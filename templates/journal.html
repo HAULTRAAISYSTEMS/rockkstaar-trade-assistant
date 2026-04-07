@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+{% block title %}Trade Journal — Rockkstaar Trade Assistant{% endblock %}
+
+{% block content %}
+<div class="journal-wrap">
+
+  <div class="journal-header">
+    <h1 class="journal-title">Trade Journal</h1>
+    <button class="btn btn-add" onclick="toggleForm()">+ Log Trade</button>
+  </div>
+
+  <!-- ===== ADD / EDIT FORM ===== -->
+  <div class="journal-form-wrap" id="journal-form-wrap"
+       style="{{ '' if edit_entry else 'display:none;' }}">
+    <div class="detail-card">
+      <h3 class="card-title">{{ 'Edit Trade' if edit_entry else 'Log New Trade' }}</h3>
+
+      <form method="POST"
+            action="{{ url_for('journal_edit', entry_id=edit_entry.id) if edit_entry else url_for('journal_add') }}">
+
+        <div class="jform-grid">
+
+          <!-- Row 1 -->
+          <div class="jform-group">
+            <label class="jform-label">Ticker</label>
+            <input type="text" name="ticker" class="jform-input"
+                   value="{{ edit_entry.ticker if edit_entry else '' }}"
+                   placeholder="AAPL" maxlength="5" required autocapitalize="characters">
+          </div>
+
+          <div class="jform-group">
+            <label class="jform-label">Date</label>
+            <input type="date" name="trade_date" class="jform-input"
+                   value="{{ edit_entry.trade_date if edit_entry else today }}" required>
+          </div>
+
+          <div class="jform-group">
+            <label class="jform-label">Direction</label>
+            <div class="jform-direction-btns">
+              <button type="button"
+                class="jform-dir-btn jform-dir-long {% if not edit_entry or edit_entry.direction == 'Long' %}active{% endif %}"
+                onclick="setDir('Long')">▲ Long</button>
+              <button type="button"
+                class="jform-dir-btn jform-dir-short {% if edit_entry and edit_entry.direction == 'Short' %}active{% endif %}"
+                onclick="setDir('Short')">▼ Short</button>
+            </div>
+            <input type="hidden" name="direction" id="jform-direction"
+                   value="{{ edit_entry.direction if edit_entry else 'Long' }}">
+          </div>
+
+          <div class="jform-group">
+            <label class="jform-label">Setup Type</label>
+            <select name="setup_type" class="jform-input jform-select">
+              <option value="">— Select —</option>
+              {% for st in setup_types %}
+              <option value="{{ st }}" {{ 'selected' if edit_entry and edit_entry.setup_type == st else '' }}>{{ st }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Row 2 -->
+          <div class="jform-group">
+            <label class="jform-label">Entry Price</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="0.01" min="0" name="entry_price" class="plan-input"
+                     placeholder="0.00" required id="jform-entry"
+                     value="{{ '%.2f'|format(edit_entry.entry_price) if edit_entry else '' }}"
+                     oninput="previewPnl()">
+            </div>
+          </div>
+
+          <div class="jform-group">
+            <label class="jform-label">Exit Price</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="0.01" min="0" name="exit_price" class="plan-input"
+                     placeholder="0.00" required id="jform-exit"
+                     value="{{ '%.2f'|format(edit_entry.exit_price) if edit_entry else '' }}"
+                     oninput="previewPnl()">
+            </div>
+          </div>
+
+          <div class="jform-group">
+            <label class="jform-label">Shares <span class="jform-optional">(optional)</span></label>
+            <input type="number" step="1" min="1" name="shares" class="jform-input"
+                   placeholder="100"
+                   value="{{ edit_entry.shares if edit_entry and edit_entry.shares else '' }}">
+          </div>
+
+          <div class="jform-group">
+            <label class="jform-label">Mom Score <span class="jform-optional">(at entry)</span></label>
+            <input type="number" step="1" min="1" max="10" name="momentum_score" class="jform-input"
+                   placeholder="1–10"
+                   value="{{ edit_entry.momentum_score if edit_entry and edit_entry.momentum_score else '' }}">
+          </div>
+
+        </div>
+
+        <!-- P&L preview -->
+        <div class="jform-pnl-preview" id="jform-pnl-preview"></div>
+
+        <!-- Notes -->
+        <div class="jform-group jform-group-full">
+          <label class="jform-label">Notes — what went right / wrong</label>
+          <textarea name="notes" class="jform-textarea"
+                    placeholder="Entry trigger confirmed at ORB break. Missed target — took partial at R2. Spread widened on exit.">{{ edit_entry.notes if edit_entry else '' }}</textarea>
+        </div>
+
+        <div class="jform-actions">
+          <button type="submit" class="btn btn-save">{{ 'Update Trade' if edit_entry else 'Log Trade' }}</button>
+          <button type="button" class="btn-clear-plan" onclick="cancelForm()">Cancel</button>
+        </div>
+
+      </form>
+    </div>
+  </div>
+
+  {% if summary.total == 0 %}
+  <!-- ===== EMPTY STATE ===== -->
+  <div class="no-setups-state" style="margin-top:1rem;">
+    <div class="no-setups-icon">📓</div>
+    <div class="no-setups-msg">No trades logged yet</div>
+    <div class="no-setups-hint">Click "Log Trade" above to record your first trade.</div>
+  </div>
+
+  {% else %}
+
+  <!-- ===== SUMMARY STRIP ===== -->
+  <div class="journal-summary-strip">
+
+    <div class="jsummary-item">
+      <div class="jsummary-label">Total Trades</div>
+      <div class="jsummary-value">{{ summary.total }}</div>
+      <div class="jsummary-sub">{{ summary.wins }}W · {{ summary.losses }}L{% if summary.be %} · {{ summary.be }}BE{% endif %}</div>
+    </div>
+
+    <div class="jsummary-divider"></div>
+
+    <div class="jsummary-item">
+      <div class="jsummary-label">Win Rate</div>
+      <div class="jsummary-value {{ 'positive' if summary.win_rate and summary.win_rate >= 50 else 'negative' }}">
+        {{ summary.win_rate }}%
+      </div>
+      <div class="jsummary-sub">{{ summary.wins }} wins of {{ summary.total }}</div>
+    </div>
+
+    <div class="jsummary-divider"></div>
+
+    <div class="jsummary-item">
+      <div class="jsummary-label">Total P&L</div>
+      <div class="jsummary-value {{ 'positive' if summary.total_pnl >= 0 else 'negative' }}">
+        {{ '+' if summary.total_pnl >= 0 else '' }}{{ summary.total_pnl }}%
+      </div>
+      <div class="jsummary-sub">sum of all trades</div>
+    </div>
+
+    <div class="jsummary-divider"></div>
+
+    <div class="jsummary-item">
+      <div class="jsummary-label">Avg Win</div>
+      <div class="jsummary-value positive">
+        {% if summary.avg_win is not none %}+{{ summary.avg_win }}%{% else %}—{% endif %}
+      </div>
+      <div class="jsummary-sub">per winning trade</div>
+    </div>
+
+    <div class="jsummary-divider"></div>
+
+    <div class="jsummary-item">
+      <div class="jsummary-label">Avg Loss</div>
+      <div class="jsummary-value negative">
+        {% if summary.avg_loss is not none %}{{ summary.avg_loss }}%{% else %}—{% endif %}
+      </div>
+      <div class="jsummary-sub">per losing trade</div>
+    </div>
+
+  </div>
+
+  <!-- ===== SETUP PERFORMANCE ===== -->
+  {% if summary.setups %}
+  <section class="journal-section">
+    <h2 class="section-title">Setup Performance</h2>
+    <div class="setup-perf-grid">
+      {% for s in summary.setups %}
+      {% set wr_class = 'perf-strong' if s.win_rate >= 60 else ('perf-moderate' if s.win_rate >= 40 else 'perf-weak') %}
+      <div class="setup-perf-card {{ wr_class }}">
+        <div class="perf-setup-name">
+          <span class="setup-pill {{ get_setup_type_class(s.setup_type) }}">{{ s.setup_type }}</span>
+        </div>
+        <div class="perf-wr {{ wr_class }}">{{ s.win_rate }}%</div>
+        <div class="perf-wr-label">win rate</div>
+        <div class="perf-bar-wrap">
+          <div class="perf-bar-fill {{ wr_class }}" style="width:{{ s.win_rate }}%;"></div>
+        </div>
+        <div class="perf-meta">
+          <span>{{ s.wins }}W / {{ s.losses }}L</span>
+          <span class="{{ 'positive' if s.avg_pnl >= 0 else 'negative' }}">
+            avg {{ '+' if s.avg_pnl >= 0 else '' }}{{ s.avg_pnl }}%
+          </span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- ===== MOMENTUM SCORE ANALYSIS ===== -->
+  {% if summary.momentum_bands %}
+  <section class="journal-section">
+    <h2 class="section-title">Win Rate by Momentum Score</h2>
+    <div class="mom-bands-row">
+      {% for b in summary.momentum_bands %}
+      {% set wr_class = 'perf-strong' if b.win_rate >= 60 else ('perf-moderate' if b.win_rate >= 40 else 'perf-weak') %}
+      <div class="mom-band-card">
+        <div class="mom-band-label">Score {{ b.label }}</div>
+        <div class="mom-band-wr {{ wr_class }}">{{ b.win_rate }}%</div>
+        <div class="perf-bar-wrap">
+          <div class="perf-bar-fill {{ wr_class }}" style="width:{{ b.win_rate }}%;"></div>
+        </div>
+        <div class="mom-band-meta">{{ b.count }} trades · avg {{ '+' if b.avg_pnl >= 0 else '' }}{{ b.avg_pnl }}%</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- ===== FULL JOURNAL TABLE ===== -->
+  <section class="journal-section">
+    <h2 class="section-title">All Trades <span class="count-badge">{{ summary.total }}</span></h2>
+    <div class="table-wrap">
+      <table class="journal-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Ticker</th>
+            <th>Dir</th>
+            <th>Setup</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>Shares</th>
+            <th title="Momentum score at entry">Mom</th>
+            <th>P&L %</th>
+            <th>Result</th>
+            <th>Notes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in entries %}
+          <tr class="jrow jrow-{{ 'win' if e.result == 'Win' else ('loss' if e.result == 'Loss' else 'be') }}">
+            <td class="jcell-date">{{ e.trade_date }}</td>
+            <td class="jcell-ticker">{{ e.ticker }}</td>
+            <td>
+              <span class="jdir-badge {{ 'jdir-long' if e.direction == 'Long' else 'jdir-short' }}">
+                {{ '▲' if e.direction == 'Long' else '▼' }} {{ e.direction or '—' }}
+              </span>
+            </td>
+            <td>
+              {% if e.setup_type %}
+              <span class="setup-pill {{ get_setup_type_class(e.setup_type) }}">{{ e.setup_type }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td class="jcell-price">${{ '%.2f'|format(e.entry_price) }}</td>
+            <td class="jcell-price">${{ '%.2f'|format(e.exit_price) }}</td>
+            <td class="text-muted">{{ e.shares if e.shares else '—' }}</td>
+            <td>
+              {% if e.momentum_score %}
+              <span class="score-num {{ get_score_class(e.momentum_score) }}">{{ e.momentum_score }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td class="jcell-pnl {{ 'positive' if e.pnl_pct and e.pnl_pct > 0 else ('negative' if e.pnl_pct and e.pnl_pct < 0 else '') }}">
+              {{ '+' if e.pnl_pct and e.pnl_pct > 0 else '' }}{{ '%.2f'|format(e.pnl_pct) if e.pnl_pct is not none else '—' }}%
+            </td>
+            <td>
+              <span class="jresult-badge jresult-{{ e.result | lower | replace(' ', '-') }}">{{ e.result }}</span>
+            </td>
+            <td class="jcell-notes" title="{{ e.notes or '' }}">
+              {{ e.notes[:55] if e.notes else '—' }}{% if e.notes and e.notes|length > 55 %}…{% endif %}
+            </td>
+            <td class="jcell-actions">
+              <a href="{{ url_for('journal') }}?edit={{ e.id }}#journal-form-wrap" class="jbtn-edit" title="Edit">✎</a>
+              <form method="POST" action="{{ url_for('journal_delete', entry_id=e.id) }}"
+                    onsubmit="return confirm('Delete this trade?')" style="display:inline;">
+                <button type="submit" class="btn-remove" title="Delete">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {% endif %} {# end summary.total > 0 #}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const TODAY = "{{ today }}";
+
+function toggleForm() {
+  const w = document.getElementById('journal-form-wrap');
+  w.style.display = w.style.display === 'none' ? '' : 'none';
+}
+
+function cancelForm() {
+  document.getElementById('journal-form-wrap').style.display = 'none';
+}
+
+function setDir(dir) {
+  document.getElementById('jform-direction').value = dir;
+  document.querySelectorAll('.jform-dir-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(dir === 'Long' ? '.jform-dir-long' : '.jform-dir-short').classList.add('active');
+  previewPnl();
+}
+
+function previewPnl() {
+  const dir    = document.getElementById('jform-direction').value;
+  const entry  = parseFloat(document.getElementById('jform-entry').value);
+  const exit_  = parseFloat(document.getElementById('jform-exit').value);
+  const el     = document.getElementById('jform-pnl-preview');
+
+  if (isNaN(entry) || isNaN(exit_) || entry === 0) {
+    el.innerHTML = '';
+    return;
+  }
+
+  const pnl = dir === 'Long'
+    ? (exit_ - entry) / entry * 100
+    : (entry - exit_) / entry * 100;
+
+  const sign    = pnl >= 0 ? '+' : '';
+  const result  = pnl > 0 ? 'Win' : (pnl < 0 ? 'Loss' : 'Break Even');
+  const cls     = pnl > 0 ? 'positive' : (pnl < 0 ? 'negative' : '');
+
+  el.innerHTML = `<span class="jform-pnl-result ${cls}">${sign}${pnl.toFixed(2)}% — ${result}</span>`;
+}
+
+// Show form when editing
+{% if edit_entry %}
+document.getElementById('journal-form-wrap').style.display = '';
+document.getElementById('journal-form-wrap').scrollIntoView({behavior:'smooth'});
+previewPnl();
+{% endif %}
+</script>
+{% endblock %}

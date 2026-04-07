@@ -1,0 +1,783 @@
+"""
+database.py - SQLite setup and database helpers for Rockkstaar Trade Assistant
+"""
+
+import sqlite3
+import json
+from datetime import datetime
+
+DB_PATH = "rockkstaar.db"
+
+
+def get_db():
+    """Return a database connection with row factory for dict-like access."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+DEFAULT_WATCHLISTS = ["A+ Momentum", "Secondary Watch", "Swing Watchlist", "Core"]
+
+
+# ---------------------------------------------------------------------------
+# App settings helpers
+# ---------------------------------------------------------------------------
+
+def get_setting(key: str) -> str | None:
+    """Return the value for a settings key, or None if not set."""
+    conn = get_db()
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else None
+
+
+def set_setting(key: str, value: str):
+    """Upsert a settings key/value pair."""
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value)
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Watchlist helpers (named)
+# ---------------------------------------------------------------------------
+
+
+def init_db():
+    """Create all tables if they don't exist, run migrations, seed defaults."""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # App settings — key/value store for persistent flags (e.g. demo_seeded)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+
+    # Legacy watchlist table — kept for migration reading only, no longer written
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS watchlist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT UNIQUE NOT NULL,
+            added_date TEXT NOT NULL
+        )
+    """)
+
+    # Named watchlists
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS watchlists (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT UNIQUE NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    # Watchlist membership (many-to-many: watchlist ↔ ticker)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS watchlist_stocks (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            watchlist_id INTEGER NOT NULL,
+            ticker       TEXT    NOT NULL,
+            added_date   TEXT    NOT NULL,
+            UNIQUE(watchlist_id, ticker),
+            FOREIGN KEY(watchlist_id) REFERENCES watchlists(id)
+        )
+    """)
+
+    # Stock data: stores enriched data for each ticker (refreshed on demand)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stock_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT UNIQUE NOT NULL,
+            current_price REAL,
+            prev_close REAL,
+            gap_pct REAL,
+            premarket_high REAL,
+            premarket_low REAL,
+            prev_day_high REAL,
+            prev_day_low REAL,
+            avg_volume INTEGER,
+            rel_volume REAL,
+            catalyst_summary TEXT,
+            news_headlines TEXT,       -- JSON list of strings
+            earnings_date TEXT,
+            trade_bias TEXT,           -- Long Bias / Short Bias / Neutral / Avoid
+            catalyst_score      INTEGER,  -- 1-10, scored from catalyst signals
+            catalyst_reason     TEXT,     -- explanation string
+            catalyst_confidence TEXT,     -- High / Medium / Low
+            momentum_score      INTEGER,  -- 1-10, premarket momentum energy
+            momentum_reason     TEXT,     -- explanation string
+            momentum_confidence TEXT,     -- High / Medium / Low
+            order_block         TEXT,     -- Demand / Supply / Neutral
+            entry_quality       TEXT,     -- Perfect / Okay / Extended
+            orb_high            REAL,     -- Opening Range high (9:30-10:00)
+            orb_low             REAL,     -- Opening Range low (9:30-10:00)
+            orb_status          TEXT,     -- ABOVE / NEAR_HIGH / INSIDE / NEAR_LOW / BELOW / NO_ORB
+            orb_ready           TEXT,     -- YES / NO
+            exec_state          TEXT,     -- TRIGGERED / READY / WAIT
+            setup_score         INTEGER,  -- 1-10, final composite setup score
+            setup_reason        TEXT,     -- explanation string
+            setup_confidence    TEXT,     -- High / Medium / Low
+            setup_type          TEXT,     -- Gap and Go / ORB / VWAP Reclaim / etc.
+            last_updated        TEXT
+        )
+    """)
+
+    # Safe migration: add any missing columns to existing databases.
+    # ALTER TABLE ... ADD COLUMN fails silently if the column already exists.
+    _new_columns = [
+        ("catalyst_score",      "INTEGER"),
+        ("catalyst_reason",     "TEXT"),
+        ("catalyst_confidence", "TEXT"),
+        ("momentum_score",      "INTEGER"),
+        ("momentum_reason",     "TEXT"),
+        ("momentum_confidence", "TEXT"),
+        ("order_block",         "TEXT"),
+        ("entry_quality",       "TEXT"),
+        ("orb_high",             "REAL"),
+        ("orb_low",              "REAL"),
+        ("orb_status",           "TEXT"),
+        ("orb_ready",            "TEXT"),
+        ("exec_state",           "TEXT"),
+        ("setup_score",         "INTEGER"),
+        ("setup_reason",        "TEXT"),
+        ("setup_confidence",    "TEXT"),
+        ("setup_type",          "TEXT"),
+        ("triggered_at",        "TEXT"),   # ISO timestamp when exec_state first became TRIGGERED
+        ("orb_phase",           "TEXT"),   # pre_market / forming / locked
+        ("auto_classify",       "INTEGER DEFAULT 1"),  # 1 = auto-move between default lists, 0 = manual override
+        ("classify_reason",     "TEXT"),   # human-readable explanation of current classification
+        ("prev_close_date",     "TEXT"),   # YYYY-MM-DD of the trading day prev_close was sourced from
+        ("vwap",                "REAL"),   # Session VWAP from 9:30 ET 1m bars (NULL pre-market)
+        ("momentum_breakout",   "INTEGER DEFAULT 0"),  # 1 if all 4 breakout conditions confirmed
+        ("candles_above_orb",   "INTEGER DEFAULT 0"),  # consecutive 1m closes above ORB high
+        ("momentum_runner",     "INTEGER DEFAULT 0"),  # 1 if momentum_score >= 6 and not full Breakout
+        ("entry_note",          "TEXT"),   # Trade guidance note (e.g. "Wait for pullback to VWAP")
+        ("position_size",       "TEXT"),   # "normal" | "reduced" — guidance for position sizing
+        ("orb_hold",            "INTEGER DEFAULT 0"),  # 1 if 2+ consecutive closes above ORB high
+        ("trend_structure",         "INTEGER DEFAULT 0"),  # 1 if HH + HL (no VWAP requirement)
+        ("higher_highs",            "INTEGER DEFAULT 0"),  # 1 if last 3 session bar Highs are ascending
+        ("higher_lows",             "INTEGER DEFAULT 0"),  # 1 if last 3 session bar Lows are ascending
+        ("strong_candle_bodies",    "INTEGER DEFAULT 0"),  # 1 if last 3 candles have body > 50% of range
+        ("price_above_vwap",        "INTEGER DEFAULT 0"),  # 1 if current price > session VWAP
+        ("structure_momentum_score","INTEGER DEFAULT 0"),  # orb_hold+trend_structure+bodies (0-7)
+    ]
+    for col, col_type in _new_columns:
+        try:
+            cursor.execute(f"ALTER TABLE stock_data ADD COLUMN {col} {col_type}")
+        except sqlite3.OperationalError:
+            pass  # Column already exists — skip
+
+    # Notes: user's trade plan notes per ticker
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT UNIQUE NOT NULL,
+            note_text TEXT,
+            updated_at TEXT
+        )
+    """)
+
+    # Trade journal: one row per executed trade
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS journal (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker         TEXT NOT NULL,
+            trade_date     TEXT NOT NULL,
+            direction      TEXT,           -- Long / Short
+            entry_price    REAL NOT NULL,
+            exit_price     REAL NOT NULL,
+            shares         INTEGER,        -- optional position size
+            setup_type     TEXT,
+            momentum_score INTEGER,        -- score at time of entry (1-10)
+            pnl_pct        REAL,           -- computed: directional % return
+            result         TEXT,           -- Win / Loss / Break Even (computed)
+            notes          TEXT,
+            created_at     TEXT
+        )
+    """)
+
+    # Pre-market plans: structured trade plan fields per ticker
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS trade_plans (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker      TEXT UNIQUE NOT NULL,
+            plan_bias   TEXT,     -- Long / Short
+            entry_level REAL,
+            stop_loss   REAL,
+            target_price REAL,
+            updated_at  TEXT
+        )
+    """)
+
+    # Seed default watchlists on first run
+    wl_count = cursor.execute("SELECT COUNT(*) FROM watchlists").fetchone()[0]
+    now_iso = datetime.now().isoformat()
+    if wl_count == 0:
+        for name in DEFAULT_WATCHLISTS:
+            cursor.execute(
+                "INSERT OR IGNORE INTO watchlists (name, created_at) VALUES (?, ?)",
+                (name, now_iso)
+            )
+        # Migrate legacy watchlist table data into "A+ Momentum"
+        first_id = cursor.execute("SELECT id FROM watchlists LIMIT 1").fetchone()
+        if first_id:
+            old_rows = cursor.execute(
+                "SELECT ticker, added_date FROM watchlist"
+            ).fetchall()
+            for row in old_rows:
+                try:
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO watchlist_stocks "
+                        "(watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
+                        (first_id[0], row[0], row[1])
+                    )
+                except sqlite3.IntegrityError:
+                    pass
+
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Named watchlist helpers
+# ---------------------------------------------------------------------------
+
+def get_all_watchlists() -> list:
+    """Return all watchlists ordered by creation."""
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM watchlists ORDER BY id").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_watchlist_by_id(wl_id: int) -> dict | None:
+    conn = get_db()
+    row = conn.execute("SELECT * FROM watchlists WHERE id = ?", (wl_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_watchlist(name: str) -> int:
+    """Create a new named watchlist. Returns its id."""
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO watchlists (name, created_at) VALUES (?, ?)",
+        (name.strip(), datetime.now().isoformat())
+    )
+    new_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def rename_watchlist(wl_id: int, name: str):
+    conn = get_db()
+    conn.execute("UPDATE watchlists SET name = ? WHERE id = ?", (name.strip(), wl_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_watchlist(wl_id: int):
+    """Delete a watchlist and its memberships. Stock data kept (may be in other lists)."""
+    conn = get_db()
+    conn.execute("DELETE FROM watchlist_stocks WHERE watchlist_id = ?", (wl_id,))
+    conn.execute("DELETE FROM watchlists WHERE id = ?", (wl_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_watchlist_stocks(wl_id: int) -> list:
+    """Return list of tickers in a watchlist, newest first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT ticker FROM watchlist_stocks WHERE watchlist_id = ? ORDER BY added_date DESC",
+        (wl_id,)
+    ).fetchall()
+    conn.close()
+    return [r["ticker"] for r in rows]
+
+
+def get_watchlist_stock_counts() -> dict:
+    """Return {watchlist_id: count} for all watchlists."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT watchlist_id, COUNT(*) as cnt FROM watchlist_stocks GROUP BY watchlist_id"
+    ).fetchall()
+    conn.close()
+    return {r["watchlist_id"]: r["cnt"] for r in rows}
+
+
+def add_ticker_to_watchlist(wl_id: int, ticker: str):
+    """Add a ticker to a specific watchlist. Silently ignores duplicates."""
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO watchlist_stocks (watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
+            (wl_id, ticker.upper().strip(), datetime.now().isoformat())
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        pass
+    finally:
+        conn.close()
+
+
+def remove_ticker_from_watchlist(wl_id: int, ticker: str):
+    """Remove a ticker from a specific watchlist.
+    Stock data is removed only if the ticker no longer belongs to any watchlist.
+    Notes and trade plans are never auto-deleted."""
+    conn = get_db()
+    t = ticker.upper().strip()
+    conn.execute(
+        "DELETE FROM watchlist_stocks WHERE watchlist_id = ? AND ticker = ?", (wl_id, t)
+    )
+    remaining = conn.execute(
+        "SELECT COUNT(*) as cnt FROM watchlist_stocks WHERE ticker = ?", (t,)
+    ).fetchone()["cnt"]
+    if remaining == 0:
+        conn.execute("DELETE FROM stock_data WHERE ticker = ?", (t,))
+    conn.commit()
+    conn.close()
+
+
+def remove_ticker_from_defaults(ticker: str):
+    """
+    Remove a ticker from ALL default watchlists in one operation.
+
+    Called when the user explicitly deletes a ticker so it cannot be
+    re-inserted by auto-classification.  The ticker stays in any user-created
+    custom watchlists; stock_data is deleted only when no memberships remain.
+    """
+    conn = get_db()
+    t = ticker.upper().strip()
+
+    # Resolve IDs of the four built-in lists
+    rows = conn.execute(
+        "SELECT id FROM watchlists WHERE name IN ({})".format(
+            ",".join("?" * len(DEFAULT_WATCHLISTS))
+        ),
+        DEFAULT_WATCHLISTS,
+    ).fetchall()
+    default_ids = [r["id"] for r in rows]
+
+    for wl_id in default_ids:
+        conn.execute(
+            "DELETE FROM watchlist_stocks WHERE watchlist_id = ? AND ticker = ?",
+            (wl_id, t),
+        )
+
+    # Remove stock_data if the ticker is now in no watchlist at all
+    remaining = conn.execute(
+        "SELECT COUNT(*) as cnt FROM watchlist_stocks WHERE ticker = ?", (t,)
+    ).fetchone()["cnt"]
+    if remaining == 0:
+        conn.execute("DELETE FROM stock_data WHERE ticker = ?", (t,))
+
+    conn.commit()
+    conn.close()
+
+
+def get_ticker_watchlist_ids(ticker: str) -> list:
+    """Return list of watchlist IDs that contain this ticker."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT watchlist_id FROM watchlist_stocks WHERE ticker = ?",
+        (ticker.upper(),)
+    ).fetchall()
+    conn.close()
+    return [r["watchlist_id"] for r in rows]
+
+
+def set_ticker_watchlists(ticker: str, watchlist_ids: list):
+    """Replace all watchlist memberships for a ticker with the provided list."""
+    conn = get_db()
+    t = ticker.upper().strip()
+    conn.execute("DELETE FROM watchlist_stocks WHERE ticker = ?", (t,))
+    now_iso = datetime.now().isoformat()
+    for wl_id in watchlist_ids:
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO watchlist_stocks "
+                "(watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
+                (int(wl_id), t, now_iso)
+            )
+        except sqlite3.IntegrityError:
+            pass
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Legacy single-watchlist helpers (kept for backward compatibility only)
+# ---------------------------------------------------------------------------
+
+def get_watchlist():
+    """Return tickers from the legacy watchlist table (migration only)."""
+    conn = get_db()
+    rows = conn.execute("SELECT ticker FROM watchlist ORDER BY added_date DESC").fetchall()
+    conn.close()
+    return [row["ticker"] for row in rows]
+
+
+def add_ticker(ticker: str):
+    """Legacy: kept so existing seeding code does not break."""
+    pass  # Replaced by add_ticker_to_watchlist
+
+
+def remove_ticker(ticker: str):
+    """Legacy: kept for any remaining references."""
+    pass  # Replaced by remove_ticker_from_watchlist
+
+
+# ---------------------------------------------------------------------------
+# Stock data helpers
+# ---------------------------------------------------------------------------
+
+def upsert_stock_data(data: dict):
+    """Insert or update stock data for a ticker."""
+    conn = get_db()
+
+    # --- triggered_at: track the exact moment exec_state first becomes TRIGGERED.
+    # Preserve the timestamp during subsequent refreshes while still TRIGGERED.
+    # Clear it the moment the stock is no longer TRIGGERED.
+    ticker = data.get("ticker", "").upper()
+    existing = conn.execute(
+        "SELECT exec_state, triggered_at FROM stock_data WHERE ticker = ?", (ticker,)
+    ).fetchone()
+
+    new_state = data.get("exec_state")
+    if new_state == "TRIGGERED":
+        if existing and existing["exec_state"] == "TRIGGERED" and existing["triggered_at"]:
+            data["triggered_at"] = existing["triggered_at"]   # preserve original timestamp
+        else:
+            data["triggered_at"] = datetime.now().isoformat() # first time triggered
+    else:
+        data["triggered_at"] = None  # clear when no longer triggered
+
+    conn.execute("""
+        INSERT INTO stock_data
+            (ticker, current_price, prev_close, gap_pct, premarket_high,
+             premarket_low, prev_day_high, prev_day_low, avg_volume, rel_volume,
+             catalyst_summary, news_headlines, earnings_date, trade_bias,
+             catalyst_score, catalyst_reason, catalyst_confidence,
+             momentum_score, momentum_reason, momentum_confidence,
+             order_block, entry_quality,
+             orb_high, orb_low, orb_status, orb_ready, orb_phase, exec_state,
+             setup_score, setup_reason, setup_confidence,
+             setup_type, triggered_at, last_updated, prev_close_date,
+             vwap, momentum_breakout, candles_above_orb,
+             momentum_runner, entry_note, position_size,
+             orb_hold, trend_structure, higher_highs, higher_lows, strong_candle_bodies,
+             price_above_vwap, structure_momentum_score)
+        VALUES
+            (:ticker, :current_price, :prev_close, :gap_pct, :premarket_high,
+             :premarket_low, :prev_day_high, :prev_day_low, :avg_volume, :rel_volume,
+             :catalyst_summary, :news_headlines, :earnings_date, :trade_bias,
+             :catalyst_score, :catalyst_reason, :catalyst_confidence,
+             :momentum_score, :momentum_reason, :momentum_confidence,
+             :order_block, :entry_quality,
+             :orb_high, :orb_low, :orb_status, :orb_ready, :orb_phase, :exec_state,
+             :setup_score, :setup_reason, :setup_confidence,
+             :setup_type, :triggered_at, :last_updated, :prev_close_date,
+             :vwap, :momentum_breakout, :candles_above_orb,
+             :momentum_runner, :entry_note, :position_size,
+             :orb_hold, :trend_structure, :higher_highs, :higher_lows, :strong_candle_bodies,
+             :price_above_vwap, :structure_momentum_score)
+        ON CONFLICT(ticker) DO UPDATE SET
+            current_price        = excluded.current_price,
+            prev_close           = excluded.prev_close,
+            gap_pct              = excluded.gap_pct,
+            premarket_high       = excluded.premarket_high,
+            premarket_low        = excluded.premarket_low,
+            prev_day_high        = excluded.prev_day_high,
+            prev_day_low         = excluded.prev_day_low,
+            avg_volume           = excluded.avg_volume,
+            rel_volume           = excluded.rel_volume,
+            catalyst_summary     = excluded.catalyst_summary,
+            news_headlines       = excluded.news_headlines,
+            earnings_date        = excluded.earnings_date,
+            trade_bias           = excluded.trade_bias,
+            catalyst_score       = excluded.catalyst_score,
+            catalyst_reason      = excluded.catalyst_reason,
+            catalyst_confidence  = excluded.catalyst_confidence,
+            momentum_score       = excluded.momentum_score,
+            momentum_reason      = excluded.momentum_reason,
+            momentum_confidence  = excluded.momentum_confidence,
+            order_block          = excluded.order_block,
+            entry_quality        = excluded.entry_quality,
+            orb_high             = excluded.orb_high,
+            orb_low              = excluded.orb_low,
+            orb_status           = excluded.orb_status,
+            orb_ready            = excluded.orb_ready,
+            orb_phase            = excluded.orb_phase,
+            exec_state           = excluded.exec_state,
+            setup_score          = excluded.setup_score,
+            setup_reason         = excluded.setup_reason,
+            setup_confidence     = excluded.setup_confidence,
+            setup_type           = excluded.setup_type,
+            triggered_at         = excluded.triggered_at,
+            last_updated         = excluded.last_updated,
+            prev_close_date      = excluded.prev_close_date,
+            vwap                 = excluded.vwap,
+            momentum_breakout    = excluded.momentum_breakout,
+            candles_above_orb    = excluded.candles_above_orb,
+            momentum_runner      = excluded.momentum_runner,
+            entry_note           = excluded.entry_note,
+            position_size        = excluded.position_size,
+            orb_hold                 = excluded.orb_hold,
+            trend_structure          = excluded.trend_structure,
+            higher_highs             = excluded.higher_highs,
+            higher_lows              = excluded.higher_lows,
+            strong_candle_bodies     = excluded.strong_candle_bodies,
+            price_above_vwap         = excluded.price_above_vwap,
+            structure_momentum_score = excluded.structure_momentum_score
+    """, data)
+    conn.commit()
+    conn.close()
+
+
+def set_stock_classify(ticker: str, reason: str):
+    """Update only the classify_reason for a ticker (called after auto-classification)."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE stock_data SET classify_reason = ? WHERE ticker = ?",
+        (reason, ticker.upper().strip())
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_auto_classify(ticker: str, enabled: bool):
+    """Toggle the auto_classify flag for a ticker (1 = ON, 0 = OFF / manual override)."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE stock_data SET auto_classify = ? WHERE ticker = ?",
+        (1 if enabled else 0, ticker.upper().strip())
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_setup_type(ticker: str, setup_type: str):
+    """
+    Persist a manually-chosen setup type override for a ticker.
+    Does not touch any other fields — leaves price/score data intact.
+    """
+    conn = get_db()
+    conn.execute(
+        "UPDATE stock_data SET setup_type = ? WHERE ticker = ?",
+        (setup_type, ticker.upper().strip())
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_stock_data(ticker: str):
+    """Return stock data dict for a single ticker, or None."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM stock_data WHERE ticker = ?", (ticker.upper(),)
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    d = dict(row)
+    # Deserialize JSON headlines
+    try:
+        d["news_headlines"] = json.loads(d["news_headlines"] or "[]")
+    except (json.JSONDecodeError, TypeError):
+        d["news_headlines"] = []
+    return d
+
+
+def get_all_stock_data():
+    """Return all stock data rows as a list of dicts."""
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM stock_data").fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        d = dict(row)
+        try:
+            d["news_headlines"] = json.loads(d["news_headlines"] or "[]")
+        except (json.JSONDecodeError, TypeError):
+            d["news_headlines"] = []
+        result.append(d)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Notes helpers
+# ---------------------------------------------------------------------------
+
+def get_note(ticker: str):
+    """Return note text for a ticker, or empty string."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT note_text FROM notes WHERE ticker = ?", (ticker.upper(),)
+    ).fetchone()
+    conn.close()
+    return row["note_text"] if row else ""
+
+
+def get_all_notes() -> dict:
+    """Return a dict of {ticker: note_text} for all tickers that have notes."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT ticker, note_text FROM notes WHERE note_text != '' AND note_text IS NOT NULL"
+    ).fetchall()
+    conn.close()
+    return {row["ticker"]: row["note_text"] for row in rows}
+
+
+def save_note(ticker: str, text: str):
+    """Insert or update trade plan note for a ticker."""
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO notes (ticker, note_text, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(ticker) DO UPDATE SET
+            note_text  = excluded.note_text,
+            updated_at = excluded.updated_at
+    """, (ticker.upper(), text, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Pre-market trade plan helpers
+# ---------------------------------------------------------------------------
+
+def get_trade_plan(ticker: str) -> dict:
+    """Return the structured pre-market plan for a ticker, or empty defaults."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM trade_plans WHERE ticker = ?", (ticker.upper(),)
+    ).fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return {
+        "ticker": ticker.upper(),
+        "plan_bias": "",
+        "entry_level": None,
+        "stop_loss": None,
+        "target_price": None,
+        "updated_at": None,
+    }
+
+
+def save_trade_plan(ticker: str, plan_bias: str, entry_level, stop_loss, target_price):
+    """Insert or update the pre-market plan for a ticker."""
+    def _float(v):
+        try:
+            return float(v) if v not in (None, "") else None
+        except (ValueError, TypeError):
+            return None
+
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO trade_plans (ticker, plan_bias, entry_level, stop_loss, target_price, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ticker) DO UPDATE SET
+            plan_bias    = excluded.plan_bias,
+            entry_level  = excluded.entry_level,
+            stop_loss    = excluded.stop_loss,
+            target_price = excluded.target_price,
+            updated_at   = excluded.updated_at
+    """, (
+        ticker.upper(),
+        plan_bias or "",
+        _float(entry_level),
+        _float(stop_loss),
+        _float(target_price),
+        datetime.now().isoformat(),
+    ))
+    conn.commit()
+    conn.close()
+
+
+def get_all_trade_plans() -> dict:
+    """Return {ticker: plan_dict} for all tickers that have a saved plan."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM trade_plans WHERE entry_level IS NOT NULL"
+    ).fetchall()
+    conn.close()
+    return {row["ticker"]: dict(row) for row in rows}
+
+
+# ---------------------------------------------------------------------------
+# Trade journal helpers
+# ---------------------------------------------------------------------------
+
+def add_journal_entry(ticker, trade_date, direction, entry_price, exit_price,
+                      shares, setup_type, momentum_score, pnl_pct, result, notes):
+    """Insert a new trade journal entry. Returns the new row id."""
+    conn = get_db()
+    cur = conn.execute("""
+        INSERT INTO journal
+            (ticker, trade_date, direction, entry_price, exit_price,
+             shares, setup_type, momentum_score, pnl_pct, result, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        ticker.upper(), trade_date, direction,
+        entry_price, exit_price, shares,
+        setup_type, momentum_score, pnl_pct, result, notes,
+        datetime.now().isoformat()
+    ))
+    new_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def update_journal_entry(entry_id, ticker, trade_date, direction, entry_price, exit_price,
+                         shares, setup_type, momentum_score, pnl_pct, result, notes):
+    """Update an existing journal entry by id."""
+    conn = get_db()
+    conn.execute("""
+        UPDATE journal SET
+            ticker=?, trade_date=?, direction=?, entry_price=?, exit_price=?,
+            shares=?, setup_type=?, momentum_score=?, pnl_pct=?, result=?, notes=?
+        WHERE id=?
+    """, (
+        ticker.upper(), trade_date, direction,
+        entry_price, exit_price, shares,
+        setup_type, momentum_score, pnl_pct, result, notes,
+        entry_id
+    ))
+    conn.commit()
+    conn.close()
+
+
+def delete_journal_entry(entry_id):
+    conn = get_db()
+    conn.execute("DELETE FROM journal WHERE id = ?", (entry_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_journal_entry(entry_id) -> dict | None:
+    conn = get_db()
+    row = conn.execute("SELECT * FROM journal WHERE id = ?", (entry_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_all_journal_entries() -> list:
+    """Return all journal entries ordered newest first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM journal ORDER BY trade_date DESC, created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

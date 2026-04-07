@@ -1,0 +1,515 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Rockkstaar Trade Assistant{% endblock %}
+
+{% block content %}
+
+<!-- ===== WATCHLIST TABS ===== -->
+<section class="wl-tabs-section">
+  <div class="wl-tabs-row">
+    <div class="wl-tabs">
+      {% for wl in all_wls %}
+      <form method="POST" action="{{ url_for('watchlist_activate', wl_id=wl.id) }}" style="display:contents;">
+        <button type="submit"
+          class="wl-tab {% if active_wl and wl.id == active_wl.id %}wl-tab-active{% endif %}">
+          {{ wl.name }}
+          <span class="wl-tab-count">{{ wl_counts.get(wl.id, 0) }}</span>
+        </button>
+      </form>
+      {% endfor %}
+    </div>
+    <button class="wl-manage-btn" onclick="toggleWlPanel()" title="Manage watchlists">⚙ Manage</button>
+  </div>
+
+  <!-- Manage panel (collapsed by default) -->
+  <div class="wl-manage-panel" id="wl-manage-panel" style="display:none;">
+
+    <!-- Create new -->
+    <form action="{{ url_for('watchlist_create') }}" method="POST" class="wl-create-form">
+      <input type="text" name="name" class="wl-name-input" placeholder="New watchlist name…" maxlength="40" required>
+      <button type="submit" class="btn btn-add">Create</button>
+    </form>
+
+    <!-- Existing watchlists: rename + delete -->
+    <div class="wl-manage-list">
+      {% for wl in all_wls %}
+      <div class="wl-manage-row">
+        <form action="{{ url_for('watchlist_rename', wl_id=wl.id) }}" method="POST" class="wl-rename-form">
+          <input type="text" name="name" class="wl-name-input wl-rename-input"
+                 value="{{ wl.name }}" maxlength="40" required>
+          <button type="submit" class="btn-inline-refresh">Rename</button>
+        </form>
+        <span class="wl-manage-count">{{ wl_counts.get(wl.id, 0) }} stocks</span>
+        {% if all_wls|length > 1 %}
+        <form action="{{ url_for('watchlist_delete', wl_id=wl.id) }}" method="POST"
+              onsubmit="return confirm('Delete « {{ wl.name }} »? Stocks will stay in any other watchlists they belong to.')">
+          <button type="submit" class="btn-remove" title="Delete watchlist">✕</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+  </div>
+</section>
+
+<!-- ===== ADD TICKERS PANEL ===== -->
+<section class="add-panel">
+  <form action="{{ url_for('watchlist_add') }}" method="POST" class="add-form">
+    <input
+      type="text"
+      name="tickers"
+      placeholder="Add to {{ active_wl.name if active_wl else 'watchlist' }}: AAPL TSLA NVDA"
+      class="ticker-input"
+      autocomplete="off"
+      autocapitalize="characters"
+    />
+    <button type="submit" class="btn btn-add">+ Add</button>
+  </form>
+</section>
+
+<!-- ===== ORB SESSION STATE BANNER ===== -->
+<div class="orb-session-banner {{ orb_session.banner_class }}">
+  <div class="orb-session-left">
+    <span class="orb-session-phase-badge {{ orb_session.phase_class }}">
+      {{ orb_session.phase_label }}
+    </span>
+    <span class="orb-session-divider">|</span>
+    <span class="orb-session-sublabel">{{ orb_session.sub_label }}</span>
+  </div>
+  <div class="orb-session-action {{ orb_session.action_class }}">
+    {{ orb_session.action }}
+  </div>
+</div>
+
+<!-- ===== NO-TRADE SIGNAL LOCK WARNING ===== -->
+{% if no_trade.lock_signals %}
+<div class="nt-lock-bar">
+  <span class="nt-lock-icon">🔒</span>
+  <span class="nt-lock-text">Signal lock active — TRIGGERED states suppressed. Conditions do not support trading.</span>
+</div>
+{% endif %}
+
+<!-- ===== TRIGGERED ALERT ===== -->
+{% if triggered and not no_trade.lock_signals %}
+<div class="triggered-alert">
+  <span class="triggered-alert-label">⚡ TRIGGERED NOW</span>
+  <div class="triggered-alert-tickers">
+    {% for s in triggered %}
+    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="triggered-alert-chip {% if s.freshness == 'Fresh Breakout' %}chip-fresh{% endif %}">
+      <span class="triggered-chip-ticker">{{ s.ticker }}</span>
+      <span class="triggered-chip-gap {{ s.gap_class }}">{{ s.gap_display }}</span>
+      {% if s.freshness %}
+      <span class="freshness-badge {{ s.freshness_class }}">{{ s.freshness }}</span>
+      {% endif %}
+      <span class="triggered-chip-setup">{{ s.setup_type or '—' }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  <span class="triggered-alert-hint">Entry conditions met — act at the open</span>
+</div>
+{% endif %}
+
+<!-- ===== SUMMARY CARDS ===== -->
+{% if summary and (summary.best_gapper or summary.strongest_catalyst) %}
+<section class="summary-section">
+  <h2 class="section-title">Today's Highlights</h2>
+  <div class="summary-grid">
+
+    {% if summary.best_gapper %}
+    {% set s = summary.best_gapper %}
+    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="summary-card summary-gapper">
+      <div class="summary-card-label">Best Gapper</div>
+      <div class="summary-card-ticker">{{ s.ticker }}</div>
+      <div class="summary-card-value {{ s.gap_class }}">{{ s.gap_display }}</div>
+      <div class="summary-card-sub">vs prev close</div>
+    </a>
+    {% endif %}
+
+    {% if summary.strongest_catalyst %}
+    {% set s = summary.strongest_catalyst %}
+    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="summary-card summary-catalyst">
+      <div class="summary-card-label">Strongest Catalyst</div>
+      <div class="summary-card-ticker">{{ s.ticker }}</div>
+      <div class="summary-card-value">{{ s.catalyst_score }}/10</div>
+      <div class="summary-card-sub">{{ s.catalyst_reason or (s.catalyst_summary[:55] ~ ('…' if s.catalyst_summary|length > 55 else '')) }}</div>
+    </a>
+    {% endif %}
+
+    {% if summary.highest_volume %}
+    {% set s = summary.highest_volume %}
+    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="summary-card summary-volume">
+      <div class="summary-card-label">Highest Volume</div>
+      <div class="summary-card-ticker">{{ s.ticker }}</div>
+      <div class="summary-card-value">{{ "%.1f"|format(s.rel_volume) }}x</div>
+      <div class="summary-card-sub">relative volume</div>
+    </a>
+    {% endif %}
+
+    {% if summary.best_setup %}
+    {% set s = summary.best_setup %}
+    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="summary-card summary-setup {{ s.score_class }}">
+      <div class="summary-card-label">Best A+ Setup</div>
+      <div class="summary-card-ticker">{{ s.ticker }}</div>
+      <div class="summary-card-value">{{ s.setup_score }}/10</div>
+      <div class="summary-card-sub">
+        <span class="setup-pill {{ s.setup_type_class }}">{{ s.setup_type or "—" }}</span>
+      </div>
+    </a>
+    {% endif %}
+
+  </div>
+</section>
+{% endif %}
+
+<!-- ===== TOP 5 IN PLAY ===== -->
+{% if top5 %}
+<section class="top5-section">
+  <h2 class="section-title">⚡ Top 5 In Play</h2>
+  <div class="top5-grid">
+    {% for s in top5 %}
+    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="top5-card {{ s.score_class }}{% if s.exec_state == 'TRIGGERED' %} top5-triggered{% endif %}">
+      <div class="top5-header">
+        <div class="top5-ticker">{{ s.ticker }}</div>
+        <span class="exec-badge exec-badge-sm {{ s.exec_class }}">{{ s.exec_state or 'WAIT' }}</span>
+        {% if s.freshness %}
+        <span class="freshness-badge {{ s.freshness_class }}">{{ s.freshness }}</span>
+        {% endif %}
+      </div>
+      <div class="top5-price">${{ "%.2f"|format(s.current_price) }}</div>
+      <div class="top5-gap {{ s.gap_class }}">{{ s.gap_display }}</div>
+      <div class="top5-meta">
+        <span class="top5-score">Mom {{ s.momentum_score or '—' }}/10</span>
+        <span class="top5-cat">Setup {{ s.setup_score }}/10</span>
+      </div>
+      <div class="top5-signals">
+        <span class="signal-badge {{ s.orb_class }}">ORB {{ s.orb_ready or 'NO' }}</span>
+        <span class="signal-badge {{ s.ob_class }}">{{ s.order_block or 'Neutral' }}</span>
+        <span class="signal-badge {{ s.entry_class }}">{{ s.entry_quality or 'Okay' }}</span>
+      </div>
+      <div class="top5-footer">
+        <span class="bias-tag {{ s.bias_class }}">{{ s.trade_bias }}</span>
+        <span class="setup-pill {{ s.setup_type_class }}">{{ s.setup_type or "—" }}</span>
+      </div>
+      {% if s.setup_type == 'Momentum Runner' %}
+      <div class="mr-warning-strip" style="margin-top:6px;font-size:0.72rem;">
+        <span class="mr-warning-icon">⚠</span>
+        <span class="mr-warning-text">
+          <strong>Reduced Size</strong>
+          {{ s.entry_note }}
+        </span>
+      </div>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% else %}
+<section class="top5-section">
+  <h2 class="section-title">⚡ Top 5 In Play</h2>
+
+  <div class="nt-panel nt-panel-{{ no_trade.severity }}">
+
+    <!-- Verdict headline -->
+    <div class="nt-verdict-row">
+      <span class="nt-icon">{{ '🚫' if no_trade.severity == 'hard' else '⚠️' }}</span>
+      <div>
+        <div class="nt-verdict">{{ no_trade.verdict }}</div>
+        <div class="nt-verdict-sub">
+          {% if no_trade.severity == 'hard' %}
+            No conditions met for A+ setups. Sitting out protects your capital.
+          {% else %}
+            Environment is marginal. Monitor only — do not force entries.
+          {% endif %}
+        </div>
+      </div>
+      {% if no_trade.lock_signals %}
+      <span class="nt-lock-badge">🔒 Signals Locked</span>
+      {% endif %}
+    </div>
+
+    <!-- Reason list -->
+    {% if no_trade.reasons %}
+    <div class="nt-reasons">
+      <div class="nt-reasons-label">Why no setups today:</div>
+      <ul class="nt-reason-list">
+        {% for reason in no_trade.reasons %}
+        <li class="nt-reason-item">
+          <span class="nt-reason-dot"></span>
+          {{ reason }}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <!-- Discipline rules -->
+    <div class="nt-rules">
+      <div class="nt-rule {% if no_trade.severity == 'hard' %}nt-rule-active{% endif %}">
+        <span class="nt-rule-icon">🛡️</span>
+        <span>No trades — protect capital</span>
+      </div>
+      <div class="nt-rule">
+        <span class="nt-rule-icon">👁️</span>
+        <span>Watch secondary setups only</span>
+      </div>
+      <div class="nt-rule">
+        <span class="nt-rule-icon">📋</span>
+        <span>Review journal — study previous setups</span>
+      </div>
+    </div>
+
+  </div>
+</section>
+{% endif %}
+
+<!-- ===== SECONDARY WATCHLIST ===== -->
+{% if secondary %}
+<section class="secondary-section">
+  <h2 class="section-title">
+    Secondary Watchlist
+    <span class="count-badge">{{ secondary|length }}</span>
+    <span class="section-subtitle">Moderate setups — monitor, do not force entries</span>
+  </h2>
+  <div class="secondary-grid">
+    {% for s in secondary %}
+    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="secondary-card {{ s.score_class }}">
+      <div class="secondary-card-header">
+        <span class="secondary-ticker">{{ s.ticker }}</span>
+        <span class="secondary-tier-badge {{ s.secondary_tier_class }}">{{ s.secondary_tier }}</span>
+        <span class="exec-badge exec-badge-sm {{ s.exec_class }}">{{ s.exec_state or 'WAIT' }}</span>
+      </div>
+      <div class="secondary-price">${{ "%.2f"|format(s.current_price) }}
+        <span class="secondary-gap {{ s.gap_class }}">{{ s.gap_display }}</span>
+      </div>
+      <div class="secondary-signals">
+        <span class="signal-badge {{ s.orb_class }}">ORB {{ s.orb_ready or 'NO' }}</span>
+        <span class="signal-badge {{ s.ob_class }}">{{ s.order_block or 'Neutral' }}</span>
+        <span class="signal-badge {{ s.entry_class }}">{{ s.entry_quality or 'Okay' }}</span>
+      </div>
+      <div class="secondary-footer">
+        <span class="secondary-scores">Mom {{ s.momentum_score or '—' }} · Setup {{ s.setup_score }}</span>
+        <span class="setup-pill {{ s.setup_type_class }}">{{ s.setup_type or '—' }}</span>
+      </div>
+      <div class="secondary-catalyst">{{ s.catalyst_summary[:65] }}{% if s.catalyst_summary|length > 65 %}…{% endif %}</div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<!-- ===== FULL WATCHLIST TABLE ===== -->
+<section class="watchlist-section">
+  <h2 class="section-title">
+    {{ active_wl.name if active_wl else 'Watchlist' }}
+    <span class="count-badge">{{ ranked|length }}</span>
+  </h2>
+
+  {% if ranked %}
+  <div class="table-wrap">
+    <table class="watchlist-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Ticker</th>
+          <th title="Execution State">State</th>
+          <th>Price</th>
+          <th>Gap %</th>
+          <th>Rel Vol</th>
+          <th title="Momentum Score">Mom</th>
+          <th title="ORB Levels — High / Low and price proximity">ORB Levels</th>
+          <th title="Order Block">OB</th>
+          <th title="Entry Quality">Entry</th>
+          <th>Bias</th>
+          <th>Setup Type</th>
+          <th title="Catalyst Score">Cat</th>
+          <th title="Final Setup Score">Setup</th>
+          <th title="Confidence level">Conf</th>
+          <th>Catalyst</th>
+          <th title="Has trade plan notes">Notes</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in ranked %}
+        <tr class="row-{{ s.score_class }}{% if s.exec_state == 'TRIGGERED' %} row-triggered{% endif %}"
+            onclick="window.location='{{ url_for('stock_detail', ticker=s.ticker) }}'">
+
+          <td class="rank-cell">{{ loop.index }}</td>
+
+          <td class="ticker-cell">
+            <span class="ticker-symbol">{{ s.ticker }}</span>
+            {% if s.earnings_date %}
+              <span class="earnings-pill" title="Earnings {{ s.earnings_date }}">E</span>
+            {% endif %}
+            {% if s.classify_reason %}
+              {%- set cr = s.classify_reason -%}
+              {%- if cr.startswith('Promoted') -%}
+                {%- set cl_name = "A+" -%}{%- set cl_css = "cl-aplus" -%}
+              {%- elif cr.startswith('Secondary') -%}
+                {%- set cl_name = "Secondary" -%}{%- set cl_css = "cl-secondary" -%}
+              {%- elif cr.startswith('Swing') -%}
+                {%- set cl_name = "Swing" -%}{%- set cl_css = "cl-swing" -%}
+              {%- else -%}
+                {%- set cl_name = "Core" -%}{%- set cl_css = "cl-core" -%}
+              {%- endif -%}
+            <span class="cl-badge {{ cl_css }} {% if s.auto_classify == 0 %}cl-manual{% endif %}"
+                  title="{{ cr }}">
+              {% if s.auto_classify == 0 %}✎ {% endif %}→ {{ cl_name }}
+            </span>
+            {% endif %}
+          </td>
+
+          <td class="state-cell">
+            <span class="exec-badge {{ s.exec_class }}">{{ s.exec_state or 'WAIT' }}</span>
+            {% if s.freshness %}
+            <span class="freshness-badge freshness-badge-sm {{ s.freshness_class }}">{{ s.freshness }}</span>
+            {% endif %}
+          </td>
+
+          <td class="price-cell">${{ "%.2f"|format(s.current_price) }}</td>
+
+          <td class="gap-cell {{ s.gap_class }}">{{ s.gap_display }}</td>
+
+          <td class="{{ 'rvol-hot' if s.rel_volume >= 2 else '' }}">
+            {{ "%.1f"|format(s.rel_volume) }}x
+          </td>
+
+          <!-- Momentum score -->
+          <td title="{{ s.momentum_reason or '' }}">
+            {% if s.momentum_score %}
+              {% if s.momentum_score >= 8 %}
+                <span class="score-badge-inline score-badge-elite {{ s.mom_score_class }}">{{ s.momentum_score }}</span>
+              {% else %}
+                <div class="score-bar-wrap">
+                  <span class="score-num {{ s.mom_score_class }}">{{ s.momentum_score }}</span>
+                  <div class="score-bar">
+                    <div class="score-fill {{ s.mom_score_class }}" style="width:{{ s.momentum_score * 10 }}%"></div>
+                  </div>
+                </div>
+              {% endif %}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+
+          <!-- ORB Levels + status -->
+          <td class="orb-levels-cell">
+            {% if s.orb_phase == 'pre_market' %}
+              <span class="orb-phase-badge orbp-pre" title="Waiting for 9:30 AM ET market open">⏳ Pre-Mkt</span>
+            {% elif s.orb_high and s.orb_low %}
+              {% set orb_labels = {"ABOVE": "▲ Above", "NEAR_HIGH": "↑ Near High", "INSIDE": "Inside", "NEAR_LOW": "↓ Near Low", "BELOW": "▼ Below", "NO_ORB": "—"} %}
+              <span class="orbs-badge {{ s.orb_status_class }}">{{ orb_labels.get(s.orb_status, '—') }}</span>
+              <div class="orb-levels-sub">
+                H: ${{ "%.2f"|format(s.orb_high) }} · L: ${{ "%.2f"|format(s.orb_low) }}
+                {% if s.orb_phase == 'forming' %}
+                  <span class="orb-phase-badge orbp-forming">Forming</span>
+                {% endif %}
+              </div>
+            {% elif s.orb_phase == 'forming' %}
+              <span class="orb-phase-badge orbp-forming">Forming…</span>
+            {% else %}
+              <span class="text-dim">—</span>
+            {% endif %}
+          </td>
+
+          <!-- Order Block -->
+          <td><span class="signal-badge {{ s.ob_class }}">{{ s.order_block or 'Neutral' }}</span></td>
+
+          <!-- Entry Quality -->
+          <td><span class="signal-badge {{ s.entry_class }}">{{ s.entry_quality or 'Okay' }}</span></td>
+
+          <td><span class="bias-tag {{ s.bias_class }}">{{ s.trade_bias }}</span></td>
+
+          <td>
+            <span class="setup-pill {{ s.setup_type_class }}">{{ s.setup_type or "—" }}</span>
+            {% if s.setup_type == 'Momentum Runner' %}
+            <br><span class="mr-table-chip" title="{{ s.entry_note }}">⚠ Reduced Size</span>
+            {% endif %}
+          </td>
+
+          <!-- Catalyst score -->
+          <td title="{{ s.catalyst_reason or '' }}">
+            {% if s.catalyst_score >= 8 %}
+              <span class="score-badge-inline score-badge-elite {{ s.cat_score_class }}">{{ s.catalyst_score }}</span>
+            {% else %}
+              <div class="score-bar-wrap">
+                <span class="score-num {{ s.cat_score_class }}">{{ s.catalyst_score }}</span>
+                <div class="score-bar">
+                  <div class="score-fill {{ s.cat_score_class }}" style="width:{{ s.catalyst_score * 10 }}%"></div>
+                </div>
+              </div>
+            {% endif %}
+          </td>
+
+          <!-- Final Setup score -->
+          <td title="{{ s.setup_reason or '' }}">
+            {% if s.setup_score >= 8 %}
+              <span class="score-badge-inline score-badge-elite {{ s.score_class }}">{{ s.setup_score }}</span>
+            {% else %}
+              <div class="score-bar-wrap">
+                <span class="score-num {{ s.score_class }}">{{ s.setup_score }}</span>
+                <div class="score-bar">
+                  <div class="score-fill {{ s.score_class }}" style="width:{{ s.setup_score * 10 }}%"></div>
+                </div>
+              </div>
+            {% endif %}
+          </td>
+
+          <!-- Combined confidence badge: worst of the two scores shown -->
+          <td class="conf-cell">
+            {% set worst_conf = "Low" if ("Low" in [s.catalyst_confidence, s.setup_confidence]) else ("Medium" if "Medium" in [s.catalyst_confidence, s.setup_confidence] else "High") %}
+            <span class="conf-badge {{ get_confidence_class(worst_conf) }}" title="Cat: {{ s.catalyst_confidence }} | Setup: {{ s.setup_confidence }}">
+              {{ worst_conf }}
+            </span>
+          </td>
+
+          <td class="catalyst-cell">
+            {{ s.catalyst_summary[:75] }}{% if s.catalyst_summary|length > 75 %}…{% endif %}
+          </td>
+
+          <!-- Notes indicator -->
+          <td class="notes-indicator-cell" onclick="event.stopPropagation()">
+            <a href="{{ url_for('stock_detail', ticker=s.ticker) }}#notes"
+               class="notes-indicator {{ 'has-notes' if s.ticker in tickers_with_notes else 'no-notes' }}"
+               title="{{ 'View trade plan' if s.ticker in tickers_with_notes else 'Add trade plan' }}">
+              {{ '✎' if s.ticker in tickers_with_notes else '·' }}
+            </a>
+          </td>
+
+          <td class="action-cell" onclick="event.stopPropagation()">
+            <form action="{{ url_for('watchlist_remove', ticker=s.ticker) }}" method="POST"
+                  onsubmit="return confirm('Remove {{ s.ticker }}?')">
+              <button type="submit" class="btn-remove" title="Remove">✕</button>
+            </form>
+          </td>
+
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% else %}
+  <div class="empty-state">
+    <p>Watchlist is empty. Paste tickers above to get started.</p>
+  </div>
+  {% endif %}
+
+  {% if missing %}
+  <div class="missing-notice">
+    No data yet for: {{ missing|join(", ") }} —
+    <a href="{{ url_for('refresh_all') }}">refresh</a>
+  </div>
+  {% endif %}
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleWlPanel() {
+  const p = document.getElementById('wl-manage-panel');
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+}
+</script>
+{% endblock %}
