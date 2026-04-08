@@ -10,18 +10,16 @@
     <a href="{{ url_for('dashboard') }}" class="back-link">← Dashboard</a>
     <div class="detail-title-row">
       <h1 class="detail-ticker">{{ stock.ticker }}</h1>
-      <span class="exec-badge exec-badge-lg {{ stock.exec_class }}">{{ stock.exec_state or 'WAIT' }}</span>
-      {% if stock.freshness %}
-      <span class="freshness-badge freshness-badge-lg {{ stock.freshness_class }}">{{ stock.freshness }}</span>
-      {% endif %}
+      <span id="detail-exec-badge" class="exec-badge exec-badge-lg {{ stock.exec_class }}">{{ stock.exec_state or 'WAIT' }}</span>
+      <span id="detail-freshness-badge" class="freshness-badge freshness-badge-lg {{ stock.freshness_class }}" {% if not stock.freshness %}style="display:none"{% endif %}>{{ stock.freshness or '' }}</span>
       {% if stock.position_size == 'reduced' %}
       <span class="mr-position-badge">⚠ Reduced Size</span>
       {% endif %}
-      <span class="bias-tag {{ stock.bias_class }} bias-large">{{ stock.trade_bias }}</span>
-      <span class="setup-pill {{ stock.setup_type_class }} setup-pill-lg">{{ stock.setup_type or "No Setup" }}</span>
+      <span id="detail-bias-tag" class="bias-tag {{ stock.bias_class }} bias-large">{{ stock.trade_bias }}</span>
+      <span id="detail-setup-pill" class="setup-pill {{ stock.setup_type_class }} setup-pill-lg">{{ stock.setup_type or "No Setup" }}</span>
     </div>
     <div class="detail-subtitle">
-      Last updated: {{ stock.last_updated }}
+      Last updated: <span id="detail-last-updated">{{ stock.last_updated }}</span>
       &nbsp;|&nbsp;
       <form action="{{ url_for('refresh_single', ticker=stock.ticker) }}" method="POST" style="display:inline;">
         <button type="submit" class="btn-inline-refresh">⟳ Refresh</button>
@@ -35,14 +33,14 @@
     <div class="score-strip-item">
       <div class="score-strip-label">Final Setup</div>
       <div class="score-big-row">
-        <div class="score-big {{ stock.score_class }}{% if stock.setup_score >= 8 %} score-elite{% endif %}">
-          {{ stock.setup_score }}<span class="score-denom">/10</span>
+        <div id="detail-setup-score-wrap" class="score-big {{ stock.score_class }}{% if stock.setup_score >= 8 %} score-elite{% endif %}">
+          <span id="detail-setup-score">{{ stock.setup_score }}</span><span class="score-denom">/10</span>
         </div>
-        <span class="conf-badge {{ stock.setup_conf_class }}">
+        <span id="detail-setup-conf" class="conf-badge {{ stock.setup_conf_class }}">
           {{ stock.setup_confidence or "—" }}
         </span>
       </div>
-      <div class="score-strip-reason">{{ stock.setup_reason or "—" }}</div>
+      <div class="score-strip-reason" id="detail-setup-reason">{{ stock.setup_reason or "—" }}</div>
     </div>
 
     <div class="score-strip-divider"></div>
@@ -50,14 +48,14 @@
     <div class="score-strip-item">
       <div class="score-strip-label">Momentum</div>
       <div class="score-big-row">
-        <div class="score-big {{ stock.mom_score_class }}{% if stock.momentum_score >= 8 %} score-elite{% endif %}">
-          {{ stock.momentum_score or "—" }}<span class="score-denom">/10</span>
+        <div id="detail-mom-score-wrap" class="score-big {{ stock.mom_score_class }}{% if stock.momentum_score >= 8 %} score-elite{% endif %}">
+          <span id="detail-mom-score">{{ stock.momentum_score or "—" }}</span><span class="score-denom">/10</span>
         </div>
         <span class="conf-badge {{ stock.mom_conf_class }}">
           {{ stock.momentum_confidence or "—" }}
         </span>
       </div>
-      <div class="score-strip-reason">{{ stock.momentum_reason or "—" }}</div>
+      <div class="score-strip-reason" id="detail-mom-reason">{{ stock.momentum_reason or "—" }}</div>
     </div>
 
     <div class="score-strip-divider"></div>
@@ -65,8 +63,8 @@
     <div class="score-strip-item">
       <div class="score-strip-label">Catalyst</div>
       <div class="score-big-row">
-        <div class="score-big {{ stock.cat_score_class }}{% if stock.catalyst_score >= 8 %} score-elite{% endif %}">
-          {{ stock.catalyst_score }}<span class="score-denom">/10</span>
+        <div id="detail-cat-score-wrap" class="score-big {{ stock.cat_score_class }}{% if stock.catalyst_score >= 8 %} score-elite{% endif %}">
+          <span id="detail-cat-score">{{ stock.catalyst_score }}</span><span class="score-denom">/10</span>
         </div>
         <span class="conf-badge {{ stock.cat_conf_class }}">
           {{ stock.catalyst_confidence or "—" }}
@@ -79,7 +77,7 @@
 
     <div class="score-strip-item">
       <div class="score-strip-label">Gap</div>
-      <div class="score-big {{ stock.gap_class }}">{{ stock.gap_display }}</div>
+      <div id="detail-gap" class="score-big {{ stock.gap_class }}">{{ stock.gap_display }}</div>
       <div class="score-strip-reason">vs prior close ${{ "%.2f"|format(stock.prev_close) }}</div>
     </div>
 
@@ -87,7 +85,7 @@
 
     <div class="score-strip-item">
       <div class="score-strip-label">Rel Volume</div>
-      <div class="score-big {{ 'positive' if stock.rel_volume >= 2 else '' }}">
+      <div id="detail-rvol" class="score-big {{ 'positive' if stock.rel_volume >= 2 else '' }}">
         {{ "%.1f"|format(stock.rel_volume) }}<span class="score-denom">x</span>
       </div>
       <div class="score-strip-reason">avg {{ "{:,.0f}".format(stock.avg_volume) }}</div>
@@ -101,18 +99,16 @@
     <div class="structure-item">
       <div class="structure-label">ORB State</div>
       <!-- Action directive — the most important signal -->
-      <div class="orb-action-directive {{ stock.orb_action_class }}">
+      <div id="detail-orb-action" class="orb-action-directive {{ stock.orb_action_class }}">
         {{ stock.orb_action }}
       </div>
       <div class="orb-readiness-row">
-        <span class="signal-badge signal-badge-lg {{ stock.orb_class }}">
+        <span id="detail-orb-ready" class="signal-badge signal-badge-lg {{ stock.orb_class }}">
           {{ stock.orb_ready or 'NO' }}
         </span>
-        {% if stock.orb_phase_label %}
-        <span class="orb-phase-badge {{ stock.orb_phase_class }}">{{ stock.orb_phase_label }}</span>
-        {% endif %}
+        <span id="detail-orb-phase" class="orb-phase-badge {{ stock.orb_phase_class }}" {% if not stock.orb_phase_label %}style="display:none"{% endif %}>{{ stock.orb_phase_label or '' }}</span>
       </div>
-      <div class="structure-hint">{{ stock.orb_action_sub }}</div>
+      <div class="structure-hint" id="detail-orb-action-sub">{{ stock.orb_action_sub }}</div>
     </div>
 
     <div class="structure-divider"></div>
@@ -189,9 +185,9 @@
 
     <!-- Level stats row -->
     <div class="orb-stats-row">
-      <div class="orb-stat orb-stat-high {{ 'orb-stat-active' if stock.orb_status in ['ABOVE', 'NEAR_HIGH'] else '' }}">
+      <div class="orb-stat orb-stat-high {{ 'orb-stat-active' if stock.orb_status in ['ABOVE', 'NEAR_HIGH'] else '' }}" id="detail-orb-high-stat">
         <div class="orb-stat-label">ORB High</div>
-        <div class="orb-stat-value">${{ "%.2f"|format(stock.orb_high) }}</div>
+        <div class="orb-stat-value" id="detail-orb-high">${{ "%.2f"|format(stock.orb_high) }}</div>
         {% if stock.orb_status == 'NEAR_HIGH' %}
           <div class="orb-stat-hint">{{ "%.2f"|format(((stock.orb_high - stock.current_price) / stock.orb_high * 100)) }}% away</div>
         {% elif stock.orb_status == 'ABOVE' %}
@@ -222,9 +218,9 @@
         </div>
       </div>
 
-      <div class="orb-stat orb-stat-low {{ 'orb-stat-active orb-stat-bear' if stock.orb_status in ['BELOW', 'NEAR_LOW'] else '' }}">
+      <div class="orb-stat orb-stat-low {{ 'orb-stat-active orb-stat-bear' if stock.orb_status in ['BELOW', 'NEAR_LOW'] else '' }}" id="detail-orb-low-stat">
         <div class="orb-stat-label">ORB Low</div>
-        <div class="orb-stat-value">${{ "%.2f"|format(stock.orb_low) }}</div>
+        <div class="orb-stat-value" id="detail-orb-low">${{ "%.2f"|format(stock.orb_low) }}</div>
         {% if stock.orb_status == 'NEAR_LOW' %}
           <div class="orb-stat-hint">{{ "%.2f"|format(((stock.current_price - stock.orb_low) / stock.orb_low * 100)) }}% away</div>
         {% elif stock.orb_status == 'BELOW' %}
@@ -261,7 +257,7 @@
   <div class="stats-grid">
     <div class="stat-card">
       <div class="stat-label">Current Price</div>
-      <div class="stat-value">${{ "%.2f"|format(stock.current_price) }}</div>
+      <div class="stat-value" id="detail-cur-price">${{ "%.2f"|format(stock.current_price) }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Prev Close</div>
@@ -303,20 +299,42 @@
   <div class="detail-row">
     <div class="detail-col">
       <div class="detail-card">
-        <h3 class="card-title">Catalyst Summary</h3>
+        <h3 class="card-title">
+          Catalyst Summary
+          {% if stock.catalyst_tags %}
+          <span class="cat-tags-inline">
+            {% for tag in stock.catalyst_tags %}
+            <span class="cat-tag cat-tag-{{ tag.key }}">{{ tag.label }}</span>
+            {% endfor %}
+          </span>
+          {% endif %}
+        </h3>
+        {% if stock.catalyst_reason %}
+        <p class="cat-reason-line {{ stock.cat_score_class }}">{{ stock.catalyst_reason }}</p>
+        {% endif %}
         <p class="catalyst-text">{{ stock.catalyst_summary }}</p>
       </div>
     </div>
     <div class="detail-col">
       <div class="detail-card">
-        <h3 class="card-title">Latest Headlines</h3>
-        <ul class="headlines-list">
+        <h3 class="card-title">
+          Latest Headlines
+          {% if stock.headline_freshness %}
+          <span class="headline-freshness-badge">{{ stock.headline_freshness }}</span>
+          {% endif %}
+        </h3>
+        <ul class="headlines-list" id="detail-headlines-list">
           {% for headline in stock.news_headlines %}
           <li>{{ headline }}</li>
           {% else %}
-          <li class="no-data">No headlines available.</li>
+          <li class="no-data">No headlines available — set FINNHUB_API_KEY, NEWS_API_KEY, or POLYGON_API_KEY.</li>
           {% endfor %}
         </ul>
+        {% if stock.headline_freshness %}
+        <div class="headline-source-row">
+          <span class="headline-source-label">Updated {{ stock.headline_freshness }}</span>
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -332,6 +350,13 @@
     </h3>
     {% if stock.catalyst_reason %}
     <p class="reason-summary {{ stock.cat_score_class }}">{{ stock.catalyst_reason }}</p>
+    {% endif %}
+    {% if stock.catalyst_tags %}
+    <div class="cat-tags-row">
+      {% for tag in stock.catalyst_tags %}
+      <span class="cat-tag cat-tag-{{ tag.key }}">{{ tag.label }}</span>
+      {% endfor %}
+    </div>
     {% endif %}
     <div class="breakdown-list">
       {% for label, pts in breakdown %}
@@ -682,5 +707,131 @@ function calcRR() {
 
 // Populate live R/R from saved values on page load
 calcRR();
+
+// ===========================================================================
+// Stock Detail Live Update
+// ===========================================================================
+
+const DETAIL_TICKER = "{{ stock.ticker }}";
+
+function setEl(id, value) {
+  const el = document.getElementById(id);
+  if (el && value != null) el.textContent = value;
+}
+
+function setClass(id, cls) {
+  const el = document.getElementById(id);
+  if (el) el.className = cls;
+}
+
+async function stockDetailRefresh() {
+  try {
+    const resp = await fetch(`/api/stock/${DETAIL_TICKER}/live`);
+    if (!resp.ok) return;
+    const s = await resp.json();
+
+    // Header badges
+    const execBadge = document.getElementById('detail-exec-badge');
+    if (execBadge) { execBadge.className = 'exec-badge exec-badge-lg ' + s.exec_class; execBadge.textContent = s.exec_state || 'WAIT'; }
+
+    const freshBadge = document.getElementById('detail-freshness-badge');
+    if (freshBadge) {
+      if (s.freshness) {
+        freshBadge.className = 'freshness-badge freshness-badge-lg ' + s.freshness_class;
+        freshBadge.textContent = s.freshness;
+        freshBadge.style.display = '';
+      } else {
+        freshBadge.style.display = 'none';
+      }
+    }
+
+    const setupPill = document.getElementById('detail-setup-pill');
+    if (setupPill) { setupPill.className = 'setup-pill ' + s.setup_type_class + ' setup-pill-lg'; setupPill.textContent = s.setup_type || 'No Setup'; }
+
+    const biasTag = document.getElementById('detail-bias-tag');
+    if (biasTag) { biasTag.className = 'bias-tag ' + s.bias_class + ' bias-large'; biasTag.textContent = s.trade_bias; }
+
+    setEl('detail-last-updated', s.last_updated);
+
+    // Score strip
+    if (s.setup_score != null) {
+      setEl('detail-setup-score', s.setup_score);
+      const wrap = document.getElementById('detail-setup-score-wrap');
+      if (wrap) wrap.className = 'score-big ' + s.score_class + (s.setup_score >= 8 ? ' score-elite' : '');
+    }
+    if (s.momentum_score != null) {
+      setEl('detail-mom-score', s.momentum_score);
+      const wrap = document.getElementById('detail-mom-score-wrap');
+      if (wrap) wrap.className = 'score-big ' + s.mom_score_class + (s.momentum_score >= 8 ? ' score-elite' : '');
+    }
+    if (s.catalyst_score != null) {
+      setEl('detail-cat-score', s.catalyst_score);
+      const wrap = document.getElementById('detail-cat-score-wrap');
+      if (wrap) wrap.className = 'score-big ' + s.cat_score_class + (s.catalyst_score >= 8 ? ' score-elite' : '');
+    }
+
+    const gapEl = document.getElementById('detail-gap');
+    if (gapEl && s.gap_display) { gapEl.className = 'score-big ' + s.gap_class; gapEl.textContent = s.gap_display; }
+
+    const rvolEl = document.getElementById('detail-rvol');
+    if (rvolEl && s.rel_volume != null) {
+      rvolEl.className = 'score-big ' + (s.rel_volume >= 2 ? 'positive' : '');
+      rvolEl.innerHTML = s.rel_volume.toFixed(1) + '<span class="score-denom">x</span>';
+    }
+
+    // ORB structure strip
+    const orbAction = document.getElementById('detail-orb-action');
+    if (orbAction) { orbAction.className = 'orb-action-directive ' + s.orb_action_class; orbAction.textContent = s.orb_action; }
+
+    const orbReady = document.getElementById('detail-orb-ready');
+    if (orbReady) { orbReady.className = 'signal-badge signal-badge-lg ' + s.orb_class; orbReady.textContent = s.orb_ready || 'NO'; }
+
+    const orbPhase = document.getElementById('detail-orb-phase');
+    if (orbPhase) {
+      if (s.orb_phase_label) { orbPhase.className = 'orb-phase-badge ' + s.orb_phase_class; orbPhase.textContent = s.orb_phase_label; orbPhase.style.display = ''; }
+      else { orbPhase.style.display = 'none'; }
+    }
+
+    setEl('detail-orb-action-sub', s.orb_action_sub);
+
+    // ORB level values
+    if (s.orb_high) setEl('detail-orb-high', '$' + s.orb_high.toFixed(2));
+    if (s.orb_low)  setEl('detail-orb-low',  '$' + s.orb_low.toFixed(2));
+
+    // Stats grid
+    if (s.current_price != null) setEl('detail-cur-price', '$' + s.current_price.toFixed(2));
+
+    // Scores in setup/momentum reasons
+    if (s.setup_reason)    setEl('detail-setup-reason', s.setup_reason);
+    if (s.momentum_reason) setEl('detail-mom-reason', s.momentum_reason);
+
+    // Catalyst category tags + freshness
+    const catTagsInline = document.querySelector('.cat-tags-inline');
+    if (catTagsInline && Array.isArray(s.catalyst_tags)) {
+      catTagsInline.innerHTML = s.catalyst_tags.map(t =>
+        `<span class="cat-tag cat-tag-${t.key}">${t.label}</span>`
+      ).join('');
+    }
+    const catTagsRow = document.querySelector('.cat-tags-row');
+    if (catTagsRow && Array.isArray(s.catalyst_tags)) {
+      catTagsRow.innerHTML = s.catalyst_tags.map(t =>
+        `<span class="cat-tag cat-tag-${t.key}">${t.label}</span>`
+      ).join('');
+    }
+    if (s.headline_freshness) {
+      document.querySelectorAll('.headline-freshness-badge, .headline-source-label').forEach(el => {
+        if (el.classList.contains('headline-freshness-badge')) el.textContent = s.headline_freshness;
+        if (el.classList.contains('headline-source-label')) el.textContent = 'Updated ' + s.headline_freshness;
+      });
+    }
+
+    window._arSetLastUpdated(new Date().toLocaleTimeString());
+  } catch (e) {
+    console.warn('Stock detail refresh error:', e);
+  }
+}
+
+// Register with shared auto-refresh system
+window._arRefreshFn = stockDetailRefresh;
 </script>
 {% endblock %}

@@ -5,6 +5,7 @@ Flask web app for premarket stock watchlist scanning.
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 
@@ -20,13 +21,14 @@ from database import (
     remove_ticker_from_defaults,
     get_ticker_watchlist_ids, set_ticker_watchlists,
     upsert_stock_data, get_stock_data, get_all_stock_data,
+    update_live_fields,
     set_stock_classify, set_auto_classify,
     get_note, save_note, get_all_notes, update_setup_type,
     get_trade_plan, save_trade_plan, get_all_trade_plans,
     add_journal_entry, update_journal_entry, delete_journal_entry,
     get_journal_entry, get_all_journal_entries,
 )
-from mock_data import generate_stock_data, load_mock_watchlist
+from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock
 from scoring import catalyst_score_breakdown, SETUP_TYPES
 from classifier import classify_stock
 
@@ -569,6 +571,24 @@ def annotate(stock: dict) -> dict:
     gap = stock.get("gap_pct") or 0
     stock["gap_display"]           = f"{'+' if gap >= 0 else ''}{gap:.2f}%"
     stock["gap_class"]             = "positive" if gap >= 0 else "negative"
+
+    # Decode catalyst_category JSON → list of {key, label} dicts for templates
+    import json as _json
+    from news_fetcher import CATALYST_CATEGORIES as _CAT_DEFS, freshness_label as _fl
+    raw_cats = stock.get("catalyst_category") or "[]"
+    try:
+        cat_keys = _json.loads(raw_cats) if isinstance(raw_cats, str) else list(raw_cats)
+    except Exception:
+        cat_keys = []
+    stock["catalyst_tags"] = [
+        {"key": k, "label": _CAT_DEFS[k]["label"]}
+        for k in cat_keys if k in _CAT_DEFS
+    ]
+    # Human-readable headline freshness ("2m ago", "1h ago", …)
+    stock["headline_freshness"] = _fl(
+        (lambda hfa: int((datetime.now() - datetime.fromisoformat(hfa)).total_seconds() / 60)
+         if hfa else None)(stock.get("headlines_fetched_at"))
+    )
     return stock
 
 
@@ -1170,6 +1190,64 @@ def toggle_auto_classify(ticker):
 # JSON API
 # ---------------------------------------------------------------------------
 
+@app.route("/quick")
+def quick_mode():
+    """Mobile Quick Mode — top 3 priority stocks for fast decision-making."""
+    wl_id     = get_active_wl_id()
+    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+
+    if watchlist:
+        auto_refresh_stale_closes(watchlist)
+
+    all_data = get_all_stock_data()
+    data_map = {s["ticker"]: s for s in all_data}
+    stocks   = [annotate(data_map[t]) for t in watchlist if t in data_map]
+    ranked   = rank_stocks(stocks)
+    top3     = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
+
+    # Worst-of-two confidence for display
+    for s in top3:
+        confs = [s.get("catalyst_confidence") or "Low", s.get("setup_confidence") or "Low"]
+        s["combined_confidence"] = (
+            "Low" if "Low" in confs else ("Medium" if "Medium" in confs else "High")
+        )
+        s["combined_conf_class"] = get_confidence_class(s["combined_confidence"])
+
+    return render_template(
+        "quick.html",
+        stocks=top3,
+        orb_session=get_orb_session_banner(),
+    )
+
+
+@app.route("/api/quick")
+def api_quick():
+    """JSON for Quick Mode live refresh — top 3 priority stocks."""
+    wl_id     = get_active_wl_id()
+    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+    all_data  = get_all_stock_data()
+    data_map  = {s["ticker"]: s for s in all_data}
+    # Re-evaluate exec_state with fresh live data before building the response
+    data_map  = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
+    stocks    = [annotate(data_map[t]) for t in watchlist if t in data_map]
+    ranked    = rank_stocks(stocks)
+    top3      = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
+
+    out = []
+    for s in top3:
+        d = _stock_summary(s)
+        confs = [s.get("catalyst_confidence") or "Low", s.get("setup_confidence") or "Low"]
+        d["combined_confidence"]  = "Low" if "Low" in confs else ("Medium" if "Medium" in confs else "High")
+        d["combined_conf_class"]  = get_confidence_class(d["combined_confidence"])
+        out.append(d)
+
+    return jsonify({
+        "server_time": datetime.now().strftime("%H:%M:%S"),
+        "orb_session": get_orb_session_banner(),
+        "stocks":      out,
+    })
+
+
 @app.route("/api/watchlist")
 def api_watchlist():
     """Return active watchlist as ranked JSON."""
@@ -1178,6 +1256,135 @@ def api_watchlist():
     data_map  = {s["ticker"]: s for s in get_all_stock_data()}
     stocks    = [data_map[t] for t in watchlist if t in data_map]
     return jsonify(rank_stocks(stocks))
+
+
+def batch_refresh_exec_states(tickers: list[str], data_map: dict) -> dict:
+    """
+    Re-fetch live data and re-evaluate exec_state for all tickers in parallel.
+
+    Uses a thread pool so yfinance calls run concurrently (one thread per ticker).
+    If a ticker's exec_state or key live fields changed, persists the update via
+    update_live_fields() so triggered_at timestamps stay accurate.
+
+    Returns an updated data_map {ticker: refreshed_stock_dict}.
+    """
+    if not tickers:
+        return data_map
+
+    refreshed_map = dict(data_map)
+
+    def _refresh_one(ticker):
+        existing = data_map.get(ticker)
+        if not existing:
+            return ticker, None
+        try:
+            updated = live_refresh_stock(ticker, existing)
+            return ticker, updated
+        except Exception as exc:
+            logger.warning("live_refresh_stock failed for %s: %s", ticker, exc)
+            return ticker, None
+
+    max_workers = min(len(tickers), 8)   # cap at 8 concurrent yfinance calls
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_refresh_one, t): t for t in tickers}
+        for future in as_completed(futures):
+            ticker, updated = future.result()
+            if updated is None:
+                continue
+            refreshed_map[ticker] = updated
+            # Persist if exec_state or any scored field changed
+            old = data_map.get(ticker, {})
+            _changed_fields = (
+                "exec_state", "momentum_score", "setup_score", "orb_status",
+                "orb_ready", "entry_quality", "order_block", "setup_type",
+            )
+            if any(updated.get(f) != old.get(f) for f in _changed_fields):
+                try:
+                    update_live_fields(updated)
+                except Exception as exc:
+                    logger.warning("update_live_fields failed for %s: %s", ticker, exc)
+
+    return refreshed_map
+
+
+def _stock_summary(s: dict) -> dict:
+    """Return a JSON-safe subset of an annotated stock dict for live updates."""
+    fields = [
+        "ticker", "current_price", "gap_pct", "gap_display", "gap_class",
+        "rel_volume", "avg_volume",
+        "momentum_score", "momentum_reason", "momentum_confidence",
+        "setup_score", "setup_reason", "setup_confidence", "setup_type",
+        "catalyst_score", "catalyst_reason", "catalyst_confidence", "catalyst_summary",
+        "catalyst_category", "headlines_fetched_at",
+        "catalyst_tags", "headline_freshness",
+        "exec_state", "exec_class",
+        "orb_ready", "orb_class", "orb_high", "orb_low", "orb_status",
+        "orb_status_class", "orb_phase", "orb_phase_label", "orb_phase_class",
+        "orb_action", "orb_action_class", "orb_action_sub", "orb_price_pct",
+        "order_block", "ob_class",
+        "entry_quality", "entry_class", "entry_note",
+        "trade_bias", "bias_class",
+        "score_class", "cat_score_class", "mom_score_class",
+        "freshness", "freshness_class",
+        "setup_type_class",
+        "last_updated",
+        "position_size",
+        "prev_close", "premarket_high", "premarket_low",
+        "prev_day_high", "prev_day_low",
+        "secondary_tier", "secondary_tier_class",
+    ]
+    return {f: s.get(f) for f in fields}
+
+
+@app.route("/api/dashboard")
+def api_dashboard():
+    """JSON endpoint for live dashboard updates (price, state, ORB, scores)."""
+    wl_id     = get_active_wl_id()
+    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+    all_data  = get_all_stock_data()
+    data_map  = {s["ticker"]: s for s in all_data}
+    # Re-evaluate exec_state with fresh live data before building the response
+    data_map  = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
+    stocks    = [annotate(data_map[t]) for t in watchlist if t in data_map]
+    ranked    = rank_stocks(stocks)
+    top5      = [
+        s for s in ranked
+        if (s.get("momentum_score") or 0) >= 6
+        and s.get("orb_ready") == "YES"
+        and s.get("entry_quality") != "Extended"
+        and s.get("trade_bias") != "Avoid"
+    ][:5]
+    no_trade  = compute_no_trade_assessment(ranked, top5)
+    triggered = [] if no_trade["lock_signals"] else [s for s in ranked if s.get("exec_state") == "TRIGGERED"]
+    top5_tickers = {s["ticker"] for s in top5}
+    secondary = compute_secondary_watchlist(ranked, top5_tickers)
+
+    return jsonify({
+        "server_time": datetime.now().strftime("%H:%M:%S"),
+        "orb_session": get_orb_session_banner(),
+        "no_trade":    no_trade,
+        "triggered":   [_stock_summary(s) for s in triggered],
+        "top5":        [_stock_summary(s) for s in top5],
+        "secondary":   [_stock_summary(s) for s in secondary],
+        "ranked":      [_stock_summary(s) for s in ranked],
+    })
+
+
+@app.route("/api/stock/<ticker>/live")
+def api_stock_live(ticker):
+    """JSON endpoint for live single-stock detail updates."""
+    ticker = ticker.upper()
+    stock  = get_stock_data(ticker)
+    if not stock:
+        return jsonify({"error": "not found"}), 404
+    # Re-evaluate exec_state with fresh live data
+    try:
+        stock = live_refresh_stock(ticker, stock)
+        update_live_fields(stock)
+    except Exception as exc:
+        logger.warning("live_refresh_stock failed for %s: %s", ticker, exc)
+    annotate(stock)
+    return jsonify(_stock_summary(stock))
 
 
 # ---------------------------------------------------------------------------
@@ -1208,6 +1415,5 @@ def inject_helpers():
 
 if __name__ == "__main__":
     init_db()
-    seed_demo_data()
-    print("\n  Rockkstaar Trade Assistant running at http://127.0.0.1:5000\n")
-    app.run(debug=True)
+    print("\nRockkstaar Trade Assistant running...\n")
+    app.run(host="0.0.0.0", port=5000, debug=False)

@@ -168,6 +168,8 @@ def init_db():
         ("strong_candle_bodies",    "INTEGER DEFAULT 0"),  # 1 if last 3 candles have body > 50% of range
         ("price_above_vwap",        "INTEGER DEFAULT 0"),  # 1 if current price > session VWAP
         ("structure_momentum_score","INTEGER DEFAULT 0"),  # orb_hold+trend_structure+bodies (0-7)
+        ("catalyst_category",      "TEXT"),               # JSON list of detected category keys
+        ("headlines_fetched_at",   "TEXT"),               # ISO timestamp of last headline fetch
     ]
     for col, col_type in _new_columns:
         try:
@@ -476,7 +478,8 @@ def upsert_stock_data(data: dict):
              vwap, momentum_breakout, candles_above_orb,
              momentum_runner, entry_note, position_size,
              orb_hold, trend_structure, higher_highs, higher_lows, strong_candle_bodies,
-             price_above_vwap, structure_momentum_score)
+             price_above_vwap, structure_momentum_score,
+             catalyst_category, headlines_fetched_at)
         VALUES
             (:ticker, :current_price, :prev_close, :gap_pct, :premarket_high,
              :premarket_low, :prev_day_high, :prev_day_low, :avg_volume, :rel_volume,
@@ -490,7 +493,8 @@ def upsert_stock_data(data: dict):
              :vwap, :momentum_breakout, :candles_above_orb,
              :momentum_runner, :entry_note, :position_size,
              :orb_hold, :trend_structure, :higher_highs, :higher_lows, :strong_candle_bodies,
-             :price_above_vwap, :structure_momentum_score)
+             :price_above_vwap, :structure_momentum_score,
+             :catalyst_category, :headlines_fetched_at)
         ON CONFLICT(ticker) DO UPDATE SET
             current_price        = excluded.current_price,
             prev_close           = excluded.prev_close,
@@ -538,7 +542,9 @@ def upsert_stock_data(data: dict):
             higher_lows              = excluded.higher_lows,
             strong_candle_bodies     = excluded.strong_candle_bodies,
             price_above_vwap         = excluded.price_above_vwap,
-            structure_momentum_score = excluded.structure_momentum_score
+            structure_momentum_score = excluded.structure_momentum_score,
+            catalyst_category        = excluded.catalyst_category,
+            headlines_fetched_at     = excluded.headlines_fetched_at
     """, data)
     conn.commit()
     conn.close()
@@ -612,6 +618,135 @@ def get_all_stock_data():
             d["news_headlines"] = []
         result.append(d)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Live exec-state update (used by auto-refresh cycle)
+# ---------------------------------------------------------------------------
+
+def update_live_fields(data: dict) -> None:
+    """
+    Update live-changing fields for a stock without touching catalyst/news.
+
+    Fields updated: price, volume, gap, ORB levels/status/phase, VWAP,
+    momentum/entry/exec scores, setup score/type, structure flags.
+
+    The triggered_at timestamp logic mirrors upsert_stock_data():
+      - When newly TRIGGERED: stamp now()
+      - When already TRIGGERED: preserve original timestamp
+      - When leaving TRIGGERED: clear to None
+    """
+    ticker = (data.get("ticker") or "").upper()
+    if not ticker:
+        return
+
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT exec_state, triggered_at FROM stock_data WHERE ticker = ?", (ticker,)
+    ).fetchone()
+
+    new_state = data.get("exec_state")
+    if new_state == "TRIGGERED":
+        if existing and existing["exec_state"] == "TRIGGERED" and existing["triggered_at"]:
+            triggered_at = existing["triggered_at"]   # preserve original stamp
+        else:
+            triggered_at = datetime.now().isoformat()  # first trigger — stamp now
+    else:
+        triggered_at = None  # clear when no longer triggered
+
+    conn.execute("""
+        UPDATE stock_data SET
+            current_price            = :current_price,
+            gap_pct                  = :gap_pct,
+            rel_volume               = :rel_volume,
+            avg_volume               = :avg_volume,
+            orb_high                 = :orb_high,
+            orb_low                  = :orb_low,
+            orb_status               = :orb_status,
+            orb_ready                = :orb_ready,
+            orb_phase                = :orb_phase,
+            vwap                     = :vwap,
+            momentum_score           = :momentum_score,
+            momentum_reason          = :momentum_reason,
+            momentum_confidence      = :momentum_confidence,
+            order_block              = :order_block,
+            entry_quality            = :entry_quality,
+            exec_state               = :exec_state,
+            setup_score              = :setup_score,
+            setup_reason             = :setup_reason,
+            setup_confidence         = :setup_confidence,
+            setup_type               = :setup_type,
+            entry_note               = :entry_note,
+            position_size            = :position_size,
+            momentum_breakout        = :momentum_breakout,
+            momentum_runner          = :momentum_runner,
+            candles_above_orb        = :candles_above_orb,
+            orb_hold                 = :orb_hold,
+            trend_structure          = :trend_structure,
+            higher_highs             = :higher_highs,
+            higher_lows              = :higher_lows,
+            strong_candle_bodies     = :strong_candle_bodies,
+            price_above_vwap         = :price_above_vwap,
+            structure_momentum_score = :structure_momentum_score,
+            catalyst_score           = :catalyst_score,
+            catalyst_reason          = :catalyst_reason,
+            catalyst_confidence      = :catalyst_confidence,
+            catalyst_summary         = :catalyst_summary,
+            catalyst_category        = :catalyst_category,
+            news_headlines           = :news_headlines,
+            headlines_fetched_at     = :headlines_fetched_at,
+            triggered_at             = :triggered_at,
+            last_updated             = :last_updated
+        WHERE ticker = :ticker
+    """, {
+        "ticker":                   ticker,
+        "current_price":            data.get("current_price"),
+        "gap_pct":                  data.get("gap_pct"),
+        "rel_volume":               data.get("rel_volume"),
+        "avg_volume":               data.get("avg_volume"),
+        "orb_high":                 data.get("orb_high"),
+        "orb_low":                  data.get("orb_low"),
+        "orb_status":               data.get("orb_status"),
+        "orb_ready":                data.get("orb_ready"),
+        "orb_phase":                data.get("orb_phase"),
+        "vwap":                     data.get("vwap"),
+        "momentum_score":           data.get("momentum_score"),
+        "momentum_reason":          data.get("momentum_reason"),
+        "momentum_confidence":      data.get("momentum_confidence"),
+        "order_block":              data.get("order_block"),
+        "entry_quality":            data.get("entry_quality"),
+        "exec_state":               data.get("exec_state"),
+        "setup_score":              data.get("setup_score"),
+        "setup_reason":             data.get("setup_reason"),
+        "setup_confidence":         data.get("setup_confidence"),
+        "setup_type":               data.get("setup_type"),
+        "entry_note":               data.get("entry_note"),
+        "position_size":            data.get("position_size"),
+        "momentum_breakout":        int(bool(data.get("momentum_breakout"))),
+        "momentum_runner":          int(bool(data.get("momentum_runner"))),
+        "candles_above_orb":        data.get("candles_above_orb") or 0,
+        "orb_hold":                 int(bool(data.get("orb_hold"))),
+        "trend_structure":          int(bool(data.get("trend_structure"))),
+        "higher_highs":             int(bool(data.get("higher_highs"))),
+        "higher_lows":              int(bool(data.get("higher_lows"))),
+        "strong_candle_bodies":     int(bool(data.get("strong_candle_bodies"))),
+        "price_above_vwap":         int(bool(data.get("price_above_vwap"))),
+        "structure_momentum_score": data.get("structure_momentum_score") or 0,
+        "catalyst_score":           data.get("catalyst_score"),
+        "catalyst_reason":          data.get("catalyst_reason"),
+        "catalyst_confidence":      data.get("catalyst_confidence"),
+        "catalyst_summary":         data.get("catalyst_summary"),
+        "catalyst_category":        data.get("catalyst_category"),
+        "news_headlines":           json.dumps(data.get("news_headlines") or [])
+                                    if isinstance(data.get("news_headlines"), list)
+                                    else (data.get("news_headlines") or "[]"),
+        "headlines_fetched_at":     data.get("headlines_fetched_at"),
+        "triggered_at":             triggered_at,
+        "last_updated":             data.get("last_updated") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    conn.commit()
+    conn.close()
+    data["triggered_at"] = triggered_at   # reflect actual value back into the dict
 
 
 # ---------------------------------------------------------------------------

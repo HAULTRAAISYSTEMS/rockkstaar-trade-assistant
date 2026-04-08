@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% block title %}Quick Mode — Rockkstaar{% endblock %}
+
+{% block content %}
+<div class="qm-wrap">
+
+  <!-- ===== HEADER BAR ===== -->
+  <div class="qm-header">
+    <div class="qm-header-left">
+      <span class="qm-title">⚡ Quick Mode</span>
+      <span class="qm-subtitle">Top {{ stocks|length }} in play</span>
+    </div>
+    <div class="qm-header-right">
+      <span class="qm-orb-pill {{ orb_session.phase_class }}">
+        {{ orb_session.phase_label or 'Market' }}
+      </span>
+      <a href="{{ url_for('dashboard') }}" class="qm-full-link">Full view →</a>
+    </div>
+  </div>
+
+  <!-- ===== ORB SESSION ACTION ===== -->
+  <div class="qm-session-bar qm-session-{{ orb_session.phase }}">
+    <span class="qm-session-action {{ orb_session.action_class }}">{{ orb_session.action }}</span>
+    <span class="qm-session-sub">{{ orb_session.sub_label }}</span>
+  </div>
+
+  <!-- ===== STOCK CARDS ===== -->
+  {% if stocks %}
+  <div class="qm-cards" id="qm-cards">
+
+    {% for s in stocks %}
+    <div class="qm-card {% if s.exec_state == 'TRIGGERED' %}qm-card-triggered{% elif s.exec_state == 'READY' %}qm-card-ready{% endif %}"
+         id="qm-card-{{ s.ticker }}"
+         data-ticker="{{ s.ticker }}">
+
+      <!-- TOP STRIPE: state + freshness -->
+      <div class="qm-state-stripe exec-stripe-{{ s.exec_class }}">
+        <span class="qm-exec-badge {{ s.exec_class }}">{{ s.exec_state or 'WAIT' }}</span>
+        {% if s.freshness %}
+        <span class="qm-freshness {{ s.freshness_class }}">{{ s.freshness }}</span>
+        {% endif %}
+        <span class="qm-rank">#{{ loop.index }}</span>
+      </div>
+
+      <!-- MAIN BODY -->
+      <div class="qm-body">
+
+        <!-- Ticker + Price row -->
+        <div class="qm-ticker-row">
+          <span class="qm-ticker">{{ s.ticker }}</span>
+          <div class="qm-price-block">
+            <span class="qm-price" id="qmp-price-{{ s.ticker }}">${{ "%.2f"|format(s.current_price) }}</span>
+            <span class="qm-gap {{ s.gap_class }}" id="qmp-gap-{{ s.ticker }}">{{ s.gap_display }}</span>
+          </div>
+        </div>
+
+        <!-- Setup type + bias -->
+        <div class="qm-setup-row">
+          <span class="setup-pill {{ s.setup_type_class }} qm-setup-pill" id="qmp-setup-{{ s.ticker }}">
+            {{ s.setup_type or '—' }}
+          </span>
+          <span class="bias-tag {{ s.bias_class }} qm-bias-tag">{{ s.trade_bias }}</span>
+        </div>
+
+        <!-- Scores row -->
+        <div class="qm-scores-row">
+          <div class="qm-score-item">
+            <span class="qm-score-label">Setup</span>
+            <span class="qm-score-value {{ s.score_class }}" id="qmp-setup-score-{{ s.ticker }}">{{ s.setup_score }}/10</span>
+          </div>
+          <div class="qm-score-divider"></div>
+          <div class="qm-score-item">
+            <span class="qm-score-label">Mom</span>
+            <span class="qm-score-value {{ s.mom_score_class }}" id="qmp-mom-{{ s.ticker }}">{{ s.momentum_score or '—' }}/10</span>
+          </div>
+          <div class="qm-score-divider"></div>
+          <div class="qm-score-item">
+            <span class="qm-score-label">Cat</span>
+            <span class="qm-score-value {{ s.cat_score_class }}" id="qmp-cat-{{ s.ticker }}">{{ s.catalyst_score }}/10</span>
+          </div>
+          <div class="qm-score-divider"></div>
+          <div class="qm-score-item">
+            <span class="qm-score-label">Conf</span>
+            <span class="conf-badge {{ s.combined_conf_class }} qm-conf-badge" id="qmp-conf-{{ s.ticker }}">{{ s.combined_confidence }}</span>
+          </div>
+        </div>
+
+        <!-- ORB status row -->
+        {% if s.orb_phase != 'pre_market' %}
+        <div class="qm-orb-row" id="qmp-orb-{{ s.ticker }}">
+          {% if s.orb_high and s.orb_low %}
+            {% set orb_labels = {"ABOVE": "▲ Above ORB", "NEAR_HIGH": "↑ Near High", "INSIDE": "Inside ORB", "NEAR_LOW": "↓ Near Low", "BELOW": "▼ Below ORB", "NO_ORB": "No ORB"} %}
+            <span class="orbs-badge {{ s.orb_status_class }}">{{ orb_labels.get(s.orb_status, '—') }}</span>
+            <span class="qm-orb-levels">H ${{ "%.2f"|format(s.orb_high) }} · L ${{ "%.2f"|format(s.orb_low) }}</span>
+          {% elif s.orb_phase == 'forming' %}
+            <span class="orb-phase-badge orbp-forming">ORB Forming…</span>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Catalyst reason -->
+        {% if s.catalyst_reason %}
+        <div class="qm-catalyst" id="qmp-catalyst-reason-{{ s.ticker }}">
+          {{ s.catalyst_reason }}
+        </div>
+        {% endif %}
+
+        <!-- Catalyst summary (short) -->
+        {% if s.catalyst_summary %}
+        <div class="qm-catalyst-summary">
+          {{ s.catalyst_summary[:120] }}{% if s.catalyst_summary|length > 120 %}…{% endif %}
+        </div>
+        {% endif %}
+
+      </div>
+
+      <!-- ACTION FOOTER -->
+      <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="qm-view-btn">
+        View {{ s.ticker }} — Full Details →
+      </a>
+
+    </div>
+    {% endfor %}
+
+  </div>
+
+  {% else %}
+  <!-- Empty state -->
+  <div class="qm-empty">
+    <div class="qm-empty-icon">📋</div>
+    <div class="qm-empty-title">No stocks in play</div>
+    <div class="qm-empty-sub">Add tickers to your watchlist on the dashboard.</div>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-add" style="margin-top:1.5rem;display:inline-flex;">Open Dashboard</a>
+  </div>
+  {% endif %}
+
+  <!-- Last updated footer -->
+  <div class="qm-footer">
+    <span id="qm-last-updated" class="qm-updated">—</span>
+    <span class="qm-footer-hint">Auto-refreshes every 15s during market hours</span>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ===========================================================================
+// Quick Mode Live Refresh
+// ===========================================================================
+
+const SCORE_CLASS_MAP = {
+  strong: 'strong', moderate: 'moderate', weak: 'weak', neutral: 'neutral'
+};
+
+function qmSetText(id, val) {
+  const el = document.getElementById(id);
+  if (el && val != null) el.textContent = val;
+}
+
+function qmSetClass(el, cls) {
+  if (el) el.className = cls;
+}
+
+function qmUpdateCard(s) {
+  const card = document.getElementById('qm-card-' + s.ticker);
+  if (!card) return;
+
+  // Card-level trigger class
+  card.classList.toggle('qm-card-triggered', s.exec_state === 'TRIGGERED');
+  card.classList.toggle('qm-card-ready',     s.exec_state === 'READY');
+
+  // State stripe
+  const stripe = card.querySelector('.qm-state-stripe');
+  if (stripe) {
+    stripe.className = 'qm-state-stripe exec-stripe-' + s.exec_class;
+    const execBadge = stripe.querySelector('.qm-exec-badge');
+    if (execBadge) { execBadge.className = 'qm-exec-badge ' + s.exec_class; execBadge.textContent = s.exec_state || 'WAIT'; }
+    const freshEl = stripe.querySelector('.qm-freshness');
+    if (freshEl) {
+      if (s.freshness) {
+        freshEl.className = 'qm-freshness ' + s.freshness_class;
+        freshEl.textContent = s.freshness;
+        freshEl.style.display = '';
+      } else {
+        freshEl.style.display = 'none';
+      }
+    }
+  }
+
+  // Price & gap
+  qmSetText('qmp-price-' + s.ticker, s.current_price != null ? '$' + s.current_price.toFixed(2) : '—');
+  const gapEl = document.getElementById('qmp-gap-' + s.ticker);
+  if (gapEl) { gapEl.className = 'qm-gap ' + (s.gap_class || ''); gapEl.textContent = s.gap_display || '—'; }
+
+  // Setup pill
+  const setupPill = document.getElementById('qmp-setup-' + s.ticker);
+  if (setupPill) { setupPill.className = 'setup-pill ' + s.setup_type_class + ' qm-setup-pill'; setupPill.textContent = s.setup_type || '—'; }
+
+  // Scores
+  const fmtScore = (v, sfx) => v != null ? v + sfx : '—';
+  qmSetText('qmp-setup-score-' + s.ticker, fmtScore(s.setup_score, '/10'));
+  const ssEl = document.getElementById('qmp-setup-score-' + s.ticker);
+  if (ssEl) ssEl.className = 'qm-score-value ' + (s.score_class || '');
+
+  qmSetText('qmp-mom-' + s.ticker, fmtScore(s.momentum_score, '/10'));
+  const momEl = document.getElementById('qmp-mom-' + s.ticker);
+  if (momEl) momEl.className = 'qm-score-value ' + (s.mom_score_class || '');
+
+  qmSetText('qmp-cat-' + s.ticker, fmtScore(s.catalyst_score, '/10'));
+  const catEl = document.getElementById('qmp-cat-' + s.ticker);
+  if (catEl) catEl.className = 'qm-score-value ' + (s.cat_score_class || '');
+
+  // Confidence
+  const confEl = document.getElementById('qmp-conf-' + s.ticker);
+  if (confEl && s.combined_confidence) {
+    confEl.className = 'conf-badge qm-conf-badge ' + (s.combined_conf_class || '');
+    confEl.textContent = s.combined_confidence;
+  }
+
+  // Catalyst reason
+  qmSetText('qmp-catalyst-reason-' + s.ticker, s.catalyst_reason || '');
+
+  // ORB row
+  const orbRow = document.getElementById('qmp-orb-' + s.ticker);
+  if (orbRow) {
+    const ORB_LABELS = {ABOVE: '▲ Above ORB', NEAR_HIGH: '↑ Near High', INSIDE: 'Inside ORB', NEAR_LOW: '↓ Near Low', BELOW: '▼ Below ORB', NO_ORB: 'No ORB'};
+    if (s.orb_high && s.orb_low) {
+      orbRow.innerHTML = `<span class="orbs-badge ${s.orb_status_class}">${ORB_LABELS[s.orb_status] || '—'}</span><span class="qm-orb-levels">H $${s.orb_high.toFixed(2)} · L $${s.orb_low.toFixed(2)}</span>`;
+      orbRow.style.display = '';
+    } else if (s.orb_phase === 'forming') {
+      orbRow.innerHTML = `<span class="orb-phase-badge orbp-forming">ORB Forming…</span>`;
+      orbRow.style.display = '';
+    } else {
+      orbRow.style.display = 'none';
+    }
+  }
+}
+
+function qmUpdateSessionBar(orb) {
+  const bar    = document.querySelector('.qm-session-bar');
+  const action = document.querySelector('.qm-session-action');
+  const sub    = document.querySelector('.qm-session-sub');
+  if (bar)    bar.className = 'qm-session-bar qm-session-' + orb.phase;
+  if (action) { action.className = 'qm-session-action ' + orb.action_class; action.textContent = orb.action; }
+  if (sub)    sub.textContent = orb.sub_label;
+}
+
+async function quickModeRefresh() {
+  try {
+    const resp = await fetch('/api/quick');
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    qmUpdateSessionBar(data.orb_session);
+
+    // Detect new triggers for alerts (uses shared system from main.js)
+    const newTriggers = detectNewTriggers(data.stocks);
+    if (newTriggers.length) {
+      newTriggers.forEach(s => {
+        const alertType = getAlertType(s);
+        playAlertSound(alertType);
+        showTriggerToast(s, alertType);
+      });
+    }
+
+    data.stocks.forEach(qmUpdateCard);
+
+    const updEl = document.getElementById('qm-last-updated');
+    if (updEl) updEl.textContent = 'Updated ' + data.server_time;
+    window._arSetLastUpdated(data.server_time);
+
+  } catch (e) {
+    console.warn('Quick mode refresh error:', e);
+  }
+}
+
+window._arRefreshFn = quickModeRefresh;
+</script>
+{% endblock %}

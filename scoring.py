@@ -14,6 +14,7 @@ update automatically.
 No DB or Flask imports — pure functions only.
 """
 
+import json as _json
 from datetime import date, datetime
 from typing import NamedTuple
 
@@ -57,27 +58,64 @@ MR_T = {
 
 
 # ===========================================================================
-# Keyword signal lists  (used in both scoring and breakdown)
+# Keyword signal lists  (legacy — used as fallback when catalyst_category absent)
 # ===========================================================================
 
-_ANALYST_UPGRADE   = ["upgrade", "raises price target", "price target", "outperform",
+_ANALYST_UPGRADE   = ["upgrade", "raises price target", "price target raised", "outperform",
                        "overweight", "buy rating", "strong buy", "initiated", "reiterate",
-                       "maintains buy", "added to conviction"]
+                       "maintains buy", "added to conviction", "initiates with buy",
+                       "boosts price target", "lifts to outperform"]
 _ANALYST_DOWNGRADE = ["downgrade", "underperform", "underweight", "sell rating",
-                       "lowers price target", "cut to neutral", "removed from conviction"]
+                       "lowers price target", "cut to neutral", "removed from conviction",
+                       "cuts price target", "trims price target", "reduced to sell"]
 _MAJOR_SIGNALS     = ["sec", "fda", "merger", "acquisition", "buyout", "settlement",
                        "investigation", "recall", "bankruptcy", "delisting", "halt",
-                       "indictment", "class action", "takeover", "going private"]
+                       "indictment", "class action", "takeover", "going private",
+                       "government contract", "defense contract", "dod contract",
+                       "guidance raised", "guidance cut", "partnership", "joint venture"]
 _EARNINGS_SIGNALS  = ["earnings", "eps", "revenue", "beat estimates", "missed estimates",
                        "quarterly results", "q1", "q2", "q3", "q4", "annual results",
-                       "guidance", "beat", "miss", "raised guidance", "lowered guidance"]
+                       "guidance", "beat", "miss", "raised guidance", "lowered guidance",
+                       "earnings beat", "earnings miss"]
 
 
 # ===========================================================================
 #  CATALYST SCORE — weights and thresholds
 # ===========================================================================
 
-# ---- Positive weights (added to raw score when signal fires) ---------------
+# ---- Per-category weights (matches news_fetcher.CATALYST_CATEGORIES) -------
+# Used by _score_from_categories() when pre-parsed categories are available.
+_CAT_WEIGHTS: dict[str, int] = {
+    "earnings_beat":       4,
+    "earnings_miss":       3,   # negative result still moves stock
+    "analyst_upgrade":     3,
+    "analyst_downgrade":   2,
+    "partnership_deal":    3,
+    "acquisition_merger":  5,
+    "government_contract": 4,
+    "product_launch":      2,
+    "fda":                 5,
+    "sec_legal":           3,
+    "guidance_raise":      4,
+    "guidance_cut":        3,
+}
+
+_CAT_DISPLAY: dict[str, str] = {
+    "earnings_beat":       "earnings beat",
+    "earnings_miss":       "earnings miss",
+    "analyst_upgrade":     "analyst upgrade",
+    "analyst_downgrade":   "analyst downgrade",
+    "partnership_deal":    "partnership/deal",
+    "acquisition_merger":  "acquisition/merger",
+    "government_contract": "government contract",
+    "product_launch":      "product launch",
+    "fda":                 "FDA/regulatory approval",
+    "sec_legal":           "SEC/legal issue",
+    "guidance_raise":      "guidance raise",
+    "guidance_cut":        "guidance cut",
+}
+
+# ---- Legacy positive weights (used when no pre-parsed categories) ----------
 CAT_W = {
     # Earnings proximity  (highest single-signal weight — defines the day's trade)
     "earnings_reported":   5,   # Reported in last 3 days or today/tomorrow
@@ -260,11 +298,28 @@ def _earnings_proximity(earnings_date_str) -> tuple[int, str | None]:
     return 0, None
 
 
+def _score_from_categories(categories: list[str]) -> tuple[int, list[str]]:
+    """
+    Score from pre-parsed catalyst_category list (from news_fetcher).
+    Returns (total_pts, list_of_display_labels).
+    Each category contributes at most once.
+    """
+    pts    = 0
+    labels = []
+    seen: set[str] = set()
+    for cat in categories:
+        if cat in _CAT_WEIGHTS and cat not in seen:
+            pts += _CAT_WEIGHTS[cat]
+            labels.append(_CAT_DISPLAY.get(cat, cat))
+            seen.add(cat)
+    return pts, labels
+
+
 def _scan_keywords(text: str) -> tuple[int, list[str]]:
     """
-    Scan catalyst_summary for keyword signal categories.
-    Returns (total_pts, list_of_labels).
-    Each category can only fire once — no double-counting.
+    Legacy keyword scanner — used when pre-parsed categories are not available.
+    Scans catalyst_summary for known signal patterns.
+    Returns (total_pts, list_of_labels).  Each category fires at most once.
     """
     t      = text.lower()
     pts    = 0
@@ -273,8 +328,6 @@ def _scan_keywords(text: str) -> tuple[int, list[str]]:
     if any(w in t for w in _ANALYST_UPGRADE):
         pts += CAT_W["analyst_upgrade"]
         labels.append("analyst upgrade")
-
-    # Only score downgrade if no upgrade also present
     elif any(w in t for w in _ANALYST_DOWNGRADE):
         pts += CAT_W["analyst_downgrade"]
         labels.append("analyst downgrade")
@@ -303,8 +356,14 @@ def _catalyst_confidence(categories_fired: list[str], rvol: float) -> str:
     if n >= CAT_CONF["high_min_categories"] and rvol >= CAT_CONF["high_min_rvol"]:
         return "High"
 
-    high_value = {"earnings reported / today", "earnings this week",
-                  "major event", "earnings data"}
+    high_value = {
+        "earnings reported / today", "earnings this week",
+        "major event", "earnings data",
+        # new category display labels
+        "earnings beat", "earnings miss",
+        "acquisition/merger", "FDA/regulatory approval",
+        "government contract", "guidance raise",
+    }
     has_high_value = bool(high_value.intersection(set(categories_fired)))
 
     if n >= CAT_CONF["medium_min_categories"]:
@@ -390,10 +449,21 @@ def compute_catalyst_score(data: dict) -> ScoringResult:
         categories.append("volume")
         signals.append(f"volume {rvol:.1f}x avg")
 
-    # ---- Keyword scan (analyst / major event / earnings data) --------------
-    catalyst_text         = data.get("catalyst_summary") or ""
-    kw_pts, kw_labels     = _scan_keywords(catalyst_text)
-    raw                  += kw_pts
+    # ---- Keyword / category scoring ----------------------------------------
+    # Prefer pre-parsed categories from news_fetcher; fall back to keyword scan.
+    raw_cats = data.get("catalyst_category")
+    if raw_cats:
+        try:
+            parsed_cats = _json.loads(raw_cats) if isinstance(raw_cats, str) else list(raw_cats)
+            kw_pts, kw_labels = _score_from_categories(parsed_cats)
+        except Exception:
+            catalyst_text = data.get("catalyst_summary") or ""
+            kw_pts, kw_labels = _scan_keywords(catalyst_text)
+    else:
+        catalyst_text = data.get("catalyst_summary") or ""
+        kw_pts, kw_labels = _scan_keywords(catalyst_text)
+
+    raw += kw_pts
     categories.extend(kw_labels)
     signals.extend(kw_labels)
 
@@ -1080,17 +1150,30 @@ def catalyst_score_breakdown(data: dict) -> list[tuple[str, int]]:
     elif rvol >= CAT_T["rvol_moderate"]:
         breakdown.append((f"Above-avg volume ({rvol:.1f}x avg)", CAT_W["rvol_moderate"]))
 
-    # Keywords
-    catalyst_text     = data.get("catalyst_summary") or ""
-    _, kw_labels      = _scan_keywords(catalyst_text)
-    kw_pts_map        = {
-        "analyst upgrade":   CAT_W["analyst_upgrade"],
-        "analyst downgrade": CAT_W["analyst_downgrade"],
-        "major event":       CAT_W["major_event"],
-        "earnings data":     CAT_W["earnings_data"],
-    }
-    for lbl in kw_labels:
-        breakdown.append((lbl.capitalize(), kw_pts_map.get(lbl, 1)))
+    # News signal keywords / categories
+    raw_cats = data.get("catalyst_category")
+    if raw_cats:
+        try:
+            parsed_cats = _json.loads(raw_cats) if isinstance(raw_cats, str) else list(raw_cats)
+            _, kw_labels = _score_from_categories(parsed_cats)
+            for lbl in kw_labels:
+                # Look up weight by reverse-matching display label → key
+                cat_key = next((k for k, v in _CAT_DISPLAY.items() if v == lbl), None)
+                pts = _CAT_WEIGHTS.get(cat_key, 1) if cat_key else 1
+                breakdown.append((lbl.capitalize(), pts))
+        except Exception:
+            kw_labels = []
+    else:
+        catalyst_text = data.get("catalyst_summary") or ""
+        _, kw_labels  = _scan_keywords(catalyst_text)
+        kw_pts_map    = {
+            "analyst upgrade":   CAT_W["analyst_upgrade"],
+            "analyst downgrade": CAT_W["analyst_downgrade"],
+            "major event":       CAT_W["major_event"],
+            "earnings data":     CAT_W["earnings_data"],
+        }
+        for lbl in kw_labels:
+            breakdown.append((lbl.capitalize(), kw_pts_map.get(lbl, 1)))
 
     # Penalties
     no_news = (not kw_labels and not _earnings_proximity(data.get("earnings_date"))[0]

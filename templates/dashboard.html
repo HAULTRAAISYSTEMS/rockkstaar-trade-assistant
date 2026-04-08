@@ -68,7 +68,7 @@
 </section>
 
 <!-- ===== ORB SESSION STATE BANNER ===== -->
-<div class="orb-session-banner {{ orb_session.banner_class }}">
+<div id="orb-session-banner" class="orb-session-banner {{ orb_session.banner_class }}">
   <div class="orb-session-left">
     <span class="orb-session-phase-badge {{ orb_session.phase_class }}">
       {{ orb_session.phase_label }}
@@ -82,20 +82,18 @@
 </div>
 
 <!-- ===== NO-TRADE SIGNAL LOCK WARNING ===== -->
-{% if no_trade.lock_signals %}
-<div class="nt-lock-bar">
+<div id="no-trade-lock-bar" class="nt-lock-bar" {% if not no_trade.lock_signals %}style="display:none"{% endif %}>
   <span class="nt-lock-icon">🔒</span>
   <span class="nt-lock-text">Signal lock active — TRIGGERED states suppressed. Conditions do not support trading.</span>
 </div>
-{% endif %}
 
 <!-- ===== TRIGGERED ALERT ===== -->
-{% if triggered and not no_trade.lock_signals %}
+<div id="triggered-section" {% if not triggered or no_trade.lock_signals %}style="display:none"{% endif %}>
 <div class="triggered-alert">
   <span class="triggered-alert-label">⚡ TRIGGERED NOW</span>
   <div class="triggered-alert-tickers">
     {% for s in triggered %}
-    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="triggered-alert-chip {% if s.freshness == 'Fresh Breakout' %}chip-fresh{% endif %}">
+    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="triggered-alert-chip {% if s.freshness_class == 'fresh-breakout' %}chip-fresh{% elif s.freshness_class == 'fresh-active' %}chip-active{% elif s.freshness_class == 'fresh-late' %}chip-stale{% endif %}">
       <span class="triggered-chip-ticker">{{ s.ticker }}</span>
       <span class="triggered-chip-gap {{ s.gap_class }}">{{ s.gap_display }}</span>
       {% if s.freshness %}
@@ -107,7 +105,7 @@
   </div>
   <span class="triggered-alert-hint">Entry conditions met — act at the open</span>
 </div>
-{% endif %}
+</div>
 
 <!-- ===== SUMMARY CARDS ===== -->
 {% if summary and (summary.best_gapper or summary.strongest_catalyst) %}
@@ -167,7 +165,7 @@
   <h2 class="section-title">⚡ Top 5 In Play</h2>
   <div class="top5-grid">
     {% for s in top5 %}
-    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="top5-card {{ s.score_class }}{% if s.exec_state == 'TRIGGERED' %} top5-triggered{% endif %}">
+    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="top5-card {{ s.score_class }}{% if s.exec_state == 'TRIGGERED' %} top5-triggered{% endif %}" data-ticker="{{ s.ticker }}">
       <div class="top5-header">
         <div class="top5-ticker">{{ s.ticker }}</div>
         <span class="exec-badge exec-badge-sm {{ s.exec_class }}">{{ s.exec_state or 'WAIT' }}</span>
@@ -332,6 +330,7 @@
       <tbody>
         {% for s in ranked %}
         <tr class="row-{{ s.score_class }}{% if s.exec_state == 'TRIGGERED' %} row-triggered{% endif %}"
+            data-ticker="{{ s.ticker }}"
             onclick="window.location='{{ url_for('stock_detail', ticker=s.ticker) }}'">
 
           <td class="rank-cell">{{ loop.index }}</td>
@@ -360,22 +359,20 @@
           </td>
 
           <td class="state-cell">
-            <span class="exec-badge {{ s.exec_class }}">{{ s.exec_state or 'WAIT' }}</span>
-            {% if s.freshness %}
-            <span class="freshness-badge freshness-badge-sm {{ s.freshness_class }}">{{ s.freshness }}</span>
-            {% endif %}
+            <span class="exec-badge {{ s.exec_class }}" data-field="exec_badge">{{ s.exec_state or 'WAIT' }}</span>
+            <span class="freshness-badge freshness-badge-sm {{ s.freshness_class }}" data-field="freshness_badge" {% if not s.freshness %}style="display:none"{% endif %}>{{ s.freshness or '' }}</span>
           </td>
 
-          <td class="price-cell">${{ "%.2f"|format(s.current_price) }}</td>
+          <td class="price-cell" data-field="price">${{ "%.2f"|format(s.current_price) }}</td>
 
-          <td class="gap-cell {{ s.gap_class }}">{{ s.gap_display }}</td>
+          <td class="gap-cell {{ s.gap_class }}" data-field="gap">{{ s.gap_display }}</td>
 
           <td class="{{ 'rvol-hot' if s.rel_volume >= 2 else '' }}">
             {{ "%.1f"|format(s.rel_volume) }}x
           </td>
 
           <!-- Momentum score -->
-          <td title="{{ s.momentum_reason or '' }}">
+          <td title="{{ s.momentum_reason or '' }}" data-field="mom">
             {% if s.momentum_score %}
               {% if s.momentum_score >= 8 %}
                 <span class="score-badge-inline score-badge-elite {{ s.mom_score_class }}">{{ s.momentum_score }}</span>
@@ -393,7 +390,7 @@
           </td>
 
           <!-- ORB Levels + status -->
-          <td class="orb-levels-cell">
+          <td class="orb-levels-cell" data-field="orb_levels">
             {% if s.orb_phase == 'pre_market' %}
               <span class="orb-phase-badge orbp-pre" title="Waiting for 9:30 AM ET market open">⏳ Pre-Mkt</span>
             {% elif s.orb_high and s.orb_low %}
@@ -413,22 +410,22 @@
           </td>
 
           <!-- Order Block -->
-          <td><span class="signal-badge {{ s.ob_class }}">{{ s.order_block or 'Neutral' }}</span></td>
+          <td><span class="signal-badge {{ s.ob_class }}" data-field="ob_badge">{{ s.order_block or 'Neutral' }}</span></td>
 
           <!-- Entry Quality -->
-          <td><span class="signal-badge {{ s.entry_class }}">{{ s.entry_quality or 'Okay' }}</span></td>
+          <td><span class="signal-badge {{ s.entry_class }}" data-field="entry_badge">{{ s.entry_quality or 'Okay' }}</span></td>
 
           <td><span class="bias-tag {{ s.bias_class }}">{{ s.trade_bias }}</span></td>
 
           <td>
-            <span class="setup-pill {{ s.setup_type_class }}">{{ s.setup_type or "—" }}</span>
+            <span class="setup-pill {{ s.setup_type_class }}" data-field="setup_type">{{ s.setup_type or "—" }}</span>
             {% if s.setup_type == 'Momentum Runner' %}
             <br><span class="mr-table-chip" title="{{ s.entry_note }}">⚠ Reduced Size</span>
             {% endif %}
           </td>
 
           <!-- Catalyst score -->
-          <td title="{{ s.catalyst_reason or '' }}">
+          <td title="{{ s.catalyst_reason or '' }}" data-field="cat_score">
             {% if s.catalyst_score >= 8 %}
               <span class="score-badge-inline score-badge-elite {{ s.cat_score_class }}">{{ s.catalyst_score }}</span>
             {% else %}
@@ -442,7 +439,7 @@
           </td>
 
           <!-- Final Setup score -->
-          <td title="{{ s.setup_reason or '' }}">
+          <td title="{{ s.setup_reason or '' }}" data-field="setup_score">
             {% if s.setup_score >= 8 %}
               <span class="score-badge-inline score-badge-elite {{ s.score_class }}">{{ s.setup_score }}</span>
             {% else %}
@@ -511,5 +508,287 @@ function toggleWlPanel() {
   const p = document.getElementById('wl-manage-panel');
   p.style.display = p.style.display === 'none' ? '' : 'none';
 }
+
+// ===========================================================================
+// Dashboard Live Update
+// ===========================================================================
+
+const ORB_LABELS = {
+  ABOVE: '▲ Above', NEAR_HIGH: '↑ Near High', INSIDE: 'Inside',
+  NEAR_LOW: '↓ Near Low', BELOW: '▼ Below', NO_ORB: '—'
+};
+
+function updateTriggeredSection(triggered, noTrade) {
+  const section = document.getElementById('triggered-section');
+  if (!section) return;
+  if (!triggered || triggered.length === 0 || noTrade.lock_signals) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+  const tickers = section.querySelector('.triggered-alert-tickers');
+  if (!tickers) return;
+  const _chipClass = fc => {
+    if (fc === 'fresh-breakout') return 'chip-fresh';
+    if (fc === 'fresh-active')   return 'chip-active';
+    if (fc === 'fresh-late')     return 'chip-stale';
+    return '';
+  };
+  tickers.innerHTML = triggered.map(s =>
+    `<a href="/stock/${s.ticker}" class="triggered-alert-chip ${_chipClass(s.freshness_class)}">
+      <span class="triggered-chip-ticker">${s.ticker}</span>
+      <span class="triggered-chip-gap ${s.gap_class}">${s.gap_display}</span>
+      ${s.freshness ? `<span class="freshness-badge ${s.freshness_class}">${s.freshness}</span>` : ''}
+      <span class="triggered-chip-setup">${s.setup_type || '—'}</span>
+    </a>`
+  ).join('');
+}
+
+function updateOrbBanner(orb) {
+  const banner = document.getElementById('orb-session-banner');
+  if (!banner) return;
+  banner.className = 'orb-session-banner ' + orb.banner_class;
+  const phase = banner.querySelector('.orb-session-phase-badge');
+  if (phase) { phase.className = 'orb-session-phase-badge ' + orb.phase_class; phase.textContent = orb.phase_label; }
+  const sub = banner.querySelector('.orb-session-sublabel');
+  if (sub) sub.textContent = orb.sub_label;
+  const action = banner.querySelector('.orb-session-action');
+  if (action) { action.className = 'orb-session-action ' + orb.action_class; action.textContent = orb.action; }
+}
+
+function updateNoTradeLock(noTrade) {
+  const bar = document.getElementById('no-trade-lock-bar');
+  if (bar) bar.style.display = noTrade.lock_signals ? '' : 'none';
+}
+
+function renderOrbLevels(s) {
+  if (s.orb_phase === 'pre_market')
+    return `<span class="orb-phase-badge orbp-pre" title="Waiting for 9:30 AM ET market open">⏳ Pre-Mkt</span>`;
+  if (s.orb_high && s.orb_low) {
+    const label = ORB_LABELS[s.orb_status] || '—';
+    let html = `<span class="orbs-badge ${s.orb_status_class}">${label}</span>`;
+    html += `<div class="orb-levels-sub">H: $${s.orb_high.toFixed(2)} · L: $${s.orb_low.toFixed(2)}`;
+    if (s.orb_phase === 'forming') html += ` <span class="orb-phase-badge orbp-forming">Forming</span>`;
+    html += `</div>`;
+    return html;
+  }
+  if (s.orb_phase === 'forming') return `<span class="orb-phase-badge orbp-forming">Forming…</span>`;
+  return `<span class="text-dim">—</span>`;
+}
+
+function renderScoreCell(score, scoreClass) {
+  if (score == null) return `<span class="text-muted">—</span>`;
+  if (score >= 8)
+    return `<span class="score-badge-inline score-badge-elite ${scoreClass}">${score}</span>`;
+  return `<div class="score-bar-wrap"><span class="score-num ${scoreClass}">${score}</span><div class="score-bar"><div class="score-fill ${scoreClass}" style="width:${score*10}%"></div></div></div>`;
+}
+
+function updateTableRow(s) {
+  const row = document.querySelector(`tr[data-ticker="${s.ticker}"]`);
+  if (!row) return;
+
+  const execBadge = row.querySelector('[data-field="exec_badge"]');
+  if (execBadge) { execBadge.className = 'exec-badge ' + s.exec_class; execBadge.textContent = s.exec_state || 'WAIT'; }
+
+  const freshBadge = row.querySelector('[data-field="freshness_badge"]');
+  if (freshBadge) {
+    if (s.freshness) {
+      freshBadge.className = 'freshness-badge freshness-badge-sm ' + s.freshness_class;
+      freshBadge.textContent = s.freshness;
+      freshBadge.style.display = '';
+    } else {
+      freshBadge.style.display = 'none';
+    }
+  }
+
+  const priceCell = row.querySelector('[data-field="price"]');
+  if (priceCell && s.current_price != null) priceCell.textContent = '$' + s.current_price.toFixed(2);
+
+  const gapCell = row.querySelector('[data-field="gap"]');
+  if (gapCell) { gapCell.className = 'gap-cell ' + s.gap_class; gapCell.textContent = s.gap_display; }
+
+  const momCell = row.querySelector('[data-field="mom"]');
+  if (momCell) momCell.innerHTML = renderScoreCell(s.momentum_score, s.mom_score_class);
+
+  const orbCell = row.querySelector('[data-field="orb_levels"]');
+  if (orbCell) orbCell.innerHTML = renderOrbLevels(s);
+
+  const obBadge = row.querySelector('[data-field="ob_badge"]');
+  if (obBadge) { obBadge.className = 'signal-badge ' + s.ob_class; obBadge.textContent = s.order_block || 'Neutral'; }
+
+  const entryBadge = row.querySelector('[data-field="entry_badge"]');
+  if (entryBadge) { entryBadge.className = 'signal-badge ' + s.entry_class; entryBadge.textContent = s.entry_quality || 'Okay'; }
+
+  const setupPill = row.querySelector('[data-field="setup_type"]');
+  if (setupPill) { setupPill.className = 'setup-pill ' + s.setup_type_class; setupPill.textContent = s.setup_type || '—'; }
+
+  const catCell = row.querySelector('[data-field="cat_score"]');
+  if (catCell) catCell.innerHTML = renderScoreCell(s.catalyst_score, s.cat_score_class);
+
+  const setupCell = row.querySelector('[data-field="setup_score"]');
+  if (setupCell) setupCell.innerHTML = renderScoreCell(s.setup_score, s.score_class);
+
+  // Row-level state classes
+  row.classList.toggle('row-triggered', s.exec_state === 'TRIGGERED');
+  ['row-strong','row-moderate','row-weak','row-neutral'].forEach(c => row.classList.remove(c));
+  if (s.score_class) row.classList.add('row-' + s.score_class);
+
+  // Visual priority for triggered rows based on freshness
+  const _priorityClasses = ['row-priority-fresh','row-priority-active','row-priority-stale','row-priority-premarket'];
+  _priorityClasses.forEach(c => row.classList.remove(c));
+  if (s.exec_state === 'TRIGGERED') {
+    const fc = s.freshness_class || '';
+    if (fc === 'fresh-breakout')  row.classList.add('row-priority-fresh');
+    else if (fc === 'fresh-active') row.classList.add('row-priority-active');
+    else if (fc === 'fresh-late')   row.classList.add('row-priority-stale');
+    else if (fc === 'fresh-premarket') row.classList.add('row-priority-premarket');
+    else row.classList.add('row-priority-fresh');  // default for newly triggered
+  }
+}
+
+function updateTop5Card(s) {
+  const card = document.querySelector(`.top5-card[data-ticker="${s.ticker}"]`);
+  if (!card) return;
+  const priceEl = card.querySelector('.top5-price');
+  if (priceEl && s.current_price != null) priceEl.textContent = '$' + s.current_price.toFixed(2);
+  const execBadge = card.querySelector('.exec-badge');
+  if (execBadge) { execBadge.className = 'exec-badge exec-badge-sm ' + s.exec_class; execBadge.textContent = s.exec_state || 'WAIT'; }
+  const gapEl = card.querySelector('.top5-gap');
+  if (gapEl) { gapEl.className = 'top5-gap ' + s.gap_class; gapEl.textContent = s.gap_display; }
+  card.classList.toggle('top5-triggered', s.exec_state === 'TRIGGERED');
+
+  // Visual priority for triggered top-5 cards
+  ['top5-priority-fresh','top5-priority-active','top5-priority-stale'].forEach(c => card.classList.remove(c));
+  if (s.exec_state === 'TRIGGERED') {
+    const fc = s.freshness_class || '';
+    if (fc === 'fresh-breakout')    card.classList.add('top5-priority-fresh');
+    else if (fc === 'fresh-active') card.classList.add('top5-priority-active');
+    else if (fc === 'fresh-late')   card.classList.add('top5-priority-stale');
+    else                             card.classList.add('top5-priority-fresh');
+  }
+}
+
+// ===========================================================================
+// Live Trigger Alert Logic
+// ===========================================================================
+
+/** Determine which type of alert badge to show based on stock data. */
+const ALERT_TYPE_LABEL = {
+  "ORB Breakout":      "⚡ ORB Breakout",
+  "VWAP Reclaim":      "↑ VWAP Reclaim",
+  "Momentum Runner":   "🚀 Mom Runner",
+  "Breakdown":         "↓ Breakdown",
+  "Momentum Breakout": "⚡ Momentum",
+  "Alert":             "⚡ Triggered",
+};
+
+/**
+ * Mark a row as freshly triggered — glowing border, pinned badge, flash animation.
+ * Badge auto-removes after 5 minutes.
+ */
+function stampFreshTrigger(ticker, alertType) {
+  const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
+  if (!row) return;
+
+  // Remove any existing fresh-trigger badge so it doesn't double-stack
+  const old = row.querySelector('.fresh-trigger-badge');
+  if (old) old.remove();
+
+  // Add flash animation class; remove it after 3 s so it can re-fire next time
+  row.classList.remove('row-fresh-trigger');
+  // Force reflow so the animation re-plays
+  void row.offsetWidth;
+  row.classList.add('row-fresh-trigger');
+  setTimeout(() => row.classList.remove('row-fresh-trigger'), 4000);
+
+  // Insert "Fresh Trigger" type badge into the state cell
+  const stateCell = row.querySelector('.state-cell');
+  if (stateCell) {
+    const badge = document.createElement('span');
+    badge.className     = 'fresh-trigger-badge alert-type-' + (alertType || 'Alert').replace(/\s+/g, '-').toLowerCase();
+    badge.textContent   = ALERT_TYPE_LABEL[alertType] || '⚡ Triggered';
+    badge.title         = alertType;
+    stateCell.appendChild(badge);
+    // Auto-expire after 5 minutes
+    setTimeout(() => badge.remove(), 300000);
+  }
+}
+
+/**
+ * Physically move TRIGGERED rows to the top of the watchlist tbody,
+ * preserving their original relative order.  Session-fresh triggers
+ * come first within the triggered group.
+ */
+function pinTriggeredRowsToTop(ranked, freshTickers) {
+  const tbody = document.querySelector('.watchlist-table tbody');
+  if (!tbody) return;
+
+  // Build ordered list: fresh triggers → other triggered → rest (ranked order)
+  const freshSet     = new Set(freshTickers);
+  const triggeredSet = new Set(
+    ranked.filter(s => s.exec_state === 'TRIGGERED').map(s => s.ticker)
+  );
+
+  const freshGroup     = ranked.filter(s => freshSet.has(s.ticker));
+  const triggeredGroup = ranked.filter(s => triggeredSet.has(s.ticker) && !freshSet.has(s.ticker));
+  const restGroup      = ranked.filter(s => !triggeredSet.has(s.ticker));
+
+  [...freshGroup, ...triggeredGroup, ...restGroup].forEach(s => {
+    const row = tbody.querySelector(`tr[data-ticker="${s.ticker}"]`);
+    if (row) tbody.appendChild(row);
+  });
+}
+
+/** Fire all alerts for a batch of newly triggered stocks. */
+function fireNewTriggerAlerts(newTriggers) {
+  if (!newTriggers.length) return;
+  const freshTickers = newTriggers.map(s => s.ticker);
+
+  // Play sound for the highest-priority alert type in the batch
+  const firstType = getAlertType(newTriggers[0]);
+  playAlertSound(firstType);
+
+  newTriggers.forEach(s => {
+    const alertType = getAlertType(s);
+    showTriggerToast(s, alertType);
+    stampFreshTrigger(s.ticker, alertType);
+  });
+
+  return freshTickers;
+}
+
+
+async function dashboardRefresh() {
+  try {
+    const resp = await fetch('/api/dashboard');
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    // Detect state changes BEFORE updating DOM (so prev states are still accurate)
+    const newTriggers = detectNewTriggers(data.ranked);
+
+    updateOrbBanner(data.orb_session);
+    updateNoTradeLock(data.no_trade);
+    updateTriggeredSection(data.triggered, data.no_trade);
+    data.ranked.forEach(updateTableRow);
+    data.top5.forEach(updateTop5Card);
+
+    // Fire alerts and reorder table after DOM fields are updated
+    if (newTriggers.length) {
+      const freshTickers = fireNewTriggerAlerts(newTriggers);
+      pinTriggeredRowsToTop(data.ranked, freshTickers);
+    } else {
+      // Keep triggered rows at top on every refresh even without new alerts
+      pinTriggeredRowsToTop(data.ranked, []);
+    }
+
+    window._arSetLastUpdated(data.server_time);
+  } catch (e) {
+    console.warn('Dashboard refresh error:', e);
+  }
+}
+
+// Register this page's refresh function with the shared auto-refresh system
+window._arRefreshFn = dashboardRefresh;
 </script>
 {% endblock %}

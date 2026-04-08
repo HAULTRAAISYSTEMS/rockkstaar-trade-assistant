@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}Rockkstaar Trade Assistant{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
 </head>
 <body>
 
@@ -14,10 +15,14 @@
       <span class="brand-icon">◈</span> ROCKKSTAAR
     </a>
     <div class="nav-links">
-      <a href="{{ url_for('dashboard') }}" class="nav-link {% if request.endpoint == 'dashboard' %}nav-link-active{% endif %}">Dashboard</a>
+      <a href="{{ url_for('dashboard') }}"  class="nav-link {% if request.endpoint == 'dashboard' %}nav-link-active{% endif %}">Dashboard</a>
+      <a href="{{ url_for('quick_mode') }}" class="nav-link nav-link-quick {% if request.endpoint == 'quick_mode' %}nav-link-active{% endif %}" title="Mobile quick view">⚡ Quick</a>
       <a href="{{ url_for('journal') }}"   class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}">Journal</a>
     </div>
     <div class="nav-actions">
+      <span id="ar-last-updated" class="ar-last-updated"></span>
+      <button id="alert-sound-toggle" class="btn-ar-toggle ar-on" onclick="toggleAlertSound()" title="Sound alerts for new triggers">🔔 Sound ON</button>
+      <button id="ar-toggle" class="btn-ar-toggle ar-on" onclick="toggleAutoRefresh()" title="Auto-refresh every 15s during market hours">⟳ Auto ON</button>
       <form action="{{ url_for('refresh_all') }}" method="POST" style="display:inline;">
         <button type="submit" class="btn btn-refresh">⟳ Refresh All</button>
       </form>

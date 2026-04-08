@@ -90,6 +90,28 @@ a { color: inherit; text-decoration: none; }
   color: var(--text-dim);
   border: 1px solid var(--border);
 }
+
+/* ---- Auto-Refresh Toggle ---- */
+.btn-ar-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: background 0.15s, color 0.15s;
+}
+.btn-ar-toggle.ar-on  { background: rgba(34,197,94,0.12); color: var(--green); border-color: var(--green-dim); }
+.btn-ar-toggle.ar-off { background: var(--bg3); color: var(--text-muted); }
+.btn-ar-toggle:hover  { opacity: 0.85; }
+
+.ar-last-updated {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
 .btn-add {
   background: var(--accent);
   color: #fff;
@@ -2704,4 +2726,303 @@ a { color: inherit; text-decoration: none; }
   .nt-panel { padding: 16px; gap: 16px; }
   .nt-rules  { flex-direction: column; }
   .nt-verdict { font-size: 1rem; }
+}
+
+
+/* =========================================================
+   Live Trigger Alert System
+   ========================================================= */
+
+/* ---- Row flash animation on new trigger ---- */
+@keyframes triggerFlash {
+  0%   { box-shadow: none; background: var(--bg2); }
+  15%  { box-shadow: 0 0 0 3px rgba(239,68,68,0.7) inset; background: rgba(239,68,68,0.18); }
+  45%  { box-shadow: 0 0 0 3px rgba(239,68,68,0.5) inset; background: rgba(239,68,68,0.12); }
+  70%  { box-shadow: 0 0 0 2px rgba(239,68,68,0.3) inset; background: rgba(239,68,68,0.06); }
+  100% { box-shadow: none; background: var(--bg2); }
+}
+
+.row-fresh-trigger {
+  animation: triggerFlash 4s ease forwards;
+  position: relative;
+  z-index: 2;
+}
+
+/* ---- Fresh-trigger badge in state cell ---- */
+.fresh-trigger-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  margin-top: 4px;
+  white-space: nowrap;
+  background: rgba(239,68,68,0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239,68,68,0.3);
+  animation: badgePop 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards;
+}
+.fresh-trigger-badge.alert-type-orb-breakout      { background: rgba(34,197,94,0.15);  color: #22c55e; border-color: rgba(34,197,94,0.3); }
+.fresh-trigger-badge.alert-type-momentum-breakout { background: rgba(34,197,94,0.15);  color: #22c55e; border-color: rgba(34,197,94,0.3); }
+.fresh-trigger-badge.alert-type-vwap-reclaim      { background: rgba(59,130,246,0.15); color: #3b82f6; border-color: rgba(59,130,246,0.3); }
+.fresh-trigger-badge.alert-type-mom-runner,
+.fresh-trigger-badge.alert-type-momentum-runner   { background: rgba(249,115,22,0.15); color: #f97316; border-color: rgba(249,115,22,0.3); }
+.fresh-trigger-badge.alert-type-breakdown         { background: rgba(239,68,68,0.15);  color: #ef4444; border-color: rgba(239,68,68,0.3); }
+
+@keyframes badgePop {
+  from { transform: scale(0.6); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+
+/* ---- Toast notification container ---- */
+.trigger-toast-container {
+  position: fixed;
+  top: 64px;
+  right: 16px;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+  max-width: 320px;
+  width: 100%;
+}
+
+/* ---- Individual toast ---- */
+.trigger-toast {
+  pointer-events: all;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--alert-color, #6366f1);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  overflow: hidden;
+  opacity: 0;
+  transform: translateX(110%);
+  transition: opacity 0.3s ease, transform 0.35s cubic-bezier(0.34,1.2,0.64,1);
+  width: 100%;
+}
+.trigger-toast.toast-visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.toast-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+.toast-flash     { font-size: 1.1rem; }
+.toast-ticker    { font-size: 1.05rem; font-weight: 700; color: var(--text); letter-spacing: 0.05em; }
+.toast-alert-type {
+  flex: 1;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--alert-color, #6366f1);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.toast-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0.6;
+}
+.toast-close:hover { opacity: 1; }
+
+.toast-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 12px 8px;
+}
+.toast-price { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+.toast-gap   { font-size: 0.8rem; font-weight: 600; }
+.toast-mom   { font-size: 0.75rem; color: var(--text-muted); margin-left: auto; }
+
+.toast-action {
+  display: block;
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--alert-color, #6366f1);
+  border-top: 1px solid var(--border);
+  text-decoration: none;
+  opacity: 0.85;
+  transition: opacity 0.15s, background 0.15s;
+}
+.toast-action:hover { opacity: 1; background: rgba(255,255,255,0.03); }
+
+.toast-progress {
+  height: 3px;
+  background: rgba(255,255,255,0.06);
+}
+.toast-progress-bar {
+  height: 100%;
+  width: 100%;
+  background: var(--alert-color, #6366f1);
+  opacity: 0.5;
+}
+
+/* ===========================================================================
+   Trigger Visual Priority — fresh / active / stale
+   Applied to table rows, top-5 cards, and triggered alert banner chips.
+   =========================================================================== */
+
+/* ---- Fresh Trigger (< 15 min) — bright green, pulsing border ---- */
+@keyframes freshPulse {
+  0%,100% { border-left-color: rgba(34,197,94,0.9);  background-color: rgba(34,197,94,0.07); }
+  50%      { border-left-color: rgba(34,197,94,0.4);  background-color: rgba(34,197,94,0.03); }
+}
+
+.row-priority-fresh td { background: rgba(34,197,94,0.07); }
+.row-priority-fresh td:first-child {
+  border-left: 3px solid #22c55e !important;
+  animation: freshPulse 1.4s ease-in-out infinite;
+}
+.row-priority-fresh .ticker-symbol { color: #22c55e; font-weight: 800; }
+
+/* ---- Active Trigger (15-45 min) — amber steady glow ---- */
+.row-priority-active td { background: rgba(234,179,8,0.06); }
+.row-priority-active td:first-child { border-left: 3px solid #eab308 !important; }
+.row-priority-active .ticker-symbol { color: #eab308; }
+
+/* ---- Stale Trigger (> 45 min) — faded orange, caution ---- */
+.row-priority-stale td { background: rgba(249,115,22,0.04); }
+.row-priority-stale td:first-child { border-left: 3px solid rgba(249,115,22,0.6) !important; }
+.row-priority-stale .ticker-symbol { color: #f97316; }
+
+/* ---- Premarket / no-freshness triggered ---- */
+.row-priority-premarket td { background: rgba(34,197,94,0.04); }
+.row-priority-premarket td:first-child { border-left: 3px solid rgba(34,197,94,0.4) !important; }
+
+/* ---- Top-5 card priority ---- */
+.top5-priority-fresh {
+  border: 1px solid rgba(34,197,94,0.5) !important;
+  box-shadow: 0 0 10px rgba(34,197,94,0.15), inset 0 0 20px rgba(34,197,94,0.04);
+  animation: freshPulse 1.4s ease-in-out infinite;
+}
+.top5-priority-active {
+  border: 1px solid rgba(234,179,8,0.4) !important;
+  box-shadow: 0 0 8px rgba(234,179,8,0.1);
+}
+.top5-priority-stale {
+  border: 1px solid rgba(249,115,22,0.3) !important;
+  opacity: 0.88;
+}
+
+/* ---- Triggered alert banner chip freshness ---- */
+.chip-fresh   { border-color: rgba(34,197,94,0.5)  !important; background: rgba(34,197,94,0.1)  !important; }
+.chip-active  { border-color: rgba(234,179,8,0.4)  !important; background: rgba(234,179,8,0.08) !important; }
+.chip-stale   { border-color: rgba(249,115,22,0.35) !important; background: rgba(249,115,22,0.07) !important; opacity: 0.85; }
+
+/* ===========================================================================
+   Catalyst Category Tags
+   =========================================================================== */
+
+.cat-tags-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-left: 0.6rem;
+  vertical-align: middle;
+}
+
+.cat-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.cat-tag {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  /* default neutral */
+  background: rgba(99,102,241,0.12);
+  color: #818cf8;
+  border-color: rgba(99,102,241,0.3);
+}
+
+/* High-impact positive — green */
+.cat-tag-earnings_beat,
+.cat-tag-acquisition_merger,
+.cat-tag-fda,
+.cat-tag-government_contract,
+.cat-tag-guidance_raise {
+  background: rgba(34,197,94,0.12);
+  color: #22c55e;
+  border-color: rgba(34,197,94,0.3);
+}
+
+/* Medium positive — blue */
+.cat-tag-analyst_upgrade,
+.cat-tag-partnership_deal,
+.cat-tag-product_launch {
+  background: rgba(59,130,246,0.12);
+  color: #60a5fa;
+  border-color: rgba(59,130,246,0.3);
+}
+
+/* Negative / warning — amber/red */
+.cat-tag-earnings_miss,
+.cat-tag-analyst_downgrade,
+.cat-tag-guidance_cut {
+  background: rgba(234,179,8,0.12);
+  color: #eab308;
+  border-color: rgba(234,179,8,0.3);
+}
+
+/* Risk events — red */
+.cat-tag-sec_legal {
+  background: rgba(239,68,68,0.12);
+  color: #f87171;
+  border-color: rgba(239,68,68,0.3);
+}
+
+/* ---- Catalyst reason line (inline summary) ---- */
+.cat-reason-line {
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin: 0.3rem 0 0.6rem;
+  opacity: 0.9;
+}
+
+/* ---- Headline freshness badge ---- */
+.headline-freshness-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(99,102,241,0.1);
+  color: #818cf8;
+  border: 1px solid rgba(99,102,241,0.25);
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.headline-source-row {
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.headline-source-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
 }

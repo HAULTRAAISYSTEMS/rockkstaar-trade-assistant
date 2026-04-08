@@ -1,5 +1,4 @@
-flask>=3.0.0
+Flask>=3.0.0
 yfinance>=0.2.36
 # requests>=2.31.0          # For calling REST APIs (NewsAPI, Polygon, etc.)
 # python-dotenv>=1.0.0      # For managing API keys via .env file
-gunicorn

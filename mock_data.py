@@ -8,7 +8,8 @@ falling back gracefully to the mock values when live data is unavailable.
 import json
 import random
 from datetime import datetime
-from data_fetcher import fetch_live_data, fetch_news_headlines, orb_phase_now
+from data_fetcher import fetch_live_data, orb_phase_now
+from news_fetcher import fetch_headlines, needs_refresh, CATALYST_CATEGORIES
 from scoring import (
     compute_catalyst_score, compute_momentum_score,
     compute_order_block, compute_entry_quality,
@@ -326,11 +327,23 @@ def generate_stock_data(ticker: str) -> dict:
                 "Short Bias" if gap < -3 else
                 "Neutral"
             )
-            summary, headlines = fetch_news_headlines(ticker)
-            if summary:
-                data["catalyst_summary"] = summary
-            if headlines:
-                data["news_headlines"] = headlines
+            news = fetch_headlines(ticker)
+            data["catalyst_summary"]   = news.summary
+            data["news_headlines"]     = news.headlines
+            data["catalyst_category"]  = json.dumps(news.categories)
+            data["headlines_fetched_at"] = datetime.now().isoformat()
+
+    # For all tickers (mock or unknown): fetch headlines + parse categories
+    # if we don't already have them from above.
+    if not data.get("headlines_fetched_at"):
+        news = fetch_headlines(ticker)
+        # Only override catalyst_summary if the template doesn't have a curated one
+        if not data.get("catalyst_summary") or data.get("catalyst_summary") == news.summary:
+            data["catalyst_summary"] = news.summary
+        if news.headlines and news.headlines != ["No headlines available — set FINNHUB_API_KEY, NEWS_API_KEY, or POLYGON_API_KEY for live news."]:
+            data["news_headlines"] = news.headlines
+        data["catalyst_category"]    = json.dumps(news.categories)
+        data["headlines_fetched_at"] = datetime.now().isoformat()
 
     # Ensure live price structure fields always exist (set to False/None when
     # intraday fetch failed or market is pre-open — scoring handles gracefully)
@@ -438,10 +451,149 @@ def generate_stock_data(ticker: str) -> dict:
         data["entry_note"]    = None
         data["position_size"] = "normal"
 
-    # Serialize headlines list to JSON string for SQLite storage
+    # Serialize list fields to JSON string for SQLite storage
     data["news_headlines"] = json.dumps(data.get("news_headlines", []))
-    data["last_updated"]   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(data.get("catalyst_category"), list):
+        data["catalyst_category"] = json.dumps(data["catalyst_category"])
+    data.setdefault("catalyst_category", "[]")
+    data.setdefault("headlines_fetched_at", None)
+    data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    return data
+
+
+def live_refresh_stock(ticker: str, existing: dict) -> dict:
+    """
+    Re-evaluate exec_state and live-changing scores with fresh market data.
+
+    Price/volume/ORB/structure: refreshed on every call.
+    Catalyst/headlines: refreshed when headlines_fetched_at is > HEADLINE_REFRESH_MINUTES old
+    (or never fetched). This means headlines update automatically ~every 5 minutes
+    during market hours without the user pressing Refresh All.
+
+    Returns an updated copy of the stock dict.
+    Does NOT persist to the database — caller is responsible for that.
+    """
+    ticker = ticker.upper().strip()
+    data   = dict(existing)          # work on a copy
+
+    # ---- Headline / catalyst refresh (time-gated) ----------------------------
+    if needs_refresh(data.get("headlines_fetched_at")):
+        news = fetch_headlines(ticker)
+        data["catalyst_summary"]     = news.summary
+        data["news_headlines"]       = news.headlines   # list; serialized later by DB layer
+        data["catalyst_category"]    = json.dumps(news.categories)
+        data["headlines_fetched_at"] = datetime.now().isoformat()
+        # Re-score catalyst with fresh category data
+        cat = compute_catalyst_score(data)
+        data["catalyst_score"]      = cat.score
+        data["catalyst_reason"]     = cat.explanation
+        data["catalyst_confidence"] = cat.confidence
+
+    live = fetch_live_data(ticker)
+    if live:
+        _live_fields = [
+            "current_price", "prev_close", "gap_pct", "prev_close_date",
+            "premarket_high", "premarket_low",
+            "prev_day_high", "prev_day_low",
+            "avg_volume", "rel_volume",
+            "vwap", "momentum_breakout", "candles_above_orb",
+            "orb_hold", "trend_structure", "higher_highs", "higher_lows",
+            "strong_candle_bodies", "price_above_vwap",
+        ]
+        for field in _live_fields:
+            if live.get(field) is not None:
+                data[field] = live[field]
+
+        live_phase = live.get("orb_phase")
+        if live_phase:
+            data["orb_phase"] = live_phase
+
+        # ORB levels: respect phase gating
+        if data.get("orb_phase") == "pre_market":
+            data["orb_high"] = None
+            data["orb_low"]  = None
+        elif data.get("orb_phase") in ("forming", "locked"):
+            if live.get("orb_high") is not None:
+                data["orb_high"] = live["orb_high"]
+            if live.get("orb_low") is not None:
+                data["orb_low"] = live["orb_low"]
+
+    # Ensure structure signal defaults
+    data.setdefault("vwap",                None)
+    data.setdefault("momentum_breakout",   False)
+    data.setdefault("candles_above_orb",   0)
+    data.setdefault("orb_hold",            False)
+    data.setdefault("trend_structure",     False)
+    data.setdefault("higher_highs",        False)
+    data.setdefault("higher_lows",         False)
+    data.setdefault("strong_candle_bodies", False)
+    data.setdefault("price_above_vwap",    False)
+
+    # Re-derive structure momentum score + momentum_runner flag
+    structure_score = (
+        (MOM_W["orb_hold"]          if data.get("orb_hold")             else 0)
+        + (MOM_W["trend_structure"] if data.get("trend_structure")      else 0)
+        + (MOM_W["strong_bodies"]   if data.get("strong_candle_bodies") else 0)
+    )
+    data["structure_momentum_score"] = structure_score
+    data["momentum_runner"] = (
+        structure_score >= MOM_T["structure_threshold"]
+        and not data.get("momentum_breakout", False)
+    )
+
+    # Re-run scoring path that depends on live price data
+    mom = compute_momentum_score(data)
+    data["momentum_score"]      = mom.score
+    data["momentum_reason"]     = mom.explanation
+    data["momentum_confidence"] = mom.confidence
+
+    data["order_block"]  = compute_order_block(data)
+    data["entry_quality"] = compute_entry_quality(data)
+    data["orb_status"]   = compute_orb_price_status(data)
+    data["orb_ready"]    = compute_orb_readiness(data)
+    data["exec_state"]   = compute_exec_state(data)
+
+    setup = compute_final_setup_score(data)
+    data["setup_score"]      = setup.score
+    data["setup_reason"]     = setup.explanation
+    data["setup_confidence"] = setup.confidence
+    data["setup_type"]       = compute_setup_type(data)
+
+    # Entry note + position size (depends on setup_type)
+    if data["setup_type"] == "Momentum Runner":
+        rvol        = data.get("rel_volume") or 0
+        above_vwap  = bool(data.get("price_above_vwap"))
+        rvol_ok     = rvol >= MOM_T["rvol_min"]
+        if above_vwap and rvol_ok:
+            data["entry_note"] = (
+                "Trend strength confirmed — extended entry, wait for pullback "
+                "to VWAP or ORB high, or use reduced size."
+            )
+        elif not rvol_ok and above_vwap:
+            data["entry_note"] = (
+                "Low volume — structure trend confirmed but participation is weak. "
+                "Wait for volume to confirm before entry."
+            )
+        elif not above_vwap:
+            data["entry_note"] = (
+                "Below VWAP — ORB hold detected, wait for VWAP reclaim "
+                "before adding. Use reduced size if entering early."
+            )
+        else:
+            data["entry_note"] = (
+                "Extended entry — wait for pullback to VWAP or ORB high. "
+                "Use reduced position size."
+            )
+        data["position_size"] = "reduced"
+    elif data["setup_type"] == "Momentum Breakout":
+        data["entry_note"]    = None
+        data["position_size"] = "normal"
+    else:
+        data["entry_note"]    = None
+        data["position_size"] = "normal"
+
+    data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return data
 
 
