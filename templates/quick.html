@@ -49,7 +49,7 @@
         <div class="qm-ticker-row">
           <span class="qm-ticker">{{ s.ticker }}</span>
           <div class="qm-price-block">
-            <span class="qm-price" id="qmp-price-{{ s.ticker }}">${{ "%.2f"|format(s.current_price) }}</span>
+            <span class="qm-price" id="qmp-price-{{ s.ticker }}">${{ "%.2f"|format(s.current_price) if s.current_price is not none else "N/A" }}</span>
             <span class="qm-gap {{ s.gap_class }}" id="qmp-gap-{{ s.ticker }}">{{ s.gap_display }}</span>
           </div>
         </div>

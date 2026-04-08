@@ -64,6 +64,14 @@ def fetch_live_data(ticker: str) -> dict | None:
     if not _YF_AVAILABLE:
         return None
 
+    def _f(val, cast=float, default=None):
+        """Safely cast val; return default on None, zero (for prices), or error."""
+        try:
+            v = cast(val)
+            return v if v == v else default   # NaN guard (NaN != NaN)
+        except Exception:
+            return default
+
     try:
         t = yf.Ticker(ticker)
         result: dict = {}
@@ -77,17 +85,20 @@ def fetch_live_data(ticker: str) -> dict | None:
         avg_volume    = None
 
         try:
-            current_price = float(fi.last_price) if fi.last_price else None
+            v = _f(fi.last_price)
+            current_price = v if v and v > 0 else None
         except Exception:
             pass
 
         try:
-            prev_close = float(fi.previous_close) if fi.previous_close else None
+            v = _f(fi.previous_close)
+            prev_close = v if v and v > 0 else None
         except Exception:
             pass
 
         try:
-            avg_volume = int(fi.three_month_average_volume) if fi.three_month_average_volume else None
+            v = _f(fi.three_month_average_volume, cast=int)
+            avg_volume = v if v and v > 0 else None
         except Exception:
             pass
 

@@ -138,7 +138,7 @@
     <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="summary-card summary-volume">
       <div class="summary-card-label">Highest Volume</div>
       <div class="summary-card-ticker">{{ s.ticker }}</div>
-      <div class="summary-card-value">{{ "%.1f"|format(s.rel_volume) }}x</div>
+      <div class="summary-card-value">{{ "%.1f"|format(s.rel_volume) if s.rel_volume is not none else "N/A" }}x</div>
       <div class="summary-card-sub">relative volume</div>
     </a>
     {% endif %}
@@ -173,7 +173,7 @@
         <span class="freshness-badge {{ s.freshness_class }}">{{ s.freshness }}</span>
         {% endif %}
       </div>
-      <div class="top5-price">${{ "%.2f"|format(s.current_price) }}</div>
+      <div class="top5-price">${{ "%.2f"|format(s.current_price) if s.current_price is not none else "N/A" }}</div>
       <div class="top5-gap {{ s.gap_class }}">{{ s.gap_display }}</div>
       <div class="top5-meta">
         <span class="top5-score">Mom {{ s.momentum_score or '—' }}/10</span>
@@ -276,7 +276,7 @@
         <span class="secondary-tier-badge {{ s.secondary_tier_class }}">{{ s.secondary_tier }}</span>
         <span class="exec-badge exec-badge-sm {{ s.exec_class }}">{{ s.exec_state or 'WAIT' }}</span>
       </div>
-      <div class="secondary-price">${{ "%.2f"|format(s.current_price) }}
+      <div class="secondary-price">${{ "%.2f"|format(s.current_price) if s.current_price is not none else "N/A" }}
         <span class="secondary-gap {{ s.gap_class }}">{{ s.gap_display }}</span>
       </div>
       <div class="secondary-signals">
@@ -363,12 +363,12 @@
             <span class="freshness-badge freshness-badge-sm {{ s.freshness_class }}" data-field="freshness_badge" {% if not s.freshness %}style="display:none"{% endif %}>{{ s.freshness or '' }}</span>
           </td>
 
-          <td class="price-cell" data-field="price">${{ "%.2f"|format(s.current_price) }}</td>
+          <td class="price-cell" data-field="price">${{ "%.2f"|format(s.current_price) if s.current_price is not none else "N/A" }}</td>
 
           <td class="gap-cell {{ s.gap_class }}" data-field="gap">{{ s.gap_display }}</td>
 
-          <td class="{{ 'rvol-hot' if s.rel_volume >= 2 else '' }}">
-            {{ "%.1f"|format(s.rel_volume) }}x
+          <td class="{{ 'rvol-hot' if s.rel_volume is not none and s.rel_volume >= 2 else '' }}">
+            {{ "%.1f"|format(s.rel_volume) if s.rel_volume is not none else "N/A" }}x
           </td>
 
           <!-- Momentum score -->
@@ -426,29 +426,33 @@
 
           <!-- Catalyst score -->
           <td title="{{ s.catalyst_reason or '' }}" data-field="cat_score">
-            {% if s.catalyst_score >= 8 %}
+            {% if s.catalyst_score is not none and s.catalyst_score >= 8 %}
               <span class="score-badge-inline score-badge-elite {{ s.cat_score_class }}">{{ s.catalyst_score }}</span>
-            {% else %}
+            {% elif s.catalyst_score is not none %}
               <div class="score-bar-wrap">
                 <span class="score-num {{ s.cat_score_class }}">{{ s.catalyst_score }}</span>
                 <div class="score-bar">
                   <div class="score-fill {{ s.cat_score_class }}" style="width:{{ s.catalyst_score * 10 }}%"></div>
                 </div>
               </div>
+            {% else %}
+              <span class="text-muted">—</span>
             {% endif %}
           </td>
 
           <!-- Final Setup score -->
           <td title="{{ s.setup_reason or '' }}" data-field="setup_score">
-            {% if s.setup_score >= 8 %}
+            {% if s.setup_score is not none and s.setup_score >= 8 %}
               <span class="score-badge-inline score-badge-elite {{ s.score_class }}">{{ s.setup_score }}</span>
-            {% else %}
+            {% elif s.setup_score is not none %}
               <div class="score-bar-wrap">
                 <span class="score-num {{ s.score_class }}">{{ s.setup_score }}</span>
                 <div class="score-bar">
                   <div class="score-fill {{ s.score_class }}" style="width:{{ s.setup_score * 10 }}%"></div>
                 </div>
               </div>
+            {% else %}
+              <span class="text-muted">—</span>
             {% endif %}
           </td>
 

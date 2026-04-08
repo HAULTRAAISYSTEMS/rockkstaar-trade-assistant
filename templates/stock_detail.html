@@ -78,17 +78,17 @@
     <div class="score-strip-item">
       <div class="score-strip-label">Gap</div>
       <div id="detail-gap" class="score-big {{ stock.gap_class }}">{{ stock.gap_display }}</div>
-      <div class="score-strip-reason">vs prior close ${{ "%.2f"|format(stock.prev_close) }}</div>
+      <div class="score-strip-reason">vs prior close ${{ "%.2f"|format(stock.prev_close) if stock.prev_close is not none else "N/A" }}</div>
     </div>
 
     <div class="score-strip-divider"></div>
 
     <div class="score-strip-item">
       <div class="score-strip-label">Rel Volume</div>
-      <div id="detail-rvol" class="score-big {{ 'positive' if stock.rel_volume >= 2 else '' }}">
-        {{ "%.1f"|format(stock.rel_volume) }}<span class="score-denom">x</span>
+      <div id="detail-rvol" class="score-big {{ 'positive' if stock.rel_volume is not none and stock.rel_volume >= 2 else '' }}">
+        {{ "%.1f"|format(stock.rel_volume) if stock.rel_volume is not none else "N/A" }}<span class="score-denom">x</span>
       </div>
-      <div class="score-strip-reason">avg {{ "{:,.0f}".format(stock.avg_volume) }}</div>
+      <div class="score-strip-reason">avg {{ "{:,.0f}".format(stock.avg_volume) if stock.avg_volume is not none else "N/A" }}</div>
     </div>
 
   </div>
@@ -203,7 +203,7 @@
           <!-- Current price marker -->
           <div class="orb-viz-marker {{ stock.orb_status_class }}"
                style="left: {{ stock.orb_price_pct }}%;"
-               title="${{ '%.2f'|format(stock.current_price) }}">
+               title="${{ '%.2f'|format(stock.current_price) if stock.current_price is not none else 'N/A' }}">
           </div>
           <!-- ORB level tick marks -->
           <div class="orb-viz-tick orb-viz-tick-high" style="left: 77.8%;"
@@ -257,35 +257,35 @@
   <div class="stats-grid">
     <div class="stat-card">
       <div class="stat-label">Current Price</div>
-      <div class="stat-value" id="detail-cur-price">${{ "%.2f"|format(stock.current_price) }}</div>
+      <div class="stat-value" id="detail-cur-price">${{ "%.2f"|format(stock.current_price) if stock.current_price is not none else "N/A" }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Prev Close</div>
-      <div class="stat-value">${{ "%.2f"|format(stock.prev_close) }}</div>
+      <div class="stat-value">${{ "%.2f"|format(stock.prev_close) if stock.prev_close is not none else "N/A" }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Premarket High</div>
-      <div class="stat-value">${{ "%.2f"|format(stock.premarket_high) }}</div>
+      <div class="stat-value">${{ "%.2f"|format(stock.premarket_high) if stock.premarket_high is not none else "N/A" }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Premarket Low</div>
-      <div class="stat-value">${{ "%.2f"|format(stock.premarket_low) }}</div>
+      <div class="stat-value">${{ "%.2f"|format(stock.premarket_low) if stock.premarket_low is not none else "N/A" }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Prev Day High</div>
-      <div class="stat-value">${{ "%.2f"|format(stock.prev_day_high) }}</div>
+      <div class="stat-value">${{ "%.2f"|format(stock.prev_day_high) if stock.prev_day_high is not none else "N/A" }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Prev Day Low</div>
-      <div class="stat-value">${{ "%.2f"|format(stock.prev_day_low) }}</div>
+      <div class="stat-value">${{ "%.2f"|format(stock.prev_day_low) if stock.prev_day_low is not none else "N/A" }}</div>
     </div>
     <div class="stat-card {{ 'stat-hot' if stock.rel_volume >= 2 else '' }}">
       <div class="stat-label">Rel Volume</div>
-      <div class="stat-value">{{ "%.1f"|format(stock.rel_volume) }}x</div>
+      <div class="stat-value">{{ "%.1f"|format(stock.rel_volume) if stock.rel_volume is not none else "N/A" }}x</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Avg Volume</div>
-      <div class="stat-value">{{ "{:,.0f}".format(stock.avg_volume) }}</div>
+      <div class="stat-value">{{ "{:,.0f}".format(stock.avg_volume) if stock.avg_volume is not none else "N/A" }}</div>
     </div>
     {% if stock.earnings_date %}
     <div class="stat-card stat-earnings">

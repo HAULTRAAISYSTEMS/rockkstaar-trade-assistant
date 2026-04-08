@@ -532,6 +532,28 @@ def get_orb_session_banner() -> dict:
 
 def annotate(stock: dict) -> dict:
     """Add all display-only fields to a stock dict (non-destructive to DB fields)."""
+    # Enforce numeric defaults so templates never receive None for numeric fields.
+    # Price/volume fields default to 0.0; score fields default to 0.
+    _PRICE_DEFAULTS = {
+        "current_price":  0.0,
+        "prev_close":     0.0,
+        "gap_pct":        0.0,
+        "premarket_high": 0.0,
+        "premarket_low":  0.0,
+        "prev_day_high":  0.0,
+        "prev_day_low":   0.0,
+        "rel_volume":     0.0,
+        "avg_volume":     0,
+    }
+    _SCORE_DEFAULTS = {
+        "catalyst_score":  0,
+        "momentum_score":  0,
+        "setup_score":     0,
+    }
+    for field, default in {**_PRICE_DEFAULTS, **_SCORE_DEFAULTS}.items():
+        if stock.get(field) is None:
+            stock[field] = default
+
     stock["score_class"]           = get_score_class(stock.get("setup_score"))
     stock["cat_score_class"]       = get_score_class(stock.get("catalyst_score"))
     stock["mom_score_class"]       = get_score_class(stock.get("momentum_score"))
