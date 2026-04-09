@@ -1,7 +1,21 @@
 """
-database.py - SQLite setup and database helpers for Rockkstaar Trade Assistant
+database.py — Database helpers for Rockkstaar Trade Assistant.
+
+Supports both SQLite (local dev, DATABASE_URL not set) and
+PostgreSQL (production on Render, DATABASE_URL set).
+
+The connection wrapper in this module auto-translates:
+  - ? positional params  →  %s
+  - :name named params   →  %(name)s
+  - INSERT OR IGNORE     →  INSERT … ON CONFLICT DO NOTHING
+  - AUTOINCREMENT        →  SERIAL PRIMARY KEY  (DDL only)
+  - ADD COLUMN           →  ADD COLUMN IF NOT EXISTS  (PG only)
+
+All caller code above this module is unchanged.
 """
 
+import os
+import re
 import logging
 import sqlite3
 import json
@@ -9,14 +23,156 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# ─── Backend selection ────────────────────────────────────────────────────────
+
 DB_PATH = "rockkstaar.db"
+_DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+# Render (and Heroku) supply postgres:// but psycopg2 2.9+ requires postgresql://
+if _DATABASE_URL.startswith("postgres://"):
+    _DATABASE_URL = _DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+_USE_POSTGRES = bool(_DATABASE_URL)
+
+if _USE_POSTGRES:
+    import psycopg2
+    import psycopg2.extras
+    logger.info("DB  backend=postgresql")
+else:
+    logger.info("DB  backend=sqlite  path=%s", DB_PATH)
+
+# ─── SQL translation ──────────────────────────────────────────────────────────
+
+_INSERT_OR_IGNORE_RE = re.compile(r"\bINSERT\s+OR\s+IGNORE\b", re.IGNORECASE)
+_INSERT_START_RE     = re.compile(r"^\s*INSERT\b",              re.IGNORECASE)
 
 
-def get_db():
-    """Return a database connection with row factory for dict-like access."""
+def _adapt_sql(sql: str, params=None):
+    """Translate SQLite-style SQL and params to psycopg2 style (PG only)."""
+    if not _USE_POSTGRES:
+        return sql, params
+
+    # Named params  :name  →  %(name)s  (avoid matching :: PG cast syntax)
+    if isinstance(params, dict):
+        sql = re.sub(r"(?<![:])[:]([A-Za-z_]\w*)", r"%(\1)s", sql)
+    # Positional params  ?  →  %s
+    elif params is not None:
+        sql = sql.replace("?", "%s")
+
+    # INSERT OR IGNORE  →  INSERT … ON CONFLICT DO NOTHING
+    if _INSERT_OR_IGNORE_RE.search(sql):
+        sql = _INSERT_OR_IGNORE_RE.sub("INSERT", sql)
+        sql = sql.rstrip().rstrip(";") + "\nON CONFLICT DO NOTHING"
+    # All other INSERTs (no RETURNING yet): append RETURNING id for lastrowid
+    elif _INSERT_START_RE.match(sql) and "RETURNING" not in sql.upper():
+        sql = sql.rstrip().rstrip(";") + "\nRETURNING id"
+
+    return sql, params
+
+
+def _adapt_ddl(sql: str) -> str:
+    """Translate SQLite DDL to PostgreSQL DDL (CREATE TABLE statements)."""
+    if not _USE_POSTGRES:
+        return sql
+    sql = re.sub(
+        r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b",
+        "SERIAL PRIMARY KEY",
+        sql, flags=re.IGNORECASE,
+    )
+    return sql
+
+
+# ─── Connection wrapper ───────────────────────────────────────────────────────
+
+class _Cursor:
+    """Normalises sqlite3 / psycopg2 cursor interfaces."""
+
+    def __init__(self, raw_cursor):
+        self._c = raw_cursor
+        self._pg_lastrowid = None  # populated after RETURNING id
+
+    def fetchone(self):
+        row = self._c.fetchone()
+        if row is None:
+            return None
+        return dict(row) if _USE_POSTGRES else row  # sqlite3.Row supports both
+
+    def fetchall(self):
+        rows = self._c.fetchall()
+        return [dict(r) for r in rows] if _USE_POSTGRES else rows
+
+    @property
+    def lastrowid(self):
+        return self._pg_lastrowid if _USE_POSTGRES else self._c.lastrowid
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+
+class _Conn:
+    """Wraps sqlite3 / psycopg2 connection with a uniform execute() interface."""
+
+    def __init__(self, raw_conn):
+        self._conn = raw_conn
+
+    def execute(self, sql: str, params=None) -> _Cursor:
+        sql, params = _adapt_sql(sql, params)
+
+        if _USE_POSTGRES:
+            raw_cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        else:
+            raw_cur = self._conn.cursor()
+
+        try:
+            if params is None:
+                raw_cur.execute(sql)
+            else:
+                raw_cur.execute(sql, params)
+        except Exception:
+            # Surface errors with the translated SQL for easier debugging
+            logger.debug("DB execute failed  sql=%s", sql[:200])
+            raise
+
+        cursor = _Cursor(raw_cur)
+
+        # Pre-fetch RETURNING id result so lastrowid works for PG
+        if _USE_POSTGRES and "RETURNING id" in sql.upper():
+            try:
+                row = raw_cur.fetchone()
+                if row:
+                    cursor._pg_lastrowid = (
+                        row["id"] if isinstance(row, dict) else row[0]
+                    )
+            except Exception:
+                pass
+
+        return cursor
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
+def get_db() -> _Conn:
+    """Return a wrapped database connection (PG or SQLite based on env)."""
+    if _USE_POSTGRES:
+        try:
+            conn = psycopg2.connect(_DATABASE_URL)
+            return _Conn(conn)
+        except Exception as exc:
+            logger.error("DB  PostgreSQL connection failed: %s", exc)
+            raise
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    return conn
+    return _Conn(conn)
 
 
 DEFAULT_WATCHLISTS = ["A+ Momentum", "Secondary Watch", "Swing Watchlist", "Core"]
@@ -26,7 +182,7 @@ DEFAULT_WATCHLISTS = ["A+ Momentum", "Secondary Watch", "Swing Watchlist", "Core
 # App settings helpers
 # ---------------------------------------------------------------------------
 
-def get_setting(key: str) -> str | None:
+def get_setting(key: str):
     """Return the value for a settings key, or None if not set."""
     conn = get_db()
     row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
@@ -47,43 +203,42 @@ def set_setting(key: str, value: str):
 
 
 # ---------------------------------------------------------------------------
-# Watchlist helpers (named)
+# Schema initialisation
 # ---------------------------------------------------------------------------
-
 
 def init_db():
     """Create all tables if they don't exist, run migrations, seed defaults."""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn  # _Conn.execute() is a superset of cursor.execute()
 
     # App settings — key/value store for persistent flags (e.g. demo_seeded)
-    cursor.execute("""
+    cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS settings (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
         )
-    """)
+    """))
 
     # Legacy watchlist table — kept for migration reading only, no longer written
-    cursor.execute("""
+    cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS watchlist (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT UNIQUE NOT NULL,
             added_date TEXT NOT NULL
         )
-    """)
+    """))
 
     # Named watchlists
-    cursor.execute("""
+    cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS watchlists (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             name       TEXT UNIQUE NOT NULL,
             created_at TEXT NOT NULL
         )
-    """)
+    """))
 
     # Watchlist membership (many-to-many: watchlist ↔ ticker)
-    cursor.execute("""
+    cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS watchlist_stocks (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             watchlist_id INTEGER NOT NULL,
@@ -92,10 +247,10 @@ def init_db():
             UNIQUE(watchlist_id, ticker),
             FOREIGN KEY(watchlist_id) REFERENCES watchlists(id)
         )
-    """)
+    """))
 
     # Stock data: stores enriched data for each ticker (refreshed on demand)
-    cursor.execute("""
+    cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS stock_data (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT UNIQUE NOT NULL,
@@ -109,121 +264,130 @@ def init_db():
             avg_volume INTEGER,
             rel_volume REAL,
             catalyst_summary TEXT,
-            news_headlines TEXT,       -- JSON list of strings
+            news_headlines TEXT,
             earnings_date TEXT,
-            trade_bias TEXT,           -- Long Bias / Short Bias / Neutral / Avoid
-            catalyst_score      INTEGER,  -- 1-10, scored from catalyst signals
-            catalyst_reason     TEXT,     -- explanation string
-            catalyst_confidence TEXT,     -- High / Medium / Low
-            momentum_score      INTEGER,  -- 1-10, premarket momentum energy
-            momentum_reason     TEXT,     -- explanation string
-            momentum_confidence TEXT,     -- High / Medium / Low
-            order_block         TEXT,     -- Demand / Supply / Neutral
-            entry_quality       TEXT,     -- Perfect / Okay / Extended
-            orb_high            REAL,     -- Opening Range high (9:30-10:00)
-            orb_low             REAL,     -- Opening Range low (9:30-10:00)
-            orb_status          TEXT,     -- ABOVE / NEAR_HIGH / INSIDE / NEAR_LOW / BELOW / NO_ORB
-            orb_ready           TEXT,     -- YES / NO
-            exec_state          TEXT,     -- TRIGGERED / READY / WAIT
-            setup_score         INTEGER,  -- 1-10, final composite setup score
-            setup_reason        TEXT,     -- explanation string
-            setup_confidence    TEXT,     -- High / Medium / Low
-            setup_type          TEXT,     -- Gap and Go / ORB / VWAP Reclaim / etc.
+            trade_bias TEXT,
+            catalyst_score      INTEGER,
+            catalyst_reason     TEXT,
+            catalyst_confidence TEXT,
+            momentum_score      INTEGER,
+            momentum_reason     TEXT,
+            momentum_confidence TEXT,
+            order_block         TEXT,
+            entry_quality       TEXT,
+            orb_high            REAL,
+            orb_low             REAL,
+            orb_status          TEXT,
+            orb_ready           TEXT,
+            exec_state          TEXT,
+            setup_score         INTEGER,
+            setup_reason        TEXT,
+            setup_confidence    TEXT,
+            setup_type          TEXT,
             last_updated        TEXT
         )
-    """)
+    """))
 
-    # Safe migration: add any missing columns to existing databases.
-    # ALTER TABLE ... ADD COLUMN fails silently if the column already exists.
+    # Safe migration: add missing columns (IF NOT EXISTS for PG; try/except for SQLite)
     _new_columns = [
-        ("catalyst_score",      "INTEGER"),
-        ("catalyst_reason",     "TEXT"),
-        ("catalyst_confidence", "TEXT"),
-        ("momentum_score",      "INTEGER"),
-        ("momentum_reason",     "TEXT"),
-        ("momentum_confidence", "TEXT"),
-        ("order_block",         "TEXT"),
-        ("entry_quality",       "TEXT"),
-        ("orb_high",             "REAL"),
-        ("orb_low",              "REAL"),
-        ("orb_status",           "TEXT"),
-        ("orb_ready",            "TEXT"),
-        ("exec_state",           "TEXT"),
-        ("setup_score",         "INTEGER"),
-        ("setup_reason",        "TEXT"),
-        ("setup_confidence",    "TEXT"),
-        ("setup_type",          "TEXT"),
-        ("triggered_at",        "TEXT"),   # ISO timestamp when exec_state first became TRIGGERED
-        ("orb_phase",           "TEXT"),   # pre_market / forming / locked
-        ("auto_classify",       "INTEGER DEFAULT 1"),  # 1 = auto-move between default lists, 0 = manual override
-        ("classify_reason",     "TEXT"),   # human-readable explanation of current classification
-        ("prev_close_date",     "TEXT"),   # YYYY-MM-DD of the trading day prev_close was sourced from
-        ("vwap",                "REAL"),   # Session VWAP from 9:30 ET 1m bars (NULL pre-market)
-        ("momentum_breakout",   "INTEGER DEFAULT 0"),  # 1 if all 4 breakout conditions confirmed
-        ("candles_above_orb",   "INTEGER DEFAULT 0"),  # consecutive 1m closes above ORB high
-        ("momentum_runner",     "INTEGER DEFAULT 0"),  # 1 if momentum_score >= 6 and not full Breakout
-        ("entry_note",          "TEXT"),   # Trade guidance note (e.g. "Wait for pullback to VWAP")
-        ("position_size",       "TEXT"),   # "normal" | "reduced" — guidance for position sizing
-        ("orb_hold",            "INTEGER DEFAULT 0"),  # 1 if 2+ consecutive closes above ORB high
-        ("trend_structure",         "INTEGER DEFAULT 0"),  # 1 if HH + HL (no VWAP requirement)
-        ("higher_highs",            "INTEGER DEFAULT 0"),  # 1 if last 3 session bar Highs are ascending
-        ("higher_lows",             "INTEGER DEFAULT 0"),  # 1 if last 3 session bar Lows are ascending
-        ("strong_candle_bodies",    "INTEGER DEFAULT 0"),  # 1 if last 3 candles have body > 50% of range
-        ("price_above_vwap",        "INTEGER DEFAULT 0"),  # 1 if current price > session VWAP
-        ("structure_momentum_score","INTEGER DEFAULT 0"),  # orb_hold+trend_structure+bodies (0-7)
-        ("catalyst_category",      "TEXT"),               # JSON list of detected category keys
-        ("headlines_fetched_at",   "TEXT"),               # ISO timestamp of last headline fetch
+        ("catalyst_score",           "INTEGER"),
+        ("catalyst_reason",          "TEXT"),
+        ("catalyst_confidence",      "TEXT"),
+        ("momentum_score",           "INTEGER"),
+        ("momentum_reason",          "TEXT"),
+        ("momentum_confidence",      "TEXT"),
+        ("order_block",              "TEXT"),
+        ("entry_quality",            "TEXT"),
+        ("orb_high",                 "REAL"),
+        ("orb_low",                  "REAL"),
+        ("orb_status",               "TEXT"),
+        ("orb_ready",                "TEXT"),
+        ("exec_state",               "TEXT"),
+        ("setup_score",              "INTEGER"),
+        ("setup_reason",             "TEXT"),
+        ("setup_confidence",         "TEXT"),
+        ("setup_type",               "TEXT"),
+        ("triggered_at",             "TEXT"),
+        ("orb_phase",                "TEXT"),
+        ("auto_classify",            "INTEGER DEFAULT 1"),
+        ("classify_reason",          "TEXT"),
+        ("prev_close_date",          "TEXT"),
+        ("vwap",                     "REAL"),
+        ("momentum_breakout",        "INTEGER DEFAULT 0"),
+        ("candles_above_orb",        "INTEGER DEFAULT 0"),
+        ("momentum_runner",          "INTEGER DEFAULT 0"),
+        ("entry_note",               "TEXT"),
+        ("position_size",            "TEXT"),
+        ("orb_hold",                 "INTEGER DEFAULT 0"),
+        ("trend_structure",          "INTEGER DEFAULT 0"),
+        ("higher_highs",             "INTEGER DEFAULT 0"),
+        ("higher_lows",              "INTEGER DEFAULT 0"),
+        ("strong_candle_bodies",     "INTEGER DEFAULT 0"),
+        ("price_above_vwap",         "INTEGER DEFAULT 0"),
+        ("structure_momentum_score", "INTEGER DEFAULT 0"),
+        ("catalyst_category",        "TEXT"),
+        ("headlines_fetched_at",     "TEXT"),
     ]
     for col, col_type in _new_columns:
-        try:
-            cursor.execute(f"ALTER TABLE stock_data ADD COLUMN {col} {col_type}")
-        except sqlite3.OperationalError:
-            pass  # Column already exists — skip
+        if _USE_POSTGRES:
+            cursor.execute(
+                f"ALTER TABLE stock_data ADD COLUMN IF NOT EXISTS {col} {col_type}"
+            )
+        else:
+            try:
+                cursor.execute(
+                    f"ALTER TABLE stock_data ADD COLUMN {col} {col_type}"
+                )
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
     # Notes: user's trade plan notes per ticker
-    cursor.execute("""
+    cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS notes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT UNIQUE NOT NULL,
             note_text TEXT,
             updated_at TEXT
         )
-    """)
+    """))
 
     # Trade journal: one row per executed trade
-    cursor.execute("""
+    cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS journal (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker         TEXT NOT NULL,
             trade_date     TEXT NOT NULL,
-            direction      TEXT,           -- Long / Short
+            direction      TEXT,
             entry_price    REAL NOT NULL,
             exit_price     REAL NOT NULL,
-            shares         INTEGER,        -- optional position size
+            shares         INTEGER,
             setup_type     TEXT,
-            momentum_score INTEGER,        -- score at time of entry (1-10)
-            pnl_pct        REAL,           -- computed: directional % return
-            result         TEXT,           -- Win / Loss / Break Even (computed)
+            momentum_score INTEGER,
+            pnl_pct        REAL,
+            result         TEXT,
             notes          TEXT,
             created_at     TEXT
         )
-    """)
+    """))
 
     # Pre-market plans: structured trade plan fields per ticker
-    cursor.execute("""
+    cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS trade_plans (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker      TEXT UNIQUE NOT NULL,
-            plan_bias   TEXT,     -- Long / Short
-            entry_level REAL,
-            stop_loss   REAL,
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker       TEXT UNIQUE NOT NULL,
+            plan_bias    TEXT,
+            entry_level  REAL,
+            stop_loss    REAL,
             target_price REAL,
-            updated_at  TEXT
+            updated_at   TEXT
         )
-    """)
+    """))
 
-    # Seed default watchlists on first run
-    wl_count = cursor.execute("SELECT COUNT(*) FROM watchlists").fetchone()[0]
+    # Seed default watchlists on first run (use cnt alias — works in both DBs)
+    wl_count = cursor.execute(
+        "SELECT COUNT(*) AS cnt FROM watchlists"
+    ).fetchone()["cnt"]
+
     now_iso = datetime.now().isoformat()
     if wl_count == 0:
         for name in DEFAULT_WATCHLISTS:
@@ -232,20 +396,18 @@ def init_db():
                 (name, now_iso)
             )
         # Migrate legacy watchlist table data into "A+ Momentum"
-        first_id = cursor.execute("SELECT id FROM watchlists LIMIT 1").fetchone()
-        if first_id:
+        first_row = cursor.execute("SELECT id FROM watchlists LIMIT 1").fetchone()
+        if first_row:
+            first_id = first_row["id"]
             old_rows = cursor.execute(
                 "SELECT ticker, added_date FROM watchlist"
             ).fetchall()
             for row in old_rows:
-                try:
-                    cursor.execute(
-                        "INSERT OR IGNORE INTO watchlist_stocks "
-                        "(watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
-                        (first_id[0], row[0], row[1])
-                    )
-                except sqlite3.IntegrityError:
-                    pass
+                cursor.execute(
+                    "INSERT OR IGNORE INTO watchlist_stocks "
+                    "(watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
+                    (first_id, row["ticker"], row["added_date"])
+                )
 
     conn.commit()
     conn.close()
@@ -263,7 +425,7 @@ def get_all_watchlists() -> list:
     return [dict(r) for r in rows]
 
 
-def get_watchlist_by_id(wl_id: int) -> dict | None:
+def get_watchlist_by_id(wl_id: int):
     conn = get_db()
     row = conn.execute("SELECT * FROM watchlists WHERE id = ?", (wl_id,)).fetchone()
     conn.close()
@@ -316,7 +478,7 @@ def get_watchlist_stock_counts() -> dict:
     """Return {watchlist_id: count} for all watchlists."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT watchlist_id, COUNT(*) as cnt FROM watchlist_stocks GROUP BY watchlist_id"
+        "SELECT watchlist_id, COUNT(*) AS cnt FROM watchlist_stocks GROUP BY watchlist_id"
     ).fetchall()
     conn.close()
     return {r["watchlist_id"]: r["cnt"] for r in rows}
@@ -326,6 +488,15 @@ def add_ticker_to_watchlist(wl_id: int, ticker: str):
     """Add a ticker to a specific watchlist. Silently ignores duplicates."""
     conn = get_db()
     t = ticker.upper().strip()
+    # Check first to avoid cross-driver IntegrityError differences
+    existing = conn.execute(
+        "SELECT id FROM watchlist_stocks WHERE watchlist_id = ? AND ticker = ?",
+        (wl_id, t)
+    ).fetchone()
+    if existing:
+        logger.debug("DB ADD (already exists)  ticker=%s wl_id=%s", t, wl_id)
+        conn.close()
+        return
     try:
         conn.execute(
             "INSERT INTO watchlist_stocks (watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
@@ -333,8 +504,8 @@ def add_ticker_to_watchlist(wl_id: int, ticker: str):
         )
         conn.commit()
         logger.info("DB ADD  ticker=%s wl_id=%s", t, wl_id)
-    except sqlite3.IntegrityError:
-        logger.debug("DB ADD (already exists)  ticker=%s wl_id=%s", t, wl_id)
+    except Exception as exc:
+        logger.warning("DB ADD failed  ticker=%s wl_id=%s err=%s", t, wl_id, exc)
     finally:
         conn.close()
 
@@ -349,7 +520,7 @@ def remove_ticker_from_watchlist(wl_id: int, ticker: str):
         "DELETE FROM watchlist_stocks WHERE watchlist_id = ? AND ticker = ?", (wl_id, t)
     )
     remaining = conn.execute(
-        "SELECT COUNT(*) as cnt FROM watchlist_stocks WHERE ticker = ?", (t,)
+        "SELECT COUNT(*) AS cnt FROM watchlist_stocks WHERE ticker = ?", (t,)
     ).fetchone()["cnt"]
     if remaining == 0:
         conn.execute("DELETE FROM stock_data WHERE ticker = ?", (t,))
@@ -373,10 +544,9 @@ def remove_ticker_from_defaults(ticker: str):
     logger.info("DB REMOVE FROM DEFAULTS  ticker=%s", t)
 
     # Resolve IDs of the four built-in lists
+    placeholders = ",".join(["?"] * len(DEFAULT_WATCHLISTS))
     rows = conn.execute(
-        "SELECT id FROM watchlists WHERE name IN ({})".format(
-            ",".join("?" * len(DEFAULT_WATCHLISTS))
-        ),
+        f"SELECT id FROM watchlists WHERE name IN ({placeholders})",
         DEFAULT_WATCHLISTS,
     ).fetchall()
     default_ids = [r["id"] for r in rows]
@@ -389,7 +559,7 @@ def remove_ticker_from_defaults(ticker: str):
 
     # Remove stock_data if the ticker is now in no watchlist at all
     remaining = conn.execute(
-        "SELECT COUNT(*) as cnt FROM watchlist_stocks WHERE ticker = ?", (t,)
+        "SELECT COUNT(*) AS cnt FROM watchlist_stocks WHERE ticker = ?", (t,)
     ).fetchone()["cnt"]
     if remaining == 0:
         conn.execute("DELETE FROM stock_data WHERE ticker = ?", (t,))
@@ -416,14 +586,11 @@ def set_ticker_watchlists(ticker: str, watchlist_ids: list):
     conn.execute("DELETE FROM watchlist_stocks WHERE ticker = ?", (t,))
     now_iso = datetime.now().isoformat()
     for wl_id in watchlist_ids:
-        try:
-            conn.execute(
-                "INSERT OR IGNORE INTO watchlist_stocks "
-                "(watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
-                (int(wl_id), t, now_iso)
-            )
-        except sqlite3.IntegrityError:
-            pass
+        conn.execute(
+            "INSERT OR IGNORE INTO watchlist_stocks "
+            "(watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
+            (int(wl_id), t, now_iso)
+        )
     conn.commit()
     conn.close()
 
@@ -458,9 +625,6 @@ def upsert_stock_data(data: dict):
     """Insert or update stock data for a ticker."""
     conn = get_db()
 
-    # --- triggered_at: track the exact moment exec_state first becomes TRIGGERED.
-    # Preserve the timestamp during subsequent refreshes while still TRIGGERED.
-    # Clear it the moment the stock is no longer TRIGGERED.
     ticker = data.get("ticker", "").upper()
     existing = conn.execute(
         "SELECT exec_state, triggered_at FROM stock_data WHERE ticker = ?", (ticker,)
@@ -469,11 +633,11 @@ def upsert_stock_data(data: dict):
     new_state = data.get("exec_state")
     if new_state == "TRIGGERED":
         if existing and existing["exec_state"] == "TRIGGERED" and existing["triggered_at"]:
-            data["triggered_at"] = existing["triggered_at"]   # preserve original timestamp
+            data["triggered_at"] = existing["triggered_at"]
         else:
-            data["triggered_at"] = datetime.now().isoformat() # first time triggered
+            data["triggered_at"] = datetime.now().isoformat()
     else:
-        data["triggered_at"] = None  # clear when no longer triggered
+        data["triggered_at"] = None
 
     conn.execute("""
         INSERT INTO stock_data
@@ -562,7 +726,7 @@ def upsert_stock_data(data: dict):
 
 
 def set_stock_classify(ticker: str, reason: str):
-    """Update only the classify_reason for a ticker (called after auto-classification)."""
+    """Update only the classify_reason for a ticker."""
     conn = get_db()
     conn.execute(
         "UPDATE stock_data SET classify_reason = ? WHERE ticker = ?",
@@ -573,7 +737,7 @@ def set_stock_classify(ticker: str, reason: str):
 
 
 def set_auto_classify(ticker: str, enabled: bool):
-    """Toggle the auto_classify flag for a ticker (1 = ON, 0 = OFF / manual override)."""
+    """Toggle the auto_classify flag for a ticker."""
     conn = get_db()
     conn.execute(
         "UPDATE stock_data SET auto_classify = ? WHERE ticker = ?",
@@ -584,10 +748,7 @@ def set_auto_classify(ticker: str, enabled: bool):
 
 
 def update_setup_type(ticker: str, setup_type: str):
-    """
-    Persist a manually-chosen setup type override for a ticker.
-    Does not touch any other fields — leaves price/score data intact.
-    """
+    """Persist a manually-chosen setup type override for a ticker."""
     conn = get_db()
     conn.execute(
         "UPDATE stock_data SET setup_type = ? WHERE ticker = ?",
@@ -607,7 +768,6 @@ def get_stock_data(ticker: str):
     if row is None:
         return None
     d = dict(row)
-    # Deserialize JSON headlines
     try:
         d["news_headlines"] = json.loads(d["news_headlines"] or "[]")
     except (json.JSONDecodeError, TypeError):
@@ -639,9 +799,6 @@ def update_live_fields(data: dict) -> None:
     """
     Update live-changing fields for a stock without touching catalyst/news.
 
-    Fields updated: price, volume, gap, ORB levels/status/phase, VWAP,
-    momentum/entry/exec scores, setup score/type, structure flags.
-
     The triggered_at timestamp logic mirrors upsert_stock_data():
       - When newly TRIGGERED: stamp now()
       - When already TRIGGERED: preserve original timestamp
@@ -659,11 +816,11 @@ def update_live_fields(data: dict) -> None:
     new_state = data.get("exec_state")
     if new_state == "TRIGGERED":
         if existing and existing["exec_state"] == "TRIGGERED" and existing["triggered_at"]:
-            triggered_at = existing["triggered_at"]   # preserve original stamp
+            triggered_at = existing["triggered_at"]
         else:
-            triggered_at = datetime.now().isoformat()  # first trigger — stamp now
+            triggered_at = datetime.now().isoformat()
     else:
-        triggered_at = None  # clear when no longer triggered
+        triggered_at = None
 
     conn.execute("""
         UPDATE stock_data SET
@@ -757,7 +914,7 @@ def update_live_fields(data: dict) -> None:
     })
     conn.commit()
     conn.close()
-    data["triggered_at"] = triggered_at   # reflect actual value back into the dict
+    data["triggered_at"] = triggered_at
 
 
 # ---------------------------------------------------------------------------
@@ -912,7 +1069,7 @@ def delete_journal_entry(entry_id):
     conn.close()
 
 
-def get_journal_entry(entry_id) -> dict | None:
+def get_journal_entry(entry_id):
     conn = get_db()
     row = conn.execute("SELECT * FROM journal WHERE id = ?", (entry_id,)).fetchone()
     conn.close()
