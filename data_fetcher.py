@@ -6,10 +6,23 @@ Falls back gracefully if yfinance is unavailable or the fetch fails.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
+
+
+@contextlib.contextmanager
+def _silence_yf():
+    """Temporarily raise yfinance's logger to ERROR to suppress known 404 noise."""
+    yf_log = logging.getLogger("yfinance")
+    old = yf_log.level
+    yf_log.setLevel(logging.ERROR)
+    try:
+        yield
+    finally:
+        yf_log.setLevel(old)
 
 try:
     import yfinance as yf
@@ -64,6 +77,12 @@ def fetch_live_data(ticker: str) -> dict | None:
     if not _YF_AVAILABLE:
         return None
 
+    # Quote types that never have earnings calendars or company fundamentals.
+    # Requesting t.calendar for these produces a 404 from Yahoo Finance.
+    _NO_FUNDAMENTALS_TYPES = frozenset({
+        "ETF", "INDEX", "MUTUALFUND", "CRYPTOCURRENCY", "FUTURE", "FOREX", "CURRENCY",
+    })
+
     def _f(val, cast=float, default=None):
         """Safely cast val; return default on None, zero (for prices), or error."""
         try:
@@ -77,12 +96,18 @@ def fetch_live_data(ticker: str) -> dict | None:
         result: dict = {}
 
         # ------------------------------------------------------------------ #
-        # 1. Fast info — current price, prev close, avg volume
+        # 1. Fast info — current price, prev close, avg volume, quote type
         # ------------------------------------------------------------------ #
         fi = t.fast_info
         current_price = None
         prev_close    = None
         avg_volume    = None
+        quote_type    = None   # "EQUITY", "ETF", "INDEX", etc.
+
+        try:
+            quote_type = str(fi.quote_type).upper() if fi.quote_type else None
+        except Exception:
+            pass
 
         try:
             v = _f(fi.last_price)
@@ -346,29 +371,47 @@ def fetch_live_data(ticker: str) -> dict | None:
 
         # ------------------------------------------------------------------ #
         # 5. Earnings date
+        #    ETFs, indexes, and funds have no earnings calendar — skip the
+        #    t.calendar call entirely to avoid Yahoo Finance 404 errors.
+        #    For equities, suppress yfinance's internal logger during the call
+        #    so a transient 404 doesn't spam the terminal; log one clean warning.
         # ------------------------------------------------------------------ #
-        try:
-            cal = t.calendar
-            earnings_date = None
-            if isinstance(cal, dict):
-                ed = cal.get("Earnings Date")
-                if ed:
-                    # May be a list or a single value
-                    if isinstance(ed, (list, tuple)):
-                        ed = ed[0]
-                    if hasattr(ed, "date"):
-                        earnings_date = str(ed.date())
-                    else:
-                        earnings_date = str(ed)[:10]
-            elif hasattr(cal, "columns"):
-                # DataFrame format
-                if "Earnings Date" in cal.columns:
-                    ed = cal["Earnings Date"].iloc[0]
-                    earnings_date = str(ed.date()) if hasattr(ed, "date") else str(ed)[:10]
-            if earnings_date:
-                result["earnings_date"] = earnings_date
-        except Exception as e:
-            logger.debug("Earnings date fetch failed for %s: %s", ticker, e)
+        _is_non_equity = quote_type in _NO_FUNDAMENTALS_TYPES if quote_type else False
+
+        if _is_non_equity:
+            logger.debug("Skipping earnings calendar for %s (quote_type=%s)", ticker, quote_type)
+        else:
+            try:
+                with _silence_yf():
+                    cal = t.calendar
+                earnings_date = None
+                if isinstance(cal, dict):
+                    ed = cal.get("Earnings Date")
+                    if ed:
+                        if isinstance(ed, (list, tuple)):
+                            ed = ed[0]
+                        if hasattr(ed, "date"):
+                            earnings_date = str(ed.date())
+                        else:
+                            earnings_date = str(ed)[:10]
+                elif hasattr(cal, "columns"):
+                    if "Earnings Date" in cal.columns:
+                        ed = cal["Earnings Date"].iloc[0]
+                        earnings_date = str(ed.date()) if hasattr(ed, "date") else str(ed)[:10]
+                if earnings_date:
+                    result["earnings_date"] = earnings_date
+            except Exception as e:
+                # Log once at WARNING only for unexpected errors; 404s on known
+                # tickers are silenced above via quote_type detection.
+                err_str = str(e)
+                if "404" in err_str or "No fundamentals" in err_str:
+                    logger.warning(
+                        "No earnings calendar for %s (likely ETF/fund not yet "
+                        "detected via quote_type — consider adding to watchlist as equity only). "
+                        "quote_type=%s", ticker, quote_type
+                    )
+                else:
+                    logger.debug("Earnings date fetch failed for %s: %s", ticker, e)
 
         return result if result else None
 

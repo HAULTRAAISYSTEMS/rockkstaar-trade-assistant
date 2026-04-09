@@ -20,6 +20,7 @@
       <a href="{{ url_for('journal') }}"   class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}">Journal</a>
     </div>
     <div class="nav-actions">
+      <span id="ws-status-pill" class="ws-status-pill ws-polling">POLLING</span>
       <span id="ar-last-updated" class="ar-last-updated"></span>
       <button id="alert-sound-toggle" class="btn-ar-toggle ar-on" onclick="toggleAlertSound()" title="Sound alerts for new triggers">🔔 Sound ON</button>
       <button id="ar-toggle" class="btn-ar-toggle ar-on" onclick="toggleAutoRefresh()" title="Auto-refresh every 15s during market hours">⟳ Auto ON</button>
@@ -45,6 +46,7 @@
     {% block content %}{% endblock %}
   </main>
 
+  <script src="{{ url_for('static', filename='js/ws_manager.js') }}"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

@@ -276,5 +276,26 @@ async function quickModeRefresh() {
 }
 
 window._arRefreshFn = quickModeRefresh;
+
+// Connect WebSocket — same update functions as polling path.
+window._wsConnect('/ws/quick', function (data) {
+  if (data.type !== 'quick') return;
+
+  qmUpdateSessionBar(data.orb_session);
+
+  var newTriggers = detectNewTriggers(data.stocks);
+  if (newTriggers.length) {
+    newTriggers.forEach(function (s) {
+      var alertType = getAlertType(s);
+      playAlertSound(alertType);
+      showTriggerToast(s, alertType);
+    });
+  }
+
+  data.stocks.forEach(qmUpdateCard);
+
+  var updEl = document.getElementById('qm-last-updated');
+  if (updEl) updEl.textContent = 'Updated ' + data.server_time;
+});
 </script>
 {% endblock %}

@@ -2,9 +2,12 @@
 database.py - SQLite setup and database helpers for Rockkstaar Trade Assistant
 """
 
+import logging
 import sqlite3
 import json
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = "rockkstaar.db"
 
@@ -304,7 +307,9 @@ def get_watchlist_stocks(wl_id: int) -> list:
         (wl_id,)
     ).fetchall()
     conn.close()
-    return [r["ticker"] for r in rows]
+    tickers = [r["ticker"] for r in rows]
+    logger.debug("DB LOAD  wl_id=%s tickers=%s", wl_id, tickers)
+    return tickers
 
 
 def get_watchlist_stock_counts() -> dict:
@@ -320,14 +325,16 @@ def get_watchlist_stock_counts() -> dict:
 def add_ticker_to_watchlist(wl_id: int, ticker: str):
     """Add a ticker to a specific watchlist. Silently ignores duplicates."""
     conn = get_db()
+    t = ticker.upper().strip()
     try:
         conn.execute(
             "INSERT INTO watchlist_stocks (watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
-            (wl_id, ticker.upper().strip(), datetime.now().isoformat())
+            (wl_id, t, datetime.now().isoformat())
         )
         conn.commit()
+        logger.info("DB ADD  ticker=%s wl_id=%s", t, wl_id)
     except sqlite3.IntegrityError:
-        pass
+        logger.debug("DB ADD (already exists)  ticker=%s wl_id=%s", t, wl_id)
     finally:
         conn.close()
 
@@ -346,6 +353,9 @@ def remove_ticker_from_watchlist(wl_id: int, ticker: str):
     ).fetchone()["cnt"]
     if remaining == 0:
         conn.execute("DELETE FROM stock_data WHERE ticker = ?", (t,))
+        logger.info("DB REMOVE  ticker=%s wl_id=%s  (stock_data purged — no other memberships)", t, wl_id)
+    else:
+        logger.info("DB REMOVE  ticker=%s wl_id=%s  (stock_data kept — still in %d other list(s))", t, wl_id, remaining)
     conn.commit()
     conn.close()
 
@@ -360,6 +370,7 @@ def remove_ticker_from_defaults(ticker: str):
     """
     conn = get_db()
     t = ticker.upper().strip()
+    logger.info("DB REMOVE FROM DEFAULTS  ticker=%s", t)
 
     # Resolve IDs of the four built-in lists
     rows = conn.execute(

@@ -27,6 +27,7 @@ Category keys (used in scoring.py _CAT_WEIGHTS):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -34,6 +35,18 @@ from datetime import datetime, timezone
 from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
+
+
+@contextlib.contextmanager
+def _silence_yf():
+    """Temporarily raise yfinance's logger to ERROR to suppress known 404 noise."""
+    yf_log = logging.getLogger("yfinance")
+    old = yf_log.level
+    yf_log.setLevel(logging.ERROR)
+    try:
+        yield
+    finally:
+        yf_log.setLevel(old)
 
 HEADLINE_REFRESH_MINUTES = 5   # minimum gap between headline refreshes during market hours
 
@@ -347,8 +360,9 @@ def _try_yfinance(ticker: str) -> CatalystNews | None:
     """Fallback: yfinance .news (no key required)."""
     try:
         import yfinance as yf
-        t    = yf.Ticker(ticker)
-        news = t.news
+        with _silence_yf():
+            t    = yf.Ticker(ticker)
+            news = t.news
         if not news:
             return None
         headlines = [item.get("title", "") for item in news[:5] if item.get("title")]

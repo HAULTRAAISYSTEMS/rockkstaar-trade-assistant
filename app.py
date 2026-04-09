@@ -3,11 +3,14 @@ app.py - Rockkstaar Trade Assistant
 Flask web app for premarket stock watchlist scanning.
 """
 
+import json as _json
 import logging
 import re
+import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+from flask_sock import Sock
 
 logger = logging.getLogger(__name__)
 from database import (
@@ -34,6 +37,14 @@ from classifier import classify_stock
 
 app = Flask(__name__)
 app.secret_key = "rockkstaar-secret-key-change-in-prod"
+sock = Sock(app)
+
+# ---------------------------------------------------------------------------
+# Startup initialization — runs on every Python process start, including
+# gunicorn workers.  init_db() is idempotent (CREATE TABLE IF NOT EXISTS).
+# seed_demo_data() is called after its definition below.
+# ---------------------------------------------------------------------------
+init_db()
 
 
 # ---------------------------------------------------------------------------
@@ -899,6 +910,9 @@ def watchlist_add():
             added.append(t)
 
     if added:
+        remaining = get_watchlist_stocks(wl_id)
+        logger.info("WATCHLIST ADD  tickers=%s wl_id=%s", added, wl_id)
+        logger.info("WATCHLIST SAVED  wl_id=%s contents=%s", wl_id, remaining)
         flash(f"Added: {', '.join(added)}", "success")
     else:
         flash("No valid tickers found. Use 1–5 letter stock symbols.", "error")
@@ -918,10 +932,13 @@ def watchlist_remove(ticker):
     t = ticker.upper()
     wl_id = get_active_wl_id()
     if wl_id:
+        logger.info("WATCHLIST REMOVE  ticker=%s wl_id=%s", t, wl_id)
         # Remove from the specific watchlist the user is viewing
         remove_ticker_from_watchlist(wl_id, t)
         # Remove from all other default lists so auto-classify can't re-add it
         remove_ticker_from_defaults(t)
+        remaining = get_watchlist_stocks(wl_id)
+        logger.info("WATCHLIST SAVED  wl_id=%s contents=%s", wl_id, remaining)
     flash(f"Removed {t} from watchlist.", "info")
     return redirect(url_for("dashboard"))
 
@@ -1245,29 +1262,64 @@ def quick_mode():
 @app.route("/api/quick")
 def api_quick():
     """JSON for Quick Mode live refresh — top 3 priority stocks."""
-    wl_id     = get_active_wl_id()
-    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-    all_data  = get_all_stock_data()
-    data_map  = {s["ticker"]: s for s in all_data}
-    # Re-evaluate exec_state with fresh live data before building the response
-    data_map  = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
-    stocks    = [annotate(data_map[t]) for t in watchlist if t in data_map]
-    ranked    = rank_stocks(stocks)
-    top3      = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
+    try:
+        return jsonify(_build_quick_payload(get_active_wl_id()))
+    except Exception as exc:
+        logger.error("api_quick failed: %s", exc, exc_info=True)
+        return jsonify({"error": "quick refresh failed", "detail": str(exc)}), 500
 
-    out = []
-    for s in top3:
-        d = _stock_summary(s)
-        confs = [s.get("catalyst_confidence") or "Low", s.get("setup_confidence") or "Low"]
-        d["combined_confidence"]  = "Low" if "Low" in confs else ("Medium" if "Medium" in confs else "High")
-        d["combined_conf_class"]  = get_confidence_class(d["combined_confidence"])
-        out.append(d)
 
-    return jsonify({
-        "server_time": datetime.now().strftime("%H:%M:%S"),
-        "orb_session": get_orb_session_banner(),
-        "stocks":      out,
-    })
+# ---------------------------------------------------------------------------
+# WebSocket endpoints — real-time push updates
+# ---------------------------------------------------------------------------
+
+@sock.route("/ws/dashboard")
+def ws_dashboard(ws):
+    """
+    WebSocket endpoint for live dashboard updates.
+    Sends an immediate snapshot on connect, then pushes fresh data every 15 s.
+    Falls silent when the client disconnects.
+    """
+    wl_id = get_active_wl_id()   # session available during the WS handshake
+    try:
+        ws.send(_json.dumps(_build_dashboard_payload(wl_id)))
+        last_push = _time.monotonic()
+        while True:
+            try:
+                msg = ws.receive(timeout=1.0)
+                if msg is None:
+                    break   # clean client close
+            except Exception:
+                break       # network error or close
+            if _time.monotonic() - last_push >= 15.0:
+                ws.send(_json.dumps(_build_dashboard_payload(wl_id)))
+                last_push = _time.monotonic()
+    except Exception as exc:
+        logger.debug("ws_dashboard closed (wl_id=%s): %s", wl_id, exc)
+
+
+@sock.route("/ws/quick")
+def ws_quick(ws):
+    """
+    WebSocket endpoint for Quick Mode live updates.
+    Sends an immediate snapshot on connect, then pushes fresh data every 15 s.
+    """
+    wl_id = get_active_wl_id()
+    try:
+        ws.send(_json.dumps(_build_quick_payload(wl_id)))
+        last_push = _time.monotonic()
+        while True:
+            try:
+                msg = ws.receive(timeout=1.0)
+                if msg is None:
+                    break
+            except Exception:
+                break
+            if _time.monotonic() - last_push >= 15.0:
+                ws.send(_json.dumps(_build_quick_payload(wl_id)))
+                last_push = _time.monotonic()
+    except Exception as exc:
+        logger.debug("ws_quick closed (wl_id=%s): %s", wl_id, exc)
 
 
 @app.route("/api/watchlist")
@@ -1358,14 +1410,15 @@ def _stock_summary(s: dict) -> dict:
     return {f: s.get(f) for f in fields}
 
 
-@app.route("/api/dashboard")
-def api_dashboard():
-    """JSON endpoint for live dashboard updates (price, state, ORB, scores)."""
-    wl_id     = get_active_wl_id()
+# ---------------------------------------------------------------------------
+# Shared payload builders (used by both REST endpoints and WebSocket handlers)
+# ---------------------------------------------------------------------------
+
+def _build_dashboard_payload(wl_id: int | None) -> dict:
+    """Compute and return the full dashboard data dict (no request context needed)."""
     watchlist = get_watchlist_stocks(wl_id) if wl_id else []
     all_data  = get_all_stock_data()
     data_map  = {s["ticker"]: s for s in all_data}
-    # Re-evaluate exec_state with fresh live data before building the response
     data_map  = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
     stocks    = [annotate(data_map[t]) for t in watchlist if t in data_map]
     ranked    = rank_stocks(stocks)
@@ -1376,12 +1429,12 @@ def api_dashboard():
         and s.get("entry_quality") != "Extended"
         and s.get("trade_bias") != "Avoid"
     ][:5]
-    no_trade  = compute_no_trade_assessment(ranked, top5)
-    triggered = [] if no_trade["lock_signals"] else [s for s in ranked if s.get("exec_state") == "TRIGGERED"]
+    no_trade     = compute_no_trade_assessment(ranked, top5)
+    triggered    = [] if no_trade["lock_signals"] else [s for s in ranked if s.get("exec_state") == "TRIGGERED"]
     top5_tickers = {s["ticker"] for s in top5}
-    secondary = compute_secondary_watchlist(ranked, top5_tickers)
-
-    return jsonify({
+    secondary    = compute_secondary_watchlist(ranked, top5_tickers)
+    return {
+        "type":        "dashboard",
         "server_time": datetime.now().strftime("%H:%M:%S"),
         "orb_session": get_orb_session_banner(),
         "no_trade":    no_trade,
@@ -1389,7 +1442,41 @@ def api_dashboard():
         "top5":        [_stock_summary(s) for s in top5],
         "secondary":   [_stock_summary(s) for s in secondary],
         "ranked":      [_stock_summary(s) for s in ranked],
-    })
+    }
+
+
+def _build_quick_payload(wl_id: int | None) -> dict:
+    """Compute and return the quick-mode data dict (no request context needed)."""
+    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+    all_data  = get_all_stock_data()
+    data_map  = {s["ticker"]: s for s in all_data}
+    data_map  = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
+    stocks    = [annotate(data_map[t]) for t in watchlist if t in data_map]
+    ranked    = rank_stocks(stocks)
+    top3      = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
+    out = []
+    for s in top3:
+        d = _stock_summary(s)
+        confs = [s.get("catalyst_confidence") or "Low", s.get("setup_confidence") or "Low"]
+        d["combined_confidence"] = "Low" if "Low" in confs else ("Medium" if "Medium" in confs else "High")
+        d["combined_conf_class"] = get_confidence_class(d["combined_confidence"])
+        out.append(d)
+    return {
+        "type":        "quick",
+        "server_time": datetime.now().strftime("%H:%M:%S"),
+        "orb_session": get_orb_session_banner(),
+        "stocks":      out,
+    }
+
+
+@app.route("/api/dashboard")
+def api_dashboard():
+    """JSON endpoint for live dashboard updates (price, state, ORB, scores)."""
+    try:
+        return jsonify(_build_dashboard_payload(get_active_wl_id()))
+    except Exception as exc:
+        logger.error("api_dashboard failed: %s", exc, exc_info=True)
+        return jsonify({"error": "dashboard refresh failed", "detail": str(exc)}), 500
 
 
 @app.route("/api/stock/<ticker>/live")
@@ -1432,10 +1519,24 @@ def inject_helpers():
 
 
 # ---------------------------------------------------------------------------
+# Deferred startup — seed demo data after all functions are defined.
+# Safe to call every startup: the demo_seeded flag prevents re-seeding.
+# ---------------------------------------------------------------------------
+seed_demo_data()
+
+_startup_wls = get_all_watchlists()
+for _wl in _startup_wls:
+    _tickers = get_watchlist_stocks(_wl["id"])
+    logger.info(
+        "STARTUP watchlist '%s' (id=%s): %s",
+        _wl["name"], _wl["id"], _tickers,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    init_db()
     print("\nRockkstaar Trade Assistant running...\n")
     app.run(host="0.0.0.0", port=5000, debug=False)

@@ -794,5 +794,26 @@ async function dashboardRefresh() {
 
 // Register this page's refresh function with the shared auto-refresh system
 window._arRefreshFn = dashboardRefresh;
+
+// Connect WebSocket — reuses the same update functions as the polling path.
+// If the WS drops, ws_manager.js automatically re-enables polling as a bridge.
+window._wsConnect('/ws/dashboard', function (data) {
+  if (data.type !== 'dashboard') return;
+
+  var newTriggers = detectNewTriggers(data.ranked);
+
+  updateOrbBanner(data.orb_session);
+  updateNoTradeLock(data.no_trade);
+  updateTriggeredSection(data.triggered, data.no_trade);
+  data.ranked.forEach(updateTableRow);
+  data.top5.forEach(updateTop5Card);
+
+  if (newTriggers.length) {
+    var freshTickers = fireNewTriggerAlerts(newTriggers);
+    pinTriggeredRowsToTop(data.ranked, freshTickers);
+  } else {
+    pinTriggeredRowsToTop(data.ranked, []);
+  }
+});
 </script>
 {% endblock %}
