@@ -82,6 +82,40 @@ def _adapt_ddl(sql: str) -> str:
     return sql
 
 
+def _normalize_value(v):
+    """Convert a single value to a native Python type safe for both SQLite and psycopg2.
+
+    NumPy scalar types (numpy.bool_, numpy.int*, numpy.float*) are not
+    recognised by psycopg2 and cause 'can't adapt type' errors.  We convert
+    them here before any query reaches the driver.
+    """
+    # Fast-path: common Python scalars need no conversion
+    if v is None or type(v) in (int, float, str, bool, bytes):
+        return v
+    # NumPy scalars — import lazily so numpy is not a hard dependency
+    type_name = type(v).__name__
+    module = getattr(type(v), "__module__", "")
+    if module.startswith("numpy"):
+        if type_name.startswith("bool"):
+            return bool(v)
+        if type_name.startswith(("int", "uint")):
+            return int(v)
+        if type_name.startswith("float"):
+            return float(v)
+        # Generic fallback for other numpy scalars (e.g. numpy.str_)
+        return v.item()
+    return v
+
+
+def _normalize_params(params):
+    """Recursively normalise query params (dict or sequence) to native Python types."""
+    if params is None:
+        return None
+    if isinstance(params, dict):
+        return {k: _normalize_value(v) for k, v in params.items()}
+    return tuple(_normalize_value(v) for v in params)
+
+
 # ─── Connection wrapper ───────────────────────────────────────────────────────
 
 class _Cursor:
@@ -117,6 +151,7 @@ class _Conn:
 
     def execute(self, sql: str, params=None) -> _Cursor:
         sql, params = _adapt_sql(sql, params)
+        params = _normalize_params(params)
 
         if _USE_POSTGRES:
             raw_cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
