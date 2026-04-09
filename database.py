@@ -63,9 +63,6 @@ def _adapt_sql(sql: str, params=None):
     if _INSERT_OR_IGNORE_RE.search(sql):
         sql = _INSERT_OR_IGNORE_RE.sub("INSERT", sql)
         sql = sql.rstrip().rstrip(";") + "\nON CONFLICT DO NOTHING"
-    # All other INSERTs (no RETURNING yet): append RETURNING id for lastrowid
-    elif _INSERT_START_RE.match(sql) and "RETURNING" not in sql.upper():
-        sql = sql.rstrip().rstrip(";") + "\nRETURNING id"
 
     return sql, params
 
@@ -159,9 +156,22 @@ class _Conn:
     def __init__(self, raw_conn):
         self._conn = raw_conn
 
-    def execute(self, sql: str, params=None) -> _Cursor:
+    def execute(self, sql: str, params=None, returning_id: bool = False) -> _Cursor:
+        """Execute a query.
+
+        Pass returning_id=True only when the caller needs cursor.lastrowid on
+        PostgreSQL.  This appends RETURNING id to the SQL, which requires the
+        target table to have an id column.  Do NOT pass returning_id=True for
+        tables whose primary key is not named id (e.g. settings.key).
+        """
         sql, params = _adapt_sql(sql, params)
         params = _normalize_params(params)
+
+        # Append RETURNING id only when the caller explicitly requests it.
+        # The old approach (appending to every INSERT) broke tables without
+        # an id column (e.g. settings) with UndefinedColumn errors.
+        if _USE_POSTGRES and returning_id:
+            sql = sql.rstrip().rstrip(";") + "\nRETURNING id"
 
         if _USE_POSTGRES:
             raw_cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -174,14 +184,13 @@ class _Conn:
             else:
                 raw_cur.execute(sql, params)
         except Exception:
-            # Surface errors with the translated SQL for easier debugging
             logger.debug("DB execute failed  sql=%s", sql[:200])
             raise
 
         cursor = _Cursor(raw_cur)
 
-        # Pre-fetch RETURNING id result so lastrowid works for PG
-        if _USE_POSTGRES and "RETURNING id" in sql.upper():
+        # Pre-fetch the returned id so cursor.lastrowid works on PostgreSQL
+        if _USE_POSTGRES and returning_id:
             try:
                 row = raw_cur.fetchone()
                 if row:
@@ -482,7 +491,8 @@ def create_watchlist(name: str) -> int:
     conn = get_db()
     cur = conn.execute(
         "INSERT INTO watchlists (name, created_at) VALUES (?, ?)",
-        (name.strip(), datetime.now().isoformat())
+        (name.strip(), datetime.now().isoformat()),
+        returning_id=True,
     )
     new_id = cur.lastrowid
     conn.commit()
@@ -1081,7 +1091,7 @@ def add_journal_entry(ticker, trade_date, direction, entry_price, exit_price,
         entry_price, exit_price, shares,
         setup_type, momentum_score, pnl_pct, result, notes,
         datetime.now().isoformat()
-    ))
+    ), returning_id=True)
     new_id = cur.lastrowid
     conn.commit()
     conn.close()
