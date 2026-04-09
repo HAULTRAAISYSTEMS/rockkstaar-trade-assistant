@@ -85,19 +85,29 @@ def _adapt_ddl(sql: str) -> str:
 def _normalize_value(v):
     """Convert a single value to a native Python type safe for both SQLite and psycopg2.
 
-    NumPy scalar types (numpy.bool_, numpy.int*, numpy.float*) are not
-    recognised by psycopg2 and cause 'can't adapt type' errors.  We convert
-    them here before any query reaches the driver.
+    Two classes of problem are handled here:
+
+    1. NumPy scalars (numpy.bool_, numpy.int*, numpy.float*) — psycopg2 does
+       not register adapters for them and raises "can't adapt type".
+
+    2. Python bool — psycopg2 maps Python bool → PostgreSQL BOOLEAN, but every
+       flag column in our schema is INTEGER (e.g. momentum_breakout INTEGER
+       DEFAULT 0).  Passing True/False causes a DatatypeMismatch error.
+       Converting bool → int (True→1, False→0) matches the INTEGER schema and
+       is safe for SQLite too (which stores booleans as 0/1 anyway).
     """
-    # Fast-path: common Python scalars need no conversion
-    if v is None or type(v) in (int, float, str, bool, bytes):
+    # None, int, float, str, bytes need no conversion
+    if v is None or type(v) in (int, float, str, bytes):
         return v
-    # NumPy scalars — import lazily so numpy is not a hard dependency
+    # Python bool: convert to int so psycopg2 sends 0/1, not BOOLEAN
+    if type(v) is bool:
+        return int(v)
+    # NumPy scalars — lazy check so numpy is not a hard dependency
     type_name = type(v).__name__
     module = getattr(type(v), "__module__", "")
     if module.startswith("numpy"):
         if type_name.startswith("bool"):
-            return bool(v)
+            return int(v)           # numpy.bool_ → int (same reason as above)
         if type_name.startswith(("int", "uint")):
             return int(v)
         if type_name.startswith("float"):
