@@ -69,6 +69,12 @@ a { color: inherit; text-decoration: none; }
   gap: 0.5rem;
 }
 .brand-icon { font-size: 1.3rem; }
+.nav-logo {
+  height: 36px;
+  width: auto;
+  display: block;
+  object-fit: contain;
+}
 
 /* ---- Buttons ---- */
 .btn {

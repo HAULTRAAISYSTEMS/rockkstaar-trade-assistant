@@ -12,7 +12,12 @@
   <!-- ===== NAV ===== -->
   <nav class="navbar">
     <a href="{{ url_for('dashboard') }}" class="nav-brand">
-      <span class="brand-icon">◈</span> ROCKKSTAAR
+      <img src="{{ url_for('static', filename='logo.png') }}"
+           alt="Rockkstaar"
+           class="nav-logo"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" />
+      <span class="brand-icon" style="display:none;">◈</span>
+      ROCKKSTAAR
     </a>
     <div class="nav-links">
       <a href="{{ url_for('dashboard') }}"  class="nav-link {% if request.endpoint == 'dashboard' %}nav-link-active{% endif %}">Dashboard</a>
