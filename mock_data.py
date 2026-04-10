@@ -16,6 +16,26 @@ from scoring import (
     compute_orb_price_status, compute_orb_readiness, compute_exec_state,
     compute_final_setup_score, compute_setup_type, SETUP_TYPES, MOM_T, MOM_W,
 )
+from zones import detect_zones, zones_need_refresh
+
+
+# ─── Zone field defaults ──────────────────────────────────────────────────────
+
+def _zone_defaults(data: dict) -> None:
+    """Ensure all zone fields exist in *data* with safe defaults."""
+    data.setdefault("nearest_supply_top",     None)
+    data.setdefault("nearest_supply_bottom",  None)
+    data.setdefault("nearest_demand_top",     None)
+    data.setdefault("nearest_demand_bottom",  None)
+    data.setdefault("distance_to_supply_pct", None)
+    data.setdefault("distance_to_demand_pct", None)
+    data.setdefault("zone_location",          "BETWEEN ZONES")
+    data.setdefault("bullish_order_block",    None)
+    data.setdefault("bearish_order_block",    None)
+    data.setdefault("in_supply_zone",         False)
+    data.setdefault("in_demand_zone",         False)
+    data.setdefault("zones_fetched_at",       None)
+
 
 # ---------------------------------------------------------------------------
 # Mock dataset: realistic premarket scenarios
@@ -345,6 +365,21 @@ def generate_stock_data(ticker: str) -> dict:
         data["catalyst_category"]    = json.dumps(news.categories)
         data["headlines_fetched_at"] = datetime.now().isoformat()
 
+    # ------------------------------------------------------------------ #
+    # Zone detection — supply/demand zones from daily & 4H bars.
+    # Zones are cached in the data dict: re-fetch only when stale.
+    # Must run BEFORE scoring so zone fields are available to scoring.py.
+    # ------------------------------------------------------------------ #
+    if zones_need_refresh(data.get("zones_fetched_at")):
+        current_px = data.get("current_price") or 0
+        if current_px:
+            zone_data = detect_zones(ticker, current_px)
+            data.update(zone_data)
+            data["zones_fetched_at"] = datetime.now().isoformat()
+        else:
+            _zone_defaults(data)
+    # If zones are fresh, existing zone fields remain in data as-is.
+
     # Ensure live price structure fields always exist (set to False/None when
     # intraday fetch failed or market is pre-open — scoring handles gracefully)
     data.setdefault("vwap", None)
@@ -356,6 +391,7 @@ def generate_stock_data(ticker: str) -> dict:
     data.setdefault("higher_lows", False)
     data.setdefault("strong_candle_bodies", False)
     data.setdefault("price_above_vwap", False)
+    _zone_defaults(data)   # ensure all zone fields present (fills gaps when zones fresh)
 
     # --- Compute scores via scoring.py ---
     # Each scoring function uses pre-stored values from earlier steps to avoid
@@ -529,6 +565,17 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
     data.setdefault("higher_lows",         False)
     data.setdefault("strong_candle_bodies", False)
     data.setdefault("price_above_vwap",    False)
+
+    # Zone refresh (time-gated — daily/4H zones don't need to update every 15 s)
+    if zones_need_refresh(data.get("zones_fetched_at")):
+        current_px = data.get("current_price") or 0
+        if current_px:
+            ticker_sym = (data.get("ticker") or "").upper()
+            if ticker_sym:
+                zone_data = detect_zones(ticker_sym, current_px)
+                data.update(zone_data)
+                data["zones_fetched_at"] = datetime.now().isoformat()
+    _zone_defaults(data)   # ensure all zone fields always present
 
     # Re-derive structure momentum score + momentum_runner flag
     structure_score = (

@@ -245,6 +245,19 @@ ENTRY_T = {
     "pm_past_margin":     0.03,  # Price >3% past PM extreme = chasing (Extended)
 }
 
+# ── Zone-aware entry thresholds ─────────────────────────────────────────────
+#   Applied on top of base ENTRY_T logic when zone data is present.
+ZONE_ENTRY_T = {
+    # Supply directly overhead: supply_bottom within this % of current price.
+    # Below this threshold we downgrade a "Perfect" entry to "Okay",
+    # because tight stop potential is negated by the overhead resistance.
+    "supply_nearby_pct":  0.03,   # 3% — supply within 3% = nearby
+
+    # Deep supply: supply_bottom within 1% — cancel "Perfect", force "Okay"
+    # or downgrade to "Extended" only if price is already in the supply zone.
+    "supply_immediate_pct": 0.01,  # 1%
+}
+
 
 # ===========================================================================
 #  ORDER BLOCK — thresholds
@@ -719,6 +732,22 @@ def compute_entry_quality(data: dict) -> str:
         if bias == "Short Bias" and current < pm_low * (1 - ENTRY_T["pm_past_margin"]):
             return "Extended"
 
+    # ---- Zone-aware checks (applied before Perfect) ------------------------
+    zone_location        = data.get("zone_location") or "BETWEEN ZONES"
+    dist_to_supply_pct   = data.get("distance_to_supply_pct")   # % from price to supply bottom (positive = above)
+    in_supply_zone       = data.get("in_supply_zone", False)
+    in_demand_zone       = data.get("in_demand_zone", False)
+
+    # If price is IN a supply zone on a long setup → DO NOT CHASE (Extended)
+    if in_supply_zone and bias == "Long Bias":
+        return "Extended"
+
+    # If price is ABOVE SUPPLY on a long setup → Extended (chasing through resistance)
+    if zone_location == "ABOVE SUPPLY" and bias == "Long Bias":
+        # Only if also extended from VWAP (both conditions must hold)
+        if vwap_dist > ENTRY_T["vwap_extended_dist"] * 0.5:
+            return "Extended"
+
     # ---- Perfect check -----------------------------------------------------
     # Near PM extreme in the right direction (tight stop available)
     near_pm_high = pm_high and abs(current - pm_high) / pm_high <= ENTRY_T["near_pm_margin"]
@@ -739,8 +768,23 @@ def compute_entry_quality(data: dict) -> str:
         near_vwap
     )
 
+    # Zone gate: "Perfect" requires no immediate supply overhead for long setups.
+    # If supply is within ZONE_ENTRY_T["supply_nearby_pct"], downgrade to "Okay".
     if near_entry and ob_aligned:
+        if bias == "Long Bias" and dist_to_supply_pct is not None:
+            if dist_to_supply_pct <= ZONE_ENTRY_T["supply_nearby_pct"] * 100:
+                return "Okay"   # Good setup but supply too close — not "Perfect"
         return "Perfect"
+
+    # ---- IN DEMAND bonus ---------------------------------------------------
+    # Price pulled back into a demand zone on a long setup — upgrade to Okay
+    # even without OB alignment (zone acts as the confirmation).
+    if in_demand_zone and bias == "Long Bias":
+        return "Okay"   # At worst Okay; never downgraded further for demand entries
+
+    # ---- APPROACHING SUPPLY downgrade for longs ----------------------------
+    # Price is within approach_pct of supply — note this but keep as Okay.
+    # (Extended is reserved for confirmed supply zone entries, handled above.)
 
     # ---- Okay (default) ----------------------------------------------------
     return "Okay"
@@ -922,12 +966,31 @@ def compute_exec_state(data: dict) -> str:
     if orb_phase == "pre_market":
         return "WAIT"
 
+    # ── Zone supply gate for LONG setups ─────────────────────────────────────
+    # If strong supply sits directly overhead, downgrade TRIGGERED → READY.
+    # The trader should see the setup but not be signalled to execute blindly
+    # into a known seller zone.
+    bias               = data.get("trade_bias") or "Neutral"
+    zone_location      = data.get("zone_location") or "BETWEEN ZONES"
+    dist_to_supply_pct = data.get("distance_to_supply_pct")   # % gap to supply bottom
+    in_supply_zone     = data.get("in_supply_zone", False)
+
+    _supply_cap = False   # will cap exec state to READY when True
+    if bias == "Long Bias":
+        if in_supply_zone:
+            # Price IS inside a supply zone — downgrade all the way to WAIT
+            return "WAIT"
+        if zone_location == "APPROACHING SUPPLY":
+            _supply_cap = True   # supply within 3% — cap at READY, not TRIGGERED
+        elif dist_to_supply_pct is not None and 0 < dist_to_supply_pct <= 1.5:
+            _supply_cap = True   # supply within 1.5% — immediate resistance
+
     # ── Momentum Breakout fast path ─────────────────────────────────────────
     # All four live conditions confirmed (3+ candles above ORB high, volume
     # increasing, price > VWAP): signal is valid regardless of entry_quality.
     # Still respect the ORB phase gate: cap at READY during the forming window.
     if data.get("momentum_breakout"):
-        if orb_phase == "forming":
+        if orb_phase == "forming" or _supply_cap:
             return "READY"
         return "TRIGGERED"
 
@@ -936,7 +999,7 @@ def compute_exec_state(data: dict) -> str:
     # but the trend is strong — signal is allowed, UI shows warning + reduced size.
     # Only fires when momentum_breakout is False (it's a secondary confirmation).
     if data.get("momentum_runner") and not data.get("momentum_breakout"):
-        if orb_phase == "forming":
+        if orb_phase == "forming" or _supply_cap:
             return "READY"
         return "TRIGGERED"
 
@@ -944,8 +1007,8 @@ def compute_exec_state(data: dict) -> str:
     if (orb_ready == "YES"
             and entry_quality == "Perfect"
             and rvol >= EXEC_T["triggered_rvol"]):
-        if orb_phase == "forming":
-            # Range still building — signal is forming, not confirmed
+        if orb_phase == "forming" or _supply_cap:
+            # Range still building or supply overhead — signal forming, not confirmed
             return "READY"
         return "TRIGGERED"
 
@@ -1033,6 +1096,34 @@ def compute_final_setup_score(data: dict) -> ScoringResult:
         else:
             raw += FINAL_P["entry_extended"]
             penalties_fired.append("extended entry — chase risk")
+
+    # ---- Zone bonus / penalty ------------------------------------------------
+    zone_location      = data.get("zone_location") or "BETWEEN ZONES"
+    in_demand_zone     = data.get("in_demand_zone", False)
+    in_supply_zone     = data.get("in_supply_zone", False)
+    dist_to_supply_pct = data.get("distance_to_supply_pct")
+
+    if bias == "Long Bias":
+        if in_demand_zone or zone_location in ("IN DEMAND", "IN BULLISH OB"):
+            raw += 1
+            parts.append("demand zone support")
+        elif zone_location == "APPROACHING SUPPLY":
+            raw -= 1
+            penalties_fired.append("supply zone approaching")
+        elif in_supply_zone or zone_location in ("IN SUPPLY", "ABOVE SUPPLY"):
+            raw -= 2
+            penalties_fired.append("overhead supply — do not chase")
+        elif dist_to_supply_pct is not None and 0 < dist_to_supply_pct <= 2.0:
+            raw -= 1
+            penalties_fired.append(f"supply {dist_to_supply_pct:.1f}% above")
+
+    elif bias == "Short Bias":
+        if in_supply_zone or zone_location in ("IN SUPPLY", "IN BEARISH OB"):
+            raw += 1
+            parts.append("supply zone resistance")
+        elif zone_location in ("IN DEMAND",):
+            raw -= 1
+            penalties_fired.append("demand zone below — short risk")
 
     # ---- Low momentum penalty ------------------------------------------------
     if momentum_score < FINAL_T["low_momentum"]:

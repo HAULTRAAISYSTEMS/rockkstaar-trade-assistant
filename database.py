@@ -381,6 +381,19 @@ def init_db():
         ("structure_momentum_score", "INTEGER DEFAULT 0"),
         ("catalyst_category",        "TEXT"),
         ("headlines_fetched_at",     "TEXT"),
+        # Supply / demand zone fields (v1)
+        ("nearest_supply_top",       "REAL"),
+        ("nearest_supply_bottom",    "REAL"),
+        ("nearest_demand_top",       "REAL"),
+        ("nearest_demand_bottom",    "REAL"),
+        ("distance_to_supply_pct",   "REAL"),
+        ("distance_to_demand_pct",   "REAL"),
+        ("zone_location",            "TEXT"),
+        ("bullish_order_block",      "TEXT"),
+        ("bearish_order_block",      "TEXT"),
+        ("in_supply_zone",           "INTEGER DEFAULT 0"),
+        ("in_demand_zone",           "INTEGER DEFAULT 0"),
+        ("zones_fetched_at",         "TEXT"),
     ]
     for col, col_type in _new_columns:
         if _USE_POSTGRES:
@@ -709,7 +722,12 @@ def upsert_stock_data(data: dict):
              momentum_runner, entry_note, position_size,
              orb_hold, trend_structure, higher_highs, higher_lows, strong_candle_bodies,
              price_above_vwap, structure_momentum_score,
-             catalyst_category, headlines_fetched_at)
+             catalyst_category, headlines_fetched_at,
+             nearest_supply_top, nearest_supply_bottom,
+             nearest_demand_top, nearest_demand_bottom,
+             distance_to_supply_pct, distance_to_demand_pct,
+             zone_location, bullish_order_block, bearish_order_block,
+             in_supply_zone, in_demand_zone, zones_fetched_at)
         VALUES
             (:ticker, :current_price, :prev_close, :gap_pct, :premarket_high,
              :premarket_low, :prev_day_high, :prev_day_low, :avg_volume, :rel_volume,
@@ -724,7 +742,12 @@ def upsert_stock_data(data: dict):
              :momentum_runner, :entry_note, :position_size,
              :orb_hold, :trend_structure, :higher_highs, :higher_lows, :strong_candle_bodies,
              :price_above_vwap, :structure_momentum_score,
-             :catalyst_category, :headlines_fetched_at)
+             :catalyst_category, :headlines_fetched_at,
+             :nearest_supply_top, :nearest_supply_bottom,
+             :nearest_demand_top, :nearest_demand_bottom,
+             :distance_to_supply_pct, :distance_to_demand_pct,
+             :zone_location, :bullish_order_block, :bearish_order_block,
+             :in_supply_zone, :in_demand_zone, :zones_fetched_at)
         ON CONFLICT(ticker) DO UPDATE SET
             current_price        = excluded.current_price,
             prev_close           = excluded.prev_close,
@@ -774,7 +797,19 @@ def upsert_stock_data(data: dict):
             price_above_vwap         = excluded.price_above_vwap,
             structure_momentum_score = excluded.structure_momentum_score,
             catalyst_category        = excluded.catalyst_category,
-            headlines_fetched_at     = excluded.headlines_fetched_at
+            headlines_fetched_at     = excluded.headlines_fetched_at,
+            nearest_supply_top       = excluded.nearest_supply_top,
+            nearest_supply_bottom    = excluded.nearest_supply_bottom,
+            nearest_demand_top       = excluded.nearest_demand_top,
+            nearest_demand_bottom    = excluded.nearest_demand_bottom,
+            distance_to_supply_pct   = excluded.distance_to_supply_pct,
+            distance_to_demand_pct   = excluded.distance_to_demand_pct,
+            zone_location            = excluded.zone_location,
+            bullish_order_block      = excluded.bullish_order_block,
+            bearish_order_block      = excluded.bearish_order_block,
+            in_supply_zone           = excluded.in_supply_zone,
+            in_demand_zone           = excluded.in_demand_zone,
+            zones_fetched_at         = excluded.zones_fetched_at
     """, data)
     conn.commit()
     conn.close()
@@ -918,6 +953,18 @@ def update_live_fields(data: dict) -> None:
             catalyst_category        = :catalyst_category,
             news_headlines           = :news_headlines,
             headlines_fetched_at     = :headlines_fetched_at,
+            nearest_supply_top       = :nearest_supply_top,
+            nearest_supply_bottom    = :nearest_supply_bottom,
+            nearest_demand_top       = :nearest_demand_top,
+            nearest_demand_bottom    = :nearest_demand_bottom,
+            distance_to_supply_pct   = :distance_to_supply_pct,
+            distance_to_demand_pct   = :distance_to_demand_pct,
+            zone_location            = :zone_location,
+            bullish_order_block      = :bullish_order_block,
+            bearish_order_block      = :bearish_order_block,
+            in_supply_zone           = :in_supply_zone,
+            in_demand_zone           = :in_demand_zone,
+            zones_fetched_at         = :zones_fetched_at,
             triggered_at             = :triggered_at,
             last_updated             = :last_updated
         WHERE ticker = :ticker
@@ -964,6 +1011,18 @@ def update_live_fields(data: dict) -> None:
                                     if isinstance(data.get("news_headlines"), list)
                                     else (data.get("news_headlines") or "[]"),
         "headlines_fetched_at":     data.get("headlines_fetched_at"),
+        "nearest_supply_top":       data.get("nearest_supply_top"),
+        "nearest_supply_bottom":    data.get("nearest_supply_bottom"),
+        "nearest_demand_top":       data.get("nearest_demand_top"),
+        "nearest_demand_bottom":    data.get("nearest_demand_bottom"),
+        "distance_to_supply_pct":   data.get("distance_to_supply_pct"),
+        "distance_to_demand_pct":   data.get("distance_to_demand_pct"),
+        "zone_location":            data.get("zone_location") or "BETWEEN ZONES",
+        "bullish_order_block":      data.get("bullish_order_block"),
+        "bearish_order_block":      data.get("bearish_order_block"),
+        "in_supply_zone":           int(bool(data.get("in_supply_zone"))),
+        "in_demand_zone":           int(bool(data.get("in_demand_zone"))),
+        "zones_fetched_at":         data.get("zones_fetched_at"),
         "triggered_at":             triggered_at,
         "last_updated":             data.get("last_updated") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
