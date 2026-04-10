@@ -1823,6 +1823,14 @@ a { color: inherit; text-decoration: none; }
 }
 .fresh-premarket::before { content: "◎  "; font-size: 0.5rem; }
 
+/* Session closed / expired — trigger stamped outside regular hours */
+.fresh-expired {
+  background: var(--bg3);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.fresh-expired::before { content: "—  "; font-size: 0.5rem; }
+
 /* Size variants */
 .freshness-badge-sm {
   font-size: 0.6rem;

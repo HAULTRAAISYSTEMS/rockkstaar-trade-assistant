@@ -417,21 +417,43 @@ def compute_rr(plan_bias, entry, stop, target):
     return ratio, display, css
 
 
-def compute_freshness(triggered_at: str | None, exec_state: str | None) -> tuple:
+def compute_freshness(
+    triggered_at: str | None,
+    exec_state: str | None,
+    session: str | None = None,
+) -> tuple:
     """
-    Determine the freshness label for a triggered stock.
-    Returns (label, css_class) — both None when exec_state != TRIGGERED.
+    Determine the freshness / staleness label for a stock's exec state.
+    Returns (label, css_class).  Both are None when exec_state != TRIGGERED.
 
-    Thresholds (minutes since triggered_at):
-      < 15 min  → Fresh Breakout  (act now — highest priority)
-      15–45 min → Active Move     (still valid but watch extension)
-      > 45 min  → Late Move       (likely extended, caution)
+    During regular market hours (session == 'regular'):
+      triggered_at before 09:30 ET  → "Premarket Watch"   (reference, not live)
+      elapsed < 15 min              → "Fresh Breakout"     (act now)
+      elapsed 15–45 min             → "Active Move"        (still valid)
+      elapsed > 45 min              → "Late Move"          (likely extended)
 
-    If triggered_at is null or was stamped before 9:30 ET → Premarket Watch.
+    Outside regular hours the trigger is stale regardless of elapsed time:
+      pre_market                    → "Watch Next Session"
+      after_hours / closed          → "Session Closed"
     """
     if exec_state != "TRIGGERED":
         return None, None
 
+    # Determine session if not supplied
+    if session is None:
+        try:
+            from data_fetcher import market_session_now
+            session = market_session_now()
+        except Exception:
+            session = "regular"
+
+    # Outside regular hours — trigger is stale, show display-only label
+    if session == "pre_market":
+        return "Watch Next Session", "fresh-premarket"
+    if session in ("after_hours", "closed"):
+        return "Session Closed", "fresh-expired"
+
+    # Regular hours — age-based freshness
     if not triggered_at:
         return "Premarket Watch", "fresh-premarket"
 
@@ -439,7 +461,7 @@ def compute_freshness(triggered_at: str | None, exec_state: str | None) -> tuple
         ts  = datetime.fromisoformat(triggered_at)
         now = datetime.now()
 
-        # Triggered before market open → premarket watch
+        # Triggered before this session's open → treat as premarket reference
         if ts.hour < 9 or (ts.hour == 9 and ts.minute < 30):
             return "Premarket Watch", "fresh-premarket"
 
@@ -447,7 +469,7 @@ def compute_freshness(triggered_at: str | None, exec_state: str | None) -> tuple
         if elapsed < 15:
             return "Fresh Breakout", "fresh-breakout"
         if elapsed < 45:
-            return "Active Move", "fresh-active"
+            return "Active Move",    "fresh-active"
         return "Late Move", "fresh-late"
     except (ValueError, TypeError):
         return "Premarket Watch", "fresh-premarket"
@@ -455,10 +477,12 @@ def compute_freshness(triggered_at: str | None, exec_state: str | None) -> tuple
 
 def get_freshness_class(label: str | None) -> str:
     return {
-        "Fresh Breakout":  "fresh-breakout",
-        "Active Move":     "fresh-active",
-        "Late Move":       "fresh-late",
-        "Premarket Watch": "fresh-premarket",
+        "Fresh Breakout":    "fresh-breakout",
+        "Active Move":       "fresh-active",
+        "Late Move":         "fresh-late",
+        "Premarket Watch":   "fresh-premarket",
+        "Watch Next Session":"fresh-premarket",
+        "Session Closed":    "fresh-expired",
     }.get(label or "", "")
 
 
@@ -486,7 +510,9 @@ def get_orb_phase_label(orb_phase: str | None) -> tuple:
     }.get(orb_phase or "", ("", ""))
 
 
-# ORB action directive — the trader-facing instruction for each phase.
+# ORB action directive — the trader-facing instruction for each ORB phase.
+# These are the base entries used during regular market hours.
+# Outside regular hours get_orb_action() overrides action/sub_label.
 # Each entry: (action_word, sub_label, banner_class, action_class)
 _ORB_ACTION_MAP = {
     "pre_market": (
@@ -509,18 +535,43 @@ _ORB_ACTION_MAP = {
     ),
 }
 
+# Session-level override labels shown when market is not in regular hours.
+_SESSION_OVERRIDE = {
+    "pre_market":  ("WAIT",        "Pre-market — levels for reference only",         "orb-action-wait"),
+    "after_hours": ("WATCH LEVELS","After hours — ORB levels for reference only",    "orb-action-wait"),
+    "closed":      ("CLOSED",      "Market closed — review levels for next session", "orb-action-wait"),
+}
 
-def get_orb_action(orb_phase: str | None) -> dict:
+
+def get_orb_action(orb_phase: str | None, session: str | None = None) -> dict:
     """
     Return the action directive dict for a given ORB phase.
+
+    When session is provided (and is not 'regular'), the action word and
+    sub_label are replaced with a display-only override so EXECUTE is never
+    shown outside regular market hours.  The banner_class (colour) still
+    reflects the ORB phase so the UI stays informative.
+
     Keys: action, sub_label, banner_class, action_class.
     """
     row = _ORB_ACTION_MAP.get(orb_phase or "locked", _ORB_ACTION_MAP["locked"])
+    action_word   = row[0]
+    sub_label     = row[1]
+    banner_class  = row[2]
+    action_class  = row[3]
+
+    if session and session != "regular":
+        override = _SESSION_OVERRIDE.get(session)
+        if override:
+            action_word  = override[0]
+            sub_label    = override[1]
+            action_class = override[2]
+
     return {
-        "action":       row[0],
-        "sub_label":    row[1],
-        "banner_class": row[2],
-        "action_class": row[3],
+        "action":       action_word,
+        "sub_label":    sub_label,
+        "banner_class": banner_class,
+        "action_class": action_class,
     }
 
 
@@ -528,13 +579,17 @@ def get_orb_session_banner() -> dict:
     """
     Compute the current global ORB session state from live ET time.
     Used by the dashboard banner — independent of any single stock.
+    Includes the market session so the frontend always knows whether
+    signals are currently live or display-only.
     """
-    from data_fetcher import orb_phase_now
-    phase = orb_phase_now()
+    from data_fetcher import orb_phase_now, market_session_now
+    phase   = orb_phase_now()
+    session = market_session_now()
     label, phase_class = get_orb_phase_label(phase)
-    action = get_orb_action(phase)
+    action = get_orb_action(phase, session=session)
     return {
         "phase":        phase,
+        "session":      session,
         "phase_label":  label,
         "phase_class":  phase_class,
         **action,
@@ -576,16 +631,37 @@ def annotate(stock: dict) -> dict:
     stock["orb_class"]             = get_orb_class(stock.get("orb_ready") or "NO")
     stock["ob_class"]              = get_ob_class(stock.get("order_block") or "Neutral")
     stock["entry_class"]           = get_entry_class(stock.get("entry_quality") or "Okay")
-    stock["exec_class"]            = get_exec_class(stock.get("exec_state") or "WAIT")
+    # ── Session-aware display state ─────────────────────────────────────────
+    # Get session once per annotate call so all derived fields are consistent.
+    try:
+        from data_fetcher import market_session_now
+        _session = market_session_now()
+    except Exception:
+        _session = "regular"
+
+    # display_exec_state: what is shown in the UI.  Never stored in the DB.
+    # The DB exec_state (TRIGGERED / READY / WAIT) is preserved for audit and
+    # alert detection.  Outside regular hours we downgrade the display so stale
+    # TRIGGERED states are never presented as immediately actionable.
+    _raw_exec = stock.get("exec_state") or "WAIT"
+    if _raw_exec == "TRIGGERED" and _session != "regular":
+        _display_exec = "WAIT"          # downgrade display — not actionable now
+    else:
+        _display_exec = _raw_exec
+
+    stock["display_exec_state"]    = _display_exec
+    stock["exec_class"]            = get_exec_class(_display_exec)
     stock["orb_status_class"]      = get_orb_status_class(stock.get("orb_status") or "NO_ORB")
     orb_phase_label, orb_phase_class = get_orb_phase_label(stock.get("orb_phase"))
     stock["orb_phase_label"]       = orb_phase_label
     stock["orb_phase_class"]       = orb_phase_class
-    orb_action                     = get_orb_action(stock.get("orb_phase"))
+    orb_action                     = get_orb_action(stock.get("orb_phase"), session=_session)
     stock["orb_action"]            = orb_action["action"]
     stock["orb_action_class"]      = orb_action["action_class"]
     stock["orb_action_sub"]        = orb_action["sub_label"]
-    freshness, freshness_class     = compute_freshness(stock.get("triggered_at"), stock.get("exec_state"))
+    freshness, freshness_class     = compute_freshness(
+        stock.get("triggered_at"), _raw_exec, session=_session
+    )
     stock["freshness"]             = freshness
     stock["freshness_class"]       = freshness_class or ""
     # ORB range visualization: position of current price on a 0-100% scale
@@ -771,7 +847,7 @@ def compute_secondary_watchlist(ranked: list, top5_set: set) -> list:
             continue
         if s.get("trade_bias") == "Avoid":
             continue
-        if s.get("exec_state") == "TRIGGERED":
+        if s.get("display_exec_state") == "TRIGGERED":
             continue
 
         mom   = s.get("momentum_score") or 0
@@ -856,7 +932,7 @@ def dashboard():
     if no_trade["lock_signals"]:
         triggered = []
     else:
-        triggered = [s for s in ranked if s.get("exec_state") == "TRIGGERED"]
+        triggered = [s for s in ranked if s.get("display_exec_state") == "TRIGGERED"]
 
     summary = compute_summary_cards(stocks)
 
@@ -1391,7 +1467,7 @@ def _stock_summary(s: dict) -> dict:
         "catalyst_score", "catalyst_reason", "catalyst_confidence", "catalyst_summary",
         "catalyst_category", "headlines_fetched_at",
         "catalyst_tags", "headline_freshness",
-        "exec_state", "exec_class",
+        "exec_state", "display_exec_state", "exec_class",
         "orb_ready", "orb_class", "orb_high", "orb_low", "orb_status",
         "orb_status_class", "orb_phase", "orb_phase_label", "orb_phase_class",
         "orb_action", "orb_action_class", "orb_action_sub", "orb_price_pct",
@@ -1430,7 +1506,9 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
         and s.get("trade_bias") != "Avoid"
     ][:5]
     no_trade     = compute_no_trade_assessment(ranked, top5)
-    triggered    = [] if no_trade["lock_signals"] else [s for s in ranked if s.get("exec_state") == "TRIGGERED"]
+    # Use display_exec_state (session-aware) so stale TRIGGERED stocks are not
+    # shown in the live-alerts section outside regular market hours.
+    triggered    = [] if no_trade["lock_signals"] else [s for s in ranked if s.get("display_exec_state") == "TRIGGERED"]
     top5_tickers = {s["ticker"] for s in top5}
     secondary    = compute_secondary_watchlist(ranked, top5_tickers)
     return {

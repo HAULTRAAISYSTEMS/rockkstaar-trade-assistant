@@ -44,6 +44,36 @@ def _et_now() -> datetime:
         return datetime.now(timezone(timedelta(hours=-4)))
 
 
+def market_session_now() -> str:
+    """
+    Return the current US market session based on US/Eastern time.
+
+    Sessions (weekdays only — weekends always return 'closed'):
+      "pre_market"  — 04:00–09:29 ET  (pre-market trading, no ORB)
+      "regular"     — 09:30–16:00 ET  (regular session, full signals active)
+      "after_hours" — 16:01–20:00 ET  (after-hours trading, signals display-only)
+      "closed"      — all other times (overnight / weekends)
+
+    This is the single source of truth for whether live trading signals
+    (TRIGGERED, EXECUTE) are currently actionable.
+    """
+    now = _et_now()
+    # Weekends are always closed
+    if now.weekday() >= 5:
+        return "closed"
+    h, m = now.hour, now.minute
+    total_min = h * 60 + m
+    if total_min < 4 * 60:            # before 04:00
+        return "closed"
+    if total_min < 9 * 60 + 30:      # 04:00–09:29
+        return "pre_market"
+    if total_min <= 16 * 60:          # 09:30–16:00
+        return "regular"
+    if total_min <= 20 * 60:          # 16:01–20:00
+        return "after_hours"
+    return "closed"                   # after 20:00
+
+
 def orb_phase_now() -> str:
     """
     Return the current ORB phase based on US/Eastern time:
