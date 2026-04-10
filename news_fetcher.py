@@ -36,6 +36,23 @@ from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
+# Log which API keys are present at import time so Render logs show immediately
+# which sources are available without needing a per-ticker fetch.
+def _log_key_status() -> None:
+    keys = {
+        "FINNHUB_API_KEY":  bool(os.environ.get("FINNHUB_API_KEY", "").strip()),
+        "NEWS_API_KEY":     bool(os.environ.get("NEWS_API_KEY",     "").strip()),
+        "POLYGON_API_KEY":  bool(os.environ.get("POLYGON_API_KEY",  "").strip()),
+    }
+    present  = [k for k, v in keys.items() if v]
+    missing  = [k for k, v in keys.items() if not v]
+    if present:
+        logger.info("news_fetcher  API keys present: %s", ", ".join(present))
+    if missing:
+        logger.info("news_fetcher  API keys missing (will use yfinance fallback): %s", ", ".join(missing))
+
+_log_key_status()
+
 
 @contextlib.contextmanager
 def _silence_yf():
@@ -270,6 +287,7 @@ def _try_finnhub(ticker: str) -> CatalystNews | None:
         with urllib.request.urlopen(url, timeout=6) as resp:
             articles = json.loads(resp.read().decode())
         if not articles:
+            logger.info("Finnhub  ticker=%s  0 articles returned", ticker)
             return None
         articles.sort(key=lambda x: x.get("datetime", 0), reverse=True)
         headlines = [a["headline"] for a in articles[:5] if a.get("headline")]
@@ -280,12 +298,13 @@ def _try_finnhub(ticker: str) -> CatalystNews | None:
         if ts:
             freshness = _minutes_ago(datetime.fromtimestamp(ts, tz=timezone.utc))
         cats = parse_catalyst_categories(headlines)
+        logger.info("Finnhub  ticker=%s  headlines=%d  categories=%s", ticker, len(headlines), cats)
         return CatalystNews(
             headlines=headlines, summary=headlines[0],
             categories=cats, freshness_minutes=freshness, source="finnhub",
         )
     except Exception as exc:
-        logger.debug("Finnhub fetch failed for %s: %s", ticker, exc)
+        logger.warning("Finnhub fetch failed for %s: %s", ticker, exc)
         return None
 
 
@@ -307,6 +326,7 @@ def _try_newsapi(ticker: str) -> CatalystNews | None:
         articles = data.get("articles", [])
         headlines = [a["title"] for a in articles if a.get("title")][:5]
         if not headlines:
+            logger.info("NewsAPI  ticker=%s  0 headlines returned  status=%s", ticker, data.get("status"))
             return None
         freshness = None
         pa = articles[0].get("publishedAt") if articles else None
@@ -314,12 +334,13 @@ def _try_newsapi(ticker: str) -> CatalystNews | None:
             dt = datetime.fromisoformat(pa.replace("Z", "+00:00"))
             freshness = _minutes_ago(dt)
         cats = parse_catalyst_categories(headlines)
+        logger.info("NewsAPI  ticker=%s  headlines=%d  categories=%s", ticker, len(headlines), cats)
         return CatalystNews(
             headlines=headlines, summary=headlines[0],
             categories=cats, freshness_minutes=freshness, source="newsapi",
         )
     except Exception as exc:
-        logger.debug("NewsAPI fetch failed for %s: %s", ticker, exc)
+        logger.warning("NewsAPI fetch failed for %s: %s", ticker, exc)
         return None
 
 
@@ -340,6 +361,7 @@ def _try_polygon(ticker: str) -> CatalystNews | None:
         results = data.get("results", [])
         headlines = [r["title"] for r in results if r.get("title")][:5]
         if not headlines:
+            logger.info("Polygon  ticker=%s  0 headlines returned", ticker)
             return None
         freshness = None
         pu = results[0].get("published_utc") if results else None
@@ -347,39 +369,85 @@ def _try_polygon(ticker: str) -> CatalystNews | None:
             dt = datetime.fromisoformat(pu.replace("Z", "+00:00"))
             freshness = _minutes_ago(dt)
         cats = parse_catalyst_categories(headlines)
+        logger.info("Polygon  ticker=%s  headlines=%d  categories=%s", ticker, len(headlines), cats)
         return CatalystNews(
             headlines=headlines, summary=headlines[0],
             categories=cats, freshness_minutes=freshness, source="polygon",
         )
     except Exception as exc:
-        logger.debug("Polygon fetch failed for %s: %s", ticker, exc)
+        logger.warning("Polygon fetch failed for %s: %s", ticker, exc)
         return None
 
 
 def _try_yfinance(ticker: str) -> CatalystNews | None:
-    """Fallback: yfinance .news (no key required)."""
+    """Fallback: yfinance .news (no key required).
+
+    yfinance changed its news payload structure around v0.2.50:
+      Old format: {"title": "...", "providerPublishTime": <unix int>, ...}
+      New format: {"id": "...", "content": {"title": "...", "pubDate": "...", ...}}
+
+    We check both paths so the code is compatible with any installed version.
+    """
     try:
         import yfinance as yf
         with _silence_yf():
             t    = yf.Ticker(ticker)
             news = t.news
         if not news:
+            logger.info("yfinance  ticker=%s  news list is empty", ticker)
             return None
-        headlines = [item.get("title", "") for item in news[:5] if item.get("title")]
+
+        headlines = []
+        freshness_dt = None
+
+        for item in news[:10]:  # scan up to 10 to get 5 real titles
+            if not isinstance(item, dict):
+                continue
+
+            # New format: content nested dict
+            content = item.get("content")
+            if isinstance(content, dict):
+                title = content.get("title", "").strip()
+                if title and not freshness_dt:
+                    pub = content.get("pubDate") or content.get("displayTime")
+                    if pub:
+                        try:
+                            freshness_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                        except Exception:
+                            pass
+            else:
+                # Old format: flat dict
+                title = item.get("title", "").strip()
+                if title and not freshness_dt:
+                    pt = item.get("providerPublishTime")
+                    if pt:
+                        try:
+                            freshness_dt = datetime.fromtimestamp(int(pt), tz=timezone.utc)
+                        except Exception:
+                            pass
+
+            if title:
+                headlines.append(title)
+            if len(headlines) >= 5:
+                break
+
         if not headlines:
+            logger.warning(
+                "yfinance  ticker=%s  news items present (%d) but no titles extracted — "
+                "structure may have changed again. First item keys: %s",
+                ticker, len(news), list(news[0].keys()) if news else [],
+            )
             return None
-        freshness = None
-        pt = news[0].get("providerPublishTime")
-        if pt:
-            dt = datetime.fromtimestamp(pt, tz=timezone.utc)
-            freshness = _minutes_ago(dt)
+
+        freshness = _minutes_ago(freshness_dt)
         cats = parse_catalyst_categories(headlines)
+        logger.info("yfinance  ticker=%s  headlines=%d  categories=%s", ticker, len(headlines), cats)
         return CatalystNews(
             headlines=headlines, summary=headlines[0],
             categories=cats, freshness_minutes=freshness, source="yfinance",
         )
     except Exception as exc:
-        logger.debug("yfinance news failed for %s: %s", ticker, exc)
+        logger.warning("yfinance news failed for %s: %s", ticker, exc)
         return None
 
 
@@ -409,9 +477,10 @@ def fetch_headlines(ticker: str) -> CatalystNews:
     for fn in (_try_finnhub, _try_newsapi, _try_polygon, _try_yfinance):
         result = fn(ticker)
         if result is not None:
-            logger.debug("Headlines for %s via %s (%d items)", ticker, result.source, len(result.headlines))
+            logger.info("fetch_headlines  ticker=%s  source=%s  headlines=%d",
+                        ticker, result.source, len(result.headlines))
             return result
-    logger.debug("No news source available for %s", ticker)
+    logger.warning("fetch_headlines  ticker=%s  ALL sources failed — returning empty fallback", ticker)
     return _EMPTY
 
 
