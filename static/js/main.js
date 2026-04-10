@@ -199,19 +199,21 @@ function playAlertSound(alertType) {
 // Trigger State Detection
 // ===========================================================================
 
-const _prevExecStates   = new Map();   // ticker → last known exec_state
+const _prevExecStates   = new Map();   // ticker → last known final_action
 let   _statesInitialized = false;      // first call just seeds state, no alerts
 
 /**
  * Compare ranked list against remembered states.
  * Returns stocks that just transitioned to TRIGGERED this cycle.
+ * Uses final_action (session-aware, score-reconciled) so alerts only fire
+ * during regular market hours when all conditions are truly confirmed.
  * On the very first call (page load), seeds the map silently.
  */
 function detectNewTriggers(ranked) {
   const fresh = [];
   for (const s of ranked) {
     const prev = _prevExecStates.get(s.ticker);
-    const cur  = s.exec_state || "WAIT";
+    const cur  = s.final_action || "WAIT";
     if (_statesInitialized && prev !== undefined && prev !== "TRIGGERED" && cur === "TRIGGERED") {
       fresh.push(s);
     }

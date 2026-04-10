@@ -280,6 +280,114 @@ def get_exec_class(exec_state):
     }.get(exec_state, "exec-wait")
 
 
+# ---------------------------------------------------------------------------
+# Final action — single source of truth for the UI decision label
+# ---------------------------------------------------------------------------
+
+_FINAL_ACTION_CSS = {
+    "TRIGGERED":       "exec-triggered",
+    "READY":           "exec-ready",
+    "WAIT":            "exec-wait",
+    "WAIT (LOW CONF)": "exec-wait-low",
+    "DO NOT CHASE":    "exec-extended",
+    "NO SETUP":        "exec-no-setup",
+}
+
+
+def get_final_action_class(final_action: str) -> str:
+    return _FINAL_ACTION_CSS.get(final_action, "exec-wait")
+
+
+def compute_final_action(
+    setup_score: int,
+    cat_score: int,
+    combined_confidence: str,
+    entry_quality: str | None,
+    display_exec_state: str,
+) -> tuple:
+    """
+    Derive the single final decision shown everywhere in the UI.
+    Returns (final_action: str, css_class: str, reason: str).
+
+    Priority order:
+      1. TRIGGERED  — ORB system confirmed all entry conditions (session-aware)
+      2. DO NOT CHASE — price already extended; never enter late
+      3. READY      — scores ≥ 4 / 4 and confidence ≥ Medium
+      4. WAIT (LOW CONF) — scores ≥ 4 / 4 but confidence Low
+      5. READY      — ORB system says READY even if scores are borderline
+      6. NO SETUP   — setup_score < 3; nothing actionable
+      7. WAIT       — default / conditions not yet met
+
+    The DB exec_state is never modified here; only the display layer changes.
+    """
+    # 1. Triggered by ORB system during regular hours — strongest signal
+    if display_exec_state == "TRIGGERED":
+        reason = "All entry conditions confirmed — act now"
+        logger.debug(
+            "final_action=TRIGGERED  setup=%s cat=%s conf=%s entry=%s",
+            setup_score, cat_score, combined_confidence, entry_quality,
+        )
+        return "TRIGGERED", "exec-triggered", reason
+
+    # 2. Extended entry — do not chase regardless of scores
+    if (entry_quality or "").lower() == "extended":
+        reason = "Price extended above entry zone — wait for pullback"
+        logger.debug(
+            "final_action=DO NOT CHASE  setup=%s cat=%s conf=%s entry=Extended",
+            setup_score, cat_score, combined_confidence,
+        )
+        return "DO NOT CHASE", "exec-extended", reason
+
+    # 3 & 4. Score-based decision (setup ≥ 4 and catalyst ≥ 4)
+    if setup_score >= 4 and cat_score >= 4:
+        if combined_confidence in ("High", "Medium"):
+            reason = (
+                f"Setup {setup_score}/10 · Catalyst {cat_score}/10 · "
+                f"{combined_confidence} confidence"
+            )
+            logger.debug(
+                "final_action=READY  setup=%s cat=%s conf=%s entry=%s",
+                setup_score, cat_score, combined_confidence, entry_quality,
+            )
+            return "READY", "exec-ready", reason
+        else:
+            reason = (
+                f"Scores strong (setup {setup_score}, catalyst {cat_score}) "
+                "but confidence Low — wait for confirmation"
+            )
+            logger.debug(
+                "final_action=WAIT (LOW CONF)  setup=%s cat=%s conf=%s entry=%s",
+                setup_score, cat_score, combined_confidence, entry_quality,
+            )
+            return "WAIT (LOW CONF)", "exec-wait-low", reason
+
+    # 5. ORB system says READY even if scores are borderline
+    if display_exec_state == "READY":
+        reason = "ORB conditions met — watching for entry signal"
+        logger.debug(
+            "final_action=READY (ORB)  setup=%s cat=%s conf=%s entry=%s",
+            setup_score, cat_score, combined_confidence, entry_quality,
+        )
+        return "READY", "exec-ready", reason
+
+    # 6. No setup
+    if setup_score < 3:
+        reason = f"Setup score {setup_score}/10 — no actionable pattern yet"
+        logger.debug(
+            "final_action=NO SETUP  setup=%s cat=%s conf=%s entry=%s",
+            setup_score, cat_score, combined_confidence, entry_quality,
+        )
+        return "NO SETUP", "exec-no-setup", reason
+
+    # 7. Default
+    reason = "Conditions not yet met — continue monitoring"
+    logger.debug(
+        "final_action=WAIT  setup=%s cat=%s conf=%s entry=%s",
+        setup_score, cat_score, combined_confidence, entry_quality,
+    )
+    return "WAIT", "exec-wait", reason
+
+
 def compute_pnl(direction: str, entry: float, exit_: float) -> tuple:
     """
     Compute directional P&L% and result label from a closed trade.
@@ -650,7 +758,28 @@ def annotate(stock: dict) -> dict:
         _display_exec = _raw_exec
 
     stock["display_exec_state"]    = _display_exec
-    stock["exec_class"]            = get_exec_class(_display_exec)
+
+    # ── Combined confidence (worst-of-two: catalyst + setup) ────────────────
+    _confs = [
+        stock.get("catalyst_confidence") or "Low",
+        stock.get("setup_confidence")    or "Low",
+    ]
+    _combined_conf = "Low" if "Low" in _confs else ("Medium" if "Medium" in _confs else "High")
+    stock["combined_confidence"]   = _combined_conf
+    stock["combined_conf_class"]   = get_confidence_class(_combined_conf)
+
+    # ── Final action — single source of truth for all UI decision labels ────
+    _fa, _fa_class, _fa_reason = compute_final_action(
+        setup_score         = stock.get("setup_score")    or 0,
+        cat_score           = stock.get("catalyst_score") or 0,
+        combined_confidence = _combined_conf,
+        entry_quality       = stock.get("entry_quality"),
+        display_exec_state  = _display_exec,
+    )
+    stock["final_action"]          = _fa
+    stock["final_action_class"]    = _fa_class
+    stock["final_action_reason"]   = _fa_reason
+    stock["exec_class"]            = _fa_class          # drives every exec badge in the UI
     stock["orb_status_class"]      = get_orb_status_class(stock.get("orb_status") or "NO_ORB")
     orb_phase_label, orb_phase_class = get_orb_phase_label(stock.get("orb_phase"))
     stock["orb_phase_label"]       = orb_phase_label
@@ -1320,14 +1449,7 @@ def quick_mode():
     ranked   = rank_stocks(stocks)
     top3     = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
 
-    # Worst-of-two confidence for display
-    for s in top3:
-        confs = [s.get("catalyst_confidence") or "Low", s.get("setup_confidence") or "Low"]
-        s["combined_confidence"] = (
-            "Low" if "Low" in confs else ("Medium" if "Medium" in confs else "High")
-        )
-        s["combined_conf_class"] = get_confidence_class(s["combined_confidence"])
-
+    # combined_confidence and final_action are already set by annotate()
     return render_template(
         "quick.html",
         stocks=top3,
@@ -1468,6 +1590,8 @@ def _stock_summary(s: dict) -> dict:
         "catalyst_category", "headlines_fetched_at",
         "catalyst_tags", "headline_freshness",
         "exec_state", "display_exec_state", "exec_class",
+        "final_action", "final_action_class", "final_action_reason",
+        "combined_confidence", "combined_conf_class",
         "orb_ready", "orb_class", "orb_high", "orb_low", "orb_status",
         "orb_status_class", "orb_phase", "orb_phase_label", "orb_phase_class",
         "orb_action", "orb_action_class", "orb_action_sub", "orb_price_pct",
@@ -1534,11 +1658,8 @@ def _build_quick_payload(wl_id: int | None) -> dict:
     top3      = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
     out = []
     for s in top3:
-        d = _stock_summary(s)
-        confs = [s.get("catalyst_confidence") or "Low", s.get("setup_confidence") or "Low"]
-        d["combined_confidence"] = "Low" if "Low" in confs else ("Medium" if "Medium" in confs else "High")
-        d["combined_conf_class"] = get_confidence_class(d["combined_confidence"])
-        out.append(d)
+        # combined_confidence and final_action are already set by annotate()
+        out.append(_stock_summary(s))
     return {
         "type":        "quick",
         "server_time": datetime.now().strftime("%H:%M:%S"),

@@ -165,10 +165,10 @@
   <h2 class="section-title">⚡ Top 5 In Play</h2>
   <div class="top5-grid">
     {% for s in top5 %}
-    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="top5-card {{ s.score_class }}{% if s.exec_state == 'TRIGGERED' %} top5-triggered{% endif %}" data-ticker="{{ s.ticker }}">
+    <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="top5-card {{ s.score_class }}{% if s.final_action == 'TRIGGERED' %} top5-triggered{% endif %}" data-ticker="{{ s.ticker }}">
       <div class="top5-header">
         <div class="top5-ticker">{{ s.ticker }}</div>
-        <span class="exec-badge exec-badge-sm {{ s.exec_class }}">{{ s.exec_state or 'WAIT' }}</span>
+        <span class="exec-badge exec-badge-sm {{ s.exec_class }}">{{ s.final_action or 'WAIT' }}</span>
         {% if s.freshness %}
         <span class="freshness-badge {{ s.freshness_class }}">{{ s.freshness }}</span>
         {% endif %}
@@ -274,7 +274,7 @@
       <div class="secondary-card-header">
         <span class="secondary-ticker">{{ s.ticker }}</span>
         <span class="secondary-tier-badge {{ s.secondary_tier_class }}">{{ s.secondary_tier }}</span>
-        <span class="exec-badge exec-badge-sm {{ s.exec_class }}">{{ s.exec_state or 'WAIT' }}</span>
+        <span class="exec-badge exec-badge-sm {{ s.exec_class }}">{{ s.final_action or 'WAIT' }}</span>
       </div>
       <div class="secondary-price">${{ "%.2f"|format(s.current_price) if s.current_price is not none else "N/A" }}
         <span class="secondary-gap {{ s.gap_class }}">{{ s.gap_display }}</span>
@@ -329,7 +329,7 @@
       </thead>
       <tbody>
         {% for s in ranked %}
-        <tr class="row-{{ s.score_class }}{% if s.exec_state == 'TRIGGERED' %} row-triggered{% endif %}"
+        <tr class="row-{{ s.score_class }}{% if s.final_action == 'TRIGGERED' %} row-triggered{% endif %}"
             data-ticker="{{ s.ticker }}"
             onclick="window.location='{{ url_for('stock_detail', ticker=s.ticker) }}'">
 
@@ -359,7 +359,7 @@
           </td>
 
           <td class="state-cell">
-            <span class="exec-badge {{ s.exec_class }}" data-field="exec_badge">{{ s.exec_state or 'WAIT' }}</span>
+            <span class="exec-badge {{ s.exec_class }}" data-field="exec_badge">{{ s.final_action or 'WAIT' }}</span>
             <span class="freshness-badge freshness-badge-sm {{ s.freshness_class }}" data-field="freshness_badge" {% if not s.freshness %}style="display:none"{% endif %}>{{ s.freshness or '' }}</span>
           </td>
 
@@ -592,7 +592,7 @@ function updateTableRow(s) {
   if (!row) return;
 
   const execBadge = row.querySelector('[data-field="exec_badge"]');
-  if (execBadge) { execBadge.className = 'exec-badge ' + s.exec_class; execBadge.textContent = s.exec_state || 'WAIT'; }
+  if (execBadge) { execBadge.className = 'exec-badge ' + s.exec_class; execBadge.textContent = s.final_action || 'WAIT'; }
 
   const freshBadge = row.querySelector('[data-field="freshness_badge"]');
   if (freshBadge) {
@@ -633,14 +633,14 @@ function updateTableRow(s) {
   if (setupCell) setupCell.innerHTML = renderScoreCell(s.setup_score, s.score_class);
 
   // Row-level state classes
-  row.classList.toggle('row-triggered', s.exec_state === 'TRIGGERED');
+  row.classList.toggle('row-triggered', s.final_action === 'TRIGGERED');
   ['row-strong','row-moderate','row-weak','row-neutral'].forEach(c => row.classList.remove(c));
   if (s.score_class) row.classList.add('row-' + s.score_class);
 
   // Visual priority for triggered rows based on freshness
   const _priorityClasses = ['row-priority-fresh','row-priority-active','row-priority-stale','row-priority-premarket'];
   _priorityClasses.forEach(c => row.classList.remove(c));
-  if (s.exec_state === 'TRIGGERED') {
+  if (s.final_action === 'TRIGGERED') {
     const fc = s.freshness_class || '';
     if (fc === 'fresh-breakout')  row.classList.add('row-priority-fresh');
     else if (fc === 'fresh-active') row.classList.add('row-priority-active');
@@ -656,14 +656,14 @@ function updateTop5Card(s) {
   const priceEl = card.querySelector('.top5-price');
   if (priceEl && s.current_price != null) priceEl.textContent = '$' + s.current_price.toFixed(2);
   const execBadge = card.querySelector('.exec-badge');
-  if (execBadge) { execBadge.className = 'exec-badge exec-badge-sm ' + s.exec_class; execBadge.textContent = s.exec_state || 'WAIT'; }
+  if (execBadge) { execBadge.className = 'exec-badge exec-badge-sm ' + s.exec_class; execBadge.textContent = s.final_action || 'WAIT'; }
   const gapEl = card.querySelector('.top5-gap');
   if (gapEl) { gapEl.className = 'top5-gap ' + s.gap_class; gapEl.textContent = s.gap_display; }
-  card.classList.toggle('top5-triggered', s.exec_state === 'TRIGGERED');
+  card.classList.toggle('top5-triggered', s.final_action === 'TRIGGERED');
 
   // Visual priority for triggered top-5 cards
   ['top5-priority-fresh','top5-priority-active','top5-priority-stale'].forEach(c => card.classList.remove(c));
-  if (s.exec_state === 'TRIGGERED') {
+  if (s.final_action === 'TRIGGERED') {
     const fc = s.freshness_class || '';
     if (fc === 'fresh-breakout')    card.classList.add('top5-priority-fresh');
     else if (fc === 'fresh-active') card.classList.add('top5-priority-active');
@@ -730,7 +730,7 @@ function pinTriggeredRowsToTop(ranked, freshTickers) {
   // Build ordered list: fresh triggers → other triggered → rest (ranked order)
   const freshSet     = new Set(freshTickers);
   const triggeredSet = new Set(
-    ranked.filter(s => s.exec_state === 'TRIGGERED').map(s => s.ticker)
+    ranked.filter(s => s.final_action === 'TRIGGERED').map(s => s.ticker)
   );
 
   const freshGroup     = ranked.filter(s => freshSet.has(s.ticker));

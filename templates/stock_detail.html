@@ -10,7 +10,7 @@
     <a href="{{ url_for('dashboard') }}" class="back-link">← Dashboard</a>
     <div class="detail-title-row">
       <h1 class="detail-ticker">{{ stock.ticker }}</h1>
-      <span id="detail-exec-badge" class="exec-badge exec-badge-lg {{ stock.exec_class }}">{{ stock.exec_state or 'WAIT' }}</span>
+      <span id="detail-exec-badge" class="exec-badge exec-badge-lg {{ stock.exec_class }}">{{ stock.final_action or 'WAIT' }}</span>
       <span id="detail-freshness-badge" class="freshness-badge freshness-badge-lg {{ stock.freshness_class }}" {% if not stock.freshness %}style="display:none"{% endif %}>{{ stock.freshness or '' }}</span>
       {% if stock.position_size == 'reduced' %}
       <span class="mr-position-badge">⚠ Reduced Size</span>
@@ -98,9 +98,9 @@
 
     <div class="structure-item">
       <div class="structure-label">ORB State</div>
-      <!-- Action directive — the most important signal -->
-      <div id="detail-orb-action" class="orb-action-directive {{ stock.orb_action_class }}">
-        {{ stock.orb_action }}
+      <!-- Final action — single source of truth for the primary directive -->
+      <div id="detail-orb-action" class="orb-action-directive {{ stock.final_action_class }}">
+        {{ stock.final_action or 'WAIT' }}
       </div>
       <div class="orb-readiness-row">
         <span id="detail-orb-ready" class="signal-badge signal-badge-lg {{ stock.orb_class }}">
@@ -392,7 +392,7 @@
         <div class="setup-factor-label">ORB Ready</div>
         <span class="signal-badge {{ stock.orb_class }}">{{ stock.orb_ready or 'NO' }}</span>
         <div class="setup-factor-hint">
-          <span class="orb-action-inline {{ stock.orb_action_class }}">{{ stock.orb_action }}</span>
+          <span class="orb-action-inline {{ stock.final_action_class }}">{{ stock.final_action or 'WAIT' }}</span>
         </div>
       </div>
       <div class="setup-factor">
@@ -732,7 +732,7 @@ async function stockDetailRefresh() {
 
     // Header badges
     const execBadge = document.getElementById('detail-exec-badge');
-    if (execBadge) { execBadge.className = 'exec-badge exec-badge-lg ' + s.exec_class; execBadge.textContent = s.exec_state || 'WAIT'; }
+    if (execBadge) { execBadge.className = 'exec-badge exec-badge-lg ' + s.exec_class; execBadge.textContent = s.final_action || 'WAIT'; }
 
     const freshBadge = document.getElementById('detail-freshness-badge');
     if (freshBadge) {
@@ -781,7 +781,7 @@ async function stockDetailRefresh() {
 
     // ORB structure strip
     const orbAction = document.getElementById('detail-orb-action');
-    if (orbAction) { orbAction.className = 'orb-action-directive ' + s.orb_action_class; orbAction.textContent = s.orb_action; }
+    if (orbAction) { orbAction.className = 'orb-action-directive ' + s.final_action_class; orbAction.textContent = s.final_action || 'WAIT'; }
 
     const orbReady = document.getElementById('detail-orb-ready');
     if (orbReady) { orbReady.className = 'signal-badge signal-badge-lg ' + s.orb_class; orbReady.textContent = s.orb_ready || 'NO'; }
