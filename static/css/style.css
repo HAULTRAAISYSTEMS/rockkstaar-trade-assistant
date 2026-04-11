@@ -3556,14 +3556,21 @@ a { color: inherit; text-decoration: none; }
   color: #ecc94b;
   border: 1px solid rgba(236, 201, 75, 0.35);
 }
+.state-partial {
+  background: rgba(154, 230, 180, 0.15);
+  color: #68d391;
+  border: 1px solid rgba(154, 230, 180, 0.35);
+  animation: state-pulse 2s ease-in-out infinite;
+}
 @keyframes state-pulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.45; }
 }
 
-/* Row-level tint for unavailable / stale rows */
+/* Row-level tint for unavailable / stale / partial rows */
 .row-state-unavailable { opacity: 0.55; }
-.row-state-stale td:not(.ticker-cell):not(.actions-cell) { color: var(--text-muted); }
+.row-state-stale   td:not(.ticker-cell):not(.actions-cell) { color: var(--text-muted); }
+.row-state-partial td:not(.ticker-cell):not(.actions-cell) { color: var(--text-muted); }
 
 /* State banners (stock detail page) */
 .state-banner {

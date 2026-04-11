@@ -363,7 +363,7 @@
       </thead>
       <tbody>
         {% for s in ranked %}
-        <tr class="row-{{ s.swing_score_class }} {% if s.ticker_state in ('error','loading') %}row-state-unavailable{% elif s.ticker_state == 'stale' %}row-state-stale{% endif %}"
+        <tr class="row-{{ s.swing_score_class }} {% if s.ticker_state in ('error','loading') %}row-state-unavailable{% elif s.ticker_state == 'stale' %}row-state-stale{% elif s.ticker_state == 'partial' %}row-state-partial{% endif %}"
             data-ticker="{{ s.ticker }}"
             data-score="{{ s.swing_score or 0 }}"
             data-status="{{ s.swing_status or '' }}"
@@ -378,6 +378,8 @@
             <span class="ticker-symbol">{{ s.ticker }}</span>
             {% if s.ticker_state == 'loading' %}
               <span class="state-badge state-loading" title="Fetching data…">Loading</span>
+            {% elif s.ticker_state == 'partial' %}
+              <span class="state-badge state-partial" title="Core data loaded — full analysis pending">Partial</span>
             {% elif s.ticker_state == 'error' %}
               <span class="state-badge state-error" title="Data unavailable — click ⟳ to retry">Error</span>
             {% elif s.ticker_state == 'stale' %}
@@ -406,10 +408,12 @@
 
           <!-- Swing Status / Action -->
           <td class="state-cell">
-            {% if s.ticker_state in ('loading', 'error') %}
-              <span class="exec-badge exec-wait text-muted">
-                {% if s.ticker_state == 'loading' %}Fetching…{% else %}Unavailable{% endif %}
-              </span>
+            {% if s.ticker_state == 'loading' %}
+              <span class="exec-badge exec-wait text-muted">Fetching…</span>
+            {% elif s.ticker_state == 'error' %}
+              <span class="exec-badge exec-wait text-muted">Unavailable</span>
+            {% elif s.ticker_state == 'partial' %}
+              <span class="exec-badge exec-wait text-muted" title="Price loaded — analysis still running">Analyzing…</span>
             {% else %}
               <span class="exec-badge {{ s.exec_class }}" data-field="exec_badge">{{ s.final_action or 'WAIT' }}</span>
             {% endif %}
@@ -655,5 +659,50 @@ function toggleDisciplineMode() {
 
 // Run filter on page load to initialise the count
 applyFilter();
+
+// ── Auto-poll: reload page when loading/partial tickers change state ─────────
+(function () {
+  // Build a map of ticker → current state for tickers still in flux.
+  var transient = {};
+  {% for s in ranked %}
+  {% if s.ticker_state in ('loading', 'partial') %}
+  transient["{{ s.ticker }}"] = "{{ s.ticker_state }}";
+  {% endif %}
+  {% endfor %}
+
+  // Nothing in flux — no polling needed.
+  if (Object.keys(transient).length === 0) return;
+
+  var pollInterval = setInterval(function () {
+    fetch('/api/ticker-states')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var states  = data.states || {};
+        var reload  = false;
+
+        Object.keys(transient).forEach(function (ticker) {
+          var oldState = transient[ticker];
+          var newState = states[ticker];
+          if (!newState || newState === oldState) return;
+
+          // loading → anything            = reload to show new state
+          // partial → ready/stale/error   = reload to show full data
+          if (oldState === 'loading') {
+            reload = true;
+          } else if (oldState === 'partial' &&
+                     newState !== 'partial' && newState !== 'loading') {
+            reload = true;
+          }
+          transient[ticker] = newState;   // update local copy
+        });
+
+        if (reload) {
+          clearInterval(pollInterval);
+          window.location.reload();
+        }
+      })
+      .catch(function () { /* ignore transient network errors */ });
+  }, 3000);   // poll every 3 seconds
+})();
 </script>
 {% endblock %}

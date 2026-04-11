@@ -433,9 +433,9 @@ def generate_stock_data(ticker: str) -> dict:
     if _price_ok and _ema_ok and _score_ok:
         data["ticker_state"] = "ready"
     elif _price_ok:
-        data["ticker_state"] = "stale"   # has price but incomplete analysis
+        data["ticker_state"] = "partial"  # price obtained but analysis incomplete
     else:
-        data["ticker_state"] = "error"   # no usable price data
+        data["ticker_state"] = "error"    # no usable price data
 
     if _errors:
         _log.info(
@@ -601,7 +601,7 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
     if _price_ok and _ema_ok and _score_ok:
         data["ticker_state"] = "ready"
     elif _price_ok:
-        data["ticker_state"] = "stale"
+        data["ticker_state"] = "partial"  # price obtained but analysis incomplete
     else:
         data["ticker_state"] = "error"
 

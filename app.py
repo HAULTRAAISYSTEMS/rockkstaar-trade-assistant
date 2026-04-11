@@ -33,7 +33,7 @@ from database import (
     add_journal_entry, update_journal_entry, delete_journal_entry,
     get_journal_entry, get_all_journal_entries,
 )
-from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock
+from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
 from scoring import catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES, compute_swing_grade
 from classifier import classify_stock
 
@@ -53,6 +53,10 @@ init_db()
 # flag (cross-process locking is not needed for UX safety on a single user app).
 _refresh_all_lock   = threading.Lock()
 _refresh_all_running = False
+
+# Loading timeout: tickers stuck in 'loading' for longer than this are
+# transitioned to 'error' so the Loading badge never shows forever.
+LOADING_TIMEOUT_SECS = 120
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +124,36 @@ def auto_refresh_stale_closes(tickers: list) -> list:
             set_ticker_state(ticker, "stale")
 
     return refreshed
+
+
+def _expire_stuck_loading(watchlist: list) -> None:
+    """
+    Transition any ticker that has been in 'loading' state for longer than
+    LOADING_TIMEOUT_SECS from 'loading' → 'error'.  Called on every dashboard
+    load to prevent the Loading badge from persisting forever.
+
+    Logs:
+        expire_loading  ticker=X  age_secs=N  reason=timeout
+    """
+    now = datetime.now()
+    for ticker in watchlist:
+        stock = get_stock_data(ticker)
+        if not stock or stock.get("ticker_state") != "loading":
+            continue
+        last_updated = stock.get("last_updated") or ""
+        try:
+            updated_at = datetime.strptime(last_updated[:19], "%Y-%m-%d %H:%M:%S")
+            age_secs   = (now - updated_at).total_seconds()
+        except (ValueError, TypeError):
+            age_secs = LOADING_TIMEOUT_SECS + 1  # unknown timestamp → expire it
+
+        if age_secs > LOADING_TIMEOUT_SECS:
+            set_ticker_state(ticker, "error")
+            logger.warning(
+                "expire_loading  ticker=%s  age_secs=%.0f  reason=timeout  "
+                "action=set_state_error",
+                ticker, age_secs,
+            )
 
 
 def get_active_wl_id() -> int | None:
@@ -767,12 +801,14 @@ def annotate(stock: dict) -> dict:
     stock["ticker_state"] = _state
     stock["ticker_state_class"] = {
         "loading": "state-loading",
+        "partial": "state-partial",
         "ready":   "state-ready",
         "error":   "state-error",
         "stale":   "state-stale",
     }.get(_state, "state-ready")
     stock["ticker_state_label"] = {
         "loading": "Loading",
+        "partial": "Partial",
         "ready":   "",
         "error":   "Data Error",
         "stale":   "Stale",
@@ -798,6 +834,7 @@ def annotate(stock: dict) -> dict:
     }
     # For error/loading states, skip price defaults so templates can check
     # `is not none` and show "N/A" / "—" instead of misleading $0.00.
+    # Partial has real price data — allow defaults.
     # Score defaults are always applied — they're needed for JS filter logic.
     if _state not in ("error", "loading"):
         for field, default in _PRICE_DEFAULTS.items():
@@ -1292,6 +1329,8 @@ def _dashboard_inner():
     # Auto-refresh any stocks whose prev_close_date is stale (new trading day)
     if watchlist:
         auto_refresh_stale_closes(watchlist)
+        # Expire any tickers stuck in 'loading' for longer than LOADING_TIMEOUT_SECS
+        _expire_stuck_loading(watchlist)
 
     all_data = get_all_stock_data()
     logger.info("dashboard  route=/  wl_id=%s  tickers=%s", active_wl_id, watchlist)
@@ -1382,51 +1421,179 @@ def _dashboard_inner():
     )
 
 
+def _onboard_ticker_bg(ticker: str) -> None:
+    """
+    Background onboarding pipeline for a newly added ticker.
+
+    Stage 1 — Core data (fast):
+        Fetch current_price, prev_close, gap_pct, volume from yfinance.
+        If price > 0  → save a 'partial' snapshot so the row shows real data.
+        If price = 0  → set state = 'error' and return.
+
+    Stage 2 — Full analysis (slow, may take 15-30 s on Render):
+        Run the full generate_stock_data() pipeline (EMAs, Fib, zones, scoring).
+        Result is 'ready', 'partial', or 'error' depending on what succeeded.
+
+    Logs at every transition so Render logs can be followed in real time.
+
+    State flow:  loading → partial (after Stage 1) → ready/partial/error (after Stage 2)
+    """
+    logger.info("onboard_bg  ticker=%s  stage=start", ticker)
+
+    # ── Stage 1: Core price data ───────────────────────────────────────────
+    stage1_ok = False
+    try:
+        from data_fetcher import fetch_live_data as _fetch_live
+        live = _fetch_live(ticker)
+        price = float(live.get("current_price") or 0) if live else 0.0
+        if price > 0:
+            gap = float(live.get("gap_pct") or 0)
+            partial = {
+                "ticker":               ticker,
+                "current_price":        price,
+                "prev_close":           live.get("prev_close"),
+                "gap_pct":              gap,
+                "prev_close_date":      live.get("prev_close_date"),
+                "premarket_high":       live.get("premarket_high"),
+                "premarket_low":        live.get("premarket_low"),
+                "prev_day_high":        live.get("prev_day_high"),
+                "prev_day_low":         live.get("prev_day_low"),
+                "avg_volume":           live.get("avg_volume", 0),
+                "rel_volume":           live.get("rel_volume", 1.0),
+                "earnings_date":        live.get("earnings_date"),
+                "vwap":                 live.get("vwap"),
+                "orb_phase":            live.get("orb_phase", "pre_market"),
+                "orb_high":             None,
+                "orb_low":              None,
+                "trade_bias":           ("Long Bias"  if gap >  3 else
+                                         "Short Bias" if gap < -3 else "Neutral"),
+                # Scoring defaults — analysis not yet complete
+                "catalyst_summary":         "Analysis pending…",
+                "news_headlines":           "[]",
+                "catalyst_category":        "[]",
+                "headlines_fetched_at":     None,
+                "catalyst_score":           0,
+                "catalyst_reason":          "Pending",
+                "catalyst_confidence":      "Low",
+                "momentum_score":           0,
+                "momentum_reason":          None,
+                "momentum_confidence":      "Low",
+                "setup_score":              0,
+                "setup_reason":             None,
+                "setup_confidence":         "Low",
+                "setup_type":               "No Setup",
+                "swing_score":              1,
+                "swing_reason":             None,
+                "swing_confidence":         "Low",
+                "swing_setup_type":         "No Setup",
+                "swing_status":             "NOT ENOUGH EDGE",
+                "exec_state":               "WAIT",
+                "orb_ready":                "NO",
+                "orb_status":               "NO_ORB",
+                "order_block":              "Neutral",
+                "entry_quality":            "Okay",
+                "position_size":            "normal",
+                "entry_note":               None,
+                "momentum_breakout":        False,
+                "candles_above_orb":        0,
+                "orb_hold":                 False,
+                "trend_structure":          False,
+                "higher_highs":             False,
+                "higher_lows":              False,
+                "strong_candle_bodies":     False,
+                "price_above_vwap":         False,
+                "momentum_runner":          False,
+                "structure_momentum_score": 0,
+                "ticker_state":             "partial",
+                "last_updated":             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            # Fill all swing/zone analysis keys so upsert_stock_data doesn't
+            # fail on named-param binding for missing columns.
+            _swing_defaults(partial)
+            _zone_defaults(partial)
+            upsert_stock_data(partial)
+            stage1_ok = True
+            logger.info(
+                "onboard_bg  ticker=%s  stage=1_complete  state=partial  price=%.2f",
+                ticker, price,
+            )
+        else:
+            logger.warning(
+                "onboard_bg  ticker=%s  stage=1_failed  reason=no_price  live=%s",
+                ticker, bool(live),
+            )
+    except Exception as exc:
+        logger.error(
+            "onboard_bg  ticker=%s  stage=1_error  err=%s",
+            ticker, exc, exc_info=True,
+        )
+
+    if not stage1_ok:
+        set_ticker_state(ticker, "error")
+        logger.warning("onboard_bg  ticker=%s  stage=1_complete  state=error", ticker)
+        return
+
+    # ── Stage 2: Full analysis (EMAs, Fib, zones, scoring) ────────────────
+    try:
+        fresh = generate_stock_data(ticker)
+        upsert_stock_data(fresh)
+        run_auto_classification(ticker)
+        logger.info(
+            "onboard_bg  ticker=%s  stage=2_complete  state=%s",
+            ticker, fresh.get("ticker_state"),
+        )
+    except Exception as exc:
+        logger.error(
+            "onboard_bg  ticker=%s  stage=2_error  err=%s",
+            ticker, exc, exc_info=True,
+        )
+        # Stage 1 data is still in the DB — keep it as partial, not error.
+        existing = get_stock_data(ticker)
+        if existing and existing.get("current_price"):
+            set_ticker_state(ticker, "partial")
+            logger.warning(
+                "onboard_bg  ticker=%s  stage=2_complete  state=partial  "
+                "reason=analysis_failed",
+                ticker,
+            )
+        else:
+            set_ticker_state(ticker, "error")
+
+
 @app.route("/watchlist/add", methods=["POST"])
 def watchlist_add():
     """Add one or more tickers to the active watchlist."""
-    wl_id = get_active_wl_id()
-    raw   = request.form.get("tickers", "")
-    added  = []
-    failed = []
+    wl_id  = get_active_wl_id()
+    raw    = request.form.get("tickers", "")
+    queued = []
     for t in re.split(r"[\s,]+", raw.upper()):
         t = t.strip()
         if not (t and t.isalpha() and 1 <= len(t) <= 5 and wl_id):
             continue
-        # Phase 1: claim the watchlist slot + insert a loading placeholder so the
-        # ticker appears on the dashboard immediately instead of "Not yet loaded".
+        # Claim the watchlist slot + insert a Loading placeholder so the
+        # ticker appears on the dashboard immediately.
         add_ticker_to_watchlist(wl_id, t)
         upsert_loading_placeholder(t)
-        logger.info("watchlist_add  ticker=%s  wl_id=%s  stage=placeholder", t, wl_id)
-        # Phase 2: full data fetch + scoring
-        try:
-            fresh = generate_stock_data(t)
-            upsert_stock_data(fresh)
-            run_auto_classification(t)
-            added.append(t)
-            logger.info(
-                "watchlist_add  ticker=%s  wl_id=%s  stage=complete  state=%s",
-                t, wl_id, fresh.get("ticker_state"),
-            )
-        except Exception as exc:
-            logger.error(
-                "watchlist_add  ticker=%s  wl_id=%s  stage=generate_failed  err=%s",
-                t, wl_id, exc, exc_info=True,
-            )
-            set_ticker_state(t, "error")
-            failed.append(t)
+        logger.info("watchlist_add  ticker=%s  wl_id=%s  stage=placeholder_queued", t, wl_id)
+        # Fire the two-stage onboarding pipeline in a background thread so the
+        # HTTP response returns immediately and the UI shows the Loading badge.
+        threading.Thread(
+            target=_onboard_ticker_bg,
+            args=(t,),
+            daemon=True,
+            name=f"onboard-{t}",
+        ).start()
+        queued.append(t)
 
-    if added:
-        remaining = get_watchlist_stocks(wl_id)
-        logger.info("watchlist_add  added=%s  wl_id=%s  watchlist=%s", added, wl_id, remaining)
-        flash(f"Added: {', '.join(added)}", "success")
-    if failed:
+    if queued:
         flash(
-            f"Data fetch failed for: {', '.join(failed)}. "
-            "Showing as error — click ⟳ on the row to retry.",
-            "warning",
+            f"Adding {', '.join(queued)}… "
+            "The row shows Loading → Partial → Ready as data arrives. "
+            "The page auto-refreshes when it's ready.",
+            "success",
         )
-    if not added and not failed:
+        logger.info("watchlist_add  queued=%s  wl_id=%s", queued, wl_id)
+    else:
         flash("No valid tickers found. Use 1–5 letter stock symbols.", "error")
     return redirect(url_for("dashboard"))
 
@@ -1614,7 +1781,7 @@ def refresh_single(ticker):
         logger.error("refresh_single  ticker=%s  err=%s", t, exc, exc_info=True)
         existing = get_stock_data(t)
         if existing and existing.get("current_price"):
-            set_ticker_state(t, "stale")
+            set_ticker_state(t, "stale")   # was good before — keep showing last known data
             flash(f"Refresh failed for {t}. Showing last known data.", "warning")
         else:
             set_ticker_state(t, "error")
@@ -2088,6 +2255,28 @@ def api_stock_live(ticker):
         logger.warning("live_refresh_stock failed for %s: %s", ticker, exc)
     annotate(stock)
     return jsonify(_stock_summary(stock))
+
+
+@app.route("/api/ticker-states")
+def api_ticker_states():
+    """
+    Return the current ticker_state for every ticker in the active watchlist.
+
+    Used by the dashboard JS to poll for state changes on loading/partial
+    tickers and trigger a page reload when they transition to a stable state.
+
+    Response:
+        { "states": { "AMD": "partial", "LMT": "ready", ... } }
+    """
+    wl_id     = get_active_wl_id()
+    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+    all_data  = get_all_stock_data()
+    data_map  = {s["ticker"]: s for s in all_data}
+    states = {
+        t: (data_map[t].get("ticker_state") or "loading") if t in data_map else "loading"
+        for t in watchlist
+    }
+    return jsonify({"states": states})
 
 
 # ---------------------------------------------------------------------------
