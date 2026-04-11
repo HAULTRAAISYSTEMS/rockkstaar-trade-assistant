@@ -426,6 +426,8 @@ def init_db():
         ("h4_hh_hl",         "INTEGER DEFAULT 0"),
         ("m15_higher_low",   "INTEGER DEFAULT 0"),
         ("m15_confirmation", "INTEGER DEFAULT 0"),
+        # Ticker state: loading | ready | error | stale
+        ("ticker_state",     "TEXT DEFAULT 'ready'"),
     ]
     for col, col_type in _new_columns:
         if _USE_POSTGRES:
@@ -739,6 +741,8 @@ def upsert_stock_data(data: dict):
     else:
         data["triggered_at"] = None
 
+    data.setdefault("ticker_state", "ready")
+
     conn.execute("""
         INSERT INTO stock_data
             (ticker, current_price, prev_close, gap_pct, premarket_high,
@@ -769,7 +773,7 @@ def upsert_stock_data(data: dict):
              entry_zone_low, entry_zone_high, stop_level,
              target_1, target_2, risk_reward, swing_data_fetched_at,
              h4_trend, h4_ema20, h4_ema50, h4_hh_hl,
-             m15_higher_low, m15_confirmation)
+             m15_higher_low, m15_confirmation, ticker_state)
         VALUES
             (:ticker, :current_price, :prev_close, :gap_pct, :premarket_high,
              :premarket_low, :prev_day_high, :prev_day_low, :avg_volume, :rel_volume,
@@ -799,7 +803,7 @@ def upsert_stock_data(data: dict):
              :entry_zone_low, :entry_zone_high, :stop_level,
              :target_1, :target_2, :risk_reward, :swing_data_fetched_at,
              :h4_trend, :h4_ema20, :h4_ema50, :h4_hh_hl,
-             :m15_higher_low, :m15_confirmation)
+             :m15_higher_low, :m15_confirmation, :ticker_state)
         ON CONFLICT(ticker) DO UPDATE SET
             current_price        = excluded.current_price,
             prev_close           = excluded.prev_close,
@@ -891,10 +895,46 @@ def upsert_stock_data(data: dict):
             h4_ema50                 = excluded.h4_ema50,
             h4_hh_hl                 = excluded.h4_hh_hl,
             m15_higher_low           = excluded.m15_higher_low,
-            m15_confirmation         = excluded.m15_confirmation
+            m15_confirmation         = excluded.m15_confirmation,
+            ticker_state             = excluded.ticker_state
     """, data)
     conn.commit()
     conn.close()
+
+
+def set_ticker_state(ticker: str, state: str):
+    """
+    Update only the ticker_state for a stock.
+    Valid states: 'loading' | 'ready' | 'error' | 'stale'
+    """
+    conn = get_db()
+    t = ticker.upper().strip()
+    conn.execute(
+        "UPDATE stock_data SET ticker_state = ?, last_updated = ? WHERE ticker = ?",
+        (state, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), t),
+    )
+    conn.commit()
+    conn.close()
+    logger.debug("set_ticker_state  ticker=%s  state=%s", t, state)
+
+
+def upsert_loading_placeholder(ticker: str):
+    """
+    Insert a minimal 'loading' placeholder for a ticker.
+    Uses INSERT OR IGNORE so it never overwrites existing data —
+    safe to call even if the ticker already has a full row.
+    """
+    conn = get_db()
+    t = ticker.upper().strip()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "INSERT OR IGNORE INTO stock_data (ticker, ticker_state, last_updated) "
+        "VALUES (?, 'loading', ?)",
+        (t, now),
+    )
+    conn.commit()
+    conn.close()
+    logger.debug("upsert_loading_placeholder  ticker=%s", t)
 
 
 def set_stock_classify(ticker: str, reason: str):

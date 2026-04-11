@@ -205,31 +205,32 @@ MOCK_STOCKS = {
 }
 
 
+import logging as _logging
+_log = _logging.getLogger(__name__)
+
+
 def generate_stock_data(ticker: str) -> dict:
     """
     Return a fully-scored swing trade data dict for *ticker*.
 
-    Data sourcing:
-      MOCK_STOCKS templates → trade bias + catalyst context (editorial)
-      yfinance (live)       → price, volume, EMAs, Fibonacci, zones
-      Unknown tickers       → placeholder prices + live news
+    Every external I/O step is wrapped in try/except.  A single failing step
+    (yfinance outage, DNS error, scoring bug) does NOT crash the whole fetch —
+    the remaining steps run with safe defaults instead.
 
-    Swing scoring pipeline:
-      1. Fetch live price/volume (data_fetcher.fetch_live_data)
-      2. Fetch swing structure (data_fetcher.fetch_swing_data) — EMAs, Fib
-      3. Fetch supply/demand zones (zones.detect_zones)
-      4. Compute catalyst score (scoring.compute_catalyst_score)
-      5. Compute swing score, setup type, status, trade plan
+    ticker_state set at end:
+      'ready'  — price > 0 AND EMA data present AND scoring completed
+      'stale'  — price > 0 but some fetch steps failed (partial data)
+      'error'  — current_price = 0 / None (no usable data)
     """
     ticker = ticker.upper().strip()
+    _errors: list[str] = []   # track which steps failed
 
     if ticker in MOCK_STOCKS:
         data = dict(MOCK_STOCKS[ticker])
     else:
-        prev_close = 100.0
         data = {
-            "current_price":  prev_close,
-            "prev_close":     prev_close,
+            "current_price":  None,         # populated by fetch_live_data; None = no fake price
+            "prev_close":     None,         # populated by fetch_live_data
             "gap_pct":        0.0,
             "avg_volume":     5_000_000,
             "rel_volume":     1.0,
@@ -242,67 +243,101 @@ def generate_stock_data(ticker: str) -> dict:
     data["ticker"] = ticker
 
     # ── Step 1: Live price + volume ───────────────────────────────────────────
-    live = fetch_live_data(ticker)
-    if live:
-        _price_fields = [
-            "current_price", "prev_close", "prev_close_date", "gap_pct",
-            "premarket_high", "premarket_low",
-            "prev_day_high", "prev_day_low",
-            "avg_volume", "rel_volume",
-            "earnings_date",
-            # intraday fields (kept for backward compatibility; not used in swing scoring)
-            "vwap", "momentum_breakout", "candles_above_orb",
-            "orb_hold", "trend_structure", "higher_highs", "higher_lows",
-            "strong_candle_bodies", "price_above_vwap",
-        ]
-        for field in _price_fields:
-            if live.get(field) is not None:
-                data[field] = live[field]
-        if live.get("earnings_date"):
-            data["earnings_date"] = live["earnings_date"]
-        # ORB / intraday phase (kept so the DB doesn't complain)
-        data["orb_phase"] = live.get("orb_phase", "pre_market")
-        data["orb_high"]  = None   # not relevant for swing trading
-        data["orb_low"]   = None
+    try:
+        live = fetch_live_data(ticker)
+        if live:
+            _price_fields = [
+                "current_price", "prev_close", "prev_close_date", "gap_pct",
+                "premarket_high", "premarket_low",
+                "prev_day_high", "prev_day_low",
+                "avg_volume", "rel_volume",
+                "earnings_date",
+                "vwap", "momentum_breakout", "candles_above_orb",
+                "orb_hold", "trend_structure", "higher_highs", "higher_lows",
+                "strong_candle_bodies", "price_above_vwap",
+            ]
+            for field in _price_fields:
+                if live.get(field) is not None:
+                    data[field] = live[field]
+            if live.get("earnings_date"):
+                data["earnings_date"] = live["earnings_date"]
+            data["orb_phase"] = live.get("orb_phase", "pre_market")
+            data["orb_high"]  = None
+            data["orb_low"]   = None
+            if ticker not in MOCK_STOCKS:
+                gap = data.get("gap_pct", 0)
+                data["trade_bias"] = (
+                    "Long Bias"  if gap >  3 else
+                    "Short Bias" if gap < -3 else
+                    "Neutral"
+                )
+        else:
+            _log.warning("generate_stock_data  stage=live_data  ticker=%s  result=None", ticker)
+            _errors.append("live_data")
+    except Exception as exc:
+        _log.error("generate_stock_data  stage=live_data  ticker=%s  err=%s", ticker, exc)
+        _errors.append("live_data")
+    data.setdefault("orb_phase", "pre_market")
+    data.setdefault("orb_high", None)
+    data.setdefault("orb_low",  None)
+    # These price fields are only added by fetch_live_data when it returns them.
+    # Without setdefault, upsert_stock_data fails on named-param binding when
+    # live data is unavailable (yfinance timeout / rate limit on prod).
+    data.setdefault("prev_close_date",  None)
+    data.setdefault("premarket_high",   None)
+    data.setdefault("premarket_low",    None)
+    data.setdefault("prev_day_high",    None)
+    data.setdefault("prev_day_low",     None)
 
-        # Derive bias for unknown tickers from gap direction
-        if ticker not in MOCK_STOCKS:
-            gap = data.get("gap_pct", 0)
-            data["trade_bias"] = (
-                "Long Bias"  if gap >  3 else
-                "Short Bias" if gap < -3 else
-                "Neutral"
-            )
-    else:
-        data.setdefault("orb_phase", "pre_market")
-        data.setdefault("orb_high", None)
-        data.setdefault("orb_low", None)
+    _log.debug(
+        "generate_stock_data  ticker=%s  stage=live_data  "
+        "price=%s  prev_close_date=%s  live_failed=%s",
+        ticker,
+        data.get("current_price"),
+        data.get("prev_close_date"),
+        "live_data" in _errors,
+    )
 
     # ── Step 2: Headlines ─────────────────────────────────────────────────────
-    if not data.get("headlines_fetched_at"):
-        news = fetch_headlines(ticker)
-        if not data.get("catalyst_summary") or ticker not in MOCK_STOCKS:
-            data["catalyst_summary"] = news.summary
-        if news.headlines and "No headlines" not in news.headlines[0]:
-            data["news_headlines"] = news.headlines
-        data["catalyst_category"]    = json.dumps(news.categories)
-        data["headlines_fetched_at"] = datetime.now().isoformat()
+    try:
+        if not data.get("headlines_fetched_at"):
+            news = fetch_headlines(ticker)
+            if not data.get("catalyst_summary") or ticker not in MOCK_STOCKS:
+                data["catalyst_summary"] = news.summary
+            if news.headlines and "No headlines" not in news.headlines[0]:
+                data["news_headlines"] = news.headlines
+            data["catalyst_category"]    = json.dumps(news.categories)
+            data["headlines_fetched_at"] = datetime.now().isoformat()
+    except Exception as exc:
+        _log.warning("generate_stock_data  stage=headlines  ticker=%s  err=%s", ticker, exc)
+        _errors.append("headlines")
 
     # ── Step 3: Swing structure (EMAs, Fibonacci, daily trend) ───────────────
-    if swing_data_needs_refresh(data.get("swing_data_fetched_at")):
-        swing = fetch_swing_data(ticker)
-        if swing:
-            data.update(swing)
-    _swing_defaults(data)
+    try:
+        if swing_data_needs_refresh(data.get("swing_data_fetched_at")):
+            swing = fetch_swing_data(ticker)
+            if swing:
+                data.update(swing)
+            else:
+                _log.warning("generate_stock_data  stage=swing_data  ticker=%s  result=None", ticker)
+                _errors.append("swing_data")
+    except Exception as exc:
+        _log.error("generate_stock_data  stage=swing_data  ticker=%s  err=%s", ticker, exc)
+        _errors.append("swing_data")
+    _swing_defaults(data)   # always apply — ensures all swing keys exist
 
     # ── Step 4: Supply/demand zones ───────────────────────────────────────────
-    if zones_need_refresh(data.get("zones_fetched_at")):
-        current_px = data.get("current_price") or 0
-        if current_px:
-            zone_data = detect_zones(ticker, current_px)
-            data.update(zone_data)
-            data["zones_fetched_at"] = datetime.now().isoformat()
-    _zone_defaults(data)
+    try:
+        if zones_need_refresh(data.get("zones_fetched_at")):
+            current_px = data.get("current_price") or 0
+            if current_px:
+                zone_data = detect_zones(ticker, current_px)
+                data.update(zone_data)
+                data["zones_fetched_at"] = datetime.now().isoformat()
+    except Exception as exc:
+        _log.warning("generate_stock_data  stage=zones  ticker=%s  err=%s", ticker, exc)
+        _errors.append("zones")
+    _zone_defaults(data)    # always apply
 
     # Intraday structure defaults (unused in swing scoring but kept for DB compat)
     data.setdefault("vwap",                 None)
@@ -318,27 +353,54 @@ def generate_stock_data(ticker: str) -> dict:
     data.setdefault("structure_momentum_score", 0)
 
     # ── Step 5: Catalyst score ────────────────────────────────────────────────
-    cat = compute_catalyst_score(data)
-    data["catalyst_score"]      = cat.score
-    data["catalyst_reason"]     = cat.explanation
-    data["catalyst_confidence"] = cat.confidence
+    try:
+        cat = compute_catalyst_score(data)
+        data["catalyst_score"]      = cat.score
+        data["catalyst_reason"]     = cat.explanation
+        data["catalyst_confidence"] = cat.confidence
+    except Exception as exc:
+        _log.error("generate_stock_data  stage=catalyst_score  ticker=%s  err=%s", ticker, exc)
+        data.setdefault("catalyst_score",      0)
+        data.setdefault("catalyst_reason",     "Score unavailable")
+        data.setdefault("catalyst_confidence", "Low")
+        _errors.append("catalyst_score")
 
-    # ── Step 6: Swing setup type (no score needed) ───────────────────────────
-    data["swing_setup_type"] = compute_swing_setup_type(data)
+    # ── Step 6: Swing setup type ──────────────────────────────────────────────
+    try:
+        data["swing_setup_type"] = compute_swing_setup_type(data)
+    except Exception as exc:
+        _log.error("generate_stock_data  stage=swing_setup_type  ticker=%s  err=%s", ticker, exc)
+        data.setdefault("swing_setup_type", "No Setup")
+        _errors.append("swing_setup_type")
 
-    # ── Step 7: Trade plan levels (no score needed; produces risk_reward) ────
-    # Must run BEFORE swing score so R:R is available as a scoring input.
-    plan = compute_swing_trade_plan(data)
-    data.update(plan)
+    # ── Step 7: Trade plan levels ─────────────────────────────────────────────
+    try:
+        plan = compute_swing_trade_plan(data)
+        data.update(plan)
+    except Exception as exc:
+        _log.error("generate_stock_data  stage=trade_plan  ticker=%s  err=%s", ticker, exc)
+        _errors.append("trade_plan")
 
-    # ── Step 8: Swing score (uses risk_reward from step 7) ───────────────────
-    swing_sr = compute_swing_score(data)
-    data["swing_score"]      = swing_sr.score
-    data["swing_reason"]     = swing_sr.explanation
-    data["swing_confidence"] = swing_sr.confidence
+    # ── Step 8: Swing score ───────────────────────────────────────────────────
+    try:
+        swing_sr = compute_swing_score(data)
+        data["swing_score"]      = swing_sr.score
+        data["swing_reason"]     = swing_sr.explanation
+        data["swing_confidence"] = swing_sr.confidence
+    except Exception as exc:
+        _log.error("generate_stock_data  stage=swing_score  ticker=%s  err=%s", ticker, exc)
+        data.setdefault("swing_score",      1)
+        data.setdefault("swing_reason",     "Score unavailable")
+        data.setdefault("swing_confidence", "Low")
+        _errors.append("swing_score")
 
-    # ── Step 9: Swing status (uses swing_score from step 8) ──────────────────
-    data["swing_status"] = compute_swing_status(data)
+    # ── Step 9: Swing status ──────────────────────────────────────────────────
+    try:
+        data["swing_status"] = compute_swing_status(data)
+    except Exception as exc:
+        _log.error("generate_stock_data  stage=swing_status  ticker=%s  err=%s", ticker, exc)
+        data.setdefault("swing_status", "NOT ENOUGH EDGE")
+        _errors.append("swing_status")
 
     # Legacy scoring fields (kept for DB schema compatibility but deprioritised)
     data.setdefault("momentum_score",      1)
@@ -349,10 +411,10 @@ def generate_stock_data(ticker: str) -> dict:
     data.setdefault("orb_status",          "NO_ORB")
     data.setdefault("orb_ready",           "NO")
     data.setdefault("exec_state",          "WAIT")
-    data.setdefault("setup_score",         data["swing_score"])
-    data.setdefault("setup_reason",        data["swing_reason"])
-    data.setdefault("setup_confidence",    data["swing_confidence"])
-    data.setdefault("setup_type",          data["swing_setup_type"])
+    data.setdefault("setup_score",         data.get("swing_score", 1))
+    data.setdefault("setup_reason",        data.get("swing_reason", ""))
+    data.setdefault("setup_confidence",    data.get("swing_confidence", "Low"))
+    data.setdefault("setup_type",          data.get("swing_setup_type", "No Setup"))
     data.setdefault("entry_note",          None)
     data.setdefault("position_size",       "normal")
 
@@ -363,6 +425,25 @@ def generate_stock_data(ticker: str) -> dict:
     data.setdefault("catalyst_category",    "[]")
     data.setdefault("headlines_fetched_at", None)
     data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # ── Determine ticker_state ────────────────────────────────────────────────
+    _price_ok = bool(data.get("current_price") and float(data.get("current_price") or 0) > 0)
+    _ema_ok   = data.get("ema_20_daily") is not None
+    _score_ok = "swing_score" not in _errors and "swing_status" not in _errors
+    if _price_ok and _ema_ok and _score_ok:
+        data["ticker_state"] = "ready"
+    elif _price_ok:
+        data["ticker_state"] = "stale"   # has price but incomplete analysis
+    else:
+        data["ticker_state"] = "error"   # no usable price data
+
+    if _errors:
+        _log.info(
+            "generate_stock_data  ticker=%s  state=%s  failed_steps=%s",
+            ticker, data["ticker_state"], _errors,
+        )
+    else:
+        _log.info("generate_stock_data  ticker=%s  state=%s", ticker, data["ticker_state"])
 
     return data
 
@@ -382,35 +463,54 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
     """
     ticker = ticker.upper().strip()
     data   = dict(existing)
+    _errors: list[str] = []
 
     # ── Headline refresh (time-gated) ─────────────────────────────────────────
-    if needs_refresh(data.get("headlines_fetched_at")):
-        news = fetch_headlines(ticker)
-        data["catalyst_summary"]     = news.summary
-        data["news_headlines"]       = news.headlines
-        data["catalyst_category"]    = json.dumps(news.categories)
-        data["headlines_fetched_at"] = datetime.now().isoformat()
-        cat = compute_catalyst_score(data)
-        data["catalyst_score"]      = cat.score
-        data["catalyst_reason"]     = cat.explanation
-        data["catalyst_confidence"] = cat.confidence
+    try:
+        if needs_refresh(data.get("headlines_fetched_at")):
+            news = fetch_headlines(ticker)
+            data["catalyst_summary"]     = news.summary
+            data["news_headlines"]       = news.headlines
+            data["catalyst_category"]    = json.dumps(news.categories)
+            data["headlines_fetched_at"] = datetime.now().isoformat()
+            cat = compute_catalyst_score(data)
+            data["catalyst_score"]      = cat.score
+            data["catalyst_reason"]     = cat.explanation
+            data["catalyst_confidence"] = cat.confidence
+    except Exception as exc:
+        _log.warning("live_refresh_stock  stage=headlines  ticker=%s  err=%s", ticker, exc)
+        _errors.append("headlines")
 
     # ── Live price + volume ───────────────────────────────────────────────────
-    live = fetch_live_data(ticker)
-    if live:
-        _live_fields = [
-            "current_price", "prev_close", "gap_pct", "prev_close_date",
-            "premarket_high", "premarket_low",
-            "prev_day_high", "prev_day_low",
-            "avg_volume", "rel_volume",
-            "vwap", "momentum_breakout", "candles_above_orb",
-            "orb_hold", "trend_structure", "higher_highs", "higher_lows",
-            "strong_candle_bodies", "price_above_vwap",
-        ]
-        for field in _live_fields:
-            if live.get(field) is not None:
-                data[field] = live[field]
-        data["orb_phase"] = live.get("orb_phase", data.get("orb_phase", "pre_market"))
+    try:
+        live = fetch_live_data(ticker)
+        if live:
+            _live_fields = [
+                "current_price", "prev_close", "gap_pct", "prev_close_date",
+                "premarket_high", "premarket_low",
+                "prev_day_high", "prev_day_low",
+                "avg_volume", "rel_volume",
+                "vwap", "momentum_breakout", "candles_above_orb",
+                "orb_hold", "trend_structure", "higher_highs", "higher_lows",
+                "strong_candle_bodies", "price_above_vwap",
+            ]
+            for field in _live_fields:
+                if live.get(field) is not None:
+                    data[field] = live[field]
+            data["orb_phase"] = live.get("orb_phase", data.get("orb_phase", "pre_market"))
+        else:
+            _errors.append("live_data")
+    except Exception as exc:
+        _log.error("live_refresh_stock  stage=live_data  ticker=%s  err=%s", ticker, exc)
+        _errors.append("live_data")
+
+    # Price field defaults — prevent upsert_stock_data from failing on named-param
+    # binding when fetch_live_data doesn't return these keys (timeout / rate limit).
+    data.setdefault("prev_close_date",  None)
+    data.setdefault("premarket_high",   None)
+    data.setdefault("premarket_low",    None)
+    data.setdefault("prev_day_high",    None)
+    data.setdefault("prev_day_low",     None)
 
     # Structure defaults
     data.setdefault("vwap",                 None)
@@ -426,43 +526,91 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
     data.setdefault("structure_momentum_score", 0)
 
     # ── Swing structure (EMAs/Fib) ────────────────────────────────────────────
-    if swing_data_needs_refresh(data.get("swing_data_fetched_at")):
-        swing = fetch_swing_data(ticker)
-        if swing:
-            data.update(swing)
+    try:
+        if swing_data_needs_refresh(data.get("swing_data_fetched_at")):
+            swing = fetch_swing_data(ticker)
+            if swing:
+                data.update(swing)
+            else:
+                _errors.append("swing_data")
+    except Exception as exc:
+        _log.error("live_refresh_stock  stage=swing_data  ticker=%s  err=%s", ticker, exc)
+        _errors.append("swing_data")
     _swing_defaults(data)
 
     # ── Zone refresh ──────────────────────────────────────────────────────────
-    if zones_need_refresh(data.get("zones_fetched_at")):
-        current_px = data.get("current_price") or 0
-        ticker_sym = (data.get("ticker") or ticker).upper()
-        if current_px and ticker_sym:
-            zone_data = detect_zones(ticker_sym, current_px)
-            data.update(zone_data)
-            data["zones_fetched_at"] = datetime.now().isoformat()
+    try:
+        if zones_need_refresh(data.get("zones_fetched_at")):
+            current_px = data.get("current_price") or 0
+            ticker_sym = (data.get("ticker") or ticker).upper()
+            if current_px and ticker_sym:
+                zone_data = detect_zones(ticker_sym, current_px)
+                data.update(zone_data)
+                data["zones_fetched_at"] = datetime.now().isoformat()
+    except Exception as exc:
+        _log.warning("live_refresh_stock  stage=zones  ticker=%s  err=%s", ticker, exc)
+        _errors.append("zones")
     _zone_defaults(data)
 
     # ── Re-score (setup type → trade plan → score → status) ─────────────────
-    # Order matters: trade plan must run before swing score (R:R is a score input).
-    data["swing_setup_type"] = compute_swing_setup_type(data)
+    try:
+        data["swing_setup_type"] = compute_swing_setup_type(data)
+    except Exception as exc:
+        _log.error("live_refresh_stock  stage=swing_setup_type  ticker=%s  err=%s", ticker, exc)
+        data.setdefault("swing_setup_type", "No Setup")
+        _errors.append("swing_setup_type")
 
-    plan = compute_swing_trade_plan(data)
-    data.update(plan)
+    try:
+        plan = compute_swing_trade_plan(data)
+        data.update(plan)
+    except Exception as exc:
+        _log.error("live_refresh_stock  stage=trade_plan  ticker=%s  err=%s", ticker, exc)
+        _errors.append("trade_plan")
 
-    swing_sr = compute_swing_score(data)
-    data["swing_score"]      = swing_sr.score
-    data["swing_reason"]     = swing_sr.explanation
-    data["swing_confidence"] = swing_sr.confidence
+    try:
+        swing_sr = compute_swing_score(data)
+        data["swing_score"]      = swing_sr.score
+        data["swing_reason"]     = swing_sr.explanation
+        data["swing_confidence"] = swing_sr.confidence
+    except Exception as exc:
+        _log.error("live_refresh_stock  stage=swing_score  ticker=%s  err=%s", ticker, exc)
+        data.setdefault("swing_score",      1)
+        data.setdefault("swing_reason",     "Score unavailable")
+        data.setdefault("swing_confidence", "Low")
+        _errors.append("swing_score")
 
-    data["swing_status"] = compute_swing_status(data)
+    try:
+        data["swing_status"] = compute_swing_status(data)
+    except Exception as exc:
+        _log.error("live_refresh_stock  stage=swing_status  ticker=%s  err=%s", ticker, exc)
+        data.setdefault("swing_status", "NOT ENOUGH EDGE")
+        _errors.append("swing_status")
 
     # Sync legacy fields
-    data["setup_score"]      = data["swing_score"]
-    data["setup_reason"]     = data["swing_reason"]
-    data["setup_confidence"] = data["swing_confidence"]
-    data["setup_type"]       = data["swing_setup_type"]
+    data["setup_score"]      = data.get("swing_score", 1)
+    data["setup_reason"]     = data.get("swing_reason", "")
+    data["setup_confidence"] = data.get("swing_confidence", "Low")
+    data["setup_type"]       = data.get("swing_setup_type", "No Setup")
 
     data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Determine ticker_state
+    _price_ok = bool(data.get("current_price") and float(data.get("current_price") or 0) > 0)
+    _ema_ok   = data.get("ema_20_daily") is not None
+    _score_ok = "swing_score" not in _errors and "swing_status" not in _errors
+    if _price_ok and _ema_ok and _score_ok:
+        data["ticker_state"] = "ready"
+    elif _price_ok:
+        data["ticker_state"] = "stale"
+    else:
+        data["ticker_state"] = "error"
+
+    if _errors:
+        _log.info(
+            "live_refresh_stock  ticker=%s  state=%s  failed_steps=%s",
+            ticker, data["ticker_state"], _errors,
+        )
+
     return data
 
 

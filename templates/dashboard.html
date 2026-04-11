@@ -363,7 +363,7 @@
       </thead>
       <tbody>
         {% for s in ranked %}
-        <tr class="row-{{ s.swing_score_class }}"
+        <tr class="row-{{ s.swing_score_class }} {% if s.ticker_state in ('error','loading') %}row-state-unavailable{% elif s.ticker_state == 'stale' %}row-state-stale{% endif %}"
             data-ticker="{{ s.ticker }}"
             data-score="{{ s.swing_score or 0 }}"
             data-status="{{ s.swing_status or '' }}"
@@ -376,6 +376,13 @@
 
           <td class="ticker-cell">
             <span class="ticker-symbol">{{ s.ticker }}</span>
+            {% if s.ticker_state == 'loading' %}
+              <span class="state-badge state-loading" title="Fetching data…">Loading</span>
+            {% elif s.ticker_state == 'error' %}
+              <span class="state-badge state-error" title="Data unavailable — click ⟳ to retry">Error</span>
+            {% elif s.ticker_state == 'stale' %}
+              <span class="state-badge state-stale" title="Using last known data — click ⟳ to refresh">Stale</span>
+            {% endif %}
             {% if s.earnings_date %}
               <span class="earnings-pill" title="Earnings {{ s.earnings_date }}">E</span>
             {% endif %}
@@ -399,14 +406,22 @@
 
           <!-- Swing Status / Action -->
           <td class="state-cell">
-            <span class="exec-badge {{ s.exec_class }}" data-field="exec_badge">{{ s.final_action or 'WAIT' }}</span>
+            {% if s.ticker_state in ('loading', 'error') %}
+              <span class="exec-badge exec-wait text-muted">
+                {% if s.ticker_state == 'loading' %}Fetching…{% else %}Unavailable{% endif %}
+              </span>
+            {% else %}
+              <span class="exec-badge {{ s.exec_class }}" data-field="exec_badge">{{ s.final_action or 'WAIT' }}</span>
+            {% endif %}
           </td>
 
           <!-- Price -->
           <td class="price-cell" data-field="price">${{ "%.2f"|format(s.current_price) if s.current_price is not none else "N/A" }}</td>
 
           <!-- Gap -->
-          <td class="gap-cell {{ s.gap_class }}" data-field="gap">{{ s.gap_display }}</td>
+          <td class="gap-cell {{ s.gap_class }}" data-field="gap">
+            {%- if s.ticker_state in ('error','loading') and not s.gap_pct -%}—{%- else -%}{{ s.gap_display }}{%- endif -%}
+          </td>
 
           <!-- Rel Volume -->
           <td class="{{ 'rvol-hot' if s.rel_volume is not none and s.rel_volume >= 2 else '' }}">

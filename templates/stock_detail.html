@@ -17,13 +17,31 @@
       {% endif %}
     </div>
     <div class="detail-subtitle">
-      Last updated: <span id="detail-last-updated">{{ stock.last_updated }}</span>
+      Last updated: <span id="detail-last-updated">{{ stock.last_updated or '—' }}</span>
       &nbsp;|&nbsp;
       <form action="{{ url_for('refresh_single', ticker=stock.ticker) }}" method="POST" style="display:inline;">
         <button type="submit" class="btn-inline-refresh">⟳ Refresh Data</button>
       </form>
     </div>
   </div>
+
+  <!-- ===== TICKER STATE BANNER ===== -->
+  {% if stock.ticker_state == 'loading' %}
+  <div class="state-banner state-banner-loading">
+    <strong>Loading data for {{ stock.ticker }}…</strong>
+    <span>Data fetch is in progress. Click Refresh Data to retry immediately.</span>
+  </div>
+  {% elif stock.ticker_state == 'error' %}
+  <div class="state-banner state-banner-error">
+    <strong>Data unavailable for {{ stock.ticker }}</strong>
+    <span>The last fetch failed. Displayed values may be empty or defaults. Click Refresh Data to retry.</span>
+  </div>
+  {% elif stock.ticker_state == 'stale' %}
+  <div class="state-banner state-banner-stale">
+    <strong>Showing last known data for {{ stock.ticker }}</strong>
+    <span>Live price or analysis data is incomplete (EMA / swing data missing). Updated: {{ stock.last_updated or 'unknown' }}. Click Refresh Data to retry.</span>
+  </div>
+  {% endif %}
 
   <!-- ===== SWING SCORE STRIP ===== -->
   <div class="score-strip">

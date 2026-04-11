@@ -6,6 +6,7 @@ Flask web app for premarket stock watchlist scanning.
 import json as _json
 import logging
 import re
+import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -26,6 +27,7 @@ from database import (
     upsert_stock_data, get_stock_data, get_all_stock_data,
     update_live_fields,
     set_stock_classify, set_auto_classify,
+    set_ticker_state, upsert_loading_placeholder,
     get_note, save_note, get_all_notes, update_setup_type,
     get_trade_plan, save_trade_plan, get_all_trade_plans,
     add_journal_entry, update_journal_entry, delete_journal_entry,
@@ -45,6 +47,12 @@ sock = Sock(app)
 # seed_demo_data() is called after its definition below.
 # ---------------------------------------------------------------------------
 init_db()
+
+# Global refresh lock — prevents overlapping bulk-refresh requests.
+# Uses a threading.Lock() so concurrent gunicorn workers each have their own
+# flag (cross-process locking is not needed for UX safety on a single user app).
+_refresh_all_lock   = threading.Lock()
+_refresh_all_running = False
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +114,10 @@ def auto_refresh_stale_closes(tickers: list) -> list:
                 ticker, stock.get("prev_close_date") or "missing", expected,
             )
         except Exception as e:
-            logger.warning("Auto-refresh failed for %s: %s", ticker, e)
+            logger.warning(
+                "auto_refresh  ticker=%s  stage=refresh  state=stale  err=%s", ticker, e
+            )
+            set_ticker_state(ticker, "stale")
 
     return refreshed
 
@@ -751,6 +762,22 @@ def get_orb_session_banner() -> dict:
 
 def annotate(stock: dict) -> dict:
     """Add all display-only fields to a stock dict (non-destructive to DB fields)."""
+    # ── Ticker state display ─────────────────────────────────────────────────
+    _state = stock.get("ticker_state") or "ready"
+    stock["ticker_state"] = _state
+    stock["ticker_state_class"] = {
+        "loading": "state-loading",
+        "ready":   "state-ready",
+        "error":   "state-error",
+        "stale":   "state-stale",
+    }.get(_state, "state-ready")
+    stock["ticker_state_label"] = {
+        "loading": "Loading",
+        "ready":   "",
+        "error":   "Data Error",
+        "stale":   "Stale",
+    }.get(_state, "")
+
     # Enforce numeric defaults so templates never receive None for numeric fields.
     # Price/volume fields default to 0.0; score fields default to 0.
     _PRICE_DEFAULTS = {
@@ -769,7 +796,14 @@ def annotate(stock: dict) -> dict:
         "momentum_score":  0,
         "setup_score":     0,
     }
-    for field, default in {**_PRICE_DEFAULTS, **_SCORE_DEFAULTS}.items():
+    # For error/loading states, skip price defaults so templates can check
+    # `is not none` and show "N/A" / "—" instead of misleading $0.00.
+    # Score defaults are always applied — they're needed for JS filter logic.
+    if _state not in ("error", "loading"):
+        for field, default in _PRICE_DEFAULTS.items():
+            if stock.get(field) is None:
+                stock[field] = default
+    for field, default in _SCORE_DEFAULTS.items():
         if stock.get(field) is None:
             stock[field] = default
 
@@ -1226,9 +1260,28 @@ def compute_summary_cards(stocks: list) -> dict:
 #   api_watchlist          GET      /api/watchlist
 # ---------------------------------------------------------------------------
 
+_DASHBOARD_EMPTY = dict(
+    ranked=[], top5=[], triggered=[], summary={},
+    missing=[], watchlist=[], notes={}, secondary=[],
+    alt_modes=[], all_wls=[], active_wl=None, wl_counts={},
+    no_trade={"is_no_trade": False, "lock_signals": False, "verdict": "",
+              "reasons": [], "severity": "none"},
+    orb_session={},
+)
+
+
 @app.route("/")
 def dashboard():
     """Main dashboard — summary cards, top 5, and full ranked watchlist."""
+    try:
+        return _dashboard_inner()
+    except Exception as exc:
+        logger.error("dashboard  route=/  unhandled_error=%s", exc, exc_info=True)
+        flash("Dashboard error — please refresh the page.", "error")
+        return render_template("dashboard.html", **_DASHBOARD_EMPTY)
+
+
+def _dashboard_inner():
     all_wls     = get_all_watchlists()
     active_wl_id = get_active_wl_id()
     active_wl    = get_watchlist_by_id(active_wl_id) if active_wl_id else None
@@ -1240,11 +1293,27 @@ def dashboard():
     if watchlist:
         auto_refresh_stale_closes(watchlist)
 
-    all_data  = get_all_stock_data()
+    all_data = get_all_stock_data()
+    logger.info("dashboard  route=/  wl_id=%s  tickers=%s", active_wl_id, watchlist)
 
     data_map = {s["ticker"]: s for s in all_data}
-    stocks   = [annotate(data_map[t]) for t in watchlist if t in data_map]
-    missing  = [t for t in watchlist if t not in data_map]
+
+    # Annotate per ticker — one bad ticker must not crash the whole dashboard
+    stocks = []
+    for t in watchlist:
+        if t not in data_map:
+            continue
+        try:
+            stocks.append(annotate(data_map[t]))
+        except Exception as exc:
+            logger.error("dashboard  ticker=%s  stage=annotate  err=%s", t, exc, exc_info=True)
+            s = data_map[t]
+            s["ticker_state"]       = "error"
+            s["ticker_state_class"] = "state-error"
+            s["ticker_state_label"] = "Data Error"
+            stocks.append(s)
+
+    missing = [t for t in watchlist if t not in data_map]
 
     ranked     = rank_stocks(stocks)
     # Top candidates: swing_score ≥ 6 and status not extended/avoid, OR fall back
@@ -1318,21 +1387,46 @@ def watchlist_add():
     """Add one or more tickers to the active watchlist."""
     wl_id = get_active_wl_id()
     raw   = request.form.get("tickers", "")
-    added = []
+    added  = []
+    failed = []
     for t in re.split(r"[\s,]+", raw.upper()):
         t = t.strip()
-        if t and t.isalpha() and 1 <= len(t) <= 5 and wl_id:
-            add_ticker_to_watchlist(wl_id, t)
-            upsert_stock_data(generate_stock_data(t))
+        if not (t and t.isalpha() and 1 <= len(t) <= 5 and wl_id):
+            continue
+        # Phase 1: claim the watchlist slot + insert a loading placeholder so the
+        # ticker appears on the dashboard immediately instead of "Not yet loaded".
+        add_ticker_to_watchlist(wl_id, t)
+        upsert_loading_placeholder(t)
+        logger.info("watchlist_add  ticker=%s  wl_id=%s  stage=placeholder", t, wl_id)
+        # Phase 2: full data fetch + scoring
+        try:
+            fresh = generate_stock_data(t)
+            upsert_stock_data(fresh)
             run_auto_classification(t)
             added.append(t)
+            logger.info(
+                "watchlist_add  ticker=%s  wl_id=%s  stage=complete  state=%s",
+                t, wl_id, fresh.get("ticker_state"),
+            )
+        except Exception as exc:
+            logger.error(
+                "watchlist_add  ticker=%s  wl_id=%s  stage=generate_failed  err=%s",
+                t, wl_id, exc, exc_info=True,
+            )
+            set_ticker_state(t, "error")
+            failed.append(t)
 
     if added:
         remaining = get_watchlist_stocks(wl_id)
-        logger.info("WATCHLIST ADD  tickers=%s wl_id=%s", added, wl_id)
-        logger.info("WATCHLIST SAVED  wl_id=%s contents=%s", wl_id, remaining)
+        logger.info("watchlist_add  added=%s  wl_id=%s  watchlist=%s", added, wl_id, remaining)
         flash(f"Added: {', '.join(added)}", "success")
-    else:
+    if failed:
+        flash(
+            f"Data fetch failed for: {', '.join(failed)}. "
+            "Showing as error — click ⟳ on the row to retry.",
+            "warning",
+        )
+    if not added and not failed:
         flash("No valid tickers found. Use 1–5 letter stock symbols.", "error")
     return redirect(url_for("dashboard"))
 
@@ -1364,12 +1458,46 @@ def watchlist_remove(ticker):
 @app.route("/refresh", methods=["POST"])
 def refresh_all():
     """Re-fetch and re-score all tickers in the active watchlist."""
-    wl_id    = get_active_wl_id()
+    global _refresh_all_running
+    if _refresh_all_running:
+        flash("Refresh already in progress — please wait.", "warning")
+        return redirect(url_for("dashboard"))
+
+    _refresh_all_running = True
+    wl_id     = get_active_wl_id()
     watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-    for ticker in watchlist:
-        upsert_stock_data(generate_stock_data(ticker))
-        run_auto_classification(ticker)
-    flash(f"Refreshed data for {len(watchlist)} tickers.", "success")
+    success, failed = [], []
+
+    try:
+        logger.info("refresh_all  route=/refresh  tickers=%s", watchlist)
+        for ticker in watchlist:
+            try:
+                fresh = generate_stock_data(ticker)
+                upsert_stock_data(fresh)
+                run_auto_classification(ticker)
+                success.append(ticker)
+                logger.info(
+                    "refresh_all  ticker=%s  state=%s", ticker, fresh.get("ticker_state")
+                )
+            except Exception as exc:
+                logger.error("refresh_all  ticker=%s  err=%s", ticker, exc, exc_info=True)
+                existing = get_stock_data(ticker)
+                if existing and existing.get("current_price"):
+                    set_ticker_state(ticker, "stale")
+                else:
+                    set_ticker_state(ticker, "error")
+                failed.append(ticker)
+    finally:
+        _refresh_all_running = False
+
+    if failed:
+        flash(
+            f"Refreshed {len(success)} tickers. "
+            f"Failed: {', '.join(failed)} — showing last known data.",
+            "warning",
+        )
+    else:
+        flash(f"Refreshed data for {len(success)} tickers.", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -1377,25 +1505,61 @@ def refresh_all():
 def stock_detail(ticker):
     """Detailed view for a single stock."""
     ticker = ticker.upper()
+    logger.info("stock_detail  ticker=%s  route=/stock/%s", ticker, ticker)
     stock  = get_stock_data(ticker)
     if stock is None:
         flash(f"No data found for {ticker}.", "error")
         return redirect(url_for("dashboard"))
 
-    annotate(stock)
-    note       = get_note(ticker)
-    breakdown  = catalyst_score_breakdown(stock) or []
-    plan       = get_trade_plan(ticker)
+    # Annotate — guarded so a single bad field can't crash the whole detail page
+    try:
+        annotate(stock)
+    except Exception as exc:
+        logger.error("stock_detail  ticker=%s  stage=annotate  err=%s", ticker, exc, exc_info=True)
+        stock.setdefault("ticker_state",       "error")
+        stock.setdefault("ticker_state_class", "state-error")
+        stock.setdefault("ticker_state_label", "Data Error")
+        # Apply critical display defaults so the template doesn't crash
+        for _f, _v in [
+            ("final_action", "WAIT"), ("exec_class", "exec-wait"),
+            ("final_action_class", "exec-wait"), ("final_action_reason", ""),
+            ("bias_class", "bias-neutral"), ("swing_score_class", "neutral"),
+            ("swing_status_class", "swing-status-wait"),
+            ("swing_setup_type_class", "setup-none"),
+            ("swing_grade", "F"), ("gap_display", "—"), ("gap_class", ""),
+            ("entry_zone_display", "—"), ("entry_distance_display", "—"),
+            ("entry_distance_class", ""), ("risk_reward_display", "—"),
+            ("risk_reward_class", "rr-neutral"), ("resistance_distance_display", "—"),
+            ("pullback_quality", "Watch"), ("pullback_quality_class", "pq-watch"),
+            ("headline_freshness", ""), ("catalyst_tags", []),
+            ("combined_confidence", "Low"), ("combined_conf_class", "conf-low"),
+            ("orb_price_pct", 50.0), ("display_exec_state", "WAIT"),
+        ]:
+            stock.setdefault(_f, _v)
 
-    _, rr_display, rr_class = compute_rr(
-        plan.get("plan_bias"),
-        plan.get("entry_level"),
-        plan.get("stop_loss"),
-        plan.get("target_price"),
-    )
+    note = get_note(ticker)
 
-    all_wls           = get_all_watchlists()
-    ticker_wl_ids     = get_ticker_watchlist_ids(ticker)
+    try:
+        breakdown = catalyst_score_breakdown(stock) or []
+    except Exception as exc:
+        logger.error("stock_detail  ticker=%s  stage=breakdown  err=%s", ticker, exc)
+        breakdown = []
+
+    plan = get_trade_plan(ticker)
+
+    try:
+        _, rr_display, rr_class = compute_rr(
+            plan.get("plan_bias"),
+            plan.get("entry_level"),
+            plan.get("stop_loss"),
+            plan.get("target_price"),
+        )
+    except Exception:
+        rr_display, rr_class = "—", "rr-neutral"
+
+    all_wls       = get_all_watchlists()
+    ticker_wl_ids = get_ticker_watchlist_ids(ticker)
+    logger.info("stock_detail  ticker=%s  state=%s", ticker, stock.get("ticker_state"))
 
     return render_template(
         "stock_detail.html",
@@ -1439,9 +1603,26 @@ def save_stock_note(ticker):
 def refresh_single(ticker):
     """Refresh and re-score a single ticker."""
     t = ticker.upper()
-    upsert_stock_data(generate_stock_data(t))
-    run_auto_classification(t)
-    flash(f"Refreshed {t}.", "success")
+    logger.info("refresh_single  ticker=%s  route=/stock/%s/refresh", t, t)
+    try:
+        fresh = generate_stock_data(t)
+        upsert_stock_data(fresh)
+        run_auto_classification(t)
+        logger.info("refresh_single  ticker=%s  state=%s", t, fresh.get("ticker_state"))
+        flash(f"Refreshed {t}.", "success")
+    except Exception as exc:
+        logger.error("refresh_single  ticker=%s  err=%s", t, exc, exc_info=True)
+        existing = get_stock_data(t)
+        if existing and existing.get("current_price"):
+            set_ticker_state(t, "stale")
+            flash(f"Refresh failed for {t}. Showing last known data.", "warning")
+        else:
+            set_ticker_state(t, "error")
+            flash(f"Refresh failed for {t}. Data unavailable.", "error")
+    # If we came from the dashboard (missing-ticker row), stay on dashboard
+    referrer = request.referrer or ""
+    if "stock/" not in referrer:
+        return redirect(url_for("dashboard"))
     return redirect(url_for("stock_detail", ticker=t))
 
 
