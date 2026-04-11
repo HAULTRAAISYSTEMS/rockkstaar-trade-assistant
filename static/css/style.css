@@ -6,11 +6,11 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:          #0d0f14;
-  --bg2:         #141820;
-  --bg3:         #1c2230;
-  --border:      #252d3d;
-  --text:        #e2e8f0;
+  --bg:          #020617;
+  --bg2:         rgba(15, 23, 42, 0.70);
+  --bg3:         rgba(15, 23, 42, 0.88);
+  --border:      rgba(255, 255, 255, 0.07);
+  --text:        #e5e7eb;
   --text-muted:  #64748b;
   --text-dim:    #94a3b8;
 
@@ -28,19 +28,32 @@
   --accent-glow: rgba(99,102,241,0.15);
 
   --radius:      6px;
-  --radius-lg:   10px;
-  --font:        'Segoe UI', system-ui, -apple-system, sans-serif;
+  --radius-lg:   16px;
+  --font:        'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-mono:   'Cascadia Code', 'Consolas', monospace;
 }
 
 html { font-size: 14px; }
 
 body {
-  background: var(--bg);
+  background: radial-gradient(circle at top, #0f172a, #020617);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font);
   line-height: 1.5;
   min-height: 100vh;
+}
+
+/* Ambient glow overlay — blue top-left, purple bottom-right */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.15), transparent 40%),
+    radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.12), transparent 40%);
+  z-index: -1;
+  pointer-events: none;
 }
 
 a { color: inherit; text-decoration: none; }
@@ -397,7 +410,7 @@ a { color: inherit; text-decoration: none; }
 }
 .watchlist-table td {
   padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid rgba(37,45,61,0.6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   vertical-align: middle;
   white-space: nowrap;
 }
@@ -3596,4 +3609,60 @@ a { color: inherit; text-decoration: none; }
   background: rgba(236, 201, 75, 0.12);
   border: 1px solid rgba(236, 201, 75, 0.30);
   color: #fefcbf;
+}
+
+/* =========================================================
+   PREMIUM GLASS DESIGN SYSTEM
+   ========================================================= */
+
+/* ── Generic .card — use anywhere a glass surface is needed ─ */
+.card {
+  background: rgba(15, 23, 42, 0.70);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.40);
+}
+
+/* ── Apply glass backdrop to every card surface ──────────── */
+.detail-card,
+.summary-card,
+.stat-card,
+.top5-card,
+.secondary-card,
+.wl-manage-panel,
+.score-strip,
+.structure-strip,
+.journal-summary-strip,
+.setup-perf-card,
+.mom-band-card,
+.no-setups-state,
+.nt-panel,
+.triggered-alert {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* ── Navbar glass ────────────────────────────────────────── */
+.navbar {
+  background: rgba(15, 23, 42, 0.80) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+/* ── Bias glow classes (requested) ──────────────────────── */
+.long-bias {
+  color: #22c55e;
+  text-shadow: 0 0 10px rgba(34, 197, 94, 0.60);
+}
+
+.wait {
+  color: #facc15;
+}
+
+.error {
+  color: #ef4444;
 }

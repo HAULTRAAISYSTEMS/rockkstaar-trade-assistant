@@ -5,6 +5,7 @@ Flask web app for premarket stock watchlist scanning.
 
 import json as _json
 import logging
+import os
 import re
 import threading
 import time as _time
@@ -2321,5 +2322,6 @@ for _wl in _startup_wls:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    print("\nRockkstaar Trade Assistant running...\n")
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    port = int(os.environ.get("PORT", 10000))
+    print(f"\nRockkstaar Trade Assistant running on port {port}...\n")
+    app.run(host="0.0.0.0", port=port, debug=False)
