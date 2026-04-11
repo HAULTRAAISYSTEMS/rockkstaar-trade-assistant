@@ -1298,6 +1298,12 @@ SWING_SETUP_TYPES = [
 ]
 
 SWING_STATUSES = [
+    # ── Current 4-mode labels ─────────────────────────────────────────────────
+    "READY — LEVEL HOLDS",        # Mode 2: confirmed at level (15m + vol ≥ 1.2×)
+    "PRE-CONFIRMATION",           # Mode 1: near key level, trend aligned, awaiting entry
+    "TREND CONTINUATION",         # Mode 3: structure breaking higher/lower, breakout entry
+    "WAIT",                       # Mode 4: no valid setup / no edge
+    # ── Legacy values (kept for DB backward compat) ───────────────────────────
     "GOOD SWING CANDIDATE",
     "READY IF LEVEL HOLDS",
     "WAIT FOR 15M CONFIRMATION",
@@ -1736,99 +1742,151 @@ def compute_swing_setup_type(data: dict) -> str:
 
 def compute_swing_status(data: dict) -> str:
     """
-    Return a swing trade status label that tells the trader exactly what to do.
+    Return the swing trade mode label for a given stock.
 
-    Priority order:
-      1. TOO EXTENDED          — price too far from key levels
-      2. AVOID — AT RESISTANCE — at major supply, long setup not viable
-      3. AVOID — WEAK STRUCTURE — no clear trend, not worth trading
-      4. READY IF LEVEL HOLDS  — at a key level, watching for confirmation
-      5. GOOD SWING CANDIDATE  — trend + pullback + zone alignment confirmed
-      6. WAIT FOR 15M CONFIRMATION — setup close but needs entry confirmation
-      7. WAIT FOR PULLBACK     — trend is right but price needs to come in
-      8. NOT ENOUGH EDGE       — insufficient signal quality
+    4-mode system evaluated in priority order:
+
+    READY — LEVEL HOLDS   (Mode 2 — green)
+        Price at a key level AND 15m candle confirms AND volume ≥ 1.2×.
+        Full trade plan is active and entry is valid.
+
+    PRE-CONFIRMATION      (Mode 1 — yellow/orange)
+        Price within 2-3% of a key level (50/61.8% fib, 20/50 EMA, demand/supply zone)
+        AND trend is aligned.  Trade plan is populated — "Waiting for confirmation."
+
+    TREND CONTINUATION    (Mode 3 — blue)
+        Trend has confirmed structure (HH+HL for bulls, LH+LL for bears) and price is
+        NOT near a classic pullback level.  Breakout/continuation entry.
+
+    WAIT                  (Mode 4 — gray)
+        No valid setup: extended, at resistance, no trend alignment, or no edge.
+
+    Key level proximity window:
+        ± 3% of 61.8% fib, ± 3% of 50% fib,
+        ± 3% of 20 EMA, ± 4% of 50 EMA, or price in demand/supply zone.
     """
     bias        = data.get("trade_bias") or "Neutral"
-    swing_score = data.get("swing_score") or 0
     pct_ema20   = data.get("pct_from_ema20")
+    pct_ema50   = data.get("pct_from_ema50")
     daily_trend = data.get("daily_trend") or "Neutral"
-    zone_loc    = data.get("zone_location") or "BETWEEN ZONES"
+    daily_hh_hl = bool(data.get("daily_hh_hl", False))
+    daily_lh_ll = bool(data.get("daily_lh_ll", False))
+    fib_50      = data.get("fib_50")
+    fib_618     = data.get("fib_618")
+    current     = data.get("current_price") or 0
     in_demand   = data.get("in_demand_zone", False)
     in_supply   = data.get("in_supply_zone", False)
-    swing_type  = data.get("swing_setup_type") or "No Setup"
+    rvol        = data.get("rel_volume") or 0
+    m15_conf    = int(data.get("m15_confirmation") or 0)
 
     if bias == "Avoid":
-        return "NOT ENOUGH EDGE"
+        return "WAIT"
 
-    # 1. Extended
+    # ── Trend alignment ───────────────────────────────────────────────────────
+    trend_bull    = bias == "Long Bias"  and daily_trend in ("Bullish", "Bullish Lean")
+    trend_bear    = bias == "Short Bias" and daily_trend in ("Bearish", "Bearish Lean")
+    trend_aligned = trend_bull or trend_bear
+
+    # ── Hard disqualifiers → WAIT ─────────────────────────────────────────────
+    # At resistance on a long, or at support on a short — structural headwind
+    if in_supply and bias == "Long Bias":
+        return "WAIT"
+    if in_demand and bias == "Short Bias":
+        return "WAIT"
+
+    # Heavily extended: >15% from 20 EMA in trend direction — do not chase
     if pct_ema20 is not None:
-        ext = abs(pct_ema20)
         ext_dir = (bias == "Long Bias" and pct_ema20 > 0) or \
                   (bias == "Short Bias" and pct_ema20 < 0)
-        if ext_dir and ext > SWING_T["extended_heavy_pct"]:
-            return "TOO EXTENDED"
+        if ext_dir and abs(pct_ema20) > SWING_T["extended_heavy_pct"]:
+            return "WAIT"
 
-    # 2. At resistance on long
-    if in_supply and bias == "Long Bias":
-        return "AVOID — AT RESISTANCE"
+    # Trend opposing — no edge
+    if not trend_aligned:
+        return "WAIT"
 
-    # 3. Weak / opposing structure
-    if bias == "Long Bias" and daily_trend == "Bearish":
-        return "AVOID — WEAK STRUCTURE"
-    if bias == "Short Bias" and daily_trend == "Bullish":
-        return "AVOID — WEAK STRUCTURE"
-    if daily_trend == "Neutral" and swing_score < 4:
-        return "AVOID — WEAK STRUCTURE"
+    # ── Near key level? (2–3% proximity window) ───────────────────────────────
+    _LVL = SWING_T["fib_proximity_pct"] * 1.5   # 3%
 
-    # 4. At key level — high quality
-    at_level = swing_type in (
-        "Order Block Test", "Near 61.8% Retracement",
-        "Near 50% Retracement", "Pullback to 20 EMA", "Pullback to 50 EMA",
-    )
-    if at_level and swing_score >= 6:
-        return "READY IF LEVEL HOLDS"
+    near_fib618 = bool(current and fib_618 and
+                       abs(current - fib_618) / current * 100 <= _LVL)
+    near_fib50  = bool(current and fib_50  and
+                       abs(current - fib_50)  / current * 100 <= _LVL)
+    near_ema20  = bool(pct_ema20 is not None and
+                       abs(pct_ema20) <= SWING_T["pullback_ema20_pct"])
+    near_ema50  = bool(pct_ema50 is not None and
+                       abs(pct_ema50) <= SWING_T["pullback_ema50_pct"])
+    near_zone   = (in_demand and bias == "Long Bias") or \
+                  (in_supply and bias == "Short Bias")
 
-    # 5. High overall quality
-    if swing_score >= 7:
-        return "GOOD SWING CANDIDATE"
+    near_level  = near_fib618 or near_fib50 or near_ema20 or near_ema50 or near_zone
 
-    # 6. Good setup but needs entry trigger
-    if swing_score >= 5 and at_level:
-        return "WAIT FOR 15M CONFIRMATION"
+    # ── Mode 2: READY — LEVEL HOLDS ──────────────────────────────────────────
+    # At key level + 15m candle confirms + volume ≥ 1.2× average
+    if near_level and m15_conf >= 2 and rvol >= SWING_T["min_rvol_strong"]:
+        return "READY — LEVEL HOLDS"
 
-    # 7. Trend is good, no pullback yet
-    trend_ok = (bias == "Long Bias"  and daily_trend in ("Bullish", "Bullish Lean")) or \
-               (bias == "Short Bias" and daily_trend in ("Bearish", "Bearish Lean"))
-    if trend_ok and swing_score >= 3:
-        return "WAIT FOR PULLBACK"
+    # ── Mode 1: PRE-CONFIRMATION ─────────────────────────────────────────────
+    # Near key level, trend aligned — entry forming but not yet confirmed
+    if near_level:
+        return "PRE-CONFIRMATION"
 
-    return "NOT ENOUGH EDGE"
+    # ── Mode 3: TREND CONTINUATION ───────────────────────────────────────────
+    # Good trend structure with no pullback level nearby — breakout/continuation entry
+    if trend_bull and daily_hh_hl:
+        return "TREND CONTINUATION"
+    if trend_bear and daily_lh_ll:
+        return "TREND CONTINUATION"
+
+    # ── Mode 4: WAIT ─────────────────────────────────────────────────────────
+    return "WAIT"
 
 
 def compute_swing_trade_plan(data: dict) -> dict:
     """
-    Compute entry zone, stop level, and targets for a swing trade.
+    Compute a COMPLETE swing trade plan for every setup mode.
 
-    Entry: prioritises demand zone, then 20 EMA, then Fibonacci, then current price.
-    Stop:  below demand zone bottom / below 20 EMA / below swing low.
-    Target 1: nearest supply zone / swing high.
-    Target 2: 1.5× the T1 reward distance.
-    Risk/Reward: reward-to-risk ratio at T1.
+    A full plan (entry zone, stop, T1, T2, R:R) is ALWAYS generated when
+    trade_bias is Long or Short.  The plan_mode field tells the UI how to
+    present it:
 
-    Returns a dict — all fields present, may be None when insufficient data.
+        "confirmed"        — at level with 15m + vol confirmation (green)
+        "pre_confirmation" — approaching key level, not yet confirmed (yellow)
+        "continuation"     — trend breakout / continuation (blue)
+        "watching"         — valid trend but no specific level yet (neutral)
+
+    Entry priority (longs):
+        1. Demand zone          (best: institutional support proven)
+        2. 20 EMA               (dynamic support in trend)
+        3. 61.8% Fibonacci      (deep pullback to golden pocket)
+        4. 50% Fibonacci        (mid-range pullback)
+        5. Trend continuation   (above swing high — breakout entry)
+        6. Current price zone   (fallback — still gives a plan to watch)
+
+    Stop: below key level support (demand zone / EMA / swing low)
+    T1:   previous high / nearest supply zone
+    T2:   1.5× the T1 reward extension
+    R:R:  reward-to-risk at T1
     """
-    bias    = data.get("trade_bias") or "Neutral"
-    current = data.get("current_price") or 0
-    e20     = data.get("ema_20_daily")
-    e50     = data.get("ema_50_daily")
-    fib_50  = data.get("fib_50")
-    fib_618 = data.get("fib_618")
-    sw_high = data.get("fib_high")
-    sw_low  = data.get("fib_low")
-    d_bot   = data.get("nearest_demand_bottom")
-    d_top   = data.get("nearest_demand_top")
-    s_bot   = data.get("nearest_supply_bottom")
-    s_top   = data.get("nearest_supply_top")
+    bias        = data.get("trade_bias") or "Neutral"
+    current     = data.get("current_price") or 0
+    e20         = data.get("ema_20_daily")
+    e50         = data.get("ema_50_daily")
+    fib_50      = data.get("fib_50")
+    fib_618     = data.get("fib_618")
+    sw_high     = data.get("fib_high")
+    sw_low      = data.get("fib_low")
+    d_bot       = data.get("nearest_demand_bottom")
+    d_top       = data.get("nearest_demand_top")
+    s_bot       = data.get("nearest_supply_bottom")
+    s_top       = data.get("nearest_supply_top")
+    daily_trend = data.get("daily_trend") or "Neutral"
+    daily_hh_hl = bool(data.get("daily_hh_hl", False))
+    daily_lh_ll = bool(data.get("daily_lh_ll", False))
+    rvol        = data.get("rel_volume") or 0
+    m15_conf    = int(data.get("m15_confirmation") or 0)
+    pct_ema20   = data.get("pct_from_ema20")
+    pct_ema50   = data.get("pct_from_ema50")
 
     out = {
         "entry_zone_low":  None,
@@ -1837,14 +1895,47 @@ def compute_swing_trade_plan(data: dict) -> dict:
         "target_1":        None,
         "target_2":        None,
         "risk_reward":     None,
+        "plan_mode":       "none",
     }
 
     if not current or bias == "Avoid" or bias == "Neutral":
         return out
 
+    # ── Determine plan mode from proximity + confirmation ─────────────────────
+    _LVL = SWING_T["fib_proximity_pct"] * 1.5   # 3% window
+    _near_level = any([
+        current and fib_618 and abs(current - fib_618) / current * 100 <= _LVL,
+        current and fib_50  and abs(current - fib_50)  / current * 100 <= _LVL,
+        e20 and abs(current - e20) / e20 * 100 <= SWING_T["pullback_ema20_pct"],
+        e50 and abs(current - e50) / e50 * 100 <= SWING_T["pullback_ema50_pct"],
+        bool(d_bot and d_top and abs(current - d_top) / current < 0.06),
+    ])
+    _trend_bull = daily_trend in ("Bullish", "Bullish Lean")
+    _trend_bear = daily_trend in ("Bearish", "Bearish Lean")
+    _confirmed  = _near_level and m15_conf >= 2 and rvol >= SWING_T["min_rvol_strong"]
+    _continuation = (
+        (bias == "Long Bias"  and _trend_bull and daily_hh_hl and not _near_level) or
+        (bias == "Short Bias" and _trend_bear and daily_lh_ll and not _near_level)
+    )
+
+    if _confirmed:
+        out["plan_mode"] = "confirmed"
+    elif _near_level:
+        out["plan_mode"] = "pre_confirmation"
+    elif _continuation:
+        out["plan_mode"] = "continuation"
+    elif (_trend_bull and bias == "Long Bias") or (_trend_bear and bias == "Short Bias"):
+        out["plan_mode"] = "watching"
+
+    # ─────────────────────────────────────────────────────────────────────────
     if bias == "Long Bias":
-        # ── Entry zone ────────────────────────────────────────────────────
-        if d_bot and d_top and current and abs(current - d_top) / current < 0.06:
+
+        # ── Entry zone ────────────────────────────────────────────────────────
+        if _continuation and sw_high:
+            # Trend continuation: breakout entry just above swing high
+            ez_lo = round(sw_high * 0.998, 2)
+            ez_hi = round(sw_high * 1.005, 2)
+        elif d_bot and d_top and abs(current - d_top) / current < 0.06:
             ez_lo, ez_hi = d_bot, d_top
         elif e20 and abs(current - e20) / e20 < 0.04:
             buf = e20 * 0.01
@@ -1855,6 +1946,16 @@ def compute_swing_trade_plan(data: dict) -> dict:
         elif fib_50 and abs(current - fib_50) / current < 0.03:
             buf = fib_50 * 0.01
             ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
+        elif fib_618:
+            # Pre-confirm: entry zone IS the upcoming key level even if not there yet
+            buf = fib_618 * 0.01
+            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
+        elif fib_50:
+            buf = fib_50 * 0.01
+            ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
+        elif e20:
+            buf = e20 * 0.01
+            ez_lo, ez_hi = round(e20 - buf, 2), round(e20 + buf, 2)
         else:
             buf = current * 0.015
             ez_lo, ez_hi = round(current - buf, 2), round(current + buf * 0.5, 2)
@@ -1862,8 +1963,11 @@ def compute_swing_trade_plan(data: dict) -> dict:
         out["entry_zone_low"]  = round(ez_lo, 2)
         out["entry_zone_high"] = round(ez_hi, 2)
 
-        # ── Stop ──────────────────────────────────────────────────────────
-        if d_bot:
+        # ── Stop ──────────────────────────────────────────────────────────────
+        if _continuation and sw_high:
+            # Stop below breakout candle (just below the former swing high)
+            stop = round(sw_high * 0.975, 2)
+        elif d_bot:
             stop = round(d_bot * 0.988, 2)
         elif e20:
             stop = round(e20 * 0.972, 2)
@@ -1873,32 +1977,43 @@ def compute_swing_trade_plan(data: dict) -> dict:
             stop = round(ez_lo * 0.960, 2)
         out["stop_level"] = stop
 
-        # ── Target 1 ─────────────────────────────────────────────────────
+        # ── Target 1 ──────────────────────────────────────────────────────────
         if s_bot and s_bot > current:
             t1 = round(s_bot * 0.998, 2)
-        elif sw_high:
+        elif sw_high and not _continuation:
             t1 = round(sw_high, 2)
         else:
             t1 = round(current * 1.07, 2)
         out["target_1"] = t1
 
-        # ── Target 2 (1.5× T1 reward) ────────────────────────────────────
+        # ── Target 2 (1.5× T1 reward extension) ──────────────────────────────
         reward_1 = t1 - ez_hi
         if reward_1 > 0:
             out["target_2"] = round(ez_hi + reward_1 * 1.5, 2)
 
-        # ── R:R ───────────────────────────────────────────────────────────
+        # ── R:R ───────────────────────────────────────────────────────────────
         risk = ez_hi - stop
         if risk > 0 and reward_1 > 0:
             out["risk_reward"] = round(reward_1 / risk, 2)
 
     elif bias == "Short Bias":
-        # ── Entry zone ────────────────────────────────────────────────────
-        if s_bot and s_top and current and abs(current - s_bot) / current < 0.06:
+
+        # ── Entry zone ────────────────────────────────────────────────────────
+        if _continuation and sw_low:
+            # Trend continuation: breakdown entry just below swing low
+            ez_lo = round(sw_low * 0.995, 2)
+            ez_hi = round(sw_low * 1.002, 2)
+        elif s_bot and s_top and abs(current - s_bot) / current < 0.06:
             ez_lo, ez_hi = s_bot, s_top
         elif e20 and abs(current - e20) / e20 < 0.04:
             buf = e20 * 0.01
             ez_lo, ez_hi = round(e20 - buf, 2), round(e20 + buf, 2)
+        elif fib_618:
+            buf = fib_618 * 0.01
+            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
+        elif fib_50:
+            buf = fib_50 * 0.01
+            ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
         else:
             buf = current * 0.015
             ez_lo, ez_hi = round(current - buf * 0.5, 2), round(current + buf, 2)
@@ -1906,8 +2021,10 @@ def compute_swing_trade_plan(data: dict) -> dict:
         out["entry_zone_low"]  = round(ez_lo, 2)
         out["entry_zone_high"] = round(ez_hi, 2)
 
-        # ── Stop ──────────────────────────────────────────────────────────
-        if s_top:
+        # ── Stop ──────────────────────────────────────────────────────────────
+        if _continuation and sw_low:
+            stop = round(sw_low * 1.025, 2)
+        elif s_top:
             stop = round(s_top * 1.012, 2)
         elif e20:
             stop = round(e20 * 1.028, 2)
@@ -1917,28 +2034,23 @@ def compute_swing_trade_plan(data: dict) -> dict:
             stop = round(ez_hi * 1.040, 2)
         out["stop_level"] = stop
 
-        # ── Target 1 ─────────────────────────────────────────────────────
+        # ── Target 1 ──────────────────────────────────────────────────────────
         if d_top and d_top < current:
             t1 = round(d_top * 1.002, 2)
-        elif sw_low:
+        elif sw_low and not _continuation:
             t1 = round(sw_low, 2)
         else:
             t1 = round(current * 0.93, 2)
         out["target_1"] = t1
 
-        # ── Target 2 ─────────────────────────────────────────────────────
+        # ── Target 2 (1.5× T1 reward extension) ──────────────────────────────
         reward_1 = ez_lo - t1
         if reward_1 > 0:
             out["target_2"] = round(ez_lo - reward_1 * 1.5, 2)
 
-        # ── R:R ───────────────────────────────────────────────────────────
+        # ── R:R ───────────────────────────────────────────────────────────────
         risk = stop - ez_lo
         if risk > 0 and reward_1 > 0:
             out["risk_reward"] = round(reward_1 / risk, 2)
 
     return out
-
-    if not breakdown:
-        breakdown.append(("No signals detected", 0))
-
-    return breakdown

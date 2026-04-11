@@ -229,7 +229,7 @@ def get_db() -> _Conn:
     return _Conn(conn)
 
 
-DEFAULT_WATCHLISTS = ["Swing Ready", "Pullback Zone", "Extended", "Core List"]
+DEFAULT_WATCHLISTS = ["A+ Swing Setups", "Secondary Swing Watch", "Extended", "Core Swing Plays"]
 
 
 # ---------------------------------------------------------------------------
@@ -512,10 +512,15 @@ def init_db():
 
     # ── Rename any legacy watchlist names to the swing-focused labels ──────
     _LEGACY_RENAMES = {
-        "A+ Momentum":    "Swing Ready",
-        "Secondary Watch": "Pullback Zone",
-        "Swing Watchlist": "Extended",
-        "Core":           "Core List",
+        # Original names → v2 names
+        "A+ Momentum":          "A+ Swing Setups",
+        "Secondary Watch":      "Secondary Swing Watch",
+        "Swing Watchlist":      "Extended",
+        "Core":                 "Core Swing Plays",
+        # v2 names → v3 names
+        "Swing Ready":          "A+ Swing Setups",
+        "Pullback Zone":        "Secondary Swing Watch",
+        "Core List":            "Core Swing Plays",
     }
     for old_name, new_name in _LEGACY_RENAMES.items():
         cursor.execute(

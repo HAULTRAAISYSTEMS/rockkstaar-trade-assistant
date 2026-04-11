@@ -309,9 +309,15 @@ def get_setup_type_class(setup_type):
 def get_swing_status_class(swing_status: str) -> str:
     """CSS class for the swing status badge."""
     return {
-        "GOOD SWING CANDIDATE":       "swing-status-good",
+        # ── Current 4-mode labels ─────────────────────────────────────────────
+        "READY — LEVEL HOLDS":        "swing-status-ready",
+        "PRE-CONFIRMATION":           "swing-status-pre-confirm",
+        "TREND CONTINUATION":         "swing-status-continuation",
+        "WAIT":                       "swing-status-wait",
+        # ── Legacy labels (backward compat for DB values) ─────────────────────
+        "GOOD SWING CANDIDATE":       "swing-status-ready",
         "READY IF LEVEL HOLDS":       "swing-status-ready",
-        "WAIT FOR 15M CONFIRMATION":  "swing-status-confirm",
+        "WAIT FOR 15M CONFIRMATION":  "swing-status-pre-confirm",
         "WAIT FOR PULLBACK":          "swing-status-wait",
         "TOO EXTENDED":               "swing-status-extended",
         "NOT ENOUGH EDGE":            "swing-status-no-edge",
@@ -366,14 +372,20 @@ def get_exec_class(exec_state):
 # ---------------------------------------------------------------------------
 
 _SWING_STATUS_ACTION = {
-    "GOOD SWING CANDIDATE":       ("READY",         "exec-ready",    "High-quality swing setup — watch for entry"),
-    "READY IF LEVEL HOLDS":       ("READY",         "exec-ready",    "Price at key level — confirm holds before entry"),
-    "WAIT FOR 15M CONFIRMATION":  ("WAIT",          "exec-wait",     "Structure in place — wait for 15m confirmation candle"),
-    "WAIT FOR PULLBACK":          ("WAIT",          "exec-wait",     "Trend is right but extended — wait for pullback to level"),
-    "TOO EXTENDED":               ("DO NOT CHASE",  "exec-extended", "Price too far from entry zone — do not chase"),
-    "NOT ENOUGH EDGE":            ("NO SETUP",      "exec-no-setup", "Insufficient edge — no actionable swing setup"),
-    "AVOID AT RESISTANCE":        ("NO SETUP",      "exec-no-setup", "At resistance — poor R:R, avoid long entry"),
-    "AVOID WEAK STRUCTURE":       ("NO SETUP",      "exec-no-setup", "Weak market structure — avoid this setup"),
+    # ── Current 4-mode labels ─────────────────────────────────────────────────
+    "READY — LEVEL HOLDS":        ("READY",              "exec-ready",        "Level confirmed — entry valid, manage risk"),
+    "PRE-CONFIRMATION":           ("PRE-CONFIRMATION",   "exec-pre-confirm",  "Potential entry forming — waiting for confirmation candle"),
+    "TREND CONTINUATION":         ("TREND CONTINUATION", "exec-continuation", "Breakout entry — trade the continuation, stop below breakout"),
+    "WAIT":                       ("WAIT",               "exec-wait",         "No valid setup — no actionable edge right now"),
+    # ── Legacy labels (backward compat) ──────────────────────────────────────
+    "GOOD SWING CANDIDATE":       ("READY",              "exec-ready",        "High-quality swing setup — watch for entry"),
+    "READY IF LEVEL HOLDS":       ("READY",              "exec-ready",        "Price at key level — confirm holds before entry"),
+    "WAIT FOR 15M CONFIRMATION":  ("PRE-CONFIRMATION",   "exec-pre-confirm",  "Structure in place — wait for 15m confirmation candle"),
+    "WAIT FOR PULLBACK":          ("WAIT",               "exec-wait",         "Trend is right but extended — wait for pullback to level"),
+    "TOO EXTENDED":               ("DO NOT CHASE",       "exec-extended",     "Price too far from entry zone — do not chase"),
+    "NOT ENOUGH EDGE":            ("WAIT",               "exec-wait",         "Insufficient edge — no actionable swing setup"),
+    "AVOID AT RESISTANCE":        ("WAIT",               "exec-wait",         "At resistance — poor R:R, avoid long entry"),
+    "AVOID WEAK STRUCTURE":       ("WAIT",               "exec-wait",         "Weak market structure — avoid this setup"),
 }
 
 
@@ -386,12 +398,14 @@ def compute_swing_final_action(swing_status: str) -> tuple:
 
 
 _FINAL_ACTION_CSS = {
-    "TRIGGERED":       "exec-triggered",
-    "READY":           "exec-ready",
-    "WAIT":            "exec-wait",
-    "WAIT (LOW CONF)": "exec-wait-low",
-    "DO NOT CHASE":    "exec-extended",
-    "NO SETUP":        "exec-no-setup",
+    "TRIGGERED":            "exec-triggered",
+    "READY":                "exec-ready",
+    "PRE-CONFIRMATION":     "exec-pre-confirm",
+    "TREND CONTINUATION":   "exec-continuation",
+    "WAIT":                 "exec-wait",
+    "WAIT (LOW CONF)":      "exec-wait-low",
+    "DO NOT CHASE":         "exec-extended",
+    "NO SETUP":             "exec-no-setup",
 }
 
 
@@ -964,6 +978,29 @@ def annotate(stock: dict) -> dict:
     stock["swing_setup_type_class"] = get_setup_type_class(stock.get("swing_setup_type") or "No Setup")
     stock["swing_grade"]            = compute_swing_grade(stock.get("swing_score") or 1)
 
+    # ── Plan mode display helpers ─────────────────────────────────────────────
+    _plan_mode = stock.get("plan_mode") or "none"
+    stock["plan_mode_label"] = {
+        "confirmed":        "CONFIRMED",
+        "pre_confirmation": "PRE-CONFIRMATION SETUP",
+        "continuation":     "TREND CONTINUATION",
+        "watching":         "WATCHING",
+    }.get(_plan_mode, "")
+    stock["plan_mode_class"] = {
+        "confirmed":        "plan-confirmed",
+        "pre_confirmation": "plan-pre-confirm",
+        "continuation":     "plan-continuation",
+        "watching":         "plan-watching",
+    }.get(_plan_mode, "")
+
+    # ── Swing confidence display (1-3=Low, 4-6=Medium, 7-10=High) ────────────
+    _sc = stock.get("swing_score") or 0
+    stock["swing_confidence_label"] = (
+        "High"   if _sc >= 7 else
+        "Medium" if _sc >= 4 else
+        "Low"
+    )
+
     # ── Entry zone distance (how far current price is from the entry zone) ────
     _cur   = stock.get("current_price") or 0
     _ez_lo = stock.get("entry_zone_low")
@@ -1088,7 +1125,9 @@ def rank_stocks(stocks: list) -> list:
         rvol     = min((s.get("rel_volume") or 0) * 1.5, 10)
         # Penalise extended/avoid statuses
         _status  = s.get("swing_status") or ""
-        penalty  = -20 if _status in ("TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE") else 0
+        penalty  = -20 if _status in (
+            "WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE"
+        ) else (-5 if _status == "TREND CONTINUATION" else 0)
         return primary + catalyst + rvol + penalty
 
     return sorted(stocks, key=composite, reverse=True)
@@ -1374,7 +1413,7 @@ def _dashboard_inner():
             # Swing mode: good score + actionable status
             (s.get("swing_score") or 0) >= 6
             and s.get("swing_status") not in (
-                "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE", "NOT ENOUGH EDGE"
+                "WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE", "NOT ENOUGH EDGE"
             )
             and s.get("trade_bias") != "Avoid"
         ) or (

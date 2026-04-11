@@ -784,6 +784,18 @@ a { color: inherit; text-decoration: none; }
   color: #ca8a04;
   border-color: rgba(251, 191, 36, 0.3);
 }
+/* PRE-CONFIRMATION — setup forming, entry zone visible but not triggered */
+.exec-pre-confirm {
+  background: rgba(251, 146, 60, 0.14);
+  color: #fb923c;
+  border-color: rgba(251, 146, 60, 0.40);
+}
+/* TREND CONTINUATION — breakout / momentum continuation entry */
+.exec-continuation {
+  background: rgba(34, 211, 238, 0.12);
+  color: #22d3ee;
+  border-color: rgba(34, 211, 238, 0.38);
+}
 /* DO NOT CHASE — price extended, entry zone missed */
 .exec-extended {
   background: rgba(249, 115, 22, 0.12);
@@ -3151,10 +3163,18 @@ a { color: inherit; text-decoration: none; }
 }
 .swing-status-sm { font-size: 0.65rem; padding: 2px 6px; }
 
-.swing-status-good      { background: rgba(34,197,94,0.15);  color: #22c55e; border-color: rgba(34,197,94,0.3); }
-.swing-status-ready     { background: rgba(59,130,246,0.15); color: #60a5fa; border-color: rgba(59,130,246,0.3); }
-.swing-status-confirm   { background: rgba(234,179,8,0.12);  color: #eab308; border-color: rgba(234,179,8,0.3); }
+/* ── 4-mode swing status badges ─────────────────────────────────────────── */
+/* Mode 2: READY — LEVEL HOLDS  (green — confirmed, act on it) */
+.swing-status-ready     { background: rgba(34,197,94,0.15);  color: #22c55e; border-color: rgba(34,197,94,0.4); font-weight: 700; }
+/* Mode 1: PRE-CONFIRMATION     (amber — forming, watching) */
+.swing-status-pre-confirm { background: rgba(251,146,60,0.15); color: #fb923c; border-color: rgba(251,146,60,0.4); font-weight: 600; }
+/* Mode 3: TREND CONTINUATION   (blue/cyan — breakout, momentum) */
+.swing-status-continuation { background: rgba(34,211,238,0.14); color: #22d3ee; border-color: rgba(34,211,238,0.4); font-weight: 600; }
+/* Mode 4: WAIT                 (neutral gray) */
 .swing-status-wait      { background: var(--bg3);            color: var(--text-dim); border-color: var(--border); }
+/* Legacy / extended states */
+.swing-status-good      { background: rgba(34,197,94,0.12);  color: #4ade80; border-color: rgba(34,197,94,0.3); }
+.swing-status-confirm   { background: rgba(251,146,60,0.12); color: #fb923c; border-color: rgba(251,146,60,0.3); }
 .swing-status-extended  { background: rgba(239,68,68,0.12);  color: #ef4444; border-color: rgba(239,68,68,0.3); }
 .swing-status-no-edge   { background: var(--bg3);            color: var(--text-muted); border-color: var(--border); }
 .swing-status-avoid     { background: rgba(239,68,68,0.08);  color: #f87171; border-color: rgba(239,68,68,0.2); }
@@ -3669,6 +3689,12 @@ a { color: inherit; text-decoration: none; }
   -webkit-backdrop-filter: blur(18px);
   border-bottom: 1px solid var(--border) !important;
 }
+
+/* ── Plan mode badges ────────────────────────────────────── */
+.plan-confirmed    { background: rgba(34,197,94,0.15);  color: #22c55e; border: 1px solid rgba(34,197,94,0.4);  border-radius: 6px; padding: 2px 8px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; }
+.plan-pre-confirm  { background: rgba(251,146,60,0.15); color: #fb923c; border: 1px solid rgba(251,146,60,0.4); border-radius: 6px; padding: 2px 8px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; }
+.plan-continuation { background: rgba(34,211,238,0.13); color: #22d3ee; border: 1px solid rgba(34,211,238,0.4); border-radius: 6px; padding: 2px 8px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; }
+.plan-watching     { background: var(--bg3);            color: var(--text-dim); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 0.72rem; }
 
 /* ── Bias glow classes (requested) ──────────────────────── */
 .long-bias {

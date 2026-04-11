@@ -13,10 +13,10 @@ Watchlist hierarchy (evaluated top to bottom — first match wins):
 """
 
 # Must match DEFAULT_WATCHLISTS in database.py
-SWING_READY   = "Swing Ready"
-PULLBACK_ZONE = "Pullback Zone"
+SWING_READY   = "A+ Swing Setups"
+PULLBACK_ZONE = "Secondary Swing Watch"
 EXTENDED      = "Extended"
-CORE_LIST     = "Core List"
+CORE_LIST     = "Core Swing Plays"
 
 _AVOID_STATUSES = {"TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE"}
 _WAIT_STATUSES  = {"WAIT FOR PULLBACK", "WAIT FOR 15M CONFIRMATION", "NOT ENOUGH EDGE"}
@@ -60,9 +60,9 @@ def classify_stock(stock: dict) -> tuple:
     """
     bias  = stock.get("trade_bias") or "Neutral"
 
-    # Avoid-biased stocks always go to Core List
+    # Avoid-biased stocks always go to Core Swing Plays
     if bias == "Avoid":
-        return CORE_LIST, "Placed in Core List: Avoid bias — not suitable for active trading"
+        return CORE_LIST, "Placed in Core Swing Plays: Avoid bias — not suitable for active trading"
 
     swing_score  = stock.get("swing_score")
     swing_status = stock.get("swing_status") or ""
@@ -81,41 +81,41 @@ def classify_stock(stock: dict) -> tuple:
                 "not a valid entry"
             )
 
-        # Swing Ready: high score + actionable status + trend confirmed
+        # A+ Swing Setups: high score + actionable status + trend confirmed
         if swing_score >= 7 and swing_status in _READY_STATUSES and trend_ok:
             return SWING_READY, (
-                f"Swing Ready: score {swing_score}/10, {swing_status}, "
+                f"A+ Swing Setups: score {swing_score}/10, {swing_status}, "
                 f"{daily_trend} daily trend — valid entry zone"
             )
 
-        # Swing Ready even without perfect trend if score is very high
+        # A+ even without perfect trend if score is very high
         if swing_score >= 8 and swing_status in _READY_STATUSES:
             return SWING_READY, (
-                f"Swing Ready (high score): score {swing_score}/10, {swing_status}"
+                f"A+ Swing Setups (high score): score {swing_score}/10, {swing_status}"
             )
 
-        # Pullback Zone: decent score, watching for entry at a key level
+        # Secondary Swing Watch: decent score, watching for entry at a key level
         if swing_score >= 5 and swing_status not in _AVOID_STATUSES:
             gaps = []
             if swing_score < 7:
-                gaps.append(f"score {swing_score}/10 (need ≥ 7 for Swing Ready)")
+                gaps.append(f"score {swing_score}/10 (need ≥ 7 for A+)")
             if swing_status not in _READY_STATUSES:
                 gaps.append(f"status: {swing_status}")
             if not trend_ok:
                 gaps.append(f"trend: {daily_trend}")
-            reason = "Pullback Zone: " + (", ".join(gaps) if gaps else "near key level, watching for entry")
+            reason = "Secondary Swing Watch: " + (", ".join(gaps) if gaps else "near key level, watching for entry")
             return PULLBACK_ZONE, reason
 
-        # Extended (low score + wait status): setup not developing
+        # Extended (low score + avoid/wait status): setup not actionable
         if swing_score >= 3 or swing_status in _WAIT_STATUSES:
             return EXTENDED, (
                 f"Extended: score {swing_score}/10, {swing_status} — "
                 "setup not ready, do not chase"
             )
 
-        # Core List: no usable data
+        # Core Swing Plays: no usable data — manually tracked
         return CORE_LIST, (
-            f"Core List: swing score {swing_score}/10, status: {swing_status or 'none'}"
+            f"Core Swing Plays: swing score {swing_score}/10, status: {swing_status or 'none'}"
         )
 
     # ── Legacy day-trading fallback ───────────────────────────────────────────
@@ -131,7 +131,7 @@ def classify_stock(stock: dict) -> tuple:
         if entry == "Perfect":
             parts.append("perfect entry quality")
         parts.append(f"setup {setup}/10")
-        return SWING_READY, "Swing Ready: " + ", ".join(parts)
+        return SWING_READY, "A+ Swing Setups: " + ", ".join(parts)
 
     if entry == "Extended" or (mom < 4 and setup < 3):
         return EXTENDED, (
@@ -148,7 +148,7 @@ def classify_stock(stock: dict) -> tuple:
             gaps.append(f"momentum only {mom}/10 (need ≥ 6)")
         if setup < 7:
             gaps.append(f"setup {setup}/10 (need ≥ 7)")
-        reason = "Pullback Zone: " + (", ".join(gaps) if gaps else "near key level, not yet Swing Ready")
+        reason = "Secondary Swing Watch: " + (", ".join(gaps) if gaps else "near key level, not yet A+")
         return PULLBACK_ZONE, reason
 
     if setup >= 3 and mom < 4 and orb != "YES":
@@ -157,4 +157,4 @@ def classify_stock(stock: dict) -> tuple:
             f"some price structure (setup {setup}/10) — not actionable"
         )
 
-    return CORE_LIST, f"Core List: low signal (momentum {mom}/10, setup {setup}/10) — manually monitor"
+    return CORE_LIST, f"Core Swing Plays: low signal (momentum {mom}/10, setup {setup}/10) — manually monitor"
