@@ -60,6 +60,47 @@ try:
 except Exception as _init_err:
     logger.error("init_db failed at startup: %s — will retry on first request", _init_err)
 
+# ---------------------------------------------------------------------------
+# Startup migration: wipe stale mock-seeded prices from the DB.
+#
+# Old versions of mock_data.py seeded current_price directly from MOCK_STOCKS
+# templates (NVDA=800, META=540, AMZN=190, etc.).  If these were written to
+# the DB before the fix, the snapshot guard preserved them forever.
+# On each startup we NULL out any price that exactly matches a known stale
+# seed and set ticker_state=error so the auto-refresh retries the live fetch.
+# ---------------------------------------------------------------------------
+_STALE_MOCK_PRICES = {
+    "NVDA": 800.0, "META": 540.0, "MRVL": 72.0,
+    "AMZN": 190.0, "MU":   95.0,  "INTC": 23.0,
+}
+
+def _clear_stale_mock_prices():
+    """Null out any DB prices that match the old mock seeds."""
+    try:
+        from database import get_db, get_stock_data
+        for ticker, stale_price in _STALE_MOCK_PRICES.items():
+            snap = get_stock_data(ticker)
+            if snap and snap.get("current_price") == stale_price:
+                conn = get_db()
+                conn.execute(
+                    "UPDATE stock_data SET current_price = NULL, prev_close = NULL, "
+                    "gap_pct = NULL, ticker_state = 'error' WHERE ticker = ?",
+                    (ticker,),
+                )
+                conn.commit()
+                conn.close()
+                logger.warning(
+                    "startup migration: cleared stale mock price %.1f for %s → ticker_state=error",
+                    stale_price, ticker,
+                )
+    except Exception as _e:
+        logger.error("_clear_stale_mock_prices failed: %s", _e)
+
+try:
+    _clear_stale_mock_prices()
+except Exception as _mig_err:
+    logger.error("startup migration failed: %s", _mig_err)
+
 # Global refresh lock — prevents overlapping bulk-refresh requests.
 # Uses a threading.Lock() so concurrent gunicorn workers each have their own
 # flag (cross-process locking is not needed for UX safety on a single user app).

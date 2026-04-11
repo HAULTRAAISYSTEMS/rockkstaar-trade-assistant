@@ -53,6 +53,50 @@ def _get_yf_session():
     return _YF_SESSION
 
 
+def _fetch_price_via_chart_api(ticker: str) -> float | None:
+    """
+    Fetch current price directly from Yahoo Finance's chart API.
+
+    This endpoint does not require cookies/crumb and works from cloud IPs
+    where yfinance's fast_info endpoint is blocked or rate-limited.
+    Returns None on any error so callers can fall back further.
+    """
+    if not _YF_AVAILABLE:
+        return None
+    _CHART_URLS = [
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+        f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}",
+    ]
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json",
+    }
+    params = {"interval": "1d", "range": "2d"}
+    for url in _CHART_URLS:
+        try:
+            import requests as _req
+            r = _req.get(url, params=params, headers=headers, timeout=8)
+            if r.status_code != 200:
+                continue
+            data = r.json()
+            meta = data["chart"]["result"][0]["meta"]
+            price = (
+                meta.get("regularMarketPrice")
+                or meta.get("previousClose")
+                or meta.get("chartPreviousClose")
+            )
+            if price and float(price) > 0:
+                return round(float(price), 2)
+        except Exception as _e:
+            logger.debug("chart API fallback failed for %s via %s: %s", ticker, url, _e)
+            continue
+    return None
+
+
 def _et_now() -> datetime:
     """Current time in US/Eastern — handles EST/EDT via zoneinfo (Python 3.9+)."""
     try:
@@ -177,6 +221,15 @@ def fetch_live_data(ticker: str) -> dict | None:
             avg_volume = v if v and v > 0 else None
         except Exception:
             pass
+
+        # ── Direct API fallback — if fast_info returned no price (common on
+        #    cloud hosts where Yahoo Finance blocks yfinance's endpoints), hit
+        #    the Yahoo Finance chart API directly.  This endpoint does not
+        #    require cookies / crumb and works reliably from server IPs. ──────
+        if not current_price:
+            current_price = _fetch_price_via_chart_api(ticker)
+            if current_price:
+                logger.info("fetch_live_data: chart API fallback used for %s → %.2f", ticker, current_price)
 
         if current_price:
             result["current_price"] = round(current_price, 2)
