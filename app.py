@@ -43,11 +43,14 @@ app.secret_key = "rockkstaar-secret-key-change-in-prod"
 sock = Sock(app)
 
 # ---------------------------------------------------------------------------
-# Startup initialization — runs on every Python process start, including
-# gunicorn workers.  init_db() is idempotent (CREATE TABLE IF NOT EXISTS).
-# seed_demo_data() is called after its definition below.
+# Startup initialization — idempotent schema creation.
+# Wrapped in try/except so a slow or unavailable DB (e.g. PG cold start on
+# Render) does not crash the import and prevent gunicorn from binding its port.
 # ---------------------------------------------------------------------------
-init_db()
+try:
+    init_db()
+except Exception as _init_err:
+    logger.error("init_db failed at startup: %s — will retry on first request", _init_err)
 
 # Global refresh lock — prevents overlapping bulk-refresh requests.
 # Uses a threading.Lock() so concurrent gunicorn workers each have their own
@@ -1306,6 +1309,12 @@ _DASHBOARD_EMPTY = dict(
               "reasons": [], "severity": "none"},
     orb_session={},
 )
+
+
+@app.route("/health")
+def health():
+    """Render health check — must respond instantly, no DB or data calls."""
+    return "OK", 200
 
 
 @app.route("/")
