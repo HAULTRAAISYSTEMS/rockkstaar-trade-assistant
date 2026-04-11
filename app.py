@@ -42,6 +42,13 @@ app = Flask(__name__)
 app.secret_key = "rockkstaar-secret-key-change-in-prod"
 sock = Sock(app)
 
+# /health MUST be registered immediately — before any code that could crash
+# during import. If anything below line 44 raises an exception, gunicorn
+# still has this route and Render's health check succeeds.
+@app.route("/health")
+def health():
+    return "OK", 200
+
 # ---------------------------------------------------------------------------
 # Startup initialization — idempotent schema creation.
 # Wrapped in try/except so a slow or unavailable DB (e.g. PG cold start on
@@ -1309,12 +1316,6 @@ _DASHBOARD_EMPTY = dict(
               "reasons": [], "severity": "none"},
     orb_session={},
 )
-
-
-@app.route("/health")
-def health():
-    """Render health check — must respond instantly, no DB or data calls."""
-    return "OK", 200
 
 
 @app.route("/")
