@@ -450,6 +450,229 @@ def fetch_live_data(ticker: str) -> dict | None:
         return None
 
 
+def swing_data_needs_refresh(fetched_at: str | None, minutes: int = 60) -> bool:
+    """Return True if swing data is stale (older than *minutes*) or missing."""
+    if not fetched_at:
+        return True
+    try:
+        from datetime import datetime as _dt
+        elapsed = (_dt.now() - _dt.fromisoformat(fetched_at)).total_seconds() / 60
+        return elapsed >= minutes
+    except Exception:
+        return True
+
+
+def fetch_swing_data(ticker: str) -> dict | None:
+    """
+    Fetch daily EMA, trend structure, and Fibonacci levels for swing analysis.
+
+    Uses 200 days of daily bars from yfinance.
+    Returns a dict with swing analysis fields, or None on failure.
+
+    Fields returned:
+        ema_20_daily, ema_50_daily, ema_200_daily   — EMA values
+        pct_from_ema20, pct_from_ema50              — % distance from current price
+        daily_trend     — "Bullish" | "Bullish Lean" | "Neutral" | "Bearish Lean" | "Bearish"
+        daily_hh_hl     — True when daily higher highs + higher lows (last 5 bars)
+        daily_lh_ll     — True when daily lower highs + lower lows
+        fib_high, fib_low, fib_50, fib_618          — 20-bar swing Fibonacci levels
+        swing_data_fetched_at                        — ISO timestamp of this fetch
+    """
+    if not _YF_AVAILABLE:
+        return None
+
+    def _ema(vals: list, period: int) -> float:
+        """Compute full EMA series (SMA-seeded) and return the last value."""
+        n = len(vals)
+        if n < period:
+            return float(vals[-1]) if n > 0 else 0.0
+        k    = 2.0 / (period + 1)
+        seed = sum(vals[:period]) / period
+        e    = seed
+        for v in vals[period:]:
+            e = float(v) * k + e * (1.0 - k)
+        return e
+
+    try:
+        with _silence_yf():
+            hist = yf.Ticker(ticker).history(period="200d", interval="1d")
+
+        if hist.empty or len(hist) < 20:
+            return None
+
+        try:
+            hist.index = hist.index.tz_convert("America/New_York")
+        except TypeError:
+            hist.index = hist.index.tz_localize("UTC").tz_convert("America/New_York")
+
+        closes = list(hist["Close"].astype(float))
+        highs  = list(hist["High"].astype(float))
+        lows   = list(hist["Low"].astype(float))
+        n      = len(closes)
+        cur    = closes[-1]
+
+        result: dict = {}
+
+        # ── EMAs ────────────────────────────────────────────────────────────
+        e20  = _ema(closes, 20)
+        e50  = _ema(closes, 50)
+        result["ema_20_daily"] = round(e20, 2)
+        result["ema_50_daily"] = round(e50, 2)
+        result["ema_200_daily"] = round(_ema(closes, 200), 2) if n >= 100 else None
+
+        result["pct_from_ema20"] = round((cur - e20) / e20 * 100, 2) if e20 else None
+        result["pct_from_ema50"] = round((cur - e50) / e50 * 100, 2) if e50 else None
+
+        # ── Daily trend ──────────────────────────────────────────────────────
+        # EMA stack: price above/below the EMAs
+        ema_bull = cur > e20 > e50
+        ema_bear = cur < e20 < e50
+
+        # Higher highs + higher lows (compare bar -1 vs bar -4 to smooth noise)
+        if n >= 5:
+            hh = highs[-1] > highs[-4]
+            hl = lows[-1]  > lows[-4]
+            lh = highs[-1] < highs[-4]
+            ll = lows[-1]  < lows[-4]
+        else:
+            hh = hl = lh = ll = False
+
+        result["daily_hh_hl"] = bool(hh and hl)
+        result["daily_lh_ll"] = bool(lh and ll)
+
+        if ema_bull and (hh and hl):
+            result["daily_trend"] = "Bullish"
+        elif ema_bear and (lh and ll):
+            result["daily_trend"] = "Bearish"
+        elif ema_bull or (hh and hl):
+            result["daily_trend"] = "Bullish Lean"
+        elif ema_bear or (lh and ll):
+            result["daily_trend"] = "Bearish Lean"
+        else:
+            result["daily_trend"] = "Neutral"
+
+        # ── Fibonacci levels (20-bar swing high/low) ────────────────────────
+        lb     = min(20, n)
+        sw_hi  = float(max(highs[-lb:]))
+        sw_lo  = float(min(lows[-lb:]))
+        sw_rng = sw_hi - sw_lo
+
+        result["fib_high"] = round(sw_hi, 2)
+        result["fib_low"]  = round(sw_lo, 2)
+        if sw_rng > 0:
+            result["fib_50"]  = round(sw_hi - 0.500 * sw_rng, 2)
+            result["fib_618"] = round(sw_hi - 0.618 * sw_rng, 2)
+        else:
+            result["fib_50"]  = None
+            result["fib_618"] = None
+
+        # ── 4H trend (derived from 1h bars — yfinance has no native 4h interval) ──
+        # Uses regular-session 1h bars.  EMA stack + HH/HL on last ~80 1h bars
+        # gives the same structural read as a 4H chart without requiring resampling.
+        try:
+            with _silence_yf():
+                hist_1h = yf.Ticker(ticker).history(period="30d", interval="60m")
+
+            if not hist_1h.empty and len(hist_1h) >= 20:
+                try:
+                    hist_1h.index = hist_1h.index.tz_convert("America/New_York")
+                except TypeError:
+                    hist_1h.index = hist_1h.index.tz_localize("UTC").tz_convert("America/New_York")
+
+                # Regular session only (09:30–15:59 ET)
+                h1_mask = (
+                    ((hist_1h.index.hour > 9) | ((hist_1h.index.hour == 9) & (hist_1h.index.minute >= 30))) &
+                    (hist_1h.index.hour < 16)
+                )
+                h1 = hist_1h[h1_mask]
+
+                if len(h1) >= 20:
+                    h1_closes = list(h1["Close"].astype(float))
+                    h1_highs  = list(h1["High"].astype(float))
+                    h1_lows   = list(h1["Low"].astype(float))
+                    n_h1      = len(h1_closes)
+                    h1_cur    = h1_closes[-1]
+
+                    h4_e20 = _ema(h1_closes, 20)
+                    h4_e50 = _ema(h1_closes, 50) if n_h1 >= 50 else None
+                    result["h4_ema20"] = round(h4_e20, 2)
+                    result["h4_ema50"] = round(h4_e50, 2) if h4_e50 else None
+
+                    h4_bull = (h1_cur > h4_e20 > h4_e50) if h4_e50 else (h1_cur > h4_e20)
+                    h4_bear = (h1_cur < h4_e20 < h4_e50) if h4_e50 else (h1_cur < h4_e20)
+
+                    # Structure: compare last vs 5 bars back (approx one 4H period)
+                    if n_h1 >= 8:
+                        h4_hh = h1_highs[-1] > h1_highs[-5]
+                        h4_hl = h1_lows[-1]  > h1_lows[-5]
+                        h4_lh = h1_highs[-1] < h1_highs[-5]
+                        h4_ll = h1_lows[-1]  < h1_lows[-5]
+                    else:
+                        h4_hh = h4_hl = h4_lh = h4_ll = False
+
+                    result["h4_hh_hl"] = bool(h4_hh and h4_hl)
+
+                    if   h4_bull and h4_hh and h4_hl:  result["h4_trend"] = "Bullish"
+                    elif h4_bear and h4_lh and h4_ll:  result["h4_trend"] = "Bearish"
+                    elif h4_bull or (h4_hh and h4_hl): result["h4_trend"] = "Bullish Lean"
+                    elif h4_bear or (h4_lh and h4_ll): result["h4_trend"] = "Bearish Lean"
+                    else:                               result["h4_trend"] = "Neutral"
+
+        except Exception as e:
+            logger.debug("4H data fetch failed for %s: %s", ticker, e)
+
+        result.setdefault("h4_trend",  "Neutral")
+        result.setdefault("h4_ema20",  None)
+        result.setdefault("h4_ema50",  None)
+        result.setdefault("h4_hh_hl",  False)
+
+        # ── 15m confirmation signals ──────────────────────────────────────────
+        # m15_confirmation scores 0 (none), 1 (developing), or 2 (confirmed).
+        # Signals checked: 15m higher low on last 3 bars, strong bullish body on last bar.
+        try:
+            with _silence_yf():
+                hist_15m = yf.Ticker(ticker).history(period="5d", interval="15m")
+
+            if not hist_15m.empty and len(hist_15m) >= 6:
+                try:
+                    hist_15m.index = hist_15m.index.tz_convert("America/New_York")
+                except TypeError:
+                    hist_15m.index = hist_15m.index.tz_localize("UTC").tz_convert("America/New_York")
+
+                m15_mask = (
+                    ((hist_15m.index.hour > 9) | ((hist_15m.index.hour == 9) & (hist_15m.index.minute >= 30))) &
+                    (hist_15m.index.hour < 16)
+                )
+                m15 = hist_15m[m15_mask]
+
+                if len(m15) >= 6:
+                    m15_lows   = m15["Low"].astype(float).values
+                    m15_last   = m15.iloc[-1]
+                    body       = abs(float(m15_last["Close"]) - float(m15_last["Open"]))
+                    rng        = float(m15_last["High"]) - float(m15_last["Low"])
+
+                    higher_low   = bool(len(m15_lows) >= 3 and m15_lows[-1] > m15_lows[-3])
+                    strong_candle = bool(
+                        rng > 0 and body / rng > 0.50
+                        and float(m15_last["Close"]) > float(m15_last["Open"])
+                    )
+                    result["m15_higher_low"]   = higher_low
+                    result["m15_confirmation"] = int(higher_low) + int(strong_candle)
+
+        except Exception as e:
+            logger.debug("15m confirmation fetch failed for %s: %s", ticker, e)
+
+        result.setdefault("m15_higher_low",   False)
+        result.setdefault("m15_confirmation", 0)
+
+        result["swing_data_fetched_at"] = datetime.now().isoformat()
+        return result
+
+    except Exception as exc:
+        logger.debug("fetch_swing_data failed for %s: %s", ticker, exc)
+        return None
+
+
 def fetch_news_headlines(ticker: str) -> tuple[str, list[str]]:
     """
     Attempt to pull recent news headlines for an unknown ticker via yfinance.

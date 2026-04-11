@@ -1276,6 +1276,668 @@ def catalyst_score_breakdown(data: dict) -> list[tuple[str, int]]:
     if gap < CAT_T["gap_tiny_pct"]:
         breakdown.append(("Tiny gap", CAT_P["tiny_gap"]))
 
+    return breakdown
+
+
+# ===========================================================================
+# SWING TRADING — Setup Types, Status Labels, Score, Trade Plan
+# ===========================================================================
+
+SWING_SETUP_TYPES = [
+    "Pullback to 20 EMA",
+    "Pullback to 50 EMA",
+    "Near 61.8% Retracement",
+    "Near 50% Retracement",
+    "Order Block Test",
+    "Breakout Retest",
+    "Trend Continuation",
+    "At Resistance — Avoid",
+    "Extended — Wait",
+    "Weak Structure — Avoid",
+    "No Setup",
+]
+
+SWING_STATUSES = [
+    "GOOD SWING CANDIDATE",
+    "READY IF LEVEL HOLDS",
+    "WAIT FOR 15M CONFIRMATION",
+    "WAIT FOR PULLBACK",
+    "TOO EXTENDED",
+    "NOT ENOUGH EDGE",
+    "AVOID — AT RESISTANCE",
+    "AVOID — WEAK STRUCTURE",
+]
+
+# ── Thresholds ───────────────────────────────────────────────────────────────
+
+SWING_T = {
+    # EMA proximity thresholds (% from price to EMA)
+    "pullback_ema20_pct":     3.0,   # within 3% of 20 EMA → pullback zone
+    "pullback_ema50_pct":     4.0,   # within 4% of 50 EMA → deeper pullback
+    # Fibonacci proximity threshold
+    "fib_proximity_pct":      2.0,   # within 2% of fib level
+    # Extension risk thresholds (pct_from_ema20, in trend direction)
+    "extended_slight_pct":    8.0,   # 8–12%: slightly extended
+    "extended_moderate_pct": 12.0,   # 12–15%: extended
+    "extended_heavy_pct":    15.0,   # >15%: heavily extended — do not chase
+    # Volume thresholds (relative volume)
+    "min_rvol_strong":        1.2,   # strong participation
+    "min_rvol_avg":           0.7,   # average participation
+    # R:R thresholds
+    "rr_excellent":           2.5,   # excellent reward/risk
+    "rr_good":                2.0,   # good reward/risk
+    "rr_ok":                  1.5,   # acceptable reward/risk
+}
+
+# ── Weights (7-category model) ────────────────────────────────────────────────
+# Max raw = 2.0+2.0+1.5+1.5+1.0+1.0 = 9.0  |  Min raw (max penalty) = -2.0
+# Normalize: score = round(1 + (raw + 2) / 11 * 9), clipped to [1, 10]
+
+SWING_W = {
+    # ── Category 1: Trend Quality (max 2.0) ──────────────────────────────────
+    "trend_full":       2.0,   # 1D strong + 4H confirms + HH/HL structure
+    "trend_partial":    1.5,   # 1D strong + partial 4H or structure
+    "trend_lean":       1.0,   # 1D lean / mixed signals
+    "trend_neutral":    0.5,   # No directional edge
+    "trend_against":    0.0,   # Opposing trend direction
+    # ── Category 2: Pullback Quality (max 2.0) ───────────────────────────────
+    "pullback_high":    2.0,   # Multi-confluence (zone + fib or zone + EMA)
+    "pullback_zone":    1.5,   # In demand/supply zone only
+    "pullback_fib618":  1.5,   # Near 61.8% Fibonacci retracement
+    "pullback_fib50":   1.0,   # Near 50% Fibonacci retracement
+    "pullback_ema20":   1.0,   # Pullback to 20 EMA (within 3%)
+    "pullback_ema50":   0.8,   # Pullback to 50 EMA (within 4%)
+    "pullback_near":    0.5,   # Approaching demand zone (within 3%)
+    "pullback_none":    0.0,   # No pullback edge identified
+    # ── Category 3: Confirmation Quality (max 1.5) ───────────────────────────
+    "confirm_full":     1.5,   # 15m confirmed: higher low + strong candle
+    "confirm_partial":  0.75,  # 15m developing: one signal present
+    "confirm_none":     0.0,   # 15m shows weakness or breakdown
+    "confirm_default":  0.5,   # No 15m data available (neutral, no penalty)
+    # ── Category 4: R:R Quality (max 1.5) ────────────────────────────────────
+    "rr_excellent":     1.5,   # R:R >= 2.5:1
+    "rr_good":          1.0,   # R:R >= 2.0:1
+    "rr_ok":            0.5,   # R:R >= 1.5:1 or unknown (neutral default)
+    "rr_weak":          0.0,   # R:R < 1.5:1
+    # ── Category 5: Volume / Participation (max 1.0) ─────────────────────────
+    "vol_strong":       1.0,   # rvol >= 1.2 — strong participation
+    "vol_average":      0.5,   # rvol >= 0.7 — average participation
+    "vol_weak":         0.0,   # rvol < 0.7 — thin / absent volume
+    # ── Category 6: Market Alignment (max 1.0) ───────────────────────────────
+    "mkt_aligned":      1.0,   # Trend direction + catalyst confirms move
+    "mkt_neutral":      0.5,   # Trend good but no catalyst confirmation
+    "mkt_against":      0.0,   # Catalyst / market fighting the direction
+    # ── Category 7: Extension Penalty (max −2.0) ─────────────────────────────
+    "ext_none":         0.0,   # Not extended (within 8% of 20 EMA)
+    "ext_slight":      -0.5,   # 8–12% from 20 EMA in trend direction
+    "ext_moderate":    -1.0,   # 12–15% from 20 EMA
+    "ext_heavy":       -2.0,   # >15% from 20 EMA — do not chase
+}
+
+
+def compute_swing_score(data: dict) -> ScoringResult:
+    """
+    7-category weighted swing score normalized to 1–10.
+
+    Categories and max contribution:
+      1. Trend Quality       0–2.0  (1D daily + 4H alignment, HH/HL structure)
+      2. Pullback Quality    0–2.0  (at key level: demand zone, fib, EMA)
+      3. Confirmation        0–1.5  (15m: higher low + strong reversal candle)
+      4. R:R Quality         0–1.5  (computed risk/reward from trade plan)
+      5. Volume              0–1.0  (relative volume participation)
+      6. Market Alignment    0–1.0  (trend direction + catalyst proxy)
+      7. Extension Penalty  −2–0    (% above/below 20 EMA in trend direction)
+
+    Raw score range: −2.0 (worst) to 9.0 (best)
+    Normalized:  score = round(1 + (raw + 2) / 11 * 9)  →  clipped to [1, 10]
+
+    Grade thresholds:
+      A  →  9–10   (high-conviction setup, act on confirmation)
+      B  →  7–8    (solid setup, good patience entry)
+      C  →  5–6    (developing, wait for better conditions)
+      D  →  1–4    (avoid / insufficient edge)
+
+    IMPORTANT: For R:R to score correctly, compute_swing_trade_plan() must run
+    BEFORE compute_swing_score() in the pipeline so risk_reward is available.
+
+    New fields consumed (from fetch_swing_data):
+        h4_trend       — "Bullish" | "Bullish Lean" | "Neutral" | "Bearish Lean" | "Bearish"
+        h4_hh_hl       — bool: 4H higher highs + higher lows
+        m15_confirmation — int 0/1/2: 0=none, 1=developing, 2=confirmed
+    """
+    bias        = data.get("trade_bias") or "Neutral"
+    daily_trend = data.get("daily_trend") or "Neutral"
+    h4_trend    = data.get("h4_trend") or "Neutral"
+    daily_hh_hl = bool(data.get("daily_hh_hl", False))
+    h4_hh_hl    = bool(data.get("h4_hh_hl", False))
+    daily_lh_ll = bool(data.get("daily_lh_ll", False))
+    pct_ema20   = data.get("pct_from_ema20")
+    pct_ema50   = data.get("pct_from_ema50")
+    fib_50      = data.get("fib_50")
+    fib_618     = data.get("fib_618")
+    current     = data.get("current_price") or 0
+    in_demand   = data.get("in_demand_zone", False)
+    in_supply   = data.get("in_supply_zone", False)
+    dist_demand = data.get("distance_to_demand_pct")
+    m15_conf    = int(data.get("m15_confirmation") or 0)
+    risk_reward = data.get("risk_reward")
+    rvol        = data.get("rel_volume") or 0
+    cat_score   = data.get("catalyst_score") or 0
+
+    if bias == "Avoid":
+        return ScoringResult(1, "Avoid — swing analysis not applicable", "Low")
+
+    raw      = 0.0
+    parts    = []
+    pen_msgs = []
+
+    # ── Category 1: Trend Quality (0–2.0) ────────────────────────────────────
+    if bias == "Long Bias":
+        trend_str_1d = daily_trend == "Bullish"
+        trend_ok_1d  = daily_trend in ("Bullish", "Bullish Lean")
+        trend_ok_4h  = h4_trend in ("Bullish", "Bullish Lean")
+        structure    = daily_hh_hl or h4_hh_hl
+
+        if trend_str_1d and trend_ok_4h and structure:
+            trend_pts = SWING_W["trend_full"]
+            parts.append("strong 1D+4H bullish trend + structure")
+        elif trend_str_1d and (trend_ok_4h or structure):
+            trend_pts = SWING_W["trend_partial"]
+            parts.append("1D bullish + 4H/structure partial")
+        elif trend_ok_1d:
+            trend_pts = SWING_W["trend_lean"]
+            parts.append("bullish lean")
+        elif daily_trend == "Neutral":
+            trend_pts = SWING_W["trend_neutral"]
+        else:
+            trend_pts = SWING_W["trend_against"]
+            pen_msgs.append("against bearish daily trend")
+
+    elif bias == "Short Bias":
+        trend_str_1d = daily_trend == "Bearish"
+        trend_ok_1d  = daily_trend in ("Bearish", "Bearish Lean")
+        trend_ok_4h  = h4_trend in ("Bearish", "Bearish Lean")
+        structure    = daily_lh_ll or (not h4_hh_hl and h4_trend in ("Bearish", "Bearish Lean"))
+
+        if trend_str_1d and trend_ok_4h and structure:
+            trend_pts = SWING_W["trend_full"]
+            parts.append("strong 1D+4H bearish trend + structure")
+        elif trend_str_1d and (trend_ok_4h or structure):
+            trend_pts = SWING_W["trend_partial"]
+            parts.append("1D bearish + 4H/structure partial")
+        elif trend_ok_1d:
+            trend_pts = SWING_W["trend_lean"]
+            parts.append("bearish lean")
+        elif daily_trend == "Neutral":
+            trend_pts = SWING_W["trend_neutral"]
+        else:
+            trend_pts = SWING_W["trend_against"]
+            pen_msgs.append("against bullish daily trend")
+    else:
+        trend_pts = SWING_W["trend_neutral"]
+
+    raw += trend_pts
+
+    # ── Category 2: Pullback Quality (0–2.0) ─────────────────────────────────
+    # Priority: multi-confluence > zone > 61.8% fib > 50% fib > 20 EMA > 50 EMA > near demand
+    pullback_pts = SWING_W["pullback_none"]
+
+    def _fib_prox(level):
+        return current and level and abs(current - level) / current * 100 <= SWING_T["fib_proximity_pct"] * 1.5
+
+    if in_demand and bias == "Long Bias":
+        if _fib_prox(fib_618) or _fib_prox(fib_50) or (pct_ema20 is not None and abs(pct_ema20) <= SWING_T["pullback_ema20_pct"]):
+            pullback_pts = SWING_W["pullback_high"]
+            parts.append("demand zone + fib/EMA confluence")
+        else:
+            pullback_pts = SWING_W["pullback_zone"]
+            parts.append("price in demand zone")
+
+    elif in_supply and bias == "Short Bias":
+        if _fib_prox(fib_618) or (pct_ema20 is not None and abs(pct_ema20) <= SWING_T["pullback_ema20_pct"]):
+            pullback_pts = SWING_W["pullback_high"]
+            parts.append("supply zone + fib/EMA confluence")
+        else:
+            pullback_pts = SWING_W["pullback_zone"]
+            parts.append("price in supply zone")
+
+    elif current and fib_618 and abs(current - fib_618) / current * 100 <= SWING_T["fib_proximity_pct"]:
+        pullback_pts = SWING_W["pullback_fib618"]
+        parts.append("at 61.8% retracement")
+
+    elif current and fib_50 and abs(current - fib_50) / current * 100 <= SWING_T["fib_proximity_pct"]:
+        pullback_pts = SWING_W["pullback_fib50"]
+        parts.append("at 50% retracement")
+
+    elif pct_ema20 is not None:
+        in_ema20_zone = abs(pct_ema20) <= SWING_T["pullback_ema20_pct"]
+        correct_ema20 = (bias == "Long Bias" and pct_ema20 >= -3) or (bias == "Short Bias" and pct_ema20 <= 3)
+        if in_ema20_zone and correct_ema20:
+            pullback_pts = SWING_W["pullback_ema20"]
+            parts.append(f"pullback to 20 EMA ({pct_ema20:+.1f}%)")
+        elif pct_ema50 is not None:
+            in_ema50_zone = abs(pct_ema50) <= SWING_T["pullback_ema50_pct"]
+            correct_ema50 = (bias == "Long Bias" and pct_ema50 >= -4) or (bias == "Short Bias" and pct_ema50 <= 4)
+            if in_ema50_zone and correct_ema50:
+                pullback_pts = SWING_W["pullback_ema50"]
+                parts.append(f"pullback to 50 EMA ({pct_ema50:+.1f}%)")
+
+    # Approaching demand zone (not yet in it) — secondary points
+    if pullback_pts == 0 and not in_demand and bias == "Long Bias" \
+            and dist_demand is not None and 0 < dist_demand <= 3.0:
+        pullback_pts = SWING_W["pullback_near"]
+        parts.append(f"approaching demand zone ({dist_demand:.1f}% away)")
+
+    # Supply zone on long = structural headwind (noted only, pullback score unchanged)
+    if in_supply and bias == "Long Bias":
+        pen_msgs.append("in supply zone — overhead resistance")
+
+    raw += pullback_pts
+
+    # ── Category 3: Confirmation Quality (0–1.5) ──────────────────────────────
+    # m15_confirmation: 0 = no data, 1 = one signal (developing), 2 = confirmed
+    if m15_conf >= 2:
+        conf_pts = SWING_W["confirm_full"]
+        parts.append("15m confirmed (higher low + strong candle)")
+    elif m15_conf == 1:
+        conf_pts = SWING_W["confirm_partial"]
+        parts.append("15m developing")
+    else:
+        # No 15m data available — neutral default, no penalty for missing data
+        conf_pts = SWING_W["confirm_default"]
+
+    raw += conf_pts
+
+    # ── Category 4: R:R Quality (0–1.5) ──────────────────────────────────────
+    # Requires compute_swing_trade_plan() to have run first in the pipeline.
+    if risk_reward is not None and risk_reward > 0:
+        if risk_reward >= SWING_T["rr_excellent"]:
+            rr_pts = SWING_W["rr_excellent"]
+            parts.append(f"excellent R:R {risk_reward:.1f}:1")
+        elif risk_reward >= SWING_T["rr_good"]:
+            rr_pts = SWING_W["rr_good"]
+            parts.append(f"good R:R {risk_reward:.1f}:1")
+        elif risk_reward >= SWING_T["rr_ok"]:
+            rr_pts = SWING_W["rr_ok"]
+        else:
+            rr_pts = SWING_W["rr_weak"]
+            pen_msgs.append(f"weak R:R {risk_reward:.1f}:1")
+    else:
+        # Trade plan not yet computed or no valid levels — neutral default
+        rr_pts = SWING_W["rr_ok"]
+
+    raw += rr_pts
+
+    # ── Category 5: Volume / Participation (0–1.0) ────────────────────────────
+    if rvol >= SWING_T["min_rvol_strong"]:
+        vol_pts = SWING_W["vol_strong"]
+        parts.append(f"strong volume {rvol:.1f}x avg")
+    elif rvol >= SWING_T["min_rvol_avg"]:
+        vol_pts = SWING_W["vol_average"]
+        parts.append(f"volume {rvol:.1f}x avg")
+    else:
+        vol_pts = SWING_W["vol_weak"]
+
+    raw += vol_pts
+
+    # ── Category 6: Market Alignment (0–1.0) ──────────────────────────────────
+    # Proxy: trend direction + catalyst score (no external market API needed)
+    trend_aligned = (
+        (bias == "Long Bias"  and daily_trend in ("Bullish", "Bullish Lean")) or
+        (bias == "Short Bias" and daily_trend in ("Bearish", "Bearish Lean"))
+    )
+    if trend_aligned and cat_score >= 3:
+        mkt_pts = SWING_W["mkt_aligned"]
+        parts.append("catalyst supports move")
+    elif trend_aligned:
+        mkt_pts = SWING_W["mkt_neutral"]
+    else:
+        mkt_pts = SWING_W["mkt_against"]
+
+    raw += mkt_pts
+
+    # ── Category 7: Extension Penalty (−2.0–0) ────────────────────────────────
+    if pct_ema20 is not None:
+        ext_dir = (bias == "Long Bias" and pct_ema20 > 0) or (bias == "Short Bias" and pct_ema20 < 0)
+        ext_pct = abs(pct_ema20)
+        if ext_dir:
+            if ext_pct > SWING_T["extended_heavy_pct"]:
+                raw += SWING_W["ext_heavy"]
+                pen_msgs.append(f"heavily extended {ext_pct:.1f}% from 20 EMA")
+            elif ext_pct > SWING_T["extended_moderate_pct"]:
+                raw += SWING_W["ext_moderate"]
+                pen_msgs.append(f"extended {ext_pct:.1f}% from 20 EMA")
+            elif ext_pct > SWING_T["extended_slight_pct"]:
+                raw += SWING_W["ext_slight"]
+                pen_msgs.append(f"slightly extended {ext_pct:.1f}% from 20 EMA")
+
+    # ── Normalize raw score to 1–10 ───────────────────────────────────────────
+    # Max possible raw = 9.0 | Min possible raw = -2.0
+    score_float = 1.0 + (raw + 2.0) / 11.0 * 9.0
+    score       = int(round(min(10.0, max(1.0, score_float))))
+
+    # ── Confidence ────────────────────────────────────────────────────────────
+    trend_ok   = trend_aligned
+    level_ok   = pullback_pts > 0
+    signal_ok  = m15_conf >= 1 or rvol >= SWING_T["min_rvol_avg"]
+    confidence = _three_factor_confidence(trend_ok, level_ok, signal_ok)
+
+    # ── Grade label ───────────────────────────────────────────────────────────
+    if score >= 9:
+        label = "A-grade setup"
+    elif score >= 7:
+        label = "B-grade setup"
+    elif score >= 5:
+        label = "C-grade setup"
+    else:
+        label = "No edge"
+
+    explanation = label
+    if parts:
+        explanation += ": " + ", ".join(parts)
+    if pen_msgs:
+        explanation += " | " + ", ".join(pen_msgs)
+
+    return ScoringResult(score, explanation, confidence)
+
+
+def compute_swing_grade(swing_score: int) -> str:
+    """
+    Return a letter grade for a swing score (1–10).
+
+    A  →  9–10  high-conviction, act on confirmation
+    B  →  7–8   solid setup, good patience entry
+    C  →  5–6   developing, wait for better conditions
+    D  →  1–4   avoid / insufficient edge
+    """
+    if swing_score >= 9:  return "A"
+    if swing_score >= 7:  return "B"
+    if swing_score >= 5:  return "C"
+    return "D"
+
+
+def compute_swing_setup_type(data: dict) -> str:
+    """
+    Classify the dominant swing setup type from price structure.
+    Returns one of SWING_SETUP_TYPES.  First match wins.
+    """
+    bias        = data.get("trade_bias") or "Neutral"
+    current     = data.get("current_price") or 0
+    pct_ema20   = data.get("pct_from_ema20")
+    pct_ema50   = data.get("pct_from_ema50")
+    fib_50      = data.get("fib_50")
+    fib_618     = data.get("fib_618")
+    fib_high    = data.get("fib_high")
+    in_demand   = data.get("in_demand_zone", False)
+    in_supply   = data.get("in_supply_zone", False)
+    daily_trend = data.get("daily_trend") or "Neutral"
+    daily_hh_hl = data.get("daily_hh_hl", False)
+
+    if bias == "Avoid":
+        return "No Setup"
+
+    # 1. Extended — too far from key levels to enter cleanly
+    if pct_ema20 is not None:
+        ext_dir = (bias == "Long Bias" and pct_ema20 > 0) or \
+                  (bias == "Short Bias" and pct_ema20 < 0)
+        if ext_dir and abs(pct_ema20) > SWING_T["extended_slight_pct"]:
+            return "Extended — Wait"
+
+    # 2. At resistance on long / at support on short (structural headwind)
+    if in_supply and bias == "Long Bias":
+        return "At Resistance — Avoid"
+
+    # 3. Order block / demand zone test (highest-quality long pullback)
+    if in_demand and bias == "Long Bias":
+        return "Order Block Test"
+    if in_supply and bias == "Short Bias":
+        return "Order Block Test"
+
+    # 4. Breakout retest: price broke to swing highs, pulled back into upper range
+    # Detects: above 50% fib, 2–8% below swing high, maintaining HH/HL structure
+    if bias == "Long Bias" and current and fib_high and fib_50 and daily_hh_hl:
+        pct_below_high = (fib_high - current) / fib_high * 100 if fib_high > 0 else 99
+        if current > fib_50 and 2.0 <= pct_below_high <= 8.0:
+            return "Breakout Retest"
+
+    # 5. Fibonacci retracement levels (2% proximity window)
+    if current and fib_618 and abs(current - fib_618) / current * 100 <= SWING_T["fib_proximity_pct"]:
+        return "Near 61.8% Retracement"
+    if current and fib_50 and abs(current - fib_50) / current * 100 <= SWING_T["fib_proximity_pct"]:
+        return "Near 50% Retracement"
+
+    # 6. EMA pullbacks
+    if pct_ema20 is not None:
+        in_zone  = abs(pct_ema20) <= SWING_T["pullback_ema20_pct"]
+        correct  = (bias == "Long Bias" and pct_ema20 >= -3) or \
+                   (bias == "Short Bias" and pct_ema20 <= 3)
+        if in_zone and correct:
+            return "Pullback to 20 EMA"
+
+    if pct_ema50 is not None:
+        in_zone  = abs(pct_ema50) <= SWING_T["pullback_ema50_pct"]
+        correct  = (bias == "Long Bias" and pct_ema50 >= -4) or \
+                   (bias == "Short Bias" and pct_ema50 <= 4)
+        if in_zone and correct:
+            return "Pullback to 50 EMA"
+
+    # 7. Trend continuation (good trend, not yet at a specific entry level)
+    if bias == "Long Bias"  and daily_trend in ("Bullish", "Bullish Lean"):
+        return "Trend Continuation"
+    if bias == "Short Bias" and daily_trend in ("Bearish", "Bearish Lean"):
+        return "Trend Continuation"
+
+    # 8. Weak / undefined structure
+    if daily_trend == "Neutral":
+        return "Weak Structure — Avoid"
+
+    return "No Setup"
+
+
+def compute_swing_status(data: dict) -> str:
+    """
+    Return a swing trade status label that tells the trader exactly what to do.
+
+    Priority order:
+      1. TOO EXTENDED          — price too far from key levels
+      2. AVOID — AT RESISTANCE — at major supply, long setup not viable
+      3. AVOID — WEAK STRUCTURE — no clear trend, not worth trading
+      4. READY IF LEVEL HOLDS  — at a key level, watching for confirmation
+      5. GOOD SWING CANDIDATE  — trend + pullback + zone alignment confirmed
+      6. WAIT FOR 15M CONFIRMATION — setup close but needs entry confirmation
+      7. WAIT FOR PULLBACK     — trend is right but price needs to come in
+      8. NOT ENOUGH EDGE       — insufficient signal quality
+    """
+    bias        = data.get("trade_bias") or "Neutral"
+    swing_score = data.get("swing_score") or 0
+    pct_ema20   = data.get("pct_from_ema20")
+    daily_trend = data.get("daily_trend") or "Neutral"
+    zone_loc    = data.get("zone_location") or "BETWEEN ZONES"
+    in_demand   = data.get("in_demand_zone", False)
+    in_supply   = data.get("in_supply_zone", False)
+    swing_type  = data.get("swing_setup_type") or "No Setup"
+
+    if bias == "Avoid":
+        return "NOT ENOUGH EDGE"
+
+    # 1. Extended
+    if pct_ema20 is not None:
+        ext = abs(pct_ema20)
+        ext_dir = (bias == "Long Bias" and pct_ema20 > 0) or \
+                  (bias == "Short Bias" and pct_ema20 < 0)
+        if ext_dir and ext > SWING_T["extended_heavy_pct"]:
+            return "TOO EXTENDED"
+
+    # 2. At resistance on long
+    if in_supply and bias == "Long Bias":
+        return "AVOID — AT RESISTANCE"
+
+    # 3. Weak / opposing structure
+    if bias == "Long Bias" and daily_trend == "Bearish":
+        return "AVOID — WEAK STRUCTURE"
+    if bias == "Short Bias" and daily_trend == "Bullish":
+        return "AVOID — WEAK STRUCTURE"
+    if daily_trend == "Neutral" and swing_score < 4:
+        return "AVOID — WEAK STRUCTURE"
+
+    # 4. At key level — high quality
+    at_level = swing_type in (
+        "Order Block Test", "Near 61.8% Retracement",
+        "Near 50% Retracement", "Pullback to 20 EMA", "Pullback to 50 EMA",
+    )
+    if at_level and swing_score >= 6:
+        return "READY IF LEVEL HOLDS"
+
+    # 5. High overall quality
+    if swing_score >= 7:
+        return "GOOD SWING CANDIDATE"
+
+    # 6. Good setup but needs entry trigger
+    if swing_score >= 5 and at_level:
+        return "WAIT FOR 15M CONFIRMATION"
+
+    # 7. Trend is good, no pullback yet
+    trend_ok = (bias == "Long Bias"  and daily_trend in ("Bullish", "Bullish Lean")) or \
+               (bias == "Short Bias" and daily_trend in ("Bearish", "Bearish Lean"))
+    if trend_ok and swing_score >= 3:
+        return "WAIT FOR PULLBACK"
+
+    return "NOT ENOUGH EDGE"
+
+
+def compute_swing_trade_plan(data: dict) -> dict:
+    """
+    Compute entry zone, stop level, and targets for a swing trade.
+
+    Entry: prioritises demand zone, then 20 EMA, then Fibonacci, then current price.
+    Stop:  below demand zone bottom / below 20 EMA / below swing low.
+    Target 1: nearest supply zone / swing high.
+    Target 2: 1.5× the T1 reward distance.
+    Risk/Reward: reward-to-risk ratio at T1.
+
+    Returns a dict — all fields present, may be None when insufficient data.
+    """
+    bias    = data.get("trade_bias") or "Neutral"
+    current = data.get("current_price") or 0
+    e20     = data.get("ema_20_daily")
+    e50     = data.get("ema_50_daily")
+    fib_50  = data.get("fib_50")
+    fib_618 = data.get("fib_618")
+    sw_high = data.get("fib_high")
+    sw_low  = data.get("fib_low")
+    d_bot   = data.get("nearest_demand_bottom")
+    d_top   = data.get("nearest_demand_top")
+    s_bot   = data.get("nearest_supply_bottom")
+    s_top   = data.get("nearest_supply_top")
+
+    out = {
+        "entry_zone_low":  None,
+        "entry_zone_high": None,
+        "stop_level":      None,
+        "target_1":        None,
+        "target_2":        None,
+        "risk_reward":     None,
+    }
+
+    if not current or bias == "Avoid" or bias == "Neutral":
+        return out
+
+    if bias == "Long Bias":
+        # ── Entry zone ────────────────────────────────────────────────────
+        if d_bot and d_top and current and abs(current - d_top) / current < 0.06:
+            ez_lo, ez_hi = d_bot, d_top
+        elif e20 and abs(current - e20) / e20 < 0.04:
+            buf = e20 * 0.01
+            ez_lo, ez_hi = round(e20 - buf, 2), round(e20 + buf, 2)
+        elif fib_618 and abs(current - fib_618) / current < 0.03:
+            buf = fib_618 * 0.01
+            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
+        elif fib_50 and abs(current - fib_50) / current < 0.03:
+            buf = fib_50 * 0.01
+            ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
+        else:
+            buf = current * 0.015
+            ez_lo, ez_hi = round(current - buf, 2), round(current + buf * 0.5, 2)
+
+        out["entry_zone_low"]  = round(ez_lo, 2)
+        out["entry_zone_high"] = round(ez_hi, 2)
+
+        # ── Stop ──────────────────────────────────────────────────────────
+        if d_bot:
+            stop = round(d_bot * 0.988, 2)
+        elif e20:
+            stop = round(e20 * 0.972, 2)
+        elif sw_low:
+            stop = round(sw_low * 0.99, 2)
+        else:
+            stop = round(ez_lo * 0.960, 2)
+        out["stop_level"] = stop
+
+        # ── Target 1 ─────────────────────────────────────────────────────
+        if s_bot and s_bot > current:
+            t1 = round(s_bot * 0.998, 2)
+        elif sw_high:
+            t1 = round(sw_high, 2)
+        else:
+            t1 = round(current * 1.07, 2)
+        out["target_1"] = t1
+
+        # ── Target 2 (1.5× T1 reward) ────────────────────────────────────
+        reward_1 = t1 - ez_hi
+        if reward_1 > 0:
+            out["target_2"] = round(ez_hi + reward_1 * 1.5, 2)
+
+        # ── R:R ───────────────────────────────────────────────────────────
+        risk = ez_hi - stop
+        if risk > 0 and reward_1 > 0:
+            out["risk_reward"] = round(reward_1 / risk, 2)
+
+    elif bias == "Short Bias":
+        # ── Entry zone ────────────────────────────────────────────────────
+        if s_bot and s_top and current and abs(current - s_bot) / current < 0.06:
+            ez_lo, ez_hi = s_bot, s_top
+        elif e20 and abs(current - e20) / e20 < 0.04:
+            buf = e20 * 0.01
+            ez_lo, ez_hi = round(e20 - buf, 2), round(e20 + buf, 2)
+        else:
+            buf = current * 0.015
+            ez_lo, ez_hi = round(current - buf * 0.5, 2), round(current + buf, 2)
+
+        out["entry_zone_low"]  = round(ez_lo, 2)
+        out["entry_zone_high"] = round(ez_hi, 2)
+
+        # ── Stop ──────────────────────────────────────────────────────────
+        if s_top:
+            stop = round(s_top * 1.012, 2)
+        elif e20:
+            stop = round(e20 * 1.028, 2)
+        elif sw_high:
+            stop = round(sw_high * 1.01, 2)
+        else:
+            stop = round(ez_hi * 1.040, 2)
+        out["stop_level"] = stop
+
+        # ── Target 1 ─────────────────────────────────────────────────────
+        if d_top and d_top < current:
+            t1 = round(d_top * 1.002, 2)
+        elif sw_low:
+            t1 = round(sw_low, 2)
+        else:
+            t1 = round(current * 0.93, 2)
+        out["target_1"] = t1
+
+        # ── Target 2 ─────────────────────────────────────────────────────
+        reward_1 = ez_lo - t1
+        if reward_1 > 0:
+            out["target_2"] = round(ez_lo - reward_1 * 1.5, 2)
+
+        # ── R:R ───────────────────────────────────────────────────────────
+        risk = stop - ez_lo
+        if risk > 0 and reward_1 > 0:
+            out["risk_reward"] = round(reward_1 / risk, 2)
+
+    return out
+
     if not breakdown:
         breakdown.append(("No signals detected", 0))
 

@@ -32,7 +32,7 @@ from database import (
     get_journal_entry, get_all_journal_entries,
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock
-from scoring import catalyst_score_breakdown, SETUP_TYPES
+from scoring import catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES, compute_swing_grade
 from classifier import classify_stock
 
 app = Flask(__name__)
@@ -226,17 +226,42 @@ def get_bias_class(bias):
 
 
 def get_setup_type_class(setup_type):
-    """CSS class for the setup type pill."""
+    """CSS class for the setup type pill (day-trading and swing types)."""
     return {
-        "Momentum Breakout": "setup-momentum-breakout",
-        "Momentum Runner":   "setup-momentum-runner",
-        "Gap and Go":        "setup-gap-go",
-        "Breakdown":         "setup-breakdown",
-        "VWAP Reclaim":      "setup-vwap",
-        "Range Break":       "setup-range",
-        "ORB":               "setup-orb",
-        "No Setup":          "setup-none",
+        # Day-trading legacy types
+        "Momentum Breakout":          "setup-momentum-breakout",
+        "Momentum Runner":            "setup-momentum-runner",
+        "Gap and Go":                 "setup-gap-go",
+        "Breakdown":                  "setup-breakdown",
+        "VWAP Reclaim":               "setup-vwap",
+        "Range Break":                "setup-range",
+        "ORB":                        "setup-orb",
+        # Swing trading types
+        "Pullback to Support":        "setup-pullback",
+        "Breakout Retest Forming":    "setup-breakout-retest",
+        "Extended Wait":              "setup-extended",
+        "At Resistance Avoid":        "setup-resistance-avoid",
+        "Near 50% Retracement":       "setup-fib50",
+        "Near 61.8% Retracement":     "setup-fib618",
+        "Order Block Test":           "setup-order-block",
+        "Trend Continuation":         "setup-trend-continuation",
+        "Weak Structure Avoid":       "setup-weak-structure",
+        "No Setup":                   "setup-none",
     }.get(setup_type, "setup-none")
+
+
+def get_swing_status_class(swing_status: str) -> str:
+    """CSS class for the swing status badge."""
+    return {
+        "GOOD SWING CANDIDATE":       "swing-status-good",
+        "READY IF LEVEL HOLDS":       "swing-status-ready",
+        "WAIT FOR 15M CONFIRMATION":  "swing-status-confirm",
+        "WAIT FOR PULLBACK":          "swing-status-wait",
+        "TOO EXTENDED":               "swing-status-extended",
+        "NOT ENOUGH EDGE":            "swing-status-no-edge",
+        "AVOID AT RESISTANCE":        "swing-status-avoid",
+        "AVOID WEAK STRUCTURE":       "swing-status-avoid",
+    }.get(swing_status or "", "swing-status-wait")
 
 
 def get_confidence_class(confidence):
@@ -283,6 +308,26 @@ def get_exec_class(exec_state):
 # ---------------------------------------------------------------------------
 # Final action — single source of truth for the UI decision label
 # ---------------------------------------------------------------------------
+
+_SWING_STATUS_ACTION = {
+    "GOOD SWING CANDIDATE":       ("READY",         "exec-ready",    "High-quality swing setup — watch for entry"),
+    "READY IF LEVEL HOLDS":       ("READY",         "exec-ready",    "Price at key level — confirm holds before entry"),
+    "WAIT FOR 15M CONFIRMATION":  ("WAIT",          "exec-wait",     "Structure in place — wait for 15m confirmation candle"),
+    "WAIT FOR PULLBACK":          ("WAIT",          "exec-wait",     "Trend is right but extended — wait for pullback to level"),
+    "TOO EXTENDED":               ("DO NOT CHASE",  "exec-extended", "Price too far from entry zone — do not chase"),
+    "NOT ENOUGH EDGE":            ("NO SETUP",      "exec-no-setup", "Insufficient edge — no actionable swing setup"),
+    "AVOID AT RESISTANCE":        ("NO SETUP",      "exec-no-setup", "At resistance — poor R:R, avoid long entry"),
+    "AVOID WEAK STRUCTURE":       ("NO SETUP",      "exec-no-setup", "Weak market structure — avoid this setup"),
+}
+
+
+def compute_swing_final_action(swing_status: str) -> tuple:
+    """Map swing_status directly to a final_action tuple (action, css, reason)."""
+    row = _SWING_STATUS_ACTION.get(swing_status or "")
+    if row:
+        return row
+    return "WAIT", "exec-wait", "Monitoring — conditions not yet met"
+
 
 _FINAL_ACTION_CSS = {
     "TRIGGERED":       "exec-triggered",
@@ -827,6 +872,110 @@ def annotate(stock: dict) -> dict:
         (lambda hfa: int((datetime.now() - datetime.fromisoformat(hfa)).total_seconds() / 60)
          if hfa else None)(stock.get("headlines_fetched_at"))
     )
+
+    # ── Swing trading display fields ─────────────────────────────────────────
+    _swing_score = stock.get("swing_score")
+    if _swing_score is None:
+        stock["swing_score"] = 0
+    stock["swing_score_class"]      = get_score_class(stock.get("swing_score"))
+    stock["swing_status_class"]     = get_swing_status_class(stock.get("swing_status"))
+    stock["swing_setup_type_class"] = get_setup_type_class(stock.get("swing_setup_type") or "No Setup")
+    stock["swing_grade"]            = compute_swing_grade(stock.get("swing_score") or 1)
+
+    # ── Entry zone distance (how far current price is from the entry zone) ────
+    _cur   = stock.get("current_price") or 0
+    _ez_lo = stock.get("entry_zone_low")
+    if _cur and _ez_lo:
+        _d = (_cur - _ez_lo) / _ez_lo * 100
+        if abs(_d) < 0.5:
+            stock["entry_distance_pct"]     = 0.0
+            stock["entry_distance_display"] = "AT ZONE"
+            stock["entry_distance_class"]   = "dist-at-zone"
+        elif 0 < _d <= 3.0:
+            stock["entry_distance_pct"]     = round(_d, 1)
+            stock["entry_distance_display"] = f"+{_d:.1f}%"
+            stock["entry_distance_class"]   = "dist-near"
+        elif _d > 3.0:
+            stock["entry_distance_pct"]     = round(_d, 1)
+            stock["entry_distance_display"] = f"+{_d:.1f}% above"
+            stock["entry_distance_class"]   = "dist-extended"
+        else:
+            stock["entry_distance_pct"]     = round(_d, 1)
+            stock["entry_distance_display"] = f"{abs(_d):.1f}% to zone"
+            stock["entry_distance_class"]   = "dist-below"
+    else:
+        stock["entry_distance_pct"]     = None
+        stock["entry_distance_display"] = "—"
+        stock["entry_distance_class"]   = ""
+
+    # Distance to T1 / first resistance target
+    _t1 = stock.get("target_1")
+    if _cur and _t1 and _t1 > _cur:
+        stock["resistance_distance_display"] = f"+{(_t1 - _cur) / _cur * 100:.1f}% to T1"
+    elif _cur and _t1 and _t1 < _cur:
+        stock["resistance_distance_display"] = f"T1 below price"
+    else:
+        stock["resistance_distance_display"] = "—"
+
+    # Extension flag (for dashboard filter: price >8% from 20 EMA in trend direction)
+    _pct20 = stock.get("pct_from_ema20")
+    _bias  = stock.get("trade_bias") or "Neutral"
+    if _pct20 is not None:
+        _ext_dir = (_bias == "Long Bias" and _pct20 > 0) or (_bias == "Short Bias" and _pct20 < 0)
+        stock["is_extended"] = bool(_ext_dir and abs(_pct20) > 8.0)
+    else:
+        stock["is_extended"] = False
+
+    # Pullback quality label (clean vs moderate vs weak)
+    _stype  = stock.get("swing_setup_type") or ""
+    _in_dem = stock.get("in_demand_zone", False)
+    _hh_hl  = stock.get("daily_hh_hl", False)
+    _h4_hh  = stock.get("h4_hh_hl", False)
+    _clean_types = {"Order Block Test", "Near 61.8% Retracement", "Breakout Retest"}
+    _mod_types   = {"Near 50% Retracement", "Pullback to 20 EMA", "Pullback to 50 EMA"}
+    if _stype in _clean_types and (_hh_hl or _h4_hh or _in_dem):
+        stock["pullback_quality"]       = "Clean"
+        stock["pullback_quality_class"] = "pq-clean"
+    elif _stype in _clean_types or (_stype in _mod_types and (_hh_hl or _h4_hh)):
+        stock["pullback_quality"]       = "Good"
+        stock["pullback_quality_class"] = "pq-good"
+    elif _stype in _mod_types:
+        stock["pullback_quality"]       = "Moderate"
+        stock["pullback_quality_class"] = "pq-moderate"
+    elif _stype in ("Extended — Wait", "At Resistance — Avoid", "Weak Structure — Avoid"):
+        stock["pullback_quality"]       = "Weak"
+        stock["pullback_quality_class"] = "pq-weak"
+    else:
+        stock["pullback_quality"]       = "Watch"
+        stock["pullback_quality_class"] = "pq-watch"
+
+    # Format entry zone as "low – high" display string
+    ez_low  = stock.get("entry_zone_low")
+    ez_high = stock.get("entry_zone_high")
+    if ez_low and ez_high:
+        stock["entry_zone_display"] = f"${ez_low:.2f} – ${ez_high:.2f}"
+    elif ez_low:
+        stock["entry_zone_display"] = f"~${ez_low:.2f}"
+    else:
+        stock["entry_zone_display"] = "—"
+
+    # Format risk/reward
+    rr = stock.get("risk_reward")
+    if rr:
+        stock["risk_reward_display"] = f"{rr:.1f}:1"
+        stock["risk_reward_class"]   = "rr-good" if rr >= 2.0 else ("rr-okay" if rr >= 1.0 else "rr-poor")
+    else:
+        stock["risk_reward_display"] = "—"
+        stock["risk_reward_class"]   = "rr-neutral"
+
+    # If swing_score is populated, override final_action from swing_status
+    if stock.get("swing_score"):
+        _sfa, _sfa_class, _sfa_reason = compute_swing_final_action(stock.get("swing_status"))
+        stock["final_action"]       = _sfa
+        stock["final_action_class"] = _sfa_class
+        stock["final_action_reason"]= _sfa_reason
+        stock["exec_class"]         = _sfa_class
+
     return stock
 
 
@@ -849,13 +998,16 @@ def rank_stocks(stocks: list) -> list:
     def composite(s):
         if s.get("trade_bias") == "Avoid":
             return -999
-        setup    = (s.get("setup_score")    or 0) * 8
-        momentum = (s.get("momentum_score") or 0) * 3
+        # Swing score is primary when populated; fall back to day-trading setup_score
+        _swing = s.get("swing_score") or 0
+        _setup = s.get("setup_score") or 0
+        primary  = (_swing * 8) if _swing else (_setup * 8)
         catalyst = (s.get("catalyst_score") or 0) * 2
         rvol     = min((s.get("rel_volume") or 0) * 1.5, 10)
-        gap      = min(abs(s.get("gap_pct") or 0) * 0.3, 6)
-        orb_bonus = 4 if s.get("orb_ready") == "YES" else 0
-        return setup + momentum + catalyst + rvol + gap + orb_bonus
+        # Penalise extended/avoid statuses
+        _status  = s.get("swing_status") or ""
+        penalty  = -20 if _status in ("TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE") else 0
+        return primary + catalyst + rvol + penalty
 
     return sorted(stocks, key=composite, reverse=True)
 
@@ -897,19 +1049,40 @@ def compute_no_trade_assessment(ranked: list, top5: list) -> dict:
     # ── Diagnose each weakness ───────────────────────────────────────────────
     reasons = []
 
-    # 1. Momentum check
-    if tradeable:
-        avg_mom = sum(s.get("momentum_score") or 0 for s in tradeable) / len(tradeable)
-        max_mom = max((s.get("momentum_score") or 0) for s in tradeable)
-    else:
-        avg_mom = 0
-        max_mom = 0
+    # 1. Swing score check (primary signal in swing mode)
+    swing_scores = [s.get("swing_score") or 0 for s in tradeable]
+    has_swing_data = any(swing_scores)
 
-    low_momentum = avg_mom < 4
-    if low_momentum:
-        reasons.append(f"Low momentum across the board (avg {avg_mom:.1f}/10, best {max_mom}/10)")
-    elif max_mom < 6:
-        reasons.append(f"Best momentum is {max_mom}/10 — below the 6/10 threshold for A+ setups")
+    if has_swing_data:
+        avg_swing = sum(swing_scores) / len(swing_scores) if swing_scores else 0
+        max_swing = max(swing_scores) if swing_scores else 0
+        low_swing = avg_swing < 4
+        if low_swing:
+            reasons.append(f"Low swing score across watchlist (avg {avg_swing:.1f}/10, best {max_swing}/10)")
+        elif max_swing < 6:
+            reasons.append(f"Best swing score is {max_swing}/10 — below the 6/10 threshold for A+ setups")
+
+        # Check for structural issues
+        avoid_count = sum(1 for s in tradeable if s.get("swing_status") in
+                          ("TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE"))
+        if avoid_count == len(tradeable):
+            reasons.append("All stocks are extended or at resistance — wait for pullbacks")
+        elif not any((s.get("swing_score") or 0) >= 6 for s in tradeable):
+            reasons.append("No stocks have swing score ≥ 6 — no A+ setups forming")
+    else:
+        # Fall back to day-trading momentum assessment
+        if tradeable:
+            avg_mom = sum(s.get("momentum_score") or 0 for s in tradeable) / len(tradeable)
+            max_mom = max((s.get("momentum_score") or 0) for s in tradeable)
+        else:
+            avg_mom = 0
+            max_mom = 0
+
+        low_momentum = avg_mom < 4
+        if low_momentum:
+            reasons.append(f"Low momentum across the board (avg {avg_mom:.1f}/10, best {max_mom}/10)")
+        elif max_mom < 6:
+            reasons.append(f"Best momentum is {max_mom}/10 — below the 6/10 threshold for A+ setups")
 
     # 2. Volume check
     if tradeable:
@@ -919,28 +1092,19 @@ def compute_no_trade_assessment(ranked: list, top5: list) -> dict:
         avg_rvol = 0
         max_rvol = 0
 
-    low_volume = avg_rvol < 1.2
+    low_volume = avg_rvol < 0.8
     if low_volume:
         reasons.append(f"Low relative volume (avg {avg_rvol:.1f}x) — market participation weak")
-    elif max_rvol < 1.5:
-        reasons.append(f"Best relative volume is {max_rvol:.1f}x — not enough conviction")
 
-    # 3. Structure / setup check
-    orb_ready_count  = sum(1 for s in tradeable if s.get("orb_ready") == "YES")
-    clean_entry_count = sum(1 for s in tradeable
-                            if s.get("entry_quality") in ("Perfect", "Okay")
-                            and s.get("trade_bias") != "Avoid")
-    if orb_ready_count == 0:
-        reasons.append("No stocks meet ORB readiness criteria (momentum ≥ 6, volume ≥ 1.5x, clean structure)")
-    elif clean_entry_count == 0:
-        reasons.append("No clean entries available — all setups are extended or structure is absent")
-
-    # Cap at 3 reasons — most important already surfaced above
+    # Cap at 3 reasons
     reasons = reasons[:3]
 
     # ── Severity ─────────────────────────────────────────────────────────────
-    # Hard lock: both momentum and volume are genuinely weak — real no-trade day
-    hard = (avg_mom < 4 and avg_rvol < 1.2) or (not tradeable)
+    if has_swing_data:
+        hard = (not tradeable) or (max_swing < 4)
+    else:
+        avg_mom_val = sum(s.get("momentum_score") or 0 for s in tradeable) / max(len(tradeable), 1)
+        hard = (avg_mom_val < 4 and avg_rvol < 1.2) or (not tradeable)
     severity = "hard" if hard else "soft"
 
     return {
@@ -979,15 +1143,24 @@ def compute_secondary_watchlist(ranked: list, top5_set: set) -> list:
         if s.get("display_exec_state") == "TRIGGERED":
             continue
 
+        swing = s.get("swing_score")    or 0
         mom   = s.get("momentum_score") or 0
         rvol  = s.get("rel_volume")     or 0
         setup = s.get("setup_score")    or 0
 
-        qualifies = mom >= 4 or rvol >= 1.5 or setup >= 5
+        # Swing mode: score ≥ 4 qualifies; day-trading fallback otherwise
+        if swing:
+            qualifies = swing >= 4 or rvol >= 1.0
+        else:
+            qualifies = mom >= 4 or rvol >= 1.5 or setup >= 5
         if not qualifies:
             continue
 
-        if mom >= 4 and setup >= 5:
+        # Tier assignment
+        if swing >= 6:
+            s["secondary_tier"]       = "B Setup"
+            s["secondary_tier_class"] = "tier-b-setup"
+        elif swing >= 4 or (not swing and mom >= 4 and setup >= 5):
             s["secondary_tier"]       = "B Setup"
             s["secondary_tier_class"] = "tier-b-setup"
         else:
@@ -1016,12 +1189,41 @@ def compute_summary_cards(stocks: list) -> dict:
         "best_gapper":        max(tradeable, key=lambda s: abs(s.get("gap_pct")        or 0)),
         "strongest_catalyst": max(tradeable, key=lambda s:     s.get("catalyst_score") or 0),
         "highest_volume":     max(tradeable, key=lambda s:     s.get("rel_volume")     or 0),
-        "best_setup":         max(tradeable, key=lambda s:     s.get("setup_score")    or 0),
+        "best_setup":         max(tradeable, key=lambda s:     s.get("swing_score") or s.get("setup_score") or 0),
     }
 
 
 # ---------------------------------------------------------------------------
 # Routes
+# ---------------------------------------------------------------------------
+# ROUTE REFERENCE — keep this list in sync when adding/renaming routes.
+# Every url_for() call in templates MUST use one of these endpoint names.
+#
+#   Endpoint name          Method   Path
+#   ─────────────────────────────────────────────────────────────────────
+#   dashboard              GET      /
+#   watchlist_add          POST     /watchlist/add
+#   watchlist_remove       POST     /watchlist/remove/<ticker>
+#   refresh_all            POST     /refresh
+#   stock_detail           GET      /stock/<ticker>
+#   refresh_single         POST     /stock/<ticker>/refresh
+#   save_stock_plan        POST     /stock/<ticker>/plan
+#   save_stock_note        POST     /stock/<ticker>/notes
+#   set_setup_type         POST     /stock/<ticker>/setup_type
+#   stock_set_watchlists   POST     /stock/<ticker>/watchlists
+#   toggle_auto_classify   POST     /stock/<ticker>/auto_classify
+#   watchlist_activate     POST     /watchlists/activate/<wl_id>
+#   watchlist_create       POST     /watchlists/create
+#   watchlist_rename       POST     /watchlists/rename/<wl_id>
+#   watchlist_delete       POST     /watchlists/delete/<wl_id>
+#   journal                GET      /journal
+#   journal_add            POST     /journal/add
+#   journal_edit           POST     /journal/<entry_id>/edit
+#   journal_delete         POST     /journal/<entry_id>/delete
+#   quick_mode             GET      /quick
+#   api_dashboard          GET      /api/dashboard
+#   api_stock_live         GET      /api/stock/<ticker>/live
+#   api_watchlist          GET      /api/watchlist
 # ---------------------------------------------------------------------------
 
 @app.route("/")
@@ -1045,13 +1247,25 @@ def dashboard():
     missing  = [t for t in watchlist if t not in data_map]
 
     ranked     = rank_stocks(stocks)
-    # Top 5: must have momentum ≥ 6, ORB ready, and entry not extended
+    # Top candidates: swing_score ≥ 6 and status not extended/avoid, OR fall back
+    # to day-trading criteria if swing fields are absent
     top5       = [
         s for s in ranked
-        if (s.get("momentum_score") or 0) >= 6
-        and s.get("orb_ready") == "YES"
-        and s.get("entry_quality") != "Extended"
-        and s.get("trade_bias") != "Avoid"
+        if (
+            # Swing mode: good score + actionable status
+            (s.get("swing_score") or 0) >= 6
+            and s.get("swing_status") not in (
+                "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE", "NOT ENOUGH EDGE"
+            )
+            and s.get("trade_bias") != "Avoid"
+        ) or (
+            # Legacy day-trading fallback when swing fields absent
+            not s.get("swing_score")
+            and (s.get("momentum_score") or 0) >= 6
+            and s.get("orb_ready") == "YES"
+            and s.get("entry_quality") != "Extended"
+            and s.get("trade_bias") != "Avoid"
+        )
     ][:5]
 
     # No-trade assessment — must run before triggered list is built
@@ -1078,8 +1292,7 @@ def dashboard():
             annotate(card)
 
     # Notes: pass a set of tickers that have notes for the indicator column
-    notes_map    = get_all_notes()
-    tickers_with_notes = set(notes_map.keys())
+    notes_map = get_all_notes()
 
     return render_template(
         "dashboard.html",
@@ -1089,7 +1302,7 @@ def dashboard():
         summary=summary,
         missing=missing,
         watchlist=watchlist,
-        tickers_with_notes=tickers_with_notes,
+        notes=notes_map,
         secondary=secondary,
         alt_modes=alt_modes,
         no_trade=no_trade,
@@ -1171,7 +1384,7 @@ def stock_detail(ticker):
 
     annotate(stock)
     note       = get_note(ticker)
-    breakdown  = catalyst_score_breakdown(stock)
+    breakdown  = catalyst_score_breakdown(stock) or []
     plan       = get_trade_plan(ticker)
 
     _, rr_display, rr_class = compute_rr(
@@ -1189,12 +1402,13 @@ def stock_detail(ticker):
         stock=stock,
         note=note,
         breakdown=breakdown,
-        setup_types=SETUP_TYPES,
+        setup_types=SWING_SETUP_TYPES + [s for s in SETUP_TYPES if s not in SWING_SETUP_TYPES],
         plan=plan,
         rr_display=rr_display,
         rr_class=rr_class,
         all_wls=all_wls,
         ticker_wl_ids=ticker_wl_ids,
+        get_setup_type_class=get_setup_type_class,
     )
 
 

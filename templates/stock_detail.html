@@ -11,51 +11,46 @@
     <div class="detail-title-row">
       <h1 class="detail-ticker">{{ stock.ticker }}</h1>
       <span id="detail-exec-badge" class="exec-badge exec-badge-lg {{ stock.exec_class }}">{{ stock.final_action or 'WAIT' }}</span>
-      <span id="detail-freshness-badge" class="freshness-badge freshness-badge-lg {{ stock.freshness_class }}" {% if not stock.freshness %}style="display:none"{% endif %}>{{ stock.freshness or '' }}</span>
-      {% if stock.position_size == 'reduced' %}
-      <span class="mr-position-badge">⚠ Reduced Size</span>
-      {% endif %}
       <span id="detail-bias-tag" class="bias-tag {{ stock.bias_class }} bias-large">{{ stock.trade_bias }}</span>
-      <span id="detail-setup-pill" class="setup-pill {{ stock.setup_type_class }} setup-pill-lg">{{ stock.setup_type or "No Setup" }}</span>
+      {% if stock.swing_setup_type %}
+      <span id="detail-setup-pill" class="setup-pill {{ stock.swing_setup_type_class }} setup-pill-lg">{{ stock.swing_setup_type }}</span>
+      {% endif %}
     </div>
     <div class="detail-subtitle">
       Last updated: <span id="detail-last-updated">{{ stock.last_updated }}</span>
       &nbsp;|&nbsp;
       <form action="{{ url_for('refresh_single', ticker=stock.ticker) }}" method="POST" style="display:inline;">
-        <button type="submit" class="btn-inline-refresh">⟳ Refresh</button>
+        <button type="submit" class="btn-inline-refresh">⟳ Refresh Data</button>
       </form>
     </div>
   </div>
 
-  <!-- ===== SCORE STRIP — all key scores ===== -->
+  <!-- ===== SWING SCORE STRIP ===== -->
   <div class="score-strip">
 
     <div class="score-strip-item">
-      <div class="score-strip-label">Final Setup</div>
+      <div class="score-strip-label">Swing Score</div>
       <div class="score-big-row">
-        <div id="detail-setup-score-wrap" class="score-big {{ stock.score_class }}{% if stock.setup_score >= 8 %} score-elite{% endif %}">
-          <span id="detail-setup-score">{{ stock.setup_score }}</span><span class="score-denom">/10</span>
+        <div class="score-big {{ stock.swing_score_class }}{% if stock.swing_score and stock.swing_score >= 8 %} score-elite{% endif %}">
+          <span id="detail-swing-score">{{ stock.swing_score or '—' }}</span><span class="score-denom">/10</span>
         </div>
-        <span id="detail-setup-conf" class="conf-badge {{ stock.setup_conf_class }}">
-          {{ stock.setup_confidence or "—" }}
+        <span class="conf-badge {{ stock.swing_score_class }}">
+          {{ stock.swing_confidence or '—' }}
         </span>
       </div>
-      <div class="score-strip-reason" id="detail-setup-reason">{{ stock.setup_reason or "—" }}</div>
+      <div class="score-strip-reason">{{ stock.swing_reason or '—' }}</div>
     </div>
 
     <div class="score-strip-divider"></div>
 
     <div class="score-strip-item">
-      <div class="score-strip-label">Momentum</div>
+      <div class="score-strip-label">Swing Status</div>
       <div class="score-big-row">
-        <div id="detail-mom-score-wrap" class="score-big {{ stock.mom_score_class }}{% if stock.momentum_score >= 8 %} score-elite{% endif %}">
-          <span id="detail-mom-score">{{ stock.momentum_score or "—" }}</span><span class="score-denom">/10</span>
-        </div>
-        <span class="conf-badge {{ stock.mom_conf_class }}">
-          {{ stock.momentum_confidence or "—" }}
+        <span class="swing-status-badge swing-status-lg {{ stock.swing_status_class }}">
+          {{ stock.swing_status or '—' }}
         </span>
       </div>
-      <div class="score-strip-reason" id="detail-mom-reason">{{ stock.momentum_reason or "—" }}</div>
+      <div class="score-strip-reason">{{ stock.final_action_reason or '—' }}</div>
     </div>
 
     <div class="score-strip-divider"></div>
@@ -63,14 +58,12 @@
     <div class="score-strip-item">
       <div class="score-strip-label">Catalyst</div>
       <div class="score-big-row">
-        <div id="detail-cat-score-wrap" class="score-big {{ stock.cat_score_class }}{% if stock.catalyst_score >= 8 %} score-elite{% endif %}">
-          <span id="detail-cat-score">{{ stock.catalyst_score }}</span><span class="score-denom">/10</span>
+        <div class="score-big {{ stock.cat_score_class }}{% if stock.catalyst_score and stock.catalyst_score >= 8 %} score-elite{% endif %}">
+          <span id="detail-cat-score">{{ stock.catalyst_score or '—' }}</span><span class="score-denom">/10</span>
         </div>
-        <span class="conf-badge {{ stock.cat_conf_class }}">
-          {{ stock.catalyst_confidence or "—" }}
-        </span>
+        <span class="conf-badge {{ stock.cat_conf_class }}">{{ stock.catalyst_confidence or '—' }}</span>
       </div>
-      <div class="score-strip-reason">{{ stock.catalyst_reason or "—" }}</div>
+      <div class="score-strip-reason">{{ stock.catalyst_reason or '—' }}</div>
     </div>
 
     <div class="score-strip-divider"></div>
@@ -78,7 +71,7 @@
     <div class="score-strip-item">
       <div class="score-strip-label">Gap</div>
       <div id="detail-gap" class="score-big {{ stock.gap_class }}">{{ stock.gap_display }}</div>
-      <div class="score-strip-reason">vs prior close ${{ "%.2f"|format(stock.prev_close) if stock.prev_close is not none else "N/A" }}</div>
+      <div class="score-strip-reason">vs prev close ${{ "%.2f"|format(stock.prev_close) if stock.prev_close is not none else "N/A" }}</div>
     </div>
 
     <div class="score-strip-divider"></div>
@@ -93,183 +86,203 @@
 
   </div>
 
-  <!-- ===== STRUCTURE ANALYSIS — ORB / Order Block / Entry Quality ===== -->
-  <div class="structure-strip">
+  <!-- ===== SWING TRADE PLAN ===== -->
+  <div class="detail-card swing-plan-card">
+    <h3 class="card-title">Swing Trade Plan</h3>
 
-    <div class="structure-item">
-      <div class="structure-label">ORB State</div>
-      <!-- Final action — single source of truth for the primary directive -->
-      <div id="detail-orb-action" class="orb-action-directive {{ stock.final_action_class }}">
-        {{ stock.final_action or 'WAIT' }}
-      </div>
-      <div class="orb-readiness-row">
-        <span id="detail-orb-ready" class="signal-badge signal-badge-lg {{ stock.orb_class }}">
-          {{ stock.orb_ready or 'NO' }}
-        </span>
-        <span id="detail-orb-phase" class="orb-phase-badge {{ stock.orb_phase_class }}" {% if not stock.orb_phase_label %}style="display:none"{% endif %}>{{ stock.orb_phase_label or '' }}</span>
-      </div>
-      <div class="structure-hint" id="detail-orb-action-sub">{{ stock.orb_action_sub }}</div>
-    </div>
+    <div class="swing-plan-grid">
 
-    <div class="structure-divider"></div>
-
-    <div class="structure-item">
-      <div class="structure-label">Order Block</div>
-      <span class="signal-badge signal-badge-lg {{ stock.ob_class }}">
-        {{ stock.order_block or 'Neutral' }}
-      </span>
-      <div class="structure-hint">
-        {% if stock.order_block == 'Demand' %}
-          Bullish institutional zone — gap up, cleared prior high, volume confirmed buyers.
-        {% elif stock.order_block == 'Supply' %}
-          Bearish institutional zone — gap down, broke prior low, volume confirmed sellers.
-        {% else %}
-          No dominant institutional zone detected — inside-day or low volume.
+      <div class="swing-plan-col">
+        <div class="swing-plan-section-title">Entry Zone</div>
+        <div class="swing-plan-value swing-plan-entry">{{ stock.entry_zone_display }}</div>
+        {% if stock.ema_20_daily %}
+        <div class="swing-plan-hint">20 EMA: ${{ "%.2f"|format(stock.ema_20_daily) }}</div>
+        {% endif %}
+        {% if stock.fib_618 %}
+        <div class="swing-plan-hint">61.8% Fib: ${{ "%.2f"|format(stock.fib_618) }}</div>
+        {% endif %}
+        {% if stock.fib_50 %}
+        <div class="swing-plan-hint">50% Fib: ${{ "%.2f"|format(stock.fib_50) }}</div>
         {% endif %}
       </div>
-    </div>
 
-    <div class="structure-divider"></div>
+      <div class="swing-plan-col">
+        <div class="swing-plan-section-title">Stop</div>
+        <div class="swing-plan-value swing-plan-stop">
+          {% if stock.stop_level %}${{ "%.2f"|format(stock.stop_level) }}{% else %}—{% endif %}
+        </div>
+      </div>
 
-    <div class="structure-item">
-      <div class="structure-label">Entry Quality</div>
-      <span class="signal-badge signal-badge-lg {{ stock.entry_class }}">
-        {{ stock.entry_quality or 'Okay' }}
-      </span>
-      <div class="structure-hint">
-        {% if stock.entry_quality == 'Perfect' %}
-          Price near VWAP / PM extreme + order block aligned — tight stop, clean R:R.
-        {% elif stock.entry_quality == 'Extended' %}
-          Price far from VWAP and gap already played — chasing, poor risk/reward.
-        {% else %}
-          Reasonable entry zone — some distance from ideal, but not extended.
+      <div class="swing-plan-col">
+        <div class="swing-plan-section-title">Target 1</div>
+        <div class="swing-plan-value swing-plan-target">
+          {% if stock.target_1 %}${{ "%.2f"|format(stock.target_1) }}{% else %}—{% endif %}
+        </div>
+        <div class="swing-plan-section-title" style="margin-top:12px;">Target 2</div>
+        <div class="swing-plan-value swing-plan-target">
+          {% if stock.target_2 %}${{ "%.2f"|format(stock.target_2) }}{% else %}—{% endif %}
+        </div>
+      </div>
+
+      <div class="swing-plan-col">
+        <div class="swing-plan-section-title">Risk / Reward</div>
+        <div class="swing-plan-value {{ stock.risk_reward_class }}">{{ stock.risk_reward_display }}</div>
+        {% if stock.risk_reward %}
+        <div class="swing-plan-hint">
+          {{ 'Good R:R' if stock.risk_reward >= 2 else ('Acceptable' if stock.risk_reward >= 1 else 'Poor R:R — avoid') }}
+        </div>
         {% endif %}
       </div>
-      {% if stock.entry_note %}
-      <div class="mr-warning-strip">
-        <span class="mr-warning-icon">⚠</span>
-        <span class="mr-warning-text">
-          <strong>Momentum Runner</strong>
-          {{ stock.entry_note }}
-        </span>
-      </div>
-      {% endif %}
-    </div>
 
+    </div>
   </div>
 
-  <!-- ===== ORB LEVELS ===== -->
-  {% set orb_labels = {"ABOVE": "▲ Above ORB High", "NEAR_HIGH": "↑ Approaching ORB High", "INSIDE": "Inside ORB Range", "NEAR_LOW": "↓ Approaching ORB Low", "BELOW": "▼ Below ORB Low", "NO_ORB": "ORB Not Set"} %}
+  <!-- ===== EMA + STRUCTURE ANALYSIS ===== -->
+  <div class="detail-row">
 
-  {# Always show the ORB card — content depends on phase #}
-  <div class="detail-card orb-card">
-    <h3 class="card-title">
-      Opening Range Breakout Levels
-      {% if stock.orb_phase_label %}
-      <span class="orb-phase-badge {{ stock.orb_phase_class }}">{{ stock.orb_phase_label }}</span>
-      {% endif %}
-      {% if stock.orb_high and stock.orb_low %}
-      <span class="orbs-badge {{ stock.orb_status_class }}">{{ orb_labels.get(stock.orb_status, '—') }}</span>
-      {% endif %}
-    </h3>
+    <div class="detail-col">
+      <div class="detail-card">
+        <h3 class="card-title">EMA Stack &amp; Trend</h3>
+        <div class="ema-stack-grid">
 
-  {% if stock.orb_phase == 'pre_market' %}
-    <!-- Pre-market: ORB not started yet -->
-    <div class="orb-waiting">
-      <div class="orb-waiting-icon">⏳</div>
-      <div class="orb-waiting-msg">ORB not available — waiting for market open</div>
-      <div class="orb-waiting-hint">Opening Range will be calculated from 9:30 AM to 10:00 AM ET using today's intraday data only.</div>
-    </div>
-
-  {% elif stock.orb_high and stock.orb_low %}
-
-    <!-- Level stats row -->
-    <div class="orb-stats-row">
-      <div class="orb-stat orb-stat-high {{ 'orb-stat-active' if stock.orb_status in ['ABOVE', 'NEAR_HIGH'] else '' }}" id="detail-orb-high-stat">
-        <div class="orb-stat-label">ORB High</div>
-        <div class="orb-stat-value" id="detail-orb-high">${{ "%.2f"|format(stock.orb_high) }}</div>
-        {% if stock.orb_status == 'NEAR_HIGH' %}
-          <div class="orb-stat-hint">{{ "%.2f"|format(((stock.orb_high - stock.current_price) / stock.orb_high * 100)) }}% away</div>
-        {% elif stock.orb_status == 'ABOVE' %}
-          <div class="orb-stat-hint">+{{ "%.2f"|format(((stock.current_price - stock.orb_high) / stock.orb_high * 100)) }}% above</div>
-        {% endif %}
-      </div>
-
-      <!-- Range bar visualization -->
-      <div class="orb-viz">
-        <div class="orb-viz-bar">
-          <!-- ORB zone (always 22–78% of the bar due to 40% padding) -->
-          <div class="orb-viz-zone"></div>
-          <!-- Current price marker -->
-          <div class="orb-viz-marker {{ stock.orb_status_class }}"
-               style="left: {{ stock.orb_price_pct }}%;"
-               title="${{ '%.2f'|format(stock.current_price) if stock.current_price is not none else 'N/A' }}">
+          <div class="ema-row">
+            <span class="ema-label">Price</span>
+            <span class="ema-value" id="detail-cur-price">${{ "%.2f"|format(stock.current_price) if stock.current_price is not none else "N/A" }}</span>
           </div>
-          <!-- ORB level tick marks -->
-          <div class="orb-viz-tick orb-viz-tick-high" style="left: 77.8%;"
-               title="ORB High: ${{ '%.2f'|format(stock.orb_high) }}"></div>
-          <div class="orb-viz-tick orb-viz-tick-low" style="left: 22.2%;"
-               title="ORB Low: ${{ '%.2f'|format(stock.orb_low) }}"></div>
-        </div>
-        <div class="orb-viz-labels">
-          <span>← Breakdown</span>
-          <span>ORB Range</span>
-          <span>Breakout →</span>
-        </div>
-      </div>
 
-      <div class="orb-stat orb-stat-low {{ 'orb-stat-active orb-stat-bear' if stock.orb_status in ['BELOW', 'NEAR_LOW'] else '' }}" id="detail-orb-low-stat">
-        <div class="orb-stat-label">ORB Low</div>
-        <div class="orb-stat-value" id="detail-orb-low">${{ "%.2f"|format(stock.orb_low) }}</div>
-        {% if stock.orb_status == 'NEAR_LOW' %}
-          <div class="orb-stat-hint">{{ "%.2f"|format(((stock.current_price - stock.orb_low) / stock.orb_low * 100)) }}% away</div>
-        {% elif stock.orb_status == 'BELOW' %}
-          <div class="orb-stat-hint">-{{ "%.2f"|format(((stock.orb_low - stock.current_price) / stock.orb_low * 100)) }}% below</div>
+          {% if stock.ema_20_daily %}
+          <div class="ema-row {{ 'ema-above' if stock.current_price and stock.current_price > stock.ema_20_daily else 'ema-below' }}">
+            <span class="ema-label">20 EMA (D)</span>
+            <span class="ema-value">${{ "%.2f"|format(stock.ema_20_daily) }}</span>
+            {% if stock.pct_from_ema20 %}
+            <span class="ema-dist {{ 'text-danger' if stock.pct_from_ema20 | abs > 8 else '' }}">
+              {{ '%+.1f' | format(stock.pct_from_ema20) }}%
+            </span>
+            {% endif %}
+          </div>
+          {% endif %}
+
+          {% if stock.ema_50_daily %}
+          <div class="ema-row {{ 'ema-above' if stock.current_price and stock.current_price > stock.ema_50_daily else 'ema-below' }}">
+            <span class="ema-label">50 EMA (D)</span>
+            <span class="ema-value">${{ "%.2f"|format(stock.ema_50_daily) }}</span>
+          </div>
+          {% endif %}
+
+          {% if stock.ema_200_daily %}
+          <div class="ema-row {{ 'ema-above' if stock.current_price and stock.current_price > stock.ema_200_daily else 'ema-below' }}">
+            <span class="ema-label">200 EMA (D)</span>
+            <span class="ema-value">${{ "%.2f"|format(stock.ema_200_daily) }}</span>
+          </div>
+          {% endif %}
+
+        </div>
+
+        {% if stock.daily_trend %}
+        <div class="daily-trend-row">
+          <span class="daily-trend-label">Daily Trend:</span>
+          <span class="daily-trend-value {{ 'text-success' if 'Bullish' in stock.daily_trend else ('text-danger' if 'Bearish' in stock.daily_trend else '') }}">
+            {{ stock.daily_trend }}
+          </span>
+          {% if stock.daily_hh_hl %}
+          <span class="structure-chip structure-bullish">HH/HL</span>
+          {% endif %}
+          {% if stock.daily_lh_ll %}
+          <span class="structure-chip structure-bearish">LH/LL</span>
+          {% endif %}
+        </div>
         {% endif %}
       </div>
     </div>
 
-    <div class="orb-card-hint">
-      {% if stock.orb_phase == 'forming' %}
-      <span class="orb-forming-note">⚡ ORB forming — levels update live until 10:00 AM ET.
-        High and low will lock when the window closes.</span>
-      {% else %}
-      Opening Range: first 30 minutes of trading (9:30–10:00 AM ET).
-      Break above ORB High = bullish signal. Break below ORB Low = bearish signal.
-      {% endif %}
-    </div>
+    <div class="detail-col">
+      <div class="detail-card">
+        <h3 class="card-title">Fibonacci Levels</h3>
+        {% if stock.fib_high and stock.fib_low %}
+        <div class="fib-grid">
 
-  {% else %}
-    {# Forming or locked but no bars yet #}
-    <div class="orb-waiting">
-      <div class="orb-waiting-icon">📊</div>
-      <div class="orb-waiting-msg">
-        {% if stock.orb_phase == 'forming' %}ORB forming — no bars captured yet
-        {% else %}ORB levels unavailable{% endif %}
+          <div class="fib-row fib-row-high">
+            <span class="fib-label">Swing High</span>
+            <span class="fib-value">${{ "%.2f"|format(stock.fib_high) }}</span>
+            <span class="fib-pct">0%</span>
+          </div>
+
+          {% if stock.fib_50 %}
+          <div class="fib-row {{ 'fib-row-active' if stock.current_price and (stock.fib_50 * 0.98) <= stock.current_price <= (stock.fib_50 * 1.02) else '' }}">
+            <span class="fib-label">50% Retracement</span>
+            <span class="fib-value">${{ "%.2f"|format(stock.fib_50) }}</span>
+            <span class="fib-pct">50%</span>
+          </div>
+          {% endif %}
+
+          {% if stock.fib_618 %}
+          <div class="fib-row {{ 'fib-row-active' if stock.current_price and (stock.fib_618 * 0.98) <= stock.current_price <= (stock.fib_618 * 1.02) else '' }}">
+            <span class="fib-label">61.8% Retracement</span>
+            <span class="fib-value">${{ "%.2f"|format(stock.fib_618) }}</span>
+            <span class="fib-pct">61.8%</span>
+          </div>
+          {% endif %}
+
+          <div class="fib-row fib-row-low">
+            <span class="fib-label">Swing Low</span>
+            <span class="fib-value">${{ "%.2f"|format(stock.fib_low) }}</span>
+            <span class="fib-pct">100%</span>
+          </div>
+
+        </div>
+        {% else %}
+        <div class="no-data-msg">Fibonacci levels not yet computed — refresh to load.</div>
+        {% endif %}
       </div>
-      <div class="orb-waiting-hint">Intraday data is fetched from yfinance on refresh. Levels appear once the 9:30 AM bar closes.</div>
     </div>
-  {% endif %}
 
   </div>
+
+  <!-- ===== SUPPLY / DEMAND ZONES ===== -->
+  {% if stock.nearest_supply_top or stock.nearest_demand_bottom %}
+  <div class="detail-card zones-card">
+    <h3 class="card-title">Supply &amp; Demand Zones</h3>
+    <div class="zones-grid">
+
+      {% if stock.nearest_supply_top %}
+      <div class="zone-item zone-supply {{ 'zone-active' if stock.in_supply_zone else '' }}">
+        <div class="zone-label">Nearest Supply</div>
+        <div class="zone-range">${{ "%.2f"|format(stock.nearest_supply_bottom or 0) }} – ${{ "%.2f"|format(stock.nearest_supply_top) }}</div>
+        {% if stock.distance_to_supply_pct %}
+        <div class="zone-dist">{{ '%+.1f'|format(stock.distance_to_supply_pct) }}% away</div>
+        {% endif %}
+        {% if stock.in_supply_zone %}<div class="zone-active-badge">IN ZONE</div>{% endif %}
+      </div>
+      {% endif %}
+
+      {% if stock.nearest_demand_bottom %}
+      <div class="zone-item zone-demand {{ 'zone-active' if stock.in_demand_zone else '' }}">
+        <div class="zone-label">Nearest Demand</div>
+        <div class="zone-range">${{ "%.2f"|format(stock.nearest_demand_bottom) }} – ${{ "%.2f"|format(stock.nearest_demand_top or 0) }}</div>
+        {% if stock.distance_to_demand_pct %}
+        <div class="zone-dist">{{ '%+.1f'|format(stock.distance_to_demand_pct) }}% away</div>
+        {% endif %}
+        {% if stock.in_demand_zone %}<div class="zone-active-badge">IN ZONE</div>{% endif %}
+      </div>
+      {% endif %}
+
+      {% if stock.zone_location %}
+      <div class="zone-location-badge">{{ stock.zone_location }}</div>
+      {% endif %}
+
+    </div>
+  </div>
+  {% endif %}
 
   <!-- ===== PRICE STATS GRID ===== -->
   <div class="stats-grid">
     <div class="stat-card">
       <div class="stat-label">Current Price</div>
-      <div class="stat-value" id="detail-cur-price">${{ "%.2f"|format(stock.current_price) if stock.current_price is not none else "N/A" }}</div>
+      <div class="stat-value">${{ "%.2f"|format(stock.current_price) if stock.current_price is not none else "N/A" }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Prev Close</div>
       <div class="stat-value">${{ "%.2f"|format(stock.prev_close) if stock.prev_close is not none else "N/A" }}</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Premarket High</div>
-      <div class="stat-value">${{ "%.2f"|format(stock.premarket_high) if stock.premarket_high is not none else "N/A" }}</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Premarket Low</div>
-      <div class="stat-value">${{ "%.2f"|format(stock.premarket_low) if stock.premarket_low is not none else "N/A" }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Prev Day High</div>
@@ -279,7 +292,7 @@
       <div class="stat-label">Prev Day Low</div>
       <div class="stat-value">${{ "%.2f"|format(stock.prev_day_low) if stock.prev_day_low is not none else "N/A" }}</div>
     </div>
-    <div class="stat-card {{ 'stat-hot' if stock.rel_volume >= 2 else '' }}">
+    <div class="stat-card {{ 'stat-hot' if stock.rel_volume and stock.rel_volume >= 2 else '' }}">
       <div class="stat-label">Rel Volume</div>
       <div class="stat-value">{{ "%.1f"|format(stock.rel_volume) if stock.rel_volume is not none else "N/A" }}x</div>
     </div>
@@ -330,11 +343,44 @@
           <li class="no-data">No headlines available — set FINNHUB_API_KEY, NEWS_API_KEY, or POLYGON_API_KEY.</li>
           {% endfor %}
         </ul>
-        {% if stock.headline_freshness %}
-        <div class="headline-source-row">
-          <span class="headline-source-label">Updated {{ stock.headline_freshness }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SWING SCORE BREAKDOWN ===== -->
+  <div class="detail-card breakdown-card">
+    <h3 class="card-title">
+      Swing Score Breakdown
+      <span class="score-badge {{ stock.swing_score_class }}{% if stock.swing_score and stock.swing_score >= 8 %} score-badge-elite{% endif %}">
+        {{ stock.swing_score or '—' }}/10
+      </span>
+      {% if stock.swing_confidence %}
+      <span class="conf-badge {{ stock.swing_score_class }}">{{ stock.swing_confidence }}</span>
+      {% endif %}
+    </h3>
+    {% if stock.swing_reason %}
+    <p class="reason-summary {{ stock.swing_score_class }}">{{ stock.swing_reason }}</p>
+    {% endif %}
+    <div class="setup-factors-row">
+      <div class="setup-factor">
+        <div class="setup-factor-label">Daily Trend</div>
+        <div class="setup-factor-value">{{ stock.daily_trend or '—' }}</div>
+      </div>
+      <div class="setup-factor">
+        <div class="setup-factor-label">Structure</div>
+        <div class="setup-factor-value">
+          {% if stock.daily_hh_hl %}<span class="structure-chip structure-bullish">HH/HL</span>{% endif %}
+          {% if stock.daily_lh_ll %}<span class="structure-chip structure-bearish">LH/LL</span>{% endif %}
+          {% if not stock.daily_hh_hl and not stock.daily_lh_ll %}—{% endif %}
         </div>
-        {% endif %}
+      </div>
+      <div class="setup-factor">
+        <div class="setup-factor-label">Setup Type</div>
+        <span class="setup-pill {{ stock.swing_setup_type_class }}">{{ stock.swing_setup_type or '—' }}</span>
+      </div>
+      <div class="setup-factor">
+        <div class="setup-factor-label">R:R</div>
+        <span class="{{ stock.risk_reward_class }}">{{ stock.risk_reward_display }}</span>
       </div>
     </div>
   </div>
@@ -343,7 +389,7 @@
   <div class="detail-card breakdown-card">
     <h3 class="card-title">
       Catalyst Score Breakdown
-      <span class="score-badge {{ stock.cat_score_class }}{% if stock.catalyst_score >= 8 %} score-badge-elite{% endif %}">
+      <span class="score-badge {{ stock.cat_score_class }}{% if stock.catalyst_score and stock.catalyst_score >= 8 %} score-badge-elite{% endif %}">
         {{ stock.catalyst_score }}/10
       </span>
       <span class="conf-badge {{ stock.cat_conf_class }}">{{ stock.catalyst_confidence or "—" }}</span>
@@ -359,50 +405,18 @@
     </div>
     {% endif %}
     <div class="breakdown-list">
-      {% for label, pts in breakdown %}
-      <div class="breakdown-row">
-        <span class="breakdown-label">{{ label }}</span>
-        <span class="breakdown-pts {{ 'pts-pos' if pts > 0 else 'pts-zero' }}">
-          {% if pts > 0 %}+{{ pts }}{% else %}—{% endif %}
-        </span>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-
-  <!-- ===== FINAL SETUP SCORE BREAKDOWN ===== -->
-  <div class="detail-card setup-quality-card">
-    <h3 class="card-title">
-      Final Setup Score
-      <span class="score-badge {{ stock.score_class }}{% if stock.setup_score >= 8 %} score-badge-elite{% endif %}">
-        {{ stock.setup_score }}/10
-      </span>
-      <span class="conf-badge {{ stock.setup_conf_class }}">{{ stock.setup_confidence or "—" }}</span>
-    </h3>
-    {% if stock.setup_reason %}
-    <p class="reason-summary {{ stock.score_class }}">{{ stock.setup_reason }}</p>
-    {% endif %}
-    <div class="setup-factors-row">
-      <div class="setup-factor">
-        <div class="setup-factor-label">Momentum</div>
-        <div class="setup-factor-value {{ stock.mom_score_class }}">{{ stock.momentum_score or '—' }}/10</div>
-        <div class="setup-factor-hint">{{ stock.momentum_reason or '—' }}</div>
-      </div>
-      <div class="setup-factor">
-        <div class="setup-factor-label">ORB Ready</div>
-        <span class="signal-badge {{ stock.orb_class }}">{{ stock.orb_ready or 'NO' }}</span>
-        <div class="setup-factor-hint">
-          <span class="orb-action-inline {{ stock.final_action_class }}">{{ stock.final_action or 'WAIT' }}</span>
+      {% if breakdown %}
+        {% for label, pts in breakdown %}
+        <div class="breakdown-row">
+          <span class="breakdown-label">{{ label }}</span>
+          <span class="breakdown-pts {{ 'pts-pos' if pts > 0 else 'pts-zero' }}">
+            {% if pts > 0 %}+{{ pts }}{% else %}—{% endif %}
+          </span>
         </div>
-      </div>
-      <div class="setup-factor">
-        <div class="setup-factor-label">Order Block</div>
-        <span class="signal-badge {{ stock.ob_class }}">{{ stock.order_block or 'Neutral' }}</span>
-      </div>
-      <div class="setup-factor">
-        <div class="setup-factor-label">Entry Quality</div>
-        <span class="signal-badge {{ stock.entry_class }}">{{ stock.entry_quality or 'Okay' }}</span>
-      </div>
+        {% endfor %}
+      {% else %}
+        <div class="breakdown-row"><span class="breakdown-label text-muted">No breakdown available</span></div>
+      {% endif %}
     </div>
   </div>
 
@@ -433,12 +447,10 @@
         {{ "AUTO" if auto_on else "MANUAL" }}
       </span>
     </h3>
-
     <div class="classify-body">
-
       {% if stock.classify_reason %}
         {%- set cr = stock.classify_reason -%}
-        {%- if cr.startswith('Promoted') -%}
+        {%- if cr.startswith('A+') or cr.startswith('Promoted') -%}
           {%- set cl_name = "A+ Momentum" -%}{%- set cl_css = "classify-aplus" -%}
         {%- elif cr.startswith('Secondary') -%}
           {%- set cl_name = "Secondary Watch" -%}{%- set cl_css = "classify-secondary" -%}
@@ -454,23 +466,17 @@
           {{ cl_name if stock.classify_reason else "—" }}
         </span>
       </div>
-
       {% if stock.classify_reason %}
       <div class="classify-reason">{{ stock.classify_reason }}</div>
       {% endif %}
-
       <form action="{{ url_for('toggle_auto_classify', ticker=stock.ticker) }}" method="POST" class="classify-toggle-form">
         {% if auto_on %}
           <input type="hidden" name="auto_classify" value="0">
-          <button type="submit" class="btn-classify-toggle btn-classify-off">
-            Turn OFF — Manual Override
-          </button>
+          <button type="submit" class="btn-classify-toggle btn-classify-off">Turn OFF — Manual Override</button>
           <span class="classify-toggle-hint">Auto is ON — stock moves automatically on refresh</span>
         {% else %}
           <input type="hidden" name="auto_classify" value="1">
-          <button type="submit" class="btn-classify-toggle btn-classify-on">
-            Turn ON — Re-enable Auto
-          </button>
+          <button type="submit" class="btn-classify-toggle btn-classify-on">Turn ON — Re-enable Auto</button>
           <span class="classify-toggle-hint">Manual mode — stock stays where you put it</span>
         {% endif %}
       </form>
@@ -479,7 +485,7 @@
 
   <!-- ===== SETUP TYPE (interactive selector) ===== -->
   <div class="detail-card setup-type-card">
-    <h3 class="card-title">Setup Type</h3>
+    <h3 class="card-title">Setup Type Override</h3>
     <form action="{{ url_for('set_setup_type', ticker=stock.ticker) }}" method="POST">
       <div class="setup-type-row">
         {% for stype in setup_types %}
@@ -487,27 +493,24 @@
           type="submit"
           name="setup_type"
           value="{{ stype }}"
-          class="setup-type-btn setup-pill {{ get_setup_type_class(stype) }} {{ 'active' if stock.setup_type == stype else '' }}"
+          class="setup-type-btn setup-pill {{ get_setup_type_class(stype) }} {{ 'active' if stock.swing_setup_type == stype or stock.setup_type == stype else '' }}"
         >{{ stype }}</button>
         {% endfor %}
       </div>
     </form>
-    <div class="setup-type-hint">
-      Auto-classified from price/volume patterns. Click to override manually.
-    </div>
+    <div class="setup-type-hint">Auto-classified from swing structure. Click to override manually.</div>
   </div>
 
-  <!-- ===== PRE-MARKET PLAN ===== -->
+  <!-- ===== PRE-MARKET / SWING PLAN ===== -->
   <div class="detail-card plan-card" id="plan">
     <h3 class="card-title">
-      Pre-Market Plan
+      Trade Plan
       {% if plan.updated_at %}
         <span class="notes-saved-badge">Saved</span>
         <span class="plan-updated">{{ plan.updated_at[:16].replace('T',' ') }}</span>
       {% endif %}
     </h3>
 
-    <!-- Saved summary — shown when a plan exists -->
     {% if plan.entry_level %}
     <div class="plan-summary-row">
       <div class="plan-summary-item">
@@ -537,10 +540,7 @@
     </div>
     {% endif %}
 
-    <!-- Input form -->
     <form action="{{ url_for('save_stock_plan', ticker=stock.ticker) }}" method="POST" id="plan-form">
-
-      <!-- Bias selector -->
       <div class="plan-field-group">
         <label class="plan-label">Direction</label>
         <div class="plan-bias-btns">
@@ -554,7 +554,6 @@
         <input type="hidden" name="plan_bias" id="plan-bias-input" value="{{ plan.plan_bias or '' }}">
       </div>
 
-      <!-- Entry / Stop / Target inputs -->
       <div class="plan-inputs-row">
         <div class="plan-input-group">
           <label class="plan-label" for="entry_level">Entry Level</label>
@@ -565,12 +564,21 @@
               value="{{ '%.2f'|format(plan.entry_level) if plan.entry_level else '' }}"
               oninput="calcRR()">
           </div>
-          {% if stock.orb_high and stock.orb_low %}
+          <!-- Quick-fill swing levels -->
+          {% if stock.entry_zone_low or stock.fib_618 %}
           <div class="plan-fill-btns">
+            {% if stock.entry_zone_low %}
             <button type="button" class="plan-fill-btn"
-              onclick="fillEntry({{ stock.orb_high }})">ORB High ${{ "%.2f"|format(stock.orb_high) }}</button>
+              onclick="fillEntry({{ stock.entry_zone_low }})">Entry Zone ${{ "%.2f"|format(stock.entry_zone_low) }}</button>
+            {% endif %}
+            {% if stock.fib_618 %}
             <button type="button" class="plan-fill-btn"
-              onclick="fillEntry({{ stock.orb_low }})">ORB Low ${{ "%.2f"|format(stock.orb_low) }}</button>
+              onclick="fillEntry({{ stock.fib_618 }})">61.8% ${{ "%.2f"|format(stock.fib_618) }}</button>
+            {% endif %}
+            {% if stock.fib_50 %}
+            <button type="button" class="plan-fill-btn"
+              onclick="fillEntry({{ stock.fib_50 }})">50% ${{ "%.2f"|format(stock.fib_50) }}</button>
+            {% endif %}
           </div>
           {% endif %}
         </div>
@@ -584,10 +592,18 @@
               value="{{ '%.2f'|format(plan.stop_loss) if plan.stop_loss else '' }}"
               oninput="calcRR()">
           </div>
+          {% if stock.stop_level %}
+          <div class="plan-fill-btns">
+            <button type="button" class="plan-fill-btn"
+              onclick="document.getElementById('stop_loss').value='{{ '%.2f'|format(stock.stop_level) }}'; calcRR();">
+              Suggested ${{ "%.2f"|format(stock.stop_level) }}
+            </button>
+          </div>
+          {% endif %}
         </div>
 
         <div class="plan-input-group">
-          <label class="plan-label" for="target_price">Target Price</label>
+          <label class="plan-label" for="target_price">Target</label>
           <div class="plan-input-wrap">
             <span class="plan-input-prefix">$</span>
             <input type="number" step="0.01" min="0" id="target_price" name="target_price"
@@ -595,9 +611,24 @@
               value="{{ '%.2f'|format(plan.target_price) if plan.target_price else '' }}"
               oninput="calcRR()">
           </div>
+          {% if stock.target_1 or stock.target_2 %}
+          <div class="plan-fill-btns">
+            {% if stock.target_1 %}
+            <button type="button" class="plan-fill-btn"
+              onclick="document.getElementById('target_price').value='{{ '%.2f'|format(stock.target_1) }}'; calcRR();">
+              T1 ${{ "%.2f"|format(stock.target_1) }}
+            </button>
+            {% endif %}
+            {% if stock.target_2 %}
+            <button type="button" class="plan-fill-btn"
+              onclick="document.getElementById('target_price').value='{{ '%.2f'|format(stock.target_2) }}'; calcRR();">
+              T2 ${{ "%.2f"|format(stock.target_2) }}
+            </button>
+            {% endif %}
+          </div>
+          {% endif %}
         </div>
 
-        <!-- Live R/R display -->
         <div class="plan-input-group plan-rr-group">
           <label class="plan-label">Risk / Reward</label>
           <div class="plan-rr-display" id="rr-display">
@@ -610,8 +641,7 @@
       <div class="plan-actions">
         <button type="submit" class="btn btn-save">Save Plan</button>
         {% if plan.entry_level %}
-        <button type="button" class="btn-clear-plan"
-          onclick="clearPlan()">Clear</button>
+        <button type="button" class="btn-clear-plan" onclick="clearPlan()">Clear</button>
         {% endif %}
       </div>
     </form>
@@ -620,17 +650,17 @@
   <!-- ===== TRADE PLAN NOTES ===== -->
   <div class="detail-card notes-card" id="notes">
     <h3 class="card-title">
-      My Trade Plan
+      My Notes
       {% if note %}<span class="notes-saved-badge">Saved</span>{% endif %}
     </h3>
     <form action="{{ url_for('save_stock_note', ticker=stock.ticker) }}" method="POST">
       <textarea
         name="note_text"
         class="notes-textarea"
-        placeholder="Entry trigger: &#10;Target: &#10;Stop: &#10;Size: &#10;Bias override: &#10;Notes:"
+        placeholder="Bias: &#10;Entry trigger: &#10;Stop below: &#10;Target 1: &#10;Target 2: &#10;Hold duration: &#10;Notes:"
         rows="9"
       >{{ note }}</textarea>
-      <button type="submit" class="btn btn-save">Save Trade Plan</button>
+      <button type="submit" class="btn btn-save">Save Notes</button>
     </form>
   </div>
 
@@ -640,8 +670,6 @@
 
 {% block scripts %}
 <script>
-// ---- Pre-Market Plan helpers ----
-
 function setPlanBias(bias) {
   document.getElementById('plan-bias-input').value = bias;
   document.querySelectorAll('.plan-bias-btn').forEach(b => b.classList.remove('active'));
@@ -670,59 +698,27 @@ function calcRR() {
   const entry  = parseFloat(document.getElementById('entry_level').value);
   const stop   = parseFloat(document.getElementById('stop_loss').value);
   const target = parseFloat(document.getElementById('target_price').value);
-
   const el        = document.getElementById('rr-value');
   const breakdown = document.getElementById('rr-breakdown');
-
   if (!bias || isNaN(entry) || isNaN(stop) || isNaN(target)) {
-    el.textContent = '—';
-    el.className = 'plan-rr rr-neutral';
-    breakdown.textContent = '';
-    return;
+    el.textContent = '—'; el.className = 'plan-rr rr-neutral'; breakdown.textContent = ''; return;
   }
-
   let reward, risk;
-  if (bias === 'Long') {
-    reward = target - entry;
-    risk   = entry  - stop;
-  } else {
-    reward = entry  - target;
-    risk   = stop   - entry;
-  }
-
+  if (bias === 'Long') { reward = target - entry; risk = entry - stop; }
+  else                 { reward = entry - target; risk = stop - entry; }
   if (risk <= 0 || reward < 0) {
-    el.textContent = 'Invalid';
-    el.className = 'plan-rr rr-warn';
-    breakdown.textContent = risk <= 0
-      ? 'Stop must be on the losing side of entry'
-      : 'Target must be on the winning side of entry';
+    el.textContent = 'Invalid'; el.className = 'plan-rr rr-warn';
+    breakdown.textContent = risk <= 0 ? 'Stop must be on the losing side' : 'Target must be on the winning side';
     return;
   }
-
   const ratio = reward / risk;
   el.textContent = ratio.toFixed(1) + ':1';
   el.className = 'plan-rr ' + (ratio >= 2 ? 'rr-good' : ratio >= 1 ? 'rr-okay' : 'rr-poor');
   breakdown.textContent = `Risk $${risk.toFixed(2)}  ·  Reward $${reward.toFixed(2)}`;
 }
-
-// Populate live R/R from saved values on page load
 calcRR();
 
-// ===========================================================================
-// Stock Detail Live Update
-// ===========================================================================
-
 const DETAIL_TICKER = "{{ stock.ticker }}";
-
-function setEl(id, value) {
-  const el = document.getElementById(id);
-  if (el && value != null) el.textContent = value;
-}
-
-function setClass(id, cls) {
-  const el = document.getElementById(id);
-  if (el) el.className = cls;
-}
 
 async function stockDetailRefresh() {
   try {
@@ -730,44 +726,24 @@ async function stockDetailRefresh() {
     if (!resp.ok) return;
     const s = await resp.json();
 
-    // Header badges
     const execBadge = document.getElementById('detail-exec-badge');
     if (execBadge) { execBadge.className = 'exec-badge exec-badge-lg ' + s.exec_class; execBadge.textContent = s.final_action || 'WAIT'; }
-
-    const freshBadge = document.getElementById('detail-freshness-badge');
-    if (freshBadge) {
-      if (s.freshness) {
-        freshBadge.className = 'freshness-badge freshness-badge-lg ' + s.freshness_class;
-        freshBadge.textContent = s.freshness;
-        freshBadge.style.display = '';
-      } else {
-        freshBadge.style.display = 'none';
-      }
-    }
-
-    const setupPill = document.getElementById('detail-setup-pill');
-    if (setupPill) { setupPill.className = 'setup-pill ' + s.setup_type_class + ' setup-pill-lg'; setupPill.textContent = s.setup_type || 'No Setup'; }
 
     const biasTag = document.getElementById('detail-bias-tag');
     if (biasTag) { biasTag.className = 'bias-tag ' + s.bias_class + ' bias-large'; biasTag.textContent = s.trade_bias; }
 
-    setEl('detail-last-updated', s.last_updated);
+    const setupPill = document.getElementById('detail-setup-pill');
+    if (setupPill && s.swing_setup_type) { setupPill.textContent = s.swing_setup_type; }
 
-    // Score strip
-    if (s.setup_score != null) {
-      setEl('detail-setup-score', s.setup_score);
-      const wrap = document.getElementById('detail-setup-score-wrap');
-      if (wrap) wrap.className = 'score-big ' + s.score_class + (s.setup_score >= 8 ? ' score-elite' : '');
-    }
-    if (s.momentum_score != null) {
-      setEl('detail-mom-score', s.momentum_score);
-      const wrap = document.getElementById('detail-mom-score-wrap');
-      if (wrap) wrap.className = 'score-big ' + s.mom_score_class + (s.momentum_score >= 8 ? ' score-elite' : '');
-    }
+    const el = document.getElementById('detail-last-updated');
+    if (el && s.last_updated) el.textContent = s.last_updated;
+
+    const swingScore = document.getElementById('detail-swing-score');
+    if (swingScore && s.swing_score != null) swingScore.textContent = s.swing_score;
+
     if (s.catalyst_score != null) {
-      setEl('detail-cat-score', s.catalyst_score);
-      const wrap = document.getElementById('detail-cat-score-wrap');
-      if (wrap) wrap.className = 'score-big ' + s.cat_score_class + (s.catalyst_score >= 8 ? ' score-elite' : '');
+      const catEl = document.getElementById('detail-cat-score');
+      if (catEl) catEl.textContent = s.catalyst_score;
     }
 
     const gapEl = document.getElementById('detail-gap');
@@ -779,59 +755,19 @@ async function stockDetailRefresh() {
       rvolEl.innerHTML = s.rel_volume.toFixed(1) + '<span class="score-denom">x</span>';
     }
 
-    // ORB structure strip
-    const orbAction = document.getElementById('detail-orb-action');
-    if (orbAction) { orbAction.className = 'orb-action-directive ' + s.final_action_class; orbAction.textContent = s.final_action || 'WAIT'; }
+    const priceEl = document.getElementById('detail-cur-price');
+    if (priceEl && s.current_price != null) priceEl.textContent = '$' + s.current_price.toFixed(2);
 
-    const orbReady = document.getElementById('detail-orb-ready');
-    if (orbReady) { orbReady.className = 'signal-badge signal-badge-lg ' + s.orb_class; orbReady.textContent = s.orb_ready || 'NO'; }
-
-    const orbPhase = document.getElementById('detail-orb-phase');
-    if (orbPhase) {
-      if (s.orb_phase_label) { orbPhase.className = 'orb-phase-badge ' + s.orb_phase_class; orbPhase.textContent = s.orb_phase_label; orbPhase.style.display = ''; }
-      else { orbPhase.style.display = 'none'; }
-    }
-
-    setEl('detail-orb-action-sub', s.orb_action_sub);
-
-    // ORB level values
-    if (s.orb_high) setEl('detail-orb-high', '$' + s.orb_high.toFixed(2));
-    if (s.orb_low)  setEl('detail-orb-low',  '$' + s.orb_low.toFixed(2));
-
-    // Stats grid
-    if (s.current_price != null) setEl('detail-cur-price', '$' + s.current_price.toFixed(2));
-
-    // Scores in setup/momentum reasons
-    if (s.setup_reason)    setEl('detail-setup-reason', s.setup_reason);
-    if (s.momentum_reason) setEl('detail-mom-reason', s.momentum_reason);
-
-    // Catalyst category tags + freshness
-    const catTagsInline = document.querySelector('.cat-tags-inline');
-    if (catTagsInline && Array.isArray(s.catalyst_tags)) {
-      catTagsInline.innerHTML = s.catalyst_tags.map(t =>
-        `<span class="cat-tag cat-tag-${t.key}">${t.label}</span>`
-      ).join('');
-    }
-    const catTagsRow = document.querySelector('.cat-tags-row');
-    if (catTagsRow && Array.isArray(s.catalyst_tags)) {
-      catTagsRow.innerHTML = s.catalyst_tags.map(t =>
-        `<span class="cat-tag cat-tag-${t.key}">${t.label}</span>`
-      ).join('');
-    }
     if (s.headline_freshness) {
-      document.querySelectorAll('.headline-freshness-badge, .headline-source-label').forEach(el => {
-        if (el.classList.contains('headline-freshness-badge')) el.textContent = s.headline_freshness;
-        if (el.classList.contains('headline-source-label')) el.textContent = 'Updated ' + s.headline_freshness;
-      });
+      document.querySelectorAll('.headline-freshness-badge').forEach(e => { e.textContent = s.headline_freshness; });
     }
 
     window._arSetLastUpdated(new Date().toLocaleTimeString());
-  } catch (e) {
+  } catch(e) {
     console.warn('Stock detail refresh error:', e);
   }
 }
 
-// Register with shared auto-refresh system
 window._arRefreshFn = stockDetailRefresh;
 </script>
 {% endblock %}

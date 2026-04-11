@@ -1,14 +1,15 @@
 """
 classifier.py - Auto-classification rules for Rockkstaar Trade Assistant.
 
-Classifies each stock into one of the four default watchlists based on
-its current momentum, ORB readiness, entry quality, and setup score.
+In swing mode (swing_score present), classifies based on swing_score,
+daily_trend, and swing_status.  Falls back to legacy day-trading logic
+when swing fields are absent (backward compat).
 
 Watchlist hierarchy (evaluated top to bottom — first match wins):
-    A+ Momentum    — Full criteria met, trade today
-    Secondary Watch — Decent but not full A+ criteria, monitor only
-    Swing Watchlist — Weak intraday, some price structure, swing candidate
-    Core            — Default / low signal / manually curated names
+    A+ Momentum    — High swing score, actionable status, good trend
+    Secondary Watch — Moderate swing score or watching for entry
+    Swing Watchlist — Low score or unfavourable status but worth tracking
+    Core            — Default / Avoid / no data
 """
 
 # Must match DEFAULT_WATCHLISTS in database.py
@@ -16,6 +17,10 @@ A_PLUS    = "A+ Momentum"
 SECONDARY = "Secondary Watch"
 SWING     = "Swing Watchlist"
 CORE      = "Core"
+
+_AVOID_STATUSES = {"TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE"}
+_WAIT_STATUSES  = {"WAIT FOR PULLBACK", "WAIT FOR 15M CONFIRMATION", "NOT ENOUGH EDGE"}
+_READY_STATUSES = {"GOOD SWING CANDIDATE", "READY IF LEVEL HOLDS"}
 
 
 def classify_stock(stock: dict) -> tuple:
@@ -25,40 +30,94 @@ def classify_stock(stock: dict) -> tuple:
     Returns:
         (watchlist_name: str, reason: str)
 
-    Classification rules:
+    Swing mode classification (when swing_score is present):
 
     A+ Momentum
-        - momentum_score >= 6
-        - orb_ready == "YES"
-        - entry_quality != "Extended"
-        - setup_score >= 7
+        - swing_score >= 7
+        - swing_status in READY_STATUSES
+        - daily_trend in ("Bullish", "Bullish Lean") for longs
+          OR daily_trend in ("Bearish", "Bearish Lean") for shorts
 
     Secondary Watch
-        - momentum_score >= 4
-          OR setup_score in [5, 6]
-        (but does NOT meet A+ criteria)
+        - swing_score >= 5
+        - swing_status not in AVOID_STATUSES
+        (watching for entry — not yet A+)
 
     Swing Watchlist
-        - setup_score >= 3
-        - momentum_score < 4
-        - orb_ready != "YES"
-        (some price structure, not an intraday momentum play)
+        - swing_score >= 3 but < 5
+        - OR swing_status in WAIT_STATUSES
+        (setup developing, not actionable yet)
 
-    Core (default catch-all)
-        - Everything else: low signal, Avoid bias, or manually curated names
+    Core (default)
+        - swing_status in AVOID_STATUSES
+        - OR swing_score < 3
+        - OR no swing data
+
+    Legacy day-trading fallback (when swing_score is absent):
+        A+       : momentum >= 6, ORB ready, entry not Extended, setup >= 7
+        Secondary: momentum >= 4 OR setup in [5, 6]
+        Swing WL : setup >= 3, momentum < 4, ORB not ready
+        Core     : everything else
     """
+    bias  = stock.get("trade_bias") or "Neutral"
+
+    # Avoid-biased stocks always go to Core
+    if bias == "Avoid":
+        return CORE, "Placed in Core: Avoid bias — not suitable for active trading"
+
+    swing_score  = stock.get("swing_score")
+    swing_status = stock.get("swing_status") or ""
+    daily_trend  = stock.get("daily_trend")  or "Neutral"
+
+    # ── Swing mode ────────────────────────────────────────────────────────────
+    if swing_score:
+        trend_ok_long  = daily_trend in ("Bullish", "Bullish Lean")
+        trend_ok_short = daily_trend in ("Bearish", "Bearish Lean")
+        trend_ok       = trend_ok_long or trend_ok_short
+
+        # A+ Momentum: high score + actionable status + trend confirmed
+        if swing_score >= 7 and swing_status in _READY_STATUSES and trend_ok:
+            return A_PLUS, (
+                f"A+ Swing: score {swing_score}/10, {swing_status}, "
+                f"{daily_trend} daily trend"
+            )
+
+        # A+ even without perfect trend if score is very high and status is great
+        if swing_score >= 8 and swing_status in _READY_STATUSES:
+            return A_PLUS, (
+                f"A+ Swing (high score override): score {swing_score}/10, {swing_status}"
+            )
+
+        # Secondary Watch: decent score, not in avoid zone
+        if swing_score >= 5 and swing_status not in _AVOID_STATUSES:
+            gaps = []
+            if swing_score < 7:
+                gaps.append(f"score {swing_score}/10 (need ≥ 7 for A+)")
+            if swing_status not in _READY_STATUSES:
+                gaps.append(f"status: {swing_status}")
+            if not trend_ok:
+                gaps.append(f"trend: {daily_trend}")
+            reason = "Secondary Swing: " + (", ".join(gaps) if gaps else "watching for entry")
+            return SECONDARY, reason
+
+        # Swing Watchlist: developing setup or wait-status
+        if swing_score >= 3 or swing_status in _WAIT_STATUSES:
+            return SWING, (
+                f"Swing Watchlist: score {swing_score}/10, {swing_status} — "
+                "setup developing, not actionable yet"
+            )
+
+        # Core: avoid statuses or too-low score
+        return CORE, (
+            f"Core: swing score {swing_score}/10, status: {swing_status or 'none'}"
+        )
+
+    # ── Legacy day-trading fallback ───────────────────────────────────────────
     mom   = stock.get("momentum_score") or 0
     orb   = stock.get("orb_ready")      or "NO"
     entry = stock.get("entry_quality")  or "Okay"
     setup = stock.get("setup_score")    or 0
-    bias  = stock.get("trade_bias")     or "Neutral"
 
-    # Avoid-biased stocks go straight to Core regardless of scores
-    if bias == "Avoid":
-        return CORE, "Placed in Core: Avoid bias — not suitable for active trading today"
-
-    # ── A+ Momentum ───────────────────────────────────────────────────────────
-    # Full criteria: strong momentum + ORB confirmed + good entry + high setup
     if mom >= 6 and orb == "YES" and entry != "Extended" and setup >= 7:
         parts = []
         parts.append(f"{'elite' if mom >= 9 else 'strong'} momentum ({mom}/10)")
@@ -68,8 +127,6 @@ def classify_stock(stock: dict) -> tuple:
         parts.append(f"setup {setup}/10")
         return A_PLUS, "Promoted: " + ", ".join(parts)
 
-    # ── Secondary Watch ───────────────────────────────────────────────────────
-    # Moderate momentum or decent setup — worth monitoring but not A+
     if mom >= 4 or (5 <= setup < 7):
         gaps = []
         if orb != "YES":
@@ -83,13 +140,10 @@ def classify_stock(stock: dict) -> tuple:
         reason = "Secondary: " + (", ".join(gaps) if gaps else "decent structure, not yet A+ criteria")
         return SECONDARY, reason
 
-    # ── Swing Watchlist ───────────────────────────────────────────────────────
-    # Some structure but intraday momentum is weak — potential swing candidate
     if setup >= 3 and mom < 4 and orb != "YES":
         return SWING, (
             f"Swing candidate: low intraday momentum ({mom}/10), "
             f"some price structure (setup {setup}/10) — not an active intraday play"
         )
 
-    # ── Core (default) ────────────────────────────────────────────────────────
     return CORE, f"Core: low signal today (momentum {mom}/10, setup {setup}/10) — manually monitor"

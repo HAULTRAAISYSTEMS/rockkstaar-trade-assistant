@@ -3099,3 +3099,431 @@ a { color: inherit; text-decoration: none; }
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.45; }
 }
+
+/* =============================================================
+   SWING TRADING — Status Badges
+   ============================================================= */
+
+.swing-status-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.swing-status-lg {
+  font-size: 0.85rem;
+  padding: 5px 12px;
+}
+.swing-status-sm { font-size: 0.65rem; padding: 2px 6px; }
+
+.swing-status-good      { background: rgba(34,197,94,0.15);  color: #22c55e; border-color: rgba(34,197,94,0.3); }
+.swing-status-ready     { background: rgba(59,130,246,0.15); color: #60a5fa; border-color: rgba(59,130,246,0.3); }
+.swing-status-confirm   { background: rgba(234,179,8,0.12);  color: #eab308; border-color: rgba(234,179,8,0.3); }
+.swing-status-wait      { background: var(--bg3);            color: var(--text-dim); border-color: var(--border); }
+.swing-status-extended  { background: rgba(239,68,68,0.12);  color: #ef4444; border-color: rgba(239,68,68,0.3); }
+.swing-status-no-edge   { background: var(--bg3);            color: var(--text-muted); border-color: var(--border); }
+.swing-status-avoid     { background: rgba(239,68,68,0.08);  color: #f87171; border-color: rgba(239,68,68,0.2); }
+
+/* =============================================================
+   SWING TRADING — Setup Type Pills
+   ============================================================= */
+
+.setup-pullback           { background: rgba(34,197,94,0.12);  color: #22c55e; }
+.setup-breakout-retest    { background: rgba(99,102,241,0.12); color: #818cf8; }
+.setup-extended           { background: rgba(239,68,68,0.10);  color: #f87171; }
+.setup-resistance-avoid   { background: rgba(239,68,68,0.08);  color: #fca5a5; }
+.setup-fib50              { background: rgba(59,130,246,0.12); color: #60a5fa; }
+.setup-fib618             { background: rgba(99,102,241,0.12); color: #a5b4fc; }
+.setup-order-block        { background: rgba(249,115,22,0.12); color: #fb923c; }
+.setup-trend-continuation { background: rgba(34,197,94,0.10);  color: #4ade80; }
+.setup-weak-structure     { background: rgba(100,116,139,0.10);color: #94a3b8; }
+
+/* =============================================================
+   SWING TRADING — Top5 Card Additions
+   ============================================================= */
+
+.swing-score-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 4px;
+}
+.swing-score-label { font-size: 0.68rem; color: var(--text-muted); flex-shrink: 0; }
+.swing-score-num   { font-size: 0.85rem; font-weight: 700; flex-shrink: 0; min-width: 18px; }
+.swing-score-denom { font-size: 0.65rem; color: var(--text-muted); flex-shrink: 0; }
+
+.swing-levels {
+  margin: 8px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.swing-level-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+}
+.swing-level-lbl { color: var(--text-muted); min-width: 36px; }
+.swing-level-val { font-family: var(--font-mono); font-weight: 600; }
+
+.swing-trend-strip {
+  margin-top: 6px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: 5px;
+}
+.swing-trend-lbl { color: var(--text-muted); }
+.swing-trend-val { color: var(--text-dim); }
+
+/* =============================================================
+   SWING TRADING — Dashboard Table
+   ============================================================= */
+
+.mono-cell { font-family: var(--font-mono); font-size: 0.75rem; }
+.text-danger  { color: var(--red); }
+.text-success { color: var(--green); }
+
+/* =============================================================
+   SWING TRADING — Swing Plan Card (stock detail)
+   ============================================================= */
+
+.swing-plan-card { border-left: 3px solid var(--accent); }
+
+.swing-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 20px;
+  padding: 4px 0;
+}
+.swing-plan-col {}
+.swing-plan-section-title {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.swing-plan-value {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.swing-plan-entry { color: #60a5fa; }
+.swing-plan-stop  { color: var(--red); }
+.swing-plan-target { color: var(--green); }
+.swing-plan-hint {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* =============================================================
+   SWING TRADING — EMA Stack (stock detail)
+   ============================================================= */
+
+.ema-stack-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.ema-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 8px;
+  border-radius: var(--radius);
+  background: var(--bg3);
+  font-size: 0.8rem;
+}
+.ema-label { color: var(--text-muted); min-width: 80px; }
+.ema-value { font-family: var(--font-mono); font-weight: 600; }
+.ema-dist  { margin-left: auto; font-size: 0.72rem; font-weight: 600; }
+.ema-above { border-left: 3px solid rgba(34,197,94,0.5); }
+.ema-below { border-left: 3px solid rgba(239,68,68,0.4); }
+
+.daily-trend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 0;
+  font-size: 0.8rem;
+}
+.daily-trend-label { color: var(--text-muted); }
+.daily-trend-value { font-weight: 700; }
+
+.structure-chip {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.structure-bullish { background: rgba(34,197,94,0.12); color: #22c55e; }
+.structure-bearish { background: rgba(239,68,68,0.10); color: #ef4444; }
+
+/* =============================================================
+   SWING TRADING — Fibonacci Levels (stock detail)
+   ============================================================= */
+
+.fib-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fib-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg3);
+  font-size: 0.8rem;
+  border-left: 3px solid transparent;
+}
+.fib-row-active {
+  border-left-color: var(--accent);
+  background: rgba(99,102,241,0.08);
+}
+.fib-row-high  { border-left-color: rgba(34,197,94,0.5); }
+.fib-row-low   { border-left-color: rgba(239,68,68,0.4); }
+.fib-label     { color: var(--text-dim); flex: 1; }
+.fib-value     { font-family: var(--font-mono); font-weight: 600; }
+.fib-pct       { color: var(--text-muted); font-size: 0.7rem; min-width: 40px; text-align: right; }
+
+/* =============================================================
+   SWING TRADING — Supply/Demand Zones (stock detail)
+   ============================================================= */
+
+.zones-card {}
+.zones-grid {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.zone-item {
+  flex: 1;
+  min-width: 160px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+.zone-supply { border-left: 3px solid rgba(239,68,68,0.5); }
+.zone-demand { border-left: 3px solid rgba(34,197,94,0.5); }
+.zone-active { box-shadow: 0 0 0 1px var(--accent); }
+.zone-label  { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 4px; }
+.zone-range  { font-family: var(--font-mono); font-size: 0.82rem; font-weight: 600; }
+.zone-dist   { font-size: 0.72rem; color: var(--text-muted); margin-top: 3px; }
+.zone-active-badge {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 2px 6px;
+  background: rgba(99,102,241,0.15);
+  color: var(--accent);
+  border-radius: var(--radius);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.zone-location-badge {
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  background: var(--bg3);
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-weight: 600;
+  align-self: center;
+  border: 1px solid var(--border);
+}
+
+/* Misc */
+.no-data-msg { color: var(--text-muted); font-size: 0.8rem; padding: 12px 0; }
+.rr-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: var(--radius);
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+
+/* ============================================================
+   SWING UPGRADE — Grade Badges, Filter Bar, Entry Distance,
+   Pullback Quality, Card Summary Strip, Trend Cell
+   ============================================================ */
+
+/* ── Grade Badges (A / B / C / D) ─────────────────────────────────────────── */
+.grade-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+  vertical-align: middle;
+}
+.grade-a  { background: rgba(34,197,94,0.18);  color: #22c55e; border: 1px solid rgba(34,197,94,0.35); }
+.grade-b  { background: rgba(59,130,246,0.18); color: #60a5fa; border: 1px solid rgba(59,130,246,0.35); }
+.grade-c  { background: rgba(234,179,8,0.18);  color: #f59e0b; border: 1px solid rgba(234,179,8,0.35); }
+.grade-d  { background: rgba(100,116,139,0.18); color: #94a3b8; border: 1px solid rgba(100,116,139,0.25); }
+
+/* ── Filter Bar ────────────────────────────────────────────────────────────── */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 16px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.filter-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.filter-btns {
+  display: flex;
+  gap: 4px;
+}
+.filter-btn {
+  padding: 3px 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.73rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  line-height: 1.6;
+}
+.filter-btn:hover { border-color: var(--accent); color: var(--text); }
+.filter-btn-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff !important;
+  font-weight: 600;
+}
+.filter-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.filter-toggle-label input[type="checkbox"] { cursor: pointer; accent-color: var(--accent); }
+.filter-discipline-btn {
+  padding: 4px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.filter-discipline-btn:hover { background: rgba(99,102,241,0.15); }
+.filter-discipline-active { background: var(--accent) !important; color: #fff !important; }
+.filter-count {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── Entry Distance ────────────────────────────────────────────────────────── */
+.dist-at-zone  { color: #22c55e; font-weight: 700; font-size: 0.78rem; }
+.dist-near     { color: #86efac; font-size: 0.78rem; }
+.dist-extended { color: #f87171; font-weight: 600; font-size: 0.78rem; }
+.dist-below    { color: var(--text-muted); font-size: 0.78rem; }
+.text-dim      { color: var(--text-dim); font-size: 0.78rem; }
+
+/* ── Pullback Quality Badges ───────────────────────────────────────────────── */
+.pq-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.pq-clean    { background: rgba(34,197,94,0.12);  color: #22c55e; }
+.pq-good     { background: rgba(59,130,246,0.12); color: #60a5fa; }
+.pq-moderate { background: rgba(234,179,8,0.12);  color: #f59e0b; }
+.pq-weak     { background: rgba(248,113,113,0.12); color: #f87171; }
+.pq-watch    { background: rgba(100,116,139,0.1);  color: #94a3b8; }
+
+/* ── Card Summary Strip ─────────────────────────────────────────────────────── */
+.card-summary-strip {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.cs-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+}
+.cs-label {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.cs-val {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+/* ── Trend Cell (1D + 4H stacked) ──────────────────────────────────────────── */
+.trend-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.78rem;
+}
+.trend-4h {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+.trend-4h::before { content: "4H: "; }
+
+/* ── Swing score row: grade badge inline ───────────────────────────────────── */
+.swing-score-row .grade-badge {
+  margin-left: 4px;
+  font-size: 0.65rem;
+  padding: 1px 6px;
+}
+
