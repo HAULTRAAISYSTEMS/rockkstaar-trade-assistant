@@ -951,35 +951,21 @@ def annotate(stock: dict) -> dict:
         "unavailable":     "Unavailable",
     }.get(_src, "Unknown")
 
-    # Enforce numeric defaults so templates never receive None for numeric fields.
-    # Price/volume fields default to 0.0; score fields default to 0.
-    _PRICE_DEFAULTS = {
-        "current_price":  0.0,
-        "prev_close":     0.0,
-        "gap_pct":        0.0,
-        "premarket_high": 0.0,
-        "premarket_low":  0.0,
-        "prev_day_high":  0.0,
-        "prev_day_low":   0.0,
-        "rel_volume":     0.0,
-        "avg_volume":     0,
-    }
+    # Score defaults are always applied — they're needed for JS filter/sort logic.
     _SCORE_DEFAULTS = {
         "catalyst_score":  0,
         "momentum_score":  0,
         "setup_score":     0,
     }
-    # For error/loading states, skip price defaults so templates can check
-    # `is not none` and show "N/A" / "—" instead of misleading $0.00.
-    # Partial has real price data — allow defaults.
-    # Score defaults are always applied — they're needed for JS filter logic.
-    if _state not in ("error", "loading"):
-        for field, default in _PRICE_DEFAULTS.items():
-            if stock.get(field) is None:
-                stock[field] = default
     for field, default in _SCORE_DEFAULTS.items():
         if stock.get(field) is None:
             stock[field] = default
+
+    # Price fields: never force 0.0 — keep None so templates can show "—"/"N/A"
+    # instead of misleading "$0.00". Only rel_volume gets a safe 0.0 default so
+    # the "Nx" multiplier display renders without crashing.
+    if stock.get("rel_volume") is None and _state not in ("error", "loading"):
+        stock["rel_volume"] = 0.0
 
     stock["score_class"]           = get_score_class(stock.get("setup_score"))
     stock["cat_score_class"]       = get_score_class(stock.get("catalyst_score"))
@@ -1059,9 +1045,13 @@ def annotate(stock: dict) -> dict:
         stock["orb_price_pct"] = round(max(2, min(98, pct)), 1)
     else:
         stock["orb_price_pct"] = 50.0
-    gap = stock.get("gap_pct") or 0
-    stock["gap_display"]           = f"{'+' if gap >= 0 else ''}{gap:.2f}%"
-    stock["gap_class"]             = "positive" if gap >= 0 else "negative"
+    gap = stock.get("gap_pct")
+    if gap is not None:
+        stock["gap_display"] = f"{'+' if gap >= 0 else ''}{gap:.2f}%"
+        stock["gap_class"]   = "positive" if gap >= 0 else "negative"
+    else:
+        stock["gap_display"] = "—"
+        stock["gap_class"]   = ""
 
     # Decode catalyst_category JSON → list of {key, label} dicts for templates
     import json as _json
@@ -1808,52 +1798,66 @@ def watchlist_remove(ticker):
     return redirect(url_for("dashboard"))
 
 
-@app.route("/refresh", methods=["POST"])
-def refresh_all():
-    """Re-fetch and re-score all tickers in the active watchlist."""
+def _refresh_all_worker(watchlist: list) -> None:
+    """
+    Background worker for refresh_all.  Runs in a daemon thread so the HTTP
+    response returns immediately (no gunicorn timeout).
+    """
     global _refresh_all_running
-    if _refresh_all_running:
-        flash("Refresh already in progress — please wait.", "warning")
-        return redirect(url_for("dashboard"))
-
-    _refresh_all_running = True
-    wl_id     = get_active_wl_id()
-    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-    success, failed = [], []
-
     try:
         _all_existing = {s["ticker"]: s for s in get_all_stock_data()}
-        logger.info("refresh_all  route=/refresh  tickers=%s", watchlist)
+        logger.info("refresh_all  bg_worker  tickers=%s", watchlist)
         for ticker in watchlist:
             try:
                 fresh  = generate_stock_data(ticker)
                 result = _upsert_or_keep_snapshot(fresh, existing=_all_existing.get(ticker))
                 if result == "updated":
                     run_auto_classification(ticker)
-                success.append(ticker)
                 logger.info(
                     "refresh_all  ticker=%s  state=%s  result=%s",
-                    ticker, fresh.get("ticker_state"), result
+                    ticker, fresh.get("ticker_state"), result,
                 )
             except Exception as exc:
                 logger.error("refresh_all  ticker=%s  err=%s", ticker, exc, exc_info=True)
-                existing = get_stock_data(ticker)
-                if existing and existing.get("current_price"):
-                    set_ticker_state(ticker, "stale")
-                else:
-                    set_ticker_state(ticker, "error")
-                failed.append(ticker)
+                try:
+                    existing = get_stock_data(ticker)
+                    if existing and existing.get("current_price"):
+                        set_ticker_state(ticker, "stale")
+                    else:
+                        set_ticker_state(ticker, "error")
+                except Exception:
+                    pass
     finally:
         _refresh_all_running = False
+        logger.info("refresh_all  bg_worker  done")
 
-    if failed:
-        flash(
-            f"Refreshed {len(success)} tickers. "
-            f"Failed: {', '.join(failed)} — showing last known data.",
-            "warning",
-        )
-    else:
-        flash(f"Refreshed data for {len(success)} tickers.", "success")
+
+@app.route("/refresh", methods=["POST"])
+def refresh_all():
+    """
+    Kick off a background refresh of all tickers and return immediately.
+    The actual data fetch runs in a daemon thread so gunicorn never times out.
+    """
+    global _refresh_all_running
+    if _refresh_all_running:
+        flash("Refresh already in progress — check back in a moment.", "warning")
+        return redirect(url_for("dashboard"))
+
+    wl_id     = get_active_wl_id()
+    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+    if not watchlist:
+        flash("No tickers in watchlist to refresh.", "warning")
+        return redirect(url_for("dashboard"))
+
+    _refresh_all_running = True
+    t = threading.Thread(target=_refresh_all_worker, args=(watchlist,), daemon=True)
+    t.start()
+
+    flash(
+        f"Refreshing {len(watchlist)} tickers in the background — "
+        "prices will update automatically. Reload in ~30 s.",
+        "info",
+    )
     return redirect(url_for("dashboard"))
 
 

@@ -53,16 +53,16 @@ def _get_yf_session():
     return _YF_SESSION
 
 
-def _fetch_price_via_chart_api(ticker: str) -> float | None:
+def _fetch_price_via_chart_api(ticker: str) -> dict | None:
     """
-    Fetch current price directly from Yahoo Finance's chart API.
+    Fetch current price AND prev_close directly from Yahoo Finance's chart API.
 
     This endpoint does not require cookies/crumb and works from cloud IPs
-    where yfinance's fast_info endpoint is blocked or rate-limited.
-    Returns None on any error so callers can fall back further.
+    where yfinance's fast_info / history endpoints are blocked or rate-limited.
+
+    Returns a dict with keys: current_price, prev_close (both floats > 0),
+    or None on any error so callers can fall back further.
     """
-    if not _YF_AVAILABLE:
-        return None
     _CHART_URLS = [
         f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
         f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}",
@@ -75,7 +75,7 @@ def _fetch_price_via_chart_api(ticker: str) -> float | None:
         ),
         "Accept": "application/json",
     }
-    params = {"interval": "1d", "range": "2d"}
+    params = {"interval": "1d", "range": "5d"}
     for url in _CHART_URLS:
         try:
             import requests as _req
@@ -83,14 +83,34 @@ def _fetch_price_via_chart_api(ticker: str) -> float | None:
             if r.status_code != 200:
                 continue
             data = r.json()
-            meta = data["chart"]["result"][0]["meta"]
-            price = (
-                meta.get("regularMarketPrice")
-                or meta.get("previousClose")
-                or meta.get("chartPreviousClose")
-            )
-            if price and float(price) > 0:
-                return round(float(price), 2)
+            result_node = data["chart"]["result"][0]
+            meta        = result_node["meta"]
+
+            # Current price: regularMarketPrice is the live/last traded price
+            price = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
+            if not price or float(price) <= 0:
+                continue
+
+            out = {"current_price": round(float(price), 2)}
+
+            # Previous close: prefer explicit previousClose field in meta,
+            # then fall back to the second-to-last bar's Close in the OHLCV data.
+            prev = meta.get("previousClose") or meta.get("chartPreviousClose")
+            if prev and float(prev) > 0:
+                out["prev_close"] = round(float(prev), 2)
+            else:
+                try:
+                    closes = result_node["indicators"]["quote"][0]["close"]
+                    valid  = [c for c in closes if c is not None and c > 0]
+                    if len(valid) >= 2:
+                        out["prev_close"] = round(float(valid[-2]), 2)
+                    elif valid:
+                        out["prev_close"] = round(float(valid[-1]), 2)
+                except Exception:
+                    pass
+
+            return out
+
         except Exception as _e:
             logger.debug("chart API fallback failed for %s via %s: %s", ticker, url, _e)
             continue
@@ -227,9 +247,16 @@ def fetch_live_data(ticker: str) -> dict | None:
         #    the Yahoo Finance chart API directly.  This endpoint does not
         #    require cookies / crumb and works reliably from server IPs. ──────
         if not current_price:
-            current_price = _fetch_price_via_chart_api(ticker)
-            if current_price:
-                logger.info("fetch_live_data: chart API fallback used for %s → %.2f", ticker, current_price)
+            _chart = _fetch_price_via_chart_api(ticker)
+            if _chart:
+                current_price = _chart.get("current_price")
+                # Also back-fill prev_close if not yet set from fast_info
+                if not prev_close and _chart.get("prev_close"):
+                    prev_close = _chart["prev_close"]
+                logger.info(
+                    "fetch_live_data: chart API fallback for %s → price=%.2f prev_close=%s",
+                    ticker, current_price or 0, _chart.get("prev_close"),
+                )
 
         if current_price:
             result["current_price"] = round(current_price, 2)
@@ -292,9 +319,14 @@ def fetch_live_data(ticker: str) -> dict | None:
 
         except Exception as e:
             logger.debug("Daily history fetch failed for %s: %s", ticker, e)
-            # Fallback: use fast_info previous_close if the history call failed entirely
-            if prev_close and "prev_close" not in result:
-                result["prev_close"] = round(prev_close, 2)
+            # Fallback chain: fast_info prev_close → chart API prev_close
+            if "prev_close" not in result:
+                if prev_close and prev_close > 0:
+                    result["prev_close"] = round(prev_close, 2)
+                else:
+                    _chart_fb = _fetch_price_via_chart_api(ticker)
+                    if _chart_fb and _chart_fb.get("prev_close"):
+                        result["prev_close"] = _chart_fb["prev_close"]
 
         # ------------------------------------------------------------------ #
         # 3. Intraday bars — premarket range + ORB levels
