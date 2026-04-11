@@ -2303,18 +2303,29 @@ def inject_helpers():
 
 
 # ---------------------------------------------------------------------------
-# Deferred startup — seed demo data after all functions are defined.
-# Safe to call every startup: the demo_seeded flag prevents re-seeding.
+# Deferred startup — seed demo data in a background thread so gunicorn can
+# bind to its port immediately.  seed_demo_data() makes yfinance API calls
+# which can take 30-120 s; running it synchronously at import time blocks
+# gunicorn from ever opening a socket, causing Render to time-out the deploy.
+# The demo_seeded flag inside the function prevents re-seeding on restart.
 # ---------------------------------------------------------------------------
-seed_demo_data()
+def _deferred_startup():
+    try:
+        seed_demo_data()
+    except Exception as _e:
+        logger.error("deferred_startup seed error: %s", _e, exc_info=True)
+    try:
+        _startup_wls = get_all_watchlists()
+        for _wl in _startup_wls:
+            _tickers = get_watchlist_stocks(_wl["id"])
+            logger.info(
+                "STARTUP watchlist '%s' (id=%s): %s",
+                _wl["name"], _wl["id"], _tickers,
+            )
+    except Exception as _e:
+        logger.error("deferred_startup watchlist log error: %s", _e, exc_info=True)
 
-_startup_wls = get_all_watchlists()
-for _wl in _startup_wls:
-    _tickers = get_watchlist_stocks(_wl["id"])
-    logger.info(
-        "STARTUP watchlist '%s' (id=%s): %s",
-        _wl["name"], _wl["id"], _tickers,
-    )
+threading.Thread(target=_deferred_startup, daemon=True, name="startup-seed").start()
 
 
 # ---------------------------------------------------------------------------
