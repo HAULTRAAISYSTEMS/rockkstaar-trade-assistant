@@ -37,6 +37,7 @@ from database import (
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
 from scoring import catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES, compute_swing_grade
 from classifier import classify_stock
+from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as _clear_alerts
 
 app = Flask(__name__)
 app.secret_key = "rockkstaar-secret-key-change-in-prod"
@@ -1087,6 +1088,21 @@ def annotate(stock: dict) -> dict:
         stock["risk_reward_display"] = "—"
         stock["risk_reward_class"]   = "rr-neutral"
 
+    # R:R quality label — shown as a warning when R:R is poor
+    if rr is not None:
+        if rr < 1.0:
+            stock["rr_quality_label"] = "Poor R:R — avoid"
+            stock["rr_quality_class"] = "rr-poor-label"
+        elif rr < 1.5:
+            stock["rr_quality_label"] = "Weak R:R"
+            stock["rr_quality_class"] = "rr-weak-label"
+        else:
+            stock["rr_quality_label"] = ""
+            stock["rr_quality_class"] = ""
+    else:
+        stock["rr_quality_label"] = ""
+        stock["rr_quality_class"] = ""
+
     # If swing_score is populated, override final_action from swing_status
     if stock.get("swing_score"):
         _sfa, _sfa_class, _sfa_reason = compute_swing_final_action(stock.get("swing_status"))
@@ -1354,6 +1370,7 @@ _DASHBOARD_EMPTY = dict(
     no_trade={"is_no_trade": False, "lock_signals": False, "verdict": "",
               "reasons": [], "severity": "none"},
     orb_session={},
+    alerts=[],
 )
 
 
@@ -1426,6 +1443,10 @@ def _dashboard_inner():
         )
     ][:5]
 
+    # Generate swing alerts from the current ranked list
+    generate_alerts(ranked)
+    dashboard_alerts = get_alerts(limit=10)
+
     # No-trade assessment — must run before triggered list is built
     no_trade = compute_no_trade_assessment(ranked, top5)
 
@@ -1468,6 +1489,7 @@ def _dashboard_inner():
         active_wl=active_wl,
         wl_counts=wl_counts,
         orb_session=get_orb_session_banner(),
+        alerts=dashboard_alerts,
     )
 
 
@@ -2130,6 +2152,19 @@ def ws_quick(ws):
                 last_push = _time.monotonic()
     except Exception as exc:
         logger.debug("ws_quick closed (wl_id=%s): %s", wl_id, exc)
+
+
+@app.route("/api/alerts")
+def api_alerts():
+    """Return the most recent swing alerts as JSON."""
+    return jsonify(get_alerts())
+
+
+@app.route("/alerts/clear", methods=["POST"])
+def alerts_clear():
+    """Dismiss all pending alerts."""
+    _clear_alerts()
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/api/watchlist")

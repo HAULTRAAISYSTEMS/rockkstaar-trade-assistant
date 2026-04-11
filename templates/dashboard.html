@@ -68,6 +68,30 @@
   <span class="nt-lock-text">No actionable swing setups — conditions do not support entries right now.</span>
 </div>
 
+<!-- ===== SWING ALERTS PANEL ===== -->
+{% if alerts %}
+<section class="alerts-panel">
+  <div class="alerts-header">
+    <span class="alerts-title">
+      Swing Alerts
+      <span class="alerts-count">{{ alerts|length }}</span>
+    </span>
+    <form action="{{ url_for('alerts_clear') }}" method="POST" style="display:inline">
+      <button type="submit" class="alerts-clear-btn">Dismiss All</button>
+    </form>
+  </div>
+  <div class="alerts-list">
+    {% for a in alerts %}
+    <div class="alert-row alert-type-{{ a.alert_type }} alert-sev-{{ a.severity }}">
+      <span class="alert-ticker">{{ a.ticker }}</span>
+      <span class="alert-msg">{{ a.message }}</span>
+      <span class="alert-time">{{ a.timestamp }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <!-- ===== SUMMARY CARDS ===== -->
 {% if summary and (summary.best_gapper or summary.strongest_catalyst) %}
 <section class="summary-section">
@@ -312,6 +336,7 @@
         <button class="filter-btn" data-val="5">5+</button>
         <button class="filter-btn" data-val="7">7+ Quality</button>
         <button class="filter-btn" data-val="9">A Grade</button>
+        <button class="filter-btn filter-btn-aplus" data-val="aplus">A+ Only</button>
       </div>
     </div>
     <div class="filter-group">
@@ -366,8 +391,10 @@
         <tr class="row-{{ s.swing_score_class }} {% if s.ticker_state in ('error','loading') %}row-state-unavailable{% elif s.ticker_state == 'stale' %}row-state-stale{% elif s.ticker_state == 'partial' %}row-state-partial{% endif %}"
             data-ticker="{{ s.ticker }}"
             data-score="{{ s.swing_score or 0 }}"
+            data-grade="{{ s.swing_grade or 'D' }}"
             data-status="{{ s.swing_status or '' }}"
             data-extended="{{ 'true' if s.is_extended else 'false' }}"
+            data-aplus="{{ 'true' if (s.swing_score or 0) >= 8 and s.swing_status in ('READY — LEVEL HOLDS','PRE-CONFIRMATION','TREND CONTINUATION') else 'false' }}"
             onclick="window.location='{{ url_for('stock_detail', ticker=s.ticker) }}'"
             style="cursor:pointer;"
             >
@@ -500,6 +527,9 @@
           <!-- R:R -->
           <td>
             <span class="{{ s.risk_reward_class }}">{{ s.risk_reward_display }}</span>
+            {% if s.rr_quality_label %}
+            <div class="rr-quality-label {{ s.rr_quality_class }}">{{ s.rr_quality_label }}</div>
+            {% endif %}
           </td>
 
           <!-- Distance to T1 -->
@@ -574,6 +604,9 @@ function toggleWlPanel() {
 
 // ── Dashboard filter ────────────────────────────────────────────────────────
 const ACTIONABLE_STATUSES = [
+  // Current 4-mode labels
+  'READY — LEVEL HOLDS', 'PRE-CONFIRMATION', 'TREND CONTINUATION',
+  // Legacy labels (backward compat)
   'GOOD SWING CANDIDATE', 'READY IF LEVEL HOLDS',
   'WAIT FOR 15M CONFIRMATION', 'WAIT FOR PULLBACK'
 ];
@@ -592,20 +625,29 @@ function setActiveBtn(groupId, val) {
 }
 
 function applyFilter() {
-  const minScore  = parseInt(getActiveVal('scoreFilter') || '0', 10);
+  const scoreVal  = getActiveVal('scoreFilter') || '0';
   const statusVal = getActiveVal('statusFilter');
   const hideExt   = document.getElementById('hideExtended') &&
                     document.getElementById('hideExtended').checked;
   const rows      = document.querySelectorAll('.watchlist-table tbody tr');
   let visible = 0;
 
+  const aplusMode = (scoreVal === 'aplus');
+  const minScore  = aplusMode ? 0 : parseInt(scoreVal, 10);
+
   rows.forEach(function(row) {
-    const score    = parseInt(row.dataset.score || '0', 10);
-    const status   = row.dataset.status || '';
+    const score    = parseInt(row.dataset.score    || '0', 10);
+    const status   = row.dataset.status   || '';
     const extended = row.dataset.extended === 'true';
+    const isAplus  = row.dataset.aplus    === 'true';
     let show = true;
 
-    if (score < minScore) show = false;
+    if (aplusMode) {
+      // A+ Only: score >= 8 AND actionable status
+      show = isAplus;
+    } else {
+      if (score < minScore) show = false;
+    }
     if (statusVal === 'actionable' && ACTIONABLE_STATUSES.indexOf(status) === -1) show = false;
     if (hideExt && extended) show = false;
 
@@ -643,7 +685,7 @@ function toggleDisciplineMode() {
   var btn = document.getElementById('disciplineBtn');
   if (_disciplineActive) {
     btn.classList.add('filter-discipline-active');
-    setActiveBtn('scoreFilter', '7');
+    setActiveBtn('scoreFilter', 'aplus');   // A+ Only in discipline mode
     setActiveBtn('statusFilter', 'actionable');
     var he = document.getElementById('hideExtended');
     if (he) he.checked = true;
