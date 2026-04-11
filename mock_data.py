@@ -93,11 +93,7 @@ def _zone_defaults(data: dict) -> None:
 
 MOCK_STOCKS = {
     "NVDA": {
-        "current_price":  800.0,
-        "prev_close":     790.0,
-        "gap_pct":        1.27,
         "avg_volume":     42_000_000,
-        "rel_volume":     1.1,
         "trade_bias":     "Long Bias",
         "catalyst_summary": (
             "AI infrastructure demand remains the dominant multi-year theme. "
@@ -111,11 +107,7 @@ MOCK_STOCKS = {
         "earnings_date": "2026-05-28",
     },
     "META": {
-        "current_price":  540.0,
-        "prev_close":     533.0,
-        "gap_pct":        1.31,
         "avg_volume":     14_000_000,
-        "rel_volume":     0.9,
         "trade_bias":     "Long Bias",
         "catalyst_summary": (
             "AI advertising monetization and Reality Labs progress support the "
@@ -129,11 +121,7 @@ MOCK_STOCKS = {
         "earnings_date": "2026-04-30",
     },
     "MRVL": {
-        "current_price":  72.0,
-        "prev_close":     70.5,
-        "gap_pct":        2.13,
         "avg_volume":     18_000_000,
-        "rel_volume":     1.0,
         "trade_bias":     "Long Bias",
         "catalyst_summary": (
             "Custom silicon and data center networking growth story. "
@@ -147,11 +135,7 @@ MOCK_STOCKS = {
         "earnings_date": "2026-05-29",
     },
     "AMZN": {
-        "current_price":  190.0,
-        "prev_close":     188.0,
-        "gap_pct":        1.06,
         "avg_volume":     38_000_000,
-        "rel_volume":     0.85,
         "trade_bias":     "Long Bias",
         "catalyst_summary": (
             "AWS growth and advertising segment support the long thesis. "
@@ -165,11 +149,7 @@ MOCK_STOCKS = {
         "earnings_date": "2026-05-01",
     },
     "MU": {
-        "current_price":  95.0,
-        "prev_close":     96.5,
-        "gap_pct":        -1.55,
         "avg_volume":     22_000_000,
-        "rel_volume":     1.2,
         "trade_bias":     "Long Bias",
         "catalyst_summary": (
             "HBM memory demand from AI accelerators is the key catalyst. "
@@ -184,11 +164,7 @@ MOCK_STOCKS = {
         "earnings_date": "2026-06-25",
     },
     "INTC": {
-        "current_price":  23.0,
-        "prev_close":     23.8,
-        "gap_pct":        -3.36,
         "avg_volume":     55_000_000,
-        "rel_volume":     1.3,
         "trade_bias":     "Short Bias",
         "catalyst_summary": (
             "Foundry execution challenges and continued market share losses "

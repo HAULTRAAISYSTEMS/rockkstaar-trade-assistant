@@ -26,10 +26,31 @@ def _silence_yf():
 
 try:
     import yfinance as yf
+    import requests as _requests
     _YF_AVAILABLE = True
 except ImportError:
     _YF_AVAILABLE = False
     logger.warning("yfinance not installed — live data unavailable. Run: pip install yfinance")
+
+# Browser-like session — prevents Yahoo Finance from blocking cloud/server IPs.
+# Render, Railway, and other cloud hosts are commonly blocked without this.
+_YF_SESSION: "_requests.Session | None" = None
+
+def _get_yf_session():
+    """Return a cached requests.Session with browser headers for yfinance."""
+    global _YF_SESSION
+    if _YF_SESSION is None and _YF_AVAILABLE:
+        _YF_SESSION = _requests.Session()
+        _YF_SESSION.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+        })
+    return _YF_SESSION
 
 
 def _et_now() -> datetime:
@@ -122,7 +143,7 @@ def fetch_live_data(ticker: str) -> dict | None:
             return default
 
     try:
-        t = yf.Ticker(ticker)
+        t = yf.Ticker(ticker, session=_get_yf_session())
         result: dict = {}
 
         # ------------------------------------------------------------------ #
@@ -495,7 +516,7 @@ def fetch_swing_data(ticker: str) -> dict | None:
 
     try:
         with _silence_yf():
-            hist = yf.Ticker(ticker).history(period="200d", interval="1d")
+            hist = yf.Ticker(ticker, session=_get_yf_session()).history(period="200d", interval="1d")
 
         if hist.empty or len(hist) < 20:
             return None
@@ -571,7 +592,7 @@ def fetch_swing_data(ticker: str) -> dict | None:
         # gives the same structural read as a 4H chart without requiring resampling.
         try:
             with _silence_yf():
-                hist_1h = yf.Ticker(ticker).history(period="30d", interval="60m")
+                hist_1h = yf.Ticker(ticker, session=_get_yf_session()).history(period="30d", interval="60m")
 
             if not hist_1h.empty and len(hist_1h) >= 20:
                 try:
@@ -631,7 +652,7 @@ def fetch_swing_data(ticker: str) -> dict | None:
         # Signals checked: 15m higher low on last 3 bars, strong bullish body on last bar.
         try:
             with _silence_yf():
-                hist_15m = yf.Ticker(ticker).history(period="5d", interval="15m")
+                hist_15m = yf.Ticker(ticker, session=_get_yf_session()).history(period="5d", interval="15m")
 
             if not hist_15m.empty and len(hist_15m) >= 6:
                 try:
@@ -686,7 +707,7 @@ def fetch_news_headlines(ticker: str) -> tuple[str, list[str]]:
         )
 
     try:
-        t = yf.Ticker(ticker)
+        t = yf.Ticker(ticker, session=_get_yf_session())
         news = t.news  # list of dicts with 'title', 'publisher', etc.
         if news:
             headlines = [item.get("title", "") for item in news[:5] if item.get("title")]
