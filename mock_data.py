@@ -226,7 +226,23 @@ def generate_stock_data(ticker: str) -> dict:
     _errors: list[str] = []   # track which steps failed
 
     if ticker in MOCK_STOCKS:
-        data = dict(MOCK_STOCKS[ticker])
+        # Copy editorial context (trade_bias, catalyst_summary, headlines, earnings_date)
+        # but DO NOT carry over any hardcoded price/volume seeds.  Those values are
+        # outdated placeholders — live data is the only source of truth for prices.
+        # If live fetch fails the ticker will show ERROR/STALE, never a fake price.
+        _tmpl = MOCK_STOCKS[ticker]
+        data = {
+            "current_price":    None,   # must come from live fetch
+            "prev_close":       None,   # must come from live fetch
+            "gap_pct":          0.0,    # recalculated from live data
+            "avg_volume":       _tmpl.get("avg_volume", 5_000_000),   # order-of-magnitude seed
+            "rel_volume":       1.0,    # recalculated from live data
+            # Editorial context — these do NOT come from live fetch:
+            "trade_bias":       _tmpl.get("trade_bias", "Neutral"),
+            "catalyst_summary": _tmpl.get("catalyst_summary", ""),
+            "news_headlines":   _tmpl.get("news_headlines", []),
+            "earnings_date":    _tmpl.get("earnings_date"),
+        }
     else:
         data = {
             "current_price":  None,         # populated by fetch_live_data; None = no fake price
@@ -240,12 +256,13 @@ def generate_stock_data(ticker: str) -> dict:
             "earnings_date":  None,
         }
 
-    data["ticker"] = ticker
+    data["ticker"]      = ticker
+    data["data_source"] = "unavailable"   # overridden below on successful live fetch
 
     # ── Step 1: Live price + volume ───────────────────────────────────────────
     try:
         live = fetch_live_data(ticker)
-        if live:
+        if live and live.get("current_price"):
             _price_fields = [
                 "current_price", "prev_close", "prev_close_date", "gap_pct",
                 "premarket_high", "premarket_low",
@@ -261,9 +278,10 @@ def generate_stock_data(ticker: str) -> dict:
                     data[field] = live[field]
             if live.get("earnings_date"):
                 data["earnings_date"] = live["earnings_date"]
-            data["orb_phase"] = live.get("orb_phase", "pre_market")
-            data["orb_high"]  = None
-            data["orb_low"]   = None
+            data["orb_phase"]   = live.get("orb_phase", "pre_market")
+            data["orb_high"]    = None
+            data["orb_low"]     = None
+            data["data_source"] = "live"   # confirmed: live price in hand
             if ticker not in MOCK_STOCKS:
                 gap = data.get("gap_pct", 0)
                 data["trade_bias"] = (
@@ -272,7 +290,11 @@ def generate_stock_data(ticker: str) -> dict:
                     "Neutral"
                 )
         else:
-            _log.warning("generate_stock_data  stage=live_data  ticker=%s  result=None", ticker)
+            # live is None OR returned no current_price — treat as failed
+            _log.warning(
+                "generate_stock_data  stage=live_data  ticker=%s  result=%s",
+                ticker, "no_price" if live else "None",
+            )
             _errors.append("live_data")
     except Exception as exc:
         _log.error("generate_stock_data  stage=live_data  ticker=%s  err=%s", ticker, exc)
@@ -484,7 +506,7 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
     # ── Live price + volume ───────────────────────────────────────────────────
     try:
         live = fetch_live_data(ticker)
-        if live:
+        if live and live.get("current_price"):
             _live_fields = [
                 "current_price", "prev_close", "gap_pct", "prev_close_date",
                 "premarket_high", "premarket_low",
@@ -497,11 +519,15 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
             for field in _live_fields:
                 if live.get(field) is not None:
                     data[field] = live[field]
-            data["orb_phase"] = live.get("orb_phase", data.get("orb_phase", "pre_market"))
+            data["orb_phase"]   = live.get("orb_phase", data.get("orb_phase", "pre_market"))
+            data["data_source"] = "live"
         else:
+            # live failed — keep the existing snapshot price (data was pre-loaded from DB)
+            data["data_source"] = "stale_snapshot"
             _errors.append("live_data")
     except Exception as exc:
         _log.error("live_refresh_stock  stage=live_data  ticker=%s  err=%s", ticker, exc)
+        data["data_source"] = "stale_snapshot"
         _errors.append("live_data")
 
     # Price field defaults — prevent upsert_stock_data from failing on named-param

@@ -112,22 +112,33 @@ def auto_refresh_stale_closes(tickers: list) -> list:
         stock = get_stock_data(ticker)
         if not stock:
             continue
-        # Skip tickers already refreshed today
-        last_updated = (stock.get("last_updated") or "")[:10]
-        if last_updated == today_str:
+
+        last_updated  = (stock.get("last_updated") or "")[:10]
+        current_state = stock.get("ticker_state") or "ready"
+        is_error      = current_state == "error"
+
+        # Skip tickers already refreshed today — UNLESS they are in error state
+        # (error-state tickers should retry on every dashboard load so LMT-style
+        # stuck errors recover when yfinance comes back).
+        if last_updated == today_str and not is_error:
             continue
-        # Skip tickers whose prev_close is already up-to-date
-        if (stock.get("prev_close_date") or "") == expected:
+        # Skip tickers whose prev_close is already up-to-date (unless erroring)
+        if (stock.get("prev_close_date") or "") == expected and not is_error:
             continue
+
         # Auto-refresh
         try:
             fresh = generate_stock_data(ticker)
-            upsert_stock_data(fresh)
-            run_auto_classification(ticker)
+            result = _upsert_or_keep_snapshot(fresh, existing=stock)
+            if result == "updated":
+                run_auto_classification(ticker)
             refreshed.append(ticker)
             logger.info(
-                "Auto-refreshed %s: prev_close_date was '%s', expected '%s'",
-                ticker, stock.get("prev_close_date") or "missing", expected,
+                "auto_refresh  ticker=%s  prev_close_date='%s'→'%s'  result=%s",
+                ticker,
+                stock.get("prev_close_date") or "missing",
+                fresh.get("prev_close_date") or "—",
+                result,
             )
         except Exception as e:
             logger.warning(
@@ -166,6 +177,48 @@ def _expire_stuck_loading(watchlist: list) -> None:
                 "action=set_state_error",
                 ticker, age_secs,
             )
+
+
+def _upsert_or_keep_snapshot(fresh: dict, existing: dict | None = None) -> str:
+    """
+    Safe upsert: guards against overwriting a good DB snapshot when a live
+    fetch fails.
+
+    If ``fresh["ticker_state"] == "error"`` AND the existing DB record has a
+    valid price, we keep the snapshot instead of writing NULL prices to the DB.
+    The ticker state is set to "stale" so the UI badge updates accordingly.
+
+    Returns one of:
+        "updated"      — fresh data was upserted normally
+        "stale_kept"   — live failed but a good snapshot exists; kept + marked stale
+        "error_saved"  — live failed, no snapshot; error state upserted
+    """
+    ticker = fresh.get("ticker") or ""
+    if fresh.get("ticker_state") == "error":
+        snap = existing if existing is not None else get_stock_data(ticker)
+        if snap and snap.get("current_price"):
+            # Live fetch failed — protect the last-known-good snapshot
+            fresh["data_source"] = "stale_snapshot"
+            set_ticker_state(ticker, "stale")
+            logger.warning(
+                "_upsert_or_keep_snapshot  ticker=%s  live_failed=True  "
+                "snapshot_price=%.2f  action=keep_snapshot  state=stale",
+                ticker, float(snap["current_price"]),
+            )
+            return "stale_kept"
+        else:
+            # No usable snapshot — save the error state so the UI shows UNAVAILABLE
+            fresh["data_source"] = "unavailable"
+            upsert_stock_data(fresh)
+            logger.info(
+                "_upsert_or_keep_snapshot  ticker=%s  live_failed=True  "
+                "snapshot=none  action=save_error",
+                ticker,
+            )
+            return "error_saved"
+    else:
+        upsert_stock_data(fresh)
+        return "updated"
 
 
 def get_active_wl_id() -> int | None:
@@ -839,6 +892,23 @@ def annotate(stock: dict) -> dict:
         "error":   "Data Error",
         "stale":   "Stale",
     }.get(_state, "")
+
+    # ── Data source — for debugging and display ──────────────────────────────
+    # Tracks WHERE the price came from (live fetch vs snapshot vs unavailable).
+    # "live"           — price confirmed from yfinance this session
+    # "stale_snapshot" — using last-known-good DB price (live fetch failed)
+    # "unavailable"    — no valid price at all
+    _src = stock.get("data_source") or (
+        "stale_snapshot" if _state == "stale" else
+        "live"           if _state in ("ready", "partial") else
+        "unavailable"
+    )
+    stock["data_source"] = _src
+    stock["data_source_label"] = {
+        "live":            "Live",
+        "stale_snapshot":  "Stale snapshot",
+        "unavailable":     "Unavailable",
+    }.get(_src, "Unknown")
 
     # Enforce numeric defaults so templates never receive None for numeric fields.
     # Price/volume fields default to 0.0; score fields default to 0.
@@ -1606,13 +1676,17 @@ def _onboard_ticker_bg(ticker: str) -> None:
         return
 
     # ── Stage 2: Full analysis (EMAs, Fib, zones, scoring) ────────────────
+    # Use Stage 1 snapshot as the "existing" reference so that if live fetch
+    # fails again in Stage 2 we preserve the good Stage 1 price (not error).
+    _stage1_snap = get_stock_data(ticker)
     try:
-        fresh = generate_stock_data(ticker)
-        upsert_stock_data(fresh)
-        run_auto_classification(ticker)
+        fresh  = generate_stock_data(ticker)
+        result = _upsert_or_keep_snapshot(fresh, existing=_stage1_snap)
+        if result == "updated":
+            run_auto_classification(ticker)
         logger.info(
-            "onboard_bg  ticker=%s  stage=2_complete  state=%s",
-            ticker, fresh.get("ticker_state"),
+            "onboard_bg  ticker=%s  stage=2_complete  state=%s  result=%s",
+            ticker, fresh.get("ticker_state"), result,
         )
     except Exception as exc:
         logger.error(
@@ -1620,8 +1694,7 @@ def _onboard_ticker_bg(ticker: str) -> None:
             ticker, exc, exc_info=True,
         )
         # Stage 1 data is still in the DB — keep it as partial, not error.
-        existing = get_stock_data(ticker)
-        if existing and existing.get("current_price"):
+        if _stage1_snap and _stage1_snap.get("current_price"):
             set_ticker_state(ticker, "partial")
             logger.warning(
                 "onboard_bg  ticker=%s  stage=2_complete  state=partial  "
@@ -1708,15 +1781,18 @@ def refresh_all():
     success, failed = [], []
 
     try:
+        _all_existing = {s["ticker"]: s for s in get_all_stock_data()}
         logger.info("refresh_all  route=/refresh  tickers=%s", watchlist)
         for ticker in watchlist:
             try:
-                fresh = generate_stock_data(ticker)
-                upsert_stock_data(fresh)
-                run_auto_classification(ticker)
+                fresh  = generate_stock_data(ticker)
+                result = _upsert_or_keep_snapshot(fresh, existing=_all_existing.get(ticker))
+                if result == "updated":
+                    run_auto_classification(ticker)
                 success.append(ticker)
                 logger.info(
-                    "refresh_all  ticker=%s  state=%s", ticker, fresh.get("ticker_state")
+                    "refresh_all  ticker=%s  state=%s  result=%s",
+                    ticker, fresh.get("ticker_state"), result
                 )
             except Exception as exc:
                 logger.error("refresh_all  ticker=%s  err=%s", ticker, exc, exc_info=True)
@@ -1843,17 +1919,21 @@ def refresh_single(ticker):
     """Refresh and re-score a single ticker."""
     t = ticker.upper()
     logger.info("refresh_single  ticker=%s  route=/stock/%s/refresh", t, t)
+    _existing = get_stock_data(t)
     try:
-        fresh = generate_stock_data(t)
-        upsert_stock_data(fresh)
-        run_auto_classification(t)
-        logger.info("refresh_single  ticker=%s  state=%s", t, fresh.get("ticker_state"))
-        flash(f"Refreshed {t}.", "success")
+        fresh  = generate_stock_data(t)
+        result = _upsert_or_keep_snapshot(fresh, existing=_existing)
+        if result == "updated":
+            run_auto_classification(t)
+        logger.info("refresh_single  ticker=%s  state=%s  result=%s", t, fresh.get("ticker_state"), result)
+        if result == "stale_kept":
+            flash(f"Live data unavailable for {t}. Showing last known data (STALE).", "warning")
+        else:
+            flash(f"Refreshed {t}.", "success")
     except Exception as exc:
         logger.error("refresh_single  ticker=%s  err=%s", t, exc, exc_info=True)
-        existing = get_stock_data(t)
-        if existing and existing.get("current_price"):
-            set_ticker_state(t, "stale")   # was good before — keep showing last known data
+        if _existing and _existing.get("current_price"):
+            set_ticker_state(t, "stale")
             flash(f"Refresh failed for {t}. Showing last known data.", "warning")
         else:
             set_ticker_state(t, "error")
