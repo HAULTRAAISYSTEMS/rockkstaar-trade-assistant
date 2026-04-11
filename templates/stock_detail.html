@@ -468,14 +468,14 @@
     <div class="classify-body">
       {% if stock.classify_reason %}
         {%- set cr = stock.classify_reason -%}
-        {%- if cr.startswith('A+') or cr.startswith('Promoted') -%}
-          {%- set cl_name = "A+ Momentum" -%}{%- set cl_css = "classify-aplus" -%}
-        {%- elif cr.startswith('Secondary') -%}
-          {%- set cl_name = "Secondary Watch" -%}{%- set cl_css = "classify-secondary" -%}
-        {%- elif cr.startswith('Swing') -%}
-          {%- set cl_name = "Swing Watchlist" -%}{%- set cl_css = "classify-swing" -%}
+        {%- if cr.startswith('Swing Ready') -%}
+          {%- set cl_name = "Swing Ready" -%}{%- set cl_css = "classify-aplus" -%}
+        {%- elif cr.startswith('Pullback Zone') -%}
+          {%- set cl_name = "Pullback Zone" -%}{%- set cl_css = "classify-secondary" -%}
+        {%- elif cr.startswith('Extended') -%}
+          {%- set cl_name = "Extended" -%}{%- set cl_css = "classify-swing" -%}
         {%- else -%}
-          {%- set cl_name = "Core" -%}{%- set cl_css = "classify-core" -%}
+          {%- set cl_name = "Core List" -%}{%- set cl_css = "classify-core" -%}
         {%- endif -%}
       {% endif %}
       <div class="classify-target-row">

@@ -229,7 +229,7 @@ def get_db() -> _Conn:
     return _Conn(conn)
 
 
-DEFAULT_WATCHLISTS = ["A+ Momentum", "Secondary Watch", "Swing Watchlist", "Core"]
+DEFAULT_WATCHLISTS = ["Swing Ready", "Pullback Zone", "Extended", "Core List"]
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +496,7 @@ def init_db():
                 "INSERT OR IGNORE INTO watchlists (name, created_at) VALUES (?, ?)",
                 (name, now_iso)
             )
-        # Migrate legacy watchlist table data into "A+ Momentum"
+        # Migrate legacy watchlist table data into "Swing Ready"
         first_row = cursor.execute("SELECT id FROM watchlists LIMIT 1").fetchone()
         if first_row:
             first_id = first_row["id"]
@@ -509,6 +509,19 @@ def init_db():
                     "(watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
                     (first_id, row["ticker"], row["added_date"])
                 )
+
+    # ── Rename any legacy watchlist names to the swing-focused labels ──────
+    _LEGACY_RENAMES = {
+        "A+ Momentum":    "Swing Ready",
+        "Secondary Watch": "Pullback Zone",
+        "Swing Watchlist": "Extended",
+        "Core":           "Core List",
+    }
+    for old_name, new_name in _LEGACY_RENAMES.items():
+        cursor.execute(
+            "UPDATE watchlists SET name = ? WHERE name = ?",
+            (new_name, old_name),
+        )
 
     conn.commit()
     conn.close()
