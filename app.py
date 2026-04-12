@@ -107,6 +107,11 @@ except Exception as _mig_err:
 _refresh_all_lock   = threading.Lock()
 _refresh_all_running = False
 
+# Per-ticker single-refresh guard — prevents double-clicking "Refresh Data"
+# from spawning two simultaneous fetches for the same ticker.
+_single_refresh_lock   = threading.Lock()
+_single_refresh_active: set = set()   # set of ticker strings currently being refreshed
+
 # Loading timeout: tickers stuck in 'loading' for longer than this are
 # transitioned to 'error' so the Loading badge never shows forever.
 LOADING_TIMEOUT_SECS = 120
@@ -137,17 +142,22 @@ def _prev_trading_day() -> str:
 
 def auto_refresh_stale_closes(tickers: list) -> list:
     """
-    For each ticker whose prev_close_date doesn't match the expected previous
-    trading day, auto-refresh market data from yfinance.
+    Identify stale tickers and kick off a background refresh for each one.
 
-    Only refreshes tickers that haven't been updated today (avoids redundant
-    API calls when an intra-day manual refresh has already run).
+    The check (staleness detection) runs synchronously so we know which tickers
+    need work, but the actual fetch (generate_stock_data) runs in a daemon
+    thread so the dashboard HTTP response is NEVER blocked.
 
-    Returns the list of tickers that were refreshed.
+    A ticker is stale when:
+      - It has not been refreshed today (last_updated date != today), OR
+      - Its prev_close_date doesn't match the expected previous trading day.
+    Error-state tickers always retry regardless of last_updated.
+
+    Returns the list of ticker symbols that were queued for background refresh.
     """
     expected  = _prev_trading_day()
-    today_str = datetime.now().strftime("%Y-%m-%d")   # matches last_updated format
-    refreshed = []
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    queued: list[str] = []
 
     for ticker in tickers:
         stock = get_stock_data(ticker)
@@ -158,36 +168,61 @@ def auto_refresh_stale_closes(tickers: list) -> list:
         current_state = stock.get("ticker_state") or "ready"
         is_error      = current_state == "error"
 
-        # Skip tickers already refreshed today — UNLESS they are in error state
-        # (error-state tickers should retry on every dashboard load so LMT-style
-        # stuck errors recover when yfinance comes back).
         if last_updated == today_str and not is_error:
             continue
-        # Skip tickers whose prev_close is already up-to-date (unless erroring)
         if (stock.get("prev_close_date") or "") == expected and not is_error:
             continue
 
-        # Auto-refresh
-        try:
-            fresh = generate_stock_data(ticker)
-            result = _upsert_or_keep_snapshot(fresh, existing=stock)
-            if result == "updated":
-                run_auto_classification(ticker)
-            refreshed.append(ticker)
-            logger.info(
-                "auto_refresh  ticker=%s  prev_close_date='%s'→'%s'  result=%s",
-                ticker,
-                stock.get("prev_close_date") or "missing",
-                fresh.get("prev_close_date") or "—",
-                result,
-            )
-        except Exception as e:
-            logger.warning(
-                "auto_refresh  ticker=%s  stage=refresh  state=stale  err=%s", ticker, e
-            )
-            set_ticker_state(ticker, "stale")
+        queued.append(ticker)
+        logger.info(
+            "auto_refresh  ticker=%s  stage=queued  prev_close_date=%s  "
+            "expected=%s  state=%s",
+            ticker,
+            stock.get("prev_close_date") or "missing",
+            expected,
+            current_state,
+        )
 
-    return refreshed
+    if not queued:
+        return []
+
+    # Capture snapshot map once so the worker thread doesn't need a fresh DB
+    # read per ticker (avoids a burst of DB calls from the thread).
+    _all_existing = {s["ticker"]: s for s in get_all_stock_data()}
+
+    def _worker():
+        for ticker in queued:
+            try:
+                logger.info("auto_refresh  ticker=%s  stage=start", ticker)
+                fresh  = generate_stock_data(ticker)
+                result = _upsert_or_keep_snapshot(fresh, existing=_all_existing.get(ticker))
+                if result == "updated":
+                    run_auto_classification(ticker)
+                logger.info(
+                    "auto_refresh  ticker=%s  stage=complete  "
+                    "prev_close_date=%s  state=%s  result=%s",
+                    ticker,
+                    fresh.get("prev_close_date") or "—",
+                    fresh.get("ticker_state"),
+                    result,
+                )
+            except Exception as e:
+                logger.warning(
+                    "auto_refresh  ticker=%s  stage=error  err=%s", ticker, e
+                )
+                try:
+                    existing = _all_existing.get(ticker)
+                    if existing and existing.get("current_price"):
+                        set_ticker_state(ticker, "stale")
+                    else:
+                        set_ticker_state(ticker, "error")
+                except Exception:
+                    pass
+
+    t = threading.Thread(target=_worker, daemon=True, name=f"auto_refresh_{','.join(queued)}")
+    t.start()
+    logger.info("auto_refresh  stage=bg_thread_started  tickers=%s", queued)
+    return queued
 
 
 def _expire_stuck_loading(watchlist: list) -> None:
@@ -1860,21 +1895,37 @@ def refresh_all():
     """
     Kick off a background refresh of all tickers and return immediately.
     The actual data fetch runs in a daemon thread so gunicorn never times out.
+
+    Uses _refresh_all_lock.acquire(blocking=False) so the in-progress check
+    and flag-set are atomic — prevents two near-simultaneous POST requests
+    (e.g. double-click) from spawning two background workers.
     """
     global _refresh_all_running
-    if _refresh_all_running:
+
+    if not _refresh_all_lock.acquire(blocking=False):
+        # Lock already held — a refresh is actively running
         flash("Refresh already in progress — check back in a moment.", "warning")
+        logger.warning("refresh_all  skipped=lock_held")
         return redirect(url_for("dashboard"))
 
-    wl_id     = get_active_wl_id()
-    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-    if not watchlist:
-        flash("No tickers in watchlist to refresh.", "warning")
-        return redirect(url_for("dashboard"))
+    try:
+        if _refresh_all_running:
+            flash("Refresh already in progress — check back in a moment.", "warning")
+            logger.warning("refresh_all  skipped=flag_set")
+            return redirect(url_for("dashboard"))
 
-    _refresh_all_running = True
-    t = threading.Thread(target=_refresh_all_worker, args=(watchlist,), daemon=True)
-    t.start()
+        wl_id     = get_active_wl_id()
+        watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+        if not watchlist:
+            flash("No tickers in watchlist to refresh.", "warning")
+            return redirect(url_for("dashboard"))
+
+        _refresh_all_running = True
+        t = threading.Thread(target=_refresh_all_worker, args=(watchlist,), daemon=True)
+        t.start()
+        logger.info("refresh_all  stage=bg_thread_started  tickers=%s", watchlist)
+    finally:
+        _refresh_all_lock.release()
 
     flash(
         f"Refreshing {len(watchlist)} tickers in the background — "
@@ -2023,27 +2074,58 @@ def save_stock_note(ticker):
 @app.route("/stock/<ticker>/refresh", methods=["POST"])
 def refresh_single(ticker):
     """Refresh and re-score a single ticker."""
+    global _single_refresh_active
     t = ticker.upper()
-    logger.info("refresh_single  ticker=%s  route=/stock/%s/refresh", t, t)
+
+    # ── Per-ticker overlap guard ─────────────────────────────────────────────
+    # Prevents a double-click or rapid reload from spawning two simultaneous
+    # fetches for the same ticker.  If a refresh is already in progress for
+    # this ticker, redirect immediately with a warning.
+    with _single_refresh_lock:
+        if t in _single_refresh_active:
+            logger.warning("refresh_single  ticker=%s  skipped=already_in_progress", t)
+            flash(f"Refresh already in progress for {t} — please wait.", "warning")
+            referrer = request.referrer or ""
+            if "stock/" not in referrer:
+                return redirect(url_for("dashboard"))
+            return redirect(url_for("stock_detail", ticker=t))
+        _single_refresh_active.add(t)
+
+    logger.info("refresh_single  ticker=%s  stage=start", t)
     _existing = get_stock_data(t)
     try:
         fresh  = generate_stock_data(t)
         result = _upsert_or_keep_snapshot(fresh, existing=_existing)
         if result == "updated":
             run_auto_classification(t)
-        logger.info("refresh_single  ticker=%s  state=%s  result=%s", t, fresh.get("ticker_state"), result)
+        logger.info(
+            "refresh_single  ticker=%s  stage=complete  state=%s  result=%s  "
+            "price=%s  ema_20=%s  fib_high=%s",
+            t, fresh.get("ticker_state"), result,
+            fresh.get("current_price"), fresh.get("ema_20_daily"), fresh.get("fib_high"),
+        )
         if result == "stale_kept":
             flash(f"Live data unavailable for {t}. Showing last known data (STALE).", "warning")
         else:
             flash(f"Refreshed {t}.", "success")
     except Exception as exc:
-        logger.error("refresh_single  ticker=%s  err=%s", t, exc, exc_info=True)
+        logger.error(
+            "refresh_single  ticker=%s  stage=error  err=%s  "
+            "snapshot_price=%s",
+            t, exc, _existing.get("current_price") if _existing else None,
+            exc_info=True,
+        )
         if _existing and _existing.get("current_price"):
             set_ticker_state(t, "stale")
             flash(f"Refresh failed for {t}. Showing last known data.", "warning")
         else:
             set_ticker_state(t, "error")
             flash(f"Refresh failed for {t}. Data unavailable.", "error")
+    finally:
+        with _single_refresh_lock:
+            _single_refresh_active.discard(t)
+        logger.debug("refresh_single  ticker=%s  stage=lock_released", t)
+
     # If we came from the dashboard (missing-ticker row), stay on dashboard
     referrer = request.referrer or ""
     if "stock/" not in referrer:

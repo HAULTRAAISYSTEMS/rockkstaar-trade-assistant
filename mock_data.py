@@ -210,7 +210,7 @@ def generate_stock_data(ticker: str) -> dict:
         data = {
             "current_price":    None,   # must come from live fetch
             "prev_close":       None,   # must come from live fetch
-            "gap_pct":          0.0,    # recalculated from live data
+            "gap_pct":          None,   # recalculated from live data; None avoids +0.00% display
             "avg_volume":       _tmpl.get("avg_volume", 5_000_000),   # order-of-magnitude seed
             "rel_volume":       1.0,    # recalculated from live data
             # Editorial context — these do NOT come from live fetch:
@@ -223,7 +223,7 @@ def generate_stock_data(ticker: str) -> dict:
         data = {
             "current_price":  None,         # populated by fetch_live_data; None = no fake price
             "prev_close":     None,         # populated by fetch_live_data
-            "gap_pct":        0.0,
+            "gap_pct":        None,         # recalculated from live data; None avoids +0.00% display
             "avg_volume":     5_000_000,
             "rel_volume":     1.0,
             "trade_bias":     "Neutral",

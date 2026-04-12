@@ -8,9 +8,52 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import threading
 from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
+
+
+def _yf_history_with_timeout(yf_ticker, timeout_s: int = 15, **kwargs):
+    """
+    Call yf_ticker.history(**kwargs) with a hard wall-clock timeout.
+
+    yfinance's history() can hang indefinitely on cloud IPs when Yahoo Finance
+    does not respond (rate-limit, crumb failure, network stall).  This wrapper
+    runs the call in a daemon thread and abandons it after *timeout_s* seconds,
+    returning an empty DataFrame so the caller can fall back to the chart API.
+
+    Returns the DataFrame on success, an empty DataFrame on timeout/error.
+    """
+    try:
+        import pandas as _pd
+    except ImportError:
+        return None
+
+    result_box: list = [None]
+    exc_box:    list = [None]
+
+    def _call():
+        try:
+            result_box[0] = yf_ticker.history(**kwargs)
+        except Exception as _e:
+            exc_box[0] = _e
+
+    t = threading.Thread(target=_call, daemon=True)
+    t.start()
+    t.join(timeout=timeout_s)
+
+    if t.is_alive():
+        logger.warning(
+            "_yf_history_with_timeout: abandoned after %ds — kwargs=%s",
+            timeout_s, kwargs,
+        )
+        return _pd.DataFrame()   # empty → triggers chart API fallback
+
+    if exc_box[0]:
+        raise exc_box[0]        # re-raise so callers' existing except blocks fire
+
+    return result_box[0]
 
 
 @contextlib.contextmanager
@@ -99,7 +142,7 @@ def _fetch_ohlcv_via_chart_api(
     for url in _CHART_URLS:
         try:
             import requests as _req
-            r = _req.get(url, params=params, headers=headers, timeout=12)
+            r = _req.get(url, params=params, headers=headers, timeout=8)
             if r.status_code != 200:
                 continue
             data        = r.json()
@@ -389,8 +432,8 @@ def fetch_live_data(ticker: str) -> dict | None:
         #   staleness detection and auto-refresh logic in the app layer.
         # ------------------------------------------------------------------ #
         try:
-            hist = t.history(period="5d", interval="1d")
-            if not hist.empty:
+            hist = _yf_history_with_timeout(t, timeout_s=15, period="5d", interval="1d")
+            if hist is not None and not hist.empty:
                 # Normalize index to US/Eastern for accurate date comparison
                 try:
                     hist.index = hist.index.tz_convert("America/New_York")
@@ -457,11 +500,15 @@ def fetch_live_data(ticker: str) -> dict | None:
         #
         #   Data source: 1-minute bars, today only, US/Eastern date filter.
         #   ORB range:   9:30 AM bars through 10:00 AM bar (31 one-minute candles).
+        #
+        #   Skip entirely when the market is fully closed (weekends/overnight).
+        #   Yahoo Finance returns no today-bars during closed hours and the 1m
+        #   fetch can hang; skipping prevents that block.
         # ------------------------------------------------------------------ #
         try:
             # --- Phase from current ET time (set even if data fetch below fails) ---
-            now_et   = _et_now()
-            h, m     = now_et.hour, now_et.minute
+            now_et    = _et_now()
+            h, m      = now_et.hour, now_et.minute
             today_str = now_et.strftime("%Y-%m-%d")   # used for date filtering below
 
             if h < 9 or (h == 9 and m < 30):
@@ -471,9 +518,22 @@ def fetch_live_data(ticker: str) -> dict | None:
             else:
                 result["orb_phase"] = "locked"
 
-            # --- Fetch 1-minute bars (pre + regular session) ---
-            intra = t.history(period="1d", interval="1m", prepost=True)
-            if not intra.empty:
+            # --- Fetch 1-minute bars (pre + regular session) with timeout ---
+            # Skip entirely when the market is fully closed (weekends/overnight).
+            # Yahoo Finance returns no today-bars during closed hours, and the 1m
+            # call can hang; avoiding it keeps dashboard loads fast on weekends.
+            _mkt_session = market_session_now()
+            if _mkt_session == "closed":
+                logger.debug(
+                    "fetch_live_data: skipping intraday 1m fetch for %s — market closed",
+                    ticker,
+                )
+                intra = None   # sentinel — skip all processing below
+            else:
+                intra = _yf_history_with_timeout(
+                    t, timeout_s=15, period="1d", interval="1m", prepost=True
+                )
+            if intra is not None and not intra.empty:
                 # Ensure index is timezone-aware in US/Eastern
                 try:
                     intra.index = intra.index.tz_convert("America/New_York")
@@ -727,10 +787,11 @@ def fetch_swing_data(ticker: str) -> dict | None:
         # Fails on cloud IPs when Yahoo Finance rejects the crumb token.
         try:
             with _silence_yf():
-                hist = yf.Ticker(ticker, session=_get_yf_session()).history(
-                    period="200d", interval="1d"
+                hist = _yf_history_with_timeout(
+                    yf.Ticker(ticker, session=_get_yf_session()),
+                    timeout_s=20, period="200d", interval="1d",
                 )
-            if not hist.empty and len(hist) >= 20:
+            if hist is not None and not hist.empty and len(hist) >= 20:
                 try:
                     hist.index = hist.index.tz_convert("America/New_York")
                 except TypeError:
@@ -832,8 +893,9 @@ def fetch_swing_data(ticker: str) -> dict | None:
             hist_1h = None
             try:
                 with _silence_yf():
-                    hist_1h = yf.Ticker(ticker, session=_get_yf_session()).history(
-                        period="30d", interval="60m"
+                    hist_1h = _yf_history_with_timeout(
+                        yf.Ticker(ticker, session=_get_yf_session()),
+                        timeout_s=15, period="30d", interval="60m",
                     )
                 if hist_1h is not None and hist_1h.empty:
                     hist_1h = None
@@ -842,7 +904,7 @@ def fetch_swing_data(ticker: str) -> dict | None:
 
             # Chart API fallback for 1h bars
             _h1_closes = _h1_highs = _h1_lows = None
-            if hist_1h is not None and len(hist_1h) >= 20:
+            if hist_1h is not None and not hist_1h.empty and len(hist_1h) >= 20:
                 try:
                     hist_1h.index = hist_1h.index.tz_convert("America/New_York")
                 except TypeError:
@@ -912,10 +974,11 @@ def fetch_swing_data(ticker: str) -> dict | None:
             _m15_lows = _m15_closes = _m15_highs = _m15_opens = None
             try:
                 with _silence_yf():
-                    hist_15m = yf.Ticker(ticker, session=_get_yf_session()).history(
-                        period="5d", interval="15m"
+                    hist_15m = _yf_history_with_timeout(
+                        yf.Ticker(ticker, session=_get_yf_session()),
+                        timeout_s=10, period="5d", interval="15m",
                     )
-                if not hist_15m.empty and len(hist_15m) >= 6:
+                if hist_15m is not None and not hist_15m.empty and len(hist_15m) >= 6:
                     try:
                         hist_15m.index = hist_15m.index.tz_convert("America/New_York")
                     except TypeError:
