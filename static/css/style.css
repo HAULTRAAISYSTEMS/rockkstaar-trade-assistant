@@ -46,9 +46,10 @@
 
 html {
   font-size: 14px;
-  /* Paint the html element dark so iOS overscroll/bounce areas are never white.
-     background-attachment:fixed is intentionally omitted — it is broken on iOS
-     Safari and causes white flashing on overscroll.  */
+  /* Solid fallback first — guarantees the safe-area / overscroll region is never white
+     even before the gradient paints or if the gradient computation fails.
+     background-attachment:fixed is omitted — it is broken on iOS Safari. */
+  background-color: #04070f;
   background:
     radial-gradient(circle at top left,  rgba(124, 58, 237, 0.18), transparent 28%),
     radial-gradient(circle at top right, rgba(34, 211, 238, 0.10), transparent 24%),
@@ -62,8 +63,9 @@ html {
 }
 
 body {
-  /* Layered gradient: purple glow top-left · cyan glow top-right · deep navy base.
+  /* Solid fallback ensures no white bleed in safe-area regions before gradient loads.
      background-attachment:fixed omitted — broken on iOS Safari (causes white flash). */
+  background-color: #04070f;
   background:
     radial-gradient(circle at top left,  rgba(124, 58, 237, 0.18), transparent 28%),
     radial-gradient(circle at top right, rgba(34, 211, 238, 0.10), transparent 24%),
@@ -76,7 +78,7 @@ body {
   min-height: 100dvh;
   max-width: 100%;
   overflow-x: hidden;
-  /* iPhone safe-area insets (active when viewport-fit=cover is set) */
+  /* iPhone safe-area insets — active because viewport-fit=cover is set in the meta tag */
   padding-top:    env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
   padding-left:   env(safe-area-inset-left);
