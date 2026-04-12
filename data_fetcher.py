@@ -53,6 +53,93 @@ def _get_yf_session():
     return _YF_SESSION
 
 
+def _fetch_ohlcv_via_chart_api(
+    ticker: str,
+    interval: str = "1d",
+    range_str: str = "1y",
+) -> dict | None:
+    """
+    Fetch OHLCV bars directly from Yahoo Finance's chart API.
+
+    This bypasses yfinance's history() call (which requires a crumb token and
+    fails on cloud IPs like Render).  The chart endpoint has no such requirement
+    and returns the same daily bars needed for EMA and Fibonacci computation.
+
+    Parameters
+    ----------
+    interval  : "1d" | "1h" | "15m" | "1m"
+    range_str : "5d" | "30d" | "1y" | "2y"
+                Use "1y" for daily EMAs/fibs (≥252 bars for 200 EMA).
+                Use "30d" for hourly 4H-proxy bars.
+                Use "5d" for 15m confirmation bars.
+
+    Returns a dict:
+        timestamps  list[int]   — Unix timestamps
+        closes      list[float]
+        opens       list[float]
+        highs       list[float]
+        lows        list[float]
+        volumes     list[int]
+    Or None on failure.
+    """
+    _CHART_URLS = [
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+        f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}",
+    ]
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json",
+    }
+    params = {"interval": interval, "range": range_str}
+
+    for url in _CHART_URLS:
+        try:
+            import requests as _req
+            r = _req.get(url, params=params, headers=headers, timeout=12)
+            if r.status_code != 200:
+                continue
+            data        = r.json()
+            result_node = data["chart"]["result"][0]
+            timestamps  = result_node.get("timestamp", [])
+            quote       = result_node["indicators"]["quote"][0]
+
+            closes  = quote.get("close",  [])
+            opens   = quote.get("open",   [])
+            highs   = quote.get("high",   [])
+            lows    = quote.get("low",    [])
+            volumes = quote.get("volume", [])
+
+            # Filter out bars with None close (incomplete bars, market holidays)
+            valid = [
+                (t, o, c, h, lo, v)
+                for t, o, c, h, lo, v in zip(timestamps, opens, closes, highs, lows, volumes)
+                if c is not None and c > 0
+            ]
+            if not valid:
+                continue
+
+            ts, ops, cls, hs, ls, vs = zip(*valid)
+            return {
+                "timestamps": list(ts),
+                "closes":     [float(x) for x in cls],
+                "opens":      [float(x) for x in ops],
+                "highs":      [float(x) for x in hs],
+                "lows":       [float(x) for x in ls],
+                "volumes":    [int(x) if x else 0 for x in vs],
+            }
+        except Exception as _e:
+            logger.debug(
+                "_fetch_ohlcv_via_chart_api failed for %s interval=%s range=%s via %s: %s",
+                ticker, interval, range_str, url, _e,
+            )
+            continue
+    return None
+
+
 def _fetch_price_via_chart_api(ticker: str) -> dict | None:
     """
     Fetch current price AND prev_close directly from Yahoo Finance's chart API.
@@ -632,31 +719,65 @@ def fetch_swing_data(ticker: str) -> dict | None:
         return e
 
     try:
-        with _silence_yf():
-            hist = yf.Ticker(ticker, session=_get_yf_session()).history(period="200d", interval="1d")
+        closes = highs = lows = None
+        _daily_source = "none"
 
-        if hist.empty or len(hist) < 20:
+        # ── Primary: yfinance history (200 trading days ≈ 10 months) ─────────
+        # Needs ≥200 bars for the 200 EMA; ≥20 for everything else.
+        # Fails on cloud IPs when Yahoo Finance rejects the crumb token.
+        try:
+            with _silence_yf():
+                hist = yf.Ticker(ticker, session=_get_yf_session()).history(
+                    period="200d", interval="1d"
+                )
+            if not hist.empty and len(hist) >= 20:
+                try:
+                    hist.index = hist.index.tz_convert("America/New_York")
+                except TypeError:
+                    hist.index = hist.index.tz_localize("UTC").tz_convert("America/New_York")
+                closes = list(hist["Close"].astype(float))
+                highs  = list(hist["High"].astype(float))
+                lows   = list(hist["Low"].astype(float))
+                _daily_source = "yfinance"
+        except Exception as _yf_err:
+            logger.debug("fetch_swing_data: yfinance history failed for %s: %s", ticker, _yf_err)
+
+        # ── Fallback: direct chart API (range=1y → ≥252 bars, no crumb needed) ─
+        if not closes:
+            _bars = _fetch_ohlcv_via_chart_api(ticker, interval="1d", range_str="1y")
+            if _bars and len(_bars["closes"]) >= 20:
+                closes = _bars["closes"]
+                highs  = _bars["highs"]
+                lows   = _bars["lows"]
+                _daily_source = "chart_api"
+                logger.info(
+                    "fetch_swing_data: chart API daily fallback for %s → %d bars",
+                    ticker, len(closes),
+                )
+
+        if not closes or len(closes) < 20:
+            logger.warning(
+                "fetch_swing_data: insufficient daily bars for %s "
+                "(yfinance=%s, chart_api tried) — EMA/fib skipped",
+                ticker, "empty" if closes is not None else "failed",
+            )
             return None
 
-        try:
-            hist.index = hist.index.tz_convert("America/New_York")
-        except TypeError:
-            hist.index = hist.index.tz_localize("UTC").tz_convert("America/New_York")
-
-        closes = list(hist["Close"].astype(float))
-        highs  = list(hist["High"].astype(float))
-        lows   = list(hist["Low"].astype(float))
-        n      = len(closes)
-        cur    = closes[-1]
+        n   = len(closes)
+        cur = closes[-1]
 
         result: dict = {}
+        result["_daily_data_source"] = _daily_source   # debug field; not stored in DB
 
         # ── EMAs ────────────────────────────────────────────────────────────
         e20  = _ema(closes, 20)
         e50  = _ema(closes, 50)
         result["ema_20_daily"] = round(e20, 2)
         result["ema_50_daily"] = round(e50, 2)
-        result["ema_200_daily"] = round(_ema(closes, 200), 2) if n >= 100 else None
+        # 200 EMA: needs ≥200 bars; with chart API range=1y we typically get 252.
+        result["ema_200_daily"] = round(_ema(closes, 200), 2) if n >= 200 else (
+            round(_ema(closes, n), 2) if n >= 100 else None
+        )
 
         result["pct_from_ema20"] = round((cur - e20) / e20 * 100, 2) if e20 else None
         result["pct_from_ema50"] = round((cur - e50) / e50 * 100, 2) if e50 else None
@@ -708,53 +829,73 @@ def fetch_swing_data(ticker: str) -> dict | None:
         # Uses regular-session 1h bars.  EMA stack + HH/HL on last ~80 1h bars
         # gives the same structural read as a 4H chart without requiring resampling.
         try:
-            with _silence_yf():
-                hist_1h = yf.Ticker(ticker, session=_get_yf_session()).history(period="30d", interval="60m")
+            hist_1h = None
+            try:
+                with _silence_yf():
+                    hist_1h = yf.Ticker(ticker, session=_get_yf_session()).history(
+                        period="30d", interval="60m"
+                    )
+                if hist_1h is not None and hist_1h.empty:
+                    hist_1h = None
+            except Exception:
+                hist_1h = None
 
-            if not hist_1h.empty and len(hist_1h) >= 20:
+            # Chart API fallback for 1h bars
+            _h1_closes = _h1_highs = _h1_lows = None
+            if hist_1h is not None and len(hist_1h) >= 20:
                 try:
                     hist_1h.index = hist_1h.index.tz_convert("America/New_York")
                 except TypeError:
                     hist_1h.index = hist_1h.index.tz_localize("UTC").tz_convert("America/New_York")
-
-                # Regular session only (09:30–15:59 ET)
+                # Filter to regular session (09:30–15:59 ET)
                 h1_mask = (
                     ((hist_1h.index.hour > 9) | ((hist_1h.index.hour == 9) & (hist_1h.index.minute >= 30))) &
                     (hist_1h.index.hour < 16)
                 )
-                h1 = hist_1h[h1_mask]
+                _h1 = hist_1h[h1_mask]
+                if len(_h1) >= 20:
+                    _h1_closes = list(_h1["Close"].astype(float))
+                    _h1_highs  = list(_h1["High"].astype(float))
+                    _h1_lows   = list(_h1["Low"].astype(float))
+            else:
+                _bars_1h = _fetch_ohlcv_via_chart_api(ticker, interval="1h", range_str="30d")
+                if _bars_1h and len(_bars_1h["closes"]) >= 20:
+                    _h1_closes = _bars_1h["closes"]
+                    _h1_highs  = _bars_1h["highs"]
+                    _h1_lows   = _bars_1h["lows"]
+                    logger.debug(
+                        "fetch_swing_data: chart API 1h fallback for %s → %d bars",
+                        ticker, len(_h1_closes),
+                    )
 
-                if len(h1) >= 20:
-                    h1_closes = list(h1["Close"].astype(float))
-                    h1_highs  = list(h1["High"].astype(float))
-                    h1_lows   = list(h1["Low"].astype(float))
-                    n_h1      = len(h1_closes)
-                    h1_cur    = h1_closes[-1]
+            # _h1_closes/_h1_highs/_h1_lows are already filtered/list — use directly
+            if _h1_closes and len(_h1_closes) >= 20:
+                n_h1  = len(_h1_closes)
+                h1_cur = _h1_closes[-1]
 
-                    h4_e20 = _ema(h1_closes, 20)
-                    h4_e50 = _ema(h1_closes, 50) if n_h1 >= 50 else None
-                    result["h4_ema20"] = round(h4_e20, 2)
-                    result["h4_ema50"] = round(h4_e50, 2) if h4_e50 else None
+                h4_e20 = _ema(_h1_closes, 20)
+                h4_e50 = _ema(_h1_closes, 50) if n_h1 >= 50 else None
+                result["h4_ema20"] = round(h4_e20, 2)
+                result["h4_ema50"] = round(h4_e50, 2) if h4_e50 else None
 
-                    h4_bull = (h1_cur > h4_e20 > h4_e50) if h4_e50 else (h1_cur > h4_e20)
-                    h4_bear = (h1_cur < h4_e20 < h4_e50) if h4_e50 else (h1_cur < h4_e20)
+                h4_bull = (h1_cur > h4_e20 > h4_e50) if h4_e50 else (h1_cur > h4_e20)
+                h4_bear = (h1_cur < h4_e20 < h4_e50) if h4_e50 else (h1_cur < h4_e20)
 
-                    # Structure: compare last vs 5 bars back (approx one 4H period)
-                    if n_h1 >= 8:
-                        h4_hh = h1_highs[-1] > h1_highs[-5]
-                        h4_hl = h1_lows[-1]  > h1_lows[-5]
-                        h4_lh = h1_highs[-1] < h1_highs[-5]
-                        h4_ll = h1_lows[-1]  < h1_lows[-5]
-                    else:
-                        h4_hh = h4_hl = h4_lh = h4_ll = False
+                if n_h1 >= 8:
+                    h4_hh = _h1_highs[-1] > _h1_highs[-5]
+                    h4_hl = _h1_lows[-1]  > _h1_lows[-5]
+                    h4_lh = _h1_highs[-1] < _h1_highs[-5]
+                    h4_ll = _h1_lows[-1]  < _h1_lows[-5]
+                else:
+                    h4_hh = h4_hl = h4_lh = h4_ll = False
 
-                    result["h4_hh_hl"] = bool(h4_hh and h4_hl)
+                result["h4_hh_hl"] = bool(h4_hh and h4_hl)
 
-                    if   h4_bull and h4_hh and h4_hl:  result["h4_trend"] = "Bullish"
-                    elif h4_bear and h4_lh and h4_ll:  result["h4_trend"] = "Bearish"
-                    elif h4_bull or (h4_hh and h4_hl): result["h4_trend"] = "Bullish Lean"
-                    elif h4_bear or (h4_lh and h4_ll): result["h4_trend"] = "Bearish Lean"
-                    else:                               result["h4_trend"] = "Neutral"
+                if   h4_bull and h4_hh and h4_hl:  result["h4_trend"] = "Bullish"
+                elif h4_bear and h4_lh and h4_ll:  result["h4_trend"] = "Bearish"
+                elif h4_bull or (h4_hh and h4_hl): result["h4_trend"] = "Bullish Lean"
+                elif h4_bear or (h4_lh and h4_ll): result["h4_trend"] = "Bearish Lean"
+                else:                               result["h4_trend"] = "Neutral"
 
         except Exception as e:
             logger.debug("4H data fetch failed for %s: %s", ticker, e)
@@ -768,34 +909,45 @@ def fetch_swing_data(ticker: str) -> dict | None:
         # m15_confirmation scores 0 (none), 1 (developing), or 2 (confirmed).
         # Signals checked: 15m higher low on last 3 bars, strong bullish body on last bar.
         try:
-            with _silence_yf():
-                hist_15m = yf.Ticker(ticker, session=_get_yf_session()).history(period="5d", interval="15m")
-
-            if not hist_15m.empty and len(hist_15m) >= 6:
-                try:
-                    hist_15m.index = hist_15m.index.tz_convert("America/New_York")
-                except TypeError:
-                    hist_15m.index = hist_15m.index.tz_localize("UTC").tz_convert("America/New_York")
-
-                m15_mask = (
-                    ((hist_15m.index.hour > 9) | ((hist_15m.index.hour == 9) & (hist_15m.index.minute >= 30))) &
-                    (hist_15m.index.hour < 16)
-                )
-                m15 = hist_15m[m15_mask]
-
-                if len(m15) >= 6:
-                    m15_lows   = m15["Low"].astype(float).values
-                    m15_last   = m15.iloc[-1]
-                    body       = abs(float(m15_last["Close"]) - float(m15_last["Open"]))
-                    rng        = float(m15_last["High"]) - float(m15_last["Low"])
-
-                    higher_low   = bool(len(m15_lows) >= 3 and m15_lows[-1] > m15_lows[-3])
-                    strong_candle = bool(
-                        rng > 0 and body / rng > 0.50
-                        and float(m15_last["Close"]) > float(m15_last["Open"])
+            _m15_lows = _m15_closes = _m15_highs = _m15_opens = None
+            try:
+                with _silence_yf():
+                    hist_15m = yf.Ticker(ticker, session=_get_yf_session()).history(
+                        period="5d", interval="15m"
                     )
-                    result["m15_higher_low"]   = higher_low
-                    result["m15_confirmation"] = int(higher_low) + int(strong_candle)
+                if not hist_15m.empty and len(hist_15m) >= 6:
+                    try:
+                        hist_15m.index = hist_15m.index.tz_convert("America/New_York")
+                    except TypeError:
+                        hist_15m.index = hist_15m.index.tz_localize("UTC").tz_convert("America/New_York")
+                    m15_mask = (
+                        ((hist_15m.index.hour > 9) | ((hist_15m.index.hour == 9) & (hist_15m.index.minute >= 30))) &
+                        (hist_15m.index.hour < 16)
+                    )
+                    m15 = hist_15m[m15_mask]
+                    if len(m15) >= 6:
+                        _m15_closes = list(m15["Close"].astype(float))
+                        _m15_opens  = list(m15["Open"].astype(float))
+                        _m15_highs  = list(m15["High"].astype(float))
+                        _m15_lows   = list(m15["Low"].astype(float))
+            except Exception:
+                pass
+
+            if not _m15_lows:
+                _bars_15m = _fetch_ohlcv_via_chart_api(ticker, interval="15m", range_str="5d")
+                if _bars_15m and len(_bars_15m["closes"]) >= 6:
+                    _m15_closes = _bars_15m["closes"]
+                    _m15_opens  = _bars_15m["opens"]
+                    _m15_highs  = _bars_15m["highs"]
+                    _m15_lows   = _bars_15m["lows"]
+
+            if _m15_lows and len(_m15_lows) >= 6:
+                body = abs(_m15_closes[-1] - _m15_opens[-1])
+                rng  = _m15_highs[-1] - _m15_lows[-1]
+                higher_low    = bool(len(_m15_lows) >= 3 and _m15_lows[-1] > _m15_lows[-3])
+                strong_candle = bool(rng > 0 and body / rng > 0.50 and _m15_closes[-1] > _m15_opens[-1])
+                result["m15_higher_low"]   = higher_low
+                result["m15_confirmation"] = int(higher_low) + int(strong_candle)
 
         except Exception as e:
             logger.debug("15m confirmation fetch failed for %s: %s", ticker, e)
