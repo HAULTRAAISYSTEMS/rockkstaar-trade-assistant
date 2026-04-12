@@ -1045,13 +1045,36 @@ def annotate(stock: dict) -> dict:
         stock["orb_price_pct"] = round(max(2, min(98, pct)), 1)
     else:
         stock["orb_price_pct"] = 50.0
+    # ── Gap calculation ─────────────────────────────────────────────────────
+    # Primary: stored gap_pct from fetch_live_data().
+    # Fallback: derive on the fly from current_price + prev_close.
+    # This ensures gap is never missing when both price fields are available.
     gap = stock.get("gap_pct")
+    if gap is None:
+        _cp = stock.get("current_price")
+        _pc = stock.get("prev_close")
+        if _cp and _pc and _pc > 0:
+            gap = round((_cp - _pc) / _pc * 100, 2)
+            stock["gap_pct"] = gap
+
     if gap is not None:
         stock["gap_display"] = f"{'+' if gap >= 0 else ''}{gap:.2f}%"
         stock["gap_class"]   = "positive" if gap >= 0 else "negative"
     else:
         stock["gap_display"] = "—"
         stock["gap_class"]   = ""
+
+    # ── Data availability flags (used by detail page to guard stale sections) ─
+    # swing_data_available: True if EMA/fib data was fetched (swing pipeline ran)
+    # swing_plan_valid:     True if a computed trade plan exists AND swing data is fresh
+    # swing_plan_stale:     True if plan fields are in DB but swing data is missing
+    _has_ema        = bool(stock.get("ema_20_daily"))
+    _has_fibs       = bool(stock.get("fib_high") and stock.get("fib_low"))
+    _has_plan_fields = bool(stock.get("entry_zone_low") or stock.get("stop_level"))
+    stock["swing_data_available"] = _has_ema
+    stock["fib_data_available"]   = _has_fibs
+    stock["swing_plan_valid"]     = _has_plan_fields and _has_ema
+    stock["swing_plan_stale"]     = _has_plan_fields and not _has_ema
 
     # Decode catalyst_category JSON → list of {key, label} dicts for templates
     import json as _json
@@ -1870,6 +1893,44 @@ def stock_detail(ticker):
     if stock is None:
         flash(f"No data found for {ticker}.", "error")
         return redirect(url_for("dashboard"))
+
+    # ── Live price enrichment pass ───────────────────────────────────────────
+    # On the detail page, always try the chart API to fill in any missing price
+    # fields so the user always sees current data regardless of DB state.
+    # This is a lightweight read-only call (~200ms) — it does NOT write to the DB.
+    try:
+        from data_fetcher import _fetch_price_via_chart_api
+        _chart = _fetch_price_via_chart_api(ticker)
+        if _chart:
+            _src_map = {}
+            for _field in ("current_price", "prev_close", "prev_day_high", "prev_day_low"):
+                _db_val   = stock.get(_field)
+                _live_val = _chart.get(_field)
+                if _live_val:
+                    if _db_val != _live_val:
+                        stock[_field] = _live_val   # always prefer freshly-fetched
+                        _src_map[_field] = "chart_api"
+                    else:
+                        _src_map[_field] = "db_matches_live"
+                else:
+                    _src_map[_field] = "db_only" if _db_val else "unavailable"
+            # Also recompute gap_pct from live current_price + prev_close
+            _cp, _pc = stock.get("current_price"), stock.get("prev_close")
+            if _cp and _pc and _pc > 0:
+                stock["gap_pct"] = round((_cp - _pc) / _pc * 100, 2)
+            logger.info(
+                "stock_detail  ticker=%s  live_enrich=ok  sources=%s  "
+                "price=%.2f  prev_close=%s  gap_pct=%s  "
+                "ema_20=%s  fib_high=%s",
+                ticker, _src_map,
+                stock.get("current_price") or 0,
+                stock.get("prev_close"),
+                stock.get("gap_pct"),
+                stock.get("ema_20_daily"),
+                stock.get("fib_high"),
+            )
+    except Exception as _enrich_err:
+        logger.warning("stock_detail  ticker=%s  live_enrich=failed  err=%s", ticker, _enrich_err)
 
     # Annotate — guarded so a single bad field can't crash the whole detail page
     try:

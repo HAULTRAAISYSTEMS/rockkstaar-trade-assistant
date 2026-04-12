@@ -93,21 +93,39 @@ def _fetch_price_via_chart_api(ticker: str) -> dict | None:
 
             out = {"current_price": round(float(price), 2)}
 
-            # Previous close: prefer explicit previousClose field in meta,
-            # then fall back to the second-to-last bar's Close in the OHLCV data.
-            prev = meta.get("previousClose") or meta.get("chartPreviousClose")
-            if prev and float(prev) > 0:
-                out["prev_close"] = round(float(prev), 2)
-            else:
-                try:
-                    closes = result_node["indicators"]["quote"][0]["close"]
-                    valid  = [c for c in closes if c is not None and c > 0]
-                    if len(valid) >= 2:
-                        out["prev_close"] = round(float(valid[-2]), 2)
-                    elif valid:
-                        out["prev_close"] = round(float(valid[-1]), 2)
-                except Exception:
-                    pass
+            # ── Pull OHLCV bars from the indicators node ─────────────────────
+            # With range=5d we get ~5 complete trading days.  The last bar in
+            # the series is the most recent completed session (prev trading day).
+            try:
+                quote      = result_node["indicators"]["quote"][0]
+                timestamps = result_node.get("timestamp", [])
+                closes  = quote.get("close",  [])
+                highs   = quote.get("high",   [])
+                lows    = quote.get("low",    [])
+
+                # Filter to bars with a valid close price
+                valid_bars = [
+                    (t, c, h, lo)
+                    for t, c, h, lo in zip(timestamps, closes, highs, lows)
+                    if c is not None and c > 0
+                ]
+
+                if len(valid_bars) >= 2:
+                    # Second-to-last bar = previous completed trading session
+                    _, prev_c, prev_h, prev_lo = valid_bars[-2]
+                    out["prev_close"]    = round(float(prev_c),  2)
+                    out["prev_day_high"] = round(float(prev_h),  2)
+                    out["prev_day_low"]  = round(float(prev_lo), 2)
+                elif len(valid_bars) == 1:
+                    _, prev_c, prev_h, prev_lo = valid_bars[0]
+                    out["prev_close"]    = round(float(prev_c),  2)
+                    out["prev_day_high"] = round(float(prev_h),  2)
+                    out["prev_day_low"]  = round(float(prev_lo), 2)
+            except Exception:
+                # Fallback: use meta previousClose when bars unavailable
+                prev = meta.get("previousClose") or meta.get("chartPreviousClose")
+                if prev and float(prev) > 0:
+                    out["prev_close"] = round(float(prev), 2)
 
             return out
 
@@ -250,12 +268,19 @@ def fetch_live_data(ticker: str) -> dict | None:
             _chart = _fetch_price_via_chart_api(ticker)
             if _chart:
                 current_price = _chart.get("current_price")
-                # Also back-fill prev_close if not yet set from fast_info
                 if not prev_close and _chart.get("prev_close"):
                     prev_close = _chart["prev_close"]
+                # Inject prev_day_high/low from chart bars immediately into result
+                # so section-2 history doesn't need to succeed to populate them.
+                if _chart.get("prev_day_high") and "prev_day_high" not in result:
+                    result["prev_day_high"] = _chart["prev_day_high"]
+                if _chart.get("prev_day_low") and "prev_day_low" not in result:
+                    result["prev_day_low"] = _chart["prev_day_low"]
                 logger.info(
-                    "fetch_live_data: chart API fallback for %s → price=%.2f prev_close=%s",
+                    "fetch_live_data: chart API fallback for %s → "
+                    "price=%.2f prev_close=%s prev_h=%s prev_l=%s",
                     ticker, current_price or 0, _chart.get("prev_close"),
+                    _chart.get("prev_day_high"), _chart.get("prev_day_low"),
                 )
 
         if current_price:
@@ -319,14 +344,21 @@ def fetch_live_data(ticker: str) -> dict | None:
 
         except Exception as e:
             logger.debug("Daily history fetch failed for %s: %s", ticker, e)
-            # Fallback chain: fast_info prev_close → chart API prev_close
-            if "prev_close" not in result:
-                if prev_close and prev_close > 0:
+            # Fallback chain for missing fields: fast_info → chart API OHLCV bars
+            if "prev_close" not in result or "prev_day_high" not in result:
+                _chart_fb = _fetch_price_via_chart_api(ticker)
+                if _chart_fb:
+                    if "prev_close" not in result:
+                        if prev_close and prev_close > 0:
+                            result["prev_close"] = round(prev_close, 2)
+                        elif _chart_fb.get("prev_close"):
+                            result["prev_close"] = _chart_fb["prev_close"]
+                    if "prev_day_high" not in result and _chart_fb.get("prev_day_high"):
+                        result["prev_day_high"] = _chart_fb["prev_day_high"]
+                    if "prev_day_low" not in result and _chart_fb.get("prev_day_low"):
+                        result["prev_day_low"] = _chart_fb["prev_day_low"]
+                elif prev_close and prev_close > 0 and "prev_close" not in result:
                     result["prev_close"] = round(prev_close, 2)
-                else:
-                    _chart_fb = _fetch_price_via_chart_api(ticker)
-                    if _chart_fb and _chart_fb.get("prev_close"):
-                        result["prev_close"] = _chart_fb["prev_close"]
 
         # ------------------------------------------------------------------ #
         # 3. Intraday bars — premarket range + ORB levels

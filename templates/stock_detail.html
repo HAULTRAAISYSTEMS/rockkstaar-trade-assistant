@@ -106,8 +106,23 @@
 
   <!-- ===== SWING TRADE PLAN ===== -->
   <div class="detail-card swing-plan-card">
-    <h3 class="card-title">Swing Trade Plan</h3>
+    <h3 class="card-title">Swing Trade Plan
+      {% if stock.swing_plan_stale %}
+      <span class="plan-stale-badge">STALE — EMA/swing data missing</span>
+      {% elif not stock.swing_plan_valid and not stock.swing_plan_stale %}
+      <span class="plan-stale-badge plan-unavailable-badge">Awaiting analysis</span>
+      {% endif %}
+    </h3>
 
+    {% if stock.swing_plan_stale %}
+    <div class="plan-stale-warning">
+      These levels were computed during a previous analysis pass. EMA and Fibonacci data
+      are currently missing — levels may not reflect the current price structure.
+      <strong>Click Refresh Data to recompute.</strong>
+    </div>
+    {% endif %}
+
+    {% if stock.swing_plan_valid or stock.swing_plan_stale %}
     <div class="swing-plan-grid">
 
       <div class="swing-plan-col">
@@ -153,6 +168,12 @@
       </div>
 
     </div>
+    {% else %}
+    <div class="no-data-msg">
+      Trade plan not yet computed — full analysis (EMA + Fibonacci) required.
+      Click <strong>Refresh Data</strong> above to run a complete analysis pass.
+    </div>
+    {% endif %}
   </div>
 
   <!-- ===== EMA + STRUCTURE ANALYSIS ===== -->
@@ -249,7 +270,10 @@
 
         </div>
         {% else %}
-        <div class="no-data-msg">Fibonacci levels not yet computed — refresh to load.</div>
+        <div class="no-data-msg">
+          Fibonacci unavailable — requires 200-day price history.<br>
+          <small>Click <strong>Refresh Data</strong> to compute levels.</small>
+        </div>
         {% endif %}
       </div>
     </div>
