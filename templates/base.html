@@ -42,6 +42,7 @@
       </form>
     </div>
   </nav>
+  <div class="mobile-refresh-bar"><form action="{{ url_for('refresh_all') }}" method="POST" style="margin:0;"><button type="submit" class="mobile-refresh-btn">Refresh All</button>button></form>form></div>div>
 
   <!-- ===== FLASH MESSAGES ===== -->
   {% with messages = get_flashed_messages(with_categories=true) %}
