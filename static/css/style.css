@@ -4099,3 +4099,10 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   .swing-plan-grid { gap: 12px; }
 
 }
+
+.mobile-refresh-bar { display: none; }
+.mobile-refresh-btn { display: none; }
+@media (max-width: 768px) {
+     .mobile-refresh-bar { display: block; padding: 8px 12px; background: #0b1120; border-bottom: 1px solid #1e2d45; }
+     .mobile-refresh-btn { display: block; width: 100%; padding: 14px; font-size: 16px; font-weight: 700; background: linear-gradient(135deg, #00d8ff, #0090d8); color: #020d18; border: none; border-radius: 10px; cursor: pointer; }
+}
