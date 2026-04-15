@@ -11,7 +11,7 @@ import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, sessionh
 from flask_sock import Sock
 
 logger = logging.getLogger(__name__)
@@ -2391,7 +2391,7 @@ def ws_dashboard(ws):
                     break   # clean client close
             except Exception:
                 break       # network error or close
-            if _time.monotonic() - last_push >= 15.0:
+            if _time.monotonic() - last_push >= 5.0:
                 ws.send(_json.dumps(_build_dashboard_payload(wl_id)))
                 last_push = _time.monotonic()
     except Exception as exc:
@@ -2415,7 +2415,7 @@ def ws_quick(ws):
                     break
             except Exception:
                 break
-            if _time.monotonic() - last_push >= 15.0:
+            if _time.monotonic() - last_push >= 5.0:
                 ws.send(_json.dumps(_build_quick_payload(wl_id)))
                 last_push = _time.monotonic()
     except Exception as exc:
@@ -2552,7 +2552,7 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
     secondary    = compute_secondary_watchlist(ranked, top5_tickers)
     return {
         "type":        "dashboard",
-        "server_time": datetime.now().strftime("%H:%M:%S"),
+        "server_time": datetime.now().strftime("%I:%M %p").lstrip("0"),
         "orb_session": get_orb_session_banner(),
         "no_trade":    no_trade,
         "triggered":   [_stock_summary(s) for s in triggered],
@@ -2577,7 +2577,7 @@ def _build_quick_payload(wl_id: int | None) -> dict:
         out.append(_stock_summary(s))
     return {
         "type":        "quick",
-        "server_time": datetime.now().strftime("%H:%M:%S"),
+        "server_time": datetime.now().strftime("%I:%M %p").lstrip("0"),
         "orb_session": get_orb_session_banner(),
         "stocks":      out,
     }
