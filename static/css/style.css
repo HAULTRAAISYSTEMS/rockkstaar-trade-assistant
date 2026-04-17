@@ -3937,6 +3937,140 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ==========================================================
+   SIMPLIFIED 4-STATE DECISION BADGES
+   sfa-aplus / sfa-watch / sfa-extended / sfa-rejected
+   Shown in: dashboard Status column, top-5 cards, detail header
+   ========================================================== */
+
+/* Base — inherits .exec-badge sizing/layout */
+.sfa-aplus {
+  background: linear-gradient(135deg, rgba(34,197,94,0.22), rgba(34,197,94,0.12));
+  color: #22c55e;
+  border: 1px solid rgba(34,197,94,0.55);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 8px rgba(34,197,94,0.45);
+  box-shadow: 0 0 10px rgba(34,197,94,0.18);
+}
+.sfa-watch {
+  background: rgba(251,191,36,0.11);
+  color: #fbbf24;
+  border: 1px solid rgba(251,191,36,0.32);
+  font-weight: 600;
+}
+.sfa-extended {
+  background: rgba(249,115,22,0.11);
+  color: #f97316;
+  border: 1px solid rgba(249,115,22,0.35);
+  font-weight: 600;
+}
+.sfa-rejected {
+  background: rgba(239,68,68,0.08);
+  color: #f87171;
+  border: 1px solid rgba(239,68,68,0.28);
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+/* XL size — used in stock detail header */
+.exec-badge-xl {
+  font-size: 1rem;
+  padding: 0.4rem 1rem;
+  border-radius: var(--radius);
+  letter-spacing: 0.06em;
+}
+
+/* ==========================================================
+   MOBILE STICKY CONTROL BAR
+   Pinned to the bottom of the screen on ≤ 768px.
+   Hidden on desktop — navbar has the same controls there.
+   ========================================================== */
+
+.mobile-ctrl-bar {
+  display: none; /* hidden on desktop */
+}
+
+@media (max-width: 768px) {
+  .mobile-ctrl-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    /* Sit above safe-area home bar */
+    padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    background: rgba(7, 11, 24, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid rgba(255,255,255,0.07);
+    z-index: 500;
+  }
+
+  .mobile-ctrl-time {
+    flex: 1;
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-ctrl-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    min-width: 52px;
+    height: 36px;
+    padding: 0 0.6rem;
+    border-radius: var(--radius);
+    font-size: 0.72rem;
+    font-weight: 700;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    color: var(--text-muted);
+    cursor: pointer;
+    white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .mobile-ctrl-btn:active {
+    transform: scale(0.95);
+  }
+
+  /* Active (ON) state — green tint */
+  .mobile-ctrl-btn.mcb-on {
+    background: rgba(34,197,94,0.12);
+    color: var(--green);
+    border-color: var(--green-dim);
+  }
+
+  /* Off state */
+  .mobile-ctrl-btn.mcb-off {
+    background: var(--bg3);
+    color: var(--text-muted);
+    border-color: var(--border);
+  }
+
+  /* Refresh button — accent blue */
+  .mobile-ctrl-refresh {
+    background: rgba(124,58,237,0.14);
+    color: #a78bfa;
+    border-color: rgba(124,58,237,0.38);
+  }
+
+  /* Push main content up so sticky bar doesn't overlap the last row */
+  .main-content {
+    padding-bottom: calc(3rem + env(safe-area-inset-bottom, 0px) + 56px) !important;
+  }
+}
+
+/* ==========================================================
    MOBILE VIEWPORT & LAYOUT FIX
    Target: iPhone and small Android (≤ 768px)
    Fixes: white background on overscroll, navbar overflow,

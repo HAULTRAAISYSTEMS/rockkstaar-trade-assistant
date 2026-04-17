@@ -153,10 +153,10 @@
     <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="top5-card {{ s.swing_score_class }}" data-ticker="{{ s.ticker }}">
       <div class="top5-header">
         <div class="top5-ticker">{{ s.ticker }}</div>
-        <span class="exec-badge exec-badge-sm {{ s.exec_class }}">{{ s.final_action or 'WAIT' }}</span>
+        <span class="exec-badge exec-badge-sm {{ s.simplified_action_class }}" data-field="sfa_badge" title="{{ s.final_action }}">{{ s.simplified_action }}</span>
       </div>
-      <div class="top5-price">${{ "%.2f"|format(s.current_price) if s.current_price is not none else "N/A" }}
-        <span class="top5-gap {{ s.gap_class }}">{{ s.gap_display }}</span>
+      <div class="top5-price" data-field="price">${{ "%.2f"|format(s.current_price) if s.current_price is not none else "N/A" }}
+        <span class="top5-gap {{ s.gap_class }}" data-field="gap">{{ s.gap_display }}</span>
       </div>
 
       <!-- Swing score bar + grade -->
@@ -442,7 +442,7 @@
             {% elif s.ticker_state == 'partial' %}
               <span class="exec-badge exec-wait text-muted" title="Price loaded — analysis still running">Analyzing…</span>
             {% else %}
-              <span class="exec-badge {{ s.exec_class }}" data-field="exec_badge">{{ s.final_action or 'WAIT' }}</span>
+              <span class="exec-badge {{ s.simplified_action_class }}" data-field="sfa_badge" title="{{ s.final_action }}">{{ s.simplified_action }}</span>
             {% endif %}
           </td>
 
@@ -701,6 +701,108 @@ function toggleDisciplineMode() {
 
 // Run filter on page load to initialise the count
 applyFilter();
+
+// ── Live dashboard patch (8s polling during market hours) ────────────────────
+// Calls /api/dashboard and surgically updates prices, badges, and scores
+// in the table and top-5 cards without a full page reload.
+async function dashboardRefresh() {
+  try {
+    const resp = await fetch('/api/dashboard');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.ranked) return;
+
+    // Build a map of ticker → stock for O(1) lookup
+    const byTicker = {};
+    (data.ranked || []).forEach(function(s) { byTicker[s.ticker] = s; });
+
+    // ── Patch watchlist table rows ─────────────────────────────────────────
+    document.querySelectorAll('.watchlist-table tbody tr[data-ticker]').forEach(function(row) {
+      const s = byTicker[row.dataset.ticker];
+      if (!s) return;
+
+      const priceEl = row.querySelector('[data-field="price"]');
+      if (priceEl && s.current_price != null)
+        priceEl.textContent = '$' + s.current_price.toFixed(2);
+
+      const gapEl = row.querySelector('[data-field="gap"]');
+      if (gapEl && s.gap_display) {
+        gapEl.className = 'gap-cell ' + (s.gap_class || '');
+        gapEl.textContent = s.gap_display;
+      }
+
+      const sfaEl = row.querySelector('[data-field="sfa_badge"]');
+      if (sfaEl && s.simplified_action) {
+        sfaEl.className  = 'exec-badge ' + (s.simplified_action_class || '');
+        sfaEl.textContent = s.simplified_action;
+        sfaEl.title       = s.final_action || '';
+      }
+
+      const swingEl = row.querySelector('[data-field="swing_score"]');
+      if (swingEl && s.swing_score != null) {
+        swingEl.innerHTML = s.swing_score > 0
+          ? '<div class="score-bar-wrap"><span class="score-num ' + (s.swing_score_class||'') + '">' + s.swing_score + '</span>'
+            + '<div class="score-bar"><div class="score-fill ' + (s.swing_score_class||'') + '" style="width:' + (s.swing_score*10) + '%"></div></div></div>'
+          : '<span class="text-muted">—</span>';
+      }
+
+      const catEl = row.querySelector('[data-field="cat"]');
+      if (catEl && s.catalyst_score != null)
+        catEl.innerHTML = s.catalyst_score
+          ? '<span class="score-num ' + (s.cat_score_class||'') + '">' + s.catalyst_score + '</span>'
+          : '<span class="text-muted">—</span>';
+    });
+
+    // ── Patch top-5 cards ──────────────────────────────────────────────────
+    document.querySelectorAll('.top5-card[data-ticker]').forEach(function(card) {
+      const s = byTicker[card.dataset.ticker];
+      if (!s) return;
+
+      const priceWrap = card.querySelector('[data-field="price"]');
+      if (priceWrap && s.current_price != null) {
+        // Update only the text node (first child), preserve the gap span
+        const firstNode = priceWrap.firstChild;
+        if (firstNode && firstNode.nodeType === Node.TEXT_NODE)
+          firstNode.textContent = '$' + s.current_price.toFixed(2) + ' ';
+      }
+
+      const gapEl = card.querySelector('[data-field="gap"]');
+      if (gapEl && s.gap_display) {
+        gapEl.className  = 'top5-gap ' + (s.gap_class || '');
+        gapEl.textContent = s.gap_display;
+      }
+
+      const sfaEl = card.querySelector('[data-field="sfa_badge"]');
+      if (sfaEl && s.simplified_action) {
+        sfaEl.className  = 'exec-badge exec-badge-sm ' + (s.simplified_action_class || '');
+        sfaEl.textContent = s.simplified_action;
+        sfaEl.title       = s.final_action || '';
+      }
+    });
+
+    // ── Update alert count badge ───────────────────────────────────────────
+    const triggered = data.triggered || [];
+    const alertCount = document.querySelector('.alerts-count');
+    if (alertCount) alertCount.textContent = triggered.length;
+
+    // ── Sync last-updated timestamp ────────────────────────────────────────
+    if (data.server_time) window._arSetLastUpdated(data.server_time);
+
+    // ── Fire toast notifications for newly-triggered stocks ───────────────
+    const newTriggers = detectNewTriggers(data.ranked || []);
+    newTriggers.forEach(function(s) {
+      const alertType = getAlertType(s);
+      playAlertSound(alertType);
+      showTriggerToast(s, alertType);
+    });
+
+  } catch(e) {
+    // Silent — network blip should not disrupt the UI
+    console.warn('[dashboard] Live refresh error:', e);
+  }
+}
+
+window._arRefreshFn = dashboardRefresh;
 
 // ── Auto-poll: reload page when loading/partial tickers change state ─────────
 (function () {

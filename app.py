@@ -1270,6 +1270,54 @@ def annotate(stock: dict) -> dict:
         stock["final_action_reason"]= _sfa_reason
         stock["exec_class"]         = _sfa_class
 
+    # ── Simplified 4-state decision badge ────────────────────────────────────
+    # Maps all conditions to one clear morning label: A+ READY / WATCH / EXTENDED / REJECTED
+    # Rules (in priority order):
+    #   REJECTED  — Avoid bias, structural avoid statuses, or swing_score < 3
+    #   EXTENDED  — price is_extended flag, entry_quality=Extended, or >5% above entry zone
+    #   A+ READY  — swing_score ≥ 7, actionable status, catalyst ≥ 4, R:R ≥ 1.5
+    #   WATCH     — everything else (decent setup, conditions not fully aligned)
+    _sfa_ss    = stock.get("swing_status") or ""
+    _sfa_sw    = stock.get("swing_score") or 0
+    _sfa_rr    = stock.get("risk_reward")
+    _sfa_ext   = stock.get("is_extended", False)
+    _sfa_eq    = stock.get("entry_quality") or ""
+    _sfa_bias  = stock.get("trade_bias") or ""
+    _sfa_cat   = stock.get("catalyst_score") or 0
+    _sfa_edist = stock.get("entry_distance_pct") or 0
+
+    _sfa_is_rejected = (
+        _sfa_bias == "Avoid" or
+        _sfa_ss in ("AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE") or
+        (_sfa_sw > 0 and _sfa_sw < 3)
+    )
+    _sfa_is_extended = (
+        _sfa_ext or
+        _sfa_eq == "Extended" or
+        (isinstance(_sfa_edist, (int, float)) and _sfa_edist > 5.0)
+    )
+    _sfa_is_aplus = (
+        not _sfa_is_rejected and
+        not _sfa_is_extended and
+        _sfa_sw >= 7 and
+        _sfa_ss in ("READY — LEVEL HOLDS", "PRE-CONFIRMATION", "TREND CONTINUATION") and
+        _sfa_cat >= 4 and
+        (_sfa_rr is None or _sfa_rr >= 1.5)
+    )
+
+    if _sfa_is_rejected:
+        stock["simplified_action"]       = "REJECTED"
+        stock["simplified_action_class"] = "sfa-rejected"
+    elif _sfa_is_extended:
+        stock["simplified_action"]       = "EXTENDED"
+        stock["simplified_action_class"] = "sfa-extended"
+    elif _sfa_is_aplus:
+        stock["simplified_action"]       = "A+ READY"
+        stock["simplified_action_class"] = "sfa-aplus"
+    else:
+        stock["simplified_action"]       = "WATCH"
+        stock["simplified_action_class"] = "sfa-watch"
+
     return stock
 
 
@@ -2521,6 +2569,22 @@ def _stock_summary(s: dict) -> dict:
         "prev_close", "premarket_high", "premarket_low",
         "prev_day_high", "prev_day_low",
         "secondary_tier", "secondary_tier_class",
+        # Simplified 4-state decision
+        "simplified_action", "simplified_action_class",
+        # Swing fields (needed for live top-5 card patching)
+        "swing_score", "swing_score_class", "swing_grade",
+        "swing_status", "swing_status_class",
+        "swing_setup_type", "swing_setup_type_class",
+        "swing_confidence_label",
+        "pullback_quality", "pullback_quality_class",
+        "entry_zone_display",
+        "entry_distance_display", "entry_distance_class",
+        "resistance_distance_display",
+        "risk_reward", "risk_reward_display", "risk_reward_class",
+        "rr_quality_label", "rr_quality_class",
+        "stop_level", "target_1", "target_2",
+        "daily_trend", "h4_trend",
+        "is_extended", "swing_data_available",
     ]
     return {f: s.get(f) for f in fields}
 

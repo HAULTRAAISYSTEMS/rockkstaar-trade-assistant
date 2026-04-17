@@ -55,7 +55,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
 window._arEnabled   = true;
 window._arTimer     = null;
-window._arInterval  = 15000;   // 15 seconds between refreshes
+window._arInterval  = 8000;    // 8 seconds between live patches during market hours
 window._arRefreshFn = null;    // Set by each page that supports live updates
 
 function isMarketHours() {
@@ -73,12 +73,20 @@ function isMarketHours() {
 
 function toggleAutoRefresh() {
   window._arEnabled = !window._arEnabled;
+  const on = window._arEnabled;
+  // Navbar button
   const btn = document.getElementById("ar-toggle");
   if (btn) {
-    btn.textContent = window._arEnabled ? "⟳ Auto ON" : "⟳ Auto OFF";
-    btn.className   = "btn-ar-toggle " + (window._arEnabled ? "ar-on" : "ar-off");
+    btn.textContent = on ? "⟳ Auto ON" : "⟳ Auto OFF";
+    btn.className   = "btn-ar-toggle " + (on ? "ar-on" : "ar-off");
   }
-  if (window._arEnabled) {
+  // Mobile bar button
+  const mob = document.getElementById("mobile-ar-toggle");
+  if (mob) {
+    mob.textContent = on ? "⟳ Auto" : "⟳ Off";
+    mob.className   = "mobile-ctrl-btn mobile-ctrl-ar " + (on ? "mcb-on" : "mcb-off");
+  }
+  if (on) {
     scheduleRefresh();
   } else {
     clearTimeout(window._arTimer);
@@ -106,6 +114,9 @@ function scheduleRefresh() {
 window._arSetLastUpdated = function (timeStr) {
   const el = document.getElementById("ar-last-updated");
   if (el) el.textContent = "Updated " + timeStr;
+  // Also sync the mobile bar timestamp
+  const mob = document.getElementById("mobile-last-updated");
+  if (mob) mob.textContent = timeStr;
 };
 
 
@@ -125,10 +136,18 @@ function _unlockAudio() {
 
 function toggleAlertSound() {
   window._arSoundEnabled = !window._arSoundEnabled;
+  const on = window._arSoundEnabled;
+  // Navbar button
   const btn = document.getElementById("alert-sound-toggle");
   if (btn) {
-    btn.textContent = window._arSoundEnabled ? "🔔 Sound ON" : "🔕 Sound OFF";
-    btn.className   = "btn-ar-toggle " + (window._arSoundEnabled ? "ar-on" : "ar-off");
+    btn.textContent = on ? "🔔 Sound ON" : "🔕 Sound OFF";
+    btn.className   = "btn-ar-toggle " + (on ? "ar-on" : "ar-off");
+  }
+  // Mobile bar button
+  const mob = document.getElementById("mobile-sound-toggle");
+  if (mob) {
+    mob.textContent = on ? "🔔" : "🔕";
+    mob.className   = "mobile-ctrl-btn mobile-ctrl-sound " + (on ? "mcb-on" : "mcb-off");
   }
 }
 

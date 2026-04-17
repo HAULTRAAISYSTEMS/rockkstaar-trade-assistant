@@ -10,6 +10,7 @@
     <a href="{{ url_for('dashboard') }}" class="back-link">← Dashboard</a>
     <div class="detail-title-row">
       <h1 class="detail-ticker">{{ stock.ticker }}</h1>
+      <span id="detail-sfa-badge" class="exec-badge exec-badge-xl {{ stock.simplified_action_class }}" title="{{ stock.final_action }}">{{ stock.simplified_action }}</span>
       <span id="detail-exec-badge" class="exec-badge exec-badge-lg {{ stock.exec_class }}">{{ stock.final_action or 'WAIT' }}</span>
       <span id="detail-bias-tag" class="bias-tag {{ stock.bias_class }} bias-large">{{ stock.trade_bias }}</span>
       {% if stock.swing_setup_type %}
@@ -767,6 +768,13 @@ async function stockDetailRefresh() {
     const resp = await fetch(`/api/stock/${DETAIL_TICKER}/live`);
     if (!resp.ok) return;
     const s = await resp.json();
+
+    const sfaBadge = document.getElementById('detail-sfa-badge');
+    if (sfaBadge && s.simplified_action) {
+      sfaBadge.className  = 'exec-badge exec-badge-xl ' + (s.simplified_action_class || '');
+      sfaBadge.textContent = s.simplified_action;
+      sfaBadge.title       = s.final_action || '';
+    }
 
     const execBadge = document.getElementById('detail-exec-badge');
     if (execBadge) { execBadge.className = 'exec-badge exec-badge-lg ' + s.exec_class; execBadge.textContent = s.final_action || 'WAIT'; }

@@ -60,6 +60,19 @@
     {% block content %}{% endblock %}
   </main>
 
+  <!-- ===== MOBILE STICKY CONTROL BAR =====
+       Visible only on ≤ 768px. Stays pinned at the bottom of the screen.
+       Mirrors the navbar controls in a touch-friendly layout.
+  -->
+  <div class="mobile-ctrl-bar" id="mobile-ctrl-bar">
+    <span id="mobile-last-updated" class="mobile-ctrl-time"></span>
+    <button id="mobile-ar-toggle"    class="mobile-ctrl-btn mobile-ctrl-ar mcb-on"    onclick="toggleAutoRefresh()">⟳ Auto</button>
+    <button id="mobile-sound-toggle" class="mobile-ctrl-btn mobile-ctrl-sound mcb-on" onclick="toggleAlertSound()">🔔</button>
+    <form action="{{ url_for('refresh_all') }}" method="POST" style="display:contents;">
+      <button type="submit" class="mobile-ctrl-btn mobile-ctrl-refresh">⟳ Now</button>
+    </form>
+  </div>
+
   <script src="{{ url_for('static', filename='js/ws_manager.js') }}"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
   {% block scripts %}{% endblock %}
