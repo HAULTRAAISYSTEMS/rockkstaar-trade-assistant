@@ -36,13 +36,13 @@
       <span id="ws-status-pill" class="ws-status-pill ws-polling">POLLING</span>
       <span id="ar-last-updated" class="ar-last-updated"></span>
       <button id="alert-sound-toggle" class="btn-ar-toggle ar-on" onclick="toggleAlertSound()" title="Sound alerts for new triggers">🔔 Sound ON</button>
-      <button id="ar-toggle" class="btn-ar-toggle ar-on" onclick="toggleAutoRefresh()" title="Auto-refresh every 15s during market hours">⟳ Auto ON</button>
+      <button id="ar-toggle" class="btn-ar-toggle ar-on" onclick="toggleAutoRefresh()" title="Auto-refresh every 8s during market hours">⟳ Auto ON</button>
       <form action="{{ url_for('refresh_all') }}" method="POST" style="display:inline;">
         <button type="submit" class="btn btn-refresh">⟳ Refresh All</button>
       </form>
     </div>
   </nav>
-  <div class="mobile-refresh-bar"><form action="{{ url_for('refresh_all') }}" method="POST" style="margin:0;"><button type="submit" class="mobile-refresh-btn">Refresh All</button>button></form>form></div>div>
+  <div class="mobile-refresh-bar"><form action="{{ url_for('refresh_all') }}" method="POST" style="margin:0;"><button type="submit" class="mobile-refresh-btn">Refresh All</button></form></div>
 
   <!-- ===== FLASH MESSAGES ===== -->
   {% with messages = get_flashed_messages(with_categories=true) %}
