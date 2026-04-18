@@ -2545,22 +2545,40 @@ def stock_detail(ticker):
     )
 
 
+_options_cache: dict = {}       # {ticker: {"data": ..., "ts": float}}
+_OPTIONS_CACHE_TTL = 20         # seconds — reuse result within this window
+
 @app.route("/api/options/<ticker>")
 def api_option_contracts(ticker):
-    """Return filtered option contracts for the options contract selector."""
+    """Return filtered option contracts for the options contract selector.
+    Results are cached server-side for _OPTIONS_CACHE_TTL seconds so that
+    rapid re-clicks or parallel auto-refresh hits do not hammer Yahoo Finance.
+    """
     ticker = ticker.upper()
     trade_mode = request.args.get("mode", "SWING TRADE")
+    now = _time.time()
+
+    cached = _options_cache.get(ticker)
+    if cached and (now - cached["ts"]) < _OPTIONS_CACHE_TTL:
+        result = dict(cached["data"])
+        result["cached"] = True
+        return jsonify(result)
+
     try:
         stock = get_stock_data(ticker)
         price = float(stock.get("current_price") or 0) if stock else 0.0
         from data_fetcher import fetch_option_contracts
         result = fetch_option_contracts(ticker, current_price=price or None,
                                         trade_mode=trade_mode)
+        if not result.get("error"):
+            _options_cache[ticker] = {"data": result, "ts": now}
+        result["cached"] = False
         return jsonify(result)
     except Exception as exc:
         logger.warning("api_option_contracts failed ticker=%s: %s", ticker, exc)
         return jsonify({"error": str(exc), "calls": [], "puts": [],
-                        "price": None, "best_day": None, "best_swing": None})
+                        "price": None, "best_day": None, "best_swing": None,
+                        "cached": False})
 
 
 @app.route("/stock/<ticker>/plan", methods=["POST"])

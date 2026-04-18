@@ -962,10 +962,51 @@ window._arRefreshFn = stockDetailRefresh;
 <script>
 // ── Options Contract Selector ────────────────────────────────────────────────
 (function() {
-  const TICKER = "{{ stock.ticker }}";
-  let _ocsData  = null;
-  let _ocsType  = "CALL";   // CALL | PUT | ALL
-  let _ocsMode  = "{{ risk_settings.trading_mode if risk_settings is defined else 'SWING TRADE' }}";
+  const TICKER    = "{{ stock.ticker }}";
+  const COOLDOWN  = 12000;   // ms between API calls
+  const CACHE_TTL = 20000;   // ms — reuse data within this window
+
+  let _ocsData        = null;
+  let _ocsType        = "CALL";
+  let _ocsMode        = "{{ risk_settings.trading_mode if risk_settings is defined else 'SWING TRADE' }}";
+  let _ocsLoading     = false;
+  let _ocsCooldownEnd = 0;    // Date.now() when cooldown expires
+  let _ocsCacheTs     = 0;    // Date.now() when data was fetched
+  let _ocsCdTimer     = null; // interval for countdown display
+  let _ocsWasPaused   = false;// did we pause AR?
+
+  function _startCooldown() {
+    _ocsCooldownEnd = Date.now() + COOLDOWN;
+    clearInterval(_ocsCdTimer);
+    _ocsCdTimer = setInterval(_tickCooldown, 500);
+  }
+
+  function _tickCooldown() {
+    const btn = document.getElementById("ocs-load-btn");
+    const remaining = Math.ceil((_ocsCooldownEnd - Date.now()) / 1000);
+    if (remaining <= 0) {
+      clearInterval(_ocsCdTimer);
+      _ocsCdTimer = null;
+      if (btn) { btn.disabled = false; btn.textContent = "Refresh"; }
+    } else {
+      if (btn) { btn.disabled = true; btn.textContent = `Wait ${remaining}s…`; }
+    }
+  }
+
+  function _pauseAR() {
+    _ocsWasPaused = false;
+    if (window._arEnabled && typeof toggleAutoRefresh === "function") {
+      toggleAutoRefresh();   // turns it off
+      _ocsWasPaused = true;
+    }
+  }
+
+  function _resumeAR() {
+    if (_ocsWasPaused && !window._arEnabled && typeof toggleAutoRefresh === "function") {
+      toggleAutoRefresh();   // turns it back on
+    }
+    _ocsWasPaused = false;
+  }
 
   window.ocsSetType = function(t) {
     _ocsType = t;
@@ -977,24 +1018,40 @@ window._arRefreshFn = stockDetailRefresh;
   };
 
   window.ocsLoad = function() {
-    const btn = document.getElementById("ocs-load-btn");
+    // Debounce: ignore clicks while loading or during cooldown
+    if (_ocsLoading) return;
+    if (Date.now() < _ocsCooldownEnd) return;
+
+    // Serve cache if still fresh (avoids API call on fast re-clicks)
+    if (_ocsData && (Date.now() - _ocsCacheTs) < CACHE_TTL) {
+      _ocsRender(_ocsData);
+      return;
+    }
+
+    const btn  = document.getElementById("ocs-load-btn");
     const body = document.getElementById("ocs-body");
+    _ocsLoading = true;
     btn.disabled = true;
-    btn.textContent = "Loading…";
+    btn.textContent = "Fetching options…";
     body.innerHTML = '<div class="ocs-hint">Fetching live option chain from Yahoo Finance…</div>';
+
+    _pauseAR();
 
     fetch(`/api/options/${TICKER}?mode=${encodeURIComponent(_ocsMode)}`)
       .then(r => r.json())
       .then(data => {
-        btn.disabled = false;
-        btn.textContent = "Refresh";
-        _ocsData = data;
+        _ocsLoading = false;
+        _ocsData    = data;
+        _ocsCacheTs = Date.now();
         _ocsRender(data);
+        _startCooldown();
+        _resumeAR();
       })
       .catch(err => {
-        btn.disabled = false;
-        btn.textContent = "Load Contracts";
-        body.innerHTML = `<div class="ocs-error">Failed to load contracts: ${err}</div>`;
+        _ocsLoading = false;
+        _resumeAR();
+        _startCooldown();
+        body.innerHTML = `<div class="ocs-error">Failed to load contracts — try again in a moment. (${err})</div>`;
       });
   };
 
