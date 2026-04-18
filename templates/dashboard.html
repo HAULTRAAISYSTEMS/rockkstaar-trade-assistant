@@ -702,15 +702,15 @@ function toggleDisciplineMode() {
 // Run filter on page load to initialise the count
 applyFilter();
 
-// ── Live dashboard patch (8s polling during market hours) ────────────────────
+// ── Live dashboard patch (4s polling during market hours) ────────────────────
 // Calls /api/dashboard and surgically updates prices, badges, and scores
 // in the table and top-5 cards without a full page reload.
 async function dashboardRefresh() {
   try {
     const resp = await fetch('/api/dashboard');
-    if (!resp.ok) return;
+    if (!resp.ok) return false;
     const data = await resp.json();
-    if (!data.ranked) return;
+    if (!data.ranked) return false;
 
     // Build a map of ticker → stock for O(1) lookup
     const byTicker = {};
@@ -796,9 +796,11 @@ async function dashboardRefresh() {
       showTriggerToast(s, alertType);
     });
 
+    return true;
+
   } catch(e) {
-    // Silent — network blip should not disrupt the UI
     console.warn('[dashboard] Live refresh error:', e);
+    return false;
   }
 }
 

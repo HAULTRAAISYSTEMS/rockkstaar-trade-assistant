@@ -766,7 +766,7 @@ const DETAIL_TICKER = "{{ stock.ticker }}";
 async function stockDetailRefresh() {
   try {
     const resp = await fetch(`/api/stock/${DETAIL_TICKER}/live`);
-    if (!resp.ok) return;
+    if (!resp.ok) return false;
     const s = await resp.json();
 
     const sfaBadge = document.getElementById('detail-sfa-badge');
@@ -816,9 +816,16 @@ async function stockDetailRefresh() {
       document.querySelectorAll('.headline-freshness-badge').forEach(e => { e.textContent = s.headline_freshness; });
     }
 
-    window._arSetLastUpdated(new Date().toLocaleTimeString());
+    // Use server ET time if available, else format browser time as ET
+    const displayTime = s.server_time || new Date().toLocaleTimeString(
+      "en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }
+    );
+    window._arSetLastUpdated(displayTime);
+    return true;
+
   } catch(e) {
-    console.warn('Stock detail refresh error:', e);
+    console.warn('[detail] Live refresh error:', e);
+    return false;
   }
 }
 

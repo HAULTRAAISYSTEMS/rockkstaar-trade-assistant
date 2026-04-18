@@ -53,10 +53,12 @@ document.addEventListener("DOMContentLoaded", function () {
 // Auto-Refresh System
 // ===========================================================================
 
-window._arEnabled   = true;
-window._arTimer     = null;
-window._arInterval  = 8000;    // 8 seconds between live patches during market hours
-window._arRefreshFn = null;    // Set by each page that supports live updates
+window._arEnabled       = true;
+window._arTimer         = null;
+window._arInterval      = 4000;   // 4 s between live patches during market hours
+window._arRefreshFn     = null;   // Set by each page that supports live updates
+window._arFailCount     = 0;      // Consecutive poll failures
+window._arLastSuccessMs = 0;      // Date.now() of last successful poll
 
 function isMarketHours() {
   try {
@@ -74,13 +76,11 @@ function isMarketHours() {
 function toggleAutoRefresh() {
   window._arEnabled = !window._arEnabled;
   const on = window._arEnabled;
-  // Navbar button
   const btn = document.getElementById("ar-toggle");
   if (btn) {
     btn.textContent = on ? "⟳ Auto ON" : "⟳ Auto OFF";
     btn.className   = "btn-ar-toggle " + (on ? "ar-on" : "ar-off");
   }
-  // Mobile bar button
   const mob = document.getElementById("mobile-ar-toggle");
   if (mob) {
     mob.textContent = on ? "⟳ Auto" : "⟳ Off";
@@ -90,9 +90,11 @@ function toggleAutoRefresh() {
     scheduleRefresh();
   } else {
     clearTimeout(window._arTimer);
+    window._arFailCount = 0;
     const el = document.getElementById("ar-last-updated");
-    if (el) el.textContent = "Auto-refresh OFF";
+    if (el) el.textContent = "Auto OFF";
   }
+  _arTickFreshness();
 }
 
 function scheduleRefresh() {
@@ -101,12 +103,25 @@ function scheduleRefresh() {
   if (!window._arRefreshFn) return;
 
   if (!isMarketHours()) {
-    window._arTimer = setTimeout(scheduleRefresh, 60000);
+    window._arTimer = setTimeout(scheduleRefresh, 90000);  // 90 s outside market hours
     return;
   }
 
   window._arTimer = setTimeout(async function () {
-    try { await window._arRefreshFn(); } catch (e) { /* silent */ }
+    let ok = false;
+    try {
+      const result = await window._arRefreshFn();
+      ok = (result !== false);  // undefined = success (backward compat), false = failure
+    } catch(e) {
+      ok = false;
+    }
+    if (ok) {
+      window._arFailCount     = 0;
+      window._arLastSuccessMs = Date.now();
+    } else {
+      window._arFailCount = Math.min(window._arFailCount + 1, 99);
+    }
+    _arTickFreshness();
     scheduleRefresh();
   }, window._arInterval);
 }
@@ -114,10 +129,61 @@ function scheduleRefresh() {
 window._arSetLastUpdated = function (timeStr) {
   const el = document.getElementById("ar-last-updated");
   if (el) el.textContent = "Updated " + timeStr;
-  // Also sync the mobile bar timestamp
   const mob = document.getElementById("mobile-last-updated");
   if (mob) mob.textContent = timeStr;
 };
+
+/**
+ * Called every second by the 1 s interval below.
+ * Updates every .freshness-badge on the page based on age since last success.
+ *
+ * States:
+ *   fr-live    — updated within 5 s       → ● LIVE
+ *   fr-delayed — updated within 5–15 s    → ● DELAYED
+ *   fr-stale   — not updated for > 15 s   → ⚠ STALE
+ *   fr-off     — auto-refresh disabled    → Auto OFF
+ *   (hidden)   — page has no live updates
+ */
+function _arTickFreshness() {
+  const badges = document.querySelectorAll(".freshness-badge");
+  if (!badges.length) return;
+
+  // Hide on pages that don't use live polling
+  if (!window._arRefreshFn) {
+    badges.forEach(function(b) { b.style.display = "none"; });
+    return;
+  }
+  badges.forEach(function(b) { b.style.display = ""; });
+
+  let cls, txt;
+
+  if (!window._arEnabled) {
+    cls = "fr-off";   txt = "Auto OFF";
+  } else if (window._arFailCount >= 3) {
+    cls = "fr-stale"; txt = "⚠ Offline";
+  } else {
+    const age = window._arLastSuccessMs
+      ? (Date.now() - window._arLastSuccessMs) / 1000
+      : null;
+    if (age === null) {
+      cls = "fr-live";    txt = "Connecting…";
+    } else if (age < 5) {
+      cls = "fr-live";    txt = "● LIVE";
+    } else if (age < 15) {
+      cls = "fr-delayed"; txt = "● DELAYED";
+    } else {
+      cls = "fr-stale";   txt = "⚠ STALE";
+    }
+  }
+
+  badges.forEach(function(b) {
+    b.className   = "freshness-badge " + cls;
+    b.textContent = txt;
+  });
+}
+
+// 1-second freshness tick — keeps LIVE/DELAYED/STALE badge current
+setInterval(_arTickFreshness, 1000);
 
 
 // ===========================================================================

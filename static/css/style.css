@@ -4240,3 +4240,54 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
      .mobile-refresh-bar { display: block; padding: 8px 12px; background: #0b1120; border-bottom: 1px solid #1e2d45; }
      .mobile-refresh-btn { display: block; width: 100%; padding: 14px; font-size: 16px; font-weight: 700; background: linear-gradient(135deg, #00d8ff, #0090d8); color: #020d18; border: none; border-radius: 10px; cursor: pointer; }
 }
+
+/* ===========================================================================
+   Freshness Badge — LIVE / DELAYED / STALE / Auto OFF
+   Rendered in .nav-actions via base.html; updated every 1 s by main.js.
+   =========================================================================== */
+
+.freshness-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.16rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  transition: background 0.3s, color 0.3s, border-color 0.3s;
+  vertical-align: middle;
+}
+
+/* ● LIVE — green, subtle pulse on the dot */
+.fr-live {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+/* ● DELAYED — amber */
+.fr-delayed {
+  background: rgba(251, 191, 36, 0.11);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+/* ⚠ STALE / ⚠ Offline — red */
+.fr-stale {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+/* Auto OFF — muted */
+.fr-off {
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text-muted, #64748b);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+/* Hide on mobile — navbar already hidden; mobile bar has its own time display */
+@media (max-width: 768px) {
+  .nav-actions .freshness-badge { display: none; }
+}

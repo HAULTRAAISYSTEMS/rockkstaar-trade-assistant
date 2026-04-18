@@ -2704,7 +2704,9 @@ def api_stock_live(ticker):
     except Exception as exc:
         logger.warning("live_refresh_stock failed for %s: %s", ticker, exc)
     annotate(stock)
-    return jsonify(_stock_summary(stock))
+    result = _stock_summary(stock)
+    result["server_time"] = _et_now().strftime("%I:%M %p").lstrip("0") + " ET"
+    return jsonify(result)
 
 
 @app.route("/api/ticker-states")
