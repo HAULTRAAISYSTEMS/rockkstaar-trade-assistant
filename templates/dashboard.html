@@ -62,6 +62,32 @@
   </form>
 </section>
 
+<!-- ===== DAILY DISCIPLINE BANNER ===== -->
+<div class="daily-banner banner-{{ daily_banner.type }} {{ daily_banner.css }}" id="daily-banner">
+  <div class="daily-banner-inner">
+    <span class="daily-banner-text">{{ daily_banner.text }}</span>
+    <span class="daily-banner-sub">{{ daily_banner.sub }}</span>
+    <div class="daily-banner-meta">
+      <span class="banner-stat">Trades today: <strong>{{ trades_today }}</strong>/{{ risk_settings.max_trades_per_day }}</span>
+      <span class="banner-stat">Losses: <strong>{{ losses_today }}</strong></span>
+      <span class="disc-badge {{ discipline.css }}" title="Discipline score">{{ discipline.score }}/100 · {{ discipline.label }}</span>
+      {% if daily_session.locked %}
+      <form action="{{ url_for('risk_settings') }}" method="POST" style="display:inline">
+        <input type="hidden" name="action" value="unlock">
+        <button type="submit" class="btn-banner-unlock">Unlock</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  <!-- Mode selector pill -->
+  <div class="mode-selector-wrap">
+    <button class="mode-btn {% if risk_settings.trading_mode == 'DAY TRADE' %}mode-btn-active{% endif %}"
+            onclick="setTradingMode('DAY TRADE')" id="mode-day">⚡ Day</button>
+    <button class="mode-btn {% if risk_settings.trading_mode == 'SWING TRADE' %}mode-btn-active{% endif %}"
+            onclick="setTradingMode('SWING TRADE')" id="mode-swing">📈 Swing</button>
+  </div>
+</div>
+
 <!-- ===== NO-TRADE SIGNAL LOCK WARNING ===== -->
 <div id="no-trade-lock-bar" class="nt-lock-bar" {% if not no_trade.lock_signals %}style="display:none"{% endif %}>
   <span class="nt-lock-icon">🔒</span>
@@ -206,6 +232,13 @@
         <span class="rr-badge {{ s.risk_reward_class }}">R:R {{ s.risk_reward_display }}</span>
         {% endif %}
       </div>
+
+      <!-- Trade Permission badge -->
+      {% if s.trade_permission %}
+      <div class="trade-perm-bar {{ s.trade_permission.css }}" title="{{ s.trade_permission.reason }}">
+        {{ s.trade_permission.permission }}
+      </div>
+      {% endif %}
 
       <!-- Timeframe + distance summary strip -->
       <div class="card-summary-strip">
@@ -380,6 +413,7 @@
           <th title="Target 2">T2</th>
           <th title="Risk/Reward Ratio">R:R</th>
           <th title="Distance to T1">To T1</th>
+          <th title="Trade Permission">Permission</th>
           <th title="Catalyst Score">Cat</th>
           <th title="Catalyst Summary">Catalyst</th>
           <th title="Has notes">Notes</th>
@@ -534,6 +568,15 @@
 
           <!-- Distance to T1 -->
           <td class="text-dim">{{ s.resistance_distance_display }}</td>
+
+          <!-- Trade Permission -->
+          <td>
+            {% if s.trade_permission %}
+            <span class="perm-badge {{ s.trade_permission.css }}" title="{{ s.trade_permission.reason }}">
+              {{ s.trade_permission.permission }}
+            </span>
+            {% endif %}
+          </td>
 
           <!-- Catalyst Score -->
           <td title="{{ s.catalyst_reason or '' }}" data-field="cat">
@@ -805,6 +848,26 @@ async function dashboardRefresh() {
 }
 
 window._arRefreshFn = dashboardRefresh;
+
+// ── Trading Mode switcher ──────────────────────────────────────────────────
+function setTradingMode(mode) {
+  fetch("{{ url_for('set_trading_mode') }}", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({mode: mode}),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.ok) {
+      // Update active class on mode buttons
+      document.getElementById("mode-day").classList.toggle("mode-btn-active", mode === "DAY TRADE");
+      document.getElementById("mode-swing").classList.toggle("mode-btn-active", mode === "SWING TRADE");
+      // Reload to update trade permission badges with new mode
+      window.location.reload();
+    }
+  })
+  .catch(function(e) { console.warn("setTradingMode failed:", e); });
+}
 
 // ── Auto-poll: reload page when loading/partial tickers change state ─────────
 (function () {

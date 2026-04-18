@@ -16,6 +16,10 @@
       {% if stock.swing_setup_type %}
       <span id="detail-setup-pill" class="setup-pill {{ stock.swing_setup_type_class }} setup-pill-lg">{{ stock.swing_setup_type }}</span>
       {% endif %}
+      {% if stock.trade_permission %}
+      <span id="detail-perm-badge" class="perm-badge perm-badge-lg {{ stock.trade_permission.css }}"
+            title="{{ stock.trade_permission.reason }}">{{ stock.trade_permission.permission }}</span>
+      {% endif %}
     </div>
     <div class="detail-subtitle">
       Last updated: <span id="detail-last-updated">{{ stock.last_updated | et_time }}</span>
@@ -583,6 +587,68 @@
     </div>
     {% endif %}
 
+    <!-- ===== OPTIONS RISK CALCULATOR ===== -->
+    <div class="options-risk-panel" id="options-risk-panel">
+      <div class="options-risk-header">
+        <span class="options-risk-title">Options Risk Calculator</span>
+        <div class="option-side-btns">
+          <button type="button" class="opt-side-btn opt-call active" id="optSideCall" onclick="setOptSide('CALL')">▲ CALL</button>
+          <button type="button" class="opt-side-btn opt-put"  id="optSidePut"  onclick="setOptSide('PUT')">▼ PUT</button>
+        </div>
+      </div>
+      <div class="options-risk-body">
+        <div class="opt-field-row">
+          <div class="opt-field">
+            <label class="opt-label">Premium / Contract</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="0.01" min="0" id="optPremium" class="plan-input"
+                     placeholder="2.50" oninput="calcOptionsRisk()">
+            </div>
+          </div>
+          <div class="opt-field">
+            <label class="opt-label">Contracts</label>
+            <input type="number" step="1" min="1" id="optContracts" class="jform-input"
+                   placeholder="1" oninput="calcOptionsRisk()">
+          </div>
+          <div class="opt-field">
+            <label class="opt-label">Account Size</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="100" min="0" id="optAccount" class="plan-input"
+                     placeholder="10000" oninput="calcOptionsRisk()"
+                     value="{{ risk_settings.account_size if risk_settings is defined else '' }}">
+            </div>
+          </div>
+          <div class="opt-field">
+            <label class="opt-label">Risk %</label>
+            <input type="number" step="0.1" min="0.1" max="10" id="optRiskPct" class="jform-input"
+                   placeholder="1.0" oninput="calcOptionsRisk()"
+                   value="{{ risk_settings.risk_pct if risk_settings is defined else '' }}">
+          </div>
+        </div>
+
+        <div class="options-risk-results" id="options-risk-results">
+          <div class="opt-result-item">
+            <span class="opt-result-label">Max $ Risk Allowed</span>
+            <span class="opt-result-val" id="res-max-risk">—</span>
+          </div>
+          <div class="opt-result-item">
+            <span class="opt-result-label">Suggested Contracts</span>
+            <span class="opt-result-val" id="res-suggested">—</span>
+          </div>
+          <div class="opt-result-item">
+            <span class="opt-result-label">Total Premium Cost</span>
+            <span class="opt-result-val" id="res-total-cost">—</span>
+          </div>
+          <div class="opt-result-item">
+            <span class="opt-result-label">Trade Type</span>
+            <span class="opt-result-val" id="res-trade-type">CALL</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <form action="{{ url_for('save_stock_plan', ticker=stock.ticker) }}" method="POST" id="plan-form">
       <div class="plan-field-group">
         <label class="plan-label">Direction</label>
@@ -760,6 +826,47 @@ function calcRR() {
   breakdown.textContent = `Risk $${risk.toFixed(2)}  ·  Reward $${reward.toFixed(2)}`;
 }
 calcRR();
+
+// ── Options Risk Calculator ─────────────────────────────────────────────────
+let _optSide = 'CALL';
+
+function setOptSide(side) {
+  _optSide = side;
+  document.getElementById('optSideCall').classList.toggle('active', side === 'CALL');
+  document.getElementById('optSidePut').classList.toggle('active',  side === 'PUT');
+  document.getElementById('res-trade-type').textContent = side;
+}
+
+function calcOptionsRisk() {
+  const premium   = parseFloat(document.getElementById('optPremium').value)   || 0;
+  const contracts = parseInt(document.getElementById('optContracts').value)    || 0;
+  const account   = parseFloat(document.getElementById('optAccount').value)    || 0;
+  const riskPct   = parseFloat(document.getElementById('optRiskPct').value)    || 1.0;
+
+  const maxRisk = account * (riskPct / 100);
+  const costPerContract = premium * 100;
+  const suggested = (premium > 0 && account > 0)
+    ? Math.max(1, Math.floor(maxRisk / costPerContract))
+    : 0;
+  const used = contracts > 0 ? contracts : suggested;
+  const totalCost = used * costPerContract;
+
+  document.getElementById('res-max-risk').textContent =
+    account > 0 ? '$' + maxRisk.toFixed(2) : '—';
+  document.getElementById('res-suggested').textContent =
+    suggested > 0 ? suggested + ' contract' + (suggested !== 1 ? 's' : '') : '—';
+  document.getElementById('res-total-cost').textContent =
+    totalCost > 0 ? '$' + totalCost.toFixed(2) : '—';
+  document.getElementById('res-trade-type').textContent = _optSide;
+
+  // Colour total cost red if it exceeds max allowed risk
+  const costEl = document.getElementById('res-total-cost');
+  if (account > 0 && totalCost > maxRisk) {
+    costEl.style.color = 'var(--red, #ef4444)';
+  } else {
+    costEl.style.color = '';
+  }
+}
 
 const DETAIL_TICKER = "{{ stock.ticker }}";
 

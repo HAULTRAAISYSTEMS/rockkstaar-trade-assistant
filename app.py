@@ -32,7 +32,8 @@ from database import (
     get_note, save_note, get_all_notes, update_setup_type,
     get_trade_plan, save_trade_plan, get_all_trade_plans,
     add_journal_entry, update_journal_entry, delete_journal_entry,
-    get_journal_entry, get_all_journal_entries,
+    get_journal_entry, get_all_journal_entries, get_journal_entries_for_date,
+    get_daily_session, upsert_daily_session, lock_daily_session, unlock_daily_session,
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
 from data_fetcher import _et_now
@@ -803,6 +804,225 @@ def compute_rr(plan_bias, entry, stop, target):
     return ratio, display, css
 
 
+# ---------------------------------------------------------------------------
+# Discipline & Risk Engine — pure functions (no DB, no Flask)
+# ---------------------------------------------------------------------------
+
+def get_risk_settings() -> dict:
+    """Load all risk settings from the settings table with safe defaults."""
+    def _f(key, default):
+        v = get_setting(key)
+        return v if v is not None else default
+    return {
+        "trading_mode":        _f("trading_mode",        "SWING TRADE"),
+        "account_size":        float(_f("account_size",        "10000")),
+        "risk_pct":            float(_f("risk_pct",            "1.0")),
+        "max_trades_per_day":  int(float(_f("max_trades_per_day",  "3"))),
+        "max_daily_loss_pct":  float(_f("max_daily_loss_pct",  "3.0")),
+        "stop_after_2_losses": _f("stop_after_2_losses", "1") == "1",
+    }
+
+
+def compute_trade_permission(stock: dict, trade_mode: str) -> dict:
+    """
+    Map a stock's current conditions to a trade permission decision.
+    Returns dict: {permission, css, reason}
+    permission: "TRADE ALLOWED" | "WATCH" | "BLOCKED"
+    """
+    bias = stock.get("trade_bias") or ""
+    if bias == "Avoid":
+        return {"permission": "BLOCKED", "css": "perm-blocked", "reason": "Avoid bias — no edge"}
+
+    if trade_mode == "DAY TRADE":
+        final  = stock.get("final_action") or "WAIT"
+        setup  = stock.get("setup_score")  or 0
+        cat    = stock.get("catalyst_score") or 0
+        mom    = stock.get("momentum_score") or 0
+        rvol   = stock.get("rel_volume")   or 0
+        entry  = stock.get("entry_quality") or ""
+
+        if entry == "Extended":
+            return {"permission": "BLOCKED", "css": "perm-blocked", "reason": "Extended — do not chase"}
+
+        # All conditions confirmed
+        if final == "TRIGGERED" and mom >= 5 and rvol >= 1.2:
+            return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
+                    "reason": "Triggered — all entry conditions confirmed"}
+
+        if final == "READY" and setup >= 6 and cat >= 4 and mom >= 5 and rvol >= 1.2:
+            return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
+                    "reason": f"Setup {setup}/10 · Catalyst {cat}/10 · Mom {mom}/10 · {rvol:.1f}x vol"}
+
+        # Setup forming — watch
+        if final in ("READY", "TRIGGERED", "WAIT (LOW CONF)") and setup >= 4:
+            return {"permission": "WATCH", "css": "perm-watch",
+                    "reason": "Setup forming — needs stronger volume/momentum confirmation"}
+
+        return {"permission": "BLOCKED", "css": "perm-blocked",
+                "reason": "Conditions not met — setup score or catalyst too low"}
+
+    else:  # SWING TRADE
+        simplified = stock.get("simplified_action") or "WATCH"
+        swing = stock.get("swing_score") or 0
+        rr    = stock.get("risk_reward")
+
+        if simplified == "REJECTED":
+            return {"permission": "BLOCKED", "css": "perm-blocked",
+                    "reason": "Setup rejected — weak structure or avoid bias"}
+        if simplified == "EXTENDED":
+            return {"permission": "BLOCKED", "css": "perm-blocked",
+                    "reason": "Extended — wait for pullback to entry zone"}
+        if simplified == "A+ READY":
+            rr_str = f", R:R {rr:.1f}:1" if rr else ""
+            return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
+                    "reason": f"A+ swing setup — score {swing}/10{rr_str}"}
+        if simplified == "WATCH" and swing >= 4:
+            return {"permission": "WATCH", "css": "perm-watch",
+                    "reason": f"Swing score {swing}/10 — building, not yet A+ quality"}
+        return {"permission": "BLOCKED", "css": "perm-blocked",
+                "reason": "Insufficient swing setup quality — score below threshold"}
+
+
+def compute_options_risk(account_size: float, risk_pct: float,
+                         premium: float | None, contracts: int | None) -> dict:
+    """Calculate options risk metrics for the given account/risk parameters."""
+    max_dollar_risk = round(account_size * (risk_pct / 100), 2)
+
+    if premium and premium > 0:
+        # Standard options lot = 100 shares per contract
+        cost_per_contract = premium * 100
+        suggested_contracts = max(1, int(max_dollar_risk / cost_per_contract))
+        used_contracts  = contracts if (contracts and contracts > 0) else suggested_contracts
+        total_cost      = round(used_contracts * cost_per_contract, 2)
+    else:
+        suggested_contracts = 0
+        used_contracts      = contracts or 0
+        total_cost          = 0
+
+    return {
+        "max_dollar_risk":    max_dollar_risk,
+        "suggested_contracts": suggested_contracts,
+        "total_cost":          total_cost,
+    }
+
+
+def compute_discipline_score(today_entries: list, risk_settings: dict,
+                              locked: bool) -> dict:
+    """
+    Score today's trading discipline 0–100.
+    Deductions: non-A+ setups (-15 each), excess trades (-10 each),
+    broke stop (-10 each), trading locked (-25).
+    """
+    score      = 100
+    deductions = []
+    max_trades = risk_settings.get("max_trades_per_day", 3)
+
+    if locked:
+        score -= 25
+        deductions.append("Daily limit hit — trading was locked (-25)")
+
+    non_aplus = sum(1 for e in today_entries if not e.get("is_aplus_setup"))
+    for _ in range(non_aplus):
+        score -= 15
+        deductions.append("Non-A+ setup taken (-15)")
+
+    excess = max(0, len(today_entries) - max_trades)
+    for _ in range(excess):
+        score -= 10
+        deductions.append("Over max trades per day (-10)")
+
+    for e in today_entries:
+        try:
+            stop   = e.get("stop_price")
+            exit_p = float(e.get("exit_price") or 0)
+            if not stop:
+                continue
+            stop = float(stop)
+            if e.get("direction") == "Long" and exit_p < stop - 0.01:
+                score -= 10
+                deductions.append(f"Stop broken on {e.get('ticker', '?')} (-10)")
+            elif e.get("direction") == "Short" and exit_p > stop + 0.01:
+                score -= 10
+                deductions.append(f"Stop broken on {e.get('ticker', '?')} (-10)")
+        except (TypeError, ValueError):
+            pass
+
+    score = max(0, min(100, score))
+
+    if score >= 90:
+        label, css = "Disciplined", "disc-high"
+    elif score >= 70:
+        label, css = "Average",     "disc-mid"
+    else:
+        label, css = "Undisciplined", "disc-low"
+
+    return {"score": score, "label": label, "css": css, "deductions": deductions}
+
+
+def check_auto_lock(today_entries: list, risk_settings: dict,
+                    existing_session: dict) -> dict | None:
+    """
+    Check if today's journal entries trigger an auto-lock.
+    Returns an updated session dict if locked, or None if no lock needed.
+    """
+    if existing_session.get("locked"):
+        return None   # already locked — don't re-trigger
+
+    max_trades   = risk_settings.get("max_trades_per_day", 3)
+    stop_after_2 = risk_settings.get("stop_after_2_losses", True)
+
+    if len(today_entries) >= max_trades:
+        return {"locked": 1, "lock_reason": f"Max {max_trades} trades reached for today"}
+
+    if stop_after_2:
+        losses = sum(1 for e in today_entries if e.get("result") == "Loss")
+        if losses >= 2:
+            return {"locked": 1, "lock_reason": "2 losses reached — mandatory pause to protect capital"}
+
+    return None
+
+
+def compute_daily_banner(no_trade: dict, daily_session: dict) -> dict:
+    """
+    Return the top-of-dashboard banner based on trading conditions and session state.
+    Priority: LOCKED > NO TRADE DAY > CAUTION > A+ ONLY
+    """
+    if daily_session.get("locked"):
+        return {
+            "type":  "locked",
+            "text":  "TRADING LOCKED — PROTECT CAPITAL",
+            "sub":   daily_session.get("lock_reason") or "Daily risk limit reached",
+            "css":   "banner-locked",
+        }
+
+    severity = no_trade.get("severity", "none")
+    reasons  = no_trade.get("reasons", [])
+    sub_text = " · ".join(reasons) if reasons else ""
+
+    if severity == "hard":
+        return {
+            "type": "no_trade",
+            "text": "NO TRADE DAY — Protect Capital",
+            "sub":  sub_text or "Market conditions are weak across the watchlist",
+            "css":  "banner-no-trade",
+        }
+
+    if severity == "soft":
+        return {
+            "type": "caution",
+            "text": "CAUTION — No A+ Setups Yet",
+            "sub":  sub_text or "Wait for higher quality setups to develop",
+            "css":  "banner-caution",
+        }
+
+    return {
+        "type": "aplus",
+        "text": "A+ ONLY MODE",
+        "sub":  "Trade only the highest-quality setups — protect capital first",
+        "css":  "banner-aplus",
+    }
+
+
 def compute_freshness(
     triggered_at: str | None,
     exec_state: str | None,
@@ -1303,6 +1523,13 @@ def annotate(stock: dict) -> dict:
         stock["final_action_reason"]= _sfa_reason
         stock["exec_class"]         = _sfa_class
 
+    # ── Trade permission (requires trading mode from settings) ───────────────
+    try:
+        _trade_mode = get_setting("trading_mode") or "SWING TRADE"
+        stock["trade_permission"] = compute_trade_permission(stock, _trade_mode)
+    except Exception:
+        stock["trade_permission"] = {"permission": "WATCH", "css": "perm-watch", "reason": ""}
+
     # ── Simplified 4-state decision badge ────────────────────────────────────
     # Maps all conditions to one clear morning label: A+ READY / WATCH / EXTENDED / REJECTED
     # Rules (in priority order):
@@ -1611,6 +1838,15 @@ _DASHBOARD_EMPTY = dict(
               "reasons": [], "severity": "none"},
     orb_session={},
     alerts=[],
+    risk_settings={"trading_mode": "SWING TRADE", "account_size": 10000,
+                   "risk_pct": 1.0, "max_trades_per_day": 3,
+                   "max_daily_loss_pct": 3.0, "stop_after_2_losses": True},
+    daily_session={"locked": 0, "lock_reason": None},
+    discipline={"score": 100, "label": "Disciplined", "css": "disc-high", "deductions": []},
+    daily_banner={"type": "aplus", "text": "A+ ONLY MODE",
+                  "sub": "Trade only the highest-quality setups", "css": "banner-aplus"},
+    trades_today=0,
+    losses_today=0,
 )
 
 
@@ -1713,6 +1949,24 @@ def _dashboard_inner():
     # Notes: pass a set of tickers that have notes for the indicator column
     notes_map = get_all_notes()
 
+    # ── Risk engine context ──────────────────────────────────────────────────
+    risk_settings   = get_risk_settings()
+    today_str       = _et_now().strftime("%Y-%m-%d")
+    daily_session   = get_daily_session(today_str)
+    today_entries   = get_journal_entries_for_date(today_str)
+
+    # Auto-lock check: fires when a new journal entry pushes over limits
+    _lock_update = check_auto_lock(today_entries, risk_settings, daily_session)
+    if _lock_update:
+        lock_daily_session(_lock_update["lock_reason"], today_str)
+        daily_session = get_daily_session(today_str)
+
+    discipline      = compute_discipline_score(today_entries, risk_settings,
+                                               bool(daily_session.get("locked")))
+    daily_banner    = compute_daily_banner(no_trade, daily_session)
+    trades_today    = len(today_entries)
+    losses_today    = sum(1 for e in today_entries if e.get("result") == "Loss")
+
     return render_template(
         "dashboard.html",
         ranked=ranked,
@@ -1730,6 +1984,12 @@ def _dashboard_inner():
         wl_counts=wl_counts,
         orb_session=get_orb_session_banner(),
         alerts=dashboard_alerts,
+        risk_settings=risk_settings,
+        daily_session=daily_session,
+        discipline=discipline,
+        daily_banner=daily_banner,
+        trades_today=trades_today,
+        losses_today=losses_today,
     )
 
 
@@ -2126,6 +2386,7 @@ def stock_detail(ticker):
         all_wls=all_wls,
         ticker_wl_ids=ticker_wl_ids,
         get_setup_type_class=get_setup_type_class,
+        risk_settings=get_risk_settings(),
     )
 
 
@@ -2243,46 +2504,79 @@ def journal():
     edit_id = request.args.get("edit")
     if edit_id:
         edit_entry = get_journal_entry(int(edit_id))
+    today_str     = _et_now().strftime("%Y-%m-%d")
+    risk_settings = get_risk_settings()
     return render_template(
         "journal.html",
         entries=entries,
         summary=summary,
-        setup_types=SETUP_TYPES,
+        setup_types=SETUP_TYPES + [s for s in SWING_SETUP_TYPES if s not in SETUP_TYPES],
         edit_entry=edit_entry,
-        today=_et_now().strftime("%Y-%m-%d"),
+        today=today_str,
+        risk_settings=risk_settings,
+    )
+
+
+def _parse_journal_form(form) -> dict:
+    """Parse all journal form fields (shared by add and edit routes)."""
+    direction   = form.get("direction", "Long")
+    entry_price = form.get("entry_price", "")
+    exit_price  = form.get("exit_price", "")
+    pnl_pct, result = compute_pnl(direction, entry_price, exit_price)
+
+    def _int(k):
+        v = form.get(k, "")
+        try: return int(v) if v else None
+        except ValueError: return None
+
+    def _float(k):
+        v = form.get(k, "")
+        try: return float(v) if v else None
+        except ValueError: return None
+
+    is_aplus = form.get("is_aplus_setup") == "1"
+
+    return dict(
+        direction      = direction,
+        entry_price    = float(entry_price) if entry_price else 0,
+        exit_price     = float(exit_price)  if exit_price  else 0,
+        shares         = _int("shares"),
+        setup_type     = form.get("setup_type", ""),
+        momentum_score = _int("momentum_score"),
+        pnl_pct        = pnl_pct,
+        result         = result,
+        notes          = form.get("notes", ""),
+        trade_mode     = form.get("trade_mode") or None,
+        option_side    = form.get("option_side") or None,
+        option_premium = _float("option_premium"),
+        contracts      = _int("contracts"),
+        stop_price     = _float("stop_price"),
+        is_aplus_setup = is_aplus,
     )
 
 
 @app.route("/journal/add", methods=["POST"])
 def journal_add():
     """Add a new journal entry."""
-    direction   = request.form.get("direction", "Long")
-    entry_price = request.form.get("entry_price", "")
-    exit_price  = request.form.get("exit_price", "")
-    pnl_pct, result = compute_pnl(direction, entry_price, exit_price)
-
-    try:
-        shares = int(request.form.get("shares", "")) if request.form.get("shares") else None
-    except ValueError:
-        shares = None
-    try:
-        momentum_score = int(request.form.get("momentum_score", "")) if request.form.get("momentum_score") else None
-    except ValueError:
-        momentum_score = None
-
+    f = _parse_journal_form(request.form)
     add_journal_entry(
-        ticker         = request.form.get("ticker", ""),
+        ticker         = request.form.get("ticker", "").upper(),
         trade_date     = request.form.get("trade_date", _et_now().strftime("%Y-%m-%d")),
-        direction      = direction,
-        entry_price    = float(entry_price) if entry_price else 0,
-        exit_price     = float(exit_price)  if exit_price  else 0,
-        shares         = shares,
-        setup_type     = request.form.get("setup_type", ""),
-        momentum_score = momentum_score,
-        pnl_pct        = pnl_pct,
-        result         = result,
-        notes          = request.form.get("notes", ""),
+        **f,
     )
+    pnl_pct = f["pnl_pct"]
+    result  = f["result"]
+
+    # Auto-lock check after adding a trade
+    today_str     = _et_now().strftime("%Y-%m-%d")
+    risk_settings = get_risk_settings()
+    today_entries = get_journal_entries_for_date(today_str)
+    daily_session = get_daily_session(today_str)
+    lock_update   = check_auto_lock(today_entries, risk_settings, daily_session)
+    if lock_update:
+        lock_daily_session(lock_update["lock_reason"], today_str)
+        flash(f"⚠ {lock_update['lock_reason']} — Trading locked for today.", "warning")
+
     flash(f"Trade logged — {result} ({'+' if pnl_pct >= 0 else ''}{pnl_pct:.2f}%).", "success")
     return redirect(url_for("journal"))
 
@@ -2290,33 +2584,12 @@ def journal_add():
 @app.route("/journal/<int:entry_id>/edit", methods=["POST"])
 def journal_edit(entry_id):
     """Update an existing journal entry."""
-    direction   = request.form.get("direction", "Long")
-    entry_price = request.form.get("entry_price", "")
-    exit_price  = request.form.get("exit_price", "")
-    pnl_pct, result = compute_pnl(direction, entry_price, exit_price)
-
-    try:
-        shares = int(request.form.get("shares", "")) if request.form.get("shares") else None
-    except ValueError:
-        shares = None
-    try:
-        momentum_score = int(request.form.get("momentum_score", "")) if request.form.get("momentum_score") else None
-    except ValueError:
-        momentum_score = None
-
+    f = _parse_journal_form(request.form)
     update_journal_entry(
-        entry_id       = entry_id,
-        ticker         = request.form.get("ticker", ""),
-        trade_date     = request.form.get("trade_date", ""),
-        direction      = direction,
-        entry_price    = float(entry_price) if entry_price else 0,
-        exit_price     = float(exit_price)  if exit_price  else 0,
-        shares         = shares,
-        setup_type     = request.form.get("setup_type", ""),
-        momentum_score = momentum_score,
-        pnl_pct        = pnl_pct,
-        result         = result,
-        notes          = request.form.get("notes", ""),
+        entry_id   = entry_id,
+        ticker     = request.form.get("ticker", "").upper(),
+        trade_date = request.form.get("trade_date", ""),
+        **f,
     )
     flash("Trade updated.", "success")
     return redirect(url_for("journal"))
@@ -2328,6 +2601,63 @@ def journal_delete(entry_id):
     delete_journal_entry(entry_id)
     flash("Trade removed.", "info")
     return redirect(url_for("journal"))
+
+
+# ---------------------------------------------------------------------------
+# Risk Settings & Daily Session routes
+# ---------------------------------------------------------------------------
+
+@app.route("/risk", methods=["GET", "POST"])
+def risk_settings():
+    """Risk settings page — account size, risk %, trade limits, trading mode."""
+    today_str     = _et_now().strftime("%Y-%m-%d")
+    daily_session = get_daily_session(today_str)
+    today_entries = get_journal_entries_for_date(today_str)
+    trades_today  = len(today_entries)
+    losses_today  = sum(1 for e in today_entries if e.get("result") == "Loss")
+
+    if request.method == "POST":
+        action = request.form.get("action", "save")
+
+        if action == "unlock":
+            unlock_daily_session(today_str)
+            flash("Trading unlocked for today.", "success")
+            return redirect(url_for("risk_settings"))
+
+        # Save risk settings
+        set_setting("trading_mode",       request.form.get("trading_mode", "SWING TRADE"))
+        set_setting("account_size",       request.form.get("account_size",       "10000"))
+        set_setting("risk_pct",           request.form.get("risk_pct",           "1.0"))
+        set_setting("max_trades_per_day", request.form.get("max_trades_per_day", "3"))
+        set_setting("max_daily_loss_pct", request.form.get("max_daily_loss_pct", "3.0"))
+        set_setting("stop_after_2_losses",
+                    "1" if request.form.get("stop_after_2_losses") else "0")
+        flash("Risk settings saved.", "success")
+        return redirect(url_for("risk_settings"))
+
+    risk_s = get_risk_settings()
+    discipline = compute_discipline_score(
+        today_entries, risk_s, bool(daily_session.get("locked"))
+    )
+    return render_template(
+        "risk_settings.html",
+        risk_settings=risk_s,
+        daily_session=daily_session,
+        discipline=discipline,
+        trades_today=trades_today,
+        losses_today=losses_today,
+        today=today_str,
+    )
+
+
+@app.route("/risk/trading-mode", methods=["POST"])
+def set_trading_mode():
+    """AJAX: Switch DAY TRADE / SWING TRADE mode. Returns JSON."""
+    mode = request.json.get("mode", "SWING TRADE") if request.is_json else request.form.get("mode", "SWING TRADE")
+    if mode in ("DAY TRADE", "SWING TRADE"):
+        set_setting("trading_mode", mode)
+        return jsonify({"ok": True, "mode": mode})
+    return jsonify({"ok": False, "error": "invalid mode"}), 400
 
 
 # ---------------------------------------------------------------------------

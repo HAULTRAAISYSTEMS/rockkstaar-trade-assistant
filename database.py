@@ -493,6 +493,37 @@ def init_db():
         )
     """))
 
+    # Daily trading sessions — one row per date, tracks trades/losses for risk engine
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS daily_sessions (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_date TEXT UNIQUE NOT NULL,
+            locked       INTEGER DEFAULT 0,
+            lock_reason  TEXT,
+            updated_at   TEXT
+        )
+    """))
+
+    # Journal options/risk columns (safe migration)
+    _journal_new_columns = [
+        ("trade_mode",     "TEXT"),
+        ("option_side",    "TEXT"),
+        ("option_premium", "REAL"),
+        ("contracts",      "INTEGER"),
+        ("stop_price",     "REAL"),
+        ("is_aplus_setup", "INTEGER DEFAULT 0"),
+    ]
+    for col, col_type in _journal_new_columns:
+        if _USE_POSTGRES:
+            cursor.execute(
+                f"ALTER TABLE journal ADD COLUMN IF NOT EXISTS {col} {col_type}"
+            )
+        else:
+            try:
+                cursor.execute(f"ALTER TABLE journal ADD COLUMN {col} {col_type}")
+            except sqlite3.OperationalError:
+                pass
+
     # Seed default watchlists on first run (use cnt alias — works in both DBs)
     wl_count = cursor.execute(
         "SELECT COUNT(*) AS cnt FROM watchlists"
@@ -1346,19 +1377,24 @@ def get_all_trade_plans() -> dict:
 # ---------------------------------------------------------------------------
 
 def add_journal_entry(ticker, trade_date, direction, entry_price, exit_price,
-                      shares, setup_type, momentum_score, pnl_pct, result, notes):
+                      shares, setup_type, momentum_score, pnl_pct, result, notes,
+                      trade_mode=None, option_side=None, option_premium=None,
+                      contracts=None, stop_price=None, is_aplus_setup=0):
     """Insert a new trade journal entry. Returns the new row id."""
     conn = get_db()
     cur = conn.execute("""
         INSERT INTO journal
             (ticker, trade_date, direction, entry_price, exit_price,
-             shares, setup_type, momentum_score, pnl_pct, result, notes, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             shares, setup_type, momentum_score, pnl_pct, result, notes, created_at,
+             trade_mode, option_side, option_premium, contracts, stop_price, is_aplus_setup)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         ticker.upper(), trade_date, direction,
         entry_price, exit_price, shares,
         setup_type, momentum_score, pnl_pct, result, notes,
-        datetime.now().isoformat()
+        datetime.now().isoformat(),
+        trade_mode, option_side, option_premium, contracts, stop_price,
+        1 if is_aplus_setup else 0,
     ), returning_id=True)
     new_id = cur.lastrowid
     conn.commit()
@@ -1367,19 +1403,25 @@ def add_journal_entry(ticker, trade_date, direction, entry_price, exit_price,
 
 
 def update_journal_entry(entry_id, ticker, trade_date, direction, entry_price, exit_price,
-                         shares, setup_type, momentum_score, pnl_pct, result, notes):
+                         shares, setup_type, momentum_score, pnl_pct, result, notes,
+                         trade_mode=None, option_side=None, option_premium=None,
+                         contracts=None, stop_price=None, is_aplus_setup=0):
     """Update an existing journal entry by id."""
     conn = get_db()
     conn.execute("""
         UPDATE journal SET
             ticker=?, trade_date=?, direction=?, entry_price=?, exit_price=?,
-            shares=?, setup_type=?, momentum_score=?, pnl_pct=?, result=?, notes=?
+            shares=?, setup_type=?, momentum_score=?, pnl_pct=?, result=?, notes=?,
+            trade_mode=?, option_side=?, option_premium=?, contracts=?, stop_price=?,
+            is_aplus_setup=?
         WHERE id=?
     """, (
         ticker.upper(), trade_date, direction,
         entry_price, exit_price, shares,
         setup_type, momentum_score, pnl_pct, result, notes,
-        entry_id
+        trade_mode, option_side, option_premium, contracts, stop_price,
+        1 if is_aplus_setup else 0,
+        entry_id,
     ))
     conn.commit()
     conn.close()
@@ -1407,3 +1449,67 @@ def get_all_journal_entries() -> list:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_journal_entries_for_date(date_str: str) -> list:
+    """Return journal entries for a specific date (YYYY-MM-DD)."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM journal WHERE trade_date = ? ORDER BY created_at DESC",
+        (date_str,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Daily session helpers (risk engine)
+# ---------------------------------------------------------------------------
+
+def get_daily_session(date_str: str | None = None) -> dict:
+    """Return today's (or a specific date's) trading session row, or defaults if none."""
+    if date_str is None:
+        date_str = _et_now().strftime("%Y-%m-%d")
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM daily_sessions WHERE session_date = ?", (date_str,)
+    ).fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return {
+        "session_date": date_str,
+        "locked":       0,
+        "lock_reason":  None,
+        "updated_at":   None,
+    }
+
+
+def upsert_daily_session(date_str: str, locked: int = 0, lock_reason: str | None = None):
+    """Insert or update a daily session record."""
+    conn = get_db()
+    now = _et_now().strftime("%Y-%m-%d %I:%M %p")
+    conn.execute("""
+        INSERT INTO daily_sessions (session_date, locked, lock_reason, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_date) DO UPDATE SET
+            locked       = excluded.locked,
+            lock_reason  = excluded.lock_reason,
+            updated_at   = excluded.updated_at
+    """, (date_str, locked, lock_reason, now))
+    conn.commit()
+    conn.close()
+
+
+def lock_daily_session(reason: str, date_str: str | None = None):
+    """Lock trading for a given date (default: today)."""
+    if date_str is None:
+        date_str = _et_now().strftime("%Y-%m-%d")
+    upsert_daily_session(date_str, locked=1, lock_reason=reason)
+
+
+def unlock_daily_session(date_str: str | None = None):
+    """Manually unlock trading for a given date (default: today)."""
+    if date_str is None:
+        date_str = _et_now().strftime("%Y-%m-%d")
+    upsert_daily_session(date_str, locked=0, lock_reason=None)

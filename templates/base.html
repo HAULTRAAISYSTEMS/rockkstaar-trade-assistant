@@ -30,7 +30,8 @@
     <div class="nav-links">
       <a href="{{ url_for('dashboard') }}"  class="nav-link {% if request.endpoint == 'dashboard' %}nav-link-active{% endif %}">Dashboard</a>
       <a href="{{ url_for('quick_mode') }}" class="nav-link nav-link-quick {% if request.endpoint == 'quick_mode' %}nav-link-active{% endif %}" title="Mobile quick view">⚡ Quick</a>
-      <a href="{{ url_for('journal') }}"   class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}">Journal</a>
+      <a href="{{ url_for('journal') }}"       class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}">Journal</a>
+      <a href="{{ url_for('risk_settings') }}" class="nav-link {% if request.endpoint == 'risk_settings' %}nav-link-active{% endif %}" title="Risk &amp; Discipline Settings">⚖ Risk</a>
     </div>
     <div class="nav-actions">
       <span id="ws-status-pill" class="ws-status-pill ws-polling">POLLING</span>

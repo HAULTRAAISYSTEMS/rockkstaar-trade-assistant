@@ -4291,3 +4291,170 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
 @media (max-width: 768px) {
   .nav-actions .freshness-badge { display: none; }
 }
+
+
+/* ============================================================
+   DISCIPLINE & RISK ENGINE — styles
+   ============================================================ */
+
+/* ── Trade Permission Badge ─────────────────────────────────── */
+.perm-badge {
+  display: inline-flex; align-items: center; padding: 0.18rem 0.55rem;
+  border-radius: 6px; font-size: 0.65rem; font-weight: 700;
+  letter-spacing: 0.06em; white-space: nowrap;
+}
+.perm-badge-lg { font-size: 0.78rem; padding: 0.3rem 0.8rem; border-radius: 8px; }
+.perm-allowed  { background: rgba(34,197,94,0.13);  color: #22c55e; border: 1px solid rgba(34,197,94,0.4); }
+.perm-watch    { background: rgba(251,191,36,0.12); color: #fbbf24; border: 1px solid rgba(251,191,36,0.35); }
+.perm-blocked  { background: rgba(239,68,68,0.12);  color: #f87171; border: 1px solid rgba(239,68,68,0.35); }
+
+/* ── Trade Permission bar on top5 cards ────────────────────── */
+.trade-perm-bar {
+  width: 100%; text-align: center; font-size: 0.68rem; font-weight: 700;
+  letter-spacing: 0.06em; padding: 0.25rem 0; border-radius: 0 0 10px 10px;
+  margin-top: 0.5rem; cursor: default;
+}
+.trade-perm-bar.perm-allowed { background: rgba(34,197,94,0.13); color: #22c55e; }
+.trade-perm-bar.perm-watch   { background: rgba(251,191,36,0.12); color: #fbbf24; }
+.trade-perm-bar.perm-blocked { background: rgba(239,68,68,0.11); color: #f87171; }
+
+/* ── Daily Discipline Banner ────────────────────────────────── */
+.daily-banner {
+  margin: 0.5rem 1.5rem 0.75rem; padding: 0.7rem 1rem;
+  border-radius: 10px; display: flex; align-items: center;
+  justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+  border: 1px solid transparent;
+}
+.daily-banner-inner { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
+.daily-banner-text  { font-weight: 800; font-size: 0.85rem; letter-spacing: 0.05em; }
+.daily-banner-sub   { font-size: 0.72rem; opacity: 0.8; }
+.daily-banner-meta  {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  font-size: 0.7rem; margin-top: 0.2rem;
+}
+.banner-stat { opacity: 0.85; }
+.banner-aplus   { background: rgba(34,197,94,0.08);  border-color: rgba(34,197,94,0.25);  color: #22c55e; }
+.banner-caution { background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.25); color: #fbbf24; }
+.banner-no-trade{ background: rgba(239,68,68,0.08);  border-color: rgba(239,68,68,0.25);  color: #f87171; }
+.banner-locked  { background: rgba(239,68,68,0.14);  border-color: rgba(239,68,68,0.5);   color: #ef4444; }
+.banner-locked .daily-banner-text { animation: pulse-red 1.5s ease-in-out infinite; }
+@keyframes pulse-red { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+
+.btn-banner-unlock {
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3);
+  color: inherit; border-radius: 5px; padding: 0.15rem 0.5rem; cursor: pointer;
+  font-size: 0.68rem; font-weight: 600;
+}
+.btn-banner-unlock:hover { background: rgba(255,255,255,0.2); }
+
+/* ── Mode Selector ─────────────────────────────────────────── */
+.mode-selector-wrap { display: flex; gap: 0.4rem; align-items: center; }
+.mode-btn {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+  color: var(--text-muted, #94a3b8); border-radius: 7px;
+  padding: 0.28rem 0.7rem; font-size: 0.72rem; font-weight: 600;
+  cursor: pointer; transition: all 0.15s ease; white-space: nowrap;
+}
+.mode-btn:hover { background: rgba(255,255,255,0.1); color: var(--text-primary, #e2e8f0); }
+.mode-btn-active { background: rgba(99,102,241,0.2); border-color: rgba(99,102,241,0.5); color: #818cf8; }
+
+/* ── Discipline Score Badge ─────────────────────────────────── */
+.disc-badge {
+  display: inline-flex; align-items: center; padding: 0.14rem 0.45rem;
+  border-radius: 6px; font-size: 0.65rem; font-weight: 700;
+}
+.disc-high { background: rgba(34,197,94,0.13); color: #22c55e; border: 1px solid rgba(34,197,94,0.35); }
+.disc-mid  { background: rgba(251,191,36,0.12); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+.disc-low  { background: rgba(239,68,68,0.12);  color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+
+/* ── Options Risk Calculator Panel ─────────────────────────── */
+.options-risk-panel {
+  background: rgba(15,23,42,0.6); border: 1px solid rgba(99,102,241,0.25);
+  border-radius: 10px; padding: 1rem 1.1rem; margin-bottom: 1rem;
+}
+.options-risk-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;
+}
+.options-risk-title { font-weight: 700; font-size: 0.85rem; color: var(--text-primary, #e2e8f0); }
+.option-side-btns   { display: flex; gap: 0.4rem; }
+.opt-side-btn {
+  padding: 0.25rem 0.7rem; border-radius: 6px; font-size: 0.72rem; font-weight: 700;
+  cursor: pointer; border: 1px solid transparent; transition: all 0.15s;
+  background: rgba(255,255,255,0.05); color: var(--text-muted, #94a3b8);
+}
+.opt-call.active { background: rgba(34,197,94,0.15); color: #22c55e; border-color: rgba(34,197,94,0.4); }
+.opt-put.active  { background: rgba(239,68,68,0.12); color: #f87171; border-color: rgba(239,68,68,0.35); }
+.opt-field-row   { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr)); gap: 0.65rem; margin-bottom: 0.8rem; }
+.opt-field       { display: flex; flex-direction: column; gap: 0.25rem; }
+.opt-label       { font-size: 0.68rem; color: var(--text-muted, #94a3b8); font-weight: 600; }
+.options-risk-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 0.5rem; }
+.opt-result-item {
+  background: rgba(255,255,255,0.04); border-radius: 7px; padding: 0.5rem 0.7rem;
+  display: flex; flex-direction: column; gap: 0.15rem;
+}
+.opt-result-label { font-size: 0.65rem; color: var(--text-muted, #94a3b8); font-weight: 600; }
+.opt-result-val   { font-size: 0.9rem; font-weight: 700; color: var(--text-primary, #e2e8f0); }
+
+/* ── Risk Settings page ─────────────────────────────────────── */
+.risk-wrap        { max-width: 900px; margin: 0 auto; padding: 1rem 1.5rem 3rem; }
+.risk-header      { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1.2rem; }
+.risk-title       { font-size: 1.4rem; font-weight: 800; color: var(--text-primary, #e2e8f0); }
+.risk-date        { color: var(--text-muted, #64748b); font-size: 0.8rem; }
+.risk-status-row  { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+.risk-stat-card   { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 0.9rem 1rem; text-align: center; }
+.risk-stat-label  { font-size: 0.65rem; color: var(--text-muted, #64748b); font-weight: 600; margin-bottom: 0.3rem; }
+.risk-stat-val    { font-size: 1.4rem; font-weight: 800; color: var(--text-primary, #e2e8f0); }
+.risk-stat-sub    { font-size: 0.65rem; color: var(--text-muted, #64748b); margin-top: 0.2rem; }
+.risk-stat-locked { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.06); }
+.risk-locked-text { color: #ef4444; }
+.risk-active-text { color: #22c55e; }
+.risk-loss-text   { color: #f87171; }
+.disc-deductions  { background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.2); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; }
+.disc-deductions-title { font-size: 0.7rem; font-weight: 700; color: #f87171; margin-bottom: 0.4rem; }
+.disc-deduction-item   { font-size: 0.72rem; color: var(--text-secondary, #cbd5e1); padding: 0.1rem 0; }
+.disc-val.disc-high { color: #22c55e; }
+.disc-val.disc-mid  { color: #fbbf24; }
+.disc-val.disc-low  { color: #ef4444; }
+.disc-label.disc-high { color: #22c55e; }
+.disc-label.disc-mid  { color: #fbbf24; }
+.disc-label.disc-low  { color: #ef4444; }
+.risk-settings-card { margin-bottom: 1rem; }
+.risk-field-group   { margin-bottom: 1rem; }
+.risk-label         { display: block; font-size: 0.72rem; font-weight: 700; color: var(--text-secondary, #cbd5e1); margin-bottom: 0.4rem; }
+.risk-field-hint    { font-size: 0.68rem; color: var(--text-muted, #64748b); margin-top: 0.3rem; }
+.risk-mode-btns     { display: flex; gap: 0.4rem; margin-bottom: 0.3rem; }
+.risk-inputs-grid   { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+.risk-input-group   { display: flex; flex-direction: column; gap: 0.25rem; }
+.risk-preview       { font-size: 0.72rem; color: #22c55e; font-weight: 600; margin-top: 0.2rem; }
+.risk-checkbox-label{ display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.8rem; color: var(--text-secondary, #cbd5e1); }
+.risk-form-actions  { display: flex; gap: 0.75rem; margin-top: 1rem; }
+.risk-guide-card    { margin-bottom: 1rem; }
+.risk-guide-grid    { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+.risk-guide-title   { font-weight: 700; font-size: 0.82rem; color: var(--text-primary, #e2e8f0); margin-bottom: 0.5rem; }
+.risk-guide-list    { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.risk-guide-list li { font-size: 0.72rem; color: var(--text-secondary, #cbd5e1); line-height: 1.4; }
+@media (max-width: 600px) { .risk-guide-grid { grid-template-columns: 1fr; } }
+
+/* ── Journal options columns ────────────────────────────────── */
+.jform-grid-options {
+  grid-template-columns: repeat(auto-fit, minmax(160px,1fr));
+  margin-top: 0.75rem; padding-top: 0.75rem;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+.jopt-side { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 5px; font-size: 0.65rem; font-weight: 700; }
+.jopt-call { background: rgba(34,197,94,0.13); color: #22c55e; }
+.jopt-put  { background: rgba(239,68,68,0.12); color: #f87171; }
+.jform-dir-call.active { background: rgba(34,197,94,0.15); color: #22c55e; border-color: rgba(34,197,94,0.4); }
+.jform-dir-put.active  { background: rgba(239,68,68,0.13); color: #f87171; border-color: rgba(239,68,68,0.35); }
+.jform-group-aplus     { display: flex; flex-direction: column; justify-content: flex-end; }
+.jform-checkbox-label  { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.75rem; color: var(--text-secondary, #cbd5e1); }
+.aplus-dot  { color: #22c55e; font-size: 1rem; }
+.text-center { text-align: center; }
+
+@media (max-width: 768px) {
+  .daily-banner { flex-direction: column; align-items: flex-start; }
+  .mode-selector-wrap { align-self: flex-end; }
+  .options-risk-panel { padding: 0.75rem; }
+  .risk-guide-grid { grid-template-columns: 1fr; }
+}

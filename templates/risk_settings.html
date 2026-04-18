@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Risk Settings — Rockkstaar Trade Assistant{% endblock %}
+
+{% block content %}
+<div class="risk-wrap">
+
+  <div class="risk-header">
+    <h1 class="risk-title">Risk &amp; Discipline Control</h1>
+    <span class="risk-date">{{ today }}</span>
+  </div>
+
+  <!-- ===== TODAY'S STATUS ===== -->
+  <div class="risk-status-row">
+
+    <div class="risk-stat-card {% if daily_session.locked %}risk-stat-locked{% endif %}">
+      <div class="risk-stat-label">Trading Status</div>
+      {% if daily_session.locked %}
+      <div class="risk-stat-val risk-locked-text">LOCKED</div>
+      <div class="risk-stat-sub">{{ daily_session.lock_reason or 'Daily limit hit' }}</div>
+      <form method="POST" action="{{ url_for('risk_settings') }}" style="margin-top:0.5rem;">
+        <input type="hidden" name="action" value="unlock">
+        <button type="submit" class="btn btn-refresh">Unlock for Today</button>
+      </form>
+      {% else %}
+      <div class="risk-stat-val risk-active-text">ACTIVE</div>
+      <div class="risk-stat-sub">Trading allowed</div>
+      {% endif %}
+    </div>
+
+    <div class="risk-stat-card">
+      <div class="risk-stat-label">Trades Today</div>
+      <div class="risk-stat-val">{{ trades_today }}</div>
+      <div class="risk-stat-sub">Max {{ risk_settings.max_trades_per_day }} per day</div>
+    </div>
+
+    <div class="risk-stat-card">
+      <div class="risk-stat-label">Losses Today</div>
+      <div class="risk-stat-val {{ 'risk-loss-text' if losses_today >= 2 else '' }}">{{ losses_today }}</div>
+      <div class="risk-stat-sub">Stop after {{ '2 losses' if risk_settings.stop_after_2_losses else 'disabled' }}</div>
+    </div>
+
+    <div class="risk-stat-card">
+      <div class="risk-stat-label">Discipline Score</div>
+      <div class="risk-stat-val disc-val {{ discipline.css }}">{{ discipline.score }}/100</div>
+      <div class="risk-stat-sub disc-label {{ discipline.css }}">{{ discipline.label }}</div>
+    </div>
+
+  </div>
+
+  {% if discipline.deductions %}
+  <div class="disc-deductions">
+    <div class="disc-deductions-title">Today's Deductions</div>
+    {% for d in discipline.deductions %}
+    <div class="disc-deduction-item">⚠ {{ d }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- ===== SETTINGS FORM ===== -->
+  <div class="detail-card risk-settings-card">
+    <h3 class="card-title">Risk Settings</h3>
+
+    <form method="POST" action="{{ url_for('risk_settings') }}">
+      <input type="hidden" name="action" value="save">
+
+      <!-- Trading Mode -->
+      <div class="risk-field-group">
+        <label class="risk-label">Trading Mode</label>
+        <div class="risk-mode-btns">
+          <button type="button"
+            class="mode-btn {% if risk_settings.trading_mode == 'DAY TRADE' %}mode-btn-active{% endif %}"
+            onclick="setMode('DAY TRADE')">⚡ Day Trade</button>
+          <button type="button"
+            class="mode-btn {% if risk_settings.trading_mode == 'SWING TRADE' %}mode-btn-active{% endif %}"
+            onclick="setMode('SWING TRADE')">📈 Swing Trade</button>
+        </div>
+        <input type="hidden" name="trading_mode" id="rs-trading-mode"
+               value="{{ risk_settings.trading_mode }}">
+        <div class="risk-field-hint">
+          Day Trade: prioritizes momentum, ORB, VWAP, intraday catalysts.<br>
+          Swing Trade: prioritizes swing score, trend, EMAs, Fibonacci, catalyst quality.
+        </div>
+      </div>
+
+      <div class="risk-inputs-grid">
+
+        <div class="risk-input-group">
+          <label class="risk-label" for="rs-account">Account Size</label>
+          <div class="plan-input-wrap">
+            <span class="plan-input-prefix">$</span>
+            <input type="number" step="100" min="0" id="rs-account" name="account_size"
+                   class="plan-input" value="{{ risk_settings.account_size }}"
+                   oninput="calcRiskPreview()">
+          </div>
+          <div class="risk-field-hint">Your total trading account balance.</div>
+        </div>
+
+        <div class="risk-input-group">
+          <label class="risk-label" for="rs-riskpct">Risk % Per Trade</label>
+          <input type="number" step="0.1" min="0.1" max="10" id="rs-riskpct" name="risk_pct"
+                 class="jform-input" value="{{ risk_settings.risk_pct }}"
+                 oninput="calcRiskPreview()">
+          <div class="risk-preview" id="risk-dollar-preview"></div>
+          <div class="risk-field-hint">Maximum % of account to risk on a single trade.</div>
+        </div>
+
+        <div class="risk-input-group">
+          <label class="risk-label" for="rs-max-trades">Max Trades Per Day</label>
+          <input type="number" step="1" min="1" max="20" id="rs-max-trades" name="max_trades_per_day"
+                 class="jform-input" value="{{ risk_settings.max_trades_per_day }}">
+          <div class="risk-field-hint">Lock trading when this count is hit.</div>
+        </div>
+
+        <div class="risk-input-group">
+          <label class="risk-label" for="rs-maxloss">Max Daily Loss %</label>
+          <input type="number" step="0.1" min="0.1" max="20" id="rs-maxloss" name="max_daily_loss_pct"
+                 class="jform-input" value="{{ risk_settings.max_daily_loss_pct }}">
+          <div class="risk-field-hint">Auto-lock if account drops this % in a day.</div>
+        </div>
+
+      </div>
+
+      <div class="risk-field-group">
+        <label class="risk-checkbox-label">
+          <input type="checkbox" name="stop_after_2_losses"
+                 {% if risk_settings.stop_after_2_losses %}checked{% endif %}>
+          <span>Stop trading after 2 losses in a day</span>
+        </label>
+        <div class="risk-field-hint" style="margin-left:1.5rem;">
+          Forces a pause to protect capital and prevent emotional revenge trading.
+        </div>
+      </div>
+
+      <div class="risk-form-actions">
+        <button type="submit" class="btn btn-save">Save Settings</button>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-refresh">Back to Dashboard</a>
+      </div>
+
+    </form>
+  </div>
+
+  <!-- ===== DAY TRADE vs SWING TRADE GUIDE ===== -->
+  <div class="detail-card risk-guide-card">
+    <h3 class="card-title">Trade Permission Logic</h3>
+    <div class="risk-guide-grid">
+      <div class="risk-guide-col">
+        <div class="risk-guide-title">⚡ Day Trade Mode</div>
+        <ul class="risk-guide-list">
+          <li><strong>TRADE ALLOWED</strong> — TRIGGERED or READY + Setup ≥6, Catalyst ≥4, Momentum ≥5, Vol ≥1.2x</li>
+          <li><strong>WATCH</strong> — Setup forming, ≥4 score, not all conditions aligned yet</li>
+          <li><strong>BLOCKED</strong> — Extended entry, Avoid bias, or scores too low</li>
+          <li>Prioritizes: intraday momentum, ORB breakouts, VWAP reclaims, volume spikes</li>
+        </ul>
+      </div>
+      <div class="risk-guide-col">
+        <div class="risk-guide-title">📈 Swing Trade Mode</div>
+        <ul class="risk-guide-list">
+          <li><strong>TRADE ALLOWED</strong> — A+ READY badge: Swing ≥7, actionable status, Catalyst ≥4, R:R ≥1.5</li>
+          <li><strong>WATCH</strong> — Swing ≥4, setup still building</li>
+          <li><strong>BLOCKED</strong> — REJECTED (weak structure) or EXTENDED (chasing)</li>
+          <li>Prioritizes: daily trend, 4H structure, EMAs, Fibonacci zones, catalyst quality</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function setMode(mode) {
+  document.getElementById('rs-trading-mode').value = mode;
+  document.querySelectorAll('.risk-mode-btns .mode-btn').forEach(function(b) {
+    b.classList.toggle('mode-btn-active',
+      (mode === 'DAY TRADE' && b.textContent.includes('Day')) ||
+      (mode === 'SWING TRADE' && b.textContent.includes('Swing'))
+    );
+  });
+}
+
+function calcRiskPreview() {
+  const account  = parseFloat(document.getElementById('rs-account').value) || 0;
+  const riskPct  = parseFloat(document.getElementById('rs-riskpct').value) || 0;
+  const el       = document.getElementById('risk-dollar-preview');
+  if (account > 0 && riskPct > 0) {
+    const dollars = (account * riskPct / 100).toFixed(2);
+    el.textContent = '= $' + dollars + ' max risk per trade';
+  } else {
+    el.textContent = '';
+  }
+}
+calcRiskPreview();
+</script>
+{% endblock %}
