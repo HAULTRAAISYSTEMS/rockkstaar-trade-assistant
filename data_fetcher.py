@@ -1097,6 +1097,18 @@ def _bsm_greeks(S: float, K: float, T: float, sigma: float,
     return round(delta, 3), round(theta_per_day, 4)
 
 
+import time as _time_module
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Return True if the exception looks like a Yahoo Finance 429 / rate-limit."""
+    msg = str(exc).lower()
+    return any(k in msg for k in (
+        "too many requests", "rate limit", "429", "ratelimit",
+        "try after", "throttl",
+    ))
+
+
 def fetch_option_contracts(ticker: str,
                            current_price: float | None = None,
                            trade_mode: str = "SWING TRADE") -> dict:
@@ -1105,27 +1117,36 @@ def fetch_option_contracts(ticker: str,
 
     Returns:
         {
-          "price": float,
+          "price": float | None,
           "calls": [...],
           "puts":  [...],
           "best_day": contract | None,
           "best_swing": contract | None,
-          "error": str | None,
+          "error": str | None,          # human-readable error (None = success)
+          "rate_limited": bool,         # True when Yahoo returned a 429
+          "partial": bool,              # True when some expirations failed mid-fetch
         }
 
-    Each contract dict:
-        strike, expiration, dte, option_type, delta, theta,
-        bid, ask, spread, spread_pct, mid, volume, open_interest,
-        in_the_money, iv, labels, score_day, score_swing
+    Calls/Puts/All filtering is ALWAYS done client-side from the returned data —
+    this function always returns both lists regardless of trade_mode.
+
+    Rate-limit protection:
+      - 0.4 s sleep between consecutive option_chain() calls
+      - Per-expiration 429 is caught; we stop fetching more expirations and
+        return whatever partial data was collected with rate_limited=True
+      - Outer 429 (e.g., on yf_t.options) also returns rate_limited=True
     """
     if not _YF_AVAILABLE:
         return {"error": "yfinance not installed", "calls": [], "puts": [],
-                "price": None, "best_day": None, "best_swing": None}
+                "price": None, "best_day": None, "best_swing": None,
+                "rate_limited": False, "partial": False}
 
     try:
         # Option chain calls require yfinance's own session (curl_cffi-based).
-        # Do NOT pass our custom requests.Session here — it breaks option_chain().
+        # Do NOT pass our custom requests.Session — it breaks option_chain().
         yf_t = yf.Ticker(ticker)
+        logger.info("options  ticker=%s  stage=upstream_call  trade_mode=%s",
+                    ticker, trade_mode)
 
         # ── Current price ────────────────────────────────────────────
         price = current_price
@@ -1137,19 +1158,30 @@ def fetch_option_contracts(ticker: str,
 
         if not price:
             return {"error": "Could not determine current price", "calls": [], "puts": [],
-                    "price": None, "best_day": None, "best_swing": None}
+                    "price": None, "best_day": None, "best_swing": None,
+                    "rate_limited": False, "partial": False}
 
         # ── Expiration selection ──────────────────────────────────────
-        all_exps = yf_t.options
+        try:
+            all_exps = yf_t.options
+        except Exception as _exp_exc:
+            if _is_rate_limit_error(_exp_exc):
+                logger.warning("options  ticker=%s  stage=get_expirations  RATE LIMITED: %s",
+                               ticker, _exp_exc)
+                return {"error": "Options source temporarily rate-limited",
+                        "calls": [], "puts": [], "price": price,
+                        "best_day": None, "best_swing": None,
+                        "rate_limited": True, "partial": False}
+            raise
+
         if not all_exps:
             return {"error": "No option expirations available for this ticker",
                     "calls": [], "puts": [], "price": price,
-                    "best_day": None, "best_swing": None}
+                    "best_day": None, "best_swing": None,
+                    "rate_limited": False, "partial": False}
 
         today = date.today()
 
-        # day trade: nearest 3 expirations within 0–14 days
-        # swing trade: expirations 15–60 days out (up to 4)
         day_exps   = []
         swing_exps = []
         for exp in all_exps:
@@ -1160,22 +1192,29 @@ def fetch_option_contracts(ticker: str,
             elif 15 <= dte <= 60:
                 swing_exps.append(exp)
 
-        # pick which expirations to pull based on mode, but always get both lists
+        # Always fetch both day and swing expirations so client-side filter works
         exps_to_fetch = list(dict.fromkeys(day_exps[:3] + swing_exps[:4]))
         if not exps_to_fetch:
-            # fallback: just take first 3 available
             exps_to_fetch = list(all_exps[:3])
 
-        # ── Pull chains ───────────────────────────────────────────────
-        raw_calls: list[dict] = []
-        raw_puts:  list[dict] = []
+        logger.info("options  ticker=%s  expirations_to_fetch=%s", ticker, exps_to_fetch)
 
-        for exp in exps_to_fetch:
+        # ── Pull chains with inter-call delay ─────────────────────────
+        raw_calls:   list[dict] = []
+        raw_puts:    list[dict] = []
+        rate_limited = False
+        partial      = False
+
+        for idx, exp in enumerate(exps_to_fetch):
+            # Small delay between calls — prevents bursting Yahoo's rate limiter
+            if idx > 0:
+                _time_module.sleep(0.4)
+
             try:
-                chain     = yf_t.option_chain(exp)
-                exp_date  = datetime.strptime(exp, "%Y-%m-%d").date()
-                dte       = max(0, (exp_date - today).days)
-                T         = max(dte / 365.0, 1 / 365.0)   # time in years, floor at 1 day
+                chain    = yf_t.option_chain(exp)
+                exp_date = datetime.strptime(exp, "%Y-%m-%d").date()
+                dte      = max(0, (exp_date - today).days)
+                T        = max(dte / 365.0, 1 / 365.0)
 
                 for row_iter, is_call in ((chain.calls.iterrows(), True),
                                           (chain.puts.iterrows(),  False)):
@@ -1183,8 +1222,6 @@ def fetch_option_contracts(ticker: str,
                         strike = float(row.get("strike") or 0)
                         if not strike:
                             continue
-
-                        # Near the money: within 15% of current price
                         if abs(strike - price) / price > 0.15:
                             continue
 
@@ -1201,7 +1238,6 @@ def fetch_option_contracts(ticker: str,
                         oi  = int(row.get("openInterest") or 0)
                         iv  = float(row.get("impliedVolatility") or 0)
 
-                        # Filter: skip wide spread, low OI, zero IV
                         if spread_pct > 25:
                             continue
                         if oi < 50:
@@ -1211,7 +1247,6 @@ def fetch_option_contracts(ticker: str,
 
                         delta, theta = _bsm_greeks(price, strike, T, iv, is_call)
 
-                        # Labels
                         labels = []
                         if vol >= 200 and oi >= 500:
                             labels.append("Good Liquidity")
@@ -1221,31 +1256,29 @@ def fetch_option_contracts(ticker: str,
                             labels.append("Wide Spread")
 
                         contract = {
-                            "strike":       strike,
-                            "expiration":   exp,
-                            "dte":          dte,
-                            "option_type":  "CALL" if is_call else "PUT",
-                            "delta":        delta,
-                            "theta":        theta,
-                            "bid":          round(bid,  2),
-                            "ask":          round(ask,  2),
-                            "mid":          round(mid,  2),
-                            "spread":       round(spread, 2),
-                            "spread_pct":   round(spread_pct, 1),
-                            "volume":       vol,
+                            "strike":        strike,
+                            "expiration":    exp,
+                            "dte":           dte,
+                            "option_type":   "CALL" if is_call else "PUT",
+                            "delta":         delta,
+                            "theta":         theta,
+                            "bid":           round(bid,    2),
+                            "ask":           round(ask,    2),
+                            "mid":           round(mid,    2),
+                            "spread":        round(spread, 2),
+                            "spread_pct":    round(spread_pct, 1),
+                            "volume":        vol,
                             "open_interest": oi,
-                            "in_the_money": bool(row.get("inTheMoney", False)),
-                            "iv":           round(iv * 100, 1),   # as %
-                            "labels":       labels,
-                            "score_day":    0.0,
-                            "score_swing":  0.0,
+                            "in_the_money":  bool(row.get("inTheMoney", False)),
+                            "iv":            round(iv * 100, 1),
+                            "labels":        labels,
+                            "score_day":     0.0,
+                            "score_swing":   0.0,
                         }
 
-                        # Scoring — day trade: favour near-ATM delta, high vol, low spread
-                        # swing trade: favour solid delta, high OI, low spread, 21-60 DTE
-                        abs_d = abs(delta)
-                        liq_vol = _math.log1p(vol)
-                        liq_oi  = _math.log1p(oi)
+                        abs_d        = abs(delta)
+                        liq_vol      = _math.log1p(vol)
+                        liq_oi       = _math.log1p(oi)
                         spread_score = max(0.0, 1.0 - spread_pct / 25.0)
 
                         day_delta_score = max(0.0, 1.0 - abs(abs_d - 0.50) / 0.30)
@@ -1253,61 +1286,87 @@ def fetch_option_contracts(ticker: str,
                             day_delta_score * 0.35 + liq_vol * 0.40 + spread_score * 0.25, 4)
 
                         swing_delta_score = max(0.0, 1.0 - abs(abs_d - 0.45) / 0.25)
-                        # penalise DTE outside 21-45 window
                         dte_ok = 1.0 if 21 <= dte <= 45 else max(0.0, 1.0 - abs(dte - 33) / 28.0)
                         contract["score_swing"] = round(
-                            swing_delta_score * 0.30 + liq_oi * 0.35 + spread_score * 0.20 + dte_ok * 0.15, 4)
+                            swing_delta_score * 0.30 + liq_oi * 0.35 +
+                            spread_score * 0.20 + dte_ok * 0.15, 4)
 
                         if is_call:
                             raw_calls.append(contract)
                         else:
                             raw_puts.append(contract)
+
+                logger.info("options  ticker=%s  exp=%s  calls=%d  puts=%d",
+                            ticker, exp, len(raw_calls), len(raw_puts))
+
             except Exception as _exp_err:
-                logger.debug("option_chain failed for %s exp=%s: %s", ticker, exp, _exp_err)
-                continue
+                if _is_rate_limit_error(_exp_err):
+                    logger.warning(
+                        "options  ticker=%s  exp=%s  RATE LIMITED — stopping after %d/%d expirations",
+                        ticker, exp, idx, len(exps_to_fetch),
+                    )
+                    rate_limited = True
+                    if idx > 0:
+                        partial = True   # we got some data before the limit hit
+                    break
+                else:
+                    logger.warning("options  ticker=%s  exp=%s  fetch_error=%s",
+                                   ticker, exp, _exp_err)
+                    partial = True
+                    continue
 
-        # ── Sort each list ────────────────────────────────────────────
-        def _sort_key_day(c):   return -c["score_day"]
-        def _sort_key_swing(c): return -c["score_swing"]
-
+        # ── Sort ──────────────────────────────────────────────────────
         raw_calls.sort(key=lambda c: c["strike"])
-        raw_puts.sort(key=lambda c: c["strike"])
+        raw_puts.sort(key=lambda c:  c["strike"])
 
         # ── Best contract selection ───────────────────────────────────
-        # Best day trade: highest score_day, delta 0.35-0.70, DTE 0-14
         def _best_day(lst):
-            candidates = [c for c in lst
-                          if 0.35 <= abs(c["delta"]) <= 0.70 and c["dte"] <= 14]
-            return max(candidates, key=lambda c: c["score_day"], default=None)
+            cands = [c for c in lst if 0.35 <= abs(c["delta"]) <= 0.70 and c["dte"] <= 14]
+            return max(cands, key=lambda c: c["score_day"], default=None)
 
-        # Best swing: highest score_swing, delta 0.35-0.65, DTE 21-60
         def _best_swing(lst):
-            candidates = [c for c in lst
-                          if 0.30 <= abs(c["delta"]) <= 0.65 and 21 <= c["dte"] <= 60]
-            return max(candidates, key=lambda c: c["score_swing"], default=None)
+            cands = [c for c in lst if 0.30 <= abs(c["delta"]) <= 0.65 and 21 <= c["dte"] <= 60]
+            return max(cands, key=lambda c: c["score_swing"], default=None)
 
-        # Pick from calls or puts based on availability; prefer calls for now
-        # (front-end lets user filter by type)
-        all_contracts = raw_calls + raw_puts
         best_day   = _best_day(raw_calls)   or _best_day(raw_puts)
         best_swing = _best_swing(raw_calls) or _best_swing(raw_puts)
 
-        # Tag them
         if best_day:
             best_day["best_tag"] = "Best Day Trade"
         if best_swing and best_swing is not best_day:
             best_swing["best_tag"] = "Best Swing Trade"
 
+        # Rate-limited mid-fetch with no data at all → treat as full rate limit
+        if rate_limited and not raw_calls and not raw_puts:
+            return {"error": "Options source temporarily rate-limited",
+                    "calls": [], "puts": [], "price": round(price, 2),
+                    "best_day": None, "best_swing": None,
+                    "rate_limited": True, "partial": False}
+
+        logger.info(
+            "options  ticker=%s  done  calls=%d  puts=%d  "
+            "rate_limited=%s  partial=%s",
+            ticker, len(raw_calls), len(raw_puts), rate_limited, partial,
+        )
         return {
-            "price":      round(price, 2),
-            "calls":      raw_calls,
-            "puts":       raw_puts,
-            "best_day":   best_day,
-            "best_swing": best_swing,
-            "error":      None,
+            "price":       round(price, 2),
+            "calls":       raw_calls,
+            "puts":        raw_puts,
+            "best_day":    best_day,
+            "best_swing":  best_swing,
+            "error":       None,
+            "rate_limited": rate_limited,
+            "partial":     partial,
         }
 
     except Exception as exc:
-        logger.warning("fetch_option_contracts failed for %s: %s", ticker, exc)
+        if _is_rate_limit_error(exc):
+            logger.warning("options  ticker=%s  RATE LIMITED (outer): %s", ticker, exc)
+            return {"error": "Options source temporarily rate-limited",
+                    "calls": [], "puts": [], "price": current_price,
+                    "best_day": None, "best_swing": None,
+                    "rate_limited": True, "partial": False}
+        logger.warning("options  ticker=%s  unexpected error: %s", ticker, exc)
         return {"error": str(exc), "calls": [], "puts": [],
-                "price": current_price, "best_day": None, "best_swing": None}
+                "price": current_price, "best_day": None, "best_swing": None,
+                "rate_limited": False, "partial": False}

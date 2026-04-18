@@ -2545,40 +2545,130 @@ def stock_detail(ticker):
     )
 
 
-_options_cache: dict = {}       # {ticker: {"data": ..., "ts": float}}
-_OPTIONS_CACHE_TTL = 20         # seconds — reuse result within this window
+# ── Options contract server-side cache ───────────────────────────────────────
+# Keyed by ticker. Stores the last successful result and when it was fetched.
+# Also tracks per-ticker rate-limit backoff so we never hammer Yahoo twice.
+_options_cache: dict = {}          # {ticker: {"data": dict, "ts": float}}
+_options_rl_until: dict = {}       # {ticker: float}  — epoch when backoff expires
+_OPTIONS_CACHE_TTL   = 90          # seconds — return cached data within this window
+_OPTIONS_RL_BACKOFF  = 120         # seconds — wait after a 429 before retrying upstream
 
 @app.route("/api/options/<ticker>")
 def api_option_contracts(ticker):
-    """Return filtered option contracts for the options contract selector.
-    Results are cached server-side for _OPTIONS_CACHE_TTL seconds so that
-    rapid re-clicks or parallel auto-refresh hits do not hammer Yahoo Finance.
     """
-    ticker = ticker.upper()
-    trade_mode = request.args.get("mode", "SWING TRADE")
-    now = _time.time()
+    Return filtered option contracts for the options contract selector.
 
-    cached = _options_cache.get(ticker)
-    if cached and (now - cached["ts"]) < _OPTIONS_CACHE_TTL:
-        result = dict(cached["data"])
+    Caching behaviour:
+      - Fresh cache hit  (<90 s old, no error): return immediately, no upstream call.
+      - Rate-limit backoff active: return stale cached data if available, else error.
+      - Cache miss or expired: call upstream, cache on success or partial-success.
+
+    Calls/Puts/All filtering is entirely client-side — this route always returns
+    both lists. The `mode` param does NOT bypass the cache.
+
+    Dashboard auto-refresh never calls this route — it has its own endpoints.
+    """
+    ticker     = ticker.upper()
+    trade_mode = request.args.get("mode", "SWING TRADE")
+    now        = _time.time()
+
+    cached_entry = _options_cache.get(ticker)
+
+    # ── Fresh cache hit ───────────────────────────────────────────────
+    if cached_entry and (now - cached_entry["ts"]) < _OPTIONS_CACHE_TTL:
+        age = int(now - cached_entry["ts"])
+        logger.info("options  ticker=%s  CACHE HIT  age=%ds  calls=%d  puts=%d",
+                    ticker, age,
+                    len(cached_entry["data"].get("calls", [])),
+                    len(cached_entry["data"].get("puts",  [])))
+        result = dict(cached_entry["data"])
         result["cached"] = True
+        result["cache_age_s"] = age
         return jsonify(result)
 
+    # ── Rate-limit backoff still active ──────────────────────────────
+    rl_until = _options_rl_until.get(ticker, 0)
+    if now < rl_until:
+        wait = int(rl_until - now)
+        logger.warning("options  ticker=%s  RATE LIMIT BACKOFF active  wait=%ds", ticker, wait)
+        if cached_entry:
+            # Return stale data — better than nothing
+            result = dict(cached_entry["data"])
+            result["cached"]          = True
+            result["stale"]           = True
+            result["rate_limited"]    = True
+            result["cache_age_s"]     = int(now - cached_entry["ts"])
+            result["retry_after_s"]   = wait
+            logger.info("options  ticker=%s  returning STALE cache during backoff  age=%ds",
+                        ticker, result["cache_age_s"])
+            return jsonify(result)
+        return jsonify({
+            "error":        "Options source temporarily rate-limited — try again later",
+            "calls": [], "puts": [], "price": None,
+            "best_day": None, "best_swing": None,
+            "cached": False, "stale": False, "rate_limited": True,
+            "retry_after_s": wait,
+        })
+
+    # ── Upstream call ─────────────────────────────────────────────────
+    logger.info("options  ticker=%s  UPSTREAM CALL  trade_mode=%s", ticker, trade_mode)
     try:
         stock = get_stock_data(ticker)
         price = float(stock.get("current_price") or 0) if stock else 0.0
         from data_fetcher import fetch_option_contracts
         result = fetch_option_contracts(ticker, current_price=price or None,
                                         trade_mode=trade_mode)
+
+        if result.get("rate_limited"):
+            # Set backoff — do not call upstream again for _OPTIONS_RL_BACKOFF seconds
+            _options_rl_until[ticker] = now + _OPTIONS_RL_BACKOFF
+            logger.warning(
+                "options  ticker=%s  RATE LIMITED by upstream — backoff %ds until %.0f",
+                ticker, _OPTIONS_RL_BACKOFF, _options_rl_until[ticker],
+            )
+            if cached_entry:
+                # We have stale data — use it and annotate
+                stale = dict(cached_entry["data"])
+                stale["cached"]        = True
+                stale["stale"]         = True
+                stale["rate_limited"]  = True
+                stale["cache_age_s"]   = int(now - cached_entry["ts"])
+                stale["retry_after_s"] = _OPTIONS_RL_BACKOFF
+                logger.info("options  ticker=%s  serving STALE cache after rate limit  age=%ds",
+                            ticker, stale["cache_age_s"])
+                return jsonify(stale)
+            # No stale data available
+            result["cached"]  = False
+            result["stale"]   = False
+            return jsonify(result)
+
+        # Success (full or partial) — cache the result
         if not result.get("error"):
             _options_cache[ticker] = {"data": result, "ts": now}
-        result["cached"] = False
+            logger.info(
+                "options  ticker=%s  cached  calls=%d  puts=%d  partial=%s",
+                ticker, len(result.get("calls", [])), len(result.get("puts", [])),
+                result.get("partial", False),
+            )
+
+        result["cached"]  = False
+        result["stale"]   = False
         return jsonify(result)
+
     except Exception as exc:
-        logger.warning("api_option_contracts failed ticker=%s: %s", ticker, exc)
-        return jsonify({"error": str(exc), "calls": [], "puts": [],
-                        "price": None, "best_day": None, "best_swing": None,
-                        "cached": False})
+        logger.warning("options  ticker=%s  unexpected exception: %s", ticker, exc)
+        if cached_entry:
+            stale = dict(cached_entry["data"])
+            stale["cached"]       = True
+            stale["stale"]        = True
+            stale["rate_limited"] = False
+            stale["cache_age_s"]  = int(now - cached_entry["ts"])
+            return jsonify(stale)
+        return jsonify({
+            "error": str(exc), "calls": [], "puts": [],
+            "price": None, "best_day": None, "best_swing": None,
+            "cached": False, "stale": False, "rate_limited": False,
+        })
 
 
 @app.route("/stock/<ticker>/plan", methods=["POST"])

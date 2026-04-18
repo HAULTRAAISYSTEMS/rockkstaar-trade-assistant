@@ -963,8 +963,8 @@ window._arRefreshFn = stockDetailRefresh;
 // ── Options Contract Selector ────────────────────────────────────────────────
 (function() {
   const TICKER    = "{{ stock.ticker }}";
-  const COOLDOWN  = 12000;   // ms between API calls
-  const CACHE_TTL = 20000;   // ms — reuse data within this window
+  const COOLDOWN  = 30000;   // ms between API calls (30 s)
+  const CACHE_TTL = 90000;   // ms — reuse client-side data within this window (matches server TTL)
 
   let _ocsData        = null;
   let _ocsType        = "CALL";
@@ -1057,12 +1057,33 @@ window._arRefreshFn = stockDetailRefresh;
 
   function _ocsRender(data) {
     const body = document.getElementById("ocs-body");
-    if (data.error) {
-      body.innerHTML = `<div class="ocs-error">${data.error}</div>`;
+
+    // Hard error with no data at all (not stale, not partial)
+    if (data.error && !data.stale && !(data.calls||[]).length && !(data.puts||[]).length) {
+      const isRL = data.rate_limited;
+      const retry = data.retry_after_s ? ` Try again in ~${data.retry_after_s}s.` : "";
+      body.innerHTML = isRL
+        ? `<div class="ocs-error ocs-rate-limited">Options source temporarily rate-limited.${retry}</div>`
+        : `<div class="ocs-error">${data.error}</div>`;
       return;
     }
 
-    // Choose which contracts to show
+    // Build status banner (stale / partial / cached / live)
+    let statusBanner = "";
+    if (data.stale && data.rate_limited) {
+      const age = data.cache_age_s ? ` (${data.cache_age_s}s old)` : "";
+      statusBanner = `<div class="ocs-status-banner ocs-status-stale">
+        Showing cached options — live refresh delayed${age}. Rate limit active.
+      </div>`;
+    } else if (data.stale) {
+      statusBanner = `<div class="ocs-status-banner ocs-status-stale">Showing cached options — live refresh delayed.</div>`;
+    } else if (data.partial) {
+      statusBanner = `<div class="ocs-status-banner ocs-status-partial">Partial data — some expirations could not be fetched.</div>`;
+    } else if (data.cached) {
+      statusBanner = `<div class="ocs-status-banner ocs-status-cached">Cached data (${data.cache_age_s || 0}s old) — no new API call made.</div>`;
+    }
+
+    // Calls/Puts/All filtering is 100% client-side — no backend request fired here
     let contracts = [];
     if (_ocsType === "CALL")     contracts = data.calls || [];
     else if (_ocsType === "PUT") contracts = data.puts  || [];
@@ -1075,7 +1096,7 @@ window._arRefreshFn = stockDetailRefresh;
     const bestSwingKey = data.best_swing ? `${data.best_swing.strike}|${data.best_swing.expiration}|${data.best_swing.option_type}` : null;
 
     if (!contracts.length) {
-      body.innerHTML = `<div class="ocs-hint">No qualifying contracts found for the selected type and filters.<br>
+      body.innerHTML = statusBanner + `<div class="ocs-hint">No qualifying contracts found for the selected type and filters.<br>
         Try switching to "All" or check that the ticker has weekly options.</div>`;
       return;
     }
@@ -1149,7 +1170,7 @@ window._arRefreshFn = stockDetailRefresh;
       </tr>`;
     }).join("");
 
-    body.innerHTML = bestHtml + caption +
+    body.innerHTML = statusBanner + bestHtml + caption +
       `<div class="ocs-table-wrap"><table class="ocs-table">${thead}<tbody>${rows}</tbody></table></div>`;
   }
 })();
