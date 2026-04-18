@@ -825,62 +825,145 @@ def get_risk_settings() -> dict:
 
 def compute_trade_permission(stock: dict, trade_mode: str) -> dict:
     """
-    Map a stock's current conditions to a trade permission decision.
-    Returns dict: {permission, css, reason}
+    Returns {permission, css, reason} based on exact strategy rules.
     permission: "TRADE ALLOWED" | "WATCH" | "BLOCKED"
+
+    DAY TRADE A+ requires one confirmed setup type (ORB / VWAP Reclaim / Momentum
+    Breakout) with volume, momentum, and catalyst thresholds all met.
+
+    SWING TRADE A+ requires: trend aligned on 4H+Daily, valid structure (HH/HL),
+    pullback to 20 EMA / 50 EMA / fib 50% / fib 61.8%, R:R >= 1.5, entry not extended.
     """
-    bias = stock.get("trade_bias") or ""
+    bias  = stock.get("trade_bias") or ""
+    entry = stock.get("entry_quality") or ""
+
+    # Hard block — no edge in this direction
     if bias == "Avoid":
-        return {"permission": "BLOCKED", "css": "perm-blocked", "reason": "Avoid bias — no edge"}
+        return {"permission": "BLOCKED", "css": "perm-blocked",
+                "reason": "Avoid bias — no directional edge"}
 
+    # Extended price always blocked regardless of mode
+    if entry == "Extended":
+        return {"permission": "BLOCKED", "css": "perm-blocked",
+                "reason": "Price extended — do not chase, wait for pullback"}
+
+    # ------------------------------------------------------------------ #
+    # DAY TRADE                                                            #
+    # ------------------------------------------------------------------ #
     if trade_mode == "DAY TRADE":
-        final  = stock.get("final_action") or "WAIT"
-        setup  = stock.get("setup_score")  or 0
-        cat    = stock.get("catalyst_score") or 0
-        mom    = stock.get("momentum_score") or 0
-        rvol   = stock.get("rel_volume")   or 0
-        entry  = stock.get("entry_quality") or ""
+        setup_type   = stock.get("setup_type") or ""
+        orb_ready    = stock.get("orb_ready") or "NO"
+        above_vwap   = bool(stock.get("price_above_vwap"))
+        trend_struct = bool(stock.get("trend_structure"))   # HH + HL confirmed
+        mom          = stock.get("momentum_score") or 0
+        cat          = stock.get("catalyst_score") or 0
+        rvol         = stock.get("rel_volume") or 0
+        setup        = stock.get("setup_score") or 0
 
-        if entry == "Extended":
-            return {"permission": "BLOCKED", "css": "perm-blocked", "reason": "Extended — do not chase"}
-
-        # All conditions confirmed
-        if final == "TRIGGERED" and mom >= 5 and rvol >= 1.2:
-            return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                    "reason": "Triggered — all entry conditions confirmed"}
-
-        if final == "READY" and setup >= 6 and cat >= 4 and mom >= 5 and rvol >= 1.2:
-            return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                    "reason": f"Setup {setup}/10 · Catalyst {cat}/10 · Mom {mom}/10 · {rvol:.1f}x vol"}
-
-        # Setup forming — watch
-        if final in ("READY", "TRIGGERED", "WAIT (LOW CONF)") and setup >= 4:
+        # ── ORB — Opening Range Breakout ──────────────────────────────
+        if orb_ready == "YES":
+            if rvol >= 1.5 and mom >= 6 and cat >= 3:
+                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
+                        "reason": f"ORB confirmed · {rvol:.1f}x vol · Mom {mom}/10 · Cat {cat}/10"}
             return {"permission": "WATCH", "css": "perm-watch",
-                    "reason": "Setup forming — needs stronger volume/momentum confirmation"}
+                    "reason": f"ORB forming — needs vol ≥1.5x ({rvol:.1f}x), mom ≥6 ({mom}), cat ≥3 ({cat})"}
+
+        # ── VWAP Reclaim ──────────────────────────────────────────────
+        if "VWAP" in setup_type.upper() or above_vwap:
+            if above_vwap and rvol >= 1.3 and mom >= 5 and cat >= 3:
+                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
+                        "reason": f"VWAP reclaim confirmed · {rvol:.1f}x vol · Mom {mom}/10"}
+            return {"permission": "WATCH", "css": "perm-watch",
+                    "reason": f"VWAP setup forming — needs price above VWAP, vol ≥1.3x ({rvol:.1f}x), mom ≥5 ({mom})"}
+
+        # ── Momentum Breakout ─────────────────────────────────────────
+        if "MOMENTUM" in setup_type.upper() or "BREAKOUT" in setup_type.upper():
+            if trend_struct and rvol >= 1.5 and mom >= 7 and cat >= 3:
+                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
+                        "reason": f"Momentum breakout · HH/HL structure · {rvol:.1f}x vol · Mom {mom}/10"}
+            return {"permission": "WATCH", "css": "perm-watch",
+                    "reason": f"Momentum setup forming — needs structure + vol ≥1.5x ({rvol:.1f}x) + mom ≥7 ({mom})"}
+
+        # ── Setup forming but no confirmed type yet ───────────────────
+        if setup >= 4 and (mom >= 4 or rvol >= 1.2):
+            return {"permission": "WATCH", "css": "perm-watch",
+                    "reason": f"Setup score {setup}/10 — no ORB/VWAP/Breakout confirmed yet"}
 
         return {"permission": "BLOCKED", "css": "perm-blocked",
-                "reason": "Conditions not met — setup score or catalyst too low"}
+                "reason": "No valid day trade setup — wait for ORB, VWAP reclaim, or momentum breakout"}
 
-    else:  # SWING TRADE
-        simplified = stock.get("simplified_action") or "WATCH"
-        swing = stock.get("swing_score") or 0
-        rr    = stock.get("risk_reward")
+    # ------------------------------------------------------------------ #
+    # SWING TRADE                                                          #
+    # ------------------------------------------------------------------ #
+    else:
+        daily_trend  = stock.get("daily_trend") or "Neutral"
+        daily_hh_hl  = bool(stock.get("daily_hh_hl"))
+        h4_hh_hl     = bool(stock.get("h4_hh_hl"))
+        pct_ema20    = stock.get("pct_from_ema20")
+        pct_ema50    = stock.get("pct_from_ema50")
+        fib_50       = stock.get("fib_50")
+        fib_618      = stock.get("fib_618")
+        current      = stock.get("current_price") or 0
+        rr           = stock.get("risk_reward") or 0
+        cat          = stock.get("catalyst_score") or 0
+        swing        = stock.get("swing_score") or 0
+        pullback_q   = stock.get("pullback_quality") or "Watch"
 
-        if simplified == "REJECTED":
+        # Trend alignment check (4H + Daily must agree)
+        long_bias  = bias == "Long Bias"
+        short_bias = bias == "Short Bias"
+        trend_bull = long_bias  and daily_trend in ("Bullish", "Bullish Lean")
+        trend_bear = short_bias and daily_trend in ("Bearish", "Bearish Lean")
+        trend_aligned = trend_bull or trend_bear
+
+        if not trend_aligned:
             return {"permission": "BLOCKED", "css": "perm-blocked",
-                    "reason": "Setup rejected — weak structure or avoid bias"}
-        if simplified == "EXTENDED":
+                    "reason": f"Trend not aligned — bias is {bias or 'unknown'}, daily trend is {daily_trend}"}
+
+        # Structure check — need HH/HL (long) or LH/LL (short) on daily or 4H
+        structure_valid = daily_hh_hl or h4_hh_hl
+        if not structure_valid:
             return {"permission": "BLOCKED", "css": "perm-blocked",
-                    "reason": "Extended — wait for pullback to entry zone"}
-        if simplified == "A+ READY":
-            rr_str = f", R:R {rr:.1f}:1" if rr else ""
+                    "reason": "No valid structure — need HH/HL on daily or 4H before entry"}
+
+        # At key level — fib 61.8%, fib 50%, 20 EMA, or 50 EMA
+        FIB_TOL = 2.0   # within 2% of fib level
+        EMA20_TOL = 3.0 # within 3% of 20 EMA
+        EMA50_TOL = 4.0 # within 4% of 50 EMA
+
+        near_fib618 = bool(current and fib_618 and
+                           abs(current - fib_618) / current * 100 <= FIB_TOL)
+        near_fib50  = bool(current and fib_50 and
+                           abs(current - fib_50) / current * 100 <= FIB_TOL)
+        near_ema20  = bool(pct_ema20 is not None and abs(pct_ema20) <= EMA20_TOL)
+        near_ema50  = bool(pct_ema50 is not None and abs(pct_ema50) <= EMA50_TOL)
+        at_key_level = near_fib618 or near_fib50 or near_ema20 or near_ema50
+
+        # Build level label for reason string
+        level_parts = []
+        if near_fib618: level_parts.append("61.8% fib")
+        if near_fib50:  level_parts.append("50% fib")
+        if near_ema20:  level_parts.append(f"20 EMA ({pct_ema20:+.1f}%)")
+        if near_ema50:  level_parts.append(f"50 EMA ({pct_ema50:+.1f}%)")
+
+        # A+ READY — all conditions met
+        if at_key_level and rr >= 1.5 and cat >= 3:
+            level_str = " · ".join(level_parts) if level_parts else "key level"
+            rr_str    = f"{rr:.1f}:1"
             return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                    "reason": f"A+ swing setup — score {swing}/10{rr_str}"}
-        if simplified == "WATCH" and swing >= 4:
-            return {"permission": "WATCH", "css": "perm-watch",
-                    "reason": f"Swing score {swing}/10 — building, not yet A+ quality"}
-        return {"permission": "BLOCKED", "css": "perm-blocked",
-                "reason": "Insufficient swing setup quality — score below threshold"}
+                    "reason": f"A+ swing — {level_str} · R:R {rr_str} · Cat {cat}/10 · score {swing}/10"}
+
+        # WATCH — structure and trend aligned but missing entry level, R:R, or catalyst
+        missing = []
+        if not at_key_level:
+            missing.append("wait for pullback to 20/50 EMA or fib 50%/61.8%")
+        if rr < 1.5:
+            missing.append(f"R:R {rr:.1f} (need ≥1.5)")
+        if cat < 3:
+            missing.append(f"catalyst {cat}/10 (need ≥3)")
+        return {"permission": "WATCH", "css": "perm-watch",
+                "reason": "Swing building — " + " · ".join(missing) if missing
+                          else f"Swing score {swing}/10 — monitoring"}
 
 
 def compute_options_risk(account_size: float, risk_pct: float,
