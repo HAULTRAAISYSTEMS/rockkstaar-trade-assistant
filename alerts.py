@@ -21,8 +21,17 @@ Public API:
 """
 
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass, field as _field
+
+
+def _et_now() -> datetime:
+    try:
+        import zoneinfo
+        return datetime.now(zoneinfo.ZoneInfo("America/New_York"))
+    except Exception:
+        from datetime import timezone
+        return datetime.now(timezone(timedelta(hours=-4)))
 
 # ---------------------------------------------------------------------------
 # Internal types
@@ -103,7 +112,7 @@ def generate_alerts(stocks: list) -> list:
       5. TREND CONTINUATION   → medium severity (score ≥ 6 gate)
     """
     new_alerts = []
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    ts = _et_now().strftime("%I:%M %p").lstrip("0") + " ET"
 
     for s in stocks:
         if s.get("trade_bias") == "Avoid":

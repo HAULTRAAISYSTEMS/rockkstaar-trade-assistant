@@ -19,7 +19,16 @@ import re
 import logging
 import sqlite3
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+
+
+def _et_now() -> datetime:
+    try:
+        import zoneinfo
+        return datetime.now(zoneinfo.ZoneInfo("America/New_York"))
+    except Exception:
+        from datetime import timezone
+        return datetime.now(timezone(timedelta(hours=-4)))
 
 logger = logging.getLogger(__name__)
 
@@ -929,7 +938,7 @@ def set_ticker_state(ticker: str, state: str):
     t = ticker.upper().strip()
     conn.execute(
         "UPDATE stock_data SET ticker_state = ?, last_updated = ? WHERE ticker = ?",
-        (state, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), t),
+        (state, _et_now().strftime("%Y-%m-%d %I:%M %p"), t),
     )
     conn.commit()
     conn.close()
@@ -944,7 +953,7 @@ def upsert_loading_placeholder(ticker: str):
     """
     conn = get_db()
     t = ticker.upper().strip()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = _et_now().strftime("%Y-%m-%d %I:%M %p")
     conn.execute(
         "INSERT OR IGNORE INTO stock_data (ticker, ticker_state, last_updated) "
         "VALUES (?, 'loading', ?)",
@@ -1224,7 +1233,7 @@ def update_live_fields(data: dict) -> None:
         "m15_higher_low":           int(bool(data.get("m15_higher_low"))),
         "m15_confirmation":         int(data.get("m15_confirmation") or 0),
         "triggered_at":             triggered_at,
-        "last_updated":             data.get("last_updated") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "last_updated":             data.get("last_updated") or _et_now().strftime("%Y-%m-%d %I:%M %p"),
     })
     conn.commit()
     conn.close()

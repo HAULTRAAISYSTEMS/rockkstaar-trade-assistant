@@ -18,7 +18,7 @@
       {% endif %}
     </div>
     <div class="detail-subtitle">
-      Last updated: <span id="detail-last-updated">{{ stock.last_updated or '—' }}</span>
+      Last updated: <span id="detail-last-updated">{{ stock.last_updated | et_time }}</span>
       &nbsp;|&nbsp;
       <form action="{{ url_for('refresh_single', ticker=stock.ticker) }}" method="POST" style="display:inline;">
         <button type="submit" class="btn-inline-refresh">⟳ Refresh Data</button>
@@ -40,7 +40,7 @@
   {% elif stock.ticker_state == 'stale' %}
   <div class="state-banner state-banner-stale">
     <strong>Showing last known data for {{ stock.ticker }}</strong>
-    <span>Live price or analysis data is incomplete (EMA / swing data missing). Updated: {{ stock.last_updated or 'unknown' }}. Click Refresh Data to retry.</span>
+    <span>Live price or analysis data is incomplete (EMA / swing data missing). Updated: {{ stock.last_updated | et_time }}. Click Refresh Data to retry.</span>
   </div>
   {% endif %}
 
@@ -786,7 +786,11 @@ async function stockDetailRefresh() {
     if (setupPill && s.swing_setup_type) { setupPill.textContent = s.swing_setup_type; }
 
     const el = document.getElementById('detail-last-updated');
-    if (el && s.last_updated) el.textContent = s.last_updated;
+    if (el && s.last_updated) {
+      // Show only the time portion: "2026-04-18 08:05 PM" → "8:05 PM"
+      const parts = s.last_updated.split(' ');
+      el.textContent = parts.length >= 3 ? (parts[1] + ' ' + parts[2]).replace(/^0/, '') : s.last_updated;
+    }
 
     const swingScore = document.getElementById('detail-swing-score');
     if (swingScore && s.swing_score != null) swingScore.textContent = s.swing_score;

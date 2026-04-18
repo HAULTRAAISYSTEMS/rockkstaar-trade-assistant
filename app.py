@@ -35,6 +35,7 @@ from database import (
     get_journal_entry, get_all_journal_entries,
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
+from data_fetcher import _et_now
 from scoring import catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES, compute_swing_grade
 from classifier import classify_stock
 from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as _clear_alerts
@@ -42,6 +43,34 @@ from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as
 app = Flask(__name__)
 app.secret_key = "rockkstaar-secret-key-change-in-prod"
 sock = Sock(app)
+
+
+@app.template_filter("et_time")
+def et_time_filter(value: str | None) -> str:
+    """Convert a stored timestamp to a clean ET time string for UI display.
+    Handles both new format ("%Y-%m-%d %I:%M %p") and old UTC format ("%Y-%m-%d %H:%M:%S").
+    Returns e.g. "8:05 PM".
+    """
+    if not value:
+        return "—"
+    s = str(value).strip()
+    # New ET format: "2026-04-18 08:05 PM"
+    try:
+        dt = datetime.strptime(s[:19], "%Y-%m-%d %I:%M %p")
+        return dt.strftime("%I:%M %p").lstrip("0")
+    except ValueError:
+        pass
+    # Old server/UTC format: "2026-04-18 00:05:06" — convert naive UTC → ET
+    try:
+        from datetime import timezone
+        import zoneinfo as _zi
+        dt_utc = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        dt_et  = dt_utc.astimezone(_zi.ZoneInfo("America/New_York"))
+        return dt_et.strftime("%I:%M %p").lstrip("0")
+    except Exception:
+        pass
+    return s
+
 
 # /health MUST be registered immediately — before any code that could crash
 # during import. If anything below line 44 raises an exception, gunicorn
@@ -156,7 +185,7 @@ def auto_refresh_stale_closes(tickers: list) -> list:
     Returns the list of ticker symbols that were queued for background refresh.
     """
     expected  = _prev_trading_day()
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_str = _et_now().strftime("%Y-%m-%d")
     queued: list[str] = []
 
     for ticker in tickers:
@@ -234,17 +263,21 @@ def _expire_stuck_loading(watchlist: list) -> None:
     Logs:
         expire_loading  ticker=X  age_secs=N  reason=timeout
     """
-    now = datetime.now()
+    now = _et_now().replace(tzinfo=None)
     for ticker in watchlist:
         stock = get_stock_data(ticker)
         if not stock or stock.get("ticker_state") != "loading":
             continue
         last_updated = stock.get("last_updated") or ""
         try:
-            updated_at = datetime.strptime(last_updated[:19], "%Y-%m-%d %H:%M:%S")
-            age_secs   = (now - updated_at).total_seconds()
+            # Try current ET format first, then fall back to old UTC format
+            try:
+                updated_at = datetime.strptime(last_updated[:19], "%Y-%m-%d %I:%M %p")
+            except ValueError:
+                updated_at = datetime.strptime(last_updated[:19], "%Y-%m-%d %H:%M:%S")
+            age_secs = (now - updated_at).total_seconds()
         except (ValueError, TypeError):
-            age_secs = LOADING_TIMEOUT_SECS + 1  # unknown timestamp → expire it
+            age_secs = LOADING_TIMEOUT_SECS + 1  # unparseable timestamp → expire it
 
         if age_secs > LOADING_TIMEOUT_SECS:
             set_ticker_state(ticker, "error")
@@ -1784,7 +1817,7 @@ def _onboard_ticker_bg(ticker: str) -> None:
                 "momentum_runner":          False,
                 "structure_momentum_score": 0,
                 "ticker_state":             "partial",
-                "last_updated":             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "last_updated":             _et_now().strftime("%Y-%m-%d %I:%M %p"),
             }
             # Fill all swing/zone analysis keys so upsert_stock_data doesn't
             # fail on named-param binding for missing columns.
@@ -2216,7 +2249,7 @@ def journal():
         summary=summary,
         setup_types=SETUP_TYPES,
         edit_entry=edit_entry,
-        today=datetime.now().strftime("%Y-%m-%d"),
+        today=_et_now().strftime("%Y-%m-%d"),
     )
 
 
@@ -2239,7 +2272,7 @@ def journal_add():
 
     add_journal_entry(
         ticker         = request.form.get("ticker", ""),
-        trade_date     = request.form.get("trade_date", datetime.now().strftime("%Y-%m-%d")),
+        trade_date     = request.form.get("trade_date", _et_now().strftime("%Y-%m-%d")),
         direction      = direction,
         entry_price    = float(entry_price) if entry_price else 0,
         exit_price     = float(exit_price)  if exit_price  else 0,
@@ -2616,7 +2649,7 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
     secondary    = compute_secondary_watchlist(ranked, top5_tickers)
     return {
         "type":        "dashboard",
-        "server_time": datetime.now().strftime("%I:%M %p").lstrip("0"),
+        "server_time": _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
         "orb_session": get_orb_session_banner(),
         "no_trade":    no_trade,
         "triggered":   [_stock_summary(s) for s in triggered],
@@ -2641,7 +2674,7 @@ def _build_quick_payload(wl_id: int | None) -> dict:
         out.append(_stock_summary(s))
     return {
         "type":        "quick",
-        "server_time": datetime.now().strftime("%I:%M %p").lstrip("0"),
+        "server_time": _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
         "orb_session": get_orb_session_banner(),
         "stocks":      out,
     }

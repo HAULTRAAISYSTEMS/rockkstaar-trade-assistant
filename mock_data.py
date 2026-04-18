@@ -20,7 +20,7 @@ Swing scoring pipeline order:
 
 import json
 from datetime import datetime
-from data_fetcher import fetch_live_data, fetch_swing_data, swing_data_needs_refresh
+from data_fetcher import fetch_live_data, fetch_swing_data, swing_data_needs_refresh, _et_now
 from news_fetcher import fetch_headlines, needs_refresh, CATALYST_CATEGORIES
 from scoring import (
     compute_catalyst_score,
@@ -422,7 +422,7 @@ def generate_stock_data(ticker: str) -> dict:
         data["catalyst_category"] = json.dumps(data["catalyst_category"])
     data.setdefault("catalyst_category",    "[]")
     data.setdefault("headlines_fetched_at", None)
-    data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data["last_updated"] = _et_now().strftime("%Y-%m-%d %I:%M %p")
 
     # ── Determine ticker_state ────────────────────────────────────────────────
     _price_ok = bool(data.get("current_price") and float(data.get("current_price") or 0) > 0)
@@ -594,7 +594,7 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
     data["setup_confidence"] = data.get("swing_confidence", "Low")
     data["setup_type"]       = data.get("swing_setup_type", "No Setup")
 
-    data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data["last_updated"] = _et_now().strftime("%Y-%m-%d %I:%M %p")
 
     # Determine ticker_state
     _price_ok = bool(data.get("current_price") and float(data.get("current_price") or 0) > 0)
