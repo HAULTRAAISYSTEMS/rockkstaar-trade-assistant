@@ -4552,3 +4552,77 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
 .ocs-status-partial { background: rgba(251,191,36,0.08); color: #fbbf24; border-color: rgba(251,191,36,0.25); }
 .ocs-status-cached  { background: rgba(100,116,139,0.10); color: #94a3b8; border-color: rgba(100,116,139,0.2); }
 .ocs-rate-limited   { background: rgba(239,68,68,0.10); color: #f87171; border-color: rgba(239,68,68,0.3); }
+
+/* ── Market Temperature Panel ──────────────────────────────────────────────── */
+.mt-panel {
+  margin: 0.75rem 1rem 0;
+  padding: 0.65rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+}
+.mt-panel-mt-risk-on  { border-color: rgba(34,197,94,0.2); }
+.mt-panel-mt-caution  { border-color: rgba(251,191,36,0.2); }
+.mt-panel-mt-risk-off { border-color: rgba(239,68,68,0.2); }
+.mt-panel-mt-no-trade { border-color: rgba(239,68,68,0.35); }
+
+.mt-header {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+.mt-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.22rem 0.6rem;
+  border-radius: 5px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.mt-risk-on  { background: rgba(34,197,94,0.14);    color: #22c55e; border: 1px solid rgba(34,197,94,0.35); }
+.mt-neutral  { background: rgba(99,179,237,0.12);   color: #63b3ed; border: 1px solid rgba(99,179,237,0.3); }
+.mt-caution  { background: rgba(251,191,36,0.13);   color: #fbbf24; border: 1px solid rgba(251,191,36,0.35); }
+.mt-risk-off { background: rgba(239,68,68,0.13);    color: #f87171; border: 1px solid rgba(239,68,68,0.35); }
+.mt-no-trade { background: rgba(239,68,68,0.18);    color: #fca5a5; border: 1px solid rgba(239,68,68,0.5); }
+.mt-loading  { background: rgba(100,116,139,0.10);  color: #94a3b8; border: 1px solid rgba(100,116,139,0.2); }
+.mt-unknown  { background: rgba(100,116,139,0.08);  color: #64748b; border: 1px solid rgba(100,116,139,0.15); }
+
+.mt-reason {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mt-body {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  margin-top: 0.45rem;
+  flex-wrap: wrap;
+}
+.mt-indicators { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+.mt-ind        { display: flex; align-items: center; gap: 0.3rem; }
+.mt-ind-lbl    { font-size: 0.66rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.mt-ind-val    { font-size: 0.75rem; font-weight: 700; color: var(--text); }
+.mt-ind-stat   { font-size: 0.67rem; color: var(--text-muted); }
+.mt-pos  { color: #22c55e !important; }
+.mt-neg  { color: #f87171 !important; }
+.mt-warn { color: #fbbf24 !important; }
+
+.mt-signals  { display: flex; gap: 0.45rem; margin-left: auto; flex-wrap: wrap; align-items: center; }
+.mt-sig      { font-size: 0.66rem; font-weight: 700; padding: 0.18rem 0.5rem; border-radius: 4px; white-space: nowrap; }
+.mt-sig-ok   { background: rgba(34,197,94,0.12);    color: #22c55e; }
+.mt-sig-no   { background: rgba(239,68,68,0.10);    color: #f87171; }
+.mt-sig-na   { background: rgba(100,116,139,0.08);  color: #64748b; }
+.mt-sig-warn { background: rgba(251,191,36,0.12);   color: #fbbf24; }
+
+@media (max-width: 768px) {
+  .mt-panel    { margin: 0.5rem 0.5rem 0; padding: 0.55rem 0.75rem; }
+  .mt-reason   { max-width: 100%; white-space: normal; }
+  .mt-signals  { margin-left: 0; }
+  .mt-body     { gap: 0.75rem; }
+}

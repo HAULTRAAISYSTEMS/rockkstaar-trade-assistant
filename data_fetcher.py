@@ -1370,3 +1370,255 @@ def fetch_option_contracts(ticker: str,
         return {"error": str(exc), "calls": [], "puts": [],
                 "price": current_price, "best_day": None, "best_swing": None,
                 "rate_limited": False, "partial": False}
+
+
+def compute_market_temperature() -> dict:
+    """
+    Compute market regime from SPY, QQQ, VIX daily and intraday data.
+
+    Scoring:
+      SPY above/below EMA20:   ±1
+      QQQ above/below EMA20:   ±1
+      SPY above/below VWAP:    ±1  (intraday only — None if market closed)
+      QQQ above/below VWAP:    ±1
+      SPY day change >+0.5%:   +1 / <-1%: -1
+      VIX <18: +1, 18-22: 0, 22-28: -1, 28-35: -2, >35: -4
+      VIX rising (>20): -1 / falling: +1
+
+    Regimes:
+      VIX > 35          → NO TRADE DAY
+      score >= 3        → RISK ON
+      score 1-2         → NEUTRAL
+      score -1 to 0     → CAUTION / CHOP
+      score <= -2       → RISK OFF
+    """
+    _UNKNOWN: dict = {
+        "regime": "UNKNOWN", "label": "Unknown", "css": "mt-unknown",
+        "reason": "Market data unavailable", "longs_ok": None, "shorts_ok": None,
+        "reduce_size": False, "score": None, "error": True,
+        "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
+        "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
+        "vix_level": None, "vix_direction": None,
+    }
+
+    try:
+        import threading as _thr
+
+        # Parallel fetch — 5 API calls simultaneously
+        _results: dict = {}
+
+        def _fetch(key, ticker, interval, range_str):
+            try:
+                _results[key] = _fetch_ohlcv_via_chart_api(
+                    ticker, interval=interval, range_str=range_str
+                )
+            except Exception:
+                _results[key] = None
+
+        _tasks = [
+            ("spy_d", "SPY",  "1d", "6mo"),
+            ("qqq_d", "QQQ",  "1d", "6mo"),
+            ("vix_d", "^VIX", "1d", "1mo"),
+            ("spy_h", "SPY",  "1h", "5d"),
+            ("qqq_h", "QQQ",  "1h", "5d"),
+        ]
+        _threads = [_thr.Thread(target=_fetch, args=a, daemon=True) for a in _tasks]
+        for _t in _threads:
+            _t.start()
+        for _t in _threads:
+            _t.join(timeout=15)
+
+        spy_d = _results.get("spy_d")
+        qqq_d = _results.get("qqq_d")
+        vix_d = _results.get("vix_d")
+        spy_h = _results.get("spy_h")
+        qqq_h = _results.get("qqq_h")
+
+        if not spy_d or not qqq_d:
+            return {**_UNKNOWN, "reason": "SPY/QQQ data unavailable"}
+
+        def _ema(closes, period):
+            n = len(closes)
+            if n < period:
+                return closes[-1]
+            k   = 2.0 / (period + 1)
+            ema = sum(closes[:period]) / period
+            for c in closes[period:]:
+                ema = c * k + ema * (1.0 - k)
+            return ema
+
+        spy_cls = spy_d["closes"]
+        qqq_cls = qqq_d["closes"]
+
+        spy_price     = spy_cls[-1]
+        spy_prev      = spy_cls[-2] if len(spy_cls) >= 2 else spy_price
+        spy_ema20     = _ema(spy_cls, 20)
+        spy_pct_ema20 = (spy_price - spy_ema20) / spy_ema20 * 100
+        spy_day_chg   = (spy_price - spy_prev) / spy_prev * 100
+
+        qqq_price     = qqq_cls[-1]
+        qqq_ema20     = _ema(qqq_cls, 20)
+        qqq_pct_ema20 = (qqq_price - qqq_ema20) / qqq_ema20 * 100
+
+        # VIX level and 5-day direction
+        vix_level     = None
+        vix_direction = "flat"
+        if vix_d and len(vix_d["closes"]) >= 2:
+            vix_level = vix_d["closes"][-1]
+            vix_ref   = vix_d["closes"][-5] if len(vix_d["closes"]) >= 5 else vix_d["closes"][0]
+            if vix_level > vix_ref * 1.05:
+                vix_direction = "rising"
+            elif vix_level < vix_ref * 0.95:
+                vix_direction = "falling"
+
+        # VWAP from today's hourly bars (None when market is closed)
+        def _today_vwap(intra_data):
+            if not intra_data:
+                return None
+            try:
+                import zoneinfo as _zi
+                from datetime import timezone as _tz
+                today_et = _et_now().strftime("%Y-%m-%d")
+                bars = [
+                    (c, h, lo, v)
+                    for ts, _, c, h, lo, v in zip(
+                        intra_data["timestamps"], intra_data["opens"],
+                        intra_data["closes"],     intra_data["highs"],
+                        intra_data["lows"],        intra_data["volumes"],
+                    )
+                    if datetime.fromtimestamp(ts, tz=_tz.utc)
+                       .astimezone(_zi.ZoneInfo("America/New_York"))
+                       .strftime("%Y-%m-%d") == today_et
+                ]
+                if not bars:
+                    return None
+                tpv = sum((h + lo + c) / 3.0 * v for c, h, lo, v in bars)
+                tv  = sum(v for _, _, _, v in bars)
+                return tpv / tv if tv > 0 else None
+            except Exception:
+                return None
+
+        spy_vwap    = _today_vwap(spy_h)
+        qqq_vwap    = _today_vwap(qqq_h)
+        spy_vs_vwap = (spy_price - spy_vwap) / spy_vwap * 100 if spy_vwap else None
+        qqq_vs_vwap = (qqq_price - qqq_vwap) / qqq_vwap * 100 if qqq_vwap else None
+
+        # ── Score ─────────────────────────────────────────────────────────────
+        score   = 0
+        factors = []
+
+        if spy_pct_ema20 >= 0:
+            score += 1
+            factors.append(f"SPY +{spy_pct_ema20:.1f}% vs EMA20")
+        else:
+            score -= 1
+            factors.append(f"SPY {spy_pct_ema20:.1f}% vs EMA20")
+
+        if qqq_pct_ema20 >= 0:
+            score += 1
+            factors.append(f"QQQ +{qqq_pct_ema20:.1f}% vs EMA20")
+        else:
+            score -= 1
+            factors.append(f"QQQ {qqq_pct_ema20:.1f}% vs EMA20")
+
+        if spy_vs_vwap is not None:
+            if spy_vs_vwap >= 0:
+                score += 1
+                factors.append("SPY above VWAP")
+            else:
+                score -= 1
+                factors.append("SPY below VWAP")
+
+        if qqq_vs_vwap is not None:
+            if qqq_vs_vwap >= 0:
+                score += 1
+                factors.append("QQQ above VWAP")
+            else:
+                score -= 1
+                factors.append("QQQ below VWAP")
+
+        if spy_day_chg > 0.5:
+            score += 1
+            factors.append(f"SPY up {spy_day_chg:.1f}%")
+        elif spy_day_chg < -1.0:
+            score -= 1
+            factors.append(f"SPY down {abs(spy_day_chg):.1f}%")
+
+        vix_note = ""
+        if vix_level is not None:
+            if vix_level > 35:
+                score -= 4
+                vix_note = f"VIX {vix_level:.0f} — extreme fear"
+            elif vix_level > 28:
+                score -= 2
+                vix_note = f"VIX {vix_level:.0f} — elevated"
+            elif vix_level > 22:
+                score -= 1
+                vix_note = f"VIX {vix_level:.0f} — caution"
+            else:
+                score += 1
+                vix_note = f"VIX {vix_level:.0f} — calm"
+            if vix_direction == "rising" and vix_level > 20:
+                score -= 1
+                vix_note += " ↑"
+            elif vix_direction == "falling":
+                score += 1
+                vix_note += " ↓"
+
+        # ── Regime ────────────────────────────────────────────────────────────
+        if vix_level is not None and vix_level > 35:
+            regime, label, css = "NO_TRADE", "NO TRADE DAY", "mt-no-trade"
+            longs_ok, shorts_ok, reduce_size = False, False, True
+            reason_parts = ([vix_note] if vix_note else []) + [
+                f for f in factors if "-" in f or "below" in f or "down" in f
+            ][:2]
+        elif score >= 3:
+            regime, label, css = "RISK_ON", "RISK ON", "mt-risk-on"
+            longs_ok, shorts_ok, reduce_size = True, False, False
+            reason_parts = [
+                f for f in factors if "+" in f or "above" in f or "up" in f
+            ][:3] + ([vix_note] if vix_note else [])
+        elif score >= 1:
+            regime, label, css = "NEUTRAL", "NEUTRAL", "mt-neutral"
+            longs_ok, shorts_ok, reduce_size = True, True, False
+            reason_parts = factors[:3] + ([vix_note] if vix_note else [])
+        elif score >= -1:
+            regime, label, css = "CAUTION", "CAUTION / CHOP", "mt-caution"
+            longs_ok, shorts_ok, reduce_size = False, False, True
+            reason_parts = factors[:3] + ([vix_note] if vix_note else [])
+        else:
+            regime, label, css = "RISK_OFF", "RISK OFF", "mt-risk-off"
+            longs_ok, shorts_ok, reduce_size = False, True, True
+            reason_parts = [
+                f for f in factors if "-" in f or "below" in f or "down" in f
+            ][:3] + ([vix_note] if vix_note else [])
+
+        reason = " · ".join(p for p in reason_parts if p)
+
+        logger.info(
+            "compute_market_temperature  regime=%s  score=%s  vix=%.1f  reason=%s",
+            regime, score, vix_level or 0, reason,
+        )
+        return {
+            "regime":        regime,
+            "label":         label,
+            "css":           css,
+            "reason":        reason,
+            "longs_ok":      longs_ok,
+            "shorts_ok":     shorts_ok,
+            "reduce_size":   reduce_size,
+            "score":         score,
+            "spy_price":     round(spy_price, 2),
+            "spy_pct_ema20": round(spy_pct_ema20, 2),
+            "spy_vs_vwap":   round(spy_vs_vwap, 2) if spy_vs_vwap is not None else None,
+            "qqq_price":     round(qqq_price, 2),
+            "qqq_pct_ema20": round(qqq_pct_ema20, 2),
+            "qqq_vs_vwap":   round(qqq_vs_vwap, 2) if qqq_vs_vwap is not None else None,
+            "vix_level":     round(vix_level, 1) if vix_level is not None else None,
+            "vix_direction": vix_direction,
+            "error":         False,
+        }
+
+    except Exception as _e:
+        logger.warning("compute_market_temperature failed: %s", _e)
+        return {**_UNKNOWN, "reason": "Error computing market data"}

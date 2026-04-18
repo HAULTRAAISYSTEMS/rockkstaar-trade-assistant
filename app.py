@@ -2002,6 +2002,12 @@ _DASHBOARD_EMPTY = dict(
                   "sub": "Trade only the highest-quality setups", "css": "banner-aplus"},
     trades_today=0,
     losses_today=0,
+    market_temp={"regime": "UNKNOWN", "label": "—", "css": "mt-unknown",
+                 "reason": "", "longs_ok": None, "shorts_ok": None,
+                 "reduce_size": False, "score": None, "error": True,
+                 "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
+                 "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
+                 "vix_level": None, "vix_direction": None},
 )
 
 
@@ -2122,6 +2128,8 @@ def _dashboard_inner():
     trades_today    = len(today_entries)
     losses_today    = sum(1 for e in today_entries if e.get("result") == "Loss")
 
+    market_temp = _get_market_temperature()
+
     return render_template(
         "dashboard.html",
         ranked=ranked,
@@ -2145,6 +2153,7 @@ def _dashboard_inner():
         daily_banner=daily_banner,
         trades_today=trades_today,
         losses_today=losses_today,
+        market_temp=market_temp,
     )
 
 
@@ -2543,6 +2552,46 @@ def stock_detail(ticker):
         get_setup_type_class=get_setup_type_class,
         risk_settings=get_risk_settings(),
     )
+
+
+# ── Market Temperature cache ─────────────────────────────────────────────────
+_market_temp_cache: dict = {"data": None, "ts": 0.0, "fetching": False}
+_MARKET_TEMP_TTL = 300   # 5-minute refresh
+
+
+def _get_market_temperature() -> dict:
+    """Return cached market regime; trigger background refresh when stale."""
+    _LOADING: dict = {
+        "regime": "LOADING", "label": "Loading…", "css": "mt-loading",
+        "reason": "Fetching market data…", "longs_ok": None, "shorts_ok": None,
+        "reduce_size": False, "score": None, "error": False,
+        "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
+        "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
+        "vix_level": None, "vix_direction": None,
+    }
+    now = _time.time()
+    if _market_temp_cache["ts"] and now - _market_temp_cache["ts"] < _MARKET_TEMP_TTL:
+        return _market_temp_cache["data"]
+    if not _market_temp_cache["fetching"]:
+        _market_temp_cache["fetching"] = True
+
+        def _bg():
+            try:
+                from data_fetcher import compute_market_temperature
+                data = compute_market_temperature()
+                _market_temp_cache["data"] = data
+                _market_temp_cache["ts"]   = _time.time()
+                logger.info(
+                    "market_temperature  regime=%s  score=%s",
+                    data.get("regime"), data.get("score"),
+                )
+            except Exception as _e:
+                logger.warning("_get_market_temperature bg failed: %s", _e)
+            finally:
+                _market_temp_cache["fetching"] = False
+
+        threading.Thread(target=_bg, daemon=True).start()
+    return _market_temp_cache["data"] or _LOADING
 
 
 # ── Options contract server-side cache ───────────────────────────────────────

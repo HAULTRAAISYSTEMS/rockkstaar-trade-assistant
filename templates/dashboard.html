@@ -62,6 +62,53 @@
   </form>
 </section>
 
+<!-- ===== MARKET TEMPERATURE PANEL ===== -->
+<section class="mt-panel mt-panel-{{ market_temp.css }}">
+  <div class="mt-header">
+    <span class="mt-badge {{ market_temp.css }}">{{ market_temp.label }}</span>
+    <span class="mt-reason">{{ market_temp.reason or '—' }}</span>
+  </div>
+  <div class="mt-body">
+    <div class="mt-indicators">
+      {% if market_temp.spy_price %}
+      <div class="mt-ind">
+        <span class="mt-ind-lbl">SPY</span>
+        <span class="mt-ind-val">${{ "%.0f"|format(market_temp.spy_price) }}</span>
+        {% if market_temp.spy_pct_ema20 is not none %}
+        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.spy_pct_ema20 >= 0 else 'mt-neg' }}">EMA20 {{ '+' if market_temp.spy_pct_ema20 >= 0 else '' }}{{ "%.1f"|format(market_temp.spy_pct_ema20) }}%</span>
+        {% endif %}
+        {% if market_temp.spy_vs_vwap is not none %}
+        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.spy_vs_vwap >= 0 else 'mt-neg' }}">VWAP {{ '+' if market_temp.spy_vs_vwap >= 0 else '' }}{{ "%.1f"|format(market_temp.spy_vs_vwap) }}%</span>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if market_temp.qqq_price %}
+      <div class="mt-ind">
+        <span class="mt-ind-lbl">QQQ</span>
+        <span class="mt-ind-val">${{ "%.0f"|format(market_temp.qqq_price) }}</span>
+        {% if market_temp.qqq_pct_ema20 is not none %}
+        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.qqq_pct_ema20 >= 0 else 'mt-neg' }}">EMA20 {{ '+' if market_temp.qqq_pct_ema20 >= 0 else '' }}{{ "%.1f"|format(market_temp.qqq_pct_ema20) }}%</span>
+        {% endif %}
+        {% if market_temp.qqq_vs_vwap is not none %}
+        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.qqq_vs_vwap >= 0 else 'mt-neg' }}">VWAP {{ '+' if market_temp.qqq_vs_vwap >= 0 else '' }}{{ "%.1f"|format(market_temp.qqq_vs_vwap) }}%</span>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if market_temp.vix_level %}
+      <div class="mt-ind">
+        <span class="mt-ind-lbl">VIX</span>
+        <span class="mt-ind-val {{ 'mt-neg' if market_temp.vix_level > 25 else ('mt-warn' if market_temp.vix_level > 18 else 'mt-pos') }}">{{ "%.1f"|format(market_temp.vix_level) }}{% if market_temp.vix_direction == 'rising' %} ↑{% elif market_temp.vix_direction == 'falling' %} ↓{% endif %}</span>
+      </div>
+      {% endif %}
+    </div>
+    <div class="mt-signals">
+      <span class="mt-sig {{ 'mt-sig-ok' if market_temp.longs_ok == true else ('mt-sig-no' if market_temp.longs_ok == false else 'mt-sig-na') }}">Longs {{ '✓' if market_temp.longs_ok == true else ('✗' if market_temp.longs_ok == false else '—') }}</span>
+      <span class="mt-sig {{ 'mt-sig-ok' if market_temp.shorts_ok == true else ('mt-sig-no' if market_temp.shorts_ok == false else 'mt-sig-na') }}">Shorts {{ '✓' if market_temp.shorts_ok == true else ('✗' if market_temp.shorts_ok == false else '—') }}</span>
+      {% if market_temp.reduce_size %}<span class="mt-sig mt-sig-warn">Reduce Size</span>{% endif %}
+    </div>
+  </div>
+</section>
+
 <!-- ===== DAILY DISCIPLINE BANNER ===== -->
 <div class="daily-banner banner-{{ daily_banner.type }} {{ daily_banner.css }}" id="daily-banner">
   <div class="daily-banner-inner">
