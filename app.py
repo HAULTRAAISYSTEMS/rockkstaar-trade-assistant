@@ -2545,6 +2545,24 @@ def stock_detail(ticker):
     )
 
 
+@app.route("/api/options/<ticker>")
+def api_option_contracts(ticker):
+    """Return filtered option contracts for the options contract selector."""
+    ticker = ticker.upper()
+    trade_mode = request.args.get("mode", "SWING TRADE")
+    try:
+        stock = get_stock_data(ticker)
+        price = float(stock.get("current_price") or 0) if stock else 0.0
+        from data_fetcher import fetch_option_contracts
+        result = fetch_option_contracts(ticker, current_price=price or None,
+                                        trade_mode=trade_mode)
+        return jsonify(result)
+    except Exception as exc:
+        logger.warning("api_option_contracts failed ticker=%s: %s", ticker, exc)
+        return jsonify({"error": str(exc), "calls": [], "puts": [],
+                        "price": None, "best_day": None, "best_swing": None})
+
+
 @app.route("/stock/<ticker>/plan", methods=["POST"])
 def save_stock_plan(ticker):
     """Save the pre-market structured trade plan for a ticker."""

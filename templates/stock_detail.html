@@ -649,6 +649,26 @@
       </div>
     </div>
 
+    <!-- ===== OPTIONS CONTRACT SELECTOR ===== -->
+    <div class="detail-card ocs-panel" id="ocs-panel">
+      <div class="ocs-header">
+        <span class="ocs-title">Options Contract Selector</span>
+        <div class="ocs-controls">
+          <div class="ocs-type-btns">
+            <button class="ocs-type-btn ocs-type-active" id="ocs-calls-btn" onclick="ocsSetType('CALL')">▲ Calls</button>
+            <button class="ocs-type-btn" id="ocs-puts-btn" onclick="ocsSetType('PUT')">▼ Puts</button>
+            <button class="ocs-type-btn" id="ocs-all-btn" onclick="ocsSetType('ALL')">All</button>
+          </div>
+          <button class="btn btn-refresh ocs-load-btn" id="ocs-load-btn"
+                  onclick="ocsLoad()">Load Contracts</button>
+        </div>
+      </div>
+
+      <div id="ocs-body">
+        <div class="ocs-hint">Click "Load Contracts" to pull live option chain from Yahoo Finance.</div>
+      </div>
+    </div>
+
     <form action="{{ url_for('save_stock_plan', ticker=stock.ticker) }}" method="POST" id="plan-form">
       <div class="plan-field-group">
         <label class="plan-label">Direction</label>
@@ -937,5 +957,144 @@ async function stockDetailRefresh() {
 }
 
 window._arRefreshFn = stockDetailRefresh;
+</script>
+
+<script>
+// ── Options Contract Selector ────────────────────────────────────────────────
+(function() {
+  const TICKER = "{{ stock.ticker }}";
+  let _ocsData  = null;
+  let _ocsType  = "CALL";   // CALL | PUT | ALL
+  let _ocsMode  = "{{ risk_settings.trading_mode if risk_settings is defined else 'SWING TRADE' }}";
+
+  window.ocsSetType = function(t) {
+    _ocsType = t;
+    document.querySelectorAll(".ocs-type-btn").forEach(b => b.classList.remove("ocs-type-active"));
+    const map = {"CALL": "ocs-calls-btn", "PUT": "ocs-puts-btn", "ALL": "ocs-all-btn"};
+    const el = document.getElementById(map[t]);
+    if (el) el.classList.add("ocs-type-active");
+    if (_ocsData) _ocsRender(_ocsData);
+  };
+
+  window.ocsLoad = function() {
+    const btn = document.getElementById("ocs-load-btn");
+    const body = document.getElementById("ocs-body");
+    btn.disabled = true;
+    btn.textContent = "Loading…";
+    body.innerHTML = '<div class="ocs-hint">Fetching live option chain from Yahoo Finance…</div>';
+
+    fetch(`/api/options/${TICKER}?mode=${encodeURIComponent(_ocsMode)}`)
+      .then(r => r.json())
+      .then(data => {
+        btn.disabled = false;
+        btn.textContent = "Refresh";
+        _ocsData = data;
+        _ocsRender(data);
+      })
+      .catch(err => {
+        btn.disabled = false;
+        btn.textContent = "Load Contracts";
+        body.innerHTML = `<div class="ocs-error">Failed to load contracts: ${err}</div>`;
+      });
+  };
+
+  function _ocsRender(data) {
+    const body = document.getElementById("ocs-body");
+    if (data.error) {
+      body.innerHTML = `<div class="ocs-error">${data.error}</div>`;
+      return;
+    }
+
+    // Choose which contracts to show
+    let contracts = [];
+    if (_ocsType === "CALL")     contracts = data.calls || [];
+    else if (_ocsType === "PUT") contracts = data.puts  || [];
+    else                         contracts = [...(data.calls||[]), ...(data.puts||[])];
+
+    // Sort: strike asc, then expiry
+    contracts.sort((a, b) => a.strike - b.strike || a.dte - b.dte);
+
+    const bestDayKey   = data.best_day   ? `${data.best_day.strike}|${data.best_day.expiration}|${data.best_day.option_type}`   : null;
+    const bestSwingKey = data.best_swing ? `${data.best_swing.strike}|${data.best_swing.expiration}|${data.best_swing.option_type}` : null;
+
+    if (!contracts.length) {
+      body.innerHTML = `<div class="ocs-hint">No qualifying contracts found for the selected type and filters.<br>
+        Try switching to "All" or check that the ticker has weekly options.</div>`;
+      return;
+    }
+
+    // Best contracts summary bar
+    let bestHtml = "";
+    if (data.best_day || data.best_swing) {
+      bestHtml = `<div class="ocs-best-bar">`;
+      if (data.best_day) {
+        const b = data.best_day;
+        bestHtml += `<div class="ocs-best-card ocs-best-day">
+          <span class="ocs-best-tag">⚡ Best Day Trade</span>
+          <span class="ocs-best-detail">$${b.strike} ${b.option_type} · exp ${b.expiration} (${b.dte}d) · δ${b.delta} · $${b.mid} mid</span>
+        </div>`;
+      }
+      if (data.best_swing) {
+        const b = data.best_swing;
+        bestHtml += `<div class="ocs-best-card ocs-best-swing">
+          <span class="ocs-best-tag">📈 Best Swing Trade</span>
+          <span class="ocs-best-detail">$${b.strike} ${b.option_type} · exp ${b.expiration} (${b.dte}d) · δ${b.delta} · $${b.mid} mid</span>
+        </div>`;
+      }
+      bestHtml += `</div>`;
+    }
+
+    // Price caption
+    const caption = `<div class="ocs-price-caption">Current price: <strong>$${data.price}</strong> · ${contracts.length} contract${contracts.length !== 1 ? "s" : ""} shown</div>`;
+
+    // Table
+    const thead = `<thead><tr>
+      <th>Strike</th><th>Exp</th><th>DTE</th><th>Type</th>
+      <th>Delta</th><th>Theta/day</th>
+      <th>Bid</th><th>Ask</th><th>Spread</th><th>Vol</th><th>OI</th>
+      <th>Labels</th>
+    </tr></thead>`;
+
+    const rows = contracts.map(c => {
+      const key = `${c.strike}|${c.expiration}|${c.option_type}`;
+      const isBestDay   = key === bestDayKey;
+      const isBestSwing = key === bestSwingKey;
+      const rowClass = isBestDay ? "ocs-row-best-day" : (isBestSwing ? "ocs-row-best-swing" : "");
+
+      const labelHtml = c.labels.map(l => {
+        const lc = l === "Good Liquidity" ? "ocs-lbl-liq"
+                 : l === "High Theta Risk" ? "ocs-lbl-theta"
+                 : "ocs-lbl-spread";
+        return `<span class="ocs-label ${lc}">${l}</span>`;
+      }).join(" ");
+
+      const bestBadge = isBestDay   ? `<span class="ocs-label ocs-lbl-best-day">⚡ Day</span> `
+                      : isBestSwing ? `<span class="ocs-label ocs-lbl-best-swing">📈 Swing</span> `
+                      : "";
+
+      const typeClass = c.option_type === "CALL" ? "ocs-call-badge" : "ocs-put-badge";
+      const spreadClass = c.spread_pct > 15 ? "ocs-spread-wide" : "";
+      const itm = c.in_the_money ? "ocs-itm" : "";
+
+      return `<tr class="${rowClass}">
+        <td class="${itm}"><strong>$${c.strike}</strong></td>
+        <td>${c.expiration}</td>
+        <td>${c.dte}d</td>
+        <td><span class="${typeClass}">${c.option_type}</span></td>
+        <td>${c.delta.toFixed(2)}</td>
+        <td class="ocs-theta">${c.theta.toFixed(4)}</td>
+        <td>$${c.bid}</td>
+        <td>$${c.ask}</td>
+        <td class="${spreadClass}">${c.spread_pct}%</td>
+        <td>${c.volume.toLocaleString()}</td>
+        <td>${c.open_interest.toLocaleString()}</td>
+        <td>${bestBadge}${labelHtml}</td>
+      </tr>`;
+    }).join("");
+
+    body.innerHTML = bestHtml + caption +
+      `<div class="ocs-table-wrap"><table class="ocs-table">${thead}<tbody>${rows}</tbody></table></div>`;
+  }
+})();
 </script>
 {% endblock %}

@@ -1052,3 +1052,262 @@ def fetch_news_headlines(ticker: str) -> tuple[str, list[str]]:
         "No catalyst loaded. Connect a news API for full analysis.",
         ["No headlines available."],
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTIONS CONTRACT SELECTOR
+# ─────────────────────────────────────────────────────────────────────────────
+
+import math as _math
+
+
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1.0 + _math.erf(x / _math.sqrt(2.0)))
+
+
+def _bsm_greeks(S: float, K: float, T: float, sigma: float,
+                is_call: bool, r: float = 0.045) -> tuple[float, float]:
+    """
+    Black-Scholes delta and daily theta.
+    Returns (delta, theta_per_day).
+    delta: 0..1 for calls, -1..0 for puts.
+    theta_per_day: dollar decay per day per contract (negative).
+    """
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        intrinsic_call = S > K
+        delta = 1.0 if (is_call and intrinsic_call) else (
+                -1.0 if (not is_call and not intrinsic_call) else 0.0)
+        return delta, 0.0
+
+    sqrt_T     = _math.sqrt(T)
+    d1         = (_math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * sqrt_T)
+    d2         = d1 - sigma * sqrt_T
+    pdf_d1     = _math.exp(-0.5 * d1 ** 2) / _math.sqrt(2 * _math.pi)
+
+    delta = _norm_cdf(d1) if is_call else (_norm_cdf(d1) - 1.0)
+
+    # Theta (annualised) → convert to per-day
+    theta_annual = (
+        -S * pdf_d1 * sigma / (2.0 * sqrt_T)
+        + (-r * K * _math.exp(-r * T) * _norm_cdf(d2)  if is_call
+           else  r * K * _math.exp(-r * T) * _norm_cdf(-d2))
+    )
+    theta_per_day = theta_annual / 365.0
+
+    return round(delta, 3), round(theta_per_day, 4)
+
+
+def fetch_option_contracts(ticker: str,
+                           current_price: float | None = None,
+                           trade_mode: str = "SWING TRADE") -> dict:
+    """
+    Fetch and filter option contracts for the given ticker.
+
+    Returns:
+        {
+          "price": float,
+          "calls": [...],
+          "puts":  [...],
+          "best_day": contract | None,
+          "best_swing": contract | None,
+          "error": str | None,
+        }
+
+    Each contract dict:
+        strike, expiration, dte, option_type, delta, theta,
+        bid, ask, spread, spread_pct, mid, volume, open_interest,
+        in_the_money, iv, labels, score_day, score_swing
+    """
+    if not _YF_AVAILABLE:
+        return {"error": "yfinance not installed", "calls": [], "puts": [],
+                "price": None, "best_day": None, "best_swing": None}
+
+    try:
+        # Option chain calls require yfinance's own session (curl_cffi-based).
+        # Do NOT pass our custom requests.Session here — it breaks option_chain().
+        yf_t = yf.Ticker(ticker)
+
+        # ── Current price ────────────────────────────────────────────
+        price = current_price
+        if not price:
+            try:
+                price = yf_t.fast_info.last_price or 0.0
+            except Exception:
+                price = 0.0
+
+        if not price:
+            return {"error": "Could not determine current price", "calls": [], "puts": [],
+                    "price": None, "best_day": None, "best_swing": None}
+
+        # ── Expiration selection ──────────────────────────────────────
+        all_exps = yf_t.options
+        if not all_exps:
+            return {"error": "No option expirations available for this ticker",
+                    "calls": [], "puts": [], "price": price,
+                    "best_day": None, "best_swing": None}
+
+        today = date.today()
+
+        # day trade: nearest 3 expirations within 0–14 days
+        # swing trade: expirations 15–60 days out (up to 4)
+        day_exps   = []
+        swing_exps = []
+        for exp in all_exps:
+            exp_date = datetime.strptime(exp, "%Y-%m-%d").date()
+            dte = (exp_date - today).days
+            if 0 <= dte <= 14:
+                day_exps.append(exp)
+            elif 15 <= dte <= 60:
+                swing_exps.append(exp)
+
+        # pick which expirations to pull based on mode, but always get both lists
+        exps_to_fetch = list(dict.fromkeys(day_exps[:3] + swing_exps[:4]))
+        if not exps_to_fetch:
+            # fallback: just take first 3 available
+            exps_to_fetch = list(all_exps[:3])
+
+        # ── Pull chains ───────────────────────────────────────────────
+        raw_calls: list[dict] = []
+        raw_puts:  list[dict] = []
+
+        for exp in exps_to_fetch:
+            try:
+                chain     = yf_t.option_chain(exp)
+                exp_date  = datetime.strptime(exp, "%Y-%m-%d").date()
+                dte       = max(0, (exp_date - today).days)
+                T         = max(dte / 365.0, 1 / 365.0)   # time in years, floor at 1 day
+
+                for row_iter, is_call in ((chain.calls.iterrows(), True),
+                                          (chain.puts.iterrows(),  False)):
+                    for _, row in row_iter:
+                        strike = float(row.get("strike") or 0)
+                        if not strike:
+                            continue
+
+                        # Near the money: within 15% of current price
+                        if abs(strike - price) / price > 0.15:
+                            continue
+
+                        bid  = float(row.get("bid") or 0)
+                        ask  = float(row.get("ask") or 0)
+                        if ask <= 0:
+                            continue
+
+                        mid        = (bid + ask) / 2.0
+                        spread     = ask - bid
+                        spread_pct = (spread / mid * 100) if mid > 0 else 999
+
+                        vol = int(row.get("volume") or 0)
+                        oi  = int(row.get("openInterest") or 0)
+                        iv  = float(row.get("impliedVolatility") or 0)
+
+                        # Filter: skip wide spread, low OI, zero IV
+                        if spread_pct > 25:
+                            continue
+                        if oi < 50:
+                            continue
+                        if iv <= 0:
+                            continue
+
+                        delta, theta = _bsm_greeks(price, strike, T, iv, is_call)
+
+                        # Labels
+                        labels = []
+                        if vol >= 200 and oi >= 500:
+                            labels.append("Good Liquidity")
+                        if dte <= 7:
+                            labels.append("High Theta Risk")
+                        if spread_pct > 15:
+                            labels.append("Wide Spread")
+
+                        contract = {
+                            "strike":       strike,
+                            "expiration":   exp,
+                            "dte":          dte,
+                            "option_type":  "CALL" if is_call else "PUT",
+                            "delta":        delta,
+                            "theta":        theta,
+                            "bid":          round(bid,  2),
+                            "ask":          round(ask,  2),
+                            "mid":          round(mid,  2),
+                            "spread":       round(spread, 2),
+                            "spread_pct":   round(spread_pct, 1),
+                            "volume":       vol,
+                            "open_interest": oi,
+                            "in_the_money": bool(row.get("inTheMoney", False)),
+                            "iv":           round(iv * 100, 1),   # as %
+                            "labels":       labels,
+                            "score_day":    0.0,
+                            "score_swing":  0.0,
+                        }
+
+                        # Scoring — day trade: favour near-ATM delta, high vol, low spread
+                        # swing trade: favour solid delta, high OI, low spread, 21-60 DTE
+                        abs_d = abs(delta)
+                        liq_vol = _math.log1p(vol)
+                        liq_oi  = _math.log1p(oi)
+                        spread_score = max(0.0, 1.0 - spread_pct / 25.0)
+
+                        day_delta_score = max(0.0, 1.0 - abs(abs_d - 0.50) / 0.30)
+                        contract["score_day"] = round(
+                            day_delta_score * 0.35 + liq_vol * 0.40 + spread_score * 0.25, 4)
+
+                        swing_delta_score = max(0.0, 1.0 - abs(abs_d - 0.45) / 0.25)
+                        # penalise DTE outside 21-45 window
+                        dte_ok = 1.0 if 21 <= dte <= 45 else max(0.0, 1.0 - abs(dte - 33) / 28.0)
+                        contract["score_swing"] = round(
+                            swing_delta_score * 0.30 + liq_oi * 0.35 + spread_score * 0.20 + dte_ok * 0.15, 4)
+
+                        if is_call:
+                            raw_calls.append(contract)
+                        else:
+                            raw_puts.append(contract)
+            except Exception as _exp_err:
+                logger.debug("option_chain failed for %s exp=%s: %s", ticker, exp, _exp_err)
+                continue
+
+        # ── Sort each list ────────────────────────────────────────────
+        def _sort_key_day(c):   return -c["score_day"]
+        def _sort_key_swing(c): return -c["score_swing"]
+
+        raw_calls.sort(key=lambda c: c["strike"])
+        raw_puts.sort(key=lambda c: c["strike"])
+
+        # ── Best contract selection ───────────────────────────────────
+        # Best day trade: highest score_day, delta 0.35-0.70, DTE 0-14
+        def _best_day(lst):
+            candidates = [c for c in lst
+                          if 0.35 <= abs(c["delta"]) <= 0.70 and c["dte"] <= 14]
+            return max(candidates, key=lambda c: c["score_day"], default=None)
+
+        # Best swing: highest score_swing, delta 0.35-0.65, DTE 21-60
+        def _best_swing(lst):
+            candidates = [c for c in lst
+                          if 0.30 <= abs(c["delta"]) <= 0.65 and 21 <= c["dte"] <= 60]
+            return max(candidates, key=lambda c: c["score_swing"], default=None)
+
+        # Pick from calls or puts based on availability; prefer calls for now
+        # (front-end lets user filter by type)
+        all_contracts = raw_calls + raw_puts
+        best_day   = _best_day(raw_calls)   or _best_day(raw_puts)
+        best_swing = _best_swing(raw_calls) or _best_swing(raw_puts)
+
+        # Tag them
+        if best_day:
+            best_day["best_tag"] = "Best Day Trade"
+        if best_swing and best_swing is not best_day:
+            best_swing["best_tag"] = "Best Swing Trade"
+
+        return {
+            "price":      round(price, 2),
+            "calls":      raw_calls,
+            "puts":       raw_puts,
+            "best_day":   best_day,
+            "best_swing": best_swing,
+            "error":      None,
+        }
+
+    except Exception as exc:
+        logger.warning("fetch_option_contracts failed for %s: %s", ticker, exc)
+        return {"error": str(exc), "calls": [], "puts": [],
+                "price": current_price, "best_day": None, "best_swing": None}
