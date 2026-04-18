@@ -962,21 +962,35 @@ window._arRefreshFn = stockDetailRefresh;
 <script>
 // ── Options Contract Selector ────────────────────────────────────────────────
 (function() {
-  const TICKER    = "{{ stock.ticker }}";
-  const COOLDOWN  = 30000;   // ms between API calls (30 s)
-  const CACHE_TTL = 90000;   // ms — reuse client-side data within this window (matches server TTL)
+  const TICKER = "{{ stock.ticker }}";
+
+  // Cooldown and client cache TTL match server-side values per session.
+  // After hours the server already extends its TTL to 600-900 s, so we mirror
+  // that on the client to avoid pointless requests that will just hit the cache.
+  const COOLDOWN_REGULAR    = 30000;   // 30 s during market hours
+  const COOLDOWN_AFTERHOURS = 120000;  // 2 min after hours / closed
+  const CACHE_TTL_REGULAR   = 90000;   // 90 s client cache during market hours
+  const CACHE_TTL_AFTERHOURS= 600000;  // 10 min client cache after hours
 
   let _ocsData        = null;
   let _ocsType        = "CALL";
   let _ocsMode        = "{{ risk_settings.trading_mode if risk_settings is defined else 'SWING TRADE' }}";
   let _ocsLoading     = false;
-  let _ocsCooldownEnd = 0;    // Date.now() when cooldown expires
-  let _ocsCacheTs     = 0;    // Date.now() when data was fetched
-  let _ocsCdTimer     = null; // interval for countdown display
-  let _ocsWasPaused   = false;// did we pause AR?
+  let _ocsCooldownEnd = 0;
+  let _ocsCacheTs     = 0;
+  let _ocsCdTimer     = null;
+  let _ocsWasPaused   = false;
+  let _ocsAfterHours  = false;  // set from server response
+
+  function _effectiveCooldown() {
+    return _ocsAfterHours ? COOLDOWN_AFTERHOURS : COOLDOWN_REGULAR;
+  }
+  function _effectiveCacheTTL() {
+    return _ocsAfterHours ? CACHE_TTL_AFTERHOURS : CACHE_TTL_REGULAR;
+  }
 
   function _startCooldown() {
-    _ocsCooldownEnd = Date.now() + COOLDOWN;
+    _ocsCooldownEnd = Date.now() + _effectiveCooldown();
     clearInterval(_ocsCdTimer);
     _ocsCdTimer = setInterval(_tickCooldown, 500);
   }
@@ -989,21 +1003,24 @@ window._arRefreshFn = stockDetailRefresh;
       _ocsCdTimer = null;
       if (btn) { btn.disabled = false; btn.textContent = "Refresh"; }
     } else {
-      if (btn) { btn.disabled = true; btn.textContent = `Wait ${remaining}s…`; }
+      const label = remaining >= 60
+        ? `Wait ${Math.ceil(remaining/60)}m…`
+        : `Wait ${remaining}s…`;
+      if (btn) { btn.disabled = true; btn.textContent = label; }
     }
   }
 
   function _pauseAR() {
     _ocsWasPaused = false;
     if (window._arEnabled && typeof toggleAutoRefresh === "function") {
-      toggleAutoRefresh();   // turns it off
+      toggleAutoRefresh();
       _ocsWasPaused = true;
     }
   }
 
   function _resumeAR() {
     if (_ocsWasPaused && !window._arEnabled && typeof toggleAutoRefresh === "function") {
-      toggleAutoRefresh();   // turns it back on
+      toggleAutoRefresh();
     }
     _ocsWasPaused = false;
   }
@@ -1014,16 +1031,16 @@ window._arRefreshFn = stockDetailRefresh;
     const map = {"CALL": "ocs-calls-btn", "PUT": "ocs-puts-btn", "ALL": "ocs-all-btn"};
     const el = document.getElementById(map[t]);
     if (el) el.classList.add("ocs-type-active");
+    // Calls/Puts/All always re-renders from existing data — never a new request
     if (_ocsData) _ocsRender(_ocsData);
   };
 
   window.ocsLoad = function() {
-    // Debounce: ignore clicks while loading or during cooldown
     if (_ocsLoading) return;
     if (Date.now() < _ocsCooldownEnd) return;
 
-    // Serve cache if still fresh (avoids API call on fast re-clicks)
-    if (_ocsData && (Date.now() - _ocsCacheTs) < CACHE_TTL) {
+    // Client-side cache still fresh — render without hitting backend
+    if (_ocsData && (Date.now() - _ocsCacheTs) < _effectiveCacheTTL()) {
       _ocsRender(_ocsData);
       return;
     }
@@ -1033,16 +1050,17 @@ window._arRefreshFn = stockDetailRefresh;
     _ocsLoading = true;
     btn.disabled = true;
     btn.textContent = "Fetching options…";
-    body.innerHTML = '<div class="ocs-hint">Fetching live option chain from Yahoo Finance…</div>';
+    body.innerHTML = '<div class="ocs-hint">Fetching option chain…</div>';
 
     _pauseAR();
 
     fetch(`/api/options/${TICKER}?mode=${encodeURIComponent(_ocsMode)}`)
       .then(r => r.json())
       .then(data => {
-        _ocsLoading = false;
-        _ocsData    = data;
-        _ocsCacheTs = Date.now();
+        _ocsLoading    = false;
+        _ocsData       = data;
+        _ocsCacheTs    = Date.now();
+        _ocsAfterHours = !!data.after_hours;
         _ocsRender(data);
         _startCooldown();
         _resumeAR();
@@ -1051,36 +1069,54 @@ window._arRefreshFn = stockDetailRefresh;
         _ocsLoading = false;
         _resumeAR();
         _startCooldown();
-        body.innerHTML = `<div class="ocs-error">Failed to load contracts — try again in a moment. (${err})</div>`;
+        body.innerHTML = `<div class="ocs-error">Could not reach options endpoint — try again in a moment.</div>`;
       });
   };
 
   function _ocsRender(data) {
     const body = document.getElementById("ocs-body");
+    const afterHours = !!data.after_hours;
 
-    // Hard error with no data at all (not stale, not partial)
+    // Hard error — no contracts at all, nothing to show
     if (data.error && !data.stale && !(data.calls||[]).length && !(data.puts||[]).length) {
-      const isRL = data.rate_limited;
-      const retry = data.retry_after_s ? ` Try again in ~${data.retry_after_s}s.` : "";
-      body.innerHTML = isRL
-        ? `<div class="ocs-error ocs-rate-limited">Options source temporarily rate-limited.${retry}</div>`
-        : `<div class="ocs-error">${data.error}</div>`;
+      const isRL  = data.rate_limited;
+      const retry = data.retry_after_s
+        ? ` Try again in ~${data.retry_after_s >= 60
+            ? Math.ceil(data.retry_after_s/60) + " min"
+            : data.retry_after_s + "s"}.`
+        : "";
+      const ahNote = afterHours
+        ? `<div class="ocs-status-banner ocs-status-afterhours">After hours — options data may be delayed</div>`
+        : "";
+      const msg = isRL
+        ? `Options source rate-limited — try again later.${retry}`
+        : (data.error || "Options temporarily unavailable.");
+      body.innerHTML = ahNote + `<div class="ocs-error ocs-rate-limited">${msg}</div>`;
       return;
     }
 
-    // Build status banner (stale / partial / cached / live)
+    // ── Status banners (stacked, most important first) ────────────────
     let statusBanner = "";
+
+    // After-hours label — always shown when market is closed/after hours
+    if (afterHours) {
+      const sessionLabel = data.market_session === "pre_market" ? "Pre-market"
+                         : data.market_session === "after_hours" ? "After hours"
+                         : "Market closed";
+      statusBanner += `<div class="ocs-status-banner ocs-status-afterhours">${sessionLabel} — options data may be delayed</div>`;
+    }
+
+    // Stale / rate-limit / partial / cached
     if (data.stale && data.rate_limited) {
-      const age = data.cache_age_s ? ` (${data.cache_age_s}s old)` : "";
-      statusBanner = `<div class="ocs-status-banner ocs-status-stale">
-        Showing cached options — live refresh delayed${age}. Rate limit active.
-      </div>`;
+      statusBanner += `<div class="ocs-status-banner ocs-status-stale">Options temporarily unavailable — showing cached data</div>`;
     } else if (data.stale) {
-      statusBanner = `<div class="ocs-status-banner ocs-status-stale">Showing cached options — live refresh delayed.</div>`;
+      statusBanner += `<div class="ocs-status-banner ocs-status-stale">Showing last known options data</div>`;
     } else if (data.partial) {
-      statusBanner = `<div class="ocs-status-banner ocs-status-partial">Partial data — some expirations could not be fetched.</div>`;
+      statusBanner += `<div class="ocs-status-banner ocs-status-partial">Partial data — some expirations could not be fetched</div>`;
     } else if (data.cached) {
-      statusBanner = `<div class="ocs-status-banner ocs-status-cached">Cached data (${data.cache_age_s || 0}s old) — no new API call made.</div>`;
+      const age = data.cache_age_s || 0;
+      const ageLabel = age >= 60 ? `${Math.round(age/60)}m` : `${age}s`;
+      statusBanner += `<div class="ocs-status-banner ocs-status-cached">Cached (${ageLabel} old) — no new API call made</div>`;
     }
 
     // Calls/Puts/All filtering is 100% client-side — no backend request fired here

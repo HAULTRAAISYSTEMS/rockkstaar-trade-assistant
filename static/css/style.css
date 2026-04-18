@@ -4547,6 +4547,7 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   font-size: 0.72rem; padding: 0.4rem 0.7rem; border-radius: 6px;
   margin-bottom: 0.6rem; border: 1px solid transparent;
 }
+.ocs-status-afterhours { background: rgba(99,102,241,0.08); color: #a5b4fc; border-color: rgba(99,102,241,0.25); }
 .ocs-status-stale   { background: rgba(251,191,36,0.10); color: #fbbf24; border-color: rgba(251,191,36,0.3); }
 .ocs-status-partial { background: rgba(251,191,36,0.08); color: #fbbf24; border-color: rgba(251,191,36,0.25); }
 .ocs-status-cached  { background: rgba(100,116,139,0.10); color: #94a3b8; border-color: rgba(100,116,139,0.2); }
