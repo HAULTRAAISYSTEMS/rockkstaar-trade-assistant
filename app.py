@@ -825,145 +825,217 @@ def get_risk_settings() -> dict:
 
 def compute_trade_permission(stock: dict, trade_mode: str) -> dict:
     """
-    Returns {permission, css, reason} based on exact strategy rules.
+    Returns {permission, css, reason}.
     permission: "TRADE ALLOWED" | "WATCH" | "BLOCKED"
 
-    DAY TRADE A+ requires one confirmed setup type (ORB / VWAP Reclaim / Momentum
-    Breakout) with volume, momentum, and catalyst thresholds all met.
+    DAY TRADE:
+      A+ = confirmed setup type (ORB / VWAP Reclaim / Momentum Breakout) with
+           volume + momentum thresholds met. Catalyst boosts confidence but is not
+           a hard gate — without it, volume and momentum thresholds are raised.
+           Extension is independently checked beyond just the entry_quality label.
 
-    SWING TRADE A+ requires: trend aligned on 4H+Daily, valid structure (HH/HL),
-    pullback to 20 EMA / 50 EMA / fib 50% / fib 61.8%, R:R >= 1.5, entry not extended.
+    SWING TRADE:
+      A+ = trend aligned (4H + Daily) + valid structure (HH/HL) +
+           price at tight key level (fib 61.8%/50%, pullback to 20/50 EMA) +
+           R:R >= 1.5 + catalyst >= 3.
+           Extension is independently detected from EMA distance.
     """
     bias  = stock.get("trade_bias") or ""
     entry = stock.get("entry_quality") or ""
 
-    # Hard block — no edge in this direction
+    # Hard block — no directional edge
     if bias == "Avoid":
         return {"permission": "BLOCKED", "css": "perm-blocked",
-                "reason": "Avoid bias — no directional edge"}
+                "reason": "Avoid bias — no directional edge, skip this stock"}
 
-    # Extended price always blocked regardless of mode
+    # Label-based extension (existing system signal)
     if entry == "Extended":
         return {"permission": "BLOCKED", "css": "perm-blocked",
-                "reason": "Price extended — do not chase, wait for pullback"}
+                "reason": "Entry extended — do not chase, wait for pullback to zone"}
 
     # ------------------------------------------------------------------ #
     # DAY TRADE                                                            #
     # ------------------------------------------------------------------ #
     if trade_mode == "DAY TRADE":
-        setup_type   = stock.get("setup_type") or ""
+        setup_type   = (stock.get("setup_type") or "").upper()
         orb_ready    = stock.get("orb_ready") or "NO"
+        orb_high     = stock.get("orb_high") or 0
         above_vwap   = bool(stock.get("price_above_vwap"))
         trend_struct = bool(stock.get("trend_structure"))   # HH + HL confirmed
         mom          = stock.get("momentum_score") or 0
         cat          = stock.get("catalyst_score") or 0
         rvol         = stock.get("rel_volume") or 0
         setup        = stock.get("setup_score") or 0
+        current      = stock.get("current_price") or 0
+
+        # Independent extension check — price >3% above ORB high = chasing
+        if orb_high and current and current > orb_high * 1.03:
+            pct_above = (current - orb_high) / orb_high * 100
+            return {"permission": "BLOCKED", "css": "perm-blocked",
+                    "reason": f"Entry extended {pct_above:.1f}% above ORB high — wait for pullback or base"}
 
         # ── ORB — Opening Range Breakout ──────────────────────────────
+        # Catalyst >= 3: standard thresholds. No catalyst: raise volume + momentum bar.
         if orb_ready == "YES":
-            if rvol >= 1.5 and mom >= 6 and cat >= 3:
+            if cat >= 3 and rvol >= 1.5 and mom >= 6:
                 return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                        "reason": f"ORB confirmed · {rvol:.1f}x vol · Mom {mom}/10 · Cat {cat}/10"}
+                        "reason": f"ORB confirmed — volume {rvol:.1f}x, momentum {mom}/10, catalyst {cat}/10"}
+            if cat < 3 and rvol >= 2.0 and mom >= 7:
+                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
+                        "reason": f"ORB confirmed — volume {rvol:.1f}x, momentum {mom}/10 (no catalyst, higher vol/mom required)"}
+            # Build exact WATCH reason
+            needs = []
+            if cat < 3:
+                needs.append(f"catalyst {cat}/10 (need ≥3) OR volume ≥2.0x + momentum ≥7")
+            else:
+                if rvol < 1.5: needs.append(f"volume {rvol:.1f}x (need ≥1.5x)")
+                if mom < 6:    needs.append(f"momentum {mom}/10 (need ≥6)")
             return {"permission": "WATCH", "css": "perm-watch",
-                    "reason": f"ORB forming — needs vol ≥1.5x ({rvol:.1f}x), mom ≥6 ({mom}), cat ≥3 ({cat})"}
+                    "reason": "ORB forming — " + ", ".join(needs)}
 
         # ── VWAP Reclaim ──────────────────────────────────────────────
-        if "VWAP" in setup_type.upper() or above_vwap:
-            if above_vwap and rvol >= 1.3 and mom >= 5 and cat >= 3:
+        if "VWAP" in setup_type or above_vwap:
+            if not above_vwap:
+                return {"permission": "WATCH", "css": "perm-watch",
+                        "reason": f"VWAP setup detected but price not yet above VWAP — volume {rvol:.1f}x, momentum {mom}/10"}
+            if cat >= 3 and rvol >= 1.3 and mom >= 5:
                 return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                        "reason": f"VWAP reclaim confirmed · {rvol:.1f}x vol · Mom {mom}/10"}
+                        "reason": f"VWAP reclaim confirmed — volume {rvol:.1f}x, momentum {mom}/10, catalyst {cat}/10"}
+            if cat < 3 and rvol >= 1.8 and mom >= 6:
+                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
+                        "reason": f"VWAP reclaim confirmed — volume {rvol:.1f}x, momentum {mom}/10 (no catalyst, higher vol/mom required)"}
+            needs = []
+            if cat < 3:
+                needs.append(f"catalyst {cat}/10 (need ≥3) OR volume ≥1.8x + momentum ≥6")
+            else:
+                if rvol < 1.3: needs.append(f"volume {rvol:.1f}x (need ≥1.3x)")
+                if mom < 5:    needs.append(f"momentum {mom}/10 (need ≥5)")
             return {"permission": "WATCH", "css": "perm-watch",
-                    "reason": f"VWAP setup forming — needs price above VWAP, vol ≥1.3x ({rvol:.1f}x), mom ≥5 ({mom})"}
+                    "reason": "VWAP reclaim detected — " + ", ".join(needs)}
 
         # ── Momentum Breakout ─────────────────────────────────────────
-        if "MOMENTUM" in setup_type.upper() or "BREAKOUT" in setup_type.upper():
-            if trend_struct and rvol >= 1.5 and mom >= 7 and cat >= 3:
+        if "MOMENTUM" in setup_type or "BREAKOUT" in setup_type:
+            if not trend_struct:
+                return {"permission": "WATCH", "css": "perm-watch",
+                        "reason": f"Momentum setup detected but HH/HL structure not confirmed — volume {rvol:.1f}x, momentum {mom}/10"}
+            if cat >= 3 and rvol >= 1.5 and mom >= 7:
                 return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                        "reason": f"Momentum breakout · HH/HL structure · {rvol:.1f}x vol · Mom {mom}/10"}
+                        "reason": f"Momentum breakout — HH/HL structure, volume {rvol:.1f}x, momentum {mom}/10, catalyst {cat}/10"}
+            if cat < 3 and rvol >= 2.0 and mom >= 8:
+                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
+                        "reason": f"Momentum breakout — HH/HL structure, volume {rvol:.1f}x, momentum {mom}/10 (no catalyst, higher bar)"}
+            needs = []
+            if cat < 3:
+                needs.append(f"catalyst {cat}/10 (need ≥3) OR volume ≥2.0x + momentum ≥8")
+            else:
+                if rvol < 1.5: needs.append(f"volume {rvol:.1f}x (need ≥1.5x)")
+                if mom < 7:    needs.append(f"momentum {mom}/10 (need ≥7)")
             return {"permission": "WATCH", "css": "perm-watch",
-                    "reason": f"Momentum setup forming — needs structure + vol ≥1.5x ({rvol:.1f}x) + mom ≥7 ({mom})"}
+                    "reason": "Momentum setup — " + ", ".join(needs)}
 
-        # ── Setup forming but no confirmed type yet ───────────────────
+        # ── No confirmed setup type ───────────────────────────────────
         if setup >= 4 and (mom >= 4 or rvol >= 1.2):
             return {"permission": "WATCH", "css": "perm-watch",
-                    "reason": f"Setup score {setup}/10 — no ORB/VWAP/Breakout confirmed yet"}
+                    "reason": f"Setup score {setup}/10, volume {rvol:.1f}x — no ORB/VWAP/Breakout pattern confirmed yet"}
 
         return {"permission": "BLOCKED", "css": "perm-blocked",
-                "reason": "No valid day trade setup — wait for ORB, VWAP reclaim, or momentum breakout"}
+                "reason": f"No valid day trade setup — setup {setup}/10, volume {rvol:.1f}x, momentum {mom}/10"}
 
     # ------------------------------------------------------------------ #
     # SWING TRADE                                                          #
     # ------------------------------------------------------------------ #
     else:
-        daily_trend  = stock.get("daily_trend") or "Neutral"
-        daily_hh_hl  = bool(stock.get("daily_hh_hl"))
-        h4_hh_hl     = bool(stock.get("h4_hh_hl"))
-        pct_ema20    = stock.get("pct_from_ema20")
-        pct_ema50    = stock.get("pct_from_ema50")
-        fib_50       = stock.get("fib_50")
-        fib_618      = stock.get("fib_618")
-        current      = stock.get("current_price") or 0
-        rr           = stock.get("risk_reward") or 0
-        cat          = stock.get("catalyst_score") or 0
-        swing        = stock.get("swing_score") or 0
-        pullback_q   = stock.get("pullback_quality") or "Watch"
+        daily_trend = stock.get("daily_trend") or "Neutral"
+        daily_hh_hl = bool(stock.get("daily_hh_hl"))
+        h4_hh_hl    = bool(stock.get("h4_hh_hl"))
+        pct_ema20   = stock.get("pct_from_ema20")   # positive = price above EMA
+        pct_ema50   = stock.get("pct_from_ema50")
+        fib_50      = stock.get("fib_50")
+        fib_618     = stock.get("fib_618")
+        current     = stock.get("current_price") or 0
+        rr          = stock.get("risk_reward") or 0
+        cat         = stock.get("catalyst_score") or 0
+        swing       = stock.get("swing_score") or 0
+        long_bias   = bias == "Long Bias"
 
-        # Trend alignment check (4H + Daily must agree)
-        long_bias  = bias == "Long Bias"
-        short_bias = bias == "Short Bias"
-        trend_bull = long_bias  and daily_trend in ("Bullish", "Bullish Lean")
-        trend_bear = short_bias and daily_trend in ("Bearish", "Bearish Lean")
+        # Independent extension check — price too far from 20 EMA = chasing, not pullback
+        # Long: >6% above 20 EMA means missed the move. Short: >6% below.
+        if pct_ema20 is not None:
+            if long_bias and pct_ema20 > 6.0:
+                return {"permission": "BLOCKED", "css": "perm-blocked",
+                        "reason": f"Entry extended — price {pct_ema20:+.1f}% above 20 EMA, wait for pullback to zone"}
+            if not long_bias and pct_ema20 < -6.0:
+                return {"permission": "BLOCKED", "css": "perm-blocked",
+                        "reason": f"Entry extended — price {pct_ema20:+.1f}% below 20 EMA, wait for bounce to zone"}
+
+        # Trend alignment — 4H and Daily must agree
+        trend_bull    = long_bias      and daily_trend in ("Bullish", "Bullish Lean")
+        trend_bear    = not long_bias  and daily_trend in ("Bearish", "Bearish Lean")
         trend_aligned = trend_bull or trend_bear
 
         if not trend_aligned:
             return {"permission": "BLOCKED", "css": "perm-blocked",
-                    "reason": f"Trend not aligned — bias is {bias or 'unknown'}, daily trend is {daily_trend}"}
+                    "reason": f"Trend not aligned — {bias or 'no bias'} vs {daily_trend} daily trend"}
 
-        # Structure check — need HH/HL (long) or LH/LL (short) on daily or 4H
+        # Structure — HH/HL on Daily or 4H required before any entry
         structure_valid = daily_hh_hl or h4_hh_hl
         if not structure_valid:
             return {"permission": "BLOCKED", "css": "perm-blocked",
-                    "reason": "No valid structure — need HH/HL on daily or 4H before entry"}
+                    "reason": "No valid structure — need HH/HL confirmed on daily or 4H chart"}
 
-        # At key level — fib 61.8%, fib 50%, 20 EMA, or 50 EMA
-        FIB_TOL = 2.0   # within 2% of fib level
-        EMA20_TOL = 3.0 # within 3% of 20 EMA
-        EMA50_TOL = 4.0 # within 4% of 50 EMA
+        # At key level — tighter bands than before
+        # Fib: within 1.5% | 20 EMA: within 2% pulling back | 50 EMA: within 3% pulling back
+        # For longs, price should be AT or slightly below the EMA (pullback into zone).
+        # Upper cap of +1.0% allows just-reclaimed EMA entries.
+        FIB_TOL   = 1.5
+        EMA20_TOL = 2.0
+        EMA50_TOL = 3.0
+        EMA_UPPER = 1.0   # price can be slightly above EMA on reclaim
 
         near_fib618 = bool(current and fib_618 and
                            abs(current - fib_618) / current * 100 <= FIB_TOL)
         near_fib50  = bool(current and fib_50 and
                            abs(current - fib_50) / current * 100 <= FIB_TOL)
-        near_ema20  = bool(pct_ema20 is not None and abs(pct_ema20) <= EMA20_TOL)
-        near_ema50  = bool(pct_ema50 is not None and abs(pct_ema50) <= EMA50_TOL)
+        near_ema20  = (pct_ema20 is not None and
+                       -EMA20_TOL <= pct_ema20 <= (EMA_UPPER if long_bias else EMA20_TOL))
+        near_ema50  = (pct_ema50 is not None and
+                       -EMA50_TOL <= pct_ema50 <= (EMA_UPPER if long_bias else EMA50_TOL))
         at_key_level = near_fib618 or near_fib50 or near_ema20 or near_ema50
 
-        # Build level label for reason string
         level_parts = []
         if near_fib618: level_parts.append("61.8% fib")
         if near_fib50:  level_parts.append("50% fib")
-        if near_ema20:  level_parts.append(f"20 EMA ({pct_ema20:+.1f}%)")
-        if near_ema50:  level_parts.append(f"50 EMA ({pct_ema50:+.1f}%)")
+        if near_ema20 and pct_ema20 is not None:
+            level_parts.append(f"20 EMA ({pct_ema20:+.1f}%)")
+        if near_ema50 and pct_ema50 is not None:
+            level_parts.append(f"50 EMA ({pct_ema50:+.1f}%)")
 
-        # A+ READY — all conditions met
+        # A+ — all gates pass
         if at_key_level and rr >= 1.5 and cat >= 3:
-            level_str = " · ".join(level_parts) if level_parts else "key level"
-            rr_str    = f"{rr:.1f}:1"
+            level_str = " + ".join(level_parts) if level_parts else "key level"
             return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                    "reason": f"A+ swing — {level_str} · R:R {rr_str} · Cat {cat}/10 · score {swing}/10"}
+                    "reason": f"A+ swing — {level_str}, R:R {rr:.1f}:1, catalyst {cat}/10, score {swing}/10"}
 
-        # WATCH — structure and trend aligned but missing entry level, R:R, or catalyst
+        # WATCH — trend + structure aligned, one or more gates still open
         missing = []
         if not at_key_level:
-            missing.append("wait for pullback to 20/50 EMA or fib 50%/61.8%")
+            gap_parts = []
+            if pct_ema20 is not None:
+                gap_parts.append(f"20 EMA {pct_ema20:+.1f}% (pullback zone ±{EMA20_TOL}%)")
+            if pct_ema50 is not None:
+                gap_parts.append(f"50 EMA {pct_ema50:+.1f}% (pullback zone ±{EMA50_TOL}%)")
+            if gap_parts:
+                missing.append("not at level — " + ", ".join(gap_parts))
+            else:
+                missing.append("not at level — wait for pullback to 20/50 EMA or fib 50%/61.8%")
         if rr < 1.5:
-            missing.append(f"R:R {rr:.1f} (need ≥1.5)")
+            missing.append(f"R:R {rr:.1f}:1 (need ≥1.5:1)")
         if cat < 3:
             missing.append(f"catalyst {cat}/10 (need ≥3)")
+
         return {"permission": "WATCH", "css": "perm-watch",
                 "reason": "Swing building — " + " · ".join(missing) if missing
-                          else f"Swing score {swing}/10 — monitoring"}
+                          else f"Swing score {swing}/10 — monitoring setup"}
 
 
 def compute_options_risk(account_size: float, risk_pct: float,
