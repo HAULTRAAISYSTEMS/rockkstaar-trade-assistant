@@ -331,8 +331,11 @@ def _try_newsapi(ticker: str) -> CatalystNews | None:
         freshness = None
         pa = articles[0].get("publishedAt") if articles else None
         if pa:
-            dt = datetime.fromisoformat(pa.replace("Z", "+00:00"))
-            freshness = _minutes_ago(dt)
+            try:
+                dt = datetime.fromisoformat(pa.replace("Z", "+00:00"))
+                freshness = _minutes_ago(dt)
+            except Exception as _date_exc:
+                logger.warning("NewsAPI  ticker=%s  bad publishedAt format=%s: %s", ticker, pa, _date_exc)
         cats = parse_catalyst_categories(headlines)
         logger.info("NewsAPI  ticker=%s  headlines=%d  categories=%s", ticker, len(headlines), cats)
         return CatalystNews(

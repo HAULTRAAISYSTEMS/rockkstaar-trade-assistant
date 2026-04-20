@@ -330,7 +330,6 @@ def detect_zones(ticker: str, current_price: float) -> dict:
         return empty
 
     # ── Price in zone? ────────────────────────────────────────────────────
-    _, _  = _zone_containing(all_demand, current_price)
     db, dt = _zone_containing(all_demand, current_price)
     sb, st = _zone_containing(all_supply, current_price)
     in_demand = db is not None

@@ -64,12 +64,13 @@ DEDUP_MINS  = 30     # suppress identical (ticker, type) within this window
 
 def _should_fire(ticker: str, atype: str) -> bool:
     """Return True if this (ticker, alert_type) hasn't fired within DEDUP_MINS."""
-    key  = (ticker, atype)
-    now  = datetime.now()
-    last = _last_fired.get(key)
-    if last and (now - last).total_seconds() < DEDUP_MINS * 60:
-        return False
-    _last_fired[key] = now
+    key = (ticker, atype)
+    now = datetime.now()
+    with _lock:
+        last = _last_fired.get(key)
+        if last and (now - last).total_seconds() < DEDUP_MINS * 60:
+            return False
+        _last_fired[key] = now
     return True
 
 
