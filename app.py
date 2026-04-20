@@ -2246,7 +2246,9 @@ _DASHBOARD_EMPTY = dict(
                  "score": None, "meter_score": 50, "error": True,
                  "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
                  "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
-                 "vix_level": None, "vix_direction": None},
+                 "vix_level": None, "vix_direction": None,
+                 "decision_cmd": "—", "risk_pct_rec": None, "size_multiplier": None,
+                 "size_zone": "unknown", "why": ""},
 )
 
 
@@ -2822,6 +2824,8 @@ def _get_market_temperature() -> dict:
         "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
         "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
         "vix_level": None, "vix_direction": None,
+        "decision_cmd": "Loading…", "risk_pct_rec": None, "size_multiplier": None,
+        "size_zone": "unknown", "why": "Fetching market data…",
     }
     now = _time.time()
     if _market_temp_cache["ts"] and now - _market_temp_cache["ts"] < _MARKET_TEMP_TTL:

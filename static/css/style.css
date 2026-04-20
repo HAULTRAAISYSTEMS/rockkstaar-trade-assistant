@@ -4637,10 +4637,11 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
 .mt-pointer {
   position: absolute;
   transform: translateX(-50%);
-  font-size: 0.7rem;
+  font-size: 0.82rem;
   line-height: 1;
-  color: rgba(255,255,255,0.85);
-  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6));
+  color: #ffffff;
+  text-shadow: 0 0 6px rgba(255,255,255,0.9), 0 0 12px rgba(255,255,255,0.5);
+  filter: drop-shadow(0 1px 4px rgba(0,0,0,0.8));
   top: 0;
   pointer-events: none;
   user-select: none;
@@ -4734,6 +4735,53 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   .mt-score-num   { font-size: 1.15rem; }
   .mt-stat-sigs   { margin-left: 0; }
   .mt-zones span  { font-size: 0.52rem; }
+  .mt-sizing-row  { flex-wrap: wrap; gap: 0.25rem; }
+}
+
+/* ── Decision Command row */
+.mt-decision {
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin: 0.45rem 0 0.2rem;
+  padding: 0.3rem 0;
+}
+.mt-decision-extreme-off { color: #f87171; }
+.mt-decision-risk-off    { color: #fca5a5; }
+.mt-decision-neutral     { color: #94a3b8; }
+.mt-decision-risk-on     { color: #86efac; }
+.mt-decision-extreme-on  { color: #4ade80; }
+.mt-decision-unknown     { color: var(--text-muted); }
+
+/* ── Position size modifier row */
+.mt-sizing-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.15rem 0 0.3rem;
+  font-size: 0.78rem;
+}
+.mt-sizing-label { color: var(--text-muted); }
+.mt-sizing-sep   { color: var(--text-muted); opacity: 0.4; }
+.mt-sizing-val   {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+}
+.mt-sizing-extreme-off { color: #f87171; }
+.mt-sizing-risk-off    { color: #fca5a5; }
+.mt-sizing-neutral     { color: #94a3b8; }
+.mt-sizing-risk-on     { color: #86efac; }
+.mt-sizing-extreme-on  { color: #4ade80; }
+.mt-sizing-unknown     { color: var(--text-muted); }
+
+/* ── Why one-liner */
+.mt-why {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0.1rem 0 0.35rem;
+  opacity: 0.85;
 }
 
 /* ── Trade Coach Card */

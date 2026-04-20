@@ -109,12 +109,33 @@
   </div>
   {% endif %}
 
-  <!-- Row 3: reason text -->
+  <!-- Row 3: Decision Command -->
+  {% if market_temp.decision_cmd and market_temp.decision_cmd != '—' and market_temp.decision_cmd != 'Loading…' %}
+  <div class="mt-decision mt-decision-{{ market_temp.size_zone }}">{{ market_temp.decision_cmd }}</div>
+  {% endif %}
+
+  <!-- Row 4: Position size modifier -->
+  {% if market_temp.risk_pct_rec is not none %}
+  <div class="mt-sizing-row">
+    <span class="mt-sizing-label">Rec. Risk</span>
+    <span class="mt-sizing-val mt-sizing-{{ market_temp.size_zone }}">{{ market_temp.risk_pct_rec }}%</span>
+    <span class="mt-sizing-sep">·</span>
+    <span class="mt-sizing-label">Size Multiplier</span>
+    <span class="mt-sizing-val mt-sizing-{{ market_temp.size_zone }}">{{ "%.2f"|format(market_temp.size_multiplier) }}x</span>
+  </div>
+  {% endif %}
+
+  <!-- Row 5: Why one-liner -->
+  {% if market_temp.why %}
+  <div class="mt-why">{{ market_temp.why }}</div>
+  {% endif %}
+
+  <!-- Row 6: reason text (technical factors) -->
   {% if market_temp.reason %}
   <div class="mt-reason">{{ market_temp.reason }}</div>
   {% endif %}
 
-  <!-- Row 4: market stats  SPY · QQQ · VIX -->
+  <!-- Row 7: market stats  SPY · QQQ · VIX -->
   <div class="mt-stats">
     {% if market_temp.spy_price %}
     <div class="mt-stat-block">
