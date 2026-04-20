@@ -217,11 +217,23 @@ class _Conn:
     def close(self):
         self._conn.close()
 
+    def __del__(self):
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
     def __enter__(self):
         return self
 
-    def __exit__(self, *_):
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
         self.close()
+        return False
 
 
 def get_db() -> _Conn:

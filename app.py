@@ -309,7 +309,7 @@ def auto_refresh_stale_closes(tickers: list, data_map: dict | None = None) -> li
     return queued
 
 
-def _expire_stuck_loading(watchlist: list) -> None:
+def _expire_stuck_loading(watchlist: list, data_map: dict = None) -> None:
     """
     Transition any ticker that has been in 'loading' state for longer than
     LOADING_TIMEOUT_SECS from 'loading' → 'error'.  Called on every dashboard
@@ -320,7 +320,7 @@ def _expire_stuck_loading(watchlist: list) -> None:
     """
     now = _et_now().replace(tzinfo=None)
     for ticker in watchlist:
-        stock = get_stock_data(ticker)
+        stock = data_map.get(ticker) if data_map is not None else get_stock_data(ticker)
         if not stock or stock.get("ticker_state") != "loading":
             continue
         last_updated = stock.get("last_updated") or ""
@@ -867,12 +867,25 @@ def get_risk_settings() -> dict:
     def _f(key, default):
         v = get_setting(key)
         return v if v is not None else default
+
+    def _sf(key, default):
+        try:
+            return float(_f(key, default))
+        except (ValueError, TypeError):
+            return float(default)
+
+    def _si(key, default):
+        try:
+            return int(float(_f(key, default)))
+        except (ValueError, TypeError):
+            return int(default)
+
     return {
         "trading_mode":        _f("trading_mode",        "SWING TRADE"),
-        "account_size":        float(_f("account_size",        "10000")),
-        "risk_pct":            float(_f("risk_pct",            "1.0")),
-        "max_trades_per_day":  int(float(_f("max_trades_per_day",  "3"))),
-        "max_daily_loss_pct":  float(_f("max_daily_loss_pct",  "3.0")),
+        "account_size":        _sf("account_size",        "10000"),
+        "risk_pct":            _sf("risk_pct",            "1.0"),
+        "max_trades_per_day":  _si("max_trades_per_day",  "3"),
+        "max_daily_loss_pct":  _sf("max_daily_loss_pct",  "3.0"),
         "stop_after_2_losses": _f("stop_after_2_losses", "1") == "1",
     }
 
@@ -1417,7 +1430,7 @@ def get_orb_session_banner() -> dict:
     }
 
 
-def annotate(stock: dict) -> dict:
+def annotate(stock: dict, trade_mode: str = None) -> dict:
     """Add all display-only fields to a stock dict (non-destructive to DB fields)."""
     # ── Ticker state display ─────────────────────────────────────────────────
     _state = stock.get("ticker_state") or "ready"
@@ -1592,10 +1605,16 @@ def annotate(stock: dict) -> dict:
         for k in cat_keys if k in _CAT_DEFS
     ]
     # Human-readable headline freshness ("2m ago", "1h ago", …)
-    stock["headline_freshness"] = _fl(
-        (lambda hfa: int((datetime.now() - datetime.fromisoformat(hfa)).total_seconds() / 60)
-         if hfa else None)(stock.get("headlines_fetched_at"))
-    )
+    def _headline_age_min(hfa):
+        if not hfa:
+            return None
+        try:
+            dt = datetime.fromisoformat(hfa)
+            now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+            return int((now - dt).total_seconds() / 60)
+        except Exception:
+            return None
+    stock["headline_freshness"] = _fl(_headline_age_min(stock.get("headlines_fetched_at")))
 
     # ── Swing trading display fields ─────────────────────────────────────────
     _swing_score = stock.get("swing_score")
@@ -1740,7 +1759,7 @@ def annotate(stock: dict) -> dict:
 
     # ── Trade permission (requires trading mode from settings) ───────────────
     try:
-        _trade_mode = get_setting("trading_mode") or "SWING TRADE"
+        _trade_mode = trade_mode or get_setting("trading_mode") or "SWING TRADE"
         stock["trade_permission"] = compute_trade_permission(stock, _trade_mode)
     except Exception as _tp_exc:
         logger.warning("annotate  ticker=%s  trade_permission failed: %s", stock.get("ticker", "?"), _tp_exc)
@@ -2096,10 +2115,13 @@ def _dashboard_inner():
     data_map = {s["ticker"]: s for s in all_data}
     logger.info("dashboard  route=/  wl_id=%s  tickers=%s", active_wl_id, watchlist)
 
+    # Fetch trade_mode once — passed into annotate() to avoid N DB calls.
+    _trade_mode = get_setting("trading_mode") or "SWING TRADE"
+
     # Pass data_map so auto_refresh and expire don't make additional DB calls.
     if watchlist:
         auto_refresh_stale_closes(watchlist, data_map=data_map)
-        _expire_stuck_loading(watchlist)
+        _expire_stuck_loading(watchlist, data_map=data_map)
 
     # Annotate per ticker — one bad ticker must not crash the whole dashboard
     stocks = []
@@ -2107,7 +2129,7 @@ def _dashboard_inner():
         if t not in data_map:
             continue
         try:
-            stocks.append(annotate(data_map[t]))
+            stocks.append(annotate(data_map[t], trade_mode=_trade_mode))
         except Exception as exc:
             logger.error("dashboard  ticker=%s  stage=annotate  err=%s", t, exc, exc_info=True)
             s = data_map[t]
@@ -2161,11 +2183,6 @@ def _dashboard_inner():
 
     # alt_modes kept for backward compat but no_trade replaces them in template
     alt_modes = []
-
-    # Annotate summary cards (they're already annotated, but ensure consistency)
-    for card in summary.values():
-        if card:
-            annotate(card)
 
     # Notes: pass a set of tickers that have notes for the indicator column
     notes_map = get_all_notes()
@@ -2926,7 +2943,8 @@ def set_setup_type(ticker):
     The override survives refreshes until the user changes it again.
     """
     chosen = request.form.get("setup_type", "").strip()
-    if chosen in SETUP_TYPES:
+    all_types = set(SETUP_TYPES) | set(SWING_SETUP_TYPES)
+    if chosen in all_types:
         update_setup_type(ticker.upper(), chosen)
         flash(f"Setup type updated to '{chosen}'.", "success")
     else:
@@ -3070,12 +3088,29 @@ def risk_settings():
             flash("Trading unlocked for today.", "success")
             return redirect(url_for("risk_settings"))
 
-        # Save risk settings
-        set_setting("trading_mode",       request.form.get("trading_mode", "SWING TRADE"))
-        set_setting("account_size",       request.form.get("account_size",       "10000"))
-        set_setting("risk_pct",           request.form.get("risk_pct",           "1.0"))
-        set_setting("max_trades_per_day", request.form.get("max_trades_per_day", "3"))
-        set_setting("max_daily_loss_pct", request.form.get("max_daily_loss_pct", "3.0"))
+        # Save risk settings — validate numerics before storing
+        def _clamp_float(key, default, lo, hi):
+            try:
+                v = float(request.form.get(key, default))
+                return str(max(lo, min(hi, v)))
+            except (ValueError, TypeError):
+                return str(default)
+
+        def _clamp_int(key, default, lo, hi):
+            try:
+                v = int(float(request.form.get(key, default)))
+                return str(max(lo, min(hi, v)))
+            except (ValueError, TypeError):
+                return str(default)
+
+        tm = request.form.get("trading_mode", "SWING TRADE")
+        if tm not in ("DAY TRADE", "SWING TRADE"):
+            tm = "SWING TRADE"
+        set_setting("trading_mode",       tm)
+        set_setting("account_size",       _clamp_float("account_size",       "10000", 0, 10_000_000))
+        set_setting("risk_pct",           _clamp_float("risk_pct",           "1.0",   0.1, 10))
+        set_setting("max_trades_per_day", _clamp_int(  "max_trades_per_day", "3",     1,   20))
+        set_setting("max_daily_loss_pct", _clamp_float("max_daily_loss_pct", "3.0",   0.1, 20))
         set_setting("stop_after_2_losses",
                     "1" if request.form.get("stop_after_2_losses") else "0")
         flash("Risk settings saved.", "success")
@@ -3120,7 +3155,7 @@ def watchlist_activate(wl_id):
 @app.route("/watchlists/create", methods=["POST"])
 def watchlist_create():
     """Create a new named watchlist."""
-    name = request.form.get("name", "").strip()
+    name = request.form.get("name", "").strip()[:50]
     if name:
         try:
             new_id = create_watchlist(name)
@@ -3136,7 +3171,7 @@ def watchlist_create():
 @app.route("/watchlists/rename/<int:wl_id>", methods=["POST"])
 def watchlist_rename(wl_id):
     """Rename an existing watchlist."""
-    name = request.form.get("name", "").strip()
+    name = request.form.get("name", "").strip()[:50]
     if name:
         try:
             rename_watchlist(wl_id, name)
@@ -3202,9 +3237,10 @@ def quick_mode():
     if watchlist:
         auto_refresh_stale_closes(watchlist)
 
+    _trade_mode = get_setting("trading_mode") or "SWING TRADE"
     all_data = get_all_stock_data()
     data_map = {s["ticker"]: s for s in all_data}
-    stocks   = [annotate(data_map[t]) for t in watchlist if t in data_map]
+    stocks   = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked   = rank_stocks(stocks)
     top3     = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
 
@@ -3404,11 +3440,12 @@ def _stock_summary(s: dict) -> dict:
 
 def _build_dashboard_payload(wl_id: int | None) -> dict:
     """Compute and return the full dashboard data dict (no request context needed)."""
-    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-    all_data  = get_all_stock_data()
-    data_map  = {s["ticker"]: s for s in all_data}
-    data_map  = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
-    stocks    = [annotate(data_map[t]) for t in watchlist if t in data_map]
+    watchlist   = get_watchlist_stocks(wl_id) if wl_id else []
+    _trade_mode = get_setting("trading_mode") or "SWING TRADE"
+    all_data    = get_all_stock_data()
+    data_map    = {s["ticker"]: s for s in all_data}
+    data_map    = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
+    stocks      = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked    = rank_stocks(stocks)
     top5      = [
         s for s in ranked
@@ -3437,11 +3474,12 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
 
 def _build_quick_payload(wl_id: int | None) -> dict:
     """Compute and return the quick-mode data dict (no request context needed)."""
-    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-    all_data  = get_all_stock_data()
-    data_map  = {s["ticker"]: s for s in all_data}
-    data_map  = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
-    stocks    = [annotate(data_map[t]) for t in watchlist if t in data_map]
+    watchlist   = get_watchlist_stocks(wl_id) if wl_id else []
+    _trade_mode = get_setting("trading_mode") or "SWING TRADE"
+    all_data    = get_all_stock_data()
+    data_map    = {s["ticker"]: s for s in all_data}
+    data_map    = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
+    stocks      = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked    = rank_stocks(stocks)
     top3      = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
     out = []
