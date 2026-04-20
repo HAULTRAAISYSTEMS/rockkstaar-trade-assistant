@@ -1742,7 +1742,8 @@ def annotate(stock: dict) -> dict:
     try:
         _trade_mode = get_setting("trading_mode") or "SWING TRADE"
         stock["trade_permission"] = compute_trade_permission(stock, _trade_mode)
-    except Exception:
+    except Exception as _tp_exc:
+        logger.warning("annotate  ticker=%s  trade_permission failed: %s", stock.get("ticker", "?"), _tp_exc)
         stock["trade_permission"] = {"permission": "WATCH", "css": "perm-watch", "reason": ""}
 
     # ── Simplified 4-state decision badge ────────────────────────────────────
@@ -2826,7 +2827,7 @@ def api_option_contracts(ticker):
             stale["rate_limited"] = False
             return jsonify(_annotate(stale, is_cached=True, is_stale=True))
         return jsonify(_annotate({
-            "error": str(exc), "calls": [], "puts": [],
+            "error": "options data unavailable", "calls": [], "puts": [],
             "price": None, "best_day": None, "best_swing": None,
             "rate_limited": False,
         }, is_cached=False, is_stale=False))
@@ -2945,7 +2946,10 @@ def journal():
     edit_entry = None
     edit_id = request.args.get("edit")
     if edit_id:
-        edit_entry = get_journal_entry(int(edit_id))
+        try:
+            edit_entry = get_journal_entry(int(edit_id))
+        except (ValueError, TypeError):
+            pass
     today_str     = _et_now().strftime("%Y-%m-%d")
     risk_settings = get_risk_settings()
     return render_template(
@@ -3219,7 +3223,7 @@ def api_quick():
         return jsonify(_build_quick_payload(get_active_wl_id()))
     except Exception as exc:
         logger.error("api_quick failed: %s", exc, exc_info=True)
-        return jsonify({"error": "quick refresh failed", "detail": str(exc)}), 500
+        return jsonify({"error": "quick refresh failed"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -3459,7 +3463,7 @@ def api_dashboard():
         return jsonify(_build_dashboard_payload(get_active_wl_id()))
     except Exception as exc:
         logger.error("api_dashboard failed: %s", exc, exc_info=True)
-        return jsonify({"error": "dashboard refresh failed", "detail": str(exc)}), 500
+        return jsonify({"error": "dashboard refresh failed"}), 500
 
 
 @app.route("/api/stock/<ticker>/live")
