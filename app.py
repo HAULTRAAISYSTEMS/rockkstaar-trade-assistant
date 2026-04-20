@@ -862,25 +862,37 @@ def compute_rr(plan_bias, entry, stop, target):
 def compute_trade_coach(stock: dict, plan: dict, market_temp: dict, risk_settings: dict) -> dict:
     """
     Return a coaching verdict for the current stock + plan + market conditions.
-    Output: {message, level, css, reduce_size, signals}
-    level: "go" | "watch" | "caution" | "blocked"
+    Output: {coach_status, message, level, css, reduce_size, signals}
+    coach_status : "TRADE ALLOWED" | "WATCH" | "REDUCE SIZE" | "BLOCKED"
+    level        : "go" | "watch" | "reduce" | "blocked"
     """
     mt        = market_temp or {}
     regime    = mt.get("regime", "NEUTRAL")
     longs_ok  = mt.get("longs_ok", True)
     shorts_ok = mt.get("shorts_ok", True)
     reduce_sz = mt.get("reduce_size", False)
+    decision  = mt.get("decision_cmd", "")
 
-    tp        = stock.get("trade_permission") or {}
-    perm      = tp.get("permission", "WATCH")
-    perm_rsn  = tp.get("reason", "")
+    tp       = stock.get("trade_permission") or {}
+    perm     = tp.get("permission", "WATCH")
+    perm_rsn = tp.get("reason", "")
 
-    bias     = stock.get("trade_bias", "")
-    swing_sc = float(stock.get("swing_score") or 0)
-    cat_sc   = float(stock.get("catalyst_score") or 0)
-    rr       = float(stock.get("risk_reward") or 0)
-    trend    = stock.get("daily_trend") or ""
-    extended = bool(stock.get("is_extended", False))
+    bias          = stock.get("trade_bias", "")
+    swing_sc      = float(stock.get("swing_score") or 0)
+    cat_sc        = float(stock.get("catalyst_score") or 0)
+    rr            = float(stock.get("risk_reward") or 0)
+    trend         = stock.get("daily_trend") or ""
+    extended      = bool(stock.get("is_extended", False))
+    entry_quality = stock.get("entry_quality") or ""
+    momentum_sc   = float(stock.get("momentum_score") or 0)
+
+    # Setup label: prefer mode-specific type, fallback to generic
+    trading_mode = risk_settings.get("trading_mode", "SWING TRADE")
+    is_day_trade = "DAY" in trading_mode.upper()
+    setup_raw    = stock.get("setup_type") if is_day_trade else stock.get("swing_setup_type")
+    setup_raw    = setup_raw or stock.get("setup_type") or stock.get("swing_setup_type") or ""
+    setup_label  = setup_raw.strip() if setup_raw else "this setup"
+    mode_label   = "Day trade" if is_day_trade else "Swing trade"
 
     has_entry  = bool(plan.get("entry_level"))
     has_stop   = bool(plan.get("stop_loss"))
@@ -892,128 +904,188 @@ def compute_trade_coach(stock: dict, plan: dict, market_temp: dict, risk_setting
     # ── Hard blocks ──────────────────────────────────────────────────────────
     if regime == "NO_TRADE":
         return {
-            "message": "No-trade conditions. VIX is elevated — market regime blocks all entries today.",
+            "coach_status": "BLOCKED",
+            "message": "Blocked. VIX is spiking and market conditions do not support any entries today. Sit out.",
             "level": "blocked", "css": "coach-blocked", "reduce_size": False,
-            "signals": ["Extreme risk-off environment (VIX spike)"],
+            "signals": ["No-trade regime active (VIX spike)", "Wait for volatility to normalize"],
         }
 
     if perm == "BLOCKED":
-        rsn = perm_rsn[:100] if perm_rsn else "setup does not meet entry criteria"
+        rsn = perm_rsn[:120] if perm_rsn else "Setup does not meet minimum entry criteria."
         return {
+            "coach_status": "BLOCKED",
             "message": f"Blocked. {rsn}",
             "level": "blocked", "css": "coach-blocked", "reduce_size": False,
-            "signals": [perm_rsn] if perm_rsn else [],
+            "signals": [perm_rsn] if perm_rsn else ["Review setup quality and entry conditions"],
         }
 
     if bias == "Long" and longs_ok is False:
         return {
-            "message": "Market does not support longs right now. Wait for a regime shift or consider the short side.",
-            "level": "caution", "css": "coach-caution", "reduce_size": True,
-            "signals": ["Market regime: RISK OFF — longs not supported"],
+            "coach_status": "BLOCKED",
+            "message": "Blocked. Market regime is risk-off — longs are not supported right now. Wait for a regime shift.",
+            "level": "blocked", "css": "coach-blocked", "reduce_size": True,
+            "signals": [f"Regime: {regime} — longs suppressed", "Consider waiting or flipping to short bias"],
         }
 
     if bias == "Short" and shorts_ok is False:
         return {
-            "message": "Market does not support shorts right now. Wait for regime confirmation.",
-            "level": "caution", "css": "coach-caution", "reduce_size": True,
-            "signals": ["Market regime: RISK ON — shorts not supported"],
+            "coach_status": "BLOCKED",
+            "message": "Blocked. Market is trending up — shorting here is against the tape. Wait for a topping structure.",
+            "level": "blocked", "css": "coach-blocked", "reduce_size": True,
+            "signals": [f"Regime: {regime} — shorts suppressed", "Wait for clear topping structure or trend shift"],
         }
 
     # ── Missing plan elements ────────────────────────────────────────────────
     if has_entry and not has_stop:
-        missing.append("stop loss missing — cannot calculate position size")
+        missing.append("no stop loss — cannot size position")
     if has_entry and has_stop and not has_target:
-        missing.append("no target set — R:R unknown")
+        missing.append("no target — R:R unknown")
 
     # ── Quality signals ──────────────────────────────────────────────────────
     if swing_sc >= 8:
-        signals.append(f"A+ swing setup ({swing_sc:.0f}/10)")
+        signals.append(f"A+ setup ({swing_sc:.0f}/10)")
     elif swing_sc >= 6:
         signals.append(f"Quality setup ({swing_sc:.0f}/10)")
     elif swing_sc > 0:
         signals.append(f"Weak setup ({swing_sc:.0f}/10)")
 
+    if momentum_sc >= 7:
+        signals.append(f"Strong momentum ({momentum_sc:.0f}/10)")
+    elif momentum_sc >= 4:
+        signals.append(f"Moderate momentum ({momentum_sc:.0f}/10)")
+    elif momentum_sc > 0:
+        signals.append(f"Weak momentum ({momentum_sc:.0f}/10)")
+
     if cat_sc >= 7:
         signals.append(f"Strong catalyst ({cat_sc:.0f}/10)")
     elif cat_sc >= 4:
         signals.append(f"Catalyst present ({cat_sc:.0f}/10)")
+    elif cat_sc > 0:
+        signals.append(f"Weak catalyst ({cat_sc:.0f}/10)")
 
-    if rr >= 2:
+    if rr >= 3:
+        signals.append(f"Excellent R:R ({rr:.1f}:1)")
+    elif rr >= 2:
         signals.append(f"Good R:R ({rr:.1f}:1)")
     elif rr >= 1:
         signals.append(f"Acceptable R:R ({rr:.1f}:1)")
     elif rr > 0:
-        signals.append(f"Weak R:R ({rr:.1f}:1)")
+        signals.append(f"Poor R:R ({rr:.1f}:1 — consider passing)")
 
     if trend:
         signals.append(f"Trend: {trend}")
-    if extended:
-        signals.append("Price extended from ideal entry")
+
+    is_extended_entry = extended or entry_quality == "Extended"
+    if is_extended_entry:
+        signals.append("Price extended from ideal entry zone")
 
     _regime_labels = {
-        "RISK_ON": "Market: RISK ON",
-        "NEUTRAL": "Market: Neutral",
-        "CAUTION": "Market: Caution/chop",
-        "RISK_OFF": "Market: RISK OFF",
+        "RISK_ON":  "Market: Risk-on (favorable)",
+        "NEUTRAL":  "Market: Neutral",
+        "CAUTION":  "Market: Caution/chop zone",
+        "RISK_OFF": "Market: Risk-off",
     }
     if regime in _regime_labels:
         signals.append(_regime_labels[regime])
 
-    # ── Build coaching message ───────────────────────────────────────────────
+    # ── Determine if market requires size reduction ──────────────────────────
     reduce_flag = reduce_sz or regime in ("CAUTION", "RISK_OFF")
 
+    # ── Build verdict ────────────────────────────────────────────────────────
     if perm == "TRADE ALLOWED":
-        if swing_sc >= 8 and cat_sc >= 6:
-            bullish_env = regime == "RISK_ON" and "Bullish" in trend
-            if bullish_env and bias == "Long":
-                msg = "Valid A+ setup. Trend and structure aligned. Risk-on market supports longs."
-            elif regime == "RISK_ON" and bias == "Short":
-                msg = "Valid A+ short setup. Confirm structure break before executing."
-            else:
-                msg = "Valid A+ setup. Trade allowed — confirm entry trigger before executing."
-            level, css = "go", "coach-go"
-        elif swing_sc >= 6:
-            if rr >= 2:
-                msg = "Valid setup with good R:R. Trade allowed — standard size, disciplined execution."
-            else:
-                msg = "Valid setup. Trade allowed — confirm entry and stop, watch R:R carefully."
-            level, css = "go", "coach-go"
-        else:
-            msg = "Trade allowed, but setup quality is average. Use reduced size and strict discipline."
-            level, css = "watch", "coach-watch"
 
+        # Weak R:R hard gate
+        if rr > 0 and rr < 1.5:
+            if missing:
+                signals.append("Note: " + "; ".join(missing))
+            return {
+                "coach_status": "BLOCKED",
+                "message": f"Blocked. Risk/reward is too weak ({rr:.1f}:1) — need at least 1.5:1 to justify entry.",
+                "level": "blocked", "css": "coach-blocked", "reduce_size": False,
+                "signals": signals[:6],
+            }
+
+        # Extended entry: downgrade to WATCH regardless of permission
+        if is_extended_entry:
+            msg = (f"Watch only. {mode_label} entry is extended from the ideal zone. "
+                   f"Do not chase — wait for a pullback into the entry zone.")
+            if missing:
+                msg += " Note: " + "; ".join(missing) + "."
+            return {
+                "coach_status": "WATCH",
+                "message": msg,
+                "level": "watch", "css": "coach-watch", "reduce_size": False,
+                "signals": signals[:6],
+            }
+
+        # A+ setup fully confirmed
+        if swing_sc >= 8 and cat_sc >= 5 and rr >= 2:
+            if regime == "RISK_ON" and "Bullish" in trend and bias == "Long":
+                msg = (f"Trade allowed. A+ {setup_label} — trend, structure, and market all aligned for longs. "
+                       f"Execute with standard size.")
+            elif "Bearish" in trend and bias == "Short":
+                msg = (f"Trade allowed. A+ {setup_label} aligned for the short side. "
+                       f"Confirm structure break before entry.")
+            else:
+                msg = (f"Trade allowed. A+ {setup_label} — quality setup with solid R:R. "
+                       f"Confirm entry trigger before executing.")
+            level, css, status = "go", "coach-go", "TRADE ALLOWED"
+
+        # Solid setup with good R:R
+        elif swing_sc >= 6 and rr >= 1.5:
+            msg = (f"Trade allowed. Quality {setup_label} with acceptable R:R. "
+                   f"Standard size, disciplined execution.")
+            level, css, status = "go", "coach-go", "TRADE ALLOWED"
+
+        # Below-average quality → REDUCE SIZE
+        else:
+            msg = (f"Trade allowed but {setup_label} quality is below ideal. "
+                   f"Use reduced size and tight stop discipline.")
+            level, css, status = "reduce", "coach-reduce", "REDUCE SIZE"
+            reduce_flag = True
+
+        # Override to REDUCE SIZE when market conditions are weak
         if reduce_flag and level == "go":
-            msg += " Reduce size — market is not fully supportive."
-            level, css = "watch", "coach-watch"
+            size_note = f" ({decision})" if decision else ""
+            msg += f" Reduce position size — market conditions are not fully supportive{size_note}."
+            level, css, status = "reduce", "coach-reduce", "REDUCE SIZE"
 
     elif perm == "WATCH":
-        if extended:
-            msg = "Watch only. Price is extended from the ideal entry — wait for a pullback into the entry zone."
-        elif swing_sc >= 6:
-            msg = "Watch only. Setup quality is good but entry is not yet confirmed. Be patient."
-        elif swing_sc >= 4:
-            msg = "Watch only. Setup is forming — not yet confirmed. Wait for clearer signal."
+        if is_extended_entry:
+            msg = ("Watch only. Price is extended from ideal entry — do not chase. "
+                   "Wait for a pullback into the zone.")
+        elif swing_sc >= 7:
+            msg = (f"Watch only. {setup_label} looks promising but entry is not yet confirmed. "
+                   f"Be patient and let the setup come to you.")
+        elif swing_sc >= 5:
+            msg = ("Watch only. Setup is forming but not confirmed. "
+                   "Wait for a clearer signal before committing capital.")
+        elif not has_entry:
+            msg = ("Watch only. No entry level defined — build a trade plan before considering this.")
         else:
-            msg = "Watch only. Setup quality is too low to consider entry right now."
-        level, css = "watch", "coach-watch"
+            msg = ("Watch only. Setup quality is too low to justify entry right now. "
+                   "Check back when conditions improve.")
+        level, css, status = "watch", "coach-watch", "WATCH"
 
+        # Weak market makes WATCH more of a REDUCE SIZE warning
         if regime in ("RISK_OFF", "CAUTION"):
-            msg += " Market regime adds extra reason for caution."
-            level, css = "caution", "coach-caution"
+            msg += " Market conditions add extra reason to stay on the sidelines or go very small."
+            level, css, status = "reduce", "coach-reduce", "REDUCE SIZE"
 
     else:
-        msg = "No clear action. Review setup quality and market conditions before committing."
-        level, css = "caution", "coach-caution"
+        msg = ("No clear action. Review setup quality and current market conditions before committing capital.")
+        level, css, status = "watch", "coach-watch", "WATCH"
 
     if missing:
         msg += " Note: " + "; ".join(missing) + "."
 
     return {
+        "coach_status": status,
         "message": msg,
         "level": level,
         "css": css,
         "reduce_size": reduce_flag,
-        "signals": signals,
+        "signals": signals[:6],
     }
 
 

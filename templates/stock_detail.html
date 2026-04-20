@@ -114,12 +114,7 @@
   <div class="detail-card coach-card {{ coach.css }}">
     <h3 class="card-title">
       AI Trade Coach
-      <span class="coach-level-badge coach-badge-{{ coach.level }}">
-        {% if coach.level == 'go' %}GO{% elif coach.level == 'watch' %}WATCH{% elif coach.level == 'caution' %}CAUTION{% else %}BLOCKED{% endif %}
-      </span>
-      {% if coach.reduce_size %}
-      <span class="coach-reduce-badge">REDUCE SIZE</span>
-      {% endif %}
+      <span class="coach-level-badge coach-badge-{{ coach.level }}">{{ coach.coach_status }}</span>
     </h3>
     <div class="coach-message {{ coach.css }}">{{ coach.message }}</div>
     {% if coach.signals %}

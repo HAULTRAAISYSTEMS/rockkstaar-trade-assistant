@@ -4791,6 +4791,7 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
 }
 .coach-card.coach-go      { border-left-color: #22c55e; }
 .coach-card.coach-watch   { border-left-color: #facc15; }
+.coach-card.coach-reduce  { border-left-color: #f97316; }
 .coach-card.coach-caution { border-left-color: #f97316; }
 .coach-card.coach-blocked { border-left-color: #ef4444; }
 
@@ -4805,6 +4806,7 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
 }
 .coach-badge-go      { background: rgba(34,197,94,0.18);  color: #22c55e; }
 .coach-badge-watch   { background: rgba(250,204,21,0.18); color: #facc15; }
+.coach-badge-reduce  { background: rgba(249,115,22,0.18); color: #f97316; }
 .coach-badge-caution { background: rgba(249,115,22,0.18); color: #f97316; }
 .coach-badge-blocked { background: rgba(239,68,68,0.18);  color: #ef4444; }
 
@@ -4828,6 +4830,7 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
 }
 .coach-message.coach-go      { color: #86efac; }
 .coach-message.coach-watch   { color: #fef08a; }
+.coach-message.coach-reduce  { color: #fdba74; }
 .coach-message.coach-caution { color: #fdba74; }
 .coach-message.coach-blocked { color: #fca5a5; }
 
