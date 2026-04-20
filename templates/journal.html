@@ -17,6 +17,7 @@
 
       <form method="POST"
             action="{{ url_for('journal_edit', entry_id=edit_entry.id) if edit_entry else url_for('journal_add') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
         <div class="jform-grid">
 
@@ -372,6 +373,7 @@
               <a href="{{ url_for('journal') }}?edit={{ e.id }}#journal-form-wrap" class="jbtn-edit" title="Edit">✎</a>
               <form method="POST" action="{{ url_for('journal_delete', entry_id=e.id) }}"
                     onsubmit="return confirm('Delete this trade?')" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn-remove" title="Delete">✕</button>
               </form>
             </td>

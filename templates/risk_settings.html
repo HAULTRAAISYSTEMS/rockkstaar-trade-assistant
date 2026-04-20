@@ -18,6 +18,7 @@
       <div class="risk-stat-val risk-locked-text">LOCKED</div>
       <div class="risk-stat-sub">{{ daily_session.lock_reason or 'Daily limit hit' }}</div>
       <form method="POST" action="{{ url_for('risk_settings') }}" style="margin-top:0.5rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="unlock">
         <button type="submit" class="btn btn-refresh">Unlock for Today</button>
       </form>
@@ -61,6 +62,7 @@
     <h3 class="card-title">Risk Settings</h3>
 
     <form method="POST" action="{{ url_for('risk_settings') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="action" value="save">
 
       <!-- Trading Mode -->

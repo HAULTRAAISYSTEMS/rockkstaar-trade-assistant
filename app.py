@@ -11,8 +11,9 @@ import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, Response
 from flask_sock import Sock
+from flask_wtf.csrf import CSRFProtect
 
 logger = logging.getLogger(__name__)
 from database import (
@@ -42,7 +43,49 @@ from classifier import classify_stock
 from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as _clear_alerts
 
 app = Flask(__name__)
-app.secret_key = "rockkstaar-secret-key-change-in-prod"
+
+# ---------------------------------------------------------------------------
+# Secret key — must come from SECRET_KEY env var in production.
+# Warns loudly at startup if missing so it is never silently insecure.
+# ---------------------------------------------------------------------------
+_secret_key = os.environ.get("SECRET_KEY")
+if not _secret_key:
+    import warnings
+    warnings.warn(
+        "SECRET_KEY env var is not set — using insecure fallback. "
+        "Set SECRET_KEY to a long random string in production.",
+        stacklevel=1,
+    )
+    _secret_key = "rockkstaar-secret-key-change-in-prod"
+app.secret_key = _secret_key
+
+# ---------------------------------------------------------------------------
+# CSRF protection — validates csrf_token on every POST/PUT/PATCH/DELETE form.
+# The /risk/trading-mode AJAX route sends the token via X-CSRFToken header.
+# ---------------------------------------------------------------------------
+csrf = CSRFProtect(app)
+
+# ---------------------------------------------------------------------------
+# Write-endpoint auth — HTTP Basic Auth on every state-mutating request.
+# Set APP_USER + APP_PASS env vars to enable. Both must be set; if either is
+# missing the guard is disabled so local dev works without credentials.
+# ---------------------------------------------------------------------------
+@app.before_request
+def _check_write_auth():
+    _user = os.environ.get("APP_USER", "")
+    _pass = os.environ.get("APP_PASS", "")
+    if not _user or not _pass:
+        return  # auth not configured — allow all (local dev / first deploy)
+    if request.method in ("GET", "HEAD", "OPTIONS") or request.path == "/health":
+        return  # read-only requests and health check always pass
+    auth = request.authorization
+    if not auth or auth.username != _user or auth.password != _pass:
+        return Response(
+            "Unauthorized",
+            401,
+            {"WWW-Authenticate": 'Basic realm="Rockkstaar Trade Assistant"'},
+        )
+
 sock = Sock(app)
 
 

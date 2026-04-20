@@ -25,6 +25,7 @@
       Last updated: <span id="detail-last-updated">{{ stock.last_updated | et_time }}</span>
       &nbsp;|&nbsp;
       <form action="{{ url_for('refresh_single', ticker=stock.ticker) }}" method="POST" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn-inline-refresh">⟳ Refresh Data</button>
       </form>
     </div>
@@ -471,6 +472,7 @@
   <div class="detail-card wl-assign-card">
     <h3 class="card-title">Watchlists</h3>
     <form action="{{ url_for('stock_set_watchlists', ticker=stock.ticker) }}" method="POST" class="wl-assign-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="wl-assign-checks">
         {% for wl in all_wls %}
         <label class="wl-assign-label {% if wl.id in ticker_wl_ids %}wl-assign-checked{% endif %}">
@@ -517,6 +519,7 @@
       <div class="classify-reason">{{ stock.classify_reason }}</div>
       {% endif %}
       <form action="{{ url_for('toggle_auto_classify', ticker=stock.ticker) }}" method="POST" class="classify-toggle-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {% if auto_on %}
           <input type="hidden" name="auto_classify" value="0">
           <button type="submit" class="btn-classify-toggle btn-classify-off">Turn OFF — Manual Override</button>
@@ -534,6 +537,7 @@
   <div class="detail-card setup-type-card">
     <h3 class="card-title">Setup Type Override</h3>
     <form action="{{ url_for('set_setup_type', ticker=stock.ticker) }}" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="setup-type-row">
         {% for stype in setup_types %}
         <button
@@ -670,6 +674,7 @@
     </div>
 
     <form action="{{ url_for('save_stock_plan', ticker=stock.ticker) }}" method="POST" id="plan-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="plan-field-group">
         <label class="plan-label">Direction</label>
         <div class="plan-bias-btns">
@@ -783,6 +788,7 @@
       {% if note %}<span class="notes-saved-badge">Saved</span>{% endif %}
     </h3>
     <form action="{{ url_for('save_stock_note', ticker=stock.ticker) }}" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <textarea
         name="note_text"
         class="notes-textarea"

@@ -9,6 +9,7 @@
     <div class="wl-tabs">
       {% for wl in all_wls %}
       <form method="POST" action="{{ url_for('watchlist_activate', wl_id=wl.id) }}" style="display:contents;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit"
           class="wl-tab {% if active_wl and wl.id == active_wl.id %}wl-tab-active{% endif %}">
           {{ wl.name }}
@@ -23,6 +24,7 @@
   <!-- Manage panel (collapsed by default) -->
   <div class="wl-manage-panel" id="wl-manage-panel" style="display:none;">
     <form action="{{ url_for('watchlist_create') }}" method="POST" class="wl-create-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="text" name="name" class="wl-name-input" placeholder="New watchlist name…" maxlength="40" required>
       <button type="submit" class="btn btn-add">Create</button>
     </form>
@@ -30,6 +32,7 @@
       {% for wl in all_wls %}
       <div class="wl-manage-row">
         <form action="{{ url_for('watchlist_rename', wl_id=wl.id) }}" method="POST" class="wl-rename-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="text" name="name" class="wl-name-input wl-rename-input"
                  value="{{ wl.name }}" maxlength="40" required>
           <button type="submit" class="btn-inline-refresh">Rename</button>
@@ -38,6 +41,7 @@
         {% if all_wls|length > 1 %}
         <form action="{{ url_for('watchlist_delete', wl_id=wl.id) }}" method="POST"
               onsubmit="return confirm('Delete « {{ wl.name }} »?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn-remove" title="Delete watchlist">✕</button>
         </form>
         {% endif %}
@@ -50,6 +54,7 @@
 <!-- ===== ADD TICKERS PANEL ===== -->
 <section class="add-panel">
   <form action="{{ url_for('watchlist_add') }}" method="POST" class="add-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input
       type="text"
       name="tickers"
@@ -120,6 +125,7 @@
       <span class="disc-badge {{ discipline.css }}" title="Discipline score">{{ discipline.score }}/100 · {{ discipline.label }}</span>
       {% if daily_session.locked %}
       <form action="{{ url_for('risk_settings') }}" method="POST" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="unlock">
         <button type="submit" class="btn-banner-unlock">Unlock</button>
       </form>
@@ -150,6 +156,7 @@
       <span class="alerts-count">{{ alerts|length }}</span>
     </span>
     <form action="{{ url_for('alerts_clear') }}" method="POST" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="alerts-clear-btn">Dismiss All</button>
     </form>
   </div>
@@ -647,10 +654,12 @@
           <!-- Actions -->
           <td class="actions-cell" onclick="event.stopPropagation()">
             <form action="{{ url_for('refresh_single', ticker=s.ticker) }}" method="POST" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn-inline-refresh" title="Refresh {{ s.ticker }}">⟳</button>
             </form>
             <form action="{{ url_for('watchlist_remove', ticker=s.ticker) }}" method="POST" style="display:inline;"
                   onsubmit="return confirm('Remove {{ s.ticker }} from this watchlist?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn-remove" title="Remove {{ s.ticker }}">✕</button>
             </form>
           </td>
@@ -673,6 +682,7 @@
     <strong>Not yet loaded:</strong>
     {% for t in missing %}
     <form action="{{ url_for('refresh_single', ticker=t) }}" method="POST" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn-missing-ticker">{{ t }}</button>
     </form>
     {% endfor %}
@@ -898,9 +908,13 @@ window._arRefreshFn = dashboardRefresh;
 
 // ── Trading Mode switcher ──────────────────────────────────────────────────
 function setTradingMode(mode) {
+  var _csrfMeta = document.querySelector('meta[name="csrf-token"]');
   fetch("{{ url_for('set_trading_mode') }}", {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRFToken": _csrfMeta ? _csrfMeta.getAttribute("content") : "",
+    },
     body: JSON.stringify({mode: mode}),
   })
   .then(function(r) { return r.json(); })

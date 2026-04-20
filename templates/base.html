@@ -13,6 +13,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <!-- CSRF token for AJAX POST requests (read by setTradingMode in dashboard.js) -->
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
 </head>
 <body>
@@ -40,11 +42,12 @@
       <button id="alert-sound-toggle" class="btn-ar-toggle ar-on" onclick="toggleAlertSound()" title="Sound alerts for new triggers">🔔 Sound ON</button>
       <button id="ar-toggle" class="btn-ar-toggle ar-on" onclick="toggleAutoRefresh()" title="Auto-refresh every 4s during market hours">⟳ Auto ON</button>
       <form action="{{ url_for('refresh_all') }}" method="POST" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-refresh">⟳ Refresh All</button>
       </form>
     </div>
   </nav>
-  <div class="mobile-refresh-bar"><form action="{{ url_for('refresh_all') }}" method="POST" style="margin:0;"><button type="submit" class="mobile-refresh-btn">Refresh All</button></form></div>
+  <div class="mobile-refresh-bar"><form action="{{ url_for('refresh_all') }}" method="POST" style="margin:0;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="mobile-refresh-btn">Refresh All</button></form></div>
 
   <!-- ===== FLASH MESSAGES ===== -->
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -71,6 +74,7 @@
     <button id="mobile-ar-toggle"    class="mobile-ctrl-btn mobile-ctrl-ar mcb-on"    onclick="toggleAutoRefresh()">⟳ Auto</button>
     <button id="mobile-sound-toggle" class="mobile-ctrl-btn mobile-ctrl-sound mcb-on" onclick="toggleAlertSound()">🔔</button>
     <form action="{{ url_for('refresh_all') }}" method="POST" style="display:contents;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="mobile-ctrl-btn mobile-ctrl-refresh">⟳ Now</button>
     </form>
   </div>
