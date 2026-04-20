@@ -858,6 +858,164 @@ def compute_rr(plan_bias, entry, stop, target):
     return ratio, display, css
 
 
+def compute_trade_coach(stock: dict, plan: dict, market_temp: dict, risk_settings: dict) -> dict:
+    """
+    Return a coaching verdict for the current stock + plan + market conditions.
+    Output: {message, level, css, reduce_size, signals}
+    level: "go" | "watch" | "caution" | "blocked"
+    """
+    mt        = market_temp or {}
+    regime    = mt.get("regime", "NEUTRAL")
+    longs_ok  = mt.get("longs_ok", True)
+    shorts_ok = mt.get("shorts_ok", True)
+    reduce_sz = mt.get("reduce_size", False)
+
+    tp        = stock.get("trade_permission") or {}
+    perm      = tp.get("permission", "WATCH")
+    perm_rsn  = tp.get("reason", "")
+
+    bias     = stock.get("trade_bias", "")
+    swing_sc = float(stock.get("swing_score") or 0)
+    cat_sc   = float(stock.get("catalyst_score") or 0)
+    rr       = float(stock.get("risk_reward") or 0)
+    trend    = stock.get("daily_trend") or ""
+    extended = bool(stock.get("is_extended", False))
+
+    has_entry  = bool(plan.get("entry_level"))
+    has_stop   = bool(plan.get("stop_loss"))
+    has_target = bool(plan.get("target_price"))
+
+    signals = []
+    missing = []
+
+    # ── Hard blocks ──────────────────────────────────────────────────────────
+    if regime == "NO_TRADE":
+        return {
+            "message": "No-trade conditions. VIX is elevated — market regime blocks all entries today.",
+            "level": "blocked", "css": "coach-blocked", "reduce_size": False,
+            "signals": ["Extreme risk-off environment (VIX spike)"],
+        }
+
+    if perm == "BLOCKED":
+        rsn = perm_rsn[:100] if perm_rsn else "setup does not meet entry criteria"
+        return {
+            "message": f"Blocked. {rsn}",
+            "level": "blocked", "css": "coach-blocked", "reduce_size": False,
+            "signals": [perm_rsn] if perm_rsn else [],
+        }
+
+    if bias == "Long" and longs_ok is False:
+        return {
+            "message": "Market does not support longs right now. Wait for a regime shift or consider the short side.",
+            "level": "caution", "css": "coach-caution", "reduce_size": True,
+            "signals": ["Market regime: RISK OFF — longs not supported"],
+        }
+
+    if bias == "Short" and shorts_ok is False:
+        return {
+            "message": "Market does not support shorts right now. Wait for regime confirmation.",
+            "level": "caution", "css": "coach-caution", "reduce_size": True,
+            "signals": ["Market regime: RISK ON — shorts not supported"],
+        }
+
+    # ── Missing plan elements ────────────────────────────────────────────────
+    if has_entry and not has_stop:
+        missing.append("stop loss missing — cannot calculate position size")
+    if has_entry and has_stop and not has_target:
+        missing.append("no target set — R:R unknown")
+
+    # ── Quality signals ──────────────────────────────────────────────────────
+    if swing_sc >= 8:
+        signals.append(f"A+ swing setup ({swing_sc:.0f}/10)")
+    elif swing_sc >= 6:
+        signals.append(f"Quality setup ({swing_sc:.0f}/10)")
+    elif swing_sc > 0:
+        signals.append(f"Weak setup ({swing_sc:.0f}/10)")
+
+    if cat_sc >= 7:
+        signals.append(f"Strong catalyst ({cat_sc:.0f}/10)")
+    elif cat_sc >= 4:
+        signals.append(f"Catalyst present ({cat_sc:.0f}/10)")
+
+    if rr >= 2:
+        signals.append(f"Good R:R ({rr:.1f}:1)")
+    elif rr >= 1:
+        signals.append(f"Acceptable R:R ({rr:.1f}:1)")
+    elif rr > 0:
+        signals.append(f"Weak R:R ({rr:.1f}:1)")
+
+    if trend:
+        signals.append(f"Trend: {trend}")
+    if extended:
+        signals.append("Price extended from ideal entry")
+
+    _regime_labels = {
+        "RISK_ON": "Market: RISK ON",
+        "NEUTRAL": "Market: Neutral",
+        "CAUTION": "Market: Caution/chop",
+        "RISK_OFF": "Market: RISK OFF",
+    }
+    if regime in _regime_labels:
+        signals.append(_regime_labels[regime])
+
+    # ── Build coaching message ───────────────────────────────────────────────
+    reduce_flag = reduce_sz or regime in ("CAUTION", "RISK_OFF")
+
+    if perm == "TRADE ALLOWED":
+        if swing_sc >= 8 and cat_sc >= 6:
+            bullish_env = regime == "RISK_ON" and "Bullish" in trend
+            if bullish_env and bias == "Long":
+                msg = "Valid A+ setup. Trend and structure aligned. Risk-on market supports longs."
+            elif regime == "RISK_ON" and bias == "Short":
+                msg = "Valid A+ short setup. Confirm structure break before executing."
+            else:
+                msg = "Valid A+ setup. Trade allowed — confirm entry trigger before executing."
+            level, css = "go", "coach-go"
+        elif swing_sc >= 6:
+            if rr >= 2:
+                msg = "Valid setup with good R:R. Trade allowed — standard size, disciplined execution."
+            else:
+                msg = "Valid setup. Trade allowed — confirm entry and stop, watch R:R carefully."
+            level, css = "go", "coach-go"
+        else:
+            msg = "Trade allowed, but setup quality is average. Use reduced size and strict discipline."
+            level, css = "watch", "coach-watch"
+
+        if reduce_flag and level == "go":
+            msg += " Reduce size — market is not fully supportive."
+            level, css = "watch", "coach-watch"
+
+    elif perm == "WATCH":
+        if extended:
+            msg = "Watch only. Price is extended from the ideal entry — wait for a pullback into the entry zone."
+        elif swing_sc >= 6:
+            msg = "Watch only. Setup quality is good but entry is not yet confirmed. Be patient."
+        elif swing_sc >= 4:
+            msg = "Watch only. Setup is forming — not yet confirmed. Wait for clearer signal."
+        else:
+            msg = "Watch only. Setup quality is too low to consider entry right now."
+        level, css = "watch", "coach-watch"
+
+        if regime in ("RISK_OFF", "CAUTION"):
+            msg += " Market regime adds extra reason for caution."
+            level, css = "caution", "coach-caution"
+
+    else:
+        msg = "No clear action. Review setup quality and market conditions before committing."
+        level, css = "caution", "coach-caution"
+
+    if missing:
+        msg += " Note: " + "; ".join(missing) + "."
+
+    return {
+        "message": msg,
+        "level": level,
+        "css": css,
+        "reduce_size": reduce_flag,
+        "signals": signals,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Discipline & Risk Engine — pure functions (no DB, no Flask)
 # ---------------------------------------------------------------------------
@@ -2603,18 +2761,32 @@ def stock_detail(ticker):
     plan = get_trade_plan(ticker)
 
     try:
-        _, rr_display, rr_class = compute_rr(
+        rr_ratio, rr_display, rr_class = compute_rr(
             plan.get("plan_bias"),
             plan.get("entry_level"),
             plan.get("stop_loss"),
             plan.get("target_price"),
         )
+        stock.setdefault("risk_reward", rr_ratio)
     except Exception:
         rr_display, rr_class = "—", "rr-neutral"
 
     all_wls       = get_all_watchlists()
     ticker_wl_ids = get_ticker_watchlist_ids(ticker)
-    logger.info("stock_detail  ticker=%s  state=%s", ticker, stock.get("ticker_state"))
+    rs            = get_risk_settings()
+    market_temp   = _get_market_temperature()
+
+    try:
+        coach = compute_trade_coach(stock, plan, market_temp, rs)
+    except Exception as _ce:
+        logger.warning("stock_detail  ticker=%s  coach_err=%s", ticker, _ce)
+        coach = {
+            "message": "Coach unavailable — could not evaluate signals.",
+            "level": "caution", "css": "coach-caution",
+            "reduce_size": False, "signals": [],
+        }
+
+    logger.info("stock_detail  ticker=%s  state=%s  coach=%s", ticker, stock.get("ticker_state"), coach.get("level"))
 
     return render_template(
         "stock_detail.html",
@@ -2628,7 +2800,9 @@ def stock_detail(ticker):
         all_wls=all_wls,
         ticker_wl_ids=ticker_wl_ids,
         get_setup_type_class=get_setup_type_class,
-        risk_settings=get_risk_settings(),
+        risk_settings=rs,
+        market_temp=market_temp,
+        coach=coach,
     )
 
 

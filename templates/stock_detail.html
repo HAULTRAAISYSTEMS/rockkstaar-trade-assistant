@@ -110,6 +110,27 @@
 
   </div>
 
+  <!-- ===== TRADE COACH ===== -->
+  <div class="detail-card coach-card {{ coach.css }}">
+    <h3 class="card-title">
+      AI Trade Coach
+      <span class="coach-level-badge coach-badge-{{ coach.level }}">
+        {% if coach.level == 'go' %}GO{% elif coach.level == 'watch' %}WATCH{% elif coach.level == 'caution' %}CAUTION{% else %}BLOCKED{% endif %}
+      </span>
+      {% if coach.reduce_size %}
+      <span class="coach-reduce-badge">REDUCE SIZE</span>
+      {% endif %}
+    </h3>
+    <div class="coach-message {{ coach.css }}">{{ coach.message }}</div>
+    {% if coach.signals %}
+    <div class="coach-signals">
+      {% for sig in coach.signals %}
+      <span class="coach-signal-chip">{{ sig }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
   <!-- ===== SWING TRADE PLAN ===== -->
   <div class="detail-card swing-plan-card">
     <h3 class="card-title">Swing Trade Plan
@@ -591,6 +612,98 @@
     </div>
     {% endif %}
 
+    <!-- ===== POSITION SIZER ===== -->
+    <div class="ps-panel" id="ps-panel">
+      <div class="ps-header">
+        <span class="ps-title">Position Sizer</span>
+        <div class="ps-type-btns">
+          <button type="button" class="ps-type-btn ps-type-active" id="psTypeStock" onclick="psSetType('stock')">Stock</button>
+          <button type="button" class="ps-type-btn" id="psTypeOption" onclick="psSetType('option')">Option</button>
+        </div>
+        <div class="ps-mode-btns">
+          <button type="button" class="ps-mode-btn ps-mode-active" id="psModeDay" onclick="psSetMode('day')">Day Trade</button>
+          <button type="button" class="ps-mode-btn" id="psModeSwing" onclick="psSetMode('swing')">Swing</button>
+        </div>
+      </div>
+
+      <div class="ps-body">
+        <div class="ps-inputs-row">
+          <div class="ps-field">
+            <label class="ps-label">Account Size</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="100" min="0" id="psAccount" class="plan-input"
+                     value="{{ risk_settings.account_size if risk_settings is defined else 10000 }}"
+                     oninput="psCalc()">
+            </div>
+          </div>
+          <div class="ps-field">
+            <label class="ps-label">Risk %</label>
+            <input type="number" step="0.1" min="0.1" max="10" id="psRiskPct" class="jform-input"
+                   value="{{ risk_settings.risk_pct if risk_settings is defined else 1.0 }}"
+                   oninput="psCalc()">
+          </div>
+          <div class="ps-field">
+            <label class="ps-label">Entry Price</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="0.01" min="0" id="psEntry" class="plan-input"
+                     placeholder="0.00"
+                     value="{{ '%.2f'|format(plan.entry_level) if plan.entry_level else '' }}"
+                     oninput="psCalc()">
+            </div>
+          </div>
+          <div class="ps-field">
+            <label class="ps-label">Stop Price</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="0.01" min="0" id="psStop" class="plan-input"
+                     placeholder="0.00"
+                     value="{{ '%.2f'|format(plan.stop_loss) if plan.stop_loss else '' }}"
+                     oninput="psCalc()">
+            </div>
+          </div>
+          <div class="ps-field ps-field-premium" id="psPremiumField" style="display:none;">
+            <label class="ps-label">Option Premium</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="0.01" min="0" id="psPremium" class="plan-input"
+                     placeholder="2.50" oninput="psCalc()">
+            </div>
+          </div>
+        </div>
+
+        {% if market_temp is defined and market_temp.reduce_size %}
+        <div class="ps-regime-warn">Market regime suggests reducing size — apply 50% of the suggested size.</div>
+        {% endif %}
+
+        <div class="ps-results" id="ps-results">
+          <div class="ps-result-item">
+            <span class="ps-result-label">Max $ Risk Allowed</span>
+            <span class="ps-result-val" id="ps-max-risk">—</span>
+          </div>
+          <div class="ps-result-item" id="ps-shares-row">
+            <span class="ps-result-label">Suggested Shares</span>
+            <span class="ps-result-val" id="ps-shares">—</span>
+          </div>
+          <div class="ps-result-item" id="ps-contracts-row" style="display:none;">
+            <span class="ps-result-label">Suggested Contracts</span>
+            <span class="ps-result-val" id="ps-contracts">—</span>
+          </div>
+          <div class="ps-result-item">
+            <span class="ps-result-label">Total Capital Required</span>
+            <span class="ps-result-val" id="ps-total-cost">—</span>
+          </div>
+          <div class="ps-result-item">
+            <span class="ps-result-label">Risk Per Unit</span>
+            <span class="ps-result-val" id="ps-risk-unit">—</span>
+          </div>
+        </div>
+
+        <div class="ps-warning" id="ps-warning" style="display:none;"></div>
+      </div>
+    </div>
+
     <!-- ===== OPTIONS RISK CALCULATOR ===== -->
     <div class="options-risk-panel" id="options-risk-panel">
       <div class="options-risk-header">
@@ -852,6 +965,111 @@ function calcRR() {
   breakdown.textContent = `Risk $${risk.toFixed(2)}  ·  Reward $${reward.toFixed(2)}`;
 }
 calcRR();
+
+// ── Position Sizer ──────────────────────────────────────────────────────────
+let _psType = 'stock';
+let _psMode = 'day';
+
+function psSetType(type) {
+  _psType = type;
+  document.getElementById('psTypeStock').classList.toggle('ps-type-active', type === 'stock');
+  document.getElementById('psTypeOption').classList.toggle('ps-type-active', type === 'option');
+  document.getElementById('psPremiumField').style.display = type === 'option' ? '' : 'none';
+  document.getElementById('ps-shares-row').style.display   = type === 'stock'  ? '' : 'none';
+  document.getElementById('ps-contracts-row').style.display = type === 'option' ? '' : 'none';
+  psCalc();
+}
+
+function psSetMode(mode) {
+  _psMode = mode;
+  document.getElementById('psModeDay').classList.toggle('ps-mode-active', mode === 'day');
+  document.getElementById('psModeSwing').classList.toggle('ps-mode-active', mode === 'swing');
+  psCalc();
+}
+
+function psCalc() {
+  const account  = parseFloat(document.getElementById('psAccount').value)  || 0;
+  const riskPct  = parseFloat(document.getElementById('psRiskPct').value)  || 0;
+  const entry    = parseFloat(document.getElementById('psEntry').value)    || 0;
+  const stop     = parseFloat(document.getElementById('psStop').value)     || 0;
+  const premium  = parseFloat(document.getElementById('psPremium')?.value) || 0;
+  const warnEl   = document.getElementById('ps-warning');
+
+  const fmt = v => '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  const maxRisk = account > 0 && riskPct > 0 ? account * (riskPct / 100) : 0;
+  document.getElementById('ps-max-risk').textContent = maxRisk > 0 ? fmt(maxRisk) : '—';
+
+  const warnings = [];
+
+  if (_psType === 'stock') {
+    if (!entry || !stop) {
+      ['ps-shares','ps-total-cost','ps-risk-unit'].forEach(id => { document.getElementById(id).textContent = '—'; });
+      warnEl.textContent = 'Enter entry and stop prices to calculate position size.';
+      warnEl.style.display = '';
+      warnEl.className = 'ps-warning ps-warn-yellow';
+      return;
+    }
+    const riskPerShare = Math.abs(entry - stop);
+    if (riskPerShare <= 0) {
+      warnEl.textContent = 'Stop must differ from entry price.';
+      warnEl.style.display = '';
+      warnEl.className = 'ps-warning ps-warn-red';
+      return;
+    }
+    const shares    = maxRisk > 0 ? Math.floor(maxRisk / riskPerShare) : 0;
+    const totalCost = shares * entry;
+    const pctOfAcct = account > 0 ? (totalCost / account * 100) : 0;
+
+    document.getElementById('ps-shares').textContent    = shares > 0 ? shares + ' shares' : '—';
+    document.getElementById('ps-total-cost').textContent = totalCost > 0 ? fmt(totalCost) : '—';
+    document.getElementById('ps-risk-unit').textContent  = fmt(riskPerShare) + ' / share';
+
+    warnEl.style.display = 'none';
+    if (shares === 0) {
+      warnings.push('Account or risk % too small to buy even 1 share at this stop.');
+    }
+    if (pctOfAcct > 20) {
+      warnings.push(`Position is ${pctOfAcct.toFixed(0)}% of account — consider reducing size.`);
+    }
+    if (pctOfAcct > 50) {
+      warnings.push('WARNING: Position exceeds 50% of account — oversized for most risk rules.');
+    }
+
+  } else {
+    // Option sizing
+    if (!premium) {
+      ['ps-contracts','ps-total-cost','ps-risk-unit'].forEach(id => { document.getElementById(id).textContent = '—'; });
+      warnEl.textContent = 'Enter option premium to calculate contracts.';
+      warnEl.style.display = '';
+      warnEl.className = 'ps-warning ps-warn-yellow';
+      return;
+    }
+    const costPerContract = premium * 100;
+    const contracts = maxRisk > 0 ? Math.max(1, Math.floor(maxRisk / costPerContract)) : 0;
+    const totalCost = contracts * costPerContract;
+    const pctOfAcct = account > 0 ? (totalCost / account * 100) : 0;
+
+    document.getElementById('ps-contracts').textContent  = contracts > 0 ? contracts + (contracts === 1 ? ' contract' : ' contracts') : '—';
+    document.getElementById('ps-total-cost').textContent  = totalCost > 0 ? fmt(totalCost) : '—';
+    document.getElementById('ps-risk-unit').textContent   = fmt(costPerContract) + ' / contract';
+
+    warnEl.style.display = 'none';
+    if (totalCost > maxRisk) {
+      warnings.push(`Total premium $${totalCost.toFixed(2)} exceeds max risk $${maxRisk.toFixed(2)}.`);
+    }
+    if (pctOfAcct > 5) {
+      warnings.push(`Option position is ${pctOfAcct.toFixed(1)}% of account — high exposure.`);
+    }
+  }
+
+  if (warnings.length) {
+    warnEl.textContent  = warnings.join(' ');
+    warnEl.style.display = '';
+    warnEl.className = 'ps-warning ' + (warnings.some(w => w.startsWith('WARNING')) ? 'ps-warn-red' : 'ps-warn-yellow');
+  }
+}
+psCalc();
 
 // ── Options Risk Calculator ─────────────────────────────────────────────────
 let _optSide = 'CALL';
