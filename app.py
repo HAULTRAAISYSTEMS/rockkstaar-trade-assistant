@@ -2367,7 +2367,7 @@ def watchlist_add():
     queued = []
     for t in re.split(r"[\s,]+", raw.upper()):
         t = t.strip()
-        if not (t and t.isalpha() and 1 <= len(t) <= 5 and wl_id):
+        if not (t and re.match(r'^[A-Z]{1,5}$', t) and wl_id):
             continue
         # Claim the watchlist slot + insert a Loading placeholder so the
         # ticker appears on the dashboard immediately.
