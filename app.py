@@ -155,13 +155,15 @@ def _clear_stale_mock_prices():
             snap = get_stock_data(ticker)
             if snap and snap.get("current_price") == stale_price:
                 conn = get_db()
-                conn.execute(
-                    "UPDATE stock_data SET current_price = NULL, prev_close = NULL, "
-                    "gap_pct = NULL, ticker_state = 'error' WHERE ticker = ?",
-                    (ticker,),
-                )
-                conn.commit()
-                conn.close()
+                try:
+                    conn.execute(
+                        "UPDATE stock_data SET current_price = NULL, prev_close = NULL, "
+                        "gap_pct = NULL, ticker_state = 'error' WHERE ticker = ?",
+                        (ticker,),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
                 logger.warning(
                     "startup migration: cleared stale mock price %.1f for %s → ticker_state=error",
                     stale_price, ticker,
@@ -213,7 +215,7 @@ def _prev_trading_day() -> str:
     return candidate.isoformat()
 
 
-def auto_refresh_stale_closes(tickers: list) -> list:
+def auto_refresh_stale_closes(tickers: list, data_map: dict | None = None) -> list:
     """
     Identify stale tickers and kick off a background refresh for each one.
 
@@ -226,14 +228,23 @@ def auto_refresh_stale_closes(tickers: list) -> list:
       - Its prev_close_date doesn't match the expected previous trading day.
     Error-state tickers always retry regardless of last_updated.
 
+    ``data_map`` — optional pre-loaded {ticker: stock_dict} from the caller.
+    When supplied, skips the per-ticker get_stock_data() calls entirely so the
+    dashboard doesn't pay N individual DB round-trips just to check staleness.
+
     Returns the list of ticker symbols that were queued for background refresh.
     """
     expected  = _prev_trading_day()
     today_str = _et_now().strftime("%Y-%m-%d")
     queued: list[str] = []
 
+    # Use the caller's already-loaded map; fall back to fetching only if needed.
+    _snapshot = data_map if data_map is not None else {
+        s["ticker"]: s for s in get_all_stock_data()
+    }
+
     for ticker in tickers:
-        stock = get_stock_data(ticker)
+        stock = _snapshot.get(ticker)
         if not stock:
             continue
 
@@ -259,9 +270,9 @@ def auto_refresh_stale_closes(tickers: list) -> list:
     if not queued:
         return []
 
-    # Capture snapshot map once so the worker thread doesn't need a fresh DB
-    # read per ticker (avoids a burst of DB calls from the thread).
-    _all_existing = {s["ticker"]: s for s in get_all_stock_data()}
+    # Reuse the same snapshot in the worker thread — avoids a second full-table
+    # scan. A second get_all_stock_data() here was the old double-fetch.
+    _all_existing = _snapshot
 
     def _worker():
         for ticker in queued:
@@ -1262,8 +1273,14 @@ def compute_freshness(
         return "Premarket Watch", "fresh-premarket"
 
     try:
-        ts  = datetime.fromisoformat(triggered_at)
-        now = datetime.now()
+        ts = datetime.fromisoformat(triggered_at)
+        # If the stored timestamp is timezone-aware, compare against a UTC-aware now
+        # to avoid TypeError: can't subtract offset-naive and offset-aware datetimes.
+        if ts.tzinfo is not None:
+            from datetime import timezone as _tz
+            now = datetime.now(tz=_tz.utc)
+        else:
+            now = datetime.now()
 
         # Triggered before this session's open → treat as premarket reference
         if ts.hour < 9 or (ts.hour == 9 and ts.minute < 30):
@@ -2073,16 +2090,15 @@ def _dashboard_inner():
 
     watchlist = get_watchlist_stocks(active_wl_id) if active_wl_id else []
 
-    # Auto-refresh any stocks whose prev_close_date is stale (new trading day)
-    if watchlist:
-        auto_refresh_stale_closes(watchlist)
-        # Expire any tickers stuck in 'loading' for longer than LOADING_TIMEOUT_SECS
-        _expire_stuck_loading(watchlist)
-
+    # Single DB read — reused for staleness checks, expiry, and rendering.
     all_data = get_all_stock_data()
+    data_map = {s["ticker"]: s for s in all_data}
     logger.info("dashboard  route=/  wl_id=%s  tickers=%s", active_wl_id, watchlist)
 
-    data_map = {s["ticker"]: s for s in all_data}
+    # Pass data_map so auto_refresh and expire don't make additional DB calls.
+    if watchlist:
+        auto_refresh_stale_closes(watchlist, data_map=data_map)
+        _expire_stuck_loading(watchlist)
 
     # Annotate per ticker — one bad ticker must not crash the whole dashboard
     stocks = []
@@ -2598,8 +2614,9 @@ def stock_detail(ticker):
 
 
 # ── Market Temperature cache ─────────────────────────────────────────────────
-_market_temp_cache: dict = {"data": None, "ts": 0.0, "fetching": False}
-_MARKET_TEMP_TTL = 300   # 5-minute refresh
+_market_temp_cache: dict = {"data": None, "ts": 0.0}
+_market_temp_lock  = threading.Lock()   # guards the spawn-once check
+_MARKET_TEMP_TTL   = 300   # 5-minute refresh
 
 
 def _get_market_temperature() -> dict:
@@ -2615,25 +2632,34 @@ def _get_market_temperature() -> dict:
     now = _time.time()
     if _market_temp_cache["ts"] and now - _market_temp_cache["ts"] < _MARKET_TEMP_TTL:
         return _market_temp_cache["data"]
-    if not _market_temp_cache["fetching"]:
+
+    # Atomic check-and-spawn: acquire the lock before reading/writing `fetching`
+    # so two simultaneous requests cannot both see fetching=False and both spawn
+    # a background thread (which would double-fetch and double-write the cache).
+    with _market_temp_lock:
+        # Re-check inside the lock — another thread may have just refreshed.
+        if _market_temp_cache["ts"] and now - _market_temp_cache["ts"] < _MARKET_TEMP_TTL:
+            return _market_temp_cache["data"]
+        if _market_temp_cache.get("fetching"):
+            return _market_temp_cache["data"] or _LOADING
         _market_temp_cache["fetching"] = True
 
-        def _bg():
-            try:
-                from data_fetcher import compute_market_temperature
-                data = compute_market_temperature()
-                _market_temp_cache["data"] = data
-                _market_temp_cache["ts"]   = _time.time()
-                logger.info(
-                    "market_temperature  regime=%s  score=%s",
-                    data.get("regime"), data.get("score"),
-                )
-            except Exception as _e:
-                logger.warning("_get_market_temperature bg failed: %s", _e)
-            finally:
-                _market_temp_cache["fetching"] = False
+    def _bg():
+        try:
+            from data_fetcher import compute_market_temperature
+            data = compute_market_temperature()
+            _market_temp_cache["data"] = data
+            _market_temp_cache["ts"]   = _time.time()
+            logger.info(
+                "market_temperature  regime=%s  score=%s",
+                data.get("regime"), data.get("score"),
+            )
+        except Exception as _e:
+            logger.warning("_get_market_temperature bg failed: %s", _e)
+        finally:
+            _market_temp_cache["fetching"] = False
 
-        threading.Thread(target=_bg, daemon=True).start()
+    threading.Thread(target=_bg, daemon=True).start()
     return _market_temp_cache["data"] or _LOADING
 
 
