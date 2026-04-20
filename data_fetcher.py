@@ -1394,8 +1394,9 @@ def compute_market_temperature() -> dict:
     """
     _UNKNOWN: dict = {
         "regime": "UNKNOWN", "label": "Unknown", "css": "mt-unknown",
-        "reason": "Market data unavailable", "longs_ok": None, "shorts_ok": None,
-        "reduce_size": False, "score": None, "error": True,
+        "reason": "Market data unavailable", "action_msg": "—",
+        "longs_ok": None, "shorts_ok": None, "reduce_size": False,
+        "score": None, "meter_score": 50, "error": True,
         "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
         "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
         "vix_level": None, "vix_direction": None,
@@ -1595,19 +1596,41 @@ def compute_market_temperature() -> dict:
 
         reason = " · ".join(p for p in reason_parts if p)
 
+        # ── Meter score: map raw score [-8, +6] → [0, 100] ──────────────────
+        # Clamp to [-8, +6] (14-point range), then scale linearly.
+        # NO_TRADE forces the needle to the far-left extreme.
+        if regime == "NO_TRADE":
+            meter_score = 3
+        else:
+            _clamped    = max(-8, min(6, score))
+            meter_score = int(round((_clamped + 8) / 14 * 100))
+            meter_score = max(0, min(100, meter_score))
+
+        # ── Action message ────────────────────────────────────────────────────
+        _action_map = {
+            "NO_TRADE": "No-trade conditions",
+            "RISK_OFF":  "Shorts favored",
+            "CAUTION":   "Avoid chasing — wait for clarity",
+            "NEUTRAL":   "Selective — trade both sides carefully",
+            "RISK_ON":   "Longs favored",
+        }
+        action_msg = _action_map.get(regime, "—")
+
         logger.info(
-            "compute_market_temperature  regime=%s  score=%s  vix=%.1f  reason=%s",
-            regime, score, vix_level or 0, reason,
+            "compute_market_temperature  regime=%s  score=%s  meter=%s  vix=%.1f  reason=%s",
+            regime, score, meter_score, vix_level or 0, reason,
         )
         return {
             "regime":        regime,
             "label":         label,
             "css":           css,
             "reason":        reason,
+            "action_msg":    action_msg,
             "longs_ok":      longs_ok,
             "shorts_ok":     shorts_ok,
             "reduce_size":   reduce_size,
             "score":         score,
+            "meter_score":   meter_score,
             "spy_price":     round(spy_price, 2),
             "spy_pct_ema20": round(spy_pct_ema20, 2),
             "spy_vs_vwap":   round(spy_vs_vwap, 2) if spy_vs_vwap is not None else None,
@@ -1621,4 +1644,4 @@ def compute_market_temperature() -> dict:
 
     except Exception as _e:
         logger.warning("compute_market_temperature failed: %s", _e)
-        return {**_UNKNOWN, "reason": "Error computing market data"}
+        return {**_UNKNOWN, "reason": "Error computing market data", "meter_score": 50, "action_msg": "—"}

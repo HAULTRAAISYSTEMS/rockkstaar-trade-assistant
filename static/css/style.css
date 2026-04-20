@@ -4553,76 +4553,185 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
 .ocs-status-cached  { background: rgba(100,116,139,0.10); color: #94a3b8; border-color: rgba(100,116,139,0.2); }
 .ocs-rate-limited   { background: rgba(239,68,68,0.10); color: #f87171; border-color: rgba(239,68,68,0.3); }
 
-/* ── Market Temperature Panel ──────────────────────────────────────────────── */
+/* ── Market Temperature Meter ───────────────────────────────────────────────── */
+
+/* Panel container */
 .mt-panel {
   margin: 0.75rem 1rem 0;
-  padding: 0.65rem 1rem;
+  padding: 0.8rem 1rem 0.7rem;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg2);
 }
-.mt-panel-mt-risk-on  { border-color: rgba(34,197,94,0.2); }
-.mt-panel-mt-caution  { border-color: rgba(251,191,36,0.2); }
-.mt-panel-mt-risk-off { border-color: rgba(239,68,68,0.2); }
-.mt-panel-mt-no-trade { border-color: rgba(239,68,68,0.35); }
+.mt-panel-mt-risk-on  { border-color: rgba(34,197,94,0.22); }
+.mt-panel-mt-neutral  { border-color: rgba(99,179,237,0.18); }
+.mt-panel-mt-caution  { border-color: rgba(251,191,36,0.22); }
+.mt-panel-mt-risk-off { border-color: rgba(239,68,68,0.22); }
+.mt-panel-mt-no-trade { border-color: rgba(239,68,68,0.40); }
 
-.mt-header {
+/* Row 1: badge + action + score */
+.mt-top {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  justify-content: space-between;
+  gap: 0.6rem;
   flex-wrap: wrap;
 }
+.mt-top-left {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+/* Regime badge */
 .mt-badge {
   font-size: 0.72rem;
-  font-weight: 700;
-  padding: 0.22rem 0.6rem;
+  font-weight: 800;
+  padding: 0.22rem 0.65rem;
   border-radius: 5px;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   white-space: nowrap;
+  text-transform: uppercase;
 }
-.mt-risk-on  { background: rgba(34,197,94,0.14);    color: #22c55e; border: 1px solid rgba(34,197,94,0.35); }
-.mt-neutral  { background: rgba(99,179,237,0.12);   color: #63b3ed; border: 1px solid rgba(99,179,237,0.3); }
-.mt-caution  { background: rgba(251,191,36,0.13);   color: #fbbf24; border: 1px solid rgba(251,191,36,0.35); }
-.mt-risk-off { background: rgba(239,68,68,0.13);    color: #f87171; border: 1px solid rgba(239,68,68,0.35); }
-.mt-no-trade { background: rgba(239,68,68,0.18);    color: #fca5a5; border: 1px solid rgba(239,68,68,0.5); }
-.mt-loading  { background: rgba(100,116,139,0.10);  color: #94a3b8; border: 1px solid rgba(100,116,139,0.2); }
-.mt-unknown  { background: rgba(100,116,139,0.08);  color: #64748b; border: 1px solid rgba(100,116,139,0.15); }
+.mt-risk-on  { background: rgba(34,197,94,0.14);   color: #22c55e; border: 1px solid rgba(34,197,94,0.35); }
+.mt-neutral  { background: rgba(99,179,237,0.12);  color: #63b3ed; border: 1px solid rgba(99,179,237,0.30); }
+.mt-caution  { background: rgba(251,191,36,0.13);  color: #fbbf24; border: 1px solid rgba(251,191,36,0.35); }
+.mt-risk-off { background: rgba(239,68,68,0.13);   color: #f87171; border: 1px solid rgba(239,68,68,0.35); }
+.mt-no-trade { background: rgba(239,68,68,0.20);   color: #fca5a5; border: 1px solid rgba(239,68,68,0.55); }
+.mt-loading  { background: rgba(100,116,139,0.10); color: #94a3b8; border: 1px solid rgba(100,116,139,0.2); }
+.mt-unknown  { background: rgba(100,116,139,0.08); color: #64748b; border: 1px solid rgba(100,116,139,0.15); }
 
-.mt-reason {
+/* Action message (e.g. "Longs favored") */
+.mt-action {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Score number  "67 /100" */
+.mt-score-wrap  { display: flex; align-items: baseline; gap: 0.15rem; }
+.mt-score-num   { font-size: 1.4rem; font-weight: 900; line-height: 1; }
+.mt-score-den   { font-size: 0.7rem; color: var(--text-muted); }
+
+/* Score colours (applied via .mt-* on .mt-score-num) */
+.mt-risk-on.mt-score-num  { color: #22c55e; }
+.mt-neutral.mt-score-num  { color: #63b3ed; }
+.mt-caution.mt-score-num  { color: #fbbf24; }
+.mt-risk-off.mt-score-num { color: #f87171; }
+.mt-no-trade.mt-score-num { color: #fca5a5; }
+.mt-loading.mt-score-num,
+.mt-unknown.mt-score-num  { color: #64748b; }
+
+/* Row 2: gauge */
+.mt-gauge-wrap {
+  margin-top: 0.65rem;
+  position: relative;
+}
+
+/* Pointer row (sits above the track) */
+.mt-pointer-row {
+  position: relative;
+  height: 14px;
+}
+.mt-pointer {
+  position: absolute;
+  transform: translateX(-50%);
   font-size: 0.7rem;
+  line-height: 1;
+  color: rgba(255,255,255,0.85);
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6));
+  top: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Gradient track */
+.mt-track {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: linear-gradient(to right,
+    #7f1d1d  0%,
+    #dc2626 18%,
+    #f59e0b 36%,
+    #475569 50%,
+    #22c55e 68%,
+    #15803d 100%
+  );
+  overflow: visible;
+}
+
+/* Zone divider ticks */
+.mt-tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: rgba(5, 8, 22, 0.55);
+  pointer-events: none;
+}
+
+/* Zone label strip */
+.mt-zones {
+  position: relative;
+  height: 16px;
+  margin-top: 3px;
+}
+.mt-zones span {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 0.58rem;
+  font-weight: 600;
   color: var(--text-muted);
-  flex: 1;
-  min-width: 0;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  top: 0;
+}
+
+/* Row 3: reason */
+.mt-reason {
+  margin-top: 0.55rem;
+  font-size: 0.68rem;
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.mt-body {
+
+/* Row 4: stats row */
+.mt-stats {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
-  margin-top: 0.45rem;
+  gap: 1.1rem;
+  margin-top: 0.6rem;
   flex-wrap: wrap;
 }
-.mt-indicators { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
-.mt-ind        { display: flex; align-items: center; gap: 0.3rem; }
-.mt-ind-lbl    { font-size: 0.66rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.mt-ind-val    { font-size: 0.75rem; font-weight: 700; color: var(--text); }
-.mt-ind-stat   { font-size: 0.67rem; color: var(--text-muted); }
+.mt-stat-block {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.mt-stat-lbl  { font-size: 0.64rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.mt-stat-val  { font-size: 0.75rem; font-weight: 700; color: var(--text); }
+.mt-stat-tag  { font-size: 0.64rem; font-weight: 600; color: var(--text-muted); }
+
+.mt-stat-sigs { display: flex; gap: 0.4rem; margin-left: auto; align-items: center; flex-wrap: wrap; }
+.mt-sig       { font-size: 0.64rem; font-weight: 700; padding: 0.16rem 0.45rem; border-radius: 4px; white-space: nowrap; }
+.mt-sig-ok    { background: rgba(34,197,94,0.12);    color: #22c55e; }
+.mt-sig-no    { background: rgba(239,68,68,0.10);    color: #f87171; }
+.mt-sig-na    { background: rgba(100,116,139,0.08);  color: #64748b; }
+.mt-sig-warn  { background: rgba(251,191,36,0.12);   color: #fbbf24; }
+
+/* Shared colour helpers */
 .mt-pos  { color: #22c55e !important; }
 .mt-neg  { color: #f87171 !important; }
 .mt-warn { color: #fbbf24 !important; }
 
-.mt-signals  { display: flex; gap: 0.45rem; margin-left: auto; flex-wrap: wrap; align-items: center; }
-.mt-sig      { font-size: 0.66rem; font-weight: 700; padding: 0.18rem 0.5rem; border-radius: 4px; white-space: nowrap; }
-.mt-sig-ok   { background: rgba(34,197,94,0.12);    color: #22c55e; }
-.mt-sig-no   { background: rgba(239,68,68,0.10);    color: #f87171; }
-.mt-sig-na   { background: rgba(100,116,139,0.08);  color: #64748b; }
-.mt-sig-warn { background: rgba(251,191,36,0.12);   color: #fbbf24; }
-
 @media (max-width: 768px) {
-  .mt-panel    { margin: 0.5rem 0.5rem 0; padding: 0.55rem 0.75rem; }
-  .mt-reason   { max-width: 100%; white-space: normal; }
-  .mt-signals  { margin-left: 0; }
-  .mt-body     { gap: 0.75rem; }
+  .mt-panel       { margin: 0.5rem 0.5rem 0; padding: 0.65rem 0.75rem; }
+  .mt-reason      { white-space: normal; }
+  .mt-score-num   { font-size: 1.15rem; }
+  .mt-stat-sigs   { margin-left: 0; }
+  .mt-zones span  { font-size: 0.52rem; }
 }

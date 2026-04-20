@@ -2083,8 +2083,9 @@ _DASHBOARD_EMPTY = dict(
     trades_today=0,
     losses_today=0,
     market_temp={"regime": "UNKNOWN", "label": "—", "css": "mt-unknown",
-                 "reason": "", "longs_ok": None, "shorts_ok": None,
-                 "reduce_size": False, "score": None, "error": True,
+                 "reason": "", "action_msg": "—", "longs_ok": None,
+                 "shorts_ok": None, "reduce_size": False,
+                 "score": None, "meter_score": 50, "error": True,
                  "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
                  "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
                  "vix_level": None, "vix_direction": None},
@@ -2641,8 +2642,9 @@ def _get_market_temperature() -> dict:
     """Return cached market regime; trigger background refresh when stale."""
     _LOADING: dict = {
         "regime": "LOADING", "label": "Loading…", "css": "mt-loading",
-        "reason": "Fetching market data…", "longs_ok": None, "shorts_ok": None,
-        "reduce_size": False, "score": None, "error": False,
+        "reason": "Fetching market data…", "action_msg": "—",
+        "longs_ok": None, "shorts_ok": None,
+        "reduce_size": False, "score": None, "meter_score": 50, "error": False,
         "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
         "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
         "vix_level": None, "vix_direction": None,
