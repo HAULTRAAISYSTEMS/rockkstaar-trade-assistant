@@ -7,6 +7,7 @@ import json as _json
 import logging
 import os
 import re
+import secrets
 import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -3771,6 +3772,175 @@ def _deferred_startup():
         logger.error("deferred_startup watchlist log error: %s", _e, exc_info=True)
 
 threading.Thread(target=_deferred_startup, daemon=True, name="startup-seed").start()
+
+
+# ---------------------------------------------------------------------------
+# Schwab Account Integration  (Phase 1 — read-only)
+# ---------------------------------------------------------------------------
+# Required env vars:  SCHWAB_CLIENT_ID  SCHWAB_CLIENT_SECRET  SCHWAB_REDIRECT_URI
+# All routes guard against missing credentials gracefully.
+# NO order-placement routes exist in this phase.
+# ---------------------------------------------------------------------------
+
+_schwab_account_cache: dict = {"data": None, "ts": 0.0}
+_SCHWAB_CACHE_TTL = 60   # refresh account data every 60 s
+
+
+def _get_schwab_data(force: bool = False) -> dict:
+    """Return cached Schwab account summary, refreshing when stale."""
+    now = _time.time()
+    if not force and _schwab_account_cache["ts"] and \
+            now - _schwab_account_cache["ts"] < _SCHWAB_CACHE_TTL:
+        return _schwab_account_cache["data"]
+    try:
+        import schwab as _schwab
+        data = _schwab.get_account_summary()
+        _schwab_account_cache["data"] = data
+        _schwab_account_cache["ts"]   = now
+        return data
+    except Exception as _e:
+        logger.warning("schwab cache refresh failed: %s", _e)
+        return _schwab_account_cache["data"] or {
+            "connected": False, "total_value": None, "buying_power": None,
+            "daily_pnl": None, "total_unrealized": None,
+            "open_positions": 0, "accounts": [], "error": str(_e),
+        }
+
+
+@app.route("/schwab/account")
+def schwab_account():
+    """Schwab account overview page — read-only, Phase 1."""
+    import schwab as _schwab
+
+    configured = _schwab.is_configured()
+    tok_status = _schwab.token_status()
+
+    account_data = None
+    orders_by_account = {}
+    error_msg = None
+
+    if tok_status["connected"]:
+        try:
+            account_data = _get_schwab_data()
+            if account_data.get("error"):
+                error_msg = account_data["error"]
+            else:
+                for acct in account_data.get("accounts", []):
+                    ah = acct.get("account_hash", "")
+                    if ah:
+                        try:
+                            orders_by_account[ah] = _schwab.fetch_orders(ah, days_back=1)
+                        except Exception as _oe:
+                            logger.warning("schwab orders fetch failed hash=%s: %s", ah, _oe)
+                            orders_by_account[ah] = []
+        except Exception as _e:
+            error_msg = str(_e)
+            logger.warning("schwab_account page error: %s", _e)
+
+    return render_template(
+        "schwab_account.html",
+        configured=configured,
+        tok_status=tok_status,
+        account_data=account_data,
+        orders_by_account=orders_by_account,
+        error_msg=error_msg,
+    )
+
+
+@app.route("/schwab/auth")
+def schwab_auth():
+    """Start the Schwab OAuth 2.0 PKCE flow."""
+    import schwab as _schwab
+
+    if not _schwab.is_configured():
+        flash("Schwab API credentials not configured. Set SCHWAB_CLIENT_ID, "
+              "SCHWAB_CLIENT_SECRET, and SCHWAB_REDIRECT_URI environment variables.", "warning")
+        return redirect(url_for("schwab_account"))
+
+    code_verifier, code_challenge = _schwab._pkce_pair()
+    state = secrets.token_urlsafe(24)
+
+    # Store PKCE verifier and state in Flask session (server-side, signed cookie)
+    session["schwab_code_verifier"] = code_verifier
+    session["schwab_state"]         = state
+
+    auth_url = _schwab.build_auth_url(state, code_challenge)
+    logger.info("schwab_auth  redirecting to Schwab  state=%s", state)
+    return redirect(auth_url)
+
+
+@app.route("/schwab/callback")
+def schwab_callback():
+    """OAuth callback — exchange code for tokens and store them."""
+    import schwab as _schwab
+
+    code      = request.args.get("code", "")
+    state     = request.args.get("state", "")
+    error     = request.args.get("error", "")
+    error_desc= request.args.get("error_description", "")
+
+    if error:
+        flash(f"Schwab authorization denied: {error_desc or error}", "danger")
+        return redirect(url_for("schwab_account"))
+
+    # Validate state to prevent CSRF
+    expected_state    = session.pop("schwab_state", None)
+    code_verifier     = session.pop("schwab_code_verifier", None)
+
+    if not state or state != expected_state:
+        flash("OAuth state mismatch — possible CSRF. Please try again.", "danger")
+        return redirect(url_for("schwab_account"))
+
+    if not code:
+        flash("No authorization code received from Schwab.", "danger")
+        return redirect(url_for("schwab_account"))
+
+    try:
+        tokens = _schwab.exchange_code_for_tokens(code, code_verifier or "")
+        _schwab.save_tokens(tokens)
+        _schwab_account_cache["ts"] = 0  # invalidate cache
+        logger.info("schwab_callback  tokens saved successfully")
+        flash("Schwab account connected successfully. Account data is loading.", "success")
+    except Exception as e:
+        logger.error("schwab_callback  token exchange failed: %s", e)
+        flash(f"Failed to connect Schwab account: {e}", "danger")
+
+    return redirect(url_for("schwab_account"))
+
+
+@csrf.exempt
+@app.route("/schwab/disconnect", methods=["POST"])
+def schwab_disconnect():
+    """Clear stored Schwab tokens (read-only disconnect, no broker-side revocation)."""
+    import schwab as _schwab
+    _schwab.clear_tokens()
+    _schwab_account_cache["data"] = None
+    _schwab_account_cache["ts"]   = 0.0
+    flash("Schwab account disconnected. Your data has been cleared from this app.", "success")
+    return redirect(url_for("schwab_account"))
+
+
+@app.route("/api/schwab/summary")
+def api_schwab_summary():
+    """
+    JSON endpoint for account summary.
+    Used by dashboard widgets to pull live account balance / buying power.
+    Read-only Phase 1 — no mutations.
+    """
+    import schwab as _schwab
+    if not _schwab.token_status()["connected"]:
+        return jsonify({"connected": False, "error": "Not authenticated"})
+    data = _get_schwab_data()
+    # Return only the safe summary fields (no token data)
+    return jsonify({
+        "connected":        data.get("connected", False),
+        "total_value":      data.get("total_value"),
+        "buying_power":     data.get("buying_power"),
+        "daily_pnl":        data.get("daily_pnl"),
+        "total_unrealized": data.get("total_unrealized"),
+        "open_positions":   data.get("open_positions"),
+        "error":            data.get("error"),
+    })
 
 
 # ---------------------------------------------------------------------------

@@ -536,6 +536,11 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+    # Schwab OAuth tokens — stored as individual settings keys (prefixed schwab_)
+    # No dedicated table needed: access_token, refresh_token, expires_at, rt_expires_at
+    # are written via set_setting("schwab_*", ...) so the existing settings table suffices.
+    # This comment is the migration marker; no DDL required.
+
     # Seed default watchlists on first run (use cnt alias — works in both DBs)
     wl_count = cursor.execute(
         "SELECT COUNT(*) AS cnt FROM watchlists"
