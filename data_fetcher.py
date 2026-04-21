@@ -1399,6 +1399,8 @@ def compute_market_temperature() -> dict:
         "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
         "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
         "vix_level": None, "vix_direction": None,
+        "es_price": None, "es_change_pct": None, "es_above_vwap": None,
+        "sectors": {}, "mode_desc": "—",
     }
 
     try:
@@ -1421,6 +1423,12 @@ def compute_market_temperature() -> dict:
             ("vix_d", "^VIX", "1d", "1mo"),
             ("spy_h", "SPY",  "1h", "5d"),
             ("qqq_h", "QQQ",  "1h", "5d"),
+            ("es_d",  "ES=F", "1d", "5d"),
+            ("es_h",  "ES=F", "1h", "5d"),
+            ("xlk_d", "XLK",  "1d", "5d"),
+            ("xly_d", "XLY",  "1d", "5d"),
+            ("xlf_d", "XLF",  "1d", "5d"),
+            ("xle_d", "XLE",  "1d", "5d"),
         ]
         _threads = [_thr.Thread(target=_fetch, args=a, daemon=True) for a in _tasks]
         for _t in _threads:
@@ -1433,6 +1441,8 @@ def compute_market_temperature() -> dict:
         vix_d = _results.get("vix_d")
         spy_h = _results.get("spy_h")
         qqq_h = _results.get("qqq_h")
+        es_d  = _results.get("es_d")
+        es_h  = _results.get("es_h")
 
         if not spy_d or not qqq_d:
             return {**_UNKNOWN, "reason": "SPY/QQQ data unavailable"}
@@ -1503,6 +1513,33 @@ def compute_market_temperature() -> dict:
         spy_vs_vwap = (spy_price - spy_vwap) / spy_vwap * 100 if spy_vwap else None
         qqq_vs_vwap = (qqq_price - qqq_vwap) / qqq_vwap * 100 if qqq_vwap else None
 
+        # ES futures
+        es_price = es_change_pct = es_above_vwap = None
+        if es_d and len(es_d.get("closes", [])) >= 2:
+            try:
+                _ep    = es_d["closes"][-1]
+                _eprev = es_d["closes"][-2]
+                _evwap = _today_vwap(es_h)
+                es_price      = _ep
+                es_change_pct = (_ep - _eprev) / _eprev * 100
+                es_above_vwap = bool(_ep > _evwap) if _evwap is not None else None
+            except Exception:
+                pass
+
+        # Sector ETF daily % changes
+        sectors: dict = {}
+        for _sk, _sn in [("xlk_d","XLK"),("xly_d","XLY"),("xlf_d","XLF"),("xle_d","XLE")]:
+            _sd = _results.get(_sk)
+            if _sd and len(_sd.get("closes", [])) >= 2:
+                try:
+                    _sp  = _sd["closes"][-1]
+                    _spp = _sd["closes"][-2]
+                    sectors[_sn] = round((_sp - _spp) / _spp * 100, 2)
+                except Exception:
+                    sectors[_sn] = None
+            else:
+                sectors[_sn] = None
+
         # ── Score ─────────────────────────────────────────────────────────────
         score   = 0
         factors = []
@@ -1565,30 +1602,59 @@ def compute_market_temperature() -> dict:
                 score += 1
                 vix_note += " ↓"
 
+        # ES futures contribution (primary driver)
+        if es_price is not None and es_change_pct is not None:
+            if es_change_pct > 0 and es_above_vwap:
+                score += 1
+                factors.append(f"ES +{es_change_pct:.1f}% above VWAP")
+            elif es_change_pct < 0 and es_above_vwap is False:
+                score -= 1
+                factors.append(f"ES {es_change_pct:.1f}% below VWAP")
+
+        # Sector strength contribution
+        _sector_vals = [v for v in sectors.values() if v is not None]
+        if _sector_vals:
+            _green = sum(1 for v in _sector_vals if v > 0)
+            if _green >= 3:
+                score += 1
+                _top = max(
+                    ((k, v) for k, v in sectors.items() if v is not None),
+                    key=lambda x: x[1],
+                )
+                factors.append(f"{_green}/4 sectors green, {_top[0]} leads")
+            elif _green <= 1:
+                score -= 1
+                factors.append("sectors mostly red")
+
         # ── Regime ────────────────────────────────────────────────────────────
         if vix_level is not None and vix_level > 35:
             regime, label, css = "NO_TRADE", "NO TRADE DAY", "mt-no-trade"
             longs_ok, shorts_ok, reduce_size = False, False, True
+            mode_desc = "Stay flat"
             reason_parts = ([vix_note] if vix_note else []) + [
                 f for f in factors if "-" in f or "below" in f or "down" in f
             ][:2]
         elif score >= 3:
-            regime, label, css = "RISK_ON", "RISK ON", "mt-risk-on"
+            regime, label, css = "RISK_ON", "ATTACK MODE", "mt-risk-on"
             longs_ok, shorts_ok, reduce_size = True, False, False
+            mode_desc = "Momentum trades allowed"
             reason_parts = [
                 f for f in factors if "+" in f or "above" in f or "up" in f
             ][:3] + ([vix_note] if vix_note else [])
         elif score >= 1:
             regime, label, css = "NEUTRAL", "NEUTRAL", "mt-neutral"
             longs_ok, shorts_ok, reduce_size = True, True, False
+            mode_desc = "Be selective"
             reason_parts = factors[:3] + ([vix_note] if vix_note else [])
         elif score >= -1:
             regime, label, css = "CAUTION", "CAUTION / CHOP", "mt-caution"
             longs_ok, shorts_ok, reduce_size = False, False, True
+            mode_desc = "Wait for clarity"
             reason_parts = factors[:3] + ([vix_note] if vix_note else [])
         else:
-            regime, label, css = "RISK_OFF", "RISK OFF", "mt-risk-off"
+            regime, label, css = "RISK_OFF", "DEFENSIVE MODE", "mt-risk-off"
             longs_ok, shorts_ok, reduce_size = False, True, True
+            mode_desc = "Reduce risk / wait"
             reason_parts = [
                 f for f in factors if "-" in f or "below" in f or "down" in f
             ][:3] + ([vix_note] if vix_note else [])
@@ -1604,6 +1670,7 @@ def compute_market_temperature() -> dict:
             "label":         label,
             "css":           css,
             "reason":        reason,
+            "mode_desc":     mode_desc,
             "longs_ok":      longs_ok,
             "shorts_ok":     shorts_ok,
             "reduce_size":   reduce_size,
@@ -1616,9 +1683,112 @@ def compute_market_temperature() -> dict:
             "qqq_vs_vwap":   round(qqq_vs_vwap, 2) if qqq_vs_vwap is not None else None,
             "vix_level":     round(vix_level, 1) if vix_level is not None else None,
             "vix_direction": vix_direction,
+            "es_price":      round(es_price, 2) if es_price is not None else None,
+            "es_change_pct": round(es_change_pct, 2) if es_change_pct is not None else None,
+            "es_above_vwap": es_above_vwap,
+            "sectors":       sectors,
             "error":         False,
         }
 
     except Exception as _e:
         logger.warning("compute_market_temperature failed: %s", _e)
         return {**_UNKNOWN, "reason": "Error computing market data"}
+
+
+def fetch_market_context() -> dict:
+    """
+    Lightweight fetch of ES futures + sector ETF data.
+    Cached externally (30 s). Returns data suitable for /api/market_context.
+    """
+    import threading as _thr
+
+    _results: dict = {}
+
+    def _fetch(key, ticker, interval, range_str):
+        try:
+            _results[key] = _fetch_ohlcv_via_chart_api(
+                ticker, interval=interval, range_str=range_str
+            )
+        except Exception:
+            _results[key] = None
+
+    _tasks = [
+        ("es_d",  "ES=F", "1d", "5d"),
+        ("es_h",  "ES=F", "1h", "5d"),
+        ("xlk_d", "XLK",  "1d", "5d"),
+        ("xly_d", "XLY",  "1d", "5d"),
+        ("xlf_d", "XLF",  "1d", "5d"),
+        ("xle_d", "XLE",  "1d", "5d"),
+    ]
+    _threads = [_thr.Thread(target=_fetch, args=a, daemon=True) for a in _tasks]
+    for _t in _threads:
+        _t.start()
+    for _t in _threads:
+        _t.join(timeout=15)
+
+    # ES futures
+    es: dict = {"price": None, "change_pct": None, "above_vwap": None, "error": True}
+    es_d = _results.get("es_d")
+    es_h = _results.get("es_h")
+    if es_d and len(es_d.get("closes", [])) >= 2:
+        try:
+            _ep    = es_d["closes"][-1]
+            _eprev = es_d["closes"][-2]
+            # Intraday VWAP using today's hourly bars
+            _evwap = None
+            if es_h and es_h.get("timestamps"):
+                try:
+                    import zoneinfo as _zi
+                    from datetime import timezone as _tz
+                    _today_et = _et_now().strftime("%Y-%m-%d")
+                    _bars = [
+                        (c, h, lo, v)
+                        for ts, _, c, h, lo, v in zip(
+                            es_h["timestamps"], es_h["opens"],
+                            es_h["closes"],     es_h["highs"],
+                            es_h["lows"],        es_h["volumes"],
+                        )
+                        if datetime.fromtimestamp(ts, tz=_tz.utc)
+                           .astimezone(_zi.ZoneInfo("America/New_York"))
+                           .strftime("%Y-%m-%d") == _today_et
+                    ]
+                    if _bars:
+                        _tpv = sum((h + lo + c) / 3.0 * v for c, h, lo, v in _bars)
+                        _tv  = sum(v for _, _, _, v in _bars)
+                        if _tv > 0:
+                            _evwap = _tpv / _tv
+                except Exception:
+                    pass
+            es = {
+                "price":      round(_ep, 2),
+                "change_pct": round((_ep - _eprev) / _eprev * 100, 2),
+                "above_vwap": (bool(_ep > _evwap) if _evwap is not None else None),
+                "error":      False,
+            }
+        except Exception:
+            pass
+
+    # Sector ETFs
+    sectors: dict = {}
+    for key, name in [("xlk_d","XLK"),("xly_d","XLY"),("xlf_d","XLF"),("xle_d","XLE")]:
+        d = _results.get(key)
+        if d and len(d.get("closes", [])) >= 2:
+            try:
+                _p  = d["closes"][-1]
+                _pp = d["closes"][-2]
+                sectors[name] = round((_p - _pp) / _pp * 100, 2)
+            except Exception:
+                sectors[name] = None
+        else:
+            sectors[name] = None
+
+    # After-hours flag (rough ET check — 9:30–16:00 = regular session)
+    after_hours = True
+    try:
+        _now_et = _et_now()
+        _mins   = _now_et.hour * 60 + _now_et.minute
+        after_hours = not (570 <= _mins < 960)   # 9:30–16:00
+    except Exception:
+        pass
+
+    return {"es": es, "sectors": sectors, "after_hours": after_hours}

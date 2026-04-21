@@ -68,13 +68,29 @@
 </section>
 
 <!-- ===== MARKET TEMPERATURE PANEL ===== -->
-<section class="mt-panel mt-panel-{{ market_temp.css }}">
+<section class="mt-panel mt-panel-{{ market_temp.css }}" id="mt-panel">
   <div class="mt-header">
-    <span class="mt-badge {{ market_temp.css }}">{{ market_temp.label }}</span>
-    <span class="mt-reason">{{ market_temp.reason or '—' }}</span>
+    <span class="mt-badge {{ market_temp.css }}" id="mt-badge">{{ market_temp.label }}</span>
+    <span class="mt-mode-desc" id="mt-mode-desc">{{ market_temp.mode_desc or '' }}</span>
+    <span class="mt-reason" id="mt-reason">{{ market_temp.reason or '—' }}</span>
   </div>
   <div class="mt-body">
     <div class="mt-indicators">
+      <!-- ES Futures (primary driver) -->
+      <div class="mt-ind" id="mt-es-ind">
+        <span class="mt-ind-lbl">ES</span>
+        {% if market_temp.es_price %}
+        <span class="mt-ind-val" id="mt-es-price">{{ "%.0f"|format(market_temp.es_price) }}</span>
+        {% if market_temp.es_change_pct is not none %}
+        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.es_change_pct >= 0 else 'mt-neg' }}" id="mt-es-chg">{{ '+' if market_temp.es_change_pct >= 0 else '' }}{{ "%.2f"|format(market_temp.es_change_pct) }}%</span>
+        {% endif %}
+        {% if market_temp.es_above_vwap is not none %}
+        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.es_above_vwap else 'mt-neg' }}" id="mt-es-vwap">{{ 'Above VWAP' if market_temp.es_above_vwap else 'Below VWAP' }}</span>
+        {% endif %}
+        {% else %}
+        <span class="mt-ind-stat" id="mt-es-price" style="color:var(--text-muted)">unavailable</span>
+        {% endif %}
+      </div>
       {% if market_temp.spy_price %}
       <div class="mt-ind">
         <span class="mt-ind-lbl">SPY</span>
@@ -111,6 +127,28 @@
       <span class="mt-sig {{ 'mt-sig-ok' if market_temp.shorts_ok == true else ('mt-sig-no' if market_temp.shorts_ok == false else 'mt-sig-na') }}">Shorts {{ '✓' if market_temp.shorts_ok == true else ('✗' if market_temp.shorts_ok == false else '—') }}</span>
       {% if market_temp.reduce_size %}<span class="mt-sig mt-sig-warn">Reduce Size</span>{% endif %}
     </div>
+  </div>
+  <!-- Sector strength strip -->
+  <div class="mt-sectors" id="mt-sectors">
+    {% set sector_vals = market_temp.sectors %}
+    {% if sector_vals %}
+      {% set strongest = namespace(name='', val=-999) %}
+      {% for name, pct in sector_vals.items() %}
+        {% if pct is not none and pct > strongest.val %}
+          {% set strongest.name = name %}{% set strongest.val = pct %}
+        {% endif %}
+      {% endfor %}
+      <span class="mt-sectors-lbl">Sectors:</span>
+      {% for name, pct in sector_vals.items() %}
+        {% if pct is not none %}
+        <span class="mt-sector {{ 'mt-pos' if pct >= 0 else 'mt-neg' }}">{{ name }} {{ '+' if pct >= 0 else '' }}{{ "%.1f"|format(pct) }}%{% if name == strongest.name and pct > 0 %} 🔥{% endif %}</span>
+        {% else %}
+        <span class="mt-sector" style="color:var(--text-muted)">{{ name }} —</span>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <span class="mt-sectors-lbl" style="color:var(--text-muted)">Sectors loading…</span>
+    {% endif %}
   </div>
 </section>
 
@@ -905,6 +943,90 @@ async function dashboardRefresh() {
 }
 
 window._arRefreshFn = dashboardRefresh;
+
+// ── Market Context polling (ES futures + sectors, every 10 s) ────────────────
+(function () {
+  function _cls(pct) {
+    return pct >= 0 ? 'mt-pos' : 'mt-neg';
+  }
+  function _fmt(pct) {
+    return (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+  }
+  function _fmt1(pct) {
+    return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+  }
+
+  function updateMarketContext(data) {
+    // ES indicator
+    var es = data.es || {};
+    var esPrice = document.getElementById('mt-es-price');
+    var esChg   = document.getElementById('mt-es-chg');
+    var esVwap  = document.getElementById('mt-es-vwap');
+    if (esPrice) {
+      if (es.error || es.price == null) {
+        esPrice.textContent = 'unavailable';
+        esPrice.className   = 'mt-ind-stat';
+        if (esChg)  { esChg.textContent  = ''; }
+        if (esVwap) { esVwap.textContent = ''; }
+      } else {
+        esPrice.textContent = Math.round(es.price);
+        esPrice.className   = 'mt-ind-val';
+        if (esChg && es.change_pct != null) {
+          esChg.textContent = _fmt(es.change_pct);
+          esChg.className   = 'mt-ind-stat ' + _cls(es.change_pct);
+        }
+        if (esVwap && es.above_vwap != null) {
+          esVwap.textContent = es.above_vwap ? 'Above VWAP' : 'Below VWAP';
+          esVwap.className   = 'mt-ind-stat ' + (es.above_vwap ? 'mt-pos' : 'mt-neg');
+        }
+      }
+    }
+
+    // Sector strip
+    var sectors  = data.sectors || {};
+    var names    = ['XLK', 'XLY', 'XLF', 'XLE'];
+    var strip    = document.getElementById('mt-sectors');
+    if (strip) {
+      // Find strongest (highest positive)
+      var strongest = null, bestVal = -Infinity;
+      names.forEach(function(n) {
+        var v = sectors[n];
+        if (v != null && v > bestVal) { bestVal = v; strongest = n; }
+      });
+
+      var html = '<span class="mt-sectors-lbl">Sectors:</span>';
+      names.forEach(function(n) {
+        var v = sectors[n];
+        if (v == null) {
+          html += '<span class="mt-sector" style="color:var(--text-muted)">' + n + ' —</span>';
+        } else {
+          var cls  = _cls(v);
+          var fire = (n === strongest && v > 0) ? ' 🔥' : '';
+          html += '<span class="mt-sector ' + cls + '">' + n + ' ' + _fmt1(v) + fire + '</span>';
+        }
+      });
+      strip.innerHTML = html;
+    }
+
+    // After-hours label on ES indicator
+    var esInd = document.getElementById('mt-es-ind');
+    if (esInd && data.after_hours && es.price != null) {
+      var lbl = esInd.querySelector('.mt-ind-lbl');
+      if (lbl) lbl.title = 'After hours — futures active';
+    }
+  }
+
+  function pollMarketContext() {
+    fetch('/api/market_context')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) { if (d) updateMarketContext(d); })
+      .catch(function() {});
+  }
+
+  // Initial poll shortly after page load, then every 10 s
+  setTimeout(pollMarketContext, 2000);
+  setInterval(pollMarketContext, 10000);
+})();
 
 // ── Trading Mode switcher ──────────────────────────────────────────────────
 function setTradingMode(mode) {

@@ -2646,6 +2646,8 @@ def _get_market_temperature() -> dict:
         "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
         "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
         "vix_level": None, "vix_direction": None,
+        "es_price": None, "es_change_pct": None, "es_above_vwap": None,
+        "sectors": {}, "mode_desc": "—",
     }
     now = _time.time()
     if _market_temp_cache["ts"] and now - _market_temp_cache["ts"] < _MARKET_TEMP_TTL:
@@ -2679,6 +2681,45 @@ def _get_market_temperature() -> dict:
 
     threading.Thread(target=_bg, daemon=True).start()
     return _market_temp_cache["data"] or _LOADING
+
+
+# ── Market Context cache (ES futures + sectors, 30 s TTL) ────────────────────
+_market_ctx_cache: dict = {"data": None, "ts": 0.0}
+_market_ctx_lock  = threading.Lock()
+_MARKET_CTX_TTL   = 30   # 30-second refresh for live ES + sector display
+
+
+def _get_market_context() -> dict:
+    """Return cached ES + sector context; refresh in background when stale."""
+    _EMPTY = {
+        "es": {"price": None, "change_pct": None, "above_vwap": None, "error": True},
+        "sectors": {},
+        "after_hours": False,
+    }
+    now = _time.time()
+    if _market_ctx_cache["ts"] and now - _market_ctx_cache["ts"] < _MARKET_CTX_TTL:
+        return _market_ctx_cache["data"]
+
+    with _market_ctx_lock:
+        if _market_ctx_cache["ts"] and now - _market_ctx_cache["ts"] < _MARKET_CTX_TTL:
+            return _market_ctx_cache["data"]
+        if _market_ctx_cache.get("fetching"):
+            return _market_ctx_cache["data"] or _EMPTY
+        _market_ctx_cache["fetching"] = True
+
+    def _bg():
+        try:
+            from data_fetcher import fetch_market_context
+            data = fetch_market_context()
+            _market_ctx_cache["data"] = data
+            _market_ctx_cache["ts"]   = _time.time()
+        except Exception as _e:
+            logger.warning("_get_market_context bg failed: %s", _e)
+        finally:
+            _market_ctx_cache["fetching"] = False
+
+    threading.Thread(target=_bg, daemon=True).start()
+    return _market_ctx_cache["data"] or _EMPTY
 
 
 # ── Options contract server-side cache ───────────────────────────────────────
@@ -3502,6 +3543,16 @@ def api_dashboard():
     except Exception as exc:
         logger.error("api_dashboard failed: %s", exc, exc_info=True)
         return jsonify({"error": "dashboard refresh failed"}), 500
+
+
+@app.route("/api/market_context")
+def api_market_context():
+    """ES futures + sector ETF data for live gauge updates. Cached 30 s."""
+    try:
+        return jsonify(_get_market_context())
+    except Exception as exc:
+        logger.error("api_market_context failed: %s", exc, exc_info=True)
+        return jsonify({"error": "market context unavailable"}), 500
 
 
 @app.route("/api/stock/<ticker>/live")

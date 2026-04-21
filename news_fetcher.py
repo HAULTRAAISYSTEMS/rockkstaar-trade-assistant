@@ -369,8 +369,11 @@ def _try_polygon(ticker: str) -> CatalystNews | None:
         freshness = None
         pu = results[0].get("published_utc") if results else None
         if pu:
-            dt = datetime.fromisoformat(pu.replace("Z", "+00:00"))
-            freshness = _minutes_ago(dt)
+            try:
+                dt = datetime.fromisoformat(pu.replace("Z", "+00:00"))
+                freshness = _minutes_ago(dt)
+            except Exception as _date_exc:
+                logger.warning("Polygon  ticker=%s  bad published_utc format=%s: %s", ticker, pu, _date_exc)
         cats = parse_catalyst_categories(headlines)
         logger.info("Polygon  ticker=%s  headlines=%d  categories=%s", ticker, len(headlines), cats)
         return CatalystNews(
@@ -496,7 +499,8 @@ def needs_refresh(headlines_fetched_at: str | None) -> bool:
         return True
     try:
         fetched = datetime.fromisoformat(headlines_fetched_at)
-        age_min = (datetime.now() - fetched).total_seconds() / 60
+        now = datetime.now(fetched.tzinfo) if fetched.tzinfo else datetime.now()
+        age_min = (now - fetched).total_seconds() / 60
         return age_min >= HEADLINE_REFRESH_MINUTES
     except Exception:
         return True
