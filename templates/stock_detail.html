@@ -111,19 +111,17 @@
   </div>
 
   <!-- ===== TRADE COACH ===== -->
-  <div class="detail-card coach-card {{ coach.css }}">
+  <div id="detail-coach-card" class="detail-card coach-card {{ coach.css }}">
     <h3 class="card-title">
       AI Trade Coach
-      <span class="coach-level-badge coach-badge-{{ coach.level }}">{{ coach.coach_status }}</span>
+      <span id="detail-coach-badge" class="coach-level-badge coach-badge-{{ coach.level }}">{{ coach.coach_status }}</span>
     </h3>
-    <div class="coach-message {{ coach.css }}">{{ coach.message }}</div>
-    {% if coach.signals %}
-    <div class="coach-signals">
+    <div id="detail-coach-msg" class="coach-message {{ coach.css }}">{{ coach.message }}</div>
+    <div id="detail-coach-signals" class="coach-signals">
       {% for sig in coach.signals %}
       <span class="coach-signal-chip">{{ sig }}</span>
       {% endfor %}
     </div>
-    {% endif %}
   </div>
 
   <!-- ===== SWING TRADE PLAN ===== -->
@@ -1110,44 +1108,70 @@ function calcOptionsRisk() {
 const DETAIL_TICKER = "{{ stock.ticker }}";
 
 async function stockDetailRefresh() {
+  const url = `/api/stock/${DETAIL_TICKER}/live`;
+  console.debug('[detail] Polling', url);
   try {
-    const resp = await fetch(`/api/stock/${DETAIL_TICKER}/live`);
-    if (!resp.ok) return false;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.warn('[detail] Endpoint returned HTTP', resp.status, '— will retry next cycle');
+      return false;
+    }
     const s = await resp.json();
+    if (s.error) {
+      console.warn('[detail] API returned error:', s.error);
+      return false;
+    }
+    console.debug('[detail] Data received — price:', s.current_price, 'swing:', s.swing_score, 'cat:', s.catalyst_score);
 
+    // ── Status badges ───────────────────────────────────────────────────────
     const sfaBadge = document.getElementById('detail-sfa-badge');
     if (sfaBadge && s.simplified_action) {
-      sfaBadge.className  = 'exec-badge exec-badge-xl ' + (s.simplified_action_class || '');
+      sfaBadge.className   = 'exec-badge exec-badge-xl ' + (s.simplified_action_class || '');
       sfaBadge.textContent = s.simplified_action;
       sfaBadge.title       = s.final_action || '';
     }
 
     const execBadge = document.getElementById('detail-exec-badge');
-    if (execBadge) { execBadge.className = 'exec-badge exec-badge-lg ' + s.exec_class; execBadge.textContent = s.final_action || 'WAIT'; }
-
-    const biasTag = document.getElementById('detail-bias-tag');
-    if (biasTag) { biasTag.className = 'bias-tag ' + s.bias_class + ' bias-large'; biasTag.textContent = s.trade_bias; }
-
-    const setupPill = document.getElementById('detail-setup-pill');
-    if (setupPill && s.swing_setup_type) { setupPill.textContent = s.swing_setup_type; }
-
-    const el = document.getElementById('detail-last-updated');
-    if (el && s.last_updated) {
-      // Show only the time portion: "2026-04-18 08:05 PM" → "8:05 PM"
-      const parts = s.last_updated.split(' ');
-      el.textContent = parts.length >= 3 ? (parts[1] + ' ' + parts[2]).replace(/^0/, '') : s.last_updated;
+    if (execBadge) {
+      execBadge.className   = 'exec-badge exec-badge-lg ' + (s.exec_class || '');
+      execBadge.textContent = s.final_action || 'WAIT';
     }
 
+    const biasTag = document.getElementById('detail-bias-tag');
+    if (biasTag && s.trade_bias) {
+      biasTag.className   = 'bias-tag ' + (s.bias_class || '') + ' bias-large';
+      biasTag.textContent = s.trade_bias;
+    }
+
+    const setupPill = document.getElementById('detail-setup-pill');
+    if (setupPill && s.swing_setup_type) {
+      setupPill.className   = 'setup-pill ' + (s.swing_setup_type_class || '') + ' setup-pill-lg';
+      setupPill.textContent = s.swing_setup_type;
+    }
+
+    const permBadge = document.getElementById('detail-perm-badge');
+    if (permBadge && s.trade_permission) {
+      permBadge.className   = 'perm-badge perm-badge-lg ' + (s.trade_permission.css || '');
+      permBadge.textContent = s.trade_permission.permission || '';
+      permBadge.title       = s.trade_permission.reason || '';
+    }
+
+    // ── Scores ──────────────────────────────────────────────────────────────
     const swingScore = document.getElementById('detail-swing-score');
     if (swingScore && s.swing_score != null) swingScore.textContent = s.swing_score;
 
-    if (s.catalyst_score != null) {
-      const catEl = document.getElementById('detail-cat-score');
-      if (catEl) catEl.textContent = s.catalyst_score;
-    }
+    const catEl = document.getElementById('detail-cat-score');
+    if (catEl && s.catalyst_score != null) catEl.textContent = s.catalyst_score;
+
+    // ── Price / market data ──────────────────────────────────────────────────
+    const priceEl = document.getElementById('detail-cur-price');
+    if (priceEl && s.current_price != null) priceEl.textContent = '$' + s.current_price.toFixed(2);
 
     const gapEl = document.getElementById('detail-gap');
-    if (gapEl && s.gap_display) { gapEl.className = 'score-big ' + s.gap_class; gapEl.textContent = s.gap_display; }
+    if (gapEl && s.gap_display) {
+      gapEl.className   = 'score-big ' + (s.gap_class || '');
+      gapEl.textContent = s.gap_display;
+    }
 
     const rvolEl = document.getElementById('detail-rvol');
     if (rvolEl && s.rel_volume != null) {
@@ -1155,27 +1179,69 @@ async function stockDetailRefresh() {
       rvolEl.innerHTML = s.rel_volume.toFixed(1) + '<span class="score-denom">x</span>';
     }
 
-    const priceEl = document.getElementById('detail-cur-price');
-    if (priceEl && s.current_price != null) priceEl.textContent = '$' + s.current_price.toFixed(2);
-
-    if (s.headline_freshness) {
-      document.querySelectorAll('.headline-freshness-badge').forEach(e => { e.textContent = s.headline_freshness; });
+    // ── Timestamps ──────────────────────────────────────────────────────────
+    const lastEl = document.getElementById('detail-last-updated');
+    if (lastEl && s.last_updated) {
+      const parts = s.last_updated.split(' ');
+      lastEl.textContent = parts.length >= 3
+        ? (parts[1] + ' ' + parts[2]).replace(/^0/, '')
+        : s.last_updated;
     }
 
-    // Use server ET time if available, else format browser time as ET
+    if (s.headline_freshness) {
+      document.querySelectorAll('.headline-freshness-badge').forEach(e => {
+        e.textContent = s.headline_freshness;
+      });
+    }
+
+    // ── Coach card ──────────────────────────────────────────────────────────
+    const c = s.coach;
+    if (c) {
+      const coachCard = document.getElementById('detail-coach-card');
+      if (coachCard) coachCard.className = 'detail-card coach-card ' + (c.css || '');
+
+      const coachBadge = document.getElementById('detail-coach-badge');
+      if (coachBadge) {
+        coachBadge.className   = 'coach-level-badge coach-badge-' + (c.level || '');
+        coachBadge.textContent = c.coach_status || '';
+      }
+
+      const coachMsg = document.getElementById('detail-coach-msg');
+      if (coachMsg) {
+        coachMsg.className   = 'coach-message ' + (c.css || '');
+        coachMsg.textContent = c.message || '';
+      }
+
+      const coachSigs = document.getElementById('detail-coach-signals');
+      if (coachSigs && c.signals) {
+        coachSigs.textContent = '';
+        c.signals.forEach(function(sig) {
+          const chip = document.createElement('span');
+          chip.className   = 'coach-signal-chip';
+          chip.textContent = sig;
+          coachSigs.appendChild(chip);
+        });
+      }
+    }
+
+    // ── Finish ──────────────────────────────────────────────────────────────
     const displayTime = s.server_time || new Date().toLocaleTimeString(
-      "en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }
+      'en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }
     );
     window._arSetLastUpdated(displayTime);
+    console.debug('[detail] DOM patch complete —', displayTime);
     return true;
 
   } catch(e) {
-    console.warn('[detail] Live refresh error:', e);
+    console.warn('[detail] Live refresh exception (will retry):', e);
     return false;
   }
 }
 
 window._arRefreshFn = stockDetailRefresh;
+console.log('[detail] Auto-refresh armed for', DETAIL_TICKER,
+            '— interval', window._arInterval / 1000 + 's',
+            '| AR enabled:', window._arEnabled);
 </script>
 
 <script>

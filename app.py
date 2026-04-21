@@ -3683,6 +3683,8 @@ def _stock_summary(s: dict) -> dict:
         "stop_level", "target_1", "target_2",
         "daily_trend", "h4_trend",
         "is_extended", "swing_data_available",
+        # Needed for live badge patching on the detail page
+        "trade_permission",
     ]
     return {f: s.get(f) for f in fields}
 
@@ -3773,6 +3775,14 @@ def api_stock_live(ticker):
     annotate(stock)
     result = _stock_summary(stock)
     result["server_time"] = _et_now().strftime("%I:%M %p").lstrip("0") + " ET"
+    # Include coach so the detail page can patch the coach card on every poll
+    try:
+        _plan = get_trade_plan(ticker)
+        _mt   = _get_market_temperature()
+        _rs   = get_risk_settings()
+        result["coach"] = compute_trade_coach(stock, _plan, _mt, _rs)
+    except Exception as _ce:
+        logger.warning("api_stock_live coach failed for %s: %s", ticker, _ce)
     return jsonify(result)
 
 
