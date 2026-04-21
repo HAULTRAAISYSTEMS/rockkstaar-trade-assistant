@@ -69,66 +69,102 @@
 
 <!-- ===== MARKET TEMPERATURE PANEL ===== -->
 <section class="mt-panel mt-panel-{{ market_temp.css }}" id="mt-panel">
-  <div class="mt-header">
-    <span class="mt-badge {{ market_temp.css }}" id="mt-badge">{{ market_temp.label }}</span>
-    <span class="mt-mode-desc" id="mt-mode-desc">{{ market_temp.mode_desc or '' }}</span>
-    <span class="mt-reason" id="mt-reason">{{ market_temp.reason or '—' }}</span>
+
+  <!-- Row 1: mode badge · description · score number -->
+  <div class="mt-top">
+    <div class="mt-top-left">
+      <span class="mt-badge {{ market_temp.css }}" id="mt-badge">{{ market_temp.label }}</span>
+      <span class="mt-action">{{ market_temp.mode_desc or market_temp.action_msg or '—' }}</span>
+    </div>
+    {% if market_temp.meter_score is not none %}
+    <div class="mt-score-wrap">
+      <span class="mt-score-num {{ market_temp.css }}">{{ market_temp.meter_score }}</span>
+      <span class="mt-score-den">/100</span>
+    </div>
+    {% endif %}
   </div>
-  <div class="mt-body">
-    <div class="mt-indicators">
-      <!-- ES Futures (primary driver) -->
-      <div class="mt-ind" id="mt-es-ind">
-        <span class="mt-ind-lbl">ES</span>
-        {% if market_temp.es_price %}
-        <span class="mt-ind-val" id="mt-es-price">{{ "%.0f"|format(market_temp.es_price) }}</span>
-        {% if market_temp.es_change_pct is not none %}
-        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.es_change_pct >= 0 else 'mt-neg' }}" id="mt-es-chg">{{ '+' if market_temp.es_change_pct >= 0 else '' }}{{ "%.2f"|format(market_temp.es_change_pct) }}%</span>
-        {% endif %}
-        {% if market_temp.es_above_vwap is not none %}
-        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.es_above_vwap else 'mt-neg' }}" id="mt-es-vwap">{{ 'Above VWAP' if market_temp.es_above_vwap else 'Below VWAP' }}</span>
-        {% endif %}
-        {% else %}
-        <span class="mt-ind-stat" id="mt-es-price" style="color:var(--text-muted)">unavailable</span>
-        {% endif %}
-      </div>
-      {% if market_temp.spy_price %}
-      <div class="mt-ind">
-        <span class="mt-ind-lbl">SPY</span>
-        <span class="mt-ind-val">${{ "%.0f"|format(market_temp.spy_price) }}</span>
-        {% if market_temp.spy_pct_ema20 is not none %}
-        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.spy_pct_ema20 >= 0 else 'mt-neg' }}">EMA20 {{ '+' if market_temp.spy_pct_ema20 >= 0 else '' }}{{ "%.1f"|format(market_temp.spy_pct_ema20) }}%</span>
-        {% endif %}
-        {% if market_temp.spy_vs_vwap is not none %}
-        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.spy_vs_vwap >= 0 else 'mt-neg' }}">VWAP {{ '+' if market_temp.spy_vs_vwap >= 0 else '' }}{{ "%.1f"|format(market_temp.spy_vs_vwap) }}%</span>
-        {% endif %}
-      </div>
+
+  <!-- Row 2: horizontal gauge bar -->
+  {% if market_temp.meter_score is not none %}
+  <div class="mt-gauge-wrap">
+    <div class="mt-pointer-row">
+      <div class="mt-pointer" style="left:{{ market_temp.meter_score }}%">▼</div>
+    </div>
+    <div class="mt-track">
+      <div class="mt-tick" style="left:20%"></div>
+      <div class="mt-tick" style="left:40%"></div>
+      <div class="mt-tick" style="left:60%"></div>
+      <div class="mt-tick" style="left:80%"></div>
+    </div>
+    <div class="mt-zones">
+      <span style="left:10%">Ext. Off</span>
+      <span style="left:30%">Risk Off</span>
+      <span style="left:50%">Neutral</span>
+      <span style="left:70%">Risk On</span>
+      <span style="left:90%">Ext. On</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Row 3: reason one-liner (technical factors) -->
+  {% if market_temp.reason %}
+  <div class="mt-reason" id="mt-reason">{{ market_temp.reason }}</div>
+  {% endif %}
+
+  <!-- Row 4: compact context strip — ES · SPY · QQQ · VIX -->
+  <div class="mt-stats">
+    <div class="mt-stat-block" id="mt-es-ind">
+      <span class="mt-stat-lbl">ES</span>
+      {% if market_temp.es_price %}
+      <span class="mt-stat-val" id="mt-es-price">{{ "%.0f"|format(market_temp.es_price) }}</span>
+      {% if market_temp.es_change_pct is not none %}
+      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.es_change_pct >= 0 else 'mt-neg' }}" id="mt-es-chg">{{ '+' if market_temp.es_change_pct >= 0 else '' }}{{ "%.2f"|format(market_temp.es_change_pct) }}%</span>
       {% endif %}
-      {% if market_temp.qqq_price %}
-      <div class="mt-ind">
-        <span class="mt-ind-lbl">QQQ</span>
-        <span class="mt-ind-val">${{ "%.0f"|format(market_temp.qqq_price) }}</span>
-        {% if market_temp.qqq_pct_ema20 is not none %}
-        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.qqq_pct_ema20 >= 0 else 'mt-neg' }}">EMA20 {{ '+' if market_temp.qqq_pct_ema20 >= 0 else '' }}{{ "%.1f"|format(market_temp.qqq_pct_ema20) }}%</span>
-        {% endif %}
-        {% if market_temp.qqq_vs_vwap is not none %}
-        <span class="mt-ind-stat {{ 'mt-pos' if market_temp.qqq_vs_vwap >= 0 else 'mt-neg' }}">VWAP {{ '+' if market_temp.qqq_vs_vwap >= 0 else '' }}{{ "%.1f"|format(market_temp.qqq_vs_vwap) }}%</span>
-        {% endif %}
-      </div>
+      {% if market_temp.es_above_vwap is not none %}
+      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.es_above_vwap else 'mt-neg' }}" id="mt-es-vwap">{{ '↑ VWAP' if market_temp.es_above_vwap else '↓ VWAP' }}</span>
       {% endif %}
-      {% if market_temp.vix_level %}
-      <div class="mt-ind">
-        <span class="mt-ind-lbl">VIX</span>
-        <span class="mt-ind-val {{ 'mt-neg' if market_temp.vix_level > 25 else ('mt-warn' if market_temp.vix_level > 18 else 'mt-pos') }}">{{ "%.1f"|format(market_temp.vix_level) }}{% if market_temp.vix_direction == 'rising' %} ↑{% elif market_temp.vix_direction == 'falling' %} ↓{% endif %}</span>
-      </div>
+      {% else %}
+      <span class="mt-stat-tag mt-stat-val" id="mt-es-price" style="color:var(--text-muted)">—</span>
       {% endif %}
     </div>
-    <div class="mt-signals">
+    {% if market_temp.spy_price %}
+    <div class="mt-stat-block">
+      <span class="mt-stat-lbl">SPY</span>
+      <span class="mt-stat-val">${{ "%.0f"|format(market_temp.spy_price) }}</span>
+      {% if market_temp.spy_pct_ema20 is not none %}
+      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.spy_pct_ema20 >= 0 else 'mt-neg' }}">EMA {{ '+' if market_temp.spy_pct_ema20 >= 0 else '' }}{{ "%.1f"|format(market_temp.spy_pct_ema20) }}%</span>
+      {% endif %}
+      {% if market_temp.spy_vs_vwap is not none %}
+      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.spy_vs_vwap >= 0 else 'mt-neg' }}">VWAP {{ '+' if market_temp.spy_vs_vwap >= 0 else '' }}{{ "%.1f"|format(market_temp.spy_vs_vwap) }}%</span>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if market_temp.qqq_price %}
+    <div class="mt-stat-block">
+      <span class="mt-stat-lbl">QQQ</span>
+      <span class="mt-stat-val">${{ "%.0f"|format(market_temp.qqq_price) }}</span>
+      {% if market_temp.qqq_pct_ema20 is not none %}
+      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.qqq_pct_ema20 >= 0 else 'mt-neg' }}">EMA {{ '+' if market_temp.qqq_pct_ema20 >= 0 else '' }}{{ "%.1f"|format(market_temp.qqq_pct_ema20) }}%</span>
+      {% endif %}
+      {% if market_temp.qqq_vs_vwap is not none %}
+      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.qqq_vs_vwap >= 0 else 'mt-neg' }}">VWAP {{ '+' if market_temp.qqq_vs_vwap >= 0 else '' }}{{ "%.1f"|format(market_temp.qqq_vs_vwap) }}%</span>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if market_temp.vix_level %}
+    <div class="mt-stat-block">
+      <span class="mt-stat-lbl">VIX</span>
+      <span class="mt-stat-val {{ 'mt-neg' if market_temp.vix_level > 25 else ('mt-warn' if market_temp.vix_level > 18 else 'mt-pos') }}">{{ "%.1f"|format(market_temp.vix_level) }}{% if market_temp.vix_direction == 'rising' %} ↑{% elif market_temp.vix_direction == 'falling' %} ↓{% endif %}</span>
+    </div>
+    {% endif %}
+    <div class="mt-stat-sigs">
       <span class="mt-sig {{ 'mt-sig-ok' if market_temp.longs_ok == true else ('mt-sig-no' if market_temp.longs_ok == false else 'mt-sig-na') }}">Longs {{ '✓' if market_temp.longs_ok == true else ('✗' if market_temp.longs_ok == false else '—') }}</span>
       <span class="mt-sig {{ 'mt-sig-ok' if market_temp.shorts_ok == true else ('mt-sig-no' if market_temp.shorts_ok == false else 'mt-sig-na') }}">Shorts {{ '✓' if market_temp.shorts_ok == true else ('✗' if market_temp.shorts_ok == false else '—') }}</span>
       {% if market_temp.reduce_size %}<span class="mt-sig mt-sig-warn">Reduce Size</span>{% endif %}
     </div>
   </div>
-  <!-- Sector strength strip -->
+
+  <!-- Row 5: sector strength strip -->
   <div class="mt-sectors" id="mt-sectors">
     {% set sector_vals = market_temp.sectors %}
     {% if sector_vals %}
@@ -150,7 +186,10 @@
       <span class="mt-sectors-lbl" style="color:var(--text-muted)">Sectors loading…</span>
     {% endif %}
   </div>
+
 </section>
+
+
 
 <!-- ===== DAILY DISCIPLINE BANNER ===== -->
 <div class="daily-banner banner-{{ daily_banner.type }} {{ daily_banner.css }}" id="daily-banner">
@@ -968,20 +1007,20 @@ window._arRefreshFn = dashboardRefresh;
     var esVwap  = document.getElementById('mt-es-vwap');
     if (esPrice) {
       if (es.error || es.price == null) {
-        esPrice.textContent = 'unavailable';
-        esPrice.className   = 'mt-ind-stat';
+        esPrice.textContent = '—';
+        esPrice.className   = 'mt-stat-tag';
         if (esChg)  { esChg.textContent  = ''; }
         if (esVwap) { esVwap.textContent = ''; }
       } else {
         esPrice.textContent = Math.round(es.price);
-        esPrice.className   = 'mt-ind-val';
+        esPrice.className   = 'mt-stat-val';
         if (esChg && es.change_pct != null) {
           esChg.textContent = _fmt(es.change_pct);
-          esChg.className   = 'mt-ind-stat ' + _cls(es.change_pct);
+          esChg.className   = 'mt-stat-tag ' + _cls(es.change_pct);
         }
         if (esVwap && es.above_vwap != null) {
-          esVwap.textContent = es.above_vwap ? 'Above VWAP' : 'Below VWAP';
-          esVwap.className   = 'mt-ind-stat ' + (es.above_vwap ? 'mt-pos' : 'mt-neg');
+          esVwap.textContent = es.above_vwap ? '↑ VWAP' : '↓ VWAP';
+          esVwap.className   = 'mt-stat-tag ' + (es.above_vwap ? 'mt-pos' : 'mt-neg');
         }
       }
     }
@@ -1015,7 +1054,7 @@ window._arRefreshFn = dashboardRefresh;
     // After-hours label on ES indicator
     var esInd = document.getElementById('mt-es-ind');
     if (esInd && data.after_hours && es.price != null) {
-      var lbl = esInd.querySelector('.mt-ind-lbl');
+      var lbl = esInd.querySelector('.mt-stat-lbl');
       if (lbl) lbl.title = 'After hours — futures active';
     }
   }
