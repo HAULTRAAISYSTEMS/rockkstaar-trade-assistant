@@ -1394,13 +1394,16 @@ def compute_market_temperature() -> dict:
     """
     _UNKNOWN: dict = {
         "regime": "UNKNOWN", "label": "Unknown", "css": "mt-unknown",
-        "reason": "Market data unavailable", "longs_ok": None, "shorts_ok": None,
-        "reduce_size": False, "score": None, "error": True,
+        "reason": "Market data unavailable", "action_msg": "—",
+        "longs_ok": None, "shorts_ok": None, "reduce_size": False,
+        "score": None, "meter_score": 50, "error": True,
         "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
         "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
         "vix_level": None, "vix_direction": None,
         "es_price": None, "es_change_pct": None, "es_above_vwap": None,
         "sectors": {}, "mode_desc": "—",
+        "action_msg": "—", "decision_cmd": "—", "risk_pct_rec": None,
+        "size_multiplier": None, "size_zone": "unknown", "why": "Market data unavailable.",
     }
 
     try:
@@ -1661,33 +1664,141 @@ def compute_market_temperature() -> dict:
 
         reason = " · ".join(p for p in reason_parts if p)
 
+        # ── Meter score: map raw score [-8, +6] → [0, 100] ──────────────────
+        # Clamp to [-8, +6] (14-point range), then scale linearly.
+        # NO_TRADE forces the needle to the far-left extreme.
+        if regime == "NO_TRADE":
+            meter_score = 3
+        else:
+            _clamped    = max(-8, min(6, score))
+            meter_score = int(round((_clamped + 8) / 14 * 100))
+            meter_score = max(0, min(100, meter_score))
+
+        # ── Action message ────────────────────────────────────────────────────
+        _action_map = {
+            "NO_TRADE": "No-trade conditions",
+            "RISK_OFF":  "Shorts favored",
+            "CAUTION":   "Avoid chasing — wait for clarity",
+            "NEUTRAL":   "Selective — trade both sides carefully",
+            "RISK_ON":   "Longs favored",
+        }
+        action_msg = _action_map.get(regime, "—")
+
+        # ── Decision engine: zone from meter_score ────────────────────────────
+        # 0-20 = Extreme Risk Off, 21-40 = Risk Off, 41-60 = Neutral,
+        # 61-80 = Risk On, 81-100 = Extreme Risk On
+        if meter_score <= 20:
+            decision_cmd   = "DEFENSE MODE — Protect capital, avoid trades"
+            risk_pct_rec   = 3
+            size_multiplier = 0.25
+            size_zone      = "extreme-off"
+        elif meter_score <= 40:
+            decision_cmd   = "CAUTION — Only A+ setups, reduce size"
+            risk_pct_rec   = 5
+            size_multiplier = 0.5
+            size_zone      = "risk-off"
+        elif meter_score <= 60:
+            decision_cmd   = "SELECTIVE — Trade carefully, no chasing"
+            risk_pct_rec   = 7
+            size_multiplier = 0.8
+            size_zone      = "neutral"
+        elif meter_score <= 80:
+            decision_cmd   = "STANDARD MODE — Normal trading allowed"
+            risk_pct_rec   = 10
+            size_multiplier = 1.0
+            size_zone      = "risk-on"
+        else:
+            decision_cmd   = "ATTACK MODE — Momentum trades allowed"
+            risk_pct_rec   = 15
+            size_multiplier = 1.25
+            size_zone      = "extreme-on"
+
+        # ── Why: short human-readable one-liner from actual data ─────────────
+        _why_parts = []
+        _vwap_bullish = (
+            (spy_vs_vwap is not None and spy_vs_vwap > 0) and
+            (qqq_vs_vwap is not None and qqq_vs_vwap > 0)
+        )
+        _vwap_bearish = (
+            (spy_vs_vwap is not None and spy_vs_vwap < 0) and
+            (qqq_vs_vwap is not None and qqq_vs_vwap < 0)
+        )
+        _ema_bullish = spy_pct_ema20 > 0 and qqq_pct_ema20 > 0
+        _ema_bearish = spy_pct_ema20 < 0 and qqq_pct_ema20 < 0
+
+        if _vwap_bullish:
+            _why_parts.append("SPY & QQQ above VWAP")
+        elif _vwap_bearish:
+            _why_parts.append("SPY & QQQ below VWAP")
+        elif spy_vs_vwap is None:
+            if _ema_bullish:
+                _why_parts.append("SPY & QQQ above EMA20")
+            elif _ema_bearish:
+                _why_parts.append("SPY & QQQ below EMA20")
+
+        if spy_vs_vwap is not None and _ema_bullish:
+            _why_parts.append("above EMA20")
+        elif spy_vs_vwap is not None and _ema_bearish:
+            _why_parts.append("below EMA20")
+
+        if vix_level is not None:
+            if vix_level < 15:
+                _why_parts.append(f"VIX {vix_level:.0f} (very low)")
+            elif vix_level < 20:
+                _why_parts.append(f"VIX {vix_level:.0f} (calm)")
+            elif vix_level < 25:
+                _why_parts.append(f"VIX {vix_level:.0f} (elevated)")
+            else:
+                _dir = f" {vix_direction}" if vix_direction else ""
+                _why_parts.append(f"VIX {vix_level:.0f}{_dir} (high risk)")
+
+        if meter_score <= 20:
+            _why_suffix = "extreme risk-off conditions"
+        elif meter_score <= 40:
+            _why_suffix = "bearish conditions"
+        elif meter_score <= 60:
+            _why_suffix = "mixed/choppy conditions"
+        elif meter_score <= 80:
+            _why_suffix = "bullish conditions"
+        else:
+            _why_suffix = "strongly bullish conditions"
+
+        why = (", ".join(_why_parts) + f" → {_why_suffix}") if _why_parts else f"Score {meter_score}/100 — {_why_suffix}"
+
         logger.info(
-            "compute_market_temperature  regime=%s  score=%s  vix=%.1f  reason=%s",
-            regime, score, vix_level or 0, reason,
+            "compute_market_temperature  regime=%s  score=%s  meter=%s  zone=%s  vix=%.1f  reason=%s",
+            regime, score, meter_score, size_zone, vix_level or 0, reason,
         )
         return {
-            "regime":        regime,
-            "label":         label,
-            "css":           css,
-            "reason":        reason,
-            "mode_desc":     mode_desc,
-            "longs_ok":      longs_ok,
-            "shorts_ok":     shorts_ok,
-            "reduce_size":   reduce_size,
-            "score":         score,
-            "spy_price":     round(spy_price, 2),
-            "spy_pct_ema20": round(spy_pct_ema20, 2),
-            "spy_vs_vwap":   round(spy_vs_vwap, 2) if spy_vs_vwap is not None else None,
-            "qqq_price":     round(qqq_price, 2),
-            "qqq_pct_ema20": round(qqq_pct_ema20, 2),
-            "qqq_vs_vwap":   round(qqq_vs_vwap, 2) if qqq_vs_vwap is not None else None,
-            "vix_level":     round(vix_level, 1) if vix_level is not None else None,
-            "vix_direction": vix_direction,
-            "es_price":      round(es_price, 2) if es_price is not None else None,
-            "es_change_pct": round(es_change_pct, 2) if es_change_pct is not None else None,
-            "es_above_vwap": es_above_vwap,
-            "sectors":       sectors,
-            "error":         False,
+            "regime":          regime,
+            "label":           label,
+            "css":             css,
+            "reason":          reason,
+            "mode_desc":       mode_desc,
+            "action_msg":      action_msg,
+            "longs_ok":        longs_ok,
+            "shorts_ok":       shorts_ok,
+            "reduce_size":     reduce_size,
+            "score":           score,
+            "meter_score":     meter_score,
+            "decision_cmd":    decision_cmd,
+            "risk_pct_rec":    risk_pct_rec,
+            "size_multiplier": size_multiplier,
+            "size_zone":       size_zone,
+            "why":             why,
+            "spy_price":       round(spy_price, 2),
+            "spy_pct_ema20":   round(spy_pct_ema20, 2),
+            "spy_vs_vwap":     round(spy_vs_vwap, 2) if spy_vs_vwap is not None else None,
+            "qqq_price":       round(qqq_price, 2),
+            "qqq_pct_ema20":   round(qqq_pct_ema20, 2),
+            "qqq_vs_vwap":     round(qqq_vs_vwap, 2) if qqq_vs_vwap is not None else None,
+            "vix_level":       round(vix_level, 1) if vix_level is not None else None,
+            "vix_direction":   vix_direction,
+            "es_price":        round(es_price, 2) if es_price is not None else None,
+            "es_change_pct":   round(es_change_pct, 2) if es_change_pct is not None else None,
+            "es_above_vwap":   es_above_vwap,
+            "sectors":         sectors,
+            "error":           False,
         }
 
     except Exception as _e:

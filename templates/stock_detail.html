@@ -29,6 +29,13 @@
         <button type="submit" class="btn-inline-refresh">⟳ Refresh Data</button>
       </form>
     </div>
+    <div class="detail-poll-row">
+      <span class="detail-poll-dot" id="detail-poll-dot">●</span>
+      <span class="detail-poll-label">Last poll:</span>
+      <span class="detail-poll-time" id="detail-poll-time">—</span>
+      <span class="poll-state-badge poll-state-waiting" id="detail-poll-state">WAITING</span>
+      <span class="poll-market-note" id="detail-market-note" style="display:none;">Market closed — values may remain unchanged</span>
+    </div>
   </div>
 
   <!-- ===== TICKER STATE BANNER ===== -->
@@ -108,6 +115,20 @@
       <div class="score-strip-reason">avg {{ "{:,.0f}".format(stock.avg_volume) if stock.avg_volume is not none else "N/A" }}</div>
     </div>
 
+  </div>
+
+  <!-- ===== TRADE COACH ===== -->
+  <div id="detail-coach-card" class="detail-card coach-card {{ coach.css }}">
+    <h3 class="card-title">
+      AI Trade Coach
+      <span id="detail-coach-badge" class="coach-level-badge coach-badge-{{ coach.level }}">{{ coach.coach_status }}</span>
+    </h3>
+    <div id="detail-coach-msg" class="coach-message {{ coach.css }}">{{ coach.message }}</div>
+    <div id="detail-coach-signals" class="coach-signals">
+      {% for sig in coach.signals %}
+      <span class="coach-signal-chip">{{ sig }}</span>
+      {% endfor %}
+    </div>
   </div>
 
   <!-- ===== SWING TRADE PLAN ===== -->
@@ -591,6 +612,98 @@
     </div>
     {% endif %}
 
+    <!-- ===== POSITION SIZER ===== -->
+    <div class="ps-panel" id="ps-panel">
+      <div class="ps-header">
+        <span class="ps-title">Position Sizer</span>
+        <div class="ps-type-btns">
+          <button type="button" class="ps-type-btn ps-type-active" id="psTypeStock" onclick="psSetType('stock')">Stock</button>
+          <button type="button" class="ps-type-btn" id="psTypeOption" onclick="psSetType('option')">Option</button>
+        </div>
+        <div class="ps-mode-btns">
+          <button type="button" class="ps-mode-btn ps-mode-active" id="psModeDay" onclick="psSetMode('day')">Day Trade</button>
+          <button type="button" class="ps-mode-btn" id="psModeSwing" onclick="psSetMode('swing')">Swing</button>
+        </div>
+      </div>
+
+      <div class="ps-body">
+        <div class="ps-inputs-row">
+          <div class="ps-field">
+            <label class="ps-label">Account Size</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="100" min="0" id="psAccount" class="plan-input"
+                     value="{{ risk_settings.account_size if risk_settings is defined else 10000 }}"
+                     oninput="psCalc()">
+            </div>
+          </div>
+          <div class="ps-field">
+            <label class="ps-label">Risk %</label>
+            <input type="number" step="0.1" min="0.1" max="10" id="psRiskPct" class="jform-input"
+                   value="{{ risk_settings.risk_pct if risk_settings is defined else 1.0 }}"
+                   oninput="psCalc()">
+          </div>
+          <div class="ps-field">
+            <label class="ps-label">Entry Price</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="0.01" min="0" id="psEntry" class="plan-input"
+                     placeholder="0.00"
+                     value="{{ '%.2f'|format(plan.entry_level) if plan.entry_level else '' }}"
+                     oninput="psCalc()">
+            </div>
+          </div>
+          <div class="ps-field">
+            <label class="ps-label">Stop Price</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="0.01" min="0" id="psStop" class="plan-input"
+                     placeholder="0.00"
+                     value="{{ '%.2f'|format(plan.stop_loss) if plan.stop_loss else '' }}"
+                     oninput="psCalc()">
+            </div>
+          </div>
+          <div class="ps-field ps-field-premium" id="psPremiumField" style="display:none;">
+            <label class="ps-label">Option Premium</label>
+            <div class="plan-input-wrap">
+              <span class="plan-input-prefix">$</span>
+              <input type="number" step="0.01" min="0" id="psPremium" class="plan-input"
+                     placeholder="2.50" oninput="psCalc()">
+            </div>
+          </div>
+        </div>
+
+        {% if market_temp is defined and market_temp.reduce_size %}
+        <div class="ps-regime-warn">Market regime suggests reducing size — apply 50% of the suggested size.</div>
+        {% endif %}
+
+        <div class="ps-results" id="ps-results">
+          <div class="ps-result-item">
+            <span class="ps-result-label">Max $ Risk Allowed</span>
+            <span class="ps-result-val" id="ps-max-risk">—</span>
+          </div>
+          <div class="ps-result-item" id="ps-shares-row">
+            <span class="ps-result-label">Suggested Shares</span>
+            <span class="ps-result-val" id="ps-shares">—</span>
+          </div>
+          <div class="ps-result-item" id="ps-contracts-row" style="display:none;">
+            <span class="ps-result-label">Suggested Contracts</span>
+            <span class="ps-result-val" id="ps-contracts">—</span>
+          </div>
+          <div class="ps-result-item">
+            <span class="ps-result-label">Total Capital Required</span>
+            <span class="ps-result-val" id="ps-total-cost">—</span>
+          </div>
+          <div class="ps-result-item">
+            <span class="ps-result-label">Risk Per Unit</span>
+            <span class="ps-result-val" id="ps-risk-unit">—</span>
+          </div>
+        </div>
+
+        <div class="ps-warning" id="ps-warning" style="display:none;"></div>
+      </div>
+    </div>
+
     <!-- ===== OPTIONS RISK CALCULATOR ===== -->
     <div class="options-risk-panel" id="options-risk-panel">
       <div class="options-risk-header">
@@ -853,6 +966,111 @@ function calcRR() {
 }
 calcRR();
 
+// ── Position Sizer ──────────────────────────────────────────────────────────
+let _psType = 'stock';
+let _psMode = 'day';
+
+function psSetType(type) {
+  _psType = type;
+  document.getElementById('psTypeStock').classList.toggle('ps-type-active', type === 'stock');
+  document.getElementById('psTypeOption').classList.toggle('ps-type-active', type === 'option');
+  document.getElementById('psPremiumField').style.display = type === 'option' ? '' : 'none';
+  document.getElementById('ps-shares-row').style.display   = type === 'stock'  ? '' : 'none';
+  document.getElementById('ps-contracts-row').style.display = type === 'option' ? '' : 'none';
+  psCalc();
+}
+
+function psSetMode(mode) {
+  _psMode = mode;
+  document.getElementById('psModeDay').classList.toggle('ps-mode-active', mode === 'day');
+  document.getElementById('psModeSwing').classList.toggle('ps-mode-active', mode === 'swing');
+  psCalc();
+}
+
+function psCalc() {
+  const account  = parseFloat(document.getElementById('psAccount').value)  || 0;
+  const riskPct  = parseFloat(document.getElementById('psRiskPct').value)  || 0;
+  const entry    = parseFloat(document.getElementById('psEntry').value)    || 0;
+  const stop     = parseFloat(document.getElementById('psStop').value)     || 0;
+  const premium  = parseFloat(document.getElementById('psPremium')?.value) || 0;
+  const warnEl   = document.getElementById('ps-warning');
+
+  const fmt = v => '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  const maxRisk = account > 0 && riskPct > 0 ? account * (riskPct / 100) : 0;
+  document.getElementById('ps-max-risk').textContent = maxRisk > 0 ? fmt(maxRisk) : '—';
+
+  const warnings = [];
+
+  if (_psType === 'stock') {
+    if (!entry || !stop) {
+      ['ps-shares','ps-total-cost','ps-risk-unit'].forEach(id => { document.getElementById(id).textContent = '—'; });
+      warnEl.textContent = 'Enter entry and stop prices to calculate position size.';
+      warnEl.style.display = '';
+      warnEl.className = 'ps-warning ps-warn-yellow';
+      return;
+    }
+    const riskPerShare = Math.abs(entry - stop);
+    if (riskPerShare <= 0) {
+      warnEl.textContent = 'Stop must differ from entry price.';
+      warnEl.style.display = '';
+      warnEl.className = 'ps-warning ps-warn-red';
+      return;
+    }
+    const shares    = maxRisk > 0 ? Math.floor(maxRisk / riskPerShare) : 0;
+    const totalCost = shares * entry;
+    const pctOfAcct = account > 0 ? (totalCost / account * 100) : 0;
+
+    document.getElementById('ps-shares').textContent    = shares > 0 ? shares + ' shares' : '—';
+    document.getElementById('ps-total-cost').textContent = totalCost > 0 ? fmt(totalCost) : '—';
+    document.getElementById('ps-risk-unit').textContent  = fmt(riskPerShare) + ' / share';
+
+    warnEl.style.display = 'none';
+    if (shares === 0) {
+      warnings.push('Account or risk % too small to buy even 1 share at this stop.');
+    }
+    if (pctOfAcct > 20) {
+      warnings.push(`Position is ${pctOfAcct.toFixed(0)}% of account — consider reducing size.`);
+    }
+    if (pctOfAcct > 50) {
+      warnings.push('WARNING: Position exceeds 50% of account — oversized for most risk rules.');
+    }
+
+  } else {
+    // Option sizing
+    if (!premium) {
+      ['ps-contracts','ps-total-cost','ps-risk-unit'].forEach(id => { document.getElementById(id).textContent = '—'; });
+      warnEl.textContent = 'Enter option premium to calculate contracts.';
+      warnEl.style.display = '';
+      warnEl.className = 'ps-warning ps-warn-yellow';
+      return;
+    }
+    const costPerContract = premium * 100;
+    const contracts = maxRisk > 0 ? Math.max(1, Math.floor(maxRisk / costPerContract)) : 0;
+    const totalCost = contracts * costPerContract;
+    const pctOfAcct = account > 0 ? (totalCost / account * 100) : 0;
+
+    document.getElementById('ps-contracts').textContent  = contracts > 0 ? contracts + (contracts === 1 ? ' contract' : ' contracts') : '—';
+    document.getElementById('ps-total-cost').textContent  = totalCost > 0 ? fmt(totalCost) : '—';
+    document.getElementById('ps-risk-unit').textContent   = fmt(costPerContract) + ' / contract';
+
+    warnEl.style.display = 'none';
+    if (totalCost > maxRisk) {
+      warnings.push(`Total premium $${totalCost.toFixed(2)} exceeds max risk $${maxRisk.toFixed(2)}.`);
+    }
+    if (pctOfAcct > 5) {
+      warnings.push(`Option position is ${pctOfAcct.toFixed(1)}% of account — high exposure.`);
+    }
+  }
+
+  if (warnings.length) {
+    warnEl.textContent  = warnings.join(' ');
+    warnEl.style.display = '';
+    warnEl.className = 'ps-warning ' + (warnings.some(w => w.startsWith('WARNING')) ? 'ps-warn-red' : 'ps-warn-yellow');
+  }
+}
+psCalc();
+
 // ── Options Risk Calculator ─────────────────────────────────────────────────
 let _optSide = 'CALL';
 
@@ -896,45 +1114,140 @@ function calcOptionsRisk() {
 
 const DETAIL_TICKER = "{{ stock.ticker }}";
 
-async function stockDetailRefresh() {
-  try {
-    const resp = await fetch(`/api/stock/${DETAIL_TICKER}/live`);
-    if (!resp.ok) return false;
-    const s = await resp.json();
+// ── Poll observability helpers ───────────────────────────────────────────────
 
+// Track previous values to detect NO CHANGE vs LIVE UPDATE
+let _prevDetailPrice = undefined;
+let _prevDetailSwing = undefined;
+let _prevDetailCat   = undefined;
+
+function _nowET() {
+  return new Date().toLocaleTimeString('en-US', {
+    timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+}
+
+function _setPollTime(t) {
+  const el = document.getElementById('detail-poll-time');
+  if (el) el.textContent = t + ' ET';
+}
+
+function _setPollState(text, cls) {
+  const el = document.getElementById('detail-poll-state');
+  if (!el) return;
+  el.textContent = text;
+  el.className   = 'poll-state-badge ' + cls;
+}
+
+function _pulseDot() {
+  const dot = document.getElementById('detail-poll-dot');
+  if (!dot) return;
+  dot.classList.add('poll-dot-pulse');
+  setTimeout(function() { dot.classList.remove('poll-dot-pulse'); }, 700);
+}
+
+function _updateMarketNote() {
+  const el = document.getElementById('detail-market-note');
+  if (!el) return;
+  const closed = typeof isMarketHours === 'function' && !isMarketHours();
+  el.style.display = closed ? '' : 'none';
+}
+
+// ── Main refresh function ────────────────────────────────────────────────────
+
+async function stockDetailRefresh() {
+  const url   = `/api/stock/${DETAIL_TICKER}/live`;
+  const stamp = _nowET();
+  console.log('[detail] Poll started —', stamp);
+
+  _updateMarketNote();
+
+  try {
+    console.log('[detail] Request sent →', url);
+    const resp = await fetch(url);
+
+    if (!resp.ok) {
+      console.warn('[detail] HTTP', resp.status, '— will retry next cycle');
+      _setPollTime(stamp);
+      _setPollState('ERROR', 'poll-state-error');
+      return false;
+    }
+
+    const s = await resp.json();
+    console.log('[detail] Response received — price:', s.current_price,
+                '| swing:', s.swing_score, '| cat:', s.catalyst_score,
+                '| server_time:', s.server_time);
+
+    if (s.error) {
+      console.warn('[detail] API error:', s.error);
+      _setPollTime(stamp);
+      _setPollState('ERROR', 'poll-state-error');
+      return false;
+    }
+
+    // ── Detect whether anything meaningful changed ──────────────────────────
+    const priceChanged = s.current_price !== _prevDetailPrice;
+    const swingChanged = s.swing_score   !== _prevDetailSwing;
+    const catChanged   = s.catalyst_score !== _prevDetailCat;
+    const anyChanged   = priceChanged || swingChanged || catChanged;
+
+    console.log('[detail] Change detection — price:', priceChanged,
+                '| swing:', swingChanged, '| catalyst:', catChanged,
+                '| any:', anyChanged);
+
+    _prevDetailPrice = s.current_price;
+    _prevDetailSwing = s.swing_score;
+    _prevDetailCat   = s.catalyst_score;
+
+    // ── Status badges ───────────────────────────────────────────────────────
     const sfaBadge = document.getElementById('detail-sfa-badge');
     if (sfaBadge && s.simplified_action) {
-      sfaBadge.className  = 'exec-badge exec-badge-xl ' + (s.simplified_action_class || '');
+      sfaBadge.className   = 'exec-badge exec-badge-xl ' + (s.simplified_action_class || '');
       sfaBadge.textContent = s.simplified_action;
       sfaBadge.title       = s.final_action || '';
     }
 
     const execBadge = document.getElementById('detail-exec-badge');
-    if (execBadge) { execBadge.className = 'exec-badge exec-badge-lg ' + s.exec_class; execBadge.textContent = s.final_action || 'WAIT'; }
-
-    const biasTag = document.getElementById('detail-bias-tag');
-    if (biasTag) { biasTag.className = 'bias-tag ' + s.bias_class + ' bias-large'; biasTag.textContent = s.trade_bias; }
-
-    const setupPill = document.getElementById('detail-setup-pill');
-    if (setupPill && s.swing_setup_type) { setupPill.textContent = s.swing_setup_type; }
-
-    const el = document.getElementById('detail-last-updated');
-    if (el && s.last_updated) {
-      // Show only the time portion: "2026-04-18 08:05 PM" → "8:05 PM"
-      const parts = s.last_updated.split(' ');
-      el.textContent = parts.length >= 3 ? (parts[1] + ' ' + parts[2]).replace(/^0/, '') : s.last_updated;
+    if (execBadge) {
+      execBadge.className   = 'exec-badge exec-badge-lg ' + (s.exec_class || '');
+      execBadge.textContent = s.final_action || 'WAIT';
     }
 
+    const biasTag = document.getElementById('detail-bias-tag');
+    if (biasTag && s.trade_bias) {
+      biasTag.className   = 'bias-tag ' + (s.bias_class || '') + ' bias-large';
+      biasTag.textContent = s.trade_bias;
+    }
+
+    const setupPill = document.getElementById('detail-setup-pill');
+    if (setupPill && s.swing_setup_type) {
+      setupPill.className   = 'setup-pill ' + (s.swing_setup_type_class || '') + ' setup-pill-lg';
+      setupPill.textContent = s.swing_setup_type;
+    }
+
+    const permBadge = document.getElementById('detail-perm-badge');
+    if (permBadge && s.trade_permission) {
+      permBadge.className   = 'perm-badge perm-badge-lg ' + (s.trade_permission.css || '');
+      permBadge.textContent = s.trade_permission.permission || '';
+      permBadge.title       = s.trade_permission.reason || '';
+    }
+
+    // ── Scores ──────────────────────────────────────────────────────────────
     const swingScore = document.getElementById('detail-swing-score');
     if (swingScore && s.swing_score != null) swingScore.textContent = s.swing_score;
 
-    if (s.catalyst_score != null) {
-      const catEl = document.getElementById('detail-cat-score');
-      if (catEl) catEl.textContent = s.catalyst_score;
-    }
+    const catEl = document.getElementById('detail-cat-score');
+    if (catEl && s.catalyst_score != null) catEl.textContent = s.catalyst_score;
+
+    // ── Price / market data ──────────────────────────────────────────────────
+    const priceEl = document.getElementById('detail-cur-price');
+    if (priceEl && s.current_price != null) priceEl.textContent = '$' + s.current_price.toFixed(2);
 
     const gapEl = document.getElementById('detail-gap');
-    if (gapEl && s.gap_display) { gapEl.className = 'score-big ' + s.gap_class; gapEl.textContent = s.gap_display; }
+    if (gapEl && s.gap_display) {
+      gapEl.className   = 'score-big ' + (s.gap_class || '');
+      gapEl.textContent = s.gap_display;
+    }
 
     const rvolEl = document.getElementById('detail-rvol');
     if (rvolEl && s.rel_volume != null) {
@@ -942,27 +1255,81 @@ async function stockDetailRefresh() {
       rvolEl.innerHTML = s.rel_volume.toFixed(1) + '<span class="score-denom">x</span>';
     }
 
-    const priceEl = document.getElementById('detail-cur-price');
-    if (priceEl && s.current_price != null) priceEl.textContent = '$' + s.current_price.toFixed(2);
-
-    if (s.headline_freshness) {
-      document.querySelectorAll('.headline-freshness-badge').forEach(e => { e.textContent = s.headline_freshness; });
+    // ── Timestamps ──────────────────────────────────────────────────────────
+    const lastEl = document.getElementById('detail-last-updated');
+    if (lastEl && s.last_updated) {
+      const parts = s.last_updated.split(' ');
+      lastEl.textContent = parts.length >= 3
+        ? (parts[1] + ' ' + parts[2]).replace(/^0/, '')
+        : s.last_updated;
     }
 
-    // Use server ET time if available, else format browser time as ET
+    if (s.headline_freshness) {
+      document.querySelectorAll('.headline-freshness-badge').forEach(function(e) {
+        e.textContent = s.headline_freshness;
+      });
+    }
+
+    // ── Coach card ──────────────────────────────────────────────────────────
+    const c = s.coach;
+    if (c) {
+      const coachCard = document.getElementById('detail-coach-card');
+      if (coachCard) coachCard.className = 'detail-card coach-card ' + (c.css || '');
+
+      const coachBadge = document.getElementById('detail-coach-badge');
+      if (coachBadge) {
+        coachBadge.className   = 'coach-level-badge coach-badge-' + (c.level || '');
+        coachBadge.textContent = c.coach_status || '';
+      }
+
+      const coachMsg = document.getElementById('detail-coach-msg');
+      if (coachMsg) {
+        coachMsg.className   = 'coach-message ' + (c.css || '');
+        coachMsg.textContent = c.message || '';
+      }
+
+      const coachSigs = document.getElementById('detail-coach-signals');
+      if (coachSigs && c.signals) {
+        coachSigs.textContent = '';
+        c.signals.forEach(function(sig) {
+          const chip = document.createElement('span');
+          chip.className   = 'coach-signal-chip';
+          chip.textContent = sig;
+          coachSigs.appendChild(chip);
+        });
+      }
+    }
+
+    // ── Poll status indicators ───────────────────────────────────────────────
+    _setPollTime(stamp);
+    if (anyChanged) {
+      _setPollState('LIVE UPDATE', 'poll-state-live');
+    } else {
+      _setPollState('NO CHANGE', 'poll-state-nochange');
+    }
+    _pulseDot();
+
     const displayTime = s.server_time || new Date().toLocaleTimeString(
-      "en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }
+      'en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }
     );
     window._arSetLastUpdated(displayTime);
+    console.log('[detail] DOM patch complete — changed:', anyChanged, '—', stamp);
     return true;
 
   } catch(e) {
-    console.warn('[detail] Live refresh error:', e);
+    console.warn('[detail] Exception (will retry):', e);
+    _setPollTime(stamp);
+    _setPollState('ERROR', 'poll-state-error');
     return false;
   }
 }
 
 window._arRefreshFn = stockDetailRefresh;
+_updateMarketNote();   // show market-closed note immediately on page load
+console.log('[detail] Auto-refresh armed for', DETAIL_TICKER,
+            '— interval', window._arInterval / 1000 + 's',
+            '| AR enabled:', window._arEnabled,
+            '| market hours:', typeof isMarketHours === 'function' ? isMarketHours() : 'unknown');
 </script>
 
 <script>

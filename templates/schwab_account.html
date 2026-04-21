@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+{% block title %}Schwab Account — Rockkstaar Trade Assistant{% endblock %}
+
+{% block content %}
+<div class="schwab-wrap">
+
+  <!-- ===== HEADER ===== -->
+  <div class="schwab-header">
+    <h1 class="schwab-title">Schwab Account</h1>
+    <div class="schwab-status-row">
+      <span class="schwab-status-badge {{ tok_status.css }}">
+        {% if tok_status.connected %}● Connected{% else %}○ Disconnected{% endif %}
+      </span>
+      <span class="schwab-status-sub">{{ tok_status.status }}</span>
+      <span class="schwab-phase-badge">Phase 1 — Read Only</span>
+    </div>
+  </div>
+
+  <!-- ===== FLASH ===== -->
+  {% if error_msg %}
+  <div class="schwab-error-banner">
+    <strong>Error:</strong> {{ error_msg }}
+    {% if 'auth' in error_msg|lower or 'token' in error_msg|lower %}
+    — <a href="{{ url_for('schwab_auth') }}" class="schwab-reauth-link">Re-authenticate</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- ===== SETUP CARD (shown when not configured or not connected) ===== -->
+  {% if not configured or not tok_status.connected %}
+  <div class="detail-card schwab-setup-card">
+    <h3 class="card-title">
+      {% if not configured %}Setup Required{% else %}Connect Your Account{% endif %}
+    </h3>
+
+    {% if not configured %}
+    <div class="schwab-setup-steps">
+      <p class="schwab-setup-intro">To connect your Charles Schwab brokerage account, you need a Schwab Developer API app. This is free and takes about 5 minutes.</p>
+      <ol class="schwab-steps-list">
+        <li>
+          <strong>Register at developer.schwab.com</strong><br>
+          Create a free account and add a new app.
+        </li>
+        <li>
+          <strong>Set your callback URL</strong><br>
+          In your app settings, set the callback URL to:<br>
+          <code class="schwab-code">{{ request.host_url }}schwab/callback</code>
+        </li>
+        <li>
+          <strong>Copy your credentials</strong><br>
+          Copy the <em>App Key</em> (client ID) and <em>App Secret</em>.
+        </li>
+        <li>
+          <strong>Set environment variables</strong><br>
+          <pre class="schwab-env-block">SCHWAB_CLIENT_ID=&lt;your App Key&gt;
+SCHWAB_CLIENT_SECRET=&lt;your App Secret&gt;
+SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
+          On Render/Railway: set these in your service Environment settings.<br>
+          Local dev: add to a <code>.env</code> file (never commit to git).
+        </li>
+        <li>
+          <strong>Restart the app</strong>, then return here and click Connect.
+        </li>
+      </ol>
+
+      <div class="schwab-safety-note">
+        <strong>Security:</strong> Credentials are stored as environment variables only.
+        Tokens are stored in the app database and never exposed in the UI.
+        This integration is read-only — no trades can be placed.
+      </div>
+    </div>
+
+    {% else %}
+    <!-- Configured but not connected — show connect button -->
+    <p class="schwab-connect-intro">
+      API credentials are configured. Click below to authorize your Schwab account via OAuth 2.0.
+      You will be redirected to Schwab's login page, then returned here automatically.
+    </p>
+    <a href="{{ url_for('schwab_auth') }}" class="btn schwab-connect-btn">
+      Connect Schwab Account →
+    </a>
+    <p class="schwab-connect-note">
+      This will only grant <strong>read-only</strong> access to your account data.
+      No trades will be placed. You can disconnect at any time.
+    </p>
+    {% endif %}
+  </div>
+
+  {% else %}
+
+  <!-- ===== CONNECTED: ACCOUNT SUMMARY ===== -->
+  {% if account_data and not account_data.error %}
+
+  <!-- Balance overview cards -->
+  <div class="schwab-balance-grid">
+
+    <div class="schwab-bal-card">
+      <div class="schwab-bal-label">Total Account Value</div>
+      <div class="schwab-bal-val">${{ "{:,.2f}".format(account_data.total_value) if account_data.total_value is not none else "—" }}</div>
+    </div>
+
+    <div class="schwab-bal-card">
+      <div class="schwab-bal-label">Buying Power</div>
+      <div class="schwab-bal-val">${{ "{:,.2f}".format(account_data.buying_power) if account_data.buying_power is not none else "—" }}</div>
+    </div>
+
+    <div class="schwab-bal-card {{ 'schwab-pnl-pos' if account_data.daily_pnl and account_data.daily_pnl > 0 else ('schwab-pnl-neg' if account_data.daily_pnl and account_data.daily_pnl < 0 else '') }}">
+      <div class="schwab-bal-label">Daily P&amp;L</div>
+      <div class="schwab-bal-val">
+        {% if account_data.daily_pnl is not none %}
+          {{ '+' if account_data.daily_pnl >= 0 else '' }}${{ "{:,.2f}".format(account_data.daily_pnl) }}
+          {% if account_data.daily_pnl_pct is not none %}
+          <span class="schwab-pnl-pct">({{ '%+.2f'|format(account_data.daily_pnl_pct) }}%)</span>
+          {% endif %}
+        {% else %}—{% endif %}
+      </div>
+    </div>
+
+    <div class="schwab-bal-card {{ 'schwab-pnl-pos' if account_data.total_unrealized and account_data.total_unrealized > 0 else ('schwab-pnl-neg' if account_data.total_unrealized and account_data.total_unrealized < 0 else '') }}">
+      <div class="schwab-bal-label">Open P&amp;L (Unrealized)</div>
+      <div class="schwab-bal-val">
+        {% if account_data.total_unrealized is not none %}
+          {{ '+' if account_data.total_unrealized >= 0 else '' }}${{ "{:,.2f}".format(account_data.total_unrealized) }}
+        {% else %}—{% endif %}
+      </div>
+    </div>
+
+    <div class="schwab-bal-card">
+      <div class="schwab-bal-label">Open Positions</div>
+      <div class="schwab-bal-val">{{ account_data.open_positions }}</div>
+    </div>
+
+  </div>
+
+  <!-- Per-account detail -->
+  {% for acct in account_data.accounts %}
+  <div class="detail-card schwab-acct-card">
+    <h3 class="card-title">
+      Account ···{{ acct.account_number[-4:] if acct.account_number else '?' }}
+      <span class="schwab-acct-type">{{ acct.account_type }}</span>
+      {% if acct.is_day_trader %}<span class="schwab-dt-badge">PDT</span>{% endif %}
+    </h3>
+
+    <!-- Balances row -->
+    <div class="schwab-acct-bals">
+      <div class="schwab-mini-stat">
+        <div class="schwab-mini-label">Net Liq Value</div>
+        <div class="schwab-mini-val">${{ "{:,.2f}".format(acct.total_value) }}</div>
+      </div>
+      <div class="schwab-mini-stat">
+        <div class="schwab-mini-label">Buying Power</div>
+        <div class="schwab-mini-val">${{ "{:,.2f}".format(acct.buying_power) }}</div>
+      </div>
+      <div class="schwab-mini-stat">
+        <div class="schwab-mini-label">Cash</div>
+        <div class="schwab-mini-val">${{ "{:,.2f}".format(acct.cash_balance) }}</div>
+      </div>
+      {% if acct.day_trading_buying_power > 0 %}
+      <div class="schwab-mini-stat">
+        <div class="schwab-mini-label">DT Buying Power</div>
+        <div class="schwab-mini-val">${{ "{:,.2f}".format(acct.day_trading_buying_power) }}</div>
+      </div>
+      {% endif %}
+      <div class="schwab-mini-stat {{ 'schwab-pnl-pos' if acct.daily_pnl and acct.daily_pnl > 0 else ('schwab-pnl-neg' if acct.daily_pnl and acct.daily_pnl < 0 else '') }}">
+        <div class="schwab-mini-label">Daily P&amp;L</div>
+        <div class="schwab-mini-val">
+          {% if acct.daily_pnl is not none %}{{ '+' if acct.daily_pnl >= 0 else '' }}${{ "{:,.2f}".format(acct.daily_pnl) }}{% else %}—{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Equity positions -->
+    {% if acct.equity_positions %}
+    <h4 class="schwab-section-title">Equity Positions ({{ acct.equity_positions|length }})</h4>
+    <div class="schwab-positions-table">
+      <div class="schwab-pos-row schwab-pos-header">
+        <span>Symbol</span><span>Qty</span><span>Avg Price</span>
+        <span>Mkt Value</span><span>Day P&amp;L</span><span>Unrealized</span>
+      </div>
+      {% for pos in acct.equity_positions %}
+      <div class="schwab-pos-row {{ 'schwab-pos-long' if pos.quantity > 0 else 'schwab-pos-short' }}">
+        <span class="schwab-pos-symbol">{{ pos.symbol }}</span>
+        <span class="schwab-pos-qty {{ 'schwab-pnl-pos' if pos.quantity > 0 else 'schwab-pnl-neg' }}">
+          {{ pos.quantity }}
+        </span>
+        <span>${{ "%.4f"|format(pos.avg_price) }}</span>
+        <span>${{ "{:,.2f}".format(pos.market_value) }}</span>
+        <span class="{{ 'schwab-pnl-pos' if pos.day_pnl > 0 else ('schwab-pnl-neg' if pos.day_pnl < 0 else '') }}">
+          {{ '+' if pos.day_pnl >= 0 else '' }}${{ "%.2f"|format(pos.day_pnl) }}
+        </span>
+        <span class="{{ 'schwab-pnl-pos' if pos.unrealized > 0 else ('schwab-pnl-neg' if pos.unrealized < 0 else '') }}">
+          {{ '+' if pos.unrealized >= 0 else '' }}${{ "%.2f"|format(pos.unrealized) }}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Option positions -->
+    {% if acct.option_positions %}
+    <h4 class="schwab-section-title">Option Positions ({{ acct.option_positions|length }})</h4>
+    <div class="schwab-positions-table schwab-opt-table">
+      <div class="schwab-pos-row schwab-pos-header">
+        <span>Symbol</span><span>Type</span><span>Strike</span>
+        <span>Exp</span><span>Contracts</span><span>Mkt Value</span><span>Day P&amp;L</span>
+      </div>
+      {% for pos in acct.option_positions %}
+      <div class="schwab-pos-row">
+        <span class="schwab-pos-symbol">{{ pos.underlying }}</span>
+        <span class="schwab-opt-type {{ 'schwab-call' if pos.option_type == 'CALL' else 'schwab-put' }}">
+          {{ pos.option_type }}
+        </span>
+        <span>${{ "%.2f"|format(pos.strike_price) }}</span>
+        <span class="schwab-pos-exp">{{ pos.expiration_date[:10] if pos.expiration_date else '—' }}</span>
+        <span>{{ pos.contracts }}</span>
+        <span>${{ "{:,.2f}".format(pos.market_value) }}</span>
+        <span class="{{ 'schwab-pnl-pos' if pos.day_pnl > 0 else ('schwab-pnl-neg' if pos.day_pnl < 0 else '') }}">
+          {{ '+' if pos.day_pnl >= 0 else '' }}${{ "%.2f"|format(pos.day_pnl) }}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if not acct.equity_positions and not acct.option_positions %}
+    <div class="no-data-msg">No open positions.</div>
+    {% endif %}
+
+    <!-- Today's orders -->
+    {% set acct_orders = orders_by_account.get(acct.account_hash, []) %}
+    {% if acct_orders %}
+    <h4 class="schwab-section-title">Today's Orders ({{ acct_orders|length }})</h4>
+    <div class="schwab-orders-table">
+      <div class="schwab-order-row schwab-order-header">
+        <span>Symbol</span><span>Side</span><span>Qty</span>
+        <span>Filled</span><span>Price</span><span>Type</span><span>Status</span><span>Time</span>
+      </div>
+      {% for order in acct_orders %}
+      <div class="schwab-order-row">
+        <span class="schwab-pos-symbol">{{ order.symbol }}</span>
+        <span class="schwab-order-side {{ 'schwab-pnl-pos' if 'BUY' in order.side else 'schwab-pnl-neg' }}">{{ order.side }}</span>
+        <span>{{ order.quantity }}</span>
+        <span>{{ order.filled }}</span>
+        <span>{{ '$%.2f'|format(order.price) if order.price else 'MKT' }}</span>
+        <span class="schwab-order-type">{{ order.order_type }}</span>
+        <span class="schwab-order-status {{ order.status_css }}">{{ order.status }}</span>
+        <span class="schwab-order-time">{{ order.entered }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="no-data-msg" style="margin-top:0.75rem;">No orders today.</div>
+    {% endif %}
+
+  </div>
+  {% endfor %}
+
+  <!-- Risk integration note -->
+  <div class="detail-card schwab-risk-note-card">
+    <h3 class="card-title">Risk Integration (Phase 1)</h3>
+    <p class="schwab-risk-note-text">
+      Your real account balance and buying power from Schwab can be used to calibrate the
+      position sizer and daily loss rules in <a href="{{ url_for('risk_settings') }}">Risk Settings</a>.
+      Currently the position sizer uses your manually entered account size. In a future update,
+      it will automatically pull your live balance from Schwab.
+    </p>
+    {% if account_data.total_value %}
+    <div class="schwab-risk-summary">
+      <div class="schwab-risk-item">
+        <span class="schwab-risk-label">Live Account Value</span>
+        <span class="schwab-risk-val">${{ "{:,.2f}".format(account_data.total_value) }}</span>
+      </div>
+      <div class="schwab-risk-item">
+        <span class="schwab-risk-label">Available Buying Power</span>
+        <span class="schwab-risk-val">${{ "{:,.2f}".format(account_data.buying_power) }}</span>
+      </div>
+      <div class="schwab-risk-item {{ 'schwab-pnl-neg' if account_data.daily_pnl and account_data.daily_pnl < 0 else '' }}">
+        <span class="schwab-risk-label">Today's P&amp;L</span>
+        <span class="schwab-risk-val">
+          {{ '+' if account_data.daily_pnl and account_data.daily_pnl >= 0 else '' }}${{ "{:,.2f}".format(account_data.daily_pnl) if account_data.daily_pnl is not none else '—' }}
+        </span>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% elif account_data and account_data.error %}
+  <div class="schwab-error-banner">
+    <strong>Could not load account data:</strong> {{ account_data.error }}<br>
+    <small>If you see an authentication error, your token may have expired — try disconnecting and reconnecting.</small>
+  </div>
+  {% endif %}
+
+  {% endif %}
+
+  <!-- ===== DISCONNECT BUTTON ===== -->
+  {% if tok_status.connected %}
+  <div class="schwab-disconnect-row">
+    <form action="{{ url_for('schwab_disconnect') }}" method="POST"
+          onsubmit="return confirm('Disconnect Schwab account? Your tokens will be cleared.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn schwab-disconnect-btn">Disconnect Account</button>
+    </form>
+    <span class="schwab-disconnect-note">Disconnecting clears your tokens from this app only. It does not revoke API access on Schwab's side.</span>
+  </div>
+  {% endif %}
+
+  <div class="schwab-footer-note">
+    Phase 1 — Read-only account visibility. No trades are placed by this app.
+    All data is fetched directly from Charles Schwab Trader API using OAuth 2.0.
+  </div>
+
+</div>
+{% endblock %}

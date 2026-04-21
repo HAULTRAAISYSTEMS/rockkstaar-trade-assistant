@@ -543,18 +543,22 @@
             {% endif %}
             {% if s.classify_reason %}
               {%- set cr = s.classify_reason -%}
-              {%- if cr.startswith('A+') or cr.startswith('Promoted') -%}
-                {%- set cl_name = "A+" -%}{%- set cl_css = "cl-aplus" -%}
-              {%- elif cr.startswith('Secondary') -%}
-                {%- set cl_name = "Secondary" -%}{%- set cl_css = "cl-secondary" -%}
-              {%- elif cr.startswith('Swing') -%}
-                {%- set cl_name = "Swing" -%}{%- set cl_css = "cl-swing" -%}
+              {%- if cr.startswith('A+ READY') or cr.startswith('A+ Swing') or cr.startswith('Promoted') -%}
+                {%- set cl_name = "A+ READY" -%}{%- set cl_css = "cl-ready" -%}
+              {%- elif cr.startswith('SETUPS FORMING') or cr.startswith('Secondary') -%}
+                {%- set cl_name = "FORMING" -%}{%- set cl_css = "cl-forming" -%}
+              {%- elif cr.startswith('TREND WATCH') or cr.startswith('Swing') -%}
+                {%- set cl_name = "TREND" -%}{%- set cl_css = "cl-trend" -%}
+              {%- elif cr.startswith('EXTENDED') or cr.startswith('Extended') -%}
+                {%- set cl_name = "EXTENDED" -%}{%- set cl_css = "cl-extended" -%}
+              {%- elif cr.startswith('AVOID') or cr.startswith('Core') or cr.startswith('Placed') -%}
+                {%- set cl_name = "AVOID" -%}{%- set cl_css = "cl-avoid" -%}
               {%- else -%}
-                {%- set cl_name = "Core" -%}{%- set cl_css = "cl-core" -%}
+                {%- set cl_name = "WATCH" -%}{%- set cl_css = "cl-forming" -%}
               {%- endif -%}
             <span class="cl-badge {{ cl_css }} {% if s.auto_classify == 0 %}cl-manual{% endif %}"
                   title="{{ cr }}">
-              {% if s.auto_classify == 0 %}✎ {% endif %}→ {{ cl_name }}
+              {% if s.auto_classify == 0 %}✎ {% endif %}{{ cl_name }}
             </span>
             {% endif %}
           </td>

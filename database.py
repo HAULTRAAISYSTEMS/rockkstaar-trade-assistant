@@ -250,7 +250,13 @@ def get_db() -> _Conn:
     return _Conn(conn)
 
 
-DEFAULT_WATCHLISTS = ["A+ Swing Setups", "Secondary Swing Watch", "Extended", "Core Swing Plays"]
+DEFAULT_WATCHLISTS = [
+    "A+ READY",
+    "SETUPS FORMING",
+    "TREND WATCH",
+    "EXTENDED / CHASE ZONE",
+    "AVOID / BLOCKED",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +542,11 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+    # Schwab OAuth tokens — stored as individual settings keys (prefixed schwab_)
+    # No dedicated table needed: access_token, refresh_token, expires_at, rt_expires_at
+    # are written via set_setting("schwab_*", ...) so the existing settings table suffices.
+    # This comment is the migration marker; no DDL required.
+
     # Seed default watchlists on first run (use cnt alias — works in both DBs)
     wl_count = cursor.execute(
         "SELECT COUNT(*) AS cnt FROM watchlists"
@@ -573,12 +584,22 @@ def init_db():
         "Swing Ready":          "A+ Swing Setups",
         "Pullback Zone":        "Secondary Swing Watch",
         "Core List":            "Core Swing Plays",
+        # v3 names → v4 bucket names
+        "A+ Swing Setups":      "A+ READY",
+        "Secondary Swing Watch": "SETUPS FORMING",
+        "Extended":             "EXTENDED / CHASE ZONE",
+        "Core Swing Plays":     "AVOID / BLOCKED",
     }
     for old_name, new_name in _LEGACY_RENAMES.items():
         cursor.execute(
             "UPDATE watchlists SET name = ? WHERE name = ?",
             (new_name, old_name),
         )
+    # Ensure TREND WATCH bucket exists (new in v4 — not a rename)
+    cursor.execute(
+        "INSERT OR IGNORE INTO watchlists (name, created_at) VALUES (?, ?)",
+        ("TREND WATCH", now_iso),
+    )
 
     conn.commit()
     conn.close()

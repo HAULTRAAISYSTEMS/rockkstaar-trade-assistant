@@ -7,6 +7,7 @@ import json as _json
 import logging
 import os
 import re
+import secrets
 import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -856,6 +857,236 @@ def compute_rr(plan_bias, entry, stop, target):
     else:
         css = "rr-poor"
     return ratio, display, css
+
+
+def compute_trade_coach(stock: dict, plan: dict, market_temp: dict, risk_settings: dict) -> dict:
+    """
+    Return a coaching verdict for the current stock + plan + market conditions.
+    Output: {coach_status, message, level, css, reduce_size, signals}
+    coach_status : "TRADE ALLOWED" | "WATCH" | "REDUCE SIZE" | "BLOCKED"
+    level        : "go" | "watch" | "reduce" | "blocked"
+    """
+    mt        = market_temp or {}
+    regime    = mt.get("regime", "NEUTRAL")
+    longs_ok  = mt.get("longs_ok", True)
+    shorts_ok = mt.get("shorts_ok", True)
+    reduce_sz = mt.get("reduce_size", False)
+    decision  = mt.get("decision_cmd", "")
+
+    tp       = stock.get("trade_permission") or {}
+    perm     = tp.get("permission", "WATCH")
+    perm_rsn = tp.get("reason", "")
+
+    bias          = stock.get("trade_bias", "")
+    swing_sc      = float(stock.get("swing_score") or 0)
+    cat_sc        = float(stock.get("catalyst_score") or 0)
+    rr            = float(stock.get("risk_reward") or 0)
+    trend         = stock.get("daily_trend") or ""
+    extended      = bool(stock.get("is_extended", False))
+    entry_quality = stock.get("entry_quality") or ""
+    momentum_sc   = float(stock.get("momentum_score") or 0)
+
+    # Setup label: prefer mode-specific type, fallback to generic
+    trading_mode = risk_settings.get("trading_mode", "SWING TRADE")
+    is_day_trade = "DAY" in trading_mode.upper()
+    setup_raw    = stock.get("setup_type") if is_day_trade else stock.get("swing_setup_type")
+    setup_raw    = setup_raw or stock.get("setup_type") or stock.get("swing_setup_type") or ""
+    setup_label  = setup_raw.strip() if setup_raw else "this setup"
+    mode_label   = "Day trade" if is_day_trade else "Swing trade"
+
+    has_entry  = bool(plan.get("entry_level"))
+    has_stop   = bool(plan.get("stop_loss"))
+    has_target = bool(plan.get("target_price"))
+
+    signals = []
+    missing = []
+
+    # ── Hard blocks ──────────────────────────────────────────────────────────
+    if regime == "NO_TRADE":
+        return {
+            "coach_status": "BLOCKED",
+            "message": "Blocked. VIX is spiking and market conditions do not support any entries today. Sit out.",
+            "level": "blocked", "css": "coach-blocked", "reduce_size": False,
+            "signals": ["No-trade regime active (VIX spike)", "Wait for volatility to normalize"],
+        }
+
+    if perm == "BLOCKED":
+        rsn = perm_rsn[:120] if perm_rsn else "Setup does not meet minimum entry criteria."
+        return {
+            "coach_status": "BLOCKED",
+            "message": f"Blocked. {rsn}",
+            "level": "blocked", "css": "coach-blocked", "reduce_size": False,
+            "signals": [perm_rsn] if perm_rsn else ["Review setup quality and entry conditions"],
+        }
+
+    if bias == "Long" and longs_ok is False:
+        return {
+            "coach_status": "BLOCKED",
+            "message": "Blocked. Market regime is risk-off — longs are not supported right now. Wait for a regime shift.",
+            "level": "blocked", "css": "coach-blocked", "reduce_size": True,
+            "signals": [f"Regime: {regime} — longs suppressed", "Consider waiting or flipping to short bias"],
+        }
+
+    if bias == "Short" and shorts_ok is False:
+        return {
+            "coach_status": "BLOCKED",
+            "message": "Blocked. Market is trending up — shorting here is against the tape. Wait for a topping structure.",
+            "level": "blocked", "css": "coach-blocked", "reduce_size": True,
+            "signals": [f"Regime: {regime} — shorts suppressed", "Wait for clear topping structure or trend shift"],
+        }
+
+    # ── Missing plan elements ────────────────────────────────────────────────
+    if has_entry and not has_stop:
+        missing.append("no stop loss — cannot size position")
+    if has_entry and has_stop and not has_target:
+        missing.append("no target — R:R unknown")
+
+    # ── Quality signals ──────────────────────────────────────────────────────
+    if swing_sc >= 8:
+        signals.append(f"A+ setup ({swing_sc:.0f}/10)")
+    elif swing_sc >= 6:
+        signals.append(f"Quality setup ({swing_sc:.0f}/10)")
+    elif swing_sc > 0:
+        signals.append(f"Weak setup ({swing_sc:.0f}/10)")
+
+    if momentum_sc >= 7:
+        signals.append(f"Strong momentum ({momentum_sc:.0f}/10)")
+    elif momentum_sc >= 4:
+        signals.append(f"Moderate momentum ({momentum_sc:.0f}/10)")
+    elif momentum_sc > 0:
+        signals.append(f"Weak momentum ({momentum_sc:.0f}/10)")
+
+    if cat_sc >= 7:
+        signals.append(f"Strong catalyst ({cat_sc:.0f}/10)")
+    elif cat_sc >= 4:
+        signals.append(f"Catalyst present ({cat_sc:.0f}/10)")
+    elif cat_sc > 0:
+        signals.append(f"Weak catalyst ({cat_sc:.0f}/10)")
+
+    if rr >= 3:
+        signals.append(f"Excellent R:R ({rr:.1f}:1)")
+    elif rr >= 2:
+        signals.append(f"Good R:R ({rr:.1f}:1)")
+    elif rr >= 1:
+        signals.append(f"Acceptable R:R ({rr:.1f}:1)")
+    elif rr > 0:
+        signals.append(f"Poor R:R ({rr:.1f}:1 — consider passing)")
+
+    if trend:
+        signals.append(f"Trend: {trend}")
+
+    is_extended_entry = extended or entry_quality == "Extended"
+    if is_extended_entry:
+        signals.append("Price extended from ideal entry zone")
+
+    _regime_labels = {
+        "RISK_ON":  "Market: Risk-on (favorable)",
+        "NEUTRAL":  "Market: Neutral",
+        "CAUTION":  "Market: Caution/chop zone",
+        "RISK_OFF": "Market: Risk-off",
+    }
+    if regime in _regime_labels:
+        signals.append(_regime_labels[regime])
+
+    # ── Determine if market requires size reduction ──────────────────────────
+    reduce_flag = reduce_sz or regime in ("CAUTION", "RISK_OFF")
+
+    # ── Build verdict ────────────────────────────────────────────────────────
+    if perm == "TRADE ALLOWED":
+
+        # Weak R:R hard gate
+        if rr > 0 and rr < 1.5:
+            if missing:
+                signals.append("Note: " + "; ".join(missing))
+            return {
+                "coach_status": "BLOCKED",
+                "message": f"Blocked. Risk/reward is too weak ({rr:.1f}:1) — need at least 1.5:1 to justify entry.",
+                "level": "blocked", "css": "coach-blocked", "reduce_size": False,
+                "signals": signals[:6],
+            }
+
+        # Extended entry: downgrade to WATCH regardless of permission
+        if is_extended_entry:
+            msg = (f"Watch only. {mode_label} entry is extended from the ideal zone. "
+                   f"Do not chase — wait for a pullback into the entry zone.")
+            if missing:
+                msg += " Note: " + "; ".join(missing) + "."
+            return {
+                "coach_status": "WATCH",
+                "message": msg,
+                "level": "watch", "css": "coach-watch", "reduce_size": False,
+                "signals": signals[:6],
+            }
+
+        # A+ setup fully confirmed
+        if swing_sc >= 8 and cat_sc >= 5 and rr >= 2:
+            if regime == "RISK_ON" and "Bullish" in trend and bias == "Long":
+                msg = (f"Trade allowed. A+ {setup_label} — trend, structure, and market all aligned for longs. "
+                       f"Execute with standard size.")
+            elif "Bearish" in trend and bias == "Short":
+                msg = (f"Trade allowed. A+ {setup_label} aligned for the short side. "
+                       f"Confirm structure break before entry.")
+            else:
+                msg = (f"Trade allowed. A+ {setup_label} — quality setup with solid R:R. "
+                       f"Confirm entry trigger before executing.")
+            level, css, status = "go", "coach-go", "TRADE ALLOWED"
+
+        # Solid setup with good R:R
+        elif swing_sc >= 6 and rr >= 1.5:
+            msg = (f"Trade allowed. Quality {setup_label} with acceptable R:R. "
+                   f"Standard size, disciplined execution.")
+            level, css, status = "go", "coach-go", "TRADE ALLOWED"
+
+        # Below-average quality → REDUCE SIZE
+        else:
+            msg = (f"Trade allowed but {setup_label} quality is below ideal. "
+                   f"Use reduced size and tight stop discipline.")
+            level, css, status = "reduce", "coach-reduce", "REDUCE SIZE"
+            reduce_flag = True
+
+        # Override to REDUCE SIZE when market conditions are weak
+        if reduce_flag and level == "go":
+            size_note = f" ({decision})" if decision else ""
+            msg += f" Reduce position size — market conditions are not fully supportive{size_note}."
+            level, css, status = "reduce", "coach-reduce", "REDUCE SIZE"
+
+    elif perm == "WATCH":
+        if is_extended_entry:
+            msg = ("Watch only. Price is extended from ideal entry — do not chase. "
+                   "Wait for a pullback into the zone.")
+        elif swing_sc >= 7:
+            msg = (f"Watch only. {setup_label} looks promising but entry is not yet confirmed. "
+                   f"Be patient and let the setup come to you.")
+        elif swing_sc >= 5:
+            msg = ("Watch only. Setup is forming but not confirmed. "
+                   "Wait for a clearer signal before committing capital.")
+        elif not has_entry:
+            msg = ("Watch only. No entry level defined — build a trade plan before considering this.")
+        else:
+            msg = ("Watch only. Setup quality is too low to justify entry right now. "
+                   "Check back when conditions improve.")
+        level, css, status = "watch", "coach-watch", "WATCH"
+
+        # Weak market makes WATCH more of a REDUCE SIZE warning
+        if regime in ("RISK_OFF", "CAUTION"):
+            msg += " Market conditions add extra reason to stay on the sidelines or go very small."
+            level, css, status = "reduce", "coach-reduce", "REDUCE SIZE"
+
+    else:
+        msg = ("No clear action. Review setup quality and current market conditions before committing capital.")
+        level, css, status = "watch", "coach-watch", "WATCH"
+
+    if missing:
+        msg += " Note: " + "; ".join(missing) + "."
+
+    return {
+        "coach_status": status,
+        "message": msg,
+        "level": level,
+        "css": css,
+        "reduce_size": reduce_flag,
+        "signals": signals[:6],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2083,11 +2314,14 @@ _DASHBOARD_EMPTY = dict(
     trades_today=0,
     losses_today=0,
     market_temp={"regime": "UNKNOWN", "label": "—", "css": "mt-unknown",
-                 "reason": "", "longs_ok": None, "shorts_ok": None,
-                 "reduce_size": False, "score": None, "error": True,
+                 "reason": "", "action_msg": "—", "longs_ok": None,
+                 "shorts_ok": None, "reduce_size": False,
+                 "score": None, "meter_score": 50, "error": True,
                  "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
                  "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
-                 "vix_level": None, "vix_direction": None},
+                 "vix_level": None, "vix_direction": None,
+                 "decision_cmd": "—", "risk_pct_rec": None, "size_multiplier": None,
+                 "size_zone": "unknown", "why": ""},
 )
 
 
@@ -2602,18 +2836,32 @@ def stock_detail(ticker):
     plan = get_trade_plan(ticker)
 
     try:
-        _, rr_display, rr_class = compute_rr(
+        rr_ratio, rr_display, rr_class = compute_rr(
             plan.get("plan_bias"),
             plan.get("entry_level"),
             plan.get("stop_loss"),
             plan.get("target_price"),
         )
+        stock.setdefault("risk_reward", rr_ratio)
     except Exception:
         rr_display, rr_class = "—", "rr-neutral"
 
     all_wls       = get_all_watchlists()
     ticker_wl_ids = get_ticker_watchlist_ids(ticker)
-    logger.info("stock_detail  ticker=%s  state=%s", ticker, stock.get("ticker_state"))
+    rs            = get_risk_settings()
+    market_temp   = _get_market_temperature()
+
+    try:
+        coach = compute_trade_coach(stock, plan, market_temp, rs)
+    except Exception as _ce:
+        logger.warning("stock_detail  ticker=%s  coach_err=%s", ticker, _ce)
+        coach = {
+            "message": "Coach unavailable — could not evaluate signals.",
+            "level": "caution", "css": "coach-caution",
+            "reduce_size": False, "signals": [],
+        }
+
+    logger.info("stock_detail  ticker=%s  state=%s  coach=%s", ticker, stock.get("ticker_state"), coach.get("level"))
 
     return render_template(
         "stock_detail.html",
@@ -2627,7 +2875,9 @@ def stock_detail(ticker):
         all_wls=all_wls,
         ticker_wl_ids=ticker_wl_ids,
         get_setup_type_class=get_setup_type_class,
-        risk_settings=get_risk_settings(),
+        risk_settings=rs,
+        market_temp=market_temp,
+        coach=coach,
     )
 
 
@@ -2641,13 +2891,16 @@ def _get_market_temperature() -> dict:
     """Return cached market regime; trigger background refresh when stale."""
     _LOADING: dict = {
         "regime": "LOADING", "label": "Loading…", "css": "mt-loading",
-        "reason": "Fetching market data…", "longs_ok": None, "shorts_ok": None,
-        "reduce_size": False, "score": None, "error": False,
+        "reason": "Fetching market data…", "action_msg": "—",
+        "longs_ok": None, "shorts_ok": None,
+        "reduce_size": False, "score": None, "meter_score": 50, "error": False,
         "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
         "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
         "vix_level": None, "vix_direction": None,
         "es_price": None, "es_change_pct": None, "es_above_vwap": None,
         "sectors": {}, "mode_desc": "—",
+        "action_msg": "—", "decision_cmd": "Loading…", "risk_pct_rec": None,
+        "size_multiplier": None, "size_zone": "unknown", "why": "Fetching market data…",
     }
     now = _time.time()
     if _market_temp_cache["ts"] and now - _market_temp_cache["ts"] < _MARKET_TEMP_TTL:
@@ -3471,6 +3724,8 @@ def _stock_summary(s: dict) -> dict:
         "stop_level", "target_1", "target_2",
         "daily_trend", "h4_trend",
         "is_extended", "swing_data_available",
+        # Needed for live badge patching on the detail page
+        "trade_permission",
     ]
     return {f: s.get(f) for f in fields}
 
@@ -3571,6 +3826,14 @@ def api_stock_live(ticker):
     annotate(stock)
     result = _stock_summary(stock)
     result["server_time"] = _et_now().strftime("%I:%M %p").lstrip("0") + " ET"
+    # Include coach so the detail page can patch the coach card on every poll
+    try:
+        _plan = get_trade_plan(ticker)
+        _mt   = _get_market_temperature()
+        _rs   = get_risk_settings()
+        result["coach"] = compute_trade_coach(stock, _plan, _mt, _rs)
+    except Exception as _ce:
+        logger.warning("api_stock_live coach failed for %s: %s", ticker, _ce)
     return jsonify(result)
 
 
@@ -3642,6 +3905,175 @@ def _deferred_startup():
         logger.error("deferred_startup watchlist log error: %s", _e, exc_info=True)
 
 threading.Thread(target=_deferred_startup, daemon=True, name="startup-seed").start()
+
+
+# ---------------------------------------------------------------------------
+# Schwab Account Integration  (Phase 1 — read-only)
+# ---------------------------------------------------------------------------
+# Required env vars:  SCHWAB_CLIENT_ID  SCHWAB_CLIENT_SECRET  SCHWAB_REDIRECT_URI
+# All routes guard against missing credentials gracefully.
+# NO order-placement routes exist in this phase.
+# ---------------------------------------------------------------------------
+
+_schwab_account_cache: dict = {"data": None, "ts": 0.0}
+_SCHWAB_CACHE_TTL = 60   # refresh account data every 60 s
+
+
+def _get_schwab_data(force: bool = False) -> dict:
+    """Return cached Schwab account summary, refreshing when stale."""
+    now = _time.time()
+    if not force and _schwab_account_cache["ts"] and \
+            now - _schwab_account_cache["ts"] < _SCHWAB_CACHE_TTL:
+        return _schwab_account_cache["data"]
+    try:
+        import schwab as _schwab
+        data = _schwab.get_account_summary()
+        _schwab_account_cache["data"] = data
+        _schwab_account_cache["ts"]   = now
+        return data
+    except Exception as _e:
+        logger.warning("schwab cache refresh failed: %s", _e)
+        return _schwab_account_cache["data"] or {
+            "connected": False, "total_value": None, "buying_power": None,
+            "daily_pnl": None, "total_unrealized": None,
+            "open_positions": 0, "accounts": [], "error": str(_e),
+        }
+
+
+@app.route("/schwab/account")
+def schwab_account():
+    """Schwab account overview page — read-only, Phase 1."""
+    import schwab as _schwab
+
+    configured = _schwab.is_configured()
+    tok_status = _schwab.token_status()
+
+    account_data = None
+    orders_by_account = {}
+    error_msg = None
+
+    if tok_status["connected"]:
+        try:
+            account_data = _get_schwab_data()
+            if account_data.get("error"):
+                error_msg = account_data["error"]
+            else:
+                for acct in account_data.get("accounts", []):
+                    ah = acct.get("account_hash", "")
+                    if ah:
+                        try:
+                            orders_by_account[ah] = _schwab.fetch_orders(ah, days_back=1)
+                        except Exception as _oe:
+                            logger.warning("schwab orders fetch failed hash=%s: %s", ah, _oe)
+                            orders_by_account[ah] = []
+        except Exception as _e:
+            error_msg = str(_e)
+            logger.warning("schwab_account page error: %s", _e)
+
+    return render_template(
+        "schwab_account.html",
+        configured=configured,
+        tok_status=tok_status,
+        account_data=account_data,
+        orders_by_account=orders_by_account,
+        error_msg=error_msg,
+    )
+
+
+@app.route("/schwab/auth")
+def schwab_auth():
+    """Start the Schwab OAuth 2.0 PKCE flow."""
+    import schwab as _schwab
+
+    if not _schwab.is_configured():
+        flash("Schwab API credentials not configured. Set SCHWAB_CLIENT_ID, "
+              "SCHWAB_CLIENT_SECRET, and SCHWAB_REDIRECT_URI environment variables.", "warning")
+        return redirect(url_for("schwab_account"))
+
+    code_verifier, code_challenge = _schwab._pkce_pair()
+    state = secrets.token_urlsafe(24)
+
+    # Store PKCE verifier and state in Flask session (server-side, signed cookie)
+    session["schwab_code_verifier"] = code_verifier
+    session["schwab_state"]         = state
+
+    auth_url = _schwab.build_auth_url(state, code_challenge)
+    logger.info("schwab_auth  redirecting to Schwab  state=%s", state)
+    return redirect(auth_url)
+
+
+@app.route("/schwab/callback")
+def schwab_callback():
+    """OAuth callback — exchange code for tokens and store them."""
+    import schwab as _schwab
+
+    code      = request.args.get("code", "")
+    state     = request.args.get("state", "")
+    error     = request.args.get("error", "")
+    error_desc= request.args.get("error_description", "")
+
+    if error:
+        flash(f"Schwab authorization denied: {error_desc or error}", "danger")
+        return redirect(url_for("schwab_account"))
+
+    # Validate state to prevent CSRF
+    expected_state    = session.pop("schwab_state", None)
+    code_verifier     = session.pop("schwab_code_verifier", None)
+
+    if not state or state != expected_state:
+        flash("OAuth state mismatch — possible CSRF. Please try again.", "danger")
+        return redirect(url_for("schwab_account"))
+
+    if not code:
+        flash("No authorization code received from Schwab.", "danger")
+        return redirect(url_for("schwab_account"))
+
+    try:
+        tokens = _schwab.exchange_code_for_tokens(code, code_verifier or "")
+        _schwab.save_tokens(tokens)
+        _schwab_account_cache["ts"] = 0  # invalidate cache
+        logger.info("schwab_callback  tokens saved successfully")
+        flash("Schwab account connected successfully. Account data is loading.", "success")
+    except Exception as e:
+        logger.error("schwab_callback  token exchange failed: %s", e)
+        flash(f"Failed to connect Schwab account: {e}", "danger")
+
+    return redirect(url_for("schwab_account"))
+
+
+@csrf.exempt
+@app.route("/schwab/disconnect", methods=["POST"])
+def schwab_disconnect():
+    """Clear stored Schwab tokens (read-only disconnect, no broker-side revocation)."""
+    import schwab as _schwab
+    _schwab.clear_tokens()
+    _schwab_account_cache["data"] = None
+    _schwab_account_cache["ts"]   = 0.0
+    flash("Schwab account disconnected. Your data has been cleared from this app.", "success")
+    return redirect(url_for("schwab_account"))
+
+
+@app.route("/api/schwab/summary")
+def api_schwab_summary():
+    """
+    JSON endpoint for account summary.
+    Used by dashboard widgets to pull live account balance / buying power.
+    Read-only Phase 1 — no mutations.
+    """
+    import schwab as _schwab
+    if not _schwab.token_status()["connected"]:
+        return jsonify({"connected": False, "error": "Not authenticated"})
+    data = _get_schwab_data()
+    # Return only the safe summary fields (no token data)
+    return jsonify({
+        "connected":        data.get("connected", False),
+        "total_value":      data.get("total_value"),
+        "buying_power":     data.get("buying_power"),
+        "daily_pnl":        data.get("daily_pnl"),
+        "total_unrealized": data.get("total_unrealized"),
+        "open_positions":   data.get("open_positions"),
+        "error":            data.get("error"),
+    })
 
 
 # ---------------------------------------------------------------------------
