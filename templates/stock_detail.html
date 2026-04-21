@@ -29,6 +29,13 @@
         <button type="submit" class="btn-inline-refresh">⟳ Refresh Data</button>
       </form>
     </div>
+    <div class="detail-poll-row">
+      <span class="detail-poll-dot" id="detail-poll-dot">●</span>
+      <span class="detail-poll-label">Last poll:</span>
+      <span class="detail-poll-time" id="detail-poll-time">—</span>
+      <span class="poll-state-badge poll-state-waiting" id="detail-poll-state">WAITING</span>
+      <span class="poll-market-note" id="detail-market-note" style="display:none;">Market closed — values may remain unchanged</span>
+    </div>
   </div>
 
   <!-- ===== TICKER STATE BANNER ===== -->
@@ -1107,21 +1114,90 @@ function calcOptionsRisk() {
 
 const DETAIL_TICKER = "{{ stock.ticker }}";
 
+// ── Poll observability helpers ───────────────────────────────────────────────
+
+// Track previous values to detect NO CHANGE vs LIVE UPDATE
+let _prevDetailPrice = undefined;
+let _prevDetailSwing = undefined;
+let _prevDetailCat   = undefined;
+
+function _nowET() {
+  return new Date().toLocaleTimeString('en-US', {
+    timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+}
+
+function _setPollTime(t) {
+  const el = document.getElementById('detail-poll-time');
+  if (el) el.textContent = t + ' ET';
+}
+
+function _setPollState(text, cls) {
+  const el = document.getElementById('detail-poll-state');
+  if (!el) return;
+  el.textContent = text;
+  el.className   = 'poll-state-badge ' + cls;
+}
+
+function _pulseDot() {
+  const dot = document.getElementById('detail-poll-dot');
+  if (!dot) return;
+  dot.classList.add('poll-dot-pulse');
+  setTimeout(function() { dot.classList.remove('poll-dot-pulse'); }, 700);
+}
+
+function _updateMarketNote() {
+  const el = document.getElementById('detail-market-note');
+  if (!el) return;
+  const closed = typeof isMarketHours === 'function' && !isMarketHours();
+  el.style.display = closed ? '' : 'none';
+}
+
+// ── Main refresh function ────────────────────────────────────────────────────
+
 async function stockDetailRefresh() {
-  const url = `/api/stock/${DETAIL_TICKER}/live`;
-  console.debug('[detail] Polling', url);
+  const url   = `/api/stock/${DETAIL_TICKER}/live`;
+  const stamp = _nowET();
+  console.log('[detail] Poll started —', stamp);
+
+  _updateMarketNote();
+
   try {
+    console.log('[detail] Request sent →', url);
     const resp = await fetch(url);
+
     if (!resp.ok) {
-      console.warn('[detail] Endpoint returned HTTP', resp.status, '— will retry next cycle');
+      console.warn('[detail] HTTP', resp.status, '— will retry next cycle');
+      _setPollTime(stamp);
+      _setPollState('ERROR', 'poll-state-error');
       return false;
     }
+
     const s = await resp.json();
+    console.log('[detail] Response received — price:', s.current_price,
+                '| swing:', s.swing_score, '| cat:', s.catalyst_score,
+                '| server_time:', s.server_time);
+
     if (s.error) {
-      console.warn('[detail] API returned error:', s.error);
+      console.warn('[detail] API error:', s.error);
+      _setPollTime(stamp);
+      _setPollState('ERROR', 'poll-state-error');
       return false;
     }
-    console.debug('[detail] Data received — price:', s.current_price, 'swing:', s.swing_score, 'cat:', s.catalyst_score);
+
+    // ── Detect whether anything meaningful changed ──────────────────────────
+    const priceChanged = s.current_price !== _prevDetailPrice;
+    const swingChanged = s.swing_score   !== _prevDetailSwing;
+    const catChanged   = s.catalyst_score !== _prevDetailCat;
+    const anyChanged   = priceChanged || swingChanged || catChanged;
+
+    console.log('[detail] Change detection — price:', priceChanged,
+                '| swing:', swingChanged, '| catalyst:', catChanged,
+                '| any:', anyChanged);
+
+    _prevDetailPrice = s.current_price;
+    _prevDetailSwing = s.swing_score;
+    _prevDetailCat   = s.catalyst_score;
 
     // ── Status badges ───────────────────────────────────────────────────────
     const sfaBadge = document.getElementById('detail-sfa-badge');
@@ -1189,7 +1265,7 @@ async function stockDetailRefresh() {
     }
 
     if (s.headline_freshness) {
-      document.querySelectorAll('.headline-freshness-badge').forEach(e => {
+      document.querySelectorAll('.headline-freshness-badge').forEach(function(e) {
         e.textContent = s.headline_freshness;
       });
     }
@@ -1224,24 +1300,36 @@ async function stockDetailRefresh() {
       }
     }
 
-    // ── Finish ──────────────────────────────────────────────────────────────
+    // ── Poll status indicators ───────────────────────────────────────────────
+    _setPollTime(stamp);
+    if (anyChanged) {
+      _setPollState('LIVE UPDATE', 'poll-state-live');
+    } else {
+      _setPollState('NO CHANGE', 'poll-state-nochange');
+    }
+    _pulseDot();
+
     const displayTime = s.server_time || new Date().toLocaleTimeString(
       'en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }
     );
     window._arSetLastUpdated(displayTime);
-    console.debug('[detail] DOM patch complete —', displayTime);
+    console.log('[detail] DOM patch complete — changed:', anyChanged, '—', stamp);
     return true;
 
   } catch(e) {
-    console.warn('[detail] Live refresh exception (will retry):', e);
+    console.warn('[detail] Exception (will retry):', e);
+    _setPollTime(stamp);
+    _setPollState('ERROR', 'poll-state-error');
     return false;
   }
 }
 
 window._arRefreshFn = stockDetailRefresh;
+_updateMarketNote();   // show market-closed note immediately on page load
 console.log('[detail] Auto-refresh armed for', DETAIL_TICKER,
             '— interval', window._arInterval / 1000 + 's',
-            '| AR enabled:', window._arEnabled);
+            '| AR enabled:', window._arEnabled,
+            '| market hours:', typeof isMarketHours === 'function' ? isMarketHours() : 'unknown');
 </script>
 
 <script>

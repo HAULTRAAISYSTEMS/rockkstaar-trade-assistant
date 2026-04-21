@@ -4961,6 +4961,53 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   .coach-signals { flex-direction: column; }
 }
 
+/* ── Detail page: poll observability row ── */
+.detail-poll-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.3rem;
+  font-size: 0.71rem;
+  color: #475569;
+  flex-wrap: wrap;
+}
+.detail-poll-dot {
+  font-size: 0.55rem;
+  color: #334155;
+  display: inline-block;
+  transition: color 0.15s;
+}
+.detail-poll-dot.poll-dot-pulse {
+  color: #4ade80;
+  animation: _detail_pulse 0.65s ease-out forwards;
+}
+@keyframes _detail_pulse {
+  0%   { transform: scale(1.8); opacity: 1; }
+  100% { transform: scale(1);   opacity: 0.6; }
+}
+.detail-poll-label { color: #475569; }
+.detail-poll-time  {
+  font-variant-numeric: tabular-nums;
+  color: #64748b;
+  min-width: 7.5ch;
+}
+.poll-state-badge {
+  padding: 0.08rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.poll-state-waiting  { background: rgba(100,116,139,0.12); color: #64748b; }
+.poll-state-live     { background: rgba(34,197,94,0.14);   color: #4ade80; }
+.poll-state-nochange { background: rgba(100,116,139,0.10); color: #475569; }
+.poll-state-error    { background: rgba(239,68,68,0.14);   color: #f87171; }
+.poll-market-note {
+  color: #f59e0b;
+  font-style: italic;
+  font-size: 0.7rem;
+}
+
 /* ── Schwab Account Page */
 .nav-link-schwab { color: #93c5fd; }
 
