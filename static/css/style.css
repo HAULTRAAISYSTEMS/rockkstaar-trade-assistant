@@ -2598,6 +2598,13 @@ a { color: inherit; text-decoration: none; }
   width: fit-content;
   opacity: 0.85;
 }
+/* v4 bucket badges */
+.cl-ready    { background: rgba(34,197,94,0.15);   color: #86efac; border: 1px solid rgba(34,197,94,0.3); }
+.cl-forming  { background: rgba(234,179,8,0.12);   color: #fde68a; border: 1px solid rgba(234,179,8,0.25); }
+.cl-trend    { background: rgba(56,189,248,0.12);  color: #7dd3fc; border: 1px solid rgba(56,189,248,0.25); }
+.cl-extended { background: rgba(249,115,22,0.12);  color: #fed7aa; border: 1px solid rgba(249,115,22,0.25); }
+.cl-avoid    { background: rgba(239,68,68,0.10);   color: #fca5a5; border: 1px solid rgba(239,68,68,0.22); }
+/* Legacy badge classes kept for backward compat */
 .cl-aplus     { background: rgba(99,102,241,0.18); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.3); }
 .cl-secondary { background: rgba(234,179,8,0.12);  color: #fde68a; border: 1px solid rgba(234,179,8,0.25); }
 .cl-swing     { background: rgba(249,115,22,0.12); color: #fed7aa; border: 1px solid rgba(249,115,22,0.25); }

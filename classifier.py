@@ -1,160 +1,196 @@
 """
 classifier.py - Auto-classification rules for Rockkstaar Trade Assistant.
 
-In swing mode (swing_score present), classifies based on swing_score,
-daily_trend, and swing_status.  Falls back to legacy day-trading logic
-when swing fields are absent (backward compat).
+Five-bucket workflow — evaluated top-to-bottom, first match wins:
 
-Watchlist hierarchy (evaluated top to bottom — first match wins):
-    Swing Ready   — High swing score, actionable status, trend aligned, good R:R
-    Pullback Zone — Near key pullback level (20/50 EMA, 50/61.8% fib, demand zone)
-    Extended      — Already ran, too far from entry, not good to chase
-    Core List     — Default / manually tracked / no actionable data
+  AVOID / BLOCKED       — do not trade: avoid bias, weak structure, bad R:R
+  EXTENDED / CHASE ZONE — ran too far from ideal entry; wait for reset
+  A+ READY              — all conditions met: score, status, trend, R:R, not extended
+  SETUPS FORMING        — decent setup but one or two things still missing
+  TREND WATCH           — strong trend, setup not yet ready
+
+Inputs used (all from stock_data table, no annotate() dependency):
+  swing_score, swing_status, daily_trend, trade_bias,
+  catalyst_score, momentum_score, risk_reward,
+  entry_quality, pct_from_ema20, auto_classify, classify_reason
 """
 
 # Must match DEFAULT_WATCHLISTS in database.py
-SWING_READY   = "A+ Swing Setups"
-PULLBACK_ZONE = "Secondary Swing Watch"
-EXTENDED      = "Extended"
-CORE_LIST     = "Core Swing Plays"
+A_PLUS_READY    = "A+ READY"
+SETUPS_FORMING  = "SETUPS FORMING"
+TREND_WATCH     = "TREND WATCH"
+EXTENDED_ZONE   = "EXTENDED / CHASE ZONE"
+AVOID_BLOCKED   = "AVOID / BLOCKED"
 
-_AVOID_STATUSES = {"TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE"}
-_WAIT_STATUSES  = {"WAIT FOR PULLBACK", "WAIT FOR 15M CONFIRMATION", "NOT ENOUGH EDGE"}
-_READY_STATUSES = {"GOOD SWING CANDIDATE", "READY IF LEVEL HOLDS"}
+# Current 4-mode swing status labels
+_READY_STATUSES = {
+    "READY — LEVEL HOLDS",
+    "PRE-CONFIRMATION",
+    # Legacy labels kept for backward compat
+    "GOOD SWING CANDIDATE",
+    "READY IF LEVEL HOLDS",
+}
+
+_AVOID_STATUSES = {
+    "AVOID — AT RESISTANCE",
+    "AVOID — WEAK STRUCTURE",
+    # Legacy labels
+    "AVOID AT RESISTANCE",
+    "AVOID WEAK STRUCTURE",
+}
+
+_EXTENDED_STATUSES = {
+    "TOO EXTENDED",
+}
+
+_FORMING_STATUSES = {
+    "WAIT",
+    "WAIT FOR PULLBACK",
+    "WAIT FOR 15M CONFIRMATION",
+    "NOT ENOUGH EDGE",
+    "TREND CONTINUATION",
+}
+
+_BULLISH_TRENDS = {"Bullish", "Bullish Lean"}
+_BEARISH_TRENDS = {"Bearish", "Bearish Lean"}
+_TREND_ALIGNED  = _BULLISH_TRENDS | _BEARISH_TRENDS
 
 
 def classify_stock(stock: dict) -> tuple:
     """
-    Determine which default watchlist this stock belongs to and why.
+    Determine which bucket this stock belongs to and why.
 
     Returns:
         (watchlist_name: str, reason: str)
 
-    Swing mode classification (when swing_score is present):
-
-    Swing Ready
-        - swing_score >= 7
-        - swing_status in READY_STATUSES
-        - daily_trend in ("Bullish", "Bullish Lean") for longs
-          OR daily_trend in ("Bearish", "Bearish Lean") for shorts
-
-    Pullback Zone
-        - swing_score >= 5
-        - swing_status not in AVOID_STATUSES
-        (near a key pullback level — not yet fully ready)
-
-    Extended
-        - swing_status in AVOID_STATUSES (too extended, at resistance)
-        - OR swing_score >= 3 with wait/unfavourable status
-
-    Core List (default)
-        - swing_score < 3
-        - OR Avoid bias
-        - OR no swing data
-
-    Legacy day-trading fallback (when swing_score is absent):
-        Swing Ready   : momentum >= 6, ORB ready, entry not Extended, setup >= 7
-        Pullback Zone : momentum >= 4 OR setup in [5, 6]
-        Extended      : setup >= 3, momentum < 4, ORB not ready
-        Core List     : everything else
+    Reason strings always start with the bucket name so the dashboard
+    badge renderer can map them to the correct CSS class.
     """
-    bias  = stock.get("trade_bias") or "Neutral"
+    bias         = stock.get("trade_bias") or "Neutral"
+    swing_score  = stock.get("swing_score") or 0
+    swing_status = (stock.get("swing_status") or "").strip()
+    daily_trend  = (stock.get("daily_trend")  or "Neutral").strip()
+    cat_sc       = float(stock.get("catalyst_score")  or 0)
+    mom_sc       = float(stock.get("momentum_score")  or 0)
+    rr           = float(stock.get("risk_reward")     or 0)
+    entry_q      = (stock.get("entry_quality") or "").strip()
+    pct_ema20    = stock.get("pct_from_ema20")   # may be None
 
-    # Avoid-biased stocks always go to Core Swing Plays
+    trend_aligned = daily_trend in _TREND_ALIGNED
+
+    # ── 1. AVOID / BLOCKED ────────────────────────────────────────────────────
     if bias == "Avoid":
-        return CORE_LIST, "Placed in Core Swing Plays: Avoid bias — not suitable for active trading"
-
-    swing_score  = stock.get("swing_score")
-    swing_status = stock.get("swing_status") or ""
-    daily_trend  = stock.get("daily_trend")  or "Neutral"
-
-    # ── Swing mode ────────────────────────────────────────────────────────────
-    if swing_score:
-        trend_ok_long  = daily_trend in ("Bullish", "Bullish Lean")
-        trend_ok_short = daily_trend in ("Bearish", "Bearish Lean")
-        trend_ok       = trend_ok_long or trend_ok_short
-
-        # Extended: avoid statuses — ran too far or bad structure
-        if swing_status in _AVOID_STATUSES:
-            return EXTENDED, (
-                f"Extended: {swing_status} — already ran or at resistance, "
-                "not a valid entry"
-            )
-
-        # A+ Swing Setups: high score + actionable status + trend confirmed
-        if swing_score >= 7 and swing_status in _READY_STATUSES and trend_ok:
-            return SWING_READY, (
-                f"A+ Swing Setups: score {swing_score}/10, {swing_status}, "
-                f"{daily_trend} daily trend — valid entry zone"
-            )
-
-        # A+ even without perfect trend if score is very high
-        if swing_score >= 8 and swing_status in _READY_STATUSES:
-            return SWING_READY, (
-                f"A+ Swing Setups (high score): score {swing_score}/10, {swing_status}"
-            )
-
-        # Secondary Swing Watch: decent score, watching for entry at a key level
-        if swing_score >= 5 and swing_status not in _AVOID_STATUSES:
-            gaps = []
-            if swing_score < 7:
-                gaps.append(f"score {swing_score}/10 (need ≥ 7 for A+)")
-            if swing_status not in _READY_STATUSES:
-                gaps.append(f"status: {swing_status}")
-            if not trend_ok:
-                gaps.append(f"trend: {daily_trend}")
-            reason = "Secondary Swing Watch: " + (", ".join(gaps) if gaps else "near key level, watching for entry")
-            return PULLBACK_ZONE, reason
-
-        # Extended (low score + avoid/wait status): setup not actionable
-        if swing_score >= 3 or swing_status in _WAIT_STATUSES:
-            return EXTENDED, (
-                f"Extended: score {swing_score}/10, {swing_status} — "
-                "setup not ready, do not chase"
-            )
-
-        # Core Swing Plays: no usable data — manually tracked
-        return CORE_LIST, (
-            f"Core Swing Plays: swing score {swing_score}/10, status: {swing_status or 'none'}"
+        return AVOID_BLOCKED, (
+            "AVOID / BLOCKED: Avoid bias — not suitable for active trading"
         )
 
-    # ── Legacy day-trading fallback ───────────────────────────────────────────
-    mom   = stock.get("momentum_score") or 0
-    orb   = stock.get("orb_ready")      or "NO"
-    entry = stock.get("entry_quality")  or "Okay"
-    setup = stock.get("setup_score")    or 0
-
-    if mom >= 6 and orb == "YES" and entry != "Extended" and setup >= 7:
-        parts = []
-        parts.append(f"{'elite' if mom >= 9 else 'strong'} momentum ({mom}/10)")
-        parts.append("ORB ready")
-        if entry == "Perfect":
-            parts.append("perfect entry quality")
-        parts.append(f"setup {setup}/10")
-        return SWING_READY, "A+ Swing Setups: " + ", ".join(parts)
-
-    if entry == "Extended" or (mom < 4 and setup < 3):
-        return EXTENDED, (
-            f"Extended: entry quality {entry}, momentum {mom}/10 — do not chase"
+    if swing_status in _AVOID_STATUSES:
+        label = swing_status.replace("AVOID — ", "").replace("AVOID ", "")
+        return AVOID_BLOCKED, (
+            f"AVOID / BLOCKED: {label} — structure or resistance makes this untradeable"
         )
 
-    if mom >= 4 or (5 <= setup < 7):
+    if rr > 0 and rr < 1.0:
+        return AVOID_BLOCKED, (
+            f"AVOID / BLOCKED: R:R too weak ({rr:.1f}:1) — risk does not justify reward"
+        )
+
+    if swing_score < 3 and cat_sc < 4 and mom_sc < 4:
+        return AVOID_BLOCKED, (
+            f"AVOID / BLOCKED: Low signal — swing {swing_score}/10, "
+            f"catalyst {cat_sc:.0f}/10, momentum {mom_sc:.0f}/10"
+        )
+
+    # ── 2. EXTENDED / CHASE ZONE ──────────────────────────────────────────────
+    if swing_status in _EXTENDED_STATUSES:
+        return EXTENDED_ZONE, (
+            "EXTENDED / CHASE ZONE: Price ran too far — do not chase, wait for reset"
+        )
+
+    if entry_q == "Extended":
+        pct_note = f" ({pct_ema20:+.1f}% from 20 EMA)" if pct_ema20 is not None else ""
+        return EXTENDED_ZONE, (
+            f"EXTENDED / CHASE ZONE: Entry quality Extended{pct_note} — wait for pullback"
+        )
+
+    if pct_ema20 is not None and pct_ema20 > 8:
+        return EXTENDED_ZONE, (
+            f"EXTENDED / CHASE ZONE: {pct_ema20:.1f}% above 20 EMA — "
+            "too far from ideal entry, wait for reset"
+        )
+
+    # ── 3. A+ READY ───────────────────────────────────────────────────────────
+    if swing_score >= 7 and swing_status in _READY_STATUSES and trend_aligned:
         gaps = []
-        if orb != "YES":
-            gaps.append("ORB not ready yet")
-        if entry == "Extended":
-            gaps.append("entry too extended")
-        if mom < 6:
-            gaps.append(f"momentum only {mom}/10 (need ≥ 6)")
-        if setup < 7:
-            gaps.append(f"setup {setup}/10 (need ≥ 7)")
-        reason = "Secondary Swing Watch: " + (", ".join(gaps) if gaps else "near key level, not yet A+")
-        return PULLBACK_ZONE, reason
-
-    if setup >= 3 and mom < 4 and orb != "YES":
-        return EXTENDED, (
-            f"Extended: low momentum ({mom}/10), "
-            f"some price structure (setup {setup}/10) — not actionable"
+        if rr > 0 and rr < 1.5:
+            gaps.append(f"R:R only {rr:.1f}:1")
+        if not gaps:
+            trend_label = daily_trend
+            rr_note = f", R:R {rr:.1f}:1" if rr >= 1.5 else ""
+            cat_note = f", catalyst {cat_sc:.0f}/10" if cat_sc >= 5 else ""
+            return A_PLUS_READY, (
+                f"A+ READY: score {swing_score}/10, {swing_status}, "
+                f"{trend_label} trend{rr_note}{cat_note} — entry in zone"
+            )
+        # Near-A+: score and status ready but R:R is marginal → SETUPS FORMING
+        return SETUPS_FORMING, (
+            f"SETUPS FORMING: Strong setup ({swing_score}/10, {swing_status}) "
+            f"but {'; '.join(gaps)} — improve R:R before entry"
         )
 
-    return CORE_LIST, f"Core Swing Plays: low signal (momentum {mom}/10, setup {setup}/10) — manually monitor"
+    # A+ even without trend if score is very high and in a ready status
+    if swing_score >= 9 and swing_status in _READY_STATUSES:
+        return A_PLUS_READY, (
+            f"A+ READY: Elite score {swing_score}/10, {swing_status} — "
+            "trade allowed regardless of trend (very high score)"
+        )
+
+    # ── 4. SETUPS FORMING ─────────────────────────────────────────────────────
+    if swing_score >= 5:
+        gaps = []
+        if swing_score < 7:
+            gaps.append(f"score {swing_score}/10 (need ≥ 7 for A+)")
+        if swing_status not in _READY_STATUSES:
+            if swing_status in _FORMING_STATUSES:
+                gaps.append(_forming_hint(swing_status))
+            elif swing_status:
+                gaps.append(f"status: {swing_status}")
+        if not trend_aligned:
+            gaps.append(f"trend not aligned ({daily_trend})")
+        if rr > 0 and rr < 1.5:
+            gaps.append(f"R:R {rr:.1f}:1 (need ≥ 1.5)")
+        reason_detail = "; ".join(gaps) if gaps else "near key level, watching"
+        return SETUPS_FORMING, (
+            f"SETUPS FORMING: {reason_detail}"
+        )
+
+    # ── 5. TREND WATCH ────────────────────────────────────────────────────────
+    if swing_score >= 3 and trend_aligned:
+        gaps = []
+        if swing_score < 5:
+            gaps.append(f"score {swing_score}/10 needs improvement")
+        if swing_status in _FORMING_STATUSES:
+            gaps.append(_forming_hint(swing_status))
+        elif swing_status and swing_status not in _READY_STATUSES:
+            gaps.append(f"status: {swing_status}")
+        reason_detail = "; ".join(gaps) if gaps else "monitoring for setup development"
+        return TREND_WATCH, (
+            f"TREND WATCH: {daily_trend} trend, {reason_detail}"
+        )
+
+    # ── Catch-all → AVOID / BLOCKED ───────────────────────────────────────────
+    return AVOID_BLOCKED, (
+        f"AVOID / BLOCKED: Insufficient signal — swing {swing_score}/10, "
+        f"trend: {daily_trend}, status: {swing_status or 'none'}"
+    )
+
+
+def _forming_hint(status: str) -> str:
+    """Return a plain-English 'needs X' string for a forming/wait status."""
+    return {
+        "WAIT":                       "needs confirmation",
+        "WAIT FOR PULLBACK":          "needs pullback to entry zone",
+        "WAIT FOR 15M CONFIRMATION":  "needs 15m entry confirmation",
+        "NOT ENOUGH EDGE":            "not enough edge yet",
+        "TREND CONTINUATION":         "needs breakout confirmation",
+    }.get(status, f"status: {status}")
