@@ -42,6 +42,7 @@ from data_fetcher import _et_now
 from scoring import catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES, compute_swing_grade
 from classifier import classify_stock
 from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as _clear_alerts
+import scanner as _scanner
 
 app = Flask(__name__)
 
@@ -133,6 +134,9 @@ try:
     init_db()
 except Exception as _init_err:
     logger.error("init_db failed at startup: %s — will retry on first request", _init_err)
+
+# Start the background momentum scanner daemon (no-op if already running).
+_scanner.start_scanner()
 
 # ---------------------------------------------------------------------------
 # Startup migration: wipe stale mock-seeded prices from the DB.
@@ -872,6 +876,8 @@ def compute_trade_coach(stock: dict, plan: dict, market_temp: dict, risk_setting
     shorts_ok = mt.get("shorts_ok", True)
     reduce_sz = mt.get("reduce_size", False)
     decision  = mt.get("decision_cmd", "")
+    if decision in ("Loading…", "—", "", None):
+        decision = ""
 
     tp       = stock.get("trade_permission") or {}
     perm     = tp.get("permission", "WATCH")
@@ -2321,7 +2327,9 @@ _DASHBOARD_EMPTY = dict(
                  "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
                  "vix_level": None, "vix_direction": None,
                  "decision_cmd": "—", "risk_pct_rec": None, "size_multiplier": None,
-                 "size_zone": "unknown", "why": ""},
+                 "size_zone": "unknown", "why": "",
+                 "mode_desc": "—", "es_price": None, "es_change_pct": None,
+                 "es_above_vwap": None, "sectors": {}},
 )
 
 
@@ -2884,14 +2892,14 @@ def stock_detail(ticker):
 # ── Market Temperature cache ─────────────────────────────────────────────────
 _market_temp_cache: dict = {"data": None, "ts": 0.0}
 _market_temp_lock  = threading.Lock()   # guards the spawn-once check
-_MARKET_TEMP_TTL   = 300   # 5-minute refresh
+_MARKET_TEMP_TTL   = 90    # 90-second refresh (was 5 min)
 
 
 def _get_market_temperature() -> dict:
     """Return cached market regime; trigger background refresh when stale."""
     _LOADING: dict = {
         "regime": "LOADING", "label": "Loading…", "css": "mt-loading",
-        "reason": "Fetching market data…", "action_msg": "—",
+        "reason": "Fetching market data…",
         "longs_ok": None, "shorts_ok": None,
         "reduce_size": False, "score": None, "meter_score": 50, "error": False,
         "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
@@ -3528,12 +3536,12 @@ def quick_mode():
     wl_id     = get_active_wl_id()
     watchlist = get_watchlist_stocks(wl_id) if wl_id else []
 
-    if watchlist:
-        auto_refresh_stale_closes(watchlist)
-
     _trade_mode = get_setting("trading_mode") or "SWING TRADE"
     all_data = get_all_stock_data()
     data_map = {s["ticker"]: s for s in all_data}
+
+    if watchlist:
+        auto_refresh_stale_closes(watchlist, data_map=data_map)
     stocks   = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked   = rank_stocks(stocks)
     top3     = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
@@ -3564,10 +3572,11 @@ def api_quick():
 def ws_dashboard(ws):
     """
     WebSocket endpoint for live dashboard updates.
-    Sends an immediate snapshot on connect, then pushes fresh data every 15 s.
-    Falls silent when the client disconnects.
+    Sends an immediate snapshot on connect, then pushes every 3 s.
+    Payload includes ranked stocks, market_temp, scanner, and alert_count
+    so the client never needs separate HTTP polls for any of those feeds.
     """
-    wl_id = get_active_wl_id()   # session available during the WS handshake
+    wl_id = get_active_wl_id()
     try:
         ws.send(_json.dumps(_build_dashboard_payload(wl_id)))
         last_push = _time.monotonic()
@@ -3578,7 +3587,7 @@ def ws_dashboard(ws):
                     break   # clean client close
             except Exception:
                 break       # network error or close
-            if _time.monotonic() - last_push >= 5.0:
+            if _time.monotonic() - last_push >= 3.0:
                 ws.send(_json.dumps(_build_dashboard_payload(wl_id)))
                 last_push = _time.monotonic()
     except Exception as exc:
@@ -3745,10 +3754,20 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
     ranked    = rank_stocks(stocks)
     top5      = [
         s for s in ranked
-        if (s.get("momentum_score") or 0) >= 6
-        and s.get("orb_ready") == "YES"
-        and s.get("entry_quality") != "Extended"
-        and s.get("trade_bias") != "Avoid"
+        if (
+            (s.get("swing_score") or 0) >= 6
+            and s.get("swing_status") not in (
+                "WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE",
+                "AVOID WEAK STRUCTURE", "NOT ENOUGH EDGE"
+            )
+            and s.get("trade_bias") != "Avoid"
+        ) or (
+            not s.get("swing_score")
+            and (s.get("momentum_score") or 0) >= 6
+            and s.get("orb_ready") == "YES"
+            and s.get("entry_quality") != "Extended"
+            and s.get("trade_bias") != "Avoid"
+        )
     ][:5]
     no_trade     = compute_no_trade_assessment(ranked, top5)
     # Use display_exec_state (session-aware) so stale TRIGGERED stocks are not
@@ -3757,14 +3776,19 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
     top5_tickers = {s["ticker"] for s in top5}
     secondary    = compute_secondary_watchlist(ranked, top5_tickers)
     return {
-        "type":        "dashboard",
-        "server_time": _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
-        "orb_session": get_orb_session_banner(),
-        "no_trade":    no_trade,
-        "triggered":   [_stock_summary(s) for s in triggered],
-        "top5":        [_stock_summary(s) for s in top5],
-        "secondary":   [_stock_summary(s) for s in secondary],
-        "ranked":      [_stock_summary(s) for s in ranked],
+        "type":           "dashboard",
+        "server_time":    _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
+        "orb_session":    get_orb_session_banner(),
+        "no_trade":       no_trade,
+        "triggered":      [_stock_summary(s) for s in triggered],
+        "top5":           [_stock_summary(s) for s in top5],
+        "secondary":      [_stock_summary(s) for s in secondary],
+        "ranked":         [_stock_summary(s) for s in ranked],
+        # Bundled real-time feeds — served from cache, zero extra latency per push
+        "market_temp":    _get_market_temperature(),
+        "market_context": _get_market_context(),
+        "scanner":        _scanner.get_scan_results(),
+        "alert_count":    get_alert_count(),
     }
 
 
@@ -3808,6 +3832,46 @@ def api_market_context():
     except Exception as exc:
         logger.error("api_market_context failed: %s", exc, exc_info=True)
         return jsonify({"error": "market context unavailable"}), 500
+
+
+@app.route("/api/scanner")
+def api_scanner():
+    """
+    Live momentum scanner results — polled every 20 s by the dashboard.
+    Returns current opportunities, last scan time, and market-hours flag.
+    """
+    try:
+        return jsonify(_scanner.get_scan_results())
+    except Exception as exc:
+        logger.error("api_scanner failed: %s", exc, exc_info=True)
+        return jsonify({"error": "scanner unavailable"}), 500
+
+
+@csrf.exempt
+@app.route("/api/scanner/add", methods=["POST"])
+def api_scanner_add():
+    """
+    Add a scanner-detected ticker to the active watchlist via AJAX.
+    Body: {"ticker": "NVDA"}
+    """
+    data   = request.get_json(silent=True) or {}
+    ticker = (data.get("ticker") or "").strip().upper()
+    if not ticker or not ticker.isalpha() or len(ticker) > 6:
+        return jsonify({"error": "invalid ticker"}), 400
+
+    wl_id = get_active_wl_id()
+    if not wl_id:
+        return jsonify({"error": "no active watchlist"}), 400
+
+    try:
+        add_ticker_to_watchlist(wl_id, ticker)
+        # Seed a loading placeholder so the row appears immediately
+        upsert_loading_placeholder(ticker)
+        logger.info("scanner_add  ticker=%s  wl=%s", ticker, wl_id)
+        return jsonify({"ok": True, "ticker": ticker})
+    except Exception as exc:
+        logger.error("api_scanner_add failed: %s", exc, exc_info=True)
+        return jsonify({"error": "could not add ticker"}), 500
 
 
 @app.route("/api/stock/<ticker>/live")

@@ -127,40 +127,26 @@
       <span class="mt-stat-tag mt-stat-val" id="mt-es-price" style="color:var(--text-muted)">—</span>
       {% endif %}
     </div>
-    {% if market_temp.spy_price %}
-    <div class="mt-stat-block">
+    <div class="mt-stat-block" id="mt-spy-block" {% if not market_temp.spy_price %}style="display:none"{% endif %}>
       <span class="mt-stat-lbl">SPY</span>
-      <span class="mt-stat-val">${{ "%.0f"|format(market_temp.spy_price) }}</span>
-      {% if market_temp.spy_pct_ema20 is not none %}
-      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.spy_pct_ema20 >= 0 else 'mt-neg' }}">EMA {{ '+' if market_temp.spy_pct_ema20 >= 0 else '' }}{{ "%.1f"|format(market_temp.spy_pct_ema20) }}%</span>
-      {% endif %}
-      {% if market_temp.spy_vs_vwap is not none %}
-      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.spy_vs_vwap >= 0 else 'mt-neg' }}">VWAP {{ '+' if market_temp.spy_vs_vwap >= 0 else '' }}{{ "%.1f"|format(market_temp.spy_vs_vwap) }}%</span>
-      {% endif %}
+      <span class="mt-stat-val" id="mt-spy-price">{% if market_temp.spy_price %}${{ "%.0f"|format(market_temp.spy_price) }}{% endif %}</span>
+      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.spy_pct_ema20 is not none and market_temp.spy_pct_ema20 >= 0 else 'mt-neg' }}" id="mt-spy-ema" {% if market_temp.spy_pct_ema20 is none %}style="display:none"{% endif %}>EMA {{ '+' if market_temp.spy_pct_ema20 is not none and market_temp.spy_pct_ema20 >= 0 else '' }}{% if market_temp.spy_pct_ema20 is not none %}{{ "%.1f"|format(market_temp.spy_pct_ema20) }}%{% endif %}</span>
+      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.spy_vs_vwap is not none and market_temp.spy_vs_vwap >= 0 else 'mt-neg' }}" id="mt-spy-vwap" {% if market_temp.spy_vs_vwap is none %}style="display:none"{% endif %}>VWAP {{ '+' if market_temp.spy_vs_vwap is not none and market_temp.spy_vs_vwap >= 0 else '' }}{% if market_temp.spy_vs_vwap is not none %}{{ "%.1f"|format(market_temp.spy_vs_vwap) }}%{% endif %}</span>
     </div>
-    {% endif %}
-    {% if market_temp.qqq_price %}
-    <div class="mt-stat-block">
+    <div class="mt-stat-block" id="mt-qqq-block" {% if not market_temp.qqq_price %}style="display:none"{% endif %}>
       <span class="mt-stat-lbl">QQQ</span>
-      <span class="mt-stat-val">${{ "%.0f"|format(market_temp.qqq_price) }}</span>
-      {% if market_temp.qqq_pct_ema20 is not none %}
-      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.qqq_pct_ema20 >= 0 else 'mt-neg' }}">EMA {{ '+' if market_temp.qqq_pct_ema20 >= 0 else '' }}{{ "%.1f"|format(market_temp.qqq_pct_ema20) }}%</span>
-      {% endif %}
-      {% if market_temp.qqq_vs_vwap is not none %}
-      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.qqq_vs_vwap >= 0 else 'mt-neg' }}">VWAP {{ '+' if market_temp.qqq_vs_vwap >= 0 else '' }}{{ "%.1f"|format(market_temp.qqq_vs_vwap) }}%</span>
-      {% endif %}
+      <span class="mt-stat-val" id="mt-qqq-price">{% if market_temp.qqq_price %}${{ "%.0f"|format(market_temp.qqq_price) }}{% endif %}</span>
+      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.qqq_pct_ema20 is not none and market_temp.qqq_pct_ema20 >= 0 else 'mt-neg' }}" id="mt-qqq-ema" {% if market_temp.qqq_pct_ema20 is none %}style="display:none"{% endif %}>EMA {{ '+' if market_temp.qqq_pct_ema20 is not none and market_temp.qqq_pct_ema20 >= 0 else '' }}{% if market_temp.qqq_pct_ema20 is not none %}{{ "%.1f"|format(market_temp.qqq_pct_ema20) }}%{% endif %}</span>
+      <span class="mt-stat-tag {{ 'mt-pos' if market_temp.qqq_vs_vwap is not none and market_temp.qqq_vs_vwap >= 0 else 'mt-neg' }}" id="mt-qqq-vwap" {% if market_temp.qqq_vs_vwap is none %}style="display:none"{% endif %}>VWAP {{ '+' if market_temp.qqq_vs_vwap is not none and market_temp.qqq_vs_vwap >= 0 else '' }}{% if market_temp.qqq_vs_vwap is not none %}{{ "%.1f"|format(market_temp.qqq_vs_vwap) }}%{% endif %}</span>
     </div>
-    {% endif %}
-    {% if market_temp.vix_level %}
-    <div class="mt-stat-block">
+    <div class="mt-stat-block" id="mt-vix-block" {% if not market_temp.vix_level %}style="display:none"{% endif %}>
       <span class="mt-stat-lbl">VIX</span>
-      <span class="mt-stat-val {{ 'mt-neg' if market_temp.vix_level > 25 else ('mt-warn' if market_temp.vix_level > 18 else 'mt-pos') }}">{{ "%.1f"|format(market_temp.vix_level) }}{% if market_temp.vix_direction == 'rising' %} ↑{% elif market_temp.vix_direction == 'falling' %} ↓{% endif %}</span>
+      <span class="mt-stat-val {{ 'mt-neg' if market_temp.vix_level and market_temp.vix_level > 25 else ('mt-warn' if market_temp.vix_level and market_temp.vix_level > 18 else 'mt-pos') }}" id="mt-vix-val">{% if market_temp.vix_level %}{{ "%.1f"|format(market_temp.vix_level) }}{% if market_temp.vix_direction == 'rising' %} ↑{% elif market_temp.vix_direction == 'falling' %} ↓{% endif %}{% endif %}</span>
     </div>
-    {% endif %}
     <div class="mt-stat-sigs">
-      <span class="mt-sig {{ 'mt-sig-ok' if market_temp.longs_ok == true else ('mt-sig-no' if market_temp.longs_ok == false else 'mt-sig-na') }}">Longs {{ '✓' if market_temp.longs_ok == true else ('✗' if market_temp.longs_ok == false else '—') }}</span>
-      <span class="mt-sig {{ 'mt-sig-ok' if market_temp.shorts_ok == true else ('mt-sig-no' if market_temp.shorts_ok == false else 'mt-sig-na') }}">Shorts {{ '✓' if market_temp.shorts_ok == true else ('✗' if market_temp.shorts_ok == false else '—') }}</span>
-      {% if market_temp.reduce_size %}<span class="mt-sig mt-sig-warn">Reduce Size</span>{% endif %}
+      <span class="mt-sig {{ 'mt-sig-ok' if market_temp.longs_ok == true else ('mt-sig-no' if market_temp.longs_ok == false else 'mt-sig-na') }}" id="mt-sig-longs">Longs {{ '✓' if market_temp.longs_ok == true else ('✗' if market_temp.longs_ok == false else '—') }}</span>
+      <span class="mt-sig {{ 'mt-sig-ok' if market_temp.shorts_ok == true else ('mt-sig-no' if market_temp.shorts_ok == false else 'mt-sig-na') }}" id="mt-sig-shorts">Shorts {{ '✓' if market_temp.shorts_ok == true else ('✗' if market_temp.shorts_ok == false else '—') }}</span>
+      <span class="mt-sig mt-sig-warn" id="mt-sig-reduce" {% if not market_temp.reduce_size %}style="display:none"{% endif %}>Reduce Size</span>
     </div>
   </div>
 
@@ -190,6 +176,22 @@
 </section>
 
 
+
+<!-- ===== LIVE OPPORTUNITIES ===== -->
+<section class="scanner-section" id="scanner-section">
+  <div class="scanner-header">
+    <span class="scanner-title">LIVE OPPORTUNITIES</span>
+    <span class="scanner-live-dot" id="scanner-live-dot"></span>
+    <span class="scanner-label-live" id="scanner-label">SCANNING…</span>
+    <span class="scanner-time" id="scanner-time"></span>
+    <span class="scanner-count" id="scanner-count"></span>
+  </div>
+  <div class="scanner-scroll" id="scanner-cards">
+    <div class="scanner-placeholder" id="scanner-placeholder">
+      Scanning market for momentum opportunities…
+    </div>
+  </div>
+</section>
 
 <!-- ===== DAILY DISCIPLINE BANNER ===== -->
 <div class="daily-banner banner-{{ daily_banner.type }} {{ daily_banner.css }}" id="daily-banner">
@@ -883,193 +885,343 @@ function toggleDisciplineMode() {
 // Run filter on page load to initialise the count
 applyFilter();
 
-// ── Live dashboard patch (4s polling during market hours) ────────────────────
-// Calls /api/dashboard and surgically updates prices, badges, and scores
-// in the table and top-5 cards without a full page reload.
+// ═══════════════════════════════════════════════════════════════════════════
+// REAL-TIME UPDATE FUNCTIONS
+// All driven by WebSocket push; HTTP polling calls these same functions.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function _mtCls(pct) { return pct >= 0 ? 'mt-pos' : 'mt-neg'; }
+function _mtFmt(pct) { return (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%'; }
+function _mtFmt1(pct){ return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%'; }
+
+// ── Market Context: ES futures + sector strip ─────────────────────────────────
+function updateMarketContext(data) {
+  var es      = data.es || {};
+  var esPrice = document.getElementById('mt-es-price');
+  var esChg   = document.getElementById('mt-es-chg');
+  var esVwap  = document.getElementById('mt-es-vwap');
+  if (esPrice) {
+    if (es.error || es.price == null) {
+      esPrice.textContent = '—';
+      esPrice.className   = 'mt-stat-tag';
+      if (esChg)  esChg.textContent  = '';
+      if (esVwap) esVwap.textContent = '';
+    } else {
+      esPrice.textContent = Math.round(es.price);
+      esPrice.className   = 'mt-stat-val';
+      if (esChg && es.change_pct != null) {
+        esChg.textContent = _mtFmt(es.change_pct);
+        esChg.className   = 'mt-stat-tag ' + _mtCls(es.change_pct);
+      }
+      if (esVwap && es.above_vwap != null) {
+        esVwap.textContent = es.above_vwap ? '↑ VWAP' : '↓ VWAP';
+        esVwap.className   = 'mt-stat-tag ' + (es.above_vwap ? 'mt-pos' : 'mt-neg');
+      }
+    }
+  }
+
+  var sectors = data.sectors || {};
+  var names   = ['XLK', 'XLY', 'XLF', 'XLE'];
+  var strip   = document.getElementById('mt-sectors');
+  if (strip) {
+    var strongest = null, bestVal = -Infinity;
+    names.forEach(function(n) {
+      var v = sectors[n];
+      if (v != null && v > bestVal) { bestVal = v; strongest = n; }
+    });
+    var html = '<span class="mt-sectors-lbl">Sectors:</span>';
+    names.forEach(function(n) {
+      var v = sectors[n];
+      if (v == null) {
+        html += '<span class="mt-sector" style="color:var(--text-muted)">' + n + ' —</span>';
+      } else {
+        var fire = (n === strongest && v > 0) ? ' 🔥' : '';
+        html += '<span class="mt-sector ' + _mtCls(v) + '">' + n + ' ' + _mtFmt1(v) + fire + '</span>';
+      }
+    });
+    strip.innerHTML = html;
+  }
+}
+
+// ── Market Temperature: regime badge, gauge pointer, SPY/QQQ/VIX ──────────��──
+function updateMarketTemp(mt) {
+  if (!mt || mt.regime === 'LOADING') return;
+
+  // Panel accent border
+  var panel = document.getElementById('mt-panel');
+  if (panel) panel.className = 'mt-panel mt-panel-' + (mt.css || 'mt-unknown');
+
+  // Regime badge
+  var badge = document.getElementById('mt-badge');
+  if (badge) { badge.textContent = mt.label || '—'; badge.className = 'mt-badge ' + (mt.css || ''); }
+
+  // Mode description
+  var action = document.querySelector('.mt-action');
+  if (action) action.textContent = mt.mode_desc || mt.action_msg || '—';
+
+  // Score number
+  var scoreNum = document.querySelector('.mt-score-num');
+  if (scoreNum && mt.meter_score != null) {
+    scoreNum.textContent = mt.meter_score;
+    scoreNum.className   = 'mt-score-num ' + (mt.css || '');
+  }
+
+  // Gauge pointer
+  var pointer = document.querySelector('.mt-pointer');
+  if (pointer && mt.meter_score != null) pointer.style.left = mt.meter_score + '%';
+
+  // Reason line
+  var reason = document.getElementById('mt-reason');
+  if (reason) reason.textContent = mt.reason || '';
+
+  // SPY block
+  var spyBlock = document.getElementById('mt-spy-block');
+  if (spyBlock) {
+    spyBlock.style.display = mt.spy_price ? '' : 'none';
+    var spyP = document.getElementById('mt-spy-price');
+    if (spyP && mt.spy_price != null) spyP.textContent = '$' + Math.round(mt.spy_price);
+    var spyE = document.getElementById('mt-spy-ema');
+    if (spyE) {
+      if (mt.spy_pct_ema20 != null) {
+        spyE.style.display = ''; spyE.textContent = 'EMA ' + _mtFmt1(mt.spy_pct_ema20);
+        spyE.className = 'mt-stat-tag ' + _mtCls(mt.spy_pct_ema20);
+      } else { spyE.style.display = 'none'; }
+    }
+    var spyV = document.getElementById('mt-spy-vwap');
+    if (spyV) {
+      if (mt.spy_vs_vwap != null) {
+        spyV.style.display = ''; spyV.textContent = 'VWAP ' + _mtFmt1(mt.spy_vs_vwap);
+        spyV.className = 'mt-stat-tag ' + _mtCls(mt.spy_vs_vwap);
+      } else { spyV.style.display = 'none'; }
+    }
+  }
+
+  // QQQ block
+  var qqqBlock = document.getElementById('mt-qqq-block');
+  if (qqqBlock) {
+    qqqBlock.style.display = mt.qqq_price ? '' : 'none';
+    var qqqP = document.getElementById('mt-qqq-price');
+    if (qqqP && mt.qqq_price != null) qqqP.textContent = '$' + Math.round(mt.qqq_price);
+    var qqqE = document.getElementById('mt-qqq-ema');
+    if (qqqE) {
+      if (mt.qqq_pct_ema20 != null) {
+        qqqE.style.display = ''; qqqE.textContent = 'EMA ' + _mtFmt1(mt.qqq_pct_ema20);
+        qqqE.className = 'mt-stat-tag ' + _mtCls(mt.qqq_pct_ema20);
+      } else { qqqE.style.display = 'none'; }
+    }
+    var qqqV = document.getElementById('mt-qqq-vwap');
+    if (qqqV) {
+      if (mt.qqq_vs_vwap != null) {
+        qqqV.style.display = ''; qqqV.textContent = 'VWAP ' + _mtFmt1(mt.qqq_vs_vwap);
+        qqqV.className = 'mt-stat-tag ' + _mtCls(mt.qqq_vs_vwap);
+      } else { qqqV.style.display = 'none'; }
+    }
+  }
+
+  // VIX block
+  var vixBlock = document.getElementById('mt-vix-block');
+  if (vixBlock) {
+    vixBlock.style.display = mt.vix_level != null ? '' : 'none';
+    var vixV = document.getElementById('mt-vix-val');
+    if (vixV && mt.vix_level != null) {
+      var dir = mt.vix_direction === 'rising' ? ' ↑' : (mt.vix_direction === 'falling' ? ' ↓' : '');
+      vixV.textContent = mt.vix_level.toFixed(1) + dir;
+      vixV.className   = 'mt-stat-val ' + (mt.vix_level > 25 ? 'mt-neg' : mt.vix_level > 18 ? 'mt-warn' : 'mt-pos');
+    }
+  }
+
+  // Longs / Shorts / Reduce signals
+  var sigL = document.getElementById('mt-sig-longs');
+  if (sigL) {
+    sigL.className   = 'mt-sig ' + (mt.longs_ok === true ? 'mt-sig-ok' : mt.longs_ok === false ? 'mt-sig-no' : 'mt-sig-na');
+    sigL.textContent = 'Longs ' + (mt.longs_ok === true ? '✓' : mt.longs_ok === false ? '✗' : '—');
+  }
+  var sigS = document.getElementById('mt-sig-shorts');
+  if (sigS) {
+    sigS.className   = 'mt-sig ' + (mt.shorts_ok === true ? 'mt-sig-ok' : mt.shorts_ok === false ? 'mt-sig-no' : 'mt-sig-na');
+    sigS.textContent = 'Shorts ' + (mt.shorts_ok === true ? '✓' : mt.shorts_ok === false ? '✗' : '—');
+  }
+  var sigR = document.getElementById('mt-sig-reduce');
+  if (sigR) sigR.style.display = mt.reduce_size ? '' : 'none';
+
+  // Delegate ES + sectors to updateMarketContext (unified format)
+  updateMarketContext({
+    es: { price: mt.es_price, change_pct: mt.es_change_pct, above_vwap: mt.es_above_vwap, error: mt.es_price == null },
+    sectors: mt.sectors || {},
+    after_hours: false,
+  });
+}
+
+// ── Scanner card builder + section updater ───────────────────────────────────��
+var _TAG_CSS   = { "MOMENTUM SPIKE":"scanner-tag-momentum","BREAKOUT":"scanner-tag-breakout","VOLUME SPIKE":"scanner-tag-volume","HOT RUNNER":"scanner-tag-runner" };
+var _TAG_EMOJI = { "MOMENTUM SPIKE":"🔥","BREAKOUT":"🚀","VOLUME SPIKE":"📊","HOT RUNNER":"⚡" };
+
+function _buildScanCard(opp) {
+  var tag   = opp.primary_tag || '';
+  var css   = _TAG_CSS[tag]   || 'scanner-tag-runner';
+  var emoji = _TAG_EMOJI[tag] || '📌';
+  var chgCls = opp.day_chg_pct >= 0 ? 'scan-pos' : 'scan-neg';
+  var chgTxt = (opp.day_chg_pct >= 0 ? '+' : '') + opp.day_chg_pct.toFixed(2) + '%';
+  var vwapBadge = opp.above_vwap
+    ? '<span class="scan-badge scan-badge-pos">↑ VWAP</span>'
+    : '<span class="scan-badge scan-badge-neg">↓ VWAP</span>';
+  var highBadge = opp.breaking_high ? '<span class="scan-badge scan-badge-pos">NEW HIGH</span>' : '';
+  return '<div class="scanner-card ' + css + '" data-ticker="' + opp.ticker + '">'
+    + '<div class="scanner-card-top"><span class="scanner-ticker">' + opp.ticker + '</span>'
+    + '<span class="scanner-tag-pill ' + css + '">' + emoji + ' ' + tag + '</span></div>'
+    + '<div class="scanner-price">$' + opp.price.toFixed(2) + '</div>'
+    + '<div class="scanner-metrics"><span class="scanner-chg ' + chgCls + '">' + chgTxt + '</span>'
+    + '<span class="scanner-vol">Vol ' + opp.volume_ratio.toFixed(1) + '×</span>'
+    + vwapBadge + highBadge + '</div>'
+    + '<div class="scanner-reason">' + (opp.reason || '') + '</div>'
+    + '<div class="scanner-entry">Entry: ' + (opp.entry_zone || '—') + '</div>'
+    + '<button class="scanner-add-btn" onclick="scannerAdd(\'' + opp.ticker + '\', this)">+ Watch</button>'
+    + '</div>';
+}
+
+function updateScanner(data) {
+  var cards       = document.getElementById('scanner-cards');
+  var placeholder = document.getElementById('scanner-placeholder');
+  var countEl     = document.getElementById('scanner-count');
+  var timeEl      = document.getElementById('scanner-time');
+  var labelEl     = document.getElementById('scanner-label');
+  var dotEl       = document.getElementById('scanner-live-dot');
+  if (!cards) return;
+
+  var opps = data.opportunities || [];
+  if (timeEl && data.last_scan) timeEl.textContent = data.last_scan;
+  if (labelEl) labelEl.textContent = data.market_hours ? 'LIVE' : 'CLOSED';
+  if (dotEl)   dotEl.className = 'scanner-live-dot ' + (data.market_hours ? 'scanner-dot-live' : 'scanner-dot-closed');
+
+  if (opps.length === 0) {
+    if (countEl) countEl.textContent = '';
+    if (placeholder) {
+      placeholder.style.display = 'block';
+      placeholder.textContent   = data.market_hours
+        ? 'No momentum signals detected yet — watching' + (data.scan_count > 0 ? ' (scan #' + data.scan_count + ')' : ' …')
+        : 'Market closed — scanner paused';
+    }
+    cards.querySelectorAll('.scanner-card').forEach(function(c) { c.remove(); });
+    return;
+  }
+  if (placeholder) placeholder.style.display = 'none';
+  if (countEl) countEl.textContent = opps.length + ' signal' + (opps.length !== 1 ? 's' : '');
+
+  var newTickers = opps.map(function(o) { return o.ticker; });
+  var existing   = {};
+  cards.querySelectorAll('.scanner-card').forEach(function(c) { existing[c.dataset.ticker] = c; });
+  Object.keys(existing).forEach(function(t) { if (newTickers.indexOf(t) === -1) existing[t].remove(); });
+  opps.forEach(function(opp, i) {
+    var html = _buildScanCard(opp);
+    var prev = existing[opp.ticker];
+    var tmp  = document.createElement('div'); tmp.innerHTML = html;
+    if (prev) {
+      prev.replaceWith(tmp.firstChild);
+    } else {
+      var all = cards.querySelectorAll('.scanner-card');
+      if (all.length > i) cards.insertBefore(tmp.firstChild, all[i]);
+      else cards.appendChild(tmp.firstChild);
+    }
+  });
+}
+
+function scannerAdd(ticker, btn) {
+  btn.disabled = true; btn.textContent = 'Adding…';
+  fetch('/api/scanner/add', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ticker: ticker}) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { btn.textContent = '✓ Added'; btn.classList.add('scanner-add-done'); }
+      else { btn.textContent = 'Error'; btn.disabled = false; }
+    })
+    .catch(function() { btn.textContent = '+ Watch'; btn.disabled = false; });
+}
+
+// ── Unified dashboard data application (called by WS handler + HTTP fallback) ─
+function applyDashboardData(data) {
+  if (!data) return;
+
+  // ── Watchlist table rows ───────────────────────────────────────────────────
+  var byTicker = {};
+  (data.ranked || []).forEach(function(s) { byTicker[s.ticker] = s; });
+
+  document.querySelectorAll('.watchlist-table tbody tr[data-ticker]').forEach(function(row) {
+    var s = byTicker[row.dataset.ticker];
+    if (!s) return;
+    var priceEl = row.querySelector('[data-field="price"]');
+    if (priceEl && s.current_price != null) priceEl.textContent = '$' + s.current_price.toFixed(2);
+    var gapEl = row.querySelector('[data-field="gap"]');
+    if (gapEl && s.gap_display) { gapEl.className = 'gap-cell ' + (s.gap_class||''); gapEl.textContent = s.gap_display; }
+    var sfaEl = row.querySelector('[data-field="sfa_badge"]');
+    if (sfaEl && s.simplified_action) { sfaEl.className = 'exec-badge ' + (s.simplified_action_class||''); sfaEl.textContent = s.simplified_action; sfaEl.title = s.final_action||''; }
+    var swingEl = row.querySelector('[data-field="swing_score"]');
+    if (swingEl && s.swing_score != null)
+      swingEl.innerHTML = s.swing_score > 0
+        ? '<div class="score-bar-wrap"><span class="score-num ' + (s.swing_score_class||'') + '">' + s.swing_score + '</span><div class="score-bar"><div class="score-fill ' + (s.swing_score_class||'') + '" style="width:' + (s.swing_score*10) + '%"></div></div></div>'
+        : '<span class="text-muted">—</span>';
+    var catEl = row.querySelector('[data-field="cat"]');
+    if (catEl && s.catalyst_score != null)
+      catEl.innerHTML = s.catalyst_score ? '<span class="score-num ' + (s.cat_score_class||'') + '">' + s.catalyst_score + '</span>' : '<span class="text-muted">—</span>';
+  });
+
+  // ── Top-5 cards ────────────────────────────────────────────────────────────
+  document.querySelectorAll('.top5-card[data-ticker]').forEach(function(card) {
+    var s = byTicker[card.dataset.ticker];
+    if (!s) return;
+    var priceWrap = card.querySelector('[data-field="price"]');
+    if (priceWrap && s.current_price != null) {
+      var fn = priceWrap.firstChild;
+      if (fn && fn.nodeType === Node.TEXT_NODE) fn.textContent = '$' + s.current_price.toFixed(2) + ' ';
+    }
+    var gapEl = card.querySelector('[data-field="gap"]');
+    if (gapEl && s.gap_display) { gapEl.className = 'top5-gap ' + (s.gap_class||''); gapEl.textContent = s.gap_display; }
+    var sfaEl = card.querySelector('[data-field="sfa_badge"]');
+    if (sfaEl && s.simplified_action) { sfaEl.className = 'exec-badge exec-badge-sm ' + (s.simplified_action_class||''); sfaEl.textContent = s.simplified_action; sfaEl.title = s.final_action||''; }
+  });
+
+  // ── Alert count (from triggered list + swing alerts) ──────────────────────
+  if (data.alert_count != null) {
+    var alertBadge = document.querySelector('.alerts-count');
+    if (alertBadge) alertBadge.textContent = data.alert_count;
+  }
+
+  // ── Timestamp ─────────────────────────────────────────────────────────────
+  if (data.server_time) window._arSetLastUpdated(data.server_time);
+
+  // ── Trigger toasts ─────────────────────────────────────────────────────────
+  var newTriggers = detectNewTriggers(data.ranked || []);
+  newTriggers.forEach(function(s) {
+    var at = getAlertType(s);
+    playAlertSound(at);
+    showTriggerToast(s, at);
+  });
+
+  // ── Market temp gauge + badge (90 s cache, always push latest) ────────────
+  if (data.market_temp) updateMarketTemp(data.market_temp);
+
+  // ── ES futures + sector strip (30 s cache) ────────────────────────────────
+  if (data.market_context) updateMarketContext(data.market_context);
+
+  // ── Live opportunities scanner ────────────────────────────────────────────
+  if (data.scanner) updateScanner(data.scanner);
+}
+
+// ── HTTP fallback refresh (used when WebSocket is unavailable) ────────────────
 async function dashboardRefresh() {
   try {
     const resp = await fetch('/api/dashboard');
     if (!resp.ok) return false;
     const data = await resp.json();
     if (!data.ranked) return false;
-
-    // Build a map of ticker → stock for O(1) lookup
-    const byTicker = {};
-    (data.ranked || []).forEach(function(s) { byTicker[s.ticker] = s; });
-
-    // ── Patch watchlist table rows ─────────────────────────────────────────
-    document.querySelectorAll('.watchlist-table tbody tr[data-ticker]').forEach(function(row) {
-      const s = byTicker[row.dataset.ticker];
-      if (!s) return;
-
-      const priceEl = row.querySelector('[data-field="price"]');
-      if (priceEl && s.current_price != null)
-        priceEl.textContent = '$' + s.current_price.toFixed(2);
-
-      const gapEl = row.querySelector('[data-field="gap"]');
-      if (gapEl && s.gap_display) {
-        gapEl.className = 'gap-cell ' + (s.gap_class || '');
-        gapEl.textContent = s.gap_display;
-      }
-
-      const sfaEl = row.querySelector('[data-field="sfa_badge"]');
-      if (sfaEl && s.simplified_action) {
-        sfaEl.className  = 'exec-badge ' + (s.simplified_action_class || '');
-        sfaEl.textContent = s.simplified_action;
-        sfaEl.title       = s.final_action || '';
-      }
-
-      const swingEl = row.querySelector('[data-field="swing_score"]');
-      if (swingEl && s.swing_score != null) {
-        swingEl.innerHTML = s.swing_score > 0
-          ? '<div class="score-bar-wrap"><span class="score-num ' + (s.swing_score_class||'') + '">' + s.swing_score + '</span>'
-            + '<div class="score-bar"><div class="score-fill ' + (s.swing_score_class||'') + '" style="width:' + (s.swing_score*10) + '%"></div></div></div>'
-          : '<span class="text-muted">—</span>';
-      }
-
-      const catEl = row.querySelector('[data-field="cat"]');
-      if (catEl && s.catalyst_score != null)
-        catEl.innerHTML = s.catalyst_score
-          ? '<span class="score-num ' + (s.cat_score_class||'') + '">' + s.catalyst_score + '</span>'
-          : '<span class="text-muted">—</span>';
-    });
-
-    // ── Patch top-5 cards ──────────────────────────────────────────────────
-    document.querySelectorAll('.top5-card[data-ticker]').forEach(function(card) {
-      const s = byTicker[card.dataset.ticker];
-      if (!s) return;
-
-      const priceWrap = card.querySelector('[data-field="price"]');
-      if (priceWrap && s.current_price != null) {
-        // Update only the text node (first child), preserve the gap span
-        const firstNode = priceWrap.firstChild;
-        if (firstNode && firstNode.nodeType === Node.TEXT_NODE)
-          firstNode.textContent = '$' + s.current_price.toFixed(2) + ' ';
-      }
-
-      const gapEl = card.querySelector('[data-field="gap"]');
-      if (gapEl && s.gap_display) {
-        gapEl.className  = 'top5-gap ' + (s.gap_class || '');
-        gapEl.textContent = s.gap_display;
-      }
-
-      const sfaEl = card.querySelector('[data-field="sfa_badge"]');
-      if (sfaEl && s.simplified_action) {
-        sfaEl.className  = 'exec-badge exec-badge-sm ' + (s.simplified_action_class || '');
-        sfaEl.textContent = s.simplified_action;
-        sfaEl.title       = s.final_action || '';
-      }
-    });
-
-    // ── Update alert count badge ───────────────────────────────────────────
-    const triggered = data.triggered || [];
-    const alertCount = document.querySelector('.alerts-count');
-    if (alertCount) alertCount.textContent = triggered.length;
-
-    // ── Sync last-updated timestamp ────────────────────────────────────────
-    if (data.server_time) window._arSetLastUpdated(data.server_time);
-
-    // ── Fire toast notifications for newly-triggered stocks ───────────────
-    const newTriggers = detectNewTriggers(data.ranked || []);
-    newTriggers.forEach(function(s) {
-      const alertType = getAlertType(s);
-      playAlertSound(alertType);
-      showTriggerToast(s, alertType);
-    });
-
+    applyDashboardData(data);
     return true;
-
   } catch(e) {
-    console.warn('[dashboard] Live refresh error:', e);
+    console.warn('[dashboard] HTTP refresh error:', e);
     return false;
   }
 }
 
 window._arRefreshFn = dashboardRefresh;
-
-// ── Market Context polling (ES futures + sectors, every 10 s) ────────────────
-(function () {
-  function _cls(pct) {
-    return pct >= 0 ? 'mt-pos' : 'mt-neg';
-  }
-  function _fmt(pct) {
-    return (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
-  }
-  function _fmt1(pct) {
-    return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
-  }
-
-  function updateMarketContext(data) {
-    // ES indicator
-    var es = data.es || {};
-    var esPrice = document.getElementById('mt-es-price');
-    var esChg   = document.getElementById('mt-es-chg');
-    var esVwap  = document.getElementById('mt-es-vwap');
-    if (esPrice) {
-      if (es.error || es.price == null) {
-        esPrice.textContent = '—';
-        esPrice.className   = 'mt-stat-tag';
-        if (esChg)  { esChg.textContent  = ''; }
-        if (esVwap) { esVwap.textContent = ''; }
-      } else {
-        esPrice.textContent = Math.round(es.price);
-        esPrice.className   = 'mt-stat-val';
-        if (esChg && es.change_pct != null) {
-          esChg.textContent = _fmt(es.change_pct);
-          esChg.className   = 'mt-stat-tag ' + _cls(es.change_pct);
-        }
-        if (esVwap && es.above_vwap != null) {
-          esVwap.textContent = es.above_vwap ? '↑ VWAP' : '↓ VWAP';
-          esVwap.className   = 'mt-stat-tag ' + (es.above_vwap ? 'mt-pos' : 'mt-neg');
-        }
-      }
-    }
-
-    // Sector strip
-    var sectors  = data.sectors || {};
-    var names    = ['XLK', 'XLY', 'XLF', 'XLE'];
-    var strip    = document.getElementById('mt-sectors');
-    if (strip) {
-      // Find strongest (highest positive)
-      var strongest = null, bestVal = -Infinity;
-      names.forEach(function(n) {
-        var v = sectors[n];
-        if (v != null && v > bestVal) { bestVal = v; strongest = n; }
-      });
-
-      var html = '<span class="mt-sectors-lbl">Sectors:</span>';
-      names.forEach(function(n) {
-        var v = sectors[n];
-        if (v == null) {
-          html += '<span class="mt-sector" style="color:var(--text-muted)">' + n + ' —</span>';
-        } else {
-          var cls  = _cls(v);
-          var fire = (n === strongest && v > 0) ? ' 🔥' : '';
-          html += '<span class="mt-sector ' + cls + '">' + n + ' ' + _fmt1(v) + fire + '</span>';
-        }
-      });
-      strip.innerHTML = html;
-    }
-
-    // After-hours label on ES indicator
-    var esInd = document.getElementById('mt-es-ind');
-    if (esInd && data.after_hours && es.price != null) {
-      var lbl = esInd.querySelector('.mt-stat-lbl');
-      if (lbl) lbl.title = 'After hours — futures active';
-    }
-  }
-
-  function pollMarketContext() {
-    fetch('/api/market_context')
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(d) { if (d) updateMarketContext(d); })
-      .catch(function() {});
-  }
-
-  // Initial poll shortly after page load, then every 10 s
-  setTimeout(pollMarketContext, 2000);
-  setInterval(pollMarketContext, 10000);
-})();
 
 // ── Trading Mode switcher ──────────────────────────────────────────────────
 function setTradingMode(mode) {
@@ -1139,5 +1291,12 @@ function setTradingMode(mode) {
       .catch(function () { /* ignore transient network errors */ });
   }, 3000);   // poll every 3 seconds
 })();
+
+// ── WebSocket init — connects to /ws/dashboard, drives all live updates ────────
+// ws_manager.js handles reconnect + falls back to HTTP polling automatically.
+window._wsConnect('/ws/dashboard', function(data) {
+  if (data && data.type === 'dashboard') applyDashboardData(data);
+});
+
 </script>
 {% endblock %}

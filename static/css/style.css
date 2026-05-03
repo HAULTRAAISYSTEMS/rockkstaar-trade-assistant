@@ -5299,3 +5299,224 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   .schwab-acct-bals    { gap: 0.75rem; }
 
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LIVE OPPORTUNITIES — Momentum Scanner Section
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.scanner-section {
+  background: var(--card-bg, #1a1f2e);
+  border: 1px solid rgba(99,179,237,0.15);
+  border-radius: 10px;
+  margin: 0.75rem 1rem;
+  padding: 0.75rem 1rem 0.85rem;
+  overflow: hidden;
+}
+
+/* ── Header row ── */
+.scanner-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.65rem;
+  flex-wrap: wrap;
+}
+.scanner-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+.scanner-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.scanner-dot-live {
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+  animation: scanner-pulse 1.8s ease-in-out infinite;
+}
+.scanner-dot-closed {
+  background: #64748b;
+}
+@keyframes scanner-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.55; transform: scale(0.85); }
+}
+.scanner-label-live {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #22c55e;
+}
+.scanner-time {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+.scanner-count {
+  font-size: 0.68rem;
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+/* ── Horizontal scroll container ── */
+.scanner-scroll {
+  display: flex;
+  gap: 0.65rem;
+  overflow-x: auto;
+  padding-bottom: 0.4rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99,179,237,0.25) transparent;
+}
+.scanner-scroll::-webkit-scrollbar        { height: 4px; }
+.scanner-scroll::-webkit-scrollbar-thumb  { background: rgba(99,179,237,0.25); border-radius: 2px; }
+.scanner-scroll::-webkit-scrollbar-track  { background: transparent; }
+
+/* ── Empty/loading placeholder ── */
+.scanner-placeholder {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  padding: 0.4rem 0;
+  font-style: italic;
+}
+
+/* ── Opportunity cards ── */
+.scanner-card {
+  flex-shrink: 0;
+  width: 185px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  position: relative;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.scanner-card:hover {
+  border-color: rgba(255,255,255,0.18);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+}
+
+/* Card accent stripe by tag */
+.scanner-tag-momentum {
+  border-left: 3px solid #f59e0b;
+  background: rgba(245,158,11,0.05);
+}
+.scanner-tag-breakout {
+  border-left: 3px solid #3b82f6;
+  background: rgba(59,130,246,0.05);
+}
+.scanner-tag-volume {
+  border-left: 3px solid #a855f7;
+  background: rgba(168,85,247,0.05);
+}
+.scanner-tag-runner {
+  border-left: 3px solid #22c55e;
+  background: rgba(34,197,94,0.05);
+}
+
+.scanner-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+}
+.scanner-ticker {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  letter-spacing: 0.04em;
+}
+.scanner-tag-pill {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.scanner-tag-pill.scanner-tag-momentum { color: #f59e0b; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3); }
+.scanner-tag-pill.scanner-tag-breakout { color: #60a5fa; background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.3); }
+.scanner-tag-pill.scanner-tag-volume   { color: #c084fc; background: rgba(168,85,247,0.15); border: 1px solid rgba(168,85,247,0.3); }
+.scanner-tag-pill.scanner-tag-runner   { color: #4ade80; background: rgba(34,197,94,0.15);  border: 1px solid rgba(34,197,94,0.3); }
+
+.scanner-price {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+.scanner-metrics {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+.scanner-chg {
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.scanner-vol {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.scan-pos   { color: #4ade80; }
+.scan-neg   { color: #f87171; }
+
+.scan-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+}
+.scan-badge-pos { color: #4ade80; background: rgba(34,197,94,0.12); }
+.scan-badge-neg { color: #f87171; background: rgba(239,68,68,0.12); }
+
+.scanner-reason {
+  font-size: 0.67rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 0.1rem;
+}
+.scanner-entry {
+  font-size: 0.67rem;
+  color: #93c5fd;
+  font-variant-numeric: tabular-nums;
+}
+
+.scanner-add-btn {
+  margin-top: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #93c5fd;
+  background: rgba(99,179,237,0.1);
+  border: 1px solid rgba(99,179,237,0.25);
+  border-radius: 5px;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.15s;
+}
+.scanner-add-btn:hover    { background: rgba(99,179,237,0.2); }
+.scanner-add-btn:disabled { cursor: default; opacity: 0.6; }
+.scanner-add-btn.scanner-add-done {
+  color: #4ade80;
+  background: rgba(34,197,94,0.1);
+  border-color: rgba(34,197,94,0.25);
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .scanner-section { margin: 0.5rem 0.5rem; padding: 0.6rem 0.65rem 0.75rem; }
+  .scanner-card    { width: 165px; }
+}
