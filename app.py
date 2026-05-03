@@ -3911,28 +3911,6 @@ def api_scanner_alerts_clear():
         return jsonify({"error": str(exc)}), 500
 
 
-@app.route("/test-telegram")
-def test_telegram():
-    """Temporary route — sends a test Telegram message and returns JSON result."""
-    token   = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-    if not token or not chat_id:
-        return jsonify({"ok": False, "error": "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set"}), 400
-    try:
-        import requests as _req
-        resp = _req.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": "Rockkstaar test alert working ✅"},
-            timeout=8,
-        )
-        data = resp.json()
-        if data.get("ok"):
-            return jsonify({"ok": True, "telegram_response": data})
-        return jsonify({"ok": False, "telegram_response": data}), 502
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
 @app.route("/api/stock/<ticker>/live")
 def api_stock_live(ticker):
     """JSON endpoint for live single-stock detail updates."""
