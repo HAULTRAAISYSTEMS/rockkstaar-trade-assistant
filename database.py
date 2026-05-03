@@ -547,6 +547,19 @@ def init_db():
     # are written via set_setting("schwab_*", ...) so the existing settings table suffices.
     # This comment is the migration marker; no DDL required.
 
+    # Scanner alerts — persisted momentum/breakout/volume events from the background scanner
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS scanner_alerts (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker     TEXT    NOT NULL,
+            alert_type TEXT    NOT NULL,
+            message    TEXT    NOT NULL,
+            severity   TEXT    NOT NULL DEFAULT 'medium',
+            seen       INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT    NOT NULL
+        )
+    """))
+
     # Seed default watchlists on first run (use cnt alias — works in both DBs)
     wl_count = cursor.execute(
         "SELECT COUNT(*) AS cnt FROM watchlists"
@@ -1546,3 +1559,81 @@ def unlock_daily_session(date_str: str | None = None):
     if date_str is None:
         date_str = _et_now().strftime("%Y-%m-%d")
     upsert_daily_session(date_str, locked=0, lock_reason=None)
+
+
+# ---------------------------------------------------------------------------
+# Scanner alert helpers (Phase 1 live opportunity finder)
+# ---------------------------------------------------------------------------
+
+_SCANNER_ALERTS_KEEP = 200   # max rows retained to avoid unbounded growth
+
+
+def add_scanner_alert(
+    ticker: str,
+    alert_type: str,
+    message: str,
+    severity: str = "medium",
+) -> int:
+    """
+    Persist a scanner-detected alert.  Returns the new row id.
+    Automatically prunes the table to _SCANNER_ALERTS_KEEP rows so it
+    never grows unbounded.
+    """
+    now = _et_now().strftime("%Y-%m-%d %I:%M %p")
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO scanner_alerts (ticker, alert_type, message, severity, seen, created_at) "
+        "VALUES (?, ?, ?, ?, 0, ?)",
+        (ticker.upper().strip(), alert_type, message, severity, now),
+        returning_id=True,
+    )
+    new_id = cur.lastrowid
+
+    # Prune oldest rows beyond the keep limit
+    conn.execute(
+        "DELETE FROM scanner_alerts WHERE id NOT IN ("
+        "  SELECT id FROM scanner_alerts ORDER BY id DESC LIMIT ?"
+        ")",
+        (_SCANNER_ALERTS_KEEP,),
+    )
+    conn.commit()
+    conn.close()
+    return new_id or 0
+
+
+def get_scanner_alerts(limit: int = 50) -> list:
+    """Return the most-recent scanner alerts, newest first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, ticker, alert_type, message, severity, seen, created_at "
+        "FROM scanner_alerts ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mark_scanner_alerts_seen() -> None:
+    """Mark all scanner alerts as seen (clears the unseen badge)."""
+    conn = get_db()
+    conn.execute("UPDATE scanner_alerts SET seen = 1 WHERE seen = 0")
+    conn.commit()
+    conn.close()
+
+
+def get_unseen_scanner_alert_count() -> int:
+    """Return the count of unread scanner alerts."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM scanner_alerts WHERE seen = 0"
+    ).fetchone()
+    conn.close()
+    return row["cnt"] if row else 0
+
+
+def clear_scanner_alerts() -> None:
+    """Delete all scanner alert rows."""
+    conn = get_db()
+    conn.execute("DELETE FROM scanner_alerts")
+    conn.commit()
+    conn.close()

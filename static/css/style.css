@@ -5520,3 +5520,84 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   .scanner-section { margin: 0.5rem 0.5rem; padding: 0.6rem 0.65rem 0.75rem; }
   .scanner-card    { width: 165px; }
 }
+
+/* ── Scanner alert badge (new alerts indicator in header) ── */
+.scan-alert-badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 10px;
+  background: rgba(251,191,36,0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(251,191,36,0.3);
+  letter-spacing: 0.04em;
+  margin-left: auto;
+}
+
+/* ── Scanner alerts log panel ── */
+.scan-alerts-panel {
+  margin-top: 0.6rem;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding-top: 0.5rem;
+}
+.scan-alerts-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+.scan-alerts-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  flex: 1;
+}
+.scan-alerts-clear-btn {
+  font-size: 0.65rem;
+  padding: 0.15rem 0.45rem;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.scan-alerts-clear-btn:hover { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+.scan-alerts-dismiss-btn { color: #f87171; border-color: rgba(248,113,113,0.25); }
+.scan-alerts-dismiss-btn:hover { background: rgba(248,113,113,0.1); }
+
+/* Alert rows */
+.scan-al-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.28rem 0.4rem;
+  border-radius: 5px;
+  margin-bottom: 0.2rem;
+  border-left: 3px solid transparent;
+  background: rgba(255,255,255,0.02);
+  transition: background 0.15s;
+}
+.scan-al-row:hover { background: rgba(255,255,255,0.05); }
+.scan-al-seen { opacity: 0.45; }
+
+.scan-al-high   { border-left-color: #f87171; }
+.scan-al-medium { border-left-color: #fbbf24; }
+.scan-al-low    { border-left-color: #64748b; }
+
+.scan-al-emoji { font-size: 0.8rem; flex-shrink: 0; }
+.scan-al-msg {
+  font-size: 0.7rem;
+  color: var(--text-primary);
+  flex: 1;
+  line-height: 1.4;
+}
+.scan-al-time {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}

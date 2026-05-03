@@ -1,17 +1,17 @@
 """
 scanner.py — Real-time Momentum Scanner for Rockkstaar Trade Assistant.
 
-Runs a background daemon thread every 25 seconds during market hours that
-scans ~90 high-activity US stocks for intraday momentum events:
+Phase 1: curated 18-ticker universe scanned every 15 s during market hours.
 
-  MOMENTUM SPIKE  — +2%+ in 15 min + vol spike 1.5×+ + above VWAP + new high
-  BREAKOUT        — breaking intraday high + day gain + elevated volume
-  VOLUME SPIKE    — volume ≥2× daily average with directional move
-  HOT RUNNER      — +4%+ on the day (strong trending)
+Signal tags (first match wins):
+  MOMENTUM SPIKE   — +1.5%+ intraday · vol ≥1.5× · above VWAP · near HOD
+  BREAKOUT WATCH   — near HOD · day gain ≥1.5% · elevated volume
+  VOLUME SPIKE     — vol ≥2× avg · directional move ≥0.5%
+  HOT RUNNER       — +4%+ on the day
 
-Results are stored in-memory and served via /api/scanner (polled by the UI).
-Telegram and Discord push alerts fire once per (ticker, tag) per 30 minutes
-when TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID or DISCORD_WEBHOOK_URL are set.
+Alerts are persisted to the scanner_alerts DB table (seen/unseen).
+Phone alerts (Telegram/Discord) are disabled in Phase 1.
+Duplicate (ticker, tag) events suppressed for 15 minutes.
 """
 from __future__ import annotations
 
@@ -45,30 +45,17 @@ def _market_hours() -> bool:
     return (8, 30) <= (h, m) <= (17, 0)
 
 
-# ── Scan universe ─────────────────────────────────────────────────────────────
+# ── Scan universe (Phase 1 — curated high-activity names) ────────────────────
 
 SCAN_UNIVERSE: list[str] = [
     # Mega-cap tech
-    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO",
-    # Semiconductors
-    "AMD", "QCOM", "INTC", "MU", "TXN", "AMAT", "LRCX", "KLAC", "MRVL", "ON",
-    # Cloud / SaaS
-    "CRM", "ADBE", "ORCL", "NFLX", "SNOW", "DDOG", "NET", "CRWD",
-    "ZS", "PANW", "PLTR", "FTNT",
-    # Fintech / Finance
-    "V", "MA", "PYPL", "COIN", "MSTR", "JPM", "GS", "MS", "BAC",
-    # Consumer / Retail
-    "WMT", "COST", "HD", "LOW", "NKE", "SBUX", "SHOP", "UBER", "ABNB",
-    # Energy
-    "XOM", "CVX", "OXY", "HAL", "SLB",
-    # Healthcare / Biotech
-    "MRNA", "BNTX", "REGN", "VRTX", "LLY", "JNJ",
-    # Speculative / high-vol
-    "RIVN", "LCID", "NIO", "SOFI", "HOOD", "RBLX",
-    # ETFs
-    "SPY", "QQQ", "IWM", "ARKK",
+    "NVDA", "META", "AMZN", "AMD", "TSLA", "AAPL", "MSFT", "GOOGL",
+    # Semis
+    "MU", "MRVL", "AVGO",
     # Other active names
-    "SNAP", "PINS", "LYFT", "DASH", "UPST",
+    "DELL", "RKLB", "PLTR", "SMCI", "TSM",
+    # ETFs
+    "QQQ", "SPY",
 ]
 
 # ── Module-level state (thread-safe) ──────────────────────────────────────────
@@ -87,10 +74,10 @@ _avg_vol_lock   = threading.Lock()
 _avg_vol_cache: dict[str, dict] = {}   # {ticker: {"vol": float, "ts": float}}
 _AVG_VOL_TTL    = 86_400   # 24 h
 
-# Notification dedup — suppress same (ticker, tag) within 30 minutes
+# Alert dedup — suppress same (ticker, tag) within 15 minutes
 _notif_lock   = threading.Lock()
 _notif_fired: dict[tuple, float] = {}   # {(ticker, tag): epoch_fired}
-_NOTIF_DEDUP  = 1_800   # 30 minutes
+_NOTIF_DEDUP  = 900   # 15 minutes
 
 
 # ── Volume average helpers ────────────────────────────────────────────────────
@@ -201,15 +188,19 @@ def _scan_ticker(ticker: str) -> dict | None:
             vol_ratio = projected_vol / avg_vol
 
         # ── Classification (first match wins for primary tag) ─────────────────
-        if mom_pct >= 2.0 and vol_ratio >= 1.5 and above_vwap and breaking_high:
+        # MOMENTUM SPIKE: +1.5%+ intraday · vol ≥1.5× · above VWAP · near HOD
+        if day_chg_pct >= 1.5 and vol_ratio >= 1.5 and above_vwap and breaking_high:
             primary_tag = "MOMENTUM SPIKE"
             scan_score  = 10
+        # BREAKOUT WATCH: near HOD · day gain ≥1.5% · elevated volume
         elif breaking_high and day_chg_pct >= 1.5 and vol_ratio >= 1.2:
-            primary_tag = "BREAKOUT"
+            primary_tag = "BREAKOUT WATCH"
             scan_score  = 7
+        # VOLUME SPIKE: vol ≥2× avg · price moving
         elif vol_ratio >= 2.0 and abs(day_chg_pct) >= 0.5:
             primary_tag = "VOLUME SPIKE"
             scan_score  = 5
+        # HOT RUNNER: strong day gain
         elif day_chg_pct >= 4.0:
             primary_tag = "HOT RUNNER"
             scan_score  = 6
@@ -234,7 +225,7 @@ def _scan_ticker(ticker: str) -> dict | None:
             "scan_score":    scan_score,
             "entry_zone":    f"${e_low}–${e_high}",
             "reason":        _build_reason(
-                primary_tag, day_chg_pct, mom_pct, vol_ratio, above_vwap, breaking_high
+                primary_tag, ticker, day_chg_pct, mom_pct, vol_ratio, above_vwap, breaking_high
             ),
             "scanned_at": _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
         }
@@ -245,21 +236,26 @@ def _scan_ticker(ticker: str) -> dict | None:
 
 
 def _build_reason(
-    tag: str, day_chg: float, mom: float,
+    tag: str, ticker: str, day_chg: float, mom: float,
     vol_r: float, above_vwap: bool, breaking: bool,
 ) -> str:
-    parts = []
+    parts = [f"{ticker}"]
     if tag == "MOMENTUM SPIKE":
-        parts.append(f"+{mom:.1f}% in 15 min")
-    elif tag in ("BREAKOUT", "HOT RUNNER"):
+        parts.append(f"momentum spike: +{day_chg:.1f}%")
+        if mom >= 1.0:
+            parts.append(f"+{mom:.1f}% in 15 min")
+    elif tag in ("BREAKOUT WATCH", "HOT RUNNER"):
         parts.append(f"+{day_chg:.1f}% on day")
+    elif tag == "VOLUME SPIKE":
+        chg_txt = f"{day_chg:+.1f}%"
+        parts.append(f"volume spike {chg_txt}")
     if vol_r >= 1.5:
-        parts.append(f"vol {vol_r:.1f}× avg")
+        parts.append(f"rel vol {vol_r:.1f}×")
     if above_vwap:
         parts.append("above VWAP")
     if breaking:
-        parts.append("new intraday high")
-    return " · ".join(parts) if parts else f"{day_chg:+.1f}% on day"
+        parts.append("near HOD")
+    return ", ".join(parts[1:]) if len(parts) > 1 else f"{day_chg:+.1f}% on day"
 
 
 # ── Notification helpers ──────────────────────────────────────────────────────
@@ -302,28 +298,22 @@ def _send_discord(msg: str) -> None:
         logger.debug("discord send failed: %s", _e)
 
 
-def _notify(opp: dict) -> None:
-    """Format and send Telegram + Discord alert for one opportunity."""
-    tag   = opp["primary_tag"]
-    emoji = {
-        "MOMENTUM SPIKE": "🔥",
-        "BREAKOUT":       "🚀",
-        "VOLUME SPIKE":   "📊",
-        "HOT RUNNER":     "⚡",
-    }.get(tag, "📌")
-
-    tg_msg = (
-        f"{emoji} <b>{tag}: ${opp['ticker']}</b>\n"
-        f"💰 Price: ${opp['price']} ({opp['day_chg_pct']:+.2f}%)\n"
-        f"📊 Volume: {opp['volume_ratio']:.1f}× avg\n"
-        f"📝 {opp['reason']}\n"
-        f"🎯 Entry zone: {opp['entry_zone']}\n"
-        f"⏰ {opp['scanned_at']}"
+def _persist_alert(opp: dict) -> None:
+    """Write a scanner-detected opportunity to the DB scanner_alerts table."""
+    tag      = opp["primary_tag"]
+    ticker   = opp["ticker"]
+    severity = "high" if tag == "MOMENTUM SPIKE" else (
+               "medium" if tag in ("BREAKOUT WATCH", "HOT RUNNER") else "low"
     )
-    dc_msg = tg_msg.replace("<b>", "**").replace("</b>", "**")
-
-    _send_telegram(tg_msg)
-    _send_discord(dc_msg)
+    message  = (
+        f"{ticker} {tag}: {opp['reason']} "
+        f"(${opp['price']}, entry {opp['entry_zone']})"
+    )
+    try:
+        from database import add_scanner_alert
+        add_scanner_alert(ticker, tag, message, severity)
+    except Exception as _e:
+        logger.debug("persist_alert failed %s: %s", ticker, _e)
 
 
 # ── Core scan cycle ───────────────────────────────────────────────────────────
@@ -390,11 +380,11 @@ def _scanner_loop() -> None:
                     _scan_state["last_scan"]     = ts
                     _scan_state["scan_count"]   += 1
 
-                # Push notifications (dedup-guarded, fire-and-forget threads)
+                # Persist new alerts to DB (dedup-guarded, fire-and-forget)
                 for opp in opps:
                     if _should_notify(opp["ticker"], opp["primary_tag"]):
                         threading.Thread(
-                            target=_notify, args=(opp,), daemon=True
+                            target=_persist_alert, args=(opp,), daemon=True
                         ).start()
 
                 logger.info(

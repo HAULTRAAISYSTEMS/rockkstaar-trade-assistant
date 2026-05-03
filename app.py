@@ -36,6 +36,8 @@ from database import (
     add_journal_entry, update_journal_entry, delete_journal_entry,
     get_journal_entry, get_all_journal_entries, get_journal_entries_for_date,
     get_daily_session, upsert_daily_session, lock_daily_session, unlock_daily_session,
+    add_scanner_alert, get_scanner_alerts, mark_scanner_alerts_seen,
+    get_unseen_scanner_alert_count, clear_scanner_alerts,
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
 from data_fetcher import _et_now
@@ -3789,6 +3791,7 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
         "market_context": _get_market_context(),
         "scanner":        _scanner.get_scan_results(),
         "alert_count":    get_alert_count(),
+        "scan_alert_count": get_unseen_scanner_alert_count(),
     }
 
 
@@ -3872,6 +3875,40 @@ def api_scanner_add():
     except Exception as exc:
         logger.error("api_scanner_add failed: %s", exc, exc_info=True)
         return jsonify({"error": "could not add ticker"}), 500
+
+
+@app.route("/api/scanner/alerts")
+def api_scanner_alerts():
+    """Return the most-recent scanner alerts (DB-persisted) as JSON."""
+    try:
+        return jsonify(get_scanner_alerts(limit=30))
+    except Exception as exc:
+        logger.error("api_scanner_alerts failed: %s", exc, exc_info=True)
+        return jsonify([]), 500
+
+
+@csrf.exempt
+@app.route("/api/scanner/alerts/seen", methods=["POST"])
+def api_scanner_alerts_seen():
+    """Mark all scanner alerts as seen (clears the unseen badge)."""
+    try:
+        mark_scanner_alerts_seen()
+        return jsonify({"ok": True})
+    except Exception as exc:
+        logger.error("api_scanner_alerts_seen failed: %s", exc, exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
+
+@csrf.exempt
+@app.route("/api/scanner/alerts/clear", methods=["POST"])
+def api_scanner_alerts_clear():
+    """Delete all scanner alert rows."""
+    try:
+        clear_scanner_alerts()
+        return jsonify({"ok": True})
+    except Exception as exc:
+        logger.error("api_scanner_alerts_clear failed: %s", exc, exc_info=True)
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/stock/<ticker>/live")

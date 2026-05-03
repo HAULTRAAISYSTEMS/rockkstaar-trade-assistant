@@ -185,11 +185,22 @@
     <span class="scanner-label-live" id="scanner-label">SCANNING…</span>
     <span class="scanner-time" id="scanner-time"></span>
     <span class="scanner-count" id="scanner-count"></span>
+    <span class="scan-alert-badge" id="scan-alert-badge" style="display:none"></span>
   </div>
+  <!-- Opportunity cards row -->
   <div class="scanner-scroll" id="scanner-cards">
     <div class="scanner-placeholder" id="scanner-placeholder">
       Scanning market for momentum opportunities…
     </div>
+  </div>
+  <!-- Recent scanner alerts log -->
+  <div class="scan-alerts-panel" id="scan-alerts-panel" style="display:none">
+    <div class="scan-alerts-header">
+      <span class="scan-alerts-title">Recent Alerts</span>
+      <button class="scan-alerts-clear-btn" onclick="scanAlertsMarkSeen()" title="Mark all seen">✓ Mark Seen</button>
+      <button class="scan-alerts-clear-btn scan-alerts-dismiss-btn" onclick="scanAlertsClear()" title="Clear all alerts">Dismiss All</button>
+    </div>
+    <div id="scan-alerts-list"></div>
   </div>
 </section>
 
@@ -1054,8 +1065,8 @@ function updateMarketTemp(mt) {
 }
 
 // ── Scanner card builder + section updater ───────────────────────────────────��
-var _TAG_CSS   = { "MOMENTUM SPIKE":"scanner-tag-momentum","BREAKOUT":"scanner-tag-breakout","VOLUME SPIKE":"scanner-tag-volume","HOT RUNNER":"scanner-tag-runner" };
-var _TAG_EMOJI = { "MOMENTUM SPIKE":"🔥","BREAKOUT":"🚀","VOLUME SPIKE":"📊","HOT RUNNER":"⚡" };
+var _TAG_CSS   = { "MOMENTUM SPIKE":"scanner-tag-momentum","BREAKOUT WATCH":"scanner-tag-breakout","BREAKOUT":"scanner-tag-breakout","VOLUME SPIKE":"scanner-tag-volume","HOT RUNNER":"scanner-tag-runner" };
+var _TAG_EMOJI = { "MOMENTUM SPIKE":"🔥","BREAKOUT WATCH":"🚀","BREAKOUT":"🚀","VOLUME SPIKE":"📊","HOT RUNNER":"⚡" };
 
 function _buildScanCard(opp) {
   var tag   = opp.primary_tag || '';
@@ -1137,6 +1148,71 @@ function scannerAdd(ticker, btn) {
     .catch(function() { btn.textContent = '+ Watch'; btn.disabled = false; });
 }
 
+// ── Scanner alert panel ────────────────────────────���──────────────────────────
+var _SEV_CLASS = { high: 'scan-al-high', medium: 'scan-al-medium', low: 'scan-al-low' };
+var _TYPE_EMOJI = { 'MOMENTUM SPIKE': '🔥', 'BREAKOUT WATCH': '🚀', 'BREAKOUT': '🚀', 'VOLUME SPIKE': '📊', 'HOT RUNNER': '⚡' };
+
+function _buildAlertRow(al) {
+  var sev   = _SEV_CLASS[al.severity] || 'scan-al-low';
+  var emoji = _TYPE_EMOJI[al.alert_type] || '📌';
+  var seenCls = al.seen ? ' scan-al-seen' : '';
+  return '<div class="scan-al-row ' + sev + seenCls + '" data-id="' + al.id + '">'
+    + '<span class="scan-al-emoji">' + emoji + '</span>'
+    + '<span class="scan-al-msg">' + (al.message || '') + '</span>'
+    + '<span class="scan-al-time">' + (al.created_at || '') + '</span>'
+    + '</div>';
+}
+
+function updateScanAlerts(alerts) {
+  var panel  = document.getElementById('scan-alerts-panel');
+  var list   = document.getElementById('scan-alerts-list');
+  var badge  = document.getElementById('scan-alert-badge');
+  if (!panel || !list) return;
+
+  if (!alerts || alerts.length === 0) {
+    panel.style.display = 'none';
+    if (badge) badge.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  list.innerHTML = alerts.map(_buildAlertRow).join('');
+
+  var unseen = alerts.filter(function(a) { return !a.seen; }).length;
+  if (badge) {
+    if (unseen > 0) {
+      badge.textContent = unseen + ' new';
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
+
+function loadScanAlerts() {
+  fetch('/api/scanner/alerts')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { updateScanAlerts(data); })
+    .catch(function() {});
+}
+
+function scanAlertsMarkSeen() {
+  fetch('/api/scanner/alerts/seen', { method: 'POST' })
+    .then(function() { loadScanAlerts(); })
+    .catch(function() {});
+}
+
+function scanAlertsClear() {
+  if (!confirm('Clear all scanner alerts?')) return;
+  fetch('/api/scanner/alerts/clear', { method: 'POST' })
+    .then(function() { loadScanAlerts(); })
+    .catch(function() {});
+}
+
+// Load alerts on page load and refresh every 20 seconds
+loadScanAlerts();
+setInterval(loadScanAlerts, 20000);
+
 // ── Unified dashboard data application (called by WS handler + HTTP fallback) ─
 function applyDashboardData(data) {
   if (!data) return;
@@ -1204,6 +1280,20 @@ function applyDashboardData(data) {
 
   // ── Live opportunities scanner ────────────────────────────────────────────
   if (data.scanner) updateScanner(data.scanner);
+
+  // ── Scanner alert badge (reload panel when unseen count changes) ──────────
+  if (data.scan_alert_count != null) {
+    var badge = document.getElementById('scan-alert-badge');
+    if (badge) {
+      if (data.scan_alert_count > 0) {
+        badge.textContent = data.scan_alert_count + ' new';
+        badge.style.display = 'inline-block';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+    loadScanAlerts();
+  }
 }
 
 // ── HTTP fallback refresh (used when WebSocket is unavailable) ────────────────
