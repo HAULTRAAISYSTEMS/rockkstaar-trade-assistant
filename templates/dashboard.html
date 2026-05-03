@@ -1065,8 +1065,8 @@ function updateMarketTemp(mt) {
 }
 
 // ── Scanner card builder + section updater ───────────────────────────────────��
-var _TAG_CSS   = { "MOMENTUM SPIKE":"scanner-tag-momentum","BREAKOUT WATCH":"scanner-tag-breakout","BREAKOUT":"scanner-tag-breakout","VOLUME SPIKE":"scanner-tag-volume","HOT RUNNER":"scanner-tag-runner" };
-var _TAG_EMOJI = { "MOMENTUM SPIKE":"🔥","BREAKOUT WATCH":"🚀","BREAKOUT":"🚀","VOLUME SPIKE":"📊","HOT RUNNER":"⚡" };
+var _TAG_CSS   = { "MOMENTUM SPIKE":"scanner-tag-momentum","EARLY MOMENTUM":"scanner-tag-early","BREAKOUT WATCH":"scanner-tag-breakout","BREAKOUT":"scanner-tag-breakout","VOLUME SPIKE":"scanner-tag-volume","HOT RUNNER":"scanner-tag-runner" };
+var _TAG_EMOJI = { "MOMENTUM SPIKE":"🔥","EARLY MOMENTUM":"📈","BREAKOUT WATCH":"🚀","BREAKOUT":"🚀","VOLUME SPIKE":"📊","HOT RUNNER":"⚡" };
 
 function _buildScanCard(opp) {
   var tag   = opp.primary_tag || '';
@@ -1150,7 +1150,7 @@ function scannerAdd(ticker, btn) {
 
 // ── Scanner alert panel ────────────────────────────���──────────────────────────
 var _SEV_CLASS = { high: 'scan-al-high', medium: 'scan-al-medium', low: 'scan-al-low' };
-var _TYPE_EMOJI = { 'MOMENTUM SPIKE': '🔥', 'BREAKOUT WATCH': '🚀', 'BREAKOUT': '🚀', 'VOLUME SPIKE': '📊', 'HOT RUNNER': '⚡' };
+var _TYPE_EMOJI = { 'MOMENTUM SPIKE': '🔥', 'EARLY MOMENTUM': '📈', 'BREAKOUT WATCH': '🚀', 'BREAKOUT': '🚀', 'VOLUME SPIKE': '📊', 'HOT RUNNER': '⚡' };
 
 function _buildAlertRow(al) {
   var sev   = _SEV_CLASS[al.severity] || 'scan-al-low';

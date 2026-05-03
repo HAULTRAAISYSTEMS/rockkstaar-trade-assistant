@@ -187,8 +187,19 @@ def _scan_ticker(ticker: str) -> dict | None:
             projected_vol = total_vol * (195 / max(n, 1))
             vol_ratio = projected_vol / avg_vol
 
+        # Volume trending up: last 3 bars avg vs session avg
+        if n >= 6:
+            recent_vol_avg  = sum(vols_clean[-3:]) / 3
+            session_vol_avg = sum(vols_clean) / n
+            vol_rising = recent_vol_avg > session_vol_avg * 1.1
+        else:
+            vol_rising = vols_clean[-1] > 0
+
+        # Upward short-term momentum (price rising in last 15 min)
+        trending_up = mom_pct > 0.2
+
         # ── Classification (first match wins for primary tag) ─────────────────
-        # MOMENTUM SPIKE: +1.5%+ intraday · vol ≥1.5× · above VWAP · near HOD
+        # Level 2 — MOMENTUM SPIKE: +1.5%+ · vol ≥1.5× · above VWAP · near HOD
         if day_chg_pct >= 1.5 and vol_ratio >= 1.5 and above_vwap and breaking_high:
             primary_tag = "MOMENTUM SPIKE"
             scan_score  = 10
@@ -204,6 +215,10 @@ def _scan_ticker(ticker: str) -> dict | None:
         elif day_chg_pct >= 4.0:
             primary_tag = "HOT RUNNER"
             scan_score  = 6
+        # Level 1 — EARLY MOMENTUM: +0.8%+ · volume increasing · trending up
+        elif day_chg_pct >= 0.8 and vol_rising and trending_up:
+            primary_tag = "EARLY MOMENTUM"
+            scan_score  = 4
         else:
             return None
 
@@ -239,23 +254,26 @@ def _build_reason(
     tag: str, ticker: str, day_chg: float, mom: float,
     vol_r: float, above_vwap: bool, breaking: bool,
 ) -> str:
-    parts = [f"{ticker}"]
+    parts = []
     if tag == "MOMENTUM SPIKE":
-        parts.append(f"momentum spike: +{day_chg:.1f}%")
+        parts.append(f"+{day_chg:.1f}%")
         if mom >= 1.0:
+            parts.append(f"+{mom:.1f}% in 15 min")
+    elif tag == "EARLY MOMENTUM":
+        parts.append(f"+{day_chg:.1f}% early move")
+        if mom > 0:
             parts.append(f"+{mom:.1f}% in 15 min")
     elif tag in ("BREAKOUT WATCH", "HOT RUNNER"):
         parts.append(f"+{day_chg:.1f}% on day")
     elif tag == "VOLUME SPIKE":
-        chg_txt = f"{day_chg:+.1f}%"
-        parts.append(f"volume spike {chg_txt}")
-    if vol_r >= 1.5:
+        parts.append(f"volume spike {day_chg:+.1f}%")
+    if vol_r >= 1.2:
         parts.append(f"rel vol {vol_r:.1f}×")
     if above_vwap:
         parts.append("above VWAP")
     if breaking:
         parts.append("near HOD")
-    return ", ".join(parts[1:]) if len(parts) > 1 else f"{day_chg:+.1f}% on day"
+    return ", ".join(parts) if parts else f"{day_chg:+.1f}% on day"
 
 
 # ── Notification helpers ──────────────────────────────────────────────────────
