@@ -1,3 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!-- Mobile browser chrome theme - prevents white address bar / status bar on iOS/Android -->
+  <meta name="theme-color" content="#070b18" />
+  <!-- iOS PWA / home-screen mode - full-screen dark with translucent status bar -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>{% block title %}Rockkstaar Trade Assistant{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <!-- CSRF token for AJAX POST requests (read by setTradingMode in dashboard.js) -->
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
+</head>
+<body>
+
+  <!-- ===== NAV ===== -->
+  <nav class="navbar">
+    <a href="{{ url_for('dashboard') }}" class="nav-brand">
+      <img src="{{ url_for('static', filename='logo.png') }}"
+           alt="Rockkstaar"
+           class="nav-logo"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" />
+      <span class="brand-icon" style="display:none;">✦</span>
+    </a>
+    <div class="nav-links">
+      <a href="{{ url_for('dashboard') }}"  class="nav-link {% if request.endpoint == 'dashboard' %}nav-link-active{% endif %}">Dashboard</a>
+      <a href="{{ url_for('quick_mode') }}" class="nav-link nav-link-quick {% if request.endpoint == 'quick_mode' %}nav-link-active{% endif %}" title="Mobile quick view">⚡ Quick</a>
+      <a href="{{ url_for('journal') }}"       class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}">Journal</a>
+      <a href="{{ url_for('risk_settings') }}" class="nav-link {% if request.endpoint == 'risk_settings' %}nav-link-active{% endif %}" title="Risk &amp; Discipline Settings">⚙ Risk</a>
+      <a href="{{ url_for('schwab_account') }}" class="nav-link nav-link-schwab {% if request.endpoint == 'schwab_account' %}nav-link-active{% endif %}" title="Schwab Account">◈ Account</a>
+      <a href="{{ url_for('intel') }}" class="nav-link {% if request.endpoint == 'intel' %}nav-link-active{% endif %}">📊 Intel</a>
+    </div>
+    <div class="nav-actions">
+      <span id="ws-status-pill" class="ws-status-pill ws-polling">POLLING</span>
+      <span class="freshness-badge fr-live">Connecting…</span>
+      <span id="ar-last-updated" class="ar-last-updated"></span>
+      <button id="alert-sound-toggle" class="btn-ar-toggle ar-on"  onclick="toggleAlertSound()" title="Sound alerts for new triggers">🔔 Sound ON</button>
+      <button id="ar-toggle"          class="btn-ar-toggle ar-on"  onclick="toggleAutoRefresh()" title="Auto-refresh every 4s during market hours">↺ Auto ON</button>
+      <form action="{{ url_for('refresh_all') }}" method="POST" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-refresh">↺ Refresh All</button>
+      </form>
+    </div>
+  </nav>
+
+  <div class="mobile-refresh-bar"><form action="{{ url_for('refresh_all') }}" method="POST" style="margin:0;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="mobile-refresh-btn">↺ Refresh All</button></form></div>
+
+  <!-- ===== FLASH MESSAGES ===== -->
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       <div class="flash-container">
@@ -14,16 +68,16 @@
   </main>
 
   <!-- ===== MOBILE STICKY CONTROL BAR =====
-       Visible only on ≤ 768px. Stays pinned at the bottom of the screen.
+       Visible only on <= 768px. Stays pinned at the bottom of the screen.
        Mirrors the navbar controls in a touch-friendly layout.
   -->
   <div class="mobile-ctrl-bar" id="mobile-ctrl-bar">
     <span id="mobile-last-updated" class="mobile-ctrl-time"></span>
-    <button id="mobile-ar-toggle"    class="mobile-ctrl-btn mobile-ctrl-ar mcb-on"    onclick="toggleAutoRefresh()">⟳ Auto</button>
+    <button id="mobile-ar-toggle"    class="mobile-ctrl-btn mobile-ctrl-ar mcb-on"    onclick="toggleAutoRefresh()">↺ Auto</button>
     <button id="mobile-sound-toggle" class="mobile-ctrl-btn mobile-ctrl-sound mcb-on" onclick="toggleAlertSound()">🔔</button>
     <form action="{{ url_for('refresh_all') }}" method="POST" style="display:contents;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="mobile-ctrl-btn mobile-ctrl-refresh">⟳ Now</button>
+      <button type="submit" class="mobile-ctrl-btn mobile-ctrl-refresh">↺ Now</button>
     </form>
   </div>
 
