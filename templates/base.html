@@ -35,6 +35,7 @@
       <a href="{{ url_for('journal') }}"       class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}">Journal</a>
       <a href="{{ url_for('risk_settings') }}" class="nav-link {% if request.endpoint == 'risk_settings' %}nav-link-active{% endif %}" title="Risk &amp; Discipline Settings">⚖ Risk</a>
       <a href="{{ url_for('schwab_account') }}" class="nav-link nav-link-schwab {% if request.endpoint == 'schwab_account' %}nav-link-active{% endif %}" title="Schwab Account">◈ Account</a>
+              <a href="{{ url_for('intel') }}" class="nav-link {% if request.endpoint == 'intel' %}nav-link-active{% endif %}">📊 Intel</a>a>
     </div>
     <div class="nav-actions">
       <span id="ws-status-pill" class="ws-status-pill ws-polling">POLLING</span>
@@ -85,3 +86,4 @@
   {% block scripts %}{% endblock %}
 </body>
 </html>
+      <a href="{{ url_for('intel') }}" class="nav-link {% if request.endpoint == 'intel' %}nav-link-active{% endif %}">📊 Intel</a>
