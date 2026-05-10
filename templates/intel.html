@@ -649,6 +649,31 @@
   .filter-btn.f-high.active     { background: #f59e0b; border-color: #f59e0b; }
   .filter-btn.f-medium.active   { background: #60a5fa; border-color: #60a5fa; }
 
+  /* ── Debug panel ── */
+  #intel-dbg {
+    background: #0d0005;
+    border: 2px solid #ff3333;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 18px;
+    font-family: var(--font);
+    font-size: 12px;
+  }
+  #intel-dbg .dbg-title {
+    color: #ff5555;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+  }
+  #intel-dbg table { width: 100%; border-collapse: collapse; }
+  #intel-dbg td { padding: 3px 8px 3px 0; vertical-align: top; }
+  #intel-dbg .dbg-key { color: #666; min-width: 200px; white-space: nowrap; }
+  #intel-dbg .dbg-yes { color: #22c55e; }
+  #intel-dbg .dbg-no  { color: #ef4444; }
+  #intel-dbg .dbg-wait{ color: #888; }
+  #intel-dbg .dbg-val { color: #aaa; word-break: break-all; }
+
   /* ── Responsive ── */
   @media (max-width: 900px) {
     .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
@@ -686,6 +711,63 @@
 
 <!-- ── Page ─────────────────────────────────────────────── -->
 <div class="page">
+
+  <!-- ══ DEBUG PANEL ══════════════════════════════════════════ -->
+  <div id="intel-dbg">
+    <div class="dbg-title">🔴 INTEL DIAGNOSTIC PANEL</div>
+    <table>
+      <tr><td class="dbg-key">JS loaded</td>
+          <td id="d-js" class="dbg-wait">WAITING — main script not yet parsed</td></tr>
+      <tr><td class="dbg-key">API fetch started</td>
+          <td id="d-fetch-start" class="dbg-no">no</td></tr>
+      <tr><td class="dbg-key">API fetch completed</td>
+          <td id="d-fetch-done" class="dbg-no">no</td></tr>
+      <tr><td class="dbg-key">API status code</td>
+          <td id="d-status" class="dbg-wait">—</td></tr>
+      <tr><td class="dbg-key">API error text</td>
+          <td id="d-error" class="dbg-wait">—</td></tr>
+      <tr><td class="dbg-key">Render started</td>
+          <td id="d-render-start" class="dbg-no">no</td></tr>
+      <tr><td class="dbg-key">Render completed</td>
+          <td id="d-render-done" class="dbg-no">no</td></tr>
+      <tr><td class="dbg-key">Render error</td>
+          <td id="d-render-err" class="dbg-wait">—</td></tr>
+      <tr><td class="dbg-key">news count</td>
+          <td id="d-news" class="dbg-wait">—</td></tr>
+      <tr><td class="dbg-key">earnings count (today/tomorrow/week)</td>
+          <td id="d-earn" class="dbg-wait">—</td></tr>
+      <tr><td class="dbg-key">splits count</td>
+          <td id="d-splits" class="dbg-wait">—</td></tr>
+      <tr><td class="dbg-key">economic_events count</td>
+          <td id="d-econ" class="dbg-wait">—</td></tr>
+    </table>
+  </div>
+  <!-- early inline script: runs in its own <script> block so a syntax error
+       in the main script below doesn't prevent this from updating the panel -->
+  <script>
+  (function() {
+    function _dbgSet(id, text, cls) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = text;
+      el.className   = cls || 'dbg-val';
+    }
+    window._dbgSet = _dbgSet;
+    _dbgSet('d-js', 'YES — init script executed', 'dbg-yes');
+
+    // Replace all LOADING spinners with FETCHING… immediately
+    var keys = ['news','earn','split','econ'];
+    keys.forEach(function(k) {
+      var el = document.getElementById(k + '-loading');
+      if (el) el.innerHTML = '<div class="loading-spinner"></div> FETCHING…';
+    });
+    var badges = ['news-count-badge','earn-count-badge','split-count-badge','econ-count-badge'];
+    badges.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.textContent = 'FETCHING…';
+    });
+  })();
+  </script>
 
   <!-- Header -->
   <div class="page-header">
@@ -1481,7 +1563,8 @@ function processEarnings(stocks) {
       } else {
         weekBody.innerHTML = `<div class="earnings-row"><span class="earnings-ticker" style="color:var(--text-muted)">—</span><span class="earnings-company">No earnings detected on your watchlist this week</span><span></span><span></span><span class="col-hide"></span><span></span></div>`;
       }
-}
+  }
+} // ← close processEarnings
 
 // ── Refresh all ────────────────────────────────────────
 function refreshAll() {
@@ -1508,9 +1591,27 @@ function loadIntelData(forceRefresh) {
   _intelLoading = true;
   if (_intelRetryTimer) { clearTimeout(_intelRetryTimer); _intelRetryTimer = null; }
 
-  console.log('[intel] fetch started  forceRefresh=' + forceRefresh + '  retry=' + _intelRetries);
+  // Detect ?debug=1 in page URL and pass it through to the API
+  var isDebugPage = window.location.search.indexOf('debug=1') !== -1;
+  var url = '/api/intel';
+  if (isDebugPage) {
+    url += '?debug=1';
+  } else if (forceRefresh) {
+    url += '?refresh=1';
+  }
 
-  var url  = '/api/intel' + (forceRefresh ? '?refresh=1' : '');
+  console.log('[intel] fetch started  url=' + url + '  retry=' + _intelRetries);
+  if (window._dbgSet) {
+    _dbgSet('d-js',          'YES — main script running', 'dbg-yes');
+    _dbgSet('d-fetch-start', 'YES — ' + url,              'dbg-yes');
+    _dbgSet('d-fetch-done',  'no (in flight)',             'dbg-no');
+    _dbgSet('d-status',      '—',                         'dbg-wait');
+    _dbgSet('d-error',       '—',                         'dbg-wait');
+    _dbgSet('d-render-start','no',                        'dbg-no');
+    _dbgSet('d-render-done', 'no',                        'dbg-no');
+    _dbgSet('d-render-err',  '—',                         'dbg-wait');
+  }
+
   var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
   var tid  = ctrl ? setTimeout(function() { ctrl.abort(); }, 8000) : null;
   var opts = ctrl ? { signal: ctrl.signal } : {};
@@ -1519,6 +1620,9 @@ function loadIntelData(forceRefresh) {
     .then(function(r) {
       if (tid) clearTimeout(tid);
       console.log('[intel] HTTP ' + r.status);
+      if (window._dbgSet) {
+        _dbgSet('d-status', String(r.status), r.ok ? 'dbg-yes' : 'dbg-no');
+      }
       return r.json();
     })
     .then(function(data) {
@@ -1540,6 +1644,15 @@ function loadIntelData(forceRefresh) {
         console.warn('[intel] server errors:', data.errors);
       }
 
+      if (window._dbgSet) {
+        _dbgSet('d-fetch-done', 'YES — ok=' + data.ok, 'dbg-yes');
+        _dbgSet('d-news',   String(newsArr.length),  newsArr.length ? 'dbg-yes' : 'dbg-wait');
+        _dbgSet('d-earn',   'today=' + (earn.today||[]).length + '  tomorrow=' + (earn.tomorrow||[]).length + '  week=' + (earn.this_week||[]).length, nEarn ? 'dbg-yes' : 'dbg-wait');
+        _dbgSet('d-splits', String(splits.length),   splits.length ? 'dbg-yes' : 'dbg-wait');
+        _dbgSet('d-econ',   String(econ.length),      econ.length ? 'dbg-yes' : 'dbg-wait');
+        _dbgSet('d-error',  data.errors && data.errors.length ? data.errors.join(' | ') : 'none', data.errors && data.errors.length ? 'dbg-no' : 'dbg-yes');
+      }
+
       // ── Always stop ALL spinners immediately, even if render crashes below ──
       ['news','earn','split','econ'].forEach(function(k) {
         var loadEl = document.getElementById(k + '-loading');
@@ -1551,15 +1664,21 @@ function loadIntelData(forceRefresh) {
       });
 
       // ── Render each section, catch any crash and show it in the debug box ──
+      if (window._dbgSet) _dbgSet('d-render-start', 'YES', 'dbg-yes');
       try {
         renderNews(newsArr);
         renderEarnings(earn);
         renderSplits(splits);
         renderEcon(econ);
         _updateIntelDebug(data);
+        if (window._dbgSet) _dbgSet('d-render-done', 'YES', 'dbg-yes');
         console.log('[intel] render complete');
       } catch (renderErr) {
         console.error('[intel] render crashed:', renderErr);
+        if (window._dbgSet) {
+          _dbgSet('d-render-done', 'CRASHED', 'dbg-no');
+          _dbgSet('d-render-err', renderErr.message + ' @ ' + (renderErr.stack || '').split('\n')[1], 'dbg-no');
+        }
         _updateIntelDebug(Object.assign({}, data, {
           errors: (data.errors || []).concat(['Render error: ' + renderErr.message])
         }));
@@ -1579,17 +1698,37 @@ function loadIntelData(forceRefresh) {
       _intelLoading = false;
       var isAbort = e.name === 'AbortError';
       var label   = isAbort ? 'TIMEOUT 8s' : e.name;
-      console.error('[intel] fetch failed  ' + label + ':', e.message || String(e));
-      var msg = isAbort
+      var msg     = isAbort
         ? 'Server timed out (8 s) — click ↻ to retry.'
         : 'Network error — ' + (e.message || String(e));
+      console.error('[intel] fetch failed  ' + label + ':', e.message || String(e));
+
+      if (window._dbgSet) {
+        _dbgSet('d-fetch-done', 'FAILED — ' + label, 'dbg-no');
+        _dbgSet('d-error', msg, 'dbg-no');
+      }
+
+      // Replace all sections with ERROR
+      ['news','earn','split','econ'].forEach(function(k) {
+        var loadEl = document.getElementById(k + '-loading');
+        var bodyEl = document.getElementById(k + '-body');
+        if (loadEl) { loadEl.style.display = 'none'; }
+        if (bodyEl) {
+          bodyEl.style.display = 'block';
+          var rowsEl = bodyEl.querySelector('[id$="-rows"], [id$="-rows-today"], [id^="' + k + '-rows"]');
+          if (!rowsEl) rowsEl = bodyEl;
+          rowsEl.innerHTML =
+            '<div style="padding:20px;text-align:center;color:#ef4444;font-size:13px;font-weight:600;">' +
+            'ERROR — ' + _esc(msg) + '</div>';
+        }
+      });
       _showIntelError('news-loading',  'news-rows',       msg);
       _showIntelError('earn-loading',  'earn-rows-today', msg);
       _showIntelError('split-loading', 'split-rows',      msg);
       _showIntelError('econ-loading',  'econ-rows',       msg);
-      console.log('[intel] fallback rendered');
+      console.log('[intel] error state rendered');
       _updateIntelDebug({ ok: false, errors: [msg], last_updated: '—',
-        market_news: [], earnings: {}, splits: [], economic_events: [],
+        news: [], market_news: [], earnings: {}, splits: [], economic_events: [],
         from_cache: false, refreshing: false });
     });
 }
@@ -1615,29 +1754,33 @@ function _showIntelError(loadId, rowsId, msg) {
 
 // Update the debug status box at the bottom of the page
 function _updateIntelDebug(data) {
-  var el = document.getElementById('intel-debug-box');
-  if (!el) return;
-  var earn  = data.earnings || {};
-  var nEarn = (earn.today||[]).length + (earn.tomorrow||[]).length + (earn.this_week||[]).length;
-  var status = data.ok
+  var earn     = data.earnings || {};
+  var nEarn    = (earn.today||[]).length + (earn.tomorrow||[]).length + (earn.this_week||[]).length;
+  var newsArr  = data.news || data.market_news || [];
+  var status   = data.ok
     ? (data.refreshing ? '⏳ Refreshing…' : '✅ OK')
     : (data.refreshing ? '⏳ Cache warming…' : '⚠ Error / empty');
-  var rows = [
-    ['API status',    status],
-    ['Last updated',  data.last_updated || '—'],
-    ['From cache',    data.from_cache ? 'Yes' : 'No'],
-    ['News items',    String((data.market_news     || []).length)],
-    ['Earnings',      String(nEarn)],
-    ['Splits',        String((data.splits          || []).length)],
-    ['Econ events',   String((data.economic_events || []).length)],
-    ['Errors',        (data.errors && data.errors.length ? data.errors.join(' │ ') : 'None')],
-  ];
-  el.innerHTML = rows.map(function(r) {
-    return '<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--border);">'
-      + '<span style="min-width:96px;color:var(--text-muted);font-size:11px;">' + _esc(r[0]) + '</span>'
-      + '<span style="color:var(--text-secondary);font-size:11px;word-break:break-all;">' + _esc(r[1]) + '</span>'
-      + '</div>';
-  }).join('');
+
+  // Update the bottom card (legacy)
+  var el = document.getElementById('intel-debug-box');
+  if (el) {
+    var rows = [
+      ['API status',    status],
+      ['Last updated',  data.last_updated || '—'],
+      ['From cache',    data.from_cache ? 'Yes' : 'No'],
+      ['News items',    String(newsArr.length)],
+      ['Earnings',      String(nEarn)],
+      ['Splits',        String((data.splits          || []).length)],
+      ['Econ events',   String((data.economic_events || []).length)],
+      ['Errors',        (data.errors && data.errors.length ? data.errors.join(' │ ') : 'None')],
+    ];
+    el.innerHTML = rows.map(function(r) {
+      return '<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--border);">'
+        + '<span style="min-width:96px;color:var(--text-muted);font-size:11px;">' + _esc(r[0]) + '</span>'
+        + '<span style="color:var(--text-secondary);font-size:11px;word-break:break-all;">' + _esc(r[1]) + '</span>'
+        + '</div>';
+    }).join('');
+  }
 }
 
 function refreshIntel() {
@@ -1898,7 +2041,8 @@ function _esc(s) {
 }
 
 // ── Init ───────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', function() {
+  if (window._dbgSet) _dbgSet('d-js', 'YES — DOMContentLoaded fired, main script OK', 'dbg-yes');
   loadChecklistState('daily');
   loadChecklistState('weekly');
   loadNotes('daily');

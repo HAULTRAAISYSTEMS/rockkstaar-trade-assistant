@@ -4203,7 +4203,34 @@ def api_intel():
     Cache-first — always responds in < 1 second.
     Cold cache: returns static fallback + triggers background refresh.
     ?refresh=1 clears the cache and starts a fresh background fetch.
+    ?debug=1  returns a guaranteed test payload for front-end diagnostics.
     """
+    if request.args.get("debug") == "1":
+        return jsonify({
+            "ok": True,
+            "news": [{"ticker": "TEST", "headline": "Debug news item", "impact": "HIGH",
+                      "time": "09:00", "reason": "Debug test payload", "source": "Debug",
+                      "on_watchlist": False}],
+            "market_news": [{"ticker": "TEST", "headline": "Debug news item", "impact": "HIGH",
+                             "time": "09:00", "reason": "Debug test payload", "source": "Debug",
+                             "on_watchlist": False}],
+            "earnings": {
+                "today": [],
+                "tomorrow": [],
+                "this_week": [{"ticker": "TEST", "date": "2026-05-11", "date_label": "This Week",
+                               "time_label": "BMO", "days_away": 1, "on_watchlist": False}],
+            },
+            "splits": [{"ticker": "TEST", "ratio": "2:1", "effective_date": "2026-05-15",
+                        "eff_date": "2026-05-15", "type": "Forward", "status": "Upcoming",
+                        "is_new": False, "days_away": 5}],
+            "economic_events": [{"name": "Debug CPI Event", "date": "2026-05-12", "impact": "HIGH",
+                                 "event": "Debug CPI Event", "date_label": "Mon May 12",
+                                 "time": "8:30 AM", "reason": "Debug payload", "is_today": False}],
+            "errors": [],
+            "last_updated": "debug",
+            "from_cache": False,
+            "refreshing": False,
+        })
     if request.args.get("refresh") == "1":
         _intel.clear_intel_cache()
     try:
