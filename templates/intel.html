@@ -6,147 +6,109 @@
 <title>Pre-Market Intel — Rockkstaar Trade Assistant</title>
 <style>
   :root {
-    --bg-primary: #0d0d0f;
-    --bg-surface: #141416;
-    --bg-card: #1a1a1e;
-    --bg-card-hover: #1f1f24;
-    --bg-inset: #111114;
-    --border: rgba(255,255,255,0.07);
-    --border-accent: rgba(255,255,255,0.12);
-    --text-primary: #f0f0f2;
-    --text-secondary: #888892;
-    --text-muted: #55555f;
-    --green: #22c55e;
-    --green-dim: rgba(34,197,94,0.12);
-    --red: #ef4444;
-    --red-dim: rgba(239,68,68,0.12);
-    --amber: #f59e0b;
-    --amber-dim: rgba(245,158,11,0.12);
-    --purple: #a78bfa;
-    --purple-dim: rgba(167,139,250,0.1);
-    --blue: #60a5fa;
-    --blue-dim: rgba(96,165,250,0.1);
-    --teal: #2dd4bf;
-    --teal-dim: rgba(45,212,191,0.1);
-    --accent: #7c5cfc;
-    --font: 'SF Mono','JetBrains Mono','Fira Code',monospace;
-    --font-ui: -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+    --bg-primary:#0d0d0f;--bg-surface:#141416;--bg-card:#1a1a1e;--bg-card-hover:#1f1f24;
+    --bg-inset:#111114;--border:rgba(255,255,255,0.07);--border-accent:rgba(255,255,255,0.12);
+    --text-primary:#f0f0f2;--text-secondary:#888892;--text-muted:#55555f;
+    --green:#22c55e;--green-dim:rgba(34,197,94,0.12);--red:#ef4444;--red-dim:rgba(239,68,68,0.12);
+    --amber:#f59e0b;--amber-dim:rgba(245,158,11,0.12);--purple:#a78bfa;
+    --blue:#60a5fa;--teal:#2dd4bf;--accent:#7c5cfc;
+    --font:'SF Mono','JetBrains Mono',monospace;--font-ui:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-ui); font-size: 13px; line-height: 1.5; min-height: 100vh; }
-  .nav { background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 0 20px; display: flex; align-items: center; height: 52px; gap: 24px; position: sticky; top: 0; z-index: 100; }
-  .nav-brand { font-size: 14px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-primary); text-decoration: none; }
-  .nav-links { display: flex; gap: 2px; }
-  .nav-link { padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 500; color: var(--text-secondary); text-decoration: none; transition: all 0.15s; }
-  .nav-link:hover { background: var(--bg-card); color: var(--text-primary); }
-  .nav-link.active { background: var(--accent); color: #fff; }
-  .nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-  .nav-time { font-family: var(--font); font-size: 11px; color: var(--text-muted); }
-  .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-  .page { max-width: 1280px; margin: 0 auto; padding: 20px; }
-  .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-  .page-title { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
-  .page-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
-  .badge-green { background: var(--green-dim); color: var(--green); border: 1px solid rgba(34,197,94,0.2); }
-  .badge-amber { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,158,11,0.2); }
-  .badge-red   { background: var(--red-dim);   color: var(--red);   border: 1px solid rgba(239,68,68,0.2); }
-  .badge-gray  { background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--border); }
-  .view-toggle { display: flex; gap: 2px; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
-  .view-btn { padding: 5px 14px; border-radius: 6px; font-size: 11px; font-weight: 600; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; letter-spacing: 0.04em; transition: all 0.15s; }
-  .view-btn.active { background: var(--accent); color: #fff; }
-  .btn { padding: 7px 14px; border-radius: 7px; font-size: 12px; font-weight: 600; border: 1px solid var(--border-accent); background: var(--bg-card); color: var(--text-primary); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s; }
-  .btn:hover { background: var(--bg-card-hover); }
-  .btn-accent { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn-accent:hover { background: #6b4fe0; }
-  .panel { display: none; }
-  .panel.active { display: block; }
-  .section { margin-bottom: 20px; }
-  .section-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; letter-spacing: 0.04em; display: flex; align-items: center; gap: 8px; }
-  .section-line { flex: 1; height: 1px; background: var(--border); }
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-  .card-header { padding: 12px 16px 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .card-title { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-secondary); }
-  .card-body { padding: 14px 16px; }
-  .env-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 1px; background: var(--border); border-radius: 8px; overflow: hidden; }
-  .env-cell { background: var(--bg-card); padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
-  .env-label { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-  .env-value { font-size: 20px; font-family: var(--font); font-weight: 600; }
-  .env-sub { font-size: 11px; color: var(--text-secondary); }
-  .env-status { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; margin-top: 4px; }
-  .regime-banner { border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; border: 1px solid; }
-  .regime-banner.risk-on  { background: rgba(34,197,94,0.06); border-color: rgba(34,197,94,0.2); }
-  .regime-banner.caution  { background: rgba(245,158,11,0.06); border-color: rgba(245,158,11,0.2); }
-  .regime-banner.risk-off { background: rgba(239,68,68,0.06); border-color: rgba(239,68,68,0.2); }
-  .regime-text { font-size: 13px; font-weight: 600; }
-  .regime-sub  { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
-  .sector-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; }
-  .sector-cell { background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
-  .sector-name { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
-  .sector-etf  { font-family: var(--font); font-size: 10px; color: var(--text-muted); }
-  .sector-pct  { font-family: var(--font); font-size: 16px; font-weight: 700; }
-  .level-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 16px; border-bottom: 1px solid var(--border); }
-  .level-row:last-child { border-bottom: none; }
-  .level-label { font-size: 12px; color: var(--text-secondary); }
-  .level-value { font-family: var(--font); font-size: 13px; font-weight: 600; }
-  .earnings-list { display: flex; flex-direction: column; }
-  .earnings-row { display: grid; grid-template-columns: 60px 1fr 70px 70px 80px 90px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); gap: 12px; transition: background 0.1s; }
-  .earnings-row:last-child { border-bottom: none; }
-  .earnings-row:hover { background: var(--bg-card-hover); }
-  .earnings-header { background: var(--bg-inset); font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-  .earnings-ticker { font-family: var(--font); font-size: 13px; font-weight: 700; }
-  .earnings-company { font-size: 12px; color: var(--text-secondary); }
-  .event-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); transition: background 0.1s; }
-  .event-row:last-child { border-bottom: none; }
-  .event-row:hover { background: var(--bg-card-hover); }
-  .event-ticker { font-family: var(--font); font-size: 13px; font-weight: 700; min-width: 55px; }
-  .event-type { flex: 1; }
-  .event-type-label { font-size: 12px; color: var(--text-primary); }
-  .event-type-sub { font-size: 11px; color: var(--text-muted); }
-  .checklist { display: flex; flex-direction: column; }
-  .check-section-title { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); padding: 10px 16px 6px; background: var(--bg-inset); border-bottom: 1px solid var(--border); }
-  .check-item { display: flex; align-items: flex-start; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
-  .check-item:last-child { border-bottom: none; }
-  .check-item:hover { background: var(--bg-card-hover); }
-  .check-item.done { opacity: 0.45; }
-  .check-box { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--border-accent); flex-shrink: 0; margin-top: 1px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
-  .check-item.done .check-box { background: var(--accent); border-color: var(--accent); }
-  .check-item.done .check-box::after { content: ''; width: 8px; height: 5px; border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff; transform: rotate(-45deg) translate(1px,-1px); }
-  .check-label { font-size: 12px; color: var(--text-primary); line-height: 1.4; }
-  .check-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-  .progress-bar-wrap { background: var(--bg-inset); border-radius: 4px; height: 4px; overflow: hidden; }
-  .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s ease; }
-  .note-box { background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: var(--text-secondary); width: 100%; resize: vertical; min-height: 80px; font-family: var(--font-ui); outline: none; transition: border-color 0.15s; }
-  .note-box:focus { border-color: var(--accent); }
-  .pos { color: var(--green); }
-  .neg { color: var(--red); }
-  hr.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
-  @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } .env-grid { grid-template-columns: 1fr 1fr; } .sector-grid { grid-template-columns: repeat(2,1fr); } }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg-primary);color:var(--text-primary);font-family:var(--font-ui);font-size:13px;line-height:1.5;min-height:100vh;}
+  .page{max-width:1280px;margin:0 auto;padding:20px;}
+  .page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+  .page-title{font-size:18px;font-weight:600;letter-spacing:-0.01em;}
+  .page-sub{font-size:12px;color:var(--text-muted);margin-top:2px;}
+  .badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;}
+  .badge-green{background:var(--green-dim);color:var(--green);border:1px solid rgba(34,197,94,0.2);}
+  .badge-amber{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(245,158,11,0.2);}
+  .badge-red{background:var(--red-dim);color:var(--red);border:1px solid rgba(239,68,68,0.2);}
+  .badge-blue{background:rgba(96,165,250,0.1);color:var(--blue);border:1px solid rgba(96,165,250,0.2);}
+  .badge-gray{background:rgba(255,255,255,0.05);color:var(--text-secondary);border:1px solid var(--border);}
+  .badge-purple{background:rgba(167,139,250,0.1);color:var(--purple);border:1px solid rgba(167,139,250,0.2);}
+  .view-toggle{display:flex;gap:2px;background:var(--bg-inset);border:1px solid var(--border);border-radius:8px;padding:2px;}
+  .view-btn{padding:5px 14px;border-radius:6px;font-size:11px;font-weight:600;border:none;background:transparent;color:var(--text-secondary);cursor:pointer;letter-spacing:0.04em;transition:all 0.15s;}
+  .view-btn.active{background:var(--accent);color:#fff;}
+  .btn{padding:7px 14px;border-radius:7px;font-size:12px;font-weight:600;border:1px solid var(--border-accent);background:var(--bg-card);color:var(--text-primary);cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all 0.15s;}
+  .btn:hover{background:var(--bg-card-hover);}
+  .btn-accent{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .btn-accent:hover{background:#6b4fe0;}
+  .panel{display:none;}.panel.active{display:block;}
+  .section{margin-bottom:20px;}
+  .section-title{font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:10px;letter-spacing:0.04em;display:flex;align-items:center;gap:8px;}
+  .section-line{flex:1;height:1px;background:var(--border);}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+  .card-header{padding:12px 16px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .card-title{font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-secondary);}
+  .card-body{padding:14px 16px;}
+  .env-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border-radius:8px;overflow:hidden;}
+  .env-cell{background:var(--bg-card);padding:14px 16px;display:flex;flex-direction:column;gap:4px;}
+  .env-label{font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);}
+  .env-value{font-size:20px;font-family:var(--font);font-weight:600;}
+  .env-sub{font-size:11px;color:var(--text-secondary);}
+  .env-status{font-size:10px;font-weight:600;letter-spacing:0.06em;margin-top:4px;}
+  .regime-banner{border-radius:8px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;border:1px solid;}
+  .regime-banner.risk-on{background:rgba(34,197,94,0.06);border-color:rgba(34,197,94,0.2);}
+  .regime-banner.caution{background:rgba(245,158,11,0.06);border-color:rgba(245,158,11,0.2);}
+  .regime-banner.risk-off{background:rgba(239,68,68,0.06);border-color:rgba(239,68,68,0.2);}
+  .regime-text{font-size:13px;font-weight:600;}
+  .regime-sub{font-size:11px;color:var(--text-secondary);margin-top:2px;}
+  .sector-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  .sector-cell{background:var(--bg-inset);border:1px solid var(--border);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;transition:border-color 0.2s;}
+  .sector-cell.hot{border-color:rgba(34,197,94,0.3);}
+  .sector-cell.cold{border-color:rgba(239,68,68,0.3);}
+  .sector-name{font-size:11px;font-weight:600;color:var(--text-secondary);}
+  .sector-etf{font-family:var(--font);font-size:10px;color:var(--text-muted);}
+  .sector-pct{font-family:var(--font);font-size:16px;font-weight:700;}
+  .level-row{display:flex;align-items:center;justify-content:space-between;padding:9px 16px;border-bottom:1px solid var(--border);}
+  .level-row:last-child{border-bottom:none;}
+  .level-label{font-size:12px;color:var(--text-secondary);}
+  .level-value{font-family:var(--font);font-size:13px;font-weight:600;}
+  .earnings-list{display:flex;flex-direction:column;}
+  .earnings-row{display:grid;grid-template-columns:65px 1fr 80px 60px 90px 80px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);gap:12px;transition:background 0.1s;}
+  .earnings-row:last-child{border-bottom:none;}
+  .earnings-row:hover{background:var(--bg-card-hover);}
+  .earnings-header{background:var(--bg-inset);font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);}
+  .earnings-ticker{font-family:var(--font);font-size:13px;font-weight:700;}
+  .earnings-company{font-size:12px;color:var(--text-secondary);}
+  .event-row{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);transition:background 0.1s;}
+  .event-row:last-child{border-bottom:none;}
+  .event-row:hover{background:var(--bg-card-hover);}
+  .event-ticker{font-family:var(--font);font-size:13px;font-weight:700;min-width:55px;}
+  .event-type{flex:1;}
+  .event-type-label{font-size:12px;color:var(--text-primary);}
+  .event-type-sub{font-size:11px;color:var(--text-muted);}
+  .checklist{display:flex;flex-direction:column;}
+  .check-section-title{font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);padding:10px 16px 6px;background:var(--bg-inset);border-bottom:1px solid var(--border);}
+  .check-item{display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.1s;}
+  .check-item:last-child{border-bottom:none;}
+  .check-item:hover{background:var(--bg-card-hover);}
+  .check-item.done{opacity:0.45;}
+  .check-box{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border-accent);flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
+  .check-item.done .check-box{background:var(--accent);border-color:var(--accent);}
+  .check-item.done .check-box::after{content:'';width:8px;height:5px;border-left:1.5px solid #fff;border-bottom:1.5px solid #fff;transform:rotate(-45deg) translate(1px,-1px);}
+  .check-label{font-size:12px;color:var(--text-primary);line-height:1.4;}
+  .check-sub{font-size:11px;color:var(--text-muted);margin-top:2px;}
+  .progress-bar-wrap{background:var(--bg-inset);border-radius:4px;height:4px;overflow:hidden;}
+  .progress-bar-fill{height:100%;background:var(--accent);border-radius:4px;transition:width 0.3s ease;}
+  .note-box{background:var(--bg-inset);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12px;color:var(--text-secondary);width:100%;resize:vertical;min-height:80px;font-family:var(--font-ui);outline:none;transition:border-color 0.15s;}
+  .note-box:focus{border-color:var(--accent);}
+  .pos{color:var(--green);}.neg{color:var(--red);}
+  .upcoming-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;background:rgba(96,165,250,0.12);color:var(--blue);border:1px solid rgba(96,165,250,0.25);}
+  .today-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;background:var(--red-dim);color:var(--red);border:1px solid rgba(239,68,68,0.3);}
+  .soon-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;background:var(--amber-dim);color:var(--amber);border:1px solid rgba(245,158,11,0.25);}
+  hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
+  @media(max-width:900px){.grid-2{grid-template-columns:1fr;}.env-grid{grid-template-columns:1fr 1fr;}.sector-grid{grid-template-columns:repeat(2,1fr);}.earnings-row{grid-template-columns:55px 1fr 70px;}}
 </style>
 </head>
 <body>
-<nav class="nav">
-  <a href="/" class="nav-brand">ROCKKSTAAR</a>
-  <div class="nav-links">
-    <a href="/" class="nav-link">Dashboard</a>
-    <a href="/quick" class="nav-link">⚡ Quick</a>
-    <a href="/journal" class="nav-link">Journal</a>
-    <a href="/risk" class="nav-link">⚙ Risk</a>
-    <a href="/schwab/account" class="nav-link">Account</a>
-    <a href="/intel" class="nav-link active">Intel</a>
-  </div>
-  <div class="nav-right">
-    <div class="pulse"></div>
-    <span class="nav-time" id="nav-clock">—</span>
-  </div>
-</nav>
 <div class="page">
   <div class="page-header">
     <div>
       <div class="page-title">Pre-Market Intel</div>
-      <div class="page-sub" id="today-date">Loading…</div>
+      <div class="page-sub" id="today-date">Loading...</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
       <div class="view-toggle">
@@ -161,33 +123,35 @@
   <div id="view-daily" class="panel active">
     <div class="regime-banner risk-on" id="regime-banner">
       <div>
-        <div class="regime-text" id="regime-label">✅ RISK-ON — Full Green Light</div>
-        <div class="regime-sub" id="regime-sub">SPY + QQQ bullish · VIX below 20 · DXY flat</div>
+        <div class="regime-text" id="regime-label">Loading market data...</div>
+        <div class="regime-sub" id="regime-sub">Fetching SPY, QQQ, VIX data</div>
       </div>
-      <span class="badge badge-green" id="regime-badge">RISK-ON</span>
+      <span class="badge badge-gray" id="regime-badge">LOADING</span>
     </div>
+
     <div class="section">
-      <div class="section-title">Market environment <div class="section-line"></div> <span class="badge badge-gray" id="env-updated">Live</span></div>
+      <div class="section-title">Market environment <div class="section-line"></div> <span class="badge badge-gray" id="env-updated">Loading...</span></div>
       <div class="env-grid">
         <div class="env-cell"><div class="env-label">SPY</div><div class="env-value pos" id="spy-price">—</div><div class="env-sub" id="spy-ema">vs EMA20</div><div class="env-status pos" id="spy-status">—</div></div>
         <div class="env-cell"><div class="env-label">QQQ</div><div class="env-value pos" id="qqq-price">—</div><div class="env-sub" id="qqq-ema">vs EMA20</div><div class="env-status pos" id="qqq-status">—</div></div>
         <div class="env-cell"><div class="env-label">VIX</div><div class="env-value" id="vix-value" style="color:var(--amber)">—</div><div class="env-sub" id="vix-direction">—</div><div class="env-status" id="vix-status" style="color:var(--amber)">—</div></div>
-        <div class="env-cell"><div class="env-label">ES Futures</div><div class="env-value" id="es-price" style="color:var(--text-primary)">—</div><div class="env-sub" id="es-sub">vs VWAP</div><div class="env-status" id="es-status">—</div></div>
+        <div class="env-cell"><div class="env-label">ES Futures</div><div class="env-value" id="es-price" style="color:var(--text-primary)">—</div><div class="env-sub">vs VWAP</div><div class="env-status" id="es-status">—</div></div>
       </div>
     </div>
+
     <div class="grid-2 section">
       <div class="card">
-        <div class="card-header"><span class="card-title">Sector heat</span></div>
+        <div class="card-header"><span class="card-title">Sector heat</span><span class="badge badge-gray" id="sector-label">Live</span></div>
         <div class="card-body">
           <div class="sector-grid">
-            <div class="sector-cell"><div class="sector-name">Technology</div><div class="sector-etf">XLK</div><div class="sector-pct" id="xlk">—</div></div>
-            <div class="sector-cell"><div class="sector-name">Consumer</div><div class="sector-etf">XLY</div><div class="sector-pct" id="xly">—</div></div>
-            <div class="sector-cell"><div class="sector-name">Financials</div><div class="sector-etf">XLF</div><div class="sector-pct" id="xlf">—</div></div>
-            <div class="sector-cell"><div class="sector-name">Energy</div><div class="sector-etf">XLE</div><div class="sector-pct" id="xle">—</div></div>
-            <div class="sector-cell"><div class="sector-name">Health Care</div><div class="sector-etf">XLV</div><div class="sector-pct" id="xlv">—</div></div>
-            <div class="sector-cell"><div class="sector-name">Industrials</div><div class="sector-etf">XLI</div><div class="sector-pct" id="xli">—</div></div>
-            <div class="sector-cell"><div class="sector-name">Utilities</div><div class="sector-etf">XLU</div><div class="sector-pct" id="xlu">—</div></div>
-            <div class="sector-cell"><div class="sector-name">Materials</div><div class="sector-etf">XLB</div><div class="sector-pct" id="xlb">—</div></div>
+            <div class="sector-cell" id="cell-xlk"><div class="sector-name">Technology</div><div class="sector-etf">XLK</div><div class="sector-pct" id="xlk">—</div></div>
+            <div class="sector-cell" id="cell-xly"><div class="sector-name">Consumer Disc</div><div class="sector-etf">XLY</div><div class="sector-pct" id="xly">—</div></div>
+            <div class="sector-cell" id="cell-xlf"><div class="sector-name">Financials</div><div class="sector-etf">XLF</div><div class="sector-pct" id="xlf">—</div></div>
+            <div class="sector-cell" id="cell-xle"><div class="sector-name">Energy</div><div class="sector-etf">XLE</div><div class="sector-pct" id="xle">—</div></div>
+            <div class="sector-cell" id="cell-xlv"><div class="sector-name">Health Care</div><div class="sector-etf">XLV</div><div class="sector-pct" id="xlv"><span style="font-size:10px;color:var(--text-muted)">Loading...</span></div></div>
+            <div class="sector-cell" id="cell-xli"><div class="sector-name">Industrials</div><div class="sector-etf">XLI</div><div class="sector-pct" id="xli"><span style="font-size:10px;color:var(--text-muted)">Loading...</span></div></div>
+            <div class="sector-cell" id="cell-xlu"><div class="sector-name">Utilities</div><div class="sector-etf">XLU</div><div class="sector-pct" id="xlu"><span style="font-size:10px;color:var(--text-muted)">Loading...</span></div></div>
+            <div class="sector-cell" id="cell-xlb"><div class="sector-name">Materials</div><div class="sector-etf">XLB</div><div class="sector-pct" id="xlb"><span style="font-size:10px;color:var(--text-muted)">Loading...</span></div></div>
           </div>
         </div>
       </div>
@@ -200,18 +164,31 @@
           <div class="level-row"><span class="level-label">Longs Allowed</span><span class="level-value" id="longs-ok">—</span></div>
           <div class="level-row"><span class="level-label">Shorts Allowed</span><span class="level-value" id="shorts-ok">—</span></div>
           <div class="level-row"><span class="level-label">VIX Level</span><span class="level-value" id="vix-row">—</span></div>
+          <div class="level-row"><span class="level-label">Regime Score</span><span class="level-value" id="regime-score">—</span></div>
         </div>
       </div>
     </div>
+
+    <!-- Earnings on watchlist - TODAY + UPCOMING 21 days -->
     <div class="section">
-      <div class="section-title">Earnings today <span id="earnings-today-count" class="badge badge-gray">Checking…</span> <div class="section-line"></div> <button class="btn" onclick="window.open('https://earningswhispers.com','_blank')" style="font-size:11px;padding:4px 10px;">EW →</button></div>
+      <div class="section-title">
+        Earnings on watchlist
+        <span id="earnings-today-count" class="badge badge-gray" style="margin-left:4px;">Checking...</span>
+        <div class="section-line"></div>
+        <button class="btn" onclick="window.open('https://earningswhispers.com','_blank')" style="font-size:11px;padding:4px 10px;">EW →</button>
+        <button class="btn" onclick="window.open('https://finviz.com/calendar.ashx','_blank')" style="font-size:11px;padding:4px 10px;">Finviz →</button>
+      </div>
       <div class="card">
         <div class="earnings-list">
-          <div class="earnings-row earnings-header"><span>Ticker</span><span>Details</span><span>Time</span><span>Swing</span><span>Status</span><span>Action</span></div>
-          <div id="earnings-today-body"><div class="earnings-row"><span class="earnings-ticker" style="color:var(--text-muted)">—</span><span class="earnings-company">No earnings on your watchlist today</span><span></span><span></span><span></span><span></span></div></div>
+          <div class="earnings-row earnings-header"><span>Ticker</span><span>Setup</span><span>When</span><span>Swing</span><span>Status</span><span>Price</span></div>
+          <div id="earnings-today-body">
+            <div class="earnings-row"><span class="earnings-ticker" style="color:var(--text-muted)">—</span><span class="earnings-company">No earnings detected on your watchlist in the next 21 days</span><span></span><span></span><span></span><span></span></div>
+          </div>
         </div>
       </div>
     </div>
+
+    <!-- Daily Checklist -->
     <div class="section">
       <div class="section-title">Daily checklist <div class="section-line"></div> <span id="daily-progress-text" class="badge badge-gray">0 / 8 done</span></div>
       <div class="grid-2" style="align-items:start;">
@@ -224,12 +201,12 @@
               <div class="check-item" onclick="toggle(this)"><div class="check-box"></div><div><div class="check-label">Check ES Futures direction</div><div class="check-sub">Above/below VWAP · Pre-market trend</div></div></div>
               <div class="check-item" onclick="toggle(this)"><div class="check-box"></div><div><div class="check-label">Confirm trading regime</div><div class="check-sub">Risk-On / Caution / Risk-Off — match your trade size</div></div></div>
               <div class="check-section-title">Event awareness</div>
-              <div class="check-item" onclick="toggle(this)"><div class="check-box"></div><div><div class="check-label">Check earnings on watchlist today</div><div class="check-sub">BMO = before open · AMC = after close</div></div></div>
+              <div class="check-item" onclick="toggle(this)"><div class="check-box"></div><div><div class="check-label">Check earnings on watchlist (21-day window)</div><div class="check-sub">BMO = before open · AMC = after close · earnings move stocks</div></div></div>
               <div class="check-item" onclick="toggle(this)"><div class="check-box"></div><div><div class="check-label">Check SEC EDGAR for 8-K filings</div><div class="check-sub">Material events on tickers you hold or watch</div></div></div>
               <div class="check-section-title">Trade prep</div>
               <div class="check-item" onclick="toggle(this)"><div class="check-box"></div><div><div class="check-label">Review A+ READY list in dashboard</div><div class="check-sub">Confirm swing score ≥ 7 and level holds</div></div></div>
               <div class="check-item" onclick="toggle(this)"><div class="check-box"></div><div><div class="check-label">Set price alerts for key entry zones</div><div class="check-sub">Schwab or TradingView — let the stock come to you</div></div></div>
-              <div class="check-item" onclick="toggle(this)"><div class="check-box"></div><div><div class="check-label">Note sector leading vs lagging today</div><div class="check-sub">Trade with strong sectors, avoid weak ones</div></div></div>
+              <div class="check-item" onclick="toggle(this)"><div class="check-box"></div><div><div class="check-label">Note sector leading vs lagging today</div><div class="check-sub">Trade with strong sectors, avoid the weak ones</div></div></div>
             </div>
           </div>
         </div>
@@ -257,11 +234,11 @@
   <!-- WEEKLY -->
   <div id="view-weekly" class="panel">
     <div class="section">
-      <div class="section-title">This week's earnings <span class="badge badge-amber" id="earnings-week-count">Loading…</span> <div class="section-line"></div> <button class="btn" onclick="window.open('https://earningswhispers.com','_blank')" style="font-size:11px;padding:4px 10px;">EW →</button></div>
+      <div class="section-title">This week's earnings on watchlist <span class="badge badge-amber" id="earnings-week-count">Loading...</span> <div class="section-line"></div> <button class="btn" onclick="window.open('https://earningswhispers.com','_blank')" style="font-size:11px;padding:4px 10px;">EW →</button></div>
       <div class="card">
         <div class="earnings-list">
           <div class="earnings-row earnings-header"><span>Ticker</span><span>Details</span><span>Day</span><span>Swing</span><span>Status</span><span>Price</span></div>
-          <div id="earnings-week-body"><div class="earnings-row"><span class="earnings-ticker" style="color:var(--text-muted)">—</span><span class="earnings-company">Loading…</span><span></span><span></span><span></span><span></span></div></div>
+          <div id="earnings-week-body"><div class="earnings-row"><span class="earnings-ticker" style="color:var(--text-muted)">—</span><span class="earnings-company">Loading...</span><span></span><span></span><span></span><span></span></div></div>
         </div>
       </div>
     </div>
@@ -312,11 +289,16 @@
 </div>
 
 <script>
-function updateClock(){const now=new Date();const et=now.toLocaleString('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit',hour12:true});document.getElementById('nav-clock').textContent=et+' ET';}
+// ── Clock & Date ──────────────────────────────────────────────────────────
+function updateClock(){const now=new Date();const et=now.toLocaleString('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit',hour12:true});const el=document.getElementById('nav-clock');if(el)el.textContent=et+' ET';}
 updateClock();setInterval(updateClock,30000);
 function updateDateHeader(){const now=new Date();const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];const d=new Date(now.toLocaleString('en-US',{timeZone:'America/New_York'}));document.getElementById('today-date').textContent=days[d.getDay()]+', '+months[d.getMonth()]+' '+d.getDate()+', '+d.getFullYear();}
 updateDateHeader();
+
+// ── View toggle ───────────────────────────────────────────────────────────
 function setView(view,btn){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.view-btn').forEach(b=>b.classList.remove('active'));document.getElementById('view-'+view).classList.add('active');btn.classList.add('active');}
+
+// ── Checklist ─────────────────────────────────────────────────────────────
 function toggle(el){el.classList.toggle('done');updateDailyProgress();saveChecklistState('daily');}
 function toggleWeekly(el){el.classList.toggle('done');updateWeeklyProgress();saveChecklistState('weekly');}
 function updateDailyProgress(){const items=document.querySelectorAll('#daily-checklist .check-item');const done=document.querySelectorAll('#daily-checklist .check-item.done').length;const total=items.length;document.getElementById('daily-progress-bar').style.width=(done/total*100)+'%';const badge=document.getElementById('daily-progress-text');badge.textContent=done+' / '+total+' done';badge.className='badge '+(done===total?'badge-green':done>0?'badge-amber':'badge-gray');}
@@ -327,24 +309,161 @@ function saveChecklistState(type){const items=document.querySelectorAll('#'+type
 function loadChecklistState(type){const raw=localStorage.getItem('rta_checklist_'+type+'_'+getTodayKey());if(!raw)return;try{const state=JSON.parse(raw);const items=document.querySelectorAll('#'+type+'-checklist .check-item');items.forEach((item,i)=>{if(state[i])item.classList.add('done');});}catch(e){}}
 function saveNotes(type){const val=document.getElementById(type+'-notes').value;const key='rta_notes_'+type+'_'+(type==='weekly'?getWeekKey():getTodayKey());localStorage.setItem(key,val);showToast('Notes saved');}
 function loadNotes(type){const key='rta_notes_'+type+'_'+(type==='weekly'?getWeekKey():getTodayKey());const val=localStorage.getItem(key);if(val)document.getElementById(type+'-notes').value=val;}
-function showToast(msg){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.style.cssText='position:fixed;bottom:24px;right:24px;background:#7c5cfc;color:#fff;padding:10px 18px;border-radius:8px;font-size:12px;font-weight:600;z-index:999;opacity:0;transition:opacity 0.2s;';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';setTimeout(()=>{t.style.opacity='0';},2000);}
-function refreshMarketData(){fetch('/api/dashboard').then(r=>r.json()).then(data=>{const mt=data.market_temp;if(!mt)return;const regime=mt.regime||'NEUTRAL';const banner=document.getElementById('regime-banner');const regimeLabel=document.getElementById('regime-label');const regimeBadge=document.getElementById('regime-badge');if(regime==='RISK_ON'){banner.className='regime-banner risk-on';regimeLabel.textContent='✅ RISK-ON — Full Green Light';regimeBadge.className='badge badge-green';regimeBadge.textContent='RISK-ON';}else if(regime==='CAUTION'){banner.className='regime-banner caution';regimeLabel.textContent='⚠️ CAUTION — A+ Setups Only';regimeBadge.className='badge badge-amber';regimeBadge.textContent='CAUTION';}else if(regime==='RISK_OFF'){banner.className='regime-banner risk-off';regimeLabel.textContent='🚫 RISK-OFF — Sit Out';regimeBadge.className='badge badge-red';regimeBadge.textContent='RISK-OFF';}
-if(mt.spy_price)document.getElementById('spy-price').textContent='$'+Number(mt.spy_price).toFixed(0);if(mt.spy_pct_ema20!=null){const v=mt.spy_pct_ema20;document.getElementById('spy-ema').textContent=(v>=0?'+':'')+v.toFixed(1)+'% vs EMA20';document.getElementById('spy-status').textContent=v>0?'BULLISH':'BEARISH';document.getElementById('spy-status').style.color=v>0?'var(--green)':'var(--red)';}
-if(mt.qqq_price)document.getElementById('qqq-price').textContent='$'+Number(mt.qqq_price).toFixed(0);if(mt.qqq_pct_ema20!=null){const v=mt.qqq_pct_ema20;document.getElementById('qqq-ema').textContent=(v>=0?'+':'')+v.toFixed(1)+'% vs EMA20';}
-if(mt.vix_level!=null){const v=mt.vix_level;const el=document.getElementById('vix-value');el.textContent=v.toFixed(1);el.style.color=v<15?'var(--green)':v<20?'var(--amber)':'var(--red)';document.getElementById('vix-direction').textContent=mt.vix_direction||'';const vstatus=document.getElementById('vix-status');if(v<15){vstatus.textContent='LOW FEAR';vstatus.style.color='var(--green)';}else if(v<20){vstatus.textContent='CAUTION ZONE';vstatus.style.color='var(--amber)';}else{vstatus.textContent='ELEVATED FEAR';vstatus.style.color='var(--red)';}
-const vrow=document.getElementById('vix-row');vrow.textContent=v.toFixed(1);vrow.style.color=v<15?'var(--green)':v<20?'var(--amber)':'var(--red)';}
-if(mt.longs_ok!=null){const el=document.getElementById('longs-ok');el.textContent=mt.longs_ok?'✓ Yes':'✗ No';el.className='level-value '+(mt.longs_ok?'pos':'neg');}
-if(mt.shorts_ok!=null){const el=document.getElementById('shorts-ok');el.textContent=mt.shorts_ok?'✓ Yes':'✗ No';el.className='level-value '+(mt.shorts_ok?'pos':'neg');}
-if(mt.spy_vs_vwap!=null){const el=document.getElementById('spy-vwap');el.textContent=mt.spy_vs_vwap?'Above ✓':'Below ✗';el.className='level-value '+(mt.spy_vs_vwap?'pos':'neg');}
-if(mt.qqq_vs_vwap!=null){const el=document.getElementById('qqq-vwap');el.textContent=mt.qqq_vs_vwap?'Above ✓':'Below ✗';el.className='level-value '+(mt.qqq_vs_vwap?'pos':'neg');}
-if(mt.es_price){const pct=mt.es_change_pct!=null?Number(mt.es_change_pct).toFixed(2):'';document.getElementById('es-price').textContent=Number(mt.es_price).toLocaleString()+(pct?' ('+( pct>=0?'+':'')+pct+'%)':'');document.getElementById('es-price').style.color=pct>=0?'var(--green)':'var(--red)';}
-if(mt.es_above_vwap!=null){const el=document.getElementById('es-vwap');el.textContent=mt.es_above_vwap?'Above ✓':'Below ✗';el.className='level-value '+(mt.es_above_vwap?'pos':'neg');document.getElementById('es-status').textContent=mt.es_above_vwap?'ABOVE VWAP':'BELOW VWAP';document.getElementById('es-status').style.color=mt.es_above_vwap?'var(--green)':'var(--red)';}
-const sectors=mt.sectors||{};const sectorMap={xlk:'XLK',xly:'XLY',xlf:'XLF',xle:'XLE',xlv:'XLV',xli:'XLI',xlu:'XLU',xlb:'XLB'};Object.entries(sectorMap).forEach(([id,key])=>{const val=sectors[key];const el=document.getElementById(id);if(el&&val!=null){const pct=Number(val).toFixed(2);el.textContent=(pct>=0?'+':'')+pct+'%';el.className='sector-pct '+(pct>=0?'pos':'neg');}});
-document.getElementById('env-updated').textContent='Live · '+(data.server_time||'');}).catch(e=>console.log('intel error',e));}
-function loadEarningsData(){fetch('/api/dashboard').then(r=>r.json()).then(data=>{const ranked=data.ranked||[];const withEarnings=ranked.filter(s=>s.earnings_date);const today=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));const todayStr=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');const todayEarnings=withEarnings.filter(s=>(s.earnings_date||'').substring(0,10)===todayStr);const todayBody=document.getElementById('earnings-today-body');const todayCount=document.getElementById('earnings-today-count');if(todayEarnings.length>0){todayCount.textContent=todayEarnings.length+' on watchlist';todayCount.className='badge badge-red';todayBody.innerHTML=todayEarnings.map(s=>'<div class="earnings-row"><span class="earnings-ticker">'+s.ticker+'</span><span class="earnings-company">'+s.ticker+' earnings today</span><span class="badge badge-amber" style="font-size:10px;">Today</span><span style="font-family:var(--font);font-size:12px;">'+(s.swing_score||'—')+'/10</span><span class="badge badge-amber" style="font-size:10px;">'+(s.swing_status||'—')+'</span><span class="badge badge-gray" style="font-size:10px;">Check EW</span></div>').join('');}else{todayCount.textContent='0 on watchlist';todayCount.className='badge badge-gray';}
-const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];const weekEarnings=withEarnings.filter(s=>{const d=new Date((s.earnings_date||'').substring(0,10));const diff=(d-today)/86400000;return diff>=-1&&diff<=7;});const weekBody=document.getElementById('earnings-week-body');const weekCount=document.getElementById('earnings-week-count');weekCount.textContent=weekEarnings.length+' this week';weekCount.className='badge '+(weekEarnings.length>0?'badge-amber':'badge-gray');if(weekEarnings.length>0){weekBody.innerHTML=weekEarnings.map(s=>{const d=new Date((s.earnings_date||'').substring(0,10));return '<div class="earnings-row"><span class="earnings-ticker">'+s.ticker+'</span><span class="earnings-company">Swing '+(s.swing_score||'—')+'/10</span><span style="font-size:11px;color:var(--text-secondary);">'+dayNames[d.getDay()]+' '+(d.getMonth()+1)+'/'+d.getDate()+'</span><span style="font-family:var(--font);font-size:12px;">'+(s.swing_score||'—')+'/10</span><span style="font-size:11px;color:var(--text-secondary);">'+(s.swing_status||'—')+'</span><span style="font-family:var(--font);font-size:12px;">$'+(s.current_price?Number(s.current_price).toFixed(2):'—')+'</span></div>';}).join('');}else{weekBody.innerHTML='<div class="earnings-row"><span class="earnings-ticker" style="color:var(--text-muted)">—</span><span class="earnings-company">No earnings detected on watchlist this week</span><span></span><span></span><span></span><span></span></div>';}}).catch(e=>console.log('intel earnings error',e));}
-function refreshAll(){showToast('Refreshing intel…');refreshMarketData();loadEarningsData();}
-document.addEventListener('DOMContentLoaded',()=>{loadChecklistState('daily');loadChecklistState('weekly');loadNotes('daily');loadNotes('weekly');updateDailyProgress();updateWeeklyProgress();refreshMarketData();loadEarningsData();setInterval(refreshMarketData,90000);setInterval(loadEarningsData,120000);});
+function showToast(msg){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.style.cssText='position:fixed;bottom:24px;right:24px;background:#7c5cfc;color:#fff;padding:10px 18px;border-radius:8px;font-size:12px;font-weight:600;z-index:9999;opacity:0;transition:opacity 0.2s;';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';setTimeout(()=>{t.style.opacity='0';},2000);}
+
+// ── Set sector pct with color and hot/cold class ──────────────────────────
+function setSector(id, pct){
+  const el=document.getElementById(id);
+  const cell=document.getElementById('cell-'+id);
+  if(!el||pct==null)return;
+  const v=Number(pct).toFixed(2);
+  el.textContent=(v>=0?'+':'')+v+'%';
+  el.className='sector-pct '+(v>=0?'pos':'neg');
+  if(cell){cell.classList.remove('hot','cold');if(v>=1)cell.classList.add('hot');else if(v<=-1)cell.classList.add('cold');}
+}
+
+// ── Market data from dashboard API ───────────────────────────────────────
+function refreshMarketData(){
+  fetch('/api/dashboard').then(r=>r.json()).then(data=>{
+    const mt=data.market_temp;
+    if(!mt)return;
+    const regime=mt.regime||'NEUTRAL';
+    const banner=document.getElementById('regime-banner');
+    const regimeLabel=document.getElementById('regime-label');
+    const regimeBadge=document.getElementById('regime-badge');
+    if(regime==='RISK_ON'){banner.className='regime-banner risk-on';regimeLabel.textContent='RISK-ON — Full Green Light';regimeBadge.className='badge badge-green';regimeBadge.textContent='RISK-ON';}
+    else if(regime==='CAUTION'){banner.className='regime-banner caution';regimeLabel.textContent='CAUTION — A+ Setups Only';regimeBadge.className='badge badge-amber';regimeBadge.textContent='CAUTION';}
+    else if(regime==='RISK_OFF'){banner.className='regime-banner risk-off';regimeLabel.textContent='RISK-OFF — Sit Out';regimeBadge.className='badge badge-red';regimeBadge.textContent='RISK-OFF';}
+    document.getElementById('regime-sub').textContent=(mt.why||mt.reason||'SPY + QQQ + VIX analysis');
+    if(mt.spy_price)document.getElementById('spy-price').textContent='$'+Number(mt.spy_price).toFixed(0);
+    if(mt.spy_pct_ema20!=null){const v=mt.spy_pct_ema20;document.getElementById('spy-ema').textContent=(v>=0?'+':'')+v.toFixed(1)+'% vs EMA20';document.getElementById('spy-status').textContent=v>0?'BULLISH':'BEARISH';document.getElementById('spy-status').style.color=v>0?'var(--green)':'var(--red)';}
+    if(mt.qqq_price)document.getElementById('qqq-price').textContent='$'+Number(mt.qqq_price).toFixed(0);
+    if(mt.qqq_pct_ema20!=null){const v=mt.qqq_pct_ema20;document.getElementById('qqq-ema').textContent=(v>=0?'+':'')+v.toFixed(1)+'% vs EMA20';}
+    if(mt.vix_level!=null){const v=mt.vix_level;const el=document.getElementById('vix-value');el.textContent=v.toFixed(1);el.style.color=v<15?'var(--green)':v<20?'var(--amber)':'var(--red)';document.getElementById('vix-direction').textContent=mt.vix_direction||'';const vstatus=document.getElementById('vix-status');if(v<15){vstatus.textContent='LOW FEAR';vstatus.style.color='var(--green)';}else if(v<20){vstatus.textContent='CAUTION ZONE';vstatus.style.color='var(--amber)';}else{vstatus.textContent='ELEVATED FEAR';vstatus.style.color='var(--red)';}document.getElementById('vix-row').textContent=v.toFixed(1);document.getElementById('vix-row').style.color=v<15?'var(--green)':v<20?'var(--amber)':'var(--red)';}
+    if(mt.longs_ok!=null){const el=document.getElementById('longs-ok');el.textContent=mt.longs_ok?'Yes':'No';el.className='level-value '+(mt.longs_ok?'pos':'neg');}
+    if(mt.shorts_ok!=null){const el=document.getElementById('shorts-ok');el.textContent=mt.shorts_ok?'Yes':'No';el.className='level-value '+(mt.shorts_ok?'pos':'neg');}
+    if(mt.spy_vs_vwap!=null){const el=document.getElementById('spy-vwap');el.textContent=mt.spy_vs_vwap?'Above':'Below';el.className='level-value '+(mt.spy_vs_vwap?'pos':'neg');}
+    if(mt.qqq_vs_vwap!=null){const el=document.getElementById('qqq-vwap');el.textContent=mt.qqq_vs_vwap?'Above':'Below';el.className='level-value '+(mt.qqq_vs_vwap?'pos':'neg');}
+    if(mt.es_above_vwap!=null){const el=document.getElementById('es-vwap');el.textContent=mt.es_above_vwap?'Above':'Below';el.className='level-value '+(mt.es_above_vwap?'pos':'neg');document.getElementById('es-status').textContent=mt.es_above_vwap?'ABOVE VWAP':'BELOW VWAP';document.getElementById('es-status').style.color=mt.es_above_vwap?'var(--green)':'var(--red)';}
+    if(mt.es_price){const pct=mt.es_change_pct!=null?'('+(mt.es_change_pct>=0?'+':'')+Number(mt.es_change_pct).toFixed(2)+'%)':'';document.getElementById('es-price').textContent=Number(mt.es_price).toLocaleString()+' '+pct;document.getElementById('es-price').style.color=mt.es_change_pct>=0?'var(--green)':'var(--red)';}
+    if(mt.score!=null){document.getElementById('regime-score').textContent=mt.score+'/100';document.getElementById('regime-score').style.color=mt.score>=70?'var(--green)':mt.score>=40?'var(--amber)':'var(--red)';}
+    // 4 sectors from market_temp
+    const sectors=mt.sectors||{};
+    setSector('xlk',sectors['XLK']||sectors['xlk']);
+    setSector('xly',sectors['XLY']||sectors['xly']);
+    setSector('xlf',sectors['XLF']||sectors['xlf']);
+    setSector('xle',sectors['XLE']||sectors['xle']);
+    document.getElementById('env-updated').textContent='Live '+new Date().toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit'});
+    // Fetch missing 4 sectors separately via stock live API
+    fetchMissingSectors();
+  }).catch(e=>console.log('intel market error',e));
+}
+
+// ── Fetch XLV, XLI, XLU, XLB via the live stock API ─────────────────────
+// These aren't in market_temp so we pull gap_pct as a proxy for daily change
+function fetchMissingSectors(){
+  const tickers=['XLV','XLI','XLU','XLB'];
+  const ids=['xlv','xli','xlu','xlb'];
+  tickers.forEach((t,i)=>{
+    fetch('/api/stock/'+t+'/live').then(r=>r.json()).then(d=>{
+      // Use gap_pct (today's gap from prev close) as daily change proxy
+      const pct=d.gap_pct!=null?d.gap_pct:null;
+      setSector(ids[i],pct);
+    }).catch(()=>{
+      // If ticker not in watchlist, show N/A
+      const el=document.getElementById(ids[i]);
+      if(el){el.textContent='N/A';el.style.fontSize='11px';el.style.color='var(--text-muted)';}
+    });
+  });
+}
+
+// ── Earnings data ─────────────────────────────────────────────────────────
+// FIX: window expanded to 21 days to catch CRWD and other upcoming earnings
+function loadEarningsData(){
+  fetch('/api/dashboard').then(r=>r.json()).then(data=>{
+    const ranked=data.ranked||[];
+    const withEarnings=ranked.filter(s=>s.earnings_date);
+    const now=new Date();
+    const today=new Date(now.toLocaleString('en-US',{timeZone:'America/New_York'}));
+    today.setHours(0,0,0,0);
+    const todayStr=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
+    const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+    // All earnings within 21 days (covers CRWD and multi-week lookahead)
+    const upcoming=withEarnings.filter(s=>{
+      const raw=(s.earnings_date||'').substring(0,10);
+      if(!raw)return false;
+      const d=new Date(raw+'T00:00:00');
+      const diff=Math.round((d-today)/(1000*60*60*24));
+      return diff>=-1&&diff<=21;
+    }).sort((a,b)=>{
+      const da=new Date((a.earnings_date||'').substring(0,10)+'T00:00:00');
+      const db=new Date((b.earnings_date||'').substring(0,10)+'T00:00:00');
+      return da-db;
+    });
+
+    const todayCount=document.getElementById('earnings-today-count');
+    const todayBody=document.getElementById('earnings-today-body');
+    const todayEarnings=upcoming.filter(s=>(s.earnings_date||'').substring(0,10)===todayStr);
+    const upcomingOnly=upcoming.filter(s=>(s.earnings_date||'').substring(0,10)!==todayStr);
+
+    if(upcoming.length>0){
+      const todayNum=todayEarnings.length;
+      todayCount.textContent=todayNum>0?todayNum+' TODAY, '+(upcomingOnly.length)+' upcoming':upcoming.length+' upcoming';
+      todayCount.className='badge '+(todayNum>0?'badge-red':'badge-blue');
+      todayBody.innerHTML=upcoming.map(s=>{
+        const raw=(s.earnings_date||'').substring(0,10);
+        const d=new Date(raw+'T00:00:00');
+        const diff=Math.round((d-today)/(1000*60*60*24));
+        const isToday=raw===todayStr;
+        const isTomorrow=diff===1;
+        const isSoon=diff>=2&&diff<=7;
+        let whenBadge='';
+        if(isToday)whenBadge='<span class="today-badge">TODAY</span>';
+        else if(isTomorrow)whenBadge='<span class="soon-badge">TOMORROW</span>';
+        else if(isSoon)whenBadge='<span class="upcoming-badge">'+dayNames[d.getDay()]+' '+diff+'d</span>';
+        else whenBadge='<span class="upcoming-badge">'+dayNames[d.getDay()]+' '+(d.getMonth()+1)+'/'+d.getDate()+'</span>';
+        const swingClass=s.swing_score>=7?'pos':s.swing_score>=5?'':' style="color:var(--text-muted)"';
+        return '<div class="earnings-row"><span class="earnings-ticker">'+s.ticker+'</span><span class="earnings-company">'+(s.swing_setup_type||s.swing_status||'—')+'</span><span>'+whenBadge+'</span><span class="level-value'+(s.swing_score>=7?' pos':'')+'">'+( s.swing_score||'—')+'/10</span><span style="font-size:11px;color:var(--text-secondary);">'+(s.swing_status||'—').substring(0,20)+'</span><span class="level-value">$'+(s.current_price?Number(s.current_price).toFixed(2):'—')+'</span></div>';
+      }).join('');
+    } else {
+      todayCount.textContent='0 in next 21 days';
+      todayCount.className='badge badge-gray';
+      todayBody.innerHTML='<div class="earnings-row"><span class="earnings-ticker" style="color:var(--text-muted)">—</span><span class="earnings-company">No earnings detected on your watchlist in the next 21 days</span><span></span><span></span><span></span><span></span></div>';
+    }
+
+    // Weekly tab
+    const weekEarnings=withEarnings.filter(s=>{
+      const d=new Date((s.earnings_date||'').substring(0,10)+'T00:00:00');
+      const diff=Math.round((d-today)/(1000*60*60*24));
+      return diff>=-1&&diff<=7;
+    }).sort((a,b)=>new Date((a.earnings_date||'').substring(0,10)+'T00:00:00')-new Date((b.earnings_date||'').substring(0,10)+'T00:00:00'));
+
+    const weekBody=document.getElementById('earnings-week-body');
+    const weekCount=document.getElementById('earnings-week-count');
+    weekCount.textContent=weekEarnings.length+' this week';
+    weekCount.className='badge '+(weekEarnings.length>0?'badge-amber':'badge-gray');
+    if(weekEarnings.length>0){
+      weekBody.innerHTML=weekEarnings.map(s=>{
+        const d=new Date((s.earnings_date||'').substring(0,10)+'T00:00:00');
+        return '<div class="earnings-row"><span class="earnings-ticker">'+s.ticker+'</span><span class="earnings-company">'+(s.swing_setup_type||'—')+'</span><span style="font-size:11px;color:var(--text-secondary);">'+dayNames[d.getDay()]+' '+(d.getMonth()+1)+'/'+d.getDate()+'</span><span class="level-value'+(s.swing_score>=7?' pos':'')+'">'+( s.swing_score||'—')+'/10</span><span style="font-size:11px;color:var(--text-secondary);">'+(s.swing_status||'—').substring(0,18)+'</span><span class="level-value">$'+(s.current_price?Number(s.current_price).toFixed(2):'—')+'</span></div>';
+      }).join('');
+    } else {
+      weekBody.innerHTML='<div class="earnings-row"><span class="earnings-ticker" style="color:var(--text-muted)">—</span><span class="earnings-company">No earnings on watchlist this week</span><span></span><span></span><span></span><span></span></div>';
+    }
+  }).catch(e=>console.log('intel earnings error',e));
+}
+
+function refreshAll(){showToast('Refreshing...');refreshMarketData();loadEarningsData();}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  loadChecklistState('daily');loadChecklistState('weekly');
+  loadNotes('daily');loadNotes('weekly');
+  updateDailyProgress();updateWeeklyProgress();
+  refreshMarketData();loadEarningsData();
+  setInterval(refreshMarketData,90000);
+  setInterval(loadEarningsData,120000);
+});
 </script>
 </body>
 </html>
