@@ -116,6 +116,9 @@ def clear_intel_cache() -> None:
 _dedup_lock = threading.Lock()
 _dedup: dict[str, float] = {}  # key → monotonic timestamp of last send
 
+_bg_refresh_lock = threading.Lock()
+_bg_refreshing: bool = False
+
 
 def should_send_alert(key: str, window_minutes: int = 1440) -> bool:
     """True if this key hasn't fired within window_minutes (default 24 h).
@@ -139,6 +142,42 @@ def _window_key(ticker: str, atype: str, window_minutes: int = 15) -> str:
     """Key bucketed by time window (for scanner-type throttling)."""
     bucket = int(_time.time() / (window_minutes * 60))
     return f"{ticker}:{atype}:{bucket}"
+
+
+def trigger_background_refresh() -> None:
+    """Start a daemon thread that populates all intel caches.
+    No-op if a refresh is already running.
+    Fetches econ first (fastest/static fallback) so partial data appears quickly.
+    """
+    global _bg_refreshing
+    with _bg_refresh_lock:
+        if _bg_refreshing:
+            return
+        _bg_refreshing = True
+
+    def _run() -> None:
+        global _bg_refreshing
+        try:
+            logger.info("intel bg-refresh: started")
+            for fn, name in [
+                (fetch_economic_calendar, "econ"),
+                (fetch_stock_splits,      "splits"),
+                (fetch_earnings_calendar, "earnings"),
+                (fetch_market_news,       "news"),
+            ]:
+                try:
+                    fn()
+                    logger.info("intel bg-refresh: %s complete", name)
+                except Exception as exc:
+                    logger.warning("intel bg-refresh/%s: %s", name, exc)
+            logger.info("intel bg-refresh: all complete")
+        except Exception as exc:
+            logger.warning("intel bg-refresh outer: %s", exc)
+        finally:
+            with _bg_refresh_lock:
+                _bg_refreshing = False
+
+    threading.Thread(target=_run, daemon=True, name="intel-bg-refresh").start()
 
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
@@ -816,53 +855,46 @@ def check_and_send_intel_alerts() -> list[dict]:
 # ── Convenience rollup for /api/intel ────────────────────────────────────────
 
 def get_intel_summary() -> dict:
-    """Full intel snapshot for the /api/intel endpoint.
-    Always returns a complete dict — never raises.
+    """Cache-first intel summary — always returns in < 1 second.
+
+    Hot path (all caches warm): read from cache, return immediately.
+    Cold path (any cache missing): return static/empty fallback immediately
+    and fire a background refresh daemon to populate the caches.
+    The frontend polls every 10 s until refreshing == False.
     """
+    global _bg_refreshing
+
+    c_news  = _cget("market_news")
+    c_earn  = _cget("earnings")
+    c_split = _cget("splits")
+    c_econ  = _cget("economic")
+
+    is_cold = (c_earn is None) or (c_split is None) or (c_econ is None)
     errors: list[str] = []
-    news:         list[dict] = []
-    earnings:     dict       = {"today": [], "tomorrow": [], "this_week": []}
-    splits:       list[dict] = []
-    econ:         list[dict] = []
-    alerts_sent:  list[dict] = []
 
-    try:
-        news = fetch_market_news()
-    except Exception as e:
-        errors.append(f"news: {e}")
-        logger.error("intel_summary/news: %s", e)
+    if is_cold:
+        trigger_background_refresh()
+        # Economic calendar has a free static fallback — use it immediately
+        if c_econ is None:
+            c_econ = _econ_static_fallback()
+        errors.append(
+            "Cache warming — background refresh started. "
+            "Full data loads in ~30 s. Page will auto-refresh."
+        )
+        logger.info("intel_summary: cold start, bg refresh triggered")
 
-    try:
-        earnings = fetch_earnings_calendar()
-    except Exception as e:
-        errors.append(f"earnings: {e}")
-        logger.error("intel_summary/earnings: %s", e)
-
-    try:
-        splits = fetch_stock_splits()
-    except Exception as e:
-        errors.append(f"splits: {e}")
-        logger.error("intel_summary/splits: %s", e)
-
-    try:
-        econ = fetch_economic_calendar()
-    except Exception as e:
-        errors.append(f"econ: {e}")
-        logger.error("intel_summary/econ: %s", e)
-
-    try:
-        alerts_sent = check_and_send_intel_alerts()
-    except Exception as e:
-        errors.append(f"alerts: {e}")
-        logger.warning("intel_summary/alerts: %s", e)
+    with _bg_refresh_lock:
+        currently_refreshing = _bg_refreshing
 
     return {
-        "ok":              len(errors) == 0,
+        "ok":              not is_cold,
         "errors":          errors,
         "last_updated":    _et_now().strftime("%I:%M %p ET"),
-        "market_news":     news,
-        "earnings":        earnings,
-        "splits":          splits,
-        "economic_events": econ,
-        "alerts_sent":     alerts_sent,
+        "market_news":     c_news  or [],
+        "earnings":        c_earn  or {"today": [], "tomorrow": [], "this_week": []},
+        "splits":          c_split or [],
+        "economic_events": c_econ  or [],
+        "alerts_sent":     [],
+        "from_cache":      not is_cold,
+        "refreshing":      currently_refreshing,
     }

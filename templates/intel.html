@@ -897,6 +897,22 @@
       </div>
     </div>
 
+    <!-- ══ INTEL DEBUG BOX ══════════════════════════════════════════════════ -->
+    <div class="section" style="margin-top:8px;">
+      <div class="section-title" style="font-size:11px;color:var(--text-muted);">
+        🔧 Intel API Status
+        <div class="section-line"></div>
+        <button class="btn" id="debug-toggle-btn"
+          onclick="(function(){var c=document.getElementById('intel-debug-card');c.style.display=c.style.display==='none'?'block':'none';document.getElementById('debug-toggle-btn').textContent=c.style.display==='none'?'show':'hide';})()"
+          style="font-size:10px;padding:2px 8px;">show</button>
+      </div>
+      <div class="card" id="intel-debug-card" style="padding:12px;display:none;">
+        <div id="intel-debug-box" style="font-family:var(--font);">
+          <div style="padding:4px;color:var(--text-muted);font-size:11px;">Waiting for first data load…</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Today's Earnings on Watchlist (legacy — kept for backwards compat) -->
     <div class="section" style="display:none;">
       <div class="section-title">
@@ -1485,77 +1501,130 @@ var _intelData        = null;
 var _newsFilter       = 'ALL';
 var _earnTab          = 'today';
 var _intelLoading     = false;
+var _intelRetries     = 0;
+var _intelRetryTimer  = null;
 
 // ── Load intel from /api/intel ─────────────────────────
 function loadIntelData(forceRefresh) {
   if (_intelLoading && !forceRefresh) return;
   _intelLoading = true;
+  if (_intelRetryTimer) { clearTimeout(_intelRetryTimer); _intelRetryTimer = null; }
 
-  var url = '/api/intel' + (forceRefresh ? '?refresh=1' : '');
+  console.log('[intel] fetch started  forceRefresh=' + forceRefresh + '  retry=' + _intelRetries);
+
+  var url  = '/api/intel' + (forceRefresh ? '?refresh=1' : '');
   var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  var tid  = ctrl ? setTimeout(function() { ctrl.abort(); }, 50000) : null;
+  var tid  = ctrl ? setTimeout(function() { ctrl.abort(); }, 8000) : null;
   var opts = ctrl ? { signal: ctrl.signal } : {};
 
   fetch(url, opts)
     .then(function(r) {
       if (tid) clearTimeout(tid);
-      console.log('[intel] HTTP ' + r.status + ' — ' + url);
+      console.log('[intel] HTTP ' + r.status);
       return r.json();
     })
     .then(function(data) {
       _intelData    = data;
       _intelLoading = false;
-      var nNews  = (data.market_news     || []).length;
-      var nSplit = (data.splits          || []).length;
-      var nEcon  = (data.economic_events || []).length;
-      var earn   = data.earnings || {};
-      var nEarn  = (earn.today||[]).length + (earn.tomorrow||[]).length + (earn.this_week||[]).length;
-      console.log('[intel] ok=' + data.ok + ' news=' + nNews + ' earnings=' + nEarn +
-                  ' splits=' + nSplit + ' econ=' + nEcon + ' updated=' + data.last_updated);
+      var earn  = data.earnings || {};
+      var nEarn = (earn.today||[]).length + (earn.tomorrow||[]).length + (earn.this_week||[]).length;
+      var nNews = (data.market_news     || []).length;
+      var nSplit= (data.splits          || []).length;
+      var nEcon = (data.economic_events || []).length;
+      console.log('[intel] fetch success  ok=' + data.ok
+        + '  news=' + nNews + '  earn=' + nEarn
+        + '  splits=' + nSplit + '  econ=' + nEcon
+        + '  refreshing=' + data.refreshing
+        + '  updated=' + data.last_updated);
       if (data.errors && data.errors.length) {
         console.warn('[intel] server errors:', data.errors);
       }
+
       renderNews(data.market_news      || []);
       renderEarnings(data.earnings     || {});
       renderSplits(data.splits         || []);
       renderEcon(data.economic_events  || []);
+      _updateIntelDebug(data);
+
+      // Auto-retry while backend cache is still warming (up to 4 times, 10s apart)
+      if (data.refreshing && _intelRetries < 4) {
+        _intelRetries++;
+        console.log('[intel] backend warming — retry #' + _intelRetries + ' in 10s');
+        _intelRetryTimer = setTimeout(function() { loadIntelData(false); }, 10000);
+      } else if (!data.refreshing) {
+        _intelRetries = 0;
+      }
     })
     .catch(function(e) {
       if (tid) clearTimeout(tid);
       _intelLoading = false;
-      console.error('[intel] fetch error:', e.name, e.message, e);
-      var msg = e.name === 'AbortError' ? 'Request timed out (50s). Server may be slow.' : 'Network error: ' + e.message;
-      _showIntelError('news-loading',  'news-rows',        msg);
-      _showIntelError('earn-loading',  'earn-rows-today',  msg);
-      _showIntelError('split-loading', 'split-rows',       msg);
-      _showIntelError('econ-loading',  'econ-rows',        msg);
+      var isAbort = e.name === 'AbortError';
+      var label   = isAbort ? 'TIMEOUT 8s' : e.name;
+      console.error('[intel] fetch failed  ' + label + ':', e.message || String(e));
+      var msg = isAbort
+        ? 'Server timed out (8 s) — click ↻ to retry.'
+        : 'Network error — ' + (e.message || String(e));
+      _showIntelError('news-loading',  'news-rows',       msg);
+      _showIntelError('earn-loading',  'earn-rows-today', msg);
+      _showIntelError('split-loading', 'split-rows',      msg);
+      _showIntelError('econ-loading',  'econ-rows',       msg);
+      console.log('[intel] fallback rendered');
+      _updateIntelDebug({ ok: false, errors: [msg], last_updated: '—',
+        market_news: [], earnings: {}, splits: [], economic_events: [],
+        from_cache: false, refreshing: false });
     });
 }
 
+// Hide loading spinner, reveal body sibling, inject error text into rows element
 function _showIntelError(loadId, rowsId, msg) {
   var loadEl = document.getElementById(loadId);
   var rowsEl = document.getElementById(rowsId);
-  var errHtml = '<div style="padding:16px;text-align:center;color:var(--red);font-size:12px;">⚠ ' + (msg || 'Could not load data — check server logs.') + '</div>';
-  // Hide spinner, show parent body, inject error into row container
   if (loadEl) {
     loadEl.style.display = 'none';
-    var bodyEl = loadEl.parentElement;
-    if (bodyEl) {
-      // Show all direct child body divs (display:none siblings)
-      var siblings = bodyEl.children;
-      for (var i = 0; i < siblings.length; i++) {
-        if (siblings[i] !== loadEl && siblings[i].style.display === 'none') {
-          siblings[i].style.display = 'block';
-        }
+    var par = loadEl.parentElement;
+    if (par) {
+      for (var i = 0; i < par.children.length; i++) {
+        if (par.children[i] !== loadEl && par.children[i].style.display === 'none')
+          par.children[i].style.display = 'block';
       }
     }
   }
-  if (rowsEl) rowsEl.innerHTML = errHtml;
+  if (rowsEl) rowsEl.innerHTML =
+    '<div style="padding:16px;text-align:center;color:var(--amber);font-size:12px;">'
+    + '⚠ ' + _esc(msg || 'Could not load — check server logs.') + '</div>';
+}
+
+// Update the debug status box at the bottom of the page
+function _updateIntelDebug(data) {
+  var el = document.getElementById('intel-debug-box');
+  if (!el) return;
+  var earn  = data.earnings || {};
+  var nEarn = (earn.today||[]).length + (earn.tomorrow||[]).length + (earn.this_week||[]).length;
+  var status = data.ok
+    ? (data.refreshing ? '⏳ Refreshing…' : '✅ OK')
+    : (data.refreshing ? '⏳ Cache warming…' : '⚠ Error / empty');
+  var rows = [
+    ['API status',    status],
+    ['Last updated',  data.last_updated || '—'],
+    ['From cache',    data.from_cache ? 'Yes' : 'No'],
+    ['News items',    String((data.market_news     || []).length)],
+    ['Earnings',      String(nEarn)],
+    ['Splits',        String((data.splits          || []).length)],
+    ['Econ events',   String((data.economic_events || []).length)],
+    ['Errors',        (data.errors && data.errors.length ? data.errors.join(' │ ') : 'None')],
+  ];
+  el.innerHTML = rows.map(function(r) {
+    return '<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--border);">'
+      + '<span style="min-width:96px;color:var(--text-muted);font-size:11px;">' + _esc(r[0]) + '</span>'
+      + '<span style="color:var(--text-secondary);font-size:11px;word-break:break-all;">' + _esc(r[1]) + '</span>'
+      + '</div>';
+  }).join('');
 }
 
 function refreshIntel() {
   showToast('Refreshing intel data…');
-  // Reset loading state
+  _intelRetries = 0;
+  if (_intelRetryTimer) { clearTimeout(_intelRetryTimer); _intelRetryTimer = null; }
   ['news','earn','split','econ'].forEach(function(k) {
     var l = document.getElementById(k + '-loading');
     var b = document.getElementById(k + '-body');

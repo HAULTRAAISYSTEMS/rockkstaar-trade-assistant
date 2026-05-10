@@ -156,6 +156,9 @@ def _intel_alert_loop():
 
 threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
 
+# Pre-warm the intel cache so the first page load is instant
+_intel.trigger_background_refresh()
+
 # ---------------------------------------------------------------------------
 # Startup migration: wipe stale mock-seeded prices from the DB.
 #
@@ -4197,38 +4200,29 @@ def api_schwab_summary():
 @app.route("/api/intel")
 def api_intel():
     """Returns all intel feeds as JSON.
-    Accepts ?refresh=1 to bypass the cache.
-    Always returns HTTP 200 with ok/errors fields — never leaves the frontend stuck.
+    Cache-first — always responds in < 1 second.
+    Cold cache: returns static fallback + triggers background refresh.
+    ?refresh=1 clears the cache and starts a fresh background fetch.
     """
     if request.args.get("refresh") == "1":
         _intel.clear_intel_cache()
-
-    _fallback = {
-        "ok":              False,
-        "errors":          ["Request timed out — data sources may be slow or unavailable"],
-        "last_updated":    "—",
-        "market_news":     [],
-        "earnings":        {"today": [], "tomorrow": [], "this_week": []},
-        "splits":          [],
-        "economic_events": [],
-        "alerts_sent":     [],
-    }
     try:
-        from concurrent.futures import ThreadPoolExecutor as _TPE, TimeoutError as _FTE
-        _ex  = _TPE(max_workers=1)
-        _fut = _ex.submit(_intel.get_intel_summary)
-        _ex.shutdown(wait=False)
-        try:
-            data = _fut.result(timeout=45)
-        except (_FTE, Exception) as e:
-            logger.warning("api_intel timed out or errored: %s", e)
-            _fallback["errors"] = [str(e)]
-            data = _fallback
+        data = _intel.get_intel_summary()
         return jsonify(data)
     except Exception as e:
-        logger.error("api_intel outer error: %s", e)
-        _fallback["errors"] = [str(e)]
-        return jsonify(_fallback)
+        logger.error("api_intel error: %s", e)
+        return jsonify({
+            "ok":              False,
+            "errors":          [str(e)],
+            "last_updated":    "—",
+            "market_news":     [],
+            "earnings":        {"today": [], "tomorrow": [], "this_week": []},
+            "splits":          [],
+            "economic_events": [],
+            "alerts_sent":     [],
+            "from_cache":      False,
+            "refreshing":      False,
+        })
 
 
 @app.route("/intel")
