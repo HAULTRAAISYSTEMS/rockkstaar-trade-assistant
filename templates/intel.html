@@ -1481,8 +1481,6 @@ function processEarnings(stocks) {
       } else {
         weekBody.innerHTML = `<div class="earnings-row"><span class="earnings-ticker" style="color:var(--text-muted)">—</span><span class="earnings-company">No earnings detected on your watchlist this week</span><span></span><span></span><span class="col-hide"></span><span></span></div>`;
       }
-    })
-    .catch(e => console.log('intel: earnings load error', e));
 }
 
 // ── Refresh all ────────────────────────────────────────
@@ -1526,25 +1524,46 @@ function loadIntelData(forceRefresh) {
     .then(function(data) {
       _intelData    = data;
       _intelLoading = false;
-      var earn  = data.earnings || {};
-      var nEarn = (earn.today||[]).length + (earn.tomorrow||[]).length + (earn.this_week||[]).length;
-      var nNews = (data.market_news     || []).length;
-      var nSplit= (data.splits          || []).length;
-      var nEcon = (data.economic_events || []).length;
+
+      // Support both key names: backend returns market_news, requirement says news
+      var newsArr = data.news || data.market_news || [];
+      var earn    = data.earnings        || {};
+      var splits  = data.splits          || [];
+      var econ    = data.economic_events || [];
+      var nEarn   = (earn.today||[]).length + (earn.tomorrow||[]).length + (earn.this_week||[]).length;
       console.log('[intel] fetch success  ok=' + data.ok
-        + '  news=' + nNews + '  earn=' + nEarn
-        + '  splits=' + nSplit + '  econ=' + nEcon
+        + '  news=' + newsArr.length + '  earn=' + nEarn
+        + '  splits=' + splits.length + '  econ=' + econ.length
         + '  refreshing=' + data.refreshing
         + '  updated=' + data.last_updated);
       if (data.errors && data.errors.length) {
         console.warn('[intel] server errors:', data.errors);
       }
 
-      renderNews(data.market_news      || []);
-      renderEarnings(data.earnings     || {});
-      renderSplits(data.splits         || []);
-      renderEcon(data.economic_events  || []);
-      _updateIntelDebug(data);
+      // ── Always stop ALL spinners immediately, even if render crashes below ──
+      ['news','earn','split','econ'].forEach(function(k) {
+        var loadEl = document.getElementById(k + '-loading');
+        var bodyEl = document.getElementById(k + '-body');
+        if (!loadEl) { console.error('[intel] missing DOM: ' + k + '-loading'); }
+        if (!bodyEl) { console.error('[intel] missing DOM: ' + k + '-body'); }
+        if (loadEl) loadEl.style.display = 'none';
+        if (bodyEl) bodyEl.style.display = 'block';
+      });
+
+      // ── Render each section, catch any crash and show it in the debug box ──
+      try {
+        renderNews(newsArr);
+        renderEarnings(earn);
+        renderSplits(splits);
+        renderEcon(econ);
+        _updateIntelDebug(data);
+        console.log('[intel] render complete');
+      } catch (renderErr) {
+        console.error('[intel] render crashed:', renderErr);
+        _updateIntelDebug(Object.assign({}, data, {
+          errors: (data.errors || []).concat(['Render error: ' + renderErr.message])
+        }));
+      }
 
       // Auto-retry while backend cache is still warming (up to 4 times, 10s apart)
       if (data.refreshing && _intelRetries < 4) {
@@ -1649,13 +1668,17 @@ function renderNews(items) {
   items.forEach(function(i) { if (counts[i.impact] !== undefined) counts[i.impact]++; });
 
   var total = items.length;
-  badge.textContent = total + ' item' + (total !== 1 ? 's' : '');
-  badge.className   = 'badge ' + (counts.CRITICAL > 0 ? 'badge-red' : counts.HIGH > 0 ? 'badge-amber' : 'badge-gray');
+  if (badge) {
+    badge.textContent = total + ' item' + (total !== 1 ? 's' : '');
+    badge.className   = 'badge ' + (counts.CRITICAL > 0 ? 'badge-red' : counts.HIGH > 0 ? 'badge-amber' : 'badge-gray');
+  }
 
-  // Update filter counts
-  document.getElementById('nf-critical').textContent = 'CRITICAL (' + counts.CRITICAL + ')';
-  document.getElementById('nf-high').textContent     = 'HIGH ('     + counts.HIGH     + ')';
-  document.getElementById('nf-medium').textContent   = 'MEDIUM ('   + counts.MEDIUM   + ')';
+  var nfCrit = document.getElementById('nf-critical');
+  var nfHigh = document.getElementById('nf-high');
+  var nfMed  = document.getElementById('nf-medium');
+  if (nfCrit) nfCrit.textContent = 'CRITICAL (' + counts.CRITICAL + ')';
+  if (nfHigh) nfHigh.textContent = 'HIGH ('     + counts.HIGH     + ')';
+  if (nfMed)  nfMed.textContent  = 'MEDIUM ('   + counts.MEDIUM   + ')';
 
   _renderNewsRows(items);
 }
@@ -1669,9 +1692,9 @@ function _renderNewsRows(items) {
     return i.impact === filter;
   });
 
+  if (!rows) { console.error('[intel] missing DOM: news-rows'); return; }
   if (!visible.length) {
-    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No ' +
-      (filter === 'ALL' ? '' : filter.toLowerCase() + ' ') + 'news items found for your universe.</div>';
+    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No market-moving news found.</div>';
     return;
   }
 
@@ -1694,7 +1717,7 @@ function newsFilter(level, btn) {
   _newsFilter = level;
   document.querySelectorAll('#news-filter-row .filter-btn').forEach(function(b) { b.classList.remove('active'); });
   btn.classList.add('active');
-  if (_intelData) _renderNewsRows(_intelData.market_news || []);
+  if (_intelData) _renderNewsRows(_intelData.news || _intelData.market_news || []);
 }
 
 // ── EARNINGS RENDERER ──────────────────────────────────
@@ -1711,8 +1734,10 @@ function renderEarnings(buckets) {
   var week     = (buckets.this_week|| []);
   var total    = today.length + tomorrow.length + week.length;
 
-  badge.textContent = total + ' this week';
-  badge.className   = 'badge ' + (today.length > 0 ? 'badge-red' : total > 0 ? 'badge-amber' : 'badge-gray');
+  if (badge) {
+    badge.textContent = total + ' this week';
+    badge.className   = 'badge ' + (today.length > 0 ? 'badge-red' : total > 0 ? 'badge-amber' : 'badge-gray');
+  }
 
   // Tab counts
   function setCount(id, n) {
@@ -1741,7 +1766,7 @@ function _renderEarnRows(elId, items) {
   var el = document.getElementById(elId);
   if (!el) return;
   if (!items.length) {
-    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No earnings in this period for your universe.</div>';
+    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No upcoming earnings found.</div>';
     return;
   }
   el.innerHTML = items.map(function(item) {
@@ -1783,11 +1808,13 @@ function renderSplits(items) {
   if (loading) loading.style.display = 'none';
   if (body)    body.style.display    = 'block';
 
-  badge.textContent = items.length ? items.length + ' found' : 'None detected';
-  badge.className   = 'badge ' + (items.length ? 'badge-amber' : 'badge-gray');
-
+  if (badge) {
+    badge.textContent = items.length ? items.length + ' found' : 'None detected';
+    badge.className   = 'badge ' + (items.length ? 'badge-amber' : 'badge-gray');
+  }
+  if (!rows) { console.error('[intel] missing DOM: split-rows'); return; }
   if (!items.length) {
-    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No upcoming splits detected for your watchlist or scanner universe.</div>';
+    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No stock splits found.</div>';
     return;
   }
 
@@ -1823,8 +1850,11 @@ function renderEcon(events) {
   if (body)    body.style.display    = 'block';
 
   var todayHigh = events.filter(function(e) { return e.is_today && e.impact === 'HIGH'; });
-  badge.textContent = events.length + ' in 14 days';
-  badge.className   = 'badge ' + (todayHigh.length > 0 ? 'badge-red' : events.length ? 'badge-amber' : 'badge-gray');
+  if (badge) {
+    badge.textContent = events.length + ' in 14 days';
+    badge.className   = 'badge ' + (todayHigh.length > 0 ? 'badge-red' : events.length ? 'badge-amber' : 'badge-gray');
+  }
+  if (!rows) { console.error('[intel] missing DOM: econ-rows'); return; }
 
   // Show danger banner if HIGH event today
   if (todayHigh.length > 0) {
@@ -1837,8 +1867,7 @@ function renderEcon(events) {
   }
 
   if (!events.length) {
-    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No high-impact events in the next 14 days. ' +
-      (document.cookie.indexOf('FINNHUB_API_KEY') === -1 ? 'Add FINNHUB_API_KEY for live calendar.' : '') + '</div>';
+    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No economic events found.</div>';
     return;
   }
 
