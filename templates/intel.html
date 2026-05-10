@@ -503,10 +503,10 @@
   .news-source  { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
   .news-wl-star { color: var(--amber); font-size: 10px; margin-left: 4px; }
 
-  /* ── Enhanced earnings rows ── */
+  /* ── Enhanced earnings rows — Ticker | Company | Date | Time | EPS Est | WL ── */
   .earn-row {
     display: grid;
-    grid-template-columns: 65px 1fr 90px 80px 80px;
+    grid-template-columns: 65px 1fr 90px 60px 65px 55px;
     align-items: center;
     gap: 12px;
     padding: 10px 16px;
@@ -524,15 +524,16 @@
     color: var(--text-muted);
   }
   .earn-ticker { font-family: var(--font); font-size: 13px; font-weight: 700; }
+  .earn-company{ font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .earn-warn   { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25);
                  border-radius: 4px; padding: 2px 7px; font-size: 10px; color: #f87171; font-weight: 700; }
   .earn-on-wl  { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25);
                  border-radius: 4px; padding: 2px 7px; font-size: 10px; color: var(--amber); font-weight: 600; }
 
-  /* ── Split rows ── */
+  /* ── Split rows — Ticker | Company | Ratio | Eff Date | Status | WL ── */
   .split-row {
     display: grid;
-    grid-template-columns: 65px 80px 80px 90px 90px 80px;
+    grid-template-columns: 65px 1fr 75px 90px 80px 55px;
     align-items: center;
     gap: 12px;
     padding: 10px 16px;
@@ -549,12 +550,47 @@
     text-transform: uppercase;
     color: var(--text-muted);
   }
+  .split-company { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .split-new { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.25);
                border-radius: 4px; padding: 2px 7px; font-size: 10px; color: var(--green); font-weight: 700; }
   .split-soon { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25);
                 border-radius: 4px; padding: 2px 7px; font-size: 10px; color: var(--amber); font-weight: 600; }
   .split-upcoming { background: rgba(255,255,255,0.05); border: 1px solid var(--border);
                     border-radius: 4px; padding: 2px 7px; font-size: 10px; color: var(--text-secondary); }
+
+  /* ── Dividend rows — Ticker | Company | Ex-Date | Pay-Date | Amount | Yield | WL ── */
+  .div-row {
+    display: grid;
+    grid-template-columns: 65px 1fr 90px 90px 65px 55px 50px;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .div-row:last-child { border-bottom: none; }
+  .div-row:hover { background: var(--bg-card-hover); }
+  .div-row-header {
+    background: var(--bg-inset);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .div-ticker  { font-family: var(--font); font-size: 13px; font-weight: 700; }
+  .div-company { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .div-amount  { font-family: var(--font); font-size: 12px; color: var(--teal); }
+  .div-yield   { font-size: 11px; color: var(--text-secondary); }
+  .div-on-wl   { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25);
+                 border-radius: 4px; padding: 2px 7px; font-size: 10px; color: var(--amber); font-weight: 600; }
+
+  /* ── WL-only toggle button ── */
+  .wl-toggle { padding: 3px 10px; border-radius: 20px; font-size: 10px; font-weight: 700;
+               letter-spacing: 0.04em; border: 1px solid var(--border); background: transparent;
+               color: var(--text-secondary); cursor: pointer; transition: all 0.15s; }
+  .wl-toggle.active { background: rgba(245,158,11,0.15); color: var(--amber);
+                      border-color: rgba(245,158,11,0.4); }
 
   /* ── Economic calendar rows ── */
   .econ-row {
@@ -699,10 +735,12 @@
     .earnings-row .col-hide { display: none; }
     .news-row { grid-template-columns: 55px 55px 1fr; }
     .news-row > *:last-child { display: none; }
-    .earn-row  { grid-template-columns: 60px 1fr 80px; }
-    .earn-row > *:nth-child(n+4) { display: none; }
+    .earn-row  { grid-template-columns: 60px 1fr 70px 50px; }
+    .earn-row > *:nth-child(n+5) { display: none; }
     .split-row { grid-template-columns: 60px 1fr 70px; }
     .split-row > *:nth-child(n+4) { display: none; }
+    .div-row   { grid-template-columns: 60px 1fr 80px 55px; }
+    .div-row > *:nth-child(n+5) { display: none; }
     .econ-row  { grid-template-columns: 1fr 70px; }
   }
 </style>
@@ -758,6 +796,8 @@
           <td id="d-earn-ov" class="dbg-wait">—</td></tr>
       <tr><td class="dbg-key">splits count</td>
           <td id="d-splits" class="dbg-wait">—</td></tr>
+      <tr><td class="dbg-key">dividends count</td>
+          <td id="d-div" class="dbg-wait">—</td></tr>
       <tr><td class="dbg-key">economic_events count</td>
           <td id="d-econ" class="dbg-wait">—</td></tr>
     </table>
@@ -776,12 +816,12 @@
     _dbgSet('d-js', 'YES — init script executed', 'dbg-yes');
 
     // Replace all LOADING spinners with FETCHING… immediately
-    var keys = ['news','earn','split','econ'];
+    var keys = ['news','earn','split','div','econ'];
     keys.forEach(function(k) {
       var el = document.getElementById(k + '-loading');
       if (el) el.innerHTML = '<div class="loading-spinner"></div> FETCHING…';
     });
-    var badges = ['news-count-badge','earn-count-badge','split-count-badge','econ-count-badge'];
+    var badges = ['news-count-badge','earn-count-badge','split-count-badge','div-count-badge','econ-count-badge'];
     badges.forEach(function(id) {
       var el = document.getElementById(id);
       if (el) el.textContent = 'FETCHING…';
@@ -935,6 +975,7 @@
         📅 Upcoming Earnings
         <span class="badge badge-gray" id="earn-count-badge" style="font-size:10px;">Loading…</span>
         <div class="section-line"></div>
+        <button class="wl-toggle" id="earn-wl-btn" onclick="earnToggleWL(this)" style="margin-right:4px;">⭐ WL Only</button>
         <button class="btn" onclick="window.open('https://earningswhispers.com','_blank')" style="font-size:11px;padding:4px 10px;">EW →</button>
       </div>
       <div class="card" id="earn-card">
@@ -948,7 +989,7 @@
             <button class="bucket-tab" onclick="earnTab('week',this)" id="et-week">This Week <span class="tab-count" id="etc-week">0</span></button>
           </div>
           <div class="earn-row earn-row-header" style="margin-top:0;">
-            <span>Ticker</span><span>Date</span><span>Time</span><span>Watchlist</span><span>Action</span>
+            <span>Ticker</span><span>Company</span><span>Date</span><span>Time</span><span>EPS Est</span><span>WL</span>
           </div>
           <div id="earn-rows-today" class="bucket-panel active"></div>
           <div id="earn-rows-tomorrow" class="bucket-panel"></div>
@@ -963,6 +1004,8 @@
         📢 Stock Splits
         <span class="badge badge-gray" id="split-count-badge" style="font-size:10px;">Loading…</span>
         <div class="section-line"></div>
+        <span style="font-size:10px;color:var(--text-muted);">Next 30 days</span>
+        <button class="wl-toggle" id="split-wl-btn" onclick="splitToggleWL(this)" style="margin:0 4px;">⭐ WL Only</button>
         <button class="btn" onclick="window.open('https://stockanalysis.com/actions/splits/','_blank')" style="font-size:11px;padding:4px 10px;">StockAnalysis →</button>
       </div>
       <div class="card" id="split-card">
@@ -971,9 +1014,32 @@
         </div>
         <div id="split-body" style="display:none;">
           <div class="split-row split-row-header">
-            <span>Ticker</span><span>Ratio</span><span>Type</span><span>Effective</span><span>Status</span><span>Alert</span>
+            <span>Ticker</span><span>Company</span><span>Ratio</span><span>Effective</span><span>Status</span><span>WL</span>
           </div>
           <div id="split-rows"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SECTION 3B — Dividends This Month ══════════════════════════════ -->
+    <div class="section">
+      <div class="section-title">
+        💰 Dividends This Month
+        <span class="badge badge-gray" id="div-count-badge" style="font-size:10px;">Loading…</span>
+        <div class="section-line"></div>
+        <span style="font-size:10px;color:var(--text-muted);">Ex-div dates · Next 30 days</span>
+        <button class="wl-toggle" id="div-wl-btn" onclick="divToggleWL(this)" style="margin:0 4px;">⭐ WL Only</button>
+        <button class="btn" onclick="window.open('https://stockanalysis.com/actions/dividends/','_blank')" style="font-size:11px;padding:4px 10px;">StockAnalysis →</button>
+      </div>
+      <div class="card" id="div-card">
+        <div class="intel-loading" id="div-loading">
+          <div class="loading-spinner"></div> Checking dividend calendar…
+        </div>
+        <div id="div-body" style="display:none;">
+          <div class="div-row div-row-header">
+            <span>Ticker</span><span>Company</span><span>Ex-Date</span><span>Pay-Date</span><span>Amount</span><span>Yield</span><span>WL</span>
+          </div>
+          <div id="div-rows"></div>
         </div>
       </div>
     </div>
@@ -1645,14 +1711,16 @@ function loadIntelData(forceRefresh) {
       _intelLoading = false;
 
       // Support both key names: backend returns market_news, requirement says news
-      var newsArr = data.news || data.market_news || [];
-      var earn    = data.earnings        || {};
-      var splits  = data.splits          || [];
-      var econ    = data.economic_events || [];
-      var nEarn   = (earn.today||[]).length + (earn.tomorrow||[]).length + (earn.this_week||[]).length;
+      var newsArr   = data.news || data.market_news || [];
+      var earn      = data.earnings        || {};
+      var splits    = data.splits          || [];
+      var dividends = data.dividends       || [];
+      var econ      = data.economic_events || [];
+      var nEarn     = (earn.today||[]).length + (earn.tomorrow||[]).length + (earn.this_week||[]).length;
       console.log('[intel] fetch success  ok=' + data.ok
         + '  news=' + newsArr.length + '  earn=' + nEarn
-        + '  splits=' + splits.length + '  econ=' + econ.length
+        + '  splits=' + splits.length + '  div=' + dividends.length
+        + '  econ=' + econ.length
         + '  refreshing=' + data.refreshing
         + '  updated=' + data.last_updated);
       if (data.earnings_debug) {
@@ -1677,13 +1745,14 @@ function loadIntelData(forceRefresh) {
         var _ed = data.earnings_debug || {};
         _dbgSet('d-earn-src', (_ed.earnings_source_used || '—') + '  · checked=' + (_ed.tickers_checked || 0) + '  yf=' + (_ed.yfinance_found || 0) + '  fh=' + (_ed.finnhub_found || 0), _ed.tickers_checked ? 'dbg-yes' : 'dbg-wait');
         _dbgSet('d-earn-ov',  String(_ed.overrides_injected || 0) + (_ed.overrides_injected ? ' override(s) forced into results' : ' (none — add to EARNINGS_OVERRIDES in intel_engine.py)'), _ed.overrides_injected ? 'dbg-yes' : 'dbg-wait');
-        _dbgSet('d-splits', String(splits.length),   splits.length ? 'dbg-yes' : 'dbg-wait');
-        _dbgSet('d-econ',   String(econ.length),      econ.length ? 'dbg-yes' : 'dbg-wait');
+        _dbgSet('d-splits', String(splits.length),    splits.length    ? 'dbg-yes' : 'dbg-wait');
+        _dbgSet('d-div',    String(dividends.length), dividends.length ? 'dbg-yes' : 'dbg-wait');
+        _dbgSet('d-econ',   String(econ.length),      econ.length      ? 'dbg-yes' : 'dbg-wait');
         _dbgSet('d-error',  data.errors && data.errors.length ? data.errors.join(' | ') : 'none', data.errors && data.errors.length ? 'dbg-no' : 'dbg-yes');
       }
 
       // ── Always stop ALL spinners immediately, even if render crashes below ──
-      ['news','earn','split','econ'].forEach(function(k) {
+      ['news','earn','split','div','econ'].forEach(function(k) {
         var loadEl = document.getElementById(k + '-loading');
         var bodyEl = document.getElementById(k + '-body');
         if (!loadEl) { console.error('[intel] missing DOM: ' + k + '-loading'); }
@@ -1698,6 +1767,7 @@ function loadIntelData(forceRefresh) {
         renderNews(newsArr);
         renderEarnings(earn);
         renderSplits(splits);
+        renderDividends(dividends);
         renderEcon(econ);
         _updateIntelDebug(data);
         if (window._dbgSet) _dbgSet('d-render-done', 'YES', 'dbg-yes');
@@ -1738,7 +1808,7 @@ function loadIntelData(forceRefresh) {
       }
 
       // Replace all sections with ERROR
-      ['news','earn','split','econ'].forEach(function(k) {
+      ['news','earn','split','div','econ'].forEach(function(k) {
         var loadEl = document.getElementById(k + '-loading');
         var bodyEl = document.getElementById(k + '-body');
         if (loadEl) { loadEl.style.display = 'none'; }
@@ -1754,10 +1824,11 @@ function loadIntelData(forceRefresh) {
       _showIntelError('news-loading',  'news-rows',       msg);
       _showIntelError('earn-loading',  'earn-rows-today', msg);
       _showIntelError('split-loading', 'split-rows',      msg);
+      _showIntelError('div-loading',   'div-rows',        msg);
       _showIntelError('econ-loading',  'econ-rows',       msg);
       console.log('[intel] error state rendered');
       _updateIntelDebug({ ok: false, errors: [msg], last_updated: '—',
-        news: [], market_news: [], earnings: {}, splits: [], economic_events: [],
+        news: [], market_news: [], earnings: {}, splits: [], dividends: [], economic_events: [],
         from_cache: false, refreshing: false });
     });
 }
@@ -1800,6 +1871,7 @@ function _updateIntelDebug(data) {
       ['News items',    String(newsArr.length)],
       ['Earnings',      String(nEarn)],
       ['Splits',        String((data.splits          || []).length)],
+      ['Dividends',     String((data.dividends        || []).length)],
       ['Econ events',   String((data.economic_events || []).length)],
       ['Errors',        (data.errors && data.errors.length ? data.errors.join(' │ ') : 'None')],
     ];
@@ -1816,7 +1888,7 @@ function refreshIntel() {
   showToast('Refreshing intel data…');
   _intelRetries = 0;
   if (_intelRetryTimer) { clearTimeout(_intelRetryTimer); _intelRetryTimer = null; }
-  ['news','earn','split','econ'].forEach(function(k) {
+  ['news','earn','split','div','econ'].forEach(function(k) {
     var l = document.getElementById(k + '-loading');
     var b = document.getElementById(k + '-body');
     if (l) { l.style.display = 'flex'; l.innerHTML = '<div class="loading-spinner"></div> Refreshing…'; }
@@ -1892,6 +1964,11 @@ function newsFilter(level, btn) {
   if (_intelData) _renderNewsRows(_intelData.news || _intelData.market_news || []);
 }
 
+// ── WL FILTER STATE ────────────────────────────────────
+var _earnWLOnly  = false;
+var _splitWLOnly = false;
+var _divWLOnly   = false;
+
 // ── EARNINGS RENDERER ──────────────────────────────────
 function renderEarnings(buckets) {
   var loading = document.getElementById('earn-loading');
@@ -1911,7 +1988,6 @@ function renderEarnings(buckets) {
     badge.className   = 'badge ' + (today.length > 0 ? 'badge-red' : total > 0 ? 'badge-amber' : 'badge-gray');
   }
 
-  // Tab counts
   function setCount(id, n) {
     var el = document.getElementById(id);
     if (el) { el.textContent = n; el.className = 'tab-count' + (n > 0 ? ' has-data' : ''); }
@@ -1923,47 +1999,61 @@ function renderEarnings(buckets) {
   _renderEarnRows('earn-rows-today',    today);
   _renderEarnRows('earn-rows-tomorrow', tomorrow);
   _renderEarnRows('earn-rows-week',     week);
-
-  // Danger banner for earnings today on watchlist
-  var wlToday = today.filter(function(i) { return i.on_watchlist; });
-  if (wlToday.length > 0) {
-    var banner = document.getElementById('danger-day-banner');
-    if (banner && banner.style.display === 'none') {
-      // Only show if econ hasn't already set it; earnings gets its own note
-    }
-  }
 }
 
-function _renderEarnRows(elId, items) {
+function _renderEarnRows(elId, allItems) {
   var el = document.getElementById(elId);
   if (!el) return;
+  var items = _earnWLOnly ? allItems.filter(function(i) { return i.on_watchlist || i.is_override; }) : allItems;
   if (!items.length) {
-    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No upcoming earnings found.</div>';
+    var msg = _earnWLOnly && allItems.length
+      ? 'No watchlist earnings in this period.'
+      : 'No upcoming earnings found.';
+    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">' + msg + '</div>';
     return;
   }
   el.innerHTML = items.map(function(item) {
-    var wlBadge   = item.on_watchlist ? '<span class="earn-on-wl">WL</span>' : '<span style="color:var(--text-muted);font-size:11px;">—</span>';
-    var warnBadge = (item.days_away <= 1 && item.on_watchlist)
-      ? '<span class="earn-warn">RISK</span>'
-      : (item.days_away <= 2 ? '<span style="color:var(--text-muted);font-size:10px;">Watch</span>' : '—');
+    var wlBadge     = item.on_watchlist
+      ? '<span class="earn-on-wl">WL</span>'
+      : '<span style="color:var(--text-muted);font-size:11px;">—</span>';
     var tickerColor = item.on_watchlist ? 'color:var(--amber)' : item.is_override ? 'color:var(--blue)' : '';
-    var ovBadge = item.is_override
+    var ovBadge     = item.is_override
       ? '<span style="font-size:9px;background:rgba(96,165,250,0.12);color:#93c5fd;border:1px solid rgba(96,165,250,0.3);border-radius:3px;padding:1px 5px;margin-left:4px;vertical-align:middle;">MANUAL</span>'
       : '';
+    var warnDot     = (item.days_away <= 1 && item.on_watchlist)
+      ? ' <span style="font-size:9px;background:rgba(239,68,68,0.12);color:#f87171;border:1px solid rgba(239,68,68,0.3);border-radius:3px;padding:1px 4px;">RISK</span>'
+      : '';
     var timeLbl = _esc(item.time_label || 'TBD');
-    if (item.time_label === 'BMO') timeLbl = '<span style="color:var(--green)">BMO</span>';
-    if (item.time_label === 'AMC') timeLbl = '<span style="color:var(--red)">AMC</span>';
+    if (item.time_label === 'BMO') timeLbl = '<span style="color:var(--green);font-weight:600;">BMO</span>';
+    if (item.time_label === 'AMC') timeLbl = '<span style="color:var(--red);font-weight:600;">AMC</span>';
+    var eps = item.eps_est != null
+      ? '<span style="font-family:var(--font);font-size:11px;color:var(--teal);">$' + item.eps_est.toFixed(2) + '</span>'
+      : '<span style="color:var(--text-muted);font-size:10px;">—</span>';
+    var company = _esc(item.company_name || '');
     return (
       '<div class="earn-row">' +
-        '<span class="earn-ticker" style="' + tickerColor + '">' + _esc(item.ticker) + ovBadge + '</span>' +
-        '<span><div style="font-size:12px;color:var(--text-primary);">' + _esc(item.date_label) + '</div>' +
+        '<span class="earn-ticker" style="' + tickerColor + '">' + _esc(item.ticker) + ovBadge + warnDot + '</span>' +
+        '<span class="earn-company">' + company + '</span>' +
+        '<span><div style="font-size:12px;color:var(--text-primary);">' + _esc(item.date_label || item.date) + '</div>' +
               '<div style="font-size:10px;color:var(--text-muted);">' + _esc(item.date) + '</div></span>' +
         '<span style="font-size:11px;">' + timeLbl + '</span>' +
+        '<span>' + eps + '</span>' +
         '<span>' + wlBadge + '</span>' +
-        '<span>' + warnBadge + '</span>' +
       '</div>'
     );
   }).join('');
+}
+
+function earnToggleWL(btn) {
+  _earnWLOnly = !_earnWLOnly;
+  btn.classList.toggle('active', _earnWLOnly);
+  if (_intelData) _renderAllEarnBuckets(_intelData.earnings || {});
+}
+
+function _renderAllEarnBuckets(buckets) {
+  _renderEarnRows('earn-rows-today',    buckets.today     || []);
+  _renderEarnRows('earn-rows-tomorrow', buckets.tomorrow  || []);
+  _renderEarnRows('earn-rows-week',     buckets.this_week || []);
 }
 
 function earnTab(tab, btn) {
@@ -1977,11 +2067,13 @@ function earnTab(tab, btn) {
 }
 
 // ── SPLITS RENDERER ────────────────────────────────────
+var _splitAllItems = [];
+
 function renderSplits(items) {
+  _splitAllItems = items;
   var loading = document.getElementById('split-loading');
   var body    = document.getElementById('split-body');
   var badge   = document.getElementById('split-count-badge');
-  var rows    = document.getElementById('split-rows');
 
   if (loading) loading.style.display = 'none';
   if (body)    body.style.display    = 'block';
@@ -1990,31 +2082,111 @@ function renderSplits(items) {
     badge.textContent = items.length ? items.length + ' found' : 'None detected';
     badge.className   = 'badge ' + (items.length ? 'badge-amber' : 'badge-gray');
   }
+  _renderSplitRows(items);
+}
+
+function _renderSplitRows(allItems) {
+  var rows  = document.getElementById('split-rows');
   if (!rows) { console.error('[intel] missing DOM: split-rows'); return; }
+  var items = _splitWLOnly ? allItems.filter(function(i) { return i.on_watchlist; }) : allItems;
   if (!items.length) {
-    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No stock splits found.</div>';
+    var msg = _splitWLOnly && allItems.length ? 'No watchlist splits in next 30 days.' : 'No stock splits found.';
+    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">' + msg + '</div>';
     return;
   }
-
   rows.innerHTML = items.map(function(item) {
-    var statusCls = item.is_new
-      ? 'split-new'
-      : (item.days_away <= 14 ? 'split-soon' : 'split-upcoming');
-    var alertBadge = item.is_new
-      ? '<span class="impact-badge impact-high">NEW!</span>'
-      : '—';
-    var typeCls = item.type === 'Forward' ? 'pos' : 'neg';
+    var statusCls  = item.is_new ? 'split-new' : (item.days_away <= 14 ? 'split-soon' : 'split-upcoming');
+    var typeCls    = item.type === 'Forward' ? 'pos' : 'neg';
+    var ratio      = _esc(item.ratio);
+    if (item.type === 'Forward') ratio = '<span class="pos" style="font-weight:700;">' + ratio + '</span>';
+    else                         ratio = '<span class="neg">' + ratio + '</span>';
+    var wlBadge    = item.on_watchlist
+      ? '<span class="earn-on-wl">WL</span>'
+      : '<span style="color:var(--text-muted);font-size:10px;">—</span>';
     return (
       '<div class="split-row">' +
         '<span style="font-family:var(--font);font-size:13px;font-weight:700;">' + _esc(item.ticker) + '</span>' +
-        '<span style="font-family:var(--font);font-size:12px;font-weight:600;">' + _esc(item.ratio) + '</span>' +
-        '<span class="' + typeCls + '" style="font-size:12px;">' + _esc(item.type) + '</span>' +
+        '<span class="split-company">' + _esc(item.company_name || '') + '</span>' +
+        '<span style="font-family:var(--font);font-size:12px;">' + ratio + '</span>' +
         '<span style="font-size:11px;font-family:var(--font);color:var(--text-secondary);">' + _esc(item.eff_date) + '</span>' +
         '<span><span class="' + statusCls + '">' + _esc(item.status) + '</span></span>' +
-        '<span>' + alertBadge + '</span>' +
+        '<span>' + wlBadge + '</span>' +
       '</div>'
     );
   }).join('');
+}
+
+function splitToggleWL(btn) {
+  _splitWLOnly = !_splitWLOnly;
+  btn.classList.toggle('active', _splitWLOnly);
+  _renderSplitRows(_splitAllItems);
+}
+
+// ── DIVIDENDS RENDERER ─────────────────────────────────
+var _divAllItems = [];
+
+function renderDividends(items) {
+  _divAllItems = items;
+  var loading = document.getElementById('div-loading');
+  var body    = document.getElementById('div-body');
+  var badge   = document.getElementById('div-count-badge');
+
+  if (loading) loading.style.display = 'none';
+  if (body)    body.style.display    = 'block';
+
+  if (badge) {
+    var wlCount = items.filter(function(i) { return i.on_watchlist; }).length;
+    badge.textContent = items.length ? items.length + ' found' + (wlCount ? ' · ' + wlCount + ' WL' : '') : 'None detected';
+    badge.className   = 'badge ' + (wlCount ? 'badge-teal' : items.length ? 'badge-gray' : 'badge-gray');
+  }
+  _renderDivRows(items);
+}
+
+function _renderDivRows(allItems) {
+  var rows  = document.getElementById('div-rows');
+  if (!rows) { console.error('[intel] missing DOM: div-rows'); return; }
+  var items = _divWLOnly ? allItems.filter(function(i) { return i.on_watchlist; }) : allItems;
+  if (!items.length) {
+    var msg = _divWLOnly && allItems.length
+      ? 'No watchlist dividends in next 30 days.'
+      : 'No upcoming ex-dividend dates found.';
+    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">' + msg + '</div>';
+    return;
+  }
+  rows.innerHTML = items.map(function(item) {
+    var wlBadge  = item.on_watchlist
+      ? '<span class="div-on-wl">WL</span>'
+      : '<span style="color:var(--text-muted);font-size:10px;">—</span>';
+    var amount   = item.div_amount != null
+      ? '<span class="div-amount">$' + item.div_amount.toFixed(4) + '</span>'
+      : '<span style="color:var(--text-muted);">—</span>';
+    var yld      = item.div_yield != null
+      ? '<span class="div-yield">' + item.div_yield.toFixed(2) + '%</span>'
+      : '<span style="color:var(--text-muted);">—</span>';
+    var exLbl    = _esc(item.ex_date_label || item.ex_date);
+    var payLbl   = item.payment_date
+      ? '<div style="font-size:11px;color:var(--text-secondary);">' + _esc(item.payment_date) + '</div>'
+      : '<span style="color:var(--text-muted);font-size:10px;">—</span>';
+    var tickerStyle = item.on_watchlist ? 'color:var(--amber)' : '';
+    return (
+      '<div class="div-row">' +
+        '<span class="div-ticker" style="' + tickerStyle + '">' + _esc(item.ticker) + '</span>' +
+        '<span class="div-company">' + _esc(item.company_name || '') + '</span>' +
+        '<span><div style="font-size:12px;">' + exLbl + '</div>' +
+              '<div style="font-size:10px;color:var(--text-muted);">' + _esc(item.ex_date) + '</div></span>' +
+        '<span>' + payLbl + '</span>' +
+        '<span>' + amount + '</span>' +
+        '<span>' + yld + '</span>' +
+        '<span>' + wlBadge + '</span>' +
+      '</div>'
+    );
+  }).join('');
+}
+
+function divToggleWL(btn) {
+  _divWLOnly = !_divWLOnly;
+  btn.classList.toggle('active', _divWLOnly);
+  _renderDivRows(_divAllItems);
 }
 
 // ── DEBUG PANEL TOGGLE ─────────────────────────────────

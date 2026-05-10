@@ -87,6 +87,7 @@ _CACHE_TTL: dict[str, int] = {
     "market_news": 900,    # 15 min — news changes often
     "earnings":    21600,  # 6 hrs  — dates change rarely
     "splits":      86400,  # 24 hrs — very stable
+    "dividends":   21600,  # 6 hrs  — ex-dates don't change often
     "economic":    3600,   # 1 hr   — stable but refresh daily
 }
 
@@ -163,6 +164,7 @@ def trigger_background_refresh() -> None:
                 (fetch_economic_calendar, "econ"),
                 (fetch_stock_splits,      "splits"),
                 (fetch_earnings_calendar, "earnings"),
+                (fetch_dividends,         "dividends"),
                 (fetch_market_news,       "news"),
             ]:
                 try:
@@ -310,6 +312,34 @@ EARNINGS_OVERRIDES: list[dict] = [
     # {"ticker": "XXXX", "date": "2026-MM-DD", "time_label": "BMO", "eps_est": None, "source": "manual override"},
 ]
 
+# Static company names for the scanner universe — avoids slow .info API call
+_COMPANY_NAMES: dict[str, str] = {
+    "NVDA": "NVIDIA",              "AMD":  "Advanced Micro Devices",
+    "TSLA": "Tesla",               "AAPL": "Apple",
+    "META": "Meta Platforms",      "GOOGL": "Alphabet",
+    "AMZN": "Amazon",              "MSFT": "Microsoft",
+    "PLTR": "Palantir",            "SOFI": "SoFi Technologies",
+    "IONQ": "IonQ",                "RGTI": "Rigetti Computing",
+    "QUBT": "Quantum Computing",   "JOBY": "Joby Aviation",
+    "ACHR": "Archer Aviation",     "RKLB": "Rocket Lab",
+    "LUNR": "Intuitive Machines",  "OKLO": "Oklo",
+    "SMR":  "NuScale Power",       "NNE":  "Nano Nuclear Energy",
+    "CEG":  "Constellation Energy","VST":  "Vistra Energy",
+    "NRG":  "NRG Energy",          "GEV":  "GE Vernova",
+    "FSLR": "First Solar",         "NEE":  "NextEra Energy",
+    "SO":   "Southern Company",    "JPM":  "JPMorgan Chase",
+    "BAC":  "Bank of America",     "GS":   "Goldman Sachs",
+    "V":    "Visa",                "MA":   "Mastercard",
+    "HD":   "Home Depot",          "WMT":  "Walmart",
+    "COST": "Costco",              "XOM":  "ExxonMobil",
+    "CVX":  "Chevron",             "OXY":  "Occidental",
+    "LMT":  "Lockheed Martin",     "RTX":  "RTX Corp",
+}
+
+
+def _company_name(ticker: str) -> str:
+    return _COMPANY_NAMES.get(ticker.upper(), "")
+
 
 def _get_watchlist_tickers() -> list[str]:
     try:
@@ -448,13 +478,28 @@ def _earnings_from_finnhub(
                 continue
             hour       = (e.get("hour") or "").lower()
             time_label = "BMO" if hour == "bmo" else "AMC" if hour == "amc" else "TBD"
+            eps_est = None
+            rev_est = None
+            try:
+                v = e.get("epsEstimate")
+                if v: eps_est = round(float(v), 2)
+            except Exception:
+                pass
+            try:
+                v = e.get("revenueEstimate")
+                if v: rev_est = int(v)
+            except Exception:
+                pass
             results.append({
-                "ticker":      ticker,
-                "date":        earn_date.isoformat(),
-                "days_away":   days_away,
-                "time_label":  time_label,
-                "source":      "finnhub",
-                "is_override": False,
+                "ticker":       ticker,
+                "company_name": _company_name(ticker),
+                "date":         earn_date.isoformat(),
+                "days_away":    days_away,
+                "time_label":   time_label,
+                "eps_est":      eps_est,
+                "rev_est":      rev_est,
+                "source":       "finnhub",
+                "is_override":  False,
             })
         except Exception as exc:
             errors.append(f"finnhub/{ticker}: {exc}")
@@ -513,11 +558,14 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
                 continue
             _bucket_item({
                 "ticker":       ov["ticker"].upper(),
+                "company_name": _company_name(ov["ticker"].upper()),
                 "date":         ov_date.isoformat(),
                 "date_label":   _date_label(ov_date, today),
                 "time_label":   ov.get("time_label", "TBD"),
                 "on_watchlist": ov["ticker"].upper() in wl_set,
                 "days_away":    days_away,
+                "eps_est":      ov.get("eps_est"),
+                "rev_est":      ov.get("rev_est"),
                 "source":       ov.get("source", "manual override"),
                 "is_override":  True,
             })
@@ -554,13 +602,30 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             days_away = (earn_date - today).days
             if days_away < 0 or days_away > 7:
                 return None
+            eps_est = None
+            rev_est = None
+            try:
+                ea = cal.get("Earnings Average") or cal.get("earningsAverage")
+                if ea is not None:
+                    eps_est = round(float(ea), 2)
+            except Exception:
+                pass
+            try:
+                ra = cal.get("Revenue Average") or cal.get("revenueAverage")
+                if ra is not None:
+                    rev_est = int(ra)
+            except Exception:
+                pass
             return {
                 "ticker":       ticker,
+                "company_name": _company_name(ticker),
                 "date":         earn_date.isoformat(),
                 "date_label":   _date_label(earn_date, today),
                 "time_label":   "TBD",
                 "on_watchlist": ticker in wl_set,
                 "days_away":    days_away,
+                "eps_est":      eps_est,
+                "rev_est":      rev_est,
                 "source":       "yfinance",
                 "is_override":  False,
             }
@@ -654,9 +719,9 @@ def fetch_stock_splits(tickers: Optional[list[str]] = None) -> list[dict]:
 def _splits_from_finnhub(tickers: list[str], api_key: str, today: date) -> list[dict]:
     import urllib.request
     from_d = today.isoformat()
-    to_d   = (today + timedelta(days=60)).isoformat()
+    to_d   = (today + timedelta(days=30)).isoformat()
     results: list[dict] = []
-    for ticker in tickers[:20]:
+    for ticker in tickers:
         try:
             url = (
                 f"https://finnhub.io/api/v1/stock/split"
@@ -671,19 +736,22 @@ def _splits_from_finnhub(tickers: list[str], api_key: str, today: date) -> list[
                 except Exception:
                     continue
                 days_away  = (ed - today).days
+                if days_away < 0 or days_away > 30:
+                    continue
                 from_f     = s.get("fromFactor", 1) or 1
                 to_f       = s.get("toFactor", 1) or 1
                 split_type = "Forward" if to_f > from_f else "Reverse"
                 ratio_str  = f"{int(from_f)}:{int(to_f)}"
                 results.append({
-                    "ticker":    ticker,
-                    "ratio":     ratio_str,
-                    "type":      split_type,
-                    "eff_date":  eff_str,
-                    "days_away": days_away,
-                    "is_new":    0 <= days_away <= 7,
-                    "status":    _split_status(days_away),
-                    "source":    "finnhub",
+                    "ticker":       ticker,
+                    "company_name": _company_name(ticker),
+                    "ratio":        ratio_str,
+                    "type":         split_type,
+                    "eff_date":     eff_str,
+                    "days_away":    days_away,
+                    "is_new":       0 <= days_away <= 7,
+                    "status":       _split_status(days_away),
+                    "source":       "finnhub",
                 })
         except Exception as e:
             logger.debug("intel/splits finnhub %s: %s", ticker, e)
@@ -691,12 +759,12 @@ def _splits_from_finnhub(tickers: list[str], api_key: str, today: date) -> list[
 
 
 def _splits_from_yfinance(tickers: list[str], today: date) -> list[dict]:
-    lookback  = today - timedelta(days=30)
-    lookahead = today + timedelta(days=60)
+    lookback  = today - timedelta(days=7)
+    lookahead = today + timedelta(days=30)
     results: list[dict] = []
     try:
         import yfinance as yf
-        for ticker in tickers[:20]:
+        for ticker in tickers:
             try:
                 splits = yf.Ticker(ticker).splits
                 if splits is None or len(splits) == 0:
@@ -720,14 +788,15 @@ def _splits_from_yfinance(tickers: list[str], today: date) -> list[dict]:
                     else:
                         ratio_str = "?"
                     results.append({
-                        "ticker":    ticker,
-                        "ratio":     ratio_str,
-                        "type":      split_type,
-                        "eff_date":  sd.isoformat(),
-                        "days_away": days_away,
-                        "is_new":    0 <= days_away <= 7,
-                        "status":    _split_status(days_away),
-                        "source":    "yfinance",
+                        "ticker":       ticker,
+                        "company_name": _company_name(ticker),
+                        "ratio":        ratio_str,
+                        "type":         split_type,
+                        "eff_date":     sd.isoformat(),
+                        "days_away":    days_away,
+                        "is_new":       0 <= days_away <= 7,
+                        "status":       _split_status(days_away),
+                        "source":       "yfinance",
                     })
             except Exception:
                 pass
@@ -744,6 +813,149 @@ def _split_status(days_away: int) -> str:
     if days_away <= 7:
         return f"In {days_away}d"
     return "Upcoming"
+
+
+# ── Dividends ─────────────────────────────────────────────────────────────────
+
+def _dividends_from_finnhub(
+    tickers: list[str], api_key: str, today: date, wl_set: set,
+) -> list[dict]:
+    """Fetch ex-dividend dates via Finnhub /stock/dividend2 (parallel)."""
+    import urllib.request
+    from_d = today.isoformat()
+    to_d   = (today + timedelta(days=30)).isoformat()
+    results: list[dict] = []
+
+    def _fetch_one(ticker: str) -> Optional[dict]:
+        try:
+            url = (
+                f"https://finnhub.io/api/v1/stock/dividend2"
+                f"?symbol={ticker}&from={from_d}&to={to_d}&token={api_key}"
+            )
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+            items = data.get("data", [])
+            if not items:
+                return None
+            d       = items[0]
+            ex_str  = (d.get("exDate") or "")[:10]
+            if not ex_str:
+                return None
+            ex_date   = datetime.strptime(ex_str, "%Y-%m-%d").date()
+            days_away = (ex_date - today).days
+            if days_away < 0 or days_away > 30:
+                return None
+            pay_str = (d.get("payDate") or "")[:10] or None
+            amount  = d.get("amount")
+            return {
+                "ticker":        ticker,
+                "company_name":  _company_name(ticker),
+                "ex_date":       ex_str,
+                "ex_date_label": _date_label(ex_date, today),
+                "payment_date":  pay_str,
+                "days_away":     days_away,
+                "div_amount":    round(float(amount), 4) if amount else None,
+                "div_yield":     None,
+                "frequency":     d.get("frequency", ""),
+                "on_watchlist":  ticker in wl_set,
+                "source":        "finnhub",
+            }
+        except Exception:
+            return None
+
+    pool = ThreadPoolExecutor(max_workers=6)
+    futs = [pool.submit(_fetch_one, t) for t in tickers]
+    pool.shutdown(wait=False)
+    try:
+        for fut in as_completed(futs, timeout=30):
+            try:
+                item = fut.result()
+                if item:
+                    results.append(item)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return results
+
+
+def _dividends_from_yfinance(tickers: list[str], today: date, wl_set: set) -> list[dict]:
+    """Fallback: read exDividendDate + dividendYield from yfinance Ticker.info."""
+    from datetime import timezone
+    results: list[dict] = []
+
+    def _fetch_one(ticker: str) -> Optional[dict]:
+        try:
+            import yfinance as yf
+            info    = yf.Ticker(ticker).info
+            ex_ts   = info.get("exDividendDate")
+            if not ex_ts:
+                return None
+            ex_date   = datetime.fromtimestamp(int(ex_ts), tz=timezone.utc).date()
+            days_away = (ex_date - today).days
+            if days_away < 0 or days_away > 30:
+                return None
+            amount    = info.get("lastDividendValue") or info.get("dividendRate")
+            div_yield = info.get("dividendYield")
+            company   = _company_name(ticker) or info.get("shortName", "")
+            return {
+                "ticker":        ticker,
+                "company_name":  company,
+                "ex_date":       ex_date.isoformat(),
+                "ex_date_label": _date_label(ex_date, today),
+                "payment_date":  None,
+                "days_away":     days_away,
+                "div_amount":    round(float(amount), 4) if amount else None,
+                "div_yield":     round(float(div_yield) * 100, 2) if div_yield else None,
+                "on_watchlist":  ticker in wl_set,
+                "source":        "yfinance",
+            }
+        except Exception:
+            return None
+
+    pool = ThreadPoolExecutor(max_workers=4)
+    futs = [pool.submit(_fetch_one, t) for t in tickers]
+    pool.shutdown(wait=False)
+    try:
+        for fut in as_completed(futs, timeout=30):
+            try:
+                item = fut.result()
+                if item:
+                    results.append(item)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return results
+
+
+def fetch_dividends(tickers: Optional[list[str]] = None) -> list[dict]:
+    """
+    Fetch upcoming ex-dividend dates for the next 30 days.
+    Uses Finnhub if API key present; falls back to yfinance .info.
+    Sorted: watchlist first, then by days_away.
+    Cached for 6 hours.
+    """
+    cached = _cget("dividends")
+    if cached is not None:
+        return cached
+
+    all_tickers = tickers if tickers is not None else _earnings_universe()
+    wl_set      = set(_get_watchlist_tickers())
+    today       = _today_et()
+    results: list[dict] = []
+
+    finnhub_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if finnhub_key:
+        results = _dividends_from_finnhub(all_tickers, finnhub_key, today, wl_set)
+
+    if not results:
+        results = _dividends_from_yfinance(all_tickers, today, wl_set)
+
+    results.sort(key=lambda x: (not x["on_watchlist"], x["days_away"]))
+    _cset("dividends", results)
+    logger.info("intel/dividends: %d items in next 30 days", len(results))
+    return results
 
 
 # ── Economic Calendar ─────────────────────────────────────────────────────────
@@ -990,7 +1202,31 @@ def check_and_send_intel_alerts() -> list[dict]:
     except Exception as e:
         logger.warning("intel: splits alert sweep failed: %s", e)
 
-    # 4. High-impact economic events today
+    # 4. Watchlist dividends with ex-date within 7 days
+    try:
+        for item in fetch_dividends():
+            if not item.get("on_watchlist"):
+                continue
+            days = item.get("days_away", 99)
+            if days < 0 or days > 7:
+                continue
+            ticker = item["ticker"]
+            dk = _daily_key(ticker, "div_exdate")
+            if should_send_alert(dk):
+                ex_lbl = item.get("ex_date_label", item.get("ex_date", "—"))
+                amt    = f"${item['div_amount']:.4f}" if item.get("div_amount") else "—"
+                yld    = f"  ·  Yield: {item['div_yield']:.1f}%" if item.get("div_yield") else ""
+                msg = (
+                    f"💰 <b>Dividend Ex-Date: {ticker} — {ex_lbl}</b>\n"
+                    f"Amount: {amt}{yld}\n"
+                    f"<i>Must own shares before ex-date to receive dividend.</i>"
+                )
+                send_intel_alert(msg)
+                sent.append({"type": "dividend", "ticker": ticker})
+    except Exception as e:
+        logger.warning("intel: dividend alert sweep failed: %s", e)
+
+    # 5. High-impact economic events today
     try:
         today_high = [e for e in fetch_economic_calendar()
                       if e.get("is_today") and e.get("impact") == "HIGH"]
@@ -1028,6 +1264,7 @@ def get_intel_summary() -> dict:
     c_news  = _cget("market_news")
     c_earn  = _cget("earnings")
     c_split = _cget("splits")
+    c_div   = _cget("dividends")
     c_econ  = _cget("economic")
 
     is_cold = (c_earn is None) or (c_split is None) or (c_econ is None)
@@ -1063,6 +1300,7 @@ def get_intel_summary() -> dict:
         "market_news":     c_news  or [],
         "earnings":        earn_buckets,
         "splits":          c_split or [],
+        "dividends":       c_div   or [],
         "economic_events": c_econ  or [],
         "earnings_debug": {
             "tickers_checked":      earn_meta.get("tickers_checked", 0),
@@ -1072,6 +1310,8 @@ def get_intel_summary() -> dict:
             "overrides_injected":   earn_meta.get("overrides_injected", 0),
             "yfinance_found":       earn_meta.get("yfinance_found", 0),
             "finnhub_found":        earn_meta.get("finnhub_found", 0),
+            "splits_count":         len(c_split or []),
+            "dividends_count":      len(c_div   or []),
         },
         "alerts_sent":     [],
         "from_cache":      not is_cold,
