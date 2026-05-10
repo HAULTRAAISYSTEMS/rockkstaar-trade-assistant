@@ -4177,7 +4177,12 @@ def api_schwab_summary():
     })
 
 
-# ---------------------------------------------------------------------------
+
+@app.route("/intel")
+def intel():
+        """Pre-Market Intel — daily and weekly checklist, earnings, market environment."""
+        return render_template("intel.html")
+    # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
