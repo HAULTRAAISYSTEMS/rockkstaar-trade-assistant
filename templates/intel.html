@@ -674,6 +674,22 @@
   #intel-dbg .dbg-wait{ color: #888; }
   #intel-dbg .dbg-val { color: #aaa; word-break: break-all; }
 
+  /* ── Econ bucket headers (Today / Tomorrow / This Week) ── */
+  .econ-bucket-header {
+    padding: 7px 16px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: var(--bg-inset);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .econ-bucket-header:not(:first-child) { border-top: 1px solid var(--border); }
+
   /* ── Responsive ── */
   @media (max-width: 900px) {
     .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
@@ -712,8 +728,8 @@
 <!-- ── Page ─────────────────────────────────────────────── -->
 <div class="page">
 
-  <!-- ══ DEBUG PANEL ══════════════════════════════════════════ -->
-  <div id="intel-dbg">
+  <!-- ══ DEBUG PANEL — hidden by default, toggled from bottom ══ -->
+  <div id="intel-dbg" style="display:none; margin-bottom:0;">
     <div class="dbg-title">🔴 INTEL DIAGNOSTIC PANEL</div>
     <table>
       <tr><td class="dbg-key">JS loaded</td>
@@ -958,17 +974,18 @@
       </div>
     </div>
 
-    <!-- ══ SECTION 4 — Economic Calendar ════════════════════════════════ -->
+    <!-- ══ SECTION 4 — Market Events Calendar ═══════════════════════════ -->
     <div class="section">
       <div class="section-title">
-        ⚠ Economic Calendar
+        📊 Market Events
         <span class="badge badge-gray" id="econ-count-badge" style="font-size:10px;">Loading…</span>
         <div class="section-line"></div>
+        <span style="font-size:10px;color:var(--text-muted);">US · HIGH &amp; MED · SPY/QQQ/VIX movers</span>
         <button class="btn" onclick="window.open('https://www.investing.com/economic-calendar/','_blank')" style="font-size:11px;padding:4px 10px;">Full Calendar →</button>
       </div>
       <div class="card" id="econ-card">
         <div class="intel-loading" id="econ-loading">
-          <div class="loading-spinner"></div> Loading economic events…
+          <div class="loading-spinner"></div> Loading market events…
         </div>
         <div id="econ-body" style="display:none;">
           <div class="econ-row econ-row-header">
@@ -984,14 +1001,8 @@
       <div class="section-title" style="font-size:11px;color:var(--text-muted);">
         🔧 Intel API Status
         <div class="section-line"></div>
-        <button class="btn" id="debug-toggle-btn"
-          onclick="(function(){var c=document.getElementById('intel-debug-card');c.style.display=c.style.display==='none'?'block':'none';document.getElementById('debug-toggle-btn').textContent=c.style.display==='none'?'show':'hide';})()"
-          style="font-size:10px;padding:2px 8px;">show</button>
-      </div>
-      <div class="card" id="intel-debug-card" style="padding:12px;display:none;">
-        <div id="intel-debug-box" style="font-family:var(--font);">
-          <div style="padding:4px;color:var(--text-muted);font-size:11px;">Waiting for first data load…</div>
-        </div>
+        <button class="btn" id="debug-toggle-btn" onclick="toggleDebugPanel()"
+          style="font-size:10px;padding:2px 8px;">Show Debug</button>
       </div>
     </div>
 
@@ -1982,6 +1993,94 @@ function renderSplits(items) {
   }).join('');
 }
 
+// ── DEBUG PANEL TOGGLE ─────────────────────────────────
+function toggleDebugPanel() {
+  var p   = document.getElementById('intel-dbg');
+  var btn = document.getElementById('debug-toggle-btn');
+  if (!p) return;
+  if (!p.style.display || p.style.display === 'none') {
+    p.style.display = 'block';
+    p.style.marginBottom = '18px';
+    p.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (btn) btn.textContent = 'Hide Debug';
+  } else {
+    p.style.display = 'none';
+    p.style.marginBottom = '0';
+    if (btn) btn.textContent = 'Show Debug';
+  }
+}
+
+// ── ECON FILTER / GROUP / BUCKET HELPERS ───────────────
+var _MARKET_KEYWORDS = [
+  'cpi', 'consumer price', 'core cpi',
+  'ppi', 'producer price', 'core ppi',
+  'fomc', 'fed rate', 'interest rate decision', 'federal funds', 'federal open market',
+  'fed press conference', 'powell', 'fed speaker', 'fed speech',
+  'beige book', 'jackson hole',
+  'nonfarm', 'non-farm', 'payroll', 'nfp',
+  'unemployment rate', 'jobless claims', 'initial claims', 'continuing claims',
+  'gdp', 'gross domestic',
+  'retail sales',
+  'consumer sentiment', 'michigan',
+  'ism',
+  'pce', 'personal consumption',
+  'pmi',
+  'treasury'
+];
+
+function _isMarketMoving(name, impact) {
+  if ((impact || '').toUpperCase() === 'HIGH') return true;
+  var n = (name || '').toLowerCase();
+  return _MARKET_KEYWORDS.some(function(kw) { return n.indexOf(kw) !== -1; });
+}
+
+function _canonicalEconKey(name) {
+  var n = (name || '').toLowerCase();
+  if (n.indexOf('cpi') !== -1 || n.indexOf('consumer price') !== -1) return 'cpi';
+  if (n.indexOf('ppi') !== -1 || n.indexOf('producer price') !== -1) return 'ppi';
+  if (n.indexOf('fomc') !== -1 || n.indexOf('interest rate decision') !== -1 || n.indexOf('federal funds') !== -1) return 'fomc';
+  if (n.indexOf('nonfarm') !== -1 || n.indexOf('non-farm') !== -1 || n.indexOf('payroll') !== -1) return 'nfp';
+  if (n.indexOf('jobless') !== -1 || n.indexOf('initial claims') !== -1 || n.indexOf('continuing claims') !== -1) return 'jobless';
+  if (n.indexOf('gdp') !== -1 || n.indexOf('gross domestic') !== -1) return 'gdp';
+  if (n.indexOf('retail sales') !== -1) return 'retail';
+  if (n.indexOf('ism') !== -1) return 'ism';
+  if (n.indexOf('pce') !== -1 || n.indexOf('personal consumption') !== -1) return 'pce';
+  if (n.indexOf('pmi') !== -1) return 'pmi';
+  if (n.indexOf('powell') !== -1 || n.indexOf('fed speaker') !== -1 || n.indexOf('fed press') !== -1 || n.indexOf('beige book') !== -1 || n.indexOf('jackson hole') !== -1) return 'fed_speech';
+  if (n.indexOf('consumer sentiment') !== -1 || n.indexOf('michigan') !== -1) return 'sentiment';
+  return n.replace(/[^a-z0-9]/g, '_').substring(0, 40);
+}
+
+function _groupEconEvents(events) {
+  var groups = [];
+  var seen   = {};
+  events.forEach(function(evt) {
+    var key = (evt.date || '') + '|' + _canonicalEconKey(evt.event || evt.name || '');
+    if (seen[key] !== undefined) {
+      groups[seen[key]].sub_events.push(evt.event || evt.name || '');
+    } else {
+      seen[key] = groups.length;
+      var copy = {};
+      Object.keys(evt).forEach(function(k) { copy[k] = evt[k]; });
+      copy.sub_events = [];
+      groups.push(copy);
+    }
+  });
+  return groups;
+}
+
+function _bucketEconEvents(events) {
+  var today = [], tomorrow = [], thisWeek = [], later = [];
+  events.forEach(function(evt) {
+    var d = (evt.days_away != null) ? evt.days_away : (evt.is_today ? 0 : 99);
+    if (evt.is_today || d <= 0)  today.push(evt);
+    else if (d === 1)            tomorrow.push(evt);
+    else if (d <= 7)             thisWeek.push(evt);
+    else                         later.push(evt);
+  });
+  return { today: today, tomorrow: tomorrow, thisWeek: thisWeek, later: later };
+}
+
 // ── ECON RENDERER ──────────────────────────────────────
 function renderEcon(events) {
   var loading = document.getElementById('econ-loading');
@@ -1992,10 +2091,23 @@ function renderEcon(events) {
   if (loading) loading.style.display = 'none';
   if (body)    body.style.display    = 'block';
 
-  var todayHigh = events.filter(function(e) { return e.is_today && e.impact === 'HIGH'; });
+  // 1. Filter to US market-moving events (HIGH always passes; MEDIUM requires keyword match)
+  var filtered = events.filter(function(e) {
+    return _isMarketMoving(e.event || e.name || '', e.impact || '');
+  });
+
+  // 2. Group duplicates: CPI + Core CPI → one row with sub-note
+  var grouped = _groupEconEvents(filtered);
+
+  // 3. Bucket into Today / Tomorrow / This Week / Upcoming
+  var buckets = _bucketEconEvents(grouped);
+  var total   = buckets.today.length + buckets.tomorrow.length + buckets.thisWeek.length + buckets.later.length;
+
+  var todayHigh = buckets.today.filter(function(e) { return (e.impact || '').toUpperCase() === 'HIGH'; });
+
   if (badge) {
-    badge.textContent = events.length + ' in 14 days';
-    badge.className   = 'badge ' + (todayHigh.length > 0 ? 'badge-red' : events.length ? 'badge-amber' : 'badge-gray');
+    badge.textContent = total ? total + (total !== 1 ? ' events' : ' event') : 'None';
+    badge.className   = 'badge ' + (todayHigh.length > 0 ? 'badge-red' : total ? 'badge-amber' : 'badge-gray');
   }
   if (!rows) { console.error('[intel] missing DOM: econ-rows'); return; }
 
@@ -2005,29 +2117,54 @@ function renderEcon(events) {
     var sub    = document.getElementById('danger-day-sub');
     if (banner) banner.style.display = 'flex';
     if (sub)    sub.textContent = todayHigh.map(function(e) {
-      return e.event + ' · ' + e.time;
+      return (e.event || e.name) + ' · ' + e.time;
     }).join(' | ');
   }
 
-  if (!events.length) {
-    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No economic events found.</div>';
+  if (!total) {
+    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No market-moving events in the next 14 days.</div>';
     return;
   }
 
-  rows.innerHTML = events.map(function(evt) {
-    var impCls  = 'impact-' + evt.impact.toLowerCase();
-    var rowCls  = evt.is_today ? 'econ-row is-today' : 'econ-row';
-    var todayLbl = evt.is_today ? ' <span class="impact-badge impact-critical" style="margin-left:4px;">TODAY</span>' : '';
-    return (
-      '<div class="' + rowCls + '">' +
-        '<span><div class="econ-name">' + _esc(evt.event) + todayLbl + '</div>' +
-              '<div class="econ-reason">' + _esc(evt.reason) + '</div></span>' +
-        '<span><div class="econ-date">' + _esc(evt.date_label) + '</div>' +
-              '<div class="econ-time">' + _esc(evt.time) + '</div></span>' +
-        '<span><span class="impact-badge ' + impCls + '">' + _esc(evt.impact) + '</span></span>' +
-      '</div>'
-    );
-  }).join('');
+  function _evtRows(evts) {
+    return evts.map(function(evt) {
+      var name    = evt.event || evt.name || 'Economic Event';
+      var impact  = (evt.impact || 'MEDIUM').toUpperCase();
+      var impCls  = 'impact-' + impact.toLowerCase();
+      var rowCls  = evt.is_today ? 'econ-row is-today' : 'econ-row';
+      var todayLbl = evt.is_today ? ' <span class="impact-badge impact-critical" style="margin-left:4px;">TODAY</span>' : '';
+      var subNote = (evt.sub_events && evt.sub_events.length)
+        ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">+ ' + evt.sub_events.map(_esc).join(' · ') + '</div>'
+        : '';
+      return (
+        '<div class="' + rowCls + '">' +
+          '<span>' +
+            '<div class="econ-name">' + _esc(name) + todayLbl + '</div>' +
+            '<div class="econ-reason">' + _esc(evt.reason) + '</div>' +
+            subNote +
+          '</span>' +
+          '<span>' +
+            '<div class="econ-date">' + _esc(evt.date_label) + '</div>' +
+            '<div class="econ-time">' + _esc(evt.time) + '</div>' +
+          '</span>' +
+          '<span><span class="impact-badge ' + impCls + '">' + impact + '</span></span>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  function _bucket(label, evts) {
+    if (!evts.length) return '';
+    return '<div class="econ-bucket-header">' + label +
+      ' <span class="tab-count has-data">' + evts.length + '</span></div>' +
+      _evtRows(evts);
+  }
+
+  rows.innerHTML =
+    _bucket('Today',     buckets.today)    +
+    _bucket('Tomorrow',  buckets.tomorrow) +
+    _bucket('This Week', buckets.thisWeek) +
+    _bucket('Upcoming',  buckets.later);
 }
 
 // ── Utility ────────────────────────────────────────────
