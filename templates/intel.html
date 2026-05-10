@@ -447,6 +447,208 @@
   /* ── Divider ── */
   hr.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 
+  /* ── Impact badges ── */
+  .impact-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+  .impact-critical { background: rgba(239,68,68,0.18);  color: #f87171; border: 1px solid rgba(239,68,68,0.35); }
+  .impact-high     { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.35); }
+  .impact-medium   { background: rgba(96,165,250,0.12); color: #93c5fd; border: 1px solid rgba(96,165,250,0.3); }
+  .impact-low      { background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid var(--border); }
+
+  /* ── Danger day banner ── */
+  .danger-banner {
+    border-radius: 8px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    background: rgba(239,68,68,0.07);
+    border: 1px solid rgba(239,68,68,0.25);
+  }
+  .danger-text { font-size: 13px; font-weight: 700; color: #f87171; }
+  .danger-sub  { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+  /* ── News rows ── */
+  .news-row {
+    display: grid;
+    grid-template-columns: 58px 60px 1fr 90px;
+    align-items: start;
+    gap: 12px;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .news-row:last-child { border-bottom: none; }
+  .news-row:hover { background: var(--bg-card-hover); }
+  .news-row-header {
+    background: var(--bg-inset);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .news-ticker  { font-family: var(--font); font-size: 13px; font-weight: 700; color: var(--text-primary); }
+  .news-time    { font-size: 10px; font-family: var(--font); color: var(--text-muted); margin-top: 2px; }
+  .news-headline{ font-size: 12px; color: var(--text-primary); line-height: 1.4; }
+  .news-reason  { font-size: 11px; color: var(--text-muted); margin-top: 3px; font-style: italic; }
+  .news-source  { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+  .news-wl-star { color: var(--amber); font-size: 10px; margin-left: 4px; }
+
+  /* ── Enhanced earnings rows ── */
+  .earn-row {
+    display: grid;
+    grid-template-columns: 65px 1fr 90px 80px 80px;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .earn-row:last-child { border-bottom: none; }
+  .earn-row:hover { background: var(--bg-card-hover); }
+  .earn-row-header {
+    background: var(--bg-inset);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .earn-ticker { font-family: var(--font); font-size: 13px; font-weight: 700; }
+  .earn-warn   { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25);
+                 border-radius: 4px; padding: 2px 7px; font-size: 10px; color: #f87171; font-weight: 700; }
+  .earn-on-wl  { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25);
+                 border-radius: 4px; padding: 2px 7px; font-size: 10px; color: var(--amber); font-weight: 600; }
+
+  /* ── Split rows ── */
+  .split-row {
+    display: grid;
+    grid-template-columns: 65px 80px 80px 90px 90px 80px;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .split-row:last-child { border-bottom: none; }
+  .split-row:hover { background: var(--bg-card-hover); }
+  .split-row-header {
+    background: var(--bg-inset);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .split-new { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.25);
+               border-radius: 4px; padding: 2px 7px; font-size: 10px; color: var(--green); font-weight: 700; }
+  .split-soon { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25);
+                border-radius: 4px; padding: 2px 7px; font-size: 10px; color: var(--amber); font-weight: 600; }
+  .split-upcoming { background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+                    border-radius: 4px; padding: 2px 7px; font-size: 10px; color: var(--text-secondary); }
+
+  /* ── Economic calendar rows ── */
+  .econ-row {
+    display: grid;
+    grid-template-columns: 1fr 100px 75px;
+    align-items: start;
+    gap: 12px;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .econ-row:last-child { border-bottom: none; }
+  .econ-row:hover { background: var(--bg-card-hover); }
+  .econ-row.is-today { background: rgba(239,68,68,0.04); border-left: 3px solid rgba(239,68,68,0.4); padding-left: 13px; }
+  .econ-row-header {
+    background: var(--bg-inset);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .econ-name    { font-size: 12px; color: var(--text-primary); font-weight: 500; }
+  .econ-reason  { font-size: 11px; color: var(--text-muted); margin-top: 3px; font-style: italic; }
+  .econ-date    { font-size: 11px; font-family: var(--font); color: var(--text-secondary); }
+  .econ-time    { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ── Section bucket tabs (Today / Tomorrow / This Week) ── */
+  .bucket-tabs { display: flex; gap: 2px; margin-bottom: 0; }
+  .bucket-tab  {
+    padding: 5px 14px;
+    border-radius: 6px 6px 0 0;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    background: var(--bg-inset);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .bucket-tab.active { background: var(--bg-card); color: var(--text-primary); }
+  .bucket-panel { display: none; }
+  .bucket-panel.active { display: block; }
+
+  /* ── Loading state ── */
+  .intel-loading {
+    padding: 20px 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .loading-spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── News filter bar ── */
+  .news-filter-bar {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-inset);
+    flex-wrap: wrap;
+  }
+  .filter-btn {
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .filter-btn.f-critical.active { background: #ef4444; border-color: #ef4444; }
+  .filter-btn.f-high.active     { background: #f59e0b; border-color: #f59e0b; }
+  .filter-btn.f-medium.active   { background: #60a5fa; border-color: #60a5fa; }
+
   /* ── Responsive ── */
   @media (max-width: 900px) {
     .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
@@ -454,6 +656,13 @@
     .sector-grid { grid-template-columns: repeat(2, 1fr); }
     .earnings-row { grid-template-columns: 55px 1fr 65px 65px; }
     .earnings-row .col-hide { display: none; }
+    .news-row { grid-template-columns: 55px 55px 1fr; }
+    .news-row > *:last-child { display: none; }
+    .earn-row  { grid-template-columns: 60px 1fr 80px; }
+    .earn-row > *:nth-child(n+4) { display: none; }
+    .split-row { grid-template-columns: 60px 1fr 70px; }
+    .split-row > *:nth-child(n+4) { display: none; }
+    .econ-row  { grid-template-columns: 1fr 70px; }
   }
 </style>
 </head>
@@ -581,8 +790,115 @@
       </div>
     </div>
 
-    <!-- Today's Earnings on Watchlist -->
+    <!-- ══ DANGER DAY BANNER (economic events) ══════════════════════════════ -->
+    <div class="danger-banner" id="danger-day-banner" style="display:none;">
+      <div>
+        <div class="danger-text">⚠️ HIGH VOLATILITY DAY — MACRO EVENT</div>
+        <div class="danger-sub" id="danger-day-sub">High-impact economic release today.</div>
+      </div>
+      <span class="badge badge-red">REDUCE SIZE / WAIT FOR REACTION</span>
+    </div>
+
+    <!-- ══ SECTION 1 — Market Moving News ════════════════════════════════ -->
     <div class="section">
+      <div class="section-title">
+        🚨 Market Moving News
+        <span class="badge badge-gray" id="news-count-badge" style="font-size:10px;">Loading…</span>
+        <div class="section-line"></div>
+        <div style="display:flex;gap:4px;" id="news-filter-row">
+          <button class="filter-btn f-critical active" onclick="newsFilter('ALL',this)" id="nf-all">ALL</button>
+          <button class="filter-btn f-critical" onclick="newsFilter('CRITICAL',this)" id="nf-critical">CRITICAL</button>
+          <button class="filter-btn f-high"     onclick="newsFilter('HIGH',this)"     id="nf-high">HIGH</button>
+          <button class="filter-btn f-medium"   onclick="newsFilter('MEDIUM',this)"   id="nf-medium">MEDIUM</button>
+          <button class="filter-btn" onclick="newsFilter('WATCHLIST',this)" id="nf-wl">⭐ WL Only</button>
+        </div>
+        <button class="btn" onclick="refreshIntel()" style="font-size:11px;padding:4px 10px;">↻</button>
+      </div>
+      <div class="card" id="news-card">
+        <div class="intel-loading" id="news-loading">
+          <div class="loading-spinner"></div> Scanning news for your watchlist…
+        </div>
+        <div id="news-body" style="display:none;">
+          <div class="news-row news-row-header">
+            <span>Impact</span><span>Ticker</span><span>Headline</span><span>Source</span>
+          </div>
+          <div id="news-rows"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SECTION 2 — Upcoming Earnings ════════════════════════════════ -->
+    <div class="section">
+      <div class="section-title">
+        📅 Upcoming Earnings
+        <span class="badge badge-gray" id="earn-count-badge" style="font-size:10px;">Loading…</span>
+        <div class="section-line"></div>
+        <button class="btn" onclick="window.open('https://earningswhispers.com','_blank')" style="font-size:11px;padding:4px 10px;">EW →</button>
+      </div>
+      <div class="card" id="earn-card">
+        <div class="intel-loading" id="earn-loading">
+          <div class="loading-spinner"></div> Checking earnings calendar…
+        </div>
+        <div id="earn-body" style="display:none;">
+          <div class="bucket-tabs" style="padding:8px 12px 0; background:var(--bg-inset); border-bottom:1px solid var(--border);">
+            <button class="bucket-tab active" onclick="earnTab('today',this)" id="et-today">Today <span class="tab-count" id="etc-today">0</span></button>
+            <button class="bucket-tab" onclick="earnTab('tomorrow',this)" id="et-tomorrow">Tomorrow <span class="tab-count" id="etc-tomorrow">0</span></button>
+            <button class="bucket-tab" onclick="earnTab('week',this)" id="et-week">This Week <span class="tab-count" id="etc-week">0</span></button>
+          </div>
+          <div class="earn-row earn-row-header" style="margin-top:0;">
+            <span>Ticker</span><span>Date</span><span>Time</span><span>Watchlist</span><span>Action</span>
+          </div>
+          <div id="earn-rows-today" class="bucket-panel active"></div>
+          <div id="earn-rows-tomorrow" class="bucket-panel"></div>
+          <div id="earn-rows-week" class="bucket-panel"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SECTION 3 — Stock Splits ══════════════════════════════════════ -->
+    <div class="section">
+      <div class="section-title">
+        📢 Stock Splits
+        <span class="badge badge-gray" id="split-count-badge" style="font-size:10px;">Loading…</span>
+        <div class="section-line"></div>
+        <button class="btn" onclick="window.open('https://stockanalysis.com/actions/splits/','_blank')" style="font-size:11px;padding:4px 10px;">StockAnalysis →</button>
+      </div>
+      <div class="card" id="split-card">
+        <div class="intel-loading" id="split-loading">
+          <div class="loading-spinner"></div> Checking split calendar…
+        </div>
+        <div id="split-body" style="display:none;">
+          <div class="split-row split-row-header">
+            <span>Ticker</span><span>Ratio</span><span>Type</span><span>Effective</span><span>Status</span><span>Alert</span>
+          </div>
+          <div id="split-rows"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SECTION 4 — Economic Calendar ════════════════════════════════ -->
+    <div class="section">
+      <div class="section-title">
+        ⚠ Economic Calendar
+        <span class="badge badge-gray" id="econ-count-badge" style="font-size:10px;">Loading…</span>
+        <div class="section-line"></div>
+        <button class="btn" onclick="window.open('https://www.investing.com/economic-calendar/','_blank')" style="font-size:11px;padding:4px 10px;">Full Calendar →</button>
+      </div>
+      <div class="card" id="econ-card">
+        <div class="intel-loading" id="econ-loading">
+          <div class="loading-spinner"></div> Loading economic events…
+        </div>
+        <div id="econ-body" style="display:none;">
+          <div class="econ-row econ-row-header">
+            <span>Event &amp; Trading Note</span><span>Date / Time ET</span><span>Impact</span>
+          </div>
+          <div id="econ-rows"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Today's Earnings on Watchlist (legacy — kept for backwards compat) -->
+    <div class="section" style="display:none;">
       <div class="section-title">
         Earnings today
         <span id="earnings-today-count" class="badge badge-amber" style="font-size:10px;">Checking…</span>
@@ -594,13 +910,7 @@
           <div class="earnings-row earnings-header">
             <span>Ticker</span><span>Company</span><span>Time</span><span>Est. EPS</span><span class="col-hide">Prev EPS</span><span>Beat Hist</span>
           </div>
-          <div id="earnings-today-body">
-            <div class="earnings-row">
-              <span class="earnings-ticker" style="color:var(--text-muted)">—</span>
-              <span class="earnings-company">No earnings on your watchlist today</span>
-              <span></span><span></span><span class="col-hide"></span><span></span>
-            </div>
-          </div>
+          <div id="earnings-today-body"></div>
         </div>
       </div>
     </div>
@@ -1166,6 +1476,293 @@ function refreshAll() {
   loadEarningsData();
 }
 
+// ════════════════════════════════════════════════════════
+// INTEL ENGINE — Phase 1
+// ════════════════════════════════════════════════════════
+
+// ── State ──────────────────────────────────────────────
+var _intelData        = null;
+var _newsFilter       = 'ALL';
+var _earnTab          = 'today';
+var _intelLoading     = false;
+
+// ── Load intel from /api/intel ─────────────────────────
+function loadIntelData(forceRefresh) {
+  if (_intelLoading) return;
+  _intelLoading = true;
+
+  var url = '/api/intel' + (forceRefresh ? '?refresh=1' : '');
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      _intelData = data;
+      _intelLoading = false;
+      renderNews(data.market_news   || []);
+      renderEarnings(data.earnings  || {});
+      renderSplits(data.splits      || []);
+      renderEcon(data.economic_events || []);
+    })
+    .catch(function(e) {
+      _intelLoading = false;
+      console.warn('intel: fetch failed', e);
+      _showIntelError('news-loading',  'news-body');
+      _showIntelError('earn-loading',  'earn-body');
+      _showIntelError('split-loading', 'split-body');
+      _showIntelError('econ-loading',  'econ-body');
+    });
+}
+
+function _showIntelError(loadId, bodyId) {
+  var el = document.getElementById(loadId);
+  if (el) el.innerHTML = '⚠ Could not load data — check server logs.';
+}
+
+function refreshIntel() {
+  showToast('Refreshing intel data…');
+  // Reset loading state
+  ['news','earn','split','econ'].forEach(function(k) {
+    var l = document.getElementById(k + '-loading');
+    var b = document.getElementById(k + '-body');
+    if (l) { l.style.display = 'flex'; l.innerHTML = '<div class="loading-spinner"></div> Refreshing…'; }
+    if (b) b.style.display = 'none';
+  });
+  _intelData = null;
+  loadIntelData(true);
+}
+
+// ── NEWS RENDERER ──────────────────────────────────────
+function renderNews(items) {
+  var loading = document.getElementById('news-loading');
+  var body    = document.getElementById('news-body');
+  var rows    = document.getElementById('news-rows');
+  var badge   = document.getElementById('news-count-badge');
+
+  if (loading) loading.style.display = 'none';
+  if (body)    body.style.display    = 'block';
+
+  var counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0 };
+  items.forEach(function(i) { if (counts[i.impact] !== undefined) counts[i.impact]++; });
+
+  var total = items.length;
+  badge.textContent = total + ' item' + (total !== 1 ? 's' : '');
+  badge.className   = 'badge ' + (counts.CRITICAL > 0 ? 'badge-red' : counts.HIGH > 0 ? 'badge-amber' : 'badge-gray');
+
+  // Update filter counts
+  document.getElementById('nf-critical').textContent = 'CRITICAL (' + counts.CRITICAL + ')';
+  document.getElementById('nf-high').textContent     = 'HIGH ('     + counts.HIGH     + ')';
+  document.getElementById('nf-medium').textContent   = 'MEDIUM ('   + counts.MEDIUM   + ')';
+
+  _renderNewsRows(items);
+}
+
+function _renderNewsRows(items) {
+  var rows    = document.getElementById('news-rows');
+  var filter  = _newsFilter;
+  var visible = items.filter(function(i) {
+    if (filter === 'ALL')       return true;
+    if (filter === 'WATCHLIST') return i.on_watchlist;
+    return i.impact === filter;
+  });
+
+  if (!visible.length) {
+    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No ' +
+      (filter === 'ALL' ? '' : filter.toLowerCase() + ' ') + 'news items found for your universe.</div>';
+    return;
+  }
+
+  rows.innerHTML = visible.map(function(item) {
+    var impCls = 'impact-' + item.impact.toLowerCase();
+    var star   = item.on_watchlist ? '<span class="news-wl-star" title="On your watchlist">⭐</span>' : '';
+    return (
+      '<div class="news-row">' +
+        '<span><span class="impact-badge ' + impCls + '">' + item.impact + '</span></span>' +
+        '<span class="news-ticker">' + _esc(item.ticker) + star + '<div class="news-time">' + _esc(item.time) + '</div></span>' +
+        '<span><div class="news-headline">' + _esc(item.headline) + '</div>' +
+              '<div class="news-reason">' + _esc(item.reason) + '</div></span>' +
+        '<span><div class="news-source">' + _esc(item.source || '—') + '</div></span>' +
+      '</div>'
+    );
+  }).join('');
+}
+
+function newsFilter(level, btn) {
+  _newsFilter = level;
+  document.querySelectorAll('#news-filter-row .filter-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  if (_intelData) _renderNewsRows(_intelData.market_news || []);
+}
+
+// ── EARNINGS RENDERER ──────────────────────────────────
+function renderEarnings(buckets) {
+  var loading = document.getElementById('earn-loading');
+  var body    = document.getElementById('earn-body');
+  var badge   = document.getElementById('earn-count-badge');
+
+  if (loading) loading.style.display = 'none';
+  if (body)    body.style.display    = 'block';
+
+  var today    = (buckets.today    || []);
+  var tomorrow = (buckets.tomorrow || []);
+  var week     = (buckets.this_week|| []);
+  var total    = today.length + tomorrow.length + week.length;
+
+  badge.textContent = total + ' this week';
+  badge.className   = 'badge ' + (today.length > 0 ? 'badge-red' : total > 0 ? 'badge-amber' : 'badge-gray');
+
+  // Tab counts
+  function setCount(id, n) {
+    var el = document.getElementById(id);
+    if (el) { el.textContent = n; el.className = 'tab-count' + (n > 0 ? ' has-data' : ''); }
+  }
+  setCount('etc-today',    today.length);
+  setCount('etc-tomorrow', tomorrow.length);
+  setCount('etc-week',     week.length);
+
+  _renderEarnRows('earn-rows-today',    today);
+  _renderEarnRows('earn-rows-tomorrow', tomorrow);
+  _renderEarnRows('earn-rows-week',     week);
+
+  // Danger banner for earnings today on watchlist
+  var wlToday = today.filter(function(i) { return i.on_watchlist; });
+  if (wlToday.length > 0) {
+    var banner = document.getElementById('danger-day-banner');
+    if (banner && banner.style.display === 'none') {
+      // Only show if econ hasn't already set it; earnings gets its own note
+    }
+  }
+}
+
+function _renderEarnRows(elId, items) {
+  var el = document.getElementById(elId);
+  if (!el) return;
+  if (!items.length) {
+    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No earnings in this period for your universe.</div>';
+    return;
+  }
+  el.innerHTML = items.map(function(item) {
+    var wlBadge   = item.on_watchlist ? '<span class="earn-on-wl">WL</span>' : '<span style="color:var(--text-muted);font-size:11px;">—</span>';
+    var warnBadge = (item.days_away <= 1 && item.on_watchlist)
+      ? '<span class="earn-warn">RISK</span>'
+      : (item.days_away <= 2 ? '<span style="color:var(--text-muted);font-size:10px;">Watch</span>' : '—');
+    var tickerColor = item.on_watchlist ? 'color:var(--amber)' : '';
+    return (
+      '<div class="earn-row">' +
+        '<span class="earn-ticker" style="' + tickerColor + '">' + _esc(item.ticker) + '</span>' +
+        '<span><div style="font-size:12px;color:var(--text-primary);">' + _esc(item.date_label) + '</div>' +
+              '<div style="font-size:10px;color:var(--text-muted);">' + _esc(item.date) + '</div></span>' +
+        '<span style="font-size:11px;color:var(--text-secondary);">' + _esc(item.time_label) + '</span>' +
+        '<span>' + wlBadge + '</span>' +
+        '<span>' + warnBadge + '</span>' +
+      '</div>'
+    );
+  }).join('');
+}
+
+function earnTab(tab, btn) {
+  _earnTab = tab;
+  document.querySelectorAll('.bucket-tab').forEach(function(b) { b.classList.remove('active'); });
+  document.querySelectorAll('.bucket-panel').forEach(function(p) { p.classList.remove('active'); });
+  btn.classList.add('active');
+  var panelId = 'earn-rows-' + tab;
+  var panel   = document.getElementById(panelId);
+  if (panel) panel.classList.add('active');
+}
+
+// ── SPLITS RENDERER ────────────────────────────────────
+function renderSplits(items) {
+  var loading = document.getElementById('split-loading');
+  var body    = document.getElementById('split-body');
+  var badge   = document.getElementById('split-count-badge');
+  var rows    = document.getElementById('split-rows');
+
+  if (loading) loading.style.display = 'none';
+  if (body)    body.style.display    = 'block';
+
+  badge.textContent = items.length ? items.length + ' found' : 'None detected';
+  badge.className   = 'badge ' + (items.length ? 'badge-amber' : 'badge-gray');
+
+  if (!items.length) {
+    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No upcoming splits detected for your watchlist or scanner universe.</div>';
+    return;
+  }
+
+  rows.innerHTML = items.map(function(item) {
+    var statusCls = item.is_new
+      ? 'split-new'
+      : (item.days_away <= 14 ? 'split-soon' : 'split-upcoming');
+    var alertBadge = item.is_new
+      ? '<span class="impact-badge impact-high">NEW!</span>'
+      : '—';
+    var typeCls = item.type === 'Forward' ? 'pos' : 'neg';
+    return (
+      '<div class="split-row">' +
+        '<span style="font-family:var(--font);font-size:13px;font-weight:700;">' + _esc(item.ticker) + '</span>' +
+        '<span style="font-family:var(--font);font-size:12px;font-weight:600;">' + _esc(item.ratio) + '</span>' +
+        '<span class="' + typeCls + '" style="font-size:12px;">' + _esc(item.type) + '</span>' +
+        '<span style="font-size:11px;font-family:var(--font);color:var(--text-secondary);">' + _esc(item.eff_date) + '</span>' +
+        '<span><span class="' + statusCls + '">' + _esc(item.status) + '</span></span>' +
+        '<span>' + alertBadge + '</span>' +
+      '</div>'
+    );
+  }).join('');
+}
+
+// ── ECON RENDERER ──────────────────────────────────────
+function renderEcon(events) {
+  var loading = document.getElementById('econ-loading');
+  var body    = document.getElementById('econ-body');
+  var badge   = document.getElementById('econ-count-badge');
+  var rows    = document.getElementById('econ-rows');
+
+  if (loading) loading.style.display = 'none';
+  if (body)    body.style.display    = 'block';
+
+  var todayHigh = events.filter(function(e) { return e.is_today && e.impact === 'HIGH'; });
+  badge.textContent = events.length + ' in 14 days';
+  badge.className   = 'badge ' + (todayHigh.length > 0 ? 'badge-red' : events.length ? 'badge-amber' : 'badge-gray');
+
+  // Show danger banner if HIGH event today
+  if (todayHigh.length > 0) {
+    var banner = document.getElementById('danger-day-banner');
+    var sub    = document.getElementById('danger-day-sub');
+    if (banner) banner.style.display = 'flex';
+    if (sub)    sub.textContent = todayHigh.map(function(e) {
+      return e.event + ' · ' + e.time;
+    }).join(' | ');
+  }
+
+  if (!events.length) {
+    rows.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No high-impact events in the next 14 days. ' +
+      (document.cookie.indexOf('FINNHUB_API_KEY') === -1 ? 'Add FINNHUB_API_KEY for live calendar.' : '') + '</div>';
+    return;
+  }
+
+  rows.innerHTML = events.map(function(evt) {
+    var impCls  = 'impact-' + evt.impact.toLowerCase();
+    var rowCls  = evt.is_today ? 'econ-row is-today' : 'econ-row';
+    var todayLbl = evt.is_today ? ' <span class="impact-badge impact-critical" style="margin-left:4px;">TODAY</span>' : '';
+    return (
+      '<div class="' + rowCls + '">' +
+        '<span><div class="econ-name">' + _esc(evt.event) + todayLbl + '</div>' +
+              '<div class="econ-reason">' + _esc(evt.reason) + '</div></span>' +
+        '<span><div class="econ-date">' + _esc(evt.date_label) + '</div>' +
+              '<div class="econ-time">' + _esc(evt.time) + '</div></span>' +
+        '<span><span class="impact-badge ' + impCls + '">' + _esc(evt.impact) + '</span></span>' +
+      '</div>'
+    );
+  }).join('');
+}
+
+// ── Utility ────────────────────────────────────────────
+function _esc(s) {
+  if (s == null) return '—';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // ── Init ───────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadChecklistState('daily');
@@ -1176,9 +1773,13 @@ document.addEventListener('DOMContentLoaded', () => {
   updateWeeklyProgress();
   refreshMarketData();
   loadEarningsData();
+  // Load Phase 1 intel sections
+  loadIntelData(false);
   // Auto-refresh every 90 seconds
   setInterval(refreshMarketData, 90000);
   setInterval(loadEarningsData, 120000);
+  // Intel refreshes every 15 minutes (cache-aligned)
+  setInterval(function() { loadIntelData(false); }, 900000);
 });
 </script>
 </body>

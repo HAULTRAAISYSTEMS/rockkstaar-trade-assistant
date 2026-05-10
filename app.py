@@ -45,6 +45,7 @@ from scoring import catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SW
 from classifier import classify_stock
 from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as _clear_alerts
 import scanner as _scanner
+import intel_engine as _intel
 
 app = Flask(__name__)
 
@@ -139,6 +140,21 @@ except Exception as _init_err:
 
 # Start the background momentum scanner daemon (no-op if already running).
 _scanner.start_scanner()
+
+# Start the background intel alert daemon — checks every 30 min during market hours.
+def _intel_alert_loop():
+    import time as _t
+    while True:
+        try:
+            now = _intel._et_now()
+            # Run during extended market hours (7 AM – 6 PM ET, weekdays)
+            if now.weekday() < 5 and 7 <= now.hour < 18:
+                _intel.check_and_send_intel_alerts()
+        except Exception as _ie:
+            logger.warning("intel alert loop error: %s", _ie)
+        _t.sleep(1800)  # every 30 minutes
+
+threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
 
 # ---------------------------------------------------------------------------
 # Startup migration: wipe stale mock-seeded prices from the DB.
@@ -4176,6 +4192,22 @@ def api_schwab_summary():
         "error":            data.get("error"),
     })
 
+
+
+@app.route("/api/intel")
+def api_intel():
+    """Debug/test endpoint — returns all intel feeds as JSON.
+    Accepts ?refresh=1 to bypass the cache (forces a fresh fetch).
+    """
+    if request.args.get("refresh") == "1":
+        _intel.clear_intel_cache()
+    try:
+        data = _intel.get_intel_summary()
+        return jsonify(data)
+    except Exception as e:
+        logger.error("api_intel error: %s", e)
+        return jsonify({"error": str(e), "market_news": [], "earnings": {},
+                        "splits": [], "economic_events": []}), 500
 
 
 @app.route("/intel")
