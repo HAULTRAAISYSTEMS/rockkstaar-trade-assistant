@@ -159,19 +159,25 @@ def trigger_background_refresh() -> None:
     def _run() -> None:
         global _bg_refreshing
         try:
-            logger.info("intel bg-refresh: started")
-            for fn, name in [
-                (fetch_economic_calendar, "econ"),
-                (fetch_stock_splits,      "splits"),
-                (fetch_earnings_calendar, "earnings"),
-                (fetch_dividends,         "dividends"),
-                (fetch_market_news,       "news"),
-            ]:
+            logger.info("intel bg-refresh: started (parallel)")
+
+            def _call(fn, name):
                 try:
                     fn()
                     logger.info("intel bg-refresh: %s complete", name)
                 except Exception as exc:
                     logger.warning("intel bg-refresh/%s: %s", name, exc)
+
+            tasks = [
+                (fetch_economic_calendar, "econ"),
+                (fetch_stock_splits,      "splits"),
+                (fetch_earnings_calendar, "earnings"),
+                (fetch_dividends,         "dividends"),
+                (fetch_market_news,       "news"),
+            ]
+            with ThreadPoolExecutor(max_workers=5) as bg_ex:
+                for fn, nm in tasks:
+                    bg_ex.submit(_call, fn, nm)
             logger.info("intel bg-refresh: all complete")
         except Exception as exc:
             logger.warning("intel bg-refresh outer: %s", exc)
@@ -583,39 +589,76 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             return None
         try:
             import yfinance as yf
-            cal = yf.Ticker(ticker).calendar
-            if cal is None:
+            tk = yf.Ticker(ticker)
+            earn_date = None
+            eps_est   = None
+            rev_est   = None
+
+            # ── Try .calendar (yfinance < 0.2.40, returns DataFrame or dict) ──
+            try:
+                cal = tk.calendar
+                if cal is not None:
+                    # DataFrame: index=field names, columns=consecutive dates
+                    if hasattr(cal, "iloc"):
+                        try:
+                            cal = cal.iloc[:, 0].to_dict()
+                        except Exception:
+                            try:
+                                cal = {k: (v[0] if isinstance(v, list) and v else v)
+                                       for k, v in cal.to_dict(orient="list").items()}
+                            except Exception:
+                                cal = {}
+                    if isinstance(cal, dict) and cal:
+                        ed = (cal.get("Earnings Date") or cal.get("earningsDate")
+                              or cal.get("Earnings Dates") or cal.get("earningsDates"))
+                        if isinstance(ed, (list, tuple)):
+                            ed = ed[0] if ed else None
+                        if ed is not None:
+                            try:
+                                earn_date = ed.date() if hasattr(ed, "date") else \
+                                            datetime.strptime(str(ed)[:10], "%Y-%m-%d").date()
+                            except Exception:
+                                pass
+                        if earn_date is not None:
+                            try:
+                                ea = (cal.get("EPS Estimate") or cal.get("epsEstimate")
+                                      or cal.get("Earnings Average") or cal.get("earningsAverage"))
+                                if ea is not None:
+                                    eps_est = round(float(ea), 2)
+                            except Exception:
+                                pass
+                            try:
+                                ra = (cal.get("Revenue Estimate") or cal.get("revenueEstimate")
+                                      or cal.get("Revenue Average") or cal.get("revenueAverage"))
+                                if ra is not None:
+                                    rev_est = int(ra)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+            # ── Fallback: .earnings_dates (yfinance 0.2.40+) ─────────────────
+            if earn_date is None:
+                try:
+                    ed_df = tk.earnings_dates
+                    if ed_df is not None and len(ed_df) > 0:
+                        for idx in ed_df.index:
+                            try:
+                                d = idx.date() if hasattr(idx, "date") else \
+                                    datetime.strptime(str(idx)[:10], "%Y-%m-%d").date()
+                                if d >= today:
+                                    earn_date = d
+                                    break
+                            except Exception:
+                                continue
+                except Exception:
+                    pass
+
+            if earn_date is None:
                 return None
-            if hasattr(cal, "to_dict"):
-                cal = cal.iloc[:, 0].to_dict() if hasattr(cal, "iloc") else cal.to_dict()
-            if not cal:
-                return None
-            ed = cal.get("Earnings Date") or cal.get("earningsDate")
-            if ed is None:
-                return None
-            if isinstance(ed, (list, tuple)):
-                ed = ed[0] if ed else None
-            if ed is None:
-                return None
-            earn_date = ed.date() if hasattr(ed, "date") else \
-                        datetime.strptime(str(ed)[:10], "%Y-%m-%d").date()
             days_away = (earn_date - today).days
             if days_away < 0 or days_away > 7:
                 return None
-            eps_est = None
-            rev_est = None
-            try:
-                ea = cal.get("Earnings Average") or cal.get("earningsAverage")
-                if ea is not None:
-                    eps_est = round(float(ea), 2)
-            except Exception:
-                pass
-            try:
-                ra = cal.get("Revenue Average") or cal.get("revenueAverage")
-                if ra is not None:
-                    rev_est = int(ra)
-            except Exception:
-                pass
             return {
                 "ticker":       ticker,
                 "company_name": _company_name(ticker),
@@ -685,6 +728,47 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
         meta["finnhub_found"],      meta["tickers_checked"],
     )
     return result
+
+
+def _apply_overrides_to_buckets(buckets: dict, today: date, wl_set: set) -> None:
+    """Inject EARNINGS_OVERRIDES into buckets at query time.
+
+    Called from get_intel_summary() so overrides always appear regardless of
+    whether the cache was warm before the override was added, or the date math
+    in the background refresh ran on a different calendar day.
+    Skips any ticker already present in a bucket (avoids duplicates).
+    """
+    existing = {item["ticker"] for bucket in buckets.values() for item in bucket}
+    for ov in EARNINGS_OVERRIDES:
+        ticker = ov["ticker"].upper()
+        if ticker in existing:
+            continue
+        try:
+            ov_date   = datetime.strptime(ov["date"][:10], "%Y-%m-%d").date()
+            days_away = (ov_date - today).days
+            if days_away < 0 or days_away > 7:
+                continue
+            item = {
+                "ticker":       ticker,
+                "company_name": _company_name(ticker),
+                "date":         ov_date.isoformat(),
+                "date_label":   _date_label(ov_date, today),
+                "time_label":   ov.get("time_label", "TBD"),
+                "on_watchlist": ticker in wl_set,
+                "days_away":    days_away,
+                "eps_est":      ov.get("eps_est"),
+                "rev_est":      ov.get("rev_est"),
+                "source":       ov.get("source", "manual override"),
+                "is_override":  True,
+            }
+            if days_away == 0:
+                buckets["today"].insert(0, item)
+            elif days_away == 1:
+                buckets["tomorrow"].insert(0, item)
+            elif 2 <= days_away <= 7:
+                buckets["this_week"].insert(0, item)
+        except Exception:
+            pass
 
 
 # ── Stock Split Tracker ───────────────────────────────────────────────────────
@@ -1287,11 +1371,17 @@ def get_intel_summary() -> dict:
     # Extract earnings buckets and debug meta separately
     _earn       = c_earn or {}
     earn_buckets = {
-        "today":     _earn.get("today",     []),
-        "tomorrow":  _earn.get("tomorrow",  []),
-        "this_week": _earn.get("this_week", []),
+        "today":     list(_earn.get("today",     [])),
+        "tomorrow":  list(_earn.get("tomorrow",  [])),
+        "this_week": list(_earn.get("this_week", [])),
     }
     earn_meta = _earn.get("meta", {})
+
+    # Always re-inject overrides so they appear even with stale/empty cache.
+    # Must use fresh today + wl_set (not the cached values from fetch time).
+    today  = _today_et()
+    wl_set = set(_get_watchlist_tickers())
+    _apply_overrides_to_buckets(earn_buckets, today, wl_set)
 
     return {
         "ok":              not is_cold,
@@ -1303,10 +1393,11 @@ def get_intel_summary() -> dict:
         "dividends":       c_div   or [],
         "economic_events": c_econ  or [],
         "earnings_debug": {
+            "server_date":          today.isoformat(),
             "tickers_checked":      earn_meta.get("tickers_checked", 0),
             "earnings_source_used": earn_meta.get("earnings_source_used", "—"),
             "earnings_errors":      earn_meta.get("earnings_errors", []),
-            "earnings_count":       earn_meta.get("earnings_count", 0),
+            "earnings_count":       sum(len(v) for v in earn_buckets.values()),
             "overrides_injected":   earn_meta.get("overrides_injected", 0),
             "yfinance_found":       earn_meta.get("yfinance_found", 0),
             "finnhub_found":        earn_meta.get("finnhub_found", 0),

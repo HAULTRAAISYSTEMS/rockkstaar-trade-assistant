@@ -788,6 +788,8 @@
           <td id="d-render-err" class="dbg-wait">—</td></tr>
       <tr><td class="dbg-key">news count</td>
           <td id="d-news" class="dbg-wait">—</td></tr>
+      <tr><td class="dbg-key">server date (ET)</td>
+          <td id="d-server-date" class="dbg-wait">—</td></tr>
       <tr><td class="dbg-key">earnings count (today/tomorrow/week)</td>
           <td id="d-earn" class="dbg-wait">—</td></tr>
       <tr><td class="dbg-key">earnings source / tickers checked</td>
@@ -1743,6 +1745,7 @@ function loadIntelData(forceRefresh) {
         _dbgSet('d-news',   String(newsArr.length),  newsArr.length ? 'dbg-yes' : 'dbg-wait');
         _dbgSet('d-earn',   'today=' + (earn.today||[]).length + '  tomorrow=' + (earn.tomorrow||[]).length + '  week=' + (earn.this_week||[]).length, nEarn ? 'dbg-yes' : 'dbg-wait');
         var _ed = data.earnings_debug || {};
+        _dbgSet('d-server-date', (_ed.server_date || '—'), _ed.server_date ? 'dbg-yes' : 'dbg-wait');
         _dbgSet('d-earn-src', (_ed.earnings_source_used || '—') + '  · checked=' + (_ed.tickers_checked || 0) + '  yf=' + (_ed.yfinance_found || 0) + '  fh=' + (_ed.finnhub_found || 0), _ed.tickers_checked ? 'dbg-yes' : 'dbg-wait');
         _dbgSet('d-earn-ov',  String(_ed.overrides_injected || 0) + (_ed.overrides_injected ? ' override(s) forced into results' : ' (none — add to EARNINGS_OVERRIDES in intel_engine.py)'), _ed.overrides_injected ? 'dbg-yes' : 'dbg-wait');
         _dbgSet('d-splits', String(splits.length),    splits.length    ? 'dbg-yes' : 'dbg-wait');
@@ -1784,7 +1787,7 @@ function loadIntelData(forceRefresh) {
       }
 
       // Auto-retry while backend cache is still warming (up to 4 times, 10s apart)
-      if (data.refreshing && _intelRetries < 4) {
+      if (data.refreshing && _intelRetries < 8) {
         _intelRetries++;
         console.log('[intel] backend warming — retry #' + _intelRetries + ' in 10s');
         _intelRetryTimer = setTimeout(function() { loadIntelData(false); }, 10000);
