@@ -752,6 +752,10 @@
           <td id="d-news" class="dbg-wait">—</td></tr>
       <tr><td class="dbg-key">earnings count (today/tomorrow/week)</td>
           <td id="d-earn" class="dbg-wait">—</td></tr>
+      <tr><td class="dbg-key">earnings source / tickers checked</td>
+          <td id="d-earn-src" class="dbg-wait">—</td></tr>
+      <tr><td class="dbg-key">earnings overrides injected</td>
+          <td id="d-earn-ov" class="dbg-wait">—</td></tr>
       <tr><td class="dbg-key">splits count</td>
           <td id="d-splits" class="dbg-wait">—</td></tr>
       <tr><td class="dbg-key">economic_events count</td>
@@ -1651,6 +1655,17 @@ function loadIntelData(forceRefresh) {
         + '  splits=' + splits.length + '  econ=' + econ.length
         + '  refreshing=' + data.refreshing
         + '  updated=' + data.last_updated);
+      if (data.earnings_debug) {
+        var ed = data.earnings_debug;
+        console.log('[intel] earnings_debug: tickers=' + ed.tickers_checked
+          + '  source=' + ed.earnings_source_used
+          + '  found=' + ed.earnings_count
+          + '  overrides=' + ed.overrides_injected
+          + '  yf=' + ed.yfinance_found + '  fh=' + ed.finnhub_found);
+        if (ed.earnings_errors && ed.earnings_errors.length) {
+          console.warn('[intel] earnings errors:', ed.earnings_errors);
+        }
+      }
       if (data.errors && data.errors.length) {
         console.warn('[intel] server errors:', data.errors);
       }
@@ -1659,6 +1674,9 @@ function loadIntelData(forceRefresh) {
         _dbgSet('d-fetch-done', 'YES — ok=' + data.ok, 'dbg-yes');
         _dbgSet('d-news',   String(newsArr.length),  newsArr.length ? 'dbg-yes' : 'dbg-wait');
         _dbgSet('d-earn',   'today=' + (earn.today||[]).length + '  tomorrow=' + (earn.tomorrow||[]).length + '  week=' + (earn.this_week||[]).length, nEarn ? 'dbg-yes' : 'dbg-wait');
+        var _ed = data.earnings_debug || {};
+        _dbgSet('d-earn-src', (_ed.earnings_source_used || '—') + '  · checked=' + (_ed.tickers_checked || 0) + '  yf=' + (_ed.yfinance_found || 0) + '  fh=' + (_ed.finnhub_found || 0), _ed.tickers_checked ? 'dbg-yes' : 'dbg-wait');
+        _dbgSet('d-earn-ov',  String(_ed.overrides_injected || 0) + (_ed.overrides_injected ? ' override(s) forced into results' : ' (none — add to EARNINGS_OVERRIDES in intel_engine.py)'), _ed.overrides_injected ? 'dbg-yes' : 'dbg-wait');
         _dbgSet('d-splits', String(splits.length),   splits.length ? 'dbg-yes' : 'dbg-wait');
         _dbgSet('d-econ',   String(econ.length),      econ.length ? 'dbg-yes' : 'dbg-wait');
         _dbgSet('d-error',  data.errors && data.errors.length ? data.errors.join(' | ') : 'none', data.errors && data.errors.length ? 'dbg-no' : 'dbg-yes');
@@ -1928,13 +1946,19 @@ function _renderEarnRows(elId, items) {
     var warnBadge = (item.days_away <= 1 && item.on_watchlist)
       ? '<span class="earn-warn">RISK</span>'
       : (item.days_away <= 2 ? '<span style="color:var(--text-muted);font-size:10px;">Watch</span>' : '—');
-    var tickerColor = item.on_watchlist ? 'color:var(--amber)' : '';
+    var tickerColor = item.on_watchlist ? 'color:var(--amber)' : item.is_override ? 'color:var(--blue)' : '';
+    var ovBadge = item.is_override
+      ? '<span style="font-size:9px;background:rgba(96,165,250,0.12);color:#93c5fd;border:1px solid rgba(96,165,250,0.3);border-radius:3px;padding:1px 5px;margin-left:4px;vertical-align:middle;">MANUAL</span>'
+      : '';
+    var timeLbl = _esc(item.time_label || 'TBD');
+    if (item.time_label === 'BMO') timeLbl = '<span style="color:var(--green)">BMO</span>';
+    if (item.time_label === 'AMC') timeLbl = '<span style="color:var(--red)">AMC</span>';
     return (
       '<div class="earn-row">' +
-        '<span class="earn-ticker" style="' + tickerColor + '">' + _esc(item.ticker) + '</span>' +
+        '<span class="earn-ticker" style="' + tickerColor + '">' + _esc(item.ticker) + ovBadge + '</span>' +
         '<span><div style="font-size:12px;color:var(--text-primary);">' + _esc(item.date_label) + '</div>' +
               '<div style="font-size:10px;color:var(--text-muted);">' + _esc(item.date) + '</div></span>' +
-        '<span style="font-size:11px;color:var(--text-secondary);">' + _esc(item.time_label) + '</span>' +
+        '<span style="font-size:11px;">' + timeLbl + '</span>' +
         '<span>' + wlBadge + '</span>' +
         '<span>' + warnBadge + '</span>' +
       '</div>'

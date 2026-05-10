@@ -287,6 +287,27 @@ SCANNER_UNIVERSE: list[str] = [
     "NVDA", "AMD", "TSLA", "AAPL", "META", "GOOGL", "AMZN", "MSFT",
     "PLTR", "SOFI", "IONQ", "RGTI", "QUBT", "JOBY", "ACHR", "RKLB",
     "LUNR", "OKLO", "SMR", "NNE",
+    # Utilities / energy / power names — frequent earnings movers
+    "CEG", "VST", "NRG", "GEV", "FSLR", "NEE", "SO",
+    # Large-cap earnings movers
+    "JPM", "BAC", "GS", "V", "MA", "HD", "WMT", "COST",
+    "XOM", "CVX", "OXY", "LMT", "RTX",
+]
+
+# ── Manual earnings overrides ──────────────────────────────────────────────────
+# Add entries here when APIs miss a known earnings date.
+# These inject directly into the result regardless of what yfinance/Finnhub return.
+# Format: ticker, date (YYYY-MM-DD), time_label (BMO/AMC/TBD), eps_est (float or None), source
+EARNINGS_OVERRIDES: list[dict] = [
+    {
+        "ticker":     "CEG",
+        "date":       "2026-05-11",
+        "time_label": "BMO",
+        "eps_est":    None,
+        "source":     "manual override",
+    },
+    # Add more here as needed:
+    # {"ticker": "XXXX", "date": "2026-MM-DD", "time_label": "BMO", "eps_est": None, "source": "manual override"},
 ]
 
 
@@ -301,11 +322,20 @@ def _get_watchlist_tickers() -> list[str]:
 
 
 def _merged_universe(extra: Optional[list[str]] = None) -> list[str]:
+    """Universe for news fetching — capped tighter due to parallel API calls."""
     wl = _get_watchlist_tickers()
     base = list(dict.fromkeys(wl + SCANNER_UNIVERSE))
     if extra:
         base = list(dict.fromkeys(base + extra))
     return base[:30]   # hard cap to protect rate limits
+
+
+def _earnings_universe() -> list[str]:
+    """Universe for earnings checks — larger cap, always includes override tickers."""
+    wl = _get_watchlist_tickers()
+    override_tickers = [ov["ticker"].upper() for ov in EARNINGS_OVERRIDES]
+    base = list(dict.fromkeys(wl + override_tickers + SCANNER_UNIVERSE))
+    return base[:60]   # earnings calendar calls are lighter than news fetches
 
 
 # ── Market News ───────────────────────────────────────────────────────────────
@@ -380,29 +410,134 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
 
 # ── Earnings Calendar ─────────────────────────────────────────────────────────
 
+def _earnings_from_finnhub(
+    tickers: list[str],
+    api_key: str,
+    today: date,
+    already_found: set,
+) -> tuple[list[dict], list[str]]:
+    """Finnhub /calendar/earnings fallback for tickers yfinance missed.
+    Returns (results, errors).
+    """
+    import urllib.request
+    from_d   = today.isoformat()
+    to_d     = (today + timedelta(days=7)).isoformat()
+    results: list[dict] = []
+    errors:  list[str]  = []
+
+    for ticker in tickers:
+        if ticker in already_found:
+            continue
+        try:
+            url = (
+                f"https://finnhub.io/api/v1/calendar/earnings"
+                f"?from={from_d}&to={to_d}&symbol={ticker}&token={api_key}"
+            )
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+            items = data.get("earningsCalendar", [])
+            if not items:
+                continue
+            e         = items[0]
+            date_str  = (e.get("date") or "")[:10]
+            if not date_str:
+                continue
+            earn_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            days_away = (earn_date - today).days
+            if days_away < 0 or days_away > 7:
+                continue
+            hour       = (e.get("hour") or "").lower()
+            time_label = "BMO" if hour == "bmo" else "AMC" if hour == "amc" else "TBD"
+            results.append({
+                "ticker":      ticker,
+                "date":        earn_date.isoformat(),
+                "days_away":   days_away,
+                "time_label":  time_label,
+                "source":      "finnhub",
+                "is_override": False,
+            })
+        except Exception as exc:
+            errors.append(f"finnhub/{ticker}: {exc}")
+
+    return results, errors
+
+
 def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
     """
-    Returns {'today': [...], 'tomorrow': [...], 'this_week': [...]}.
-    Each item: {ticker, date, date_label, time_label, on_watchlist, days_away}.
+    Returns earnings buckets + debug metadata.
+    Shape: {today, tomorrow, this_week, meta}.
+    Each item: {ticker, date, date_label, time_label, on_watchlist, days_away,
+                source, is_override}.
+
+    Priority:
+      1. EARNINGS_OVERRIDES  — manual entries, always injected
+      2. yfinance calendar   — primary API
+      3. Finnhub earnings    — fallback for tickers yfinance missed
+
     Cached for 6 hours.
     """
     cached = _cget("earnings")
     if cached is not None:
         return cached
 
-    all_tickers = tickers if tickers is not None else _merged_universe()
+    all_tickers = tickers if tickers is not None else _earnings_universe()
     wl_set      = set(_get_watchlist_tickers())
     today       = _today_et()
 
     buckets: dict[str, list] = {"today": [], "tomorrow": [], "this_week": []}
+    meta: dict = {
+        "tickers_checked":      len(all_tickers),
+        "overrides_injected":   0,
+        "yfinance_found":       0,
+        "finnhub_found":        0,
+        "earnings_errors":      [],
+        "earnings_source_used": "overrides+yfinance",
+    }
+
+    def _bucket_item(item: dict) -> None:
+        d = item["days_away"]
+        if d == 0:
+            buckets["today"].append(item)
+        elif d == 1:
+            buckets["tomorrow"].append(item)
+        elif 2 <= d <= 7:
+            buckets["this_week"].append(item)
+
+    # ── 1. Manual overrides (always first) ──────────────────────────────────
+    already_added: set[str] = set()
+    for ov in EARNINGS_OVERRIDES:
+        try:
+            ov_date   = datetime.strptime(ov["date"][:10], "%Y-%m-%d").date()
+            days_away = (ov_date - today).days
+            if days_away < 0 or days_away > 7:
+                continue
+            _bucket_item({
+                "ticker":       ov["ticker"].upper(),
+                "date":         ov_date.isoformat(),
+                "date_label":   _date_label(ov_date, today),
+                "time_label":   ov.get("time_label", "TBD"),
+                "on_watchlist": ov["ticker"].upper() in wl_set,
+                "days_away":    days_away,
+                "source":       ov.get("source", "manual override"),
+                "is_override":  True,
+            })
+            already_added.add(ov["ticker"].upper())
+            meta["overrides_injected"] += 1
+        except Exception as exc:
+            meta["earnings_errors"].append(f"override/{ov.get('ticker')}: {exc}")
+
+    # ── 2. yfinance (primary API) ────────────────────────────────────────────
+    yf_found:  set[str]  = set(already_added)
+    yf_missed: list[str] = []
 
     def _fetch_cal(ticker: str) -> Optional[dict]:
+        if ticker in already_added:
+            return None
         try:
             import yfinance as yf
             cal = yf.Ticker(ticker).calendar
             if cal is None:
                 return None
-            # yfinance returns dict or DataFrame depending on version
             if hasattr(cal, "to_dict"):
                 cal = cal.iloc[:, 0].to_dict() if hasattr(cal, "iloc") else cal.to_dict()
             if not cal:
@@ -414,12 +549,10 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
                 ed = ed[0] if ed else None
             if ed is None:
                 return None
-            if hasattr(ed, "date"):
-                earn_date = ed.date()
-            else:
-                earn_date = datetime.strptime(str(ed)[:10], "%Y-%m-%d").date()
+            earn_date = ed.date() if hasattr(ed, "date") else \
+                        datetime.strptime(str(ed)[:10], "%Y-%m-%d").date()
             days_away = (earn_date - today).days
-            if days_away < -1 or days_away > 7:
+            if days_away < 0 or days_away > 7:
                 return None
             return {
                 "ticker":       ticker,
@@ -428,40 +561,65 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
                 "time_label":   "TBD",
                 "on_watchlist": ticker in wl_set,
                 "days_away":    days_away,
+                "source":       "yfinance",
+                "is_override":  False,
             }
         except Exception as e:
-            logger.debug("intel/earnings %s: %s", ticker, e)
+            logger.debug("intel/earnings yf %s: %s", ticker, e)
             return None
 
-    pool = ThreadPoolExecutor(max_workers=5)
-    futs = [pool.submit(_fetch_cal, t) for t in all_tickers]
-    pool.shutdown(wait=False)  # don't block when as_completed times out
+    pool = ThreadPoolExecutor(max_workers=8)
+    futs = {pool.submit(_fetch_cal, t): t for t in all_tickers}
+    pool.shutdown(wait=False)
     try:
         for fut in as_completed(futs, timeout=25):
+            t = futs[fut]
             try:
                 item = fut.result()
-                if not item:
-                    continue
-                days = item["days_away"]
-                if days == 0:
-                    buckets["today"].append(item)
-                elif days == 1:
-                    buckets["tomorrow"].append(item)
-                elif 2 <= days <= 7:
-                    buckets["this_week"].append(item)
+                if item:
+                    _bucket_item(item)
+                    yf_found.add(t)
+                    meta["yfinance_found"] += 1
+                elif t not in already_added:
+                    yf_missed.append(t)
             except Exception:
-                pass
+                yf_missed.append(t)
     except Exception:
         pass
 
-    for k in buckets:
-        buckets[k].sort(key=lambda x: (not x["on_watchlist"], x["days_away"]))
+    # ── 3. Finnhub fallback for tickers yfinance missed ─────────────────────
+    finnhub_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if finnhub_key and yf_missed:
+        meta["earnings_source_used"] = "overrides+yfinance+finnhub"
+        fh_items, fh_errors = _earnings_from_finnhub(yf_missed, finnhub_key, today, yf_found)
+        meta["earnings_errors"].extend(fh_errors)
+        for item in fh_items:
+            item["date_label"]   = _date_label(datetime.strptime(item["date"], "%Y-%m-%d").date(), today)
+            item["on_watchlist"] = item["ticker"] in wl_set
+            _bucket_item(item)
+            meta["finnhub_found"] += 1
 
-    _cset("earnings", buckets)
-    total = sum(len(v) for v in buckets.values())
-    logger.info("intel/earnings: today=%d tomorrow=%d week=%d",
-                len(buckets["today"]), len(buckets["tomorrow"]), len(buckets["this_week"]))
-    return buckets
+    # Sort: overrides first, then watchlist, then by date
+    for k in buckets:
+        buckets[k].sort(key=lambda x: (
+            not x.get("is_override"),
+            not x.get("on_watchlist"),
+            x["days_away"],
+        ))
+
+    meta["earnings_count"] = sum(len(v) for v in buckets.values())
+    result = dict(buckets)
+    result["meta"] = meta
+
+    _cset("earnings", result)
+    logger.info(
+        "intel/earnings: today=%d tomorrow=%d week=%d "
+        "(overrides=%d yf=%d fh=%d tickers=%d)",
+        len(buckets["today"]), len(buckets["tomorrow"]), len(buckets["this_week"]),
+        meta["overrides_injected"], meta["yfinance_found"],
+        meta["finnhub_found"],      meta["tickers_checked"],
+    )
+    return result
 
 
 # ── Stock Split Tracker ───────────────────────────────────────────────────────
@@ -801,9 +959,12 @@ def check_and_send_intel_alerts() -> list[dict]:
                 ticker = item["ticker"]
                 dk = _daily_key(ticker, f"earnings_{bucket}")
                 if should_send_alert(dk):
+                    day_lbl  = item.get("date_label", label)
+                    time_lbl = item.get("time_label", "TBD")
+                    src_note = " [manual override]" if item.get("is_override") else ""
                     msg = (
-                        f"📅 <b>EARNINGS {label} — {ticker}</b>\n"
-                        f"Date: {item['date']} · Time: {item['time_label']}\n"
+                        f"⚠️ <b>Earnings Risk: {ticker} reports {day_lbl} {time_lbl}{src_note}</b>\n"
+                        f"Date: {item['date']}\n"
                         f"<i>Do not hold into earnings without a plan.</i>"
                     )
                     send_intel_alert(msg)
@@ -886,14 +1047,32 @@ def get_intel_summary() -> dict:
     with _bg_refresh_lock:
         currently_refreshing = _bg_refreshing
 
+    # Extract earnings buckets and debug meta separately
+    _earn       = c_earn or {}
+    earn_buckets = {
+        "today":     _earn.get("today",     []),
+        "tomorrow":  _earn.get("tomorrow",  []),
+        "this_week": _earn.get("this_week", []),
+    }
+    earn_meta = _earn.get("meta", {})
+
     return {
         "ok":              not is_cold,
         "errors":          errors,
         "last_updated":    _et_now().strftime("%I:%M %p ET"),
         "market_news":     c_news  or [],
-        "earnings":        c_earn  or {"today": [], "tomorrow": [], "this_week": []},
+        "earnings":        earn_buckets,
         "splits":          c_split or [],
         "economic_events": c_econ  or [],
+        "earnings_debug": {
+            "tickers_checked":      earn_meta.get("tickers_checked", 0),
+            "earnings_source_used": earn_meta.get("earnings_source_used", "—"),
+            "earnings_errors":      earn_meta.get("earnings_errors", []),
+            "earnings_count":       earn_meta.get("earnings_count", 0),
+            "overrides_injected":   earn_meta.get("overrides_injected", 0),
+            "yfinance_found":       earn_meta.get("yfinance_found", 0),
+            "finnhub_found":        earn_meta.get("finnhub_found", 0),
+        },
         "alerts_sent":     [],
         "from_cache":      not is_cold,
         "refreshing":      currently_refreshing,
