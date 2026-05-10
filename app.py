@@ -4196,18 +4196,39 @@ def api_schwab_summary():
 
 @app.route("/api/intel")
 def api_intel():
-    """Debug/test endpoint — returns all intel feeds as JSON.
-    Accepts ?refresh=1 to bypass the cache (forces a fresh fetch).
+    """Returns all intel feeds as JSON.
+    Accepts ?refresh=1 to bypass the cache.
+    Always returns HTTP 200 with ok/errors fields — never leaves the frontend stuck.
     """
     if request.args.get("refresh") == "1":
         _intel.clear_intel_cache()
+
+    _fallback = {
+        "ok":              False,
+        "errors":          ["Request timed out — data sources may be slow or unavailable"],
+        "last_updated":    "—",
+        "market_news":     [],
+        "earnings":        {"today": [], "tomorrow": [], "this_week": []},
+        "splits":          [],
+        "economic_events": [],
+        "alerts_sent":     [],
+    }
     try:
-        data = _intel.get_intel_summary()
+        from concurrent.futures import ThreadPoolExecutor as _TPE, TimeoutError as _FTE
+        _ex  = _TPE(max_workers=1)
+        _fut = _ex.submit(_intel.get_intel_summary)
+        _ex.shutdown(wait=False)
+        try:
+            data = _fut.result(timeout=45)
+        except (_FTE, Exception) as e:
+            logger.warning("api_intel timed out or errored: %s", e)
+            _fallback["errors"] = [str(e)]
+            data = _fallback
         return jsonify(data)
     except Exception as e:
-        logger.error("api_intel error: %s", e)
-        return jsonify({"error": str(e), "market_news": [], "earnings": {},
-                        "splits": [], "economic_events": []}), 500
+        logger.error("api_intel outer error: %s", e)
+        _fallback["errors"] = [str(e)]
+        return jsonify(_fallback)
 
 
 @app.route("/intel")

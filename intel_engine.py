@@ -310,13 +310,17 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
             logger.debug("intel/news %s: %s", ticker, e)
             return []
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futs = {pool.submit(_fetch_one, t): t for t in all_tickers}
-        for fut in as_completed(futs, timeout=25):
+    pool = ThreadPoolExecutor(max_workers=4)
+    futs = [pool.submit(_fetch_one, t) for t in all_tickers]
+    pool.shutdown(wait=False)  # don't block when as_completed times out
+    try:
+        for fut in as_completed(futs, timeout=20):
             try:
                 results.extend(fut.result())
             except Exception:
                 pass
+    except Exception:
+        pass
 
     # Sort by impact descending
     results.sort(key=lambda x: -_IMPACT_ORDER.get(x["impact"], 0))
@@ -390,9 +394,11 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             logger.debug("intel/earnings %s: %s", ticker, e)
             return None
 
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        futs = [pool.submit(_fetch_cal, t) for t in all_tickers]
-        for fut in as_completed(futs, timeout=30):
+    pool = ThreadPoolExecutor(max_workers=5)
+    futs = [pool.submit(_fetch_cal, t) for t in all_tickers]
+    pool.shutdown(wait=False)  # don't block when as_completed times out
+    try:
+        for fut in as_completed(futs, timeout=25):
             try:
                 item = fut.result()
                 if not item:
@@ -406,6 +412,8 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
                     buckets["this_week"].append(item)
             except Exception:
                 pass
+    except Exception:
+        pass
 
     for k in buckets:
         buckets[k].sort(key=lambda x: (not x["on_watchlist"], x["days_away"]))
@@ -808,13 +816,53 @@ def check_and_send_intel_alerts() -> list[dict]:
 # ── Convenience rollup for /api/intel ────────────────────────────────────────
 
 def get_intel_summary() -> dict:
-    """Full intel snapshot for the /api/intel debug endpoint."""
-    alerts_sent = check_and_send_intel_alerts()
+    """Full intel snapshot for the /api/intel endpoint.
+    Always returns a complete dict — never raises.
+    """
+    errors: list[str] = []
+    news:         list[dict] = []
+    earnings:     dict       = {"today": [], "tomorrow": [], "this_week": []}
+    splits:       list[dict] = []
+    econ:         list[dict] = []
+    alerts_sent:  list[dict] = []
+
+    try:
+        news = fetch_market_news()
+    except Exception as e:
+        errors.append(f"news: {e}")
+        logger.error("intel_summary/news: %s", e)
+
+    try:
+        earnings = fetch_earnings_calendar()
+    except Exception as e:
+        errors.append(f"earnings: {e}")
+        logger.error("intel_summary/earnings: %s", e)
+
+    try:
+        splits = fetch_stock_splits()
+    except Exception as e:
+        errors.append(f"splits: {e}")
+        logger.error("intel_summary/splits: %s", e)
+
+    try:
+        econ = fetch_economic_calendar()
+    except Exception as e:
+        errors.append(f"econ: {e}")
+        logger.error("intel_summary/econ: %s", e)
+
+    try:
+        alerts_sent = check_and_send_intel_alerts()
+    except Exception as e:
+        errors.append(f"alerts: {e}")
+        logger.warning("intel_summary/alerts: %s", e)
+
     return {
-        "market_news":     fetch_market_news(),
-        "earnings":        fetch_earnings_calendar(),
-        "splits":          fetch_stock_splits(),
-        "economic_events": fetch_economic_calendar(),
+        "ok":              len(errors) == 0,
+        "errors":          errors,
+        "last_updated":    _et_now().strftime("%I:%M %p ET"),
+        "market_news":     news,
+        "earnings":        earnings,
+        "splits":          splits,
+        "economic_events": econ,
         "alerts_sent":     alerts_sent,
-        "cached_at":       _et_now().strftime("%I:%M %p ET"),
     }
