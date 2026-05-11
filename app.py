@@ -160,6 +160,142 @@ def et_time_filter(value: str | None) -> str:
 def health():
     return "OK", 200
 
+
+# ---------------------------------------------------------------------------
+# Security headers — applied to every response
+# ---------------------------------------------------------------------------
+@app.after_request
+def _add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+
+
+# ---------------------------------------------------------------------------
+# /debug/status — production health check (no secret values exposed)
+# ---------------------------------------------------------------------------
+@app.route("/debug/status")
+def debug_status():
+    """
+    Read-only diagnostics endpoint.
+    Returns PASS/FAIL for each system component.
+    Never exposes secret values — only checks presence and reachability.
+    """
+    checks = {}
+
+    # 1. Database connected
+    try:
+        from database import get_db
+        conn = get_db()
+        conn.execute("SELECT 1")
+        conn.close()
+        checks["database"] = {"status": "PASS", "detail": "Connection OK"}
+    except Exception as _e:
+        checks["database"] = {"status": "FAIL", "detail": str(_e), "file": "database.py"}
+
+    # 2. Required env vars
+    _required_vars = {
+        "SECRET_KEY":   os.environ.get("SECRET_KEY"),
+        "DATABASE_URL": os.environ.get("DATABASE_URL"),  # optional — SQLite fallback
+    }
+    _optional_vars = {
+        "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN"),
+        "TELEGRAM_CHAT_ID":   os.environ.get("TELEGRAM_CHAT_ID"),
+        "FINNHUB_API_KEY":    os.environ.get("FINNHUB_API_KEY"),
+        "POLYGON_API_KEY":    os.environ.get("POLYGON_API_KEY"),
+        "SCHWAB_CLIENT_ID":   os.environ.get("SCHWAB_CLIENT_ID"),
+    }
+    env_detail = {}
+    env_ok = True
+    for k, v in _required_vars.items():
+        if k == "SECRET_KEY" and not v:
+            env_detail[k] = "MISSING (using insecure fallback)"
+            env_ok = False
+        elif k == "DATABASE_URL":
+            env_detail[k] = "set" if v else "not set (SQLite fallback)"
+        else:
+            env_detail[k] = "set" if v else "missing"
+    checks["env_required"] = {
+        "status": "PASS" if env_ok else "WARN",
+        "detail": env_detail,
+    }
+
+    # 3. Optional env vars (PASS if set, WARN if missing)
+    opt_detail = {k: ("set" if v else "not set") for k, v in _optional_vars.items()}
+    checks["env_optional"] = {
+        "status": "PASS" if all(_optional_vars.values()) else "WARN",
+        "detail": opt_detail,
+    }
+
+    # 4. Telegram configured
+    _tg_token  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    _tg_chat   = os.environ.get("TELEGRAM_CHAT_ID", "")
+    checks["telegram"] = {
+        "status": "PASS" if (_tg_token and _tg_chat) else "WARN",
+        "detail": "configured" if (_tg_token and _tg_chat) else "not configured (alerts will be skipped)",
+    }
+
+    # 5. Finnhub key loaded
+    _fh_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    checks["finnhub"] = {
+        "status": "PASS" if _fh_key else "WARN",
+        "detail": "key present" if _fh_key else "key missing (static fallback will be used)",
+    }
+
+    # 6. static/logo.png exists
+    import pathlib
+    _logo = pathlib.Path(app.static_folder) / "logo.png"
+    checks["static_logo"] = {
+        "status": "PASS" if _logo.exists() else "FAIL",
+        "detail": str(_logo) if _logo.exists() else f"missing: {_logo}",
+        "file": "static/logo.png",
+    }
+
+    # 7. Intel cache / API reachable (checks in-process only, no network call)
+    try:
+        data = _intel.get_intel_summary()
+        intel_ok = isinstance(data, dict) and "earnings" in data
+        checks["intel_api"] = {
+            "status": "PASS" if intel_ok else "FAIL",
+            "detail": f"ok  from_cache={data.get('from_cache')}  refreshing={data.get('refreshing')}",
+        }
+    except Exception as _ie:
+        checks["intel_api"] = {"status": "FAIL", "detail": str(_ie), "file": "intel_engine.py"}
+
+    # 8. Scanner running
+    try:
+        scan = _scanner.get_scan_results()
+        checks["scanner"] = {
+            "status": "PASS",
+            "detail": f"ok  running={scan.get('running', False)}  results={len(scan.get('results', []))}",
+        }
+    except Exception as _se:
+        checks["scanner"] = {"status": "FAIL", "detail": str(_se), "file": "scanner.py"}
+
+    # 9. Watchlist / DB round-trip
+    try:
+        wls = get_all_watchlists()
+        checks["watchlists"] = {
+            "status": "PASS",
+            "detail": f"{len(wls)} watchlist(s) found",
+        }
+    except Exception as _we:
+        checks["watchlists"] = {"status": "FAIL", "detail": str(_we), "file": "database.py"}
+
+    overall = "PASS" if all(
+        c["status"] in ("PASS", "WARN") for c in checks.values()
+    ) else "FAIL"
+    failures = [k for k, c in checks.items() if c["status"] == "FAIL"]
+
+    return jsonify({
+        "overall": overall,
+        "failures": failures,
+        "checks": checks,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    })
+
+
 # ---------------------------------------------------------------------------
 # Startup initialization — idempotent schema creation.
 # Wrapped in try/except so a slow or unavailable DB (e.g. PG cold start on
@@ -4293,9 +4429,11 @@ def api_intel():
 
 @app.route("/intel")
 def intel():
-        """Pre-Market Intel — daily and weekly checklist, earnings, market environment."""
-        return render_template("intel.html")
-    # ---------------------------------------------------------------------------
+    """Pre-Market Intel — daily and weekly checklist, earnings, market environment."""
+    return render_template("intel.html")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
