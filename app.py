@@ -12,7 +12,7 @@ import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, Response
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, Response, send_from_directory
 from flask_sock import Sock
 from flask_wtf.csrf import CSRFProtect
 
@@ -99,10 +99,12 @@ sock = Sock(app)
 # ---------------------------------------------------------------------------
 @app.errorhandler(Exception)
 def _handle_all_errors(e):
-    """If a crash escapes a route handler on an /api/ path, return JSON."""
+    """Return JSON for /api/ errors; let Flask handle HTTP errors on frontend routes."""
+    from werkzeug.exceptions import HTTPException
+    code = e.code if isinstance(e, HTTPException) else 500
     if request.path.startswith("/api/"):
-        logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
-        code = getattr(e, "code", 500) or 500
+        if code != 404:
+            logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
         return jsonify({
             "ok": False,
             "errors": [f"{type(e).__name__}: {e}"],
@@ -111,8 +113,17 @@ def _handle_all_errors(e):
             "splits": [], "dividends": [], "economic_events": [],
             "from_cache": False, "refreshing": False, "last_updated": "—",
         }), code
-    # For non-API routes, let Flask handle it normally
-    raise e
+    # For HTTP errors (404, 403, etc.) on frontend routes, return Flask's default response
+    if isinstance(e, HTTPException):
+        return e
+    # Unexpected server errors on frontend routes — log and show a simple message
+    logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
+    return "Internal server error", 500
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(app.static_folder, "logo.png", mimetype="image/png")
 
 
 @app.template_filter("et_time")
