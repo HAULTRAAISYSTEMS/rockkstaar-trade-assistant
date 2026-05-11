@@ -158,7 +158,7 @@ def et_time_filter(value: str | None) -> str:
 # still has this route and Render's health check succeeds.
 @app.route("/health")
 def health():
-    return "OK", 200
+    return jsonify({"ok": True}), 200
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +307,10 @@ except Exception as _init_err:
     logger.error("init_db failed at startup: %s — will retry on first request", _init_err)
 
 # Start the background momentum scanner daemon (no-op if already running).
-_scanner.start_scanner()
+try:
+    _scanner.start_scanner()
+except Exception as _scan_err:
+    logger.error("scanner start failed at startup: %s", _scan_err)
 
 # Start the background intel alert daemon — checks every 30 min during market hours.
 def _intel_alert_loop():
@@ -322,10 +325,16 @@ def _intel_alert_loop():
             logger.warning("intel alert loop error: %s", _ie)
         _t.sleep(1800)  # every 30 minutes
 
-threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
+try:
+    threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
+except Exception as _loop_err:
+    logger.error("intel alert loop failed to start: %s", _loop_err)
 
 # Pre-warm the intel cache so the first page load is instant
-_intel.trigger_background_refresh()
+try:
+    _intel.trigger_background_refresh()
+except Exception as _warm_err:
+    logger.error("intel bg refresh failed at startup: %s", _warm_err)
 
 # ---------------------------------------------------------------------------
 # Startup migration: wipe stale mock-seeded prices from the DB.

@@ -43,10 +43,16 @@ if _DATABASE_URL.startswith("postgres://"):
 
 _USE_POSTGRES = bool(_DATABASE_URL)
 
+# Guard the psycopg2 import so a missing binary doesn't crash the whole app.
+psycopg2 = None  # type: ignore[assignment]
 if _USE_POSTGRES:
-    import psycopg2
-    import psycopg2.extras
-    logger.info("DB  backend=postgresql")
+    try:
+        import psycopg2            # type: ignore[no-redef]
+        import psycopg2.extras     # type: ignore[no-redef]
+        logger.info("DB  backend=postgresql")
+    except ImportError as _pg_err:
+        logger.error("psycopg2 not available: %s — falling back to SQLite", _pg_err)
+        _USE_POSTGRES = False
 else:
     logger.info("DB  backend=sqlite  path=%s", DB_PATH)
 
@@ -238,9 +244,9 @@ class _Conn:
 
 def get_db() -> _Conn:
     """Return a wrapped database connection (PG or SQLite based on env)."""
-    if _USE_POSTGRES:
+    if _USE_POSTGRES and psycopg2 is not None:
         try:
-            conn = psycopg2.connect(_DATABASE_URL)
+            conn = psycopg2.connect(_DATABASE_URL, connect_timeout=10)
             return _Conn(conn)
         except Exception as exc:
             logger.error("DB  PostgreSQL connection failed: %s", exc)
