@@ -1,5 +1,5 @@
 /* =========================================================
-   Rockkstaar Trade Assistant — Dark Trading Dashboard
+   HAULTRA AI SYSTEMS — Institutional Trading Terminal
    ========================================================= */
 
 /* ---- Reset & Base ---- */
@@ -31,11 +31,11 @@
   --blue:        #22D3EE;
   --orange:      #f97316;
 
-  /* ── Brand / accent ── */
-  --brand-purple: #7C3AED;
+  /* ── Brand / accent (HAULTRA electric blue) ── */
+  --brand-blue:   #0ea5e9;
   --brand-cyan:   #22D3EE;
-  --accent:       #7C3AED;
-  --accent-glow:  rgba(124, 58, 237, 0.20);
+  --accent:       #0ea5e9;
+  --accent-glow:  rgba(14, 165, 233, 0.20);
 
   /* ── Shape & type ── */
   --radius:      6px;
@@ -46,14 +46,11 @@
 
 html {
   font-size: 14px;
-  /* Solid fallback first — guarantees the safe-area / overscroll region is never white
-     even before the gradient paints or if the gradient computation fails.
-     background-attachment:fixed is omitted — it is broken on iOS Safari. */
-  background-color: #04070f;
+  background-color: #020617;
   background:
-    radial-gradient(circle at top left,  rgba(124, 58, 237, 0.18), transparent 28%),
-    radial-gradient(circle at top right, rgba(34, 211, 238, 0.10), transparent 24%),
-    linear-gradient(180deg, #070b18 0%, #04070f 100%);
+    radial-gradient(ellipse at top left,  rgba(14, 165, 233, 0.10), transparent 32%),
+    radial-gradient(ellipse at top right, rgba(34, 211, 238, 0.06), transparent 28%),
+    linear-gradient(180deg, #040c1e 0%, #020617 100%);
   background-repeat: no-repeat;
   background-size: cover;
   min-height: 100%;
@@ -63,13 +60,11 @@ html {
 }
 
 body {
-  /* Solid fallback ensures no white bleed in safe-area regions before gradient loads.
-     background-attachment:fixed omitted — broken on iOS Safari (causes white flash). */
-  background-color: #04070f;
+  background-color: #020617;
   background:
-    radial-gradient(circle at top left,  rgba(124, 58, 237, 0.18), transparent 28%),
-    radial-gradient(circle at top right, rgba(34, 211, 238, 0.10), transparent 24%),
-    linear-gradient(180deg, #070b18 0%, #04070f 100%);
+    radial-gradient(ellipse at top left,  rgba(14, 165, 233, 0.10), transparent 32%),
+    radial-gradient(ellipse at top right, rgba(34, 211, 238, 0.06), transparent 28%),
+    linear-gradient(180deg, #040c1e 0%, #020617 100%);
   background-size: cover;
   color: var(--text);
   font-family: var(--font);
@@ -101,41 +96,115 @@ body::before {
 
 a { color: inherit; text-decoration: none; }
 
-/* ---- Navbar ---- */
+/* ============================================================
+   HAULTRA AI — NAVBAR & BRAND SYSTEM
+   ============================================================ */
+
 .navbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 1.5rem;
-  height: 52px;
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
+  gap: 0.75rem;
+  padding: 0 1.25rem 0 1rem;
+  height: 56px;
+  background: rgba(2, 5, 16, 0.97);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-bottom: 1px solid rgba(14, 165, 233, 0.18);
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: 200;
+  box-shadow:
+    0 1px 0 rgba(14, 165, 233, 0.06),
+    0 4px 20px rgba(0, 0, 0, 0.55);
 }
 
+/* Brand / Logo area */
 .nav-brand {
-  font-size: 1.1rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--accent);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
+  flex-shrink: 0;
+  text-decoration: none;
 }
-.brand-icon { font-size: 1.3rem; }
 .nav-logo {
-  height: 36px;
+  height: 34px;
   width: auto;
   display: block;
   object-fit: contain;
-  filter: drop-shadow(0 0 6px rgba(124, 58, 237, 0.50));
-  transition: filter 0.3s ease, transform 0.3s ease;
+  filter: drop-shadow(0 0 8px rgba(14, 165, 233, 0.45));
+  transition: filter 0.25s ease, transform 0.25s ease;
 }
 .nav-logo:hover {
-  filter: drop-shadow(0 0 12px rgba(124, 58, 237, 0.90)) drop-shadow(0 0 24px rgba(34, 211, 238, 0.35));
-  transform: scale(1.06);
+  filter: drop-shadow(0 0 14px rgba(14, 165, 233, 0.85))
+          drop-shadow(0 0 28px rgba(34, 211, 238, 0.28));
+  transform: scale(1.04);
+}
+
+/* Fallback brand when logo fails to load */
+.brand-fallback {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.brand-icon {
+  font-size: 1.1rem;
+  color: #38bdf8;
+  line-height: 1;
+}
+.brand-text {
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.20em;
+  color: #38bdf8;
+  text-transform: uppercase;
+}
+
+/* Thin separator between logo and sub-label */
+.brand-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(14, 165, 233, 0.25);
+  flex-shrink: 0;
+}
+.brand-sub {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+/* Live market status pill (injected by JS or static) */
+.nav-live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.18rem 0.55rem;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  border-radius: 20px;
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #10b981;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.nav-live-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  animation: nav-dot-pulse 2s ease-in-out infinite;
+}
+@keyframes nav-dot-pulse {
+  0%, 100% { opacity: 1;   box-shadow: 0 0 0 0   rgba(16, 185, 129, 0.50); }
+  50%       { opacity: 0.7; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0); }
 }
 
 /* ---- Buttons ---- */
@@ -1508,21 +1577,54 @@ a { color: inherit; text-decoration: none; }
 
 .nav-links {
   display: flex;
-  gap: 0.25rem;
-  margin: 0 1rem;
+  align-items: center;
+  gap: 2px;
+  margin: 0 0.5rem;
+  flex: 1;
+  justify-content: center;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.nav-links::-webkit-scrollbar { display: none; }
 
 .nav-link {
-  font-size: 0.82rem;
-  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
   color: var(--text-muted);
   text-decoration: none;
-  padding: 0.35rem 0.75rem;
-  border-radius: var(--radius);
-  transition: color 0.15s, background 0.15s;
+  padding: 0.32rem 0.72rem;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  position: relative;
+  transition: color 0.18s, background 0.18s, border-color 0.18s;
 }
-.nav-link:hover       { color: var(--text); background: var(--bg3); }
-.nav-link-active      { color: var(--text); background: var(--bg3); }
+.nav-link:hover {
+  color: #e2e8f0;
+  background: rgba(14, 165, 233, 0.07);
+  border-color: rgba(14, 165, 233, 0.14);
+}
+.nav-link-active {
+  color: #38bdf8;
+  background: rgba(14, 165, 233, 0.10);
+  border-color: rgba(14, 165, 233, 0.24);
+}
+.nav-link-active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #0ea5e9, transparent);
+  border-radius: 1px;
+}
+.nav-link-schwab { color: #93c5fd; }
 
 /* =========================================================
    Trade Journal
@@ -4093,38 +4195,40 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
 
 @media (max-width: 768px) {
 
-  /* ── 2. Navbar: wrap to two rows so it fits on small screens ── */
+  /* ── 2. Navbar: wrap to two rows on small screens ── */
   .navbar {
     height: auto;
-    min-height: 48px;
+    min-height: 50px;
     flex-wrap: wrap;
-    padding: 0.45rem 0.75rem;
-    gap: 0.3rem;
-    /* sticky top must respect safe area notch */
+    padding: 0.4rem 0.75rem;
+    gap: 0.25rem;
     top: env(safe-area-inset-top, 0px);
   }
 
-  /* Brand stays on left of first row */
+  /* Brand stays left on first row */
   .nav-brand {
     flex: 1 0 auto;
-    font-size: 0.95rem;
+    gap: 0.45rem;
   }
+  .brand-sub { display: none; }
+  .brand-divider { display: none; }
 
-  /* Nav links move to a dedicated second row, full width */
+  /* Nav links → second row, full width, scrollable */
   .nav-links {
     order: 10;
     width: 100%;
     margin: 0;
-    gap: 0.1rem;
-    flex-wrap: wrap;
+    justify-content: flex-start;
+    padding-bottom: 0.15rem;
   }
 
   .nav-link {
-    font-size: 0.73rem;
-    padding: 0.22rem 0.45rem;
+    font-size: 0.65rem;
+    padding: 0.25rem 0.5rem;
+    letter-spacing: 0.06em;
   }
 
-  /* Actions stay on the right of the first row; wrap if still too wide */
+  /* Actions stay right of first row */
   .nav-actions {
     display: flex;
     flex-wrap: wrap;
@@ -4134,26 +4238,25 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
     flex: 0 1 auto;
   }
 
-  /* Hide "last updated" timestamp — too verbose on small screens */
   .ar-last-updated { display: none !important; }
 
-  /* Shrink the action buttons */
   .btn-ar-toggle {
-    font-size: 0.65rem;
-    padding: 0.22rem 0.42rem;
+    font-size: 0.62rem;
+    padding: 0.2rem 0.4rem;
     letter-spacing: 0;
   }
 
   .ws-status-pill {
-    font-size: 0.58rem;
-    padding: 0.13rem 0.38rem;
+    font-size: 0.56rem;
+    padding: 0.12rem 0.36rem;
   }
 
-  /* Shrink "Refresh All" button */
   .btn.btn-refresh {
-    font-size: 0.68rem;
-    padding: 0.25rem 0.5rem;
+    font-size: 0.65rem;
+    padding: 0.22rem 0.5rem;
   }
+
+  .nav-live-indicator { display: none; }
 
   /* ── 3. Main content padding ─────────────────────────────── */
   .main-content {
@@ -5034,8 +5137,6 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
 }
 
 /* ── Schwab Account Page */
-.nav-link-schwab { color: #93c5fd; }
-
 .schwab-wrap { max-width: 1100px; margin: 0 auto; padding: 0 1rem 3rem; }
 
 .schwab-header { margin-bottom: 1.5rem; }
