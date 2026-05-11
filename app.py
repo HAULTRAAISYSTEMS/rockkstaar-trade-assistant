@@ -94,6 +94,27 @@ def _check_write_auth():
 sock = Sock(app)
 
 
+# ---------------------------------------------------------------------------
+# Global JSON error handler — ensures /api/* routes NEVER return HTML
+# ---------------------------------------------------------------------------
+@app.errorhandler(Exception)
+def _handle_all_errors(e):
+    """If a crash escapes a route handler on an /api/ path, return JSON."""
+    if request.path.startswith("/api/"):
+        logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
+        code = getattr(e, "code", 500) or 500
+        return jsonify({
+            "ok": False,
+            "errors": [f"{type(e).__name__}: {e}"],
+            "news": [], "market_news": [],
+            "earnings": {"today": [], "tomorrow": [], "this_week": []},
+            "splits": [], "dividends": [], "economic_events": [],
+            "from_cache": False, "refreshing": False, "last_updated": "—",
+        }), code
+    # For non-API routes, let Flask handle it normally
+    raise e
+
+
 @app.template_filter("et_time")
 def et_time_filter(value: str | None) -> str:
     """Convert a stored timestamp to a clean ET time string for UI display.
@@ -4197,59 +4218,66 @@ def api_schwab_summary():
 
 
 
+def _intel_error_payload(msg: str) -> dict:
+    """Standard JSON error payload for /api/intel."""
+    return {
+        "ok":              False,
+        "errors":          [msg],
+        "last_updated":    "—",
+        "news":            [],
+        "market_news":     [],
+        "earnings":        {"today": [], "tomorrow": [], "this_week": []},
+        "splits":          [],
+        "dividends":       [],
+        "economic_events": [],
+        "alerts_sent":     [],
+        "from_cache":      False,
+        "refreshing":      False,
+    }
+
+
 @app.route("/api/intel")
+@csrf.exempt
 def api_intel():
-    """Returns all intel feeds as JSON.
-    Cache-first — always responds in < 1 second.
-    Cold cache: returns static fallback + triggers background refresh.
-    ?refresh=1 clears the cache and starts a fresh background fetch.
-    ?debug=1  returns a guaranteed test payload for front-end diagnostics.
-    """
-    if request.args.get("debug") == "1":
-        return jsonify({
-            "ok": True,
-            "news": [{"ticker": "TEST", "headline": "Debug news item", "impact": "HIGH",
-                      "time": "09:00", "reason": "Debug test payload", "source": "Debug",
-                      "on_watchlist": False}],
-            "market_news": [{"ticker": "TEST", "headline": "Debug news item", "impact": "HIGH",
-                             "time": "09:00", "reason": "Debug test payload", "source": "Debug",
-                             "on_watchlist": False}],
-            "earnings": {
-                "today": [],
-                "tomorrow": [],
-                "this_week": [{"ticker": "TEST", "date": "2026-05-11", "date_label": "This Week",
-                               "time_label": "BMO", "days_away": 1, "on_watchlist": False}],
-            },
-            "splits": [{"ticker": "TEST", "ratio": "2:1", "effective_date": "2026-05-15",
-                        "eff_date": "2026-05-15", "type": "Forward", "status": "Upcoming",
-                        "is_new": False, "days_away": 5}],
-            "economic_events": [{"name": "Debug CPI Event", "date": "2026-05-12", "impact": "HIGH",
-                                 "event": "Debug CPI Event", "date_label": "Mon May 12",
-                                 "time": "8:30 AM", "reason": "Debug payload", "is_today": False}],
-            "errors": [],
-            "last_updated": "debug",
-            "from_cache": False,
-            "refreshing": False,
-        })
-    if request.args.get("refresh") == "1":
-        _intel.clear_intel_cache()
+    """Returns all intel feeds as JSON — always returns JSON, never HTML."""
     try:
+        if request.args.get("debug") == "1":
+            return jsonify({
+                "ok": True,
+                "news": [{"ticker": "TEST", "headline": "Debug news item", "impact": "HIGH",
+                          "time": "09:00", "reason": "Debug test payload", "source": "Debug",
+                          "on_watchlist": False}],
+                "market_news": [{"ticker": "TEST", "headline": "Debug news item", "impact": "HIGH",
+                                 "time": "09:00", "reason": "Debug test payload", "source": "Debug",
+                                 "on_watchlist": False}],
+                "earnings": {
+                    "today": [],
+                    "tomorrow": [],
+                    "this_week": [{"ticker": "TEST", "date": "2026-05-11", "date_label": "This Week",
+                                   "time_label": "BMO", "days_away": 1, "on_watchlist": False}],
+                },
+                "splits": [{"ticker": "TEST", "ratio": "2:1", "effective_date": "2026-05-15",
+                            "eff_date": "2026-05-15", "type": "Forward", "status": "Upcoming",
+                            "is_new": False, "days_away": 5}],
+                "dividends": [],
+                "economic_events": [{"name": "Debug CPI Event", "date": "2026-05-12", "impact": "HIGH",
+                                     "event": "Debug CPI Event", "date_label": "Mon May 12",
+                                     "time": "8:30 AM", "reason": "Debug payload", "is_today": False}],
+                "errors": [],
+                "last_updated": "debug",
+                "from_cache": False,
+                "refreshing": False,
+            })
+
+        if request.args.get("refresh") == "1":
+            _intel.clear_intel_cache()
+
         data = _intel.get_intel_summary()
         return jsonify(data)
+
     except Exception as e:
-        logger.error("api_intel error: %s", e)
-        return jsonify({
-            "ok":              False,
-            "errors":          [str(e)],
-            "last_updated":    "—",
-            "market_news":     [],
-            "earnings":        {"today": [], "tomorrow": [], "this_week": []},
-            "splits":          [],
-            "economic_events": [],
-            "alerts_sent":     [],
-            "from_cache":      False,
-            "refreshing":      False,
-        })
+        logger.error("api_intel error: %s", e, exc_info=True)
+        return jsonify(_intel_error_payload(str(e))), 200
 
 
 @app.route("/intel")
