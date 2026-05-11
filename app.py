@@ -3868,22 +3868,29 @@ def batch_refresh_exec_states(tickers: list[str], data_map: dict) -> dict:
     max_workers = min(len(tickers), 8)   # cap at 8 concurrent yfinance calls
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_refresh_one, t): t for t in tickers}
-        for future in as_completed(futures):
-            ticker, updated = future.result()
-            if updated is None:
-                continue
-            refreshed_map[ticker] = updated
-            # Persist if exec_state or any scored field changed
-            old = data_map.get(ticker, {})
-            _changed_fields = (
-                "exec_state", "momentum_score", "setup_score", "orb_status",
-                "orb_ready", "entry_quality", "order_block", "setup_type",
-            )
-            if any(updated.get(f) != old.get(f) for f in _changed_fields):
+        try:
+            for future in as_completed(futures, timeout=30):
                 try:
-                    update_live_fields(updated)
+                    ticker, updated = future.result()
                 except Exception as exc:
-                    logger.warning("update_live_fields failed for %s: %s", ticker, exc)
+                    logger.warning("batch_refresh future result failed: %s", exc)
+                    continue
+                if updated is None:
+                    continue
+                refreshed_map[ticker] = updated
+                # Persist if exec_state or any scored field changed
+                old = data_map.get(ticker, {})
+                _changed_fields = (
+                    "exec_state", "momentum_score", "setup_score", "orb_status",
+                    "orb_ready", "entry_quality", "order_block", "setup_type",
+                )
+                if any(updated.get(f) != old.get(f) for f in _changed_fields):
+                    try:
+                        update_live_fields(updated)
+                    except Exception as exc:
+                        logger.warning("update_live_fields failed for %s: %s", ticker, exc)
+        except Exception:
+            logger.warning("batch_refresh_exec_states: timed out after 30s — returning partial results")
 
     return refreshed_map
 
