@@ -3866,10 +3866,13 @@ def batch_refresh_exec_states(tickers: list[str], data_map: dict) -> dict:
             return ticker, None
 
     max_workers = min(len(tickers), 8)   # cap at 8 concurrent yfinance calls
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    # Do NOT use 'with ThreadPoolExecutor' — its __exit__ calls shutdown(wait=True)
+    # which blocks indefinitely when yfinance threads hang on cloud IPs.
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futures = {pool.submit(_refresh_one, t): t for t in tickers}
         try:
-            for future in as_completed(futures, timeout=30):
+            for future in as_completed(futures, timeout=25):
                 try:
                     ticker, updated = future.result()
                 except Exception as exc:
@@ -3890,7 +3893,9 @@ def batch_refresh_exec_states(tickers: list[str], data_map: dict) -> dict:
                     except Exception as exc:
                         logger.warning("update_live_fields failed for %s: %s", ticker, exc)
         except Exception:
-            logger.warning("batch_refresh_exec_states: timed out after 30s — returning partial results")
+            logger.warning("batch_refresh_exec_states: timed out — returning partial results")
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     return refreshed_map
 
@@ -3945,6 +3950,44 @@ def _stock_summary(s: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Non-blocking background exec-state refresh
+# ---------------------------------------------------------------------------
+# Keeps yfinance calls entirely off the gunicorn request thread.
+# Endpoints call _trigger_exec_state_refresh() and return stale DB data
+# immediately; this background thread updates the DB asynchronously.
+
+_bg_refresh_state: dict = {"active": False, "last_triggered": 0.0}
+_bg_refresh_lock = threading.Lock()
+
+
+def _trigger_exec_state_refresh(wl_id: int | None) -> None:
+    """Fire-and-forget background refresh. No-op if one is already running or
+    was triggered within the last 45 seconds."""
+    with _bg_refresh_lock:
+        now = _time.monotonic()
+        if _bg_refresh_state["active"] or (now - _bg_refresh_state["last_triggered"]) < 45.0:
+            return
+        _bg_refresh_state["active"] = True
+        _bg_refresh_state["last_triggered"] = now
+
+    def _run():
+        try:
+            watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+            all_data  = get_all_stock_data()
+            data_map  = {s["ticker"]: s for s in all_data}
+            tickers   = [t for t in watchlist if t in data_map]
+            if tickers:
+                batch_refresh_exec_states(tickers, data_map)
+        except Exception as exc:
+            logger.warning("background exec-state refresh failed: %s", exc)
+        finally:
+            with _bg_refresh_lock:
+                _bg_refresh_state["active"] = False
+
+    threading.Thread(target=_run, daemon=True, name="exec-state-refresh").start()
+
+
+# ---------------------------------------------------------------------------
 # Shared payload builders (used by both REST endpoints and WebSocket handlers)
 # ---------------------------------------------------------------------------
 
@@ -3954,7 +3997,7 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
     _trade_mode = get_setting("trading_mode") or "SWING TRADE"
     all_data    = get_all_stock_data()
     data_map    = {s["ticker"]: s for s in all_data}
-    data_map    = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
+    _trigger_exec_state_refresh(wl_id)   # non-blocking; returns stale data this call
     stocks      = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked    = rank_stocks(stocks)
     top5      = [
@@ -4004,7 +4047,7 @@ def _build_quick_payload(wl_id: int | None) -> dict:
     _trade_mode = get_setting("trading_mode") or "SWING TRADE"
     all_data    = get_all_stock_data()
     data_map    = {s["ticker"]: s for s in all_data}
-    data_map    = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
+    _trigger_exec_state_refresh(wl_id)   # non-blocking; returns stale data this call
     stocks      = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked    = rank_stocks(stocks)
     top3      = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
