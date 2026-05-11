@@ -84,12 +84,46 @@ _cache_lock = threading.Lock()
 _cache: dict = {}
 
 _CACHE_TTL: dict[str, int] = {
-    "market_news": 900,    # 15 min — news changes often
-    "earnings":    21600,  # 6 hrs  — dates change rarely
-    "splits":      86400,  # 24 hrs — very stable
-    "dividends":   21600,  # 6 hrs  — ex-dates don't change often
-    "economic":    3600,   # 1 hr   — stable but refresh daily
+    "market_news": 900,    # 15 min  — news changes often
+    "earnings":    21600,  # 6 hrs   — dates change rarely
+    "splits":      43200,  # 12 hrs  — stable; long TTL protects rate limits
+    "dividends":   43200,  # 12 hrs  — ex-dates don't change often
+    "economic":    43200,  # 12 hrs  — stable; Finnhub econ is 1 call/day max
 }
+
+# ── Finnhub rate-limit backoff ─────────────────────────────────────────────────
+# When Finnhub returns HTTP 429 we freeze ALL Finnhub calls for 30 minutes.
+# Every call site checks _fh_is_rate_limited() before touching urllib.
+
+_fh_rl_lock  = threading.Lock()
+_fh_rl_until = 0.0      # monotonic timestamp; 0 = not rate-limited
+_FH_RL_SECS  = 1800     # 30-minute cooldown
+
+
+def _fh_is_rate_limited() -> bool:
+    return _time.monotonic() < _fh_rl_until
+
+
+def _fh_set_rate_limited(secs: int = _FH_RL_SECS) -> None:
+    global _fh_rl_until
+    with _fh_rl_lock:
+        _fh_rl_until = _time.monotonic() + secs
+    logger.warning("Finnhub 429 — rate-limited, pausing all Finnhub calls for %d min", secs // 60)
+
+
+def _fh_urlopen(url: str, timeout: int = 8):
+    """urllib.request.urlopen wrapper that detects Finnhub 429 and sets the backoff."""
+    import urllib.request
+    import urllib.error
+    if _fh_is_rate_limited():
+        raise RuntimeError("Finnhub rate-limited — call skipped")
+    try:
+        return urllib.request.urlopen(url, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            _fh_set_rate_limited()
+            raise RuntimeError(f"Finnhub 429 — rate limited for {_FH_RL_SECS // 60} min") from exc
+        raise
 
 
 def _cget(key: str):
@@ -452,65 +486,75 @@ def _earnings_from_finnhub(
     today: date,
     already_found: set,
 ) -> tuple[list[dict], list[str]]:
-    """Finnhub /calendar/earnings fallback for tickers yfinance missed.
-    Returns (results, errors).
+    """ONE bulk call to Finnhub /calendar/earnings (no symbol= filter).
+    Returns (results, errors).  Filters locally by tickers_wanted to avoid
+    N per-ticker requests that trigger 429s.
     """
-    import urllib.request
-    from_d   = today.isoformat()
-    to_d     = (today + timedelta(days=7)).isoformat()
-    results: list[dict] = []
-    errors:  list[str]  = []
+    if _fh_is_rate_limited():
+        return [], ["Finnhub rate-limited — earnings fallback skipped"]
 
-    for ticker in tickers:
-        if ticker in already_found:
+    tickers_wanted = {t.upper() for t in tickers if t.upper() not in already_found}
+    if not tickers_wanted:
+        return [], []
+
+    from_d = today.isoformat()
+    to_d   = (today + timedelta(days=7)).isoformat()
+    url = (
+        f"https://finnhub.io/api/v1/calendar/earnings"
+        f"?from={from_d}&to={to_d}&token={api_key}"
+    )
+
+    try:
+        with _fh_urlopen(url, timeout=8) as resp:
+            data = json.loads(resp.read().decode())
+    except RuntimeError as exc:
+        return [], [str(exc)]
+    except Exception as exc:
+        return [], [f"finnhub/earnings bulk: {exc}"]
+
+    results: list[dict] = []
+    for e in data.get("earningsCalendar", []):
+        ticker = (e.get("symbol") or "").upper()
+        if not ticker or ticker not in tickers_wanted:
+            continue
+        date_str = (e.get("date") or "")[:10]
+        if not date_str:
             continue
         try:
-            url = (
-                f"https://finnhub.io/api/v1/calendar/earnings"
-                f"?from={from_d}&to={to_d}&symbol={ticker}&token={api_key}"
-            )
-            with urllib.request.urlopen(url, timeout=5) as resp:
-                data = json.loads(resp.read().decode())
-            items = data.get("earningsCalendar", [])
-            if not items:
-                continue
-            e         = items[0]
-            date_str  = (e.get("date") or "")[:10]
-            if not date_str:
-                continue
             earn_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            days_away = (earn_date - today).days
-            if days_away < 0 or days_away > 7:
-                continue
-            hour       = (e.get("hour") or "").lower()
-            time_label = "BMO" if hour == "bmo" else "AMC" if hour == "amc" else "TBD"
-            eps_est = None
-            rev_est = None
-            try:
-                v = e.get("epsEstimate")
-                if v: eps_est = round(float(v), 2)
-            except Exception:
-                pass
-            try:
-                v = e.get("revenueEstimate")
-                if v: rev_est = int(v)
-            except Exception:
-                pass
-            results.append({
-                "ticker":       ticker,
-                "company_name": _company_name(ticker),
-                "date":         earn_date.isoformat(),
-                "days_away":    days_away,
-                "time_label":   time_label,
-                "eps_est":      eps_est,
-                "rev_est":      rev_est,
-                "source":       "finnhub",
-                "is_override":  False,
-            })
-        except Exception as exc:
-            errors.append(f"finnhub/{ticker}: {exc}")
+        except Exception:
+            continue
+        days_away = (earn_date - today).days
+        if days_away < 0 or days_away > 7:
+            continue
+        hour       = (e.get("hour") or "").lower()
+        time_label = "BMO" if hour == "bmo" else "AMC" if hour == "amc" else "TBD"
+        eps_est = None
+        rev_est = None
+        try:
+            v = e.get("epsEstimate")
+            if v: eps_est = round(float(v), 2)
+        except Exception:
+            pass
+        try:
+            v = e.get("revenueEstimate")
+            if v: rev_est = int(v)
+        except Exception:
+            pass
+        results.append({
+            "ticker":       ticker,
+            "company_name": _company_name(ticker),
+            "date":         earn_date.isoformat(),
+            "days_away":    days_away,
+            "time_label":   time_label,
+            "eps_est":      eps_est,
+            "rev_est":      rev_est,
+            "source":       "finnhub",
+            "is_override":  False,
+        })
 
-    return results, errors
+    logger.info("intel/earnings finnhub bulk: %d found from %d wanted", len(results), len(tickers_wanted))
+    return results, []
 
 
 def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
@@ -801,17 +845,22 @@ def fetch_stock_splits(tickers: Optional[list[str]] = None) -> list[dict]:
 
 
 def _splits_from_finnhub(tickers: list[str], api_key: str, today: date) -> list[dict]:
-    import urllib.request
+    if _fh_is_rate_limited():
+        logger.warning("intel/splits: Finnhub rate-limited — skipping, using yfinance fallback")
+        return []
     from_d = today.isoformat()
     to_d   = (today + timedelta(days=30)).isoformat()
     results: list[dict] = []
     for ticker in tickers:
+        if _fh_is_rate_limited():
+            logger.warning("intel/splits: Finnhub 429 mid-loop — stopping at %s", ticker)
+            break
         try:
             url = (
                 f"https://finnhub.io/api/v1/stock/split"
                 f"?symbol={ticker}&from={from_d}&to={to_d}&token={api_key}"
             )
-            with urllib.request.urlopen(url, timeout=4) as resp:
+            with _fh_urlopen(url, timeout=4) as resp:
                 data = json.loads(resp.read().decode())
             for s in (data or []):
                 eff_str = (s.get("date") or "")[:10]
@@ -837,6 +886,9 @@ def _splits_from_finnhub(tickers: list[str], api_key: str, today: date) -> list[
                     "status":       _split_status(days_away),
                     "source":       "finnhub",
                 })
+        except RuntimeError as exc:
+            logger.warning("intel/splits finnhub %s: %s", ticker, exc)
+            break   # rate-limited — stop calling Finnhub
         except Exception as e:
             logger.debug("intel/splits finnhub %s: %s", ticker, e)
     return results
@@ -905,18 +957,22 @@ def _dividends_from_finnhub(
     tickers: list[str], api_key: str, today: date, wl_set: set,
 ) -> list[dict]:
     """Fetch ex-dividend dates via Finnhub /stock/dividend2 (parallel)."""
-    import urllib.request
+    if _fh_is_rate_limited():
+        logger.warning("intel/dividends: Finnhub rate-limited — skipping, using yfinance fallback")
+        return []
     from_d = today.isoformat()
     to_d   = (today + timedelta(days=30)).isoformat()
     results: list[dict] = []
 
     def _fetch_one(ticker: str) -> Optional[dict]:
+        if _fh_is_rate_limited():
+            return None
         try:
             url = (
                 f"https://finnhub.io/api/v1/stock/dividend2"
                 f"?symbol={ticker}&from={from_d}&to={to_d}&token={api_key}"
             )
-            with urllib.request.urlopen(url, timeout=5) as resp:
+            with _fh_urlopen(url, timeout=5) as resp:
                 data = json.loads(resp.read().decode())
             items = data.get("data", [])
             if not items:
@@ -944,6 +1000,8 @@ def _dividends_from_finnhub(
                 "on_watchlist":  ticker in wl_set,
                 "source":        "finnhub",
             }
+        except RuntimeError:
+            return None   # rate-limited mid-flight
         except Exception:
             return None
 
@@ -1096,8 +1154,10 @@ def _econ_from_finnhub() -> list[dict]:
     api_key = os.environ.get("FINNHUB_API_KEY", "").strip()
     if not api_key:
         return []
+    if _fh_is_rate_limited():
+        logger.warning("intel/econ: Finnhub rate-limited — using static fallback")
+        return []
     try:
-        import urllib.request
         today  = _today_et()
         from_d = today.isoformat()
         to_d   = (today + timedelta(days=14)).isoformat()
@@ -1105,7 +1165,7 @@ def _econ_from_finnhub() -> list[dict]:
             f"https://finnhub.io/api/v1/calendar/economic"
             f"?from={from_d}&to={to_d}&token={api_key}"
         )
-        with urllib.request.urlopen(url, timeout=8) as resp:
+        with _fh_urlopen(url, timeout=8) as resp:
             data = json.loads(resp.read().decode())
         raw = data.get("economicCalendar", [])
         events: list[dict] = []
@@ -1368,6 +1428,12 @@ def get_intel_summary() -> dict:
     with _bg_refresh_lock:
         currently_refreshing = _bg_refreshing
 
+    fh_limited = _fh_is_rate_limited()
+    if fh_limited:
+        remaining = max(0, int((_fh_rl_until - _time.monotonic()) / 60))
+        errors.append(f"Finnhub rate-limited — using cached data ({remaining} min remaining)")
+        logger.warning("get_intel_summary: Finnhub rate-limited, serving cache")
+
     # Extract earnings buckets and debug meta separately
     _earn       = c_earn or {}
     earn_buckets = {
@@ -1385,9 +1451,11 @@ def get_intel_summary() -> dict:
 
     return {
         "ok":              not is_cold,
+        "rate_limited":    fh_limited,
         "errors":          errors,
         "last_updated":    _et_now().strftime("%I:%M %p ET"),
         "market_news":     c_news  or [],
+        "news":            c_news  or [],   # alias — frontend checks both keys
         "earnings":        earn_buckets,
         "splits":          c_split or [],
         "dividends":       c_div   or [],

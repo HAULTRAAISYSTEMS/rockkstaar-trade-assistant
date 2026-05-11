@@ -1844,6 +1844,17 @@ function loadIntelData(forceRefresh) {
       if (window._dbgSet) {
         _dbgSet('d-status', String(r.status), r.ok ? 'dbg-yes' : 'dbg-no');
       }
+      // Guard against HTML error pages — if content-type is not JSON, surface a clear message
+      var ct = r.headers.get('content-type') || '';
+      if (!ct.includes('json')) {
+        return r.text().then(function(txt) {
+          var preview = txt.slice(0, 120).replace(/</g, '&lt;');
+          throw new Error(
+            'Intel API returned non-JSON (HTTP ' + r.status + '). ' +
+            'Check Render logs. Preview: ' + preview
+          );
+        });
+      }
       return r.json();
     })
     .then(function(data) {
