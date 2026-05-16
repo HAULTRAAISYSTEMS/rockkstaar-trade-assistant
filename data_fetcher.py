@@ -1426,18 +1426,28 @@ def compute_market_temperature() -> dict:
             ("vix_d", "^VIX", "1d", "1mo"),
             ("spy_h", "SPY",  "1h", "5d"),
             ("qqq_h", "QQQ",  "1h", "5d"),
-            ("es_d",  "ES=F", "1d", "5d"),
-            ("es_h",  "ES=F", "1h", "5d"),
-            ("xlk_d", "XLK",  "1d", "5d"),
-            ("xly_d", "XLY",  "1d", "5d"),
-            ("xlf_d", "XLF",  "1d", "5d"),
-            ("xle_d", "XLE",  "1d", "5d"),
+            ("es_d",   "ES=F",      "1d", "5d"),
+            ("es_h",   "ES=F",      "1h", "5d"),
+            ("xlk_d",  "XLK",       "1d", "5d"),
+            ("xly_d",  "XLY",       "1d", "5d"),
+            ("xlf_d",  "XLF",       "1d", "5d"),
+            ("xle_d",  "XLE",       "1d", "5d"),
+            ("xlv_d",  "XLV",       "1d", "5d"),
+            ("xli_d",  "XLI",       "1d", "5d"),
+            ("xlu_d",  "XLU",       "1d", "5d"),
+            ("xlb_d",  "XLB",       "1d", "5d"),
+            ("xlre_d", "XLRE",      "1d", "5d"),
+            ("xlc_d",  "XLC",       "1d", "5d"),
+            ("smh_d",  "SMH",       "1d", "5d"),
+            ("iwm_d",  "IWM",       "1d", "5d"),
+            ("tnx_d",  "^TNX",      "1d", "5d"),
+            ("dxy_d",  "DX-Y.NYB",  "1d", "5d"),
         ]
         _threads = [_thr.Thread(target=_fetch, args=a, daemon=True) for a in _tasks]
         for _t in _threads:
             _t.start()
         for _t in _threads:
-            _t.join(timeout=15)
+            _t.join(timeout=18)
 
         spy_d = _results.get("spy_d")
         qqq_d = _results.get("qqq_d")
@@ -1529,9 +1539,14 @@ def compute_market_temperature() -> dict:
             except Exception:
                 pass
 
-        # Sector ETF daily % changes
+        # Sector ETF daily % changes (12 sectors)
         sectors: dict = {}
-        for _sk, _sn in [("xlk_d","XLK"),("xly_d","XLY"),("xlf_d","XLF"),("xle_d","XLE")]:
+        _sector_list = [
+            ("xlk_d","XLK"), ("xly_d","XLY"), ("xlf_d","XLF"), ("xle_d","XLE"),
+            ("xlv_d","XLV"), ("xli_d","XLI"), ("xlu_d","XLU"), ("xlb_d","XLB"),
+            ("xlre_d","XLRE"),("xlc_d","XLC"), ("smh_d","SMH"), ("iwm_d","IWM"),
+        ]
+        for _sk, _sn in _sector_list:
             _sd = _results.get(_sk)
             if _sd and len(_sd.get("closes", [])) >= 2:
                 try:
@@ -1542,6 +1557,52 @@ def compute_market_temperature() -> dict:
                     sectors[_sn] = None
             else:
                 sectors[_sn] = None
+
+        # 10Y Treasury yield (^TNX: value is already %, e.g. 4.25 = 4.25% yield)
+        yield_10y        = None
+        yield_change_bps = None
+        yield_trend      = "flat"
+        yield_note       = "—"
+        _tnx = _results.get("tnx_d")
+        if _tnx and len(_tnx.get("closes", [])) >= 2:
+            try:
+                yield_10y        = round(_tnx["closes"][-1], 3)
+                _tnx_prev        = _tnx["closes"][-2]
+                yield_change_bps = round((yield_10y - _tnx_prev) * 100, 1)
+                if yield_change_bps > 10:
+                    yield_trend = "rising fast"
+                    yield_note  = "Pressure on growth/tech — rising rates headwind"
+                elif yield_change_bps > 2:
+                    yield_trend = "rising"
+                    yield_note  = "Watch tech — yields creeping higher"
+                elif yield_change_bps < -10:
+                    yield_trend = "falling fast"
+                    yield_note  = "Supportive for growth/tech — rates declining"
+                elif yield_change_bps < -2:
+                    yield_trend = "falling"
+                    yield_note  = "Mild tailwind for growth/tech"
+                else:
+                    yield_trend = "flat"
+                    yield_note  = "Neutral — no rate pressure"
+            except Exception:
+                pass
+
+        # DXY (US Dollar Index)
+        dxy_price      = None
+        dxy_change_pct = None
+        dxy_trend      = "flat"
+        _dxy = _results.get("dxy_d")
+        if _dxy and len(_dxy.get("closes", [])) >= 2:
+            try:
+                dxy_price      = round(_dxy["closes"][-1], 2)
+                _dxy_prev      = _dxy["closes"][-2]
+                dxy_change_pct = round((dxy_price - _dxy_prev) / _dxy_prev * 100, 2) if _dxy_prev else 0.0
+                if dxy_change_pct > 0.3:
+                    dxy_trend = "rising"
+                elif dxy_change_pct < -0.3:
+                    dxy_trend = "falling"
+            except Exception:
+                pass
 
         # ── Score ─────────────────────────────────────────────────────────────
         score   = 0
@@ -1614,18 +1675,21 @@ def compute_market_temperature() -> dict:
                 score -= 1
                 factors.append(f"ES {es_change_pct:.1f}% below VWAP")
 
-        # Sector strength contribution
+        # Sector strength contribution (scales with however many sectors have data)
         _sector_vals = [v for v in sectors.values() if v is not None]
         if _sector_vals:
-            _green = sum(1 for v in _sector_vals if v > 0)
-            if _green >= 3:
+            _total_s = len(_sector_vals)
+            _green   = sum(1 for v in _sector_vals if v > 0)
+            _thresh_up   = max(3, round(_total_s * 0.60))
+            _thresh_down = max(1, round(_total_s * 0.25))
+            if _green >= _thresh_up:
                 score += 1
                 _top = max(
                     ((k, v) for k, v in sectors.items() if v is not None),
                     key=lambda x: x[1],
                 )
-                factors.append(f"{_green}/4 sectors green, {_top[0]} leads")
-            elif _green <= 1:
+                factors.append(f"{_green}/{_total_s} sectors green, {_top[0]} leads")
+            elif _green <= _thresh_down:
                 score -= 1
                 factors.append("sectors mostly red")
 
@@ -1792,13 +1856,20 @@ def compute_market_temperature() -> dict:
             "qqq_price":       round(qqq_price, 2),
             "qqq_pct_ema20":   round(qqq_pct_ema20, 2),
             "qqq_vs_vwap":     round(qqq_vs_vwap, 2) if qqq_vs_vwap is not None else None,
-            "vix_level":       round(vix_level, 1) if vix_level is not None else None,
-            "vix_direction":   vix_direction,
-            "es_price":        round(es_price, 2) if es_price is not None else None,
-            "es_change_pct":   round(es_change_pct, 2) if es_change_pct is not None else None,
-            "es_above_vwap":   es_above_vwap,
-            "sectors":         sectors,
-            "error":           False,
+            "vix_level":         round(vix_level, 1) if vix_level is not None else None,
+            "vix_direction":     vix_direction,
+            "es_price":          round(es_price, 2) if es_price is not None else None,
+            "es_change_pct":     round(es_change_pct, 2) if es_change_pct is not None else None,
+            "es_above_vwap":     es_above_vwap,
+            "yield_10y":         yield_10y,
+            "yield_change_bps":  yield_change_bps,
+            "yield_trend":       yield_trend,
+            "yield_note":        yield_note,
+            "dxy_price":         dxy_price,
+            "dxy_change_pct":    dxy_change_pct,
+            "dxy_trend":         dxy_trend,
+            "sectors":           sectors,
+            "error":             False,
         }
 
     except Exception as _e:
@@ -1824,18 +1895,28 @@ def fetch_market_context() -> dict:
             _results[key] = None
 
     _tasks = [
-        ("es_d",  "ES=F", "1d", "5d"),
-        ("es_h",  "ES=F", "1h", "5d"),
-        ("xlk_d", "XLK",  "1d", "5d"),
-        ("xly_d", "XLY",  "1d", "5d"),
-        ("xlf_d", "XLF",  "1d", "5d"),
-        ("xle_d", "XLE",  "1d", "5d"),
+        ("es_d",   "ES=F",      "1d", "5d"),
+        ("es_h",   "ES=F",      "1h", "5d"),
+        ("xlk_d",  "XLK",       "1d", "5d"),
+        ("xly_d",  "XLY",       "1d", "5d"),
+        ("xlf_d",  "XLF",       "1d", "5d"),
+        ("xle_d",  "XLE",       "1d", "5d"),
+        ("xlv_d",  "XLV",       "1d", "5d"),
+        ("xli_d",  "XLI",       "1d", "5d"),
+        ("xlu_d",  "XLU",       "1d", "5d"),
+        ("xlb_d",  "XLB",       "1d", "5d"),
+        ("xlre_d", "XLRE",      "1d", "5d"),
+        ("xlc_d",  "XLC",       "1d", "5d"),
+        ("smh_d",  "SMH",       "1d", "5d"),
+        ("iwm_d",  "IWM",       "1d", "5d"),
+        ("tnx_d",  "^TNX",      "1d", "5d"),
+        ("dxy_d",  "DX-Y.NYB",  "1d", "5d"),
     ]
     _threads = [_thr.Thread(target=_fetch, args=a, daemon=True) for a in _tasks]
     for _t in _threads:
         _t.start()
     for _t in _threads:
-        _t.join(timeout=15)
+        _t.join(timeout=18)
 
     # ES futures
     es: dict = {"price": None, "change_pct": None, "above_vwap": None, "error": True}
@@ -1879,9 +1960,13 @@ def fetch_market_context() -> dict:
         except Exception:
             pass
 
-    # Sector ETFs
+    # Sector ETFs (12 sectors)
     sectors: dict = {}
-    for key, name in [("xlk_d","XLK"),("xly_d","XLY"),("xlf_d","XLF"),("xle_d","XLE")]:
+    for key, name in [
+        ("xlk_d","XLK"), ("xly_d","XLY"), ("xlf_d","XLF"), ("xle_d","XLE"),
+        ("xlv_d","XLV"), ("xli_d","XLI"), ("xlu_d","XLU"), ("xlb_d","XLB"),
+        ("xlre_d","XLRE"),("xlc_d","XLC"), ("smh_d","SMH"), ("iwm_d","IWM"),
+    ]:
         d = _results.get(key)
         if d and len(d.get("closes", [])) >= 2:
             try:
@@ -1893,6 +1978,43 @@ def fetch_market_context() -> dict:
         else:
             sectors[name] = None
 
+    # 10Y Treasury yield
+    yield_10y = None; yield_change_bps = None; yield_trend = "flat"; yield_note = "—"
+    _tnx = _results.get("tnx_d")
+    if _tnx and len(_tnx.get("closes", [])) >= 2:
+        try:
+            yield_10y        = round(_tnx["closes"][-1], 3)
+            _tnx_prev        = _tnx["closes"][-2]
+            yield_change_bps = round((yield_10y - _tnx_prev) * 100, 1)
+            yield_trend = (
+                "rising fast" if yield_change_bps > 10 else
+                "rising"      if yield_change_bps > 2  else
+                "falling fast"if yield_change_bps < -10 else
+                "falling"     if yield_change_bps < -2 else "flat"
+            )
+            _note_map = {
+                "rising fast": "Pressure on growth/tech — rising rates headwind",
+                "rising":      "Watch tech — yields creeping higher",
+                "falling fast":"Supportive for growth/tech — rates declining",
+                "falling":     "Mild tailwind for growth/tech",
+                "flat":        "Neutral — no rate pressure",
+            }
+            yield_note = _note_map[yield_trend]
+        except Exception:
+            pass
+
+    # DXY
+    dxy_price = None; dxy_change_pct = None; dxy_trend = "flat"
+    _dxy = _results.get("dxy_d")
+    if _dxy and len(_dxy.get("closes", [])) >= 2:
+        try:
+            dxy_price      = round(_dxy["closes"][-1], 2)
+            _dxy_prev      = _dxy["closes"][-2]
+            dxy_change_pct = round((dxy_price - _dxy_prev) / _dxy_prev * 100, 2) if _dxy_prev else 0.0
+            dxy_trend = "rising" if dxy_change_pct > 0.3 else "falling" if dxy_change_pct < -0.3 else "flat"
+        except Exception:
+            pass
+
     # After-hours flag (rough ET check — 9:30–16:00 = regular session)
     after_hours = True
     try:
@@ -1902,4 +2024,15 @@ def fetch_market_context() -> dict:
     except Exception:
         pass
 
-    return {"es": es, "sectors": sectors, "after_hours": after_hours}
+    return {
+        "es":              es,
+        "sectors":         sectors,
+        "after_hours":     after_hours,
+        "yield_10y":       yield_10y,
+        "yield_change_bps":yield_change_bps,
+        "yield_trend":     yield_trend,
+        "yield_note":      yield_note,
+        "dxy_price":       dxy_price,
+        "dxy_change_pct":  dxy_change_pct,
+        "dxy_trend":       dxy_trend,
+    }

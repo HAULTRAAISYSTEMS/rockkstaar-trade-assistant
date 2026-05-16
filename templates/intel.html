@@ -272,7 +272,7 @@
   /* ── Market environment grid ── */
   .env-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 12px;
   }
   .env-cell {
@@ -456,7 +456,7 @@
   .sell-badge { background: var(--red-dim);   color: var(--red);   border: 1px solid rgba(239,68,68,0.2);  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.05em; }
 
   /* ── Sector heat ── */
-  .sector-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .sector-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .sector-cell {
     background: var(--bg-inset);
     border: 1px solid var(--border);
@@ -869,6 +869,7 @@
     .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
     .env-grid { grid-template-columns: 1fr 1fr; }
     .sector-grid { grid-template-columns: repeat(2, 1fr); }
+    .sector-grid .sector-pct { font-size: 14px; }
     .earnings-row { grid-template-columns: 55px 1fr 65px 65px; }
     .earnings-row .col-hide { display: none; }
     .news-row { grid-template-columns: 55px 55px 1fr; }
@@ -991,7 +992,7 @@
     <div class="regime-banner risk-on" id="regime-banner">
       <div>
         <div class="regime-text" id="regime-label">✅ RISK-ON — Full Green Light</div>
-        <div class="regime-sub" id="regime-sub">SPY + QQQ bullish · VIX below 20 · DXY flat</div>
+        <div class="regime-sub" id="regime-sub">SPY + QQQ bullish · VIX below 20 · 10Y flat · DXY flat</div>
       </div>
       <span class="badge badge-green" id="regime-badge">RISK-ON</span>
     </div>
@@ -1024,9 +1025,15 @@
         </div>
         <div class="env-cell">
           <div class="env-label">DXY</div>
-          <div class="env-value" id="dxy-value" style="color:var(--text-primary)">103.2</div>
-          <div class="env-sub" id="dxy-sub">vs 30-day avg</div>
-          <div class="env-status" id="dxy-status" style="color:var(--green)">FLAT / NEUTRAL</div>
+          <div class="env-value" id="dxy-value" style="color:var(--text-primary)">—</div>
+          <div class="env-sub" id="dxy-sub">US Dollar Index</div>
+          <div class="env-status" id="dxy-status" style="color:var(--text-secondary)">—</div>
+        </div>
+        <div class="env-cell">
+          <div class="env-label">10Y YIELD</div>
+          <div class="env-value" id="yield-value" style="color:var(--text-primary)">—</div>
+          <div class="env-sub" id="yield-change">Daily change</div>
+          <div class="env-status" id="yield-status" style="color:var(--text-secondary)">—</div>
         </div>
       </div>
     </div>
@@ -1040,14 +1047,18 @@
         </div>
         <div class="card-body">
           <div class="sector-grid" id="sector-grid">
-            <div class="sector-cell"><div class="sector-name">Technology</div><div class="sector-etf">XLK</div><div class="sector-pct pos" id="xlk">+2.7%</div></div>
-            <div class="sector-cell"><div class="sector-name">Consumer</div><div class="sector-etf">XLY</div><div class="sector-pct pos" id="xly">+1.5%</div></div>
-            <div class="sector-cell"><div class="sector-name">Financials</div><div class="sector-etf">XLF</div><div class="sector-pct pos" id="xlf">+0.5%</div></div>
-            <div class="sector-cell"><div class="sector-name">Energy</div><div class="sector-etf">XLE</div><div class="sector-pct neg" id="xle">-4.1%</div></div>
+            <div class="sector-cell"><div class="sector-name">Technology</div><div class="sector-etf">XLK</div><div class="sector-pct" id="xlk">—</div></div>
+            <div class="sector-cell"><div class="sector-name">Consumer</div><div class="sector-etf">XLY</div><div class="sector-pct" id="xly">—</div></div>
+            <div class="sector-cell"><div class="sector-name">Financials</div><div class="sector-etf">XLF</div><div class="sector-pct" id="xlf">—</div></div>
+            <div class="sector-cell"><div class="sector-name">Energy</div><div class="sector-etf">XLE</div><div class="sector-pct" id="xle">—</div></div>
             <div class="sector-cell"><div class="sector-name">Health Care</div><div class="sector-etf">XLV</div><div class="sector-pct" id="xlv">—</div></div>
             <div class="sector-cell"><div class="sector-name">Industrials</div><div class="sector-etf">XLI</div><div class="sector-pct" id="xli">—</div></div>
             <div class="sector-cell"><div class="sector-name">Utilities</div><div class="sector-etf">XLU</div><div class="sector-pct" id="xlu">—</div></div>
             <div class="sector-cell"><div class="sector-name">Materials</div><div class="sector-etf">XLB</div><div class="sector-pct" id="xlb">—</div></div>
+            <div class="sector-cell"><div class="sector-name">Real Estate</div><div class="sector-etf">XLRE</div><div class="sector-pct" id="xlre">—</div></div>
+            <div class="sector-cell"><div class="sector-name">Comm Svcs</div><div class="sector-etf">XLC</div><div class="sector-pct" id="xlc">—</div></div>
+            <div class="sector-cell"><div class="sector-name">Semis</div><div class="sector-etf">SMH</div><div class="sector-pct" id="smh">—</div></div>
+            <div class="sector-cell"><div class="sector-name">Small Caps</div><div class="sector-etf">IWM</div><div class="sector-pct" id="iwm">—</div></div>
           </div>
         </div>
       </div>
@@ -1681,16 +1692,65 @@ function refreshMarketData() {
         el.className = 'level-value ' + (mt.qqq_vs_vwap ? 'pos' : 'neg');
       }
 
-      // Sectors
+      // DXY
+      if (mt.dxy_price != null) {
+        document.getElementById('dxy-value').textContent = Number(mt.dxy_price).toFixed(2);
+        const dxyChg = mt.dxy_change_pct;
+        if (dxyChg != null) {
+          const s = dxyChg >= 0 ? '+' : '';
+          document.getElementById('dxy-sub').textContent = s + Number(dxyChg).toFixed(2) + '% today';
+        }
+        const dxyTrend = mt.dxy_trend || 'flat';
+        const dxyEl = document.getElementById('dxy-status');
+        if (dxyTrend === 'rising') { dxyEl.textContent = 'RISING ↑'; dxyEl.style.color = 'var(--amber)'; }
+        else if (dxyTrend === 'falling') { dxyEl.textContent = 'FALLING ↓'; dxyEl.style.color = 'var(--green)'; }
+        else { dxyEl.textContent = 'FLAT / NEUTRAL'; dxyEl.style.color = 'var(--text-secondary)'; }
+      }
+
+      // 10Y Treasury Yield
+      if (mt.yield_10y != null) {
+        const yieldEl = document.getElementById('yield-value');
+        const yv = Number(mt.yield_10y);
+        yieldEl.textContent = yv.toFixed(3) + '%';
+        yieldEl.style.color = yv > 4.5 ? 'var(--red)' : yv > 4.0 ? 'var(--amber)' : 'var(--green)';
+        const bps = mt.yield_change_bps;
+        if (bps != null) {
+          const s = bps >= 0 ? '+' : '';
+          document.getElementById('yield-change').textContent = s + Number(bps).toFixed(1) + ' bps today';
+        }
+        const yTrend = mt.yield_trend || 'flat';
+        const yStatusEl = document.getElementById('yield-status');
+        const _yNoteMap = {
+          'rising fast': ['RISING FAST ↑↑', 'var(--red)'],
+          'rising':      ['RISING ↑',        'var(--amber)'],
+          'falling fast':['FALLING FAST ↓↓', 'var(--green)'],
+          'falling':     ['FALLING ↓',       'var(--teal)'],
+          'flat':        ['FLAT / NEUTRAL',   'var(--text-secondary)'],
+        };
+        const [yLabel, yColor] = _yNoteMap[yTrend] || _yNoteMap['flat'];
+        yStatusEl.textContent = yLabel; yStatusEl.style.color = yColor;
+      }
+
+      // Sectors (12 total)
       const sectors = mt.sectors || {};
-      const sectorMap = { xlk:'XLK', xly:'XLY', xlf:'XLF', xle:'XLE', xlv:'XLV', xli:'XLI', xlu:'XLU', xlb:'XLB' };
+      const sectorMap = {
+        xlk:'XLK', xly:'XLY', xlf:'XLF', xle:'XLE',
+        xlv:'XLV', xli:'XLI', xlu:'XLU', xlb:'XLB',
+        xlre:'XLRE', xlc:'XLC', smh:'SMH', iwm:'IWM',
+      };
       Object.entries(sectorMap).forEach(([id, key]) => {
         const val = sectors[key];
         const el = document.getElementById(id);
-        if (el && val != null) {
+        if (!el) return;
+        if (val != null) {
           const pct = Number(val).toFixed(2);
           el.textContent = (pct >= 0 ? '+' : '') + pct + '%';
           el.className = 'sector-pct ' + (pct >= 0 ? 'pos' : 'neg');
+        } else {
+          el.textContent = 'No data';
+          el.className = 'sector-pct';
+          el.style.color = 'var(--text-muted)';
+          el.style.fontSize = '11px';
         }
       });
 

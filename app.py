@@ -4486,6 +4486,55 @@ def api_intel():
         return jsonify(_intel_error_payload(str(e))), 200
 
 
+@app.route("/api/intel/debug")
+def api_intel_debug():
+    """Debug endpoint — shows data source health for the intel engine. No API keys exposed."""
+    try:
+        summary    = _intel.get_intel_summary()
+        earn_dbg   = summary.get("earnings_debug", {})
+        macro      = summary.get("market_environment", {})
+        sector_ht  = summary.get("sector_heat", [])
+
+        cache_ages: dict = {}
+        with _intel._cache_lock:
+            for key, entry in list(_intel._cache.items()):
+                age_s = int(_time.monotonic() - entry["ts"])
+                cache_ages[key] = f"{age_s}s ago"
+
+        fh_limited = _intel._fh_is_rate_limited()
+        fh_secs    = max(0, int(_intel._fh_rl_until - _time.monotonic())) if fh_limited else 0
+        earn       = summary.get("earnings", {})
+
+        return jsonify({
+            "ok":                   summary.get("ok"),
+            "finnhub_rate_limited": fh_limited,
+            "finnhub_rl_remaining": f"{fh_secs}s" if fh_limited else "not limited",
+            "errors":               summary.get("errors", []),
+            "cache_ages":           cache_ages,
+            "news_count":           len(summary.get("news", [])),
+            "earnings_today":       len(earn.get("today", [])),
+            "earnings_tomorrow":    len(earn.get("tomorrow", [])),
+            "earnings_this_week":   len(earn.get("this_week", [])),
+            "earnings_tickers_checked": earn_dbg.get("tickers_checked", 0),
+            "earnings_source":      earn_dbg.get("earnings_source_used", "—"),
+            "earnings_yfinance":    earn_dbg.get("yfinance_found", 0),
+            "earnings_finnhub":     earn_dbg.get("finnhub_found", 0),
+            "earnings_overrides":   earn_dbg.get("overrides_injected", 0),
+            "splits_count":         len(summary.get("splits", [])),
+            "dividends_count":      len(summary.get("dividends", [])),
+            "sector_heat_count":    len(sector_ht),
+            "yield_10y":            macro.get("yield_10y"),
+            "yield_change_bps":     macro.get("yield_change_bps"),
+            "yield_trend":          macro.get("yield_trend"),
+            "dxy_price":            macro.get("dxy_price"),
+            "vix_level":            macro.get("vix_level"),
+            "regime":               macro.get("regime"),
+        })
+    except Exception as exc:
+        logger.error("api_intel_debug: %s", exc, exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/intel")
 def intel():
     """Pre-Market Intel — daily and weekly checklist, earnings, market environment."""

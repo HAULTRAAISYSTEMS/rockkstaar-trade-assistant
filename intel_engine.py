@@ -84,11 +84,12 @@ _cache_lock = threading.Lock()
 _cache: dict = {}
 
 _CACHE_TTL: dict[str, int] = {
-    "market_news": 900,    # 15 min  — news changes often
+    "market_news": 600,    # 10 min  — news changes often
     "earnings":    21600,  # 6 hrs   — dates change rarely
     "splits":      43200,  # 12 hrs  — stable; long TTL protects rate limits
     "dividends":   43200,  # 12 hrs  — ex-dates don't change often
     "economic":    43200,  # 12 hrs  — stable; Finnhub econ is 1 call/day max
+    "macro":       300,    # 5 min   — 10Y/DXY/VIX live feeds
 }
 
 # ── Finnhub rate-limit backoff ─────────────────────────────────────────────────
@@ -208,6 +209,7 @@ def trigger_background_refresh() -> None:
                 (fetch_earnings_calendar, "earnings"),
                 (fetch_dividends,         "dividends"),
                 (fetch_market_news,       "news"),
+                (fetch_macro_environment, "macro"),
             ]
             with ThreadPoolExecutor(max_workers=5) as bg_ex:
                 for fn, nm in tasks:
@@ -324,6 +326,12 @@ def classify_news_impact(headline: str, categories: list[str]) -> tuple[str, str
 
 # ── Ticker universe ───────────────────────────────────────────────────────────
 
+# Major market tickers always included in news fetching — never dropped by the cap
+_MAJOR_NEWS_TICKERS: list[str] = [
+    "SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT", "AMZN",
+    "META", "GOOGL", "AMD", "AVGO", "SMH",
+]
+
 # Mirrored from scanner.py — curated high-activity universe
 SCANNER_UNIVERSE: list[str] = [
     "NVDA", "AMD", "TSLA", "AAPL", "META", "GOOGL", "AMZN", "MSFT",
@@ -392,12 +400,18 @@ def _get_watchlist_tickers() -> list[str]:
 
 
 def _merged_universe(extra: Optional[list[str]] = None) -> list[str]:
-    """Universe for news fetching — capped tighter due to parallel API calls."""
-    wl = _get_watchlist_tickers()
-    base = list(dict.fromkeys(wl + SCANNER_UNIVERSE))
+    """Universe for news fetching.
+    Major market tickers always included first; remaining slots filled by watchlist
+    then scanner universe. Hard-capped to protect Finnhub rate limits.
+    """
+    wl   = _get_watchlist_tickers()
+    rest = list(dict.fromkeys(wl + SCANNER_UNIVERSE))
     if extra:
-        base = list(dict.fromkeys(base + extra))
-    return base[:30]   # hard cap to protect rate limits
+        rest = list(dict.fromkeys(rest + extra))
+    # Major tickers always in — fill remaining slots up to 40
+    remaining = [t for t in rest if t not in set(_MAJOR_NEWS_TICKERS)]
+    combined  = list(dict.fromkeys(_MAJOR_NEWS_TICKERS + remaining))
+    return combined[:40]
 
 
 def _earnings_universe() -> list[str]:
@@ -476,6 +490,50 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
     _cset("market_news", unique)
     logger.info("intel/news: %d items (MEDIUM+) from %d tickers", len(unique), len(all_tickers))
     return unique
+
+
+# ── Macro Environment (10Y Yield / DXY / VIX / SPY / QQQ) ───────────────────
+
+def fetch_macro_environment() -> dict:
+    """Fetch 10Y Treasury, DXY, VIX, SPY/QQQ for the Intel market environment card.
+    Cached 5 minutes. Returns an empty dict on failure so callers never crash.
+    """
+    cached = _cget("macro")
+    if cached is not None:
+        return cached
+
+    try:
+        from data_fetcher import compute_market_temperature
+        mt = compute_market_temperature()
+        result = {
+            "yield_10y":         mt.get("yield_10y"),
+            "yield_change_bps":  mt.get("yield_change_bps"),
+            "yield_trend":       mt.get("yield_trend", "flat"),
+            "yield_note":        mt.get("yield_note", "—"),
+            "dxy_price":         mt.get("dxy_price"),
+            "dxy_change_pct":    mt.get("dxy_change_pct"),
+            "dxy_trend":         mt.get("dxy_trend", "flat"),
+            "vix_level":         mt.get("vix_level"),
+            "vix_direction":     mt.get("vix_direction", "flat"),
+            "spy_price":         mt.get("spy_price"),
+            "spy_pct_ema20":     mt.get("spy_pct_ema20"),
+            "qqq_price":         mt.get("qqq_price"),
+            "qqq_pct_ema20":     mt.get("qqq_pct_ema20"),
+            "es_price":          mt.get("es_price"),
+            "es_change_pct":     mt.get("es_change_pct"),
+            "sectors":           mt.get("sectors", {}),
+            "regime":            mt.get("regime"),
+            "score":             mt.get("score"),
+        }
+        _cset("macro", result)
+        logger.info(
+            "intel/macro: yield=%.3f%%  dxy=%.2f  vix=%.1f",
+            result["yield_10y"] or 0, result["dxy_price"] or 0, result["vix_level"] or 0,
+        )
+        return result
+    except Exception as exc:
+        logger.warning("fetch_macro_environment: %s", exc)
+        return {}
 
 
 # ── Earnings Calendar ─────────────────────────────────────────────────────────
@@ -1388,6 +1446,43 @@ def check_and_send_intel_alerts() -> list[dict]:
     except Exception as e:
         logger.warning("intel: econ alert sweep failed: %s", e)
 
+    # 6. VIX spike + 10Y yield spike
+    try:
+        macro = fetch_macro_environment()
+        vix   = macro.get("vix_level")
+        if vix and vix > 25:
+            level = "EXTREME" if vix > 35 else "ELEVATED"
+            dk = _daily_key("VIX", f"spike_{level}")
+            if should_send_alert(dk):
+                msg = (
+                    f"⚠️ <b>VIX {level} — {vix:.1f}</b>\n"
+                    f"Fear index {level.lower()}. Reduce size, use tighter stops.\n"
+                    f"<i>Consider sitting out until VIX drops below 25.</i>"
+                )
+                send_intel_alert(msg)
+                sent.append({"type": "vix_spike", "vix": vix})
+
+        yield_10y   = macro.get("yield_10y")
+        change_bps  = macro.get("yield_change_bps")
+        if yield_10y and change_bps is not None and abs(change_bps) >= 10:
+            direction = "SURGING" if change_bps > 0 else "DROPPING"
+            dk = _daily_key("TNX", f"spike_{direction}")
+            if should_send_alert(dk):
+                note = (
+                    "Growth/tech headwind — watch for sector rotation."
+                    if change_bps > 0 else
+                    "Bond rally — supportive for growth/tech."
+                )
+                msg = (
+                    f"📈 <b>10Y Yield {direction} — {yield_10y:.3f}%</b>\n"
+                    f"Daily change: {change_bps:+.1f} bps\n"
+                    f"<i>{note}</i>"
+                )
+                send_intel_alert(msg)
+                sent.append({"type": "yield_spike", "yield_10y": yield_10y, "change_bps": change_bps})
+    except Exception as e:
+        logger.warning("intel: vix/yield alert sweep failed: %s", e)
+
     if sent:
         logger.info("intel: sent %d Telegram alerts", len(sent))
     return sent
@@ -1410,6 +1505,7 @@ def get_intel_summary() -> dict:
     c_split = _cget("splits")
     c_div   = _cget("dividends")
     c_econ  = _cget("economic")
+    c_macro = _cget("macro")
 
     is_cold = (c_earn is None) or (c_split is None) or (c_econ is None)
     errors: list[str] = []
@@ -1450,16 +1546,21 @@ def get_intel_summary() -> dict:
     _apply_overrides_to_buckets(earn_buckets, today, wl_set)
 
     return {
-        "ok":              not is_cold,
-        "rate_limited":    fh_limited,
-        "errors":          errors,
-        "last_updated":    _et_now().strftime("%I:%M %p ET"),
-        "market_news":     c_news  or [],
-        "news":            c_news  or [],   # alias — frontend checks both keys
-        "earnings":        earn_buckets,
-        "splits":          c_split or [],
-        "dividends":       c_div   or [],
-        "economic_events": c_econ  or [],
+        "ok":                 not is_cold,
+        "rate_limited":       fh_limited,
+        "errors":             errors,
+        "last_updated":       _et_now().strftime("%I:%M %p ET"),
+        "market_news":        c_news  or [],
+        "news":               c_news  or [],   # alias — frontend checks both keys
+        "earnings":           earn_buckets,
+        "splits":             c_split or [],
+        "dividends":          c_div   or [],
+        "economic_events":    c_econ  or [],
+        "market_environment": c_macro or {},
+        "sector_heat": [
+            {"ticker": k, "pct": v, "direction": "up" if (v or 0) >= 0 else "down"}
+            for k, v in (c_macro or {}).get("sectors", {}).items()
+        ],
         "earnings_debug": {
             "server_date":          today.isoformat(),
             "tickers_checked":      earn_meta.get("tickers_checked", 0),
