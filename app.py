@@ -1255,7 +1255,14 @@ def compute_trade_coach(stock: dict, plan: dict, market_temp: dict, risk_setting
             level, css, status = "reduce", "coach-reduce", "REDUCE SIZE"
 
     elif perm == "WATCH":
-        if is_extended_entry:
+        if "Bullish pullback" in perm_rsn:
+            msg = (
+                "Watch — Bullish pullback in progress. Price is above both 20 EMA and 50 EMA "
+                "with a healthy Fibonacci retracement. Trend structure (HH/HL) not yet confirmed "
+                "— wait for a higher low to print before entering. Strong continuation candidate "
+                "if demand holds here."
+            )
+        elif is_extended_entry:
             msg = ("Watch only. Price is extended from ideal entry — do not chase. "
                    "Wait for a pullback into the zone.")
         elif swing_sc >= 7:
@@ -1350,8 +1357,10 @@ def compute_trade_permission(stock: dict, trade_mode: str) -> dict:
         return {"permission": "BLOCKED", "css": "perm-blocked",
                 "reason": "Avoid bias — no directional edge, skip this stock"}
 
-    # Label-based extension (existing system signal)
-    if entry == "Extended":
+    # Label-based extension — hard block for day trades only.
+    # Swing trades use the independent EMA-distance check below so they aren't
+    # double-penalised when the label fires on a healthy pullback leg.
+    if entry == "Extended" and trade_mode != "SWING TRADE":
         return {"permission": "BLOCKED", "css": "perm-blocked",
                 "reason": "Entry extended — do not chase, wait for pullback to zone"}
 
@@ -1482,6 +1491,21 @@ def compute_trade_permission(stock: dict, trade_mode: str) -> dict:
         # Structure — HH/HL on Daily or 4H required before any entry
         structure_valid = daily_hh_hl or h4_hh_hl
         if not structure_valid:
+            # Classify as bullish pullback (WATCH) when price is above both EMAs
+            # and within a healthy fib retracement — trend still intact, structure forming
+            above_20ema = pct_ema20 is not None and pct_ema20 > 0
+            above_50ema = pct_ema50 is not None and pct_ema50 > 0
+            fib_705_val = stock.get("fib_705")
+            in_fib_zone = bool(
+                current and fib_618 and fib_705_val and
+                fib_705_val <= current <= fib_618 * 1.02
+            ) or bool(
+                current and fib_50 and current >= fib_50 * 0.97
+            )
+            if long_bias and above_20ema and above_50ema and in_fib_zone:
+                return {"permission": "WATCH", "css": "perm-watch",
+                        "reason": ("Bullish pullback / continuation watch — price above 20 & 50 EMA "
+                                   "within healthy fib zone; wait for HH/HL structure to confirm")}
             return {"permission": "BLOCKED", "css": "perm-blocked",
                     "reason": "No valid structure — need HH/HL confirmed on daily or 4H chart"}
 

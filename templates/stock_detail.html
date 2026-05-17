@@ -285,10 +285,18 @@
           <span class="fib-direction fib-dir-{{ stock.fib_direction or 'bullish' }}">
             {{ '▲ Bullish' if (stock.fib_direction or 'bullish') == 'bullish' else '▼ Bearish' }}
           </span>
+          {% if stock.macro_fib_high and stock.macro_fib_low %}
+          <div class="fib-toggle-group">
+            <button class="fib-toggle-btn{{ ' fib-toggle-on' if (stock.fib_mode or 'macro') != 'macro' else '' }}"
+                    id="fib-btn-active" onclick="fibToggle('active')">Active</button>
+            <button class="fib-toggle-btn{{ ' fib-toggle-on' if (stock.fib_mode or 'macro') == 'macro' else '' }}"
+                    id="fib-btn-macro" onclick="fibToggle('macro')">Macro</button>
+          </div>
+          {% endif %}
         </div>
         <div class="fib-anchors">
-          <span>High: ${{ "%.2f"|format(fh) }}</span>
-          <span>Low: ${{ "%.2f"|format(fl) }}</span>
+          <span id="fib-anchor-high">High: ${{ "%.2f"|format(fh) }}</span>
+          <span id="fib-anchor-low">Low: ${{ "%.2f"|format(fl) }}</span>
         </div>
 
         <!-- Full level grid -->
@@ -299,14 +307,14 @@
           <div class="fib-row fib-row-high {{ 'fib-row-active' if cur and frng > 0 and (fh * 0.99) <= cur else '' }}">
             <span class="fib-pct">0%</span>
             <span class="fib-label">Swing High</span>
-            <span class="fib-value">${{ "%.2f"|format(fh) }}</span>
+            <span class="fib-value" id="fib-val-0">${{ "%.2f"|format(fh) }}</span>
           </div>
 
           {% if stock.fib_236 %}
           <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_236 * 0.98) <= cur <= (stock.fib_236 * 1.02) else '' }}">
             <span class="fib-pct">23.6%</span>
             <span class="fib-label">Shallow Pullback</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_236) }}</span>
+            <span class="fib-value" id="fib-val-236">${{ "%.2f"|format(stock.fib_236) }}</span>
           </div>
           {% endif %}
 
@@ -314,7 +322,7 @@
           <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_382 * 0.98) <= cur <= (stock.fib_382 * 1.02) else '' }}">
             <span class="fib-pct">38.2%</span>
             <span class="fib-label">Standard Pullback</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_382) }}</span>
+            <span class="fib-value" id="fib-val-382">${{ "%.2f"|format(stock.fib_382) }}</span>
           </div>
           {% endif %}
 
@@ -324,27 +332,38 @@
           <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_50 * 0.98) <= cur <= (stock.fib_50 * 1.02) else '' }}">
             <span class="fib-pct">50%</span>
             <span class="fib-label">Mid Retracement</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_50) }}</span>
+            <span class="fib-value" id="fib-val-50">${{ "%.2f"|format(stock.fib_50) }}</span>
           </div>
           {% endif %}
 
-          <div class="fib-zone-label fib-zone-golden">Golden Pocket</div>
-
-          {% if stock.fib_618 %}
-          <div class="fib-row fib-row-golden {{ 'fib-row-active' if cur and (stock.fib_618 * 0.98) <= cur <= (stock.fib_618 * 1.02) else '' }}">
-            <span class="fib-pct">61.8%</span>
-            <span class="fib-label">Golden Pocket Top</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_618) }}</span>
+          <!-- Golden Pocket Zone — 61.8% to 70.5% -->
+          <div class="fib-golden-pocket-zone">
+            <div class="fib-gp-title">
+              <span class="fib-gp-label">Golden Pocket</span>
+              <span class="fib-gp-range">61.8% – 70.5%</span>
+            </div>
+            {% if stock.fib_618 %}
+            <div class="fib-row fib-row-golden {{ 'fib-row-active' if cur and (stock.fib_618 * 0.98) <= cur <= (stock.fib_618 * 1.02) else '' }}">
+              <span class="fib-pct">61.8%</span>
+              <span class="fib-label">GP Top</span>
+              <span class="fib-value" id="fib-val-618">${{ "%.2f"|format(stock.fib_618) }}</span>
+            </div>
+            {% endif %}
+            {% if stock.fib_65 %}
+            <div class="fib-row fib-row-golden {{ 'fib-row-active' if cur and (stock.fib_65 * 0.98) <= cur <= (stock.fib_65 * 1.02) else '' }}">
+              <span class="fib-pct">65%</span>
+              <span class="fib-label">GP Mid</span>
+              <span class="fib-value" id="fib-val-65">${{ "%.2f"|format(stock.fib_65) }}</span>
+            </div>
+            {% endif %}
+            {% if stock.fib_705 %}
+            <div class="fib-row fib-row-golden {{ 'fib-row-active' if cur and (stock.fib_705 * 0.98) <= cur <= (stock.fib_705 * 1.02) else '' }}">
+              <span class="fib-pct">70.5%</span>
+              <span class="fib-label">GP Bot</span>
+              <span class="fib-value" id="fib-val-705">${{ "%.2f"|format(stock.fib_705) }}</span>
+            </div>
+            {% endif %}
           </div>
-          {% endif %}
-
-          {% if stock.fib_65 %}
-          <div class="fib-row fib-row-golden {{ 'fib-row-active' if cur and (stock.fib_65 * 0.98) <= cur <= (stock.fib_65 * 1.02) else '' }}">
-            <span class="fib-pct">65%</span>
-            <span class="fib-label">Golden Pocket Bot</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_65) }}</span>
-          </div>
-          {% endif %}
 
           <div class="fib-zone-label fib-zone-discount">Discount Zone</div>
 
@@ -352,14 +371,14 @@
           <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_786 * 0.98) <= cur <= (stock.fib_786 * 1.02) else '' }}">
             <span class="fib-pct">78.6%</span>
             <span class="fib-label">Deep Retracement</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_786) }}</span>
+            <span class="fib-value" id="fib-val-786">${{ "%.2f"|format(stock.fib_786) }}</span>
           </div>
           {% endif %}
 
           <div class="fib-row fib-row-low {{ 'fib-row-active' if cur and frng > 0 and cur <= (fl * 1.01) else '' }}">
             <span class="fib-pct">100%</span>
             <span class="fib-label">Swing Low</span>
-            <span class="fib-value">${{ "%.2f"|format(fl) }}</span>
+            <span class="fib-value" id="fib-val-100">${{ "%.2f"|format(fl) }}</span>
           </div>
 
         </div>
@@ -367,7 +386,7 @@
         <!-- Price position insight -->
         {% if cur and frng > 0 %}
         {% set pct_r = (fh - cur) / frng * 100 %}
-        <div class="fib-position-insight {{ 'fib-pos-premium' if pct_r < 38.2 else ('fib-pos-golden' if pct_r <= 65 else 'fib-pos-discount') }}">
+        <div class="fib-position-insight {{ 'fib-pos-premium' if pct_r < 38.2 else ('fib-pos-golden' if pct_r <= 70.5 else 'fib-pos-discount') }}">
           {% if pct_r < 0 %}
             Extended <strong>{{ "%.1f"|format(-pct_r) }}%</strong> above swing high — momentum extended, watch for pullback.
           {% elif pct_r < 23.6 %}
@@ -378,7 +397,7 @@
             Between 38.2–50% at <strong>{{ "%.1f"|format(pct_r) }}%</strong> — standard retracement, watch for demand reaction.
           {% elif pct_r < 61.8 %}
             Near <strong>50% mid-level</strong> ({{ "%.1f"|format(pct_r) }}%) — trend intact while price holds above here.
-          {% elif pct_r <= 65 %}
+          {% elif pct_r <= 70.5 %}
             In the <strong>Golden Pocket</strong> ({{ "%.1f"|format(pct_r) }}%) — prime long entry zone in uptrend, high-confluence area.
           {% elif pct_r < 78.6 %}
             <strong>Deep retracement</strong> at {{ "%.1f"|format(pct_r) }}% — structure weakening, needs reclaim of 61.8%.
@@ -435,6 +454,55 @@
             <button class="fib-override-btn" type="submit">Apply Override</button>
           </form>
         </div>
+
+        {% if stock.macro_fib_high and stock.macro_fib_low %}
+        {% set m_hi = stock.macro_fib_high %}
+        {% set m_lo = stock.macro_fib_low %}
+        {% set m_rng = m_hi - m_lo %}
+        <script>
+        (function() {
+          var _fibD = {
+            active: {
+              high:   {{ fh | tojson }},      low:    {{ fl | tojson }},
+              fib236: {{ stock.fib_236 | tojson }}, fib382: {{ stock.fib_382 | tojson }},
+              fib50:  {{ stock.fib_50  | tojson }}, fib618: {{ stock.fib_618 | tojson }},
+              fib65:  {{ stock.fib_65  | tojson }}, fib705: {{ stock.fib_705 | tojson }},
+              fib786: {{ stock.fib_786 | tojson }}
+            },
+            macro: {
+              high:   {{ m_hi | tojson }},    low:    {{ m_lo | tojson }},
+              fib236: {{ (m_hi - 0.236 * m_rng) | round(2) | tojson }},
+              fib382: {{ (m_hi - 0.382 * m_rng) | round(2) | tojson }},
+              fib50:  {{ (stock.macro_fib_50  if stock.macro_fib_50  else (m_hi - 0.5   * m_rng)) | round(2) | tojson }},
+              fib618: {{ (stock.macro_fib_618 if stock.macro_fib_618 else (m_hi - 0.618 * m_rng)) | round(2) | tojson }},
+              fib65:  {{ (m_hi - 0.65  * m_rng) | round(2) | tojson }},
+              fib705: {{ (m_hi - 0.705 * m_rng) | round(2) | tojson }},
+              fib786: {{ (m_hi - 0.786 * m_rng) | round(2) | tojson }}
+            }
+          };
+          window.fibToggle = function(mode) {
+            var d = _fibD[mode];
+            if (!d) return;
+            var fmt = function(v) { return v != null ? '$' + parseFloat(v).toFixed(2) : '—'; };
+            var upd = function(id, txt) { var e = document.getElementById(id); if (e) e.textContent = txt; };
+            upd('fib-anchor-high', 'High: ' + fmt(d.high));
+            upd('fib-anchor-low',  'Low: '  + fmt(d.low));
+            var map = {
+              'fib-val-0':   d.high,   'fib-val-236': d.fib236,
+              'fib-val-382': d.fib382, 'fib-val-50':  d.fib50,
+              'fib-val-618': d.fib618, 'fib-val-65':  d.fib65,
+              'fib-val-705': d.fib705, 'fib-val-786': d.fib786,
+              'fib-val-100': d.low
+            };
+            for (var id in map) { upd(id, fmt(map[id])); }
+            var btnA = document.getElementById('fib-btn-active');
+            var btnM = document.getElementById('fib-btn-macro');
+            if (btnA) btnA.classList.toggle('fib-toggle-on', mode === 'active');
+            if (btnM) btnM.classList.toggle('fib-toggle-on', mode === 'macro');
+          };
+        })();
+        </script>
+        {% endif %}
 
         {% else %}
         <div class="no-data-msg">
@@ -973,6 +1041,10 @@
             {% if stock.fib_65 %}
             <button type="button" class="plan-fill-btn"
               onclick="fillEntry({{ stock.fib_65 }})">65% ${{ "%.2f"|format(stock.fib_65) }}</button>
+            {% endif %}
+            {% if stock.fib_705 %}
+            <button type="button" class="plan-fill-btn"
+              onclick="fillEntry({{ stock.fib_705 }})">70.5% ${{ "%.2f"|format(stock.fib_705) }}</button>
             {% endif %}
           </div>
           {% endif %}

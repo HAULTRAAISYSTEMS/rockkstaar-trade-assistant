@@ -1093,9 +1093,10 @@ def fetch_swing_data(ticker: str) -> dict | None:
                 result["fib_50"]  = round(a_hi - 0.500 * a_rng, 2)
                 result["fib_618"] = round(a_hi - 0.618 * a_rng, 2)
                 result["fib_65"]  = round(a_hi - 0.650 * a_rng, 2)
+                result["fib_705"] = round(a_hi - 0.705 * a_rng, 2)
                 result["fib_786"] = round(a_hi - 0.786 * a_rng, 2)
             else:
-                for _k in ("fib_236", "fib_382", "fib_50", "fib_618", "fib_65", "fib_786"):
+                for _k in ("fib_236", "fib_382", "fib_50", "fib_618", "fib_65", "fib_705", "fib_786"):
                     result[_k] = None
         else:
             # Fallback: use macro fib (20-bar range)
@@ -1110,9 +1111,10 @@ def fetch_swing_data(ticker: str) -> dict | None:
                 result["fib_50"]  = result["macro_fib_50"]
                 result["fib_618"] = result["macro_fib_618"]
                 result["fib_65"]  = round(mac_hi - 0.650 * mac_rng, 2)
+                result["fib_705"] = round(mac_hi - 0.705 * mac_rng, 2)
                 result["fib_786"] = round(mac_hi - 0.786 * mac_rng, 2)
             else:
-                for _k in ("fib_236", "fib_382", "fib_50", "fib_618", "fib_65", "fib_786"):
+                for _k in ("fib_236", "fib_382", "fib_50", "fib_618", "fib_65", "fib_705", "fib_786"):
                     result[_k] = None
 
         # ── 4H trend (derived from 1h bars — yfinance has no native 4h interval) ──
