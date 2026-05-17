@@ -495,6 +495,104 @@
 </section>
 {% endif %}
 
+<!-- ===== SCANNER BUCKETS ===== -->
+{% set _sb = scanner_buckets %}
+{% if _sb.aplus or _sb.forming or _sb.chase or _sb.avoid %}
+<section class="scanner-buckets-section">
+  <h2 class="section-title">
+    Scanner Buckets
+    <span class="section-subtitle">Grade-sorted view of every watchlist stock</span>
+  </h2>
+  <div class="scanner-buckets-grid">
+
+    <!-- Bucket 1: A+ READY -->
+    <div class="sbucket sbucket-aplus">
+      <div class="sbucket-header">
+        <span class="sbucket-icon">&#9651;</span>
+        <span class="sbucket-title">A+ READY</span>
+        <span class="sbucket-count">{{ _sb.aplus|length }}</span>
+      </div>
+      <div class="sbucket-body">
+        {% for s in _sb.aplus %}
+        <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="sbucket-row">
+          <span class="sbucket-ticker">{{ s.ticker }}</span>
+          <span class="sbucket-grade exec-badge exec-badge-sm {{ s.simplified_action_class | default('') }}">{{ s.simplified_action | default('—') }}</span>
+          <span class="sbucket-type setup-pill {{ s.swing_setup_type_class | default('') }}">{{ s.swing_setup_type | default('—') }}</span>
+          <span class="sbucket-score">{{ s.swing_score or '—' }}/10</span>
+        </a>
+        {% else %}
+        <div class="sbucket-empty">No A+ setups found</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Bucket 2: SETUPS FORMING -->
+    <div class="sbucket sbucket-forming">
+      <div class="sbucket-header">
+        <span class="sbucket-icon">&#9670;</span>
+        <span class="sbucket-title">SETUPS FORMING</span>
+        <span class="sbucket-count">{{ _sb.forming|length }}</span>
+      </div>
+      <div class="sbucket-body">
+        {% for s in _sb.forming %}
+        <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="sbucket-row">
+          <span class="sbucket-ticker">{{ s.ticker }}</span>
+          <span class="sbucket-grade exec-badge exec-badge-sm {{ s.simplified_action_class | default('') }}">{{ s.simplified_action | default('—') }}</span>
+          <span class="sbucket-type setup-pill {{ s.swing_setup_type_class | default('') }}">{{ s.swing_setup_type | default('—') }}</span>
+          <span class="sbucket-score">{{ s.swing_score or '—' }}/10</span>
+        </a>
+        {% else %}
+        <div class="sbucket-empty">No developing setups</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Bucket 3: EXTENDED / CHASE ZONE -->
+    <div class="sbucket sbucket-chase">
+      <div class="sbucket-header">
+        <span class="sbucket-icon">&#9651;</span>
+        <span class="sbucket-title">EXTENDED / CHASE</span>
+        <span class="sbucket-count">{{ _sb.chase|length }}</span>
+      </div>
+      <div class="sbucket-body">
+        {% for s in _sb.chase %}
+        <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="sbucket-row">
+          <span class="sbucket-ticker">{{ s.ticker }}</span>
+          <span class="sbucket-grade exec-badge exec-badge-sm {{ s.simplified_action_class | default('') }}">{{ s.simplified_action | default('—') }}</span>
+          <span class="sbucket-type setup-pill {{ s.swing_setup_type_class | default('') }}">{{ s.swing_setup_type | default('—') }}</span>
+          <span class="sbucket-score">{{ s.swing_score or '—' }}/10</span>
+        </a>
+        {% else %}
+        <div class="sbucket-empty">No extended stocks</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Bucket 4: AVOID / BLOCKED -->
+    <div class="sbucket sbucket-avoid">
+      <div class="sbucket-header">
+        <span class="sbucket-icon">&#9650;</span>
+        <span class="sbucket-title">AVOID / BLOCKED</span>
+        <span class="sbucket-count">{{ _sb.avoid|length }}</span>
+      </div>
+      <div class="sbucket-body">
+        {% for s in _sb.avoid %}
+        <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="sbucket-row">
+          <span class="sbucket-ticker">{{ s.ticker }}</span>
+          <span class="sbucket-grade exec-badge exec-badge-sm {{ s.simplified_action_class | default('') }}">{{ s.simplified_action | default('—') }}</span>
+          <span class="sbucket-type setup-pill {{ s.swing_setup_type_class | default('') }}">{{ s.swing_setup_type | default('—') }}</span>
+          <span class="sbucket-score">{{ s.swing_score or '—' }}/10</span>
+        </a>
+        {% else %}
+        <div class="sbucket-empty">No blocked stocks</div>
+        {% endfor %}
+      </div>
+    </div>
+
+  </div>
+</section>
+{% endif %}
+
 <!-- ===== FULL WATCHLIST TABLE ===== -->
 <section class="watchlist-section">
   <h2 class="section-title">

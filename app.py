@@ -41,7 +41,8 @@ from database import (
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
 from data_fetcher import _et_now
-from scoring import catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES, compute_swing_grade
+from scoring import (catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES,
+                     compute_swing_grade, compute_continuation_score)
 from classifier import classify_stock
 from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as _clear_alerts
 import scanner as _scanner
@@ -706,24 +707,38 @@ def get_setup_type_class(setup_type):
     """CSS class for the setup type pill (day-trading and swing types)."""
     return {
         # Day-trading legacy types
-        "Momentum Breakout":          "setup-momentum-breakout",
-        "Momentum Runner":            "setup-momentum-runner",
-        "Gap and Go":                 "setup-gap-go",
-        "Breakdown":                  "setup-breakdown",
-        "VWAP Reclaim":               "setup-vwap",
-        "Range Break":                "setup-range",
-        "ORB":                        "setup-orb",
-        # Swing trading types
-        "Pullback to Support":        "setup-pullback",
-        "Breakout Retest Forming":    "setup-breakout-retest",
-        "Extended Wait":              "setup-extended",
-        "At Resistance Avoid":        "setup-resistance-avoid",
-        "Near 50% Retracement":       "setup-fib50",
-        "Near 61.8% Retracement":     "setup-fib618",
-        "Order Block Test":           "setup-order-block",
-        "Trend Continuation":         "setup-trend-continuation",
-        "Weak Structure Avoid":       "setup-weak-structure",
-        "No Setup":                   "setup-none",
+        "Momentum Breakout":             "setup-momentum-breakout",
+        "Momentum Runner":               "setup-momentum-runner",
+        "Gap and Go":                    "setup-gap-go",
+        "Breakdown":                     "setup-breakdown",
+        "VWAP Reclaim":                  "setup-vwap",
+        "Range Break":                   "setup-range",
+        "ORB":                           "setup-orb",
+        # Swing pullback / entry types
+        "Pullback to Support":           "setup-pullback",
+        "Pullback to 20 EMA":            "setup-pullback",
+        "Pullback to 50 EMA":            "setup-pullback",
+        "Breakout Retest":               "setup-breakout-retest",
+        "Breakout Retest Forming":       "setup-breakout-retest",
+        "Near 50% Retracement":          "setup-fib50",
+        "Near 61.8% Retracement":        "setup-fib618",
+        "Order Block Test":              "setup-order-block",
+        # Continuation / run-up types (green/teal accent)
+        "Breakout Continuation":         "setup-continuation",
+        "Earnings Continuation":         "setup-continuation",
+        "Bull Flag":                     "setup-bull-flag",
+        "Relative Strength Leader":      "setup-rs-leader",
+        "Trend Continuation":            "setup-trend-continuation",
+        # Extended / chase (amber accent)
+        "Extended — Wait for Pullback":  "setup-extended",
+        "Extended — Wait":               "setup-extended",
+        "Chase Zone — Do Not Enter":     "setup-chase",
+        # Avoid
+        "At Resistance — Avoid":         "setup-resistance-avoid",
+        "At Resistance Avoid":           "setup-resistance-avoid",
+        "Weak Structure — Avoid":        "setup-weak-structure",
+        "Weak Structure Avoid":          "setup-weak-structure",
+        "No Setup":                      "setup-none",
     }.get(setup_type, "setup-none")
 
 
@@ -2083,6 +2098,7 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
     stock["swing_status_class"]     = get_swing_status_class(stock.get("swing_status"))
     stock["swing_setup_type_class"] = get_setup_type_class(stock.get("swing_setup_type") or "No Setup")
     stock["swing_grade"]            = compute_swing_grade(stock.get("swing_score") or 1)
+    stock["continuation_score"]     = compute_continuation_score(stock)
 
     # ── Plan mode display helpers ─────────────────────────────────────────────
     _plan_mode = stock.get("plan_mode") or "none"
@@ -2224,13 +2240,8 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
         logger.warning("annotate  ticker=%s  trade_permission failed: %s", stock.get("ticker", "?"), _tp_exc)
         stock["trade_permission"] = {"permission": "WATCH", "css": "perm-watch", "reason": ""}
 
-    # ── Simplified 4-state decision badge ────────────────────────────────────
-    # Maps all conditions to one clear morning label: A+ READY / WATCH / EXTENDED / REJECTED
-    # Rules (in priority order):
-    #   REJECTED  — Avoid bias, structural avoid statuses, or swing_score < 3
-    #   EXTENDED  — price is_extended flag, entry_quality=Extended, or >5% above entry zone
-    #   A+ READY  — swing_score ≥ 7, actionable status, catalyst ≥ 4, R:R ≥ 1.5
-    #   WATCH     — everything else (decent setup, conditions not fully aligned)
+    # ── Simplified decision badge (grade-aware, 7 states) ────────────────────
+    # Priority order: REJECTED → CHASE ZONE → A+/A/B+ READY → B WATCH → FORMING → WATCH
     _sfa_ss    = stock.get("swing_status") or ""
     _sfa_sw    = stock.get("swing_score") or 0
     _sfa_rr    = stock.get("risk_reward")
@@ -2239,35 +2250,74 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
     _sfa_bias  = stock.get("trade_bias") or ""
     _sfa_cat   = stock.get("catalyst_score") or 0
     _sfa_edist = stock.get("entry_distance_pct") or 0
+    _sfa_grade = stock.get("swing_grade") or "D"
+    _sfa_stype = stock.get("swing_setup_type") or ""
+    _sfa_cont  = stock.get("continuation_score") or 0
+    _sfa_trend = stock.get("daily_trend") or ""
+    _sfa_struct= bool(stock.get("daily_hh_hl")) or bool(stock.get("h4_hh_hl"))
 
+    _CONT_TYPES = {
+        "Breakout Continuation", "Gap and Go", "Earnings Continuation",
+        "Bull Flag", "Relative Strength Leader", "Trend Continuation",
+    }
+    _CHASE_TYPES = {"Chase Zone — Do Not Enter"}
+    _EXTENDED_TYPES = {"Extended — Wait for Pullback", "Extended — Wait",
+                       "At Resistance — Avoid"}
+
+    # REJECTED: only true Avoid bias or confirmed-weak structure with no edge
     _sfa_is_rejected = (
         _sfa_bias == "Avoid" or
-        _sfa_ss in ("AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE") or
-        (_sfa_sw > 0 and _sfa_sw < 3)
+        (_sfa_sw > 0 and _sfa_sw < 3 and _sfa_cont < 4 and
+         _sfa_trend not in ("Bullish", "Bullish Lean"))
     )
-    _sfa_is_extended = (
-        _sfa_ext or
-        _sfa_eq == "Extended" or
-        (isinstance(_sfa_edist, (int, float)) and _sfa_edist > 5.0)
-    )
+    _sfa_is_chase = (_sfa_stype in _CHASE_TYPES or
+                     (_sfa_ext and not _sfa_struct and _sfa_sw < 5))
+    _sfa_is_extended = (_sfa_stype in _EXTENDED_TYPES or
+                        _sfa_eq == "Extended" or
+                        (isinstance(_sfa_edist, (int, float)) and _sfa_edist > 5.0
+                         and not _sfa_stype in _CONT_TYPES))
+
+    _READY_STATUSES = ("READY — LEVEL HOLDS", "PRE-CONFIRMATION", "TREND CONTINUATION")
     _sfa_is_aplus = (
+        not _sfa_is_rejected and not _sfa_is_chase and not _sfa_is_extended and
+        _sfa_sw >= 8 and _sfa_ss in _READY_STATUSES and
+        _sfa_cat >= 4 and (_sfa_rr is None or _sfa_rr >= 1.5)
+    )
+    _sfa_is_a = (
+        not _sfa_is_rejected and not _sfa_is_chase and not _sfa_is_extended and
+        _sfa_sw >= 7 and (_sfa_ss in _READY_STATUSES or _sfa_stype in _CONT_TYPES) and
+        (_sfa_rr is None or _sfa_rr >= 1.2)
+    )
+    _sfa_is_bplus = (
+        not _sfa_is_rejected and not _sfa_is_chase and
+        (_sfa_sw >= 6 or (_sfa_cont >= 6 and _sfa_stype in _CONT_TYPES))
+    )
+    _sfa_is_forming = (
         not _sfa_is_rejected and
-        not _sfa_is_extended and
-        _sfa_sw >= 7 and
-        _sfa_ss in ("READY — LEVEL HOLDS", "PRE-CONFIRMATION", "TREND CONTINUATION") and
-        _sfa_cat >= 4 and
-        (_sfa_rr is None or _sfa_rr >= 1.5)
+        (_sfa_sw >= 4 or _sfa_cont >= 5)
     )
 
     if _sfa_is_rejected:
         stock["simplified_action"]       = "REJECTED"
         stock["simplified_action_class"] = "sfa-rejected"
+    elif _sfa_is_chase:
+        stock["simplified_action"]       = "CHASE ZONE"
+        stock["simplified_action_class"] = "sfa-chase"
     elif _sfa_is_extended:
         stock["simplified_action"]       = "EXTENDED"
         stock["simplified_action_class"] = "sfa-extended"
     elif _sfa_is_aplus:
         stock["simplified_action"]       = "A+ READY"
         stock["simplified_action_class"] = "sfa-aplus"
+    elif _sfa_is_a:
+        stock["simplified_action"]       = "A READY"
+        stock["simplified_action_class"] = "sfa-a"
+    elif _sfa_is_bplus:
+        stock["simplified_action"]       = "B+ WATCH"
+        stock["simplified_action_class"] = "sfa-bplus"
+    elif _sfa_is_forming:
+        stock["simplified_action"]       = "FORMING"
+        stock["simplified_action_class"] = "sfa-forming"
     else:
         stock["simplified_action"]       = "WATCH"
         stock["simplified_action_class"] = "sfa-watch"
@@ -2527,6 +2577,7 @@ def compute_summary_cards(stocks: list) -> dict:
 _DASHBOARD_EMPTY = dict(
     ranked=[], top5=[], triggered=[], summary={},
     missing=[], watchlist=[], notes={}, secondary=[],
+    scanner_buckets={"aplus": [], "forming": [], "chase": [], "avoid": []},
     alt_modes=[], all_wls=[], active_wl=None, wl_counts={},
     no_trade={"is_no_trade": False, "lock_signals": False, "verdict": "",
               "reasons": [], "severity": "none"},
@@ -2605,16 +2656,25 @@ def _dashboard_inner():
     missing = [t for t in watchlist if t not in data_map]
 
     ranked     = rank_stocks(stocks)
-    # Top candidates: swing_score ≥ 6 and status not extended/avoid, OR fall back
-    # to day-trading criteria if swing fields are absent
+
+    _CONT_TYPES_TOP5 = {"Breakout Continuation", "Gap and Go", "Earnings Continuation",
+                        "Bull Flag", "Relative Strength Leader", "Trend Continuation"}
+    _AVOID_STATUSES = {"WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE", "NOT ENOUGH EDGE"}
+
+    # Top candidates: swing_score ≥ 6 OR continuation stock with score ≥ 5;
+    # also fall back to day-trading criteria when swing fields are absent.
     top5       = [
         s for s in ranked
         if (
+            # Continuation stocks: lower score bar when setup type is actionable
+            (s.get("swing_score") or 0) >= 5
+            and s.get("swing_setup_type") in _CONT_TYPES_TOP5
+            and s.get("swing_status") not in _AVOID_STATUSES
+            and s.get("trade_bias") != "Avoid"
+        ) or (
             # Swing mode: good score + actionable status
             (s.get("swing_score") or 0) >= 6
-            and s.get("swing_status") not in (
-                "WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE", "NOT ENOUGH EDGE"
-            )
+            and s.get("swing_status") not in _AVOID_STATUSES
             and s.get("trade_bias") != "Avoid"
         ) or (
             # Legacy day-trading fallback when swing fields absent
@@ -2644,6 +2704,30 @@ def _dashboard_inner():
     # Secondary watchlist — B setups and watch-only when Top 5 is thin/empty
     top5_tickers = {s["ticker"] for s in top5}
     secondary    = compute_secondary_watchlist(ranked, top5_tickers)
+
+    # ── Scanner buckets: 4-quadrant view of the full watchlist ───────────────
+    _CHASE_STYPE  = {"Chase Zone — Do Not Enter"}
+    _EXT_STYPE    = {"Extended — Wait for Pullback", "Extended — Wait", "At Resistance — Avoid"}
+    _READY_SFA    = {"A+ READY", "A READY"}
+    _FORMING_SFA  = {"B+ WATCH", "FORMING", "WATCH", "B WATCH"}
+
+    scanner_buckets: dict = {"aplus": [], "forming": [], "chase": [], "avoid": []}
+    for _sb in ranked:
+        _sfa_  = _sb.get("simplified_action") or ""
+        _bias_ = _sb.get("trade_bias") or ""
+        _stype_= _sb.get("swing_setup_type") or ""
+        if _bias_ == "Avoid" or _sfa_ == "REJECTED":
+            if len(scanner_buckets["avoid"]) < 6:
+                scanner_buckets["avoid"].append(_sb)
+        elif _sfa_ in ("CHASE ZONE", "EXTENDED") or _stype_ in _CHASE_STYPE or _stype_ in _EXT_STYPE:
+            if len(scanner_buckets["chase"]) < 8:
+                scanner_buckets["chase"].append(_sb)
+        elif _sfa_ in _READY_SFA:
+            if len(scanner_buckets["aplus"]) < 6:
+                scanner_buckets["aplus"].append(_sb)
+        else:
+            if len(scanner_buckets["forming"]) < 10:
+                scanner_buckets["forming"].append(_sb)
 
     # alt_modes kept for backward compat but no_trade replaces them in template
     alt_modes = []
@@ -2681,6 +2765,7 @@ def _dashboard_inner():
         watchlist=watchlist,
         notes=notes_map,
         secondary=secondary,
+        scanner_buckets=scanner_buckets,
         alt_modes=alt_modes,
         no_trade=no_trade,
         all_wls=all_wls,
