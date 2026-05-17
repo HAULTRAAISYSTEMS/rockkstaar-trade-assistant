@@ -599,6 +599,21 @@ def init_db():
         )
     """))
 
+    # Setup outcome tracking for adaptive AI learning (Feature 15)
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS setup_outcomes (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker     TEXT    NOT NULL,
+            setup_type TEXT    NOT NULL,
+            pattern    TEXT,
+            outcome    TEXT    NOT NULL,
+            regime     TEXT,
+            prob_score INTEGER,
+            notes      TEXT,
+            created_at TEXT    NOT NULL
+        )
+    """))
+
     # Seed default watchlists on first run (use cnt alias — works in both DBs)
     wl_count = cursor.execute(
         "SELECT COUNT(*) AS cnt FROM watchlists"
@@ -1776,3 +1791,65 @@ def clear_scanner_alerts() -> None:
     conn.execute("DELETE FROM scanner_alerts")
     conn.commit()
     conn.close()
+
+
+# ── Setup outcome tracking (adaptive AI learning) ─────────────────────────────
+
+def save_setup_outcome(
+    ticker: str,
+    setup_type: str,
+    outcome: str,
+    regime: str = "",
+    pattern: str = "",
+    prob_score: int = 0,
+    notes: str = "",
+) -> None:
+    """Persist a trade outcome for adaptive learning win-rate tracking."""
+    from data_fetcher import _et_now as _db_et_now
+    now = _db_et_now().strftime("%Y-%m-%d %I:%M %p")
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO setup_outcomes "
+        "(ticker, setup_type, pattern, outcome, regime, prob_score, notes, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            ticker.upper().strip(), setup_type, pattern, outcome,
+            regime, prob_score, notes, now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_setup_outcomes(limit: int = 200) -> list[dict]:
+    """Return recent setup outcomes ordered newest-first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM setup_outcomes ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_setup_outcome_stats() -> list[dict]:
+    """
+    Aggregate setup outcomes by setup_type.
+    Returns list of {setup_type, total, wins, losses, win_rate}.
+    """
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT
+            setup_type,
+            COUNT(*)                                                AS total,
+            SUM(CASE WHEN outcome = 'win'  THEN 1 ELSE 0 END)     AS wins,
+            SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END)      AS losses,
+            ROUND(
+                100.0 * SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END)
+                / NULLIF(COUNT(*), 0), 1
+            )                                                       AS win_rate
+        FROM setup_outcomes
+        GROUP BY setup_type
+        ORDER BY win_rate DESC
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

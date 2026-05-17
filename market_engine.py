@@ -452,7 +452,15 @@ def _sector_css(strength: str) -> str:
 
 def _build_context() -> dict:
     """Full market context fetch. Called at most once per _CACHE_TTL_MIN."""
-    all_tickers = ["QQQ", "SPY", "^VIX"] + list(SECTOR_ETFS.keys())
+    # Core market tickers + macro instruments
+    _MACRO_TICKERS = {
+        "DX-Y.NYB": "dxy",           # DXY dollar index
+        "^TNX":     "yield_10y",      # 10-Year Treasury Yield
+        "CL=F":     "oil_price",      # WTI Crude Oil Futures
+        "ES=F":     "es_futures",     # S&P 500 E-mini futures
+        "NQ=F":     "nq_futures",     # Nasdaq 100 E-mini futures
+    }
+    all_tickers = ["QQQ", "SPY", "^VIX"] + list(SECTOR_ETFS.keys()) + list(_MACRO_TICKERS.keys())
     prices = _fetch_prices_chart(all_tickers, period="60d")
 
     qqq = prices.get("QQQ", [])
@@ -465,8 +473,33 @@ def _build_context() -> dict:
     leading = [s["etf"] for s in sectors if s["strength"] in ("leading", "strong")][:4]
     weak    = [s["etf"] for s in sectors if s["strength"] in ("weak", "lagging")][:3]
 
+    # ── Macro data ─────────────────────────────────────────────────────────────
+    macro = {}
+    for ticker_sym, field in _MACRO_TICKERS.items():
+        px = prices.get(ticker_sym, [])
+        if px and len(px) >= 2:
+            macro[field]              = round(px[-1], 3)
+            chg = (px[-1] - px[-2]) / max(px[-2], 0.001) * 100
+            macro[f"{field}_1d_chg"] = round(chg, 3)
+        else:
+            macro[field]              = None
+            macro[f"{field}_1d_chg"] = None
+
+    # Rename chg key for yield (basis points convention — yield is already in %)
+    if macro.get("yield_10y") and macro.get("yield_10y_1d_chg") is not None:
+        # TNX is quoted in %, change is already in pct terms
+        macro["yield_1d_chg"] = macro.pop("yield_10y_1d_chg", None)
+    else:
+        macro["yield_1d_chg"] = None
+
+    macro["dxy_1d_chg"]      = macro.pop("dxy_1d_chg",      None)
+    macro["oil_1d_chg"]      = macro.pop("oil_price_1d_chg",None)
+    macro["es_1d_chg"]       = macro.pop("es_futures_1d_chg",None)
+    macro["nq_1d_chg"]       = macro.pop("nq_futures_1d_chg",None)
+
     return {
         **regime,
+        **macro,
         "sectors":         sectors,
         "leading_sectors": leading,
         "weak_sectors":    weak,
@@ -491,6 +524,17 @@ def _empty_context() -> dict:
         "spy_price":       None,
         "_qqq_prices":     [],
         "fetched_at":      None,
+        # Macro fields
+        "dxy":             None,
+        "dxy_1d_chg":      None,
+        "yield_10y":       None,
+        "yield_1d_chg":    None,
+        "oil_price":       None,
+        "oil_1d_chg":      None,
+        "es_futures":      None,
+        "es_1d_chg":       None,
+        "nq_futures":      None,
+        "nq_1d_chg":       None,
     }
 
 

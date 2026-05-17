@@ -38,6 +38,7 @@ from database import (
     get_daily_session, upsert_daily_session, lock_daily_session, unlock_daily_session,
     add_scanner_alert, get_scanner_alerts, mark_scanner_alerts_seen,
     get_unseen_scanner_alert_count, clear_scanner_alerts,
+    save_setup_outcome, get_setup_outcome_stats,
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
 from data_fetcher import _et_now
@@ -4992,6 +4993,148 @@ def api_intel_debug():
     except Exception as exc:
         logger.error("api_intel_debug: %s", exc, exc_info=True)
         return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/institutional/market-internals")
+def api_market_internals():
+    """Market internals: breadth, ADD proxy, sector participation, breakout conditions."""
+    try:
+        import institutional_engine as _inst
+        ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        internals = _inst.get_market_internals(ctx)
+        macro     = _inst.get_macro_context(ctx)
+        return jsonify({
+            "ok": True,
+            "internals": internals,
+            "macro": macro,
+            "regime": ctx.get("regime"),
+            "regime_label": ctx.get("regime_label"),
+            "vix": ctx.get("vix_level"),
+            "qqq_1d": ctx.get("qqq_1d_pct"),
+            "spy_1d": ctx.get("spy_1d_pct"),
+        })
+    except Exception as exc:
+        logger.error("api_market_internals: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/institutional/<ticker>")
+def api_institutional_ticker(ticker: str):
+    """
+    Full institutional analysis for a single ticker.
+    Returns all 15 engine outputs: volatility compression, liquidity map,
+    patterns, probability score, continuation, risk levels, discipline AI.
+    """
+    try:
+        import institutional_engine as _inst
+        ticker = ticker.upper().strip()
+        ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+
+        # Try to get existing stock data from DB
+        stock = get_stock_data(ticker) or {"ticker": ticker}
+
+        result = _inst.analyze_institutional(stock, ctx)
+        # Append market internals and macro for completeness
+        result["internals"] = _inst.get_market_internals(ctx)
+        result["macro"]     = _inst.get_macro_context(ctx)
+        result["ticker"]    = ticker
+        result["ok"]        = True
+        return jsonify(result)
+    except Exception as exc:
+        logger.error("api_institutional_ticker %s: %s", ticker, exc, exc_info=True)
+        return jsonify({"ok": False, "ticker": ticker, "error": str(exc)}), 500
+
+
+@app.route("/api/institutional/smart-watchlist")
+def api_smart_watchlist():
+    """
+    AI-ranked smart watchlist: A+/A/B tiers, earnings plays,
+    ORB candidates, continuation setups, squeeze plays.
+    """
+    try:
+        import institutional_engine as _inst
+        ctx    = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        stocks = get_all_stock_data()   # list of dicts from DB
+
+        # Ensure each stock has a prob_score (may already be set from analysis)
+        scored = []
+        for s in stocks:
+            if not s.get("prob_score"):
+                s["prob_score"] = _inst.compute_probability_score(s, ctx)["prob_score"]
+            scored.append(s)
+
+        watchlists = _inst.build_smart_watchlist(scored, ctx)
+        return jsonify({"ok": True, **watchlists})
+    except Exception as exc:
+        logger.error("api_smart_watchlist: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/institutional/adaptive-insights")
+def api_adaptive_insights():
+    """Adaptive learning: setup win rates, best regimes, AI recommendations."""
+    try:
+        import institutional_engine as _inst
+        insights    = _inst.get_adaptive_insights()
+        db_stats    = get_setup_outcome_stats()
+        return jsonify({"ok": True, **insights, "db_stats": db_stats})
+    except Exception as exc:
+        logger.error("api_adaptive_insights: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/institutional/record-outcome", methods=["POST"])
+@csrf.exempt
+def api_record_outcome():
+    """
+    Record a trade outcome for adaptive learning.
+    POST JSON: {"ticker": "NVDA", "setup_type": "Bull Flag", "outcome": "win", "regime": "RISK_ON"}
+    """
+    try:
+        import institutional_engine as _inst
+        body       = request.get_json(force=True) or {}
+        setup_type = body.get("setup_type", "")
+        outcome    = body.get("outcome", "")     # "win" | "loss" | "breakeven"
+        regime     = body.get("regime", "")
+        pattern    = body.get("pattern", "")
+
+        if outcome not in ("win", "loss", "breakeven"):
+            return jsonify({"ok": False, "error": "outcome must be win|loss|breakeven"}), 400
+
+        ticker     = body.get("ticker", "")
+        prob_score = int(body.get("prob_score", 0))
+        notes      = body.get("notes", "")
+
+        _inst.record_setup_outcome(setup_type, outcome, regime, pattern)
+        save_setup_outcome(ticker, setup_type, outcome, regime, pattern, prob_score, notes)
+        return jsonify({"ok": True, "recorded": {"ticker": ticker, "setup_type": setup_type, "outcome": outcome}})
+    except Exception as exc:
+        logger.error("api_record_outcome: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/institutional/daily-review")
+def api_daily_review():
+    """End-of-day performance review across all scanned setups."""
+    try:
+        import institutional_engine as _inst
+        ctx    = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        stocks = get_all_stock_data()
+
+        # Build analysis dicts for all stocks (fast — uses cached data)
+        analyzed = []
+        for s in stocks:
+            try:
+                result = _inst.analyze_institutional(s, ctx)
+                analyzed.append({**s, **result})
+            except Exception:
+                analyzed.append(s)
+
+        review = _inst.generate_daily_review(analyzed)
+        return jsonify({"ok": True, **review})
+    except Exception as exc:
+        logger.error("api_daily_review: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @app.route("/intel")

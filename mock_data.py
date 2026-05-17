@@ -429,6 +429,46 @@ def generate_stock_data(ticker: str) -> dict:
         data.setdefault("swing_status", "NOT ENOUGH EDGE")
         _errors.append("swing_status")
 
+    # ── Step 9b: Institutional analysis (all 15 engines) ────────────────────────
+    try:
+        import market_engine as _mkt_eng
+        import institutional_engine as _inst
+        _mkt_ctx = _mkt_eng.get_market_context()
+        _inst_result = _inst.analyze_institutional(data, _mkt_ctx)
+        # Merge institutional results — don't overwrite core price/scoring fields
+        _SAFE_INST_KEYS = {
+            "atr_14", "atr_pct", "atr_5_pct", "atr_compressed",
+            "bb_width_pct", "bb_squeeze", "range_compressed",
+            "squeeze_score", "squeeze_probability", "expansion_likely", "compression_alert",
+            "bb_upper", "bb_lower", "bb_mid",
+            "equal_highs", "equal_lows", "resistance_above", "support_below",
+            "liquidity_pools", "sweep_above", "sweep_below",
+            "recent_bear_trap", "recent_bull_trap", "liquidity_alerts",
+            "failed_breakdown", "failed_breakout",
+            "failed_breakdown_level", "failed_breakout_level", "failed_move_alerts",
+            "vol_profile",
+            "patterns_detected", "best_pattern", "pattern_score",
+            "pattern_count", "best_continuation_prob",
+            "in_earnings_drift", "days_since_earnings", "earnings_gap_pct",
+            "post_earnings_trend", "drift_continuation", "accumulation_signal",
+            "earnings_drift_alert",
+            "continuation_score", "continuation_strength",
+            "continuation_signals", "continuation_summary",
+            "macro_alerts",
+            "stop_loss", "target_1", "target_2",
+            "risk_reward_1", "risk_reward_2",
+            "shares_adjusted", "risk_dollars", "atr_used",
+            "regime_size_note", "size_modifier",
+            "discipline_score", "discipline_grade",
+            "discipline_warnings", "discipline_alerts", "safe_to_trade",
+            "prob_score", "prob_grade", "prob_breakdown", "penalty_total",
+        }
+        for k in _SAFE_INST_KEYS:
+            if k in _inst_result:
+                data[k] = _inst_result[k]
+    except Exception as _inst_exc:
+        _log.debug("generate_stock_data  stage=institutional  ticker=%s  err=%s", ticker, _inst_exc)
+
     # Legacy scoring fields (kept for DB schema compatibility but deprioritised)
     data.setdefault("momentum_score",      1)
     data.setdefault("momentum_reason",     "Swing mode — intraday momentum not tracked")
@@ -629,6 +669,30 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
         _log.error("live_refresh_stock  stage=swing_status  ticker=%s  err=%s", ticker, exc)
         data.setdefault("swing_status", "NOT ENOUGH EDGE")
         _errors.append("swing_status")
+
+    # ── Institutional analysis ────────────────────────────────────────────────
+    try:
+        import market_engine as _mkt_eng
+        import institutional_engine as _inst
+        _mkt_ctx = _mkt_eng.get_market_context()
+        _inst_result = _inst.analyze_institutional(data, _mkt_ctx)
+        _LIVE_INST_KEYS = {
+            "atr_14", "atr_pct", "squeeze_score", "squeeze_probability",
+            "expansion_likely", "compression_alert", "bb_upper", "bb_lower", "bb_mid",
+            "sweep_above", "sweep_below", "liquidity_alerts",
+            "failed_breakdown", "failed_breakout", "failed_move_alerts",
+            "vol_profile", "best_pattern", "pattern_score", "patterns_detected",
+            "in_earnings_drift", "earnings_drift_alert", "drift_continuation",
+            "continuation_score", "continuation_strength", "continuation_summary",
+            "stop_loss", "target_1", "target_2", "risk_reward_1", "risk_reward_2",
+            "discipline_score", "discipline_grade", "discipline_alerts", "safe_to_trade",
+            "prob_score", "prob_grade", "prob_breakdown",
+        }
+        for k in _LIVE_INST_KEYS:
+            if k in _inst_result:
+                data[k] = _inst_result[k]
+    except Exception as _inst_exc:
+        _log.debug("live_refresh_stock  stage=institutional  ticker=%s  err=%s", ticker, _inst_exc)
 
     # Sync legacy fields
     data["setup_score"]      = data.get("swing_score", 1)
