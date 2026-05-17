@@ -747,6 +747,185 @@ def swing_data_needs_refresh(fetched_at: str | None, minutes: int = 60) -> bool:
         return True
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FIBONACCI ENGINE — Active Swing Detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _compute_atr(highs: list, lows: list, closes: list, period: int = 14) -> float:
+    """Average True Range over the last `period` bars."""
+    n = len(closes)
+    if n < 2:
+        return (highs[-1] - lows[-1]) if n >= 1 else 1.0
+    trs = []
+    for i in range(1, n):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i]  - closes[i - 1]),
+        )
+        trs.append(tr)
+    w = min(len(trs), period)
+    return sum(trs[-w:]) / w if w else 1.0
+
+
+def _find_pivot_points(highs: list, lows: list, window: int = 3):
+    """
+    Return (pivot_highs, pivot_lows) as lists of (index, value).
+    A pivot high at i: highs[i] >= all highs in [i-window, i+window].
+    A pivot low  at i: lows[i]  <= all lows  in [i-window, i+window].
+    """
+    n = len(highs)
+    ph, pl = [], []
+    for i in range(window, n - window):
+        lo, hi = max(0, i - window), i + window + 1
+        if highs[i] >= max(highs[lo:hi]):
+            ph.append((i, highs[i]))
+        if lows[i] <= min(lows[lo:hi]):
+            pl.append((i, lows[i]))
+    return ph, pl
+
+
+def _score_impulse_leg(
+    start_i: int, end_i: int, leg_size: float,
+    closes: list, highs: list, lows: list,
+    volumes: list | None, n_total: int, atr: float,
+) -> float:
+    """
+    Score an impulse leg from start_i to end_i on a 0-10 scale.
+    start_i < end_i; leg_size = abs(high - low) for the leg.
+    """
+    if atr <= 0 or leg_size <= 0:
+        return 0.0
+    score = 0.0
+
+    # 1. Magnitude vs ATR (0-3 pts) — bigger relative leg = higher quality
+    m = leg_size / atr
+    if   m >= 6:   score += 3.0
+    elif m >= 4:   score += 2.5
+    elif m >= 2.5: score += 2.0
+    elif m >= 1.5: score += 1.5
+    elif m >= 1.0: score += 1.0
+    else:          score += 0.3
+
+    # 2. Candle body quality during the leg (0-2 pts)
+    end_clamp = min(end_i, len(closes) - 1)
+    if end_clamp > start_i:
+        bodies = []
+        for i in range(start_i + 1, end_clamp + 1):
+            rng = highs[i] - lows[i]
+            if rng > 0:
+                bodies.append(min(1.0, abs(closes[i] - closes[i - 1]) / rng))
+        if bodies:
+            avg_b = sum(bodies) / len(bodies)
+            if   avg_b >= 0.55: score += 2.0
+            elif avg_b >= 0.38: score += 1.2
+            else:               score += 0.4
+
+    # 3. Volume expansion during the leg (0-2 pts)
+    if volumes and len(volumes) > end_clamp:
+        lvols = volumes[start_i:end_clamp + 1]
+        pvols = volumes[max(0, start_i - 10):start_i]
+        if lvols and pvols:
+            al = sum(lvols) / len(lvols)
+            ap = sum(pvols) / len(pvols)
+            if ap > 0:
+                vr = al / ap
+                if   vr >= 1.5: score += 2.0
+                elif vr >= 1.2: score += 1.2
+                else:           score += 0.4
+
+    # 4. Recency (0-3 pts) — most recent endpoint of the leg
+    bars_old = n_total - 1 - end_i
+    if   bars_old <= 2:  score += 3.0
+    elif bars_old <= 5:  score += 2.5
+    elif bars_old <= 10: score += 2.0
+    elif bars_old <= 20: score += 1.5
+    elif bars_old <= 40: score += 0.7
+    else:                score += 0.1
+
+    return min(10.0, score)
+
+
+def _find_active_impulse_leg(
+    closes: list, highs: list, lows: list,
+    volumes: list | None = None,
+    window: int = 3,
+) -> dict | None:
+    """
+    Detect the most recent high-quality impulsive leg suitable for Fibonacci anchoring.
+
+    Returns a dict with keys:
+        direction  "bullish" | "bearish"
+        low_val    float — impulse low price
+        high_val   float — impulse high price
+        low_idx    int   — bar index of the impulse low
+        high_idx   int   — bar index of the impulse high
+        score      float — quality score 0-10
+        atr_mult   float — leg size as multiple of ATR
+    Returns None if no qualifying leg is found.
+    """
+    n = len(closes)
+    if n < window * 2 + 5:
+        return None
+
+    atr = _compute_atr(highs, lows, closes, period=14)
+    if atr <= 0:
+        return None
+
+    ph, pl = _find_pivot_points(highs, lows, window=window)
+    if not ph or not pl:
+        return None
+
+    MIN_ATR_MULT = 1.2   # reject legs smaller than this many ATRs
+
+    best: dict | None = None
+
+    # ── Bullish legs: pivot_low → pivot_high ──────────────────────────────────
+    for j in range(len(pl) - 1, -1, -1):          # iterate recent pivot lows first
+        li, lv = pl[j]
+        # find the most recent pivot high AFTER this low
+        for k in range(len(ph) - 1, -1, -1):
+            hi, hv = ph[k]
+            if hi <= li:
+                continue
+            leg_size = hv - lv
+            if leg_size / atr < MIN_ATR_MULT:
+                break  # all remaining ph[k] will be the same or worse — stop
+            sc = _score_impulse_leg(li, hi, leg_size, closes, highs, lows, volumes, n, atr)
+            candidate = {
+                "direction": "bullish",
+                "low_idx": li,  "low_val": lv,
+                "high_idx": hi, "high_val": hv,
+                "score": sc,    "atr_mult": leg_size / atr,
+            }
+            if best is None or sc > best["score"]:
+                best = candidate
+            break  # take only the best high for this particular low
+
+    # ── Bearish legs: pivot_high → pivot_low ─────────────────────────────────
+    for j in range(len(ph) - 1, -1, -1):
+        hi, hv = ph[j]
+        for k in range(len(pl) - 1, -1, -1):
+            li, lv = pl[k]
+            if li <= hi:
+                continue
+            leg_size = hv - lv
+            if leg_size / atr < MIN_ATR_MULT:
+                break
+            sc = _score_impulse_leg(hi, li, leg_size, closes, highs, lows, volumes, n, atr)
+            candidate = {
+                "direction": "bearish",
+                "low_idx": li,  "low_val": lv,
+                "high_idx": hi, "high_val": hv,
+                "score": sc,    "atr_mult": leg_size / atr,
+            }
+            if best is None or sc > best["score"]:
+                best = candidate
+            break
+
+    return best if (best and best["score"] >= 2.0) else None
+
+
 def fetch_swing_data(ticker: str) -> dict | None:
     """
     Fetch daily EMA, trend structure, and Fibonacci levels for swing analysis.
@@ -871,20 +1050,70 @@ def fetch_swing_data(ticker: str) -> dict | None:
         else:
             result["daily_trend"] = "Neutral"
 
-        # ── Fibonacci levels (20-bar swing high/low) ────────────────────────
-        lb     = min(20, n)
-        sw_hi  = float(max(highs[-lb:]))
-        sw_lo  = float(min(lows[-lb:]))
-        sw_rng = sw_hi - sw_lo
-
-        result["fib_high"] = round(sw_hi, 2)
-        result["fib_low"]  = round(sw_lo, 2)
-        if sw_rng > 0:
-            result["fib_50"]  = round(sw_hi - 0.500 * sw_rng, 2)
-            result["fib_618"] = round(sw_hi - 0.618 * sw_rng, 2)
+        # ── Macro Fibonacci (20-bar simple swing high/low — institutional context) ─
+        lb      = min(20, n)
+        mac_hi  = float(max(highs[-lb:]))
+        mac_lo  = float(min(lows[-lb:]))
+        mac_rng = mac_hi - mac_lo
+        result["macro_fib_high"] = round(mac_hi, 2)
+        result["macro_fib_low"]  = round(mac_lo, 2)
+        if mac_rng > 0:
+            result["macro_fib_50"]  = round(mac_hi - 0.500 * mac_rng, 2)
+            result["macro_fib_618"] = round(mac_hi - 0.618 * mac_rng, 2)
         else:
-            result["fib_50"]  = None
-            result["fib_618"] = None
+            result["macro_fib_50"]  = None
+            result["macro_fib_618"] = None
+
+        # ── Active Swing Fibonacci (pivot-based impulse leg detection) ────────
+        # Detects the most recent significant directional leg so fib levels
+        # align with the actual tradeable momentum move, not arbitrary lookback.
+        _volumes: list | None = None
+        try:
+            if _daily_source == "yfinance" and hist is not None and not hist.empty:
+                _volumes = list(hist["Volume"].astype(float))
+            elif _daily_source == "chart_api" and _bars and _bars.get("volumes"):
+                _volumes = _bars["volumes"]
+        except Exception:
+            pass
+
+        _active_leg = _find_active_impulse_leg(closes, highs, lows, _volumes, window=3)
+
+        if _active_leg and _active_leg["atr_mult"] >= 1.2:
+            a_hi  = round(_active_leg["high_val"], 2)
+            a_lo  = round(_active_leg["low_val"],  2)
+            a_rng = a_hi - a_lo
+            result["fib_high"]       = a_hi
+            result["fib_low"]        = a_lo
+            result["fib_direction"]  = _active_leg["direction"]
+            result["fib_mode"]       = "active"
+            result["fib_confidence"] = round(_active_leg["score"], 1)
+            if a_rng > 0:
+                result["fib_236"] = round(a_hi - 0.236 * a_rng, 2)
+                result["fib_382"] = round(a_hi - 0.382 * a_rng, 2)
+                result["fib_50"]  = round(a_hi - 0.500 * a_rng, 2)
+                result["fib_618"] = round(a_hi - 0.618 * a_rng, 2)
+                result["fib_65"]  = round(a_hi - 0.650 * a_rng, 2)
+                result["fib_786"] = round(a_hi - 0.786 * a_rng, 2)
+            else:
+                for _k in ("fib_236", "fib_382", "fib_50", "fib_618", "fib_65", "fib_786"):
+                    result[_k] = None
+        else:
+            # Fallback: use macro fib (20-bar range)
+            result["fib_high"]       = result["macro_fib_high"]
+            result["fib_low"]        = result["macro_fib_low"]
+            result["fib_direction"]  = "bullish" if closes[-1] > (mac_hi + mac_lo) / 2 else "bearish"
+            result["fib_mode"]       = "macro"
+            result["fib_confidence"] = 3.0
+            if mac_rng > 0:
+                result["fib_236"] = round(mac_hi - 0.236 * mac_rng, 2)
+                result["fib_382"] = round(mac_hi - 0.382 * mac_rng, 2)
+                result["fib_50"]  = result["macro_fib_50"]
+                result["fib_618"] = result["macro_fib_618"]
+                result["fib_65"]  = round(mac_hi - 0.650 * mac_rng, 2)
+                result["fib_786"] = round(mac_hi - 0.786 * mac_rng, 2)
+            else:
+                for _k in ("fib_236", "fib_382", "fib_50", "fib_618", "fib_65", "fib_786"):
+                    result[_k] = None
 
         # ── 4H trend (derived from 1h bars — yfinance has no native 4h interval) ──
         # Uses regular-session 1h bars.  EMA stack + HH/HL on last ~80 1h bars
@@ -959,13 +1188,45 @@ def fetch_swing_data(ticker: str) -> dict | None:
                 elif h4_bear or (h4_lh and h4_ll): result["h4_trend"] = "Bearish Lean"
                 else:                               result["h4_trend"] = "Neutral"
 
+                # ── H4 Fibonacci (active swing on 1h bars, window=2) ─────────
+                _h4_leg = _find_active_impulse_leg(
+                    _h1_closes, _h1_highs, _h1_lows, window=2
+                )
+                if _h4_leg and _h4_leg["atr_mult"] >= 1.0:
+                    h4a_hi  = round(_h4_leg["high_val"], 2)
+                    h4a_lo  = round(_h4_leg["low_val"],  2)
+                    h4a_rng = h4a_hi - h4a_lo
+                    result["h4_fib_high"] = h4a_hi
+                    result["h4_fib_low"]  = h4a_lo
+                    if h4a_rng > 0:
+                        result["h4_fib_50"]  = round(h4a_hi - 0.500 * h4a_rng, 2)
+                        result["h4_fib_618"] = round(h4a_hi - 0.618 * h4a_rng, 2)
+                    else:
+                        result["h4_fib_50"] = result["h4_fib_618"] = None
+                else:
+                    h4_lb = min(20, n_h1)
+                    h4_hi = float(max(_h1_highs[-h4_lb:]))
+                    h4_lo = float(min(_h1_lows[-h4_lb:]))
+                    h4_rng = h4_hi - h4_lo
+                    result["h4_fib_high"] = round(h4_hi, 2)
+                    result["h4_fib_low"]  = round(h4_lo, 2)
+                    if h4_rng > 0:
+                        result["h4_fib_50"]  = round(h4_hi - 0.500 * h4_rng, 2)
+                        result["h4_fib_618"] = round(h4_hi - 0.618 * h4_rng, 2)
+                    else:
+                        result["h4_fib_50"] = result["h4_fib_618"] = None
+
         except Exception as e:
             logger.debug("4H data fetch failed for %s: %s", ticker, e)
 
-        result.setdefault("h4_trend",  "Neutral")
-        result.setdefault("h4_ema20",  None)
-        result.setdefault("h4_ema50",  None)
-        result.setdefault("h4_hh_hl",  False)
+        result.setdefault("h4_trend",    "Neutral")
+        result.setdefault("h4_ema20",    None)
+        result.setdefault("h4_ema50",    None)
+        result.setdefault("h4_hh_hl",    False)
+        result.setdefault("h4_fib_high", None)
+        result.setdefault("h4_fib_low",  None)
+        result.setdefault("h4_fib_50",   None)
+        result.setdefault("h4_fib_618",  None)
 
         # ── 15m confirmation signals ──────────────────────────────────────────
         # m15_confirmation scores 0 (none), 1 (developing), or 2 (confirmed).

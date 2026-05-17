@@ -3373,6 +3373,68 @@ def save_stock_note(ticker):
     return redirect(url_for("stock_detail", ticker=ticker.upper()))
 
 
+@app.route("/api/fib-override/<ticker>", methods=["POST"])
+def fib_override(ticker):
+    """
+    Apply manual Fibonacci anchors for a ticker.
+    Accepts: fib_manual_high, fib_manual_low (float, POST form).
+    Recomputes all fib levels from the given anchors and saves to DB.
+    """
+    t = ticker.upper()
+    try:
+        hi = float(request.form.get("fib_manual_high") or 0)
+        lo = float(request.form.get("fib_manual_low")  or 0)
+    except (TypeError, ValueError):
+        flash("Invalid fib values — enter numeric prices.", "error")
+        return redirect(url_for("stock_detail", ticker=t))
+
+    if hi <= lo or hi <= 0 or lo <= 0:
+        flash("Swing high must be greater than swing low.", "error")
+        return redirect(url_for("stock_detail", ticker=t))
+
+    rng = hi - lo
+    from database import get_db
+    update_data = {
+        "ticker":        t,
+        "fib_high":      round(hi, 2),
+        "fib_low":       round(lo, 2),
+        "fib_236":       round(hi - 0.236 * rng, 2),
+        "fib_382":       round(hi - 0.382 * rng, 2),
+        "fib_50":        round(hi - 0.500 * rng, 2),
+        "fib_618":       round(hi - 0.618 * rng, 2),
+        "fib_65":        round(hi - 0.650 * rng, 2),
+        "fib_786":       round(hi - 0.786 * rng, 2),
+        "fib_mode":      "manual",
+        "fib_direction": "bullish",
+        "fib_confidence": 10.0,
+    }
+    try:
+        conn = get_db()
+        conn.execute("""
+            UPDATE stock_data SET
+                fib_high      = :fib_high,
+                fib_low       = :fib_low,
+                fib_236       = :fib_236,
+                fib_382       = :fib_382,
+                fib_50        = :fib_50,
+                fib_618       = :fib_618,
+                fib_65        = :fib_65,
+                fib_786       = :fib_786,
+                fib_mode      = :fib_mode,
+                fib_direction = :fib_direction,
+                fib_confidence = :fib_confidence
+            WHERE ticker = :ticker
+        """, update_data)
+        conn.commit()
+        conn.close()
+        flash(f"Manual fib anchors saved for {t}: High ${hi:.2f} / Low ${lo:.2f}", "success")
+    except Exception as exc:
+        logger.error("fib_override: %s", exc)
+        flash("Failed to save fib override.", "error")
+
+    return redirect(url_for("stock_detail", ticker=t))
+
+
 @app.route("/stock/<ticker>/refresh", methods=["POST"])
 def refresh_single(ticker):
     """Refresh and re-score a single ticker."""

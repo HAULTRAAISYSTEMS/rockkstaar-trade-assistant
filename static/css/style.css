@@ -3467,30 +3467,203 @@ a { color: inherit; text-decoration: none; }
    SWING TRADING — Fibonacci Levels (stock detail)
    ============================================================= */
 
+/* legacy fib-grid (kept for compatibility) */
 .fib-grid {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
+
+/* ── Active Swing Fib Header ────────────────────────────────────────── */
+.fib-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.fib-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.fib-mode-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.fib-mode-active  { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+.fib-mode-macro   { background: rgba(148,163,184,0.1); color: var(--text-dim); border: 1px solid rgba(148,163,184,0.2); }
+.fib-mode-manual  { background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+.fib-confidence   { font-size: 0.72rem; color: var(--text-dim); }
+.fib-confidence strong { color: var(--text-primary); }
+.fib-direction    { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.05em; }
+.fib-dir-bullish  { color: #4ade80; }
+.fib-dir-bearish  { color: #f87171; }
+.fib-anchors {
+  display: flex;
+  gap: 12px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  font-family: var(--font-mono);
+}
+
+/* ── Fib Level Grid (v2) ────────────────────────────────────────────── */
+.fib-grid-v2 {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+}
 .fib-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
+  gap: 8px;
+  padding: 5px 8px;
   border-radius: var(--radius);
   background: var(--bg3);
-  font-size: 0.8rem;
+  font-size: 0.79rem;
   border-left: 3px solid transparent;
+  transition: background 0.15s;
 }
+.fib-row:hover { background: rgba(255,255,255,0.04); }
 .fib-row-active {
   border-left-color: var(--accent);
-  background: rgba(99,102,241,0.08);
+  background: rgba(99,102,241,0.1);
+  box-shadow: 0 0 0 1px rgba(99,102,241,0.2);
 }
-.fib-row-high  { border-left-color: rgba(34,197,94,0.5); }
-.fib-row-low   { border-left-color: rgba(239,68,68,0.4); }
-.fib-label     { color: var(--text-dim); flex: 1; }
-.fib-value     { font-family: var(--font-mono); font-weight: 600; }
-.fib-pct       { color: var(--text-muted); font-size: 0.7rem; min-width: 40px; text-align: right; }
+.fib-row-high  { border-left-color: rgba(34,197,94,0.6); }
+.fib-row-low   { border-left-color: rgba(239,68,68,0.5); }
+/* golden pocket rows */
+.fib-row-golden {
+  border-left-color: #f59e0b;
+  background: rgba(245,158,11,0.07);
+}
+.fib-row-golden.fib-row-active {
+  background: rgba(245,158,11,0.15);
+  box-shadow: 0 0 0 1px rgba(245,158,11,0.3);
+}
+.fib-label     { color: var(--text-dim); flex: 1; font-size: 0.77rem; }
+.fib-value     { font-family: var(--font-mono); font-weight: 600; min-width: 64px; text-align: right; }
+.fib-pct       { color: var(--text-muted); font-size: 0.68rem; min-width: 38px; text-align: right; font-weight: 600; }
+
+/* ── Zone separator labels ──────────────────────────────────────────── */
+.fib-zone-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin: 4px 0 2px;
+  width: fit-content;
+}
+.fib-zone-premium  { background: rgba(251,146,60,0.12); color: #fb923c; }
+.fib-zone-neutral  { background: rgba(148,163,184,0.1); color: var(--text-muted); }
+.fib-zone-golden   { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.fib-zone-discount { background: rgba(34,197,94,0.1);  color: #4ade80; }
+
+/* ── Price Position Insight ─────────────────────────────────────────── */
+.fib-position-insight {
+  font-size: 0.77rem;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-top: 8px;
+  border-left: 3px solid;
+  line-height: 1.5;
+}
+.fib-pos-premium  { background: rgba(251,146,60,0.08); border-color: #fb923c; color: var(--text-dim); }
+.fib-pos-golden   { background: rgba(245,158,11,0.1);  border-color: #f59e0b; color: var(--text-dim); }
+.fib-pos-discount { background: rgba(34,197,94,0.07);  border-color: #4ade80; color: var(--text-dim); }
+
+/* ── Macro / H4 Context Sections ────────────────────────────────────── */
+.fib-macro-context, .fib-h4-context {
+  margin-top: 10px;
+  padding: 7px 10px;
+  background: rgba(255,255,255,0.025);
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.fib-macro-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+.fib-macro-vals {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+
+/* ── Manual Override Form ───────────────────────────────────────────── */
+.fib-override-section {
+  margin-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  padding-top: 10px;
+}
+.fib-override-toggle {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+.fib-override-toggle:hover { color: var(--text-dim); }
+.fib-override-form {
+  display: none;
+  margin-top: 8px;
+  gap: 8px;
+  flex-direction: column;
+}
+.fib-override-form.open { display: flex; }
+.fib-override-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fib-override-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  min-width: 70px;
+}
+.fib-override-input {
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+.fib-override-input:focus { outline: none; border-color: var(--accent); }
+.fib-override-btn {
+  font-size: 0.72rem;
+  padding: 5px 12px;
+  border-radius: 4px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+.fib-override-btn:hover { opacity: 0.85; }
 
 /* =============================================================
    SWING TRADING — Supply/Demand Zones (stock detail)

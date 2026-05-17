@@ -159,10 +159,13 @@
         <div class="swing-plan-hint">20 EMA: ${{ "%.2f"|format(stock.ema_20_daily) }}</div>
         {% endif %}
         {% if stock.fib_618 %}
-        <div class="swing-plan-hint">61.8% Fib: ${{ "%.2f"|format(stock.fib_618) }}</div>
+        <div class="swing-plan-hint">61.8% Fib{{ ' ★' if stock.fib_mode == 'active' else '' }}: ${{ "%.2f"|format(stock.fib_618) }}</div>
         {% endif %}
         {% if stock.fib_50 %}
         <div class="swing-plan-hint">50% Fib: ${{ "%.2f"|format(stock.fib_50) }}</div>
+        {% endif %}
+        {% if stock.fib_382 %}
+        <div class="swing-plan-hint">38.2% Fib: ${{ "%.2f"|format(stock.fib_382) }}</div>
         {% endif %}
       </div>
 
@@ -264,41 +267,178 @@
     <div class="detail-col">
       <div class="detail-card">
         <h3 class="card-title">Fibonacci Levels</h3>
-        {% if stock.fib_high and stock.fib_low %}
-        <div class="fib-grid">
 
-          <div class="fib-row fib-row-high">
-            <span class="fib-label">Swing High</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_high) }}</span>
+        {% if stock.fib_high and stock.fib_low %}
+        {% set cur  = stock.current_price %}
+        {% set fh   = stock.fib_high %}
+        {% set fl   = stock.fib_low %}
+        {% set frng = fh - fl %}
+
+        <!-- Mode + confidence header -->
+        <div class="fib-meta-row">
+          <span class="fib-mode-badge fib-mode-{{ stock.fib_mode or 'macro' }}">
+            {% if stock.fib_mode == 'active' %}Active Swing{% elif stock.fib_mode == 'manual' %}Manual{% else %}Macro Struct{% endif %}
+          </span>
+          {% if stock.fib_confidence %}
+          <span class="fib-confidence">Confidence: <strong>{{ "%.1f"|format(stock.fib_confidence) }}/10</strong></span>
+          {% endif %}
+          <span class="fib-direction fib-dir-{{ stock.fib_direction or 'bullish' }}">
+            {{ '▲ Bullish' if (stock.fib_direction or 'bullish') == 'bullish' else '▼ Bearish' }}
+          </span>
+        </div>
+        <div class="fib-anchors">
+          <span>High: ${{ "%.2f"|format(fh) }}</span>
+          <span>Low: ${{ "%.2f"|format(fl) }}</span>
+        </div>
+
+        <!-- Full level grid -->
+        <div class="fib-grid-v2">
+
+          <div class="fib-zone-label fib-zone-premium">Premium Zone</div>
+
+          <div class="fib-row fib-row-high {{ 'fib-row-active' if cur and frng > 0 and (fh * 0.99) <= cur else '' }}">
             <span class="fib-pct">0%</span>
+            <span class="fib-label">Swing High</span>
+            <span class="fib-value">${{ "%.2f"|format(fh) }}</span>
           </div>
+
+          {% if stock.fib_236 %}
+          <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_236 * 0.98) <= cur <= (stock.fib_236 * 1.02) else '' }}">
+            <span class="fib-pct">23.6%</span>
+            <span class="fib-label">Shallow Pullback</span>
+            <span class="fib-value">${{ "%.2f"|format(stock.fib_236) }}</span>
+          </div>
+          {% endif %}
+
+          {% if stock.fib_382 %}
+          <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_382 * 0.98) <= cur <= (stock.fib_382 * 1.02) else '' }}">
+            <span class="fib-pct">38.2%</span>
+            <span class="fib-label">Standard Pullback</span>
+            <span class="fib-value">${{ "%.2f"|format(stock.fib_382) }}</span>
+          </div>
+          {% endif %}
+
+          <div class="fib-zone-label fib-zone-neutral">Mid Zone</div>
 
           {% if stock.fib_50 %}
-          <div class="fib-row {{ 'fib-row-active' if stock.current_price and (stock.fib_50 * 0.98) <= stock.current_price <= (stock.fib_50 * 1.02) else '' }}">
-            <span class="fib-label">50% Retracement</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_50) }}</span>
+          <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_50 * 0.98) <= cur <= (stock.fib_50 * 1.02) else '' }}">
             <span class="fib-pct">50%</span>
+            <span class="fib-label">Mid Retracement</span>
+            <span class="fib-value">${{ "%.2f"|format(stock.fib_50) }}</span>
           </div>
           {% endif %}
+
+          <div class="fib-zone-label fib-zone-golden">Golden Pocket</div>
 
           {% if stock.fib_618 %}
-          <div class="fib-row {{ 'fib-row-active' if stock.current_price and (stock.fib_618 * 0.98) <= stock.current_price <= (stock.fib_618 * 1.02) else '' }}">
-            <span class="fib-label">61.8% Retracement</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_618) }}</span>
+          <div class="fib-row fib-row-golden {{ 'fib-row-active' if cur and (stock.fib_618 * 0.98) <= cur <= (stock.fib_618 * 1.02) else '' }}">
             <span class="fib-pct">61.8%</span>
+            <span class="fib-label">Golden Pocket Top</span>
+            <span class="fib-value">${{ "%.2f"|format(stock.fib_618) }}</span>
           </div>
           {% endif %}
 
-          <div class="fib-row fib-row-low">
-            <span class="fib-label">Swing Low</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_low) }}</span>
+          {% if stock.fib_65 %}
+          <div class="fib-row fib-row-golden {{ 'fib-row-active' if cur and (stock.fib_65 * 0.98) <= cur <= (stock.fib_65 * 1.02) else '' }}">
+            <span class="fib-pct">65%</span>
+            <span class="fib-label">Golden Pocket Bot</span>
+            <span class="fib-value">${{ "%.2f"|format(stock.fib_65) }}</span>
+          </div>
+          {% endif %}
+
+          <div class="fib-zone-label fib-zone-discount">Discount Zone</div>
+
+          {% if stock.fib_786 %}
+          <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_786 * 0.98) <= cur <= (stock.fib_786 * 1.02) else '' }}">
+            <span class="fib-pct">78.6%</span>
+            <span class="fib-label">Deep Retracement</span>
+            <span class="fib-value">${{ "%.2f"|format(stock.fib_786) }}</span>
+          </div>
+          {% endif %}
+
+          <div class="fib-row fib-row-low {{ 'fib-row-active' if cur and frng > 0 and cur <= (fl * 1.01) else '' }}">
             <span class="fib-pct">100%</span>
+            <span class="fib-label">Swing Low</span>
+            <span class="fib-value">${{ "%.2f"|format(fl) }}</span>
           </div>
 
         </div>
+
+        <!-- Price position insight -->
+        {% if cur and frng > 0 %}
+        {% set pct_r = (fh - cur) / frng * 100 %}
+        <div class="fib-position-insight {{ 'fib-pos-premium' if pct_r < 38.2 else ('fib-pos-golden' if pct_r <= 65 else 'fib-pos-discount') }}">
+          {% if pct_r < 0 %}
+            Extended <strong>{{ "%.1f"|format(-pct_r) }}%</strong> above swing high — momentum extended, watch for pullback.
+          {% elif pct_r < 23.6 %}
+            In <strong>premium zone</strong> ({{ "%.1f"|format(pct_r) }}%) — trend continuation area, wait for volume confirmation.
+          {% elif pct_r < 38.2 %}
+            Shallow pullback at <strong>{{ "%.1f"|format(pct_r) }}%</strong> — bullish continuation zone, 20 EMA support key.
+          {% elif pct_r < 50 %}
+            Between 38.2–50% at <strong>{{ "%.1f"|format(pct_r) }}%</strong> — standard retracement, watch for demand reaction.
+          {% elif pct_r < 61.8 %}
+            Near <strong>50% mid-level</strong> ({{ "%.1f"|format(pct_r) }}%) — trend intact while price holds above here.
+          {% elif pct_r <= 65 %}
+            In the <strong>Golden Pocket</strong> ({{ "%.1f"|format(pct_r) }}%) — prime long entry zone in uptrend, high-confluence area.
+          {% elif pct_r < 78.6 %}
+            <strong>Deep retracement</strong> at {{ "%.1f"|format(pct_r) }}% — structure weakening, needs reclaim of 61.8%.
+          {% else %}
+            Below 78.6% ({{ "%.1f"|format(pct_r) }}%) — trend structure <strong>challenged</strong>. Confirm reversal before entry.
+          {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Macro context (shown when active swing is in use) -->
+        {% if stock.fib_mode == 'active' and stock.macro_fib_high and stock.macro_fib_low %}
+        <div class="fib-macro-context">
+          <div class="fib-macro-label">Macro Structure (20-bar)</div>
+          <div class="fib-macro-vals">
+            <span>H: ${{ "%.2f"|format(stock.macro_fib_high) }}</span>
+            {% if stock.macro_fib_50 %}<span>50%: ${{ "%.2f"|format(stock.macro_fib_50) }}</span>{% endif %}
+            {% if stock.macro_fib_618 %}<span>61.8%: ${{ "%.2f"|format(stock.macro_fib_618) }}</span>{% endif %}
+            <span>L: ${{ "%.2f"|format(stock.macro_fib_low) }}</span>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- 4H fibs -->
+        {% if stock.h4_fib_high and stock.h4_fib_low %}
+        <div class="fib-h4-context">
+          <div class="fib-macro-label">4H Structure</div>
+          <div class="fib-macro-vals">
+            <span>H: ${{ "%.2f"|format(stock.h4_fib_high) }}</span>
+            {% if stock.h4_fib_50 %}<span>50%: ${{ "%.2f"|format(stock.h4_fib_50) }}</span>{% endif %}
+            {% if stock.h4_fib_618 %}<span>61.8%: ${{ "%.2f"|format(stock.h4_fib_618) }}</span>{% endif %}
+            <span>L: ${{ "%.2f"|format(stock.h4_fib_low) }}</span>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Manual override -->
+        <div class="fib-override-section">
+          <button class="fib-override-toggle" onclick="this.nextElementSibling.classList.toggle('open')">
+            Set manual fib anchors
+          </button>
+          <form class="fib-override-form" id="fib-override-form"
+                action="/api/fib-override/{{ stock.ticker }}" method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="fib-override-row">
+              <label class="fib-override-label">Swing High</label>
+              <input class="fib-override-input" type="number" name="fib_manual_high" step="0.01"
+                     placeholder="{{ '%.2f'|format(fh) }}" min="0">
+            </div>
+            <div class="fib-override-row">
+              <label class="fib-override-label">Swing Low</label>
+              <input class="fib-override-input" type="number" name="fib_manual_low" step="0.01"
+                     placeholder="{{ '%.2f'|format(fl) }}" min="0">
+            </div>
+            <button class="fib-override-btn" type="submit">Apply Override</button>
+          </form>
+        </div>
+
         {% else %}
         <div class="no-data-msg">
-          Fibonacci unavailable — requires 200-day price history.<br>
+          Fibonacci unavailable — price history required.<br>
           <small>Click <strong>Refresh Data</strong> to compute levels.</small>
         </div>
         {% endif %}
@@ -818,13 +958,21 @@
             <button type="button" class="plan-fill-btn"
               onclick="fillEntry({{ stock.entry_zone_low }})">Entry Zone ${{ "%.2f"|format(stock.entry_zone_low) }}</button>
             {% endif %}
-            {% if stock.fib_618 %}
+            {% if stock.fib_382 %}
             <button type="button" class="plan-fill-btn"
-              onclick="fillEntry({{ stock.fib_618 }})">61.8% ${{ "%.2f"|format(stock.fib_618) }}</button>
+              onclick="fillEntry({{ stock.fib_382 }})">38.2% ${{ "%.2f"|format(stock.fib_382) }}</button>
             {% endif %}
             {% if stock.fib_50 %}
             <button type="button" class="plan-fill-btn"
               onclick="fillEntry({{ stock.fib_50 }})">50% ${{ "%.2f"|format(stock.fib_50) }}</button>
+            {% endif %}
+            {% if stock.fib_618 %}
+            <button type="button" class="plan-fill-btn"
+              onclick="fillEntry({{ stock.fib_618 }})">61.8% ${{ "%.2f"|format(stock.fib_618) }}</button>
+            {% endif %}
+            {% if stock.fib_65 %}
+            <button type="button" class="plan-fill-btn"
+              onclick="fillEntry({{ stock.fib_65 }})">65% ${{ "%.2f"|format(stock.fib_65) }}</button>
             {% endif %}
           </div>
           {% endif %}
