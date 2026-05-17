@@ -48,6 +48,10 @@ _CACHE_TTL_MIN   = 60          # refresh market context every hour
 _rs_cache: dict  = {}          # {ticker: (score, vs_qqq, fetched_at)}
 _RS_TTL_MIN      = 120         # 2-hour RS cache (intraday drift is slow)
 
+# Guards against spawning multiple concurrent background refreshes
+_bg_refresh_lock    = threading.Lock()
+_bg_refresh_active  = False
+
 # ── Sector registry ────────────────────────────────────────────────────────────
 
 SECTOR_ETFS: dict[str, str] = {
@@ -192,9 +196,9 @@ def rs_css_class(score: int) -> str:
 
 def _fetch_prices_chart(tickers: list[str], period: str = "60d") -> dict[str, list[float]]:
     """
-    Fetch daily close prices via Yahoo Finance chart API.
+    Fetch daily close prices via Yahoo Finance chart API — all tickers in parallel.
+    Total wall-clock time is capped at ~12 s regardless of how many tickers are fetched.
     Returns {ticker: [close_prices]} (may be empty list on failure).
-    Avoids yfinance's crumb/cookie requirement — works on cloud IPs.
     """
     result: dict[str, list[float]] = {t: [] for t in tickers}
     if not tickers:
@@ -202,6 +206,7 @@ def _fetch_prices_chart(tickers: list[str], period: str = "60d") -> dict[str, li
 
     try:
         import requests as _req
+        from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
     except ImportError:
         return result
 
@@ -214,7 +219,7 @@ def _fetch_prices_chart(tickers: list[str], period: str = "60d") -> dict[str, li
         "Accept": "application/json",
     }
 
-    for ticker in tickers:
+    def _fetch_one(ticker: str) -> tuple[str, list[float]]:
         for base in (
             "https://query1.finance.yahoo.com/v8/finance/chart",
             "https://query2.finance.yahoo.com/v8/finance/chart",
@@ -225,7 +230,7 @@ def _fetch_prices_chart(tickers: list[str], period: str = "60d") -> dict[str, li
                     url,
                     params={"interval": "1d", "range": period},
                     headers=headers,
-                    timeout=10,
+                    timeout=8,
                 )
                 if r.status_code != 200:
                     continue
@@ -233,11 +238,24 @@ def _fetch_prices_chart(tickers: list[str], period: str = "60d") -> dict[str, li
                 closes = node["indicators"]["quote"][0].get("close", [])
                 prices = [float(c) for c in closes if c is not None and c > 0]
                 if prices:
-                    result[ticker] = prices
-                    break
+                    return ticker, prices
             except Exception as _e:
                 logger.debug("market_engine chart fetch %s: %s", ticker, _e)
                 continue
+        return ticker, []
+
+    workers = min(len(tickers), 10)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(_fetch_one, t): t for t in tickers}
+        try:
+            for fut in _as_completed(futs, timeout=12):
+                try:
+                    ticker, prices = fut.result()
+                    result[ticker] = prices
+                except Exception as _e:
+                    logger.debug("market_engine fetch_one result error: %s", _e)
+        except Exception:
+            pass  # timeout — return whatever we collected so far
 
     return result
 
@@ -464,39 +482,66 @@ def _empty_context() -> dict:
     }
 
 
+def _do_refresh() -> None:
+    """Background worker: fetch all market data and update the cache."""
+    global _market_cache, _market_cache_at, _bg_refresh_active
+    try:
+        ctx = _build_context()
+        with _cache_lock:
+            _market_cache    = ctx
+            _market_cache_at = datetime.now()
+        logger.info("market_engine: cache refreshed  regime=%s", ctx.get("regime"))
+    except Exception as exc:
+        logger.warning("market_engine._build_context failed: %s", exc)
+    finally:
+        with _bg_refresh_lock:
+            _bg_refresh_active = False
+
+
 def get_market_context() -> dict:
     """
-    Return cached market context. Thread-safe. Refreshes every _CACHE_TTL_MIN.
-    Always returns a valid dict — never raises.
+    Return cached market context immediately — NEVER blocks the calling thread.
+
+    If the cache is fresh, returns it directly.
+    If the cache is stale or cold, returns stale/empty data immediately and
+    triggers a background refresh so the next call gets updated data.
+    This prevents the dashboard request thread from blocking on API calls.
     """
-    global _market_cache, _market_cache_at
+    global _bg_refresh_active
 
     now = datetime.now()
     with _cache_lock:
-        if (
-            _market_cache_at is not None
-            and (now - _market_cache_at).total_seconds() < _CACHE_TTL_MIN * 60
-            and _market_cache
-        ):
+        has_data  = bool(_market_cache)
+        cache_age = (
+            (now - _market_cache_at).total_seconds()
+            if _market_cache_at is not None else float("inf")
+        )
+        is_fresh = has_data and cache_age < _CACHE_TTL_MIN * 60
+        if is_fresh:
             return dict(_market_cache)
+        # Return whatever we have right now (stale or empty) without waiting
+        snapshot = dict(_market_cache) if has_data else {}
 
-    try:
-        ctx = _build_context()
-    except Exception as e:
-        logger.warning("market_engine._build_context failed: %s", e)
-        ctx = _empty_context()
+    # Kick off one background refresh at a time
+    with _bg_refresh_lock:
+        if not _bg_refresh_active:
+            _bg_refresh_active = True
+            threading.Thread(
+                target=_do_refresh, daemon=True, name="mkt-ctx-refresh"
+            ).start()
 
-    with _cache_lock:
-        _market_cache    = ctx
-        _market_cache_at = now
-
-    return dict(ctx)
+    return snapshot if snapshot else _empty_context()
 
 
 def refresh_market_context_bg() -> None:
     """Kick off a background refresh without blocking the caller."""
-    import threading as _th
-    _th.Thread(target=get_market_context, daemon=True, name="mkt-ctx-refresh").start()
+    global _bg_refresh_active
+    with _bg_refresh_lock:
+        if not _bg_refresh_active:
+            _bg_refresh_active = True
+            threading.Thread(
+                target=_do_refresh, daemon=True, name="mkt-ctx-refresh"
+            ).start()
 
 
 # ── 20-day RS score (slower — fetches per-ticker data) ───────────────────────
