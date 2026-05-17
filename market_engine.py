@@ -122,8 +122,20 @@ _YF_SECTOR_MAP: dict[str, str] = {
 def get_sector_for_ticker(ticker: str) -> tuple[str, str]:
     """
     Return (etf_symbol, sector_name) for a ticker.
-    Uses built-in map first; falls back to yfinance info.
+    Uses built-in map only — never makes a blocking API call during a request.
     Returns ("", "") if unknown.
+    """
+    t = (ticker or "").upper().strip()
+    etf = _TICKER_SECTOR.get(t)
+    if etf:
+        return etf, SECTOR_ETFS.get(etf, "")
+    return "", ""
+
+
+def get_sector_for_ticker_bg(ticker: str) -> tuple[str, str]:
+    """
+    Slow fallback: lookup sector via yfinance and cache result for the session.
+    Call this ONLY from background threads, never from a request handler.
     """
     t = (ticker or "").upper().strip()
     etf = _TICKER_SECTOR.get(t)
@@ -136,7 +148,7 @@ def get_sector_for_ticker(ticker: str) -> tuple[str, str]:
             sector = info.get("sector", "")
             etf    = _YF_SECTOR_MAP.get(sector, "")
             if etf:
-                _TICKER_SECTOR[t] = etf   # cache for this session
+                _TICKER_SECTOR[t] = etf
                 return etf, SECTOR_ETFS.get(etf, sector)
         except Exception:
             pass

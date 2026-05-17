@@ -353,7 +353,7 @@ def generate_stock_data(ticker: str) -> dict:
 
     # ── Step 4b: Relative strength & sector (market_engine) ───────────────────
     try:
-        from market_engine import compute_rs_score_20d, get_sector_for_ticker
+        from market_engine import compute_rs_score_20d, get_sector_for_ticker_bg as get_sector_for_ticker
         _rs, _vs = compute_rs_score_20d(ticker)
         data["rs_score"]   = _rs
         data["rs_vs_qqq"]  = _vs
@@ -585,7 +585,7 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
 
     # ── RS score + sector ─────────────────────────────────────────────────────
     try:
-        from market_engine import compute_rs_score_20d, get_sector_for_ticker
+        from market_engine import compute_rs_score_20d, get_sector_for_ticker_bg as get_sector_for_ticker
         _rs, _vs = compute_rs_score_20d(ticker)
         data["rs_score"]  = _rs
         data["rs_vs_qqq"] = _vs
