@@ -24,6 +24,11 @@ import threading
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field as _field
 
+try:
+    from zones import check_zone_alert_conditions as _zone_alerts
+except Exception:
+    _zone_alerts = None
+
 
 def _et_now() -> datetime:
     try:
@@ -182,6 +187,17 @@ def generate_alerts(stocks: list) -> list:
                 a = _Alert(ticker, msg, "continuation", "medium", ts)
                 _push(a)
                 new_alerts.append(_alert_to_dict(a))
+
+        # ── 6. Institutional zone alerts (V2) ─────────────────────────────────
+        if _zone_alerts:
+            try:
+                for atype, msg, sev in _zone_alerts(s):
+                    if _should_fire(ticker, atype):
+                        a = _Alert(ticker, msg, atype, sev, ts)
+                        _push(a)
+                        new_alerts.append(_alert_to_dict(a))
+            except Exception:
+                pass
 
     return new_alerts
 

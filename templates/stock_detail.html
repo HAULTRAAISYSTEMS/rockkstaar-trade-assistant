@@ -515,41 +515,159 @@
 
   </div>
 
-  <!-- ===== SUPPLY / DEMAND ZONES ===== -->
-  {% if stock.nearest_supply_top or stock.nearest_demand_bottom %}
-  <div class="detail-card zones-card">
-    <h3 class="card-title">Supply &amp; Demand Zones</h3>
-    <div class="zones-grid">
-
-      {% if stock.nearest_supply_top %}
-      <div class="zone-item zone-supply {{ 'zone-active' if stock.in_supply_zone else '' }}">
-        <div class="zone-label">Nearest Supply</div>
-        <div class="zone-range">${{ "%.2f"|format(stock.nearest_supply_bottom or 0) }} – ${{ "%.2f"|format(stock.nearest_supply_top) }}</div>
-        {% if stock.distance_to_supply_pct %}
-        <div class="zone-dist">{{ '%+.1f'|format(stock.distance_to_supply_pct) }}% away</div>
-        {% endif %}
-        {% if stock.in_supply_zone %}<div class="zone-active-badge">IN ZONE</div>{% endif %}
-      </div>
-      {% endif %}
-
-      {% if stock.nearest_demand_bottom %}
-      <div class="zone-item zone-demand {{ 'zone-active' if stock.in_demand_zone else '' }}">
-        <div class="zone-label">Nearest Demand</div>
-        <div class="zone-range">${{ "%.2f"|format(stock.nearest_demand_bottom) }} – ${{ "%.2f"|format(stock.nearest_demand_top or 0) }}</div>
-        {% if stock.distance_to_demand_pct %}
-        <div class="zone-dist">{{ '%+.1f'|format(stock.distance_to_demand_pct) }}% away</div>
-        {% endif %}
-        {% if stock.in_demand_zone %}<div class="zone-active-badge">IN ZONE</div>{% endif %}
-      </div>
-      {% endif %}
-
+  <!-- ===== INSTITUTIONAL SUPPLY & DEMAND ZONES ===== -->
+  <div class="detail-card zones-card-v2">
+    <h3 class="card-title">
+      Smart Money Zones
       {% if stock.zone_location %}
-      <div class="zone-location-badge">{{ stock.zone_location }}</div>
+      <span class="zone-location-chip zone-loc-{{ stock.zone_location | lower | replace(' ', '-') | replace('—', '') }}">{{ stock.zone_location }}</span>
       {% endif %}
+    </h3>
 
+    {# ── AI Setup Engine ───────────────────────────────────────────────── #}
+    {% if stock.zone_ai_setup and stock.zone_probability %}
+    <div class="zone-ai-box">
+      <div class="zone-ai-header">
+        <span class="zone-ai-setup">{{ stock.zone_ai_setup }}</span>
+        <span class="zone-ai-prob {{ 'zone-prob-high' if stock.zone_probability >= 75 else ('zone-prob-med' if stock.zone_probability >= 60 else 'zone-prob-low') }}">
+          {{ stock.zone_probability }}% probability
+        </span>
+      </div>
+      {% if stock.zone_ai_reasons %}
+      <ul class="zone-ai-reasons">
+        {% for r in stock.zone_ai_reasons[:7] %}
+        <li>{{ r }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
     </div>
-  </div>
-  {% endif %}
+    {% endif %}
+
+    {# ── Smart Money Flags ─────────────────────────────────────────────── #}
+    {% set sm = stock.smart_money or {} %}
+    {% if sm %}
+    <div class="sm-flags-row">
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('fvg_bullish') else 'sm-flag-off' }}">FVG Bull</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('fvg_bearish') else 'sm-flag-off' }}">FVG Bear</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('bos_bullish') else 'sm-flag-off' }}">BOS ▲</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('bos_bearish') else 'sm-flag-off' }}">BOS ▼</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('mss_bullish') else 'sm-flag-off' }}">MSS ▲</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('bullish_sweep') else 'sm-flag-off' }}">Sweep ▲</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('bearish_sweep') else 'sm-flag-off' }}">Sweep ▼</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('order_block_bull') else 'sm-flag-off' }}">OB Bull</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('order_block_bear') else 'sm-flag-off' }}">OB Bear</span>
+    </div>
+    {% endif %}
+
+    {# ── Best Demand + Supply side-by-side ─────────────────────────────── #}
+    <div class="zones-dual-grid">
+
+      {# DEMAND ZONES #}
+      <div class="zones-col zones-col-demand">
+        <div class="zones-col-header">
+          <span class="zones-col-title">DEMAND ZONES</span>
+          {% if stock.demand_zone_grade %}
+          <span class="zone-grade-badge {{ stock.demand_zone_grade_css }}">{{ stock.demand_zone_grade }}</span>
+          {% endif %}
+        </div>
+
+        {% if stock.demand_zones %}
+          {% for z in stock.demand_zones[:3] %}
+          {% set cur = stock.current_price %}
+          {% set in_z = cur and z.zone_bottom <= cur <= z.zone_top %}
+          {% set near = cur and not in_z and (z.zone_top - cur) / cur <= 0.04 %}
+          <div class="zone-row zone-row-demand {{ 'zone-row-active' if in_z else '' }} {{ 'zone-row-near' if near else '' }}">
+            <div class="zone-row-top">
+              <span class="zone-grade-badge {{ {'A+':'zone-grade-aplus','A':'zone-grade-a','B+':'zone-grade-bplus','B':'zone-grade-b'}.get(z.grade, '') }}">{{ z.grade }}</span>
+              <span class="zone-row-range">${{ "%.2f"|format(z.zone_bottom) }} – ${{ "%.2f"|format(z.zone_top) }}</span>
+              {% if in_z %}<span class="zone-in-badge">IN ZONE</span>{% elif near %}<span class="zone-near-badge">NEAR</span>{% endif %}
+            </div>
+            <div class="zone-row-meta">
+              {% if z.timeframe %}<span class="zone-tf">{{ z.timeframe | upper }}</span>{% endif %}
+              <span class="zone-fresh {{ 'zone-fresh-yes' if z.is_fresh else 'zone-fresh-no' }}">
+                {{ 'Fresh' if z.retest_count == 0 else ('1st retest' if z.retest_count == 1 else (z.retest_count|string + 'x used')) }}
+              </span>
+              {% if z.has_fvg %}<span class="sm-flag sm-flag-on sm-flag-xs">FVG</span>{% endif %}
+              {% if z.ob_present %}<span class="sm-flag sm-flag-on sm-flag-xs">OB</span>{% endif %}
+              {% if z.has_bos %}<span class="sm-flag sm-flag-on sm-flag-xs">BOS</span>{% endif %}
+              {% if z.has_liq_sweep %}<span class="sm-flag sm-flag-on sm-flag-xs">SWEEP</span>{% endif %}
+            </div>
+            {% if z.confluence_factors %}
+            <div class="zone-confluence">{{ z.confluence_factors[:3] | join(' · ') }}</div>
+            {% endif %}
+            <div class="zone-row-score">Score: {{ "%.1f"|format(z.final_score) }}/10 · Vol {{ z.vol_ratio }}x · Disp {{ z.displacement_atr }}x ATR</div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="zone-empty">No institutional demand zones detected</div>
+        {% endif %}
+      </div>
+
+      {# SUPPLY ZONES #}
+      <div class="zones-col zones-col-supply">
+        <div class="zones-col-header">
+          <span class="zones-col-title">SUPPLY ZONES</span>
+          {% if stock.supply_zone_grade %}
+          <span class="zone-grade-badge {{ stock.supply_zone_grade_css }}">{{ stock.supply_zone_grade }}</span>
+          {% endif %}
+        </div>
+
+        {% if stock.supply_zones %}
+          {% for z in stock.supply_zones[:3] %}
+          {% set cur = stock.current_price %}
+          {% set in_z = cur and z.zone_bottom <= cur <= z.zone_top %}
+          {% set near = cur and not in_z and (cur - z.zone_bottom) / cur <= 0.04 %}
+          <div class="zone-row zone-row-supply {{ 'zone-row-active' if in_z else '' }} {{ 'zone-row-near' if near else '' }}">
+            <div class="zone-row-top">
+              <span class="zone-grade-badge {{ {'A+':'zone-grade-aplus','A':'zone-grade-a','B+':'zone-grade-bplus','B':'zone-grade-b'}.get(z.grade, '') }}">{{ z.grade }}</span>
+              <span class="zone-row-range">${{ "%.2f"|format(z.zone_bottom) }} – ${{ "%.2f"|format(z.zone_top) }}</span>
+              {% if in_z %}<span class="zone-in-badge">IN ZONE</span>{% elif near %}<span class="zone-near-badge">NEAR</span>{% endif %}
+            </div>
+            <div class="zone-row-meta">
+              {% if z.timeframe %}<span class="zone-tf">{{ z.timeframe | upper }}</span>{% endif %}
+              <span class="zone-fresh {{ 'zone-fresh-yes' if z.is_fresh else 'zone-fresh-no' }}">
+                {{ 'Fresh' if z.retest_count == 0 else ('1st retest' if z.retest_count == 1 else (z.retest_count|string + 'x used')) }}
+              </span>
+              {% if z.has_fvg %}<span class="sm-flag sm-flag-on sm-flag-xs">FVG</span>{% endif %}
+              {% if z.ob_present %}<span class="sm-flag sm-flag-on sm-flag-xs">OB</span>{% endif %}
+              {% if z.has_bos %}<span class="sm-flag sm-flag-on sm-flag-xs">BOS</span>{% endif %}
+            </div>
+            {% if z.confluence_factors %}
+            <div class="zone-confluence">{{ z.confluence_factors[:3] | join(' · ') }}</div>
+            {% endif %}
+            <div class="zone-row-score">Score: {{ "%.1f"|format(z.final_score) }}/10 · Vol {{ z.vol_ratio }}x · Disp {{ z.displacement_atr }}x ATR</div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="zone-empty">No institutional supply zones detected</div>
+        {% endif %}
+      </div>
+
+    </div>{# end zones-dual-grid #}
+
+    {# ── Fallback V1 zone display when no V2 zones exist ─────────────────── #}
+    {% if not stock.demand_zones and not stock.supply_zones %}
+    {% if stock.nearest_supply_top or stock.nearest_demand_bottom %}
+    <div class="zones-v1-fallback">
+      {% if stock.nearest_supply_top %}
+      <div class="zone-v1-item zone-supply">
+        <span class="zone-v1-label">Supply</span>
+        <span class="zone-v1-range">${{ "%.2f"|format(stock.nearest_supply_bottom or 0) }}–${{ "%.2f"|format(stock.nearest_supply_top) }}</span>
+        {% if stock.distance_to_supply_pct %}<span class="zone-v1-dist">{{ '%+.1f'|format(stock.distance_to_supply_pct) }}%</span>{% endif %}
+      </div>
+      {% endif %}
+      {% if stock.nearest_demand_bottom %}
+      <div class="zone-v1-item zone-demand">
+        <span class="zone-v1-label">Demand</span>
+        <span class="zone-v1-range">${{ "%.2f"|format(stock.nearest_demand_bottom) }}–${{ "%.2f"|format(stock.nearest_demand_top or 0) }}</span>
+        {% if stock.distance_to_demand_pct %}<span class="zone-v1-dist">{{ '%+.1f'|format(stock.distance_to_demand_pct) }}%</span>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% endif %}
+
+  </div>{# end zones-card-v2 #}
 
   <!-- ===== PRICE STATS GRID ===== -->
   <div class="stats-grid">

@@ -84,6 +84,16 @@ def _zone_defaults(data: dict) -> None:
     data.setdefault("in_supply_zone",         False)
     data.setdefault("in_demand_zone",         False)
     data.setdefault("zones_fetched_at",       None)
+    # V2 institutional zone fields
+    data.setdefault("zones_json",             None)
+    data.setdefault("demand_zone_grade",      None)
+    data.setdefault("supply_zone_grade",      None)
+    data.setdefault("zone_ai_setup",          None)
+    data.setdefault("zone_ai_reason",         None)
+    data.setdefault("zone_probability",       None)
+    data.setdefault("smart_money_json",       None)
+    data.setdefault("fvg_bullish",            False)
+    data.setdefault("fvg_bearish",            False)
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +339,7 @@ def generate_stock_data(ticker: str) -> dict:
         if zones_need_refresh(data.get("zones_fetched_at")):
             current_px = data.get("current_price") or 0
             if current_px:
-                zone_data = detect_zones(ticker, current_px)
+                zone_data = detect_zones(ticker, current_px, stock_data=data)
                 data.update(zone_data)
                 data["zones_fetched_at"] = datetime.now().isoformat()
     except Exception as exc:
@@ -546,7 +556,7 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
             current_px = data.get("current_price") or 0
             ticker_sym = (data.get("ticker") or ticker).upper()
             if current_px and ticker_sym:
-                zone_data = detect_zones(ticker_sym, current_px)
+                zone_data = detect_zones(ticker_sym, current_px, stock_data=data)
                 data.update(zone_data)
                 data["zones_fetched_at"] = datetime.now().isoformat()
     except Exception as exc:

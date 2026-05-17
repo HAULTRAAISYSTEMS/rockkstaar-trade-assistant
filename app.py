@@ -2100,6 +2100,43 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
     stock["swing_grade"]            = compute_swing_grade(stock.get("swing_score") or 1)
     stock["continuation_score"]     = compute_continuation_score(stock)
 
+    # ── Institutional zone display fields ─────────────────────────────────────
+    import json as _json
+    _zones_str = stock.get("zones_json")
+    try:
+        stock["parsed_zones"] = _json.loads(_zones_str) if _zones_str else []
+    except Exception:
+        stock["parsed_zones"] = []
+
+    _sm_str = stock.get("smart_money_json")
+    try:
+        stock["smart_money"] = _json.loads(_sm_str) if _sm_str else {}
+    except Exception:
+        stock["smart_money"] = {}
+
+    _reason_str = stock.get("zone_ai_reason")
+    try:
+        stock["zone_ai_reasons"] = _json.loads(_reason_str) if _reason_str else []
+    except Exception:
+        stock["zone_ai_reasons"] = []
+
+    # Separate demand/supply zones for template convenience
+    _pz = stock.get("parsed_zones") or []
+    stock["demand_zones"] = sorted(
+        [z for z in _pz if z.get("zone_type") == "demand"],
+        key=lambda z: z.get("final_score", 0), reverse=True
+    )
+    stock["supply_zones"] = sorted(
+        [z for z in _pz if z.get("zone_type") == "supply"],
+        key=lambda z: z.get("final_score", 0), reverse=True
+    )
+
+    # Zone grade CSS mapping
+    _grade_css = {"A+": "zone-grade-aplus", "A": "zone-grade-a",
+                  "B+": "zone-grade-bplus", "B": "zone-grade-b"}
+    stock["demand_zone_grade_css"] = _grade_css.get(stock.get("demand_zone_grade") or "", "")
+    stock["supply_zone_grade_css"] = _grade_css.get(stock.get("supply_zone_grade") or "", "")
+
     # ── Plan mode display helpers ─────────────────────────────────────────────
     _plan_mode = stock.get("plan_mode") or "none"
     stock["plan_mode_label"] = {
