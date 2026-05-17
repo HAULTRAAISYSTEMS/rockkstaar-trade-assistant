@@ -6373,3 +6373,341 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   white-space: nowrap;
   flex-shrink: 0;
 }
+
+/* ============================================================
+   SECTOR REGIME BAR  (market_engine.py — new)
+   ============================================================ */
+
+.sector-regime-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0;
+}
+
+.srb-regime {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+}
+
+.srb-regime-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+.srb-regime-risk-on    .srb-regime-dot { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+.srb-regime-neutral    .srb-regime-dot { background: #a3a3a3; }
+.srb-regime-caution    .srb-regime-dot { background: #f59e0b; }
+.srb-regime-risk-off   .srb-regime-dot { background: #ef4444; }
+.srb-regime-no-trade   .srb-regime-dot { background: #dc2626; box-shadow: 0 0 6px #dc262688; animation: zone-pulse 1.2s infinite; }
+
+.srb-regime-label {
+  font-weight: 600;
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
+.srb-regime-risk-on  .srb-regime-label { color: #22c55e; }
+.srb-regime-risk-off .srb-regime-label { color: #ef4444; }
+.srb-regime-caution  .srb-regime-label { color: #f59e0b; }
+.srb-regime-no-trade .srb-regime-label { color: #dc2626; }
+
+.srb-index-chip {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-family: 'IBM Plex Mono', monospace;
+  border: 1px solid var(--border);
+}
+.srb-green  { color: #22c55e; border-color: #22c55e44; background: #22c55e11; }
+.srb-red    { color: #ef4444; border-color: #ef444444; background: #ef444411; }
+.srb-amber  { color: #f59e0b; border-color: #f59e0b44; background: #f59e0b11; }
+
+.srb-signal {
+  font-size: 0.70rem;
+  color: var(--text-muted);
+  margin-left: auto;
+  font-style: italic;
+}
+
+/* Sector strip */
+.srb-sectors {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.srb-sector {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  font-size: 0.68rem;
+  cursor: default;
+  transition: background 0.15s;
+}
+.srb-sector:hover { background: var(--bg-hover); }
+
+.srb-etf  { font-weight: 700; color: var(--text-secondary); font-family: 'IBM Plex Mono', monospace; }
+.srb-pct  { font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+
+.srb-sector.srb-leading { border-color: #22c55e44; background: #22c55e0e; }
+.srb-sector.srb-leading .srb-etf { color: #22c55e; }
+.srb-sector.srb-strong  { border-color: #4ade8044; }
+.srb-sector.srb-weak    { border-color: #ef444444; background: #ef44440a; }
+.srb-sector.srb-weak    .srb-etf { color: #ef4444; }
+.srb-sector.srb-lagging { border-color: #f9731644; }
+.srb-sector.srb-neutral { opacity: 0.7; }
+
+
+/* ============================================================
+   RELATIVE STRENGTH (RS) BADGES
+   ============================================================ */
+
+.rs-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono', monospace;
+  border: 1px solid var(--border);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.rs-badge-sm {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+}
+
+.rs-leader  { color: #16a34a; border-color: #16a34a55; background: #16a34a18; }
+.rs-strong  { color: #22c55e; border-color: #22c55e44; background: #22c55e0e; }
+.rs-avg     { color: var(--text-secondary); border-color: var(--border); background: var(--bg-secondary); }
+.rs-weak    { color: #f59e0b; border-color: #f59e0b44; background: #f59e0b0a; }
+.rs-laggard { color: #ef4444; border-color: #ef444444; background: #ef44440a; }
+
+/* RS score in detail page score strip */
+.score-big.rs-leader  { color: #16a34a; }
+.score-big.rs-strong  { color: #22c55e; }
+.score-big.rs-avg     { color: var(--text-secondary); }
+.score-big.rs-weak    { color: #f59e0b; }
+.score-big.rs-laggard { color: #ef4444; }
+
+
+/* ============================================================
+   SECTOR CHIP
+   ============================================================ */
+
+.sector-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-family: 'IBM Plex Mono', monospace;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.sector-chip-leading {
+  color: #22c55e;
+  border-color: #22c55e55;
+  background: #22c55e12;
+}
+
+
+/* ============================================================
+   AVOIDANCE FLAGS STRIP (dashboard cards)
+   ============================================================ */
+
+.avoidance-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 5px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: #ef444408;
+  border: 1px solid #ef444422;
+}
+
+.avoid-flag {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  line-height: 1.3;
+}
+.avoid-flag-high   { color: #ef4444; }
+.avoid-flag-medium { color: #f59e0b; }
+.avoid-flag-low    { color: var(--text-muted); }
+
+
+/* ============================================================
+   AI INSTITUTIONAL TRADE PLAN CARD  (stock_detail.html)
+   ============================================================ */
+
+.ai-plan-card {
+  border-left: 3px solid #8b5cf6;
+}
+.ai-plan-card .card-title { color: var(--text-primary); }
+
+/* Grade badge */
+.plan-grade-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  margin-left: 8px;
+}
+.plan-aplus { background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff; box-shadow: 0 0 10px #7c3aed55; }
+.plan-a     { background: #16a34a22; color: #16a34a; border: 1px solid #16a34a44; }
+.plan-bplus { background: #0ea5e922; color: #0ea5e9; border: 1px solid #0ea5e944; }
+.plan-b     { background: var(--bg-secondary); color: var(--text-muted); border: 1px solid var(--border); }
+
+/* Probability badge */
+.plan-prob-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 0.70rem;
+  font-weight: 700;
+  margin-left: 6px;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.prob-high { color: #22c55e; border: 1px solid #22c55e44; background: #22c55e0e; }
+.prob-med  { color: #f59e0b; border: 1px solid #f59e0b44; background: #f59e0b0a; }
+.prob-low  { color: #ef4444; border: 1px solid #ef444444; background: #ef44440a; }
+
+/* Header row: setup label + RS + sector */
+.ai-plan-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.ai-plan-setup-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+
+/* Two-column body */
+.ai-plan-body {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 16px;
+}
+@media (max-width: 600px) {
+  .ai-plan-body { grid-template-columns: 1fr; }
+}
+
+/* Levels column */
+.ai-plan-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.ai-level-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+}
+.ai-level-entry { border-color: #8b5cf644; background: #8b5cf608; }
+.ai-level-stop  { border-color: #ef444422; background: #ef44440a; }
+.ai-level-target{ border-color: #22c55e22; background: #22c55e0a; }
+
+.ai-level-lbl {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.ai-level-val {
+  font-size: 0.80rem;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--text-primary);
+}
+
+/* Signals column */
+.ai-plan-signals {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ai-signals-section { display: flex; flex-direction: column; gap: 4px; }
+.ai-signals-title {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 2px;
+}
+.ai-signals-bull { color: #22c55e; }
+.ai-signals-warn { color: #f59e0b; }
+
+.ai-signal-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+.ai-signal-bull { color: var(--text-secondary); }
+.ai-signal-warn { color: #d97706; }
+
+.ai-sig-dot {
+  flex-shrink: 0;
+  font-weight: 800;
+  margin-top: 1px;
+  color: #22c55e;
+}
+.ai-sig-warn-dot { color: #f59e0b; }
+
+
+/* ============================================================
+   RVOL enhanced display (Nx multiplier color tiers)
+   ============================================================ */
+
+/* Already handled by rvol-hot; add institutional tier */
+.rvol-institutional {
+  color: #8b5cf6 !important;
+  font-weight: 700;
+}
+.rvol-strong {
+  color: #22c55e !important;
+  font-weight: 700;
+}
+

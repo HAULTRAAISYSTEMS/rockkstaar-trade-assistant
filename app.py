@@ -47,6 +47,11 @@ from classifier import classify_stock
 from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as _clear_alerts
 import scanner as _scanner
 import intel_engine as _intel
+try:
+    import market_engine as _mkt
+    _MKT_AVAILABLE = True
+except Exception:
+    _MKT_AVAILABLE = False
 
 app = Flask(__name__)
 
@@ -337,6 +342,13 @@ try:
 except Exception as _warm_err:
     logger.error("intel bg refresh failed at startup: %s", _warm_err)
 
+# Pre-warm the market context cache (regime, sectors, RS baseline)
+try:
+    if _MKT_AVAILABLE:
+        _mkt.refresh_market_context_bg()
+except Exception as _mkt_warm_err:
+    logger.error("market context bg refresh failed at startup: %s", _mkt_warm_err)
+
 # ---------------------------------------------------------------------------
 # Startup migration: wipe stale mock-seeded prices from the DB.
 #
@@ -587,6 +599,138 @@ def _upsert_or_keep_snapshot(fresh: dict, existing: dict | None = None) -> str:
     else:
         upsert_stock_data(fresh)
         return "updated"
+
+
+def _get_mkt_ctx() -> dict:
+    """Return cached market context (regime, RS, sectors). Never raises."""
+    if _MKT_AVAILABLE:
+        try:
+            return _mkt.get_market_context()
+        except Exception:
+            pass
+    return {
+        "regime": "NEUTRAL", "regime_label": "Neutral",
+        "qqq_trend": "Unknown", "spy_trend": "Unknown",
+        "qqq_1d_pct": None, "spy_1d_pct": None,
+        "signal": "", "longs_ok": True, "shorts_ok": True,
+        "reduce_size": False, "no_trade": False,
+        "sectors": [], "leading_sectors": [], "weak_sectors": [],
+        "top_sector": None, "qqq_price": None, "spy_price": None,
+        "vix_level": None,
+    }
+
+
+def build_ai_trade_plan(stock: dict) -> dict:
+    """
+    Build an institutional-style AI trade plan from existing stock data fields.
+    Returns a dict consumed by the stock_detail template's trade plan panel.
+    """
+    swing_score  = stock.get("swing_score")  or 0
+    cat_score    = stock.get("catalyst_score") or 0
+    rr           = stock.get("risk_reward")
+    swing_status = stock.get("swing_status") or ""
+    swing_type   = stock.get("swing_setup_type") or ""
+    zone_prob    = stock.get("zone_probability")
+    zone_setup   = stock.get("zone_ai_setup") or ""
+    cat_summary  = (stock.get("catalyst_summary") or "").strip()
+    rvol         = stock.get("rel_volume") or 0
+    daily_trend  = stock.get("daily_trend") or ""
+    h4_trend     = stock.get("h4_trend") or ""
+    fvg_bull     = stock.get("fvg_bullish") or False
+    fvg_bear     = stock.get("fvg_bearish") or False
+    demand_grade = stock.get("demand_zone_grade") or ""
+    supply_grade = stock.get("supply_zone_grade") or ""
+    rs_score     = stock.get("rs_score") or 50
+    sector_etf   = stock.get("sector_etf") or ""
+    pct_ema20    = stock.get("pct_from_ema20") or 0
+    in_supply    = stock.get("in_supply_zone") or False
+    bos_bull     = False
+    try:
+        import json as _j
+        sm = _j.loads(stock.get("smart_money_json") or "{}")
+        bos_bull = bool(sm.get("bos_bullish"))
+    except Exception:
+        pass
+
+    # Grade
+    if swing_score >= 8 and cat_score >= 6 and rr and rr >= 2:
+        grade, grade_css = "A+", "plan-aplus"
+    elif swing_score >= 7 and cat_score >= 5:
+        grade, grade_css = "A",  "plan-a"
+    elif swing_score >= 5 or cat_score >= 5:
+        grade, grade_css = "B+", "plan-bplus"
+    else:
+        grade, grade_css = "B",  "plan-b"
+
+    # Probability
+    prob = zone_prob or max(30, min(90, 30 + swing_score * 4 + cat_score * 3))
+
+    # Reasons (green signals)
+    reasons = []
+    if cat_summary:
+        reasons.append(cat_summary[:90])
+    if rvol >= 4:
+        reasons.append(f"RVOL {rvol:.1f}x — institutional momentum")
+    elif rvol >= 2:
+        reasons.append(f"RVOL {rvol:.1f}x — above average volume")
+    elif rvol >= 1.3:
+        reasons.append(f"RVOL {rvol:.1f}x — moderate interest")
+    if "Bullish" in daily_trend:
+        reasons.append("Daily trend bullish — higher highs / higher lows")
+    if "Bullish" in h4_trend:
+        reasons.append("4H trend bullish — momentum aligning")
+    if demand_grade in ("A+", "A"):
+        reasons.append(f"Institutional demand zone ({demand_grade}) below")
+    if fvg_bull:
+        reasons.append("Bullish Fair Value Gap — liquidity void support")
+    if bos_bull:
+        reasons.append("Break of structure bullish — trend confirmed")
+    if rs_score >= 75:
+        reasons.append(f"Outperforming QQQ (RS {rs_score})")
+    if sector_etf:
+        reasons.append(f"Sector: {sector_etf} — check sector strength")
+
+    # Warnings (red flags / avoidance)
+    warnings = []
+    if in_supply or supply_grade in ("A+", "A"):
+        warnings.append("Near supply zone — watch for rejection")
+    if fvg_bear:
+        warnings.append("Bearish Fair Value Gap overhead — possible resistance")
+    if rvol < 0.8:
+        warnings.append("Low relative volume — weak institutional interest")
+    if rr and rr < 1.5:
+        warnings.append(f"R:R {rr:.1f}:1 is too weak — minimum 1.5:1 needed")
+    if pct_ema20 > 8:
+        warnings.append(f"Extended {pct_ema20:.1f}% above 20 EMA — wait for pullback")
+    if swing_status == "WAIT":
+        warnings.append("No confirmed entry signal — monitor for setup")
+    if rs_score < 30:
+        warnings.append(f"Weak RS ({rs_score}) — underperforming QQQ")
+
+    entry_low  = stock.get("entry_zone_low")
+    entry_high = stock.get("entry_zone_high")
+    entry_mid  = None
+    if entry_low and entry_high:
+        entry_mid = round((entry_low + entry_high) / 2, 2)
+
+    return {
+        "grade":       grade,
+        "grade_css":   grade_css,
+        "setup_label": zone_setup or swing_type or "Setup Forming",
+        "probability": prob,
+        "entry_low":   entry_low,
+        "entry_high":  entry_high,
+        "entry_mid":   entry_mid,
+        "stop":        stock.get("stop_level"),
+        "target1":     stock.get("target_1"),
+        "target2":     stock.get("target_2"),
+        "rr":          rr,
+        "reasons":     reasons[:7],
+        "warnings":    warnings[:4],
+        "has_plan":    bool(entry_low or stock.get("stop_level") or stock.get("target_1")),
+        "swing_score": swing_score,
+        "cat_score":   cat_score,
+    }
 
 
 def get_active_wl_id() -> int | None:
@@ -2359,6 +2503,100 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
         stock["simplified_action"]       = "WATCH"
         stock["simplified_action_class"] = "sfa-watch"
 
+    # ── Relative Strength & Sector (market_engine) ────────────────────────────
+    if _MKT_AVAILABLE:
+        try:
+            _mkt_ctx   = _get_mkt_ctx()
+            _qqq_1d    = _mkt_ctx.get("qqq_1d_pct")
+            _stock_gap = stock.get("gap_pct")
+            _rs_db     = stock.get("rs_score")   # stored 20-day RS if available
+
+            # Fast intraday RS from today's gap vs QQQ gap
+            _rs_intra = _mkt.rs_score_intraday(_stock_gap, _qqq_1d)
+            # Prefer stored 20-day RS; use intraday if not computed yet
+            _rs_final = _rs_db if _rs_db else _rs_intra
+
+            stock["rs_score_display"] = _rs_final
+            stock["rs_label"]         = _mkt.rs_label(_rs_final)
+            stock["rs_class"]         = _mkt.rs_css_class(_rs_final)
+            stock["rs_vs_qqq_display"] = (
+                f"{'+' if (_stock_gap or 0) - (_qqq_1d or 0) >= 0 else ''}"
+                f"{((_stock_gap or 0) - (_qqq_1d or 0)):.1f}% vs QQQ"
+            )
+
+            # Sector for this ticker
+            _etf = stock.get("sector_etf") or ""
+            if not _etf and _MKT_AVAILABLE:
+                _etf, _ = _mkt.get_sector_for_ticker(stock.get("ticker") or "")
+                if _etf:
+                    stock["sector_etf"] = _etf
+            _leading = _mkt_ctx.get("leading_sectors") or []
+            stock["sector_name"]    = _mkt.SECTOR_ETFS.get(_etf, "")
+            stock["sector_leading"] = _etf in _leading if _etf else False
+            stock["sector_class"]   = "sector-chip-leading" if stock["sector_leading"] else "sector-chip"
+
+            # Market context for templates
+            stock["mkt_regime"]       = _mkt_ctx.get("regime", "NEUTRAL")
+            stock["mkt_regime_label"] = _mkt_ctx.get("regime_label", "Neutral")
+        except Exception as _rs_exc:
+            logger.debug("annotate RS/sector failed: %s", _rs_exc)
+            stock.setdefault("rs_score_display", 50)
+            stock.setdefault("rs_label",  "Neutral RS")
+            stock.setdefault("rs_class",  "rs-avg")
+            stock.setdefault("sector_name",    "")
+            stock.setdefault("sector_leading", False)
+            stock.setdefault("sector_class",   "sector-chip")
+    else:
+        stock.setdefault("rs_score_display", 50)
+        stock.setdefault("rs_label",  "Neutral RS")
+        stock.setdefault("rs_class",  "rs-avg")
+        stock.setdefault("sector_name",    "")
+        stock.setdefault("sector_leading", False)
+        stock.setdefault("sector_class",   "sector-chip")
+
+    # ── Trade Avoidance AI — warning flags ────────────────────────────────────
+    _avoid_flags = []
+    _pct_ema20 = stock.get("pct_from_ema20") or 0
+    _rvol      = stock.get("rel_volume") or 0
+    _rr_val    = stock.get("risk_reward")
+    _in_sup    = stock.get("in_supply_zone") or False
+    _fvg_b     = stock.get("fvg_bearish") or False
+    _lh_ll     = stock.get("daily_lh_ll") or False
+    _sup_grade = stock.get("supply_zone_grade") or ""
+    _sw_stat   = stock.get("swing_status") or ""
+    _price     = stock.get("current_price") or 0
+    _pm_high   = stock.get("premarket_high") or 0
+    _prev_day_high = stock.get("prev_day_high") or 0
+
+    if _in_sup or _sup_grade in ("A+", "A"):
+        _avoid_flags.append({"icon": "⚠", "text": "At institutional supply zone — watch for rejection", "level": "high"})
+    if _fvg_b:
+        _avoid_flags.append({"icon": "⬛", "text": "Bearish FVG overhead — institutional resistance", "level": "medium"})
+    if abs(_pct_ema20) > 8 and _pct_ema20 > 0:
+        _avoid_flags.append({"icon": "📈", "text": f"Extended {_pct_ema20:.1f}% above 20 EMA — high chase risk", "level": "high"})
+    if _rvol < 0.8 and _price > 0:
+        _avoid_flags.append({"icon": "📉", "text": "Low relative volume — weak institutional conviction", "level": "medium"})
+    if _rr_val is not None and _rr_val < 1.5:
+        _avoid_flags.append({"icon": "⚖", "text": f"Risk/reward {_rr_val:.1f}:1 — below 1.5:1 minimum", "level": "high"})
+    if _lh_ll:
+        _avoid_flags.append({"icon": "📉", "text": "Downtrend structure (LH/LL) — against institutional flow", "level": "medium"})
+    if _pm_high and _price and _prev_day_high and _price > _prev_day_high * 1.05:
+        _avoid_flags.append({"icon": "🔴", "text": "Significant gap up — late entry risk if chasing open", "level": "medium"})
+    if _sw_stat in ("WAIT", "NOT ENOUGH EDGE"):
+        _avoid_flags.append({"icon": "⏸", "text": "No confirmed entry setup — monitor only", "level": "low"})
+
+    stock["avoidance_flags"]     = _avoid_flags
+    stock["avoidance_flag_count"]= len(_avoid_flags)
+    stock["avoidance_high"]      = any(f["level"] == "high" for f in _avoid_flags)
+
+    # ── AI Trade Plan ─────────────────────────────────────────────────────────
+    try:
+        stock["ai_trade_plan"] = build_ai_trade_plan(stock)
+    except Exception as _tp_err:
+        logger.debug("annotate  ai_trade_plan failed: %s", _tp_err)
+        stock["ai_trade_plan"] = {"has_plan": False, "grade": "B", "grade_css": "plan-b",
+                                   "reasons": [], "warnings": [], "probability": 0}
+
     return stock
 
 
@@ -2640,6 +2878,15 @@ _DASHBOARD_EMPTY = dict(
                  "size_zone": "unknown", "why": "",
                  "mode_desc": "—", "es_price": None, "es_change_pct": None,
                  "es_above_vwap": None, "sectors": {}},
+    mkt_context={
+        "regime": "NEUTRAL", "regime_label": "Neutral",
+        "qqq_trend": "Unknown", "spy_trend": "Unknown",
+        "qqq_1d_pct": None, "spy_1d_pct": None,
+        "signal": "", "longs_ok": True, "shorts_ok": True,
+        "sectors": [], "leading_sectors": [], "weak_sectors": [],
+        "top_sector": None, "vix_level": None,
+        "qqq_price": None, "spy_price": None,
+    },
 )
 
 
@@ -2792,6 +3039,9 @@ def _dashboard_inner():
 
     market_temp = _get_market_temperature()
 
+    # Market regime + sector strength from market_engine (cached, 60 min TTL)
+    mkt_context = _get_mkt_ctx()
+
     return render_template(
         "dashboard.html",
         ranked=ranked,
@@ -2817,6 +3067,7 @@ def _dashboard_inner():
         trades_today=trades_today,
         losses_today=losses_today,
         market_temp=market_temp,
+        mkt_context=mkt_context,
     )
 
 

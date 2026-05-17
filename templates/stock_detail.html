@@ -115,6 +115,16 @@
       <div class="score-strip-reason">avg {{ "{:,.0f}".format(stock.avg_volume) if stock.avg_volume is not none else "N/A" }}</div>
     </div>
 
+    <div class="score-strip-divider"></div>
+
+    <div class="score-strip-item">
+      <div class="score-strip-label">RS vs QQQ</div>
+      <div class="score-big {{ stock.rs_class | default('rs-avg') }}">
+        {{ stock.rs_score_display | default('—') }}
+      </div>
+      <div class="score-strip-reason">{{ stock.rs_label | default('') }}{% if stock.sector_name %} · {{ stock.sector_etf }}{% endif %}</div>
+    </div>
+
   </div>
 
   <!-- ===== TRADE COACH ===== -->
@@ -130,6 +140,112 @@
       {% endfor %}
     </div>
   </div>
+
+  <!-- ===== AI INSTITUTIONAL TRADE PLAN ===== -->
+  {% if stock.ai_trade_plan and stock.ai_trade_plan.has_plan %}
+  {% set plan = stock.ai_trade_plan %}
+  <div class="detail-card ai-plan-card">
+    <h3 class="card-title">
+      AI Institutional Plan
+      <span class="plan-grade-badge {{ plan.grade_css }}">{{ plan.grade }}</span>
+      <span class="plan-prob-badge {% if plan.probability >= 75 %}prob-high{% elif plan.probability >= 55 %}prob-med{% else %}prob-low{% endif %}">
+        {{ plan.probability }}% probability
+      </span>
+    </h3>
+
+    <!-- Setup label + RS + Sector -->
+    <div class="ai-plan-header-row">
+      <span class="ai-plan-setup-label">{{ plan.setup_label }}</span>
+      {% if stock.rs_score_display is defined %}
+      <span class="rs-badge {{ stock.rs_class }}" title="{{ stock.rs_vs_qqq_display | default('') }}">
+        RS {{ stock.rs_score_display }} — {{ stock.rs_label }}
+      </span>
+      {% endif %}
+      {% if stock.sector_name %}
+      <span class="sector-chip {{ stock.sector_class }}" title="Sector">
+        {{ stock.sector_etf }} · {{ stock.sector_name }}
+        {% if stock.sector_leading %} ↑ Leading{% endif %}
+      </span>
+      {% endif %}
+    </div>
+
+    <div class="ai-plan-body">
+      <!-- Left: Levels -->
+      <div class="ai-plan-levels">
+        {% if plan.entry_low or plan.entry_high %}
+        <div class="ai-level-row ai-level-entry">
+          <span class="ai-level-lbl">Entry Zone</span>
+          <span class="ai-level-val">
+            {% if plan.entry_low and plan.entry_high %}
+              ${{ "%.2f"|format(plan.entry_low) }} – ${{ "%.2f"|format(plan.entry_high) }}
+            {% elif plan.entry_low %}
+              ~${{ "%.2f"|format(plan.entry_low) }}
+            {% endif %}
+          </span>
+        </div>
+        {% endif %}
+        {% if plan.stop %}
+        <div class="ai-level-row ai-level-stop">
+          <span class="ai-level-lbl">Stop Loss</span>
+          <span class="ai-level-val text-danger">${{ "%.2f"|format(plan.stop) }}</span>
+        </div>
+        {% endif %}
+        {% if plan.target1 %}
+        <div class="ai-level-row ai-level-target">
+          <span class="ai-level-lbl">Target 1</span>
+          <span class="ai-level-val text-success">${{ "%.2f"|format(plan.target1) }}</span>
+        </div>
+        {% endif %}
+        {% if plan.target2 %}
+        <div class="ai-level-row ai-level-target">
+          <span class="ai-level-lbl">Target 2</span>
+          <span class="ai-level-val text-success">${{ "%.2f"|format(plan.target2) }}</span>
+        </div>
+        {% endif %}
+        {% if plan.rr %}
+        <div class="ai-level-row">
+          <span class="ai-level-lbl">R:R Ratio</span>
+          <span class="ai-level-val {{ 'text-success' if plan.rr >= 2 else ('text-warning' if plan.rr >= 1 else 'text-danger') }}">
+            {{ "%.1f"|format(plan.rr) }}:1
+          </span>
+        </div>
+        {% endif %}
+        <div class="ai-level-row">
+          <span class="ai-level-lbl">Swing Score</span>
+          <span class="ai-level-val">{{ plan.swing_score }}/10</span>
+        </div>
+        <div class="ai-level-row">
+          <span class="ai-level-lbl">Catalyst</span>
+          <span class="ai-level-val">{{ plan.cat_score }}/10</span>
+        </div>
+      </div>
+
+      <!-- Right: Reasons + Warnings -->
+      <div class="ai-plan-signals">
+        {% if plan.reasons %}
+        <div class="ai-signals-section">
+          <div class="ai-signals-title ai-signals-bull">Bull Factors</div>
+          {% for r in plan.reasons %}
+          <div class="ai-signal-row ai-signal-bull">
+            <span class="ai-sig-dot">+</span> {{ r }}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if plan.warnings %}
+        <div class="ai-signals-section">
+          <div class="ai-signals-title ai-signals-warn">Warnings</div>
+          {% for w in plan.warnings %}
+          <div class="ai-signal-row ai-signal-warn">
+            <span class="ai-sig-dot ai-sig-warn-dot">!</span> {{ w }}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- ===== SWING TRADE PLAN ===== -->
   <div class="detail-card swing-plan-card">

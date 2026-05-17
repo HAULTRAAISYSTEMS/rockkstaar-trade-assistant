@@ -490,6 +490,10 @@ def init_db():
         ("h4_fib_low",       "REAL"),
         ("h4_fib_50",        "REAL"),
         ("h4_fib_618",       "REAL"),
+        # Relative strength & sector rotation (market_engine.py)
+        ("rs_score",         "INTEGER"),
+        ("rs_vs_qqq",        "REAL"),
+        ("sector_etf",       "TEXT"),
     ]
     for col, col_type in _new_columns:
         if _USE_POSTGRES:
@@ -919,7 +923,8 @@ def upsert_stock_data(data: dict):
              entry_zone_low, entry_zone_high, stop_level,
              target_1, target_2, risk_reward, swing_data_fetched_at,
              h4_trend, h4_ema20, h4_ema50, h4_hh_hl,
-             m15_higher_low, m15_confirmation, ticker_state)
+             m15_higher_low, m15_confirmation, ticker_state,
+             rs_score, rs_vs_qqq, sector_etf)
         VALUES
             (:ticker, :current_price, :prev_close, :gap_pct, :premarket_high,
              :premarket_low, :prev_day_high, :prev_day_low, :avg_volume, :rel_volume,
@@ -956,7 +961,8 @@ def upsert_stock_data(data: dict):
              :entry_zone_low, :entry_zone_high, :stop_level,
              :target_1, :target_2, :risk_reward, :swing_data_fetched_at,
              :h4_trend, :h4_ema20, :h4_ema50, :h4_hh_hl,
-             :m15_higher_low, :m15_confirmation, :ticker_state)
+             :m15_higher_low, :m15_confirmation, :ticker_state,
+             :rs_score, :rs_vs_qqq, :sector_etf)
         ON CONFLICT(ticker) DO UPDATE SET
             current_price        = excluded.current_price,
             prev_close           = excluded.prev_close,
@@ -1074,7 +1080,10 @@ def upsert_stock_data(data: dict):
             h4_hh_hl                 = excluded.h4_hh_hl,
             m15_higher_low           = excluded.m15_higher_low,
             m15_confirmation         = excluded.m15_confirmation,
-            ticker_state             = excluded.ticker_state
+            ticker_state             = excluded.ticker_state,
+            rs_score                 = excluded.rs_score,
+            rs_vs_qqq                = excluded.rs_vs_qqq,
+            sector_etf               = excluded.sector_etf
     """, data)
     conn.commit()
     conn.close()
@@ -1320,6 +1329,9 @@ def update_live_fields(data: dict) -> None:
             h4_hh_hl                 = :h4_hh_hl,
             m15_higher_low           = :m15_higher_low,
             m15_confirmation         = :m15_confirmation,
+            rs_score                 = :rs_score,
+            rs_vs_qqq                = :rs_vs_qqq,
+            sector_etf               = :sector_etf,
             triggered_at             = :triggered_at,
             last_updated             = :last_updated
         WHERE ticker = :ticker
@@ -1433,6 +1445,9 @@ def update_live_fields(data: dict) -> None:
         "h4_hh_hl":                 int(bool(data.get("h4_hh_hl"))),
         "m15_higher_low":           int(bool(data.get("m15_higher_low"))),
         "m15_confirmation":         int(data.get("m15_confirmation") or 0),
+        "rs_score":                 data.get("rs_score"),
+        "rs_vs_qqq":                data.get("rs_vs_qqq"),
+        "sector_etf":               data.get("sector_etf"),
         "triggered_at":             triggered_at,
         "last_updated":             data.get("last_updated") or _et_now().strftime("%Y-%m-%d %I:%M %p"),
     })

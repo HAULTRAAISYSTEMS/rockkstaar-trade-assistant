@@ -94,6 +94,10 @@ def _zone_defaults(data: dict) -> None:
     data.setdefault("smart_money_json",       None)
     data.setdefault("fvg_bullish",            False)
     data.setdefault("fvg_bearish",            False)
+    # Relative strength & sector
+    data.setdefault("rs_score",              None)
+    data.setdefault("rs_vs_qqq",             None)
+    data.setdefault("sector_etf",            None)
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +351,21 @@ def generate_stock_data(ticker: str) -> dict:
         _errors.append("zones")
     _zone_defaults(data)    # always apply
 
+    # ── Step 4b: Relative strength & sector (market_engine) ───────────────────
+    try:
+        from market_engine import compute_rs_score_20d, get_sector_for_ticker
+        _rs, _vs = compute_rs_score_20d(ticker)
+        data["rs_score"]   = _rs
+        data["rs_vs_qqq"]  = _vs
+        if not data.get("sector_etf"):
+            _etf, _ = get_sector_for_ticker(ticker)
+            if _etf:
+                data["sector_etf"] = _etf
+    except Exception as exc:
+        _log.debug("generate_stock_data  stage=rs_score  ticker=%s  err=%s", ticker, exc)
+        data.setdefault("rs_score",  None)
+        data.setdefault("rs_vs_qqq", None)
+
     # Intraday structure defaults (unused in swing scoring but kept for DB compat)
     data.setdefault("vwap",                 None)
     data.setdefault("momentum_breakout",    False)
@@ -563,6 +582,19 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
         _log.warning("live_refresh_stock  stage=zones  ticker=%s  err=%s", ticker, exc)
         _errors.append("zones")
     _zone_defaults(data)
+
+    # ── RS score + sector ─────────────────────────────────────────────────────
+    try:
+        from market_engine import compute_rs_score_20d, get_sector_for_ticker
+        _rs, _vs = compute_rs_score_20d(ticker)
+        data["rs_score"]  = _rs
+        data["rs_vs_qqq"] = _vs
+        if not data.get("sector_etf"):
+            _etf, _ = get_sector_for_ticker(ticker)
+            if _etf:
+                data["sector_etf"] = _etf
+    except Exception as exc:
+        _log.debug("live_refresh_stock  stage=rs_score  ticker=%s  err=%s", ticker, exc)
 
     # ── Re-score (setup type → trade plan → score → status) ─────────────────
     try:
