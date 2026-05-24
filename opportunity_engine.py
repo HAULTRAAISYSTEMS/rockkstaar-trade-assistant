@@ -229,6 +229,8 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
             "short_float":       info.get("shortPercentOfFloat"),
             "institutional_pct": info.get("heldPercentInstitutions"),
             "insider_pct":       info.get("heldPercentInsiders"),
+            "dividend_yield":    info.get("yield") or info.get("dividendYield"),
+            "expense_ratio":     info.get("annualReportExpenseRatio") or info.get("totalExpenseRatio"),
             "business_summary":  (info.get("longBusinessSummary") or "")[:500],
             "fetched_at":        datetime.now(),
         }
@@ -768,11 +770,34 @@ def build_research_report(
     debt_eq = fund.get("debt_to_equity")
 
     if is_etf:
-        rev_str  = "ETF — N/A"
-        earn_str = "ETF — N/A"
-        mg_str   = "ETF — N/A"
-        fcf_str  = "ETF — N/A"
-        deq_str  = "ETF — N/A"
+        # Compute ETF performance metrics from OHLCV (always available via chart API)
+        perf_1y = perf_6m = perf_3m = vol_ann = None
+        if closes and len(closes) >= 2:
+            try:
+                import statistics as _stats
+                if len(closes) >= 200:
+                    perf_1y = (closes[-1] / closes[-200] - 1) * 100
+                elif len(closes) >= 20:
+                    perf_1y = (closes[-1] / closes[0] - 1) * 100
+                if len(closes) >= 126:
+                    perf_6m = (closes[-1] / closes[-126] - 1) * 100
+                if len(closes) >= 63:
+                    perf_3m = (closes[-1] / closes[-63] - 1) * 100
+                if len(closes) >= 21:
+                    rets = [closes[i] / closes[i-1] - 1 for i in range(-20, 0)]
+                    vol_ann = _stats.stdev(rets) * (252 ** 0.5) * 100
+            except Exception:
+                pass
+
+        def _pf(v):
+            if v is None: return "N/A"
+            return f"+{v:.1f}%" if v >= 0 else f"{v:.1f}%"
+
+        rev_str  = _pf(perf_1y)
+        earn_str = _pf(perf_6m)
+        mg_str   = _pf(perf_3m)
+        fcf_str  = f"${fund['aum']/1e9:.1f}B" if fund.get("aum") else "N/A"
+        deq_str  = f"{vol_ann:.1f}%" if vol_ann is not None else "N/A"
     else:
         rev_str  = f"+{rev_g*100:.0f}% YoY"  if rev_g  and rev_g  > 0 else (f"{rev_g*100:.0f}% YoY" if rev_g  else "N/A")
         earn_str = f"+{earn_g*100:.0f}% YoY" if earn_g and earn_g > 0 else (f"{earn_g*100:.0f}% YoY" if earn_g else "N/A")

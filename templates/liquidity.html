@@ -861,12 +861,12 @@ function renderReport(d) {
 
     <!-- Financials -->
     <div class="liq-report-section">
-      <h4>Financials</h4>
-      ${pctRow('Revenue Growth', rpt.revenue_growth, true)}
-      ${pctRow('EPS Growth',     rpt.earnings_growth, true)}
-      ${pctRow('Op. Margins',    rpt.operating_margins)}
-      ${pctRow('Free Cash Flow', rpt.free_cashflow)}
-      ${pctRow('Debt/Equity',    rpt.debt_to_equity)}
+      <h4>${rpt.is_etf ? 'ETF Performance' : 'Financials'}</h4>
+      ${pctRow(rpt.is_etf ? '1Y Return'       : 'Revenue Growth', rpt.revenue_growth,   !rpt.is_etf)}
+      ${pctRow(rpt.is_etf ? '6M Return'       : 'EPS Growth',     rpt.earnings_growth,  !rpt.is_etf)}
+      ${pctRow(rpt.is_etf ? '3M Return'       : 'Op. Margins',    rpt.operating_margins)}
+      ${pctRow(rpt.is_etf ? 'AUM'             : 'Free Cash Flow', rpt.free_cashflow)}
+      ${pctRow(rpt.is_etf ? '30D Volatility'  : 'Debt/Equity',    rpt.debt_to_equity)}
       ${pctRow('Forward P/E',    rpt.pe_forward)}
       ${pctRow('PEG Ratio',      rpt.peg_ratio ? rpt.peg_ratio.toFixed(2) + 'x' : '—')}
     </div>
