@@ -178,19 +178,22 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
             "fetched_at":        datetime.now(),
         }
 
-        # Fetch OHLCV for technical/volume scoring (used as fallback when institutional_engine lacks the ticker)
+        # Cache .info data immediately — sync callers don't need to wait for OHLCV
+        with _fund_lock:
+            _fund_cache[ticker] = data
+
+        # Fetch OHLCV separately (slower ~3-8s) and append to existing cache entry
         try:
             hist = t_obj.history(period="60d")
             if hist is not None and len(hist) >= 5:
-                data["closes"]  = hist["Close"].tolist()
-                data["volumes"] = hist["Volume"].tolist()
-                data["highs"]   = hist["High"].tolist()
-                data["lows"]    = hist["Low"].tolist()
+                with _fund_lock:
+                    if ticker in _fund_cache:
+                        _fund_cache[ticker]["closes"]  = hist["Close"].tolist()
+                        _fund_cache[ticker]["volumes"] = hist["Volume"].tolist()
+                        _fund_cache[ticker]["highs"]   = hist["High"].tolist()
+                        _fund_cache[ticker]["lows"]    = hist["Low"].tolist()
         except Exception:
             pass
-
-        with _fund_lock:
-            _fund_cache[ticker] = data
     except Exception as exc:
         logger.debug("_fetch_fundamentals_bg %s: %s", ticker, exc)
     finally:
@@ -223,11 +226,14 @@ def get_fundamentals(ticker: str) -> dict:
     return cached or {}
 
 
-def get_fundamentals_sync(ticker: str) -> dict:
+def get_fundamentals_sync(ticker: str, timeout: float = 8.0) -> dict:
     """
-    Return fundamentals, fetching synchronously (blocking) if not cached.
+    Return fundamentals, waiting up to `timeout` seconds if not cached.
+    Polls the cache after triggering a background fetch — returns as soon
+    as .info data appears (before the slower OHLCV history finishes).
     Only use from single-ticker report endpoint — not in bulk scan path.
     """
+    import time as _time
     t = ticker.upper().strip()
     now = datetime.now()
     with _fund_lock:
@@ -236,8 +242,25 @@ def get_fundamentals_sync(ticker: str) -> dict:
             age_h = (now - cached["fetched_at"]).total_seconds() / 3600
             if age_h < _FUND_TTL_H:
                 return cached
-    # Not cached or stale — fetch inline (this call can afford to block ~5s)
-    _fetch_fundamentals_bg(t)
+
+    # Trigger fetch if not already running
+    with _fetch_set_lock:
+        if t not in _fetch_active_set:
+            _fetch_active_set.add(t)
+            threading.Thread(
+                target=_fetch_fundamentals_bg, args=(t,),
+                daemon=True, name=f"fund-sync-{t}"
+            ).start()
+
+    # Poll until .info data lands in cache (written before OHLCV fetch starts)
+    deadline = _time.time() + timeout
+    while _time.time() < deadline:
+        with _fund_lock:
+            cached = _fund_cache.get(t)
+            if cached:
+                return cached
+        _time.sleep(0.25)
+
     with _fund_lock:
         return _fund_cache.get(t) or {}
 
