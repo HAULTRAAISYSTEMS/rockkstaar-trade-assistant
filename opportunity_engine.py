@@ -51,6 +51,38 @@ _ETF_TICKERS = {
     "VTI","MDY","IJR","VIG","VYM","SCHD","SPDW","IEFA","AGG","BND","LQD",
 }
 
+# Fallback names for common ETFs when yfinance .info is rate-limited
+_ETF_NAME_MAP = {
+    "SPY":  "SPDR S&P 500 ETF",
+    "QQQ":  "Invesco QQQ — Nasdaq 100",
+    "IWM":  "iShares Russell 2000 ETF",
+    "SMH":  "VanEck Semiconductor ETF",
+    "SOXX": "iShares Semiconductor ETF",
+    "XLK":  "Technology Select Sector SPDR",
+    "XLE":  "Energy Select Sector SPDR",
+    "XLF":  "Financial Select Sector SPDR",
+    "XLI":  "Industrial Select Sector SPDR",
+    "XLP":  "Consumer Staples Select SPDR",
+    "XLU":  "Utilities Select Sector SPDR",
+    "XBI":  "SPDR S&P Biotech ETF",
+    "ARKK": "ARK Innovation ETF",
+    "GLD":  "SPDR Gold Shares",
+    "TLT":  "iShares 20+ Year Treasury Bond ETF",
+    "GDX":  "VanEck Gold Miners ETF",
+    "SLV":  "iShares Silver Trust",
+    "DIA":  "SPDR Dow Jones Industrial ETF",
+    "IVV":  "iShares Core S&P 500 ETF",
+    "VOO":  "Vanguard S&P 500 ETF",
+    "EEM":  "iShares MSCI Emerging Markets ETF",
+    "HYG":  "iShares iBoxx High Yield Corporate Bond ETF",
+    "TAN":  "Invesco Solar ETF",
+    "ICLN": "iShares Global Clean Energy ETF",
+    "VTI":  "Vanguard Total Stock Market ETF",
+    "SCHD": "Schwab U.S. Dividend Equity ETF",
+    "AGG":  "iShares Core U.S. Aggregate Bond ETF",
+    "BND":  "Vanguard Total Bond Market ETF",
+    "SPDW": "SPDR Portfolio Developed World ex-US ETF",
+}
 
 # ── Curated opportunity universe ──────────────────────────────────────────────
 
@@ -158,6 +190,9 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
             info.get("previousClose")
         )
         company = info.get("longName") or info.get("shortName")
+        # Fallback: use hardcoded names for known ETFs so they always display correctly
+        if not company and ticker in _ETF_NAME_MAP:
+            company = _ETF_NAME_MAP[ticker]
 
         # Only skip if yfinance returned truly nothing (rate-limit empty response)
         if not current_price and not company:
@@ -673,6 +708,10 @@ def build_research_report(
         high52 = max(ohlcv["highs"])
     if not low52 and ohlcv.get("lows"):
         low52 = min(ohlcv["lows"])
+    # Round all prices to 2dp — numpy floats from OHLCV data carry many decimal places
+    cp     = round(float(cp),     2) if cp     else None
+    high52 = round(float(high52), 2) if high52 else None
+    low52  = round(float(low52),  2) if low52  else None
 
     ema20 = _ema_val(closes, min(20, len(closes))) if closes else None
     ema50 = _ema_val(closes, min(50, len(closes))) if closes else None

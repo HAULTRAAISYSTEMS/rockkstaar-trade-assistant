@@ -849,9 +849,9 @@ function renderReport(d) {
       ${pctRow('Company',    rpt.company_name)}
       ${pctRow('Sector',     rpt.sector)}
       ${pctRow('Theme',      rpt.theme)}
-      ${pctRow('Price',      rpt.current_price ? '$' + rpt.current_price : '—')}
-      ${pctRow('52W High',   rpt.high_52w ? '$' + rpt.high_52w : '—')}
-      ${pctRow('52W Low',    rpt.low_52w  ? '$' + rpt.low_52w  : '—')}
+      ${pctRow('Price',      rpt.current_price ? '$' + parseFloat(rpt.current_price).toFixed(2) : '—')}
+      ${pctRow('52W High',   rpt.high_52w ? '$' + parseFloat(rpt.high_52w).toFixed(2) : '—')}
+      ${pctRow('52W Low',    rpt.low_52w  ? '$' + parseFloat(rpt.low_52w).toFixed(2)  : '—')}
       ${pctRow('Market Cap', rpt.market_cap)}
       <div class="liq-report-row" style="margin-top:.5rem">
         <span class="grade-badge grade-${gradeKey}" style="font-size:.8rem">${grade} — ${rpt.grade_label || ''}</span>
