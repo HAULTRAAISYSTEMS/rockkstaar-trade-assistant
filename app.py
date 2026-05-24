@@ -5215,6 +5215,7 @@ def api_opportunity_ticker(ticker: str):
         ticker  = ticker.upper().strip()
         mkt_ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
         liq_ctx = _liq.get_liquidity_status()
+        _opp.get_fundamentals_sync(ticker)   # ensure data is ready before building report
         result  = _opp.scan_ticker(ticker, mkt_ctx, liq_ctx)
         return jsonify({"ok": True, **result})
     except Exception as exc:

@@ -723,7 +723,12 @@ async function runScan() {
     _scanData = d;
     document.getElementById('scan-sub').textContent =
       `${d.total_scanned} stocks scanned — ${(d.hidden_gems||[]).length} hidden gems found`;
-    renderScanTab(_activeTab);
+    // When user enters custom tickers, switch to All Results so they can see them
+    if (extra) {
+      showTab('all');
+    } else {
+      renderScanTab(_activeTab);
+    }
     updateTimestamp();
   } catch(e) { console.warn('runScan:', e); }
 }
@@ -746,7 +751,11 @@ function renderScanTab(tab) {
   else                            rows = (_scanData.results || []).slice(0, 50);
 
   if (!rows.length) {
-    content.innerHTML = `<div class="liq-empty-state">No ${tab.replace('_',' ')} opportunities found yet.<br>Fundamentals load in background — check back in ~30 seconds.</div>`;
+    const allCount = (_scanData.results || []).length;
+    const hint = allCount > 0 && tab !== 'all'
+      ? `<br><button class="btn-liq-scan" style="margin-top:.75rem;font-size:.78rem;padding:.3rem .65rem" onclick="showTab('all')">View all ${allCount} scanned results →</button>`
+      : '';
+    content.innerHTML = `<div class="liq-empty-state">No ${tab.replace('_',' ')} opportunities found yet.<br>Fundamentals load in background — check back in ~30 seconds.${hint}</div>`;
     return;
   }
   content.innerHTML = `

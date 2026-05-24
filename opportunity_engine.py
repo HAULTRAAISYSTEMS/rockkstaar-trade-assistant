@@ -130,8 +130,15 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
         if not _YF_AVAILABLE:
             return
 
-        info = yf.Ticker(ticker).info
-        if not info or not info.get("regularMarketPrice"):
+        t_obj = yf.Ticker(ticker)
+        info  = t_obj.info
+        # regularMarketPrice is None when market is closed (weekends/holidays) — use fallbacks
+        current_price = (
+            info.get("regularMarketPrice") or
+            info.get("currentPrice") or
+            info.get("previousClose")
+        )
+        if not info or not current_price:
             return
 
         # Pull only the fields we need
@@ -160,7 +167,7 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
             "eps_trailing":      info.get("trailingEps"),
             "52w_high":          info.get("fiftyTwoWeekHigh"),
             "52w_low":           info.get("fiftyTwoWeekLow"),
-            "current_price":     info.get("regularMarketPrice"),
+            "current_price":     current_price,
             "analyst_target":    info.get("targetMeanPrice"),
             "analyst_rec":       info.get("recommendationKey", ""),
             "num_analysts":      info.get("numberOfAnalystOpinions", 0),
@@ -170,6 +177,18 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
             "business_summary":  (info.get("longBusinessSummary") or "")[:500],
             "fetched_at":        datetime.now(),
         }
+
+        # Fetch OHLCV for technical/volume scoring (used as fallback when institutional_engine lacks the ticker)
+        try:
+            hist = t_obj.history(period="60d")
+            if hist is not None and len(hist) >= 5:
+                data["closes"]  = hist["Close"].tolist()
+                data["volumes"] = hist["Volume"].tolist()
+                data["highs"]   = hist["High"].tolist()
+                data["lows"]    = hist["Low"].tolist()
+        except Exception:
+            pass
+
         with _fund_lock:
             _fund_cache[ticker] = data
     except Exception as exc:
@@ -204,18 +223,50 @@ def get_fundamentals(ticker: str) -> dict:
     return cached or {}
 
 
+def get_fundamentals_sync(ticker: str) -> dict:
+    """
+    Return fundamentals, fetching synchronously (blocking) if not cached.
+    Only use from single-ticker report endpoint — not in bulk scan path.
+    """
+    t = ticker.upper().strip()
+    now = datetime.now()
+    with _fund_lock:
+        cached = _fund_cache.get(t)
+        if cached:
+            age_h = (now - cached["fetched_at"]).total_seconds() / 3600
+            if age_h < _FUND_TTL_H:
+                return cached
+    # Not cached or stale — fetch inline (this call can afford to block ~5s)
+    _fetch_fundamentals_bg(t)
+    with _fund_lock:
+        return _fund_cache.get(t) or {}
+
+
 # ── Technical data (reuse market_engine chart API) ─────────────────────────────
 
 def _get_price_data(ticker: str) -> dict:
     """
-    Get recent OHLCV from the institutional_engine OHLCV cache (background-fetched).
-    Returns whatever is cached; triggers fetch if needed.
+    Get recent OHLCV. Tries institutional_engine first, falls back to fund cache OHLCV.
     """
     try:
         from institutional_engine import _get_ohlcv
-        return _get_ohlcv(ticker) or {}
+        data = _get_ohlcv(ticker)
+        if data and data.get("closes"):
+            return data
     except Exception:
-        return {}
+        pass
+    # Fallback: OHLCV stored alongside fundamentals in _fetch_fundamentals_bg
+    t = ticker.upper().strip()
+    with _fund_lock:
+        cached = _fund_cache.get(t)
+        if cached and cached.get("closes"):
+            return {
+                "closes":  cached["closes"],
+                "volumes": cached.get("volumes", []),
+                "highs":   cached.get("highs",   []),
+                "lows":    cached.get("lows",    []),
+            }
+    return {}
 
 
 def _safe(v, default=0.0):
@@ -284,19 +335,29 @@ def compute_confluence_score(
 
     # ── 2. Sector strength ────────────────────────────────────────────────────
     try:
-        from market_engine import get_sector_for_ticker, SECTOR_ETFS
-        sector_etf, _ = get_sector_for_ticker(ticker)
-        leading = mkt_ctx.get("leading_sectors", [])
-        if sector_etf and sector_etf in leading:
-            pts = 10; reasons.append(f"Sector ETF {sector_etf} leading")
-        elif sector_etf:
-            # Check money flow for this ETF
-            mflow = liq_ctx.get("money_flow", [])
-            etf_flow = next((f for f in mflow if f["ticker"] == sector_etf), {})
-            fs = _safe(etf_flow.get("flow_score"), 50)
-            pts = int(fs / 10) if etf_flow else 5
+        mflow = liq_ctx.get("money_flow", [])
+        if is_etf:
+            # For sector ETFs, their own money flow IS their sector strength
+            own_flow = next((f for f in mflow if f["ticker"] == ticker.upper()), {})
+            if own_flow:
+                fs = _safe(own_flow.get("flow_score"), 50)
+                pts = int(fs / 10)
+                if fs >= 70:
+                    reasons.append(f"{ticker} strong sector inflow")
+            else:
+                pts = 5
         else:
-            pts = 4
+            from market_engine import get_sector_for_ticker
+            sector_etf, _ = get_sector_for_ticker(ticker)
+            leading = mkt_ctx.get("leading_sectors", [])
+            if sector_etf and sector_etf in leading:
+                pts = 10; reasons.append(f"Sector ETF {sector_etf} leading")
+            elif sector_etf:
+                etf_flow = next((f for f in mflow if f["ticker"] == sector_etf), {})
+                fs = _safe(etf_flow.get("flow_score"), 50)
+                pts = int(fs / 10) if etf_flow else 5
+            else:
+                pts = 4
     except Exception:
         pts = 5
     breakdown["Sector Strength"] = pts
@@ -687,7 +748,7 @@ def build_research_report(
         "debt_to_equity":   deq_str,
         "is_etf":           is_etf,
         "aum":              f"${fund.get('aum',0)/1e9:.1f}B" if fund.get("aum") else None,
-        "market_cap":       f"${fund.get('market_cap',0)/1e9:.1f}B" if fund.get("market_cap") else "N/A",
+        "market_cap":       (f"${fund.get('aum',0)/1e9:.1f}B AUM" if fund.get("aum") else "ETF — N/A") if is_etf else (f"${fund.get('market_cap',0)/1e9:.1f}B" if fund.get("market_cap") else "N/A"),
         "pe_forward":       f"{fund.get('pe_forward','N/A')}x" if fund.get("pe_forward") else "N/A",
         "peg_ratio":        fund.get("peg_ratio"),
         # Macro
