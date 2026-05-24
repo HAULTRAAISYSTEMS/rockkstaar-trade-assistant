@@ -194,9 +194,8 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
         if not company and ticker in _ETF_NAME_MAP:
             company = _ETF_NAME_MAP[ticker]
 
-        # Only skip if yfinance returned truly nothing (rate-limit empty response)
-        if not current_price and not company:
-            return
+        # Always proceed — OHLCV chart API runs after this and fills price/closes.
+        # Only abort if yfinance is completely unavailable (ImportError handled above).
 
         data = {
             "ticker":            ticker,
@@ -238,18 +237,26 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
         with _fund_lock:
             _fund_cache[ticker] = data
 
-        # Fetch OHLCV separately (slower ~3-8s) and append to existing cache entry
+        # Fetch OHLCV via chart API — bypasses yfinance crumb-token which fails on cloud IPs
         try:
-            hist = t_obj.history(period="60d")
-            if hist is not None and len(hist) >= 5:
+            from data_fetcher import _fetch_ohlcv_via_chart_api
+            hist = _fetch_ohlcv_via_chart_api(ticker, interval="1d", range_str="1y")
+            if hist and hist.get("closes") and len(hist["closes"]) >= 5:
                 with _fund_lock:
                     if ticker in _fund_cache:
-                        _fund_cache[ticker]["closes"]  = hist["Close"].tolist()
-                        _fund_cache[ticker]["volumes"] = hist["Volume"].tolist()
-                        _fund_cache[ticker]["highs"]   = hist["High"].tolist()
-                        _fund_cache[ticker]["lows"]    = hist["Low"].tolist()
-        except Exception:
-            pass
+                        _fund_cache[ticker]["closes"]  = hist["closes"]
+                        _fund_cache[ticker]["volumes"] = hist["volumes"]
+                        _fund_cache[ticker]["highs"]   = hist["highs"]
+                        _fund_cache[ticker]["lows"]    = hist["lows"]
+                        # Fill price and 52W range from OHLCV when .info/fast_info failed
+                        if not _fund_cache[ticker].get("current_price"):
+                            _fund_cache[ticker]["current_price"] = round(hist["closes"][-1], 2)
+                        if not _fund_cache[ticker].get("52w_high"):
+                            _fund_cache[ticker]["52w_high"] = round(max(hist["highs"]), 2)
+                        if not _fund_cache[ticker].get("52w_low"):
+                            _fund_cache[ticker]["52w_low"] = round(min(hist["lows"]), 2)
+        except Exception as exc:
+            logger.debug("_fetch_fundamentals_bg ohlcv %s: %s", ticker, exc)
 
     except Exception as exc:
         logger.debug("_fetch_fundamentals_bg %s: %s", ticker, exc)
@@ -283,11 +290,11 @@ def get_fundamentals(ticker: str) -> dict:
     return cached or {}
 
 
-def get_fundamentals_sync(ticker: str, timeout: float = 8.0) -> dict:
+def get_fundamentals_sync(ticker: str, timeout: float = 15.0) -> dict:
     """
     Return fundamentals, waiting up to `timeout` seconds if not cached.
-    Polls the cache after triggering a background fetch — returns as soon
-    as .info data appears (before the slower OHLCV history finishes).
+    Polls until price OR ohlcv closes are populated — the OHLCV chart-API
+    fetch is the most reliable path on cloud hosts (no crumb-token needed).
     Only use from single-ticker report endpoint — not in bulk scan path.
     """
     import time as _time
@@ -297,7 +304,7 @@ def get_fundamentals_sync(ticker: str, timeout: float = 8.0) -> dict:
         cached = _fund_cache.get(t)
         if cached:
             age_h = (now - cached["fetched_at"]).total_seconds() / 3600
-            if age_h < _FUND_TTL_H:
+            if age_h < _FUND_TTL_H and (cached.get("current_price") or cached.get("closes")):
                 return cached
 
     # Trigger fetch if not already running
@@ -309,12 +316,12 @@ def get_fundamentals_sync(ticker: str, timeout: float = 8.0) -> dict:
                 daemon=True, name=f"fund-sync-{t}"
             ).start()
 
-    # Poll until .info data lands in cache (written before OHLCV fetch starts)
+    # Poll until we have price or OHLCV closes — OHLCV chart-API fills both
     deadline = _time.time() + timeout
     while _time.time() < deadline:
         with _fund_lock:
             cached = _fund_cache.get(t)
-            if cached:
+            if cached and (cached.get("current_price") or cached.get("closes")):
                 return cached
         _time.sleep(0.25)
 
