@@ -153,115 +153,160 @@ OPPORTUNITY_UNIVERSE = {
 # ── Fundamental data fetch ─────────────────────────────────────────────────────
 
 def _fetch_fundamentals_bg(ticker: str) -> None:
-    """Background thread: fetch yfinance fundamentals and cache."""
+    """Background thread: fetch fundamentals and OHLCV, cache results.
+
+    Phase 1 — chart API (fast, no crumb token, runs immediately):
+        Fetches 1Y daily OHLCV, writes price + closes to cache right away.
+        get_fundamentals_sync() polls for this and returns as soon as it lands.
+
+    Phase 2 — yfinance .info (slow, rate-limited, semaphore-gated):
+        Fetches fundamentals (PE, margins, analyst data, etc.).
+        Merges into cache, preserving Phase 1 OHLCV data.
+    """
+    t = ticker.upper().strip()
     try:
+        # ── Phase 1: OHLCV via chart API ─────────────────────────────────────────
+        # Runs immediately, no semaphore. Reliable on Render/cloud IPs.
+        closes = highs = lows = volumes = None
+        cp_ohlcv = h52_ohlcv = l52_ohlcv = None
+        try:
+            from data_fetcher import _fetch_ohlcv_via_chart_api
+            hist = _fetch_ohlcv_via_chart_api(t, interval="1d", range_str="1y")
+            if hist and hist.get("closes") and len(hist["closes"]) >= 5:
+                closes   = hist["closes"]
+                highs    = hist["highs"]
+                lows     = hist["lows"]
+                volumes  = hist["volumes"]
+                cp_ohlcv  = round(float(closes[-1]),  2)
+                h52_ohlcv = round(float(max(highs)),  2)
+                l52_ohlcv = round(float(min(lows)),   2)
+        except Exception as exc:
+            logger.debug("_fetch_fundamentals_bg ohlcv phase1 %s: %s", t, exc)
+
+        # Write Phase 1 data to cache immediately so sync callers don't wait on yfinance
+        phase1 = {
+            "ticker":            t,
+            "quote_type":        "ETF" if t in _ETF_TICKERS else "EQUITY",
+            "company_name":      _ETF_NAME_MAP.get(t, t),
+            "sector":            "",
+            "industry":          "",
+            "aum":               None,
+            "market_cap":        None,
+            "pe_trailing":       None,
+            "pe_forward":        None,
+            "peg_ratio":         None,
+            "revenue_growth":    None,
+            "earnings_growth":   None,
+            "gross_margins":     None,
+            "operating_margins": None,
+            "profit_margins":    None,
+            "free_cashflow":     None,
+            "debt_to_equity":    None,
+            "return_on_equity":  None,
+            "price_to_book":     None,
+            "price_to_sales":    None,
+            "eps_forward":       None,
+            "eps_trailing":      None,
+            "current_price":     cp_ohlcv,
+            "52w_high":          h52_ohlcv,
+            "52w_low":           l52_ohlcv,
+            "closes":            closes,
+            "highs":             highs,
+            "lows":              lows,
+            "volumes":           volumes,
+            "analyst_target":    None,
+            "analyst_rec":       "",
+            "num_analysts":      0,
+            "short_float":       None,
+            "institutional_pct": None,
+            "insider_pct":       None,
+            "dividend_yield":    None,
+            "expense_ratio":     None,
+            "business_summary":  "",
+            "fetched_at":        datetime.now(),
+        }
+        with _fund_lock:
+            _fund_cache[t] = phase1
+
+        # ── Phase 2: yfinance .info (semaphore-gated) ─────────────────────────────
         try:
             import yfinance as yf
         except ImportError:
             return
 
-        # Throttle concurrent requests — 50 simultaneous .info calls hit Yahoo Finance rate limits
         with _yf_semaphore:
-            t_obj = yf.Ticker(ticker)
-
-            # .info: full fundamentals — may fail under rate limiting
+            t_obj = yf.Ticker(t)
             info = {}
             try:
                 info = t_obj.info or {}
             except Exception as exc:
-                logger.debug("_fetch_fundamentals_bg %s .info: %s", ticker, exc)
+                logger.debug("_fetch_fundamentals_bg %s .info: %s", t, exc)
 
-            # fast_info: lightweight fallback for price/range/mktcap when .info fails
             fi_price = fi_high = fi_low = fi_mcap = None
             try:
                 fast     = t_obj.fast_info
-                fi_price = getattr(fast, "lastPrice",   None)
-                fi_high  = getattr(fast, "yearHigh",    None)
-                fi_low   = getattr(fast, "yearLow",     None)
-                fi_mcap  = getattr(fast, "marketCap",   None)
+                fi_price = getattr(fast, "lastPrice",  None)
+                fi_high  = getattr(fast, "yearHigh",   None)
+                fi_low   = getattr(fast, "yearLow",    None)
+                fi_mcap  = getattr(fast, "marketCap",  None)
             except Exception:
                 pass
 
-        # Resolve price — regularMarketPrice is None when market is closed
-        current_price = (
+        # Resolve fundamentals from yfinance
+        company = info.get("longName") or info.get("shortName")
+        if not company and t in _ETF_NAME_MAP:
+            company = _ETF_NAME_MAP[t]
+
+        info_price = (
             info.get("regularMarketPrice") or
             info.get("currentPrice") or
             fi_price or
             info.get("previousClose")
         )
-        company = info.get("longName") or info.get("shortName")
-        # Fallback: use hardcoded names for known ETFs so they always display correctly
-        if not company and ticker in _ETF_NAME_MAP:
-            company = _ETF_NAME_MAP[ticker]
 
-        # Always proceed — OHLCV chart API runs after this and fills price/closes.
-        # Only abort if yfinance is completely unavailable (ImportError handled above).
-
-        data = {
-            "ticker":            ticker,
-            "quote_type":        info.get("quoteType", "EQUITY"),
-            "company_name":      company or ticker,
-            "sector":            info.get("sector", ""),
-            "industry":          info.get("industry", ""),
-            "aum":               info.get("totalAssets"),
-            "market_cap":        info.get("marketCap") or fi_mcap,
-            "pe_trailing":       info.get("trailingPE"),
-            "pe_forward":        info.get("forwardPE"),
-            "peg_ratio":         info.get("pegRatio"),
-            "revenue_growth":    info.get("revenueGrowth"),
-            "earnings_growth":   info.get("earningsGrowth"),
-            "gross_margins":     info.get("grossMargins"),
-            "operating_margins": info.get("operatingMargins"),
-            "profit_margins":    info.get("profitMargins"),
-            "free_cashflow":     info.get("freeCashflow"),
-            "debt_to_equity":    info.get("debtToEquity"),
-            "return_on_equity":  info.get("returnOnEquity"),
-            "price_to_book":     info.get("priceToBook"),
-            "price_to_sales":    info.get("priceToSalesTrailing12Months"),
-            "eps_forward":       info.get("forwardEps"),
-            "eps_trailing":      info.get("trailingEps"),
-            "52w_high":          info.get("fiftyTwoWeekHigh") or fi_high,
-            "52w_low":           info.get("fiftyTwoWeekLow")  or fi_low,
-            "current_price":     current_price,
-            "analyst_target":    info.get("targetMeanPrice"),
-            "analyst_rec":       info.get("recommendationKey", ""),
-            "num_analysts":      info.get("numberOfAnalystOpinions", 0),
-            "short_float":       info.get("shortPercentOfFloat"),
-            "institutional_pct": info.get("heldPercentInstitutions"),
-            "insider_pct":       info.get("heldPercentInsiders"),
-            "dividend_yield":    info.get("yield") or info.get("dividendYield"),
-            "expense_ratio":     info.get("annualReportExpenseRatio") or info.get("totalExpenseRatio"),
-            "business_summary":  (info.get("longBusinessSummary") or "")[:500],
-            "fetched_at":        datetime.now(),
-        }
-
-        # Cache .info/fast_info data immediately — sync callers return without waiting for OHLCV
+        # Merge yfinance data into cache, keeping Phase 1 OHLCV
         with _fund_lock:
-            _fund_cache[ticker] = data
-
-        # Fetch OHLCV via chart API — bypasses yfinance crumb-token which fails on cloud IPs
-        try:
-            from data_fetcher import _fetch_ohlcv_via_chart_api
-            hist = _fetch_ohlcv_via_chart_api(ticker, interval="1d", range_str="1y")
-            if hist and hist.get("closes") and len(hist["closes"]) >= 5:
-                with _fund_lock:
-                    if ticker in _fund_cache:
-                        _fund_cache[ticker]["closes"]  = hist["closes"]
-                        _fund_cache[ticker]["volumes"] = hist["volumes"]
-                        _fund_cache[ticker]["highs"]   = hist["highs"]
-                        _fund_cache[ticker]["lows"]    = hist["lows"]
-                        # Fill price and 52W range from OHLCV when .info/fast_info failed
-                        if not _fund_cache[ticker].get("current_price"):
-                            _fund_cache[ticker]["current_price"] = round(hist["closes"][-1], 2)
-                        if not _fund_cache[ticker].get("52w_high"):
-                            _fund_cache[ticker]["52w_high"] = round(max(hist["highs"]), 2)
-                        if not _fund_cache[ticker].get("52w_low"):
-                            _fund_cache[ticker]["52w_low"] = round(min(hist["lows"]), 2)
-        except Exception as exc:
-            logger.debug("_fetch_fundamentals_bg ohlcv %s: %s", ticker, exc)
+            entry = _fund_cache.get(t, phase1)
+            entry.update({
+                "quote_type":        info.get("quoteType") or entry["quote_type"],
+                "company_name":      company or entry["company_name"],
+                "sector":            info.get("sector", ""),
+                "industry":          info.get("industry", ""),
+                "aum":               info.get("totalAssets"),
+                "market_cap":        info.get("marketCap") or fi_mcap,
+                "pe_trailing":       info.get("trailingPE"),
+                "pe_forward":        info.get("forwardPE"),
+                "peg_ratio":         info.get("pegRatio"),
+                "revenue_growth":    info.get("revenueGrowth"),
+                "earnings_growth":   info.get("earningsGrowth"),
+                "gross_margins":     info.get("grossMargins"),
+                "operating_margins": info.get("operatingMargins"),
+                "profit_margins":    info.get("profitMargins"),
+                "free_cashflow":     info.get("freeCashflow"),
+                "debt_to_equity":    info.get("debtToEquity"),
+                "return_on_equity":  info.get("returnOnEquity"),
+                "price_to_book":     info.get("priceToBook"),
+                "price_to_sales":    info.get("priceToSalesTrailing12Months"),
+                "eps_forward":       info.get("forwardEps"),
+                "eps_trailing":      info.get("trailingEps"),
+                # Prefer yfinance price if available, keep OHLCV price as fallback
+                "current_price":     info_price or entry.get("current_price"),
+                "52w_high":          info.get("fiftyTwoWeekHigh") or fi_high or entry.get("52w_high"),
+                "52w_low":           info.get("fiftyTwoWeekLow")  or fi_low  or entry.get("52w_low"),
+                "analyst_target":    info.get("targetMeanPrice"),
+                "analyst_rec":       info.get("recommendationKey", ""),
+                "num_analysts":      info.get("numberOfAnalystOpinions", 0),
+                "short_float":       info.get("shortPercentOfFloat"),
+                "institutional_pct": info.get("heldPercentInstitutions"),
+                "insider_pct":       info.get("heldPercentInsiders"),
+                "dividend_yield":    info.get("yield") or info.get("dividendYield"),
+                "expense_ratio":     info.get("annualReportExpenseRatio") or info.get("totalExpenseRatio"),
+                "business_summary":  (info.get("longBusinessSummary") or "")[:500],
+            })
+            _fund_cache[t] = entry
 
     except Exception as exc:
-        logger.debug("_fetch_fundamentals_bg %s: %s", ticker, exc)
+        logger.debug("_fetch_fundamentals_bg %s: %s", t, exc)
     finally:
         with _fetch_set_lock:
             _fetch_active_set.discard(ticker)
