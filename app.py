@@ -5144,6 +5144,121 @@ def intel():
 
 
 # ---------------------------------------------------------------------------
+# Liquidity & Opportunity Research Engine
+# ---------------------------------------------------------------------------
+
+@app.route("/opportunity")
+def liquidity_page():
+    """Liquidity & Hidden Opportunity Research page."""
+    return render_template("liquidity.html")
+
+
+@app.route("/api/liquidity/status")
+def api_liquidity_status():
+    """Fed liquidity monitor: FRED data, yield curve, liquidity score."""
+    try:
+        import liquidity_engine as _liq
+        ctx = _liq.get_liquidity_status()
+        return jsonify({"ok": True, **ctx})
+    except Exception as exc:
+        logger.error("api_liquidity_status: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/liquidity/money-flow")
+def api_money_flow():
+    """Sector ETF money flow rankings."""
+    try:
+        import liquidity_engine as _liq
+        mflow = _liq.get_money_flow()
+        ctx   = _liq.get_liquidity_status()
+        return jsonify({
+            "ok":        True,
+            "money_flow":mflow,
+            "liq_status":ctx.get("status"),
+            "liq_score": ctx.get("score"),
+        })
+    except Exception as exc:
+        logger.error("api_money_flow: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/opportunity/scan")
+def api_opportunity_scan():
+    """
+    Run the full hidden opportunity scan.
+    Query params:
+      mode=both|trade|invest   (default: both)
+      tickers=NVDA,CRWD,...    (extra tickers to include)
+    """
+    try:
+        import opportunity_engine as _opp
+        import liquidity_engine   as _liq
+        mode          = request.args.get("mode", "both")
+        extra_raw     = request.args.get("tickers", "")
+        extra_tickers = [t.strip().upper() for t in extra_raw.split(",") if t.strip()]
+        mkt_ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        liq_ctx = _liq.get_liquidity_status()
+        results = _opp.run_opportunity_scan(extra_tickers, mkt_ctx, liq_ctx, mode)
+        return jsonify({"ok": True, **results})
+    except Exception as exc:
+        logger.error("api_opportunity_scan: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/opportunity/ticker/<ticker>")
+def api_opportunity_ticker(ticker: str):
+    """Full opportunity analysis + research report for a single ticker."""
+    try:
+        import opportunity_engine as _opp
+        import liquidity_engine   as _liq
+        ticker  = ticker.upper().strip()
+        mkt_ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        liq_ctx = _liq.get_liquidity_status()
+        result  = _opp.scan_ticker(ticker, mkt_ctx, liq_ctx)
+        return jsonify({"ok": True, **result})
+    except Exception as exc:
+        logger.error("api_opportunity_ticker %s: %s", ticker, exc, exc_info=True)
+        return jsonify({"ok": False, "ticker": ticker, "error": str(exc)}), 500
+
+
+@app.route("/api/opportunity/alerts")
+def api_opportunity_alerts():
+    """Combined opportunity + liquidity alerts."""
+    try:
+        import opportunity_engine as _opp
+        import liquidity_engine   as _liq
+        mkt_ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        liq_ctx = _liq.get_liquidity_status()
+        # Quick scan of top tickers only for speed
+        fast_universe = ["NVDA","CRWD","AMD","META","PLTR","MRVL","DDOG","NET","AMZN","COIN"]
+        results = []
+        for t in fast_universe:
+            try:
+                results.append(_opp.scan_ticker(t, mkt_ctx, liq_ctx))
+            except Exception:
+                pass
+        alerts = _opp.generate_opportunity_alerts(results, mkt_ctx, liq_ctx)
+        return jsonify({"ok": True, "alerts": alerts, "count": len(alerts)})
+    except Exception as exc:
+        logger.error("api_opportunity_alerts: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/opportunity/refresh", methods=["POST"])
+@csrf.exempt
+def api_opportunity_refresh():
+    """Trigger background refresh of liquidity data."""
+    try:
+        import liquidity_engine as _liq
+        _liq.refresh_liquidity_bg()
+        return jsonify({"ok": True, "msg": "Liquidity refresh triggered."})
+    except Exception as exc:
+        logger.error("api_opportunity_refresh: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

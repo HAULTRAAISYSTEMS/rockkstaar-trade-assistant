@@ -62,6 +62,11 @@
          class="nav-link {% if request.endpoint == 'intel' %}nav-link-active{% endif %}">
         Intel
       </a>
+      <a href="{{ url_for('liquidity_page') }}"
+         class="nav-link nav-link-liq {% if request.endpoint == 'liquidity_page' %}nav-link-active{% endif %}"
+         title="Liquidity & Hidden Opportunities">
+        🔍 Opportunity
+      </a>
     </div>
 
     <!-- RIGHT: Status + Controls -->
