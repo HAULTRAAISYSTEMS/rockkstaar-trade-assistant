@@ -20,7 +20,7 @@
   <nav class="navbar">
 
     <!-- LEFT: Brand -->
-    <a href="{{ url_for('dashboard') }}" class="nav-brand">
+    <a href="{{ url_for('liquidity_page') }}" class="nav-brand">
       <img src="{{ url_for('static', filename='logo.png') }}"
            alt="HAULTRA AI"
            class="nav-logo"
@@ -35,14 +35,20 @@
 
     <!-- CENTER: Navigation Links -->
     <div class="nav-links">
-      <a href="{{ url_for('dashboard') }}"
-         class="nav-link {% if request.endpoint == 'dashboard' %}nav-link-active{% endif %}">
-        Dashboard
+      <a href="{{ url_for('liquidity_page') }}"
+         class="nav-link nav-link-home {% if request.endpoint == 'liquidity_page' %}nav-link-active{% endif %}"
+         title="Morning Command Center">
+        HOME
       </a>
       <a href="{{ url_for('quick_mode') }}"
-         class="nav-link nav-link-quick {% if request.endpoint == 'quick_mode' %}nav-link-active{% endif %}"
-         title="Mobile quick view">
-        ⚡ Quick
+         class="nav-link nav-link-exec {% if request.endpoint == 'quick_mode' %}nav-link-active{% endif %}"
+         title="Trade Execution — entries, stops, targets, setups">
+        EXECUTION
+      </a>
+      <a href="{{ url_for('intel') }}"
+         class="nav-link nav-link-research {% if request.endpoint == 'intel' %}nav-link-active{% endif %}"
+         title="Deep Research — macro, sector, institutional, valuations">
+        RESEARCH
       </a>
       <a href="{{ url_for('journal') }}"
          class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}">
@@ -53,19 +59,15 @@
          title="Risk &amp; Discipline Settings">
         Risk
       </a>
+      <a href="{{ url_for('dashboard') }}"
+         class="nav-link nav-link-account {% if request.endpoint == 'dashboard' %}nav-link-active{% endif %}"
+         title="Account & Performance Hub">
+        ACCOUNT
+      </a>
       <a href="{{ url_for('schwab_account') }}"
          class="nav-link nav-link-schwab {% if request.endpoint == 'schwab_account' %}nav-link-active{% endif %}"
-         title="Schwab Account">
-        Account
-      </a>
-      <a href="{{ url_for('intel') }}"
-         class="nav-link {% if request.endpoint == 'intel' %}nav-link-active{% endif %}">
-        Intel
-      </a>
-      <a href="{{ url_for('liquidity_page') }}"
-         class="nav-link nav-link-liq {% if request.endpoint == 'liquidity_page' %}nav-link-active{% endif %}"
-         title="Liquidity & Hidden Opportunities">
-        🔍 Opportunity
+         title="Schwab Brokerage">
+        Schwab
       </a>
     </div>
 

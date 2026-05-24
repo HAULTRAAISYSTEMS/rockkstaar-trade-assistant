@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Quick Mode — Rockkstaar{% endblock %}
+{% block title %}Execution — HAULTRA AI{% endblock %}
 
 {% block content %}
 <div class="qm-wrap">
@@ -7,14 +7,14 @@
   <!-- ===== HEADER BAR ===== -->
   <div class="qm-header">
     <div class="qm-header-left">
-      <span class="qm-title">⚡ Quick Mode</span>
-      <span class="qm-subtitle">Top {{ stocks|length }} in play</span>
+      <span class="qm-title">⚡ Execution</span>
+      <span class="qm-subtitle">Top {{ stocks|length }} setups in play</span>
     </div>
     <div class="qm-header-right">
       <span class="qm-orb-pill {{ orb_session.phase_class }}">
         {{ orb_session.phase_label or 'Market' }}
       </span>
-      <a href="{{ url_for('dashboard') }}" class="qm-full-link">Full view →</a>
+      <a href="{{ url_for('dashboard') }}" class="qm-full-link">Account →</a>
     </div>
   </div>
 
@@ -129,8 +129,8 @@
   <div class="qm-empty">
     <div class="qm-empty-icon">📋</div>
     <div class="qm-empty-title">No stocks in play</div>
-    <div class="qm-empty-sub">Add tickers to your watchlist on the dashboard.</div>
-    <a href="{{ url_for('dashboard') }}" class="btn btn-add" style="margin-top:1.5rem;display:inline-flex;">Open Dashboard</a>
+    <div class="qm-empty-sub">Add tickers to your watchlist in the Account hub.</div>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-add" style="margin-top:1.5rem;display:inline-flex;">Open Account</a>
   </div>
   {% endif %}
 

@@ -2891,9 +2891,9 @@ _DASHBOARD_EMPTY = dict(
 )
 
 
-@app.route("/")
+@app.route("/account")
 def dashboard():
-    """Main dashboard — summary cards, top 5, and full ranked watchlist."""
+    """Account & Performance Hub — watchlist, PnL, journal, discipline tracking."""
     try:
         return _dashboard_inner()
     except Exception as exc:
@@ -5147,9 +5147,10 @@ def intel():
 # Liquidity & Opportunity Research Engine
 # ---------------------------------------------------------------------------
 
+@app.route("/")
 @app.route("/opportunity")
 def liquidity_page():
-    """Liquidity & Hidden Opportunity Research page."""
+    """Morning Command Center — liquidity, risk, sector flow, hidden opportunities."""
     return render_template("liquidity.html")
 
 
