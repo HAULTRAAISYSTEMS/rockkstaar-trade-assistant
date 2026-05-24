@@ -41,6 +41,9 @@ _FUND_TTL_H = 4   # hours
 _fetch_active_set: set[str] = set()
 _fetch_set_lock   = threading.Lock()
 
+# Throttle concurrent yfinance requests — Yahoo Finance rate-limits heavy parallel usage
+_yf_semaphore = threading.Semaphore(5)
+
 # Known ETFs — don't score on fundamental factors (no revenue/EPS/margins)
 _ETF_TICKERS = {
     "SPY","QQQ","IWM","SMH","XLK","XLE","XLF","XLI","XLP","XLU","XBI","ARKK",
@@ -120,41 +123,59 @@ OPPORTUNITY_UNIVERSE = {
 def _fetch_fundamentals_bg(ticker: str) -> None:
     """Background thread: fetch yfinance fundamentals and cache."""
     try:
-        _YF_AVAILABLE = False
         try:
             import yfinance as yf
-            _YF_AVAILABLE = True
         except ImportError:
-            pass
-
-        if not _YF_AVAILABLE:
             return
 
-        t_obj = yf.Ticker(ticker)
-        info  = t_obj.info
-        # regularMarketPrice is None when market is closed (weekends/holidays) — use fallbacks
+        # Throttle concurrent requests — 50 simultaneous .info calls hit Yahoo Finance rate limits
+        with _yf_semaphore:
+            t_obj = yf.Ticker(ticker)
+
+            # .info: full fundamentals — may fail under rate limiting
+            info = {}
+            try:
+                info = t_obj.info or {}
+            except Exception as exc:
+                logger.debug("_fetch_fundamentals_bg %s .info: %s", ticker, exc)
+
+            # fast_info: lightweight fallback for price/range/mktcap when .info fails
+            fi_price = fi_high = fi_low = fi_mcap = None
+            try:
+                fast     = t_obj.fast_info
+                fi_price = getattr(fast, "lastPrice",   None)
+                fi_high  = getattr(fast, "yearHigh",    None)
+                fi_low   = getattr(fast, "yearLow",     None)
+                fi_mcap  = getattr(fast, "marketCap",   None)
+            except Exception:
+                pass
+
+        # Resolve price — regularMarketPrice is None when market is closed
         current_price = (
             info.get("regularMarketPrice") or
             info.get("currentPrice") or
+            fi_price or
             info.get("previousClose")
         )
-        if not info or not current_price:
+        company = info.get("longName") or info.get("shortName")
+
+        # Only skip if yfinance returned truly nothing (rate-limit empty response)
+        if not current_price and not company:
             return
 
-        # Pull only the fields we need
         data = {
             "ticker":            ticker,
-            "quote_type":        info.get("quoteType", "EQUITY"),  # "ETF" | "EQUITY" | "INDEX"
-            "company_name":      info.get("longName") or info.get("shortName", ticker),
+            "quote_type":        info.get("quoteType", "EQUITY"),
+            "company_name":      company or ticker,
             "sector":            info.get("sector", ""),
             "industry":          info.get("industry", ""),
-            "aum":               info.get("totalAssets"),  # ETF-specific
-            "market_cap":        info.get("marketCap"),
+            "aum":               info.get("totalAssets"),
+            "market_cap":        info.get("marketCap") or fi_mcap,
             "pe_trailing":       info.get("trailingPE"),
             "pe_forward":        info.get("forwardPE"),
             "peg_ratio":         info.get("pegRatio"),
-            "revenue_growth":    info.get("revenueGrowth"),    # YoY
-            "earnings_growth":   info.get("earningsGrowth"),   # YoY
+            "revenue_growth":    info.get("revenueGrowth"),
+            "earnings_growth":   info.get("earningsGrowth"),
             "gross_margins":     info.get("grossMargins"),
             "operating_margins": info.get("operatingMargins"),
             "profit_margins":    info.get("profitMargins"),
@@ -165,8 +186,8 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
             "price_to_sales":    info.get("priceToSalesTrailing12Months"),
             "eps_forward":       info.get("forwardEps"),
             "eps_trailing":      info.get("trailingEps"),
-            "52w_high":          info.get("fiftyTwoWeekHigh"),
-            "52w_low":           info.get("fiftyTwoWeekLow"),
+            "52w_high":          info.get("fiftyTwoWeekHigh") or fi_high,
+            "52w_low":           info.get("fiftyTwoWeekLow")  or fi_low,
             "current_price":     current_price,
             "analyst_target":    info.get("targetMeanPrice"),
             "analyst_rec":       info.get("recommendationKey", ""),
@@ -178,7 +199,7 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
             "fetched_at":        datetime.now(),
         }
 
-        # Cache .info data immediately — sync callers don't need to wait for OHLCV
+        # Cache .info/fast_info data immediately — sync callers return without waiting for OHLCV
         with _fund_lock:
             _fund_cache[ticker] = data
 
@@ -194,6 +215,7 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
                         _fund_cache[ticker]["lows"]    = hist["Low"].tolist()
         except Exception:
             pass
+
     except Exception as exc:
         logger.debug("_fetch_fundamentals_bg %s: %s", ticker, exc)
     finally:
@@ -499,6 +521,8 @@ def compute_confluence_score(
     # ── 9. Technical setup ────────────────────────────────────────────────────
     tech_pts = 0
     cp = _safe(fund.get("current_price"))
+    if not cp and closes:
+        cp = closes[-1]  # fallback: last OHLCV close when .info price is missing
     if closes and cp:
         ema20 = _ema_val(closes, min(20, len(closes)))
         ema50 = _ema_val(closes, min(50, len(closes)))
@@ -637,10 +661,18 @@ def build_research_report(
     All data is evidence-based. No price predictions.
     """
     is_etf = (fund.get("quote_type") == "ETF" or ticker.upper() in _ETF_TICKERS)
+    closes = ohlcv.get("closes", [])
     cp     = _safe(fund.get("current_price"))
+    # Fallback: use last OHLCV close when .info didn't return a price
+    if not cp and closes:
+        cp = closes[-1]
     high52 = _safe(fund.get("52w_high"))
     low52  = _safe(fund.get("52w_low"))
-    closes = ohlcv.get("closes", [])
+    # Fallback: derive 52w range from OHLCV highs/lows when .info didn't return them
+    if not high52 and ohlcv.get("highs"):
+        high52 = max(ohlcv["highs"])
+    if not low52 and ohlcv.get("lows"):
+        low52 = min(ohlcv["lows"])
 
     ema20 = _ema_val(closes, min(20, len(closes))) if closes else None
     ema50 = _ema_val(closes, min(50, len(closes))) if closes else None
