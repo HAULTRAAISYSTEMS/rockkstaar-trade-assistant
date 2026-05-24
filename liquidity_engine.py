@@ -22,11 +22,13 @@ FRED series tracked:
   T10Y2Y    — 10Y-2Y spread (daily, yield curve)
 
 API key: optional env var FRED_API_KEY (higher rate limits, still works without).
-Data cached 6 hours — FRED series update weekly/monthly; daily series fine with 6h cache.
+Data cached 8 hours — FRED only updates on business days; 8h cache is safe.
+Persistent disk cache in cache/ dir so server restarts never lose data.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -35,18 +37,93 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# ── Cache ──────────────────────────────────────────────────────────────────────
-_cache_lock  = threading.Lock()
-_cache: dict = {}                  # series_id → {values, dates, fetched_at}
-_CACHE_TTL_H = 6                   # hours
+# ── Locks ─────────────────────────────────────────────────────────────────────
+_cache_lock = threading.Lock()
+_ctx_lock   = threading.Lock()
+_bg_lock    = threading.Lock()
 
-_ctx_lock       = threading.Lock()
-_liq_ctx:  dict = {}
-_liq_ctx_at: Optional[datetime] = None
-_CTX_TTL_H = 6
+# ── TTLs ─────────────────────────────────────────────────────────────────────
+_CACHE_TTL_H = 8   # FRED series: 8h (data updates at most daily)
+_CTX_TTL_H   = 8   # Full context rebuild: 8h
 
-_bg_lock   = threading.Lock()
 _bg_active = False
+
+# ── Persistent disk cache ─────────────────────────────────────────────────────
+_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+_FRED_FILE = os.path.join(_CACHE_DIR, "fred_series.json")
+_CTX_FILE  = os.path.join(_CACHE_DIR, "liq_ctx.json")
+
+
+def _load_fred_from_disk() -> dict:
+    try:
+        if not os.path.exists(_FRED_FILE):
+            return {}
+        with open(_FRED_FILE) as f:
+            raw = json.load(f)
+        out = {}
+        for sid, v in raw.items():
+            try:
+                v["fetched_at"] = datetime.fromisoformat(v["fetched_at"])
+                out[sid] = v
+            except Exception:
+                pass
+        if out:
+            logger.info("liquidity_engine: loaded %d FRED series from disk cache", len(out))
+        return out
+    except Exception as exc:
+        logger.debug("_load_fred_from_disk: %s", exc)
+        return {}
+
+
+def _save_fred_to_disk() -> None:
+    def _w():
+        try:
+            os.makedirs(_CACHE_DIR, exist_ok=True)
+            with _cache_lock:
+                raw = {sid: {**v, "fetched_at": v["fetched_at"].isoformat()}
+                       for sid, v in _cache.items()}
+            with open(_FRED_FILE, "w") as f:
+                json.dump(raw, f)
+        except Exception as exc:
+            logger.debug("_save_fred_to_disk: %s", exc)
+    threading.Thread(target=_w, daemon=True, name="fred-save").start()
+
+
+def _load_ctx_from_disk() -> tuple[dict, Optional[datetime]]:
+    try:
+        if not os.path.exists(_CTX_FILE):
+            return {}, None
+        with open(_CTX_FILE) as f:
+            raw = json.load(f)
+        at_str = raw.pop("__at__", None)
+        at = datetime.fromisoformat(at_str) if at_str else None
+        if at:
+            age_h = (datetime.now() - at).total_seconds() / 3600
+            logger.info("liquidity_engine: loaded ctx from disk  age=%.1fh", age_h)
+        return raw, at
+    except Exception as exc:
+        logger.debug("_load_ctx_from_disk: %s", exc)
+        return {}, None
+
+
+def _save_ctx_to_disk(ctx: dict, at: datetime) -> None:
+    def _w():
+        try:
+            os.makedirs(_CACHE_DIR, exist_ok=True)
+            data = {**ctx, "__at__": at.isoformat()}
+            with open(_CTX_FILE, "w") as f:
+                json.dump(data, f, default=str)
+        except Exception as exc:
+            logger.debug("_save_ctx_to_disk: %s", exc)
+    threading.Thread(target=_w, daemon=True, name="ctx-save").start()
+
+
+# ── In-memory caches (warm from disk on import) ───────────────────────────────
+_cache: dict = _load_fred_from_disk()
+_liq_ctx: dict
+_liq_ctx_at: Optional[datetime]
+_liq_ctx, _liq_ctx_at = _load_ctx_from_disk()
+
 
 # ── FRED series manifest ───────────────────────────────────────────────────────
 _FRED_SERIES = {
@@ -101,7 +178,7 @@ def _fred_url(series_id: str, limit: int = 20) -> str:
 def _fetch_fred(series_id: str, limit: int = 20) -> dict | None:
     """
     Fetch a FRED series and return {values: [float], dates: [str]}.
-    Returns None on any failure. Gracefully handles missing API key.
+    Returns stale cached data on network failure (never returns None if we have any data).
     """
     with _cache_lock:
         cached = _cache.get(series_id)
@@ -109,26 +186,30 @@ def _fetch_fred(series_id: str, limit: int = 20) -> dict | None:
             age = (datetime.now() - cached["fetched_at"]).total_seconds() / 3600
             if age < _CACHE_TTL_H:
                 return cached
+        stale_fallback = cached  # may be None
 
     try:
         import requests as _req
         url = _fred_url(series_id, limit)
         r = _req.get(url, timeout=10, headers={"Accept": "application/json"})
+
         if r.status_code == 400:
             logger.debug("FRED %s: 400 — likely needs API key or bad series", series_id)
-            return None
+            return stale_fallback
+        if r.status_code == 429:
+            logger.debug("FRED %s: 429 rate limit — returning stale cache", series_id)
+            return stale_fallback
         if r.status_code != 200:
             logger.debug("FRED %s: HTTP %s", series_id, r.status_code)
-            return None
+            return stale_fallback
 
         data = r.json()
         obs  = data.get("observations", [])
-        # Filter out "." (missing values) and sort oldest→newest
         valid = [(o["date"], o["value"]) for o in obs if o.get("value", ".") != "."]
         valid.sort(key=lambda x: x[0])
 
         if not valid:
-            return None
+            return stale_fallback
 
         result = {
             "series_id":  series_id,
@@ -143,7 +224,7 @@ def _fetch_fred(series_id: str, limit: int = 20) -> dict | None:
 
     except Exception as exc:
         logger.debug("_fetch_fred %s: %s", series_id, exc)
-        return None
+        return stale_fallback
 
 
 def _last(data: dict | None) -> float | None:
@@ -170,6 +251,24 @@ def _abs_chg(cur: float | None, prev: float | None) -> float | None:
     return round(cur - prev, 4)
 
 
+def _trend_arrow(chg: float | None, threshold: float = 0) -> str:
+    """Return ↑ / ↓ / → based on change magnitude."""
+    if chg is None:
+        return "→"
+    if chg > threshold:
+        return "↑"
+    if chg < -threshold:
+        return "↓"
+    return "→"
+
+
+def _last_date(data: dict | None) -> str | None:
+    """Return the most recent observation date string from a FRED series."""
+    if data and data.get("dates"):
+        return data["dates"][-1]
+    return None
+
+
 # ── Individual series analysis ─────────────────────────────────────────────────
 
 def _analyze_balance_sheet() -> dict:
@@ -179,68 +278,74 @@ def _analyze_balance_sheet() -> dict:
     chg  = _abs_chg(cur, prev)
     trend_4w = _pct_chg(_last(d), _prev(d, 4))
 
-    expanding = chg and chg > 0
+    expanding = bool(chg and chg > 0)
     result = {
-        "value":      round(cur / 1000, 1) if cur else None,   # convert M→B, show in T
-        "unit":       "$T",
-        "chg_wow":    round(chg / 1000, 1) if chg else None,
-        "trend_4w":   trend_4w,
-        "expanding":  expanding,
-        "signal":     "Expanding — liquidity bullish" if expanding else "Contracting — QT in progress",
-        "dates":      (d or {}).get("dates", [])[-8:],
-        "values":     [round(v / 1000, 2) for v in (d or {}).get("values", [])[-8:]],
+        "value":       round(cur / 1000, 1) if cur else None,   # M→T
+        "unit":        "$T",
+        "chg_wow":     round(chg / 1000, 1) if chg else None,
+        "trend_4w":    trend_4w,
+        "expanding":   expanding,
+        "trend_arrow": _trend_arrow(chg),
+        "data_as_of":  _last_date(d),
+        "signal":      "Expanding — liquidity bullish" if expanding else "Contracting — QT in progress",
+        "dates":       (d or {}).get("dates", [])[-8:],
+        "values":      [round(v / 1000, 2) for v in (d or {}).get("values", [])[-8:]],
     }
     return result
 
 
 def _analyze_reverse_repo() -> dict:
-    d    = _fetch_fred("RRPONTSYD")
-    cur  = _last(d)
-    prev = _prev(d, 1)
-    prev5= _prev(d, 5)
-    chg  = _abs_chg(cur, prev)
-    trend= _pct_chg(cur, prev5)
+    d     = _fetch_fred("RRPONTSYD")
+    cur   = _last(d)
+    prev  = _prev(d, 1)
+    prev5 = _prev(d, 5)
+    chg   = _abs_chg(cur, prev)
+    trend = _pct_chg(cur, prev5)
 
-    # Falling reverse repo = liquidity LEAVING the Fed's facility = bullish (more $ in system)
-    falling_fast = trend and trend < -5
+    falling_fast = bool(trend and trend < -5)
+    rising       = bool(chg and chg > 0)
     result = {
-        "value":      round(cur / 1000, 2) if cur else None,   # M→T
-        "unit":       "$T",
-        "chg_dod":    round(chg / 1000, 3) if chg else None,
-        "trend_5d":   trend,
+        "value":        round(cur / 1000, 2) if cur else None,   # M→T
+        "unit":         "$T",
+        "chg_dod":      round(chg / 1000, 3) if chg else None,
+        "trend_5d":     trend,
         "falling_fast": falling_fast,
-        "signal":     (
+        "trend_arrow":  "↓" if falling_fast else ("↑" if rising else "→"),
+        "data_as_of":   _last_date(d),
+        "signal":       (
             "Draining sharply — liquidity entering markets (bullish)" if falling_fast else
-            "Rising — cash parked at Fed (less liquid)" if (chg and chg > 0) else
+            "Rising — cash parked at Fed (less liquid)" if rising else
             "Falling — cash moving to markets"
         ),
-        "dates":      (d or {}).get("dates", [])[-10:],
-        "values":     [round(v / 1000, 3) for v in (d or {}).get("values", [])[-10:]],
+        "dates":  (d or {}).get("dates", [])[-10:],
+        "values": [round(v / 1000, 3) for v in (d or {}).get("values", [])[-10:]],
     }
     return result
 
 
 def _analyze_m2() -> dict:
-    d    = _fetch_fred("M2SL")
-    cur  = _last(d)
-    prev = _prev(d, 1)
+    d      = _fetch_fred("M2SL")
+    cur    = _last(d)
+    prev   = _prev(d, 1)
     prev12 = _prev(d, 12)
     chg_mom = _pct_chg(cur, prev)
     chg_yoy = _pct_chg(cur, prev12)
 
     result = {
-        "value":    round(cur / 1000, 1) if cur else None,
-        "unit":     "$T",
-        "chg_mom":  chg_mom,
-        "chg_yoy":  chg_yoy,
-        "expanding": chg_yoy and chg_yoy > 0,
-        "signal":   (
+        "value":       round(cur / 1000, 1) if cur else None,
+        "unit":        "$T",
+        "chg_mom":     chg_mom,
+        "chg_yoy":     chg_yoy,
+        "expanding":   bool(chg_yoy and chg_yoy > 0),
+        "trend_arrow": _trend_arrow(chg_yoy),
+        "data_as_of":  _last_date(d),
+        "signal":      (
             f"M2 growing +{chg_yoy:.1f}% YoY — money supply expanding" if (chg_yoy and chg_yoy > 2) else
             f"M2 contracting {chg_yoy:.1f}% YoY — tighter monetary conditions" if (chg_yoy and chg_yoy < 0) else
             "M2 stable — neutral monetary backdrop"
         ),
-        "dates":    (d or {}).get("dates", [])[-12:],
-        "values":   [round(v / 1000, 2) for v in (d or {}).get("values", [])[-12:]],
+        "dates":  (d or {}).get("dates", [])[-12:],
+        "values": [round(v / 1000, 2) for v in (d or {}).get("values", [])[-12:]],
     }
     return result
 
@@ -250,24 +355,24 @@ def _analyze_yield_curve() -> dict:
     y10_d    = _fetch_fred("DGS10")
     y2_d     = _fetch_fred("DGS2")
 
-    spread  = _last(spread_d)
-    y10     = _last(y10_d)
-    y2      = _last(y2_d)
-    computed = (y10 - y2) if (y10 and y2) else spread
+    spread   = _last(spread_d)
+    y10      = _last(y10_d)
+    y2       = _last(y2_d)
+    computed = (y10 - y2) if (y10 is not None and y2 is not None) else spread
 
     prev_spread = _prev(spread_d, 5) if spread_d else None
     trend = _abs_chg(spread, prev_spread)
 
-    inverted    = computed is not None and computed < 0
-    steepening  = trend is not None and trend > 0.05
-    flattening  = trend is not None and trend < -0.05
+    inverted   = computed is not None and computed < 0
+    steepening = trend is not None and trend > 0.05
+    flattening = trend is not None and trend < -0.05
 
     if computed is None:
         status = "Unknown"
         signal = "Yield curve data unavailable."
     elif computed < -0.5:
         status = "Deeply Inverted"
-        signal = f"Yield curve deeply inverted ({computed:.2f}%) — recession risk elevated, watch growth stocks."
+        signal = f"Yield curve deeply inverted ({computed:.2f}%) — recession risk elevated."
     elif computed < 0:
         status = "Inverted"
         signal = f"Yield curve inverted ({computed:.2f}%) — growth headwind for tech/high-multiple stocks."
@@ -281,15 +386,21 @@ def _analyze_yield_curve() -> dict:
         status = "Normal"
         signal = f"Yield curve normal ({computed:.2f}%) — healthy credit environment."
 
+    y10_arrow = _trend_arrow(_abs_chg(y10, _prev(y10_d, 5)))
+    y2_arrow  = _trend_arrow(_abs_chg(y2,  _prev(y2_d,  5)))
+
     return {
-        "spread":      round(computed, 3) if computed else None,
+        "spread":      round(computed, 3) if computed is not None else None,
         "y10":         y10,
         "y2":          y2,
+        "y10_arrow":   y10_arrow,
+        "y2_arrow":    y2_arrow,
         "inverted":    inverted,
         "steepening":  steepening,
         "flattening":  flattening,
         "status":      status,
         "signal":      signal,
+        "data_as_of":  _last_date(spread_d) or _last_date(y10_d),
         "dates":       (spread_d or {}).get("dates", [])[-20:],
         "values":      (spread_d or {}).get("values", [])[-20:],
     }
@@ -301,45 +412,95 @@ def _analyze_fed_rate() -> dict:
     rate = _last(dff)
     sofr_val = _last(sofr)
 
-    prev = _prev(dff, 30)
+    prev   = _prev(dff, 30)
     cutting = rate is not None and prev is not None and rate < prev
     hiking  = rate is not None and prev is not None and rate > prev
 
     return {
-        "fed_funds":  rate,
-        "sofr":       sofr_val,
-        "cutting":    cutting,
-        "hiking":     hiking,
-        "stable":     not cutting and not hiking,
-        "signal":     (
+        "fed_funds":     rate,
+        "sofr":          sofr_val,
+        "cutting":       cutting,
+        "hiking":        hiking,
+        "stable":        not cutting and not hiking,
+        "trend_arrow":   "↓" if cutting else ("↑" if hiking else "→"),
+        "data_as_of":    _last_date(dff),
+        "sofr_data_as_of": _last_date(sofr),
+        "signal":        (
             f"Fed cutting rates ({rate:.2f}%) — risk-on catalyst for growth stocks." if cutting else
             f"Fed hiking ({rate:.2f}%) — headwind for valuations." if hiking else
-            f"Fed on hold ({rate:.2f}%) — market waiting for next move."
+            f"Fed on hold ({rate:.2f}%) — market waiting for next move." if rate else
+            "Fed rate data unavailable."
         ),
     }
 
 
 def _analyze_tga() -> dict:
-    d   = _fetch_fred("WTREGEN")
-    cur = _last(d)
-    prev= _prev(d, 4)
-    chg = _abs_chg(cur, prev)
-    # TGA falling = Treasury spending into economy = bullish liquidity
-    draining = chg and chg < -50
-    filling  = chg and chg > 50
+    d    = _fetch_fred("WTREGEN")
+    cur  = _last(d)
+    prev = _prev(d, 4)
+    chg  = _abs_chg(cur, prev)
+    draining = bool(chg and chg < -50)
+    filling  = bool(chg and chg > 50)
 
     return {
-        "value":   round(cur / 1000, 2) if cur else None,
-        "unit":    "$T",
-        "chg_mow": round(chg / 1000, 2) if chg else None,
-        "draining": draining,
-        "filling":  filling,
-        "signal":  (
+        "value":       round(cur / 1000, 2) if cur else None,
+        "unit":        "$T",
+        "chg_mow":     round(chg / 1000, 2) if chg else None,
+        "draining":    draining,
+        "filling":     filling,
+        "trend_arrow": "↓" if draining else ("↑" if filling else "→"),
+        "data_as_of":  _last_date(d),
+        "signal":      (
             "TGA draining — Treasury spending into economy (bullish liquidity)" if draining else
             "TGA filling — Treasury absorbing liquidity (bearish)" if filling else
             "TGA stable"
         ),
     }
+
+
+# ── Liquidity interpretation ───────────────────────────────────────────────────
+
+def _build_interpretation(score: int, bs: dict, rrp: dict, m2: dict,
+                          yc: dict, rate: dict, tga: dict) -> str:
+    lines = []
+    if score >= 70:
+        lines.append("Liquidity strongly supportive for risk assets.")
+    elif score >= 55:
+        lines.append("Liquidity mildly supportive for risk assets.")
+    elif score >= 45:
+        lines.append("Mixed liquidity signals — market neutral.")
+    elif score >= 30:
+        lines.append("Financial conditions tightening — caution warranted.")
+    else:
+        lines.append("Liquidity contracting sharply — defensive posture recommended.")
+
+    if rate.get("cutting"):
+        r = rate.get("fed_funds")
+        lines.append(f"Fed cutting ({f'{r:.2f}' if r else '?'}%) — risk-on catalyst.")
+    elif rate.get("hiking"):
+        r = rate.get("fed_funds")
+        lines.append(f"Fed hiking ({f'{r:.2f}' if r else '?'}%) — multiple compression risk.")
+    else:
+        r = rate.get("fed_funds")
+        lines.append(f"Fed on hold ({f'{r:.2f}' if r else '?'}%) — data dependent.")
+
+    spread = yc.get("spread")
+    if spread is not None:
+        if spread < -0.5:
+            lines.append("Deep yield curve inversion — elevated recession risk.")
+        elif spread < 0:
+            lines.append("Inverted yield curve — growth stocks face valuation headwinds.")
+        elif spread > 0.5 and yc.get("steepening"):
+            lines.append("Yield curve steepening — improving credit conditions.")
+
+    if rrp.get("falling_fast"):
+        lines.append("Reverse repo draining fast — excess cash flowing into markets.")
+    if bs.get("expanding"):
+        lines.append("Balance sheet expanding — accommodative conditions.")
+    elif bs.get("chg_wow") is not None and bs["chg_wow"] < -10:
+        lines.append("QT in progress — reducing system liquidity.")
+
+    return " ".join(lines)
 
 
 # ── Master liquidity score ─────────────────────────────────────────────────────
@@ -355,18 +516,16 @@ def _build_liquidity_context() -> dict:
     mflow = _fetch_money_flow()
 
     # ── Liquidity score 0-100 ─────────────────────────────────────────────────
-    score = 50   # start neutral
+    score  = 50
     alerts = []
 
-    # 1. Fed balance sheet: expanding = +15, contracting = -15
     if bs.get("expanding"):
         score += 15
-        alerts.append({"type": "bullish", "msg": f"Fed balance sheet expanding +${bs.get('chg_wow','?')}B WoW."})
+        alerts.append({"type": "bullish", "msg": f"Fed balance sheet expanding +${bs.get('chg_wow','?')}T WoW."})
     elif bs.get("chg_wow") and bs["chg_wow"] < -10:
         score -= 15
         alerts.append({"type": "bearish", "msg": "Fed balance sheet contracting — QT in progress."})
 
-    # 2. Reverse repo: falling fast = +15 (liquidity leaving Fed, entering markets)
     if rrp.get("falling_fast"):
         score += 15
         alerts.append({"type": "bullish", "msg": "Reverse repo draining rapidly — excess liquidity entering markets."})
@@ -374,7 +533,6 @@ def _build_liquidity_context() -> dict:
         score -= 10
         alerts.append({"type": "caution", "msg": "Reverse repo rising — cash being parked at Fed."})
 
-    # 3. M2 growth
     m2_yoy = m2.get("chg_yoy")
     if m2_yoy and m2_yoy > 3:
         score += 10
@@ -383,7 +541,6 @@ def _build_liquidity_context() -> dict:
         score -= 10
         alerts.append({"type": "bearish", "msg": f"M2 contracting {m2_yoy:.1f}% YoY — tighter money supply."})
 
-    # 4. Yield curve
     spread = yc.get("spread")
     if spread is not None:
         if spread > 0.5:
@@ -400,15 +557,13 @@ def _build_liquidity_context() -> dict:
             score += 5
             alerts.append({"type": "bullish", "msg": "Yield curve steepening — risk appetite improving."})
 
-    # 5. Fed rate policy
     if rate.get("cutting"):
         score += 12
-        alerts.append({"type": "bullish", "msg": f"Fed cutting rates — tailwind for growth and risk assets."})
+        alerts.append({"type": "bullish", "msg": "Fed cutting rates — tailwind for growth and risk assets."})
     elif rate.get("hiking"):
         score -= 12
         alerts.append({"type": "bearish", "msg": "Fed hiking — headwind for high-multiple stocks."})
 
-    # 6. TGA
     if tga.get("draining"):
         score += 8
         alerts.append({"type": "bullish", "msg": "Treasury draining TGA — fiscal injection into economy."})
@@ -418,22 +573,21 @@ def _build_liquidity_context() -> dict:
     score = max(0, min(100, score))
 
     if score >= 65:
-        status = "RISK_ON"
+        status       = "RISK_ON"
         status_label = "Risk-On — Liquidity Expanding"
         status_color = "green"
-        summary = "Multiple liquidity indicators are bullish. Conditions historically favor risk assets."
+        summary      = "Multiple liquidity indicators are bullish. Conditions historically favor risk assets."
     elif score >= 35:
-        status = "NEUTRAL"
+        status       = "NEUTRAL"
         status_label = "Neutral — Mixed Liquidity"
         status_color = "yellow"
-        summary = "Mixed liquidity signals. Market sensitive to Fed communication and data releases."
+        summary      = "Mixed liquidity signals. Market sensitive to Fed communication and data releases."
     else:
-        status = "RISK_OFF"
+        status       = "RISK_OFF"
         status_label = "Risk-Off — Liquidity Contracting"
         status_color = "red"
-        summary = "Multiple liquidity headwinds. High-multiple and growth stocks most at risk."
+        summary      = "Multiple liquidity headwinds. High-multiple and growth stocks most at risk."
 
-    # 10Y yield level alerts
     y10 = yc.get("y10")
     if y10:
         if y10 > 4.8:
@@ -441,38 +595,63 @@ def _build_liquidity_context() -> dict:
         elif y10 < 4.0:
             alerts.append({"type": "bullish", "msg": f"10Y yield falling ({y10:.2f}%) — multiple expansion tailwind."})
 
+    # Diagnostics: which series loaded successfully
+    with _cache_lock:
+        series_ok = {sid: (sid in _cache and bool(_cache[sid].get("values"))) for sid in _FRED_SERIES}
+
+    interpretation = _build_interpretation(score, bs, rrp, m2, yc, rate, tga)
+
     return {
-        "score":        score,
-        "status":       status,
-        "status_label": status_label,
-        "status_color": status_color,
-        "summary":      summary,
-        "alerts":       alerts,
-        "balance_sheet":bs,
-        "reverse_repo": rrp,
-        "m2":           m2,
-        "yield_curve":  yc,
-        "fed_rate":     rate,
-        "tga":          tga,
-        "money_flow":   mflow,
-        "fetched_at":   datetime.now().isoformat(),
-        "has_fred_key": bool(os.environ.get("FRED_API_KEY")),
+        "score":          score,
+        "status":         status,
+        "status_label":   status_label,
+        "status_color":   status_color,
+        "summary":        summary,
+        "interpretation": interpretation,
+        "alerts":         alerts,
+        "balance_sheet":  bs,
+        "reverse_repo":   rrp,
+        "m2":             m2,
+        "yield_curve":    yc,
+        "fed_rate":       rate,
+        "tga":            tga,
+        "money_flow":     mflow,
+        "fetched_at":     datetime.now().isoformat(),
+        "has_fred_key":   bool(os.environ.get("FRED_API_KEY")),
+        "diagnostics": {
+            "fred_key_configured": bool(os.environ.get("FRED_API_KEY")),
+            "series_loaded":       series_ok,
+            "series_count":        sum(1 for v in series_ok.values() if v),
+            "series_total":        len(_FRED_SERIES),
+            "data_sources":        list(_FRED_SERIES.keys()),
+        },
     }
 
 
 def _empty_liquidity_context() -> dict:
     return {
-        "score":        50,
-        "status":       "NEUTRAL",
-        "status_label": "Neutral — Fetching data",
-        "status_color": "yellow",
-        "summary":      "Liquidity data loading in background. Check back in 30 seconds.",
-        "alerts":       [],
-        "balance_sheet":{}, "reverse_repo": {}, "m2": {},
-        "yield_curve":  {}, "fed_rate":     {}, "tga": {},
-        "money_flow":   [],
-        "fetched_at":   None,
-        "has_fred_key": bool(os.environ.get("FRED_API_KEY")),
+        "score":          50,
+        "status":         "NEUTRAL",
+        "status_label":   "Loading…",
+        "status_color":   "yellow",
+        "summary":        "Fetching latest macro data from FRED. Available in ~15 seconds.",
+        "interpretation": "",
+        "alerts":         [],
+        "balance_sheet":  {}, "reverse_repo": {}, "m2": {},
+        "yield_curve":    {}, "fed_rate":      {}, "tga": {},
+        "money_flow":     [],
+        "fetched_at":     None,
+        "has_fred_key":   bool(os.environ.get("FRED_API_KEY")),
+        "is_loading":     True,
+        "is_stale":       False,
+        "data_age_hours": None,
+        "diagnostics": {
+            "fred_key_configured": bool(os.environ.get("FRED_API_KEY")),
+            "series_loaded":       {},
+            "series_count":        0,
+            "series_total":        len(_FRED_SERIES),
+            "data_sources":        list(_FRED_SERIES.keys()),
+        },
     }
 
 
@@ -482,12 +661,17 @@ def _do_refresh() -> None:
     global _liq_ctx, _liq_ctx_at, _bg_active
     try:
         ctx = _build_liquidity_context()
+        now = datetime.now()
         with _ctx_lock:
             _liq_ctx    = ctx
-            _liq_ctx_at = datetime.now()
+            _liq_ctx_at = now
+        # Persist to disk so restarts don't lose data
+        _save_ctx_to_disk(ctx, now)
+        _save_fred_to_disk()
         logger.info("liquidity_engine: refreshed  score=%s  status=%s", ctx["score"], ctx["status"])
     except Exception as exc:
         logger.warning("liquidity_engine._build_liquidity_context: %s", exc)
+        # Do NOT clear existing context on failure — preserve stale data
     finally:
         with _bg_lock:
             _bg_active = False
@@ -495,27 +679,37 @@ def _do_refresh() -> None:
 
 def get_liquidity_status() -> dict:
     """
-    Return cached liquidity context. Never blocks the caller.
-    Triggers a background refresh if stale/missing.
+    Return cached liquidity context immediately. Never blocks the caller.
+    - If fresh: return current data
+    - If stale: return stale data + trigger background refresh
+    - If no data (cold start): return loading placeholder + trigger refresh
+    FRED data is 24/7; weekends just show the most recent business day values.
     """
     global _bg_active
     now = datetime.now()
     with _ctx_lock:
         has_data = bool(_liq_ctx)
-        is_fresh = (
-            has_data and _liq_ctx_at is not None and
-            (now - _liq_ctx_at).total_seconds() < _CTX_TTL_H * 3600
-        )
+        if has_data and _liq_ctx_at:
+            age_h    = round((now - _liq_ctx_at).total_seconds() / 3600, 1)
+            is_fresh = age_h < _CTX_TTL_H
+        else:
+            age_h    = None
+            is_fresh = False
+
         if is_fresh:
-            return dict(_liq_ctx)
-        snapshot = dict(_liq_ctx) if has_data else {}
+            return {**_liq_ctx, "data_age_hours": age_h, "is_stale": False, "is_loading": False}
+
+        snapshot = {**_liq_ctx, "data_age_hours": age_h, "is_stale": True, "is_loading": False} \
+                   if has_data else {}
 
     with _bg_lock:
         if not _bg_active:
             _bg_active = True
             threading.Thread(target=_do_refresh, daemon=True, name="liq-refresh").start()
 
-    return snapshot if snapshot else _empty_liquidity_context()
+    if snapshot:
+        return snapshot  # stale disk-cached data — much better than empty
+    return _empty_liquidity_context()  # truly first run, nothing on disk
 
 
 def refresh_liquidity_bg() -> None:
@@ -560,7 +754,6 @@ def _fetch_money_flow() -> list[dict]:
             above20 = bool(ema20 and last > ema20)
             above50 = bool(ema50 and last > ema50)
 
-            # Flow score 0-100 based on momentum indicators
             fs = 50
             if chg_1d:
                 fs += min(15, max(-15, chg_1d * 5))
@@ -586,18 +779,18 @@ def _fetch_money_flow() -> list[dict]:
                 label, css = "Strong Outflow", "flow-weak"
 
             results.append({
-                "ticker":     sym,
-                "name":       meta["name"],
-                "theme":      meta["theme"],
-                "price":      round(last, 2),
-                "chg_1d":     round(chg_1d, 2)  if chg_1d  else None,
-                "chg_5d":     round(chg_5d, 2)  if chg_5d  else None,
-                "chg_20d":    round(chg_20d, 2) if chg_20d else None,
-                "above_ema20":above20,
-                "above_ema50":above50,
-                "flow_score": fs,
-                "flow_label": label,
-                "flow_css":   css,
+                "ticker":      sym,
+                "name":        meta["name"],
+                "theme":       meta["theme"],
+                "price":       round(last, 2),
+                "chg_1d":      round(chg_1d, 2)  if chg_1d  else None,
+                "chg_5d":      round(chg_5d, 2)  if chg_5d  else None,
+                "chg_20d":     round(chg_20d, 2) if chg_20d else None,
+                "above_ema20": above20,
+                "above_ema50": above50,
+                "flow_score":  fs,
+                "flow_label":  label,
+                "flow_css":    css,
             })
 
         results.sort(key=lambda x: x["flow_score"], reverse=True)

@@ -4,6 +4,9 @@
 {% block content %}
 <div class="liq-page">
 
+  <!-- Weekend / stale data banner -->
+  <div class="liq-status-banner" id="liq-status-banner" style="display:none;"></div>
+
   <!-- ═══════════════════════════════════════════════════════════════════════
        PAGE HEADER
   ═══════════════════════════════════════════════════════════════════════ -->
@@ -53,8 +56,15 @@
       <div class="liq-alerts-section" id="liq-alerts-section"></div>
 
       <div class="liq-fred-note" id="liq-fred-note">
-        Data: FRED (Federal Reserve Economic Data). Updated every 6 hours.
+        Data: FRED (Federal Reserve Economic Data). Updated every 8 hours.
+        Cached on disk — available 24/7 including weekends &amp; holidays.
         <span id="liq-key-note"></span>
+      </div>
+
+      <!-- API Diagnostics -->
+      <div class="liq-diag" id="liq-diag" style="display:none;">
+        <div class="liq-diag-title">API Diagnostics</div>
+        <div class="liq-diag-grid" id="liq-diag-grid"></div>
       </div>
     </div>
 
@@ -163,6 +173,13 @@
 /* ── Liquidity Page Styles ───────────────────────────────────────────── */
 .liq-page { padding: 1rem 1.5rem 3rem; max-width: 1600px; margin: 0 auto; }
 
+/* Status banner (weekend / stale / loading) */
+.liq-status-banner { padding:.55rem 1.25rem; border-radius:8px; font-size:.78rem; margin-bottom:.75rem;
+  display:flex; align-items:center; gap:.6rem; }
+.liq-status-banner.banner-weekend { background:rgba(99,102,241,.08); border:1px solid rgba(99,102,241,.2); color:#a5b4fc; }
+.liq-status-banner.banner-stale   { background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.2); color:#fde68a; }
+.liq-status-banner.banner-loading { background:rgba(100,116,139,.08);border:1px solid rgba(100,116,139,.2); color:#94a3b8; }
+
 .liq-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.25rem; flex-wrap:wrap; gap:.75rem; }
 .liq-title  { font-size:1.5rem; font-weight:800; color:#f1f5f9; margin:0; }
 .liq-subtitle{ font-size:.8rem; color:#64748b; margin:.2rem 0 0; }
@@ -204,13 +221,29 @@
 /* FRED grid */
 .liq-fred-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.6rem; margin-bottom:1rem; }
 .liq-fred-row{ background:#080f1a; border:1px solid #1e293b; border-radius:8px; padding:.65rem .85rem; }
+.liq-fred-row.loading-cell{ opacity:.55; }
 .liq-fred-name{ font-size:.68rem; color:#475569; text-transform:uppercase; letter-spacing:.04em; }
-.liq-fred-val { font-size:1rem; font-weight:700; color:#f1f5f9; margin:.1rem 0; }
+.liq-fred-val { font-size:1rem; font-weight:700; color:#f1f5f9; margin:.1rem 0; display:flex; align-items:center; gap:.3rem; }
+.liq-fred-arrow{ font-size:.85rem; }
+.liq-fred-arrow.up{ color:#10b981; } .liq-fred-arrow.down{ color:#ef4444; } .liq-fred-arrow.flat{ color:#64748b; }
 .liq-fred-chg { font-size:.72rem; }
 .liq-fred-chg.pos{ color:#10b981; } .liq-fred-chg.neg{ color:#ef4444; }
 .liq-fred-sig { font-size:.68rem; color:#64748b; margin-top:.2rem; line-height:1.3; }
+.liq-fred-date{ font-size:.62rem; color:#334155; margin-top:.2rem; }
 .liq-fred-loading{ color:#475569; font-size:.8rem; padding:1rem; }
 .liq-fred-note{ font-size:.65rem; color:#334155; margin-top:.5rem; }
+/* Interpretation text */
+.liq-interpretation{ font-size:.78rem; color:#94a3b8; line-height:1.55; padding:.6rem .75rem;
+  background:#060d18; border:1px solid #1e293b; border-radius:7px; margin-top:.5rem; }
+/* Diagnostics */
+.liq-diag { margin-top:.75rem; padding-top:.65rem; border-top:1px solid #1e293b; }
+.liq-diag-title { font-size:.65rem; color:#475569; text-transform:uppercase; letter-spacing:.06em; margin-bottom:.4rem; }
+.liq-diag-grid { display:flex; flex-wrap:wrap; gap:.35rem; }
+.liq-diag-pill { padding:.15rem .55rem; border-radius:12px; font-size:.65rem; font-weight:600; }
+.diag-ok  { background:rgba(16,185,129,.1); color:#10b981; }
+.diag-warn{ background:rgba(245,158,11,.1); color:#f59e0b; }
+.diag-err { background:rgba(239,68,68,.1);  color:#ef4444; }
+.diag-info{ background:rgba(100,116,139,.1);color:#94a3b8; }
 
 /* Alerts */
 .liq-alerts-section{ margin:.5rem 0; }
@@ -336,18 +369,74 @@ let _mode        = 'both';
 let _scanData    = null;
 let _activeTab   = 'hidden_gems';
 let _liqData     = null;
+let _liqLoading  = true;   // true until first successful load
+
+/* ─────────────────────────────────────────────────────────────
+   UTILS
+───────────────────────────────────────────────────────────── */
+function isWeekend() {
+  const day = new Date().getDay(); // 0=Sun, 6=Sat
+  return day === 0 || day === 6;
+}
+
+function fmtDate(iso) {
+  if (!iso) return null;
+  try {
+    const d = new Date(iso + 'T12:00:00');
+    return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+  } catch { return iso; }
+}
+
+function arrowCss(arrow) {
+  if (arrow === '↑') return 'up';
+  if (arrow === '↓') return 'down';
+  return 'flat';
+}
+
+function fredVal(raw, suffix, loading) {
+  if (raw != null) return raw + (suffix || '');
+  return loading ? '<span style="color:#475569;font-style:italic;font-size:.75rem">Fetching…</span>' : '—';
+}
 
 /* ─────────────────────────────────────────────────────────────
    INIT
 ───────────────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
+  showStatusBanner();
   loadLiquidity();
   loadMoneyFlow();
   runScan();
   loadAlerts();
-  // Trigger background FRED refresh
   fetch('/api/opportunity/refresh', {method:'POST'}).catch(()=>{});
 });
+
+/* ─────────────────────────────────────────────────────────────
+   STATUS BANNER (weekend / stale / loading)
+───────────────────────────────────────────────────────────── */
+function showStatusBanner(d) {
+  const el = document.getElementById('liq-status-banner');
+  if (!el) return;
+  const weekend = isWeekend();
+  const stale   = d && d.is_stale;
+  const loading = !d || d.is_loading;
+
+  if (loading && !weekend) {
+    el.className = 'liq-status-banner banner-loading';
+    el.innerHTML = '⏳ Fetching latest macro data from FRED… Available in ~15 seconds.';
+    el.style.display = '';
+  } else if (weekend) {
+    const ageStr = d && d.data_age_hours != null ? ` · Data from ${d.data_age_hours}h ago` : '';
+    el.className = 'liq-status-banner banner-weekend';
+    el.innerHTML = `📅 Weekend — markets closed. Showing latest cached FRED data.${ageStr} Fed balance sheet, yields, and M2 update on business days.`;
+    el.style.display = '';
+  } else if (stale && d.data_age_hours != null) {
+    el.className = 'liq-status-banner banner-stale';
+    el.innerHTML = `⚡ Using cached data from ${d.data_age_hours}h ago · Refreshing in background…`;
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+}
 
 /* ─────────────────────────────────────────────────────────────
    REFRESH ALL
@@ -380,14 +469,18 @@ async function loadLiquidity() {
     const r = await fetch('/api/liquidity/status');
     const d = await r.json();
     if (!d.ok) return;
-    _liqData = d;
+    _liqData    = d;
+    _liqLoading = false;
+    showStatusBanner(d);
     renderLiquidityStatus(d);
     renderRiskMeter(d);
-    updateTimestamp();
+    updateTimestamp(d);
   } catch(e) { console.warn('loadLiquidity:', e); }
 }
 
 function renderLiquidityStatus(d) {
+  const loading = d.is_loading || false;
+
   // Badge
   const badge = document.getElementById('liq-status-badge');
   badge.textContent  = d.status_label || d.status;
@@ -395,12 +488,12 @@ function renderLiquidityStatus(d) {
 
   // Score ring
   const ring = document.getElementById('liq-score-ring');
-  document.getElementById('liq-score-num').textContent = d.score ?? '—';
-  ring.className = 'liq-score-ring ' + (d.score >= 65 ? 'ring-green' : d.score >= 35 ? 'ring-yellow' : 'ring-red');
-  document.getElementById('liq-score-label').textContent  = d.status_label || '';
+  document.getElementById('liq-score-num').textContent = loading ? '…' : (d.score ?? '—');
+  ring.className = 'liq-score-ring ' + (loading ? 'ring-yellow' : d.score >= 65 ? 'ring-green' : d.score >= 35 ? 'ring-yellow' : 'ring-red');
+  document.getElementById('liq-score-label').textContent   = d.status_label || '';
   document.getElementById('liq-score-summary').textContent = d.summary || '';
 
-  // FRED grid
+  // Interpretation text
   const grid = document.getElementById('liq-fred-grid');
   const bs   = d.balance_sheet || {};
   const rrp  = d.reverse_repo  || {};
@@ -409,23 +502,85 @@ function renderLiquidityStatus(d) {
   const rate = d.fed_rate      || {};
   const tga  = d.tga           || {};
 
-  const items = [
-    { name:'Fed Balance Sheet', val: bs.value ? bs.value+'T' : '—', chg: bs.chg_wow ? (bs.chg_wow > 0 ? '+' : '') + bs.chg_wow + 'T WoW' : null, pos: bs.expanding, sig: bs.signal },
-    { name:'Reverse Repo',       val: rrp.value ? '$'+rrp.value+'T' : '—', chg: rrp.trend_5d ? (rrp.trend_5d > 0 ? '+' : '') + rrp.trend_5d?.toFixed(1) + '% 5d' : null, pos: rrp.falling_fast, sig: rrp.signal },
-    { name:'M2 Money Supply',    val: m2.value ? '$'+m2.value+'T' : '—', chg: m2.chg_yoy ? (m2.chg_yoy > 0 ? '+' : '') + m2.chg_yoy?.toFixed(1) + '% YoY' : null, pos: m2.expanding, sig: m2.signal },
-    { name:'Fed Funds Rate',     val: rate.fed_funds ? rate.fed_funds + '%' : '—', chg: rate.cutting ? 'Cutting ↓' : rate.hiking ? 'Hiking ↑' : 'On Hold', pos: rate.cutting, sig: rate.signal },
-    { name:'SOFR',               val: rate.sofr ? rate.sofr + '%' : '—', chg: null, pos: null, sig: '' },
-    { name:'Treasury Gen Acct',  val: tga.value ? '$'+tga.value+'T' : '—', chg: tga.chg_mow ? (tga.chg_mow > 0 ? '+' : '') + tga.chg_mow + 'T/mo' : null, pos: tga.draining, sig: tga.signal },
-  ];
+  // Helper: build a FRED cell with value, trend arrow, change, signal, and data date
+  function fredCell(name, val, arrow, chgHtml, sig, dateStr, isLoading) {
+    const arrowHtml = arrow
+      ? `<span class="liq-fred-arrow ${arrowCss(arrow)}">${arrow}</span>` : '';
+    const valHtml = (val != null)
+      ? `<span>${val}</span>${arrowHtml}`
+      : isLoading
+        ? `<span style="color:#475569;font-style:italic;font-size:.78rem">Fetching…</span>`
+        : `<span style="color:#334155">—</span>`;
+    const dateHtml = dateStr
+      ? `<div class="liq-fred-date">As of ${fmtDate(dateStr)}</div>` : '';
+    return `
+    <div class="liq-fred-row${isLoading && val == null ? ' loading-cell' : ''}">
+      <div class="liq-fred-name">${name}</div>
+      <div class="liq-fred-val">${valHtml}</div>
+      ${chgHtml || ''}
+      ${sig ? `<div class="liq-fred-sig">${sig}</div>` : ''}
+      ${dateHtml}
+    </div>`;
+  }
 
-  grid.innerHTML = items.map(i => `
-    <div class="liq-fred-row">
-      <div class="liq-fred-name">${i.name}</div>
-      <div class="liq-fred-val">${i.val}</div>
-      ${i.chg ? `<div class="liq-fred-chg ${i.pos === true ? 'pos' : i.pos === false ? 'neg' : ''}">${i.chg}</div>` : ''}
-      ${i.sig ? `<div class="liq-fred-sig">${i.sig}</div>` : ''}
-    </div>
-  `).join('');
+  function chgDiv(val, pos, suffix) {
+    if (val == null) return '';
+    const sign = val > 0 ? '+' : '';
+    const css  = pos === true ? 'pos' : pos === false ? 'neg' : (val > 0 ? 'pos' : val < 0 ? 'neg' : '');
+    return `<div class="liq-fred-chg ${css}">${sign}${val}${suffix || ''}</div>`;
+  }
+
+  grid.innerHTML = [
+    fredCell('Fed Balance Sheet',
+      bs.value != null ? '$' + bs.value + 'T' : null,
+      bs.trend_arrow,
+      chgDiv(bs.chg_wow, bs.expanding, 'T WoW'),
+      bs.signal, bs.data_as_of, loading),
+
+    fredCell('Reverse Repo',
+      rrp.value != null ? '$' + rrp.value + 'T' : null,
+      rrp.trend_arrow,
+      rrp.trend_5d != null ? chgDiv(rrp.trend_5d?.toFixed(1), !rrp.falling_fast && rrp.trend_5d > 0 ? false : true, '% 5d') : '',
+      rrp.signal, rrp.data_as_of, loading),
+
+    fredCell('M2 Money Supply',
+      m2.value != null ? '$' + m2.value + 'T' : null,
+      m2.trend_arrow,
+      m2.chg_yoy != null ? chgDiv(m2.chg_yoy?.toFixed(1), m2.expanding, '% YoY') : '',
+      m2.signal, m2.data_as_of, loading),
+
+    fredCell('Fed Funds Rate',
+      rate.fed_funds != null ? rate.fed_funds + '%' : null,
+      rate.trend_arrow,
+      `<div class="liq-fred-chg ${rate.cutting ? 'pos' : rate.hiking ? 'neg' : ''}">${rate.cutting ? 'Cutting ↓' : rate.hiking ? 'Hiking ↑' : rate.stable ? 'On Hold →' : ''}</div>`,
+      rate.signal, rate.data_as_of, loading),
+
+    fredCell('SOFR',
+      rate.sofr != null ? rate.sofr + '%' : null,
+      null,
+      '',
+      '', rate.sofr_data_as_of || rate.data_as_of, loading),
+
+    fredCell('Treasury Gen Acct',
+      tga.value != null ? '$' + tga.value + 'T' : null,
+      tga.trend_arrow,
+      tga.chg_mow != null ? chgDiv(tga.chg_mow, tga.draining, 'T/mo') : '',
+      tga.signal, tga.data_as_of, loading),
+  ].join('');
+
+  // Interpretation
+  if (d.interpretation && !loading) {
+    const existing = document.getElementById('liq-interpretation');
+    if (!existing) {
+      const interp = document.createElement('div');
+      interp.id = 'liq-interpretation';
+      interp.className = 'liq-interpretation';
+      interp.textContent = d.interpretation;
+      grid.parentNode.insertBefore(interp, grid.nextSibling);
+    } else {
+      existing.textContent = d.interpretation;
+    }
+  }
 
   // Alerts
   const alertsEl = document.getElementById('liq-alerts-section');
@@ -435,40 +590,86 @@ function renderLiquidityStatus(d) {
       <div class="liq-alert-row ${a.type}">
         <span>${a.type === 'bullish' ? '▲' : a.type === 'bearish' ? '▼' : '◆'}</span>
         <span>${a.msg}</span>
-      </div>
-    `).join('');
+      </div>`).join('');
   }
 
-  // Key note
+  // FRED API key note
   const note = document.getElementById('liq-key-note');
   if (!d.has_fred_key) {
-    note.innerHTML = ' | <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank" style="color:#6366f1">Get free FRED API key</a> for higher rate limits. Set env var FRED_API_KEY.';
+    note.innerHTML = ' · <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank" style="color:#6366f1">Get free FRED API key</a> for higher rate limits → set env var <code style="color:#94a3b8">FRED_API_KEY</code>.';
   }
+
+  // Diagnostics panel
+  renderDiagnostics(d);
+}
+
+function renderDiagnostics(d) {
+  const diag   = d.diagnostics || {};
+  const el     = document.getElementById('liq-diag');
+  const grid   = document.getElementById('liq-diag-grid');
+  if (!el || !grid) return;
+
+  const pills = [];
+  const keyOk = diag.fred_key_configured;
+  pills.push(`<span class="liq-diag-pill ${keyOk ? 'diag-ok' : 'diag-warn'}">${keyOk ? '✓ FRED API key' : '⚠ No API key (rate-limited)'}</span>`);
+
+  const cnt    = diag.series_count  ?? 0;
+  const total  = diag.series_total  ?? 10;
+  const allOk  = cnt >= total;
+  pills.push(`<span class="liq-diag-pill ${allOk ? 'diag-ok' : cnt > 0 ? 'diag-warn' : 'diag-err'}">${cnt}/${total} series loaded</span>`);
+
+  if (d.data_age_hours != null) {
+    const ageOk = d.data_age_hours < 9;
+    pills.push(`<span class="liq-diag-pill ${ageOk ? 'diag-info' : 'diag-warn'}">Last sync: ${d.data_age_hours}h ago</span>`);
+  } else if (d.is_loading) {
+    pills.push(`<span class="liq-diag-pill diag-warn">Syncing now…</span>`);
+  }
+
+  if (d.is_stale) pills.push(`<span class="liq-diag-pill diag-warn">⚡ Cached data</span>`);
+  if (isWeekend())pills.push(`<span class="liq-diag-pill diag-info">📅 Weekend — FRED updates Mon</span>`);
+
+  // Series availability
+  const seriesOk   = Object.entries(diag.series_loaded || {}).filter(([,v]) => v).map(([k]) => k);
+  const seriesFail = Object.entries(diag.series_loaded || {}).filter(([,v]) => !v).map(([k]) => k);
+  if (seriesFail.length) {
+    pills.push(`<span class="liq-diag-pill diag-err">Missing: ${seriesFail.join(', ')}</span>`);
+  }
+
+  grid.innerHTML = pills.join('');
+  el.style.display = '';
 }
 
 function renderRiskMeter(d) {
-  const score    = d.score || 50;
-  const pct      = score + '%';
-  document.getElementById('liq-risk-fill').style.width    = pct;
-  document.getElementById('liq-risk-pointer').style.left  = pct;
+  const score   = d.is_loading ? 50 : (d.score || 50);
+  const pct     = score + '%';
+  document.getElementById('liq-risk-fill').style.width   = pct;
+  document.getElementById('liq-risk-pointer').style.left = pct;
 
-  const yc  = d.yield_curve || {};
-  const rate = d.fed_rate   || {};
+  const loading = d.is_loading || false;
+  const yc   = d.yield_curve || {};
+  const rate = d.fed_rate    || {};
   const grid = document.getElementById('liq-yield-grid');
-  grid.innerHTML = [
-    { name:'10Y Yield',    val: yc.y10 ? yc.y10+'%' : '—',    sub: '' },
-    { name:'2Y Yield',     val: yc.y2  ? yc.y2+'%'  : '—',    sub: '' },
-    { name:'10Y-2Y Spread',val: yc.spread != null ? yc.spread+'%' : '—', sub: yc.status || '' },
-    { name:'SOFR',         val: rate.sofr ? rate.sofr+'%' : '—', sub: '' },
-  ].map(r => `
-    <div class="liq-yield-row">
-      <div class="liq-yield-name">${r.name}</div>
-      <div class="liq-yield-val">${r.val}</div>
-      ${r.sub ? `<div class="liq-yield-sub">${r.sub}</div>` : ''}
-    </div>
-  `).join('');
 
-  // Regime box (from market_engine via liq context)
+  function yieldRow(name, val, arrow, sub, dateStr) {
+    const arrowHtml = arrow ? `<span class="liq-fred-arrow ${arrowCss(arrow)}" style="font-size:.8rem">${arrow}</span>` : '';
+    const valHtml   = val != null ? val : (loading ? '<span style="color:#475569;font-size:.75rem;font-style:italic">Fetching…</span>' : '—');
+    const dateHtml  = dateStr ? `<div class="liq-yield-sub" style="font-size:.6rem;margin-top:.15rem">As of ${fmtDate(dateStr)}</div>` : '';
+    return `<div class="liq-yield-row">
+      <div class="liq-yield-name">${name}</div>
+      <div class="liq-yield-val" style="display:flex;align-items:center;gap:.3rem">${valHtml}${arrowHtml}</div>
+      ${sub ? `<div class="liq-yield-sub">${sub}</div>` : ''}
+      ${dateHtml}
+    </div>`;
+  }
+
+  grid.innerHTML = [
+    yieldRow('10Y Yield',     yc.y10 != null ? yc.y10 + '%' : null,     yc.y10_arrow, '', yc.data_as_of),
+    yieldRow('2Y Yield',      yc.y2  != null ? yc.y2  + '%' : null,     yc.y2_arrow,  '', yc.data_as_of),
+    yieldRow('10Y–2Y Spread', yc.spread != null ? yc.spread + '%' : null, null,         yc.status || '', yc.data_as_of),
+    yieldRow('SOFR',          rate.sofr != null ? rate.sofr + '%' : null, null, '', rate.sofr_data_as_of || rate.data_as_of),
+  ].join('');
+
+  // Regime box
   const regime = document.getElementById('liq-regime-box');
   if (d.status) {
     regime.innerHTML = `
@@ -726,12 +927,20 @@ async function loadAlerts() {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   UTILS
+   TIMESTAMP
 ───────────────────────────────────────────────────────────── */
-function updateTimestamp() {
+function updateTimestamp(d) {
+  const el  = document.getElementById('liq-last-updated');
+  if (!el) return;
   const now = new Date();
-  document.getElementById('liq-last-updated').textContent =
-    'Updated ' + now.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit',hour12:true});
+  const time = now.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit',hour12:true});
+  if (d && d.is_stale && d.data_age_hours != null) {
+    el.textContent = `Cached ${d.data_age_hours}h ago · checked ${time}`;
+  } else if (d && d.is_loading) {
+    el.textContent = 'Fetching…';
+  } else {
+    el.textContent = 'Updated ' + time;
+  }
 }
 </script>
 {% endblock %}
