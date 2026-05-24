@@ -287,7 +287,8 @@ def _analyze_balance_sheet() -> dict:
         "expanding":   expanding,
         "trend_arrow": _trend_arrow(chg),
         "data_as_of":  _last_date(d),
-        "signal":      "Expanding — liquidity bullish" if expanding else "Contracting — QT in progress",
+        "signal":      ("Expanding — liquidity bullish" if expanding else "Contracting — QT in progress")
+                       if cur is not None else "",
         "dates":       (d or {}).get("dates", [])[-8:],
         "values":      [round(v / 1000, 2) for v in (d or {}).get("values", [])[-8:]],
     }
@@ -316,7 +317,7 @@ def _analyze_reverse_repo() -> dict:
             "Draining sharply — liquidity entering markets (bullish)" if falling_fast else
             "Rising — cash parked at Fed (less liquid)" if rising else
             "Falling — cash moving to markets"
-        ),
+        ) if cur is not None else "",
         "dates":  (d or {}).get("dates", [])[-10:],
         "values": [round(v / 1000, 3) for v in (d or {}).get("values", [])[-10:]],
     }
@@ -343,7 +344,7 @@ def _analyze_m2() -> dict:
             f"M2 growing +{chg_yoy:.1f}% YoY — money supply expanding" if (chg_yoy and chg_yoy > 2) else
             f"M2 contracting {chg_yoy:.1f}% YoY — tighter monetary conditions" if (chg_yoy and chg_yoy < 0) else
             "M2 stable — neutral monetary backdrop"
-        ),
+        ) if cur is not None else "",
         "dates":  (d or {}).get("dates", [])[-12:],
         "values": [round(v / 1000, 2) for v in (d or {}).get("values", [])[-12:]],
     }
@@ -358,6 +359,18 @@ def _analyze_yield_curve() -> dict:
     spread   = _last(spread_d)
     y10      = _last(y10_d)
     y2       = _last(y2_d)
+
+    # Fallback: pull 10Y yield from market_engine macro context (^TNX, no API key needed)
+    if y10 is None:
+        try:
+            from market_engine import get_market_context as _gmctx
+            _mc = _gmctx()
+            _y10_fb = _mc.get("yield_10y")
+            if _y10_fb is not None:
+                y10 = float(_y10_fb)
+        except Exception:
+            pass
+
     computed = (y10 - y2) if (y10 is not None and y2 is not None) else spread
 
     prev_spread = _prev(spread_d, 5) if spread_d else None
@@ -454,7 +467,7 @@ def _analyze_tga() -> dict:
             "TGA draining — Treasury spending into economy (bullish liquidity)" if draining else
             "TGA filling — Treasury absorbing liquidity (bearish)" if filling else
             "TGA stable"
-        ),
+        ) if cur is not None else "",
     }
 
 
@@ -600,6 +613,20 @@ def _build_liquidity_context() -> dict:
         series_ok = {sid: (sid in _cache and bool(_cache[sid].get("values"))) for sid in _FRED_SERIES}
 
     interpretation = _build_interpretation(score, bs, rrp, m2, yc, rate, tga)
+
+    # If no FRED data loaded at all (missing API key), surface an actionable message
+    no_fred_data = sum(1 for v in series_ok.values() if v) == 0
+    if no_fred_data and not os.environ.get("FRED_API_KEY"):
+        summary = (
+            "FRED API key not configured — balance sheet, M2, and yield data unavailable. "
+            "Get a free key at fred.stlouisfed.org/docs/api/api_key.html, "
+            "then set FRED_API_KEY on your Render environment."
+        )
+        interpretation = (
+            "Set FRED_API_KEY to unlock the Fed Liquidity Monitor. "
+            "The key is free and takes under a minute to get. "
+            "Yield curve data may still populate from market price feeds."
+        )
 
     return {
         "score":          score,

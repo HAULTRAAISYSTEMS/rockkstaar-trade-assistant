@@ -41,6 +41,13 @@ _FUND_TTL_H = 4   # hours
 _fetch_active_set: set[str] = set()
 _fetch_set_lock   = threading.Lock()
 
+# Known ETFs — don't score on fundamental factors (no revenue/EPS/margins)
+_ETF_TICKERS = {
+    "SPY","QQQ","IWM","SMH","XLK","XLE","XLF","XLI","XLP","XLU","XBI","ARKK",
+    "GLD","TLT","GDX","SLV","DIA","IVV","VOO","EEM","HYG","TAN","ICLN","SOXX",
+    "VTI","MDY","IJR","VIG","VYM","SCHD","SPDW","IEFA","AGG","BND","LQD",
+}
+
 
 # ── Curated opportunity universe ──────────────────────────────────────────────
 
@@ -130,9 +137,11 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
         # Pull only the fields we need
         data = {
             "ticker":            ticker,
+            "quote_type":        info.get("quoteType", "EQUITY"),  # "ETF" | "EQUITY" | "INDEX"
             "company_name":      info.get("longName") or info.get("shortName", ticker),
             "sector":            info.get("sector", ""),
             "industry":          info.get("industry", ""),
+            "aum":               info.get("totalAssets"),  # ETF-specific
             "market_cap":        info.get("marketCap"),
             "pe_trailing":       info.get("trailingPE"),
             "pe_forward":        info.get("forwardPE"),
@@ -256,6 +265,12 @@ def compute_confluence_score(
     total      = 0
     reasons    = []
 
+    # ETF detection: skip fundamental factors (no revenue / EPS / margins / P/E)
+    is_etf = (
+        fund.get("quote_type") == "ETF" or
+        ticker.upper() in _ETF_TICKERS
+    )
+
     # ── 1. Liquidity backdrop ─────────────────────────────────────────────────
     liq_score = _safe(liq_ctx.get("score"), 50)
     if liq_score >= 65:
@@ -303,42 +318,53 @@ def compute_confluence_score(
     total += pts
 
     # ── 4. Revenue growth ─────────────────────────────────────────────────────
-    rev_growth = _safe(fund.get("revenue_growth"))
-    if rev_growth >= 0.30:     pts = 10; reasons.append(f"Revenue +{rev_growth*100:.0f}% YoY")
-    elif rev_growth >= 0.15:   pts = 8
-    elif rev_growth >= 0.08:   pts = 6
-    elif rev_growth >= 0:      pts = 4
-    elif rev_growth < 0:       pts = 1; reasons.append("Revenue declining")
-    else:                      pts = 5   # no data
+    raw_rev = fund.get("revenue_growth")
+    if is_etf or raw_rev is None:
+        pts = 5  # N/A for ETFs or missing data — neutral
+    else:
+        rev_growth = _safe(raw_rev)
+        if rev_growth >= 0.30:    pts = 10; reasons.append(f"Revenue +{rev_growth*100:.0f}% YoY")
+        elif rev_growth >= 0.15:  pts = 8
+        elif rev_growth >= 0.08:  pts = 6
+        elif rev_growth >= 0:     pts = 4
+        else:                     pts = 1; reasons.append("Revenue declining")
     breakdown["Revenue Growth"] = pts
     total += pts
 
     # ── 5. Earnings growth ────────────────────────────────────────────────────
-    earn_growth = _safe(fund.get("earnings_growth"))
-    if earn_growth >= 0.30:    pts = 10; reasons.append(f"EPS +{earn_growth*100:.0f}% YoY")
-    elif earn_growth >= 0.15:  pts = 8
-    elif earn_growth >= 0.05:  pts = 6
-    elif earn_growth >= 0:     pts = 4
-    elif earn_growth < 0:      pts = 1
-    else:                      pts = 5
+    raw_earn = fund.get("earnings_growth")
+    if is_etf or raw_earn is None:
+        pts = 5
+    else:
+        earn_growth = _safe(raw_earn)
+        if earn_growth >= 0.30:   pts = 10; reasons.append(f"EPS +{earn_growth*100:.0f}% YoY")
+        elif earn_growth >= 0.15: pts = 8
+        elif earn_growth >= 0.05: pts = 6
+        elif earn_growth >= 0:    pts = 4
+        else:                     pts = 1
     breakdown["Earnings Growth"] = pts
     total += pts
 
     # ── 6. Profit margins ─────────────────────────────────────────────────────
-    margins = _safe(fund.get("operating_margins"))
-    if margins >= 0.30:   pts = 10; reasons.append(f"{margins*100:.0f}% operating margins")
-    elif margins >= 0.20: pts = 8
-    elif margins >= 0.10: pts = 6
-    elif margins >= 0:    pts = 4
-    elif margins < 0:     pts = 2
-    else:                 pts = 5
+    raw_mg = fund.get("operating_margins")
+    if is_etf or raw_mg is None:
+        pts = 5
+    else:
+        margins = _safe(raw_mg)
+        if margins >= 0.30:   pts = 10; reasons.append(f"{margins*100:.0f}% operating margins")
+        elif margins >= 0.20: pts = 8
+        elif margins >= 0.10: pts = 6
+        elif margins >= 0:    pts = 4
+        else:                 pts = 2
     breakdown["Profit Margins"] = pts
     total += pts
 
-    # ── 7. Valuation (PEG ratio — best for growth stocks) ────────────────────
+    # ── 7. Valuation ──────────────────────────────────────────────────────────
     peg  = fund.get("peg_ratio")
     pe_f = fund.get("pe_forward")
-    if peg is not None:
+    if is_etf:
+        pts = 5  # ETFs don't have meaningful P/E — neutral
+    elif peg is not None:
         p = _safe(peg)
         if 0 < p <= 1.0:    pts = 10; reasons.append(f"PEG {p:.1f} — attractively valued")
         elif p <= 2.0:      pts = 7
@@ -526,6 +552,7 @@ def build_research_report(
     Generate a structured investment research report for a single ticker.
     All data is evidence-based. No price predictions.
     """
+    is_etf = (fund.get("quote_type") == "ETF" or ticker.upper() in _ETF_TICKERS)
     cp     = _safe(fund.get("current_price"))
     high52 = _safe(fund.get("52w_high"))
     low52  = _safe(fund.get("52w_low"))
@@ -578,11 +605,18 @@ def build_research_report(
     fcf   = fund.get("free_cashflow")
     debt_eq = fund.get("debt_to_equity")
 
-    rev_str  = f"+{rev_g*100:.0f}% YoY"  if rev_g  and rev_g  > 0 else (f"{rev_g*100:.0f}% YoY" if rev_g  else "N/A")
-    earn_str = f"+{earn_g*100:.0f}% YoY" if earn_g and earn_g > 0 else (f"{earn_g*100:.0f}% YoY" if earn_g else "N/A")
-    mg_str   = f"{margins*100:.1f}%"      if margins else "N/A"
-    fcf_str  = f"${fcf/1e9:.1f}B"         if fcf and fcf > 0 else ("Negative" if fcf else "N/A")
-    deq_str  = f"{debt_eq:.1f}x"          if debt_eq else "N/A"
+    if is_etf:
+        rev_str  = "ETF — N/A"
+        earn_str = "ETF — N/A"
+        mg_str   = "ETF — N/A"
+        fcf_str  = "ETF — N/A"
+        deq_str  = "ETF — N/A"
+    else:
+        rev_str  = f"+{rev_g*100:.0f}% YoY"  if rev_g  and rev_g  > 0 else (f"{rev_g*100:.0f}% YoY" if rev_g  else "N/A")
+        earn_str = f"+{earn_g*100:.0f}% YoY" if earn_g and earn_g > 0 else (f"{earn_g*100:.0f}% YoY" if earn_g else "N/A")
+        mg_str   = f"{margins*100:.1f}%"      if margins else "N/A"
+        fcf_str  = f"${fcf/1e9:.1f}B"         if fcf and fcf > 0 else ("Negative" if fcf else "N/A")
+        deq_str  = f"{debt_eq:.1f}x"          if debt_eq else "N/A"
 
     # Analyst target
     target = fund.get("analyst_target")
@@ -602,22 +636,40 @@ def build_research_report(
 
     # 6-12 month thesis
     thesis_parts = []
-    if fund.get("company_name"):
-        thesis_parts.append(f"{fund['company_name']} ({ticker})")
-    if theme:
-        thesis_parts.append(f"operates in the {theme} space")
-    if rev_g and rev_g > 0.10:
-        thesis_parts.append(f"with revenue growing {rev_g*100:.0f}% YoY")
-    if earn_g and earn_g > 0.10:
-        thesis_parts.append(f"and earnings accelerating {earn_g*100:.0f}% YoY")
-    if macro_tail:
-        thesis_parts.append(f". Macro tailwinds: {macro_tail[0]}")
-    if macro_head:
-        thesis_parts.append(f". Key risk: {macro_head[0]}")
-    thesis_parts.append(
-        f". Technical status: {score_result.get('action', 'Watch')}. "
-        f"Confluence score {score}/100 ({score_result.get('grade_label','')})."
-    )
+    if is_etf:
+        name = fund.get("company_name", ticker)
+        thesis_parts.append(f"{name} ({ticker}) is a sector ETF tracking the {theme} space.")
+        aum = fund.get("aum")
+        if aum and aum > 0:
+            thesis_parts.append(f"AUM: ${aum/1e9:.1f}B.")
+        rs_val = score_result.get("rs_score", 50)
+        if rs_val and rs_val >= 70:
+            thesis_parts.append(f"Showing relative strength (RS {rs_val}) vs benchmark.")
+        if macro_tail:
+            thesis_parts.append(f"Tailwind: {macro_tail[0]}.")
+        if macro_head:
+            thesis_parts.append(f"Risk: {macro_head[0]}.")
+        thesis_parts.append(
+            f"Technical status: {score_result.get('action', 'Watch')}. "
+            f"Confluence score {score}/100 based on price/momentum factors."
+        )
+    else:
+        if fund.get("company_name"):
+            thesis_parts.append(f"{fund['company_name']} ({ticker})")
+        if theme:
+            thesis_parts.append(f"operates in the {theme} space")
+        if rev_g and rev_g > 0.10:
+            thesis_parts.append(f"with revenue growing {rev_g*100:.0f}% YoY")
+        if earn_g and earn_g > 0.10:
+            thesis_parts.append(f"and earnings accelerating {earn_g*100:.0f}% YoY")
+        if macro_tail:
+            thesis_parts.append(f". Macro tailwinds: {macro_tail[0]}")
+        if macro_head:
+            thesis_parts.append(f". Key risk: {macro_head[0]}")
+        thesis_parts.append(
+            f". Technical status: {score_result.get('action', 'Watch')}. "
+            f"Confluence score {score}/100 ({score_result.get('grade_label','')})."
+        )
     thesis = " ".join(thesis_parts) if thesis_parts else "Insufficient data for thesis generation."
 
     return {
@@ -633,6 +685,8 @@ def build_research_report(
         "operating_margins":mg_str,
         "free_cashflow":    fcf_str,
         "debt_to_equity":   deq_str,
+        "is_etf":           is_etf,
+        "aum":              f"${fund.get('aum',0)/1e9:.1f}B" if fund.get("aum") else None,
         "market_cap":       f"${fund.get('market_cap',0)/1e9:.1f}B" if fund.get("market_cap") else "N/A",
         "pe_forward":       f"{fund.get('pe_forward','N/A')}x" if fund.get("pe_forward") else "N/A",
         "peg_ratio":        fund.get("peg_ratio"),
