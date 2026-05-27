@@ -6,15 +6,18 @@ Flask web app for premarket stock watchlist scanning.
 import json as _json
 import logging
 import os
+import pathlib
 import re
 import secrets
 import threading
 import time as _time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, Response, send_from_directory
 from flask_sock import Sock
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect  # type: ignore[import-untyped]
+from werkzeug.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
 from database import (
@@ -41,13 +44,15 @@ from database import (
     save_setup_outcome, get_setup_outcome_stats,
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
-from data_fetcher import _et_now
+from data_fetcher import _et_now, market_session_now, orb_phase_now
 from scoring import (catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES,
                      compute_swing_grade, compute_continuation_score)
 from classifier import classify_stock
 from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as _clear_alerts
+from news_fetcher import CATALYST_CATEGORIES as _CAT_DEFS, freshness_label as _fl
 import scanner as _scanner
 import intel_engine as _intel
+_mkt = None  # set below if market_engine is available
 try:
     import market_engine as _mkt
     _MKT_AVAILABLE = True
@@ -107,7 +112,6 @@ sock = Sock(app)
 @app.errorhandler(Exception)
 def _handle_all_errors(e):
     """Return JSON for /api/ errors; let Flask handle HTTP errors on frontend routes."""
-    from werkzeug.exceptions import HTTPException
     code = e.code if isinstance(e, HTTPException) else 500
     if request.path.startswith("/api/"):
         if code != 404:
@@ -122,7 +126,7 @@ def _handle_all_errors(e):
         }), code
     # For HTTP errors (404, 403, etc.) on frontend routes, return Flask's default response
     if isinstance(e, HTTPException):
-        return e
+        return e.get_response()
     # Unexpected server errors on frontend routes — log and show a simple message
     logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
     return "Internal server error", 500
@@ -130,7 +134,7 @@ def _handle_all_errors(e):
 
 @app.route("/favicon.ico")
 def favicon():
-    return send_from_directory(app.static_folder, "logo.png", mimetype="image/png")
+    return send_from_directory(app.static_folder or "static", "logo.png", mimetype="image/png")
 
 
 @app.template_filter("et_time")
@@ -251,8 +255,7 @@ def debug_status():
     }
 
     # 6. static/logo.png exists
-    import pathlib
-    _logo = pathlib.Path(app.static_folder) / "logo.png"
+    _logo = pathlib.Path(app.static_folder or "static") / "logo.png"
     checks["static_logo"] = {
         "status": "PASS" if _logo.exists() else "FAIL",
         "detail": str(_logo) if _logo.exists() else f"missing: {_logo}",
@@ -321,7 +324,6 @@ except Exception as _scan_err:
 
 # Start the background intel alert daemon — checks every 30 min during market hours.
 def _intel_alert_loop():
-    import time as _t
     while True:
         try:
             now = _intel._et_now()
@@ -330,7 +332,7 @@ def _intel_alert_loop():
                 _intel.check_and_send_intel_alerts()
         except Exception as _ie:
             logger.warning("intel alert loop error: %s", _ie)
-        _t.sleep(1800)  # every 30 minutes
+        _time.sleep(1800)  # every 30 minutes
 
 try:
     threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
@@ -526,7 +528,7 @@ def auto_refresh_stale_closes(tickers: list, data_map: dict | None = None) -> li
     return queued
 
 
-def _expire_stuck_loading(watchlist: list, data_map: dict = None) -> None:
+def _expire_stuck_loading(watchlist: list, data_map: dict | None = None) -> None:
     """
     Transition any ticker that has been in 'loading' state for longer than
     LOADING_TIMEOUT_SECS from 'loading' → 'error'.  Called on every dashboard
@@ -647,8 +649,7 @@ def build_ai_trade_plan(stock: dict) -> dict:
     in_supply    = stock.get("in_supply_zone") or False
     bos_bull     = False
     try:
-        import json as _j
-        sm = _j.loads(stock.get("smart_money_json") or "{}")
+        sm = _json.loads(stock.get("smart_money_json") or "{}")
         bos_bull = bool(sm.get("bos_bullish"))
     except Exception:
         pass
@@ -1133,7 +1134,6 @@ def compute_journal_summary(entries: list) -> dict:
     total_pnl = round(sum(e.get("pnl_pct") or 0 for e in entries), 2)
 
     # Per-setup breakdown — rank by win rate (min 2 trades to appear in ranked list)
-    from collections import defaultdict
     setup_map = defaultdict(list)
     for e in entries:
         st = e.get("setup_type") or "Untagged"
@@ -1889,7 +1889,6 @@ def compute_freshness(
     # Determine session if not supplied
     if session is None:
         try:
-            from data_fetcher import market_session_now
             session = market_session_now()
         except Exception:
             session = "regular"
@@ -2035,7 +2034,6 @@ def get_orb_session_banner() -> dict:
     Includes the market session so the frontend always knows whether
     signals are currently live or display-only.
     """
-    from data_fetcher import orb_phase_now, market_session_now
     phase   = orb_phase_now()
     session = market_session_now()
     label, phase_class = get_orb_phase_label(phase)
@@ -2049,7 +2047,7 @@ def get_orb_session_banner() -> dict:
     }
 
 
-def annotate(stock: dict, trade_mode: str = None) -> dict:
+def annotate(stock: dict, trade_mode: str | None = None) -> dict:
     """Add all display-only fields to a stock dict (non-destructive to DB fields)."""
     # ── Ticker state display ─────────────────────────────────────────────────
     _state = stock.get("ticker_state") or "ready"
@@ -2116,7 +2114,6 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
     # ── Session-aware display state ─────────────────────────────────────────
     # Get session once per annotate call so all derived fields are consistent.
     try:
-        from data_fetcher import market_session_now
         _session = market_session_now()
     except Exception:
         _session = "regular"
@@ -2212,8 +2209,6 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
     stock["swing_plan_stale"]     = _has_plan_fields and not _has_ema
 
     # Decode catalyst_category JSON → list of {key, label} dicts for templates
-    import json as _json
-    from news_fetcher import CATALYST_CATEGORIES as _CAT_DEFS, freshness_label as _fl
     raw_cats = stock.get("catalyst_category") or "[]"
     try:
         cat_keys = _json.loads(raw_cats) if isinstance(raw_cats, str) else list(raw_cats)
@@ -2240,13 +2235,12 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
     if _swing_score is None:
         stock["swing_score"] = 0
     stock["swing_score_class"]      = get_score_class(stock.get("swing_score"))
-    stock["swing_status_class"]     = get_swing_status_class(stock.get("swing_status"))
+    stock["swing_status_class"]     = get_swing_status_class(stock.get("swing_status") or "")
     stock["swing_setup_type_class"] = get_setup_type_class(stock.get("swing_setup_type") or "No Setup")
     stock["swing_grade"]            = compute_swing_grade(stock.get("swing_score") or 1)
     stock["continuation_score"]     = compute_continuation_score(stock)
 
     # ── Institutional zone display fields ─────────────────────────────────────
-    import json as _json
     _zones_str = stock.get("zones_json")
     try:
         stock["parsed_zones"] = _json.loads(_zones_str) if _zones_str else []
@@ -2408,7 +2402,7 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
 
     # If swing_score is populated, override final_action from swing_status
     if stock.get("swing_score"):
-        _sfa, _sfa_class, _sfa_reason = compute_swing_final_action(stock.get("swing_status"))
+        _sfa, _sfa_class, _sfa_reason = compute_swing_final_action(stock.get("swing_status") or "")
         stock["final_action"]       = _sfa
         stock["final_action_class"] = _sfa_class
         stock["final_action_reason"]= _sfa_reason
@@ -2676,6 +2670,7 @@ def compute_no_trade_assessment(ranked: list, top5: list) -> dict:
     # 1. Swing score check (primary signal in swing mode)
     swing_scores = [s.get("swing_score") or 0 for s in tradeable]
     has_swing_data = any(swing_scores)
+    max_swing = 0  # initialized here; set below if has_swing_data
 
     if has_swing_data:
         avg_swing = sum(swing_scores) / len(swing_scores) if swing_scores else 0
@@ -3097,7 +3092,7 @@ def _onboard_ticker_bg(ticker: str) -> None:
         from data_fetcher import fetch_live_data as _fetch_live
         live = _fetch_live(ticker)
         price = float(live.get("current_price") or 0) if live else 0.0
-        if price > 0:
+        if live and price > 0:
             gap = float(live.get("gap_pct") or 0)
             partial = {
                 "ticker":               ticker,
@@ -3601,7 +3596,6 @@ _OPT_RL_BACKOFF = {
 def _options_session_ttl() -> tuple[int, int, str, bool]:
     """Return (cache_ttl, rl_backoff, session_label, is_after_hours)."""
     try:
-        from data_fetcher import market_session_now
         session = market_session_now()
     except Exception:
         session = "closed"
