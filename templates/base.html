@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
+  {% block head_extra %}{% endblock %}
 </head>
 <body>
 
