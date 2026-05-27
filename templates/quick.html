@@ -4,20 +4,20 @@
 {% block head_extra %}
 <style>
 /* ════════════════════════════════════════════════════════════════════════════
-   EXECUTION COMMAND CENTER — Bloomberg/BlackRock institutional style
+   EXECUTION COMMAND CENTER — Bloomberg/BlackRock institutional style v2
    ════════════════════════════════════════════════════════════════════════════ */
 
 /* ── Variables ──────────────────────────────────────────────────────────── */
 :root {
-  --exec-bg:        #020617;
-  --exec-card:      rgba(6, 12, 28, 0.92);
-  --exec-card-hov:  rgba(10, 18, 40, 0.98);
-  --exec-border:    rgba(14,165,233,0.10);
-  --exec-border-hi: rgba(14,165,233,0.28);
-  --exec-strip:     rgba(2, 5, 14, 0.98);
-  --text-pri:       #E8ECFF;
-  --text-sec:       #64748B;
-  --text-dim:       #374151;
+  --exec-bg:        #020b18;
+  --exec-card:      #071830;
+  --exec-card-hov:  #0c2240;
+  --exec-border:    rgba(34,211,238,0.14);
+  --exec-border-hi: rgba(34,211,238,0.35);
+  --exec-strip:     #030e1c;
+  --text-pri:       #dde8ff;
+  --text-sec:       #5b7a9d;
+  --text-dim:       #2e4a65;
   --cyan:           #22D3EE;
   --cyan-dim:       rgba(34,211,238,0.10);
   --green:          #22c55e;
@@ -27,81 +27,91 @@
   --amber:          #f59e0b;
   --amber-dim:      rgba(245,158,11,0.10);
   --purple:         #a78bfa;
-  --purple-dim:     rgba(167,139,250,0.10);
+  --purple-dim:     rgba(167,139,250,0.12);
   --font-mono:      'JetBrains Mono','Fira Code','SF Mono',monospace;
   --font-ui:        'Inter',-apple-system,sans-serif;
 }
 
 /* ── Base ───────────────────────────────────────────────────────────────── */
+body { background: var(--exec-bg) !important; }
+.main-content { padding: 0 !important; }
 .exec-wrap { display:flex; flex-direction:column; gap:0; min-height:100vh; padding-bottom:3rem; }
 
 /* ════════════════════════════════════════════════════════════════════════
-   1. MARKET COMMAND STRIP — always pinned at top
+   1. MARKET COMMAND STRIP
    ════════════════════════════════════════════════════════════════════════ */
 .mcs {
   display:flex;
-  align-items:center;
+  align-items:stretch;
   gap:0;
   background: var(--exec-strip);
-  border-bottom: 1px solid var(--exec-border-hi);
+  border-bottom: 2px solid rgba(34,211,238,0.20);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.5);
   overflow-x: auto;
   scrollbar-width: none;
-  padding: 0 1rem;
-  min-height: 40px;
+  min-height: 48px;
   flex-wrap: nowrap;
 }
 .mcs::-webkit-scrollbar { display:none; }
 
 .mcs-chip {
-  display:flex; flex-direction:column; align-items:center;
-  padding: 6px 14px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding: 6px 16px;
   white-space: nowrap;
-  border-right: 1px solid rgba(14,165,233,0.08);
-  gap:1px;
+  border-right: 1px solid rgba(34,211,238,0.08);
+  gap:2px;
   flex-shrink:0;
+  transition: background 0.15s;
 }
+.mcs-chip:hover { background: rgba(34,211,238,0.04); }
 .mcs-chip:last-child { border-right:none; }
+
 .mcs-label {
   font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--text-sec);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
   text-transform: uppercase;
 }
 .mcs-val {
   font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 800;
   color: var(--text-pri);
   letter-spacing: 0.02em;
+  line-height: 1.1;
 }
 
-/* Regime color coding */
-.mcs-chip.regime-risk_on    .mcs-val { color: var(--green); }
-.mcs-chip.regime-risk_off   .mcs-val { color: var(--red); }
-.mcs-chip.regime-caution    .mcs-val { color: var(--amber); }
-.mcs-chip.regime-no_trade   .mcs-val { color: var(--red); animation: blink 1s step-end infinite; }
-.mcs-chip.regime-neutral    .mcs-val { color: var(--cyan); }
-@keyframes blink { 50% { opacity: 0.3; } }
+/* Regime chip — colored background glow */
+.mcs-chip.regime-chip-risk_on    { background: rgba(34,197,94,0.07); border-bottom: 2px solid var(--green); }
+.mcs-chip.regime-chip-risk_off   { background: rgba(239,68,68,0.07);  border-bottom: 2px solid var(--red); }
+.mcs-chip.regime-chip-caution    { background: rgba(245,158,11,0.07); border-bottom: 2px solid var(--amber); }
+.mcs-chip.regime-chip-no_trade   { background: rgba(239,68,68,0.07);  border-bottom: 2px solid var(--red); }
+.mcs-chip.regime-chip-neutral    { background: rgba(34,211,238,0.05); border-bottom: 2px solid var(--cyan); }
 
-/* Longs/Shorts permissions */
-.mcs-chip.mcs-perm-longs  .mcs-val { color: var(--green); font-size: 11px; }
-.mcs-chip.mcs-perm-shorts .mcs-val { color: var(--text-sec); font-size: 11px; }
-.mcs-chip.mcs-perm-shorts.allowed .mcs-val { color: var(--amber); }
+.mcs-chip.regime-chip-risk_on  .mcs-val { color: var(--green); }
+.mcs-chip.regime-chip-risk_off .mcs-val,
+.mcs-chip.regime-chip-no_trade .mcs-val { color: var(--red); }
+.mcs-chip.regime-chip-caution  .mcs-val { color: var(--amber); }
+.mcs-chip.regime-chip-neutral  .mcs-val { color: var(--cyan); }
 
-/* Regime signal text */
+@keyframes blink { 50% { opacity: 0.25; } }
+.mcs-chip.regime-chip-no_trade .mcs-val { animation: blink 1.2s step-end infinite; }
+
+/* Regime signal text (wide screens only) */
 .mcs-signal {
   font-family: var(--font-ui);
   font-size: 10px;
   color: var(--text-sec);
-  padding: 0 14px;
+  padding: 0 18px;
   flex-shrink: 0;
-  max-width: 320px;
+  align-self: center;
+  max-width: 340px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  display: none;  /* shown on wider screens */
+  display: none;
 }
 @media(min-width:900px){ .mcs-signal { display:block; } }
 
@@ -110,9 +120,9 @@
    ════════════════════════════════════════════════════════════════════════ */
 .exec-header {
   display:flex; align-items:center; justify-content:space-between;
-  padding: 12px 16px 10px;
+  padding: 10px 16px 8px;
   border-bottom: 1px solid var(--exec-border);
-  background: var(--exec-bg);
+  background: rgba(4,11,24,0.97);
   gap: 12px;
 }
 .exec-header-left  { display:flex; align-items:center; gap:10px; }
@@ -120,29 +130,30 @@
 
 .exec-title {
   font-family: var(--font-mono);
-  font-size: 15px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 900;
   color: var(--cyan);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.10em;
   text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(34,211,238,0.35);
 }
 .exec-session-pill {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  padding: 3px 9px;
-  border-radius: 4px;
-  background: rgba(34,211,238,0.10);
+  padding: 3px 10px;
+  border-radius: 3px;
+  background: rgba(34,211,238,0.08);
   color: var(--cyan);
   border: 1px solid rgba(34,211,238,0.22);
   text-transform: uppercase;
 }
 .exec-session-pill.orb-regular_hours,
 .exec-session-pill.orb-orb_window,
-.exec-session-pill.orb-orb_formed { background: rgba(34,197,94,0.10); color: var(--green); border-color: rgba(34,197,94,0.22); }
-.exec-session-pill.orb-after_hours { background: rgba(245,158,11,0.10); color: var(--amber); border-color: rgba(245,158,11,0.22); }
-.exec-session-pill.orb-closed      { background: rgba(100,116,139,0.10); color: var(--text-sec); border-color: rgba(100,116,139,0.18); }
+.exec-session-pill.orb-orb_formed { background: rgba(34,197,94,0.10); color: var(--green); border-color: rgba(34,197,94,0.28); }
+.exec-session-pill.orb-after_hours { background: rgba(245,158,11,0.10); color: var(--amber); border-color: rgba(245,158,11,0.28); }
+.exec-session-pill.orb-closed      { background: rgba(91,122,157,0.10); color: var(--text-sec); border-color: rgba(91,122,157,0.18); }
 
 /* Focus Mode button */
 .focus-mode-btn {
@@ -152,9 +163,9 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 5px 12px;
-  border-radius: 4px;
-  border: 1px solid rgba(167,139,250,0.25);
-  background: rgba(167,139,250,0.07);
+  border-radius: 3px;
+  border: 1px solid rgba(167,139,250,0.22);
+  background: rgba(167,139,250,0.06);
   color: var(--text-sec);
   cursor: pointer;
   transition: all 0.15s;
@@ -162,8 +173,7 @@
 }
 .focus-mode-btn:hover  { border-color: var(--purple); color: var(--purple); background: var(--purple-dim); }
 .focus-mode-btn.active { border-color: var(--purple); color: var(--purple); background: var(--purple-dim); }
-.focus-dot { font-size:8px; transition: color 0.15s; color: var(--text-sec); }
-.focus-mode-btn.active .focus-dot { color: var(--purple); }
+.focus-dot { font-size:8px; transition: color 0.15s; }
 
 .exec-last-upd {
   font-family: var(--font-mono);
@@ -176,8 +186,8 @@
    ════════════════════════════════════════════════════════════════════════ */
 .exec-session-bar {
   display:flex; align-items:center; gap:14px;
-  padding: 8px 16px;
-  background: rgba(2,6,18,0.96);
+  padding: 7px 16px;
+  background: rgba(3,9,20,0.98);
   border-bottom: 1px solid var(--exec-border);
   overflow-x: auto;
   scrollbar-width: none;
@@ -186,17 +196,17 @@
 .exec-session-action {
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   white-space: nowrap;
   color: var(--cyan);
 }
-/* Reuse existing ORB action classes */
-.exec-session-action.orb-wait      { color: var(--text-sec); }
-.exec-session-action.orb-ready     { color: var(--cyan); }
-.exec-session-action.orb-active    { color: var(--green); }
-.exec-session-action.orb-closed    { color: var(--text-sec); }
-.exec-session-action.orb-caution   { color: var(--amber); }
+.exec-session-action.orb-wait   { color: var(--text-sec); }
+.exec-session-action.orb-ready  { color: var(--cyan); }
+.exec-session-action.orb-active { color: var(--green); }
+.exec-session-action.orb-closed { color: var(--text-sec); }
+.exec-session-action.orb-caution{ color: var(--amber); }
 .exec-session-sub {
   font-family: var(--font-ui);
   font-size: 10px;
@@ -208,19 +218,21 @@
    4. SECTION WRAPPER
    ════════════════════════════════════════════════════════════════════════ */
 .exec-section {
-  padding: 12px 12px 0;
+  padding: 14px 12px 0;
 }
 .exec-section-hdr {
   display:flex; align-items:center; gap:10px;
   padding: 0 4px 10px;
   border-bottom: 1px solid var(--exec-border);
   margin-bottom: 12px;
+  border-left: 3px solid var(--cyan);
+  padding-left: 10px;
 }
 .exec-section-title {
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.10em;
+  font-weight: 900;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--cyan);
 }
@@ -232,261 +244,303 @@
 }
 
 /* ════════════════════════════════════════════════════════════════════════
-   5. STOCK GRID — Bloomberg-density cards
+   5. STOCK GRID
    ════════════════════════════════════════════════════════════════════════ */
 .exec-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 8px;
+  gap: 10px;
 }
 @media(min-width:560px)  { .exec-grid { grid-template-columns: repeat(2,1fr); } }
 @media(min-width:900px)  { .exec-grid { grid-template-columns: repeat(3,1fr); } }
 @media(min-width:1280px) { .exec-grid { grid-template-columns: repeat(4,1fr); } }
 
+/* ── Card ── */
 .exec-card {
   background: var(--exec-card);
   border: 1px solid var(--exec-border);
-  border-radius: 6px;
+  border-left: 3px solid rgba(91,122,157,0.30);
+  border-radius: 5px;
   overflow: hidden;
   display:flex; flex-direction:column;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.10s;
   position:relative;
 }
 .exec-card:hover {
   border-color: var(--exec-border-hi);
-  box-shadow: 0 0 16px rgba(14,165,233,0.08);
-}
-.ec-triggered {
-  border-color: rgba(34,197,94,0.35) !important;
-  box-shadow: 0 0 12px rgba(34,197,94,0.10);
-}
-.ec-ready {
-  border-color: rgba(34,211,238,0.28) !important;
+  border-left-color: rgba(34,211,238,0.50);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 12px rgba(34,211,238,0.06);
+  transform: translateY(-1px);
 }
 
-/* Card stripe */
+/* State variants */
+.ec-triggered {
+  border-color: rgba(34,197,94,0.28) !important;
+  border-left-color: var(--green) !important;
+  box-shadow: 0 0 16px rgba(34,197,94,0.10), inset 1px 0 0 var(--green);
+}
+.ec-ready {
+  border-color: rgba(34,211,238,0.22) !important;
+  border-left-color: var(--cyan) !important;
+  box-shadow: 0 0 10px rgba(34,211,238,0.06);
+}
+
+/* ── Stripe ── */
 .ec-stripe {
   display:flex; align-items:center; gap:6px;
   padding: 5px 10px;
-  background: rgba(0,0,0,0.35);
+  background: rgba(0,0,0,0.40);
   border-bottom: 1px solid var(--exec-border);
 }
 .ec-rank {
   font-family: var(--font-mono);
   font-size: 9px;
   color: var(--text-dim);
-  font-weight: 600;
-  margin-right:2px;
+  font-weight: 700;
+  min-width: 20px;
 }
 .ec-state-badge {
   font-family: var(--font-mono);
   font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.07em;
-  padding: 2px 6px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
   border-radius: 3px;
   text-transform: uppercase;
 }
-/* reuse existing exec-class colors */
-.ec-state-badge.exec-triggered { background:rgba(34,197,94,0.15); color:var(--green); border:1px solid rgba(34,197,94,0.25); }
-.ec-state-badge.exec-ready     { background:rgba(34,211,238,0.10); color:var(--cyan);  border:1px solid rgba(34,211,238,0.20); }
-.ec-state-badge.exec-wait      { background:rgba(100,116,139,0.10); color:var(--text-sec); border:1px solid rgba(100,116,139,0.15); }
+.ec-state-badge.exec-triggered { background:rgba(34,197,94,0.18);  color:var(--green); border:1px solid rgba(34,197,94,0.30); }
+.ec-state-badge.exec-ready     { background:rgba(34,211,238,0.12); color:var(--cyan);  border:1px solid rgba(34,211,238,0.25); }
+.ec-state-badge.exec-wait      { background:rgba(46,74,101,0.20);  color:var(--text-sec); border:1px solid rgba(46,74,101,0.30); }
 .ec-freshness {
   font-family: var(--font-mono);
   font-size: 8px;
-  color: var(--text-sec);
+  color: var(--text-dim);
   margin-left:auto;
 }
 
-/* Ticker row */
+/* ── Ticker row ── */
 .ec-ticker-row {
   display:flex; align-items:center; justify-content:space-between;
-  padding: 8px 10px 4px;
+  padding: 9px 10px 5px;
 }
-.ec-ticker-left { display:flex; flex-direction:column; gap:3px; }
+.ec-ticker-left { display:flex; flex-direction:column; gap:4px; }
 .ec-ticker {
   font-family: var(--font-mono);
-  font-size: 17px;
+  font-size: 19px;
   font-weight: 900;
-  color: var(--text-pri);
-  letter-spacing: 0.02em;
+  color: #f0f6ff;
+  letter-spacing: 0.03em;
   line-height: 1;
+  text-shadow: 0 0 8px rgba(200,220,255,0.15);
 }
 .ec-setup {
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 700;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 3px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   align-self:flex-start;
 }
-.ec-price-block { display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
+.ec-price-block { display:flex; flex-direction:column; align-items:flex-end; gap:3px; }
 .ec-price {
   font-family: var(--font-mono);
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 17px;
+  font-weight: 800;
   color: var(--text-pri);
+  letter-spacing: 0.01em;
 }
 .ec-gap {
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
 }
+.gap-up   { color: var(--green); background: var(--green-dim); }
+.gap-down { color: var(--red);   background: var(--red-dim); }
+.gap-flat { color: var(--text-sec); }
 
-/* Metrics row: RS RVOL ORB TREND */
+/* ── Metrics grid ── */
 .ec-metrics {
   display: grid;
   grid-template-columns: repeat(4,1fr);
-  gap: 1px;
-  background: rgba(0,0,0,0.3);
+  background: rgba(0,0,0,0.35);
   border-top: 1px solid var(--exec-border);
   border-bottom: 1px solid var(--exec-border);
-  margin: 4px 0;
+  margin: 3px 0;
 }
 .ec-metric {
   display:flex; flex-direction:column; align-items:center;
-  padding: 5px 4px;
+  padding: 6px 3px;
   gap:2px;
-  background: rgba(6,12,28,0.5);
+  border-right: 1px solid rgba(34,211,238,0.06);
 }
+.ec-metric:last-child { border-right: none; }
 .ecm-label {
   font-family: var(--font-mono);
-  font-size: 8px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--text-sec);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
   text-transform: uppercase;
 }
 .ecm-val {
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--text-pri);
   white-space: nowrap;
 }
-.ecm-hot  { color: var(--green) !important; }
-.ecm-warm { color: var(--cyan)  !important; }
 /* RS classes */
-.ecm-val.rs-leader  { color: var(--green) !important; }
-.ecm-val.rs-strong  { color: var(--cyan)  !important; }
+.ecm-val.rs-leader  { color: #00ff88 !important; }
+.ecm-val.rs-strong  { color: var(--cyan) !important; }
 .ecm-val.rs-avg     { color: var(--text-pri); }
 .ecm-val.rs-weak    { color: var(--amber) !important; }
-.ecm-val.rs-laggard { color: var(--red)   !important; }
+.ecm-val.rs-laggard { color: var(--red) !important; }
+/* RVOL */
+.ecm-hot  { color: #00ff88 !important; }
+.ecm-warm { color: var(--cyan) !important; }
 /* ORB status */
-.ecm-val.orbs-above    { color: var(--green) !important; }
-.ecm-val.orbs-below    { color: var(--red)   !important; }
-.ecm-val.orbs-inside   { color: var(--cyan)  !important; }
-.ecm-val.orbs-near-high{ color: var(--green) !important; }
-.ecm-val.orbs-near-low { color: var(--amber) !important; }
+.orbs-above     { color: var(--green) !important; }
+.orbs-below     { color: var(--red)   !important; }
+.orbs-inside    { color: var(--cyan)  !important; }
+.orbs-near-high { color: var(--green) !important; }
+.orbs-near-low  { color: var(--amber) !important; }
 
-/* Scores row */
+/* ── Score rows ── */
 .ec-scores {
   display: grid;
   grid-template-columns: repeat(4,1fr);
-  padding: 0 4px 4px;
+  padding: 5px 6px 5px;
   gap: 4px;
 }
-.ec-score-item { display:flex; flex-direction:column; align-items:center; gap:1px; }
+.ec-score-item { display:flex; flex-direction:column; align-items:center; gap:2px; }
 .ecs-lbl {
   font-family: var(--font-mono);
   font-size: 7px;
-  font-weight: 600;
-  letter-spacing: 0.10em;
+  font-weight: 700;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-dim);
 }
 .ecs-val {
   font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 800;
   color: var(--text-pri);
 }
+/* Score bar */
+.score-bar {
+  width: 100%;
+  height: 2px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 1px;
+  overflow: hidden;
+  margin-top: 1px;
+}
+.score-bar-fill {
+  height: 100%;
+  border-radius: 1px;
+  transition: width 0.3s ease;
+}
+/* Score color classes (used on both ecs-val and score-bar-fill) */
+.score-high   { color: var(--green)  !important; background: var(--green)  !important; }
+.score-med    { color: var(--cyan)   !important; background: var(--cyan)   !important; }
+.score-low    { color: var(--amber)  !important; background: var(--amber)  !important; }
+.score-poor   { color: var(--red)    !important; background: var(--red)    !important; }
+.score-none   { color: var(--text-dim) !important; }
+
 .ecs-conf {
   font-family: var(--font-mono) !important;
   font-size: 9px !important;
-  padding: 1px 5px !important;
+  padding: 2px 6px !important;
 }
 
-/* Execution levels */
+/* ── Execution levels ── */
 .ec-levels {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px 10px;
+  gap: 3px;
+  padding: 5px 10px;
   border-top: 1px solid var(--exec-border);
-  background: rgba(0,0,0,0.2);
+  background: rgba(0,0,0,0.25);
 }
-.ec-level-item { display:flex; flex-direction:column; align-items:center; flex:1; min-width:48px; }
+.ec-level-item { display:flex; flex-direction:column; align-items:center; flex:1; min-width:46px; }
 .ecl-lbl {
   font-family: var(--font-mono);
   font-size: 7px;
-  font-weight: 600;
-  letter-spacing: 0.10em;
+  font-weight: 700;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-dim);
 }
 .ecl-val {
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
 }
-.ecl-entry  { color: var(--cyan);  }
-.ecl-stop   { color: var(--red);   }
-.ecl-target { color: var(--green); }
-.ecl-rr     { color: var(--purple);}
+.ecl-entry  { color: var(--cyan);   }
+.ecl-stop   { color: var(--red);    }
+.ecl-target { color: var(--green);  }
+.ecl-rr     { color: var(--purple); }
 
-/* AI explanation */
-.ec-explain {
-  font-family: var(--font-ui);
-  font-size: 10px;
-  color: var(--text-sec);
-  padding: 4px 10px;
-  line-height: 1.45;
-  border-top: 1px solid var(--exec-border);
-  background: rgba(14,165,233,0.03);
-}
-
-/* ORB levels line */
+/* ── ORB levels line ── */
 .ec-orb-levels {
   font-family: var(--font-mono);
   font-size: 9px;
   color: var(--text-sec);
   padding: 3px 10px;
   border-top: 1px solid var(--exec-border);
+  letter-spacing: 0.03em;
 }
 
-/* Card footer */
+/* ── AI explanation ── */
+.ec-explain {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-sec);
+  padding: 5px 10px;
+  line-height: 1.5;
+  border-top: 1px solid var(--exec-border);
+  background: rgba(34,211,238,0.025);
+}
+
+/* ── Card footer ── */
 .ec-footer {
   display:flex; align-items:center; justify-content:space-between;
   padding: 6px 10px;
   margin-top: auto;
   border-top: 1px solid var(--exec-border);
-  background: rgba(0,0,0,0.2);
+  background: rgba(0,0,0,0.30);
 }
 .ec-grade-badge {
   font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 900;
   color: var(--purple);
   letter-spacing: 0.04em;
+  text-shadow: 0 0 8px rgba(167,139,250,0.35);
 }
 .ec-detail-link {
   font-family: var(--font-mono);
   font-size: 9px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-sec);
   text-decoration: none;
   transition: color 0.12s;
   white-space: nowrap;
+  letter-spacing: 0.04em;
 }
 .ec-detail-link:hover { color: var(--cyan); }
 
 /* ════════════════════════════════════════════════════════════════════════
    6. LIVE ALERT FEED
    ════════════════════════════════════════════════════════════════════════ */
-.exec-alert-section { padding-top: 16px; }
+.exec-alert-section { padding-top: 20px; }
+.exec-alert-section .exec-section-hdr { border-left-color: var(--amber); }
+.exec-alert-section .exec-section-title { color: var(--amber); }
 
 .alert-filter-row {
   display:flex; align-items:center; gap:4px; margin-left:auto;
@@ -497,9 +551,9 @@
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  padding: 3px 8px;
+  padding: 3px 9px;
   border-radius: 3px;
-  border: 1px solid rgba(100,116,139,0.20);
+  border: 1px solid rgba(91,122,157,0.20);
   background: transparent;
   color: var(--text-sec);
   cursor: pointer;
@@ -509,76 +563,59 @@
 .alert-filter-btn.active { background: rgba(34,211,238,0.08); color: var(--cyan); border-color: rgba(34,211,238,0.25); }
 
 .alert-feed {
-  display:flex; flex-direction:column; gap:1px;
-  max-height: 320px;
+  display:flex; flex-direction:column; gap:0;
+  max-height: 340px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(14,165,233,0.2) transparent;
+  scrollbar-color: rgba(34,211,238,0.15) transparent;
   border: 1px solid var(--exec-border);
   border-radius: 5px;
-  background: rgba(2,5,14,0.80);
+  background: rgba(3,9,20,0.85);
 }
 .alert-loading {
   font-family: var(--font-ui);
   font-size: 11px;
   color: var(--text-sec);
-  padding: 16px;
+  padding: 20px;
   text-align:center;
 }
-
 .alert-row {
   display:flex; align-items:flex-start; gap:10px;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(14,165,233,0.05);
+  padding: 9px 14px;
+  border-bottom: 1px solid rgba(34,211,238,0.04);
   transition: background 0.12s;
 }
 .alert-row:last-child { border-bottom: none; }
-.alert-row:hover { background: rgba(14,165,233,0.04); }
+.alert-row:hover { background: rgba(34,211,238,0.03); }
 
 .alert-priority-badge {
   font-family: var(--font-mono);
   font-size: 8px;
-  font-weight: 800;
+  font-weight: 900;
   letter-spacing: 0.10em;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 3px;
   flex-shrink: 0;
-  margin-top:1px;
+  margin-top:2px;
   white-space: nowrap;
 }
-.ap-CRITICAL { background:rgba(239,68,68,0.15);  color:var(--red);    border:1px solid rgba(239,68,68,0.25); }
-.ap-HIGH     { background:rgba(34,197,94,0.12);  color:var(--green);  border:1px solid rgba(34,197,94,0.22); }
-.ap-MEDIUM   { background:rgba(34,211,238,0.08); color:var(--cyan);   border:1px solid rgba(34,211,238,0.18); }
-.ap-WATCHLIST{ background:rgba(100,116,139,0.08);color:var(--text-sec);border:1px solid rgba(100,116,139,0.15); }
+.ap-CRITICAL { background:rgba(239,68,68,0.18);  color:var(--red);    border:1px solid rgba(239,68,68,0.30); }
+.ap-HIGH     { background:rgba(34,197,94,0.14);  color:var(--green);  border:1px solid rgba(34,197,94,0.28); }
+.ap-MEDIUM   { background:rgba(34,211,238,0.08); color:var(--cyan);   border:1px solid rgba(34,211,238,0.20); }
+.ap-WATCHLIST{ background:rgba(46,74,101,0.15);  color:var(--text-sec);border:1px solid rgba(46,74,101,0.25); }
 
 .alert-body { flex:1; min-width:0; }
-.alert-msg {
-  font-family: var(--font-ui);
-  font-size: 11px;
-  color: var(--text-pri);
-  line-height: 1.4;
-}
-.alert-time {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  color: var(--text-sec);
-  margin-top:2px;
-}
-.alert-empty {
-  font-family: var(--font-ui);
-  font-size: 11px;
-  color: var(--text-sec);
-  padding: 20px 16px;
-  text-align: center;
-}
+.alert-msg  { font-family:var(--font-ui); font-size:11px; color:var(--text-pri); line-height:1.4; }
+.alert-time { font-family:var(--font-mono); font-size:9px; color:var(--text-dim); margin-top:2px; }
+.alert-empty { font-family:var(--font-ui); font-size:11px; color:var(--text-sec); padding:24px 16px; text-align:center; }
 
 /* ════════════════════════════════════════════════════════════════════════
-   7. FOCUS MODE — show only top 5 high-conviction + command strip
+   7. FOCUS MODE
    ════════════════════════════════════════════════════════════════════════ */
 body.focus-mode .focus-hide { display: none !important; }
 body.focus-mode .exec-card.focus-secondary { display: none !important; }
 body.focus-mode .exec-section-hdr .exec-section-sub::after {
-  content: ' · FOCUS MODE'; color: var(--purple); font-weight:700;
+  content: ' · FOCUS'; color: var(--purple); font-weight:800;
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -586,10 +623,10 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
    ════════════════════════════════════════════════════════════════════════ */
 .exec-empty {
   display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:8px; padding: 3rem 1rem; text-align:center;
+  gap:8px; padding: 4rem 1rem; text-align:center;
 }
-.exec-empty-icon { font-size:2rem; margin-bottom:4px; }
-.exec-empty-title { font-family:var(--font-mono); font-size:14px; font-weight:700; color:var(--text-pri); }
+.exec-empty-icon  { font-size:2.5rem; margin-bottom:4px; }
+.exec-empty-title { font-family:var(--font-mono); font-size:14px; font-weight:800; color:var(--text-pri); }
 .exec-empty-sub   { font-family:var(--font-ui);   font-size:12px; color:var(--text-sec); max-width:260px; }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -599,7 +636,7 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
   display:flex; align-items:center; justify-content:space-between;
   padding: 12px 16px 8px;
   border-top: 1px solid var(--exec-border);
-  margin-top: 20px;
+  margin-top: 24px;
   gap: 8px;
 }
 .exec-upd-text { font-family:var(--font-mono); font-size:9px; color:var(--text-sec); }
@@ -609,12 +646,13 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
    10. MOBILE OPTIMIZATIONS
    ════════════════════════════════════════════════════════════════════════ */
 @media(max-width:480px) {
-  .exec-title { font-size:13px; }
-  .ec-ticker  { font-size:15px; }
-  .ec-price   { font-size:14px; }
-  .ecm-val    { font-size:10px; }
+  .exec-title  { font-size:12px; }
+  .ec-ticker   { font-size:16px; }
+  .ec-price    { font-size:15px; }
+  .ecm-val     { font-size:10px; }
   .exec-section { padding: 10px 8px 0; }
-  .mcs-chip   { padding: 5px 10px; }
+  .mcs-chip    { padding: 5px 12px; }
+  .mcs-val     { font-size:12px; }
 }
 </style>
 {% endblock %}
@@ -627,7 +665,7 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
   ══════════════════════════════════════════════════════════════════════════ -->
   <div class="mcs" id="mcs">
 
-    <div class="mcs-chip regime-{{ (mkt.regime or 'neutral')|lower }}" id="mcs-regime-chip">
+    <div class="mcs-chip regime-chip-{{ (mkt.regime or 'neutral')|lower }}" id="mcs-regime-chip">
       <span class="mcs-label">REGIME</span>
       <span class="mcs-val" id="mcs-regime">{{ mkt.regime_label or '—' }}</span>
     </div>
@@ -635,7 +673,8 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
     {% if mkt.vix_level is not none %}
     <div class="mcs-chip" id="mcs-vix-chip">
       <span class="mcs-label">VIX</span>
-      <span class="mcs-val {% if mkt.vix_level > 25 %}style="color:var(--red)"{% elif mkt.vix_level > 20 %}style="color:var(--amber)"{% else %}style="color:var(--green)"{% endif %}" id="mcs-vix">
+      <span class="mcs-val" id="mcs-vix"
+            style="color:{% if mkt.vix_level > 25 %}var(--red){% elif mkt.vix_level > 20 %}var(--amber){% else %}var(--green){% endif %}">
         {{ "%.1f"|format(mkt.vix_level) }}
       </span>
     </div>
@@ -644,32 +683,53 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
     {% if mkt.yield_10y is not none %}
     <div class="mcs-chip">
       <span class="mcs-label">10Y YIELD</span>
-      <span class="mcs-val" id="mcs-yield">{{ "%.2f"|format(mkt.yield_10y) }}%</span>
+      <span class="mcs-val" id="mcs-yield"
+            style="color:{% if mkt.yield_10y > 4.5 %}var(--red){% elif mkt.yield_10y > 4.0 %}var(--amber){% else %}var(--text-pri){% endif %}">
+        {{ "%.2f"|format(mkt.yield_10y) }}%
+      </span>
     </div>
     {% endif %}
 
     {% if mkt.qqq_price is not none %}
     <div class="mcs-chip">
       <span class="mcs-label">QQQ</span>
-      <span class="mcs-val" id="mcs-qqq">${{ "%.2f"|format(mkt.qqq_price) }}{% if mkt.qqq_1d_pct is not none %} <span style="font-size:10px;color:{{ 'var(--green)' if mkt.qqq_1d_pct >= 0 else 'var(--red)' }}">{{ '+' if mkt.qqq_1d_pct >= 0 else '' }}{{ "%.1f"|format(mkt.qqq_1d_pct) }}%</span>{% endif %}</span>
+      <span class="mcs-val" id="mcs-qqq">
+        ${{ "%.2f"|format(mkt.qqq_price) }}
+        {% if mkt.qqq_1d_pct is not none %}
+        <span style="font-size:10px;font-weight:700;color:{{ 'var(--green)' if mkt.qqq_1d_pct >= 0 else 'var(--red)' }}">
+          {{ '+' if mkt.qqq_1d_pct >= 0 else '' }}{{ "%.1f"|format(mkt.qqq_1d_pct) }}%
+        </span>
+        {% endif %}
+      </span>
     </div>
     {% endif %}
 
     {% if mkt.spy_price is not none %}
     <div class="mcs-chip">
       <span class="mcs-label">SPY</span>
-      <span class="mcs-val" id="mcs-spy">${{ "%.2f"|format(mkt.spy_price) }}{% if mkt.spy_1d_pct is not none %} <span style="font-size:10px;color:{{ 'var(--green)' if mkt.spy_1d_pct >= 0 else 'var(--red)' }}">{{ '+' if mkt.spy_1d_pct >= 0 else '' }}{{ "%.1f"|format(mkt.spy_1d_pct) }}%</span>{% endif %}</span>
+      <span class="mcs-val" id="mcs-spy">
+        ${{ "%.2f"|format(mkt.spy_price) }}
+        {% if mkt.spy_1d_pct is not none %}
+        <span style="font-size:10px;font-weight:700;color:{{ 'var(--green)' if mkt.spy_1d_pct >= 0 else 'var(--red)' }}">
+          {{ '+' if mkt.spy_1d_pct >= 0 else '' }}{{ "%.1f"|format(mkt.spy_1d_pct) }}%
+        </span>
+        {% endif %}
+      </span>
     </div>
     {% endif %}
 
-    <div class="mcs-chip mcs-perm-longs {% if mkt.longs_ok %}allowed{% endif %}">
+    <div class="mcs-chip">
       <span class="mcs-label">LONGS</span>
-      <span class="mcs-val" style="color:{{ 'var(--green)' if mkt.longs_ok else 'var(--red)' }}">{{ '✓ OK' if mkt.longs_ok else '✗ OFF' }}</span>
+      <span class="mcs-val" style="color:{{ 'var(--green)' if mkt.longs_ok else 'var(--red)' }}">
+        {{ '✓ OK' if mkt.longs_ok else '✗ OFF' }}
+      </span>
     </div>
 
-    <div class="mcs-chip mcs-perm-shorts {% if mkt.shorts_ok %}allowed{% endif %}">
+    <div class="mcs-chip">
       <span class="mcs-label">SHORTS</span>
-      <span class="mcs-val" style="color:{{ 'var(--amber)' if mkt.shorts_ok else 'var(--text-sec)' }}">{{ '✓ OK' if mkt.shorts_ok else '✗ OFF' }}</span>
+      <span class="mcs-val" style="color:{{ 'var(--amber)' if mkt.shorts_ok else 'var(--text-sec)' }}">
+        {{ '✓ OK' if mkt.shorts_ok else '✗ OFF' }}
+      </span>
     </div>
 
     {% if mkt.reduce_size %}
@@ -730,6 +790,14 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
     <div class="exec-grid" id="exec-grid">
 
       {% for s in stocks %}
+      {# Score color helpers #}
+      {% set ss = s.setup_score|int(0) %}
+      {% set ms = s.momentum_score|int(0) %}
+      {% set cs = s.catalyst_score|int(0) %}
+      {% set ss_cls = 'score-high' if ss >= 7 else ('score-med' if ss >= 5 else ('score-low' if ss >= 3 else 'score-poor')) %}
+      {% set ms_cls = 'score-high' if ms >= 7 else ('score-med' if ms >= 5 else ('score-low' if ms >= 3 else 'score-poor')) %}
+      {% set cs_cls = 'score-high' if cs >= 7 else ('score-med' if cs >= 5 else ('score-low' if cs >= 3 else 'score-poor')) %}
+
       <div class="exec-card
                   {{ 'ec-triggered' if s.exec_state == 'TRIGGERED' else '' }}
                   {{ 'ec-ready'     if s.exec_state == 'READY'     else '' }}
@@ -749,12 +817,12 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
           {% endif %}
         </div>
 
-        <!-- TICKER ROW: ticker + setup pill · price + gap -->
+        <!-- TICKER ROW: ticker + setup pill · price + gap% -->
         <div class="ec-ticker-row">
           <div class="ec-ticker-left">
             <span class="ec-ticker">{{ s.ticker }}</span>
             <span class="ec-setup setup-pill {{ s.setup_type_class }}" id="ecp-setup-pill-{{ s.ticker }}">
-              {{ s.setup_type or '—' }}
+              {{ s.setup_type or 'NO SETUP' }}
             </span>
           </div>
           <div class="ec-price-block">
@@ -770,13 +838,13 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
           <div class="ec-metric">
             <span class="ecm-label">RS</span>
             <span class="ecm-val {{ s.rs_class or '' }}" id="ecp-rs-{{ s.ticker }}"
-                  title="{{ s.rs_vs_qqq_display or s.rs_label or '' }}">
+                  title="{{ s.rs_label or '' }}">
               {{ s.rs_score_display or '—' }}
             </span>
           </div>
           <div class="ec-metric">
             <span class="ecm-label">RVOL</span>
-            <span class="ecm-val {{ 'ecm-hot' if (s.rel_volume or 0) >= 2 else 'ecm-warm' if (s.rel_volume or 0) >= 1.2 else '' }}"
+            <span class="ecm-val {{ 'ecm-hot' if (s.rel_volume or 0) >= 2 else ('ecm-warm' if (s.rel_volume or 0) >= 1.2 else '') }}"
                   id="ecp-rvol-{{ s.ticker }}">
               {{ '%.1f'|format(s.rel_volume) + 'x' if s.rel_volume else '—' }}
             </span>
@@ -784,8 +852,8 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
           <div class="ec-metric">
             <span class="ecm-label">ORB</span>
             <span class="ecm-val {{ s.orb_status_class or '' }}" id="ecp-orb-{{ s.ticker }}">
-              {% set orb_short = {'ABOVE':'▲ ABOVE','INSIDE':'INSIDE','BELOW':'▼ BELOW','NEAR_HIGH':'↑ HI','NEAR_LOW':'↓ LO','NO_ORB':'—'} %}
-              {{ orb_short.get(s.orb_status, '—') }}
+              {% set orb_map = {'ABOVE':'▲ABV','INSIDE':'IN','BELOW':'▼BLW','NEAR_HIGH':'↑HI','NEAR_LOW':'↓LO','NO_ORB':'—'} %}
+              {{ orb_map.get(s.orb_status, '—') }}
             </span>
           </div>
           <div class="ec-metric">
@@ -796,19 +864,22 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
           </div>
         </div>
 
-        <!-- SCORES: SETUP · MOM · CAT · CONF -->
+        <!-- SCORES: SETUP · MOM · CAT · CONF — with mini score bars -->
         <div class="ec-scores">
           <div class="ec-score-item">
             <span class="ecs-lbl">SETUP</span>
-            <span class="ecs-val {{ s.score_class or '' }}" id="ecp-ss-{{ s.ticker }}">{{ s.setup_score }}/10</span>
+            <span class="ecs-val {{ ss_cls }}" id="ecp-ss-{{ s.ticker }}">{{ ss }}/10</span>
+            <div class="score-bar"><div class="score-bar-fill {{ ss_cls }}" style="width:{{ ss * 10 }}%"></div></div>
           </div>
           <div class="ec-score-item">
             <span class="ecs-lbl">MOM</span>
-            <span class="ecs-val {{ s.mom_score_class or '' }}" id="ecp-mom-{{ s.ticker }}">{{ s.momentum_score or '—' }}/10</span>
+            <span class="ecs-val {{ ms_cls }}" id="ecp-mom-{{ s.ticker }}">{{ ms if s.momentum_score else '—' }}/10</span>
+            <div class="score-bar"><div class="score-bar-fill {{ ms_cls }}" style="width:{{ ms * 10 }}%"></div></div>
           </div>
           <div class="ec-score-item">
             <span class="ecs-lbl">CAT</span>
-            <span class="ecs-val {{ s.cat_score_class or '' }}" id="ecp-cat-{{ s.ticker }}">{{ s.catalyst_score }}/10</span>
+            <span class="ecs-val {{ cs_cls }}" id="ecp-cat-{{ s.ticker }}">{{ cs }}/10</span>
+            <div class="score-bar"><div class="score-bar-fill {{ cs_cls }}" style="width:{{ cs * 10 }}%"></div></div>
           </div>
           <div class="ec-score-item">
             <span class="ecs-lbl">CONF</span>
@@ -818,7 +889,7 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
           </div>
         </div>
 
-        <!-- EXECUTION LEVELS (entry / stop / target / R:R) -->
+        <!-- EXECUTION LEVELS -->
         {% set has_levels = s.stop_level or s.target_1 or s.entry_zone_display %}
         {% if has_levels %}
         <div class="ec-levels" id="ecp-levels-{{ s.ticker }}">
@@ -855,7 +926,7 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
         </div>
         {% endif %}
 
-        <!-- ORB LEVELS (when inside ORB window) -->
+        <!-- ORB LEVELS -->
         {% if s.orb_high and s.orb_low %}
         <div class="ec-orb-levels" id="ecp-orblevels-{{ s.ticker }}">
           ORB H ${{ '%.2f'|format(s.orb_high) }} · L ${{ '%.2f'|format(s.orb_low) }}
@@ -869,7 +940,7 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
         </div>
         {% endif %}
 
-        <!-- FOOTER: grade + AI RS explanation + detail link -->
+        <!-- FOOTER -->
         <div class="ec-footer">
           <div>
             {% if s.swing_grade %}
@@ -892,7 +963,6 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
     </div><!-- /exec-grid -->
 
     {% else %}
-    <!-- Empty state -->
     <div class="exec-empty">
       <div class="exec-empty-icon">📋</div>
       <div class="exec-empty-title">No setups in play</div>
@@ -958,9 +1028,13 @@ function applyFocusMode() {
   if (btn) btn.classList.toggle('active', _focusMode);
   if (dot) dot.style.color = _focusMode ? 'var(--purple)' : 'var(--text-sec)';
 }
-
-// Apply focus mode on load
 applyFocusMode();
+
+// ── Score color helper (JS-side for live updates) ──────────────────────────
+function scoreClass(v) {
+  const n = parseFloat(v) || 0;
+  return n >= 7 ? 'score-high' : n >= 5 ? 'score-med' : n >= 3 ? 'score-low' : 'score-poor';
+}
 
 // ── Alert Feed ─────────────────────────────────────────────────────────────
 const PRIORITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, WATCHLIST: 3 };
@@ -978,7 +1052,6 @@ function renderAlerts(alerts) {
     return;
   }
 
-  // Sort: priority first, then newest
   const sorted = [...filtered].sort((a,b) =>
     (PRIORITY_ORDER[a.priority]||3) - (PRIORITY_ORDER[b.priority]||3)
   );
@@ -1011,13 +1084,15 @@ function updateMCS(mkt) {
   const set = (id, val) => { const el=document.getElementById(id); if(el && val!=null) el.textContent=val; };
   const chip = document.getElementById('mcs-regime-chip');
   if (chip && mkt.regime) {
-    chip.className = 'mcs-chip regime-' + mkt.regime.toLowerCase();
+    chip.className = 'mcs-chip regime-chip-' + mkt.regime.toLowerCase();
   }
   set('mcs-regime', mkt.regime_label || '—');
   if (mkt.vix_level != null) {
-    set('mcs-vix', mkt.vix_level.toFixed(1));
     const vEl = document.getElementById('mcs-vix');
-    if (vEl) vEl.style.color = mkt.vix_level > 25 ? 'var(--red)' : mkt.vix_level > 20 ? 'var(--amber)' : 'var(--green)';
+    if (vEl) {
+      vEl.textContent = mkt.vix_level.toFixed(1);
+      vEl.style.color = mkt.vix_level > 25 ? 'var(--red)' : mkt.vix_level > 20 ? 'var(--amber)' : 'var(--green)';
+    }
   }
   if (mkt.yield_10y != null) set('mcs-yield', mkt.yield_10y.toFixed(2) + '%');
 }
@@ -1026,7 +1101,6 @@ function updateMCS(mkt) {
 function updateSessionBar(orb) {
   if (!orb) return;
   const pill = document.getElementById('exec-session-pill');
-  const bar  = document.getElementById('exec-session-bar');
   const act  = document.getElementById('exec-session-action');
   const sub  = document.getElementById('exec-session-sub');
   if (pill) { pill.className = 'exec-session-pill orb-' + orb.phase; pill.textContent = orb.phase_label || 'Market'; }
@@ -1043,7 +1117,6 @@ function updateCard(s) {
   card.classList.toggle('ec-ready',     s.exec_state === 'READY');
 
   const setText = (id, val) => { const el=document.getElementById(id); if(el && val!=null) el.textContent=val; };
-  const setClass = (id, cls) => { const el=document.getElementById(id); if(el) el.className = cls; };
 
   // State badge
   const stateBadge = document.getElementById('ecp-state-' + s.ticker);
@@ -1059,12 +1132,30 @@ function updateCard(s) {
 
   // Setup pill
   const setupPill = document.getElementById('ecp-setup-pill-' + s.ticker);
-  if (setupPill) { setupPill.className = 'ec-setup setup-pill ' + (s.setup_type_class||''); setupPill.textContent = s.setup_type || '—'; }
+  if (setupPill) { setupPill.className = 'ec-setup setup-pill ' + (s.setup_type_class||''); setupPill.textContent = s.setup_type || 'NO SETUP'; }
 
-  // Scores
-  setText('ecp-ss-' + s.ticker,  s.setup_score != null ? s.setup_score + '/10' : '—');
-  setText('ecp-mom-' + s.ticker, s.momentum_score != null ? s.momentum_score + '/10' : '—');
-  setText('ecp-cat-' + s.ticker, s.catalyst_score != null ? s.catalyst_score + '/10' : '—');
+  // Scores + bars
+  const scoreFields = [
+    ['ecp-ss-',  s.setup_score,    'setup_score'],
+    ['ecp-mom-', s.momentum_score, 'momentum_score'],
+    ['ecp-cat-', s.catalyst_score, 'catalyst_score'],
+  ];
+  scoreFields.forEach(([prefix, val]) => {
+    const el = document.getElementById(prefix + s.ticker);
+    if (el && val != null) {
+      const sc = scoreClass(val);
+      el.className = 'ecs-val ' + sc;
+      el.textContent = val + '/10';
+      // update bar
+      const bar = el.nextElementSibling;
+      if (bar && bar.classList.contains('score-bar')) {
+        const fill = bar.firstElementChild;
+        if (fill) { fill.className = 'score-bar-fill ' + sc; fill.style.width = (val * 10) + '%'; }
+      }
+    }
+  });
+
+  // Conf badge
   const confEl = document.getElementById('ecp-conf-' + s.ticker);
   if (confEl) { confEl.className = 'conf-badge ecs-conf ' + (s.combined_conf_class||''); confEl.textContent = s.combined_confidence || '—'; }
 
@@ -1080,16 +1171,16 @@ function updateCard(s) {
     rvolEl.textContent = rv != null ? rv.toFixed(1) + 'x' : '—';
   }
 
-  // ORB status
-  const ORB_SHORT = {ABOVE:'▲ ABOVE',INSIDE:'INSIDE',BELOW:'▼ BELOW',NEAR_HIGH:'↑ HI',NEAR_LOW:'↓ LO',NO_ORB:'—'};
+  // ORB
+  const ORB_MAP = {ABOVE:'▲ABV',INSIDE:'IN',BELOW:'▼BLW',NEAR_HIGH:'↑HI',NEAR_LOW:'↓LO',NO_ORB:'—'};
   const orbEl = document.getElementById('ecp-orb-' + s.ticker);
-  if (orbEl) { orbEl.className = 'ecm-val ' + (s.orb_status_class||''); orbEl.textContent = ORB_SHORT[s.orb_status] || '—'; }
+  if (orbEl) { orbEl.className = 'ecm-val ' + (s.orb_status_class||''); orbEl.textContent = ORB_MAP[s.orb_status] || '—'; }
 
   // Catalyst reason
   setText('ecp-explain-' + s.ticker, s.catalyst_reason || '');
 }
 
-// ── Main refresh function ──────────────────────────────────────────────────
+// ── Main refresh ───────────────────────────────────────────────────────────
 async function execRefresh() {
   try {
     const resp = await fetch('/api/quick');
@@ -1104,7 +1195,6 @@ async function execRefresh() {
       renderAlerts(_allAlerts);
     }
 
-    // Detect new triggers (shared system from main.js)
     if (data.stocks) {
       const newTriggers = typeof detectNewTriggers === 'function'
         ? detectNewTriggers(data.stocks) : [];
@@ -1117,8 +1207,8 @@ async function execRefresh() {
     }
 
     const upd = data.server_time || '';
-    const updEl = document.getElementById('exec-last-upd');
-    const footEl= document.getElementById('exec-updated-footer');
+    const updEl  = document.getElementById('exec-last-upd');
+    const footEl = document.getElementById('exec-updated-footer');
     if (updEl)  updEl.textContent  = upd;
     if (footEl) footEl.textContent = 'Updated ' + upd;
     if (typeof window._arSetLastUpdated === 'function') window._arSetLastUpdated(upd);
@@ -1128,10 +1218,9 @@ async function execRefresh() {
   }
 }
 
-// Register as the page refresh function (used by auto-refresh timer in main.js)
 window._arRefreshFn = execRefresh;
 
-// WebSocket — real-time push
+// WebSocket real-time push
 window._wsConnect && window._wsConnect('/ws/quick', function(data) {
   if (data.type !== 'quick') return;
   updateSessionBar(data.orb_session);
@@ -1152,7 +1241,7 @@ window._wsConnect && window._wsConnect('/ws/quick', function(data) {
   if (typeof window._arSetLastUpdated === 'function') window._arSetLastUpdated(upd);
 });
 
-// Initial alert load
+// Initial load
 execRefresh();
 </script>
 {% endblock %}
