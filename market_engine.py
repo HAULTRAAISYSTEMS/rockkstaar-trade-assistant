@@ -698,6 +698,201 @@ def is_sector_leading(ticker_etf: str, ctx: dict | None = None) -> bool:
     return ticker_etf in (c.get("leading_sectors") or [])
 
 
+# ── AI Market Story Engine ─────────────────────────────────────────────────────
+
+def generate_market_story(mkt_ctx: dict, liq_score: int | None = None) -> dict:
+    """
+    Generate a human-readable AI market narrative for the Morning Command Center.
+
+    Returns:
+        {
+          headline:    str   — one punchy sentence
+          body:        str   — regime signal text
+          sentiment:   str   — "bullish" | "bearish" | "cautious" | "neutral"
+          bullets:     list  — up to 4 supporting observations
+          permissions: list  — e.g. ["Longs ✓", "Reduce size"]
+          regime:      str   — raw regime code
+        }
+    """
+    regime      = mkt_ctx.get("regime", "NEUTRAL")
+    vix         = mkt_ctx.get("vix_level")
+    qqq_trend   = mkt_ctx.get("qqq_trend", "Unknown")
+    spy_trend   = mkt_ctx.get("spy_trend", "Unknown")
+    leading     = mkt_ctx.get("leading_sectors") or []
+    weak        = mkt_ctx.get("weak_sectors")    or []
+    longs_ok    = mkt_ctx.get("longs_ok", True)
+    shorts_ok   = mkt_ctx.get("shorts_ok", False)
+    signal      = mkt_ctx.get("signal", "")
+    qqq_1d      = mkt_ctx.get("qqq_1d_pct")
+    spy_1d      = mkt_ctx.get("spy_1d_pct")
+    qqq_5d      = mkt_ctx.get("qqq_5d_pct")
+    yield_10y   = mkt_ctx.get("yield_10y")
+    yield_chg   = mkt_ctx.get("yield_1d_chg")
+    es_1d       = mkt_ctx.get("es_1d_chg")
+    nq_1d       = mkt_ctx.get("nq_1d_chg")
+
+    # ── Sentiment ─────────────────────────────────────────────────────────────
+    if regime in ("RISK_ON",):
+        sentiment = "bullish"
+    elif regime in ("RISK_OFF", "NO_TRADE"):
+        sentiment = "bearish"
+    elif regime == "CAUTION":
+        sentiment = "cautious"
+    else:
+        sentiment = "neutral"
+
+    # ── Headline ──────────────────────────────────────────────────────────────
+    if regime == "NO_TRADE":
+        headline = f"Extreme volatility — VIX {vix or '?'} — stand aside"
+    elif regime == "RISK_OFF":
+        if weak:
+            w_name = SECTOR_ETFS.get(weak[0], weak[0])
+            headline = f"Risk-Off — {w_name} leading decline — defensive posture required"
+        else:
+            headline = "Risk-Off — institutions rotating to defense"
+    elif regime == "RISK_ON":
+        if leading:
+            l_name = SECTOR_ETFS.get(leading[0], leading[0])
+            headline = f"{l_name} leading — risk appetite expanding"
+        elif qqq_5d and qqq_5d > 3:
+            headline = f"Momentum environment — QQQ up {qqq_5d:.1f}% this week"
+        else:
+            headline = "Risk-On environment — indices trending bullish"
+    elif regime == "CAUTION":
+        if vix and vix > 22:
+            headline = f"Choppy conditions — VIX {vix} elevated — reduce size"
+        else:
+            headline = "Choppy conditions — mixed signals, be selective"
+    else:
+        if qqq_1d and qqq_1d > 0.5:
+            headline = "Neutral bias with upward drift — selective long opportunities"
+        elif qqq_1d and qqq_1d < -0.5:
+            headline = "Neutral bias with downside pressure — wait for confirmation"
+        else:
+            headline = "Mixed market signals — patience and selectivity required"
+
+    # ── Supporting bullets ────────────────────────────────────────────────────
+    bullets = []
+
+    # Index trends
+    if "Bullish" in qqq_trend and "Bullish" in spy_trend:
+        bullets.append(
+            "QQQ & SPY both trending bullish above 20 EMA — "
+            "continuation setups favored over reversals"
+        )
+    elif "Bearish" in qqq_trend:
+        bullets.append(
+            f"QQQ breaking below key EMAs — "
+            "avoid chasing longs, wait for structure to rebuild"
+        )
+    elif "Above" in qqq_trend and "Above" in spy_trend:
+        bullets.append(
+            "Indices holding above 20 EMA — "
+            "dip-buy structure intact, watch for high-RVOL entries"
+        )
+    elif qqq_1d is not None:
+        dir_str = f"up {qqq_1d:.1f}%" if qqq_1d > 0 else f"down {abs(qqq_1d):.1f}%"
+        bullets.append(f"QQQ {dir_str} today — {qqq_trend.lower()}")
+
+    # VIX context
+    if vix is not None:
+        if vix > 28:
+            bullets.append(
+                f"VIX at {vix} (danger zone) — cut size in half, "
+                "use limit orders only, widen stops"
+            )
+        elif vix > 20:
+            bullets.append(
+                f"VIX elevated at {vix} — "
+                "trade smaller, expect gaps and whipsaws"
+            )
+        elif vix < 14:
+            bullets.append(
+                f"VIX compressed at {vix} — "
+                "complacency risk; tighten stops on open winners"
+            )
+        else:
+            bullets.append(
+                f"VIX calm at {vix} — "
+                "execution conditions favorable for planned setups"
+            )
+
+    # Sector rotation
+    if leading:
+        l_names = [SECTOR_ETFS.get(s, s) for s in leading[:2]]
+        bullets.append(
+            f"Institutional inflows: {', '.join(l_names)} — "
+            "focus setups in leading sectors for highest win rate"
+        )
+    if weak:
+        w_names = [SECTOR_ETFS.get(s, s) for s in weak[:2]]
+        bullets.append(
+            f"Sector weakness: {', '.join(w_names)} — "
+            "avoid setups in lagging sectors regardless of individual chart"
+        )
+
+    # Yield context
+    if yield_10y is not None:
+        if yield_chg and yield_chg < -0.05:
+            bullets.append(
+                f"10Y yield falling to {yield_10y:.2f}% — "
+                "tailwind for growth/tech names"
+            )
+        elif yield_chg and yield_chg > 0.05:
+            bullets.append(
+                f"10Y yield rising to {yield_10y:.2f}% — "
+                "headwind for high-multiple tech; watch banks"
+            )
+
+    # Liquidity context
+    if liq_score is not None:
+        if liq_score >= 65:
+            bullets.append(
+                f"Fed liquidity score {liq_score}/100 — "
+                "favorable macro backdrop, risk assets supported"
+            )
+        elif liq_score <= 35:
+            bullets.append(
+                f"Fed liquidity tight ({liq_score}/100) — "
+                "headwind for high-multiple names; prefer profitable companies"
+            )
+
+    # Weekly momentum
+    if qqq_5d is not None and len(bullets) < 4:
+        if qqq_5d > 4:
+            bullets.append(
+                f"QQQ up {qqq_5d:.1f}% this week — "
+                "momentum environment; continuation > reversal"
+            )
+        elif qqq_5d < -4:
+            bullets.append(
+                f"QQQ down {abs(qqq_5d):.1f}% this week — "
+                "wait for a stabilization candle before adding exposure"
+            )
+
+    # ── Permissions ───────────────────────────────────────────────────────────
+    perms = []
+    if longs_ok:
+        perms.append("Longs ✓")
+    else:
+        perms.append("Longs ✗")
+    if shorts_ok:
+        perms.append("Shorts ✓")
+    if mkt_ctx.get("reduce_size"):
+        perms.append("Reduce size")
+    if mkt_ctx.get("no_trade"):
+        perms.append("Stand aside")
+
+    return {
+        "headline":    headline,
+        "body":        signal,
+        "sentiment":   sentiment,
+        "bullets":     bullets[:4],
+        "permissions": perms,
+        "regime":      regime,
+    }
+
+
 # ── Market temperature dict (compatible with existing _get_market_temperature) ─
 
 def market_temperature_from_context(ctx: dict) -> dict:

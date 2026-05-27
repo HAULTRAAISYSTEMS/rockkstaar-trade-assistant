@@ -4184,7 +4184,7 @@ def toggle_auto_classify(ticker):
 
 @app.route("/quick")
 def quick_mode():
-    """Mobile Quick Mode — top 3 priority stocks for fast decision-making."""
+    """Execution Command Center — full Bloomberg-style institutional layout."""
     wl_id     = get_active_wl_id()
     watchlist = get_watchlist_stocks(wl_id) if wl_id else []
 
@@ -4194,26 +4194,73 @@ def quick_mode():
 
     if watchlist:
         auto_refresh_stale_closes(watchlist, data_map=data_map)
-    stocks   = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
-    ranked   = rank_stocks(stocks)
-    top3     = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
+    stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
+    ranked  = rank_stocks(stocks)
+    # Show all ranked stocks (not just top 3) — focus mode collapses to top 5 client-side
+    valid   = [s for s in ranked if s.get("trade_bias") != "Avoid"]
 
-    # combined_confidence and final_action are already set by annotate()
+    # Market context for command strip
+    mkt_ctx = _get_mkt_ctx()
+
+    # AI market story
+    story = {}
+    if _MKT_AVAILABLE:
+        try:
+            liq_score = None
+            try:
+                import liquidity_engine as _liq
+                liq_score = _liq.get_liquidity_status().get("score")
+            except Exception:
+                pass
+            story = _mkt.generate_market_story(mkt_ctx, liq_score)
+        except Exception as _se:
+            logger.debug("market story failed: %s", _se)
+
     return render_template(
         "quick.html",
-        stocks=top3,
+        stocks=valid,
         orb_session=get_orb_session_banner(),
+        mkt=mkt_ctx,
+        story=story,
     )
 
 
 @app.route("/api/quick")
 def api_quick():
-    """JSON for Quick Mode live refresh — top 3 priority stocks."""
+    """JSON for Execution Command Center live refresh — all ranked stocks + market context."""
     try:
         return jsonify(_build_quick_payload(get_active_wl_id()))
     except Exception as exc:
         logger.error("api_quick failed: %s", exc, exc_info=True)
         return jsonify({"error": "quick refresh failed"}), 500
+
+
+@app.route("/api/market-story")
+def api_market_story():
+    """AI market narrative for the Morning Command Center header."""
+    try:
+        mkt_ctx   = _get_mkt_ctx()
+        liq_score = None
+        try:
+            import liquidity_engine as _liq
+            liq_score = _liq.get_liquidity_status().get("score")
+        except Exception:
+            pass
+        if _MKT_AVAILABLE:
+            story = _mkt.generate_market_story(mkt_ctx, liq_score)
+        else:
+            story = {
+                "headline": "Market data loading…",
+                "body": "Fetching regime and sector data.",
+                "sentiment": "neutral",
+                "bullets": [],
+                "permissions": [],
+                "regime": "NEUTRAL",
+            }
+        return jsonify({"ok": True, "story": story, "mkt_ctx": mkt_ctx})
+    except Exception as exc:
+        logger.error("api_market_story: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -4399,6 +4446,12 @@ def _stock_summary(s: dict) -> dict:
         "is_extended", "swing_data_available",
         # Needed for live badge patching on the detail page
         "trade_permission",
+        # Relative Strength (needed by execution page)
+        "rs_score_display", "rs_label", "rs_class", "rs_vs_qqq_display",
+        # VWAP
+        "vwap",
+        # Sector
+        "sector_etf", "sector_name", "sector_leading", "sector_class",
     ]
     return {f: s.get(f) for f in fields}
 
@@ -4495,6 +4548,30 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
     }
 
 
+def _smart_alerts() -> list:
+    """Return recent alerts enriched with CRITICAL/HIGH/MEDIUM/WATCHLIST priority."""
+    raw = get_alerts(limit=25)
+    out = []
+    for a in raw:
+        atype    = a.get("alert_type", "")
+        severity = a.get("severity", "medium")
+        msg      = a.get("message", "")
+        msg_up   = msg.upper()
+
+        # Classify priority
+        if atype in ("ready",) or "TRIGGERED" in msg_up or "BREAKOUT" in msg_up:
+            priority = "CRITICAL"
+        elif atype in ("aplus",) or severity == "high" or "A+" in msg or "READY" in msg_up:
+            priority = "HIGH"
+        elif atype in ("pre_confirm", "continuation") or severity == "medium":
+            priority = "MEDIUM"
+        else:
+            priority = "WATCHLIST"
+
+        out.append({**a, "priority": priority})
+    return out
+
+
 def _build_quick_payload(wl_id: int | None) -> dict:
     """Compute and return the quick-mode data dict (no request context needed)."""
     watchlist   = get_watchlist_stocks(wl_id) if wl_id else []
@@ -4502,18 +4579,16 @@ def _build_quick_payload(wl_id: int | None) -> dict:
     all_data    = get_all_stock_data()
     data_map    = {s["ticker"]: s for s in all_data}
     _trigger_exec_state_refresh(wl_id)   # non-blocking; returns stale data this call
-    stocks      = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
-    ranked    = rank_stocks(stocks)
-    top3      = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
-    out = []
-    for s in top3:
-        # combined_confidence and final_action are already set by annotate()
-        out.append(_stock_summary(s))
+    stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
+    ranked  = rank_stocks(stocks)
+    valid   = [s for s in ranked if s.get("trade_bias") != "Avoid"]
     return {
-        "type":        "quick",
-        "server_time": _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
-        "orb_session": get_orb_session_banner(),
-        "stocks":      out,
+        "type":           "quick",
+        "server_time":    _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
+        "orb_session":    get_orb_session_banner(),
+        "stocks":         [_stock_summary(s) for s in valid],
+        "mkt_ctx":        _get_mkt_ctx(),
+        "smart_alerts":   _smart_alerts(),
     }
 
 

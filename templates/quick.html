@@ -1,301 +1,1158 @@
 {% extends "base.html" %}
-{% block title %}Execution — HAULTRA AI{% endblock %}
+{% block title %}Execution Command Center — HAULTRA AI{% endblock %}
+
+{% block head_extra %}
+<style>
+/* ════════════════════════════════════════════════════════════════════════════
+   EXECUTION COMMAND CENTER — Bloomberg/BlackRock institutional style
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Variables ──────────────────────────────────────────────────────────── */
+:root {
+  --exec-bg:        #020617;
+  --exec-card:      rgba(6, 12, 28, 0.92);
+  --exec-card-hov:  rgba(10, 18, 40, 0.98);
+  --exec-border:    rgba(14,165,233,0.10);
+  --exec-border-hi: rgba(14,165,233,0.28);
+  --exec-strip:     rgba(2, 5, 14, 0.98);
+  --text-pri:       #E8ECFF;
+  --text-sec:       #64748B;
+  --text-dim:       #374151;
+  --cyan:           #22D3EE;
+  --cyan-dim:       rgba(34,211,238,0.10);
+  --green:          #22c55e;
+  --green-dim:      rgba(34,197,94,0.12);
+  --red:            #ef4444;
+  --red-dim:        rgba(239,68,68,0.12);
+  --amber:          #f59e0b;
+  --amber-dim:      rgba(245,158,11,0.10);
+  --purple:         #a78bfa;
+  --purple-dim:     rgba(167,139,250,0.10);
+  --font-mono:      'JetBrains Mono','Fira Code','SF Mono',monospace;
+  --font-ui:        'Inter',-apple-system,sans-serif;
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
+.exec-wrap { display:flex; flex-direction:column; gap:0; min-height:100vh; padding-bottom:3rem; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   1. MARKET COMMAND STRIP — always pinned at top
+   ════════════════════════════════════════════════════════════════════════ */
+.mcs {
+  display:flex;
+  align-items:center;
+  gap:0;
+  background: var(--exec-strip);
+  border-bottom: 1px solid var(--exec-border-hi);
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 0 1rem;
+  min-height: 40px;
+  flex-wrap: nowrap;
+}
+.mcs::-webkit-scrollbar { display:none; }
+
+.mcs-chip {
+  display:flex; flex-direction:column; align-items:center;
+  padding: 6px 14px;
+  white-space: nowrap;
+  border-right: 1px solid rgba(14,165,233,0.08);
+  gap:1px;
+  flex-shrink:0;
+}
+.mcs-chip:last-child { border-right:none; }
+.mcs-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-sec);
+  text-transform: uppercase;
+}
+.mcs-val {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-pri);
+  letter-spacing: 0.02em;
+}
+
+/* Regime color coding */
+.mcs-chip.regime-risk_on    .mcs-val { color: var(--green); }
+.mcs-chip.regime-risk_off   .mcs-val { color: var(--red); }
+.mcs-chip.regime-caution    .mcs-val { color: var(--amber); }
+.mcs-chip.regime-no_trade   .mcs-val { color: var(--red); animation: blink 1s step-end infinite; }
+.mcs-chip.regime-neutral    .mcs-val { color: var(--cyan); }
+@keyframes blink { 50% { opacity: 0.3; } }
+
+/* Longs/Shorts permissions */
+.mcs-chip.mcs-perm-longs  .mcs-val { color: var(--green); font-size: 11px; }
+.mcs-chip.mcs-perm-shorts .mcs-val { color: var(--text-sec); font-size: 11px; }
+.mcs-chip.mcs-perm-shorts.allowed .mcs-val { color: var(--amber); }
+
+/* Regime signal text */
+.mcs-signal {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-sec);
+  padding: 0 14px;
+  flex-shrink: 0;
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: none;  /* shown on wider screens */
+}
+@media(min-width:900px){ .mcs-signal { display:block; } }
+
+/* ════════════════════════════════════════════════════════════════════════
+   2. HEADER
+   ════════════════════════════════════════════════════════════════════════ */
+.exec-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--exec-border);
+  background: var(--exec-bg);
+  gap: 12px;
+}
+.exec-header-left  { display:flex; align-items:center; gap:10px; }
+.exec-header-right { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+
+.exec-title {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--cyan);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.exec-session-pill {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 9px;
+  border-radius: 4px;
+  background: rgba(34,211,238,0.10);
+  color: var(--cyan);
+  border: 1px solid rgba(34,211,238,0.22);
+  text-transform: uppercase;
+}
+.exec-session-pill.orb-regular_hours,
+.exec-session-pill.orb-orb_window,
+.exec-session-pill.orb-orb_formed { background: rgba(34,197,94,0.10); color: var(--green); border-color: rgba(34,197,94,0.22); }
+.exec-session-pill.orb-after_hours { background: rgba(245,158,11,0.10); color: var(--amber); border-color: rgba(245,158,11,0.22); }
+.exec-session-pill.orb-closed      { background: rgba(100,116,139,0.10); color: var(--text-sec); border-color: rgba(100,116,139,0.18); }
+
+/* Focus Mode button */
+.focus-mode-btn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border-radius: 4px;
+  border: 1px solid rgba(167,139,250,0.25);
+  background: rgba(167,139,250,0.07);
+  color: var(--text-sec);
+  cursor: pointer;
+  transition: all 0.15s;
+  display:flex; align-items:center; gap:5px;
+}
+.focus-mode-btn:hover  { border-color: var(--purple); color: var(--purple); background: var(--purple-dim); }
+.focus-mode-btn.active { border-color: var(--purple); color: var(--purple); background: var(--purple-dim); }
+.focus-dot { font-size:8px; transition: color 0.15s; color: var(--text-sec); }
+.focus-mode-btn.active .focus-dot { color: var(--purple); }
+
+.exec-last-upd {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   3. SESSION ACTION BAR
+   ════════════════════════════════════════════════════════════════════════ */
+.exec-session-bar {
+  display:flex; align-items:center; gap:14px;
+  padding: 8px 16px;
+  background: rgba(2,6,18,0.96);
+  border-bottom: 1px solid var(--exec-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.exec-session-bar::-webkit-scrollbar { display:none; }
+.exec-session-action {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--cyan);
+}
+/* Reuse existing ORB action classes */
+.exec-session-action.orb-wait      { color: var(--text-sec); }
+.exec-session-action.orb-ready     { color: var(--cyan); }
+.exec-session-action.orb-active    { color: var(--green); }
+.exec-session-action.orb-closed    { color: var(--text-sec); }
+.exec-session-action.orb-caution   { color: var(--amber); }
+.exec-session-sub {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-sec);
+  white-space: nowrap;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   4. SECTION WRAPPER
+   ════════════════════════════════════════════════════════════════════════ */
+.exec-section {
+  padding: 12px 12px 0;
+}
+.exec-section-hdr {
+  display:flex; align-items:center; gap:10px;
+  padding: 0 4px 10px;
+  border-bottom: 1px solid var(--exec-border);
+  margin-bottom: 12px;
+}
+.exec-section-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+.exec-section-sub {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-sec);
+  margin-left: auto;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   5. STOCK GRID — Bloomberg-density cards
+   ════════════════════════════════════════════════════════════════════════ */
+.exec-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+@media(min-width:560px)  { .exec-grid { grid-template-columns: repeat(2,1fr); } }
+@media(min-width:900px)  { .exec-grid { grid-template-columns: repeat(3,1fr); } }
+@media(min-width:1280px) { .exec-grid { grid-template-columns: repeat(4,1fr); } }
+
+.exec-card {
+  background: var(--exec-card);
+  border: 1px solid var(--exec-border);
+  border-radius: 6px;
+  overflow: hidden;
+  display:flex; flex-direction:column;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  position:relative;
+}
+.exec-card:hover {
+  border-color: var(--exec-border-hi);
+  box-shadow: 0 0 16px rgba(14,165,233,0.08);
+}
+.ec-triggered {
+  border-color: rgba(34,197,94,0.35) !important;
+  box-shadow: 0 0 12px rgba(34,197,94,0.10);
+}
+.ec-ready {
+  border-color: rgba(34,211,238,0.28) !important;
+}
+
+/* Card stripe */
+.ec-stripe {
+  display:flex; align-items:center; gap:6px;
+  padding: 5px 10px;
+  background: rgba(0,0,0,0.35);
+  border-bottom: 1px solid var(--exec-border);
+}
+.ec-rank {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  font-weight: 600;
+  margin-right:2px;
+}
+.ec-state-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+/* reuse existing exec-class colors */
+.ec-state-badge.exec-triggered { background:rgba(34,197,94,0.15); color:var(--green); border:1px solid rgba(34,197,94,0.25); }
+.ec-state-badge.exec-ready     { background:rgba(34,211,238,0.10); color:var(--cyan);  border:1px solid rgba(34,211,238,0.20); }
+.ec-state-badge.exec-wait      { background:rgba(100,116,139,0.10); color:var(--text-sec); border:1px solid rgba(100,116,139,0.15); }
+.ec-freshness {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-sec);
+  margin-left:auto;
+}
+
+/* Ticker row */
+.ec-ticker-row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 8px 10px 4px;
+}
+.ec-ticker-left { display:flex; flex-direction:column; gap:3px; }
+.ec-ticker {
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 900;
+  color: var(--text-pri);
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+.ec-setup {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  align-self:flex-start;
+}
+.ec-price-block { display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
+.ec-price {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-pri);
+}
+.ec-gap {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Metrics row: RS RVOL ORB TREND */
+.ec-metrics {
+  display: grid;
+  grid-template-columns: repeat(4,1fr);
+  gap: 1px;
+  background: rgba(0,0,0,0.3);
+  border-top: 1px solid var(--exec-border);
+  border-bottom: 1px solid var(--exec-border);
+  margin: 4px 0;
+}
+.ec-metric {
+  display:flex; flex-direction:column; align-items:center;
+  padding: 5px 4px;
+  gap:2px;
+  background: rgba(6,12,28,0.5);
+}
+.ecm-label {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-sec);
+  text-transform: uppercase;
+}
+.ecm-val {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-pri);
+  white-space: nowrap;
+}
+.ecm-hot  { color: var(--green) !important; }
+.ecm-warm { color: var(--cyan)  !important; }
+/* RS classes */
+.ecm-val.rs-leader  { color: var(--green) !important; }
+.ecm-val.rs-strong  { color: var(--cyan)  !important; }
+.ecm-val.rs-avg     { color: var(--text-pri); }
+.ecm-val.rs-weak    { color: var(--amber) !important; }
+.ecm-val.rs-laggard { color: var(--red)   !important; }
+/* ORB status */
+.ecm-val.orbs-above    { color: var(--green) !important; }
+.ecm-val.orbs-below    { color: var(--red)   !important; }
+.ecm-val.orbs-inside   { color: var(--cyan)  !important; }
+.ecm-val.orbs-near-high{ color: var(--green) !important; }
+.ecm-val.orbs-near-low { color: var(--amber) !important; }
+
+/* Scores row */
+.ec-scores {
+  display: grid;
+  grid-template-columns: repeat(4,1fr);
+  padding: 0 4px 4px;
+  gap: 4px;
+}
+.ec-score-item { display:flex; flex-direction:column; align-items:center; gap:1px; }
+.ecs-lbl {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.ecs-val {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-pri);
+}
+.ecs-conf {
+  font-family: var(--font-mono) !important;
+  font-size: 9px !important;
+  padding: 1px 5px !important;
+}
+
+/* Execution levels */
+.ec-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 10px;
+  border-top: 1px solid var(--exec-border);
+  background: rgba(0,0,0,0.2);
+}
+.ec-level-item { display:flex; flex-direction:column; align-items:center; flex:1; min-width:48px; }
+.ecl-lbl {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.ecl-val {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+.ecl-entry  { color: var(--cyan);  }
+.ecl-stop   { color: var(--red);   }
+.ecl-target { color: var(--green); }
+.ecl-rr     { color: var(--purple);}
+
+/* AI explanation */
+.ec-explain {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-sec);
+  padding: 4px 10px;
+  line-height: 1.45;
+  border-top: 1px solid var(--exec-border);
+  background: rgba(14,165,233,0.03);
+}
+
+/* ORB levels line */
+.ec-orb-levels {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-sec);
+  padding: 3px 10px;
+  border-top: 1px solid var(--exec-border);
+}
+
+/* Card footer */
+.ec-footer {
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 6px 10px;
+  margin-top: auto;
+  border-top: 1px solid var(--exec-border);
+  background: rgba(0,0,0,0.2);
+}
+.ec-grade-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--purple);
+  letter-spacing: 0.04em;
+}
+.ec-detail-link {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-sec);
+  text-decoration: none;
+  transition: color 0.12s;
+  white-space: nowrap;
+}
+.ec-detail-link:hover { color: var(--cyan); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   6. LIVE ALERT FEED
+   ════════════════════════════════════════════════════════════════════════ */
+.exec-alert-section { padding-top: 16px; }
+
+.alert-filter-row {
+  display:flex; align-items:center; gap:4px; margin-left:auto;
+}
+.alert-filter-btn {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid rgba(100,116,139,0.20);
+  background: transparent;
+  color: var(--text-sec);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.alert-filter-btn:hover,
+.alert-filter-btn.active { background: rgba(34,211,238,0.08); color: var(--cyan); border-color: rgba(34,211,238,0.25); }
+
+.alert-feed {
+  display:flex; flex-direction:column; gap:1px;
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(14,165,233,0.2) transparent;
+  border: 1px solid var(--exec-border);
+  border-radius: 5px;
+  background: rgba(2,5,14,0.80);
+}
+.alert-loading {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-sec);
+  padding: 16px;
+  text-align:center;
+}
+
+.alert-row {
+  display:flex; align-items:flex-start; gap:10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(14,165,233,0.05);
+  transition: background 0.12s;
+}
+.alert-row:last-child { border-bottom: none; }
+.alert-row:hover { background: rgba(14,165,233,0.04); }
+
+.alert-priority-badge {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.10em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-top:1px;
+  white-space: nowrap;
+}
+.ap-CRITICAL { background:rgba(239,68,68,0.15);  color:var(--red);    border:1px solid rgba(239,68,68,0.25); }
+.ap-HIGH     { background:rgba(34,197,94,0.12);  color:var(--green);  border:1px solid rgba(34,197,94,0.22); }
+.ap-MEDIUM   { background:rgba(34,211,238,0.08); color:var(--cyan);   border:1px solid rgba(34,211,238,0.18); }
+.ap-WATCHLIST{ background:rgba(100,116,139,0.08);color:var(--text-sec);border:1px solid rgba(100,116,139,0.15); }
+
+.alert-body { flex:1; min-width:0; }
+.alert-msg {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-pri);
+  line-height: 1.4;
+}
+.alert-time {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-sec);
+  margin-top:2px;
+}
+.alert-empty {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-sec);
+  padding: 20px 16px;
+  text-align: center;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   7. FOCUS MODE — show only top 5 high-conviction + command strip
+   ════════════════════════════════════════════════════════════════════════ */
+body.focus-mode .focus-hide { display: none !important; }
+body.focus-mode .exec-card.focus-secondary { display: none !important; }
+body.focus-mode .exec-section-hdr .exec-section-sub::after {
+  content: ' · FOCUS MODE'; color: var(--purple); font-weight:700;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   8. EMPTY STATE
+   ════════════════════════════════════════════════════════════════════════ */
+.exec-empty {
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:8px; padding: 3rem 1rem; text-align:center;
+}
+.exec-empty-icon { font-size:2rem; margin-bottom:4px; }
+.exec-empty-title { font-family:var(--font-mono); font-size:14px; font-weight:700; color:var(--text-pri); }
+.exec-empty-sub   { font-family:var(--font-ui);   font-size:12px; color:var(--text-sec); max-width:260px; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   9. PAGE FOOTER
+   ════════════════════════════════════════════════════════════════════════ */
+.exec-footer {
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 12px 16px 8px;
+  border-top: 1px solid var(--exec-border);
+  margin-top: 20px;
+  gap: 8px;
+}
+.exec-upd-text { font-family:var(--font-mono); font-size:9px; color:var(--text-sec); }
+.exec-hint     { font-family:var(--font-ui);   font-size:10px; color:var(--text-dim); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   10. MOBILE OPTIMIZATIONS
+   ════════════════════════════════════════════════════════════════════════ */
+@media(max-width:480px) {
+  .exec-title { font-size:13px; }
+  .ec-ticker  { font-size:15px; }
+  .ec-price   { font-size:14px; }
+  .ecm-val    { font-size:10px; }
+  .exec-section { padding: 10px 8px 0; }
+  .mcs-chip   { padding: 5px 10px; }
+}
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="qm-wrap">
+<div class="exec-wrap" id="exec-wrap">
 
-  <!-- ===== HEADER BAR ===== -->
-  <div class="qm-header">
-    <div class="qm-header-left">
-      <span class="qm-title">⚡ Execution</span>
-      <span class="qm-subtitle">Top {{ stocks|length }} setups in play</span>
+  <!-- ══════════════════════════════════════════════════════════════════════
+       1. MARKET COMMAND STRIP
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <div class="mcs" id="mcs">
+
+    <div class="mcs-chip regime-{{ (mkt.regime or 'neutral')|lower }}" id="mcs-regime-chip">
+      <span class="mcs-label">REGIME</span>
+      <span class="mcs-val" id="mcs-regime">{{ mkt.regime_label or '—' }}</span>
     </div>
-    <div class="qm-header-right">
-      <span class="qm-orb-pill {{ orb_session.phase_class }}">
+
+    {% if mkt.vix_level is not none %}
+    <div class="mcs-chip" id="mcs-vix-chip">
+      <span class="mcs-label">VIX</span>
+      <span class="mcs-val {% if mkt.vix_level > 25 %}style="color:var(--red)"{% elif mkt.vix_level > 20 %}style="color:var(--amber)"{% else %}style="color:var(--green)"{% endif %}" id="mcs-vix">
+        {{ "%.1f"|format(mkt.vix_level) }}
+      </span>
+    </div>
+    {% endif %}
+
+    {% if mkt.yield_10y is not none %}
+    <div class="mcs-chip">
+      <span class="mcs-label">10Y YIELD</span>
+      <span class="mcs-val" id="mcs-yield">{{ "%.2f"|format(mkt.yield_10y) }}%</span>
+    </div>
+    {% endif %}
+
+    {% if mkt.qqq_price is not none %}
+    <div class="mcs-chip">
+      <span class="mcs-label">QQQ</span>
+      <span class="mcs-val" id="mcs-qqq">${{ "%.2f"|format(mkt.qqq_price) }}{% if mkt.qqq_1d_pct is not none %} <span style="font-size:10px;color:{{ 'var(--green)' if mkt.qqq_1d_pct >= 0 else 'var(--red)' }}">{{ '+' if mkt.qqq_1d_pct >= 0 else '' }}{{ "%.1f"|format(mkt.qqq_1d_pct) }}%</span>{% endif %}</span>
+    </div>
+    {% endif %}
+
+    {% if mkt.spy_price is not none %}
+    <div class="mcs-chip">
+      <span class="mcs-label">SPY</span>
+      <span class="mcs-val" id="mcs-spy">${{ "%.2f"|format(mkt.spy_price) }}{% if mkt.spy_1d_pct is not none %} <span style="font-size:10px;color:{{ 'var(--green)' if mkt.spy_1d_pct >= 0 else 'var(--red)' }}">{{ '+' if mkt.spy_1d_pct >= 0 else '' }}{{ "%.1f"|format(mkt.spy_1d_pct) }}%</span>{% endif %}</span>
+    </div>
+    {% endif %}
+
+    <div class="mcs-chip mcs-perm-longs {% if mkt.longs_ok %}allowed{% endif %}">
+      <span class="mcs-label">LONGS</span>
+      <span class="mcs-val" style="color:{{ 'var(--green)' if mkt.longs_ok else 'var(--red)' }}">{{ '✓ OK' if mkt.longs_ok else '✗ OFF' }}</span>
+    </div>
+
+    <div class="mcs-chip mcs-perm-shorts {% if mkt.shorts_ok %}allowed{% endif %}">
+      <span class="mcs-label">SHORTS</span>
+      <span class="mcs-val" style="color:{{ 'var(--amber)' if mkt.shorts_ok else 'var(--text-sec)' }}">{{ '✓ OK' if mkt.shorts_ok else '✗ OFF' }}</span>
+    </div>
+
+    {% if mkt.reduce_size %}
+    <div class="mcs-chip">
+      <span class="mcs-label">SIZE</span>
+      <span class="mcs-val" style="color:var(--amber)">REDUCE</span>
+    </div>
+    {% endif %}
+
+    {% if mkt.signal %}
+    <div class="mcs-signal">{{ mkt.signal }}</div>
+    {% endif %}
+
+  </div><!-- /mcs -->
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       2. HEADER
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <div class="exec-header">
+    <div class="exec-header-left">
+      <span class="exec-title">⚡ EXECUTION</span>
+      <span class="exec-session-pill orb-{{ orb_session.phase }}" id="exec-session-pill">
         {{ orb_session.phase_label or 'Market' }}
       </span>
-      <a href="{{ url_for('dashboard') }}" class="qm-full-link">Account →</a>
+      <span class="exec-session-pill" style="background:rgba(167,139,250,0.08);color:var(--purple);border-color:rgba(167,139,250,0.22);">
+        {{ stocks|length }} setup{{ 's' if stocks|length != 1 else '' }}
+      </span>
+    </div>
+    <div class="exec-header-right">
+      <button class="focus-mode-btn" id="focus-mode-btn" onclick="toggleFocusMode()">
+        <span class="focus-dot" id="focus-dot">●</span>
+        FOCUS
+      </button>
+      <span class="exec-last-upd" id="exec-last-upd">—</span>
     </div>
   </div>
 
-  <!-- ===== ORB SESSION ACTION ===== -->
-  <div class="qm-session-bar qm-session-{{ orb_session.phase }}">
-    <span class="qm-session-action {{ orb_session.action_class }}">{{ orb_session.action }}</span>
-    <span class="qm-session-sub">{{ orb_session.sub_label }}</span>
+  <!-- SESSION ACTION BAR -->
+  <div class="exec-session-bar" id="exec-session-bar">
+    <span class="exec-session-action {{ orb_session.action_class }}" id="exec-session-action">
+      {{ orb_session.action }}
+    </span>
+    <span class="exec-session-sub" id="exec-session-sub">{{ orb_session.sub_label }}</span>
   </div>
 
-  <!-- ===== STOCK CARDS ===== -->
-  {% if stocks %}
-  <div class="qm-cards" id="qm-cards">
 
-    {% for s in stocks %}
-    <div class="qm-card {% if s.exec_state == 'TRIGGERED' %}qm-card-triggered{% elif s.exec_state == 'READY' %}qm-card-ready{% endif %}"
-         id="qm-card-{{ s.ticker }}"
-         data-ticker="{{ s.ticker }}">
+  <!-- ══════════════════════════════════════════════════════════════════════
+       3. WATCHLIST SETUPS GRID
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <div class="exec-section" id="watchlist-section">
+    <div class="exec-section-hdr">
+      <span class="exec-section-title">📋 SETUPS IN PLAY</span>
+      <span class="exec-section-sub" id="exec-setup-sub">{{ stocks|length }} stocks · ranked by conviction</span>
+    </div>
 
-      <!-- TOP STRIPE: state + freshness -->
-      <div class="qm-state-stripe exec-stripe-{{ s.exec_class }}">
-        <span class="qm-exec-badge {{ s.exec_class }}">{{ s.exec_state or 'WAIT' }}</span>
-        {% if s.freshness %}
-        <span class="qm-freshness {{ s.freshness_class }}">{{ s.freshness }}</span>
-        {% endif %}
-        <span class="qm-rank">#{{ loop.index }}</span>
-      </div>
+    {% if stocks %}
+    <div class="exec-grid" id="exec-grid">
 
-      <!-- MAIN BODY -->
-      <div class="qm-body">
+      {% for s in stocks %}
+      <div class="exec-card
+                  {{ 'ec-triggered' if s.exec_state == 'TRIGGERED' else '' }}
+                  {{ 'ec-ready'     if s.exec_state == 'READY'     else '' }}
+                  {{ 'focus-secondary' if loop.index > 5 else '' }}"
+           id="exc-card-{{ s.ticker }}"
+           data-ticker="{{ s.ticker }}"
+           data-rank="{{ loop.index }}">
 
-        <!-- Ticker + Price row -->
-        <div class="qm-ticker-row">
-          <span class="qm-ticker">{{ s.ticker }}</span>
-          <div class="qm-price-block">
-            <span class="qm-price" id="qmp-price-{{ s.ticker }}">${{ "%.2f"|format(s.current_price) if s.current_price is not none else "N/A" }}</span>
-            <span class="qm-gap {{ s.gap_class }}" id="qmp-gap-{{ s.ticker }}">{{ s.gap_display }}</span>
-          </div>
-        </div>
-
-        <!-- Setup type + bias -->
-        <div class="qm-setup-row">
-          <span class="setup-pill {{ s.setup_type_class }} qm-setup-pill" id="qmp-setup-{{ s.ticker }}">
-            {{ s.setup_type or '—' }}
+        <!-- STRIPE: rank · state · freshness -->
+        <div class="ec-stripe">
+          <span class="ec-rank">#{{ loop.index }}</span>
+          <span class="ec-state-badge exec-{{ (s.exec_state or 'wait')|lower }}" id="ecp-state-{{ s.ticker }}">
+            {{ s.exec_state or 'WAIT' }}
           </span>
-          <span class="bias-tag {{ s.bias_class }} qm-bias-tag">{{ s.trade_bias }}</span>
+          {% if s.freshness %}
+          <span class="ec-freshness {{ s.freshness_class }}" id="ecp-fresh-{{ s.ticker }}">{{ s.freshness }}</span>
+          {% endif %}
         </div>
 
-        <!-- Scores row -->
-        <div class="qm-scores-row">
-          <div class="qm-score-item">
-            <span class="qm-score-label">Setup</span>
-            <span class="qm-score-value {{ s.score_class }}" id="qmp-setup-score-{{ s.ticker }}">{{ s.setup_score }}/10</span>
+        <!-- TICKER ROW: ticker + setup pill · price + gap -->
+        <div class="ec-ticker-row">
+          <div class="ec-ticker-left">
+            <span class="ec-ticker">{{ s.ticker }}</span>
+            <span class="ec-setup setup-pill {{ s.setup_type_class }}" id="ecp-setup-pill-{{ s.ticker }}">
+              {{ s.setup_type or '—' }}
+            </span>
           </div>
-          <div class="qm-score-divider"></div>
-          <div class="qm-score-item">
-            <span class="qm-score-label">Mom</span>
-            <span class="qm-score-value {{ s.mom_score_class }}" id="qmp-mom-{{ s.ticker }}">{{ s.momentum_score or '—' }}/10</span>
-          </div>
-          <div class="qm-score-divider"></div>
-          <div class="qm-score-item">
-            <span class="qm-score-label">Cat</span>
-            <span class="qm-score-value {{ s.cat_score_class }}" id="qmp-cat-{{ s.ticker }}">{{ s.catalyst_score }}/10</span>
-          </div>
-          <div class="qm-score-divider"></div>
-          <div class="qm-score-item">
-            <span class="qm-score-label">Conf</span>
-            <span class="conf-badge {{ s.combined_conf_class }} qm-conf-badge" id="qmp-conf-{{ s.ticker }}">{{ s.combined_confidence }}</span>
+          <div class="ec-price-block">
+            <span class="ec-price" id="ecp-price-{{ s.ticker }}">
+              {{ '$%.2f'|format(s.current_price) if s.current_price is not none else '—' }}
+            </span>
+            <span class="ec-gap {{ s.gap_class }}" id="ecp-gap-{{ s.ticker }}">{{ s.gap_display or '—' }}</span>
           </div>
         </div>
 
-        <!-- ORB status row -->
-        {% if s.orb_phase != 'pre_market' %}
-        <div class="qm-orb-row" id="qmp-orb-{{ s.ticker }}">
-          {% if s.orb_high and s.orb_low %}
-            {% set orb_labels = {"ABOVE": "▲ Above ORB", "NEAR_HIGH": "↑ Near High", "INSIDE": "Inside ORB", "NEAR_LOW": "↓ Near Low", "BELOW": "▼ Below ORB", "NO_ORB": "No ORB"} %}
-            <span class="orbs-badge {{ s.orb_status_class }}">{{ orb_labels.get(s.orb_status, '—') }}</span>
-            <span class="qm-orb-levels">H ${{ "%.2f"|format(s.orb_high) }} · L ${{ "%.2f"|format(s.orb_low) }}</span>
-          {% elif s.orb_phase == 'forming' %}
-            <span class="orb-phase-badge orbp-forming">ORB Forming…</span>
+        <!-- METRICS: RS · RVOL · ORB · TREND -->
+        <div class="ec-metrics">
+          <div class="ec-metric">
+            <span class="ecm-label">RS</span>
+            <span class="ecm-val {{ s.rs_class or '' }}" id="ecp-rs-{{ s.ticker }}"
+                  title="{{ s.rs_vs_qqq_display or s.rs_label or '' }}">
+              {{ s.rs_score_display or '—' }}
+            </span>
+          </div>
+          <div class="ec-metric">
+            <span class="ecm-label">RVOL</span>
+            <span class="ecm-val {{ 'ecm-hot' if (s.rel_volume or 0) >= 2 else 'ecm-warm' if (s.rel_volume or 0) >= 1.2 else '' }}"
+                  id="ecp-rvol-{{ s.ticker }}">
+              {{ '%.1f'|format(s.rel_volume) + 'x' if s.rel_volume else '—' }}
+            </span>
+          </div>
+          <div class="ec-metric">
+            <span class="ecm-label">ORB</span>
+            <span class="ecm-val {{ s.orb_status_class or '' }}" id="ecp-orb-{{ s.ticker }}">
+              {% set orb_short = {'ABOVE':'▲ ABOVE','INSIDE':'INSIDE','BELOW':'▼ BELOW','NEAR_HIGH':'↑ HI','NEAR_LOW':'↓ LO','NO_ORB':'—'} %}
+              {{ orb_short.get(s.orb_status, '—') }}
+            </span>
+          </div>
+          <div class="ec-metric">
+            <span class="ecm-label">TREND</span>
+            <span class="ecm-val {{ s.bias_class or '' }}" id="ecp-bias-{{ s.ticker }}">
+              {{ {'Long Bias':'LONG','Short Bias':'SHORT','Neutral':'NEUT','Avoid':'AVOID'}.get(s.trade_bias, s.trade_bias or '—') }}
+            </span>
+          </div>
+        </div>
+
+        <!-- SCORES: SETUP · MOM · CAT · CONF -->
+        <div class="ec-scores">
+          <div class="ec-score-item">
+            <span class="ecs-lbl">SETUP</span>
+            <span class="ecs-val {{ s.score_class or '' }}" id="ecp-ss-{{ s.ticker }}">{{ s.setup_score }}/10</span>
+          </div>
+          <div class="ec-score-item">
+            <span class="ecs-lbl">MOM</span>
+            <span class="ecs-val {{ s.mom_score_class or '' }}" id="ecp-mom-{{ s.ticker }}">{{ s.momentum_score or '—' }}/10</span>
+          </div>
+          <div class="ec-score-item">
+            <span class="ecs-lbl">CAT</span>
+            <span class="ecs-val {{ s.cat_score_class or '' }}" id="ecp-cat-{{ s.ticker }}">{{ s.catalyst_score }}/10</span>
+          </div>
+          <div class="ec-score-item">
+            <span class="ecs-lbl">CONF</span>
+            <span class="conf-badge ecs-conf {{ s.combined_conf_class or '' }}" id="ecp-conf-{{ s.ticker }}">
+              {{ s.combined_confidence or '—' }}
+            </span>
+          </div>
+        </div>
+
+        <!-- EXECUTION LEVELS (entry / stop / target / R:R) -->
+        {% set has_levels = s.stop_level or s.target_1 or s.entry_zone_display %}
+        {% if has_levels %}
+        <div class="ec-levels" id="ecp-levels-{{ s.ticker }}">
+          {% if s.entry_zone_display %}
+          <div class="ec-level-item">
+            <span class="ecl-lbl">ENTRY</span>
+            <span class="ecl-val ecl-entry">{{ s.entry_zone_display }}</span>
+          </div>
+          {% endif %}
+          {% if s.stop_level %}
+          <div class="ec-level-item">
+            <span class="ecl-lbl">STOP</span>
+            <span class="ecl-val ecl-stop">${{ '%.2f'|format(s.stop_level) }}</span>
+          </div>
+          {% endif %}
+          {% if s.target_1 %}
+          <div class="ec-level-item">
+            <span class="ecl-lbl">T1</span>
+            <span class="ecl-val ecl-target">${{ '%.2f'|format(s.target_1) }}</span>
+          </div>
+          {% endif %}
+          {% if s.target_2 %}
+          <div class="ec-level-item">
+            <span class="ecl-lbl">T2</span>
+            <span class="ecl-val ecl-target">${{ '%.2f'|format(s.target_2) }}</span>
+          </div>
+          {% endif %}
+          {% if s.risk_reward %}
+          <div class="ec-level-item">
+            <span class="ecl-lbl">R:R</span>
+            <span class="ecl-val ecl-rr">{{ '%.1f'|format(s.risk_reward) }}:1</span>
+          </div>
           {% endif %}
         </div>
         {% endif %}
 
-        <!-- Catalyst reason -->
+        <!-- ORB LEVELS (when inside ORB window) -->
+        {% if s.orb_high and s.orb_low %}
+        <div class="ec-orb-levels" id="ecp-orblevels-{{ s.ticker }}">
+          ORB H ${{ '%.2f'|format(s.orb_high) }} · L ${{ '%.2f'|format(s.orb_low) }}
+        </div>
+        {% endif %}
+
+        <!-- AI EXPLANATION -->
         {% if s.catalyst_reason %}
-        <div class="qm-catalyst" id="qmp-catalyst-reason-{{ s.ticker }}">
+        <div class="ec-explain" id="ecp-explain-{{ s.ticker }}">
           {{ s.catalyst_reason }}
         </div>
         {% endif %}
 
-        <!-- Catalyst summary (short) -->
-        {% if s.catalyst_summary %}
-        <div class="qm-catalyst-summary">
-          {{ s.catalyst_summary[:120] }}{% if s.catalyst_summary|length > 120 %}…{% endif %}
+        <!-- FOOTER: grade + AI RS explanation + detail link -->
+        <div class="ec-footer">
+          <div>
+            {% if s.swing_grade %}
+            <span class="ec-grade-badge">{{ s.swing_grade }}</span>
+            {% endif %}
+            {% if s.rs_label and s.rs_score_display %}
+            <span style="font-family:var(--font-mono);font-size:8px;color:var(--text-sec);margin-left:6px;">
+              {{ s.rs_label }}
+            </span>
+            {% endif %}
+          </div>
+          <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="ec-detail-link">
+            Full Analysis →
+          </a>
         </div>
-        {% endif %}
 
-      </div>
+      </div><!-- /exec-card -->
+      {% endfor %}
 
-      <!-- ACTION FOOTER -->
-      <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="qm-view-btn">
-        View {{ s.ticker }} — Full Details →
+    </div><!-- /exec-grid -->
+
+    {% else %}
+    <!-- Empty state -->
+    <div class="exec-empty">
+      <div class="exec-empty-icon">📋</div>
+      <div class="exec-empty-title">No setups in play</div>
+      <div class="exec-empty-sub">Add tickers to your watchlist from the Account hub.</div>
+      <a href="{{ url_for('dashboard') }}" class="btn btn-add" style="margin-top:1.5rem;display:inline-flex;">
+        Open Account →
       </a>
-
     </div>
-    {% endfor %}
+    {% endif %}
 
+  </div><!-- /watchlist-section -->
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       4. LIVE AI ALERT FEED
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <div class="exec-section exec-alert-section focus-hide" id="alert-section">
+    <div class="exec-section-hdr">
+      <span class="exec-section-title">🔔 LIVE ALERT FEED</span>
+      <div class="alert-filter-row">
+        <button class="alert-filter-btn active" data-filter="all"       onclick="filterAlerts('all',this)">All</button>
+        <button class="alert-filter-btn"         data-filter="CRITICAL" onclick="filterAlerts('CRITICAL',this)">Critical</button>
+        <button class="alert-filter-btn"         data-filter="HIGH"     onclick="filterAlerts('HIGH',this)">High</button>
+        <button class="alert-filter-btn"         data-filter="MEDIUM"   onclick="filterAlerts('MEDIUM',this)">Medium</button>
+      </div>
+    </div>
+    <div class="alert-feed" id="alert-feed">
+      <div class="alert-loading">Connecting to alert feed…</div>
+    </div>
   </div>
 
-  {% else %}
-  <!-- Empty state -->
-  <div class="qm-empty">
-    <div class="qm-empty-icon">📋</div>
-    <div class="qm-empty-title">No stocks in play</div>
-    <div class="qm-empty-sub">Add tickers to your watchlist in the Account hub.</div>
-    <a href="{{ url_for('dashboard') }}" class="btn btn-add" style="margin-top:1.5rem;display:inline-flex;">Open Account</a>
-  </div>
-  {% endif %}
-
-  <!-- Last updated footer -->
-  <div class="qm-footer">
-    <span id="qm-last-updated" class="qm-updated">—</span>
-    <span class="qm-footer-hint">Auto-refreshes every 15s during market hours</span>
+  <!-- PAGE FOOTER -->
+  <div class="exec-footer focus-hide">
+    <span class="exec-upd-text" id="exec-updated-footer">—</span>
+    <span class="exec-hint">Auto-refreshes every 15s · WebSocket active</span>
   </div>
 
-</div>
+</div><!-- /exec-wrap -->
 {% endblock %}
+
 
 {% block scripts %}
 <script>
-// ===========================================================================
-// Quick Mode Live Refresh
-// ===========================================================================
+/* ============================================================================
+   EXECUTION COMMAND CENTER — Live Update Logic
+   ============================================================================ */
 
-const SCORE_CLASS_MAP = {
-  strong: 'strong', moderate: 'moderate', weak: 'weak', neutral: 'neutral'
-};
+// ── State ──────────────────────────────────────────────────────────────────
+let _focusMode    = localStorage.getItem('execFocusMode') === 'true';
+let _alertFilter  = 'all';
+let _allAlerts    = [];
 
-function qmSetText(id, val) {
-  const el = document.getElementById(id);
-  if (el && val != null) el.textContent = val;
+// ── Focus Mode ──────────────────────────────────────────────────────────────
+function toggleFocusMode() {
+  _focusMode = !_focusMode;
+  localStorage.setItem('execFocusMode', _focusMode);
+  applyFocusMode();
+}
+function applyFocusMode() {
+  document.body.classList.toggle('focus-mode', _focusMode);
+  const btn = document.getElementById('focus-mode-btn');
+  const dot = document.getElementById('focus-dot');
+  if (btn) btn.classList.toggle('active', _focusMode);
+  if (dot) dot.style.color = _focusMode ? 'var(--purple)' : 'var(--text-sec)';
 }
 
-function qmSetClass(el, cls) {
-  if (el) el.className = cls;
+// Apply focus mode on load
+applyFocusMode();
+
+// ── Alert Feed ─────────────────────────────────────────────────────────────
+const PRIORITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, WATCHLIST: 3 };
+
+function renderAlerts(alerts) {
+  const feed = document.getElementById('alert-feed');
+  if (!feed) return;
+
+  const filtered = _alertFilter === 'all'
+    ? alerts
+    : alerts.filter(a => a.priority === _alertFilter);
+
+  if (!filtered.length) {
+    feed.innerHTML = '<div class="alert-empty">No alerts matching current filter</div>';
+    return;
+  }
+
+  // Sort: priority first, then newest
+  const sorted = [...filtered].sort((a,b) =>
+    (PRIORITY_ORDER[a.priority]||3) - (PRIORITY_ORDER[b.priority]||3)
+  );
+
+  feed.innerHTML = sorted.map(a => `
+    <div class="alert-row" data-priority="${a.priority}">
+      <span class="alert-priority-badge ap-${a.priority}">${a.priority}</span>
+      <div class="alert-body">
+        <div class="alert-msg">${escHtml(a.message || '')}</div>
+        <div class="alert-time">${escHtml(a.timestamp || '')}</div>
+      </div>
+    </div>
+  `).join('');
 }
 
-function qmUpdateCard(s) {
-  const card = document.getElementById('qm-card-' + s.ticker);
+function filterAlerts(filter, btn) {
+  _alertFilter = filter;
+  document.querySelectorAll('.alert-filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderAlerts(_allAlerts);
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Market Command Strip live update ──────────────────────────────────────
+function updateMCS(mkt) {
+  if (!mkt) return;
+  const set = (id, val) => { const el=document.getElementById(id); if(el && val!=null) el.textContent=val; };
+  const chip = document.getElementById('mcs-regime-chip');
+  if (chip && mkt.regime) {
+    chip.className = 'mcs-chip regime-' + mkt.regime.toLowerCase();
+  }
+  set('mcs-regime', mkt.regime_label || '—');
+  if (mkt.vix_level != null) {
+    set('mcs-vix', mkt.vix_level.toFixed(1));
+    const vEl = document.getElementById('mcs-vix');
+    if (vEl) vEl.style.color = mkt.vix_level > 25 ? 'var(--red)' : mkt.vix_level > 20 ? 'var(--amber)' : 'var(--green)';
+  }
+  if (mkt.yield_10y != null) set('mcs-yield', mkt.yield_10y.toFixed(2) + '%');
+}
+
+// ── Session bar update ─────────────────────────────────────────────────────
+function updateSessionBar(orb) {
+  if (!orb) return;
+  const pill = document.getElementById('exec-session-pill');
+  const bar  = document.getElementById('exec-session-bar');
+  const act  = document.getElementById('exec-session-action');
+  const sub  = document.getElementById('exec-session-sub');
+  if (pill) { pill.className = 'exec-session-pill orb-' + orb.phase; pill.textContent = orb.phase_label || 'Market'; }
+  if (act)  { act.className = 'exec-session-action ' + (orb.action_class||''); act.textContent = orb.action || ''; }
+  if (sub)  sub.textContent = orb.sub_label || '';
+}
+
+// ── Stock card update ──────────────────────────────────────────────────────
+function updateCard(s) {
+  const card = document.getElementById('exc-card-' + s.ticker);
   if (!card) return;
 
-  // Card-level trigger class
-  card.classList.toggle('qm-card-triggered', s.exec_state === 'TRIGGERED');
-  card.classList.toggle('qm-card-ready',     s.exec_state === 'READY');
+  card.classList.toggle('ec-triggered', s.exec_state === 'TRIGGERED');
+  card.classList.toggle('ec-ready',     s.exec_state === 'READY');
 
-  // State stripe
-  const stripe = card.querySelector('.qm-state-stripe');
-  if (stripe) {
-    stripe.className = 'qm-state-stripe exec-stripe-' + s.exec_class;
-    const execBadge = stripe.querySelector('.qm-exec-badge');
-    if (execBadge) { execBadge.className = 'qm-exec-badge ' + s.exec_class; execBadge.textContent = s.exec_state || 'WAIT'; }
-    const freshEl = stripe.querySelector('.qm-freshness');
-    if (freshEl) {
-      if (s.freshness) {
-        freshEl.className = 'qm-freshness ' + s.freshness_class;
-        freshEl.textContent = s.freshness;
-        freshEl.style.display = '';
-      } else {
-        freshEl.style.display = 'none';
-      }
-    }
+  const setText = (id, val) => { const el=document.getElementById(id); if(el && val!=null) el.textContent=val; };
+  const setClass = (id, cls) => { const el=document.getElementById(id); if(el) el.className = cls; };
+
+  // State badge
+  const stateBadge = document.getElementById('ecp-state-' + s.ticker);
+  if (stateBadge) {
+    stateBadge.className = 'ec-state-badge exec-' + (s.exec_state||'wait').toLowerCase();
+    stateBadge.textContent = s.exec_state || 'WAIT';
   }
 
-  // Price & gap
-  qmSetText('qmp-price-' + s.ticker, s.current_price != null ? '$' + s.current_price.toFixed(2) : '—');
-  const gapEl = document.getElementById('qmp-gap-' + s.ticker);
-  if (gapEl) { gapEl.className = 'qm-gap ' + (s.gap_class || ''); gapEl.textContent = s.gap_display || '—'; }
+  // Price + gap
+  setText('ecp-price-' + s.ticker, s.current_price != null ? '$' + s.current_price.toFixed(2) : '—');
+  const gapEl = document.getElementById('ecp-gap-' + s.ticker);
+  if (gapEl) { gapEl.className = 'ec-gap ' + (s.gap_class||''); gapEl.textContent = s.gap_display || '—'; }
 
   // Setup pill
-  const setupPill = document.getElementById('qmp-setup-' + s.ticker);
-  if (setupPill) { setupPill.className = 'setup-pill ' + s.setup_type_class + ' qm-setup-pill'; setupPill.textContent = s.setup_type || '—'; }
+  const setupPill = document.getElementById('ecp-setup-pill-' + s.ticker);
+  if (setupPill) { setupPill.className = 'ec-setup setup-pill ' + (s.setup_type_class||''); setupPill.textContent = s.setup_type || '—'; }
 
   // Scores
-  const fmtScore = (v, sfx) => v != null ? v + sfx : '—';
-  qmSetText('qmp-setup-score-' + s.ticker, fmtScore(s.setup_score, '/10'));
-  const ssEl = document.getElementById('qmp-setup-score-' + s.ticker);
-  if (ssEl) ssEl.className = 'qm-score-value ' + (s.score_class || '');
+  setText('ecp-ss-' + s.ticker,  s.setup_score != null ? s.setup_score + '/10' : '—');
+  setText('ecp-mom-' + s.ticker, s.momentum_score != null ? s.momentum_score + '/10' : '—');
+  setText('ecp-cat-' + s.ticker, s.catalyst_score != null ? s.catalyst_score + '/10' : '—');
+  const confEl = document.getElementById('ecp-conf-' + s.ticker);
+  if (confEl) { confEl.className = 'conf-badge ecs-conf ' + (s.combined_conf_class||''); confEl.textContent = s.combined_confidence || '—'; }
 
-  qmSetText('qmp-mom-' + s.ticker, fmtScore(s.momentum_score, '/10'));
-  const momEl = document.getElementById('qmp-mom-' + s.ticker);
-  if (momEl) momEl.className = 'qm-score-value ' + (s.mom_score_class || '');
+  // RS
+  const rsEl = document.getElementById('ecp-rs-' + s.ticker);
+  if (rsEl) { rsEl.className = 'ecm-val ' + (s.rs_class||''); rsEl.textContent = s.rs_score_display != null ? s.rs_score_display : '—'; }
 
-  qmSetText('qmp-cat-' + s.ticker, fmtScore(s.catalyst_score, '/10'));
-  const catEl = document.getElementById('qmp-cat-' + s.ticker);
-  if (catEl) catEl.className = 'qm-score-value ' + (s.cat_score_class || '');
-
-  // Confidence
-  const confEl = document.getElementById('qmp-conf-' + s.ticker);
-  if (confEl && s.combined_confidence) {
-    confEl.className = 'conf-badge qm-conf-badge ' + (s.combined_conf_class || '');
-    confEl.textContent = s.combined_confidence;
+  // RVOL
+  const rvolEl = document.getElementById('ecp-rvol-' + s.ticker);
+  if (rvolEl) {
+    const rv = s.rel_volume;
+    rvolEl.className = 'ecm-val ' + (rv >= 2 ? 'ecm-hot' : rv >= 1.2 ? 'ecm-warm' : '');
+    rvolEl.textContent = rv != null ? rv.toFixed(1) + 'x' : '—';
   }
+
+  // ORB status
+  const ORB_SHORT = {ABOVE:'▲ ABOVE',INSIDE:'INSIDE',BELOW:'▼ BELOW',NEAR_HIGH:'↑ HI',NEAR_LOW:'↓ LO',NO_ORB:'—'};
+  const orbEl = document.getElementById('ecp-orb-' + s.ticker);
+  if (orbEl) { orbEl.className = 'ecm-val ' + (s.orb_status_class||''); orbEl.textContent = ORB_SHORT[s.orb_status] || '—'; }
 
   // Catalyst reason
-  qmSetText('qmp-catalyst-reason-' + s.ticker, s.catalyst_reason || '');
-
-  // ORB row
-  const orbRow = document.getElementById('qmp-orb-' + s.ticker);
-  if (orbRow) {
-    const ORB_LABELS = {ABOVE: '▲ Above ORB', NEAR_HIGH: '↑ Near High', INSIDE: 'Inside ORB', NEAR_LOW: '↓ Near Low', BELOW: '▼ Below ORB', NO_ORB: 'No ORB'};
-    if (s.orb_high && s.orb_low) {
-      orbRow.innerHTML = `<span class="orbs-badge ${s.orb_status_class}">${ORB_LABELS[s.orb_status] || '—'}</span><span class="qm-orb-levels">H $${s.orb_high.toFixed(2)} · L $${s.orb_low.toFixed(2)}</span>`;
-      orbRow.style.display = '';
-    } else if (s.orb_phase === 'forming') {
-      orbRow.innerHTML = `<span class="orb-phase-badge orbp-forming">ORB Forming…</span>`;
-      orbRow.style.display = '';
-    } else {
-      orbRow.style.display = 'none';
-    }
-  }
+  setText('ecp-explain-' + s.ticker, s.catalyst_reason || '');
 }
 
-function qmUpdateSessionBar(orb) {
-  const bar    = document.querySelector('.qm-session-bar');
-  const action = document.querySelector('.qm-session-action');
-  const sub    = document.querySelector('.qm-session-sub');
-  if (bar)    bar.className = 'qm-session-bar qm-session-' + orb.phase;
-  if (action) { action.className = 'qm-session-action ' + orb.action_class; action.textContent = orb.action; }
-  if (sub)    sub.textContent = orb.sub_label;
-}
-
-async function quickModeRefresh() {
+// ── Main refresh function ──────────────────────────────────────────────────
+async function execRefresh() {
   try {
     const resp = await fetch('/api/quick');
     if (!resp.ok) return;
     const data = await resp.json();
 
-    qmUpdateSessionBar(data.orb_session);
+    updateSessionBar(data.orb_session);
+    updateMCS(data.mkt_ctx);
 
-    // Detect new triggers for alerts (uses shared system from main.js)
-    const newTriggers = detectNewTriggers(data.stocks);
-    if (newTriggers.length) {
-      newTriggers.forEach(s => {
-        const alertType = getAlertType(s);
-        playAlertSound(alertType);
-        showTriggerToast(s, alertType);
-      });
+    if (data.smart_alerts) {
+      _allAlerts = data.smart_alerts;
+      renderAlerts(_allAlerts);
     }
 
-    data.stocks.forEach(qmUpdateCard);
+    // Detect new triggers (shared system from main.js)
+    if (data.stocks) {
+      const newTriggers = typeof detectNewTriggers === 'function'
+        ? detectNewTriggers(data.stocks) : [];
+      newTriggers.forEach(s => {
+        const alertType = typeof getAlertType === 'function' ? getAlertType(s) : 'info';
+        if (typeof playAlertSound  === 'function') playAlertSound(alertType);
+        if (typeof showTriggerToast=== 'function') showTriggerToast(s, alertType);
+      });
+      data.stocks.forEach(updateCard);
+    }
 
-    const updEl = document.getElementById('qm-last-updated');
-    if (updEl) updEl.textContent = 'Updated ' + data.server_time;
-    window._arSetLastUpdated(data.server_time);
+    const upd = data.server_time || '';
+    const updEl = document.getElementById('exec-last-upd');
+    const footEl= document.getElementById('exec-updated-footer');
+    if (updEl)  updEl.textContent  = upd;
+    if (footEl) footEl.textContent = 'Updated ' + upd;
+    if (typeof window._arSetLastUpdated === 'function') window._arSetLastUpdated(upd);
 
-  } catch (e) {
-    console.warn('Quick mode refresh error:', e);
+  } catch(e) {
+    console.warn('exec refresh error:', e);
   }
 }
 
-window._arRefreshFn = quickModeRefresh;
+// Register as the page refresh function (used by auto-refresh timer in main.js)
+window._arRefreshFn = execRefresh;
 
-// Connect WebSocket — same update functions as polling path.
-window._wsConnect('/ws/quick', function (data) {
+// WebSocket — real-time push
+window._wsConnect && window._wsConnect('/ws/quick', function(data) {
   if (data.type !== 'quick') return;
-
-  qmUpdateSessionBar(data.orb_session);
-
-  var newTriggers = detectNewTriggers(data.stocks);
-  if (newTriggers.length) {
-    newTriggers.forEach(function (s) {
-      var alertType = getAlertType(s);
-      playAlertSound(alertType);
-      showTriggerToast(s, alertType);
+  updateSessionBar(data.orb_session);
+  updateMCS(data.mkt_ctx);
+  if (data.smart_alerts) { _allAlerts = data.smart_alerts; renderAlerts(_allAlerts); }
+  if (data.stocks) {
+    const nt = typeof detectNewTriggers==='function' ? detectNewTriggers(data.stocks) : [];
+    nt.forEach(s => {
+      const t = typeof getAlertType==='function' ? getAlertType(s) : 'info';
+      if(typeof playAlertSound==='function')   playAlertSound(t);
+      if(typeof showTriggerToast==='function') showTriggerToast(s, t);
     });
+    data.stocks.forEach(updateCard);
   }
-
-  data.stocks.forEach(qmUpdateCard);
-
-  var updEl = document.getElementById('qm-last-updated');
-  if (updEl) updEl.textContent = 'Updated ' + data.server_time;
+  const upd = data.server_time || '';
+  const updEl = document.getElementById('exec-last-upd');
+  if (updEl) updEl.textContent = upd;
+  if (typeof window._arSetLastUpdated === 'function') window._arSetLastUpdated(upd);
 });
+
+// Initial alert load
+execRefresh();
 </script>
 {% endblock %}
