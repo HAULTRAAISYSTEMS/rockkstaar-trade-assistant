@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#020b18" />
+  <title>Authenticate — HAULTRA AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #020b18;
+      --card:    #071830;
+      --border:  rgba(34,211,238,0.18);
+      --cyan:    #22D3EE;
+      --green:   #22c55e;
+      --red:     #ef4444;
+      --amber:   #f59e0b;
+      --text:    #dde8ff;
+      --muted:   #5b7a9d;
+      --dim:     #2e4a65;
+      --mono:    'JetBrains Mono', 'Fira Code', monospace;
+      --ui:      'Inter', -apple-system, sans-serif;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--ui);
+    }
+
+    /* ── Animated grid background ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(34,211,238,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(34,211,238,0.025) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Glow orb ── */
+    body::after {
+      content: '';
+      position: fixed;
+      top: 20%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(34,211,238,0.05) 0%, transparent 65%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout ── */
+    .login-wrap {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+      gap: 2rem;
+    }
+
+    /* ── Brand ── */
+    .login-brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .login-brand-line {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.25em;
+      color: var(--dim);
+      text-transform: uppercase;
+    }
+    .login-brand-name {
+      font-family: var(--mono);
+      font-size: 28px;
+      font-weight: 900;
+      letter-spacing: 0.10em;
+      color: var(--cyan);
+      text-shadow: 0 0 24px rgba(34,211,238,0.40), 0 0 60px rgba(34,211,238,0.15);
+      text-transform: uppercase;
+    }
+    .login-brand-sub {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.20em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    /* ── Card ── */
+    .login-card {
+      width: 100%;
+      max-width: 380px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-top: 2px solid rgba(34,211,238,0.30);
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px rgba(34,211,238,0.05),
+        0 8px 32px rgba(0,0,0,0.6),
+        0 0 60px rgba(34,211,238,0.04);
+    }
+
+    .login-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 20px;
+      background: rgba(0,0,0,0.35);
+      border-bottom: 1px solid rgba(34,211,238,0.10);
+    }
+    .login-card-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 6px var(--cyan);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+    .login-card-title {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--cyan);
+    }
+
+    .login-card-body {
+      padding: 28px 24px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── Error banner ── */
+    .login-error {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: rgba(239,68,68,0.10);
+      border: 1px solid rgba(239,68,68,0.25);
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--red);
+    }
+
+    /* ── Field ── */
+    .login-field {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .login-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+    .login-input {
+      width: 100%;
+      padding: 11px 14px;
+      background: rgba(0,0,0,0.50);
+      border: 1px solid rgba(34,211,238,0.15);
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      letter-spacing: 0.08em;
+    }
+    .login-input::placeholder { color: var(--dim); letter-spacing: 0.05em; }
+    .login-input:focus {
+      border-color: rgba(34,211,238,0.40);
+      box-shadow: 0 0 0 3px rgba(34,211,238,0.06);
+    }
+
+    /* ── Button ── */
+    .login-btn {
+      width: 100%;
+      padding: 13px;
+      background: rgba(34,211,238,0.10);
+      border: 1px solid rgba(34,211,238,0.28);
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--cyan);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .login-btn:hover {
+      background: rgba(34,211,238,0.18);
+      border-color: rgba(34,211,238,0.50);
+      box-shadow: 0 0 16px rgba(34,211,238,0.12);
+    }
+    .login-btn:active {
+      transform: scale(0.99);
+    }
+
+    /* ── Footer note ── */
+    .login-footer {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--dim);
+      text-align: center;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── Status row (bottom of page) ── */
+    .login-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--dim);
+      letter-spacing: 0.08em;
+    }
+    .login-status-dot {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 4px var(--green);
+    }
+
+    @media(max-width:420px) {
+      .login-brand-name { font-size: 22px; }
+      .login-card { border-radius: 5px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="login-wrap">
+
+  <!-- Brand -->
+  <div class="login-brand">
+    <span class="login-brand-line">▲ HAULTRA AI SYSTEMS</span>
+    <span class="login-brand-name">ROCKKSTAAR</span>
+    <span class="login-brand-sub">Trade Assistant · Terminal Access</span>
+  </div>
+
+  <!-- Login card -->
+  <div class="login-card">
+
+    <div class="login-card-header">
+      <span class="login-card-dot"></span>
+      <span class="login-card-title">Secure Access Required</span>
+    </div>
+
+    <div class="login-card-body">
+
+      {% if error %}
+      <div class="login-error">
+        ⚠ {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="POST" action="/login" autocomplete="off">
+        <input type="hidden" name="next" value="{{ next }}">
+
+        <div style="display:flex;flex-direction:column;gap:20px;">
+          <div class="login-field">
+            <label class="login-label" for="password">Access Code</label>
+            <input
+              class="login-input"
+              type="password"
+              id="password"
+              name="password"
+              placeholder="Enter access code"
+              autofocus
+              autocomplete="current-password"
+            />
+          </div>
+
+          <button type="submit" class="login-btn">⚡ Authenticate</button>
+        </div>
+      </form>
+
+      <div class="login-footer">
+        Set <code style="color:var(--muted)">LOGIN_PASS</code> env var to change your access code
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Status -->
+  <div class="login-status">
+    <span class="login-status-dot"></span>
+    SYSTEM ONLINE
+  </div>
+
+</div>
+
+</body>
+</html>

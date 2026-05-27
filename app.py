@@ -75,12 +75,36 @@ if not _secret_key:
     )
     _secret_key = "rockkstaar-secret-key-change-in-prod"
 app.secret_key = _secret_key
+app.permanent_session_lifetime = timedelta(days=30)
 
 # ---------------------------------------------------------------------------
 # CSRF protection — validates csrf_token on every POST/PUT/PATCH/DELETE form.
 # The /risk/trading-mode AJAX route sends the token via X-CSRFToken header.
 # ---------------------------------------------------------------------------
 csrf = CSRFProtect(app)
+
+# ---------------------------------------------------------------------------
+# Session-based login gate.
+# Set LOGIN_PASS env var to enable. If not set, all routes are open (local dev).
+# API / WebSocket paths return 401 JSON; page routes redirect to /login.
+# ---------------------------------------------------------------------------
+@app.before_request
+def _require_login():
+    _pass = os.environ.get("LOGIN_PASS", "")
+    if not _pass:
+        return  # No password configured — open access (local / first deploy)
+    # Always public
+    if (request.path in ("/login", "/favicon.ico", "/health")
+            or request.path.startswith("/static/")):
+        return
+    if session.get("logged_in"):
+        return  # Authenticated
+    # API / WebSocket — JSON 401
+    if request.path.startswith(("/api/", "/ws/")):
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    # Page routes — redirect
+    return redirect(url_for("login_page", next=request.path))
+
 
 # ---------------------------------------------------------------------------
 # Write-endpoint auth — HTTP Basic Auth on every state-mutating request.
@@ -5327,6 +5351,43 @@ def api_opportunity_refresh():
     except Exception as exc:
         logger.error("api_opportunity_refresh: %s", exc, exc_info=True)
         return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Authentication routes
+# ---------------------------------------------------------------------------
+
+@app.route("/login", methods=["GET", "POST"])
+@csrf.exempt  # Login is the auth gate itself — no prior session needed for token
+def login_page():
+    """Session login page. Enabled only when LOGIN_PASS env var is set."""
+    _pass = os.environ.get("LOGIN_PASS", "")
+    if not _pass:
+        return redirect(url_for("liquidity_page"))  # Auth disabled
+    if session.get("logged_in"):
+        return redirect(url_for("liquidity_page"))
+    error = None
+    if request.method == "POST":
+        entered = request.form.get("password", "").strip()
+        if entered == _pass:
+            session.permanent = True
+            session["logged_in"] = True
+            next_url = request.form.get("next") or url_for("liquidity_page")
+            # Safety: only redirect to internal paths
+            if not next_url.startswith("/") or next_url.startswith("//"):
+                next_url = url_for("liquidity_page")
+            return redirect(next_url)
+        error = "Invalid password — try again."
+    return render_template("login.html",
+                           next=request.args.get("next", ""),
+                           error=error)
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    """Clear session and redirect to login."""
+    session.clear()
+    return redirect(url_for("login_page"))
 
 
 # ---------------------------------------------------------------------------
