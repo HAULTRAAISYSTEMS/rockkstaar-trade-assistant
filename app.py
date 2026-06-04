@@ -6,15 +6,18 @@ Flask web app for premarket stock watchlist scanning.
 import json as _json
 import logging
 import os
+import pathlib
 import re
 import secrets
 import threading
 import time as _time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, Response
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, Response, send_from_directory
 from flask_sock import Sock
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect  # type: ignore[import-untyped]
+from werkzeug.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
 from database import (
@@ -38,13 +41,23 @@ from database import (
     get_daily_session, upsert_daily_session, lock_daily_session, unlock_daily_session,
     add_scanner_alert, get_scanner_alerts, mark_scanner_alerts_seen,
     get_unseen_scanner_alert_count, clear_scanner_alerts,
+    save_setup_outcome, get_setup_outcome_stats,
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
-from data_fetcher import _et_now
-from scoring import catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES, compute_swing_grade
+from data_fetcher import _et_now, market_session_now, orb_phase_now
+from scoring import (catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES,
+                     compute_swing_grade, compute_continuation_score)
 from classifier import classify_stock
 from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as _clear_alerts
+from news_fetcher import CATALYST_CATEGORIES as _CAT_DEFS, freshness_label as _fl
 import scanner as _scanner
+import intel_engine as _intel
+_mkt = None  # set below if market_engine is available
+try:
+    import market_engine as _mkt
+    _MKT_AVAILABLE = True
+except Exception:
+    _MKT_AVAILABLE = False
 
 app = Flask(__name__)
 
@@ -62,12 +75,36 @@ if not _secret_key:
     )
     _secret_key = "rockkstaar-secret-key-change-in-prod"
 app.secret_key = _secret_key
+app.permanent_session_lifetime = timedelta(days=30)
 
 # ---------------------------------------------------------------------------
 # CSRF protection — validates csrf_token on every POST/PUT/PATCH/DELETE form.
 # The /risk/trading-mode AJAX route sends the token via X-CSRFToken header.
 # ---------------------------------------------------------------------------
 csrf = CSRFProtect(app)
+
+# ---------------------------------------------------------------------------
+# Session-based login gate.
+# Set LOGIN_PASS env var to enable. If not set, all routes are open (local dev).
+# API / WebSocket paths return 401 JSON; page routes redirect to /login.
+# ---------------------------------------------------------------------------
+@app.before_request
+def _require_login():
+    _pass = os.environ.get("LOGIN_PASS", "")
+    if not _pass:
+        return  # No password configured — open access (local / first deploy)
+    # Always public
+    if (request.path in ("/login", "/favicon.ico", "/health")
+            or request.path.startswith("/static/")):
+        return
+    if session.get("logged_in"):
+        return  # Authenticated
+    # API / WebSocket — JSON 401
+    if request.path.startswith(("/api/", "/ws/")):
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    # Page routes — redirect
+    return redirect(url_for("login_page", next=request.path))
+
 
 # ---------------------------------------------------------------------------
 # Write-endpoint auth — HTTP Basic Auth on every state-mutating request.
@@ -91,6 +128,37 @@ def _check_write_auth():
         )
 
 sock = Sock(app)
+
+
+# ---------------------------------------------------------------------------
+# Global JSON error handler — ensures /api/* routes NEVER return HTML
+# ---------------------------------------------------------------------------
+@app.errorhandler(Exception)
+def _handle_all_errors(e):
+    """Return JSON for /api/ errors; let Flask handle HTTP errors on frontend routes."""
+    code = e.code if isinstance(e, HTTPException) else 500
+    if request.path.startswith("/api/"):
+        if code != 404:
+            logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
+        return jsonify({
+            "ok": False,
+            "errors": [f"{type(e).__name__}: {e}"],
+            "news": [], "market_news": [],
+            "earnings": {"today": [], "tomorrow": [], "this_week": []},
+            "splits": [], "dividends": [], "economic_events": [],
+            "from_cache": False, "refreshing": False, "last_updated": "—",
+        }), code
+    # For HTTP errors (404, 403, etc.) on frontend routes, return Flask's default response
+    if isinstance(e, HTTPException):
+        return e.get_response()
+    # Unexpected server errors on frontend routes — log and show a simple message
+    logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
+    return "Internal server error", 500
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(app.static_folder or "static", "logo.png", mimetype="image/png")
 
 
 @app.template_filter("et_time")
@@ -125,7 +193,142 @@ def et_time_filter(value: str | None) -> str:
 # still has this route and Render's health check succeeds.
 @app.route("/health")
 def health():
-    return "OK", 200
+    return jsonify({"ok": True}), 200
+
+
+# ---------------------------------------------------------------------------
+# Security headers — applied to every response
+# ---------------------------------------------------------------------------
+@app.after_request
+def _add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+
+
+# ---------------------------------------------------------------------------
+# /debug/status — production health check (no secret values exposed)
+# ---------------------------------------------------------------------------
+@app.route("/debug/status")
+def debug_status():
+    """
+    Read-only diagnostics endpoint.
+    Returns PASS/FAIL for each system component.
+    Never exposes secret values — only checks presence and reachability.
+    """
+    checks = {}
+
+    # 1. Database connected
+    try:
+        from database import get_db
+        conn = get_db()
+        conn.execute("SELECT 1")
+        conn.close()
+        checks["database"] = {"status": "PASS", "detail": "Connection OK"}
+    except Exception as _e:
+        checks["database"] = {"status": "FAIL", "detail": str(_e), "file": "database.py"}
+
+    # 2. Required env vars
+    _required_vars = {
+        "SECRET_KEY":   os.environ.get("SECRET_KEY"),
+        "DATABASE_URL": os.environ.get("DATABASE_URL"),  # optional — SQLite fallback
+    }
+    _optional_vars = {
+        "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN"),
+        "TELEGRAM_CHAT_ID":   os.environ.get("TELEGRAM_CHAT_ID"),
+        "FINNHUB_API_KEY":    os.environ.get("FINNHUB_API_KEY"),
+        "POLYGON_API_KEY":    os.environ.get("POLYGON_API_KEY"),
+        "SCHWAB_CLIENT_ID":   os.environ.get("SCHWAB_CLIENT_ID"),
+    }
+    env_detail = {}
+    env_ok = True
+    for k, v in _required_vars.items():
+        if k == "SECRET_KEY" and not v:
+            env_detail[k] = "MISSING (using insecure fallback)"
+            env_ok = False
+        elif k == "DATABASE_URL":
+            env_detail[k] = "set" if v else "not set (SQLite fallback)"
+        else:
+            env_detail[k] = "set" if v else "missing"
+    checks["env_required"] = {
+        "status": "PASS" if env_ok else "WARN",
+        "detail": env_detail,
+    }
+
+    # 3. Optional env vars (PASS if set, WARN if missing)
+    opt_detail = {k: ("set" if v else "not set") for k, v in _optional_vars.items()}
+    checks["env_optional"] = {
+        "status": "PASS" if all(_optional_vars.values()) else "WARN",
+        "detail": opt_detail,
+    }
+
+    # 4. Telegram configured
+    _tg_token  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    _tg_chat   = os.environ.get("TELEGRAM_CHAT_ID", "")
+    checks["telegram"] = {
+        "status": "PASS" if (_tg_token and _tg_chat) else "WARN",
+        "detail": "configured" if (_tg_token and _tg_chat) else "not configured (alerts will be skipped)",
+    }
+
+    # 5. Finnhub key loaded
+    _fh_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    checks["finnhub"] = {
+        "status": "PASS" if _fh_key else "WARN",
+        "detail": "key present" if _fh_key else "key missing (static fallback will be used)",
+    }
+
+    # 6. static/logo.png exists
+    _logo = pathlib.Path(app.static_folder or "static") / "logo.png"
+    checks["static_logo"] = {
+        "status": "PASS" if _logo.exists() else "FAIL",
+        "detail": str(_logo) if _logo.exists() else f"missing: {_logo}",
+        "file": "static/logo.png",
+    }
+
+    # 7. Intel cache / API reachable (checks in-process only, no network call)
+    try:
+        data = _intel.get_intel_summary()
+        intel_ok = isinstance(data, dict) and "earnings" in data
+        checks["intel_api"] = {
+            "status": "PASS" if intel_ok else "FAIL",
+            "detail": f"ok  from_cache={data.get('from_cache')}  refreshing={data.get('refreshing')}",
+        }
+    except Exception as _ie:
+        checks["intel_api"] = {"status": "FAIL", "detail": str(_ie), "file": "intel_engine.py"}
+
+    # 8. Scanner running
+    try:
+        scan = _scanner.get_scan_results()
+        checks["scanner"] = {
+            "status": "PASS",
+            "detail": f"ok  running={scan.get('running', False)}  results={len(scan.get('results', []))}",
+        }
+    except Exception as _se:
+        checks["scanner"] = {"status": "FAIL", "detail": str(_se), "file": "scanner.py"}
+
+    # 9. Watchlist / DB round-trip
+    try:
+        wls = get_all_watchlists()
+        checks["watchlists"] = {
+            "status": "PASS",
+            "detail": f"{len(wls)} watchlist(s) found",
+        }
+    except Exception as _we:
+        checks["watchlists"] = {"status": "FAIL", "detail": str(_we), "file": "database.py"}
+
+    overall = "PASS" if all(
+        c["status"] in ("PASS", "WARN") for c in checks.values()
+    ) else "FAIL"
+    failures = [k for k, c in checks.items() if c["status"] == "FAIL"]
+
+    return jsonify({
+        "overall": overall,
+        "failures": failures,
+        "checks": checks,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    })
+
 
 # ---------------------------------------------------------------------------
 # Startup initialization — idempotent schema creation.
@@ -138,7 +341,40 @@ except Exception as _init_err:
     logger.error("init_db failed at startup: %s — will retry on first request", _init_err)
 
 # Start the background momentum scanner daemon (no-op if already running).
-_scanner.start_scanner()
+try:
+    _scanner.start_scanner()
+except Exception as _scan_err:
+    logger.error("scanner start failed at startup: %s", _scan_err)
+
+# Start the background intel alert daemon — checks every 30 min during market hours.
+def _intel_alert_loop():
+    while True:
+        try:
+            now = _intel._et_now()
+            # Run during extended market hours (7 AM – 6 PM ET, weekdays)
+            if now.weekday() < 5 and 7 <= now.hour < 18:
+                _intel.check_and_send_intel_alerts()
+        except Exception as _ie:
+            logger.warning("intel alert loop error: %s", _ie)
+        _time.sleep(1800)  # every 30 minutes
+
+try:
+    threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
+except Exception as _loop_err:
+    logger.error("intel alert loop failed to start: %s", _loop_err)
+
+# Pre-warm the intel cache so the first page load is instant
+try:
+    _intel.trigger_background_refresh()
+except Exception as _warm_err:
+    logger.error("intel bg refresh failed at startup: %s", _warm_err)
+
+# Pre-warm the market context cache (regime, sectors, RS baseline)
+try:
+    if _MKT_AVAILABLE:
+        _mkt.refresh_market_context_bg()
+except Exception as _mkt_warm_err:
+    logger.error("market context bg refresh failed at startup: %s", _mkt_warm_err)
 
 # ---------------------------------------------------------------------------
 # Startup migration: wipe stale mock-seeded prices from the DB.
@@ -316,7 +552,7 @@ def auto_refresh_stale_closes(tickers: list, data_map: dict | None = None) -> li
     return queued
 
 
-def _expire_stuck_loading(watchlist: list, data_map: dict = None) -> None:
+def _expire_stuck_loading(watchlist: list, data_map: dict | None = None) -> None:
     """
     Transition any ticker that has been in 'loading' state for longer than
     LOADING_TIMEOUT_SECS from 'loading' → 'error'.  Called on every dashboard
@@ -390,6 +626,137 @@ def _upsert_or_keep_snapshot(fresh: dict, existing: dict | None = None) -> str:
     else:
         upsert_stock_data(fresh)
         return "updated"
+
+
+def _get_mkt_ctx() -> dict:
+    """Return cached market context (regime, RS, sectors). Never raises."""
+    if _MKT_AVAILABLE:
+        try:
+            return _mkt.get_market_context()
+        except Exception:
+            pass
+    return {
+        "regime": "NEUTRAL", "regime_label": "Neutral",
+        "qqq_trend": "Unknown", "spy_trend": "Unknown",
+        "qqq_1d_pct": None, "spy_1d_pct": None,
+        "signal": "", "longs_ok": True, "shorts_ok": True,
+        "reduce_size": False, "no_trade": False,
+        "sectors": [], "leading_sectors": [], "weak_sectors": [],
+        "top_sector": None, "qqq_price": None, "spy_price": None,
+        "vix_level": None,
+    }
+
+
+def build_ai_trade_plan(stock: dict) -> dict:
+    """
+    Build an institutional-style AI trade plan from existing stock data fields.
+    Returns a dict consumed by the stock_detail template's trade plan panel.
+    """
+    swing_score  = stock.get("swing_score")  or 0
+    cat_score    = stock.get("catalyst_score") or 0
+    rr           = stock.get("risk_reward")
+    swing_status = stock.get("swing_status") or ""
+    swing_type   = stock.get("swing_setup_type") or ""
+    zone_prob    = stock.get("zone_probability")
+    zone_setup   = stock.get("zone_ai_setup") or ""
+    cat_summary  = (stock.get("catalyst_summary") or "").strip()
+    rvol         = stock.get("rel_volume") or 0
+    daily_trend  = stock.get("daily_trend") or ""
+    h4_trend     = stock.get("h4_trend") or ""
+    fvg_bull     = stock.get("fvg_bullish") or False
+    fvg_bear     = stock.get("fvg_bearish") or False
+    demand_grade = stock.get("demand_zone_grade") or ""
+    supply_grade = stock.get("supply_zone_grade") or ""
+    rs_score     = stock.get("rs_score") or 50
+    sector_etf   = stock.get("sector_etf") or ""
+    pct_ema20    = stock.get("pct_from_ema20") or 0
+    in_supply    = stock.get("in_supply_zone") or False
+    bos_bull     = False
+    try:
+        sm = _json.loads(stock.get("smart_money_json") or "{}")
+        bos_bull = bool(sm.get("bos_bullish"))
+    except Exception:
+        pass
+
+    # Grade
+    if swing_score >= 8 and cat_score >= 6 and rr and rr >= 2:
+        grade, grade_css = "A+", "plan-aplus"
+    elif swing_score >= 7 and cat_score >= 5:
+        grade, grade_css = "A",  "plan-a"
+    elif swing_score >= 5 or cat_score >= 5:
+        grade, grade_css = "B+", "plan-bplus"
+    else:
+        grade, grade_css = "B",  "plan-b"
+
+    # Probability
+    prob = zone_prob or max(30, min(90, 30 + swing_score * 4 + cat_score * 3))
+
+    # Reasons (green signals)
+    reasons = []
+    if cat_summary:
+        reasons.append(cat_summary[:90])
+    if rvol >= 4:
+        reasons.append(f"RVOL {rvol:.1f}x — institutional momentum")
+    elif rvol >= 2:
+        reasons.append(f"RVOL {rvol:.1f}x — above average volume")
+    elif rvol >= 1.3:
+        reasons.append(f"RVOL {rvol:.1f}x — moderate interest")
+    if "Bullish" in daily_trend:
+        reasons.append("Daily trend bullish — higher highs / higher lows")
+    if "Bullish" in h4_trend:
+        reasons.append("4H trend bullish — momentum aligning")
+    if demand_grade in ("A+", "A"):
+        reasons.append(f"Institutional demand zone ({demand_grade}) below")
+    if fvg_bull:
+        reasons.append("Bullish Fair Value Gap — liquidity void support")
+    if bos_bull:
+        reasons.append("Break of structure bullish — trend confirmed")
+    if rs_score >= 75:
+        reasons.append(f"Outperforming QQQ (RS {rs_score})")
+    if sector_etf:
+        reasons.append(f"Sector: {sector_etf} — check sector strength")
+
+    # Warnings (red flags / avoidance)
+    warnings = []
+    if in_supply or supply_grade in ("A+", "A"):
+        warnings.append("Near supply zone — watch for rejection")
+    if fvg_bear:
+        warnings.append("Bearish Fair Value Gap overhead — possible resistance")
+    if rvol < 0.8:
+        warnings.append("Low relative volume — weak institutional interest")
+    if rr and rr < 1.5:
+        warnings.append(f"R:R {rr:.1f}:1 is too weak — minimum 1.5:1 needed")
+    if pct_ema20 > 8:
+        warnings.append(f"Extended {pct_ema20:.1f}% above 20 EMA — wait for pullback")
+    if swing_status == "WAIT":
+        warnings.append("No confirmed entry signal — monitor for setup")
+    if rs_score < 30:
+        warnings.append(f"Weak RS ({rs_score}) — underperforming QQQ")
+
+    entry_low  = stock.get("entry_zone_low")
+    entry_high = stock.get("entry_zone_high")
+    entry_mid  = None
+    if entry_low and entry_high:
+        entry_mid = round((entry_low + entry_high) / 2, 2)
+
+    return {
+        "grade":       grade,
+        "grade_css":   grade_css,
+        "setup_label": zone_setup or swing_type or "Setup Forming",
+        "probability": prob,
+        "entry_low":   entry_low,
+        "entry_high":  entry_high,
+        "entry_mid":   entry_mid,
+        "stop":        stock.get("stop_level"),
+        "target1":     stock.get("target_1"),
+        "target2":     stock.get("target_2"),
+        "rr":          rr,
+        "reasons":     reasons[:7],
+        "warnings":    warnings[:4],
+        "has_plan":    bool(entry_low or stock.get("stop_level") or stock.get("target_1")),
+        "swing_score": swing_score,
+        "cat_score":   cat_score,
+    }
 
 
 def get_active_wl_id() -> int | None:
@@ -510,24 +877,38 @@ def get_setup_type_class(setup_type):
     """CSS class for the setup type pill (day-trading and swing types)."""
     return {
         # Day-trading legacy types
-        "Momentum Breakout":          "setup-momentum-breakout",
-        "Momentum Runner":            "setup-momentum-runner",
-        "Gap and Go":                 "setup-gap-go",
-        "Breakdown":                  "setup-breakdown",
-        "VWAP Reclaim":               "setup-vwap",
-        "Range Break":                "setup-range",
-        "ORB":                        "setup-orb",
-        # Swing trading types
-        "Pullback to Support":        "setup-pullback",
-        "Breakout Retest Forming":    "setup-breakout-retest",
-        "Extended Wait":              "setup-extended",
-        "At Resistance Avoid":        "setup-resistance-avoid",
-        "Near 50% Retracement":       "setup-fib50",
-        "Near 61.8% Retracement":     "setup-fib618",
-        "Order Block Test":           "setup-order-block",
-        "Trend Continuation":         "setup-trend-continuation",
-        "Weak Structure Avoid":       "setup-weak-structure",
-        "No Setup":                   "setup-none",
+        "Momentum Breakout":             "setup-momentum-breakout",
+        "Momentum Runner":               "setup-momentum-runner",
+        "Gap and Go":                    "setup-gap-go",
+        "Breakdown":                     "setup-breakdown",
+        "VWAP Reclaim":                  "setup-vwap",
+        "Range Break":                   "setup-range",
+        "ORB":                           "setup-orb",
+        # Swing pullback / entry types
+        "Pullback to Support":           "setup-pullback",
+        "Pullback to 20 EMA":            "setup-pullback",
+        "Pullback to 50 EMA":            "setup-pullback",
+        "Breakout Retest":               "setup-breakout-retest",
+        "Breakout Retest Forming":       "setup-breakout-retest",
+        "Near 50% Retracement":          "setup-fib50",
+        "Near 61.8% Retracement":        "setup-fib618",
+        "Order Block Test":              "setup-order-block",
+        # Continuation / run-up types (green/teal accent)
+        "Breakout Continuation":         "setup-continuation",
+        "Earnings Continuation":         "setup-continuation",
+        "Bull Flag":                     "setup-bull-flag",
+        "Relative Strength Leader":      "setup-rs-leader",
+        "Trend Continuation":            "setup-trend-continuation",
+        # Extended / chase (amber accent)
+        "Extended — Wait for Pullback":  "setup-extended",
+        "Extended — Wait":               "setup-extended",
+        "Chase Zone — Do Not Enter":     "setup-chase",
+        # Avoid
+        "At Resistance — Avoid":         "setup-resistance-avoid",
+        "At Resistance Avoid":           "setup-resistance-avoid",
+        "Weak Structure — Avoid":        "setup-weak-structure",
+        "Weak Structure Avoid":          "setup-weak-structure",
+        "No Setup":                      "setup-none",
     }.get(setup_type, "setup-none")
 
 
@@ -777,7 +1158,6 @@ def compute_journal_summary(entries: list) -> dict:
     total_pnl = round(sum(e.get("pnl_pct") or 0 for e in entries), 2)
 
     # Per-setup breakdown — rank by win rate (min 2 trades to appear in ranked list)
-    from collections import defaultdict
     setup_map = defaultdict(list)
     for e in entries:
         st = e.get("setup_type") or "Untagged"
@@ -1059,7 +1439,14 @@ def compute_trade_coach(stock: dict, plan: dict, market_temp: dict, risk_setting
             level, css, status = "reduce", "coach-reduce", "REDUCE SIZE"
 
     elif perm == "WATCH":
-        if is_extended_entry:
+        if "Bullish pullback" in perm_rsn:
+            msg = (
+                "Watch — Bullish pullback in progress. Price is above both 20 EMA and 50 EMA "
+                "with a healthy Fibonacci retracement. Trend structure (HH/HL) not yet confirmed "
+                "— wait for a higher low to print before entering. Strong continuation candidate "
+                "if demand holds here."
+            )
+        elif is_extended_entry:
             msg = ("Watch only. Price is extended from ideal entry — do not chase. "
                    "Wait for a pullback into the zone.")
         elif swing_sc >= 7:
@@ -1154,8 +1541,10 @@ def compute_trade_permission(stock: dict, trade_mode: str) -> dict:
         return {"permission": "BLOCKED", "css": "perm-blocked",
                 "reason": "Avoid bias — no directional edge, skip this stock"}
 
-    # Label-based extension (existing system signal)
-    if entry == "Extended":
+    # Label-based extension — hard block for day trades only.
+    # Swing trades use the independent EMA-distance check below so they aren't
+    # double-penalised when the label fires on a healthy pullback leg.
+    if entry == "Extended" and trade_mode != "SWING TRADE":
         return {"permission": "BLOCKED", "css": "perm-blocked",
                 "reason": "Entry extended — do not chase, wait for pullback to zone"}
 
@@ -1286,6 +1675,21 @@ def compute_trade_permission(stock: dict, trade_mode: str) -> dict:
         # Structure — HH/HL on Daily or 4H required before any entry
         structure_valid = daily_hh_hl or h4_hh_hl
         if not structure_valid:
+            # Classify as bullish pullback (WATCH) when price is above both EMAs
+            # and within a healthy fib retracement — trend still intact, structure forming
+            above_20ema = pct_ema20 is not None and pct_ema20 > 0
+            above_50ema = pct_ema50 is not None and pct_ema50 > 0
+            fib_705_val = stock.get("fib_705")
+            in_fib_zone = bool(
+                current and fib_618 and fib_705_val and
+                fib_705_val <= current <= fib_618 * 1.02
+            ) or bool(
+                current and fib_50 and current >= fib_50 * 0.97
+            )
+            if long_bias and above_20ema and above_50ema and in_fib_zone:
+                return {"permission": "WATCH", "css": "perm-watch",
+                        "reason": ("Bullish pullback / continuation watch — price above 20 & 50 EMA "
+                                   "within healthy fib zone; wait for HH/HL structure to confirm")}
             return {"permission": "BLOCKED", "css": "perm-blocked",
                     "reason": "No valid structure — need HH/HL confirmed on daily or 4H chart"}
 
@@ -1509,7 +1913,6 @@ def compute_freshness(
     # Determine session if not supplied
     if session is None:
         try:
-            from data_fetcher import market_session_now
             session = market_session_now()
         except Exception:
             session = "regular"
@@ -1655,7 +2058,6 @@ def get_orb_session_banner() -> dict:
     Includes the market session so the frontend always knows whether
     signals are currently live or display-only.
     """
-    from data_fetcher import orb_phase_now, market_session_now
     phase   = orb_phase_now()
     session = market_session_now()
     label, phase_class = get_orb_phase_label(phase)
@@ -1669,7 +2071,7 @@ def get_orb_session_banner() -> dict:
     }
 
 
-def annotate(stock: dict, trade_mode: str = None) -> dict:
+def annotate(stock: dict, trade_mode: str | None = None) -> dict:
     """Add all display-only fields to a stock dict (non-destructive to DB fields)."""
     # ── Ticker state display ─────────────────────────────────────────────────
     _state = stock.get("ticker_state") or "ready"
@@ -1736,7 +2138,6 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
     # ── Session-aware display state ─────────────────────────────────────────
     # Get session once per annotate call so all derived fields are consistent.
     try:
-        from data_fetcher import market_session_now
         _session = market_session_now()
     except Exception:
         _session = "regular"
@@ -1832,8 +2233,6 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
     stock["swing_plan_stale"]     = _has_plan_fields and not _has_ema
 
     # Decode catalyst_category JSON → list of {key, label} dicts for templates
-    import json as _json
-    from news_fetcher import CATALYST_CATEGORIES as _CAT_DEFS, freshness_label as _fl
     raw_cats = stock.get("catalyst_category") or "[]"
     try:
         cat_keys = _json.loads(raw_cats) if isinstance(raw_cats, str) else list(raw_cats)
@@ -1860,9 +2259,46 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
     if _swing_score is None:
         stock["swing_score"] = 0
     stock["swing_score_class"]      = get_score_class(stock.get("swing_score"))
-    stock["swing_status_class"]     = get_swing_status_class(stock.get("swing_status"))
+    stock["swing_status_class"]     = get_swing_status_class(stock.get("swing_status") or "")
     stock["swing_setup_type_class"] = get_setup_type_class(stock.get("swing_setup_type") or "No Setup")
     stock["swing_grade"]            = compute_swing_grade(stock.get("swing_score") or 1)
+    stock["continuation_score"]     = compute_continuation_score(stock)
+
+    # ── Institutional zone display fields ─────────────────────────────────────
+    _zones_str = stock.get("zones_json")
+    try:
+        stock["parsed_zones"] = _json.loads(_zones_str) if _zones_str else []
+    except Exception:
+        stock["parsed_zones"] = []
+
+    _sm_str = stock.get("smart_money_json")
+    try:
+        stock["smart_money"] = _json.loads(_sm_str) if _sm_str else {}
+    except Exception:
+        stock["smart_money"] = {}
+
+    _reason_str = stock.get("zone_ai_reason")
+    try:
+        stock["zone_ai_reasons"] = _json.loads(_reason_str) if _reason_str else []
+    except Exception:
+        stock["zone_ai_reasons"] = []
+
+    # Separate demand/supply zones for template convenience
+    _pz = stock.get("parsed_zones") or []
+    stock["demand_zones"] = sorted(
+        [z for z in _pz if z.get("zone_type") == "demand"],
+        key=lambda z: z.get("final_score", 0), reverse=True
+    )
+    stock["supply_zones"] = sorted(
+        [z for z in _pz if z.get("zone_type") == "supply"],
+        key=lambda z: z.get("final_score", 0), reverse=True
+    )
+
+    # Zone grade CSS mapping
+    _grade_css = {"A+": "zone-grade-aplus", "A": "zone-grade-a",
+                  "B+": "zone-grade-bplus", "B": "zone-grade-b"}
+    stock["demand_zone_grade_css"] = _grade_css.get(stock.get("demand_zone_grade") or "", "")
+    stock["supply_zone_grade_css"] = _grade_css.get(stock.get("supply_zone_grade") or "", "")
 
     # ── Plan mode display helpers ─────────────────────────────────────────────
     _plan_mode = stock.get("plan_mode") or "none"
@@ -1990,7 +2426,7 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
 
     # If swing_score is populated, override final_action from swing_status
     if stock.get("swing_score"):
-        _sfa, _sfa_class, _sfa_reason = compute_swing_final_action(stock.get("swing_status"))
+        _sfa, _sfa_class, _sfa_reason = compute_swing_final_action(stock.get("swing_status") or "")
         stock["final_action"]       = _sfa
         stock["final_action_class"] = _sfa_class
         stock["final_action_reason"]= _sfa_reason
@@ -2004,13 +2440,8 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
         logger.warning("annotate  ticker=%s  trade_permission failed: %s", stock.get("ticker", "?"), _tp_exc)
         stock["trade_permission"] = {"permission": "WATCH", "css": "perm-watch", "reason": ""}
 
-    # ── Simplified 4-state decision badge ────────────────────────────────────
-    # Maps all conditions to one clear morning label: A+ READY / WATCH / EXTENDED / REJECTED
-    # Rules (in priority order):
-    #   REJECTED  — Avoid bias, structural avoid statuses, or swing_score < 3
-    #   EXTENDED  — price is_extended flag, entry_quality=Extended, or >5% above entry zone
-    #   A+ READY  — swing_score ≥ 7, actionable status, catalyst ≥ 4, R:R ≥ 1.5
-    #   WATCH     — everything else (decent setup, conditions not fully aligned)
+    # ── Simplified decision badge (grade-aware, 7 states) ────────────────────
+    # Priority order: REJECTED → CHASE ZONE → A+/A/B+ READY → B WATCH → FORMING → WATCH
     _sfa_ss    = stock.get("swing_status") or ""
     _sfa_sw    = stock.get("swing_score") or 0
     _sfa_rr    = stock.get("risk_reward")
@@ -2019,38 +2450,171 @@ def annotate(stock: dict, trade_mode: str = None) -> dict:
     _sfa_bias  = stock.get("trade_bias") or ""
     _sfa_cat   = stock.get("catalyst_score") or 0
     _sfa_edist = stock.get("entry_distance_pct") or 0
+    _sfa_grade = stock.get("swing_grade") or "D"
+    _sfa_stype = stock.get("swing_setup_type") or ""
+    _sfa_cont  = stock.get("continuation_score") or 0
+    _sfa_trend = stock.get("daily_trend") or ""
+    _sfa_struct= bool(stock.get("daily_hh_hl")) or bool(stock.get("h4_hh_hl"))
 
+    _CONT_TYPES = {
+        "Breakout Continuation", "Gap and Go", "Earnings Continuation",
+        "Bull Flag", "Relative Strength Leader", "Trend Continuation",
+    }
+    _CHASE_TYPES = {"Chase Zone — Do Not Enter"}
+    _EXTENDED_TYPES = {"Extended — Wait for Pullback", "Extended — Wait",
+                       "At Resistance — Avoid"}
+
+    # REJECTED: only true Avoid bias or confirmed-weak structure with no edge
     _sfa_is_rejected = (
         _sfa_bias == "Avoid" or
-        _sfa_ss in ("AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE") or
-        (_sfa_sw > 0 and _sfa_sw < 3)
+        (_sfa_sw > 0 and _sfa_sw < 3 and _sfa_cont < 4 and
+         _sfa_trend not in ("Bullish", "Bullish Lean"))
     )
-    _sfa_is_extended = (
-        _sfa_ext or
-        _sfa_eq == "Extended" or
-        (isinstance(_sfa_edist, (int, float)) and _sfa_edist > 5.0)
-    )
+    _sfa_is_chase = (_sfa_stype in _CHASE_TYPES or
+                     (_sfa_ext and not _sfa_struct and _sfa_sw < 5))
+    _sfa_is_extended = (_sfa_stype in _EXTENDED_TYPES or
+                        _sfa_eq == "Extended" or
+                        (isinstance(_sfa_edist, (int, float)) and _sfa_edist > 5.0
+                         and not _sfa_stype in _CONT_TYPES))
+
+    _READY_STATUSES = ("READY — LEVEL HOLDS", "PRE-CONFIRMATION", "TREND CONTINUATION")
     _sfa_is_aplus = (
+        not _sfa_is_rejected and not _sfa_is_chase and not _sfa_is_extended and
+        _sfa_sw >= 8 and _sfa_ss in _READY_STATUSES and
+        _sfa_cat >= 4 and (_sfa_rr is None or _sfa_rr >= 1.5)
+    )
+    _sfa_is_a = (
+        not _sfa_is_rejected and not _sfa_is_chase and not _sfa_is_extended and
+        _sfa_sw >= 7 and (_sfa_ss in _READY_STATUSES or _sfa_stype in _CONT_TYPES) and
+        (_sfa_rr is None or _sfa_rr >= 1.2)
+    )
+    _sfa_is_bplus = (
+        not _sfa_is_rejected and not _sfa_is_chase and
+        (_sfa_sw >= 6 or (_sfa_cont >= 6 and _sfa_stype in _CONT_TYPES))
+    )
+    _sfa_is_forming = (
         not _sfa_is_rejected and
-        not _sfa_is_extended and
-        _sfa_sw >= 7 and
-        _sfa_ss in ("READY — LEVEL HOLDS", "PRE-CONFIRMATION", "TREND CONTINUATION") and
-        _sfa_cat >= 4 and
-        (_sfa_rr is None or _sfa_rr >= 1.5)
+        (_sfa_sw >= 4 or _sfa_cont >= 5)
     )
 
     if _sfa_is_rejected:
         stock["simplified_action"]       = "REJECTED"
         stock["simplified_action_class"] = "sfa-rejected"
+    elif _sfa_is_chase:
+        stock["simplified_action"]       = "CHASE ZONE"
+        stock["simplified_action_class"] = "sfa-chase"
     elif _sfa_is_extended:
         stock["simplified_action"]       = "EXTENDED"
         stock["simplified_action_class"] = "sfa-extended"
     elif _sfa_is_aplus:
         stock["simplified_action"]       = "A+ READY"
         stock["simplified_action_class"] = "sfa-aplus"
+    elif _sfa_is_a:
+        stock["simplified_action"]       = "A READY"
+        stock["simplified_action_class"] = "sfa-a"
+    elif _sfa_is_bplus:
+        stock["simplified_action"]       = "B+ WATCH"
+        stock["simplified_action_class"] = "sfa-bplus"
+    elif _sfa_is_forming:
+        stock["simplified_action"]       = "FORMING"
+        stock["simplified_action_class"] = "sfa-forming"
     else:
         stock["simplified_action"]       = "WATCH"
         stock["simplified_action_class"] = "sfa-watch"
+
+    # ── Relative Strength & Sector (market_engine) ────────────────────────────
+    if _MKT_AVAILABLE:
+        try:
+            _mkt_ctx   = _get_mkt_ctx()
+            _qqq_1d    = _mkt_ctx.get("qqq_1d_pct")
+            _stock_gap = stock.get("gap_pct")
+            _rs_db     = stock.get("rs_score")   # stored 20-day RS if available
+
+            # Fast intraday RS from today's gap vs QQQ gap
+            _rs_intra = _mkt.rs_score_intraday(_stock_gap, _qqq_1d)
+            # Prefer stored 20-day RS; use intraday if not computed yet
+            _rs_final = _rs_db if _rs_db else _rs_intra
+
+            stock["rs_score_display"] = _rs_final
+            stock["rs_label"]         = _mkt.rs_label(_rs_final)
+            stock["rs_class"]         = _mkt.rs_css_class(_rs_final)
+            stock["rs_vs_qqq_display"] = (
+                f"{'+' if (_stock_gap or 0) - (_qqq_1d or 0) >= 0 else ''}"
+                f"{((_stock_gap or 0) - (_qqq_1d or 0)):.1f}% vs QQQ"
+            )
+
+            # Sector for this ticker
+            _etf = stock.get("sector_etf") or ""
+            if not _etf and _MKT_AVAILABLE:
+                _etf, _ = _mkt.get_sector_for_ticker(stock.get("ticker") or "")
+                if _etf:
+                    stock["sector_etf"] = _etf
+            _leading = _mkt_ctx.get("leading_sectors") or []
+            stock["sector_name"]    = _mkt.SECTOR_ETFS.get(_etf, "")
+            stock["sector_leading"] = _etf in _leading if _etf else False
+            stock["sector_class"]   = "sector-chip-leading" if stock["sector_leading"] else "sector-chip"
+
+            # Market context for templates
+            stock["mkt_regime"]       = _mkt_ctx.get("regime", "NEUTRAL")
+            stock["mkt_regime_label"] = _mkt_ctx.get("regime_label", "Neutral")
+        except Exception as _rs_exc:
+            logger.debug("annotate RS/sector failed: %s", _rs_exc)
+            stock.setdefault("rs_score_display", 50)
+            stock.setdefault("rs_label",  "Neutral RS")
+            stock.setdefault("rs_class",  "rs-avg")
+            stock.setdefault("sector_name",    "")
+            stock.setdefault("sector_leading", False)
+            stock.setdefault("sector_class",   "sector-chip")
+    else:
+        stock.setdefault("rs_score_display", 50)
+        stock.setdefault("rs_label",  "Neutral RS")
+        stock.setdefault("rs_class",  "rs-avg")
+        stock.setdefault("sector_name",    "")
+        stock.setdefault("sector_leading", False)
+        stock.setdefault("sector_class",   "sector-chip")
+
+    # ── Trade Avoidance AI — warning flags ────────────────────────────────────
+    _avoid_flags = []
+    _pct_ema20 = stock.get("pct_from_ema20") or 0
+    _rvol      = stock.get("rel_volume") or 0
+    _rr_val    = stock.get("risk_reward")
+    _in_sup    = stock.get("in_supply_zone") or False
+    _fvg_b     = stock.get("fvg_bearish") or False
+    _lh_ll     = stock.get("daily_lh_ll") or False
+    _sup_grade = stock.get("supply_zone_grade") or ""
+    _sw_stat   = stock.get("swing_status") or ""
+    _price     = stock.get("current_price") or 0
+    _pm_high   = stock.get("premarket_high") or 0
+    _prev_day_high = stock.get("prev_day_high") or 0
+
+    if _in_sup or _sup_grade in ("A+", "A"):
+        _avoid_flags.append({"icon": "⚠", "text": "At institutional supply zone — watch for rejection", "level": "high"})
+    if _fvg_b:
+        _avoid_flags.append({"icon": "⬛", "text": "Bearish FVG overhead — institutional resistance", "level": "medium"})
+    if abs(_pct_ema20) > 8 and _pct_ema20 > 0:
+        _avoid_flags.append({"icon": "📈", "text": f"Extended {_pct_ema20:.1f}% above 20 EMA — high chase risk", "level": "high"})
+    if _rvol < 0.8 and _price > 0:
+        _avoid_flags.append({"icon": "📉", "text": "Low relative volume — weak institutional conviction", "level": "medium"})
+    if _rr_val is not None and _rr_val < 1.5:
+        _avoid_flags.append({"icon": "⚖", "text": f"Risk/reward {_rr_val:.1f}:1 — below 1.5:1 minimum", "level": "high"})
+    if _lh_ll:
+        _avoid_flags.append({"icon": "📉", "text": "Downtrend structure (LH/LL) — against institutional flow", "level": "medium"})
+    if _pm_high and _price and _prev_day_high and _price > _prev_day_high * 1.05:
+        _avoid_flags.append({"icon": "🔴", "text": "Significant gap up — late entry risk if chasing open", "level": "medium"})
+    if _sw_stat in ("WAIT", "NOT ENOUGH EDGE"):
+        _avoid_flags.append({"icon": "⏸", "text": "No confirmed entry setup — monitor only", "level": "low"})
+
+    stock["avoidance_flags"]     = _avoid_flags
+    stock["avoidance_flag_count"]= len(_avoid_flags)
+    stock["avoidance_high"]      = any(f["level"] == "high" for f in _avoid_flags)
+
+    # ── AI Trade Plan ─────────────────────────────────────────────────────────
+    try:
+        stock["ai_trade_plan"] = build_ai_trade_plan(stock)
+    except Exception as _tp_err:
+        logger.debug("annotate  ai_trade_plan failed: %s", _tp_err)
+        stock["ai_trade_plan"] = {"has_plan": False, "grade": "B", "grade_css": "plan-b",
+                                   "reasons": [], "warnings": [], "probability": 0}
 
     return stock
 
@@ -2130,6 +2694,7 @@ def compute_no_trade_assessment(ranked: list, top5: list) -> dict:
     # 1. Swing score check (primary signal in swing mode)
     swing_scores = [s.get("swing_score") or 0 for s in tradeable]
     has_swing_data = any(swing_scores)
+    max_swing = 0  # initialized here; set below if has_swing_data
 
     if has_swing_data:
         avg_swing = sum(swing_scores) / len(swing_scores) if swing_scores else 0
@@ -2307,6 +2872,7 @@ def compute_summary_cards(stocks: list) -> dict:
 _DASHBOARD_EMPTY = dict(
     ranked=[], top5=[], triggered=[], summary={},
     missing=[], watchlist=[], notes={}, secondary=[],
+    scanner_buckets={"aplus": [], "forming": [], "chase": [], "avoid": []},
     alt_modes=[], all_wls=[], active_wl=None, wl_counts={},
     no_trade={"is_no_trade": False, "lock_signals": False, "verdict": "",
               "reasons": [], "severity": "none"},
@@ -2332,12 +2898,21 @@ _DASHBOARD_EMPTY = dict(
                  "size_zone": "unknown", "why": "",
                  "mode_desc": "—", "es_price": None, "es_change_pct": None,
                  "es_above_vwap": None, "sectors": {}},
+    mkt_context={
+        "regime": "NEUTRAL", "regime_label": "Neutral",
+        "qqq_trend": "Unknown", "spy_trend": "Unknown",
+        "qqq_1d_pct": None, "spy_1d_pct": None,
+        "signal": "", "longs_ok": True, "shorts_ok": True,
+        "sectors": [], "leading_sectors": [], "weak_sectors": [],
+        "top_sector": None, "vix_level": None,
+        "qqq_price": None, "spy_price": None,
+    },
 )
 
 
-@app.route("/")
+@app.route("/account")
 def dashboard():
-    """Main dashboard — summary cards, top 5, and full ranked watchlist."""
+    """Account & Performance Hub — watchlist, PnL, journal, discipline tracking."""
     try:
         return _dashboard_inner()
     except Exception as exc:
@@ -2385,16 +2960,25 @@ def _dashboard_inner():
     missing = [t for t in watchlist if t not in data_map]
 
     ranked     = rank_stocks(stocks)
-    # Top candidates: swing_score ≥ 6 and status not extended/avoid, OR fall back
-    # to day-trading criteria if swing fields are absent
+
+    _CONT_TYPES_TOP5 = {"Breakout Continuation", "Gap and Go", "Earnings Continuation",
+                        "Bull Flag", "Relative Strength Leader", "Trend Continuation"}
+    _AVOID_STATUSES = {"WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE", "NOT ENOUGH EDGE"}
+
+    # Top candidates: swing_score ≥ 6 OR continuation stock with score ≥ 5;
+    # also fall back to day-trading criteria when swing fields are absent.
     top5       = [
         s for s in ranked
         if (
+            # Continuation stocks: lower score bar when setup type is actionable
+            (s.get("swing_score") or 0) >= 5
+            and s.get("swing_setup_type") in _CONT_TYPES_TOP5
+            and s.get("swing_status") not in _AVOID_STATUSES
+            and s.get("trade_bias") != "Avoid"
+        ) or (
             # Swing mode: good score + actionable status
             (s.get("swing_score") or 0) >= 6
-            and s.get("swing_status") not in (
-                "WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE", "NOT ENOUGH EDGE"
-            )
+            and s.get("swing_status") not in _AVOID_STATUSES
             and s.get("trade_bias") != "Avoid"
         ) or (
             # Legacy day-trading fallback when swing fields absent
@@ -2425,6 +3009,30 @@ def _dashboard_inner():
     top5_tickers = {s["ticker"] for s in top5}
     secondary    = compute_secondary_watchlist(ranked, top5_tickers)
 
+    # ── Scanner buckets: 4-quadrant view of the full watchlist ───────────────
+    _CHASE_STYPE  = {"Chase Zone — Do Not Enter"}
+    _EXT_STYPE    = {"Extended — Wait for Pullback", "Extended — Wait", "At Resistance — Avoid"}
+    _READY_SFA    = {"A+ READY", "A READY"}
+    _FORMING_SFA  = {"B+ WATCH", "FORMING", "WATCH", "B WATCH"}
+
+    scanner_buckets: dict = {"aplus": [], "forming": [], "chase": [], "avoid": []}
+    for _sb in ranked:
+        _sfa_  = _sb.get("simplified_action") or ""
+        _bias_ = _sb.get("trade_bias") or ""
+        _stype_= _sb.get("swing_setup_type") or ""
+        if _bias_ == "Avoid" or _sfa_ == "REJECTED":
+            if len(scanner_buckets["avoid"]) < 6:
+                scanner_buckets["avoid"].append(_sb)
+        elif _sfa_ in ("CHASE ZONE", "EXTENDED") or _stype_ in _CHASE_STYPE or _stype_ in _EXT_STYPE:
+            if len(scanner_buckets["chase"]) < 8:
+                scanner_buckets["chase"].append(_sb)
+        elif _sfa_ in _READY_SFA:
+            if len(scanner_buckets["aplus"]) < 6:
+                scanner_buckets["aplus"].append(_sb)
+        else:
+            if len(scanner_buckets["forming"]) < 10:
+                scanner_buckets["forming"].append(_sb)
+
     # alt_modes kept for backward compat but no_trade replaces them in template
     alt_modes = []
 
@@ -2451,6 +3059,9 @@ def _dashboard_inner():
 
     market_temp = _get_market_temperature()
 
+    # Market regime + sector strength from market_engine (cached, 60 min TTL)
+    mkt_context = _get_mkt_ctx()
+
     return render_template(
         "dashboard.html",
         ranked=ranked,
@@ -2461,6 +3072,7 @@ def _dashboard_inner():
         watchlist=watchlist,
         notes=notes_map,
         secondary=secondary,
+        scanner_buckets=scanner_buckets,
         alt_modes=alt_modes,
         no_trade=no_trade,
         all_wls=all_wls,
@@ -2475,6 +3087,7 @@ def _dashboard_inner():
         trades_today=trades_today,
         losses_today=losses_today,
         market_temp=market_temp,
+        mkt_context=mkt_context,
     )
 
 
@@ -2503,7 +3116,7 @@ def _onboard_ticker_bg(ticker: str) -> None:
         from data_fetcher import fetch_live_data as _fetch_live
         live = _fetch_live(ticker)
         price = float(live.get("current_price") or 0) if live else 0.0
-        if price > 0:
+        if live and price > 0:
             gap = float(live.get("gap_pct") or 0)
             partial = {
                 "ticker":               ticker,
@@ -3007,7 +3620,6 @@ _OPT_RL_BACKOFF = {
 def _options_session_ttl() -> tuple[int, int, str, bool]:
     """Return (cache_ttl, rl_backoff, session_label, is_after_hours)."""
     try:
-        from data_fetcher import market_session_now
         session = market_session_now()
     except Exception:
         session = "closed"
@@ -3175,6 +3787,68 @@ def save_stock_note(ticker):
     save_note(ticker.upper(), request.form.get("note_text", ""))
     flash("Notes saved.", "success")
     return redirect(url_for("stock_detail", ticker=ticker.upper()))
+
+
+@app.route("/api/fib-override/<ticker>", methods=["POST"])
+def fib_override(ticker):
+    """
+    Apply manual Fibonacci anchors for a ticker.
+    Accepts: fib_manual_high, fib_manual_low (float, POST form).
+    Recomputes all fib levels from the given anchors and saves to DB.
+    """
+    t = ticker.upper()
+    try:
+        hi = float(request.form.get("fib_manual_high") or 0)
+        lo = float(request.form.get("fib_manual_low")  or 0)
+    except (TypeError, ValueError):
+        flash("Invalid fib values — enter numeric prices.", "error")
+        return redirect(url_for("stock_detail", ticker=t))
+
+    if hi <= lo or hi <= 0 or lo <= 0:
+        flash("Swing high must be greater than swing low.", "error")
+        return redirect(url_for("stock_detail", ticker=t))
+
+    rng = hi - lo
+    from database import get_db
+    update_data = {
+        "ticker":        t,
+        "fib_high":      round(hi, 2),
+        "fib_low":       round(lo, 2),
+        "fib_236":       round(hi - 0.236 * rng, 2),
+        "fib_382":       round(hi - 0.382 * rng, 2),
+        "fib_50":        round(hi - 0.500 * rng, 2),
+        "fib_618":       round(hi - 0.618 * rng, 2),
+        "fib_65":        round(hi - 0.650 * rng, 2),
+        "fib_786":       round(hi - 0.786 * rng, 2),
+        "fib_mode":      "manual",
+        "fib_direction": "bullish",
+        "fib_confidence": 10.0,
+    }
+    try:
+        conn = get_db()
+        conn.execute("""
+            UPDATE stock_data SET
+                fib_high      = :fib_high,
+                fib_low       = :fib_low,
+                fib_236       = :fib_236,
+                fib_382       = :fib_382,
+                fib_50        = :fib_50,
+                fib_618       = :fib_618,
+                fib_65        = :fib_65,
+                fib_786       = :fib_786,
+                fib_mode      = :fib_mode,
+                fib_direction = :fib_direction,
+                fib_confidence = :fib_confidence
+            WHERE ticker = :ticker
+        """, update_data)
+        conn.commit()
+        conn.close()
+        flash(f"Manual fib anchors saved for {t}: High ${hi:.2f} / Low ${lo:.2f}", "success")
+    except Exception as exc:
+        logger.error("fib_override: %s", exc)
+        flash("Failed to save fib override.", "error")
+
+    return redirect(url_for("stock_detail", ticker=t))
 
 
 @app.route("/stock/<ticker>/refresh", methods=["POST"])
@@ -3534,7 +4208,7 @@ def toggle_auto_classify(ticker):
 
 @app.route("/quick")
 def quick_mode():
-    """Mobile Quick Mode — top 3 priority stocks for fast decision-making."""
+    """Execution Command Center — full Bloomberg-style institutional layout."""
     wl_id     = get_active_wl_id()
     watchlist = get_watchlist_stocks(wl_id) if wl_id else []
 
@@ -3544,26 +4218,73 @@ def quick_mode():
 
     if watchlist:
         auto_refresh_stale_closes(watchlist, data_map=data_map)
-    stocks   = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
-    ranked   = rank_stocks(stocks)
-    top3     = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
+    stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
+    ranked  = rank_stocks(stocks)
+    # Show all ranked stocks (not just top 3) — focus mode collapses to top 5 client-side
+    valid   = [s for s in ranked if s.get("trade_bias") != "Avoid"]
 
-    # combined_confidence and final_action are already set by annotate()
+    # Market context for command strip
+    mkt_ctx = _get_mkt_ctx()
+
+    # AI market story
+    story = {}
+    if _MKT_AVAILABLE:
+        try:
+            liq_score = None
+            try:
+                import liquidity_engine as _liq
+                liq_score = _liq.get_liquidity_status().get("score")
+            except Exception:
+                pass
+            story = _mkt.generate_market_story(mkt_ctx, liq_score)
+        except Exception as _se:
+            logger.debug("market story failed: %s", _se)
+
     return render_template(
         "quick.html",
-        stocks=top3,
+        stocks=valid,
         orb_session=get_orb_session_banner(),
+        mkt=mkt_ctx,
+        story=story,
     )
 
 
 @app.route("/api/quick")
 def api_quick():
-    """JSON for Quick Mode live refresh — top 3 priority stocks."""
+    """JSON for Execution Command Center live refresh — all ranked stocks + market context."""
     try:
         return jsonify(_build_quick_payload(get_active_wl_id()))
     except Exception as exc:
         logger.error("api_quick failed: %s", exc, exc_info=True)
         return jsonify({"error": "quick refresh failed"}), 500
+
+
+@app.route("/api/market-story")
+def api_market_story():
+    """AI market narrative for the Morning Command Center header."""
+    try:
+        mkt_ctx   = _get_mkt_ctx()
+        liq_score = None
+        try:
+            import liquidity_engine as _liq
+            liq_score = _liq.get_liquidity_status().get("score")
+        except Exception:
+            pass
+        if _MKT_AVAILABLE:
+            story = _mkt.generate_market_story(mkt_ctx, liq_score)
+        else:
+            story = {
+                "headline": "Market data loading…",
+                "body": "Fetching regime and sector data.",
+                "sentiment": "neutral",
+                "bullets": [],
+                "permissions": [],
+                "regime": "NEUTRAL",
+            }
+        return jsonify({"ok": True, "story": story, "mkt_ctx": mkt_ctx})
+    except Exception as exc:
+        logger.error("api_market_story: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -3670,24 +4391,36 @@ def batch_refresh_exec_states(tickers: list[str], data_map: dict) -> dict:
             return ticker, None
 
     max_workers = min(len(tickers), 8)   # cap at 8 concurrent yfinance calls
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    # Do NOT use 'with ThreadPoolExecutor' — its __exit__ calls shutdown(wait=True)
+    # which blocks indefinitely when yfinance threads hang on cloud IPs.
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futures = {pool.submit(_refresh_one, t): t for t in tickers}
-        for future in as_completed(futures):
-            ticker, updated = future.result()
-            if updated is None:
-                continue
-            refreshed_map[ticker] = updated
-            # Persist if exec_state or any scored field changed
-            old = data_map.get(ticker, {})
-            _changed_fields = (
-                "exec_state", "momentum_score", "setup_score", "orb_status",
-                "orb_ready", "entry_quality", "order_block", "setup_type",
-            )
-            if any(updated.get(f) != old.get(f) for f in _changed_fields):
+        try:
+            for future in as_completed(futures, timeout=25):
                 try:
-                    update_live_fields(updated)
+                    ticker, updated = future.result()
                 except Exception as exc:
-                    logger.warning("update_live_fields failed for %s: %s", ticker, exc)
+                    logger.warning("batch_refresh future result failed: %s", exc)
+                    continue
+                if updated is None:
+                    continue
+                refreshed_map[ticker] = updated
+                # Persist if exec_state or any scored field changed
+                old = data_map.get(ticker, {})
+                _changed_fields = (
+                    "exec_state", "momentum_score", "setup_score", "orb_status",
+                    "orb_ready", "entry_quality", "order_block", "setup_type",
+                )
+                if any(updated.get(f) != old.get(f) for f in _changed_fields):
+                    try:
+                        update_live_fields(updated)
+                    except Exception as exc:
+                        logger.warning("update_live_fields failed for %s: %s", ticker, exc)
+        except Exception:
+            logger.warning("batch_refresh_exec_states: timed out — returning partial results")
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     return refreshed_map
 
@@ -3737,8 +4470,52 @@ def _stock_summary(s: dict) -> dict:
         "is_extended", "swing_data_available",
         # Needed for live badge patching on the detail page
         "trade_permission",
+        # Relative Strength (needed by execution page)
+        "rs_score_display", "rs_label", "rs_class", "rs_vs_qqq_display",
+        # VWAP
+        "vwap",
+        # Sector
+        "sector_etf", "sector_name", "sector_leading", "sector_class",
     ]
     return {f: s.get(f) for f in fields}
+
+
+# ---------------------------------------------------------------------------
+# Non-blocking background exec-state refresh
+# ---------------------------------------------------------------------------
+# Keeps yfinance calls entirely off the gunicorn request thread.
+# Endpoints call _trigger_exec_state_refresh() and return stale DB data
+# immediately; this background thread updates the DB asynchronously.
+
+_bg_refresh_state: dict = {"active": False, "last_triggered": 0.0}
+_bg_refresh_lock = threading.Lock()
+
+
+def _trigger_exec_state_refresh(wl_id: int | None) -> None:
+    """Fire-and-forget background refresh. No-op if one is already running or
+    was triggered within the last 45 seconds."""
+    with _bg_refresh_lock:
+        now = _time.monotonic()
+        if _bg_refresh_state["active"] or (now - _bg_refresh_state["last_triggered"]) < 45.0:
+            return
+        _bg_refresh_state["active"] = True
+        _bg_refresh_state["last_triggered"] = now
+
+    def _run():
+        try:
+            watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+            all_data  = get_all_stock_data()
+            data_map  = {s["ticker"]: s for s in all_data}
+            tickers   = [t for t in watchlist if t in data_map]
+            if tickers:
+                batch_refresh_exec_states(tickers, data_map)
+        except Exception as exc:
+            logger.warning("background exec-state refresh failed: %s", exc)
+        finally:
+            with _bg_refresh_lock:
+                _bg_refresh_state["active"] = False
+
+    threading.Thread(target=_run, daemon=True, name="exec-state-refresh").start()
 
 
 # ---------------------------------------------------------------------------
@@ -3751,7 +4528,7 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
     _trade_mode = get_setting("trading_mode") or "SWING TRADE"
     all_data    = get_all_stock_data()
     data_map    = {s["ticker"]: s for s in all_data}
-    data_map    = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
+    _trigger_exec_state_refresh(wl_id)   # non-blocking; returns stale data this call
     stocks      = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked    = rank_stocks(stocks)
     top5      = [
@@ -3795,25 +4572,47 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
     }
 
 
+def _smart_alerts() -> list:
+    """Return recent alerts enriched with CRITICAL/HIGH/MEDIUM/WATCHLIST priority."""
+    raw = get_alerts(limit=25)
+    out = []
+    for a in raw:
+        atype    = a.get("alert_type", "")
+        severity = a.get("severity", "medium")
+        msg      = a.get("message", "")
+        msg_up   = msg.upper()
+
+        # Classify priority
+        if atype in ("ready",) or "TRIGGERED" in msg_up or "BREAKOUT" in msg_up:
+            priority = "CRITICAL"
+        elif atype in ("aplus",) or severity == "high" or "A+" in msg or "READY" in msg_up:
+            priority = "HIGH"
+        elif atype in ("pre_confirm", "continuation") or severity == "medium":
+            priority = "MEDIUM"
+        else:
+            priority = "WATCHLIST"
+
+        out.append({**a, "priority": priority})
+    return out
+
+
 def _build_quick_payload(wl_id: int | None) -> dict:
     """Compute and return the quick-mode data dict (no request context needed)."""
     watchlist   = get_watchlist_stocks(wl_id) if wl_id else []
     _trade_mode = get_setting("trading_mode") or "SWING TRADE"
     all_data    = get_all_stock_data()
     data_map    = {s["ticker"]: s for s in all_data}
-    data_map    = batch_refresh_exec_states([t for t in watchlist if t in data_map], data_map)
-    stocks      = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
-    ranked    = rank_stocks(stocks)
-    top3      = [s for s in ranked if s.get("trade_bias") != "Avoid"][:3]
-    out = []
-    for s in top3:
-        # combined_confidence and final_action are already set by annotate()
-        out.append(_stock_summary(s))
+    _trigger_exec_state_refresh(wl_id)   # non-blocking; returns stale data this call
+    stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
+    ranked  = rank_stocks(stocks)
+    valid   = [s for s in ranked if s.get("trade_bias") != "Avoid"]
     return {
-        "type":        "quick",
-        "server_time": _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
-        "orb_session": get_orb_session_banner(),
-        "stocks":      out,
+        "type":           "quick",
+        "server_time":    _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
+        "orb_session":    get_orb_session_banner(),
+        "stocks":         [_stock_summary(s) for s in valid],
+        "mkt_ctx":        _get_mkt_ctx(),
+        "smart_alerts":   _smart_alerts(),
     }
 
 
@@ -4175,6 +4974,420 @@ def api_schwab_summary():
         "open_positions":   data.get("open_positions"),
         "error":            data.get("error"),
     })
+
+
+
+def _intel_error_payload(msg: str) -> dict:
+    """Standard JSON error payload for /api/intel."""
+    return {
+        "ok":              False,
+        "errors":          [msg],
+        "last_updated":    "—",
+        "news":            [],
+        "market_news":     [],
+        "earnings":        {"today": [], "tomorrow": [], "this_week": []},
+        "splits":          [],
+        "dividends":       [],
+        "economic_events": [],
+        "alerts_sent":     [],
+        "from_cache":      False,
+        "refreshing":      False,
+    }
+
+
+@app.route("/api/intel")
+@csrf.exempt
+def api_intel():
+    """Returns all intel feeds as JSON — always returns JSON, never HTML."""
+    try:
+        if request.args.get("debug") == "1":
+            return jsonify({
+                "ok": True,
+                "news": [{"ticker": "TEST", "headline": "Debug news item", "impact": "HIGH",
+                          "time": "09:00", "reason": "Debug test payload", "source": "Debug",
+                          "on_watchlist": False}],
+                "market_news": [{"ticker": "TEST", "headline": "Debug news item", "impact": "HIGH",
+                                 "time": "09:00", "reason": "Debug test payload", "source": "Debug",
+                                 "on_watchlist": False}],
+                "earnings": {
+                    "today": [],
+                    "tomorrow": [],
+                    "this_week": [{"ticker": "TEST", "date": "2026-05-11", "date_label": "This Week",
+                                   "time_label": "BMO", "days_away": 1, "on_watchlist": False}],
+                },
+                "splits": [{"ticker": "TEST", "ratio": "2:1", "effective_date": "2026-05-15",
+                            "eff_date": "2026-05-15", "type": "Forward", "status": "Upcoming",
+                            "is_new": False, "days_away": 5}],
+                "dividends": [],
+                "economic_events": [{"name": "Debug CPI Event", "date": "2026-05-12", "impact": "HIGH",
+                                     "event": "Debug CPI Event", "date_label": "Mon May 12",
+                                     "time": "8:30 AM", "reason": "Debug payload", "is_today": False}],
+                "errors": [],
+                "last_updated": "debug",
+                "from_cache": False,
+                "refreshing": False,
+            })
+
+        if request.args.get("refresh") == "1":
+            _intel.clear_intel_cache()
+
+        data = _intel.get_intel_summary()
+        return jsonify(data)
+
+    except Exception as e:
+        logger.error("api_intel error: %s", e, exc_info=True)
+        return jsonify(_intel_error_payload(str(e))), 200
+
+
+@app.route("/api/intel/debug")
+def api_intel_debug():
+    """Debug endpoint — shows data source health for the intel engine. No API keys exposed."""
+    try:
+        summary    = _intel.get_intel_summary()
+        earn_dbg   = summary.get("earnings_debug", {})
+        macro      = summary.get("market_environment", {})
+        sector_ht  = summary.get("sector_heat", [])
+
+        cache_ages: dict = {}
+        with _intel._cache_lock:
+            for key, entry in list(_intel._cache.items()):
+                age_s = int(_time.monotonic() - entry["ts"])
+                cache_ages[key] = f"{age_s}s ago"
+
+        fh_limited = _intel._fh_is_rate_limited()
+        fh_secs    = max(0, int(_intel._fh_rl_until - _time.monotonic())) if fh_limited else 0
+        earn       = summary.get("earnings", {})
+
+        return jsonify({
+            "ok":                   summary.get("ok"),
+            "finnhub_rate_limited": fh_limited,
+            "finnhub_rl_remaining": f"{fh_secs}s" if fh_limited else "not limited",
+            "errors":               summary.get("errors", []),
+            "cache_ages":           cache_ages,
+            "news_count":           len(summary.get("news", [])),
+            "earnings_today":       len(earn.get("today", [])),
+            "earnings_tomorrow":    len(earn.get("tomorrow", [])),
+            "earnings_this_week":   len(earn.get("this_week", [])),
+            "earnings_tickers_checked": earn_dbg.get("tickers_checked", 0),
+            "earnings_source":      earn_dbg.get("earnings_source_used", "—"),
+            "earnings_yfinance":    earn_dbg.get("yfinance_found", 0),
+            "earnings_finnhub":     earn_dbg.get("finnhub_found", 0),
+            "earnings_overrides":   earn_dbg.get("overrides_injected", 0),
+            "splits_count":         len(summary.get("splits", [])),
+            "dividends_count":      len(summary.get("dividends", [])),
+            "sector_heat_count":    len(sector_ht),
+            "yield_10y":            macro.get("yield_10y"),
+            "yield_change_bps":     macro.get("yield_change_bps"),
+            "yield_trend":          macro.get("yield_trend"),
+            "dxy_price":            macro.get("dxy_price"),
+            "vix_level":            macro.get("vix_level"),
+            "regime":               macro.get("regime"),
+        })
+    except Exception as exc:
+        logger.error("api_intel_debug: %s", exc, exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/institutional/market-internals")
+def api_market_internals():
+    """Market internals: breadth, ADD proxy, sector participation, breakout conditions."""
+    try:
+        import institutional_engine as _inst
+        ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        internals = _inst.get_market_internals(ctx)
+        macro     = _inst.get_macro_context(ctx)
+        return jsonify({
+            "ok": True,
+            "internals": internals,
+            "macro": macro,
+            "regime": ctx.get("regime"),
+            "regime_label": ctx.get("regime_label"),
+            "vix": ctx.get("vix_level"),
+            "qqq_1d": ctx.get("qqq_1d_pct"),
+            "spy_1d": ctx.get("spy_1d_pct"),
+        })
+    except Exception as exc:
+        logger.error("api_market_internals: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/institutional/<ticker>")
+def api_institutional_ticker(ticker: str):
+    """
+    Full institutional analysis for a single ticker.
+    Returns all 15 engine outputs: volatility compression, liquidity map,
+    patterns, probability score, continuation, risk levels, discipline AI.
+    """
+    try:
+        import institutional_engine as _inst
+        ticker = ticker.upper().strip()
+        ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+
+        # Try to get existing stock data from DB
+        stock = get_stock_data(ticker) or {"ticker": ticker}
+
+        result = _inst.analyze_institutional(stock, ctx)
+        # Append market internals and macro for completeness
+        result["internals"] = _inst.get_market_internals(ctx)
+        result["macro"]     = _inst.get_macro_context(ctx)
+        result["ticker"]    = ticker
+        result["ok"]        = True
+        return jsonify(result)
+    except Exception as exc:
+        logger.error("api_institutional_ticker %s: %s", ticker, exc, exc_info=True)
+        return jsonify({"ok": False, "ticker": ticker, "error": str(exc)}), 500
+
+
+@app.route("/api/institutional/smart-watchlist")
+def api_smart_watchlist():
+    """
+    AI-ranked smart watchlist: A+/A/B tiers, earnings plays,
+    ORB candidates, continuation setups, squeeze plays.
+    """
+    try:
+        import institutional_engine as _inst
+        ctx    = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        stocks = get_all_stock_data()   # list of dicts from DB
+
+        # Ensure each stock has a prob_score (may already be set from analysis)
+        scored = []
+        for s in stocks:
+            if not s.get("prob_score"):
+                s["prob_score"] = _inst.compute_probability_score(s, ctx)["prob_score"]
+            scored.append(s)
+
+        watchlists = _inst.build_smart_watchlist(scored, ctx)
+        return jsonify({"ok": True, **watchlists})
+    except Exception as exc:
+        logger.error("api_smart_watchlist: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/institutional/adaptive-insights")
+def api_adaptive_insights():
+    """Adaptive learning: setup win rates, best regimes, AI recommendations."""
+    try:
+        import institutional_engine as _inst
+        insights    = _inst.get_adaptive_insights()
+        db_stats    = get_setup_outcome_stats()
+        return jsonify({"ok": True, **insights, "db_stats": db_stats})
+    except Exception as exc:
+        logger.error("api_adaptive_insights: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/institutional/record-outcome", methods=["POST"])
+@csrf.exempt
+def api_record_outcome():
+    """
+    Record a trade outcome for adaptive learning.
+    POST JSON: {"ticker": "NVDA", "setup_type": "Bull Flag", "outcome": "win", "regime": "RISK_ON"}
+    """
+    try:
+        import institutional_engine as _inst
+        body       = request.get_json(force=True) or {}
+        setup_type = body.get("setup_type", "")
+        outcome    = body.get("outcome", "")     # "win" | "loss" | "breakeven"
+        regime     = body.get("regime", "")
+        pattern    = body.get("pattern", "")
+
+        if outcome not in ("win", "loss", "breakeven"):
+            return jsonify({"ok": False, "error": "outcome must be win|loss|breakeven"}), 400
+
+        ticker     = body.get("ticker", "")
+        prob_score = int(body.get("prob_score", 0))
+        notes      = body.get("notes", "")
+
+        _inst.record_setup_outcome(setup_type, outcome, regime, pattern)
+        save_setup_outcome(ticker, setup_type, outcome, regime, pattern, prob_score, notes)
+        return jsonify({"ok": True, "recorded": {"ticker": ticker, "setup_type": setup_type, "outcome": outcome}})
+    except Exception as exc:
+        logger.error("api_record_outcome: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/institutional/daily-review")
+def api_daily_review():
+    """End-of-day performance review across all scanned setups."""
+    try:
+        import institutional_engine as _inst
+        ctx    = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        stocks = get_all_stock_data()
+
+        # Build analysis dicts for all stocks (fast — uses cached data)
+        analyzed = []
+        for s in stocks:
+            try:
+                result = _inst.analyze_institutional(s, ctx)
+                analyzed.append({**s, **result})
+            except Exception:
+                analyzed.append(s)
+
+        review = _inst.generate_daily_review(analyzed)
+        return jsonify({"ok": True, **review})
+    except Exception as exc:
+        logger.error("api_daily_review: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/intel")
+def intel():
+    """Pre-Market Intel — daily and weekly checklist, earnings, market environment."""
+    return render_template("intel.html")
+
+
+# ---------------------------------------------------------------------------
+# Liquidity & Opportunity Research Engine
+# ---------------------------------------------------------------------------
+
+@app.route("/")
+@app.route("/opportunity")
+def liquidity_page():
+    """Morning Command Center — liquidity, risk, sector flow, hidden opportunities."""
+    return render_template("liquidity.html")
+
+
+@app.route("/api/liquidity/status")
+def api_liquidity_status():
+    """Fed liquidity monitor: FRED data, yield curve, liquidity score."""
+    try:
+        import liquidity_engine as _liq
+        ctx = _liq.get_liquidity_status()
+        return jsonify({"ok": True, **ctx})
+    except Exception as exc:
+        logger.error("api_liquidity_status: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/liquidity/money-flow")
+def api_money_flow():
+    """Sector ETF money flow rankings."""
+    try:
+        import liquidity_engine as _liq
+        mflow = _liq.get_money_flow()
+        ctx   = _liq.get_liquidity_status()
+        return jsonify({
+            "ok":        True,
+            "money_flow":mflow,
+            "liq_status":ctx.get("status"),
+            "liq_score": ctx.get("score"),
+        })
+    except Exception as exc:
+        logger.error("api_money_flow: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/opportunity/scan")
+def api_opportunity_scan():
+    """
+    Run the full hidden opportunity scan.
+    Query params:
+      mode=both|trade|invest   (default: both)
+      tickers=NVDA,CRWD,...    (extra tickers to include)
+    """
+    try:
+        import opportunity_engine as _opp
+        import liquidity_engine   as _liq
+        mode          = request.args.get("mode", "both")
+        extra_raw     = request.args.get("tickers", "")
+        extra_tickers = [t.strip().upper() for t in extra_raw.split(",") if t.strip()]
+        mkt_ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        liq_ctx = _liq.get_liquidity_status()
+        results = _opp.run_opportunity_scan(extra_tickers, mkt_ctx, liq_ctx, mode)
+        return jsonify({"ok": True, **results})
+    except Exception as exc:
+        logger.error("api_opportunity_scan: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/opportunity/ticker/<ticker>")
+def api_opportunity_ticker(ticker: str):
+    """Full opportunity analysis + research report for a single ticker."""
+    try:
+        import opportunity_engine as _opp
+        import liquidity_engine   as _liq
+        ticker  = ticker.upper().strip()
+        mkt_ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        liq_ctx = _liq.get_liquidity_status()
+        _opp.get_fundamentals_sync(ticker)   # ensure data is ready before building report
+        result  = _opp.scan_ticker(ticker, mkt_ctx, liq_ctx)
+        return jsonify({"ok": True, **result})
+    except Exception as exc:
+        logger.error("api_opportunity_ticker %s: %s", ticker, exc, exc_info=True)
+        return jsonify({"ok": False, "ticker": ticker, "error": str(exc)}), 500
+
+
+@app.route("/api/opportunity/alerts")
+def api_opportunity_alerts():
+    """Combined opportunity + liquidity alerts."""
+    try:
+        import opportunity_engine as _opp
+        import liquidity_engine   as _liq
+        mkt_ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
+        liq_ctx = _liq.get_liquidity_status()
+        # Quick scan of top tickers only for speed
+        fast_universe = ["NVDA","CRWD","AMD","META","PLTR","MRVL","DDOG","NET","AMZN","COIN"]
+        results = []
+        for t in fast_universe:
+            try:
+                results.append(_opp.scan_ticker(t, mkt_ctx, liq_ctx))
+            except Exception:
+                pass
+        alerts = _opp.generate_opportunity_alerts(results, mkt_ctx, liq_ctx)
+        return jsonify({"ok": True, "alerts": alerts, "count": len(alerts)})
+    except Exception as exc:
+        logger.error("api_opportunity_alerts: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/opportunity/refresh", methods=["POST"])
+@csrf.exempt
+def api_opportunity_refresh():
+    """Trigger background refresh of liquidity data."""
+    try:
+        import liquidity_engine as _liq
+        _liq.refresh_liquidity_bg()
+        return jsonify({"ok": True, "msg": "Liquidity refresh triggered."})
+    except Exception as exc:
+        logger.error("api_opportunity_refresh: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Authentication routes
+# ---------------------------------------------------------------------------
+
+@app.route("/login", methods=["GET", "POST"])
+@csrf.exempt  # Login is the auth gate itself — no prior session needed for token
+def login_page():
+    """Session login page. Enabled only when LOGIN_PASS env var is set."""
+    _pass = os.environ.get("LOGIN_PASS", "")
+    if not _pass:
+        return redirect(url_for("liquidity_page"))  # Auth disabled
+    if session.get("logged_in"):
+        return redirect(url_for("liquidity_page"))
+    error = None
+    if request.method == "POST":
+        entered = request.form.get("password", "").strip()
+        if entered == _pass:
+            session.permanent = True
+            session["logged_in"] = True
+            next_url = request.form.get("next") or url_for("liquidity_page")
+            # Safety: only redirect to internal paths
+            if not next_url.startswith("/") or next_url.startswith("//"):
+                next_url = url_for("liquidity_page")
+            return redirect(next_url)
+        error = "Invalid password — try again."
+    return render_template("login.html",
+                           next=request.args.get("next", ""),
+                           error=error)
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    """Clear session and redirect to login."""
+    session.clear()
+    return redirect(url_for("login_page"))
 
 
 # ---------------------------------------------------------------------------

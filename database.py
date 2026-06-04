@@ -43,10 +43,16 @@ if _DATABASE_URL.startswith("postgres://"):
 
 _USE_POSTGRES = bool(_DATABASE_URL)
 
+# Guard the psycopg2 import so a missing binary doesn't crash the whole app.
+psycopg2 = None  # type: ignore[assignment]
 if _USE_POSTGRES:
-    import psycopg2
-    import psycopg2.extras
-    logger.info("DB  backend=postgresql")
+    try:
+        import psycopg2            # type: ignore[no-redef]
+        import psycopg2.extras     # type: ignore[no-redef]
+        logger.info("DB  backend=postgresql")
+    except ImportError as _pg_err:
+        logger.error("psycopg2 not available: %s — falling back to SQLite", _pg_err)
+        _USE_POSTGRES = False
 else:
     logger.info("DB  backend=sqlite  path=%s", DB_PATH)
 
@@ -238,9 +244,9 @@ class _Conn:
 
 def get_db() -> _Conn:
     """Return a wrapped database connection (PG or SQLite based on env)."""
-    if _USE_POSTGRES:
+    if _USE_POSTGRES and psycopg2 is not None:
         try:
-            conn = psycopg2.connect(_DATABASE_URL)
+            conn = psycopg2.connect(_DATABASE_URL, connect_timeout=10)
             return _Conn(conn)
         except Exception as exc:
             logger.error("DB  PostgreSQL connection failed: %s", exc)
@@ -421,6 +427,16 @@ def init_db():
         ("in_supply_zone",           "INTEGER DEFAULT 0"),
         ("in_demand_zone",           "INTEGER DEFAULT 0"),
         ("zones_fetched_at",         "TEXT"),
+        # Supply/demand zone fields (v2 institutional)
+        ("zones_json",               "TEXT"),
+        ("demand_zone_grade",        "TEXT"),
+        ("supply_zone_grade",        "TEXT"),
+        ("zone_ai_setup",            "TEXT"),
+        ("zone_ai_reason",           "TEXT"),
+        ("zone_probability",         "INTEGER"),
+        ("smart_money_json",         "TEXT"),
+        ("fvg_bullish",              "INTEGER DEFAULT 0"),
+        ("fvg_bearish",              "INTEGER DEFAULT 0"),
         # Swing trading fields (v1)
         ("ema_20_daily",             "REAL"),
         ("ema_50_daily",             "REAL"),
@@ -455,6 +471,29 @@ def init_db():
         ("m15_confirmation", "INTEGER DEFAULT 0"),
         # Ticker state: loading | ready | error | stale
         ("ticker_state",     "TEXT DEFAULT 'ready'"),
+        # Active Swing Fibonacci engine — extended levels and metadata
+        ("fib_236",          "REAL"),
+        ("fib_382",          "REAL"),
+        ("fib_65",           "REAL"),
+        ("fib_705",          "REAL"),
+        ("fib_786",          "REAL"),
+        ("fib_confidence",   "REAL"),
+        ("fib_direction",    "TEXT"),
+        ("fib_mode",         "TEXT"),
+        # Macro structure fib (20-bar simple swing — institutional context)
+        ("macro_fib_high",   "REAL"),
+        ("macro_fib_low",    "REAL"),
+        ("macro_fib_50",     "REAL"),
+        ("macro_fib_618",    "REAL"),
+        # 4H timeframe fib levels (from 1h bar data)
+        ("h4_fib_high",      "REAL"),
+        ("h4_fib_low",       "REAL"),
+        ("h4_fib_50",        "REAL"),
+        ("h4_fib_618",       "REAL"),
+        # Relative strength & sector rotation (market_engine.py)
+        ("rs_score",         "INTEGER"),
+        ("rs_vs_qqq",        "REAL"),
+        ("sector_etf",       "TEXT"),
     ]
     for col, col_type in _new_columns:
         if _USE_POSTGRES:
@@ -556,6 +595,21 @@ def init_db():
             message    TEXT    NOT NULL,
             severity   TEXT    NOT NULL DEFAULT 'medium',
             seen       INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT    NOT NULL
+        )
+    """))
+
+    # Setup outcome tracking for adaptive AI learning (Feature 15)
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS setup_outcomes (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker     TEXT    NOT NULL,
+            setup_type TEXT    NOT NULL,
+            pattern    TEXT,
+            outcome    TEXT    NOT NULL,
+            regime     TEXT,
+            prob_score INTEGER,
+            notes      TEXT,
             created_at TEXT    NOT NULL
         )
     """))
@@ -868,16 +922,24 @@ def upsert_stock_data(data: dict):
              distance_to_supply_pct, distance_to_demand_pct,
              zone_location, bullish_order_block, bearish_order_block,
              in_supply_zone, in_demand_zone, zones_fetched_at,
+             zones_json, demand_zone_grade, supply_zone_grade,
+             zone_ai_setup, zone_ai_reason, zone_probability,
+             smart_money_json, fvg_bullish, fvg_bearish,
              ema_20_daily, ema_50_daily, ema_200_daily,
              pct_from_ema20, pct_from_ema50, daily_trend,
              daily_hh_hl, daily_lh_ll,
              fib_high, fib_low, fib_50, fib_618,
+             fib_236, fib_382, fib_65, fib_705, fib_786,
+             fib_confidence, fib_direction, fib_mode,
+             macro_fib_high, macro_fib_low, macro_fib_50, macro_fib_618,
+             h4_fib_high, h4_fib_low, h4_fib_50, h4_fib_618,
              swing_score, swing_reason, swing_confidence,
              swing_setup_type, swing_status,
              entry_zone_low, entry_zone_high, stop_level,
              target_1, target_2, risk_reward, swing_data_fetched_at,
              h4_trend, h4_ema20, h4_ema50, h4_hh_hl,
-             m15_higher_low, m15_confirmation, ticker_state)
+             m15_higher_low, m15_confirmation, ticker_state,
+             rs_score, rs_vs_qqq, sector_etf)
         VALUES
             (:ticker, :current_price, :prev_close, :gap_pct, :premarket_high,
              :premarket_low, :prev_day_high, :prev_day_low, :avg_volume, :rel_volume,
@@ -898,16 +960,24 @@ def upsert_stock_data(data: dict):
              :distance_to_supply_pct, :distance_to_demand_pct,
              :zone_location, :bullish_order_block, :bearish_order_block,
              :in_supply_zone, :in_demand_zone, :zones_fetched_at,
+             :zones_json, :demand_zone_grade, :supply_zone_grade,
+             :zone_ai_setup, :zone_ai_reason, :zone_probability,
+             :smart_money_json, :fvg_bullish, :fvg_bearish,
              :ema_20_daily, :ema_50_daily, :ema_200_daily,
              :pct_from_ema20, :pct_from_ema50, :daily_trend,
              :daily_hh_hl, :daily_lh_ll,
              :fib_high, :fib_low, :fib_50, :fib_618,
+             :fib_236, :fib_382, :fib_65, :fib_705, :fib_786,
+             :fib_confidence, :fib_direction, :fib_mode,
+             :macro_fib_high, :macro_fib_low, :macro_fib_50, :macro_fib_618,
+             :h4_fib_high, :h4_fib_low, :h4_fib_50, :h4_fib_618,
              :swing_score, :swing_reason, :swing_confidence,
              :swing_setup_type, :swing_status,
              :entry_zone_low, :entry_zone_high, :stop_level,
              :target_1, :target_2, :risk_reward, :swing_data_fetched_at,
              :h4_trend, :h4_ema20, :h4_ema50, :h4_hh_hl,
-             :m15_higher_low, :m15_confirmation, :ticker_state)
+             :m15_higher_low, :m15_confirmation, :ticker_state,
+             :rs_score, :rs_vs_qqq, :sector_etf)
         ON CONFLICT(ticker) DO UPDATE SET
             current_price        = excluded.current_price,
             prev_close           = excluded.prev_close,
@@ -970,6 +1040,15 @@ def upsert_stock_data(data: dict):
             in_supply_zone           = excluded.in_supply_zone,
             in_demand_zone           = excluded.in_demand_zone,
             zones_fetched_at         = excluded.zones_fetched_at,
+            zones_json               = excluded.zones_json,
+            demand_zone_grade        = excluded.demand_zone_grade,
+            supply_zone_grade        = excluded.supply_zone_grade,
+            zone_ai_setup            = excluded.zone_ai_setup,
+            zone_ai_reason           = excluded.zone_ai_reason,
+            zone_probability         = excluded.zone_probability,
+            smart_money_json         = excluded.smart_money_json,
+            fvg_bullish              = excluded.fvg_bullish,
+            fvg_bearish              = excluded.fvg_bearish,
             ema_20_daily             = excluded.ema_20_daily,
             ema_50_daily             = excluded.ema_50_daily,
             ema_200_daily            = excluded.ema_200_daily,
@@ -982,6 +1061,22 @@ def upsert_stock_data(data: dict):
             fib_low                  = excluded.fib_low,
             fib_50                   = excluded.fib_50,
             fib_618                  = excluded.fib_618,
+            fib_236                  = excluded.fib_236,
+            fib_382                  = excluded.fib_382,
+            fib_65                   = excluded.fib_65,
+            fib_705                  = excluded.fib_705,
+            fib_786                  = excluded.fib_786,
+            fib_confidence           = excluded.fib_confidence,
+            fib_direction            = excluded.fib_direction,
+            fib_mode                 = excluded.fib_mode,
+            macro_fib_high           = excluded.macro_fib_high,
+            macro_fib_low            = excluded.macro_fib_low,
+            macro_fib_50             = excluded.macro_fib_50,
+            macro_fib_618            = excluded.macro_fib_618,
+            h4_fib_high              = excluded.h4_fib_high,
+            h4_fib_low               = excluded.h4_fib_low,
+            h4_fib_50                = excluded.h4_fib_50,
+            h4_fib_618               = excluded.h4_fib_618,
             swing_score              = excluded.swing_score,
             swing_reason             = excluded.swing_reason,
             swing_confidence         = excluded.swing_confidence,
@@ -1000,7 +1095,10 @@ def upsert_stock_data(data: dict):
             h4_hh_hl                 = excluded.h4_hh_hl,
             m15_higher_low           = excluded.m15_higher_low,
             m15_confirmation         = excluded.m15_confirmation,
-            ticker_state             = excluded.ticker_state
+            ticker_state             = excluded.ticker_state,
+            rs_score                 = excluded.rs_score,
+            rs_vs_qqq                = excluded.rs_vs_qqq,
+            sector_etf               = excluded.sector_etf
     """, data)
     conn.commit()
     conn.close()
@@ -1191,6 +1289,15 @@ def update_live_fields(data: dict) -> None:
             in_supply_zone           = :in_supply_zone,
             in_demand_zone           = :in_demand_zone,
             zones_fetched_at         = :zones_fetched_at,
+            zones_json               = :zones_json,
+            demand_zone_grade        = :demand_zone_grade,
+            supply_zone_grade        = :supply_zone_grade,
+            zone_ai_setup            = :zone_ai_setup,
+            zone_ai_reason           = :zone_ai_reason,
+            zone_probability         = :zone_probability,
+            smart_money_json         = :smart_money_json,
+            fvg_bullish              = :fvg_bullish,
+            fvg_bearish              = :fvg_bearish,
             ema_20_daily             = :ema_20_daily,
             ema_50_daily             = :ema_50_daily,
             ema_200_daily            = :ema_200_daily,
@@ -1203,6 +1310,22 @@ def update_live_fields(data: dict) -> None:
             fib_low                  = :fib_low,
             fib_50                   = :fib_50,
             fib_618                  = :fib_618,
+            fib_236                  = :fib_236,
+            fib_382                  = :fib_382,
+            fib_65                   = :fib_65,
+            fib_705                  = :fib_705,
+            fib_786                  = :fib_786,
+            fib_confidence           = :fib_confidence,
+            fib_direction            = :fib_direction,
+            fib_mode                 = :fib_mode,
+            macro_fib_high           = :macro_fib_high,
+            macro_fib_low            = :macro_fib_low,
+            macro_fib_50             = :macro_fib_50,
+            macro_fib_618            = :macro_fib_618,
+            h4_fib_high              = :h4_fib_high,
+            h4_fib_low               = :h4_fib_low,
+            h4_fib_50                = :h4_fib_50,
+            h4_fib_618               = :h4_fib_618,
             swing_score              = :swing_score,
             swing_reason             = :swing_reason,
             swing_confidence         = :swing_confidence,
@@ -1221,6 +1344,9 @@ def update_live_fields(data: dict) -> None:
             h4_hh_hl                 = :h4_hh_hl,
             m15_higher_low           = :m15_higher_low,
             m15_confirmation         = :m15_confirmation,
+            rs_score                 = :rs_score,
+            rs_vs_qqq                = :rs_vs_qqq,
+            sector_etf               = :sector_etf,
             triggered_at             = :triggered_at,
             last_updated             = :last_updated
         WHERE ticker = :ticker
@@ -1279,6 +1405,15 @@ def update_live_fields(data: dict) -> None:
         "in_supply_zone":           int(bool(data.get("in_supply_zone"))),
         "in_demand_zone":           int(bool(data.get("in_demand_zone"))),
         "zones_fetched_at":         data.get("zones_fetched_at"),
+        "zones_json":               data.get("zones_json"),
+        "demand_zone_grade":        data.get("demand_zone_grade"),
+        "supply_zone_grade":        data.get("supply_zone_grade"),
+        "zone_ai_setup":            data.get("zone_ai_setup"),
+        "zone_ai_reason":           data.get("zone_ai_reason"),
+        "zone_probability":         data.get("zone_probability"),
+        "smart_money_json":         data.get("smart_money_json"),
+        "fvg_bullish":              int(bool(data.get("fvg_bullish"))),
+        "fvg_bearish":              int(bool(data.get("fvg_bearish"))),
         "ema_20_daily":             data.get("ema_20_daily"),
         "ema_50_daily":             data.get("ema_50_daily"),
         "ema_200_daily":            data.get("ema_200_daily"),
@@ -1291,6 +1426,22 @@ def update_live_fields(data: dict) -> None:
         "fib_low":                  data.get("fib_low"),
         "fib_50":                   data.get("fib_50"),
         "fib_618":                  data.get("fib_618"),
+        "fib_236":                  data.get("fib_236"),
+        "fib_382":                  data.get("fib_382"),
+        "fib_65":                   data.get("fib_65"),
+        "fib_705":                  data.get("fib_705"),
+        "fib_786":                  data.get("fib_786"),
+        "fib_confidence":           data.get("fib_confidence"),
+        "fib_direction":            data.get("fib_direction"),
+        "fib_mode":                 data.get("fib_mode"),
+        "macro_fib_high":           data.get("macro_fib_high"),
+        "macro_fib_low":            data.get("macro_fib_low"),
+        "macro_fib_50":             data.get("macro_fib_50"),
+        "macro_fib_618":            data.get("macro_fib_618"),
+        "h4_fib_high":              data.get("h4_fib_high"),
+        "h4_fib_low":               data.get("h4_fib_low"),
+        "h4_fib_50":                data.get("h4_fib_50"),
+        "h4_fib_618":               data.get("h4_fib_618"),
         "swing_score":              data.get("swing_score"),
         "swing_reason":             data.get("swing_reason"),
         "swing_confidence":         data.get("swing_confidence"),
@@ -1309,6 +1460,9 @@ def update_live_fields(data: dict) -> None:
         "h4_hh_hl":                 int(bool(data.get("h4_hh_hl"))),
         "m15_higher_low":           int(bool(data.get("m15_higher_low"))),
         "m15_confirmation":         int(data.get("m15_confirmation") or 0),
+        "rs_score":                 data.get("rs_score"),
+        "rs_vs_qqq":                data.get("rs_vs_qqq"),
+        "sector_etf":               data.get("sector_etf"),
         "triggered_at":             triggered_at,
         "last_updated":             data.get("last_updated") or _et_now().strftime("%Y-%m-%d %I:%M %p"),
     })
@@ -1637,3 +1791,65 @@ def clear_scanner_alerts() -> None:
     conn.execute("DELETE FROM scanner_alerts")
     conn.commit()
     conn.close()
+
+
+# ── Setup outcome tracking (adaptive AI learning) ─────────────────────────────
+
+def save_setup_outcome(
+    ticker: str,
+    setup_type: str,
+    outcome: str,
+    regime: str = "",
+    pattern: str = "",
+    prob_score: int = 0,
+    notes: str = "",
+) -> None:
+    """Persist a trade outcome for adaptive learning win-rate tracking."""
+    from data_fetcher import _et_now as _db_et_now
+    now = _db_et_now().strftime("%Y-%m-%d %I:%M %p")
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO setup_outcomes "
+        "(ticker, setup_type, pattern, outcome, regime, prob_score, notes, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            ticker.upper().strip(), setup_type, pattern, outcome,
+            regime, prob_score, notes, now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_setup_outcomes(limit: int = 200) -> list[dict]:
+    """Return recent setup outcomes ordered newest-first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM setup_outcomes ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_setup_outcome_stats() -> list[dict]:
+    """
+    Aggregate setup outcomes by setup_type.
+    Returns list of {setup_type, total, wins, losses, win_rate}.
+    """
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT
+            setup_type,
+            COUNT(*)                                                AS total,
+            SUM(CASE WHEN outcome = 'win'  THEN 1 ELSE 0 END)     AS wins,
+            SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END)      AS losses,
+            ROUND(
+                100.0 * SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END)
+                / NULLIF(COUNT(*), 0), 1
+            )                                                       AS win_rate
+        FROM setup_outcomes
+        GROUP BY setup_type
+        ORDER BY win_rate DESC
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

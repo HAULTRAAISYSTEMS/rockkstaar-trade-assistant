@@ -1138,6 +1138,185 @@ def swing_data_needs_refresh(fetched_at: str | None, minutes: int = 60) -> bool:
         return True
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FIBONACCI ENGINE — Active Swing Detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _compute_atr(highs: list, lows: list, closes: list, period: int = 14) -> float:
+    """Average True Range over the last `period` bars."""
+    n = len(closes)
+    if n < 2:
+        return (highs[-1] - lows[-1]) if n >= 1 else 1.0
+    trs = []
+    for i in range(1, n):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i]  - closes[i - 1]),
+        )
+        trs.append(tr)
+    w = min(len(trs), period)
+    return sum(trs[-w:]) / w if w else 1.0
+
+
+def _find_pivot_points(highs: list, lows: list, window: int = 3):
+    """
+    Return (pivot_highs, pivot_lows) as lists of (index, value).
+    A pivot high at i: highs[i] >= all highs in [i-window, i+window].
+    A pivot low  at i: lows[i]  <= all lows  in [i-window, i+window].
+    """
+    n = len(highs)
+    ph, pl = [], []
+    for i in range(window, n - window):
+        lo, hi = max(0, i - window), i + window + 1
+        if highs[i] >= max(highs[lo:hi]):
+            ph.append((i, highs[i]))
+        if lows[i] <= min(lows[lo:hi]):
+            pl.append((i, lows[i]))
+    return ph, pl
+
+
+def _score_impulse_leg(
+    start_i: int, end_i: int, leg_size: float,
+    closes: list, highs: list, lows: list,
+    volumes: list | None, n_total: int, atr: float,
+) -> float:
+    """
+    Score an impulse leg from start_i to end_i on a 0-10 scale.
+    start_i < end_i; leg_size = abs(high - low) for the leg.
+    """
+    if atr <= 0 or leg_size <= 0:
+        return 0.0
+    score = 0.0
+
+    # 1. Magnitude vs ATR (0-3 pts) — bigger relative leg = higher quality
+    m = leg_size / atr
+    if   m >= 6:   score += 3.0
+    elif m >= 4:   score += 2.5
+    elif m >= 2.5: score += 2.0
+    elif m >= 1.5: score += 1.5
+    elif m >= 1.0: score += 1.0
+    else:          score += 0.3
+
+    # 2. Candle body quality during the leg (0-2 pts)
+    end_clamp = min(end_i, len(closes) - 1)
+    if end_clamp > start_i:
+        bodies = []
+        for i in range(start_i + 1, end_clamp + 1):
+            rng = highs[i] - lows[i]
+            if rng > 0:
+                bodies.append(min(1.0, abs(closes[i] - closes[i - 1]) / rng))
+        if bodies:
+            avg_b = sum(bodies) / len(bodies)
+            if   avg_b >= 0.55: score += 2.0
+            elif avg_b >= 0.38: score += 1.2
+            else:               score += 0.4
+
+    # 3. Volume expansion during the leg (0-2 pts)
+    if volumes and len(volumes) > end_clamp:
+        lvols = volumes[start_i:end_clamp + 1]
+        pvols = volumes[max(0, start_i - 10):start_i]
+        if lvols and pvols:
+            al = sum(lvols) / len(lvols)
+            ap = sum(pvols) / len(pvols)
+            if ap > 0:
+                vr = al / ap
+                if   vr >= 1.5: score += 2.0
+                elif vr >= 1.2: score += 1.2
+                else:           score += 0.4
+
+    # 4. Recency (0-3 pts) — most recent endpoint of the leg
+    bars_old = n_total - 1 - end_i
+    if   bars_old <= 2:  score += 3.0
+    elif bars_old <= 5:  score += 2.5
+    elif bars_old <= 10: score += 2.0
+    elif bars_old <= 20: score += 1.5
+    elif bars_old <= 40: score += 0.7
+    else:                score += 0.1
+
+    return min(10.0, score)
+
+
+def _find_active_impulse_leg(
+    closes: list, highs: list, lows: list,
+    volumes: list | None = None,
+    window: int = 3,
+) -> dict | None:
+    """
+    Detect the most recent high-quality impulsive leg suitable for Fibonacci anchoring.
+
+    Returns a dict with keys:
+        direction  "bullish" | "bearish"
+        low_val    float — impulse low price
+        high_val   float — impulse high price
+        low_idx    int   — bar index of the impulse low
+        high_idx   int   — bar index of the impulse high
+        score      float — quality score 0-10
+        atr_mult   float — leg size as multiple of ATR
+    Returns None if no qualifying leg is found.
+    """
+    n = len(closes)
+    if n < window * 2 + 5:
+        return None
+
+    atr = _compute_atr(highs, lows, closes, period=14)
+    if atr <= 0:
+        return None
+
+    ph, pl = _find_pivot_points(highs, lows, window=window)
+    if not ph or not pl:
+        return None
+
+    MIN_ATR_MULT = 1.2   # reject legs smaller than this many ATRs
+
+    best: dict | None = None
+
+    # ── Bullish legs: pivot_low → pivot_high ──────────────────────────────────
+    for j in range(len(pl) - 1, -1, -1):          # iterate recent pivot lows first
+        li, lv = pl[j]
+        # find the most recent pivot high AFTER this low
+        for k in range(len(ph) - 1, -1, -1):
+            hi, hv = ph[k]
+            if hi <= li:
+                continue
+            leg_size = hv - lv
+            if leg_size / atr < MIN_ATR_MULT:
+                break  # all remaining ph[k] will be the same or worse — stop
+            sc = _score_impulse_leg(li, hi, leg_size, closes, highs, lows, volumes, n, atr)
+            candidate = {
+                "direction": "bullish",
+                "low_idx": li,  "low_val": lv,
+                "high_idx": hi, "high_val": hv,
+                "score": sc,    "atr_mult": leg_size / atr,
+            }
+            if best is None or sc > best["score"]:
+                best = candidate
+            break  # take only the best high for this particular low
+
+    # ── Bearish legs: pivot_high → pivot_low ─────────────────────────────────
+    for j in range(len(ph) - 1, -1, -1):
+        hi, hv = ph[j]
+        for k in range(len(pl) - 1, -1, -1):
+            li, lv = pl[k]
+            if li <= hi:
+                continue
+            leg_size = hv - lv
+            if leg_size / atr < MIN_ATR_MULT:
+                break
+            sc = _score_impulse_leg(hi, li, leg_size, closes, highs, lows, volumes, n, atr)
+            candidate = {
+                "direction": "bearish",
+                "low_idx": li,  "low_val": lv,
+                "high_idx": hi, "high_val": hv,
+                "score": sc,    "atr_mult": leg_size / atr,
+            }
+            if best is None or sc > best["score"]:
+                best = candidate
+            break
+
+    return best if (best and best["score"] >= 2.0) else None
+
+
 def fetch_swing_data(ticker: str) -> dict | None:
     """
     Fetch daily EMA, trend structure, and Fibonacci levels for swing analysis.
@@ -1279,20 +1458,72 @@ def fetch_swing_data(ticker: str) -> dict | None:
         else:
             result["daily_trend"] = "Neutral"
 
-        # ── Fibonacci levels (20-bar swing high/low) ────────────────────────
-        lb     = min(20, n)
-        sw_hi  = float(max(highs[-lb:]))
-        sw_lo  = float(min(lows[-lb:]))
-        sw_rng = sw_hi - sw_lo
-
-        result["fib_high"] = round(sw_hi, 2)
-        result["fib_low"]  = round(sw_lo, 2)
-        if sw_rng > 0:
-            result["fib_50"]  = round(sw_hi - 0.500 * sw_rng, 2)
-            result["fib_618"] = round(sw_hi - 0.618 * sw_rng, 2)
+        # ── Macro Fibonacci (20-bar simple swing high/low — institutional context) ─
+        lb      = min(20, n)
+        mac_hi  = float(max(highs[-lb:]))
+        mac_lo  = float(min(lows[-lb:]))
+        mac_rng = mac_hi - mac_lo
+        result["macro_fib_high"] = round(mac_hi, 2)
+        result["macro_fib_low"]  = round(mac_lo, 2)
+        if mac_rng > 0:
+            result["macro_fib_50"]  = round(mac_hi - 0.500 * mac_rng, 2)
+            result["macro_fib_618"] = round(mac_hi - 0.618 * mac_rng, 2)
         else:
-            result["fib_50"]  = None
-            result["fib_618"] = None
+            result["macro_fib_50"]  = None
+            result["macro_fib_618"] = None
+
+        # ── Active Swing Fibonacci (pivot-based impulse leg detection) ────────
+        # Detects the most recent significant directional leg so fib levels
+        # align with the actual tradeable momentum move, not arbitrary lookback.
+        _volumes: list | None = None
+        try:
+            if _daily_source == "yfinance" and hist is not None and not hist.empty:
+                _volumes = list(hist["Volume"].astype(float))
+            elif _daily_source == "chart_api" and _bars and _bars.get("volumes"):
+                _volumes = _bars["volumes"]
+        except Exception:
+            pass
+
+        _active_leg = _find_active_impulse_leg(closes, highs, lows, _volumes, window=3)
+
+        if _active_leg and _active_leg["atr_mult"] >= 1.2:
+            a_hi  = round(_active_leg["high_val"], 2)
+            a_lo  = round(_active_leg["low_val"],  2)
+            a_rng = a_hi - a_lo
+            result["fib_high"]       = a_hi
+            result["fib_low"]        = a_lo
+            result["fib_direction"]  = _active_leg["direction"]
+            result["fib_mode"]       = "active"
+            result["fib_confidence"] = round(_active_leg["score"], 1)
+            if a_rng > 0:
+                result["fib_236"] = round(a_hi - 0.236 * a_rng, 2)
+                result["fib_382"] = round(a_hi - 0.382 * a_rng, 2)
+                result["fib_50"]  = round(a_hi - 0.500 * a_rng, 2)
+                result["fib_618"] = round(a_hi - 0.618 * a_rng, 2)
+                result["fib_65"]  = round(a_hi - 0.650 * a_rng, 2)
+                result["fib_705"] = round(a_hi - 0.705 * a_rng, 2)
+                result["fib_786"] = round(a_hi - 0.786 * a_rng, 2)
+            else:
+                for _k in ("fib_236", "fib_382", "fib_50", "fib_618", "fib_65", "fib_705", "fib_786"):
+                    result[_k] = None
+        else:
+            # Fallback: use macro fib (20-bar range)
+            result["fib_high"]       = result["macro_fib_high"]
+            result["fib_low"]        = result["macro_fib_low"]
+            result["fib_direction"]  = "bullish" if closes[-1] > (mac_hi + mac_lo) / 2 else "bearish"
+            result["fib_mode"]       = "macro"
+            result["fib_confidence"] = 3.0
+            if mac_rng > 0:
+                result["fib_236"] = round(mac_hi - 0.236 * mac_rng, 2)
+                result["fib_382"] = round(mac_hi - 0.382 * mac_rng, 2)
+                result["fib_50"]  = result["macro_fib_50"]
+                result["fib_618"] = result["macro_fib_618"]
+                result["fib_65"]  = round(mac_hi - 0.650 * mac_rng, 2)
+                result["fib_705"] = round(mac_hi - 0.705 * mac_rng, 2)
+                result["fib_786"] = round(mac_hi - 0.786 * mac_rng, 2)
+            else:
+                for _k in ("fib_236", "fib_382", "fib_50", "fib_618", "fib_65", "fib_705", "fib_786"):
+                    result[_k] = None
 
         # ── 4H trend (derived from 1h bars — yfinance has no native 4h interval) ──
         # Uses regular-session 1h bars.  EMA stack + HH/HL on last ~80 1h bars
@@ -1367,13 +1598,45 @@ def fetch_swing_data(ticker: str) -> dict | None:
                 elif h4_bear or (h4_lh and h4_ll): result["h4_trend"] = "Bearish Lean"
                 else:                               result["h4_trend"] = "Neutral"
 
+                # ── H4 Fibonacci (active swing on 1h bars, window=2) ─────────
+                _h4_leg = _find_active_impulse_leg(
+                    _h1_closes, _h1_highs, _h1_lows, window=2
+                )
+                if _h4_leg and _h4_leg["atr_mult"] >= 1.0:
+                    h4a_hi  = round(_h4_leg["high_val"], 2)
+                    h4a_lo  = round(_h4_leg["low_val"],  2)
+                    h4a_rng = h4a_hi - h4a_lo
+                    result["h4_fib_high"] = h4a_hi
+                    result["h4_fib_low"]  = h4a_lo
+                    if h4a_rng > 0:
+                        result["h4_fib_50"]  = round(h4a_hi - 0.500 * h4a_rng, 2)
+                        result["h4_fib_618"] = round(h4a_hi - 0.618 * h4a_rng, 2)
+                    else:
+                        result["h4_fib_50"] = result["h4_fib_618"] = None
+                else:
+                    h4_lb = min(20, n_h1)
+                    h4_hi = float(max(_h1_highs[-h4_lb:]))
+                    h4_lo = float(min(_h1_lows[-h4_lb:]))
+                    h4_rng = h4_hi - h4_lo
+                    result["h4_fib_high"] = round(h4_hi, 2)
+                    result["h4_fib_low"]  = round(h4_lo, 2)
+                    if h4_rng > 0:
+                        result["h4_fib_50"]  = round(h4_hi - 0.500 * h4_rng, 2)
+                        result["h4_fib_618"] = round(h4_hi - 0.618 * h4_rng, 2)
+                    else:
+                        result["h4_fib_50"] = result["h4_fib_618"] = None
+
         except Exception as e:
             logger.debug("4H data fetch failed for %s: %s", ticker, e)
 
-        result.setdefault("h4_trend",  "Neutral")
-        result.setdefault("h4_ema20",  None)
-        result.setdefault("h4_ema50",  None)
-        result.setdefault("h4_hh_hl",  False)
+        result.setdefault("h4_trend",    "Neutral")
+        result.setdefault("h4_ema20",    None)
+        result.setdefault("h4_ema50",    None)
+        result.setdefault("h4_hh_hl",    False)
+        result.setdefault("h4_fib_high", None)
+        result.setdefault("h4_fib_low",  None)
+        result.setdefault("h4_fib_50",   None)
+        result.setdefault("h4_fib_618",  None)
 
         # ── 15m confirmation signals ──────────────────────────────────────────
         # m15_confirmation scores 0 (none), 1 (developing), or 2 (confirmed).
@@ -1834,18 +2097,28 @@ def compute_market_temperature() -> dict:
             ("vix_d", "^VIX", "1d", "1mo"),
             ("spy_h", "SPY",  "1h", "5d"),
             ("qqq_h", "QQQ",  "1h", "5d"),
-            ("es_d",  "ES=F", "1d", "5d"),
-            ("es_h",  "ES=F", "1h", "5d"),
-            ("xlk_d", "XLK",  "1d", "5d"),
-            ("xly_d", "XLY",  "1d", "5d"),
-            ("xlf_d", "XLF",  "1d", "5d"),
-            ("xle_d", "XLE",  "1d", "5d"),
+            ("es_d",   "ES=F",      "1d", "5d"),
+            ("es_h",   "ES=F",      "1h", "5d"),
+            ("xlk_d",  "XLK",       "1d", "5d"),
+            ("xly_d",  "XLY",       "1d", "5d"),
+            ("xlf_d",  "XLF",       "1d", "5d"),
+            ("xle_d",  "XLE",       "1d", "5d"),
+            ("xlv_d",  "XLV",       "1d", "5d"),
+            ("xli_d",  "XLI",       "1d", "5d"),
+            ("xlu_d",  "XLU",       "1d", "5d"),
+            ("xlb_d",  "XLB",       "1d", "5d"),
+            ("xlre_d", "XLRE",      "1d", "5d"),
+            ("xlc_d",  "XLC",       "1d", "5d"),
+            ("smh_d",  "SMH",       "1d", "5d"),
+            ("iwm_d",  "IWM",       "1d", "5d"),
+            ("tnx_d",  "^TNX",      "1d", "5d"),
+            ("dxy_d",  "DX-Y.NYB",  "1d", "5d"),
         ]
         _threads = [_thr.Thread(target=_fetch, args=a, daemon=True) for a in _tasks]
         for _t in _threads:
             _t.start()
         for _t in _threads:
-            _t.join(timeout=15)
+            _t.join(timeout=18)
 
         spy_d = _results.get("spy_d")
         qqq_d = _results.get("qqq_d")
@@ -1937,9 +2210,14 @@ def compute_market_temperature() -> dict:
             except Exception:
                 pass
 
-        # Sector ETF daily % changes
+        # Sector ETF daily % changes (12 sectors)
         sectors: dict = {}
-        for _sk, _sn in [("xlk_d","XLK"),("xly_d","XLY"),("xlf_d","XLF"),("xle_d","XLE")]:
+        _sector_list = [
+            ("xlk_d","XLK"), ("xly_d","XLY"), ("xlf_d","XLF"), ("xle_d","XLE"),
+            ("xlv_d","XLV"), ("xli_d","XLI"), ("xlu_d","XLU"), ("xlb_d","XLB"),
+            ("xlre_d","XLRE"),("xlc_d","XLC"), ("smh_d","SMH"), ("iwm_d","IWM"),
+        ]
+        for _sk, _sn in _sector_list:
             _sd = _results.get(_sk)
             if _sd and len(_sd.get("closes", [])) >= 2:
                 try:
@@ -1950,6 +2228,52 @@ def compute_market_temperature() -> dict:
                     sectors[_sn] = None
             else:
                 sectors[_sn] = None
+
+        # 10Y Treasury yield (^TNX: value is already %, e.g. 4.25 = 4.25% yield)
+        yield_10y        = None
+        yield_change_bps = None
+        yield_trend      = "flat"
+        yield_note       = "—"
+        _tnx = _results.get("tnx_d")
+        if _tnx and len(_tnx.get("closes", [])) >= 2:
+            try:
+                yield_10y        = round(_tnx["closes"][-1], 3)
+                _tnx_prev        = _tnx["closes"][-2]
+                yield_change_bps = round((yield_10y - _tnx_prev) * 100, 1)
+                if yield_change_bps > 10:
+                    yield_trend = "rising fast"
+                    yield_note  = "Pressure on growth/tech — rising rates headwind"
+                elif yield_change_bps > 2:
+                    yield_trend = "rising"
+                    yield_note  = "Watch tech — yields creeping higher"
+                elif yield_change_bps < -10:
+                    yield_trend = "falling fast"
+                    yield_note  = "Supportive for growth/tech — rates declining"
+                elif yield_change_bps < -2:
+                    yield_trend = "falling"
+                    yield_note  = "Mild tailwind for growth/tech"
+                else:
+                    yield_trend = "flat"
+                    yield_note  = "Neutral — no rate pressure"
+            except Exception:
+                pass
+
+        # DXY (US Dollar Index)
+        dxy_price      = None
+        dxy_change_pct = None
+        dxy_trend      = "flat"
+        _dxy = _results.get("dxy_d")
+        if _dxy and len(_dxy.get("closes", [])) >= 2:
+            try:
+                dxy_price      = round(_dxy["closes"][-1], 2)
+                _dxy_prev      = _dxy["closes"][-2]
+                dxy_change_pct = round((dxy_price - _dxy_prev) / _dxy_prev * 100, 2) if _dxy_prev else 0.0
+                if dxy_change_pct > 0.3:
+                    dxy_trend = "rising"
+                elif dxy_change_pct < -0.3:
+                    dxy_trend = "falling"
+            except Exception:
+                pass
 
         # ── Score ─────────────────────────────────────────────────────────────
         score   = 0
@@ -2022,18 +2346,21 @@ def compute_market_temperature() -> dict:
                 score -= 1
                 factors.append(f"ES {es_change_pct:.1f}% below VWAP")
 
-        # Sector strength contribution
+        # Sector strength contribution (scales with however many sectors have data)
         _sector_vals = [v for v in sectors.values() if v is not None]
         if _sector_vals:
-            _green = sum(1 for v in _sector_vals if v > 0)
-            if _green >= 3:
+            _total_s = len(_sector_vals)
+            _green   = sum(1 for v in _sector_vals if v > 0)
+            _thresh_up   = max(3, round(_total_s * 0.60))
+            _thresh_down = max(1, round(_total_s * 0.25))
+            if _green >= _thresh_up:
                 score += 1
                 _top = max(
                     ((k, v) for k, v in sectors.items() if v is not None),
                     key=lambda x: x[1],
                 )
-                factors.append(f"{_green}/4 sectors green, {_top[0]} leads")
-            elif _green <= 1:
+                factors.append(f"{_green}/{_total_s} sectors green, {_top[0]} leads")
+            elif _green <= _thresh_down:
                 score -= 1
                 factors.append("sectors mostly red")
 
@@ -2200,13 +2527,20 @@ def compute_market_temperature() -> dict:
             "qqq_price":       round(qqq_price, 2),
             "qqq_pct_ema20":   round(qqq_pct_ema20, 2),
             "qqq_vs_vwap":     round(qqq_vs_vwap, 2) if qqq_vs_vwap is not None else None,
-            "vix_level":       round(vix_level, 1) if vix_level is not None else None,
-            "vix_direction":   vix_direction,
-            "es_price":        round(es_price, 2) if es_price is not None else None,
-            "es_change_pct":   round(es_change_pct, 2) if es_change_pct is not None else None,
-            "es_above_vwap":   es_above_vwap,
-            "sectors":         sectors,
-            "error":           False,
+            "vix_level":         round(vix_level, 1) if vix_level is not None else None,
+            "vix_direction":     vix_direction,
+            "es_price":          round(es_price, 2) if es_price is not None else None,
+            "es_change_pct":     round(es_change_pct, 2) if es_change_pct is not None else None,
+            "es_above_vwap":     es_above_vwap,
+            "yield_10y":         yield_10y,
+            "yield_change_bps":  yield_change_bps,
+            "yield_trend":       yield_trend,
+            "yield_note":        yield_note,
+            "dxy_price":         dxy_price,
+            "dxy_change_pct":    dxy_change_pct,
+            "dxy_trend":         dxy_trend,
+            "sectors":           sectors,
+            "error":             False,
         }
 
     except Exception as _e:
@@ -2232,18 +2566,28 @@ def fetch_market_context() -> dict:
             _results[key] = None
 
     _tasks = [
-        ("es_d",  "ES=F", "1d", "5d"),
-        ("es_h",  "ES=F", "1h", "5d"),
-        ("xlk_d", "XLK",  "1d", "5d"),
-        ("xly_d", "XLY",  "1d", "5d"),
-        ("xlf_d", "XLF",  "1d", "5d"),
-        ("xle_d", "XLE",  "1d", "5d"),
+        ("es_d",   "ES=F",      "1d", "5d"),
+        ("es_h",   "ES=F",      "1h", "5d"),
+        ("xlk_d",  "XLK",       "1d", "5d"),
+        ("xly_d",  "XLY",       "1d", "5d"),
+        ("xlf_d",  "XLF",       "1d", "5d"),
+        ("xle_d",  "XLE",       "1d", "5d"),
+        ("xlv_d",  "XLV",       "1d", "5d"),
+        ("xli_d",  "XLI",       "1d", "5d"),
+        ("xlu_d",  "XLU",       "1d", "5d"),
+        ("xlb_d",  "XLB",       "1d", "5d"),
+        ("xlre_d", "XLRE",      "1d", "5d"),
+        ("xlc_d",  "XLC",       "1d", "5d"),
+        ("smh_d",  "SMH",       "1d", "5d"),
+        ("iwm_d",  "IWM",       "1d", "5d"),
+        ("tnx_d",  "^TNX",      "1d", "5d"),
+        ("dxy_d",  "DX-Y.NYB",  "1d", "5d"),
     ]
     _threads = [_thr.Thread(target=_fetch, args=a, daemon=True) for a in _tasks]
     for _t in _threads:
         _t.start()
     for _t in _threads:
-        _t.join(timeout=15)
+        _t.join(timeout=18)
 
     # ES futures
     es: dict = {"price": None, "change_pct": None, "above_vwap": None, "error": True}
@@ -2287,9 +2631,13 @@ def fetch_market_context() -> dict:
         except Exception:
             pass
 
-    # Sector ETFs
+    # Sector ETFs (12 sectors)
     sectors: dict = {}
-    for key, name in [("xlk_d","XLK"),("xly_d","XLY"),("xlf_d","XLF"),("xle_d","XLE")]:
+    for key, name in [
+        ("xlk_d","XLK"), ("xly_d","XLY"), ("xlf_d","XLF"), ("xle_d","XLE"),
+        ("xlv_d","XLV"), ("xli_d","XLI"), ("xlu_d","XLU"), ("xlb_d","XLB"),
+        ("xlre_d","XLRE"),("xlc_d","XLC"), ("smh_d","SMH"), ("iwm_d","IWM"),
+    ]:
         d = _results.get(key)
         if d and len(d.get("closes", [])) >= 2:
             try:
@@ -2301,6 +2649,43 @@ def fetch_market_context() -> dict:
         else:
             sectors[name] = None
 
+    # 10Y Treasury yield
+    yield_10y = None; yield_change_bps = None; yield_trend = "flat"; yield_note = "—"
+    _tnx = _results.get("tnx_d")
+    if _tnx and len(_tnx.get("closes", [])) >= 2:
+        try:
+            yield_10y        = round(_tnx["closes"][-1], 3)
+            _tnx_prev        = _tnx["closes"][-2]
+            yield_change_bps = round((yield_10y - _tnx_prev) * 100, 1)
+            yield_trend = (
+                "rising fast" if yield_change_bps > 10 else
+                "rising"      if yield_change_bps > 2  else
+                "falling fast"if yield_change_bps < -10 else
+                "falling"     if yield_change_bps < -2 else "flat"
+            )
+            _note_map = {
+                "rising fast": "Pressure on growth/tech — rising rates headwind",
+                "rising":      "Watch tech — yields creeping higher",
+                "falling fast":"Supportive for growth/tech — rates declining",
+                "falling":     "Mild tailwind for growth/tech",
+                "flat":        "Neutral — no rate pressure",
+            }
+            yield_note = _note_map[yield_trend]
+        except Exception:
+            pass
+
+    # DXY
+    dxy_price = None; dxy_change_pct = None; dxy_trend = "flat"
+    _dxy = _results.get("dxy_d")
+    if _dxy and len(_dxy.get("closes", [])) >= 2:
+        try:
+            dxy_price      = round(_dxy["closes"][-1], 2)
+            _dxy_prev      = _dxy["closes"][-2]
+            dxy_change_pct = round((dxy_price - _dxy_prev) / _dxy_prev * 100, 2) if _dxy_prev else 0.0
+            dxy_trend = "rising" if dxy_change_pct > 0.3 else "falling" if dxy_change_pct < -0.3 else "flat"
+        except Exception:
+            pass
+
     # After-hours flag (rough ET check — 9:30–16:00 = regular session)
     after_hours = True
     try:
@@ -2310,4 +2695,15 @@ def fetch_market_context() -> dict:
     except Exception:
         pass
 
-    return {"es": es, "sectors": sectors, "after_hours": after_hours}
+    return {
+        "es":              es,
+        "sectors":         sectors,
+        "after_hours":     after_hours,
+        "yield_10y":       yield_10y,
+        "yield_change_bps":yield_change_bps,
+        "yield_trend":     yield_trend,
+        "yield_note":      yield_note,
+        "dxy_price":       dxy_price,
+        "dxy_change_pct":  dxy_change_pct,
+        "dxy_trend":       dxy_trend,
+    }

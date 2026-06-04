@@ -3,54 +3,118 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <!-- Mobile browser chrome theme — prevents white address bar / status bar on iOS/Android -->
-  <meta name="theme-color" content="#070b18" />
-  <!-- iOS PWA / home-screen mode — full-screen dark with translucent status bar -->
+  <meta name="theme-color" content="#020617" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>{% block title %}Rockkstaar Trade Assistant{% endblock %}</title>
+  <title>{% block title %}HAULTRA AI — Trade Terminal{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
-  <!-- CSRF token for AJAX POST requests (read by setTradingMode in dashboard.js) -->
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
   <!-- Mobile / iPad responsive overrides — loaded last to take priority -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}" />
+  {% block head_extra %}{% endblock %}
 </head>
 <body>
 
-  <!-- ===== NAV ===== -->
+  <!-- ===== NAVBAR ===== -->
   <nav class="navbar">
-    <a href="{{ url_for('dashboard') }}" class="nav-brand">
+
+    <!-- LEFT: Brand -->
+    <a href="{{ url_for('liquidity_page') }}" class="nav-brand">
       <img src="{{ url_for('static', filename='logo.png') }}"
-           alt="Rockkstaar"
+           alt="HAULTRA AI"
            class="nav-logo"
-           onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" />
-      <span class="brand-icon" style="display:none;">◈</span>
-      ROCKKSTAAR
+           onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+      <span class="brand-fallback" style="display:none;">
+        <span class="brand-icon">▲</span>
+        <span class="brand-text">HAULTRA</span>
+      </span>
+      <span class="brand-divider"></span>
+      <span class="brand-sub">AI&nbsp;SYSTEMS</span>
     </a>
+
+    <!-- CENTER: Navigation Links -->
     <div class="nav-links">
-      <a href="{{ url_for('dashboard') }}"  class="nav-link {% if request.endpoint == 'dashboard' %}nav-link-active{% endif %}">Dashboard</a>
-      <a href="{{ url_for('quick_mode') }}" class="nav-link nav-link-quick {% if request.endpoint == 'quick_mode' %}nav-link-active{% endif %}" title="Mobile quick view">⚡ Quick</a>
-      <a href="{{ url_for('journal') }}"       class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}">Journal</a>
-      <a href="{{ url_for('risk_settings') }}" class="nav-link {% if request.endpoint == 'risk_settings' %}nav-link-active{% endif %}" title="Risk &amp; Discipline Settings">⚖ Risk</a>
-      <a href="{{ url_for('schwab_account') }}" class="nav-link nav-link-schwab {% if request.endpoint == 'schwab_account' %}nav-link-active{% endif %}" title="Schwab Account">◈ Account</a>
+      <a href="{{ url_for('liquidity_page') }}"
+         class="nav-link nav-link-home {% if request.endpoint == 'liquidity_page' %}nav-link-active{% endif %}"
+         title="Morning Command Center">
+        HOME
+      </a>
+      <a href="{{ url_for('quick_mode') }}"
+         class="nav-link nav-link-exec {% if request.endpoint == 'quick_mode' %}nav-link-active{% endif %}"
+         title="Trade Execution — entries, stops, targets, setups">
+        EXECUTION
+      </a>
+      <a href="{{ url_for('intel') }}"
+         class="nav-link nav-link-research {% if request.endpoint == 'intel' %}nav-link-active{% endif %}"
+         title="Deep Research — macro, sector, institutional, valuations">
+        RESEARCH
+      </a>
+      <a href="{{ url_for('journal') }}"
+         class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}">
+        Journal
+      </a>
+      <a href="{{ url_for('risk_settings') }}"
+         class="nav-link {% if request.endpoint == 'risk_settings' %}nav-link-active{% endif %}"
+         title="Risk &amp; Discipline Settings">
+        Risk
+      </a>
+      <a href="{{ url_for('dashboard') }}"
+         class="nav-link nav-link-account {% if request.endpoint == 'dashboard' %}nav-link-active{% endif %}"
+         title="Account & Performance Hub">
+        ACCOUNT
+      </a>
+      <a href="{{ url_for('schwab_account') }}"
+         class="nav-link nav-link-schwab {% if request.endpoint == 'schwab_account' %}nav-link-active{% endif %}"
+         title="Schwab Brokerage">
+        Schwab
+      </a>
     </div>
+
+    <!-- RIGHT: Status + Controls -->
     <div class="nav-actions">
+      <!-- Live market status indicator (shown on desktop) -->
+      <span class="nav-live-indicator" id="nav-live-indicator">
+        <span class="nav-live-dot"></span>
+        <span id="nav-live-label">LIVE</span>
+      </span>
+
       <span id="ws-status-pill" class="ws-status-pill ws-polling">POLLING</span>
       <span class="freshness-badge fr-live">Connecting…</span>
       <span id="ar-last-updated" class="ar-last-updated"></span>
-      <button id="alert-sound-toggle" class="btn-ar-toggle ar-on" onclick="toggleAlertSound()" title="Sound alerts for new triggers">🔔 Sound ON</button>
-      <button id="ar-toggle" class="btn-ar-toggle ar-on" onclick="toggleAutoRefresh()" title="Auto-refresh every 4s during market hours">⟳ Auto ON</button>
+
+      <button id="alert-sound-toggle" class="btn-ar-toggle ar-on"
+              onclick="toggleAlertSound()" title="Sound alerts for new triggers">🔔</button>
+      <button id="ar-toggle" class="btn-ar-toggle ar-on"
+              onclick="toggleAutoRefresh()" title="Auto-refresh every 4s during market hours">↺ Auto</button>
+
       <form action="{{ url_for('refresh_all') }}" method="POST" style="display:inline;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-refresh">⟳ Refresh All</button>
+        <button type="submit" class="btn btn-refresh" title="Refresh All">↺</button>
       </form>
+
+      {% if session.get('logged_in') %}
+      <form action="{{ url_for('logout') }}" method="POST" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn-ar-toggle" title="Sign out"
+                style="font-size:13px;padding:4px 8px;opacity:0.55;transition:opacity 0.15s;"
+                onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.55'">⏻</button>
+      </form>
+      {% endif %}
     </div>
+
   </nav>
-  <div class="mobile-refresh-bar"><form action="{{ url_for('refresh_all') }}" method="POST" style="margin:0;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="mobile-refresh-btn">Refresh All</button></form></div>
+
+  <!-- Mobile refresh bar (shown on very small screens) -->
+  <div class="mobile-refresh-bar">
+    <form action="{{ url_for('refresh_all') }}" method="POST" style="margin:0;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="mobile-refresh-btn">↺ Refresh All</button>
+    </form>
+  </div>
 
   <!-- ===== FLASH MESSAGES ===== -->
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -68,24 +132,59 @@
     {% block content %}{% endblock %}
   </main>
 
-  <!-- ===== MOBILE STICKY CONTROL BAR =====
-       Visible only on ≤ 768px. Stays pinned at the bottom of the screen.
-       Mirrors the navbar controls in a touch-friendly layout.
-  -->
+  <!-- ===== MOBILE STICKY CONTROL BAR ===== -->
   <div class="mobile-ctrl-bar" id="mobile-ctrl-bar">
     <a href="{{ url_for('journal') }}"       class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'journal' %}mcb-on{% endif %}" title="Journal">📓</a>
     <a href="{{ url_for('risk_settings') }}" class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'risk_settings' %}mcb-on{% endif %}" title="Risk Settings">⚖</a>
-    <button id="mobile-ar-toggle"    class="mobile-ctrl-btn mobile-ctrl-ar mcb-on"    onclick="toggleAutoRefresh()">⟳ Auto</button>
+    <button id="mobile-ar-toggle"    class="mobile-ctrl-btn mobile-ctrl-ar mcb-on"    onclick="toggleAutoRefresh()">↺ Auto</button>
     <button id="mobile-sound-toggle" class="mobile-ctrl-btn mobile-ctrl-sound mcb-on" onclick="toggleAlertSound()">🔔</button>
     <form action="{{ url_for('refresh_all') }}" method="POST" style="display:contents;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="mobile-ctrl-btn mobile-ctrl-refresh">⟳ Now</button>
+      <button type="submit" class="mobile-ctrl-btn mobile-ctrl-refresh">↺ Now</button>
     </form>
     <span id="mobile-last-updated" class="mobile-ctrl-time"></span>
   </div>
 
   <script src="{{ url_for('static', filename='js/ws_manager.js') }}"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+
+  <script>
+    // Update nav live indicator based on market session
+    (function() {
+      var el = document.getElementById('nav-live-indicator');
+      var lbl = document.getElementById('nav-live-label');
+      if (!el || !lbl) return;
+      var h = new Date().getUTCHours();
+      var etH = (h - 4 + 24) % 24; // rough ET
+      if (etH >= 9 && etH < 16) {
+        el.style.display = 'inline-flex';
+        lbl.textContent = 'MARKET ACTIVE';
+      } else if (etH >= 4 && etH < 9) {
+        el.style.background = 'rgba(245,158,11,0.08)';
+        el.style.borderColor = 'rgba(245,158,11,0.22)';
+        el.style.color = '#f59e0b';
+        el.querySelector('.nav-live-dot').style.background = '#f59e0b';
+        lbl.textContent = 'PREMARKET';
+        el.style.display = 'inline-flex';
+      } else if (etH >= 16 && etH < 20) {
+        el.style.background = 'rgba(245,158,11,0.08)';
+        el.style.borderColor = 'rgba(245,158,11,0.22)';
+        el.style.color = '#f59e0b';
+        el.querySelector('.nav-live-dot').style.background = '#f59e0b';
+        lbl.textContent = 'AFTERHOURS';
+        el.style.display = 'inline-flex';
+      } else {
+        el.style.background = 'rgba(100,116,139,0.08)';
+        el.style.borderColor = 'rgba(100,116,139,0.18)';
+        el.style.color = '#64748b';
+        el.querySelector('.nav-live-dot').style.background = '#64748b';
+        el.querySelector('.nav-live-dot').style.animation = 'none';
+        lbl.textContent = 'MARKET CLOSED';
+        el.style.display = 'inline-flex';
+      }
+    })();
+  </script>
+
   {% block scripts %}{% endblock %}
 </body>
 </html>

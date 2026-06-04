@@ -7,7 +7,7 @@
 
   <!-- ===== HEADER ===== -->
   <div class="detail-header">
-    <a href="{{ url_for('dashboard') }}" class="back-link">← Dashboard</a>
+    <a href="{{ url_for('dashboard') }}" class="back-link">← Account</a>
     <div class="detail-title-row">
       <h1 class="detail-ticker">{{ stock.ticker }}</h1>
       <span id="detail-sfa-badge" class="exec-badge exec-badge-xl {{ stock.simplified_action_class }}" title="{{ stock.final_action }}">{{ stock.simplified_action }}</span>
@@ -115,6 +115,16 @@
       <div class="score-strip-reason">avg {{ "{:,.0f}".format(stock.avg_volume) if stock.avg_volume is not none else "N/A" }}</div>
     </div>
 
+    <div class="score-strip-divider"></div>
+
+    <div class="score-strip-item">
+      <div class="score-strip-label">RS vs QQQ</div>
+      <div class="score-big {{ stock.rs_class | default('rs-avg') }}">
+        {{ stock.rs_score_display | default('—') }}
+      </div>
+      <div class="score-strip-reason">{{ stock.rs_label | default('') }}{% if stock.sector_name %} · {{ stock.sector_etf }}{% endif %}</div>
+    </div>
+
   </div>
 
   <!-- ===== TRADE COACH ===== -->
@@ -130,6 +140,112 @@
       {% endfor %}
     </div>
   </div>
+
+  <!-- ===== AI INSTITUTIONAL TRADE PLAN ===== -->
+  {% if stock.ai_trade_plan and stock.ai_trade_plan.has_plan %}
+  {% set plan = stock.ai_trade_plan %}
+  <div class="detail-card ai-plan-card">
+    <h3 class="card-title">
+      AI Institutional Plan
+      <span class="plan-grade-badge {{ plan.grade_css }}">{{ plan.grade }}</span>
+      <span class="plan-prob-badge {% if plan.probability >= 75 %}prob-high{% elif plan.probability >= 55 %}prob-med{% else %}prob-low{% endif %}">
+        {{ plan.probability }}% probability
+      </span>
+    </h3>
+
+    <!-- Setup label + RS + Sector -->
+    <div class="ai-plan-header-row">
+      <span class="ai-plan-setup-label">{{ plan.setup_label }}</span>
+      {% if stock.rs_score_display is defined %}
+      <span class="rs-badge {{ stock.rs_class }}" title="{{ stock.rs_vs_qqq_display | default('') }}">
+        RS {{ stock.rs_score_display }} — {{ stock.rs_label }}
+      </span>
+      {% endif %}
+      {% if stock.sector_name %}
+      <span class="sector-chip {{ stock.sector_class }}" title="Sector">
+        {{ stock.sector_etf }} · {{ stock.sector_name }}
+        {% if stock.sector_leading %} ↑ Leading{% endif %}
+      </span>
+      {% endif %}
+    </div>
+
+    <div class="ai-plan-body">
+      <!-- Left: Levels -->
+      <div class="ai-plan-levels">
+        {% if plan.entry_low or plan.entry_high %}
+        <div class="ai-level-row ai-level-entry">
+          <span class="ai-level-lbl">Entry Zone</span>
+          <span class="ai-level-val">
+            {% if plan.entry_low and plan.entry_high %}
+              ${{ "%.2f"|format(plan.entry_low) }} – ${{ "%.2f"|format(plan.entry_high) }}
+            {% elif plan.entry_low %}
+              ~${{ "%.2f"|format(plan.entry_low) }}
+            {% endif %}
+          </span>
+        </div>
+        {% endif %}
+        {% if plan.stop %}
+        <div class="ai-level-row ai-level-stop">
+          <span class="ai-level-lbl">Stop Loss</span>
+          <span class="ai-level-val text-danger">${{ "%.2f"|format(plan.stop) }}</span>
+        </div>
+        {% endif %}
+        {% if plan.target1 %}
+        <div class="ai-level-row ai-level-target">
+          <span class="ai-level-lbl">Target 1</span>
+          <span class="ai-level-val text-success">${{ "%.2f"|format(plan.target1) }}</span>
+        </div>
+        {% endif %}
+        {% if plan.target2 %}
+        <div class="ai-level-row ai-level-target">
+          <span class="ai-level-lbl">Target 2</span>
+          <span class="ai-level-val text-success">${{ "%.2f"|format(plan.target2) }}</span>
+        </div>
+        {% endif %}
+        {% if plan.rr %}
+        <div class="ai-level-row">
+          <span class="ai-level-lbl">R:R Ratio</span>
+          <span class="ai-level-val {{ 'text-success' if plan.rr >= 2 else ('text-warning' if plan.rr >= 1 else 'text-danger') }}">
+            {{ "%.1f"|format(plan.rr) }}:1
+          </span>
+        </div>
+        {% endif %}
+        <div class="ai-level-row">
+          <span class="ai-level-lbl">Swing Score</span>
+          <span class="ai-level-val">{{ plan.swing_score }}/10</span>
+        </div>
+        <div class="ai-level-row">
+          <span class="ai-level-lbl">Catalyst</span>
+          <span class="ai-level-val">{{ plan.cat_score }}/10</span>
+        </div>
+      </div>
+
+      <!-- Right: Reasons + Warnings -->
+      <div class="ai-plan-signals">
+        {% if plan.reasons %}
+        <div class="ai-signals-section">
+          <div class="ai-signals-title ai-signals-bull">Bull Factors</div>
+          {% for r in plan.reasons %}
+          <div class="ai-signal-row ai-signal-bull">
+            <span class="ai-sig-dot">+</span> {{ r }}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if plan.warnings %}
+        <div class="ai-signals-section">
+          <div class="ai-signals-title ai-signals-warn">Warnings</div>
+          {% for w in plan.warnings %}
+          <div class="ai-signal-row ai-signal-warn">
+            <span class="ai-sig-dot ai-sig-warn-dot">!</span> {{ w }}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- ===== SWING TRADE PLAN ===== -->
   <div class="detail-card swing-plan-card">
@@ -159,10 +275,13 @@
         <div class="swing-plan-hint">20 EMA: ${{ "%.2f"|format(stock.ema_20_daily) }}</div>
         {% endif %}
         {% if stock.fib_618 %}
-        <div class="swing-plan-hint">61.8% Fib: ${{ "%.2f"|format(stock.fib_618) }}</div>
+        <div class="swing-plan-hint">61.8% Fib{{ ' ★' if stock.fib_mode == 'active' else '' }}: ${{ "%.2f"|format(stock.fib_618) }}</div>
         {% endif %}
         {% if stock.fib_50 %}
         <div class="swing-plan-hint">50% Fib: ${{ "%.2f"|format(stock.fib_50) }}</div>
+        {% endif %}
+        {% if stock.fib_382 %}
+        <div class="swing-plan-hint">38.2% Fib: ${{ "%.2f"|format(stock.fib_382) }}</div>
         {% endif %}
       </div>
 
@@ -264,41 +383,246 @@
     <div class="detail-col">
       <div class="detail-card">
         <h3 class="card-title">Fibonacci Levels</h3>
-        {% if stock.fib_high and stock.fib_low %}
-        <div class="fib-grid">
 
-          <div class="fib-row fib-row-high">
-            <span class="fib-label">Swing High</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_high) }}</span>
-            <span class="fib-pct">0%</span>
+        {% if stock.fib_high and stock.fib_low %}
+        {% set cur  = stock.current_price %}
+        {% set fh   = stock.fib_high %}
+        {% set fl   = stock.fib_low %}
+        {% set frng = fh - fl %}
+
+        <!-- Mode + confidence header -->
+        <div class="fib-meta-row">
+          <span class="fib-mode-badge fib-mode-{{ stock.fib_mode or 'macro' }}">
+            {% if stock.fib_mode == 'active' %}Active Swing{% elif stock.fib_mode == 'manual' %}Manual{% else %}Macro Struct{% endif %}
+          </span>
+          {% if stock.fib_confidence %}
+          <span class="fib-confidence">Confidence: <strong>{{ "%.1f"|format(stock.fib_confidence) }}/10</strong></span>
+          {% endif %}
+          <span class="fib-direction fib-dir-{{ stock.fib_direction or 'bullish' }}">
+            {{ '▲ Bullish' if (stock.fib_direction or 'bullish') == 'bullish' else '▼ Bearish' }}
+          </span>
+          {% if stock.macro_fib_high and stock.macro_fib_low %}
+          <div class="fib-toggle-group">
+            <button class="fib-toggle-btn{{ ' fib-toggle-on' if (stock.fib_mode or 'macro') != 'macro' else '' }}"
+                    id="fib-btn-active" onclick="fibToggle('active')">Active</button>
+            <button class="fib-toggle-btn{{ ' fib-toggle-on' if (stock.fib_mode or 'macro') == 'macro' else '' }}"
+                    id="fib-btn-macro" onclick="fibToggle('macro')">Macro</button>
           </div>
+          {% endif %}
+        </div>
+        <div class="fib-anchors">
+          <span id="fib-anchor-high">High: ${{ "%.2f"|format(fh) }}</span>
+          <span id="fib-anchor-low">Low: ${{ "%.2f"|format(fl) }}</span>
+        </div>
+
+        <!-- Full level grid -->
+        <div class="fib-grid-v2">
+
+          <div class="fib-zone-label fib-zone-premium">Premium Zone</div>
+
+          <div class="fib-row fib-row-high {{ 'fib-row-active' if cur and frng > 0 and (fh * 0.99) <= cur else '' }}">
+            <span class="fib-pct">0%</span>
+            <span class="fib-label">Swing High</span>
+            <span class="fib-value" id="fib-val-0">${{ "%.2f"|format(fh) }}</span>
+          </div>
+
+          {% if stock.fib_236 %}
+          <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_236 * 0.98) <= cur <= (stock.fib_236 * 1.02) else '' }}">
+            <span class="fib-pct">23.6%</span>
+            <span class="fib-label">Shallow Pullback</span>
+            <span class="fib-value" id="fib-val-236">${{ "%.2f"|format(stock.fib_236) }}</span>
+          </div>
+          {% endif %}
+
+          {% if stock.fib_382 %}
+          <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_382 * 0.98) <= cur <= (stock.fib_382 * 1.02) else '' }}">
+            <span class="fib-pct">38.2%</span>
+            <span class="fib-label">Standard Pullback</span>
+            <span class="fib-value" id="fib-val-382">${{ "%.2f"|format(stock.fib_382) }}</span>
+          </div>
+          {% endif %}
+
+          <div class="fib-zone-label fib-zone-neutral">Mid Zone</div>
 
           {% if stock.fib_50 %}
-          <div class="fib-row {{ 'fib-row-active' if stock.current_price and (stock.fib_50 * 0.98) <= stock.current_price <= (stock.fib_50 * 1.02) else '' }}">
-            <span class="fib-label">50% Retracement</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_50) }}</span>
+          <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_50 * 0.98) <= cur <= (stock.fib_50 * 1.02) else '' }}">
             <span class="fib-pct">50%</span>
+            <span class="fib-label">Mid Retracement</span>
+            <span class="fib-value" id="fib-val-50">${{ "%.2f"|format(stock.fib_50) }}</span>
           </div>
           {% endif %}
 
-          {% if stock.fib_618 %}
-          <div class="fib-row {{ 'fib-row-active' if stock.current_price and (stock.fib_618 * 0.98) <= stock.current_price <= (stock.fib_618 * 1.02) else '' }}">
-            <span class="fib-label">61.8% Retracement</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_618) }}</span>
-            <span class="fib-pct">61.8%</span>
+          <!-- Golden Pocket Zone — 61.8% to 70.5% -->
+          <div class="fib-golden-pocket-zone">
+            <div class="fib-gp-title">
+              <span class="fib-gp-label">Golden Pocket</span>
+              <span class="fib-gp-range">61.8% – 70.5%</span>
+            </div>
+            {% if stock.fib_618 %}
+            <div class="fib-row fib-row-golden {{ 'fib-row-active' if cur and (stock.fib_618 * 0.98) <= cur <= (stock.fib_618 * 1.02) else '' }}">
+              <span class="fib-pct">61.8%</span>
+              <span class="fib-label">GP Top</span>
+              <span class="fib-value" id="fib-val-618">${{ "%.2f"|format(stock.fib_618) }}</span>
+            </div>
+            {% endif %}
+            {% if stock.fib_65 %}
+            <div class="fib-row fib-row-golden {{ 'fib-row-active' if cur and (stock.fib_65 * 0.98) <= cur <= (stock.fib_65 * 1.02) else '' }}">
+              <span class="fib-pct">65%</span>
+              <span class="fib-label">GP Mid</span>
+              <span class="fib-value" id="fib-val-65">${{ "%.2f"|format(stock.fib_65) }}</span>
+            </div>
+            {% endif %}
+            {% if stock.fib_705 %}
+            <div class="fib-row fib-row-golden {{ 'fib-row-active' if cur and (stock.fib_705 * 0.98) <= cur <= (stock.fib_705 * 1.02) else '' }}">
+              <span class="fib-pct">70.5%</span>
+              <span class="fib-label">GP Bot</span>
+              <span class="fib-value" id="fib-val-705">${{ "%.2f"|format(stock.fib_705) }}</span>
+            </div>
+            {% endif %}
+          </div>
+
+          <div class="fib-zone-label fib-zone-discount">Discount Zone</div>
+
+          {% if stock.fib_786 %}
+          <div class="fib-row {{ 'fib-row-active' if cur and (stock.fib_786 * 0.98) <= cur <= (stock.fib_786 * 1.02) else '' }}">
+            <span class="fib-pct">78.6%</span>
+            <span class="fib-label">Deep Retracement</span>
+            <span class="fib-value" id="fib-val-786">${{ "%.2f"|format(stock.fib_786) }}</span>
           </div>
           {% endif %}
 
-          <div class="fib-row fib-row-low">
-            <span class="fib-label">Swing Low</span>
-            <span class="fib-value">${{ "%.2f"|format(stock.fib_low) }}</span>
+          <div class="fib-row fib-row-low {{ 'fib-row-active' if cur and frng > 0 and cur <= (fl * 1.01) else '' }}">
             <span class="fib-pct">100%</span>
+            <span class="fib-label">Swing Low</span>
+            <span class="fib-value" id="fib-val-100">${{ "%.2f"|format(fl) }}</span>
           </div>
 
         </div>
+
+        <!-- Price position insight -->
+        {% if cur and frng > 0 %}
+        {% set pct_r = (fh - cur) / frng * 100 %}
+        <div class="fib-position-insight {{ 'fib-pos-premium' if pct_r < 38.2 else ('fib-pos-golden' if pct_r <= 70.5 else 'fib-pos-discount') }}">
+          {% if pct_r < 0 %}
+            Extended <strong>{{ "%.1f"|format(-pct_r) }}%</strong> above swing high — momentum extended, watch for pullback.
+          {% elif pct_r < 23.6 %}
+            In <strong>premium zone</strong> ({{ "%.1f"|format(pct_r) }}%) — trend continuation area, wait for volume confirmation.
+          {% elif pct_r < 38.2 %}
+            Shallow pullback at <strong>{{ "%.1f"|format(pct_r) }}%</strong> — bullish continuation zone, 20 EMA support key.
+          {% elif pct_r < 50 %}
+            Between 38.2–50% at <strong>{{ "%.1f"|format(pct_r) }}%</strong> — standard retracement, watch for demand reaction.
+          {% elif pct_r < 61.8 %}
+            Near <strong>50% mid-level</strong> ({{ "%.1f"|format(pct_r) }}%) — trend intact while price holds above here.
+          {% elif pct_r <= 70.5 %}
+            In the <strong>Golden Pocket</strong> ({{ "%.1f"|format(pct_r) }}%) — prime long entry zone in uptrend, high-confluence area.
+          {% elif pct_r < 78.6 %}
+            <strong>Deep retracement</strong> at {{ "%.1f"|format(pct_r) }}% — structure weakening, needs reclaim of 61.8%.
+          {% else %}
+            Below 78.6% ({{ "%.1f"|format(pct_r) }}%) — trend structure <strong>challenged</strong>. Confirm reversal before entry.
+          {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Macro context (shown when active swing is in use) -->
+        {% if stock.fib_mode == 'active' and stock.macro_fib_high and stock.macro_fib_low %}
+        <div class="fib-macro-context">
+          <div class="fib-macro-label">Macro Structure (20-bar)</div>
+          <div class="fib-macro-vals">
+            <span>H: ${{ "%.2f"|format(stock.macro_fib_high) }}</span>
+            {% if stock.macro_fib_50 %}<span>50%: ${{ "%.2f"|format(stock.macro_fib_50) }}</span>{% endif %}
+            {% if stock.macro_fib_618 %}<span>61.8%: ${{ "%.2f"|format(stock.macro_fib_618) }}</span>{% endif %}
+            <span>L: ${{ "%.2f"|format(stock.macro_fib_low) }}</span>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- 4H fibs -->
+        {% if stock.h4_fib_high and stock.h4_fib_low %}
+        <div class="fib-h4-context">
+          <div class="fib-macro-label">4H Structure</div>
+          <div class="fib-macro-vals">
+            <span>H: ${{ "%.2f"|format(stock.h4_fib_high) }}</span>
+            {% if stock.h4_fib_50 %}<span>50%: ${{ "%.2f"|format(stock.h4_fib_50) }}</span>{% endif %}
+            {% if stock.h4_fib_618 %}<span>61.8%: ${{ "%.2f"|format(stock.h4_fib_618) }}</span>{% endif %}
+            <span>L: ${{ "%.2f"|format(stock.h4_fib_low) }}</span>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Manual override -->
+        <div class="fib-override-section">
+          <button class="fib-override-toggle" onclick="this.nextElementSibling.classList.toggle('open')">
+            Set manual fib anchors
+          </button>
+          <form class="fib-override-form" id="fib-override-form"
+                action="/api/fib-override/{{ stock.ticker }}" method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="fib-override-row">
+              <label class="fib-override-label">Swing High</label>
+              <input class="fib-override-input" type="number" name="fib_manual_high" step="0.01"
+                     placeholder="{{ '%.2f'|format(fh) }}" min="0">
+            </div>
+            <div class="fib-override-row">
+              <label class="fib-override-label">Swing Low</label>
+              <input class="fib-override-input" type="number" name="fib_manual_low" step="0.01"
+                     placeholder="{{ '%.2f'|format(fl) }}" min="0">
+            </div>
+            <button class="fib-override-btn" type="submit">Apply Override</button>
+          </form>
+        </div>
+
+        {% if stock.macro_fib_high and stock.macro_fib_low %}
+        {% set m_hi = stock.macro_fib_high %}
+        {% set m_lo = stock.macro_fib_low %}
+        {% set m_rng = m_hi - m_lo %}
+        <script>
+        (function() {
+          var _fibD = {
+            active: {
+              high:   {{ fh | tojson }},      low:    {{ fl | tojson }},
+              fib236: {{ stock.fib_236 | tojson }}, fib382: {{ stock.fib_382 | tojson }},
+              fib50:  {{ stock.fib_50  | tojson }}, fib618: {{ stock.fib_618 | tojson }},
+              fib65:  {{ stock.fib_65  | tojson }}, fib705: {{ stock.fib_705 | tojson }},
+              fib786: {{ stock.fib_786 | tojson }}
+            },
+            macro: {
+              high:   {{ m_hi | tojson }},    low:    {{ m_lo | tojson }},
+              fib236: {{ (m_hi - 0.236 * m_rng) | round(2) | tojson }},
+              fib382: {{ (m_hi - 0.382 * m_rng) | round(2) | tojson }},
+              fib50:  {{ (stock.macro_fib_50  if stock.macro_fib_50  else (m_hi - 0.5   * m_rng)) | round(2) | tojson }},
+              fib618: {{ (stock.macro_fib_618 if stock.macro_fib_618 else (m_hi - 0.618 * m_rng)) | round(2) | tojson }},
+              fib65:  {{ (m_hi - 0.65  * m_rng) | round(2) | tojson }},
+              fib705: {{ (m_hi - 0.705 * m_rng) | round(2) | tojson }},
+              fib786: {{ (m_hi - 0.786 * m_rng) | round(2) | tojson }}
+            }
+          };
+          window.fibToggle = function(mode) {
+            var d = _fibD[mode];
+            if (!d) return;
+            var fmt = function(v) { return v != null ? '$' + parseFloat(v).toFixed(2) : '—'; };
+            var upd = function(id, txt) { var e = document.getElementById(id); if (e) e.textContent = txt; };
+            upd('fib-anchor-high', 'High: ' + fmt(d.high));
+            upd('fib-anchor-low',  'Low: '  + fmt(d.low));
+            var map = {
+              'fib-val-0':   d.high,   'fib-val-236': d.fib236,
+              'fib-val-382': d.fib382, 'fib-val-50':  d.fib50,
+              'fib-val-618': d.fib618, 'fib-val-65':  d.fib65,
+              'fib-val-705': d.fib705, 'fib-val-786': d.fib786,
+              'fib-val-100': d.low
+            };
+            for (var id in map) { upd(id, fmt(map[id])); }
+            var btnA = document.getElementById('fib-btn-active');
+            var btnM = document.getElementById('fib-btn-macro');
+            if (btnA) btnA.classList.toggle('fib-toggle-on', mode === 'active');
+            if (btnM) btnM.classList.toggle('fib-toggle-on', mode === 'macro');
+          };
+        })();
+        </script>
+        {% endif %}
+
         {% else %}
         <div class="no-data-msg">
-          Fibonacci unavailable — requires 200-day price history.<br>
+          Fibonacci unavailable — price history required.<br>
           <small>Click <strong>Refresh Data</strong> to compute levels.</small>
         </div>
         {% endif %}
@@ -307,41 +631,159 @@
 
   </div>
 
-  <!-- ===== SUPPLY / DEMAND ZONES ===== -->
-  {% if stock.nearest_supply_top or stock.nearest_demand_bottom %}
-  <div class="detail-card zones-card">
-    <h3 class="card-title">Supply &amp; Demand Zones</h3>
-    <div class="zones-grid">
-
-      {% if stock.nearest_supply_top %}
-      <div class="zone-item zone-supply {{ 'zone-active' if stock.in_supply_zone else '' }}">
-        <div class="zone-label">Nearest Supply</div>
-        <div class="zone-range">${{ "%.2f"|format(stock.nearest_supply_bottom or 0) }} – ${{ "%.2f"|format(stock.nearest_supply_top) }}</div>
-        {% if stock.distance_to_supply_pct %}
-        <div class="zone-dist">{{ '%+.1f'|format(stock.distance_to_supply_pct) }}% away</div>
-        {% endif %}
-        {% if stock.in_supply_zone %}<div class="zone-active-badge">IN ZONE</div>{% endif %}
-      </div>
-      {% endif %}
-
-      {% if stock.nearest_demand_bottom %}
-      <div class="zone-item zone-demand {{ 'zone-active' if stock.in_demand_zone else '' }}">
-        <div class="zone-label">Nearest Demand</div>
-        <div class="zone-range">${{ "%.2f"|format(stock.nearest_demand_bottom) }} – ${{ "%.2f"|format(stock.nearest_demand_top or 0) }}</div>
-        {% if stock.distance_to_demand_pct %}
-        <div class="zone-dist">{{ '%+.1f'|format(stock.distance_to_demand_pct) }}% away</div>
-        {% endif %}
-        {% if stock.in_demand_zone %}<div class="zone-active-badge">IN ZONE</div>{% endif %}
-      </div>
-      {% endif %}
-
+  <!-- ===== INSTITUTIONAL SUPPLY & DEMAND ZONES ===== -->
+  <div class="detail-card zones-card-v2">
+    <h3 class="card-title">
+      Smart Money Zones
       {% if stock.zone_location %}
-      <div class="zone-location-badge">{{ stock.zone_location }}</div>
+      <span class="zone-location-chip zone-loc-{{ stock.zone_location | lower | replace(' ', '-') | replace('—', '') }}">{{ stock.zone_location }}</span>
       {% endif %}
+    </h3>
 
+    {# ── AI Setup Engine ───────────────────────────────────────────────── #}
+    {% if stock.zone_ai_setup and stock.zone_probability %}
+    <div class="zone-ai-box">
+      <div class="zone-ai-header">
+        <span class="zone-ai-setup">{{ stock.zone_ai_setup }}</span>
+        <span class="zone-ai-prob {{ 'zone-prob-high' if stock.zone_probability >= 75 else ('zone-prob-med' if stock.zone_probability >= 60 else 'zone-prob-low') }}">
+          {{ stock.zone_probability }}% probability
+        </span>
+      </div>
+      {% if stock.zone_ai_reasons %}
+      <ul class="zone-ai-reasons">
+        {% for r in stock.zone_ai_reasons[:7] %}
+        <li>{{ r }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
     </div>
-  </div>
-  {% endif %}
+    {% endif %}
+
+    {# ── Smart Money Flags ─────────────────────────────────────────────── #}
+    {% set sm = stock.smart_money or {} %}
+    {% if sm %}
+    <div class="sm-flags-row">
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('fvg_bullish') else 'sm-flag-off' }}">FVG Bull</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('fvg_bearish') else 'sm-flag-off' }}">FVG Bear</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('bos_bullish') else 'sm-flag-off' }}">BOS ▲</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('bos_bearish') else 'sm-flag-off' }}">BOS ▼</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('mss_bullish') else 'sm-flag-off' }}">MSS ▲</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('bullish_sweep') else 'sm-flag-off' }}">Sweep ▲</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('bearish_sweep') else 'sm-flag-off' }}">Sweep ▼</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('order_block_bull') else 'sm-flag-off' }}">OB Bull</span>
+      <span class="sm-flag {{ 'sm-flag-on' if sm.get('order_block_bear') else 'sm-flag-off' }}">OB Bear</span>
+    </div>
+    {% endif %}
+
+    {# ── Best Demand + Supply side-by-side ─────────────────────────────── #}
+    <div class="zones-dual-grid">
+
+      {# DEMAND ZONES #}
+      <div class="zones-col zones-col-demand">
+        <div class="zones-col-header">
+          <span class="zones-col-title">DEMAND ZONES</span>
+          {% if stock.demand_zone_grade %}
+          <span class="zone-grade-badge {{ stock.demand_zone_grade_css }}">{{ stock.demand_zone_grade }}</span>
+          {% endif %}
+        </div>
+
+        {% if stock.demand_zones %}
+          {% for z in stock.demand_zones[:3] %}
+          {% set cur = stock.current_price %}
+          {% set in_z = cur and z.zone_bottom <= cur <= z.zone_top %}
+          {% set near = cur and not in_z and (z.zone_top - cur) / cur <= 0.04 %}
+          <div class="zone-row zone-row-demand {{ 'zone-row-active' if in_z else '' }} {{ 'zone-row-near' if near else '' }}">
+            <div class="zone-row-top">
+              <span class="zone-grade-badge {{ {'A+':'zone-grade-aplus','A':'zone-grade-a','B+':'zone-grade-bplus','B':'zone-grade-b'}.get(z.grade, '') }}">{{ z.grade }}</span>
+              <span class="zone-row-range">${{ "%.2f"|format(z.zone_bottom) }} – ${{ "%.2f"|format(z.zone_top) }}</span>
+              {% if in_z %}<span class="zone-in-badge">IN ZONE</span>{% elif near %}<span class="zone-near-badge">NEAR</span>{% endif %}
+            </div>
+            <div class="zone-row-meta">
+              {% if z.timeframe %}<span class="zone-tf">{{ z.timeframe | upper }}</span>{% endif %}
+              <span class="zone-fresh {{ 'zone-fresh-yes' if z.is_fresh else 'zone-fresh-no' }}">
+                {{ 'Fresh' if z.retest_count == 0 else ('1st retest' if z.retest_count == 1 else (z.retest_count|string + 'x used')) }}
+              </span>
+              {% if z.has_fvg %}<span class="sm-flag sm-flag-on sm-flag-xs">FVG</span>{% endif %}
+              {% if z.ob_present %}<span class="sm-flag sm-flag-on sm-flag-xs">OB</span>{% endif %}
+              {% if z.has_bos %}<span class="sm-flag sm-flag-on sm-flag-xs">BOS</span>{% endif %}
+              {% if z.has_liq_sweep %}<span class="sm-flag sm-flag-on sm-flag-xs">SWEEP</span>{% endif %}
+            </div>
+            {% if z.confluence_factors %}
+            <div class="zone-confluence">{{ z.confluence_factors[:3] | join(' · ') }}</div>
+            {% endif %}
+            <div class="zone-row-score">Score: {{ "%.1f"|format(z.final_score) }}/10 · Vol {{ z.vol_ratio }}x · Disp {{ z.displacement_atr }}x ATR</div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="zone-empty">No institutional demand zones detected</div>
+        {% endif %}
+      </div>
+
+      {# SUPPLY ZONES #}
+      <div class="zones-col zones-col-supply">
+        <div class="zones-col-header">
+          <span class="zones-col-title">SUPPLY ZONES</span>
+          {% if stock.supply_zone_grade %}
+          <span class="zone-grade-badge {{ stock.supply_zone_grade_css }}">{{ stock.supply_zone_grade }}</span>
+          {% endif %}
+        </div>
+
+        {% if stock.supply_zones %}
+          {% for z in stock.supply_zones[:3] %}
+          {% set cur = stock.current_price %}
+          {% set in_z = cur and z.zone_bottom <= cur <= z.zone_top %}
+          {% set near = cur and not in_z and (cur - z.zone_bottom) / cur <= 0.04 %}
+          <div class="zone-row zone-row-supply {{ 'zone-row-active' if in_z else '' }} {{ 'zone-row-near' if near else '' }}">
+            <div class="zone-row-top">
+              <span class="zone-grade-badge {{ {'A+':'zone-grade-aplus','A':'zone-grade-a','B+':'zone-grade-bplus','B':'zone-grade-b'}.get(z.grade, '') }}">{{ z.grade }}</span>
+              <span class="zone-row-range">${{ "%.2f"|format(z.zone_bottom) }} – ${{ "%.2f"|format(z.zone_top) }}</span>
+              {% if in_z %}<span class="zone-in-badge">IN ZONE</span>{% elif near %}<span class="zone-near-badge">NEAR</span>{% endif %}
+            </div>
+            <div class="zone-row-meta">
+              {% if z.timeframe %}<span class="zone-tf">{{ z.timeframe | upper }}</span>{% endif %}
+              <span class="zone-fresh {{ 'zone-fresh-yes' if z.is_fresh else 'zone-fresh-no' }}">
+                {{ 'Fresh' if z.retest_count == 0 else ('1st retest' if z.retest_count == 1 else (z.retest_count|string + 'x used')) }}
+              </span>
+              {% if z.has_fvg %}<span class="sm-flag sm-flag-on sm-flag-xs">FVG</span>{% endif %}
+              {% if z.ob_present %}<span class="sm-flag sm-flag-on sm-flag-xs">OB</span>{% endif %}
+              {% if z.has_bos %}<span class="sm-flag sm-flag-on sm-flag-xs">BOS</span>{% endif %}
+            </div>
+            {% if z.confluence_factors %}
+            <div class="zone-confluence">{{ z.confluence_factors[:3] | join(' · ') }}</div>
+            {% endif %}
+            <div class="zone-row-score">Score: {{ "%.1f"|format(z.final_score) }}/10 · Vol {{ z.vol_ratio }}x · Disp {{ z.displacement_atr }}x ATR</div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="zone-empty">No institutional supply zones detected</div>
+        {% endif %}
+      </div>
+
+    </div>{# end zones-dual-grid #}
+
+    {# ── Fallback V1 zone display when no V2 zones exist ─────────────────── #}
+    {% if not stock.demand_zones and not stock.supply_zones %}
+    {% if stock.nearest_supply_top or stock.nearest_demand_bottom %}
+    <div class="zones-v1-fallback">
+      {% if stock.nearest_supply_top %}
+      <div class="zone-v1-item zone-supply">
+        <span class="zone-v1-label">Supply</span>
+        <span class="zone-v1-range">${{ "%.2f"|format(stock.nearest_supply_bottom or 0) }}–${{ "%.2f"|format(stock.nearest_supply_top) }}</span>
+        {% if stock.distance_to_supply_pct %}<span class="zone-v1-dist">{{ '%+.1f'|format(stock.distance_to_supply_pct) }}%</span>{% endif %}
+      </div>
+      {% endif %}
+      {% if stock.nearest_demand_bottom %}
+      <div class="zone-v1-item zone-demand">
+        <span class="zone-v1-label">Demand</span>
+        <span class="zone-v1-range">${{ "%.2f"|format(stock.nearest_demand_bottom) }}–${{ "%.2f"|format(stock.nearest_demand_top or 0) }}</span>
+        {% if stock.distance_to_demand_pct %}<span class="zone-v1-dist">{{ '%+.1f'|format(stock.distance_to_demand_pct) }}%</span>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% endif %}
+
+  </div>{# end zones-card-v2 #}
 
   <!-- ===== PRICE STATS GRID ===== -->
   <div class="stats-grid">
@@ -818,13 +1260,25 @@
             <button type="button" class="plan-fill-btn"
               onclick="fillEntry({{ stock.entry_zone_low }})">Entry Zone ${{ "%.2f"|format(stock.entry_zone_low) }}</button>
             {% endif %}
-            {% if stock.fib_618 %}
+            {% if stock.fib_382 %}
             <button type="button" class="plan-fill-btn"
-              onclick="fillEntry({{ stock.fib_618 }})">61.8% ${{ "%.2f"|format(stock.fib_618) }}</button>
+              onclick="fillEntry({{ stock.fib_382 }})">38.2% ${{ "%.2f"|format(stock.fib_382) }}</button>
             {% endif %}
             {% if stock.fib_50 %}
             <button type="button" class="plan-fill-btn"
               onclick="fillEntry({{ stock.fib_50 }})">50% ${{ "%.2f"|format(stock.fib_50) }}</button>
+            {% endif %}
+            {% if stock.fib_618 %}
+            <button type="button" class="plan-fill-btn"
+              onclick="fillEntry({{ stock.fib_618 }})">61.8% ${{ "%.2f"|format(stock.fib_618) }}</button>
+            {% endif %}
+            {% if stock.fib_65 %}
+            <button type="button" class="plan-fill-btn"
+              onclick="fillEntry({{ stock.fib_65 }})">65% ${{ "%.2f"|format(stock.fib_65) }}</button>
+            {% endif %}
+            {% if stock.fib_705 %}
+            <button type="button" class="plan-fill-btn"
+              onclick="fillEntry({{ stock.fib_705 }})">70.5% ${{ "%.2f"|format(stock.fib_705) }}</button>
             {% endif %}
           </div>
           {% endif %}

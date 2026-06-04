@@ -1284,16 +1284,27 @@ def catalyst_score_breakdown(data: dict) -> list[tuple[str, int]]:
 # ===========================================================================
 
 SWING_SETUP_TYPES = [
+    # ── Pullback / entry setups ───────────────────────────────────────────────
     "Pullback to 20 EMA",
     "Pullback to 50 EMA",
     "Near 61.8% Retracement",
     "Near 50% Retracement",
     "Order Block Test",
     "Breakout Retest",
+    # ── Continuation / run-up plays ──────────────────────────────────────────
+    "Breakout Continuation",
+    "Gap and Go",
+    "Bull Flag",
+    "Earnings Continuation",
+    "Relative Strength Leader",
     "Trend Continuation",
+    # ── Extended / chase zone ────────────────────────────────────────────────
+    "Extended — Wait for Pullback",
+    "Chase Zone — Do Not Enter",
+    # ── Avoid / no edge ──────────────────────────────────────────────────────
     "At Resistance — Avoid",
-    "Extended — Wait",
     "Weak Structure — Avoid",
+    "Extended — Wait",          # legacy label kept for DB backward compat
     "No Setup",
 ]
 
@@ -1603,18 +1614,23 @@ def compute_swing_score(data: dict) -> ScoringResult:
     raw += mkt_pts
 
     # ── Category 7: Extension Penalty (−2.0–0) ────────────────────────────────
+    # Halve the penalty for trend-aligned stocks with confirmed structure —
+    # these are continuation plays, not late-chase entries.
+    _has_structure = daily_hh_hl or h4_hh_hl
+    _cont_discount = 0.5 if (trend_pts >= SWING_W["trend_partial"] and _has_structure) else 1.0
     if pct_ema20 is not None:
         ext_dir = (bias == "Long Bias" and pct_ema20 > 0) or (bias == "Short Bias" and pct_ema20 < 0)
         ext_pct = abs(pct_ema20)
         if ext_dir:
             if ext_pct > SWING_T["extended_heavy_pct"]:
-                raw += SWING_W["ext_heavy"]
-                pen_msgs.append(f"heavily extended {ext_pct:.1f}% from 20 EMA")
+                raw += SWING_W["ext_heavy"] * _cont_discount
+                _tag = "continuation run" if _cont_discount < 1 else "heavily extended"
+                pen_msgs.append(f"{_tag} {ext_pct:.1f}% from 20 EMA")
             elif ext_pct > SWING_T["extended_moderate_pct"]:
-                raw += SWING_W["ext_moderate"]
+                raw += SWING_W["ext_moderate"] * _cont_discount
                 pen_msgs.append(f"extended {ext_pct:.1f}% from 20 EMA")
             elif ext_pct > SWING_T["extended_slight_pct"]:
-                raw += SWING_W["ext_slight"]
+                raw += SWING_W["ext_slight"] * _cont_discount
                 pen_msgs.append(f"slightly extended {ext_pct:.1f}% from 20 EMA")
 
     # ── Normalize raw score to 1–10 ───────────────────────────────────────────
@@ -1651,21 +1667,102 @@ def compute_swing_grade(swing_score: int) -> str:
     """
     Return a letter grade for a swing score (1–10).
 
-    A  →  9–10  high-conviction, act on confirmation
-    B  →  7–8   solid setup, good patience entry
-    C  →  5–6   developing, wait for better conditions
-    D  →  1–4   avoid / insufficient edge
+    A+  →  10    perfect setup — all factors aligned, trade ready
+    A   →  9     high-conviction — act on confirmation
+    B+  →  8     solid — confirm then enter
+    B   →  7     good patience entry
+    C+  →  6     developing — worth watching closely
+    C   →  5     early / watchlist only
+    D   →  1–4   insufficient edge / avoid
     """
+    if swing_score >= 10: return "A+"
     if swing_score >= 9:  return "A"
+    if swing_score >= 8:  return "B+"
     if swing_score >= 7:  return "B"
+    if swing_score >= 6:  return "C+"
     if swing_score >= 5:  return "C"
     return "D"
+
+
+def compute_continuation_score(data: dict) -> int:
+    """
+    Score a stock's continuation / run-up potential (0–10).
+    Used to catch momentum expansions and extended-but-strong stocks earlier.
+
+    Points (cumulative):
+      above_20ema      price above 20 EMA in trend direction        (1 pt)
+      above_50ema      price above 50 EMA in trend direction        (1 pt)
+      structure_daily  HH/HL confirmed daily                        (1 pt)
+      structure_4h     HH/HL confirmed 4H                          (1 pt)
+      strong_rvol      rel_volume ≥ 1.5 (0.5 pt for ≥ 1.0)        (0–1 pt)
+      gap_strength     gap_pct ≥ 2% (0.5 pt for ≥ 1%)             (0–1 pt)
+      catalyst         catalyst_score ≥ 5 (0.5 pt for ≥ 3)        (0–1 pt)
+      momentum         momentum_score ≥ 7 (0.5 pt for ≥ 5)        (0–1 pt)
+      not_overextended pct_ema20 ≤ 12% (0.5 pt for ≤ 20%)         (0–1 pt)
+      trend_quality    daily_trend Bullish (0.5 pt for Lean)       (0–1 pt)
+    Max raw ≈ 10; clipped to [0, 10].
+    """
+    bias        = data.get("trade_bias") or ""
+    pct_ema20   = data.get("pct_from_ema20")
+    pct_ema50   = data.get("pct_from_ema50")
+    daily_trend = data.get("daily_trend") or ""
+    daily_hh_hl = bool(data.get("daily_hh_hl", False))
+    h4_hh_hl    = bool(data.get("h4_hh_hl", False))
+    rvol        = data.get("rel_volume") or 0
+    gap_pct     = abs(data.get("gap_pct") or 0)
+    cat_sc      = data.get("catalyst_score") or 0
+    mom_sc      = data.get("momentum_score") or 0
+    is_long     = bias == "Long Bias"
+    is_short    = bias == "Short Bias"
+
+    score = 0.0
+
+    if pct_ema20 is not None:
+        if (is_long and pct_ema20 > 0) or (is_short and pct_ema20 < 0):
+            score += 1.0
+    if pct_ema50 is not None:
+        if (is_long and pct_ema50 > 0) or (is_short and pct_ema50 < 0):
+            score += 1.0
+
+    if daily_hh_hl: score += 1.0
+    if h4_hh_hl:    score += 1.0
+
+    if rvol >= 1.5:   score += 1.0
+    elif rvol >= 1.0: score += 0.5
+
+    if gap_pct >= 2.0:   score += 1.0
+    elif gap_pct >= 1.0: score += 0.5
+
+    if cat_sc >= 5:   score += 1.0
+    elif cat_sc >= 3: score += 0.5
+
+    if mom_sc >= 7:   score += 1.0
+    elif mom_sc >= 5: score += 0.5
+
+    if pct_ema20 is not None:
+        ext = abs(pct_ema20)
+        if ext <= 12.0:   score += 1.0
+        elif ext <= 20.0: score += 0.5
+
+    if is_long:
+        if daily_trend == "Bullish":        score += 1.0
+        elif daily_trend == "Bullish Lean": score += 0.5
+    elif is_short:
+        if daily_trend == "Bearish":        score += 1.0
+        elif daily_trend == "Bearish Lean": score += 0.5
+
+    return min(10, int(round(score)))
 
 
 def compute_swing_setup_type(data: dict) -> str:
     """
     Classify the dominant swing setup type from price structure.
     Returns one of SWING_SETUP_TYPES.  First match wins.
+
+    Key change from v1: extended stocks are NO LONGER immediately rejected.
+    Bullish continuations are classified as Breakout Continuation / Extended —
+    Wait for Pullback / Chase Zone based on structure strength and momentum,
+    so they show up in the scanner instead of disappearing as "No Setup".
     """
     bias        = data.get("trade_bias") or "Neutral"
     current     = data.get("current_price") or 0
@@ -1677,63 +1774,106 @@ def compute_swing_setup_type(data: dict) -> str:
     in_demand   = data.get("in_demand_zone", False)
     in_supply   = data.get("in_supply_zone", False)
     daily_trend = data.get("daily_trend") or "Neutral"
-    daily_hh_hl = data.get("daily_hh_hl", False)
+    daily_hh_hl = bool(data.get("daily_hh_hl", False))
+    h4_hh_hl    = bool(data.get("h4_hh_hl", False))
+    rvol        = data.get("rel_volume") or 0
+    gap_pct     = abs(data.get("gap_pct") or 0)
+    cat_sc      = data.get("catalyst_score") or 0
+    mom_sc      = data.get("momentum_score") or 0
 
     if bias == "Avoid":
         return "No Setup"
 
-    # 1. Extended — too far from key levels to enter cleanly
-    if pct_ema20 is not None:
-        ext_dir = (bias == "Long Bias" and pct_ema20 > 0) or \
-                  (bias == "Short Bias" and pct_ema20 < 0)
-        if ext_dir and abs(pct_ema20) > SWING_T["extended_slight_pct"]:
-            return "Extended — Wait"
+    is_long  = bias == "Long Bias"
+    is_short = bias == "Short Bias"
 
-    # 2. At resistance on long / at support on short (structural headwind)
-    if in_supply and bias == "Long Bias":
+    # Extension detection
+    ext_pct      = abs(pct_ema20) if pct_ema20 is not None else 0
+    ext_dir      = (is_long  and pct_ema20 is not None and pct_ema20 > 0) or \
+                   (is_short and pct_ema20 is not None and pct_ema20 < 0)
+    is_extended  = ext_dir and ext_pct > SWING_T["extended_slight_pct"]   # > 8%
+    is_chase     = ext_dir and ext_pct > SWING_T["extended_heavy_pct"]    # > 15%
+
+    bullish_structure = daily_hh_hl or h4_hh_hl
+    bullish_trend = is_long  and daily_trend in ("Bullish", "Bullish Lean")
+    bearish_trend = is_short and daily_trend in ("Bearish", "Bearish Lean")
+    trend_aligned = bullish_trend or bearish_trend
+    strong_momentum = rvol >= 1.3 or gap_pct >= 2.0 or mom_sc >= 6
+
+    # ── 1. Chase Zone — very extended, minimal structure ─────────────────────
+    # Flags as DO NOT ENTER but keeps the stock visible (not "No Setup").
+    if is_chase and not bullish_structure:
+        return "Chase Zone — Do Not Enter"
+
+    # ── 2. Breakout Continuation / Extended — Wait ────────────────────────────
+    # Extended WITH confirmed trend structure = continuation play.
+    # Extended WITHOUT structure = wait for pullback.
+    if is_extended and trend_aligned:
+        if bullish_structure and strong_momentum:
+            return "Breakout Continuation"
+        if bullish_structure:
+            return "Extended — Wait for Pullback"
+        return "Extended — Wait for Pullback"
+
+    # ── 3. Gap and Go — significant gap with strong volume ───────────────────
+    if is_long and gap_pct >= 3.0 and rvol >= 1.5 and bullish_trend:
+        return "Gap and Go"
+
+    # ── 4. Earnings Continuation — gap with strong catalyst ──────────────────
+    if is_long and gap_pct >= 2.0 and cat_sc >= 5 and bullish_trend:
+        return "Earnings Continuation"
+
+    # ── 5. At resistance (structural headwind) ───────────────────────────────
+    if in_supply and is_long:
         return "At Resistance — Avoid"
 
-    # 3. Order block / demand zone test (highest-quality long pullback)
-    if in_demand and bias == "Long Bias":
+    # ── 6. Order block / demand zone test ────────────────────────────────────
+    if in_demand and is_long:
         return "Order Block Test"
-    if in_supply and bias == "Short Bias":
+    if in_supply and is_short:
         return "Order Block Test"
 
-    # 4. Breakout retest: price broke to swing highs, pulled back into upper range
-    # Detects: above 50% fib, 2–8% below swing high, maintaining HH/HL structure
-    if bias == "Long Bias" and current and fib_high and fib_50 and daily_hh_hl:
+    # ── 7. Breakout retest ────────────────────────────────────────────────────
+    if is_long and current and fib_high and fib_50 and daily_hh_hl:
         pct_below_high = (fib_high - current) / fib_high * 100 if fib_high > 0 else 99
         if current > fib_50 and 2.0 <= pct_below_high <= 8.0:
             return "Breakout Retest"
 
-    # 5. Fibonacci retracement levels (2% proximity window)
+    # ── 8. Bull Flag — consolidating above 20 EMA after a run-up ────────────
+    if (is_long and bullish_structure and daily_trend in ("Bullish", "Bullish Lean")
+            and pct_ema20 is not None and 1.0 <= pct_ema20 <= 12.0):
+        return "Bull Flag"
+
+    # ── 9. Fibonacci retracement levels ──────────────────────────────────────
     if current and fib_618 and abs(current - fib_618) / current * 100 <= SWING_T["fib_proximity_pct"]:
         return "Near 61.8% Retracement"
     if current and fib_50 and abs(current - fib_50) / current * 100 <= SWING_T["fib_proximity_pct"]:
         return "Near 50% Retracement"
 
-    # 6. EMA pullbacks
+    # ── 10. EMA pullbacks ────────────────────────────────────────────────────
     if pct_ema20 is not None:
-        in_zone  = abs(pct_ema20) <= SWING_T["pullback_ema20_pct"]
-        correct  = (bias == "Long Bias" and pct_ema20 >= -3) or \
-                   (bias == "Short Bias" and pct_ema20 <= 3)
+        in_zone = abs(pct_ema20) <= SWING_T["pullback_ema20_pct"]
+        correct = (is_long and pct_ema20 >= -3) or (is_short and pct_ema20 <= 3)
         if in_zone and correct:
             return "Pullback to 20 EMA"
 
     if pct_ema50 is not None:
-        in_zone  = abs(pct_ema50) <= SWING_T["pullback_ema50_pct"]
-        correct  = (bias == "Long Bias" and pct_ema50 >= -4) or \
-                   (bias == "Short Bias" and pct_ema50 <= 4)
+        in_zone = abs(pct_ema50) <= SWING_T["pullback_ema50_pct"]
+        correct = (is_long and pct_ema50 >= -4) or (is_short and pct_ema50 <= 4)
         if in_zone and correct:
             return "Pullback to 50 EMA"
 
-    # 7. Trend continuation (good trend, not yet at a specific entry level)
-    if bias == "Long Bias"  and daily_trend in ("Bullish", "Bullish Lean"):
+    # ── 11. Relative Strength Leader — bullish structure + volume ────────────
+    if trend_aligned and bullish_structure and rvol >= 1.0:
+        return "Relative Strength Leader"
+
+    # ── 12. Trend Continuation — directional trend, no specific entry level ──
+    if bullish_trend:
         return "Trend Continuation"
-    if bias == "Short Bias" and daily_trend in ("Bearish", "Bearish Lean"):
+    if bearish_trend:
         return "Trend Continuation"
 
-    # 8. Weak / undefined structure
+    # ── 13. Weak / undefined ─────────────────────────────────────────────────
     if daily_trend == "Neutral":
         return "Weak Structure — Avoid"
 

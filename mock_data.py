@@ -84,6 +84,20 @@ def _zone_defaults(data: dict) -> None:
     data.setdefault("in_supply_zone",         False)
     data.setdefault("in_demand_zone",         False)
     data.setdefault("zones_fetched_at",       None)
+    # V2 institutional zone fields
+    data.setdefault("zones_json",             None)
+    data.setdefault("demand_zone_grade",      None)
+    data.setdefault("supply_zone_grade",      None)
+    data.setdefault("zone_ai_setup",          None)
+    data.setdefault("zone_ai_reason",         None)
+    data.setdefault("zone_probability",       None)
+    data.setdefault("smart_money_json",       None)
+    data.setdefault("fvg_bullish",            False)
+    data.setdefault("fvg_bearish",            False)
+    # Relative strength & sector
+    data.setdefault("rs_score",              None)
+    data.setdefault("rs_vs_qqq",             None)
+    data.setdefault("sector_etf",            None)
 
 
 # ---------------------------------------------------------------------------
@@ -329,13 +343,28 @@ def generate_stock_data(ticker: str) -> dict:
         if zones_need_refresh(data.get("zones_fetched_at")):
             current_px = data.get("current_price") or 0
             if current_px:
-                zone_data = detect_zones(ticker, current_px)
+                zone_data = detect_zones(ticker, current_px, stock_data=data)
                 data.update(zone_data)
                 data["zones_fetched_at"] = datetime.now().isoformat()
     except Exception as exc:
         _log.warning("generate_stock_data  stage=zones  ticker=%s  err=%s", ticker, exc)
         _errors.append("zones")
     _zone_defaults(data)    # always apply
+
+    # ── Step 4b: Relative strength & sector (market_engine) ───────────────────
+    try:
+        from market_engine import compute_rs_score_20d, get_sector_for_ticker_bg as get_sector_for_ticker
+        _rs, _vs = compute_rs_score_20d(ticker)
+        data["rs_score"]   = _rs
+        data["rs_vs_qqq"]  = _vs
+        if not data.get("sector_etf"):
+            _etf, _ = get_sector_for_ticker(ticker)
+            if _etf:
+                data["sector_etf"] = _etf
+    except Exception as exc:
+        _log.debug("generate_stock_data  stage=rs_score  ticker=%s  err=%s", ticker, exc)
+        data.setdefault("rs_score",  None)
+        data.setdefault("rs_vs_qqq", None)
 
     # Intraday structure defaults (unused in swing scoring but kept for DB compat)
     data.setdefault("vwap",                 None)
@@ -399,6 +428,46 @@ def generate_stock_data(ticker: str) -> dict:
         _log.error("generate_stock_data  stage=swing_status  ticker=%s  err=%s", ticker, exc)
         data.setdefault("swing_status", "NOT ENOUGH EDGE")
         _errors.append("swing_status")
+
+    # ── Step 9b: Institutional analysis (all 15 engines) ────────────────────────
+    try:
+        import market_engine as _mkt_eng
+        import institutional_engine as _inst
+        _mkt_ctx = _mkt_eng.get_market_context()
+        _inst_result = _inst.analyze_institutional(data, _mkt_ctx)
+        # Merge institutional results — don't overwrite core price/scoring fields
+        _SAFE_INST_KEYS = {
+            "atr_14", "atr_pct", "atr_5_pct", "atr_compressed",
+            "bb_width_pct", "bb_squeeze", "range_compressed",
+            "squeeze_score", "squeeze_probability", "expansion_likely", "compression_alert",
+            "bb_upper", "bb_lower", "bb_mid",
+            "equal_highs", "equal_lows", "resistance_above", "support_below",
+            "liquidity_pools", "sweep_above", "sweep_below",
+            "recent_bear_trap", "recent_bull_trap", "liquidity_alerts",
+            "failed_breakdown", "failed_breakout",
+            "failed_breakdown_level", "failed_breakout_level", "failed_move_alerts",
+            "vol_profile",
+            "patterns_detected", "best_pattern", "pattern_score",
+            "pattern_count", "best_continuation_prob",
+            "in_earnings_drift", "days_since_earnings", "earnings_gap_pct",
+            "post_earnings_trend", "drift_continuation", "accumulation_signal",
+            "earnings_drift_alert",
+            "continuation_score", "continuation_strength",
+            "continuation_signals", "continuation_summary",
+            "macro_alerts",
+            "stop_loss", "target_1", "target_2",
+            "risk_reward_1", "risk_reward_2",
+            "shares_adjusted", "risk_dollars", "atr_used",
+            "regime_size_note", "size_modifier",
+            "discipline_score", "discipline_grade",
+            "discipline_warnings", "discipline_alerts", "safe_to_trade",
+            "prob_score", "prob_grade", "prob_breakdown", "penalty_total",
+        }
+        for k in _SAFE_INST_KEYS:
+            if k in _inst_result:
+                data[k] = _inst_result[k]
+    except Exception as _inst_exc:
+        _log.debug("generate_stock_data  stage=institutional  ticker=%s  err=%s", ticker, _inst_exc)
 
     # Legacy scoring fields (kept for DB schema compatibility but deprioritised)
     data.setdefault("momentum_score",      1)
@@ -546,13 +615,26 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
             current_px = data.get("current_price") or 0
             ticker_sym = (data.get("ticker") or ticker).upper()
             if current_px and ticker_sym:
-                zone_data = detect_zones(ticker_sym, current_px)
+                zone_data = detect_zones(ticker_sym, current_px, stock_data=data)
                 data.update(zone_data)
                 data["zones_fetched_at"] = datetime.now().isoformat()
     except Exception as exc:
         _log.warning("live_refresh_stock  stage=zones  ticker=%s  err=%s", ticker, exc)
         _errors.append("zones")
     _zone_defaults(data)
+
+    # ── RS score + sector ─────────────────────────────────────────────────────
+    try:
+        from market_engine import compute_rs_score_20d, get_sector_for_ticker_bg as get_sector_for_ticker
+        _rs, _vs = compute_rs_score_20d(ticker)
+        data["rs_score"]  = _rs
+        data["rs_vs_qqq"] = _vs
+        if not data.get("sector_etf"):
+            _etf, _ = get_sector_for_ticker(ticker)
+            if _etf:
+                data["sector_etf"] = _etf
+    except Exception as exc:
+        _log.debug("live_refresh_stock  stage=rs_score  ticker=%s  err=%s", ticker, exc)
 
     # ── Re-score (setup type → trade plan → score → status) ─────────────────
     try:
@@ -587,6 +669,30 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
         _log.error("live_refresh_stock  stage=swing_status  ticker=%s  err=%s", ticker, exc)
         data.setdefault("swing_status", "NOT ENOUGH EDGE")
         _errors.append("swing_status")
+
+    # ── Institutional analysis ────────────────────────────────────────────────
+    try:
+        import market_engine as _mkt_eng
+        import institutional_engine as _inst
+        _mkt_ctx = _mkt_eng.get_market_context()
+        _inst_result = _inst.analyze_institutional(data, _mkt_ctx)
+        _LIVE_INST_KEYS = {
+            "atr_14", "atr_pct", "squeeze_score", "squeeze_probability",
+            "expansion_likely", "compression_alert", "bb_upper", "bb_lower", "bb_mid",
+            "sweep_above", "sweep_below", "liquidity_alerts",
+            "failed_breakdown", "failed_breakout", "failed_move_alerts",
+            "vol_profile", "best_pattern", "pattern_score", "patterns_detected",
+            "in_earnings_drift", "earnings_drift_alert", "drift_continuation",
+            "continuation_score", "continuation_strength", "continuation_summary",
+            "stop_loss", "target_1", "target_2", "risk_reward_1", "risk_reward_2",
+            "discipline_score", "discipline_grade", "discipline_alerts", "safe_to_trade",
+            "prob_score", "prob_grade", "prob_breakdown",
+        }
+        for k in _LIVE_INST_KEYS:
+            if k in _inst_result:
+                data[k] = _inst_result[k]
+    except Exception as _inst_exc:
+        _log.debug("live_refresh_stock  stage=institutional  ticker=%s  err=%s", ticker, _inst_exc)
 
     # Sync legacy fields
     data["setup_score"]      = data.get("swing_score", 1)

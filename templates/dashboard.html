@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — Rockkstaar Trade Assistant{% endblock %}
+{% block title %}Account & Performance Hub — HAULTRA AI{% endblock %}
 
 {% block content %}
 
@@ -174,6 +174,40 @@
   </div>
 
 </section>
+
+<!-- ===== SECTOR ROTATION + MARKET REGIME ===== -->
+{% if mkt_context and mkt_context.sectors %}
+<section class="sector-regime-bar" id="sector-regime-bar">
+  <div class="srb-regime srb-regime-{{ mkt_context.regime | lower | replace('_', '-') }}">
+    <span class="srb-regime-dot"></span>
+    <span class="srb-regime-label">{{ mkt_context.regime_label }}</span>
+    {% if mkt_context.qqq_1d_pct is not none %}
+    <span class="srb-index-chip {{ 'srb-green' if mkt_context.qqq_1d_pct >= 0 else 'srb-red' }}">
+      QQQ {{ '+' if mkt_context.qqq_1d_pct >= 0 else '' }}{{ "%.2f"|format(mkt_context.qqq_1d_pct) }}%
+    </span>
+    {% endif %}
+    {% if mkt_context.spy_1d_pct is not none %}
+    <span class="srb-index-chip {{ 'srb-green' if mkt_context.spy_1d_pct >= 0 else 'srb-red' }}">
+      SPY {{ '+' if mkt_context.spy_1d_pct >= 0 else '' }}{{ "%.2f"|format(mkt_context.spy_1d_pct) }}%
+    </span>
+    {% endif %}
+    {% if mkt_context.vix_level %}
+    <span class="srb-index-chip {{ 'srb-red' if mkt_context.vix_level > 25 else ('srb-amber' if mkt_context.vix_level > 18 else 'srb-green') }}">
+      VIX {{ "%.1f"|format(mkt_context.vix_level) }}
+    </span>
+    {% endif %}
+    <span class="srb-signal">{{ mkt_context.signal }}</span>
+  </div>
+  <div class="srb-sectors">
+    {% for s in mkt_context.sectors[:12] %}
+    <div class="srb-sector srb-{{ s.strength }}" title="{{ s.name }} — 5d: {{ '+' if s.change_5d is not none and s.change_5d >= 0 else '' }}{{ '%.1f'|format(s.change_5d) if s.change_5d is not none else '—' }}%">
+      <span class="srb-etf">{{ s.etf }}</span>
+      <span class="srb-pct {{ 'srb-green' if s.change_1d >= 0 else 'srb-red' }}">{{ '+' if s.change_1d >= 0 else '' }}{{ "%.1f"|format(s.change_1d) }}%</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 
 
 
@@ -375,7 +409,25 @@
         {% if s.risk_reward %}
         <span class="rr-badge {{ s.risk_reward_class }}">R:R {{ s.risk_reward_display }}</span>
         {% endif %}
+        {% if s.rs_score_display is defined %}
+        <span class="rs-badge {{ s.rs_class }}" title="{{ s.rs_vs_qqq_display | default('') }}">RS {{ s.rs_score_display }}</span>
+        {% endif %}
+        {% if s.sector_name %}
+        <span class="sector-chip {{ s.sector_class }}">{{ s.sector_etf }}</span>
+        {% endif %}
       </div>
+
+      <!-- Avoidance warnings (high-priority flags only) -->
+      {% if s.avoidance_flags %}
+      {% set high_flags = s.avoidance_flags | selectattr('level', 'equalto', 'high') | list %}
+      {% if high_flags %}
+      <div class="avoidance-strip">
+        {% for f in high_flags[:2] %}
+        <span class="avoid-flag avoid-flag-{{ f.level }}">{{ f.icon }} {{ f.text }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endif %}
 
       <!-- Trade Permission badge -->
       {% if s.trade_permission %}
@@ -495,6 +547,104 @@
 </section>
 {% endif %}
 
+<!-- ===== SCANNER BUCKETS ===== -->
+{% set _sb = scanner_buckets %}
+{% if _sb.aplus or _sb.forming or _sb.chase or _sb.avoid %}
+<section class="scanner-buckets-section">
+  <h2 class="section-title">
+    Scanner Buckets
+    <span class="section-subtitle">Grade-sorted view of every watchlist stock</span>
+  </h2>
+  <div class="scanner-buckets-grid">
+
+    <!-- Bucket 1: A+ READY -->
+    <div class="sbucket sbucket-aplus">
+      <div class="sbucket-header">
+        <span class="sbucket-icon">&#9651;</span>
+        <span class="sbucket-title">A+ READY</span>
+        <span class="sbucket-count">{{ _sb.aplus|length }}</span>
+      </div>
+      <div class="sbucket-body">
+        {% for s in _sb.aplus %}
+        <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="sbucket-row">
+          <span class="sbucket-ticker">{{ s.ticker }}</span>
+          <span class="sbucket-grade exec-badge exec-badge-sm {{ s.simplified_action_class | default('') }}">{{ s.simplified_action | default('—') }}</span>
+          <span class="sbucket-type setup-pill {{ s.swing_setup_type_class | default('') }}">{{ s.swing_setup_type | default('—') }}</span>
+          <span class="sbucket-score">{{ s.swing_score or '—' }}/10</span>
+        </a>
+        {% else %}
+        <div class="sbucket-empty">No A+ setups found</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Bucket 2: SETUPS FORMING -->
+    <div class="sbucket sbucket-forming">
+      <div class="sbucket-header">
+        <span class="sbucket-icon">&#9670;</span>
+        <span class="sbucket-title">SETUPS FORMING</span>
+        <span class="sbucket-count">{{ _sb.forming|length }}</span>
+      </div>
+      <div class="sbucket-body">
+        {% for s in _sb.forming %}
+        <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="sbucket-row">
+          <span class="sbucket-ticker">{{ s.ticker }}</span>
+          <span class="sbucket-grade exec-badge exec-badge-sm {{ s.simplified_action_class | default('') }}">{{ s.simplified_action | default('—') }}</span>
+          <span class="sbucket-type setup-pill {{ s.swing_setup_type_class | default('') }}">{{ s.swing_setup_type | default('—') }}</span>
+          <span class="sbucket-score">{{ s.swing_score or '—' }}/10</span>
+        </a>
+        {% else %}
+        <div class="sbucket-empty">No developing setups</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Bucket 3: EXTENDED / CHASE ZONE -->
+    <div class="sbucket sbucket-chase">
+      <div class="sbucket-header">
+        <span class="sbucket-icon">&#9651;</span>
+        <span class="sbucket-title">EXTENDED / CHASE</span>
+        <span class="sbucket-count">{{ _sb.chase|length }}</span>
+      </div>
+      <div class="sbucket-body">
+        {% for s in _sb.chase %}
+        <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="sbucket-row">
+          <span class="sbucket-ticker">{{ s.ticker }}</span>
+          <span class="sbucket-grade exec-badge exec-badge-sm {{ s.simplified_action_class | default('') }}">{{ s.simplified_action | default('—') }}</span>
+          <span class="sbucket-type setup-pill {{ s.swing_setup_type_class | default('') }}">{{ s.swing_setup_type | default('—') }}</span>
+          <span class="sbucket-score">{{ s.swing_score or '—' }}/10</span>
+        </a>
+        {% else %}
+        <div class="sbucket-empty">No extended stocks</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Bucket 4: AVOID / BLOCKED -->
+    <div class="sbucket sbucket-avoid">
+      <div class="sbucket-header">
+        <span class="sbucket-icon">&#9650;</span>
+        <span class="sbucket-title">AVOID / BLOCKED</span>
+        <span class="sbucket-count">{{ _sb.avoid|length }}</span>
+      </div>
+      <div class="sbucket-body">
+        {% for s in _sb.avoid %}
+        <a href="{{ url_for('stock_detail', ticker=s.ticker) }}" class="sbucket-row">
+          <span class="sbucket-ticker">{{ s.ticker }}</span>
+          <span class="sbucket-grade exec-badge exec-badge-sm {{ s.simplified_action_class | default('') }}">{{ s.simplified_action | default('—') }}</span>
+          <span class="sbucket-type setup-pill {{ s.swing_setup_type_class | default('') }}">{{ s.swing_setup_type | default('—') }}</span>
+          <span class="sbucket-score">{{ s.swing_score or '—' }}/10</span>
+        </a>
+        {% else %}
+        <div class="sbucket-empty">No blocked stocks</div>
+        {% endfor %}
+      </div>
+    </div>
+
+  </div>
+</section>
+{% endif %}
+
 <!-- ===== FULL WATCHLIST TABLE ===== -->
 <section class="watchlist-section">
   <h2 class="section-title">
@@ -556,6 +706,7 @@
           <th title="Target 1">T1</th>
           <th title="Target 2">T2</th>
           <th title="Risk/Reward Ratio">R:R</th>
+          <th title="Relative Strength vs QQQ">RS</th>
           <th title="Distance to T1">To T1</th>
           <th title="Trade Permission">Permission</th>
           <th title="Catalyst Score">Cat</th>
@@ -712,6 +863,16 @@
             {% if s.rr_quality_label %}
             <div class="rr-quality-label {{ s.rr_quality_class }}">{{ s.rr_quality_label }}</div>
             {% endif %}
+          </td>
+
+          <!-- RS Score -->
+          <td>
+            {% if s.rs_score_display is defined %}
+            <span class="rs-badge rs-badge-sm {{ s.rs_class }}" title="{{ s.rs_label }} — {{ s.rs_vs_qqq_display | default('') }}">{{ s.rs_score_display }}</span>
+            {% if s.sector_leading is defined and s.sector_leading %}
+            <span class="sector-chip sector-chip-leading" title="{{ s.sector_name }}">{{ s.sector_etf }}</span>
+            {% endif %}
+            {% else %}—{% endif %}
           </td>
 
           <!-- Distance to T1 -->
