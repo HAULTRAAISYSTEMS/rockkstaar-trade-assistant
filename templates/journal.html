@@ -252,6 +252,181 @@
 
   </div>
 
+  <!-- ===== INSIGHTS ROW ===== -->
+  {% if summary.total >= 2 %}
+  <section class="journal-section journal-insights-row" id="journal-insights">
+
+    <!-- Streak card (filled by JS) -->
+    <div class="insight-card" id="insight-streak">
+      <div class="insight-label">Current Streak</div>
+      <div class="insight-value" id="streak-value">—</div>
+      <div class="insight-sub" id="streak-sub"></div>
+    </div>
+
+    <!-- Recent form vs all-time -->
+    <div class="insight-card" id="insight-form">
+      <div class="insight-label">Last 10 Trades</div>
+      <div class="insight-value" id="form-value">—</div>
+      <div class="insight-sub" id="form-sub">vs {{ summary.win_rate }}% all-time</div>
+    </div>
+
+    <!-- Best setup (from summary.setups, sorted by win rate with ≥2 trades) -->
+    {% set best = summary.setups | selectattr('count', 'ge', 2) | sort(attribute='win_rate', reverse=True) | first if summary.setups else none %}
+    {% if best %}
+    <div class="insight-card insight-edge">
+      <div class="insight-label">Your Edge</div>
+      <div class="insight-value insight-edge-val">{{ best.win_rate }}%</div>
+      <div class="insight-sub">{{ best.setup_type }} ({{ best.count }} trades)</div>
+    </div>
+    {% endif %}
+
+    <!-- Expectancy (avg P&L per trade) -->
+    <div class="insight-card">
+      <div class="insight-label">Expectancy</div>
+      <div class="insight-value {{ 'positive' if summary.total_pnl >= 0 else 'negative' }}">
+        {{ '+' if summary.total_pnl >= 0 else '' }}{{ (summary.total_pnl / summary.total) | round(2) }}%
+      </div>
+      <div class="insight-sub">avg P&L per trade</div>
+    </div>
+
+  </section>
+
+  <!-- ===== CUMULATIVE P&L CHART ===== -->
+  <section class="journal-section">
+    <h2 class="section-title">Cumulative P&L Curve</h2>
+    <div class="pnl-chart-wrap">
+      <canvas id="pnl-chart" class="pnl-chart-canvas" height="140"></canvas>
+      <div class="pnl-chart-empty" id="pnl-chart-empty" style="display:none;">Not enough trades yet</div>
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Pass journal data to JS for chart + streak -->
+  <script>
+  (function() {
+    var _entries = [
+      {% for e in entries | sort(attribute='trade_date') %}
+      { date: {{ e.trade_date | tojson }}, pnl: {{ e.pnl_pct | default(0) | float }}, result: {{ e.result | tojson }} }{{ ',' if not loop.last }}
+      {% endfor %}
+    ];
+
+    // ── Streak ──────────────────────────────────────────────
+    var streak = 0, streakType = '';
+    if (_entries.length > 0) {
+      var lastRes = _entries[_entries.length - 1].result;
+      streakType = lastRes === 'Win' ? 'W' : (lastRes === 'Loss' ? 'L' : 'BE');
+      for (var i = _entries.length - 1; i >= 0; i--) {
+        var r = _entries[i].result;
+        var t = r === 'Win' ? 'W' : (r === 'Loss' ? 'L' : 'BE');
+        if (t === streakType) streak++;
+        else break;
+      }
+    }
+    var sv = document.getElementById('streak-value');
+    var ss = document.getElementById('streak-sub');
+    if (sv) {
+      sv.textContent = streak + streakType;
+      sv.className = 'insight-value ' + (streakType === 'W' ? 'positive' : (streakType === 'L' ? 'negative' : ''));
+      if (ss) ss.textContent = streakType === 'W' ? 'consecutive wins' : (streakType === 'L' ? 'consecutive losses' : 'break-even');
+    }
+
+    // ── Recent form (last 10) ───────────────────────────────
+    var last10 = _entries.slice(-10);
+    var wins10 = last10.filter(function(e){ return e.result === 'Win'; }).length;
+    var wr10 = last10.length > 0 ? Math.round(wins10 / last10.length * 100) : null;
+    var fv = document.getElementById('form-value');
+    if (fv && wr10 !== null) {
+      fv.textContent = wr10 + '%';
+      fv.className = 'insight-value ' + (wr10 >= 50 ? 'positive' : 'negative');
+    }
+
+    // ── Cumulative P&L chart ────────────────────────────────
+    var canvas = document.getElementById('pnl-chart');
+    if (!canvas || _entries.length < 2) {
+      var empty = document.getElementById('pnl-chart-empty');
+      if (empty) empty.style.display = 'flex';
+      if (canvas) canvas.style.display = 'none';
+      return;
+    }
+
+    // Build cumulative series
+    var cumPnl = [0];
+    _entries.forEach(function(e) { cumPnl.push(cumPnl[cumPnl.length - 1] + (e.pnl || 0)); });
+
+    var dpr = window.devicePixelRatio || 1;
+    var W = canvas.parentElement.clientWidth || 600;
+    var H = 140;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    var pad = { top: 12, right: 16, bottom: 24, left: 44 };
+    var iW = W - pad.left - pad.right;
+    var iH = H - pad.top - pad.bottom;
+
+    var minV = Math.min.apply(null, cumPnl);
+    var maxV = Math.max.apply(null, cumPnl);
+    var range = maxV - minV || 1;
+
+    function xp(i) { return pad.left + (i / (cumPnl.length - 1)) * iW; }
+    function yp(v) { return pad.top + (1 - (v - minV) / range) * iH; }
+
+    // Zero line
+    var zeroY = yp(0);
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(pad.left, zeroY); ctx.lineTo(W - pad.right, zeroY); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Gradient fill
+    var finalVal = cumPnl[cumPnl.length - 1];
+    var grad = ctx.createLinearGradient(0, pad.top, 0, H - pad.bottom);
+    var lineColor = finalVal >= 0 ? '#22c55e' : '#ef4444';
+    grad.addColorStop(0, finalVal >= 0 ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+    ctx.beginPath();
+    ctx.moveTo(xp(0), yp(cumPnl[0]));
+    for (var i = 1; i < cumPnl.length; i++) ctx.lineTo(xp(i), yp(cumPnl[i]));
+    ctx.lineTo(xp(cumPnl.length - 1), H - pad.bottom);
+    ctx.lineTo(xp(0), H - pad.bottom);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    ctx.moveTo(xp(0), yp(cumPnl[0]));
+    for (var j = 1; j < cumPnl.length; j++) ctx.lineTo(xp(j), yp(cumPnl[j]));
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // Y-axis labels
+    ctx.fillStyle = 'rgba(148,163,184,0.8)';
+    ctx.font = '10px Inter, system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    [minV, 0, maxV].forEach(function(v) {
+      ctx.fillText((v >= 0 ? '+' : '') + v.toFixed(1) + '%', pad.left - 4, yp(v) + 3);
+    });
+
+    // End-point dot
+    var lastX = xp(cumPnl.length - 1);
+    var lastY = yp(cumPnl[cumPnl.length - 1]);
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+    ctx.fillStyle = lineColor;
+    ctx.fill();
+
+  })();
+  </script>
+
   <!-- ===== SETUP PERFORMANCE ===== -->
   {% if summary.setups %}
   <section class="journal-section">
