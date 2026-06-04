@@ -1,0 +1,488 @@
+/* =========================================================
+   Rockkstaar Trade Assistant — Mobile / iPad Stylesheet
+   Loaded after style.css — overrides only what needs to change.
+
+   Breakpoints:
+     ≤ 1024px  tablet (iPad landscape + portrait)
+     ≤  768px  tablet portrait / large phone
+     ≤  480px  phone
+   ========================================================= */
+
+/* ─── 1. NAVBAR ─────────────────────────────────────────── */
+
+/* Tablet: tighten the nav, hide verbose labels */
+@media (max-width: 1024px) {
+  .navbar {
+    padding: 0 0.75rem;
+    gap: 0.5rem;
+  }
+
+  .nav-brand {
+    font-size: 0.85rem;
+    gap: 0.35rem;
+  }
+
+  .nav-logo { height: 22px; }
+
+  .nav-links {
+    gap: 0.1rem;
+  }
+
+  .nav-link {
+    font-size: 0.72rem;
+    padding: 0.3rem 0.5rem;
+  }
+
+  /* Hide less-used nav items on tablet to save space */
+  .nav-link-schwab { display: none; }
+
+  .nav-actions {
+    gap: 0.3rem;
+  }
+
+  /* Collapse the auto-refresh + sound buttons text on tablet */
+  #ar-toggle,
+  #alert-sound-toggle {
+    font-size: 0.68rem;
+    padding: 0.25rem 0.45rem;
+  }
+
+  .btn-refresh {
+    font-size: 0.7rem;
+    padding: 0.3rem 0.6rem;
+  }
+}
+
+/* Phone: show only logo + essential nav, hide the rest from desktop nav */
+@media (max-width: 768px) {
+  .navbar {
+    height: 52px;
+    padding: 0 0.75rem;
+  }
+
+  /* Hide desktop nav-links — mobile ctrl bar handles navigation */
+  .nav-links { display: none; }
+
+  /* Hide desktop right-side action buttons — mobile ctrl bar handles these */
+  .nav-actions { display: none; }
+
+  /* Show mobile refresh bar */
+  .mobile-refresh-bar { display: flex; }
+}
+
+/* ─── 2. MOBILE BOTTOM CTRL BAR — Improve Schwab + Journal links ─ */
+@media (max-width: 768px) {
+  .mobile-ctrl-bar {
+    gap: 0.3rem;
+  }
+
+  /* Ensure all ctrl buttons are big enough to tap */
+  .mobile-ctrl-btn {
+    min-width: 44px;
+    height: 42px;
+    font-size: 0.75rem;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Nav links in mobile bar */
+  .mobile-ctrl-nav {
+    font-size: 1rem;
+    min-width: 42px;
+  }
+}
+
+/* ─── 3. SUMMARY CARDS ───────────────────────────────────── */
+@media (max-width: 1024px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.6rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+
+  .summary-card {
+    padding: 0.7rem 0.6rem;
+  }
+
+  .summary-card-ticker {
+    font-size: 1.1rem;
+  }
+}
+
+/* ─── 4. TOP 5 SWING CANDIDATES CARDS ───────────────────── */
+@media (max-width: 1024px) {
+  .top5-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .top5-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ─── 5. MAIN WATCHLIST TABLE — iPad (≤ 1024px) ─────────── */
+/* On iPad: hide lower-priority columns, keep the essentials */
+@media (max-width: 1024px) {
+  /* Hide: Entry Zone, Entry Dist, Stop, T1, T2, R:R, To T1, Cat score, Notes col */
+  .watchlist-table th:nth-child(13),  /* Entry Zone   */
+  .watchlist-table td:nth-child(13),
+  .watchlist-table th:nth-child(14),  /* Entry Dist   */
+  .watchlist-table td:nth-child(14),
+  .watchlist-table th:nth-child(15),  /* Stop         */
+  .watchlist-table td:nth-child(15),
+  .watchlist-table th:nth-child(16),  /* T1           */
+  .watchlist-table td:nth-child(16),
+  .watchlist-table th:nth-child(17),  /* T2           */
+  .watchlist-table td:nth-child(17),
+  .watchlist-table th:nth-child(19),  /* To T1        */
+  .watchlist-table td:nth-child(19),
+  .watchlist-table th:nth-child(21),  /* Cat score    */
+  .watchlist-table td:nth-child(21),
+  .watchlist-table th:nth-child(23),  /* Notes icon   */
+  .watchlist-table td:nth-child(23) {
+    display: none;
+  }
+
+  .watchlist-table th,
+  .watchlist-table td {
+    padding: 0.45rem 0.4rem;
+    font-size: 0.72rem;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ─── 6. MAIN WATCHLIST TABLE — Tablet portrait (≤ 768px) ── */
+/* Keep only: #, Ticker, Status, Price, Gap%, Swing score, Bias, Permission, Remove */
+@media (max-width: 768px) {
+  .watchlist-table th:nth-child(6),   /* Vol          */
+  .watchlist-table td:nth-child(6),
+  .watchlist-table th:nth-child(8),   /* Grade        */
+  .watchlist-table td:nth-child(8),
+  .watchlist-table th:nth-child(9),   /* Setup Type   */
+  .watchlist-table td:nth-child(9),
+  .watchlist-table th:nth-child(10),  /* Quality      */
+  .watchlist-table td:nth-child(10),
+  .watchlist-table th:nth-child(12),  /* Trend        */
+  .watchlist-table td:nth-child(12),
+  .watchlist-table th:nth-child(22),  /* Catalyst text */
+  .watchlist-table td:nth-child(22) {
+    display: none;
+  }
+
+  .watchlist-table th,
+  .watchlist-table td {
+    font-size: 0.68rem;
+    padding: 0.4rem 0.3rem;
+  }
+
+  /* Make ticker symbol slightly bigger for tap accuracy */
+  .ticker-symbol {
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+
+  /* Bigger tap area for rows */
+  .watchlist-table tbody tr {
+    min-height: 48px;
+  }
+
+  /* Status badges — shorter text on small screens */
+  .exec-badge {
+    font-size: 0.6rem;
+    padding: 0.15rem 0.3rem;
+  }
+
+  /* Score cells */
+  .score-cell {
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+}
+
+/* ─── 7. WATCHLIST TABLE as stacked CARDS — Phone (≤ 480px) ─ */
+@media (max-width: 480px) {
+  .table-wrap { overflow-x: hidden; }
+
+  .watchlist-table { display: block; }
+  .watchlist-table thead { display: none; }
+  .watchlist-table tbody { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  .watchlist-table tbody tr {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto auto auto;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.6rem 0.75rem;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    min-height: 56px;
+  }
+
+  .watchlist-table tbody tr:active {
+    background: rgba(124, 58, 237, 0.1);
+  }
+
+  /* Hide everything except: #, Ticker, Status, Price, Swing, Permission, Remove */
+  .watchlist-table td:nth-child(5),   /* Gap%         */
+  .watchlist-table td:nth-child(6),   /* Vol          */
+  .watchlist-table td:nth-child(8),   /* Grade        */
+  .watchlist-table td:nth-child(9),   /* Setup type   */
+  .watchlist-table td:nth-child(10),  /* Quality      */
+  .watchlist-table td:nth-child(11),  /* Bias         */
+  .watchlist-table td:nth-child(12),  /* Trend        */
+  .watchlist-table td:nth-child(18),  /* R:R          */
+  .watchlist-table td:nth-child(20),  /* Permission   */
+  .watchlist-table td:nth-child(21),  /* Cat score    */
+  .watchlist-table td:nth-child(22),  /* Catalyst     */
+  .watchlist-table td:nth-child(23) { /* Notes        */
+    display: none;
+  }
+
+  .watchlist-table td {
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
+
+  /* Rank cell */
+  .rank-cell {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    min-width: 14px;
+    text-align: center;
+  }
+
+  /* Ticker cell */
+  .ticker-cell { min-width: 0; }
+  .ticker-symbol { font-size: 0.9rem; font-weight: 800; }
+
+  /* Price */
+  .price-cell { font-size: 0.8rem; font-weight: 600; }
+
+  /* Swing score */
+  .score-cell { font-size: 0.8rem; font-weight: 700; }
+}
+
+/* ─── 8. DAILY BANNER — tablet/phone ───────────────────── */
+@media (max-width: 768px) {
+  .daily-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.65rem 0.85rem;
+  }
+
+  .daily-banner-text {
+    font-size: 0.78rem;
+  }
+
+  .daily-banner-sub {
+    font-size: 0.68rem;
+  }
+
+  .daily-banner-meta {
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .mode-selector-wrap {
+    align-self: stretch;
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .mode-btn {
+    flex: 1;
+    padding: 0.45rem 0.5rem;
+    font-size: 0.75rem;
+    min-height: 40px;
+  }
+}
+
+/* ─── 9. ADD TICKER PANEL ────────────────────────────────── */
+@media (max-width: 768px) {
+  .add-panel { padding: 0.4rem 0; }
+
+  .add-form {
+    gap: 0.4rem;
+  }
+
+  .ticker-input {
+    font-size: 0.85rem;
+    padding: 0.55rem 0.75rem;
+    height: 44px;
+  }
+
+  .btn.btn-add {
+    height: 44px;
+    font-size: 0.8rem;
+    padding: 0 1rem;
+    min-width: 60px;
+  }
+}
+
+/* ─── 10. MARKET TEMPERATURE PANEL ─────────────────────── */
+@media (max-width: 768px) {
+  .mt-panel {
+    padding: 0.7rem 0.85rem;
+    gap: 0.4rem;
+  }
+
+  .mt-badge {
+    font-size: 0.7rem;
+  }
+
+  .mt-action {
+    font-size: 0.72rem;
+  }
+}
+
+/* ─── 11. SECTION TITLES + SPACING ─────────────────────── */
+@media (max-width: 768px) {
+  .section-title {
+    font-size: 0.8rem;
+    padding: 0.3rem 0;
+    margin-bottom: 0.4rem;
+  }
+
+  .main-content {
+    padding: 0.5rem 0.6rem;
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ─── 12. WATCHLIST TABS ────────────────────────────────── */
+@media (max-width: 768px) {
+  .wl-tabs-section {
+    padding: 0.4rem 0 0.25rem;
+  }
+
+  .wl-tabs-row {
+    gap: 0.4rem;
+  }
+
+  .wl-tab {
+    font-size: 0.72rem;
+    padding: 0.35rem 0.6rem;
+    min-height: 36px;
+  }
+
+  .wl-manage-btn {
+    font-size: 0.7rem;
+    padding: 0.35rem 0.55rem;
+    min-height: 36px;
+  }
+}
+
+/* ─── 13. STOCK DETAIL — tablet/phone ──────────────────── */
+@media (max-width: 768px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .detail-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .detail-ticker {
+    font-size: 1.4rem;
+  }
+
+  .detail-price {
+    font-size: 1.3rem;
+  }
+
+  /* Make action buttons full-width on phone */
+  .detail-actions {
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .detail-actions .btn {
+    width: 100%;
+    min-height: 46px;
+    font-size: 0.85rem;
+  }
+}
+
+/* ─── 14. JOURNAL — tablet/phone ────────────────────────── */
+@media (max-width: 768px) {
+  .journal-table th:nth-child(n+7),
+  .journal-table td:nth-child(n+7) {
+    display: none;
+  }
+
+  .journal-table th,
+  .journal-table td {
+    font-size: 0.7rem;
+    padding: 0.4rem 0.35rem;
+  }
+}
+
+/* ─── 15. ALERTS PANEL ──────────────────────────────────── */
+@media (max-width: 768px) {
+  .alert-row {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    font-size: 0.72rem;
+    padding: 0.4rem 0.6rem;
+  }
+
+  .alert-time {
+    font-size: 0.62rem;
+    margin-left: auto;
+  }
+}
+
+/* ─── 16. FILTER BAR ─────────────────────────────────────── */
+@media (max-width: 768px) {
+  .filter-bar {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    padding: 0.4rem 0.5rem;
+  }
+
+  .filter-btn,
+  .filter-discipline-btn {
+    font-size: 0.68rem;
+    padding: 0.3rem 0.5rem;
+    min-height: 36px;
+  }
+}
+
+/* ─── 17. ORB / SCANNER PANELS ──────────────────────────── */
+@media (max-width: 768px) {
+  .orb-panel {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .orb-action-word {
+    font-size: 1rem;
+  }
+}
+
+/* ─── 18. SAFE AREA — iPad bottom bar clearance ─────────── */
+@media (max-width: 1024px) {
+  .main-content {
+    padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+  }
+}

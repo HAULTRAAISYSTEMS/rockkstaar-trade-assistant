@@ -16,6 +16,8 @@
   <!-- CSRF token for AJAX POST requests (read by setTradingMode in dashboard.js) -->
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
+  <!-- Mobile / iPad responsive overrides — loaded last to take priority -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}" />
 </head>
 <body>
 
@@ -71,13 +73,15 @@
        Mirrors the navbar controls in a touch-friendly layout.
   -->
   <div class="mobile-ctrl-bar" id="mobile-ctrl-bar">
-    <span id="mobile-last-updated" class="mobile-ctrl-time"></span>
+    <a href="{{ url_for('journal') }}"       class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'journal' %}mcb-on{% endif %}" title="Journal">📓</a>
+    <a href="{{ url_for('risk_settings') }}" class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'risk_settings' %}mcb-on{% endif %}" title="Risk Settings">⚖</a>
     <button id="mobile-ar-toggle"    class="mobile-ctrl-btn mobile-ctrl-ar mcb-on"    onclick="toggleAutoRefresh()">⟳ Auto</button>
     <button id="mobile-sound-toggle" class="mobile-ctrl-btn mobile-ctrl-sound mcb-on" onclick="toggleAlertSound()">🔔</button>
     <form action="{{ url_for('refresh_all') }}" method="POST" style="display:contents;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="mobile-ctrl-btn mobile-ctrl-refresh">⟳ Now</button>
     </form>
+    <span id="mobile-last-updated" class="mobile-ctrl-time"></span>
   </div>
 
   <script src="{{ url_for('static', filename='js/ws_manager.js') }}"></script>

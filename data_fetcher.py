@@ -1,17 +1,211 @@
 """
-data_fetcher.py - Live market data via yfinance.
+data_fetcher.py - Live market data via Polygon.io (primary) + yfinance (fallback).
 Provides fetch_live_data() and fetch_news_headlines() for use in generate_stock_data().
-Falls back gracefully if yfinance is unavailable or the fetch fails.
+
+Data source priority:
+  1. Polygon.io   — reliable cloud API, no rate-limit blocks on server IPs.
+                    Requires POLYGON_API_KEY env var. Free tier = 15-min delayed
+                    during market hours; Starter ($29/mo) = real-time.
+  2. yfinance     — original source; kept as fallback when Polygon key is absent
+                    or a Polygon call fails.
+  3. Yahoo chart API — direct HTTP fallback that bypasses yfinance's crumb system.
+
+If POLYGON_API_KEY is not set, behavior is identical to the original version.
 """
 
 from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import threading
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Polygon.io helpers
+# ---------------------------------------------------------------------------
+
+_POLYGON_KEY: str | None = os.environ.get("POLYGON_API_KEY") or None
+_POLYGON_BASE = "https://api.polygon.io"
+
+
+def _polygon_get(path: str, params: dict | None = None) -> dict | None:
+    """
+    Make a GET request to the Polygon.io REST API.
+    Returns the parsed JSON dict on HTTP 200, or None on any error.
+    """
+    if not _POLYGON_KEY:
+        return None
+    try:
+        import requests as _req
+        p = dict(params or {})
+        p["apiKey"] = _POLYGON_KEY
+        r = _req.get(f"{_POLYGON_BASE}{path}", params=p, timeout=8)
+        if r.status_code == 200:
+            return r.json()
+        logger.debug("Polygon %s → HTTP %s", path, r.status_code)
+    except Exception as _e:
+        logger.debug("Polygon request failed %s: %s", path, _e)
+    return None
+
+
+def _fetch_polygon_snapshot(ticker: str) -> dict | None:
+    """
+    Fetch current price, prev close, today's volume, and avg volume from
+    Polygon's snapshot endpoint.
+
+    Returns a dict with any of:
+        current_price, prev_close, avg_volume, rel_volume, gap_pct
+    or None on failure.
+    """
+    data = _polygon_get(f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}")
+    if not data:
+        return None
+    try:
+        ticker_node = data.get("ticker") or {}
+        day   = ticker_node.get("day") or {}
+        prev  = ticker_node.get("prevDay") or {}
+
+        current_price = ticker_node.get("lastTrade", {}).get("p") or day.get("c")
+        if not current_price or float(current_price) <= 0:
+            return None
+
+        out: dict = {"current_price": round(float(current_price), 2)}
+
+        pc = prev.get("c")
+        if pc and float(pc) > 0:
+            out["prev_close"] = round(float(pc), 2)
+            out["gap_pct"]    = round((out["current_price"] - out["prev_close"]) / out["prev_close"] * 100, 2)
+
+        # Volume — today's vs 30-day average (Polygon provides vw = VWAP, v = volume)
+        today_vol = day.get("v")
+        avg_vol   = ticker_node.get("prevDay", {}).get("v")  # best proxy available in snapshot
+        if today_vol and float(today_vol) > 0:
+            out["today_volume"] = int(float(today_vol))
+            # Polygon snapshot doesn't expose 30-day avg directly; skip rel_volume here
+            # (fetched separately in _fetch_polygon_prev_close or left to yfinance fallback)
+
+        logger.info(
+            "Polygon snapshot %s → price=%.2f prev_close=%s",
+            ticker, out["current_price"], out.get("prev_close"),
+        )
+        return out
+    except Exception as _e:
+        logger.debug("_fetch_polygon_snapshot parse failed %s: %s", ticker, _e)
+        return None
+
+
+def _fetch_polygon_prev_close(ticker: str) -> dict | None:
+    """
+    Fetch previous trading day OHLCV from Polygon's /v2/aggs/ticker/{t}/prev endpoint.
+
+    Returns dict with prev_close, prev_day_high, prev_day_low, prev_close_date,
+    avg_volume (30-day), rel_volume — or None on failure.
+    """
+    data = _polygon_get(f"/v2/aggs/ticker/{ticker}/prev", {"adjusted": "true"})
+    if not data:
+        return None
+    try:
+        results = data.get("results") or []
+        if not results:
+            return None
+        bar = results[0]
+        pc  = bar.get("c")
+        if not pc or float(pc) <= 0:
+            return None
+        out = {
+            "prev_close":      round(float(pc), 2),
+            "prev_day_high":   round(float(bar["h"]), 2),
+            "prev_day_low":    round(float(bar["l"]), 2),
+        }
+        # Timestamp is milliseconds epoch → date string
+        ts_ms = bar.get("t")
+        if ts_ms:
+            from datetime import timezone
+            dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+            out["prev_close_date"] = dt.strftime("%Y-%m-%d")
+        logger.info("Polygon prev close %s → %s", ticker, out)
+        return out
+    except Exception as _e:
+        logger.debug("_fetch_polygon_prev_close parse failed %s: %s", ticker, _e)
+        return None
+
+
+def _fetch_polygon_daily_bars(ticker: str, days: int = 252) -> dict | None:
+    """
+    Fetch up to *days* of daily OHLCV bars from Polygon for EMA/fib computation.
+
+    Returns dict with keys: closes, highs, lows (all list[float]), or None.
+    """
+    from datetime import timezone
+    to_date   = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    from_date = (datetime.now(tz=timezone.utc) - timedelta(days=days + 60)).strftime("%Y-%m-%d")
+    data = _polygon_get(
+        f"/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}",
+        {"adjusted": "true", "sort": "asc", "limit": days + 60},
+    )
+    if not data:
+        return None
+    try:
+        results = data.get("results") or []
+        if len(results) < 20:
+            return None
+        closes = [float(r["c"]) for r in results if r.get("c")]
+        highs  = [float(r["h"]) for r in results if r.get("h")]
+        lows   = [float(r["l"]) for r in results if r.get("l")]
+        if len(closes) < 20:
+            return None
+        logger.info("Polygon daily bars %s → %d bars", ticker, len(closes))
+        return {"closes": closes, "highs": highs, "lows": lows}
+    except Exception as _e:
+        logger.debug("_fetch_polygon_daily_bars parse failed %s: %s", ticker, _e)
+        return None
+
+
+def _fetch_polygon_intraday(ticker: str) -> dict | None:
+    """
+    Fetch today's 1-minute bars from Polygon for ORB, VWAP, and premarket range.
+
+    Returns dict with keys: timestamps, opens, closes, highs, lows, volumes
+    where timestamps are Unix seconds (ET-aware), or None on failure.
+
+    Note: Polygon free tier returns 15-min delayed data during market hours.
+    Upgrade to Starter ($29/mo) for real-time intraday bars.
+    """
+    now_et = _et_now()
+    date_str = now_et.strftime("%Y-%m-%d")
+    # Request from 4 AM to cover premarket
+    from_ts = f"{date_str}T04:00:00"
+    to_ts   = f"{date_str}T20:00:00"
+    data = _polygon_get(
+        f"/v2/aggs/ticker/{ticker}/range/1/minute/{date_str}/{date_str}",
+        {"adjusted": "true", "sort": "asc", "limit": 1000},
+    )
+    if not data:
+        return None
+    try:
+        results = data.get("results") or []
+        if not results:
+            return None
+        # Convert ms timestamps → seconds
+        timestamps = [int(r["t"] / 1000) for r in results]
+        opens      = [float(r.get("o", 0)) for r in results]
+        closes     = [float(r.get("c", 0)) for r in results]
+        highs      = [float(r.get("h", 0)) for r in results]
+        lows       = [float(r.get("l", 0)) for r in results]
+        volumes    = [int(r.get("v", 0)) for r in results]
+        logger.info("Polygon intraday %s → %d 1m bars", ticker, len(results))
+        return {
+            "timestamps": timestamps,
+            "opens": opens, "closes": closes,
+            "highs": highs, "lows": lows,
+            "volumes": volumes,
+        }
+    except Exception as _e:
+        logger.debug("_fetch_polygon_intraday parse failed %s: %s", ticker, _e)
+        return None
 
 
 def _yf_history_with_timeout(yf_ticker, timeout_s: int = 15, **kwargs):
@@ -337,6 +531,203 @@ def fetch_live_data(ticker: str) -> dict | None:
 
     Returns None if yfinance is unavailable or the fetch fails entirely.
     """
+    # ------------------------------------------------------------------ #
+    # 0. Polygon.io — primary source (used when POLYGON_API_KEY is set)
+    #
+    #    Fetches: current_price, prev_close, prev_day_high/low, gap_pct,
+    #             intraday bars (ORB, VWAP, premarket, trend_structure).
+    #    Falls through to yfinance when Polygon key is absent or call fails.
+    # ------------------------------------------------------------------ #
+    if _POLYGON_KEY:
+        try:
+            result: dict = {}
+
+            # --- Price + prev close ---
+            snap = _fetch_polygon_snapshot(ticker)
+            prev = _fetch_polygon_prev_close(ticker)
+
+            if snap and snap.get("current_price"):
+                result["current_price"] = snap["current_price"]
+                if snap.get("prev_close"):
+                    result["prev_close"] = snap["prev_close"]
+                if snap.get("gap_pct") is not None:
+                    result["gap_pct"] = snap["gap_pct"]
+
+            if prev:
+                # prev close from /prev endpoint is more authoritative
+                result["prev_close"]      = prev["prev_close"]
+                result["prev_day_high"]   = prev["prev_day_high"]
+                result["prev_day_low"]    = prev["prev_day_low"]
+                if prev.get("prev_close_date"):
+                    result["prev_close_date"] = prev["prev_close_date"]
+                # Recompute gap with authoritative prev_close
+                if result.get("current_price") and result["prev_close"] > 0:
+                    result["gap_pct"] = round(
+                        (result["current_price"] - result["prev_close"]) / result["prev_close"] * 100, 2
+                    )
+
+            # --- Intraday bars (ORB, VWAP, premarket) ---
+            if result.get("current_price"):
+                intra_bars = _fetch_polygon_intraday(ticker)
+                if intra_bars:
+                    from datetime import timezone as _tz
+                    today_str = _et_now().strftime("%Y-%m-%d")
+                    now_et    = _et_now()
+                    h, m      = now_et.hour, now_et.minute
+
+                    # ORB phase
+                    if h < 9 or (h == 9 and m < 30):
+                        result["orb_phase"] = "pre_market"
+                    elif (h == 9 and m >= 30) or (h == 10 and m == 0):
+                        result["orb_phase"] = "forming"
+                    else:
+                        result["orb_phase"] = "locked"
+
+                    # Split bars by session using ET timestamps
+                    import datetime as _dt
+                    et_tz = None
+                    try:
+                        import zoneinfo
+                        et_tz = zoneinfo.ZoneInfo("America/New_York")
+                    except Exception:
+                        pass
+
+                    pm_highs = []
+                    pm_lows  = []
+                    orb_highs = []
+                    orb_lows  = []
+                    sess_closes  = []
+                    sess_highs   = []
+                    sess_lows    = []
+                    sess_opens   = []
+                    sess_volumes = []
+
+                    for i, ts in enumerate(intra_bars["timestamps"]):
+                        if et_tz:
+                            bar_dt = _dt.datetime.fromtimestamp(ts, tz=et_tz)
+                        else:
+                            bar_dt = _dt.datetime.utcfromtimestamp(ts - 4 * 3600)
+                        bh, bm = bar_dt.hour, bar_dt.minute
+                        c  = intra_bars["closes"][i]
+                        hv = intra_bars["highs"][i]
+                        lv = intra_bars["lows"][i]
+                        o  = intra_bars["opens"][i]
+                        vol = intra_bars["volumes"][i]
+
+                        # Premarket: 04:00–09:29
+                        if (bh >= 4) and (bh < 9 or (bh == 9 and bm < 30)):
+                            pm_highs.append(hv)
+                            pm_lows.append(lv)
+
+                        # ORB window: 09:30–10:00
+                        if (bh == 9 and bm >= 30) or (bh == 10 and bm == 0):
+                            orb_highs.append(hv)
+                            orb_lows.append(lv)
+
+                        # Regular session: 09:30+
+                        if bh > 9 or (bh == 9 and bm >= 30):
+                            sess_closes.append(c)
+                            sess_highs.append(hv)
+                            sess_lows.append(lv)
+                            sess_opens.append(o)
+                            sess_volumes.append(vol)
+
+                    if pm_highs:
+                        result["premarket_high"] = round(max(pm_highs), 2)
+                        result["premarket_low"]  = round(min(pm_lows),  2)
+
+                    if orb_highs and result.get("orb_phase") in ("forming", "locked"):
+                        result["orb_high"] = round(max(orb_highs), 2)
+                        result["orb_low"]  = round(min(orb_lows),  2)
+
+                    if sess_closes:
+                        # VWAP
+                        tp_sum  = sum((h + l + c) / 3 * v
+                                      for h, l, c, v in zip(sess_highs, sess_lows, sess_closes, sess_volumes))
+                        vol_sum = sum(sess_volumes)
+                        if vol_sum > 0:
+                            result["vwap"] = round(tp_sum / vol_sum, 2)
+
+                        # Trend structure (HH + HL on last 3 bars)
+                        if len(sess_highs) >= 3:
+                            higher_highs = sess_highs[-1] > sess_highs[-2] > sess_highs[-3]
+                            higher_lows  = sess_lows[-1]  > sess_lows[-2]  > sess_lows[-3]
+                        else:
+                            higher_highs = higher_lows = False
+                        result["higher_highs"]    = higher_highs
+                        result["higher_lows"]     = higher_lows
+                        result["trend_structure"] = higher_highs and higher_lows
+
+                        vwap_now = result.get("vwap")
+                        cur_now  = result.get("current_price")
+                        result["price_above_vwap"] = bool(vwap_now and cur_now and cur_now > vwap_now)
+
+                        # Strong candle bodies
+                        if len(sess_closes) >= 3:
+                            _last3_c = sess_closes[-3:]
+                            _last3_o = sess_opens[-3:]
+                            _last3_h = sess_highs[-3:]
+                            _last3_l = sess_lows[-3:]
+                            bodies = [abs(c - o) for c, o in zip(_last3_c, _last3_o)]
+                            ranges = [h - l for h, l in zip(_last3_h, _last3_l)]
+                            valid  = [r for r in ranges if r > 0.001]
+                            if len(valid) >= 2:
+                                ratios = [b / r for b, r in zip(bodies, ranges) if r > 0.001]
+                                result["strong_candle_bodies"] = all(r > 0.5 for r in ratios)
+                            else:
+                                result["strong_candle_bodies"] = False
+                        else:
+                            result["strong_candle_bodies"] = False
+
+                        # ORB hold + momentum breakout
+                        orb_h = result.get("orb_high")
+                        vwap  = result.get("vwap")
+                        cur   = result.get("current_price")
+                        if orb_h and cur and cur > orb_h:
+                            candles_above = 0
+                            for c in reversed(sess_closes):
+                                if c > orb_h:
+                                    candles_above += 1
+                                else:
+                                    break
+                            result["candles_above_orb"] = candles_above
+                            result["orb_hold"]          = candles_above >= 2
+                        else:
+                            result["candles_above_orb"] = 0
+                            result["orb_hold"]          = False
+
+                        if orb_h and vwap and cur and cur > orb_h and cur > vwap:
+                            vol_inc = (
+                                len(sess_volumes) >= 3
+                                and sess_volumes[-2] > sess_volumes[-3]
+                                and sess_volumes[-1] > sess_volumes[-2]
+                            )
+                            result["momentum_breakout"] = (
+                                result["candles_above_orb"] >= 3 and vol_inc
+                            )
+                        else:
+                            result["momentum_breakout"] = False
+
+                # Earnings not available from Polygon on free tier — leave for yfinance path
+                # or skip entirely (non-critical field)
+
+            if result.get("current_price"):
+                logger.info(
+                    "fetch_live_data: Polygon SUCCESS %s price=%.2f",
+                    ticker, result["current_price"],
+                )
+                return result
+
+        except Exception as _poly_err:
+            logger.warning(
+                "fetch_live_data: Polygon path failed for %s (%s) — falling back to yfinance",
+                ticker, _poly_err,
+            )
+
+    # ------------------------------------------------------------------ #
+    # Fallback: yfinance + Yahoo chart API (original implementation)
+    # ------------------------------------------------------------------ #
+
     if not _YF_AVAILABLE:
         return None
 
@@ -782,28 +1173,45 @@ def fetch_swing_data(ticker: str) -> dict | None:
         closes = highs = lows = None
         _daily_source = "none"
 
-        # ── Primary: yfinance history (200 trading days ≈ 10 months) ─────────
+        # ── Primary: Polygon.io daily bars (when API key is configured) ───────
+        if _POLYGON_KEY:
+            try:
+                _poly_bars = _fetch_polygon_daily_bars(ticker, days=252)
+                if _poly_bars and len(_poly_bars["closes"]) >= 20:
+                    closes = _poly_bars["closes"]
+                    highs  = _poly_bars["highs"]
+                    lows   = _poly_bars["lows"]
+                    _daily_source = "polygon"
+                    logger.info(
+                        "fetch_swing_data: Polygon daily bars for %s → %d bars",
+                        ticker, len(closes),
+                    )
+            except Exception as _poly_err:
+                logger.debug("fetch_swing_data: Polygon failed for %s: %s", ticker, _poly_err)
+
+        # ── Fallback 1: yfinance history (200 trading days ≈ 10 months) ──────
         # Needs ≥200 bars for the 200 EMA; ≥20 for everything else.
         # Fails on cloud IPs when Yahoo Finance rejects the crumb token.
-        try:
-            with _silence_yf():
-                hist = _yf_history_with_timeout(
-                    yf.Ticker(ticker, session=_get_yf_session()),
-                    timeout_s=20, period="200d", interval="1d",
-                )
-            if hist is not None and not hist.empty and len(hist) >= 20:
-                try:
-                    hist.index = hist.index.tz_convert("America/New_York")
-                except TypeError:
-                    hist.index = hist.index.tz_localize("UTC").tz_convert("America/New_York")
-                closes = list(hist["Close"].astype(float))
-                highs  = list(hist["High"].astype(float))
-                lows   = list(hist["Low"].astype(float))
-                _daily_source = "yfinance"
-        except Exception as _yf_err:
-            logger.debug("fetch_swing_data: yfinance history failed for %s: %s", ticker, _yf_err)
+        if not closes:
+            try:
+                with _silence_yf():
+                    hist = _yf_history_with_timeout(
+                        yf.Ticker(ticker, session=_get_yf_session()),
+                        timeout_s=20, period="200d", interval="1d",
+                    )
+                if hist is not None and not hist.empty and len(hist) >= 20:
+                    try:
+                        hist.index = hist.index.tz_convert("America/New_York")
+                    except TypeError:
+                        hist.index = hist.index.tz_localize("UTC").tz_convert("America/New_York")
+                    closes = list(hist["Close"].astype(float))
+                    highs  = list(hist["High"].astype(float))
+                    lows   = list(hist["Low"].astype(float))
+                    _daily_source = "yfinance"
+            except Exception as _yf_err:
+                logger.debug("fetch_swing_data: yfinance history failed for %s: %s", ticker, _yf_err)
 
-        # ── Fallback: direct chart API (range=1y → ≥252 bars, no crumb needed) ─
+        # ── Fallback 2: direct chart API (range=1y → ≥252 bars, no crumb needed) ─
         if not closes:
             _bars = _fetch_ohlcv_via_chart_api(ticker, interval="1d", range_str="1y")
             if _bars and len(_bars["closes"]) >= 20:
