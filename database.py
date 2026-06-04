@@ -550,6 +550,18 @@ def init_db():
         )
     """))
 
+    # Schwab trade import tracking — prevents duplicate imports
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS schwab_imports (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            import_key    TEXT UNIQUE NOT NULL,
+            journal_id    INTEGER,
+            ticker        TEXT,
+            trade_date    TEXT,
+            imported_at   TEXT
+        )
+    """))
+
     # Daily trading sessions — one row per date, tracks trades/losses for risk engine
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS daily_sessions (
@@ -1853,3 +1865,37 @@ def get_setup_outcome_stats() -> list[dict]:
     """).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ── Schwab import tracking ────────────────────────────────────────────────────
+
+def schwab_import_exists(import_key: str) -> bool:
+    """Return True if this trade pair was already imported."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT id FROM schwab_imports WHERE import_key = ?", (import_key,)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def record_schwab_import(import_key: str, journal_id: int,
+                         ticker: str, trade_date: str) -> None:
+    """Mark a Schwab trade pair as imported so it won't be imported again."""
+    conn = get_db()
+    conn.execute(
+        """INSERT OR IGNORE INTO schwab_imports
+               (import_key, journal_id, ticker, trade_date, imported_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (import_key, journal_id, ticker, trade_date, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_schwab_import_keys() -> set:
+    """Return the set of all already-imported Schwab trade pair keys."""
+    conn = get_db()
+    rows = conn.execute("SELECT import_key FROM schwab_imports").fetchall()
+    conn.close()
+    return {r[0] for r in rows}

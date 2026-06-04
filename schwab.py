@@ -561,3 +561,133 @@ def get_account_summary() -> dict:
             "accounts":         [],
             "error":            str(e),
         }
+
+
+# ── Trade pair matching ───────────────────────────────────────────────────────
+
+def match_schwab_trades(days_back: int = 30) -> list[dict]:
+    """
+    Fetch filled orders from Schwab and match BUY + SELL pairs into completed trades.
+
+    Returns a list of trade dicts ready for journal preview:
+      ticker, trade_date, direction, entry_price, exit_price, shares,
+      pnl_pct, result, import_key, buy_order_id, sell_order_id, already_imported
+
+    Only FILLED equity orders are considered. Options and partial fills
+    are skipped to keep the first version simple and safe.
+
+    import_key = "{ticker}:{buy_order_id}:{sell_order_id}" — used for dedup.
+    """
+    from database import get_schwab_import_keys
+    already_imported = get_schwab_import_keys()
+
+    try:
+        accounts = fetch_accounts()
+    except Exception as e:
+        logger.warning("match_schwab_trades: fetch_accounts failed: %s", e)
+        return []
+
+    trades: list[dict] = []
+
+    for acct in accounts:
+        account_hash = acct.get("account_hash") or acct.get("hashValue", "")
+        if not account_hash:
+            continue
+        try:
+            raw_orders = _get(
+                f"/accounts/{account_hash}/orders",
+                {
+                    "fromEnteredTime": (
+                        datetime.utcnow() - timedelta(days=days_back)
+                    ).strftime("%Y-%m-%dT00:00:00Z"),
+                    "toEnteredTime": (
+                        datetime.utcnow() + timedelta(days=1)
+                    ).strftime("%Y-%m-%dT23:59:59Z"),
+                    "maxResults": 200,
+                    "status": "FILLED",
+                },
+            )
+        except Exception as e:
+            logger.warning("match_schwab_trades: fetch orders failed: %s", e)
+            continue
+
+        if not isinstance(raw_orders, list):
+            continue
+
+        # Group filled orders by ticker
+        buys:  dict[str, list] = {}
+        sells: dict[str, list] = {}
+
+        for raw in raw_orders:
+            if raw.get("status") != "FILLED":
+                continue
+            legs = raw.get("orderLegCollection") or []
+            if not legs:
+                continue
+            leg       = legs[0]
+            instrument= leg.get("instrument") or {}
+            asset_type= instrument.get("assetType", "EQUITY")
+            if asset_type != "EQUITY":
+                continue   # skip options for now
+
+            ticker     = instrument.get("symbol", "")
+            instruction= leg.get("instruction", "").upper()  # BUY / SELL / BUY_TO_COVER / SELL_SHORT
+            filled_qty = float(raw.get("filledQuantity") or 0)
+            avg_price  = float(raw.get("orderActivityCollection", [{}])[0]
+                               .get("executionLegs", [{}])[0]
+                               .get("price") or raw.get("price") or 0)
+            order_id   = str(raw.get("orderId", ""))
+            entered    = (raw.get("closeTime") or raw.get("enteredTime") or "")[:10]
+
+            if not ticker or filled_qty <= 0 or avg_price <= 0:
+                continue
+
+            item = {
+                "ticker":    ticker,
+                "qty":       filled_qty,
+                "price":     avg_price,
+                "order_id":  order_id,
+                "date":      entered,
+            }
+
+            if "BUY" in instruction:
+                buys.setdefault(ticker, []).append(item)
+            elif "SELL" in instruction:
+                sells.setdefault(ticker, []).append(item)
+
+        # Match buys → sells (FIFO per ticker)
+        for ticker in set(buys) & set(sells):
+            buy_list  = sorted(buys[ticker],  key=lambda x: x["date"])
+            sell_list = sorted(sells[ticker], key=lambda x: x["date"])
+
+            for buy in buy_list:
+                for sell in sell_list:
+                    if sell["date"] < buy["date"]:
+                        continue  # sell must be after buy
+                    shares    = min(buy["qty"], sell["qty"])
+                    entry     = round(buy["price"], 4)
+                    exit_p    = round(sell["price"], 4)
+                    pnl_pct   = round((exit_p - entry) / entry * 100, 2) if entry else 0.0
+                    result    = "Win" if pnl_pct > 0 else ("Loss" if pnl_pct < 0 else "Break Even")
+                    key       = f"{ticker}:{buy['order_id']}:{sell['order_id']}"
+
+                    trades.append({
+                        "ticker":           ticker,
+                        "trade_date":       sell["date"] or buy["date"],
+                        "direction":        "Long",
+                        "entry_price":      entry,
+                        "exit_price":       exit_p,
+                        "shares":           int(shares),
+                        "pnl_pct":          pnl_pct,
+                        "result":           result,
+                        "import_key":       key,
+                        "buy_order_id":     buy["order_id"],
+                        "sell_order_id":    sell["order_id"],
+                        "already_imported": key in already_imported,
+                    })
+                    break  # one match per buy order
+
+    # Sort: newest first, unimported first
+    trades.sort(key=lambda t: (t["already_imported"], t["trade_date"]), reverse=False)
+    trades.sort(key=lambda t: t["trade_date"], reverse=True)
+    return trades

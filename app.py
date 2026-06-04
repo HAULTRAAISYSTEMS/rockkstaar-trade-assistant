@@ -4953,6 +4953,80 @@ def schwab_disconnect():
     return redirect(url_for("schwab_account"))
 
 
+@app.route("/schwab/sync-preview")
+def schwab_sync_preview():
+    """
+    Return a JSON preview of Schwab filled trades that can be imported to the journal.
+    Only returns completed round-trips (BUY → SELL pairs) from the last 30 days.
+    Flags trades already imported so the UI can grey them out.
+    """
+    import schwab as _schwab
+    if not _schwab.is_connected():
+        return jsonify({"error": "Schwab not connected"}), 403
+    try:
+        trades = _schwab.match_schwab_trades(days_back=30)
+        return jsonify({"ok": True, "trades": trades, "count": len(trades)})
+    except Exception as e:
+        logger.error("schwab_sync_preview error: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@csrf.exempt
+@app.route("/schwab/sync-import", methods=["POST"])
+def schwab_sync_import():
+    """
+    Import confirmed Schwab trade pairs into the journal.
+    Accepts JSON body: { "trades": [...] } where each trade has the same
+    shape returned by /schwab/sync-preview.
+    Skips trades already imported (by import_key).
+    """
+    import schwab as _schwab
+    from database import schwab_import_exists, record_schwab_import
+    if not _schwab.is_connected():
+        return jsonify({"error": "Schwab not connected"}), 403
+    try:
+        body   = request.get_json(force=True) or {}
+        trades = body.get("trades") or []
+        imported = []
+        skipped  = []
+        for t in trades:
+            key = t.get("import_key", "")
+            if not key or schwab_import_exists(key):
+                skipped.append(t.get("ticker", "?"))
+                continue
+            try:
+                pnl_pct = t.get("pnl_pct", 0.0)
+                result  = t.get("result", "Break Even")
+                journal_id = add_journal_entry(
+                    ticker         = t["ticker"],
+                    trade_date     = t["trade_date"],
+                    direction      = t.get("direction", "Long"),
+                    entry_price    = t["entry_price"],
+                    exit_price     = t["exit_price"],
+                    shares         = t.get("shares"),
+                    setup_type     = t.get("setup_type"),
+                    momentum_score = None,
+                    pnl_pct        = pnl_pct,
+                    result         = result,
+                    notes          = f"[Schwab import] Buy #{t.get('buy_order_id','')} · Sell #{t.get('sell_order_id','')}",
+                    trade_mode     = t.get("trade_mode", "SWING TRADE"),
+                )
+                record_schwab_import(key, journal_id, t["ticker"], t["trade_date"])
+                imported.append(t["ticker"])
+            except Exception as _e:
+                logger.warning("schwab_sync_import: error importing %s: %s", t.get("ticker"), _e)
+                skipped.append(t.get("ticker", "?"))
+        return jsonify({
+            "ok": True,
+            "imported": imported,
+            "skipped":  skipped,
+            "count":    len(imported),
+        })
+    except Exception as e:
+        logger.error("schwab_sync_import error: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/schwab/summary")
 def api_schwab_summary():
     """

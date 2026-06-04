@@ -293,6 +293,223 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
 
   {% endif %}
 
+  <!-- ===== SYNC TRADES TO JOURNAL ===== -->
+  {% if tok_status.connected %}
+  <div class="schwab-sync-section">
+    <div class="schwab-sync-header">
+      <h3 class="card-title" style="margin:0;">Sync Trades to Journal</h3>
+      <span class="schwab-sync-sub">Pulls your filled buy/sell pairs from the last 30 days and lets you preview before importing.</span>
+    </div>
+    <button class="btn btn-add" id="schwab-sync-btn" onclick="loadSchwabPreview()">
+      ↓ Preview Trades
+    </button>
+  </div>
+
+  <!-- Preview modal -->
+  <div id="schwab-sync-modal" style="display:none;" class="schwab-sync-modal-wrap">
+    <div class="schwab-sync-modal">
+      <div class="schwab-sync-modal-header">
+        <span class="schwab-sync-modal-title">Trade Import Preview</span>
+        <button onclick="closeSyncModal()" class="schwab-sync-close">✕</button>
+      </div>
+      <div id="schwab-sync-loading" style="padding:1.5rem;text-align:center;color:var(--text-muted);">
+        Fetching filled orders…
+      </div>
+      <div id="schwab-sync-body" style="display:none;">
+        <p id="schwab-sync-summary" style="font-size:0.8rem;color:var(--text-muted);padding:0 1rem 0.5rem;"></p>
+        <div class="table-wrap" style="max-height:380px;overflow-y:auto;">
+          <table class="watchlist-table" id="schwab-sync-table">
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="sync-check-all" onchange="toggleAll(this)" title="Select all"></th>
+                <th>Date</th>
+                <th>Ticker</th>
+                <th>Dir</th>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>Shares</th>
+                <th>P&amp;L %</th>
+                <th>Result</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="schwab-sync-rows"></tbody>
+          </table>
+        </div>
+        <div style="padding:1rem;display:flex;gap:0.75rem;justify-content:flex-end;align-items:center;">
+          <span id="sync-selected-count" style="font-size:0.78rem;color:var(--text-muted);"></span>
+          <button class="btn" onclick="closeSyncModal()" style="background:var(--bg3);color:var(--text-muted);">Cancel</button>
+          <button class="btn btn-add" id="sync-import-btn" onclick="importSelected()">↓ Import Selected</button>
+        </div>
+      </div>
+      <div id="schwab-sync-done" style="display:none;padding:1.5rem;text-align:center;">
+        <div style="font-size:1.5rem;margin-bottom:0.5rem;">✓</div>
+        <div id="schwab-sync-done-msg" style="color:var(--green);font-weight:700;"></div>
+        <div style="margin-top:0.75rem;">
+          <a href="{{ url_for('journal') }}" class="btn btn-add" style="font-size:0.8rem;">View Journal →</a>
+          <button onclick="closeSyncModal()" class="btn" style="background:var(--bg3);color:var(--text-muted);margin-left:0.5rem;">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+  .schwab-sync-section {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+  }
+  .schwab-sync-header { flex: 1; display: flex; flex-direction: column; gap: 0.25rem; }
+  .schwab-sync-sub { font-size: 0.75rem; color: var(--text-muted); }
+  .schwab-sync-modal-wrap {
+    position: fixed; inset: 0; z-index: 900;
+    background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+    padding: 1rem;
+  }
+  .schwab-sync-modal {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    width: 100%; max-width: 720px;
+    max-height: 90vh;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    box-shadow: var(--shadow-deep);
+  }
+  .schwab-sync-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .schwab-sync-modal-title { font-size: 0.95rem; font-weight: 700; }
+  .schwab-sync-close {
+    background: none; border: none; color: var(--text-muted);
+    font-size: 1rem; cursor: pointer; padding: 0.25rem;
+  }
+  .sync-row-imported { opacity: 0.45; }
+  .sync-row-imported td { text-decoration: line-through; }
+  </style>
+
+  <script>
+  var _syncTrades = [];
+
+  function loadSchwabPreview() {
+    document.getElementById('schwab-sync-modal').style.display = 'flex';
+    document.getElementById('schwab-sync-loading').style.display = 'block';
+    document.getElementById('schwab-sync-body').style.display = 'none';
+    document.getElementById('schwab-sync-done').style.display = 'none';
+
+    fetch('/schwab/sync-preview')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        document.getElementById('schwab-sync-loading').style.display = 'none';
+        if (data.error) {
+          document.getElementById('schwab-sync-loading').style.display = 'block';
+          document.getElementById('schwab-sync-loading').textContent = 'Error: ' + data.error;
+          return;
+        }
+        _syncTrades = data.trades || [];
+        renderSyncPreview(_syncTrades);
+        document.getElementById('schwab-sync-body').style.display = 'block';
+      })
+      .catch(function(e) {
+        document.getElementById('schwab-sync-loading').textContent = 'Failed to load: ' + e;
+      });
+  }
+
+  function renderSyncPreview(trades) {
+    var tbody = document.getElementById('schwab-sync-rows');
+    var newCount = trades.filter(function(t) { return !t.already_imported; }).length;
+    document.getElementById('schwab-sync-summary').textContent =
+      trades.length + ' matched trade' + (trades.length !== 1 ? 's' : '') + ' found · ' +
+      newCount + ' new · ' + (trades.length - newCount) + ' already imported';
+
+    tbody.innerHTML = trades.map(function(t, i) {
+      var pnlClass = t.pnl_pct > 0 ? 'positive' : (t.pnl_pct < 0 ? 'negative' : '');
+      var imported = t.already_imported;
+      var rowClass = imported ? 'sync-row-imported' : '';
+      return '<tr class="' + rowClass + '">' +
+        '<td><input type="checkbox" class="sync-chk" data-idx="' + i + '"' +
+          (imported ? ' disabled' : ' checked') + '></td>' +
+        '<td style="font-size:0.78rem;">' + (t.trade_date || '—') + '</td>' +
+        '<td style="font-weight:700;">' + t.ticker + '</td>' +
+        '<td style="color:var(--green);">▲ ' + (t.direction || 'Long') + '</td>' +
+        '<td>$' + (t.entry_price || 0).toFixed(2) + '</td>' +
+        '<td>$' + (t.exit_price || 0).toFixed(2) + '</td>' +
+        '<td>' + (t.shares || '—') + '</td>' +
+        '<td class="' + pnlClass + '">' + (t.pnl_pct >= 0 ? '+' : '') + (t.pnl_pct || 0).toFixed(2) + '%</td>' +
+        '<td class="' + pnlClass + '">' + (t.result || '—') + '</td>' +
+        '<td style="font-size:0.7rem;color:var(--text-muted);">' + (imported ? '✓ Imported' : 'New') + '</td>' +
+      '</tr>';
+    }).join('');
+
+    updateSelectedCount();
+    var chks = document.querySelectorAll('.sync-chk:not(:disabled)');
+    chks.forEach(function(c) { c.addEventListener('change', updateSelectedCount); });
+  }
+
+  function updateSelectedCount() {
+    var n = document.querySelectorAll('.sync-chk:checked:not(:disabled)').length;
+    document.getElementById('sync-selected-count').textContent = n + ' selected';
+  }
+
+  function toggleAll(master) {
+    document.querySelectorAll('.sync-chk:not(:disabled)').forEach(function(c) {
+      c.checked = master.checked;
+    });
+    updateSelectedCount();
+  }
+
+  function importSelected() {
+    var selected = [];
+    document.querySelectorAll('.sync-chk:checked:not(:disabled)').forEach(function(c) {
+      var idx = parseInt(c.getAttribute('data-idx'));
+      if (_syncTrades[idx]) selected.push(_syncTrades[idx]);
+    });
+    if (!selected.length) { alert('Select at least one trade to import.'); return; }
+
+    document.getElementById('sync-import-btn').disabled = true;
+    document.getElementById('sync-import-btn').textContent = 'Importing…';
+
+    fetch('/schwab/sync-import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trades: selected }),
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        document.getElementById('schwab-sync-body').style.display = 'none';
+        document.getElementById('schwab-sync-done').style.display = 'block';
+        if (data.ok) {
+          document.getElementById('schwab-sync-done-msg').textContent =
+            data.count + ' trade' + (data.count !== 1 ? 's' : '') + ' imported to your journal.';
+        } else {
+          document.getElementById('schwab-sync-done-msg').textContent = 'Error: ' + (data.error || 'Unknown');
+          document.getElementById('schwab-sync-done-msg').style.color = 'var(--red)';
+        }
+      })
+      .catch(function(e) {
+        document.getElementById('sync-import-btn').disabled = false;
+        document.getElementById('sync-import-btn').textContent = '↓ Import Selected';
+        alert('Import failed: ' + e);
+      });
+  }
+
+  function closeSyncModal() {
+    document.getElementById('schwab-sync-modal').style.display = 'none';
+    document.getElementById('sync-import-btn').disabled = false;
+    document.getElementById('sync-import-btn').textContent = '↓ Import Selected';
+  }
+  </script>
+  {% endif %}
+
   <!-- ===== DISCONNECT BUTTON ===== -->
   {% if tok_status.connected %}
   <div class="schwab-disconnect-row">
