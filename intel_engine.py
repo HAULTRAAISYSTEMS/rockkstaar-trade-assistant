@@ -682,11 +682,130 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
         except Exception as exc:
             meta["earnings_errors"].append(f"override/{ov.get('ticker')}: {exc}")
 
-    # ── 2. yfinance (primary API) ────────────────────────────────────────────
-    yf_found:  set[str]  = set(already_added)
+    # ── 2a. Direct Yahoo quoteSummary (primary — no crumb/cookie needed) ───────
+    # This hits Yahoo Finance's quoteSummary API directly, bypassing yfinance's
+    # crumb token mechanism that is blocked on cloud/server IPs. Returns earnings
+    # dates from calendarEvents module. Falls through to yfinance if it fails.
+    def _fetch_earnings_yahoo_api(ticker: str) -> Optional[dict]:
+        """Fetch next earnings date via Yahoo Finance quoteSummary (no crumb needed)."""
+        if ticker in already_added:
+            return None
+        _URLS = [
+            f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker}",
+            f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker}",
+        ]
+        _headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json",
+        }
+        for url in _URLS:
+            try:
+                import urllib.request, json as _json
+                req = urllib.request.Request(
+                    url + "?modules=calendarEvents",
+                    headers=_headers,
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = _json.loads(resp.read())
+                result = (data.get("quoteSummary") or {}).get("result") or []
+                if not result:
+                    continue
+                cal = (result[0].get("calendarEvents") or {})
+                earn_dates = cal.get("earningsDate") or []
+                earn_date  = None
+                for ed in earn_dates:
+                    try:
+                        raw_ts = ed.get("raw")
+                        if raw_ts:
+                            import datetime as _dt
+                            d = _dt.datetime.utcfromtimestamp(raw_ts).date()
+                            if d >= today:
+                                earn_date = d
+                                break
+                        fmt = ed.get("fmt", "")
+                        if fmt:
+                            d = datetime.strptime(fmt[:10], "%Y-%m-%d").date()
+                            if d >= today:
+                                earn_date = d
+                                break
+                    except Exception:
+                        continue
+                if not earn_date:
+                    continue
+                days_away = (earn_date - today).days
+                if days_away < 0 or days_away > 7:
+                    return None
+                # EPS / Revenue estimates
+                eps_est = rev_est = None
+                try:
+                    ea = cal.get("earningsAverage") or {}
+                    if ea.get("raw") is not None:
+                        eps_est = round(float(ea["raw"]), 2)
+                except Exception:
+                    pass
+                try:
+                    ra = cal.get("revenueAverage") or {}
+                    if ra.get("raw") is not None:
+                        rev_est = int(ra["raw"])
+                except Exception:
+                    pass
+                logger.info("intel/earnings yahoo_api %s → %s (%d days)", ticker, earn_date, days_away)
+                return {
+                    "ticker":       ticker,
+                    "company_name": _company_name(ticker),
+                    "date":         earn_date.isoformat(),
+                    "date_label":   _date_label(earn_date, today),
+                    "time_label":   "TBD",
+                    "on_watchlist": ticker in wl_set,
+                    "days_away":    days_away,
+                    "eps_est":      eps_est,
+                    "rev_est":      rev_est,
+                    "source":       "yahoo_api",
+                    "is_override":  False,
+                }
+            except Exception as _e:
+                logger.debug("intel/earnings yahoo_api %s via %s: %s", ticker, url, _e)
+                continue
+        return None
+
+    # Run direct Yahoo API fetch first (parallel, 8 workers)
+    yahoo_api_found:  set[str]  = set(already_added)
+    yahoo_api_missed: list[str] = []
+
+    pool_ya = ThreadPoolExecutor(max_workers=8)
+    futs_ya = {pool_ya.submit(_fetch_earnings_yahoo_api, t): t
+               for t in all_tickers if t not in already_added}
+    pool_ya.shutdown(wait=False)
+    try:
+        for fut in as_completed(futs_ya, timeout=25):
+            t = futs_ya[fut]
+            try:
+                item = fut.result()
+                if item:
+                    _bucket_item(item)
+                    yahoo_api_found.add(t)
+                    meta["yfinance_found"] += 1   # reuse counter so debug shows totals
+                elif t not in already_added:
+                    yahoo_api_missed.append(t)
+            except Exception:
+                yahoo_api_missed.append(t)
+    except Exception:
+        pass
+
+    meta["earnings_source_used"] = "overrides+yahoo_api+yfinance"
+
+    # ── 2b. yfinance fallback for tickers the direct API missed ──────────────
+    yf_found:  set[str]  = set(yahoo_api_found)
     yf_missed: list[str] = []
 
     def _fetch_cal(ticker: str) -> Optional[dict]:
+        # Skip tickers already found via yahoo_api or overrides
+        if ticker in yahoo_api_found:
+            return None
         if ticker in already_added:
             return None
         try:
@@ -778,8 +897,10 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             logger.debug("intel/earnings yf %s: %s", ticker, e)
             return None
 
+    # Only run yfinance on tickers the yahoo_api missed
+    _yf_targets = [t for t in yahoo_api_missed if t not in yahoo_api_found]
     pool = ThreadPoolExecutor(max_workers=8)
-    futs = {pool.submit(_fetch_cal, t): t for t in all_tickers}
+    futs = {pool.submit(_fetch_cal, t): t for t in _yf_targets}
     pool.shutdown(wait=False)
     try:
         for fut in as_completed(futs, timeout=25):
@@ -790,14 +911,14 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
                     _bucket_item(item)
                     yf_found.add(t)
                     meta["yfinance_found"] += 1
-                elif t not in already_added:
+                elif t not in yahoo_api_found:
                     yf_missed.append(t)
             except Exception:
                 yf_missed.append(t)
     except Exception:
         pass
 
-    # ── 3. Finnhub fallback for tickers yfinance missed ─────────────────────
+    # ── 3. Finnhub fallback for tickers both yahoo_api AND yfinance missed ─────
     finnhub_key = os.environ.get("FINNHUB_API_KEY", "").strip()
     if finnhub_key and yf_missed:
         meta["earnings_source_used"] = "overrides+yfinance+finnhub"
