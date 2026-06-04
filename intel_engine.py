@@ -85,7 +85,7 @@ _cache: dict = {}
 
 _CACHE_TTL: dict[str, int] = {
     "market_news": 600,    # 10 min  — news changes often
-    "earnings":    21600,  # 6 hrs   — dates change rarely
+    "earnings":    3600,   # 1 hr    — refreshes more often to catch new dates
     "splits":      43200,  # 12 hrs  — stable; long TTL protects rate limits
     "dividends":   43200,  # 12 hrs  — ex-dates don't change often
     "economic":    43200,  # 12 hrs  — stable; Finnhub econ is 1 call/day max
@@ -682,18 +682,17 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
         except Exception as exc:
             meta["earnings_errors"].append(f"override/{ov.get('ticker')}: {exc}")
 
-    # ── 2a. Direct Yahoo quoteSummary (primary — no crumb/cookie needed) ───────
-    # This hits Yahoo Finance's quoteSummary API directly, bypassing yfinance's
-    # crumb token mechanism that is blocked on cloud/server IPs. Returns earnings
-    # dates from calendarEvents module. Falls through to yfinance if it fails.
+    # ── 2a. Direct Yahoo chart API (primary — confirmed to work from cloud IPs) ──
+    # Uses the same v8/finance/chart endpoint that data_fetcher.py uses for prices.
+    # Returns earningsTimestamp from meta object — no crumb/cookie needed.
+    # Falls back to quoteSummary, then yfinance if chart API has no earnings date.
     def _fetch_earnings_yahoo_api(ticker: str) -> Optional[dict]:
-        """Fetch next earnings date via Yahoo Finance quoteSummary (no crumb needed)."""
+        """Fetch next earnings date via Yahoo Finance chart API (no crumb needed)."""
         if ticker in already_added:
             return None
-        _URLS = [
-            f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker}",
-            f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker}",
-        ]
+
+        import urllib.request as _urlreq, json as _json, datetime as _dt
+
         _headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -702,75 +701,115 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             ),
             "Accept": "application/json",
         }
-        for url in _URLS:
+
+        earn_date = None
+        eps_est = rev_est = None
+
+        # ── Try 1: v8 chart API (same endpoint used for live prices — works on Render) ──
+        for base_url in [
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+            f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}",
+        ]:
             try:
-                import urllib.request, json as _json
-                req = urllib.request.Request(
-                    url + "?modules=calendarEvents",
+                req = _urlreq.Request(
+                    base_url + "?interval=1d&range=5d",
                     headers=_headers,
                 )
-                with urllib.request.urlopen(req, timeout=8) as resp:
+                with _urlreq.urlopen(req, timeout=8) as resp:
                     data = _json.loads(resp.read())
-                result = (data.get("quoteSummary") or {}).get("result") or []
-                if not result:
-                    continue
-                cal = (result[0].get("calendarEvents") or {})
-                earn_dates = cal.get("earningsDate") or []
-                earn_date  = None
-                for ed in earn_dates:
-                    try:
-                        raw_ts = ed.get("raw")
-                        if raw_ts:
-                            import datetime as _dt
-                            d = _dt.datetime.utcfromtimestamp(raw_ts).date()
-                            if d >= today:
-                                earn_date = d
-                                break
-                        fmt = ed.get("fmt", "")
-                        if fmt:
-                            d = datetime.strptime(fmt[:10], "%Y-%m-%d").date()
-                            if d >= today:
-                                earn_date = d
-                                break
-                    except Exception:
-                        continue
-                if not earn_date:
-                    continue
-                days_away = (earn_date - today).days
-                if days_away < 0 or days_away > 7:
-                    return None
-                # EPS / Revenue estimates
-                eps_est = rev_est = None
-                try:
-                    ea = cal.get("earningsAverage") or {}
-                    if ea.get("raw") is not None:
-                        eps_est = round(float(ea["raw"]), 2)
-                except Exception:
-                    pass
-                try:
-                    ra = cal.get("revenueAverage") or {}
-                    if ra.get("raw") is not None:
-                        rev_est = int(ra["raw"])
-                except Exception:
-                    pass
-                logger.info("intel/earnings yahoo_api %s → %s (%d days)", ticker, earn_date, days_away)
-                return {
-                    "ticker":       ticker,
-                    "company_name": _company_name(ticker),
-                    "date":         earn_date.isoformat(),
-                    "date_label":   _date_label(earn_date, today),
-                    "time_label":   "TBD",
-                    "on_watchlist": ticker in wl_set,
-                    "days_away":    days_away,
-                    "eps_est":      eps_est,
-                    "rev_est":      rev_est,
-                    "source":       "yahoo_api",
-                    "is_override":  False,
-                }
+                result = ((data.get("chart") or {}).get("result") or [{}])[0]
+                meta   = result.get("meta") or {}
+
+                # earningsTimestamp = next earnings as UTC Unix timestamp
+                ts = meta.get("earningsTimestamp")
+                if ts:
+                    d = _dt.datetime.utcfromtimestamp(int(ts)).date()
+                    if d >= today:
+                        earn_date = d
+                        break
+
+                # earningsTimestampStart/End give a range — use Start
+                ts_start = meta.get("earningsTimestampStart")
+                if ts_start and not earn_date:
+                    d = _dt.datetime.utcfromtimestamp(int(ts_start)).date()
+                    if d >= today:
+                        earn_date = d
+                        break
             except Exception as _e:
-                logger.debug("intel/earnings yahoo_api %s via %s: %s", ticker, url, _e)
+                logger.debug("intel/earnings chart_api %s: %s", ticker, _e)
                 continue
-        return None
+
+        # ── Try 2: v10 quoteSummary calendarEvents (second attempt) ─────────────
+        if not earn_date:
+            for base_url in [
+                f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker}",
+                f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker}",
+            ]:
+                try:
+                    req = _urlreq.Request(
+                        base_url + "?modules=calendarEvents",
+                        headers=_headers,
+                    )
+                    with _urlreq.urlopen(req, timeout=8) as resp:
+                        data = _json.loads(resp.read())
+                    result = ((data.get("quoteSummary") or {}).get("result") or [{}])[0]
+                    cal    = result.get("calendarEvents") or {}
+                    for ed_obj in (cal.get("earningsDate") or []):
+                        try:
+                            raw_ts = ed_obj.get("raw")
+                            if raw_ts:
+                                d = _dt.datetime.utcfromtimestamp(int(raw_ts)).date()
+                                if d >= today:
+                                    earn_date = d
+                                    break
+                            fmt = (ed_obj.get("fmt") or "")[:10]
+                            if fmt:
+                                d = datetime.strptime(fmt, "%Y-%m-%d").date()
+                                if d >= today:
+                                    earn_date = d
+                                    break
+                        except Exception:
+                            continue
+                    if earn_date:
+                        # Pull EPS/Rev estimates if available
+                        try:
+                            ea = (cal.get("earningsAverage") or {})
+                            if ea.get("raw") is not None:
+                                eps_est = round(float(ea["raw"]), 2)
+                        except Exception:
+                            pass
+                        try:
+                            ra = (cal.get("revenueAverage") or {})
+                            if ra.get("raw") is not None:
+                                rev_est = int(ra["raw"])
+                        except Exception:
+                            pass
+                        break
+                except Exception as _e:
+                    logger.debug("intel/earnings quotesummary %s: %s", ticker, _e)
+                    continue
+
+        if not earn_date:
+            return None
+
+        days_away = (earn_date - today).days
+        if days_away < 0 or days_away > 7:
+            return None
+
+        logger.info("intel/earnings yahoo_api %s → %s (%d days away)", ticker, earn_date, days_away)
+        return {
+            "ticker":       ticker,
+            "company_name": _company_name(ticker),
+            "date":         earn_date.isoformat(),
+            "date_label":   _date_label(earn_date, today),
+            "time_label":   "TBD",
+            "on_watchlist": ticker in wl_set,
+            "days_away":    days_away,
+            "eps_est":      eps_est,
+            "rev_est":      rev_est,
+            "source":       "yahoo_chart_api",
+            "is_override":  False,
+        }
 
     # Run direct Yahoo API fetch first (parallel, 8 workers)
     yahoo_api_found:  set[str]  = set(already_added)
