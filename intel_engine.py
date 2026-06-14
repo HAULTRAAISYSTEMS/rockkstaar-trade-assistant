@@ -90,6 +90,7 @@ _CACHE_TTL: dict[str, int] = {
     "dividends":   43200,  # 12 hrs  — ex-dates don't change often
     "economic":    43200,  # 12 hrs  — stable; Finnhub econ is 1 call/day max
     "macro":       300,    # 5 min   — 10Y/DXY/VIX live feeds
+    "ndx":         86400,  # 24 hrs  — NDX constituents; rebalances ~quarterly
 }
 
 # ── Finnhub rate-limit backoff ─────────────────────────────────────────────────
@@ -204,12 +205,13 @@ def trigger_background_refresh() -> None:
                     logger.warning("intel bg-refresh/%s: %s", name, exc)
 
             tasks = [
-                (fetch_economic_calendar, "econ"),
-                (fetch_stock_splits,      "splits"),
-                (fetch_earnings_calendar, "earnings"),
-                (fetch_dividends,         "dividends"),
-                (fetch_market_news,       "news"),
-                (fetch_macro_environment, "macro"),
+                (fetch_economic_calendar,  "econ"),
+                (fetch_stock_splits,       "splits"),
+                (fetch_earnings_calendar,  "earnings"),
+                (fetch_dividends,          "dividends"),
+                (fetch_market_news,        "news"),
+                (fetch_macro_environment,  "macro"),
+                (run_ndx_constituent_check, "ndx"),
             ]
             with ThreadPoolExecutor(max_workers=5) as bg_ex:
                 for fn, nm in tasks:
@@ -1733,7 +1735,189 @@ def get_intel_summary() -> dict:
             "splits_count":         len(c_split or []),
             "dividends_count":      len(c_div   or []),
         },
+        "ndx_watch":       get_ndx_watch_data(),
         "alerts_sent":     [],
         "from_cache":      not is_cold,
         "refreshing":      currently_refreshing,
+    }
+
+
+# ── Nasdaq-100 Constituent Tracker ────────────────────────────────────────────
+
+def _ndx_parse_invesco_csv(raw: str) -> list:
+    """Parse Invesco QQQ holdings CSV.  Handles preamble rows before the header."""
+    import csv, io
+    lines = raw.splitlines()
+    csv_start = 0
+    for i, line in enumerate(lines):
+        lower = line.lower()
+        if "ticker" in lower or "symbol" in lower:
+            csv_start = i
+            break
+    csv_text = "\n".join(lines[csv_start:])
+    results = []
+    try:
+        reader = csv.DictReader(io.StringIO(csv_text))
+        for row in reader:
+            ticker = (
+                row.get("Ticker") or row.get("ticker") or
+                row.get("Symbol") or row.get("symbol") or ""
+            ).strip().upper()
+            if not ticker or len(ticker) > 6:
+                continue
+            if not all(c.isalpha() or c in (".", "-") for c in ticker):
+                continue
+            name = (
+                row.get("Name") or row.get("name") or
+                row.get("Security Name") or ""
+            ).strip()
+            weight_raw = (
+                row.get("Weight") or row.get("weight") or
+                row.get("% Weight") or row.get("Weightings") or "0"
+            ).strip().replace("%", "").replace(",", "")
+            try:
+                weight = float(weight_raw)
+            except (ValueError, TypeError):
+                weight = 0.0
+            results.append({"ticker": ticker, "company_name": name, "weight_pct": weight})
+    except Exception as exc:
+        logger.debug("intel/ndx csv parse: %s", exc)
+    results.sort(key=lambda x: x["weight_pct"], reverse=True)
+    return results
+
+
+def _ndx_from_invesco() -> list:
+    """Fetch QQQ holdings CSV from Invesco.com."""
+    import urllib.request
+    url = (
+        "https://www.invesco.com/us/financial-products/etfs/holdings/main/holdings/0"
+        "?audienceType=Investor&action=download&ticker=QQQ"
+    )
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept":   "text/csv,application/csv,text/plain,*/*",
+        "Referer":  "https://www.invesco.com/us/financial-products/etfs/product-detail?t=QQQ",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        if "<html" in raw[:200].lower():
+            logger.debug("intel/ndx invesco returned HTML, not CSV")
+            return []
+        result = _ndx_parse_invesco_csv(raw)
+        logger.info("intel/ndx invesco: parsed %d constituents", len(result))
+        return result
+    except Exception as exc:
+        logger.debug("intel/ndx invesco fetch: %s", exc)
+        return []
+
+
+def fetch_ndx_constituents() -> list:
+    """Fetch the current Nasdaq-100 constituent list from Invesco QQQ holdings CSV.
+    Returns [{ticker, weight_pct, company_name}] sorted by weight desc.
+    Cached for 24 hours.
+    """
+    cached = _cget("ndx")
+    if cached is not None:
+        return cached
+    result = _ndx_from_invesco()
+    if result:
+        _cset("ndx", result)
+        logger.info("intel/ndx: %d constituents fetched and cached", len(result))
+    else:
+        logger.warning("intel/ndx: fetch failed — no data available")
+    return result
+
+
+def run_ndx_constituent_check() -> dict:
+    """Fetch current NDX constituents, diff against last DB snapshot, persist changes.
+    Returns {added, removed, snapshot_date, total}.
+    Safe to call repeatedly — only writes a new snapshot when date changes.
+    """
+    try:
+        from database import (
+            get_latest_ndx_snapshot, save_ndx_snapshot,
+            save_ndx_change, add_scanner_alert,
+        )
+    except Exception as exc:
+        logger.warning("intel/ndx: db import failed: %s", exc)
+        return {"added": [], "removed": [], "snapshot_date": "", "total": 0}
+
+    today_str = _today_et().isoformat()
+    constituents = fetch_ndx_constituents()
+    if not constituents:
+        return {"added": [], "removed": [], "snapshot_date": today_str, "total": 0, "error": "fetch_failed"}
+
+    current_tickers = {c["ticker"] for c in constituents}
+    ticker_info     = {c["ticker"]: c for c in constituents}
+    prev_date, prev_tickers = get_latest_ndx_snapshot()
+
+    added   = []
+    removed = []
+
+    if prev_tickers:
+        added   = sorted(current_tickers - prev_tickers)
+        removed = sorted(prev_tickers   - current_tickers)
+
+        for ticker in added:
+            info = ticker_info.get(ticker, {})
+            save_ndx_change(ticker, "added", today_str, info.get("company_name", ""))
+            dk = _daily_key(ticker, "ndx_added")
+            if should_send_alert(dk):
+                name_part = f" ({info['company_name']})" if info.get("company_name") else ""
+                add_scanner_alert(
+                    ticker,
+                    "NDX_ADDED",
+                    f"Added to Nasdaq-100: {ticker}{name_part}",
+                    severity="high",
+                )
+                logger.info("intel/ndx: ADDED  ticker=%s", ticker)
+
+        for ticker in removed:
+            save_ndx_change(ticker, "removed", today_str, "")
+            dk = _daily_key(ticker, "ndx_removed")
+            if should_send_alert(dk):
+                add_scanner_alert(
+                    ticker,
+                    "NDX_REMOVED",
+                    f"Removed from Nasdaq-100: {ticker}",
+                    severity="medium",
+                )
+                logger.info("intel/ndx: REMOVED  ticker=%s", ticker)
+
+    if prev_date != today_str:
+        save_ndx_snapshot(constituents, today_str)
+
+    return {
+        "added":         added,
+        "removed":       removed,
+        "snapshot_date": today_str,
+        "total":         len(current_tickers),
+    }
+
+
+def get_ndx_watch_data() -> dict:
+    """Return NDX 100 Watch data for the Intel page (DB + cache)."""
+    try:
+        from database import get_ndx_changes, get_ndx_latest_constituents
+        recent_changes = get_ndx_changes(limit=20)
+        top_holdings   = get_ndx_latest_constituents(limit=15)
+    except Exception as exc:
+        logger.warning("intel/ndx watch_data: %s", exc)
+        recent_changes = []
+        top_holdings   = []
+
+    cached_constituents = _cget("ndx") or []
+    return {
+        "recent_changes": recent_changes,
+        "top_holdings":   top_holdings,
+        "total_members":  len(cached_constituents) if cached_constituents else (
+            len(top_holdings) if top_holdings else 0
+        ),
+        "last_checked":   _et_now().strftime("%m/%d %I:%M %p ET") if cached_constituents else "—",
     }

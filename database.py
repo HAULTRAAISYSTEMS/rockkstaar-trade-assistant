@@ -626,6 +626,30 @@ def init_db():
         )
     """))
 
+    # Nasdaq-100 constituent snapshots — one row per (date, ticker)
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS ndx_constituents (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_date TEXT    NOT NULL,
+            ticker        TEXT    NOT NULL,
+            weight_pct    REAL,
+            company_name  TEXT,
+            UNIQUE(snapshot_date, ticker)
+        )
+    """))
+
+    # Nasdaq-100 constituent change events (additions / removals)
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS ndx_changes (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker        TEXT    NOT NULL,
+            change_type   TEXT    NOT NULL,
+            detected_date TEXT    NOT NULL,
+            company_name  TEXT,
+            created_at    TEXT    NOT NULL
+        )
+    """))
+
     # Seed default watchlists on first run (use cnt alias — works in both DBs)
     wl_count = cursor.execute(
         "SELECT COUNT(*) AS cnt FROM watchlists"
@@ -1899,3 +1923,92 @@ def get_schwab_import_keys() -> set:
     rows = conn.execute("SELECT import_key FROM schwab_imports").fetchall()
     conn.close()
     return {r[0] for r in rows}
+
+
+# ── Nasdaq-100 constituent tracking ──────────────────────────────────────────
+
+def get_latest_ndx_snapshot() -> tuple:
+    """Return (snapshot_date, set_of_tickers) for the most recent NDX snapshot."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT snapshot_date FROM ndx_constituents ORDER BY snapshot_date DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        conn.close()
+        return None, set()
+    snap_date = row["snapshot_date"]
+    rows = conn.execute(
+        "SELECT ticker FROM ndx_constituents WHERE snapshot_date = ?", (snap_date,)
+    ).fetchall()
+    conn.close()
+    return snap_date, {r["ticker"] for r in rows}
+
+
+def save_ndx_snapshot(tickers_data: list, snapshot_date: str) -> None:
+    """Persist a full NDX constituent snapshot. tickers_data: [{ticker, weight_pct, company_name}]"""
+    conn = get_db()
+    for item in tickers_data:
+        conn.execute(
+            "INSERT OR IGNORE INTO ndx_constituents "
+            "(snapshot_date, ticker, weight_pct, company_name) VALUES (?, ?, ?, ?)",
+            (snapshot_date, item["ticker"], item.get("weight_pct"), item.get("company_name", "")),
+        )
+    # Retain only the 30 most recent snapshot dates to bound table growth
+    conn.execute(
+        "DELETE FROM ndx_constituents WHERE snapshot_date NOT IN ("
+        "  SELECT DISTINCT snapshot_date FROM ndx_constituents "
+        "  ORDER BY snapshot_date DESC LIMIT 30"
+        ")"
+    )
+    conn.commit()
+    conn.close()
+
+
+def save_ndx_change(ticker: str, change_type: str, detected_date: str,
+                    company_name: str = "") -> None:
+    """Record an NDX constituent add or removal event."""
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        "INSERT INTO ndx_changes "
+        "(ticker, change_type, detected_date, company_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (ticker.upper(), change_type, detected_date, company_name or "", now),
+    )
+    # Keep the 200 most recent changes
+    conn.execute(
+        "DELETE FROM ndx_changes WHERE id NOT IN ("
+        "  SELECT id FROM ndx_changes ORDER BY id DESC LIMIT 200"
+        ")"
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_ndx_changes(limit: int = 20) -> list:
+    """Return recent NDX constituent changes, newest first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM ndx_changes ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_ndx_latest_constituents(limit: int = 15) -> list:
+    """Return top-N constituents from the most recent snapshot, ordered by weight."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT snapshot_date FROM ndx_constituents ORDER BY snapshot_date DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        conn.close()
+        return []
+    snap_date = row["snapshot_date"]
+    rows = conn.execute(
+        "SELECT ticker, weight_pct, company_name FROM ndx_constituents "
+        "WHERE snapshot_date = ? ORDER BY weight_pct DESC LIMIT ?",
+        (snap_date, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

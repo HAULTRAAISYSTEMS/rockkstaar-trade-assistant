@@ -864,6 +864,41 @@
   }
   .econ-bucket-header:not(:first-child) { border-top: 1px solid var(--border-accent); }
 
+  /* ── NDX 100 Watch rows ── */
+  .ndx-change-row {
+    display: grid;
+    grid-template-columns: 70px 50px 1fr 90px;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .ndx-change-row:last-child { border-bottom: none; }
+  .ndx-change-row:hover { background: rgba(14,165,233,0.04); }
+  .ndx-change-row.ndx-added   { border-left: 3px solid rgba(34,197,94,0.55);  padding-left: 13px; }
+  .ndx-change-row.ndx-removed { border-left: 3px solid rgba(239,68,68,0.55);  padding-left: 13px; }
+  .ndx-add-badge  { background: rgba(34,197,94,0.12);  color: var(--green); border: 1px solid rgba(34,197,94,0.3);  font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+  .ndx-rem-badge  { background: rgba(239,68,68,0.12);  color: var(--red);   border: 1px solid rgba(239,68,68,0.3);  font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+  .ndx-holding-row {
+    display: grid;
+    grid-template-columns: 65px 1fr 80px 90px;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .ndx-holding-row:last-child { border-bottom: none; }
+  .ndx-holding-row:hover { background: rgba(14,165,233,0.04); }
+  .ndx-holding-bar-wrap {
+    background: var(--bg-inset);
+    border-radius: 3px;
+    height: 4px;
+    overflow: hidden;
+  }
+  .ndx-holding-bar { height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); border-radius: 3px; }
+
   /* ── Responsive ── */
   @media (max-width: 900px) {
     .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
@@ -1213,6 +1248,48 @@
             <span>Event &amp; Trading Note</span><span>Date / Time ET</span><span>Impact</span>
           </div>
           <div id="econ-rows"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SECTION 5 — Nasdaq-100 Watch ═══════════════════════════════════ -->
+    <div class="section" id="ndx-section">
+      <div class="section-title">
+        📊 Nasdaq-100 Watch
+        <span class="badge badge-gray" id="ndx-members-badge" style="font-size:10px;">Loading…</span>
+        <div class="section-line"></div>
+        <span style="font-size:10px;color:var(--text-muted);" id="ndx-last-checked">—</span>
+        <button class="btn" onclick="refreshNdx()" style="font-size:11px;padding:4px 10px;">↻ Refresh</button>
+        <button class="btn" onclick="window.open('https://www.invesco.com/us/financial-products/etfs/product-detail?t=QQQ','_blank')" style="font-size:11px;padding:4px 10px;">QQQ →</button>
+      </div>
+
+      <div class="grid-2">
+        <!-- Left: recent adds/removes -->
+        <div class="card" id="ndx-changes-card">
+          <div class="card-header">
+            <span class="card-title">Constituent Changes</span>
+            <span class="badge badge-gray" id="ndx-changes-badge">—</span>
+          </div>
+          <div class="intel-loading" id="ndx-changes-loading">
+            <div class="loading-spinner"></div> Checking NDX changes…
+          </div>
+          <div id="ndx-changes-body" style="display:none;">
+            <div id="ndx-changes-rows"></div>
+          </div>
+        </div>
+
+        <!-- Right: top holdings by weight -->
+        <div class="card" id="ndx-holdings-card">
+          <div class="card-header">
+            <span class="card-title">Top Holdings by Weight</span>
+            <span class="badge badge-gray" id="ndx-holdings-badge">QQQ</span>
+          </div>
+          <div class="intel-loading" id="ndx-holdings-loading">
+            <div class="loading-spinner"></div> Loading top holdings…
+          </div>
+          <div id="ndx-holdings-body" style="display:none;">
+            <div id="ndx-holdings-rows"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1981,6 +2058,7 @@ function loadIntelData(forceRefresh) {
         renderSplits(splits);
         renderDividends(dividends);
         renderEcon(econ);
+        renderNdxWatch(data.ndx_watch || {});
         _updateIntelDebug(data);
         if (window._dbgSet) _dbgSet('d-render-done', 'YES', 'dbg-yes');
         console.log('[intel] render complete');
@@ -2101,6 +2179,13 @@ function refreshIntel() {
   _intelRetries = 0;
   if (_intelRetryTimer) { clearTimeout(_intelRetryTimer); _intelRetryTimer = null; }
   ['news','earn','split','div','econ'].forEach(function(k) {
+    var l = document.getElementById(k + '-loading');
+    var b = document.getElementById(k + '-body');
+    if (l) { l.style.display = 'flex'; l.innerHTML = '<div class="loading-spinner"></div> Refreshing…'; }
+    if (b) b.style.display = 'none';
+  });
+  // Reset NDX spinners
+  ['ndx-changes','ndx-holdings'].forEach(function(k) {
     var l = document.getElementById(k + '-loading');
     var b = document.getElementById(k + '-body');
     if (l) { l.style.display = 'flex'; l.innerHTML = '<div class="loading-spinner"></div> Refreshing…'; }
@@ -2573,6 +2658,139 @@ function renderEcon(events) {
     _bucket('Tomorrow',  buckets.tomorrow) +
     _bucket('This Week', buckets.thisWeek) +
     _bucket('Upcoming',  buckets.later);
+}
+
+// ── NDX 100 WATCH RENDERER ─────────────────────────────
+function renderNdxWatch(ndx) {
+  ndx = ndx || {};
+  var changes      = ndx.recent_changes  || [];
+  var holdings     = ndx.top_holdings    || [];
+  var totalMembers = ndx.total_members   || 0;
+  var lastChecked  = ndx.last_checked    || '—';
+
+  // Header badges
+  var membersBadge = document.getElementById('ndx-members-badge');
+  var lastChk      = document.getElementById('ndx-last-checked');
+  if (membersBadge) {
+    membersBadge.textContent = totalMembers ? totalMembers + ' members' : '—';
+    membersBadge.className   = 'badge ' + (totalMembers ? 'badge-blue' : 'badge-gray');
+  }
+  if (lastChk) lastChk.textContent = 'Last checked: ' + lastChecked;
+
+  _renderNdxChanges(changes);
+  _renderNdxHoldings(holdings);
+}
+
+function _renderNdxChanges(changes) {
+  var loadEl  = document.getElementById('ndx-changes-loading');
+  var bodyEl  = document.getElementById('ndx-changes-body');
+  var rowsEl  = document.getElementById('ndx-changes-rows');
+  var badge   = document.getElementById('ndx-changes-badge');
+
+  if (loadEl) loadEl.style.display = 'none';
+  if (bodyEl) bodyEl.style.display = 'block';
+
+  var adds = changes.filter(function(c) { return c.change_type === 'added'; });
+  var rems = changes.filter(function(c) { return c.change_type === 'removed'; });
+
+  if (badge) {
+    var parts = [];
+    if (adds.length) parts.push('+' + adds.length + ' added');
+    if (rems.length) parts.push('-' + rems.length + ' removed');
+    badge.textContent = parts.length ? parts.join(' · ') : 'No recent changes';
+    badge.className   = 'badge ' + (adds.length ? 'badge-green' : rems.length ? 'badge-amber' : 'badge-gray');
+  }
+
+  if (!rowsEl) return;
+  if (!changes.length) {
+    rowsEl.innerHTML =
+      '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">' +
+      'No constituent changes detected yet.<br>' +
+      '<span style="font-size:10px;">Changes appear once two daily snapshots are compared.</span></div>';
+    return;
+  }
+
+  rowsEl.innerHTML = changes.map(function(c) {
+    var isAdd  = c.change_type === 'added';
+    var cls    = 'ndx-change-row ' + (isAdd ? 'ndx-added' : 'ndx-removed');
+    var badge  = isAdd
+      ? '<span class="ndx-add-badge">ADDED</span>'
+      : '<span class="ndx-rem-badge">REMOVED</span>';
+    var name   = _esc(c.company_name || '');
+    var date   = _esc(c.detected_date || '');
+    return (
+      '<div class="' + cls + '">' +
+        '<span style="font-family:var(--font);font-size:13px;font-weight:700;">' + _esc(c.ticker) + '</span>' +
+        '<span>' + badge + '</span>' +
+        '<span style="font-size:11px;color:var(--text-secondary);">' + name + '</span>' +
+        '<span style="font-size:10px;font-family:var(--font);color:var(--text-muted);">' + date + '</span>' +
+      '</div>'
+    );
+  }).join('');
+}
+
+function _renderNdxHoldings(holdings) {
+  var loadEl  = document.getElementById('ndx-holdings-loading');
+  var bodyEl  = document.getElementById('ndx-holdings-body');
+  var rowsEl  = document.getElementById('ndx-holdings-rows');
+  var badge   = document.getElementById('ndx-holdings-badge');
+
+  if (loadEl) loadEl.style.display = 'none';
+  if (bodyEl) bodyEl.style.display = 'block';
+
+  if (badge) {
+    badge.textContent = holdings.length ? 'Top ' + holdings.length : 'QQQ';
+    badge.className   = 'badge ' + (holdings.length ? 'badge-blue' : 'badge-gray');
+  }
+
+  if (!rowsEl) return;
+  if (!holdings.length) {
+    rowsEl.innerHTML =
+      '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">' +
+      'No holdings data yet — will populate after first successful QQQ CSV fetch.</div>';
+    return;
+  }
+
+  var maxWeight = holdings.length ? (holdings[0].weight_pct || 1) : 1;
+  var header =
+    '<div class="ndx-holding-row" style="background:rgba(14,165,233,0.04);font-size:9px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--text-muted);">' +
+    '<span>Ticker</span><span>Company</span><span style="text-align:right;">Weight %</span><span>Bar</span></div>';
+
+  var rows = holdings.map(function(h, i) {
+    var pct    = h.weight_pct != null ? Number(h.weight_pct).toFixed(2) : '—';
+    var barPct = h.weight_pct != null ? Math.min(100, h.weight_pct / maxWeight * 100) : 0;
+    var col    = i < 3 ? 'color:var(--blue)' : '';
+    return (
+      '<div class="ndx-holding-row">' +
+        '<span style="font-family:var(--font);font-size:13px;font-weight:700;' + col + '">' + _esc(h.ticker) + '</span>' +
+        '<span style="font-size:11px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _esc(h.company_name || '') + '</span>' +
+        '<span style="font-family:var(--font);font-size:12px;color:var(--teal);text-align:right;">' + pct + '%</span>' +
+        '<div class="ndx-holding-bar-wrap"><div class="ndx-holding-bar" style="width:' + barPct.toFixed(1) + '%;"></div></div>' +
+      '</div>'
+    );
+  }).join('');
+
+  rowsEl.innerHTML = header + rows;
+}
+
+function refreshNdx() {
+  showToast('Refreshing NDX data…');
+  var loadEl = document.getElementById('ndx-changes-loading');
+  var bodyEl = document.getElementById('ndx-changes-body');
+  var hLoadEl= document.getElementById('ndx-holdings-loading');
+  var hBodyEl= document.getElementById('ndx-holdings-body');
+  if (loadEl) { loadEl.style.display = 'flex'; loadEl.innerHTML = '<div class="loading-spinner"></div> Refreshing…'; }
+  if (bodyEl) bodyEl.style.display = 'none';
+  if (hLoadEl){ hLoadEl.style.display = 'flex'; hLoadEl.innerHTML = '<div class="loading-spinner"></div> Refreshing…'; }
+  if (hBodyEl) hBodyEl.style.display = 'none';
+
+  fetch('/api/ndx_watch?refresh=1')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { renderNdxWatch(data); showToast('NDX data refreshed'); })
+    .catch(function(e) {
+      var loadEl = document.getElementById('ndx-changes-loading');
+      if (loadEl) loadEl.innerHTML = '<span style="color:var(--amber);">⚠ NDX refresh failed — ' + String(e.message || e) + '</span>';
+    });
 }
 
 // ── Utility ────────────────────────────────────────────

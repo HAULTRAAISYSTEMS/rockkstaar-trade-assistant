@@ -5113,6 +5113,22 @@ def api_intel():
         return jsonify(_intel_error_payload(str(e))), 200
 
 
+@app.route("/api/ndx_watch")
+@csrf.exempt
+def api_ndx_watch():
+    """Return Nasdaq-100 constituent watch data (recent changes + top holdings)."""
+    try:
+        refresh = request.args.get("refresh") == "1"
+        if refresh:
+            with _intel._cache_lock:
+                _intel._cache.pop("ndx", None)
+            _intel.run_ndx_constituent_check()
+        return jsonify(_intel.get_ndx_watch_data())
+    except Exception as exc:
+        logger.error("api_ndx_watch: %s", exc, exc_info=True)
+        return jsonify({"error": str(exc), "recent_changes": [], "top_holdings": [], "total_members": 0}), 200
+
+
 @app.route("/api/intel/debug")
 def api_intel_debug():
     """Debug endpoint — shows data source health for the intel engine. No API keys exposed."""
