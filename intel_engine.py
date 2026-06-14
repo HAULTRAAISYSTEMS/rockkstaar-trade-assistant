@@ -352,14 +352,7 @@ SCANNER_UNIVERSE: list[str] = [
 # These inject directly into the result regardless of what yfinance/Finnhub return.
 # Format: ticker, date (YYYY-MM-DD), time_label (BMO/AMC/TBD), eps_est (float or None), source
 EARNINGS_OVERRIDES: list[dict] = [
-    {
-        "ticker":     "CEG",
-        "date":       "2026-05-11",
-        "time_label": "BMO",
-        "eps_est":    None,
-        "source":     "manual override",
-    },
-    # Add more here as needed:
+    # Add entries here when APIs miss a known earnings date.
     # {"ticker": "XXXX", "date": "2026-MM-DD", "time_label": "BMO", "eps_est": None, "source": "manual override"},
 ]
 

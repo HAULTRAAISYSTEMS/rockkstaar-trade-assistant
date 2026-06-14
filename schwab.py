@@ -687,7 +687,7 @@ def match_schwab_trades(days_back: int = 30) -> list[dict]:
                     })
                     break  # one match per buy order
 
-    # Sort: newest first, unimported first
-    trades.sort(key=lambda t: (t["already_imported"], t["trade_date"]), reverse=False)
-    trades.sort(key=lambda t: t["trade_date"], reverse=True)
+    # Sort: unimported first, then newest first within each group.
+    # not already_imported = True for unimported → sorts first with reverse=True.
+    trades.sort(key=lambda t: (not t["already_imported"], t["trade_date"]), reverse=True)
     return trades
