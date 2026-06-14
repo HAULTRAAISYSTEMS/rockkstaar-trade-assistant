@@ -91,6 +91,7 @@ _CACHE_TTL: dict[str, int] = {
     "economic":    43200,  # 12 hrs  — stable; Finnhub econ is 1 call/day max
     "macro":       300,    # 5 min   — 10Y/DXY/VIX live feeds
     "ndx":         86400,  # 24 hrs  — NDX constituents; rebalances ~quarterly
+    "ndx_watch":   3600,   # 1 hr    — cached watch rollup (avoids hot-path DB hits)
 }
 
 # ── Finnhub rate-limit backoff ─────────────────────────────────────────────────
@@ -1804,7 +1805,7 @@ def _ndx_from_invesco() -> list:
     }
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=6) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
         if "<html" in raw[:200].lower():
             logger.debug("intel/ndx invesco returned HTML, not CSV")
@@ -1893,6 +1894,10 @@ def run_ndx_constituent_check() -> dict:
     if prev_date != today_str:
         save_ndx_snapshot(constituents, today_str)
 
+    # Bust the ndx_watch cache so get_intel_summary() picks up fresh DB data
+    with _cache_lock:
+        _cache.pop("ndx_watch", None)
+
     return {
         "added":         added,
         "removed":       removed,
@@ -1902,22 +1907,59 @@ def run_ndx_constituent_check() -> dict:
 
 
 def get_ndx_watch_data() -> dict:
-    """Return NDX 100 Watch data for the Intel page (DB + cache)."""
+    """Return NDX 100 Watch data for the Intel page.
+
+    Hot-path safe: result is cached in-process for 1 h so that the two DB
+    queries (changes + top-holdings) are NOT run on every /api/intel call.
+    The background refresh calls _populate_ndx_watch_cache() which updates
+    the cache after the constituent check completes.
+    """
+    cached = _cget("ndx_watch")
+    if cached is not None:
+        return cached
+    result = _build_ndx_watch_payload()
+    _cset("ndx_watch", result)
+    return result
+
+
+def _build_ndx_watch_payload() -> dict:
+    """Fetch NDX watch data from DB using a single connection, return payload dict."""
+    recent_changes: list = []
+    top_holdings:   list = []
     try:
-        from database import get_ndx_changes, get_ndx_latest_constituents
-        recent_changes = get_ndx_changes(limit=20)
-        top_holdings   = get_ndx_latest_constituents(limit=15)
+        from database import get_db as _get_db
+        conn = _get_db()
+        try:
+            # Recent constituent changes
+            rows = conn.execute(
+                "SELECT * FROM ndx_changes ORDER BY id DESC LIMIT 20"
+            ).fetchall()
+            recent_changes = [dict(r) for r in rows]
+
+            # Top holdings from most recent snapshot (single query)
+            snap_row = conn.execute(
+                "SELECT snapshot_date FROM ndx_constituents "
+                "ORDER BY snapshot_date DESC LIMIT 1"
+            ).fetchone()
+            if snap_row:
+                snap_date = snap_row["snapshot_date"]
+                h_rows = conn.execute(
+                    "SELECT ticker, weight_pct, company_name "
+                    "FROM ndx_constituents WHERE snapshot_date = ? "
+                    "ORDER BY weight_pct DESC LIMIT 15",
+                    (snap_date,),
+                ).fetchall()
+                top_holdings = [dict(r) for r in h_rows]
+        finally:
+            conn.close()
     except Exception as exc:
-        logger.warning("intel/ndx watch_data: %s", exc)
-        recent_changes = []
-        top_holdings   = []
+        logger.warning("intel/ndx _build_watch_payload: %s", exc)
 
     cached_constituents = _cget("ndx") or []
+    total = len(cached_constituents) if cached_constituents else len(top_holdings)
     return {
         "recent_changes": recent_changes,
         "top_holdings":   top_holdings,
-        "total_members":  len(cached_constituents) if cached_constituents else (
-            len(top_holdings) if top_holdings else 0
-        ),
+        "total_members":  total,
         "last_checked":   _et_now().strftime("%m/%d %I:%M %p ET") if cached_constituents else "—",
     }

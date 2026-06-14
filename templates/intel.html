@@ -1971,7 +1971,7 @@ function loadIntelData(forceRefresh) {
   }
 
   var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  var tid  = ctrl ? setTimeout(function() { ctrl.abort(); }, 8000) : null;
+  var tid  = ctrl ? setTimeout(function() { ctrl.abort(); }, 20000) : null;
   var opts = ctrl ? { signal: ctrl.signal } : {};
 
   fetch(url, opts)
