@@ -780,20 +780,19 @@ def init_db():
             ("schwab_imports", "schwab_imports_import_key_key",    "user_id, import_key"),
         ]
         for _tbl, _old_con, _new_cols in _pg_constraint_ops:
-            try:
+            _new_con = f"{_tbl}_user_unique"
+            _con_exists = cursor.execute(
+                "SELECT 1 FROM pg_catalog.pg_constraint WHERE conname = ?",
+                (_new_con,)
+            ).fetchone()
+            if not _con_exists:
                 cursor.execute(
                     f"ALTER TABLE {_tbl} DROP CONSTRAINT IF EXISTS {_old_con}"
                 )
-            except Exception:
-                pass
-            try:
-                _new_con = f"{_tbl}_user_unique"
                 cursor.execute(
                     f"ALTER TABLE {_tbl} ADD CONSTRAINT {_new_con} "
                     f"UNIQUE ({_new_cols})"
                 )
-            except Exception:
-                pass  # Constraint may already exist
 
     # ── Seed default watchlists for admin user on first run ──────────────────
     now_iso = datetime.now().isoformat()
