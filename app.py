@@ -24,6 +24,10 @@ from database import (
     init_db,
     DEFAULT_WATCHLISTS,
     get_setting, set_setting,
+    get_user_setting, set_user_setting,
+    create_user, get_user_by_id, get_user_by_username,
+    get_all_users, update_user_password, delete_user, check_user_password,
+    ensure_user_watchlists,
     get_all_watchlists, get_watchlist_by_id, create_watchlist,
     rename_watchlist, delete_watchlist,
     get_watchlist_stocks, get_watchlist_stock_counts,
@@ -84,33 +88,58 @@ app.permanent_session_lifetime = timedelta(days=30)
 csrf = CSRFProtect(app)
 
 # ---------------------------------------------------------------------------
-# Session-based login gate.
-# Set APP_PASSWORD env var to enable (LOGIN_PASS also accepted for backwards compat).
-# If neither is set, all routes are open — existing behaviour preserved until configured.
-# API / WebSocket paths return 401 JSON when unauthenticated; page routes redirect to /login.
+# Multi-user session auth helpers
 # ---------------------------------------------------------------------------
-def _get_app_password() -> str:
-    """Return the configured app password — APP_PASSWORD preferred, LOGIN_PASS fallback."""
-    return os.environ.get("APP_PASSWORD", "") or os.environ.get("LOGIN_PASS", "")
+
+def current_user_id() -> int:
+    """Return the logged-in user_id from session (default 1 for backward compat)."""
+    return session.get("user_id", 1)
+
+
+def current_user() -> dict | None:
+    """Return the full user dict from session, or None if not logged in."""
+    uid = session.get("user_id")
+    if uid is None:
+        return None
+    return {"id": uid, "username": session.get("username", ""), "is_admin": session.get("is_admin", 0)}
+
+
+def _auth_required() -> bool:
+    """Return True if the users table has at least one user (auth is active)."""
+    try:
+        return bool(get_all_users())
+    except Exception:
+        return False
+
+
+def require_admin(f):
+    """Decorator — 403 unless logged-in user is admin."""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("is_admin"):
+            return jsonify({"ok": False, "error": "admin required"}), 403 \
+                if request.path.startswith("/api/") \
+                else (render_template("login.html", error="Admin access required.", next=""), 403)
+        return f(*args, **kwargs)
+    return decorated
 
 
 @app.before_request
 def _require_login():
-    _pass = _get_app_password()
-    if not _pass:
-        return  # No password configured — open access (local / first deploy)
-    # Always public: login UI, health check, static assets, Schwab OAuth callback
-    # (/schwab/callback must stay reachable — Schwab redirects here after auth;
-    #  the callback itself validates state/PKCE so the open path is safe)
-    if (request.path in ("/login", "/favicon.ico", "/health", "/schwab/callback")
+    # Always public — Schwab OAuth callback must stay reachable; callback validates PKCE/state.
+    if (request.path in ("/login", "/logout", "/favicon.ico", "/health", "/schwab/callback")
             or request.path.startswith("/static/")):
         return
-    if session.get("logged_in"):
-        return  # Authenticated
+    if session.get("user_id"):
+        return  # Already authenticated
+    # If no users exist yet, allow open access (fresh unconfigured deploy)
+    if not _auth_required():
+        return
     # API / WebSocket — JSON 401
     if request.path.startswith(("/api/", "/ws/")):
         return jsonify({"ok": False, "error": "unauthorized"}), 401
-    # Page routes — redirect
+    # Page routes — redirect to login
     return redirect(url_for("login_page", next=request.path))
 
 
@@ -773,7 +802,7 @@ def get_active_wl_id() -> int | None:
     Falls back to the first watchlist if the session value is missing or stale.
     Returns None only when no watchlists exist at all.
     """
-    all_wls = get_all_watchlists()
+    all_wls = get_all_watchlists(current_user_id())
     if not all_wls:
         return None
     wl_id = session.get("active_wl_id")
@@ -782,7 +811,7 @@ def get_active_wl_id() -> int | None:
     return all_wls[0]["id"]
 
 
-def run_auto_classification(ticker: str):
+def run_auto_classification(ticker: str, user_id: int = 1):
     """
     Classify a ticker and, if auto_classify is ON, move it to the appropriate
     default watchlist. Only reorganizes memberships within the four DEFAULT_WATCHLISTS;
@@ -804,7 +833,7 @@ def run_auto_classification(ticker: str):
         return
 
     # Build a map of {name → id} for every default watchlist that exists in DB
-    all_wls = get_all_watchlists()
+    all_wls = get_all_watchlists(user_id)
     default_wl_map = {wl["name"]: wl["id"] for wl in all_wls
                       if wl["name"] in DEFAULT_WATCHLISTS}
     if not default_wl_map:
@@ -815,7 +844,7 @@ def run_auto_classification(ticker: str):
         return
 
     # Only reorganize if the stock is already in at least one default list
-    current_ids = set(get_ticker_watchlist_ids(ticker))
+    current_ids = set(get_ticker_watchlist_ids(ticker, user_id))
     default_ids = set(default_wl_map.values())
     in_defaults = current_ids & default_ids
 
@@ -845,7 +874,7 @@ def seed_demo_data():
     if get_setting("demo_seeded") == "1":
         return   # Already seeded — never re-seed, even if watchlist is empty
 
-    all_wls = get_all_watchlists()
+    all_wls = get_all_watchlists(1)
     if not all_wls:
         return
     first_id = all_wls[0]["id"]
@@ -1496,11 +1525,15 @@ def compute_trade_coach(stock: dict, plan: dict, market_temp: dict, risk_setting
 # Discipline & Risk Engine — pure functions (no DB, no Flask)
 # ---------------------------------------------------------------------------
 
-def get_risk_settings() -> dict:
-    """Load all risk settings from the settings table with safe defaults."""
+def get_risk_settings(user_id: int = 1) -> dict:
+    """Load all risk settings from user_settings with safe defaults."""
     def _f(key, default):
-        v = get_setting(key)
-        return v if v is not None else default
+        v = get_user_setting(user_id, key)
+        if v is not None:
+            return v
+        # Fallback to global settings for backward compat during migration
+        gv = get_setting(key)
+        return gv if gv is not None else default
 
     def _sf(key, default):
         try:
@@ -2930,10 +2963,11 @@ def dashboard():
 
 
 def _dashboard_inner():
-    all_wls     = get_all_watchlists()
+    uid          = current_user_id()
+    all_wls      = get_all_watchlists(uid)
     active_wl_id = get_active_wl_id()
     active_wl    = get_watchlist_by_id(active_wl_id) if active_wl_id else None
-    wl_counts    = get_watchlist_stock_counts()
+    wl_counts    = get_watchlist_stock_counts(uid)
 
     watchlist = get_watchlist_stocks(active_wl_id) if active_wl_id else []
 
@@ -3045,19 +3079,19 @@ def _dashboard_inner():
     alt_modes = []
 
     # Notes: pass a set of tickers that have notes for the indicator column
-    notes_map = get_all_notes()
+    notes_map = get_all_notes(uid)
 
     # ── Risk engine context ──────────────────────────────────────────────────
-    risk_settings   = get_risk_settings()
+    risk_settings   = get_risk_settings(uid)
     today_str       = _et_now().strftime("%Y-%m-%d")
-    daily_session   = get_daily_session(today_str)
-    today_entries   = get_journal_entries_for_date(today_str)
+    daily_session   = get_daily_session(today_str, uid)
+    today_entries   = get_journal_entries_for_date(today_str, uid)
 
     # Auto-lock check: fires when a new journal entry pushes over limits
     _lock_update = check_auto_lock(today_entries, risk_settings, daily_session)
     if _lock_update:
-        lock_daily_session(_lock_update["lock_reason"], today_str)
-        daily_session = get_daily_session(today_str)
+        lock_daily_session(_lock_update["lock_reason"], today_str, uid)
+        daily_session = get_daily_session(today_str, uid)
 
     discipline      = compute_discipline_score(today_entries, risk_settings,
                                                bool(daily_session.get("locked")))
@@ -3296,7 +3330,7 @@ def watchlist_remove(ticker):
         # Remove from the specific watchlist the user is viewing
         remove_ticker_from_watchlist(wl_id, t)
         # Remove from all other default lists so auto-classify can't re-add it
-        remove_ticker_from_defaults(t)
+        remove_ticker_from_defaults(t, current_user_id())
         remaining = get_watchlist_stocks(wl_id)
         logger.info("WATCHLIST SAVED  wl_id=%s contents=%s", wl_id, remaining)
     flash(f"Removed {t} from watchlist.", "info")
@@ -3456,7 +3490,8 @@ def stock_detail(ticker):
         ]:
             stock.setdefault(_f, _v)
 
-    note = get_note(ticker)
+    uid  = current_user_id()
+    note = get_note(ticker, uid)
 
     try:
         breakdown = catalyst_score_breakdown(stock) or []
@@ -3464,7 +3499,7 @@ def stock_detail(ticker):
         logger.error("stock_detail  ticker=%s  stage=breakdown  err=%s", ticker, exc)
         breakdown = []
 
-    plan = get_trade_plan(ticker)
+    plan = get_trade_plan(ticker, uid)
 
     try:
         rr_ratio, rr_display, rr_class = compute_rr(
@@ -3477,9 +3512,9 @@ def stock_detail(ticker):
     except Exception:
         rr_display, rr_class = "—", "rr-neutral"
 
-    all_wls       = get_all_watchlists()
-    ticker_wl_ids = get_ticker_watchlist_ids(ticker)
-    rs            = get_risk_settings()
+    all_wls       = get_all_watchlists(uid)
+    ticker_wl_ids = get_ticker_watchlist_ids(ticker, uid)
+    rs            = get_risk_settings(uid)
     market_temp   = _get_market_temperature()
 
     try:
@@ -3784,6 +3819,7 @@ def save_stock_plan(ticker):
         entry_level = request.form.get("entry_level", ""),
         stop_loss   = request.form.get("stop_loss", ""),
         target_price= request.form.get("target_price", ""),
+        user_id     = current_user_id(),
     )
     flash("Pre-market plan saved.", "success")
     return redirect(url_for("stock_detail", ticker=t) + "#plan")
@@ -3792,7 +3828,7 @@ def save_stock_plan(ticker):
 @app.route("/stock/<ticker>/notes", methods=["POST"])
 def save_stock_note(ticker):
     """Save trade plan notes for a stock."""
-    save_note(ticker.upper(), request.form.get("note_text", ""))
+    save_note(ticker.upper(), request.form.get("note_text", ""), current_user_id())
     flash("Notes saved.", "success")
     return redirect(url_for("stock_detail", ticker=ticker.upper()))
 
@@ -3885,7 +3921,7 @@ def refresh_single(ticker):
         fresh  = generate_stock_data(t)
         result = _upsert_or_keep_snapshot(fresh, existing=_existing)
         if result == "updated":
-            run_auto_classification(t)
+            run_auto_classification(t, current_user_id())
         logger.info(
             "refresh_single  ticker=%s  stage=complete  state=%s  result=%s  "
             "price=%s  ema_20=%s  fib_high=%s",
@@ -3945,17 +3981,18 @@ def set_setup_type(ticker):
 @app.route("/journal")
 def journal():
     """Trade journal — full history + summary stats."""
-    entries = get_all_journal_entries()
+    uid = current_user_id()
+    entries = get_all_journal_entries(uid)
     summary = compute_journal_summary(entries)
     edit_entry = None
     edit_id = request.args.get("edit")
     if edit_id:
         try:
-            edit_entry = get_journal_entry(int(edit_id))
+            edit_entry = get_journal_entry(int(edit_id), uid)
         except (ValueError, TypeError):
             pass
     today_str     = _et_now().strftime("%Y-%m-%d")
-    risk_settings = get_risk_settings()
+    risk_settings = get_risk_settings(uid)
     return render_template(
         "journal.html",
         entries=entries,
@@ -4008,10 +4045,12 @@ def _parse_journal_form(form) -> dict:
 @app.route("/journal/add", methods=["POST"])
 def journal_add():
     """Add a new journal entry."""
+    uid = current_user_id()
     f = _parse_journal_form(request.form)
     add_journal_entry(
         ticker         = request.form.get("ticker", "").upper(),
         trade_date     = request.form.get("trade_date", _et_now().strftime("%Y-%m-%d")),
+        user_id        = uid,
         **f,
     )
     pnl_pct = f["pnl_pct"]
@@ -4019,12 +4058,12 @@ def journal_add():
 
     # Auto-lock check after adding a trade
     today_str     = _et_now().strftime("%Y-%m-%d")
-    risk_settings = get_risk_settings()
-    today_entries = get_journal_entries_for_date(today_str)
-    daily_session = get_daily_session(today_str)
+    risk_settings = get_risk_settings(uid)
+    today_entries = get_journal_entries_for_date(today_str, uid)
+    daily_session = get_daily_session(today_str, uid)
     lock_update   = check_auto_lock(today_entries, risk_settings, daily_session)
     if lock_update:
-        lock_daily_session(lock_update["lock_reason"], today_str)
+        lock_daily_session(lock_update["lock_reason"], today_str, uid)
         flash(f"⚠ {lock_update['lock_reason']} — Trading locked for today.", "warning")
 
     flash(f"Trade logged — {result} ({'+' if pnl_pct >= 0 else ''}{pnl_pct:.2f}%).", "success")
@@ -4039,6 +4078,7 @@ def journal_edit(entry_id):
         entry_id   = entry_id,
         ticker     = request.form.get("ticker", "").upper(),
         trade_date = request.form.get("trade_date", ""),
+        user_id    = current_user_id(),
         **f,
     )
     flash("Trade updated.", "success")
@@ -4048,7 +4088,7 @@ def journal_edit(entry_id):
 @app.route("/journal/<int:entry_id>/delete", methods=["POST"])
 def journal_delete(entry_id):
     """Delete a journal entry."""
-    delete_journal_entry(entry_id)
+    delete_journal_entry(entry_id, current_user_id())
     flash("Trade removed.", "info")
     return redirect(url_for("journal"))
 
@@ -4060,9 +4100,10 @@ def journal_delete(entry_id):
 @app.route("/risk", methods=["GET", "POST"])
 def risk_settings():
     """Risk settings page — account size, risk %, trade limits, trading mode."""
+    uid           = current_user_id()
     today_str     = _et_now().strftime("%Y-%m-%d")
-    daily_session = get_daily_session(today_str)
-    today_entries = get_journal_entries_for_date(today_str)
+    daily_session = get_daily_session(today_str, uid)
+    today_entries = get_journal_entries_for_date(today_str, uid)
     trades_today  = len(today_entries)
     losses_today  = sum(1 for e in today_entries if e.get("result") == "Loss")
 
@@ -4070,7 +4111,7 @@ def risk_settings():
         action = request.form.get("action", "save")
 
         if action == "unlock":
-            unlock_daily_session(today_str)
+            unlock_daily_session(today_str, uid)
             flash("Trading unlocked for today.", "success")
             return redirect(url_for("risk_settings"))
 
@@ -4089,20 +4130,21 @@ def risk_settings():
             except (ValueError, TypeError):
                 return str(default)
 
+        uid = current_user_id()
         tm = request.form.get("trading_mode", "SWING TRADE")
         if tm not in ("DAY TRADE", "SWING TRADE"):
             tm = "SWING TRADE"
-        set_setting("trading_mode",       tm)
-        set_setting("account_size",       _clamp_float("account_size",       "10000", 0, 10_000_000))
-        set_setting("risk_pct",           _clamp_float("risk_pct",           "1.0",   0.1, 10))
-        set_setting("max_trades_per_day", _clamp_int(  "max_trades_per_day", "3",     1,   20))
-        set_setting("max_daily_loss_pct", _clamp_float("max_daily_loss_pct", "3.0",   0.1, 20))
-        set_setting("stop_after_2_losses",
-                    "1" if request.form.get("stop_after_2_losses") else "0")
+        set_user_setting(uid, "trading_mode",       tm)
+        set_user_setting(uid, "account_size",       _clamp_float("account_size",       "10000", 0, 10_000_000))
+        set_user_setting(uid, "risk_pct",           _clamp_float("risk_pct",           "1.0",   0.1, 10))
+        set_user_setting(uid, "max_trades_per_day", _clamp_int(  "max_trades_per_day", "3",     1,   20))
+        set_user_setting(uid, "max_daily_loss_pct", _clamp_float("max_daily_loss_pct", "3.0",   0.1, 20))
+        set_user_setting(uid, "stop_after_2_losses",
+                         "1" if request.form.get("stop_after_2_losses") else "0")
         flash("Risk settings saved.", "success")
         return redirect(url_for("risk_settings"))
 
-    risk_s = get_risk_settings()
+    risk_s = get_risk_settings(uid)
     discipline = compute_discipline_score(
         today_entries, risk_s, bool(daily_session.get("locked"))
     )
@@ -4122,7 +4164,7 @@ def set_trading_mode():
     """AJAX: Switch DAY TRADE / SWING TRADE mode. Returns JSON."""
     mode = request.json.get("mode", "SWING TRADE") if request.is_json else request.form.get("mode", "SWING TRADE")
     if mode in ("DAY TRADE", "SWING TRADE"):
-        set_setting("trading_mode", mode)
+        set_user_setting(current_user_id(), "trading_mode", mode)
         return jsonify({"ok": True, "mode": mode})
     return jsonify({"ok": False, "error": "invalid mode"}), 400
 
@@ -4144,7 +4186,7 @@ def watchlist_create():
     name = request.form.get("name", "").strip()[:50]
     if name:
         try:
-            new_id = create_watchlist(name)
+            new_id = create_watchlist(name, current_user_id())
             session["active_wl_id"] = new_id
             flash(f"Watchlist '{name}' created.", "success")
         except Exception:
@@ -4170,14 +4212,15 @@ def watchlist_rename(wl_id):
 @app.route("/watchlists/delete/<int:wl_id>", methods=["POST"])
 def watchlist_delete(wl_id):
     """Delete a watchlist. Refuses to delete the last one."""
-    all_wls = get_all_watchlists()
+    uid     = current_user_id()
+    all_wls = get_all_watchlists(uid)
     if len(all_wls) <= 1:
         flash("Cannot delete the last watchlist.", "error")
         return redirect(url_for("dashboard"))
     delete_watchlist(wl_id)
     # If the deleted list was active, fall back to the first remaining list
     if session.get("active_wl_id") == wl_id:
-        remaining = get_all_watchlists()
+        remaining = get_all_watchlists(uid)
         if remaining:
             session["active_wl_id"] = remaining[0]["id"]
     flash("Watchlist deleted.", "info")
@@ -4203,7 +4246,7 @@ def toggle_auto_classify(ticker):
     set_auto_classify(t, enabled)
     if enabled:
         # Run classification immediately so the user sees the result
-        run_auto_classification(t)
+        run_auto_classification(t, current_user_id())
         flash(f"Auto-classification ON for {t}. Stock moved to its recommended list.", "success")
     else:
         flash(f"Auto-classification OFF for {t}. You control the watchlist placement.", "info")
@@ -4736,9 +4779,10 @@ def api_stock_live(ticker):
     result["server_time"] = _et_now().strftime("%I:%M %p").lstrip("0") + " ET"
     # Include coach so the detail page can patch the coach card on every poll
     try:
-        _plan = get_trade_plan(ticker)
+        _uid  = current_user_id()
+        _plan = get_trade_plan(ticker, _uid)
         _mt   = _get_market_temperature()
-        _rs   = get_risk_settings()
+        _rs   = get_risk_settings(_uid)
         result["coach"] = compute_trade_coach(stock, _plan, _mt, _rs)
     except Exception as _ce:
         logger.warning("api_stock_live coach failed for %s: %s", ticker, _ce)
@@ -4802,7 +4846,7 @@ def _deferred_startup():
     except Exception as _e:
         logger.error("deferred_startup seed error: %s", _e, exc_info=True)
     try:
-        _startup_wls = get_all_watchlists()
+        _startup_wls = get_all_watchlists(None)  # None = all users, background context
         for _wl in _startup_wls:
             _tickers = get_watchlist_stocks(_wl["id"])
             logger.info(
@@ -4823,38 +4867,37 @@ threading.Thread(target=_deferred_startup, daemon=True, name="startup-seed").sta
 # NO order-placement routes exist in this phase.
 # ---------------------------------------------------------------------------
 
-_schwab_account_cache: dict = {"data": None, "ts": 0.0}
+_schwab_account_cache: dict = {}  # keyed by user_id → {"data": ..., "ts": ...}
 _SCHWAB_CACHE_TTL = 60   # refresh account data every 60 s
 
 
-def _get_schwab_data(force: bool = False) -> dict:
-    """Return cached Schwab account summary, refreshing when stale."""
-    now = _time.time()
-    if not force and _schwab_account_cache["ts"] and \
-            now - _schwab_account_cache["ts"] < _SCHWAB_CACHE_TTL:
-        return _schwab_account_cache["data"]
+def _get_schwab_data(user_id: int = 1, force: bool = False) -> dict:
+    """Return cached Schwab account summary for a user, refreshing when stale."""
+    now   = _time.time()
+    entry = _schwab_account_cache.get(user_id, {"data": None, "ts": 0.0})
+    if not force and entry["ts"] and now - entry["ts"] < _SCHWAB_CACHE_TTL:
+        return entry["data"]
     try:
         import schwab as _schwab
-        data = _schwab.get_account_summary()
-        _schwab_account_cache["data"] = data
-        _schwab_account_cache["ts"]   = now
+        data = _schwab.get_account_summary(user_id)
+        _schwab_account_cache[user_id] = {"data": data, "ts": now}
         return data
     except Exception as _e:
         logger.warning("schwab cache refresh failed: %s", _e)
-        return _schwab_account_cache["data"] or {
+        return (entry["data"] or {
             "connected": False, "total_value": None, "buying_power": None,
             "daily_pnl": None, "total_unrealized": None,
             "open_positions": 0, "accounts": [], "error": str(_e),
-        }
+        })
 
 
 @app.route("/schwab/account")
 def schwab_account():
     """Schwab account overview page — read-only, Phase 1."""
     import schwab as _schwab
-
+    uid        = current_user_id()
     configured = _schwab.is_configured()
-    tok_status = _schwab.token_status()
+    tok_status = _schwab.token_status(uid)
 
     account_data = None
     orders_by_account = {}
@@ -4862,7 +4905,7 @@ def schwab_account():
 
     if tok_status["connected"]:
         try:
-            account_data = _get_schwab_data()
+            account_data = _get_schwab_data(uid)
             if account_data.get("error"):
                 error_msg = account_data["error"]
             else:
@@ -4870,7 +4913,7 @@ def schwab_account():
                     ah = acct.get("account_hash", "")
                     if ah:
                         try:
-                            orders_by_account[ah] = _schwab.fetch_orders(ah, days_back=1)
+                            orders_by_account[ah] = _schwab.fetch_orders(ah, days_back=1, user_id=uid)
                         except Exception as _oe:
                             logger.warning("schwab orders fetch failed hash=%s: %s", ah, _oe)
                             orders_by_account[ah] = []
@@ -4937,9 +4980,10 @@ def schwab_callback():
         return redirect(url_for("schwab_account"))
 
     try:
+        uid    = current_user_id()
         tokens = _schwab.exchange_code_for_tokens(code, code_verifier or "")
-        _schwab.save_tokens(tokens)
-        _schwab_account_cache["ts"] = 0  # invalidate cache
+        _schwab.save_tokens(tokens, uid)
+        _schwab_account_cache.pop(uid, None)  # invalidate cache for this user
         logger.info("schwab_callback  tokens saved successfully")
         flash("Schwab account connected successfully. Account data is loading.", "success")
     except Exception as e:
@@ -4954,9 +4998,9 @@ def schwab_callback():
 def schwab_disconnect():
     """Clear stored Schwab tokens (read-only disconnect, no broker-side revocation)."""
     import schwab as _schwab
-    _schwab.clear_tokens()
-    _schwab_account_cache["data"] = None
-    _schwab_account_cache["ts"]   = 0.0
+    uid = current_user_id()
+    _schwab.clear_tokens(uid)
+    _schwab_account_cache.pop(uid, None)
     flash("Schwab account disconnected. Your data has been cleared from this app.", "success")
     return redirect(url_for("schwab_account"))
 
@@ -4969,10 +5013,11 @@ def schwab_sync_preview():
     Flags trades already imported so the UI can grey them out.
     """
     import schwab as _schwab
-    if not _schwab.is_connected():
+    uid = current_user_id()
+    if not _schwab.is_connected(uid):
         return jsonify({"error": "Schwab not connected"}), 403
     try:
-        trades = _schwab.match_schwab_trades(days_back=30)
+        trades = _schwab.match_schwab_trades(days_back=30, user_id=uid)
         return jsonify({"ok": True, "trades": trades, "count": len(trades)})
     except Exception as e:
         logger.error("schwab_sync_preview error: %s", e, exc_info=True)
@@ -4990,7 +5035,8 @@ def schwab_sync_import():
     """
     import schwab as _schwab
     from database import schwab_import_exists, record_schwab_import
-    if not _schwab.is_connected():
+    uid = current_user_id()
+    if not _schwab.is_connected(uid):
         return jsonify({"error": "Schwab not connected"}), 403
     try:
         body   = request.get_json(force=True) or {}
@@ -4999,7 +5045,7 @@ def schwab_sync_import():
         skipped  = []
         for t in trades:
             key = t.get("import_key", "")
-            if not key or schwab_import_exists(key):
+            if not key or schwab_import_exists(key, uid):
                 skipped.append(t.get("ticker", "?"))
                 continue
             try:
@@ -5018,8 +5064,9 @@ def schwab_sync_import():
                     result         = result,
                     notes          = f"[Schwab import] Buy #{t.get('buy_order_id','')} · Sell #{t.get('sell_order_id','')}",
                     trade_mode     = t.get("trade_mode", "SWING TRADE"),
+                    user_id        = uid,
                 )
-                record_schwab_import(key, journal_id, t["ticker"], t["trade_date"])
+                record_schwab_import(key, journal_id, t["ticker"], t["trade_date"], uid)
                 imported.append(t["ticker"])
             except Exception as _e:
                 logger.warning("schwab_sync_import: error importing %s: %s", t.get("ticker"), _e)
@@ -5043,9 +5090,10 @@ def api_schwab_summary():
     Read-only Phase 1 — no mutations.
     """
     import schwab as _schwab
-    if not _schwab.token_status()["connected"]:
+    uid = current_user_id()
+    if not _schwab.token_status(uid)["connected"]:
         return jsonify({"connected": False, "error": "Not authenticated"})
-    data = _get_schwab_data()
+    data = _get_schwab_data(uid)
     # Return only the safe summary fields (no token data)
     return jsonify({
         "connected":        data.get("connected", False),
@@ -5267,7 +5315,7 @@ def api_adaptive_insights():
     try:
         import institutional_engine as _inst
         insights    = _inst.get_adaptive_insights()
-        db_stats    = get_setup_outcome_stats()
+        db_stats    = get_setup_outcome_stats(current_user_id())
         return jsonify({"ok": True, **insights, "db_stats": db_stats})
     except Exception as exc:
         logger.error("api_adaptive_insights: %s", exc, exc_info=True)
@@ -5297,7 +5345,8 @@ def api_record_outcome():
         notes      = body.get("notes", "")
 
         _inst.record_setup_outcome(setup_type, outcome, regime, pattern)
-        save_setup_outcome(ticker, setup_type, outcome, regime, pattern, prob_score, notes)
+        save_setup_outcome(ticker, setup_type, outcome, regime, pattern, prob_score, notes,
+                           current_user_id())
         return jsonify({"ok": True, "recorded": {"ticker": ticker, "setup_type": setup_type, "outcome": outcome}})
     except Exception as exc:
         logger.error("api_record_outcome: %s", exc, exc_info=True)
@@ -5456,27 +5505,27 @@ def api_opportunity_refresh():
 # ---------------------------------------------------------------------------
 
 @app.route("/login", methods=["GET", "POST"])
-@csrf.exempt  # Login is the auth gate itself — no prior session needed for token
+@csrf.exempt
 def login_page():
-    """Session login page. Enabled only when APP_PASSWORD (or LOGIN_PASS) env var is set."""
-    _pass = _get_app_password()
-    if not _pass:
-        return redirect(url_for("liquidity_page"))  # Auth disabled — open access
-    if session.get("logged_in"):
+    """Multi-user login page."""
+    if session.get("user_id"):
         return redirect(url_for("liquidity_page"))
     error = None
     if request.method == "POST":
-        entered = request.form.get("password", "").strip()
-        if entered == _pass:
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+        user = check_user_password(username, password)
+        if user:
             remember = request.form.get("remember_me") == "1"
-            session.permanent = remember  # 30-day cookie if checked; session-only if not
-            session["logged_in"] = True
+            session.permanent = remember
+            session["user_id"]   = user["id"]
+            session["username"]  = user["username"]
+            session["is_admin"]  = user["is_admin"]
             next_url = request.form.get("next") or url_for("liquidity_page")
-            # Safety: only redirect to internal paths
             if not next_url.startswith("/") or next_url.startswith("//"):
                 next_url = url_for("liquidity_page")
             return redirect(next_url)
-        error = "Invalid password — try again."
+        error = "Invalid username or password."
     return render_template("login.html",
                            next=request.args.get("next", ""),
                            error=error)
@@ -5487,6 +5536,64 @@ def logout():
     """Clear session and redirect to login."""
     session.clear()
     return redirect(url_for("login_page"))
+
+
+# ---------------------------------------------------------------------------
+# Admin — user management
+# ---------------------------------------------------------------------------
+
+@app.route("/admin/users")
+@require_admin
+def admin_users():
+    """Admin page: list all users."""
+    users = get_all_users()
+    return render_template("admin_users.html", users=users,
+                           current_uid=current_user_id())
+
+
+@app.route("/admin/users/create", methods=["POST"])
+@require_admin
+def admin_user_create():
+    """Admin: create a new user."""
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "").strip()
+    is_admin = bool(request.form.get("is_admin"))
+    if not username or not password:
+        flash("Username and password are required.", "error")
+        return redirect(url_for("admin_users"))
+    try:
+        create_user(username, password, is_admin=is_admin)
+        flash(f"User '{username}' created.", "success")
+    except Exception as exc:
+        flash(f"Could not create user: {exc}", "error")
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users/<int:uid>/delete", methods=["POST"])
+@require_admin
+def admin_user_delete(uid):
+    """Admin: delete a user (cannot delete admin, id=1)."""
+    try:
+        delete_user(uid)
+        flash("User deleted.", "info")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    except Exception as exc:
+        flash(f"Error deleting user: {exc}", "error")
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users/<int:uid>/password", methods=["POST"])
+@require_admin
+def admin_user_password(uid):
+    """Admin: change a user's password."""
+    new_password = request.form.get("password", "").strip()
+    if not new_password:
+        flash("Password cannot be empty.", "error")
+        return redirect(url_for("admin_users"))
+    update_user_password(uid, new_password)
+    flash("Password updated.", "success")
+    return redirect(url_for("admin_users"))
 
 
 # ---------------------------------------------------------------------------

@@ -200,41 +200,40 @@ def refresh_access_token(refresh_token: str) -> dict:
         raise RuntimeError(f"Token refresh failed {e.code}: {body}") from e
 
 
-# ── Token storage (uses database get_setting / set_setting) ──────────────────
+# ── Token storage (per-user, stored in user_settings table) ──────────────────
 
-def save_tokens(token_response: dict) -> None:
-    """Persist tokens in the database settings table."""
-    from database import set_setting
+def save_tokens(token_response: dict, user_id: int = 1) -> None:
+    """Persist Schwab tokens in user_settings for the given user."""
+    from database import set_user_setting
     now = int(time.time())
     expires_at = now + int(token_response.get("expires_in", _ACCESS_TTL))
-    set_setting("schwab_access_token",  token_response["access_token"])
-    set_setting("schwab_refresh_token", token_response.get("refresh_token", ""))
-    set_setting("schwab_expires_at",    str(expires_at))
-    # Refresh token expires in 7 days from Schwab; store absolute epoch
+    set_user_setting(user_id, "schwab_access_token",  token_response["access_token"])
+    set_user_setting(user_id, "schwab_refresh_token", token_response.get("refresh_token", ""))
+    set_user_setting(user_id, "schwab_expires_at",    str(expires_at))
     rt_expires = now + 7 * 86400
-    set_setting("schwab_rt_expires_at", str(rt_expires))
-    logger.info("schwab  tokens saved  expires_at=%s", expires_at)
+    set_user_setting(user_id, "schwab_rt_expires_at", str(rt_expires))
+    logger.info("schwab  tokens saved  user_id=%s  expires_at=%s", user_id, expires_at)
 
 
-def clear_tokens() -> None:
-    """Remove stored Schwab tokens (disconnect)."""
-    from database import set_setting
+def clear_tokens(user_id: int = 1) -> None:
+    """Remove stored Schwab tokens for a user (disconnect)."""
+    from database import set_user_setting
     for key in ("schwab_access_token", "schwab_refresh_token",
                 "schwab_expires_at",   "schwab_rt_expires_at"):
-        set_setting(key, "")
-    logger.info("schwab  tokens cleared")
+        set_user_setting(user_id, key, "")
+    logger.info("schwab  tokens cleared  user_id=%s", user_id)
 
 
-def load_tokens() -> dict | None:
+def load_tokens(user_id: int = 1) -> dict | None:
     """
-    Load tokens from DB, auto-refresh if access_token is expiring.
+    Load tokens from user_settings, auto-refresh if access_token is expiring.
     Returns dict with access_token, or None if not connected.
     """
-    from database import get_setting
-    access_token  = get_setting("schwab_access_token")  or ""
-    refresh_token = get_setting("schwab_refresh_token") or ""
-    expires_at    = get_setting("schwab_expires_at")    or "0"
-    rt_expires_at = get_setting("schwab_rt_expires_at") or "0"
+    from database import get_user_setting
+    access_token  = get_user_setting(user_id, "schwab_access_token")  or ""
+    refresh_token = get_user_setting(user_id, "schwab_refresh_token") or ""
+    expires_at    = get_user_setting(user_id, "schwab_expires_at")    or "0"
+    rt_expires_at = get_user_setting(user_id, "schwab_rt_expires_at") or "0"
 
     if not access_token and not refresh_token:
         return None
@@ -243,23 +242,22 @@ def load_tokens() -> dict | None:
 
     # Refresh token expired — user must re-authenticate
     if refresh_token and int(rt_expires_at) < now:
-        logger.warning("schwab  refresh_token expired — user must re-auth")
+        logger.warning("schwab  refresh_token expired  user_id=%s — must re-auth", user_id)
         return None
 
     # Access token expiring soon — refresh it now
     if int(expires_at) - now < _REFRESH_EARLY and refresh_token:
         try:
-            logger.info("schwab  refreshing access_token")
+            logger.info("schwab  refreshing access_token  user_id=%s", user_id)
             new_tokens = refresh_access_token(refresh_token)
-            save_tokens(new_tokens)
+            save_tokens(new_tokens, user_id=user_id)
             return {
                 "access_token":  new_tokens["access_token"],
                 "refresh_token": new_tokens.get("refresh_token", refresh_token),
                 "expires_at":    int(time.time()) + int(new_tokens.get("expires_in", _ACCESS_TTL)),
             }
         except Exception as e:
-            logger.error("schwab  token refresh failed: %s", e)
-            # Fall back to existing token and hope it still works
+            logger.error("schwab  token refresh failed  user_id=%s: %s", user_id, e)
             pass
 
     return {
@@ -269,16 +267,21 @@ def load_tokens() -> dict | None:
     }
 
 
-def token_status() -> dict:
+def is_connected(user_id: int = 1) -> bool:
+    """Return True if the user has valid (or refreshable) Schwab tokens."""
+    return load_tokens(user_id) is not None
+
+
+def token_status(user_id: int = 1) -> dict:
     """
     Return connection status without making API calls.
     Used for the account page header display.
     """
-    from database import get_setting
-    access_token  = get_setting("schwab_access_token")  or ""
-    refresh_token = get_setting("schwab_refresh_token") or ""
-    expires_at    = int(get_setting("schwab_expires_at") or "0")
-    rt_expires_at = int(get_setting("schwab_rt_expires_at") or "0")
+    from database import get_user_setting
+    access_token  = get_user_setting(user_id, "schwab_access_token")  or ""
+    refresh_token = get_user_setting(user_id, "schwab_refresh_token") or ""
+    expires_at    = int(get_user_setting(user_id, "schwab_expires_at") or "0")
+    rt_expires_at = int(get_user_setting(user_id, "schwab_rt_expires_at") or "0")
     now           = int(time.time())
 
     if not access_token and not refresh_token:
@@ -299,7 +302,8 @@ def token_status() -> dict:
 
 # ── HTTP helper ───────────────────────────────────────────────────────────────
 
-def _get(path: str, params: dict = None, *, base: str = _BASE_TRADER) -> dict | list:
+def _get(path: str, params: dict = None, *, base: str = _BASE_TRADER,
+         user_id: int = 1) -> dict | list:
     """
     Authenticated GET against Schwab API.
     Handles token refresh on 401 automatically.
@@ -309,7 +313,7 @@ def _get(path: str, params: dict = None, *, base: str = _BASE_TRADER) -> dict | 
     import urllib.error
     from urllib.parse import urlencode
 
-    tokens = load_tokens()
+    tokens = load_tokens(user_id)
     if not tokens:
         raise RuntimeError("Not authenticated with Schwab — visit /schwab/auth")
 
@@ -345,18 +349,18 @@ def _get(path: str, params: dict = None, *, base: str = _BASE_TRADER) -> dict | 
 
 # ── Read-only data fetchers ───────────────────────────────────────────────────
 
-def fetch_accounts() -> list[dict]:
+def fetch_accounts(user_id: int = 1) -> list[dict]:
     """
     Fetch all linked accounts with positions and balances.
     Returns a list of normalized account dicts.
     """
-    raw = _get("/accounts", {"fields": "positions"})
+    raw = _get("/accounts", {"fields": "positions"}, user_id=user_id)
     if not isinstance(raw, list):
         raw = [raw]
     return [_normalize_account(a) for a in raw]
 
 
-def fetch_orders(account_hash: str, *, days_back: int = 1) -> list[dict]:
+def fetch_orders(account_hash: str, *, days_back: int = 1, user_id: int = 1) -> list[dict]:
     """
     Fetch recent orders for an account.
     days_back=1 returns today's orders; increase for history.
@@ -367,6 +371,7 @@ def fetch_orders(account_hash: str, *, days_back: int = 1) -> list[dict]:
     raw = _get(
         f"/accounts/{account_hash}/orders",
         {"fromEnteredTime": from_dt, "toEnteredTime": to_dt, "maxResults": 50},
+        user_id=user_id,
     )
     if not isinstance(raw, list):
         raw = []
@@ -515,7 +520,7 @@ def _normalize_order(raw: dict) -> dict:
 
 # ── Aggregate summary for risk integration ───────────────────────────────────
 
-def get_account_summary() -> dict:
+def get_account_summary(user_id: int = 1) -> dict:
     """
     Fetch all accounts and return a single summary dict.
     Used by the risk engine to override account_size / buying_power.
@@ -533,7 +538,7 @@ def get_account_summary() -> dict:
       }
     """
     try:
-        accounts = fetch_accounts()
+        accounts = fetch_accounts(user_id=user_id)
         total_value   = sum(a["total_value"]      for a in accounts)
         buying_power  = sum(a["buying_power"]     for a in accounts)
         daily_pnl     = sum(a["daily_pnl"] or 0   for a in accounts)
@@ -565,7 +570,7 @@ def get_account_summary() -> dict:
 
 # ── Trade pair matching ───────────────────────────────────────────────────────
 
-def match_schwab_trades(days_back: int = 30) -> list[dict]:
+def match_schwab_trades(days_back: int = 30, user_id: int = 1) -> list[dict]:
     """
     Fetch filled orders from Schwab and match BUY + SELL pairs into completed trades.
 
@@ -579,10 +584,10 @@ def match_schwab_trades(days_back: int = 30) -> list[dict]:
     import_key = "{ticker}:{buy_order_id}:{sell_order_id}" — used for dedup.
     """
     from database import get_schwab_import_keys
-    already_imported = get_schwab_import_keys()
+    already_imported = get_schwab_import_keys(user_id=user_id)
 
     try:
-        accounts = fetch_accounts()
+        accounts = fetch_accounts(user_id=user_id)
     except Exception as e:
         logger.warning("match_schwab_trades: fetch_accounts failed: %s", e)
         return []
@@ -606,6 +611,7 @@ def match_schwab_trades(days_back: int = 30) -> list[dict]:
                     "maxResults": 200,
                     "status": "FILLED",
                 },
+                user_id=user_id,
             )
         except Exception as e:
             logger.warning("match_schwab_trades: fetch orders failed: %s", e)

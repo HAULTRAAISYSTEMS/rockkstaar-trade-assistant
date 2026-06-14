@@ -96,13 +96,24 @@
         <button type="submit" class="btn btn-refresh" title="Refresh All">↺</button>
       </form>
 
-      {% if session.get('logged_in') %}
-      <form action="{{ url_for('logout') }}" method="POST" style="display:inline;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn-ar-toggle" title="Sign out"
-                style="font-size:13px;padding:4px 8px;opacity:0.55;transition:opacity 0.15s;"
-                onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.55'">⏻</button>
-      </form>
+      {% if session.get('user_id') %}
+        {% if session.get('is_admin') %}
+        <a href="{{ url_for('admin_users') }}"
+           style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:0.10em;
+                  text-transform:uppercase;color:var(--amber);text-decoration:none;opacity:0.70;
+                  padding:4px 8px;transition:opacity 0.15s;"
+           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.70'"
+           title="User management">⚙</a>
+        {% endif %}
+        <span style="font-family:var(--mono);font-size:9px;color:var(--dim);opacity:0.6;">
+          {{ session.get('username', '') }}
+        </span>
+        <form action="{{ url_for('logout') }}" method="POST" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn-ar-toggle" title="Sign out"
+                  style="font-size:13px;padding:4px 8px;opacity:0.55;transition:opacity 0.15s;"
+                  onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.55'">⏻</button>
+        </form>
       {% endif %}
     </div>
 

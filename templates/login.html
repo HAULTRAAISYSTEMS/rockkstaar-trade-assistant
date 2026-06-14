@@ -295,14 +295,26 @@
 
         <div style="display:flex;flex-direction:column;gap:20px;">
           <div class="login-field">
-            <label class="login-label" for="password">Access Code</label>
+            <label class="login-label" for="username">Username</label>
+            <input
+              class="login-input"
+              type="text"
+              id="username"
+              name="username"
+              placeholder="Enter username"
+              autofocus
+              autocomplete="username"
+            />
+          </div>
+
+          <div class="login-field">
+            <label class="login-label" for="password">Password</label>
             <input
               class="login-input"
               type="password"
               id="password"
               name="password"
-              placeholder="Enter access code"
-              autofocus
+              placeholder="Enter password"
               autocomplete="current-password"
             />
           </div>
@@ -320,7 +332,7 @@
       </form>
 
       <div class="login-footer">
-        Set <code style="color:var(--muted)">APP_PASSWORD</code> env var to enable authentication
+        Default admin: <code style="color:var(--muted)">rockkstaar</code> / your <code style="color:var(--muted)">APP_PASSWORD</code>
       </div>
 
     </div>

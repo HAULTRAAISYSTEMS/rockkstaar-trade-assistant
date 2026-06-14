@@ -20,6 +20,7 @@ import logging
 import sqlite3
 import json
 from datetime import datetime, timedelta
+from werkzeug.security import generate_password_hash, check_password_hash
 
 
 def _et_now() -> datetime:
@@ -306,6 +307,27 @@ def init_db():
         )
     """))
 
+    # Users — one row per account (admin creates additional accounts; no self-registration)
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS users (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            username      TEXT    UNIQUE NOT NULL,
+            password_hash TEXT    NOT NULL,
+            created_at    TEXT    NOT NULL,
+            is_admin      INTEGER NOT NULL DEFAULT 0
+        )
+    """))
+
+    # Per-user key/value settings — risk prefs, Schwab tokens, etc.
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS user_settings (
+            user_id INTEGER NOT NULL,
+            key     TEXT    NOT NULL,
+            value   TEXT,
+            PRIMARY KEY (user_id, key)
+        )
+    """))
+
     # Legacy watchlist table — kept for migration reading only, no longer written
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS watchlist (
@@ -315,12 +337,13 @@ def init_db():
         )
     """))
 
-    # Named watchlists
+    # Named watchlists (user_id scopes lists to the owning user)
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS watchlists (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT UNIQUE NOT NULL,
-            created_at TEXT NOT NULL
+            user_id    INTEGER NOT NULL DEFAULT 1,
+            name       TEXT    NOT NULL,
+            created_at TEXT    NOT NULL
         )
     """))
 
@@ -508,20 +531,22 @@ def init_db():
             except sqlite3.OperationalError:
                 pass  # Column already exists
 
-    # Notes: user's trade plan notes per ticker
+    # Notes: user's trade plan notes per ticker (scoped per user)
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT UNIQUE NOT NULL,
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id   INTEGER NOT NULL DEFAULT 1,
+            ticker    TEXT    NOT NULL,
             note_text TEXT,
             updated_at TEXT
         )
     """))
 
-    # Trade journal: one row per executed trade
+    # Trade journal: one row per executed trade (scoped per user)
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS journal (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id        INTEGER NOT NULL DEFAULT 1,
             ticker         TEXT NOT NULL,
             trade_date     TEXT NOT NULL,
             direction      TEXT,
@@ -537,11 +562,12 @@ def init_db():
         )
     """))
 
-    # Pre-market plans: structured trade plan fields per ticker
+    # Pre-market plans: structured trade plan fields per ticker (scoped per user)
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS trade_plans (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker       TEXT UNIQUE NOT NULL,
+            user_id      INTEGER NOT NULL DEFAULT 1,
+            ticker       TEXT    NOT NULL,
             plan_bias    TEXT,
             entry_level  REAL,
             stop_loss    REAL,
@@ -550,11 +576,12 @@ def init_db():
         )
     """))
 
-    # Schwab trade import tracking — prevents duplicate imports
+    # Schwab trade import tracking — prevents duplicate imports (scoped per user)
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS schwab_imports (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            import_key    TEXT UNIQUE NOT NULL,
+            user_id       INTEGER NOT NULL DEFAULT 1,
+            import_key    TEXT    NOT NULL,
             journal_id    INTEGER,
             ticker        TEXT,
             trade_date    TEXT,
@@ -562,11 +589,12 @@ def init_db():
         )
     """))
 
-    # Daily trading sessions — one row per date, tracks trades/losses for risk engine
+    # Daily trading sessions — one row per date per user, tracks trades/losses
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS daily_sessions (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_date TEXT UNIQUE NOT NULL,
+            user_id      INTEGER NOT NULL DEFAULT 1,
+            session_date TEXT    NOT NULL,
             locked       INTEGER DEFAULT 0,
             lock_reason  TEXT,
             updated_at   TEXT
@@ -611,10 +639,11 @@ def init_db():
         )
     """))
 
-    # Setup outcome tracking for adaptive AI learning (Feature 15)
+    # Setup outcome tracking for adaptive AI learning (scoped per user)
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS setup_outcomes (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL DEFAULT 1,
             ticker     TEXT    NOT NULL,
             setup_type TEXT    NOT NULL,
             pattern    TEXT,
@@ -650,20 +679,144 @@ def init_db():
         )
     """))
 
-    # Seed default watchlists on first run (use cnt alias — works in both DBs)
+    # ── Multi-user migration: add user_id columns to all user-data tables ───
+    _user_tables = [
+        "watchlists", "notes", "trade_plans", "journal",
+        "daily_sessions", "schwab_imports", "setup_outcomes",
+    ]
+    for _tbl in _user_tables:
+        if _USE_POSTGRES:
+            cursor.execute(
+                f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS user_id INTEGER"
+            )
+        else:
+            try:
+                cursor.execute(f"ALTER TABLE {_tbl} ADD COLUMN user_id INTEGER")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+    # ── Create admin user from APP_PASSWORD if users table is empty ──────────
+    admin_count = cursor.execute(
+        "SELECT COUNT(*) AS cnt FROM users"
+    ).fetchone()["cnt"]
+    admin_id = 1  # will always be 1 on a fresh table
+    if admin_count == 0:
+        _admin_pass = (
+            os.environ.get("APP_PASSWORD") or
+            os.environ.get("LOGIN_PASS") or
+            "changeme"
+        )
+        _admin_hash = generate_password_hash(_admin_pass)
+        _now_u = datetime.now().isoformat()
+        cursor.execute(
+            "INSERT INTO users (username, password_hash, created_at, is_admin) "
+            "VALUES (?, ?, ?, 1)",
+            ("rockkstaar", _admin_hash, _now_u),
+        )
+        # Fetch the id in case SERIAL doesn't start at 1
+        admin_row = cursor.execute(
+            "SELECT id FROM users WHERE username = 'rockkstaar'"
+        ).fetchone()
+        admin_id = admin_row["id"] if admin_row else 1
+        logger.info("DB  admin user created  username=rockkstaar  id=%s", admin_id)
+    else:
+        admin_row = cursor.execute(
+            "SELECT id FROM users ORDER BY id LIMIT 1"
+        ).fetchone()
+        admin_id = admin_row["id"] if admin_row else 1
+
+    # ── Backfill user_id for all existing rows (assign to admin) ────────────
+    for _tbl in _user_tables:
+        cursor.execute(f"UPDATE {_tbl} SET user_id = ? WHERE user_id IS NULL", (admin_id,))
+
+    # ── Migrate global risk settings to user_settings for admin ─────────────
+    _risk_keys = (
+        "trading_mode", "account_size", "risk_pct",
+        "max_trades_per_day", "max_daily_loss_pct", "stop_after_2_losses",
+    )
+    for _rk in _risk_keys:
+        _rv = cursor.execute(
+            "SELECT value FROM settings WHERE key = ?", (_rk,)
+        ).fetchone()
+        if _rv:
+            _existing_us = cursor.execute(
+                "SELECT 1 FROM user_settings WHERE user_id = ? AND key = ?",
+                (admin_id, _rk)
+            ).fetchone()
+            if not _existing_us:
+                cursor.execute(
+                    "INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)",
+                    (admin_id, _rk, _rv["value"])
+                )
+
+    # ── Migrate Schwab tokens from global settings to user_settings ──────────
+    _schwab_keys = (
+        "schwab_access_token", "schwab_refresh_token",
+        "schwab_expires_at",   "schwab_rt_expires_at",
+    )
+    for _sk in _schwab_keys:
+        _sv = cursor.execute(
+            "SELECT value FROM settings WHERE key = ?", (_sk,)
+        ).fetchone()
+        if _sv and _sv["value"]:
+            _existing_us = cursor.execute(
+                "SELECT 1 FROM user_settings WHERE user_id = ? AND key = ?",
+                (admin_id, _sk)
+            ).fetchone()
+            if not _existing_us:
+                cursor.execute(
+                    "INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)",
+                    (admin_id, _sk, _sv["value"])
+                )
+
+    # ── For PostgreSQL: update unique constraints to be (user_id, col) ───────
+    if _USE_POSTGRES:
+        _pg_constraint_ops = [
+            # (table, old_constraint, new_cols)
+            ("watchlists",     "watchlists_name_key",              "user_id, name"),
+            ("notes",          "notes_ticker_key",                 "user_id, ticker"),
+            ("trade_plans",    "trade_plans_ticker_key",           "user_id, ticker"),
+            ("daily_sessions", "daily_sessions_session_date_key",  "user_id, session_date"),
+            ("schwab_imports", "schwab_imports_import_key_key",    "user_id, import_key"),
+        ]
+        for _tbl, _old_con, _new_cols in _pg_constraint_ops:
+            try:
+                cursor.execute(
+                    f"ALTER TABLE {_tbl} DROP CONSTRAINT IF EXISTS {_old_con}"
+                )
+            except Exception:
+                pass
+            try:
+                _new_con = f"{_tbl}_user_unique"
+                cursor.execute(
+                    f"ALTER TABLE {_tbl} ADD CONSTRAINT {_new_con} "
+                    f"UNIQUE ({_new_cols})"
+                )
+            except Exception:
+                pass  # Constraint may already exist
+
+    # ── Seed default watchlists for admin user on first run ──────────────────
+    now_iso = datetime.now().isoformat()
     wl_count = cursor.execute(
-        "SELECT COUNT(*) AS cnt FROM watchlists"
+        "SELECT COUNT(*) AS cnt FROM watchlists WHERE user_id = ?", (admin_id,)
     ).fetchone()["cnt"]
 
-    now_iso = datetime.now().isoformat()
     if wl_count == 0:
         for name in DEFAULT_WATCHLISTS:
-            cursor.execute(
-                "INSERT OR IGNORE INTO watchlists (name, created_at) VALUES (?, ?)",
-                (name, now_iso)
-            )
-        # Migrate legacy watchlist table data into "Swing Ready"
-        first_row = cursor.execute("SELECT id FROM watchlists LIMIT 1").fetchone()
+            existing_wl = cursor.execute(
+                "SELECT id FROM watchlists WHERE user_id = ? AND name = ?",
+                (admin_id, name)
+            ).fetchone()
+            if not existing_wl:
+                cursor.execute(
+                    "INSERT INTO watchlists (user_id, name, created_at) VALUES (?, ?, ?)",
+                    (admin_id, name, now_iso)
+                )
+        # Migrate legacy watchlist table data into first list
+        first_row = cursor.execute(
+            "SELECT id FROM watchlists WHERE user_id = ? ORDER BY id LIMIT 1",
+            (admin_id,)
+        ).fetchone()
         if first_row:
             first_id = first_row["id"]
             old_rows = cursor.execute(
@@ -676,35 +829,189 @@ def init_db():
                     (first_id, row["ticker"], row["added_date"])
                 )
 
-    # ── Rename any legacy watchlist names to the swing-focused labels ──────
+    # ── Rename any legacy watchlist names to the current bucket labels ────────
     _LEGACY_RENAMES = {
-        # Original names → v2 names
-        "A+ Momentum":          "A+ Swing Setups",
-        "Secondary Watch":      "Secondary Swing Watch",
-        "Swing Watchlist":      "Extended",
-        "Core":                 "Core Swing Plays",
-        # v2 names → v3 names
-        "Swing Ready":          "A+ Swing Setups",
-        "Pullback Zone":        "Secondary Swing Watch",
-        "Core List":            "Core Swing Plays",
-        # v3 names → v4 bucket names
-        "A+ Swing Setups":      "A+ READY",
+        "A+ Momentum":           "A+ Swing Setups",
+        "Secondary Watch":       "Secondary Swing Watch",
+        "Swing Watchlist":       "Extended",
+        "Core":                  "Core Swing Plays",
+        "Swing Ready":           "A+ Swing Setups",
+        "Pullback Zone":         "Secondary Swing Watch",
+        "Core List":             "Core Swing Plays",
+        "A+ Swing Setups":       "A+ READY",
         "Secondary Swing Watch": "SETUPS FORMING",
-        "Extended":             "EXTENDED / CHASE ZONE",
-        "Core Swing Plays":     "AVOID / BLOCKED",
+        "Extended":              "EXTENDED / CHASE ZONE",
+        "Core Swing Plays":      "AVOID / BLOCKED",
     }
     for old_name, new_name in _LEGACY_RENAMES.items():
         cursor.execute(
             "UPDATE watchlists SET name = ? WHERE name = ?",
             (new_name, old_name),
         )
-    # Ensure TREND WATCH bucket exists (new in v4 — not a rename)
-    cursor.execute(
-        "INSERT OR IGNORE INTO watchlists (name, created_at) VALUES (?, ?)",
-        ("TREND WATCH", now_iso),
-    )
+    # Ensure TREND WATCH bucket exists for admin (new in v4)
+    if not cursor.execute(
+        "SELECT 1 FROM watchlists WHERE user_id = ? AND name = 'TREND WATCH'",
+        (admin_id,)
+    ).fetchone():
+        cursor.execute(
+            "INSERT INTO watchlists (user_id, name, created_at) VALUES (?, ?, ?)",
+            (admin_id, "TREND WATCH", now_iso),
+        )
 
     conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# User management helpers
+# ---------------------------------------------------------------------------
+
+def create_user(username: str, password: str, is_admin: bool = False) -> int:
+    """Create a new user account. Returns the new user_id."""
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO users (username, password_hash, created_at, is_admin) VALUES (?, ?, ?, ?)",
+        (username.strip().lower(), generate_password_hash(password),
+         datetime.now().isoformat(), 1 if is_admin else 0),
+        returning_id=True,
+    )
+    new_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    # Seed default watchlists for the new user
+    ensure_user_watchlists(new_id)
+    return new_id
+
+
+def get_user_by_id(user_id: int) -> dict | None:
+    conn = get_db()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_user_by_username(username: str) -> dict | None:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM users WHERE username = ?", (username.strip().lower(),)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_all_users() -> list:
+    conn = get_db()
+    rows = conn.execute("SELECT id, username, created_at, is_admin FROM users ORDER BY id").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_user_password(user_id: int, new_password: str) -> None:
+    conn = get_db()
+    conn.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (generate_password_hash(new_password), user_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_user(user_id: int) -> None:
+    """Delete a user and all their data. Cannot delete user_id=1 (original admin)."""
+    if user_id == 1:
+        raise ValueError("Cannot delete the primary admin user (id=1).")
+    conn = get_db()
+    # Cascade-delete all user-scoped data
+    for tbl in ("watchlist_stocks",):
+        # watchlist_stocks via watchlist FK
+        wl_ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM watchlists WHERE user_id = ?", (user_id,)
+        ).fetchall()]
+        for wl_id in wl_ids:
+            conn.execute("DELETE FROM watchlist_stocks WHERE watchlist_id = ?", (wl_id,))
+    for tbl in ("watchlists", "notes", "trade_plans", "journal",
+                "daily_sessions", "schwab_imports", "setup_outcomes", "user_settings"):
+        conn.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def check_user_password(username: str, password: str) -> dict | None:
+    """Return user dict if credentials match, else None."""
+    user = get_user_by_username(username)
+    if user and check_password_hash(user["password_hash"], password):
+        return user
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Per-user settings helpers (risk prefs, Schwab tokens, etc.)
+# ---------------------------------------------------------------------------
+
+def get_user_setting(user_id: int, key: str, default=None):
+    """Return the value of a per-user setting key, or default if not set."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT value FROM user_settings WHERE user_id = ? AND key = ?",
+        (user_id, key)
+    ).fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+
+def set_user_setting(user_id: int, key: str, value: str) -> None:
+    """Upsert a per-user setting key/value pair."""
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT 1 FROM user_settings WHERE user_id = ? AND key = ?", (user_id, key)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE user_settings SET value = ? WHERE user_id = ? AND key = ?",
+            (value, user_id, key)
+        )
+    else:
+        conn.execute(
+            "INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)",
+            (user_id, key, value)
+        )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Ensure default watchlists for a user (called on new account creation)
+# ---------------------------------------------------------------------------
+
+def ensure_user_watchlists(user_id: int) -> None:
+    """Seed the 5 default watchlists for a user if they have none yet."""
+    conn = get_db()
+    count = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM watchlists WHERE user_id = ?", (user_id,)
+    ).fetchone()["cnt"]
+    if count == 0:
+        now_iso = datetime.now().isoformat()
+        for name in DEFAULT_WATCHLISTS:
+            existing = conn.execute(
+                "SELECT 1 FROM watchlists WHERE user_id = ? AND name = ?",
+                (user_id, name)
+            ).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO watchlists (user_id, name, created_at) VALUES (?, ?, ?)",
+                    (user_id, name, now_iso)
+                )
+        # Ensure TREND WATCH too
+        if not conn.execute(
+            "SELECT 1 FROM watchlists WHERE user_id = ? AND name = 'TREND WATCH'",
+            (user_id,)
+        ).fetchone():
+            conn.execute(
+                "INSERT INTO watchlists (user_id, name, created_at) VALUES (?, ?, ?)",
+                (user_id, "TREND WATCH", now_iso)
+            )
+        conn.commit()
     conn.close()
 
 
@@ -712,10 +1019,17 @@ def init_db():
 # Named watchlist helpers
 # ---------------------------------------------------------------------------
 
-def get_all_watchlists() -> list:
-    """Return all watchlists ordered by creation."""
+def get_all_watchlists(user_id=None) -> list:
+    """Return watchlists ordered by creation.
+    If user_id is given, return only that user's lists.
+    If user_id is None, return all (used by background tasks)."""
     conn = get_db()
-    rows = conn.execute("SELECT * FROM watchlists ORDER BY id").fetchall()
+    if user_id is not None:
+        rows = conn.execute(
+            "SELECT * FROM watchlists WHERE user_id = ? ORDER BY id", (user_id,)
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM watchlists ORDER BY id").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -727,12 +1041,20 @@ def get_watchlist_by_id(wl_id: int):
     return dict(row) if row else None
 
 
-def create_watchlist(name: str) -> int:
-    """Create a new named watchlist. Returns its id."""
+def create_watchlist(name: str, user_id: int = 1) -> int:
+    """Create a new named watchlist for a user. Returns its id."""
     conn = get_db()
+    # Check for duplicate name under same user
+    existing = conn.execute(
+        "SELECT id FROM watchlists WHERE user_id = ? AND name = ?",
+        (user_id, name.strip())
+    ).fetchone()
+    if existing:
+        conn.close()
+        raise ValueError(f"Watchlist '{name}' already exists.")
     cur = conn.execute(
-        "INSERT INTO watchlists (name, created_at) VALUES (?, ?)",
-        (name.strip(), datetime.now().isoformat()),
+        "INSERT INTO watchlists (user_id, name, created_at) VALUES (?, ?, ?)",
+        (user_id, name.strip(), datetime.now().isoformat()),
         returning_id=True,
     )
     new_id = cur.lastrowid
@@ -770,12 +1092,22 @@ def get_watchlist_stocks(wl_id: int) -> list:
     return tickers
 
 
-def get_watchlist_stock_counts() -> dict:
-    """Return {watchlist_id: count} for all watchlists."""
+def get_watchlist_stock_counts(user_id=None) -> dict:
+    """Return {watchlist_id: count} for the given user's watchlists (all if user_id=None)."""
     conn = get_db()
-    rows = conn.execute(
-        "SELECT watchlist_id, COUNT(*) AS cnt FROM watchlist_stocks GROUP BY watchlist_id"
-    ).fetchall()
+    if user_id is not None:
+        rows = conn.execute(
+            "SELECT ws.watchlist_id, COUNT(*) AS cnt "
+            "FROM watchlist_stocks ws "
+            "JOIN watchlists wl ON wl.id = ws.watchlist_id "
+            "WHERE wl.user_id = ? "
+            "GROUP BY ws.watchlist_id",
+            (user_id,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT watchlist_id, COUNT(*) AS cnt FROM watchlist_stocks GROUP BY watchlist_id"
+        ).fetchall()
     conn.close()
     return {r["watchlist_id"]: r["cnt"] for r in rows}
 
@@ -827,9 +1159,9 @@ def remove_ticker_from_watchlist(wl_id: int, ticker: str):
     conn.close()
 
 
-def remove_ticker_from_defaults(ticker: str):
+def remove_ticker_from_defaults(ticker: str, user_id: int = 1):
     """
-    Remove a ticker from ALL default watchlists in one operation.
+    Remove a ticker from all default watchlists for a user.
 
     Called when the user explicitly deletes a ticker so it cannot be
     re-inserted by auto-classification.  The ticker stays in any user-created
@@ -837,13 +1169,13 @@ def remove_ticker_from_defaults(ticker: str):
     """
     conn = get_db()
     t = ticker.upper().strip()
-    logger.info("DB REMOVE FROM DEFAULTS  ticker=%s", t)
+    logger.info("DB REMOVE FROM DEFAULTS  ticker=%s  user_id=%s", t, user_id)
 
-    # Resolve IDs of the four built-in lists
+    # Resolve IDs of the default lists belonging to this user
     placeholders = ",".join(["?"] * len(DEFAULT_WATCHLISTS))
     rows = conn.execute(
-        f"SELECT id FROM watchlists WHERE name IN ({placeholders})",
-        DEFAULT_WATCHLISTS,
+        f"SELECT id FROM watchlists WHERE user_id = ? AND name IN ({placeholders})",
+        (user_id, *DEFAULT_WATCHLISTS),
     ).fetchall()
     default_ids = [r["id"] for r in rows]
 
@@ -853,7 +1185,7 @@ def remove_ticker_from_defaults(ticker: str):
             (wl_id, t),
         )
 
-    # Remove stock_data if the ticker is now in no watchlist at all
+    # Remove stock_data if the ticker is now in no watchlist at all (any user)
     remaining = conn.execute(
         "SELECT COUNT(*) AS cnt FROM watchlist_stocks WHERE ticker = ?", (t,)
     ).fetchone()["cnt"]
@@ -864,13 +1196,22 @@ def remove_ticker_from_defaults(ticker: str):
     conn.close()
 
 
-def get_ticker_watchlist_ids(ticker: str) -> list:
-    """Return list of watchlist IDs that contain this ticker."""
+def get_ticker_watchlist_ids(ticker: str, user_id=None) -> list:
+    """Return list of watchlist IDs that contain this ticker.
+    If user_id given, restricts to that user's watchlists only."""
     conn = get_db()
-    rows = conn.execute(
-        "SELECT watchlist_id FROM watchlist_stocks WHERE ticker = ?",
-        (ticker.upper(),)
-    ).fetchall()
+    if user_id is not None:
+        rows = conn.execute(
+            "SELECT ws.watchlist_id FROM watchlist_stocks ws "
+            "JOIN watchlists wl ON wl.id = ws.watchlist_id "
+            "WHERE ws.ticker = ? AND wl.user_id = ?",
+            (ticker.upper(), user_id)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT watchlist_id FROM watchlist_stocks WHERE ticker = ?",
+            (ticker.upper(),)
+        ).fetchall()
     conn.close()
     return [r["watchlist_id"] for r in rows]
 
@@ -1511,36 +1852,47 @@ def update_live_fields(data: dict) -> None:
 # Notes helpers
 # ---------------------------------------------------------------------------
 
-def get_note(ticker: str):
-    """Return note text for a ticker, or empty string."""
+def get_note(ticker: str, user_id: int = 1):
+    """Return note text for a ticker for this user, or empty string."""
     conn = get_db()
     row = conn.execute(
-        "SELECT note_text FROM notes WHERE ticker = ?", (ticker.upper(),)
+        "SELECT note_text FROM notes WHERE user_id = ? AND ticker = ?",
+        (user_id, ticker.upper())
     ).fetchone()
     conn.close()
     return row["note_text"] if row else ""
 
 
-def get_all_notes() -> dict:
-    """Return a dict of {ticker: note_text} for all tickers that have notes."""
+def get_all_notes(user_id: int = 1) -> dict:
+    """Return a dict of {ticker: note_text} for all notes belonging to this user."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT ticker, note_text FROM notes WHERE note_text != '' AND note_text IS NOT NULL"
+        "SELECT ticker, note_text FROM notes "
+        "WHERE user_id = ? AND note_text != '' AND note_text IS NOT NULL",
+        (user_id,)
     ).fetchall()
     conn.close()
     return {row["ticker"]: row["note_text"] for row in rows}
 
 
-def save_note(ticker: str, text: str):
+def save_note(ticker: str, text: str, user_id: int = 1):
     """Insert or update trade plan note for a ticker."""
     conn = get_db()
-    conn.execute("""
-        INSERT INTO notes (ticker, note_text, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(ticker) DO UPDATE SET
-            note_text  = excluded.note_text,
-            updated_at = excluded.updated_at
-    """, (ticker.upper(), text, datetime.now().isoformat()))
+    t = ticker.upper()
+    now = datetime.now().isoformat()
+    existing = conn.execute(
+        "SELECT id FROM notes WHERE user_id = ? AND ticker = ?", (user_id, t)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE notes SET note_text = ?, updated_at = ? WHERE id = ?",
+            (text, now, existing["id"])
+        )
+    else:
+        conn.execute(
+            "INSERT INTO notes (user_id, ticker, note_text, updated_at) VALUES (?, ?, ?, ?)",
+            (user_id, t, text, now)
+        )
     conn.commit()
     conn.close()
 
@@ -1549,11 +1901,12 @@ def save_note(ticker: str, text: str):
 # Pre-market trade plan helpers
 # ---------------------------------------------------------------------------
 
-def get_trade_plan(ticker: str) -> dict:
-    """Return the structured pre-market plan for a ticker, or empty defaults."""
+def get_trade_plan(ticker: str, user_id: int = 1) -> dict:
+    """Return the structured pre-market plan for a ticker for this user, or empty defaults."""
     conn = get_db()
     row = conn.execute(
-        "SELECT * FROM trade_plans WHERE ticker = ?", (ticker.upper(),)
+        "SELECT * FROM trade_plans WHERE user_id = ? AND ticker = ?",
+        (user_id, ticker.upper())
     ).fetchone()
     conn.close()
     if row:
@@ -1568,7 +1921,8 @@ def get_trade_plan(ticker: str) -> dict:
     }
 
 
-def save_trade_plan(ticker: str, plan_bias: str, entry_level, stop_loss, target_price):
+def save_trade_plan(ticker: str, plan_bias: str, entry_level, stop_loss, target_price,
+                    user_id: int = 1):
     """Insert or update the pre-market plan for a ticker."""
     def _float(v):
         try:
@@ -1577,32 +1931,34 @@ def save_trade_plan(ticker: str, plan_bias: str, entry_level, stop_loss, target_
             return None
 
     conn = get_db()
-    conn.execute("""
-        INSERT INTO trade_plans (ticker, plan_bias, entry_level, stop_loss, target_price, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(ticker) DO UPDATE SET
-            plan_bias    = excluded.plan_bias,
-            entry_level  = excluded.entry_level,
-            stop_loss    = excluded.stop_loss,
-            target_price = excluded.target_price,
-            updated_at   = excluded.updated_at
-    """, (
-        ticker.upper(),
-        plan_bias or "",
-        _float(entry_level),
-        _float(stop_loss),
-        _float(target_price),
-        datetime.now().isoformat(),
-    ))
+    t = ticker.upper()
+    now = datetime.now().isoformat()
+    existing = conn.execute(
+        "SELECT id FROM trade_plans WHERE user_id = ? AND ticker = ?", (user_id, t)
+    ).fetchone()
+    vals = (plan_bias or "", _float(entry_level), _float(stop_loss), _float(target_price), now)
+    if existing:
+        conn.execute(
+            "UPDATE trade_plans SET plan_bias=?, entry_level=?, stop_loss=?, "
+            "target_price=?, updated_at=? WHERE id=?",
+            (*vals, existing["id"])
+        )
+    else:
+        conn.execute(
+            "INSERT INTO trade_plans (user_id, ticker, plan_bias, entry_level, stop_loss, "
+            "target_price, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, t, *vals)
+        )
     conn.commit()
     conn.close()
 
 
-def get_all_trade_plans() -> dict:
-    """Return {ticker: plan_dict} for all tickers that have a saved plan."""
+def get_all_trade_plans(user_id: int = 1) -> dict:
+    """Return {ticker: plan_dict} for all tickers with a saved plan for this user."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM trade_plans WHERE entry_level IS NOT NULL"
+        "SELECT * FROM trade_plans WHERE user_id = ? AND entry_level IS NOT NULL",
+        (user_id,)
     ).fetchall()
     conn.close()
     return {row["ticker"]: dict(row) for row in rows}
@@ -1615,17 +1971,17 @@ def get_all_trade_plans() -> dict:
 def add_journal_entry(ticker, trade_date, direction, entry_price, exit_price,
                       shares, setup_type, momentum_score, pnl_pct, result, notes,
                       trade_mode=None, option_side=None, option_premium=None,
-                      contracts=None, stop_price=None, is_aplus_setup=0):
+                      contracts=None, stop_price=None, is_aplus_setup=0, user_id: int = 1):
     """Insert a new trade journal entry. Returns the new row id."""
     conn = get_db()
     cur = conn.execute("""
         INSERT INTO journal
-            (ticker, trade_date, direction, entry_price, exit_price,
+            (user_id, ticker, trade_date, direction, entry_price, exit_price,
              shares, setup_type, momentum_score, pnl_pct, result, notes, created_at,
              trade_mode, option_side, option_premium, contracts, stop_price, is_aplus_setup)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        ticker.upper(), trade_date, direction,
+        user_id, ticker.upper(), trade_date, direction,
         entry_price, exit_price, shares,
         setup_type, momentum_score, pnl_pct, result, notes,
         datetime.now().isoformat(),
@@ -1641,8 +1997,8 @@ def add_journal_entry(ticker, trade_date, direction, entry_price, exit_price,
 def update_journal_entry(entry_id, ticker, trade_date, direction, entry_price, exit_price,
                          shares, setup_type, momentum_score, pnl_pct, result, notes,
                          trade_mode=None, option_side=None, option_premium=None,
-                         contracts=None, stop_price=None, is_aplus_setup=0):
-    """Update an existing journal entry by id."""
+                         contracts=None, stop_price=None, is_aplus_setup=0, user_id: int = 1):
+    """Update an existing journal entry by id (only if it belongs to user_id)."""
     conn = get_db()
     conn.execute("""
         UPDATE journal SET
@@ -1650,49 +2006,52 @@ def update_journal_entry(entry_id, ticker, trade_date, direction, entry_price, e
             shares=?, setup_type=?, momentum_score=?, pnl_pct=?, result=?, notes=?,
             trade_mode=?, option_side=?, option_premium=?, contracts=?, stop_price=?,
             is_aplus_setup=?
-        WHERE id=?
+        WHERE id=? AND user_id=?
     """, (
         ticker.upper(), trade_date, direction,
         entry_price, exit_price, shares,
         setup_type, momentum_score, pnl_pct, result, notes,
         trade_mode, option_side, option_premium, contracts, stop_price,
         1 if is_aplus_setup else 0,
-        entry_id,
+        entry_id, user_id,
     ))
     conn.commit()
     conn.close()
 
 
-def delete_journal_entry(entry_id):
+def delete_journal_entry(entry_id, user_id: int = 1):
     conn = get_db()
-    conn.execute("DELETE FROM journal WHERE id = ?", (entry_id,))
+    conn.execute("DELETE FROM journal WHERE id = ? AND user_id = ?", (entry_id, user_id))
     conn.commit()
     conn.close()
 
 
-def get_journal_entry(entry_id):
+def get_journal_entry(entry_id, user_id: int = 1):
     conn = get_db()
-    row = conn.execute("SELECT * FROM journal WHERE id = ?", (entry_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM journal WHERE id = ? AND user_id = ?", (entry_id, user_id)
+    ).fetchone()
     conn.close()
     return dict(row) if row else None
 
 
-def get_all_journal_entries() -> list:
-    """Return all journal entries ordered newest first."""
+def get_all_journal_entries(user_id: int = 1) -> list:
+    """Return all journal entries for a user, ordered newest first."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM journal ORDER BY trade_date DESC, created_at DESC"
+        "SELECT * FROM journal WHERE user_id = ? ORDER BY trade_date DESC, created_at DESC",
+        (user_id,)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def get_journal_entries_for_date(date_str: str) -> list:
-    """Return journal entries for a specific date (YYYY-MM-DD)."""
+def get_journal_entries_for_date(date_str: str, user_id: int = 1) -> list:
+    """Return journal entries for a specific date (YYYY-MM-DD) for a user."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM journal WHERE trade_date = ? ORDER BY created_at DESC",
-        (date_str,)
+        "SELECT * FROM journal WHERE user_id = ? AND trade_date = ? ORDER BY created_at DESC",
+        (user_id, date_str)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -1702,13 +2061,14 @@ def get_journal_entries_for_date(date_str: str) -> list:
 # Daily session helpers (risk engine)
 # ---------------------------------------------------------------------------
 
-def get_daily_session(date_str: str | None = None) -> dict:
+def get_daily_session(date_str: str | None = None, user_id: int = 1) -> dict:
     """Return today's (or a specific date's) trading session row, or defaults if none."""
     if date_str is None:
         date_str = _et_now().strftime("%Y-%m-%d")
     conn = get_db()
     row = conn.execute(
-        "SELECT * FROM daily_sessions WHERE session_date = ?", (date_str,)
+        "SELECT * FROM daily_sessions WHERE user_id = ? AND session_date = ?",
+        (user_id, date_str)
     ).fetchone()
     conn.close()
     if row:
@@ -1721,34 +2081,42 @@ def get_daily_session(date_str: str | None = None) -> dict:
     }
 
 
-def upsert_daily_session(date_str: str, locked: int = 0, lock_reason: str | None = None):
-    """Insert or update a daily session record."""
+def upsert_daily_session(date_str: str, locked: int = 0, lock_reason: str | None = None,
+                         user_id: int = 1):
+    """Insert or update a daily session record for a user."""
     conn = get_db()
     now = _et_now().strftime("%Y-%m-%d %I:%M %p")
-    conn.execute("""
-        INSERT INTO daily_sessions (session_date, locked, lock_reason, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(session_date) DO UPDATE SET
-            locked       = excluded.locked,
-            lock_reason  = excluded.lock_reason,
-            updated_at   = excluded.updated_at
-    """, (date_str, locked, lock_reason, now))
+    existing = conn.execute(
+        "SELECT id FROM daily_sessions WHERE user_id = ? AND session_date = ?",
+        (user_id, date_str)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE daily_sessions SET locked=?, lock_reason=?, updated_at=? WHERE id=?",
+            (locked, lock_reason, now, existing["id"])
+        )
+    else:
+        conn.execute(
+            "INSERT INTO daily_sessions (user_id, session_date, locked, lock_reason, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, date_str, locked, lock_reason, now)
+        )
     conn.commit()
     conn.close()
 
 
-def lock_daily_session(reason: str, date_str: str | None = None):
+def lock_daily_session(reason: str, date_str: str | None = None, user_id: int = 1):
     """Lock trading for a given date (default: today)."""
     if date_str is None:
         date_str = _et_now().strftime("%Y-%m-%d")
-    upsert_daily_session(date_str, locked=1, lock_reason=reason)
+    upsert_daily_session(date_str, locked=1, lock_reason=reason, user_id=user_id)
 
 
-def unlock_daily_session(date_str: str | None = None):
+def unlock_daily_session(date_str: str | None = None, user_id: int = 1):
     """Manually unlock trading for a given date (default: today)."""
     if date_str is None:
         date_str = _et_now().strftime("%Y-%m-%d")
-    upsert_daily_session(date_str, locked=0, lock_reason=None)
+    upsert_daily_session(date_str, locked=0, lock_reason=None, user_id=user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1839,6 +2207,7 @@ def save_setup_outcome(
     pattern: str = "",
     prob_score: int = 0,
     notes: str = "",
+    user_id: int = 1,
 ) -> None:
     """Persist a trade outcome for adaptive learning win-rate tracking."""
     from data_fetcher import _et_now as _db_et_now
@@ -1846,10 +2215,10 @@ def save_setup_outcome(
     conn = get_db()
     conn.execute(
         "INSERT INTO setup_outcomes "
-        "(ticker, setup_type, pattern, outcome, regime, prob_score, notes, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "(user_id, ticker, setup_type, pattern, outcome, regime, prob_score, notes, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            ticker.upper().strip(), setup_type, pattern, outcome,
+            user_id, ticker.upper().strip(), setup_type, pattern, outcome,
             regime, prob_score, notes, now,
         ),
     )
@@ -1857,19 +2226,20 @@ def save_setup_outcome(
     conn.close()
 
 
-def get_setup_outcomes(limit: int = 200) -> list[dict]:
-    """Return recent setup outcomes ordered newest-first."""
+def get_setup_outcomes(limit: int = 200, user_id: int = 1) -> list[dict]:
+    """Return recent setup outcomes for a user, ordered newest-first."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM setup_outcomes ORDER BY id DESC LIMIT ?", (limit,)
+        "SELECT * FROM setup_outcomes WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+        (user_id, limit)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def get_setup_outcome_stats() -> list[dict]:
+def get_setup_outcome_stats(user_id: int = 1) -> list[dict]:
     """
-    Aggregate setup outcomes by setup_type.
+    Aggregate setup outcomes by setup_type for a user.
     Returns list of {setup_type, total, wins, losses, win_rate}.
     """
     conn = get_db()
@@ -1884,45 +2254,54 @@ def get_setup_outcome_stats() -> list[dict]:
                 / NULLIF(COUNT(*), 0), 1
             )                                                       AS win_rate
         FROM setup_outcomes
+        WHERE user_id = ?
         GROUP BY setup_type
         ORDER BY win_rate DESC
-    """).fetchall()
+    """, (user_id,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
 # ── Schwab import tracking ────────────────────────────────────────────────────
 
-def schwab_import_exists(import_key: str) -> bool:
-    """Return True if this trade pair was already imported."""
+def schwab_import_exists(import_key: str, user_id: int = 1) -> bool:
+    """Return True if this trade pair was already imported for this user."""
     conn = get_db()
     row = conn.execute(
-        "SELECT id FROM schwab_imports WHERE import_key = ?", (import_key,)
+        "SELECT id FROM schwab_imports WHERE user_id = ? AND import_key = ?",
+        (user_id, import_key)
     ).fetchone()
     conn.close()
     return row is not None
 
 
 def record_schwab_import(import_key: str, journal_id: int,
-                         ticker: str, trade_date: str) -> None:
-    """Mark a Schwab trade pair as imported so it won't be imported again."""
+                         ticker: str, trade_date: str, user_id: int = 1) -> None:
+    """Mark a Schwab trade pair as imported for this user so it won't be re-imported."""
     conn = get_db()
-    conn.execute(
-        """INSERT OR IGNORE INTO schwab_imports
-               (import_key, journal_id, ticker, trade_date, imported_at)
-           VALUES (?, ?, ?, ?, ?)""",
-        (import_key, journal_id, ticker, trade_date, datetime.now().isoformat()),
-    )
+    existing = conn.execute(
+        "SELECT id FROM schwab_imports WHERE user_id = ? AND import_key = ?",
+        (user_id, import_key)
+    ).fetchone()
+    if not existing:
+        conn.execute(
+            "INSERT INTO schwab_imports "
+            "(user_id, import_key, journal_id, ticker, trade_date, imported_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, import_key, journal_id, ticker, trade_date, datetime.now().isoformat()),
+        )
     conn.commit()
     conn.close()
 
 
-def get_schwab_import_keys() -> set:
-    """Return the set of all already-imported Schwab trade pair keys."""
+def get_schwab_import_keys(user_id: int = 1) -> set:
+    """Return the set of all already-imported Schwab trade pair keys for this user."""
     conn = get_db()
-    rows = conn.execute("SELECT import_key FROM schwab_imports").fetchall()
+    rows = conn.execute(
+        "SELECT import_key FROM schwab_imports WHERE user_id = ?", (user_id,)
+    ).fetchall()
     conn.close()
-    return {r[0] for r in rows}
+    return {r["import_key"] for r in rows}
 
 
 # ── Nasdaq-100 constituent tracking ──────────────────────────────────────────
