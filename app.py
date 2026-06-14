@@ -128,7 +128,7 @@ def require_admin(f):
 @app.before_request
 def _require_login():
     # Always public — Schwab OAuth callback must stay reachable; callback validates PKCE/state.
-    if (request.path in ("/login", "/logout", "/favicon.ico", "/health", "/schwab/callback")
+    if (request.path in ("/login", "/logout", "/register", "/favicon.ico", "/health", "/schwab/callback")
             or request.path.startswith("/static/")):
         return
     if session.get("user_id"):
@@ -5536,6 +5536,47 @@ def logout():
     """Clear session and redirect to login."""
     session.clear()
     return redirect(url_for("login_page"))
+
+
+@app.route("/register", methods=["GET", "POST"])
+@csrf.exempt
+def register_page():
+    """Self-registration page. Creates a regular (non-admin) user account."""
+    if session.get("user_id"):
+        return redirect(url_for("liquidity_page"))
+    error = None
+    entered_username = ""
+    if request.method == "POST":
+        entered_username = request.form.get("username", "").strip()
+        password         = request.form.get("password", "")
+        confirm          = request.form.get("confirm_password", "")
+
+        if not entered_username:
+            error = "Username is required."
+        elif len(entered_username) < 3:
+            error = "Username must be at least 3 characters."
+        elif len(entered_username) > 50:
+            error = "Username must be 50 characters or fewer."
+        elif not entered_username.replace("_", "").replace("-", "").isalnum():
+            error = "Username may only contain letters, numbers, hyphens, and underscores."
+        elif len(password) < 8:
+            error = "Password must be at least 8 characters."
+        elif password != confirm:
+            error = "Passwords do not match."
+        elif get_user_by_username(entered_username):
+            error = "That username is already taken."
+        else:
+            try:
+                uid = create_user(entered_username, password, is_admin=False)
+                session.permanent = False
+                session["user_id"]  = uid
+                session["username"] = entered_username.lower()
+                session["is_admin"] = 0
+                return redirect(url_for("liquidity_page"))
+            except Exception:
+                error = "Could not create account — please try again."
+
+    return render_template("register.html", error=error, username=entered_username)
 
 
 # ---------------------------------------------------------------------------

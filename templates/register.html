@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#020b18" />
-  <title>Authenticate — HAULTRA AI</title>
+  <title>Create Account — HAULTRA AI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -33,7 +33,6 @@
       font-family: var(--ui);
     }
 
-    /* ── Animated grid background ── */
     body::before {
       content: '';
       position: fixed;
@@ -46,7 +45,6 @@
       z-index: 0;
     }
 
-    /* ── Glow orb ── */
     body::after {
       content: '';
       position: fixed;
@@ -60,7 +58,6 @@
       z-index: 0;
     }
 
-    /* ── Layout ── */
     .login-wrap {
       position: relative;
       z-index: 1;
@@ -73,7 +70,6 @@
       gap: 2rem;
     }
 
-    /* ── Brand ── */
     .login-brand {
       display: flex;
       flex-direction: column;
@@ -106,7 +102,6 @@
       text-transform: uppercase;
     }
 
-    /* ── Card ── */
     .login-card {
       width: 100%;
       max-width: 380px;
@@ -133,8 +128,8 @@
       width: 7px;
       height: 7px;
       border-radius: 50%;
-      background: var(--cyan);
-      box-shadow: 0 0 6px var(--cyan);
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
       animation: pulse 2s ease-in-out infinite;
     }
     @keyframes pulse {
@@ -147,7 +142,7 @@
       font-weight: 800;
       letter-spacing: 0.15em;
       text-transform: uppercase;
-      color: var(--cyan);
+      color: var(--green);
     }
 
     .login-card-body {
@@ -157,7 +152,6 @@
       gap: 20px;
     }
 
-    /* ── Error banner ── */
     .login-error {
       display: flex;
       align-items: center;
@@ -172,7 +166,6 @@
       color: var(--red);
     }
 
-    /* ── Field ── */
     .login-field {
       display: flex;
       flex-direction: column;
@@ -206,32 +199,28 @@
       box-shadow: 0 0 0 3px rgba(34,211,238,0.06);
     }
 
-    /* ── Button ── */
     .login-btn {
       width: 100%;
       padding: 13px;
-      background: rgba(34,211,238,0.10);
-      border: 1px solid rgba(34,211,238,0.28);
+      background: rgba(34,197,94,0.10);
+      border: 1px solid rgba(34,197,94,0.28);
       border-radius: 4px;
       font-family: var(--mono);
       font-size: 12px;
       font-weight: 900;
       letter-spacing: 0.15em;
       text-transform: uppercase;
-      color: var(--cyan);
+      color: var(--green);
       cursor: pointer;
       transition: all 0.15s;
     }
     .login-btn:hover {
-      background: rgba(34,211,238,0.18);
-      border-color: rgba(34,211,238,0.50);
-      box-shadow: 0 0 16px rgba(34,211,238,0.12);
+      background: rgba(34,197,94,0.18);
+      border-color: rgba(34,197,94,0.50);
+      box-shadow: 0 0 16px rgba(34,197,94,0.12);
     }
-    .login-btn:active {
-      transform: scale(0.99);
-    }
+    .login-btn:active { transform: scale(0.99); }
 
-    /* ── Footer note ── */
     .login-footer {
       font-family: var(--mono);
       font-size: 9px;
@@ -240,7 +229,6 @@
       letter-spacing: 0.05em;
     }
 
-    /* ── Status row (bottom of page) ── */
     .login-status {
       display: flex;
       align-items: center;
@@ -267,19 +255,17 @@
 
 <div class="login-wrap">
 
-  <!-- Brand -->
   <div class="login-brand">
     <span class="login-brand-line">▲ HAULTRA AI SYSTEMS</span>
     <span class="login-brand-name">ROCKKSTAAR</span>
-    <span class="login-brand-sub">Trade Assistant · Terminal Access</span>
+    <span class="login-brand-sub">Trade Assistant · New Account</span>
   </div>
 
-  <!-- Login card -->
   <div class="login-card">
 
     <div class="login-card-header">
       <span class="login-card-dot"></span>
-      <span class="login-card-title">Secure Access Required</span>
+      <span class="login-card-title">Create Account</span>
     </div>
 
     <div class="login-card-body">
@@ -290,10 +276,9 @@
       </div>
       {% endif %}
 
-      <form method="POST" action="/login" autocomplete="off">
-        <input type="hidden" name="next" value="{{ next }}">
-
+      <form method="POST" action="/register" autocomplete="off">
         <div style="display:flex;flex-direction:column;gap:20px;">
+
           <div class="login-field">
             <label class="login-label" for="username">Username</label>
             <input
@@ -301,9 +286,11 @@
               type="text"
               id="username"
               name="username"
-              placeholder="Enter username"
+              value="{{ username or '' }}"
+              placeholder="Choose a username"
               autofocus
               autocomplete="username"
+              maxlength="50"
             />
           </div>
 
@@ -314,38 +301,38 @@
               type="password"
               id="password"
               name="password"
-              placeholder="Enter password"
-              autocomplete="current-password"
+              placeholder="8+ characters"
+              autocomplete="new-password"
             />
           </div>
 
-          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;">
-            <input type="checkbox" name="remember_me" value="1"
-              style="width:15px;height:15px;accent-color:var(--cyan);cursor:pointer;" />
-            <span style="font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:0.10em;color:var(--muted);text-transform:uppercase;">
-              Remember me for 30 days
-            </span>
-          </label>
+          <div class="login-field">
+            <label class="login-label" for="confirm_password">Confirm Password</label>
+            <input
+              class="login-input"
+              type="password"
+              id="confirm_password"
+              name="confirm_password"
+              placeholder="Repeat password"
+              autocomplete="new-password"
+            />
+          </div>
 
-          <button type="submit" class="login-btn">⚡ Authenticate</button>
+          <button type="submit" class="login-btn">✦ Create Account</button>
         </div>
       </form>
 
       <div class="login-footer">
-        Default admin: <code style="color:var(--muted)">rockkstaar</code> / your <code style="color:var(--muted)">APP_PASSWORD</code>
-      </div>
-
-      <div class="login-footer" style="margin-top:-8px;">
-        <a href="/register" style="color:var(--cyan);text-decoration:none;opacity:0.75;transition:opacity 0.15s;"
-           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.75'">
-          Create an account →
+        Already have an account?
+        <a href="/login" style="color:var(--cyan);text-decoration:none;opacity:0.80;margin-left:4px;transition:opacity 0.15s;"
+           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.80'">
+          Sign in →
         </a>
       </div>
 
     </div>
   </div>
 
-  <!-- Status -->
   <div class="login-status">
     <span class="login-status-dot"></span>
     SYSTEM ONLINE
