@@ -307,12 +307,20 @@
             />
           </div>
 
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;">
+            <input type="checkbox" name="remember_me" value="1"
+              style="width:15px;height:15px;accent-color:var(--cyan);cursor:pointer;" />
+            <span style="font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:0.10em;color:var(--muted);text-transform:uppercase;">
+              Remember me for 30 days
+            </span>
+          </label>
+
           <button type="submit" class="login-btn">⚡ Authenticate</button>
         </div>
       </form>
 
       <div class="login-footer">
-        Set <code style="color:var(--muted)">LOGIN_PASS</code> env var to change your access code
+        Set <code style="color:var(--muted)">APP_PASSWORD</code> env var to enable authentication
       </div>
 
     </div>

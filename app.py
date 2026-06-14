@@ -85,16 +85,24 @@ csrf = CSRFProtect(app)
 
 # ---------------------------------------------------------------------------
 # Session-based login gate.
-# Set LOGIN_PASS env var to enable. If not set, all routes are open (local dev).
-# API / WebSocket paths return 401 JSON; page routes redirect to /login.
+# Set APP_PASSWORD env var to enable (LOGIN_PASS also accepted for backwards compat).
+# If neither is set, all routes are open — existing behaviour preserved until configured.
+# API / WebSocket paths return 401 JSON when unauthenticated; page routes redirect to /login.
 # ---------------------------------------------------------------------------
+def _get_app_password() -> str:
+    """Return the configured app password — APP_PASSWORD preferred, LOGIN_PASS fallback."""
+    return os.environ.get("APP_PASSWORD", "") or os.environ.get("LOGIN_PASS", "")
+
+
 @app.before_request
 def _require_login():
-    _pass = os.environ.get("LOGIN_PASS", "")
+    _pass = _get_app_password()
     if not _pass:
         return  # No password configured — open access (local / first deploy)
-    # Always public
-    if (request.path in ("/login", "/favicon.ico", "/health")
+    # Always public: login UI, health check, static assets, Schwab OAuth callback
+    # (/schwab/callback must stay reachable — Schwab redirects here after auth;
+    #  the callback itself validates state/PKCE so the open path is safe)
+    if (request.path in ("/login", "/favicon.ico", "/health", "/schwab/callback")
             or request.path.startswith("/static/")):
         return
     if session.get("logged_in"):
@@ -5450,17 +5458,18 @@ def api_opportunity_refresh():
 @app.route("/login", methods=["GET", "POST"])
 @csrf.exempt  # Login is the auth gate itself — no prior session needed for token
 def login_page():
-    """Session login page. Enabled only when LOGIN_PASS env var is set."""
-    _pass = os.environ.get("LOGIN_PASS", "")
+    """Session login page. Enabled only when APP_PASSWORD (or LOGIN_PASS) env var is set."""
+    _pass = _get_app_password()
     if not _pass:
-        return redirect(url_for("liquidity_page"))  # Auth disabled
+        return redirect(url_for("liquidity_page"))  # Auth disabled — open access
     if session.get("logged_in"):
         return redirect(url_for("liquidity_page"))
     error = None
     if request.method == "POST":
         entered = request.form.get("password", "").strip()
         if entered == _pass:
-            session.permanent = True
+            remember = request.form.get("remember_me") == "1"
+            session.permanent = remember  # 30-day cookie if checked; session-only if not
             session["logged_in"] = True
             next_url = request.form.get("next") or url_for("liquidity_page")
             # Safety: only redirect to internal paths
