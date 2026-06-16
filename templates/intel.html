@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Research — HAULTRA AI</title>
 <style>
   :root {
@@ -917,6 +917,73 @@
     .div-row > *:nth-child(n+5) { display: none; }
     .econ-row  { grid-template-columns: 1fr 70px; }
   }
+
+  /* ================================================================
+     Mobile & iPad Responsive Additions — 2026-06-16
+     ================================================================ */
+
+  /* Remove 300ms tap delay on all interactive elements */
+  .tab, button, a, select, input, label {
+    touch-action: manipulation;
+  }
+
+  /* Minimum 44px touch targets on tabs */
+  .tab {
+    min-height: 44px;
+    padding: 10px 16px;
+  }
+
+  /* ── iPad (600px – 900px): 2-column card grid ── */
+  @media (min-width: 600px) and (max-width: 900px) {
+    .grid-3, .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    .col-span-2 { grid-column: span 2; }
+    .page { padding: 16px 16px calc(60px + env(safe-area-inset-bottom, 0px)); }
+    .page-header { flex-wrap: wrap; gap: 10px; }
+    .nav-links {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .nav-links::-webkit-scrollbar { display: none; }
+  }
+
+  /* ── Phone (≤ 599px): full phone overrides ── */
+  @media (max-width: 599px) {
+    .tabs {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .tabs::-webkit-scrollbar { display: none; }
+
+    .page { padding: 12px 12px calc(80px + env(safe-area-inset-bottom, 0px)); }
+
+    .page-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .nav { padding: 0 12px; height: 52px; }
+    .nav-links {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      gap: 1px;
+    }
+    .nav-links::-webkit-scrollbar { display: none; }
+    .nav-link { font-size: 11px; padding: 6px 8px; white-space: nowrap; }
+
+    .card-header { padding: 10px 12px 9px; }
+    .card-title  { font-size: 9px; letter-spacing: 0.08em; }
+
+    body { padding-bottom: env(safe-area-inset-bottom, 20px); }
+  }
+
+  /* ── Scrollable horizontal sections ── */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 </style>
 </head>
 <body>
