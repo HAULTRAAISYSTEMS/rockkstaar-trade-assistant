@@ -15,7 +15,7 @@ DEDUP_MINS minutes — use clear_alerts() to reset between sessions.
 
 Public API:
   generate_alerts(stocks)  → list[dict]   scan annotated stocks, push new alerts
-  get_alerts(limit)        → list[dict]   most-recent-first for JSON / template
+  get_alerts(limit)         → list[dict]   most-recent-first for JSON / template
   get_alert_count()        → int          badge count
   clear_alerts()                          reset queue + dedup tracker
 """
@@ -38,9 +38,9 @@ def _et_now() -> datetime:
         from datetime import timezone
         return datetime.now(timezone(timedelta(hours=-4)))
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Internal types
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 @dataclass
 class _Alert:
@@ -51,9 +51,9 @@ class _Alert:
     timestamp:  str    # "YYYY-MM-DD HH:MM"
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Module-level state  (thread-safe)
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 _lock:        threading.Lock = threading.Lock()
 _queue:       list           = []       # list[_Alert]
@@ -63,14 +63,14 @@ MAX_ALERTS  = 50
 DEDUP_MINS  = 30     # suppress identical (ticker, type) within this window
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Private helpers
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 def _should_fire(ticker: str, atype: str) -> bool:
-    """Return True if this (ticker, alert_type) hasn't fired within DEDUP_MINS."""
+    """Return True if this (ticker, alert_type) hasn'_t fired within DEDUP_MINS."""
     key = (ticker, atype)
-    now = datetime.now()
+    now = _et_now()
     with _lock:
         last = _last_fired.get(key)
         if last and (now - last).total_seconds() < DEDUP_MINS * 60:
@@ -83,7 +83,7 @@ def _push(a: _Alert) -> None:
     """Append alert to queue, evicting oldest if at capacity."""
     with _lock:
         _queue.append(a)
-        if len(_queue) > MAX_ALERTS:
+        if len(_queue) > MAX_ALERTS :
             _queue.pop(0)
 
 
@@ -93,15 +93,15 @@ def _level_hint(setup_type: str) -> str:
     if "20 EMA"      in t: return " — approaching 20 EMA"
     if "50 EMA"      in t: return " — approaching 50 EMA"
     if "61.8"        in t: return " — near 61.8% fib"
-    if "50%"         in t: return " — near 50% fib"
-    if "Order Block" in t: return " — demand zone retest"
-    if "Breakout"    in t: return " — breakout retest"
+    if "50%"         in t: return " — ear 50% fib"
+    if "Order Block" in t: return " ⁭ demand zone retest"
+    if "Breakout"    in t: return " ⁭ breakout retest"
     return ""
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 def generate_alerts(stocks: list) -> list:
     """
@@ -150,14 +150,17 @@ def generate_alerts(stocks: list) -> list:
 
         # ── 2. A+ Setup  (score >= 8, not suppressed by WAIT) ────────────────
         if score >= 8 and status != "WAIT":
-            if _should_fire(ticker, "aplus"):
+            _aplus_fired = _should_fire(ticker, "aplus")
+            if _aplus_fired:
                 msg = f"{ticker} A+ Swing Setup — score {score}/10{rr_str}"
                 a = _Alert(ticker, msg, "aplus", "high", ts)
                 _push(a)
                 new_alerts.append(_alert_to_dict(a))
+        else:
+            _aplus_fired = False
 
-        # ── 3. PRE-CONFIRMATION ───────────────────────────────────────────────
-        if status == "PRE-CONFIRMATION":
+        # ── 3. PRE-CONFIRMATION ────────────────────────────────────────────────
+        if status == "PRE-CONFIRMATION" and not _aplus_fired:
             if _should_fire(ticker, "pre_confirm"):
                 hint = _level_hint(setup_type)
                 msg  = f"{ticker} upgraded to PRE-CONFIRMATION{hint}"
@@ -188,7 +191,7 @@ def generate_alerts(stocks: list) -> list:
                 _push(a)
                 new_alerts.append(_alert_to_dict(a))
 
-        # ── 6. Institutional zone alerts (V2) ─────────────────────────────────
+        # ── 6. Institutional zone alerts (V2) ──────────────────────────────────
         if _zone_alerts:
             try:
                 for atype, msg, sev in _zone_alerts(s):
