@@ -1,7 +1,3 @@
-https://raw.githubusercontent.com/HAULTRAAISYSTEMS/rockkstaar-trade-assistant/main/data_fetcher.py
-→ https://raw.githubusercontent.com/HAULTRAAISYSTEMS/rockkstaar-trade-assistant/main/data_fetcher.py
-Content-Type: text/plain; charset=utf-8
-
 """
 data_fetcher.py - Live market data via Polygon.io (primary) + yfinance (fallback).
 Provides fetch_live_data() and fetch_news_headlines() for use in generate_stock_data().
@@ -88,8 +84,6 @@ def _fetch_polygon_snapshot(ticker: str) -> dict | None:
         avg_vol   = ticker_node.get("prevDay", {}).get("v")  # best proxy available in snapshot
         if today_vol and float(today_vol) > 0:
             out["today_volume"] = int(float(today_vol))
-            if avg_vol and float(avg_vol) > 0:
-                out["avg_vol"] = int(float(avg_vol))
             # Polygon snapshot doesn't expose 30-day avg directly; skip rel_volume here
             # (fetched separately in _fetch_polygon_prev_close or left to yfinance fallback)
 
@@ -183,6 +177,8 @@ def _fetch_polygon_intraday(ticker: str) -> dict | None:
     now_et = _et_now()
     date_str = now_et.strftime("%Y-%m-%d")
     # Request from 4 AM to cover premarket
+    from_ts = f"{date_str}T04:00:00"
+    to_ts   = f"{date_str}T20:00:00"
     data = _polygon_get(
         f"/v2/aggs/ticker/{ticker}/range/1/minute/{date_str}/{date_str}",
         {"adjusted": "true", "sort": "asc", "limit": 1000},
@@ -1285,7 +1281,7 @@ def _find_active_impulse_leg(
                 continue
             leg_size = hv - lv
             if leg_size / atr < MIN_ATR_MULT:
-                continue  # pivot highs are sorted by bar index, not price — keep searching
+                break  # all remaining ph[k] will be the same or worse — stop
             sc = _score_impulse_leg(li, hi, leg_size, closes, highs, lows, volumes, n, atr)
             candidate = {
                 "direction": "bullish",
@@ -1306,7 +1302,7 @@ def _find_active_impulse_leg(
                 continue
             leg_size = hv - lv
             if leg_size / atr < MIN_ATR_MULT:
-                continue
+                break
             sc = _score_impulse_leg(hi, li, leg_size, closes, highs, lows, volumes, n, atr)
             candidate = {
                 "direction": "bearish",
@@ -2202,4 +2198,512 @@ def compute_market_temperature() -> dict:
         qqq_vs_vwap = (qqq_price - qqq_vwap) / qqq_vwap * 100 if qqq_vwap else None
 
         # ES futures
-        es_price = 
+        es_price = es_change_pct = es_above_vwap = None
+        if es_d and len(es_d.get("closes", [])) >= 2:
+            try:
+                _ep    = es_d["closes"][-1]
+                _eprev = es_d["closes"][-2]
+                _evwap = _today_vwap(es_h)
+                es_price      = _ep
+                es_change_pct = (_ep - _eprev) / _eprev * 100
+                es_above_vwap = bool(_ep > _evwap) if _evwap is not None else None
+            except Exception:
+                pass
+
+        # Sector ETF daily % changes (12 sectors)
+        sectors: dict = {}
+        _sector_list = [
+            ("xlk_d","XLK"), ("xly_d","XLY"), ("xlf_d","XLF"), ("xle_d","XLE"),
+            ("xlv_d","XLV"), ("xli_d","XLI"), ("xlu_d","XLU"), ("xlb_d","XLB"),
+            ("xlre_d","XLRE"),("xlc_d","XLC"), ("smh_d","SMH"), ("iwm_d","IWM"),
+        ]
+        for _sk, _sn in _sector_list:
+            _sd = _results.get(_sk)
+            if _sd and len(_sd.get("closes", [])) >= 2:
+                try:
+                    _sp  = _sd["closes"][-1]
+                    _spp = _sd["closes"][-2]
+                    sectors[_sn] = round((_sp - _spp) / _spp * 100, 2)
+                except Exception:
+                    sectors[_sn] = None
+            else:
+                sectors[_sn] = None
+
+        # 10Y Treasury yield (^TNX: value is already %, e.g. 4.25 = 4.25% yield)
+        yield_10y        = None
+        yield_change_bps = None
+        yield_trend      = "flat"
+        yield_note       = "—"
+        _tnx = _results.get("tnx_d")
+        if _tnx and len(_tnx.get("closes", [])) >= 2:
+            try:
+                yield_10y        = round(_tnx["closes"][-1], 3)
+                _tnx_prev        = _tnx["closes"][-2]
+                yield_change_bps = round((yield_10y - _tnx_prev) * 100, 1)
+                if yield_change_bps > 10:
+                    yield_trend = "rising fast"
+                    yield_note  = "Pressure on growth/tech — rising rates headwind"
+                elif yield_change_bps > 2:
+                    yield_trend = "rising"
+                    yield_note  = "Watch tech — yields creeping higher"
+                elif yield_change_bps < -10:
+                    yield_trend = "falling fast"
+                    yield_note  = "Supportive for growth/tech — rates declining"
+                elif yield_change_bps < -2:
+                    yield_trend = "falling"
+                    yield_note  = "Mild tailwind for growth/tech"
+                else:
+                    yield_trend = "flat"
+                    yield_note  = "Neutral — no rate pressure"
+            except Exception:
+                pass
+
+        # DXY (US Dollar Index)
+        dxy_price      = None
+        dxy_change_pct = None
+        dxy_trend      = "flat"
+        _dxy = _results.get("dxy_d")
+        if _dxy and len(_dxy.get("closes", [])) >= 2:
+            try:
+                dxy_price      = round(_dxy["closes"][-1], 2)
+                _dxy_prev      = _dxy["closes"][-2]
+                dxy_change_pct = round((dxy_price - _dxy_prev) / _dxy_prev * 100, 2) if _dxy_prev else 0.0
+                if dxy_change_pct > 0.3:
+                    dxy_trend = "rising"
+                elif dxy_change_pct < -0.3:
+                    dxy_trend = "falling"
+            except Exception:
+                pass
+
+        # ── Score ─────────────────────────────────────────────────────────────
+        score   = 0
+        factors = []
+
+        if spy_pct_ema20 >= 0:
+            score += 1
+            factors.append(f"SPY +{spy_pct_ema20:.1f}% vs EMA20")
+        else:
+            score -= 1
+            factors.append(f"SPY {spy_pct_ema20:.1f}% vs EMA20")
+
+        if qqq_pct_ema20 >= 0:
+            score += 1
+            factors.append(f"QQQ +{qqq_pct_ema20:.1f}% vs EMA20")
+        else:
+            score -= 1
+            factors.append(f"QQQ {qqq_pct_ema20:.1f}% vs EMA20")
+
+        if spy_vs_vwap is not None:
+            if spy_vs_vwap >= 0:
+                score += 1
+                factors.append("SPY above VWAP")
+            else:
+                score -= 1
+                factors.append("SPY below VWAP")
+
+        if qqq_vs_vwap is not None:
+            if qqq_vs_vwap >= 0:
+                score += 1
+                factors.append("QQQ above VWAP")
+            else:
+                score -= 1
+                factors.append("QQQ below VWAP")
+
+        if spy_day_chg > 0.5:
+            score += 1
+            factors.append(f"SPY up {spy_day_chg:.1f}%")
+        elif spy_day_chg < -1.0:
+            score -= 1
+            factors.append(f"SPY down {abs(spy_day_chg):.1f}%")
+
+        vix_note = ""
+        if vix_level is not None:
+            if vix_level > 35:
+                score -= 4
+                vix_note = f"VIX {vix_level:.0f} — extreme fear"
+            elif vix_level > 28:
+                score -= 2
+                vix_note = f"VIX {vix_level:.0f} — elevated"
+            elif vix_level > 22:
+                score -= 1
+                vix_note = f"VIX {vix_level:.0f} — caution"
+            else:
+                score += 1
+                vix_note = f"VIX {vix_level:.0f} — calm"
+            if vix_direction == "rising" and vix_level > 20:
+                score -= 1
+                vix_note += " ↑"
+            elif vix_direction == "falling":
+                score += 1
+                vix_note += " ↓"
+
+        # ES futures contribution (primary driver)
+        if es_price is not None and es_change_pct is not None:
+            if es_change_pct > 0 and es_above_vwap:
+                score += 1
+                factors.append(f"ES +{es_change_pct:.1f}% above VWAP")
+            elif es_change_pct < 0 and es_above_vwap is False:
+                score -= 1
+                factors.append(f"ES {es_change_pct:.1f}% below VWAP")
+
+        # Sector strength contribution (scales with however many sectors have data)
+        _sector_vals = [v for v in sectors.values() if v is not None]
+        if _sector_vals:
+            _total_s = len(_sector_vals)
+            _green   = sum(1 for v in _sector_vals if v > 0)
+            _thresh_up   = max(3, round(_total_s * 0.60))
+            _thresh_down = max(1, round(_total_s * 0.25))
+            if _green >= _thresh_up:
+                score += 1
+                _top = max(
+                    ((k, v) for k, v in sectors.items() if v is not None),
+                    key=lambda x: x[1],
+                )
+                factors.append(f"{_green}/{_total_s} sectors green, {_top[0]} leads")
+            elif _green <= _thresh_down:
+                score -= 1
+                factors.append("sectors mostly red")
+
+        # ── Regime ────────────────────────────────────────────────────────────
+        if vix_level is not None and vix_level > 35:
+            regime, label, css = "NO_TRADE", "NO TRADE DAY", "mt-no-trade"
+            longs_ok, shorts_ok, reduce_size = False, False, True
+            mode_desc = "Stay flat"
+            reason_parts = ([vix_note] if vix_note else []) + [
+                f for f in factors if "-" in f or "below" in f or "down" in f
+            ][:2]
+        elif score >= 3:
+            regime, label, css = "RISK_ON", "ATTACK MODE", "mt-risk-on"
+            longs_ok, shorts_ok, reduce_size = True, False, False
+            mode_desc = "Momentum trades allowed"
+            reason_parts = [
+                f for f in factors if "+" in f or "above" in f or "up" in f
+            ][:3] + ([vix_note] if vix_note else [])
+        elif score >= 1:
+            regime, label, css = "NEUTRAL", "NEUTRAL", "mt-neutral"
+            longs_ok, shorts_ok, reduce_size = True, True, False
+            mode_desc = "Be selective"
+            reason_parts = factors[:3] + ([vix_note] if vix_note else [])
+        elif score >= -1:
+            regime, label, css = "CAUTION", "CAUTION / CHOP", "mt-caution"
+            longs_ok, shorts_ok, reduce_size = False, False, True
+            mode_desc = "Wait for clarity"
+            reason_parts = factors[:3] + ([vix_note] if vix_note else [])
+        else:
+            regime, label, css = "RISK_OFF", "DEFENSIVE MODE", "mt-risk-off"
+            longs_ok, shorts_ok, reduce_size = False, True, True
+            mode_desc = "Reduce risk / wait"
+            reason_parts = [
+                f for f in factors if "-" in f or "below" in f or "down" in f
+            ][:3] + ([vix_note] if vix_note else [])
+
+        reason = " · ".join(p for p in reason_parts if p)
+
+        # ── Meter score: map raw score [-8, +6] → [0, 100] ──────────────────
+        # Clamp to [-8, +6] (14-point range), then scale linearly.
+        # NO_TRADE forces the needle to the far-left extreme.
+        if regime == "NO_TRADE":
+            meter_score = 3
+        else:
+            _clamped    = max(-8, min(6, score))
+            meter_score = int(round((_clamped + 8) / 14 * 100))
+            meter_score = max(0, min(100, meter_score))
+
+        # ── Action message ────────────────────────────────────────────────────
+        _action_map = {
+            "NO_TRADE": "No-trade conditions",
+            "RISK_OFF":  "Shorts favored",
+            "CAUTION":   "Avoid chasing — wait for clarity",
+            "NEUTRAL":   "Selective — trade both sides carefully",
+            "RISK_ON":   "Longs favored",
+        }
+        action_msg = _action_map.get(regime, "—")
+
+        # ── Decision engine: zone from meter_score ────────────────────────────
+        # 0-20 = Extreme Risk Off, 21-40 = Risk Off, 41-60 = Neutral,
+        # 61-80 = Risk On, 81-100 = Extreme Risk On
+        if meter_score <= 20:
+            decision_cmd   = "DEFENSE MODE — Protect capital, avoid trades"
+            risk_pct_rec   = 3
+            size_multiplier = 0.25
+            size_zone      = "extreme-off"
+        elif meter_score <= 40:
+            decision_cmd   = "CAUTION — Only A+ setups, reduce size"
+            risk_pct_rec   = 5
+            size_multiplier = 0.5
+            size_zone      = "risk-off"
+        elif meter_score <= 60:
+            decision_cmd   = "SELECTIVE — Trade carefully, no chasing"
+            risk_pct_rec   = 7
+            size_multiplier = 0.8
+            size_zone      = "neutral"
+        elif meter_score <= 80:
+            decision_cmd   = "STANDARD MODE — Normal trading allowed"
+            risk_pct_rec   = 10
+            size_multiplier = 1.0
+            size_zone      = "risk-on"
+        else:
+            decision_cmd   = "ATTACK MODE — Momentum trades allowed"
+            risk_pct_rec   = 15
+            size_multiplier = 1.25
+            size_zone      = "extreme-on"
+
+        # ── Why: short human-readable one-liner from actual data ─────────────
+        _why_parts = []
+        _vwap_bullish = (
+            (spy_vs_vwap is not None and spy_vs_vwap > 0) and
+            (qqq_vs_vwap is not None and qqq_vs_vwap > 0)
+        )
+        _vwap_bearish = (
+            (spy_vs_vwap is not None and spy_vs_vwap < 0) and
+            (qqq_vs_vwap is not None and qqq_vs_vwap < 0)
+        )
+        _ema_bullish = spy_pct_ema20 > 0 and qqq_pct_ema20 > 0
+        _ema_bearish = spy_pct_ema20 < 0 and qqq_pct_ema20 < 0
+
+        if _vwap_bullish:
+            _why_parts.append("SPY & QQQ above VWAP")
+        elif _vwap_bearish:
+            _why_parts.append("SPY & QQQ below VWAP")
+        elif spy_vs_vwap is None:
+            if _ema_bullish:
+                _why_parts.append("SPY & QQQ above EMA20")
+            elif _ema_bearish:
+                _why_parts.append("SPY & QQQ below EMA20")
+
+        if spy_vs_vwap is not None and _ema_bullish:
+            _why_parts.append("above EMA20")
+        elif spy_vs_vwap is not None and _ema_bearish:
+            _why_parts.append("below EMA20")
+
+        if vix_level is not None:
+            if vix_level < 15:
+                _why_parts.append(f"VIX {vix_level:.0f} (very low)")
+            elif vix_level < 20:
+                _why_parts.append(f"VIX {vix_level:.0f} (calm)")
+            elif vix_level < 25:
+                _why_parts.append(f"VIX {vix_level:.0f} (elevated)")
+            else:
+                _dir = f" {vix_direction}" if vix_direction else ""
+                _why_parts.append(f"VIX {vix_level:.0f}{_dir} (high risk)")
+
+        if meter_score <= 20:
+            _why_suffix = "extreme risk-off conditions"
+        elif meter_score <= 40:
+            _why_suffix = "bearish conditions"
+        elif meter_score <= 60:
+            _why_suffix = "mixed/choppy conditions"
+        elif meter_score <= 80:
+            _why_suffix = "bullish conditions"
+        else:
+            _why_suffix = "strongly bullish conditions"
+
+        why = (", ".join(_why_parts) + f" → {_why_suffix}") if _why_parts else f"Score {meter_score}/100 — {_why_suffix}"
+
+        logger.info(
+            "compute_market_temperature  regime=%s  score=%s  meter=%s  zone=%s  vix=%.1f  reason=%s",
+            regime, score, meter_score, size_zone, vix_level or 0, reason,
+        )
+        return {
+            "regime":          regime,
+            "label":           label,
+            "css":             css,
+            "reason":          reason,
+            "mode_desc":       mode_desc,
+            "action_msg":      action_msg,
+            "longs_ok":        longs_ok,
+            "shorts_ok":       shorts_ok,
+            "reduce_size":     reduce_size,
+            "score":           score,
+            "meter_score":     meter_score,
+            "decision_cmd":    decision_cmd,
+            "risk_pct_rec":    risk_pct_rec,
+            "size_multiplier": size_multiplier,
+            "size_zone":       size_zone,
+            "why":             why,
+            "spy_price":       round(spy_price, 2),
+            "spy_pct_ema20":   round(spy_pct_ema20, 2),
+            "spy_vs_vwap":     round(spy_vs_vwap, 2) if spy_vs_vwap is not None else None,
+            "qqq_price":       round(qqq_price, 2),
+            "qqq_pct_ema20":   round(qqq_pct_ema20, 2),
+            "qqq_vs_vwap":     round(qqq_vs_vwap, 2) if qqq_vs_vwap is not None else None,
+            "vix_level":         round(vix_level, 1) if vix_level is not None else None,
+            "vix_direction":     vix_direction,
+            "es_price":          round(es_price, 2) if es_price is not None else None,
+            "es_change_pct":     round(es_change_pct, 2) if es_change_pct is not None else None,
+            "es_above_vwap":     es_above_vwap,
+            "yield_10y":         yield_10y,
+            "yield_change_bps":  yield_change_bps,
+            "yield_trend":       yield_trend,
+            "yield_note":        yield_note,
+            "dxy_price":         dxy_price,
+            "dxy_change_pct":    dxy_change_pct,
+            "dxy_trend":         dxy_trend,
+            "sectors":           sectors,
+            "error":             False,
+        }
+
+    except Exception as _e:
+        logger.warning("compute_market_temperature failed: %s", _e)
+        return {**_UNKNOWN, "reason": "Error computing market data"}
+
+
+def fetch_market_context() -> dict:
+    """
+    Lightweight fetch of ES futures + sector ETF data.
+    Cached externally (30 s). Returns data suitable for /api/market_context.
+    """
+    import threading as _thr
+
+    _results: dict = {}
+
+    def _fetch(key, ticker, interval, range_str):
+        try:
+            _results[key] = _fetch_ohlcv_via_chart_api(
+                ticker, interval=interval, range_str=range_str
+            )
+        except Exception:
+            _results[key] = None
+
+    _tasks = [
+        ("es_d",   "ES=F",      "1d", "5d"),
+        ("es_h",   "ES=F",      "1h", "5d"),
+        ("xlk_d",  "XLK",       "1d", "5d"),
+        ("xly_d",  "XLY",       "1d", "5d"),
+        ("xlf_d",  "XLF",       "1d", "5d"),
+        ("xle_d",  "XLE",       "1d", "5d"),
+        ("xlv_d",  "XLV",       "1d", "5d"),
+        ("xli_d",  "XLI",       "1d", "5d"),
+        ("xlu_d",  "XLU",       "1d", "5d"),
+        ("xlb_d",  "XLB",       "1d", "5d"),
+        ("xlre_d", "XLRE",      "1d", "5d"),
+        ("xlc_d",  "XLC",       "1d", "5d"),
+        ("smh_d",  "SMH",       "1d", "5d"),
+        ("iwm_d",  "IWM",       "1d", "5d"),
+        ("tnx_d",  "^TNX",      "1d", "5d"),
+        ("dxy_d",  "DX-Y.NYB",  "1d", "5d"),
+    ]
+    _threads = [_thr.Thread(target=_fetch, args=a, daemon=True) for a in _tasks]
+    for _t in _threads:
+        _t.start()
+    for _t in _threads:
+        _t.join(timeout=18)
+
+    # ES futures
+    es: dict = {"price": None, "change_pct": None, "above_vwap": None, "error": True}
+    es_d = _results.get("es_d")
+    es_h = _results.get("es_h")
+    if es_d and len(es_d.get("closes", [])) >= 2:
+        try:
+            _ep    = es_d["closes"][-1]
+            _eprev = es_d["closes"][-2]
+            # Intraday VWAP using today's hourly bars
+            _evwap = None
+            if es_h and es_h.get("timestamps"):
+                try:
+                    import zoneinfo as _zi
+                    from datetime import timezone as _tz
+                    _today_et = _et_now().strftime("%Y-%m-%d")
+                    _bars = [
+                        (c, h, lo, v)
+                        for ts, _, c, h, lo, v in zip(
+                            es_h["timestamps"], es_h["opens"],
+                            es_h["closes"],     es_h["highs"],
+                            es_h["lows"],        es_h["volumes"],
+                        )
+                        if datetime.fromtimestamp(ts, tz=_tz.utc)
+                           .astimezone(_zi.ZoneInfo("America/New_York"))
+                           .strftime("%Y-%m-%d") == _today_et
+                    ]
+                    if _bars:
+                        _tpv = sum((h + lo + c) / 3.0 * v for c, h, lo, v in _bars)
+                        _tv  = sum(v for _, _, _, v in _bars)
+                        if _tv > 0:
+                            _evwap = _tpv / _tv
+                except Exception:
+                    pass
+            es = {
+                "price":      round(_ep, 2),
+                "change_pct": round((_ep - _eprev) / _eprev * 100, 2),
+                "above_vwap": (bool(_ep > _evwap) if _evwap is not None else None),
+                "error":      False,
+            }
+        except Exception:
+            pass
+
+    # Sector ETFs (12 sectors)
+    sectors: dict = {}
+    for key, name in [
+        ("xlk_d","XLK"), ("xly_d","XLY"), ("xlf_d","XLF"), ("xle_d","XLE"),
+        ("xlv_d","XLV"), ("xli_d","XLI"), ("xlu_d","XLU"), ("xlb_d","XLB"),
+        ("xlre_d","XLRE"),("xlc_d","XLC"), ("smh_d","SMH"), ("iwm_d","IWM"),
+    ]:
+        d = _results.get(key)
+        if d and len(d.get("closes", [])) >= 2:
+            try:
+                _p  = d["closes"][-1]
+                _pp = d["closes"][-2]
+                sectors[name] = round((_p - _pp) / _pp * 100, 2)
+            except Exception:
+                sectors[name] = None
+        else:
+            sectors[name] = None
+
+    # 10Y Treasury yield
+    yield_10y = None; yield_change_bps = None; yield_trend = "flat"; yield_note = "—"
+    _tnx = _results.get("tnx_d")
+    if _tnx and len(_tnx.get("closes", [])) >= 2:
+        try:
+            yield_10y        = round(_tnx["closes"][-1], 3)
+            _tnx_prev        = _tnx["closes"][-2]
+            yield_change_bps = round((yield_10y - _tnx_prev) * 100, 1)
+            yield_trend = (
+                "rising fast" if yield_change_bps > 10 else
+                "rising"      if yield_change_bps > 2  else
+                "falling fast"if yield_change_bps < -10 else
+                "falling"     if yield_change_bps < -2 else "flat"
+            )
+            _note_map = {
+                "rising fast": "Pressure on growth/tech — rising rates headwind",
+                "rising":      "Watch tech — yields creeping higher",
+                "falling fast":"Supportive for growth/tech — rates declining",
+                "falling":     "Mild tailwind for growth/tech",
+                "flat":        "Neutral — no rate pressure",
+            }
+            yield_note = _note_map[yield_trend]
+        except Exception:
+            pass
+
+    # DXY
+    dxy_price = None; dxy_change_pct = None; dxy_trend = "flat"
+    _dxy = _results.get("dxy_d")
+    if _dxy and len(_dxy.get("closes", [])) >= 2:
+        try:
+            dxy_price      = round(_dxy["closes"][-1], 2)
+            _dxy_prev      = _dxy["closes"][-2]
+            dxy_change_pct = round((dxy_price - _dxy_prev) / _dxy_prev * 100, 2) if _dxy_prev else 0.0
+            dxy_trend = "rising" if dxy_change_pct > 0.3 else "falling" if dxy_change_pct < -0.3 else "flat"
+        except Exception:
+            pass
+
+    # After-hours flag (rough ET check — 9:30–16:00 = regular session)
+    after_hours = True
+    try:
+        _now_et = _et_now()
+        _mins   = _now_et.hour * 60 + _now_et.minute
+        after_hours = not (570 <= _mins < 960)   # 9:30–16:00
+    except Exception:
+        pass
+
+    return {
+        "es":              es,
+        "sectors":         sectors,
+        "after_hours":     after_hours,
+        "yield_10y":       yield_10y,
+        "yield_change_bps":yield_change_bps,
+        "yield_trend":     yield_trend,
+        "yield_note":      yield_note,
+        "dxy_price":       dxy_price,
+        "dxy_change_pct":  dxy_change_pct,
+        "dxy_trend":       dxy_trend,
+    }
