@@ -11,9 +11,7 @@
   }
 
   /* ── Header ── */
-  .rd-header {
-    margin-bottom: 2rem;
-  }
+  .rd-header { margin-bottom: 2rem; }
   .rd-title {
     font-family: var(--font-mono);
     font-size: 1.15rem;
@@ -60,19 +58,26 @@
     background: var(--brand-cyan);
     box-shadow: 0 0 5px var(--brand-cyan);
   }
-  .rd-card-body {
-    padding: 20px 18px;
-  }
+  .rd-card-body { padding: 20px 18px; }
 
-  /* ── Tier buttons ── */
+  /* ── Resource buttons ── */
+  .rd-resources-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
   .rd-tiers {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-bottom: 14px;
+    margin-bottom: 22px;
   }
   .rd-tier-btn {
-    padding: 6px 14px;
+    padding: 7px 14px;
     background: rgba(34,211,238,0.06);
     border: 1px solid rgba(34,211,238,0.18);
     border-radius: var(--radius);
@@ -85,6 +90,10 @@
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
   }
   .rd-tier-btn:hover {
     background: rgba(34,211,238,0.12);
@@ -93,10 +102,47 @@
   }
   .rd-tier-btn:active { transform: scale(0.98); }
 
-  /* ── Textarea ── */
+  /* ── Divider ── */
+  .rd-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 18px 0;
+  }
+
+  /* ── Note inputs ── */
+  .rd-input-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    display: block;
+  }
+  .rd-title-input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    margin-bottom: 12px;
+    box-sizing: border-box;
+  }
+  .rd-title-input::placeholder { color: var(--text-muted); }
+  .rd-title-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
   .rd-textarea {
     width: 100%;
-    min-height: 100px;
+    min-height: 120px;
     padding: 12px 14px;
     background: var(--bg);
     border: 1px solid var(--border);
@@ -109,7 +155,7 @@
     resize: vertical;
     transition: border-color 0.15s, box-shadow 0.15s;
     line-height: 1.55;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
     box-sizing: border-box;
   }
   .rd-textarea::placeholder { color: var(--text-muted); }
@@ -118,7 +164,7 @@
     box-shadow: 0 0 0 3px var(--accent-glow);
   }
 
-  /* ── Ask button ── */
+  /* ── Save button ── */
   .rd-ask-row {
     display: flex;
     align-items: center;
@@ -149,81 +195,14 @@
     cursor: not-allowed;
     transform: none;
   }
-
-  /* ── Spinner ── */
-  .rd-spinner {
-    display: none;
-    align-items: center;
-    gap: 10px;
+  .rd-status {
     font-family: var(--font-mono);
     font-size: 11px;
-    color: var(--text-muted);
-    letter-spacing: 0.08em;
-  }
-  .rd-spinner.active { display: flex; }
-  .rd-spinner-ring {
-    width: 16px; height: 16px;
-    border: 2px solid rgba(34,211,238,0.20);
-    border-top-color: var(--brand-cyan);
-    border-radius: 50%;
-    animation: rd-spin 0.7s linear infinite;
-  }
-  @keyframes rd-spin { to { transform: rotate(360deg); } }
-
-  /* ── Answer area ── */
-  .rd-answer-wrap {
-    display: none;
-    margin-top: 16px;
-  }
-  .rd-answer-wrap.visible { display: block; }
-  .rd-answer-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
-  }
-  .rd-answer-label {
-    font-family: var(--font-mono);
-    font-size: 9px;
-    font-weight: 800;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
     color: var(--text-dim);
+    letter-spacing: 0.05em;
   }
-  .rd-save-btn {
-    padding: 7px 16px;
-    background: var(--green-bg);
-    border: 1px solid var(--green-dim);
-    border-radius: var(--radius);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.10em;
-    text-transform: uppercase;
-    color: var(--green);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .rd-save-btn:hover {
-    background: rgba(34,197,94,0.15);
-    border-color: rgba(34,197,94,0.45);
-  }
-  .rd-save-btn:disabled {
-    opacity: 0.40;
-    cursor: not-allowed;
-  }
-  .rd-answer-body {
-    padding: 16px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    font-family: var(--font);
-    font-size: 13.5px;
-    line-height: 1.7;
-    color: var(--text);
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
+
+  /* ── Error ── */
   .rd-error-msg {
     padding: 10px 14px;
     background: var(--red-bg);
@@ -330,49 +309,55 @@
   <!-- Header -->
   <div class="rd-header">
     <h1 class="rd-title">▲ Research Desk</h1>
-    <p class="rd-subtitle">AI-powered market research · powered by Claude</p>
+    <p class="rd-subtitle">Market research &amp; personal study notes</p>
   </div>
 
-  <!-- Ask card -->
+  <!-- Free Resources card -->
   <div class="rd-card">
     <div class="rd-card-header">
       <span class="rd-card-dot"></span>
-      Ask a Research Question
+      Free Learning Resources
+    </div>
+    <div class="rd-card-body">
+      <div class="rd-resources-label">Open a topic in a new tab →</div>
+      <div class="rd-tiers">
+        <a class="rd-tier-btn" href="https://www.investopedia.com/financial-term-dictionary-4769738" target="_blank" rel="noopener">📚 Investopedia</a>
+        <a class="rd-tier-btn" href="https://fred.stlouisfed.org/" target="_blank" rel="noopener">📊 FRED Macro Data</a>
+        <a class="rd-tier-btn" href="https://finviz.com/screener.ashx" target="_blank" rel="noopener">🔍 Finviz Screener</a>
+        <a class="rd-tier-btn" href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=10-K&dateb=&owner=include&count=40" target="_blank" rel="noopener">📄 SEC Filings</a>
+        <a class="rd-tier-btn" href="https://finance.yahoo.com/markets/" target="_blank" rel="noopener">📈 Yahoo Markets</a>
+        <a class="rd-tier-btn" href="https://stockanalysis.com/stocks/" target="_blank" rel="noopener">📉 Stock Analysis</a>
+        <a class="rd-tier-btn" href="https://www.barchart.com/stocks/unusual-options-activity" target="_blank" rel="noopener">⚡ Options Flow</a>
+        <a class="rd-tier-btn" href="https://earningswhispers.com/calendar" target="_blank" rel="noopener">🗓 Earnings Calendar</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notes card -->
+  <div class="rd-card">
+    <div class="rd-card-header">
+      <span class="rd-card-dot"></span>
+      Save a Research Note
     </div>
     <div class="rd-card-body">
 
-      <!-- Quick-fill tier buttons -->
-      <div class="rd-tiers">
-        <button class="rd-tier-btn" onclick="prefillTier('origins')">Origins</button>
-        <button class="rd-tier-btn" onclick="prefillTier('mechanics')">Mechanics</button>
-        <button class="rd-tier-btn" onclick="prefillTier('macro')">Macro</button>
-        <button class="rd-tier-btn" onclick="prefillTier('fundamentals')">Fundamentals</button>
-        <button class="rd-tier-btn" onclick="prefillTier('ai-infra')">AI Infra</button>
-      </div>
+      <label class="rd-input-label" for="rd-title">Note title / topic</label>
+      <input id="rd-title" class="rd-title-input"
+        type="text"
+        placeholder="e.g. SPY gap analysis · June 17, or How EMA 9/21 crossover works"
+        maxlength="200" />
 
+      <label class="rd-input-label" for="rd-question">Your notes</label>
       <textarea id="rd-question" class="rd-textarea"
-        placeholder="Ask anything — e.g. 'What drives pre-market gaps in small-cap biotech?'"
-        rows="4"></textarea>
+        placeholder="Write what you learned, key levels, setup rules, market observations — anything you want to remember later."
+        rows="5"></textarea>
 
       <div class="rd-ask-row">
-        <button id="rd-ask-btn" class="rd-ask-btn" onclick="askQuestion()">⚡ Ask</button>
-        <div id="rd-spinner" class="rd-spinner">
-          <span class="rd-spinner-ring"></span>
-          <span>Researching…</span>
-        </div>
+        <button id="rd-ask-btn" class="rd-ask-btn" onclick="saveNote()">+ Save Note</button>
+        <span id="rd-status" class="rd-status"></span>
       </div>
 
-      <!-- Error -->
       <div id="rd-error" class="rd-error-msg"></div>
-
-      <!-- Answer -->
-      <div id="rd-answer-wrap" class="rd-answer-wrap">
-        <div class="rd-answer-header">
-          <span class="rd-answer-label">Answer</span>
-          <button id="rd-save-btn" class="rd-save-btn" onclick="saveToLog()">+ Save to Study Log</button>
-        </div>
-        <div id="rd-answer-body" class="rd-answer-body"></div>
-      </div>
 
     </div>
   </div>
@@ -395,89 +380,50 @@
 <script>
 (function() {
 
-  const TIER_PROMPTS = {
-    "origins":       "Explain the origins and history of [topic] in markets",
-    "mechanics":     "Explain how [topic] works mechanically in the market",
-    "macro":         "What is the macro/economic significance of [topic]?",
-    "fundamentals":  "Break down the fundamental analysis of [topic]",
-    "ai-infra":      "What is the AI infrastructure/tech angle on [topic]?",
-  };
+  // ── Save note directly to study log ─────────────────────────────────────
+  window.saveNote = async function() {
+    const titleEl  = document.getElementById("rd-title");
+    const notesEl  = document.getElementById("rd-question");
+    const btn      = document.getElementById("rd-ask-btn");
+    const statusEl = document.getElementById("rd-status");
+    const errEl    = document.getElementById("rd-error");
 
-  window.prefillTier = function(tier) {
-    const ta = document.getElementById("rd-question");
-    ta.value = TIER_PROMPTS[tier] || "";
-    ta.focus();
-    // Place cursor at [topic] so user can type straight away
-    const idx = ta.value.indexOf("[topic]");
-    if (idx !== -1) {
-      ta.setSelectionRange(idx, idx + 7);
+    const title = titleEl.value.trim();
+    const notes = notesEl.value.trim();
+
+    if (!title && !notes) {
+      titleEl.focus();
+      return;
     }
-  };
 
-  // ── Ask ──────────────────────────────────────────────────────────────────
-  let _lastQuestion = "";
-  let _lastAnswer   = "";
-
-  window.askQuestion = async function() {
-    const ta  = document.getElementById("rd-question");
-    const q   = ta.value.trim();
-    if (!q) { ta.focus(); return; }
-
-    const btn     = document.getElementById("rd-ask-btn");
-    const spinner = document.getElementById("rd-spinner");
-    const errEl   = document.getElementById("rd-error");
-    const ansWrap = document.getElementById("rd-answer-wrap");
-    const ansBody = document.getElementById("rd-answer-body");
-    const saveBtn = document.getElementById("rd-save-btn");
+    const topic   = title || "Untitled Note";
+    const content = notes || "(no notes)";
 
     btn.disabled = true;
-    spinner.classList.add("active");
+    statusEl.textContent = "Saving…";
     errEl.classList.remove("visible");
-    ansWrap.classList.remove("visible");
-    saveBtn.disabled = false;
-    _lastQuestion = q;
-    _lastAnswer   = "";
 
-    try {
-      const res = await fetch("/api/research/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Server error " + res.status);
-      }
-      _lastAnswer = data.answer || "";
-      ansBody.textContent = _lastAnswer;
-      ansWrap.classList.add("visible");
-    } catch (err) {
-      errEl.textContent = "⚠ " + err.message;
-      errEl.classList.add("visible");
-    } finally {
-      btn.disabled = false;
-      spinner.classList.remove("active");
-    }
-  };
-
-  // ── Save to log ──────────────────────────────────────────────────────────
-  window.saveToLog = async function() {
-    if (!_lastQuestion || !_lastAnswer) return;
-    const saveBtn = document.getElementById("rd-save-btn");
-    saveBtn.disabled = true;
     try {
       const res = await fetch("/api/study-log", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: _lastQuestion, answer: _lastAnswer }),
+        body: JSON.stringify({ question: topic, answer: content }),
       });
       const data = await res.json();
-      if (data.ok) {
-        saveBtn.textContent = "✓ Saved";
-        loadLog();
-      }
-    } catch (e) {
-      saveBtn.disabled = false;
+      if (!res.ok || !data.ok) throw new Error(data.error || "Save failed");
+
+      // Clear inputs
+      titleEl.value = "";
+      notesEl.value = "";
+      statusEl.textContent = "✓ Saved";
+      setTimeout(() => { statusEl.textContent = ""; }, 2500);
+      loadLog();
+    } catch (err) {
+      errEl.textContent = "⚠ " + err.message;
+      errEl.classList.add("visible");
+      statusEl.textContent = "";
+    } finally {
+      btn.disabled = false;
     }
   };
 
@@ -493,7 +439,7 @@
   function renderLog(entries) {
     const el = document.getElementById("rd-log-list");
     if (!entries.length) {
-      el.innerHTML = '<div class="rd-empty">Your study log is empty — ask something and save it.</div>';
+      el.innerHTML = '<div class="rd-empty">No notes yet — start researching and save what you learn.</div>';
       return;
     }
     el.innerHTML = entries.map(function(e) {
@@ -532,10 +478,9 @@
       if (data.ok) {
         const row = document.getElementById("log-entry-" + id);
         if (row) row.remove();
-        // Show empty state if nothing left
         const el = document.getElementById("rd-log-list");
         if (!el.querySelector(".rd-log-entry")) {
-          el.innerHTML = '<div class="rd-empty">Your study log is empty — ask something and save it.</div>';
+          el.innerHTML = '<div class="rd-empty">No notes yet — start researching and save what you learn.</div>';
         }
       }
     } catch (e) { /* silent */ }
@@ -549,12 +494,12 @@
       .replace(/"/g, "&quot;");
   }
 
-  // Allow Ctrl+Enter / Cmd+Enter to submit
+  // Ctrl+Enter / Cmd+Enter to save
   document.addEventListener("DOMContentLoaded", function() {
     document.getElementById("rd-question").addEventListener("keydown", function(e) {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
-        askQuestion();
+        saveNote();
       }
     });
     loadLog();
