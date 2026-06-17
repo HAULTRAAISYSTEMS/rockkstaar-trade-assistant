@@ -679,6 +679,17 @@ def init_db():
         )
     """))
 
+    # AI research study log — saved Q&A pairs per user
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS study_log (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            question   TEXT    NOT NULL,
+            answer     TEXT    NOT NULL,
+            created_at TEXT    NOT NULL
+        )
+    """))
+
     # ── Multi-user migration: add user_id columns to all user-data tables ───
     _user_tables = [
         "watchlists", "notes", "trade_plans", "journal",
@@ -2390,3 +2401,45 @@ def get_ndx_latest_constituents(limit: int = 15) -> list:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Study log helpers
+# ---------------------------------------------------------------------------
+
+def save_study_log_entry(user_id: int, question: str, answer: str) -> int:
+    """Save a Q&A pair to the study log. Returns the new entry id."""
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO study_log (user_id, question, answer, created_at) VALUES (?, ?, ?, ?)",
+        (user_id, question, answer, datetime.now().isoformat()),
+        returning_id=True,
+    )
+    new_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def get_study_log(user_id: int) -> list:
+    """Return all study log entries for a user, newest first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, question, answer, created_at FROM study_log "
+        "WHERE user_id = ? ORDER BY id DESC",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_study_log_entry(user_id: int, entry_id: int) -> bool:
+    """Delete a study log entry (scoped to user). Returns True if a row was deleted."""
+    conn = get_db()
+    conn.execute(
+        "DELETE FROM study_log WHERE id = ? AND user_id = ?",
+        (entry_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+    return True

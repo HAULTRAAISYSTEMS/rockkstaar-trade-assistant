@@ -46,6 +46,7 @@ from database import (
     add_scanner_alert, get_scanner_alerts, mark_scanner_alerts_seen,
     get_unseen_scanner_alert_count, clear_scanner_alerts,
     save_setup_outcome, get_setup_outcome_stats,
+    save_study_log_entry, get_study_log, delete_study_log_entry,
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
 from data_fetcher import _et_now, market_session_now, orb_phase_now
@@ -5635,6 +5636,74 @@ def admin_user_password(uid):
     update_user_password(uid, new_password)
     flash("Password updated.", "success")
     return redirect(url_for("admin_users"))
+
+
+# ---------------------------------------------------------------------------
+# Research Desk
+# ---------------------------------------------------------------------------
+
+@app.route("/research")
+def research_page():
+    return render_template("research.html")
+
+
+@app.route("/api/research/ask", methods=["POST"])
+@csrf.exempt
+def api_research_ask():
+    """Call Anthropic with web_search enabled and return the answer."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return jsonify({"ok": False, "error": "ANTHROPIC_API_KEY is not configured on this server."}), 503
+
+    data = request.get_json(force=True, silent=True) or {}
+    question = (data.get("question") or "").strip()
+    if not question:
+        return jsonify({"ok": False, "error": "question is required"}), 400
+
+    try:
+        import anthropic as _anthropic
+        client = _anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+            messages=[{"role": "user", "content": question}],
+        )
+        # Collect all text blocks from the response
+        answer_parts = []
+        for block in response.content:
+            if hasattr(block, "text"):
+                answer_parts.append(block.text)
+        answer = "\n\n".join(answer_parts).strip() or "(no text response)"
+        return jsonify({"ok": True, "answer": answer})
+    except Exception as exc:
+        logger.exception("Research ask error")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/study-log", methods=["GET"])
+def api_study_log_get():
+    entries = get_study_log(current_user_id())
+    return jsonify({"ok": True, "entries": entries})
+
+
+@app.route("/api/study-log", methods=["POST"])
+@csrf.exempt
+def api_study_log_save():
+    data = request.get_json(force=True, silent=True) or {}
+    question = (data.get("question") or "").strip()
+    answer = (data.get("answer") or "").strip()
+    if not question or not answer:
+        return jsonify({"ok": False, "error": "question and answer are required"}), 400
+    entry_id = save_study_log_entry(current_user_id(), question, answer)
+    return jsonify({"ok": True, "id": entry_id})
+
+
+@app.route("/api/study-log/<int:entry_id>", methods=["DELETE"])
+@csrf.exempt
+def api_study_log_delete(entry_id):
+    delete_study_log_entry(current_user_id(), entry_id)
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------

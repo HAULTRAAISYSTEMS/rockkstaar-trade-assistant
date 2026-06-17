@@ -1,0 +1,562 @@
+{% extends "base.html" %}
+{% block title %}Research Desk — Rockkstaar Trade Assistant{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* ── Page shell ── */
+  .rd-wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 1.25rem 4rem;
+  }
+
+  /* ── Header ── */
+  .rd-header {
+    margin-bottom: 2rem;
+  }
+  .rd-title {
+    font-family: var(--mono);
+    font-size: 1.15rem;
+    font-weight: 900;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--cyan);
+    margin: 0 0 4px;
+  }
+  .rd-subtitle {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  /* ── Card ── */
+  .rd-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+  }
+  .rd-card-header {
+    padding: 11px 18px;
+    background: rgba(0,0,0,0.30);
+    border-bottom: 1px solid rgba(34,211,238,0.08);
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--cyan);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .rd-card-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 5px var(--cyan);
+  }
+  .rd-card-body {
+    padding: 20px 18px;
+  }
+
+  /* ── Tier buttons ── */
+  .rd-tiers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .rd-tier-btn {
+    padding: 6px 14px;
+    background: rgba(34,211,238,0.06);
+    border: 1px solid rgba(34,211,238,0.18);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .rd-tier-btn:hover {
+    background: rgba(34,211,238,0.12);
+    border-color: rgba(34,211,238,0.35);
+    color: var(--cyan);
+  }
+  .rd-tier-btn:active { transform: scale(0.98); }
+
+  /* ── Textarea ── */
+  .rd-textarea {
+    width: 100%;
+    min-height: 100px;
+    padding: 12px 14px;
+    background: rgba(0,0,0,0.45);
+    border: 1px solid rgba(34,211,238,0.15);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    outline: none;
+    resize: vertical;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    line-height: 1.55;
+    margin-bottom: 12px;
+  }
+  .rd-textarea::placeholder { color: var(--dim); }
+  .rd-textarea:focus {
+    border-color: rgba(34,211,238,0.38);
+    box-shadow: 0 0 0 3px rgba(34,211,238,0.05);
+  }
+
+  /* ── Ask button ── */
+  .rd-ask-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .rd-ask-btn {
+    padding: 11px 28px;
+    background: rgba(34,211,238,0.10);
+    border: 1px solid rgba(34,211,238,0.28);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--cyan);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .rd-ask-btn:hover {
+    background: rgba(34,211,238,0.18);
+    border-color: rgba(34,211,238,0.50);
+    box-shadow: 0 0 14px rgba(34,211,238,0.10);
+  }
+  .rd-ask-btn:active { transform: scale(0.99); }
+  .rd-ask-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  /* ── Spinner ── */
+  .rd-spinner {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+  }
+  .rd-spinner.active { display: flex; }
+  .rd-spinner-ring {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(34,211,238,0.20);
+    border-top-color: var(--cyan);
+    border-radius: 50%;
+    animation: rd-spin 0.7s linear infinite;
+  }
+  @keyframes rd-spin { to { transform: rotate(360deg); } }
+
+  /* ── Answer area ── */
+  .rd-answer-wrap {
+    display: none;
+    margin-top: 16px;
+  }
+  .rd-answer-wrap.visible { display: block; }
+  .rd-answer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .rd-answer-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .rd-save-btn {
+    padding: 7px 16px;
+    background: rgba(34,197,94,0.08);
+    border: 1px solid rgba(34,197,94,0.25);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--green);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .rd-save-btn:hover {
+    background: rgba(34,197,94,0.15);
+    border-color: rgba(34,197,94,0.45);
+  }
+  .rd-save-btn:disabled {
+    opacity: 0.40;
+    cursor: not-allowed;
+  }
+  .rd-answer-body {
+    padding: 16px;
+    background: rgba(0,0,0,0.30);
+    border: 1px solid rgba(34,211,238,0.10);
+    border-radius: 4px;
+    font-family: var(--ui);
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .rd-error-msg {
+    padding: 10px 14px;
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.22);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: #ef4444;
+    margin-top: 12px;
+    display: none;
+  }
+  .rd-error-msg.visible { display: block; }
+
+  /* ── Study log ── */
+  .rd-log-entry {
+    border-bottom: 1px solid rgba(34,211,238,0.06);
+    padding: 14px 0;
+  }
+  .rd-log-entry:last-child { border-bottom: none; }
+  .rd-log-q-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .rd-log-q {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.45;
+    flex: 1;
+  }
+  .rd-log-meta {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--dim);
+    white-space: nowrap;
+    margin-top: 2px;
+  }
+  .rd-log-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .rd-log-toggle {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    transition: color 0.15s;
+  }
+  .rd-log-q-row:hover .rd-log-toggle { color: var(--cyan); }
+  .rd-log-del {
+    background: none;
+    border: none;
+    font-size: 13px;
+    color: var(--dim);
+    cursor: pointer;
+    padding: 2px 4px;
+    transition: color 0.15s;
+    line-height: 1;
+  }
+  .rd-log-del:hover { color: #ef4444; }
+  .rd-log-answer {
+    display: none;
+    margin-top: 10px;
+    padding: 12px 14px;
+    background: rgba(0,0,0,0.28);
+    border: 1px solid rgba(34,211,238,0.08);
+    border-radius: 4px;
+    font-family: var(--ui);
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: var(--muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .rd-log-answer.open { display: block; }
+
+  .rd-empty {
+    padding: 28px 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dim);
+    text-align: center;
+    letter-spacing: 0.05em;
+  }
+
+  @media (max-width: 600px) {
+    .rd-tiers { gap: 6px; }
+    .rd-tier-btn { font-size: 9px; padding: 5px 10px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rd-wrap">
+
+  <!-- Header -->
+  <div class="rd-header">
+    <h1 class="rd-title">▲ Research Desk</h1>
+    <p class="rd-subtitle">AI-powered market research · powered by Claude</p>
+  </div>
+
+  <!-- Ask card -->
+  <div class="rd-card">
+    <div class="rd-card-header">
+      <span class="rd-card-dot"></span>
+      Ask a Research Question
+    </div>
+    <div class="rd-card-body">
+
+      <!-- Quick-fill tier buttons -->
+      <div class="rd-tiers">
+        <button class="rd-tier-btn" onclick="prefillTier('origins')">Origins</button>
+        <button class="rd-tier-btn" onclick="prefillTier('mechanics')">Mechanics</button>
+        <button class="rd-tier-btn" onclick="prefillTier('macro')">Macro</button>
+        <button class="rd-tier-btn" onclick="prefillTier('fundamentals')">Fundamentals</button>
+        <button class="rd-tier-btn" onclick="prefillTier('ai-infra')">AI Infra</button>
+      </div>
+
+      <textarea id="rd-question" class="rd-textarea"
+        placeholder="Ask anything — e.g. 'What drives pre-market gaps in small-cap biotech?'"
+        rows="4"></textarea>
+
+      <div class="rd-ask-row">
+        <button id="rd-ask-btn" class="rd-ask-btn" onclick="askQuestion()">⚡ Ask</button>
+        <div id="rd-spinner" class="rd-spinner">
+          <span class="rd-spinner-ring"></span>
+          <span>Researching…</span>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div id="rd-error" class="rd-error-msg"></div>
+
+      <!-- Answer -->
+      <div id="rd-answer-wrap" class="rd-answer-wrap">
+        <div class="rd-answer-header">
+          <span class="rd-answer-label">Answer</span>
+          <button id="rd-save-btn" class="rd-save-btn" onclick="saveToLog()">+ Save to Study Log</button>
+        </div>
+        <div id="rd-answer-body" class="rd-answer-body"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Study log card -->
+  <div class="rd-card">
+    <div class="rd-card-header">
+      <span class="rd-card-dot" style="background:var(--green);box-shadow:0 0 5px var(--green);"></span>
+      Study Log
+    </div>
+    <div class="rd-card-body" style="padding:0 18px;">
+      <div id="rd-log-list"></div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+
+  const TIER_PROMPTS = {
+    "origins":       "Explain the origins and history of [topic] in markets",
+    "mechanics":     "Explain how [topic] works mechanically in the market",
+    "macro":         "What is the macro/economic significance of [topic]?",
+    "fundamentals":  "Break down the fundamental analysis of [topic]",
+    "ai-infra":      "What is the AI infrastructure/tech angle on [topic]?",
+  };
+
+  window.prefillTier = function(tier) {
+    const ta = document.getElementById("rd-question");
+    ta.value = TIER_PROMPTS[tier] || "";
+    ta.focus();
+    // Place cursor at [topic] so user can type straight away
+    const idx = ta.value.indexOf("[topic]");
+    if (idx !== -1) {
+      ta.setSelectionRange(idx, idx + 7);
+    }
+  };
+
+  // ── Ask ──────────────────────────────────────────────────────────────────
+  let _lastQuestion = "";
+  let _lastAnswer   = "";
+
+  window.askQuestion = async function() {
+    const ta  = document.getElementById("rd-question");
+    const q   = ta.value.trim();
+    if (!q) { ta.focus(); return; }
+
+    const btn     = document.getElementById("rd-ask-btn");
+    const spinner = document.getElementById("rd-spinner");
+    const errEl   = document.getElementById("rd-error");
+    const ansWrap = document.getElementById("rd-answer-wrap");
+    const ansBody = document.getElementById("rd-answer-body");
+    const saveBtn = document.getElementById("rd-save-btn");
+
+    btn.disabled = true;
+    spinner.classList.add("active");
+    errEl.classList.remove("visible");
+    ansWrap.classList.remove("visible");
+    saveBtn.disabled = false;
+    _lastQuestion = q;
+    _lastAnswer   = "";
+
+    try {
+      const res = await fetch("/api/research/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Server error " + res.status);
+      }
+      _lastAnswer = data.answer || "";
+      ansBody.textContent = _lastAnswer;
+      ansWrap.classList.add("visible");
+    } catch (err) {
+      errEl.textContent = "⚠ " + err.message;
+      errEl.classList.add("visible");
+    } finally {
+      btn.disabled = false;
+      spinner.classList.remove("active");
+    }
+  };
+
+  // ── Save to log ──────────────────────────────────────────────────────────
+  window.saveToLog = async function() {
+    if (!_lastQuestion || !_lastAnswer) return;
+    const saveBtn = document.getElementById("rd-save-btn");
+    saveBtn.disabled = true;
+    try {
+      const res = await fetch("/api/study-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: _lastQuestion, answer: _lastAnswer }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        saveBtn.textContent = "✓ Saved";
+        loadLog();
+      }
+    } catch (e) {
+      saveBtn.disabled = false;
+    }
+  };
+
+  // ── Study log ────────────────────────────────────────────────────────────
+  async function loadLog() {
+    try {
+      const res  = await fetch("/api/study-log");
+      const data = await res.json();
+      renderLog(data.entries || []);
+    } catch (e) { /* silent */ }
+  }
+
+  function renderLog(entries) {
+    const el = document.getElementById("rd-log-list");
+    if (!entries.length) {
+      el.innerHTML = '<div class="rd-empty">Your study log is empty — ask something and save it.</div>';
+      return;
+    }
+    el.innerHTML = entries.map(function(e) {
+      const date = e.created_at ? e.created_at.slice(0, 10) : "";
+      const qEsc = escHtml(e.question);
+      const aEsc = escHtml(e.answer);
+      return `<div class="rd-log-entry" id="log-entry-${e.id}">
+        <div class="rd-log-q-row" onclick="toggleAnswer(${e.id})">
+          <div style="flex:1">
+            <div class="rd-log-q">${qEsc}</div>
+            <div class="rd-log-meta">${date}</div>
+          </div>
+          <div class="rd-log-controls">
+            <span class="rd-log-toggle" id="log-toggle-${e.id}">▾</span>
+            <button class="rd-log-del" onclick="deleteEntry(event, ${e.id})" title="Delete">✕</button>
+          </div>
+        </div>
+        <div class="rd-log-answer" id="log-answer-${e.id}">${aEsc}</div>
+      </div>`;
+    }).join("");
+  }
+
+  window.toggleAnswer = function(id) {
+    const el     = document.getElementById("log-answer-" + id);
+    const toggle = document.getElementById("log-toggle-" + id);
+    if (!el) return;
+    const open = el.classList.toggle("open");
+    toggle.textContent = open ? "▴" : "▾";
+  };
+
+  window.deleteEntry = async function(evt, id) {
+    evt.stopPropagation();
+    try {
+      const res = await fetch("/api/study-log/" + id, { method: "DELETE" });
+      const data = await res.json();
+      if (data.ok) {
+        const row = document.getElementById("log-entry-" + id);
+        if (row) row.remove();
+        // Show empty state if nothing left
+        const el = document.getElementById("rd-log-list");
+        if (!el.querySelector(".rd-log-entry")) {
+          el.innerHTML = '<div class="rd-empty">Your study log is empty — ask something and save it.</div>';
+        }
+      }
+    } catch (e) { /* silent */ }
+  };
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  // Allow Ctrl+Enter / Cmd+Enter to submit
+  document.addEventListener("DOMContentLoaded", function() {
+    document.getElementById("rd-question").addEventListener("keydown", function(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        askQuestion();
+      }
+    });
+    loadLog();
+  });
+
+})();
+</script>
+{% endblock %}
