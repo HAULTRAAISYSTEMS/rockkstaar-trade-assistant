@@ -580,3 +580,123 @@
     padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+
+/* ═══════════════════════════════════════════════════════════
+   ADDITIONAL MOBILE & iPAD IMPROVEMENTS — 2026-06-16
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── A. TOUCH — eliminate 300ms tap delay everywhere ───── */
+button,
+a,
+input,
+select,
+textarea,
+label,
+.btn,
+.nav-link,
+.wl-tab,
+.wl-manage-btn,
+.mobile-ctrl-btn,
+.filter-btn,
+.filter-discipline-btn,
+.mode-btn,
+.top5-card,
+.summary-card {
+  touch-action: manipulation;
+}
+
+/* ─── B. INTERACTIVE FEEDBACK (tap active state) ────────── */
+@media (hover: none) {
+  .btn:active,
+  .nav-link:active,
+  .wl-tab:active,
+  .mobile-ctrl-btn:active,
+  .filter-btn:active,
+  .top5-card:active,
+  .summary-card:active {
+    opacity: 0.72;
+    transform: scale(0.97);
+    transition: opacity 0.08s, transform 0.08s;
+  }
+}
+
+/* ─── C. HORIZONTAL SCROLL — native momentum everywhere ─── */
+.table-wrap,
+.orb-scroll-wrap,
+.filter-bar,
+.wl-tabs-row {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.table-wrap::-webkit-scrollbar,
+.filter-bar::-webkit-scrollbar { display: none; }
+
+/* ─── D. iPAD PORTRAIT (≤ 768px) — 2-col card grids ─────── */
+@media (max-width: 768px) {
+  .secondary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .detail-row { grid-template-columns: 1fr 1fr; }
+}
+
+/* ─── E. PHONE (≤ 480px) — secondary grid stacks ──────── */
+@media (max-width: 480px) {
+  .secondary-grid { grid-template-columns: 1fr; }
+  .detail-row     { grid-template-columns: 1fr; }
+}
+
+/* ─── F. MOBILE CTRL BAR — 44px min touch targets ──────── */
+@media (max-width: 768px) {
+  .mobile-ctrl-bar {
+    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .mobile-ctrl-btn {
+    min-height: 44px;
+    min-width: 44px;
+    font-size: 0.8rem;
+  }
+  .wl-tab,
+  .wl-manage-btn,
+  .mode-btn {
+    min-height: 44px;
+  }
+  .nav-brand {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
+
+/* ─── G. iPAD LANDSCAPE (1025px – 1180px) ───────────────── */
+@media (min-width: 1025px) and (max-width: 1180px) {
+  .navbar { padding: 0 0.75rem; }
+  .nav-link { font-size: 0.72rem; padding: 0.3rem 0.6rem; }
+  .main-content { padding-left: 0.75rem; padding-right: 0.75rem; }
+}
+
+/* ─── H. FLUID FONT SCALING (clamp) ─────────────────────── */
+@media (max-width: 768px) {
+  .summary-card-ticker {
+    font-size: clamp(0.9rem, 4vw, 1.4rem);
+  }
+  .summary-card-value {
+    font-size: clamp(0.85rem, 3.5vw, 1.1rem);
+  }
+  .detail-ticker {
+    font-size: clamp(1.2rem, 6vw, 1.8rem);
+  }
+  .detail-price {
+    font-size: clamp(1.1rem, 5.5vw, 1.6rem);
+  }
+  .daily-banner-text {
+    font-size: clamp(0.7rem, 3.2vw, 0.88rem);
+  }
+}
+
+/* ─── I. PHONE SMALL — market temperature badges ────────── */
+@media (max-width: 480px) {
+  .mt-badge  { font-size: clamp(0.62rem, 2.8vw, 0.78rem); }
+  .mt-action { font-size: clamp(0.65rem, 3vw, 0.8rem); }
+}
