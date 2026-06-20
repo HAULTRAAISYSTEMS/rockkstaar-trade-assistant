@@ -415,6 +415,60 @@ def _company_name(ticker: str) -> str:
     return _COMPANY_NAMES.get(ticker.upper(), "")
 
 
+# Static one-line "what does this company do" blurbs for the same universe
+# as _COMPANY_NAMES. yfinance's .info endpoint (the only free source of a
+# real description) has proven unreliable on this host — Yahoo intermittently
+#401s/429s it even outside the bulk-fetch crash loop — so this is the
+# primary source for known tickers, with yfinance only as best-effort for
+# tickers outside this list.
+_COMPANY_DESCRIPTIONS: dict[str, str] = {
+    "NVDA": "Designs GPUs and AI accelerator chips that power data centers, gaming, and machine learning workloads.",
+    "AMD":  "Designs CPUs and GPUs for PCs, servers, and data centers, competing directly with Intel and NVIDIA.",
+    "TSLA": "Designs and manufactures electric vehicles, batteries, and solar energy products.",
+    "AAPL": "Designs and sells the iPhone, Mac, and iPad, plus a growing services ecosystem including the App Store.",
+    "META": "Owns Facebook, Instagram, and WhatsApp, and is investing heavily in AI and the metaverse.",
+    "GOOGL": "Google's parent company — dominates search and online advertising while investing in cloud, AI, and Waymo self-driving cars.",
+    "AMZN": "The largest US e-commerce retailer and owner of AWS, the leading cloud computing platform.",
+    "MSFT": "Sells the Windows OS, Office productivity suite, and Azure cloud services, with major AI investments through OpenAI.",
+    "PLTR": "Builds data analytics software used by government agencies and large enterprises for intelligence and operations.",
+    "SOFI": "Offers online personal loans, student loan refinancing, banking, and investing services.",
+    "IONQ": "Builds trapped-ion quantum computers and sells quantum computing access via the cloud.",
+    "RGTI": "Designs and builds superconducting quantum computing chips and systems.",
+    "QUBT": "Develops quantum and photonic computing hardware and software.",
+    "JOBY": "Developing electric vertical takeoff and landing (eVTOL) aircraft for air taxi services.",
+    "ACHR": "Developing electric vertical takeoff and landing (eVTOL) aircraft for urban air mobility.",
+    "RKLB": "Designs, builds, and launches small satellites and rockets, and makes spacecraft components.",
+    "LUNR": "Builds lunar landers and provides space exploration services for NASA and commercial clients.",
+    "OKLO": "Developing small modular nuclear fission reactors for clean energy generation.",
+    "SMR":  "Designs small modular nuclear reactors for utility-scale power generation.",
+    "NNE":  "Develops portable microreactor technology for clean nuclear power.",
+    "CEG":  "The largest producer of carbon-free electricity in the US, operating a major nuclear power fleet.",
+    "VST":  "An integrated power company that generates and sells electricity across multiple US markets.",
+    "NRG":  "Generates and sells electricity and provides energy management services to homes and businesses.",
+    "GEV":  "Makes power generation equipment including gas turbines, wind turbines, and grid technology.",
+    "FSLR": "Manufactures thin-film solar panels used in large-scale solar power installations.",
+    "NEE":  "One of the largest utility holding companies, with major investments in wind and solar power.",
+    "SO":   "A major regulated electric and gas utility serving the southeastern US.",
+    "JPM":  "The largest US bank by assets, offering consumer banking, investment banking, and asset management.",
+    "BAC":  "One of the largest US banks, offering consumer banking, wealth management, and investment banking.",
+    "GS":   "A leading global investment bank providing trading, asset management, and advisory services.",
+    "V":    "Operates the world's largest electronic payments network, processing card transactions globally.",
+    "MA":   "Operates a global electronic payments network connecting consumers, merchants, and banks.",
+    "HD":   "The largest home improvement retailer in the US, selling building materials and tools.",
+    "WMT":  "The world's largest retailer, operating supercenters, discount stores, and a growing e-commerce business.",
+    "COST": "Operates membership-based warehouse clubs selling groceries and general merchandise in bulk.",
+    "XOM":  "One of the world's largest oil and gas companies, involved in exploration, production, and refining.",
+    "CVX":  "A major integrated oil and gas company engaged in exploration, production, and refining.",
+    "OXY":  "An oil and gas exploration and production company with growing carbon capture operations.",
+    "LMT":  "A leading defense contractor making fighter jets, missiles, and aerospace systems.",
+    "RTX":  "Aerospace and defense systems maker (formerly Raytheon) — jet engines, missiles, and avionics.",
+}
+
+
+def _company_description(ticker: str) -> str:
+    return _COMPANY_DESCRIPTIONS.get(ticker.upper(), "")
+
+
 # ── Company profile (name / sector / industry / description) ─────────────────
 # Company fundamentals barely change — cached in stock_data indefinitely.
 # Pass force=True to bypass the cache and refetch.
@@ -437,6 +491,12 @@ def fetch_company_profile(ticker: str, force: bool = False) -> dict:
 
     if not force:
         cached = get_company_profile(ticker)
+        if cached and cached.get("fetched_at"):
+            # If a cached row is missing a description but we now have a
+            # static one for this ticker, fall through and refresh instead
+            # of serving the stale gap for up to 30 days.
+            if not cached.get("description") and _company_description(ticker):
+                cached = None
         if cached and cached.get("fetched_at"):
             try:
                 age_days = (datetime.now() - datetime.fromisoformat(cached["fetched_at"])).days
@@ -462,16 +522,24 @@ def fetch_company_profile(ticker: str, force: bool = False) -> dict:
         except Exception as e:
             logger.debug("intel/profile finnhub %s: %s", ticker, e)
 
-    # yfinance backstops name/industry and is the only free source of a
-    # plain-English description + GICS sector.
+    # Static description first — instant and reliable. yfinance's .info
+    # endpoint (the only free source of a real description) has proven
+    # unreliable on this host (Yahoo intermittently 401s/429s it even
+    # outside the bulk-fetch crash loop), so it's a best-effort enhancement
+    # only, not the primary path.
+    if not profile.get("description"):
+        static_desc = _company_description(ticker)
+        if static_desc:
+            profile["description"] = static_desc
+
     if (not profile.get("description") or not profile.get("sector")) and not _yf_is_rate_limited():
         try:
             import yfinance as yf
             info = yf.Ticker(ticker).info or {}
             profile["company_name"] = profile.get("company_name") or info.get("longName") or info.get("shortName")
-            profile["sector"]       = info.get("sector")
+            profile["sector"]       = profile.get("sector") or info.get("sector")
             profile["industry"]     = profile.get("industry") or info.get("industry")
-            profile["description"]  = info.get("longBusinessSummary")
+            profile["description"]  = profile.get("description") or info.get("longBusinessSummary")
             profile["logo_url"]     = profile.get("logo_url") or info.get("logo_url")
         except Exception as e:
             if _is_yf_rate_limit_error(e):
