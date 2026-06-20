@@ -52,7 +52,7 @@ from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_sto
 from data_fetcher import _et_now, market_session_now, orb_phase_now
 from scoring import (catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES,
                      compute_swing_grade, compute_continuation_score)
-from classifier import classify_stock
+from classifier import classify, classify_stock, A_PLUS_READY
 from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as _clear_alerts
 from news_fetcher import CATALYST_CATEGORIES as _CAT_DEFS, freshness_label as _fl
 import scanner as _scanner
@@ -716,15 +716,18 @@ def build_ai_trade_plan(stock: dict) -> dict:
     except Exception:
         pass
 
-    # Grade
-    if swing_score >= 8 and cat_score >= 6 and rr and rr >= 2:
-        grade, grade_css = "A+", "plan-aplus"
-    elif swing_score >= 7 and cat_score >= 5:
-        grade, grade_css = "A",  "plan-a"
-    elif swing_score >= 5 or cat_score >= 5:
-        grade, grade_css = "B+", "plan-bplus"
-    else:
-        grade, grade_css = "B",  "plan-b"
+    # Grade — read from the canonical classify() result instead of a
+    # second, independently-tuned threshold table. This is the exact field
+    # shown as the grade badge everywhere else for this ticker, so the AI
+    # trade plan panel can never show a grade that contradicts the
+    # dashboard table / Scanner Buckets / Best Swing Candidates badge.
+    _plan_classification = classify(stock)
+    grade = _plan_classification["grade"]
+    grade_css = {
+        "A+": "plan-aplus", "A": "plan-a",
+        "B+": "plan-bplus", "B": "plan-b",
+        "B-": "plan-bplus", "C": "plan-b", "D": "plan-b",
+    }.get(grade, "plan-b")
 
     # Probability
     prob = zone_prob or max(30, min(90, 30 + swing_score * 4 + cat_score * 3))
@@ -2482,87 +2485,26 @@ def annotate(stock: dict, trade_mode: str | None = None) -> dict:
         logger.warning("annotate  ticker=%s  trade_permission failed: %s", stock.get("ticker", "?"), _tp_exc)
         stock["trade_permission"] = {"permission": "WATCH", "css": "perm-watch", "reason": ""}
 
-    # ── Simplified decision badge (grade-aware, 7 states) ────────────────────
-    # Priority order: REJECTED → CHASE ZONE → A+/A/B+ READY → B WATCH → FORMING → WATCH
-    _sfa_ss    = stock.get("swing_status") or ""
-    _sfa_sw    = stock.get("swing_score") or 0
-    _sfa_rr    = stock.get("risk_reward")
-    _sfa_ext   = stock.get("is_extended", False)
-    _sfa_eq    = stock.get("entry_quality") or ""
-    _sfa_bias  = stock.get("trade_bias") or ""
-    _sfa_cat   = stock.get("catalyst_score") or 0
-    _sfa_edist = stock.get("entry_distance_pct") or 0
-    _sfa_grade = stock.get("swing_grade") or "D"
-    _sfa_stype = stock.get("swing_setup_type") or ""
-    _sfa_cont  = stock.get("continuation_score") or 0
-    _sfa_trend = stock.get("daily_trend") or ""
-    _sfa_struct= bool(stock.get("daily_hh_hl")) or bool(stock.get("h4_hh_hl"))
-
-    _CONT_TYPES = {
-        "Breakout Continuation", "Gap and Go", "Earnings Continuation",
-        "Bull Flag", "Relative Strength Leader", "Trend Continuation",
-    }
-    _CHASE_TYPES = {"Chase Zone — Do Not Enter"}
-    _EXTENDED_TYPES = {"Extended — Wait for Pullback", "Extended — Wait",
-                       "At Resistance — Avoid"}
-
-    # REJECTED: only true Avoid bias or confirmed-weak structure with no edge
-    _sfa_is_rejected = (
-        _sfa_bias == "Avoid" or
-        (_sfa_sw > 0 and _sfa_sw < 3 and _sfa_cont < 4 and
-         _sfa_trend not in ("Bullish", "Bullish Lean"))
-    )
-    _sfa_is_chase = (_sfa_stype in _CHASE_TYPES or
-                     (_sfa_ext and not _sfa_struct and _sfa_sw < 5))
-    _sfa_is_extended = (_sfa_stype in _EXTENDED_TYPES or
-                        _sfa_eq == "Extended" or
-                        (isinstance(_sfa_edist, (int, float)) and _sfa_edist > 5.0
-                         and not _sfa_stype in _CONT_TYPES))
-
-    _READY_STATUSES = ("READY — LEVEL HOLDS", "PRE-CONFIRMATION", "TREND CONTINUATION")
-    _sfa_is_aplus = (
-        not _sfa_is_rejected and not _sfa_is_chase and not _sfa_is_extended and
-        _sfa_sw >= 8 and _sfa_ss in _READY_STATUSES and
-        _sfa_cat >= 4 and (_sfa_rr is None or _sfa_rr >= 1.5)
-    )
-    _sfa_is_a = (
-        not _sfa_is_rejected and not _sfa_is_chase and not _sfa_is_extended and
-        _sfa_sw >= 7 and (_sfa_ss in _READY_STATUSES or _sfa_stype in _CONT_TYPES) and
-        (_sfa_rr is None or _sfa_rr >= 1.2)
-    )
-    _sfa_is_bplus = (
-        not _sfa_is_rejected and not _sfa_is_chase and
-        (_sfa_sw >= 6 or (_sfa_cont >= 6 and _sfa_stype in _CONT_TYPES))
-    )
-    _sfa_is_forming = (
-        not _sfa_is_rejected and
-        (_sfa_sw >= 4 or _sfa_cont >= 5)
-    )
-
-    if _sfa_is_rejected:
-        stock["simplified_action"]       = "REJECTED"
-        stock["simplified_action_class"] = "sfa-rejected"
-    elif _sfa_is_chase:
-        stock["simplified_action"]       = "CHASE ZONE"
-        stock["simplified_action_class"] = "sfa-chase"
-    elif _sfa_is_extended:
-        stock["simplified_action"]       = "EXTENDED"
-        stock["simplified_action_class"] = "sfa-extended"
-    elif _sfa_is_aplus:
-        stock["simplified_action"]       = "A+ READY"
-        stock["simplified_action_class"] = "sfa-aplus"
-    elif _sfa_is_a:
-        stock["simplified_action"]       = "A READY"
-        stock["simplified_action_class"] = "sfa-a"
-    elif _sfa_is_bplus:
-        stock["simplified_action"]       = "B+ WATCH"
-        stock["simplified_action_class"] = "sfa-bplus"
-    elif _sfa_is_forming:
-        stock["simplified_action"]       = "FORMING"
-        stock["simplified_action_class"] = "sfa-forming"
-    else:
-        stock["simplified_action"]       = "WATCH"
-        stock["simplified_action_class"] = "sfa-watch"
+    # ── Canonical classification (single source of truth) ───────────────────
+    # Previously this block independently re-derived an "A+ READY" / "B+
+    # WATCH" / etc. badge from raw score fields with its own thresholds,
+    # separate from classifier.classify_stock() (which drives watchlist
+    # auto-membership) and separate again from build_ai_trade_plan()'s own
+    # grade thresholds. That's exactly how the same ticker could show up
+    # simultaneously as A+ READY in one widget and AVOID in another: every
+    # widget was computing its own answer. Now every field below comes from
+    # one classify(stock) call, and every other piece of UI (Scanner
+    # Buckets, the Avoid/Blocked watchlist table, the top-5 "Best Swing
+    # Candidates" cards, and the alerts feed) reads these same fields
+    # instead of recomputing them.
+    _classification = classify(stock)
+    stock["classification"]          = _classification
+    stock["bucket"]                  = _classification["bucket"]
+    stock["simplified_action"]       = _classification["status_label"]
+    stock["simplified_action_class"] = _classification["badge_css"]
+    stock["avoid_blocked"]           = _classification["avoid_blocked"]
+    stock["swing_grade"]             = _classification["grade"]
+    stock["classify_reason"]         = _classification["reason"]
 
     # ── Relative Strength & Sector (market_engine) ────────────────────────────
     if _MKT_AVAILABLE:
@@ -2696,6 +2638,51 @@ def rank_stocks(stocks: list) -> list:
     return sorted(stocks, key=composite, reverse=True)
 
 
+_CONT_TYPES_TOP5 = {"Breakout Continuation", "Gap and Go", "Earnings Continuation",
+                    "Bull Flag", "Relative Strength Leader", "Trend Continuation"}
+
+
+def compute_top5(ranked: list) -> list:
+    """
+    Select the "Best Swing Candidates" — the single shared definition used
+    by both the server-rendered dashboard and the live WebSocket/poll
+    payload (_build_dashboard_payload). These used to be two separate,
+    independently-maintained copies of this same threshold logic; one of
+    them excluded avoid statuses using strings without the em dash the
+    live status labels actually use ("AVOID — AT RESISTANCE" vs "AVOID AT
+    RESISTANCE"), so it silently failed to exclude some avoid-classified
+    tickers. Having one function means the cards you see on first page
+    load and the cards the 4-second auto-refresh patches in are always
+    selected by the exact same rule.
+
+    Excludes anything classify(stock) marked avoid_blocked — that flag
+    already covers Avoid bias, weak R:R, low signal, and avoid swing
+    statuses, so a ticker shown as AVOID / BLOCKED anywhere else in the UI
+    can never also appear in Best Swing Candidates.
+    """
+    return [
+        s for s in ranked
+        if not s.get("avoid_blocked") and (
+        (
+            # Continuation stocks: lower score bar when setup type is actionable
+            (s.get("swing_score") or 0) >= 5
+            and s.get("swing_setup_type") in _CONT_TYPES_TOP5
+            and s.get("trade_bias") != "Avoid"
+        ) or (
+            # Swing mode: good score + actionable status
+            (s.get("swing_score") or 0) >= 6
+            and s.get("trade_bias") != "Avoid"
+        ) or (
+            # Legacy day-trading fallback when swing fields absent
+            not s.get("swing_score")
+            and (s.get("momentum_score") or 0) >= 6
+            and s.get("orb_ready") == "YES"
+            and s.get("entry_quality") != "Extended"
+            and s.get("trade_bias") != "Avoid"
+        ))
+    ][:5]
+
+
 def compute_no_trade_assessment(ranked: list, top5: list) -> dict:
     """
     Analyse the full ranked watchlist to decide whether this is a no-trade day
@@ -2812,7 +2799,10 @@ def compute_secondary_watchlist(ranked: list, top5_set: set) -> list:
 
     Exclusion:
       - Already in Top 5
-      - trade_bias == "Avoid"
+      - classify(stock)["avoid_blocked"] is True (covers trade_bias == "Avoid"
+        plus the other AVOID / BLOCKED paths — weak R:R, low signal, etc. —
+        so a ticker the rest of the UI shows as AVOID can never also appear
+        "on the radar")
       - exec_state == "TRIGGERED" (already highlighted in alert banner)
 
     Each stock gets a tier label:
@@ -2823,7 +2813,7 @@ def compute_secondary_watchlist(ranked: list, top5_set: set) -> list:
     for s in ranked:
         if s.get("ticker") in top5_set:
             continue
-        if s.get("trade_bias") == "Avoid":
+        if s.get("avoid_blocked") or s.get("trade_bias") == "Avoid":
             continue
         if s.get("display_exec_state") == "TRIGGERED":
             continue
@@ -3004,34 +2994,9 @@ def _dashboard_inner():
 
     ranked     = rank_stocks(stocks)
 
-    _CONT_TYPES_TOP5 = {"Breakout Continuation", "Gap and Go", "Earnings Continuation",
-                        "Bull Flag", "Relative Strength Leader", "Trend Continuation"}
-    _AVOID_STATUSES = {"WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE", "NOT ENOUGH EDGE"}
-
-    # Top candidates: swing_score ≥ 6 OR continuation stock with score ≥ 5;
-    # also fall back to day-trading criteria when swing fields are absent.
-    top5       = [
-        s for s in ranked
-        if (
-            # Continuation stocks: lower score bar when setup type is actionable
-            (s.get("swing_score") or 0) >= 5
-            and s.get("swing_setup_type") in _CONT_TYPES_TOP5
-            and s.get("swing_status") not in _AVOID_STATUSES
-            and s.get("trade_bias") != "Avoid"
-        ) or (
-            # Swing mode: good score + actionable status
-            (s.get("swing_score") or 0) >= 6
-            and s.get("swing_status") not in _AVOID_STATUSES
-            and s.get("trade_bias") != "Avoid"
-        ) or (
-            # Legacy day-trading fallback when swing fields absent
-            not s.get("swing_score")
-            and (s.get("momentum_score") or 0) >= 6
-            and s.get("orb_ready") == "YES"
-            and s.get("entry_quality") != "Extended"
-            and s.get("trade_bias") != "Avoid"
-        )
-    ][:5]
+    # Best Swing Candidates — shared with the live WebSocket/poll payload,
+    # see compute_top5() for why that matters.
+    top5 = compute_top5(ranked)
 
     # Generate swing alerts from the current ranked list
     generate_alerts(ranked)
@@ -3053,28 +3018,20 @@ def _dashboard_inner():
     secondary    = compute_secondary_watchlist(ranked, top5_tickers)
 
     # ── Scanner buckets: 4-quadrant view of the full watchlist ───────────────
-    _CHASE_STYPE  = {"Chase Zone — Do Not Enter"}
-    _EXT_STYPE    = {"Extended — Wait for Pullback", "Extended — Wait", "At Resistance — Avoid"}
-    _READY_SFA    = {"A+ READY", "A READY"}
-    _FORMING_SFA  = {"B+ WATCH", "FORMING", "WATCH", "B WATCH"}
-
+    # Grouped strictly by the canonical classify(stock)["scanner_key"] —
+    # the exact same field that produced this ticker's bucket badge and
+    # avoid_blocked flag a few lines ago in annotate(). Previously this
+    # grouping re-matched on simplified_action/trade_bias/setup_type
+    # strings with its own ad hoc rules, which is how a ticker could be
+    # bucketed AVOID here while showing A+ READY everywhere else.
+    _SCANNER_CAPS = {"avoid": 6, "chase": 8, "aplus": 6, "forming": 10}
     scanner_buckets: dict = {"aplus": [], "forming": [], "chase": [], "avoid": []}
     for _sb in ranked:
-        _sfa_  = _sb.get("simplified_action") or ""
-        _bias_ = _sb.get("trade_bias") or ""
-        _stype_= _sb.get("swing_setup_type") or ""
-        if _bias_ == "Avoid" or _sfa_ == "REJECTED":
-            if len(scanner_buckets["avoid"]) < 6:
-                scanner_buckets["avoid"].append(_sb)
-        elif _sfa_ in ("CHASE ZONE", "EXTENDED") or _stype_ in _CHASE_STYPE or _stype_ in _EXT_STYPE:
-            if len(scanner_buckets["chase"]) < 8:
-                scanner_buckets["chase"].append(_sb)
-        elif _sfa_ in _READY_SFA:
-            if len(scanner_buckets["aplus"]) < 6:
-                scanner_buckets["aplus"].append(_sb)
-        else:
-            if len(scanner_buckets["forming"]) < 10:
-                scanner_buckets["forming"].append(_sb)
+        _scanner_key = (_sb.get("classification") or {}).get("scanner_key", "forming")
+        if _scanner_key not in scanner_buckets:
+            _scanner_key = "forming"
+        if len(scanner_buckets[_scanner_key]) < _SCANNER_CAPS.get(_scanner_key, 10):
+            scanner_buckets[_scanner_key].append(_sb)
 
     # alt_modes kept for backward compat but no_trade replaces them in template
     alt_modes = []
@@ -4504,7 +4461,11 @@ def _stock_summary(s: dict) -> dict:
         "prev_close", "premarket_high", "premarket_low",
         "prev_day_high", "prev_day_low",
         "secondary_tier", "secondary_tier_class",
-        # Simplified 4-state decision
+        # Canonical classification (classifier.classify) — keep these in
+        # sync with annotate()'s output so every live-polled/WebSocket
+        # consumer can group/filter by the same bucket/avoid flag the
+        # server-rendered page used.
+        "bucket", "avoid_blocked", "classify_reason",
         "simplified_action", "simplified_action_class",
         # Swing fields (needed for live top-5 card patching)
         "swing_score", "swing_score_class", "swing_grade",
@@ -4583,23 +4544,11 @@ def _build_dashboard_payload(wl_id: int | None) -> dict:
     _trigger_exec_state_refresh(wl_id)   # non-blocking; returns stale data this call
     stocks      = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked    = rank_stocks(stocks)
-    top5      = [
-        s for s in ranked
-        if (
-            (s.get("swing_score") or 0) >= 6
-            and s.get("swing_status") not in (
-                "WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE",
-                "AVOID WEAK STRUCTURE", "NOT ENOUGH EDGE"
-            )
-            and s.get("trade_bias") != "Avoid"
-        ) or (
-            not s.get("swing_score")
-            and (s.get("momentum_score") or 0) >= 6
-            and s.get("orb_ready") == "YES"
-            and s.get("entry_quality") != "Extended"
-            and s.get("trade_bias") != "Avoid"
-        )
-    ][:5]
+    # Same compute_top5() used by the server-rendered dashboard — this used
+    # to be a second, independently-tuned copy of the top5 rule, which is
+    # exactly how the live-polled payload could disagree with what the page
+    # showed on initial load for the same ticker a few seconds apart.
+    top5      = compute_top5(ranked)
     no_trade     = compute_no_trade_assessment(ranked, top5)
     # Use display_exec_state (session-aware) so stale TRIGGERED stocks are not
     # shown in the live-alerts section outside regular market hours.
@@ -4657,7 +4606,7 @@ def _build_quick_payload(wl_id: int | None) -> dict:
     _trigger_exec_state_refresh(wl_id)   # non-blocking; returns stale data this call
     stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked  = rank_stocks(stocks)
-    valid   = [s for s in ranked if s.get("trade_bias") != "Avoid"]
+    valid   = [s for s in ranked if not s.get("avoid_blocked") and s.get("trade_bias") != "Avoid"]
     return {
         "type":           "quick",
         "server_time":    _et_now().strftime("%I:%M %p").lstrip("0") + " ET",

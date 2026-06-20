@@ -1,5 +1,22 @@
 """
-classifier.py - Auto-classification rules for Rockkstaar Trade Assistant.
+classifier.py - Single source of truth for ticker classification in the
+Rockkstaar Trade Assistant.
+
+This module is the ONLY place that decides:
+  - which bucket a ticker belongs to     (bucket)
+  - the badge label shown for that ticker (status_label)
+  - whether the ticker is avoid/blocked   (avoid_blocked)
+  - the letter grade shown for it         (grade)
+  - the human-readable explanation        (reason)
+
+Every other part of the app (dashboard table, Scanner Buckets widget,
+Best Swing Candidates cards, top-nav / watchlist-tab counters, the
+Avoid/Blocked watchlist view, and the swing-alerts feed) MUST read these
+five fields from the same classify(stock) call instead of re-deriving
+their own grade/status/bucket from raw score fields. That is what
+previously let the same ticker show up as e.g. simultaneously "AVOID"
+in one widget and "A+ READY" in another — each widget had its own
+slightly-different threshold logic. See classify() below.
 
 Five-bucket workflow — evaluated top-to-bottom, first match wins:
 
@@ -21,6 +38,24 @@ SETUPS_FORMING  = "SETUPS FORMING"
 TREND_WATCH     = "TREND WATCH"
 EXTENDED_ZONE   = "EXTENDED / CHASE ZONE"
 AVOID_BLOCKED   = "AVOID / BLOCKED"
+
+# All valid bucket constants, in priority order (first match wins in classify()).
+ALL_BUCKETS = (AVOID_BLOCKED, EXTENDED_ZONE, A_PLUS_READY, SETUPS_FORMING, TREND_WATCH)
+
+# ---------------------------------------------------------------------------
+# Canonical display mapping — every badge/label/css/grade shown anywhere in
+# the UI for a given bucket comes from THIS table, not from ad hoc per-widget
+# logic. This is what guarantees the bucket badge, status badge, and
+# avoid/blocked flag can never contradict each other: they're all looked up
+# from the same row.
+# ---------------------------------------------------------------------------
+_BUCKET_DISPLAY = {
+    A_PLUS_READY:   {"status_label": "A+ READY",        "badge_css": "sfa-aplus",    "grade_hint": "A+", "scanner_key": "aplus",   "avoid_blocked": False},
+    SETUPS_FORMING: {"status_label": "SETUPS FORMING",   "badge_css": "sfa-forming",  "grade_hint": "B",  "scanner_key": "forming", "avoid_blocked": False},
+    TREND_WATCH:    {"status_label": "TREND WATCH",      "badge_css": "sfa-watch",    "grade_hint": "C",  "scanner_key": "forming", "avoid_blocked": False},
+    EXTENDED_ZONE:  {"status_label": "EXTENDED / CHASE", "badge_css": "sfa-extended", "grade_hint": "B-", "scanner_key": "chase",   "avoid_blocked": False},
+    AVOID_BLOCKED:  {"status_label": "AVOID / BLOCKED",  "badge_css": "sfa-rejected", "grade_hint": "D",  "scanner_key": "avoid",   "avoid_blocked": True},
+}
 
 # Current 4-mode swing status labels
 _READY_STATUSES = {
@@ -56,15 +91,19 @@ _BEARISH_TRENDS = {"Bearish", "Bearish Lean"}
 _TREND_ALIGNED  = _BULLISH_TRENDS | _BEARISH_TRENDS
 
 
-def classify_stock(stock: dict) -> tuple:
+def _bucket_and_reason(stock: dict) -> tuple:
     """
     Determine which bucket this stock belongs to and why.
 
     Returns:
-        (watchlist_name: str, reason: str)
+        (bucket: str, reason: str)
 
     Reason strings always start with the bucket name so the dashboard
     badge renderer can map them to the correct CSS class.
+
+    This is the only function in the codebase allowed to decide bucket
+    membership from raw score fields. Everything else must call
+    classify() and read its "bucket" key.
     """
     bias         = stock.get("trade_bias") or "Neutral"
     swing_score  = stock.get("swing_score") or 0
@@ -194,3 +233,98 @@ def _forming_hint(status: str) -> str:
         "NOT ENOUGH EDGE":            "not enough edge yet",
         "TREND CONTINUATION":         "needs breakout confirmation",
     }.get(status, f"status: {status}")
+
+
+def _grade_for_bucket(bucket: str, swing_score) -> str:
+    """
+    Letter grade shown next to a ticker. Derived FROM the bucket (not
+    independently from swing_score) so the grade can never contradict the
+    bucket — e.g. a stock can never be lettered "A+" while bucketed
+    AVOID / BLOCKED.
+
+    Within A+ READY / SETUPS FORMING we still use score to pick between the
+    two adjacent letters (A+ vs A, B+ vs B) so the grade keeps some
+    granularity, but the bucket always wins: the letter is capped to what
+    that bucket allows.
+    """
+    swing_score = swing_score or 0
+    if bucket == A_PLUS_READY:
+        return "A+" if swing_score >= 9 else "A"
+    if bucket == SETUPS_FORMING:
+        return "B+" if swing_score >= 6 else "B"
+    if bucket == TREND_WATCH:
+        return "C"
+    if bucket == EXTENDED_ZONE:
+        return "B-"
+    return "D"  # AVOID_BLOCKED
+
+
+def classify(stock: dict) -> dict:
+    """
+    THE canonical per-ticker classification. Call this once per ticker per
+    scan/render cycle and have every UI surface read its fields — do not
+    re-derive grade/status/bucket from raw score fields anywhere else.
+
+    Returns a dict with:
+      bucket          - one of A_PLUS_READY / SETUPS_FORMING / TREND_WATCH /
+                         EXTENDED_ZONE / AVOID_BLOCKED
+      status_label    - short badge text, derived 1:1 from bucket
+                         (e.g. "A+ READY", "AVOID / BLOCKED")
+      badge_css       - CSS class for that badge, derived 1:1 from bucket
+      grade           - letter grade, derived from (bucket, swing_score) —
+                         can never imply a better/worse bucket than `bucket`
+      scanner_key     - which Scanner Buckets quadrant this belongs in
+                         ("aplus" | "forming" | "chase" | "avoid")
+      avoid_blocked   - bool, True iff bucket == AVOID_BLOCKED
+      reason          - human-readable explanation (also persisted as
+                         classify_reason)
+    """
+    bucket, reason = _bucket_and_reason(stock)
+    display = _BUCKET_DISPLAY[bucket]
+    return {
+        "bucket":        bucket,
+        "status_label":  display["status_label"],
+        "badge_css":     display["badge_css"],
+        "grade":         _grade_for_bucket(bucket, stock.get("swing_score")),
+        "scanner_key":   display["scanner_key"],
+        "avoid_blocked": display["avoid_blocked"],
+        "reason":        reason,
+    }
+
+
+def classify_stock(stock: dict) -> tuple:
+    """
+    Backward-compatible wrapper around classify(). Returns (bucket, reason)
+    as the original API did. New code should call classify() directly so it
+    also gets status_label / badge_css / grade / avoid_blocked from the same
+    computation instead of re-deriving them.
+    """
+    result = classify(stock)
+    return result["bucket"], result["reason"]
+
+
+def is_consistent(classification: dict) -> bool:
+    """
+    Basic invariant check: the bucket, status label, and avoid/blocked flag
+    must never contradict each other for a single classification result.
+    Used by tests and can be called defensively wherever a classification
+    is rendered.
+    """
+    bucket = classification.get("bucket")
+    if bucket not in ALL_BUCKETS:
+        return False
+
+    expected = _BUCKET_DISPLAY[bucket]
+    if classification.get("status_label") != expected["status_label"]:
+        return False
+    if classification.get("avoid_blocked") != expected["avoid_blocked"]:
+        return False
+
+    # A ticker flagged avoid/blocked can never show an A+ READY (or any
+    # other non-avoid) status label, and vice versa.
+    if classification.get("avoid_blocked") and classification.get("status_label") == A_PLUS_READY:
+        return False
+    if not classification.get("avoid_blocked") and classification.get("status_label") == AVOID_BLOCKED:
+        return False
+
+    return True

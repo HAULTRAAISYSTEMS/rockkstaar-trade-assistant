@@ -1,12 +1,25 @@
 """
 alerts.py — Central alert generation for Rockkstaar Trade Assistant.
 
-Alert triggers (evaluated in priority order per stock):
-  1. READY — LEVEL HOLDS     (green — strongest signal)
-  2. A+ Swing Setup           (swing_score >= 8, not WAIT)
-  3. PRE-CONFIRMATION         (setup forming, not yet confirmed)
-  4. Zone entry               (price entering EMA zone — heads-up only)
-  5. TREND CONTINUATION       (score >= 6 — breakout in progress)
+Alert triggers (evaluated in priority order per stock), driven by the
+SAME canonical classification used everywhere else in the app
+(classifier.classify — see that module for why this matters):
+  1. Skip entirely     — ticker is avoid_blocked this scan
+  2. READY — LEVEL HOLDS     (green — strongest signal)
+  3. A+ Swing Setup           (bucket == A+ READY)
+  4. PRE-CONFIRMATION         (status PRE-CONFIRMATION, but NOT bucketed A+ READY)
+  5. Zone entry               (price entering EMA zone — heads-up only)
+  6. TREND CONTINUATION       (score >= 6 — breakout in progress)
+
+A ticker currently bucketed A+ READY can only ever produce an "aplus"
+alert here — it can never also fire "pre_confirm" for the same scan or a
+later one while it remains in that bucket. Previously "pre_confirm" was
+gated on whether the "aplus" alert happened to fire *in that specific
+function call* (a side effect of its own dedup timer), which meant a
+ticker could get an "A+ Swing Setup" alert and then, a few scans later,
+an "upgraded to PRE-CONFIRMATION" alert for the exact same unchanged
+setup — a visible contradiction in the alerts feed. Gating on the
+canonical bucket instead of the dedup side effect fixes that at the root.
 
 Each alert has: ticker, message, alert_type, severity, timestamp.
 
@@ -23,6 +36,8 @@ Public API:
 import threading
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field as _field
+
+from classifier import classify, A_PLUS_READY
 
 try:
     from zones import check_zone_alert_conditions as _zone_alerts
@@ -111,21 +126,33 @@ def generate_alerts(stocks: list) -> list:
     Call this after annotating + ranking stocks — e.g. inside _dashboard_inner().
 
     Alert priority per stock (first match wins for "ready" and "aplus"):
-      1. READY — LEVEL HOLDS  → high severity
-      2. A+ Setup (score ≥ 8) → high severity
-      3. PRE-CONFIRMATION     → medium severity
-      4. Zone entry (EMA)     → medium/low severity (background only)
-      5. TREND CONTINUATION   → medium severity (score ≥ 6 gate)
+      0. Skipped entirely if classifier.classify(s) says avoid_blocked
+      1. READY — LEVEL HOLDS         → high severity
+      2. A+ Setup (bucket A+ READY)  → high severity (never paired with #3)
+      3. PRE-CONFIRMATION            → medium severity
+      4. Zone entry (EMA)            → medium/low severity (background only)
+      5. TREND CONTINUATION          → medium severity (score ≥ 6 gate)
     """
     new_alerts = []
     ts = _et_now().strftime("%I:%M %p").lstrip("0") + " ET"
 
     for s in stocks:
-        if s.get("trade_bias") == "Avoid":
-            continue
-
         ticker = s.get("ticker") or ""
         if not ticker:
+            continue
+
+        # ── Canonical classification — single source of truth ────────────────
+        # Prefer the classification already computed by annotate() this scan
+        # (so we're judging the exact same bucket the rest of the UI is
+        # showing); fall back to computing it here if a caller passed in a
+        # raw, un-annotated stock dict.
+        classification = s.get("classification") or classify(s)
+        bucket         = classification["bucket"]
+
+        # A ticker the rest of the UI is showing as AVOID / BLOCKED must never
+        # also produce an "A+ Swing Setup" / "PRE-CONFIRMATION" style alert —
+        # that was the exact contradiction users were seeing in the feed.
+        if classification["avoid_blocked"]:
             continue
 
         status     = s.get("swing_status") or ""
@@ -148,19 +175,23 @@ def generate_alerts(stocks: list) -> list:
             # Don't double-fire "aplus" for the same event
             continue
 
-        # ── 2. A+ Setup  (score >= 8, not suppressed by WAIT) ────────────────
-        if score >= 8 and status != "WAIT":
-            _aplus_fired = _should_fire(ticker, "aplus")
-            if _aplus_fired:
+        # ── 2. A+ Setup — gated on the canonical bucket, not a raw score
+        #      threshold, so this can never disagree with the bucket/status
+        #      badges shown elsewhere for the same ticker this scan.
+        if bucket == A_PLUS_READY:
+            if _should_fire(ticker, "aplus"):
                 msg = f"{ticker} A+ Swing Setup — score {score}/10{rr_str}"
                 a = _Alert(ticker, msg, "aplus", "high", ts)
                 _push(a)
                 new_alerts.append(_alert_to_dict(a))
-        else:
-            _aplus_fired = False
+            # While a ticker is bucketed A+ READY it must never also fire a
+            # "PRE-CONFIRMATION" alert (even on a later scan where the A+
+            # alert itself is deduped) — that pairing is exactly the
+            # contradiction reported in the alerts feed.
+            continue
 
-        # ── 3. PRE-CONFIRMATION ────────────────────────────────────────────────
-        if status == "PRE-CONFIRMATION" and not _aplus_fired:
+        # ── 3. PRE-CONFIRMATION (only reached when NOT bucketed A+ READY) ───
+        if status == "PRE-CONFIRMATION":
             if _should_fire(ticker, "pre_confirm"):
                 hint = _level_hint(setup_type)
                 msg  = f"{ticker} upgraded to PRE-CONFIRMATION{hint}"
