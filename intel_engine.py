@@ -129,6 +129,36 @@ def _fh_urlopen(url: str, timeout: int = 8):
         raise
 
 
+# ── yfinance rate-limit backoff ────────────────────────────────────────────────
+# Yahoo Finance (via the yfinance package) returns HTTP 401/429 when it
+# blocks/rate-limits an IP. Unlike Finnhub, yfinance calls have no built-in
+# timeout or backoff — a serial loop over the full ticker universe can hang
+# the whole gthread worker long enough for Render's health check to fail and
+# restart the dyno, which then repeats the same flood on boot (crash loop).
+# This mirrors the Finnhub breaker: one 401/429 freezes ALL yfinance calls
+# for 30 minutes so the loop aborts fast instead of burning through 60 tickers.
+
+_yf_rl_lock  = threading.Lock()
+_yf_rl_until = 0.0      # monotonic timestamp; 0 = not rate-limited
+_YF_RL_SECS  = 1800     # 30-minute cooldown
+
+
+def _yf_is_rate_limited() -> bool:
+    return _time.monotonic() < _yf_rl_until
+
+
+def _yf_set_rate_limited(secs: int = _YF_RL_SECS) -> None:
+    global _yf_rl_until
+    with _yf_rl_lock:
+        _yf_rl_until = _time.monotonic() + secs
+    logger.warning("yfinance 401/429 — Yahoo is blocking us, pausing all yfinance calls for %d min", secs // 60)
+
+
+def _is_yf_rate_limit_error(exc: BaseException) -> bool:
+    msg = str(exc)
+    return "401" in msg or "429" in msg or "Too Many Requests" in msg or "Unauthorized" in msg
+
+
 def _cget(key: str):
     ns = key.split(":")[0]
     ttl = _CACHE_TTL.get(ns, 900)
@@ -434,7 +464,7 @@ def fetch_company_profile(ticker: str, force: bool = False) -> dict:
 
     # yfinance backstops name/industry and is the only free source of a
     # plain-English description + GICS sector.
-    if not profile.get("description") or not profile.get("sector"):
+    if (not profile.get("description") or not profile.get("sector")) and not _yf_is_rate_limited():
         try:
             import yfinance as yf
             info = yf.Ticker(ticker).info or {}
@@ -444,6 +474,8 @@ def fetch_company_profile(ticker: str, force: bool = False) -> dict:
             profile["description"]  = info.get("longBusinessSummary")
             profile["logo_url"]     = profile.get("logo_url") or info.get("logo_url")
         except Exception as e:
+            if _is_yf_rate_limit_error(e):
+                _yf_set_rate_limited()
             logger.debug("intel/profile yfinance %s: %s", ticker, e)
 
     profile["company_name"] = profile.get("company_name") or _company_name(ticker) or ticker
@@ -915,6 +947,8 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             return None
         if ticker in already_added:
             return None
+        if _yf_is_rate_limited():
+            return None
         try:
             import yfinance as yf
             tk = yf.Ticker(ticker)
@@ -1001,11 +1035,13 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
                 "is_override":  False,
             }
         except Exception as e:
+            if _is_yf_rate_limit_error(e):
+                _yf_set_rate_limited()
             logger.debug("intel/earnings yf %s: %s", ticker, e)
             return None
 
     # Only run yfinance on tickers the yahoo_api missed
-    _yf_targets = [t for t in yahoo_api_missed if t not in yahoo_api_found]
+    _yf_targets = [] if _yf_is_rate_limited() else [t for t in yahoo_api_missed if t not in yahoo_api_found]
     pool = ThreadPoolExecutor(max_workers=8)
     futs = {pool.submit(_fetch_cal, t): t for t in _yf_targets}
     pool.shutdown(wait=False)
@@ -1181,12 +1217,18 @@ def _splits_from_finnhub(tickers: list[str], api_key: str, today: date) -> list[
 
 
 def _splits_from_yfinance(tickers: list[str], today: date) -> list[dict]:
+    if _yf_is_rate_limited():
+        logger.warning("intel/splits: yfinance rate-limited — skipping entirely")
+        return []
     lookback  = today - timedelta(days=7)
     lookahead = today + timedelta(days=30)
     results: list[dict] = []
     try:
         import yfinance as yf
         for ticker in tickers:
+            if _yf_is_rate_limited():
+                logger.warning("intel/splits: yfinance 401/429 mid-loop — stopping at %s", ticker)
+                break
             try:
                 splits = yf.Ticker(ticker).splits
                 if splits is None or len(splits) == 0:
@@ -1220,8 +1262,11 @@ def _splits_from_yfinance(tickers: list[str], today: date) -> list[dict]:
                         "status":       _split_status(days_away),
                         "source":       "yfinance",
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                if _is_yf_rate_limit_error(e):
+                    _yf_set_rate_limited()
+                    logger.warning("intel/splits yfinance %s: rate-limited — %s", ticker, e)
+                    break
     except Exception as e:
         logger.debug("intel/splits yfinance: %s", e)
     return results
@@ -1312,7 +1357,13 @@ def _dividends_from_yfinance(tickers: list[str], today: date, wl_set: set) -> li
     from datetime import timezone
     results: list[dict] = []
 
+    if _yf_is_rate_limited():
+        logger.warning("intel/dividends: yfinance rate-limited — skipping entirely")
+        return []
+
     def _fetch_one(ticker: str) -> Optional[dict]:
+        if _yf_is_rate_limited():
+            return None
         try:
             import yfinance as yf
             info    = yf.Ticker(ticker).info
@@ -1338,7 +1389,9 @@ def _dividends_from_yfinance(tickers: list[str], today: date, wl_set: set) -> li
                 "on_watchlist":  ticker in wl_set,
                 "source":        "yfinance",
             }
-        except Exception:
+        except Exception as e:
+            if _is_yf_rate_limit_error(e):
+                _yf_set_rate_limited()
             return None
 
     pool = ThreadPoolExecutor(max_workers=4)
