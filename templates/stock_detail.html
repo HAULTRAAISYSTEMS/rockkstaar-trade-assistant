@@ -960,22 +960,23 @@
       </span>
     </h3>
     <div class="classify-body">
-      {% if stock.classify_reason %}
-        {%- set cr = stock.classify_reason -%}
-        {%- if cr.startswith('A+ Swing Setups') -%}
-          {%- set cl_name = "A+ Swing Setups" -%}{%- set cl_css = "classify-aplus" -%}
-        {%- elif cr.startswith('Secondary Swing Watch') -%}
-          {%- set cl_name = "Secondary Swing Watch" -%}{%- set cl_css = "classify-secondary" -%}
-        {%- elif cr.startswith('Extended') -%}
-          {%- set cl_name = "Extended" -%}{%- set cl_css = "classify-swing" -%}
+      {% if stock.bucket %}
+        {%- if stock.bucket == "A+ READY" -%}
+          {%- set cl_name = "A+ READY" -%}{%- set cl_css = "classify-aplus" -%}
+        {%- elif stock.bucket == "SETUPS FORMING" -%}
+          {%- set cl_name = "SETUPS FORMING" -%}{%- set cl_css = "classify-secondary" -%}
+        {%- elif stock.bucket == "TREND WATCH" -%}
+          {%- set cl_name = "TREND WATCH" -%}{%- set cl_css = "classify-secondary" -%}
+        {%- elif stock.bucket == "EXTENDED / CHASE ZONE" -%}
+          {%- set cl_name = "EXTENDED / CHASE ZONE" -%}{%- set cl_css = "classify-swing" -%}
         {%- else -%}
-          {%- set cl_name = "Core Swing Plays" -%}{%- set cl_css = "classify-core" -%}
+          {%- set cl_name = "AVOID / BLOCKED" -%}{%- set cl_css = "classify-core" -%}
         {%- endif -%}
       {% endif %}
       <div class="classify-target-row">
         <span class="classify-label">Recommended list</span>
-        <span class="classify-wl-badge {{ cl_css if stock.classify_reason else 'classify-core' }}">
-          {{ cl_name if stock.classify_reason else "—" }}
+        <span class="classify-wl-badge {{ cl_css if stock.bucket else 'classify-core' }}">
+          {{ cl_name if stock.bucket else "—" }}
         </span>
       </div>
       {% if stock.classify_reason %}
