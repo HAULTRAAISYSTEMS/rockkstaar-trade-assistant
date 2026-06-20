@@ -38,6 +38,17 @@
     </div>
   </div>
 
+  <!-- ===== COMPANY OVERVIEW ===== -->
+  <div id="company-overview-card" class="detail-card company-overview-card" style="display:none; margin-bottom: 1rem;">
+    <h3 class="card-title">Company Overview</h3>
+    <div class="co-meta-row">
+      <span id="co-name" class="co-name"></span>
+      <span id="co-sector-chip" class="co-chip co-chip-sector" style="display:none;"></span>
+      <span id="co-industry-chip" class="co-chip co-chip-industry" style="display:none;"></span>
+    </div>
+    <div id="co-description" class="co-description"></div>
+  </div>
+
   <!-- ===== TICKER STATE BANNER ===== -->
   {% if stock.ticker_state == 'loading' %}
   <div class="state-banner state-banner-loading">
@@ -2036,6 +2047,31 @@ console.log('[detail] Auto-refresh armed for', DETAIL_TICKER,
     body.innerHTML = statusBanner + bestHtml + caption +
       `<div class="ocs-table-wrap"><table class="ocs-table">${thead}<tbody>${rows}</tbody></table></div>`;
   }
+})();
+
+// ── Company Overview (name / sector / industry / description) ──────────────
+(function() {
+  const ticker = {{ stock.ticker | tojson }};
+  fetch(`/api/stock/${ticker}/profile`)
+    .then(r => r.json())
+    .then(data => {
+      if (!data || !data.ok) return;
+      const p = data.profile || {};
+      if (!p.company_name && !p.description && !p.sector && !p.industry) return;
+
+      const card  = document.getElementById("company-overview-card");
+      const name  = document.getElementById("co-name");
+      const secEl = document.getElementById("co-sector-chip");
+      const indEl = document.getElementById("co-industry-chip");
+      const descEl = document.getElementById("co-description");
+
+      name.textContent = p.company_name || ticker;
+      if (p.sector) { secEl.textContent = p.sector; secEl.style.display = "inline-flex"; }
+      if (p.industry) { indEl.textContent = p.industry; indEl.style.display = "inline-flex"; }
+      descEl.textContent = p.description || "";
+      card.style.display = "block";
+    })
+    .catch(() => { /* silent — overview is a nice-to-have */ });
 })();
 </script>
 {% endblock %}

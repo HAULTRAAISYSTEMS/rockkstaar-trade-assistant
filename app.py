@@ -4790,6 +4790,21 @@ def api_stock_live(ticker):
     return jsonify(result)
 
 
+@app.route("/api/stock/<ticker>/profile")
+def api_stock_profile(ticker):
+    """JSON endpoint: company name, sector, industry, description blurb.
+    Cached in the DB for 30 days — first call per ticker hits Finnhub/yfinance,
+    every call after that is instant."""
+    ticker = ticker.upper()
+    try:
+        from intel_engine import fetch_company_profile
+        profile = fetch_company_profile(ticker)
+        return jsonify({"ok": True, "ticker": ticker, "profile": profile})
+    except Exception as exc:
+        logger.warning("api_stock_profile failed for %s: %s", ticker, exc)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @app.route("/api/ticker-states")
 def api_ticker_states():
     """

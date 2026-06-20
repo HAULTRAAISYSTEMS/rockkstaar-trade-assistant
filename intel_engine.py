@@ -385,6 +385,78 @@ def _company_name(ticker: str) -> str:
     return _COMPANY_NAMES.get(ticker.upper(), "")
 
 
+# ── Company profile (name / sector / industry / description) ─────────────────
+# Company fundamentals barely change — cached in stock_data indefinitely.
+# Pass force=True to bypass the cache and refetch.
+
+_PROFILE_MAX_AGE_DAYS = 30
+
+
+def fetch_company_profile(ticker: str, force: bool = False) -> dict:
+    """
+    Return {company_name, sector, industry, description, logo_url}.
+    Tries Finnhub /stock/profile2 first (name, industry, logo), then
+    yfinance for a description and sector fallback. Cached in the DB so
+    repeat lookups (e.g. revisiting a stock page) don't re-hit either API.
+    """
+    ticker = (ticker or "").upper().strip()
+    if not ticker:
+        return {}
+
+    from database import get_company_profile, save_company_profile
+
+    if not force:
+        cached = get_company_profile(ticker)
+        if cached and cached.get("fetched_at"):
+            try:
+                age_days = (datetime.now() - datetime.fromisoformat(cached["fetched_at"])).days
+            except Exception:
+                age_days = 0
+            if age_days < _PROFILE_MAX_AGE_DAYS:
+                return cached
+
+    profile: dict = {}
+
+    finnhub_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if finnhub_key and not _fh_is_rate_limited():
+        try:
+            url = f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={finnhub_key}"
+            with _fh_urlopen(url, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+            if data:
+                profile["company_name"] = data.get("name")
+                profile["industry"]     = data.get("finnhubIndustry")
+                profile["logo_url"]     = data.get("logo")
+        except RuntimeError as exc:
+            logger.warning("intel/profile finnhub %s: %s", ticker, exc)
+        except Exception as e:
+            logger.debug("intel/profile finnhub %s: %s", ticker, e)
+
+    # yfinance backstops name/industry and is the only free source of a
+    # plain-English description + GICS sector.
+    if not profile.get("description") or not profile.get("sector"):
+        try:
+            import yfinance as yf
+            info = yf.Ticker(ticker).info or {}
+            profile["company_name"] = profile.get("company_name") or info.get("longName") or info.get("shortName")
+            profile["sector"]       = info.get("sector")
+            profile["industry"]     = profile.get("industry") or info.get("industry")
+            profile["description"]  = info.get("longBusinessSummary")
+            profile["logo_url"]     = profile.get("logo_url") or info.get("logo_url")
+        except Exception as e:
+            logger.debug("intel/profile yfinance %s: %s", ticker, e)
+
+    profile["company_name"] = profile.get("company_name") or _company_name(ticker) or ticker
+
+    if profile.get("description") or profile.get("sector") or profile.get("industry"):
+        try:
+            save_company_profile(ticker, profile)
+        except Exception:
+            logger.exception("intel/profile: failed to cache profile for %s", ticker)
+
+    return profile
+
+
 def _get_watchlist_tickers() -> list[str]:
     try:
         from database import get_all_stock_data

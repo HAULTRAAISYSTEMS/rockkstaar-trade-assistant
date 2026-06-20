@@ -6534,6 +6534,43 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   background: #22c55e12;
 }
 
+/* ============================================================
+   COMPANY OVERVIEW CARD (stock detail page)
+   ============================================================ */
+
+.company-overview-card .co-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.co-name {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.co-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-family: 'IBM Plex Mono', monospace;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.co-chip-sector { color: var(--brand-cyan); border-color: rgba(34,211,238,0.30); }
+.co-chip-industry { color: var(--text-muted); }
+.co-description {
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
 
 /* ============================================================
    AVOIDANCE FLAGS STRIP (dashboard cards)

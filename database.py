@@ -517,6 +517,13 @@ def init_db():
         ("rs_score",         "INTEGER"),
         ("rs_vs_qqq",        "REAL"),
         ("sector_etf",       "TEXT"),
+        # Company profile (name / sector / industry / description) — refreshed rarely
+        ("company_name",         "TEXT"),
+        ("company_sector",       "TEXT"),
+        ("company_industry",     "TEXT"),
+        ("company_description",  "TEXT"),
+        ("company_logo_url",     "TEXT"),
+        ("profile_fetched_at",   "TEXT"),
     ]
     for col, col_type in _new_columns:
         if _USE_POSTGRES:
@@ -1856,6 +1863,88 @@ def update_live_fields(data: dict) -> None:
     conn.commit()
     conn.close()
     data["triggered_at"] = triggered_at
+
+
+# ---------------------------------------------------------------------------
+# Company profile (name / sector / industry / description)
+# ---------------------------------------------------------------------------
+
+def save_company_profile(ticker: str, profile: dict) -> None:
+    """
+    Save/refresh the company profile blurb for a ticker (name, sector,
+    industry, description, logo). Upserts a minimal row if stock_data
+    doesn't have this ticker yet; otherwise updates only profile columns.
+    """
+    ticker = (ticker or "").upper().strip()
+    if not ticker:
+        return
+
+    now = datetime.now().isoformat()
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT 1 FROM stock_data WHERE ticker = ?", (ticker,)
+    ).fetchone()
+
+    params = {
+        "ticker":               ticker,
+        "company_name":         profile.get("company_name"),
+        "company_sector":       profile.get("sector"),
+        "company_industry":     profile.get("industry"),
+        "company_description": profile.get("description"),
+        "company_logo_url":     profile.get("logo_url"),
+        "profile_fetched_at":   now,
+    }
+
+    if existing:
+        conn.execute("""
+            UPDATE stock_data SET
+                company_name        = :company_name,
+                company_sector      = :company_sector,
+                company_industry    = :company_industry,
+                company_description = :company_description,
+                company_logo_url    = :company_logo_url,
+                profile_fetched_at  = :profile_fetched_at
+            WHERE ticker = :ticker
+        """, params)
+    else:
+        conn.execute("""
+            INSERT INTO stock_data
+                (ticker, company_name, company_sector, company_industry,
+                 company_description, company_logo_url, profile_fetched_at,
+                 ticker_state, last_updated)
+            VALUES
+                (:ticker, :company_name, :company_sector, :company_industry,
+                 :company_description, :company_logo_url, :profile_fetched_at,
+                 'ready', :profile_fetched_at)
+        """, params)
+
+    conn.commit()
+    conn.close()
+
+
+def get_company_profile(ticker: str):
+    """Return {company_name, sector, industry, description, logo_url, fetched_at} or None."""
+    ticker = (ticker or "").upper().strip()
+    if not ticker:
+        return None
+    conn = get_db()
+    row = conn.execute(
+        """SELECT company_name, company_sector, company_industry,
+                  company_description, company_logo_url, profile_fetched_at
+           FROM stock_data WHERE ticker = ?""",
+        (ticker,),
+    ).fetchone()
+    conn.close()
+    if row is None or not row["company_name"]:
+        return None
+    return {
+        "company_name": row["company_name"],
+        "sector":       row["company_sector"],
+        "industry":     row["company_industry"],
+        "description":  row["company_description"],
+        "logo_url":     row["company_logo_url"],
+        "fetched_at":   row["profile_fetched_at"],
+    }
 
 
 # ---------------------------------------------------------------------------
