@@ -1269,6 +1269,22 @@ def _find_active_impulse_leg(
 
     MIN_ATR_MULT = 1.2   # reject legs smaller than this many ATRs
 
+    # An "active" swing has to mean what it says — a leg that's still
+    # relevant to where the stock is actually trading now, not just the
+    # biggest/cleanest move anywhere in the lookback history. Without this
+    # check, a huge old rally from months ago can outscore a smaller-but-
+    # current move on magnitude/quality alone (e.g. AMAT's fib anchors
+    # stayed pinned to a leg ending near $447 even after price rallied well
+    # past $600 — a >35% gap between the "active" high and the real recent
+    # high). Reject any candidate whose extreme is more than 8% away from
+    # the actual highest/lowest price reached in the recent window — i.e.
+    # the chosen pivot must be at or near the real recent extreme, not a
+    # smaller historical one that's since been blown through.
+    RECENT_WINDOW   = 90
+    STALE_TOLERANCE = 0.08
+    recent_hi = max(highs[-RECENT_WINDOW:]) if n >= 1 else None
+    recent_lo = min(lows[-RECENT_WINDOW:])  if n >= 1 else None
+
     best: dict | None = None
 
     # ── Bullish legs: pivot_low → pivot_high ──────────────────────────────────
@@ -1279,6 +1295,8 @@ def _find_active_impulse_leg(
             hi, hv = ph[k]
             if hi <= li:
                 continue
+            if recent_hi and hv < recent_hi * (1 - STALE_TOLERANCE):
+                continue  # this pivot high has been superseded — too far below the real recent high, keep looking
             leg_size = hv - lv
             if leg_size / atr < MIN_ATR_MULT:
                 break  # all remaining ph[k] will be the same or worse — stop
@@ -1291,7 +1309,7 @@ def _find_active_impulse_leg(
             }
             if best is None or sc > best["score"]:
                 best = candidate
-            break  # take only the best high for this particular low
+            break  # take only the best qualifying high for this particular low
 
     # ── Bearish legs: pivot_high → pivot_low ─────────────────────────────────
     for j in range(len(ph) - 1, -1, -1):
@@ -1300,6 +1318,8 @@ def _find_active_impulse_leg(
             li, lv = pl[k]
             if li <= hi:
                 continue
+            if recent_lo and lv > recent_lo * (1 + STALE_TOLERANCE):
+                continue  # this pivot low has been superseded — too far above the real recent low, keep looking
             leg_size = hv - lv
             if leg_size / atr < MIN_ATR_MULT:
                 break
