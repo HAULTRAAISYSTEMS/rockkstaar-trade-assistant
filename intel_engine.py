@@ -469,6 +469,48 @@ def _company_description(ticker: str) -> str:
     return _COMPANY_DESCRIPTIONS.get(ticker.upper(), "")
 
 
+def _wikipedia_description(name: str, max_chars: int = 320) -> Optional[str]:
+    """
+    Universal fallback for company descriptions — used for any ticker
+    outside the curated static list (e.g. new tickers the user adds).
+    Wikipedia's public REST API needs no key and isn't subject to the
+    401/429 blocking we've seen from Yahoo, so it's the reliable catch-all.
+    """
+    if not name:
+        return None
+    import urllib.request
+    import urllib.parse
+    headers = {"User-Agent": "RockkstaarTradeAssistant/1.0 (contact: app)"}
+    try:
+        search_url = (
+            "https://en.wikipedia.org/w/api.php?action=opensearch&format=json"
+            f"&namespace=0&limit=1&search={urllib.parse.quote(name)}"
+        )
+        req = urllib.request.Request(search_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+        titles = data[1] if isinstance(data, list) and len(data) > 1 else []
+        if not titles:
+            return None
+        title = titles[0]
+
+        summary_url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + urllib.parse.quote(title)
+        req2 = urllib.request.Request(summary_url, headers=headers)
+        with urllib.request.urlopen(req2, timeout=5) as resp:
+            summary = json.loads(resp.read().decode())
+        extract = (summary.get("extract") or "").strip()
+        if not extract or summary.get("type") == "disambiguation":
+            return None
+        if len(extract) > max_chars:
+            cut = extract[:max_chars]
+            last_period = cut.rfind(". ")
+            extract = cut[:last_period + 1] if last_period > 80 else cut.rstrip() + "…"
+        return extract
+    except Exception as e:
+        logger.debug("intel/profile wikipedia %s: %s", name, e)
+        return None
+
+
 # ── Company profile (name / sector / industry / description) ─────────────────
 # Company fundamentals barely change — cached in stock_data indefinitely.
 # Pass force=True to bypass the cache and refetch.
@@ -492,10 +534,11 @@ def fetch_company_profile(ticker: str, force: bool = False) -> dict:
     if not force:
         cached = get_company_profile(ticker)
         if cached and cached.get("fetched_at"):
-            # If a cached row is missing a description but we now have a
-            # static one for this ticker, fall through and refresh instead
-            # of serving the stale gap for up to 30 days.
-            if not cached.get("description") and _company_description(ticker):
+            # A cached row with no description at all means an earlier fetch
+            # failed before the Wikipedia fallback existed (or hit a dead
+            # end). Re-run instead of serving that gap for up to 30 days —
+            # the Wikipedia step below makes a hit far more likely now.
+            if not cached.get("description"):
                 cached = None
         if cached and cached.get("fetched_at"):
             try:
@@ -547,6 +590,16 @@ def fetch_company_profile(ticker: str, force: bool = False) -> dict:
             logger.debug("intel/profile yfinance %s: %s", ticker, e)
 
     profile["company_name"] = profile.get("company_name") or _company_name(ticker) or ticker
+
+    # Universal fallback — covers any ticker not in the curated static list
+    # (e.g. new tickers the user adds) without depending on Yahoo at all.
+    if not profile.get("description"):
+        wiki_name = profile.get("company_name") or ticker
+        wiki_desc = _wikipedia_description(wiki_name)
+        if not wiki_desc and wiki_name != ticker:
+            wiki_desc = _wikipedia_description(ticker)  # retry with bare ticker
+        if wiki_desc:
+            profile["description"] = wiki_desc
 
     if profile.get("description") or profile.get("sector") or profile.get("industry"):
         try:
