@@ -12,9 +12,147 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+import requests as _req_module
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ─── Financial Modeling Prep (FMP) data source ───────────────────────────────
+# FMP is used as the primary data source when FMP_API_KEY is set in the
+# environment.  It avoids the Yahoo Finance IP-based rate-limiting that blocks
+# yfinance on cloud-hosted servers like Render.
+# Free tier: 250 requests/day — plenty for personal use with 24-hr caching.
+# Register at https://financialmodelingprep.com to get a free API key, then
+# add FMP_API_KEY to your Render environment variables.
+
+_FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
+_FMP_BASE    = "https://financialmodelingprep.com/api/v3"
+
+
+def _fmp_get(path: str, params: dict | None = None) -> list | dict | None:
+    """GET from FMP API. Returns parsed JSON or None on any error."""
+    if not _FMP_API_KEY:
+        return None
+    try:
+        p = {"apikey": _FMP_API_KEY}
+        if params:
+            p.update(params)
+        resp = _req_module.get(f"{_FMP_BASE}/{path}", params=p, timeout=15)
+        if resp.status_code == 200:
+            return resp.json()
+        logger.warning("FMP API %d for %s", resp.status_code, path)
+        return None
+    except Exception as exc:
+        logger.warning("FMP request error (%s): %s", path, exc)
+        return None
+
+
+def fetch_fundamentals_fmp(ticker: str) -> dict | None:
+    """
+    Fetch fundamental data from Financial Modeling Prep.
+    Returns the same raw-result dict as fetch_fundamentals_raw(), or None if
+    FMP_API_KEY is not configured or if all four API calls fail.
+    """
+    if not _FMP_API_KEY:
+        return None
+
+    result: dict[str, Any] = {
+        "ticker": ticker.upper(),
+        "missing_fields": [],
+        "revenue": [], "gross_profit": [], "operating_income": [],
+        "net_income": [], "diluted_eps": [],
+        "total_assets": [], "total_liabilities": [], "total_equity": [],
+        "current_assets": [], "current_liabilities": [],
+        "cash": [], "total_debt": [], "goodwill": [],
+        "intangible_assets": [], "retained_earnings": [],
+        "operating_cash_flow": [], "capex": [], "free_cash_flow": [],
+        "financing_cash_flow": [],
+        "roe": None, "roic": None, "insider_pct": None,
+        "company_name": None, "sector": None, "industry": None,
+    }
+    missing = result["missing_fields"]
+
+    try:
+        # ── Company profile ──────────────────────────────────────────────────
+        profile = _fmp_get(f"profile/{ticker}")
+        if profile and isinstance(profile, list) and profile:
+            p = profile[0]
+            result["company_name"] = p.get("companyName")
+            result["sector"]       = p.get("sector")
+            result["industry"]     = p.get("industry")
+            # Insider % not in profile; skip for now
+        else:
+            missing.append("company_info")
+
+        # ── Income statement ─────────────────────────────────────────────────
+        inc = _fmp_get(f"income-statement/{ticker}", {"limit": 5})
+        if inc and isinstance(inc, list):
+            for row in inc:
+                result["revenue"].append(row.get("revenue"))
+                result["gross_profit"].append(row.get("grossProfit"))
+                result["operating_income"].append(row.get("operatingIncome"))
+                result["net_income"].append(row.get("netIncome"))
+                result["diluted_eps"].append(row.get("epsdiluted"))
+        else:
+            missing.append("income_statement")
+
+        # ── Balance sheet ────────────────────────────────────────────────────
+        bs = _fmp_get(f"balance-sheet-statement/{ticker}", {"limit": 5})
+        if bs and isinstance(bs, list):
+            for row in bs:
+                result["total_assets"].append(row.get("totalAssets"))
+                result["total_liabilities"].append(row.get("totalLiabilities"))
+                result["total_equity"].append(row.get("totalStockholdersEquity"))
+                result["current_assets"].append(row.get("totalCurrentAssets"))
+                result["current_liabilities"].append(row.get("totalCurrentLiabilities"))
+                result["cash"].append(row.get("cashAndCashEquivalents"))
+                result["total_debt"].append(row.get("totalDebt"))
+                result["goodwill"].append(row.get("goodwill"))
+                result["intangible_assets"].append(row.get("intangibleAssets"))
+                result["retained_earnings"].append(row.get("retainedEarnings"))
+        else:
+            missing.append("balance_sheet")
+
+        # ── Cash flow ────────────────────────────────────────────────────────
+        cf = _fmp_get(f"cash-flow-statement/{ticker}", {"limit": 5})
+        if cf and isinstance(cf, list):
+            for row in cf:
+                ocf = row.get("operatingCashFlow")
+                cap = row.get("capitalExpenditure")
+                fcf = row.get("freeCashFlow")
+                fin = (row.get("netCashUsedProvidedByFinancingActivities")
+                       or row.get("financingActivitiesCashFlow"))
+                if cap is not None:
+                    cap = abs(cap)
+                result["operating_cash_flow"].append(ocf)
+                result["capex"].append(cap)
+                result["free_cash_flow"].append(fcf)
+                result["financing_cash_flow"].append(fin)
+        else:
+            missing.append("cash_flow")
+
+        # ── Key metrics for ROE / ROIC ───────────────────────────────────────
+        km = _fmp_get(f"key-metrics-ttm/{ticker}")
+        if km and isinstance(km, list) and km:
+            k = km[0]
+            roe  = k.get("roeTTM")
+            roic = k.get("roicTTM")
+            if roe  is not None:
+                result["roe"]  = float(roe)  * 100
+            if roic is not None:
+                result["roic"] = float(roic) * 100
+
+        # Return None only if ALL major sections are missing (FMP returned nothing useful)
+        if len(missing) >= 4:
+            logger.warning("FMP returned no data for %s — falling back to yfinance", ticker)
+            return None
+
+    except Exception as exc:
+        logger.warning("FMP fetch error for %s: %s", ticker, exc)
+        return None
+
+    return result
 
 # ─── Education blurbs ────────────────────────────────────────────────────────
 # Each entry: {"def": plain-English definition, "why": why it matters, "formula": formula string}
@@ -153,9 +291,19 @@ def _pct_change(new_val: float | None, old_val: float | None) -> float | None:
 
 def fetch_fundamentals_raw(ticker: str) -> dict:
     """
-    Fetch raw financial data from yfinance and return a structured dict.
-    Returns a dict with keys: income_stmt, balance_sheet, cash_flow, info, missing_fields.
+    Fetch raw financial data and return a structured dict.
+    Tries Financial Modeling Prep (FMP) first when FMP_API_KEY is set —
+    FMP is not subject to Yahoo Finance's cloud-IP rate-limiting.
+    Falls back to yfinance if FMP is not configured or returns no data.
     """
+    # ── FMP primary path ─────────────────────────────────────────────────────
+    if _FMP_API_KEY:
+        fmp_result = fetch_fundamentals_fmp(ticker)
+        if fmp_result is not None:
+            return fmp_result
+        logger.warning("FMP returned nothing for %s, falling back to yfinance", ticker)
+
+    # ── yfinance fallback ────────────────────────────────────────────────────
     missing: list[str] = []
     result: dict[str, Any] = {
         "ticker": ticker.upper(),
