@@ -222,17 +222,25 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
         # ── Income statement ──────────────────────────────────────────────────
         try:
             inc = t.financials  # annual, columns = dates (most recent first)
+            if inc is None or inc.empty:
+                try:
+                    inc = t.income_stmt  # new attribute name in yfinance 0.2.x
+                except Exception:
+                    inc = None
             if inc is not None and not inc.empty:
                 def _row(label):
+                    # Normalize: strip spaces/underscores for robust matching
+                    label_norm = label.lower().replace(" ", "").replace("_", "")
                     for key in inc.index:
-                        if label.lower() in str(key).lower():
+                        key_norm = str(key).lower().replace(" ", "").replace("_", "")
+                        if label_norm == key_norm or label_norm in key_norm:
                             return inc.loc[key]
                     return None
 
-                rev_row  = _row("Total Revenue")
-                gp_row   = _row("Gross Profit")
-                oi_row   = _row("Operating Income") or _row("EBIT")
-                ni_row   = _row("Net Income")
+                rev_row  = _row("Total Revenue") or _row("Revenue")
+                gp_row   = _row("Gross Profit") or _row("GrossProfit")
+                oi_row   = _row("Operating Income") or _row("OperatingIncome") or _row("EBIT")
+                ni_row   = _row("Net Income") or _row("NetIncome") or _row("Net Income Common Stockholders")
 
                 n_years = min(5, inc.shape[1])
                 for i in range(n_years):
@@ -270,24 +278,31 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
         # ── Balance sheet ─────────────────────────────────────────────────────
         try:
             bs = t.balance_sheet  # annual, most recent first
+            if bs is None or bs.empty:
+                try:
+                    bs = t.quarterly_balance_sheet
+                except Exception:
+                    bs = None
             if bs is not None and not bs.empty:
                 def _brow(label):
+                    label_norm = label.lower().replace(" ", "").replace("_", "")
                     for key in bs.index:
-                        if label.lower() in str(key).lower():
+                        key_norm = str(key).lower().replace(" ", "").replace("_", "")
+                        if label_norm == key_norm or label_norm in key_norm:
                             return bs.loc[key]
                     return None
 
                 n_years = min(5, bs.shape[1])
-                ta_row   = _brow("Total Assets")
-                tl_row   = _brow("Total Liabilities Net Minority Interest") or _brow("Total Liabilities")
-                eq_row   = _brow("Stockholders Equity") or _brow("Total Equity Gross Minority Interest") or _brow("Common Stock Equity")
-                ca_row   = _brow("Current Assets")
-                cl_row   = _brow("Current Liabilities")
-                cash_row = _brow("Cash And Cash Equivalents") or _brow("Cash Cash Equivalents And Short Term Investments")
-                debt_row = _brow("Total Debt") or _brow("Long Term Debt And Capital Lease Obligation")
+                ta_row   = _brow("Total Assets") or _brow("TotalAssets")
+                tl_row   = _brow("Total Liabilities Net Minority Interest") or _brow("Total Liabilities") or _brow("TotalLiabilities")
+                eq_row   = _brow("Stockholders Equity") or _brow("Total Equity Gross Minority Interest") or _brow("Common Stock Equity") or _brow("StockholdersEquity")
+                ca_row   = _brow("Current Assets") or _brow("CurrentAssets")
+                cl_row   = _brow("Current Liabilities") or _brow("CurrentLiabilities")
+                cash_row = _brow("Cash And Cash Equivalents") or _brow("Cash Cash Equivalents And Short Term Investments") or _brow("CashAndCashEquivalents")
+                debt_row = _brow("Total Debt") or _brow("Long Term Debt And Capital Lease Obligation") or _brow("TotalDebt")
                 gw_row   = _brow("Goodwill")
-                ia_row   = _brow("Intangible Assets") or _brow("Other Intangible Assets")
-                re_row   = _brow("Retained Earnings")
+                ia_row   = _brow("Intangible Assets") or _brow("Other Intangible Assets") or _brow("OtherIntangibleAssets")
+                re_row   = _brow("Retained Earnings") or _brow("RetainedEarnings")
 
                 for i in range(n_years):
                     result["total_assets"].append(_safe_val(ta_row, i))
@@ -309,18 +324,25 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
         # ── Cash flow ─────────────────────────────────────────────────────────
         try:
             cf = t.cashflow  # annual, most recent first
+            if cf is None or cf.empty:
+                try:
+                    cf = t.cash_flow  # alternate attribute name
+                except Exception:
+                    cf = None
             if cf is not None and not cf.empty:
                 def _crow(label):
+                    label_norm = label.lower().replace(" ", "").replace("_", "")
                     for key in cf.index:
-                        if label.lower() in str(key).lower():
+                        key_norm = str(key).lower().replace(" ", "").replace("_", "")
+                        if label_norm == key_norm or label_norm in key_norm:
                             return cf.loc[key]
                     return None
 
                 n_years = min(5, cf.shape[1])
-                ocf_row  = _crow("Operating Cash Flow") or _crow("Cash From Operations")
-                cap_row  = _crow("Capital Expenditure") or _crow("Purchase Of Property Plant And Equipment")
-                fcf_row  = _crow("Free Cash Flow")
-                fin_row  = _crow("Financing Activities") or _crow("Cash Flow From Financing")
+                ocf_row  = _crow("Operating Cash Flow") or _crow("Cash From Operations") or _crow("CashFlowFromContinuingOperatingActivities")
+                cap_row  = _crow("Capital Expenditure") or _crow("Purchase Of Property Plant And Equipment") or _crow("CapitalExpenditure")
+                fcf_row  = _crow("Free Cash Flow") or _crow("FreeCashFlow")
+                fin_row  = _crow("Financing Activities") or _crow("Cash Flow From Financing") or _crow("CashFlowFromContinuingFinancingActivities")
 
                 for i in range(n_years):
                     ocf = _safe_val(ocf_row, i)
