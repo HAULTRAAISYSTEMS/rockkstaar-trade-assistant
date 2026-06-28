@@ -369,6 +369,89 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
             logger.debug("fundamentals cash flow error %s: %s", ticker, e)
             missing.append("cash_flow")
 
+        # ── t.info fallback: populate financial lists from info if DataFrames empty ──
+        # t.info reliably returns single-year financial data even when the
+        # statement endpoints are rate-limited by Yahoo Finance on cloud hosts.
+        try:
+            info_fb = t.info or {}  # re-use already-fetched info
+
+            if not result["revenue"]:
+                rev = info_fb.get("totalRevenue")
+                if rev:
+                    result["revenue"] = [float(rev)]
+                    missing[:] = [m for m in missing if m != "income_statement"]
+
+            if not result["gross_profit"]:
+                gp = info_fb.get("grossProfits")
+                if gp:
+                    result["gross_profit"] = [float(gp)]
+
+            if not result["operating_income"]:
+                oi = info_fb.get("operatingIncomeRatio") and result["revenue"] and \
+                     info_fb.get("operatingIncomeRatio") * result["revenue"][0]
+                if not oi:
+                    oi = info_fb.get("ebitda")  # close enough for scoring
+                if oi:
+                    result["operating_income"] = [float(oi)]
+
+            if not result["net_income"]:
+                ni = info_fb.get("netIncomeToCommon") or info_fb.get("netIncome")
+                if ni:
+                    result["net_income"] = [float(ni)]
+
+            if not result["total_assets"]:
+                ta = info_fb.get("totalAssets")
+                if ta:
+                    result["total_assets"] = [float(ta)]
+                    missing[:] = [m for m in missing if m != "balance_sheet"]
+
+            if not result["total_debt"]:
+                td = info_fb.get("totalDebt")
+                if td:
+                    result["total_debt"] = [float(td)]
+
+            if not result["total_equity"]:
+                eq = info_fb.get("bookValue") and info_fb.get("sharesOutstanding") and \
+                     info_fb.get("bookValue") * info_fb.get("sharesOutstanding")
+                if not eq:
+                    eq = info_fb.get("totalStockholderEquity")
+                if eq:
+                    result["total_equity"] = [float(eq)]
+
+            if not result["current_assets"]:
+                ca = info_fb.get("totalCurrentAssets")
+                if ca:
+                    result["current_assets"] = [float(ca)]
+
+            if not result["current_liabilities"]:
+                cl = info_fb.get("totalCurrentLiabilities")
+                if cl:
+                    result["current_liabilities"] = [float(cl)]
+
+            if not result["cash"]:
+                cash = info_fb.get("totalCash") or info_fb.get("cashAndShortTermInvestments")
+                if cash:
+                    result["cash"] = [float(cash)]
+
+            if not result["free_cash_flow"]:
+                fcf = info_fb.get("freeCashflow")
+                if fcf:
+                    result["free_cash_flow"] = [float(fcf)]
+                    missing[:] = [m for m in missing if m != "cash_flow"]
+
+            if not result["operating_cash_flow"]:
+                ocf = info_fb.get("operatingCashflow")
+                if ocf:
+                    result["operating_cash_flow"] = [float(ocf)]
+
+            if not result["diluted_eps"]:
+                eps = info_fb.get("trailingEps") or info_fb.get("forwardEps")
+                if eps:
+                    result["diluted_eps"] = [float(eps)]
+
+        except Exception as e:
+            logger.debug("fundamentals info fallback error %s: %s", ticker, e)
+
         # ── ROIC (manual calc) ────────────────────────────────────────────────
         try:
             oi0  = result["operating_income"][0] if result["operating_income"] else None
@@ -388,6 +471,14 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
     except Exception as e:
         logger.warning("fundamentals_engine fetch error for %s: %s", ticker, e)
         result["error"] = str(e)
+
+    # Clean up missing list based on what the info fallback may have filled
+    if result["revenue"]:
+        missing[:] = [m for m in missing if m != "income_statement"]
+    if result["total_assets"]:
+        missing[:] = [m for m in missing if m != "balance_sheet"]
+    if result["free_cash_flow"] or result["operating_cash_flow"]:
+        missing[:] = [m for m in missing if m != "cash_flow"]
 
     result["missing_fields"] = list(set(missing))
     return result
