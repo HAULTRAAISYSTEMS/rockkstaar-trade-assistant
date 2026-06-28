@@ -193,16 +193,30 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
 
     try:
         import yfinance as yf  # type: ignore
+        import requests as _requests
     except ImportError:
         result["error"] = "yfinance is not installed on this server."
         return result
 
     try:
-        t = yf.Ticker(ticker)
+        # Use a browser-like session to avoid Yahoo Finance rate-limiting on cloud hosts
+        _session = _requests.Session()
+        _session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        t = yf.Ticker(ticker, session=_session)
+        _info_cache: dict = {}  # shared info dict — fetched once, reused everywhere
 
         # ── Info ──────────────────────────────────────────────────────────────
         try:
-            info = t.info or {}
+            _info_cache.update(t.info or {})
+            info = _info_cache
             result["company_name"] = info.get("longName") or info.get("shortName")
             result["sector"]       = info.get("sector")
             result["industry"]     = info.get("industry")
@@ -221,12 +235,15 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
 
         # ── Income statement ──────────────────────────────────────────────────
         try:
-            inc = t.financials  # annual, columns = dates (most recent first)
-            if inc is None or inc.empty:
+            inc = None
+            for _attr in ("income_stmt", "financials"):
                 try:
-                    inc = t.income_stmt  # new attribute name in yfinance 0.2.x
+                    _df = getattr(t, _attr)
+                    if _df is not None and not _df.empty:
+                        inc = _df
+                        break
                 except Exception:
-                    inc = None
+                    continue
             if inc is not None and not inc.empty:
                 def _row(label):
                     # Normalize: strip spaces/underscores for robust matching
@@ -323,12 +340,15 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
 
         # ── Cash flow ─────────────────────────────────────────────────────────
         try:
-            cf = t.cashflow  # annual, most recent first
-            if cf is None or cf.empty:
+            cf = None
+            for _attr in ("cash_flow", "cashflow"):
                 try:
-                    cf = t.cash_flow  # alternate attribute name
+                    _df = getattr(t, _attr)
+                    if _df is not None and not _df.empty:
+                        cf = _df
+                        break
                 except Exception:
-                    cf = None
+                    continue
             if cf is not None and not cf.empty:
                 def _crow(label):
                     label_norm = label.lower().replace(" ", "").replace("_", "")
@@ -373,7 +393,7 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
         # t.info reliably returns single-year financial data even when the
         # statement endpoints are rate-limited by Yahoo Finance on cloud hosts.
         try:
-            info_fb = t.info or {}  # re-use already-fetched info
+            info_fb = _info_cache  # reuse already-fetched info — do NOT call t.info again
 
             if not result["revenue"]:
                 rev = info_fb.get("totalRevenue")
