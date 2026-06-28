@@ -697,6 +697,15 @@ def init_db():
         )
     """))
 
+    # Fundamentals cache — stores yfinance fundamental data per ticker, 24-hr TTL
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS fundamentals_cache (
+            ticker     TEXT PRIMARY KEY,
+            data_json  TEXT NOT NULL,
+            fetched_at TEXT NOT NULL
+        )
+    """))
+
     # ── Multi-user migration: add user_id columns to all user-data tables ───
     _user_tables = [
         "watchlists", "notes", "trade_plans", "journal",
@@ -2532,3 +2541,41 @@ def delete_study_log_entry(user_id: int, entry_id: int) -> bool:
     conn.commit()
     conn.close()
     return True
+
+
+# ---------------------------------------------------------------------------
+# Fundamentals cache helpers
+# ---------------------------------------------------------------------------
+
+def get_fundamentals_cache(ticker: str) -> dict | None:
+    """Return cached fundamentals data if fresher than 24 hours, else None."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT data_json, fetched_at FROM fundamentals_cache WHERE ticker = ?",
+        (ticker.upper(),),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    try:
+        fetched = datetime.fromisoformat(row["fetched_at"])
+        age_hours = (datetime.now() - fetched).total_seconds() / 3600
+        if age_hours > 24:
+            return None
+        import json as _json
+        return _json.loads(row["data_json"])
+    except Exception:
+        return None
+
+
+def save_fundamentals_cache(ticker: str, data: dict) -> None:
+    """Upsert fundamentals data into cache with current timestamp."""
+    import json as _json
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO fundamentals_cache (ticker, data_json, fetched_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(ticker) DO UPDATE SET data_json = excluded.data_json, fetched_at = excluded.fetched_at",
+        (ticker.upper(), _json.dumps(data), datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()

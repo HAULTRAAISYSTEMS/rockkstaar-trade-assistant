@@ -5611,6 +5611,27 @@ def research_page():
     return render_template("research.html")
 
 
+@app.route("/fundamentals")
+def fundamentals_page():
+    """Fundamentals Analyzer + Education Module."""
+    ticker = (request.args.get("ticker") or "").strip().upper()
+    data   = None
+    error  = None
+
+    if ticker:
+        force = request.args.get("refresh") == "1"
+        try:
+            from fundamentals_engine import get_fundamentals
+            data = get_fundamentals(ticker, force_refresh=force)
+            if data.get("error"):
+                error = data["error"]
+        except Exception as exc:
+            logger.exception("fundamentals_page error for %s", ticker)
+            error = str(exc)
+
+    return render_template("fundamentals.html", ticker=ticker, data=data, error=error)
+
+
 @app.route("/api/research/ask", methods=["POST"])
 @csrf.exempt
 def api_research_ask():
