@@ -244,10 +244,18 @@ def trigger_background_refresh() -> None:
                 (fetch_macro_environment,  "macro"),
                 (run_ndx_constituent_check, "ndx"),
             ]
-            with ThreadPoolExecutor(max_workers=5) as bg_ex:
-                for fn, nm in tasks:
-                    bg_ex.submit(_call, fn, nm)
-            logger.info("intel bg-refresh: all complete")
+            # Hard ceiling: never block the bg thread longer than 90 s.
+            # Without this, a hung yfinance call keeps _bg_refreshing=True forever,
+            # preventing any future refresh from starting.
+            bg_ex = ThreadPoolExecutor(max_workers=5)
+            futs = [bg_ex.submit(_call, fn, nm) for fn, nm in tasks]
+            bg_ex.shutdown(wait=False)
+            try:
+                for fut in as_completed(futs, timeout=90):
+                    pass
+            except Exception:
+                pass   # TimeoutError after 90 s — move on regardless
+            logger.info("intel bg-refresh: all complete (or timed out)")
         except Exception as exc:
             logger.warning("intel bg-refresh outer: %s", exc)
         finally:
@@ -1338,58 +1346,71 @@ def _splits_from_finnhub(tickers: list[str], api_key: str, today: date) -> list[
 
 
 def _splits_from_yfinance(tickers: list[str], today: date) -> list[dict]:
+    """Parallelised with per-ticker timeout so a hung connection never blocks the
+    background refresh thread.  Each ticker gets 8 s; total capped at 20 s."""
     if _yf_is_rate_limited():
         logger.warning("intel/splits: yfinance rate-limited — skipping entirely")
         return []
     lookback  = today - timedelta(days=7)
     lookahead = today + timedelta(days=30)
     results: list[dict] = []
-    try:
-        import yfinance as yf
-        for ticker in tickers:
-            if _yf_is_rate_limited():
-                logger.warning("intel/splits: yfinance 401/429 mid-loop — stopping at %s", ticker)
-                break
-            try:
-                splits = yf.Ticker(ticker).splits
-                if splits is None or len(splits) == 0:
-                    continue
-                for ts, ratio in splits.items():
-                    if hasattr(ts, "date"):
-                        sd = ts.date()
-                    else:
-                        try:
-                            sd = datetime.strptime(str(ts)[:10], "%Y-%m-%d").date()
-                        except Exception:
-                            continue
-                    if sd < lookback or sd > lookahead:
+
+    def _fetch_one(ticker: str) -> list[dict]:
+        if _yf_is_rate_limited():
+            return []
+        try:
+            import yfinance as yf
+            splits = yf.Ticker(ticker).splits
+            if splits is None or len(splits) == 0:
+                return []
+            items: list[dict] = []
+            for ts, ratio in splits.items():
+                if hasattr(ts, "date"):
+                    sd = ts.date()
+                else:
+                    try:
+                        sd = datetime.strptime(str(ts)[:10], "%Y-%m-%d").date()
+                    except Exception:
                         continue
-                    days_away  = (sd - today).days
-                    split_type = "Forward" if ratio > 1 else "Reverse"
-                    if ratio > 1:
-                        ratio_str = f"{int(ratio)}:1"
-                    elif ratio > 0:
-                        ratio_str = f"1:{int(round(1 / ratio))}"
-                    else:
-                        ratio_str = "?"
-                    results.append({
-                        "ticker":       ticker,
-                        "company_name": _company_name(ticker),
-                        "ratio":        ratio_str,
-                        "type":         split_type,
-                        "eff_date":     sd.isoformat(),
-                        "days_away":    days_away,
-                        "is_new":       0 <= days_away <= 7,
-                        "status":       _split_status(days_away),
-                        "source":       "yfinance",
-                    })
-            except Exception as e:
-                if _is_yf_rate_limit_error(e):
-                    _yf_set_rate_limited()
-                    logger.warning("intel/splits yfinance %s: rate-limited — %s", ticker, e)
-                    break
-    except Exception as e:
-        logger.debug("intel/splits yfinance: %s", e)
+                if sd < lookback or sd > lookahead:
+                    continue
+                days_away  = (sd - today).days
+                split_type = "Forward" if ratio > 1 else "Reverse"
+                if ratio > 1:
+                    ratio_str = f"{int(ratio)}:1"
+                elif ratio > 0:
+                    ratio_str = f"1:{int(round(1 / ratio))}"
+                else:
+                    ratio_str = "?"
+                items.append({
+                    "ticker":       ticker,
+                    "company_name": _company_name(ticker),
+                    "ratio":        ratio_str,
+                    "type":         split_type,
+                    "eff_date":     sd.isoformat(),
+                    "days_away":    days_away,
+                    "is_new":       0 <= days_away <= 7,
+                    "status":       _split_status(days_away),
+                    "source":       "yfinance",
+                })
+            return items
+        except Exception as e:
+            if _is_yf_rate_limit_error(e):
+                _yf_set_rate_limited()
+                logger.warning("intel/splits yfinance %s: rate-limited", ticker)
+            return []
+
+    pool = ThreadPoolExecutor(max_workers=6)
+    futs = {pool.submit(_fetch_one, t): t for t in tickers}
+    pool.shutdown(wait=False)
+    try:
+        for fut in as_completed(futs, timeout=20):
+            try:
+                results.extend(fut.result() or [])
+            except Exception:
+                pass
+    except Exception:
+        pass   # TimeoutError after 20 s — return what we have
     return results
 
 
@@ -1670,21 +1691,30 @@ def _econ_from_finnhub() -> list[dict]:
 # Static fallback calendar — update each quarter with real dates
 _STATIC_ECON: list[tuple] = [
     # (date_str, time_str, event_name, impact)
-    ("2026-05-13", "8:30 AM ET",  "Consumer Price Index (CPI)",     "HIGH"),
-    ("2026-05-13", "8:30 AM ET",  "Core CPI (MoM)",                 "HIGH"),
-    ("2026-05-14", "8:30 AM ET",  "Producer Price Index (PPI)",     "HIGH"),
-    ("2026-05-14", "8:30 AM ET",  "Core PPI (MoM)",                 "HIGH"),
-    ("2026-05-15", "8:30 AM ET",  "Initial Jobless Claims",         "MEDIUM"),
-    ("2026-05-15", "8:30 AM ET",  "Retail Sales (MoM)",             "HIGH"),
-    ("2026-05-16", "10:00 AM ET", "Consumer Sentiment (Michigan)",  "MEDIUM"),
-    ("2026-05-19", "TBD",         "Fed Speaker Events",             "MEDIUM"),
-    ("2026-05-20", "8:30 AM ET",  "Housing Starts",                 "MEDIUM"),
-    ("2026-05-22", "8:30 AM ET",  "Initial Jobless Claims",         "MEDIUM"),
-    ("2026-05-29", "8:30 AM ET",  "GDP (Second Estimate)",          "HIGH"),
-    ("2026-06-04", "8:30 AM ET",  "Non-Farm Payrolls (NFP)",        "HIGH"),
-    ("2026-06-10", "8:30 AM ET",  "Consumer Price Index (CPI)",     "HIGH"),
-    ("2026-06-17", "2:00 PM ET",  "FOMC Interest Rate Decision",    "HIGH"),
-    ("2026-06-17", "2:30 PM ET",  "Fed Press Conference",           "HIGH"),
+    # ── July 2026 ──
+    ("2026-07-02", "8:30 AM ET",  "Non-Farm Payrolls (NFP)",           "HIGH"),
+    ("2026-07-02", "8:30 AM ET",  "Unemployment Rate",                 "HIGH"),
+    ("2026-07-10", "8:30 AM ET",  "Consumer Price Index (CPI)",        "HIGH"),
+    ("2026-07-10", "8:30 AM ET",  "Core CPI (MoM)",                    "HIGH"),
+    ("2026-07-11", "8:30 AM ET",  "Producer Price Index (PPI)",        "HIGH"),
+    ("2026-07-15", "8:30 AM ET",  "Retail Sales (MoM)",                "HIGH"),
+    ("2026-07-17", "8:30 AM ET",  "Initial Jobless Claims",            "MEDIUM"),
+    ("2026-07-25", "8:30 AM ET",  "GDP (Advance Estimate Q2)",         "HIGH"),
+    ("2026-07-29", "8:30 AM ET",  "PCE Price Index",                   "HIGH"),
+    ("2026-07-29", "8:30 AM ET",  "Core PCE (MoM)",                    "HIGH"),
+    ("2026-07-30", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2026-07-30", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
+    # ── August 2026 ──
+    ("2026-08-06", "8:30 AM ET",  "Non-Farm Payrolls (NFP)",           "HIGH"),
+    ("2026-08-12", "8:30 AM ET",  "Consumer Price Index (CPI)",        "HIGH"),
+    ("2026-08-13", "8:30 AM ET",  "Producer Price Index (PPI)",        "HIGH"),
+    ("2026-08-14", "8:30 AM ET",  "Retail Sales (MoM)",                "HIGH"),
+    ("2026-08-28", "8:30 AM ET",  "PCE Price Index",                   "HIGH"),
+    # ── September 2026 ──
+    ("2026-09-03", "8:30 AM ET",  "Non-Farm Payrolls (NFP)",           "HIGH"),
+    ("2026-09-10", "8:30 AM ET",  "Consumer Price Index (CPI)",        "HIGH"),
+    ("2026-09-16", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2026-09-16", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
 ]
 
 
