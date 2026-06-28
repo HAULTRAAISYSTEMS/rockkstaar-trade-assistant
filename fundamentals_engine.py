@@ -26,26 +26,50 @@ logger = logging.getLogger(__name__)
 # Register at https://financialmodelingprep.com to get a free API key, then
 # add FMP_API_KEY to your Render environment variables.
 
-_FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
-_FMP_BASE    = "https://financialmodelingprep.com/api/v3"
+_FMP_API_KEY  = os.environ.get("FMP_API_KEY", "")
+# FMP updated their API in 2024: free-tier accounts use the /stable/ base URL
+# with ?symbol= query params instead of ticker in the path.
+_FMP_BASE_V3     = "https://financialmodelingprep.com/api/v3"
+_FMP_BASE_STABLE = "https://financialmodelingprep.com/stable"
 
 
-def _fmp_get(path: str, params: dict | None = None) -> list | dict | None:
-    """GET from FMP API. Returns parsed JSON or None on any error."""
+def _fmp_get(endpoint: str, params: dict | None = None, ticker: str = "") -> list | dict | None:
+    """
+    GET from FMP API. Tries the new /stable/ endpoint first (free-tier friendly),
+    falls back to the legacy /api/v3/ path. Returns parsed JSON or None on error.
+    """
     if not _FMP_API_KEY:
         return None
-    try:
-        p = {"apikey": _FMP_API_KEY}
-        if params:
-            p.update(params)
-        resp = _req_module.get(f"{_FMP_BASE}/{path}", params=p, timeout=15)
-        if resp.status_code == 200:
-            return resp.json()
-        logger.warning("FMP API %d for %s", resp.status_code, path)
-        return None
-    except Exception as exc:
-        logger.warning("FMP request error (%s): %s", path, exc)
-        return None
+
+    base_params = {"apikey": _FMP_API_KEY}
+    if ticker:
+        base_params["symbol"] = ticker
+    if params:
+        base_params.update(params)
+
+    # Try /stable/ first (free tier)
+    for base in (_FMP_BASE_STABLE, _FMP_BASE_V3):
+        try:
+            if base == _FMP_BASE_V3 and ticker:
+                url = f"{base}/{endpoint}/{ticker}"
+                p = {"apikey": _FMP_API_KEY}
+                if params:
+                    p.update(params)
+            else:
+                url = f"{base}/{endpoint}"
+                p = base_params
+            resp = _req_module.get(url, params=p, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                # FMP returns {"Error Message": "..."} on bad key / no access
+                if isinstance(data, dict) and "Error Message" in data:
+                    logger.warning("FMP error (%s): %s", endpoint, data["Error Message"])
+                    return None
+                return data
+            logger.warning("FMP API %d for %s (base: %s)", resp.status_code, endpoint, base)
+        except Exception as exc:
+            logger.warning("FMP request error (%s @ %s): %s", endpoint, base, exc)
+    return None
 
 
 def fetch_fundamentals_fmp(ticker: str) -> dict | None:
@@ -75,30 +99,29 @@ def fetch_fundamentals_fmp(ticker: str) -> dict | None:
 
     try:
         # ── Company profile ──────────────────────────────────────────────────
-        profile = _fmp_get(f"profile/{ticker}")
+        profile = _fmp_get("profile", ticker=ticker)
         if profile and isinstance(profile, list) and profile:
             p = profile[0]
             result["company_name"] = p.get("companyName")
             result["sector"]       = p.get("sector")
             result["industry"]     = p.get("industry")
-            # Insider % not in profile; skip for now
         else:
             missing.append("company_info")
 
         # ── Income statement ─────────────────────────────────────────────────
-        inc = _fmp_get(f"income-statement/{ticker}", {"limit": 5})
+        inc = _fmp_get("income-statement", {"limit": 5, "period": "annual"}, ticker=ticker)
         if inc and isinstance(inc, list):
             for row in inc:
                 result["revenue"].append(row.get("revenue"))
                 result["gross_profit"].append(row.get("grossProfit"))
                 result["operating_income"].append(row.get("operatingIncome"))
                 result["net_income"].append(row.get("netIncome"))
-                result["diluted_eps"].append(row.get("epsdiluted"))
+                result["diluted_eps"].append(row.get("epsdiluted") or row.get("eps"))
         else:
             missing.append("income_statement")
 
         # ── Balance sheet ────────────────────────────────────────────────────
-        bs = _fmp_get(f"balance-sheet-statement/{ticker}", {"limit": 5})
+        bs = _fmp_get("balance-sheet-statement", {"limit": 5, "period": "annual"}, ticker=ticker)
         if bs and isinstance(bs, list):
             for row in bs:
                 result["total_assets"].append(row.get("totalAssets"))
@@ -115,7 +138,7 @@ def fetch_fundamentals_fmp(ticker: str) -> dict | None:
             missing.append("balance_sheet")
 
         # ── Cash flow ────────────────────────────────────────────────────────
-        cf = _fmp_get(f"cash-flow-statement/{ticker}", {"limit": 5})
+        cf = _fmp_get("cash-flow-statement", {"limit": 5, "period": "annual"}, ticker=ticker)
         if cf and isinstance(cf, list):
             for row in cf:
                 ocf = row.get("operatingCashFlow")
@@ -133,7 +156,7 @@ def fetch_fundamentals_fmp(ticker: str) -> dict | None:
             missing.append("cash_flow")
 
         # ── Key metrics for ROE / ROIC ───────────────────────────────────────
-        km = _fmp_get(f"key-metrics-ttm/{ticker}")
+        km = _fmp_get("key-metrics-ttm", ticker=ticker)
         if km and isinstance(km, list) and km:
             k = km[0]
             roe  = k.get("roeTTM")
