@@ -18,6 +18,204 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# ─── SEC EDGAR data source (primary — completely free, no API key needed) ────
+# EDGAR hosts XBRL financial data for all SEC-reporting companies (US stocks
+# plus foreign ADRs that file 20-F).  No API key, no rate limits that matter
+# for personal use, and no IP-based blocking.
+# Rate limit: 10 req/sec — we stay well under that with caching.
+
+_EDGAR_HEADERS = {
+    "User-Agent": "HAULTRA-AI/1.0 contact@haultra.ai",
+    "Accept-Encoding": "gzip, deflate",
+    "Host": "data.sec.gov",
+}
+_EDGAR_TICKERS_URL   = "https://www.sec.gov/files/company_tickers.json"
+_EDGAR_FACTS_URL     = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+_EDGAR_COMPANY_URL   = "https://data.sec.gov/submissions/CIK{cik}.json"
+
+# In-process cache for the giant tickers file (downloaded once per process)
+_edgar_tickers_cache: dict = {}
+
+
+def _edgar_cik(ticker: str) -> tuple[str, str] | tuple[None, None]:
+    """
+    Return (cik_padded, company_name) for ticker, or (None, None) if not found.
+    The tickers file is cached in memory after the first download.
+    """
+    global _edgar_tickers_cache
+    if not _edgar_tickers_cache:
+        try:
+            resp = _req_module.get(
+                _EDGAR_TICKERS_URL,
+                timeout=15,
+                headers={"User-Agent": "HAULTRA-AI/1.0 contact@haultra.ai"},
+            )
+            if resp.status_code == 200:
+                _edgar_tickers_cache = resp.json()
+        except Exception as exc:
+            logger.warning("EDGAR tickers fetch error: %s", exc)
+            return None, None
+
+    t_upper = ticker.upper()
+    for _, entry in _edgar_tickers_cache.items():
+        if entry.get("ticker", "").upper() == t_upper:
+            cik = str(entry["cik_str"]).zfill(10)
+            return cik, entry.get("title")
+    return None, None
+
+
+def fetch_fundamentals_edgar(ticker: str) -> dict | None:
+    """
+    Fetch fundamental data from SEC EDGAR XBRL API.
+    Free, no API key, works for US-listed companies and ADRs (20-F filers).
+    Returns the same dict structure as fetch_fundamentals_raw(), or None if
+    the ticker isn't found or has no XBRL data.
+    """
+    result: dict[str, Any] = {
+        "ticker": ticker.upper(),
+        "missing_fields": [],
+        "company_name": None, "sector": None, "industry": None,
+        "roe": None, "roic": None, "insider_pct": None,
+        "revenue": [], "gross_profit": [], "operating_income": [],
+        "net_income": [], "diluted_eps": [],
+        "total_assets": [], "total_liabilities": [], "total_equity": [],
+        "current_assets": [], "current_liabilities": [],
+        "cash": [], "total_debt": [], "goodwill": [],
+        "intangible_assets": [], "retained_earnings": [],
+        "operating_cash_flow": [], "capex": [], "free_cash_flow": [],
+        "financing_cash_flow": [],
+    }
+    missing = result["missing_fields"]
+
+    # ── 1. Resolve CIK ───────────────────────────────────────────────────────
+    cik, company_name = _edgar_cik(ticker)
+    if not cik:
+        logger.warning("EDGAR: %s not found in SEC tickers", ticker)
+        return None
+    result["company_name"] = company_name
+
+    # ── 2. Fetch XBRL company facts ──────────────────────────────────────────
+    try:
+        resp = _req_module.get(
+            _EDGAR_FACTS_URL.format(cik=cik),
+            timeout=30,
+            headers=_EDGAR_HEADERS,
+        )
+        if resp.status_code != 200:
+            logger.warning("EDGAR facts %d for %s (CIK %s)", resp.status_code, ticker, cik)
+            return None
+        facts = resp.json()
+    except Exception as exc:
+        logger.warning("EDGAR facts fetch error for %s: %s", ticker, exc)
+        return None
+
+    us_gaap = facts.get("facts", {}).get("us-gaap", {})
+    if not us_gaap:
+        # Some foreign filers use ifrs-full instead of us-gaap
+        us_gaap = facts.get("facts", {}).get("ifrs-full", {})
+    if not us_gaap:
+        logger.warning("EDGAR: no us-gaap or ifrs-full facts for %s", ticker)
+        return None
+
+    # ── 3. Helper: extract up to n annual values, most recent first ──────────
+    def _annual(concepts, n: int = 5):
+        if isinstance(concepts, str):
+            concepts = [concepts]
+        for name in concepts:
+            concept = us_gaap.get(name)
+            if not concept:
+                continue
+            usd_vals = concept.get("units", {}).get("USD", [])
+            if not usd_vals:
+                # Some EPS values are in USD/shares
+                usd_vals = concept.get("units", {}).get("USD/shares", [])
+            annual = [
+                v for v in usd_vals
+                if v.get("form") in ("10-K", "20-F", "40-F")
+                and "end" in v and "val" in v
+            ]
+            if not annual:
+                continue
+            # Deduplicate: one value per fiscal year end (keep latest accession)
+            by_end: dict[str, dict] = {}
+            for v in annual:
+                end = v["end"]
+                if end not in by_end or v.get("accn", "") > by_end[end].get("accn", ""):
+                    by_end[end] = v
+            sorted_vals = sorted(by_end.values(), key=lambda x: x["end"], reverse=True)
+            return [v["val"] for v in sorted_vals[:n]]
+        return []
+
+    # ── 4. Income statement ──────────────────────────────────────────────────
+    rev = _annual(["RevenueFromContractWithCustomerExcludingAssessedTax",
+                   "RevenueFromContractWithCustomerIncludingAssessedTax",
+                   "Revenues", "SalesRevenueNet", "SalesRevenueGoodsNet"])
+    gp  = _annual(["GrossProfit"])
+    oi  = _annual(["OperatingIncomeLoss"])
+    ni  = _annual(["NetIncomeLoss", "NetIncome",
+                   "NetIncomeLossAvailableToCommonStockholdersBasic"])
+    eps = _annual(["EarningsPerShareDiluted", "EarningsPerShareBasic"])
+
+    result.update(revenue=rev, gross_profit=gp, operating_income=oi,
+                  net_income=ni, diluted_eps=eps)
+    if not rev and not ni:
+        missing.append("income_statement")
+
+    # ── 5. Balance sheet ─────────────────────────────────────────────────────
+    ta  = _annual(["Assets"])
+    tl  = _annual(["Liabilities"])
+    eq  = _annual(["StockholdersEquity",
+                   "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"])
+    ca  = _annual(["AssetsCurrent"])
+    cl  = _annual(["LiabilitiesCurrent"])
+    csh = _annual(["CashAndCashEquivalentsAtCarryingValue",
+                   "CashCashEquivalentsAndShortTermInvestments",
+                   "CashAndCashEquivalents"])
+    # Debt: prefer total debt, fall back to long-term + current portions summed
+    td  = _annual(["DebtCurrent", "LongTermDebtNoncurrent", "LongTermDebt",
+                   "LongTermDebtAndCapitalLeaseObligations"])
+    gw  = _annual(["Goodwill"])
+    ia  = _annual(["IntangibleAssetsNetExcludingGoodwill",
+                   "FiniteLivedIntangibleAssetsNet"])
+    re  = _annual(["RetainedEarningsAccumulatedDeficit"])
+
+    result.update(total_assets=ta, total_liabilities=tl, total_equity=eq,
+                  current_assets=ca, current_liabilities=cl, cash=csh,
+                  total_debt=td, goodwill=gw, intangible_assets=ia,
+                  retained_earnings=re)
+    if not ta and not eq:
+        missing.append("balance_sheet")
+
+    # ── 6. Cash flow ─────────────────────────────────────────────────────────
+    ocf = _annual(["NetCashProvidedByUsedInOperatingActivities"])
+    cap = _annual(["PaymentsToAcquirePropertyPlantAndEquipment",
+                   "CapitalExpendituresIncurredButNotYetPaid"])
+    fin = _annual(["NetCashProvidedByUsedInFinancingActivities"])
+
+    cap_abs = [abs(c) if c is not None else None for c in cap]
+    fcf = []
+    for i in range(max(len(ocf), len(cap_abs))):
+        o = ocf[i] if i < len(ocf) else None
+        c = cap_abs[i] if i < len(cap_abs) else None
+        fcf.append((o - c) if o is not None and c is not None else None)
+
+    result.update(operating_cash_flow=ocf, capex=cap_abs,
+                  free_cash_flow=fcf, financing_cash_flow=fin)
+    if not ocf:
+        missing.append("cash_flow")
+
+    # ── 7. Derived ratios ────────────────────────────────────────────────────
+    if ni and eq and ni[0] is not None and eq[0] and eq[0] != 0:
+        result["roe"] = (ni[0] / eq[0]) * 100
+
+    # Return None only if ALL major sections are missing
+    if len(missing) >= 3:
+        logger.warning("EDGAR returned insufficient data for %s", ticker)
+        return None
+
+    return result
+
+
 # ─── Financial Modeling Prep (FMP) data source ───────────────────────────────
 # FMP is used as the primary data source when FMP_API_KEY is set in the
 # environment.  It avoids the Yahoo Finance IP-based rate-limiting that blocks
@@ -319,7 +517,13 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
     FMP is not subject to Yahoo Finance's cloud-IP rate-limiting.
     Falls back to yfinance if FMP is not configured or returns no data.
     """
-    # ── FMP primary path ─────────────────────────────────────────────────────
+    # ── EDGAR primary path (free, no key needed) ─────────────────────────────
+    edgar_result = fetch_fundamentals_edgar(ticker)
+    if edgar_result is not None:
+        return edgar_result
+    logger.warning("EDGAR returned nothing for %s, trying FMP/yfinance", ticker)
+
+    # ── FMP secondary path (requires FMP_API_KEY env var) ────────────────────
     if _FMP_API_KEY:
         fmp_result = fetch_fundamentals_fmp(ticker)
         if fmp_result is not None:
