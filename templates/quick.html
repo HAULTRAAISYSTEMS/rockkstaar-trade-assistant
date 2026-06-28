@@ -743,6 +743,53 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
     <div class="mcs-signal">{{ mkt.signal }}</div>
     {% endif %}
 
+    {% if acct %}
+    <!-- ── ACCOUNT DIVIDER ──────────────────────────────────────────────── -->
+    <div style="width:2px;background:rgba(34,211,238,0.20);margin:6px 0;flex-shrink:0;"></div>
+
+    <div class="mcs-chip" title="Total Account Value">
+      <span class="mcs-label">ACCT VALUE</span>
+      <span class="mcs-val" style="color:var(--cyan)">
+        {% if acct.total_value is not none %}${{ "{:,.0f}".format(acct.total_value) }}{% else %}—{% endif %}
+      </span>
+    </div>
+
+    <div class="mcs-chip" title="Available Buying Power">
+      <span class="mcs-label">BUY POWER</span>
+      <span class="mcs-val" style="color:var(--green)">
+        {% if acct.buying_power is not none %}${{ "{:,.0f}".format(acct.buying_power) }}{% else %}—{% endif %}
+      </span>
+    </div>
+
+    <div class="mcs-chip" title="Daily Realized P&L"
+         style="{% if acct.daily_pnl is not none and acct.daily_pnl > 0 %}background:rgba(34,197,94,0.07){% elif acct.daily_pnl is not none and acct.daily_pnl < 0 %}background:rgba(239,68,68,0.07){% endif %}">
+      <span class="mcs-label">DAY P&L</span>
+      <span class="mcs-val" style="color:{% if acct.daily_pnl is not none and acct.daily_pnl > 0 %}var(--green){% elif acct.daily_pnl is not none and acct.daily_pnl < 0 %}var(--red){% else %}var(--text-pri){% endif %}">
+        {% if acct.daily_pnl is not none %}
+          {{ '+' if acct.daily_pnl > 0 else '' }}${{ "{:,.0f}".format(acct.daily_pnl) }}
+          {% if acct.daily_pnl_pct is not none %}
+            <span style="font-size:9px;opacity:0.75">({{ '%+.1f'|format(acct.daily_pnl_pct) }}%)</span>
+          {% endif %}
+        {% else %}—{% endif %}
+      </span>
+    </div>
+
+    <div class="mcs-chip" title="Open / Unrealized P&L"
+         style="{% if acct.total_unrealized is not none and acct.total_unrealized > 0 %}background:rgba(34,197,94,0.05){% elif acct.total_unrealized is not none and acct.total_unrealized < 0 %}background:rgba(239,68,68,0.05){% endif %}">
+      <span class="mcs-label">OPEN P&L</span>
+      <span class="mcs-val" style="color:{% if acct.total_unrealized is not none and acct.total_unrealized > 0 %}var(--green){% elif acct.total_unrealized is not none and acct.total_unrealized < 0 %}var(--red){% else %}var(--text-pri){% endif %}">
+        {% if acct.total_unrealized is not none %}
+          {{ '+' if acct.total_unrealized > 0 else '' }}${{ "{:,.0f}".format(acct.total_unrealized) }}
+        {% else %}—{% endif %}
+      </span>
+    </div>
+
+    <div class="mcs-chip" title="Open Positions">
+      <span class="mcs-label">POSITIONS</span>
+      <span class="mcs-val">{{ acct.open_positions if acct.open_positions is not none else '—' }}</span>
+    </div>
+    {% endif %}
+
   </div><!-- /mcs -->
 
 

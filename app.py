@@ -4249,12 +4249,26 @@ def quick_mode():
         except Exception as _se:
             logger.debug("market story failed: %s", _se)
 
+    # Schwab account snapshot (buying power, P&L, etc.) — blended into Execution
+    acct = None
+    try:
+        uid = session.get("user_id")
+        if uid:
+            tok = _schwab.token_status(uid)
+            if tok.get("connected"):
+                acct = _get_schwab_data(uid)
+                if acct.get("error"):
+                    acct = None
+    except Exception as _ae:
+        logger.debug("quick_mode: schwab account fetch skipped: %s", _ae)
+
     return render_template(
         "quick.html",
         stocks=valid,
         orb_session=get_orb_session_banner(),
         mkt=mkt_ctx,
         story=story,
+        acct=acct,
     )
 
 
