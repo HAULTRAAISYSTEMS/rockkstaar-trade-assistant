@@ -1271,21 +1271,27 @@ def _find_active_impulse_leg(
 
     # An "active" swing has to mean what it says — a leg that's still
     # relevant to where the stock is actually trading now, not just the
-    # biggest/cleanest move anywhere in the lookback history. Without this
-    # check, a huge old rally from months ago can outscore a smaller-but-
-    # current move on magnitude/quality alone (e.g. AMAT's fib anchors
-    # stayed pinned to a leg ending near $447 even after price rallied well
-    # past $600 — a >35% gap between the "active" high and the real recent
-    # high). Reject any candidate whose extreme is more than 8% away from
-    # the actual highest/lowest price reached in the recent window — i.e.
-    # the chosen pivot must be at or near the real recent extreme, not a
-    # smaller historical one that's since been blown through.
-    RECENT_WINDOW   = 90
-    STALE_TOLERANCE = 0.08
-    recent_hi = max(highs[-RECENT_WINDOW:]) if n >= 1 else None
-    recent_lo = min(lows[-RECENT_WINDOW:])  if n >= 1 else None
+    # biggest/cleanest move anywhere in the lookback history. Without a
+    # recency check, a huge old rally from months ago can outscore a
+    # smaller-but-current move on magnitude/quality alone (e.g. AMAT's fib
+    # anchors stayed pinned to a leg ending near $447 even after price
+    # rallied well past $600 — a >35% gap between the "active" high and the
+    # real recent high).
+    #
+    # A hard per-candidate cutoff is too blunt though: if the very latest
+    # high hasn't been pivot-confirmed yet (needs `window` bars of pullback
+    # after it), rejecting every bullish candidate can flip the result to an
+    # unrelated, low-confidence bearish leg — equally misleading in the
+    # other direction. So: track the best candidate per direction, then
+    # prefer whichever one is actually fresh (close to the real recent
+    # extreme) over one that merely scores higher on magnitude/quality.
+    RECENT_WINDOW    = 90
+    FRESH_TOLERANCE  = 0.15   # within 15% of the real recent extreme counts as "fresh"
+    recent_hi = max(highs[-RECENT_WINDOW:])
+    recent_lo = min(lows[-RECENT_WINDOW:])
 
-    best: dict | None = None
+    best_bull: dict | None = None
+    best_bear: dict | None = None
 
     # ── Bullish legs: pivot_low → pivot_high ──────────────────────────────────
     for j in range(len(pl) - 1, -1, -1):          # iterate recent pivot lows first
@@ -1295,8 +1301,6 @@ def _find_active_impulse_leg(
             hi, hv = ph[k]
             if hi <= li:
                 continue
-            if recent_hi and hv < recent_hi * (1 - STALE_TOLERANCE):
-                continue  # this pivot high has been superseded — too far below the real recent high, keep looking
             leg_size = hv - lv
             if leg_size / atr < MIN_ATR_MULT:
                 break  # all remaining ph[k] will be the same or worse — stop
@@ -1306,9 +1310,10 @@ def _find_active_impulse_leg(
                 "low_idx": li,  "low_val": lv,
                 "high_idx": hi, "high_val": hv,
                 "score": sc,    "atr_mult": leg_size / atr,
+                "fresh": hv >= recent_hi * (1 - FRESH_TOLERANCE),
             }
-            if best is None or sc > best["score"]:
-                best = candidate
+            if best_bull is None or sc > best_bull["score"]:
+                best_bull = candidate
             break  # take only the best qualifying high for this particular low
 
     # ── Bearish legs: pivot_high → pivot_low ─────────────────────────────────
@@ -1318,8 +1323,6 @@ def _find_active_impulse_leg(
             li, lv = pl[k]
             if li <= hi:
                 continue
-            if recent_lo and lv > recent_lo * (1 + STALE_TOLERANCE):
-                continue  # this pivot low has been superseded — too far above the real recent low, keep looking
             leg_size = hv - lv
             if leg_size / atr < MIN_ATR_MULT:
                 break
@@ -1329,12 +1332,29 @@ def _find_active_impulse_leg(
                 "low_idx": li,  "low_val": lv,
                 "high_idx": hi, "high_val": hv,
                 "score": sc,    "atr_mult": leg_size / atr,
+                # A bearish leg is "fresh" if it STARTED from a high that is
+                # close to the recent peak — i.e. the rally that preceded the
+                # selloff is still the dominant recent move.  Checking the low
+                # against recent_lo was wrong: in an uptrend recent_lo is an
+                # old accumulation low, making the threshold too permissive.
+                "fresh": hv >= recent_hi * (1 - FRESH_TOLERANCE),
             }
-            if best is None or sc > best["score"]:
-                best = candidate
+            if best_bear is None or sc > best_bear["score"]:
+                best_bear = candidate
             break
 
-    return best if (best and best["score"] >= 2.0) else None
+    # ── Pick the winner: freshness is a hard requirement, not just a tiebreaker ──
+    # If neither direction has a pivot that's actually close to where price is
+    # trading now (e.g. mid-rally with no confirmed pullback yet to anchor a
+    # fresh pivot), there's no trustworthy "active" leg to show — defer to the
+    # macro 20-bar fallback (computed by the caller) instead of guessing with a
+    # stale leg, which is exactly how this bug surfaced in the first place.
+    candidates = [c for c in (best_bull, best_bear) if c and c["score"] >= 2.0 and c["fresh"]]
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda c: c["score"])
+    best.pop("fresh", None)
+    return best
 
 
 def fetch_swing_data(ticker: str) -> dict | None:
