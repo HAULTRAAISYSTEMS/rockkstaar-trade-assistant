@@ -36,12 +36,26 @@ _EDGAR_COMPANY_URL   = "https://data.sec.gov/submissions/CIK{cik}.json"
 # In-process cache for the giant tickers file (downloaded once per process)
 _edgar_tickers_cache: dict = {}
 
+# Hardcoded CIK overrides for tickers that may be missing or wrong in company_tickers.json
+# (recent spinoffs, renames, foreign co-listings, etc.)
+_CIK_OVERRIDES: dict[str, tuple[str, str]] = {
+    # (ticker_upper) -> (cik_padded, company_name)
+    "GEV":  ("0001996810", "GE Vernova Inc."),      # GE spinoff Apr 2024, may lag in tickers file
+    "GEHC": ("0001835016", "GE HealthCare Technologies Inc."),
+    "SOLV": ("0001974964", "Solventum Corp"),        # 3M spinoff Apr 2024
+}
+
 
 def _edgar_cik(ticker: str) -> tuple[str, str] | tuple[None, None]:
     """
     Return (cik_padded, company_name) for ticker, or (None, None) if not found.
     The tickers file is cached in memory after the first download.
     """
+    t_upper = ticker.upper()
+    # Check hardcoded overrides first (covers recent spinoffs / renames)
+    if t_upper in _CIK_OVERRIDES:
+        return _CIK_OVERRIDES[t_upper]
+
     global _edgar_tickers_cache
     if not _edgar_tickers_cache:
         try:
@@ -56,7 +70,6 @@ def _edgar_cik(ticker: str) -> tuple[str, str] | tuple[None, None]:
             logger.warning("EDGAR tickers fetch error: %s", exc)
             return None, None
 
-    t_upper = ticker.upper()
     for _, entry in _edgar_tickers_cache.items():
         if entry.get("ticker", "").upper() == t_upper:
             cik = str(entry["cik_str"]).zfill(10)
