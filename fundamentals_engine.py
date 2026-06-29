@@ -109,52 +109,71 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
         logger.warning("EDGAR facts fetch error for %s: %s", ticker, exc)
         return None
 
-    us_gaap = facts.get("facts", {}).get("us-gaap", {})
-    if not us_gaap:
-        # Some foreign filers use ifrs-full instead of us-gaap
-        us_gaap = facts.get("facts", {}).get("ifrs-full", {})
-    if not us_gaap:
+    all_facts = facts.get("facts", {})
+    us_gaap   = all_facts.get("us-gaap", {})
+    ifrs_data = all_facts.get("ifrs-full", {})
+    is_ifrs   = bool(ifrs_data) and not us_gaap  # true for 20-F IFRS filers like TSM
+
+    if not us_gaap and not ifrs_data:
         logger.warning("EDGAR: no us-gaap or ifrs-full facts for %s", ticker)
         return None
 
     # ── 3. Helper: extract up to n annual values, most recent first ──────────
     def _annual(concepts, n: int = 5):
+        """Try each concept name in order; search both us-gaap and ifrs-full."""
         if isinstance(concepts, str):
             concepts = [concepts]
-        for name in concepts:
-            concept = us_gaap.get(name)
-            if not concept:
-                continue
-            usd_vals = concept.get("units", {}).get("USD", [])
-            if not usd_vals:
-                # Some EPS values are in USD/shares
-                usd_vals = concept.get("units", {}).get("USD/shares", [])
-            annual = [
-                v for v in usd_vals
-                if v.get("form") in ("10-K", "20-F", "40-F")
-                and "end" in v and "val" in v
-            ]
-            if not annual:
-                continue
-            # Deduplicate: one value per fiscal year end (keep latest accession)
-            by_end: dict[str, dict] = {}
-            for v in annual:
-                end = v["end"]
-                if end not in by_end or v.get("accn", "") > by_end[end].get("accn", ""):
-                    by_end[end] = v
-            sorted_vals = sorted(by_end.values(), key=lambda x: x["end"], reverse=True)
-            return [v["val"] for v in sorted_vals[:n]]
+        namespaces = []
+        if us_gaap:
+            namespaces.append(us_gaap)
+        if ifrs_data:
+            namespaces.append(ifrs_data)
+        for ns in namespaces:
+            for name in concepts:
+                concept = ns.get(name)
+                if not concept:
+                    continue
+                usd_vals = concept.get("units", {}).get("USD", [])
+                if not usd_vals:
+                    usd_vals = concept.get("units", {}).get("USD/shares", [])
+                annual = [
+                    v for v in usd_vals
+                    if v.get("form") in ("10-K", "20-F", "40-F")
+                    and "end" in v and "val" in v
+                ]
+                if not annual:
+                    continue
+                by_end: dict[str, dict] = {}
+                for v in annual:
+                    end = v["end"]
+                    if end not in by_end or v.get("accn", "") > by_end[end].get("accn", ""):
+                        by_end[end] = v
+                sorted_vals = sorted(by_end.values(), key=lambda x: x["end"], reverse=True)
+                return [v["val"] for v in sorted_vals[:n]]
         return []
 
     # ── 4. Income statement ──────────────────────────────────────────────────
+    # US-GAAP names first, then IFRS equivalents (for 20-F filers like TSM)
     rev = _annual(["RevenueFromContractWithCustomerExcludingAssessedTax",
                    "RevenueFromContractWithCustomerIncludingAssessedTax",
-                   "Revenues", "SalesRevenueNet", "SalesRevenueGoodsNet"])
-    gp  = _annual(["GrossProfit"])
-    oi  = _annual(["OperatingIncomeLoss"])
+                   "Revenues", "SalesRevenueNet", "SalesRevenueGoodsNet",
+                   # IFRS equivalents
+                   "Revenue", "RevenueFromContractWithCustomer",
+                   "SalesRevenueFromContractsWithCustomers"])
+    gp  = _annual(["GrossProfit",
+                   "GrossProfitLoss"])       # IFRS
+    oi  = _annual(["OperatingIncomeLoss",
+                   "ProfitLossFromOperatingActivities",  # IFRS
+                   "OperatingProfit"])
     ni  = _annual(["NetIncomeLoss", "NetIncome",
-                   "NetIncomeLossAvailableToCommonStockholdersBasic"])
-    eps = _annual(["EarningsPerShareDiluted", "EarningsPerShareBasic"])
+                   "NetIncomeLossAvailableToCommonStockholdersBasic",
+                   # IFRS equivalents
+                   "ProfitLoss",
+                   "ProfitLossAttributableToOwnersOfParent",
+                   "ComprehensiveIncome"])
+    eps = _annual(["EarningsPerShareDiluted", "EarningsPerShareBasic",
+                   "DilutedEarningsLossPerShare",        # IFRS
+                   "BasicEarningsLossPerShare"])
 
     result.update(revenue=rev, gross_profit=gp, operating_income=oi,
                   net_income=ni, diluted_eps=eps)
@@ -162,22 +181,33 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
         missing.append("income_statement")
 
     # ── 5. Balance sheet ─────────────────────────────────────────────────────
-    ta  = _annual(["Assets"])
-    tl  = _annual(["Liabilities"])
+    ta  = _annual(["Assets"])                   # same in IFRS
+    tl  = _annual(["Liabilities"])              # same in IFRS
     eq  = _annual(["StockholdersEquity",
-                   "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"])
-    ca  = _annual(["AssetsCurrent"])
-    cl  = _annual(["LiabilitiesCurrent"])
+                   "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+                   # IFRS equivalents
+                   "Equity", "EquityAttributableToOwnersOfParent"])
+    ca  = _annual(["AssetsCurrent",
+                   "CurrentAssets"])            # IFRS
+    cl  = _annual(["LiabilitiesCurrent",
+                   "CurrentLiabilities"])       # IFRS
     csh = _annual(["CashAndCashEquivalentsAtCarryingValue",
                    "CashCashEquivalentsAndShortTermInvestments",
-                   "CashAndCashEquivalents"])
-    # Debt: prefer total debt, fall back to long-term + current portions summed
+                   "CashAndCashEquivalents",
+                   # IFRS equivalents
+                   "CashAndCashEquivalentsIfrs",
+                   "CashAndBankBalancesAtCentralBanks"])
     td  = _annual(["DebtCurrent", "LongTermDebtNoncurrent", "LongTermDebt",
-                   "LongTermDebtAndCapitalLeaseObligations"])
-    gw  = _annual(["Goodwill"])
+                   "LongTermDebtAndCapitalLeaseObligations",
+                   # IFRS equivalents
+                   "Borrowings", "BorrowingsAndBankOverdrafts",
+                   "LongtermBorrowings", "ShorttermBorrowings"])
+    gw  = _annual(["Goodwill"])                 # same in IFRS
     ia  = _annual(["IntangibleAssetsNetExcludingGoodwill",
-                   "FiniteLivedIntangibleAssetsNet"])
-    re  = _annual(["RetainedEarningsAccumulatedDeficit"])
+                   "FiniteLivedIntangibleAssetsNet",
+                   "IntangibleAssetsOtherThanGoodwill"])   # IFRS
+    re  = _annual(["RetainedEarningsAccumulatedDeficit",
+                   "RetainedEarnings"])         # IFRS
 
     result.update(total_assets=ta, total_liabilities=tl, total_equity=eq,
                   current_assets=ca, current_liabilities=cl, cash=csh,
@@ -187,10 +217,15 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
         missing.append("balance_sheet")
 
     # ── 6. Cash flow ─────────────────────────────────────────────────────────
-    ocf = _annual(["NetCashProvidedByUsedInOperatingActivities"])
+    ocf = _annual(["NetCashProvidedByUsedInOperatingActivities",
+                   "CashFlowsFromUsedInOperatingActivities"])   # IFRS
     cap = _annual(["PaymentsToAcquirePropertyPlantAndEquipment",
-                   "CapitalExpendituresIncurredButNotYetPaid"])
-    fin = _annual(["NetCashProvidedByUsedInFinancingActivities"])
+                   "CapitalExpendituresIncurredButNotYetPaid",
+                   # IFRS equivalents
+                   "PurchaseOfPropertyPlantAndEquipment",
+                   "AcquisitionOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"])
+    fin = _annual(["NetCashProvidedByUsedInFinancingActivities",
+                   "CashFlowsFromUsedInFinancingActivities"])   # IFRS
 
     cap_abs = [abs(c) if c is not None else None for c in cap]
     fcf = []
@@ -572,6 +607,42 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
         logger.warning("FMP returned nothing for %s, falling back to yfinance", ticker)
 
     # ── yfinance fallback ────────────────────────────────────────────────────
+    # Quick connectivity check: if Yahoo Finance is unreachable (Render cloud IPs
+    # are IP-blocked), return an error immediately instead of hanging for 30s.
+    _yf_reachable = False
+    try:
+        import requests as _rq_check
+        _probe = _rq_check.head(
+            "https://query1.finance.yahoo.com/v8/finance/chart/AAPL",
+            timeout=4,
+            headers={"User-Agent": "Mozilla/5.0"},
+            allow_redirects=True,
+        )
+        _yf_reachable = _probe.status_code < 500
+    except Exception:
+        _yf_reachable = False
+
+    if not _yf_reachable:
+        logger.warning("yfinance unreachable for %s — Yahoo Finance is blocking this server's IP. "
+                       "EDGAR had no XBRL data for this ticker.", ticker)
+        return {
+            "ticker": ticker.upper(),
+            "missing_fields": ["income_statement", "balance_sheet", "cash_flow"],
+            "company_name": None, "sector": None, "industry": None,
+            "roe": None, "roic": None, "insider_pct": None,
+            "revenue": [], "gross_profit": [], "operating_income": [], "net_income": [], "diluted_eps": [],
+            "total_assets": [], "total_liabilities": [], "total_equity": [],
+            "current_assets": [], "current_liabilities": [], "cash": [],
+            "total_debt": [], "goodwill": [], "intangible_assets": [], "retained_earnings": [],
+            "operating_cash_flow": [], "capex": [], "free_cash_flow": [], "financing_cash_flow": [],
+            "error": (
+                f"No SEC EDGAR data found for {ticker}. "
+                "This ticker may not file with the SEC (foreign stock not listed as ADR), "
+                "may be too new (recent IPO with no annual filing yet), or may use a "
+                "different ticker symbol in EDGAR. Try the full exchange ticker if this is an ADR."
+            ),
+        }
+
     missing: list[str] = []
     result: dict[str, Any] = {
         "ticker": ticker.upper(),
