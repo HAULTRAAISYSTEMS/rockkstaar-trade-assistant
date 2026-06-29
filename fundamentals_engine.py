@@ -205,8 +205,49 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
         missing.append("cash_flow")
 
     # ── 7. Derived ratios ────────────────────────────────────────────────────
-    if ni and eq and ni[0] is not None and eq[0] and eq[0] != 0:
-        result["roe"] = (ni[0] / eq[0]) * 100
+    ni0_d = ni[0] if ni else None
+    eq0_d = eq[0] if eq else None
+    oi0_d = oi[0] if oi else None
+    td0_d = td[0] if td else 0
+
+    if ni0_d is not None and eq0_d and eq0_d != 0:
+        result["roe"] = (ni0_d / eq0_d) * 100
+
+    # ROIC = NOPAT / Invested Capital  (NOPAT = OperatingIncome × (1 - tax_rate))
+    if oi0_d and ni0_d and eq0_d is not None and oi0_d != 0:
+        try:
+            tax_rate = max(0.0, min(0.40, 1.0 - (ni0_d / oi0_d)))
+            nopat = oi0_d * (1.0 - tax_rate)
+            invested_capital = (eq0_d or 0) + (td0_d or 0)
+            if invested_capital > 0:
+                result["roic"] = (nopat / invested_capital) * 100
+        except Exception:
+            pass
+
+    # ── 8. Insider ownership — quick yfinance probe with hard timeout ────────
+    # EDGAR company facts don't include insider %; yfinance does but can hang.
+    # We run it in a separate thread and abandon after 8 seconds so it never
+    # blocks the page render.
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed as _asc
+
+        def _yf_insider(tkr: str):
+            import yfinance as _yf
+            info = _yf.Ticker(tkr).info
+            pct = info.get("heldPercentInsiders")
+            return float(pct) * 100 if pct is not None else None
+
+        with ThreadPoolExecutor(max_workers=1) as _ex:
+            _fut = _ex.submit(_yf_insider, ticker)
+        # Wait up to 8 s; if Yahoo hangs we get TimeoutError and skip
+        try:
+            _pct = _fut.result(timeout=8)
+            if _pct is not None:
+                result["insider_pct"] = _pct
+        except Exception:
+            pass
+    except Exception:
+        pass
 
     # Return None only if ALL major sections are missing
     if len(missing) >= 3:
