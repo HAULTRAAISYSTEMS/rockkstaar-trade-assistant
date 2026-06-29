@@ -1354,6 +1354,86 @@ def score_fundamentals(raw: dict) -> dict:
         "Avoid":         "verdict-avoid",
     }.get(verdict, "verdict-caution")
 
+    # ── Verdict reason — 1-2 sentences explaining the score ──────────────────
+    def _build_verdict_reason() -> str:
+        # Rank sections by how much they underperformed (worst first)
+        sec_scores = [(s["name"], s["earned"], s["possible"]) for s in sections if s["possible"] > 0]
+        sec_pct    = sorted(sec_scores, key=lambda x: x[1]/x[2])
+        worst_sec  = sec_pct[0][0]  if sec_pct else None
+        best_sec   = sec_pct[-1][0] if sec_pct else None
+
+        roe_str  = f"{raw.get('roe'):.0f}%" if raw.get("roe") is not None else None
+        roic_str = f"{raw.get('roic'):.0f}%" if raw.get("roic") is not None else None
+        flags    = [f["key"] for f in red_flags]
+
+        # Build nicely-named section references
+        _sec_names = {
+            "Balance Sheet":    "the balance sheet",
+            "Income Statement": "the income statement",
+            "Cash Flow":        "cash flow",
+            "Quality Metrics":  "profitability metrics",
+        }
+        worst_label = _sec_names.get(worst_sec, worst_sec) if worst_sec else "key metrics"
+        best_label  = _sec_names.get(best_sec,  best_sec)  if best_sec  else "some areas"
+
+        # Specific signal phrases
+        roe_phrase  = f"ROE of {roe_str}" if roe_str else None
+        roic_phrase = f"ROIC of {roic_str}" if roic_str else None
+
+        flag_phrases = {
+            "income_positive_fcf_negative":     "earnings aren't backed by real cash",
+            "debt_growing_faster_than_revenue":  "debt is growing faster than revenue",
+            "current_ratio_below_1":             "current liabilities exceed liquid assets",
+            "goodwill_impairment":               "a prior acquisition has lost value",
+        }
+        flag_text = next((flag_phrases[k] for k in flags if k in flag_phrases), None)
+
+        if verdict == "Great Company":
+            parts = []
+            if roe_str and raw.get("roe", 0) > 15:
+                parts.append(f"{roe_str} ROE")
+            if roic_str and raw.get("roic", 0) > 10:
+                parts.append(f"{roic_str} ROIC")
+            strength = " and ".join(parts) if parts else f"strong {best_label}"
+            s1 = f"Scores across all four pillars are elite — {strength} signals a durable, high-quality business."
+            s2 = "This is the type of company worth holding through the long run." if not flag_text else f"Watch: {flag_text}."
+            return f"{s1} {s2}"
+
+        elif verdict == "Good":
+            s1 = f"Solid fundamentals overall — {best_label} is a clear strength."
+            if flag_text:
+                s2 = f"Red flag to monitor: {flag_text}, which keeps this out of the elite tier."
+            else:
+                s2 = f"The main drag is {worst_label}, which has room to improve before this reaches elite status."
+            return f"{s1} {s2}"
+
+        elif verdict == "Caution":
+            if flag_text:
+                s1 = f"Material concern: {flag_text}."
+            else:
+                s1 = f"Weakness in {worst_label} is the primary drag on this score."
+            if roe_str and raw.get("roe", 0) > 0:
+                s2 = f"Some positives exist (e.g. {roe_str} ROE), but deeper due diligence is needed before committing capital."
+            elif best_label and best_label != worst_label:
+                s2 = f"There are pockets of strength in {best_label}, but overall the risk/reward needs more study before entry."
+            else:
+                s2 = "Requires deeper due diligence — don't size up until the picture is clearer."
+            return f"{s1} {s2}"
+
+        else:  # Avoid
+            if flag_text:
+                s1 = f"Multiple red flags including {flag_text} make this a high-risk hold."
+            else:
+                s1 = f"Significant weakness in {worst_label} puts this well below minimum quality standards."
+            if len(flags) >= 2:
+                flag2 = next((flag_phrases[k] for k in flags[1:] if k in flag_phrases), None)
+                s2 = f"Also: {flag2}." if flag2 else "The scorecard shows structural problems across multiple pillars."
+            else:
+                s2 = "Until the fundamentals improve materially, capital is better deployed elsewhere."
+            return f"{s1} {s2}"
+
+    verdict_reason = _build_verdict_reason()
+
     # ── Historical table data (for sparkline display) ─────────────────────────
     def _history_table(raw_data: dict) -> list[dict]:
         """Build a year-by-year summary table (up to 5 years)."""
@@ -1395,6 +1475,7 @@ def score_fundamentals(raw: dict) -> dict:
         "normalized_score": round(score_pct),
         "verdict":       verdict,
         "verdict_class": verdict_class,
+        "verdict_reason": verdict_reason,
         "red_flags":     red_flags,
         "missing_fields": raw.get("missing_fields", []),
         "error":         raw.get("error"),

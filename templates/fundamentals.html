@@ -668,6 +668,11 @@
         </div>
         <div>
           <span class="verdict-badge {{ data.verdict_class }}">{{ data.verdict }}</span>
+          {% if data.verdict_reason %}
+          <div style="margin-top:8px;max-width:360px;font-size:12px;line-height:1.5;color:var(--text-muted);font-family:var(--font);">
+            {{ data.verdict_reason }}
+          </div>
+          {% endif %}
         </div>
         <div class="score-bar-wrap">
           <div style="font-size:10px;color:var(--text-muted);font-family:var(--font);margin-bottom:5px;letter-spacing:0.06em;">QUALITY SCORE</div>
