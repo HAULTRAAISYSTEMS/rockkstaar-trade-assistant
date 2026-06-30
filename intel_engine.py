@@ -375,14 +375,30 @@ _MAJOR_NEWS_TICKERS: list[str] = [
 
 # Mirrored from scanner.py — curated high-activity universe
 SCANNER_UNIVERSE: list[str] = [
+    # Mega-cap tech
     "NVDA", "AMD", "TSLA", "AAPL", "META", "GOOGL", "AMZN", "MSFT",
+    "ORCL", "CRM", "ADBE", "INTC", "QCOM", "AVGO", "MU", "AMAT",
+    "NFLX", "UBER", "SNAP", "PINS", "SPOT",
+    # High-momentum / speculative
     "PLTR", "SOFI", "IONQ", "RGTI", "QUBT", "JOBY", "ACHR", "RKLB",
-    "LUNR", "OKLO", "SMR", "NNE",
-    # Utilities / energy / power names — frequent earnings movers
-    "CEG", "VST", "NRG", "GEV", "FSLR", "NEE", "SO",
-    # Large-cap earnings movers
-    "JPM", "BAC", "GS", "V", "MA", "HD", "WMT", "COST",
-    "XOM", "CVX", "OXY", "LMT", "RTX",
+    "LUNR", "OKLO", "SMR", "NNE", "ALAB", "ARM", "SMCI",
+    # Utilities / energy / power
+    "CEG", "VST", "NRG", "GEV", "FSLR", "NEE", "SO", "DUK", "SRE",
+    # Financials
+    "JPM", "BAC", "GS", "MS", "WFC", "C", "V", "MA", "AXP", "COF",
+    "SCHW", "BLK", "BX",
+    # Consumer / retail
+    "HD", "WMT", "COST", "TGT", "AMZN", "NKE", "SBUX", "MCD",
+    "DIS", "NFLX", "LOW", "TJX", "LULU", "GPS", "RL",
+    # Healthcare / biotech
+    "JNJ", "UNH", "PFE", "ABBV", "MRK", "LLY", "BMY", "GILD",
+    "AMGN", "ISRG", "DXCM", "MRNA", "BNTX",
+    # Energy / commodities
+    "XOM", "CVX", "OXY", "COP", "SLB", "HAL",
+    # Industrials / defense
+    "LMT", "RTX", "GD", "NOC", "BA", "CAT", "DE", "HON", "MMM", "GE",
+    # Real estate / other
+    "COIN", "HOOD", "SQ", "PYPL", "SHOP",
 ]
 
 # ── Manual earnings overrides ──────────────────────────────────────────────────
@@ -411,11 +427,29 @@ _COMPANY_NAMES: dict[str, str] = {
     "FSLR": "First Solar",         "NEE":  "NextEra Energy",
     "SO":   "Southern Company",    "JPM":  "JPMorgan Chase",
     "BAC":  "Bank of America",     "GS":   "Goldman Sachs",
+    "MS":   "Morgan Stanley",      "WFC":  "Wells Fargo",
+    "C":    "Citigroup",           "AXP":  "American Express",
     "V":    "Visa",                "MA":   "Mastercard",
     "HD":   "Home Depot",          "WMT":  "Walmart",
-    "COST": "Costco",              "XOM":  "ExxonMobil",
-    "CVX":  "Chevron",             "OXY":  "Occidental",
+    "COST": "Costco",              "TGT":  "Target",
+    "NKE":  "Nike",                "SBUX": "Starbucks",
+    "MCD":  "McDonald's",          "DIS":  "Walt Disney",
+    "LOW":  "Lowe's",              "LULU": "Lululemon",
+    "XOM":  "ExxonMobil",         "CVX":  "Chevron",
+    "OXY":  "Occidental",         "COP":  "ConocoPhillips",
     "LMT":  "Lockheed Martin",     "RTX":  "RTX Corp",
+    "GD":   "General Dynamics",   "NOC":  "Northrop Grumman",
+    "BA":   "Boeing",             "CAT":  "Caterpillar",
+    "JNJ":  "Johnson & Johnson",  "UNH":  "UnitedHealth",
+    "PFE":  "Pfizer",             "ABBV": "AbbVie",
+    "LLY":  "Eli Lilly",          "MRK":  "Merck",
+    "COIN": "Coinbase",           "HOOD": "Robinhood",
+    "SHOP": "Shopify",            "PYPL": "PayPal",
+    "ORCL": "Oracle",             "CRM":  "Salesforce",
+    "ADBE": "Adobe",              "AVGO": "Broadcom",
+    "NFLX": "Netflix",            "UBER": "Uber",
+    "ARM":  "Arm Holdings",       "SMCI": "Super Micro",
+    "ALAB": "Astera Labs",
 }
 
 
