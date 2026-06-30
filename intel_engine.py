@@ -1202,6 +1202,18 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             _bucket_item(item)
             meta["finnhub_found"] += 1
 
+    # ── 4. Nasdaq calendar fallback (free, no key — market-wide earnings) ──────
+    if sum(len(v) for v in buckets.values()) == 0 or meta.get("yfinance_found", 0) == 0:
+        universe_set = set(all_tickers)
+        nasdaq_items = _earnings_from_nasdaq(today, wl_set, already_added, universe_set)
+        nasdaq_found = 0
+        for item in nasdaq_items:
+            _bucket_item(item)
+            nasdaq_found += 1
+        if nasdaq_found:
+            meta["earnings_source_used"] = meta.get("earnings_source_used", "") + "+nasdaq"
+            logger.info("intel/earnings nasdaq: %d items added", nasdaq_found)
+
     # Sort: overrides first, then watchlist, then by date
     for k in buckets:
         buckets[k].sort(key=lambda x: (
@@ -1268,6 +1280,181 @@ def _apply_overrides_to_buckets(buckets: dict, today: date, wl_set: set) -> None
 
 # ── Stock Split Tracker ───────────────────────────────────────────────────────
 
+# ── Nasdaq public calendar API (no key needed) ───────────────────────────────
+
+def _nasdaq_cal(endpoint: str, date_str: str) -> list[dict]:
+    """Single GET to Nasdaq calendar API. Returns row list or [] on any error."""
+    import urllib.request as _urlreq
+    url = f"https://api.nasdaq.com/api/calendar/{endpoint}?date={date_str}"
+    hdrs = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/120.0.0.0 Safari/537.36"),
+        "Accept":          "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Origin":          "https://www.nasdaq.com",
+        "Referer":         f"https://www.nasdaq.com/market-activity/{endpoint}",
+    }
+    try:
+        req = _urlreq.Request(url, headers=hdrs)
+        with _urlreq.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+        return (data.get("data") or {}).get("rows") or []
+    except Exception as exc:
+        logger.debug("intel/nasdaq/%s %s: %s", endpoint, date_str, exc)
+        return []
+
+
+def _earnings_from_nasdaq(today: date, wl_set: set, already_added: set,
+                           universe: set) -> list[dict]:
+    """
+    Pull market-wide earnings from Nasdaq calendar for the next 7 days.
+    Filters to `universe` tickers only; skips any already in `already_added`.
+    Runs 4 parallel requests so the 7-day window resolves in ~8 s total.
+    """
+    date_strs = [(today + timedelta(days=i)).isoformat() for i in range(8)]
+    results: list[dict] = []
+
+    def _fetch_day(ds: str) -> list[dict]:
+        return _nasdaq_cal("earnings", ds)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futs = {pool.submit(_fetch_day, ds): ds for ds in date_strs}
+        for fut in as_completed(futs, timeout=20):
+            ds = futs[fut]
+            d  = datetime.strptime(ds, "%Y-%m-%d").date()
+            try:
+                rows = fut.result() or []
+            except Exception:
+                rows = []
+            for row in rows:
+                ticker = (row.get("symbol") or "").strip().upper()
+                if not ticker or ticker in already_added:
+                    continue
+                if universe and ticker not in universe:
+                    continue
+                time_raw   = (row.get("time") or "").lower()
+                time_label = ("BMO" if any(k in time_raw for k in ("before", "bmo", "pre"))
+                              else "AMC" if any(k in time_raw for k in ("after", "amc", "post"))
+                              else "TBD")
+                try:
+                    eps_raw = row.get("epsForecast") or row.get("epsEstimate")
+                    eps_est = float(eps_raw) if eps_raw not in (None, "--", "", "N/A") else None
+                except Exception:
+                    eps_est = None
+                days_away = (d - today).days
+                results.append({
+                    "ticker":       ticker,
+                    "company_name": row.get("name") or row.get("companyName") or _company_name(ticker),
+                    "date":         d.isoformat(),
+                    "date_label":   _date_label(d, today),
+                    "time_label":   time_label,
+                    "on_watchlist": ticker in wl_set,
+                    "days_away":    days_away,
+                    "eps_est":      eps_est,
+                    "source":       "nasdaq",
+                    "is_override":  False,
+                })
+                already_added.add(ticker)
+    return results
+
+
+def _splits_from_nasdaq(today: date) -> list[dict]:
+    """Pull upcoming splits from Nasdaq calendar for the next 14 days (no key)."""
+    date_strs = [(today + timedelta(days=i)).isoformat() for i in range(15)]
+    results: list[dict] = []
+    seen: set = set()
+
+    def _fetch_day(ds: str) -> list[dict]:
+        return _nasdaq_cal("splits", ds)
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futs = {pool.submit(_fetch_day, ds): ds for ds in date_strs}
+        for fut in as_completed(futs, timeout=25):
+            ds = futs[fut]
+            d  = datetime.strptime(ds, "%Y-%m-%d").date()
+            try:
+                rows = fut.result() or []
+            except Exception:
+                rows = []
+            for row in rows:
+                ticker = (row.get("symbol") or "").strip().upper()
+                if not ticker or ticker in seen:
+                    continue
+                ratio = (row.get("ratio") or row.get("splitRatio") or
+                         f"{row.get('newShares','?')}:{row.get('oldShares','?')}")
+                try:
+                    parts = str(ratio).replace(" ", "").split(":")
+                    to_f  = float(parts[0]) if parts else 1
+                    fr_f  = float(parts[1]) if len(parts) > 1 else 1
+                    split_type = "Forward" if to_f > fr_f else "Reverse"
+                except Exception:
+                    split_type = "Forward"
+                days_away = (d - today).days
+                results.append({
+                    "ticker":       ticker,
+                    "company_name": row.get("companyName") or _company_name(ticker),
+                    "ratio":        ratio,
+                    "type":         split_type,
+                    "eff_date":     d.isoformat(),
+                    "days_away":    days_away,
+                    "is_new":       0 <= days_away <= 7,
+                    "status":       _split_status(days_away),
+                    "source":       "nasdaq",
+                })
+                seen.add(ticker)
+    return results
+
+
+def _dividends_from_nasdaq(today: date, wl_set: set) -> list[dict]:
+    """Pull upcoming ex-dividend dates from Nasdaq for the next 14 days (no key)."""
+    date_strs = [(today + timedelta(days=i)).isoformat() for i in range(15)]
+    results: list[dict] = []
+    seen: set = set()
+
+    def _fetch_day(ds: str) -> list[dict]:
+        return _nasdaq_cal("dividends", ds)
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futs = {pool.submit(_fetch_day, ds): ds for ds in date_strs}
+        for fut in as_completed(futs, timeout=25):
+            ds = futs[fut]
+            d  = datetime.strptime(ds, "%Y-%m-%d").date()
+            try:
+                rows = fut.result() or []
+            except Exception:
+                rows = []
+            for row in rows:
+                ticker = (row.get("symbol") or "").strip().upper()
+                if not ticker or ticker in seen:
+                    continue
+                # Filter to watchlist — otherwise hundreds of tickers show up
+                if wl_set and ticker not in wl_set:
+                    continue
+                try:
+                    amt_raw = (row.get("dividend_Rate") or row.get("amount")
+                               or row.get("dividendRate") or row.get("indicated_Annual_Dividend"))
+                    amount = float(amt_raw) if amt_raw not in (None, "--", "", "N/A") else None
+                except Exception:
+                    amount = None
+                pay_date = (row.get("payment_Date") or row.get("paymentDate")
+                            or row.get("payDate") or "—")
+                days_away = (d - today).days
+                results.append({
+                    "ticker":       ticker,
+                    "company_name": row.get("companyName") or _company_name(ticker),
+                    "ex_date":      d.isoformat(),
+                    "ex_date_label": _date_label(d, today),
+                    "pay_date":     pay_date,
+                    "amount":       amount,
+                    "on_watchlist": ticker in wl_set,
+                    "days_away":    days_away,
+                    "source":       "nasdaq",
+                })
+                seen.add(ticker)
+    return results
+
+
 def fetch_stock_splits(tickers: Optional[list[str]] = None) -> list[dict]:
     """
     Returns upcoming + recently announced splits.
@@ -1288,6 +1475,9 @@ def fetch_stock_splits(tickers: Optional[list[str]] = None) -> list[dict]:
 
     if not results:
         results = _splits_from_yfinance(all_tickers, today)
+
+    if not results:
+        results = _splits_from_nasdaq(today)
 
     results.sort(key=lambda x: x.get("days_away", 0))
     _cset("splits", results)
@@ -1574,6 +1764,9 @@ def fetch_dividends(tickers: Optional[list[str]] = None) -> list[dict]:
 
     if not results:
         results = _dividends_from_yfinance(all_tickers, today, wl_set)
+
+    if not results:
+        results = _dividends_from_nasdaq(today, wl_set)
 
     results.sort(key=lambda x: (not x["on_watchlist"], x["days_away"]))
     _cset("dividends", results)

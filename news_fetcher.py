@@ -458,6 +458,74 @@ def _try_yfinance(ticker: str) -> CatalystNews | None:
 
 
 # ---------------------------------------------------------------------------
+# Benzinga / MarketWatch RSS fallback (no API key needed)
+# ---------------------------------------------------------------------------
+
+def _try_rss(ticker: str) -> CatalystNews | None:
+    """
+    Fetch news via Yahoo Finance RSS (no API key, different IP path than the YF API).
+    Falls back to MarketWatch RSS if Yahoo RSS returns nothing.
+    This is a last-resort free fallback for when all keyed sources fail.
+    """
+    import urllib.request as _urlreq
+    import html
+    import re
+
+    _RSS_SOURCES = [
+        # Yahoo Finance RSS — different endpoint from the blocked v8 API
+        (f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US",
+         "yahoo_rss"),
+        # Seeking Alpha ticker RSS (free, limited but often works)
+        (f"https://seekingalpha.com/symbol/{ticker}.xml",
+         "seeking_alpha"),
+    ]
+
+    _hdrs = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/120.0.0.0 Safari/537.36"),
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+    }
+
+    for url, source_name in _RSS_SOURCES:
+        try:
+            req  = _urlreq.Request(url, headers=_hdrs)
+            with _urlreq.urlopen(req, timeout=6) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+
+            # Extract <title> tags from RSS items (skip channel title)
+            titles = re.findall(r"<item[^>]*>.*?<title[^>]*>(.*?)</title>", raw,
+                                re.DOTALL | re.IGNORECASE)
+            if not titles:
+                # Atom feed style
+                titles = re.findall(r"<entry[^>]*>.*?<title[^>]*>(.*?)</title>", raw,
+                                    re.DOTALL | re.IGNORECASE)
+
+            headlines = []
+            for t in titles[:8]:
+                t = html.unescape(re.sub(r"<[^>]+>", "", t)).strip()
+                if t and len(t) > 10:
+                    headlines.append(t)
+                if len(headlines) >= 5:
+                    break
+
+            if headlines:
+                cats = parse_catalyst_categories(headlines)
+                logger.info("rss  ticker=%s  source=%s  headlines=%d", ticker, source_name, len(headlines))
+                return CatalystNews(
+                    headlines=headlines,
+                    summary=headlines[0],
+                    categories=cats,
+                    freshness_minutes=None,
+                    source=source_name,
+                )
+        except Exception as exc:
+            logger.debug("rss  ticker=%s  source=%s  error: %s", ticker, source_name, exc)
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Empty fallback
 # ---------------------------------------------------------------------------
 
@@ -480,7 +548,7 @@ def fetch_headlines(ticker: str) -> CatalystNews:
     Priority: Finnhub → NewsAPI → Polygon → yfinance → empty fallback.
     Never raises — always returns a CatalystNews.
     """
-    for fn in (_try_finnhub, _try_newsapi, _try_polygon, _try_yfinance):
+    for fn in (_try_finnhub, _try_newsapi, _try_polygon, _try_yfinance, _try_rss):
         result = fn(ticker)
         if result is not None:
             logger.info("fetch_headlines  ticker=%s  source=%s  headlines=%d",
