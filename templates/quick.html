@@ -155,6 +155,25 @@ body { background: var(--exec-bg) !important; }
 .exec-session-pill.orb-after_hours { background: rgba(245,158,11,0.10); color: var(--amber); border-color: rgba(245,158,11,0.28); }
 .exec-session-pill.orb-closed      { background: rgba(91,122,157,0.10); color: var(--text-sec); border-color: rgba(91,122,157,0.18); }
 
+/* Account link button */
+.acct-link-btn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(34,211,238,0.22);
+  background: rgba(34,211,238,0.06);
+  color: var(--text-sec);
+  cursor: pointer;
+  transition: all 0.15s;
+  display:flex; align-items:center; gap:5px;
+  text-decoration: none;
+}
+.acct-link-btn:hover { border-color: var(--cyan,#22d3ee); color: var(--cyan,#22d3ee); background: rgba(34,211,238,0.12); }
+
 /* Focus Mode button */
 .focus-mode-btn {
   font-family: var(--font-mono);
@@ -807,6 +826,9 @@ body.focus-mode .exec-section-hdr .exec-section-sub::after {
       </span>
     </div>
     <div class="exec-header-right">
+      <a href="{{ url_for('schwab_account') }}" class="acct-link-btn" title="View Schwab account — buying power, positions, P&amp;L">
+        ⬡ ACCOUNT
+      </a>
       <button class="focus-mode-btn" id="focus-mode-btn" onclick="toggleFocusMode()">
         <span class="focus-dot" id="focus-dot">●</span>
         FOCUS
