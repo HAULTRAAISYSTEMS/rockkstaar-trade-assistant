@@ -24,6 +24,54 @@ from datetime import datetime, date, timedelta
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Finnhub helpers  (quote data — used when Polygon key is absent)
+# ---------------------------------------------------------------------------
+
+_FINNHUB_KEY: str | None = os.environ.get("FINNHUB_API_KEY") or None
+
+
+def _fetch_finnhub_quote(ticker: str) -> dict | None:
+    """
+    Fetch current quote from Finnhub /quote endpoint.
+    Returns dict with current_price, prev_close, gap_pct, today high/low/open,
+    or None on failure.  Free tier: 60 req/min — adequate for on-demand page loads.
+    """
+    if not _FINNHUB_KEY:
+        return None
+    try:
+        import requests as _req
+        r = _req.get(
+            "https://finnhub.io/api/v1/quote",
+            params={"symbol": ticker, "token": _FINNHUB_KEY},
+            timeout=8,
+        )
+        if r.status_code != 200:
+            logger.debug("Finnhub quote %s → HTTP %s", ticker, r.status_code)
+            return None
+        d = r.json()
+        current_price = d.get("c")
+        if not current_price or float(current_price) <= 0:
+            return None  # market closed / unknown symbol returns 0
+        out: dict = {"current_price": round(float(current_price), 2)}
+        pc = d.get("pc")
+        if pc and float(pc) > 0:
+            out["prev_close"] = round(float(pc), 2)
+            out["gap_pct"]    = round(
+                (out["current_price"] - out["prev_close"]) / out["prev_close"] * 100, 2
+            )
+        if d.get("h") and float(d["h"]) > 0:
+            out["prev_day_high"] = round(float(d["h"]), 2)
+        if d.get("l") and float(d["l"]) > 0:
+            out["prev_day_low"] = round(float(d["l"]), 2)
+        logger.info("Finnhub quote %s → price=%.2f gap=%s%%",
+                    ticker, out["current_price"], out.get("gap_pct"))
+        return out
+    except Exception as _e:
+        logger.debug("_fetch_finnhub_quote failed %s: %s", ticker, _e)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Polygon.io helpers
 # ---------------------------------------------------------------------------
 
@@ -725,7 +773,15 @@ def fetch_live_data(ticker: str) -> dict | None:
             )
 
     # ------------------------------------------------------------------ #
-    # Fallback: yfinance + Yahoo chart API (original implementation)
+    # Fallback 1: Finnhub quote — works from Render IPs, no Polygon key needed
+    # ------------------------------------------------------------------ #
+    fh = _fetch_finnhub_quote(ticker)
+    if fh and fh.get("current_price"):
+        logger.info("fetch_live_data: Finnhub SUCCESS %s price=%.2f", ticker, fh["current_price"])
+        return fh
+
+    # ------------------------------------------------------------------ #
+    # Fallback 2: yfinance + Yahoo chart API (original implementation)
     # ------------------------------------------------------------------ #
 
     if not _YF_AVAILABLE:
