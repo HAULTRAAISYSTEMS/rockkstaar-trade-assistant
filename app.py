@@ -685,7 +685,7 @@ def _get_mkt_ctx() -> dict:
     }
 
 
-def _build_entry_trigger(stock: dict) -> tuple[str, str]:
+def _build_entry_trigger(stock: dict):
     """
     Return (trigger_text, css_class) — a specific, actionable entry instruction
     shown on the stock detail page so the trader knows EXACTLY when to execute.
