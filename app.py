@@ -4602,7 +4602,7 @@ def api_ai_briefing():
         "briefing": {
             "macro_bias": "neutral",
             "vix_level":  "Data unavailable",
-            "briefing":   "Could not generate briefing. Check NEBIUS_API_KEY and try again.",
+            "briefing":   f"Nebius error: {_last_err or 'unknown — check NEBIUS_API_KEY on Render'}",
             "tickers_flagged": [],
             "cached": False,
             "date": today_et,
