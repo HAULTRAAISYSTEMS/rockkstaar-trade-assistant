@@ -247,7 +247,7 @@ def trigger_background_refresh() -> None:
             # Hard ceiling: never block the bg thread longer than 90 s.
             # Without this, a hung yfinance call keeps _bg_refreshing=True forever,
             # preventing any future refresh from starting.
-            bg_ex = ThreadPoolExecutor(max_workers=5)
+            bg_ex = ThreadPoolExecutor(max_workers=3)
             futs = [bg_ex.submit(_call, fn, nm) for fn, nm in tasks]
             bg_ex.shutdown(wait=False)
             try:
@@ -256,6 +256,12 @@ def trigger_background_refresh() -> None:
             except Exception:
                 pass   # TimeoutError after 90 s — move on regardless
             logger.info("intel bg-refresh: all complete (or timed out)")
+            try:
+                import gc as _gc
+                _gc.collect()
+                logger.info("intel bg-refresh: gc.collect() done")
+            except Exception:
+                pass
         except Exception as exc:
             logger.warning("intel bg-refresh outer: %s", exc)
         finally:
@@ -387,9 +393,9 @@ SCANNER_UNIVERSE: list[str] = [
     # Financials
     "JPM", "BAC", "GS", "MS", "WFC", "C", "V", "MA", "AXP", "COF",
     "SCHW", "BLK", "BX",
-    # Consumer / retail
-    "HD", "WMT", "COST", "TGT", "AMZN", "NKE", "SBUX", "MCD",
-    "DIS", "NFLX", "LOW", "TJX", "LULU", "GPS", "RL",
+    # Consumer / retail (AMZN and NFLX deduplicated — already in mega-cap)
+    "HD", "WMT", "COST", "TGT", "NKE", "SBUX", "MCD",
+    "DIS", "LOW", "TJX", "LULU", "GPS", "RL",
     # Healthcare / biotech
     "JNJ", "UNH", "PFE", "ABBV", "MRK", "LLY", "BMY", "GILD",
     "AMGN", "ISRG", "DXCM", "MRNA", "BNTX",
@@ -397,7 +403,7 @@ SCANNER_UNIVERSE: list[str] = [
     "XOM", "CVX", "OXY", "COP", "SLB", "HAL",
     # Industrials / defense
     "LMT", "RTX", "GD", "NOC", "BA", "CAT", "DE", "HON", "MMM", "GE",
-    # Real estate / other
+    # Fintech / other
     "COIN", "HOOD", "SQ", "PYPL", "SHOP",
 ]
 
@@ -726,7 +732,7 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
             logger.debug("intel/news %s: %s", ticker, e)
             return []
 
-    pool = ThreadPoolExecutor(max_workers=4)
+    pool = ThreadPoolExecutor(max_workers=3)
     futs = [pool.submit(_fetch_one, t) for t in all_tickers]
     pool.shutdown(wait=False)  # don't block when as_completed times out
     try:
@@ -1078,7 +1084,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
     yahoo_api_found:  set[str]  = set(already_added)
     yahoo_api_missed: list[str] = []
 
-    pool_ya = ThreadPoolExecutor(max_workers=8)
+    pool_ya = ThreadPoolExecutor(max_workers=3)
     futs_ya = {pool_ya.submit(_fetch_earnings_yahoo_api, t): t
                for t in all_tickers if t not in already_added}
     pool_ya.shutdown(wait=False)
@@ -1205,7 +1211,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
 
     # Only run yfinance on tickers the yahoo_api missed
     _yf_targets = [] if _yf_is_rate_limited() else [t for t in yahoo_api_missed if t not in yahoo_api_found]
-    pool = ThreadPoolExecutor(max_workers=8)
+    pool = ThreadPoolExecutor(max_workers=3)
     futs = {pool.submit(_fetch_cal, t): t for t in _yf_targets}
     pool.shutdown(wait=False)
     try:
@@ -1352,7 +1358,7 @@ def _earnings_from_nasdaq(today: date, wl_set: set, already_added: set,
     def _fetch_day(ds: str) -> list[dict]:
         return _nasdaq_cal("earnings", ds)
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         futs = {pool.submit(_fetch_day, ds): ds for ds in date_strs}
         for fut in as_completed(futs, timeout=20):
             ds = futs[fut]
@@ -1402,7 +1408,7 @@ def _splits_from_nasdaq(today: date) -> list[dict]:
     def _fetch_day(ds: str) -> list[dict]:
         return _nasdaq_cal("splits", ds)
 
-    with ThreadPoolExecutor(max_workers=5) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         futs = {pool.submit(_fetch_day, ds): ds for ds in date_strs}
         for fut in as_completed(futs, timeout=25):
             ds = futs[fut]
@@ -1449,7 +1455,7 @@ def _dividends_from_nasdaq(today: date, wl_set: set) -> list[dict]:
     def _fetch_day(ds: str) -> list[dict]:
         return _nasdaq_cal("dividends", ds)
 
-    with ThreadPoolExecutor(max_workers=5) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         futs = {pool.submit(_fetch_day, ds): ds for ds in date_strs}
         for fut in as_completed(futs, timeout=25):
             ds = futs[fut]
@@ -1624,7 +1630,7 @@ def _splits_from_yfinance(tickers: list[str], today: date) -> list[dict]:
                 logger.warning("intel/splits yfinance %s: rate-limited", ticker)
             return []
 
-    pool = ThreadPoolExecutor(max_workers=6)
+    pool = ThreadPoolExecutor(max_workers=3)
     futs = {pool.submit(_fetch_one, t): t for t in tickers}
     pool.shutdown(wait=False)
     try:
@@ -1702,7 +1708,7 @@ def _dividends_from_finnhub(
         except Exception:
             return None
 
-    pool = ThreadPoolExecutor(max_workers=6)
+    pool = ThreadPoolExecutor(max_workers=3)
     futs = [pool.submit(_fetch_one, t) for t in tickers]
     pool.shutdown(wait=False)
     try:
@@ -1760,7 +1766,7 @@ def _dividends_from_yfinance(tickers: list[str], today: date, wl_set: set) -> li
                 _yf_set_rate_limited()
             return None
 
-    pool = ThreadPoolExecutor(max_workers=4)
+    pool = ThreadPoolExecutor(max_workers=3)
     futs = [pool.submit(_fetch_one, t) for t in tickers]
     pool.shutdown(wait=False)
     try:
