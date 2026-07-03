@@ -2198,4 +2198,77 @@ def compute_swing_trade_plan(data: dict) -> dict:
         if risk > 0 and reward_1 > 0:
             out["risk_reward"] = round(reward_1 / risk, 2)
 
+    # ── Sanity checks: catch stale fib/swing data that no longer matches ──────
+    # current price. This happens when the stock has moved significantly since
+    # the fib levels were last computed (e.g. KLAC at $235 with an entry zone
+    # from when it was at $89 — a 62% mismatch).
+    if out["entry_zone_low"] and current and current > 0:
+        ez_lo = out["entry_zone_low"]
+        ez_hi = out["entry_zone_high"] or ez_lo
+
+        # For SHORT: entry zone should be near or above current price.
+        # If entry_zone_high is below 80% of current, it's stale long data.
+        if bias == "Short Bias" and ez_hi < current * 0.80:
+            ref = e20 if (e20 and current * 0.85 < e20 < current * 1.20) else current
+            buf = ref * 0.012
+            ez_lo = round(ref - buf, 2)
+            ez_hi = round(ref + buf, 2)
+            out["entry_zone_low"]  = ez_lo
+            out["entry_zone_high"] = ez_hi
+            out["stop_level"]      = round(ez_hi * 1.030, 2)
+            # Recompute targets relative to corrected zone
+            t1 = round(current * 0.93, 2)
+            out["target_1"] = t1
+            reward_1 = ez_lo - t1
+            if reward_1 > 0:
+                out["target_2"]    = round(ez_lo - reward_1 * 1.5, 2)
+                risk = out["stop_level"] - ez_lo
+                if risk > 0:
+                    out["risk_reward"] = round(reward_1 / risk, 2)
+
+        # For LONG: entry zone should be near or below current price.
+        # If entry_zone_low is above 120% of current, it's stale short data.
+        elif bias == "Long Bias" and ez_lo > current * 1.20:
+            ref = e20 if (e20 and current * 0.80 < e20 < current * 1.15) else current
+            buf = ref * 0.012
+            ez_lo = round(ref - buf, 2)
+            ez_hi = round(ref + buf, 2)
+            out["entry_zone_low"]  = ez_lo
+            out["entry_zone_high"] = ez_hi
+            out["stop_level"]      = round(ez_lo * 0.970, 2)
+            t1 = round(current * 1.07, 2)
+            out["target_1"] = t1
+            reward_1 = t1 - ez_hi
+            if reward_1 > 0:
+                out["target_2"]    = round(ez_hi + reward_1 * 1.5, 2)
+                risk = ez_hi - out["stop_level"]
+                if risk > 0:
+                    out["risk_reward"] = round(reward_1 / risk, 2)
+
+    # ── Target direction sanity checks ────────────────────────────────────────
+    # For SHORT: target must be BELOW entry zone (targets go down).
+    # For LONG:  target must be ABOVE entry zone (targets go up).
+    if out.get("target_1") and out.get("entry_zone_low"):
+        ez_lo = out["entry_zone_low"]
+        t1    = out["target_1"]
+        if bias == "Short Bias" and t1 > ez_lo:
+            # Target is above entry — was computed for a long setup, fix it
+            out["target_1"] = round(current * 0.93, 2)
+            out["target_2"] = round(current * 0.87, 2)
+            reward_1 = ez_lo - out["target_1"]
+            if reward_1 > 0 and out.get("stop_level"):
+                risk = out["stop_level"] - ez_lo
+                if risk > 0:
+                    out["risk_reward"] = round(reward_1 / risk, 2)
+        elif bias == "Long Bias" and t1 < (out.get("entry_zone_high") or ez_lo):
+            # Target is below entry — was computed for a short setup, fix it
+            out["target_1"] = round(current * 1.07, 2)
+            out["target_2"] = round(current * 1.12, 2)
+            ez_hi = out.get("entry_zone_high") or ez_lo
+            reward_1 = out["target_1"] - ez_hi
+            if reward_1 > 0 and out.get("stop_level"):
+                risk = ez_hi - out["stop_level"]
+                if risk > 0:
+                    out["risk_reward"] = round(reward_1 / risk, 2)
+
     return out
