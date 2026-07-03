@@ -85,6 +85,23 @@
 
     <div class="score-strip-divider"></div>
 
+    <!-- SETUP GRADE — letter grade derived from classifier bucket + score -->
+    <div class="score-strip-item">
+      <div class="score-strip-label">Setup Grade</div>
+      <div class="score-big-row">
+        {% set _g = stock.swing_grade or 'D' %}
+        {% set _gcss = {
+            'A+': 'grade-aplus', 'A': 'grade-a',
+            'B+': 'grade-bplus', 'B': 'grade-b',
+            'C+': 'grade-c', 'C': 'grade-c', 'D': 'grade-d'
+        }.get(_g, 'grade-d') %}
+        <span class="setup-grade-badge {{ _gcss }}">{{ _g }}</span>
+      </div>
+      <div class="score-strip-reason">{{ stock.simplified_action or '—' }}</div>
+    </div>
+
+    <div class="score-strip-divider"></div>
+
     <div class="score-strip-item">
       <div class="score-strip-label">Swing Status</div>
       <div class="score-big-row">
@@ -137,6 +154,27 @@
     </div>
 
   </div>
+
+  <!-- ===== EXECUTION TRIGGER ===== -->
+  {% if stock.entry_trigger %}
+  <div class="entry-trigger-banner {{ stock.entry_trigger_css }}">
+    <span class="entry-trigger-icon">
+      {% if stock.entry_trigger_css == 'entry-trigger-confirmed' %}✅
+      {% elif stock.entry_trigger_css == 'entry-trigger-preconf' %}⏳
+      {% elif stock.entry_trigger_css == 'entry-trigger-continuation' %}🔵
+      {% elif stock.entry_trigger_css == 'entry-trigger-avoid' %}🚫
+      {% else %}⚪{% endif %}
+    </span>
+    <span class="entry-trigger-label">
+      {% if stock.entry_trigger_css == 'entry-trigger-confirmed' %}EXECUTE
+      {% elif stock.entry_trigger_css == 'entry-trigger-preconf' %}PRE-CONFIRMATION
+      {% elif stock.entry_trigger_css == 'entry-trigger-continuation' %}CONTINUATION
+      {% elif stock.entry_trigger_css == 'entry-trigger-avoid' %}AVOID
+      {% else %}WAIT{% endif %}
+    </span>
+    <span class="entry-trigger-text">{{ stock.entry_trigger }}</span>
+  </div>
+  {% endif %}
 
   <!-- ===== TRADE COACH ===== -->
   <div id="detail-coach-card" class="detail-card coach-card {{ coach.css }}">

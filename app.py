@@ -685,6 +685,77 @@ def _get_mkt_ctx() -> dict:
     }
 
 
+def _build_entry_trigger(stock: dict) -> tuple[str, str]:
+    """
+    Return (trigger_text, css_class) — a specific, actionable entry instruction
+    shown on the stock detail page so the trader knows EXACTLY when to execute.
+
+    CSS classes: entry-trigger-confirmed | entry-trigger-preconf |
+                 entry-trigger-continuation | entry-trigger-wait | entry-trigger-avoid
+    """
+    swing_status = stock.get("swing_status") or ""
+    bias         = stock.get("trade_bias") or "Neutral"
+    ema20        = stock.get("ema_20_daily")
+    ema50        = stock.get("ema_50_daily")
+    pct_ema20    = stock.get("pct_from_ema20")
+    entry_low    = stock.get("entry_zone_low")
+    entry_high   = stock.get("entry_zone_high")
+    fib_618      = stock.get("fib_618")
+    current      = stock.get("current_price") or 0
+    stop         = stock.get("stop_level")
+
+    if bias == "Avoid":
+        return ("DO NOT TRADE — avoid bias set. No valid edge present. Remove from watchlist.",
+                "entry-trigger-avoid")
+
+    if swing_status == "READY — LEVEL HOLDS":
+        if entry_low and entry_high and stop:
+            return (
+                f"EXECUTE NOW — Entry zone ${entry_low:.2f}–${entry_high:.2f} confirmed. "
+                f"Level holding with volume. Stop: ${stop:.2f}. Enter current zone.",
+                "entry-trigger-confirmed")
+        if entry_low and entry_high:
+            return (
+                f"EXECUTE NOW — Entry zone ${entry_low:.2f}–${entry_high:.2f} confirmed. "
+                "Level holding with volume. Enter current zone.",
+                "entry-trigger-confirmed")
+        return ("EXECUTE NOW — Key level confirmed with volume. Enter at current price.",
+                "entry-trigger-confirmed")
+
+    if swing_status == "PRE-CONFIRMATION":
+        dir_word = "above" if bias == "Long Bias" else "below"
+        if ema20 and pct_ema20 is not None and abs(pct_ema20) <= 3.5:
+            return (
+                f"WAIT FOR TRIGGER — 15m candle must close {dir_word} 20 EMA (${ema20:.2f}) "
+                "on volume ≥ 1.2x avg. That close = entry signal. Do not jump early.",
+                "entry-trigger-preconf")
+        if fib_618 and current and abs(current - fib_618) / current * 100 <= 4.5:
+            return (
+                f"WAIT FOR TRIGGER — Approaching 61.8% Fib (${fib_618:.2f}). "
+                f"Need 15m candle close {dir_word} level + volume ≥ 1.2x avg before entry.",
+                "entry-trigger-preconf")
+        if entry_low and entry_high:
+            return (
+                f"WAIT FOR TRIGGER — Price approaching entry zone ${entry_low:.2f}–${entry_high:.2f}. "
+                "Need 15m confirmation candle + volume ≥ 1.2x avg. Do not enter early.",
+                "entry-trigger-preconf")
+        return ("WAIT FOR TRIGGER — Near key level. Need 15m bullish candle + volume ≥ 1.2x avg before entry.",
+                "entry-trigger-preconf")
+
+    if swing_status == "TREND CONTINUATION":
+        if entry_low:
+            return (
+                f"PULLBACK ENTRY — Wait for pullback to ${entry_low:.2f}. "
+                "Buy the higher low. Need 15m momentum candle showing trend resuming.",
+                "entry-trigger-continuation")
+        return ("TREND CONTINUATION — Wait for pullback to key level. Buy the higher low with volume confirmation.",
+                "entry-trigger-continuation")
+
+    # WAIT or unknown
+    return ("NOT READY — No valid entry signal. Monitor for READY — LEVEL HOLDS or PRE-CONFIRMATION status.",
+            "entry-trigger-wait")
+
+
 def build_ai_trade_plan(stock: dict) -> dict:
     """
     Build an institutional-style AI trade plan from existing stock data fields.
@@ -2599,6 +2670,16 @@ def annotate(stock: dict, trade_mode: str | None = None) -> dict:
         logger.debug("annotate  ai_trade_plan failed: %s", _tp_err)
         stock["ai_trade_plan"] = {"has_plan": False, "grade": "B", "grade_css": "plan-b",
                                    "reasons": [], "warnings": [], "probability": 0}
+
+    # ── Entry Trigger ─────────────────────────────────────────────────────────
+    try:
+        _trig_text, _trig_css = _build_entry_trigger(stock)
+        stock["entry_trigger"]     = _trig_text
+        stock["entry_trigger_css"] = _trig_css
+    except Exception as _et_err:
+        logger.debug("annotate entry_trigger failed: %s", _et_err)
+        stock["entry_trigger"]     = ""
+        stock["entry_trigger_css"] = "entry-trigger-wait"
 
     return stock
 

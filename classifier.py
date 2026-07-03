@@ -163,6 +163,11 @@ def _bucket_and_reason(stock: dict) -> tuple:
         gaps = []
         if rr > 0 and rr < 1.5:
             gaps.append(f"R:R only {rr:.1f}:1")
+        if cat_sc < 4:
+            # Catalyst floor: A+ requires at least a low-moderate catalyst.
+            # Stocks with catalyst 1-3/10 (no news, no driver) are SETUPS FORMING,
+            # not A+, because there's no reason for institutional follow-through.
+            gaps.append(f"catalyst {cat_sc:.0f}/10 (need ≥ 4 for A+ — needs a catalyst/driver)")
         if not gaps:
             trend_label = daily_trend
             rr_note = f", R:R {rr:.1f}:1" if rr >= 1.5 else ""
@@ -171,17 +176,17 @@ def _bucket_and_reason(stock: dict) -> tuple:
                 f"A+ READY: score {swing_score}/10, {swing_status}, "
                 f"{trend_label} trend{rr_note}{cat_note} — entry in zone"
             )
-        # Near-A+: score and status ready but R:R is marginal → SETUPS FORMING
+        # Near-A+: score and status ready but missing requirement → SETUPS FORMING
         return SETUPS_FORMING, (
             f"SETUPS FORMING: Strong setup ({swing_score}/10, {swing_status}) "
-            f"but {'; '.join(gaps)} — improve R:R before entry"
+            f"but {'; '.join(gaps)} — resolve before entry"
         )
 
-    # A+ even without trend if score is very high and in a ready status
-    if swing_score >= 9 and swing_status in _READY_STATUSES:
+    # A+ even without trend if score is very high, in a ready status, AND has catalyst
+    if swing_score >= 9 and swing_status in _READY_STATUSES and cat_sc >= 4:
         return A_PLUS_READY, (
             f"A+ READY: Elite score {swing_score}/10, {swing_status} — "
-            "trade allowed regardless of trend (very high score)"
+            "trade allowed regardless of trend (very high score + catalyst)"
         )
 
     # ── 4. SETUPS FORMING ─────────────────────────────────────────────────────

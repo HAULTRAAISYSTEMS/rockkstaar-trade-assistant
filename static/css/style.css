@@ -6752,3 +6752,74 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   font-weight: 700;
 }
 
+
+
+/* ============================================================
+   SETUP GRADE BADGE (score strip — large letter grade)
+   ============================================================ */
+.setup-grade-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  padding: 4px 14px;
+  border-radius: 7px;
+  font-size: 1.35rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  border: 1.5px solid transparent;
+}
+.grade-aplus { background: linear-gradient(135deg,#7c3aed,#a855f7); color:#fff; box-shadow:0 0 14px #7c3aed55; }
+.grade-a     { background: #16a34a22; color:#22c55e; border-color:#16a34a66; }
+.grade-bplus { background: #0ea5e922; color:#38bdf8; border-color:#0ea5e966; }
+.grade-b     { background: #2563eb18; color:#60a5fa; border-color:#2563eb44; }
+.grade-c     { background: var(--bg3); color:var(--text-muted); border-color:var(--border); }
+.grade-d     { background: #ef444418; color:#f87171; border-color:#ef444444; }
+
+
+/* ============================================================
+   ENTRY TRIGGER BANNER
+   ============================================================ */
+.entry-trigger-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  border: 1.5px solid transparent;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.entry-trigger-icon  { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+.entry-trigger-label {
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding-top: 3px;
+  min-width: 120px;
+  flex-shrink: 0;
+}
+.entry-trigger-text  { color: var(--text-secondary); flex: 1; }
+
+.entry-trigger-confirmed   { background:#16a34a18; border-color:#16a34a55; }
+.entry-trigger-confirmed   .entry-trigger-label { color:#22c55e; }
+.entry-trigger-confirmed   .entry-trigger-text  { color:#bbf7d0; }
+
+.entry-trigger-preconf     { background:#b4530018; border-color:#b4530055; }
+.entry-trigger-preconf     .entry-trigger-label { color:#f59e0b; }
+.entry-trigger-preconf     .entry-trigger-text  { color:#fcd34d; }
+
+.entry-trigger-continuation{ background:#1d4ed818; border-color:#1d4ed855; }
+.entry-trigger-continuation .entry-trigger-label { color:#60a5fa; }
+.entry-trigger-continuation .entry-trigger-text  { color:#bfdbfe; }
+
+.entry-trigger-wait        { background:var(--bg-secondary); border-color:var(--border); }
+.entry-trigger-wait        .entry-trigger-label { color:var(--text-muted); }
+.entry-trigger-wait        .entry-trigger-text  { color:var(--text-muted); }
+
+.entry-trigger-avoid       { background:#ef444418; border-color:#ef444455; }
+.entry-trigger-avoid       .entry-trigger-label { color:#f87171; }
+.entry-trigger-avoid       .entry-trigger-text  { color:#fca5a5; }
