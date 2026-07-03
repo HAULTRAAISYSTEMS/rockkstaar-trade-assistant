@@ -858,6 +858,129 @@
 
   /* ── Scrollable horizontal sections ── */
   .page .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* ── AI Morning Briefing card ── */
+  .page .ai-briefing-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-accent);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 16px;
+    position: relative;
+    transition: border-color 0.25s, box-shadow 0.25s;
+  }
+  .page .ai-briefing-card:hover {
+    box-shadow: 0 0 22px rgba(14,165,233,0.09), 0 6px 28px rgba(0,0,0,0.35);
+  }
+  .page .ai-briefing-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 16px 10px;
+    border-bottom: 1px solid var(--border);
+    gap: 10px;
+  }
+  .page .ai-briefing-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .page .ai-briefing-label svg { opacity: 0.7; }
+  .page .ai-briefing-body {
+    padding: 14px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .page .macro-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .page .macro-badge.risk-on  { background: rgba(34,197,94,0.14); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+  .page .macro-badge.risk-off { background: rgba(239,68,68,0.14);  color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+  .page .macro-badge.neutral  { background: rgba(148,163,184,0.12);color: #94A3B8; border: 1px solid rgba(148,163,184,0.25); }
+  .page .ai-vix-line {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: italic;
+  }
+  .page .ai-briefing-text {
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--text-primary);
+  }
+  .page .ai-tickers-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .page .ai-tickers-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-right: 2px;
+  }
+  .page .ai-ticker-chip {
+    background: rgba(14,165,233,0.12);
+    color: var(--accent);
+    border: 1px solid rgba(14,165,233,0.28);
+    border-radius: 6px;
+    padding: 3px 9px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.15s;
+  }
+  .page .ai-ticker-chip:hover { background: rgba(14,165,233,0.22); }
+  .page .ai-briefing-footer {
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 8px 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .page .ai-briefing-footer button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .page .ai-briefing-footer button:hover { border-color: var(--accent); color: var(--accent); }
+  .page .ai-briefing-skeleton {
+    height: 80px;
+    background: linear-gradient(90deg, rgba(14,165,233,0.04) 25%, rgba(14,165,233,0.08) 50%, rgba(14,165,233,0.04) 75%);
+    background-size: 200% 100%;
+    animation: ai-shimmer 1.6s ease-in-out infinite;
+    border-radius: 8px;
+  }
+  @keyframes ai-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 </style>
 {% endblock %}
 
@@ -954,6 +1077,27 @@
         <div class="regime-sub" id="regime-sub">SPY + QQQ bullish · VIX below 20 · 10Y flat · DXY flat</div>
       </div>
       <span class="badge badge-green" id="regime-badge">RISK-ON</span>
+    </div>
+
+    <!-- ══ AI MORNING BRIEFING ════════════════════════════════════════════ -->
+    <div class="ai-briefing-card" id="ai-briefing-card">
+      <div class="ai-briefing-header">
+        <div class="ai-briefing-label">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+          AI Morning Briefing
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span id="ai-briefing-cached-badge" style="display:none;" class="badge badge-gray" title="Served from today's cache">cached</span>
+          <span id="ai-briefing-badge" class="macro-badge neutral">—</span>
+        </div>
+      </div>
+      <div class="ai-briefing-body" id="ai-briefing-body">
+        <div class="ai-briefing-skeleton"></div>
+      </div>
+      <div class="ai-briefing-footer">
+        <span id="ai-briefing-time">Fetching briefing…</span>
+        <button onclick="refreshAIBriefing()" id="ai-briefing-refresh-btn" title="Force refresh (calls Nebius again)">↻ Refresh</button>
+      </div>
     </div>
 
     <!-- Market Environment: DXY / 10Y. Live SPY/QQQ/VIX, ES futures, sector heat
@@ -2592,6 +2736,88 @@ function _esc(s) {
 }
 
 // ── Init ───────────────────────────────────────────────
+// ── AI Morning Briefing ─────────────────────────────────────────────────────
+
+function loadAIBriefing(forceRefresh) {
+  var url = '/api/ai_briefing' + (forceRefresh ? '?refresh=true' : '');
+  var btn = document.getElementById('ai-briefing-refresh-btn');
+  var body = document.getElementById('ai-briefing-body');
+  var badge = document.getElementById('ai-briefing-badge');
+  var cachedBadge = document.getElementById('ai-briefing-cached-badge');
+  var timeEl = document.getElementById('ai-briefing-time');
+
+  if (btn) { btn.textContent = '…'; btn.disabled = true; }
+  if (body && forceRefresh) {
+    body.innerHTML = '<div class="ai-briefing-skeleton"></div>';
+  }
+
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var b = data.briefing || {};
+      var bias = (b.macro_bias || 'neutral').toLowerCase();
+
+      // Badge
+      if (badge) {
+        badge.className = 'macro-badge ' + (
+          bias === 'risk_on'  ? 'risk-on'  :
+          bias === 'risk_off' ? 'risk-off' : 'neutral'
+        );
+        badge.textContent = (
+          bias === 'risk_on'  ? '🟢 RISK ON'  :
+          bias === 'risk_off' ? '🔴 RISK OFF' : '⚪ NEUTRAL'
+        );
+      }
+
+      // Cached indicator
+      if (cachedBadge) {
+        cachedBadge.style.display = b.cached ? 'inline-flex' : 'none';
+      }
+
+      // Body
+      if (body) {
+        var tickers = (b.tickers_flagged || []);
+        var tickerHtml = '';
+        if (tickers.length > 0) {
+          tickerHtml = '<div class="ai-tickers-row"><span class="ai-tickers-label">Flagged:</span>' +
+            tickers.map(function(t) {
+              return '<a class="ai-ticker-chip" href="/stock/' + encodeURIComponent(t) + '">' + t + '</a>';
+            }).join('') +
+            '</div>';
+        }
+        body.innerHTML =
+          '<div class="ai-vix-line">' + _esc(b.vix_level || '') + '</div>' +
+          '<div class="ai-briefing-text">' + _esc(b.briefing || 'No briefing available.') + '</div>' +
+          (tickerHtml || '');
+      }
+
+      // Footer timestamp
+      if (timeEl) {
+        var label = b.cached ? 'Cached · ' : 'Generated · ';
+        timeEl.textContent = label + (b.date || new Date().toLocaleDateString());
+      }
+    })
+    .catch(function(err) {
+      if (body) {
+        body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Briefing unavailable — ' + err.message + '</div>';
+      }
+      if (timeEl) timeEl.textContent = 'Error loading briefing';
+    })
+    .finally(function() {
+      if (btn) { btn.textContent = '↻ Refresh'; btn.disabled = false; }
+    });
+}
+
+function _esc(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function refreshAIBriefing() { loadAIBriefing(true); }
+
+// ── DOMContentLoaded ─────────────────────────────────────────────────────────
+
 document.addEventListener('DOMContentLoaded', function() {
   if (window._dbgSet) _dbgSet('d-js', 'YES — DOMContentLoaded fired, main script OK', 'dbg-yes');
   loadChecklistState('daily');
@@ -2604,6 +2830,8 @@ document.addEventListener('DOMContentLoaded', function() {
   loadEarningsData();
   // Load Phase 1 intel sections
   loadIntelData(false);
+  // Load AI morning briefing (served from cache if already generated today)
+  loadAIBriefing(false);
   // Auto-refresh every 90 seconds
   setInterval(refreshMarketData, 90000);
   setInterval(loadEarningsData, 120000);

@@ -706,6 +706,16 @@ def init_db():
         )
     """))
 
+    # AI Briefings cache — stores daily Nebius AI morning briefing, one row per date
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS ai_briefings (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            date          TEXT    NOT NULL UNIQUE,
+            json_response TEXT    NOT NULL,
+            created_at    TEXT    NOT NULL
+        )
+    """))
+
     # ── Multi-user migration: add user_id columns to all user-data tables ───
     _user_tables = [
         "watchlists", "notes", "trade_plans", "journal",
@@ -2576,6 +2586,39 @@ def save_fundamentals_cache(ticker: str, data: dict) -> None:
         "INSERT INTO fundamentals_cache (ticker, data_json, fetched_at) VALUES (?, ?, ?) "
         "ON CONFLICT(ticker) DO UPDATE SET data_json = excluded.data_json, fetched_at = excluded.fetched_at",
         (ticker.upper(), _json.dumps(data), datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# AI Briefings cache
+# ---------------------------------------------------------------------------
+
+def get_ai_briefing(date: str):
+    """Return today's cached briefing dict, or None if not found."""
+    import json as _json
+    conn = get_db()
+    row = conn.execute(
+        "SELECT json_response FROM ai_briefings WHERE date = ?", (date,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    try:
+        return _json.loads(row["json_response"])
+    except Exception:
+        return None
+
+
+def save_ai_briefing(date: str, data: dict) -> None:
+    """Upsert an AI briefing for the given date."""
+    import json as _json
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO ai_briefings (date, json_response, created_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(date) DO UPDATE SET json_response = excluded.json_response, created_at = excluded.created_at",
+        (date, _json.dumps(data), datetime.now().isoformat()),
     )
     conn.commit()
     conn.close()

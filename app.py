@@ -47,6 +47,7 @@ from database import (
     get_unseen_scanner_alert_count, clear_scanner_alerts,
     save_setup_outcome, get_setup_outcome_stats,
     save_study_log_entry, get_study_log, delete_study_log_entry,
+    get_ai_briefing, save_ai_briefing,
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
 from data_fetcher import _et_now, market_session_now, orb_phase_now
@@ -4410,6 +4411,203 @@ def api_quick():
     except Exception as exc:
         logger.error("api_quick failed: %s", exc, exc_info=True)
         return jsonify({"error": "quick refresh failed"}), 500
+
+
+# ---------------------------------------------------------------------------
+# AI Morning Briefing — powered by Nebius (Llama-3.3-70B)
+# ---------------------------------------------------------------------------
+
+_NEBIUS_SYSTEM_PROMPT = """You are an elite institutional trading assistant providing a pre-market morning briefing.
+Analyze the provided market data and return ONLY a valid JSON object with this exact schema:
+
+{
+  "macro_bias": "risk_on" | "risk_off" | "neutral",
+  "vix_level": "<one short sentence describing VIX level and what it means for volatility today>",
+  "briefing": "<2-4 sentence pre-market briefing: regime, key macro drivers, sector rotation, actionable context for the trading day>",
+  "tickers_flagged": ["TICK1", "TICK2"]
+}
+
+Rules:
+- macro_bias must be exactly one of: risk_on, risk_off, neutral
+- vix_level: one sentence max, e.g. "VIX at 18 — low fear, options cheap, momentum trades favored"
+- briefing: 2-4 sentences, concise and institutional. Cover: (1) overall regime, (2) key macro headwinds/tailwinds (DXY, yields, futures), (3) which sectors are leading/lagging, (4) what it means for your watchlist
+- tickers_flagged: list only tickers from the provided watchlist that have a notable setup, catalyst, or risk today. Empty array [] if none stand out.
+- Return ONLY the JSON object. No markdown, no explanation, no preamble."""
+
+
+def _build_briefing_market_text() -> str:
+    """
+    Assemble a text snapshot of current market conditions to send to Nebius.
+    Pulls from the same caches used by /api/market_context and the dashboard.
+    """
+    lines = []
+
+    # ── Market regime (SPY/QQQ/VIX) ─────────────────────────────────────────
+    try:
+        mkt = _get_mkt_ctx()
+        lines.append(f"MARKET REGIME: {mkt.get('regime', 'NEUTRAL')}")
+        lines.append(f"SPY trend: {mkt.get('spy_trend', 'Unknown')}, 1d change: {mkt.get('spy_1d_pct', 'N/A')}%")
+        lines.append(f"QQQ trend: {mkt.get('qqq_trend', 'Unknown')}, 1d change: {mkt.get('qqq_1d_pct', 'N/A')}%")
+        vix = mkt.get("vix_level")
+        if vix:
+            lines.append(f"VIX: {vix}")
+        spy_price = mkt.get("spy_price")
+        if spy_price:
+            lines.append(f"SPY price: ${spy_price}")
+        qqq_price = mkt.get("qqq_price")
+        if qqq_price:
+            lines.append(f"QQQ price: ${qqq_price}")
+        longs_ok  = mkt.get("longs_ok", True)
+        shorts_ok = mkt.get("shorts_ok", True)
+        lines.append(f"Trading signal: longs_ok={longs_ok}, shorts_ok={shorts_ok}, no_trade={mkt.get('no_trade', False)}")
+        leading = mkt.get("leading_sectors") or []
+        weak    = mkt.get("weak_sectors") or []
+        if leading:
+            lines.append(f"Leading sectors: {', '.join(leading[:4])}")
+        if weak:
+            lines.append(f"Weak sectors: {', '.join(weak[:4])}")
+    except Exception as _e:
+        logger.debug("briefing: mkt_ctx failed: %s", _e)
+
+    # ── ES futures + macro (DXY, 10Y, sector ETFs) ───────────────────────────
+    try:
+        ctx = _get_market_context()
+        es = ctx.get("es", {})
+        if es and not es.get("error"):
+            vwap_note = "above VWAP" if es.get("above_vwap") else "below VWAP" if es.get("above_vwap") is False else ""
+            lines.append(f"ES futures: ${es.get('price', 'N/A')} ({es.get('change_pct', 'N/A'):+.2f}%) {vwap_note}".strip())
+        dxy = ctx.get("dxy_price")
+        dxy_chg = ctx.get("dxy_change_pct")
+        if dxy:
+            lines.append(f"DXY: {dxy} ({dxy_chg:+.2f}%), trend: {ctx.get('dxy_trend', 'flat')}")
+        yield_10y = ctx.get("yield_10y")
+        yield_chg = ctx.get("yield_change_bps")
+        if yield_10y:
+            lines.append(f"10Y Treasury yield: {yield_10y}% ({yield_chg:+.1f}bps), {ctx.get('yield_trend', 'flat')}")
+            lines.append(f"Yield note: {ctx.get('yield_note', '')}")
+        sectors = ctx.get("sectors") or {}
+        if sectors:
+            top3    = sorted(((k, v) for k, v in sectors.items() if v is not None), key=lambda x: x[1], reverse=True)[:3]
+            bottom3 = sorted(((k, v) for k, v in sectors.items() if v is not None), key=lambda x: x[1])[:3]
+            if top3:
+                lines.append("Top sectors today: " + ", ".join(f"{k} {v:+.2f}%" for k, v in top3))
+            if bottom3:
+                lines.append("Weak sectors today: " + ", ".join(f"{k} {v:+.2f}%" for k, v in bottom3))
+    except Exception as _e:
+        logger.debug("briefing: market_context failed: %s", _e)
+
+    # ── Watchlist stocks from DB ─────────────────────────────────────────────
+    try:
+        wl_id = get_active_wl_id()
+        if wl_id:
+            stocks = get_all_stock_data(wl_id)
+            if stocks:
+                lines.append(f"\nWATCHLIST ({len(stocks)} tickers):")
+                for s in stocks[:20]:   # cap at 20 to stay within token budget
+                    ticker  = s.get("ticker", "?")
+                    price   = s.get("current_price")
+                    chg     = s.get("day_change_pct")
+                    score   = s.get("swing_score")
+                    status  = s.get("swing_status") or ""
+                    bias    = s.get("trade_bias") or ""
+                    grade   = s.get("swing_grade") or ""
+                    cat     = s.get("catalyst_score")
+                    bucket  = s.get("auto_classify") or ""
+                    price_s = f"${price:.2f}" if price else "N/A"
+                    chg_s   = f"{chg:+.1f}%" if chg is not None else ""
+                    lines.append(
+                        f"  {ticker}: {price_s} {chg_s} | "
+                        f"grade={grade} score={score}/10 | "
+                        f"status={status} | bias={bias} | "
+                        f"catalyst={cat}/10 | bucket={bucket}"
+                    )
+    except Exception as _e:
+        logger.debug("briefing: watchlist fetch failed: %s", _e)
+
+    return "\n".join(lines)
+
+
+def _generate_nebius_briefing(market_data_text: str) -> dict:
+    """
+    Call Nebius (Llama-3.3-70B) with market data and return parsed JSON.
+    Raises on any error so the caller can fall back to cache.
+    """
+    import json as _j
+    from openai import OpenAI
+    client = OpenAI(
+        base_url="https://api.tokenfactory.nebius.com/v1/",
+        api_key=os.environ.get("NEBIUS_API_KEY"),
+    )
+    response = client.chat.completions.create(
+        model="meta-llama/Llama-3.3-70B-Instruct",
+        max_tokens=512,
+        temperature=0.3,
+        top_p=0.9,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": _NEBIUS_SYSTEM_PROMPT},
+            {"role": "user",   "content": market_data_text},
+        ],
+    )
+    return _j.loads(response.choices[0].message.content)
+
+
+@app.route("/api/ai_briefing")
+def api_ai_briefing():
+    """
+    Return today's AI morning briefing (macro_bias, vix_level, briefing, tickers_flagged).
+
+    Caching: one call to Nebius per calendar day (ET). Returns the cached row
+    immediately on subsequent requests. Pass ?refresh=true to force a fresh call.
+    """
+    force_refresh = request.args.get("refresh", "").lower() == "true"
+    today_et = _et_now().strftime("%Y-%m-%d")
+    _last_err = None
+
+    if not force_refresh:
+        cached = get_ai_briefing(today_et)
+        if cached:
+            cached["cached"] = True
+            cached["date"]   = today_et
+            return jsonify({"ok": True, "briefing": cached})
+
+    # Build market data snapshot and call Nebius
+    try:
+        market_text = _build_briefing_market_text()
+        result      = _generate_nebius_briefing(market_text)
+        # Validate required fields; fill defaults if LLM omits them
+        result.setdefault("macro_bias",      "neutral")
+        result.setdefault("vix_level",       "VIX data unavailable")
+        result.setdefault("briefing",        "Briefing unavailable — market data is loading.")
+        result.setdefault("tickers_flagged", [])
+        result["cached"] = False
+        result["date"]   = today_et
+        save_ai_briefing(today_et, result)
+        return jsonify({"ok": True, "briefing": result})
+    except Exception as exc:
+        logger.error("api_ai_briefing Nebius call failed: %s", exc, exc_info=True)
+        _last_err = str(exc)
+
+    # Fall back to today's cached briefing (if any) rather than returning an error
+    fallback = get_ai_briefing(today_et)
+    if fallback:
+        fallback["cached"] = True
+        fallback["date"]   = today_et
+        fallback["error"]  = _last_err
+        return jsonify({"ok": True, "briefing": fallback})
+
+    return jsonify({
+        "ok": False,
+        "error": _last_err or "Briefing unavailable",
+        "briefing": {
+            "macro_bias": "neutral",
+            "vix_level":  "Data unavailable",
+            "briefing":   "Could not generate briefing. Check NEBIUS_API_KEY and try again.",
+            "tickers_flagged": [],
+            "cached": False,
+            "date": today_et,
+        }
+    }), 503
 
 
 @app.route("/api/market-story")
