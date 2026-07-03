@@ -692,11 +692,13 @@ def _build_entry_trigger(stock: dict):
 
     CSS classes: entry-trigger-confirmed | entry-trigger-preconf |
                  entry-trigger-continuation | entry-trigger-wait | entry-trigger-avoid
+
+    Handles Long Bias, Short Bias, and detects when price has already moved
+    past the entry zone so the trader is never told to enter a stale setup.
     """
     swing_status = stock.get("swing_status") or ""
     bias         = stock.get("trade_bias") or "Neutral"
     ema20        = stock.get("ema_20_daily")
-    ema50        = stock.get("ema_50_daily")
     pct_ema20    = stock.get("pct_from_ema20")
     entry_low    = stock.get("entry_zone_low")
     entry_high   = stock.get("entry_zone_high")
@@ -704,10 +706,15 @@ def _build_entry_trigger(stock: dict):
     current      = stock.get("current_price") or 0
     stop         = stock.get("stop_level")
 
+    is_short    = bias in ("Short Bias", "Short")
+    dir_word    = "below" if is_short else "above"
+    candle_word = "bearish" if is_short else "bullish"
+
     if bias == "Avoid":
         return ("DO NOT TRADE — avoid bias set. No valid edge present. Remove from watchlist.",
                 "entry-trigger-avoid")
 
+    # ── READY — LEVEL HOLDS ───────────────────────────────────────────────────
     if swing_status == "READY — LEVEL HOLDS":
         if entry_low and entry_high and stop:
             return (
@@ -722,8 +729,8 @@ def _build_entry_trigger(stock: dict):
         return ("EXECUTE NOW — Key level confirmed with volume. Enter at current price.",
                 "entry-trigger-confirmed")
 
+    # ── PRE-CONFIRMATION ──────────────────────────────────────────────────────
     if swing_status == "PRE-CONFIRMATION":
-        dir_word = "above" if bias == "Long Bias" else "below"
         if ema20 and pct_ema20 is not None and abs(pct_ema20) <= 3.5:
             return (
                 f"WAIT FOR TRIGGER — 15m candle must close {dir_word} 20 EMA (${ema20:.2f}) "
@@ -737,19 +744,61 @@ def _build_entry_trigger(stock: dict):
         if entry_low and entry_high:
             return (
                 f"WAIT FOR TRIGGER — Price approaching entry zone ${entry_low:.2f}–${entry_high:.2f}. "
-                "Need 15m confirmation candle + volume ≥ 1.2x avg. Do not enter early.",
+                f"Need 15m {candle_word} confirmation candle + volume ≥ 1.2x avg. Do not enter early.",
                 "entry-trigger-preconf")
-        return ("WAIT FOR TRIGGER — Near key level. Need 15m bullish candle + volume ≥ 1.2x avg before entry.",
-                "entry-trigger-preconf")
+        return (
+            f"WAIT FOR TRIGGER — Near key level. Need 15m {candle_word} candle + volume ≥ 1.2x avg before entry.",
+            "entry-trigger-preconf")
 
+    # ── TREND CONTINUATION ────────────────────────────────────────────────────
     if swing_status == "TREND CONTINUATION":
-        if entry_low:
-            return (
-                f"PULLBACK ENTRY — Wait for pullback to ${entry_low:.2f}. "
-                "Buy the higher low. Need 15m momentum candle showing trend resuming.",
-                "entry-trigger-continuation")
-        return ("TREND CONTINUATION — Wait for pullback to key level. Buy the higher low with volume confirmation.",
-                "entry-trigger-continuation")
+        if is_short:
+            # Short continuation: ideal entry is a bounce UP into resistance, then short on rejection.
+            # If price is already BELOW the entry zone it already broke down — entry was missed.
+            if entry_low and entry_high:
+                if current and current < entry_low:
+                    return (
+                        f"MISSED ENTRY — Price already broke below entry zone (${entry_low:.2f}). "
+                        f"Wait for a bounce back to ${entry_low:.2f}–${entry_high:.2f} resistance, "
+                        "then enter short on 15m bearish rejection candle.",
+                        "entry-trigger-wait")
+                if current and current > entry_high:
+                    return (
+                        f"SHORT CONTINUATION — Price above entry zone. "
+                        f"Wait for pullback to ${entry_low:.2f}–${entry_high:.2f} resistance, "
+                        "then enter short on 15m bearish rejection candle.",
+                        "entry-trigger-continuation")
+                return (
+                    f"SHORT CONTINUATION — Price in resistance zone ${entry_low:.2f}–${entry_high:.2f}. "
+                    "Wait for 15m bearish rejection candle + volume ≥ 1.2x avg, then enter short.",
+                    "entry-trigger-continuation")
+            if entry_high:
+                return (
+                    f"SHORT CONTINUATION — Wait for bounce to ${entry_high:.2f} resistance, "
+                    "then enter short on 15m bearish rejection candle.",
+                    "entry-trigger-continuation")
+            return ("SHORT CONTINUATION — Wait for bounce to key resistance. Short the lower high with volume confirmation.",
+                    "entry-trigger-continuation")
+        else:
+            # Long continuation: ideal entry is a pullback DOWN to support, then buy the hold.
+            # If price is already BELOW the entry zone it broke through support — entry was missed.
+            if entry_low and entry_high:
+                if current and current < entry_low:
+                    return (
+                        f"MISSED ENTRY — Price already broke below entry zone (${entry_low:.2f}). "
+                        f"Wait for new setup or bounce back to ${entry_low:.2f}–${entry_high:.2f} before re-evaluating.",
+                        "entry-trigger-wait")
+                return (
+                    f"PULLBACK ENTRY — Wait for pullback to ${entry_low:.2f}–${entry_high:.2f}. "
+                    "Buy the higher low. Need 15m momentum candle showing trend resuming.",
+                    "entry-trigger-continuation")
+            if entry_low:
+                return (
+                    f"PULLBACK ENTRY — Wait for pullback to ${entry_low:.2f}. "
+                    "Buy the higher low. Need 15m momentum candle showing trend resuming.",
+                    "entry-trigger-continuation")
+            return ("TREND CONTINUATION — Wait for pullback to key level. Buy the higher low with volume confirmation.",
+                    "entry-trigger-continuation")
 
     # WAIT or unknown
     return ("NOT READY — No valid entry signal. Monitor for READY — LEVEL HOLDS or PRE-CONFIRMATION status.",
