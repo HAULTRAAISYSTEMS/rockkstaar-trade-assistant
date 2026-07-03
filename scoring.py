@@ -1777,7 +1777,8 @@ def compute_swing_setup_type(data: dict) -> str:
     daily_hh_hl = bool(data.get("daily_hh_hl", False))
     h4_hh_hl    = bool(data.get("h4_hh_hl", False))
     rvol        = data.get("rel_volume") or 0
-    gap_pct     = abs(data.get("gap_pct") or 0)
+    raw_gap_pct = data.get("gap_pct") or 0          # signed — negative = gap down
+    gap_pct     = abs(raw_gap_pct)                   # magnitude only (for Gap and Go / Bull Flag checks)
     cat_sc      = data.get("catalyst_score") or 0
     mom_sc      = data.get("momentum_score") or 0
 
@@ -1819,8 +1820,9 @@ def compute_swing_setup_type(data: dict) -> str:
     if is_long and gap_pct >= 3.0 and rvol >= 1.5 and bullish_trend:
         return "Gap and Go"
 
-    # ── 4. Earnings Continuation — gap with strong catalyst ──────────────────
-    if is_long and gap_pct >= 2.0 and cat_sc >= 5 and bullish_trend:
+    # ── 4. Earnings Continuation — gap UP with strong catalyst ───────────────
+    # Must be a positive gap (stock gapping up), not a gap down.
+    if is_long and raw_gap_pct >= 2.0 and cat_sc >= 5 and bullish_trend:
         return "Earnings Continuation"
 
     # ── 5. At resistance (structural headwind) ───────────────────────────────
@@ -1839,8 +1841,11 @@ def compute_swing_setup_type(data: dict) -> str:
         if current > fib_50 and 2.0 <= pct_below_high <= 8.0:
             return "Breakout Retest"
 
-    # ── 8. Bull Flag — consolidating above 20 EMA after a run-up ────────────
-    if (is_long and bullish_structure and daily_trend in ("Bullish", "Bullish Lean")
+    # ── 8. Bull Flag — tight consolidation above 20 EMA, flag resolving up ──
+    # Requires daily higher-highs/higher-lows in recent bars so the flag is
+    # actually breaking out, not just sitting above the 20 EMA for months.
+    if (is_long and bullish_structure and daily_hh_hl
+            and daily_trend in ("Bullish", "Bullish Lean")
             and pct_ema20 is not None and 1.0 <= pct_ema20 <= 12.0):
         return "Bull Flag"
 
