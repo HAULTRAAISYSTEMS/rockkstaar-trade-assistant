@@ -54,6 +54,25 @@
     </div>
   </div>
 
+  <!-- ══ AI MORNING BRIEFING ═════════════════════════════════════════════ -->
+  <div class="ai-brief-card" id="ai-brief-card">
+    <div class="ai-brief-header">
+      <div class="ai-brief-label">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        AI Morning Briefing
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span id="ai-brief-cached" style="display:none;" class="liq-badge" title="Served from cache">cached</span>
+        <span id="ai-brief-badge" class="ai-brief-badge neutral">—</span>
+      </div>
+    </div>
+    <div id="ai-brief-body"><div class="ai-brief-skeleton"></div></div>
+    <div class="ai-brief-footer">
+      <span class="ai-brief-time" id="ai-brief-time">Fetching briefing…</span>
+      <button class="ai-brief-refresh" id="ai-brief-refresh-btn" onclick="refreshAIBrief()">↻ Refresh</button>
+    </div>
+  </div>
+
   <!-- ═══════════════════════════════════════════════════════════════════════
        ROW 1: FED LIQUIDITY STATUS  +  MARKET RISK METER
   ═══════════════════════════════════════════════════════════════════════ -->
@@ -387,6 +406,35 @@
 .liq-opp-alert-msg   { color:#cbd5e1; flex:1; }
 .liq-opp-score{ font-size:.68rem; color:#475569; margin-left:auto; white-space:nowrap; }
 .liq-badge-count{ min-width:24px; text-align:center; }
+
+/* ── AI Morning Briefing card ── */
+.ai-brief-card {
+  background: linear-gradient(135deg, rgba(14,165,233,0.05) 0%, rgba(99,102,241,0.04) 100%);
+  border: 1px solid rgba(14,165,233,0.18);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  transition: border-color .2s;
+}
+.ai-brief-card:hover { border-color: rgba(14,165,233,0.32); }
+.ai-brief-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:.6rem; }
+.ai-brief-label { font-size:.75rem; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:.06em; display:flex; align-items:center; gap:.4rem; }
+.ai-brief-badge { padding:.15rem .55rem; border-radius:10px; font-size:.68rem; font-weight:700; letter-spacing:.04em; }
+.ai-brief-badge.risk-on  { background:rgba(34,197,94,.14);  color:#22c55e; border:1px solid rgba(34,197,94,.3); }
+.ai-brief-badge.risk-off { background:rgba(239,68,68,.14);  color:#ef4444; border:1px solid rgba(239,68,68,.3); }
+.ai-brief-badge.neutral  { background:rgba(148,163,184,.12);color:#94a3b8; border:1px solid rgba(148,163,184,.25); }
+.ai-brief-vix { font-size:.72rem; color:#64748b; margin-bottom:.45rem; }
+.ai-brief-text { font-size:.82rem; line-height:1.55; color:#cbd5e1; margin-bottom:.6rem; }
+.ai-brief-tickers { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.5rem; }
+.ai-brief-chip { font-size:.68rem; font-weight:700; padding:.15rem .5rem; border-radius:6px; background:rgba(14,165,233,.1); color:#38bdf8; border:1px solid rgba(14,165,233,.2); text-decoration:none; transition:.15s; }
+.ai-brief-chip:hover { background:rgba(14,165,233,.22); }
+.ai-brief-footer { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding-top:.5rem; border-top:1px solid rgba(30,41,59,.7); }
+.ai-brief-time { font-size:.65rem; color:#475569; }
+.ai-brief-refresh { font-size:.68rem; padding:.2rem .6rem; border-radius:6px; background:transparent; border:1px solid #334155; color:#94a3b8; cursor:pointer; transition:.15s; }
+.ai-brief-refresh:hover { border-color:#38bdf8; color:#38bdf8; }
+.ai-brief-skeleton { height:56px; border-radius:6px; background:linear-gradient(90deg,rgba(30,41,59,.6) 25%,rgba(51,65,85,.5) 50%,rgba(30,41,59,.6) 75%); background-size:200% 100%; animation:brief-shimmer 1.4s infinite; }
+@keyframes brief-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+.ai-brief-err { font-size:.75rem; color:#475569; padding:.25rem 0; }
 </style>
 
 <script>
@@ -435,8 +483,56 @@ document.addEventListener('DOMContentLoaded', () => {
   loadMoneyFlow();
   runScan();
   loadAlerts();
+  loadAIBrief(false);
   fetch('/api/opportunity/refresh', {method:'POST'}).catch(()=>{});
 });
+
+/* ─────────────────────────────────────────────────────────────
+   AI MORNING BRIEFING
+───────────────────────────────────────────────────────────── */
+function _escB(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function loadAIBrief(forceRefresh) {
+  const url    = '/api/ai_briefing' + (forceRefresh ? '?refresh=true' : '');
+  const body   = document.getElementById('ai-brief-body');
+  const badge  = document.getElementById('ai-brief-badge');
+  const cached = document.getElementById('ai-brief-cached');
+  const time   = document.getElementById('ai-brief-time');
+  const btn    = document.getElementById('ai-brief-refresh-btn');
+  if (btn)  { btn.textContent = '…'; btn.disabled = true; }
+  if (body && forceRefresh) body.innerHTML = '<div class="ai-brief-skeleton"></div>';
+
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      const b    = data.briefing || {};
+      const bias = (b.macro_bias || 'neutral').toLowerCase();
+      if (badge) {
+        badge.className = 'ai-brief-badge ' + (bias === 'risk_on' ? 'risk-on' : bias === 'risk_off' ? 'risk-off' : 'neutral');
+        badge.textContent = bias === 'risk_on' ? '🟢 RISK ON' : bias === 'risk_off' ? '🔴 RISK OFF' : '⚪ NEUTRAL';
+      }
+      if (cached) cached.style.display = b.cached ? '' : 'none';
+      if (body) {
+        const chips = (b.tickers_flagged || []).map(t =>
+          `<a class="ai-brief-chip" href="/stock/${encodeURIComponent(t)}">${_escB(t)}</a>`
+        ).join('');
+        body.innerHTML =
+          (b.vix_level ? `<div class="ai-brief-vix">${_escB(b.vix_level)}</div>` : '') +
+          `<div class="ai-brief-text">${_escB(b.briefing || 'No briefing available.')}</div>` +
+          (chips ? `<div class="ai-brief-tickers"><span style="font-size:.65rem;color:#475569;align-self:center;">Flagged:</span>${chips}</div>` : '');
+      }
+      if (time) time.textContent = (b.cached ? 'Cached · ' : 'Generated · ') + (b.date || new Date().toLocaleDateString());
+    })
+    .catch(err => {
+      if (body) body.innerHTML = `<div class="ai-brief-err">Briefing unavailable — ${_escB(err.message)}</div>`;
+      if (time) time.textContent = 'Error loading briefing';
+    })
+    .finally(() => { if (btn) { btn.textContent = '↻ Refresh'; btn.disabled = false; } });
+}
+
+function refreshAIBrief() { loadAIBrief(true); }
 
 /* ─────────────────────────────────────────────────────────────
    STATUS BANNER (weekend / stale / loading)
