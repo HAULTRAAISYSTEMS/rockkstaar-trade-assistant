@@ -1,0 +1,23 @@
+========================================
+PRESS CMD+V in Terminal to push the fix
+========================================
+
+The command is already in your clipboard.
+Just click on the Terminal window and press Cmd+V then Enter.
+
+If that doesn't work, paste this manually:
+
+cd ~/Documents/GitHub/rockkstaar-trade-assistant && rm -f .git/index.lock && git add data_fetcher.py && git commit -m "fix: Fibonacci bearish freshness check wrong in uptrend" && git push origin main
+
+========================================
+WHAT WAS FIXED:
+- Fibonacci bug: bearish legs were wrongly marked "fresh" in uptrends
+  (AMAT showed High $447 even though price was at $617+)
+- Fundamentals Analyzer page (/fundamentals) — full new feature
+
+AFTER PUSH:
+- Render will auto-deploy in ~2 min
+- Check /fundamentals?ticker=AAPL to test the new page
+- If 502 persists, check Render dashboard → Logs tab
+  and paste the error here
+========================================

@@ -48,6 +48,9 @@ from database import (
     save_setup_outcome, get_setup_outcome_stats,
     save_study_log_entry, get_study_log, delete_study_log_entry,
     get_ai_briefing, save_ai_briefing,
+    get_score_narration, save_score_narration,
+    get_journal_summary, save_journal_summary,
+    get_earnings_digest, save_earnings_digest,
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
 from data_fetcher import _et_now, market_session_now, orb_phase_now
@@ -4439,24 +4442,27 @@ def _build_briefing_market_text() -> str:
     """
     Assemble a text snapshot of current market conditions to send to Nebius.
     Pulls from the same caches used by /api/market_context and the dashboard.
+    Always includes VIX, SPY, QQQ, and DXY — falls back to data_fetcher when
+    market_engine cache is cold.
     """
     lines = []
 
-    # ── Market regime (SPY/QQQ/VIX) ─────────────────────────────────────────
+    # Collect live values from both sources so we can fill gaps
+    vix_val   = None
+    spy_price = None
+    qqq_price = None
+    dxy_val   = None
+    dxy_chg   = None
+
+    # ── Market regime (SPY/QQQ/VIX) — primary source: market_engine ────────
     try:
         mkt = _get_mkt_ctx()
         lines.append(f"MARKET REGIME: {mkt.get('regime', 'NEUTRAL')}")
         lines.append(f"SPY trend: {mkt.get('spy_trend', 'Unknown')}, 1d change: {mkt.get('spy_1d_pct', 'N/A')}%")
         lines.append(f"QQQ trend: {mkt.get('qqq_trend', 'Unknown')}, 1d change: {mkt.get('qqq_1d_pct', 'N/A')}%")
-        vix = mkt.get("vix_level")
-        if vix:
-            lines.append(f"VIX: {vix}")
+        vix_val   = mkt.get("vix_level")
         spy_price = mkt.get("spy_price")
-        if spy_price:
-            lines.append(f"SPY price: ${spy_price}")
         qqq_price = mkt.get("qqq_price")
-        if qqq_price:
-            lines.append(f"QQQ price: ${qqq_price}")
         longs_ok  = mkt.get("longs_ok", True)
         shorts_ok = mkt.get("shorts_ok", True)
         lines.append(f"Trading signal: longs_ok={longs_ok}, shorts_ok={shorts_ok}, no_trade={mkt.get('no_trade', False)}")
@@ -4476,10 +4482,19 @@ def _build_briefing_market_text() -> str:
         if es and not es.get("error"):
             vwap_note = "above VWAP" if es.get("above_vwap") else "below VWAP" if es.get("above_vwap") is False else ""
             lines.append(f"ES futures: ${es.get('price', 'N/A')} ({es.get('change_pct', 'N/A'):+.2f}%) {vwap_note}".strip())
-        dxy = ctx.get("dxy_price")
-        dxy_chg = ctx.get("dxy_change_pct")
-        if dxy:
-            lines.append(f"DXY: {dxy} ({dxy_chg:+.2f}%), trend: {ctx.get('dxy_trend', 'flat')}")
+
+        # DXY — data_fetcher uses dxy_price / dxy_change_pct; market_engine uses dxy / dxy_1d_chg
+        dxy_val = ctx.get("dxy_price") or ctx.get("dxy")
+        dxy_chg = ctx.get("dxy_change_pct") or ctx.get("dxy_1d_chg")
+
+        # Fill VIX/SPY/QQQ from data_fetcher if market_engine cache was cold
+        if vix_val is None:
+            vix_val = ctx.get("vix_level")
+        if spy_price is None:
+            spy_price = ctx.get("spy_price")
+        if qqq_price is None:
+            qqq_price = ctx.get("qqq_price")
+
         yield_10y = ctx.get("yield_10y")
         yield_chg = ctx.get("yield_change_bps")
         if yield_10y:
@@ -4495,6 +4510,16 @@ def _build_briefing_market_text() -> str:
                 lines.append("Weak sectors today: " + ", ".join(f"{k} {v:+.2f}%" for k, v in bottom3))
     except Exception as _e:
         logger.debug("briefing: market_context failed: %s", _e)
+
+    # ── Always emit VIX / SPY / QQQ / DXY so Nebius is never told "not provided" ──
+    lines.append(f"VIX: {vix_val if vix_val is not None else 'N/A'}")
+    lines.append(f"SPY price: ${spy_price if spy_price is not None else 'N/A'}")
+    lines.append(f"QQQ price: ${qqq_price if qqq_price is not None else 'N/A'}")
+    if dxy_val is not None:
+        try:
+            lines.append(f"DXY: {dxy_val} ({float(dxy_chg):+.2f}%)" if dxy_chg is not None else f"DXY: {dxy_val}")
+        except Exception:
+            lines.append(f"DXY: {dxy_val}")
 
     # ── Watchlist stocks from DB ─────────────────────────────────────────────
     try:
@@ -4608,6 +4633,264 @@ def api_ai_briefing():
             "date": today_et,
         }
     }), 503
+
+
+@app.route("/api/narrate_score")
+@csrf.exempt
+def api_narrate_score():
+    """
+    Return a 2-3 sentence AI narration of why a ticker scored the way it did.
+    Params: ticker, total, catalyst, setup, volume, macro_gate
+    Cached per (ticker, today_ET, score_key) so Nebius is only called once per unique score.
+    """
+    import json as _j
+    from openai import OpenAI
+
+    ticker     = (request.args.get("ticker") or "").upper().strip()
+    total      = request.args.get("total",     "N/A")
+    catalyst   = request.args.get("catalyst",  "N/A")
+    setup      = request.args.get("setup",     "N/A")
+    volume     = request.args.get("volume",    "N/A")
+    macro_gate = request.args.get("macro_gate","N/A")
+
+    if not ticker:
+        return jsonify({"ok": False, "error": "ticker required"}), 400
+
+    today_et  = _et_now().strftime("%Y-%m-%d")
+    score_key = f"{total}_C{catalyst}_S{setup}_V{volume}"
+
+    cached = get_score_narration(ticker, today_et, score_key)
+    if cached:
+        return jsonify({"ok": True, "narration": cached, "cached": True})
+
+    _NARRATE_SYSTEM = (
+        'You are the score narrator for a swing trading engine. '
+        'You receive a ticker and its scores. '
+        'Explain in 2-3 sentences WHY it scored this way and what the trader should watch. '
+        'Never predict price. Never change or recalculate the scores — narrate only. '
+        'Respond in JSON: {"ticker": "", "narration": "", "watch_for": ""}'
+    )
+    user_msg = (
+        f"Ticker: {ticker}\n"
+        f"Total swing score: {total}/10\n"
+        f"Catalyst score: {catalyst}/10\n"
+        f"Setup score: {setup}/10\n"
+        f"Volume score: {volume}/10\n"
+        f"Macro gate: {macro_gate}"
+    )
+    try:
+        client = OpenAI(
+            base_url="https://api.tokenfactory.nebius.com/v1/",
+            api_key=os.environ.get("NEBIUS_API_KEY"),
+        )
+        response = client.chat.completions.create(
+            model="meta-llama/Llama-3.3-70B-Instruct",
+            max_tokens=256,
+            temperature=0.3,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": _NARRATE_SYSTEM},
+                {"role": "user",   "content": user_msg},
+            ],
+        )
+        result = _j.loads(response.choices[0].message.content)
+        result.setdefault("ticker",    ticker)
+        result.setdefault("narration", "")
+        result.setdefault("watch_for", "")
+        save_score_narration(ticker, today_et, score_key, result)
+        return jsonify({"ok": True, "narration": result, "cached": False})
+    except Exception as exc:
+        logger.error("api_narrate_score failed: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/journal_summary")
+@csrf.exempt
+def api_journal_summary():
+    """
+    Return an AI weekly trading journal summary.
+    Optional param: week (e.g. '2026-W27'). Defaults to current ISO week.
+    Cached per week_key.
+    """
+    import json as _j
+    from openai import OpenAI
+
+    week_param = (request.args.get("week") or "").strip()
+    if week_param:
+        week_key = week_param
+    else:
+        now_et   = _et_now()
+        iso_cal  = now_et.isocalendar()
+        week_key = f"{iso_cal[0]}-W{iso_cal[1]:02d}"
+
+    cached = get_journal_summary(week_key)
+    if cached:
+        return jsonify({"ok": True, "summary": cached, "week_key": week_key, "cached": True})
+
+    # Pull trades for the week from the journal table
+    try:
+        # Derive Monday–Sunday date range from week_key
+        import datetime as _dt
+        year, wnum = int(week_key.split("-W")[0]), int(week_key.split("-W")[1])
+        monday  = _dt.date.fromisocalendar(year, wnum, 1)
+        sunday  = monday + _dt.timedelta(days=6)
+        from database import get_db as _get_db
+        conn = _get_db()
+        rows = conn.execute(
+            "SELECT * FROM journal WHERE trade_date >= ? AND trade_date <= ? ORDER BY trade_date ASC",
+            (str(monday), str(sunday)),
+        ).fetchall()
+        conn.close()
+        trades = [dict(r) for r in rows]
+    except Exception as exc:
+        logger.error("api_journal_summary: failed to pull trades: %s", exc)
+        trades = []
+
+    if not trades:
+        fallback = {
+            "week_summary":    "No trades logged for this week.",
+            "rule_adherence":  "N/A",
+            "top_mistake":     "N/A",
+            "one_improvement": "Log your trades consistently to unlock weekly AI reviews.",
+        }
+        return jsonify({"ok": True, "summary": fallback, "week_key": week_key, "cached": False})
+
+    lines = [f"Week: {week_key}  ({len(trades)} trades)"]
+    for t in trades:
+        pnl  = t.get("pnl_pct")
+        pnl_s = f"{pnl:+.1f}%" if pnl is not None else "N/A"
+        lines.append(
+            f"  {t.get('trade_date')} {t.get('ticker')} {t.get('direction','')} "
+            f"entry={t.get('entry_price')} exit={t.get('exit_price')} "
+            f"pnl={pnl_s} result={t.get('result','')} "
+            f"setup={t.get('setup_type','')} notes={t.get('notes','')}"
+        )
+    trades_text = "\n".join(lines)
+
+    _JOURNAL_SYSTEM = (
+        "You are a trading journal coach reviewing a swing trader's week. "
+        "Summarize: rule adherence, repeated mistakes, what worked, one specific improvement for next week. "
+        "Honest, direct, no cheerleading. "
+        'Respond in JSON: {"week_summary": "", "rule_adherence": "", "top_mistake": "", "one_improvement": ""}'
+    )
+    try:
+        client = OpenAI(
+            base_url="https://api.tokenfactory.nebius.com/v1/",
+            api_key=os.environ.get("NEBIUS_API_KEY"),
+        )
+        response = client.chat.completions.create(
+            model="meta-llama/Llama-3.3-70B-Instruct",
+            max_tokens=512,
+            temperature=0.3,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": _JOURNAL_SYSTEM},
+                {"role": "user",   "content": trades_text},
+            ],
+        )
+        result = _j.loads(response.choices[0].message.content)
+        result.setdefault("week_summary",    "")
+        result.setdefault("rule_adherence",  "")
+        result.setdefault("top_mistake",     "")
+        result.setdefault("one_improvement", "")
+        save_journal_summary(week_key, result)
+        return jsonify({"ok": True, "summary": result, "week_key": week_key, "cached": False})
+    except Exception as exc:
+        logger.error("api_journal_summary Nebius call failed: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/earnings_digest")
+@csrf.exempt
+def api_earnings_digest():
+    """
+    Return an AI earnings digest for swing-trading watch tickers.
+    Cached per today's ET date.
+    """
+    import json as _j
+    from openai import OpenAI
+
+    today_et = _et_now().strftime("%Y-%m-%d")
+    cached   = get_earnings_digest(today_et)
+    if cached:
+        return jsonify({"ok": True, "digest": cached, "cached": True})
+
+    WATCH_TICKERS = ["AMD", "ANET", "FN", "TSM", "ISRG", "EME", "GOOG"]
+
+    # Pull earnings dates from stock_data table
+    earnings_info = []
+    try:
+        from database import get_db as _get_db
+        conn = _get_db()
+        rows = conn.execute(
+            f"SELECT ticker, earnings_date, catalyst_summary, news_headlines "
+            f"FROM stock_data WHERE ticker IN ({','.join('?' * len(WATCH_TICKERS))})",
+            WATCH_TICKERS,
+        ).fetchall()
+        conn.close()
+        for r in rows:
+            earnings_info.append(dict(r))
+    except Exception as exc:
+        logger.debug("api_earnings_digest: db lookup failed: %s", exc)
+
+    # Also pull from intel engine's earnings calendar
+    try:
+        intel_data = _intel.get_intel_summary()
+        all_earn   = (
+            intel_data.get("earnings", {}).get("today", []) +
+            intel_data.get("earnings", {}).get("tomorrow", []) +
+            intel_data.get("earnings", {}).get("this_week", [])
+        )
+        watch_set = set(WATCH_TICKERS)
+        intel_earn = [e for e in all_earn if e.get("ticker", "").upper() in watch_set]
+    except Exception:
+        intel_earn = []
+
+    lines = [f"Swing trader earnings watch  Date: {today_et}"]
+    lines.append(f"Tickers: {', '.join(WATCH_TICKERS)}")
+    lines.append("")
+
+    for t in WATCH_TICKERS:
+        db_row = next((r for r in earnings_info if r.get("ticker") == t), {})
+        earn_date = db_row.get("earnings_date") or "unknown"
+        summary   = db_row.get("catalyst_summary") or ""
+        # Check intel calendar for precise date/time
+        ie = next((e for e in intel_earn if e.get("ticker", "").upper() == t), {})
+        if ie:
+            earn_date = ie.get("date") or ie.get("date_label") or earn_date
+        lines.append(f"{t}: earnings {earn_date}  catalyst_summary={summary[:120] if summary else 'N/A'}")
+
+    digest_text = "\n".join(lines)
+
+    _EARNINGS_SYSTEM = (
+        "Summarize what matters for a swing trader holding none of these but watching all: "
+        "which earnings this week could move these tickers, expected dates, and any pre-announcement sector reads. "
+        "4 sentences max. "
+        'JSON: {"digest": "", "key_dates": []}'
+    )
+    try:
+        client = OpenAI(
+            base_url="https://api.tokenfactory.nebius.com/v1/",
+            api_key=os.environ.get("NEBIUS_API_KEY"),
+        )
+        response = client.chat.completions.create(
+            model="meta-llama/Llama-3.3-70B-Instruct",
+            max_tokens=384,
+            temperature=0.3,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": _EARNINGS_SYSTEM},
+                {"role": "user",   "content": digest_text},
+            ],
+        )
+        result = _j.loads(response.choices[0].message.content)
+        result.setdefault("digest",    "")
+        result.setdefault("key_dates", [])
+        save_earnings_digest(today_et, result)
+        return jsonify({"ok": True, "digest": result, "cached": False})
+    except Exception as exc:
+        logger.error("api_earnings_digest Nebius call failed: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @app.route("/api/market-story")

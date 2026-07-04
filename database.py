@@ -716,6 +716,39 @@ def init_db():
         )
     """))
 
+    # AI Score Narrations — one row per ticker+date+score_key combination
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS score_narrations (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker        TEXT    NOT NULL,
+            date          TEXT    NOT NULL,
+            score_key     TEXT    NOT NULL,
+            json_response TEXT    NOT NULL,
+            created_at    TEXT    NOT NULL,
+            UNIQUE (ticker, date, score_key)
+        )
+    """))
+
+    # AI Journal Summaries — one row per week
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS journal_summaries (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            week_key      TEXT    NOT NULL UNIQUE,
+            json_response TEXT    NOT NULL,
+            created_at    TEXT    NOT NULL
+        )
+    """))
+
+    # AI Earnings Digests — one row per calendar date
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS earnings_digests (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            date          TEXT    NOT NULL UNIQUE,
+            json_response TEXT    NOT NULL,
+            created_at    TEXT    NOT NULL
+        )
+    """))
+
     # ── Multi-user migration: add user_id columns to all user-data tables ───
     _user_tables = [
         "watchlists", "notes", "trade_plans", "journal",
@@ -2617,6 +2650,110 @@ def save_ai_briefing(date: str, data: dict) -> None:
     conn = get_db()
     conn.execute(
         "INSERT INTO ai_briefings (date, json_response, created_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(date) DO UPDATE SET json_response = excluded.json_response, created_at = excluded.created_at",
+        (date, _json.dumps(data), datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# AI Score Narrations
+# ---------------------------------------------------------------------------
+
+def get_score_narration(ticker: str, date: str, score_key: str):
+    """Return cached narration dict for (ticker, date, score_key), or None."""
+    import json as _json
+    conn = get_db()
+    row = conn.execute(
+        "SELECT json_response FROM score_narrations WHERE ticker = ? AND date = ? AND score_key = ?",
+        (ticker.upper(), date, score_key),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    try:
+        return _json.loads(row["json_response"])
+    except Exception:
+        return None
+
+
+def save_score_narration(ticker: str, date: str, score_key: str, data: dict) -> None:
+    """Upsert a score narration row."""
+    import json as _json
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO score_narrations (ticker, date, score_key, json_response, created_at) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(ticker, date, score_key) DO UPDATE SET "
+        "json_response = excluded.json_response, created_at = excluded.created_at",
+        (ticker.upper(), date, score_key, _json.dumps(data), datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# AI Journal Summaries
+# ---------------------------------------------------------------------------
+
+def get_journal_summary(week_key: str):
+    """Return cached journal summary dict for a week_key (e.g. '2026-W27'), or None."""
+    import json as _json
+    conn = get_db()
+    row = conn.execute(
+        "SELECT json_response FROM journal_summaries WHERE week_key = ?",
+        (week_key,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    try:
+        return _json.loads(row["json_response"])
+    except Exception:
+        return None
+
+
+def save_journal_summary(week_key: str, data: dict) -> None:
+    """Upsert a journal summary for a week."""
+    import json as _json
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO journal_summaries (week_key, json_response, created_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(week_key) DO UPDATE SET json_response = excluded.json_response, created_at = excluded.created_at",
+        (week_key, _json.dumps(data), datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# AI Earnings Digests
+# ---------------------------------------------------------------------------
+
+def get_earnings_digest(date: str):
+    """Return cached earnings digest dict for a date (YYYY-MM-DD), or None."""
+    import json as _json
+    conn = get_db()
+    row = conn.execute(
+        "SELECT json_response FROM earnings_digests WHERE date = ?",
+        (date,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    try:
+        return _json.loads(row["json_response"])
+    except Exception:
+        return None
+
+
+def save_earnings_digest(date: str, data: dict) -> None:
+    """Upsert an earnings digest for the given date."""
+    import json as _json
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO earnings_digests (date, json_response, created_at) VALUES (?, ?, ?) "
         "ON CONFLICT(date) DO UPDATE SET json_response = excluded.json_response, created_at = excluded.created_at",
         (date, _json.dumps(data), datetime.now().isoformat()),
     )

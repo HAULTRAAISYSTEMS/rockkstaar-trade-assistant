@@ -1195,6 +1195,28 @@
       </div>
     </div>
 
+    <!-- ══ EARNINGS DIGEST (AI) ═════════════════════════════════════════ -->
+    <div class="section" id="earnings-digest-section">
+      <div class="section-title">
+        🤖 Earnings Digest
+        <div class="section-line"></div>
+        <span style="font-size:10px;color:var(--text-muted);">AMD · ANET · FN · TSM · ISRG · EME · GOOG</span>
+      </div>
+      <div class="card" id="earnings-digest-card" style="padding:14px;">
+        <div id="earnings-digest-shimmer" style="
+          background:linear-gradient(90deg,var(--bg-inset) 25%,var(--bg-card-hover) 50%,var(--bg-inset) 75%);
+          background-size:200% 100%; animation:ai-shimmer 1.4s infinite;
+          border-radius:6px; height:60px;">
+        </div>
+        <div id="earnings-digest-body" style="display:none;">
+          <p id="earnings-digest-text" style="margin:0 0 10px;font-size:13px;color:var(--text-primary);line-height:1.6;"></p>
+          <div id="earnings-digest-dates" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+          <div id="earnings-digest-meta" style="font-size:10px;color:var(--text-muted);margin-top:8px;"></div>
+        </div>
+        <div id="earnings-digest-error" style="display:none;color:var(--text-muted);font-size:12px;"></div>
+      </div>
+    </div>
+
     <!-- ══ SECTION 3 — Stock Splits ══════════════════════════════════════ -->
     <div class="section">
       <div class="section-title">
@@ -2816,6 +2838,39 @@ function _esc(str) {
 
 function refreshAIBriefing() { loadAIBriefing(true); }
 
+// ── Earnings Digest (AI) ─────────────────────────────────────────────────────
+function loadEarningsDigest() {
+  const shimmer = document.getElementById('earnings-digest-shimmer');
+  const body    = document.getElementById('earnings-digest-body');
+  const errEl   = document.getElementById('earnings-digest-error');
+
+  fetch('/api/earnings_digest')
+    .then(r => r.json())
+    .then(data => {
+      if (shimmer) shimmer.style.display = 'none';
+      if (data.ok && data.digest) {
+        const d = data.digest;
+        const textEl = document.getElementById('earnings-digest-text');
+        if (textEl) textEl.textContent = d.digest || '';
+        const datesEl = document.getElementById('earnings-digest-dates');
+        if (datesEl && Array.isArray(d.key_dates)) {
+          datesEl.innerHTML = d.key_dates.map(kd =>
+            `<span style="background:var(--bg-inset);border:1px solid var(--border);border-radius:12px;padding:3px 10px;font-size:11px;color:var(--text-secondary);">${kd}</span>`
+          ).join('');
+        }
+        const metaEl = document.getElementById('earnings-digest-meta');
+        if (metaEl) metaEl.textContent = data.cached ? 'cached today' : 'fresh';
+        if (body) body.style.display = 'block';
+      } else {
+        if (errEl) { errEl.textContent = data.error || 'Digest unavailable'; errEl.style.display = 'block'; }
+      }
+    })
+    .catch(() => {
+      if (shimmer) shimmer.style.display = 'none';
+      if (errEl) { errEl.textContent = 'Digest unavailable'; errEl.style.display = 'block'; }
+    });
+}
+
 // ── DOMContentLoaded ─────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -2832,6 +2887,8 @@ document.addEventListener('DOMContentLoaded', function() {
   loadIntelData(false);
   // Load AI morning briefing (served from cache if already generated today)
   loadAIBriefing(false);
+  // Load Earnings Digest (auto-load on page open, cached by date)
+  loadEarningsDigest();
   // Auto-refresh every 90 seconds
   setInterval(refreshMarketData, 90000);
   setInterval(loadEarningsData, 120000);

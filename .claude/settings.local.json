@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(git -C /Users/mac/Documents/GitHub/rockkstaar-trade-assistant status)",
+      "Bash(git -C /Users/mac/Documents/GitHub/rockkstaar-trade-assistant log --oneline -5)",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__get_page_text",
+      "mcp__Claude_in_Chrome__find",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('/Users/mac/Documents/GitHub/rockkstaar-trade-assistant/data_fetcher.py'\\).read\\(\\)\\); print\\('data_fetcher.py OK'\\)\")"
+    ]
+  }
+}

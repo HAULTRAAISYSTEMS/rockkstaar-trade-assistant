@@ -1,6 +1,15 @@
 {% extends "base.html" %}
 {% block title %}{{ stock.ticker }} — Rockkstaar Trade Assistant{% endblock %}
 
+{% block head_extra %}
+<style>
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+</style>
+{% endblock %}
+
 {% block content %}
 
 <div class="detail-wrap">
@@ -945,6 +954,26 @@
     </div>
   </div>
 
+  <!-- ===== AI SCORE READ ===== -->
+  <div class="detail-card" id="ai-read-card" style="margin-bottom:12px;">
+    <h3 class="card-title">🤖 AI Read
+      <span id="ai-read-badge" style="font-size:10px;color:var(--text-muted);font-weight:400;margin-left:8px;"></span>
+    </h3>
+    <div id="ai-read-shimmer" style="
+      background:linear-gradient(90deg,var(--bg-inset) 25%,var(--bg-card-hover) 50%,var(--bg-inset) 75%);
+      background-size:200% 100%;
+      animation:shimmer 1.4s infinite;
+      border-radius:6px;height:52px;margin:6px 0;">
+    </div>
+    <div id="ai-read-body" style="display:none;">
+      <p id="ai-read-narration" style="margin:6px 0 4px;color:var(--text-primary);font-size:13px;line-height:1.5;"></p>
+      <p id="ai-read-watch" style="margin:0;color:var(--text-secondary);font-size:12px;">
+        <strong style="color:var(--accent);">Watch:</strong> <span id="ai-read-watch-text"></span>
+      </p>
+    </div>
+    <div id="ai-read-error" style="display:none;color:var(--text-muted);font-size:12px;"></div>
+  </div>
+
   <!-- ===== CATALYST SCORE BREAKDOWN ===== -->
   <div class="detail-card breakdown-card">
     <h3 class="card-title">
@@ -1617,6 +1646,42 @@ function calcOptionsRisk() {
 }
 
 const DETAIL_TICKER = "{{ stock.ticker }}";
+
+// ── AI Read (score narration) ─────────────────────────────────────────────────
+(function loadAiRead() {
+  const ticker    = DETAIL_TICKER;
+  const total     = {{ stock.swing_score    | default(0) | int }};
+  const catalyst  = {{ stock.catalyst_score | default(0) | int }};
+  const setup     = {{ stock.setup_score    | default(0) | int }};
+  const volume    = {{ stock.rel_volume     | default(0) | round(1) }};
+  const macroGate = {{ stock.no_trade       | default(false) | tojson }};
+
+  const url = `/api/narrate_score?ticker=${encodeURIComponent(ticker)}&total=${total}&catalyst=${catalyst}&setup=${setup}&volume=${volume}&macro_gate=${macroGate ? 'NO_TRADE' : 'OK'}`;
+
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('ai-read-shimmer').style.display = 'none';
+      if (data.ok && data.narration) {
+        document.getElementById('ai-read-narration').textContent = data.narration.narration || '';
+        document.getElementById('ai-read-watch-text').textContent  = data.narration.watch_for || '';
+        document.getElementById('ai-read-body').style.display = 'block';
+        if (data.cached) {
+          document.getElementById('ai-read-badge').textContent = 'cached';
+        }
+      } else {
+        const err = document.getElementById('ai-read-error');
+        err.textContent = 'AI read unavailable';
+        err.style.display = 'block';
+      }
+    })
+    .catch(() => {
+      document.getElementById('ai-read-shimmer').style.display = 'none';
+      const err = document.getElementById('ai-read-error');
+      err.textContent = 'AI read unavailable';
+      err.style.display = 'block';
+    });
+})();
 
 // ── Poll observability helpers ───────────────────────────────────────────────
 

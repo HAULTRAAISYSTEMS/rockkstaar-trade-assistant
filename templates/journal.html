@@ -1,5 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Trade Journal — Rockkstaar Trade Assistant{% endblock %}
+{% block head_extra %}
+<style>
+@keyframes ai-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="journal-wrap">
@@ -475,6 +483,43 @@
   </section>
   {% endif %}
 
+  <!-- ===== WEEKLY AI REVIEW ===== -->
+  <section class="journal-section">
+    <h2 class="section-title">Weekly AI Review</h2>
+    <div class="detail-card" id="weekly-ai-card" style="padding:16px;">
+      <button id="weekly-ai-btn" class="btn" onclick="loadWeeklyAiReview()" style="margin-bottom:12px;">
+        Generate Weekly Review
+      </button>
+      <div id="weekly-ai-shimmer" style="display:none;
+        background:linear-gradient(90deg,var(--bg-inset) 25%,var(--bg-card-hover) 50%,var(--bg-inset) 75%);
+        background-size:200% 100%; animation:ai-shimmer 1.4s infinite;
+        border-radius:6px; height:80px; margin-top:8px;">
+      </div>
+      <div id="weekly-ai-body" style="display:none; margin-top:8px;">
+        <div style="margin-bottom:10px;">
+          <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Week Summary</div>
+          <p id="wai-summary" style="margin:0;font-size:13px;color:var(--text-primary);line-height:1.5;"></p>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;">
+          <div style="background:var(--bg-inset);border-radius:6px;padding:10px;">
+            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Rule Adherence</div>
+            <p id="wai-rules" style="margin:0;font-size:12px;color:var(--text-secondary);line-height:1.5;"></p>
+          </div>
+          <div style="background:var(--bg-inset);border-radius:6px;padding:10px;">
+            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Top Mistake</div>
+            <p id="wai-mistake" style="margin:0;font-size:12px;color:var(--loss);line-height:1.5;"></p>
+          </div>
+        </div>
+        <div style="background:var(--bg-inset);border-radius:6px;padding:10px;margin-top:10px;">
+          <div style="font-size:10px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">One Improvement for Next Week</div>
+          <p id="wai-improvement" style="margin:0;font-size:12px;color:var(--text-primary);line-height:1.5;"></p>
+        </div>
+        <div id="wai-meta" style="font-size:10px;color:var(--text-muted);margin-top:8px;"></div>
+      </div>
+      <div id="weekly-ai-error" style="display:none;color:var(--text-muted);font-size:12px;margin-top:8px;"></div>
+    </div>
+  </section>
+
   <!-- ===== FULL JOURNAL TABLE ===== -->
   <section class="journal-section">
     <h2 class="section-title">All Trades <span class="count-badge">{{ summary.total }}</span></h2>
@@ -634,5 +679,48 @@ document.getElementById('journal-form-wrap').style.display = '';
 document.getElementById('journal-form-wrap').scrollIntoView({behavior:'smooth'});
 previewPnl();
 {% endif %}
+
+// ── Weekly AI Review ──────────────────────────────────────────────────────────
+function loadWeeklyAiReview(weekKey) {
+  const btn     = document.getElementById('weekly-ai-btn');
+  const shimmer = document.getElementById('weekly-ai-shimmer');
+  const body    = document.getElementById('weekly-ai-body');
+  const errEl   = document.getElementById('weekly-ai-error');
+
+  btn.disabled  = true;
+  btn.textContent = 'Generating…';
+  shimmer.style.display = 'block';
+  body.style.display    = 'none';
+  errEl.style.display   = 'none';
+
+  const url = weekKey ? `/api/journal_summary?week=${encodeURIComponent(weekKey)}` : '/api/journal_summary';
+
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      shimmer.style.display = 'none';
+      btn.disabled = false;
+      btn.textContent = 'Regenerate';
+      if (data.ok && data.summary) {
+        const s = data.summary;
+        document.getElementById('wai-summary').textContent     = s.week_summary    || '';
+        document.getElementById('wai-rules').textContent       = s.rule_adherence  || '';
+        document.getElementById('wai-mistake').textContent     = s.top_mistake     || '';
+        document.getElementById('wai-improvement').textContent = s.one_improvement || '';
+        document.getElementById('wai-meta').textContent        = `Week: ${data.week_key || ''}${data.cached ? '  (cached)' : ''}`;
+        body.style.display = 'block';
+      } else {
+        errEl.textContent   = data.error || 'Review unavailable';
+        errEl.style.display = 'block';
+      }
+    })
+    .catch(err => {
+      shimmer.style.display = 'none';
+      btn.disabled = false;
+      btn.textContent = 'Retry';
+      errEl.textContent   = 'Request failed — try again';
+      errEl.style.display = 'block';
+    });
+}
 </script>
 {% endblock %}
