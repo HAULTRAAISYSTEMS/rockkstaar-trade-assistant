@@ -1978,7 +1978,7 @@ def compute_swing_status(data: dict) -> str:
             near_zone = True  # no zone price data — trust the flag
     elif in_supply and bias == "Short Bias" and current:
         if s_bot and s_top:
-            near_zone = current <= s_top * 1.03
+            near_zone = current >= s_bot * 0.97  # price approaching supply zone from below
         else:
             near_zone = True
     else:
