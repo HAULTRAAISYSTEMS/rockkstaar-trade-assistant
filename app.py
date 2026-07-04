@@ -10,7 +10,6 @@ import pathlib
 import re
 import secrets
 import threading
-import requests as _requests
 import time as _time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -6264,19 +6263,14 @@ def fundamentals_page():
 @app.route("/api/research/ask# ---------------------------------------------------------------------------
 # Nebius AI client (market Q&A)
 # ---------------------------------------------------------------------------
-try:
-    from openai import OpenAI as _OpenAI
-    _nebius_client = _OpenAI(
-        api_key=os.environ.get("NEBIUS_API_KEY"),
-        base_url="https://api.studio.nebius.ai/v1/",
-    )
-except Exception:
-    _nebius_client = None
+import anthropic as _anthropic
 
-BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
+_anthropic_client = _anthropic.Anthropic(
+    api_key=os.environ.get("ANTHROPIC_API_KEY"),
+)
 
 @app.route("/api/ask", methods=["POST"])
-@csrf.exempt
+@login_required
 def api_ask():
     try:
         data = request.get_json(force=True)
@@ -6284,57 +6278,38 @@ def api_ask():
         if not question:
             return jsonify({"error": "No question provided"}), 400
 
-        # Step 1: Brave Search
+        response = _anthropic_client.messages.create(
+            model="claude-3-5-haiku-20241022",
+            max_tokens=1024,
+            tools=[{"type": "web_search_tool", "name": "web_search"}],
+            system=(
+                "You are a concise financial market research assistant. "
+                "Search the web for current information to answer the user's question. "
+                "Be specific and factual. Keep answers under 200 words. "
+                "Include key numbers, dates, and sources when relevant."
+            ),
+            messages=[{"role": "user", "content": question}],
+        )
+
+        # Extract text answer and any web sources
+        answer_parts = []
         sources = []
-        context_text = ""
-        if BRAVE_API_KEY:
-            try:
-                brave_resp = _requests.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    headers={"Accept": "application/json", "X-Subscription-Token": BRAVE_API_KEY},
-                    params={"q": question, "count": 5, "search_lang": "en"},
-                    timeout=8,
-                )
-                if brave_resp.status_code == 200:
-                    results = brave_resp.json().get("web", {}).get("results", [])
-                    for r in results[:5]:
-                        title = r.get("title", "")
-                        snippet = r.get("description", "")
-                        url = r.get("url", "")
-                        sources.append({"title": title, "url": url})
-                        context_text += f"Source: {title}\n{snippet}\n\n"
-            except Exception:
-                pass
+        for block in response.content:
+            if hasattr(block, "text"):
+                answer_parts.append(block.text)
+            elif hasattr(block, "type") and block.type == "tool_result":
+                pass  # sources come through in text
 
-        # Step 2: Nebius answer
-        system_prompt = (
-            "You are a concise financial market assistant. "
-            "Answer the user's question using the provided search context. "
-            "Be specific, cite key facts, and keep answers under 200 words. "
-            "If the context doesn't contain enough info, say so briefly."
-        )
-        user_content = f"Question: {question}\n\nSearch context:\n{context_text or 'No web results available.'}"
-
-        if _nebius_client is None:
-            return jsonify({"error": "Nebius client not configured"}), 503
-
-        completion = _nebius_client.chat.completions.create(
-            model="meta-llama/Meta-Llama-3.1-70B-Instruct",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-            max_tokens=400,
-            temperature=0.3,
-        )
-        answer = completion.choices[0].message.content.strip()
+        answer = "\n".join(answer_parts).strip()
+        if not answer:
+            answer = "I wasn't able to find a clear answer to that question."
 
         return jsonify({"answer": answer, "sources": sources})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-", methods=["POST"])
+@app.route("/api/research/ask", methods=["POST"])
 @csrf.exempt
 def api_research_ask():
     """Call Anthropic with web_search enabled and return the answer."""
