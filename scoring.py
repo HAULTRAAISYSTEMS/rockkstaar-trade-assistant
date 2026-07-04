@@ -1923,6 +1923,10 @@ def compute_swing_status(data: dict) -> str:
     in_supply   = data.get("in_supply_zone", False)
     rvol        = data.get("rel_volume") or 0
     m15_conf    = int(data.get("m15_confirmation") or 0)
+    d_bot       = data.get("nearest_demand_bottom")
+    d_top       = data.get("nearest_demand_top")
+    s_bot       = data.get("nearest_supply_bottom")
+    s_top       = data.get("nearest_supply_top")
 
     if bias == "Avoid":
         return "WAIT"
@@ -1950,6 +1954,12 @@ def compute_swing_status(data: dict) -> str:
     if not trend_aligned:
         return "WAIT"
 
+    # Extended BELOW key levels = breakdown, not pullback.
+    if bias == "Long Bias" and pct_ema50 is not None and pct_ema50 < -10.0:
+        return "WAIT"
+    if bias == "Short Bias" and pct_ema50 is not None and pct_ema50 > 10.0:
+        return "WAIT"
+
     # ── Near key level? (2–3% proximity window) ───────────────────────────────
     _LVL = SWING_T["fib_proximity_pct"] * 1.5   # 3%
 
@@ -1961,8 +1971,18 @@ def compute_swing_status(data: dict) -> str:
                        abs(pct_ema20) <= SWING_T["pullback_ema20_pct"])
     near_ema50  = bool(pct_ema50 is not None and
                        abs(pct_ema50) <= SWING_T["pullback_ema50_pct"])
-    near_zone   = (in_demand and bias == "Long Bias") or \
-                  (in_supply and bias == "Short Bias")
+    if in_demand and bias == "Long Bias" and current:
+        if d_bot and d_top:
+            near_zone = current >= d_bot * 0.97
+        else:
+            near_zone = True  # no zone price data — trust the flag
+    elif in_supply and bias == "Short Bias" and current:
+        if s_bot and s_top:
+            near_zone = current <= s_top * 1.03
+        else:
+            near_zone = True
+    else:
+        near_zone = False
 
     near_level  = near_fib618 or near_fib50 or near_ema20 or near_ema50 or near_zone
 
@@ -2091,11 +2111,10 @@ def compute_swing_trade_plan(data: dict) -> dict:
         elif fib_50 and abs(current - fib_50) / current < 0.03:
             buf = fib_50 * 0.01
             ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
-        elif fib_618:
-            # Pre-confirm: entry zone IS the upcoming key level even if not there yet
+        elif fib_618 and current > fib_618:
             buf = fib_618 * 0.01
             ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
-        elif fib_50:
+        elif fib_50 and current > fib_50:
             buf = fib_50 * 0.01
             ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
         elif e20:
@@ -2107,6 +2126,10 @@ def compute_swing_trade_plan(data: dict) -> dict:
 
         out["entry_zone_low"]  = round(ez_lo, 2)
         out["entry_zone_high"] = round(ez_hi, 2)
+
+        # Safety: if price has already blown below the entry zone, downgrade to watching
+        if out["plan_mode"] == "pre_confirmation" and current and ez_lo and current < ez_lo * 0.97:
+            out["plan_mode"] = "watching"
 
         # ── Stop ──────────────────────────────────────────────────────────────
         if _continuation and sw_high:
