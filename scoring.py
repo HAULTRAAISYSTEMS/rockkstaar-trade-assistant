@@ -11,7 +11,7 @@ Every weight and threshold is a named constant in the *_W / *_P / *_T dicts at
 the top of each section.  Change a number there; the logic and explanation strings
 update automatically.
 
-No DB or Flask imports — pure functions only.h
+No DB or Flask imports — pure functions only.
 """
 
 import json as _json
