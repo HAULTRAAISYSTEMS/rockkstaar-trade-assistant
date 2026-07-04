@@ -834,9 +834,11 @@ def build_ai_trade_plan(stock: dict) -> dict:
     pct_ema20    = stock.get("pct_from_ema20") or 0
     in_supply    = stock.get("in_supply_zone") or False
     bos_bull     = False
+    bos_bear     = False
     try:
         sm = _json.loads(stock.get("smart_money_json") or "{}")
         bos_bull = bool(sm.get("bos_bullish"))
+        bos_bear = bool(sm.get("bos_bearish"))
     except Exception:
         pass
 
@@ -1396,7 +1398,7 @@ def compute_rr(plan_bias, entry, stop, target):
     else:
         return None, "—", "rr-neutral"
 
-    if risk <= 0 or reward < 0:
+    if risk <= 0 or reward <= 0:
         return None, "Invalid", "rr-warn"
 
     ratio = reward / risk
@@ -2765,8 +2767,9 @@ def rank_stocks(stocks: list) -> list:
         # Penalise extended/avoid statuses
         _status  = s.get("swing_status") or ""
         penalty  = -20 if _status in (
-            "WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE"
-        ) else (-5 if _status == "TREND CONTINUATION" else 0)
+            "WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE",
+            "TREND CONTINUATION"
+        ) else 0
         return primary + catalyst + rvol + penalty
 
     return sorted(stocks, key=composite, reverse=True)
