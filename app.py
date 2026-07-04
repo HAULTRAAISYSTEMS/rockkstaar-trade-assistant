@@ -767,8 +767,22 @@ def build_ai_trade_plan(stock: dict) -> dict:
         warnings.append("Low relative volume — weak institutional interest")
     if rr and rr < 1.5:
         warnings.append(f"R:R {rr:.1f}:1 is too weak — minimum 1.5:1 needed")
+    _bias_str = stock.get("trade_bias") or ""
     if pct_ema20 > 8:
         warnings.append(f"Extended {pct_ema20:.1f}% above 20 EMA — wait for pullback")
+    elif pct_ema20 < -8 and _bias_str == "Long Bias":
+        warnings.append(f"Price {abs(pct_ema20):.1f}% below 20 EMA — 20 EMA now overhead resistance")
+    # Warn when entry zone is significantly above current price for a long setup —
+    # this means the zone level was missed on the way down or is stale
+    _entry_lo = stock.get("entry_zone_low")
+    _cur_p    = stock.get("current_price") or 0
+    if _entry_lo and _cur_p and _bias_str == "Long Bias":
+        _zone_gap_pct = (_entry_lo - _cur_p) / _cur_p * 100
+        if _zone_gap_pct > 8:
+            warnings.append(
+                f"Entry zone ${_entry_lo:.2f} is {_zone_gap_pct:.0f}% above current price "
+                f"— wait for bounce to zone, do not chase"
+            )
     if swing_status == "WAIT":
         warnings.append("No confirmed entry signal — monitor for setup")
     if rs_score < 30:
@@ -2472,6 +2486,22 @@ def annotate(stock: dict, trade_mode: str | None = None) -> dict:
     # If swing_score is populated, override final_action from swing_status
     if stock.get("swing_score"):
         _sfa, _sfa_class, _sfa_reason = compute_swing_final_action(stock.get("swing_status") or "")
+        # For PRE-CONFIRMATION, build a richer reason that references the actual
+        # entry zone and uses bias-correct candle language. This prevents the
+        # message from referring to an entry zone that doesn't match the level
+        # that actually triggered PRE-CONFIRMATION status.
+        if stock.get("swing_status") == "PRE-CONFIRMATION":
+            _ez_lo = stock.get("entry_zone_low")
+            _ez_hi = stock.get("entry_zone_high")
+            _bias  = stock.get("trade_bias") or ""
+            if _ez_lo and _ez_hi:
+                _candle = "bullish" if _bias == "Long Bias" else "bearish"
+                _sfa_reason = (
+                    f"WAIT FOR TRIGGER — Price approaching entry zone "
+                    f"${_ez_lo:.2f}–${_ez_hi:.2f}. "
+                    f"Need 15m {_candle} confirmation candle + volume ≥ 1.2x avg. "
+                    f"Do not enter early."
+                )
         stock["final_action"]       = _sfa
         stock["final_action_class"] = _sfa_class
         stock["final_action_reason"]= _sfa_reason
@@ -5618,7 +5648,7 @@ def api_research_ask():
             tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
             messages=[{"role": "user", "content": question}],
         )
-        # Collect all text blocks from the response
+             # Collect all text blocks from the response
         answer_parts = []
         for block in response.content:
             if hasattr(block, "text"):

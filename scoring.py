@@ -2080,19 +2080,28 @@ def compute_swing_trade_plan(data: dict) -> dict:
         elif e20 and abs(current - e20) / e20 < 0.04:
             buf = e20 * 0.01
             ez_lo, ez_hi = round(e20 - buf, 2), round(e20 + buf, 2)
+        elif e50 and abs(current - e50) / e50 < 0.04:
+            # 50 EMA within 4% — deeper pullback to 50 EMA support
+            buf = e50 * 0.01
+            ez_lo, ez_hi = round(e50 - buf, 2), round(e50 + buf, 2)
         elif fib_618 and abs(current - fib_618) / current < 0.03:
             buf = fib_618 * 0.01
             ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
         elif fib_50 and abs(current - fib_50) / current < 0.03:
             buf = fib_50 * 0.01
             ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
-        elif fib_618:
-            # Pre-confirm: entry zone IS the upcoming key level even if not there yet
-            buf = fib_618 * 0.01
-            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
-        elif fib_50:
+        elif fib_50 and current > fib_50:
+            # Price above fib_50 (shallower level), approaching it from above
             buf = fib_50 * 0.01
             ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
+        elif fib_618 and current > fib_618:
+            # Price between fib_50 and fib_618 — approaching deeper fib level
+            buf = fib_618 * 0.01
+            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
+        elif e50:
+            # Price is below all fib levels — use 50 EMA as the current key support
+            buf = e50 * 0.01
+            ez_lo, ez_hi = round(e50 - buf, 2), round(e50 + buf, 2)
         elif e20:
             buf = e20 * 0.01
             ez_lo, ez_hi = round(e20 - buf, 2), round(e20 + buf, 2)
@@ -2148,12 +2157,28 @@ def compute_swing_trade_plan(data: dict) -> dict:
         elif e20 and abs(current - e20) / e20 < 0.04:
             buf = e20 * 0.01
             ez_lo, ez_hi = round(e20 - buf, 2), round(e20 + buf, 2)
-        elif fib_618:
-            buf = fib_618 * 0.01
-            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
-        elif fib_50:
+        elif e50 and abs(current - e50) / e50 < 0.04:
+            # 50 EMA within 4% — bounce-to-resistance short entry level
+            buf = e50 * 0.01
+            ez_lo, ez_hi = round(e50 - buf, 2), round(e50 + buf, 2)
+        elif fib_50 and abs(current - fib_50) / current < 0.03:
             buf = fib_50 * 0.01
             ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
+        elif fib_618 and abs(current - fib_618) / current < 0.03:
+            buf = fib_618 * 0.01
+            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
+        elif fib_50 and current < fib_50:
+            # Price approaching fib_50 from below (Short Bias: short into resistance)
+            buf = fib_50 * 0.01
+            ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
+        elif fib_618 and current < fib_618:
+            # Price approaching deeper fib_618 resistance from below
+            buf = fib_618 * 0.01
+            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
+        elif e50:
+            # Price above all fib levels — use 50 EMA as the current resistance reference
+            buf = e50 * 0.01
+            ez_lo, ez_hi = round(e50 - buf, 2), round(e50 + buf, 2)
         else:
             buf = current * 0.015
             ez_lo, ez_hi = round(current - buf * 0.5, 2), round(current + buf, 2)
@@ -2161,36 +2186,4 @@ def compute_swing_trade_plan(data: dict) -> dict:
         out["entry_zone_low"]  = round(ez_lo, 2)
         out["entry_zone_high"] = round(ez_hi, 2)
 
-        # ── Stop ──────────────────────────────────────────────────────────────
-        if _continuation and sw_low:
-            stop = round(sw_low * 1.025, 2)
-        elif s_top:
-            stop = round(s_top * 1.012, 2)
-        elif e20:
-            stop = round(e20 * 1.028, 2)
-        elif sw_high:
-            stop = round(sw_high * 1.01, 2)
-        else:
-            stop = round(ez_hi * 1.040, 2)
-        out["stop_level"] = stop
-
-        # ── Target 1 ──────────────────────────────────────────────────────────
-        if d_top and d_top < current:
-            t1 = round(d_top * 1.002, 2)
-        elif sw_low and not _continuation:
-            t1 = round(sw_low, 2)
-        else:
-            t1 = round(current * 0.93, 2)
-        out["target_1"] = t1
-
-        # ── Target 2 (1.5× T1 reward extension) ──────────────────────────────
-        reward_1 = ez_lo - t1
-        if reward_1 > 0:
-            out["target_2"] = round(ez_lo - reward_1 * 1.5, 2)
-
-        # ── R:R ───────────────────────────────────────────────────────────────
-        risk = stop - ez_lo
-        if risk > 0 and reward_1 > 0:
-            out["risk_reward"] = round(reward_1 / risk, 2)
-
-    return out
+        # ── Stop ──────────────────────────────────�
