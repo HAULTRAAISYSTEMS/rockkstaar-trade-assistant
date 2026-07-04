@@ -10,6 +10,7 @@ import pathlib
 import re
 import secrets
 import threading
+import requests as _requests
 import time as _time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -6260,7 +6261,80 @@ def fundamentals_page():
     return render_template("fundamentals.html", ticker=ticker, data=data, error=error)
 
 
-@app.route("/api/research/ask", methods=["POST"])
+@app.route("/api/research/ask# ---------------------------------------------------------------------------
+# Nebius AI client (market Q&A)
+# ---------------------------------------------------------------------------
+try:
+    from openai import OpenAI as _OpenAI
+    _nebius_client = _OpenAI(
+        api_key=os.environ.get("NEBIUS_API_KEY"),
+        base_url="https://api.studio.nebius.ai/v1/",
+    )
+except Exception:
+    _nebius_client = None
+
+BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
+
+@app.route("/api/ask", methods=["POST"])
+@csrf.exempt
+def api_ask():
+    try:
+        data = request.get_json(force=True)
+        question = (data.get("question") or "").strip()
+        if not question:
+            return jsonify({"error": "No question provided"}), 400
+
+        # Step 1: Brave Search
+        sources = []
+        context_text = ""
+        if BRAVE_API_KEY:
+            try:
+                brave_resp = _requests.get(
+                    "https://api.search.brave.com/res/v1/web/search",
+                    headers={"Accept": "application/json", "X-Subscription-Token": BRAVE_API_KEY},
+                    params={"q": question, "count": 5, "search_lang": "en"},
+                    timeout=8,
+                )
+                if brave_resp.status_code == 200:
+                    results = brave_resp.json().get("web", {}).get("results", [])
+                    for r in results[:5]:
+                        title = r.get("title", "")
+                        snippet = r.get("description", "")
+                        url = r.get("url", "")
+                        sources.append({"title": title, "url": url})
+                        context_text += f"Source: {title}\n{snippet}\n\n"
+            except Exception:
+                pass
+
+        # Step 2: Nebius answer
+        system_prompt = (
+            "You are a concise financial market assistant. "
+            "Answer the user's question using the provided search context. "
+            "Be specific, cite key facts, and keep answers under 200 words. "
+            "If the context doesn't contain enough info, say so briefly."
+        )
+        user_content = f"Question: {question}\n\nSearch context:\n{context_text or 'No web results available.'}"
+
+        if _nebius_client is None:
+            return jsonify({"error": "Nebius client not configured"}), 503
+
+        completion = _nebius_client.chat.completions.create(
+            model="meta-llama/Meta-Llama-3.1-70B-Instruct",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            max_tokens=400,
+            temperature=0.3,
+        )
+        answer = completion.choices[0].message.content.strip()
+
+        return jsonify({"answer": answer, "sources": sources})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+", methods=["POST"])
 @csrf.exempt
 def api_research_ask():
     """Call Anthropic with web_search enabled and return the answer."""
