@@ -1923,6 +1923,10 @@ def compute_swing_status(data: dict) -> str:
     in_supply   = data.get("in_supply_zone", False)
     rvol        = data.get("rel_volume") or 0
     m15_conf    = int(data.get("m15_confirmation") or 0)
+    d_bot       = data.get("nearest_demand_bottom")
+    d_top       = data.get("nearest_demand_top")
+    s_bot       = data.get("nearest_supply_bottom")
+    s_top       = data.get("nearest_supply_top")
 
     if bias == "Avoid":
         return "WAIT"
@@ -1946,6 +1950,14 @@ def compute_swing_status(data: dict) -> str:
         if ext_dir and abs(pct_ema20) > SWING_T["extended_heavy_pct"]:
             return "WAIT"
 
+    # Extended BELOW key levels = breakdown, not pullback. A Long Bias stock that is
+    # already >10% below the 50 EMA has broken through support — it needs to reclaim
+    # levels before a PRE-CONFIRMATION entry makes sense. Symmetric check for shorts.
+    if bias == "Long Bias" and pct_ema50 is not None and pct_ema50 < -10.0:
+        return "WAIT"
+    if bias == "Short Bias" and pct_ema50 is not None and pct_ema50 > 10.0:
+        return "WAIT"
+
     # Trend opposing — no edge
     if not trend_aligned:
         return "WAIT"
@@ -1961,8 +1973,24 @@ def compute_swing_status(data: dict) -> str:
                        abs(pct_ema20) <= SWING_T["pullback_ema20_pct"])
     near_ema50  = bool(pct_ema50 is not None and
                        abs(pct_ema50) <= SWING_T["pullback_ema50_pct"])
-    near_zone   = (in_demand and bias == "Long Bias") or \
-                  (in_supply and bias == "Short Bias")
+
+    # near_zone: the in_demand/in_supply flags can be stale (set when price was at the
+    # zone, not updated as price moves away). Verify that current price is actually
+    # within or approaching the zone boundary — not already blown through it.
+    if in_demand and bias == "Long Bias" and current:
+        if d_bot and d_top:
+            # Price must still be inside or within 3% below the demand zone bottom
+            near_zone = current >= d_bot * 0.97
+        else:
+            near_zone = True  # no zone price data — trust the flag
+    elif in_supply and bias == "Short Bias" and current:
+        if s_bot and s_top:
+            # Price must still be inside or within 3% above the supply zone top
+            near_zone = current <= s_top * 1.03
+        else:
+            near_zone = True
+    else:
+        near_zone = False
 
     near_level  = near_fib618 or near_fib50 or near_ema20 or near_ema50 or near_zone
 
@@ -2085,19 +2113,28 @@ def compute_swing_trade_plan(data: dict) -> dict:
         elif e20 and abs(current - e20) / e20 < 0.04:
             buf = e20 * 0.01
             ez_lo, ez_hi = round(e20 - buf, 2), round(e20 + buf, 2)
+        elif e50 and abs(current - e50) / e50 < 0.04:
+            # 50 EMA within 4% — deeper pullback to 50 EMA support
+            buf = e50 * 0.01
+            ez_lo, ez_hi = round(e50 - buf, 2), round(e50 + buf, 2)
         elif fib_618 and abs(current - fib_618) / current < 0.03:
             buf = fib_618 * 0.01
             ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
         elif fib_50 and abs(current - fib_50) / current < 0.03:
             buf = fib_50 * 0.01
             ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
-        elif fib_618:
-            # Pre-confirm: entry zone IS the upcoming key level even if not there yet
-            buf = fib_618 * 0.01
-            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
-        elif fib_50:
+        elif fib_50 and current > fib_50:
+            # Price above fib_50, approaching it from above
             buf = fib_50 * 0.01
             ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
+        elif fib_618 and current > fib_618:
+            # Price between fib_50 and fib_618
+            buf = fib_618 * 0.01
+            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
+        elif e50:
+            # Price below all fib levels — use 50 EMA as key support
+            buf = e50 * 0.01
+            ez_lo, ez_hi = round(e50 - buf, 2), round(e50 + buf, 2)
         elif e20:
             buf = e20 * 0.01
             ez_lo, ez_hi = round(e20 - buf, 2), round(e20 + buf, 2)
@@ -2107,6 +2144,13 @@ def compute_swing_trade_plan(data: dict) -> dict:
 
         out["entry_zone_low"]  = round(ez_lo, 2)
         out["entry_zone_high"] = round(ez_hi, 2)
+
+        # Directional guard: PRE-CONFIRMATION only makes sense when price is
+        # approaching the entry zone from above, not already extended below it.
+        # If current price is >3% below ez_lo, the stock has blown through the
+        # zone — downgrade plan_mode so the UI does not show a stale "approaching" alert.
+        if out["plan_mode"] == "pre_confirmation" and current < ez_lo * 0.97:
+            out["plan_mode"] = "watching"
 
         # ── Stop ──────────────────────────────────────────────────────────────
         if _continuation and sw_high:
@@ -2153,18 +2197,38 @@ def compute_swing_trade_plan(data: dict) -> dict:
         elif e20 and abs(current - e20) / e20 < 0.04:
             buf = e20 * 0.01
             ez_lo, ez_hi = round(e20 - buf, 2), round(e20 + buf, 2)
-        elif fib_618:
-            buf = fib_618 * 0.01
-            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
-        elif fib_50:
+        elif e50 and abs(current - e50) / e50 < 0.04:
+            # 50 EMA within 4% — bounce-to-resistance short entry
+            buf = e50 * 0.01
+            ez_lo, ez_hi = round(e50 - buf, 2), round(e50 + buf, 2)
+        elif fib_50 and abs(current - fib_50) / current < 0.03:
             buf = fib_50 * 0.01
             ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
+        elif fib_618 and abs(current - fib_618) / current < 0.03:
+            buf = fib_618 * 0.01
+            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
+        elif fib_50 and current < fib_50:
+            # Price approaching fib_50 resistance from below
+            buf = fib_50 * 0.01
+            ez_lo, ez_hi = round(fib_50 - buf, 2), round(fib_50 + buf, 2)
+        elif fib_618 and current < fib_618:
+            buf = fib_618 * 0.01
+            ez_lo, ez_hi = round(fib_618 - buf, 2), round(fib_618 + buf, 2)
+        elif e50:
+            buf = e50 * 0.01
+            ez_lo, ez_hi = round(e50 - buf, 2), round(e50 + buf, 2)
         else:
             buf = current * 0.015
             ez_lo, ez_hi = round(current - buf * 0.5, 2), round(current + buf, 2)
 
         out["entry_zone_low"]  = round(ez_lo, 2)
         out["entry_zone_high"] = round(ez_hi, 2)
+
+        # Directional guard: for shorts, price must be approaching the zone from
+        # below (not already extended above it). If price is >3% above ez_hi,
+        # the stock has blown through resistance — downgrade plan_mode.
+        if out["plan_mode"] == "pre_confirmation" and current > ez_hi * 1.03:
+            out["plan_mode"] = "watching"
 
         # ── Stop ──────────────────────────────────────────────────────────────
         if _continuation and sw_low:
@@ -2229,46 +2293,4 @@ def compute_swing_trade_plan(data: dict) -> dict:
         # For LONG: entry zone should be near or below current price.
         # If entry_zone_low is above 120% of current, it's stale short data.
         elif bias == "Long Bias" and ez_lo > current * 1.20:
-            ref = e20 if (e20 and current * 0.80 < e20 < current * 1.15) else current
-            buf = ref * 0.012
-            ez_lo = round(ref - buf, 2)
-            ez_hi = round(ref + buf, 2)
-            out["entry_zone_low"]  = ez_lo
-            out["entry_zone_high"] = ez_hi
-            out["stop_level"]      = round(ez_lo * 0.970, 2)
-            t1 = round(current * 1.07, 2)
-            out["target_1"] = t1
-            reward_1 = t1 - ez_hi
-            if reward_1 > 0:
-                out["target_2"]    = round(ez_hi + reward_1 * 1.5, 2)
-                risk = ez_hi - out["stop_level"]
-                if risk > 0:
-                    out["risk_reward"] = round(reward_1 / risk, 2)
-
-    # ── Target direction sanity checks ────────────────────────────────────────
-    # For SHORT: target must be BELOW entry zone (targets go down).
-    # For LONG:  target must be ABOVE entry zone (targets go up).
-    if out.get("target_1") and out.get("entry_zone_low"):
-        ez_lo = out["entry_zone_low"]
-        t1    = out["target_1"]
-        if bias == "Short Bias" and t1 > ez_lo:
-            # Target is above entry — was computed for a long setup, fix it
-            out["target_1"] = round(current * 0.93, 2)
-            out["target_2"] = round(current * 0.87, 2)
-            reward_1 = ez_lo - out["target_1"]
-            if reward_1 > 0 and out.get("stop_level"):
-                risk = out["stop_level"] - ez_lo
-                if risk > 0:
-                    out["risk_reward"] = round(reward_1 / risk, 2)
-        elif bias == "Long Bias" and t1 < (out.get("entry_zone_high") or ez_lo):
-            # Target is below entry — was computed for a short setup, fix it
-            out["target_1"] = round(current * 1.07, 2)
-            out["target_2"] = round(current * 1.12, 2)
-            ez_hi = out.get("entry_zone_high") or ez_lo
-            reward_1 = out["target_1"] - ez_hi
-            if reward_1 > 0 and out.get("stop_level"):
-                risk = ez_hi - out["stop_level"]
-                if risk > 0:
-                    out["risk_reward"] = round(reward_1 / risk, 2)
-
-    return out
+         
