@@ -11,7 +11,7 @@ Every weight and threshold is a named constant in the *_W / *_P / *_T dicts at
 the top of each section.  Change a number there; the logic and explanation strings
 update automatically.
 
-No DB or Flask imports — pure functions only.
+No DB or Flask imports — pure functions only.h
 """
 
 import json as _json
@@ -1973,12 +1973,12 @@ def compute_swing_status(data: dict) -> str:
                        abs(pct_ema50) <= SWING_T["pullback_ema50_pct"])
     if in_demand and bias == "Long Bias" and current:
         if d_bot and d_top:
-            near_zone = current >= d_bot * 0.97
+            near_zone = d_bot * 0.94 <= current <= d_top * 1.06
         else:
             near_zone = True  # no zone price data — trust the flag
     elif in_supply and bias == "Short Bias" and current:
         if s_bot and s_top:
-            near_zone = current >= s_bot * 0.97  # price approaching supply zone from below
+            near_zone = s_bot * 0.94 <= current <= s_top * 1.06
         else:
             near_zone = True
     else:
@@ -2074,6 +2074,7 @@ def compute_swing_trade_plan(data: dict) -> dict:
         e20 and abs(current - e20) / e20 * 100 <= SWING_T["pullback_ema20_pct"],
         e50 and abs(current - e50) / e50 * 100 <= SWING_T["pullback_ema50_pct"],
         bool(d_bot and d_top and abs(current - d_top) / current < 0.06),
+    bool(s_bot and s_top and abs(current - s_bot) / current < 0.06),
     ])
     _trend_bull = daily_trend in ("Bullish", "Bullish Lean")
     _trend_bear = daily_trend in ("Bearish", "Bearish Lean")
@@ -2214,7 +2215,7 @@ def compute_swing_trade_plan(data: dict) -> dict:
         # ── Target 2 (1.5× T1 reward extension) ──────────────────────────────
         reward_1 = ez_lo - t1
         if reward_1 > 0:
-            out["target_2"] = round(ez_lo - reward_1 * 1.5, 2)
+            out["target_2"] = max(0.01, round(ez_lo - reward_1 * 1.5, 2))
 
         # ── R:R ───────────────────────────────────────────────────────────────
         risk = stop - ez_lo
