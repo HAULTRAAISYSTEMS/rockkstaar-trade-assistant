@@ -3,7 +3,7 @@ app.py - Rockkstaar Trade Assistant
 Flask web app for premarket stock watchlist scanning.
 """
 
-import json as _json
+import json as _jsonh
 import logging
 import os
 import pathlib
@@ -11,7 +11,7 @@ import re
 import secrets
 import threading
 import time as _time
-from collections import defaultdict
+from collections import defaultdicth
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, Response, send_from_directory
@@ -6260,7 +6260,7 @@ def fundamentals_page():
     return render_template("fundamentals.html", ticker=ticker, data=data, error=error)
 
 
-@app.route("/api/research/ask# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Nebius AI client (market Q&A)
 # ---------------------------------------------------------------------------
 import anthropic as _anthropic
