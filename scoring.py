@@ -2186,4 +2186,36 @@ def compute_swing_trade_plan(data: dict) -> dict:
         out["entry_zone_low"]  = round(ez_lo, 2)
         out["entry_zone_high"] = round(ez_hi, 2)
 
-        # ── Stop ──────────────────────────────────�
+        # ── Stop ──────────────────────────────────────────────────────────────────────────────
+        if _continuation and sw_low:
+            stop = round(sw_low * 1.025, 2)
+        elif s_top:
+            stop = round(s_top * 1.012, 2)
+        elif e20:
+            stop = round(e20 * 1.028, 2)
+        elif sw_high:
+            stop = round(sw_high * 1.01, 2)
+        else:
+            stop = round(ez_hi * 1.040, 2)
+        out["stop_level"] = stop
+
+        # ── Target 1 ─────────────────────────────────────────────────────────────────────
+        if d_top and d_top < current:
+            t1 = round(d_top * 1.002, 2)
+        elif sw_low and not _continuation:
+            t1 = round(sw_low, 2)
+        else:
+            t1 = round(current * 0.93, 2)
+        out["target_1"] = t1
+
+        # ── Target 2 (1.5× T1 reward extension) ────────────────────────────────────────
+        reward_1 = ez_lo - t1
+        if reward_1 > 0:
+            out["target_2"] = round(ez_lo - reward_1 * 1.5, 2)
+
+        # ── R:R ────────────────────────────────────────────────────────────────────────
+        risk = stop - ez_lo
+        if risk > 0 and reward_1 > 0:
+            out["risk_reward"] = round(reward_1 / risk, 2)
+
+    return out
