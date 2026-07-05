@@ -224,7 +224,7 @@
   transition: box-shadow 0.2s, bottom 0.2s;
 " onmouseover="this.style.boxShadow='0 6px 28px rgba(0,212,255,0.7)';this.style.bottom='28px'"
    onmouseout="this.style.boxShadow='0 4px 20px rgba(0,212,255,0.4)';this.style.bottom='24px'">
-  🔍 Ask AI
+  🔍 Ask HAULTRA AI
 </button>
 
 <!-- ===== ASK AI MODAL ===== -->
@@ -243,14 +243,14 @@
   z-index:10000; display:none; flex-direction:column; gap:16px;">
 
   <div style="display:flex;align-items:center;justify-content:space-between;">
-    <span style="color:#00d4ff;font-size:17px;font-weight:700;letter-spacing:0.5px;">🔍 Ask AI</span>
+    <span style="color:#00d4ff;font-size:17px;font-weight:700;letter-spacing:0.5px;">🔍 Ask HAULTRA AI</span>
     <button onclick="closeAsk()" style="
       background:none;border:none;color:#6b8099;cursor:pointer;
       font-size:22px;line-height:1;padding:2px 6px;" title="Close (Esc)">&times;</button>
   </div>
 
   <div style="display:flex;gap:10px;">
-    <input id="ask-input" type="text" placeholder="Ask about any ticker, market setup, or trade idea…"
+    <input id="ask-input" type="text" placeholder="Ask about earnings dates, trade setups, tickers…"
       onkeydown="if(event.key==='Enter')submitAsk()"
       style="flex:1;background:#0d1620;border:1px solid #1e3a5f;border-radius:10px;
              color:#e2e8f0;font-size:14px;padding:11px 16px;outline:none;" />

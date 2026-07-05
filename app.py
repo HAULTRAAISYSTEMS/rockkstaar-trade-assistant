@@ -3,7 +3,7 @@ app.py - Rockkstaar Trade Assistant
 Flask web app for premarket stock watchlist scanning.
 """
 
-import json as _jsonh
+import json as _json
 import logging
 import os
 import pathlib
@@ -1398,7 +1398,7 @@ def compute_rr(plan_bias, entry, stop, target):
     else:
         return None, "—", "rr-neutral"
 
-    if risk <= 0 or reward <= 0:
+    if risk <= 0 or reward < 0:
         return None, "Invalid", "rr-warn"
 
     ratio = reward / risk
@@ -2767,9 +2767,8 @@ def rank_stocks(stocks: list) -> list:
         # Penalise extended/avoid statuses
         _status  = s.get("swing_status") or ""
         penalty  = -20 if _status in (
-            "WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE",
-            "TREND CONTINUATION"
-        ) else 0
+            "WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE"
+        ) else (-5 if _status == "TREND CONTINUATION" else 0)
         return primary + catalyst + rvol + penalty
 
     return sorted(stocks, key=composite, reverse=True)
@@ -6260,43 +6259,6 @@ def fundamentals_page():
     return render_template("fundamentals.html", ticker=ticker, data=data, error=error)
 
 
-# ---------------------------------------------------------------------------
-# Nebius AI client (market Q&A)
-# ---------------------------------------------------------------------------
-from openai import OpenAI as _OpenAI
-
-_nebius_qa_client = _OpenAI(
-    api_key=os.environ.get("NEBIUS_API_KEY"),
-    base_url="https://api.tokenfactory.nebius.com/v1/",
-)
-
-@app.route("/api/ask", methods=["POST"])
-@csrf.exempt
-def api_ask():
-    data = request.get_json(force=True)
-    question = (data.get("question") or "").strip()
-    if not question:
-        return jsonify({"error": "No question provided"}), 400
-    try:
-        resp = _nebius_qa_client.chat.completions.create(
-            model="meta-llama/Llama-3.3-70B-Instruct",
-            max_tokens=1024,
-            messages=[
-                {"role": "system", "content": (
-                    "You are a concise financial market research assistant. "
-                    "Answer questions about stocks, companies, market trends, and financial concepts. "
-                    "Be direct and factual. Use bullet points for lists. "
-                    "Keep answers under 300 words unless more detail is needed."
-                )},
-                {"role": "user", "content": question},
-            ],
-        )
-        answer = resp.choices[0].message.content or "No answer available."
-        return jsonify({"answer": answer, "sources": []})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route("/api/research/ask", methods=["POST"])
 @csrf.exempt
 def api_research_ask():
@@ -6329,6 +6291,78 @@ def api_research_ask():
     except Exception as exc:
         logger.exception("Research ask error")
         return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+# ── HAULTRA AI — general Q&A with earnings context ─────────────────────────
+@app.route("/api/ask", methods=["POST"])
+@csrf.exempt
+def api_ask():
+    """HAULTRA AI: answers trading questions using Nebius + live earnings data."""
+    from openai import OpenAI as _OpenAI
+    import datetime as _dt
+
+    data     = request.get_json(force=True, silent=True) or {}
+    question = (data.get("question") or "").strip()
+    if not question:
+        return jsonify({"answer": "No question provided."}), 400
+
+    # ── Build earnings context from live calendar ──────────────────────────
+    try:
+        from intel_engine import fetch_earnings_calendar as _fetch_earn
+        cal   = _fetch_earn()
+        today = _dt.date.today()
+
+        def _fmt_bucket(items: list) -> str:
+            if not items:
+                return "  (none)"
+            lines = []
+            for e in items:
+                name = e.get("company_name") or e.get("ticker")
+                date = e.get("date", "?")
+                time = e.get("time_label", "TBD")
+                days = e.get("days_away", "?")
+                lines.append(f"  • {e['ticker']} ({name}) — {date} {time} ({days}d away)")
+            return "\n".join(lines)
+
+        earn_ctx = (
+            f"TODAY IS: {today.strftime('%A, %B %d, %Y')}\n\n"
+            f"UPCOMING EARNINGS CALENDAR (next 21 days):\n"
+            f"TODAY:\n{_fmt_bucket(cal.get('today', []))}\n"
+            f"TOMORROW:\n{_fmt_bucket(cal.get('tomorrow', []))}\n"
+            f"THIS WEEK:\n{_fmt_bucket(cal.get('this_week', []))}\n"
+            f"NEXT 3 WEEKS:\n{_fmt_bucket(cal.get('coming_up', []))}\n"
+        )
+    except Exception:
+        import datetime as _dt2
+        earn_ctx = f"TODAY IS: {_dt2.date.today().strftime('%A, %B %d, %Y')}\n(Earnings data unavailable)"
+
+    system_prompt = (
+        "You are HAULTRA AI — a sharp, concise trading assistant built for Rockkstaar's swing trading system. "
+        "You have live access to the earnings calendar shown below. When asked about earnings dates, "
+        "answer with the exact ticker, company name, date, and time (BMO=before market open, AMC=after market close). "
+        "For trade analysis questions, use technical reasoning: EMAs, VWAP, structure, volume, R/R. "
+        "Be direct, confident, and specific. No generic disclaimers. Keep answers under 200 words unless a deep dive is requested.\n\n"
+        + earn_ctx
+    )
+
+    try:
+        client = _OpenAI(
+            base_url="https://api.tokenfactory.nebius.com/v1/",
+            api_key=os.environ.get("NEBIUS_API_KEY"),
+        )
+        resp = client.chat.completions.create(
+            model="meta-llama/Llama-3.3-70B-Instruct",
+            max_tokens=512,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": question},
+            ],
+        )
+        answer = (resp.choices[0].message.content or "").strip() or "No response."
+        return jsonify({"answer": answer})
+    except Exception as exc:
+        logger.exception("HAULTRA AI ask error")
+        return jsonify({"answer": f"Error: {exc}"}), 500
 
 
 @app.route("/api/study-log", methods=["GET"])
