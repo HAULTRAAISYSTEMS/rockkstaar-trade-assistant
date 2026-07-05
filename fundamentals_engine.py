@@ -1066,8 +1066,8 @@ def score_fundamentals(raw: dict) -> dict:
         return src_map.get(key, "annual")
 
     # ── Pre-compute helper values ─────────────────────────────────────────────
-    cr0 = (v(raw["current_assets"]) / v(raw["current_liabilities"])
-           if v(raw["current_assets"]) and v(raw["current_liabilities"]) and v(raw["current_liabilities"]) != 0
+    cr0 = (v(raw.get("current_assets", [])) / v(raw.get("current_liabilities", []))
+           if v(raw.get("current_assets", [])) and v(raw.get("current_liabilities", [])) and v(raw.get("current_liabilities", [])) != 0
            else None)
     cr0_source = "annual"
     cr0_period = "Annual"
@@ -1078,8 +1078,8 @@ def score_fundamentals(raw: dict) -> dict:
         cr0_source = "finnhub_metric"
         cr0_period = "Quarterly (latest)"
 
-    total_equity = v(raw["total_equity"])
-    total_debt   = v(raw["total_debt"])
+    total_equity = v(raw.get("total_equity", []))
+    total_debt   = v(raw.get("total_debt", []))
     de_ratio = (total_debt / total_equity
                 if total_debt is not None and total_equity and total_equity != 0
                 else None)
@@ -1092,25 +1092,25 @@ def score_fundamentals(raw: dict) -> dict:
         de_source = "finnhub_metric"
         de_period = "Quarterly (latest)"
 
-    cash0 = v(raw["cash"])
+    cash0 = v(raw.get("cash", []))
     cash_covers_debt = (cash0 >= total_debt if cash0 is not None and total_debt is not None else None)
 
     # Retained earnings growing?
-    re_vals = [v(raw["retained_earnings"], i) for i in range(min(4, len(raw["retained_earnings"])))]
+    re_vals = [v(raw.get("retained_earnings", []), i) for i in range(min(4, len(raw.get("retained_earnings", []))))]
     re_growing = None
     if len([x for x in re_vals if x is not None]) >= 2:
         valid_re = [(i, x) for i, x in enumerate(re_vals) if x is not None]
         re_growing = all(valid_re[i][1] > valid_re[i+1][1] for i in range(len(valid_re)-1))
 
     # Goodwill ratio
-    gw0 = v(raw["goodwill"]) or 0
-    ia0 = v(raw["intangible_assets"]) or 0
-    ta0 = v(raw["total_assets"])
+    gw0 = v(raw.get("goodwill", [])) or 0
+    ia0 = v(raw.get("intangible_assets", [])) or 0
+    ta0 = v(raw.get("total_assets", []))
     gw_ratio = ((gw0 + ia0) / ta0 if ta0 and ta0 != 0 else None)
     gw_ok = (gw_ratio < 0.30 if gw_ratio is not None else None)
 
     # Revenue growth 3+ consecutive years
-    rev_vals = [v(raw["revenue"], i) for i in range(min(4, len(raw["revenue"])))]
+    rev_vals = [v(raw.get("revenue", []), i) for i in range(min(4, len(raw.get("revenue", []))))]
     valid_rev = [(i, x) for i, x in enumerate(rev_vals) if x is not None]
     rev_growth = None
     if len(valid_rev) >= 3:
@@ -1131,9 +1131,9 @@ def score_fundamentals(raw: dict) -> dict:
                 margins.append(None)
         return margins
 
-    gm_series = _margin(raw["gross_profit"], raw["revenue"])
-    om_series = _margin(raw["operating_income"], raw["revenue"])
-    nm_series = _margin(raw["net_income"], raw["revenue"])
+    gm_series = _margin(raw.get("gross_profit", []), raw.get("revenue", []))
+    om_series = _margin(raw.get("operating_income", []), raw.get("revenue", []))
+    nm_series = _margin(raw.get("net_income", []), raw.get("revenue", []))
 
     # ── TTM margin injection: replace position-0 with TTM scalars ─────────────
     # This is the core fix: annual FY snapshots at [0] may lag a TTM recovery.
@@ -1175,7 +1175,7 @@ def score_fundamentals(raw: dict) -> dict:
     nm_positive = (
         nm_series[0] is not None and nm_series[0] > 0
         if nm_series and nm_series[0] is not None
-        else (v(raw["net_income"], 0) is not None and v(raw["net_income"], 0) > 0)
+        else (v(raw.get("net_income", []), 0) is not None and v(raw.get("net_income", []), 0) > 0)
     )
     nm_ok = (nm_positive and _margin_ok(nm_series, abs_threshold=0.05)) if nm_positive else (False if nm_positive is False else None)
 
@@ -1494,9 +1494,9 @@ def score_fundamentals(raw: dict) -> dict:
             "label": RED_FLAG_DEFS["income_positive_fcf_negative"],
         })
     # Debt growing faster than revenue
-    if len(raw["total_debt"]) >= 2 and len(raw["revenue"]) >= 2:
-        debt_chg = _pct_change(v(raw["total_debt"], 0), v(raw["total_debt"], 1))
-        rev_chg  = _pct_change(v(raw["revenue"], 0),    v(raw["revenue"], 1))
+    if len(raw.get("total_debt", [])) >= 2 and len(raw.get("revenue", [])) >= 2:
+        debt_chg = _pct_change(v(raw.get("total_debt", []), 0), v(raw.get("total_debt", []), 1))
+        rev_chg  = _pct_change(v(raw.get("revenue", []), 0),    v(raw.get("revenue", []), 1))
         if debt_chg is not None and rev_chg is not None and debt_chg > rev_chg and debt_chg > 0.05:
             red_flags.append({
                 "key": "debt_growing_faster_than_revenue",
