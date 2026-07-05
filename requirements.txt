@@ -8,7 +8,7 @@ requests>=2.31.0
 pandas>=2.0.0
 numpy>=1.24.0
 tzdata>=2024.1
-anthropic>=0.25.0
+anthropic>=0.40.0
 openai>=1.30.0
 # Optional: set POLYGON_API_KEY env var to use Polygon.io as primary data source
 # polygon-api-client>=1.12.0
