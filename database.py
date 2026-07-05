@@ -706,6 +706,28 @@ def init_db():
         )
     """))
 
+    # Finnhub /stock/metric TTM cache — one row per (ticker, date), 24-hr TTL
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS finnhub_metrics_cache (
+            ticker     TEXT NOT NULL,
+            date       TEXT NOT NULL,
+            json_data  TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (ticker, date)
+        )
+    """))
+
+    # Finnhub /stock/financials-reported quarterly cache — one row per (ticker, date), 24-hr TTL
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS finnhub_financials_cache (
+            ticker     TEXT NOT NULL,
+            date       TEXT NOT NULL,
+            json_data  TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (ticker, date)
+        )
+    """))
+
     # AI Briefings cache — stores daily Nebius AI morning briefing, one row per date
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS ai_briefings (
@@ -2756,6 +2778,88 @@ def save_earnings_digest(date: str, data: dict) -> None:
         "INSERT INTO earnings_digests (date, json_response, created_at) VALUES (?, ?, ?) "
         "ON CONFLICT(date) DO UPDATE SET json_response = excluded.json_response, created_at = excluded.created_at",
         (date, _json.dumps(data), datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Finnhub TTM metrics cache  (/stock/metric)
+# ---------------------------------------------------------------------------
+
+def get_finnhub_metrics_cache(ticker: str) -> dict | None:
+    """Return cached /stock/metric data for today, or None if not found / expired."""
+    import json as _json
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = get_db()
+    row = conn.execute(
+        "SELECT json_data, created_at FROM finnhub_metrics_cache WHERE ticker = ? AND date = ?",
+        (ticker.upper(), today),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    try:
+        fetched = datetime.fromisoformat(row["created_at"])
+        age_hours = (datetime.now() - fetched).total_seconds() / 3600
+        if age_hours > 24:
+            return None
+        return _json.loads(row["json_data"])
+    except Exception:
+        return None
+
+
+def save_finnhub_metrics_cache(ticker: str, data: dict) -> None:
+    """Upsert Finnhub /stock/metric data for today."""
+    import json as _json
+    today = datetime.now().strftime("%Y-%m-%d")
+    now_iso = datetime.now().isoformat()
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO finnhub_metrics_cache (ticker, date, json_data, created_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(ticker, date) DO UPDATE SET json_data = excluded.json_data, created_at = excluded.created_at",
+        (ticker.upper(), today, _json.dumps(data), now_iso),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Finnhub quarterly financials cache  (/stock/financials-reported)
+# ---------------------------------------------------------------------------
+
+def get_finnhub_financials_cache(ticker: str) -> list | None:
+    """Return cached /stock/financials-reported data for today, or None if not found / expired."""
+    import json as _json
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = get_db()
+    row = conn.execute(
+        "SELECT json_data, created_at FROM finnhub_financials_cache WHERE ticker = ? AND date = ?",
+        (ticker.upper(), today),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    try:
+        fetched = datetime.fromisoformat(row["created_at"])
+        age_hours = (datetime.now() - fetched).total_seconds() / 3600
+        if age_hours > 24:
+            return None
+        return _json.loads(row["json_data"])
+    except Exception:
+        return None
+
+
+def save_finnhub_financials_cache(ticker: str, data: list) -> None:
+    """Upsert Finnhub /stock/financials-reported data for today."""
+    import json as _json
+    today = datetime.now().strftime("%Y-%m-%d")
+    now_iso = datetime.now().isoformat()
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO finnhub_financials_cache (ticker, date, json_data, created_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(ticker, date) DO UPDATE SET json_data = excluded.json_data, created_at = excluded.created_at",
+        (ticker.upper(), today, _json.dumps(data), now_iso),
     )
     conn.commit()
     conn.close()

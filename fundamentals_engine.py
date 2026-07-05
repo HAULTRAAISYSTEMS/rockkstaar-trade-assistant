@@ -1016,7 +1016,16 @@ def _score_check(condition: bool | None, points: int) -> tuple[int, int, bool | 
 def score_fundamentals(raw: dict) -> dict:
     """
     Score a raw fundamentals dict and return a structured scorecard.
-    Returns dict with sections, total_score, max_possible, verdict, red_flags, etc.
+
+    When raw["_ttm_metrics"] is populated (by finnhub_ttm.build_fundamentals_data),
+    TTM/quarterly values are preferred over annual snapshots:
+      - Gross / operating / net margin trend: TTM value replaces position-0 in series
+      - Current ratio, D/E ratio: quarterly values from Finnhub override balance-sheet calc
+      - FCF: TTM FCF (from Finnhub metric or computed from quarterly) overrides annual FCF
+      - ROE / ROIC: TTM values already injected into raw["roe"] / raw["roic"] by build_fundamentals_data
+
+    Returns dict with sections, total_score, max_possible, verdict, red_flags,
+    partial_score, scored_metrics, total_metrics, and per-metric metadata.
     """
 
     def v(lst, i=0):
@@ -1027,16 +1036,56 @@ def score_fundamentals(raw: dict) -> dict:
         except (IndexError, TypeError):
             return None
 
+    # ── Extract TTM overlay ───────────────────────────────────────────────────
+    ttm = raw.get("_ttm_metrics", {}) or {}
+
+    def _ttm_period_label(key: str) -> str:
+        """Return the period label for a metric key given the TTM source."""
+        if ttm.get(key) is not None:
+            period = ttm.get("period_end") or "TTM"
+            return f"TTM (ends {period})" if period else "TTM"
+        return "Annual"
+
+    def _ttm_source(key: str) -> str:
+        """Return the source endpoint string for a given TTM metric key."""
+        src_map = {
+            "gross_margin_ttm":     "finnhub_metric",
+            "operating_margin_ttm": "finnhub_metric",
+            "net_margin_ttm":       "finnhub_metric",
+            "roe_ttm":              "finnhub_metric",
+            "roi_ttm":              "finnhub_metric",
+            "current_ratio_q":      "finnhub_metric",
+            "de_ratio_q":           "finnhub_metric",
+            "fcf_ttm_usd":          ttm.get("sources", {}).get("fcf", "annual"),
+        }
+        return src_map.get(key, "annual")
+
     # ── Pre-compute helper values ─────────────────────────────────────────────
     cr0 = (v(raw["current_assets"]) / v(raw["current_liabilities"])
            if v(raw["current_assets"]) and v(raw["current_liabilities"]) and v(raw["current_liabilities"]) != 0
            else None)
+    cr0_source = "annual"
+    cr0_period = "Annual"
+
+    # Prefer Finnhub quarterly current ratio
+    if ttm.get("current_ratio_q") is not None:
+        cr0 = ttm["current_ratio_q"]
+        cr0_source = "finnhub_metric"
+        cr0_period = "Quarterly (latest)"
 
     total_equity = v(raw["total_equity"])
     total_debt   = v(raw["total_debt"])
     de_ratio = (total_debt / total_equity
                 if total_debt is not None and total_equity and total_equity != 0
                 else None)
+    de_source = "annual"
+    de_period = "Annual"
+
+    # Prefer Finnhub quarterly D/E ratio
+    if ttm.get("de_ratio_q") is not None:
+        de_ratio = ttm["de_ratio_q"]
+        de_source = "finnhub_metric"
+        de_period = "Quarterly (latest)"
 
     cash0 = v(raw["cash"])
     cash_covers_debt = (cash0 >= total_debt if cash0 is not None and total_debt is not None else None)
@@ -1077,6 +1126,26 @@ def score_fundamentals(raw: dict) -> dict:
     om_series = _margin(raw["operating_income"], raw["revenue"])
     nm_series = _margin(raw["net_income"], raw["revenue"])
 
+    # ── TTM margin injection: replace position-0 with TTM scalars ─────────────
+    # This is the core fix: annual FY snapshots at [0] may lag a TTM recovery.
+    # Injecting the TTM margin as the "most-recent" point makes _trending_up()
+    # correctly compare TTM vs the oldest annual snapshot.
+    gm_source = "annual"
+    om_source = "annual"
+    nm_source = "annual"
+
+    if ttm.get("gross_margin_ttm") is not None:
+        gm_series = [ttm["gross_margin_ttm"]] + list(gm_series[1:])
+        gm_source = "finnhub_metric"
+
+    if ttm.get("operating_margin_ttm") is not None:
+        om_series = [ttm["operating_margin_ttm"]] + list(om_series[1:])
+        om_source = "finnhub_metric"
+
+    if ttm.get("net_margin_ttm") is not None:
+        nm_series = [ttm["net_margin_ttm"]] + list(nm_series[1:])
+        nm_source = "finnhub_metric"
+
     def _trending_up(series):
         valid = [(i, x) for i, x in enumerate(series) if x is not None]
         if len(valid) < 2:
@@ -1085,46 +1154,60 @@ def score_fundamentals(raw: dict) -> dict:
 
     gm_ok = _trending_up(gm_series)
     om_ok = _trending_up(om_series)
-    nm_positive = (v(raw["net_income"]) is not None and v(raw["net_income"], 0) is not None
-                   and v(raw["net_income"], 0) > 0)
+    nm_positive = (
+        nm_series[0] is not None and nm_series[0] > 0
+        if nm_series and nm_series[0] is not None
+        else (v(raw["net_income"], 0) is not None and v(raw["net_income"], 0) > 0)
+    )
     nm_ok = (nm_positive and _trending_up(nm_series)) if nm_positive else (False if nm_positive is False else None)
 
-    # EPS growing
-    eps_vals = raw["diluted_eps"]
+    # EPS growing — use TTM EPS growth if available
+    eps_vals = raw.get("diluted_eps", [])
     eps_growing = None
-    if len([x for x in eps_vals if x is not None]) >= 2:
+    eps_source = "annual"
+    ttm_eps_growth = ttm.get("eps_growth_ttm_yoy")  # percentage, e.g. 15.4
+    if ttm_eps_growth is not None:
+        eps_growing = ttm_eps_growth > 0
+        eps_source = "finnhub_metric"
+    elif len([x for x in eps_vals if x is not None]) >= 2:
         valid_eps = [(i, x) for i, x in enumerate(eps_vals) if x is not None]
         eps_growing = (valid_eps[0][1] > valid_eps[-1][1]) if valid_eps else None
 
-    # FCF
-    fcf0 = v(raw["free_cash_flow"])
-    ni0  = v(raw["net_income"])
-    ocf0 = v(raw["operating_cash_flow"])
+    # FCF — prefer TTM FCF over annual snapshot
+    fcf0 = v(raw.get("free_cash_flow", []))
+    fcf_source = "annual"
+    if ttm.get("fcf_ttm_usd") is not None:
+        fcf0 = ttm["fcf_ttm_usd"]
+        fcf_source = ttm.get("sources", {}).get("fcf", "finnhub_metric")
+
+    ni0  = v(raw.get("net_income", []))
+    ocf0 = v(raw.get("operating_cash_flow", []))
 
     fcf_positive = (fcf0 > 0 if fcf0 is not None else None)
     fcf_ge_ni    = ((fcf0 >= ni0) if fcf0 is not None and ni0 is not None else None)
 
-    ocf_vals = [v(raw["operating_cash_flow"], i) for i in range(min(4, len(raw["operating_cash_flow"])))]
+    ocf_vals = [v(raw.get("operating_cash_flow", []), i) for i in range(min(4, len(raw.get("operating_cash_flow", []))))]
     ocf_growing = _trending_up(ocf_vals) if len([x for x in ocf_vals if x is not None]) >= 2 else None
 
     # CapEx ratio
-    capex0  = v(raw["capex"])
-    rev0    = v(raw["revenue"])
+    capex0  = v(raw.get("capex", []))
+    rev0    = v(raw.get("revenue", []))
     capex_ratio = (capex0 / rev0 if capex0 is not None and rev0 and rev0 != 0 else None)
     capex_ok    = (capex_ratio <= 0.10 if capex_ratio is not None else None)
 
     # Debt financing check — positive and large financing CF is a warning
-    fin_cf0 = v(raw["financing_cash_flow"])
+    fin_cf0 = v(raw.get("financing_cash_flow", []))
     not_debt_reliant = None
     if fin_cf0 is not None and ocf0 is not None and ocf0 != 0:
-        # If financing CF is large positive relative to OCF, flag it
         not_debt_reliant = not (fin_cf0 > 0 and fin_cf0 > abs(ocf0) * 0.5)
 
-    # Quality metrics
+    # Quality metrics (ROE / ROIC already injected into raw by build_fundamentals_data)
     roe  = raw.get("roe")
     roic = raw.get("roic")
     roe_ok  = (roe  > 15 if roe  is not None else None)
     roic_ok = (roic > 10 if roic is not None else None)
+    roe_source  = "finnhub_metric" if ttm.get("roe_ttm") is not None else "annual"
+    roic_source = "finnhub_metric" if ttm.get("roi_ttm") is not None else "annual"
 
     insider_pct = raw.get("insider_pct")
     insider_ok  = (insider_pct is not None)  # 2pts if data exists at all
@@ -1132,11 +1215,13 @@ def score_fundamentals(raw: dict) -> dict:
     # ── Score each section ────────────────────────────────────────────────────
 
     sections = []
-    total_earned = 0
+    total_earned   = 0
     total_possible = 0
+    total_metrics_count  = 0
+    scored_metrics_count = 0
 
     def add_section(name: str, metrics: list[dict]) -> None:
-        nonlocal total_earned, total_possible
+        nonlocal total_earned, total_possible, total_metrics_count, scored_metrics_count
         sec_earned = 0
         sec_possible = 0
         rows = []
@@ -1144,6 +1229,9 @@ def score_fundamentals(raw: dict) -> dict:
             earned, avail, passed = _score_check(m["condition"], m["points"])
             sec_earned   += earned
             sec_possible += avail
+            total_metrics_count += 1
+            if passed is not None:
+                scored_metrics_count += 1
             rows.append({
                 "key":     m["key"],
                 "label":   m["label"],
@@ -1153,6 +1241,7 @@ def score_fundamentals(raw: dict) -> dict:
                 "avail":   avail,
                 "passed":  passed,       # True/False/None(missing)
                 "edu":     EDUCATION.get(m["key"], {}),
+                "metadata": m.get("metadata", {}),  # TTM provenance data
             })
         total_earned   += sec_earned
         total_possible += sec_possible
@@ -1178,6 +1267,24 @@ def score_fundamentals(raw: dict) -> dict:
             return "N/A"
         return f"{val*100:.1f}%"
 
+    # Helper: build standard metadata dict for a metric
+    def _meta(key: str, source: str = "annual", period: str = "Annual",
+              gated: bool = False) -> dict:
+        div = raw.get("_ttm_validation", {}).get(key, {})
+        return {
+            "period_label":          period,
+            "source_endpoint":       source,
+            "computed_or_reported": "reported" if source.startswith("finnhub") else "computed",
+            "gated":                 gated,
+            "divergence_warning":    div.get("divergence_warning", False) if div else False,
+            "divergence_pct":        div.get("divergence_pct") if div else None,
+        }
+
+    _ttm_period = (
+        f"TTM (ends {ttm.get('period_end')})" if ttm.get("period_end")
+        else "TTM"
+    )
+
     # ── Section 1: Balance Sheet ──────────────────────────────────────────────
     add_section("Balance Sheet", [
         {
@@ -1186,6 +1293,7 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": (cr0 >= 1.5 if cr0 is not None else None),
             "points": 2,
             "display_value": f"{cr0:.2f}" if cr0 is not None else "N/A",
+            "metadata": _meta("current_ratio_q", cr0_source, cr0_period),
         },
         {
             "key": "debt_to_equity",
@@ -1193,6 +1301,7 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": (de_ratio < 1.0 if de_ratio is not None else None),
             "points": 2,
             "display_value": f"{de_ratio:.2f}" if de_ratio is not None else "N/A",
+            "metadata": _meta("de_ratio_q", de_source, de_period),
         },
         {
             "key": "cash_covers_debt",
@@ -1201,13 +1310,15 @@ def score_fundamentals(raw: dict) -> dict:
             "points": 2,
             "display_value": (f"{_fmt(cash0)} vs {_fmt(total_debt)} debt"
                               if cash0 is not None and total_debt is not None else "N/A"),
+            "metadata": _meta("cash_covers_debt"),
         },
         {
             "key": "retained_earnings_growth",
             "label": "Retained earnings growing (3–5 yr)",
             "condition": re_growing,
             "points": 2,
-            "display_value": _fmt(v(raw["retained_earnings"])),
+            "display_value": _fmt(v(raw.get("retained_earnings", []))),
+            "metadata": _meta("retained_earnings_growth"),
         },
         {
             "key": "goodwill_ratio",
@@ -1215,6 +1326,7 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": gw_ok,
             "points": 2,
             "display_value": f"{gw_ratio*100:.1f}%" if gw_ratio is not None else "N/A",
+            "metadata": _meta("goodwill_ratio"),
         },
     ])
 
@@ -1225,7 +1337,8 @@ def score_fundamentals(raw: dict) -> dict:
             "label": "Revenue growing 3+ consecutive years",
             "condition": rev_growth,
             "points": 2,
-            "display_value": _fmt(v(raw["revenue"])),
+            "display_value": _fmt(v(raw.get("revenue", []))),
+            "metadata": _meta("revenue_growth"),
         },
         {
             "key": "gross_margin",
@@ -1233,6 +1346,8 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": gm_ok,
             "points": 2,
             "display_value": _pct_fmt(gm_series[0]) if gm_series and gm_series[0] is not None else "N/A",
+            "metadata": _meta("gross_margin_ttm", gm_source,
+                               _ttm_period if gm_source == "finnhub_metric" else "Annual"),
         },
         {
             "key": "operating_margin",
@@ -1240,6 +1355,8 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": om_ok,
             "points": 2,
             "display_value": _pct_fmt(om_series[0]) if om_series and om_series[0] is not None else "N/A",
+            "metadata": _meta("operating_margin_ttm", om_source,
+                               _ttm_period if om_source == "finnhub_metric" else "Annual"),
         },
         {
             "key": "net_margin",
@@ -1247,13 +1364,20 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": nm_ok,
             "points": 2,
             "display_value": _pct_fmt(nm_series[0]) if nm_series and nm_series[0] is not None else "N/A",
+            "metadata": _meta("net_margin_ttm", nm_source,
+                               _ttm_period if nm_source == "finnhub_metric" else "Annual"),
         },
         {
             "key": "eps_growth",
             "label": "EPS growing",
             "condition": eps_growing,
             "points": 2,
-            "display_value": (f"${eps_vals[0]:.2f}" if eps_vals and eps_vals[0] is not None else "N/A"),
+            "display_value": (
+                f"{ttm.get('eps_growth_ttm_yoy'):+.1f}% YoY (TTM)" if eps_source == "finnhub_metric" and ttm.get("eps_growth_ttm_yoy") is not None
+                else (f"${eps_vals[0]:.2f}" if eps_vals and eps_vals[0] is not None else "N/A")
+            ),
+            "metadata": _meta("eps_growth_ttm_yoy", eps_source,
+                               _ttm_period if eps_source == "finnhub_metric" else "Annual"),
         },
     ])
 
@@ -1265,6 +1389,10 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": fcf_positive,
             "points": 2,
             "display_value": _fmt(fcf0),
+            "metadata": _meta("fcf", fcf_source,
+                               _ttm_period if fcf_source != "annual" else "Annual",
+                               gated=raw.get("_ttm_partial", {}).get("gated_fields") is not None
+                                     and "fcf_ttm_usd" in (raw.get("_ttm_partial", {}).get("gated_fields") or [])),
         },
         {
             "key": "fcf_vs_net_income",
@@ -1273,6 +1401,8 @@ def score_fundamentals(raw: dict) -> dict:
             "points": 3,
             "display_value": (f"{_fmt(fcf0)} FCF vs {_fmt(ni0)} NI"
                               if fcf0 is not None and ni0 is not None else "N/A"),
+            "metadata": _meta("fcf_vs_net_income", fcf_source,
+                               _ttm_period if fcf_source != "annual" else "Annual"),
         },
         {
             "key": "ocf_trend",
@@ -1280,6 +1410,7 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": ocf_growing,
             "points": 2,
             "display_value": _fmt(ocf0),
+            "metadata": _meta("ocf_trend"),
         },
         {
             "key": "capex_ratio",
@@ -1287,6 +1418,7 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": capex_ok,
             "points": 2,
             "display_value": f"{capex_ratio*100:.1f}%" if capex_ratio is not None else "N/A",
+            "metadata": _meta("capex_ratio"),
         },
         {
             "key": "debt_financing",
@@ -1294,6 +1426,7 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": not_debt_reliant,
             "points": 1,
             "display_value": _fmt(fin_cf0) if fin_cf0 is not None else "N/A",
+            "metadata": _meta("debt_financing"),
         },
     ])
 
@@ -1305,6 +1438,8 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": roe_ok,
             "points": 3,
             "display_value": f"{roe:.1f}%" if roe is not None else "N/A",
+            "metadata": _meta("roe_ttm", roe_source,
+                               _ttm_period if roe_source == "finnhub_metric" else "Annual"),
         },
         {
             "key": "roic",
@@ -1312,6 +1447,8 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": roic_ok,
             "points": 3,
             "display_value": f"{roic:.1f}%" if roic is not None else "N/A",
+            "metadata": _meta("roi_ttm", roic_source,
+                               _ttm_period if roic_source == "finnhub_metric" else "Annual"),
         },
         {
             "key": "moat",
@@ -1319,6 +1456,7 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": None,  # always manual — no auto-score
             "points": 0,
             "display_value": "Needs manual review",
+            "metadata": _meta("moat"),
         },
         {
             "key": "insider_ownership",
@@ -1326,6 +1464,7 @@ def score_fundamentals(raw: dict) -> dict:
             "condition": (True if insider_ok else None),
             "points": 2,
             "display_value": f"{insider_pct:.1f}%" if insider_pct is not None else "N/A",
+            "metadata": _meta("insider_ownership"),
         },
     ])
 
@@ -1477,25 +1616,48 @@ def score_fundamentals(raw: dict) -> dict:
 
     history = _history_table(raw)
 
+    # ── Partial score bookkeeping ─────────────────────────────────────────────
+    ttm_partial = raw.get("_ttm_partial", {}) or {}
+    partial_score = ttm_partial.get("partial_score", False)
+
+    # Backfill scored_metrics / total_metrics into the partial dict
+    ttm_partial["scored_metrics"] = scored_metrics_count
+    ttm_partial["total_metrics"]  = total_metrics_count
+
+    # Divergence warnings from validation layer
+    ttm_validation = raw.get("_ttm_validation", {}) or {}
+    divergence_warnings = {
+        k: v for k, v in ttm_validation.items()
+        if isinstance(v, dict) and v.get("divergence_warning")
+    }
+
     return {
-        "ticker":        raw.get("ticker", ""),
-        "company_name":  raw.get("company_name"),
-        "sector":        raw.get("sector"),
-        "industry":      raw.get("industry"),
-        "sections":      sections,
-        "total_earned":  total_earned,
-        "total_possible": total_possible,
+        "ticker":           raw.get("ticker", ""),
+        "company_name":     raw.get("company_name"),
+        "sector":           raw.get("sector"),
+        "industry":         raw.get("industry"),
+        "sections":         sections,
+        "total_earned":     total_earned,
+        "total_possible":   total_possible,
         "normalized_score": round(score_pct),
-        "verdict":       verdict,
-        "verdict_class": verdict_class,
-        "verdict_reason": verdict_reason,
-        "red_flags":     red_flags,
-        "missing_fields": raw.get("missing_fields", []),
-        "error":         raw.get("error"),
-        "history":       history,
-        "roe":           raw.get("roe"),
-        "roic":          raw.get("roic"),
-        "insider_pct":   raw.get("insider_pct"),
+        "verdict":          verdict,
+        "verdict_class":    verdict_class,
+        "verdict_reason":   verdict_reason,
+        "red_flags":        red_flags,
+        "missing_fields":   raw.get("missing_fields", []),
+        "error":            raw.get("error"),
+        "history":          history,
+        "roe":              raw.get("roe"),
+        "roic":             raw.get("roic"),
+        "insider_pct":      raw.get("insider_pct"),
+        # ── TTM pipeline fields ───────────────────────────────────────────────
+        "partial_score":       partial_score,
+        "scored_metrics":      scored_metrics_count,
+        "total_metrics":       total_metrics_count,
+        "gated_fields":        ttm_partial.get("gated_fields", []),
+        "ttm_period_end":      (raw.get("_ttm_metrics") or {}).get("period_end"),
+        "ttm_quarters_used":   (raw.get("_ttm_metrics") or {}).get("quarters_used", 0),
+        "divergence_warnings": divergence_warnings,
     }
 
 
@@ -1505,10 +1667,15 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
     """
     Main entry point. Returns fully scored fundamentals dict for ticker.
     Uses 24-hr cache unless force_refresh=True.
+
+    Pipeline:
+      1. fetch_fundamentals_raw()      — historical annual arrays from EDGAR/FMP/yfinance
+      2. finnhub_ttm.build_fundamentals_data() — augments raw with TTM scalars from Finnhub
+      3. score_fundamentals(raw)       — scores using TTM-injected values
     """
     ticker = ticker.upper().strip()
 
-    # Try cache first
+    # ── Cache check ──────────────────────────────────────────────────────────
     if not force_refresh:
         try:
             from database import get_fundamentals_cache
@@ -1519,11 +1686,37 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
         except Exception as e:
             logger.debug("fundamentals cache read error: %s", e)
 
-    # Fetch fresh
-    raw  = fetch_fundamentals_raw(ticker)
+    # ── Step 1: fetch historical annual data ──────────────────────────────────
+    raw = fetch_fundamentals_raw(ticker)
+
+    # ── Step 2: augment with Finnhub TTM data ─────────────────────────────────
+    try:
+        from finnhub_ttm import build_fundamentals_data
+        raw = build_fundamentals_data(ticker, raw=raw, force_refresh=force_refresh)
+        logger.debug(
+            "fundamentals  TTM augmentation complete  ticker=%s  "
+            "gm_ttm=%s  fcf_ttm=%s",
+            ticker,
+            (raw.get("_ttm_metrics") or {}).get("gross_margin_ttm"),
+            (raw.get("_ttm_metrics") or {}).get("fcf_ttm_usd"),
+        )
+    except Exception as exc:
+        logger.warning(
+            "fundamentals  TTM augmentation failed for %s  error=%s  "
+            "(falling back to annual data)", ticker, exc,
+        )
+        # Ensure _ttm_metrics is present so score_fundamentals() doesn't error
+        raw.setdefault("_ttm_metrics", {})
+        raw.setdefault("_ttm_validation", {})
+        raw.setdefault("_ttm_partial", {
+            "partial_score": False, "scored_metrics": None,
+            "total_metrics": None, "gated_fields": [],
+        })
+
+    # ── Step 3: score ─────────────────────────────────────────────────────────
     result = score_fundamentals(raw)
 
-    # Save to cache
+    # ── Save to cache ─────────────────────────────────────────────────────────
     try:
         from database import save_fundamentals_cache
         save_fundamentals_cache(ticker, result)
