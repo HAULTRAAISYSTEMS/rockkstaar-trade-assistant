@@ -210,7 +210,7 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                    # IFRS equivalents
                    "CashAndCashEquivalentsIfrs",
                    "CashAndBankBalancesAtCentralBanks"])
-        td  = _annual(["LongTermDebt",
+    td  = _annual(["LongTermDebt",
                                       "LongTermDebtAndCapitalLeaseObligation",   # correct XBRL concept (no trailing 's')
                                       "LongTermDebtAndCapitalLeaseObligations",  # alternate spelling as fallback
                                       "LongTermDebtNoncurrent",
