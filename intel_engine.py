@@ -456,6 +456,9 @@ _COMPANY_NAMES: dict[str, str] = {
     "NFLX": "Netflix",            "UBER": "Uber",
     "ARM":  "Arm Holdings",       "SMCI": "Super Micro",
     "ALAB": "Astera Labs",
+    "ANET": "Arista Networks",     "FN":   "Fabrinet",
+    "TSM":  "Taiwan Semiconductor","ISRG": "Intuitive Surgical",
+    "EME":  "EMCOR Group",         "GOOG": "Alphabet",
 }
 
 
@@ -825,7 +828,7 @@ def _earnings_from_finnhub(
         return [], []
 
     from_d = today.isoformat()
-    to_d   = (today + timedelta(days=7)).isoformat()
+    to_d   = (today + timedelta(days=21)).isoformat()
     url = (
         f"https://finnhub.io/api/v1/calendar/earnings"
         f"?from={from_d}&to={to_d}&token={api_key}"
@@ -852,7 +855,7 @@ def _earnings_from_finnhub(
         except Exception:
             continue
         days_away = (earn_date - today).days
-        if days_away < 0 or days_away > 7:
+        if days_away < 0 or days_away > 21:
             continue
         hour       = (e.get("hour") or "").lower()
         time_label = "BMO" if hour == "bmo" else "AMC" if hour == "amc" else "TBD"
@@ -906,7 +909,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
     wl_set      = set(_get_watchlist_tickers())
     today       = _today_et()
 
-    buckets: dict[str, list] = {"today": [], "tomorrow": [], "this_week": []}
+    buckets: dict[str, list] = {"today": [], "tomorrow": [], "this_week": [], "coming_up": []}
     meta: dict = {
         "tickers_checked":      len(all_tickers),
         "overrides_injected":   0,
@@ -924,6 +927,8 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             buckets["tomorrow"].append(item)
         elif 2 <= d <= 7:
             buckets["this_week"].append(item)
+        elif 8 <= d <= 21:
+            buckets["coming_up"].append(item)
 
     # ── 1. Manual overrides (always first) ──────────────────────────────────
     already_added: set[str] = set()
@@ -931,7 +936,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
         try:
             ov_date   = datetime.strptime(ov["date"][:10], "%Y-%m-%d").date()
             days_away = (ov_date - today).days
-            if days_away < 0 or days_away > 7:
+            if days_away < 0 or days_away > 21:
                 continue
             _bucket_item({
                 "ticker":       ov["ticker"].upper(),
@@ -1062,7 +1067,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             return None
 
         days_away = (earn_date - today).days
-        if days_away < 0 or days_away > 7:
+        if days_away < 0 or days_away > 21:
             return None
 
         logger.info("intel/earnings yahoo_api %s → %s (%d days away)", ticker, earn_date, days_away)
@@ -1188,7 +1193,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             if earn_date is None:
                 return None
             days_away = (earn_date - today).days
-            if days_away < 0 or days_away > 7:
+            if days_away < 0 or days_away > 21:
                 return None
             return {
                 "ticker":       ticker,
@@ -1255,7 +1260,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             logger.info("intel/earnings nasdaq: %d items added", nasdaq_found)
 
     # Sort: overrides first, then watchlist, then by date
-    for k in buckets:
+    for k in ("today", "tomorrow", "this_week", "coming_up"):
         buckets[k].sort(key=lambda x: (
             not x.get("is_override"),
             not x.get("on_watchlist"),
@@ -1293,7 +1298,7 @@ def _apply_overrides_to_buckets(buckets: dict, today: date, wl_set: set) -> None
         try:
             ov_date   = datetime.strptime(ov["date"][:10], "%Y-%m-%d").date()
             days_away = (ov_date - today).days
-            if days_away < 0 or days_away > 7:
+            if days_away < 0 or days_away > 21:
                 continue
             item = {
                 "ticker":       ticker,
@@ -1314,6 +1319,8 @@ def _apply_overrides_to_buckets(buckets: dict, today: date, wl_set: set) -> None
                 buckets["tomorrow"].insert(0, item)
             elif 2 <= days_away <= 7:
                 buckets["this_week"].insert(0, item)
+            elif 8 <= days_away <= 21:
+                buckets.setdefault("coming_up", []).insert(0, item)
         except Exception:
             pass
 
@@ -1348,11 +1355,11 @@ def _nasdaq_cal(endpoint: str, date_str: str) -> list[dict]:
 def _earnings_from_nasdaq(today: date, wl_set: set, already_added: set,
                            universe: set) -> list[dict]:
     """
-    Pull market-wide earnings from Nasdaq calendar for the next 7 days.
+    Pull market-wide earnings from Nasdaq calendar for the next 21 days.
     Filters to `universe` tickers only; skips any already in `already_added`.
-    Runs 4 parallel requests so the 7-day window resolves in ~8 s total.
+    Runs parallel requests so the window resolves quickly.
     """
-    date_strs = [(today + timedelta(days=i)).isoformat() for i in range(8)]
+    date_strs = [(today + timedelta(days=i)).isoformat() for i in range(22)]
     results: list[dict] = []
 
     def _fetch_day(ds: str) -> list[dict]:
@@ -2198,9 +2205,10 @@ def get_intel_summary() -> dict:
     # Extract earnings buckets and debug meta separately
     _earn       = c_earn or {}
     earn_buckets = {
-        "today":     list(_earn.get("today",     [])),
-        "tomorrow":  list(_earn.get("tomorrow",  [])),
-        "this_week": list(_earn.get("this_week", [])),
+        "today":      list(_earn.get("today",      [])),
+        "tomorrow":   list(_earn.get("tomorrow",   [])),
+        "this_week":  list(_earn.get("this_week",  [])),
+        "coming_up":  list(_earn.get("coming_up",  [])),
     }
     earn_meta = _earn.get("meta", {})
 

@@ -1184,6 +1184,7 @@
             <button class="bucket-tab active" onclick="earnTab('today',this)" id="et-today">Today <span class="tab-count" id="etc-today">0</span></button>
             <button class="bucket-tab" onclick="earnTab('tomorrow',this)" id="et-tomorrow">Tomorrow <span class="tab-count" id="etc-tomorrow">0</span></button>
             <button class="bucket-tab" onclick="earnTab('week',this)" id="et-week">This Week <span class="tab-count" id="etc-week">0</span></button>
+            <button class="bucket-tab" onclick="earnTab('upcoming',this)" id="et-upcoming">Next 3 Wks <span class="tab-count" id="etc-upcoming">0</span></button>
           </div>
           <div class="earn-row earn-row-header" style="margin-top:0;">
             <span>Ticker</span><span>Company</span><span>Date</span><span>Time</span><span>EPS Est</span><span>WL</span>
@@ -1191,6 +1192,7 @@
           <div id="earn-rows-today" class="bucket-panel active"></div>
           <div id="earn-rows-tomorrow" class="bucket-panel"></div>
           <div id="earn-rows-week" class="bucket-panel"></div>
+          <div id="earn-rows-upcoming" class="bucket-panel"></div>
         </div>
       </div>
     </div>
@@ -1958,7 +1960,7 @@ function loadIntelData(forceRefresh) {
       var splits    = data.splits          || [];
       var dividends = data.dividends       || [];
       var econ      = data.economic_events || [];
-      var nEarn     = (earn.today||[]).length + (earn.tomorrow||[]).length + (earn.this_week||[]).length;
+      var nEarn     = (earn.today||[]).length + (earn.tomorrow||[]).length + (earn.this_week||[]).length + (earn.coming_up||[]).length;
       console.log('[intel] fetch success  ok=' + data.ok
         + '  news=' + newsArr.length + '  earn=' + nEarn
         + '  splits=' + splits.length + '  div=' + dividends.length
@@ -1983,7 +1985,7 @@ function loadIntelData(forceRefresh) {
       if (window._dbgSet) {
         _dbgSet('d-fetch-done', 'YES — ok=' + data.ok, 'dbg-yes');
         _dbgSet('d-news',   String(newsArr.length),  newsArr.length ? 'dbg-yes' : 'dbg-wait');
-        _dbgSet('d-earn',   'today=' + (earn.today||[]).length + '  tomorrow=' + (earn.tomorrow||[]).length + '  week=' + (earn.this_week||[]).length, nEarn ? 'dbg-yes' : 'dbg-wait');
+        _dbgSet('d-earn',   'today=' + (earn.today||[]).length + '  tomorrow=' + (earn.tomorrow||[]).length + '  week=' + (earn.this_week||[]).length + '  upcoming=' + (earn.coming_up||[]).length, nEarn ? 'dbg-yes' : 'dbg-wait');
         var _ed = data.earnings_debug || {};
         _dbgSet('d-server-date', (_ed.server_date || '—'), _ed.server_date ? 'dbg-yes' : 'dbg-wait');
         _dbgSet('d-earn-src', (_ed.earnings_source_used || '—') + '  · checked=' + (_ed.tickers_checked || 0) + '  yf=' + (_ed.yfinance_found || 0) + '  fh=' + (_ed.finnhub_found || 0), _ed.tickers_checked ? 'dbg-yes' : 'dbg-wait');
@@ -2229,13 +2231,14 @@ function renderEarnings(buckets) {
   if (loading) loading.style.display = 'none';
   if (body)    body.style.display    = 'block';
 
-  var today    = (buckets.today    || []);
-  var tomorrow = (buckets.tomorrow || []);
-  var week     = (buckets.this_week|| []);
-  var total    = today.length + tomorrow.length + week.length;
+  var today    = (buckets.today     || []);
+  var tomorrow = (buckets.tomorrow  || []);
+  var week     = (buckets.this_week || []);
+  var upcoming = (buckets.coming_up || []);
+  var total    = today.length + tomorrow.length + week.length + upcoming.length;
 
   if (badge) {
-    badge.textContent = total + ' this week';
+    badge.textContent = total + ' upcoming';
     badge.className   = 'badge ' + (today.length > 0 ? 'badge-red' : total > 0 ? 'badge-amber' : 'badge-gray');
   }
 
@@ -2246,10 +2249,18 @@ function renderEarnings(buckets) {
   setCount('etc-today',    today.length);
   setCount('etc-tomorrow', tomorrow.length);
   setCount('etc-week',     week.length);
+  setCount('etc-upcoming', upcoming.length);
 
   _renderEarnRows('earn-rows-today',    today);
   _renderEarnRows('earn-rows-tomorrow', tomorrow);
   _renderEarnRows('earn-rows-week',     week);
+  _renderEarnRows('earn-rows-upcoming', upcoming);
+
+  // Auto-switch to the first non-empty tab
+  if (today.length === 0 && tomorrow.length === 0 && week.length === 0 && upcoming.length > 0) {
+    var upBtn = document.getElementById('et-upcoming');
+    if (upBtn) earnTab('upcoming', upBtn);
+  }
 }
 
 function _renderEarnRows(elId, allItems) {
@@ -2305,6 +2316,7 @@ function _renderAllEarnBuckets(buckets) {
   _renderEarnRows('earn-rows-today',    buckets.today     || []);
   _renderEarnRows('earn-rows-tomorrow', buckets.tomorrow  || []);
   _renderEarnRows('earn-rows-week',     buckets.this_week || []);
+  _renderEarnRows('earn-rows-upcoming', buckets.coming_up || []);
 }
 
 function earnTab(tab, btn) {
