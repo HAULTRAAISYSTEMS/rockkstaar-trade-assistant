@@ -36,37 +36,41 @@
       <span class="brand-sub">AI&nbsp;SYSTEMS</span>
     </a>
 
-    <!-- CENTER: Navigation Links — Home · Fundamentals · Intel · Execution · Journal · Risk -->
+    <!-- CENTER: Navigation Links -->
     <div class="nav-links">
       <a href="{{ url_for('liquidity_page') }}"
          class="nav-link nav-link-home {% if request.endpoint == 'liquidity_page' %}nav-link-active{% endif %}"
          title="Morning Command Center">
         HOME
       </a>
-      <a href="{{ url_for('fundamentals_page') }}"
-         class="nav-link {% if request.endpoint == 'fundamentals_page' %}nav-link-active{% endif %}"
-         title="Fundamentals Analyzer &amp; Quality Scorecard">
-        FUNDAMENTALS
+      <a href="{{ url_for('quick_mode') }}"
+         class="nav-link nav-link-exec {% if request.endpoint == 'quick_mode' %}nav-link-active{% endif %}"
+         title="Trade Execution — entries, stops, targets, setups">
+        EXECUTION
       </a>
       <a href="{{ url_for('intel') }}"
          class="nav-link nav-link-research {% if request.endpoint == 'intel' %}nav-link-active{% endif %}"
-         title="Pre-Market Intel — checklist, earnings, economic events, market environment">
-        INTEL
-      </a>
-      <a href="{{ url_for('quick_mode') }}"
-         class="nav-link nav-link-exec {% if request.endpoint in ('quick_mode', 'dashboard', 'schwab_account') %}nav-link-active{% endif %}"
-         title="Trade Execution — entries, stops, targets, account">
-        EXECUTION
+         title="Deep Research — macro, sector, institutional, valuations">
+        RESEARCH
       </a>
       <a href="{{ url_for('journal') }}"
-         class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}"
-         title="Trade Journal">
-        JOURNAL
+         class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}">
+        Journal
       </a>
       <a href="{{ url_for('risk_settings') }}"
          class="nav-link {% if request.endpoint == 'risk_settings' %}nav-link-active{% endif %}"
          title="Risk &amp; Discipline Settings">
-        RISK
+        Risk
+      </a>
+      <a href="{{ url_for('dashboard') }}"
+         class="nav-link nav-link-account {% if request.endpoint == 'dashboard' %}nav-link-active{% endif %}"
+         title="Account & Performance Hub">
+        ACCOUNT
+      </a>
+      <a href="{{ url_for('schwab_account') }}"
+         class="nav-link nav-link-schwab {% if request.endpoint == 'schwab_account' %}nav-link-active{% endif %}"
+         title="Schwab Brokerage">
+        Schwab
       </a>
     </div>
 
@@ -91,11 +95,6 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-refresh" title="Refresh All">↺</button>
       </form>
-  <button onclick="openAsk()" title="Search / Ask (Ctrl+K)"
-    style="background:none;border:1px solid #2d2d4e;border-radius:8px;color:#7c7caa;padding:6px 12px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;margin-left:4px;">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    Ask AI
-  </button>
 
       {% if session.get('user_id') %}
         {% if session.get('is_admin') %}
@@ -146,11 +145,8 @@
 
   <!-- ===== MOBILE STICKY CONTROL BAR ===== -->
   <div class="mobile-ctrl-bar" id="mobile-ctrl-bar">
-    <a href="{{ url_for('fundamentals_page') }}" class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'fundamentals_page' %}mcb-on{% endif %}" title="Fundamentals">📊</a>
-    <a href="{{ url_for('intel') }}"          class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'intel' %}mcb-on{% endif %}" title="Intel">📡</a>
-    <a href="{{ url_for('quick_mode') }}"     class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'quick_mode' %}mcb-on{% endif %}" title="Execution">⚡</a>
-    <a href="{{ url_for('journal') }}"        class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'journal' %}mcb-on{% endif %}" title="Journal">📓</a>
-    <a href="{{ url_for('risk_settings') }}"  class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'risk_settings' %}mcb-on{% endif %}" title="Risk">⚖</a>
+    <a href="{{ url_for('journal') }}"       class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'journal' %}mcb-on{% endif %}" title="Journal">📓</a>
+    <a href="{{ url_for('risk_settings') }}" class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'risk_settings' %}mcb-on{% endif %}" title="Risk Settings">⚖</a>
     <button id="mobile-ar-toggle"    class="mobile-ctrl-btn mobile-ctrl-ar mcb-on"    onclick="toggleAutoRefresh()">↺ Auto</button>
     <button id="mobile-sound-toggle" class="mobile-ctrl-btn mobile-ctrl-sound mcb-on" onclick="toggleAlertSound()">🔔</button>
     <form action="{{ url_for('refresh_all') }}" method="POST" style="display:contents;">
@@ -200,71 +196,30 @@
     })();
   </script>
 
-
-<!-- Ask AI Search Modal -->
-<div id="ask-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;pointer-events:all;">
-  <div style="background:#1a1a2e;border:1px solid #2d2d4e;border-radius:12px;width:min(680px,90vw);max-height:80vh;overflow:hidden;display:flex;flex-direction:column;">
-    <div style="padding:16px 20px;border-bottom:1px solid #2d2d4e;display:flex;align-items:center;gap:12px;">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c7caa" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-      <input id="ask-input" type="text" placeholder="Ask anything about a stock or the market..."
-        style="flex:1;background:none;border:none;outline:none;color:#e0e0ff;font-size:15px;" />
-      <button onclick="closeAsk()" style="background:none;border:none;color:#7c7caa;cursor:pointer;font-size:20px;line-height:1;">&#215;</button>
-    </div>
-    <div id="ask-body" style="padding:20px;overflow-y:auto;flex:1;min-height:200px;">
-      <p style="color:#5a5a7a;font-size:13px;text-align:center;margin-top:40px;">Type a question and press Enter</p>
-    </div>
-  </div>
-</div>
-<script>
-function openAsk(){var o=document.getElementById('ask-overlay');o.style.display='flex';setTimeout(function(){document.getElementById('ask-input').focus();},50);}
-function closeAsk(){document.getElementById('ask-overlay').style.display='none';document.getElementById('ask-input').value='';document.getElementById('ask-body').innerHTML='<p style="color:#5a5a7a;font-size:13px;text-align:center;margin-top:40px;">Type a question and press Enter</p>';}
-document.addEventListener('keydown',function(e){if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openAsk();}if(e.key==='Escape')closeAsk();});
-document.getElementById('ask-overlay').addEventListener('click',function(e){if(e.target===this)closeAsk();});
-document.getElementById('ask-input').addEventListener('keydown',function(e){
-  if(e.key!=='Enter')return;
-  var q=this.value.trim();if(!q)return;
-  var body=document.getElementById('ask-body');
-  body.innerHTML='<div style="text-align:center;padding:40px;color:#7c7caa;">Searching…</div>';
-  fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})})
-  .then(function(r){return r.json();})
-  .then(function(d){
-    if(d.error){body.innerHTML='<p style="color:#ff6b6b;padding:16px;">'+d.error+'</p>';return;}
-    var h='<div style="color:#c0c0e8;font-size:14px;line-height:1.7;margin-bottom:20px;">'+d.answer.replace(/\n/g,'<br>')+'</div>';
-    if(d.sources&&d.sources.length){
-      h+='<div style="border-top:1px solid #2d2d4e;padding-top:12px;"><p style="color:#5a5a7a;font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px;">Sources</p>';
-      d.sources.forEach(function(s){h+='<a href="'+s.url+'" target="_blank" style="display:block;color:#7c7caa;font-size:12px;margin-bottom:4px;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">↗ '+s.title+'</a>';});
-      h+='</div>';
-    }
-    body.innerHTML=h;
-  })
-  .catch(function(){body.innerHTML='<p style="color:#ff6b6b;padding:16px;">Network error</p>';});
-});
-</script>
   {% block scripts %}{% endblock %}
 
-  <!-- Floating Ask AI button -->
+  <!-- ===== ASK AI FAB — bottom-center pill ===== -->
   <button id="ask-fab" onclick="openAsk()" title="Ask AI (Ctrl+K)" style="
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #00d4ff, #0088cc);
-    border: none;
-    cursor: pointer;
-    box-shadow: 0 4px 20px rgba(0,212,255,0.4);
-    z-index: 9998;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 22px;
-    color: white;
-    transition: transform 0.2s, box-shadow 0.2s;
-  " onmouseover="this.style.transform='scale(1.1)';this.style.boxShadow='0 6px 28px rgba(0,212,255,0.6)'" 
-     onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 4px 20px rgba(0,212,255,0.4)'">
-    🔍
-  </button>
-
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 28px;
+  border-radius: 30px;
+  background: linear-gradient(135deg, #00d4ff, #0088cc);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0,212,255,0.4);
+  z-index: 9998;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  transition: box-shadow 0.2s, bottom 0.2s;
+" onmouseover="this.style.boxShadow='0 6px 28px rgba(0,212,255,0.7)';this.style.bottom='28px'"
+   onmouseout="this.style.boxShadow='0 4px 20px rgba(0,212,255,0.4)';this.style.bottom='24px'">
+  🔍 Ask AI
+</button>
 </body>
 </html>
