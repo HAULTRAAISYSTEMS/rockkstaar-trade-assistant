@@ -6270,7 +6270,6 @@ _anthropic_client = _anthropic.Anthropic(
 )
 
 @app.route("/api/ask", methods=["POST"])
-@login_required
 def api_ask():
     try:
         data = request.get_json(force=True)
