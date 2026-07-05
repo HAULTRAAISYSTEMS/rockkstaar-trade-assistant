@@ -11,7 +11,7 @@ Caches results in SQLite/PostgreSQL for 24 hours to avoid hammering Yahoo Financ
 from __future__ import annotations
 
 import logging
-import math
+import mathh
 import os
 import requests as _req_module
 from typing import Any
@@ -210,11 +210,16 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                    # IFRS equivalents
                    "CashAndCashEquivalentsIfrs",
                    "CashAndBankBalancesAtCentralBanks"])
-    td  = _annual(["DebtCurrent", "LongTermDebtNoncurrent", "LongTermDebt",
-                   "LongTermDebtAndCapitalLeaseObligations",
-                   # IFRS equivalents
-                   "Borrowings", "BorrowingsAndBankOverdrafts",
-                   "LongtermBorrowings", "ShorttermBorrowings"])
+        td  = _annual(["LongTermDebt",
+                                      "LongTermDebtAndCapitalLeaseObligation",   # correct XBRL concept (no trailing 's')
+                                      "LongTermDebtAndCapitalLeaseObligations",  # alternate spelling as fallback
+                                      "LongTermDebtNoncurrent",
+                                      # IFRS equivalents
+                                      "Borrowings", "BorrowingsAndBankOverdrafts",
+                                      "LongtermBorrowings",
+                                      # Current/short-term debt as final fallbacks
+                                      "DebtCurrent",
+                                      "ShorttermBorrowings"])
     gw  = _annual(["Goodwill"])                 # same in IFRS
     ia  = _annual(["IntangibleAssetsNetExcludingGoodwill",
                    "FiniteLivedIntangibleAssetsNet",
@@ -1110,6 +1115,10 @@ def score_fundamentals(raw: dict) -> dict:
     rev_growth = None
     if len(valid_rev) >= 3:
         rev_growth = all(valid_rev[i][1] > valid_rev[i+1][1] for i in range(min(2, len(valid_rev)-1)))
+    elif len(valid_rev) >= 2:
+        rev_growth = valid_rev[0][1] > valid_rev[1][1]
+    elif len(valid_rev) == 1:
+        rev_growth = valid_rev[0][1] > 0
 
     # Gross margin trend
     def _margin(num_vals, den_vals):
@@ -1152,14 +1161,23 @@ def score_fundamentals(raw: dict) -> dict:
             return None
         return valid[0][1] >= valid[-1][1]  # most-recent >= oldest (stable/rising)
 
-    gm_ok = _trending_up(gm_series)
-    om_ok = _trending_up(om_series)
+    def _margin_ok(series, abs_threshold=None):
+        """Trend check with absolute fallback when only 1 data point is available."""
+        valid = [(i, x) for i, x in enumerate(series) if x is not None]
+        if len(valid) >= 2:
+            return valid[0][1] >= valid[-1][1]  # most-recent >= oldest
+        if len(valid) == 1 and abs_threshold is not None:
+            return valid[0][1] >= abs_threshold  # single-year absolute check
+        return None
+
+    gm_ok = _margin_ok(gm_series, abs_threshold=0.30)
+    om_ok = _margin_ok(om_series, abs_threshold=0.10)
     nm_positive = (
         nm_series[0] is not None and nm_series[0] > 0
         if nm_series and nm_series[0] is not None
         else (v(raw["net_income"], 0) is not None and v(raw["net_income"], 0) > 0)
     )
-    nm_ok = (nm_positive and _trending_up(nm_series)) if nm_positive else (False if nm_positive is False else None)
+    nm_ok = (nm_positive and _margin_ok(nm_series, abs_threshold=0.05)) if nm_positive else (False if nm_positive is False else None)
 
     # EPS growing — use TTM EPS growth if available
     eps_vals = raw.get("diluted_eps", [])
