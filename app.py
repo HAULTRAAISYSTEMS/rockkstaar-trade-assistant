@@ -6263,10 +6263,11 @@ def fundamentals_page():
 # ---------------------------------------------------------------------------
 # Nebius AI client (market Q&A)
 # ---------------------------------------------------------------------------
-import anthropic as _anthropic
+from openai import OpenAI as _OpenAI
 
-_anthropic_client = _anthropic.Anthropic(
-    api_key=os.environ.get("ANTHROPIC_API_KEY"),
+_nebius_qa_client = _OpenAI(
+    api_key=os.environ.get("NEBIUS_API_KEY"),
+    base_url="https://api.tokenfactory.nebius.com/v1/",
 )
 
 @app.route("/api/ask", methods=["POST"])
@@ -6277,18 +6278,20 @@ def api_ask():
     if not question:
         return jsonify({"error": "No question provided"}), 400
     try:
-        response = _anthropic_client.messages.create(
-            model="claude-3-5-haiku-20241022",
+        resp = _nebius_qa_client.chat.completions.create(
+            model="meta-llama/Llama-3.3-70B-Instruct",
             max_tokens=1024,
-            system=(
-                "You are a concise financial market research assistant. "
-                "Answer questions about stocks, companies, market trends, and financial concepts. "
-                "Be direct and factual. Use bullet points for lists. "
-                "Keep answers under 300 words unless more detail is needed."
-            ),
-            messages=[{"role": "user", "content": question}],
+            messages=[
+                {"role": "system", "content": (
+                    "You are a concise financial market research assistant. "
+                    "Answer questions about stocks, companies, market trends, and financial concepts. "
+                    "Be direct and factual. Use bullet points for lists. "
+                    "Keep answers under 300 words unless more detail is needed."
+                )},
+                {"role": "user", "content": question},
+            ],
         )
-        answer = response.content[0].text if response.content else "No answer available."
+        answer = resp.choices[0].message.content or "No answer available."
         return jsonify({"answer": answer, "sources": []})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
