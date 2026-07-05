@@ -6293,12 +6293,12 @@ def api_research_ask():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
-# ── HAULTRA AI — general Q&A with earnings context ─────────────────────────
+# ── HAULTRA AI — general Q&A with web search + live earnings context ────────
 @app.route("/api/ask", methods=["POST"])
 @csrf.exempt
 def api_ask():
-    """HAULTRA AI: answers trading questions using Nebius + live earnings data."""
-    from openai import OpenAI as _OpenAI
+    """HAULTRA AI: Claude + web search + live earnings calendar context."""
+    import anthropic as _anthropic
     import datetime as _dt
 
     data     = request.get_json(force=True, silent=True) or {}
@@ -6306,59 +6306,68 @@ def api_ask():
     if not question:
         return jsonify({"answer": "No question provided."}), 400
 
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return jsonify({"answer": "ANTHROPIC_API_KEY not configured on this server."}), 503
+
     # ── Build earnings context from live calendar ──────────────────────────
     try:
         from intel_engine import fetch_earnings_calendar as _fetch_earn
         cal   = _fetch_earn()
         today = _dt.date.today()
 
-        def _fmt_bucket(items: list) -> str:
+        def _fmt_bucket(items):
             if not items:
                 return "  (none)"
             lines = []
             for e in items:
                 name = e.get("company_name") or e.get("ticker")
-                date = e.get("date", "?")
-                time = e.get("time_label", "TBD")
-                days = e.get("days_away", "?")
-                lines.append(f"  • {e['ticker']} ({name}) — {date} {time} ({days}d away)")
+                lines.append(
+                    f"  • {e['ticker']} ({name}) — {e.get('date','?')} "
+                    f"{e.get('time_label','TBD')} ({e.get('days_away','?')}d away)"
+                )
             return "\n".join(lines)
 
         earn_ctx = (
             f"TODAY IS: {today.strftime('%A, %B %d, %Y')}\n\n"
-            f"UPCOMING EARNINGS CALENDAR (next 21 days):\n"
+            f"ROCKKSTAAR WATCHLIST EARNINGS (next 21 days):\n"
             f"TODAY:\n{_fmt_bucket(cal.get('today', []))}\n"
             f"TOMORROW:\n{_fmt_bucket(cal.get('tomorrow', []))}\n"
             f"THIS WEEK:\n{_fmt_bucket(cal.get('this_week', []))}\n"
             f"NEXT 3 WEEKS:\n{_fmt_bucket(cal.get('coming_up', []))}\n"
         )
     except Exception:
-        import datetime as _dt2
-        earn_ctx = f"TODAY IS: {_dt2.date.today().strftime('%A, %B %d, %Y')}\n(Earnings data unavailable)"
+        earn_ctx = (
+            f"TODAY IS: {_dt.date.today().strftime('%A, %B %d, %Y')}\n"
+            "(Internal calendar unavailable — use web search for all dates)"
+        )
 
     system_prompt = (
-        "You are HAULTRA AI — a sharp, concise trading assistant built for Rockkstaar's swing trading system. "
-        "You have live access to the earnings calendar shown below. When asked about earnings dates, "
-        "answer with the exact ticker, company name, date, and time (BMO=before market open, AMC=after market close). "
-        "For trade analysis questions, use technical reasoning: EMAs, VWAP, structure, volume, R/R. "
-        "Be direct, confident, and specific. No generic disclaimers. Keep answers under 200 words unless a deep dive is requested.\n\n"
+        "You are HAULTRA AI — a sharp, real-time trading assistant built for Rockkstaar's swing trading system.\n\n"
+        "CAPABILITIES:\n"
+        "- You have WEB SEARCH. Use it to find real earnings dates, real fundamentals, and recent news.\n"
+        "- You also have Rockkstaar's internal watchlist calendar (below) for near-term tracked tickers.\n\n"
+        "RULES:\n"
+        "- Earnings date questions: ALWAYS web search to get the exact date + time (BMO/AMC). "
+        "Never say 'not listed' without searching first.\n"
+        "- Fundamentals questions: web search for real numbers — P/E, revenue, EPS, margins, YoY growth. "
+        "Give actual figures, not generic descriptions.\n"
+        "- Trade setup questions: use technicals (EMAs, VWAP, structure, volume, R/R). Be specific.\n"
+        "- Be direct and concise. No filler. No disclaimers. Give the answer.\n\n"
         + earn_ctx
     )
 
     try:
-        client = _OpenAI(
-            base_url="https://api.tokenfactory.nebius.com/v1/",
-            api_key=os.environ.get("NEBIUS_API_KEY"),
+        client = _anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=system_prompt,
+            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
+            messages=[{"role": "user", "content": question}],
         )
-        resp = client.chat.completions.create(
-            model="meta-llama/Llama-3.3-70B-Instruct",
-            max_tokens=512,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": question},
-            ],
-        )
-        answer = (resp.choices[0].message.content or "").strip() or "No response."
+        answer_parts = [b.text for b in response.content if hasattr(b, "text")]
+        answer = "\n\n".join(answer_parts).strip() or "No response."
         return jsonify({"answer": answer})
     except Exception as exc:
         logger.exception("HAULTRA AI ask error")
