@@ -11,7 +11,7 @@ Caches results in SQLite/PostgreSQL for 24 hours to avoid hammering Yahoo Financ
 from __future__ import annotations
 
 import logging
-import mathh
+import math
 import os
 import requests as _req_module
 from typing import Any
