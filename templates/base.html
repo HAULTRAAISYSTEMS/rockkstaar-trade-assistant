@@ -226,5 +226,100 @@
    onmouseout="this.style.boxShadow='0 4px 20px rgba(0,212,255,0.4)';this.style.bottom='24px'">
   🔍 Ask AI
 </button>
+
+<!-- ===== ASK AI MODAL ===== -->
+<div id="ask-overlay" onclick="closeAsk()" style="
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,0.65); z-index:9999;
+  align-items:center; justify-content:center;"></div>
+
+<div id="ask-modal" style="
+  display:none; position:fixed; left:50%; top:50%;
+  transform:translate(-50%,-50%);
+  width:min(680px,92vw); max-height:80vh;
+  background:#131a24; border:1px solid #1e3a5f;
+  border-radius:16px; padding:28px 30px 24px;
+  box-shadow:0 20px 60px rgba(0,0,0,0.7);
+  z-index:10000; display:none; flex-direction:column; gap:16px;">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;">
+    <span style="color:#00d4ff;font-size:17px;font-weight:700;letter-spacing:0.5px;">🔍 Ask AI</span>
+    <button onclick="closeAsk()" style="
+      background:none;border:none;color:#6b8099;cursor:pointer;
+      font-size:22px;line-height:1;padding:2px 6px;" title="Close (Esc)">&times;</button>
+  </div>
+
+  <div style="display:flex;gap:10px;">
+    <input id="ask-input" type="text" placeholder="Ask about any ticker, market setup, or trade idea…"
+      onkeydown="if(event.key==='Enter')submitAsk()"
+      style="flex:1;background:#0d1620;border:1px solid #1e3a5f;border-radius:10px;
+             color:#e2e8f0;font-size:14px;padding:11px 16px;outline:none;" />
+    <button onclick="submitAsk()" id="ask-send-btn" style="
+      background:linear-gradient(135deg,#00d4ff,#0088cc);border:none;
+      border-radius:10px;color:#fff;font-size:14px;font-weight:600;
+      cursor:pointer;padding:11px 22px;white-space:nowrap;">Send</button>
+  </div>
+
+  <div id="ask-answer" style="
+    display:none;background:#0d1620;border:1px solid #1e3a5f;
+    border-radius:10px;padding:16px;color:#c9d8e8;font-size:14px;
+    line-height:1.7;max-height:45vh;overflow-y:auto;white-space:pre-wrap;"></div>
+
+  <div id="ask-spinner" style="display:none;text-align:center;color:#6b8099;font-size:13px;">
+    ⏳ Thinking…
+  </div>
+</div>
+
+<script>
+(function(){
+  function openAsk(){
+    document.getElementById('ask-overlay').style.display='flex';
+    document.getElementById('ask-modal').style.display='flex';
+    document.getElementById('ask-input').value='';
+    document.getElementById('ask-answer').style.display='none';
+    document.getElementById('ask-spinner').style.display='none';
+    document.getElementById('ask-send-btn').disabled=false;
+    setTimeout(()=>document.getElementById('ask-input').focus(),60);
+  }
+  function closeAsk(){
+    document.getElementById('ask-overlay').style.display='none';
+    document.getElementById('ask-modal').style.display='none';
+  }
+  function submitAsk(){
+    var q=(document.getElementById('ask-input').value||'').trim();
+    if(!q)return;
+    document.getElementById('ask-answer').style.display='none';
+    document.getElementById('ask-spinner').style.display='block';
+    document.getElementById('ask-send-btn').disabled=true;
+    fetch('/api/ask',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({question:q})
+    })
+    .then(function(r){return r.json();})
+    .then(function(d){
+      document.getElementById('ask-spinner').style.display='none';
+      document.getElementById('ask-send-btn').disabled=false;
+      var box=document.getElementById('ask-answer');
+      box.textContent=d.answer||d.error||'No response.';
+      box.style.display='block';
+    })
+    .catch(function(e){
+      document.getElementById('ask-spinner').style.display='none';
+      document.getElementById('ask-send-btn').disabled=false;
+      var box=document.getElementById('ask-answer');
+      box.textContent='Error: '+e.message;
+      box.style.display='block';
+    });
+  }
+  window.openAsk=openAsk;
+  window.closeAsk=closeAsk;
+  window.submitAsk=submitAsk;
+  document.addEventListener('keydown',function(e){
+    if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openAsk();}
+    if(e.key==='Escape'){closeAsk();}
+  });
+})();
+</script>
 </body>
 </html>
