@@ -6270,40 +6270,26 @@ _anthropic_client = _anthropic.Anthropic(
 )
 
 @app.route("/api/ask", methods=["POST"])
+@csrf.exempt
 def api_ask():
+    data = request.get_json(force=True)
+    question = (data.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "No question provided"}), 400
     try:
-        data = request.get_json(force=True)
-        question = (data.get("question") or "").strip()
-        if not question:
-            return jsonify({"error": "No question provided"}), 400
-
         response = _anthropic_client.messages.create(
             model="claude-3-5-haiku-20241022",
             max_tokens=1024,
-            tools=[{"type": "web_search_tool", "name": "web_search"}],
             system=(
                 "You are a concise financial market research assistant. "
-                "Search the web for current information to answer the user's question. "
-                "Be specific and factual. Keep answers under 200 words. "
-                "Include key numbers, dates, and sources when relevant."
+                "Answer questions about stocks, companies, market trends, and financial concepts. "
+                "Be direct and factual. Use bullet points for lists. "
+                "Keep answers under 300 words unless more detail is needed."
             ),
             messages=[{"role": "user", "content": question}],
         )
-
-        # Extract text answer and any web sources
-        answer_parts = []
-        sources = []
-        for block in response.content:
-            if hasattr(block, "text"):
-                answer_parts.append(block.text)
-            elif hasattr(block, "type") and block.type == "tool_result":
-                pass  # sources come through in text
-
-        answer = "\n".join(answer_parts).strip()
-        if not answer:
-            answer = "I wasn't able to find a clear answer to that question."
-
-        return jsonify({"answer": answer, "sources": sources})
+        answer = response.content[0].text if response.content else "No answer available."
+        return jsonify({"answer": answer, "sources": []})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
