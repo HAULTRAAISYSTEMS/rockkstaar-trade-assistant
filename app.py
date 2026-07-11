@@ -3,7 +3,7 @@ app.py - Rockkstaar Trade Assistant
 Flask web app for premarket stock watchlist scanning.
 """
 
-import json as _json
+import json as _json 
 import logging
 import os
 import pathlib
