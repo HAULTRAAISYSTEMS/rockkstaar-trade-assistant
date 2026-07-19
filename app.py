@@ -4419,6 +4419,21 @@ def terminal():
     wl_id     = get_active_wl_id()
     watchlist = get_watchlist_stocks(wl_id) if wl_id else []
 
+    # Seed a starter watchlist the first time the Terminal is opened empty.
+    # Reuses the SAME onboarding path as /watchlist/add (Execution) — no new
+    # write logic. Runs once (membership is added immediately, so it won't
+    # re-seed on subsequent loads).
+    if wl_id and not watchlist:
+        for t in ("SPY", "QQQ", "NVDA", "TSLA", "AAPL", "AMD", "MSFT", "SMH"):
+            try:
+                add_ticker_to_watchlist(wl_id, t)
+                upsert_loading_placeholder(t)
+                threading.Thread(target=_onboard_ticker_bg, args=(t,),
+                                 daemon=True, name=f"seed-{t}").start()
+            except Exception as _se:
+                logger.debug("terminal seed %s failed: %s", t, _se)
+        watchlist = get_watchlist_stocks(wl_id)
+
     _trade_mode = get_setting("trading_mode") or "SWING TRADE"
     all_data = get_all_stock_data()
     data_map = {s["ticker"]: s for s in all_data}
@@ -4430,6 +4445,15 @@ def terminal():
     valid   = [s for s in ranked if s.get("trade_bias") != "Avoid"]
 
     mkt_ctx = _get_mkt_ctx()
+
+    # Win rate — from the same Journal store the Journal tab uses (None if no
+    # logged trades → template shows a NOT WIRED badge).
+    win_rate = None
+    try:
+        _uid = session.get("user_id") or 1
+        win_rate = compute_journal_summary(get_all_journal_entries(_uid)).get("win_rate")
+    except Exception as _we:
+        logger.debug("terminal win_rate failed: %s", _we)
 
     # Schwab account snapshot (buying power, P&L, positions) — live when connected
     acct = None
@@ -4450,7 +4474,75 @@ def terminal():
         orb_session=get_orb_session_banner(),
         mkt=mkt_ctx,
         acct=acct,
+        win_rate=win_rate,
     )
+
+
+# Terminal chart candle series — reuses the SAME price feed the watchlist /
+# Execution engine uses (data_fetcher's Yahoo chart OHLCV, via institutional
+# engine). No new provider. Six timeframe tabs map to interval/range pairs the
+# feed supports; unsupported/empty ranges return [] so the UI can disable them.
+_TERMINAL_TF_MAP = {
+    "1D":  ("5m",  "1d"),
+    "1W":  ("30m", "5d"),
+    "1M":  ("1d",  "1mo"),
+    "3M":  ("1d",  "3mo"),
+    "1Y":  ("1d",  "1y"),
+    "ALL": ("1wk", "max"),
+}
+_TERMINAL_CANDLE_CACHE: dict = {}          # (ticker, tf) -> {"ts": epoch, "bars": [...]}
+_TERMINAL_CANDLE_TTL = {"1D": 60, "1W": 120}   # seconds; others fall back to 600
+
+
+@app.route("/api/terminal/candles/<ticker>")
+def api_terminal_candles(ticker):
+    """Return OHLCV bars for the terminal chart from the existing data feed."""
+    tf = (request.args.get("tf") or "1D").upper()
+    if tf not in _TERMINAL_TF_MAP:
+        return jsonify({"ok": False, "error": "unsupported timeframe"}), 400
+    ticker = (ticker or "").upper().strip()
+    if not ticker or len(ticker) > 12:
+        return jsonify({"ok": False, "error": "bad ticker"}), 400
+
+    ttl = _TERMINAL_CANDLE_TTL.get(tf, 600)
+    key = (ticker, tf)
+    cached = _TERMINAL_CANDLE_CACHE.get(key)
+    if cached and (_time.time() - cached["ts"]) < ttl:
+        return jsonify({"ok": True, "ticker": ticker, "tf": tf,
+                        "bars": cached["bars"], "cached": True})
+
+    interval, range_str = _TERMINAL_TF_MAP[tf]
+    data = None
+    try:
+        from data_fetcher import _fetch_ohlcv_via_chart_api
+        data = _fetch_ohlcv_via_chart_api(ticker, interval=interval, range_str=range_str)
+    except Exception as _e:
+        logger.debug("terminal candles %s %s failed: %s", ticker, tf, _e)
+
+    bars = []
+    if data and data.get("closes"):
+        ts  = data.get("timestamps") or []
+        op  = data.get("opens")  or []
+        hi  = data.get("highs")  or []
+        lo  = data.get("lows")   or []
+        cl  = data.get("closes") or []
+        vol = data.get("volumes") or []
+        n = min(len(ts), len(op), len(hi), len(lo), len(cl))
+        for i in range(n):
+            bar = {
+                "time":  int(ts[i]),
+                "open":  round(float(op[i]), 4),
+                "high":  round(float(hi[i]), 4),
+                "low":   round(float(lo[i]), 4),
+                "close": round(float(cl[i]), 4),
+            }
+            if i < len(vol):
+                bar["volume"] = int(vol[i] or 0)
+            bars.append(bar)
+
+    _TERMINAL_CANDLE_CACHE[key] = {"ts": _time.time(), "bars": bars}
+    return jsonify({"ok": True, "ticker": ticker, "tf": tf,
+                    "interval": interval, "range": range_str, "bars": bars})
 
 
 @app.route("/api/quick")

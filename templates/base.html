@@ -23,8 +23,8 @@
   <!-- ===== NAVBAR ===== -->
   <nav class="navbar">
 
-    <!-- LEFT: Brand -->
-    <a href="{{ url_for('liquidity_page') }}" class="nav-brand">
+    <!-- LEFT: Brand — Terminal is home -->
+    <a href="{{ url_for('terminal') }}" class="nav-brand">
       <img src="{{ url_for('static', filename='logo.png') }}"
            alt="HAULTRA AI"
            class="nav-logo"
@@ -37,7 +37,7 @@
       <span class="brand-sub">AI&nbsp;SYSTEMS</span>
     </a>
 
-    <!-- CENTER: Navigation Links — Terminal · Fundamentals · Research · Journal · Risk · Account (+ Command Center) -->
+    <!-- CENTER: Navigation Links — Terminal · Fundamentals · Execution · Research · Journal · Risk · Account · Command Center · Schwab -->
     <div class="nav-links">
       <a href="{{ url_for('terminal') }}"
          class="nav-link nav-link-exec {% if request.endpoint == 'terminal' %}nav-link-active{% endif %}"
@@ -48,6 +48,11 @@
          class="nav-link {% if request.endpoint == 'fundamentals_page' %}nav-link-active{% endif %}"
          title="Fundamentals Analyzer &amp; Quality Scorecard">
         FUNDAMENTALS
+      </a>
+      <a href="{{ url_for('quick_mode') }}"
+         class="nav-link {% if request.endpoint == 'quick_mode' %}nav-link-active{% endif %}"
+         title="Execution — live setup cards, ORB, alerts">
+        EXECUTION
       </a>
       <a href="{{ url_for('intel') }}"
          class="nav-link nav-link-research {% if request.endpoint == 'intel' %}nav-link-active{% endif %}"
