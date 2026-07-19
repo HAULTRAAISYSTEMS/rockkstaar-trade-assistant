@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#020b18" />
+  <meta name="theme-color" content="#060708" />
   <title>Authenticate — HAULTRA AI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -12,10 +12,10 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:      #020b18;
+      --bg:      #060708;
       --card:    #071830;
-      --border:  rgba(34,211,238,0.18);
-      --cyan:    #22D3EE;
+      --border:  rgba(255, 169, 77,0.18);
+      --cyan:    #FFA94D;
       --green:   #22c55e;
       --red:     #ef4444;
       --amber:   #f59e0b;
@@ -39,8 +39,8 @@
       position: fixed;
       inset: 0;
       background-image:
-        linear-gradient(rgba(34,211,238,0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(34,211,238,0.025) 1px, transparent 1px);
+        linear-gradient(rgba(255, 169, 77,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 169, 77,0.025) 1px, transparent 1px);
       background-size: 40px 40px;
       pointer-events: none;
       z-index: 0;
@@ -55,7 +55,7 @@
       transform: translateX(-50%);
       width: 600px;
       height: 600px;
-      background: radial-gradient(circle, rgba(34,211,238,0.05) 0%, transparent 65%);
+      background: radial-gradient(circle, rgba(255, 169, 77,0.05) 0%, transparent 65%);
       pointer-events: none;
       z-index: 0;
     }
@@ -94,7 +94,7 @@
       font-weight: 900;
       letter-spacing: 0.10em;
       color: var(--cyan);
-      text-shadow: 0 0 24px rgba(34,211,238,0.40), 0 0 60px rgba(34,211,238,0.15);
+      text-shadow: 0 0 24px rgba(255, 169, 77,0.40), 0 0 60px rgba(255, 169, 77,0.15);
       text-transform: uppercase;
     }
     .login-brand-sub {
@@ -112,13 +112,13 @@
       max-width: 380px;
       background: var(--card);
       border: 1px solid var(--border);
-      border-top: 2px solid rgba(34,211,238,0.30);
+      border-top: 2px solid rgba(255, 169, 77,0.30);
       border-radius: 6px;
       overflow: hidden;
       box-shadow:
-        0 0 0 1px rgba(34,211,238,0.05),
+        0 0 0 1px rgba(255, 169, 77,0.05),
         0 8px 32px rgba(0,0,0,0.6),
-        0 0 60px rgba(34,211,238,0.04);
+        0 0 60px rgba(255, 169, 77,0.04);
     }
 
     .login-card-header {
@@ -127,7 +127,7 @@
       gap: 8px;
       padding: 14px 20px;
       background: rgba(0,0,0,0.35);
-      border-bottom: 1px solid rgba(34,211,238,0.10);
+      border-bottom: 1px solid rgba(255, 169, 77,0.10);
     }
     .login-card-dot {
       width: 7px;
@@ -190,7 +190,7 @@
       width: 100%;
       padding: 11px 14px;
       background: rgba(0,0,0,0.50);
-      border: 1px solid rgba(34,211,238,0.15);
+      border: 1px solid rgba(255, 169, 77,0.15);
       border-radius: 4px;
       font-family: var(--mono);
       font-size: 14px;
@@ -202,16 +202,16 @@
     }
     .login-input::placeholder { color: var(--dim); letter-spacing: 0.05em; }
     .login-input:focus {
-      border-color: rgba(34,211,238,0.40);
-      box-shadow: 0 0 0 3px rgba(34,211,238,0.06);
+      border-color: rgba(255, 169, 77,0.40);
+      box-shadow: 0 0 0 3px rgba(255, 169, 77,0.06);
     }
 
     /* ── Button ── */
     .login-btn {
       width: 100%;
       padding: 13px;
-      background: rgba(34,211,238,0.10);
-      border: 1px solid rgba(34,211,238,0.28);
+      background: rgba(255, 169, 77,0.10);
+      border: 1px solid rgba(255, 169, 77,0.28);
       border-radius: 4px;
       font-family: var(--mono);
       font-size: 12px;
@@ -223,9 +223,9 @@
       transition: all 0.15s;
     }
     .login-btn:hover {
-      background: rgba(34,211,238,0.18);
-      border-color: rgba(34,211,238,0.50);
-      box-shadow: 0 0 16px rgba(34,211,238,0.12);
+      background: rgba(255, 169, 77,0.18);
+      border-color: rgba(255, 169, 77,0.50);
+      box-shadow: 0 0 16px rgba(255, 169, 77,0.12);
     }
     .login-btn:active {
       transform: scale(0.99);

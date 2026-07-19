@@ -1,0 +1,580 @@
+{% extends "base.html" %}
+{% block title %}Terminal — HAULTRA AI{% endblock %}
+
+{% block head_extra %}
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   HAULTRA AI — TRADE TERMINAL
+   Layout & styling only. Live data: watchlist (stocks), Schwab (acct).
+   Clearly-labeled paper/placeholder zones where no live source exists
+   (chart series, win rate, order ticket).
+   ═══════════════════════════════════════════════════════════════════ */
+
+.tw { max-width: 1680px; margin: 0 auto; }
+
+/* ---- Status line ---- */
+.tw-status {
+  display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap;
+  padding: var(--sp-2) var(--sp-1) var(--sp-3);
+}
+.tw-title {
+  font-family: var(--font-display); text-transform: uppercase;
+  letter-spacing: var(--track-display); font-weight: var(--fw-bold);
+  font-size: var(--fs-h2); color: var(--text-hi); line-height: 1;
+}
+.tw-title .accent { color: var(--orange-500); }
+.tw-chip {
+  display:inline-flex; align-items:center; gap:6px;
+  font-family: var(--font-mono); font-size: var(--fs-xs);
+  padding: 3px 10px; border-radius: var(--r-full);
+  background: var(--ink-750); border:1px solid var(--border-subtle);
+  color: var(--text-muted); white-space:nowrap;
+}
+.tw-chip b { color: var(--text-hi); font-weight: var(--fw-semi); }
+.tw-paper-flag {
+  color: var(--warn-500); border-color: rgba(255,176,32,.35);
+  background: rgba(255,176,32,.08);
+}
+
+/* ---- Ticker tape ---- */
+.tw-tape {
+  position: relative; overflow: hidden;
+  background: var(--surface-inset); border:1px solid var(--border-subtle);
+  border-radius: var(--r-md); margin-bottom: var(--sp-4);
+  box-shadow: var(--shadow-inset);
+}
+.tw-tape-track {
+  display:flex; align-items:center; gap: var(--sp-6);
+  padding: var(--sp-2) var(--sp-4); white-space:nowrap;
+  width: max-content; animation: tw-marquee 60s linear infinite;
+}
+.tw-tape:hover .tw-tape-track { animation-play-state: paused; }
+@keyframes tw-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.tw-tape-item { display:inline-flex; align-items:baseline; gap:8px; font-family: var(--font-mono); font-size: var(--fs-sm); }
+.tw-tape-sym  { color: var(--text-hi); font-weight: var(--fw-semi); letter-spacing:.03em; }
+.tw-tape-px   { color: var(--text-body); }
+.tw-tape-chg  { font-size: var(--fs-xs); font-weight: var(--fw-semi); }
+.chg-pos { color: var(--pos-500); }
+.chg-neg { color: var(--neg-500); }
+.chg-flat{ color: var(--text-faint); }
+
+/* ---- 3-column body ---- */
+.tw-body {
+  display:grid; grid-template-columns: 288px minmax(0,1fr) 340px;
+  gap: var(--sp-4); align-items:start;
+}
+
+/* Shared panel */
+.tw-panel {
+  background: var(--surface-card); border:1px solid var(--border-subtle);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-md);
+}
+.tw-panel-hd {
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding: var(--sp-3) var(--sp-4); border-bottom:1px solid var(--border-subtle);
+}
+.tw-panel-hd h3 {
+  font-family: var(--font-display); text-transform: uppercase;
+  letter-spacing: var(--track-label); font-size: var(--fs-xs);
+  font-weight: var(--fw-semi); color: var(--text-muted);
+}
+.tw-panel-hd .tw-count {
+  font-family: var(--font-mono); font-size: var(--fs-micro);
+  color: var(--text-faint); background: var(--ink-750);
+  border-radius: var(--r-full); padding:1px 8px;
+}
+
+/* ---- LEFT: watchlist ---- */
+.tw-wl { max-height: 640px; overflow-y:auto; }
+.tw-wl-row {
+  display:grid; grid-template-columns: 1fr 54px auto; align-items:center;
+  gap: var(--sp-2); padding: var(--sp-3) var(--sp-4);
+  border-bottom:1px solid var(--border-subtle); cursor:pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.tw-wl-row:last-child { border-bottom:none; }
+.tw-wl-row:hover { background: var(--surface-raised); }
+.tw-wl-row.active { background: var(--grad-brand-soft); box-shadow: inset 3px 0 0 var(--orange-500); }
+.tw-wl-sym  { font-family: var(--font-mono); font-weight: var(--fw-semi); font-size: var(--fs-sm); color: var(--text-hi); }
+.tw-wl-px   { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); margin-top:2px; }
+.tw-wl-chg  { font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: var(--fw-semi); text-align:right; }
+.tw-spark   { display:block; }
+
+/* ---- CENTER ---- */
+.tw-sym-hd {
+  display:flex; align-items:flex-end; gap: var(--sp-4); flex-wrap:wrap;
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+}
+.tw-sym-ticker { font-family: var(--font-mono); font-weight: var(--fw-bold); font-size: 34px; color: var(--text-hi); line-height:1; letter-spacing:.02em; }
+.tw-sym-px { font-family: var(--font-mono); font-size: var(--fs-h2); color: var(--text-body); }
+.tw-sym-chg { font-family: var(--font-mono); font-size: var(--fs-lg); font-weight: var(--fw-semi); }
+.tw-sym-meta { margin-left:auto; display:flex; gap: var(--sp-4); }
+.tw-sym-meta .m-lbl { font-family: var(--font-display); text-transform:uppercase; letter-spacing:var(--track-label); font-size:var(--fs-micro); color:var(--text-faint); }
+.tw-sym-meta .m-val { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-body); }
+
+/* Timeframe tabs */
+.tw-tf { display:flex; gap:4px; padding: 0 var(--sp-5) var(--sp-3); }
+.tw-tf-btn {
+  font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: var(--fw-med);
+  color: var(--text-faint); background: var(--ink-750);
+  border:1px solid var(--border-subtle); border-radius: var(--r-sm);
+  padding: 5px 12px; cursor:pointer; transition: all var(--dur-fast) var(--ease-out);
+}
+.tw-tf-btn:hover { color: var(--text-body); border-color: var(--border-strong); }
+.tw-tf-btn.active {
+  color: var(--text-on-accent); background: var(--grad-brand);
+  border-color: transparent; font-weight: var(--fw-bold);
+}
+
+/* Chart placeholder */
+.tw-chart {
+  margin: 0 var(--sp-5) var(--sp-5);
+  height: 380px; border-radius: var(--r-md);
+  border:1px dashed var(--border-strong);
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 47px, rgba(255,255,255,.02) 47px, rgba(255,255,255,.02) 48px),
+    repeating-linear-gradient(90deg, transparent, transparent 63px, rgba(255,255,255,.02) 63px, rgba(255,255,255,.02) 64px),
+    var(--surface-inset);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; text-align:center;
+}
+.tw-chart-icn { font-size: 30px; opacity:.5; }
+.tw-chart-msg { font-family: var(--font-display); text-transform:uppercase; letter-spacing:var(--track-label); font-size: var(--fs-sm); color: var(--text-muted); }
+.tw-chart-sub { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-faint); max-width: 380px; line-height:1.5; }
+
+/* ---- RIGHT: stat cards ---- */
+.tw-right { display:flex; flex-direction:column; gap: var(--sp-4); }
+.tw-stats { display:grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.tw-stat {
+  background: var(--surface-card); border:1px solid var(--border-subtle);
+  border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4);
+  box-shadow: var(--shadow-sm);
+}
+.tw-stat-lbl { font-family: var(--font-display); text-transform:uppercase; letter-spacing:var(--track-label); font-size: var(--fs-micro); color: var(--text-faint); }
+.tw-stat-val { font-family: var(--font-mono); font-size: var(--fs-h3); font-weight: var(--fw-semi); color: var(--text-hi); margin-top:4px; }
+.tw-stat-sub { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text-faint); margin-top:2px; }
+.tw-stat.paper { border-style:dashed; }
+.tw-stat.paper .tw-stat-val { color: var(--text-muted); }
+.tw-tag-paper {
+  display:inline-block; font-family: var(--font-mono); font-size: 9px;
+  letter-spacing:.08em; text-transform:uppercase; padding:1px 5px;
+  border-radius: var(--r-xs); color: var(--warn-500);
+  background: rgba(255,176,32,.10); border:1px solid rgba(255,176,32,.30); margin-top:6px;
+}
+
+/* ---- Order ticket ---- */
+.tw-ticket { padding: var(--sp-4); }
+.tw-side { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom: var(--sp-4); }
+.tw-side-btn {
+  font-family: var(--font-display); text-transform:uppercase; letter-spacing:var(--track-label);
+  font-size: var(--fs-sm); font-weight: var(--fw-bold);
+  padding: 9px 0; border-radius: var(--r-sm); cursor:pointer;
+  background: var(--ink-750); border:1px solid var(--border-subtle); color: var(--text-muted);
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.tw-side-btn.buy.active  { background: rgba(34,197,139,.16); border-color: var(--pos-600); color: var(--pos-500); }
+.tw-side-btn.sell.active { background: rgba(255,77,69,.14); border-color: var(--neg-600); color: var(--neg-500); }
+.tw-field { margin-bottom: var(--sp-3); }
+.tw-field label {
+  display:block; font-family: var(--font-display); text-transform:uppercase;
+  letter-spacing: var(--track-label); font-size: var(--fs-micro); color: var(--text-faint); margin-bottom:5px;
+}
+.tw-input, .tw-select {
+  width:100%; background: var(--surface-inset); border:1px solid var(--border-subtle);
+  border-radius: var(--r-sm); color: var(--text-hi); font-family: var(--font-mono);
+  font-size: var(--fs-sm); padding: 8px 10px; outline:none;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.tw-input:focus, .tw-select:focus { border-color: var(--orange-500); box-shadow: 0 0 0 2px rgba(255,122,24,.20); }
+.tw-input:disabled { opacity:.45; cursor:not-allowed; }
+.tw-field-row { display:grid; grid-template-columns:1fr 1fr; gap: var(--sp-3); }
+.tw-submit {
+  width:100%; margin-top: var(--sp-2); padding: 11px 0;
+  font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label);
+  font-size: var(--fs-sm); font-weight: var(--fw-bold); cursor:pointer;
+  border:none; border-radius: var(--r-sm); color: var(--text-on-accent);
+  background: var(--grad-brand); box-shadow: var(--shadow-sm);
+  transition: filter var(--dur-fast), box-shadow var(--dur-fast);
+}
+.tw-submit:hover { filter: brightness(1.06); box-shadow: var(--glow-accent); }
+.tw-ticket-note {
+  margin-top: var(--sp-3); font-family: var(--font-mono); font-size: var(--fs-micro);
+  color: var(--warn-500); line-height:1.5; text-align:center;
+}
+.tw-preview {
+  display:none; margin-top: var(--sp-3); padding: var(--sp-3);
+  background: var(--surface-inset); border:1px dashed var(--border-strong);
+  border-radius: var(--r-sm); font-family: var(--font-mono); font-size: var(--fs-xs);
+  color: var(--text-body); line-height:1.6; white-space:pre-wrap;
+}
+
+/* ---- Positions table ---- */
+.tw-positions { margin-top: var(--sp-4); }
+.tw-pos-wrap { overflow-x:auto; }
+.tw-pos-table { width:100%; border-collapse:collapse; font-family: var(--font-mono); font-size: var(--fs-sm); }
+.tw-pos-table th {
+  text-align:right; padding: var(--sp-2) var(--sp-4); color: var(--text-faint);
+  font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label);
+  font-size: var(--fs-micro); font-weight: var(--fw-semi);
+  border-bottom:1px solid var(--border-subtle); white-space:nowrap;
+}
+.tw-pos-table th:first-child, .tw-pos-table td:first-child { text-align:left; }
+.tw-pos-table th:nth-child(2), .tw-pos-table td:nth-child(2) { text-align:center; }
+.tw-pos-table td {
+  padding: var(--sp-3) var(--sp-4); text-align:right; color: var(--text-body);
+  border-bottom:1px solid var(--border-subtle); white-space:nowrap;
+}
+.tw-pos-table tr:last-child td { border-bottom:none; }
+.tw-pos-table tbody tr:hover td { background: var(--surface-raised); }
+.tw-pos-sym { color: var(--text-hi); font-weight: var(--fw-semi); }
+.tw-side-badge {
+  display:inline-block; font-family: var(--font-display); text-transform:uppercase;
+  letter-spacing:.08em; font-size: var(--fs-micro); font-weight: var(--fw-bold);
+  padding: 2px 8px; border-radius: var(--r-xs);
+}
+.tw-side-badge.long  { color: var(--pos-500); background: rgba(34,197,139,.12); border:1px solid var(--pos-600); }
+.tw-side-badge.short { color: var(--neg-500); background: rgba(255,77,69,.12); border:1px solid var(--neg-600); }
+
+/* ---- Empty states ---- */
+.tw-empty {
+  padding: var(--sp-8) var(--sp-4); text-align:center;
+  font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-faint); line-height:1.7;
+}
+.tw-empty a { color: var(--orange-400); text-decoration:underline; }
+
+/* ---- Responsive ---- */
+@media (max-width: 1180px) {
+  .tw-body { grid-template-columns: 240px minmax(0,1fr); }
+  .tw-right { grid-column: 1 / -1; }
+  .tw-stats { grid-template-columns: repeat(4,1fr); }
+}
+@media (max-width: 760px) {
+  .tw-body { grid-template-columns: 1fr; }
+  .tw-stats { grid-template-columns: 1fr 1fr; }
+  .tw-wl { max-height: 320px; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="tw">
+
+  <!-- ===== Status line ===== -->
+  <div class="tw-status">
+    <span class="tw-title"><span class="accent">◧</span> TERMINAL</span>
+    {% if mkt %}
+      {% if mkt.regime_label %}<span class="tw-chip">REGIME <b>{{ mkt.regime_label }}</b></span>{% endif %}
+      {% if mkt.vix_level is not none %}<span class="tw-chip">VIX <b>{{ '%.2f'|format(mkt.vix_level) }}</b></span>{% endif %}
+      {% if mkt.spy_1d_pct is not none %}<span class="tw-chip">SPY <b class="{{ 'chg-pos' if mkt.spy_1d_pct >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(mkt.spy_1d_pct) }}%</b></span>{% endif %}
+    {% endif %}
+    {% if orb_session and orb_session.phase_label %}<span class="tw-chip">{{ orb_session.phase_label }}</span>{% endif %}
+    <span class="tw-chip tw-paper-flag" title="Order ticket, chart series, and win rate are not wired to live data">PAPER / PREVIEW MODE</span>
+  </div>
+
+  <!-- ===== Ticker tape ===== -->
+  {% if stocks %}
+  <div class="tw-tape">
+    <div class="tw-tape-track">
+      {% for s in stocks + stocks %}
+      <span class="tw-tape-item">
+        <span class="tw-tape-sym">{{ s.ticker }}</span>
+        <span class="tw-tape-px">{{ '%.2f'|format(s.current_price) if s.current_price else '—' }}</span>
+        <span class="tw-tape-chg {{ 'chg-pos' if (s.gap_pct or 0) > 0 else ('chg-neg' if (s.gap_pct or 0) < 0 else 'chg-flat') }}">{{ s.gap_display or '0.00%' }}</span>
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ===== 3-column body ===== -->
+  <div class="tw-body">
+
+    <!-- LEFT: Watchlist -->
+    <div class="tw-panel">
+      <div class="tw-panel-hd">
+        <h3>Watchlist</h3>
+        <span class="tw-count">{{ stocks|length }}</span>
+      </div>
+      <div class="tw-wl">
+        {% for s in stocks %}
+        <div class="tw-wl-row {{ 'active' if loop.first }}"
+             data-ticker="{{ s.ticker }}"
+             data-price="{{ '%.2f'|format(s.current_price) if s.current_price else '' }}"
+             data-chg="{{ s.gap_display or '0.00%' }}"
+             data-chgdir="{{ 'pos' if (s.gap_pct or 0) > 0 else ('neg' if (s.gap_pct or 0) < 0 else 'flat') }}"
+             data-rvol="{{ '%.2f'|format(s.rel_volume) if s.rel_volume else '—' }}"
+             data-orbh="{{ '%.2f'|format(s.orb_high) if s.orb_high else '—' }}"
+             data-orbl="{{ '%.2f'|format(s.orb_low) if s.orb_low else '—' }}"
+             data-prev="{{ s.prev_close or '' }}"
+             data-vwap="{{ s.vwap or '' }}"
+             data-last="{{ s.current_price or '' }}"
+             data-href="{{ url_for('stock_detail', ticker=s.ticker) }}"
+             onclick="twSelect(this)">
+          <div>
+            <div class="tw-wl-sym">{{ s.ticker }}</div>
+            <div class="tw-wl-px">{{ '%.2f'|format(s.current_price) if s.current_price else '—' }}</div>
+          </div>
+          <svg class="tw-spark" width="54" height="26" viewBox="0 0 54 26" preserveAspectRatio="none"
+               data-spark data-prev="{{ s.prev_close or '' }}" data-vwap="{{ s.vwap or '' }}" data-last="{{ s.current_price or '' }}"
+               data-dir="{{ 'pos' if (s.gap_pct or 0) >= 0 else 'neg' }}"></svg>
+          <div class="tw-wl-chg {{ 'chg-pos' if (s.gap_pct or 0) > 0 else ('chg-neg' if (s.gap_pct or 0) < 0 else 'chg-flat') }}">{{ s.gap_display or '0.00%' }}</div>
+        </div>
+        {% else %}
+        <div class="tw-empty">No watchlist symbols.<br>Add tickers from the <a href="{{ url_for('quick_mode') }}">Execution</a> screen.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- CENTER: Symbol header + chart -->
+    <div class="tw-panel">
+      <div class="tw-sym-hd">
+        <span class="tw-sym-ticker" id="tw-c-ticker">{{ stocks[0].ticker if stocks else '—' }}</span>
+        <span class="tw-sym-px" id="tw-c-price">{{ '%.2f'|format(stocks[0].current_price) if stocks and stocks[0].current_price else '—' }}</span>
+        {% set c0dir = 'chg-pos' if (stocks and (stocks[0].gap_pct or 0) > 0) else ('chg-neg' if (stocks and (stocks[0].gap_pct or 0) < 0) else 'chg-flat') %}
+        <span class="tw-sym-chg {{ c0dir }}" id="tw-c-chg">{{ stocks[0].gap_display if stocks else '0.00%' }}</span>
+        <div class="tw-sym-meta">
+          <div><div class="m-lbl">RVOL</div><div class="m-val" id="tw-c-rvol">{{ '%.2f'|format(stocks[0].rel_volume) if stocks and stocks[0].rel_volume else '—' }}</div></div>
+          <div><div class="m-lbl">ORB Hi</div><div class="m-val" id="tw-c-orbh">{{ '%.2f'|format(stocks[0].orb_high) if stocks and stocks[0].orb_high else '—' }}</div></div>
+          <div><div class="m-lbl">ORB Lo</div><div class="m-val" id="tw-c-orbl">{{ '%.2f'|format(stocks[0].orb_low) if stocks and stocks[0].orb_low else '—' }}</div></div>
+        </div>
+      </div>
+
+      <div class="tw-tf">
+        {% for tf in ['1D','1W','1M','3M','1Y','ALL'] %}
+        <button class="tw-tf-btn {{ 'active' if tf == '1D' }}" onclick="twTf(this)">{{ tf }}</button>
+        {% endfor %}
+      </div>
+
+      <div class="tw-chart">
+        <div class="tw-chart-icn">📈</div>
+        <div class="tw-chart-msg">Chart — Placeholder</div>
+        <div class="tw-chart-sub">No intraday price series is wired to this view yet. Timeframe tabs are display-only. Symbol, price, %, RVOL and ORB levels above are live from the watchlist feed.</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: stat cards + order ticket -->
+    <div class="tw-right">
+      {% set connected = acct and acct.connected %}
+      <div class="tw-stats">
+        <div class="tw-stat {{ '' if connected else 'paper' }}">
+          <div class="tw-stat-lbl">Buying Power</div>
+          <div class="tw-stat-val">{{ '${:,.0f}'.format(acct.buying_power) if connected and acct.buying_power is not none else '—' }}</div>
+          {% if not connected %}<div class="tw-stat-sub">connect Schwab</div>{% endif %}
+        </div>
+        <div class="tw-stat {{ '' if connected else 'paper' }}">
+          <div class="tw-stat-lbl">Day P&amp;L</div>
+          {% if connected and acct.daily_pnl is not none %}
+          <div class="tw-stat-val {{ 'chg-pos' if acct.daily_pnl >= 0 else 'chg-neg' }}">{{ '{:+,.0f}'.format(acct.daily_pnl) }}</div>
+          {% if acct.daily_pnl_pct is not none %}<div class="tw-stat-sub {{ 'chg-pos' if acct.daily_pnl_pct >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(acct.daily_pnl_pct) }}%</div>{% endif %}
+          {% else %}<div class="tw-stat-val">—</div>{% endif %}
+        </div>
+        <div class="tw-stat {{ '' if connected else 'paper' }}">
+          <div class="tw-stat-lbl">Open P&amp;L</div>
+          {% if connected and acct.total_unrealized is not none %}
+          <div class="tw-stat-val {{ 'chg-pos' if acct.total_unrealized >= 0 else 'chg-neg' }}">{{ '{:+,.0f}'.format(acct.total_unrealized) }}</div>
+          {% else %}<div class="tw-stat-val">—</div>{% endif %}
+        </div>
+        <div class="tw-stat paper">
+          <div class="tw-stat-lbl">Win Rate</div>
+          <div class="tw-stat-val">—</div>
+          <div class="tw-tag-paper">not wired</div>
+        </div>
+      </div>
+
+      <!-- Order ticket (paper / preview) -->
+      <div class="tw-panel">
+        <div class="tw-panel-hd">
+          <h3>Order Ticket</h3>
+          <span class="tw-count">PAPER</span>
+        </div>
+        <div class="tw-ticket">
+          <div class="tw-side">
+            <button type="button" class="tw-side-btn buy active" data-side="BUY" onclick="twSide(this)">Buy</button>
+            <button type="button" class="tw-side-btn sell" data-side="SELL" onclick="twSide(this)">Sell</button>
+          </div>
+
+          <div class="tw-field">
+            <label for="tw-ot-symbol">Symbol</label>
+            <input class="tw-input" id="tw-ot-symbol" type="text" value="{{ stocks[0].ticker if stocks else '' }}" autocomplete="off">
+          </div>
+
+          <div class="tw-field">
+            <label for="tw-ot-type">Order Type</label>
+            <select class="tw-select" id="tw-ot-type" onchange="twType()">
+              <option value="MARKET">Market</option>
+              <option value="LIMIT">Limit</option>
+              <option value="STOP">Stop</option>
+              <option value="STOP_LIMIT">Stop Limit</option>
+            </select>
+          </div>
+
+          <div class="tw-field-row">
+            <div class="tw-field">
+              <label for="tw-ot-qty">Quantity</label>
+              <input class="tw-input" id="tw-ot-qty" type="number" min="0" step="1" value="100">
+            </div>
+            <div class="tw-field">
+              <label for="tw-ot-limit">Limit</label>
+              <input class="tw-input" id="tw-ot-limit" type="number" min="0" step="0.01" placeholder="—" disabled>
+            </div>
+          </div>
+
+          <div class="tw-field">
+            <label for="tw-ot-tif">Time in Force</label>
+            <select class="tw-select" id="tw-ot-tif">
+              <option value="DAY">Day</option>
+              <option value="GTC">Good 'til Canceled</option>
+              <option value="IOC">Immediate or Cancel</option>
+              <option value="FOK">Fill or Kill</option>
+            </select>
+          </div>
+
+          <button type="button" class="tw-submit" onclick="twPreview()">Preview Order</button>
+          <div class="tw-ticket-note">⚠ Paper / preview only — does not place live orders.</div>
+          <div class="tw-preview" id="tw-preview"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Positions table ===== -->
+  <div class="tw-panel tw-positions">
+    <div class="tw-panel-hd">
+      <h3>Positions</h3>
+      {% set connected = acct and acct.connected %}
+      <span class="tw-count">{{ acct.open_positions if connected else 0 }}{{ '' if connected else ' · paper' }}</span>
+    </div>
+    <div class="tw-pos-wrap">
+      {% set connected = acct and acct.connected %}
+      {% set ns = namespace(rows=0) %}
+      {% if connected %}
+      <table class="tw-pos-table">
+        <thead>
+          <tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg</th><th>Last</th><th>P&amp;L</th><th>%</th></tr>
+        </thead>
+        <tbody>
+          {% for a in acct.accounts %}
+            {% for p in a.equity_positions %}
+              {% set ns.rows = ns.rows + 1 %}
+              {% set last = (p.market_value / p.quantity) if p.quantity else 0 %}
+              {% set basis = (p.avg_price * (p.quantity if p.quantity >= 0 else -p.quantity)) %}
+              {% set pct = (p.unrealized / basis * 100) if basis else 0 %}
+              <tr>
+                <td class="tw-pos-sym">{{ p.symbol }}</td>
+                <td><span class="tw-side-badge {{ 'long' if p.quantity >= 0 else 'short' }}">{{ 'Long' if p.quantity >= 0 else 'Short' }}</span></td>
+                <td>{{ '{:,.0f}'.format(p.quantity) }}</td>
+                <td>{{ '%.2f'|format(p.avg_price) }}</td>
+                <td>{{ '%.2f'|format(last) }}</td>
+                <td class="{{ 'chg-pos' if (p.unrealized or 0) >= 0 else 'chg-neg' }}">{{ '{:+,.2f}'.format(p.unrealized or 0) }}</td>
+                <td class="{{ 'chg-pos' if pct >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(pct) }}%</td>
+              </tr>
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if ns.rows == 0 %}
+      <div class="tw-empty">Schwab connected — no open equity positions.</div>
+      {% endif %}
+      {% else %}
+      <div class="tw-empty">
+        No live positions — Schwab account not connected.<br>
+        Connect via the <a href="{{ url_for('schwab_account') }}">Schwab</a> tab to populate positions, buying power, and P&amp;L. Paper mode.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── Sparklines: drawn from real anchor points (prev close · VWAP · last) ── */
+(function drawSparks(){
+  document.querySelectorAll('svg[data-spark]').forEach(function(svg){
+    var pts = [svg.dataset.prev, svg.dataset.vwap, svg.dataset.last]
+      .map(parseFloat).filter(function(v){ return !isNaN(v); });
+    if (pts.length < 2) return;
+    var w = 54, h = 26, pad = 3;
+    var min = Math.min.apply(null, pts), max = Math.max.apply(null, pts);
+    var span = (max - min) || 1;
+    var step = (w - pad*2) / (pts.length - 1);
+    var d = pts.map(function(v, i){
+      var x = pad + i*step;
+      var y = pad + (h - pad*2) * (1 - (v - min)/span);
+      return (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1);
+    }).join(' ');
+    var color = svg.dataset.dir === 'neg' ? 'var(--neg-500)' : 'var(--pos-500)';
+    var path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill','none');
+    path.setAttribute('stroke', color);
+    path.setAttribute('stroke-width','1.5');
+    path.setAttribute('stroke-linecap','round');
+    path.setAttribute('stroke-linejoin','round');
+    svg.appendChild(path);
+  });
+})();
+
+/* ── Watchlist → center header selection ── */
+function twSelect(row){
+  document.querySelectorAll('.tw-wl-row').forEach(function(r){ r.classList.remove('active'); });
+  row.classList.add('active');
+  var d = row.dataset;
+  var set = function(id, val){ var el = document.getElementById(id); if (el) el.textContent = val; };
+  set('tw-c-ticker', d.ticker);
+  set('tw-c-price', d.price || '—');
+  set('tw-c-rvol', d.rvol);
+  set('tw-c-orbh', d.orbh);
+  set('tw-c-orbl', d.orbl);
+  var chg = document.getElementById('tw-c-chg');
+  if (chg){
+    chg.textContent = d.chg;
+    chg.className = 'tw-sym-chg ' + (d.chgdir === 'pos' ? 'chg-pos' : (d.chgdir === 'neg' ? 'chg-neg' : 'chg-flat'));
+  }
+  var sym = document.getElementById('tw-ot-symbol');
+  if (sym) sym.value = d.ticker;
+}
+
+/* ── Timeframe tabs (display-only) ── */
+function twTf(btn){
+  btn.parentElement.querySelectorAll('.tw-tf-btn').forEach(function(b){ b.classList.remove('active'); });
+  btn.classList.add('active');
+}
+
+/* ── Order ticket: side toggle ── */
+function twSide(btn){
+  document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); });
+  btn.classList.add('active');
+  window._twSide = btn.dataset.side;
+}
+
+/* ── Order type → enable/disable limit field ── */
+function twType(){
+  var t = document.getElementById('tw-ot-type').value;
+  var limit = document.getElementById('tw-ot-limit');
+  var needsLimit = (t === 'LIMIT' || t === 'STOP_LIMIT' || t === 'STOP');
+  limit.disabled = !needsLimit;
+  if (!needsLimit) limit.value = '';
+}
+
+/* ── Preview (local only — never submits a live order) ── */
+function twPreview(){
+  var side = window._twSide || 'BUY';
+  var sym  = (document.getElementById('tw-ot-symbol').value || '—').toUpperCase();
+  var type = document.getElementById('tw-ot-type').value;
+  var qty  = document.getElementById('tw-ot-qty').value || '0';
+  var lim  = document.getElementById('tw-ot-limit').value;
+  var tif  = document.getElementById('tw-ot-tif').value;
+  var lines = [
+    'PAPER ORDER PREVIEW — not transmitted',
+    '────────────────────────────',
+    side + '  ' + qty + '  ' + sym,
+    'Type: ' + type + (lim ? '  @ ' + lim : ''),
+    'TIF:  ' + tif
+  ];
+  var box = document.getElementById('tw-preview');
+  box.textContent = lines.join('\n');
+  box.style.display = 'block';
+}
+</script>
+{% endblock %}

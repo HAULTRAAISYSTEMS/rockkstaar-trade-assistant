@@ -5,14 +5,14 @@
 <style>
   .page {
     /* ── Backgrounds (navy/dark — matches HAULTRA app) ── */
-    --bg-primary:    #020617;
-    --bg-surface:    #040c1e;
+    --bg-primary:    #060708;
+    --bg-surface:    #0B0D10;
     --bg-card:       rgba(8, 14, 36, 0.88);
     --bg-card-hover: rgba(12, 22, 50, 0.95);
     --bg-inset:      rgba(2, 6, 16, 0.92);
     /* ── Borders ── */
-    --border:        rgba(14, 165, 233, 0.11);
-    --border-accent: rgba(14, 165, 233, 0.26);
+    --border:        rgba(255, 122, 24, 0.11);
+    --border-accent: rgba(255, 122, 24, 0.26);
     /* ── Text ── */
     --text-primary:  #E8ECFF;
     --text-secondary:#94A3B8;
@@ -26,13 +26,13 @@
     --amber-dim:  rgba(245,158,11,0.12);
     --purple:     #a78bfa;
     --purple-dim: rgba(167,139,250,0.10);
-    --blue:       #22D3EE;
-    --blue-dim:   rgba(34,211,238,0.10);
-    --teal:       #22D3EE;
-    --teal-dim:   rgba(34,211,238,0.10);
+    --blue:       #FFA94D;
+    --blue-dim:   rgba(255, 169, 77,0.10);
+    --teal:       #FFA94D;
+    --teal-dim:   rgba(255, 169, 77,0.10);
     /* ── Brand accent (electric blue) ── */
-    --accent:      #0ea5e9;
-    --accent-glow: rgba(14,165,233,0.22);
+    --accent:      #FF7A18;
+    --accent-glow: rgba(255, 122, 24,0.22);
     /* ── Typography ── */
     --font:    'Cascadia Code','JetBrains Mono','Fira Code','SF Mono',monospace;
     --font-ui: 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
@@ -68,7 +68,7 @@
     content: '';
     width: 3px;
     height: 20px;
-    background: linear-gradient(180deg, var(--accent), rgba(14,165,233,0.2));
+    background: linear-gradient(180deg, var(--accent), rgba(255, 122, 24,0.2));
     border-radius: 2px;
     flex-shrink: 0;
   }
@@ -147,20 +147,20 @@
   }
   .page .card:hover {
     border-color: var(--border-accent);
-    box-shadow: 0 0 22px rgba(14,165,233,0.07), 0 6px 28px rgba(0,0,0,0.35);
+    box-shadow: 0 0 22px rgba(255, 122, 24,0.07), 0 6px 28px rgba(0,0,0,0.35);
   }
   .page .card::after {
     content: '';
     position: absolute;
     inset: 0;
     border-radius: 12px;
-    background: linear-gradient(135deg, rgba(14,165,233,0.025) 0%, transparent 55%);
+    background: linear-gradient(135deg, rgba(255, 122, 24,0.025) 0%, transparent 55%);
     pointer-events: none;
   }
   .page .card-header {
     padding: 13px 18px 11px;
     border-bottom: 1px solid var(--border);
-    background: rgba(14,165,233,0.025);
+    background: rgba(255, 122, 24,0.025);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -183,7 +183,7 @@
     background: var(--accent);
     border-radius: 1px;
     display: block;
-    box-shadow: 0 0 5px rgba(14,165,233,0.7);
+    box-shadow: 0 0 5px rgba(255, 122, 24,0.7);
   }
   .page .card-body { padding: 15px 18px; }
 
@@ -214,7 +214,7 @@
     opacity: 0;
     transition: opacity 0.25s;
   }
-  .page .env-cell:hover { border-color: var(--border-accent); box-shadow: 0 0 18px rgba(14,165,233,0.07); }
+  .page .env-cell:hover { border-color: var(--border-accent); box-shadow: 0 0 18px rgba(255, 122, 24,0.07); }
   .page .env-cell:hover::before { opacity: 1; }
   .page .env-label { font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); font-family: var(--font); }
   .page .env-value { font-size: 22px; font-family: var(--font); font-weight: 700; letter-spacing: -0.02em; margin-top: 2px; }
@@ -314,7 +314,7 @@
     transition: background 0.1s;
   }
   .page .check-item:last-child { border-bottom: none; }
-  .page .check-item:hover { background: rgba(14,165,233,0.04); }
+  .page .check-item:hover { background: rgba(255, 122, 24,0.04); }
   .page .check-item.done { opacity: 0.40; }
   .page .check-box {
     width: 16px;
@@ -331,7 +331,7 @@
   .page .check-item.done .check-box {
     background: var(--accent);
     border-color: var(--accent);
-    box-shadow: 0 0 7px rgba(14,165,233,0.45);
+    box-shadow: 0 0 7px rgba(255, 122, 24,0.45);
   }
   .page .check-item.done .check-box::after {
     content: '';
@@ -355,7 +355,7 @@
     background: linear-gradient(90deg, var(--accent), var(--blue));
     border-radius: 4px;
     transition: width 0.3s ease;
-    box-shadow: 0 0 6px rgba(14,165,233,0.5);
+    box-shadow: 0 0 6px rgba(255, 122, 24,0.5);
   }
 
   /* ── Insider feed ── */
@@ -428,7 +428,7 @@
     letter-spacing: 0.04em;
     transition: all 0.15s;
   }
-  .page .view-btn.active { background: var(--accent); color: #fff; box-shadow: 0 0 12px rgba(14,165,233,0.35); }
+  .page .view-btn.active { background: var(--accent); color: #fff; box-shadow: 0 0 12px rgba(255, 122, 24,0.35); }
 
   /* ── Action btn ── */
   .page .btn {
@@ -447,9 +447,9 @@
     letter-spacing: 0.02em;
     white-space: nowrap;
   }
-  .page .btn:hover { background: var(--bg-card-hover); border-color: rgba(14,165,233,0.30); color: #38bdf8; }
-  .page .btn-accent { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 0 14px rgba(14,165,233,0.30); }
-  .page .btn-accent:hover { background: #38bdf8; border-color: #38bdf8; box-shadow: 0 0 22px rgba(14,165,233,0.45); }
+  .page .btn:hover { background: var(--bg-card-hover); border-color: rgba(255, 122, 24,0.30); color: #FFA94D; }
+  .page .btn-accent { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 0 14px rgba(255, 122, 24,0.30); }
+  .page .btn-accent:hover { background: #FFA94D; border-color: #FFA94D; box-shadow: 0 0 22px rgba(255, 122, 24,0.45); }
 
   /* ── Tab panels ── */
   .page .panel { display: none; }
@@ -470,7 +470,7 @@
   }
   .page .impact-critical { background: rgba(239,68,68,0.18);  color: #f87171; border: 1px solid rgba(239,68,68,0.35); }
   .page .impact-high { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.35); }
-  .page .impact-medium { background: rgba(96,165,250,0.12); color: #93c5fd; border: 1px solid rgba(96,165,250,0.3); }
+  .page .impact-medium { background: rgba(96,165,250,0.12); color: #FFC078; border: 1px solid rgba(96,165,250,0.3); }
   .page .impact-low { background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid var(--border); }
 
   /* ── Danger day banner ── */
@@ -499,9 +499,9 @@
     transition: background 0.12s;
   }
   .page .news-row:last-child { border-bottom: none; }
-  .page .news-row:hover { background: rgba(14,165,233,0.04); }
+  .page .news-row:hover { background: rgba(255, 122, 24,0.04); }
   .page .news-row-header {
-    background: rgba(14,165,233,0.04);
+    background: rgba(255, 122, 24,0.04);
     border-bottom: 1px solid var(--border-accent);
     font-size: 9px;
     font-weight: 700;
@@ -528,9 +528,9 @@
     transition: background 0.1s;
   }
   .page .earn-row:last-child { border-bottom: none; }
-  .page .earn-row:hover { background: rgba(14,165,233,0.04); }
+  .page .earn-row:hover { background: rgba(255, 122, 24,0.04); }
   .page .earn-row-header {
-    background: rgba(14,165,233,0.04);
+    background: rgba(255, 122, 24,0.04);
     border-bottom: 1px solid var(--border-accent);
     font-size: 9px;
     font-weight: 700;
@@ -558,9 +558,9 @@
     transition: background 0.12s;
   }
   .page .split-row:last-child { border-bottom: none; }
-  .page .split-row:hover { background: rgba(14,165,233,0.04); }
+  .page .split-row:hover { background: rgba(255, 122, 24,0.04); }
   .page .split-row-header {
-    background: rgba(14,165,233,0.04);
+    background: rgba(255, 122, 24,0.04);
     border-bottom: 1px solid var(--border-accent);
     font-size: 9px;
     font-weight: 700;
@@ -588,9 +588,9 @@
     transition: background 0.12s;
   }
   .page .div-row:last-child { border-bottom: none; }
-  .page .div-row:hover { background: rgba(14,165,233,0.04); }
+  .page .div-row:hover { background: rgba(255, 122, 24,0.04); }
   .page .div-row-header {
-    background: rgba(14,165,233,0.04);
+    background: rgba(255, 122, 24,0.04);
     border-bottom: 1px solid var(--border-accent);
     font-size: 9px;
     font-weight: 700;
@@ -624,7 +624,7 @@
     transition: background 0.12s;
   }
   .page .econ-row:last-child { border-bottom: none; }
-  .page .econ-row:hover { background: rgba(14,165,233,0.04); }
+  .page .econ-row:hover { background: rgba(255, 122, 24,0.04); }
   .page .econ-row.is-today {
     background: rgba(239,68,68,0.04);
     border-left: 3px solid rgba(239,68,68,0.50);
@@ -632,7 +632,7 @@
     box-shadow: inset 2px 0 10px rgba(239,68,68,0.04);
   }
   .page .econ-row-header {
-    background: rgba(14,165,233,0.04);
+    background: rgba(255, 122, 24,0.04);
     border-bottom: 1px solid var(--border-accent);
     font-size: 9px;
     font-weight: 700;
@@ -686,7 +686,7 @@
     border-radius: 50%;
     animation: spin 0.75s linear infinite;
     flex-shrink: 0;
-    box-shadow: 0 0 8px rgba(14,165,233,0.20);
+    box-shadow: 0 0 8px rgba(255, 122, 24,0.20);
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -711,10 +711,10 @@
     cursor: pointer;
     transition: all 0.15s;
   }
-  .page .filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: 0 0 8px rgba(14,165,233,0.30); }
+  .page .filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: 0 0 8px rgba(255, 122, 24,0.30); }
   .page .filter-btn.f-critical.active { background: #ef4444; border-color: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.30); }
   .page .filter-btn.f-high.active { background: #f59e0b; border-color: #f59e0b; box-shadow: 0 0 8px rgba(245,158,11,0.30); }
-  .page .filter-btn.f-medium.active { background: #22D3EE; border-color: #22D3EE; box-shadow: 0 0 8px rgba(34,211,238,0.30); }
+  .page .filter-btn.f-medium.active { background: #FFA94D; border-color: #FFA94D; box-shadow: 0 0 8px rgba(255, 169, 77,0.30); }
 
   /* ── Debug panel ── */
   .page #intel-dbg {
@@ -749,7 +749,7 @@
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--text-muted);
-    background: rgba(14,165,233,0.03);
+    background: rgba(255, 122, 24,0.03);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
@@ -768,7 +768,7 @@
     transition: background 0.1s;
   }
   .page .ndx-change-row:last-child { border-bottom: none; }
-  .page .ndx-change-row:hover { background: rgba(14,165,233,0.04); }
+  .page .ndx-change-row:hover { background: rgba(255, 122, 24,0.04); }
   .page .ndx-change-row.ndx-added { border-left: 3px solid rgba(34,197,94,0.55);  padding-left: 13px; }
   .page .ndx-change-row.ndx-removed { border-left: 3px solid rgba(239,68,68,0.55);  padding-left: 13px; }
   .page .ndx-add-badge { background: rgba(34,197,94,0.12);  color: var(--green); border: 1px solid rgba(34,197,94,0.3);  font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
@@ -783,7 +783,7 @@
     transition: background 0.1s;
   }
   .page .ndx-holding-row:last-child { border-bottom: none; }
-  .page .ndx-holding-row:hover { background: rgba(14,165,233,0.04); }
+  .page .ndx-holding-row:hover { background: rgba(255, 122, 24,0.04); }
   .page .ndx-holding-bar-wrap {
     background: var(--bg-inset);
     border-radius: 3px;
@@ -870,7 +870,7 @@
     transition: border-color 0.25s, box-shadow 0.25s;
   }
   .page .ai-briefing-card:hover {
-    box-shadow: 0 0 22px rgba(14,165,233,0.09), 0 6px 28px rgba(0,0,0,0.35);
+    box-shadow: 0 0 22px rgba(255, 122, 24,0.09), 0 6px 28px rgba(0,0,0,0.35);
   }
   .page .ai-briefing-header {
     display: flex;
@@ -936,9 +936,9 @@
     margin-right: 2px;
   }
   .page .ai-ticker-chip {
-    background: rgba(14,165,233,0.12);
+    background: rgba(255, 122, 24,0.12);
     color: var(--accent);
-    border: 1px solid rgba(14,165,233,0.28);
+    border: 1px solid rgba(255, 122, 24,0.28);
     border-radius: 6px;
     padding: 3px 9px;
     font-size: 11px;
@@ -948,7 +948,7 @@
     text-decoration: none;
     transition: background 0.15s;
   }
-  .page .ai-ticker-chip:hover { background: rgba(14,165,233,0.22); }
+  .page .ai-ticker-chip:hover { background: rgba(255, 122, 24,0.22); }
   .page .ai-briefing-footer {
     font-size: 10px;
     color: var(--text-muted);
@@ -972,7 +972,7 @@
   .page .ai-briefing-footer button:hover { border-color: var(--accent); color: var(--accent); }
   .page .ai-briefing-skeleton {
     height: 80px;
-    background: linear-gradient(90deg, rgba(14,165,233,0.04) 25%, rgba(14,165,233,0.08) 50%, rgba(14,165,233,0.04) 75%);
+    background: linear-gradient(90deg, rgba(255, 122, 24,0.04) 25%, rgba(255, 122, 24,0.08) 50%, rgba(255, 122, 24,0.04) 75%);
     background-size: 200% 100%;
     animation: ai-shimmer 1.6s ease-in-out infinite;
     border-radius: 8px;
@@ -2280,7 +2280,7 @@ function _renderEarnRows(elId, allItems) {
       : '<span style="color:var(--text-muted);font-size:11px;">—</span>';
     var tickerColor = item.on_watchlist ? 'color:var(--amber)' : item.is_override ? 'color:var(--blue)' : '';
     var ovBadge     = item.is_override
-      ? '<span style="font-size:9px;background:rgba(96,165,250,0.12);color:#93c5fd;border:1px solid rgba(96,165,250,0.3);border-radius:3px;padding:1px 5px;margin-left:4px;vertical-align:middle;">MANUAL</span>'
+      ? '<span style="font-size:9px;background:rgba(96,165,250,0.12);color:#FFC078;border:1px solid rgba(96,165,250,0.3);border-radius:3px;padding:1px 5px;margin-left:4px;vertical-align:middle;">MANUAL</span>'
       : '';
     var warnDot     = (item.days_away <= 1 && item.on_watchlist)
       ? ' <span style="font-size:9px;background:rgba(239,68,68,0.12);color:#f87171;border:1px solid rgba(239,68,68,0.3);border-radius:3px;padding:1px 4px;">RISK</span>'
@@ -2719,7 +2719,7 @@ function _renderNdxHoldings(holdings) {
 
   var maxWeight = holdings.length ? (holdings[0].weight_pct || 1) : 1;
   var header =
-    '<div class="ndx-holding-row" style="background:rgba(14,165,233,0.04);font-size:9px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--text-muted);">' +
+    '<div class="ndx-holding-row" style="background:rgba(255, 122, 24,0.04);font-size:9px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--text-muted);">' +
     '<span>Ticker</span><span>Company</span><span style="text-align:right;">Weight %</span><span>Bar</span></div>';
 
   var rows = holdings.map(function(h, i) {

@@ -4408,6 +4408,51 @@ def quick_mode():
     )
 
 
+@app.route("/terminal")
+def terminal():
+    """HAULTRA Trade Terminal — ticker tape · watchlist · chart · order ticket · positions.
+
+    View/layout only. Reuses the exact same existing data sources as quick_mode
+    (get_watchlist_stocks / get_all_stock_data / annotate / rank_stocks /
+    _get_mkt_ctx / _get_schwab_data). No new API calls, no logic changes.
+    """
+    wl_id     = get_active_wl_id()
+    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+
+    _trade_mode = get_setting("trading_mode") or "SWING TRADE"
+    all_data = get_all_stock_data()
+    data_map = {s["ticker"]: s for s in all_data}
+
+    if watchlist:
+        auto_refresh_stale_closes(watchlist, data_map=data_map)
+    stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
+    ranked  = rank_stocks(stocks)
+    valid   = [s for s in ranked if s.get("trade_bias") != "Avoid"]
+
+    mkt_ctx = _get_mkt_ctx()
+
+    # Schwab account snapshot (buying power, P&L, positions) — live when connected
+    acct = None
+    try:
+        uid = session.get("user_id")
+        if uid:
+            tok = _schwab.token_status(uid)
+            if tok.get("connected"):
+                acct = _get_schwab_data(uid)
+                if acct.get("error"):
+                    acct = None
+    except Exception as _ae:
+        logger.debug("terminal: schwab account fetch skipped: %s", _ae)
+
+    return render_template(
+        "terminal.html",
+        stocks=valid,
+        orb_session=get_orb_session_banner(),
+        mkt=mkt_ctx,
+        acct=acct,
+    )
+
+
 @app.route("/api/quick")
 def api_quick():
     """JSON for Execution Command Center live refresh — all ranked stocks + market context."""

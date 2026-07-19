@@ -38,7 +38,7 @@
 }
 .qm-orb-pill.orbp-forming { background: rgba(234,179,8,0.12);  color: #eab308; border-color: rgba(234,179,8,0.3); }
 .qm-orb-pill.orbp-locked  { background: rgba(34,197,94,0.12);  color: #22c55e; border-color: rgba(34,197,94,0.3); }
-.qm-full-link { font-size: 0.78rem; font-weight: 600; color: #6366f1; white-space: nowrap; opacity: 0.85; }
+.qm-full-link { font-size: 0.78rem; font-weight: 600; color: #FF7A18; white-space: nowrap; opacity: 0.85; }
 .qm-full-link:hover { opacity: 1; }
 
 /* ---- Session bar ---- */
@@ -165,7 +165,7 @@
   padding: 0.4rem 0.6rem;
   background: #1c2230;
   border-radius: 6px;
-  border-left: 3px solid #6366f1;
+  border-left: 3px solid #FF7A18;
   line-height: 1.4;
 }
 .qm-catalyst-summary { font-size: 0.78rem; color: #64748b; line-height: 1.45; }
@@ -178,14 +178,14 @@
   padding: 0.85rem 1rem;
   font-size: 0.82rem;
   font-weight: 700;
-  color: #6366f1;
+  color: #FF7A18;
   border-top: 1px solid #252d3d;
   letter-spacing: 0.03em;
   transition: background 0.15s;
   min-height: 48px;
 }
 .qm-view-btn:hover,
-.qm-view-btn:active { background: rgba(99,102,241,0.08); }
+.qm-view-btn:active { background: rgba(255, 122, 24,0.08); }
 
 /* Empty state */
 .qm-empty {

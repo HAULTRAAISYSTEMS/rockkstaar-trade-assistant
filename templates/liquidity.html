@@ -12,7 +12,7 @@
   ═══════════════════════════════════════════════════════════════════════ -->
   <div id="market-story-banner" style="display:none;
     background:linear-gradient(135deg,rgba(6,12,28,0.96) 0%,rgba(2,6,16,0.98) 100%);
-    border-bottom:1px solid rgba(14,165,233,0.15);
+    border-bottom:1px solid rgba(255, 122, 24,0.15);
     padding:12px 16px;
     position:relative;
     overflow:hidden;">
@@ -21,15 +21,15 @@
     <div style="display:flex;align-items:flex-start;gap:14px;padding-left:10px;">
       <div style="flex:1;min-width:0;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap;">
-          <span style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:rgba(14,165,233,0.7);">📊 TODAY'S MARKET STORY</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255, 122, 24,0.7);">📊 TODAY'S MARKET STORY</span>
           <span id="ms-sentiment-badge" style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.07em;padding:2px 7px;border-radius:3px;"></span>
-          <span id="ms-regime-badge"    style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.07em;padding:2px 7px;border-radius:3px;background:rgba(34,211,238,0.08);color:#22D3EE;border:1px solid rgba(34,211,238,0.18);"></span>
+          <span id="ms-regime-badge"    style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.07em;padding:2px 7px;border-radius:3px;background:rgba(255, 169, 77,0.08);color:#FFA94D;border:1px solid rgba(255, 169, 77,0.18);"></span>
         </div>
         <div id="ms-headline" style="font-family:'Inter',sans-serif;font-size:13px;font-weight:700;color:#E8ECFF;line-height:1.3;margin-bottom:6px;"></div>
         <div id="ms-bullets" style="display:flex;flex-direction:column;gap:3px;"></div>
         <div id="ms-permissions" style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;"></div>
       </div>
-      <a href="/quick" style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.07em;color:#22D3EE;text-decoration:none;white-space:nowrap;flex-shrink:0;padding:4px 0;opacity:0.7;">
+      <a href="/quick" style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.07em;color:#FFA94D;text-decoration:none;white-space:nowrap;flex-shrink:0;padding:4px 0;opacity:0.7;">
         ⚡ EXECUTION →
       </a>
     </div>
@@ -223,7 +223,7 @@
 /* Status banner (weekend / stale / loading) */
 .liq-status-banner { padding:.55rem 1.25rem; border-radius:8px; font-size:.78rem; margin-bottom:.75rem;
   display:flex; align-items:center; gap:.6rem; }
-.liq-status-banner.banner-weekend { background:rgba(99,102,241,.08); border:1px solid rgba(99,102,241,.2); color:#a5b4fc; }
+.liq-status-banner.banner-weekend { background:rgba(255, 122, 24,.08); border:1px solid rgba(255, 122, 24,.2); color:#a5b4fc; }
 .liq-status-banner.banner-stale   { background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.2); color:#fde68a; }
 .liq-status-banner.banner-loading { background:rgba(100,116,139,.08);border:1px solid rgba(100,116,139,.2); color:#94a3b8; }
 
@@ -336,7 +336,7 @@
 .liq-scan-controls{ display:flex; gap:.5rem; align-items:center; margin-left:auto; }
 .liq-ticker-input{ background:#080f1a; border:1px solid #1e293b; color:#f1f5f9; border-radius:6px; padding:.35rem .65rem; font-size:.8rem; width:200px; }
 .btn-liq-scan{ background:#1e40af; border:none; color:#fff; padding:.35rem .75rem; border-radius:6px; cursor:pointer; font-size:.8rem; font-weight:600; }
-.btn-liq-scan:hover{ background:#2563eb; }
+.btn-liq-scan:hover{ background:#F2600C; }
 
 .liq-scan-tabs{ display:flex; gap:.25rem; flex-wrap:wrap; border-bottom:1px solid #1e293b; margin-bottom:1rem; padding-bottom:.5rem; }
 .liq-tab{ background:transparent; border:1px solid transparent; color:#64748b; padding:.35rem .75rem; border-radius:7px; cursor:pointer; font-size:.78rem; font-weight:600; transition:.15s; }
@@ -353,13 +353,13 @@
 .grade-badge{ display:inline-block; padding:.15rem .5rem; border-radius:5px; font-size:.72rem; font-weight:700; }
 .grade-Ap   { background:rgba(16,185,129,.2); color:#10b981; }
 .grade-A    { background:rgba(52,211,153,.15);color:#34d399; }
-.grade-Bp   { background:rgba(99,102,241,.15);color:#818cf8; }
+.grade-Bp   { background:rgba(255, 122, 24,.15);color:#FFA94D; }
 .grade-B    { background:rgba(100,116,139,.15);color:#94a3b8; }
 .grade-C    { background:rgba(239,68,68,.1);  color:#f87171; }
 
 .action-badge{ display:inline-block; padding:.15rem .55rem; border-radius:5px; font-size:.72rem; font-weight:600; white-space:nowrap; }
 .action-Accumulate { background:rgba(16,185,129,.15); color:#10b981; }
-.action-Watch      { background:rgba(99,102,241,.12); color:#818cf8; }
+.action-Watch      { background:rgba(255, 122, 24,.12); color:#FFA94D; }
 .action-Breakout   { background:rgba(245,158,11,.15); color:#f59e0b; }
 .action-Extended   { background:rgba(239,68,68,.1);   color:#f87171; }
 .action-Avoid      { background:rgba(100,116,139,.12);color:#64748b; }
@@ -371,12 +371,12 @@
 .liq-empty-state{ padding:2rem; text-align:center; color:#475569; font-size:.85rem; }
 
 /* ── Research Report ──────────────────────────────────────────── */
-.liq-report-ticker{ font-size:1.1rem; font-weight:800; color:#6366f1; }
+.liq-report-ticker{ font-size:1.1rem; font-weight:800; color:#FF7A18; }
 .btn-close-report{ margin-left:auto; background:#1e293b; border:1px solid #334155; color:#94a3b8; padding:.3rem .7rem; border-radius:6px; cursor:pointer; font-size:.8rem; }
 
 .liq-report-body{ display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:1rem; }
 .liq-report-section{ background:#080f1a; border:1px solid #1e293b; border-radius:10px; padding:1rem; }
-.liq-report-section h4{ font-size:.8rem; font-weight:700; color:#6366f1; text-transform:uppercase; letter-spacing:.06em; margin:0 0 .75rem; }
+.liq-report-section h4{ font-size:.8rem; font-weight:700; color:#FF7A18; text-transform:uppercase; letter-spacing:.06em; margin:0 0 .75rem; }
 .liq-report-row{ display:flex; justify-content:space-between; align-items:flex-start; padding:.35rem 0; border-bottom:1px solid #0f1724; font-size:.8rem; }
 .liq-report-row:last-child{ border-bottom:none; }
 .liq-report-label{ color:#64748b; }
@@ -384,14 +384,14 @@
 .liq-report-val.pos{ color:#10b981; } .liq-report-val.neg{ color:#ef4444; }
 
 .liq-thesis-box{ background:#080f1a; border:1px solid #1e293b; border-radius:10px; padding:1rem; grid-column:1/-1; }
-.liq-thesis-box h4{ font-size:.8rem; font-weight:700; color:#6366f1; text-transform:uppercase; letter-spacing:.06em; margin:0 0 .5rem; }
+.liq-thesis-box h4{ font-size:.8rem; font-weight:700; color:#FF7A18; text-transform:uppercase; letter-spacing:.06em; margin:0 0 .5rem; }
 .liq-thesis-text{ font-size:.82rem; color:#94a3b8; line-height:1.6; }
 
 .liq-score-bar-wrap{ margin:1rem 0; }
 .liq-score-bar-row{ display:flex; align-items:center; gap:.5rem; margin-bottom:.35rem; font-size:.75rem; }
 .liq-score-bar-label{ width:150px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .liq-score-bar-track{ flex:1; height:6px; background:#1e293b; border-radius:3px; overflow:hidden; }
-.liq-score-bar-fill { height:100%; border-radius:3px; background:#6366f1; transition:width .4s; }
+.liq-score-bar-fill { height:100%; border-radius:3px; background:#FF7A18; transition:width .4s; }
 .liq-score-bar-pts  { width:30px; text-align:right; color:#94a3b8; }
 
 /* Opportunity alerts */
@@ -399,7 +399,7 @@
 .liq-opp-alert{ display:flex; align-items:flex-start; gap:.75rem; padding:.6rem .85rem; border-radius:8px; font-size:.8rem; line-height:1.4; }
 .liq-opp-alert.breakout   { background:rgba(245,158,11,.08); border-left:3px solid #f59e0b; }
 .liq-opp-alert.hidden_gem { background:rgba(16,185,129,.08); border-left:3px solid #10b981; }
-.liq-opp-alert.rs_leader  { background:rgba(99,102,241,.08); border-left:3px solid #6366f1; }
+.liq-opp-alert.rs_leader  { background:rgba(255, 122, 24,.08); border-left:3px solid #FF7A18; }
 .liq-opp-alert.macro      { background:rgba(100,116,139,.08);border-left:3px solid #475569; }
 .liq-opp-alert.w52_high   { background:rgba(245,158,11,.08); border-left:3px solid #f59e0b; }
 .liq-opp-alert-ticker{ font-weight:700; color:#f1f5f9; min-width:45px; }
@@ -409,14 +409,14 @@
 
 /* ── AI Morning Briefing card ── */
 .ai-brief-card {
-  background: linear-gradient(135deg, rgba(14,165,233,0.05) 0%, rgba(99,102,241,0.04) 100%);
-  border: 1px solid rgba(14,165,233,0.18);
+  background: linear-gradient(135deg, rgba(255, 122, 24,0.05) 0%, rgba(255, 122, 24,0.04) 100%);
+  border: 1px solid rgba(255, 122, 24,0.18);
   border-radius: 12px;
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
   transition: border-color .2s;
 }
-.ai-brief-card:hover { border-color: rgba(14,165,233,0.32); }
+.ai-brief-card:hover { border-color: rgba(255, 122, 24,0.32); }
 .ai-brief-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:.6rem; }
 .ai-brief-label { font-size:.75rem; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:.06em; display:flex; align-items:center; gap:.4rem; }
 .ai-brief-badge { padding:.15rem .55rem; border-radius:10px; font-size:.68rem; font-weight:700; letter-spacing:.04em; }
@@ -426,12 +426,12 @@
 .ai-brief-vix { font-size:.72rem; color:#64748b; margin-bottom:.45rem; }
 .ai-brief-text { font-size:.82rem; line-height:1.55; color:#cbd5e1; margin-bottom:.6rem; }
 .ai-brief-tickers { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.5rem; }
-.ai-brief-chip { font-size:.68rem; font-weight:700; padding:.15rem .5rem; border-radius:6px; background:rgba(14,165,233,.1); color:#38bdf8; border:1px solid rgba(14,165,233,.2); text-decoration:none; transition:.15s; }
-.ai-brief-chip:hover { background:rgba(14,165,233,.22); }
+.ai-brief-chip { font-size:.68rem; font-weight:700; padding:.15rem .5rem; border-radius:6px; background:rgba(255, 122, 24,.1); color:#FFA94D; border:1px solid rgba(255, 122, 24,.2); text-decoration:none; transition:.15s; }
+.ai-brief-chip:hover { background:rgba(255, 122, 24,.22); }
 .ai-brief-footer { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding-top:.5rem; border-top:1px solid rgba(30,41,59,.7); }
 .ai-brief-time { font-size:.65rem; color:#475569; }
 .ai-brief-refresh { font-size:.68rem; padding:.2rem .6rem; border-radius:6px; background:transparent; border:1px solid #334155; color:#94a3b8; cursor:pointer; transition:.15s; }
-.ai-brief-refresh:hover { border-color:#38bdf8; color:#38bdf8; }
+.ai-brief-refresh:hover { border-color:#FFA94D; color:#FFA94D; }
 .ai-brief-skeleton { height:56px; border-radius:6px; background:linear-gradient(90deg,rgba(30,41,59,.6) 25%,rgba(51,65,85,.5) 50%,rgba(30,41,59,.6) 75%); background-size:200% 100%; animation:brief-shimmer 1.4s infinite; }
 @keyframes brief-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 .ai-brief-err { font-size:.75rem; color:#475569; padding:.25rem 0; }
@@ -720,7 +720,7 @@ function renderLiquidityStatus(d) {
   // FRED API key note
   const note = document.getElementById('liq-key-note');
   if (!d.has_fred_key) {
-    note.innerHTML = ' · <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank" style="color:#6366f1">Get free FRED API key</a> for higher rate limits → set env var <code style="color:#94a3b8">FRED_API_KEY</code>.';
+    note.innerHTML = ' · <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank" style="color:#FF7A18">Get free FRED API key</a> for higher rate limits → set env var <code style="color:#94a3b8">FRED_API_KEY</code>.';
   }
 
   // Diagnostics panel
@@ -1081,7 +1081,7 @@ const SENTIMENT_STYLES = {
   bullish:  { bg:'rgba(34,197,94,0.12)',  color:'#22c55e', border:'rgba(34,197,94,0.25)',  glow:'#22c55e' },
   bearish:  { bg:'rgba(239,68,68,0.12)',  color:'#ef4444', border:'rgba(239,68,68,0.25)',  glow:'#ef4444' },
   cautious: { bg:'rgba(245,158,11,0.10)', color:'#f59e0b', border:'rgba(245,158,11,0.22)', glow:'#f59e0b' },
-  neutral:  { bg:'rgba(34,211,238,0.08)', color:'#22D3EE', border:'rgba(34,211,238,0.18)', glow:'#22D3EE' },
+  neutral:  { bg:'rgba(255, 169, 77,0.08)', color:'#FFA94D', border:'rgba(255, 169, 77,0.18)', glow:'#FFA94D' },
 };
 const PERM_STYLES = {
   'Longs ✓':    'background:rgba(34,197,94,0.10);color:#22c55e;border:1px solid rgba(34,197,94,0.20);',
