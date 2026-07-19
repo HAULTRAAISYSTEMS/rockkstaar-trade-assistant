@@ -1,0 +1,80 @@
+<!-- @dsCard group="Screens" viewport="900x820" name="Today's Setups — Terminal Panel" subtitle="Dense right-column variant · top 3 graded setups" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Today's Setups Panel</title>
+<link rel="stylesheet" href="./styles.css">
+<link rel="stylesheet" href="./screens.css">
+<style>
+.dense-row{display:grid;grid-template-columns:46px 1fr auto;gap:10px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--border-subtle);cursor:pointer}
+.dense-row:last-child{border-bottom:none}
+.dense-row:hover{background:var(--surface-raised)}
+.dense-row.is-aplus{background:linear-gradient(90deg,rgba(255,122,24,.08),transparent)}
+.levels{display:flex;gap:10px;margin-top:3px}
+.levels span{font-family:var(--font-mono);font-size:11px;color:var(--text-faint)}
+.levels b{color:var(--text-muted);font-weight:500}
+</style>
+</head><body class="scr">
+<div class="canvas" style="align-items:flex-start">
+  <div><div class="spec-h">Today's Setups — Terminal Panel</div><div class="spec-sub">Compact variant for the Terminal right column. Top 3 graded setups, one tap to load into the ticket.</div></div>
+
+  <div class="row gap-6" style="align-items:flex-start;flex-wrap:wrap">
+    <!-- the panel -->
+    <div class="card" style="width:340px;flex:none">
+      <div class="card-hd">Today's Setups<span class="badge badge-accent"><span class="dot"></span>3 A+</span></div>
+      <!-- A+ -->
+      <div class="dense-row is-aplus">
+        <span class="grade grade--row g-aplus" style="height:28px">A+</span>
+        <div class="col">
+          <div class="between"><span class="mono hi" style="font-size:14px;font-weight:600">NVDA</span><span class="mono pos" style="font-size:12px">+3.4%</span></div>
+          <div class="levels"><span><b>E</b> 184.5</span><span><b>S</b> 179.8</span><span><b>T</b> 198</span><span class="pos"><b>R:R</b> 2.9</span></div>
+        </div>
+        <div class="col" style="align-items:flex-end;gap:3px"><span class="mono hi" style="font-size:13px">92</span><span class="badge badge-pos" style="height:16px;padding:1px 6px;font-size:10px"><span class="dot" style="width:5px;height:5px"></span>Ready</span></div>
+      </div>
+      <!-- A -->
+      <div class="dense-row">
+        <span class="grade grade--row g-a" style="height:28px">A</span>
+        <div class="col">
+          <div class="between"><span class="mono hi" style="font-size:14px;font-weight:600">AMD</span><span class="mono pos" style="font-size:12px">+1.9%</span></div>
+          <div class="levels"><span><b>E</b> 168.4</span><span><b>S</b> 163.2</span><span><b>T</b> 179</span><span class="pos"><b>R:R</b> 2.0</span></div>
+        </div>
+        <div class="col" style="align-items:flex-end;gap:3px"><span class="mono hi" style="font-size:13px">84</span><span class="badge badge-pos" style="height:16px;padding:1px 6px;font-size:10px"><span class="dot" style="width:5px;height:5px"></span>Ready</span></div>
+      </div>
+      <!-- B+ WAIT -->
+      <div class="dense-row">
+        <span class="grade grade--row g-bplus" style="height:28px">B+</span>
+        <div class="col">
+          <div class="between"><span class="mono hi" style="font-size:14px;font-weight:600">MSFT</span><span class="mono pos" style="font-size:12px">+0.6%</span></div>
+          <div class="levels"><span class="faint"><b>E</b> trigger</span><span><b>S</b> 489</span><span><b>T</b> 520</span><span class="warn"><b>R:R</b> 2.4</span></div>
+        </div>
+        <div class="col" style="align-items:flex-end;gap:3px"><span class="mono hi" style="font-size:13px">71</span><span class="badge badge-warn" style="height:16px;padding:1px 6px;font-size:10px"><span class="dot" style="width:5px;height:5px"></span>Wait</span></div>
+      </div>
+      <div class="card-ft"><button class="btn btn-outline btn-sm" style="width:100%;justify-content:center">Open Scanner →</button></div>
+    </div>
+
+    <!-- in-context: terminal right rail -->
+    <div class="frame" style="width:300px;flex:none">
+      <div class="frame-cap"><span class="dots"><i></i><i></i><i></i></span>terminal · right rail</div>
+      <div style="background:var(--bg-base);padding:12px;display:flex;flex-direction:column;gap:12px">
+        <div class="card" style="background:var(--surface-inset)"><div class="card-bd col gap-2" style="padding:12px"><span class="eyebrow">Order Ticket</span><span class="faint" style="font-size:12px">Tap a setup to prefill entry / stop / target →</span></div></div>
+        <div class="card">
+          <div class="card-hd" style="padding:10px 12px;font-size:12px">Today's Setups<span class="badge badge-accent" style="height:16px;padding:1px 6px;font-size:10px">3</span></div>
+          <div class="dense-row is-aplus" style="padding:9px 12px"><span class="grade grade--row g-aplus">A+</span><div class="col"><span class="mono hi" style="font-size:13px;font-weight:600">NVDA</span><span class="mono faint" style="font-size:10px">E184.5 · 2.9R</span></div><span class="mono pos" style="font-size:11px">92</span></div>
+          <div class="dense-row" style="padding:9px 12px"><span class="grade grade--row g-a">A</span><div class="col"><span class="mono hi" style="font-size:13px;font-weight:600">AMD</span><span class="mono faint" style="font-size:10px">E168.4 · 2.0R</span></div><span class="mono pos" style="font-size:11px">84</span></div>
+          <div class="dense-row" style="padding:9px 12px"><span class="grade grade--row g-bplus">B+</span><div class="col"><span class="mono hi" style="font-size:13px;font-weight:600">MSFT</span><span class="mono faint" style="font-size:10px">wait · 2.4R</span></div><span class="mono warn" style="font-size:11px">71</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="notes" style="width:320px;flex:none">
+      <h4>Panel spec</h4>
+      <ul>
+        <li>Fixed ~340px column; shows the <b>top 3</b> setups by grade → swing score. Never more than 3 — it's a glance, not the scanner.</li>
+        <li>Row grid: <code>grade | ticker+levels | score+status</code>. Levels compressed to <code>E / S / T / R:R</code> mono, faint labels.</li>
+        <li>A+ row gets a subtle left-to-right <code>--grad-brand</code> tint wash so it separates without a full glow (glow is reserved for card size).</li>
+        <li>Whole row is a tap target → prefills the order ticket with entry/stop/target. Hover = <code>--surface-raised</code>.</li>
+        <li>Header pill shows the A+ count; footer links out to the full Setups screen.</li>
+        <li>If 0 setups: collapse to a one-line <code>--text-faint</code> "No setups — patience is a position." (mini empty state, no illustration).</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</body></html>

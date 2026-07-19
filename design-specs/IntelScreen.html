@@ -1,0 +1,135 @@
+<!-- @dsCard group="Screens" viewport="1440x1520" name="Intel Screen" subtitle="Morning macro · regime banner, AI briefing, liquidity, flows, calendar, news" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Intel Screen</title>
+<link rel="stylesheet" href="./styles.css">
+<link rel="stylesheet" href="./screens.css">
+<style>
+.intel-2col{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start}
+@media(max-width:1100px){.intel-2col{grid-template-columns:1fr}}
+.flow-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media(max-width:1100px){.flow-grid{grid-template-columns:repeat(2,1fr)}}
+.flow{padding:12px 14px;border-radius:var(--r-md);border:1px solid var(--border-subtle);background:var(--surface-card);display:flex;flex-direction:column;gap:6px}
+.flow .bar{height:4px;border-radius:var(--r-full);background:var(--surface-inset);overflow:hidden}
+.flow .bar>i{display:block;height:100%;border-radius:var(--r-full)}
+.risk-gauge{height:8px;border-radius:var(--r-full);background:linear-gradient(90deg,var(--neg-500),var(--warn-500),var(--pos-500));position:relative}
+.risk-gauge>.pin{position:absolute;top:-5px;width:3px;height:18px;border-radius:var(--r-full);background:var(--white);box-shadow:0 0 0 2px var(--ink-900)}
+.cal-row{display:grid;grid-template-columns:64px 1fr auto auto auto;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-subtle);font-size:13px}
+.cal-row:last-child{border-bottom:none}
+.news-row{display:flex;gap:12px;padding:11px 0;border-bottom:1px solid var(--border-subtle)}
+.news-row:last-child{border-bottom:none}
+</style>
+</head><body class="scr">
+<div class="canvas">
+  <div><div class="spec-h">Intel Screen — Morning Macro</div><div class="spec-sub">Top-down hierarchy: read the regime banner and AI briefing in 5s, drill to liquidity / flows / calendar / news as needed.</div></div>
+
+  <div class="frame">
+    <div class="frame-cap"><span class="dots"><i></i><i></i><i></i></span>haultra · intel · 1440w</div>
+    <div class="app">
+      <aside class="side">
+        <div class="brandmark"><span class="cube"></span><span class="wm">Haultra</span></div>
+        <div class="nav"><span class="ic"></span>Setups</div>
+        <div class="nav"><span class="ic"></span>Account</div>
+        <div class="nav on"><span class="ic"></span>Intel</div>
+        <div class="nav"><span class="ic"></span>Terminal</div>
+        <div class="grow"></div>
+        <div class="nav"><span class="ic"></span>Settings</div>
+      </aside>
+      <main class="main">
+        <div class="topbar">
+          <div class="col gap-1"><div class="page-h1">Intel</div><div class="faint" style="font-size:13px">Pre-market brief · <span class="mono">07:15 ET · Jul 19</span></div></div>
+          <div class="row gap-2"><span class="badge badge-info"><span class="dot"></span>Cash open 09:30</span></div>
+        </div>
+
+        <!-- 1 · REGIME / RISK BANNER -->
+        <div class="between" style="padding:18px 22px;border-radius:var(--r-lg);background:var(--grad-brand-soft);border:1px solid rgba(255,122,24,.3)">
+          <div class="row gap-4">
+            <div class="col gap-1"><span class="eyebrow">Today's Regime</span><span class="dtitle" style="font-size:30px;color:var(--pos-500)">RISK-ON</span></div>
+            <div class="divider" style="width:1px;height:44px"></div>
+            <div class="col gap-1"><span class="eyebrow">Bias</span><span class="hi" style="font-size:15px;font-weight:600">Favor A+ longs · trim into strength</span><span class="faint" style="font-size:12px">Trend intact above all EMAs · breadth expanding</span></div>
+          </div>
+          <div class="col gap-2" style="align-items:flex-end"><span class="badge badge-warn"><span class="dot"></span>Event risk: CPI 08:30</span><span class="faint mono" style="font-size:11px">Size down pre-print</span></div>
+        </div>
+
+        <!-- 2 · AI BRIEFING -->
+        <div class="card card--accent"><div class="card-hd"><span class="row gap-2"><span style="width:16px;height:16px;border-radius:4px;background:var(--grad-brand)"></span>AI Briefing</span><span class="faint mono" style="font-size:11px;text-transform:none;letter-spacing:0">generated 07:14</span></div>
+          <div class="card-bd col gap-3" style="font-size:14px;line-height:1.65;color:var(--text-body)">
+            <p style="margin:0">Overnight tape held constructive. Futures <b class="hi">+0.4%</b>, semis leading on <b class="hi">TSM</b> guidance. The scanner surfaced <b style="color:var(--orange-400)">3 A+ setups</b> — all in AI/semis, all long. Dollar soft, yields flat.</p>
+            <p style="margin:0">Primary risk is the <b class="warn">08:30 CPI print</b>. Consensus 3.1% YoY; a hot number reverses the risk-on read fast. Keep starter size until the market digests it. Discipline note: yesterday's only rule-break was an early entry — <b class="hi">wait for trigger confirmation today</b>.</p>
+            <div class="row gap-2" style="margin-top:4px"><span class="badge badge-accent">3 A+ ready</span><span class="badge badge-pos">Breadth +</span><span class="badge badge-warn">CPI 08:30</span><span class="badge badge-neutral">VIX 13.8</span></div>
+          </div>
+        </div>
+
+        <div class="intel-2col">
+          <div class="col gap-4">
+            <!-- 3 · FED LIQUIDITY -->
+            <div class="card"><div class="card-hd">Fed Liquidity Monitor<span class="badge badge-pos"><span class="dot"></span>Expanding</span></div>
+              <div class="card-bd" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+                <div class="col gap-1"><span class="eyebrow">Net Liquidity</span><span class="mono hi" style="font-size:20px">6.28T</span><span class="mono pos" style="font-size:12px">▲ +38B wk</span></div>
+                <div class="col gap-1"><span class="eyebrow">Reverse Repo</span><span class="mono hi" style="font-size:20px">412B</span><span class="mono pos" style="font-size:12px">▼ draining</span></div>
+                <div class="col gap-1"><span class="eyebrow">Reserves</span><span class="mono hi" style="font-size:20px">3.41T</span><span class="mono faint" style="font-size:12px">▬ stable</span></div>
+              </div>
+            </div>
+            <!-- 4 · MARKET RISK METER -->
+            <div class="card"><div class="card-hd">Market Risk Meter</div>
+              <div class="card-bd col gap-3">
+                <div class="between"><span class="faint" style="font-size:12px">Risk-Off</span><span class="dtitle" style="font-size:16px;color:var(--pos-500)">RISK-ON · 72</span><span class="faint" style="font-size:12px">Risk-On</span></div>
+                <div class="risk-gauge"><span class="pin" style="left:72%"></span></div>
+                <div class="row gap-2" style="flex-wrap:wrap"><span class="badge badge-pos">VIX 13.8</span><span class="badge badge-pos">HY spreads tight</span><span class="badge badge-pos">Put/Call 0.82</span><span class="badge badge-warn">CPI pending</span></div>
+              </div>
+            </div>
+            <!-- 5 · SECTOR FLOW -->
+            <div class="card"><div class="card-hd">Sector Money Flow</div>
+              <div class="card-bd flow-grid">
+                <div class="flow"><span class="between"><span class="hi" style="font-size:13px;font-weight:600">Semis</span><span class="mono pos" style="font-size:12px">+2.1%</span></span><div class="bar"><i style="width:88%;background:var(--pos-500)"></i></div></div>
+                <div class="flow"><span class="between"><span class="hi" style="font-size:13px;font-weight:600">Tech</span><span class="mono pos" style="font-size:12px">+1.3%</span></span><div class="bar"><i style="width:70%;background:var(--pos-500)"></i></div></div>
+                <div class="flow"><span class="between"><span class="hi" style="font-size:13px;font-weight:600">Energy</span><span class="mono pos" style="font-size:12px">+0.4%</span></span><div class="bar"><i style="width:52%;background:var(--pos-500)"></i></div></div>
+                <div class="flow"><span class="between"><span class="hi" style="font-size:13px;font-weight:600">Financials</span><span class="mono faint" style="font-size:12px">0.0%</span></span><div class="bar"><i style="width:48%;background:var(--ink-400)"></i></div></div>
+                <div class="flow"><span class="between"><span class="hi" style="font-size:13px;font-weight:600">Health</span><span class="mono neg" style="font-size:12px">−0.3%</span></span><div class="bar"><i style="width:40%;background:var(--neg-500)"></i></div></div>
+                <div class="flow"><span class="between"><span class="hi" style="font-size:13px;font-weight:600">Staples</span><span class="mono neg" style="font-size:12px">−0.6%</span></span><div class="bar"><i style="width:34%;background:var(--neg-500)"></i></div></div>
+                <div class="flow"><span class="between"><span class="hi" style="font-size:13px;font-weight:600">Utilities</span><span class="mono neg" style="font-size:12px">−0.8%</span></span><div class="bar"><i style="width:30%;background:var(--neg-500)"></i></div></div>
+                <div class="flow"><span class="between"><span class="hi" style="font-size:13px;font-weight:600">REITs</span><span class="mono neg" style="font-size:12px">−1.1%</span></span><div class="bar"><i style="width:24%;background:var(--neg-500)"></i></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col gap-4">
+            <!-- 6 · ECON CALENDAR -->
+            <div class="card"><div class="card-hd">Economic Calendar</div>
+              <div class="card-bd" style="padding:2px 16px">
+                <div class="cal-row"><span class="mono warn" style="font-weight:600">08:30</span><span class="hi" style="font-weight:600">CPI (YoY)</span><span class="badge badge-neg">High</span><span class="faint mono" style="font-size:12px">3.1%e</span><span class="faint mono" style="font-size:12px">3.0%p</span></div>
+                <div class="cal-row"><span class="mono warn" style="font-weight:600">08:30</span><span class="hi" style="font-weight:600">Core CPI</span><span class="badge badge-neg">High</span><span class="faint mono" style="font-size:12px">0.3%e</span><span class="faint mono" style="font-size:12px">0.2%p</span></div>
+                <div class="cal-row"><span class="mono faint">10:00</span><span class="muted">Michigan Sentiment</span><span class="badge badge-warn">Med</span><span class="faint mono" style="font-size:12px">71.2e</span><span class="faint mono" style="font-size:12px">70.0p</span></div>
+                <div class="cal-row"><span class="mono faint">13:00</span><span class="muted">10Y Note Auction</span><span class="badge badge-neutral">Low</span><span class="faint mono" style="font-size:12px">—</span><span class="faint mono" style="font-size:12px">—</span></div>
+              </div>
+            </div>
+            <!-- 7 · NEWS -->
+            <div class="card"><div class="card-hd">News<span class="faint mono" style="font-size:11px;text-transform:none;letter-spacing:0">live</span></div>
+              <div class="card-bd" style="padding:2px 16px">
+                <div class="news-row"><span class="jmark" style="width:4px;border-radius:var(--r-full);background:var(--pos-500);flex:none"></span><div class="col gap-1"><span class="hi" style="font-size:13px;font-weight:600;line-height:1.4">TSMC lifts full-year outlook on AI demand</span><span class="faint mono" style="font-size:11px">Reuters · 06:48 · <span class="pos">SMH +1.9%</span></span></div></div>
+                <div class="news-row"><span class="jmark" style="width:4px;border-radius:var(--r-full);background:var(--ink-500);flex:none"></span><div class="col gap-1"><span class="hi" style="font-size:13px;font-weight:600;line-height:1.4">Fed's Williams: policy "well positioned" for data</span><span class="faint mono" style="font-size:11px">Bloomberg · 06:20</span></div></div>
+                <div class="news-row"><span class="jmark" style="width:4px;border-radius:var(--r-full);background:var(--neg-500);flex:none"></span><div class="col gap-1"><span class="hi" style="font-size:13px;font-weight:600;line-height:1.4">Crude slips as OPEC+ signals higher output</span><span class="faint mono" style="font-size:11px">CNBC · 05:55 · <span class="neg">USO −1.4%</span></span></div></div>
+                <div class="news-row"><span class="jmark" style="width:4px;border-radius:var(--r-full);background:var(--ink-500);flex:none"></span><div class="col gap-1"><span class="hi" style="font-size:13px;font-weight:600;line-height:1.4">Retail sales preview: spending seen cooling</span><span class="faint mono" style="font-size:11px">WSJ · 05:30</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h4>Reading order (top-down, ≤30s)</h4>
+    <ul>
+      <li><b>1 Regime/Risk banner</b> — <code>--grad-brand-soft</code> hero strip: one-word regime verdict (huge Rajdhani, colored by risk), the day's bias in a sentence, and the highest event-risk badge. This alone should orient the trader.</li>
+      <li><b>2 AI Briefing</b> — accent-bordered <code>&lt;Card&gt;</code>; 2 short paragraphs + a chip row summarizing the takeaways. Ties back to scanner ("3 A+ ready") and yesterday's discipline note.</li>
+      <li><b>3–5 left column</b>: Fed Liquidity (3 mono stats + trend), Market Risk Meter (0–100 gradient gauge with pin), Sector Money Flow (8 tiles, bar + %chg, green→red by flow).</li>
+      <li><b>6–7 right column</b>: Economic Calendar rows (time · event · impact badge · est/prev) and a News list (left rail colored by market impact, source + timestamp + ticker reaction).</li>
+    </ul>
+    <h4>Components</h4>
+    <ul>
+      <li>Liquidity/risk numbers = <code>&lt;Stat&gt;</code>-style mono. Impact + reaction = <code>&lt;Badge&gt;</code> tones (High=negative, Med=warning, Low=neutral).</li>
+      <li>Everything above the fold (banner + briefing) is static-height; the four monitors sit in a 2-col grid collapsing to 1 under <b>1100px</b>. Order is deliberate — do not reflow it random on mobile.</li>
+    </ul>
+  </div>
+</div>
+</body></html>

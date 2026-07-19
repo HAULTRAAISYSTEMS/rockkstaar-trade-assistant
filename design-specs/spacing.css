@@ -1,0 +1,34 @@
+/* HAULTRA spacing, radius, shadow, motion */
+:root {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  /* Radii — tight, mechanical. Nothing pill-soft except full-round chips. */
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-full: 999px;
+
+  /* Shadows — deep, cool, for dark surfaces */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-md: 0 4px 14px -4px rgba(0,0,0,.55);
+  --shadow-lg: 0 18px 44px -12px rgba(0,0,0,.7);
+  --shadow-inset: inset 0 1px 0 rgba(255,255,255,.04);
+
+  /* Motion */
+  --ease-out: cubic-bezier(.2,.7,.3,1);   /* @kind other */
+  --ease-in-out: cubic-bezier(.4,0,.2,1); /* @kind other */
+  --dur-fast: 120ms; /* @kind other */
+  --dur-med: 200ms;  /* @kind other */
+  --dur-slow: 320ms; /* @kind other */
+}
