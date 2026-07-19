@@ -6951,3 +6951,22 @@ select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.20);
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Unified grade badge — single scale across every surface.
+   A+ orange gradient · A orange outline · B+ amber · B neutral.
+   UNGRADED renders no badge (ugrade-none is unused / no styling).
+   ═══════════════════════════════════════════════════════════════════ */
+.ugrade-badge {
+  display:inline-flex; align-items:center; justify-content:center;
+  font-family: var(--font-display); text-transform:uppercase;
+  letter-spacing:.06em; font-weight:700; font-size:.72rem; line-height:1;
+  min-width:2rem; padding:3px 8px; border-radius:4px; white-space:nowrap;
+}
+.ugrade-aplus { background: var(--grad-brand); color: var(--text-on-accent); border:none; }
+.ugrade-a     { color: var(--orange-500); border:1px solid var(--orange-500); background: rgba(255,122,24,.08); }
+.ugrade-bplus { color: var(--warn-500);   border:1px solid rgba(255,176,32,.42); background: rgba(255,176,32,.10); }
+.ugrade-b     { color: var(--text-muted); border:1px solid var(--border-subtle); background: var(--ink-750); }
+.ugrade-none  { display:none; }
+/* Small dash shown where a grade cell would otherwise be empty (tables) */
+.ugrade-dash { color: var(--text-faint); font-family: var(--font-mono); }

@@ -371,7 +371,7 @@
           <div class="score-fill {{ s.swing_score_class }}" style="width:{{ (s.swing_score or 0) * 10 }}%"></div>
         </div>
         <span class="swing-score-denom">/10</span>
-        <span class="grade-badge grade-{{ s.swing_grade|lower }}">{{ s.swing_grade }}</span>
+        {% set _gl = s.swing_grade|ugrade %}{% if _gl %}<span class="ugrade-badge {{ s.swing_grade|ugcss }}">{{ _gl }}</span>{% else %}<span class="ugrade-dash">—</span>{% endif %}
       </div>
 
       <!-- Setup type + bias + pullback quality -->
@@ -657,13 +657,12 @@
   <!-- ── Filter Bar ───────────────────────────────────────────────────────── -->
   <div class="filter-bar">
     <div class="filter-group">
-      <span class="filter-label">Min Score</span>
+      <span class="filter-label">Grade</span>
       <div class="filter-btns" id="scoreFilter">
+        <button class="filter-btn filter-btn-aplus" data-val="4">A+ only</button>
+        <button class="filter-btn" data-val="3">A and up</button>
+        <button class="filter-btn" data-val="2">B+ and up</button>
         <button class="filter-btn filter-btn-active" data-val="0">All</button>
-        <button class="filter-btn" data-val="5">5+</button>
-        <button class="filter-btn" data-val="7">7+ Quality</button>
-        <button class="filter-btn" data-val="9">A Grade</button>
-        <button class="filter-btn filter-btn-aplus" data-val="aplus">A+ Only</button>
       </div>
     </div>
     <div class="filter-group">
@@ -695,7 +694,7 @@
           <th>Gap %</th>
           <th>Vol</th>
           <th title="Swing Score 1-10">Swing</th>
-          <th title="A/B/C/D Grade">Grade</th>
+          <th title="Grade — A+ / A / B+ / B (below = ungraded)">Grade</th>
           <th title="Setup Pattern">Setup Type</th>
           <th title="Pullback Quality">Quality</th>
           <th>Bias</th>
@@ -721,6 +720,7 @@
             data-ticker="{{ s.ticker }}"
             data-score="{{ s.swing_score or 0 }}"
             data-grade="{{ s.swing_grade or 'D' }}"
+            data-grade-rank="{{ s.swing_grade|ugrank }}"
             data-status="{{ s.swing_status or '' }}"
             data-extended="{{ 'true' if s.is_extended else 'false' }}"
             data-aplus="{{ 'true' if s.bucket == 'A+ READY' else 'false' }}"
@@ -807,7 +807,7 @@
 
           <!-- Grade -->
           <td>
-            <span class="grade-badge grade-{{ s.swing_grade|lower }}">{{ s.swing_grade }}</span>
+            {% set _gl = s.swing_grade|ugrade %}{% if _gl %}<span class="ugrade-badge {{ s.swing_grade|ugcss }}">{{ _gl }}</span>{% else %}<span class="ugrade-dash">—</span>{% endif %}
           </td>
 
           <!-- Setup Type -->
@@ -986,22 +986,16 @@ function applyFilter() {
   const rows      = document.querySelectorAll('.watchlist-table tbody tr');
   let visible = 0;
 
-  const aplusMode = (scoreVal === 'aplus');
-  const minScore  = aplusMode ? 0 : parseInt(scoreVal, 10);
+  // Grade filter: 4 = A+ only, 3 = A and up, 2 = B+ and up, 0 = all.
+  const minRank = parseInt(scoreVal || '0', 10);
 
   rows.forEach(function(row) {
-    const score    = parseInt(row.dataset.score    || '0', 10);
+    const gradeRank = parseInt(row.dataset.gradeRank || '0', 10);
     const status   = row.dataset.status   || '';
     const extended = row.dataset.extended === 'true';
-    const isAplus  = row.dataset.aplus    === 'true';
     let show = true;
 
-    if (aplusMode) {
-      // A+ Only: score >= 8 AND actionable status
-      show = isAplus;
-    } else {
-      if (score < minScore) show = false;
-    }
+    if (gradeRank < minRank) show = false;
     if (statusVal === 'actionable' && ACTIONABLE_STATUSES.indexOf(status) === -1) show = false;
     if (hideExt && extended) show = false;
 
@@ -1039,7 +1033,7 @@ function toggleDisciplineMode() {
   var btn = document.getElementById('disciplineBtn');
   if (_disciplineActive) {
     btn.classList.add('filter-discipline-active');
-    setActiveBtn('scoreFilter', 'aplus');   // A+ Only in discipline mode
+    setActiveBtn('scoreFilter', '4');   // A+ only in discipline mode
     setActiveBtn('statusFilter', 'actionable');
     var he = document.getElementById('hideExtended');
     if (he) he.checked = true;
