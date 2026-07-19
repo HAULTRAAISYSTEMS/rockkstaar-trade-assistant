@@ -3078,15 +3078,63 @@ _DASHBOARD_EMPTY = dict(
 )
 
 
-@app.route("/account")
+@app.route("/setups")
 def dashboard():
-    """Account & Performance Hub — watchlist, PnL, journal, discipline tracking."""
+    """SETUPS — swing-setup scanner (buckets, market temp, best candidates,
+    radar, watchlist table). Endpoint name kept as `dashboard` so existing
+    url_for('dashboard') redirects (watchlist add/remove/refresh) still land
+    here after mutations."""
     try:
         return _dashboard_inner()
     except Exception as exc:
-        logger.error("dashboard  route=/  unhandled_error=%s", exc, exc_info=True)
-        flash("Dashboard error — please refresh the page.", "error")
+        logger.error("dashboard  route=/setups  unhandled_error=%s", exc, exc_info=True)
+        flash("Scanner error — please refresh the page.", "error")
         return render_template("dashboard.html", **_DASHBOARD_EMPTY)
+
+
+@app.route("/account")
+def account():
+    """ACCOUNT & Performance — Schwab balances/positions, journal performance
+    (win rate), and discipline counters. Read-only view over the existing
+    Schwab, Journal, and Risk data sources (no new logic)."""
+    uid = current_user_id()
+
+    # Schwab snapshot (buying power, P&L, positions) — live when connected
+    acct = None
+    try:
+        tok = _schwab.token_status(uid)
+        if tok.get("connected"):
+            acct = _get_schwab_data(uid)
+            if acct.get("error"):
+                acct = None
+    except Exception as _ae:
+        logger.debug("account: schwab fetch skipped: %s", _ae)
+
+    # Journal performance (same store the Journal page uses)
+    entries = get_all_journal_entries(uid)
+    summary = compute_journal_summary(entries)
+
+    # Discipline counters (today) — same computation as the Risk page
+    today_str     = _et_now().strftime("%Y-%m-%d")
+    daily_session = get_daily_session(today_str, uid)
+    today_entries = get_journal_entries_for_date(today_str, uid)
+    risk_s        = get_risk_settings(uid)
+    discipline    = compute_discipline_score(today_entries, risk_s,
+                                             bool(daily_session.get("locked")))
+    trades_today  = len(today_entries)
+    losses_today  = sum(1 for e in today_entries if e.get("result") == "Loss")
+
+    return render_template(
+        "account.html",
+        acct=acct,
+        entries=entries,
+        summary=summary,
+        discipline=discipline,
+        daily_session=daily_session,
+        trades_today=trades_today,
+        losses_today=losses_today,
+        risk_settings=risk_s,
+    )
 
 
 def _dashboard_inner():
@@ -3197,6 +3245,13 @@ def _dashboard_inner():
 
     # Market regime + sector strength from market_engine (cached, 60 min TTL)
     mkt_context = _get_mkt_ctx()
+
+    # Display sort — grade first (A+ → … → ungraded), then swing score desc.
+    # Presentation only; does not alter rank_stocks / scoring.
+    def _grade_sort_key(s):
+        return (_ugrade_info(s.get("swing_grade"))[1], s.get("swing_score") or 0)
+    ranked = sorted(ranked, key=_grade_sort_key, reverse=True)
+    top5   = sorted(top5,   key=_grade_sort_key, reverse=True)
 
     return render_template(
         "dashboard.html",
@@ -4353,59 +4408,10 @@ def toggle_auto_classify(ticker):
 
 @app.route("/quick")
 def quick_mode():
-    """Execution Command Center — full Bloomberg-style institutional layout."""
-    wl_id     = get_active_wl_id()
-    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-
-    _trade_mode = get_setting("trading_mode") or "SWING TRADE"
-    all_data = get_all_stock_data()
-    data_map = {s["ticker"]: s for s in all_data}
-
-    if watchlist:
-        auto_refresh_stale_closes(watchlist, data_map=data_map)
-    stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
-    ranked  = rank_stocks(stocks)
-    # Show all ranked stocks (not just top 3) — focus mode collapses to top 5 client-side
-    valid   = [s for s in ranked if s.get("trade_bias") != "Avoid"]
-
-    # Market context for command strip
-    mkt_ctx = _get_mkt_ctx()
-
-    # AI market story
-    story = {}
-    if _MKT_AVAILABLE:
-        try:
-            liq_score = None
-            try:
-                import liquidity_engine as _liq
-                liq_score = _liq.get_liquidity_status().get("score")
-            except Exception:
-                pass
-            story = _mkt.generate_market_story(mkt_ctx, liq_score)
-        except Exception as _se:
-            logger.debug("market story failed: %s", _se)
-
-    # Schwab account snapshot (buying power, P&L, etc.) — blended into Execution
-    acct = None
-    try:
-        uid = session.get("user_id")
-        if uid:
-            tok = _schwab.token_status(uid)
-            if tok.get("connected"):
-                acct = _get_schwab_data(uid)
-                if acct.get("error"):
-                    acct = None
-    except Exception as _ae:
-        logger.debug("quick_mode: schwab account fetch skipped: %s", _ae)
-
-    return render_template(
-        "quick.html",
-        stocks=valid,
-        orb_session=get_orb_session_banner(),
-        mkt=mkt_ctx,
-        story=story,
-        acct=acct,
-    )
+    """Legacy Execution page — merged into SETUPS (the swing scanner is the one
+    primary setups view). Kept as a permanent redirect so old links still work.
+    quick.html is retained in the repo but no longer served."""
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/terminal")
@@ -5543,6 +5549,40 @@ def api_ticker_states():
 # ---------------------------------------------------------------------------
 # Template context — helpers available in every template
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Unified grade scale (DISPLAY ONLY — does not change how swing_score or the
+# engine's swing_grade are computed). Normalises the engine's effective
+# swing_grade (classifier._grade_for_bucket → A+/A/B+/B/B-/C/D/…) to the single
+# scale used across every surface: A+, A, B+, B, and UNGRADED (everything else,
+# ranked last / no letter shown).
+# ---------------------------------------------------------------------------
+_UGRADE_MAP = {
+    "A+": ("A+", 4, "ugrade-aplus"),
+    "A":  ("A",  3, "ugrade-a"),
+    "B+": ("B+", 2, "ugrade-bplus"),
+    "B":  ("B",  1, "ugrade-b"),
+}
+
+def _ugrade_info(swing_grade):
+    """(label, rank, css) for a raw engine grade. UNGRADED → ('', 0, 'ugrade-none')."""
+    return _UGRADE_MAP.get((swing_grade or "").strip().upper(), ("", 0, "ugrade-none"))
+
+@app.template_filter("ugrade")
+def _tf_ugrade(g):
+    """Unified grade letter ('' when ungraded)."""
+    return _ugrade_info(g)[0]
+
+@app.template_filter("ugrank")
+def _tf_ugrank(g):
+    """Sort rank for a grade (A+=4 … B=1, ungraded=0)."""
+    return _ugrade_info(g)[1]
+
+@app.template_filter("ugcss")
+def _tf_ugcss(g):
+    """CSS class for the unified grade badge."""
+    return _ugrade_info(g)[2]
+
 
 @app.context_processor
 def inject_helpers():

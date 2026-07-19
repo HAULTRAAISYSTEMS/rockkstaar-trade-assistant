@@ -37,46 +37,32 @@
       <span class="brand-sub">AI&nbsp;SYSTEMS</span>
     </a>
 
-    <!-- CENTER: Navigation Links — Terminal · Fundamentals · Execution · Research · Journal · Risk · Account · Command Center · Schwab -->
+    <!-- CENTER: Navigation Links — Terminal · Setups · Fundamentals · Intel · Account · Schwab -->
     <div class="nav-links">
       <a href="{{ url_for('terminal') }}"
          class="nav-link nav-link-exec {% if request.endpoint == 'terminal' %}nav-link-active{% endif %}"
          title="Trade Terminal — ticker tape, watchlist, chart, order ticket, positions">
         TERMINAL
       </a>
+      <a href="{{ url_for('dashboard') }}"
+         class="nav-link {% if request.endpoint in ('dashboard', 'quick_mode') %}nav-link-active{% endif %}"
+         title="Setups — swing scanner, buckets, best candidates, alerts">
+        SETUPS
+      </a>
       <a href="{{ url_for('fundamentals_page') }}"
          class="nav-link {% if request.endpoint == 'fundamentals_page' %}nav-link-active{% endif %}"
          title="Fundamentals Analyzer &amp; Quality Scorecard">
         FUNDAMENTALS
       </a>
-      <a href="{{ url_for('quick_mode') }}"
-         class="nav-link {% if request.endpoint == 'quick_mode' %}nav-link-active{% endif %}"
-         title="Execution — live setup cards, ORB, alerts">
-        EXECUTION
-      </a>
       <a href="{{ url_for('intel') }}"
          class="nav-link nav-link-research {% if request.endpoint == 'intel' %}nav-link-active{% endif %}"
-         title="Deep Research — macro, sector, institutional, valuations">
-        RESEARCH
+         title="Intel — macro, sector, institutional, valuations">
+        INTEL
       </a>
-      <a href="{{ url_for('journal') }}"
-         class="nav-link {% if request.endpoint == 'journal' %}nav-link-active{% endif %}">
-        JOURNAL
-      </a>
-      <a href="{{ url_for('risk_settings') }}"
-         class="nav-link {% if request.endpoint == 'risk_settings' %}nav-link-active{% endif %}"
-         title="Risk &amp; Discipline Settings">
-        RISK
-      </a>
-      <a href="{{ url_for('dashboard') }}"
-         class="nav-link nav-link-account {% if request.endpoint == 'dashboard' %}nav-link-active{% endif %}"
-         title="Account & Performance Hub">
+      <a href="{{ url_for('account') }}"
+         class="nav-link nav-link-account {% if request.endpoint in ('account', 'journal', 'risk_settings') %}nav-link-active{% endif %}"
+         title="Account &amp; Performance — Schwab, P&amp;L, journal, discipline">
         ACCOUNT
-      </a>
-      <a href="{{ url_for('liquidity_page') }}"
-         class="nav-link nav-link-home {% if request.endpoint == 'liquidity_page' %}nav-link-active{% endif %}"
-         title="Morning Command Center — macro / market environment">
-        COMMAND CENTER
       </a>
       <a href="{{ url_for('schwab_account') }}"
          class="nav-link nav-link-schwab {% if request.endpoint == 'schwab_account' %}nav-link-active{% endif %}"

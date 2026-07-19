@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Account & Performance — HAULTRA AI{% endblock %}
+
+{% block head_extra %}
+<style>
+.ac { max-width: 1400px; margin: 0 auto; }
+.ac-head { display:flex; align-items:center; gap: var(--sp-4); flex-wrap:wrap; padding: var(--sp-2) var(--sp-1) var(--sp-4); }
+.ac-title { font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-display); font-weight: var(--fw-bold); font-size: var(--fs-h2); color: var(--text-hi); line-height:1; }
+.ac-title .accent { color: var(--orange-500); }
+/* discipline strip */
+.ac-disc { display:flex; align-items:center; gap: var(--sp-2); margin-left:auto; flex-wrap:wrap; }
+.ac-disc-chip { display:inline-flex; align-items:baseline; gap:6px; font-family: var(--font-mono); font-size: var(--fs-xs); padding: 5px 12px; border-radius: var(--r-full); background: var(--ink-750); border:1px solid var(--border-subtle); color: var(--text-muted); white-space:nowrap; }
+.ac-disc-chip b { color: var(--text-hi); font-weight: var(--fw-semi); }
+.ac-disc-chip.warn { color: var(--warn-500); border-color: rgba(255,176,32,.35); background: rgba(255,176,32,.08); }
+.ac-disc-chip.bad  { color: var(--neg-500); border-color: var(--neg-600); background: rgba(255,77,69,.10); }
+.ac-disc-score { font-family: var(--font-display); text-transform:uppercase; letter-spacing:.08em; font-weight: var(--fw-bold); font-size: var(--fs-xs); padding: 5px 12px; border-radius: var(--r-full); }
+.ac-disc-score.good { color: var(--pos-500); background: rgba(34,197,139,.12); border:1px solid var(--pos-600); }
+.ac-disc-score.mid  { color: var(--warn-500); background: rgba(255,176,32,.12); border:1px solid rgba(255,176,32,.4); }
+.ac-disc-score.low  { color: var(--neg-500); background: rgba(255,77,69,.12); border:1px solid var(--neg-600); }
+
+.ac-sec { margin-bottom: var(--sp-6); }
+.ac-sec-hd { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom: var(--sp-3); }
+.ac-sec-hd h2 { font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-size: var(--fs-lg); font-weight: var(--fw-semi); color: var(--text-muted); }
+.ac-sec-hd a { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--orange-400); text-decoration:none; }
+.ac-sec-hd a:hover { text-decoration:underline; }
+
+.ac-cards { display:grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-3); }
+.ac-card { background: var(--surface-card); border:1px solid var(--border-subtle); border-radius: var(--r-md); padding: var(--sp-4); box-shadow: var(--shadow-sm); }
+.ac-card.paper { border-style:dashed; }
+.ac-card-lbl { font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-size: 10px; color: var(--text-faint); }
+.ac-card-val { font-family: var(--font-mono); font-size: var(--fs-h2); font-weight: var(--fw-semi); color: var(--text-hi); margin-top:5px; }
+.ac-card.paper .ac-card-val { color: var(--text-muted); }
+.ac-card-sub { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text-faint); margin-top:3px; }
+.chg-pos { color: var(--pos-500); } .chg-neg { color: var(--neg-500); }
+.tag-paper { display:inline-block; font-family: var(--font-mono); font-size: 9px; letter-spacing:.08em; text-transform:uppercase; padding:1px 5px; border-radius: var(--r-xs); color: var(--warn-500); background: rgba(255,176,32,.10); border:1px solid rgba(255,176,32,.30); margin-top:6px; }
+
+.ac-connect { background: var(--surface-card); border:1px dashed var(--border-strong); border-radius: var(--r-lg); padding: var(--sp-8); text-align:center; }
+.ac-connect p { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-faint); line-height:1.7; }
+.ac-connect a.btn-primary { display:inline-block; margin-top: var(--sp-3); padding: 10px 22px; border-radius: var(--r-sm); background: var(--grad-brand); color: var(--text-on-accent); font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-weight: var(--fw-bold); font-size: var(--fs-sm); text-decoration:none; }
+
+.ac-panel { background: var(--surface-card); border:1px solid var(--border-subtle); border-radius: var(--r-lg); box-shadow: var(--shadow-md); margin-top: var(--sp-3); overflow:hidden; }
+.ac-tbl-wrap { overflow-x:auto; }
+.ac-tbl { width:100%; border-collapse:collapse; font-family: var(--font-mono); font-size: var(--fs-sm); }
+.ac-tbl th { text-align:right; padding: var(--sp-2) var(--sp-4); color: var(--text-faint); font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-size:10px; font-weight: var(--fw-semi); border-bottom:1px solid var(--border-subtle); white-space:nowrap; }
+.ac-tbl th:first-child, .ac-tbl td:first-child { text-align:left; }
+.ac-tbl th:nth-child(2), .ac-tbl td:nth-child(2) { text-align:center; }
+.ac-tbl td { padding: var(--sp-3) var(--sp-4); text-align:right; color: var(--text-body); border-bottom:1px solid var(--border-subtle); white-space:nowrap; }
+.ac-tbl tr:last-child td { border-bottom:none; }
+.ac-tbl tbody tr:hover td { background: var(--surface-raised); }
+.ac-sym { color: var(--text-hi); font-weight: var(--fw-semi); }
+.ac-badge { display:inline-block; font-family: var(--font-display); text-transform:uppercase; letter-spacing:.08em; font-size:10px; font-weight: var(--fw-bold); padding: 2px 8px; border-radius: var(--r-xs); }
+.ac-badge.long { color: var(--pos-500); background: rgba(34,197,139,.12); border:1px solid var(--pos-600); }
+.ac-badge.short { color: var(--neg-500); background: rgba(255,77,69,.12); border:1px solid var(--neg-600); }
+.ac-badge.win  { color: var(--pos-500); background: rgba(34,197,139,.12); border:1px solid var(--pos-600); }
+.ac-badge.loss { color: var(--neg-500); background: rgba(255,77,69,.12); border:1px solid var(--neg-600); }
+.ac-badge.be   { color: var(--text-muted); background: var(--ink-750); border:1px solid var(--border-subtle); }
+.ac-empty { padding: var(--sp-8) var(--sp-4); text-align:center; font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-faint); line-height:1.7; }
+.ac-empty a { color: var(--orange-400); text-decoration:underline; }
+.ac-deduct { display:flex; flex-wrap:wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+.ac-deduct span { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--neg-500); background: rgba(255,77,69,.08); border:1px solid rgba(255,77,69,.25); border-radius: var(--r-sm); padding: 3px 9px; }
+
+@media (max-width: 900px) { .ac-cards { grid-template-columns: 1fr 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set connected = acct and acct.connected %}
+{% set mx = (risk_settings.max_trades_per_day if risk_settings and risk_settings.max_trades_per_day else 3) %}
+<div class="ac">
+
+  <!-- Header + discipline counters -->
+  <div class="ac-head">
+    <span class="ac-title"><span class="accent">◧</span> ACCOUNT &amp; PERFORMANCE</span>
+    <div class="ac-disc">
+      <span class="ac-disc-chip {{ 'warn' if trades_today|int >= mx|int else '' }}">TRADES TODAY <b>{{ trades_today }}/{{ mx }}</b></span>
+      <span class="ac-disc-chip {{ 'bad' if losses_today|int >= 2 else '' }}">LOSSES <b>{{ losses_today }}</b></span>
+      {% set dscore = discipline.score if discipline else None %}
+      {% if dscore is not none %}
+      <span class="ac-disc-score {{ 'good' if dscore >= 80 else ('mid' if dscore >= 50 else 'low') }}">DISCIPLINE {{ dscore }}{% if discipline.label %} · {{ discipline.label }}{% endif %}</span>
+      {% endif %}
+      {% if daily_session and daily_session.locked %}<span class="ac-disc-chip bad">🔒 LOCKED</span>{% endif %}
+    </div>
+  </div>
+
+  <!-- ===== Broker account (Schwab) ===== -->
+  <div class="ac-sec">
+    <div class="ac-sec-hd"><h2>Broker Account</h2><a href="{{ url_for('schwab_account') }}">Schwab tab →</a></div>
+    {% if connected %}
+    <div class="ac-cards">
+      <div class="ac-card"><div class="ac-card-lbl">Total Value</div><div class="ac-card-val">{{ '${:,.0f}'.format(acct.total_value) if acct.total_value is not none else '—' }}</div></div>
+      <div class="ac-card"><div class="ac-card-lbl">Buying Power</div><div class="ac-card-val">{{ '${:,.0f}'.format(acct.buying_power) if acct.buying_power is not none else '—' }}</div></div>
+      <div class="ac-card"><div class="ac-card-lbl">Day P&amp;L</div>
+        {% if acct.daily_pnl is not none %}<div class="ac-card-val {{ 'chg-pos' if acct.daily_pnl >= 0 else 'chg-neg' }}">{{ '{:+,.0f}'.format(acct.daily_pnl) }}</div>
+        {% if acct.daily_pnl_pct is not none %}<div class="ac-card-sub {{ 'chg-pos' if acct.daily_pnl_pct >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(acct.daily_pnl_pct) }}%</div>{% endif %}
+        {% else %}<div class="ac-card-val">—</div>{% endif %}</div>
+      <div class="ac-card"><div class="ac-card-lbl">Open P&amp;L</div>
+        {% if acct.total_unrealized is not none %}<div class="ac-card-val {{ 'chg-pos' if acct.total_unrealized >= 0 else 'chg-neg' }}">{{ '{:+,.0f}'.format(acct.total_unrealized) }}</div>
+        {% else %}<div class="ac-card-val">—</div>{% endif %}</div>
+    </div>
+    <!-- Positions -->
+    <div class="ac-panel">
+      <div class="ac-tbl-wrap">
+        {% set ns = namespace(rows=0) %}
+        <table class="ac-tbl">
+          <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg</th><th>Last</th><th>P&amp;L</th><th>%</th></tr></thead>
+          <tbody>
+            {% for a in acct.accounts %}{% for p in a.equity_positions %}
+              {% set ns.rows = ns.rows + 1 %}
+              {% set last = (p.market_value / p.quantity) if p.quantity else 0 %}
+              {% set basis = (p.avg_price * (p.quantity if p.quantity >= 0 else -p.quantity)) %}
+              {% set pct = (p.unrealized / basis * 100) if basis else 0 %}
+              <tr>
+                <td class="ac-sym">{{ p.symbol }}</td>
+                <td><span class="ac-badge {{ 'long' if p.quantity >= 0 else 'short' }}">{{ 'Long' if p.quantity >= 0 else 'Short' }}</span></td>
+                <td>{{ '{:,.0f}'.format(p.quantity) }}</td>
+                <td>{{ '%.2f'|format(p.avg_price) }}</td>
+                <td>{{ '%.2f'|format(last) }}</td>
+                <td class="{{ 'chg-pos' if (p.unrealized or 0) >= 0 else 'chg-neg' }}">{{ '{:+,.2f}'.format(p.unrealized or 0) }}</td>
+                <td class="{{ 'chg-pos' if pct >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(pct) }}%</td>
+              </tr>
+            {% endfor %}{% endfor %}
+          </tbody>
+        </table>
+        {% if ns.rows == 0 %}<div class="ac-empty">No open positions.</div>{% endif %}
+      </div>
+    </div>
+    {% else %}
+    <div class="ac-connect">
+      <p>Schwab is not connected.<br>Connect your brokerage to see buying power, day P&amp;L, open P&amp;L and live positions.</p>
+      <a class="btn-primary" href="{{ url_for('schwab_account') }}">Connect Schwab</a>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ===== Journal performance ===== -->
+  <div class="ac-sec">
+    <div class="ac-sec-hd"><h2>Performance</h2><a href="{{ url_for('journal') }}">Full journal →</a></div>
+    <div class="ac-cards">
+      <div class="ac-card {{ '' if summary.win_rate is not none else 'paper' }}">
+        <div class="ac-card-lbl">Win Rate</div>
+        {% if summary.win_rate is not none %}<div class="ac-card-val">{{ '%.0f'|format(summary.win_rate) }}<span style="font-size:14px;color:var(--text-faint);"> %</span></div>
+        <div class="ac-card-sub">{{ summary.wins }}W · {{ summary.losses }}L{% if summary.be %} · {{ summary.be }}BE{% endif %}</div>
+        {% else %}<div class="ac-card-val">—</div><div class="tag-paper">no trades logged</div>{% endif %}
+      </div>
+      <div class="ac-card"><div class="ac-card-lbl">Total Trades</div><div class="ac-card-val">{{ summary.total }}</div></div>
+      <div class="ac-card"><div class="ac-card-lbl">Total P&amp;L</div>
+        <div class="ac-card-val {{ 'chg-pos' if (summary.total_pnl or 0) >= 0 else 'chg-neg' }}">{{ '%+.1f'|format(summary.total_pnl or 0) }}%</div></div>
+      <div class="ac-card"><div class="ac-card-lbl">Avg Win / Loss</div>
+        <div class="ac-card-val" style="font-size:var(--fs-h3);"><span class="chg-pos">{{ ('%+.1f'|format(summary.avg_win)) if summary.avg_win is not none else '—' }}</span> / <span class="chg-neg">{{ ('%.1f'|format(summary.avg_loss)) if summary.avg_loss is not none else '—' }}</span></div>
+        <div class="ac-card-sub">% per trade</div></div>
+    </div>
+
+    <div class="ac-panel">
+      <div class="ac-tbl-wrap">
+        {% if entries %}
+        <table class="ac-tbl">
+          <thead><tr><th>Date</th><th>Side</th><th>Symbol</th><th>Setup</th><th>Entry</th><th>Exit</th><th>Result</th><th>P&amp;L %</th></tr></thead>
+          <tbody>
+            {% for e in entries[:15] %}
+            <tr>
+              <td>{{ e.trade_date }}</td>
+              <td><span class="ac-badge {{ 'long' if (e.direction or '')|lower in ('long','buy') else 'short' }}">{{ e.direction or '—' }}</span></td>
+              <td class="ac-sym">{{ e.ticker }}</td>
+              <td style="text-align:right;color:var(--text-faint);">{{ e.setup_type or '—' }}</td>
+              <td>{{ '%.2f'|format(e.entry_price) if e.entry_price is not none else '—' }}</td>
+              <td>{{ '%.2f'|format(e.exit_price) if e.exit_price is not none else '—' }}</td>
+              <td>{% set rl = (e.result or '')|lower %}<span class="ac-badge {{ 'win' if rl=='win' else ('loss' if rl=='loss' else 'be') }}">{{ e.result or '—' }}</span></td>
+              <td class="{{ 'chg-pos' if (e.pnl_pct or 0) >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(e.pnl_pct) if e.pnl_pct is not none else '—' }}%</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="ac-empty">No journal entries yet.<br>Log trades on the <a href="{{ url_for('journal') }}">Journal</a> to build win-rate &amp; performance stats.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Discipline ===== -->
+  <div class="ac-sec">
+    <div class="ac-sec-hd"><h2>Discipline</h2><a href="{{ url_for('risk_settings') }}">Risk settings →</a></div>
+    <div class="ac-cards">
+      <div class="ac-card"><div class="ac-card-lbl">Trades Today</div><div class="ac-card-val {{ 'chg-neg' if trades_today|int > mx|int else '' }}">{{ trades_today }}<span style="font-size:14px;color:var(--text-faint);"> / {{ mx }}</span></div></div>
+      <div class="ac-card"><div class="ac-card-lbl">Losses Today</div><div class="ac-card-val {{ 'chg-neg' if losses_today|int >= 2 else '' }}">{{ losses_today }}</div></div>
+      <div class="ac-card"><div class="ac-card-lbl">Discipline Score</div><div class="ac-card-val">{{ discipline.score if discipline else '—' }}{% if discipline and discipline.label %}<span style="font-size:13px;color:var(--text-faint);"> {{ discipline.label }}</span>{% endif %}</div></div>
+      <div class="ac-card"><div class="ac-card-lbl">Status</div><div class="ac-card-val" style="font-size:var(--fs-h3);">{% if daily_session and daily_session.locked %}<span class="chg-neg">LOCKED</span>{% else %}<span class="chg-pos">OPEN</span>{% endif %}</div></div>
+    </div>
+    {% if discipline and discipline.deductions %}
+    <div class="ac-deduct">
+      {% for d in discipline.deductions %}<span>{{ d }}</span>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

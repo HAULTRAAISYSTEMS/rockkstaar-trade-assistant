@@ -98,13 +98,9 @@
     <div class="score-strip-item">
       <div class="score-strip-label">Setup Grade</div>
       <div class="score-big-row">
-        {% set _g = stock.swing_grade or 'D' %}
-        {% set _gcss = {
-            'A+': 'grade-aplus', 'A': 'grade-a',
-            'B+': 'grade-bplus', 'B': 'grade-b',
-            'C+': 'grade-c', 'C': 'grade-c', 'D': 'grade-d'
-        }.get(_g, 'grade-d') %}
-        <span class="setup-grade-badge {{ _gcss }}">{{ _g }}</span>
+        {% set _gl = stock.swing_grade|ugrade %}
+        {% if _gl %}<span class="ugrade-badge {{ stock.swing_grade|ugcss }}">{{ _gl }}</span>
+        {% else %}<span class="ugrade-dash">UNGRADED</span>{% endif %}
       </div>
       <div class="score-strip-reason">{{ stock.simplified_action or '—' }}</div>
     </div>
@@ -270,7 +266,7 @@
         {% endif %}
         <div class="ai-level-row">
           <span class="ai-level-lbl">Swing Score</span>
-          <span class="ai-level-val">{{ stock.swing_score or '—' }}/10</span>
+          <span class="ai-level-val">{{ plan.swing_score }}/10</span>
         </div>
         <div class="ai-level-row">
           <span class="ai-level-lbl">Catalyst</span>
