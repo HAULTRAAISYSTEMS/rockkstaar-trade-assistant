@@ -1,0 +1,111 @@
+<!-- @dsCard group="Screens" viewport="1440x1400" name="Account Screen" subtitle="Performance hub · KPI tiles, positions, journal, Schwab states" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Account Screen</title>
+<link rel="stylesheet" href="./styles.css">
+<link rel="stylesheet" href="./screens.css">
+<style>
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+@media(max-width:1100px){.kpis{grid-template-columns:repeat(3,1fr)}}
+.disc-ring{--v:88;width:34px;height:34px;border-radius:50%;background:conic-gradient(var(--pos-500) calc(var(--v)*1%),var(--surface-inset) 0);display:flex;align-items:center;justify-content:center}
+.disc-ring>i{width:24px;height:24px;border-radius:50%;background:var(--surface-card);display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10px;color:var(--text-hi)}
+.trades-dots{display:flex;gap:4px}
+.trades-dots i{width:12px;height:12px;border-radius:var(--r-xs);background:var(--surface-inset);border:1px solid var(--border)}
+.trades-dots i.used{background:var(--grad-brand);border-color:transparent}
+.jrow{display:flex;gap:14px;padding:14px 0;border-bottom:1px solid var(--border-subtle)}
+.jrow:last-child{border-bottom:none}
+.jmark{width:4px;border-radius:var(--r-full);flex:none}
+.acct-2col{display:grid;grid-template-columns:1.7fr 1fr;gap:16px;align-items:start}
+@media(max-width:1100px){.acct-2col{grid-template-columns:1fr}}
+</style>
+</head><body class="scr">
+<div class="canvas">
+  <div><div class="spec-h">Account Screen — Performance Hub</div><div class="spec-sub">KPI row → positions → journal, with the Schwab connection state pinned top-right. Discipline is a first-class metric.</div></div>
+
+  <div class="frame">
+    <div class="frame-cap"><span class="dots"><i></i><i></i><i></i></span>haultra · account · 1440w</div>
+    <div class="app">
+      <aside class="side">
+        <div class="brandmark"><span class="cube"></span><span class="wm">Haultra</span></div>
+        <div class="nav"><span class="ic"></span>Setups</div>
+        <div class="nav on"><span class="ic"></span>Account</div>
+        <div class="nav"><span class="ic"></span>Intel</div>
+        <div class="nav"><span class="ic"></span>Terminal</div>
+        <div class="grow"></div>
+        <div class="nav"><span class="ic"></span>Settings</div>
+      </aside>
+      <main class="main">
+        <div class="topbar">
+          <div class="col gap-1"><div class="page-h1">Account</div><div class="faint" style="font-size:13px">Swing book · <span class="mono">Jul 19 2026</span></div></div>
+          <!-- Schwab connected -->
+          <div class="row gap-2" style="padding:8px 12px;background:var(--surface-card);border:1px solid rgba(34,197,139,.35);border-radius:var(--r-md)">
+            <span class="badge badge-pos"><span class="dot"></span>Schwab</span><span class="hi" style="font-size:12px;font-weight:600">Connected</span><span class="faint mono" style="font-size:11px">· synced 12s ago</span>
+          </div>
+        </div>
+
+        <!-- KPI TILES -->
+        <div class="kpis">
+          <div class="stat"><div class="stat-lbl">Portfolio Value</div><div class="stat-val">128,540<span class="u">USD</span></div><span class="stat-delta pos">▲ +1.8% today</span></div>
+          <div class="stat"><div class="stat-lbl">Day P&amp;L</div><div class="stat-val pos">+2,310</div><span class="stat-delta pos">▲ +1.83%</span></div>
+          <div class="stat"><div class="stat-lbl">Open P&amp;L</div><div class="stat-val pos">+4,120</div><span class="stat-delta faint">3 positions</span></div>
+          <div class="stat"><div class="stat-lbl">Win Rate</div><div class="stat-val">64<span class="u">%</span></div><span class="stat-delta faint">last 50 trades</span></div>
+          <div class="stat"><div class="stat-lbl">Discipline</div><div class="row gap-3" style="align-items:center"><div class="disc-ring" style="--v:88"><i>88</i></div><span class="stat-val" style="font-size:22px">88</span></div><span class="stat-delta pos">▲ rules held</span></div>
+          <div class="stat"><div class="stat-lbl">Trades Today</div><div class="stat-val">2<span class="u">/ 3</span></div><div class="trades-dots"><i class="used"></i><i class="used"></i><i></i></div></div>
+        </div>
+
+        <div class="acct-2col">
+          <!-- positions -->
+          <div class="card"><div class="card-hd">Open Positions<span class="badge badge-neutral">3</span></div>
+            <div class="tbl-wrap" style="border:none;border-radius:0">
+              <table class="tbl">
+                <thead><tr><th>Symbol</th><th class="c">Grade</th><th class="r">Qty</th><th class="r">Entry</th><th class="r">Last</th><th class="r">P&amp;L</th><th class="r">R</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono hi">NVDA</td><td class="c"><span class="grade grade--row g-aplus">A+</span></td><td class="r mono">40</td><td class="r mono">178.10</td><td class="r mono">184.20</td><td class="r mono pos">+244</td><td class="r mono pos">+1.3R</td></tr>
+                  <tr><td class="mono hi">AMD</td><td class="c"><span class="grade grade--row g-a">A</span></td><td class="r mono">55</td><td class="r mono">162.40</td><td class="r mono">168.05</td><td class="r mono pos">+311</td><td class="r mono pos">+1.1R</td></tr>
+                  <tr><td class="mono hi">SMCI</td><td class="c"><span class="grade grade--row g-bplus">B+</span></td><td class="r mono">30</td><td class="r mono">42.80</td><td class="r mono">41.05</td><td class="r mono neg">−52</td><td class="r mono neg">−0.4R</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <!-- journal -->
+          <div class="card"><div class="card-hd">Journal<button class="btn btn-outline btn-sm">+ Entry</button></div>
+            <div class="card-bd" style="padding:0 16px">
+              <div class="jrow"><span class="jmark" style="background:var(--pos-500)"></span><div class="col gap-1 grow"><div class="between"><span class="hi" style="font-weight:600;font-size:13px">Closed AVGO +2.1R</span><span class="faint mono" style="font-size:11px">08:52</span></div><span class="muted" style="font-size:12px;line-height:1.5">Took the A+ breakout, trailed to target. Followed the plan exactly.</span><span class="badge badge-pos" style="align-self:flex-start;margin-top:4px"><span class="dot"></span>Rules held</span></div></div>
+              <div class="jrow"><span class="jmark" style="background:var(--neg-500)"></span><div class="col gap-1 grow"><div class="between"><span class="hi" style="font-weight:600;font-size:13px">Stopped TSLA −0.5R</span><span class="faint mono" style="font-size:11px">Yesterday</span></div><span class="muted" style="font-size:12px;line-height:1.5">B setup, entered early before trigger. Note: wait for confirmation.</span><span class="badge badge-neg" style="align-self:flex-start;margin-top:4px"><span class="dot"></span>Broke rule</span></div></div>
+              <div class="jrow"><span class="jmark" style="background:var(--warn-500)"></span><div class="col gap-1 grow"><div class="between"><span class="hi" style="font-weight:600;font-size:13px">Skipped GME parabolic</span><span class="faint mono" style="font-size:11px">Yesterday</span></div><span class="muted" style="font-size:12px;line-height:1.5">Extended +38% over 20EMA. Did not chase — good discipline.</span><span class="badge badge-warn" style="align-self:flex-start;margin-top:4px"><span class="dot"></span>Avoided</span></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Schwab connect-prompt (alt state) -->
+        <div class="card"><div class="card-hd">Broker Connection · states</div>
+          <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div class="between" style="padding:16px;background:var(--surface-inset);border:1px solid rgba(34,197,139,.3);border-radius:var(--r-md)">
+              <div class="row gap-3"><div style="width:38px;height:38px;border-radius:var(--r-md);background:rgba(34,197,139,.14);display:flex;align-items:center;justify-content:center"><span class="badge badge-pos" style="border:none;background:none;padding:0">✓</span></div><div class="col"><span class="hi" style="font-weight:600;font-size:14px">Charles Schwab</span><span class="faint" style="font-size:12px">Connected · live positions & fills</span></div></div>
+              <button class="btn btn-ghost btn-sm">Manage</button>
+            </div>
+            <div class="between" style="padding:16px;background:var(--surface-inset);border:1px dashed var(--border-strong);border-radius:var(--r-md)">
+              <div class="row gap-3"><div style="width:38px;height:38px;border-radius:var(--r-md);background:var(--surface-raised);display:flex;align-items:center;justify-content:center;color:var(--text-faint)">○</div><div class="col"><span class="hi" style="font-weight:600;font-size:14px">Charles Schwab</span><span class="faint" style="font-size:12px">Not connected · manual entry only</span></div></div>
+              <button class="btn btn-primary btn-sm">Connect</button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h4>Components</h4>
+    <ul>
+      <li>KPI row = 6× <code>&lt;Stat&gt;</code> in a <code>repeat(6,1fr)</code> grid (→ <code>repeat(3,1fr)</code> under 1100px). Value = mono, label = <code>--track-label</code> uppercase.</li>
+      <li><b>Discipline</b> uses a conic-gradient ring (score→fill), colored by band: ≥80 <code>--pos-500</code>, 60-79 <code>--warn-500</code>, &lt;60 <code>--neg-500</code>.</li>
+      <li><b>Trades Today X/3</b> renders the cap as 3 slot chips — filled = <code>--grad-brand</code>. At 3/3 the value flips to <code>--warn-500</code> and Terminal should disable new orders (daily-limit guardrail).</li>
+      <li>Positions = <code>&lt;DataTable&gt;</code> with mono numeric columns; render the grade cell as a row-size <code>&lt;GradeBadge&gt;</code>. P&L / R colored by sign.</li>
+    </ul>
+    <h4>Journal + broker</h4>
+    <ul>
+      <li>Journal rows carry a left <code>.jmark</code> rail colored by outcome (win=pos, loss=neg, avoided=warn) + an outcome <code>&lt;Badge&gt;</code>: <b>Rules held / Broke rule / Avoided</b>. This ties every trade back to discipline.</li>
+      <li>Schwab has two states: <b>Connected</b> (green pill in topbar, "synced Xs ago") vs <b>Connect-prompt</b> (dashed card, primary Connect button). Show the prompt state whenever the token is missing/expired.</li>
+    </ul>
+  </div>
+</div>
+</body></html>

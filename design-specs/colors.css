@@ -1,0 +1,67 @@
+/* HAULTRA color system — orange on industrial near-black */
+:root {
+  /* Brand orange (from the logo gradient: bright amber → deep orange) */
+  --orange-300: #FFC078;
+  --orange-400: #FFA94D;
+  --orange-500: #FF7A18; /* primary brand orange */
+  --orange-600: #F2600C;
+  --orange-700: #C24A05;
+  --amber-glow: #FFB24C; /* top of the mark's gradient */
+
+  /* Neutral ramp — cool industrial darks */
+  --ink-900: #060708;   /* deepest / app backdrop */
+  --ink-850: #0B0D10;
+  --ink-800: #101318;   /* base surface */
+  --ink-750: #161A20;
+  --ink-700: #1B2027;   /* raised surface / cards */
+  --ink-650: #222833;
+  --ink-600: #2A313C;   /* borders strong */
+  --ink-500: #3A424F;   /* borders / dividers */
+  --ink-400: #55606E;   /* disabled text */
+  --ink-300: #7B8794;   /* faint text */
+  --ink-200: #AEB7C2;   /* muted text */
+  --ink-100: #D6Dce3;
+  --ink-050: #EEF1F5;   /* high text */
+  --white:   #FFFFFF;
+
+  /* Semantic — trading + system states */
+  --pos-500: #22C58B;   /* long / up / gains */
+  --pos-600: #17A473;
+  --neg-500: #FF4D45;   /* short / down / loss */
+  --neg-600: #E0362F;
+  --warn-500: #FFB020;
+  --info-500: #3B9EFF;
+
+  /* ---- Semantic aliases ---- */
+  --bg-app: var(--ink-900);
+  --bg-base: var(--ink-800);
+  --surface-card: var(--ink-700);
+  --surface-raised: var(--ink-650);
+  --surface-inset: var(--ink-850);
+
+  --border: var(--ink-500);
+  --border-subtle: var(--ink-600);
+  --border-strong: var(--ink-400);
+  --border-accent: var(--orange-500);
+
+  --text-hi: var(--ink-050);
+  --text-body: var(--ink-100);
+  --text-muted: var(--ink-200);
+  --text-faint: var(--ink-300);
+  --text-disabled: var(--ink-400);
+  --text-on-accent: #1A0E00;
+
+  --accent: var(--orange-500);
+  --accent-hover: var(--orange-400);
+  --accent-press: var(--orange-600);
+
+  --pos: var(--pos-500);
+  --neg: var(--neg-500);
+  --warn: var(--warn-500);
+  --info: var(--info-500);
+
+  /* Signature gradient (the cube mark) */
+  --grad-brand: linear-gradient(150deg, var(--amber-glow) 0%, var(--orange-500) 45%, var(--orange-700) 100%); /* @kind color */
+  --grad-brand-soft: linear-gradient(150deg, rgba(255,178,76,.18) 0%, rgba(242,96,12,.12) 100%); /* @kind color */
+  --glow-accent: 0 0 0 1px rgba(255,122,24,.35), 0 8px 30px -8px rgba(255,122,24,.45); /* @kind shadow */
+}

@@ -1,0 +1,125 @@
+/* HAULTRA screen-spec kit — component classes built strictly on design-system tokens.
+   Mirrors the React components (Badge, Card, Stat, DataTable, Tabs) so these mocks
+   are 1:1 with production. Reference this + styles.css. */
+
+*{box-sizing:border-box}
+.scr{background:var(--bg-app);color:var(--text-body);font-family:var(--font-ui);min-height:100%;margin:0}
+.mono{font-family:var(--font-mono)}
+.pos{color:var(--pos-500)}
+.neg{color:var(--neg-500)}
+.warn{color:var(--warn-500)}
+.faint{color:var(--text-faint)}
+.muted{color:var(--text-muted)}
+.hi{color:var(--text-hi)}
+
+/* ---- Eyebrow / section label ---- */
+.eyebrow{font-family:var(--font-ui);font-size:11px;font-weight:600;letter-spacing:var(--track-label);text-transform:uppercase;color:var(--text-faint)}
+.dtitle{font-family:var(--font-display);font-weight:700;letter-spacing:var(--track-display);text-transform:uppercase;color:var(--text-hi)}
+
+/* ================= GRADE BADGES ================= */
+.grade{font-family:var(--font-display);font-weight:700;letter-spacing:.03em;display:inline-flex;align-items:center;justify-content:center;line-height:1;white-space:nowrap}
+.grade--card{padding:7px 15px;font-size:23px;border-radius:var(--r-md);min-width:66px}
+.grade--row{padding:3px 8px;font-size:12px;border-radius:var(--r-xs);font-family:var(--font-mono);font-weight:600;letter-spacing:.05em;min-width:38px}
+
+.g-aplus{background:var(--grad-brand);color:var(--text-on-accent);border:1px solid transparent;box-shadow:var(--glow-accent)}
+.g-aplus.grade--card{animation:aplusPulse 2.4s var(--ease-in-out) infinite}
+.g-a{background:var(--grad-brand-soft);color:var(--orange-400);border:1px solid rgba(255,122,24,.6)}
+.g-bplus{background:rgba(255,176,32,.14);color:var(--warn-500);border:1px solid rgba(255,176,32,.42)}
+.g-b{background:var(--surface-raised);color:var(--text-muted);border:1px solid var(--border)}
+.g-ungraded{background:var(--surface-inset);color:var(--text-disabled);border:1px dashed var(--border-subtle)}
+@keyframes aplusPulse{0%,100%{box-shadow:0 0 0 1px rgba(255,122,24,.35),0 8px 30px -8px rgba(255,122,24,.35)}50%{box-shadow:0 0 0 1px rgba(255,122,24,.6),0 10px 40px -6px rgba(255,122,24,.7)}}
+
+/* ================= CARD ================= */
+.card{background:var(--surface-card);border:1px solid var(--border-subtle);border-radius:var(--r-lg);box-shadow:var(--shadow-sm);overflow:hidden;display:flex;flex-direction:column}
+.card--raised{background:var(--surface-raised);box-shadow:var(--shadow-md)}
+.card--accent{border-color:var(--border-accent)}
+.card-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border-subtle);font-family:var(--font-display);font-size:14px;font-weight:600;letter-spacing:var(--track-label);text-transform:uppercase;color:var(--text-muted)}
+.card-bd{padding:16px}
+.card-ft{padding:12px 16px;border-top:1px solid var(--border-subtle);margin-top:auto}
+
+/* ================= BADGE (status chips) ================= */
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;height:20px;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;border-radius:var(--r-xs);white-space:nowrap}
+.badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge-neutral{color:var(--text-muted);background:var(--surface-raised);border:1px solid var(--border)}
+.badge-accent{color:var(--orange-400);background:var(--grad-brand-soft);border:1px solid rgba(255,122,24,.4)}
+.badge-pos{color:var(--pos-500);background:rgba(34,197,139,.14);border:1px solid rgba(34,197,139,.35)}
+.badge-neg{color:var(--neg-500);background:rgba(255,77,69,.14);border:1px solid rgba(255,77,69,.35)}
+.badge-warn{color:var(--warn-500);background:rgba(255,176,32,.14);border:1px solid rgba(255,176,32,.35)}
+.badge-info{color:var(--info-500);background:rgba(59,158,255,.14);border:1px solid rgba(59,158,255,.35)}
+
+/* ================= STAT TILE ================= */
+.stat{display:flex;flex-direction:column;gap:8px;padding:16px;background:var(--surface-card);border:1px solid var(--border-subtle);border-radius:var(--r-lg)}
+.stat-lbl{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-ui);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint)}
+.stat-val{font-family:var(--font-mono);font-size:26px;font-weight:600;color:var(--text-hi);line-height:1;display:flex;align-items:baseline;gap:6px}
+.stat-val .u{font-size:13px;color:var(--text-faint)}
+.stat-delta{font-family:var(--font-mono);font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:4px}
+
+/* ================= TABLE ================= */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--border-subtle);border-radius:var(--r-lg)}
+.tbl{width:100%;border-collapse:collapse;font-family:var(--font-ui)}
+.tbl th{text-align:left;padding:11px 14px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);background:var(--surface-inset);border-bottom:1px solid var(--border);white-space:nowrap}
+.tbl td{padding:11px 14px;font-size:13px;color:var(--text-body);border-bottom:1px solid var(--border-subtle);white-space:nowrap}
+.tbl.dense th,.tbl.dense td{padding:7px 12px}
+.tbl tr:last-child td{border-bottom:none}
+.tbl .r{text-align:right}
+.tbl .c{text-align:center}
+
+/* ================= TABS ================= */
+.tabs{display:inline-flex;gap:2px;border-bottom:1px solid var(--border-subtle)}
+.tab{position:relative;cursor:pointer;font-family:var(--font-ui);font-size:13px;font-weight:600;letter-spacing:.02em;padding:10px 14px;color:var(--text-faint);background:none;border:none}
+.tab.on{color:var(--text-hi)}
+.tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--grad-brand)}
+.tab .cnt{font-family:var(--font-mono);font-size:11px;margin-left:7px;padding:1px 6px;border-radius:var(--r-full);background:var(--surface-raised);color:var(--text-muted)}
+.tab.on .cnt{background:var(--grad-brand);color:var(--text-on-accent)}
+
+/* ================= BUTTONS ================= */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;font-family:var(--font-ui);font-size:13px;font-weight:600;letter-spacing:.02em;padding:9px 16px;border-radius:var(--r-md);border:1px solid transparent;white-space:nowrap}
+.btn-primary{background:var(--grad-brand);color:var(--text-on-accent);box-shadow:var(--glow-accent)}
+.btn-outline{background:transparent;color:var(--orange-400);border-color:rgba(255,122,24,.5)}
+.btn-ghost{background:var(--surface-raised);color:var(--text-body);border-color:var(--border-subtle)}
+.btn-sm{padding:6px 12px;font-size:12px}
+
+/* ================= LAYOUT HELPERS ================= */
+.row{display:flex;align-items:center}
+.between{display:flex;align-items:center;justify-content:space-between}
+.gap-1{gap:4px}.gap-2{gap:8px}.gap-3{gap:12px}.gap-4{gap:16px}.gap-6{gap:24px}
+.col{display:flex;flex-direction:column}
+.grow{flex:1}
+.divider{height:1px;background:var(--border-subtle)}
+
+/* ---- App chrome (shared shell) ---- */
+.app{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
+.side{background:var(--ink-850);border-right:1px solid var(--border-subtle);padding:18px 14px;display:flex;flex-direction:column;gap:4px}
+.brandmark{display:flex;align-items:center;gap:10px;padding:2px 6px 18px}
+.brandmark .cube{width:26px;height:26px;border-radius:var(--r-sm);background:var(--grad-brand);box-shadow:var(--glow-accent)}
+.brandmark .wm{font-family:var(--font-display);font-weight:700;font-size:17px;letter-spacing:var(--track-display);color:var(--text-hi);text-transform:uppercase}
+.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--r-md);font-size:13px;font-weight:600;color:var(--text-faint);cursor:pointer}
+.nav.on{background:var(--grad-brand-soft);color:var(--orange-400)}
+.nav .ic{width:16px;height:16px;border-radius:3px;background:currentColor;opacity:.8}
+.main{padding:24px 28px;display:flex;flex-direction:column;gap:20px;min-width:0}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.page-h1{font-family:var(--font-display);font-size:28px;font-weight:700;letter-spacing:var(--track-display);text-transform:uppercase;color:var(--text-hi);line-height:1}
+
+/* ---- Regime meter ---- */
+.regime{display:flex;align-items:stretch;gap:0;border:1px solid var(--border-subtle);border-radius:var(--r-lg);overflow:hidden;background:var(--surface-card)}
+.regime .seg{flex:1;padding:12px 16px;display:flex;flex-direction:column;gap:5px;border-right:1px solid var(--border-subtle)}
+.regime .seg:last-child{border-right:none}
+.meterbar{height:6px;border-radius:var(--r-full);background:var(--surface-inset);overflow:hidden}
+.meterbar>i{display:block;height:100%;border-radius:var(--r-full)}
+
+/* ---- Spec-notes panel (handoff) ---- */
+.notes{background:var(--ink-850);border:1px solid var(--border-subtle);border-left:3px solid var(--orange-500);border-radius:var(--r-md);padding:18px 22px;font-family:var(--font-ui);font-size:12.5px;line-height:1.6;color:var(--text-muted)}
+.notes h4{font-family:var(--font-display);font-size:12px;font-weight:700;letter-spacing:var(--track-label);text-transform:uppercase;color:var(--orange-400);margin:0 0 8px}
+.notes h4:not(:first-child){margin-top:16px}
+.notes ul{margin:0;padding-left:18px}
+.notes li{margin:3px 0}
+.notes code{font-family:var(--font-mono);font-size:11.5px;color:var(--orange-300);background:var(--surface-inset);padding:1px 5px;border-radius:var(--r-xs)}
+.notes b{color:var(--text-hi);font-weight:600}
+
+/* spec canvas frame */
+.canvas{padding:40px;background:var(--ink-900);display:flex;flex-direction:column;gap:28px}
+.spec-h{font-family:var(--font-display);font-size:20px;font-weight:700;letter-spacing:var(--track-display);text-transform:uppercase;color:var(--text-hi)}
+.spec-sub{font-size:13px;color:var(--text-faint);margin-top:2px}
+.frame{border:1px solid var(--border-subtle);border-radius:var(--r-xl);overflow:hidden;box-shadow:var(--shadow-lg)}
+.frame-cap{display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--ink-850);border-bottom:1px solid var(--border-subtle);font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint)}
+.frame-cap .dots{display:flex;gap:5px}.frame-cap .dots i{width:9px;height:9px;border-radius:50%;background:var(--ink-600)}
