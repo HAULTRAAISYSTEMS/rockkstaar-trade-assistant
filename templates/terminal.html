@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_hx_macros.html" import grade_badge %}
 {% block title %}Terminal — HAULTRA AI{% endblock %}
 
 {% block head_extra %}
@@ -330,6 +331,39 @@
 
     <!-- RIGHT: stat cards + order ticket -->
     <div class="tw-right">
+      <!-- Today's Setups panel (design spec · item #5) -->
+      <div class="hx" style="margin-bottom:var(--sp-4)">
+        <div class="card">
+          {% set apn = today_setups|selectattr('swing_grade','equalto','A+')|list|length if today_setups else 0 %}
+          <div class="card-hd">Today's Setups{% if today_setups %}<span class="badge badge-accent"><span class="dot"></span>{{ apn }} A+</span>{% endif %}</div>
+          {% if today_setups %}
+            {% for s in today_setups %}
+            {% set is_ap = (s.swing_grade|ugrade) == 'A+' %}
+            {% set ready = (s.bucket == 'A+ READY') %}
+            <div class="dense-row {{ 'is-aplus' if is_ap }}" onclick="twSetupPrefill('{{ s.ticker }}','{{ s.entry_zone_display or '' }}','{{ s.stop_level or '' }}','{{ s.target_1 or '' }}')">
+              {{ grade_badge(s.swing_grade, 'row') }}
+              <div class="col">
+                <div class="between"><span class="mono hi" style="font-size:14px;font-weight:600">{{ s.ticker }}</span><span class="mono {{ 'pos' if (s.gap_pct or 0)>=0 else 'neg' }}" style="font-size:12px">{{ s.gap_display or '' }}</span></div>
+                <div class="levels">
+                  <span><b>E</b> {{ s.entry_zone_display or '—' }}</span>
+                  <span><b>S</b> {{ '%.2f'|format(s.stop_level) if s.stop_level else '—' }}</span>
+                  <span><b>T</b> {{ '%.2f'|format(s.target_1) if s.target_1 else '—' }}</span>
+                  <span class="{{ 'pos' if s.risk_reward }}"><b>R:R</b> {{ '%.1f'|format(s.risk_reward) if s.risk_reward else '—' }}</span>
+                </div>
+              </div>
+              <div class="col" style="align-items:flex-end;gap:3px">
+                <span class="mono hi" style="font-size:13px">{{ s.swing_score or '—' }}</span>
+                <span class="badge {{ 'badge-pos' if ready else 'badge-warn' }}" style="height:16px;padding:1px 6px;font-size:10px"><span class="dot" style="width:5px;height:5px"></span>{{ 'Ready' if ready else 'Wait' }}</span>
+              </div>
+            </div>
+            {% endfor %}
+            <div class="card-ft"><a class="btn btn-outline btn-sm" style="width:100%;justify-content:center" href="{{ url_for('dashboard') }}">Open Scanner →</a></div>
+          {% else %}
+            <div style="padding:14px;font-size:12px;color:var(--text-faint);font-family:var(--font-mono)">No setups — patience is a position.</div>
+          {% endif %}
+        </div>
+      </div>
+
       <div class="tw-stats">
         <div class="tw-stat {{ '' if connected else 'paper' }}">
           <div class="tw-stat-lbl">Buying Power</div>
@@ -523,6 +557,16 @@ function twApplyType(){
 /* ── Order ticket ── */
 function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; }
 function twTypeChange(){ var t=document.getElementById('tw-ot-type').value; var lim=document.getElementById('tw-ot-limit'); var need=(t!=='MARKET'); lim.disabled=!need; if(!need) lim.value=''; twEstCost(); }
+/* Today's Setups row tap → prefill the order ticket with entry/stop/target */
+function twSetupPrefill(sym, entry, stop, target){
+  var s=document.getElementById('tw-ot-symbol'); if(s) s.value=sym;
+  var t=document.getElementById('tw-ot-type'); if(t){ t.value='LIMIT'; twTypeChange(); }
+  var lim=document.getElementById('tw-ot-limit'); var e=parseFloat(entry);
+  if(lim && !isNaN(e)){ lim.disabled=false; lim.value=e; }
+  window._twStop=stop; window._twTarget=target;
+  twEstCost();
+  var ot=document.getElementById('tw-ot-symbol'); if(ot) ot.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
 function twEstCost(){
   var qty=parseFloat(document.getElementById('tw-ot-qty').value)||0;
   var lim=parseFloat(document.getElementById('tw-ot-limit').value);

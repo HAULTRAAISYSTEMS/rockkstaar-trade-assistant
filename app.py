@@ -4474,6 +4474,13 @@ def terminal():
     except Exception as _ae:
         logger.debug("terminal: schwab account fetch skipped: %s", _ae)
 
+    # Today's Setups panel — top 3 by grade then swing score (display only)
+    today_setups = sorted(
+        valid,
+        key=lambda s: (_ugrade_info(s.get("swing_grade"))[1], s.get("swing_score") or 0),
+        reverse=True,
+    )[:3]
+
     return render_template(
         "terminal.html",
         stocks=valid,
@@ -4481,6 +4488,7 @@ def terminal():
         mkt=mkt_ctx,
         acct=acct,
         win_rate=win_rate,
+        today_setups=today_setups,
     )
 
 
