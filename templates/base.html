@@ -12,6 +12,8 @@
   <!-- HAULTRA AI Systems — Rajdhani (display) · IBM Plex Sans (UI) · IBM Plex Mono (data) -->
   <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <!-- HAULTRA design-system component layer (scoped under .hx / hx-*) -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/haultra.css') }}" />
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
   <!-- Mobile / iPad responsive overrides — loaded last to take priority -->
