@@ -1,0 +1,16 @@
+{# ═══ HAULTRA grade badge — the one reusable component (item #1) ═══
+   Maps the engine's swing_grade (via the ugrade normalization) to the
+   unified display tier and emits the spec markup. size = 'card' | 'row'.
+   A+ is the only tier that glows/animates (card size). UNGRADED → dashed '—'. #}
+{% macro grade_badge(grade, size='row') -%}
+  {%- set g = grade|ugrade -%}
+  {%- set cls = {'A+':'g-aplus','A':'g-a','B+':'g-bplus','B':'g-b'}.get(g, 'g-ungraded') -%}
+  <span class="grade grade--{{ size }} {{ cls }}">{{ g if g else '—' }}</span>
+{%- endmacro %}
+
+{# Swing-score meter fill colour degrades as score drops (spec). score 0-100 or 0-10. #}
+{% macro swing_fill_color(score) -%}
+  {%- set s = (score or 0) -%}
+  {%- set n = (s * 10) if s <= 10 else s -%}
+  {%- if n >= 70 -%}var(--grad-brand){%- elif n >= 50 -%}var(--warn-500){%- elif n >= 30 -%}var(--ink-400){%- else -%}var(--neg-500){%- endif -%}
+{%- endmacro %}
