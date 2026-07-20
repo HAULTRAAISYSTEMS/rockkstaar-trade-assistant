@@ -6234,10 +6234,17 @@ def intel():
 # ---------------------------------------------------------------------------
 
 @app.route("/")
+def home():
+    """Default landing → Terminal."""
+    return redirect(url_for("terminal"))
+
+
 @app.route("/opportunity")
 def liquidity_page():
-    """Morning Command Center — liquidity, risk, sector flow, hidden opportunities."""
-    return render_template("liquidity.html")
+    """Command Center retired — its liquidity / macro content now lives on the
+    Intel screen. Kept as a redirect so old links and url_for('liquidity_page')
+    still resolve to the new home for that content."""
+    return redirect(url_for("intel"))
 
 
 @app.route("/api/liquidity/status")

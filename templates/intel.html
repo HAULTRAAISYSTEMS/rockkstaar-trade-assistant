@@ -109,12 +109,12 @@
         <div class="cal-row"><span class="mono {{ 'warn' if e.impact=='HIGH' else 'faint' }}" style="font-weight:600">{{ e.time or e.date_label or '—' }}</span>
           <span class="{{ 'hi' if e.impact=='HIGH' else 'muted' }}" style="font-weight:600">{{ e.event }}</span>
           <span class="badge {{ 'badge-neg' if e.impact=='HIGH' else 'badge-warn' }}">{{ 'High' if e.impact=='HIGH' else 'Med' }}</span>
-          <span class="faint mono" style="font-size:12px">—</span><span class="faint mono" style="font-size:12px">—</span></div>
+          <span class="faint mono" style="font-size:12px" title="Estimate">{{ (e.estimate ~ (e.unit or '')) if e.estimate is not none else '—' }}e</span><span class="faint mono" style="font-size:12px" title="Previous">{{ (e.previous ~ (e.unit or '')) if e.previous is not none else '—' }}p</span></div>
         {% else %}
         <div class="faint" style="font-size:12px;padding:14px 0">No upcoming events.</div>
         {% endfor %}
       </div>
-      {% if events %}<div class="card-ft faint" style="font-size:11px">Estimate / previous not wired (dropped by the calendar engine) — shown as —.</div>{% endif %}
+      {% if events %}<div class="card-ft faint" style="font-size:11px">Estimate (e) / previous (p) from the calendar feed — <span class="mono">—</span> when the source omits them (incl. the static fallback).</div>{% endif %}
     </div>
 
     <!-- 7 · NEWS -->
@@ -135,6 +135,6 @@
 </div>
 
 <div class="faint" style="font-size:11px;line-height:1.6;margin-top:8px">
-  Note: <b class="muted">Net Liquidity</b> is derived (WALCL−TGA−RRP); bank <b class="muted">reserves</b> (WRESBAL) aren't analyzed yet; calendar <b class="muted">estimate/previous</b> and news <b class="muted">ticker-reaction %</b> have no source in the current engines — all shown as <span class="mono">—</span>, never faked.
+  Note: <b class="muted">Net Liquidity</b> is derived (WALCL−TGA−RRP); bank <b class="muted">reserves</b> (WRESBAL) aren't analyzed yet; news <b class="muted">ticker-reaction %</b> has no source in the current engines — all shown as <span class="mono">—</span>, never faked. Calendar <b class="muted">estimate/previous</b> now come from the live feed (<span class="mono">—</span> on the static fallback).
 </div>
 {% endblock %}
