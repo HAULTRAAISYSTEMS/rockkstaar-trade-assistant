@@ -6156,8 +6156,44 @@ def api_daily_review():
 
 @app.route("/intel")
 def intel():
-    """Pre-Market Intel — daily and weekly checklist, earnings, market environment."""
-    return render_template("intel.html")
+    """Intel — morning macro: regime, AI briefing, Fed liquidity, risk meter,
+    sector flow, economic calendar, news. Server-rendered from the existing
+    cache-first engines (no new data sources; all non-blocking)."""
+    mkt = _get_mkt_ctx()
+
+    liq, money_flow = {}, []
+    try:
+        import liquidity_engine as _liq
+        liq = _liq.get_liquidity_status() or {}
+        money_flow = _liq.get_money_flow() or []
+    except Exception as _e:
+        logger.debug("intel: liquidity fetch failed: %s", _e)
+
+    events, news = [], []
+    try:
+        summ = _intel.get_intel_summary() or {}
+        events = summ.get("economic_events") or []
+        news = summ.get("market_news") or summ.get("news") or []
+    except Exception as _e:
+        logger.debug("intel: intel_summary failed: %s", _e)
+
+    briefing = None
+    try:
+        briefing = get_ai_briefing(_et_now().strftime("%Y-%m-%d"))
+    except Exception:
+        pass
+    story = {}
+    if not briefing and _MKT_AVAILABLE:
+        try:
+            story = _mkt.generate_market_story(mkt, (liq.get("score") if liq else None))
+        except Exception as _e:
+            logger.debug("intel: story failed: %s", _e)
+
+    return render_template(
+        "intel.html",
+        mkt=mkt, liq=liq, money_flow=money_flow[:8],
+        events=events[:6], news=news[:6], briefing=briefing, story=story,
+    )
 
 
 # ---------------------------------------------------------------------------
