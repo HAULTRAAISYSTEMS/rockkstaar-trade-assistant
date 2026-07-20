@@ -187,3 +187,9 @@
 .hx .levels{display:flex;gap:10px;margin-top:3px;flex-wrap:wrap}
 .hx .levels span{font-family:var(--font-mono);font-size:11px;color:var(--text-faint)}
 .hx .levels b{color:var(--text-muted);font-weight:500}
+
+/* ---------- Form input (settings views) ---------- */
+.hx-input{background:var(--surface-inset);border:1px solid var(--border-subtle);border-radius:var(--r-sm);color:var(--text-hi);font-family:var(--font-ui);font-size:13px;padding:8px 10px;outline:none;transition:border-color var(--dur-fast),box-shadow var(--dur-fast)}
+.hx-input:focus{border-color:var(--orange-500);box-shadow:0 0 0 2px rgba(255,122,24,.2)}
+.hx .chip-x{background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 2px}
+.hx .chip-x:hover{color:var(--neg-500)}

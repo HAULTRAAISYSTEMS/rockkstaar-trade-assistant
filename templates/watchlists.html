@@ -1,0 +1,82 @@
+{% extends "hx_base.html" %}
+{% block title %}Watchlists — HAULTRA AI{% endblock %}
+
+{% block hx_content %}
+{% set nexturl = url_for('watchlists_page') %}
+
+<div class="hx-topbar">
+  <div class="col gap-1">
+    <div class="hx-h1">Watchlists</div>
+    <div class="faint" style="font-size:13px">Manage your scanner lists · the <b class="muted">active</b> list feeds Setups &amp; Terminal</div>
+  </div>
+</div>
+
+<div class="acct-2col">
+  <!-- Lists -->
+  <div class="card"><div class="card-hd">Your Lists<span class="badge badge-neutral">{{ all_wls|length }}</span></div>
+    <div class="tbl-wrap" style="border:none;border-radius:0">
+      <table class="tbl">
+        <thead><tr><th>Name</th><th class="c">Tickers</th><th class="r">Actions</th></tr></thead>
+        <tbody>
+          {% for w in all_wls %}
+          <tr>
+            <td>
+              <form action="{{ url_for('watchlist_rename', wl_id=w.id) }}" method="POST" class="row gap-2" style="margin:0" title="Edit name and press Enter (or Save) to rename">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}">
+                <input class="hx-input" name="name" value="{{ w.name }}" maxlength="50" style="width:170px">
+                <button class="btn btn-ghost btn-sm" type="submit">Save</button>
+                {% if w.id == active_id %}<span class="badge badge-accent"><span class="dot"></span>Active</span>{% endif %}
+              </form>
+            </td>
+            <td class="c mono">{{ wl_counts.get(w.id, 0) }}</td>
+            <td class="r">
+              <div class="row gap-2" style="justify-content:flex-end">
+                {% if w.id != active_id %}
+                <form action="{{ url_for('watchlist_activate', wl_id=w.id) }}" method="POST" style="margin:0"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}"><button class="btn btn-outline btn-sm" type="submit">Activate</button></form>
+                {% endif %}
+                {% if all_wls|length > 1 %}
+                <form action="{{ url_for('watchlist_delete', wl_id=w.id) }}" method="POST" style="margin:0" onsubmit="return confirm('Delete watchlist “{{ w.name }}”?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}"><button class="btn btn-ghost btn-sm" type="submit" style="color:var(--neg-500)">Delete</button></form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-ft">
+      <form action="{{ url_for('watchlist_create') }}" method="POST" class="row gap-2" style="margin:0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}">
+        <input class="hx-input" name="name" placeholder="New list name" maxlength="50" style="flex:1">
+        <button class="btn btn-primary btn-sm" type="submit">+ Create</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Active list tickers -->
+  <div class="card"><div class="card-hd">{{ active_wl.name if active_wl else 'Active list' }} · Tickers<span class="badge badge-neutral">{{ active_tickers|length }}</span></div>
+    <div class="card-bd col gap-3">
+      <form action="{{ url_for('watchlist_add') }}" method="POST" class="row gap-2" style="margin:0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}">
+        <input class="hx-input" name="tickers" placeholder="ADD TICKERS · e.g. NVDA AMD" autocomplete="off" style="flex:1;text-transform:uppercase;font-family:var(--font-mono)">
+        <button class="btn btn-primary btn-sm" type="submit">Add</button>
+      </form>
+      {% if active_tickers %}
+      <div class="row gap-2" style="flex-wrap:wrap">
+        {% for t in active_tickers %}
+        <span class="badge badge-neutral" style="height:26px;padding:2px 6px 2px 10px;gap:4px;font-family:var(--font-mono);text-transform:none">{{ t }}
+          <form action="{{ url_for('watchlist_remove', ticker=t) }}" method="POST" style="margin:0;display:inline-flex"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}"><button type="submit" class="chip-x" title="Remove {{ t }}">×</button></form>
+        </span>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="faint" style="font-size:13px">No tickers in this list yet — add some above. Newly added tickers load in the background (Loading → Partial → Ready).</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="faint" style="font-size:11px;line-height:1.6;margin-top:8px">
+  The active list drives the <a href="{{ url_for('dashboard') }}" style="color:var(--orange-400)">Setups</a> scanner and the <a href="{{ url_for('terminal') }}" style="color:var(--orange-400)">Terminal</a> watchlist. Adding a ticker kicks off the same two-stage onboarding the app uses everywhere.
+</div>
+{% endblock %}

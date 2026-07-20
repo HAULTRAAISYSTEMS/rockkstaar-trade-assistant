@@ -3459,7 +3459,7 @@ def watchlist_add():
         logger.info("watchlist_add  queued=%s  wl_id=%s", queued, wl_id)
     else:
         flash("No valid tickers found. Use 1–5 letter stock symbols.", "error")
-    return redirect(url_for("dashboard"))
+    return _wl_next()
 
 
 @app.route("/watchlist/remove/<ticker>", methods=["POST"])
@@ -3483,7 +3483,7 @@ def watchlist_remove(ticker):
         remaining = get_watchlist_stocks(wl_id)
         logger.info("WATCHLIST SAVED  wl_id=%s contents=%s", wl_id, remaining)
     flash(f"Removed {t} from watchlist.", "info")
-    return redirect(url_for("dashboard"))
+    return _wl_next()
 
 
 def _refresh_all_worker(watchlist: list) -> None:
@@ -4322,11 +4322,44 @@ def set_trading_mode():
 # Watchlist management routes
 # ---------------------------------------------------------------------------
 
+def _wl_next():
+    """Redirect back to the submitting page via a safe relative `next` form
+    field (e.g. the Watchlists settings view), defaulting to the Setups
+    scanner. Backward-compatible: callers that don't send `next` get dashboard."""
+    nxt = request.form.get("next", "")
+    if nxt.startswith("/") and not nxt.startswith("//"):
+        return redirect(nxt)
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/watchlists")
+def watchlists_page():
+    """Watchlists settings — create / rename / activate / delete lists and
+    add / remove tickers. Reuses the existing watchlist store and the existing
+    POST routes; no new data logic."""
+    uid       = current_user_id()
+    all_wls   = get_all_watchlists(uid)
+    active_id = get_active_wl_id()
+    wl_counts = {}
+    for w in all_wls:
+        try:
+            wl_counts[w["id"]] = len(get_watchlist_stocks(w["id"]) or [])
+        except Exception:
+            wl_counts[w["id"]] = 0
+    active_tickers = get_watchlist_stocks(active_id) if active_id else []
+    active_wl      = get_watchlist_by_id(active_id) if active_id else None
+    return render_template(
+        "watchlists.html",
+        all_wls=all_wls, active_id=active_id, active_wl=active_wl,
+        wl_counts=wl_counts, active_tickers=active_tickers,
+    )
+
+
 @app.route("/watchlists/activate/<int:wl_id>", methods=["POST"])
 def watchlist_activate(wl_id):
     """Switch the active watchlist (stored in session)."""
     session["active_wl_id"] = wl_id
-    return redirect(url_for("dashboard"))
+    return _wl_next()
 
 
 @app.route("/watchlists/create", methods=["POST"])
@@ -4342,7 +4375,7 @@ def watchlist_create():
             flash("A watchlist with that name already exists.", "error")
     else:
         flash("Please enter a watchlist name.", "error")
-    return redirect(url_for("dashboard"))
+    return _wl_next()
 
 
 @app.route("/watchlists/rename/<int:wl_id>", methods=["POST"])
@@ -4355,7 +4388,7 @@ def watchlist_rename(wl_id):
             flash(f"Watchlist renamed to '{name}'.", "success")
         except Exception:
             flash("That name is already taken.", "error")
-    return redirect(url_for("dashboard"))
+    return _wl_next()
 
 
 @app.route("/watchlists/delete/<int:wl_id>", methods=["POST"])
@@ -4365,7 +4398,7 @@ def watchlist_delete(wl_id):
     all_wls = get_all_watchlists(uid)
     if len(all_wls) <= 1:
         flash("Cannot delete the last watchlist.", "error")
-        return redirect(url_for("dashboard"))
+        return _wl_next()
     delete_watchlist(wl_id)
     # If the deleted list was active, fall back to the first remaining list
     if session.get("active_wl_id") == wl_id:
@@ -4373,7 +4406,7 @@ def watchlist_delete(wl_id):
         if remaining:
             session["active_wl_id"] = remaining[0]["id"]
     flash("Watchlist deleted.", "info")
-    return redirect(url_for("dashboard"))
+    return _wl_next()
 
 
 @app.route("/stock/<ticker>/watchlists", methods=["POST"])
