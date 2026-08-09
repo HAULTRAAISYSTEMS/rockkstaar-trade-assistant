@@ -6370,27 +6370,19 @@ def intel():
     except Exception as _e:
         logger.debug("intel: intel_summary failed: %s", _e)
 
-    # Lightweight, explainable headline tone.  This is intentionally not
-    # presented as analyst consensus or social sentiment.
-    bullish_words = (
-        "beat", "beats", "upgrade", "raises", "raised", "growth", "record",
-        "approval", "approved", "surge", "rally", "wins", "buyback",
-    )
-    bearish_words = (
-        "miss", "misses", "downgrade", "cuts", "cut ", "decline", "probe",
-        "lawsuit", "recall", "warning", "falls", "layoff", "offering",
-    )
+    active_id = get_active_wl_id()
+    try:
+        watchlist = get_watchlist_stocks(active_id) if active_id else []
+    except Exception:
+        watchlist = []
+
+    # Elite News Scanner values are deterministic and auditable. They describe
+    # headline tone and catalyst importance, not analyst consensus or advice.
+    from sentiment_engine import enrich_news_article
     enriched_news = []
     coverage = {}
     for raw in news:
-        item = dict(raw)
-        headline = str(item.get("headline") or "")
-        lowered = headline.lower()
-        bull_hits = sum(word in lowered for word in bullish_words)
-        bear_hits = sum(word in lowered for word in bearish_words)
-        item["sentiment"] = "BULLISH" if bull_hits > bear_hits else (
-            "BEARISH" if bear_hits > bull_hits else "NEUTRAL"
-        )
+        item = enrich_news_article(raw, watchlist)
         ticker = str(item.get("ticker") or "").upper()
         if ticker:
             score = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2}.get(item.get("impact"), 1)
@@ -6398,6 +6390,7 @@ def intel():
             entry["mentions"] += 1
             entry["score"] += score
         enriched_news.append(item)
+    enriched_news.sort(key=lambda row: (-row["importance"], row.get("time") or ""))
     trending = sorted(coverage.values(), key=lambda row: (-row["score"], -row["mentions"], row["ticker"]))[:6]
 
     briefing = None

@@ -25,6 +25,18 @@ BEARISH_TERMS = {
     "decline": 1, "falls": 1, "probe": 1,
 }
 
+CATALYST_EXPLANATIONS = (
+    (("guidance", "outlook", "forecast"), "Guidance can change forward estimates before the next reported quarter."),
+    (("earnings", "estimates", "revenue", "eps"), "Earnings news can reset growth expectations and near-term valuation."),
+    (("upgrade", "downgrade", "price target"), "A rating change can affect positioning, momentum, and near-term demand for shares."),
+    (("approval", "fda", "trial", "drug"), "A regulatory or clinical update can materially change the probability of future revenue."),
+    (("contract", "partnership", "deal", "acquisition", "merger"), "A major agreement can change the company's revenue path or strategic value."),
+    (("lawsuit", "probe", "investigation", "recall"), "Legal or regulatory risk can raise costs and pressure investor confidence."),
+    (("offering", "share sale", "dilution"), "New share issuance can dilute existing holders and increase near-term supply."),
+    (("buyback", "repurchase", "dividend"), "Capital-return news can change share supply and the market's view of management confidence."),
+    (("layoff", "layoffs", "job cuts"), "Workforce changes may signal cost control, weaker demand, or a shift in company priorities."),
+)
+
 
 def _clean(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
@@ -48,6 +60,41 @@ def score_headline(headline: object) -> dict:
         "bearish_terms": [term for term, _ in negative],
         "evidence_count": total,
     }
+
+
+def explain_headline(headline: object, reason: object = "") -> str:
+    """Return a short catalyst explanation grounded only in supplied text."""
+    text = f"{_clean(headline)} {_clean(reason)}".lower()
+    for terms, explanation in CATALYST_EXPLANATIONS:
+        if any(term in text for term in terms):
+            return explanation
+    return "This headline is on the scanner because the live feed classified it as a market-relevant catalyst."
+
+
+def enrich_news_article(raw: dict, watchlist: list[str] | set[str] | None = None) -> dict:
+    """Build the auditable fields used by Elite News Scanner cards."""
+    item = dict(raw or {})
+    headline = _clean(item.get("headline"))
+    ticker = _clean(item.get("ticker")).upper() or "MARKET"
+    watch = {str(value).upper() for value in (watchlist or [])}
+    scored = score_headline(headline)
+    impact = _clean(item.get("impact")).upper() or "MEDIUM"
+    base_importance = {"CRITICAL": 94, "HIGH": 82, "MEDIUM": 66, "LOW": 42}.get(impact, 58)
+    evidence_bonus = min(6, scored["evidence_count"] * 2)
+    watch_bonus = 4 if ticker in watch or bool(item.get("on_watchlist")) else 0
+    importance = min(99, base_importance + evidence_bonus + watch_bonus)
+    item.update({
+        **scored,
+        "ticker": ticker,
+        "headline": headline,
+        "source": _clean(item.get("source")) or "Market feed",
+        "impact": impact,
+        "importance": importance,
+        "on_watchlist": ticker in watch or bool(item.get("on_watchlist")),
+        "why_it_matters": explain_headline(headline, item.get("reason")),
+        "search_text": " ".join((ticker, headline, _clean(item.get("source")), _clean(item.get("reason")))).lower(),
+    })
+    return item
 
 
 def build_sentiment_snapshot(news: list[dict] | None, watchlist: list[str] | None = None) -> dict:
