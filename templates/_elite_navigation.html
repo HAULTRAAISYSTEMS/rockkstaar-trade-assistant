@@ -1,0 +1,66 @@
+{% set ep = request.endpoint %}
+<nav class="navbar elite-navbar" aria-label="Primary navigation">
+  <a href="{{ url_for('terminal') }}" class="nav-brand" aria-label="Tradestaar Elite Terminal">
+    <img src="{{ url_for('static', filename='logo.png') }}"
+         alt="Tradestaar Elite"
+         class="nav-logo"
+         onerror="this.style.display='none';this.nextElementSibling.hidden=false;" />
+    <span class="brand-fallback" hidden>
+      <span class="brand-icon" aria-hidden="true">▲</span>
+      <span class="brand-text">Tradestaar</span>
+    </span>
+    <span class="brand-divider" aria-hidden="true"></span>
+    <span class="brand-sub">Elite</span>
+  </a>
+
+  <div class="nav-links" aria-label="Desktop destinations">
+    <a href="{{ url_for('terminal') }}" class="nav-link nav-link-exec {{ 'nav-link-active' if ep == 'terminal' }}">Terminal</a>
+    <a href="{{ url_for('dashboard') }}" class="nav-link {{ 'nav-link-active' if ep in ('dashboard', 'quick_mode') }}">Setups</a>
+    <a href="{{ url_for('fundamentals_page') }}" class="nav-link {{ 'nav-link-active' if ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare') }}">Fundamentals</a>
+    <a href="{{ url_for('intel') }}" class="nav-link nav-link-research {{ 'nav-link-active' if ep in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'liquidity_page') }}">Market Intel</a>
+    <a href="{{ url_for('account') }}" class="nav-link nav-link-account {{ 'nav-link-active' if ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'tradestaar_ai') }}">Account</a>
+    <a href="{{ url_for('schwab_account') }}" class="nav-link nav-link-schwab {{ 'nav-link-active' if ep == 'schwab_account' }}">Schwab</a>
+  </div>
+
+  <div class="nav-actions">
+    <span class="nav-live-indicator" id="nav-live-indicator">
+      <span class="nav-live-dot" aria-hidden="true"></span>
+      <span id="nav-live-label">Live</span>
+    </span>
+    <span id="ws-status-pill" class="ws-status-pill ws-polling">Polling</span>
+    <span class="freshness-badge fr-live">Connecting…</span>
+    <span id="ar-last-updated" class="ar-last-updated"></span>
+    <button id="alert-sound-toggle" class="btn-ar-toggle ar-on" onclick="toggleAlertSound()" title="Sound alerts for new triggers" aria-label="Toggle alert sounds">🔔</button>
+    <button id="ar-toggle" class="btn-ar-toggle ar-on" onclick="toggleAutoRefresh()" title="Auto-refresh every 4 seconds during market hours">↺ Auto</button>
+    <form action="{{ url_for('refresh_all') }}" method="POST" class="nav-inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-refresh nav-refresh" title="Refresh all data" aria-label="Refresh all data">↺</button>
+    </form>
+    {% if session.get('user_id') %}
+      {% if session.get('is_admin') %}<a href="{{ url_for('admin_users') }}" class="nav-icon-link" title="User management" aria-label="User management">⚙</a>{% endif %}
+      <span class="nav-username">{{ session.get('username', '') }}</span>
+      <form action="{{ url_for('logout') }}" method="POST" class="nav-inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn-ar-toggle nav-signout" title="Sign out" aria-label="Sign out">⏻</button>
+      </form>
+    {% endif %}
+  </div>
+</nav>
+
+<nav class="mobile-app-nav" aria-label="Primary mobile navigation">
+  <a href="{{ url_for('terminal') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('terminal', 'dashboard', 'quick_mode') }}" {% if ep in ('terminal', 'dashboard', 'quick_mode') %}aria-current="page"{% endif %}>
+    <span class="mobile-app-nav__icon" aria-hidden="true">⌁</span><span>Trade</span>
+  </a>
+  <a href="{{ url_for('intel') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'liquidity_page') }}" {% if ep in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'liquidity_page') %}aria-current="page"{% endif %}>
+    <span class="mobile-app-nav__icon" aria-hidden="true">▥</span><span>Intel</span>
+  </a>
+  <a href="{{ url_for('watchlists_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep == 'watchlists_page' }}" {% if ep == 'watchlists_page' %}aria-current="page"{% endif %}>
+    <span class="mobile-app-nav__icon" aria-hidden="true">★</span><span>Watchlist</span>
+  </a>
+  <a href="{{ url_for('fundamentals_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('research_page', 'stock_detail', 'fundamentals_page', 'stock_compare') }}" {% if ep in ('research_page', 'stock_detail', 'fundamentals_page', 'stock_compare') %}aria-current="page"{% endif %}>
+    <span class="mobile-app-nav__icon" aria-hidden="true">⌕</span><span>Research</span>
+  </a>
+  <a href="{{ url_for('account') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('account', 'journal', 'risk_settings', 'schwab_account', 'paper_trading', 'tradestaar_ai') }}" {% if ep in ('account', 'journal', 'risk_settings', 'schwab_account', 'paper_trading', 'tradestaar_ai') %}aria-current="page"{% endif %}>
+    <span class="mobile-app-nav__icon" aria-hidden="true">●</span><span>Account</span>
+  </a>
+</nav>

@@ -1,100 +1,14 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#0a0d11" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-  <meta name="application-name" content="Tradestaar Elite" />
-  <meta name="apple-mobile-web-app-title" content="Tradestaar Elite" />
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}" />
-  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}?v=5" />
-  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v=5" />
-  <title>{% block title %}Tradestaar Elite{% endblock %}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/haultra.css') }}" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}" />
-  <meta name="csrf-token" content="{{ csrf_token() }}" />
-  {% block head_extra %}{% endblock %}
-</head>
-<body class="scr">
-  {% set ep = request.endpoint %}
-  <div class="hx-app">
+{% extends "base.html" %}
 
-    <!-- ===== Sidebar ===== -->
-    <aside class="hx-side">
-      <a href="{{ url_for('terminal') }}" class="hx-brand">
-        <span class="cube"><img src="{{ url_for('static', filename='icon-192.png') }}?v=5" alt="" onerror="this.style.display='none'"></span>
-        <span class="wm">Tradestaar Elite</span>
-      </a>
-      <a href="{{ url_for('dashboard') }}"  class="hx-nav {{ 'on' if ep in ('dashboard','quick_mode') }}"><span class="ic"></span>Setups</a>
-      <a href="{{ url_for('account') }}"    class="hx-nav {{ 'on' if ep in ('account','journal','paper_trading') }}"><span class="ic"></span>Account</a>
-      <a href="{{ url_for('intel') }}"      class="hx-nav {{ 'on' if ep in ('intel','liquidity_page','catalyst_calendar','sentiment','smart_money') }}"><span class="ic"></span>Intel</a>
-      <a href="{{ url_for('catalyst_calendar') }}" class="hx-nav {{ 'on' if ep == 'catalyst_calendar' }}"><span class="ic"></span>Calendar</a>
-      <a href="{{ url_for('terminal') }}"   class="hx-nav {{ 'on' if ep == 'terminal' }}"><span class="ic"></span>Terminal</a>
-      <a href="{{ url_for('tradestaar_ai') }}" class="hx-nav {{ 'on' if ep == 'tradestaar_ai' }}"><span class="ic"></span>Tradestaar AI</a>
+{#
+  Compatibility shell for the componentized screens. Keeping this template
+  means feature templates do not need route or block changes, while every
+  page now inherits the same desktop header, mobile nav, scripts and AI tools.
+#}
+{% block body_class %}elite-component-page{% endblock %}
 
-      <div class="hx-nav-sub">More</div>
-      <a href="{{ url_for('fundamentals_page') }}" class="hx-nav {{ 'on' if ep == 'fundamentals_page' }}"><span class="ic"></span>Fundamentals</a>
-      <a href="{{ url_for('watchlists_page') }}"   class="hx-nav {{ 'on' if ep == 'watchlists_page' }}"><span class="ic"></span>Watchlists</a>
-      <a href="{{ url_for('schwab_account') }}"    class="hx-nav {{ 'on' if ep == 'schwab_account' }}"><span class="ic"></span>Schwab</a>
-
-      <div class="hx-grow"></div>
-      <a href="{{ url_for('risk_settings') }}" class="hx-nav {{ 'on' if ep == 'risk_settings' }}"><span class="ic"></span>Settings</a>
-      {% if session.get('user_id') %}
-      <form action="{{ url_for('logout') }}" method="POST" style="margin:0;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="hx-nav" style="width:100%;background:none;border:none;text-align:left;"><span class="ic"></span>Sign out</button>
-      </form>
-      {% endif %}
-    </aside>
-
-    <!-- ===== Main ===== -->
-    <main class="hx-main hx">
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-          <div style="display:flex;flex-direction:column;gap:6px;">
-          {% for category, message in messages %}
-            <div class="badge {{ 'badge-pos' if category=='success' else ('badge-neg' if category=='error' else 'badge-info') }}" style="height:auto;padding:8px 12px;white-space:normal;">{{ message }}</div>
-          {% endfor %}
-          </div>
-        {% endif %}
-      {% endwith %}
-      {% block hx_content %}{% endblock %}
-    </main>
+{% block content %}
+  <div class="hx elite-page">
+    {% block hx_content %}{% endblock %}
   </div>
-
-  <nav class="mobile-app-nav" aria-label="Primary mobile navigation">
-    <a href="{{ url_for('terminal') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('terminal','dashboard','quick_mode') }}" {% if ep in ('terminal','dashboard','quick_mode') %}aria-current="page"{% endif %}>
-      <span class="mobile-app-nav__icon" aria-hidden="true">⌂</span><span>Home</span>
-    </a>
-    <a href="{{ url_for('intel') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('intel','catalyst_calendar','sentiment','smart_money','liquidity_page') }}" {% if ep in ('intel','catalyst_calendar','sentiment','smart_money','liquidity_page') %}aria-current="page"{% endif %}>
-      <span class="mobile-app-nav__icon" aria-hidden="true">▥</span><span>Markets</span>
-    </a>
-    <a href="{{ url_for('watchlists_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep == 'watchlists_page' }}" {% if ep == 'watchlists_page' %}aria-current="page"{% endif %}>
-      <span class="mobile-app-nav__icon" aria-hidden="true">★</span><span>Watchlist</span>
-    </a>
-    <a href="{{ url_for('research_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('research_page','stock_detail','fundamentals_page','stock_compare') }}" {% if ep in ('research_page','stock_detail','fundamentals_page','stock_compare') %}aria-current="page"{% endif %}>
-      <span class="mobile-app-nav__icon" aria-hidden="true">⌕</span><span>Search</span>
-    </a>
-    <a href="{{ url_for('account') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('account','journal','risk_settings','schwab_account','paper_trading','tradestaar_ai') }}" {% if ep in ('account','journal','risk_settings','schwab_account','paper_trading','tradestaar_ai') %}aria-current="page"{% endif %}>
-      <span class="mobile-app-nav__icon" aria-hidden="true">●</span><span>Account</span>
-    </a>
-  </nav>
-
-  <script src="{{ url_for('static', filename='js/ws_manager.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function () {
-        navigator.serviceWorker.register('/service-worker.js').catch(function () {});
-      });
-    }
-  </script>
-  {% block scripts %}{% endblock %}
-</body>
-</html>
+{% endblock %}

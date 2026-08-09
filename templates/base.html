@@ -24,104 +24,12 @@
   <!-- Mobile / iPad responsive overrides — loaded last to take priority -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}" />
   {% block head_extra %}{% endblock %}
+  <!-- Unified Tradestaar Elite shell and component normalization — loaded last. -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/elite.css') }}" />
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
 
-  <!-- ===== NAVBAR ===== -->
-  <nav class="navbar">
-
-    <!-- LEFT: Brand — Terminal is home -->
-    <a href="{{ url_for('terminal') }}" class="nav-brand">
-      <img src="{{ url_for('static', filename='logo.png') }}"
-           alt="Tradestaar Elite"
-           class="nav-logo"
-           onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
-      <span class="brand-fallback" style="display:none;">
-        <span class="brand-icon">▲</span>
-        <span class="brand-text">TRADESTAAR</span>
-      </span>
-      <span class="brand-divider"></span>
-      <span class="brand-sub">ELITE</span>
-    </a>
-
-    <!-- CENTER: Navigation Links — Terminal · Setups · Fundamentals · Intel · Account · Schwab -->
-    <div class="nav-links">
-      <a href="{{ url_for('terminal') }}"
-         class="nav-link nav-link-exec {% if request.endpoint == 'terminal' %}nav-link-active{% endif %}"
-         title="Trade Terminal — ticker tape, watchlist, chart, order ticket, positions">
-        TERMINAL
-      </a>
-      <a href="{{ url_for('dashboard') }}"
-         class="nav-link {% if request.endpoint in ('dashboard', 'quick_mode') %}nav-link-active{% endif %}"
-         title="Setups — swing scanner, buckets, best candidates, alerts">
-        SETUPS
-      </a>
-      <a href="{{ url_for('fundamentals_page') }}"
-         class="nav-link {% if request.endpoint == 'fundamentals_page' %}nav-link-active{% endif %}"
-         title="Fundamentals Analyzer &amp; Quality Scorecard">
-        FUNDAMENTALS
-      </a>
-      <a href="{{ url_for('intel') }}"
-         class="nav-link nav-link-research {% if request.endpoint in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'liquidity_page') %}nav-link-active{% endif %}"
-         title="Market News &amp; Smart Money — catalysts, earnings, macro, sector flow">
-        MARKET INTEL
-      </a>
-      <a href="{{ url_for('account') }}"
-         class="nav-link nav-link-account {% if request.endpoint in ('account', 'journal', 'risk_settings', 'paper_trading', 'tradestaar_ai') %}nav-link-active{% endif %}"
-         title="Account &amp; Performance — Schwab, P&amp;L, journal, discipline">
-        ACCOUNT
-      </a>
-      <a href="{{ url_for('schwab_account') }}"
-         class="nav-link nav-link-schwab {% if request.endpoint == 'schwab_account' %}nav-link-active{% endif %}"
-         title="Schwab Brokerage">
-        SCHWAB
-      </a>
-    </div>
-
-    <!-- RIGHT: Status + Controls -->
-    <div class="nav-actions">
-      <!-- Live market status indicator (shown on desktop) -->
-      <span class="nav-live-indicator" id="nav-live-indicator">
-        <span class="nav-live-dot"></span>
-        <span id="nav-live-label">LIVE</span>
-      </span>
-
-      <span id="ws-status-pill" class="ws-status-pill ws-polling">POLLING</span>
-      <span class="freshness-badge fr-live">Connecting…</span>
-      <span id="ar-last-updated" class="ar-last-updated"></span>
-
-      <button id="alert-sound-toggle" class="btn-ar-toggle ar-on"
-              onclick="toggleAlertSound()" title="Sound alerts for new triggers">🔔</button>
-      <button id="ar-toggle" class="btn-ar-toggle ar-on"
-              onclick="toggleAutoRefresh()" title="Auto-refresh every 4s during market hours">↺ Auto</button>
-
-      <form action="{{ url_for('refresh_all') }}" method="POST" style="display:inline;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-refresh" title="Refresh All">↺</button>
-      </form>
-
-      {% if session.get('user_id') %}
-        {% if session.get('is_admin') %}
-        <a href="{{ url_for('admin_users') }}"
-           style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:0.10em;
-                  text-transform:uppercase;color:var(--amber);text-decoration:none;opacity:0.70;
-                  padding:4px 8px;transition:opacity 0.15s;"
-           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.70'"
-           title="User management">⚙</a>
-        {% endif %}
-        <span style="font-family:var(--mono);font-size:9px;color:var(--dim);opacity:0.6;">
-          {{ session.get('username', '') }}
-        </span>
-        <form action="{{ url_for('logout') }}" method="POST" style="display:inline;">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn-ar-toggle" title="Sign out"
-                  style="font-size:13px;padding:4px 8px;opacity:0.55;transition:opacity 0.15s;"
-                  onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.55'">⏻</button>
-        </form>
-      {% endif %}
-    </div>
-
-  </nav>
+  {% include "_elite_navigation.html" %}
 
   <!-- ===== FLASH MESSAGES ===== -->
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -138,25 +46,6 @@
   <main class="main-content">
     {% block content %}{% endblock %}
   </main>
-
-  <!-- ===== MOBILE APP NAVIGATION ===== -->
-  <nav class="mobile-app-nav" aria-label="Primary mobile navigation">
-    <a href="{{ url_for('terminal') }}" class="mobile-app-nav__item {% if request.endpoint == 'terminal' %}is-active{% endif %}" {% if request.endpoint == 'terminal' %}aria-current="page"{% endif %}>
-      <span class="mobile-app-nav__icon" aria-hidden="true">⌂</span><span>Home</span>
-    </a>
-    <a href="{{ url_for('intel') }}" class="mobile-app-nav__item {% if request.endpoint in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'liquidity_page') %}is-active{% endif %}" {% if request.endpoint in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'liquidity_page') %}aria-current="page"{% endif %}>
-      <span class="mobile-app-nav__icon" aria-hidden="true">▥</span><span>Markets</span>
-    </a>
-    <a href="{{ url_for('watchlists_page') }}" class="mobile-app-nav__item {% if request.endpoint == 'watchlists_page' %}is-active{% endif %}" {% if request.endpoint == 'watchlists_page' %}aria-current="page"{% endif %}>
-      <span class="mobile-app-nav__icon" aria-hidden="true">★</span><span>Watchlist</span>
-    </a>
-    <a href="{{ url_for('research_page') }}" class="mobile-app-nav__item {% if request.endpoint in ('research_page', 'stock_detail', 'fundamentals_page', 'stock_compare') %}is-active{% endif %}" {% if request.endpoint in ('research_page', 'stock_detail', 'fundamentals_page', 'stock_compare') %}aria-current="page"{% endif %}>
-      <span class="mobile-app-nav__icon" aria-hidden="true">⌕</span><span>Search</span>
-    </a>
-    <a href="{{ url_for('account') }}" class="mobile-app-nav__item {% if request.endpoint in ('account', 'journal', 'risk_settings', 'schwab_account', 'paper_trading', 'tradestaar_ai') %}is-active{% endif %}" {% if request.endpoint in ('account', 'journal', 'risk_settings', 'schwab_account', 'paper_trading', 'tradestaar_ai') %}aria-current="page"{% endif %}>
-      <span class="mobile-app-nav__icon" aria-hidden="true">●</span><span>Account</span>
-    </a>
-  </nav>
 
   <script src="{{ url_for('static', filename='js/ws_manager.js') }}"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
