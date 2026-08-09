@@ -38,10 +38,14 @@
   <!-- ═══════════════════════════════════════════════════════════════════════
        PAGE HEADER
   ═══════════════════════════════════════════════════════════════════════ -->
-  <div class="liq-header">
+  <div class="liq-hero">
+    <div class="liq-hero-orb liq-hero-orb-one"></div>
+    <div class="liq-hero-orb liq-hero-orb-two"></div>
+    <div class="liq-header">
     <div class="liq-header-left">
-      <h1 class="liq-title">🧠 Morning Command Center</h1>
-      <p class="liq-subtitle">Market intelligence terminal — liquidity, risk, sector rotation &amp; hidden opportunities</p>
+      <div class="liq-eyebrow"><span class="liq-live-dot"></span> TRADESTAAR INTELLIGENCE</div>
+      <h1 class="liq-title">Morning <span>Command Center</span></h1>
+      <p class="liq-subtitle">Read the market. Find the edge. Execute with confidence.</p>
     </div>
     <div class="liq-header-right">
       <div class="liq-mode-toggle">
@@ -51,6 +55,14 @@
       </div>
       <button class="btn-liq-refresh" onclick="refreshAll()" title="Refresh all data">↺ Refresh</button>
       <span class="liq-last-updated" id="liq-last-updated">Loading…</span>
+    </div>
+    </div>
+
+    <div class="liq-command-strip">
+      <a href="/intel" class="liq-command-link"><span class="liq-command-icon">⌁</span><span><b>Elite News</b><small>Live catalyst feed</small></span><i>→</i></a>
+      <a href="/calendar" class="liq-command-link"><span class="liq-command-icon">◫</span><span><b>Earnings</b><small>Upcoming events</small></span><i>→</i></a>
+      <a href="/watchlists" class="liq-command-link"><span class="liq-command-icon">☆</span><span><b>Watchlist</b><small>Track your names</small></span><i>→</i></a>
+      <a href="/quick" class="liq-command-link command-primary"><span class="liq-command-icon">⚡</span><span><b>Trade Setup</b><small>Build an execution plan</small></span><i>→</i></a>
     </div>
   </div>
 
@@ -218,7 +230,8 @@
 {% block scripts %}
 <style>
 /* ── Liquidity Page Styles ───────────────────────────────────────────── */
-.liq-page { padding: 1rem 1.5rem 3rem; max-width: 1600px; margin: 0 auto; }
+.liq-page { --elite-gold:#f6b94a; --elite-gold-bright:#ffd47a; --elite-ink:#06080d; --elite-panel:#0c111b; padding:1.35rem 1.5rem 4rem; max-width:1600px; margin:0 auto; position:relative; }
+.liq-page:before { content:""; position:fixed; inset:77px 0 0; pointer-events:none; z-index:-1; background:radial-gradient(circle at 76% 8%,rgba(246,185,74,.08),transparent 30%),radial-gradient(circle at 12% 38%,rgba(32,125,255,.045),transparent 28%),linear-gradient(180deg,#080a0e 0%,#05070a 100%); }
 
 /* Status banner (weekend / stale / loading) */
 .liq-status-banner { padding:.55rem 1.25rem; border-radius:8px; font-size:.78rem; margin-bottom:.75rem;
@@ -227,23 +240,43 @@
 .liq-status-banner.banner-stale   { background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.2); color:#fde68a; }
 .liq-status-banner.banner-loading { background:rgba(100,116,139,.08);border:1px solid rgba(100,116,139,.2); color:#94a3b8; }
 
-.liq-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.25rem; flex-wrap:wrap; gap:.75rem; }
-.liq-title  { font-size:1.5rem; font-weight:800; color:#f1f5f9; margin:0; }
-.liq-subtitle{ font-size:.8rem; color:#64748b; margin:.2rem 0 0; }
+.liq-hero { position:relative; overflow:hidden; margin-bottom:1rem; padding:1.65rem; border:1px solid rgba(246,185,74,.2); border-radius:20px; background:linear-gradient(125deg,rgba(15,18,26,.98),rgba(8,10,15,.98) 60%,rgba(37,27,9,.55)); box-shadow:0 22px 60px rgba(0,0,0,.3),inset 0 1px rgba(255,255,255,.025); }
+.liq-hero:before { content:""; position:absolute; inset:0; opacity:.18; pointer-events:none; background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px); background-size:34px 34px; mask-image:linear-gradient(to right,#000,transparent 70%); }
+.liq-hero-orb { position:absolute; border-radius:50%; filter:blur(2px); pointer-events:none; }
+.liq-hero-orb-one { width:230px; height:230px; right:-75px; top:-120px; background:radial-gradient(circle,rgba(246,185,74,.18),transparent 68%); }
+.liq-hero-orb-two { width:160px; height:160px; left:43%; bottom:-135px; background:radial-gradient(circle,rgba(45,116,255,.1),transparent 70%); }
+.liq-header { position:relative; z-index:1; display:flex; justify-content:space-between; align-items:center; margin-bottom:1.35rem; flex-wrap:wrap; gap:1rem; }
+.liq-eyebrow { display:flex; align-items:center; gap:.45rem; font:800 .64rem/1 'JetBrains Mono',monospace; letter-spacing:.17em; color:var(--elite-gold); margin-bottom:.7rem; }
+.liq-live-dot { width:7px; height:7px; border-radius:50%; background:#2ee6a6; box-shadow:0 0 0 4px rgba(46,230,166,.1),0 0 16px rgba(46,230,166,.75); animation:elite-pulse 2s infinite; }
+@keyframes elite-pulse { 50% { opacity:.5; transform:scale(.8); } }
+.liq-title { font-size:clamp(1.75rem,2.5vw,2.65rem); line-height:1.05; letter-spacing:-.045em; font-weight:850; color:#f7f8fb; margin:0; }
+.liq-title span { background:linear-gradient(115deg,var(--elite-gold-bright),#e79520); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.liq-subtitle{ font-size:.83rem; color:#7e899b; margin:.55rem 0 0; letter-spacing:.01em; }
 .liq-header-right{ display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; }
 
-.liq-mode-toggle{ display:flex; gap:.25rem; background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:.2rem; }
+.liq-mode-toggle{ display:flex; gap:.25rem; background:rgba(3,6,12,.72); border:1px solid rgba(246,185,74,.14); border-radius:10px; padding:.24rem; backdrop-filter:blur(12px); }
 .liq-mode-btn{ background:transparent; border:none; color:#64748b; padding:.35rem .75rem; border-radius:6px; cursor:pointer; font-size:.8rem; font-weight:600; transition:.15s; }
-.liq-mode-btn.active{ background:#1e40af; color:#fff; }
+.liq-mode-btn.active{ background:linear-gradient(135deg,#f5c15e,#d98b18); color:#171006; box-shadow:0 5px 18px rgba(246,185,74,.2); }
 
-.btn-liq-refresh{ background:#1e293b; border:1px solid #334155; color:#94a3b8; padding:.35rem .75rem; border-radius:6px; cursor:pointer; font-size:.8rem; }
-.btn-liq-refresh:hover{ background:#334155; color:#f1f5f9; }
+.btn-liq-refresh{ background:rgba(15,20,30,.82); border:1px solid #2b3444; color:#bdc6d5; padding:.42rem .8rem; border-radius:8px; cursor:pointer; font-size:.76rem; }
+.btn-liq-refresh:hover{ border-color:var(--elite-gold); color:var(--elite-gold-bright); }
 .liq-last-updated{ font-size:.72rem; color:#475569; }
+.liq-command-strip { position:relative; z-index:1; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.65rem; }
+.liq-command-link { min-width:0; display:flex; align-items:center; gap:.7rem; padding:.75rem .85rem; color:#dbe2ec; text-decoration:none; border:1px solid rgba(255,255,255,.065); border-radius:12px; background:rgba(5,8,13,.62); transition:transform .18s,border-color .18s,background .18s; }
+.liq-command-link:hover { transform:translateY(-2px); border-color:rgba(246,185,74,.38); background:rgba(18,20,25,.9); }
+.liq-command-link.command-primary { border-color:rgba(246,185,74,.28); background:linear-gradient(135deg,rgba(246,185,74,.14),rgba(246,185,74,.04)); }
+.liq-command-icon { width:30px; height:30px; display:grid; place-items:center; flex:0 0 30px; border-radius:9px; background:rgba(246,185,74,.1); color:var(--elite-gold-bright); font-size:.9rem; }
+.liq-command-link span:nth-child(2) { min-width:0; display:flex; flex-direction:column; }
+.liq-command-link b { font-size:.76rem; line-height:1.15; }
+.liq-command-link small { margin-top:.18rem; color:#657083; font-size:.62rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.liq-command-link i { margin-left:auto; color:#78643e; font-style:normal; }
 
 /* ── Cards ────────────────────────────────────────────────────── */
-.liq-card{ background:#0f172a; border:1px solid #1e293b; border-radius:14px; padding:1.25rem; margin-bottom:1rem; }
+.liq-card{ position:relative; overflow:hidden; background:linear-gradient(145deg,rgba(15,21,33,.98),rgba(8,12,19,.98)); border:1px solid rgba(112,129,154,.18); border-radius:16px; padding:1.25rem; margin-bottom:1rem; box-shadow:0 14px 35px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.02); transition:border-color .2s,transform .2s; }
+.liq-card:before { content:""; position:absolute; left:0; right:0; top:0; height:1px; background:linear-gradient(90deg,transparent,rgba(246,185,74,.45),transparent); opacity:.45; }
+.liq-card:hover { border-color:rgba(246,185,74,.22); }
 .liq-card-header{ display:flex; align-items:center; gap:.75rem; margin-bottom:1rem; flex-wrap:wrap; }
-.liq-card-title{ font-size:.95rem; font-weight:700; color:#f1f5f9; }
+.liq-card-title{ font-size:.95rem; font-weight:750; color:#f4f7fb; letter-spacing:-.01em; }
 .liq-card-sub{ font-size:.75rem; color:#64748b; }
 .liq-badge{ padding:.2rem .65rem; border-radius:20px; font-size:.72rem; font-weight:700; background:#1e293b; color:#94a3b8; }
 .liq-badge-risk-on  { background:rgba(16,185,129,.15); color:#10b981; border:1px solid rgba(16,185,129,.3); }
@@ -267,7 +300,8 @@
 
 /* FRED grid */
 .liq-fred-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.6rem; margin-bottom:1rem; }
-.liq-fred-row{ background:#080f1a; border:1px solid #1e293b; border-radius:8px; padding:.65rem .85rem; }
+.liq-fred-row{ background:linear-gradient(145deg,rgba(5,9,15,.9),rgba(10,16,25,.9)); border:1px solid rgba(75,91,116,.28); border-radius:10px; padding:.75rem .9rem; transition:border-color .18s,transform .18s; }
+.liq-fred-row:hover{ border-color:rgba(246,185,74,.28); transform:translateY(-1px); }
 .liq-fred-row.loading-cell{ opacity:.55; }
 .liq-fred-name{ font-size:.68rem; color:#475569; text-transform:uppercase; letter-spacing:.04em; }
 .liq-fred-val { font-size:1rem; font-weight:700; color:#f1f5f9; margin:.1rem 0; display:flex; align-items:center; gap:.3rem; }
@@ -301,7 +335,7 @@
 
 /* Yield grid */
 .liq-yield-grid{ display:grid; grid-template-columns:1fr 1fr; gap:.5rem; margin-bottom:.75rem; }
-.liq-yield-row{ background:#080f1a; border:1px solid #1e293b; border-radius:8px; padding:.55rem .75rem; }
+.liq-yield-row{ background:linear-gradient(145deg,rgba(5,9,15,.9),rgba(10,16,25,.9)); border:1px solid rgba(75,91,116,.28); border-radius:10px; padding:.7rem .8rem; }
 .liq-yield-name{ font-size:.68rem; color:#475569; }
 .liq-yield-val { font-size:.95rem; font-weight:700; color:#f1f5f9; }
 .liq-yield-sub { font-size:.68rem; color:#64748b; }
@@ -319,8 +353,8 @@
 
 /* ── Money Flow Grid ───────────────────────────────────────────── */
 .liq-flow-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:.5rem; }
-.liq-flow-cell{ background:#080f1a; border:1px solid #1e293b; border-radius:9px; padding:.65rem .8rem; cursor:pointer; transition:.15s; }
-.liq-flow-cell:hover{ border-color:#334155; background:#0d1a2d; }
+.liq-flow-cell{ background:linear-gradient(145deg,#070c14,#0b1320); border:1px solid rgba(75,91,116,.25); border-radius:11px; padding:.75rem .85rem; cursor:pointer; transition:.18s; }
+.liq-flow-cell:hover{ border-color:rgba(246,185,74,.35); background:#101725; transform:translateY(-2px); box-shadow:0 10px 24px rgba(0,0,0,.22); }
 .liq-flow-ticker{ font-size:.85rem; font-weight:700; color:#f1f5f9; }
 .liq-flow-name  { font-size:.65rem; color:#475569; margin:.05rem 0 .3rem; }
 .liq-flow-score { font-size:.72rem; font-weight:600; padding:.15rem .45rem; border-radius:4px; display:inline-block; }
@@ -335,13 +369,13 @@
 /* ── Scanner ──────────────────────────────────────────────────── */
 .liq-scan-controls{ display:flex; gap:.5rem; align-items:center; margin-left:auto; }
 .liq-ticker-input{ background:#080f1a; border:1px solid #1e293b; color:#f1f5f9; border-radius:6px; padding:.35rem .65rem; font-size:.8rem; width:200px; }
-.btn-liq-scan{ background:#1e40af; border:none; color:#fff; padding:.35rem .75rem; border-radius:6px; cursor:pointer; font-size:.8rem; font-weight:600; }
-.btn-liq-scan:hover{ background:#F2600C; }
+.btn-liq-scan{ background:linear-gradient(135deg,#f5c15e,#dc8c17); border:none; color:#171006; padding:.42rem .85rem; border-radius:7px; cursor:pointer; font-size:.78rem; font-weight:800; }
+.btn-liq-scan:hover{ filter:brightness(1.08); }
 
 .liq-scan-tabs{ display:flex; gap:.25rem; flex-wrap:wrap; border-bottom:1px solid #1e293b; margin-bottom:1rem; padding-bottom:.5rem; }
 .liq-tab{ background:transparent; border:1px solid transparent; color:#64748b; padding:.35rem .75rem; border-radius:7px; cursor:pointer; font-size:.78rem; font-weight:600; transition:.15s; }
 .liq-tab:hover{ color:#94a3b8; border-color:#1e293b; }
-.liq-tab.active{ background:#1e293b; color:#f1f5f9; border-color:#334155; }
+.liq-tab.active{ background:rgba(246,185,74,.12); color:var(--elite-gold-bright); border-color:rgba(246,185,74,.28); }
 
 /* Scanner table */
 .liq-scan-table{ width:100%; border-collapse:collapse; font-size:.8rem; }
@@ -409,16 +443,20 @@
 
 /* ── AI Morning Briefing card ── */
 .ai-brief-card {
-  background: linear-gradient(135deg, rgba(255, 122, 24,0.05) 0%, rgba(255, 122, 24,0.04) 100%);
-  border: 1px solid rgba(255, 122, 24,0.18);
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
+  position:relative;
+  overflow:hidden;
+  background: linear-gradient(120deg, rgba(34,25,10,.62) 0%, rgba(12,16,24,.98) 42%, rgba(8,12,19,.98) 100%);
+  border: 1px solid rgba(246,185,74,.24);
+  border-radius: 16px;
+  padding: 1.15rem 1.3rem;
   margin-bottom: 1rem;
-  transition: border-color .2s;
+  box-shadow:0 14px 35px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.025);
+  transition: border-color .2s,transform .2s;
 }
-.ai-brief-card:hover { border-color: rgba(255, 122, 24,0.32); }
+.ai-brief-card:after { content:"AI"; position:absolute; right:1rem; bottom:-1.5rem; font-size:6.5rem; line-height:1; font-weight:900; letter-spacing:-.1em; color:rgba(246,185,74,.025); pointer-events:none; }
+.ai-brief-card:hover { border-color: rgba(246,185,74,.4); transform:translateY(-1px); }
 .ai-brief-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:.6rem; }
-.ai-brief-label { font-size:.75rem; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:.06em; display:flex; align-items:center; gap:.4rem; }
+.ai-brief-label { font-size:.72rem; font-weight:800; color:var(--elite-gold); text-transform:uppercase; letter-spacing:.1em; display:flex; align-items:center; gap:.45rem; }
 .ai-brief-badge { padding:.15rem .55rem; border-radius:10px; font-size:.68rem; font-weight:700; letter-spacing:.04em; }
 .ai-brief-badge.risk-on  { background:rgba(34,197,94,.14);  color:#22c55e; border:1px solid rgba(34,197,94,.3); }
 .ai-brief-badge.risk-off { background:rgba(239,68,68,.14);  color:#ef4444; border:1px solid rgba(239,68,68,.3); }
@@ -426,8 +464,8 @@
 .ai-brief-vix { font-size:.72rem; color:#64748b; margin-bottom:.45rem; }
 .ai-brief-text { font-size:.82rem; line-height:1.55; color:#cbd5e1; margin-bottom:.6rem; }
 .ai-brief-tickers { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.5rem; }
-.ai-brief-chip { font-size:.68rem; font-weight:700; padding:.15rem .5rem; border-radius:6px; background:rgba(255, 122, 24,.1); color:#FFA94D; border:1px solid rgba(255, 122, 24,.2); text-decoration:none; transition:.15s; }
-.ai-brief-chip:hover { background:rgba(255, 122, 24,.22); }
+.ai-brief-chip { font-size:.68rem; font-weight:700; padding:.15rem .5rem; border-radius:6px; background:rgba(246,185,74,.1); color:var(--elite-gold-bright); border:1px solid rgba(246,185,74,.2); text-decoration:none; transition:.15s; }
+.ai-brief-chip:hover { background:rgba(246,185,74,.22); }
 .ai-brief-footer { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding-top:.5rem; border-top:1px solid rgba(30,41,59,.7); }
 .ai-brief-time { font-size:.65rem; color:#475569; }
 .ai-brief-refresh { font-size:.68rem; padding:.2rem .6rem; border-radius:6px; background:transparent; border:1px solid #334155; color:#94a3b8; cursor:pointer; transition:.15s; }
@@ -435,6 +473,25 @@
 .ai-brief-skeleton { height:56px; border-radius:6px; background:linear-gradient(90deg,rgba(30,41,59,.6) 25%,rgba(51,65,85,.5) 50%,rgba(30,41,59,.6) 75%); background-size:200% 100%; animation:brief-shimmer 1.4s infinite; }
 @keyframes brief-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 .ai-brief-err { font-size:.75rem; color:#475569; padding:.25rem 0; }
+
+@media(max-width:1100px) {
+  .liq-command-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-width:700px) {
+  .liq-page { padding:.75rem .75rem 6rem; }
+  .liq-hero { padding:1.1rem; border-radius:16px; }
+  .liq-header { align-items:flex-start; }
+  .liq-header-right { width:100%; }
+  .liq-last-updated { width:100%; }
+  .liq-command-strip { grid-template-columns:1fr 1fr; gap:.45rem; }
+  .liq-command-link { padding:.65rem; }
+  .liq-command-link small { display:none; }
+  .liq-command-link i { display:none; }
+  .liq-title { font-size:1.8rem; }
+}
+@media(max-width:420px) {
+  .liq-command-strip { grid-template-columns:1fr; }
+}
 </style>
 
 <script>
