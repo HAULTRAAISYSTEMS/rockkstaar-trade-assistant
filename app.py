@@ -64,6 +64,7 @@ from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as
 from news_fetcher import CATALYST_CATEGORIES as _CAT_DEFS, freshness_label as _fl
 import scanner as _scanner
 import intel_engine as _intel
+import schwab as _schwab
 _mkt = None  # set below if market_engine is available
 try:
     import market_engine as _mkt
