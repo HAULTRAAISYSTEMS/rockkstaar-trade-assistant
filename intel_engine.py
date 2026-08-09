@@ -687,11 +687,14 @@ def _merged_universe(extra: Optional[list[str]] = None) -> list[str]:
 
 
 def _earnings_universe() -> list[str]:
-    """Universe for earnings checks — larger cap, always includes override tickers."""
+    """Per-symbol earnings checks: every watchlist and override ticker.
+
+    The separate Nasdaq bulk feed supplies the market-wide large/mid-cap slate,
+    so this list must not be capped or padded with scanner symbols.
+    """
     wl = _get_watchlist_tickers()
     override_tickers = [ov["ticker"].upper() for ov in EARNINGS_OVERRIDES]
-    base = list(dict.fromkeys(wl + override_tickers + SCANNER_UNIVERSE))
-    return base[:60]   # earnings calendar calls are lighter than news fetches
+    return list(dict.fromkeys(wl + override_tickers))
 
 
 # ── Market News ───────────────────────────────────────────────────────────────
@@ -828,7 +831,8 @@ def _earnings_from_finnhub(
         return [], []
 
     from_d = today.isoformat()
-    to_d   = (today + timedelta(days=21)).isoformat()
+    # Keep enough runway to preserve the next known date for watchlist names.
+    to_d   = (today + timedelta(days=120)).isoformat()
     url = (
         f"https://finnhub.io/api/v1/calendar/earnings"
         f"?from={from_d}&to={to_d}&token={api_key}"
@@ -855,7 +859,7 @@ def _earnings_from_finnhub(
         except Exception:
             continue
         days_away = (earn_date - today).days
-        if days_away < 0 or days_away > 21:
+        if days_away < 0 or days_away > 120:
             continue
         hour       = (e.get("hour") or "").lower()
         time_label = "BMO" if hour == "bmo" else "AMC" if hour == "amc" else "TBD"
@@ -927,7 +931,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             buckets["tomorrow"].append(item)
         elif 2 <= d <= 7:
             buckets["this_week"].append(item)
-        elif 8 <= d <= 21:
+        elif 8 <= d <= 21 or (item.get("on_watchlist") and d <= 120):
             buckets["coming_up"].append(item)
 
     # ── 1. Manual overrides (always first) ──────────────────────────────────
@@ -936,7 +940,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
         try:
             ov_date   = datetime.strptime(ov["date"][:10], "%Y-%m-%d").date()
             days_away = (ov_date - today).days
-            if days_away < 0 or days_away > 21:
+            if days_away < 0 or days_away > 120:
                 continue
             _bucket_item({
                 "ticker":       ov["ticker"].upper(),
@@ -1067,7 +1071,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             return None
 
         days_away = (earn_date - today).days
-        if days_away < 0 or days_away > 21:
+        if days_away < 0 or days_away > 120:
             return None
 
         logger.info("intel/earnings yahoo_api %s → %s (%d days away)", ticker, earn_date, days_away)
@@ -1193,7 +1197,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             if earn_date is None:
                 return None
             days_away = (earn_date - today).days
-            if days_away < 0 or days_away > 21:
+            if days_away < 0 or days_away > 120:
                 return None
             return {
                 "ticker":       ticker,
@@ -1247,17 +1251,23 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             _bucket_item(item)
             meta["finnhub_found"] += 1
 
-    # ── 4. Nasdaq calendar fallback (free, no key — market-wide earnings) ──────
-    if sum(len(v) for v in buckets.values()) == 0 or meta.get("yfinance_found", 0) == 0:
-        universe_set = set(all_tickers)
-        nasdaq_items = _earnings_from_nasdaq(today, wl_set, already_added, universe_set)
-        nasdaq_found = 0
-        for item in nasdaq_items:
-            _bucket_item(item)
-            nasdaq_found += 1
-        if nasdaq_found:
-            meta["earnings_source_used"] = meta.get("earnings_source_used", "") + "+nasdaq"
-            logger.info("intel/earnings nasdaq: %d items added", nasdaq_found)
+    # ── 4. Nasdaq market-wide calendar (free, no key) ─────────────────────────
+    # Always merge it. The per-symbol feeds above protect watchlist coverage;
+    # Nasdaq supplies the broad large/mid-cap earnings slate for the next week.
+    present = {
+        item.get("ticker")
+        for bucket in buckets.values()
+        for item in bucket
+        if item.get("ticker")
+    }
+    nasdaq_items = _earnings_from_nasdaq(today, wl_set, present)
+    nasdaq_found = 0
+    for item in nasdaq_items:
+        _bucket_item(item)
+        nasdaq_found += 1
+    if nasdaq_found:
+        meta["earnings_source_used"] = meta.get("earnings_source_used", "") + "+nasdaq_marketwide"
+        logger.info("intel/earnings nasdaq market-wide: %d large/mid-cap items added", nasdaq_found)
 
     # Sort: overrides first, then watchlist, then by date
     for k in ("today", "tomorrow", "this_week", "coming_up"):
@@ -1319,7 +1329,7 @@ def _apply_overrides_to_buckets(buckets: dict, today: date, wl_set: set) -> None
                 buckets["tomorrow"].insert(0, item)
             elif 2 <= days_away <= 7:
                 buckets["this_week"].insert(0, item)
-            elif 8 <= days_away <= 21:
+            elif 8 <= days_away <= 21 or (ticker in wl_set and days_away <= 120):
                 buckets.setdefault("coming_up", []).insert(0, item)
         except Exception:
             pass
@@ -1352,14 +1362,43 @@ def _nasdaq_cal(endpoint: str, date_str: str) -> list[dict]:
         return []
 
 
-def _earnings_from_nasdaq(today: date, wl_set: set, already_added: set,
-                           universe: set) -> list[dict]:
+def _parse_market_cap(value) -> Optional[int]:
+    """Normalize Nasdaq market-cap strings such as '$42.7B' to raw dollars."""
+    if value in (None, "", "--", "N/A"):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    raw = str(value).strip().upper().replace("$", "").replace(",", "")
+    multiplier = 1
+    if raw.endswith("T"):
+        multiplier, raw = 1_000_000_000_000, raw[:-1]
+    elif raw.endswith("B"):
+        multiplier, raw = 1_000_000_000, raw[:-1]
+    elif raw.endswith("M"):
+        multiplier, raw = 1_000_000, raw[:-1]
+    try:
+        return int(float(raw) * multiplier)
+    except (TypeError, ValueError):
+        return None
+
+
+def _market_cap_tier(market_cap: Optional[int]) -> str:
+    if market_cap is None:
+        return ""
+    if market_cap >= 10_000_000_000:
+        return "Large Cap"
+    if market_cap >= 2_000_000_000:
+        return "Mid Cap"
+    return "Small Cap"
+
+
+def _earnings_from_nasdaq(today: date, wl_set: set, already_added: set) -> list[dict]:
     """
-    Pull market-wide earnings from Nasdaq calendar for the next 21 days.
-    Filters to `universe` tickers only; skips any already in `already_added`.
-    Runs parallel requests so the window resolves quickly.
+    Pull market-wide large/mid-cap earnings for today through the next 7 days.
+    Watchlist symbols are retained regardless of market cap. Per-symbol feeds
+    provide watchlist dates beyond this market-wide window.
     """
-    date_strs = [(today + timedelta(days=i)).isoformat() for i in range(22)]
+    date_strs = [(today + timedelta(days=i)).isoformat() for i in range(8)]
     results: list[dict] = []
 
     def _fetch_day(ds: str) -> list[dict]:
@@ -1378,7 +1417,11 @@ def _earnings_from_nasdaq(today: date, wl_set: set, already_added: set,
                 ticker = (row.get("symbol") or "").strip().upper()
                 if not ticker or ticker in already_added:
                     continue
-                if universe and ticker not in universe:
+                market_cap = _parse_market_cap(
+                    row.get("marketCap") or row.get("marketcap") or row.get("market_cap")
+                )
+                cap_tier = _market_cap_tier(market_cap)
+                if ticker not in wl_set and cap_tier not in ("Large Cap", "Mid Cap"):
                     continue
                 time_raw   = (row.get("time") or "").lower()
                 time_label = ("BMO" if any(k in time_raw for k in ("before", "bmo", "pre"))
@@ -1399,6 +1442,8 @@ def _earnings_from_nasdaq(today: date, wl_set: set, already_added: set,
                     "on_watchlist": ticker in wl_set,
                     "days_away":    days_away,
                     "eps_est":      eps_est,
+                    "market_cap":   market_cap,
+                    "cap_tier":     cap_tier,
                     "source":       "nasdaq",
                     "is_override":  False,
                 })

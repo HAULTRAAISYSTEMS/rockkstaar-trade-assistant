@@ -22,7 +22,7 @@
   <section class="cal-hero">
     <span class="eyebrow">Tradestaar Elite Intelligence</span>
     <h1>Earnings <span>&amp; Catalyst Calendar</span></h1>
-    <p>Track verified earnings dates and high-impact U.S. economic releases in one mobile view. Times are Eastern unless the connected feed says otherwise.</p>
+    <p>Next 7 days of large- and mid-cap earnings, every watched ticker's next known report, and high-impact U.S. economic releases. Times are Eastern unless the connected feed says otherwise.</p>
   </section>
 
   <section class="cal-kpis" aria-label="Calendar summary">
@@ -38,6 +38,8 @@
       <button class="cal-chip" data-filter="TODAY">Today</button>
       <button class="cal-chip" data-filter="WEEK">7 Days</button>
       <button class="cal-chip" data-filter="EARNINGS">Earnings</button>
+      <button class="cal-chip" data-filter="LARGE_CAP">Large Cap</button>
+      <button class="cal-chip" data-filter="MID_CAP">Mid Cap</button>
       <button class="cal-chip" data-filter="ECONOMIC">Macro</button>
       <button class="cal-chip" data-filter="HIGH">High Impact</button>
       <button class="cal-chip" data-filter="WATCHLIST">My Watchlist</button>
@@ -46,13 +48,14 @@
 
   <section class="cal-list" id="calendar-list">
     {% for event in events %}
-    <article class="cal-event" data-kind="{{ event.kind }}" data-impact="{{ event.impact }}" data-days="{{ event.days_away }}" data-watchlist="{{ '1' if event.on_watchlist else '0' }}" data-search="{{ (event.ticker ~ ' ' ~ event.company_name ~ ' ' ~ event.title)|upper }}">
+    <article class="cal-event" data-kind="{{ event.kind }}" data-impact="{{ event.impact }}" data-days="{{ event.days_away }}" data-watchlist="{{ '1' if event.on_watchlist else '0' }}" data-cap-tier="{{ event.cap_tier|upper|replace(' ', '_') }}" data-search="{{ (event.ticker ~ ' ' ~ event.company_name ~ ' ' ~ event.title ~ ' ' ~ event.cap_tier)|upper }}">
       <div class="cal-when"><strong>{{ event.date_label }}</strong><span>{{ event.time }}</span></div>
       <div>
         <div class="cal-title">{% if event.ticker %}<a href="{{ url_for('stock_detail', ticker=event.ticker) }}">{{ event.title }}</a>{% else %}{{ event.title }}{% endif %}</div>
         <div class="cal-meta">
           <span class="cal-tag">{{ event.kind|title }}</span>
           {% if event.on_watchlist %}<span class="cal-tag watch">★ Watchlist</span>{% endif %}
+          {% if event.cap_tier and event.cap_tier != 'Watchlist' %}<span class="cal-tag">{{ event.cap_tier }}</span>{% endif %}
           {% if event.eps_est is not none %}<span class="cal-tag">EPS est. {{ event.eps_est }}</span>{% endif %}
         </div>
         <p class="cal-reason">{{ event.reason }}</p>
@@ -73,7 +76,7 @@
     items.forEach(function(item){
       var days=parseInt(item.dataset.days,10), match=active==='ALL'||
         (active==='TODAY'&&days===0)||(active==='WEEK'&&days>=0&&days<=7)||
-        item.dataset.kind===active||item.dataset.impact===active||
+        item.dataset.kind===active||item.dataset.impact===active||item.dataset.capTier===active||
         (active==='WATCHLIST'&&item.dataset.watchlist==='1');
       match=match&&(!query||item.dataset.search.indexOf(query)!==-1);
       item.hidden=!match;if(match)shown++;

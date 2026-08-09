@@ -6500,6 +6500,8 @@ def _build_catalyst_calendar(summary, watchlist_tickers=None):
                 "on_watchlist": ticker in watchlist,
                 "eps_est": raw.get("eps_est"),
                 "rev_est": raw.get("rev_est"),
+                "market_cap": raw.get("market_cap"),
+                "cap_tier": raw.get("cap_tier") or ("Watchlist" if ticker in watchlist else ""),
             })
 
     for raw in (summary or {}).get("economic_events") or []:
@@ -6518,6 +6520,7 @@ def _build_catalyst_calendar(summary, watchlist_tickers=None):
             "reason": raw.get("reason") or "Macro releases can affect rates, sectors, and broad market risk.",
             "days_away": days, "on_watchlist": False,
             "eps_est": None, "rev_est": None,
+            "market_cap": None, "cap_tier": "",
         })
 
     return sorted(rows, key=lambda row: (
