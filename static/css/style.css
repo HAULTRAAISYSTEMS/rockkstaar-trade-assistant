@@ -1,5 +1,5 @@
 /* =========================================================
-   HAULTRA AI SYSTEMS — Institutional Trading Terminal
+   TRADESTAAR ELITE — Market Intelligence System
    ========================================================= */
 
 /* ---- Reset & Base ---- */
@@ -11,9 +11,9 @@
      (Fonts imported in base.html <head>)
      ═══════════════════════════════════════════════════════════════ */
 
-  /* Brand orange (logo gradient: bright amber → deep orange) */
-  --orange-300:#FFC078; --orange-400:#FFA94D; --orange-500:#FF7A18; /* primary */
-  --orange-600:#F2600C; --orange-700:#C24A05; --amber-glow:#FFB24C;
+  /* Compatibility names retained; values now form the Elite gold palette. */
+  --orange-300:#FFE7A3; --orange-400:#F3D37A; --orange-500:#E5B94F;
+  --orange-600:#C9962F; --orange-700:#8C6319; --amber-glow:#F3D37A;
 
   /* Neutral ramp — cool industrial darks */
   --ink-900:#060708; --ink-850:#0B0D10; --ink-800:#101318; --ink-750:#161A20;
@@ -35,9 +35,9 @@
   --pos:var(--pos-500); --neg:var(--neg-500); --warn:var(--warn-500); --info:var(--info-500);
 
   /* Signature gradient (the cube mark) */
-  --grad-brand:linear-gradient(150deg, #FFB24C 0%, #FF7A18 45%, #C24A05 100%);
-  --grad-brand-soft:linear-gradient(150deg, rgba(255,178,76,.18) 0%, rgba(242,96,12,.12) 100%);
-  --glow-accent:0 0 0 1px rgba(255,122,24,.35), 0 8px 30px -8px rgba(255,122,24,.45);
+  --grad-brand:linear-gradient(145deg,#FFE7A3 0%,#E5B94F 48%,#A87520 100%);
+  --grad-brand-soft:linear-gradient(145deg,rgba(229,185,79,.17) 0%,rgba(140,99,25,.10) 100%);
+  --glow-accent:0 0 0 1px rgba(229,185,79,.30),0 8px 30px -10px rgba(229,185,79,.34);
 
   /* Type */
   --font-display:'Rajdhani','Chakra Petch',system-ui,sans-serif;
@@ -93,7 +93,7 @@
   --brand-blue:  var(--orange-500);
   --brand-cyan:  var(--orange-400);
   --accent:      var(--orange-500);
-  --accent-glow: rgba(255, 122, 24, 0.20);
+  --accent-glow: rgba(229, 185, 79, 0.18);
 
   /* Shape & type */
   --radius:      var(--r-sm);
@@ -106,8 +106,8 @@ html {
   font-size: 14px;
   background-color: #060708;
   background:
-    radial-gradient(ellipse at top left,  rgba(255, 122, 24, 0.10), transparent 32%),
-    radial-gradient(ellipse at top right, rgba(255, 169, 77, 0.06), transparent 28%),
+    radial-gradient(ellipse at top left,rgba(229,185,79,.08),transparent 32%),
+    radial-gradient(ellipse at top right,rgba(243,211,122,.04),transparent 28%),
     linear-gradient(180deg, #0B0D10 0%, #060708 100%);
   background-repeat: no-repeat;
   background-size: cover;
@@ -120,8 +120,8 @@ html {
 body {
   background-color: #060708;
   background:
-    radial-gradient(ellipse at top left,  rgba(255, 122, 24, 0.10), transparent 32%),
-    radial-gradient(ellipse at top right, rgba(255, 169, 77, 0.06), transparent 28%),
+    radial-gradient(ellipse at top left,rgba(229,185,79,.08),transparent 32%),
+    radial-gradient(ellipse at top right,rgba(243,211,122,.04),transparent 28%),
     linear-gradient(180deg, #0B0D10 0%, #060708 100%);
   background-size: cover;
   color: var(--text);
