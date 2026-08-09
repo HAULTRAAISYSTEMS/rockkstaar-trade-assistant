@@ -37,7 +37,7 @@
     <div class="mobile-stock-profile__facts">
       <div><span>Previous close</span><strong>${{ "%.2f"|format(stock.prev_close) if stock.prev_close is not none else "—" }}</strong></div>
       <div><span>Relative volume</span><strong>{{ "%.1f"|format(stock.rel_volume) if stock.rel_volume is not none else "—" }}x</strong></div>
-      <div><span>Earnings</span><strong>{{ stock.earnings_date or "—" }}</strong></div>
+      <div><span>Earnings</span><strong>{{ stock.earnings_date or "—" }}{% if stock.earnings_date and stock.earnings_time and stock.earnings_time != 'TBD' %}<small> · {{ stock.earnings_time }}</small>{% endif %}</strong></div>
     </div>
     <nav class="mobile-stock-tabs" aria-label="Stock profile sections">
       <a href="#company-overview-card">Overview</a>

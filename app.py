@@ -3641,6 +3641,26 @@ def stock_detail(ticker):
         flash(f"No data found for {ticker}.", "error")
         return redirect(url_for("dashboard"))
 
+    # The stock snapshot's legacy Yahoo calendar field is frequently blank on
+    # cloud hosts. Reuse the multi-source Intel calendar so the profile and the
+    # dedicated Calendar screen present one consistent next earnings date.
+    if not stock.get("earnings_date"):
+        try:
+            _earnings = (_intel.get_intel_summary() or {}).get("earnings") or {}
+            _matches = [
+                item
+                for bucket in ("today", "tomorrow", "this_week", "coming_up")
+                for item in (_earnings.get(bucket) or [])
+                if str(item.get("ticker") or "").upper() == ticker
+            ]
+            if _matches:
+                _next = min(_matches, key=lambda item: item.get("date") or "9999-12-31")
+                stock["earnings_date"] = _next.get("date")
+                stock["earnings_time"] = _next.get("time_label") or "TBD"
+                stock["earnings_source"] = _next.get("source") or "intel_calendar"
+        except Exception as _earnings_err:
+            logger.debug("stock_detail  ticker=%s  earnings_enrich=failed  err=%s", ticker, _earnings_err)
+
     # ── Live price enrichment pass ───────────────────────────────────────────
     # On the detail page, always try the chart API to fill in any missing price
     # fields so the user always sees current data regardless of DB state.

@@ -120,6 +120,21 @@
 
 <div class="card"><div class="card-hd">Practice Portfolio<a class="btn btn-primary btn-sm" href="{{ url_for('paper_trading') }}">Open Paper Trading</a></div><div class="card-bd"><div class="muted" style="font-size:13px;line-height:1.6">Practice market orders with $100,000 in simulated buying power. Paper positions and performance stay separate from your live Schwab account.</div></div></div>
 
+<div class="card app-preferences-card">
+  <div class="card-hd">App Preferences<span class="badge badge-info">Saved on this device</span></div>
+  <div class="card-bd app-preferences-grid">
+    <div>
+      <div class="hi" style="font-size:14px;font-weight:700">Default market chart</div>
+      <div class="faint" style="font-size:12px;margin-top:4px">Your choice stays selected when you return to the Terminal.</div>
+    </div>
+    <div class="preference-segment" role="group" aria-label="Default chart type">
+      <button type="button" data-chart-preference="area">Area</button>
+      <button type="button" data-chart-preference="candles">Candles</button>
+    </div>
+    <a class="btn btn-outline btn-sm" href="{{ url_for('risk_settings') }}">Trading &amp; Risk Settings</a>
+  </div>
+</div>
+
 <!-- Broker connection (actual state) -->
 <div class="card"><div class="card-hd">Broker Connection</div>
   <div class="card-bd">
@@ -143,4 +158,30 @@
 <div class="faint" style="font-size:11px;line-height:1.6">
   Note: position <b class="muted">Grade</b> badges show <span class="mono">—</span> (the scanner grade isn't joined to broker holdings yet) and the journal has no per-trade <b class="muted">R-multiple</b> stored, so P&amp;L% is shown instead of R. Both are real data-wiring follow-ups, not fabricated.
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  var key = 'tradestaar.chartType';
+  var current = 'area';
+  try { current = localStorage.getItem(key) || 'area'; } catch(e) {}
+  var buttons = document.querySelectorAll('[data-chart-preference]');
+  function paint(){
+    buttons.forEach(function(btn){
+      var active = btn.dataset.chartPreference === current;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+  buttons.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      current = btn.dataset.chartPreference;
+      try { localStorage.setItem(key, current); } catch(e) {}
+      paint();
+    });
+  });
+  paint();
+})();
+</script>
 {% endblock %}

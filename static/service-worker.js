@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tradestaar-shell-v7';
+const CACHE_NAME = 'tradestaar-shell-v9';
 const SHELL_ASSETS = [
   '/static/logo.png',
   '/static/icon-192.png',
@@ -34,7 +34,11 @@ self.addEventListener('fetch', (event) => {
 
   if (requestUrl.pathname.startsWith('/static/')) {
     event.respondWith(
-      caches.match(event.request).then((cached) => cached || fetch(event.request))
+      fetch(event.request).then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return response;
+      }).catch(() => caches.match(event.request))
     );
     return;
   }
