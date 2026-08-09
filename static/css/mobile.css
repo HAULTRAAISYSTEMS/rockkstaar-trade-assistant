@@ -57,6 +57,13 @@
 .mobile-app-nav { display: none; }
 
 @media (max-width: 768px) {
+  html,
+  body {
+    min-height: 100dvh;
+    overflow-x: clip;
+    background: #080a0d;
+  }
+
   .mobile-refresh-bar,
   .mobile-ctrl-bar { display: none !important; }
 
@@ -117,21 +124,23 @@
   }
 
   #ask-fab {
-    bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important;
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px)) !important;
     left: auto !important;
-    right: 14px !important;
-    width: 48px;
-    height: 48px;
+    right: 12px !important;
+    width: 42px;
+    height: 42px;
     padding: 0 !important;
     overflow: hidden;
     transform: none !important;
     font-size: 0 !important;
     border-radius: 50% !important;
+    box-shadow: 0 6px 22px rgba(214, 166, 63, 0.28) !important;
+    opacity: 0.92;
   }
 
   #ask-fab::before {
     content: 'AI';
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 800;
     letter-spacing: 0.04em;
   }
@@ -140,8 +149,7 @@
 /* Phone: show only logo + essential nav, hide the rest from desktop nav */
 @media (max-width: 768px) {
   .navbar {
-    height: 52px;
-    padding: 0 0.75rem;
+    display: none !important;
   }
 
   /* Hide desktop nav-links — mobile ctrl bar handles navigation */
