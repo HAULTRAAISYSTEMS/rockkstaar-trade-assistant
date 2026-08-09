@@ -6,6 +6,7 @@
 {% set connected = acct and acct.connected %}
 {% set mx = (risk_settings.max_trades_per_day if risk_settings and risk_settings.max_trades_per_day else 3) %}
 {% set ds = discipline.score if discipline and discipline.score is not none else none %}
+{% set live_daily_pct = acct.get('daily_pnl_pct') if connected else none %}
 
 <!-- topbar -->
 <div class="hx-topbar">
@@ -15,7 +16,7 @@
   </div>
   {% if connected %}
   <div class="row gap-2" style="padding:8px 12px;background:var(--surface-card);border:1px solid rgba(34,197,139,.35);border-radius:var(--r-md)">
-    <span class="badge badge-pos"><span class="dot"></span>Schwab</span><span class="hi" style="font-size:12px;font-weight:600">Connected</span>
+    <span class="badge badge-pos"><span class="dot"></span>Schwab</span><span class="hi" style="font-size:12px;font-weight:600">Live</span>
   </div>
   {% else %}
   <div class="row gap-2" style="padding:8px 12px;background:var(--surface-card);border:1px dashed var(--border-strong);border-radius:var(--r-md)">
@@ -27,16 +28,19 @@
 <!-- KPI tiles -->
 <div class="kpis">
   <div class="stat"><div class="stat-lbl">Portfolio Value</div>
-    <div class="stat-val">{{ '{:,.0f}'.format(acct.total_value) if connected and acct.total_value is not none else '—' }}{% if connected and acct.total_value is not none %}<span class="u">USD</span>{% endif %}</div>
-    {% if connected and acct.daily_pnl_pct is not none %}<span class="stat-delta {{ 'pos' if acct.daily_pnl_pct >= 0 else 'neg' }}">{{ '▲' if acct.daily_pnl_pct >= 0 else '▼' }} {{ '%+.2f'|format(acct.daily_pnl_pct) }}% today</span>{% else %}<span class="stat-delta faint">connect Schwab</span>{% endif %}
+    <div class="stat-val">{{ '{:,.2f}'.format(acct.total_value) if connected and acct.total_value is not none else '—' }}{% if connected and acct.total_value is not none %}<span class="u">USD</span>{% endif %}</div>
+    {% if connected %}<span class="stat-delta pos">● live from Schwab</span>{% else %}<span class="stat-delta faint">connect Schwab</span>{% endif %}
   </div>
   <div class="stat"><div class="stat-lbl">Day P&amp;L</div>
-    {% if connected and acct.daily_pnl is not none %}<div class="stat-val {{ 'pos' if acct.daily_pnl >= 0 else 'neg' }}">{{ '{:+,.0f}'.format(acct.daily_pnl) }}</div>
-    {% if acct.daily_pnl_pct is not none %}<span class="stat-delta {{ 'pos' if acct.daily_pnl_pct >= 0 else 'neg' }}">{{ '%+.2f'|format(acct.daily_pnl_pct) }}%</span>{% endif %}
+    {% if connected and acct.daily_pnl is not none %}<div class="stat-val {{ 'pos' if acct.daily_pnl >= 0 else 'neg' }}">{{ '{:+,.2f}'.format(acct.daily_pnl) }}</div>
+    {% if live_daily_pct is not none %}<span class="stat-delta {{ 'pos' if live_daily_pct >= 0 else 'neg' }}">{{ '%+.2f'|format(live_daily_pct) }}%</span>{% else %}<span class="stat-delta faint">live broker value</span>{% endif %}
     {% else %}<div class="stat-val">—</div>{% endif %}
   </div>
+  <div class="stat"><div class="stat-lbl">Buying Power</div>
+    {% if connected and acct.buying_power is not none %}<div class="stat-val">{{ '{:,.2f}'.format(acct.buying_power) }}<span class="u">USD</span></div><span class="stat-delta faint">Schwab available funds</span>{% else %}<div class="stat-val">—</div>{% endif %}
+  </div>
   <div class="stat"><div class="stat-lbl">Open P&amp;L</div>
-    {% if connected and acct.total_unrealized is not none %}<div class="stat-val {{ 'pos' if acct.total_unrealized >= 0 else 'neg' }}">{{ '{:+,.0f}'.format(acct.total_unrealized) }}</div>
+    {% if connected and acct.total_unrealized is not none %}<div class="stat-val {{ 'pos' if acct.total_unrealized >= 0 else 'neg' }}">{{ '{:+,.2f}'.format(acct.total_unrealized) }}</div>
     <span class="stat-delta faint">{{ acct.open_positions or 0 }} positions</span>{% else %}<div class="stat-val">—</div>{% endif %}
   </div>
   <div class="stat"><div class="stat-lbl">Win Rate</div>
@@ -59,7 +63,6 @@
 </div>
 
 <div class="acct-2col">
-  <!-- positions -->
   <div class="card"><div class="card-hd">Open Positions<span class="badge badge-neutral">{{ acct.open_positions if connected else 0 }}</span></div>
     <div class="tbl-wrap" style="border:none;border-radius:0">
       {% set ns = namespace(rows=0) %}
@@ -78,7 +81,7 @@
               <td class="r mono">{{ '{:,.0f}'.format(p.quantity) }}</td>
               <td class="r mono">{{ '%.2f'|format(p.avg_price) }}</td>
               <td class="r mono">{{ '%.2f'|format(last) }}</td>
-              <td class="r mono {{ 'pos' if (p.unrealized or 0) >= 0 else 'neg' }}">{{ '{:+,.0f}'.format(p.unrealized or 0) }}</td>
+              <td class="r mono {{ 'pos' if (p.unrealized or 0) >= 0 else 'neg' }}">{{ '{:+,.2f}'.format(p.unrealized or 0) }}</td>
               <td class="r mono {{ 'pos' if pct >= 0 else 'neg' }}">{{ '%+.1f'|format(pct) }}%</td>
             </tr>
           {% endfor %}{% endfor %}
@@ -86,102 +89,32 @@
       </table>
       {% if ns.rows == 0 %}<div class="empty" style="border:none;padding:40px"><div class="faint">No open positions.</div></div>{% endif %}
       {% else %}
-      <div class="empty" style="border:none;padding:40px">
-        <div class="hi" style="font-size:14px">Schwab not connected</div>
-        <div class="faint" style="font-size:12px">Connect below to see live positions &amp; P&amp;L.</div>
-      </div>
+      <div class="empty" style="border:none;padding:40px"><div class="hi" style="font-size:14px">Schwab not connected</div><div class="faint" style="font-size:12px">Connect below to see live positions &amp; P&amp;L.</div></div>
       {% endif %}
     </div>
   </div>
 
-  <!-- journal -->
   <div class="card"><div class="card-hd">Journal<a class="btn btn-outline btn-sm" href="{{ url_for('journal') }}">+ Entry</a></div>
     <div class="card-bd" style="padding:0 16px">
-      {% if entries %}
-        {% for e in entries[:6] %}
-        {% set rl = (e.result or '')|lower %}
-        {% set mark = 'var(--pos-500)' if rl=='win' else ('var(--neg-500)' if rl=='loss' else 'var(--warn-500)') %}
-        {% set ocss = 'badge-pos' if rl=='win' else ('badge-neg' if rl=='loss' else 'badge-warn') %}
-        {% set olbl = 'Rules held' if (rl=='win' and e.is_aplus_setup) else ('Broke rule' if rl=='loss' else ('Rules held' if rl=='win' else 'Logged')) %}
-        <div class="jrow"><span class="jmark" style="background:{{ mark }}"></span>
-          <div class="col gap-1 grow">
-            <div class="between"><span class="hi" style="font-weight:600;font-size:13px">{{ (e.result or 'Trade') }} {{ e.ticker }}{% if e.pnl_pct is not none %} {{ '%+.1f'|format(e.pnl_pct) }}%{% endif %}</span><span class="faint mono" style="font-size:11px">{{ e.trade_date }}</span></div>
-            {% if e.notes %}<span class="muted" style="font-size:12px;line-height:1.5">{{ e.notes|truncate(120) }}</span>{% endif %}
-            <span class="badge {{ ocss }}" style="align-self:flex-start;margin-top:4px"><span class="dot"></span>{{ olbl }}</span>
-          </div>
-        </div>
-        {% endfor %}
-      {% else %}
-      <div class="empty" style="border:none;padding:32px 0"><div class="faint" style="font-size:13px">No journal entries yet. <a href="{{ url_for('journal') }}" style="color:var(--orange-400)">Log a trade →</a></div></div>
-      {% endif %}
+      {% if entries %}{% for e in entries[:6] %}
+        {% set rl = (e.result or '')|lower %}{% set mark = 'var(--pos-500)' if rl=='win' else ('var(--neg-500)' if rl=='loss' else 'var(--warn-500)') %}{% set ocss = 'badge-pos' if rl=='win' else ('badge-neg' if rl=='loss' else 'badge-warn') %}{% set olbl = 'Rules held' if (rl=='win' and e.is_aplus_setup) else ('Broke rule' if rl=='loss' else ('Rules held' if rl=='win' else 'Logged')) %}
+        <div class="jrow"><span class="jmark" style="background:{{ mark }}"></span><div class="col gap-1 grow"><div class="between"><span class="hi" style="font-weight:600;font-size:13px">{{ (e.result or 'Trade') }} {{ e.ticker }}{% if e.pnl_pct is not none %} {{ '%+.1f'|format(e.pnl_pct) }}%{% endif %}</span><span class="faint mono" style="font-size:11px">{{ e.trade_date }}</span></div>{% if e.notes %}<span class="muted" style="font-size:12px;line-height:1.5">{{ e.notes|truncate(120) }}</span>{% endif %}<span class="badge {{ ocss }}" style="align-self:flex-start;margin-top:4px"><span class="dot"></span>{{ olbl }}</span></div></div>
+      {% endfor %}{% else %}<div class="empty" style="border:none;padding:32px 0"><div class="faint" style="font-size:13px">No journal entries yet. <a href="{{ url_for('journal') }}" style="color:var(--orange-400)">Log a trade →</a></div></div>{% endif %}
     </div>
   </div>
 </div>
 
 <div class="card"><div class="card-hd">Practice Portfolio<a class="btn btn-primary btn-sm" href="{{ url_for('paper_trading') }}">Open Paper Trading</a></div><div class="card-bd"><div class="muted" style="font-size:13px;line-height:1.6">Practice market orders with $100,000 in simulated buying power. Paper positions and performance stay separate from your live Schwab account.</div></div></div>
 
-<div class="card app-preferences-card">
-  <div class="card-hd">App Preferences<span class="badge badge-info">Saved on this device</span></div>
-  <div class="card-bd app-preferences-grid">
-    <div>
-      <div class="hi" style="font-size:14px;font-weight:700">Default market chart</div>
-      <div class="faint" style="font-size:12px;margin-top:4px">Your choice stays selected when you return to the Terminal.</div>
-    </div>
-    <div class="preference-segment" role="group" aria-label="Default chart type">
-      <button type="button" data-chart-preference="area">Area</button>
-      <button type="button" data-chart-preference="candles">Candles</button>
-    </div>
-    <a class="btn btn-outline btn-sm" href="{{ url_for('risk_settings') }}">Trading &amp; Risk Settings</a>
-  </div>
-</div>
+<div class="card app-preferences-card"><div class="card-hd">App Preferences<span class="badge badge-info">Saved on this device</span></div><div class="card-bd app-preferences-grid"><div><div class="hi" style="font-size:14px;font-weight:700">Default market chart</div><div class="faint" style="font-size:12px;margin-top:4px">Your choice stays selected when you return to the Terminal.</div></div><div class="preference-segment" role="group" aria-label="Default chart type"><button type="button" data-chart-preference="area">Area</button><button type="button" data-chart-preference="candles">Candles</button></div><a class="btn btn-outline btn-sm" href="{{ url_for('risk_settings') }}">Trading &amp; Risk Settings</a></div></div>
 
-<!-- Broker connection (actual state) -->
-<div class="card"><div class="card-hd">Broker Connection</div>
-  <div class="card-bd">
-    {% if connected %}
-    <div class="between" style="padding:16px;background:var(--surface-inset);border:1px solid rgba(34,197,139,.3);border-radius:var(--r-md)">
-      <div class="row gap-3"><div style="width:38px;height:38px;border-radius:var(--r-md);background:rgba(34,197,139,.14);display:flex;align-items:center;justify-content:center;color:var(--pos-500)">✓</div>
-        <div class="col"><span class="hi" style="font-weight:600;font-size:14px">Charles Schwab</span><span class="faint" style="font-size:12px">Connected · live positions &amp; fills</span></div></div>
-      <a class="btn btn-ghost btn-sm" href="{{ url_for('schwab_account') }}">Manage</a>
-    </div>
-    {% else %}
-    <div class="between" style="padding:16px;background:var(--surface-inset);border:1px dashed var(--border-strong);border-radius:var(--r-md)">
-      <div class="row gap-3"><div style="width:38px;height:38px;border-radius:var(--r-md);background:var(--surface-raised);display:flex;align-items:center;justify-content:center;color:var(--text-faint)">○</div>
-        <div class="col"><span class="hi" style="font-weight:600;font-size:14px">Charles Schwab</span><span class="faint" style="font-size:12px">Not connected · manual entry only</span></div></div>
-      <a class="btn btn-primary btn-sm" href="{{ url_for('schwab_account') }}">Connect</a>
-    </div>
-    {% endif %}
-  </div>
-</div>
+<div class="card"><div class="card-hd">Broker Connection</div><div class="card-bd">{% if connected %}<div class="between" style="padding:16px;background:var(--surface-inset);border:1px solid rgba(34,197,139,.3);border-radius:var(--r-md)"><div class="row gap-3"><div style="width:38px;height:38px;border-radius:var(--r-md);background:rgba(34,197,139,.14);display:flex;align-items:center;justify-content:center;color:var(--pos-500)">✓</div><div class="col"><span class="hi" style="font-weight:600;font-size:14px">Charles Schwab</span><span class="faint" style="font-size:12px">Connected · live balances, positions &amp; fills</span></div></div><a class="btn btn-ghost btn-sm" href="{{ url_for('schwab_account') }}">Manage</a></div>{% else %}<div class="between" style="padding:16px;background:var(--surface-inset);border:1px dashed var(--border-strong);border-radius:var(--r-md)"><div class="row gap-3"><div style="width:38px;height:38px;border-radius:var(--r-md);background:var(--surface-raised);display:flex;align-items:center;justify-content:center;color:var(--text-faint)">○</div><div class="col"><span class="hi" style="font-weight:600;font-size:14px">Charles Schwab</span><span class="faint" style="font-size:12px">Not connected · manual entry only</span></div></div><a class="btn btn-primary btn-sm" href="{{ url_for('schwab_account') }}">Connect</a></div>{% endif %}</div></div>
 
-<!-- honest data-gap note -->
-<div class="faint" style="font-size:11px;line-height:1.6">
-  Note: position <b class="muted">Grade</b> badges show <span class="mono">—</span> (the scanner grade isn't joined to broker holdings yet) and the journal has no per-trade <b class="muted">R-multiple</b> stored, so P&amp;L% is shown instead of R. Both are real data-wiring follow-ups, not fabricated.
-</div>
+<div class="faint" style="font-size:11px;line-height:1.6">Live broker balances and positions are read-only. Position <b class="muted">Grade</b> badges remain <span class="mono">—</span> until scanner grades are joined to broker holdings.</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-(function(){
-  var key = 'tradestaar.chartType';
-  var current = 'area';
-  try { current = localStorage.getItem(key) || 'area'; } catch(e) {}
-  var buttons = document.querySelectorAll('[data-chart-preference]');
-  function paint(){
-    buttons.forEach(function(btn){
-      var active = btn.dataset.chartPreference === current;
-      btn.classList.toggle('is-active', active);
-      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-    });
-  }
-  buttons.forEach(function(btn){
-    btn.addEventListener('click', function(){
-      current = btn.dataset.chartPreference;
-      try { localStorage.setItem(key, current); } catch(e) {}
-      paint();
-    });
-  });
-  paint();
-})();
+(function(){var key='tradestaar.chartType';var current='area';try{current=localStorage.getItem(key)||'area';}catch(e){}var buttons=document.querySelectorAll('[data-chart-preference]');function paint(){buttons.forEach(function(btn){var active=btn.dataset.chartPreference===current;btn.classList.toggle('is-active',active);btn.setAttribute('aria-pressed',active?'true':'false');});}buttons.forEach(function(btn){btn.addEventListener('click',function(){current=btn.dataset.chartPreference;try{localStorage.setItem(key,current);}catch(e){}paint();});});paint();})();
 </script>
 {% endblock %}
