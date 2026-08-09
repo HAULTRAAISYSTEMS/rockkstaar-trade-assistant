@@ -45,12 +45,15 @@ from database import (
     get_daily_session, upsert_daily_session, lock_daily_session, unlock_daily_session,
     add_scanner_alert, get_scanner_alerts, mark_scanner_alerts_seen,
     get_unseen_scanner_alert_count, clear_scanner_alerts,
+    create_price_alert, get_price_alerts, set_price_alert_enabled,
+    delete_price_alert,
     save_setup_outcome, get_setup_outcome_stats,
     save_study_log_entry, get_study_log, delete_study_log_entry,
     get_ai_briefing, save_ai_briefing,
     get_score_narration, save_score_narration,
     get_journal_summary, save_journal_summary,
     get_earnings_digest, save_earnings_digest,
+    get_paper_account, get_paper_positions, get_paper_orders, execute_paper_order,
 )
 from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
 from data_fetcher import _et_now, market_session_now, orb_phase_now
@@ -71,18 +74,16 @@ except Exception:
 app = Flask(__name__)
 
 # ---------------------------------------------------------------------------
-# Secret key — must come from SECRET_KEY env var in production.
-# Warns loudly at startup if missing so it is never silently insecure.
+# Secret key — always supplied by the deployment environment.
+# Refuse to start without it so sessions and CSRF tokens can never be signed
+# with a public, predictable fallback value.
 # ---------------------------------------------------------------------------
 _secret_key = os.environ.get("SECRET_KEY")
 if not _secret_key:
-    import warnings
-    warnings.warn(
-        "SECRET_KEY env var is not set — using insecure fallback. "
-        "Set SECRET_KEY to a long random string in production.",
-        stacklevel=1,
+    raise RuntimeError(
+        "SECRET_KEY environment variable is required. "
+        "Set it to a long, random value before starting Tradestaar Elite."
     )
-    _secret_key = "rockkstaar-secret-key-change-in-prod"
 app.secret_key = _secret_key
 app.permanent_session_lifetime = timedelta(days=30)
 
@@ -133,7 +134,8 @@ def require_admin(f):
 @app.before_request
 def _require_login():
     # Always public — Schwab OAuth callback must stay reachable; callback validates PKCE/state.
-    if (request.path in ("/login", "/logout", "/register", "/favicon.ico", "/health", "/schwab/callback")
+    if (request.path in ("/login", "/logout", "/register", "/favicon.ico", "/health",
+                         "/service-worker.js", "/schwab/callback")
             or request.path.startswith("/static/")):
         return
     if session.get("user_id"):
@@ -166,7 +168,7 @@ def _check_write_auth():
         return Response(
             "Unauthorized",
             401,
-            {"WWW-Authenticate": 'Basic realm="Rockkstaar Trade Assistant"'},
+            {"WWW-Authenticate": 'Basic realm="Tradestaar Elite"'},
         )
 
 sock = Sock(app)
@@ -201,6 +203,17 @@ def _handle_all_errors(e):
 @app.route("/favicon.ico")
 def favicon():
     return send_from_directory(app.static_folder or "static", "logo.png", mimetype="image/png")
+
+
+@app.route("/service-worker.js")
+def service_worker():
+    """Serve the PWA worker from the site root so it can cover every app route."""
+    response = send_from_directory(
+        app.static_folder or "static", "service-worker.js", mimetype="application/javascript"
+    )
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.template_filter("et_time")
@@ -287,7 +300,7 @@ def debug_status():
     env_ok = True
     for k, v in _required_vars.items():
         if k == "SECRET_KEY" and not v:
-            env_detail[k] = "MISSING (using insecure fallback)"
+            env_detail[k] = "MISSING (application startup blocked)"
             env_ok = False
         elif k == "DATABASE_URL":
             env_detail[k] = "set" if v else "not set (SQLite fallback)"
@@ -3137,6 +3150,59 @@ def account():
     )
 
 
+def _paper_snapshot(uid: int) -> dict:
+    account = get_paper_account(uid)
+    positions = get_paper_positions(uid)
+    quotes = {s["ticker"]: s for s in get_all_stock_data()}
+    market_value = unrealized = 0.0
+    for pos in positions:
+        quote = quotes.get(pos["ticker"], {})
+        last = float(quote.get("current_price") or pos["avg_price"])
+        pos["last_price"] = last
+        pos["market_value"] = round(last * pos["quantity"], 2)
+        pos["unrealized_pnl"] = round((last - pos["avg_price"]) * pos["quantity"], 2)
+        market_value += pos["market_value"]
+        unrealized += pos["unrealized_pnl"]
+    orders = get_paper_orders(uid)
+    realized = round(sum(float(o.get("realized_pnl") or 0) for o in orders), 2)
+    equity = round(float(account["cash_balance"]) + market_value, 2)
+    total_pnl = round(equity - float(account["starting_cash"]), 2)
+    return {"account": account, "positions": positions, "orders": orders,
+            "market_value": round(market_value, 2), "unrealized": round(unrealized, 2),
+            "realized": realized, "equity": equity, "total_pnl": total_pnl,
+            "return_pct": round(total_pnl / float(account["starting_cash"]) * 100, 2)}
+
+
+@app.route("/paper")
+def paper_trading():
+    """Account-isolated, long-only paper portfolio and performance screen."""
+    return render_template("paper.html", paper=_paper_snapshot(current_user_id()))
+
+
+@app.route("/paper/order", methods=["POST"])
+def paper_order():
+    ticker = (request.form.get("ticker") or "").strip().upper()
+    side = (request.form.get("side") or "BUY").strip().upper()
+    try:
+        quantity = int(request.form.get("quantity") or 0)
+    except (TypeError, ValueError):
+        quantity = 0
+    if not re.fullmatch(r"[A-Z]{1,6}", ticker) or side not in ("BUY", "SELL") or quantity < 1:
+        flash("Enter a valid ticker, side, and whole-share quantity.", "error")
+        return redirect(url_for("paper_trading"))
+    stock = get_stock_data(ticker)
+    price = float(stock.get("current_price") or 0) if stock else 0
+    if price <= 0:
+        flash(f"No verified quote is available for {ticker}; no paper order was filled.", "error")
+        return redirect(url_for("paper_trading"))
+    try:
+        fill = execute_paper_order(current_user_id(), ticker, side, quantity, price)
+        flash(f"Paper {side.lower()} filled: {quantity} {ticker} @ ${price:,.2f}.", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("paper_trading"))
+
+
 def _dashboard_inner():
     uid          = current_user_id()
     all_wls      = get_all_watchlists(uid)
@@ -3694,6 +3760,27 @@ def stock_detail(ticker):
         market_temp=market_temp,
         coach=coach,
     )
+
+
+@app.route("/api/stock/<ticker>/chart")
+def stock_chart(ticker):
+    """Return a compact daily price series for the mobile stock profile."""
+    ticker = ticker.upper().strip()
+    if not ticker or len(ticker) > 10 or not all(c.isalnum() or c in ".-" for c in ticker):
+        return jsonify({"ok": False, "error": "Invalid ticker"}), 400
+    try:
+        from data_fetcher import _fetch_ohlcv_via_chart_api
+        bars = _fetch_ohlcv_via_chart_api(ticker, interval="1d", range_str="3mo")
+        if not bars or not bars.get("closes"):
+            return jsonify({"ok": False, "error": "Chart data unavailable"}), 503
+        points = [
+            {"t": int(ts), "c": round(float(close), 2)}
+            for ts, close in zip(bars.get("timestamps", []), bars["closes"])
+        ][-65:]
+        return jsonify({"ok": True, "ticker": ticker, "points": points})
+    except Exception as exc:
+        logger.warning("stock_chart ticker=%s err=%s", ticker, exc)
+        return jsonify({"ok": False, "error": "Chart data unavailable"}), 503
 
 
 # ── Market Temperature cache ─────────────────────────────────────────────────
@@ -4348,11 +4435,59 @@ def watchlists_page():
             wl_counts[w["id"]] = 0
     active_tickers = get_watchlist_stocks(active_id) if active_id else []
     active_wl      = get_watchlist_by_id(active_id) if active_id else None
+    stock_data     = {row["ticker"]: row for row in get_all_stock_data()}
+    price_alerts   = get_price_alerts(uid)
+    for alert in price_alerts:
+        quote = stock_data.get(alert["ticker"], {})
+        current = quote.get("current_price")
+        alert["current_price"] = current
+        alert["triggered"] = bool(
+            alert["enabled"] and current is not None and
+            ((alert["direction"] == "above" and current >= alert["target_price"]) or
+             (alert["direction"] == "below" and current <= alert["target_price"]))
+        )
     return render_template(
         "watchlists.html",
         all_wls=all_wls, active_id=active_id, active_wl=active_wl,
         wl_counts=wl_counts, active_tickers=active_tickers,
+        price_alerts=price_alerts,
     )
+
+
+@app.route("/price-alerts/create", methods=["POST"])
+def price_alert_create():
+    ticker = request.form.get("ticker", "").strip().upper()
+    direction = request.form.get("direction", "above").strip().lower()
+    try:
+        target = float(request.form.get("target_price", ""))
+    except (TypeError, ValueError):
+        target = 0
+    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", ticker):
+        flash("Enter a valid ticker symbol.", "error")
+    elif direction not in ("above", "below") or target <= 0 or target > 10_000_000:
+        flash("Enter a valid alert direction and target price.", "error")
+    else:
+        try:
+            create_price_alert(current_user_id(), ticker, direction, round(target, 4))
+            flash(f"Price alert created for {ticker}.", "success")
+        except Exception:
+            flash("That exact price alert already exists.", "error")
+    return redirect(url_for("watchlists_page") + "#price-alerts")
+
+
+@app.route("/price-alerts/<int:alert_id>/toggle", methods=["POST"])
+def price_alert_toggle(alert_id):
+    enabled = request.form.get("enabled") == "1"
+    set_price_alert_enabled(alert_id, current_user_id(), enabled)
+    flash("Price alert resumed." if enabled else "Price alert paused.", "success")
+    return redirect(url_for("watchlists_page") + "#price-alerts")
+
+
+@app.route("/price-alerts/<int:alert_id>/delete", methods=["POST"])
+def price_alert_delete(alert_id):
+    delete_price_alert(alert_id, current_user_id())
+    flash("Price alert deleted.", "info")
+    return redirect(url_for("watchlists_page") + "#price-alerts")
 
 
 @app.route("/watchlists/activate/<int:wl_id>", methods=["POST"])
@@ -4449,7 +4584,7 @@ def quick_mode():
 
 @app.route("/terminal")
 def terminal():
-    """HAULTRA Trade Terminal — ticker tape · watchlist · chart · order ticket · positions.
+    """Tradestaar Elite terminal — tape, watchlist, chart, ticket and positions.
 
     View/layout only. Reuses the exact same existing data sources as quick_mode
     (get_watchlist_stocks / get_all_stock_data / annotate / rank_stocks /
@@ -4514,6 +4649,18 @@ def terminal():
         reverse=True,
     )[:3]
 
+    # Mobile discovery rails.  The momentum scanner covers a curated liquid
+    # universe while the activity list uses verified relative-volume values
+    # already stored for the active watchlist.  Keep the two concepts separate:
+    # a fast price move is not automatically high-volume activity.
+    scanner_snapshot = _scanner.get_scan_results() or {}
+    trending_stocks = (scanner_snapshot.get("opportunities") or [])[:6]
+    most_active = sorted(
+        [s for s in valid if s.get("rel_volume") is not None],
+        key=lambda s: (s.get("rel_volume") or 0, s.get("today_volume") or 0),
+        reverse=True,
+    )[:6]
+
     return render_template(
         "terminal.html",
         stocks=valid,
@@ -4522,6 +4669,9 @@ def terminal():
         acct=acct,
         win_rate=win_rate,
         today_setups=today_setups,
+        trending_stocks=trending_stocks,
+        most_active=most_active,
+        scanner_last_scan=scanner_snapshot.get("last_scan"),
     )
 
 
@@ -6189,9 +6339,12 @@ def api_daily_review():
 
 @app.route("/intel")
 def intel():
-    """Intel — morning macro: regime, AI briefing, Fed liquidity, risk meter,
-    sector flow, economic calendar, news. Server-rendered from the existing
-    cache-first engines (no new data sources; all non-blocking)."""
+    """Tradestaar market-news and smart-money hub.
+
+    All cards are built from the existing cache-first engines.  Derived values
+    (headline sentiment and coverage momentum) are explicitly labelled so they
+    cannot be mistaken for exchange volume or a third-party sentiment feed.
+    """
     mkt = _get_mkt_ctx()
 
     liq, money_flow = {}, []
@@ -6202,13 +6355,50 @@ def intel():
     except Exception as _e:
         logger.debug("intel: liquidity fetch failed: %s", _e)
 
-    events, news = [], []
+    events, news, earnings = [], [], []
     try:
         summ = _intel.get_intel_summary() or {}
         events = summ.get("economic_events") or []
         news = summ.get("market_news") or summ.get("news") or []
+        earn = summ.get("earnings") or {}
+        earnings = (
+            list(earn.get("today") or [])
+            + list(earn.get("tomorrow") or [])
+            + list(earn.get("this_week") or [])
+            + list(earn.get("coming_up") or [])
+        )
     except Exception as _e:
         logger.debug("intel: intel_summary failed: %s", _e)
+
+    # Lightweight, explainable headline tone.  This is intentionally not
+    # presented as analyst consensus or social sentiment.
+    bullish_words = (
+        "beat", "beats", "upgrade", "raises", "raised", "growth", "record",
+        "approval", "approved", "surge", "rally", "wins", "buyback",
+    )
+    bearish_words = (
+        "miss", "misses", "downgrade", "cuts", "cut ", "decline", "probe",
+        "lawsuit", "recall", "warning", "falls", "layoff", "offering",
+    )
+    enriched_news = []
+    coverage = {}
+    for raw in news:
+        item = dict(raw)
+        headline = str(item.get("headline") or "")
+        lowered = headline.lower()
+        bull_hits = sum(word in lowered for word in bullish_words)
+        bear_hits = sum(word in lowered for word in bearish_words)
+        item["sentiment"] = "BULLISH" if bull_hits > bear_hits else (
+            "BEARISH" if bear_hits > bull_hits else "NEUTRAL"
+        )
+        ticker = str(item.get("ticker") or "").upper()
+        if ticker:
+            score = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2}.get(item.get("impact"), 1)
+            entry = coverage.setdefault(ticker, {"ticker": ticker, "mentions": 0, "score": 0})
+            entry["mentions"] += 1
+            entry["score"] += score
+        enriched_news.append(item)
+    trending = sorted(coverage.values(), key=lambda row: (-row["score"], -row["mentions"], row["ticker"]))[:6]
 
     briefing = None
     try:
@@ -6225,7 +6415,136 @@ def intel():
     return render_template(
         "intel.html",
         mkt=mkt, liq=liq, money_flow=money_flow[:8],
-        events=events[:6], news=news[:6], briefing=briefing, story=story,
+        events=events[:8], news=enriched_news[:24], earnings=earnings[:12],
+        trending=trending, briefing=briefing, story=story,
+    )
+
+
+@app.route("/sentiment")
+def sentiment():
+    """Transparent news tone with an explicit social-data availability state."""
+    news = []
+    try:
+        summary = _intel.get_intel_summary() or {}
+        news = summary.get("market_news") or summary.get("news") or []
+    except Exception as exc:
+        logger.debug("sentiment: news summary unavailable: %s", exc)
+
+    active_id = get_active_wl_id()
+    try:
+        watchlist = get_watchlist_stocks(active_id) if active_id else []
+    except Exception:
+        watchlist = []
+
+    from sentiment_engine import build_sentiment_snapshot
+    snapshot = build_sentiment_snapshot(news, watchlist)
+    return render_template("sentiment.html", snapshot=snapshot)
+
+
+@app.route("/smart-money")
+def smart_money():
+    """Verified SEC insider filings and congressional trade disclosures."""
+    active_id = get_active_wl_id()
+    try:
+        tickers = get_watchlist_stocks(active_id) if active_id else []
+    except Exception:
+        tickers = []
+
+    from smart_money import fetch_congress_trades, fetch_sec_form4
+    insiders, insider_status = fetch_sec_form4(tickers)
+    congress, congress_status = fetch_congress_trades()
+    return render_template(
+        "smart_money.html",
+        insiders=insiders,
+        congress=congress,
+        insider_status=insider_status,
+        congress_status=congress_status,
+        watched_tickers=tickers[:10],
+    )
+
+
+def _build_catalyst_calendar(summary, watchlist_tickers=None):
+    """Normalize cached earnings and macro events for the calendar UI.
+
+    The intelligence engine intentionally has different schemas for company
+    earnings and economic releases.  Keeping the normalization here gives the
+    template one stable contract and makes the filters deterministic/offline.
+    """
+    watchlist = {str(t).upper() for t in (watchlist_tickers or [])}
+    rows = []
+    earnings = (summary or {}).get("earnings") or {}
+    seen_earnings = set()
+    for bucket in ("today", "tomorrow", "this_week", "coming_up"):
+        for raw in earnings.get(bucket) or []:
+            ticker = str(raw.get("ticker") or "").upper()
+            date = str(raw.get("date") or "")[:10]
+            key = (ticker, date)
+            if not ticker or key in seen_earnings:
+                continue
+            seen_earnings.add(key)
+            days = raw.get("days_away")
+            try:
+                days = int(days)
+            except (TypeError, ValueError):
+                days = 99
+            rows.append({
+                "kind": "EARNINGS", "date": date,
+                "date_label": raw.get("date_label") or date or "Date TBD",
+                "time": raw.get("time_label") or "TBD",
+                "title": f"{ticker} Earnings",
+                "ticker": ticker,
+                "company_name": raw.get("company_name") or ticker,
+                "impact": "HIGH" if ticker in watchlist else "MEDIUM",
+                "reason": "Quarterly earnings can create price gaps and volatility.",
+                "days_away": days,
+                "on_watchlist": ticker in watchlist,
+                "eps_est": raw.get("eps_est"),
+                "rev_est": raw.get("rev_est"),
+            })
+
+    for raw in (summary or {}).get("economic_events") or []:
+        days = raw.get("days_away")
+        try:
+            days = int(days)
+        except (TypeError, ValueError):
+            days = 99
+        rows.append({
+            "kind": "ECONOMIC", "date": str(raw.get("date") or "")[:10],
+            "date_label": raw.get("date_label") or raw.get("date") or "Date TBD",
+            "time": raw.get("time") or "TBD",
+            "title": raw.get("event") or "Economic Event",
+            "ticker": "", "company_name": "US Macro",
+            "impact": str(raw.get("impact") or "MEDIUM").upper(),
+            "reason": raw.get("reason") or "Macro releases can affect rates, sectors, and broad market risk.",
+            "days_away": days, "on_watchlist": False,
+            "eps_est": None, "rev_est": None,
+        })
+
+    return sorted(rows, key=lambda row: (
+        row["days_away"], row["date"], row["time"] == "TBD", row["time"], row["title"]
+    ))
+
+
+@app.route("/calendar")
+def catalyst_calendar():
+    """Mobile-first earnings and economic catalyst calendar."""
+    try:
+        summary = _intel.get_intel_summary() or {}
+    except Exception as exc:
+        logger.debug("catalyst_calendar: intel summary failed: %s", exc)
+        summary = {}
+
+    active_id = get_active_wl_id()
+    try:
+        active_tickers = get_watchlist_stocks(active_id) if active_id else []
+    except Exception:
+        active_tickers = []
+    rows = _build_catalyst_calendar(summary, active_tickers)
+    return render_template(
+        "catalyst_calendar.html", events=rows,
+        earnings_count=sum(row["kind"] == "EARNINGS" for row in rows),
+        economic_count=sum(row["kind"] == "ECONOMIC" for row in rows),
+        watchlist_count=sum(row["on_watchlist"] for row in rows),
     )
 
 
@@ -6513,6 +6832,69 @@ def fundamentals_page():
     return render_template("fundamentals.html", ticker=ticker, data=data, error=error)
 
 
+def _comparison_snapshot(ticker: str) -> dict:
+    """Build a compact, source-labelled comparison record for one ticker."""
+    from fundamentals_engine import get_fundamentals
+
+    data = get_fundamentals(ticker)
+    metrics = {}
+    for section in data.get("sections", []):
+        for row in section.get("rows", []):
+            label = row.get("label")
+            if label:
+                metrics[label] = row
+
+    stock = get_stock_data(ticker) or {}
+    return {
+        "ticker": ticker,
+        "company_name": data.get("company_name") or ticker,
+        "sector": data.get("sector"),
+        "industry": data.get("industry"),
+        "score": data.get("normalized_score"),
+        "earned": data.get("total_earned"),
+        "possible": data.get("total_possible"),
+        "verdict": data.get("verdict"),
+        "verdict_class": data.get("verdict_class"),
+        "price": stock.get("current_price") or stock.get("price"),
+        "change_pct": stock.get("change_pct"),
+        "roe": data.get("roe"),
+        "roic": data.get("roic"),
+        "insider_pct": data.get("insider_pct"),
+        "metrics": metrics,
+        "red_flags": data.get("red_flags", []),
+        "missing_fields": data.get("missing_fields", []),
+        "error": data.get("error"),
+    }
+
+
+@app.route("/compare")
+def stock_compare():
+    """Compare two or three stocks using the existing fundamentals pipeline."""
+    raw = request.args.get("symbols", "")
+    symbols = []
+    for value in raw.split(","):
+        ticker = value.strip().upper()
+        if ticker and re.fullmatch(r"[A-Z][A-Z0-9.-]{0,7}", ticker) and ticker not in symbols:
+            symbols.append(ticker)
+    symbols = symbols[:3]
+
+    comparisons = []
+    errors = []
+    for ticker in symbols:
+        try:
+            snapshot = _comparison_snapshot(ticker)
+            if snapshot.get("error"):
+                errors.append(f"{ticker}: {snapshot['error']}")
+            comparisons.append(snapshot)
+        except Exception as exc:
+            logger.exception("stock_compare error for %s", ticker)
+            errors.append(f"{ticker}: comparison data is temporarily unavailable.")
+
+    return render_template(
+        "compare.html", symbols=symbols, comparisons=comparisons, errors=errors,
+    )
+
+
 @app.route("/api/research/ask", methods=["POST"])
 @csrf.exempt
 def api_research_ask():
@@ -6547,18 +6929,91 @@ def api_research_ask():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
-# ── HAULTRA AI — general Q&A with Nebius + live earnings context ─────────────
+# ── Tradestaar AI — grounded, account-aware research assistant ────────
+def _tradestaar_ai_context(user_id: int, question: str = "") -> dict:
+    """Build a compact, cache-first context packet scoped to one user."""
+    active_id = get_active_wl_id()
+    watchlist = get_watchlist_stocks(active_id) if active_id else []
+    data_map = {str(row.get("ticker", "")).upper(): row for row in get_all_stock_data()}
+    ignored = {"A", "AI", "I", "THE", "FOR", "AND", "OR", "MY", "TO", "IS"}
+    requested = [t for t in re.findall(r"\b[A-Z]{1,5}\b", question.upper()) if t not in ignored]
+    focus = list(dict.fromkeys(requested + watchlist))[:8]
+    stocks = []
+    for ticker in focus:
+        row = data_map.get(ticker) or get_stock_data(ticker) or {}
+        if row:
+            stocks.append({
+                "ticker": ticker,
+                "price": row.get("current_price") or row.get("price") or row.get("close"),
+                "change_pct": row.get("change_pct") or row.get("daily_change_pct"),
+                "relative_volume": row.get("relative_volume") or row.get("rel_volume"),
+                "grade": row.get("swing_grade") or row.get("grade"),
+                "setup": row.get("setup_type") or row.get("swing_setup"),
+                "earnings_date": row.get("earnings_date"),
+                "updated_at": row.get("updated_at") or row.get("last_updated"),
+            })
+    account = get_paper_account(user_id)
+    positions = []
+    for position in get_paper_positions(user_id)[:10]:
+        quote = data_map.get(position["ticker"]) or {}
+        positions.append({
+            "ticker": position["ticker"], "shares": position["quantity"],
+            "average_cost": position["avg_price"],
+            "cached_price": quote.get("current_price") or quote.get("price") or quote.get("close"),
+        })
+    headlines = []
+    try:
+        summary = _intel.get_intel_summary() or {}
+        for item in (summary.get("market_news") or summary.get("news") or [])[:12]:
+            ticker = str(item.get("ticker") or "").upper()
+            if not focus or not ticker or ticker in focus:
+                headlines.append({"ticker": ticker or "MARKET", "headline": item.get("headline"),
+                                  "source": item.get("source"),
+                                  "published": item.get("published") or item.get("published_at") or item.get("time")})
+            if len(headlines) == 6:
+                break
+    except Exception as exc:
+        logger.debug("Tradestaar AI news context unavailable: %s", exc)
+    market = _get_mkt_ctx()
+    return {
+        "as_of": _et_now().isoformat(), "watchlist": watchlist[:20], "stocks": stocks,
+        "paper_account": {"cash_balance": account.get("cash_balance"), "positions": positions},
+        "market": {key: market.get(key) for key in
+                   ("regime", "regime_label", "spy_1d_pct", "qqq_1d_pct", "vix_level")},
+        "headlines": headlines,
+    }
+
+
+@app.route("/ai")
+def tradestaar_ai():
+    """Mobile-first Tradestaar AI research workspace."""
+    return render_template("tradestaar_ai.html", ai_context=_tradestaar_ai_context(current_user_id()))
+
+
 @app.route("/api/ask", methods=["POST"])
 @csrf.exempt
 def api_ask():
-    """HAULTRA AI: Nebius/Llama + live earnings calendar, smart prompt for real answers."""
+    """Tradestaar AI with bounded history and verified in-app context."""
     from openai import OpenAI as _OpenAI
     import datetime as _dt
 
     data     = request.get_json(force=True, silent=True) or {}
     question = (data.get("question") or "").strip()
     if not question:
-        return jsonify({"answer": "No question provided."}), 400
+        return jsonify({"ok": False, "error": "No question provided."}), 400
+    if len(question) > 1200:
+        return jsonify({"ok": False, "error": "Question must be 1,200 characters or less."}), 400
+    if not os.environ.get("NEBIUS_API_KEY"):
+        return jsonify({"ok": False, "error": "Tradestaar AI is not configured on this server."}), 503
+    safe_history = []
+    history = data.get("history") or []
+    if isinstance(history, list):
+        for item in history[-6:]:
+            if isinstance(item, dict) and item.get("role") in ("user", "assistant"):
+                content = str(item.get("content") or "").strip()[:2000]
+                if content:
+                    safe_history.append({"role": item["role"], "content": content})
+    grounded = _tradestaar_ai_context(current_user_id(), question)
 
     # ── Build earnings context from live calendar ──────────────────────────
     try:
@@ -6590,25 +7045,23 @@ def api_ask():
         earn_ctx = f"TODAY IS: {_dt.date.today().strftime('%A, %B %d, %Y')}\n(Live calendar unavailable)"
 
     system_prompt = (
-        "You are HAULTRA AI — a sharp, knowledgeable trading assistant for Rockkstaar's swing trading system.\n\n"
-        "TODAY'S DATE and CONFIRMED UPCOMING EARNINGS are provided below. Use them when answering.\n\n"
+        "You are Tradestaar AI — the sharp, knowledgeable trading assistant inside Tradestaar Elite.\n\n"
+        "Use the dated VERIFIED APP CONTEXT and confirmed calendar below. Cached values may be delayed.\n\n"
+        "TRUTH AND SAFETY RULES:\n"
+        "- Never invent a price, filing, headline, position, rating, fundamental, or earnings date.\n"
+        "- Prefer VERIFIED APP CONTEXT. If a fact is absent, say it is unavailable.\n"
+        "- Label interpretations and educational examples. Never promise returns.\n"
+        "- Never reveal data belonging to another account.\n\n"
         "HOW TO ANSWER:\n\n"
         "EARNINGS DATE QUESTIONS:\n"
         "- First check the confirmed calendar above. If the ticker is listed, give that exact date.\n"
-        "- If NOT in the 21-day calendar, use your training knowledge to give the expected quarter "
-        "and approximate timeframe (e.g. 'NVDA typically reports in late August for Q2 — "
-        "expected around August 27, 2026 AMC based on historical patterns'). "
-        "Label it as estimated. Always give a specific answer, never just say 'not listed'.\n\n"
+        "- If NOT in the calendar, say the verified date is unavailable. Do not guess a date.\n\n"
         "FUNDAMENTALS QUESTIONS:\n"
-        "- Give real specific numbers from your training knowledge: P/E ratio, revenue (TTM), "
-        "EPS, gross margin, YoY revenue growth, operating margin, free cash flow.\n"
-        "- Format cleanly. Example: 'NVDA — P/E: 45x | Revenue TTM: $96B | EPS: $2.94 | "
-        "Gross Margin: 75% | Rev Growth YoY: +122%'\n"
-        "- Note that figures are from training data and may be a few quarters old.\n\n"
+        "- Use only figures present in VERIFIED APP CONTEXT. Direct users to Fundamentals when absent.\n\n"
         "TRADE SETUP QUESTIONS:\n"
         "- Use technical reasoning: EMA alignment, VWAP relationship, structure, volume, R/R.\n\n"
         "STYLE: Direct, specific, no filler, no generic non-answers. Always give a real answer.\n\n"
-        + earn_ctx
+        + earn_ctx + "\nVERIFIED APP CONTEXT (JSON):\n" + _json.dumps(grounded, default=str)
     )
 
     try:
@@ -6620,16 +7073,17 @@ def api_ask():
             model="meta-llama/Llama-3.3-70B-Instruct",
             max_tokens=600,
             temperature=0.3,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": question},
-            ],
+            messages=[{"role": "system", "content": system_prompt}, *safe_history,
+                      {"role": "user", "content": question}],
         )
         answer = (resp.choices[0].message.content or "").strip() or "No response."
-        return jsonify({"answer": answer})
+        return jsonify({"ok": True, "answer": answer, "context": grounded,
+                        "disclaimer": "AI research can be wrong. Verify before trading."})
     except Exception as exc:
-        logger.exception("HAULTRA AI ask error")
-        return jsonify({"answer": f"Error: {exc}"}), 500
+        logger.exception("Tradestaar AI ask error")
+        if not os.environ.get("NEBIUS_API_KEY"):
+            return jsonify({"ok": False, "error": "Tradestaar AI is not configured on this server."}), 503
+        return jsonify({"ok": False, "error": "Tradestaar AI is temporarily unavailable."}), 502
 
 
 @app.route("/api/study-log", methods=["GET"])
@@ -6663,5 +7117,5 @@ def api_study_log_delete(entry_id):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    print(f"\nRockkstaar Trade Assistant running on port {port}...\n")
+    print(f"\nTradestaar Elite running on port {port}...\n")
     app.run(host="0.0.0.0", port=port, debug=False)

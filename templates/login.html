@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#060708" />
-  <title>Authenticate — HAULTRA AI</title>
+  <title>Authenticate — Tradestaar Elite</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -87,6 +87,13 @@
       letter-spacing: 0.25em;
       color: var(--dim);
       text-transform: uppercase;
+    }
+    .login-brand-logo {
+      width: 112px;
+      height: 112px;
+      object-fit: contain;
+      border-radius: 22px;
+      filter: drop-shadow(0 10px 28px rgba(255, 178, 76, 0.22));
     }
     .login-brand-name {
       font-family: var(--mono);
@@ -269,9 +276,10 @@
 
   <!-- Brand -->
   <div class="login-brand">
-    <span class="login-brand-line">▲ HAULTRA AI SYSTEMS</span>
-    <span class="login-brand-name">ROCKKSTAAR</span>
-    <span class="login-brand-sub">Trade Assistant · Terminal Access</span>
+    <img src="{{ url_for('static', filename='logo.png') }}" alt="Tradestaar Elite" class="login-brand-logo">
+    <span class="login-brand-line">TRADESTAAR ELITE</span>
+    <span class="login-brand-name">TRADESTAAR</span>
+    <span class="login-brand-sub">Elite Market Intelligence · Terminal Access</span>
   </div>
 
   <!-- Login card -->
@@ -332,10 +340,6 @@
       </form>
 
       <div class="login-footer">
-        Default admin: <code style="color:var(--muted)">rockkstaar</code> / your <code style="color:var(--muted)">APP_PASSWORD</code>
-      </div>
-
-      <div class="login-footer" style="margin-top:-8px;">
         <a href="/register" style="color:var(--cyan);text-decoration:none;opacity:0.75;transition:opacity 0.15s;"
            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.75'">
           Create an account →

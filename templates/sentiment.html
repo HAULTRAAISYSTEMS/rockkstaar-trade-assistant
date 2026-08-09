@@ -1,0 +1,56 @@
+{% extends "hx_base.html" %}
+{% block title %}News Sentiment — Tradestaar Elite{% endblock %}
+{% block head_extra %}
+<style>
+  .sent-hero{padding:22px;border:1px solid rgba(240,181,63,.3);border-radius:var(--r-lg);background:radial-gradient(circle at 85% 5%,rgba(240,181,63,.14),transparent 35%),#090a0c}
+  .sent-title{font:700 clamp(29px,5vw,46px)/.98 var(--font-display);text-transform:uppercase;color:#f6f1e7}.sent-title em{color:#f0b53f;font-style:normal}
+  .sent-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}.sent-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .sent-kpi{padding:15px;border:1px solid var(--border-subtle);border-radius:10px;background:#0b0d0f}.sent-kpi strong{display:block;margin-top:5px;font:700 24px var(--font-mono)}
+  .sent-row{display:grid;grid-template-columns:65px 1fr auto;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid var(--border-subtle)}.sent-row:last-child{border:0}
+  .sent-meter{height:6px;background:var(--ink-700);border-radius:8px;overflow:hidden}.sent-meter i{display:block;height:100%;background:#f0b53f}
+  .sent-article{padding:14px 0;border-bottom:1px solid var(--border-subtle)}.sent-article:last-child{border:0}
+  .sent-head{display:flex;justify-content:space-between;gap:10px;color:var(--text-primary);font-weight:600;line-height:1.4}
+  .sent-ticker{font:700 14px var(--font-mono);color:#f0b53f;text-decoration:none}
+  .social-state{padding:18px;border:1px dashed rgba(240,181,63,.35);border-radius:10px;background:rgba(240,181,63,.035)}
+  @media(max-width:800px){.sent-grid{grid-template-columns:1fr}.sent-kpis{grid-template-columns:1fr 1fr}.sent-kpi:last-child{grid-column:1/-1}.sent-row{grid-template-columns:58px 1fr}}
+</style>
+{% endblock %}
+{% block hx_content %}
+<section class="sent-hero col gap-2">
+  <span class="eyebrow">Tradestaar Elite Research</span>
+  <h1 class="sent-title">News &amp; <em>Social Sentiment</em></h1>
+  <span class="faint">Explainable coverage tone from connected news feeds. Every score can be traced to its headline evidence.</span>
+</section>
+
+<div class="sent-kpis">
+  <div class="sent-kpi"><span class="eyebrow">News Tone</span><strong class="{{ 'pos' if snapshot.overall_score > 0 else ('neg' if snapshot.overall_score < 0 else 'faint') }}">{{ '%+d'|format(snapshot.overall_score) }}</strong><span class="faint">{{ snapshot.overall_label }}</span></div>
+  <div class="sent-kpi"><span class="eyebrow">Headlines Scored</span><strong>{{ snapshot.article_count }}</strong><span class="faint">current cached feed</span></div>
+  <div class="sent-kpi"><span class="eyebrow">Source Coverage</span><strong>{{ snapshot.sources|length }}</strong><span class="faint">identified publishers/feeds</span></div>
+</div>
+
+<div class="sent-grid">
+  <main class="col gap-4">
+    <div class="card"><div class="card-hd">Ticker Sentiment</div><div class="card-bd" style="padding:4px 16px">
+      {% for row in snapshot.tickers %}<div class="sent-row">
+        <a class="sent-ticker" href="{{ url_for('stock_detail', ticker=row.ticker) if row.ticker != 'MARKET' else url_for('intel') }}">{{ row.ticker }}</a>
+        <div class="col gap-1"><div class="sent-meter"><i style="width:{{ row.confidence }}%"></i></div><span class="faint" style="font-size:10px">{{ row.articles }} headline{{ '' if row.articles == 1 else 's' }} · {{ row.confidence }}% evidence confidence</span></div>
+        <span class="tone tone-{{ row.label }}">{{ '%+d'|format(row.score) }} {{ row.label }}</span>
+      </div>{% else %}<p class="faint">No cached headlines are available to score.</p>{% endfor %}
+    </div></div>
+
+    <div class="card"><div class="card-hd">Headline Evidence</div><div class="card-bd">
+      {% for item in snapshot.articles[:30] %}<article class="sent-article">
+        <div class="sent-head"><span>{{ item.headline }}</span><span class="tone tone-{{ item.label }}">{{ '%+d'|format(item.score) }}</span></div>
+        <div class="faint mono" style="font-size:10px;margin-top:7px">{{ item.ticker }} · {{ item.source }}{% if item.bullish_terms %} · Bullish: {{ item.bullish_terms|join(', ') }}{% endif %}{% if item.bearish_terms %} · Bearish: {{ item.bearish_terms|join(', ') }}{% endif %}</div>
+      </article>{% else %}<p class="faint">The news cache is warming.</p>{% endfor %}
+    </div></div>
+  </main>
+
+  <aside class="col gap-4">
+    <div class="card"><div class="card-hd">Social Sentiment</div><div class="card-bd"><div class="social-state"><span class="badge badge-warn">FEED NOT CONNECTED</span><p class="muted" style="font-size:13px;line-height:1.5;margin:10px 0 0">Tradestaar will not label social chatter as verified sentiment until a licensed source supplies posts, timestamps, engagement, and provenance.</p></div></div></div>
+    <div class="card"><div class="card-hd">Method &amp; Sources</div><div class="card-bd col gap-3"><p class="muted" style="font-size:12px;line-height:1.5;margin:0">{{ snapshot.method }} Scores run from −100 to +100. Confidence measures available headline evidence, not prediction accuracy.</p>
+      {% for source in snapshot.sources %}<div class="between"><span class="hi" style="font-size:12px">{{ source.name }}</span><span class="mono faint">{{ source.articles }}</span></div>{% else %}<span class="faint">No sources loaded.</span>{% endfor %}
+    </div><div class="card-ft faint" style="font-size:10px">Coverage tone can be wrong, incomplete, or stale. It is research context—not financial advice or a buy/sell signal.</div></div>
+  </aside>
+</div>
+{% endblock %}

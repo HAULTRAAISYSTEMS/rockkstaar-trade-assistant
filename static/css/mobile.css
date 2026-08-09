@@ -1,5 +1,5 @@
 /* =========================================================
-   Rockkstaar Trade Assistant — Mobile / iPad Stylesheet
+   Tradestaar Elite — Mobile / iPad Stylesheet
    Loaded after style.css — overrides only what needs to change.
 
    Breakpoints:
@@ -50,6 +50,90 @@
   .btn-refresh {
     font-size: 0.7rem;
     padding: 0.3rem 0.6rem;
+  }
+}
+
+/* Mobile app shell: persistent primary destinations with safe-area support. */
+.mobile-app-nav { display: none; }
+
+@media (max-width: 768px) {
+  .mobile-refresh-bar,
+  .mobile-ctrl-bar { display: none !important; }
+
+  .mobile-app-nav {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 9997;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: rgba(6, 7, 8, 0.97);
+    border-top: 1px solid rgba(214, 166, 63, 0.22);
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .mobile-app-nav__item {
+    min-width: 0;
+    min-height: 50px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border-radius: 10px;
+    color: #777d86;
+    font-family: var(--font-ui, system-ui);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-app-nav__icon {
+    color: currentColor;
+    font-family: system-ui, sans-serif;
+    font-size: 21px;
+    line-height: 1;
+  }
+
+  .mobile-app-nav__item.is-active {
+    color: #e3b94f;
+    background: linear-gradient(180deg, rgba(214, 166, 63, 0.14), rgba(214, 166, 63, 0.03));
+  }
+
+  .mobile-app-nav__item:active { transform: scale(0.95); }
+
+  .main-content {
+    padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* The newer hx screens share the same app navigation on phones. */
+  .hx-side { display: none !important; }
+  .hx-main {
+    padding: 16px 14px calc(88px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  #ask-fab {
+    bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important;
+    left: auto !important;
+    right: 14px !important;
+    width: 48px;
+    height: 48px;
+    padding: 0 !important;
+    overflow: hidden;
+    transform: none !important;
+    font-size: 0 !important;
+    border-radius: 50% !important;
+  }
+
+  #ask-fab::before {
+    content: 'AI';
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
   }
 }
 
@@ -699,4 +783,29 @@ label,
 @media (max-width: 480px) {
   .mt-badge  { font-size: clamp(0.62rem, 2.8vw, 0.78rem); }
   .mt-action { font-size: clamp(0.65rem, 3vw, 0.8rem); }
+}
+/* Mobile-first stock profile summary. Desktop retains the full trading workstation. */
+.mobile-stock-profile { display: none; }
+@media (max-width: 767px) {
+  .mobile-stock-profile { display:block; margin:0 0 16px; padding:18px; border:1px solid rgba(245,185,66,.24); border-radius:20px; background:linear-gradient(155deg,#17130b 0%,#0b0c0f 46%,#08090b 100%); box-shadow:0 18px 46px rgba(0,0,0,.28); }
+  .mobile-stock-profile__top { display:flex; align-items:center; justify-content:space-between; }
+  .mobile-stock-profile__eyebrow { color:#b7aa8a; font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; }
+  .mobile-stock-profile h1 { margin:2px 0 0; color:#fff; font:800 28px/1 var(--font-mono); }
+  .mobile-stock-profile__refresh { width:38px; height:38px; border:1px solid rgba(245,185,66,.35); border-radius:50%; background:#17130b; color:#f5b942; font-size:20px; }
+  .mobile-stock-profile__price { display:flex; align-items:baseline; gap:10px; margin:16px 0 8px; }
+  .mobile-stock-profile__price strong { color:#fff; font:700 32px/1 var(--font-mono); }
+  .mobile-stock-profile__price span { font:700 13px/1 var(--font-mono); }
+  .mobile-stock-chart { position:relative; min-height:145px; margin:8px -4px 12px; }
+  .mobile-stock-chart svg { width:100%; height:116px; filter:drop-shadow(0 5px 8px rgba(245,185,66,.16)); }
+  .mobile-stock-chart__state { position:absolute; inset:42px 0 auto; color:#817b6d; font-size:12px; text-align:center; }
+  .mobile-stock-chart__range { display:flex; justify-content:space-between; color:#817b6d; font:500 10px/1 var(--font-mono); }
+  .mobile-stock-profile__facts { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+  .mobile-stock-profile__facts div { min-width:0; padding:10px 8px; border:1px solid rgba(255,255,255,.06); border-radius:10px; background:rgba(255,255,255,.025); }
+  .mobile-stock-profile__facts span,.mobile-stock-profile__facts strong { display:block; overflow:hidden; text-overflow:ellipsis; }
+  .mobile-stock-profile__facts span { color:#817b6d; font-size:9px; text-transform:uppercase; }
+  .mobile-stock-profile__facts strong { margin-top:5px; color:#f2ede2; font:600 11px/1.2 var(--font-mono); }
+  .mobile-stock-tabs { display:flex; gap:7px; margin-top:13px; overflow-x:auto; scrollbar-width:none; }
+  .mobile-stock-tabs a { flex:0 0 auto; padding:9px 12px; border-radius:999px; background:#1a1710; color:#d5c79e; font-size:11px; font-weight:700; text-decoration:none; }
+  .detail-header { display:none; }
+  .detail-wrap { scroll-behavior:smooth; }
 }

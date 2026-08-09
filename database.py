@@ -359,6 +359,21 @@ def init_db():
         )
     """))
 
+    # User-defined price thresholds. These are intentionally separate from
+    # scanner_alerts, which represent system-generated setup signals.
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS price_alerts (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            ticker       TEXT    NOT NULL,
+            direction    TEXT    NOT NULL,
+            target_price REAL    NOT NULL,
+            enabled      INTEGER NOT NULL DEFAULT 1,
+            created_at   TEXT    NOT NULL,
+            UNIQUE(user_id, ticker, direction, target_price)
+        )
+    """))
+
     # Stock data: stores enriched data for each ticker (refreshed on demand)
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS stock_data (
@@ -566,6 +581,43 @@ def init_db():
             result         TEXT,
             notes          TEXT,
             created_at     TEXT
+        )
+    """))
+
+    # Paper trading is deliberately isolated from live broker holdings.  Cash,
+    # positions and fills are scoped to the signed-in user.
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS paper_accounts (
+            user_id       INTEGER PRIMARY KEY,
+            starting_cash REAL NOT NULL DEFAULT 100000,
+            cash_balance  REAL NOT NULL DEFAULT 100000,
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL
+        )
+    """))
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS paper_positions (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            ticker     TEXT NOT NULL,
+            quantity   INTEGER NOT NULL,
+            avg_price  REAL NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, ticker)
+        )
+    """))
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS paper_orders (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL,
+            ticker      TEXT NOT NULL,
+            side        TEXT NOT NULL,
+            quantity    INTEGER NOT NULL,
+            fill_price  REAL NOT NULL,
+            gross_value REAL NOT NULL,
+            realized_pnl REAL NOT NULL DEFAULT 0,
+            status      TEXT NOT NULL DEFAULT 'FILLED',
+            created_at  TEXT NOT NULL
         )
     """))
 
@@ -2370,6 +2422,58 @@ def clear_scanner_alerts() -> None:
     conn.close()
 
 
+# ── User price alerts ────────────────────────────────────────────────────────
+
+def create_price_alert(user_id: int, ticker: str, direction: str,
+                       target_price: float) -> int:
+    """Create a user-owned threshold alert and return its id."""
+    now = _et_now().strftime("%Y-%m-%d %I:%M %p")
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO price_alerts "
+        "(user_id, ticker, direction, target_price, enabled, created_at) "
+        "VALUES (?, ?, ?, ?, 1, ?)",
+        (user_id, ticker.upper().strip(), direction, target_price, now),
+        returning_id=True,
+    )
+    new_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id or 0
+
+
+def get_price_alerts(user_id: int) -> list:
+    """Return only alerts owned by the signed-in user."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, ticker, direction, target_price, enabled, created_at "
+        "FROM price_alerts WHERE user_id = ? ORDER BY enabled DESC, id DESC",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def set_price_alert_enabled(alert_id: int, user_id: int, enabled: bool) -> None:
+    conn = get_db()
+    conn.execute(
+        "UPDATE price_alerts SET enabled = ? WHERE id = ? AND user_id = ?",
+        (1 if enabled else 0, alert_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_price_alert(alert_id: int, user_id: int) -> None:
+    conn = get_db()
+    conn.execute(
+        "DELETE FROM price_alerts WHERE id = ? AND user_id = ?",
+        (alert_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 # ── Setup outcome tracking (adaptive AI learning) ─────────────────────────────
 
 def save_setup_outcome(
@@ -2863,3 +2967,103 @@ def save_finnhub_financials_cache(ticker: str, data: list) -> None:
     )
     conn.commit()
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Paper trading
+# ---------------------------------------------------------------------------
+
+def get_paper_account(user_id: int) -> dict:
+    """Return (and lazily create) a user's isolated paper account."""
+    now = _et_now().isoformat()
+    conn = get_db()
+    conn.execute(
+        "INSERT OR IGNORE INTO paper_accounts "
+        "(user_id, starting_cash, cash_balance, created_at, updated_at) "
+        "VALUES (?, 100000, 100000, ?, ?)", (user_id, now, now),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM paper_accounts WHERE user_id = ?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def get_paper_positions(user_id: int) -> list:
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM paper_positions WHERE user_id = ? ORDER BY ticker", (user_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_paper_orders(user_id: int, limit: int = 50) -> list:
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM paper_orders WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+        (user_id, max(1, min(int(limit), 200))),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def execute_paper_order(user_id: int, ticker: str, side: str, quantity: int,
+                        fill_price: float) -> dict:
+    """Atomically fill a long-only market paper order at the supplied quote."""
+    ticker, side = ticker.upper(), side.upper()
+    if side not in ("BUY", "SELL") or quantity < 1 or fill_price <= 0:
+        raise ValueError("Invalid paper order")
+    get_paper_account(user_id)
+    now, gross = _et_now().isoformat(), round(quantity * fill_price, 2)
+    conn = get_db()
+    account = conn.execute(
+        "SELECT * FROM paper_accounts WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    position = conn.execute(
+        "SELECT * FROM paper_positions WHERE user_id = ? AND ticker = ?",
+        (user_id, ticker),
+    ).fetchone()
+    realized = 0.0
+    if side == "BUY":
+        if float(account["cash_balance"]) + 1e-8 < gross:
+            conn.close()
+            raise ValueError("Not enough paper buying power")
+        old_qty = int(position["quantity"]) if position else 0
+        old_avg = float(position["avg_price"]) if position else 0.0
+        new_qty = old_qty + quantity
+        new_avg = ((old_qty * old_avg) + gross) / new_qty
+        if position:
+            conn.execute(
+                "UPDATE paper_positions SET quantity=?, avg_price=?, updated_at=? WHERE id=?",
+                (new_qty, new_avg, now, position["id"]),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO paper_positions (user_id,ticker,quantity,avg_price,updated_at) VALUES (?,?,?,?,?)",
+                (user_id, ticker, new_qty, new_avg, now),
+            )
+        new_cash = float(account["cash_balance"]) - gross
+    else:
+        held = int(position["quantity"]) if position else 0
+        if held < quantity:
+            conn.close()
+            raise ValueError(f"Only {held} paper shares available to sell")
+        realized = round((fill_price - float(position["avg_price"])) * quantity, 2)
+        remaining = held - quantity
+        if remaining:
+            conn.execute("UPDATE paper_positions SET quantity=?, updated_at=? WHERE id=?",
+                         (remaining, now, position["id"]))
+        else:
+            conn.execute("DELETE FROM paper_positions WHERE id=?", (position["id"],))
+        new_cash = float(account["cash_balance"]) + gross
+    conn.execute("UPDATE paper_accounts SET cash_balance=?, updated_at=? WHERE user_id=?",
+                 (new_cash, now, user_id))
+    conn.execute(
+        "INSERT INTO paper_orders (user_id,ticker,side,quantity,fill_price,gross_value,realized_pnl,status,created_at) "
+        "VALUES (?,?,?,?,?,?,?,'FILLED',?)",
+        (user_id, ticker, side, quantity, fill_price, gross, realized, now),
+    )
+    conn.commit()
+    conn.close()
+    return {"ticker": ticker, "side": side, "quantity": quantity,
+            "fill_price": fill_price, "gross_value": gross, "realized_pnl": realized}

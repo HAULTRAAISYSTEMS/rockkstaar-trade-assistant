@@ -6,13 +6,18 @@
   <meta name="theme-color" content="#060708" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>{% block title %}HAULTRA AI — Trade Terminal{% endblock %}</title>
+  <meta name="application-name" content="Tradestaar Elite" />
+  <meta name="apple-mobile-web-app-title" content="Tradestaar Elite" />
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}" />
+  <link rel="icon" href="{{ url_for('static', filename='logo.png') }}" />
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon-192.png') }}" />
+  <title>{% block title %}Tradestaar Elite — Trade Terminal{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <!-- HAULTRA AI Systems — Rajdhani (display) · IBM Plex Sans (UI) · IBM Plex Mono (data) -->
+  <!-- Tradestaar Elite typography: Rajdhani display, IBM Plex Sans UI, IBM Plex Mono data -->
   <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
-  <!-- HAULTRA design-system component layer (scoped under .hx / hx-*) -->
+  <!-- Tradestaar component layer (scoped under .hx / hx-*) -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/haultra.css') }}" />
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
@@ -28,15 +33,15 @@
     <!-- LEFT: Brand — Terminal is home -->
     <a href="{{ url_for('terminal') }}" class="nav-brand">
       <img src="{{ url_for('static', filename='logo.png') }}"
-           alt="HAULTRA AI"
+           alt="Tradestaar Elite"
            class="nav-logo"
            onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
       <span class="brand-fallback" style="display:none;">
         <span class="brand-icon">▲</span>
-        <span class="brand-text">HAULTRA</span>
+        <span class="brand-text">TRADESTAAR</span>
       </span>
       <span class="brand-divider"></span>
-      <span class="brand-sub">AI&nbsp;SYSTEMS</span>
+      <span class="brand-sub">ELITE</span>
     </a>
 
     <!-- CENTER: Navigation Links — Terminal · Setups · Fundamentals · Intel · Account · Schwab -->
@@ -57,12 +62,12 @@
         FUNDAMENTALS
       </a>
       <a href="{{ url_for('intel') }}"
-         class="nav-link nav-link-research {% if request.endpoint == 'intel' %}nav-link-active{% endif %}"
-         title="Intel — macro, sector, institutional, valuations">
-        INTEL
+         class="nav-link nav-link-research {% if request.endpoint in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'liquidity_page') %}nav-link-active{% endif %}"
+         title="Market News &amp; Smart Money — catalysts, earnings, macro, sector flow">
+        MARKET INTEL
       </a>
       <a href="{{ url_for('account') }}"
-         class="nav-link nav-link-account {% if request.endpoint in ('account', 'journal', 'risk_settings') %}nav-link-active{% endif %}"
+         class="nav-link nav-link-account {% if request.endpoint in ('account', 'journal', 'risk_settings', 'paper_trading', 'tradestaar_ai') %}nav-link-active{% endif %}"
          title="Account &amp; Performance — Schwab, P&amp;L, journal, discipline">
         ACCOUNT
       </a>
@@ -118,14 +123,6 @@
 
   </nav>
 
-  <!-- Mobile refresh bar (shown on very small screens) -->
-  <div class="mobile-refresh-bar">
-    <form action="{{ url_for('refresh_all') }}" method="POST" style="margin:0;">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="mobile-refresh-btn">↺ Refresh All</button>
-    </form>
-  </div>
-
   <!-- ===== FLASH MESSAGES ===== -->
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -142,21 +139,34 @@
     {% block content %}{% endblock %}
   </main>
 
-  <!-- ===== MOBILE STICKY CONTROL BAR ===== -->
-  <div class="mobile-ctrl-bar" id="mobile-ctrl-bar">
-    <a href="{{ url_for('journal') }}"       class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'journal' %}mcb-on{% endif %}" title="Journal">📓</a>
-    <a href="{{ url_for('risk_settings') }}" class="mobile-ctrl-btn mobile-ctrl-nav {% if request.endpoint == 'risk_settings' %}mcb-on{% endif %}" title="Risk Settings">⚖</a>
-    <button id="mobile-ar-toggle"    class="mobile-ctrl-btn mobile-ctrl-ar mcb-on"    onclick="toggleAutoRefresh()">↺ Auto</button>
-    <button id="mobile-sound-toggle" class="mobile-ctrl-btn mobile-ctrl-sound mcb-on" onclick="toggleAlertSound()">🔔</button>
-    <form action="{{ url_for('refresh_all') }}" method="POST" style="display:contents;">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="mobile-ctrl-btn mobile-ctrl-refresh">↺ Now</button>
-    </form>
-    <span id="mobile-last-updated" class="mobile-ctrl-time"></span>
-  </div>
+  <!-- ===== MOBILE APP NAVIGATION ===== -->
+  <nav class="mobile-app-nav" aria-label="Primary mobile navigation">
+    <a href="{{ url_for('terminal') }}" class="mobile-app-nav__item {% if request.endpoint == 'terminal' %}is-active{% endif %}" {% if request.endpoint == 'terminal' %}aria-current="page"{% endif %}>
+      <span class="mobile-app-nav__icon" aria-hidden="true">⌂</span><span>Home</span>
+    </a>
+    <a href="{{ url_for('intel') }}" class="mobile-app-nav__item {% if request.endpoint in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'liquidity_page') %}is-active{% endif %}" {% if request.endpoint in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'liquidity_page') %}aria-current="page"{% endif %}>
+      <span class="mobile-app-nav__icon" aria-hidden="true">▥</span><span>Markets</span>
+    </a>
+    <a href="{{ url_for('watchlists_page') }}" class="mobile-app-nav__item {% if request.endpoint == 'watchlists_page' %}is-active{% endif %}" {% if request.endpoint == 'watchlists_page' %}aria-current="page"{% endif %}>
+      <span class="mobile-app-nav__icon" aria-hidden="true">★</span><span>Watchlist</span>
+    </a>
+    <a href="{{ url_for('research_page') }}" class="mobile-app-nav__item {% if request.endpoint in ('research_page', 'stock_detail', 'fundamentals_page', 'stock_compare') %}is-active{% endif %}" {% if request.endpoint in ('research_page', 'stock_detail', 'fundamentals_page', 'stock_compare') %}aria-current="page"{% endif %}>
+      <span class="mobile-app-nav__icon" aria-hidden="true">⌕</span><span>Search</span>
+    </a>
+    <a href="{{ url_for('account') }}" class="mobile-app-nav__item {% if request.endpoint in ('account', 'journal', 'risk_settings', 'schwab_account', 'paper_trading', 'tradestaar_ai') %}is-active{% endif %}" {% if request.endpoint in ('account', 'journal', 'risk_settings', 'schwab_account', 'paper_trading', 'tradestaar_ai') %}aria-current="page"{% endif %}>
+      <span class="mobile-app-nav__icon" aria-hidden="true">●</span><span>Account</span>
+    </a>
+  </nav>
 
   <script src="{{ url_for('static', filename='js/ws_manager.js') }}"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/service-worker.js').catch(function () {});
+      });
+    }
+  </script>
 
   <script>
     // Update nav live indicator based on market session
@@ -220,7 +230,7 @@
   transition: box-shadow 0.2s, bottom 0.2s;
 " onmouseover="this.style.boxShadow='0 6px 28px rgba(255,122,24,0.7)';this.style.bottom='28px'"
    onmouseout="this.style.boxShadow='0 4px 20px rgba(255,122,24,0.4)';this.style.bottom='24px'">
-  🔍 Ask HAULTRA AI
+  🔍 Ask Tradestaar AI
 </button>
 
 <!-- ===== ASK AI MODAL ===== -->
@@ -239,7 +249,7 @@
   z-index:10000; display:none; flex-direction:column; gap:16px;">
 
   <div style="display:flex;align-items:center;justify-content:space-between;">
-    <span style="color:var(--orange-500,#FF7A18);font-family:var(--font-display,system-ui);font-size:17px;font-weight:700;letter-spacing:0.10em;text-transform:uppercase;">🔍 Ask HAULTRA AI</span>
+    <span style="color:var(--orange-500,#FF7A18);font-family:var(--font-display,system-ui);font-size:17px;font-weight:700;letter-spacing:0.10em;text-transform:uppercase;">🔍 Ask Tradestaar AI</span>
     <button onclick="closeAsk()" style="
       background:none;border:none;color:var(--ink-300,#7B8794);cursor:pointer;
       font-size:22px;line-height:1;padding:2px 6px;" title="Close (Esc)">&times;</button>

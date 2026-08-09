@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ stock.ticker }} — Rockkstaar Trade Assistant{% endblock %}
+{% block title %}{{ stock.ticker }} — Tradestaar Elite{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -13,6 +13,39 @@
 {% block content %}
 
 <div class="detail-wrap">
+
+  <section class="mobile-stock-profile" aria-label="{{ stock.ticker }} stock overview">
+    <div class="mobile-stock-profile__top">
+      <div>
+        <span class="mobile-stock-profile__eyebrow">Stock profile</span>
+        <h1>{{ stock.ticker }}</h1>
+      </div>
+      <form action="{{ url_for('refresh_single', ticker=stock.ticker) }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="mobile-stock-profile__refresh" type="submit" aria-label="Refresh {{ stock.ticker }}">↻</button>
+      </form>
+    </div>
+    <div class="mobile-stock-profile__price">
+      <strong>${{ "%.2f"|format(stock.current_price) if stock.current_price is not none else "—" }}</strong>
+      <span class="{{ stock.gap_class }}">{{ stock.gap_display }}</span>
+    </div>
+    <div class="mobile-stock-chart" id="mobile-stock-chart" data-ticker="{{ stock.ticker }}">
+      <div class="mobile-stock-chart__state">Loading 3-month chart…</div>
+      <svg viewBox="0 0 320 116" preserveAspectRatio="none" role="img" aria-label="{{ stock.ticker }} three-month price chart"></svg>
+      <div class="mobile-stock-chart__range"><span id="chart-low">3M low —</span><span id="chart-high">3M high —</span></div>
+    </div>
+    <div class="mobile-stock-profile__facts">
+      <div><span>Previous close</span><strong>${{ "%.2f"|format(stock.prev_close) if stock.prev_close is not none else "—" }}</strong></div>
+      <div><span>Relative volume</span><strong>{{ "%.1f"|format(stock.rel_volume) if stock.rel_volume is not none else "—" }}x</strong></div>
+      <div><span>Earnings</span><strong>{{ stock.earnings_date or "—" }}</strong></div>
+    </div>
+    <nav class="mobile-stock-tabs" aria-label="Stock profile sections">
+      <a href="#company-overview-card">Overview</a>
+      <a href="#profile-analysis">Analysis</a>
+      <a href="#profile-news">News</a>
+      <a href="{{ url_for('fundamentals_page', ticker=stock.ticker) }}">Fundamentals</a>
+    </nav>
+  </section>
 
   <!-- ===== HEADER ===== -->
   <div class="detail-header">
@@ -182,6 +215,7 @@
   {% endif %}
 
   <!-- ===== TRADE COACH ===== -->
+  <span id="profile-analysis" class="profile-anchor" aria-hidden="true"></span>
   <div id="detail-coach-card" class="detail-card coach-card {{ coach.css }}">
     <h3 class="card-title">
       AI Trade Coach
@@ -874,6 +908,7 @@
   </div>
 
   <!-- ===== CATALYST + NEWS ===== -->
+  <span id="profile-news" class="profile-anchor" aria-hidden="true"></span>
   <div class="detail-row">
     <div class="detail-col">
       <div class="detail-card">
@@ -2172,6 +2207,30 @@ console.log('[detail] Auto-refresh armed for', DETAIL_TICKER,
       card.style.display = "block";
     })
     .catch(() => { /* silent — overview is a nice-to-have */ });
+})();
+
+// Mobile stock profile chart — fetched lazily so the main analysis remains fast.
+(function() {
+  const root = document.getElementById('mobile-stock-chart');
+  if (!root) return;
+  const svg = root.querySelector('svg');
+  const state = root.querySelector('.mobile-stock-chart__state');
+  fetch(`/api/stock/${encodeURIComponent(root.dataset.ticker)}/chart`)
+    .then(r => r.json())
+    .then(data => {
+      const points = data && data.ok ? data.points : [];
+      if (points.length < 2) throw new Error('No chart data');
+      const values = points.map(p => Number(p.c));
+      const low = Math.min(...values), high = Math.max(...values);
+      const spread = high - low || 1;
+      const coords = values.map((v, i) => `${(i/(values.length-1)*320).toFixed(1)},${(108-(v-low)/spread*96).toFixed(1)}`).join(' ');
+      const rising = values[values.length - 1] >= values[0];
+      svg.innerHTML = `<polyline points="${coords}" fill="none" stroke="${rising ? '#f5b942' : '#ff5a67'}" stroke-width="3" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>`;
+      document.getElementById('chart-low').textContent = `3M low $${low.toFixed(2)}`;
+      document.getElementById('chart-high').textContent = `3M high $${high.toFixed(2)}`;
+      state.hidden = true;
+    })
+    .catch(() => { state.textContent = 'Chart temporarily unavailable'; });
 })();
 </script>
 {% endblock %}

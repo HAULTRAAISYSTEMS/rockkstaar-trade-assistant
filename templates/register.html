@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#060708" />
-  <title>Create Account — HAULTRA AI</title>
+  <title>Create Account — Tradestaar Elite</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -83,6 +83,13 @@
       letter-spacing: 0.25em;
       color: var(--dim);
       text-transform: uppercase;
+    }
+    .login-brand-logo {
+      width: 112px;
+      height: 112px;
+      object-fit: contain;
+      border-radius: 22px;
+      filter: drop-shadow(0 10px 28px rgba(255, 178, 76, 0.22));
     }
     .login-brand-name {
       font-family: var(--mono);
@@ -256,9 +263,10 @@
 <div class="login-wrap">
 
   <div class="login-brand">
-    <span class="login-brand-line">▲ HAULTRA AI SYSTEMS</span>
-    <span class="login-brand-name">ROCKKSTAAR</span>
-    <span class="login-brand-sub">Trade Assistant · New Account</span>
+    <img src="{{ url_for('static', filename='logo.png') }}" alt="Tradestaar Elite" class="login-brand-logo">
+    <span class="login-brand-line">TRADESTAAR ELITE</span>
+    <span class="login-brand-name">TRADESTAAR</span>
+    <span class="login-brand-sub">Elite Market Intelligence · New Account</span>
   </div>
 
   <div class="login-card">

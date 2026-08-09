@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Stock Comparison — Tradestaar Elite{% endblock %}
+{% block head_extra %}
+<style>
+  .compare-shell{max-width:1180px;margin:0 auto;padding:24px 18px 110px}.compare-kicker{color:var(--amber);font:700 11px var(--mono);letter-spacing:.14em}.compare-title{font:700 clamp(26px,5vw,42px) var(--font);margin:5px 0}.compare-sub{color:var(--muted);max-width:720px;line-height:1.5}.compare-form{display:flex;gap:10px;margin:22px 0}.compare-form input{min-width:0;flex:1;background:#101215;border:1px solid #30343a;border-radius:10px;padding:14px;color:#fff;font:600 15px var(--mono);text-transform:uppercase}.compare-form button{border:0;border-radius:10px;padding:0 20px;background:var(--amber);color:#080909;font-weight:800}.compare-note{font-size:11px;color:var(--dim);margin-top:-14px}.compare-grid{display:grid;grid-template-columns:repeat(var(--cols,2),minmax(0,1fr));gap:12px;margin-top:24px}.compare-card{background:#0d0f11;border:1px solid #25292e;border-radius:16px;overflow:hidden}.compare-head{padding:18px;border-bottom:1px solid #25292e}.compare-symbol{font:800 24px var(--font);color:var(--amber)}.compare-company{font-size:13px;color:#fff;margin-top:2px}.compare-meta{font-size:11px;color:var(--dim);margin-top:5px}.compare-score{display:flex;align-items:center;justify-content:space-between;margin-top:16px}.compare-score strong{font:800 28px var(--mono)}.compare-chart{height:125px;padding:12px}.compare-chart svg{width:100%;height:100%;overflow:visible}.compare-chart-state{height:100%;display:grid;place-items:center;color:var(--dim);font-size:11px}.compare-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 18px;border-top:1px solid #1d2024}.compare-row span:first-child{color:var(--muted);font-size:12px}.compare-row strong{text-align:right;font:600 12px var(--mono)}.compare-section{padding:14px 18px 8px;color:var(--amber);font:700 10px var(--mono);letter-spacing:.12em}.compare-empty{margin-top:28px;padding:40px 18px;text-align:center;border:1px dashed #343940;border-radius:16px;color:var(--muted)}.compare-alert{margin-top:12px;padding:12px;border:1px solid #633;border-radius:10px;color:#ff9d9d;font-size:12px}.positive{color:#41d68a}.negative{color:#ff6b6b}.unavailable{color:var(--dim)!important;font-weight:400!important}.compare-ai{margin:12px 18px 18px;padding:12px;background:rgba(212,168,67,.07);border:1px solid rgba(212,168,67,.22);border-radius:10px;font-size:12px;line-height:1.5;color:#d9d9d9}
+  @media(max-width:760px){.compare-shell{padding:18px 12px 105px}.compare-grid{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;margin-left:-12px;margin-right:-12px;padding:0 12px 8px}.compare-card{min-width:82vw;scroll-snap-align:start}.compare-form button{padding:0 14px}.compare-note{line-height:1.5}}
+</style>
+{% endblock %}
+{% block content %}
+<main class="compare-shell">
+  <div class="compare-kicker">RESEARCH LAB</div>
+  <h1 class="compare-title">Compare Stocks</h1>
+  <p class="compare-sub">Put up to three companies side by side. Scores come from Tradestaar's fundamental quality model; charts compare percentage performance, not share prices.</p>
+  <form class="compare-form" method="get" action="{{ url_for('stock_compare') }}">
+    <input name="symbols" value="{{ symbols|join(', ') }}" placeholder="AAPL, MSFT, NVDA" maxlength="32" aria-label="Stock symbols separated by commas">
+    <button type="submit">Compare</button>
+  </form>
+  <div class="compare-note">Enter 2–3 ticker symbols separated by commas. Data availability varies by filing source.</div>
+  {% for error in errors %}<div class="compare-alert">{{ error }}</div>{% endfor %}
+  {% if comparisons %}
+  <section class="compare-grid" style="--cols:{{ comparisons|length }}">
+    {% for stock in comparisons %}
+    <article class="compare-card" data-chart-url="{{ url_for('stock_chart', ticker=stock.ticker) }}">
+      <div class="compare-head">
+        <div class="compare-symbol">{{ stock.ticker }}</div><div class="compare-company">{{ stock.company_name }}</div>
+        <div class="compare-meta">{{ stock.sector or 'Sector unavailable' }}{% if stock.industry %} · {{ stock.industry }}{% endif %}</div>
+        <div class="compare-score"><div><strong>{{ stock.score if stock.score is not none else '—' }}</strong><small>/100</small></div><span class="verdict-badge {{ stock.verdict_class }}">{{ stock.verdict or 'Unrated' }}</span></div>
+      </div>
+      <div class="compare-chart"><div class="compare-chart-state">Loading 3-month performance…</div></div>
+      <div class="compare-section">MARKET SNAPSHOT</div>
+      <div class="compare-row"><span>Latest cached price</span><strong>{% if stock.price is not none %}${{ '%.2f'|format(stock.price) }}{% else %}<em class="unavailable">Unavailable</em>{% endif %}</strong></div>
+      <div class="compare-row"><span>Daily move</span><strong class="{{ 'positive' if stock.change_pct and stock.change_pct > 0 else 'negative' if stock.change_pct and stock.change_pct < 0 }}">{% if stock.change_pct is not none %}{{ '%+.2f'|format(stock.change_pct) }}%{% else %}<em class="unavailable">Unavailable</em>{% endif %}</strong></div>
+      <div class="compare-section">QUALITY &amp; OWNERSHIP</div>
+      <div class="compare-row"><span>ROE</span><strong>{% if stock.roe is not none %}{{ '%.1f'|format(stock.roe) }}%{% else %}<em class="unavailable">Unavailable</em>{% endif %}</strong></div>
+      <div class="compare-row"><span>ROIC</span><strong>{% if stock.roic is not none %}{{ '%.1f'|format(stock.roic) }}%{% else %}<em class="unavailable">Unavailable</em>{% endif %}</strong></div>
+      <div class="compare-row"><span>Insider ownership</span><strong>{% if stock.insider_pct is not none %}{{ '%.1f'|format(stock.insider_pct) }}%{% else %}<em class="unavailable">Unavailable</em>{% endif %}</strong></div>
+      <div class="compare-row"><span>Red flags</span><strong>{{ stock.red_flags|length }}</strong></div>
+      <div class="compare-section">ANALYST ACTIVITY</div>
+      <div class="compare-row"><span>Consensus &amp; target</span><strong><em class="unavailable">Verified feed not connected</em></strong></div>
+      <div class="compare-ai"><strong>Tradestaar read:</strong> {{ stock.company_name }} scores {{ stock.earned if stock.earned is not none else '—' }}/{{ stock.possible if stock.possible is not none else '—' }} available points{% if stock.red_flags %}, with {{ stock.red_flags|length }} flagged area{{ '' if stock.red_flags|length == 1 else 's' }} requiring review{% else %}, with no model red flags in the available data{% endif %}. This is research context, not investment advice.</div>
+    </article>
+    {% endfor %}
+  </section>
+  {% else %}<div class="compare-empty">Enter two or three symbols to start a side-by-side comparison.</div>{% endif %}
+</main>
+<script>
+document.querySelectorAll('.compare-card').forEach(async card => {
+  const box=card.querySelector('.compare-chart');
+  try{const res=await fetch(card.dataset.chartUrl);if(!res.ok)throw new Error();const payload=await res.json(),bars=payload.points;if(!Array.isArray(bars)||bars.length<2)throw new Error();const vals=bars.map(x=>Number(x.c)).filter(Number.isFinite);if(vals.length<2)throw new Error();const base=vals[0], p=vals.map(v=>(v/base-1)*100), lo=Math.min(...p), hi=Math.max(...p), span=hi-lo||1;const pts=p.map((v,i)=>`${i/(p.length-1)*100},${95-(v-lo)/span*85}`).join(' ');const gain=p[p.length-1]>=0;box.innerHTML=`<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="3 month relative performance"><polyline points="${pts}" fill="none" stroke="${gain?'#41d68a':'#ff6b6b'}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="${gain?'positive':'negative'}" style="font:700 11px var(--mono);margin-top:-8px">${p[p.length-1]>=0?'+':''}${p[p.length-1].toFixed(1)}% · 3M</div>`}catch(e){box.innerHTML='<div class="compare-chart-state">3-month chart unavailable</div>'}
+});
+</script>
+{% endblock %}
