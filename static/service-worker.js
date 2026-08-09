@@ -1,8 +1,10 @@
-const CACHE_NAME = 'tradestaar-shell-v3';
+const CACHE_NAME = 'tradestaar-shell-v5';
 const SHELL_ASSETS = [
   '/static/logo.png',
   '/static/icon-192.png',
   '/static/icon-512.png',
+  '/static/apple-touch-icon.png',
+  '/static/favicon-32.png',
   '/static/css/style.css',
   '/static/css/haultra.css',
   '/static/css/quick_mode.css',

@@ -202,7 +202,7 @@ def _handle_all_errors(e):
 
 @app.route("/favicon.ico")
 def favicon():
-    return send_from_directory(app.static_folder or "static", "logo.png", mimetype="image/png")
+    return send_from_directory(app.static_folder or "static", "favicon-32.png", mimetype="image/png")
 
 
 @app.route("/service-worker.js")
