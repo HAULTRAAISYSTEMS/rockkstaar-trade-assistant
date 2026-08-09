@@ -643,6 +643,7 @@ function twType(btn){
   btn.parentElement.querySelectorAll('.tw-type-btn').forEach(function(b){ b.classList.remove('active'); });
   btn.classList.add('active');
   twChartState.type = btn.dataset.type;
+  try { localStorage.setItem('tradestaar.chartType', twChartState.type); } catch(e) {}
   twApplyType();
 }
 function twApplyType(){
@@ -687,7 +688,12 @@ function twPreview(){
 }
 
 /* ═══ Price chart ═══ */
-var twChartState = { chart:null, area:null, candle:null, vol:null, ticker:null, tf:'1D', type:'area', reqId:0, lastPrice:null };
+var twSavedChartType = 'area';
+try {
+  var twStoredType = localStorage.getItem('tradestaar.chartType');
+  if (twStoredType === 'candles' || twStoredType === 'area') twSavedChartType = twStoredType;
+} catch(e) {}
+var twChartState = { chart:null, area:null, candle:null, vol:null, ticker:null, tf:'1D', type:twSavedChartType, reqId:0, lastPrice:null };
 
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
 function twChartHideMsg(){ var box=document.getElementById('tw-chart-empty'); if(box) box.classList.add('hidden'); }
@@ -771,6 +777,10 @@ function twLoadChart(ticker, tf){
 /* Boot */
 (function twBoot(){
   twInitChart();
+  document.querySelectorAll('.tw-type-btn').forEach(function(btn){
+    btn.classList.toggle('active', btn.dataset.type === twChartState.type);
+  });
+  twApplyType();
   var first=document.querySelector('.tw-wl-row.active')||document.querySelector('.tw-wl-row');
   if(first && first.dataset.ticker){ twLoadChart(first.dataset.ticker,'1D'); }
   else if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load.'); }
