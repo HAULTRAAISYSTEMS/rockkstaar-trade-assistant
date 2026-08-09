@@ -39,7 +39,7 @@ OAUTH FLOW
     → redirect to /schwab/account
 
   Tokens:
-    access_token  — expires in 30 minutes (auto-refreshed on 401)
+    access_token  — expires in 30 minutes (auto-refreshed before expiry / on 401)
     refresh_token — expires in 7 days (user must re-auth after expiry)
 """
 
@@ -49,6 +49,7 @@ import json
 import logging
 import os
 import secrets
+import threading
 import time
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
@@ -62,9 +63,14 @@ _TOKEN_URL    = f"{_BASE_AUTH}/token"
 _AUTH_URL     = f"{_BASE_AUTH}/authorize"
 
 # Access token TTL from Schwab is 1800 s (30 min).
-# Refresh 60 s early to avoid edge-case expiry mid-request.
-_ACCESS_TTL   = 1800
-_REFRESH_EARLY = 60
+# Refresh 2 minutes early so page/API requests do not race the token boundary.
+_ACCESS_TTL    = 1800
+_REFRESH_EARLY = 120
+
+# Prevent multiple simultaneous requests from refreshing the same token at once.
+# This matters in production where Home, Account, and background requests can hit
+# Schwab nearly simultaneously when an access token reaches its expiry window.
+_REFRESH_LOCK = threading.Lock()
 
 # Read-only scopes required for Phase 1
 _SCOPES = "readonly"
@@ -202,17 +208,67 @@ def refresh_access_token(refresh_token: str) -> dict:
 
 # ── Token storage (per-user, stored in user_settings table) ──────────────────
 
-def save_tokens(token_response: dict, user_id: int = 1) -> None:
-    """Persist Schwab tokens in user_settings for the given user."""
-    from database import set_user_setting
+def _safe_int(value, default: int = 0) -> int:
+    """Parse persisted numeric token metadata without letting bad data crash auth."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def save_tokens(token_response: dict, user_id: int = 1, *, is_refresh: bool = False) -> None:
+    """
+    Persist Schwab tokens for the given user.
+
+    Critical refresh behavior:
+    Schwab refresh responses are not guaranteed to return a refresh_token every
+    time. During a refresh we therefore preserve the currently stored refresh
+    token instead of replacing it with an empty string. We also preserve the
+    original refresh-token expiry unless Schwab explicitly returns a refresh
+    token expiry value.
+    """
+    from database import get_user_setting, set_user_setting
+
+    access_token = token_response.get("access_token")
+    if not access_token:
+        raise RuntimeError("Schwab token response did not include access_token")
+
     now = int(time.time())
-    expires_at = now + int(token_response.get("expires_in", _ACCESS_TTL))
-    set_user_setting(user_id, "schwab_access_token",  token_response["access_token"])
-    set_user_setting(user_id, "schwab_refresh_token", token_response.get("refresh_token", ""))
-    set_user_setting(user_id, "schwab_expires_at",    str(expires_at))
-    rt_expires = now + 7 * 86400
+    expires_at = now + _safe_int(token_response.get("expires_in"), _ACCESS_TTL)
+
+    old_refresh = get_user_setting(user_id, "schwab_refresh_token") or ""
+    old_rt_exp  = _safe_int(get_user_setting(user_id, "schwab_rt_expires_at"), 0)
+    new_refresh = token_response.get("refresh_token") or ""
+
+    # Initial authorization must establish a refresh token. Refresh operations
+    # keep the old one if Schwab only sends a replacement access token.
+    refresh_token = new_refresh or (old_refresh if is_refresh else "")
+
+    set_user_setting(user_id, "schwab_access_token", access_token)
+    set_user_setting(user_id, "schwab_refresh_token", refresh_token)
+    set_user_setting(user_id, "schwab_expires_at", str(expires_at))
+
+    explicit_rt_ttl = _safe_int(
+        token_response.get("refresh_token_expires_in")
+        or token_response.get("refresh_expires_in"),
+        0,
+    )
+    if explicit_rt_ttl > 0:
+        rt_expires = now + explicit_rt_ttl
+    elif is_refresh and old_rt_exp > 0:
+        # Do not accidentally extend Schwab's absolute refresh-token lifetime.
+        rt_expires = old_rt_exp
+    else:
+        rt_expires = now + 7 * 86400
+
     set_user_setting(user_id, "schwab_rt_expires_at", str(rt_expires))
-    logger.info("schwab  tokens saved  user_id=%s  expires_at=%s", user_id, expires_at)
+    logger.info(
+        "schwab tokens saved user_id=%s access_expires_at=%s refresh_expires_at=%s refresh_preserved=%s",
+        user_id,
+        expires_at,
+        rt_expires,
+        bool(is_refresh and not new_refresh and old_refresh),
+    )
 
 
 def clear_tokens(user_id: int = 1) -> None:
@@ -221,81 +277,126 @@ def clear_tokens(user_id: int = 1) -> None:
     for key in ("schwab_access_token", "schwab_refresh_token",
                 "schwab_expires_at",   "schwab_rt_expires_at"):
         set_user_setting(user_id, key, "")
-    logger.info("schwab  tokens cleared  user_id=%s", user_id)
+    logger.info("schwab tokens cleared user_id=%s", user_id)
+
+
+def _read_stored_tokens(user_id: int) -> dict:
+    """Read the current token snapshot from persistent storage."""
+    from database import get_user_setting
+    return {
+        "access_token":  get_user_setting(user_id, "schwab_access_token") or "",
+        "refresh_token": get_user_setting(user_id, "schwab_refresh_token") or "",
+        "expires_at":    _safe_int(get_user_setting(user_id, "schwab_expires_at"), 0),
+        "rt_expires_at": _safe_int(get_user_setting(user_id, "schwab_rt_expires_at"), 0),
+    }
 
 
 def load_tokens(user_id: int = 1) -> dict | None:
     """
-    Load tokens from user_settings, auto-refresh if access_token is expiring.
-    Returns dict with access_token, or None if not connected.
+    Load tokens from user_settings and proactively refresh an expiring access token.
+    Returns a usable token dict, or None when the Schwab session truly requires
+    re-authentication.
     """
-    from database import get_user_setting
-    access_token  = get_user_setting(user_id, "schwab_access_token")  or ""
-    refresh_token = get_user_setting(user_id, "schwab_refresh_token") or ""
-    expires_at    = get_user_setting(user_id, "schwab_expires_at")    or "0"
-    rt_expires_at = get_user_setting(user_id, "schwab_rt_expires_at") or "0"
+    stored = _read_stored_tokens(user_id)
+    access_token  = stored["access_token"]
+    refresh_token = stored["refresh_token"]
+    expires_at    = stored["expires_at"]
+    rt_expires_at = stored["rt_expires_at"]
 
     if not access_token and not refresh_token:
         return None
 
     now = int(time.time())
 
-    # Refresh token expired — user must re-authenticate
-    if refresh_token and int(rt_expires_at) < now:
-        logger.warning("schwab  refresh_token expired  user_id=%s — must re-auth", user_id)
+    # Refresh token expired — user must re-authenticate.
+    if refresh_token and rt_expires_at and rt_expires_at <= now:
+        logger.warning("schwab refresh_token expired user_id=%s — must re-auth", user_id)
         return None
 
-    # Access token expiring soon — refresh it now
-    if int(expires_at) - now < _REFRESH_EARLY and refresh_token:
-        try:
-            logger.info("schwab  refreshing access_token  user_id=%s", user_id)
-            new_tokens = refresh_access_token(refresh_token)
-            save_tokens(new_tokens, user_id=user_id)
-            return {
-                "access_token":  new_tokens["access_token"],
-                "refresh_token": new_tokens.get("refresh_token", refresh_token),
-                "expires_at":    int(time.time()) + int(new_tokens.get("expires_in", _ACCESS_TTL)),
-            }
-        except Exception as e:
-            logger.error("schwab  token refresh failed  user_id=%s: %s", user_id, e)
-            pass
+    # No usable access token and nothing that can refresh it.
+    if not access_token and not refresh_token:
+        return None
+
+    # Access token expiring soon — refresh it now. The lock stops simultaneous
+    # Home/Account/API requests from racing and invalidating one another.
+    if expires_at - now < _REFRESH_EARLY and refresh_token:
+        with _REFRESH_LOCK:
+            # Another request may already have refreshed while we waited.
+            stored = _read_stored_tokens(user_id)
+            access_token  = stored["access_token"]
+            refresh_token = stored["refresh_token"]
+            expires_at    = stored["expires_at"]
+            rt_expires_at = stored["rt_expires_at"]
+            now = int(time.time())
+
+            if refresh_token and rt_expires_at and rt_expires_at <= now:
+                return None
+
+            if expires_at - now < _REFRESH_EARLY and refresh_token:
+                try:
+                    logger.info("schwab refreshing access_token user_id=%s", user_id)
+                    new_tokens = refresh_access_token(refresh_token)
+                    save_tokens(new_tokens, user_id=user_id, is_refresh=True)
+                    refreshed = _read_stored_tokens(user_id)
+                    return {
+                        "access_token":  refreshed["access_token"],
+                        "refresh_token": refreshed["refresh_token"],
+                        "expires_at":    refreshed["expires_at"],
+                    }
+                except Exception as e:
+                    logger.error("schwab token refresh failed user_id=%s: %s", user_id, e)
+                    # If the existing access token still has time left, allow the
+                    # request to use it. If it is already expired, report auth as
+                    # unavailable rather than repeatedly sending a dead token.
+                    if access_token and expires_at > now:
+                        return {
+                            "access_token":  access_token,
+                            "refresh_token": refresh_token,
+                            "expires_at":    expires_at,
+                        }
+                    return None
+
+    if not access_token or expires_at <= now:
+        # An expired access token with no successful refresh is not usable.
+        return None
 
     return {
         "access_token":  access_token,
         "refresh_token": refresh_token,
-        "expires_at":    int(expires_at),
+        "expires_at":    expires_at,
     }
 
 
 def is_connected(user_id: int = 1) -> bool:
-    """Return True if the user has valid (or refreshable) Schwab tokens."""
+    """Return True if the user currently has a usable Schwab session."""
     return load_tokens(user_id) is not None
 
 
 def token_status(user_id: int = 1) -> dict:
     """
-    Return connection status without making API calls.
-    Used for the account page header display.
+    Return connection status from persisted token metadata without exposing
+    secrets. An expired access token is still considered connected while a valid
+    refresh token exists because the next authenticated request can refresh it.
     """
-    from database import get_user_setting
-    access_token  = get_user_setting(user_id, "schwab_access_token")  or ""
-    refresh_token = get_user_setting(user_id, "schwab_refresh_token") or ""
-    expires_at    = int(get_user_setting(user_id, "schwab_expires_at") or "0")
-    rt_expires_at = int(get_user_setting(user_id, "schwab_rt_expires_at") or "0")
+    stored = _read_stored_tokens(user_id)
+    access_token  = stored["access_token"]
+    refresh_token = stored["refresh_token"]
+    expires_at    = stored["expires_at"]
+    rt_expires_at = stored["rt_expires_at"]
     now           = int(time.time())
 
     if not access_token and not refresh_token:
         return {"connected": False, "status": "Not connected", "css": "schwab-disconnected"}
 
-    if refresh_token and rt_expires_at < now:
+    if refresh_token and rt_expires_at and rt_expires_at <= now:
         return {"connected": False, "status": "Session expired — re-authenticate", "css": "schwab-expired"}
 
     if expires_at > now:
-        mins = (expires_at - now) // 60
+        mins = max(0, (expires_at - now) // 60)
         return {"connected": True, "status": f"Connected (token valid ~{mins}m)", "css": "schwab-connected"}
 
     if refresh_token:
-        return {"connected": True, "status": "Connected (refreshing token)", "css": "schwab-connected"}
+        return {"connected": True, "status": "Connected (refresh ready)", "css": "schwab-connected"}
 
     return {"connected": False, "status": "Token expired", "css": "schwab-expired"}
 
@@ -306,7 +407,7 @@ def _get(path: str, params: dict = None, *, base: str = _BASE_TRADER,
          user_id: int = 1) -> dict | list:
     """
     Authenticated GET against Schwab API.
-    Handles token refresh on 401 automatically.
+    Handles proactive refresh and a one-shot refresh on 401 automatically.
     Read-only — this module never issues POST/PUT/DELETE.
     """
     import urllib.request
@@ -336,11 +437,16 @@ def _get(path: str, params: dict = None, *, base: str = _BASE_TRADER,
         return _do_request(tokens["access_token"])
     except urllib.error.HTTPError as e:
         if e.code == 401 and tokens.get("refresh_token"):
-            # Try a one-shot refresh then retry
+            # One-shot refresh and retry. Preserve the correct user's refresh
+            # token instead of writing the retry result into user_id=1.
             try:
-                new_tok = refresh_access_token(tokens["refresh_token"])
-                save_tokens(new_tok)
-                return _do_request(new_tok["access_token"])
+                with _REFRESH_LOCK:
+                    latest = _read_stored_tokens(user_id)
+                    refresh_token = latest.get("refresh_token") or tokens["refresh_token"]
+                    new_tok = refresh_access_token(refresh_token)
+                    save_tokens(new_tok, user_id=user_id, is_refresh=True)
+                    refreshed = _read_stored_tokens(user_id)
+                return _do_request(refreshed["access_token"])
             except Exception as refresh_err:
                 raise RuntimeError(f"Schwab auth failed after refresh: {refresh_err}") from refresh_err
         body = e.read().decode(errors="replace")
@@ -539,9 +645,9 @@ def get_account_summary(user_id: int = 1) -> dict:
     """
     try:
         accounts = fetch_accounts(user_id=user_id)
-        total_value   = sum(a["total_value"]      for a in accounts)
-        buying_power  = sum(a["buying_power"]     for a in accounts)
-        daily_pnl     = sum(a["daily_pnl"] or 0   for a in accounts)
+        total_value   = sum(a["total_value"]       for a in accounts)
+        buying_power  = sum(a["buying_power"]      for a in accounts)
+        daily_pnl     = sum(a["daily_pnl"] or 0    for a in accounts)
         unrealized    = sum(a["total_unrealized"]  for a in accounts)
         positions     = sum(a["position_count"]    for a in accounts)
         return {
@@ -555,7 +661,7 @@ def get_account_summary(user_id: int = 1) -> dict:
             "error":            None,
         }
     except Exception as e:
-        logger.warning("schwab  get_account_summary failed: %s", e)
+        logger.warning("schwab get_account_summary failed: %s", e)
         return {
             "connected":        False,
             "total_value":      None,
