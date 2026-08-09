@@ -531,7 +531,7 @@ def _wikipedia_description(name: str, max_chars: int = 320) -> Optional[str]:
         return None
     import urllib.request
     import urllib.parse
-    headers = {"User-Agent": "RockkstaarTradeAssistant/1.0 (contact: app)"}
+    headers = {"User-Agent": "TradestaarElite/1.0 (contact: app)"}
     try:
         search_url = (
             "https://en.wikipedia.org/w/api.php?action=opensearch&format=json"

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Fundamentals Analyzer — HAULTRA AI{% endblock %}
+{% block title %}Fundamentals Analyzer — Tradestaar Elite{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -637,6 +637,9 @@
          class="btn-refresh-link">↺ Force refresh</a>
       {% endif %}
     </form>
+    <div style="margin:-8px 0 18px;text-align:right;">
+      <a href="{{ url_for('stock_compare', symbols=ticker if ticker else '') }}" style="color:var(--amber);font:700 11px var(--mono);text-decoration:none;letter-spacing:.06em;">COMPARE STOCKS →</a>
+    </div>
 
     <!-- Error -->
     {% if error %}

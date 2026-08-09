@@ -1,140 +1,106 @@
 {% extends "hx_base.html" %}
-{% block title %}Intel — HAULTRA AI{% endblock %}
+{% block title %}Market Intel — Tradestaar Elite{% endblock %}
+
+{% block head_extra %}
+<style>
+  .hub-hero{display:flex;justify-content:space-between;gap:18px;align-items:flex-end;padding:22px;border:1px solid rgba(240,181,63,.28);border-radius:var(--r-lg);background:radial-gradient(circle at 85% 10%,rgba(240,181,63,.14),transparent 34%),#090a0c}
+  .hub-title{font-family:var(--font-display);font-size:clamp(28px,4vw,44px);line-height:.95;letter-spacing:.02em;color:#f6f1e7;text-transform:uppercase}
+  .hub-title em{display:block;color:#f0b53f;font-style:normal}
+  .hub-search{display:flex;gap:8px;min-width:min(100%,330px)}
+  .hub-search input{min-width:0;flex:1;background:#050607;color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:8px;padding:11px 13px;font-family:var(--font-mono);text-transform:uppercase}
+  .hub-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .hub-kpi{padding:14px 16px;background:#0b0d0f;border:1px solid var(--border-subtle);border-radius:10px}
+  .hub-kpi strong{display:block;margin-top:4px;color:#f6f1e7;font:700 22px var(--font-mono)}
+  .hub-tabs{display:flex;gap:8px;overflow:auto;padding-bottom:2px;scrollbar-width:none}
+  .hub-tab{border:1px solid var(--border-subtle);background:#0b0d0f;color:var(--text-muted);padding:8px 13px;border-radius:999px;white-space:nowrap;font:600 11px var(--font-display);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
+  .hub-tab.active{color:#080808;border-color:#f0b53f;background:#f0b53f}
+  .hub-layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(280px,.75fr);gap:16px;align-items:start}
+  .hub-news{display:grid;gap:0}
+  .hub-news-item{display:grid;grid-template-columns:76px 1fr auto;gap:12px;padding:14px 0;border-bottom:1px solid var(--border-subtle);align-items:start}
+  .hub-news-item:last-child{border-bottom:0}.hub-news-item[hidden]{display:none}
+  .hub-ticker{font:700 14px var(--font-mono);color:#f0b53f;text-decoration:none}
+  .hub-headline{color:var(--text-primary);font-size:14px;font-weight:600;line-height:1.42;text-decoration:none}.hub-headline:hover{color:#f0b53f}
+  .tone{font:600 9px var(--font-mono);padding:3px 6px;border-radius:4px}.tone-BULLISH{color:var(--pos-500);background:rgba(31,202,132,.1)}.tone-BEARISH{color:var(--neg-500);background:rgba(255,82,99,.1)}.tone-NEUTRAL{color:var(--text-muted);background:var(--ink-750)}
+  .trend-row,.earn-row{display:grid;grid-template-columns:62px 1fr auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-subtle)}
+  .trend-row:last-child,.earn-row:last-child{border-bottom:0}.trend-bar{height:4px;background:var(--ink-700);border-radius:8px;overflow:hidden}.trend-bar i{display:block;height:100%;background:linear-gradient(90deg,#a66b12,#f0b53f)}
+  .locked-feed{padding:16px;border:1px dashed rgba(240,181,63,.28);border-radius:9px;background:rgba(240,181,63,.035)}
+  @media(max-width:900px){.hub-hero{align-items:stretch;flex-direction:column}.hub-search{width:100%}.hub-kpis{grid-template-columns:repeat(2,1fr)}.hub-layout{grid-template-columns:1fr}}
+  @media(max-width:560px){.hub-kpis{grid-template-columns:1fr 1fr}.hub-kpi{padding:12px}.hub-news-item{grid-template-columns:54px 1fr}.hub-news-item>span:last-child{grid-column:2}.hub-title{font-size:31px}}
+</style>
+{% endblock %}
 
 {% block hx_content %}
-{% set rlabel = (mkt.regime_label if mkt and mkt.regime_label else '—') %}
-{% set risky = 'RISK-ON' in (rlabel|upper) or 'BULL' in (rlabel|upper) %}
-{% set rcolor = 'var(--pos-500)' if risky else ('var(--neg-500)' if 'RISK-OFF' in (rlabel|upper) else 'var(--warn-500)') %}
-{% set ns = namespace(hi=none) %}
-{% for e in events %}{% if e.impact == 'HIGH' and not ns.hi %}{% set ns.hi = e %}{% endif %}{% endfor %}
+{% set rlabel = (mkt.regime_label if mkt and mkt.regime_label else 'Monitoring') %}
+{% set bull_count = news|selectattr('sentiment','equalto','BULLISH')|list|length %}
+{% set bear_count = news|selectattr('sentiment','equalto','BEARISH')|list|length %}
 
-<!-- topbar -->
-<div class="hx-topbar">
-  <div class="col gap-1">
-    <div class="hx-h1">Intel</div>
-    <div class="faint" style="font-size:13px">Morning macro brief</div>
-  </div>
-  <div class="row gap-2">{% if ns.hi %}<span class="badge badge-warn"><span class="dot"></span>{{ ns.hi.event|truncate(24) }} {{ ns.hi.time or '' }}</span>{% endif %}</div>
+<section class="hub-hero">
+  <div class="col gap-2"><span class="eyebrow">Tradestaar Elite Intelligence</span><h1 class="hub-title">Market News <em>&amp; Smart Money</em></h1><span class="faint" style="font-size:13px">Catalysts, earnings, macro risk and market-moving coverage in one command center.</span></div>
+  <form class="hub-search" onsubmit="event.preventDefault();var t=this.ticker.value.trim().toUpperCase();if(t)location.href='/stock/'+encodeURIComponent(t)">
+    <input name="ticker" maxlength="8" placeholder="ENTER TICKER" aria-label="Open ticker research"><button class="btn btn-primary" type="submit">RESEARCH</button>
+  </form>
+</section>
+
+<div style="display:flex;justify-content:flex-end">
+  <a class="btn" href="{{ url_for('sentiment') }}">OPEN NEWS SENTIMENT</a>
+  <a class="btn btn-primary" href="{{ url_for('catalyst_calendar') }}">OPEN EARNINGS &amp; CATALYST CALENDAR</a>
 </div>
 
-<!-- 1 · REGIME BANNER -->
-<div class="between" style="padding:18px 22px;border-radius:var(--r-lg);background:var(--grad-brand-soft);border:1px solid rgba(255,122,24,.3);flex-wrap:wrap;gap:16px">
-  <div class="row gap-4" style="flex-wrap:wrap">
-    <div class="col gap-1"><span class="eyebrow">Today's Regime</span><span class="dtitle" style="font-size:30px;color:{{ rcolor }}">{{ rlabel }}</span></div>
-    <div class="divider" style="width:1px;height:44px"></div>
-    <div class="col gap-1" style="max-width:520px"><span class="eyebrow">Bias</span>
-      <span class="hi" style="font-size:15px;font-weight:600">{{ (story.headline if story and story.headline else (mkt.signal if mkt and mkt.signal else 'Trade the levels, respect the stops.')) }}</span>
-      {% if mkt %}<span class="faint" style="font-size:12px">{% if mkt.longs_ok %}Longs ✓ {% endif %}{% if mkt.shorts_ok %}Shorts ✓ {% endif %}{% if mkt.reduce_size %}· reduce size{% endif %}</span>{% endif %}
-    </div>
-  </div>
-  <div class="col gap-2" style="align-items:flex-end">
-    {% if ns.hi %}<span class="badge badge-warn"><span class="dot"></span>Event risk: {{ ns.hi.event|truncate(20) }}</span><span class="faint mono" style="font-size:11px">{{ ns.hi.time or ns.hi.date_label or '' }}</span>
-    {% else %}<span class="badge badge-neutral">No major events flagged</span>{% endif %}
-  </div>
+<div class="hub-kpis">
+  <div class="hub-kpi"><span class="eyebrow">Market Regime</span><strong>{{ rlabel }}</strong></div>
+  <div class="hub-kpi"><span class="eyebrow">Live Catalysts</span><strong>{{ news|length }}</strong></div>
+  <div class="hub-kpi"><span class="eyebrow">Bullish / Bearish</span><strong><span class="pos">{{ bull_count }}</span> / <span class="neg">{{ bear_count }}</span></strong></div>
+  <div class="hub-kpi"><span class="eyebrow">Upcoming Earnings</span><strong>{{ earnings|length }}</strong></div>
 </div>
 
-<!-- 2 · AI BRIEFING -->
-<div class="card card--accent"><div class="card-hd"><span class="row gap-2"><span style="width:16px;height:16px;border-radius:4px;background:var(--grad-brand)"></span>AI Briefing</span><span class="faint mono" style="font-size:11px;text-transform:none;letter-spacing:0">{{ (briefing.date if briefing and briefing.date else 'market story') }}</span></div>
-  <div class="card-bd col gap-3" style="font-size:14px;line-height:1.65;color:var(--text-body)">
-    {% if briefing and briefing.briefing %}
-      {% for para in briefing.briefing.split('\n\n') %}{% if para.strip() %}<p style="margin:0">{{ para.strip() }}</p>{% endif %}{% endfor %}
-    {% elif story and story.body %}
-      <p style="margin:0">{{ story.body }}</p>
-      {% if story.bullets %}<ul style="margin:0;padding-left:18px;color:var(--text-muted)">{% for b in story.bullets %}<li style="margin:3px 0">{{ b }}</li>{% endfor %}</ul>{% endif %}
-    {% else %}
-      <p class="faint" style="margin:0">Market briefing unavailable right now — the narrative engine returned no data.</p>
-    {% endif %}
-    <div class="row gap-2" style="margin-top:4px;flex-wrap:wrap">
-      {% if mkt and mkt.vix_level is not none %}<span class="badge badge-neutral">VIX {{ '%.1f'|format(mkt.vix_level) }}</span>{% endif %}
-      {% if liq and liq.status_label %}<span class="badge {{ 'badge-pos' if liq.status=='RISK_ON' else ('badge-neg' if liq.status=='RISK_OFF' else 'badge-warn') }}">Liquidity {{ liq.status_label }}</span>{% endif %}
-      {% for p in (story.permissions or []) %}<span class="badge badge-accent">{{ p }}</span>{% endfor %}
-      {% if ns.hi %}<span class="badge badge-warn">{{ ns.hi.event|truncate(18) }}</span>{% endif %}
+<div class="hub-tabs" role="tablist" aria-label="Filter market news">
+  <button class="hub-tab active" data-filter="ALL">All News</button><button class="hub-tab" data-filter="WATCHLIST">My Watchlist</button><button class="hub-tab" data-filter="BULLISH">Bullish</button><button class="hub-tab" data-filter="BEARISH">Bearish</button><button class="hub-tab" data-filter="HIGH">High Impact</button>
+</div>
+
+<div class="hub-layout">
+  <main class="card"><div class="card-hd"><span>Breaking Market Intelligence</span><span class="faint mono" style="font-size:10px;text-transform:none;letter-spacing:0">cached live feed</span></div>
+    <div class="card-bd hub-news" id="hub-news">
+      {% for n in news %}
+      <article class="hub-news-item" data-tone="{{ n.sentiment }}" data-impact="{{ n.impact }}" data-watchlist="{{ '1' if n.on_watchlist else '0' }}">
+        <a class="hub-ticker" href="{{ url_for('stock_detail', ticker=n.ticker) if n.ticker else '#' }}">{{ n.ticker or 'MARKET' }}</a>
+        <div class="col gap-1"><a class="hub-headline" href="{{ url_for('stock_detail', ticker=n.ticker) if n.ticker else '#' }}">{{ n.headline }}</a><span class="faint mono" style="font-size:10px">{{ n.source or 'Market feed' }} · {{ n.time or 'recent' }}{% if n.reason %} · {{ n.reason }}{% endif %}</span></div>
+        <span class="tone tone-{{ n.sentiment }}">{{ n.sentiment }}</span>
+      </article>
+      {% else %}<div class="faint" style="padding:22px 0">The news cache is warming. Live headlines will appear automatically when the feed is ready.</div>{% endfor %}
+      <div id="hub-empty" class="faint" style="display:none;padding:22px 0">No headlines match this filter.</div>
     </div>
-  </div>
+    <div class="card-ft faint" style="font-size:10px">Headline tone is keyword-derived context—not financial advice, analyst consensus, or a social sentiment score.</div>
+  </main>
+
+  <aside class="col gap-4">
+    <div class="card"><div class="card-hd">Trending in Coverage</div><div class="card-bd" style="padding:4px 16px">
+      {% for row in trending %}<div class="trend-row"><a class="hub-ticker" href="{{ url_for('stock_detail', ticker=row.ticker) }}">{{ row.ticker }}</a><div class="col gap-1"><div class="trend-bar"><i style="width:{{ [row.score * 12,100]|min }}%"></i></div><span class="faint" style="font-size:10px">{{ row.mentions }} catalyst mention{{ '' if row.mentions==1 else 's' }}</span></div><span class="mono muted">{{ row.score }}</span></div>
+      {% else %}<p class="faint" style="font-size:12px">Coverage momentum appears after headlines load.</p>{% endfor %}
+      </div><div class="card-ft faint" style="font-size:10px">Ranked by Tradestaar headline impact—not exchange trading volume.</div></div>
+
+    <div class="card"><div class="card-hd">Earnings Radar</div><div class="card-bd" style="padding:4px 16px">
+      {% for e in earnings[:6] %}<div class="earn-row"><a class="hub-ticker" href="{{ url_for('stock_detail', ticker=e.ticker) }}">{{ e.ticker }}</a><span class="muted" style="font-size:12px">{{ e.company_name or 'Earnings' }}</span><span class="mono faint" style="font-size:10px;text-align:right">{{ e.date_label or e.date }}<br>{{ e.time_label or 'TBD' }}</span></div>
+      {% else %}<p class="faint" style="font-size:12px">No earnings events are currently cached.</p>{% endfor %}
+    </div></div>
+
+    <div class="card"><div class="card-hd">Smart Money Filings <span class="badge badge-warn">VERIFIED</span></div><div class="card-bd col gap-3">
+      <div class="locked-feed"><span class="eyebrow">Insider Transactions</span><p class="muted" style="font-size:12px;margin:6px 0 10px">Official SEC Form 4 activity for companies in your active watchlist.</p><a class="btn btn-primary" href="{{ url_for('smart_money') }}">OPEN VERIFIED FEEDS</a></div>
+      <div class="locked-feed"><span class="eyebrow">Congressional Trades</span><p class="muted" style="font-size:12px;margin:6px 0 0">Only records backed by an official House or Senate disclosure link are shown.</p></div>
+    </div><div class="card-ft faint" style="font-size:10px">Filing data can be delayed and is research context—not a trade signal.</div></div>
+  </aside>
 </div>
 
 <div class="intel-2col">
-  <!-- LEFT -->
-  <div class="col gap-4">
-    <!-- 3 · FED LIQUIDITY -->
-    <div class="card"><div class="card-hd">Fed Liquidity Monitor{% if liq and liq.status_label %}<span class="badge {{ 'badge-pos' if liq.status=='RISK_ON' else ('badge-neg' if liq.status=='RISK_OFF' else 'badge-warn') }}"><span class="dot"></span>{{ liq.status_label }}</span>{% endif %}</div>
-      <div class="card-bd" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
-        {% set bs = liq.balance_sheet if liq else none %}
-        {% set rr = liq.reverse_repo if liq else none %}
-        {% set m2 = liq.m2 if liq else none %}
-        {% set netliq = (bs.value - (liq.tga.value if liq.tga and liq.tga.value else 0) - rr.value) if (bs and bs.value is not none and rr and rr.value is not none) else none %}
-        <div class="col gap-1"><span class="eyebrow">Net Liquidity</span><span class="mono hi" style="font-size:20px">{{ '%.2fT'|format(netliq) if netliq is not none else '—' }}</span><span class="mono faint" style="font-size:11px">derived · WALCL−TGA−RRP</span></div>
-        <div class="col gap-1"><span class="eyebrow">Reverse Repo</span><span class="mono hi" style="font-size:20px">{{ '%.2fT'|format(rr.value) if rr and rr.value is not none else '—' }}</span><span class="mono {{ 'pos' if rr and rr.falling_fast else 'faint' }}" style="font-size:11px">{{ (rr.trend_arrow ~ ' ' ~ ('draining' if rr.falling_fast else 'stable')) if rr else '—' }}</span></div>
-        <div class="col gap-1"><span class="eyebrow">M2 Supply</span><span class="mono hi" style="font-size:20px">{{ '%.2fT'|format(m2.value) if m2 and m2.value is not none else '—' }}</span><span class="mono {{ 'pos' if m2 and m2.expanding else 'faint' }}" style="font-size:11px">{{ (m2.trend_arrow ~ ' ' ~ ('expanding' if m2.expanding else 'flat')) if m2 else '—' }}</span></div>
-      </div>
-      {% if not (liq and liq.has_fred_key) %}<div class="card-ft faint" style="font-size:11px">FRED key not configured — liquidity values may be limited. Reserves (WRESBAL) not wired.</div>{% endif %}
-    </div>
-
-    <!-- 4 · MARKET RISK METER -->
-    <div class="card"><div class="card-hd">Market Risk Meter</div>
-      <div class="card-bd col gap-3">
-        {% set score = liq.score if liq and liq.score is not none else none %}
-        <div class="between"><span class="faint" style="font-size:12px">Risk-Off</span>
-          <span class="dtitle" style="font-size:16px;color:{{ 'var(--pos-500)' if (score or 0) >= 60 else ('var(--neg-500)' if (score or 0) < 40 else 'var(--warn-500)') }}">{{ (liq.status_label if liq and liq.status_label else '—') }}{% if score is not none %} · {{ score }}{% endif %}</span>
-          <span class="faint" style="font-size:12px">Risk-On</span></div>
-        <div class="risk-gauge"><span class="pin" style="left:{{ score if score is not none else 50 }}%"></span></div>
-        <div class="row gap-2" style="flex-wrap:wrap">
-          {% if mkt and mkt.vix_level is not none %}<span class="badge {{ 'badge-pos' if mkt.vix_level < 20 else 'badge-warn' }}">VIX {{ '%.1f'|format(mkt.vix_level) }}</span>{% endif %}
-          {% for a in (liq.alerts or [])[:3] %}<span class="badge badge-neutral">{{ a.msg|truncate(28) if a.msg else a }}</span>{% endfor %}
-        </div>
-      </div>
-    </div>
-
-    <!-- 5 · SECTOR FLOW -->
-    <div class="card"><div class="card-hd">Sector Money Flow</div>
-      <div class="card-bd flow-grid">
-        {% for s in money_flow %}
-        {% set p = s.chg_1d or 0 %}
-        {% set fcolor = 'var(--pos-500)' if p > 0 else ('var(--neg-500)' if p < 0 else 'var(--ink-400)') %}
-        <div class="flow"><span class="between"><span class="hi" style="font-size:13px;font-weight:600">{{ s.name or s.ticker }}</span><span class="mono {{ 'pos' if p>0 else ('neg' if p<0 else 'faint') }}" style="font-size:12px">{{ '%+.1f'|format(p) }}%</span></span>
-          <div class="bar"><i style="width:{{ s.flow_score if s.flow_score is not none else 50 }}%;background:{{ fcolor }}"></i></div></div>
-        {% else %}
-        <div class="faint" style="font-size:12px;grid-column:1/-1">Sector flow data unavailable.</div>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-
-  <!-- RIGHT -->
-  <div class="col gap-4">
-    <!-- 6 · ECON CALENDAR -->
-    <div class="card"><div class="card-hd">Economic Calendar</div>
-      <div class="card-bd" style="padding:2px 16px">
-        {% for e in events %}
-        <div class="cal-row"><span class="mono {{ 'warn' if e.impact=='HIGH' else 'faint' }}" style="font-weight:600">{{ e.time or e.date_label or '—' }}</span>
-          <span class="{{ 'hi' if e.impact=='HIGH' else 'muted' }}" style="font-weight:600">{{ e.event }}</span>
-          <span class="badge {{ 'badge-neg' if e.impact=='HIGH' else 'badge-warn' }}">{{ 'High' if e.impact=='HIGH' else 'Med' }}</span>
-          <span class="faint mono" style="font-size:12px">—</span><span class="faint mono" style="font-size:12px">—</span></div>
-        {% else %}
-        <div class="faint" style="font-size:12px;padding:14px 0">No upcoming events.</div>
-        {% endfor %}
-      </div>
-      {% if events %}<div class="card-ft faint" style="font-size:11px">Estimate / previous not wired (dropped by the calendar engine) — shown as —.</div>{% endif %}
-    </div>
-
-    <!-- 7 · NEWS -->
-    <div class="card"><div class="card-hd">News<span class="faint mono" style="font-size:11px;text-transform:none;letter-spacing:0">live</span></div>
-      <div class="card-bd" style="padding:2px 16px">
-        {% for n in news %}
-        {% set rail = 'var(--neg-500)' if n.impact in ('CRITICAL','HIGH') else ('var(--warn-500)' if n.impact=='MEDIUM' else 'var(--ink-500)') %}
-        <div class="news-row"><span class="jmark" style="width:4px;border-radius:var(--r-full);background:{{ rail }};flex:none"></span>
-          <div class="col gap-1"><span class="hi" style="font-size:13px;font-weight:600;line-height:1.4">{{ n.headline }}</span>
-            <span class="faint mono" style="font-size:11px">{{ n.source or '' }}{% if n.time %} · {{ n.time }}{% endif %}{% if n.ticker %} · <span class="muted">{{ n.ticker }}</span>{% endif %}</span></div>
-        </div>
-        {% else %}
-        <div class="faint" style="font-size:12px;padding:14px 0">No market-moving news right now.</div>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
+  <div class="card"><div class="card-hd">Economic Catalyst Calendar</div><div class="card-bd" style="padding:2px 16px">{% for e in events %}<div class="cal-row"><span class="mono {{ 'warn' if e.impact=='HIGH' else 'faint' }}">{{ e.time or e.date_label or '—' }}</span><span class="{{ 'hi' if e.impact=='HIGH' else 'muted' }}">{{ e.event }}</span><span class="badge {{ 'badge-neg' if e.impact=='HIGH' else 'badge-warn' }}">{{ e.impact|title }}</span><span></span><span></span></div>{% else %}<p class="faint">No upcoming events cached.</p>{% endfor %}</div></div>
+  <div class="card"><div class="card-hd">Sector Money Flow</div><div class="card-bd flow-grid">{% for s in money_flow %}{% set p=s.chg_1d or 0 %}<div class="flow"><span class="between"><span class="hi" style="font-size:12px">{{ s.name or s.ticker }}</span><span class="mono {{ 'pos' if p>0 else ('neg' if p<0 else 'faint') }}" style="font-size:11px">{{ '%+.1f'|format(p) }}%</span></span><div class="bar"><i style="width:{{ s.flow_score if s.flow_score is not none else 50 }}%;background:{{ 'var(--pos-500)' if p>0 else 'var(--neg-500)' }}"></i></div></div>{% else %}<span class="faint">Sector data unavailable.</span>{% endfor %}</div></div>
 </div>
 
-<div class="faint" style="font-size:11px;line-height:1.6;margin-top:8px">
-  Note: <b class="muted">Net Liquidity</b> is derived (WALCL−TGA−RRP); bank <b class="muted">reserves</b> (WRESBAL) aren't analyzed yet; calendar <b class="muted">estimate/previous</b> and news <b class="muted">ticker-reaction %</b> have no source in the current engines — all shown as <span class="mono">—</span>, never faked.
-</div>
+<script>
+document.querySelectorAll('.hub-tab').forEach(function(button){button.addEventListener('click',function(){
+  document.querySelectorAll('.hub-tab').forEach(function(b){b.classList.remove('active')});button.classList.add('active');
+  var filter=button.dataset.filter, shown=0;
+  document.querySelectorAll('.hub-news-item').forEach(function(item){var show=filter==='ALL'||item.dataset.tone===filter||item.dataset.impact===filter||(filter==='WATCHLIST'&&item.dataset.watchlist==='1');item.hidden=!show;if(show)shown++});
+  document.getElementById('hub-empty').style.display=shown?'none':'block';
+})});
+</script>
 {% endblock %}

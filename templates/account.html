@@ -1,6 +1,6 @@
 {% extends "hx_base.html" %}
 {% from "_hx_macros.html" import grade_badge %}
-{% block title %}Account — HAULTRA AI{% endblock %}
+{% block title %}Account — Tradestaar Elite{% endblock %}
 
 {% block hx_content %}
 {% set connected = acct and acct.connected %}
@@ -117,6 +117,8 @@
     </div>
   </div>
 </div>
+
+<div class="card"><div class="card-hd">Practice Portfolio<a class="btn btn-primary btn-sm" href="{{ url_for('paper_trading') }}">Open Paper Trading</a></div><div class="card-bd"><div class="muted" style="font-size:13px;line-height:1.6">Practice market orders with $100,000 in simulated buying power. Paper positions and performance stay separate from your live Schwab account.</div></div></div>
 
 <!-- Broker connection (actual state) -->
 <div class="card"><div class="card-hd">Broker Connection</div>

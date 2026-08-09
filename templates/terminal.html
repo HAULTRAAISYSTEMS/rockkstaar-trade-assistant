@@ -1,15 +1,16 @@
 {% extends "base.html" %}
 {% from "_hx_macros.html" import grade_badge %}
-{% block title %}Terminal — HAULTRA AI{% endblock %}
+{% block title %}Terminal — Tradestaar Elite{% endblock %}
 
 {% block head_extra %}
 <style>
 /* ═══════════════════════════════════════════════════════════════════
-   HAULTRA AI — TRADE TERMINAL  (Tradestaar-style layout on real data)
+   TRADESTAAR ELITE — TRADE TERMINAL
    Live: watchlist quotes, chart series, Schwab account/positions, win rate.
    Paper: order ticket only.  Market cap: no source → shows "—".
    ═══════════════════════════════════════════════════════════════════ */
 .tw { max-width: 1720px; margin: 0 auto; }
+.mobile-home { display:none; }
 
 /* ── Status line ── */
 .tw-status { display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap; padding: var(--sp-2) var(--sp-1) var(--sp-3); }
@@ -153,6 +154,38 @@
   .tw-stats { grid-template-columns: repeat(4,1fr); }
 }
 @media (max-width: 780px) {
+  .mobile-home { display:block; margin-bottom:var(--sp-4); }
+  .mobile-home__eyebrow { color:var(--orange-400); font-family:var(--font-display); font-size:10px; font-weight:var(--fw-bold); letter-spacing:.16em; text-transform:uppercase; }
+  .mobile-home__title { color:var(--text-hi); font-family:var(--font-display); font-size:26px; margin:4px 0 14px; }
+  .mobile-home__search { display:flex; gap:8px; margin-bottom:12px; }
+  .mobile-home__search input { flex:1; min-width:0; background:var(--surface-inset); border:1px solid var(--border-subtle); border-radius:12px; color:var(--text-hi); font-family:var(--font-mono); font-size:16px; padding:12px 14px; text-transform:uppercase; }
+  .mobile-home__search button { border:0; border-radius:12px; background:var(--grad-brand); color:var(--text-on-accent); font-family:var(--font-display); font-weight:var(--fw-bold); padding:0 18px; }
+  .mobile-home__grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .mobile-home__metric { background:var(--surface-card); border:1px solid var(--border-subtle); border-radius:14px; padding:12px 10px; }
+  .mobile-home__metric span { display:block; color:var(--text-faint); font-size:9px; letter-spacing:.08em; text-transform:uppercase; }
+  .mobile-home__metric b { display:block; color:var(--text-hi); font-family:var(--font-mono); font-size:14px; margin-top:5px; }
+  .mobile-home__actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
+  .mobile-home__action { background:var(--surface-card); border:1px solid var(--border-subtle); border-radius:14px; color:var(--text-body); font-size:12px; font-weight:var(--fw-semi); padding:12px; text-align:center; text-decoration:none; }
+  .mobile-home__action:first-child { border-color:rgba(214,166,63,.45); color:var(--orange-400); }
+  .mobile-discovery { margin-top:18px; }
+  .mobile-discovery__head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:10px; }
+  .mobile-discovery__head h2 { color:var(--text-hi); font-family:var(--font-display); font-size:18px; margin:0; }
+  .mobile-discovery__head a { color:var(--orange-400); font-size:11px; text-decoration:none; }
+  .mobile-discovery__tabs { display:grid; grid-template-columns:1fr 1fr; gap:5px; background:var(--surface-inset); border:1px solid var(--border-subtle); border-radius:12px; padding:4px; }
+  .mobile-discovery__tab { border:0; border-radius:9px; background:transparent; color:var(--text-faint); font-family:var(--font-display); font-size:11px; font-weight:var(--fw-bold); letter-spacing:.04em; padding:9px 6px; text-transform:uppercase; }
+  .mobile-discovery__tab.active { background:var(--surface-card); box-shadow:var(--shadow-sm); color:var(--orange-400); }
+  .mobile-discovery__panel { display:none; margin-top:8px; }
+  .mobile-discovery__panel.active { display:block; }
+  .mobile-discovery__row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:12px; background:var(--surface-card); border-bottom:1px solid var(--border-subtle); color:inherit; min-height:60px; padding:9px 12px; text-decoration:none; }
+  .mobile-discovery__row:first-child { border-radius:14px 14px 0 0; }
+  .mobile-discovery__row:last-child { border-bottom:0; border-radius:0 0 14px 14px; }
+  .mobile-discovery__row:only-child { border-radius:14px; }
+  .mobile-discovery__symbol { color:var(--text-hi); font-family:var(--font-mono); font-size:14px; font-weight:var(--fw-bold); }
+  .mobile-discovery__tag { color:var(--text-faint); font-size:10px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mobile-discovery__price { color:var(--text-body); font-family:var(--font-mono); font-size:12px; text-align:right; }
+  .mobile-discovery__move { font-family:var(--font-mono); font-size:12px; font-weight:var(--fw-bold); min-width:52px; text-align:right; }
+  .mobile-discovery__empty { background:var(--surface-card); border:1px solid var(--border-subtle); border-radius:14px; color:var(--text-faint); font-size:12px; line-height:1.5; padding:18px; text-align:center; }
+  .mobile-discovery__note { color:var(--text-faint); font-size:9px; line-height:1.4; margin:8px 3px 0; }
   .tw-body { grid-template-columns: 1fr; }
   .tw-stats { grid-template-columns: 1fr 1fr; }
   .tw-wl { max-height: 320px; }
@@ -163,6 +196,59 @@
 {% block content %}
 {% set connected = acct and acct.connected %}
 <div class="tw">
+
+  <section class="mobile-home" aria-label="Market home">
+    <div class="mobile-home__eyebrow">Tradestaar Elite</div>
+    <h1 class="mobile-home__title">Your market, at a glance.</h1>
+    <form class="mobile-home__search" action="{{ url_for('fundamentals_page') }}" method="get">
+      <input name="ticker" type="search" maxlength="6" placeholder="Search a ticker" aria-label="Search a ticker" required>
+      <button type="submit">Search</button>
+    </form>
+    <div class="mobile-home__grid">
+      <div class="mobile-home__metric"><span>SPY today</span><b class="{{ 'chg-pos' if (mkt.spy_1d_pct or 0) >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(mkt.spy_1d_pct) ~ '%' if mkt and mkt.spy_1d_pct is not none else '—' }}</b></div>
+      <div class="mobile-home__metric"><span>VIX</span><b>{{ '%.2f'|format(mkt.vix_level) if mkt and mkt.vix_level is not none else '—' }}</b></div>
+      <div class="mobile-home__metric"><span>Top setups</span><b>{{ today_setups|length }}</b></div>
+    </div>
+    <div class="mobile-home__actions">
+      <a class="mobile-home__action" href="{{ url_for('intel') }}">Breaking market news</a>
+      <a class="mobile-home__action" href="{{ url_for('watchlists_page') }}">Watchlist movers</a>
+    </div>
+
+    <section class="mobile-discovery" aria-labelledby="mobile-discovery-title">
+      <div class="mobile-discovery__head">
+        <h2 id="mobile-discovery-title">Discover stocks</h2>
+        <a href="{{ url_for('dashboard') }}">View setups</a>
+      </div>
+      <div class="mobile-discovery__tabs" role="tablist" aria-label="Stock discovery lists">
+        <button class="mobile-discovery__tab active" id="discovery-trending-tab" type="button" role="tab" aria-selected="true" aria-controls="discovery-trending" onclick="twDiscoveryTab('trending')">Trending</button>
+        <button class="mobile-discovery__tab" id="discovery-active-tab" type="button" role="tab" aria-selected="false" aria-controls="discovery-active" onclick="twDiscoveryTab('active')">Most active</button>
+      </div>
+      <div class="mobile-discovery__panel active" id="discovery-trending" role="tabpanel" aria-labelledby="discovery-trending-tab">
+        {% for s in trending_stocks %}
+        <a class="mobile-discovery__row" href="{{ url_for('stock_detail', ticker=s.ticker) }}">
+          <span><span class="mobile-discovery__symbol">{{ s.ticker }}</span><span class="mobile-discovery__tag">{{ s.primary_tag or 'Momentum watch' }}</span></span>
+          <span class="mobile-discovery__price">{{ '$%.2f'|format(s.price) if s.price else '—' }}</span>
+          <span class="mobile-discovery__move {{ 'chg-pos' if (s.day_chg_pct or 0) >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(s.day_chg_pct or 0) }}%</span>
+        </a>
+        {% else %}
+        <div class="mobile-discovery__empty">No live momentum signals yet. This list fills when the scanner confirms a qualifying move.</div>
+        {% endfor %}
+        <p class="mobile-discovery__note">Trending is derived from Tradestaar's curated momentum scanner{% if scanner_last_scan %} · last scan {{ scanner_last_scan }}{% endif %}.</p>
+      </div>
+      <div class="mobile-discovery__panel" id="discovery-active" role="tabpanel" aria-labelledby="discovery-active-tab" hidden>
+        {% for s in most_active %}
+        <a class="mobile-discovery__row" href="{{ url_for('stock_detail', ticker=s.ticker) }}">
+          <span><span class="mobile-discovery__symbol">{{ s.ticker }}</span><span class="mobile-discovery__tag">Relative volume</span></span>
+          <span class="mobile-discovery__price">{{ '$%.2f'|format(s.current_price) if s.current_price else '—' }}</span>
+          <span class="mobile-discovery__move {{ 'chg-pos' if (s.gap_pct or 0) >= 0 else 'chg-neg' }}">{{ '%.1f'|format(s.rel_volume) }}x</span>
+        </a>
+        {% else %}
+        <div class="mobile-discovery__empty">Relative-volume data is not available for the current watchlist yet.</div>
+        {% endfor %}
+        <p class="mobile-discovery__note">Most active ranks verified relative volume inside your active watchlist—not the entire market.</p>
+      </div>
+    </section>
+  </section>
 
   <!-- ===== Status line ===== -->
   <div class="tw-status">
@@ -439,7 +525,8 @@
             <span class="v" id="tw-ot-est">—</span>
           </div>
           <button type="button" class="tw-submit" onclick="twPreview()">Preview Order</button>
-          <div class="tw-ticket-note">⚠ Paper / preview only — does not place live orders.</div>
+          <a class="tw-submit" href="{{ url_for('paper_trading') }}" style="display:block;text-align:center;text-decoration:none;margin-top:8px">Open Paper Portfolio</a>
+          <div class="tw-ticket-note">Preview here, then use the paper portfolio for simulated fills. No live order is transmitted.</div>
           <div class="tw-preview" id="tw-preview"></div>
         </div>
       </div>
@@ -462,6 +549,17 @@ function twFmtVol(n){
   return String(Math.round(n));
 }
 function twNum(id, val){ var el=document.getElementById(id); if(el) el.textContent=val; }
+
+/* ── Mobile stock-discovery tabs ── */
+function twDiscoveryTab(name){
+  ['trending','active'].forEach(function(tabName){
+    var selected = tabName === name;
+    var tab = document.getElementById('discovery-' + tabName + '-tab');
+    var panel = document.getElementById('discovery-' + tabName);
+    if(tab){ tab.classList.toggle('active', selected); tab.setAttribute('aria-selected', selected ? 'true' : 'false'); }
+    if(panel){ panel.classList.toggle('active', selected); panel.hidden = !selected; }
+  });
+}
 
 /* ── Watchlist add (reuses existing /watchlist/add write path + CSRF) ── */
 function twToggleAdd(){
