@@ -1,7124 +1,1488 @@
-"""
-app.py - Rockkstaar Trade Assistant
-Flask web app for premarket stock watchlist scanning.
-"""
-
-import json as _json 
-import logging
-import os
-import pathlib
-import re
-import secrets
-import threading
-import time as _time
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, Response, send_from_directory
-from flask_sock import Sock
-from flask_wtf.csrf import CSRFProtect  # type: ignore[import-untyped]
-from werkzeug.exceptions import HTTPException
-
-logger = logging.getLogger(__name__)
-from database import (
-    init_db,
-    DEFAULT_WATCHLISTS,
-    get_setting, set_setting,
-    get_user_setting, set_user_setting,
-    create_user, get_user_by_id, get_user_by_username,
-    get_all_users, update_user_password, delete_user, check_user_password,
-    ensure_user_watchlists,
-    get_all_watchlists, get_watchlist_by_id, create_watchlist,
-    rename_watchlist, delete_watchlist,
-    get_watchlist_stocks, get_watchlist_stock_counts,
-    add_ticker_to_watchlist, remove_ticker_from_watchlist,
-    remove_ticker_from_defaults,
-    get_ticker_watchlist_ids, set_ticker_watchlists,
-    upsert_stock_data, get_stock_data, get_all_stock_data,
-    update_live_fields,
-    set_stock_classify, set_auto_classify,
-    set_ticker_state, upsert_loading_placeholder,
-    get_note, save_note, get_all_notes, update_setup_type,
-    get_trade_plan, save_trade_plan, get_all_trade_plans,
-    add_journal_entry, update_journal_entry, delete_journal_entry,
-    get_journal_entry, get_all_journal_entries, get_journal_entries_for_date,
-    get_daily_session, upsert_daily_session, lock_daily_session, unlock_daily_session,
-    add_scanner_alert, get_scanner_alerts, mark_scanner_alerts_seen,
-    get_unseen_scanner_alert_count, clear_scanner_alerts,
-    create_price_alert, get_price_alerts, set_price_alert_enabled,
-    delete_price_alert,
-    save_setup_outcome, get_setup_outcome_stats,
-    save_study_log_entry, get_study_log, delete_study_log_entry,
-    get_ai_briefing, save_ai_briefing,
-    get_score_narration, save_score_narration,
-    get_journal_summary, save_journal_summary,
-    get_earnings_digest, save_earnings_digest,
-    get_paper_account, get_paper_positions, get_paper_orders, execute_paper_order,
-)
-from mock_data import generate_stock_data, load_mock_watchlist, live_refresh_stock, _swing_defaults, _zone_defaults
-from data_fetcher import _et_now, market_session_now, orb_phase_now
-from scoring import (catalyst_score_breakdown, SETUP_TYPES, SWING_SETUP_TYPES, SWING_STATUSES,
-                     compute_swing_grade, compute_continuation_score)
-from classifier import classify, classify_stock, A_PLUS_READY
-from alerts import generate_alerts, get_alerts, get_alert_count, clear_alerts as _clear_alerts
-from news_fetcher import CATALYST_CATEGORIES as _CAT_DEFS, freshness_label as _fl
-import scanner as _scanner
-import intel_engine as _intel
-_mkt = None  # set below if market_engine is available
-try:
-    import market_engine as _mkt
-    _MKT_AVAILABLE = True
-except Exception:
-    _MKT_AVAILABLE = False
-
-app = Flask(__name__)
-
-# ---------------------------------------------------------------------------
-# Secret key â€” always supplied by the deployment environment.
-# Refuse to start without it so sessions and CSRF tokens can never be signed
-# with a public, predictable fallback value.
-# ---------------------------------------------------------------------------
-_secret_key = os.environ.get("SECRET_KEY")
-if not _secret_key:
-    raise RuntimeError(
-        "SECRET_KEY environment variable is required. "
-        "Set it to a long, random value before starting Tradestaar Elite."
-    )
-app.secret_key = _secret_key
-app.permanent_session_lifetime = timedelta(days=30)
-
-# ---------------------------------------------------------------------------
-# CSRF protection â€” validates csrf_token on every POST/PUT/PATCH/DELETE form.
-# The /risk/trading-mode AJAX route sends the token via X-CSRFToken header.
-# ---------------------------------------------------------------------------
-csrf = CSRFProtect(app)
-
-# ---------------------------------------------------------------------------
-# Multi-user session auth helpers
-# ---------------------------------------------------------------------------
-
-def current_user_id() -> int:
-    """Return the logged-in user_id from session (default 1 for backward compat)."""
-    return session.get("user_id", 1)
-
-
-def current_user() -> dict | None:
-    """Return the full user dict from session, or None if not logged in."""
-    uid = session.get("user_id")
-    if uid is None:
-        return None
-    return {"id": uid, "username": session.get("username", ""), "is_admin": session.get("is_admin", 0)}
-
-
-def _auth_required() -> bool:
-    """Return True if the users table has at least one user (auth is active)."""
-    try:
-        return bool(get_all_users())
-    except Exception:
-        return False
-
-
-def require_admin(f):
-    """Decorator â€” 403 unless logged-in user is admin."""
-    from functools import wraps
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not session.get("is_admin"):
-            return jsonify({"ok": False, "error": "admin required"}), 403 \
-                if request.path.startswith("/api/") \
-                else (render_template("login.html", error="Admin access required.", next=""), 403)
-        return f(*args, **kwargs)
-    return decorated
-
-
-@app.before_request
-def _require_login():
-    # Always public â€” Schwab OAuth callback must stay reachable; callback validates PKCE/state.
-    if (request.path in ("/login", "/logout", "/register", "/favicon.ico", "/health",
-                         "/service-worker.js", "/schwab/callback")
-            or request.path.startswith("/static/")):
-        return
-    if session.get("user_id"):
-        return  # Already authenticated
-    # If no users exist yet, allow open access (fresh unconfigured deploy)
-    if not _auth_required():
-        return
-    # API / WebSocket â€” JSON 401
-    if request.path.startswith(("/api/", "/ws/")):
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-    # Page routes â€” redirect to login
-    return redirect(url_for("login_page", next=request.path))
-
-
-# ---------------------------------------------------------------------------
-# Write-endpoint auth â€” HTTP Basic Auth on every state-mutating request.
-# Set APP_USER + APP_PASS env vars to enable. Both must be set; if either is
-# missing the guard is disabled so local dev works without credentials.
-# ---------------------------------------------------------------------------
-@app.before_request
-def _check_write_auth():
-    _user = os.environ.get("APP_USER", "")
-    _pass = os.environ.get("APP_PASS", "")
-    if not _user or not _pass:
-        return  # auth not configured â€” allow all (local dev / first deploy)
-    if request.method in ("GET", "HEAD", "OPTIONS") or request.path == "/health":
-        return  # read-only requests and health check always pass
-    auth = request.authorization
-    if not auth or auth.username != _user or auth.password != _pass:
-        return Response(
-            "Unauthorized",
-            401,
-            {"WWW-Authenticate": 'Basic realm="Tradestaar Elite"'},
-        )
-
-sock = Sock(app)
-
-
-# ---------------------------------------------------------------------------
-# Global JSON error handler â€” ensures /api/* routes NEVER return HTML
-# ---------------------------------------------------------------------------
-@app.errorhandler(Exception)
-def _handle_all_errors(e):
-    """Return JSON for /api/ errors; let Flask handle HTTP errors on frontend routes."""
-    code = e.code if isinstance(e, HTTPException) else 500
-    if request.path.startswith("/api/"):
-        if code != 404:
-            logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
-        return jsonify({
-            "ok": False,
-            "errors": [f"{type(e).__name__}: {e}"],
-            "news": [], "market_news": [],
-            "earnings": {"today": [], "tomorrow": [], "this_week": []},
-            "splits": [], "dividends": [], "economic_events": [],
-            "from_cache": False, "refreshing": False, "last_updated": "â€”",
-        }), code
-    # For HTTP errors (404, 403, etc.) on frontend routes, return Flask's default response
-    if isinstance(e, HTTPException):
-        return e.get_response()
-    # Unexpected server errors on frontend routes â€” log and show a simple message
-    logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
-    return "Internal server error", 500
-
-
-@app.route("/favicon.ico")
-def favicon():
-    return send_from_directory(app.static_folder or "static", "favicon-32.png", mimetype="image/png")
-
-
-@app.route("/service-worker.js")
-def service_worker():
-    """Serve the PWA worker from the site root so it can cover every app route."""
-    response = send_from_directory(
-        app.static_folder or "static", "service-worker.js", mimetype="application/javascript"
-    )
-    response.headers["Service-Worker-Allowed"] = "/"
-    response.headers["Cache-Control"] = "no-cache"
-    return response
-
-
-@app.template_filter("et_time")
-def et_time_filter(value: str | None) -> str:
-    """Convert a stored timestamp to a clean ET time string for UI display.
-    Handles both new format ("%Y-%m-%d %I:%M %p") and old UTC format ("%Y-%m-%d %H:%M:%S").
-    Returns e.g. "8:05 PM".
-    """
-    if not value:
-        return "â€”"
-    s = str(value).strip()
-    # New ET format: "2026-04-18 08:05 PM"
-    try:
-        dt = datetime.strptime(s[:19], "%Y-%m-%d %I:%M %p")
-        return dt.strftime("%I:%M %p").lstrip("0")
-    except ValueError:
-        pass
-    # Old server/UTC format: "2026-04-18 00:05:06" â€” convert naive UTC â†’ ET
-    try:
-        from datetime import timezone
-        import zoneinfo as _zi
-        dt_utc = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-        dt_et  = dt_utc.astimezone(_zi.ZoneInfo("America/New_York"))
-        return dt_et.strftime("%I:%M %p").lstrip("0")
-    except Exception:
-        pass
-    return s
-
-
-# /health MUST be registered immediately â€” before any code that could crash
-# during import. If anything below line 44 raises an exception, gunicorn
-# still has this route and Render's health check succeeds.
-@app.route("/health")
-def health():
-    return jsonify({"ok": True}), 200
-
-
-# ---------------------------------------------------------------------------
-# Security headers â€” applied to every response
-# ---------------------------------------------------------------------------
-@app.after_request
-def _add_security_headers(response):
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
-    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    return response
-
-
-# ---------------------------------------------------------------------------
-# /debug/status â€” production health check (no secret values exposed)
-# ---------------------------------------------------------------------------
-@app.route("/debug/status")
-def debug_status():
-    """
-    Read-only diagnostics endpoint.
-    Returns PASS/FAIL for each system component.
-    Never exposes secret values â€” only checks presence and reachability.
-    """
-    checks = {}
-
-    # 1. Database connected
-    try:
-        from database import get_db
-        conn = get_db()
-        conn.execute("SELECT 1")
-        conn.close()
-        checks["database"] = {"status": "PASS", "detail": "Connection OK"}
-    except Exception as _e:
-        checks["database"] = {"status": "FAIL", "detail": str(_e), "file": "database.py"}
-
-    # 2. Required env vars
-    _required_vars = {
-        "SECRET_KEY":   os.environ.get("SECRET_KEY"),
-        "DATABASE_URL": os.environ.get("DATABASE_URL"),  # optional â€” SQLite fallback
-    }
-    _optional_vars = {
-        "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN"),
-        "TELEGRAM_CHAT_ID":   os.environ.get("TELEGRAM_CHAT_ID"),
-        "FINNHUB_API_KEY":    os.environ.get("FINNHUB_API_KEY"),
-        "POLYGON_API_KEY":    os.environ.get("POLYGON_API_KEY"),
-        "SCHWAB_CLIENT_ID":   os.environ.get("SCHWAB_CLIENT_ID"),
-    }
-    env_detail = {}
-    env_ok = True
-    for k, v in _required_vars.items():
-        if k == "SECRET_KEY" and not v:
-            env_detail[k] = "MISSING (application startup blocked)"
-            env_ok = False
-        elif k == "DATABASE_URL":
-            env_detail[k] = "set" if v else "not set (SQLite fallback)"
-        else:
-            env_detail[k] = "set" if v else "missing"
-    checks["env_required"] = {
-        "status": "PASS" if env_ok else "WARN",
-        "detail": env_detail,
-    }
-
-    # 3. Optional env vars (PASS if set, WARN if missing)
-    opt_detail = {k: ("set" if v else "not set") for k, v in _optional_vars.items()}
-    checks["env_optional"] = {
-        "status": "PASS" if all(_optional_vars.values()) else "WARN",
-        "detail": opt_detail,
-    }
-
-    # 4. Telegram configured
-    _tg_token  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    _tg_chat   = os.environ.get("TELEGRAM_CHAT_ID", "")
-    checks["telegram"] = {
-        "status": "PASS" if (_tg_token and _tg_chat) else "WARN",
-        "detail": "configured" if (_tg_token and _tg_chat) else "not configured (alerts will be skipped)",
-    }
-
-    # 5. Finnhub key loaded
-    _fh_key = os.environ.get("FINNHUB_API_KEY", "").strip()
-    checks["finnhub"] = {
-        "status": "PASS" if _fh_key else "WARN",
-        "detail": "key present" if _fh_key else "key missing (static fallback will be used)",
-    }
-
-    # 6. static/logo.png exists
-    _logo = pathlib.Path(app.static_folder or "static") / "logo.png"
-    checks["static_logo"] = {
-        "status": "PASS" if _logo.exists() else "FAIL",
-        "detail": str(_logo) if _logo.exists() else f"missing: {_logo}",
-        "file": "static/logo.png",
-    }
-
-    # 7. Intel cache / API reachable (checks in-process only, no network call)
-    try:
-        data = _intel.get_intel_summary()
-        intel_ok = isinstance(data, dict) and "earnings" in data
-        checks["intel_api"] = {
-            "status": "PASS" if intel_ok else "FAIL",
-            "detail": f"ok  from_cache={data.get('from_cache')}  refreshing={data.get('refreshing')}",
-        }
-    except Exception as _ie:
-        checks["intel_api"] = {"status": "FAIL", "detail": str(_ie), "file": "intel_engine.py"}
-
-    # 8. Scanner running
-    try:
-        scan = _scanner.get_scan_results()
-        checks["scanner"] = {
-            "status": "PASS",
-            "detail": f"ok  running={scan.get('running', False)}  results={len(scan.get('results', []))}",
-        }
-    except Exception as _se:
-        checks["scanner"] = {"status": "FAIL", "detail": str(_se), "file": "scanner.py"}
-
-    # 9. Watchlist / DB round-trip
-    try:
-        wls = get_all_watchlists()
-        checks["watchlists"] = {
-            "status": "PASS",
-            "detail": f"{len(wls)} watchlist(s) found",
-        }
-    except Exception as _we:
-        checks["watchlists"] = {"status": "FAIL", "detail": str(_we), "file": "database.py"}
-
-    overall = "PASS" if all(
-        c["status"] in ("PASS", "WARN") for c in checks.values()
-    ) else "FAIL"
-    failures = [k for k, c in checks.items() if c["status"] == "FAIL"]
-
-    return jsonify({
-        "overall": overall,
-        "failures": failures,
-        "checks": checks,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-    })
-
-
-# ---------------------------------------------------------------------------
-# Startup initialization â€” idempotent schema creation.
-# Wrapped in try/except so a slow or unavailable DB (e.g. PG cold start on
-# Render) does not crash the import and prevent gunicorn from binding its port.
-# ---------------------------------------------------------------------------
-try:
-    init_db()
-except Exception as _init_err:
-    logger.error("init_db failed at startup: %s â€” will retry on first request", _init_err)
-
-# Start the background momentum scanner daemon (no-op if already running).
-try:
-    _scanner.start_scanner()
-except Exception as _scan_err:
-    logger.error("scanner start failed at startup: %s", _scan_err)
-
-# Start the background intel alert daemon â€” checks every 30 min during market hours.
-def _intel_alert_loop():
-    while True:
-        try:
-            now = _intel._et_now()
-            # Run during extended market hours (7 AM â€“ 6 PM ET, weekdays)
-            if now.weekday() < 5 and 7 <= now.hour < 18:
-                _intel.check_and_send_intel_alerts()
-        except Exception as _ie:
-            logger.warning("intel alert loop error: %s", _ie)
-        _time.sleep(1800)  # every 30 minutes
-
-try:
-    threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
-except Exception as _loop_err:
-    logger.error("intel alert loop failed to start: %s", _loop_err)
-
-# Pre-warm the intel cache so the first page load is instant
-try:
-    _intel.trigger_background_refresh()
-except Exception as _warm_err:
-    logger.error("intel bg refresh failed at startup: %s", _warm_err)
-
-# Pre-warm the market context cache (regime, sectors, RS baseline)
-try:
-    if _MKT_AVAILABLE:
-        _mkt.refresh_market_context_bg()
-except Exception as _mkt_warm_err:
-    logger.error("market context bg refresh failed at startup: %s", _mkt_warm_err)
-
-# ---------------------------------------------------------------------------
-# Startup migration: wipe stale mock-seeded prices from the DB.
-#
-# Old versions of mock_data.py seeded current_price directly from MOCK_STOCKS
-# templates (NVDA=800, META=540, AMZN=190, etc.).  If these were written to
-# the DB before the fix, the snapshot guard preserved them forever.
-# On each startup we NULL out any price that exactly matches a known stale
-# seed and set ticker_state=error so the auto-refresh retries the live fetch.
-# ---------------------------------------------------------------------------
-_STALE_MOCK_PRICES = {
-    "NVDA": 800.0, "META": 540.0, "MRVL": 72.0,
-    "AMZN": 190.0, "MU":   95.0,  "INTC": 23.0,
-}
-
-def _clear_stale_mock_prices():
-    """Null out any DB prices that match the old mock seeds."""
-    try:
-        from database import get_db, get_stock_data
-        for ticker, stale_price in _STALE_MOCK_PRICES.items():
-            snap = get_stock_data(ticker)
-            if snap and snap.get("current_price") == stale_price:
-                conn = get_db()
-                try:
-                    conn.execute(
-                        "UPDATE stock_data SET current_price = NULL, prev_close = NULL, "
-                        "gap_pct = NULL, ticker_state = 'error' WHERE ticker = ?",
-                        (ticker,),
-                    )
-                    conn.commit()
-                finally:
-                    conn.close()
-                logger.warning(
-                    "startup migration: cleared stale mock price %.1f for %s â†’ ticker_state=error",
-                    stale_price, ticker,
-                )
-    except Exception as _e:
-        logger.error("_clear_stale_mock_prices failed: %s", _e)
-
-try:
-    _clear_stale_mock_prices()
-except Exception as _mig_err:
-    logger.error("startup migration failed: %s", _mig_err)
-
-# Global refresh lock â€” prevents overlapping bulk-refresh requests.
-# Uses a threading.Lock() so concurrent gunicorn workers each have their own
-# flag (cross-process locking is not needed for UX safety on a single user app).
-_refresh_all_lock   = threading.Lock()
-_refresh_all_running = False
-
-# Per-ticker single-refresh guard â€” prevents double-clicking "Refresh Data"
-# from spawning two simultaneous fetches for the same ticker.
-_single_refresh_lock   = threading.Lock()
-_single_refresh_active: set = set()   # set of ticker strings currently being refreshed
-
-# Loading timeout: tickers stuck in 'loading' for longer than this are
-# transitioned to 'error' so the Loading badge never shows forever.
-LOADING_TIMEOUT_SECS = 120
-
-
-# ---------------------------------------------------------------------------
-# App initialization
-# ---------------------------------------------------------------------------
-
-def _prev_trading_day() -> str:
-    """
-    Return the most recent past trading day as YYYY-MM-DD (Monâ€“Fri, weekend-aware).
-    Uses US/Eastern time so the date is correct before/after midnight ET.
-    Does not account for public holidays â€” weekend skipping is sufficient for
-    the staleness check (a 3-day holiday gap still triggers a refresh which is fine).
-    """
-    try:
-        import zoneinfo
-        today = datetime.now(zoneinfo.ZoneInfo("America/New_York")).date()
-    except Exception:
-        from datetime import timezone
-        today = datetime.now(timezone(timedelta(hours=-4))).date()
-    candidate = today - timedelta(days=1)
-    while candidate.weekday() >= 5:   # 5 = Saturday, 6 = Sunday
-        candidate -= timedelta(days=1)
-    return candidate.isoformat()
-
-
-def auto_refresh_stale_closes(tickers: list, data_map: dict | None = None) -> list:
-    """
-    Identify stale tickers and kick off a background refresh for each one.
-
-    The check (staleness detection) runs synchronously so we know which tickers
-    need work, but the actual fetch (generate_stock_data) runs in a daemon
-    thread so the dashboard HTTP response is NEVER blocked.
-
-    A ticker is stale when:
-      - It has not been refreshed today (last_updated date != today), OR
-      - Its prev_close_date doesn't match the expected previous trading day.
-    Error-state tickers always retry regardless of last_updated.
-
-    ``data_map`` â€” optional pre-loaded {ticker: stock_dict} from the caller.
-    When supplied, skips the per-ticker get_stock_data() calls entirely so the
-    dashboard doesn't pay N individual DB round-trips just to check staleness.
-
-    Returns the list of ticker symbols that were queued for background refresh.
-    """
-    expected  = _prev_trading_day()
-    today_str = _et_now().strftime("%Y-%m-%d")
-    queued: list[str] = []
-
-    # Use the caller's already-loaded map; fall back to fetching only if needed.
-    _snapshot = data_map if data_map is not None else {
-        s["ticker"]: s for s in get_all_stock_data()
-    }
-
-    for ticker in tickers:
-        stock = _snapshot.get(ticker)
-        if not stock:
-            continue
-
-        last_updated  = (stock.get("last_updated") or "")[:10]
-        current_state = stock.get("ticker_state") or "ready"
-        is_error      = current_state == "error"
-
-        if last_updated == today_str and not is_error:
-            continue
-        if (stock.get("prev_close_date") or "") == expected and not is_error:
-            continue
-
-        queued.append(ticker)
-        logger.info(
-            "auto_refresh  ticker=%s  stage=queued  prev_close_date=%s  "
-            "expected=%s  state=%s",
-            ticker,
-            stock.get("prev_close_date") or "missing",
-            expected,
-            current_state,
-        )
-
-    if not queued:
-        return []
-
-    # Reuse the same snapshot in the worker thread â€” avoids a second full-table
-    # scan. A second get_all_stock_data() here was the old double-fetch.
-    _all_existing = _snapshot
-
-    def _worker():
-        for ticker in queued:
-            try:
-                logger.info("auto_refresh  ticker=%s  stage=start", ticker)
-                fresh  = generate_stock_data(ticker)
-                result = _upsert_or_keep_snapshot(fresh, existing=_all_existing.get(ticker))
-                if result == "updated":
-                    run_auto_classification(ticker)
-                logger.info(
-                    "auto_refresh  ticker=%s  stage=complete  "
-                    "prev_close_date=%s  state=%s  result=%s",
-                    ticker,
-                    fresh.get("prev_close_date") or "â€”",
-                    fresh.get("ticker_state"),
-                    result,
-                )
-            except Exception as e:
-                logger.warning(
-                    "auto_refresh  ticker=%s  stage=error  err=%s", ticker, e
-                )
-                try:
-                    existing = _all_existing.get(ticker)
-                    if existing and existing.get("current_price"):
-                        set_ticker_state(ticker, "stale")
-                    else:
-                        set_ticker_state(ticker, "error")
-                except Exception:
-                    pass
-
-    t = threading.Thread(target=_worker, daemon=True, name=f"auto_refresh_{','.join(queued)}")
-    t.start()
-    logger.info("auto_refresh  stage=bg_thread_started  tickers=%s", queued)
-    return queued
-
-
-def _expire_stuck_loading(watchlist: list, data_map: dict | None = None) -> None:
-    """
-    Transition any ticker that has been in 'loading' state for longer than
-    LOADING_TIMEOUT_SECS from 'loading' â†’ 'error'.  Called on every dashboard
-    load to prevent the Loading badge from persisting forever.
-
-    Logs:
-        expire_loading  ticker=X  age_secs=N  reason=timeout
-    """
-    now = _et_now().replace(tzinfo=None)
-    for ticker in watchlist:
-        stock = data_map.get(ticker) if data_map is not None else get_stock_data(ticker)
-        if not stock or stock.get("ticker_state") != "loading":
-            continue
-        last_updated = stock.get("last_updated") or ""
-        try:
-            # Try current ET format first, then fall back to old UTC format
-            try:
-                updated_at = datetime.strptime(last_updated[:19], "%Y-%m-%d %I:%M %p")
-            except ValueError:
-                updated_at = datetime.strptime(last_updated[:19], "%Y-%m-%d %H:%M:%S")
-            age_secs = (now - updated_at).total_seconds()
-        except (ValueError, TypeError):
-            age_secs = LOADING_TIMEOUT_SECS + 1  # unparseable timestamp â†’ expire it
-
-        if age_secs > LOADING_TIMEOUT_SECS:
-            set_ticker_state(ticker, "error")
-            logger.warning(
-                "expire_loading  ticker=%s  age_secs=%.0f  reason=timeout  "
-                "action=set_state_error",
-                ticker, age_secs,
-            )
-
-
-def _upsert_or_keep_snapshot(fresh: dict, existing: dict | None = None) -> str:
-    """
-    Safe upsert: guards against overwriting a good DB snapshot when a live
-    fetch fails.
-
-    If ``fresh["ticker_state"] == "error"`` AND the existing DB record has a
-    valid price, we keep the snapshot instead of writing NULL prices to the DB.
-    The ticker state is set to "stale" so the UI badge updates accordingly.
-
-    Returns one of:
-        "updated"      â€” fresh data was upserted normally
-        "stale_kept"   â€” live failed but a good snapshot exists; kept + marked stale
-        "error_saved"  â€” live failed, no snapshot; error state upserted
-    """
-    ticker = fresh.get("ticker") or ""
-    if fresh.get("ticker_state") == "error":
-        snap = existing if existing is not None else get_stock_data(ticker)
-        if snap and snap.get("current_price"):
-            # Live fetch failed â€” protect the last-known-good snapshot
-            fresh["data_source"] = "stale_snapshot"
-            set_ticker_state(ticker, "stale")
-            logger.warning(
-                "_upsert_or_keep_snapshot  ticker=%s  live_failed=True  "
-                "snapshot_price=%.2f  action=keep_snapshot  state=stale",
-                ticker, float(snap["current_price"]),
-            )
-            return "stale_kept"
-        else:
-            # No usable snapshot â€” save the error state so the UI shows UNAVAILABLE
-            fresh["data_source"] = "unavailable"
-            upsert_stock_data(fresh)
-            logger.info(
-                "_upsert_or_keep_snapshot  ticker=%s  live_failed=True  "
-                "snapshot=none  action=save_error",
-                ticker,
-            )
-            return "error_saved"
-    else:
-        upsert_stock_data(fresh)
-        return "updated"
-
-
-def _get_mkt_ctx() -> dict:
-    """Return cached market context (regime, RS, sectors). Never raises."""
-    if _MKT_AVAILABLE:
-        try:
-            return _mkt.get_market_context()
-        except Exception:
-            pass
-    return {
-        "regime": "NEUTRAL", "regime_label": "Neutral",
-        "qqq_trend": "Unknown", "spy_trend": "Unknown",
-        "qqq_1d_pct": None, "spy_1d_pct": None,
-        "signal": "", "longs_ok": True, "shorts_ok": True,
-        "reduce_size": False, "no_trade": False,
-        "sectors": [], "leading_sectors": [], "weak_sectors": [],
-        "top_sector": None, "qqq_price": None, "spy_price": None,
-        "vix_level": None,
-    }
-
-
-def _build_entry_trigger(stock: dict):
-    """
-    Return (trigger_text, css_class) â€” a specific, actionable entry instruction
-    shown on the stock detail page so the trader knows EXACTLY when to execute.
-
-    CSS classes: entry-trigger-confirmed | entry-trigger-preconf |
-                 entry-trigger-continuation | entry-trigger-wait | entry-trigger-avoid
-
-    Handles Long Bias, Short Bias, and detects when price has already moved
-    past the entry zone so the trader is never told to enter a stale setup.
-    """
-    swing_status = stock.get("swing_status") or ""
-    bias         = stock.get("trade_bias") or "Neutral"
-    ema20        = stock.get("ema_20_daily")
-    pct_ema20    = stock.get("pct_from_ema20")
-    entry_low    = stock.get("entry_zone_low")
-    entry_high   = stock.get("entry_zone_high")
-    fib_618      = stock.get("fib_618")
-    current      = stock.get("current_price") or 0
-    stop         = stock.get("stop_level")
-
-    is_short    = bias in ("Short Bias", "Short")
-    dir_word    = "below" if is_short else "above"
-    candle_word = "bearish" if is_short else "bullish"
-
-    if bias == "Avoid":
-        return ("DO NOT TRADE â€” avoid bias set. No valid edge present. Remove from watchlist.",
-                "entry-trigger-avoid")
-
-    # â”€â”€ READY â€” LEVEL HOLDS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if swing_status == "READY â€” LEVEL HOLDS":
-        if entry_low and entry_high and stop:
-            return (
-                f"EXECUTE NOW â€” Entry zone ${entry_low:.2f}â€“${entry_high:.2f} confirmed. "
-                f"Level holding with volume. Stop: ${stop:.2f}. Enter current zone.",
-                "entry-trigger-confirmed")
-        if entry_low and entry_high:
-            return (
-                f"EXECUTE NOW â€” Entry zone ${entry_low:.2f}â€“${entry_high:.2f} confirmed. "
-                "Level holding with volume. Enter current zone.",
-                "entry-trigger-confirmed")
-        return ("EXECUTE NOW â€” Key level confirmed with volume. Enter at current price.",
-                "entry-trigger-confirmed")
-
-    # â”€â”€ PRE-CONFIRMATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if swing_status == "PRE-CONFIRMATION":
-        if ema20 and pct_ema20 is not None and abs(pct_ema20) <= 3.5:
-            return (
-                f"WAIT FOR TRIGGER â€” 15m candle must close {dir_word} 20 EMA (${ema20:.2f}) "
-                "on volume â‰¥ 1.2x avg. That close = entry signal. Do not jump early.",
-                "entry-trigger-preconf")
-        if fib_618 and current and abs(current - fib_618) / current * 100 <= 4.5:
-            return (
-                f"WAIT FOR TRIGGER â€” Approaching 61.8% Fib (${fib_618:.2f}). "
-                f"Need 15m candle close {dir_word} level + volume â‰¥ 1.2x avg before entry.",
-                "entry-trigger-preconf")
-        if entry_low and entry_high:
-            return (
-                f"WAIT FOR TRIGGER â€” Price approaching entry zone ${entry_low:.2f}â€“${entry_high:.2f}. "
-                f"Need 15m {candle_word} confirmation candle + volume â‰¥ 1.2x avg. Do not enter early.",
-                "entry-trigger-preconf")
-        return (
-            f"WAIT FOR TRIGGER â€” Near key level. Need 15m {candle_word} candle + volume â‰¥ 1.2x avg before entry.",
-            "entry-trigger-preconf")
-
-    # â”€â”€ TREND CONTINUATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if swing_status == "TREND CONTINUATION":
-        if is_short:
-            # Short continuation: ideal entry is a bounce UP into resistance, then short on rejection.
-            # If price is already BELOW the entry zone it already broke down â€” entry was missed.
-            if entry_low and entry_high:
-                if current and current < entry_low:
-                    return (
-                        f"MISSED ENTRY â€” Price already broke below entry zone (${entry_low:.2f}). "
-                        f"Wait for a bounce back to ${entry_low:.2f}â€“${entry_high:.2f} resistance, "
-                        "then enter short on 15m bearish rejection candle.",
-                        "entry-trigger-wait")
-                if current and current > entry_high:
-                    return (
-                        f"SHORT CONTINUATION â€” Price above entry zone. "
-                        f"Wait for pullback to ${entry_low:.2f}â€“${entry_high:.2f} resistance, "
-                        "then enter short on 15m bearish rejection candle.",
-                        "entry-trigger-continuation")
-                return (
-                    f"SHORT CONTINUATION â€” Price in resistance zone ${entry_low:.2f}â€“${entry_high:.2f}. "
-                    "Wait for 15m bearish rejection candle + volume â‰¥ 1.2x avg, then enter short.",
-                    "entry-trigger-continuation")
-            if entry_high:
-                return (
-                    f"SHORT CONTINUATION â€” Wait for bounce to ${entry_high:.2f} resistance, "
-                    "then enter short on 15m bearish rejection candle.",
-                    "entry-trigger-continuation")
-            return ("SHORT CONTINUATION â€” Wait for bounce to key resistance. Short the lower high with volume confirmation.",
-                    "entry-trigger-continuation")
-        else:
-            # Long continuation: ideal entry is a pullback DOWN to support, then buy the hold.
-            # If price is already BELOW the entry zone it broke through support â€” entry was missed.
-            if entry_low and entry_high:
-                if current and current < entry_low:
-                    return (
-                        f"MISSED ENTRY â€” Price already broke below entry zone (${entry_low:.2f}). "
-                        f"Wait for new setup or bounce back to ${entry_low:.2f}â€“${entry_high:.2f} before re-evaluating.",
-                        "entry-trigger-wait")
-                return (
-                    f"PULLBACK ENTRY â€” Wait for pullback to ${entry_low:.2f}â€“${entry_high:.2f}. "
-                    "Buy the higher low. Need 15m momentum candle showing trend resuming.",
-                    "entry-trigger-continuation")
-            if entry_low:
-                return (
-                    f"PULLBACK ENTRY â€” Wait for pullback to ${entry_low:.2f}. "
-                    "Buy the higher low. Need 15m momentum candle showing trend resuming.",
-                    "entry-trigger-continuation")
-            return ("TREND CONTINUATION â€” Wait for pullback to key level. Buy the higher low with volume confirmation.",
-                    "entry-trigger-continuation")
-
-    # WAIT or unknown
-    return ("NOT READY â€” No valid entry signal. Monitor for READY â€” LEVEL HOLDS or PRE-CONFIRMATION status.",
-            "entry-trigger-wait")
-
-
-def build_ai_trade_plan(stock: dict) -> dict:
-    """
-    Build an institutional-style AI trade plan from existing stock data fields.
-    Returns a dict consumed by the stock_detail template's trade plan panel.
-    """
-    swing_score  = stock.get("swing_score")  or 0
-    cat_score    = stock.get("catalyst_score") or 0
-    rr           = stock.get("risk_reward")
-    swing_status = stock.get("swing_status") or ""
-    swing_type   = stock.get("swing_setup_type") or ""
-    zone_prob    = stock.get("zone_probability")
-    zone_setup   = stock.get("zone_ai_setup") or ""
-    cat_summary  = (stock.get("catalyst_summary") or "").strip()
-    rvol         = stock.get("rel_volume") or 0
-    daily_trend  = stock.get("daily_trend") or ""
-    h4_trend     = stock.get("h4_trend") or ""
-    fvg_bull     = stock.get("fvg_bullish") or False
-    fvg_bear     = stock.get("fvg_bearish") or False
-    demand_grade = stock.get("demand_zone_grade") or ""
-    supply_grade = stock.get("supply_zone_grade") or ""
-    rs_score     = stock.get("rs_score") or 50
-    sector_etf   = stock.get("sector_etf") or ""
-    pct_ema20    = stock.get("pct_from_ema20") or 0
-    in_supply    = stock.get("in_supply_zone") or False
-    bos_bull     = False
-    bos_bear     = False
-    try:
-        sm = _json.loads(stock.get("smart_money_json") or "{}")
-        bos_bull = bool(sm.get("bos_bullish"))
-        bos_bear = bool(sm.get("bos_bearish"))
-    except Exception:
-        pass
-
-    # Grade â€” read from the canonical classify() result instead of a
-    # second, independently-tuned threshold table. This is the exact field
-    # shown as the grade badge everywhere else for this ticker, so the AI
-    # trade plan panel can never show a grade that contradicts the
-    # dashboard table / Scanner Buckets / Best Swing Candidates badge.
-    _plan_classification = classify(stock)
-    grade = _plan_classification["grade"]
-    grade_css = {
-        "A+": "plan-aplus", "A": "plan-a",
-        "B+": "plan-bplus", "B": "plan-b",
-        "B-": "plan-bplus", "C": "plan-b", "D": "plan-b",
-    }.get(grade, "plan-b")
-
-    # Probability
-    prob = zone_prob or max(30, min(90, 30 + swing_score * 4 + cat_score * 3))
-
-    # Reasons (green signals)
-    reasons = []
-    if cat_summary:
-        reasons.append(cat_summary[:90])
-    if rvol >= 4:
-        reasons.append(f"RVOL {rvol:.1f}x â€” institutional momentum")
-    elif rvol >= 2:
-        reasons.append(f"RVOL {rvol:.1f}x â€” above average volume")
-    elif rvol >= 1.3:
-        reasons.append(f"RVOL {rvol:.1f}x â€” moderate interest")
-    if "Bullish" in daily_trend:
-        reasons.append("Daily trend bullish â€” higher highs / higher lows")
-    if "Bullish" in h4_trend:
-        reasons.append("4H trend bullish â€” momentum aligning")
-    if demand_grade in ("A+", "A"):
-        reasons.append(f"Institutional demand zone ({demand_grade}) below")
-    if fvg_bull:
-        reasons.append("Bullish Fair Value Gap â€” liquidity void support")
-    if bos_bull:
-        reasons.append("Break of structure bullish â€” trend confirmed")
-    if rs_score >= 75:
-        reasons.append(f"Outperforming QQQ (RS {rs_score})")
-    if sector_etf:
-        reasons.append(f"Sector: {sector_etf} â€” check sector strength")
-
-    # Warnings (red flags / avoidance)
-    warnings = []
-    if in_supply or supply_grade in ("A+", "A"):
-        warnings.append("Near supply zone â€” watch for rejection")
-    if fvg_bear:
-        warnings.append("Bearish Fair Value Gap overhead â€” possible resistance")
-    if rvol < 0.8:
-        warnings.append("Low relative volume â€” weak institutional interest")
-    if rr and rr < 1.5:
-        warnings.append(f"R:R {rr:.1f}:1 is too weak â€” minimum 1.5:1 needed")
-    if pct_ema20 > 8:
-        warnings.append(f"Extended {pct_ema20:.1f}% above 20 EMA â€” wait for pullback")
-    if swing_status == "WAIT":
-        warnings.append("No confirmed entry signal â€” monitor for setup")
-    if rs_score < 30:
-        warnings.append(f"Weak RS ({rs_score}) â€” underperforming QQQ")
-
-    entry_low  = stock.get("entry_zone_low")
-    entry_high = stock.get("entry_zone_high")
-    entry_mid  = None
-    if entry_low and entry_high:
-        entry_mid = round((entry_low + entry_high) / 2, 2)
-
-    return {
-        "grade":       grade,
-        "grade_css":   grade_css,
-        "setup_label": zone_setup or swing_type or "Setup Forming",
-        "probability": prob,
-        "entry_low":   entry_low,
-        "entry_high":  entry_high,
-        "entry_mid":   entry_mid,
-        "stop":        stock.get("stop_level"),
-        "target1":     stock.get("target_1"),
-        "target2":     stock.get("target_2"),
-        "rr":          rr,
-        "reasons":     reasons[:7],
-        "warnings":    warnings[:4],
-        "has_plan":    bool(entry_low or stock.get("stop_level") or stock.get("target_1")),
-        "swing_score": swing_score,
-        "cat_score":   cat_score,
-    }
-
-
-def get_active_wl_id() -> int | None:
-    """
-    Return the active watchlist ID from the session.
-    Falls back to the first watchlist if the session value is missing or stale.
-    Returns None only when no watchlists exist at all.
-    """
-    all_wls = get_all_watchlists(current_user_id())
-    if not all_wls:
-        return None
-    wl_id = session.get("active_wl_id")
-    if wl_id and any(w["id"] == wl_id for w in all_wls):
-        return wl_id
-    return all_wls[0]["id"]
-
-
-def run_auto_classification(ticker: str, user_id: int = 1):
-    """
-    Classify a ticker and, if auto_classify is ON, move it to the appropriate
-    default watchlist. Only reorganizes memberships within the four DEFAULT_WATCHLISTS;
-    never touches user-created custom watchlists.
-
-    Called after every upsert_stock_data (add, refresh, refresh-single).
-    """
-    stock = get_stock_data(ticker)
-    if not stock:
-        return
-
-    target_name, reason = classify_stock(stock)
-
-    # Always persist the reason (visible even when auto_classify is OFF)
-    set_stock_classify(ticker, reason)
-
-    # Respect manual override â€” do not move if auto_classify is OFF
-    if stock.get("auto_classify", 1) == 0:
-        return
-
-    # Build a map of {name â†’ id} for every default watchlist that exists in DB
-    all_wls = get_all_watchlists(user_id)
-    default_wl_map = {wl["name"]: wl["id"] for wl in all_wls
-                      if wl["name"] in DEFAULT_WATCHLISTS}
-    if not default_wl_map:
-        return
-
-    target_id = default_wl_map.get(target_name)
-    if not target_id:
-        return
-
-    # Only reorganize if the stock is already in at least one default list
-    current_ids = set(get_ticker_watchlist_ids(ticker, user_id))
-    default_ids = set(default_wl_map.values())
-    in_defaults = current_ids & default_ids
-
-    if not in_defaults:
-        # Stock lives only in custom lists â€” don't auto-insert into defaults
-        return
-
-    if target_id in in_defaults and len(in_defaults) == 1:
-        # Already in the correct list and only that list â€” nothing to do
-        return
-
-    # Move: add to target first (preserves stock_data), then remove from others
-    add_ticker_to_watchlist(target_id, ticker)
-    for wid in in_defaults:
-        if wid != target_id:
-            remove_ticker_from_watchlist(wid, ticker)
-
-
-def seed_demo_data():
-    """
-    Populate the first watchlist with mock data on the very first run only.
-
-    The 'demo_seeded' flag in the settings table ensures this runs exactly once,
-    even if the user later deletes all tickers (which would otherwise make the
-    first watchlist appear empty and trigger a re-seed on the next server start).
-    """
-    if get_setting("demo_seeded") == "1":
-        return   # Already seeded â€” never re-seed, even if watchlist is empty
-
-    all_wls = get_all_watchlists(1)
-    if not all_wls:
-        return
-    first_id = all_wls[0]["id"]
-    for ticker in load_mock_watchlist():
-        add_ticker_to_watchlist(first_id, ticker)
-        upsert_stock_data(generate_stock_data(ticker))
-
-    set_setting("demo_seeded", "1")
-
-
-# ---------------------------------------------------------------------------
-# Display helpers
-# ---------------------------------------------------------------------------
-
-def get_score_class(score):
-    """CSS class for a 1-10 score (used for both setup_score and catalyst_score)."""
-    if score is None:
-        return "neutral"
-    if score >= 7:
-        return "strong"
-    if score >= 4:
-        return "moderate"
-    return "weak"
-
-
-def get_bias_class(bias):
-    """CSS class for the trade bias label."""
-    return {
-        "Long Bias":  "bias-long",
-        "Short Bias": "bias-short",
-        "Neutral":    "bias-neutral",
-        "Avoid":      "bias-avoid",
-    }.get(bias, "bias-neutral")
-
-
-def get_setup_type_class(setup_type):
-    """CSS class for the setup type pill (day-trading and swing types)."""
-    return {
-        # Day-trading legacy types
-        "Momentum Breakout":             "setup-momentum-breakout",
-        "Momentum Runner":               "setup-momentum-runner",
-        "Gap and Go":                    "setup-gap-go",
-        "Breakdown":                     "setup-breakdown",
-        "VWAP Reclaim":                  "setup-vwap",
-        "Range Break":                   "setup-range",
-        "ORB":                           "setup-orb",
-        # Swing pullback / entry types
-        "Pullback to Support":           "setup-pullback",
-        "Pullback to 20 EMA":            "setup-pullback",
-        "Pullback to 50 EMA":            "setup-pullback",
-        "Breakout Retest":               "setup-breakout-retest",
-        "Breakout Retest Forming":       "setup-breakout-retest",
-        "Near 50% Retracement":          "setup-fib50",
-        "Near 61.8% Retracement":        "setup-fib618",
-        "Order Block Test":              "setup-order-block",
-        # Continuation / run-up types (green/teal accent)
-        "Breakout Continuation":         "setup-continuation",
-        "Earnings Continuation":         "setup-continuation",
-        "Bull Flag":                     "setup-bull-flag",
-        "Relative Strength Leader":      "setup-rs-leader",
-        "Trend Continuation":            "setup-trend-continuation",
-        # Extended / chase (amber accent)
-        "Extended â€” Wait for Pullback":  "setup-extended",
-        "Extended â€” Wait":               "setup-extended",
-        "Chase Zone â€” Do Not Enter":     "setup-chase",
-        # Avoid
-        "At Resistance â€” Avoid":         "setup-resistance-avoid",
-        "At Resistance Avoid":           "setup-resistance-avoid",
-        "Weak Structure â€” Avoid":        "setup-weak-structure",
-        "Weak Structure Avoid":          "setup-weak-structure",
-        "No Setup":                      "setup-none",
-    }.get(setup_type, "setup-none")
-
-
-def get_swing_status_class(swing_status: str) -> str:
-    """CSS class for the swing status badge."""
-    return {
-        # â”€â”€ Current 4-mode labels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        "READY â€” LEVEL HOLDS":        "swing-status-ready",
-        "PRE-CONFIRMATION":           "swing-status-pre-confirm",
-        "TREND CONTINUATION":         "swing-status-continuation",
-        "WAIT":                       "swing-status-wait",
-        # â”€â”€ Legacy labels (backward compat for DB values) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        "GOOD SWING CANDIDATE":       "swing-status-ready",
-        "READY IF LEVEL HOLDS":       "swing-status-ready",
-        "WAIT FOR 15M CONFIRMATION":  "swing-status-pre-confirm",
-        "WAIT FOR PULLBACK":          "swing-status-wait",
-        "TOO EXTENDED":               "swing-status-extended",
-        "NOT ENOUGH EDGE":            "swing-status-no-edge",
-        "AVOID AT RESISTANCE":        "swing-status-avoid",
-        "AVOID WEAK STRUCTURE":       "swing-status-avoid",
-    }.get(swing_status or "", "swing-status-wait")
-
-
-def get_confidence_class(confidence):
-    """CSS class for the confidence level badge."""
-    return {
-        "High":   "conf-high",
-        "Medium": "conf-medium",
-        "Low":    "conf-low",
-    }.get(confidence, "conf-low")
-
-
-def get_orb_class(orb_ready):
-    """CSS class for the ORB readiness badge."""
-    return "orb-yes" if orb_ready == "YES" else "orb-no"
-
-
-def get_ob_class(order_block):
-    """CSS class for the order block badge."""
-    return {
-        "Demand":  "ob-demand",
-        "Supply":  "ob-supply",
-        "Neutral": "ob-neutral",
-    }.get(order_block, "ob-neutral")
-
-
-def get_entry_class(entry_quality):
-    """CSS class for the entry quality badge."""
-    return {
-        "Perfect":  "entry-perfect",
-        "Okay":     "entry-okay",
-        "Extended": "entry-extended",
-    }.get(entry_quality, "entry-okay")
-
-
-def get_exec_class(exec_state):
-    """CSS class for the execution state badge."""
-    return {
-        "TRIGGERED": "exec-triggered",
-        "READY":     "exec-ready",
-        "WAIT":      "exec-wait",
-    }.get(exec_state, "exec-wait")
-
-
-# ---------------------------------------------------------------------------
-# Final action â€” single source of truth for the UI decision label
-# ---------------------------------------------------------------------------
-
-_SWING_STATUS_ACTION = {
-    # â”€â”€ Current 4-mode labels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "READY â€” LEVEL HOLDS":        ("READY",              "exec-ready",        "Level confirmed â€” entry valid, manage risk"),
-    "PRE-CONFIRMATION":           ("PRE-CONFIRMATION",   "exec-pre-confirm",  "Potential entry forming â€” waiting for confirmation candle"),
-    "TREND CONTINUATION":         ("TREND CONTINUATION", "exec-continuation", "Breakout entry â€” trade the continuation, stop below breakout"),
-    "WAIT":                       ("WAIT",               "exec-wait",         "No valid setup â€” no actionable edge right now"),
-    # â”€â”€ Legacy labels (backward compat) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "GOOD SWING CANDIDATE":       ("READY",              "exec-ready",        "High-quality swing setup â€” watch for entry"),
-    "READY IF LEVEL HOLDS":       ("READY",              "exec-ready",        "Price at key level â€” confirm holds before entry"),
-    "WAIT FOR 15M CONFIRMATION":  ("PRE-CONFIRMATION",   "exec-pre-confirm",  "Structure in place â€” wait for 15m confirmation candle"),
-    "WAIT FOR PULLBACK":          ("WAIT",               "exec-wait",         "Trend is right but extended â€” wait for pullback to level"),
-    "TOO EXTENDED":               ("DO NOT CHASE",       "exec-extended",     "Price too far from entry zone â€” do not chase"),
-    "NOT ENOUGH EDGE":            ("WAIT",               "exec-wait",         "Insufficient edge â€” no actionable swing setup"),
-    "AVOID AT RESISTANCE":        ("WAIT",               "exec-wait",         "At resistance â€” poor R:R, avoid long entry"),
-    "AVOID WEAK STRUCTURE":       ("WAIT",               "exec-wait",         "Weak market structure â€” avoid this setup"),
-}
-
-
-def compute_swing_final_action(swing_status: str) -> tuple:
-    """Map swing_status directly to a final_action tuple (action, css, reason)."""
-    row = _SWING_STATUS_ACTION.get(swing_status or "")
-    if row:
-        return row
-    return "WAIT", "exec-wait", "Monitoring â€” conditions not yet met"
-
-
-_FINAL_ACTION_CSS = {
-    "TRIGGERED":            "exec-triggered",
-    "READY":                "exec-ready",
-    "PRE-CONFIRMATION":     "exec-pre-confirm",
-    "TREND CONTINUATION":   "exec-continuation",
-    "WAIT":                 "exec-wait",
-    "WAIT (LOW CONF)":      "exec-wait-low",
-    "DO NOT CHASE":         "exec-extended",
-    "NO SETUP":             "exec-no-setup",
-}
-
-
-def get_final_action_class(final_action: str) -> str:
-    return _FINAL_ACTION_CSS.get(final_action, "exec-wait")
-
-
-def compute_final_action(
-    setup_score: int,
-    cat_score: int,
-    combined_confidence: str,
-    entry_quality: str | None,
-    display_exec_state: str,
-) -> tuple:
-    """
-    Derive the single final decision shown everywhere in the UI.
-    Returns (final_action: str, css_class: str, reason: str).
-
-    Priority order:
-      1. TRIGGERED  â€” ORB system confirmed all entry conditions (session-aware)
-      2. DO NOT CHASE â€” price already extended; never enter late
-      3. READY      â€” scores â‰¥ 4 / 4 and confidence â‰¥ Medium
-      4. WAIT (LOW CONF) â€” scores â‰¥ 4 / 4 but confidence Low
-      5. READY      â€” ORB system says READY even if scores are borderline
-      6. NO SETUP   â€” setup_score < 3; nothing actionable
-      7. WAIT       â€” default / conditions not yet met
-
-    The DB exec_state is never modified here; only the display layer changes.
-    """
-    # 1. Triggered by ORB system during regular hours â€” strongest signal
-    if display_exec_state == "TRIGGERED":
-        reason = "All entry conditions confirmed â€” act now"
-        logger.debug(
-            "final_action=TRIGGERED  setup=%s cat=%s conf=%s entry=%s",
-            setup_score, cat_score, combined_confidence, entry_quality,
-        )
-        return "TRIGGERED", "exec-triggered", reason
-
-    # 2. Extended entry â€” do not chase regardless of scores
-    if (entry_quality or "").lower() == "extended":
-        reason = "Price extended above entry zone â€” wait for pullback"
-        logger.debug(
-            "final_action=DO NOT CHASE  setup=%s cat=%s conf=%s entry=Extended",
-            setup_score, cat_score, combined_confidence,
-        )
-        return "DO NOT CHASE", "exec-extended", reason
-
-    # 3 & 4. Score-based decision (setup â‰¥ 4 and catalyst â‰¥ 4)
-    if setup_score >= 4 and cat_score >= 4:
-        if combined_confidence in ("High", "Medium"):
-            reason = (
-                f"Setup {setup_score}/10 Â· Catalyst {cat_score}/10 Â· "
-                f"{combined_confidence} confidence"
-            )
-            logger.debug(
-                "final_action=READY  setup=%s cat=%s conf=%s entry=%s",
-                setup_score, cat_score, combined_confidence, entry_quality,
-            )
-            return "READY", "exec-ready", reason
-        else:
-            reason = (
-                f"Scores strong (setup {setup_score}, catalyst {cat_score}) "
-                "but confidence Low â€” wait for confirmation"
-            )
-            logger.debug(
-                "final_action=WAIT (LOW CONF)  setup=%s cat=%s conf=%s entry=%s",
-                setup_score, cat_score, combined_confidence, entry_quality,
-            )
-            return "WAIT (LOW CONF)", "exec-wait-low", reason
-
-    # 5. ORB system says READY even if scores are borderline
-    if display_exec_state == "READY":
-        reason = "ORB conditions met â€” watching for entry signal"
-        logger.debug(
-            "final_action=READY (ORB)  setup=%s cat=%s conf=%s entry=%s",
-            setup_score, cat_score, combined_confidence, entry_quality,
-        )
-        return "READY", "exec-ready", reason
-
-    # 6. No setup
-    if setup_score < 3:
-        reason = f"Setup score {setup_score}/10 â€” no actionable pattern yet"
-        logger.debug(
-            "final_action=NO SETUP  setup=%s cat=%s conf=%s entry=%s",
-            setup_score, cat_score, combined_confidence, entry_quality,
-        )
-        return "NO SETUP", "exec-no-setup", reason
-
-    # 7. Default
-    reason = "Conditions not yet met â€” continue monitoring"
-    logger.debug(
-        "final_action=WAIT  setup=%s cat=%s conf=%s entry=%s",
-        setup_score, cat_score, combined_confidence, entry_quality,
-    )
-    return "WAIT", "exec-wait", reason
-
-
-def compute_pnl(direction: str, entry: float, exit_: float) -> tuple:
-    """
-    Compute directional P&L% and result label from a closed trade.
-    Returns (pnl_pct: float, result: str).
-    """
-    try:
-        entry  = float(entry)
-        exit_  = float(exit_)
-    except (TypeError, ValueError):
-        return 0.0, "Break Even"
-
-    if entry == 0:
-        return 0.0, "Break Even"
-
-    if direction == "Long":
-        pnl_pct = (exit_ - entry) / entry * 100
-    else:  # Short
-        pnl_pct = (entry - exit_) / entry * 100
-
-    pnl_pct = round(pnl_pct, 2)
-    if pnl_pct > 0:
-        result = "Win"
-    elif pnl_pct < 0:
-        result = "Loss"
-    else:
-        result = "Break Even"
-    return pnl_pct, result
-
-
-def compute_journal_summary(entries: list) -> dict:
-    """
-    Derive win-rate, P&L stats, and per-setup breakdown from journal entries.
-    Returns a dict consumed directly by the journal template.
-    """
-    if not entries:
-        return {"total": 0, "wins": 0, "losses": 0, "be": 0,
-                "win_rate": None, "avg_win": None, "avg_loss": None,
-                "total_pnl": 0.0, "setups": [], "momentum_bands": []}
-
-    wins   = [e for e in entries if e.get("result") == "Win"]
-    losses = [e for e in entries if e.get("result") == "Loss"]
-    bes    = [e for e in entries if e.get("result") == "Break Even"]
-
-    win_rate  = round(len(wins) / len(entries) * 100, 1) if entries else None
-    avg_win   = round(sum(e["pnl_pct"] for e in wins)   / len(wins),   2) if wins   else None
-    avg_loss  = round(sum(e["pnl_pct"] for e in losses) / len(losses), 2) if losses else None
-    total_pnl = round(sum(e.get("pnl_pct") or 0 for e in entries), 2)
-
-    # Per-setup breakdown â€” rank by win rate (min 2 trades to appear in ranked list)
-    setup_map = defaultdict(list)
-    for e in entries:
-        st = e.get("setup_type") or "Untagged"
-        setup_map[st].append(e)
-
-    setups = []
-    for st, trades in setup_map.items():
-        st_wins = [t for t in trades if t.get("result") == "Win"]
-        st_wr   = round(len(st_wins) / len(trades) * 100, 1)
-        st_pnl  = round(sum(t.get("pnl_pct") or 0 for t in trades) / len(trades), 2)
-        setups.append({
-            "setup_type": st,
-            "count":      len(trades),
-            "win_rate":   st_wr,
-            "avg_pnl":    st_pnl,
-            "wins":       len(st_wins),
-            "losses":     len(trades) - len(st_wins),
-        })
-    setups.sort(key=lambda s: (s["win_rate"], s["avg_pnl"]), reverse=True)
-
-    # Momentum score bands: group 1-3 / 4-6 / 7-8 / 9-10
-    bands = [("1-3", 1, 3), ("4-6", 4, 6), ("7-8", 7, 8), ("9-10", 9, 10)]
-    momentum_bands = []
-    for label, lo, hi in bands:
-        band = [e for e in entries
-                if e.get("momentum_score") and lo <= e["momentum_score"] <= hi]
-        if not band:
-            continue
-        bw = [t for t in band if t.get("result") == "Win"]
-        momentum_bands.append({
-            "label":    label,
-            "count":    len(band),
-            "win_rate": round(len(bw) / len(band) * 100, 1),
-            "avg_pnl":  round(sum(t.get("pnl_pct") or 0 for t in band) / len(band), 2),
-        })
-
-    return {
-        "total":    len(entries),
-        "wins":     len(wins),
-        "losses":   len(losses),
-        "be":       len(bes),
-        "win_rate": win_rate,
-        "avg_win":  avg_win,
-        "avg_loss": avg_loss,
-        "total_pnl": total_pnl,
-        "setups":    setups,
-        "momentum_bands": momentum_bands,
-    }
-
-
-def compute_rr(plan_bias, entry, stop, target):
-    """
-    Compute risk/reward ratio from plan fields.
-    Returns (rr_ratio: float, rr_display: str, rr_class: str) or (None, 'â€”', 'rr-neutral').
-    Long:  reward = target - entry,  risk = entry - stop
-    Short: reward = entry - target,  risk = stop  - entry
-    """
-    try:
-        entry  = float(entry)
-        stop   = float(stop)
-        target = float(target)
-    except (TypeError, ValueError):
-        return None, "â€”", "rr-neutral"
-
-    if plan_bias == "Long":
-        reward = target - entry
-        risk   = entry  - stop
-    elif plan_bias == "Short":
-        reward = entry  - target
-        risk   = stop   - entry
-    else:
-        return None, "â€”", "rr-neutral"
-
-    if risk <= 0 or reward < 0:
-        return None, "Invalid", "rr-warn"
-
-    ratio = reward / risk
-    display = f"{ratio:.1f}:1"
-    if ratio >= 2:
-        css = "rr-good"
-    elif ratio >= 1:
-        css = "rr-okay"
-    else:
-        css = "rr-poor"
-    return ratio, display, css
-
-
-def compute_trade_coach(stock: dict, plan: dict, market_temp: dict, risk_settings: dict) -> dict:
-    """
-    Return a coaching verdict for the current stock + plan + market conditions.
-    Output: {coach_status, message, level, css, reduce_size, signals}
-    coach_status : "TRADE ALLOWED" | "WATCH" | "REDUCE SIZE" | "BLOCKED"
-    level        : "go" | "watch" | "reduce" | "blocked"
-    """
-    mt        = market_temp or {}
-    regime    = mt.get("regime", "NEUTRAL")
-    longs_ok  = mt.get("longs_ok", True)
-    shorts_ok = mt.get("shorts_ok", True)
-    reduce_sz = mt.get("reduce_size", False)
-    decision  = mt.get("decision_cmd", "")
-    if decision in ("Loadingâ€¦", "â€”", "", None):
-        decision = ""
-
-    tp       = stock.get("trade_permission") or {}
-    perm     = tp.get("permission", "WATCH")
-    perm_rsn = tp.get("reason", "")
-
-    bias          = stock.get("trade_bias", "")
-    swing_sc      = float(stock.get("swing_score") or 0)
-    cat_sc        = float(stock.get("catalyst_score") or 0)
-    rr            = float(stock.get("risk_reward") or 0)
-    trend         = stock.get("daily_trend") or ""
-    extended      = bool(stock.get("is_extended", False))
-    entry_quality = stock.get("entry_quality") or ""
-    momentum_sc   = float(stock.get("momentum_score") or 0)
-
-    # Setup label: prefer mode-specific type, fallback to generic
-    trading_mode = risk_settings.get("trading_mode", "SWING TRADE")
-    is_day_trade = "DAY" in trading_mode.upper()
-    setup_raw    = stock.get("setup_type") if is_day_trade else stock.get("swing_setup_type")
-    setup_raw    = setup_raw or stock.get("setup_type") or stock.get("swing_setup_type") or ""
-    setup_label  = setup_raw.strip() if setup_raw else "this setup"
-    mode_label   = "Day trade" if is_day_trade else "Swing trade"
-
-    has_entry  = bool(plan.get("entry_level"))
-    has_stop   = bool(plan.get("stop_loss"))
-    has_target = bool(plan.get("target_price"))
-
-    signals = []
-    missing = []
-
-    # â”€â”€ Hard blocks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if regime == "NO_TRADE":
-        return {
-            "coach_status": "BLOCKED",
-            "message": "Blocked. VIX is spiking and market conditions do not support any entries today. Sit out.",
-            "level": "blocked", "css": "coach-blocked", "reduce_size": False,
-            "signals": ["No-trade regime active (VIX spike)", "Wait for volatility to normalize"],
-        }
-
-    if perm == "BLOCKED":
-        rsn = perm_rsn[:120] if perm_rsn else "Setup does not meet minimum entry criteria."
-        return {
-            "coach_status": "BLOCKED",
-            "message": f"Blocked. {rsn}",
-            "level": "blocked", "css": "coach-blocked", "reduce_size": False,
-            "signals": [perm_rsn] if perm_rsn else ["Review setup quality and entry conditions"],
-        }
-
-    if bias == "Long" and longs_ok is False:
-        return {
-            "coach_status": "BLOCKED",
-            "message": "Blocked. Market regime is risk-off â€” longs are not supported right now. Wait for a regime shift.",
-            "level": "blocked", "css": "coach-blocked", "reduce_size": True,
-            "signals": [f"Regime: {regime} â€” longs suppressed", "Consider waiting or flipping to short bias"],
-        }
-
-    if bias == "Short" and shorts_ok is False:
-        return {
-            "coach_status": "BLOCKED",
-            "message": "Blocked. Market is trending up â€” shorting here is against the tape. Wait for a topping structure.",
-            "level": "blocked", "css": "coach-blocked", "reduce_size": True,
-            "signals": [f"Regime: {regime} â€” shorts suppressed", "Wait for clear topping structure or trend shift"],
-        }
-
-    # â”€â”€ Missing plan elements â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if has_entry and not has_stop:
-        missing.append("no stop loss â€” cannot size position")
-    if has_entry and has_stop and not has_target:
-        missing.append("no target â€” R:R unknown")
-
-    # â”€â”€ Quality signals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if swing_sc >= 8:
-        signals.append(f"A+ setup ({swing_sc:.0f}/10)")
-    elif swing_sc >= 6:
-        signals.append(f"Quality setup ({swing_sc:.0f}/10)")
-    elif swing_sc > 0:
-        signals.append(f"Weak setup ({swing_sc:.0f}/10)")
-
-    if momentum_sc >= 7:
-        signals.append(f"Strong momentum ({momentum_sc:.0f}/10)")
-    elif momentum_sc >= 4:
-        signals.append(f"Moderate momentum ({momentum_sc:.0f}/10)")
-    elif momentum_sc > 0:
-        signals.append(f"Weak momentum ({momentum_sc:.0f}/10)")
-
-    if cat_sc >= 7:
-        signals.append(f"Strong catalyst ({cat_sc:.0f}/10)")
-    elif cat_sc >= 4:
-        signals.append(f"Catalyst present ({cat_sc:.0f}/10)")
-    elif cat_sc > 0:
-        signals.append(f"Weak catalyst ({cat_sc:.0f}/10)")
-
-    if rr >= 3:
-        signals.append(f"Excellent R:R ({rr:.1f}:1)")
-    elif rr >= 2:
-        signals.append(f"Good R:R ({rr:.1f}:1)")
-    elif rr >= 1:
-        signals.append(f"Acceptable R:R ({rr:.1f}:1)")
-    elif rr > 0:
-        signals.append(f"Poor R:R ({rr:.1f}:1 â€” consider passing)")
-
-    if trend:
-        signals.append(f"Trend: {trend}")
-
-    is_extended_entry = extended or entry_quality == "Extended"
-    if is_extended_entry:
-        signals.append("Price extended from ideal entry zone")
-
-    _regime_labels = {
-        "RISK_ON":  "Market: Risk-on (favorable)",
-        "NEUTRAL":  "Market: Neutral",
-        "CAUTION":  "Market: Caution/chop zone",
-        "RISK_OFF": "Market: Risk-off",
-    }
-    if regime in _regime_labels:
-        signals.append(_regime_labels[regime])
-
-    # â”€â”€ Determine if market requires size reduction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    reduce_flag = reduce_sz or regime in ("CAUTION", "RISK_OFF")
-
-    # â”€â”€ Build verdict â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if perm == "TRADE ALLOWED":
-
-        # Weak R:R hard gate
-        if rr > 0 and rr < 1.5:
-            if missing:
-                signals.append("Note: " + "; ".join(missing))
-            return {
-                "coach_status": "BLOCKED",
-                "message": f"Blocked. Risk/reward is too weak ({rr:.1f}:1) â€” need at least 1.5:1 to justify entry.",
-                "level": "blocked", "css": "coach-blocked", "reduce_size": False,
-                "signals": signals[:6],
-            }
-
-        # Extended entry: downgrade to WATCH regardless of permission
-        if is_extended_entry:
-            msg = (f"Watch only. {mode_label} entry is extended from the ideal zone. "
-                   f"Do not chase â€” wait for a pullback into the entry zone.")
-            if missing:
-                msg += " Note: " + "; ".join(missing) + "."
-            return {
-                "coach_status": "WATCH",
-                "message": msg,
-                "level": "watch", "css": "coach-watch", "reduce_size": False,
-                "signals": signals[:6],
-            }
-
-        # A+ setup fully confirmed
-        if swing_sc >= 8 and cat_sc >= 5 and rr >= 2:
-            if regime == "RISK_ON" and "Bullish" in trend and bias == "Long":
-                msg = (f"Trade allowed. A+ {setup_label} â€” trend, structure, and market all aligned for longs. "
-                       f"Execute with standard size.")
-            elif "Bearish" in trend and bias == "Short":
-                msg = (f"Trade allowed. A+ {setup_label} aligned for the short side. "
-                       f"Confirm structure break before entry.")
-            else:
-                msg = (f"Trade allowed. A+ {setup_label} â€” quality setup with solid R:R. "
-                       f"Confirm entry trigger before executing.")
-            level, css, status = "go", "coach-go", "TRADE ALLOWED"
-
-        # Solid setup with good R:R
-        elif swing_sc >= 6 and rr >= 1.5:
-            msg = (f"Trade allowed. Quality {setup_label} with acceptable R:R. "
-                   f"Standard size, disciplined execution.")
-            level, css, status = "go", "coach-go", "TRADE ALLOWED"
-
-        # Below-average quality â†’ REDUCE SIZE
-        else:
-            msg = (f"Trade allowed but {setup_label} quality is below ideal. "
-                   f"Use reduced size and tight stop discipline.")
-            level, css, status = "reduce", "coach-reduce", "REDUCE SIZE"
-            reduce_flag = True
-
-        # Override to REDUCE SIZE when market conditions are weak
-        if reduce_flag and level == "go":
-            size_note = f" ({decision})" if decision else ""
-            msg += f" Reduce position size â€” market conditions are not fully supportive{size_note}."
-            level, css, status = "reduce", "coach-reduce", "REDUCE SIZE"
-
-    elif perm == "WATCH":
-        if "Bullish pullback" in perm_rsn:
-            msg = (
-                "Watch â€” Bullish pullback in progress. Price is above both 20 EMA and 50 EMA "
-                "with a healthy Fibonacci retracement. Trend structure (HH/HL) not yet confirmed "
-                "â€” wait for a higher low to print before entering. Strong continuation candidate "
-                "if demand holds here."
-            )
-        elif is_extended_entry:
-            msg = ("Watch only. Price is extended from ideal entry â€” do not chase. "
-                   "Wait for a pullback into the zone.")
-        elif swing_sc >= 7:
-            msg = (f"Watch only. {setup_label} looks promising but entry is not yet confirmed. "
-                   f"Be patient and let the setup come to you.")
-        elif swing_sc >= 5:
-            msg = ("Watch only. Setup is forming but not confirmed. "
-                   "Wait for a clearer signal before committing capital.")
-        elif not has_entry:
-            msg = ("Watch only. No entry level defined â€” build a trade plan before considering this.")
-        else:
-            msg = ("Watch only. Setup quality is too low to justify entry right now. "
-                   "Check back when conditions improve.")
-        level, css, status = "watch", "coach-watch", "WATCH"
-
-        # Weak market makes WATCH more of a REDUCE SIZE warning
-        if regime in ("RISK_OFF", "CAUTION"):
-            msg += " Market conditions add extra reason to stay on the sidelines or go very small."
-            level, css, status = "reduce", "coach-reduce", "REDUCE SIZE"
-
-    else:
-        msg = ("No clear action. Review setup quality and current market conditions before committing capital.")
-        level, css, status = "watch", "coach-watch", "WATCH"
-
-    if missing:
-        msg += " Note: " + "; ".join(missing) + "."
-
-    return {
-        "coach_status": status,
-        "message": msg,
-        "level": level,
-        "css": css,
-        "reduce_size": reduce_flag,
-        "signals": signals[:6],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Discipline & Risk Engine â€” pure functions (no DB, no Flask)
-# ---------------------------------------------------------------------------
-
-def get_risk_settings(user_id: int = 1) -> dict:
-    """Load all risk settings from user_settings with safe defaults."""
-    def _f(key, default):
-        v = get_user_setting(user_id, key)
-        if v is not None:
-            return v
-        # Fallback to global settings for backward compat during migration
-        gv = get_setting(key)
-        return gv if gv is not None else default
-
-    def _sf(key, default):
-        try:
-            return float(_f(key, default))
-        except (ValueError, TypeError):
-            return float(default)
-
-    def _si(key, default):
-        try:
-            return int(float(_f(key, default)))
-        except (ValueError, TypeError):
-            return int(default)
-
-    return {
-        "trading_mode":        _f("trading_mode",        "SWING TRADE"),
-        "account_size":        _sf("account_size",        "10000"),
-        "risk_pct":            _sf("risk_pct",            "1.0"),
-        "max_trades_per_day":  _si("max_trades_per_day",  "3"),
-        "max_daily_loss_pct":  _sf("max_daily_loss_pct",  "3.0"),
-        "stop_after_2_losses": _f("stop_after_2_losses", "1") == "1",
-    }
-
-
-def compute_trade_permission(stock: dict, trade_mode: str) -> dict:
-    """
-    Returns {permission, css, reason}.
-    permission: "TRADE ALLOWED" | "WATCH" | "BLOCKED"
-
-    DAY TRADE:
-      A+ = confirmed setup type (ORB / VWAP Reclaim / Momentum Breakout) with
-           volume + momentum thresholds met. Catalyst boosts confidence but is not
-           a hard gate â€” without it, volume and momentum thresholds are raised.
-           Extension is independently checked beyond just the entry_quality label.
-
-    SWING TRADE:
-      A+ = trend aligned (4H + Daily) + valid structure (HH/HL) +
-           price at tight key level (fib 61.8%/50%, pullback to 20/50 EMA) +
-           R:R >= 1.5 + catalyst >= 3.
-           Extension is independently detected from EMA distance.
-    """
-    bias  = stock.get("trade_bias") or ""
-    entry = stock.get("entry_quality") or ""
-
-    # Hard block â€” no directional edge
-    if bias == "Avoid":
-        return {"permission": "BLOCKED", "css": "perm-blocked",
-                "reason": "Avoid bias â€” no directional edge, skip this stock"}
-
-    # Label-based extension â€” hard block for day trades only.
-    # Swing trades use the independent EMA-distance check below so they aren't
-    # double-penalised when the label fires on a healthy pullback leg.
-    if entry == "Extended" and trade_mode != "SWING TRADE":
-        return {"permission": "BLOCKED", "css": "perm-blocked",
-                "reason": "Entry extended â€” do not chase, wait for pullback to zone"}
-
-    # ------------------------------------------------------------------ #
-    # DAY TRADE                                                            #
-    # ------------------------------------------------------------------ #
-    if trade_mode == "DAY TRADE":
-        setup_type   = (stock.get("setup_type") or "").upper()
-        orb_ready    = stock.get("orb_ready") or "NO"
-        orb_high     = stock.get("orb_high") or 0
-        above_vwap   = bool(stock.get("price_above_vwap"))
-        trend_struct = bool(stock.get("trend_structure"))   # HH + HL confirmed
-        mom          = stock.get("momentum_score") or 0
-        cat          = stock.get("catalyst_score") or 0
-        rvol         = stock.get("rel_volume") or 0
-        setup        = stock.get("setup_score") or 0
-        current      = stock.get("current_price") or 0
-
-        # Independent extension check â€” price >3% above ORB high = chasing
-        if orb_high and current and current > orb_high * 1.03:
-            pct_above = (current - orb_high) / orb_high * 100
-            return {"permission": "BLOCKED", "css": "perm-blocked",
-                    "reason": f"Entry extended {pct_above:.1f}% above ORB high â€” wait for pullback or base"}
-
-        # â”€â”€ ORB â€” Opening Range Breakout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # Catalyst >= 3: standard thresholds. No catalyst: raise volume + momentum bar.
-        if orb_ready == "YES":
-            if cat >= 3 and rvol >= 1.5 and mom >= 6:
-                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                        "reason": f"ORB confirmed â€” volume {rvol:.1f}x, momentum {mom}/10, catalyst {cat}/10"}
-            if cat < 3 and rvol >= 2.0 and mom >= 7:
-                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                        "reason": f"ORB confirmed â€” volume {rvol:.1f}x, momentum {mom}/10 (no catalyst, higher vol/mom required)"}
-            # Build exact WATCH reason
-            needs = []
-            if cat < 3:
-                needs.append(f"catalyst {cat}/10 (need â‰¥3) OR volume â‰¥2.0x + momentum â‰¥7")
-            else:
-                if rvol < 1.5: needs.append(f"volume {rvol:.1f}x (need â‰¥1.5x)")
-                if mom < 6:    needs.append(f"momentum {mom}/10 (need â‰¥6)")
-            return {"permission": "WATCH", "css": "perm-watch",
-                    "reason": "ORB forming â€” " + ", ".join(needs)}
-
-        # â”€â”€ VWAP Reclaim â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        if "VWAP" in setup_type or above_vwap:
-            if not above_vwap:
-                return {"permission": "WATCH", "css": "perm-watch",
-                        "reason": f"VWAP setup detected but price not yet above VWAP â€” volume {rvol:.1f}x, momentum {mom}/10"}
-            if cat >= 3 and rvol >= 1.3 and mom >= 5:
-                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                        "reason": f"VWAP reclaim confirmed â€” volume {rvol:.1f}x, momentum {mom}/10, catalyst {cat}/10"}
-            if cat < 3 and rvol >= 1.8 and mom >= 6:
-                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                        "reason": f"VWAP reclaim confirmed â€” volume {rvol:.1f}x, momentum {mom}/10 (no catalyst, higher vol/mom required)"}
-            needs = []
-            if cat < 3:
-                needs.append(f"catalyst {cat}/10 (need â‰¥3) OR volume â‰¥1.8x + momentum â‰¥6")
-            else:
-                if rvol < 1.3: needs.append(f"volume {rvol:.1f}x (need â‰¥1.3x)")
-                if mom < 5:    needs.append(f"momentum {mom}/10 (need â‰¥5)")
-            return {"permission": "WATCH", "css": "perm-watch",
-                    "reason": "VWAP reclaim detected â€” " + ", ".join(needs)}
-
-        # â”€â”€ Momentum Breakout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        if "MOMENTUM" in setup_type or "BREAKOUT" in setup_type:
-            if not trend_struct:
-                return {"permission": "WATCH", "css": "perm-watch",
-                        "reason": f"Momentum setup detected but HH/HL structure not confirmed â€” volume {rvol:.1f}x, momentum {mom}/10"}
-            if cat >= 3 and rvol >= 1.5 and mom >= 7:
-                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                        "reason": f"Momentum breakout â€” HH/HL structure, volume {rvol:.1f}x, momentum {mom}/10, catalyst {cat}/10"}
-            if cat < 3 and rvol >= 2.0 and mom >= 8:
-                return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                        "reason": f"Momentum breakout â€” HH/HL structure, volume {rvol:.1f}x, momentum {mom}/10 (no catalyst, higher bar)"}
-            needs = []
-            if cat < 3:
-                needs.append(f"catalyst {cat}/10 (need â‰¥3) OR volume â‰¥2.0x + momentum â‰¥8")
-            else:
-                if rvol < 1.5: needs.append(f"volume {rvol:.1f}x (need â‰¥1.5x)")
-                if mom < 7:    needs.append(f"momentum {mom}/10 (need â‰¥7)")
-            return {"permission": "WATCH", "css": "perm-watch",
-                    "reason": "Momentum setup â€” " + ", ".join(needs)}
-
-        # â”€â”€ No confirmed setup type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        if setup >= 4 and (mom >= 4 or rvol >= 1.2):
-            return {"permission": "WATCH", "css": "perm-watch",
-                    "reason": f"Setup score {setup}/10, volume {rvol:.1f}x â€” no ORB/VWAP/Breakout pattern confirmed yet"}
-
-        return {"permission": "BLOCKED", "css": "perm-blocked",
-                "reason": f"No valid day trade setup â€” setup {setup}/10, volume {rvol:.1f}x, momentum {mom}/10"}
-
-    # ------------------------------------------------------------------ #
-    # SWING TRADE                                                          #
-    # ------------------------------------------------------------------ #
-    else:
-        daily_trend = stock.get("daily_trend") or "Neutral"
-        daily_hh_hl = bool(stock.get("daily_hh_hl"))
-        h4_hh_hl    = bool(stock.get("h4_hh_hl"))
-        pct_ema20   = stock.get("pct_from_ema20")   # positive = price above EMA
-        pct_ema50   = stock.get("pct_from_ema50")
-        fib_50      = stock.get("fib_50")
-        fib_618     = stock.get("fib_618")
-        current     = stock.get("current_price") or 0
-        rr          = stock.get("risk_reward") or 0
-        cat         = stock.get("catalyst_score") or 0
-        swing       = stock.get("swing_score") or 0
-        long_bias   = bias == "Long Bias"
-
-        # Independent extension check â€” price too far from 20 EMA = chasing, not pullback
-        # Long: >6% above 20 EMA means missed the move. Short: >6% below.
-        if pct_ema20 is not None:
-            if long_bias and pct_ema20 > 6.0:
-                return {"permission": "BLOCKED", "css": "perm-blocked",
-                        "reason": f"Entry extended â€” price {pct_ema20:+.1f}% above 20 EMA, wait for pullback to zone"}
-            if not long_bias and pct_ema20 < -6.0:
-                return {"permission": "BLOCKED", "css": "perm-blocked",
-                        "reason": f"Entry extended â€” price {pct_ema20:+.1f}% below 20 EMA, wait for bounce to zone"}
-
-        # Trend alignment â€” 4H and Daily must agree
-        trend_bull    = long_bias      and daily_trend in ("Bullish", "Bullish Lean")
-        trend_bear    = not long_bias  and daily_trend in ("Bearish", "Bearish Lean")
-        trend_aligned = trend_bull or trend_bear
-
-        if not trend_aligned:
-            return {"permission": "BLOCKED", "css": "perm-blocked",
-                    "reason": f"Trend not aligned â€” {bias or 'no bias'} vs {daily_trend} daily trend"}
-
-        # Structure â€” HH/HL on Daily or 4H required before any entry
-        structure_valid = daily_hh_hl or h4_hh_hl
-        if not structure_valid:
-            # Classify as bullish pullback (WATCH) when price is above both EMAs
-            # and within a healthy fib retracement â€” trend still intact, structure forming
-            above_20ema = pct_ema20 is not None and pct_ema20 > 0
-            above_50ema = pct_ema50 is not None and pct_ema50 > 0
-            fib_705_val = stock.get("fib_705")
-            in_fib_zone = bool(
-                current and fib_618 and fib_705_val and
-                fib_705_val <= current <= fib_618 * 1.02
-            ) or bool(
-                current and fib_50 and current >= fib_50 * 0.97
-            )
-            if long_bias and above_20ema and above_50ema and in_fib_zone:
-                return {"permission": "WATCH", "css": "perm-watch",
-                        "reason": ("Bullish pullback / continuation watch â€” price above 20 & 50 EMA "
-                                   "within healthy fib zone; wait for HH/HL structure to confirm")}
-            return {"permission": "BLOCKED", "css": "perm-blocked",
-                    "reason": "No valid structure â€” need HH/HL confirmed on daily or 4H chart"}
-
-        # At key level â€” tighter bands than before
-        # Fib: within 1.5% | 20 EMA: within 2% pulling back | 50 EMA: within 3% pulling back
-        # For longs, price should be AT or slightly below the EMA (pullback into zone).
-        # Upper cap of +1.0% allows just-reclaimed EMA entries.
-        FIB_TOL   = 1.5
-        EMA20_TOL = 2.0
-        EMA50_TOL = 3.0
-        EMA_UPPER = 1.0   # price can be slightly above EMA on reclaim
-
-        near_fib618 = bool(current and fib_618 and
-                           abs(current - fib_618) / current * 100 <= FIB_TOL)
-        near_fib50  = bool(current and fib_50 and
-                           abs(current - fib_50) / current * 100 <= FIB_TOL)
-        near_ema20  = (pct_ema20 is not None and
-                       -EMA20_TOL <= pct_ema20 <= (EMA_UPPER if long_bias else EMA20_TOL))
-        near_ema50  = (pct_ema50 is not None and
-                       -EMA50_TOL <= pct_ema50 <= (EMA_UPPER if long_bias else EMA50_TOL))
-        at_key_level = near_fib618 or near_fib50 or near_ema20 or near_ema50
-
-        level_parts = []
-        if near_fib618: level_parts.append("61.8% fib")
-        if near_fib50:  level_parts.append("50% fib")
-        if near_ema20 and pct_ema20 is not None:
-            level_parts.append(f"20 EMA ({pct_ema20:+.1f}%)")
-        if near_ema50 and pct_ema50 is not None:
-            level_parts.append(f"50 EMA ({pct_ema50:+.1f}%)")
-
-        # A+ â€” all gates pass
-        if at_key_level and rr >= 1.5 and cat >= 3:
-            level_str = " + ".join(level_parts) if level_parts else "key level"
-            return {"permission": "TRADE ALLOWED", "css": "perm-allowed",
-                    "reason": f"A+ swing â€” {level_str}, R:R {rr:.1f}:1, catalyst {cat}/10, score {swing}/10"}
-
-        # WATCH â€” trend + structure aligned, one or more gates still open
-        missing = []
-        if not at_key_level:
-            gap_parts = []
-            if pct_ema20 is not None:
-                gap_parts.append(f"20 EMA {pct_ema20:+.1f}% (pullback zone Â±{EMA20_TOL}%)")
-            if pct_ema50 is not None:
-                gap_parts.append(f"50 EMA {pct_ema50:+.1f}% (pullback zone Â±{EMA50_TOL}%)")
-            if gap_parts:
-                missing.append("not at level â€” " + ", ".join(gap_parts))
-            else:
-                missing.append("not at level â€” wait for pullback to 20/50 EMA or fib 50%/61.8%")
-        if rr < 1.5:
-            missing.append(f"R:R {rr:.1f}:1 (need â‰¥1.5:1)")
-        if cat < 3:
-            missing.append(f"catalyst {cat}/10 (need â‰¥3)")
-
-        return {"permission": "WATCH", "css": "perm-watch",
-                "reason": "Swing building â€” " + " Â· ".join(missing) if missing
-                          else f"Swing score {swing}/10 â€” monitoring setup"}
-
-
-def compute_options_risk(account_size: float, risk_pct: float,
-                         premium: float | None, contracts: int | None) -> dict:
-    """Calculate options risk metrics for the given account/risk parameters."""
-    max_dollar_risk = round(account_size * (risk_pct / 100), 2)
-
-    if premium and premium > 0:
-        # Standard options lot = 100 shares per contract
-        cost_per_contract = premium * 100
-        suggested_contracts = max(1, int(max_dollar_risk / cost_per_contract))
-        used_contracts  = contracts if (contracts and contracts > 0) else suggested_contracts
-        total_cost      = round(used_contracts * cost_per_contract, 2)
-    else:
-        suggested_contracts = 0
-        used_contracts      = contracts or 0
-        total_cost          = 0
-
-    return {
-        "max_dollar_risk":    max_dollar_risk,
-        "suggested_contracts": suggested_contracts,
-        "total_cost":          total_cost,
-    }
-
-
-def compute_discipline_score(today_entries: list, risk_settings: dict,
-                              locked: bool) -> dict:
-    """
-    Score today's trading discipline 0â€“100.
-    Deductions: non-A+ setups (-15 each), excess trades (-10 each),
-    broke stop (-10 each), trading locked (-25).
-    """
-    score      = 100
-    deductions = []
-    max_trades = risk_settings.get("max_trades_per_day", 3)
-
-    if locked:
-        score -= 25
-        deductions.append("Daily limit hit â€” trading was locked (-25)")
-
-    non_aplus = sum(1 for e in today_entries if not e.get("is_aplus_setup"))
-    for _ in range(non_aplus):
-        score -= 15
-        deductions.append("Non-A+ setup taken (-15)")
-
-    excess = max(0, len(today_entries) - max_trades)
-    for _ in range(excess):
-        score -= 10
-        deductions.append("Over max trades per day (-10)")
-
-    for e in today_entries:
-        try:
-            stop   = e.get("stop_price")
-            exit_p = float(e.get("exit_price") or 0)
-            if not stop:
-                continue
-            stop = float(stop)
-            if e.get("direction") == "Long" and exit_p < stop - 0.01:
-                score -= 10
-                deductions.append(f"Stop broken on {e.get('ticker', '?')} (-10)")
-            elif e.get("direction") == "Short" and exit_p > stop + 0.01:
-                score -= 10
-                deductions.append(f"Stop broken on {e.get('ticker', '?')} (-10)")
-        except (TypeError, ValueError):
-            pass
-
-    score = max(0, min(100, score))
-
-    if score >= 90:
-        label, css = "Disciplined", "disc-high"
-    elif score >= 70:
-        label, css = "Average",     "disc-mid"
-    else:
-        label, css = "Undisciplined", "disc-low"
-
-    return {"score": score, "label": label, "css": css, "deductions": deductions}
-
-
-def check_auto_lock(today_entries: list, risk_settings: dict,
-                    existing_session: dict) -> dict | None:
-    """
-    Check if today's journal entries trigger an auto-lock.
-    Returns an updated session dict if locked, or None if no lock needed.
-    """
-    if existing_session.get("locked"):
-        return None   # already locked â€” don't re-trigger
-
-    max_trades   = risk_settings.get("max_trades_per_day", 3)
-    stop_after_2 = risk_settings.get("stop_after_2_losses", True)
-
-    if len(today_entries) >= max_trades:
-        return {"locked": 1, "lock_reason": f"Max {max_trades} trades reached for today"}
-
-    if stop_after_2:
-        losses = sum(1 for e in today_entries if e.get("result") == "Loss")
-        if losses >= 2:
-            return {"locked": 1, "lock_reason": "2 losses reached â€” mandatory pause to protect capital"}
-
-    return None
-
-
-def compute_daily_banner(no_trade: dict, daily_session: dict) -> dict:
-    """
-    Return the top-of-dashboard banner based on trading conditions and session state.
-    Priority: LOCKED > NO TRADE DAY > CAUTION > A+ ONLY
-    """
-    if daily_session.get("locked"):
-        return {
-            "type":  "locked",
-            "text":  "TRADING LOCKED â€” PROTECT CAPITAL",
-            "sub":   daily_session.get("lock_reason") or "Daily risk limit reached",
-            "css":   "banner-locked",
-        }
-
-    severity = no_trade.get("severity", "none")
-    reasons  = no_trade.get("reasons", [])
-    sub_text = " Â· ".join(reasons) if reasons else ""
-
-    if severity == "hard":
-        return {
-            "type": "no_trade",
-            "text": "NO TRADE DAY â€” Protect Capital",
-            "sub":  sub_text or "Market conditions are weak across the watchlist",
-            "css":  "banner-no-trade",
-        }
-
-    if severity == "soft":
-        return {
-            "type": "caution",
-            "text": "CAUTION â€” No A+ Setups Yet",
-            "sub":  sub_text or "Wait for higher quality setups to develop",
-            "css":  "banner-caution",
-        }
-
-    return {
-        "type": "aplus",
-        "text": "A+ ONLY MODE",
-        "sub":  "Trade only the highest-quality setups â€” protect capital first",
-        "css":  "banner-aplus",
-    }
-
-
-def compute_freshness(
-    triggered_at: str | None,
-    exec_state: str | None,
-    session: str | None = None,
-) -> tuple:
-    """
-    Determine the freshness / staleness label for a stock's exec state.
-    Returns (label, css_class).  Both are None when exec_state != TRIGGERED.
-
-    During regular market hours (session == 'regular'):
-      triggered_at before 09:30 ET  â†’ "Premarket Watch"   (reference, not live)
-      elapsed < 15 min              â†’ "Fresh Breakout"     (act now)
-      elapsed 15â€“45 min             â†’ "Active Move"        (still valid)
-      elapsed > 45 min              â†’ "Late Move"          (likely extended)
-
-    Outside regular hours the trigger is stale regardless of elapsed time:
-      pre_market                    â†’ "Watch Next Session"
-      after_hours / closed          â†’ "Session Closed"
-    """
-    if exec_state != "TRIGGERED":
-        return None, None
-
-    # Determine session if not supplied
-    if session is None:
-        try:
-            session = market_session_now()
-        except Exception:
-            session = "regular"
-
-    # Outside regular hours â€” trigger is stale, show display-only label
-    if session == "pre_market":
-        return "Watch Next Session", "fresh-premarket"
-    if session in ("after_hours", "closed"):
-        return "Session Closed", "fresh-expired"
-
-    # Regular hours â€” age-based freshness
-    if not triggered_at:
-        return "Premarket Watch", "fresh-premarket"
-
-    try:
-        ts = datetime.fromisoformat(triggered_at)
-        # If the stored timestamp is timezone-aware, compare against a UTC-aware now
-        # to avoid TypeError: can't subtract offset-naive and offset-aware datetimes.
-        if ts.tzinfo is not None:
-            from datetime import timezone as _tz
-            now = datetime.now(tz=_tz.utc)
-        else:
-            now = datetime.now()
-
-        # Triggered before this session's open â†’ treat as premarket reference
-        if ts.hour < 9 or (ts.hour == 9 and ts.minute < 30):
-            return "Premarket Watch", "fresh-premarket"
-
-        elapsed = (now - ts).total_seconds() / 60
-        if elapsed < 15:
-            return "Fresh Breakout", "fresh-breakout"
-        if elapsed < 45:
-            return "Active Move",    "fresh-active"
-        return "Late Move", "fresh-late"
-    except (ValueError, TypeError):
-        return "Premarket Watch", "fresh-premarket"
-
-
-def get_freshness_class(label: str | None) -> str:
-    return {
-        "Fresh Breakout":    "fresh-breakout",
-        "Active Move":       "fresh-active",
-        "Late Move":         "fresh-late",
-        "Premarket Watch":   "fresh-premarket",
-        "Watch Next Session":"fresh-premarket",
-        "Session Closed":    "fresh-expired",
-    }.get(label or "", "")
-
-
-def get_orb_status_class(orb_status):
-    """CSS class for the ORB price level status badge."""
-    return {
-        "ABOVE":     "orbs-above",
-        "NEAR_HIGH": "orbs-near-high",
-        "INSIDE":    "orbs-inside",
-        "NEAR_LOW":  "orbs-near-low",
-        "BELOW":     "orbs-below",
-        "NO_ORB":    "orbs-none",
-    }.get(orb_status, "orbs-none")
-
-
-def get_orb_phase_label(orb_phase: str | None) -> tuple:
-    """
-    Return (label, css_class) for the ORB phase badge.
-    Used in both stock detail and dashboard table.
-    """
-    return {
-        "pre_market": ("Waiting for Open",  "orbp-pre"),
-        "forming":    ("ORB Forming",        "orbp-forming"),
-        "locked":     ("ORB Locked",         "orbp-locked"),
-    }.get(orb_phase or "", ("", ""))
-
-
-# ORB action directive â€” the trader-facing instruction for each ORB phase.
-# These are the base entries used during regular market hours.
-# Outside regular hours get_orb_action() overrides action/sub_label.
-# Each entry: (action_word, sub_label, banner_class, action_class)
-_ORB_ACTION_MAP = {
-    "pre_market": (
-        "WAIT",
-        "Market opens at 9:30 AM ET â€” no ORB data yet",
-        "orb-banner-pre",
-        "orb-action-wait",
-    ),
-    "forming": (
-        "OBSERVE",
-        "ORB forming 9:30â€“10:00 AM ET â€” watch the range, do not enter yet",
-        "orb-banner-forming",
-        "orb-action-observe",
-    ),
-    "locked": (
-        "EXECUTE",
-        "ORB locked â€” use levels for breakout entries",
-        "orb-banner-locked",
-        "orb-action-execute",
-    ),
-}
-
-# Session-level override labels shown when market is not in regular hours.
-_SESSION_OVERRIDE = {
-    "pre_market":  ("WAIT",        "Pre-market â€” levels for reference only",         "orb-action-wait"),
-    "after_hours": ("WATCH LEVELS","After hours â€” ORB levels for reference only",    "orb-action-wait"),
-    "closed":      ("CLOSED",      "Market closed â€” review levels for next session", "orb-action-wait"),
-}
-
-
-def get_orb_action(orb_phase: str | None, session: str | None = None) -> dict:
-    """
-    Return the action directive dict for a given ORB phase.
-
-    When session is provided (and is not 'regular'), the action word and
-    sub_label are replaced with a display-only override so EXECUTE is never
-    shown outside regular market hours.  The banner_class (colour) still
-    reflects the ORB phase so the UI stays informative.
-
-    Keys: action, sub_label, banner_class, action_class.
-    """
-    row = _ORB_ACTION_MAP.get(orb_phase or "locked", _ORB_ACTION_MAP["locked"])
-    action_word   = row[0]
-    sub_label     = row[1]
-    banner_class  = row[2]
-    action_class  = row[3]
-
-    if session and session != "regular":
-        override = _SESSION_OVERRIDE.get(session)
-        if override:
-            action_word  = override[0]
-            sub_label    = override[1]
-            action_class = override[2]
-
-    return {
-        "action":       action_word,
-        "sub_label":    sub_label,
-        "banner_class": banner_class,
-        "action_class": action_class,
-    }
-
-
-def get_orb_session_banner() -> dict:
-    """
-    Compute the current global ORB session state from live ET time.
-    Used by the dashboard banner â€” independent of any single stock.
-    Includes the market session so the frontend always knows whether
-    signals are currently live or display-only.
-    """
-    phase   = orb_phase_now()
-    session = market_session_now()
-    label, phase_class = get_orb_phase_label(phase)
-    action = get_orb_action(phase, session=session)
-    return {
-        "phase":        phase,
-        "session":      session,
-        "phase_label":  label,
-        "phase_class":  phase_class,
-        **action,
-    }
-
-
-def annotate(stock: dict, trade_mode: str | None = None) -> dict:
-    """Add all display-only fields to a stock dict (non-destructive to DB fields)."""
-    # â”€â”€ Ticker state display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    _state = stock.get("ticker_state") or "ready"
-    stock["ticker_state"] = _state
-    stock["ticker_state_class"] = {
-        "loading": "state-loading",
-        "partial": "state-partial",
-        "ready":   "state-ready",
-        "error":   "state-error",
-        "stale":   "state-stale",
-    }.get(_state, "state-ready")
-    stock["ticker_state_label"] = {
-        "loading": "Loading",
-        "partial": "Partial",
-        "ready":   "",
-        "error":   "Data Error",
-        "stale":   "Stale",
-    }.get(_state, "")
-
-    # â”€â”€ Data source â€” for debugging and display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Tracks WHERE the price came from (live fetch vs snapshot vs unavailable).
-    # "live"           â€” price confirmed from yfinance this session
-    # "stale_snapshot" â€” using last-known-good DB price (live fetch failed)
-    # "unavailable"    â€” no valid price at all
-    _src = stock.get("data_source") or (
-        "stale_snapshot" if _state == "stale" else
-        "live"           if _state in ("ready", "partial") else
-        "unavailable"
-    )
-    stock["data_source"] = _src
-    stock["data_source_label"] = {
-        "live":            "Live",
-        "stale_snapshot":  "Stale snapshot",
-        "unavailable":     "Unavailable",
-    }.get(_src, "Unknown")
-
-    # Score defaults are always applied â€” they're needed for JS filter/sort logic.
-    _SCORE_DEFAULTS = {
-        "catalyst_score":  0,
-        "momentum_score":  0,
-        "setup_score":     0,
-    }
-    for field, default in _SCORE_DEFAULTS.items():
-        if stock.get(field) is None:
-            stock[field] = default
-
-    # Price fields: never force 0.0 â€” keep None so templates can show "â€”"/"N/A"
-    # instead of misleading "$0.00". Only rel_volume gets a safe 0.0 default so
-    # the "Nx" multiplier display renders without crashing.
-    if stock.get("rel_volume") is None and _state not in ("error", "loading"):
-        stock["rel_volume"] = 0.0
-
-    stock["score_class"]           = get_score_class(stock.get("setup_score"))
-    stock["cat_score_class"]       = get_score_class(stock.get("catalyst_score"))
-    stock["mom_score_class"]       = get_score_class(stock.get("momentum_score"))
-    stock["bias_class"]            = get_bias_class(stock.get("trade_bias"))
-    stock["setup_type_class"]      = get_setup_type_class(stock.get("setup_type") or "No Setup")
-    stock["cat_conf_class"]        = get_confidence_class(stock.get("catalyst_confidence") or "Low")
-    stock["setup_conf_class"]      = get_confidence_class(stock.get("setup_confidence") or "Low")
-    stock["mom_conf_class"]        = get_confidence_class(stock.get("momentum_confidence") or "Low")
-    stock["orb_class"]             = get_orb_class(stock.get("orb_ready") or "NO")
-    stock["ob_class"]              = get_ob_class(stock.get("order_block") or "Neutral")
-    stock["entry_class"]           = get_entry_class(stock.get("entry_quality") or "Okay")
-    # â”€â”€ Session-aware display state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Get session once per annotate call so all derived fields are consistent.
-    try:
-        _session = market_session_now()
-    except Exception:
-        _session = "regular"
-
-    # display_exec_state: what is shown in the UI.  Never stored in the DB.
-    # The DB exec_state (TRIGGERED / READY / WAIT) is preserved for audit and
-    # alert detection.  Outside regular hours we downgrade the display so stale
-    # TRIGGERED states are never presented as immediately actionable.
-    _raw_exec = stock.get("exec_state") or "WAIT"
-    if _raw_exec == "TRIGGERED" and _session != "regular":
-        _display_exec = "WAIT"          # downgrade display â€” not actionable now
-    else:
-        _display_exec = _raw_exec
-
-    stock["display_exec_state"]    = _display_exec
-
-    # â”€â”€ Combined confidence (worst-of-two: catalyst + setup) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    _confs = [
-        stock.get("catalyst_confidence") or "Low",
-        stock.get("setup_confidence")    or "Low",
-    ]
-    _combined_conf = "Low" if "Low" in _confs else ("Medium" if "Medium" in _confs else "High")
-    stock["combined_confidence"]   = _combined_conf
-    stock["combined_conf_class"]   = get_confidence_class(_combined_conf)
-
-    # â”€â”€ Final action â€” single source of truth for all UI decision labels â”€â”€â”€â”€
-    _fa, _fa_class, _fa_reason = compute_final_action(
-        setup_score         = stock.get("setup_score")    or 0,
-        cat_score           = stock.get("catalyst_score") or 0,
-        combined_confidence = _combined_conf,
-        entry_quality       = stock.get("entry_quality"),
-        display_exec_state  = _display_exec,
-    )
-    stock["final_action"]          = _fa
-    stock["final_action_class"]    = _fa_class
-    stock["final_action_reason"]   = _fa_reason
-    stock["exec_class"]            = _fa_class          # drives every exec badge in the UI
-    stock["orb_status_class"]      = get_orb_status_class(stock.get("orb_status") or "NO_ORB")
-    orb_phase_label, orb_phase_class = get_orb_phase_label(stock.get("orb_phase"))
-    stock["orb_phase_label"]       = orb_phase_label
-    stock["orb_phase_class"]       = orb_phase_class
-    orb_action                     = get_orb_action(stock.get("orb_phase"), session=_session)
-    stock["orb_action"]            = orb_action["action"]
-    stock["orb_action_class"]      = orb_action["action_class"]
-    stock["orb_action_sub"]        = orb_action["sub_label"]
-    freshness, freshness_class     = compute_freshness(
-        stock.get("triggered_at"), _raw_exec, session=_session
-    )
-    stock["freshness"]             = freshness
-    stock["freshness_class"]       = freshness_class or ""
-    # ORB range visualization: position of current price on a 0-100% scale
-    # Extended range = 40% padding on each side of the ORB range (1.8x total width)
-    orb_h = stock.get("orb_high")
-    orb_l = stock.get("orb_low")
-    cur   = stock.get("current_price") or 0
-    if orb_h and orb_l and cur and orb_h > orb_l:
-        rng      = orb_h - orb_l
-        vis_low  = orb_l - 0.4 * rng
-        vis_rng  = rng * 1.8
-        pct      = (cur - vis_low) / vis_rng * 100
-        stock["orb_price_pct"] = round(max(2, min(98, pct)), 1)
-    else:
-        stock["orb_price_pct"] = 50.0
-    # â”€â”€ Gap calculation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Primary: stored gap_pct from fetch_live_data().
-    # Fallback: derive on the fly from current_price + prev_close.
-    # This ensures gap is never missing when both price fields are available.
-    gap = stock.get("gap_pct")
-    if gap is None:
-        _cp = stock.get("current_price")
-        _pc = stock.get("prev_close")
-        if _cp and _pc and _pc > 0:
-            gap = round((_cp - _pc) / _pc * 100, 2)
-            stock["gap_pct"] = gap
-
-    if gap is not None:
-        stock["gap_display"] = f"{'+' if gap >= 0 else ''}{gap:.2f}%"
-        stock["gap_class"]   = "positive" if gap >= 0 else "negative"
-    else:
-        stock["gap_display"] = "â€”"
-        stock["gap_class"]   = ""
-
-    # â”€â”€ Data availability flags (used by detail page to guard stale sections) â”€
-    # swing_data_available: True if EMA/fib data was fetched (swing pipeline ran)
-    # swing_plan_valid:     True if a computed trade plan exists AND swing data is fresh
-    # swing_plan_stale:     True if plan fields are in DB but swing data is missing
-    _has_ema        = bool(stock.get("ema_20_daily"))
-    _has_fibs       = bool(stock.get("fib_high") and stock.get("fib_low"))
-    _has_plan_fields = bool(stock.get("entry_zone_low") or stock.get("stop_level"))
-    stock["swing_data_available"] = _has_ema
-    stock["fib_data_available"]   = _has_fibs
-    stock["swing_plan_valid"]     = _has_plan_fields and _has_ema
-    stock["swing_plan_stale"]     = _has_plan_fields and not _has_ema
-
-    # Decode catalyst_category JSON â†’ list of {key, label} dicts for templates
-    raw_cats = stock.get("catalyst_category") or "[]"
-    try:
-        cat_keys = _json.loads(raw_cats) if isinstance(raw_cats, str) else list(raw_cats)
-    except Exception:
-        cat_keys = []
-    stock["catalyst_tags"] = [
-        {"key": k, "label": _CAT_DEFS[k]["label"]}
-        for k in cat_keys if k in _CAT_DEFS
-    ]
-    # Human-readable headline freshness ("2m ago", "1h ago", â€¦)
-    def _headline_age_min(hfa):
-        if not hfa:
-            return None
-        try:
-            dt = datetime.fromisoformat(hfa)
-            now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
-            return int((now - dt).total_seconds() / 60)
-        except Exception:
-            return None
-    stock["headline_freshness"] = _fl(_headline_age_min(stock.get("headlines_fetched_at")))
-
-    # â”€â”€ Swing trading display fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    _swing_score = stock.get("swing_score")
-    if _swing_score is None:
-        stock["swing_score"] = 0
-    stock["swing_score_class"]      = get_score_class(stock.get("swing_score"))
-    stock["swing_status_class"]     = get_swing_status_class(stock.get("swing_status") or "")
-    stock["swing_setup_type_class"] = get_setup_type_class(stock.get("swing_setup_type") or "No Setup")
-    stock["swing_grade"]            = compute_swing_grade(stock.get("swing_score") or 1)
-    stock["continuation_score"]     = compute_continuation_score(stock)
-
-    # â”€â”€ Institutional zone display fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    _zones_str = stock.get("zones_json")
-    try:
-        stock["parsed_zones"] = _json.loads(_zones_str) if _zones_str else []
-    except Exception:
-        stock["parsed_zones"] = []
-
-    _sm_str = stock.get("smart_money_json")
-    try:
-        stock["smart_money"] = _json.loads(_sm_str) if _sm_str else {}
-    except Exception:
-        stock["smart_money"] = {}
-
-    _reason_str = stock.get("zone_ai_reason")
-    try:
-        stock["zone_ai_reasons"] = _json.loads(_reason_str) if _reason_str else []
-    except Exception:
-        stock["zone_ai_reasons"] = []
-
-    # Separate demand/supply zones for template convenience
-    _pz = stock.get("parsed_zones") or []
-    stock["demand_zones"] = sorted(
-        [z for z in _pz if z.get("zone_type") == "demand"],
-        key=lambda z: z.get("final_score", 0), reverse=True
-    )
-    stock["supply_zones"] = sorted(
-        [z for z in _pz if z.get("zone_type") == "supply"],
-        key=lambda z: z.get("final_score", 0), reverse=True
-    )
-
-    # Zone grade CSS mapping
-    _grade_css = {"A+": "zone-grade-aplus", "A": "zone-grade-a",
-                  "B+": "zone-grade-bplus", "B": "zone-grade-b"}
-    stock["demand_zone_grade_css"] = _grade_css.get(stock.get("demand_zone_grade") or "", "")
-    stock["supply_zone_grade_css"] = _grade_css.get(stock.get("supply_zone_grade") or "", "")
-
-    # â”€â”€ Plan mode display helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    _plan_mode = stock.get("plan_mode") or "none"
-    stock["plan_mode_label"] = {
-        "confirmed":        "CONFIRMED",
-        "pre_confirmation": "PRE-CONFIRMATION SETUP",
-        "continuation":     "TREND CONTINUATION",
-        "watching":         "WATCHING",
-    }.get(_plan_mode, "")
-    stock["plan_mode_class"] = {
-        "confirmed":        "plan-confirmed",
-        "pre_confirmation": "plan-pre-confirm",
-        "continuation":     "plan-continuation",
-        "watching":         "plan-watching",
-    }.get(_plan_mode, "")
-
-    # â”€â”€ Swing confidence display (1-3=Low, 4-6=Medium, 7-10=High) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    _sc = stock.get("swing_score") or 0
-    stock["swing_confidence_label"] = (
-        "High"   if _sc >= 7 else
-        "Medium" if _sc >= 4 else
-        "Low"
-    )
-
-    # â”€â”€ Entry zone distance (how far current price is from the entry zone) â”€â”€â”€â”€
-    _cur   = stock.get("current_price") or 0
-    _ez_lo = stock.get("entry_zone_low")
-    if _cur and _ez_lo:
-        _d = (_cur - _ez_lo) / _ez_lo * 100
-        if abs(_d) < 0.5:
-            stock["entry_distance_pct"]     = 0.0
-            stock["entry_distance_display"] = "AT ZONE"
-            stock["entry_distance_class"]   = "dist-at-zone"
-        elif 0 < _d <= 3.0:
-            stock["entry_distance_pct"]     = round(_d, 1)
-            stock["entry_distance_display"] = f"+{_d:.1f}%"
-            stock["entry_distance_class"]   = "dist-near"
-        elif _d > 3.0:
-            stock["entry_distance_pct"]     = round(_d, 1)
-            stock["entry_distance_display"] = f"+{_d:.1f}% above"
-            stock["entry_distance_class"]   = "dist-extended"
-        else:
-            stock["entry_distance_pct"]     = round(_d, 1)
-            stock["entry_distance_display"] = f"{abs(_d):.1f}% to zone"
-            stock["entry_distance_class"]   = "dist-below"
-    else:
-        stock["entry_distance_pct"]     = None
-        stock["entry_distance_display"] = "â€”"
-        stock["entry_distance_class"]   = ""
-
-    # Distance to T1 / first resistance target
-    _t1 = stock.get("target_1")
-    if _cur and _t1 and _t1 > _cur:
-        stock["resistance_distance_display"] = f"+{(_t1 - _cur) / _cur * 100:.1f}% to T1"
-    elif _cur and _t1 and _t1 < _cur:
-        stock["resistance_distance_display"] = f"T1 below price"
-    else:
-        stock["resistance_distance_display"] = "â€”"
-
-    # Extension flag (for dashboard filter: price >8% from 20 EMA in trend direction)
-    _pct20 = stock.get("pct_from_ema20")
-    _bias  = stock.get("trade_bias") or "Neutral"
-    if _pct20 is not None:
-        _ext_dir = (_bias == "Long Bias" and _pct20 > 0) or (_bias == "Short Bias" and _pct20 < 0)
-        stock["is_extended"] = bool(_ext_dir and abs(_pct20) > 8.0)
-    else:
-        stock["is_extended"] = False
-
-    # Pullback quality label (clean vs moderate vs weak)
-    _stype  = stock.get("swing_setup_type") or ""
-    _in_dem = stock.get("in_demand_zone", False)
-    _hh_hl  = stock.get("daily_hh_hl", False)
-    _h4_hh  = stock.get("h4_hh_hl", False)
-    _clean_types = {"Order Block Test", "Near 61.8% Retracement", "Breakout Retest"}
-    _mod_types   = {"Near 50% Retracement", "Pullback to 20 EMA", "Pullback to 50 EMA"}
-    if _stype in _clean_types and (_hh_hl or _h4_hh or _in_dem):
-        stock["pullback_quality"]       = "Clean"
-        stock["pullback_quality_class"] = "pq-clean"
-    elif _stype in _clean_types or (_stype in _mod_types and (_hh_hl or _h4_hh)):
-        stock["pullback_quality"]       = "Good"
-        stock["pullback_quality_class"] = "pq-good"
-    elif _stype in _mod_types:
-        stock["pullback_quality"]       = "Moderate"
-        stock["pullback_quality_class"] = "pq-moderate"
-    elif _stype in ("Extended â€” Wait", "At Resistance â€” Avoid", "Weak Structure â€” Avoid"):
-        stock["pullback_quality"]       = "Weak"
-        stock["pullback_quality_class"] = "pq-weak"
-    else:
-        stock["pullback_quality"]       = "Watch"
-        stock["pullback_quality_class"] = "pq-watch"
-
-    # Format entry zone as "low â€“ high" display string
-    ez_low  = stock.get("entry_zone_low")
-    ez_high = stock.get("entry_zone_high")
-    if ez_low and ez_high:
-        stock["entry_zone_display"] = f"${ez_low:.2f} â€“ ${ez_high:.2f}"
-    elif ez_low:
-        stock["entry_zone_display"] = f"~${ez_low:.2f}"
-    else:
-        stock["entry_zone_display"] = "â€”"
-
-    # Format risk/reward
-    rr = stock.get("risk_reward")
-    if rr:
-        stock["risk_reward_display"] = f"{rr:.1f}:1"
-        stock["risk_reward_class"]   = "rr-good" if rr >= 2.0 else ("rr-okay" if rr >= 1.0 else "rr-poor")
-    else:
-        stock["risk_reward_display"] = "â€”"
-        stock["risk_reward_class"]   = "rr-neutral"
-
-    # R:R quality label â€” shown as a warning when R:R is poor
-    if rr is not None:
-        if rr < 1.0:
-            stock["rr_quality_label"] = "Poor R:R â€” avoid"
-            stock["rr_quality_class"] = "rr-poor-label"
-        elif rr < 1.5:
-            stock["rr_quality_label"] = "Weak R:R"
-            stock["rr_quality_class"] = "rr-weak-label"
-        else:
-            stock["rr_quality_label"] = ""
-            stock["rr_quality_class"] = ""
-    else:
-        stock["rr_quality_label"] = ""
-        stock["rr_quality_class"] = ""
-
-    # If swing_score is populated, override final_action from swing_status
-    if stock.get("swing_score"):
-        _sfa, _sfa_class, _sfa_reason = compute_swing_final_action(stock.get("swing_status") or "")
-        stock["final_action"]       = _sfa
-        stock["final_action_class"] = _sfa_class
-        stock["final_action_reason"]= _sfa_reason
-        stock["exec_class"]         = _sfa_class
-
-    # â”€â”€ Trade permission (requires trading mode from settings) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    try:
-        _trade_mode = trade_mode or get_setting("trading_mode") or "SWING TRADE"
-        stock["trade_permission"] = compute_trade_permission(stock, _trade_mode)
-    except Exception as _tp_exc:
-        logger.warning("annotate  ticker=%s  trade_permission failed: %s", stock.get("ticker", "?"), _tp_exc)
-        stock["trade_permission"] = {"permission": "WATCH", "css": "perm-watch", "reason": ""}
-
-    # â”€â”€ Canonical classification (single source of truth) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Previously this block independently re-derived an "A+ READY" / "B+
-    # WATCH" / etc. badge from raw score fields with its own thresholds,
-    # separate from classifier.classify_stock() (which drives watchlist
-    # auto-membership) and separate again from build_ai_trade_plan()'s own
-    # grade thresholds. That's exactly how the same ticker could show up
-    # simultaneously as A+ READY in one widget and AVOID in another: every
-    # widget was computing its own answer. Now every field below comes from
-    # one classify(stock) call, and every other piece of UI (Scanner
-    # Buckets, the Avoid/Blocked watchlist table, the top-5 "Best Swing
-    # Candidates" cards, and the alerts feed) reads these same fields
-    # instead of recomputing them.
-    _classification = classify(stock)
-    stock["classification"]          = _classification
-    stock["bucket"]                  = _classification["bucket"]
-    stock["simplified_action"]       = _classification["status_label"]
-    stock["simplified_action_class"] = _classification["badge_css"]
-    stock["avoid_blocked"]           = _classification["avoid_blocked"]
-    stock["swing_grade"]             = _classification["grade"]
-    stock["classify_reason"]         = _classification["reason"]
-
-    # â”€â”€ Relative Strength & Sector (market_engine) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if _MKT_AVAILABLE:
-        try:
-            _mkt_ctx   = _get_mkt_ctx()
-            _qqq_1d    = _mkt_ctx.get("qqq_1d_pct")
-            _stock_gap = stock.get("gap_pct")
-            _rs_db     = stock.get("rs_score")   # stored 20-day RS if available
-
-            # Fast intraday RS from today's gap vs QQQ gap
-            _rs_intra = _mkt.rs_score_intraday(_stock_gap, _qqq_1d)
-            # Prefer stored 20-day RS; use intraday if not computed yet
-            _rs_final = _rs_db if _rs_db else _rs_intra
-
-            stock["rs_score_display"] = _rs_final
-            stock["rs_label"]         = _mkt.rs_label(_rs_final)
-            stock["rs_class"]         = _mkt.rs_css_class(_rs_final)
-            stock["rs_vs_qqq_display"] = (
-                f"{'+' if (_stock_gap or 0) - (_qqq_1d or 0) >= 0 else ''}"
-                f"{((_stock_gap or 0) - (_qqq_1d or 0)):.1f}% vs QQQ"
-            )
-
-            # Sector for this ticker
-            _etf = stock.get("sector_etf") or ""
-            if not _etf and _MKT_AVAILABLE:
-                _etf, _ = _mkt.get_sector_for_ticker(stock.get("ticker") or "")
-                if _etf:
-                    stock["sector_etf"] = _etf
-            _leading = _mkt_ctx.get("leading_sectors") or []
-            stock["sector_name"]    = _mkt.SECTOR_ETFS.get(_etf, "")
-            stock["sector_leading"] = _etf in _leading if _etf else False
-            stock["sector_class"]   = "sector-chip-leading" if stock["sector_leading"] else "sector-chip"
-
-            # Market context for templates
-            stock["mkt_regime"]       = _mkt_ctx.get("regime", "NEUTRAL")
-            stock["mkt_regime_label"] = _mkt_ctx.get("regime_label", "Neutral")
-        except Exception as _rs_exc:
-            logger.debug("annotate RS/sector failed: %s", _rs_exc)
-            stock.setdefault("rs_score_display", 50)
-            stock.setdefault("rs_label",  "Neutral RS")
-            stock.setdefault("rs_class",  "rs-avg")
-            stock.setdefault("sector_name",    "")
-            stock.setdefault("sector_leading", False)
-            stock.setdefault("sector_class",   "sector-chip")
-    else:
-        stock.setdefault("rs_score_display", 50)
-        stock.setdefault("rs_label",  "Neutral RS")
-        stock.setdefault("rs_class",  "rs-avg")
-        stock.setdefault("sector_name",    "")
-        stock.setdefault("sector_leading", False)
-        stock.setdefault("sector_class",   "sector-chip")
-
-    # â”€â”€ Trade Avoidance AI â€” warning flags â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    _avoid_flags = []
-    _pct_ema20 = stock.get("pct_from_ema20") or 0
-    _rvol      = stock.get("rel_volume") or 0
-    _rr_val    = stock.get("risk_reward")
-    _in_sup    = stock.get("in_supply_zone") or False
-    _fvg_b     = stock.get("fvg_bearish") or False
-    _lh_ll     = stock.get("daily_lh_ll") or False
-    _sup_grade = stock.get("supply_zone_grade") or ""
-    _sw_stat   = stock.get("swing_status") or ""
-    _price     = stock.get("current_price") or 0
-    _pm_high   = stock.get("premarket_high") or 0
-    _prev_day_high = stock.get("prev_day_high") or 0
-
-    if _in_sup or _sup_grade in ("A+", "A"):
-        _avoid_flags.append({"icon": "âš ", "text": "At institutional supply zone â€” watch for rejection", "level": "high"})
-    if _fvg_b:
-        _avoid_flags.append({"icon": "â¬›", "text": "Bearish FVG overhead â€” institutional resistance", "level": "medium"})
-    if abs(_pct_ema20) > 8 and _pct_ema20 > 0:
-        _avoid_flags.append({"icon": "ðŸ“ˆ", "text": f"Extended {_pct_ema20:.1f}% above 20 EMA â€” high chase risk", "level": "high"})
-    if _rvol < 0.8 and _price > 0:
-        _avoid_flags.append({"icon": "ðŸ“‰", "text": "Low relative volume â€” weak institutional conviction", "level": "medium"})
-    if _rr_val is not None and _rr_val < 1.5:
-        _avoid_flags.append({"icon": "âš–", "text": f"Risk/reward {_rr_val:.1f}:1 â€” below 1.5:1 minimum", "level": "high"})
-    if _lh_ll:
-        _avoid_flags.append({"icon": "ðŸ“‰", "text": "Downtrend structure (LH/LL) â€” against institutional flow", "level": "medium"})
-    if _pm_high and _price and _prev_day_high and _price > _prev_day_high * 1.05:
-        _avoid_flags.append({"icon": "ðŸ”´", "text": "Significant gap up â€” late entry risk if chasing open", "level": "medium"})
-    if _sw_stat in ("WAIT", "NOT ENOUGH EDGE"):
-        _avoid_flags.append({"icon": "â¸", "text": "No confirmed entry setup â€” monitor only", "level": "low"})
-
-    stock["avoidance_flags"]     = _avoid_flags
-    stock["avoidance_flag_count"]= len(_avoid_flags)
-    stock["avoidance_high"]      = any(f["level"] == "high" for f in _avoid_flags)
-
-    # â”€â”€ AI Trade Plan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    try:
-        stock["ai_trade_plan"] = build_ai_trade_plan(stock)
-    except Exception as _tp_err:
-        logger.debug("annotate  ai_trade_plan failed: %s", _tp_err)
-        stock["ai_trade_plan"] = {"has_plan": False, "grade": "B", "grade_css": "plan-b",
-                                   "reasons": [], "warnings": [], "probability": 0}
-
-    # â”€â”€ Entry Trigger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    try:
-        _trig_text, _trig_css = _build_entry_trigger(stock)
-        stock["entry_trigger"]     = _trig_text
-        stock["entry_trigger_css"] = _trig_css
-    except Exception as _et_err:
-        logger.debug("annotate entry_trigger failed: %s", _et_err)
-        stock["entry_trigger"]     = ""
-        stock["entry_trigger_css"] = "entry-trigger-wait"
-
-    return stock
-
-
-# ---------------------------------------------------------------------------
-# Ranking & summary logic
-# ---------------------------------------------------------------------------
-
-def rank_stocks(stocks: list) -> list:
-    """
-    Rank stocks from strongest to weakest opportunity.
-    Composite score weights:
-      - setup_score    (primary â€” final composite: momentum + ORB + OB + entry)
-      - momentum_score (secondary â€” raw energy/follow-through)
-      - catalyst_score (tertiary â€” fundamental reason)
-      - relative volume (market interest)
-      - absolute gap % (size of the move)
-      - ORB ready stocks get a tiebreaker bonus
-      - Avoid stocks are always last
-    """
-    def composite(s):
-        if s.get("trade_bias") == "Avoid":
-            return -999
-        # Swing score is primary when populated; fall back to day-trading setup_score
-        _swing = s.get("swing_score") or 0
-        _setup = s.get("setup_score") or 0
-        primary  = (_swing * 8) if _swing else (_setup * 8)
-        catalyst = (s.get("catalyst_score") or 0) * 2
-        rvol     = min((s.get("rel_volume") or 0) * 1.5, 10)
-        # Penalise extended/avoid statuses
-        _status  = s.get("swing_status") or ""
-        penalty  = -20 if _status in (
-            "WAIT", "TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE"
-        ) else (-5 if _status == "TREND CONTINUATION" else 0)
-        return primary + catalyst + rvol + penalty
-
-    return sorted(stocks, key=composite, reverse=True)
-
-
-_CONT_TYPES_TOP5 = {"Breakout Continuation", "Gap and Go", "Earnings Continuation",
-                    "Bull Flag", "Relative Strength Leader", "Trend Continuation"}
-
-
-def compute_top5(ranked: list) -> list:
-    """
-    Select the "Best Swing Candidates" â€” the single shared definition used
-    by both the server-rendered dashboard and the live WebSocket/poll
-    payload (_build_dashboard_payload). These used to be two separate,
-    independently-maintained copies of this same threshold logic; one of
-    them excluded avoid statuses using strings without the em dash the
-    live status labels actually use ("AVOID â€” AT RESISTANCE" vs "AVOID AT
-    RESISTANCE"), so it silently failed to exclude some avoid-classified
-    tickers. Having one function means the cards you see on first page
-    load and the cards the 4-second auto-refresh patches in are always
-    selected by the exact same rule.
-
-    Excludes anything classify(stock) marked avoid_blocked â€” that flag
-    already covers Avoid bias, weak R:R, low signal, and avoid swing
-    statuses, so a ticker shown as AVOID / BLOCKED anywhere else in the UI
-    can never also appear in Best Swing Candidates.
-    """
-    return [
-        s for s in ranked
-        if not s.get("avoid_blocked") and (
-        (
-            # Continuation stocks: lower score bar when setup type is actionable
-            (s.get("swing_score") or 0) >= 5
-            and s.get("swing_setup_type") in _CONT_TYPES_TOP5
-            and s.get("trade_bias") != "Avoid"
-        ) or (
-            # Swing mode: good score + actionable status
-            (s.get("swing_score") or 0) >= 6
-            and s.get("trade_bias") != "Avoid"
-        ) or (
-            # Legacy day-trading fallback when swing fields absent
-            not s.get("swing_score")
-            and (s.get("momentum_score") or 0) >= 6
-            and s.get("orb_ready") == "YES"
-            and s.get("entry_quality") != "Extended"
-            and s.get("trade_bias") != "Avoid"
-        ))
-    ][:5]
-
-
-def compute_no_trade_assessment(ranked: list, top5: list) -> dict:
-    """
-    Analyse the full ranked watchlist to decide whether this is a no-trade day
-    and to explain *why* conditions are poor.
-
-    Returns a dict with these keys:
-      is_no_trade   bool   â€” True when no A+ setups exist
-      lock_signals  bool   â€” True when signal quality is so low that TRIGGERED
-                             states should be suppressed (prevents false urgency)
-      verdict       str    â€” Short headline ("NO TRADE DAY" or "")
-      reasons       list   â€” Up to 3 specific reason strings
-      severity      str    â€” "hard" | "soft" | "none"
-                             hard â†’ lock signals, show red panel
-                             soft â†’ show amber warning, do not lock
-                             none â†’ normal trading conditions
-
-    Severity rules:
-      hard  â€” top5 empty AND (avg momentum < 4 OR avg rvol < 1.2)
-               Conditions are genuinely bad; locking signals protects discipline.
-      soft  â€” top5 empty but some secondary setups exist with decent scores
-               Environment is marginal; worth watching but not forcing trades.
-      none  â€” top5 exists; normal flow.
-    """
-    if top5:
-        return {
-            "is_no_trade":  False,
-            "lock_signals": False,
-            "verdict":      "",
-            "reasons":      [],
-            "severity":     "none",
-        }
-
-    tradeable = [s for s in ranked if s.get("trade_bias") != "Avoid"]
-
-    # â”€â”€ Diagnose each weakness â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    reasons = []
-
-    # 1. Swing score check (primary signal in swing mode)
-    swing_scores = [s.get("swing_score") or 0 for s in tradeable]
-    has_swing_data = any(swing_scores)
-    max_swing = 0  # initialized here; set below if has_swing_data
-
-    if has_swing_data:
-        avg_swing = sum(swing_scores) / len(swing_scores) if swing_scores else 0
-        max_swing = max(swing_scores) if swing_scores else 0
-        low_swing = avg_swing < 4
-        if low_swing:
-            reasons.append(f"Low swing score across watchlist (avg {avg_swing:.1f}/10, best {max_swing}/10)")
-        elif max_swing < 6:
-            reasons.append(f"Best swing score is {max_swing}/10 â€” below the 6/10 threshold for A+ setups")
-
-        # Check for structural issues
-        avoid_count = sum(1 for s in tradeable if s.get("swing_status") in
-                          ("TOO EXTENDED", "AVOID AT RESISTANCE", "AVOID WEAK STRUCTURE"))
-        if avoid_count == len(tradeable):
-            reasons.append("All stocks are extended or at resistance â€” wait for pullbacks")
-        elif not any((s.get("swing_score") or 0) >= 6 for s in tradeable):
-            reasons.append("No stocks have swing score â‰¥ 6 â€” no A+ setups forming")
-    else:
-        # Fall back to day-trading momentum assessment
-        if tradeable:
-            avg_mom = sum(s.get("momentum_score") or 0 for s in tradeable) / len(tradeable)
-            max_mom = max((s.get("momentum_score") or 0) for s in tradeable)
-        else:
-            avg_mom = 0
-            max_mom = 0
-
-        low_momentum = avg_mom < 4
-        if low_momentum:
-            reasons.append(f"Low momentum across the board (avg {avg_mom:.1f}/10, best {max_mom}/10)")
-        elif max_mom < 6:
-            reasons.append(f"Best momentum is {max_mom}/10 â€” below the 6/10 threshold for A+ setups")
-
-    # 2. Volume check
-    if tradeable:
-        avg_rvol = sum(s.get("rel_volume") or 0 for s in tradeable) / len(tradeable)
-        max_rvol = max(s.get("rel_volume") or 0 for s in tradeable)
-    else:
-        avg_rvol = 0
-        max_rvol = 0
-
-    low_volume = avg_rvol < 0.8
-    if low_volume:
-        reasons.append(f"Low relative volume (avg {avg_rvol:.1f}x) â€” market participation weak")
-
-    # Cap at 3 reasons
-    reasons = reasons[:3]
-
-    # â”€â”€ Severity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if has_swing_data:
-        hard = (not tradeable) or (max_swing < 4)
-    else:
-        avg_mom_val = sum(s.get("momentum_score") or 0 for s in tradeable) / max(len(tradeable), 1)
-        hard = (avg_mom_val < 4 and avg_rvol < 1.2) or (not tradeable)
-    severity = "hard" if hard else "soft"
-
-    return {
-        "is_no_trade":  True,
-        "lock_signals": hard,
-        "verdict":      "NO TRADE DAY â€” Protect Capital" if hard else "No A+ Setups â€” Caution",
-        "reasons":      reasons,
-        "severity":     severity,
-    }
-
-
-def compute_secondary_watchlist(ranked: list, top5_set: set) -> list:
-    """
-    Return B-setup / Watch-Only stocks that missed the Top 5 cut but are still worth tracking.
-
-    Inclusion criteria (any one of):
-      - momentum_score >= 4  (some energy but not A+)
-      - rel_volume >= 1.5    (market is paying attention)
-      - setup_score >= 5     (decent structure)
-
-    Exclusion:
-      - Already in Top 5
-      - classify(stock)["avoid_blocked"] is True (covers trade_bias == "Avoid"
-        plus the other AVOID / BLOCKED paths â€” weak R:R, low signal, etc. â€”
-        so a ticker the rest of the UI shows as AVOID can never also appear
-        "on the radar")
-      - exec_state == "TRIGGERED" (already highlighted in alert banner)
-
-    Each stock gets a tier label:
-      "B Setup"    â€” momentum â‰¥ 4 AND setup â‰¥ 5 (worthy of active monitoring)
-      "Watch Only" â€” everything else that qualifies (on the radar but not acting)
-    """
-    secondary = []
-    for s in ranked:
-        if s.get("ticker") in top5_set:
-            continue
-        if s.get("avoid_blocked") or s.get("trade_bias") == "Avoid":
-            continue
-        if s.get("display_exec_state") == "TRIGGERED":
-            continue
-
-        swing = s.get("swing_score")    or 0
-        mom   = s.get("momentum_score") or 0
-        rvol  = s.get("rel_volume")     or 0
-        setup = s.get("setup_score")    or 0
-
-        # Swing mode: score â‰¥ 4 qualifies; day-trading fallback otherwise
-        if swing:
-            qualifies = swing >= 4 or rvol >= 1.0
-        else:
-            qualifies = mom >= 4 or rvol >= 1.5 or setup >= 5
-        if not qualifies:
-            continue
-
-        # Tier assignment
-        if swing >= 6:
-            s["secondary_tier"]       = "B Setup"
-            s["secondary_tier_class"] = "tier-b-setup"
-        elif swing >= 4 or (not swing and mom >= 4 and setup >= 5):
-            s["secondary_tier"]       = "B Setup"
-            s["secondary_tier_class"] = "tier-b-setup"
-        else:
-            s["secondary_tier"]       = "Watch Only"
-            s["secondary_tier_class"] = "tier-watch"
-
-        secondary.append(s)
-
-    return secondary
-
-
-def compute_summary_cards(stocks: list) -> dict:
-    """
-    Find the four featured stocks for the summary card row:
-      best_gapper       â€” largest absolute gap %
-      strongest_catalyst â€” highest catalyst_score
-      highest_volume    â€” highest relative volume
-      best_setup        â€” highest setup_score (Avoid excluded)
-    Returns None for a slot if no suitable stock exists.
-    """
-    tradeable = [s for s in stocks if s.get("trade_bias") != "Avoid"]
-    if not tradeable:
-        return {"best_gapper": None, "strongest_catalyst": None,
-                "highest_volume": None, "best_setup": None}
-    return {
-        "best_gapper":        max(tradeable, key=lambda s: abs(s.get("gap_pct")        or 0)),
-        "strongest_catalyst": max(tradeable, key=lambda s:     s.get("catalyst_score") or 0),
-        "highest_volume":     max(tradeable, key=lambda s:     s.get("rel_volume")     or 0),
-        "best_setup":         max(tradeable, key=lambda s:     s.get("swing_score") or s.get("setup_score") or 0),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
-# ROUTE REFERENCE â€” keep this list in sync when adding/renaming routes.
-# Every url_for() call in templates MUST use one of these endpoint names.
-#
-#   Endpoint name          Method   Path
-#   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-#   dashboard              GET      /
-#   watchlist_add          POST     /watchlist/add
-#   watchlist_remove       POST     /watchlist/remove/<ticker>
-#   refresh_all            POST     /refresh
-#   stock_detail           GET      /stock/<ticker>
-#   refresh_single         POST     /stock/<ticker>/refresh
-#   save_stock_plan        POST     /stock/<ticker>/plan
-#   save_stock_note        POST     /stock/<ticker>/notes
-#   set_setup_type         POST     /stock/<ticker>/setup_type
-#   stock_set_watchlists   POST     /stock/<ticker>/watchlists
-#   toggle_auto_classify   POST     /stock/<ticker>/auto_classify
-#   watchlist_activate     POST     /watchlists/activate/<wl_id>
-#   watchlist_create       POST     /watchlists/create
-#   watchlist_rename       POST     /watchlists/rename/<wl_id>
-#   watchlist_delete       POST     /watchlists/delete/<wl_id>
-#   journal                GET      /journal
-#   journal_add            POST     /journal/add
-#   journal_edit           POST     /journal/<entry_id>/edit
-#   journal_delete         POST     /journal/<entry_id>/delete
-#   quick_mode             GET      /quick
-#   api_dashboard          GET      /api/dashboard
-#   api_stock_live         GET      /api/stock/<ticker>/live
-#   api_watchlist          GET      /api/watchlist
-# ---------------------------------------------------------------------------
-
-_DASHBOARD_EMPTY = dict(
-    ranked=[], top5=[], triggered=[], summary={},
-    missing=[], watchlist=[], notes={}, secondary=[],
-    scanner_buckets={"aplus": [], "forming": [], "chase": [], "avoid": []},
-    alt_modes=[], all_wls=[], active_wl=None, wl_counts={},
-    no_trade={"is_no_trade": False, "lock_signals": False, "verdict": "",
-              "reasons": [], "severity": "none"},
-    orb_session={},
-    alerts=[],
-    risk_settings={"trading_mode": "SWING TRADE", "account_size": 10000,
-                   "risk_pct": 1.0, "max_trades_per_day": 3,
-                   "max_daily_loss_pct": 3.0, "stop_after_2_losses": True},
-    daily_session={"locked": 0, "lock_reason": None},
-    discipline={"score": 100, "label": "Disciplined", "css": "disc-high", "deductions": []},
-    daily_banner={"type": "aplus", "text": "A+ ONLY MODE",
-                  "sub": "Trade only the highest-quality setups", "css": "banner-aplus"},
-    trades_today=0,
-    losses_today=0,
-    market_temp={"regime": "UNKNOWN", "label": "â€”", "css": "mt-unknown",
-                 "reason": "", "action_msg": "â€”", "longs_ok": None,
-                 "shorts_ok": None, "reduce_size": False,
-                 "score": None, "meter_score": 50, "error": True,
-                 "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
-                 "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
-                 "vix_level": None, "vix_direction": None,
-                 "decision_cmd": "â€”", "risk_pct_rec": None, "size_multiplier": None,
-                 "size_zone": "unknown", "why": "",
-                 "mode_desc": "â€”", "es_price": None, "es_change_pct": None,
-                 "es_above_vwap": None, "sectors": {}},
-    mkt_context={
-        "regime": "NEUTRAL", "regime_label": "Neutral",
-        "qqq_trend": "Unknown", "spy_trend": "Unknown",
-        "qqq_1d_pct": None, "spy_1d_pct": None,
-        "signal": "", "longs_ok": True, "shorts_ok": True,
-        "sectors": [], "leading_sectors": [], "weak_sectors": [],
-        "top_sector": None, "vix_level": None,
-        "qqq_price": None, "spy_price": None,
-    },
-)
-
-
-@app.route("/setups")
-def dashboard():
-    """SETUPS â€” swing-setup scanner (buckets, market temp, best candidates,
-    radar, watchlist table). Endpoint name kept as `dashboard` so existing
-    url_for('dashboard') redirects (watchlist add/remove/refresh) still land
-    here after mutations."""
-    try:
-        return _dashboard_inner()
-    except Exception as exc:
-        logger.error("dashboard  route=/setups  unhandled_error=%s", exc, exc_info=True)
-        flash("Scanner error â€” please refresh the page.", "error")
-        return render_template("dashboard.html", **_DASHBOARD_EMPTY)
-
-
-@app.route("/account")
-def account():
-    """ACCOUNT & Performance â€” Schwab balances/positions, journal performance
-    (win rate), and discipline counters. Read-only view over the existing
-    Schwab, Journal, and Risk data sources (no new logic)."""
-    uid = current_user_id()
-
-    # Schwab snapshot (buying power, P&L, positions) â€” live when connected
-    acct = None
-    try:
-        tok = _schwab.token_status(uid)
-        if tok.get("connected"):
-            acct = _get_schwab_data(uid)
-            if acct.get("error"):
-                acct = None
-    except Exception as _ae:
-        logger.debug("account: schwab fetch skipped: %s", _ae)
-
-    # Journal performance (same store the Journal page uses)
-    entries = get_all_journal_entries(uid)
-    summary = compute_journal_summary(entries)
-
-    # Discipline counters (today) â€” same computation as the Risk page
-    today_str     = _et_now().strftime("%Y-%m-%d")
-    daily_session = get_daily_session(today_str, uid)
-    today_entries = get_journal_entries_for_date(today_str, uid)
-    risk_s        = get_risk_settings(uid)
-    discipline    = compute_discipline_score(today_entries, risk_s,
-                                             bool(daily_session.get("locked")))
-    trades_today  = len(today_entries)
-    losses_today  = sum(1 for e in today_entries if e.get("result") == "Loss")
-
-    return render_template(
-        "account.html",
-        acct=acct,
-        entries=entries,
-        summary=summary,
-        discipline=discipline,
-        daily_session=daily_session,
-        trades_today=trades_today,
-        losses_today=losses_today,
-        risk_settings=risk_s,
-    )
-
-
-def _paper_snapshot(uid: int) -> dict:
-    account = get_paper_account(uid)
-    positions = get_paper_positions(uid)
-    quotes = {s["ticker"]: s for s in get_all_stock_data()}
-    market_value = unrealized = 0.0
-    for pos in positions:
-        quote = quotes.get(pos["ticker"], {})
-        last = float(quote.get("current_price") or pos["avg_price"])
-        pos["last_price"] = last
-        pos["market_value"] = round(last * pos["quantity"], 2)
-        pos["unrealized_pnl"] = round((last - pos["avg_price"]) * pos["quantity"], 2)
-        market_value += pos["market_value"]
-        unrealized += pos["unrealized_pnl"]
-    orders = get_paper_orders(uid)
-    realized = round(sum(float(o.get("realized_pnl") or 0) for o in orders), 2)
-    equity = round(float(account["cash_balance"]) + market_value, 2)
-    total_pnl = round(equity - float(account["starting_cash"]), 2)
-    return {"account": account, "positions": positions, "orders": orders,
-            "market_value": round(market_value, 2), "unrealized": round(unrealized, 2),
-            "realized": realized, "equity": equity, "total_pnl": total_pnl,
-            "return_pct": round(total_pnl / float(account["starting_cash"]) * 100, 2)}
-
-
-@app.route("/paper")
-def paper_trading():
-    """Account-isolated, long-only paper portfolio and performance screen."""
-    return render_template("paper.html", paper=_paper_snapshot(current_user_id()))
-
-
-@app.route("/paper/order", methods=["POST"])
-def paper_order():
-    ticker = (request.form.get("ticker") or "").strip().upper()
-    side = (request.form.get("side") or "BUY").strip().upper()
-    try:
-        quantity = int(request.form.get("quantity") or 0)
-    except (TypeError, ValueError):
-        quantity = 0
-    if not re.fullmatch(r"[A-Z]{1,6}", ticker) or side not in ("BUY", "SELL") or quantity < 1:
-        flash("Enter a valid ticker, side, and whole-share quantity.", "error")
-        return redirect(url_for("paper_trading"))
-    stock = get_stock_data(ticker)
-    price = float(stock.get("current_price") or 0) if stock else 0
-    if price <= 0:
-        flash(f"No verified quote is available for {ticker}; no paper order was filled.", "error")
-        return redirect(url_for("paper_trading"))
-    try:
-        fill = execute_paper_order(current_user_id(), ticker, side, quantity, price)
-        flash(f"Paper {side.lower()} filled: {quantity} {ticker} @ ${price:,.2f}.", "success")
-    except ValueError as exc:
-        flash(str(exc), "error")
-    return redirect(url_for("paper_trading"))
-
-
-def _dashboard_inner():
-    uid          = current_user_id()
-    all_wls      = get_all_watchlists(uid)
-    active_wl_id = get_active_wl_id()
-    active_wl    = get_watchlist_by_id(active_wl_id) if active_wl_id else None
-    wl_counts    = get_watchlist_stock_counts(uid)
-
-    watchlist = get_watchlist_stocks(active_wl_id) if active_wl_id else []
-
-    # Single DB read â€” reused for staleness checks, expiry, and rendering.
-    all_data = get_all_stock_data()
-    data_map = {s["ticker"]: s for s in all_data}
-    logger.info("dashboard  route=/  wl_id=%s  tickers=%s", active_wl_id, watchlist)
-
-    # Fetch trade_mode once â€” passed into annotate() to avoid N DB calls.
-    _trade_mode = get_setting("trading_mode") or "SWING TRADE"
-
-    # Pass data_map so auto_refresh and expire don't make additional DB calls.
-    if watchlist:
-        auto_refresh_stale_closes(watchlist, data_map=data_map)
-        _expire_stuck_loading(watchlist, data_map=data_map)
-
-    # Annotate per ticker â€” one bad ticker must not crash the whole dashboard
-    stocks = []
-    for t in watchlist:
-        if t not in data_map:
-            continue
-        try:
-            stocks.append(annotate(data_map[t], trade_mode=_trade_mode))
-        except Exception as exc:
-            logger.error("dashboard  ticker=%s  stage=annotate  err=%s", t, exc, exc_info=True)
-            s = data_map[t]
-            s["ticker_state"]       = "error"
-            s["ticker_state_class"] = "state-error"
-            s["ticker_state_label"] = "Data Error"
-            stocks.append(s)
-
-    missing = [t for t in watchlist if t not in data_map]
-
-    ranked     = rank_stocks(stocks)
-
-    # Best Swing Candidates â€” shared with the live WebSocket/poll payload,
-    # see compute_top5() for why that matters.
-    top5 = compute_top5(ranked)
-
-    # Generate swing alerts from the current ranked list
-    generate_alerts(ranked)
-    dashboard_alerts = get_alerts(limit=10)
-
-    # No-trade assessment â€” must run before triggered list is built
-    no_trade = compute_no_trade_assessment(ranked, top5)
-
-    # Triggered: suppress entirely when signal lock is active (no-trade day)
-    if no_trade["lock_signals"]:
-        triggered = []
-    else:
-        triggered = [s for s in ranked if s.get("display_exec_state") == "TRIGGERED"]
-
-    summary = compute_summary_cards(stocks)
-
-    # Secondary watchlist â€” B setups and watch-only when Top 5 is thin/empty
-    top5_tickers = {s["ticker"] for s in top5}
-    secondary    = compute_secondary_watchlist(ranked, top5_tickers)
-
-    # â”€â”€ Scanner buckets: 4-quadrant view of the full watchlist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Grouped strictly by the canonical classify(stock)["scanner_key"] â€”
-    # the exact same field that produced this ticker's bucket badge and
-    # avoid_blocked flag a few lines ago in annotate(). Previously this
-    # grouping re-matched on simplified_action/trade_bias/setup_type
-    # strings with its own ad hoc rules, which is how a ticker could be
-    # bucketed AVOID here while showing A+ READY everywhere else.
-    _SCANNER_CAPS = {"avoid": 6, "chase": 8, "aplus": 6, "forming": 10}
-    scanner_buckets: dict = {"aplus": [], "forming": [], "chase": [], "avoid": []}
-    for _sb in ranked:
-        _scanner_key = (_sb.get("classification") or {}).get("scanner_key", "forming")
-        if _scanner_key not in scanner_buckets:
-            _scanner_key = "forming"
-        if len(scanner_buckets[_scanner_key]) < _SCANNER_CAPS.get(_scanner_key, 10):
-            scanner_buckets[_scanner_key].append(_sb)
-
-    # alt_modes kept for backward compat but no_trade replaces them in template
-    alt_modes = []
-
-    # Notes: pass a set of tickers that have notes for the indicator column
-    notes_map = get_all_notes(uid)
-
-    # â”€â”€ Risk engine context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    risk_settings   = get_risk_settings(uid)
-    today_str       = _et_now().strftime("%Y-%m-%d")
-    daily_session   = get_daily_session(today_str, uid)
-    today_entries   = get_journal_entries_for_date(today_str, uid)
-
-    # Auto-lock check: fires when a new journal entry pushes over limits
-    _lock_update = check_auto_lock(today_entries, risk_settings, daily_session)
-    if _lock_update:
-        lock_daily_session(_lock_update["lock_reason"], today_str, uid)
-        daily_session = get_daily_session(today_str, uid)
-
-    discipline      = compute_discipline_score(today_entries, risk_settings,
-                                               bool(daily_session.get("locked")))
-    daily_banner    = compute_daily_banner(no_trade, daily_session)
-    trades_today    = len(today_entries)
-    losses_today    = sum(1 for e in today_entries if e.get("result") == "Loss")
-
-    market_temp = _get_market_temperature()
-
-    # Market regime + sector strength from market_engine (cached, 60 min TTL)
-    mkt_context = _get_mkt_ctx()
-
-    # Display sort â€” grade first (A+ â†’ â€¦ â†’ ungraded), then swing score desc.
-    # Presentation only; does not alter rank_stocks / scoring.
-    def _grade_sort_key(s):
-        return (_ugrade_info(s.get("swing_grade"))[1], s.get("swing_score") or 0)
-    ranked = sorted(ranked, key=_grade_sort_key, reverse=True)
-    top5   = sorted(top5,   key=_grade_sort_key, reverse=True)
-
-    return render_template(
-        "dashboard.html",
-        ranked=ranked,
-        top5=top5,
-        triggered=triggered,
-        summary=summary,
-        missing=missing,
-        watchlist=watchlist,
-        notes=notes_map,
-        secondary=secondary,
-        scanner_buckets=scanner_buckets,
-        alt_modes=alt_modes,
-        no_trade=no_trade,
-        all_wls=all_wls,
-        active_wl=active_wl,
-        wl_counts=wl_counts,
-        orb_session=get_orb_session_banner(),
-        alerts=dashboard_alerts,
-        risk_settings=risk_settings,
-        daily_session=daily_session,
-        discipline=discipline,
-        daily_banner=daily_banner,
-        trades_today=trades_today,
-        losses_today=losses_today,
-        market_temp=market_temp,
-        mkt_context=mkt_context,
-    )
-
-
-def _onboard_ticker_bg(ticker: str) -> None:
-    """
-    Background onboarding pipeline for a newly added ticker.
-
-    Stage 1 â€” Core data (fast):
-        Fetch current_price, prev_close, gap_pct, volume from yfinance.
-        If price > 0  â†’ save a 'partial' snapshot so the row shows real data.
-        If price = 0  â†’ set state = 'error' and return.
-
-    Stage 2 â€” Full analysis (slow, may take 15-30 s on Render):
-        Run the full generate_stock_data() pipeline (EMAs, Fib, zones, scoring).
-        Result is 'ready', 'partial', or 'error' depending on what succeeded.
-
-    Logs at every transition so Render logs can be followed in real time.
-
-    State flow:  loading â†’ partial (after Stage 1) â†’ ready/partial/error (after Stage 2)
-    """
-    logger.info("onboard_bg  ticker=%s  stage=start", ticker)
-
-    # â”€â”€ Stage 1: Core price data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    stage1_ok = False
-    try:
-        from data_fetcher import fetch_live_data as _fetch_live
-        live = _fetch_live(ticker)
-        price = float(live.get("current_price") or 0) if live else 0.0
-        if live and price > 0:
-            gap = float(live.get("gap_pct") or 0)
-            partial = {
-                "ticker":               ticker,
-                "current_price":        price,
-                "prev_close":           live.get("prev_close"),
-                "gap_pct":              gap,
-                "prev_close_date":      live.get("prev_close_date"),
-                "premarket_high":       live.get("premarket_high"),
-                "premarket_low":        live.get("premarket_low"),
-                "prev_day_high":        live.get("prev_day_high"),
-                "prev_day_low":         live.get("prev_day_low"),
-                "avg_volume":           live.get("avg_volume", 0),
-                "rel_volume":           live.get("rel_volume", 1.0),
-                "earnings_date":        live.get("earnings_date"),
-                "vwap":                 live.get("vwap"),
-                "orb_phase":            live.get("orb_phase", "pre_market"),
-                "orb_high":             None,
-                "orb_low":              None,
-                "trade_bias":           ("Long Bias"  if gap >  3 else
-                                         "Short Bias" if gap < -3 else "Neutral"),
-                # Scoring defaults â€” analysis not yet complete
-                "catalyst_summary":         "Analysis pendingâ€¦",
-                "news_headlines":           "[]",
-                "catalyst_category":        "[]",
-                "headlines_fetched_at":     None,
-                "catalyst_score":           0,
-                "catalyst_reason":          "Pending",
-                "catalyst_confidence":      "Low",
-                "momentum_score":           0,
-                "momentum_reason":          None,
-                "momentum_confidence":      "Low",
-                "setup_score":              0,
-                "setup_reason":             None,
-                "setup_confidence":         "Low",
-                "setup_type":               "No Setup",
-                "swing_score":              1,
-                "swing_reason":             None,
-                "swing_confidence":         "Low",
-                "swing_setup_type":         "No Setup",
-                "swing_status":             "NOT ENOUGH EDGE",
-                "exec_state":               "WAIT",
-                "orb_ready":                "NO",
-                "orb_status":               "NO_ORB",
-                "order_block":              "Neutral",
-                "entry_quality":            "Okay",
-                "position_size":            "normal",
-                "entry_note":               None,
-                "momentum_breakout":        False,
-                "candles_above_orb":        0,
-                "orb_hold":                 False,
-                "trend_structure":          False,
-                "higher_highs":             False,
-                "higher_lows":              False,
-                "strong_candle_bodies":     False,
-                "price_above_vwap":         False,
-                "momentum_runner":          False,
-                "structure_momentum_score": 0,
-                "ticker_state":             "partial",
-                "last_updated":             _et_now().strftime("%Y-%m-%d %I:%M %p"),
-            }
-            # Fill all swing/zone analysis keys so upsert_stock_data doesn't
-            # fail on named-param binding for missing columns.
-            _swing_defaults(partial)
-            _zone_defaults(partial)
-            upsert_stock_data(partial)
-            stage1_ok = True
-            logger.info(
-                "onboard_bg  ticker=%s  stage=1_complete  state=partial  price=%.2f",
-                ticker, price,
-            )
-        else:
-            logger.warning(
-                "onboard_bg  ticker=%s  stage=1_failed  reason=no_price  live=%s",
-                ticker, bool(live),
-            )
-    except Exception as exc:
-        logger.error(
-            "onboard_bg  ticker=%s  stage=1_error  err=%s",
-            ticker, exc, exc_info=True,
-        )
-
-    if not stage1_ok:
-        set_ticker_state(ticker, "error")
-        logger.warning("onboard_bg  ticker=%s  stage=1_complete  state=error", ticker)
-        return
-
-    # â”€â”€ Stage 2: Full analysis (EMAs, Fib, zones, scoring) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Use Stage 1 snapshot as the "existing" reference so that if live fetch
-    # fails again in Stage 2 we preserve the good Stage 1 price (not error).
-    _stage1_snap = get_stock_data(ticker)
-    try:
-        fresh  = generate_stock_data(ticker)
-        result = _upsert_or_keep_snapshot(fresh, existing=_stage1_snap)
-        if result == "updated":
-            run_auto_classification(ticker)
-        logger.info(
-            "onboard_bg  ticker=%s  stage=2_complete  state=%s  result=%s",
-            ticker, fresh.get("ticker_state"), result,
-        )
-    except Exception as exc:
-        logger.error(
-            "onboard_bg  ticker=%s  stage=2_error  err=%s",
-            ticker, exc, exc_info=True,
-        )
-        # Stage 1 data is still in the DB â€” keep it as partial, not error.
-        if _stage1_snap and _stage1_snap.get("current_price"):
-            set_ticker_state(ticker, "partial")
-            logger.warning(
-                "onboard_bg  ticker=%s  stage=2_complete  state=partial  "
-                "reason=analysis_failed",
-                ticker,
-            )
-        else:
-            set_ticker_state(ticker, "error")
-
-
-@app.route("/watchlist/add", methods=["POST"])
-def watchlist_add():
-    """Add one or more tickers to the active watchlist."""
-    wl_id  = get_active_wl_id()
-    raw    = request.form.get("tickers", "")
-    queued = []
-    for t in re.split(r"[\s,]+", raw.upper()):
-        t = t.strip()
-        if not (t and re.match(r'^[A-Z]{1,5}$', t) and wl_id):
-            continue
-        # Claim the watchlist slot + insert a Loading placeholder so the
-        # ticker appears on the dashboard immediately.
-        add_ticker_to_watchlist(wl_id, t)
-        upsert_loading_placeholder(t)
-        logger.info("watchlist_add  ticker=%s  wl_id=%s  stage=placeholder_queued", t, wl_id)
-        # Fire the two-stage onboarding pipeline in a background thread so the
-        # HTTP response returns immediately and the UI shows the Loading badge.
-        threading.Thread(
-            target=_onboard_ticker_bg,
-            args=(t,),
-            daemon=True,
-            name=f"onboard-{t}",
-        ).start()
-        queued.append(t)
-
-    if queued:
-        flash(
-            f"Adding {', '.join(queued)}â€¦ "
-            "The row shows Loading â†’ Partial â†’ Ready as data arrives. "
-            "The page auto-refreshes when it's ready.",
-            "success",
-        )
-        logger.info("watchlist_add  queued=%s  wl_id=%s", queued, wl_id)
-    else:
-        flash("No valid tickers found. Use 1â€“5 letter stock symbols.", "error")
-    return _wl_next()
-
-
-@app.route("/watchlist/remove/<ticker>", methods=["POST"])
-def watchlist_remove(ticker):
-    """
-    Remove a ticker from the active watchlist.
-
-    Also removes it from ALL other default watchlists so auto-classification
-    cannot silently move it back into a different default list after deletion.
-    The ticker stays in any user-created custom watchlists (those are never
-    touched by auto-classification anyway).
-    """
-    t = ticker.upper()
-    wl_id = get_active_wl_id()
-    if wl_id:
-        logger.info("WATCHLIST REMOVE  ticker=%s wl_id=%s", t, wl_id)
-        # Remove from the specific watchlist the user is viewing
-        remove_ticker_from_watchlist(wl_id, t)
-        # Remove from all other default lists so auto-classify can't re-add it
-        remove_ticker_from_defaults(t, current_user_id())
-        remaining = get_watchlist_stocks(wl_id)
-        logger.info("WATCHLIST SAVED  wl_id=%s contents=%s", wl_id, remaining)
-    flash(f"Removed {t} from watchlist.", "info")
-    return _wl_next()
-
-
-def _refresh_all_worker(watchlist: list) -> None:
-    """
-    Background worker for refresh_all.  Runs in a daemon thread so the HTTP
-    response returns immediately (no gunicorn timeout).
-    """
-    global _refresh_all_running
-    try:
-        _all_existing = {s["ticker"]: s for s in get_all_stock_data()}
-        logger.info("refresh_all  bg_worker  tickers=%s", watchlist)
-        for ticker in watchlist:
-            try:
-                fresh  = generate_stock_data(ticker)
-                result = _upsert_or_keep_snapshot(fresh, existing=_all_existing.get(ticker))
-                if result == "updated":
-                    run_auto_classification(ticker)
-                logger.info(
-                    "refresh_all  ticker=%s  state=%s  result=%s",
-                    ticker, fresh.get("ticker_state"), result,
-                )
-            except Exception as exc:
-                logger.error("refresh_all  ticker=%s  err=%s", ticker, exc, exc_info=True)
-                try:
-                    existing = get_stock_data(ticker)
-                    if existing and existing.get("current_price"):
-                        set_ticker_state(ticker, "stale")
-                    else:
-                        set_ticker_state(ticker, "error")
-                except Exception:
-                    pass
-    finally:
-        _refresh_all_running = False
-        logger.info("refresh_all  bg_worker  done")
-
-
-@app.route("/refresh", methods=["POST"])
-def refresh_all():
-    """
-    Kick off a background refresh of all tickers and return immediately.
-    The actual data fetch runs in a daemon thread so gunicorn never times out.
-
-    Uses _refresh_all_lock.acquire(blocking=False) so the in-progress check
-    and flag-set are atomic â€” prevents two near-simultaneous POST requests
-    (e.g. double-click) from spawning two background workers.
-    """
-    global _refresh_all_running
-
-    if not _refresh_all_lock.acquire(blocking=False):
-        # Lock already held â€” a refresh is actively running
-        flash("Refresh already in progress â€” check back in a moment.", "warning")
-        logger.warning("refresh_all  skipped=lock_held")
-        return redirect(url_for("dashboard"))
-
-    try:
-        if _refresh_all_running:
-            flash("Refresh already in progress â€” check back in a moment.", "warning")
-            logger.warning("refresh_all  skipped=flag_set")
-            return redirect(url_for("dashboard"))
-
-        wl_id     = get_active_wl_id()
-        watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-        if not watchlist:
-            flash("No tickers in watchlist to refresh.", "warning")
-            return redirect(url_for("dashboard"))
-
-        _refresh_all_running = True
-        t = threading.Thread(target=_refresh_all_worker, args=(watchlist,), daemon=True)
-        t.start()
-        logger.info("refresh_all  stage=bg_thread_started  tickers=%s", watchlist)
-    finally:
-        _refresh_all_lock.release()
-
-    flash(
-        f"Refreshing {len(watchlist)} tickers in the background â€” "
-        "prices will update automatically. Reload in ~30 s.",
-        "info",
-    )
-    return redirect(url_for("dashboard"))
-
-
-@app.route("/stock/<ticker>")
-def stock_detail(ticker):
-    """Detailed view for a single stock."""
-    ticker = ticker.upper()
-    logger.info("stock_detail  ticker=%s  route=/stock/%s", ticker, ticker)
-    stock  = get_stock_data(ticker)
-    if stock is None:
-        flash(f"No data found for {ticker}.", "error")
-        return redirect(url_for("dashboard"))
-
-    # â”€â”€ Live price enrichment pass â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # On the detail page, always try the chart API to fill in any missing price
-    # fields so the user always sees current data regardless of DB state.
-    # This is a lightweight read-only call (~200ms) â€” it does NOT write to the DB.
-    try:
-        from data_fetcher import _fetch_price_via_chart_api
-        _chart = _fetch_price_via_chart_api(ticker)
-        if _chart:
-            _src_map = {}
-            for _field in ("current_price", "prev_close", "prev_day_high", "prev_day_low"):
-                _db_val   = stock.get(_field)
-                _live_val = _chart.get(_field)
-                if _live_val:
-                    if _db_val != _live_val:
-                        stock[_field] = _live_val   # always prefer freshly-fetched
-                        _src_map[_field] = "chart_api"
-                    else:
-                        _src_map[_field] = "db_matches_live"
-                else:
-                    _src_map[_field] = "db_only" if _db_val else "unavailable"
-            # Also recompute gap_pct from live current_price + prev_close
-            _cp, _pc = stock.get("current_price"), stock.get("prev_close")
-            if _cp and _pc and _pc > 0:
-                stock["gap_pct"] = round((_cp - _pc) / _pc * 100, 2)
-            logger.info(
-                "stock_detail  ticker=%s  live_enrich=ok  sources=%s  "
-                "price=%.2f  prev_close=%s  gap_pct=%s  "
-                "ema_20=%s  fib_high=%s",
-                ticker, _src_map,
-                stock.get("current_price") or 0,
-                stock.get("prev_close"),
-                stock.get("gap_pct"),
-                stock.get("ema_20_daily"),
-                stock.get("fib_high"),
-            )
-    except Exception as _enrich_err:
-        logger.warning("stock_detail  ticker=%s  live_enrich=failed  err=%s", ticker, _enrich_err)
-
-    # Annotate â€” guarded so a single bad field can't crash the whole detail page
-    try:
-        annotate(stock)
-    except Exception as exc:
-        logger.error("stock_detail  ticker=%s  stage=annotate  err=%s", ticker, exc, exc_info=True)
-        stock.setdefault("ticker_state",       "error")
-        stock.setdefault("ticker_state_class", "state-error")
-        stock.setdefault("ticker_state_label", "Data Error")
-        # Apply critical display defaults so the template doesn't crash
-        for _f, _v in [
-            ("final_action", "WAIT"), ("exec_class", "exec-wait"),
-            ("final_action_class", "exec-wait"), ("final_action_reason", ""),
-            ("bias_class", "bias-neutral"), ("swing_score_class", "neutral"),
-            ("swing_status_class", "swing-status-wait"),
-            ("swing_setup_type_class", "setup-none"),
-            ("swing_grade", "F"), ("gap_display", "â€”"), ("gap_class", ""),
-            ("entry_zone_display", "â€”"), ("entry_distance_display", "â€”"),
-            ("entry_distance_class", ""), ("risk_reward_display", "â€”"),
-            ("risk_reward_class", "rr-neutral"), ("resistance_distance_display", "â€”"),
-            ("pullback_quality", "Watch"), ("pullback_quality_class", "pq-watch"),
-            ("headline_freshness", ""), ("catalyst_tags", []),
-            ("combined_confidence", "Low"), ("combined_conf_class", "conf-low"),
-            ("orb_price_pct", 50.0), ("display_exec_state", "WAIT"),
-        ]:
-            stock.setdefault(_f, _v)
-
-    uid  = current_user_id()
-    note = get_note(ticker, uid)
-
-    try:
-        breakdown = catalyst_score_breakdown(stock) or []
-    except Exception as exc:
-        logger.error("stock_detail  ticker=%s  stage=breakdown  err=%s", ticker, exc)
-        breakdown = []
-
-    plan = get_trade_plan(ticker, uid)
-
-    try:
-        rr_ratio, rr_display, rr_class = compute_rr(
-            plan.get("plan_bias"),
-            plan.get("entry_level"),
-            plan.get("stop_loss"),
-            plan.get("target_price"),
-        )
-        stock.setdefault("risk_reward", rr_ratio)
-    except Exception:
-        rr_display, rr_class = "â€”", "rr-neutral"
-
-    all_wls       = get_all_watchlists(uid)
-    ticker_wl_ids = get_ticker_watchlist_ids(ticker, uid)
-    rs            = get_risk_settings(uid)
-    market_temp   = _get_market_temperature()
-
-    try:
-        coach = compute_trade_coach(stock, plan, market_temp, rs)
-    except Exception as _ce:
-        logger.warning("stock_detail  ticker=%s  coach_err=%s", ticker, _ce)
-        coach = {
-            "message": "Coach unavailable â€” could not evaluate signals.",
-            "level": "caution", "css": "coach-caution",
-            "reduce_size": False, "signals": [],
-        }
-
-    logger.info("stock_detail  ticker=%s  state=%s  coach=%s", ticker, stock.get("ticker_state"), coach.get("level"))
-
-    return render_template(
-        "stock_detail.html",
-        stock=stock,
-        note=note,
-        breakdown=breakdown,
-        setup_types=SWING_SETUP_TYPES + [s for s in SETUP_TYPES if s not in SWING_SETUP_TYPES],
-        plan=plan,
-        rr_display=rr_display,
-        rr_class=rr_class,
-        all_wls=all_wls,
-        ticker_wl_ids=ticker_wl_ids,
-        get_setup_type_class=get_setup_type_class,
-        risk_settings=rs,
-        market_temp=market_temp,
-        coach=coach,
-    )
-
-
-@app.route("/api/stock/<ticker>/chart")
-def stock_chart(ticker):
-    """Return a compact daily price series for the mobile stock profile."""
-    ticker = ticker.upper().strip()
-    if not ticker or len(ticker) > 10 or not all(c.isalnum() or c in ".-" for c in ticker):
-        return jsonify({"ok": False, "error": "Invalid ticker"}), 400
-    try:
-        from data_fetcher import _fetch_ohlcv_via_chart_api
-        bars = _fetch_ohlcv_via_chart_api(ticker, interval="1d", range_str="3mo")
-        if not bars or not bars.get("closes"):
-            return jsonify({"ok": False, "error": "Chart data unavailable"}), 503
-        points = [
-            {"t": int(ts), "c": round(float(close), 2)}
-            for ts, close in zip(bars.get("timestamps", []), bars["closes"])
-        ][-65:]
-        return jsonify({"ok": True, "ticker": ticker, "points": points})
-    except Exception as exc:
-        logger.warning("stock_chart ticker=%s err=%s", ticker, exc)
-        return jsonify({"ok": False, "error": "Chart data unavailable"}), 503
-
-
-# â”€â”€ Market Temperature cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-_market_temp_cache: dict = {"data": None, "ts": 0.0}
-_market_temp_lock  = threading.Lock()   # guards the spawn-once check
-_MARKET_TEMP_TTL   = 90    # 90-second refresh (was 5 min)
-
-
-def _get_market_temperature() -> dict:
-    """Return cached market regime; trigger background refresh when stale."""
-    _LOADING: dict = {
-        "regime": "LOADING", "label": "Loadingâ€¦", "css": "mt-loading",
-        "reason": "Fetching market dataâ€¦",
-        "longs_ok": None, "shorts_ok": None,
-        "reduce_size": False, "score": None, "meter_score": 50, "error": False,
-        "spy_price": None, "spy_pct_ema20": None, "spy_vs_vwap": None,
-        "qqq_price": None, "qqq_pct_ema20": None, "qqq_vs_vwap": None,
-        "vix_level": None, "vix_direction": None,
-        "es_price": None, "es_change_pct": None, "es_above_vwap": None,
-        "sectors": {}, "mode_desc": "â€”",
-        "action_msg": "â€”", "decision_cmd": "Loadingâ€¦", "risk_pct_rec": None,
-        "size_multiplier": None, "size_zone": "unknown", "why": "Fetching market dataâ€¦",
-    }
-    now = _time.time()
-    if _market_temp_cache["ts"] and now - _market_temp_cache["ts"] < _MARKET_TEMP_TTL:
-        return _market_temp_cache["data"]
-
-    # Atomic check-and-spawn: acquire the lock before reading/writing `fetching`
-    # so two simultaneous requests cannot both see fetching=False and both spawn
-    # a background thread (which would double-fetch and double-write the cache).
-    with _market_temp_lock:
-        # Re-check inside the lock â€” another thread may have just refreshed.
-        if _market_temp_cache["ts"] and now - _market_temp_cache["ts"] < _MARKET_TEMP_TTL:
-            return _market_temp_cache["data"]
-        if _market_temp_cache.get("fetching"):
-            return _market_temp_cache["data"] or _LOADING
-        _market_temp_cache["fetching"] = True
-
-    def _bg():
-        try:
-            from data_fetcher import compute_market_temperature
-            data = compute_market_temperature()
-            _market_temp_cache["data"] = data
-            _market_temp_cache["ts"]   = _time.time()
-            logger.info(
-                "market_temperature  regime=%s  score=%s",
-                data.get("regime"), data.get("score"),
-            )
-        except Exception as _e:
-            logger.warning("_get_market_temperature bg failed: %s", _e)
-        finally:
-            _market_temp_cache["fetching"] = False
-
-    threading.Thread(target=_bg, daemon=True).start()
-    return _market_temp_cache["data"] or _LOADING
-
-
-# â”€â”€ Market Context cache (ES futures + sectors, 30 s TTL) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-_market_ctx_cache: dict = {"data": None, "ts": 0.0}
-_market_ctx_lock  = threading.Lock()
-_MARKET_CTX_TTL   = 30   # 30-second refresh for live ES + sector display
-
-
-def _get_market_context() -> dict:
-    """Return cached ES + sector context; refresh in background when stale."""
-    _EMPTY = {
-        "es": {"price": None, "change_pct": None, "above_vwap": None, "error": True},
-        "sectors": {},
-        "after_hours": False,
-    }
-    now = _time.time()
-    if _market_ctx_cache["ts"] and now - _market_ctx_cache["ts"] < _MARKET_CTX_TTL:
-        return _market_ctx_cache["data"]
-
-    with _market_ctx_lock:
-        if _market_ctx_cache["ts"] and now - _market_ctx_cache["ts"] < _MARKET_CTX_TTL:
-            return _market_ctx_cache["data"]
-        if _market_ctx_cache.get("fetching"):
-            return _market_ctx_cache["data"] or _EMPTY
-        _market_ctx_cache["fetching"] = True
-
-    def _bg():
-        try:
-            from data_fetcher import fetch_market_context
-            data = fetch_market_context()
-            _market_ctx_cache["data"] = data
-            _market_ctx_cache["ts"]   = _time.time()
-        except Exception as _e:
-            logger.warning("_get_market_context bg failed: %s", _e)
-        finally:
-            _market_ctx_cache["fetching"] = False
-
-    threading.Thread(target=_bg, daemon=True).start()
-    return _market_ctx_cache["data"] or _EMPTY
-
-
-# â”€â”€ Options contract server-side cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-_options_cache: dict    = {}   # {ticker: {"data": dict, "ts": float}}
-_options_rl_until: dict = {}   # {ticker: float} â€” epoch when rate-limit backoff expires
-
-# TTL and backoff scale with market session so we never hammer Yahoo after hours
-_OPT_TTL = {
-    "regular":     90,    # market open â€” refresh up to every 90 s
-    "pre_market":  180,   # pre-market â€” prices move, but slower
-    "after_hours": 600,   # after hours â€” data barely changes, don't re-fetch for 10 min
-    "closed":      900,   # overnight / weekend â€” 15 min TTL, serve from cache
-}
-_OPT_RL_BACKOFF = {
-    "regular":     120,   # 2 min backoff after 429 during market hours
-    "pre_market":  300,   # 5 min backoff pre-market
-    "after_hours": 600,   # 10 min backoff after hours â€” Yahoo is throttled hardest here
-    "closed":      900,   # 15 min backoff overnight
-}
-
-
-def _options_session_ttl() -> tuple[int, int, str, bool]:
-    """Return (cache_ttl, rl_backoff, session_label, is_after_hours)."""
-    try:
-        session = market_session_now()
-    except Exception:
-        session = "closed"
-    ttl      = _OPT_TTL.get(session, 300)
-    backoff  = _OPT_RL_BACKOFF.get(session, 300)
-    after_hours = session in ("after_hours", "closed")
-    return ttl, backoff, session, after_hours
-
-
-@app.route("/api/options/<ticker>")
-def api_option_contracts(ticker):
-    """
-    Return filtered option contracts for the options contract selector.
-
-    Caching strategy scales with market session:
-      regular     â†’ TTL  90 s, RL backoff  120 s
-      pre_market  â†’ TTL 180 s, RL backoff  300 s
-      after_hours â†’ TTL 600 s, RL backoff  600 s
-      closed      â†’ TTL 900 s, RL backoff  900 s  (weekend / overnight)
-
-    Every response includes `market_session` and `after_hours` so the client
-    can show the "After hours â€” options data may be delayed" label without
-    any extra request.
-
-    Calls/Puts/All filtering is entirely client-side â€” this route always
-    returns both lists regardless of the `mode` query param.
-    Dashboard auto-refresh never calls this route.
-    """
-    ticker     = ticker.upper()
-    trade_mode = request.args.get("mode", "SWING TRADE")
-    now        = _time.time()
-
-    cache_ttl, rl_backoff, session, after_hours = _options_session_ttl()
-    cached_entry = _options_cache.get(ticker)
-
-    def _annotate(d: dict, *, is_cached: bool, is_stale: bool) -> dict:
-        """Stamp session / after-hours context onto every outgoing response."""
-        d["market_session"] = session
-        d["after_hours"]    = after_hours
-        d["cached"]         = is_cached
-        d["stale"]          = is_stale
-        return d
-
-    # â”€â”€ Fresh cache hit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if cached_entry and (now - cached_entry["ts"]) < cache_ttl:
-        age = int(now - cached_entry["ts"])
-        logger.info(
-            "options  ticker=%s  CACHE HIT  session=%s  age=%ds  ttl=%ds  "
-            "calls=%d  puts=%d",
-            ticker, session, age, cache_ttl,
-            len(cached_entry["data"].get("calls", [])),
-            len(cached_entry["data"].get("puts",  [])),
-        )
-        result = dict(cached_entry["data"])
-        result["cache_age_s"] = age
-        return jsonify(_annotate(result, is_cached=True, is_stale=False))
-
-    # â”€â”€ Rate-limit backoff still active â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    rl_until = _options_rl_until.get(ticker, 0)
-    if now < rl_until:
-        wait = int(rl_until - now)
-        logger.warning(
-            "options  ticker=%s  RATE LIMIT BACKOFF  session=%s  wait=%ds  "
-            "after_hours=%s  cache_exists=%s",
-            ticker, session, wait, after_hours, bool(cached_entry),
-        )
-        if cached_entry:
-            result = dict(cached_entry["data"])
-            result["cache_age_s"]   = int(now - cached_entry["ts"])
-            result["rate_limited"]  = True
-            result["retry_after_s"] = wait
-            logger.info(
-                "options  ticker=%s  serving STALE cache during backoff  age=%ds",
-                ticker, result["cache_age_s"],
-            )
-            return jsonify(_annotate(result, is_cached=True, is_stale=True))
-        return jsonify(_annotate({
-            "error":          "Options source rate-limited â€” try again later",
-            "calls": [], "puts": [], "price": None,
-            "best_day": None, "best_swing": None,
-            "rate_limited":   True,
-            "retry_after_s":  wait,
-        }, is_cached=False, is_stale=False))
-
-    # â”€â”€ Upstream call â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    logger.info(
-        "options  ticker=%s  UPSTREAM CALL  session=%s  after_hours=%s  "
-        "trade_mode=%s",
-        ticker, session, after_hours, trade_mode,
-    )
-    try:
-        stock = get_stock_data(ticker)
-        price = float(stock.get("current_price") or 0) if stock else 0.0
-        from data_fetcher import fetch_option_contracts
-        result = fetch_option_contracts(ticker, current_price=price or None,
-                                        trade_mode=trade_mode)
-
-        if result.get("rate_limited"):
-            _options_rl_until[ticker] = now + rl_backoff
-            logger.warning(
-                "options  ticker=%s  RATE LIMITED  session=%s  after_hours=%s  "
-                "backoff=%ds",
-                ticker, session, after_hours, rl_backoff,
-            )
-            if cached_entry:
-                stale = dict(cached_entry["data"])
-                stale["cache_age_s"]   = int(now - cached_entry["ts"])
-                stale["rate_limited"]  = True
-                stale["retry_after_s"] = rl_backoff
-                logger.info(
-                    "options  ticker=%s  serving STALE cache after rate limit  age=%ds",
-                    ticker, stale["cache_age_s"],
-                )
-                return jsonify(_annotate(stale, is_cached=True, is_stale=True))
-            result["retry_after_s"] = rl_backoff
-            return jsonify(_annotate(result, is_cached=False, is_stale=False))
-
-        # Success â€” cache it
-        if not result.get("error"):
-            _options_cache[ticker] = {"data": result, "ts": now}
-            logger.info(
-                "options  ticker=%s  CACHED  session=%s  calls=%d  puts=%d  "
-                "partial=%s  ttl=%ds",
-                ticker, session,
-                len(result.get("calls", [])), len(result.get("puts", [])),
-                result.get("partial", False), cache_ttl,
-            )
-
-        return jsonify(_annotate(result, is_cached=False, is_stale=False))
-
-    except Exception as exc:
-        logger.warning(
-            "options  ticker=%s  EXCEPTION  session=%s  err=%s", ticker, session, exc,
-        )
-        if cached_entry:
-            stale = dict(cached_entry["data"])
-            stale["cache_age_s"]  = int(now - cached_entry["ts"])
-            stale["rate_limited"] = False
-            return jsonify(_annotate(stale, is_cached=True, is_stale=True))
-        return jsonify(_annotate({
-            "error": "options data unavailable", "calls": [], "puts": [],
-            "price": None, "best_day": None, "best_swing": None,
-            "rate_limited": False,
-        }, is_cached=False, is_stale=False))
-
-
-@app.route("/stock/<ticker>/plan", methods=["POST"])
-def save_stock_plan(ticker):
-    """Save the pre-market structured trade plan for a ticker."""
-    t = ticker.upper()
-    save_trade_plan(
-        ticker      = t,
-        plan_bias   = request.form.get("plan_bias", ""),
-        entry_level = request.form.get("entry_level", ""),
-        stop_loss   = request.form.get("stop_loss", ""),
-        target_price= request.form.get("target_price", ""),
-        user_id     = current_user_id(),
-    )
-    flash("Pre-market plan saved.", "success")
-    return redirect(url_for("stock_detail", ticker=t) + "#plan")
-
-
-@app.route("/stock/<ticker>/notes", methods=["POST"])
-def save_stock_note(ticker):
-    """Save trade plan notes for a stock."""
-    save_note(ticker.upper(), request.form.get("note_text", ""), current_user_id())
-    flash("Notes saved.", "success")
-    return redirect(url_for("stock_detail", ticker=ticker.upper()))
-
-
-@app.route("/api/fib-override/<ticker>", methods=["POST"])
-def fib_override(ticker):
-    """
-    Apply manual Fibonacci anchors for a ticker.
-    Accepts: fib_manual_high, fib_manual_low (float, POST form).
-    Recomputes all fib levels from the given anchors and saves to DB.
-    """
-    t = ticker.upper()
-    try:
-        hi = float(request.form.get("fib_manual_high") or 0)
-        lo = float(request.form.get("fib_manual_low")  or 0)
-    except (TypeError, ValueError):
-        flash("Invalid fib values â€” enter numeric prices.", "error")
-        return redirect(url_for("stock_detail", ticker=t))
-
-    if hi <= lo or hi <= 0 or lo <= 0:
-        flash("Swing high must be greater than swing low.", "error")
-        return redirect(url_for("stock_detail", ticker=t))
-
-    rng = hi - lo
-    from database import get_db
-    update_data = {
-        "ticker":        t,
-        "fib_high":      round(hi, 2),
-        "fib_low":       round(lo, 2),
-        "fib_236":       round(hi - 0.236 * rng, 2),
-        "fib_382":       round(hi - 0.382 * rng, 2),
-        "fib_50":        round(hi - 0.500 * rng, 2),
-        "fib_618":       round(hi - 0.618 * rng, 2),
-        "fib_65":        round(hi - 0.650 * rng, 2),
-        "fib_786":       round(hi - 0.786 * rng, 2),
-        "fib_mode":      "manual",
-        "fib_direction": "bullish",
-        "fib_confidence": 10.0,
-    }
-    try:
-        conn = get_db()
-        conn.execute("""
-            UPDATE stock_data SET
-                fib_high      = :fib_high,
-                fib_low       = :fib_low,
-                fib_236       = :fib_236,
-                fib_382       = :fib_382,
-                fib_50        = :fib_50,
-                fib_618       = :fib_618,
-                fib_65        = :fib_65,
-                fib_786       = :fib_786,
-                fib_mode      = :fib_mode,
-                fib_direction = :fib_direction,
-                fib_confidence = :fib_confidence
-            WHERE ticker = :ticker
-        """, update_data)
-        conn.commit()
-        conn.close()
-        flash(f"Manual fib anchors saved for {t}: High ${hi:.2f} / Low ${lo:.2f}", "success")
-    except Exception as exc:
-        logger.error("fib_override: %s", exc)
-        flash("Failed to save fib override.", "error")
-
-    return redirect(url_for("stock_detail", ticker=t))
-
-
-@app.route("/stock/<ticker>/refresh", methods=["POST"])
-def refresh_single(ticker):
-    """Refresh and re-score a single ticker."""
-    global _single_refresh_active
-    t = ticker.upper()
-
-    # â”€â”€ Per-ticker overlap guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Prevents a double-click or rapid reload from spawning two simultaneous
-    # fetches for the same ticker.  If a refresh is already in progress for
-    # this ticker, redirect immediately with a warning.
-    with _single_refresh_lock:
-        if t in _single_refresh_active:
-            logger.warning("refresh_single  ticker=%s  skipped=already_in_progress", t)
-            flash(f"Refresh already in progress for {t} â€” please wait.", "warning")
-            referrer = request.referrer or ""
-            if "stock/" not in referrer:
-                return redirect(url_for("dashboard"))
-            return redirect(url_for("stock_detail", ticker=t))
-        _single_refresh_active.add(t)
-
-    logger.info("refresh_single  ticker=%s  stage=start", t)
-    _existing = get_stock_data(t)
-    try:
-        fresh  = generate_stock_data(t)
-        result = _upsert_or_keep_snapshot(fresh, existing=_existing)
-        if result == "updated":
-            run_auto_classification(t, current_user_id())
-        logger.info(
-            "refresh_single  ticker=%s  stage=complete  state=%s  result=%s  "
-            "price=%s  ema_20=%s  fib_high=%s",
-            t, fresh.get("ticker_state"), result,
-            fresh.get("current_price"), fresh.get("ema_20_daily"), fresh.get("fib_high"),
-        )
-        if result == "stale_kept":
-            flash(f"Live data unavailable for {t}. Showing last known data (STALE).", "warning")
-        else:
-            flash(f"Refreshed {t}.", "success")
-    except Exception as exc:
-        logger.error(
-            "refresh_single  ticker=%s  stage=error  err=%s  "
-            "snapshot_price=%s",
-            t, exc, _existing.get("current_price") if _existing else None,
-            exc_info=True,
-        )
-        if _existing and _existing.get("current_price"):
-            set_ticker_state(t, "stale")
-            flash(f"Refresh failed for {t}. Showing last known data.", "warning")
-        else:
-            set_ticker_state(t, "error")
-            flash(f"Refresh failed for {t}. Data unavailable.", "error")
-    finally:
-        with _single_refresh_lock:
-            _single_refresh_active.discard(t)
-        logger.debug("refresh_single  ticker=%s  stage=lock_released", t)
-
-    # If we came from the dashboard (missing-ticker row), stay on dashboard
-    referrer = request.referrer or ""
-    if "stock/" not in referrer:
-        return redirect(url_for("dashboard"))
-    return redirect(url_for("stock_detail", ticker=t))
-
-
-@app.route("/stock/<ticker>/setup_type", methods=["POST"])
-def set_setup_type(ticker):
-    """
-    Persist a manual setup type override for a ticker.
-    Only updates the setup_type column â€” leaves all other data intact.
-    The override survives refreshes until the user changes it again.
-    """
-    chosen = request.form.get("setup_type", "").strip()
-    all_types = set(SETUP_TYPES) | set(SWING_SETUP_TYPES)
-    if chosen in all_types:
-        update_setup_type(ticker.upper(), chosen)
-        flash(f"Setup type updated to '{chosen}'.", "success")
-    else:
-        flash("Invalid setup type.", "error")
-    return redirect(url_for("stock_detail", ticker=ticker.upper()))
-
-
-# ---------------------------------------------------------------------------
-# Trade Journal routes
-# ---------------------------------------------------------------------------
-
-@app.route("/journal")
-def journal():
-    """Trade journal â€” full history + summary stats."""
-    uid = current_user_id()
-    entries = get_all_journal_entries(uid)
-    summary = compute_journal_summary(entries)
-    edit_entry = None
-    edit_id = request.args.get("edit")
-    if edit_id:
-        try:
-            edit_entry = get_journal_entry(int(edit_id), uid)
-        except (ValueError, TypeError):
-            pass
-    today_str     = _et_now().strftime("%Y-%m-%d")
-    risk_settings = get_risk_settings(uid)
-    return render_template(
-        "journal.html",
-        entries=entries,
-        summary=summary,
-        setup_types=SETUP_TYPES + [s for s in SWING_SETUP_TYPES if s not in SETUP_TYPES],
-        edit_entry=edit_entry,
-        today=today_str,
-        risk_settings=risk_settings,
-    )
-
-
-def _parse_journal_form(form) -> dict:
-    """Parse all journal form fields (shared by add and edit routes)."""
-    direction   = form.get("direction", "Long")
-    entry_price = form.get("entry_price", "")
-    exit_price  = form.get("exit_price", "")
-    pnl_pct, result = compute_pnl(direction, entry_price, exit_price)
-
-    def _int(k):
-        v = form.get(k, "")
-        try: return int(v) if v else None
-        except ValueError: return None
-
-    def _float(k):
-        v = form.get(k, "")
-        try: return float(v) if v else None
-        except ValueError: return None
-
-    is_aplus = form.get("is_aplus_setup") == "1"
-
-    return dict(
-        direction      = direction,
-        entry_price    = float(entry_price) if entry_price else 0,
-        exit_price     = float(exit_price)  if exit_price  else 0,
-        shares         = _int("shares"),
-        setup_type     = form.get("setup_type", ""),
-        momentum_score = _int("momentum_score"),
-        pnl_pct        = pnl_pct,
-        result         = result,
-        notes          = form.get("notes", ""),
-        trade_mode     = form.get("trade_mode") or None,
-        option_side    = form.get("option_side") or None,
-        option_premium = _float("option_premium"),
-        contracts      = _int("contracts"),
-        stop_price     = _float("stop_price"),
-        is_aplus_setup = is_aplus,
-    )
-
-
-@app.route("/journal/add", methods=["POST"])
-def journal_add():
-    """Add a new journal entry."""
-    uid = current_user_id()
-    f = _parse_journal_form(request.form)
-    add_journal_entry(
-        ticker         = request.form.get("ticker", "").upper(),
-        trade_date     = request.form.get("trade_date", _et_now().strftime("%Y-%m-%d")),
-        user_id        = uid,
-        **f,
-    )
-    pnl_pct = f["pnl_pct"]
-    result  = f["result"]
-
-    # Auto-lock check after adding a trade
-    today_str     = _et_now().strftime("%Y-%m-%d")
-    risk_settings = get_risk_settings(uid)
-    today_entries = get_journal_entries_for_date(today_str, uid)
-    daily_session = get_daily_session(today_str, uid)
-    lock_update   = check_auto_lock(today_entries, risk_settings, daily_session)
-    if lock_update:
-        lock_daily_session(lock_update["lock_reason"], today_str, uid)
-        flash(f"âš  {lock_update['lock_reason']} â€” Trading locked for today.", "warning")
-
-    flash(f"Trade logged â€” {result} ({'+' if pnl_pct >= 0 else ''}{pnl_pct:.2f}%).", "success")
-    return redirect(url_for("journal"))
-
-
-@app.route("/journal/<int:entry_id>/edit", methods=["POST"])
-def journal_edit(entry_id):
-    """Update an existing journal entry."""
-    f = _parse_journal_form(request.form)
-    update_journal_entry(
-        entry_id   = entry_id,
-        ticker     = request.form.get("ticker", "").upper(),
-        trade_date = request.form.get("trade_date", ""),
-        user_id    = current_user_id(),
-        **f,
-    )
-    flash("Trade updated.", "success")
-    return redirect(url_for("journal"))
-
-
-@app.route("/journal/<int:entry_id>/delete", methods=["POST"])
-def journal_delete(entry_id):
-    """Delete a journal entry."""
-    delete_journal_entry(entry_id, current_user_id())
-    flash("Trade removed.", "info")
-    return redirect(url_for("journal"))
-
-
-# ---------------------------------------------------------------------------
-# Risk Settings & Daily Session routes
-# ---------------------------------------------------------------------------
-
-@app.route("/risk", methods=["GET", "POST"])
-def risk_settings():
-    """Risk settings page â€” account size, risk %, trade limits, trading mode."""
-    uid           = current_user_id()
-    today_str     = _et_now().strftime("%Y-%m-%d")
-    daily_session = get_daily_session(today_str, uid)
-    today_entries = get_journal_entries_for_date(today_str, uid)
-    trades_today  = len(today_entries)
-    losses_today  = sum(1 for e in today_entries if e.get("result") == "Loss")
-
-    if request.method == "POST":
-        action = request.form.get("action", "save")
-
-        if action == "unlock":
-            unlock_daily_session(today_str, uid)
-            flash("Trading unlocked for today.", "success")
-            return redirect(url_for("risk_settings"))
-
-        # Save risk settings â€” validate numerics before storing
-        def _clamp_float(key, default, lo, hi):
-            try:
-                v = float(request.form.get(key, default))
-                return str(max(lo, min(hi, v)))
-            except (ValueError, TypeError):
-                return str(default)
-
-        def _clamp_int(key, default, lo, hi):
-            try:
-                v = int(float(request.form.get(key, default)))
-                return str(max(lo, min(hi, v)))
-            except (ValueError, TypeError):
-                return str(default)
-
-        uid = current_user_id()
-        tm = request.form.get("trading_mode", "SWING TRADE")
-        if tm not in ("DAY TRADE", "SWING TRADE"):
-            tm = "SWING TRADE"
-        set_user_setting(uid, "trading_mode",       tm)
-        set_user_setting(uid, "account_size",       _clamp_float("account_size",       "10000", 0, 10_000_000))
-        set_user_setting(uid, "risk_pct",           _clamp_float("risk_pct",           "1.0",   0.1, 10))
-        set_user_setting(uid, "max_trades_per_day", _clamp_int(  "max_trades_per_day", "3",     1,   20))
-        set_user_setting(uid, "max_daily_loss_pct", _clamp_float("max_daily_loss_pct", "3.0",   0.1, 20))
-        set_user_setting(uid, "stop_after_2_losses",
-                         "1" if request.form.get("stop_after_2_losses") else "0")
-        flash("Risk settings saved.", "success")
-        return redirect(url_for("risk_settings"))
-
-    risk_s = get_risk_settings(uid)
-    discipline = compute_discipline_score(
-        today_entries, risk_s, bool(daily_session.get("locked"))
-    )
-    return render_template(
-        "risk_settings.html",
-        risk_settings=risk_s,
-        daily_session=daily_session,
-        discipline=discipline,
-        trades_today=trades_today,
-        losses_today=losses_today,
-        today=today_str,
-    )
-
-
-@app.route("/risk/trading-mode", methods=["POST"])
-def set_trading_mode():
-    """AJAX: Switch DAY TRADE / SWING TRADE mode. Returns JSON."""
-    mode = request.json.get("mode", "SWING TRADE") if request.is_json else request.form.get("mode", "SWING TRADE")
-    if mode in ("DAY TRADE", "SWING TRADE"):
-        set_user_setting(current_user_id(), "trading_mode", mode)
-        return jsonify({"ok": True, "mode": mode})
-    return jsonify({"ok": False, "error": "invalid mode"}), 400
-
-
-# ---------------------------------------------------------------------------
-# Watchlist management routes
-# ---------------------------------------------------------------------------
-
-def _wl_next():
-    """Redirect back to the submitting page via a safe relative `next` form
-    field (e.g. the Watchlists settings view), defaulting to the Setups
-    scanner. Backward-compatible: callers that don't send `next` get dashboard."""
-    nxt = request.form.get("next", "")
-    if nxt.startswith("/") and not nxt.startswith("//"):
-        return redirect(nxt)
-    return redirect(url_for("dashboard"))
-
-
-@app.route("/watchlists")
-def watchlists_page():
-    """Watchlists settings â€” create / rename / activate / delete lists and
-    add / remove tickers. Reuses the existing watchlist store and the existing
-    POST routes; no new data logic."""
-    uid       = current_user_id()
-    all_wls   = get_all_watchlists(uid)
-    active_id = get_active_wl_id()
-    wl_counts = {}
-    for w in all_wls:
-        try:
-            wl_counts[w["id"]] = len(get_watchlist_stocks(w["id"]) or [])
-        except Exception:
-            wl_counts[w["id"]] = 0
-    active_tickers = get_watchlist_stocks(active_id) if active_id else []
-    active_wl      = get_watchlist_by_id(active_id) if active_id else None
-    stock_data     = {row["ticker"]: row for row in get_all_stock_data()}
-    price_alerts   = get_price_alerts(uid)
-    for alert in price_alerts:
-        quote = stock_data.get(alert["ticker"], {})
-        current = quote.get("current_price")
-        alert["current_price"] = current
-        alert["triggered"] = bool(
-            alert["enabled"] and current is not None and
-            ((alert["direction"] == "above" and current >= alert["target_price"]) or
-             (alert["direction"] == "below" and current <= alert["target_price"]))
-        )
-    return render_template(
-        "watchlists.html",
-        all_wls=all_wls, active_id=active_id, active_wl=active_wl,
-        wl_counts=wl_counts, active_tickers=active_tickers,
-        price_alerts=price_alerts,
-    )
-
-
-@app.route("/price-alerts/create", methods=["POST"])
-def price_alert_create():
-    ticker = request.form.get("ticker", "").strip().upper()
-    direction = request.form.get("direction", "above").strip().lower()
-    try:
-        target = float(request.form.get("target_price", ""))
-    except (TypeError, ValueError):
-        target = 0
-    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", ticker):
-        flash("Enter a valid ticker symbol.", "error")
-    elif direction not in ("above", "below") or target <= 0 or target > 10_000_000:
-        flash("Enter a valid alert direction and target price.", "error")
-    else:
-        try:
-            create_price_alert(current_user_id(), ticker, direction, round(target, 4))
-            flash(f"Price alert created for {ticker}.", "success")
-        except Exception:
-            flash("That exact price alert already exists.", "error")
-    return redirect(url_for("watchlists_page") + "#price-alerts")
-
-
-@app.route("/price-alerts/<int:alert_id>/toggle", methods=["POST"])
-def price_alert_toggle(alert_id):
-    enabled = request.form.get("enabled") == "1"
-    set_price_alert_enabled(alert_id, current_user_id(), enabled)
-    flash("Price alert resumed." if enabled else "Price alert paused.", "success")
-    return redirect(url_for("watchlists_page") + "#price-alerts")
-
-
-@app.route("/price-alerts/<int:alert_id>/delete", methods=["POST"])
-def price_alert_delete(alert_id):
-    delete_price_alert(alert_id, current_user_id())
-    flash("Price alert deleted.", "info")
-    return redirect(url_for("watchlists_page") + "#price-alerts")
-
-
-@app.route("/watchlists/activate/<int:wl_id>", methods=["POST"])
-def watchlist_activate(wl_id):
-    """Switch the active watchlist (stored in session)."""
-    session["active_wl_id"] = wl_id
-    return _wl_next()
-
-
-@app.route("/watchlists/create", methods=["POST"])
-def watchlist_create():
-    """Create a new named watchlist."""
-    name = request.form.get("name", "").strip()[:50]
-    if name:
-        try:
-            new_id = create_watchlist(name, current_user_id())
-            session["active_wl_id"] = new_id
-            flash(f"Watchlist '{name}' created.", "success")
-        except Exception:
-            flash("A watchlist with that name already exists.", "error")
-    else:
-        flash("Please enter a watchlist name.", "error")
-    return _wl_next()
-
-
-@app.route("/watchlists/rename/<int:wl_id>", methods=["POST"])
-def watchlist_rename(wl_id):
-    """Rename an existing watchlist."""
-    name = request.form.get("name", "").strip()[:50]
-    if name:
-        try:
-            rename_watchlist(wl_id, name)
-            flash(f"Watchlist renamed to '{name}'.", "success")
-        except Exception:
-            flash("That name is already taken.", "error")
-    return _wl_next()
-
-
-@app.route("/watchlists/delete/<int:wl_id>", methods=["POST"])
-def watchlist_delete(wl_id):
-    """Delete a watchlist. Refuses to delete the last one."""
-    uid     = current_user_id()
-    all_wls = get_all_watchlists(uid)
-    if len(all_wls) <= 1:
-        flash("Cannot delete the last watchlist.", "error")
-        return _wl_next()
-    delete_watchlist(wl_id)
-    # If the deleted list was active, fall back to the first remaining list
-    if session.get("active_wl_id") == wl_id:
-        remaining = get_all_watchlists(uid)
-        if remaining:
-            session["active_wl_id"] = remaining[0]["id"]
-    flash("Watchlist deleted.", "info")
-    return _wl_next()
-
-
-@app.route("/stock/<ticker>/watchlists", methods=["POST"])
-def stock_set_watchlists(ticker):
-    """Update which watchlists a stock belongs to (from the detail page)."""
-    t = ticker.upper()
-    raw_ids    = request.form.getlist("watchlist_ids")
-    wl_ids     = [int(i) for i in raw_ids if i.isdigit()]
-    set_ticker_watchlists(t, wl_ids)
-    flash("Watchlist assignment updated.", "success")
-    return redirect(url_for("stock_detail", ticker=t))
-
-
-@app.route("/stock/<ticker>/auto_classify", methods=["POST"])
-def toggle_auto_classify(ticker):
-    """Toggle the auto-classification flag for a ticker."""
-    t       = ticker.upper()
-    enabled = request.form.get("auto_classify") == "1"
-    set_auto_classify(t, enabled)
-    if enabled:
-        # Run classification immediately so the user sees the result
-        run_auto_classification(t, current_user_id())
-        flash(f"Auto-classification ON for {t}. Stock moved to its recommended list.", "success")
-    else:
-        flash(f"Auto-classification OFF for {t}. You control the watchlist placement.", "info")
-    return redirect(url_for("stock_detail", ticker=t))
-
-
-# ---------------------------------------------------------------------------
-# JSON API
-# ---------------------------------------------------------------------------
-
-@app.route("/quick")
-def quick_mode():
-    """Legacy Execution page â€” merged into SETUPS (the swing scanner is the one
-    primary setups view). Kept as a permanent redirect so old links still work.
-    quick.html is retained in the repo but no longer served."""
-    return redirect(url_for("dashboard"))
-
-
-@app.route("/terminal")
-def terminal():
-    """Tradestaar Elite terminal â€” tape, watchlist, chart, ticket and positions.
-
-    View/layout only. Reuses the exact same existing data sources as quick_mode
-    (get_watchlist_stocks / get_all_stock_data / annotate / rank_stocks /
-    _get_mkt_ctx / _get_schwab_data). No new API calls, no logic changes.
-    """
-    wl_id     = get_active_wl_id()
-    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-
-    # Seed a starter watchlist the first time the Terminal is opened empty.
-    # Reuses the SAME onboarding path as /watchlist/add (Execution) â€” no new
-    # write logic. Runs once (membership is added immediately, so it won't
-    # re-seed on subsequent loads).
-    if wl_id and not watchlist:
-        for t in ("SPY", "QQQ", "NVDA", "TSLA", "AAPL", "AMD", "MSFT", "SMH"):
-            try:
-                add_ticker_to_watchlist(wl_id, t)
-                upsert_loading_placeholder(t)
-                threading.Thread(target=_onboard_ticker_bg, args=(t,),
-                                 daemon=True, name=f"seed-{t}").start()
-            except Exception as _se:
-                logger.debug("terminal seed %s failed: %s", t, _se)
-        watchlist = get_watchlist_stocks(wl_id)
-
-    _trade_mode = get_setting("trading_mode") or "SWING TRADE"
-    all_data = get_all_stock_data()
-    data_map = {s["ticker"]: s for s in all_data}
-
-    if watchlist:
-        auto_refresh_stale_closes(watchlist, data_map=data_map)
-    stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
-    ranked  = rank_stocks(stocks)
-    valid   = [s for s in ranked if s.get("trade_bias") != "Avoid"]
-
-    mkt_ctx = _get_mkt_ctx()
-
-    # Win rate â€” from the same Journal store the Journal tab uses (None if no
-    # logged trades â†’ template shows a NOT WIRED badge).
-    win_rate = None
-    try:
-        _uid = session.get("user_id") or 1
-        win_rate = compute_journal_summary(get_all_journal_entries(_uid)).get("win_rate")
-    except Exception as _we:
-        logger.debug("terminal win_rate failed: %s", _we)
-
-    # Schwab account snapshot (buying power, P&L, positions) â€” live when connected
-    acct = None
-    try:
-        uid = session.get("user_id")
-        if uid:
-            tok = _schwab.token_status(uid)
-            if tok.get("connected"):
-                acct = _get_schwab_data(uid)
-                if acct.get("error"):
-                    acct = None
-    except Exception as _ae:
-        logger.debug("terminal: schwab account fetch skipped: %s", _ae)
-
-    # Today's Setups panel â€” top 3 by grade then swing score (display only)
-    today_setups = sorted(
-        valid,
-        key=lambda s: (_ugrade_info(s.get("swing_grade"))[1], s.get("swing_score") or 0),
-        reverse=True,
-    )[:3]
-
-    # Mobile discovery rails.  The momentum scanner covers a curated liquid
-    # universe while the activity list uses verified relative-volume values
-    # already stored for the active watchlist.  Keep the two concepts separate:
-    # a fast price move is not automatically high-volume activity.
-    scanner_snapshot = _scanner.get_scan_results() or {}
-    trending_stocks = (scanner_snapshot.get("opportunities") or [])[:6]
-    most_active = sorted(
-        [s for s in valid if s.get("rel_volume") is not None],
-        key=lambda s: (s.get("rel_volume") or 0, s.get("today_volume") or 0),
-        reverse=True,
-    )[:6]
-
-    return render_template(
-        "terminal.html",
-        stocks=valid,
-        orb_session=get_orb_session_banner(),
-        mkt=mkt_ctx,
-        acct=acct,
-        win_rate=win_rate,
-        today_setups=today_setups,
-        trending_stocks=trending_stocks,
-        most_active=most_active,
-        scanner_last_scan=scanner_snapshot.get("last_scan"),
-    )
-
-
-# Terminal chart candle series â€” reuses the SAME price feed the watchlist /
-# Execution engine uses (data_fetcher's Yahoo chart OHLCV, via institutional
-# engine). No new provider. Six timeframe tabs map to interval/range pairs the
-# feed supports; unsupported/empty ranges return [] so the UI can disable them.
-_TERMINAL_TF_MAP = {
-    "1D":  ("5m",  "1d"),
-    "1W":  ("30m", "5d"),
-    "1M":  ("1d",  "1mo"),
-    "3M":  ("1d",  "3mo"),
-    "1Y":  ("1d",  "1y"),
-    "ALL": ("1wk", "max"),
-}
-_TERMINAL_CANDLE_CACHE: dict = {}          # (ticker, tf) -> {"ts": epoch, "bars": [...]}
-_TERMINAL_CANDLE_TTL = {"1D": 60, "1W": 120}   # seconds; others fall back to 600
-
-
-@app.route("/api/terminal/candles/<ticker>")
-def api_terminal_candles(ticker):
-    """Return OHLCV bars for the terminal chart from the existing data feed."""
-    tf = (request.args.get("tf") or "1D").upper()
-    if tf not in _TERMINAL_TF_MAP:
-        return jsonify({"ok": False, "error": "unsupported timeframe"}), 400
-    ticker = (ticker or "").upper().strip()
-    if not ticker or len(ticker) > 12:
-        return jsonify({"ok": False, "error": "bad ticker"}), 400
-
-    ttl = _TERMINAL_CANDLE_TTL.get(tf, 600)
-    key = (ticker, tf)
-    cached = _TERMINAL_CANDLE_CACHE.get(key)
-    if cached and (_time.time() - cached["ts"]) < ttl:
-        return jsonify({"ok": True, "ticker": ticker, "tf": tf,
-                        "bars": cached["bars"], "cached": True})
-
-    interval, range_str = _TERMINAL_TF_MAP[tf]
-    data = None
-    try:
-        from data_fetcher import _fetch_ohlcv_via_chart_api
-        data = _fetch_ohlcv_via_chart_api(ticker, interval=interval, range_str=range_str)
-    except Exception as _e:
-        logger.debug("terminal candles %s %s failed: %s", ticker, tf, _e)
-
-    bars = []
-    if data and data.get("closes"):
-        ts  = data.get("timestamps") or []
-        op  = data.get("opens")  or []
-        hi  = data.get("highs")  or []
-        lo  = data.get("lows")   or []
-        cl  = data.get("closes") or []
-        vol = data.get("volumes") or []
-        n = min(len(ts), len(op), len(hi), len(lo), len(cl))
-        for i in range(n):
-            bar = {
-                "time":  int(ts[i]),
-                "open":  round(float(op[i]), 4),
-                "high":  round(float(hi[i]), 4),
-                "low":   round(float(lo[i]), 4),
-                "close": round(float(cl[i]), 4),
-            }
-            if i < len(vol):
-                bar["volume"] = int(vol[i] or 0)
-            bars.append(bar)
-
-    _TERMINAL_CANDLE_CACHE[key] = {"ts": _time.time(), "bars": bars}
-    return jsonify({"ok": True, "ticker": ticker, "tf": tf,
-                    "interval": interval, "range": range_str, "bars": bars})
-
-
-@app.route("/api/quick")
-def api_quick():
-    """JSON for Execution Command Center live refresh â€” all ranked stocks + market context."""
-    try:
-        return jsonify(_build_quick_payload(get_active_wl_id()))
-    except Exception as exc:
-        logger.error("api_quick failed: %s", exc, exc_info=True)
-        return jsonify({"error": "quick refresh failed"}), 500
-
-
-# ---------------------------------------------------------------------------
-# AI Morning Briefing â€” powered by Nebius (Llama-3.3-70B)
-# ---------------------------------------------------------------------------
-
-_NEBIUS_SYSTEM_PROMPT = """You are an elite institutional trading assistant providing a pre-market morning briefing.
-Analyze the provided market data and return ONLY a valid JSON object with this exact schema:
-
-{
-  "macro_bias": "risk_on" | "risk_off" | "neutral",
-  "vix_level": "<one short sentence describing VIX level and what it means for volatility today>",
-  "briefing": "<2-4 sentence pre-market briefing: regime, key macro drivers, sector rotation, actionable context for the trading day>",
-  "tickers_flagged": ["TICK1", "TICK2"]
-}
-
-Rules:
-- macro_bias must be exactly one of: risk_on, risk_off, neutral
-- vix_level: one sentence max, e.g. "VIX at 18 â€” low fear, options cheap, momentum trades favored"
-- briefing: 2-4 sentences, concise and institutional. Cover: (1) overall regime, (2) key macro headwinds/tailwinds (DXY, yields, futures), (3) which sectors are leading/lagging, (4) what it means for your watchlist
-- tickers_flagged: list only tickers from the provided watchlist that have a notable setup, catalyst, or risk today. Empty array [] if none stand out.
-- Return ONLY the JSON object. No markdown, no explanation, no preamble."""
-
-
-def _build_briefing_market_text() -> str:
-    """
-    Assemble a text snapshot of current market conditions to send to Nebius.
-    Pulls from the same caches used by /api/market_context and the dashboard.
-    Always includes VIX, SPY, QQQ, and DXY â€” falls back to data_fetcher when
-    market_engine cache is cold.
-    """
-    lines = []
-
-    # Collect live values from both sources so we can fill gaps
-    vix_val   = None
-    spy_price = None
-    qqq_price = None
-    dxy_val   = None
-    dxy_chg   = None
-
-    # â”€â”€ Market regime (SPY/QQQ/VIX) â€” primary source: market_engine â”€â”€â”€â”€â”€â”€â”€â”€
-    try:
-        mkt = _get_mkt_ctx()
-        lines.append(f"MARKET REGIME: {mkt.get('regime', 'NEUTRAL')}")
-        lines.append(f"SPY trend: {mkt.get('spy_trend', 'Unknown')}, 1d change: {mkt.get('spy_1d_pct', 'N/A')}%")
-        lines.append(f"QQQ trend: {mkt.get('qqq_trend', 'Unknown')}, 1d change: {mkt.get('qqq_1d_pct', 'N/A')}%")
-        vix_val   = mkt.get("vix_level")
-        spy_price = mkt.get("spy_price")
-        qqq_price = mkt.get("qqq_price")
-        longs_ok  = mkt.get("longs_ok", True)
-        shorts_ok = mkt.get("shorts_ok", True)
-        lines.append(f"Trading signal: longs_ok={longs_ok}, shorts_ok={shorts_ok}, no_trade={mkt.get('no_trade', False)}")
-        leading = mkt.get("leading_sectors") or []
-        weak    = mkt.get("weak_sectors") or []
-        if leading:
-            lines.append(f"Leading sectors: {', '.join(leading[:4])}")
-        if weak:
-            lines.append(f"Weak sectors: {', '.join(weak[:4])}")
-    except Exception as _e:
-        logger.debug("briefing: mkt_ctx failed: %s", _e)
-
-    # â”€â”€ ES futures + macro (DXY, 10Y, sector ETFs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    try:
-        ctx = _get_market_context()
-        es = ctx.get("es", {})
-        if es and not es.get("error"):
-            vwap_note = "above VWAP" if es.get("above_vwap") else "below VWAP" if es.get("above_vwap") is False else ""
-            lines.append(f"ES futures: ${es.get('price', 'N/A')} ({es.get('change_pct', 'N/A'):+.2f}%) {vwap_note}".strip())
-
-        # DXY â€” data_fetcher uses dxy_price / dxy_change_pct; market_engine uses dxy / dxy_1d_chg
-        dxy_val = ctx.get("dxy_price") or ctx.get("dxy")
-        dxy_chg = ctx.get("dxy_change_pct") or ctx.get("dxy_1d_chg")
-
-        # Fill VIX/SPY/QQQ from data_fetcher if market_engine cache was cold
-        if vix_val is None:
-            vix_val = ctx.get("vix_level")
-        if spy_price is None:
-            spy_price = ctx.get("spy_price")
-        if qqq_price is None:
-            qqq_price = ctx.get("qqq_price")
-
-        yield_10y = ctx.get("yield_10y")
-        yield_chg = ctx.get("yield_change_bps")
-        if yield_10y:
-            lines.append(f"10Y Treasury yield: {yield_10y}% ({yield_chg:+.1f}bps), {ctx.get('yield_trend', 'flat')}")
-            lines.append(f"Yield note: {ctx.get('yield_note', '')}")
-        sectors = ctx.get("sectors") or {}
-        if sectors:
-            top3    = sorted(((k, v) for k, v in sectors.items() if v is not None), key=lambda x: x[1], reverse=True)[:3]
-            bottom3 = sorted(((k, v) for k, v in sectors.items() if v is not None), key=lambda x: x[1])[:3]
-            if top3:
-                lines.append("Top sectors today: " + ", ".join(f"{k} {v:+.2f}%" for k, v in top3))
-            if bottom3:
-                lines.append("Weak sectors today: " + ", ".join(f"{k} {v:+.2f}%" for k, v in bottom3))
-    except Exception as _e:
-        logger.debug("briefing: market_context failed: %s", _e)
-
-    # â”€â”€ Always emit VIX / SPY / QQQ / DXY so Nebius is never told "not provided" â”€â”€
-    lines.append(f"VIX: {vix_val if vix_val is not None else 'N/A'}")
-    lines.append(f"SPY price: ${spy_price if spy_price is not None else 'N/A'}")
-    lines.append(f"QQQ price: ${qqq_price if qqq_price is not None else 'N/A'}")
-    if dxy_val is not None:
-        try:
-            lines.append(f"DXY: {dxy_val} ({float(dxy_chg):+.2f}%)" if dxy_chg is not None else f"DXY: {dxy_val}")
-        except Exception:
-            lines.append(f"DXY: {dxy_val}")
-
-    # â”€â”€ Watchlist stocks from DB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    try:
-        wl_id = get_active_wl_id()
-        if wl_id:
-            stocks = get_all_stock_data(wl_id)
-            if stocks:
-                lines.append(f"\nWATCHLIST ({len(stocks)} tickers):")
-                for s in stocks[:20]:   # cap at 20 to stay within token budget
-                    ticker  = s.get("ticker", "?")
-                    price   = s.get("current_price")
-                    chg     = s.get("day_change_pct")
-                    score   = s.get("swing_score")
-                    status  = s.get("swing_status") or ""
-                    bias    = s.get("trade_bias") or ""
-                    grade   = s.get("swing_grade") or ""
-                    cat     = s.get("catalyst_score")
-                    bucket  = s.get("auto_classify") or ""
-                    price_s = f"${price:.2f}" if price else "N/A"
-                    chg_s   = f"{chg:+.1f}%" if chg is not None else ""
-                    lines.append(
-                        f"  {ticker}: {price_s} {chg_s} | "
-                        f"grade={grade} score={score}/10 | "
-                        f"status={status} | bias={bias} | "
-                        f"catalyst={cat}/10 | bucket={bucket}"
-                    )
-    except Exception as _e:
-        logger.debug("briefing: watchlist fetch failed: %s", _e)
-
-    return "\n".join(lines)
-
-
-def _generate_nebius_briefing(market_data_text: str) -> dict:
-    """
-    Call Nebius (Llama-3.3-70B) with market data and return parsed JSON.
-    Raises on any error so the caller can fall back to cache.
-    """
-    import json as _j
-    from openai import OpenAI
-    client = OpenAI(
-        base_url="https://api.tokenfactory.nebius.com/v1/",
-        api_key=os.environ.get("NEBIUS_API_KEY"),
-    )
-    response = client.chat.completions.create(
-        model="meta-llama/Llama-3.3-70B-Instruct",
-        max_tokens=512,
-        temperature=0.3,
-        top_p=0.9,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": _NEBIUS_SYSTEM_PROMPT},
-            {"role": "user",   "content": market_data_text},
-        ],
-    )
-    return _j.loads(response.choices[0].message.content)
-
-
-@app.route("/api/ai_briefing")
-def api_ai_briefing():
-    """
-    Return today's AI morning briefing (macro_bias, vix_level, briefing, tickers_flagged).
-
-    Caching: one call to Nebius per calendar day (ET). Returns the cached row
-    immediately on subsequent requests. Pass ?refresh=true to force a fresh call.
-    """
-    force_refresh = request.args.get("refresh", "").lower() == "true"
-    today_et = _et_now().strftime("%Y-%m-%d")
-    _last_err = None
-
-    if not force_refresh:
-        cached = get_ai_briefing(today_et)
-        if cached:
-            cached["cached"] = True
-            cached["date"]   = today_et
-            return jsonify({"ok": True, "briefing": cached})
-
-    # Build market data snapshot and call Nebius
-    try:
-        market_text = _build_briefing_market_text()
-        result      = _generate_nebius_briefing(market_text)
-        # Validate required fields; fill defaults if LLM omits them
-        result.setdefault("macro_bias",      "neutral")
-        result.setdefault("vix_level",       "VIX data unavailable")
-        result.setdefault("briefing",        "Briefing unavailable â€” market data is loading.")
-        result.setdefault("tickers_flagged", [])
-        result["cached"] = False
-        result["date"]   = today_et
-        save_ai_briefing(today_et, result)
-        return jsonify({"ok": True, "briefing": result})
-    except Exception as exc:
-        logger.error("api_ai_briefing Nebius call failed: %s", exc, exc_info=True)
-        _last_err = str(exc)
-
-    # Fall back to today's cached briefing (if any) rather than returning an error
-    fallback = get_ai_briefing(today_et)
-    if fallback:
-        fallback["cached"] = True
-        fallback["date"]   = today_et
-        fallback["error"]  = _last_err
-        return jsonify({"ok": True, "briefing": fallback})
-
-    return jsonify({
-        "ok": False,
-        "error": _last_err or "Briefing unavailable",
-        "briefing": {
-            "macro_bias": "neutral",
-            "vix_level":  "Data unavailable",
-            "briefing":   f"Nebius error: {_last_err or 'unknown â€” check NEBIUS_API_KEY on Render'}",
-            "tickers_flagged": [],
-            "cached": False,
-            "date": today_et,
-        }
-    }), 503
-
-
-@app.route("/api/narrate_score")
-@csrf.exempt
-def api_narrate_score():
-    """
-    Return a 2-3 sentence AI narration of why a ticker scored the way it did.
-    Params: ticker, total, catalyst, setup, volume, macro_gate
-    Cached per (ticker, today_ET, score_key) so Nebius is only called once per unique score.
-    """
-    import json as _j
-    from openai import OpenAI
-
-    ticker     = (request.args.get("ticker") or "").upper().strip()
-    total      = request.args.get("total",     "N/A")
-    catalyst   = request.args.get("catalyst",  "N/A")
-    setup      = request.args.get("setup",     "N/A")
-    volume     = request.args.get("volume",    "N/A")
-    macro_gate = request.args.get("macro_gate","N/A")
-
-    if not ticker:
-        return jsonify({"ok": False, "error": "ticker required"}), 400
-
-    today_et  = _et_now().strftime("%Y-%m-%d")
-    score_key = f"{total}_C{catalyst}_S{setup}_V{volume}"
-
-    cached = get_score_narration(ticker, today_et, score_key)
-    if cached:
-        return jsonify({"ok": True, "narration": cached, "cached": True})
-
-    _NARRATE_SYSTEM = (
-        'You are the score narrator for a swing trading engine. '
-        'You receive a ticker and its scores. '
-        'Explain in 2-3 sentences WHY it scored this way and what the trader should watch. '
-        'Never predict price. Never change or recalculate the scores â€” narrate only. '
-        'Respond in JSON: {"ticker": "", "narration": "", "watch_for": ""}'
-    )
-    user_msg = (
-        f"Ticker: {ticker}\n"
-        f"Total swing score: {total}/10\n"
-        f"Catalyst score: {catalyst}/10\n"
-        f"Setup score: {setup}/10\n"
-        f"Volume score: {volume}/10\n"
-        f"Macro gate: {macro_gate}"
-    )
-    try:
-        client = OpenAI(
-            base_url="https://api.tokenfactory.nebius.com/v1/",
-            api_key=os.environ.get("NEBIUS_API_KEY"),
-        )
-        response = client.chat.completions.create(
-            model="meta-llama/Llama-3.3-70B-Instruct",
-            max_tokens=256,
-            temperature=0.3,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": _NARRATE_SYSTEM},
-                {"role": "user",   "content": user_msg},
-            ],
-        )
-        result = _j.loads(response.choices[0].message.content)
-        result.setdefault("ticker",    ticker)
-        result.setdefault("narration", "")
-        result.setdefault("watch_for", "")
-        save_score_narration(ticker, today_et, score_key, result)
-        return jsonify({"ok": True, "narration": result, "cached": False})
-    except Exception as exc:
-        logger.error("api_narrate_score failed: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/journal_summary")
-@csrf.exempt
-def api_journal_summary():
-    """
-    Return an AI weekly trading journal summary.
-    Optional param: week (e.g. '2026-W27'). Defaults to current ISO week.
-    Cached per week_key.
-    """
-    import json as _j
-    from openai import OpenAI
-
-    week_param = (request.args.get("week") or "").strip()
-    if week_param:
-        week_key = week_param
-    else:
-        now_et   = _et_now()
-        iso_cal  = now_et.isocalendar()
-        week_key = f"{iso_cal[0]}-W{iso_cal[1]:02d}"
-
-    cached = get_journal_summary(week_key)
-    if cached:
-        return jsonify({"ok": True, "summary": cached, "week_key": week_key, "cached": True})
-
-    # Pull trades for the week from the journal table
-    try:
-        # Derive Mondayâ€“Sunday date range from week_key
-        import datetime as _dt
-        year, wnum = int(week_key.split("-W")[0]), int(week_key.split("-W")[1])
-        monday  = _dt.date.fromisocalendar(year, wnum, 1)
-        sunday  = monday + _dt.timedelta(days=6)
-        from database import get_db as _get_db
-        conn = _get_db()
-        rows = conn.execute(
-            "SELECT * FROM journal WHERE trade_date >= ? AND trade_date <= ? ORDER BY trade_date ASC",
-            (str(monday), str(sunday)),
-        ).fetchall()
-        conn.close()
-        trades = [dict(r) for r in rows]
-    except Exception as exc:
-        logger.error("api_journal_summary: failed to pull trades: %s", exc)
-        trades = []
-
-    if not trades:
-        fallback = {
-            "week_summary":    "No trades logged for this week.",
-            "rule_adherence":  "N/A",
-            "top_mistake":     "N/A",
-            "one_improvement": "Log your trades consistently to unlock weekly AI reviews.",
-        }
-        return jsonify({"ok": True, "summary": fallback, "week_key": week_key, "cached": False})
-
-    lines = [f"Week: {week_key}  ({len(trades)} trades)"]
-    for t in trades:
-        pnl  = t.get("pnl_pct")
-        pnl_s = f"{pnl:+.1f}%" if pnl is not None else "N/A"
-        lines.append(
-            f"  {t.get('trade_date')} {t.get('ticker')} {t.get('direction','')} "
-            f"entry={t.get('entry_price')} exit={t.get('exit_price')} "
-            f"pnl={pnl_s} result={t.get('result','')} "
-            f"setup={t.get('setup_type','')} notes={t.get('notes','')}"
-        )
-    trades_text = "\n".join(lines)
-
-    _JOURNAL_SYSTEM = (
-        "You are a trading journal coach reviewing a swing trader's week. "
-        "Summarize: rule adherence, repeated mistakes, what worked, one specific improvement for next week. "
-        "Honest, direct, no cheerleading. "
-        'Respond in JSON: {"week_summary": "", "rule_adherence": "", "top_mistake": "", "one_improvement": ""}'
-    )
-    try:
-        client = OpenAI(
-            base_url="https://api.tokenfactory.nebius.com/v1/",
-            api_key=os.environ.get("NEBIUS_API_KEY"),
-        )
-        response = client.chat.completions.create(
-            model="meta-llama/Llama-3.3-70B-Instruct",
-            max_tokens=512,
-            temperature=0.3,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": _JOURNAL_SYSTEM},
-                {"role": "user",   "content": trades_text},
-            ],
-        )
-        result = _j.loads(response.choices[0].message.content)
-        result.setdefault("week_summary",    "")
-        result.setdefault("rule_adherence",  "")
-        result.setdefault("top_mistake",     "")
-        result.setdefault("one_improvement", "")
-        save_journal_summary(week_key, result)
-        return jsonify({"ok": True, "summary": result, "week_key": week_key, "cached": False})
-    except Exception as exc:
-        logger.error("api_journal_summary Nebius call failed: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/earnings_digest")
-@csrf.exempt
-def api_earnings_digest():
-    """
-    Return an AI earnings digest for swing-trading watch tickers.
-    Cached per today's ET date.
-    """
-    import json as _j
-    from openai import OpenAI
-
-    today_et = _et_now().strftime("%Y-%m-%d")
-    cached   = get_earnings_digest(today_et)
-    if cached:
-        return jsonify({"ok": True, "digest": cached, "cached": True})
-
-    WATCH_TICKERS = ["AMD", "ANET", "FN", "TSM", "ISRG", "EME", "GOOG"]
-
-    # Pull earnings dates from stock_data table
-    earnings_info = []
-    try:
-        from database import get_db as _get_db
-        conn = _get_db()
-        rows = conn.execute(
-            f"SELECT ticker, earnings_date, catalyst_summary, news_headlines "
-            f"FROM stock_data WHERE ticker IN ({','.join('?' * len(WATCH_TICKERS))})",
-            WATCH_TICKERS,
-        ).fetchall()
-        conn.close()
-        for r in rows:
-            earnings_info.append(dict(r))
-    except Exception as exc:
-        logger.debug("api_earnings_digest: db lookup failed: %s", exc)
-
-    # Also pull from intel engine's earnings calendar
-    try:
-        intel_data = _intel.get_intel_summary()
-        all_earn   = (
-            intel_data.get("earnings", {}).get("today", []) +
-            intel_data.get("earnings", {}).get("tomorrow", []) +
-            intel_data.get("earnings", {}).get("this_week", [])
-        )
-        watch_set = set(WATCH_TICKERS)
-        intel_earn = [e for e in all_earn if e.get("ticker", "").upper() in watch_set]
-    except Exception:
-        intel_earn = []
-
-    lines = [f"Swing trader earnings watch  Date: {today_et}"]
-    lines.append(f"Tickers: {', '.join(WATCH_TICKERS)}")
-    lines.append("")
-
-    for t in WATCH_TICKERS:
-        db_row = next((r for r in earnings_info if r.get("ticker") == t), {})
-        earn_date = db_row.get("earnings_date") or "unknown"
-        summary   = db_row.get("catalyst_summary") or ""
-        # Check intel calendar for precise date/time
-        ie = next((e for e in intel_earn if e.get("ticker", "").upper() == t), {})
-        if ie:
-            earn_date = ie.get("date") or ie.get("date_label") or earn_date
-        lines.append(f"{t}: earnings {earn_date}  catalyst_summary={summary[:120] if summary else 'N/A'}")
-
-    digest_text = "\n".join(lines)
-
-    _EARNINGS_SYSTEM = (
-        "Summarize what matters for a swing trader holding none of these but watching all: "
-        "which earnings this week could move these tickers, expected dates, and any pre-announcement sector reads. "
-        "4 sentences max. "
-        'JSON: {"digest": "", "key_dates": []}'
-    )
-    try:
-        client = OpenAI(
-            base_url="https://api.tokenfactory.nebius.com/v1/",
-            api_key=os.environ.get("NEBIUS_API_KEY"),
-        )
-        response = client.chat.completions.create(
-            model="meta-llama/Llama-3.3-70B-Instruct",
-            max_tokens=384,
-            temperature=0.3,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": _EARNINGS_SYSTEM},
-                {"role": "user",   "content": digest_text},
-            ],
-        )
-        result = _j.loads(response.choices[0].message.content)
-        result.setdefault("digest",    "")
-        result.setdefault("key_dates", [])
-        save_earnings_digest(today_et, result)
-        return jsonify({"ok": True, "digest": result, "cached": False})
-    except Exception as exc:
-        logger.error("api_earnings_digest Nebius call failed: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/market-story")
-def api_market_story():
-    """AI market narrative for the Morning Command Center header."""
-    try:
-        mkt_ctx   = _get_mkt_ctx()
-        liq_score = None
-        try:
-            import liquidity_engine as _liq
-            liq_score = _liq.get_liquidity_status().get("score")
-        except Exception:
-            pass
-        if _MKT_AVAILABLE:
-            story = _mkt.generate_market_story(mkt_ctx, liq_score)
-        else:
-            story = {
-                "headline": "Market data loadingâ€¦",
-                "body": "Fetching regime and sector data.",
-                "sentiment": "neutral",
-                "bullets": [],
-                "permissions": [],
-                "regime": "NEUTRAL",
-            }
-        return jsonify({"ok": True, "story": story, "mkt_ctx": mkt_ctx})
-    except Exception as exc:
-        logger.error("api_market_story: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-# ---------------------------------------------------------------------------
-# WebSocket endpoints â€” real-time push updates
-# ---------------------------------------------------------------------------
-
-@sock.route("/ws/dashboard")
-def ws_dashboard(ws):
-    """
-    WebSocket endpoint for live dashboard updates.
-    Sends an immediate snapshot on connect, then pushes every 3 s.
-    Payload includes ranked stocks, market_temp, scanner, and alert_count
-    so the client never needs separate HTTP polls for any of those feeds.
-    """
-    wl_id = get_active_wl_id()
-    try:
-        ws.send(_json.dumps(_build_dashboard_payload(wl_id)))
-        last_push = _time.monotonic()
-        while True:
-            try:
-                msg = ws.receive(timeout=1.0)
-                if msg is None:
-                    break   # clean client close
-            except Exception:
-                break       # network error or close
-            if _time.monotonic() - last_push >= 3.0:
-                ws.send(_json.dumps(_build_dashboard_payload(wl_id)))
-                last_push = _time.monotonic()
-    except Exception as exc:
-        logger.debug("ws_dashboard closed (wl_id=%s): %s", wl_id, exc)
-
-
-@sock.route("/ws/quick")
-def ws_quick(ws):
-    """
-    WebSocket endpoint for Quick Mode live updates.
-    Sends an immediate snapshot on connect, then pushes fresh data every 15 s.
-    """
-    wl_id = get_active_wl_id()
-    try:
-        ws.send(_json.dumps(_build_quick_payload(wl_id)))
-        last_push = _time.monotonic()
-        while True:
-            try:
-                msg = ws.receive(timeout=1.0)
-                if msg is None:
-                    break
-            except Exception:
-                break
-            if _time.monotonic() - last_push >= 5.0:
-                ws.send(_json.dumps(_build_quick_payload(wl_id)))
-                last_push = _time.monotonic()
-    except Exception as exc:
-        logger.debug("ws_quick closed (wl_id=%s): %s", wl_id, exc)
-
-
-@app.route("/api/alerts")
-def api_alerts():
-    """Return the most recent swing alerts as JSON."""
-    return jsonify(get_alerts())
-
-
-@app.route("/alerts/clear", methods=["POST"])
-def alerts_clear():
-    """Dismiss all pending alerts."""
-    _clear_alerts()
-    return redirect(url_for("dashboard"))
-
-
-@app.route("/api/watchlist")
-def api_watchlist():
-    """Return active watchlist as ranked JSON."""
-    wl_id    = get_active_wl_id()
-    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-    data_map  = {s["ticker"]: s for s in get_all_stock_data()}
-    stocks    = [data_map[t] for t in watchlist if t in data_map]
-    return jsonify(rank_stocks(stocks))
-
-
-def batch_refresh_exec_states(tickers: list[str], data_map: dict) -> dict:
-    """
-    Re-fetch live data and re-evaluate exec_state for all tickers in parallel.
-
-    Uses a thread pool so yfinance calls run concurrently (one thread per ticker).
-    If a ticker's exec_state or key live fields changed, persists the update via
-    update_live_fields() so triggered_at timestamps stay accurate.
-
-    Returns an updated data_map {ticker: refreshed_stock_dict}.
-    """
-    if not tickers:
-        return data_map
-
-    refreshed_map = dict(data_map)
-
-    def _refresh_one(ticker):
-        existing = data_map.get(ticker)
-        if not existing:
-            return ticker, None
-        try:
-            updated = live_refresh_stock(ticker, existing)
-            return ticker, updated
-        except Exception as exc:
-            logger.warning("live_refresh_stock failed for %s: %s", ticker, exc)
-            return ticker, None
-
-    max_workers = min(len(tickers), 8)   # cap at 8 concurrent yfinance calls
-    # Do NOT use 'with ThreadPoolExecutor' â€” its __exit__ calls shutdown(wait=True)
-    # which blocks indefinitely when yfinance threads hang on cloud IPs.
-    pool = ThreadPoolExecutor(max_workers=max_workers)
-    try:
-        futures = {pool.submit(_refresh_one, t): t for t in tickers}
-        try:
-            for future in as_completed(futures, timeout=25):
-                try:
-                    ticker, updated = future.result()
-                except Exception as exc:
-                    logger.warning("batch_refresh future result failed: %s", exc)
-                    continue
-                if updated is None:
-                    continue
-                refreshed_map[ticker] = updated
-                # Persist if exec_state or any scored field changed
-                old = data_map.get(ticker, {})
-                _changed_fields = (
-                    "exec_state", "momentum_score", "setup_score", "orb_status",
-                    "orb_ready", "entry_quality", "order_block", "setup_type",
-                )
-                if any(updated.get(f) != old.get(f) for f in _changed_fields):
-                    try:
-                        update_live_fields(updated)
-                    except Exception as exc:
-                        logger.warning("update_live_fields failed for %s: %s", ticker, exc)
-        except Exception:
-            logger.warning("batch_refresh_exec_states: timed out â€” returning partial results")
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
-
-    return refreshed_map
-
-
-def _stock_summary(s: dict) -> dict:
-    """Return a JSON-safe subset of an annotated stock dict for live updates."""
-    fields = [
-        "ticker", "current_price", "gap_pct", "gap_display", "gap_class",
-        "rel_volume", "avg_volume",
-        "momentum_score", "momentum_reason", "momentum_confidence",
-        "setup_score", "setup_reason", "setup_confidence", "setup_type",
-        "catalyst_score", "catalyst_reason", "catalyst_confidence", "catalyst_summary",
-        "catalyst_category", "headlines_fetched_at",
-        "catalyst_tags", "headline_freshness",
-        "exec_state", "display_exec_state", "exec_class",
-        "final_action", "final_action_class", "final_action_reason",
-        "combined_confidence", "combined_conf_class",
-        "orb_ready", "orb_class", "orb_high", "orb_low", "orb_status",
-        "orb_status_class", "orb_phase", "orb_phase_label", "orb_phase_class",
-        "orb_action", "orb_action_class", "orb_action_sub", "orb_price_pct",
-        "order_block", "ob_class",
-        "entry_quality", "entry_class", "entry_note",
-        "trade_bias", "bias_class",
-        "score_class", "cat_score_class", "mom_score_class",
-        "freshness", "freshness_class",
-        "setup_type_class",
-        "last_updated",
-        "position_size",
-        "prev_close", "premarket_high", "premarket_low",
-        "prev_day_high", "prev_day_low",
-        "secondary_tier", "secondary_tier_class",
-        # Canonical classification (classifier.classify) â€” keep these in
-        # sync with annotate()'s output so every live-polled/WebSocket
-        # consumer can group/filter by the same bucket/avoid flag the
-        # server-rendered page used.
-        "bucket", "avoid_blocked", "classify_reason",
-        "simplified_action", "simplified_action_class",
-        # Swing fields (needed for live top-5 card patching)
-        "swing_score", "swing_score_class", "swing_grade",
-        "swing_status", "swing_status_class",
-        "swing_setup_type", "swing_setup_type_class",
-        "swing_confidence_label",
-        "pullback_quality", "pullback_quality_class",
-        "entry_zone_display",
-        "entry_distance_display", "entry_distance_class",
-        "resistance_distance_display",
-        "risk_reward", "risk_reward_display", "risk_reward_class",
-        "rr_quality_label", "rr_quality_class",
-        "stop_level", "target_1", "target_2",
-        "daily_trend", "h4_trend",
-        "is_extended", "swing_data_available",
-        # Needed for live badge patching on the detail page
-        "trade_permission",
-        # Relative Strength (needed by execution page)
-        "rs_score_display", "rs_label", "rs_class", "rs_vs_qqq_display",
-        # VWAP
-        "vwap",
-        # Sector
-        "sector_etf", "sector_name", "sector_leading", "sector_class",
-    ]
-    return {f: s.get(f) for f in fields}
-
-
-# ---------------------------------------------------------------------------
-# Non-blocking background exec-state refresh
-# ---------------------------------------------------------------------------
-# Keeps yfinance calls entirely off the gunicorn request thread.
-# Endpoints call _trigger_exec_state_refresh() and return stale DB data
-# immediately; this background thread updates the DB asynchronously.
-
-_bg_refresh_state: dict = {"active": False, "last_triggered": 0.0}
-_bg_refresh_lock = threading.Lock()
-
-
-def _trigger_exec_state_refresh(wl_id: int | None) -> None:
-    """Fire-and-forget background refresh. No-op if one is already running or
-    was triggered within the last 45 seconds."""
-    with _bg_refresh_lock:
-        now = _time.monotonic()
-        if _bg_refresh_state["active"] or (now - _bg_refresh_state["last_triggered"]) < 45.0:
-            return
-        _bg_refresh_state["active"] = True
-        _bg_refresh_state["last_triggered"] = now
-
-    def _run():
-        try:
-            watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-            all_data  = get_all_stock_data()
-            data_map  = {s["ticker"]: s for s in all_data}
-            tickers   = [t for t in watchlist if t in data_map]
-            if tickers:
-                batch_refresh_exec_states(tickers, data_map)
-        except Exception as exc:
-            logger.warning("background exec-state refresh failed: %s", exc)
-        finally:
-            with _bg_refresh_lock:
-                _bg_refresh_state["active"] = False
-
-    threading.Thread(target=_run, daemon=True, name="exec-state-refresh").start()
-
-
-# ---------------------------------------------------------------------------
-# Shared payload builders (used by both REST endpoints and WebSocket handlers)
-# ---------------------------------------------------------------------------
-
-def _build_dashboard_payload(wl_id: int | None) -> dict:
-    """Compute and return the full dashboard data dict (no request context needed)."""
-    watchlist   = get_watchlist_stocks(wl_id) if wl_id else []
-    _trade_mode = get_setting("trading_mode") or "SWING TRADE"
-    all_data    = get_all_stock_data()
-    data_map    = {s["ticker"]: s for s in all_data}
-    _trigger_exec_state_refresh(wl_id)   # non-blocking; returns stale data this call
-    stocks      = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
-    ranked    = rank_stocks(stocks)
-    # Same compute_top5() used by the server-rendered dashboard â€” this used
-    # to be a second, independently-tuned copy of the top5 rule, which is
-    # exactly how the live-polled payload could disagree with what the page
-    # showed on initial load for the same ticker a few seconds apart.
-    top5      = compute_top5(ranked)
-    no_trade     = compute_no_trade_assessment(ranked, top5)
-    # Use display_exec_state (session-aware) so stale TRIGGERED stocks are not
-    # shown in the live-alerts section outside regular market hours.
-    triggered    = [] if no_trade["lock_signals"] else [s for s in ranked if s.get("display_exec_state") == "TRIGGERED"]
-    top5_tickers = {s["ticker"] for s in top5}
-    secondary    = compute_secondary_watchlist(ranked, top5_tickers)
-    return {
-        "type":           "dashboard",
-        "server_time":    _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
-        "orb_session":    get_orb_session_banner(),
-        "no_trade":       no_trade,
-        "triggered":      [_stock_summary(s) for s in triggered],
-        "top5":           [_stock_summary(s) for s in top5],
-        "secondary":      [_stock_summary(s) for s in secondary],
-        "ranked":         [_stock_summary(s) for s in ranked],
-        # Bundled real-time feeds â€” served from cache, zero extra latency per push
-        "market_temp":    _get_market_temperature(),
-        "market_context": _get_market_context(),
-        "scanner":        _scanner.get_scan_results(),
-        "alert_count":    get_alert_count(),
-        "scan_alert_count": get_unseen_scanner_alert_count(),
-    }
-
-
-def _smart_alerts() -> list:
-    """Return recent alerts enriched with CRITICAL/HIGH/MEDIUM/WATCHLIST priority."""
-    raw = get_alerts(limit=25)
-    out = []
-    for a in raw:
-        atype    = a.get("alert_type", "")
-        severity = a.get("severity", "medium")
-        msg      = a.get("message", "")
-        msg_up   = msg.upper()
-
-        # Classify priority
-        if atype in ("ready",) or "TRIGGERED" in msg_up or "BREAKOUT" in msg_up:
-            priority = "CRITICAL"
-        elif atype in ("aplus",) or severity == "high" or "A+" in msg or "READY" in msg_up:
-            priority = "HIGH"
-        elif atype in ("pre_confirm", "continuation") or severity == "medium":
-            priority = "MEDIUM"
-        else:
-            priority = "WATCHLIST"
-
-        out.append({**a, "priority": priority})
-    return out
-
-
-def _build_quick_payload(wl_id: int | None) -> dict:
-    """Compute and return the quick-mode data dict (no request context needed)."""
-    watchlist   = get_watchlist_stocks(wl_id) if wl_id else []
-    _trade_mode = get_setting("trading_mode") or "SWING TRADE"
-    all_data    = get_all_stock_data()
-    data_map    = {s["ticker"]: s for s in all_data}
-    _trigger_exec_state_refresh(wl_id)   # non-blocking; returns stale data this call
-    stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
-    ranked  = rank_stocks(stocks)
-    valid   = [s for s in ranked if not s.get("avoid_blocked") and s.get("trade_bias") != "Avoid"]
-    return {
-        "type":           "quick",
-        "server_time":    _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
-        "orb_session":    get_orb_session_banner(),
-        "stocks":         [_stock_summary(s) for s in valid],
-        "mkt_ctx":        _get_mkt_ctx(),
-        "smart_alerts":   _smart_alerts(),
-    }
-
-
-@app.route("/api/dashboard")
-def api_dashboard():
-    """JSON endpoint for live dashboard updates (price, state, ORB, scores)."""
-    try:
-        return jsonify(_build_dashboard_payload(get_active_wl_id()))
-    except Exception as exc:
-        logger.error("api_dashboard failed: %s", exc, exc_info=True)
-        return jsonify({"error": "dashboard refresh failed"}), 500
-
-
-@app.route("/api/market_context")
-def api_market_context():
-    """ES futures + sector ETF data for live gauge updates. Cached 30 s."""
-    try:
-        return jsonify(_get_market_context())
-    except Exception as exc:
-        logger.error("api_market_context failed: %s", exc, exc_info=True)
-        return jsonify({"error": "market context unavailable"}), 500
-
-
-@app.route("/api/scanner")
-def api_scanner():
-    """
-    Live momentum scanner results â€” polled every 20 s by the dashboard.
-    Returns current opportunities, last scan time, and market-hours flag.
-    """
-    try:
-        return jsonify(_scanner.get_scan_results())
-    except Exception as exc:
-        logger.error("api_scanner failed: %s", exc, exc_info=True)
-        return jsonify({"error": "scanner unavailable"}), 500
-
-
-@csrf.exempt
-@app.route("/api/scanner/add", methods=["POST"])
-def api_scanner_add():
-    """
-    Add a scanner-detected ticker to the active watchlist via AJAX.
-    Body: {"ticker": "NVDA"}
-    """
-    data   = request.get_json(silent=True) or {}
-    ticker = (data.get("ticker") or "").strip().upper()
-    if not ticker or not ticker.isalpha() or len(ticker) > 6:
-        return jsonify({"error": "invalid ticker"}), 400
-
-    wl_id = get_active_wl_id()
-    if not wl_id:
-        return jsonify({"error": "no active watchlist"}), 400
-
-    try:
-        add_ticker_to_watchlist(wl_id, ticker)
-        # Seed a loading placeholder so the row appears immediately
-        upsert_loading_placeholder(ticker)
-        logger.info("scanner_add  ticker=%s  wl=%s", ticker, wl_id)
-        return jsonify({"ok": True, "ticker": ticker})
-    except Exception as exc:
-        logger.error("api_scanner_add failed: %s", exc, exc_info=True)
-        return jsonify({"error": "could not add ticker"}), 500
-
-
-@app.route("/api/scanner/alerts")
-def api_scanner_alerts():
-    """Return the most-recent scanner alerts (DB-persisted) as JSON."""
-    try:
-        return jsonify(get_scanner_alerts(limit=30))
-    except Exception as exc:
-        logger.error("api_scanner_alerts failed: %s", exc, exc_info=True)
-        return jsonify([]), 500
-
-
-@csrf.exempt
-@app.route("/api/scanner/alerts/seen", methods=["POST"])
-def api_scanner_alerts_seen():
-    """Mark all scanner alerts as seen (clears the unseen badge)."""
-    try:
-        mark_scanner_alerts_seen()
-        return jsonify({"ok": True})
-    except Exception as exc:
-        logger.error("api_scanner_alerts_seen failed: %s", exc, exc_info=True)
-        return jsonify({"error": str(exc)}), 500
-
-
-@csrf.exempt
-@app.route("/api/scanner/alerts/clear", methods=["POST"])
-def api_scanner_alerts_clear():
-    """Delete all scanner alert rows."""
-    try:
-        clear_scanner_alerts()
-        return jsonify({"ok": True})
-    except Exception as exc:
-        logger.error("api_scanner_alerts_clear failed: %s", exc, exc_info=True)
-        return jsonify({"error": str(exc)}), 500
-
-
-@app.route("/api/stock/<ticker>/live")
-def api_stock_live(ticker):
-    """JSON endpoint for live single-stock detail updates."""
-    ticker = ticker.upper()
-    stock  = get_stock_data(ticker)
-    if not stock:
-        return jsonify({"error": "not found"}), 404
-    # Re-evaluate exec_state with fresh live data
-    try:
-        stock = live_refresh_stock(ticker, stock)
-        update_live_fields(stock)
-    except Exception as exc:
-        logger.warning("live_refresh_stock failed for %s: %s", ticker, exc)
-    annotate(stock)
-    result = _stock_summary(stock)
-    result["server_time"] = _et_now().strftime("%I:%M %p").lstrip("0") + " ET"
-    # Include coach so the detail page can patch the coach card on every poll
-    try:
-        _uid  = current_user_id()
-        _plan = get_trade_plan(ticker, _uid)
-        _mt   = _get_market_temperature()
-        _rs   = get_risk_settings(_uid)
-        result["coach"] = compute_trade_coach(stock, _plan, _mt, _rs)
-    except Exception as _ce:
-        logger.warning("api_stock_live coach failed for %s: %s", ticker, _ce)
-    return jsonify(result)
-
-
-@app.route("/api/stock/<ticker>/profile")
-def api_stock_profile(ticker):
-    """JSON endpoint: company name, sector, industry, description blurb.
-    Cached in the DB for 30 days â€” first call per ticker hits Finnhub/yfinance,
-    every call after that is instant."""
-    ticker = ticker.upper()
-    try:
-        from intel_engine import fetch_company_profile
-        profile = fetch_company_profile(ticker)
-        return jsonify({"ok": True, "ticker": ticker, "profile": profile})
-    except Exception as exc:
-        logger.warning("api_stock_profile failed for %s: %s", ticker, exc)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/ticker-states")
-def api_ticker_states():
-    """
-    Return the current ticker_state for every ticker in the active watchlist.
-
-    Used by the dashboard JS to poll for state changes on loading/partial
-    tickers and trigger a page reload when they transition to a stable state.
-
-    Response:
-        { "states": { "AMD": "partial", "LMT": "ready", ... } }
-    """
-    wl_id     = get_active_wl_id()
-    watchlist = get_watchlist_stocks(wl_id) if wl_id else []
-    all_data  = get_all_stock_data()
-    data_map  = {s["ticker"]: s for s in all_data}
-    states = {
-        t: (data_map[t].get("ticker_state") or "loading") if t in data_map else "loading"
-        for t in watchlist
-    }
-    return jsonify({"states": states})
-
-
-# ---------------------------------------------------------------------------
-# Template context â€” helpers available in every template
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Unified grade scale (DISPLAY ONLY â€” does not change how swing_score or the
-# engine's swing_grade are computed). Normalises the engine's effective
-# swing_grade (classifier._grade_for_bucket â†’ A+/A/B+/B/B-/C/D/â€¦) to the single
-# scale used across every surface: A+, A, B+, B, and UNGRADED (everything else,
-# ranked last / no letter shown).
-# ---------------------------------------------------------------------------
-_UGRADE_MAP = {
-    "A+": ("A+", 4, "ugrade-aplus"),
-    "A":  ("A",  3, "ugrade-a"),
-    "B+": ("B+", 2, "ugrade-bplus"),
-    "B":  ("B",  1, "ugrade-b"),
-}
-
-def _ugrade_info(swing_grade):
-    """(label, rank, css) for a raw engine grade. UNGRADED â†’ ('', 0, 'ugrade-none')."""
-    return _UGRADE_MAP.get((swing_grade or "").strip().upper(), ("", 0, "ugrade-none"))
-
-@app.template_filter("ugrade")
-def _tf_ugrade(g):
-    """Unified grade letter ('' when ungraded)."""
-    return _ugrade_info(g)[0]
-
-@app.template_filter("ugrank")
-def _tf_ugrank(g):
-    """Sort rank for a grade (A+=4 â€¦ B=1, ungraded=0)."""
-    return _ugrade_info(g)[1]
-
-@app.template_filter("ugcss")
-def _tf_ugcss(g):
-    """CSS class for the unified grade badge."""
-    return _ugrade_info(g)[2]
-
-
-@app.context_processor
-def inject_helpers():
-    return {
-        "get_score_class":      get_score_class,
-        "get_bias_class":       get_bias_class,
-        "get_setup_type_class": get_setup_type_class,
-        "get_confidence_class": get_confidence_class,
-        "get_orb_class":        get_orb_class,
-        "get_ob_class":         get_ob_class,
-        "get_entry_class":      get_entry_class,
-        "get_exec_class":       get_exec_class,
-        "get_orb_status_class":  get_orb_status_class,
-        "get_orb_phase_label":   get_orb_phase_label,
-        "get_orb_action":        get_orb_action,
-        "get_freshness_class":   get_freshness_class,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Deferred startup â€” seed demo data in a background thread so gunicorn can
-# bind to its port immediately.  seed_demo_data() makes yfinance API calls
-# which can take 30-120 s; running it synchronously at import time blocks
-# gunicorn from ever opening a socket, causing Render to time-out the deploy.
-# The demo_seeded flag inside the function prevents re-seeding on restart.
-# ---------------------------------------------------------------------------
-def _deferred_startup():
-    try:
-        seed_demo_data()
-    except Exception as _e:
-        logger.error("deferred_startup seed error: %s", _e, exc_info=True)
-    try:
-        _startup_wls = get_all_watchlists(None)  # None = all users, background context
-        for _wl in _startup_wls:
-            _tickers = get_watchlist_stocks(_wl["id"])
-            logger.info(
-                "STARTUP watchlist '%s' (id=%s): %s",
-                _wl["name"], _wl["id"], _tickers,
-            )
-    except Exception as _e:
-        logger.error("deferred_startup watchlist log error: %s", _e, exc_info=True)
-
-threading.Thread(target=_deferred_startup, daemon=True, name="startup-seed").start()
-
-
-# ---------------------------------------------------------------------------
-# Schwab Account Integration  (Phase 1 â€” read-only)
-# ---------------------------------------------------------------------------
-# Required env vars:  SCHWAB_CLIENT_ID  SCHWAB_CLIENT_SECRET  SCHWAB_REDIRECT_URI
-# All routes guard against missing credentials gracefully.
-# NO order-placement routes exist in this phase.
-# ---------------------------------------------------------------------------
-
-_schwab_account_cache: dict = {}  # keyed by user_id â†’ {"data": ..., "ts": ...}
-_SCHWAB_CACHE_TTL = 60   # refresh account data every 60 s
-
-
-def _get_schwab_data(user_id: int = 1, force: bool = False) -> dict:
-    """Return cached Schwab account summary for a user, refreshing when stale."""
-    now   = _time.time()
-    entry = _schwab_account_cache.get(user_id, {"data": None, "ts": 0.0})
-    if not force and entry["ts"] and now - entry["ts"] < _SCHWAB_CACHE_TTL:
-        return entry["data"]
-    try:
-        import schwab as _schwab
-        data = _schwab.get_account_summary(user_id)
-        _schwab_account_cache[user_id] = {"data": data, "ts": now}
-        return data
-    except Exception as _e:
-        logger.warning("schwab cache refresh failed: %s", _e)
-        return (entry["data"] or {
-            "connected": False, "total_value": None, "buying_power": None,
-            "daily_pnl": None, "total_unrealized": None,
-            "open_positions": 0, "accounts": [], "error": str(_e),
-        })
-
-
-@app.route("/schwab/account")
-def schwab_account():
-    """Schwab account overview page â€” read-only, Phase 1."""
-    import schwab as _schwab
-    uid        = current_user_id()
-    configured = _schwab.is_configured()
-    tok_status = _schwab.token_status(uid)
-
-    account_data = None
-    orders_by_account = {}
-    error_msg = None
-
-    if tok_status["connected"]:
-        try:
-            account_data = _get_schwab_data(uid)
-            if account_data.get("error"):
-                error_msg = account_data["error"]
-            else:
-                for acct in account_data.get("accounts", []):
-                    ah = acct.get("account_hash", "")
-                    if ah:
-                        try:
-                            orders_by_account[ah] = _schwab.fetch_orders(ah, days_back=1, user_id=uid)
-                        except Exception as _oe:
-                            logger.warning("schwab orders fetch failed hash=%s: %s", ah, _oe)
-                            orders_by_account[ah] = []
-        except Exception as _e:
-            error_msg = str(_e)
-            logger.warning("schwab_account page error: %s", _e)
-
-    return render_template(
-        "schwab_account.html",
-        configured=configured,
-        tok_status=tok_status,
-        account_data=account_data,
-        orders_by_account=orders_by_account,
-        error_msg=error_msg,
-    )
-
-
-@app.route("/schwab/auth")
-def schwab_auth():
-    """Start the Schwab OAuth 2.0 PKCE flow."""
-    import schwab as _schwab
-
-    if not _schwab.is_configured():
-        flash("Schwab API credentials not configured. Set SCHWAB_CLIENT_ID, "
-              "SCHWAB_CLIENT_SECRET, and SCHWAB_REDIRECT_URI environment variables.", "warning")
-        return redirect(url_for("schwab_account"))
-
-    code_verifier, code_challenge = _schwab._pkce_pair()
-    state = secrets.token_urlsafe(24)
-
-    # Store PKCE verifier and state in Flask session (server-side, signed cookie)
-    session["schwab_code_verifier"] = code_verifier
-    session["schwab_state"]         = state
-
-    auth_url = _schwab.build_auth_url(state, code_challenge)
-    logger.info("schwab_auth  redirecting to Schwab  state=%s", state)
-    return redirect(auth_url)
-
-
-@app.route("/schwab/callback")
-def schwab_callback():
-    """OAuth callback â€” exchange code for tokens and store them."""
-    import schwab as _schwab
-
-    code      = request.args.get("code", "")
-    state     = request.args.get("state", "")
-    error     = request.args.get("error", "")
-    error_desc= request.args.get("error_description", "")
-
-    if error:
-        flash(f"Schwab authorization denied: {error_desc or error}", "danger")
-        return redirect(url_for("schwab_account"))
-
-    # Validate state to prevent CSRF
-    expected_state    = session.pop("schwab_state", None)
-    code_verifier     = session.pop("schwab_code_verifier", None)
-
-    if not state or state != expected_state:
-        flash("OAuth state mismatch â€” possible CSRF. Please try again.", "danger")
-        return redirect(url_for("schwab_account"))
-
-    if not code:
-        flash("No authorization code received from Schwab.", "danger")
-        return redirect(url_for("schwab_account"))
-
-    try:
-        uid    = current_user_id()
-        tokens = _schwab.exchange_code_for_tokens(code, code_verifier or "")
-        _schwab.save_tokens(tokens, uid)
-        _schwab_account_cache.pop(uid, None)  # invalidate cache for this user
-        logger.info("schwab_callback  tokens saved successfully")
-        flash("Schwab account connected successfully. Account data is loading.", "success")
-    except Exception as e:
-        logger.error("schwab_callback  token exchange failed: %s", e)
-        flash(f"Failed to connect Schwab account: {e}", "danger")
-
-    return redirect(url_for("schwab_account"))
-
-
-@csrf.exempt
-@app.route("/schwab/disconnect", methods=["POST"])
-def schwab_disconnect():
-    """Clear stored Schwab tokens (read-only disconnect, no broker-side revocation)."""
-    import schwab as _schwab
-    uid = current_user_id()
-    _schwab.clear_tokens(uid)
-    _schwab_account_cache.pop(uid, None)
-    flash("Schwab account disconnected. Your data has been cleared from this app.", "success")
-    return redirect(url_for("schwab_account"))
-
-
-@app.route("/schwab/sync-preview")
-def schwab_sync_preview():
-    """
-    Return a JSON preview of Schwab filled trades that can be imported to the journal.
-    Only returns completed round-trips (BUY â†’ SELL pairs) from the last 30 days.
-    Flags trades already imported so the UI can grey them out.
-    """
-    import schwab as _schwab
-    uid = current_user_id()
-    if not _schwab.is_connected(uid):
-        return jsonify({"error": "Schwab not connected"}), 403
-    try:
-        trades = _schwab.match_schwab_trades(days_back=30, user_id=uid)
-        return jsonify({"ok": True, "trades": trades, "count": len(trades)})
-    except Exception as e:
-        logger.error("schwab_sync_preview error: %s", e, exc_info=True)
-        return jsonify({"error": str(e)}), 500
-
-
-@csrf.exempt
-@app.route("/schwab/sync-import", methods=["POST"])
-def schwab_sync_import():
-    """
-    Import confirmed Schwab trade pairs into the journal.
-    Accepts JSON body: { "trades": [...] } where each trade has the same
-    shape returned by /schwab/sync-preview.
-    Skips trades already imported (by import_key).
-    """
-    import schwab as _schwab
-    from database import schwab_import_exists, record_schwab_import
-    uid = current_user_id()
-    if not _schwab.is_connected(uid):
-        return jsonify({"error": "Schwab not connected"}), 403
-    try:
-        body   = request.get_json(force=True) or {}
-        trades = body.get("trades") or []
-        imported = []
-        skipped  = []
-        for t in trades:
-            key = t.get("import_key", "")
-            if not key or schwab_import_exists(key, uid):
-                skipped.append(t.get("ticker", "?"))
-                continue
-            try:
-                pnl_pct = t.get("pnl_pct", 0.0)
-                result  = t.get("result", "Break Even")
-                journal_id = add_journal_entry(
-                    ticker         = t["ticker"],
-                    trade_date     = t["trade_date"],
-                    direction      = t.get("direction", "Long"),
-                    entry_price    = t["entry_price"],
-                    exit_price     = t["exit_price"],
-                    shares         = t.get("shares"),
-                    setup_type     = t.get("setup_type"),
-                    momentum_score = None,
-                    pnl_pct        = pnl_pct,
-                    result         = result,
-                    notes          = f"[Schwab import] Buy #{t.get('buy_order_id','')} Â· Sell #{t.get('sell_order_id','')}",
-                    trade_mode     = t.get("trade_mode", "SWING TRADE"),
-                    user_id        = uid,
-                )
-                record_schwab_import(key, journal_id, t["ticker"], t["trade_date"], uid)
-                imported.append(t["ticker"])
-            except Exception as _e:
-                logger.warning("schwab_sync_import: error importing %s: %s", t.get("ticker"), _e)
-                skipped.append(t.get("ticker", "?"))
-        return jsonify({
-            "ok": True,
-            "imported": imported,
-            "skipped":  skipped,
-            "count":    len(imported),
-        })
-    except Exception as e:
-        logger.error("schwab_sync_import error: %s", e, exc_info=True)
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/schwab/summary")
-def api_schwab_summary():
-    """
-    JSON endpoint for account summary.
-    Used by dashboard widgets to pull live account balance / buying power.
-    Read-only Phase 1 â€” no mutations.
-    """
-    import schwab as _schwab
-    uid = current_user_id()
-    if not _schwab.token_status(uid)["connected"]:
-        return jsonify({"connected": False, "error": "Not authenticated"})
-    data = _get_schwab_data(uid)
-    # Return only the safe summary fields (no token data)
-    return jsonify({
-        "connected":        data.get("connected", False),
-        "total_value":      data.get("total_value"),
-        "buying_power":     data.get("buying_power"),
-        "daily_pnl":        data.get("daily_pnl"),
-        "total_unrealized": data.get("total_unrealized"),
-        "open_positions":   data.get("open_positions"),
-        "error":            data.get("error"),
-    })
-
-
-
-def _intel_error_payload(msg: str) -> dict:
-    """Standard JSON error payload for /api/intel."""
-    return {
-        "ok":              False,
-        "errors":          [msg],
-        "last_updated":    "â€”",
-        "news":            [],
-        "market_news":     [],
-        "earnings":        {"today": [], "tomorrow": [], "this_week": []},
-        "splits":          [],
-        "dividends":       [],
-        "economic_events": [],
-        "alerts_sent":     [],
-        "from_cache":      False,
-        "refreshing":      False,
-    }
-
-
-@app.route("/api/intel")
-@csrf.exempt
-def api_intel():
-    """Returns all intel feeds as JSON â€” always returns JSON, never HTML."""
-    try:
-        if request.args.get("debug") == "1":
-            return jsonify({
-                "ok": True,
-                "news": [{"ticker": "TEST", "headline": "Debug news item", "impact": "HIGH",
-                          "time": "09:00", "reason": "Debug test payload", "source": "Debug",
-                          "on_watchlist": False}],
-                "market_news": [{"ticker": "TEST", "headline": "Debug news item", "impact": "HIGH",
-                                 "time": "09:00", "reason": "Debug test payload", "source": "Debug",
-                                 "on_watchlist": False}],
-                "earnings": {
-                    "today": [],
-                    "tomorrow": [],
-                    "this_week": [{"ticker": "TEST", "date": "2026-05-11", "date_label": "This Week",
-                                   "time_label": "BMO", "days_away": 1, "on_watchlist": False}],
-                },
-                "splits": [{"ticker": "TEST", "ratio": "2:1", "effective_date": "2026-05-15",
-                            "eff_date": "2026-05-15", "type": "Forward", "status": "Upcoming",
-                            "is_new": False, "days_away": 5}],
-                "dividends": [],
-                "economic_events": [{"name": "Debug CPI Event", "date": "2026-05-12", "impact": "HIGH",
-                                     "event": "Debug CPI Event", "date_label": "Mon May 12",
-                                     "time": "8:30 AM", "reason": "Debug payload", "is_today": False}],
-                "errors": [],
-                "last_updated": "debug",
-                "from_cache": False,
-                "refreshing": False,
-            })
-
-        if request.args.get("refresh") == "1":
-            _intel.clear_intel_cache()
-
-        data = _intel.get_intel_summary()
-        return jsonify(data)
-
-    except Exception as e:
-        logger.error("api_intel error: %s", e, exc_info=True)
-        return jsonify(_intel_error_payload(str(e))), 200
-
-
-@app.route("/api/ndx_watch")
-@csrf.exempt
-def api_ndx_watch():
-    """Return Nasdaq-100 constituent watch data (recent changes + top holdings)."""
-    try:
-        refresh = request.args.get("refresh") == "1"
-        if refresh:
-            with _intel._cache_lock:
-                _intel._cache.pop("ndx", None)
-            _intel.run_ndx_constituent_check()
-        return jsonify(_intel.get_ndx_watch_data())
-    except Exception as exc:
-        logger.error("api_ndx_watch: %s", exc, exc_info=True)
-        return jsonify({"error": str(exc), "recent_changes": [], "top_holdings": [], "total_members": 0}), 200
-
-
-@app.route("/api/intel/debug")
-def api_intel_debug():
-    """Debug endpoint â€” shows data source health for the intel engine. No API keys exposed."""
-    try:
-        summary    = _intel.get_intel_summary()
-        earn_dbg   = summary.get("earnings_debug", {})
-        macro      = summary.get("market_environment", {})
-        sector_ht  = summary.get("sector_heat", [])
-
-        cache_ages: dict = {}
-        with _intel._cache_lock:
-            for key, entry in list(_intel._cache.items()):
-                age_s = int(_time.monotonic() - entry["ts"])
-                cache_ages[key] = f"{age_s}s ago"
-
-        fh_limited = _intel._fh_is_rate_limited()
-        fh_secs    = max(0, int(_intel._fh_rl_until - _time.monotonic())) if fh_limited else 0
-        earn       = summary.get("earnings", {})
-
-        return jsonify({
-            "ok":                   summary.get("ok"),
-            "finnhub_rate_limited": fh_limited,
-            "finnhub_rl_remaining": f"{fh_secs}s" if fh_limited else "not limited",
-            "errors":               summary.get("errors", []),
-            "cache_ages":           cache_ages,
-            "news_count":           len(summary.get("news", [])),
-            "earnings_today":       len(earn.get("today", [])),
-            "earnings_tomorrow":    len(earn.get("tomorrow", [])),
-            "earnings_this_week":   len(earn.get("this_week", [])),
-            "earnings_tickers_checked": earn_dbg.get("tickers_checked", 0),
-            "earnings_source":      earn_dbg.get("earnings_source_used", "â€”"),
-            "earnings_yfinance":    earn_dbg.get("yfinance_found", 0),
-            "earnings_finnhub":     earn_dbg.get("finnhub_found", 0),
-            "earnings_overrides":   earn_dbg.get("overrides_injected", 0),
-            "splits_count":         len(summary.get("splits", [])),
-            "dividends_count":      len(summary.get("dividends", [])),
-            "sector_heat_count":    len(sector_ht),
-            "yield_10y":            macro.get("yield_10y"),
-            "yield_change_bps":     macro.get("yield_change_bps"),
-            "yield_trend":          macro.get("yield_trend"),
-            "dxy_price":            macro.get("dxy_price"),
-            "vix_level":            macro.get("vix_level"),
-            "regime":               macro.get("regime"),
-        })
-    except Exception as exc:
-        logger.error("api_intel_debug: %s", exc, exc_info=True)
-        return jsonify({"error": str(exc)}), 500
-
-
-@app.route("/api/institutional/market-internals")
-def api_market_internals():
-    """Market internals: breadth, ADD proxy, sector participation, breakout conditions."""
-    try:
-        import institutional_engine as _inst
-        ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
-        internals = _inst.get_market_internals(ctx)
-        macro     = _inst.get_macro_context(ctx)
-        return jsonify({
-            "ok": True,
-            "internals": internals,
-            "macro": macro,
-            "regime": ctx.get("regime"),
-            "regime_label": ctx.get("regime_label"),
-            "vix": ctx.get("vix_level"),
-            "qqq_1d": ctx.get("qqq_1d_pct"),
-            "spy_1d": ctx.get("spy_1d_pct"),
-        })
-    except Exception as exc:
-        logger.error("api_market_internals: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/institutional/<ticker>")
-def api_institutional_ticker(ticker: str):
-    """
-    Full institutional analysis for a single ticker.
-    Returns all 15 engine outputs: volatility compression, liquidity map,
-    patterns, probability score, continuation, risk levels, discipline AI.
-    """
-    try:
-        import institutional_engine as _inst
-        ticker = ticker.upper().strip()
-        ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
-
-        # Try to get existing stock data from DB
-        stock = get_stock_data(ticker) or {"ticker": ticker}
-
-        result = _inst.analyze_institutional(stock, ctx)
-        # Append market internals and macro for completeness
-        result["internals"] = _inst.get_market_internals(ctx)
-        result["macro"]     = _inst.get_macro_context(ctx)
-        result["ticker"]    = ticker
-        result["ok"]        = True
-        return jsonify(result)
-    except Exception as exc:
-        logger.error("api_institutional_ticker %s: %s", ticker, exc, exc_info=True)
-        return jsonify({"ok": False, "ticker": ticker, "error": str(exc)}), 500
-
-
-@app.route("/api/institutional/smart-watchlist")
-def api_smart_watchlist():
-    """
-    AI-ranked smart watchlist: A+/A/B tiers, earnings plays,
-    ORB candidates, continuation setups, squeeze plays.
-    """
-    try:
-        import institutional_engine as _inst
-        ctx    = _mkt.get_market_context() if _MKT_AVAILABLE else {}
-        stocks = get_all_stock_data()   # list of dicts from DB
-
-        # Ensure each stock has a prob_score (may already be set from analysis)
-        scored = []
-        for s in stocks:
-            if not s.get("prob_score"):
-                s["prob_score"] = _inst.compute_probability_score(s, ctx)["prob_score"]
-            scored.append(s)
-
-        watchlists = _inst.build_smart_watchlist(scored, ctx)
-        return jsonify({"ok": True, **watchlists})
-    except Exception as exc:
-        logger.error("api_smart_watchlist: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/institutional/adaptive-insights")
-def api_adaptive_insights():
-    """Adaptive learning: setup win rates, best regimes, AI recommendations."""
-    try:
-        import institutional_engine as _inst
-        insights    = _inst.get_adaptive_insights()
-        db_stats    = get_setup_outcome_stats(current_user_id())
-        return jsonify({"ok": True, **insights, "db_stats": db_stats})
-    except Exception as exc:
-        logger.error("api_adaptive_insights: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/institutional/record-outcome", methods=["POST"])
-@csrf.exempt
-def api_record_outcome():
-    """
-    Record a trade outcome for adaptive learning.
-    POST JSON: {"ticker": "NVDA", "setup_type": "Bull Flag", "outcome": "win", "regime": "RISK_ON"}
-    """
-    try:
-        import institutional_engine as _inst
-        body       = request.get_json(force=True) or {}
-        setup_type = body.get("setup_type", "")
-        outcome    = body.get("outcome", "")     # "win" | "loss" | "breakeven"
-        regime     = body.get("regime", "")
-        pattern    = body.get("pattern", "")
-
-        if outcome not in ("win", "loss", "breakeven"):
-            return jsonify({"ok": False, "error": "outcome must be win|loss|breakeven"}), 400
-
-        ticker     = body.get("ticker", "")
-        prob_score = int(body.get("prob_score", 0))
-        notes      = body.get("notes", "")
-
-        _inst.record_setup_outcome(setup_type, outcome, regime, pattern)
-        save_setup_outcome(ticker, setup_type, outcome, regime, pattern, prob_score, notes,
-                           current_user_id())
-        return jsonify({"ok": True, "recorded": {"ticker": ticker, "setup_type": setup_type, "outcome": outcome}})
-    except Exception as exc:
-        logger.error("api_record_outcome: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/institutional/daily-review")
-def api_daily_review():
-    """End-of-day performance review across all scanned setups."""
-    try:
-        import institutional_engine as _inst
-        ctx    = _mkt.get_market_context() if _MKT_AVAILABLE else {}
-        stocks = get_all_stock_data()
-
-        # Build analysis dicts for all stocks (fast â€” uses cached data)
-        analyzed = []
-        for s in stocks:
-            try:
-                result = _inst.analyze_institutional(s, ctx)
-                analyzed.append({**s, **result})
-            except Exception:
-                analyzed.append(s)
-
-        review = _inst.generate_daily_review(analyzed)
-        return jsonify({"ok": True, **review})
-    except Exception as exc:
-        logger.error("api_daily_review: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/intel")
-def intel():
-    """Tradestaar market-news and smart-money hub.
-
-    All cards are built from the existing cache-first engines.  Derived values
-    (headline sentiment and coverage momentum) are explicitly labelled so they
-    cannot be mistaken for exchange volume or a third-party sentiment feed.
-    """
-    mkt = _get_mkt_ctx()
-
-    liq, money_flow = {}, []
-    try:
-        import liquidity_engine as _liq
-        liq = _liq.get_liquidity_status() or {}
-        money_flow = _liq.get_money_flow() or []
-    except Exception as _e:
-        logger.debug("intel: liquidity fetch failed: %s", _e)
-
-    events, news, earnings = [], [], []
-    try:
-        summ = _intel.get_intel_summary() or {}
-        events = summ.get("economic_events") or []
-        news = summ.get("market_news") or summ.get("news") or []
-        earn = summ.get("earnings") or {}
-        earnings = (
-            list(earn.get("today") or [])
-            + list(earn.get("tomorrow") or [])
-            + list(earn.get("this_week") or [])
-            + list(earn.get("coming_up") or [])
-        )
-    except Exception as _e:
-        logger.debug("intel: intel_summary failed: %s", _e)
-
-    # Lightweight, explainable headline tone.  This is intentionally not
-    # presented as analyst consensus or social sentiment.
-    bullish_words = (
-        "beat", "beats", "upgrade", "raises", "raised", "growth", "record",
-        "approval", "approved", "surge", "rally", "wins", "buyback",
-    )
-    bearish_words = (
-        "miss", "misses", "downgrade", "cuts", "cut ", "decline", "probe",
-        "lawsuit", "recall", "warning", "falls", "layoff", "offering",
-    )
-    enriched_news = []
-    coverage = {}
-    for raw in news:
-        item = dict(raw)
-        headline = str(item.get("headline") or "")
-        lowered = headline.lower()
-        bull_hits = sum(word in lowered for word in bullish_words)
-        bear_hits = sum(word in lowered for word in bearish_words)
-        item["sentiment"] = "BULLISH" if bull_hits > bear_hits else (
-            "BEARISH" if bear_hits > bull_hits else "NEUTRAL"
-        )
-        ticker = str(item.get("ticker") or "").upper()
-        if ticker:
-            score = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2}.get(item.get("impact"), 1)
-            entry = coverage.setdefault(ticker, {"ticker": ticker, "mentions": 0, "score": 0})
-            entry["mentions"] += 1
-            entry["score"] += score
-        enriched_news.append(item)
-    trending = sorted(coverage.values(), key=lambda row: (-row["score"], -row["mentions"], row["ticker"]))[:6]
-
-    briefing = None
-    try:
-        briefing = get_ai_briefing(_et_now().strftime("%Y-%m-%d"))
-    except Exception:
-        pass
-    story = {}
-    if not briefing and _MKT_AVAILABLE:
-        try:
-            story = _mkt.generate_market_story(mkt, (liq.get("score") if liq else None))
-        except Exception as _e:
-            logger.debug("intel: story failed: %s", _e)
-
-    return render_template(
-        "intel.html",
-        mkt=mkt, liq=liq, money_flow=money_flow[:8],
-        events=events[:8], news=enriched_news[:24], earnings=earnings[:12],
-        trending=trending, briefing=briefing, story=story,
-    )
-
-
-@app.route("/sentiment")
-def sentiment():
-    """Transparent news tone with an explicit social-data availability state."""
-    news = []
-    try:
-        summary = _intel.get_intel_summary() or {}
-        news = summary.get("market_news") or summary.get("news") or []
-    except Exception as exc:
-        logger.debug("sentiment: news summary unavailable: %s", exc)
-
-    active_id = get_active_wl_id()
-    try:
-        watchlist = get_watchlist_stocks(active_id) if active_id else []
-    except Exception:
-        watchlist = []
-
-    from sentiment_engine import build_sentiment_snapshot
-    snapshot = build_sentiment_snapshot(news, watchlist)
-    return render_template("sentiment.html", snapshot=snapshot)
-
-
-@app.route("/smart-money")
-def smart_money():
-    """Verified SEC insider filings and congressional trade disclosures."""
-    active_id = get_active_wl_id()
-    try:
-        tickers = get_watchlist_stocks(active_id) if active_id else []
-    except Exception:
-        tickers = []
-
-    from smart_money import fetch_congress_trades, fetch_sec_form4
-    insiders, insider_status = fetch_sec_form4(tickers)
-    congress, congress_status = fetch_congress_trades()
-    return render_template(
-        "smart_money.html",
-        insiders=insiders,
-        congress=congress,
-        insider_status=insider_status,
-        congress_status=congress_status,
-        watched_tickers=tickers[:10],
-    )
-
-
-def _build_catalyst_calendar(summary, watchlist_tickers=None):
-    """Normalize cached earnings and macro events for the calendar UI.
-
-    The intelligence engine intentionally has different schemas for company
-    earnings and economic releases.  Keeping the normalization here gives the
-    template one stable contract and makes the filters deterministic/offline.
-    """
-    watchlist = {str(t).upper() for t in (watchlist_tickers or [])}
-    rows = []
-    earnings = (summary or {}).get("earnings") or {}
-    seen_earnings = set()
-    for bucket in ("today", "tomorrow", "this_week", "coming_up"):
-        for raw in earnings.get(bucket) or []:
-            ticker = str(raw.get("ticker") or "").upper()
-            date = str(raw.get("date") or "")[:10]
-            key = (ticker, date)
-            if not ticker or key in seen_earnings:
-                continue
-            seen_earnings.add(key)
-            days = raw.get("days_away")
-            try:
-                days = int(days)
-            except (TypeError, ValueError):
-                days = 99
-            rows.append({
-                "kind": "EARNINGS", "date": date,
-                "date_label": raw.get("date_label") or date or "Date TBD",
-                "time": raw.get("time_label") or "TBD",
-                "title": f"{ticker} Earnings",
-                "ticker": ticker,
-                "company_name": raw.get("company_name") or ticker,
-                "impact": "HIGH" if ticker in watchlist else "MEDIUM",
-                "reason": "Quarterly earnings can create price gaps and volatility.",
-                "days_away": days,
-                "on_watchlist": ticker in watchlist,
-                "eps_est": raw.get("eps_est"),
-                "rev_est": raw.get("rev_est"),
-                "market_cap": raw.get("market_cap"),
-                "cap_tier": raw.get("cap_tier") or ("Watchlist" if ticker in watchlist else ""),
-            })
-
-    for raw in (summary or {}).get("economic_events") or []:
-        days = raw.get("days_away")
-        try:
-            days = int(days)
-        except (TypeError, ValueError):
-            days = 99
-        rows.append({
-            "kind": "ECONOMIC", "date": str(raw.get("date") or "")[:10],
-            "date_label": raw.get("date_label") or raw.get("date") or "Date TBD",
-            "time": raw.get("time") or "TBD",
-            "title": raw.get("event") or "Economic Event",
-            "ticker": "", "company_name": "US Macro",
-            "impact": str(raw.get("impact") or "MEDIUM").upper(),
-            "reason": raw.get("reason") or "Macro releases can affect rates, sectors, and broad market risk.",
-            "days_away": days, "on_watchlist": False,
-            "eps_est": None, "rev_est": None,
-            "market_cap": None, "cap_tier": "",
-        })
-
-    return sorted(rows, key=lambda row: (
-        row["days_away"], row["date"], row["time"] == "TBD", row["time"], row["title"]
-    ))
-
-
-@app.route("/calendar")
-def catalyst_calendar():
-    """Mobile-first earnings and economic catalyst calendar."""
-    try:
-        summary = _intel.get_intel_summary() or {}
-    except Exception as exc:
-        logger.debug("catalyst_calendar: intel summary failed: %s", exc)
-        summary = {}
-
-    active_id = get_active_wl_id()
-    try:
-        active_tickers = get_watchlist_stocks(active_id) if active_id else []
-    except Exception:
-        active_tickers = []
-    rows = _build_catalyst_calendar(summary, active_tickers)
-    return render_template(
-        "catalyst_calendar.html", events=rows,
-        earnings_count=sum(row["kind"] == "EARNINGS" for row in rows),
-        economic_count=sum(row["kind"] == "ECONOMIC" for row in rows),
-        watchlist_count=sum(row["on_watchlist"] for row in rows),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Liquidity & Opportunity Research Engine
-# ---------------------------------------------------------------------------
-
-@app.route("/")
-@app.route("/opportunity")
-def liquidity_page():
-    """Morning Command Center â€” liquidity, risk, sector flow, hidden opportunities."""
-    return render_template("liquidity.html")
-
-
-@app.route("/api/liquidity/status")
-def api_liquidity_status():
-    """Fed liquidity monitor: FRED data, yield curve, liquidity score."""
-    try:
-        import liquidity_engine as _liq
-        ctx = _liq.get_liquidity_status()
-        return jsonify({"ok": True, **ctx})
-    except Exception as exc:
-        logger.error("api_liquidity_status: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/liquidity/money-flow")
-def api_money_flow():
-    """Sector ETF money flow rankings."""
-    try:
-        import liquidity_engine as _liq
-        mflow = _liq.get_money_flow()
-        ctx   = _liq.get_liquidity_status()
-        return jsonify({
-            "ok":        True,
-            "money_flow":mflow,
-            "liq_status":ctx.get("status"),
-            "liq_score": ctx.get("score"),
-        })
-    except Exception as exc:
-        logger.error("api_money_flow: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/opportunity/scan")
-def api_opportunity_scan():
-    """
-    Run the full hidden opportunity scan.
-    Query params:
-      mode=both|trade|invest   (default: both)
-      tickers=NVDA,CRWD,...    (extra tickers to include)
-    """
-    try:
-        import opportunity_engine as _opp
-        import liquidity_engine   as _liq
-        mode          = request.args.get("mode", "both")
-        extra_raw     = request.args.get("tickers", "")
-        extra_tickers = [t.strip().upper() for t in extra_raw.split(",") if t.strip()]
-        mkt_ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
-        liq_ctx = _liq.get_liquidity_status()
-        results = _opp.run_opportunity_scan(extra_tickers, mkt_ctx, liq_ctx, mode)
-        return jsonify({"ok": True, **results})
-    except Exception as exc:
-        logger.error("api_opportunity_scan: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/opportunity/ticker/<ticker>")
-def api_opportunity_ticker(ticker: str):
-    """Full opportunity analysis + research report for a single ticker."""
-    try:
-        import opportunity_engine as _opp
-        import liquidity_engine   as _liq
-        ticker  = ticker.upper().strip()
-        mkt_ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
-        liq_ctx = _liq.get_liquidity_status()
-        _opp.get_fundamentals_sync(ticker)   # ensure data is ready before building report
-        result  = _opp.scan_ticker(ticker, mkt_ctx, liq_ctx)
-        return jsonify({"ok": True, **result})
-    except Exception as exc:
-        logger.error("api_opportunity_ticker %s: %s", ticker, exc, exc_info=True)
-        return jsonify({"ok": False, "ticker": ticker, "error": str(exc)}), 500
-
-
-@app.route("/api/opportunity/alerts")
-def api_opportunity_alerts():
-    """Combined opportunity + liquidity alerts."""
-    try:
-        import opportunity_engine as _opp
-        import liquidity_engine   as _liq
-        mkt_ctx = _mkt.get_market_context() if _MKT_AVAILABLE else {}
-        liq_ctx = _liq.get_liquidity_status()
-        # Quick scan of top tickers only for speed
-        fast_universe = ["NVDA","CRWD","AMD","META","PLTR","MRVL","DDOG","NET","AMZN","COIN"]
-        results = []
-        for t in fast_universe:
-            try:
-                results.append(_opp.scan_ticker(t, mkt_ctx, liq_ctx))
-            except Exception:
-                pass
-        alerts = _opp.generate_opportunity_alerts(results, mkt_ctx, liq_ctx)
-        return jsonify({"ok": True, "alerts": alerts, "count": len(alerts)})
-    except Exception as exc:
-        logger.error("api_opportunity_alerts: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/opportunity/refresh", methods=["POST"])
-@csrf.exempt
-def api_opportunity_refresh():
-    """Trigger background refresh of liquidity data."""
-    try:
-        import liquidity_engine as _liq
-        _liq.refresh_liquidity_bg()
-        return jsonify({"ok": True, "msg": "Liquidity refresh triggered."})
-    except Exception as exc:
-        logger.error("api_opportunity_refresh: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-# ---------------------------------------------------------------------------
-# Authentication routes
-# ---------------------------------------------------------------------------
-
-@app.route("/login", methods=["GET", "POST"])
-@csrf.exempt
-def login_page():
-    """Multi-user login page."""
-    if session.get("user_id"):
-        return redirect(url_for("liquidity_page"))
-    error = None
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
-        user = check_user_password(username, password)
-        if user:
-            remember = request.form.get("remember_me") == "1"
-            session.permanent = remember
-            session["user_id"]   = user["id"]
-            session["username"]  = user["username"]
-            session["is_admin"]  = user["is_admin"]
-            next_url = request.form.get("next") or url_for("liquidity_page")
-            if not next_url.startswith("/") or next_url.startswith("//"):
-                next_url = url_for("liquidity_page")
-            return redirect(next_url)
-        error = "Invalid username or password."
-    return render_template("login.html",
-                           next=request.args.get("next", ""),
-                           error=error)
-
-
-@app.route("/logout", methods=["POST"])
-def logout():
-    """Clear session and redirect to login."""
-    session.clear()
-    return redirect(url_for("login_page"))
-
-
-@app.route("/register", methods=["GET", "POST"])
-@csrf.exempt
-def register_page():
-    """Self-registration page. Creates a regular (non-admin) user account."""
-    if session.get("user_id"):
-        return redirect(url_for("liquidity_page"))
-    error = None
-    entered_username = ""
-    if request.method == "POST":
-        entered_username = request.form.get("username", "").strip()
-        password         = request.form.get("password", "")
-        confirm          = request.form.get("confirm_password", "")
-
-        if not entered_username:
-            error = "Username is required."
-        elif len(entered_username) < 3:
-            error = "Username must be at least 3 characters."
-        elif len(entered_username) > 50:
-            error = "Username must be 50 characters or fewer."
-        elif not entered_username.replace("_", "").replace("-", "").isalnum():
-            error = "Username may only contain letters, numbers, hyphens, and underscores."
-        elif len(password) < 8:
-            error = "Password must be at least 8 characters."
-        elif password != confirm:
-            error = "Passwords do not match."
-        elif get_user_by_username(entered_username):
-            error = "That username is already taken."
-        else:
-            try:
-                uid = create_user(entered_username, password, is_admin=False)
-                session.permanent = False
-                session["user_id"]  = uid
-                session["username"] = entered_username.lower()
-                session["is_admin"] = 0
-                return redirect(url_for("liquidity_page"))
-            except Exception:
-                error = "Could not create account â€” please try again."
-
-    return render_template("register.html", error=error, username=entered_username)
-
-
-# ---------------------------------------------------------------------------
-# Admin â€” user management
-# ---------------------------------------------------------------------------
-
-@app.route("/admin/users")
-@require_admin
-def admin_users():
-    """Admin page: list all users."""
-    users = get_all_users()
-    return render_template("admin_users.html", users=users,
-                           current_uid=current_user_id())
-
-
-@app.route("/admin/users/create", methods=["POST"])
-@require_admin
-def admin_user_create():
-    """Admin: create a new user."""
-    username = request.form.get("username", "").strip()
-    password = request.form.get("password", "").strip()
-    is_admin = bool(request.form.get("is_admin"))
-    if not username or not password:
-        flash("Username and password are required.", "error")
-        return redirect(url_for("admin_users"))
-    try:
-        create_user(username, password, is_admin=is_admin)
-        flash(f"User '{username}' created.", "success")
-    except Exception as exc:
-        flash(f"Could not create user: {exc}", "error")
-    return redirect(url_for("admin_users"))
-
-
-@app.route("/admin/users/<int:uid>/delete", methods=["POST"])
-@require_admin
-def admin_user_delete(uid):
-    """Admin: delete a user (cannot delete admin, id=1)."""
-    try:
-        delete_user(uid)
-        flash("User deleted.", "info")
-    except ValueError as exc:
-        flash(str(exc), "error")
-    except Exception as exc:
-        flash(f"Error deleting user: {exc}", "error")
-    return redirect(url_for("admin_users"))
-
-
-@app.route("/admin/users/<int:uid>/password", methods=["POST"])
-@require_admin
-def admin_user_password(uid):
-    """Admin: change a user's password."""
-    new_password = request.form.get("password", "").strip()
-    if not new_password:
-        flash("Password cannot be empty.", "error")
-        return redirect(url_for("admin_users"))
-    update_user_password(uid, new_password)
-    flash("Password updated.", "success")
-    return redirect(url_for("admin_users"))
-
-
-# ---------------------------------------------------------------------------
-# Research Desk
-# ---------------------------------------------------------------------------
-
-@app.route("/research")
-def research_page():
-    return render_template("research.html")
-
-
-@app.route("/fundamentals")
-def fundamentals_page():
-    """Fundamentals Analyzer + Education Module."""
-    ticker = (request.args.get("ticker") or "").strip().upper()
-    data   = None
-    error  = None
-
-    if ticker:
-        force = request.args.get("refresh") == "1"
-        try:
-            from fundamentals_engine import get_fundamentals
-            data = get_fundamentals(ticker, force_refresh=force)
-            if data.get("error"):
-                error = data["error"]
-        except Exception as exc:
-            logger.exception("fundamentals_page error for %s", ticker)
-            error = str(exc)
-
-    return render_template("fundamentals.html", ticker=ticker, data=data, error=error)
-
-
-def _comparison_snapshot(ticker: str) -> dict:
-    """Build a compact, source-labelled comparison record for one ticker."""
-    from fundamentals_engine import get_fundamentals
-
-    data = get_fundamentals(ticker)
-    metrics = {}
-    for section in data.get("sections", []):
-        for row in section.get("rows", []):
-            label = row.get("label")
-            if label:
-                metrics[label] = row
-
-    stock = get_stock_data(ticker) or {}
-    return {
-        "ticker": ticker,
-        "company_name": data.get("company_name") or ticker,
-        "sector": data.get("sector"),
-        "industry": data.get("industry"),
-        "score": data.get("normalized_score"),
-        "earned": data.get("total_earned"),
-        "possible": data.get("total_possible"),
-        "verdict": data.get("verdict"),
-        "verdict_class": data.get("verdict_class"),
-        "price": stock.get("current_price") or stock.get("price"),
-        "change_pct": stock.get("change_pct"),
-        "roe": data.get("roe"),
-        "roic": data.get("roic"),
-        "insider_pct": data.get("insider_pct"),
-        "metrics": metrics,
-        "red_flags": data.get("red_flags", []),
-        "missing_fields": data.get("missing_fields", []),
-        "error": data.get("error"),
-    }
-
-
-@app.route("/compare")
-def stock_compare():
-    """Compare two or three stocks using the existing fundamentals pipeline."""
-    raw = request.args.get("symbols", "")
-    symbols = []
-    for value in raw.split(","):
-        ticker = value.strip().upper()
-        if ticker and re.fullmatch(r"[A-Z][A-Z0-9.-]{0,7}", ticker) and ticker not in symbols:
-            symbols.append(ticker)
-    symbols = symbols[:3]
-
-    comparisons = []
-    errors = []
-    for ticker in symbols:
-        try:
-            snapshot = _comparison_snapshot(ticker)
-            if snapshot.get("error"):
-                errors.append(f"{ticker}: {snapshot['error']}")
-            comparisons.append(snapshot)
-        except Exception as exc:
-            logger.exception("stock_compare error for %s", ticker)
-            errors.append(f"{ticker}: comparison data is temporarily unavailable.")
-
-    return render_template(
-        "compare.html", symbols=symbols, comparisons=comparisons, errors=errors,
-    )
-
-
-@app.route("/api/research/ask", methods=["POST"])
-@csrf.exempt
-def api_research_ask():
-    """Call Anthropic with web_search enabled and return the answer."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return jsonify({"ok": False, "error": "ANTHROPIC_API_KEY is not configured on this server."}), 503
-
-    data = request.get_json(force=True, silent=True) or {}
-    question = (data.get("question") or "").strip()
-    if not question:
-        return jsonify({"ok": False, "error": "question is required"}), 400
-
-    try:
-        import anthropic as _anthropic
-        client = _anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2048,
-            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
-            messages=[{"role": "user", "content": question}],
-        )
-        # Collect all text blocks from the response
-        answer_parts = []
-        for block in response.content:
-            if hasattr(block, "text"):
-                answer_parts.append(block.text)
-        answer = "\n\n".join(answer_parts).strip() or "(no text response)"
-        return jsonify({"ok": True, "answer": answer})
-    except Exception as exc:
-        logger.exception("Research ask error")
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-# â”€â”€ Tradestaar AI â€” grounded, account-aware research assistant â”€â”€â”€â”€â”€â”€â”€â”€
-def _tradestaar_ai_context(user_id: int, question: str = "") -> dict:
-    """Build a compact, cache-first context packet scoped to one user."""
-    active_id = get_active_wl_id()
-    watchlist = get_watchlist_stocks(active_id) if active_id else []
-    data_map = {str(row.get("ticker", "")).upper(): row for row in get_all_stock_data()}
-    ignored = {"A", "AI", "I", "THE", "FOR", "AND", "OR", "MY", "TO", "IS"}
-    requested = [t for t in re.findall(r"\b[A-Z]{1,5}\b", question.upper()) if t not in ignored]
-    focus = list(dict.fromkeys(requested + watchlist))[:8]
-    stocks = []
-    for ticker in focus:
-        row = data_map.get(ticker) or get_stock_data(ticker) or {}
-        if row:
-            stocks.append({
-                "ticker": ticker,
-                "price": row.get("current_price") or row.get("price") or row.get("close"),
-                "change_pct": row.get("change_pct") or row.get("daily_change_pct"),
-                "relative_volume": row.get("relative_volume") or row.get("rel_volume"),
-                "grade": row.get("swing_grade") or row.get("grade"),
-                "setup": row.get("setup_type") or row.get("swing_setup"),
-                "earnings_date": row.get("earnings_date"),
-                "updated_at": row.get("updated_at") or row.get("last_updated"),
-            })
-    account = get_paper_account(user_id)
-    positions = []
-    for position in get_paper_positions(user_id)[:10]:
-        quote = data_map.get(position["ticker"]) or {}
-        positions.append({
-            "ticker": position["ticker"], "shares": position["quantity"],
-            "average_cost": position["avg_price"],
-            "cached_price": quote.get("current_price") or quote.get("price") or quote.get("close"),
-        })
-    headlines = []
-    try:
-        summary = _intel.get_intel_summary() or {}
-        for item in (summary.get("market_news") or summary.get("news") or [])[:12]:
-            ticker = str(item.get("ticker") or "").upper()
-            if not focus or not ticker or ticker in focus:
-                headlines.append({"ticker": ticker or "MARKET", "headline": item.get("headline"),
-                                  "source": item.get("source"),
-                                  "published": item.get("published") or item.get("published_at") or item.get("time")})
-            if len(headlines) == 6:
-                break
-    except Exception as exc:
-        logger.debug("Tradestaar AI news context unavailable: %s", exc)
-    market = _get_mkt_ctx()
-    return {
-        "as_of": _et_now().isoformat(), "watchlist": watchlist[:20], "stocks": stocks,
-        "paper_account": {"cash_balance": account.get("cash_balance"), "positions": positions},
-        "market": {key: market.get(key) for key in
-                   ("regime", "regime_label", "spy_1d_pct", "qqq_1d_pct", "vix_level")},
-        "headlines": headlines,
-    }
-
-
-@app.route("/ai")
-def tradestaar_ai():
-    """Mobile-first Tradestaar AI research workspace."""
-    return render_template("tradestaar_ai.html", ai_context=_tradestaar_ai_context(current_user_id()))
-
-
-@app.route("/api/ask", methods=["POST"])
-@csrf.exempt
-def api_ask():
-    """Tradestaar AI with bounded history and verified in-app context."""
-    from openai import OpenAI as _OpenAI
-    import datetime as _dt
-
-    data     = request.get_json(force=True, silent=True) or {}
-    question = (data.get("question") or "").strip()
-    if not question:
-        return jsonify({"ok": False, "error": "No question provided."}), 400
-    if len(question) > 1200:
-        return jsonify({"ok": False, "error": "Question must be 1,200 characters or less."}), 400
-    if not os.environ.get("NEBIUS_API_KEY"):
-        return jsonify({"ok": False, "error": "Tradestaar AI is not configured on this server."}), 503
-    safe_history = []
-    history = data.get("history") or []
-    if isinstance(history, list):
-        for item in history[-6:]:
-            if isinstance(item, dict) and item.get("role") in ("user", "assistant"):
-                content = str(item.get("content") or "").strip()[:2000]
-                if content:
-                    safe_history.append({"role": item["role"], "content": content})
-    grounded = _tradestaar_ai_context(current_user_id(), question)
-
-    # â”€â”€ Build earnings context from live calendar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    try:
-        from intel_engine import fetch_earnings_calendar as _fetch_earn
-        cal   = _fetch_earn()
-        today = _dt.date.today()
-
-        def _fmt_bucket(items):
-            if not items:
-                return "  (none)"
-            lines = []
-            for e in items:
-                name = e.get("company_name") or e.get("ticker")
-                lines.append(
-                    f"  â€¢ {e['ticker']} ({name}) â€” {e.get('date','?')} "
-                    f"{e.get('time_label','TBD')} ({e.get('days_away','?')}d away)"
-                )
-            return "\n".join(lines)
-
-        earn_ctx = (
-            f"TODAY IS: {today.strftime('%A, %B %d, %Y')}\n\n"
-            f"CONFIRMED UPCOMING EARNINGS (next 21 days from live calendar):\n"
-            f"TODAY:\n{_fmt_bucket(cal.get('today', []))}\n"
-            f"TOMORROW:\n{_fmt_bucket(cal.get('tomorrow', []))}\n"
-            f"THIS WEEK:\n{_fmt_bucket(cal.get('this_week', []))}\n"
-            f"NEXT 3 WEEKS:\n{_fmt_bucket(cal.get('coming_up', []))}\n"
-        )
-    except Exception:
-        earn_ctx = f"TODAY IS: {_dt.date.today().strftime('%A, %B %d, %Y')}\n(Live calendar unavailable)"
-
-    system_prompt = (
-        "You are Tradestaar AI â€” the sharp, knowledgeable trading assistant inside Tradestaar Elite.\n\n"
-        "Use the dated VERIFIED APP CONTEXT and confirmed calendar below. Cached values may be delayed.\n\n"
-        "TRUTH AND SAFETY RULES:\n"
-        "- Never invent a price, filing, headline, position, rating, fundamental, or earnings date.\n"
-        "- Prefer VERIFIED APP CONTEXT. If a fact is absent, say it is unavailable.\n"
-        "- Label interpretations and educational examples. Never promise returns.\n"
-        "- Never reveal data belonging to another account.\n\n"
-        "HOW TO ANSWER:\n\n"
-        "EARNINGS DATE QUESTIONS:\n"
-        "- First check the confirmed calendar above. If the ticker is listed, give that exact date.\n"
-        "- If NOT in the calendar, say the verified date is unavailable. Do not guess a date.\n\n"
-        "FUNDAMENTALS QUESTIONS:\n"
-        "- Use only figures present in VERIFIED APP CONTEXT. Direct users to Fundamentals when absent.\n\n"
-        "TRADE SETUP QUESTIONS:\n"
-        "- Use technical reasoning: EMA alignment, VWAP relationship, structure, volume, R/R.\n\n"
-        "STYLE: Direct, specific, no filler, no generic non-answers. Always give a real answer.\n\n"
-        + earn_ctx + "\nVERIFIED APP CONTEXT (JSON):\n" + _json.dumps(grounded, default=str)
-    )
-
-    try:
-        client = _OpenAI(
-            base_url="https://api.tokenfactory.nebius.com/v1/",
-            api_key=os.environ.get("NEBIUS_API_KEY"),
-        )
-        resp = client.chat.completions.create(
-            model="meta-llama/Llama-3.3-70B-Instruct",
-            max_tokens=600,
-            temperature=0.3,
-            messages=[{"role": "system", "content": system_prompt}, *safe_history,
-                      {"role": "user", "content": question}],
-        )
-        answer = (resp.choices[0].message.content or "").strip() or "No response."
-        return jsonify({"ok": True, "answer": answer, "context": grounded,
-                        "disclaimer": "AI research can be wrong. Verify before trading."})
-    except Exception as exc:
-        logger.exception("Tradestaar AI ask error")
-        if not os.environ.get("NEBIUS_API_KEY"):
-            return jsonify({"ok": False, "error": "Tradestaar AI is not configured on this server."}), 503
-        return jsonify({"ok": False, "error": "Tradestaar AI is temporarily unavailable."}), 502
-
-
-@app.route("/api/study-log", methods=["GET"])
-def api_study_log_get():
-    entries = get_study_log(current_user_id())
-    return jsonify({"ok": True, "entries": entries})
-
-
-@app.route("/api/study-log", methods=["POST"])
-@csrf.exempt
-def api_study_log_save():
-    data = request.get_json(force=True, silent=True) or {}
-    question = (data.get("question") or "").strip()
-    answer = (data.get("answer") or "").strip()
-    if not question or not answer:
-        return jsonify({"ok": False, "error": "question and answer are required"}), 400
-    entry_id = save_study_log_entry(current_user_id(), question, answer)
-    return jsonify({"ok": True, "id": entry_id})
-
-
-@app.route("/api/study-log/<int:entry_id>", methods=["DELETE"])
-@csrf.exempt
-def api_study_log_delete(entry_id):
-    delete_study_log_entry(current_user_id(), entry_id)
-    return jsonify({"ok": True})
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    print(f"\nTradestaar Elite running on port {port}...\n")
-    app.run(host="0.0.0.0", port=port, debug=False)
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×M¶ã¤èµ©hºÚn¶X§zÍHˆˆ‚˜\œHH›ØÚÚÜÝX\ˆ˜YH\ÜÚ\Ý[‘›\ÚÈÙXˆ\›Üˆ™[X\šÙ]ÝØÚÈØ]Ú\ÝØØ[›š[™Ë‚ˆˆˆ‚‚š[\ÜœÛÛˆ\ÈÚœÛÛˆš[\ÜÙÙÚ[™Âš[\ÜÜÂš[\Ü]X‚š[\Ü™Bš[\ÜÙXÜ™]Âš[\Ü™XY[™Âš[\Ü[YH\ÈÝ[YB™œ›ÛHÛÛXÝ[ÛœÈ[\ÜY˜][XÝ™œ›ÛHÛÛ˜Ý\œ™[™]\™\È[\Ü™XYÛÛ^XÝ]Ü‹\×ØÛÛ\]Y™œ›ÛH]][YH[\Ü]][YK[YY[B™œ›ÛH›\ÚÈ[\Ü›\ÚË™[™\—Ý[\]K™\]Y\Ý™Y\™XÝ\›Ù›Ü‹›\ÚœÛÛšYžKÙ\ÜÚ[Û‹™\ÜÛœÙKÙ[™Ùœ›ÛWÙ\™XÝÜžB™œ›ÛH›\Ú×ÜÛØÚÈ[\ÜÛØÚÂ™œ›ÛH›\Ú×ÝÝ‹˜ÜÜ™ˆ[\ÜÔÔ‘”›ÝXÝÈ\NˆYÛ›Ü™VÚ[\Ü][\YB™œ›ÛHÙ\šÞ™]YË™^Ù\[ÛœÈ[\Ü^Ù\[Û‚‚›ÙÙÙ\ˆHÙÙÚ[™Ë™Ù]ÙÙÙ\Š×Û˜[YW×ÊB™œ›ÛH]X˜\ÙH[\Ü
+ˆ[š]Ù‹ˆQUSÕÐUÒTÕËˆÙ]ÜÙ][™ËÙ]ÜÙ][™ËˆÙ]Ý\Ù\—ÜÙ][™ËÙ]Ý\Ù\—ÜÙ][™ËˆÜ™X]WÝ\Ù\‹Ù]Ý\Ù\—ØžWÚYÙ]Ý\Ù\—ØžWÝ\Ù\›˜[YKˆÙ]Ø[Ý\Ù\œË\]WÝ\Ù\—Ü\ÜÝÛÜ™[]WÝ\Ù\‹ÚXÚ×Ý\Ù\—Ü\ÜÝÛÜ™ˆ[œÝ\™WÝ\Ù\—ÝØ]Ú\ÝËˆÙ]Ø[ÝØ]Ú\ÝËÙ]ÝØ]Ú\ÝØžWÚYÜ™X]WÝØ]Ú\Ýˆ™[˜[YWÝØ]Ú\Ý[]WÝØ]Ú\ÝˆÙ]ÝØ]Ú\ÝÜÝØÚÜËÙ]ÝØ]Ú\ÝÜÝØÚ×ØÛÝ[ËˆYÝXÚÙ\—Ý×ÝØ]Ú\Ý™[[Ý™WÝXÚÙ\—Ùœ›ÛWÝØ]Ú\Ýˆ™[[Ý™WÝXÚÙ\—Ùœ›ÛWÙY˜][ËˆÙ]ÝXÚÙ\—ÝØ]Ú\ÝÚYËÙ]ÝXÚÙ\—ÝØ]Ú\ÝËˆ\Ù\ÜÝØÚ×Ù]KÙ]ÜÝØÚ×Ù]KÙ]Ø[ÜÝØÚ×Ù]Kˆ\]WÛ]™WÙšY[ËˆÙ]ÜÝØÚ×ØÛ\ÜÚYžKÙ]Ø]]×ØÛ\ÜÚYžKˆÙ]ÝXÚÙ\—ÜÝ]K\Ù\ÛØY[™×ÜXÙZÛ\‹ˆÙ]Û›ÝKØ]™WÛ›ÝKÙ]Ø[Û›Ý\Ë\]WÜÙ]\Ý\KˆÙ]Ý˜YWÜ[‹Ø]™WÝ˜YWÜ[‹Ù]Ø[Ý˜YWÜ[œËˆYÚ›Ý\›˜[Ù[žK\]WÚ›Ý\›˜[Ù[žK[]WÚ›Ý\›˜[Ù[žKˆÙ]Ú›Ý\›˜[Ù[žKÙ]Ø[Ú›Ý\›˜[Ù[šY\ËÙ]Ú›Ý\›˜[Ù[šY\×Ù›Ü—Ù]KˆÙ]ÙZ[WÜÙ\ÜÚ[Û‹\Ù\ÙZ[WÜÙ\ÜÚ[Û‹ØÚ×ÙZ[WÜÙ\ÜÚ[Û‹[›ØÚ×ÙZ[WÜÙ\ÜÚ[Û‹ˆYÜØØ[›™\—Ø[\Ù]ÜØØ[›™\—Ø[\ËX\š×ÜØØ[›™\—Ø[\×ÜÙY[‹ˆÙ]Ý[œÙY[—ÜØØ[›™\—Ø[\ØÛÝ[ÛX\—ÜØØ[›™\—Ø[\ËˆÜ™X]WÜšXÙWØ[\Ù]ÜšXÙWØ[\ËÙ]ÜšXÙWØ[\Ù[˜X›Yˆ[]WÜšXÙWØ[\ˆØ]™WÜÙ]\ÛÝ]ÛÛYKÙ]ÜÙ]\ÛÝ]ÛÛYWÜÝ]ËˆØ]™WÜÝYWÛÙ×Ù[žKÙ]ÜÝYWÛÙË[]WÜÝYWÛÙ×Ù[žKˆÙ]ØZWØœšYYš[™ËØ]™WØZWØœšYYš[™ËˆÙ]ÜØÛÜ™WÛ˜\œ˜][Û‹Ø]™WÜØÛÜ™WÛ˜\œ˜][Û‹ˆÙ]Ú›Ý\›˜[ÜÝ[[X\žKØ]™WÚ›Ý\›˜[ÜÝ[[X\žKˆÙ]ÙX\›š[™Ü×ÙYÙ\ÝØ]™WÙX\›š[™Ü×ÙYÙ\ÝˆÙ]Ü\\—ØXØÛÝ[Ù]Ü\\—ÜÜÚ][ÛœËÙ]Ü\\—ÛÜ™\œË^XÝ]WÜ\\—ÛÜ™\‹ŠB™œ›ÛH[ØÚ×Ù]H[\ÜÙ[™\˜]WÜÝØÚ×Ù]KØYÛ[ØÚ×ÝØ]Ú\Ý]™WÜ™Yœ™\ÚÜÝØÚËÜÝÚ[™×ÙY˜][ËÞ›Û™WÙY˜][Â™œ›ÛH]WÙ™]Ú\ˆ[\ÜÙ]Û›ÝËX\šÙ]ÜÙ\ÜÚ[Û—Û›ÝËÜ˜—Ü\ÙWÛ›ÝÂ™œ›ÛHØÛÜš[™È[\Ü
+Ø][\ÝÜØÛÜ™WØœ™XZÙÝÛ‹ÑUTÕTTËÕÒS‘×ÔÑUTÕTTËÕÒS‘×ÔÕUTÑTËˆÛÛ\]WÜÝÚ[™×ÙÜ˜YKÛÛ\]WØÛÛ[X][Û—ÜØÛÜ™JB™œ›ÛHÛ\ÜÚYšY\ˆ[\ÜÛ\ÜÚYžKÛ\ÜÚYžWÜÝØÚËWÔT×Ô‘PQB™œ›ÛH[\È[\ÜÙ[™\˜]WØ[\ËÙ]Ø[\ËÙ]Ø[\ØÛÝ[ÛX\—Ø[\È\ÈØÛX\—Ø[\Â™œ›ÛH™]Ü×Ù™]Ú\ˆ[\ÜÐUSTÕÐÐUQÓÔ’QTÈ\ÈÐÐUÑQ”Ëœ™\Ú™\Ü×ÛX™[\ÈÙ›š[\ÜØØ[›™\ˆ\ÈÜØØ[›™\‚š[\Ü[[Ù[™Ú[™H\ÈÚ[[—ÛZÝH›Û™HÈÙ]™[ÝÈYˆX\šÙ]Ù[™Ú[™H\È]˜Z[X›BžN‚ˆ[\ÜX\šÙ]Ù[™Ú[™H\ÈÛZÝˆÓRÕÐURSP“HHYB™^Ù\^Ù\[ÛŽ‚ˆÓRÕÐURSP“HH˜[ÙB‚˜\H›\ÚÊ×Û˜[YW×ÊB‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈÙXÜ™]Ù^H8 %[Ø^\ÈÝ\YYžHH\Þ[Y[[š\›Û›Y[‚ˆÈ™Y\ÙHÈÝ\Ú]Ý]]ÛÈÙ\ÜÚ[ÛœÈ[™ÔÔ‘ˆÚÙ[œÈØ[ˆ™]™\ˆ™HÚYÛ™YˆÈÚ]HX›XË™YXÝX›H˜[˜XÚÈ˜[YK‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB—ÜÙXÜ™]ÚÙ^HHÜË™[š\›Û‹™Ù]
+”ÑPÔ‘UÒÑVHŠBšYˆ›ÝÜÙXÜ™]ÚÙ^N‚ˆ˜Z\ÙH[[YQ\œ›ÜŠˆ”ÑPÔ‘UÒÑVH[š\›Û›Y[˜\šXX›H\È™\]Z\™Yˆ‚ˆ”Ù]]ÈHÛ™Ë˜[™ÛH˜[YH™Y›Ü™HÝ\[™È˜Y\ÝX\ˆ[]Kˆ‚ˆ
+B˜\œÙXÜ™]ÚÙ^HHÜÙXÜ™]ÚÙ^B˜\œ\›X[™[ÜÙ\ÜÚ[Û—ÛY™][YHH[YY[J^\ÏLÌ
+B‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈÔÔ‘ˆ›ÝXÝ[Ûˆ8 %˜[Y]\ÈÜÜ™—ÝÚÙ[ˆÛˆ]™\žHÔÕÔUÔUÒÑSUH›Ü›K‚ˆÈHÜš\ÚËÝ˜Y[™Ë[[ÙHRV›Ý]HÙ[™ÈHÚÙ[ˆšXHPÔÔ‘•ÚÙ[ˆXY\‹‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB˜ÜÜ™ˆHÔÔ‘”›ÝXÝ
+\
+B‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ][K]\Ù\ˆÙ\ÜÚ[Ûˆ]][\œÂˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚™YˆÝ\œ™[Ý\Ù\—ÚY
+
+HOˆ[‚ˆˆˆ”™]\›ˆHÙÙÙYZ[ˆ\Ù\—ÚYœ›ÛHÙ\ÜÚ[Ûˆ
+Y˜][H›Üˆ˜XÚÝØ\™ÛÛ\]
+Kˆˆˆ‚ˆ™]\›ˆÙ\ÜÚ[Û‹™Ù]
+\Ù\—ÚY‹JB‚‚™YˆÝ\œ™[Ý\Ù\Š
+HOˆXÝ›Û™N‚ˆˆˆ”™]\›ˆH[\Ù\ˆXÝœ›ÛHÙ\ÜÚ[Û‹Üˆ›Û™HYˆ›ÝÙÙÙY[‹ˆˆˆ‚ˆZYHÙ\ÜÚ[Û‹™Ù]
+\Ù\—ÚYŠBˆYˆZY\È›Û™N‚ˆ™]\›ˆ›Û™Bˆ™]\›ˆÈšYŽˆZY\Ù\›˜[YHŽˆÙ\ÜÚ[Û‹™Ù]
+\Ù\›˜[YH‹ˆŠKš\×ØYZ[ˆŽˆÙ\ÜÚ[Û‹™Ù]
+š\×ØYZ[ˆ‹
+_B‚‚™YˆØ]]Ü™\]Z\™Y
+
+HOˆ›ÛÛ‚ˆˆˆ”™]\›ˆYHYˆH\Ù\œÈX›H\È]X\ÝÛ™H\Ù\ˆ
+]]\ÈXÝ]™JKˆˆˆ‚ˆžN‚ˆ™]\›ˆ›ÛÛ
+Ù]Ø[Ý\Ù\œÊ
+JBˆ^Ù\^Ù\[ÛŽ‚ˆ™]\›ˆ˜[ÙB‚‚™Yˆ™\]Z\™WØYZ[ŠŠN‚ˆˆˆ‘XÛÜ˜]Üˆ8 %È[›\ÜÈÙÙÙYZ[ˆ\Ù\ˆ\ÈYZ[‹ˆˆˆ‚ˆœ›ÛH[˜ÝÛÛÈ[\ÜÜ˜\ÂˆÜ˜\ÊŠBˆYˆXÛÜ˜]Y
+
+˜\™ÜË
+ŠšÝØ\™ÜÊN‚ˆYˆ›ÝÙ\ÜÚ[Û‹™Ù]
+š\×ØYZ[ˆŠN‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆ˜YZ[ˆ™\]Z\™YŸJKÈˆYˆ™\]Y\Ýœ]œÝ\ÝÚ]
+‹Ø\KÈŠHˆ[ÙH
+™[™\—Ý[\]J›ÙÚ[‹š[‹\œ›ÜHYZ[ˆXØÙ\ÜÈ™\]Z\™Yˆ‹™^HˆŠKÊBˆ™]\›ˆŠ
+˜\™ÜË
+ŠšÝØ\™ÜÊBˆ™]\›ˆXÛÜ˜]Y‚‚\˜™Y›Ü™WÜ™\]Y\Ý™YˆÜ™\]Z\™WÛÙÚ[Š
+N‚ˆÈ[Ø^\ÈX›XÈ8 %ØÚØXˆÐ]]Ø[˜XÚÈ]\ÝÝ^H™XXÚX›NÈØ[˜XÚÈ˜[Y]\ÈÐÑKÜÝ]K‚ˆYˆ
+™\]Y\Ýœ][ˆ
+‹ÛÙÚ[ˆ‹‹ÛÙÛÝ]‹‹Ü™YÚ\Ý\ˆ‹‹Ù˜]šXÛÛ‹šXÛÈ‹‹ÚX[‹ˆ‹ÜÙ\šXÙK]ÛÜšÙ\‹šœÈ‹‹ÜØÚØX‹ØØ[˜XÚÈŠBˆÜˆ™\]Y\Ýœ]œÝ\ÝÚ]
+‹ÜÝ]XËÈŠJN‚ˆ™]\›‚ˆYˆÙ\ÜÚ[Û‹™Ù]
+\Ù\—ÚYŠN‚ˆ™]\›ˆÈ[™XYH]][XØ]YˆÈYˆ›È\Ù\œÈ^\ÝY][ÝÈÜ[ˆXØÙ\ÜÈ
+œ™\Ú[˜ÛÛ™šYÝ\™Y\ÞJBˆYˆ›ÝØ]]Ü™\]Z\™Y
+
+N‚ˆ™]\›‚ˆÈTHÈÙX”ÛØÚÙ]8 %”ÓÓˆBˆYˆ™\]Y\Ýœ]œÝ\ÝÚ]
+
+‹Ø\KÈ‹‹ÝÜËÈŠJN‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆ[˜]]Üš^™YŸJKBˆÈYÙH›Ý]\È8 %™Y\™XÝÈÙÚ[‚ˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠ›ÙÚ[—ÜYÙH‹™^\™\]Y\Ýœ]
+JB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈÜš]KY[™Ú[]]8 %˜\ÚXÈ]]Ûˆ]™\žHÝ]K[]]][™È™\]Y\Ý‚ˆÈÙ]TÕTÑTˆ
+ÈTÔTÔÈ[ˆ˜\œÈÈ[˜X›Kˆ›Ý]\Ý™HÙ]ÈYˆZ]\ˆ\ÂˆÈZ\ÜÚ[™ÈHÝX\™\È\ØX›YÛÈØØ[]ˆÛÜšÜÈÚ]Ý]Ü™Y[X[Ë‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB\˜™Y›Ü™WÜ™\]Y\Ý™YˆØÚXÚ×ÝÜš]WØ]]
+
+N‚ˆÝ\Ù\ˆHÜË™[š\›Û‹™Ù]
+TÕTÑTˆ‹ˆŠBˆÜ\ÜÈHÜË™[š\›Û‹™Ù]
+TÔTÔÈ‹ˆŠBˆYˆ›ÝÝ\Ù\ˆÜˆ›ÝÜ\ÜÎ‚ˆ™]\›ˆÈ]]›ÝÛÛ™šYÝ\™Y8 %[ÝÈ[
+ØØ[]ˆÈš\œÝ\ÞJBˆYˆ™\]Y\Ý›Y]Ù[ˆ
+‘ÑU‹’PQ‹“ÔSÓ”ÈŠHÜˆ™\]Y\Ýœ]OH‹ÚX[Ž‚ˆ™]\›ˆÈ™XY[Û›H™\]Y\ÝÈ[™X[ÚXÚÈ[Ø^\È\ÜÂˆ]]H™\]Y\Ý˜]]Üš^˜][Û‚ˆYˆ›Ý]]Üˆ]]\Ù\›˜[YHOHÝ\Ù\ˆÜˆ]]œ\ÜÝÛÜ™OHÜ\ÜÎ‚ˆ™]\›ˆ™\ÜÛœÙJˆ•[˜]]Üš^™Y‹ˆKˆÈ•ÕÕËP]][XØ]HŽˆ	Ð˜\ÚXÈ™X[OH•˜Y\ÝX\ˆ[]H‰ßKˆ
+B‚œÛØÚÈHÛØÚÊ\
+B‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈÛØ˜[”ÓÓˆ\œ›Üˆ[™\ˆ8 %[œÝ\™\ÈØ\KÊˆ›Ý]\È‘U‘Tˆ™]\›ˆSˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB\™\œ›Üš[™\Š^Ù\[ÛŠB™YˆÚ[™WØ[Ù\œ›ÜœÊJN‚ˆˆˆ”™]\›ˆ”ÓÓˆ›ÜˆØ\KÈ\œ›ÜœÎÈ]›\ÚÈ[™H\œ›ÜœÈÛˆœ›Û[™›Ý]\Ëˆˆˆ‚ˆÛÙHHK˜ÛÙHYˆ\Ú[œÝ[˜ÙJK^Ù\[ÛŠH[ÙHLˆYˆ™\]Y\Ýœ]œÝ\ÝÚ]
+‹Ø\KÈŠN‚ˆYˆÛÙHOH‚ˆÙÙÙ\‹™\œ›ÜŠ•[š[™Y\œ›ÜˆÛˆ	\Îˆ	\È‹™\]Y\Ýœ]K^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÂˆ›ÚÈŽˆ˜[ÙKˆ™\œ›ÜœÈŽˆÙˆžÝ\JJK—×Û˜[YW×ßNˆÙ_H—Kˆ›™]ÜÈŽˆ×K›X\šÙ]Û™]ÜÈŽˆ×Kˆ™X\›š[™ÜÈŽˆÈÙ^HŽˆ×KÛ[Üœ›ÝÈŽˆ×K\×ÝÙYZÈŽˆ×_KˆœÜ]ÈŽˆ×K™]šY[™ÈŽˆ×K™XÛÛ›ÛZX×Ù]™[ÈŽˆ×Kˆ™œ›ÛWØØXÚHŽˆ˜[ÙKœ™Yœ™\Ú[™ÈŽˆ˜[ÙK›\ÝÝ\]YŽˆ¸ %‹ˆJKÛÙBˆÈ›Üˆ\œ›ÜœÈ
+Ë]ËŠHÛˆœ›Û[™›Ý]\Ë™]\›ˆ›\ÚÉÜÈY˜][™\ÜÛœÙBˆYˆ\Ú[œÝ[˜ÙJK^Ù\[ÛŠN‚ˆ™]\›ˆK™Ù]Ü™\ÜÛœÙJ
+BˆÈ[™^XÝYÙ\™\ˆ\œ›ÜœÈÛˆœ›Û[™›Ý]\È8 %ÙÈ[™ÚÝÈHÚ[\HY\ÜØYÙBˆÙÙÙ\‹™\œ›ÜŠ•[š[™Y\œ›ÜˆÛˆ	\Îˆ	\È‹™\]Y\Ýœ]K^×Ú[™›ÏUYJBˆ™]\›ˆ’[\›˜[Ù\™\ˆ\œ›Üˆ‹L‚‚\œ›Ý]J‹Ù˜]šXÛÛ‹šXÛÈŠB™Yˆ˜]šXÛÛŠ
+N‚ˆ™]\›ˆÙ[™Ùœ›ÛWÙ\™XÝÜžJ\œÝ]X×Ù›Û\ˆÜˆœÝ]XÈ‹™˜]šXÛÛ‹LÌ‹œ™È‹Z[Y]\OHš[XYÙKÜ™ÈŠB‚‚\œ›Ý]J‹ÜÙ\šXÙK]ÛÜšÙ\‹šœÈŠB™YˆÙ\šXÙWÝÛÜšÙ\Š
+N‚ˆˆˆ”Ù\™HHÐHÛÜšÙ\ˆœ›ÛHHÚ]H›ÛÝÛÈ]Ø[ˆÛÝ™\ˆ]™\žH\›Ý]Kˆˆˆ‚ˆ™\ÜÛœÙHHÙ[™Ùœ›ÛWÙ\™XÝÜžJˆ\œÝ]X×Ù›Û\ˆÜˆœÝ]XÈ‹œÙ\šXÙK]ÛÜšÙ\‹šœÈ‹Z[Y]\OH˜\XØ][Û‹Ú˜]˜\ØÜš\‚ˆ
+Bˆ™\ÜÛœÙKšXY\œÖÈ”Ù\šXÙKUÛÜšÙ\‹P[ÝÙY—HH‹È‚ˆ™\ÜÛœÙKšXY\œÖÈØXÚKPÛÛ›Û—HH››ËXØXÚH‚ˆ™]\›ˆ™\ÜÛœÙB‚‚\[\]WÙš[\Š™]Ý[YHŠB™Yˆ]Ý[YWÙš[\Š˜[YNˆÝˆ›Û™JHOˆÝŽ‚ˆˆˆÛÛ™\HÝÜ™Y[Y\Ý[\ÈHÛX[ˆU[YHÝš[™È›ÜˆRH\Ü^K‚ˆ[™\È›Ý™]È›Ü›X]
+‰VKI[KIY	RN‰SH	\ŠH[™ÛUÈ›Ü›X]
+‰VKI[KIY	R‰SN‰TÈŠK‚ˆ™]\›œÈK™ËˆŽŒHH‹‚ˆˆˆ‚ˆYˆ›Ý˜[YN‚ˆ™]\›ˆ¸ %‚ˆÈHÝŠ˜[YJKœÝš\
+
+BˆÈ™]ÈU›Ü›X]ˆŒŒ‹LLNŒHH‚ˆžN‚ˆH]][YKœÝœ[YJÖÎŒNWK‰VKI[KIY	RN‰SH	\ŠBˆ™]\›ˆœÝ™[YJ‰RN‰SH	\ŠK›Ýš\
+ŒŠBˆ^Ù\˜[YQ\œ›ÜŽ‚ˆ\ÜÂˆÈÛÙ\™\‹ÕUÈ›Ü›X]ˆŒŒ‹LLNŒNŒˆˆ8 %ÛÛ™\˜Z]™HUÈ8¡¤ˆUˆžN‚ˆœ›ÛH]][YH[\Ü[Y^›Û™Bˆ[\Ü›Û™Z[™›È\ÈÞšBˆÝ]ÈH]][YKœÝœ[YJÖÎŒNWK‰VKI[KIY	R‰SN‰TÈŠKœ™\XÙJš[™›Ï][Y^›Û™K]ÊBˆÙ]HÝ]Ë˜\Ý[Y^›Û™JÞšK–›Û™R[™›Ê[Y\šXØKÓ™]×Ö[ÜšÈŠJBˆ™]\›ˆÙ]œÝ™[YJ‰RN‰SH	\ŠK›Ýš\
+ŒŠBˆ^Ù\^Ù\[ÛŽ‚ˆ\ÜÂˆ™]\›ˆÂ‚‚ˆÈÚX[UTÕ™H™YÚ\Ý\™Y[[YYX][H8 %™Y›Ü™H[žHÛÙH]ÛÝ[Ü˜\ÚˆÈ\š[™È[\ÜˆYˆ[ž][™È™[ÝÈ[™H˜Z\Ù\È[ˆ^Ù\[Û‹Ý[šXÛÜ›‚ˆÈÝ[\È\È›Ý]H[™™[™\‰ÜÈX[ÚXÚÈÝXØÙYYË‚\œ›Ý]J‹ÚX[ŠB™YˆX[
+
+N‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆY_JKŒ‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈÙXÝ\š]HXY\œÈ8 %\YYÈ]™\žH™\ÜÛœÙBˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB\˜Y\—Ü™\]Y\Ý™YˆØYÜÙXÝ\š]WÚXY\œÊ™\ÜÛœÙJN‚ˆ™\ÜÛœÙKšXY\œËœÙ]Y˜][
+–PÛÛ[U\KSÜ[ÛœÈ‹››ÜÛšY™ˆŠBˆ™\ÜÛœÙKšXY\œËœÙ]Y˜][
+–Qœ˜[YKSÜ[ÛœÈ‹”ÐSQSÔ’QÒSˆŠBˆ™\ÜÛœÙKšXY\œËœÙ]Y˜][
+”™Y™\œ™\‹TÛXÞH‹œÝšXÝ[ÜšYÚ[‹]Ú[‹XÜ›ÜÜË[ÜšYÚ[ˆŠBˆ™]\›ˆ™\ÜÛœÙB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈÙXYËÜÝ]\È8 %›ÙXÝ[ÛˆX[ÚXÚÈ
+›ÈÙXÜ™]˜[Y\È^ÜÙY
+BˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB\œ›Ý]J‹ÙXYËÜÝ]\ÈŠB™YˆXY×ÜÝ]\Ê
+N‚ˆˆˆ‚ˆ™XY[Û›HXYÛ›ÜÝXÜÈ[™Ú[‚ˆ™]\›œÈTÔËÑRS›ÜˆXXÚÞ\Ý[HÛÛ\Û™[‚ˆ™]™\ˆ^ÜÙ\ÈÙXÜ™]˜[Y\È8 %Û›HÚXÚÜÈ™\Ù[˜ÙH[™™XXÚXš[]K‚ˆˆˆ‚ˆÚXÚÜÈHßB‚ˆÈKˆ]X˜\ÙHÛÛ›™XÝYˆžN‚ˆœ›ÛH]X˜\ÙH[\ÜÙ]Ù‚ˆÛÛ›ˆHÙ]ÙŠ
+BˆÛÛ›‹™^XÝ]J”ÑSPÕHŠBˆÛÛ›‹˜ÛÜÙJ
+BˆÚXÚÜÖÈ™]X˜\ÙH—HHÈœÝ]\ÈŽˆ”TÔÈ‹™]Z[ŽˆÛÛ›™XÝ[ÛˆÒÈŸBˆ^Ù\^Ù\[Ûˆ\ÈÙN‚ˆÚXÚÜÖÈ™]X˜\ÙH—HHÈœÝ]\ÈŽˆ‘RS‹™]Z[ŽˆÝŠÙJK™š[HŽˆ™]X˜\ÙKœHŸB‚ˆÈ‹ˆ™\]Z\™Y[ˆ˜\œÂˆÜ™\]Z\™YÝ˜\œÈHÂˆ”ÑPÔ‘UÒÑVHŽˆÜË™[š\›Û‹™Ù]
+”ÑPÔ‘UÒÑVHŠKˆ‘UPTÑWÕT“ŽˆÜË™[š\›Û‹™Ù]
+‘UPTÑWÕT“ŠKÈÜ[Û˜[8 %ÔS]H˜[˜XÚÂˆBˆÛÜ[Û˜[Ý˜\œÈHÂˆ•SQÔSWÐ“ÕÕÒÑSˆŽˆÜË™[š\›Û‹™Ù]
+•SQÔSWÐ“ÕÕÒÑSˆŠKˆ•SQÔSWÐÒUÒQŽˆÜË™[š\›Û‹™Ù]
+•SQÔSWÐÒUÒQŠKˆ‘’S“’P—ÐTWÒÑVHŽˆÜË™[š\›Û‹™Ù]
+‘’S“’P—ÐTWÒÑVHŠKˆ”ÓQÓÓ—ÐTWÒÑVHŽˆÜË™[š\›Û‹™Ù]
+”ÓQÓÓ—ÐTWÒÑVHŠKˆ”ÐÒÐP—ÐÓQS•ÒQŽˆÜË™[š\›Û‹™Ù]
+”ÐÒÐP—ÐÓQS•ÒQŠKˆBˆ[—Ù]Z[HßBˆ[—ÛÚÈHYBˆ›ÜˆËˆ[ˆÜ™\]Z\™YÝ˜\œËš][\Ê
+N‚ˆYˆÈOH”ÑPÔ‘UÒÑVHˆ[™›ÝŽ‚ˆ[—Ù]Z[Ú×HH“RTÔÒS‘È
+\XØ][ÛˆÝ\\›ØÚÙY
+H‚ˆ[—ÛÚÈH˜[ÙBˆ[YˆÈOH‘UPTÑWÕT“Ž‚ˆ[—Ù]Z[Ú×HHœÙ]ˆYˆˆ[ÙH››ÝÙ]
+ÔS]H˜[˜XÚÊH‚ˆ[ÙN‚ˆ[—Ù]Z[Ú×HHœÙ]ˆYˆˆ[ÙH›Z\ÜÚ[™È‚ˆÚXÚÜÖÈ™[—Ü™\]Z\™Y—HHÂˆœÝ]\ÈŽˆ”TÔÈˆYˆ[—ÛÚÈ[ÙH•ÐT“ˆ‹ˆ™]Z[Žˆ[—Ù]Z[ˆB‚ˆÈËˆÜ[Û˜[[ˆ˜\œÈ
+TÔÈYˆÙ]ÐT“ˆYˆZ\ÜÚ[™ÊBˆÜÙ]Z[HÚÎˆ
+œÙ]ˆYˆˆ[ÙH››ÝÙ]ŠH›ÜˆËˆ[ˆÛÜ[Û˜[Ý˜\œËš][\Ê
+_BˆÚXÚÜÖÈ™[—ÛÜ[Û˜[—HHÂˆœÝ]\ÈŽˆ”TÔÈˆYˆ[
+ÛÜ[Û˜[Ý˜\œË˜[Y\Ê
+JH[ÙH•ÐT“ˆ‹ˆ™]Z[ŽˆÜÙ]Z[ˆB‚ˆÈˆ[YÜ˜[HÛÛ™šYÝ\™YˆÝ×ÝÚÙ[ˆHÜË™[š\›Û‹™Ù]
+•SQÔSWÐ“ÕÕÒÑSˆ‹ˆŠBˆÝ×ØÚ]HÜË™[š\›Û‹™Ù]
+•SQÔSWÐÒUÒQ‹ˆŠBˆÚXÚÜÖÈ[YÜ˜[H—HHÂˆœÝ]\ÈŽˆ”TÔÈˆYˆ
+Ý×ÝÚÙ[ˆ[™Ý×ØÚ]
+H[ÙH•ÐT“ˆ‹ˆ™]Z[Žˆ˜ÛÛ™šYÝ\™YˆYˆ
+Ý×ÝÚÙ[ˆ[™Ý×ØÚ]
+H[ÙH››ÝÛÛ™šYÝ\™Y
+[\ÈÚ[™HÚÚ\Y
+H‹ˆB‚ˆÈKˆš[›šXˆÙ^HØYYˆÙšÚÙ^HHÜË™[š\›Û‹™Ù]
+‘’S“’P—ÐTWÒÑVH‹ˆŠKœÝš\
+
+BˆÚXÚÜÖÈ™š[›šXˆ—HHÂˆœÝ]\ÈŽˆ”TÔÈˆYˆÙšÚÙ^H[ÙH•ÐT“ˆ‹ˆ™]Z[ŽˆšÙ^H™\Ù[ˆYˆÙšÚÙ^H[ÙHšÙ^HZ\ÜÚ[™È
+Ý]XÈ˜[˜XÚÈÚ[™H\ÙY
+H‹ˆB‚ˆÈ‹ˆÝ]XËÛÙÛËœ™È^\ÝÂˆÛÙÛÈH]X‹”]
+\œÝ]X×Ù›Û\ˆÜˆœÝ]XÈŠHÈ›ÙÛËœ™È‚ˆÚXÚÜÖÈœÝ]X×ÛÙÛÈ—HHÂˆœÝ]\ÈŽˆ”TÔÈˆYˆÛÙÛË™^\ÝÊ
+H[ÙH‘RS‹ˆ™]Z[ŽˆÝŠÛÙÛÊHYˆÛÙÛË™^\ÝÊ
+H[ÙHˆ›Z\ÜÚ[™Îˆ×ÛÙÛßH‹ˆ™š[HŽˆœÝ]XËÛÙÛËœ™È‹ˆB‚ˆÈËˆ[[ØXÚHÈTH™XXÚX›H
+ÚXÚÜÈ[‹\›ØÙ\ÜÈÛ›K›È™]ÛÜšÈØ[
+BˆžN‚ˆ]HHÚ[[™Ù]Ú[[ÜÝ[[X\žJ
+Bˆ[[ÛÚÈH\Ú[œÝ[˜ÙJ]KXÝ
+H[™™X\›š[™ÜÈˆ[ˆ]BˆÚXÚÜÖÈš[[Ø\H—HHÂˆœÝ]\ÈŽˆ”TÔÈˆYˆ[[ÛÚÈ[ÙH‘RS‹ˆ™]Z[Žˆˆ›ÚÈœ›ÛWØØXÚO^Ù]K™Ù]
+	Ùœ›ÛWØØXÚIÊ_H™Yœ™\Ú[™Ï^Ù]K™Ù]
+	Ü™Yœ™\Ú[™ÉÊ_H‹ˆBˆ^Ù\^Ù\[Ûˆ\ÈÚYN‚ˆÚXÚÜÖÈš[[Ø\H—HHÈœÝ]\ÈŽˆ‘RS‹™]Z[ŽˆÝŠÚYJK™š[HŽˆš[[Ù[™Ú[™KœHŸB‚ˆÈˆØØ[›™\ˆ[›š[™ÂˆžN‚ˆØØ[ˆHÜØØ[›™\‹™Ù]ÜØØ[—Ü™\Ý[Ê
+BˆÚXÚÜÖÈœØØ[›™\ˆ—HHÂˆœÝ]\ÈŽˆ”TÔÈ‹ˆ™]Z[Žˆˆ›ÚÈ[›š[™Ï^ÜØØ[‹™Ù]
+	Ü[›š[™ÉË˜[ÙJ_H™\Ý[Ï^Û[ŠØØ[‹™Ù]
+	Ü™\Ý[ÉË×JJ_H‹ˆBˆ^Ù\^Ù\[Ûˆ\ÈÜÙN‚ˆÚXÚÜÖÈœØØ[›™\ˆ—HHÈœÝ]\ÈŽˆ‘RS‹™]Z[ŽˆÝŠÜÙJK™š[HŽˆœØØ[›™\‹œHŸB‚ˆÈKˆØ]Ú\ÝÈˆ›Ý[™]š\ˆžN‚ˆÛÈHÙ]Ø[ÝØ]Ú\ÝÊ
+BˆÚXÚÜÖÈØ]Ú\ÝÈ—HHÂˆœÝ]\ÈŽˆ”TÔÈ‹ˆ™]Z[ŽˆˆžÛ[ŠÛÊ_HØ]Ú\Ý
+ÊH›Ý[™‹ˆBˆ^Ù\^Ù\[Ûˆ\ÈÝÙN‚ˆÚXÚÜÖÈØ]Ú\ÝÈ—HHÈœÝ]\ÈŽˆ‘RS‹™]Z[ŽˆÝŠÝÙJK™š[HŽˆ™]X˜\ÙKœHŸB‚ˆÝ™\˜[H”TÔÈˆYˆ[
+ˆÖÈœÝ]\È—H[ˆ
+”TÔÈ‹•ÐT“ˆŠH›ÜˆÈ[ˆÚXÚÜË˜[Y\Ê
+Bˆ
+H[ÙH‘RS‚ˆ˜Z[\™\ÈHÚÈ›ÜˆËÈ[ˆÚXÚÜËš][\Ê
+HYˆÖÈœÝ]\È—HOH‘RS—B‚ˆ™]\›ˆœÛÛšYžJÂˆ›Ý™\˜[ŽˆÝ™\˜[ˆ™˜Z[\™\ÈŽˆ˜Z[\™\Ëˆ˜ÚXÚÜÈŽˆÚXÚÜËˆ[Y\Ý[\Žˆ]][YK]Û›ÝÊ
+Kš\ÛÙ›Ü›X]
+
+H
+È–ˆ‹ˆJB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈÝ\\[š]X[^˜][Ûˆ8 %Y[\Ý[ØÚ[XHÜ™X][Û‹‚ˆÈÜ˜\Y[ˆžKÙ^Ù\ÛÈHÛÝÈÜˆ[˜]˜Z[X›Hˆ
+K™ËˆÈÛÛÝ\Û‚ˆÈ™[™\ŠHÙ\È›ÝÜ˜\ÚH[\Ü[™™]™[Ý[šXÛÜ›ˆœ›ÛHš[™[™È]ÈÜ‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBžN‚ˆ[š]ÙŠ
+B™^Ù\^Ù\[Ûˆ\ÈÚ[š]Ù\œŽ‚ˆÙÙÙ\‹™\œ›ÜŠš[š]Ùˆ˜Z[Y]Ý\\ˆ	\È8 %Ú[™]žHÛˆš\œÝ™\]Y\Ý‹Ú[š]Ù\œŠB‚ˆÈÝ\H˜XÚÙÜ›Ý[™[ÛY[[HØØ[›™\ˆY[[Ûˆ
+›Ë[ÜYˆ[™XYH[›š[™ÊK‚žN‚ˆÜØØ[›™\‹œÝ\ÜØØ[›™\Š
+B™^Ù\^Ù\[Ûˆ\ÈÜØØ[—Ù\œŽ‚ˆÙÙÙ\‹™\œ›ÜŠœØØ[›™\ˆÝ\˜Z[Y]Ý\\ˆ	\È‹ÜØØ[—Ù\œŠB‚ˆÈÝ\H˜XÚÙÜ›Ý[™[[[\Y[[Ûˆ8 %ÚXÚÜÈ]™\žHÌZ[ˆ\š[™ÈX\šÙ]Ý\œË‚™YˆÚ[[Ø[\ÛÛÜ
+
+N‚ˆÚ[HYN‚ˆžN‚ˆ›ÝÈHÚ[[—Ù]Û›ÝÊ
+BˆÈ[ˆ\š[™È^[™YX\šÙ]Ý\œÈ
+ÈSH8 $ÈˆHUÙYZÙ^\ÊBˆYˆ›ÝËÙYZÙ^J
+HH[™ÈH›ÝËšÝ\ˆN‚ˆÚ[[˜ÚXÚ×Ø[™ÜÙ[™Ú[[Ø[\Ê
+Bˆ^Ù\^Ù\[Ûˆ\ÈÚYN‚ˆÙÙÙ\‹Ø\›š[™Êš[[[\ÛÜ\œ›ÜŽˆ	\È‹ÚYJBˆÝ[YKœÛY\
+N
+HÈ]™\žHÌZ[]\Â‚žN‚ˆ™XY[™Ë•™XY
+\™Ù]WÚ[[Ø[\ÛÛÜY[[ÛUYK˜[YOHš[[X[\ÈŠKœÝ\
+
+B™^Ù\^Ù\[Ûˆ\ÈÛÛÜÙ\œŽ‚ˆÙÙÙ\‹™\œ›ÜŠš[[[\ÛÜ˜Z[YÈÝ\ˆ	\È‹ÛÛÜÙ\œŠB‚ˆÈ™K]Ø\›HH[[ØXÚHÛÈHš\œÝYÙHØY\È[œÝ[žN‚ˆÚ[[šYÙÙ\—Ø˜XÚÙÜ›Ý[™Ü™Yœ™\Ú
+
+B™^Ù\^Ù\[Ûˆ\ÈÝØ\›WÙ\œŽ‚ˆÙÙÙ\‹™\œ›ÜŠš[[™È™Yœ™\Ú˜Z[Y]Ý\\ˆ	\È‹ÝØ\›WÙ\œŠB‚ˆÈ™K]Ø\›HHX\šÙ]ÛÛ^ØXÚH
+™YÚ[YKÙXÝÜœË”È˜\Ù[[™JBžN‚ˆYˆÓRÕÐURSP“N‚ˆÛZÝœ™Yœ™\ÚÛX\šÙ]ØÛÛ^Ø™Ê
+B™^Ù\^Ù\[Ûˆ\ÈÛZÝÝØ\›WÙ\œŽ‚ˆÙÙÙ\‹™\œ›ÜŠ›X\šÙ]ÛÛ^™È™Yœ™\Ú˜Z[Y]Ý\\ˆ	\È‹ÛZÝÝØ\›WÙ\œŠB‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈÝ\\ZYÜ˜][ÛŽˆÚ\HÝ[H[ØÚË\ÙYYYšXÙ\Èœ›ÛHH‹‚ˆÂˆÈÛ™\œÚ[ÛœÈÙˆ[ØÚ×Ù]KœHÙYYYÝ\œ™[ÜšXÙH\™XÝHœ›ÛHSÐÒ×ÔÕÐÒÔÂˆÈ[\]\È
+•‘ONQUOMMSV“LNL]ËŠKˆYˆ\ÙHÙ\™HÜš][ˆÂˆÈHˆ™Y›Ü™HHš^HÛ˜\ÚÝÝX\™™\Ù\™Y[H›Ü™]™\‹‚ˆÈÛˆXXÚÝ\\ÙH•SÝ][žHšXÙH]^XÝHX]Ú\ÈHÛ›ÝÛˆÝ[BˆÈÙYY[™Ù]XÚÙ\—ÜÝ]OY\œ›ÜˆÛÈH]]Ë\™Yœ™\Ú™]šY\ÈH]™H™]Ú‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB—ÔÕSWÓSÐÒ×Ô’PÑTÈHÂˆ“•‘HŽˆŒ“QUHŽˆMŒ“T•“ŽˆÌ‹ŒˆSV“ˆŽˆNLŒ“UHŽˆMKŒ’S•ÈŽˆŒËŒŸB‚™YˆØÛX\—ÜÝ[WÛ[ØÚ×ÜšXÙ\Ê
+N‚ˆˆˆ“[Ý][žHˆšXÙ\È]X]ÚHÛ[ØÚÈÙYYËˆˆˆ‚ˆžN‚ˆœ›ÛH]X˜\ÙH[\ÜÙ]Ù‹Ù]ÜÝØÚ×Ù]Bˆ›ÜˆXÚÙ\‹Ý[WÜšXÙH[ˆÔÕSWÓSÐÒ×Ô’PÑTËš][\Ê
+N‚ˆÛ˜\HÙ]ÜÝØÚ×Ù]JXÚÙ\ŠBˆYˆÛ˜\[™Û˜\™Ù]
+˜Ý\œ™[ÜšXÙHŠHOHÝ[WÜšXÙN‚ˆÛÛ›ˆHÙ]ÙŠ
+BˆžN‚ˆÛÛ›‹™^XÝ]Jˆ•TUHÝØÚ×Ù]HÑUÝ\œ™[ÜšXÙHH•S™]—ØÛÜÙHH•S‚ˆ™Ø\ÜÝH•SXÚÙ\—ÜÝ]HH	Ù\œ›Ü‰ÈÒT‘HXÚÙ\ˆHÈ‹ˆ
+XÚÙ\‹
+Kˆ
+BˆÛÛ›‹˜ÛÛ[Z]
+
+Bˆš[˜[N‚ˆÛÛ›‹˜ÛÜÙJ
+BˆÙÙÙ\‹Ø\›š[™ÊˆœÝ\\ZYÜ˜][ÛŽˆÛX\™YÝ[H[ØÚÈšXÙH	KŒYˆ›Üˆ	\È8¡¤ˆXÚÙ\—ÜÝ]OY\œ›Üˆ‹ˆÝ[WÜšXÙKXÚÙ\‹ˆ
+Bˆ^Ù\^Ù\[Ûˆ\ÈÙN‚ˆÙÙÙ\‹™\œ›ÜŠ—ØÛX\—ÜÝ[WÛ[ØÚ×ÜšXÙ\È˜Z[Yˆ	\È‹ÙJB‚žN‚ˆØÛX\—ÜÝ[WÛ[ØÚ×ÜšXÙ\Ê
+B™^Ù\^Ù\[Ûˆ\ÈÛZY×Ù\œŽ‚ˆÙÙÙ\‹™\œ›ÜŠœÝ\\ZYÜ˜][Ûˆ˜Z[Yˆ	\È‹ÛZY×Ù\œŠB‚ˆÈÛØ˜[™Yœ™\ÚØÚÈ8 %™]™[ÈÝ™\›\[™È[Ë\™Yœ™\Ú™\]Y\ÝË‚ˆÈ\Ù\ÈH™XY[™Ë“ØÚÊ
+HÛÈÛÛ˜Ý\œ™[Ý[šXÛÜ›ˆÛÜšÙ\œÈXXÚ]™HZ\ˆÝÛ‚ˆÈ›YÈ
+Ü›ÜÜË\›ØÙ\ÜÈØÚÚ[™È\È›Ý™YYY›ÜˆVØY™]HÛˆHÚ[™ÛH\Ù\ˆ\
+K‚—Ü™Yœ™\ÚØ[ÛØÚÈH™XY[™Ë“ØÚÊ
+B—Ü™Yœ™\ÚØ[Ü[›š[™ÈH˜[ÙB‚ˆÈ\‹]XÚÙ\ˆÚ[™ÛK\™Yœ™\ÚÝX\™8 %™]™[ÈÝX›KXÛXÚÚ[™È”™Yœ™\Ú]H‚ˆÈœ›ÛHÜ]Ûš[™ÈÛÈÚ[][[™[Ý\È™]Ú\È›ÜˆHØ[YHXÚÙ\‹‚—ÜÚ[™ÛWÜ™Yœ™\ÚÛØÚÈH™XY[™Ë“ØÚÊ
+B—ÜÚ[™ÛWÜ™Yœ™\ÚØXÝ]™NˆÙ]HÙ]
+
+HÈÙ]ÙˆXÚÙ\ˆÝš[™ÜÈÝ\œ™[H™Z[™È™Yœ™\ÚY‚ˆÈØY[™È[Y[Ý]ˆXÚÙ\œÈÝXÚÈ[ˆ	ÛØY[™ÉÈ›ÜˆÛ™Ù\ˆ[ˆ\È\™BˆÈ˜[œÚ][Û™YÈ	Ù\œ›Ü‰ÈÛÈHØY[™È˜YÙH™]™\ˆÚÝÜÈ›Ü™]™\‹‚“ÐQS‘×ÕSQSÕUÔÑPÔÈHLŒ‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ\[š]X[^˜][Û‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚™YˆÜ™]—Ý˜Y[™×Ù^J
+HOˆÝŽ‚ˆˆˆ‚ˆ™]\›ˆH[ÜÝ™XÙ[\Ý˜Y[™È^H\ÈVVVKSSKQ
+[Û¸ $ÑœšKÙYZÙ[™X]Ø\™JK‚ˆ\Ù\ÈTËÑX\Ý\›ˆ[YHÛÈH]H\ÈÛÜœ™XÝ™Y›Ü™KØY\ˆZYšYÚU‚ˆÙ\È›ÝXØÛÝ[›ÜˆX›XÈÛY^\È8 %ÙYZÙ[™ÚÚ\[™È\ÈÝY™šXÚY[›Ü‚ˆHÝ[[™\ÜÈÚXÚÈ
+HËY^HÛY^HØ\Ý[šYÙÙ\œÈH™Yœ™\ÚÚXÚ\Èš[™JK‚ˆˆˆ‚ˆžN‚ˆ[\Ü›Û™Z[™›ÂˆÙ^HH]][YK››ÝÊ›Û™Z[™›Ë–›Û™R[™›Ê[Y\šXØKÓ™]×Ö[ÜšÈŠJK™]J
+Bˆ^Ù\^Ù\[ÛŽ‚ˆœ›ÛH]][YH[\Ü[Y^›Û™BˆÙ^HH]][YK››ÝÊ[Y^›Û™J[YY[JÝ\œÏKM
+JJK™]J
+BˆØ[™Y]HHÙ^HH[YY[J^\ÏLJBˆÚ[HØ[™Y]KÙYZÙ^J
+HHNˆÈHHØ]\™^KˆHÝ[™^BˆØ[™Y]HOH[YY[J^\ÏLJBˆ™]\›ˆØ[™Y]Kš\ÛÙ›Ü›X]
+
+B‚‚™Yˆ]]×Ü™Yœ™\ÚÜÝ[WØÛÜÙ\ÊXÚÙ\œÎˆ\Ý]WÛX\ˆXÝ›Û™HH›Û™JHOˆ\Ý‚ˆˆˆ‚ˆY[YžHÝ[HXÚÙ\œÈ[™ÚXÚÈÙ™ˆH˜XÚÙÜ›Ý[™™Yœ™\Ú›ÜˆXXÚÛ™K‚‚ˆHÚXÚÈ
+Ý[[™\ÜÈ]XÝ[ÛŠH[œÈÞ[˜Ú›Û›Ý\ÛHÛÈÙHÛ›ÝÈÚXÚXÚÙ\œÂˆ™YYÛÜšË]HXÝX[™]Ú
+Ù[™\˜]WÜÝØÚ×Ù]JH[œÈ[ˆHY[[Û‚ˆ™XYÛÈH\Ú›Ø\™™\ÜÛœÙH\È‘U‘Tˆ›ØÚÙY‚‚ˆHXÚÙ\ˆ\ÈÝ[HÚ[Ž‚ˆH]\È›Ý™Y[ˆ™Yœ™\ÚYÙ^H
+\ÝÝ\]Y]HOHÙ^JKÔ‚ˆH]È™]—ØÛÜÙWÙ]HÙ\Û‰ÝX]ÚH^XÝY™]š[Ý\È˜Y[™È^K‚ˆ\œ›Ü‹\Ý]HXÚÙ\œÈ[Ø^\È™]žH™YØ\™\ÜÈÙˆ\ÝÝ\]Y‚‚ˆ]WÛX\8 %Ü[Û˜[™K[ØYYÝXÚÙ\ŽˆÝØÚ×ÙXÝHœ›ÛHHØ[\‹‚ˆÚ[ˆÝ\YYÚÚ\ÈH\‹]XÚÙ\ˆÙ]ÜÝØÚ×Ù]J
+HØ[È[\™[HÛÈBˆ\Ú›Ø\™Ù\Û‰Ý^Hˆ[™]šYX[ˆ›Ý[™]š\È\ÝÈÚXÚÈÝ[[™\ÜË‚‚ˆ™]\›œÈH\ÝÙˆXÚÙ\ˆÞ[X›ÛÈ]Ù\™H]Y]YY›Üˆ˜XÚÙÜ›Ý[™™Yœ™\Ú‚ˆˆˆ‚ˆ^XÝYHÜ™]—Ý˜Y[™×Ù^J
+BˆÙ^WÜÝˆHÙ]Û›ÝÊ
+KœÝ™[YJ‰VKI[KIYŠBˆ]Y]YYˆ\ÝÜÝ—HH×B‚ˆÈ\ÙHHØ[\‰ÜÈ[™XYK[ØYYX\È˜[˜XÚÈÈ™]Ú[™ÈÛ›HYˆ™YYY‚ˆÜÛ˜\ÚÝH]WÛX\Yˆ]WÛX\\È›Ý›Û™H[ÙHÂˆÖÈXÚÙ\ˆ—NˆÈ›ÜˆÈ[ˆÙ]Ø[ÜÝØÚ×Ù]J
+BˆB‚ˆ›ÜˆXÚÙ\ˆ[ˆXÚÙ\œÎ‚ˆÝØÚÈHÜÛ˜\ÚÝ™Ù]
+XÚÙ\ŠBˆYˆ›ÝÝØÚÎ‚ˆÛÛ[YB‚ˆ\ÝÝ\]YH
+ÝØÚË™Ù]
+›\ÝÝ\]YŠHÜˆˆŠVÎŒLBˆÝ\œ™[ÜÝ]HHÝØÚË™Ù]
+XÚÙ\—ÜÝ]HŠHÜˆœ™XYH‚ˆ\×Ù\œ›ÜˆHÝ\œ™[ÜÝ]HOH™\œ›Üˆ‚‚ˆYˆ\ÝÝ\]YOHÙ^WÜÝˆ[™›Ý\×Ù\œ›ÜŽ‚ˆÛÛ[YBˆYˆ
+ÝØÚË™Ù]
+œ™]—ØÛÜÙWÙ]HŠHÜˆˆŠHOH^XÝY[™›Ý\×Ù\œ›ÜŽ‚ˆÛÛ[YB‚ˆ]Y]YY˜\[™
+XÚÙ\ŠBˆÙÙÙ\‹š[™›Êˆ˜]]×Ü™Yœ™\ÚXÚÙ\I\ÈÝYÙO\]Y]YY™]—ØÛÜÙWÙ]OI\È‚ˆ™^XÝYI\ÈÝ]OI\È‹ˆXÚÙ\‹ˆÝØÚË™Ù]
+œ™]—ØÛÜÙWÙ]HŠHÜˆ›Z\ÜÚ[™È‹ˆ^XÝYˆÝ\œ™[ÜÝ]Kˆ
+B‚ˆYˆ›Ý]Y]YY‚ˆ™]\›ˆ×B‚ˆÈ™]\ÙHHØ[YHÛ˜\ÚÝ[ˆHÛÜšÙ\ˆ™XY8 %]›ÚYÈHÙXÛÛ™[]X›BˆÈØØ[‹ˆHÙXÛÛ™Ù]Ø[ÜÝØÚ×Ù]J
+H\™HØ\ÈHÛÝX›KY™]Ú‚ˆØ[Ù^\Ý[™ÈHÜÛ˜\ÚÝ‚ˆYˆÝÛÜšÙ\Š
+N‚ˆ›ÜˆXÚÙ\ˆ[ˆ]Y]YY‚ˆžN‚ˆÙÙÙ\‹š[™›Ê˜]]×Ü™Yœ™\ÚXÚÙ\I\ÈÝYÙO\Ý\‹XÚÙ\ŠBˆœ™\ÚHÙ[™\˜]WÜÝØÚ×Ù]JXÚÙ\ŠBˆ™\Ý[HÝ\Ù\ÛÜ—ÚÙY\ÜÛ˜\ÚÝ
+œ™\Ú^\Ý[™ÏWØ[Ù^\Ý[™Ë™Ù]
+XÚÙ\ŠJBˆYˆ™\Ý[OH\]YŽ‚ˆ[—Ø]]×ØÛ\ÜÚYšXØ][ÛŠXÚÙ\ŠBˆÙÙÙ\‹š[™›Êˆ˜]]×Ü™Yœ™\ÚXÚÙ\I\ÈÝYÙOXÛÛ\]H‚ˆœ™]—ØÛÜÙWÙ]OI\ÈÝ]OI\È™\Ý[I\È‹ˆXÚÙ\‹ˆœ™\Ú™Ù]
+œ™]—ØÛÜÙWÙ]HŠHÜˆ¸ %‹ˆœ™\Ú™Ù]
+XÚÙ\—ÜÝ]HŠKˆ™\Ý[ˆ
+Bˆ^Ù\^Ù\[Ûˆ\ÈN‚ˆÙÙÙ\‹Ø\›š[™Êˆ˜]]×Ü™Yœ™\ÚXÚÙ\I\ÈÝYÙOY\œ›Üˆ\œI\È‹XÚÙ\‹Bˆ
+BˆžN‚ˆ^\Ý[™ÈHØ[Ù^\Ý[™Ë™Ù]
+XÚÙ\ŠBˆYˆ^\Ý[™È[™^\Ý[™Ë™Ù]
+˜Ý\œ™[ÜšXÙHŠN‚ˆÙ]ÝXÚÙ\—ÜÝ]JXÚÙ\‹œÝ[HŠBˆ[ÙN‚ˆÙ]ÝXÚÙ\—ÜÝ]JXÚÙ\‹™\œ›ÜˆŠBˆ^Ù\^Ù\[ÛŽ‚ˆ\ÜÂ‚ˆH™XY[™Ë•™XY
+\™Ù]WÝÛÜšÙ\‹Y[[ÛUYK˜[YOYˆ˜]]×Ü™Yœ™\ÚÞÉË	Ëš›Ú[Š]Y]YY
+_HŠBˆœÝ\
+
+BˆÙÙÙ\‹š[™›Ê˜]]×Ü™Yœ™\ÚÝYÙOX™×Ý™XYÜÝ\YXÚÙ\œÏI\È‹]Y]YY
+Bˆ™]\›ˆ]Y]YY‚‚™YˆÙ^\™WÜÝXÚ×ÛØY[™ÊØ]Ú\Ýˆ\Ý]WÛX\ˆXÝ›Û™HH›Û™JHOˆ›Û™N‚ˆˆˆ‚ˆ˜[œÚ][Ûˆ[žHXÚÙ\ˆ]\È™Y[ˆ[ˆ	ÛØY[™ÉÈÝ]H›ÜˆÛ™Ù\ˆ[‚ˆÐQS‘×ÕSQSÕUÔÑPÔÈœ›ÛH	ÛØY[™ÉÈ8¡¤ˆ	Ù\œ›Ü‰ËˆØ[YÛˆ]™\žH\Ú›Ø\™ˆØYÈ™]™[HØY[™È˜YÙHœ›ÛH\œÚ\Ý[™È›Ü™]™\‹‚‚ˆÙÜÎ‚ˆ^\™WÛØY[™ÈXÚÙ\VYÙWÜÙXÜÏSˆ™X\ÛÛ][Y[Ý]ˆˆˆ‚ˆ›ÝÈHÙ]Û›ÝÊ
+Kœ™\XÙJš[™›ÏS›Û™JBˆ›ÜˆXÚÙ\ˆ[ˆØ]Ú\Ý‚ˆÝØÚÈH]WÛX\™Ù]
+XÚÙ\ŠHYˆ]WÛX\\È›Ý›Û™H[ÙHÙ]ÜÝØÚ×Ù]JXÚÙ\ŠBˆYˆ›ÝÝØÚÈÜˆÝØÚË™Ù]
+XÚÙ\—ÜÝ]HŠHOH›ØY[™ÈŽ‚ˆÛÛ[YBˆ\ÝÝ\]YHÝØÚË™Ù]
+›\ÝÝ\]YŠHÜˆˆ‚ˆžN‚ˆÈžHÝ\œ™[U›Ü›X]š\œÝ[ˆ˜[˜XÚÈÈÛUÈ›Ü›X]ˆžN‚ˆ\]YØ]H]][YKœÝœ[YJ\ÝÝ\]YÎŒNWK‰VKI[KIY	RN‰SH	\ŠBˆ^Ù\˜[YQ\œ›ÜŽ‚ˆ\]YØ]H]][YKœÝœ[YJ\ÝÝ\]YÎŒNWK‰VKI[KIY	R‰SN‰TÈŠBˆYÙWÜÙXÜÈH
+›ÝÈH\]YØ]
+KÝ[ÜÙXÛÛ™Ê
+Bˆ^Ù\
+˜[YQ\œ›Ü‹\Q\œ›ÜŠN‚ˆYÙWÜÙXÜÈHÐQS‘×ÕSQSÕUÔÑPÔÈ
+ÈHÈ[œ\œÙXX›H[Y\Ý[\8¡¤ˆ^\™H]‚ˆYˆYÙWÜÙXÜÈˆÐQS‘×ÕSQSÕUÔÑPÔÎ‚ˆÙ]ÝXÚÙ\—ÜÝ]JXÚÙ\‹™\œ›ÜˆŠBˆÙÙÙ\‹Ø\›š[™Êˆ™^\™WÛØY[™ÈXÚÙ\I\ÈYÙWÜÙXÜÏIKŒˆ™X\ÛÛ][Y[Ý]‚ˆ˜XÝ[Û\Ù]ÜÝ]WÙ\œ›Üˆ‹ˆXÚÙ\‹YÙWÜÙXÜËˆ
+B‚‚™YˆÝ\Ù\ÛÜ—ÚÙY\ÜÛ˜\ÚÝ
+œ™\ÚˆXÝ^\Ý[™ÎˆXÝ›Û™HH›Û™JHOˆÝŽ‚ˆˆˆ‚ˆØY™H\Ù\ˆÝX\™ÈYØZ[œÝÝ™\Üš][™ÈHÛÛÙˆÛ˜\ÚÝÚ[ˆH]™Bˆ™]Ú˜Z[Ë‚‚ˆYˆœ™\ÚÈXÚÙ\—ÜÝ]H—HOH™\œ›Üˆ˜S‘H^\Ý[™Èˆ™XÛÜ™\ÈBˆ˜[YšXÙKÙHÙY\HÛ˜\ÚÝ[œÝXYÙˆÜš][™È•SšXÙ\ÈÈH‹‚ˆHXÚÙ\ˆÝ]H\ÈÙ]ÈœÝ[HˆÛÈHRH˜YÙH\]\ÈXØÛÜ™[™ÛK‚‚ˆ™]\›œÈÛ™HÙŽ‚ˆ\]Yˆ8 %œ™\Ú]HØ\È\Ù\Y›Ü›X[BˆœÝ[WÚÙ\ˆ8 %]™H˜Z[Y]HÛÛÙÛ˜\ÚÝ^\ÝÎÈÙ\
+ÈX\šÙYÝ[Bˆ™\œ›Ü—ÜØ]™Yˆ8 %]™H˜Z[Y›ÈÛ˜\ÚÝÈ\œ›ÜˆÝ]H\Ù\Yˆˆˆ‚ˆXÚÙ\ˆHœ™\Ú™Ù]
+XÚÙ\ˆŠHÜˆˆ‚ˆYˆœ™\Ú™Ù]
+XÚÙ\—ÜÝ]HŠHOH™\œ›ÜˆŽ‚ˆÛ˜\H^\Ý[™ÈYˆ^\Ý[™È\È›Ý›Û™H[ÙHÙ]ÜÝØÚ×Ù]JXÚÙ\ŠBˆYˆÛ˜\[™Û˜\™Ù]
+˜Ý\œ™[ÜšXÙHŠN‚ˆÈ]™H™]Ú˜Z[Y8 %›ÝXÝH\ÝZÛ›ÝÛ‹YÛÛÙÛ˜\ÚÝˆœ™\ÚÈ™]WÜÛÝ\˜ÙH—HHœÝ[WÜÛ˜\ÚÝ‚ˆÙ]ÝXÚÙ\—ÜÝ]JXÚÙ\‹œÝ[HŠBˆÙÙÙ\‹Ø\›š[™Êˆ—Ý\Ù\ÛÜ—ÚÙY\ÜÛ˜\ÚÝXÚÙ\I\È]™WÙ˜Z[YUYH‚ˆœÛ˜\ÚÝÜšXÙOIKŒ™ˆXÝ[ÛZÙY\ÜÛ˜\ÚÝÝ]O\Ý[H‹ˆXÚÙ\‹›Ø]
+Û˜\È˜Ý\œ™[ÜšXÙH—JKˆ
+Bˆ™]\›ˆœÝ[WÚÙ\‚ˆ[ÙN‚ˆÈ›È\ØX›HÛ˜\ÚÝ8 %Ø]™HH\œ›ÜˆÝ]HÛÈHRHÚÝÜÈSURSP“Bˆœ™\ÚÈ™]WÜÛÝ\˜ÙH—HH[˜]˜Z[X›H‚ˆ\Ù\ÜÝØÚ×Ù]Jœ™\Ú
+BˆÙÙÙ\‹š[™›Êˆ—Ý\Ù\ÛÜ—ÚÙY\ÜÛ˜\ÚÝXÚÙ\I\È]™WÙ˜Z[YUYH‚ˆœÛ˜\ÚÝ[›Û™HXÝ[Û\Ø]™WÙ\œ›Üˆ‹ˆXÚÙ\‹ˆ
+Bˆ™]\›ˆ™\œ›Ü—ÜØ]™Y‚ˆ[ÙN‚ˆ\Ù\ÜÝØÚ×Ù]Jœ™\Ú
+Bˆ™]\›ˆ\]Y‚‚‚™YˆÙÙ]ÛZÝØÝ
+
+HOˆXÝ‚ˆˆˆ”™]\›ˆØXÚYX\šÙ]ÛÛ^
+™YÚ[YK”ËÙXÝÜœÊKˆ™]™\ˆ˜Z\Ù\Ëˆˆˆ‚ˆYˆÓRÕÐURSP“N‚ˆžN‚ˆ™]\›ˆÛZÝ™Ù]ÛX\šÙ]ØÛÛ^
+
+Bˆ^Ù\^Ù\[ÛŽ‚ˆ\ÜÂˆ™]\›ˆÂˆœ™YÚ[YHŽˆ“‘UUS‹œ™YÚ[YWÛX™[Žˆ“™]]˜[‹ˆœ\\WÝ™[™Žˆ•[šÛ›ÝÛˆ‹œÜWÝ™[™Žˆ•[šÛ›ÝÛˆ‹ˆœ\\WÌYÜÝŽˆ›Û™KœÜWÌYÜÝŽˆ›Û™KˆœÚYÛ˜[Žˆˆ‹›Û™Ü×ÛÚÈŽˆYKœÚÜ×ÛÚÈŽˆYKˆœ™YXÙWÜÚ^™HŽˆ˜[ÙK››×Ý˜YHŽˆ˜[ÙKˆœÙXÝÜœÈŽˆ×K›XY[™×ÜÙXÝÜœÈŽˆ×KÙXZ×ÜÙXÝÜœÈŽˆ×KˆÜÜÙXÝÜˆŽˆ›Û™Kœ\\WÜšXÙHŽˆ›Û™KœÜWÜšXÙHŽˆ›Û™Kˆš^Û]™[Žˆ›Û™KˆB‚‚™YˆØZ[Ù[žWÝšYÙÙ\ŠÝØÚÎˆXÝ
+N‚ˆˆˆ‚ˆ™]\›ˆ
+šYÙÙ\—Ý^ÜÜ×ØÛ\ÜÊH8 %HÜXÚYšXËXÝ[Û˜X›H[žH[œÝXÝ[Û‚ˆÚÝÛˆÛˆHÝØÚÈ]Z[YÙHÛÈH˜Y\ˆÛ›ÝÜÈVPÕHÚ[ˆÈ^XÝ]K‚‚ˆÔÔÈÛ\ÜÙ\Îˆ[žK]šYÙÙ\‹XÛÛ™š\›YY[žK]šYÙÙ\‹\™XÛÛ™ˆˆ[žK]šYÙÙ\‹XÛÛ[X][Ûˆ[žK]šYÙÙ\‹]ØZ][žK]šYÙÙ\‹X]›ÚY‚ˆ[™\ÈÛ™ÈšX\ËÚÜšX\Ë[™]XÝÈÚ[ˆšXÙH\È[™XYH[Ý™Yˆ\ÝH[žH›Û™HÛÈH˜Y\ˆ\È™]™\ˆÛÈ[\ˆHÝ[HÙ]\‚ˆˆˆ‚ˆÝÚ[™×ÜÝ]\ÈHÝØÚË™Ù]
+œÝÚ[™×ÜÝ]\ÈŠHÜˆˆ‚ˆšX\ÈHÝØÚË™Ù]
+˜YWØšX\ÈŠHÜˆ“™]]˜[‚ˆ[XLŒHÝØÚË™Ù]
+™[XWÌŒÙZ[HŠBˆÝÙ[XLŒHÝØÚË™Ù]
+œÝÙœ›ÛWÙ[XLŒŠBˆ[žWÛÝÈHÝØÚË™Ù]
+™[žWÞ›Û™WÛÝÈŠBˆ[žWÚYÚHÝØÚË™Ù]
+™[žWÞ›Û™WÚYÚŠBˆšX—ÍŒNHÝØÚË™Ù]
+™šX—ÍŒNŠBˆÝ\œ™[HÝØÚË™Ù]
+˜Ý\œ™[ÜšXÙHŠHÜˆˆÝÜHÝØÚË™Ù]
+œÝÜÛ]™[ŠB‚ˆ\×ÜÚÜHšX\È[ˆ
+”ÚÜšX\È‹”ÚÜŠBˆ\—ÝÛÜ™H˜™[ÝÈˆYˆ\×ÜÚÜ[ÙH˜X›Ý™H‚ˆØ[™WÝÛÜ™H˜™X\š\ÚˆYˆ\×ÜÚÜ[ÙH˜[\Ú‚‚ˆYˆšX\ÈOH]›ÚYŽ‚ˆ™]\›ˆ
+‘È“ÕQH8 %]›ÚYšX\ÈÙ]ˆ›È˜[YYÙH™\Ù[ˆ™[[Ý™Hœ›ÛHØ]Ú\Ýˆ‹ˆ™[žK]šYÙÙ\‹X]›ÚYŠB‚ˆÈ8¥ 8¥ ‘PQH8 %U‘SÓÈ8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆYˆÝÚ[™×ÜÝ]\ÈOH”‘PQH8 %U‘SÓÈŽ‚ˆYˆ[žWÛÝÈ[™[žWÚYÚ[™ÝÜ‚ˆ™]\›ˆ
+ˆˆ‘VPÕUH“ÕÈ8 %[žH›Û™H	Ù[žWÛÝÎ‹Œ™Ÿx $ÉÙ[žWÚYÚ‹Œ™ŸHÛÛ™š\›YYˆ‚ˆˆ“]™[Û[™ÈÚ]›Û[YKˆÝÜˆ	ÜÝÜ‹Œ™ŸKˆ[\ˆÝ\œ™[›Û™Kˆ‹ˆ™[žK]šYÙÙ\‹XÛÛ™š\›YYŠBˆYˆ[žWÛÝÈ[™[žWÚYÚ‚ˆ™]\›ˆ
+ˆˆ‘VPÕUH“ÕÈ8 %[žH›Û™H	Ù[žWÛÝÎ‹Œ™Ÿx $ÉÙ[žWÚYÚ‹Œ™ŸHÛÛ™š\›YYˆ‚ˆ“]™[Û[™ÈÚ]›Û[YKˆ[\ˆÝ\œ™[›Û™Kˆ‹ˆ™[žK]šYÙÙ\‹XÛÛ™š\›YYŠBˆ™]\›ˆ
+‘VPÕUH“ÕÈ8 %Ù^H]™[ÛÛ™š\›YYÚ]›Û[YKˆ[\ˆ]Ý\œ™[šXÙKˆ‹ˆ™[žK]šYÙÙ\‹XÛÛ™š\›YYŠB‚ˆÈ8¥ 8¥ ‘KPÓÓ‘’T“PUSÓˆ8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆYˆÝÚ[™×ÜÝ]\ÈOH”‘KPÓÓ‘’T“PUSÓˆŽ‚ˆYˆ[XLŒ[™ÝÙ[XLŒ\È›Ý›Û™H[™XœÊÝÙ[XLŒ
+HHËN‚ˆ™]\›ˆ
+ˆˆ•ÐRU“Ôˆ’QÑÑTˆ8 %M[HØ[™H]\ÝÛÜÙHÙ\—ÝÛÜ™HŒSPH
+	Ù[XLŒ‹Œ™ŸJH‚ˆ›Ûˆ›Û[YH8¢iHKŒž]™Ëˆ]ÛÜÙHH[žHÚYÛ˜[ˆÈ›Ý[\X\›Kˆ‹ˆ™[žK]šYÙÙ\‹\™XÛÛ™ˆŠBˆYˆšX—ÍŒN[™Ý\œ™[[™XœÊÝ\œ™[HšX—ÍŒN
+HÈÝ\œ™[
+ˆLHN‚ˆ™]\›ˆ
+ˆˆ•ÐRU“Ôˆ’QÑÑTˆ8 %\›ØXÚ[™ÈŒKŽ	HšXˆ
+	ÙšX—ÍŒN‹Œ™ŸJKˆ‚ˆˆ“™YYM[HØ[™HÛÜÙHÙ\—ÝÛÜ™H]™[
+È›Û[YH8¢iHKŒž]™È™Y›Ü™H[žKˆ‹ˆ™[žK]šYÙÙ\‹\™XÛÛ™ˆŠBˆYˆ[žWÛÝÈ[™[žWÚYÚ‚ˆ™]\›ˆ
+ˆˆ•ÐRU“Ôˆ’QÑÑTˆ8 %šXÙH\›ØXÚ[™È[žH›Û™H	Ù[žWÛÝÎ‹Œ™Ÿx $ÉÙ[žWÚYÚ‹Œ™ŸKˆ‚ˆˆ“™YYM[HØØ[™WÝÛÜ™HÛÛ™š\›X][ÛˆØ[™H
+È›Û[YH8¢iHKŒž]™ËˆÈ›Ý[\ˆX\›Kˆ‹ˆ™[žK]šYÙÙ\‹\™XÛÛ™ˆŠBˆ™]\›ˆ
+ˆˆ•ÐRU“Ôˆ’QÑÑTˆ8 %™X\ˆÙ^H]™[ˆ™YYM[HØØ[™WÝÛÜ™HØ[™H
+È›Û[YH8¢iHKŒž]™È™Y›Ü™H[žKˆ‹ˆ™[žK]šYÙÙ\‹\™XÛÛ™ˆŠB‚ˆÈ8¥ 8¥ ‘S‘ÓÓ•S•PUSÓˆ8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆYˆÝÚ[™×ÜÝ]\ÈOH•‘S‘ÓÓ•S•PUSÓˆŽ‚ˆYˆ\×ÜÚÜ‚ˆÈÚÜÛÛ[X][ÛŽˆYX[[žH\ÈH›Ý[˜ÙHT[È™\Ú\Ý[˜ÙK[ˆÚÜÛˆ™Z™XÝ[Û‹‚ˆÈYˆšXÙH\È[™XYH‘SÕÈH[žH›Û™H][™XYHœ›ÚÙHÝÛˆ8 %[žHØ\ÈZ\ÜÙY‚ˆYˆ[žWÛÝÈ[™[žWÚYÚ‚ˆYˆÝ\œ™[[™Ý\œ™[[žWÛÝÎ‚ˆ™]\›ˆ
+ˆˆ“RTÔÑQS•–H8 %šXÙH[™XYHœ›ÚÙH™[ÝÈ[žH›Û™H
+	Ù[žWÛÝÎ‹Œ™ŸJKˆ‚ˆˆ•ØZ]›ÜˆH›Ý[˜ÙH˜XÚÈÈ	Ù[žWÛÝÎ‹Œ™Ÿx $ÉÙ[žWÚYÚ‹Œ™ŸH™\Ú\Ý[˜ÙK‚ˆ[ˆ[\ˆÚÜÛˆM[H™X\š\Ú™Z™XÝ[ÛˆØ[™Kˆ‹ˆ™[žK]šYÙÙ\‹]ØZ]ŠBˆYˆÝ\œ™[[™Ý\œ™[ˆ[žWÚYÚ‚ˆ™]\›ˆ
+ˆˆ”ÒÔ•ÓÓ•S•PUSÓˆ8 %šXÙHX›Ý™H[žH›Û™Kˆ‚ˆˆ•ØZ]›Üˆ[˜XÚÈÈ	Ù[žWÛÝÎ‹Œ™Ÿx $ÉÙ[žWÚYÚ‹Œ™ŸH™\Ú\Ý[˜ÙK‚ˆ[ˆ[\ˆÚÜÛˆM[H™X\š\Ú™Z™XÝ[ÛˆØ[™Kˆ‹ˆ™[žK]šYÙÙ\‹XÛÛ[X][ÛˆŠBˆ™]\›ˆ
+ˆˆ”ÒÔ•ÓÓ•S•PUSÓˆ8 %šXÙH[ˆ™\Ú\Ý[˜ÙH›Û™H	Ù[žWÛÝÎ‹Œ™Ÿx $ÉÙ[žWÚYÚ‹Œ™ŸKˆ‚ˆ•ØZ]›ÜˆM[H™X\š\Ú™Z™XÝ[ÛˆØ[™H
+È›Û[YH8¢iHKŒž]™Ë[ˆ[\ˆÚÜˆ‹ˆ™[žK]šYÙÙ\‹XÛÛ[X][ÛˆŠBˆYˆ[žWÚYÚ‚ˆ™]\›ˆ
+ˆˆ”ÒÔ•ÓÓ•S•PUSÓˆ8 %ØZ]›Üˆ›Ý[˜ÙHÈ	Ù[žWÚYÚ‹Œ™ŸH™\Ú\Ý[˜ÙK‚ˆ[ˆ[\ˆÚÜÛˆM[H™X\š\Ú™Z™XÝ[ÛˆØ[™Kˆ‹ˆ™[žK]šYÙÙ\‹XÛÛ[X][ÛˆŠBˆ™]\›ˆ
+”ÒÔ•ÓÓ•S•PUSÓˆ8 %ØZ]›Üˆ›Ý[˜ÙHÈÙ^H™\Ú\Ý[˜ÙKˆÚÜHÝÙ\ˆYÚÚ]›Û[YHÛÛ™š\›X][Û‹ˆ‹ˆ™[žK]šYÙÙ\‹XÛÛ[X][ÛˆŠBˆ[ÙN‚ˆÈÛ™ÈÛÛ[X][ÛŽˆYX[[žH\ÈH[˜XÚÈÕÓˆÈÝ\Ü[ˆ^HHÛ‚ˆÈYˆšXÙH\È[™XYH‘SÕÈH[žH›Û™H]œ›ÚÙH›ÝYÚÝ\Ü8 %[žHØ\ÈZ\ÜÙY‚ˆYˆ[žWÛÝÈ[™[žWÚYÚ‚ˆYˆÝ\œ™[[™Ý\œ™[[žWÛÝÎ‚ˆ™]\›ˆ
+ˆˆ“RTÔÑQS•–H8 %šXÙH[™XYHœ›ÚÙH™[ÝÈ[žH›Û™H
+	Ù[žWÛÝÎ‹Œ™ŸJKˆ‚ˆˆ•ØZ]›Üˆ™]ÈÙ]\Üˆ›Ý[˜ÙH˜XÚÈÈ	Ù[žWÛÝÎ‹Œ™Ÿx $ÉÙ[žWÚYÚ‹Œ™ŸH™Y›Ü™H™KY]˜[X][™Ëˆ‹ˆ™[žK]šYÙÙ\‹]ØZ]ŠBˆ™]\›ˆ
+ˆˆ”SPÒÈS•–H8 %ØZ]›Üˆ[˜XÚÈÈ	Ù[žWÛÝÎ‹Œ™Ÿx $ÉÙ[žWÚYÚ‹Œ™ŸKˆ‚ˆ^HHYÚ\ˆÝËˆ™YYM[H[ÛY[[HØ[™HÚÝÚ[™È™[™™\Ý[Z[™Ëˆ‹ˆ™[žK]šYÙÙ\‹XÛÛ[X][ÛˆŠBˆYˆ[žWÛÝÎ‚ˆ™]\›ˆ
+ˆˆ”SPÒÈS•–H8 %ØZ]›Üˆ[˜XÚÈÈ	Ù[žWÛÝÎ‹Œ™ŸKˆ‚ˆ^HHYÚ\ˆÝËˆ™YYM[H[ÛY[[HØ[™HÚÝÚ[™È™[™™\Ý[Z[™Ëˆ‹ˆ™[žK]šYÙÙ\‹XÛÛ[X][ÛˆŠBˆ™]\›ˆ
+•‘S‘ÓÓ•S•PUSÓˆ8 %ØZ]›Üˆ[˜XÚÈÈÙ^H]™[ˆ^HHYÚ\ˆÝÈÚ]›Û[YHÛÛ™š\›X][Û‹ˆ‹ˆ™[žK]šYÙÙ\‹XÛÛ[X][ÛˆŠB‚ˆÈÐRUÜˆ[šÛ›ÝÛ‚ˆ™]\›ˆ
+““Õ‘PQH8 %›È˜[Y[žHÚYÛ˜[ˆ[Ûš]Üˆ›Üˆ‘PQH8 %U‘SÓÈÜˆ‘KPÓÓ‘’T“PUSÓˆÝ]\Ëˆ‹ˆ™[žK]šYÙÙ\‹]ØZ]ŠB‚‚™YˆZ[ØZWÝ˜YWÜ[ŠÝØÚÎˆXÝ
+HOˆXÝ‚ˆˆˆ‚ˆZ[[ˆ[œÝ]][Û˜[\Ý[HRH˜YH[ˆœ›ÛH^\Ý[™ÈÝØÚÈ]HšY[Ë‚ˆ™]\›œÈHXÝÛÛœÝ[YYžHHÝØÚ×Ù]Z[[\]IÜÈ˜YH[ˆ[™[‚ˆˆˆ‚ˆÝÚ[™×ÜØÛÜ™HHÝØÚË™Ù]
+œÝÚ[™×ÜØÛÜ™HŠHÜˆˆØ]ÜØÛÜ™HHÝØÚË™Ù]
+˜Ø][\ÝÜØÛÜ™HŠHÜˆˆœˆHÝØÚË™Ù]
+œš\Ú×Ü™]Ø\™ŠBˆÝÚ[™×ÜÝ]\ÈHÝØÚË™Ù]
+œÝÚ[™×ÜÝ]\ÈŠHÜˆˆ‚ˆÝÚ[™×Ý\HHÝØÚË™Ù]
+œÝÚ[™×ÜÙ]\Ý\HŠHÜˆˆ‚ˆ›Û™WÜ›ØˆHÝØÚË™Ù]
+ž›Û™WÜ›Ø˜Xš[]HŠBˆ›Û™WÜÙ]\HÝØÚË™Ù]
+ž›Û™WØZWÜÙ]\ŠHÜˆˆ‚ˆØ]ÜÝ[[X\žHH
+ÝØÚË™Ù]
+˜Ø][\ÝÜÝ[[X\žHŠHÜˆˆŠKœÝš\
+
+Bˆ›ÛHÝØÚË™Ù]
+œ™[Ý›Û[YHŠHÜˆˆZ[WÝ™[™HÝØÚË™Ù]
+™Z[WÝ™[™ŠHÜˆˆ‚ˆÝ™[™HÝØÚË™Ù]
+šÝ™[™ŠHÜˆˆ‚ˆ™×Ø[HÝØÚË™Ù]
+™™×Ø[\ÚŠHÜˆ˜[ÙBˆ™×Ø™X\ˆHÝØÚË™Ù]
+™™×Ø™X\š\ÚŠHÜˆ˜[ÙBˆ[X[™ÙÜ˜YHHÝØÚË™Ù]
+™[X[™Þ›Û™WÙÜ˜YHŠHÜˆˆ‚ˆÝ\WÙÜ˜YHHÝØÚË™Ù]
+œÝ\WÞ›Û™WÙÜ˜YHŠHÜˆˆ‚ˆœ×ÜØÛÜ™HHÝØÚË™Ù]
+œœ×ÜØÛÜ™HŠHÜˆLˆÙXÝÜ—Ù]ˆHÝØÚË™Ù]
+œÙXÝÜ—Ù]ˆŠHÜˆˆ‚ˆÝÙ[XLŒHÝØÚË™Ù]
+œÝÙœ›ÛWÙ[XLŒŠHÜˆˆ[—ÜÝ\HHÝØÚË™Ù]
+š[—ÜÝ\WÞ›Û™HŠHÜˆ˜[ÙBˆ›Ü×Ø[H˜[ÙBˆ›Ü×Ø™X\ˆH˜[ÙBˆžN‚ˆÛHHÚœÛÛ‹›ØYÊÝØÚË™Ù]
+œÛX\Û[Û™^WÚœÛÛˆŠHÜˆžßHŠBˆ›Ü×Ø[H›ÛÛ
+ÛK™Ù]
+˜›Ü×Ø[\ÚŠJBˆ›Ü×Ø™X\ˆH›ÛÛ
+ÛK™Ù]
+˜›Ü×Ø™X\š\ÚŠJBˆ^Ù\^Ù\[ÛŽ‚ˆ\ÜÂ‚ˆÈÜ˜YH8 %™XYœ›ÛHHØ[›ÛšXØ[Û\ÜÚYžJ
+H™\Ý[[œÝXYÙˆBˆÈÙXÛÛ™[™\[™[K][™Y™\ÚÛX›Kˆ\È\ÈH^XÝšY[ˆÈÚÝÛˆ\ÈHÜ˜YH˜YÙH]™\ž]Ú\™H[ÙH›Üˆ\ÈXÚÙ\‹ÛÈHRBˆÈ˜YH[ˆ[™[Ø[ˆ™]™\ˆÚÝÈHÜ˜YH]ÛÛ˜YXÝÈBˆÈ\Ú›Ø\™X›HÈØØ[›™\ˆXÚÙ]ÈÈ™\ÝÝÚ[™ÈØ[™Y]\È˜YÙK‚ˆÜ[—ØÛ\ÜÚYšXØ][ÛˆHÛ\ÜÚYžJÝØÚÊBˆÜ˜YHHÜ[—ØÛ\ÜÚYšXØ][Û–È™Ü˜YH—BˆÜ˜YWØÜÜÈHÂˆJÈŽˆœ[‹X\\È‹HŽˆœ[‹XH‹ˆŠÈŽˆœ[‹Xœ\È‹ˆŽˆœ[‹Xˆ‹ˆ‹HŽˆœ[‹Xœ\È‹ÈŽˆœ[‹Xˆ‹‘Žˆœ[‹Xˆ‹ˆK™Ù]
+Ü˜YKœ[‹XˆŠB‚ˆÈ›Ø˜Xš[]Bˆ›ØˆH›Û™WÜ›ØˆÜˆX^
+ÌZ[ŠLÌ
+ÈÝÚ[™×ÜØÛÜ™H
+ˆ
+ÈØ]ÜØÛÜ™H
+ˆÊJB‚ˆÈ™X\ÛÛœÈ
+Ü™Y[ˆÚYÛ˜[ÊBˆ™X\ÛÛœÈH×BˆYˆØ]ÜÝ[[X\žN‚ˆ™X\ÛÛœË˜\[™
+Ø]ÜÝ[[X\žVÎŽLJBˆYˆ›ÛH‚ˆ™X\ÛÛœË˜\[™
+ˆ”•“ÓÜ›Û‹ŒYŸ^8 %[œÝ]][Û˜[[ÛY[[HŠBˆ[Yˆ›ÛHŽ‚ˆ™X\ÛÛœË˜\[™
+ˆ”•“ÓÜ›Û‹ŒYŸ^8 %X›Ý™H]™\˜YÙH›Û[YHŠBˆ[Yˆ›ÛHKŒÎ‚ˆ™X\ÛÛœË˜\[™
+ˆ”•“ÓÜ›Û‹ŒYŸ^8 %[Ù\˜]H[\™\ÝŠBˆYˆ[\Úˆ[ˆZ[WÝ™[™‚ˆ™X\ÛÛœË˜\[™
+‘Z[H™[™[\Ú8 %YÚ\ˆYÚÈÈYÚ\ˆÝÜÈŠBˆYˆ[\Úˆ[ˆÝ™[™‚ˆ™X\ÛÛœË˜\[™
+™[™[\Ú8 %[ÛY[[H[YÛš[™ÈŠBˆYˆ[X[™ÙÜ˜YH[ˆ
+JÈ‹HŠN‚ˆ™X\ÛÛœË˜\[™
+ˆ’[œÝ]][Û˜[[X[™›Û™H
+Ù[X[™ÙÜ˜Y_JH™[ÝÈŠBˆYˆ™×Ø[‚ˆ™X\ÛÛœË˜\[™
+[\Ú˜Z\ˆ˜[YHØ\8 %\]ZY]H›ÚYÝ\ÜŠBˆYˆ›Ü×Ø[‚ˆ™X\ÛÛœË˜\[™
+œ™XZÈÙˆÝXÝ\™H[\Ú8 %™[™ÛÛ™š\›YYŠBˆYˆœ×ÜØÛÜ™HHÍN‚ˆ™X\ÛÛœË˜\[™
+ˆ“Ý]\™›Ü›Z[™ÈTTH
+”ÈÜœ×ÜØÛÜ™_JHŠBˆYˆÙXÝÜ—Ù]Ž‚ˆ™X\ÛÛœË˜\[™
+ˆ”ÙXÝÜŽˆÜÙXÝÜ—Ù]ŸH8 %ÚXÚÈÙXÝÜˆÝ™[™ÝŠB‚ˆÈØ\›š[™ÜÈ
+™Y›YÜÈÈ]›ÚY[˜ÙJBˆØ\›š[™ÜÈH×BˆYˆ[—ÜÝ\HÜˆÝ\WÙÜ˜YH[ˆ
+JÈ‹HŠN‚ˆØ\›š[™ÜË˜\[™
+“™X\ˆÝ\H›Û™H8 %Ø]Ú›Üˆ™Z™XÝ[ÛˆŠBˆYˆ™×Ø™X\Ž‚ˆØ\›š[™ÜË˜\[™
+™X\š\Ú˜Z\ˆ˜[YHØ\Ý™\šXY8 %ÜÜÚX›H™\Ú\Ý[˜ÙHŠBˆYˆ›ÛŽ‚ˆØ\›š[™ÜË˜\[™
+“ÝÈ™[]]™H›Û[YH8 %ÙXZÈ[œÝ]][Û˜[[\™\ÝŠBˆYˆœˆ[™œˆKN‚ˆØ\›š[™ÜË˜\[™
+ˆ”Ž”ˆÜœŽ‹ŒYŸNŒH\ÈÛÈÙXZÈ8 %Z[š[][HKNŒH™YYYŠBˆYˆÝÙ[XLŒˆ‚ˆØ\›š[™ÜË˜\[™
+ˆ‘^[™YÜÝÙ[XLŒ‹ŒYŸIHX›Ý™HŒSPH8 %ØZ]›Üˆ[˜XÚÈŠBˆYˆÝÚ[™×ÜÝ]\ÈOH•ÐRUŽ‚ˆØ\›š[™ÜË˜\[™
+“›ÈÛÛ™š\›YY[žHÚYÛ˜[8 %[Ûš]Üˆ›ÜˆÙ]\ŠBˆYˆœ×ÜØÛÜ™HÌ‚ˆØ\›š[™ÜË˜\[™
+ˆ•ÙXZÈ”È
+Üœ×ÜØÛÜ™_JH8 %[™\œ\™›Ü›Z[™ÈTTHŠB‚ˆ[žWÛÝÈHÝØÚË™Ù]
+™[žWÞ›Û™WÛÝÈŠBˆ[žWÚYÚHÝØÚË™Ù]
+™[žWÞ›Û™WÚYÚŠBˆ[žWÛZYH›Û™BˆYˆ[žWÛÝÈ[™[žWÚYÚ‚ˆ[žWÛZYH›Ý[™
+
+[žWÛÝÈ
+È[žWÚYÚ
+HÈ‹ŠB‚ˆ™]\›ˆÂˆ™Ü˜YHŽˆÜ˜YKˆ™Ü˜YWØÜÜÈŽˆÜ˜YWØÜÜËˆœÙ]\ÛX™[Žˆ›Û™WÜÙ]\ÜˆÝÚ[™×Ý\HÜˆ”Ù]\›Ü›Z[™È‹ˆœ›Ø˜Xš[]HŽˆ›Ø‹ˆ™[žWÛÝÈŽˆ[žWÛÝËˆ™[žWÚYÚŽˆ[žWÚYÚˆ™[žWÛZYŽˆ[žWÛZYˆœÝÜŽˆÝØÚË™Ù]
+œÝÜÛ]™[ŠKˆ\™Ù]HŽˆÝØÚË™Ù]
+\™Ù]ÌHŠKˆ\™Ù]ˆŽˆÝØÚË™Ù]
+\™Ù]ÌˆŠKˆœœˆŽˆœ‹ˆœ™X\ÛÛœÈŽˆ™X\ÛÛœÖÎ×KˆØ\›š[™ÜÈŽˆØ\›š[™ÜÖÎKˆš\×Ü[ˆŽˆ›ÛÛ
+[žWÛÝÈÜˆÝØÚË™Ù]
+œÝÜÛ]™[ŠHÜˆÝØÚË™Ù]
+\™Ù]ÌHŠJKˆœÝÚ[™×ÜØÛÜ™HŽˆÝÚ[™×ÜØÛÜ™Kˆ˜Ø]ÜØÛÜ™HŽˆØ]ÜØÛÜ™KˆB‚‚™YˆÙ]ØXÝ]™WÝÛÚY
+
+HOˆ[›Û™N‚ˆˆˆ‚ˆ™]\›ˆHXÝ]™HØ]Ú\ÝQœ›ÛHHÙ\ÜÚ[Û‹‚ˆ˜[È˜XÚÈÈHš\œÝØ]Ú\ÝYˆHÙ\ÜÚ[Ûˆ˜[YH\ÈZ\ÜÚ[™ÈÜˆÝ[K‚ˆ™]\›œÈ›Û™HÛ›HÚ[ˆ›ÈØ]Ú\ÝÈ^\Ý][‚ˆˆˆ‚ˆ[ÝÛÈHÙ]Ø[ÝØ]Ú\ÝÊÝ\œ™[Ý\Ù\—ÚY
+
+JBˆYˆ›Ý[ÝÛÎ‚ˆ™]\›ˆ›Û™BˆÛÚYHÙ\ÜÚ[Û‹™Ù]
+˜XÝ]™WÝÛÚYŠBˆYˆÛÚY[™[žJÖÈšY—HOHÛÚY›ÜˆÈ[ˆ[ÝÛÊN‚ˆ™]\›ˆÛÚYˆ™]\›ˆ[ÝÛÖÌVÈšY—B‚‚™Yˆ[—Ø]]×ØÛ\ÜÚYšXØ][ÛŠXÚÙ\ŽˆÝ‹\Ù\—ÚYˆ[HJN‚ˆˆˆ‚ˆÛ\ÜÚYžHHXÚÙ\ˆ[™Yˆ]]×ØÛ\ÜÚYžH\ÈÓ‹[Ý™H]ÈH\›ÜšX]BˆY˜][Ø]Ú\ÝˆÛ›H™[Ü™Ø[š^™\ÈY[X™\œÚ\ÈÚ][ˆH›Ý\ˆQUSÕÐUÒTÕÎÂˆ™]™\ˆÝXÚ\È\Ù\‹XÜ™X]YÝ\ÝÛHØ]Ú\ÝË‚‚ˆØ[YY\ˆ]™\žH\Ù\ÜÝØÚ×Ù]H
+Y™Yœ™\Ú™Yœ™\Ú\Ú[™ÛJK‚ˆˆˆ‚ˆÝØÚÈHÙ]ÜÝØÚ×Ù]JXÚÙ\ŠBˆYˆ›ÝÝØÚÎ‚ˆ™]\›‚‚ˆ\™Ù]Û˜[YK™X\ÛÛˆHÛ\ÜÚYžWÜÝØÚÊÝØÚÊB‚ˆÈ[Ø^\È\œÚ\ÝH™X\ÛÛˆ
+š\ÚX›H]™[ˆÚ[ˆ]]×ØÛ\ÜÚYžH\ÈÑ‘ŠBˆÙ]ÜÝØÚ×ØÛ\ÜÚYžJXÚÙ\‹™X\ÛÛŠB‚ˆÈ™\ÜXÝX[X[Ý™\œšYH8 %È›Ý[Ý™HYˆ]]×ØÛ\ÜÚYžH\ÈÑ‘‚ˆYˆÝØÚË™Ù]
+˜]]×ØÛ\ÜÚYžH‹JHOH‚ˆ™]\›‚‚ˆÈZ[HX\ÙˆÛ˜[YH8¡¤ˆYH›Üˆ]™\žHY˜][Ø]Ú\Ý]^\ÝÈ[ˆ‚ˆ[ÝÛÈHÙ]Ø[ÝØ]Ú\ÝÊ\Ù\—ÚY
+BˆY˜][ÝÛÛX\HÝÛÈ›˜[YH—NˆÛÈšY—H›ÜˆÛ[ˆ[ÝÛÂˆYˆÛÈ›˜[YH—H[ˆQUSÕÐUÒTÕßBˆYˆ›ÝY˜][ÝÛÛX\‚ˆ™]\›‚‚ˆ\™Ù]ÚYHY˜][ÝÛÛX\™Ù]
+\™Ù]Û˜[YJBˆYˆ›Ý\™Ù]ÚY‚ˆ™]\›‚‚ˆÈÛ›H™[Ü™Ø[š^™HYˆHÝØÚÈ\È[™XYH[ˆ]X\ÝÛ™HY˜][\ÝˆÝ\œ™[ÚYÈHÙ]
+Ù]ÝXÚÙ\—ÝØ]Ú\ÝÚYÊXÚÙ\‹\Ù\—ÚY
+JBˆY˜][ÚYÈHÙ]
+Y˜][ÝÛÛX\˜[Y\Ê
+JBˆ[—ÙY˜][ÈHÝ\œ™[ÚYÈ	ˆY˜][ÚYÂ‚ˆYˆ›Ý[—ÙY˜][Î‚ˆÈÝØÚÈ]™\ÈÛ›H[ˆÝ\ÝÛH\ÝÈ8 %Û‰Ý]]ËZ[œÙ\[ÈY˜][Âˆ™]\›‚‚ˆYˆ\™Ù]ÚY[ˆ[—ÙY˜][È[™[Š[—ÙY˜][ÊHOHN‚ˆÈ[™XYH[ˆHÛÜœ™XÝ\Ý[™Û›H]\Ý8 %›Ý[™ÈÈÂˆ™]\›‚‚ˆÈ[Ý™NˆYÈ\™Ù]š\œÝ
+™\Ù\™\ÈÝØÚ×Ù]JK[ˆ™[[Ý™Hœ›ÛHÝ\œÂˆYÝXÚÙ\—Ý×ÝØ]Ú\Ý
+\™Ù]ÚYXÚÙ\ŠBˆ›ÜˆÚY[ˆ[—ÙY˜][Î‚ˆYˆÚYOH\™Ù]ÚY‚ˆ™[[Ý™WÝXÚÙ\—Ùœ›ÛWÝØ]Ú\Ý
+ÚYXÚÙ\ŠB‚‚™YˆÙYYÙ[[×Ù]J
+N‚ˆˆˆ‚ˆÜ[]HHš\œÝØ]Ú\ÝÚ][ØÚÈ]HÛˆH™\žHš\œÝ[ˆÛ›K‚‚ˆH	Ù[[×ÜÙYYY	È›YÈ[ˆHÙ][™ÜÈX›H[œÝ\™\È\È[œÈ^XÝHÛ˜ÙKˆ]™[ˆYˆH\Ù\ˆ]\ˆ[]\È[XÚÙ\œÈ
+ÚXÚÛÝ[Ý\Ú\ÙHXZÙHBˆš\œÝØ]Ú\Ý\X\ˆ[\H[™šYÙÙ\ˆH™K\ÙYYÛˆH™^Ù\™\ˆÝ\
+K‚ˆˆˆ‚ˆYˆÙ]ÜÙ][™Ê™[[×ÜÙYYYŠHOHŒHŽ‚ˆ™]\›ˆÈ[™XYHÙYYY8 %™]™\ˆ™K\ÙYY]™[ˆYˆØ]Ú\Ý\È[\B‚ˆ[ÝÛÈHÙ]Ø[ÝØ]Ú\ÝÊJBˆYˆ›Ý[ÝÛÎ‚ˆ™]\›‚ˆš\œÝÚYH[ÝÛÖÌVÈšY—Bˆ›ÜˆXÚÙ\ˆ[ˆØYÛ[ØÚ×ÝØ]Ú\Ý
+
+N‚ˆYÝXÚÙ\—Ý×ÝØ]Ú\Ý
+š\œÝÚYXÚÙ\ŠBˆ\Ù\ÜÝØÚ×Ù]JÙ[™\˜]WÜÝØÚ×Ù]JXÚÙ\ŠJB‚ˆÙ]ÜÙ][™Ê™[[×ÜÙYYY‹ŒHŠB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ\Ü^H[\œÂˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚™YˆÙ]ÜØÛÜ™WØÛ\ÜÊØÛÜ™JN‚ˆˆˆÔÔÈÛ\ÜÈ›ÜˆHKLLØÛÜ™H
+\ÙY›Üˆ›ÝÙ]\ÜØÛÜ™H[™Ø][\ÝÜØÛÜ™JKˆˆˆ‚ˆYˆØÛÜ™H\È›Û™N‚ˆ™]\›ˆ›™]]˜[‚ˆYˆØÛÜ™HHÎ‚ˆ™]\›ˆœÝ›Û™È‚ˆYˆØÛÜ™HH‚ˆ™]\›ˆ›[Ù\˜]H‚ˆ™]\›ˆÙXZÈ‚‚‚™YˆÙ]ØšX\×ØÛ\ÜÊšX\ÊN‚ˆˆˆÔÔÈÛ\ÜÈ›ÜˆH˜YHšX\ÈX™[ˆˆˆ‚ˆ™]\›ˆÂˆ“Û™ÈšX\ÈŽˆ˜šX\Ë[Û™È‹ˆ”ÚÜšX\ÈŽˆ˜šX\Ë\ÚÜ‹ˆ“™]]˜[Žˆ˜šX\Ë[™]]˜[‹ˆ]›ÚYŽˆ˜šX\ËX]›ÚY‹ˆK™Ù]
+šX\Ë˜šX\Ë[™]]˜[ŠB‚‚™YˆÙ]ÜÙ]\Ý\WØÛ\ÜÊÙ]\Ý\JN‚ˆˆˆÔÔÈÛ\ÜÈ›ÜˆHÙ]\\H[
+^K]˜Y[™È[™ÝÚ[™È\\ÊKˆˆˆ‚ˆ™]\›ˆÂˆÈ^K]˜Y[™ÈYØXÞH\\Âˆ“[ÛY[[Hœ™XZÛÝ]ŽˆœÙ]\[[ÛY[[KXœ™XZÛÝ]‹ˆ“[ÛY[[H[›™\ˆŽˆœÙ]\[[ÛY[[K\[›™\ˆ‹ˆ‘Ø\[™ÛÈŽˆœÙ]\YØ\YÛÈ‹ˆœ™XZÙÝÛˆŽˆœÙ]\Xœ™XZÙÝÛˆ‹ˆ••ÐT™XÛZ[HŽˆœÙ]\]Ø\‹ˆ”˜[™ÙHœ™XZÈŽˆœÙ]\\˜[™ÙH‹ˆ“ÔˆŽˆœÙ]\[Ü˜ˆ‹ˆÈÝÚ[™È[˜XÚÈÈ[žH\\Âˆ”[˜XÚÈÈÝ\ÜŽˆœÙ]\\[˜XÚÈ‹ˆ”[˜XÚÈÈŒSPHŽˆœÙ]\\[˜XÚÈ‹ˆ”[˜XÚÈÈLSPHŽˆœÙ]\\[˜XÚÈ‹ˆœ™XZÛÝ]™]\ÝŽˆœÙ]\Xœ™XZÛÝ]\™]\Ý‹ˆœ™XZÛÝ]™]\Ý›Ü›Z[™ÈŽˆœÙ]\Xœ™XZÛÝ]\™]\Ý‹ˆ“™X\ˆL	H™]˜XÙ[Y[ŽˆœÙ]\YšXL‹ˆ“™X\ˆŒKŽ	H™]˜XÙ[Y[ŽˆœÙ]\YšXŒN‹ˆ“Ü™\ˆ›ØÚÈ\ÝŽˆœÙ]\[Ü™\‹X›ØÚÈ‹ˆÈÛÛ[X][ÛˆÈ[‹]\\\È
+Ü™Y[‹ÝX[XØÙ[
+Bˆœ™XZÛÝ]ÛÛ[X][ÛˆŽˆœÙ]\XÛÛ[X][Ûˆ‹ˆ‘X\›š[™ÜÈÛÛ[X][ÛˆŽˆœÙ]\XÛÛ[X][Ûˆ‹ˆ[›YÈŽˆœÙ]\X[Y›YÈ‹ˆ”™[]]™HÝ™[™ÝXY\ˆŽˆœÙ]\\œË[XY\ˆ‹ˆ•™[™ÛÛ[X][ÛˆŽˆœÙ]\]™[™XÛÛ[X][Ûˆ‹ˆÈ^[™YÈÚ\ÙH
+[X™\ˆXØÙ[
+Bˆ‘^[™Y8 %ØZ]›Üˆ[˜XÚÈŽˆœÙ]\Y^[™Y‹ˆ‘^[™Y8 %ØZ]ŽˆœÙ]\Y^[™Y‹ˆÚ\ÙH›Û™H8 %È›Ý[\ˆŽˆœÙ]\XÚ\ÙH‹ˆÈ]›ÚYˆ]™\Ú\Ý[˜ÙH8 %]›ÚYŽˆœÙ]\\™\Ú\Ý[˜ÙKX]›ÚY‹ˆ]™\Ú\Ý[˜ÙH]›ÚYŽˆœÙ]\\™\Ú\Ý[˜ÙKX]›ÚY‹ˆ•ÙXZÈÝXÝ\™H8 %]›ÚYŽˆœÙ]\]ÙXZË\ÝXÝ\™H‹ˆ•ÙXZÈÝXÝ\™H]›ÚYŽˆœÙ]\]ÙXZË\ÝXÝ\™H‹ˆ“›ÈÙ]\ŽˆœÙ]\[›Û™H‹ˆK™Ù]
+Ù]\Ý\KœÙ]\[›Û™HŠB‚‚™YˆÙ]ÜÝÚ[™×ÜÝ]\×ØÛ\ÜÊÝÚ[™×ÜÝ]\ÎˆÝŠHOˆÝŽ‚ˆˆˆÔÔÈÛ\ÜÈ›ÜˆHÝÚ[™ÈÝ]\È˜YÙKˆˆˆ‚ˆ™]\›ˆÂˆÈ8¥ 8¥ Ý\œ™[[[ÙHX™[È8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆ”‘PQH8 %U‘SÓÈŽˆœÝÚ[™Ë\Ý]\Ë\™XYH‹ˆ”‘KPÓÓ‘’T“PUSÓˆŽˆœÝÚ[™Ë\Ý]\Ë\™KXÛÛ™š\›H‹ˆ•‘S‘ÓÓ•S•PUSÓˆŽˆœÝÚ[™Ë\Ý]\ËXÛÛ[X][Ûˆ‹ˆ•ÐRUŽˆœÝÚ[™Ë\Ý]\Ë]ØZ]‹ˆÈ8¥ 8¥ YØXÞHX™[È
+˜XÚÝØ\™ÛÛ\]›Üˆˆ˜[Y\ÊH8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆ‘ÓÓÑÕÒS‘ÈÐS‘QUHŽˆœÝÚ[™Ë\Ý]\Ë\™XYH‹ˆ”‘PQHQˆU‘SÓÈŽˆœÝÚ[™Ë\Ý]\Ë\™XYH‹ˆ•ÐRU“ÔˆMSHÓÓ‘’T“PUSÓˆŽˆœÝÚ[™Ë\Ý]\Ë\™KXÛÛ™š\›H‹ˆ•ÐRU“ÔˆSPÒÈŽˆœÝÚ[™Ë\Ý]\Ë]ØZ]‹ˆ•ÓÈVS‘QŽˆœÝÚ[™Ë\Ý]\ËY^[™Y‹ˆ““ÕS“ÕQÒQÑHŽˆœÝÚ[™Ë\Ý]\Ë[›ËYYÙH‹ˆU“ÒQU‘TÒTÕSÑHŽˆœÝÚ[™Ë\Ý]\ËX]›ÚY‹ˆU“ÒQÑPRÈÕ•PÕT‘HŽˆœÝÚ[™Ë\Ý]\ËX]›ÚY‹ˆK™Ù]
+ÝÚ[™×ÜÝ]\ÈÜˆˆ‹œÝÚ[™Ë\Ý]\Ë]ØZ]ŠB‚‚™YˆÙ]ØÛÛ™šY[˜ÙWØÛ\ÜÊÛÛ™šY[˜ÙJN‚ˆˆˆÔÔÈÛ\ÜÈ›ÜˆHÛÛ™šY[˜ÙH]™[˜YÙKˆˆˆ‚ˆ™]\›ˆÂˆ’YÚŽˆ˜ÛÛ™‹ZYÚ‹ˆ“YY][HŽˆ˜ÛÛ™‹[YY][H‹ˆ“ÝÈŽˆ˜ÛÛ™‹[ÝÈ‹ˆK™Ù]
+ÛÛ™šY[˜ÙK˜ÛÛ™‹[ÝÈŠB‚‚™YˆÙ]ÛÜ˜—ØÛ\ÜÊÜ˜—Ü™XYJN‚ˆˆˆÔÔÈÛ\ÜÈ›ÜˆHÔˆ™XY[™\ÜÈ˜YÙKˆˆˆ‚ˆ™]\›ˆ›Ü˜‹^Y\ÈˆYˆÜ˜—Ü™XYHOH–QTÈˆ[ÙH›Ü˜‹[›È‚‚‚™YˆÙ]ÛØ—ØÛ\ÜÊÜ™\—Ø›ØÚÊN‚ˆˆˆÔÔÈÛ\ÜÈ›ÜˆHÜ™\ˆ›ØÚÈ˜YÙKˆˆˆ‚ˆ™]\›ˆÂˆ‘[X[™Žˆ›Ø‹Y[X[™‹ˆ”Ý\HŽˆ›Ø‹\Ý\H‹ˆ“™]]˜[Žˆ›Ø‹[™]]˜[‹ˆK™Ù]
+Ü™\—Ø›ØÚË›Ø‹[™]]˜[ŠB‚‚™YˆÙ]Ù[žWØÛ\ÜÊ[žWÜ]X[]JN‚ˆˆˆÔÔÈÛ\ÜÈ›ÜˆH[žH]X[]H˜YÙKˆˆˆ‚ˆ™]\›ˆÂˆ”\™™XÝŽˆ™[žK\\™™XÝ‹ˆ“ÚØ^HŽˆ™[žK[ÚØ^H‹ˆ‘^[™YŽˆ™[žKY^[™Y‹ˆK™Ù]
+[žWÜ]X[]K™[žK[ÚØ^HŠB‚‚™YˆÙ]Ù^X×ØÛ\ÜÊ^X×ÜÝ]JN‚ˆˆˆÔÔÈÛ\ÜÈ›ÜˆH^XÝ][ÛˆÝ]H˜YÙKˆˆˆ‚ˆ™]\›ˆÂˆ•’QÑÑT‘QŽˆ™^XË]šYÙÙ\™Y‹ˆ”‘PQHŽˆ™^XË\™XYH‹ˆ•ÐRUŽˆ™^XË]ØZ]‹ˆK™Ù]
+^X×ÜÝ]K™^XË]ØZ]ŠB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈš[˜[XÝ[Ûˆ8 %Ú[™ÛHÛÝ\˜ÙHÙˆ]›ÜˆHRHXÚ\Ú[ÛˆX™[ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚—ÔÕÒS‘×ÔÕUT×ÐPÕSÓˆHÂˆÈ8¥ 8¥ Ý\œ™[[[ÙHX™[È8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆ”‘PQH8 %U‘SÓÈŽˆ
+”‘PQH‹™^XË\™XYH‹“]™[ÛÛ™š\›YY8 %[žH˜[YX[˜YÙHš\ÚÈŠKˆ”‘KPÓÓ‘’T“PUSÓˆŽˆ
+”‘KPÓÓ‘’T“PUSÓˆ‹™^XË\™KXÛÛ™š\›H‹”Ý[X[[žH›Ü›Z[™È8 %ØZ][™È›ÜˆÛÛ™š\›X][ÛˆØ[™HŠKˆ•‘S‘ÓÓ•S•PUSÓˆŽˆ
+•‘S‘ÓÓ•S•PUSÓˆ‹™^XËXÛÛ[X][Ûˆ‹œ™XZÛÝ][žH8 %˜YHHÛÛ[X][Û‹ÝÜ™[ÝÈœ™XZÛÝ]ŠKˆ•ÐRUŽˆ
+•ÐRU‹™^XË]ØZ]‹“›È˜[YÙ]\8 %›ÈXÝ[Û˜X›HYÙHšYÚ›ÝÈŠKˆÈ8¥ 8¥ YØXÞHX™[È
+˜XÚÝØ\™ÛÛ\]
+H8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆ‘ÓÓÑÕÒS‘ÈÐS‘QUHŽˆ
+”‘PQH‹™^XË\™XYH‹’YÚ\]X[]HÝÚ[™ÈÙ]\8 %Ø]Ú›Üˆ[žHŠKˆ”‘PQHQˆU‘SÓÈŽˆ
+”‘PQH‹™^XË\™XYH‹”šXÙH]Ù^H]™[8 %ÛÛ™š\›HÛÈ™Y›Ü™H[žHŠKˆ•ÐRU“ÔˆMSHÓÓ‘’T“PUSÓˆŽˆ
+”‘KPÓÓ‘’T“PUSÓˆ‹™^XË\™KXÛÛ™š\›H‹”ÝXÝ\™H[ˆXÙH8 %ØZ]›ÜˆM[HÛÛ™š\›X][ÛˆØ[™HŠKˆ•ÐRU“ÔˆSPÒÈŽˆ
+•ÐRU‹™^XË]ØZ]‹•™[™\ÈšYÚ]^[™Y8 %ØZ]›Üˆ[˜XÚÈÈ]™[ŠKˆ•ÓÈVS‘QŽˆ
+‘È“ÕÒTÑH‹™^XËY^[™Y‹”šXÙHÛÈ˜\ˆœ›ÛH[žH›Û™H8 %È›ÝÚ\ÙHŠKˆ““ÕS“ÕQÒQÑHŽˆ
+•ÐRU‹™^XË]ØZ]‹’[œÝY™šXÚY[YÙH8 %›ÈXÝ[Û˜X›HÝÚ[™ÈÙ]\ŠKˆU“ÒQU‘TÒTÕSÑHŽˆ
+•ÐRU‹™^XË]ØZ]‹]™\Ú\Ý[˜ÙH8 %ÛÜˆŽ”‹]›ÚYÛ™È[žHŠKˆU“ÒQÑPRÈÕ•PÕT‘HŽˆ
+•ÐRU‹™^XË]ØZ]‹•ÙXZÈX\šÙ]ÝXÝ\™H8 %]›ÚY\ÈÙ]\ŠKŸB‚‚™YˆÛÛ\]WÜÝÚ[™×Ùš[˜[ØXÝ[ÛŠÝÚ[™×ÜÝ]\ÎˆÝŠHOˆ\N‚ˆˆˆ“X\ÝÚ[™×ÜÝ]\È\™XÝHÈHš[˜[ØXÝ[Ûˆ\H
+XÝ[Û‹ÜÜË™X\ÛÛŠKˆˆˆ‚ˆ›ÝÈHÔÕÒS‘×ÔÕUT×ÐPÕSÓ‹™Ù]
+ÝÚ[™×ÜÝ]\ÈÜˆˆŠBˆYˆ›ÝÎ‚ˆ™]\›ˆ›ÝÂˆ™]\›ˆ•ÐRU‹™^XË]ØZ]‹“[Ûš]Üš[™È8 %ÛÛ™][ÛœÈ›ÝY]Y]‚‚‚—Ñ’SSÐPÕSÓ—ÐÔÔÈHÂˆ•’QÑÑT‘QŽˆ™^XË]šYÙÙ\™Y‹ˆ”‘PQHŽˆ™^XË\™XYH‹ˆ”‘KPÓÓ‘’T“PUSÓˆŽˆ™^XË\™KXÛÛ™š\›H‹ˆ•‘S‘ÓÓ•S•PUSÓˆŽˆ™^XËXÛÛ[X][Ûˆ‹ˆ•ÐRUŽˆ™^XË]ØZ]‹ˆ•ÐRU
+ÕÈÓÓ‘ŠHŽˆ™^XË]ØZ][ÝÈ‹ˆ‘È“ÕÒTÑHŽˆ™^XËY^[™Y‹ˆ““ÈÑUTŽˆ™^XË[›Ë\Ù]\‹ŸB‚‚™YˆÙ]Ùš[˜[ØXÝ[Û—ØÛ\ÜÊš[˜[ØXÝ[ÛŽˆÝŠHOˆÝŽ‚ˆ™]\›ˆÑ’SSÐPÕSÓ—ÐÔÔË™Ù]
+š[˜[ØXÝ[Û‹™^XË]ØZ]ŠB‚‚™YˆÛÛ\]WÙš[˜[ØXÝ[ÛŠˆÙ]\ÜØÛÜ™Nˆ[ˆØ]ÜØÛÜ™Nˆ[ˆÛÛXš[™YØÛÛ™šY[˜ÙNˆÝ‹ˆ[žWÜ]X[]NˆÝˆ›Û™Kˆ\Ü^WÙ^X×ÜÝ]NˆÝ‹ŠHOˆ\N‚ˆˆˆ‚ˆ\š]™HHÚ[™ÛHš[˜[XÚ\Ú[ÛˆÚÝÛˆ]™\ž]Ú\™H[ˆHRK‚ˆ™]\›œÈ
+š[˜[ØXÝ[ÛŽˆÝ‹ÜÜ×ØÛ\ÜÎˆÝ‹™X\ÛÛŽˆÝŠK‚‚ˆš[Üš]HÜ™\Ž‚ˆKˆ’QÑÑT‘Q8 %ÔˆÞ\Ý[HÛÛ™š\›YY[[žHÛÛ™][ÛœÈ
+Ù\ÜÚ[Û‹X]Ø\™JBˆ‹ˆÈ“ÕÒTÑH8 %šXÙH[™XYH^[™YÈ™]™\ˆ[\ˆ]BˆËˆ‘PQH8 %ØÛÜ™\È8¢iHÈ[™ÛÛ™šY[˜ÙH8¢iHYY][BˆˆÐRU
+ÕÈÓÓ‘ŠH8 %ØÛÜ™\È8¢iHÈ]ÛÛ™šY[˜ÙHÝÂˆKˆ‘PQH8 %ÔˆÞ\Ý[HØ^\È‘PQH]™[ˆYˆØÛÜ™\È\™H›Ü™\›[™Bˆ‹ˆ“ÈÑUT8 %Ù]\ÜØÛÜ™HÎÈ›Ý[™ÈXÝ[Û˜X›BˆËˆÐRU8 %Y˜][ÈÛÛ™][ÛœÈ›ÝY]Y]‚ˆHˆ^X×ÜÝ]H\È™]™\ˆ[ÙYšYY\™NÈÛ›HH\Ü^H^Y\ˆÚ[™Ù\Ë‚ˆˆˆ‚ˆÈKˆšYÙÙ\™YžHÔˆÞ\Ý[H\š[™È™YÝ[\ˆÝ\œÈ8 %Ý›Û™Ù\ÝÚYÛ˜[ˆYˆ\Ü^WÙ^X×ÜÝ]HOH•’QÑÑT‘QŽ‚ˆ™X\ÛÛˆH[[žHÛÛ™][ÛœÈÛÛ™š\›YY8 %XÝ›ÝÈ‚ˆÙÙÙ\‹™XYÊˆ™š[˜[ØXÝ[ÛU’QÑÑT‘QÙ]\I\ÈØ]I\ÈÛÛ™I\È[žOI\È‹ˆÙ]\ÜØÛÜ™KØ]ÜØÛÜ™KÛÛXš[™YØÛÛ™šY[˜ÙK[žWÜ]X[]Kˆ
+Bˆ™]\›ˆ•’QÑÑT‘Q‹™^XË]šYÙÙ\™Y‹™X\ÛÛ‚‚ˆÈ‹ˆ^[™Y[žH8 %È›ÝÚ\ÙH™YØ\™\ÜÈÙˆØÛÜ™\ÂˆYˆ
+[žWÜ]X[]HÜˆˆŠK›ÝÙ\Š
+HOH™^[™YŽ‚ˆ™X\ÛÛˆH”šXÙH^[™YX›Ý™H[žH›Û™H8 %ØZ]›Üˆ[˜XÚÈ‚ˆÙÙÙ\‹™XYÊˆ™š[˜[ØXÝ[ÛQÈ“ÕÒTÑHÙ]\I\ÈØ]I\ÈÛÛ™I\È[žOQ^[™Y‹ˆÙ]\ÜØÛÜ™KØ]ÜØÛÜ™KÛÛXš[™YØÛÛ™šY[˜ÙKˆ
+Bˆ™]\›ˆ‘È“ÕÒTÑH‹™^XËY^[™Y‹™X\ÛÛ‚‚ˆÈÈ	ˆˆØÛÜ™KX˜\ÙYXÚ\Ú[Ûˆ
+Ù]\8¢iH[™Ø][\Ý8¢iH
+BˆYˆÙ]\ÜØÛÜ™HH[™Ø]ÜØÛÜ™HH‚ˆYˆÛÛXš[™YØÛÛ™šY[˜ÙH[ˆ
+’YÚ‹“YY][HŠN‚ˆ™X\ÛÛˆH
+ˆˆ”Ù]\ÜÙ]\ÜØÛÜ™_KÌL0­ÈØ][\ÝØØ]ÜØÛÜ™_KÌL0­È‚ˆˆžØÛÛXš[™YØÛÛ™šY[˜Ù_HÛÛ™šY[˜ÙH‚ˆ
+BˆÙÙÙ\‹™XYÊˆ™š[˜[ØXÝ[ÛT‘PQHÙ]\I\ÈØ]I\ÈÛÛ™I\È[žOI\È‹ˆÙ]\ÜØÛÜ™KØ]ÜØÛÜ™KÛÛXš[™YØÛÛ™šY[˜ÙK[žWÜ]X[]Kˆ
+Bˆ™]\›ˆ”‘PQH‹™^XË\™XYH‹™X\ÛÛ‚ˆ[ÙN‚ˆ™X\ÛÛˆH
+ˆˆ”ØÛÜ™\ÈÝ›Û™È
+Ù]\ÜÙ]\ÜØÛÜ™_KØ][\ÝØØ]ÜØÛÜ™_JH‚ˆ˜]ÛÛ™šY[˜ÙHÝÈ8 %ØZ]›ÜˆÛÛ™š\›X][Ûˆ‚ˆ
+BˆÙÙÙ\‹™XYÊˆ™š[˜[ØXÝ[ÛUÐRU
+ÕÈÓÓ‘ŠHÙ]\I\ÈØ]I\ÈÛÛ™I\È[žOI\È‹ˆÙ]\ÜØÛÜ™KØ]ÜØÛÜ™KÛÛXš[™YØÛÛ™šY[˜ÙK[žWÜ]X[]Kˆ
+Bˆ™]\›ˆ•ÐRU
+ÕÈÓÓ‘ŠH‹™^XË]ØZ][ÝÈ‹™X\ÛÛ‚‚ˆÈKˆÔˆÞ\Ý[HØ^\È‘PQH]™[ˆYˆØÛÜ™\È\™H›Ü™\›[™BˆYˆ\Ü^WÙ^X×ÜÝ]HOH”‘PQHŽ‚ˆ™X\ÛÛˆH“ÔˆÛÛ™][ÛœÈY]8 %Ø]Ú[™È›Üˆ[žHÚYÛ˜[‚ˆÙÙÙ\‹™XYÊˆ™š[˜[ØXÝ[ÛT‘PQH
+ÔŠHÙ]\I\ÈØ]I\ÈÛÛ™I\È[žOI\È‹ˆÙ]\ÜØÛÜ™KØ]ÜØÛÜ™KÛÛXš[™YØÛÛ™šY[˜ÙK[žWÜ]X[]Kˆ
+Bˆ™]\›ˆ”‘PQH‹™^XË\™XYH‹™X\ÛÛ‚‚ˆÈ‹ˆ›ÈÙ]\ˆYˆÙ]\ÜØÛÜ™HÎ‚ˆ™X\ÛÛˆHˆ”Ù]\ØÛÜ™HÜÙ]\ÜØÛÜ™_KÌL8 %›ÈXÝ[Û˜X›H]\›ˆY]‚ˆÙÙÙ\‹™XYÊˆ™š[˜[ØXÝ[ÛS“ÈÑUTÙ]\I\ÈØ]I\ÈÛÛ™I\È[žOI\È‹ˆÙ]\ÜØÛÜ™KØ]ÜØÛÜ™KÛÛXš[™YØÛÛ™šY[˜ÙK[žWÜ]X[]Kˆ
+Bˆ™]\›ˆ““ÈÑUT‹™^XË[›Ë\Ù]\‹™X\ÛÛ‚‚ˆÈËˆY˜][ˆ™X\ÛÛˆHÛÛ™][ÛœÈ›ÝY]Y]8 %ÛÛ[YH[Ûš]Üš[™È‚ˆÙÙÙ\‹™XYÊˆ™š[˜[ØXÝ[ÛUÐRUÙ]\I\ÈØ]I\ÈÛÛ™I\È[žOI\È‹ˆÙ]\ÜØÛÜ™KØ]ÜØÛÜ™KÛÛXš[™YØÛÛ™šY[˜ÙK[žWÜ]X[]Kˆ
+Bˆ™]\›ˆ•ÐRU‹™^XË]ØZ]‹™X\ÛÛ‚‚‚™YˆÛÛ\]WÜ›
+\™XÝ[ÛŽˆÝ‹[žNˆ›Ø]^]Îˆ›Ø]
+HOˆ\N‚ˆˆˆ‚ˆÛÛ\]H\™XÝ[Û˜[	“	H[™™\Ý[X™[œ›ÛHHÛÜÙY˜YK‚ˆ™]\›œÈ
+›ÜÝˆ›Ø]™\Ý[ˆÝŠK‚ˆˆˆ‚ˆžN‚ˆ[žHH›Ø]
+[žJBˆ^]ÈH›Ø]
+^]ÊBˆ^Ù\
+\Q\œ›Ü‹˜[YQ\œ›ÜŠN‚ˆ™]\›ˆŒœ™XZÈ]™[ˆ‚‚ˆYˆ[žHOH‚ˆ™]\›ˆŒœ™XZÈ]™[ˆ‚‚ˆYˆ\™XÝ[ÛˆOH“Û™ÈŽ‚ˆ›ÜÝH
+^]ÈH[žJHÈ[žH
+ˆLˆ[ÙNˆÈÚÜˆ›ÜÝH
+[žHH^]ÊHÈ[žH
+ˆL‚ˆ›ÜÝH›Ý[™
+›ÜÝŠBˆYˆ›ÜÝˆ‚ˆ™\Ý[H•Ú[ˆ‚ˆ[Yˆ›ÜÝ‚ˆ™\Ý[H“ÜÜÈ‚ˆ[ÙN‚ˆ™\Ý[Hœ™XZÈ]™[ˆ‚ˆ™]\›ˆ›ÜÝ™\Ý[‚‚™YˆÛÛ\]WÚ›Ý\›˜[ÜÝ[[X\žJ[šY\Îˆ\Ý
+HOˆXÝ‚ˆˆˆ‚ˆ\š]™HÚ[‹\˜]K	“Ý]Ë[™\‹\Ù]\œ™XZÙÝÛˆœ›ÛH›Ý\›˜[[šY\Ë‚ˆ™]\›œÈHXÝÛÛœÝ[YY\™XÝHžHH›Ý\›˜[[\]K‚ˆˆˆ‚ˆYˆ›Ý[šY\Î‚ˆ™]\›ˆÈÝ[ŽˆÚ[œÈŽˆ›ÜÜÙ\ÈŽˆ˜™HŽˆˆÚ[—Ü˜]HŽˆ›Û™K˜]™×ÝÚ[ˆŽˆ›Û™K˜]™×ÛÜÜÈŽˆ›Û™KˆÝ[Ü›ŽˆŒœÙ]\ÈŽˆ×K›[ÛY[[WØ˜[™ÈŽˆ×_B‚ˆÚ[œÈHÙH›ÜˆH[ˆ[šY\ÈYˆK™Ù]
+œ™\Ý[ŠHOH•Ú[ˆ—BˆÜÜÙ\ÈHÙH›ÜˆH[ˆ[šY\ÈYˆK™Ù]
+œ™\Ý[ŠHOH“ÜÜÈ—Bˆ™\ÈHÙH›ÜˆH[ˆ[šY\ÈYˆK™Ù]
+œ™\Ý[ŠHOHœ™XZÈ]™[ˆ—B‚ˆÚ[—Ü˜]HH›Ý[™
+[ŠÚ[œÊHÈ[Š[šY\ÊH
+ˆLJHYˆ[šY\È[ÙH›Û™Bˆ]™×ÝÚ[ˆH›Ý[™
+Ý[JVÈœ›ÜÝ—H›ÜˆH[ˆÚ[œÊHÈ[ŠÚ[œÊKŠHYˆÚ[œÈ[ÙH›Û™Bˆ]™×ÛÜÜÈH›Ý[™
+Ý[JVÈœ›ÜÝ—H›ÜˆH[ˆÜÜÙ\ÊHÈ[ŠÜÜÙ\ÊKŠHYˆÜÜÙ\È[ÙH›Û™BˆÝ[Ü›H›Ý[™
+Ý[JK™Ù]
+œ›ÜÝŠHÜˆ›ÜˆH[ˆ[šY\ÊKŠB‚ˆÈ\‹\Ù]\œ™XZÙÝÛˆ8 %˜[šÈžHÚ[ˆ˜]H
+Z[ˆˆ˜Y\ÈÈ\X\ˆ[ˆ˜[šÙY\Ý
+BˆÙ]\ÛX\HY˜][XÝ
+\Ý
+Bˆ›ÜˆH[ˆ[šY\Î‚ˆÝHK™Ù]
+œÙ]\Ý\HŠHÜˆ•[YÙÙY‚ˆÙ]\ÛX\ÜÝK˜\[™
+JB‚ˆÙ]\ÈH×Bˆ›ÜˆÝ˜Y\È[ˆÙ]\ÛX\š][\Ê
+N‚ˆÝÝÚ[œÈHÝ›Üˆ[ˆ˜Y\ÈYˆ™Ù]
+œ™\Ý[ŠHOH•Ú[ˆ—BˆÝÝÜˆH›Ý[™
+[ŠÝÝÚ[œÊHÈ[Š˜Y\ÊH
+ˆLJBˆÝÜ›H›Ý[™
+Ý[J™Ù]
+œ›ÜÝŠHÜˆ›Üˆ[ˆ˜Y\ÊHÈ[Š˜Y\ÊKŠBˆÙ]\Ë˜\[™
+ÂˆœÙ]\Ý\HŽˆÝˆ˜ÛÝ[Žˆ[Š˜Y\ÊKˆÚ[—Ü˜]HŽˆÝÝÜ‹ˆ˜]™×Ü›ŽˆÝÜ›ˆÚ[œÈŽˆ[ŠÝÝÚ[œÊKˆ›ÜÜÙ\ÈŽˆ[Š˜Y\ÊHH[ŠÝÝÚ[œÊKˆJBˆÙ]\ËœÛÜ
+Ù^O[[X™HÎˆ
+ÖÈÚ[—Ü˜]H—KÖÈ˜]™×Ü›—JK™]™\œÙOUYJB‚ˆÈ[ÛY[[HØÛÜ™H˜[™ÎˆÜ›Ý\KLÈÈMˆÈËNÈKLLˆ˜[™ÈHÊŒKLÈ‹KÊK
+Mˆ‹ŠK
+ËN‹Ë
+K
+ŽKLL‹KL
+WBˆ[ÛY[[WØ˜[™ÈH×Bˆ›ÜˆX™[ËH[ˆ˜[™Î‚ˆ˜[™HÙH›ÜˆH[ˆ[šY\ÂˆYˆK™Ù]
+›[ÛY[[WÜØÛÜ™HŠH[™ÈHVÈ›[ÛY[[WÜØÛÜ™H—HHWBˆYˆ›Ý˜[™‚ˆÛÛ[YBˆÈHÝ›Üˆ[ˆ˜[™Yˆ™Ù]
+œ™\Ý[ŠHOH•Ú[ˆ—Bˆ[ÛY[[WØ˜[™Ë˜\[™
+Âˆ›X™[ŽˆX™[ˆ˜ÛÝ[Žˆ[Š˜[™
+KˆÚ[—Ü˜]HŽˆ›Ý[™
+[ŠÊHÈ[Š˜[™
+H
+ˆLJKˆ˜]™×Ü›Žˆ›Ý[™
+Ý[J™Ù]
+œ›ÜÝŠHÜˆ›Üˆ[ˆ˜[™
+HÈ[Š˜[™
+KŠKˆJB‚ˆ™]\›ˆÂˆÝ[Žˆ[Š[šY\ÊKˆÚ[œÈŽˆ[ŠÚ[œÊKˆ›ÜÜÙ\ÈŽˆ[ŠÜÜÙ\ÊKˆ˜™HŽˆ[Š™\ÊKˆÚ[—Ü˜]HŽˆÚ[—Ü˜]Kˆ˜]™×ÝÚ[ˆŽˆ]™×ÝÚ[‹ˆ˜]™×ÛÜÜÈŽˆ]™×ÛÜÜËˆÝ[Ü›ŽˆÝ[Ü›ˆœÙ]\ÈŽˆÙ]\Ëˆ›[ÛY[[WØ˜[™ÈŽˆ[ÛY[[WØ˜[™ËˆB‚‚™YˆÛÛ\]WÜœŠ[—ØšX\Ë[žKÝÜ\™Ù]
+N‚ˆˆˆ‚ˆÛÛ\]Hš\ÚËÜ™]Ø\™˜][Èœ›ÛH[ˆšY[Ë‚ˆ™]\›œÈ
+œ—Ü˜][Îˆ›Ø]œ—Ù\Ü^NˆÝ‹œ—ØÛ\ÜÎˆÝŠHÜˆ
+›Û™K	ø %	Ë	Üœ‹[™]]˜[	ÊK‚ˆÛ™Îˆ™]Ø\™H\™Ù]H[žKš\ÚÈH[žHHÝÜˆÚÜˆ™]Ø\™H[žHH\™Ù]š\ÚÈHÝÜH[žBˆˆˆ‚ˆžN‚ˆ[žHH›Ø]
+[žJBˆÝÜH›Ø]
+ÝÜ
+Bˆ\™Ù]H›Ø]
+\™Ù]
+Bˆ^Ù\
+\Q\œ›Ü‹˜[YQ\œ›ÜŠN‚ˆ™]\›ˆ›Û™K¸ %‹œœ‹[™]]˜[‚‚ˆYˆ[—ØšX\ÈOH“Û™ÈŽ‚ˆ™]Ø\™H\™Ù]H[žBˆš\ÚÈH[žHHÝÜˆ[Yˆ[—ØšX\ÈOH”ÚÜŽ‚ˆ™]Ø\™H[žHH\™Ù]ˆš\ÚÈHÝÜH[žBˆ[ÙN‚ˆ™]\›ˆ›Û™K¸ %‹œœ‹[™]]˜[‚‚ˆYˆš\ÚÈHÜˆ™]Ø\™‚ˆ™]\›ˆ›Û™K’[˜[Y‹œœ‹]Ø\›ˆ‚‚ˆ˜][ÈH™]Ø\™Èš\ÚÂˆ\Ü^HHˆžÜ˜][Î‹ŒYŸNŒH‚ˆYˆ˜][ÈHŽ‚ˆÜÜÈHœœ‹YÛÛÙ‚ˆ[Yˆ˜][ÈHN‚ˆÜÜÈHœœ‹[ÚØ^H‚ˆ[ÙN‚ˆÜÜÈHœœ‹\ÛÜˆ‚ˆ™]\›ˆ˜][Ë\Ü^KÜÜÂ‚‚™YˆÛÛ\]WÝ˜YWØÛØXÚ
+ÝØÚÎˆXÝ[ŽˆXÝX\šÙ]Ý[\ˆXÝš\Ú×ÜÙ][™ÜÎˆXÝ
+HOˆXÝ‚ˆˆˆ‚ˆ™]\›ˆHÛØXÚ[™È™\™XÝ›ÜˆHÝ\œ™[ÝØÚÈ
+È[ˆ
+ÈX\šÙ]ÛÛ™][ÛœË‚ˆÝ]]ˆØÛØXÚÜÝ]\ËY\ÜØYÙK]™[ÜÜË™YXÙWÜÚ^™KÚYÛ˜[ßBˆÛØXÚÜÝ]\Èˆ•QHSÕÑQˆ•ÐUÒˆ”‘QPÑHÒV‘Hˆ“ÐÒÑQ‚ˆ]™[ˆ™ÛÈˆØ]Úˆœ™YXÙHˆ˜›ØÚÙY‚ˆˆˆ‚ˆ]HX\šÙ]Ý[\ÜˆßBˆ™YÚ[YHH]™Ù]
+œ™YÚ[YH‹“‘UUSŠBˆÛ™Ü×ÛÚÈH]™Ù]
+›Û™Ü×ÛÚÈ‹YJBˆÚÜ×ÛÚÈH]™Ù]
+œÚÜ×ÛÚÈ‹YJBˆ™YXÙWÜÞˆH]™Ù]
+œ™YXÙWÜÚ^™H‹˜[ÙJBˆXÚ\Ú[ÛˆH]™Ù]
+™XÚ\Ú[Û—ØÛY‹ˆŠBˆYˆXÚ\Ú[Ûˆ[ˆ
+“ØY[™ø )ˆ‹¸ %‹ˆ‹›Û™JN‚ˆXÚ\Ú[ÛˆHˆ‚‚ˆHÝØÚË™Ù]
+˜YWÜ\›Z\ÜÚ[ÛˆŠHÜˆßBˆ\›HH™Ù]
+œ\›Z\ÜÚ[Ûˆ‹•ÐUÒŠBˆ\›WÜœÛˆH™Ù]
+œ™X\ÛÛˆ‹ˆŠB‚ˆšX\ÈHÝØÚË™Ù]
+˜YWØšX\È‹ˆŠBˆÝÚ[™×ÜØÈH›Ø]
+ÝØÚË™Ù]
+œÝÚ[™×ÜØÛÜ™HŠHÜˆ
+BˆØ]ÜØÈH›Ø]
+ÝØÚË™Ù]
+˜Ø][\ÝÜØÛÜ™HŠHÜˆ
+BˆœˆH›Ø]
+ÝØÚË™Ù]
+œš\Ú×Ü™]Ø\™ŠHÜˆ
+Bˆ™[™HÝØÚË™Ù]
+™Z[WÝ™[™ŠHÜˆˆ‚ˆ^[™YH›ÛÛ
+ÝØÚË™Ù]
+š\×Ù^[™Y‹˜[ÙJJBˆ[žWÜ]X[]HHÝØÚË™Ù]
+™[žWÜ]X[]HŠHÜˆˆ‚ˆ[ÛY[[WÜØÈH›Ø]
+ÝØÚË™Ù]
+›[ÛY[[WÜØÛÜ™HŠHÜˆ
+B‚ˆÈÙ]\X™[ˆ™Y™\ˆ[ÙK\ÜXÚYšXÈ\K˜[˜XÚÈÈÙ[™\šXÂˆ˜Y[™×Û[ÙHHš\Ú×ÜÙ][™ÜË™Ù]
+˜Y[™×Û[ÙH‹”ÕÒS‘ÈQHŠBˆ\×Ù^WÝ˜YHH‘VHˆ[ˆ˜Y[™×Û[ÙK\\Š
+BˆÙ]\Ü˜]ÈHÝØÚË™Ù]
+œÙ]\Ý\HŠHYˆ\×Ù^WÝ˜YH[ÙHÝØÚË™Ù]
+œÝÚ[™×ÜÙ]\Ý\HŠBˆÙ]\Ü˜]ÈHÙ]\Ü˜]ÈÜˆÝØÚË™Ù]
+œÙ]\Ý\HŠHÜˆÝØÚË™Ù]
+œÝÚ[™×ÜÙ]\Ý\HŠHÜˆˆ‚ˆÙ]\ÛX™[HÙ]\Ü˜]ËœÝš\
+
+HYˆÙ]\Ü˜]È[ÙH\ÈÙ]\‚ˆ[ÙWÛX™[H‘^H˜YHˆYˆ\×Ù^WÝ˜YH[ÙH”ÝÚ[™È˜YH‚‚ˆ\×Ù[žHH›ÛÛ
+[‹™Ù]
+™[žWÛ]™[ŠJBˆ\×ÜÝÜH›ÛÛ
+[‹™Ù]
+œÝÜÛÜÜÈŠJBˆ\×Ý\™Ù]H›ÛÛ
+[‹™Ù]
+\™Ù]ÜšXÙHŠJB‚ˆÚYÛ˜[ÈH×BˆZ\ÜÚ[™ÈH×B‚ˆÈ8¥ 8¥ \™›ØÚÜÈ8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆYˆ™YÚ[YHOH““×ÕQHŽ‚ˆ™]\›ˆÂˆ˜ÛØXÚÜÝ]\ÈŽˆ“ÐÒÑQ‹ˆ›Y\ÜØYÙHŽˆ›ØÚÙYˆ’V\ÈÜZÚ[™È[™X\šÙ]ÛÛ™][ÛœÈÈ›ÝÝ\Ü[žH[šY\ÈÙ^KˆÚ]Ý]ˆ‹ˆ›]™[Žˆ˜›ØÚÙY‹˜ÜÜÈŽˆ˜ÛØXÚX›ØÚÙY‹œ™YXÙWÜÚ^™HŽˆ˜[ÙKˆœÚYÛ˜[ÈŽˆÈ“›Ë]˜YH™YÚ[YHXÝ]™H
+’VÜZÙJH‹•ØZ]›Üˆ›Û][]HÈ›Ü›X[^™H—KˆB‚ˆYˆ\›HOH“ÐÒÑQŽ‚ˆœÛˆH\›WÜœÛ–ÎŒLŒHYˆ\›WÜœÛˆ[ÙH”Ù]\Ù\È›ÝYY]Z[š[][H[žHÜš]\šXKˆ‚ˆ™]\›ˆÂˆ˜ÛØXÚÜÝ]\ÈŽˆ“ÐÒÑQ‹ˆ›Y\ÜØYÙHŽˆˆ›ØÚÙYˆÜœÛŸH‹ˆ›]™[Žˆ˜›ØÚÙY‹˜ÜÜÈŽˆ˜ÛØXÚX›ØÚÙY‹œ™YXÙWÜÚ^™HŽˆ˜[ÙKˆœÚYÛ˜[ÈŽˆÜ\›WÜœÛ—HYˆ\›WÜœÛˆ[ÙHÈ”™]šY]ÈÙ]\]X[]H[™[žHÛÛ™][ÛœÈ—KˆB‚ˆYˆšX\ÈOH“Û™Èˆ[™Û™Ü×ÛÚÈ\È˜[ÙN‚ˆ™]\›ˆÂˆ˜ÛØXÚÜÝ]\ÈŽˆ“ÐÒÑQ‹ˆ›Y\ÜØYÙHŽˆ›ØÚÙYˆX\šÙ]™YÚ[YH\Èš\ÚË[Ù™ˆ8 %Û™ÜÈ\™H›ÝÝ\ÜYšYÚ›ÝËˆØZ]›ÜˆH™YÚ[YHÚYˆ‹ˆ›]™[Žˆ˜›ØÚÙY‹˜ÜÜÈŽˆ˜ÛØXÚX›ØÚÙY‹œ™YXÙWÜÚ^™HŽˆYKˆœÚYÛ˜[ÈŽˆÙˆ”™YÚ[YNˆÜ™YÚ[Y_H8 %Û™ÜÈÝ\™\ÜÙY‹ÛÛœÚY\ˆØZ][™ÈÜˆ›\[™ÈÈÚÜšX\È—KˆB‚ˆYˆšX\ÈOH”ÚÜˆ[™ÚÜ×ÛÚÈ\È˜[ÙN‚ˆ™]\›ˆÂˆ˜ÛØXÚÜÝ]\ÈŽˆ“ÐÒÑQ‹ˆ›Y\ÜØYÙHŽˆ›ØÚÙYˆX\šÙ]\È™[™[™È\8 %ÚÜ[™È\™H\ÈYØZ[œÝH\KˆØZ]›ÜˆHÜ[™ÈÝXÝ\™Kˆ‹ˆ›]™[Žˆ˜›ØÚÙY‹˜ÜÜÈŽˆ˜ÛØXÚX›ØÚÙY‹œ™YXÙWÜÚ^™HŽˆYKˆœÚYÛ˜[ÈŽˆÙˆ”™YÚ[YNˆÜ™YÚ[Y_H8 %ÚÜÈÝ\™\ÜÙY‹•ØZ]›ÜˆÛX\ˆÜ[™ÈÝXÝ\™HÜˆ™[™ÚY—KˆB‚ˆÈ8¥ 8¥ Z\ÜÚ[™È[ˆ[[Y[È8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆYˆ\×Ù[žH[™›Ý\×ÜÝÜ‚ˆZ\ÜÚ[™Ë˜\[™
+››ÈÝÜÜÜÈ8 %Ø[››ÝÚ^™HÜÚ][ÛˆŠBˆYˆ\×Ù[žH[™\×ÜÝÜ[™›Ý\×Ý\™Ù]‚ˆZ\ÜÚ[™Ë˜\[™
+››È\™Ù]8 %Ž”ˆ[šÛ›ÝÛˆŠB‚ˆÈ8¥ 8¥ ]X[]HÚYÛ˜[È8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆYˆÝÚ[™×ÜØÈH‚ˆÚYÛ˜[Ë˜\[™
+ˆJÈÙ]\
+ÜÝÚ[™×ÜØÎ‹ŒŸKÌL
+HŠBˆ[YˆÝÚ[™×ÜØÈHŽ‚ˆÚYÛ˜[Ë˜\[™
+ˆ”]X[]HÙ]\
+ÜÝÚ[™×ÜØÎ‹ŒŸKÌL
+HŠBˆ[YˆÝÚ[™×ÜØÈˆ‚ˆÚYÛ˜[Ë˜\[™
+ˆ•ÙXZÈÙ]\
+ÜÝÚ[™×ÜØÎ‹ŒŸKÌL
+HŠB‚ˆYˆ[ÛY[[WÜØÈHÎ‚ˆÚYÛ˜[Ë˜\[™
+ˆ”Ý›Û™È[ÛY[[H
+Û[ÛY[[WÜØÎ‹ŒŸKÌL
+HŠBˆ[Yˆ[ÛY[[WÜØÈH‚ˆÚYÛ˜[Ë˜\[™
+ˆ“[Ù\˜]H[ÛY[[H
+Û[ÛY[[WÜØÎ‹ŒŸKÌL
+HŠBˆ[Yˆ[ÛY[[WÜØÈˆ‚ˆÚYÛ˜[Ë˜\[™
+ˆ•ÙXZÈ[ÛY[[H
+Û[ÛY[[WÜØÎ‹ŒŸKÌL
+HŠB‚ˆYˆØ]ÜØÈHÎ‚ˆÚYÛ˜[Ë˜\[™
+ˆ”Ý›Û™ÈØ][\Ý
+ØØ]ÜØÎ‹ŒŸKÌL
+HŠBˆ[YˆØ]ÜØÈH‚ˆÚYÛ˜[Ë˜\[™
+ˆØ][\Ý™\Ù[
+ØØ]ÜØÎ‹ŒŸKÌL
+HŠBˆ[YˆØ]ÜØÈˆ‚ˆÚYÛ˜[Ë˜\[™
+ˆ•ÙXZÈØ][\Ý
+ØØ]ÜØÎ‹ŒŸKÌL
+HŠB‚ˆYˆœˆHÎ‚ˆÚYÛ˜[Ë˜\[™
+ˆ‘^Ù[[Ž”ˆ
+ÜœŽ‹ŒYŸNŒJHŠBˆ[YˆœˆHŽ‚ˆÚYÛ˜[Ë˜\[™
+ˆ‘ÛÛÙŽ”ˆ
+ÜœŽ‹ŒYŸNŒJHŠBˆ[YˆœˆHN‚ˆÚYÛ˜[Ë˜\[™
+ˆXØÙ\X›HŽ”ˆ
+ÜœŽ‹ŒYŸNŒJHŠBˆ[Yˆœˆˆ‚ˆÚYÛ˜[Ë˜\[™
+ˆ”ÛÜˆŽ”ˆ
+ÜœŽ‹ŒYŸNŒH8 %ÛÛœÚY\ˆ\ÜÚ[™ÊHŠB‚ˆYˆ™[™‚ˆÚYÛ˜[Ë˜\[™
+ˆ•™[™ˆÝ™[™HŠB‚ˆ\×Ù^[™YÙ[žHH^[™YÜˆ[žWÜ]X[]HOH‘^[™Y‚ˆYˆ\×Ù^[™YÙ[žN‚ˆÚYÛ˜[Ë˜\[™
+”šXÙH^[™Yœ›ÛHYX[[žH›Û™HŠB‚ˆÜ™YÚ[YWÛX™[ÈHÂˆ”’TÒ×ÓÓˆŽˆ“X\šÙ]ˆš\ÚË[Ûˆ
+˜]›Ü˜X›JH‹ˆ“‘UUSŽˆ“X\šÙ]ˆ™]]˜[‹ˆÐUUSÓˆŽˆ“X\šÙ]ˆØ]][Û‹ØÚÜ›Û™H‹ˆ”’TÒ×ÓÑ‘ˆŽˆ“X\šÙ]ˆš\ÚË[Ù™ˆ‹ˆBˆYˆ™YÚ[YH[ˆÜ™YÚ[YWÛX™[Î‚ˆÚYÛ˜[Ë˜\[™
+Ü™YÚ[YWÛX™[ÖÜ™YÚ[YWJB‚ˆÈ8¥ 8¥ ]\›Z[™HYˆX\šÙ]™\]Z\™\ÈÚ^™H™YXÝ[Ûˆ8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆ™YXÙWÙ›YÈH™YXÙWÜÞˆÜˆ™YÚ[YH[ˆ
+ÐUUSÓˆ‹”’TÒ×ÓÑ‘ˆŠB‚ˆÈ8¥ 8¥ Z[™\™XÝ8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆYˆ\›HOH•QHSÕÑQŽ‚‚ˆÈÙXZÈŽ”ˆ\™Ø]BˆYˆœˆˆ[™œˆKN‚ˆYˆZ\ÜÚ[™Î‚ˆÚYÛ˜[Ë˜\[™
+“›ÝNˆˆ
+ÈŽÈ‹š›Ú[ŠZ\ÜÚ[™ÊJBˆ™]\›ˆÂˆ˜ÛØXÚÜÝ]\ÈŽˆ“ÐÒÑQ‹ˆ›Y\ÜØYÙHŽˆˆ›ØÚÙYˆš\ÚËÜ™]Ø\™\ÈÛÈÙXZÈ
+ÜœŽ‹ŒYŸNŒJH8 %™YY]X\ÝKNŒHÈ\ÝYžH[žKˆ‹ˆ›]™[Žˆ˜›ØÚÙY‹˜ÜÜÈŽˆ˜ÛØXÚX›ØÚÙY‹œ™YXÙWÜÚ^™HŽˆ˜[ÙKˆœÚYÛ˜[ÈŽˆÚYÛ˜[ÖÎ—KˆB‚ˆÈ^[™Y[žNˆÝÛ™Ü˜YHÈÐUÒ™YØ\™\ÜÈÙˆ\›Z\ÜÚ[Û‚ˆYˆ\×Ù^[™YÙ[žN‚ˆ\ÙÈH
+ˆ•Ø]ÚÛ›KˆÛ[ÙWÛX™[H[žH\È^[™Yœ›ÛHHYX[›Û™Kˆ‚ˆˆ‘È›ÝÚ\ÙH8 %ØZ]›ÜˆH[˜XÚÈ[ÈH[žH›Û™KˆŠBˆYˆZ\ÜÚ[™Î‚ˆ\ÙÈ
+ÏHˆ›ÝNˆˆ
+ÈŽÈ‹š›Ú[ŠZ\ÜÚ[™ÊH
+È‹ˆ‚ˆ™]\›ˆÂˆ˜ÛØXÚÜÝ]\ÈŽˆ•ÐUÒ‹ˆ›Y\ÜØYÙHŽˆ\ÙËˆ›]™[ŽˆØ]Ú‹˜ÜÜÈŽˆ˜ÛØXÚ]Ø]Ú‹œ™YXÙWÜÚ^™HŽˆ˜[ÙKˆœÚYÛ˜[ÈŽˆÚYÛ˜[ÖÎ—KˆB‚ˆÈJÈÙ]\[HÛÛ™š\›YYˆYˆÝÚ[™×ÜØÈH[™Ø]ÜØÈHH[™œˆHŽ‚ˆYˆ™YÚ[YHOH”’TÒ×ÓÓˆˆ[™[\Úˆ[ˆ™[™[™šX\ÈOH“Û™ÈŽ‚ˆ\ÙÈH
+ˆ•˜YH[ÝÙYˆJÈÜÙ]\ÛX™[H8 %™[™ÝXÝ\™K[™X\šÙ][[YÛ™Y›ÜˆÛ™ÜËˆ‚ˆˆ‘^XÝ]HÚ]Ý[™\™Ú^™KˆŠBˆ[Yˆ™X\š\Úˆ[ˆ™[™[™šX\ÈOH”ÚÜŽ‚ˆ\ÙÈH
+ˆ•˜YH[ÝÙYˆJÈÜÙ]\ÛX™[H[YÛ™Y›ÜˆHÚÜÚYKˆ‚ˆˆÛÛ™š\›HÝXÝ\™Hœ™XZÈ™Y›Ü™H[žKˆŠBˆ[ÙN‚ˆ\ÙÈH
+ˆ•˜YH[ÝÙYˆJÈÜÙ]\ÛX™[H8 %]X[]HÙ]\Ú]ÛÛYŽ”‹ˆ‚ˆˆÛÛ™š\›H[žHšYÙÙ\ˆ™Y›Ü™H^XÝ][™ËˆŠBˆ]™[ÜÜËÝ]\ÈH™ÛÈ‹˜ÛØXÚYÛÈ‹•QHSÕÑQ‚‚ˆÈÛÛYÙ]\Ú]ÛÛÙŽ”‚ˆ[YˆÝÚ[™×ÜØÈHˆ[™œˆHKN‚ˆ\ÙÈH
+ˆ•˜YH[ÝÙYˆ]X[]HÜÙ]\ÛX™[HÚ]XØÙ\X›HŽ”‹ˆ‚ˆˆ”Ý[™\™Ú^™K\ØÚ\[™Y^XÝ][Û‹ˆŠBˆ]™[ÜÜËÝ]\ÈH™ÛÈ‹˜ÛØXÚYÛÈ‹•QHSÕÑQ‚‚ˆÈ™[ÝËX]™\˜YÙH]X[]H8¡¤ˆ‘QPÑHÒV‘Bˆ[ÙN‚ˆ\ÙÈH
+ˆ•˜YH[ÝÙY]ÜÙ]\ÛX™[H]X[]H\È™[ÝÈYX[ˆ‚ˆˆ•\ÙH™YXÙYÚ^™H[™YÚÝÜ\ØÚ\[™KˆŠBˆ]™[ÜÜËÝ]\ÈHœ™YXÙH‹˜ÛØXÚ\™YXÙH‹”‘QPÑHÒV‘H‚ˆ™YXÙWÙ›YÈHYB‚ˆÈÝ™\œšYHÈ‘QPÑHÒV‘HÚ[ˆX\šÙ]ÛÛ™][ÛœÈ\™HÙXZÂˆYˆ™YXÙWÙ›YÈ[™]™[OH™ÛÈŽ‚ˆÚ^™WÛ›ÝHHˆˆ
+ÙXÚ\Ú[ÛŸJHˆYˆXÚ\Ú[Ûˆ[ÙHˆ‚ˆ\ÙÈ
+ÏHˆˆ™YXÙHÜÚ][ÛˆÚ^™H8 %X\šÙ]ÛÛ™][ÛœÈ\™H›Ý[HÝ\Ü]™^ÜÚ^™WÛ›Ý_Kˆ‚ˆ]™[ÜÜËÝ]\ÈHœ™YXÙH‹˜ÛØXÚ\™YXÙH‹”‘QPÑHÒV‘H‚‚ˆ[Yˆ\›HOH•ÐUÒŽ‚ˆYˆ[\Ú[˜XÚÈˆ[ˆ\›WÜœÛŽ‚ˆ\ÙÈH
+ˆ•Ø]Ú8 %[\Ú[˜XÚÈ[ˆ›ÙÜ™\ÜËˆšXÙH\ÈX›Ý™H›ÝŒSPH[™LSPH‚ˆÚ]HX[HšX›Û˜XØÚH™]˜XÙ[Y[ˆ™[™ÝXÝ\™H
+Ò
+H›ÝY]ÛÛ™š\›YY‚ˆ¸ %ØZ]›ÜˆHYÚ\ˆÝÈÈš[™Y›Ü™H[\š[™ËˆÝ›Û™ÈÛÛ[X][ÛˆØ[™Y]H‚ˆšYˆ[X[™ÛÈ\™Kˆ‚ˆ
+Bˆ[Yˆ\×Ù^[™YÙ[žN‚ˆ\ÙÈH
+•Ø]ÚÛ›KˆšXÙH\È^[™Yœ›ÛHYX[[žH8 %È›ÝÚ\ÙKˆ‚ˆ•ØZ]›ÜˆH[˜XÚÈ[ÈH›Û™KˆŠBˆ[YˆÝÚ[™×ÜØÈHÎ‚ˆ\ÙÈH
+ˆ•Ø]ÚÛ›KˆÜÙ]\ÛX™[HÛÚÜÈ›ÛZ\Ú[™È][žH\È›ÝY]ÛÛ™š\›YYˆ‚ˆˆ™H]Y[[™]HÙ]\ÛÛYHÈ[ÝKˆŠBˆ[YˆÝÚ[™×ÜØÈHN‚ˆ\ÙÈH
+•Ø]ÚÛ›KˆÙ]\\È›Ü›Z[™È]›ÝÛÛ™š\›YYˆ‚ˆ•ØZ]›ÜˆHÛX\™\ˆÚYÛ˜[™Y›Ü™HÛÛ[Z][™ÈØ\][ˆŠBˆ[Yˆ›Ý\×Ù[žN‚ˆ\ÙÈH
+•Ø]ÚÛ›Kˆ›È[žH]™[Yš[™Y8 %Z[H˜YH[ˆ™Y›Ü™HÛÛœÚY\š[™È\ËˆŠBˆ[ÙN‚ˆ\ÙÈH
+•Ø]ÚÛ›KˆÙ]\]X[]H\ÈÛÈÝÈÈ\ÝYžH[žHšYÚ›ÝËˆ‚ˆÚXÚÈ˜XÚÈÚ[ˆÛÛ™][ÛœÈ[\›Ý™KˆŠBˆ]™[ÜÜËÝ]\ÈHØ]Ú‹˜ÛØXÚ]Ø]Ú‹•ÐUÒ‚‚ˆÈÙXZÈX\šÙ]XZÙ\ÈÐUÒ[Ü™HÙˆH‘QPÑHÒV‘HØ\›š[™ÂˆYˆ™YÚ[YH[ˆ
+”’TÒ×ÓÑ‘ˆ‹ÐUUSÓˆŠN‚ˆ\ÙÈ
+ÏHˆX\šÙ]ÛÛ™][ÛœÈY^˜H™X\ÛÛˆÈÝ^HÛˆHÚY[[™\ÈÜˆÛÈ™\žHÛX[ˆ‚ˆ]™[ÜÜËÝ]\ÈHœ™YXÙH‹˜ÛØXÚ\™YXÙH‹”‘QPÑHÒV‘H‚‚ˆ[ÙN‚ˆ\ÙÈH
+“›ÈÛX\ˆXÝ[Û‹ˆ™]šY]ÈÙ]\]X[]H[™Ý\œ™[X\šÙ]ÛÛ™][ÛœÈ™Y›Ü™HÛÛ[Z][™ÈØ\][ˆŠBˆ]™[ÜÜËÝ]\ÈHØ]Ú‹˜ÛØXÚ]Ø]Ú‹•ÐUÒ‚‚ˆYˆZ\ÜÚ[™Î‚ˆ\ÙÈ
+ÏHˆ›ÝNˆˆ
+ÈŽÈ‹š›Ú[ŠZ\ÜÚ[™ÊH
+È‹ˆ‚‚ˆ™]\›ˆÂˆ˜ÛØXÚÜÝ]\ÈŽˆÝ]\Ëˆ›Y\ÜØYÙHŽˆ\ÙËˆ›]™[Žˆ]™[ˆ˜ÜÜÈŽˆÜÜËˆœ™YXÙWÜÚ^™HŽˆ™YXÙWÙ›YËˆœÚYÛ˜[ÈŽˆÚYÛ˜[ÖÎ—KˆB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ\ØÚ\[™H	ˆš\ÚÈ[™Ú[™H8 %\™H[˜Ý[ÛœÈ
+›È‹›È›\ÚÊBˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚™YˆÙ]Üš\Ú×ÜÙ][™ÜÊ\Ù\—ÚYˆ[HJHOˆXÝ‚ˆˆˆ“ØY[š\ÚÈÙ][™ÜÈœ›ÛH\Ù\—ÜÙ][™ÜÈÚ]ØY™HY˜][Ëˆˆˆ‚ˆYˆÙŠÙ^KY˜][
+N‚ˆˆHÙ]Ý\Ù\—ÜÙ][™Ê\Ù\—ÚYÙ^JBˆYˆˆ\È›Ý›Û™N‚ˆ™]\›ˆ‚ˆÈ˜[˜XÚÈÈÛØ˜[Ù][™ÜÈ›Üˆ˜XÚÝØ\™ÛÛ\]\š[™ÈZYÜ˜][Û‚ˆÝˆHÙ]ÜÙ][™ÊÙ^JBˆ™]\›ˆÝˆYˆÝˆ\È›Ý›Û™H[ÙHY˜][‚ˆYˆÜÙŠÙ^KY˜][
+N‚ˆžN‚ˆ™]\›ˆ›Ø]
+ÙŠÙ^KY˜][
+JBˆ^Ù\
+˜[YQ\œ›Ü‹\Q\œ›ÜŠN‚ˆ™]\›ˆ›Ø]
+Y˜][
+B‚ˆYˆÜÚJÙ^KY˜][
+N‚ˆžN‚ˆ™]\›ˆ[
+›Ø]
+ÙŠÙ^KY˜][
+JJBˆ^Ù\
+˜[YQ\œ›Ü‹\Q\œ›ÜŠN‚ˆ™]\›ˆ[
+Y˜][
+B‚ˆ™]\›ˆÂˆ˜Y[™×Û[ÙHŽˆÙŠ˜Y[™×Û[ÙH‹”ÕÒS‘ÈQHŠKˆ˜XØÛÝ[ÜÚ^™HŽˆÜÙŠ˜XØÛÝ[ÜÚ^™H‹ŒLŠKˆœš\Ú×ÜÝŽˆÜÙŠœš\Ú×ÜÝ‹ŒKŒŠKˆ›X^Ý˜Y\×Ü\—Ù^HŽˆÜÚJ›X^Ý˜Y\×Ü\—Ù^H‹ŒÈŠKˆ›X^ÙZ[WÛÜÜ×ÜÝŽˆÜÙŠ›X^ÙZ[WÛÜÜ×ÜÝ‹ŒËŒŠKˆœÝÜØY\—Ì—ÛÜÜÙ\ÈŽˆÙŠœÝÜØY\—Ì—ÛÜÜÙ\È‹ŒHŠHOHŒH‹ˆB‚‚™YˆÛÛ\]WÝ˜YWÜ\›Z\ÜÚ[ÛŠÝØÚÎˆXÝ˜YWÛ[ÙNˆÝŠHOˆXÝ‚ˆˆˆ‚ˆ™]\›œÈÜ\›Z\ÜÚ[Û‹ÜÜË™X\ÛÛŸK‚ˆ\›Z\ÜÚ[ÛŽˆ•QHSÕÑQˆ•ÐUÒˆ“ÐÒÑQ‚‚ˆVHQN‚ˆJÈHÛÛ™š\›YYÙ]\\H
+ÔˆÈ•ÐT™XÛZ[HÈ[ÛY[[Hœ™XZÛÝ]
+HÚ]ˆ›Û[YH
+È[ÛY[[H™\ÚÛÈY]ˆØ][\Ý›ÛÜÝÈÛÛ™šY[˜ÙH]\È›ÝˆH\™Ø]H8 %Ú]Ý]]›Û[YH[™[ÛY[[H™\ÚÛÈ\™H˜Z\ÙY‚ˆ^[œÚ[Ûˆ\È[™\[™[HÚXÚÙY™^[Û™\ÝH[žWÜ]X[]HX™[‚‚ˆÕÒS‘ÈQN‚ˆJÈH™[™[YÛ™Y
+
+ÈZ[JH
+È˜[YÝXÝ\™H
+Ò
+H
+ÂˆšXÙH]YÚÙ^H]™[
+šXˆŒKŽ	KÍL	K[˜XÚÈÈŒÍLSPJH
+ÂˆŽ”ˆHKH
+ÈØ][\ÝHË‚ˆ^[œÚ[Ûˆ\È[™\[™[H]XÝYœ›ÛHSPH\Ý[˜ÙK‚ˆˆˆ‚ˆšX\ÈHÝØÚË™Ù]
+˜YWØšX\ÈŠHÜˆˆ‚ˆ[žHHÝØÚË™Ù]
+™[žWÜ]X[]HŠHÜˆˆ‚‚ˆÈ\™›ØÚÈ8 %›È\™XÝ[Û˜[YÙBˆYˆšX\ÈOH]›ÚYŽ‚ˆ™]\›ˆÈœ\›Z\ÜÚ[ÛˆŽˆ“ÐÒÑQ‹˜ÜÜÈŽˆœ\›KX›ØÚÙY‹ˆœ™X\ÛÛˆŽˆ]›ÚYšX\È8 %›È\™XÝ[Û˜[YÙKÚÚ\\ÈÝØÚÈŸB‚ˆÈX™[X˜\ÙY^[œÚ[Ûˆ8 %\™›ØÚÈ›Üˆ^H˜Y\ÈÛ›K‚ˆÈÝÚ[™È˜Y\È\ÙHH[™\[™[SPKY\Ý[˜ÙHÚXÚÈ™[ÝÈÛÈ^H\™[‰ÝˆÈÝX›K\[˜[\ÙYÚ[ˆHX™[š\™\ÈÛˆHX[H[˜XÚÈYË‚ˆYˆ[žHOH‘^[™Yˆ[™˜YWÛ[ÙHOH”ÕÒS‘ÈQHŽ‚ˆ™]\›ˆÈœ\›Z\ÜÚ[ÛˆŽˆ“ÐÒÑQ‹˜ÜÜÈŽˆœ\›KX›ØÚÙY‹ˆœ™X\ÛÛˆŽˆ‘[žH^[™Y8 %È›ÝÚ\ÙKØZ]›Üˆ[˜XÚÈÈ›Û™HŸB‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKHÂˆÈVHQHÂˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKHÂˆYˆ˜YWÛ[ÙHOH‘VHQHŽ‚ˆÙ]\Ý\HH
+ÝØÚË™Ù]
+œÙ]\Ý\HŠHÜˆˆŠK\\Š
+BˆÜ˜—Ü™XYHHÝØÚË™Ù]
+›Ü˜—Ü™XYHŠHÜˆ““È‚ˆÜ˜—ÚYÚHÝØÚË™Ù]
+›Ü˜—ÚYÚŠHÜˆˆX›Ý™WÝØ\H›ÛÛ
+ÝØÚË™Ù]
+œšXÙWØX›Ý™WÝØ\ŠJBˆ™[™ÜÝXÝH›ÛÛ
+ÝØÚË™Ù]
+™[™ÜÝXÝ\™HŠJHÈ
+ÈÛÛ™š\›YYˆ[ÛHHÝØÚË™Ù]
+›[ÛY[[WÜØÛÜ™HŠHÜˆˆØ]HÝØÚË™Ù]
+˜Ø][\ÝÜØÛÜ™HŠHÜˆˆ›Û9Ûn:¶‰žËkºwµçHžN‚ˆÜËœÙ[™
+ÚœÛÛ‹™[\ÊØZ[Ü]ZXÚ×Ü^[ØY
+ÛÚY
+JJBˆ\ÝÜ\ÚHÝ[YK›[Û›ÝÛšXÊ
+BˆÚ[HYN‚ˆžN‚ˆ\ÙÈHÜËœ™XÙZ]™J[Y[Ý]LKŒ
+BˆYˆ\ÙÈ\È›Û™N‚ˆœ™XZÂˆ^Ù\^Ù\[ÛŽ‚ˆœ™XZÂˆYˆÝ[YK›[Û›ÝÛšXÊ
+HH\ÝÜ\ÚHKŒ‚ˆÜËœÙ[™
+ÚœÛÛ‹™[\ÊØZ[Ü]ZXÚ×Ü^[ØY
+ÛÚY
+JJBˆ\ÝÜ\ÚHÝ[YK›[Û›ÝÛšXÊ
+Bˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™XYÊÜ×Ü]ZXÚÈÛÜÙY
+ÛÚYI\ÊNˆ	\È‹ÛÚY^ÊB‚‚\œ›Ý]J‹Ø\KØ[\ÈŠB™Yˆ\WØ[\Ê
+N‚ˆˆˆ”™]\›ˆH[ÜÝ™XÙ[ÝÚ[™È[\È\È”ÓÓ‹ˆˆˆ‚ˆ™]\›ˆœÛÛšYžJÙ]Ø[\Ê
+JB‚‚\œ›Ý]J‹Ø[\ËØÛX\ˆ‹Y]ÙÏVÈ”ÔÕ—JB™Yˆ[\×ØÛX\Š
+N‚ˆˆˆ‘\ÛZ\ÜÈ[[™[™È[\Ëˆˆˆ‚ˆØÛX\—Ø[\Ê
+Bˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠ™\Ú›Ø\™ŠJB‚‚\œ›Ý]J‹Ø\KÝØ]Ú\ÝŠB™Yˆ\WÝØ]Ú\Ý
+
+N‚ˆˆˆ”™]\›ˆXÝ]™HØ]Ú\Ý\È˜[šÙY”ÓÓ‹ˆˆˆ‚ˆÛÚYHÙ]ØXÝ]™WÝÛÚY
+
+BˆØ]Ú\ÝHÙ]ÝØ]Ú\ÝÜÝØÚÜÊÛÚY
+HYˆÛÚY[ÙH×Bˆ]WÛX\HÜÖÈXÚÙ\ˆ—NˆÈ›ÜˆÈ[ˆÙ]Ø[ÜÝØÚ×Ù]J
+_BˆÝØÚÜÈHÙ]WÛX\ÝH›Üˆ[ˆØ]Ú\ÝYˆ[ˆ]WÛX\Bˆ™]\›ˆœÛÛšYžJ˜[š×ÜÝØÚÜÊÝØÚÜÊJB‚‚™Yˆ˜]ÚÜ™Yœ™\ÚÙ^X×ÜÝ]\ÊXÚÙ\œÎˆ\ÝÜÝ—K]WÛX\ˆXÝ
+HOˆXÝ‚ˆˆˆ‚ˆ™KY™]Ú]™H]H[™™KY]˜[X]H^X×ÜÝ]H›Üˆ[XÚÙ\œÈ[ˆ\˜[[‚‚ˆ\Ù\ÈH™XYÛÛÛÈYš[˜[˜ÙHØ[È[ˆÛÛ˜Ý\œ™[H
+Û™H™XY\ˆXÚÙ\ŠK‚ˆYˆHXÚÙ\‰ÜÈ^X×ÜÝ]HÜˆÙ^H]™HšY[ÈÚ[™ÙY\œÚ\ÝÈH\]HšXBˆ\]WÛ]™WÙšY[Ê
+HÛÈšYÙÙ\™YØ][Y\Ý[\ÈÝ^HXØÝ\˜]K‚‚ˆ™]\›œÈ[ˆ\]Y]WÛX\ÝXÚÙ\Žˆ™Yœ™\ÚYÜÝØÚ×ÙXÝK‚ˆˆˆ‚ˆYˆ›ÝXÚÙ\œÎ‚ˆ™]\›ˆ]WÛX\‚ˆ™Yœ™\ÚYÛX\HXÝ
+]WÛX\
+B‚ˆYˆÜ™Yœ™\ÚÛÛ™JXÚÙ\ŠN‚ˆ^\Ý[™ÈH]WÛX\™Ù]
+XÚÙ\ŠBˆYˆ›Ý^\Ý[™Î‚ˆ™]\›ˆXÚÙ\‹›Û™BˆžN‚ˆ\]YH]™WÜ™Yœ™\ÚÜÝØÚÊXÚÙ\‹^\Ý[™ÊBˆ™]\›ˆXÚÙ\‹\]Yˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹Ø\›š[™Ê›]™WÜ™Yœ™\ÚÜÝØÚÈ˜Z[Y›Üˆ	\Îˆ	\È‹XÚÙ\‹^ÊBˆ™]\›ˆXÚÙ\‹›Û™B‚ˆX^ÝÛÜšÙ\œÈHZ[Š[ŠXÚÙ\œÊK
+HÈØ\]ÛÛ˜Ý\œ™[Yš[˜[˜ÙHØ[ÂˆÈÈ“Õ\ÙH	ÝÚ]™XYÛÛ^XÝ]Ü‰È8 %]È×Ù^]×ÈØ[ÈÚ]ÝÛŠØZ]UYJBˆÈÚXÚ›ØÚÜÈ[™Yš[š][HÚ[ˆYš[˜[˜ÙH™XYÈ[™ÈÛˆÛÝYTË‚ˆÛÛH™XYÛÛ^XÝ]ÜŠX^ÝÛÜšÙ\œÏ[X^ÝÛÜšÙ\œÊBˆžN‚ˆ]\™\ÈHÜÛÛœÝX›Z]
+Ü™Yœ™\ÚÛÛ™K
+Nˆ›Üˆ[ˆXÚÙ\œßBˆžN‚ˆ›Üˆ]\™H[ˆ\×ØÛÛ\]Y
+]\™\Ë[Y[Ý]LJN‚ˆžN‚ˆXÚÙ\‹\]YH]\™Kœ™\Ý[
+
+Bˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹Ø\›š[™Ê˜˜]ÚÜ™Yœ™\Ú]\™H™\Ý[˜Z[Yˆ	\È‹^ÊBˆÛÛ[YBˆYˆ\]Y\È›Û™N‚ˆÛÛ[YBˆ™Yœ™\ÚYÛX\ÝXÚÙ\—HH\]YˆÈ\œÚ\ÝYˆ^X×ÜÝ]HÜˆ[žHØÛÜ™YšY[Ú[™ÙYˆÛH]WÛX\™Ù]
+XÚÙ\‹ßJBˆØÚ[™ÙYÙšY[ÈH
+ˆ™^X×ÜÝ]H‹›[ÛY[[WÜØÛÜ™H‹œÙ]\ÜØÛÜ™H‹›Ü˜—ÜÝ]\È‹ˆ›Ü˜—Ü™XYH‹™[žWÜ]X[]H‹›Ü™\—Ø›ØÚÈ‹œÙ]\Ý\H‹ˆ
+BˆYˆ[žJ\]Y™Ù]
+ŠHOHÛ™Ù]
+ŠH›Üˆˆ[ˆØÚ[™ÙYÙšY[ÊN‚ˆžN‚ˆ\]WÛ]™WÙšY[Ê\]Y
+Bˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹Ø\›š[™Ê\]WÛ]™WÙšY[È˜Z[Y›Üˆ	\Îˆ	\È‹XÚÙ\‹^ÊBˆ^Ù\^Ù\[ÛŽ‚ˆÙÙÙ\‹Ø\›š[™Ê˜˜]ÚÜ™Yœ™\ÚÙ^X×ÜÝ]\Îˆ[YYÝ]8 %™]\›š[™È\X[™\Ý[ÈŠBˆš[˜[N‚ˆÛÛœÚ]ÝÛŠØZ]Q˜[ÙKØ[˜Ù[Ù]\™\ÏUYJB‚ˆ™]\›ˆ™Yœ™\ÚYÛX\‚‚™YˆÜÝØÚ×ÜÝ[[X\žJÎˆXÝ
+HOˆXÝ‚ˆˆˆ”™]\›ˆH”ÓÓ‹\ØY™HÝXœÙ]Ùˆ[ˆ[››Ý]YÝØÚÈXÝ›Üˆ]™H\]\Ëˆˆˆ‚ˆšY[ÈHÂˆXÚÙ\ˆ‹˜Ý\œ™[ÜšXÙH‹™Ø\ÜÝ‹™Ø\Ù\Ü^H‹™Ø\ØÛ\ÜÈ‹ˆœ™[Ý›Û[YH‹˜]™×Ý›Û[YH‹ˆ›[ÛY[[WÜØÛÜ™H‹›[ÛY[[WÜ™X\ÛÛˆ‹›[ÛY[[WØÛÛ™šY[˜ÙH‹ˆœÙ]\ÜØÛÜ™H‹œÙ]\Ü™X\ÛÛˆ‹œÙ]\ØÛÛ™šY[˜ÙH‹œÙ]\Ý\H‹ˆ˜Ø][\ÝÜØÛÜ™H‹˜Ø][\ÝÜ™X\ÛÛˆ‹˜Ø][\ÝØÛÛ™šY[˜ÙH‹˜Ø][\ÝÜÝ[[X\žH‹ˆ˜Ø][\ÝØØ]YÛÜžH‹šXY[™\×Ù™]ÚYØ]‹ˆ˜Ø][\ÝÝYÜÈ‹šXY[™WÙœ™\Ú™\ÜÈ‹ˆ™^X×ÜÝ]H‹™\Ü^WÙ^X×ÜÝ]H‹™^X×ØÛ\ÜÈ‹ˆ™š[˜[ØXÝ[Ûˆ‹™š[˜[ØXÝ[Û—ØÛ\ÜÈ‹™š[˜[ØXÝ[Û—Ü™X\ÛÛˆ‹ˆ˜ÛÛXš[™YØÛÛ™šY[˜ÙH‹˜ÛÛXš[™YØÛÛ™—ØÛ\ÜÈ‹ˆ›Ü˜—Ü™XYH‹›Ü˜—ØÛ\ÜÈ‹›Ü˜—ÚYÚ‹›Ü˜—ÛÝÈ‹›Ü˜—ÜÝ]\È‹ˆ›Ü˜—ÜÝ]\×ØÛ\ÜÈ‹›Ü˜—Ü\ÙH‹›Ü˜—Ü\ÙWÛX™[‹›Ü˜—Ü\ÙWØÛ\ÜÈ‹ˆ›Ü˜—ØXÝ[Ûˆ‹›Ü˜—ØXÝ[Û—ØÛ\ÜÈ‹›Ü˜—ØXÝ[Û—ÜÝXˆ‹›Ü˜—ÜšXÙWÜÝ‹ˆ›Ü™\—Ø›ØÚÈ‹›Ø—ØÛ\ÜÈ‹ˆ™[žWÜ]X[]H‹™[žWØÛ\ÜÈ‹™[žWÛ›ÝH‹ˆ˜YWØšX\È‹˜šX\×ØÛ\ÜÈ‹ˆœØÛÜ™WØÛ\ÜÈ‹˜Ø]ÜØÛÜ™WØÛ\ÜÈ‹›[ÛWÜØÛÜ™WØÛ\ÜÈ‹ˆ™œ™\Ú™\ÜÈ‹™œ™\Ú™\Ü×ØÛ\ÜÈ‹ˆœÙ]\Ý\WØÛ\ÜÈ‹ˆ›\ÝÝ\]Y‹ˆœÜÚ][Û—ÜÚ^™H‹ˆœ™]—ØÛÜÙH‹œ™[X\šÙ]ÚYÚ‹œ™[X\šÙ]ÛÝÈ‹ˆœ™]—Ù^WÚYÚ‹œ™]—Ù^WÛÝÈ‹ˆœÙXÛÛ™\žWÝY\ˆ‹œÙXÛÛ™\žWÝY\—ØÛ\ÜÈ‹ˆÈØ[›ÛšXØ[Û\ÜÚYšXØ][Ûˆ
+Û\ÜÚYšY\‹˜Û\ÜÚYžJH8 %ÙY\\ÙH[‚ˆÈÞ[˜ÈÚ][››Ý]J
+IÜÈÝ]]ÛÈ]™\žH]™K\ÛYÕÙX”ÛØÚÙ]ˆÈÛÛœÝ[Y\ˆØ[ˆÜ›Ý\Ùš[\ˆžHHØ[YHXÚÙ]Ø]›ÚY›YÈBˆÈÙ\™\‹\™[™\™YYÙH\ÙY‚ˆ˜XÚÙ]‹˜]›ÚYØ›ØÚÙY‹˜Û\ÜÚYžWÜ™X\ÛÛˆ‹ˆœÚ[\YšYYØXÝ[Ûˆ‹œÚ[\YšYYØXÝ[Û—ØÛ\ÜÈ‹ˆÈÝÚ[™ÈšY[È
+™YYY›Üˆ]™HÜMHØ\™]Ú[™ÊBˆœÝÚ[™×ÜØÛÜ™H‹œÝÚ[™×ÜØÛÜ™WØÛ\ÜÈ‹œÝÚ[™×ÙÜ˜YH‹ˆœÝÚ[™×ÜÝ]\È‹œÝÚ[™×ÜÝ]\×ØÛ\ÜÈ‹ˆœÝÚ[™×ÜÙ]\Ý\H‹œÝÚ[™×ÜÙ]\Ý\WØÛ\ÜÈ‹ˆœÝÚ[™×ØÛÛ™šY[˜ÙWÛX™[‹ˆœ[˜XÚ×Ü]X[]H‹œ[˜XÚ×Ü]X[]WØÛ\ÜÈ‹ˆ™[žWÞ›Û™WÙ\Ü^H‹ˆ™[žWÙ\Ý[˜ÙWÙ\Ü^H‹™[žWÙ\Ý[˜ÙWØÛ\ÜÈ‹ˆœ™\Ú\Ý[˜ÙWÙ\Ý[˜ÙWÙ\Ü^H‹ˆœš\Ú×Ü™]Ø\™‹œš\Ú×Ü™]Ø\™Ù\Ü^H‹œš\Ú×Ü™]Ø\™ØÛ\ÜÈ‹ˆœœ—Ü]X[]WÛX™[‹œœ—Ü]X[]WØÛ\ÜÈ‹ˆœÝÜÛ]™[‹\™Ù]ÌH‹\™Ù]Ìˆ‹ˆ™Z[WÝ™[™‹šÝ™[™‹ˆš\×Ù^[™Y‹œÝÚ[™×Ù]WØ]˜Z[X›H‹ˆÈ™YYY›Üˆ]™H˜YÙH]Ú[™ÈÛˆH]Z[YÙBˆ˜YWÜ\›Z\ÜÚ[Ûˆ‹ˆÈ™[]]™HÝ™[™Ý
+™YYYžH^XÝ][ÛˆYÙJBˆœœ×ÜØÛÜ™WÙ\Ü^H‹œœ×ÛX™[‹œœ×ØÛ\ÜÈ‹œœ×Ýœ×Ü\\WÙ\Ü^H‹ˆÈ•ÐTˆØ\‹ˆÈÙXÝÜ‚ˆœÙXÝÜ—Ù]ˆ‹œÙXÝÜ—Û˜[YH‹œÙXÝÜ—ÛXY[™È‹œÙXÝÜ—ØÛ\ÜÈ‹ˆBˆ™]\›ˆÙŽˆË™Ù]
+ŠH›Üˆˆ[ˆšY[ßB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ›Û‹X›ØÚÚ[™È˜XÚÙÜ›Ý[™^XË\Ý]H™Yœ™\ÚˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈÙY\ÈYš[˜[˜ÙHØ[È[\™[HÙ™ˆHÝ[šXÛÜ›ˆ™\]Y\Ý™XY‚ˆÈ[™Ú[ÈØ[ÝšYÙÙ\—Ù^X×ÜÝ]WÜ™Yœ™\Ú
+
+H[™™]\›ˆÝ[Hˆ]BˆÈ[[YYX][NÈ\È˜XÚÙÜ›Ý[™™XY\]\ÈHˆ\Þ[˜Ú›Û›Ý\ÛK‚‚—Ø™×Ü™Yœ™\ÚÜÝ]NˆXÝHÈ˜XÝ]™HŽˆ˜[ÙK›\ÝÝšYÙÙ\™YŽˆŒB—Ø™×Ü™Yœ™\ÚÛØÚÈH™XY[™Ë“ØÚÊ
+B‚‚™YˆÝšYÙÙ\—Ù^X×ÜÝ]WÜ™Yœ™\Ú
+ÛÚYˆ[›Û™JHOˆ›Û™N‚ˆˆˆ‘š\™KX[™Y›Ü™Ù]˜XÚÙÜ›Ý[™™Yœ™\Úˆ›Ë[ÜYˆÛ™H\È[™XYH[›š[™ÈÜ‚ˆØ\ÈšYÙÙ\™YÚ][ˆH\ÝHÙXÛÛ™Ëˆˆˆ‚ˆÚ]Ø™×Ü™Yœ™\ÚÛØÚÎ‚ˆ›ÝÈHÝ[YK›[Û›ÝÛšXÊ
+BˆYˆØ™×Ü™Yœ™\ÚÜÝ]VÈ˜XÝ]™H—HÜˆ
+›ÝÈHØ™×Ü™Yœ™\ÚÜÝ]VÈ›\ÝÝšYÙÙ\™Y—JHKŒ‚ˆ™]\›‚ˆØ™×Ü™Yœ™\ÚÜÝ]VÈ˜XÝ]™H—HHYBˆØ™×Ü™Yœ™\ÚÜÝ]VÈ›\ÝÝšYÙÙ\™Y—HH›ÝÂ‚ˆYˆÜ[Š
+N‚ˆžN‚ˆØ]Ú\ÝHÙ]ÝØ]Ú\ÝÜÝØÚÜÊÛÚY
+HYˆÛÚY[ÙH×Bˆ[Ù]HHÙ]Ø[ÜÝØÚ×Ù]J
+Bˆ]WÛX\HÜÖÈXÚÙ\ˆ—NˆÈ›ÜˆÈ[ˆ[Ù]_BˆXÚÙ\œÈHÝ›Üˆ[ˆØ]Ú\ÝYˆ[ˆ]WÛX\BˆYˆXÚÙ\œÎ‚ˆ˜]ÚÜ™Yœ™\ÚÙ^X×ÜÝ]\ÊXÚÙ\œË]WÛX\
+Bˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹Ø\›š[™Ê˜˜XÚÙÜ›Ý[™^XË\Ý]H™Yœ™\Ú˜Z[Yˆ	\È‹^ÊBˆš[˜[N‚ˆÚ]Ø™×Ü™Yœ™\ÚÛØÚÎ‚ˆØ™×Ü™Yœ™\ÚÜÝ]VÈ˜XÝ]™H—HH˜[ÙB‚ˆ™XY[™Ë•™XY
+\™Ù]WÜ[‹Y[[ÛUYK˜[YOH™^XË\Ý]K\™Yœ™\ÚŠKœÝ\
+
+B‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈÚ\™Y^[ØYZ[\œÈ
+\ÙYžH›Ý‘TÕ[™Ú[È[™ÙX”ÛØÚÙ][™\œÊBˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚™YˆØZ[Ù\Ú›Ø\™Ü^[ØY
+ÛÚYˆ[›Û™JHOˆXÝ‚ˆˆˆÛÛ\]H[™™]\›ˆH[\Ú›Ø\™]HXÝ
+›È™\]Y\ÝÛÛ^™YYY
+Kˆˆˆ‚ˆØ]Ú\ÝHÙ]ÝØ]Ú\ÝÜÝØÚÜÊÛÚY
+HYˆÛÚY[ÙH×BˆÝ˜YWÛ[ÙHHÙ]ÜÙ][™Ê˜Y[™×Û[ÙHŠHÜˆ”ÕÒS‘ÈQH‚ˆ[Ù]HHÙ]Ø[ÜÝØÚ×Ù]J
+Bˆ]WÛX\HÜÖÈXÚÙ\ˆ—NˆÈ›ÜˆÈ[ˆ[Ù]_BˆÝšYÙÙ\—Ù^X×ÜÝ]WÜ™Yœ™\Ú
+ÛÚY
+HÈ›Û‹X›ØÚÚ[™ÎÈ™]\›œÈÝ[H]H\ÈØ[ˆÝØÚÜÈHØ[››Ý]J]WÛX\ÝK˜YWÛ[ÙOWÝ˜YWÛ[ÙJH›Üˆ[ˆØ]Ú\ÝYˆ[ˆ]WÛX\Bˆ˜[šÙYH˜[š×ÜÝØÚÜÊÝØÚÜÊBˆÈØ[YHÛÛ\]WÝÜJ
+H\ÙYžHHÙ\™\‹\™[™\™Y\Ú›Ø\™8 %\È\ÙYˆÈÈ™HHÙXÛÛ™[™\[™[K][™YÛÜHÙˆHÜH[KÚXÚ\ÂˆÈ^XÝHÝÈH]™K\ÛY^[ØYÛÝ[\ØYÜ™YHÚ]Ú]HYÙBˆÈÚÝÙYÛˆ[š]X[ØY›ÜˆHØ[YHXÚÙ\ˆH™]ÈÙXÛÛ™È\\‚ˆÜHHÛÛ\]WÝÜJ˜[šÙY
+Bˆ›×Ý˜YHHÛÛ\]WÛ›×Ý˜YWØ\ÜÙ\ÜÛY[
+˜[šÙYÜJBˆÈ\ÙH\Ü^WÙ^X×ÜÝ]H
+Ù\ÜÚ[Û‹X]Ø\™JHÛÈÝ[H’QÑÑT‘QÝØÚÜÈ\™H›ÝˆÈÚÝÛˆ[ˆH]™KX[\ÈÙXÝ[ÛˆÝ]ÚYH™YÝ[\ˆX\šÙ]Ý\œË‚ˆšYÙÙ\™YH×HYˆ›×Ý˜YVÈ›ØÚ×ÜÚYÛ˜[È—H[ÙHÜÈ›ÜˆÈ[ˆ˜[šÙYYˆË™Ù]
+™\Ü^WÙ^X×ÜÝ]HŠHOH•’QÑÑT‘Q—BˆÜWÝXÚÙ\œÈHÜÖÈXÚÙ\ˆ—H›ÜˆÈ[ˆÜ_BˆÙXÛÛ™\žHHÛÛ\]WÜÙXÛÛ™\žWÝØ]Ú\Ý
+˜[šÙYÜWÝXÚÙ\œÊBˆ™]\›ˆÂˆ\HŽˆ™\Ú›Ø\™‹ˆœÙ\™\—Ý[YHŽˆÙ]Û›ÝÊ
+KœÝ™[YJ‰RN‰SH	\ŠK›Ýš\
+ŒŠH
+ÈˆU‹ˆ›Ü˜—ÜÙ\ÜÚ[ÛˆŽˆÙ]ÛÜ˜—ÜÙ\ÜÚ[Û—Ø˜[›™\Š
+Kˆ››×Ý˜YHŽˆ›×Ý˜YKˆšYÙÙ\™YŽˆ×ÜÝØÚ×ÜÝ[[X\žJÊH›ÜˆÈ[ˆšYÙÙ\™YKˆÜHŽˆ×ÜÝØÚ×ÜÝ[[X\žJÊH›ÜˆÈ[ˆÜWKˆœÙXÛÛ™\žHŽˆ×ÜÝØÚ×ÜÝ[[X\žJÊH›ÜˆÈ[ˆÙXÛÛ™\žWKˆœ˜[šÙYŽˆ×ÜÝØÚ×ÜÝ[[X\žJÊH›ÜˆÈ[ˆ˜[šÙYKˆÈ[™Y™X[][YH™YYÈ8 %Ù\™Yœ›ÛHØXÚK™\›È^˜H][˜ÞH\ˆ\Úˆ›X\šÙ]Ý[\ŽˆÙÙ]ÛX\šÙ]Ý[\\˜]\™J
+Kˆ›X\šÙ]ØÛÛ^ŽˆÙÙ]ÛX\šÙ]ØÛÛ^
+
+KˆœØØ[›™\ˆŽˆÜØØ[›™\‹™Ù]ÜØØ[—Ü™\Ý[Ê
+Kˆ˜[\ØÛÝ[ŽˆÙ]Ø[\ØÛÝ[
+
+KˆœØØ[—Ø[\ØÛÝ[ŽˆÙ]Ý[œÙY[—ÜØØ[›™\—Ø[\ØÛÝ[
+
+KˆB‚‚™YˆÜÛX\Ø[\Ê
+HOˆ\Ý‚ˆˆˆ”™]\›ˆ™XÙ[[\È[œšXÚYÚ]Ô’UPÐSÒQÒÓQQUSKÕÐUÒTÕš[Üš]Kˆˆˆ‚ˆ˜]ÈHÙ]Ø[\Ê[Z]LJBˆÝ]H×Bˆ›ÜˆH[ˆ˜]Î‚ˆ]\HHK™Ù]
+˜[\Ý\H‹ˆŠBˆÙ]™\š]HHK™Ù]
+œÙ]™\š]H‹›YY][HŠBˆ\ÙÈHK™Ù]
+›Y\ÜØYÙH‹ˆŠBˆ\Ù×Ý\H\ÙË\\Š
+B‚ˆÈÛ\ÜÚYžHš[Üš]BˆYˆ]\H[ˆ
+œ™XYH‹
+HÜˆ•’QÑÑT‘Qˆ[ˆ\Ù×Ý\Üˆ”‘PRÓÕUˆ[ˆ\Ù×Ý\‚ˆš[Üš]HHÔ’UPÐS‚ˆ[Yˆ]\H[ˆ
+˜\\È‹
+HÜˆÙ]™\š]HOHšYÚˆÜˆJÈˆ[ˆ\ÙÈÜˆ”‘PQHˆ[ˆ\Ù×Ý\‚ˆš[Üš]HH’QÒ‚ˆ[Yˆ]\H[ˆ
+œ™WØÛÛ™š\›H‹˜ÛÛ[X][ÛˆŠHÜˆÙ]™\š]HOH›YY][HŽ‚ˆš[Üš]HH“QQUSH‚ˆ[ÙN‚ˆš[Üš]HH•ÐUÒTÕ‚‚ˆÝ]˜\[™
+ÊŠ˜Kœš[Üš]HŽˆš[Üš]_JBˆ™]\›ˆÝ]‚‚™YˆØZ[Ü]ZXÚ×Ü^[ØY
+ÛÚYˆ[›Û™JHOˆXÝ‚ˆˆˆÛÛ\]H[™™]\›ˆH]ZXÚË[[ÙH]HXÝ
+›È™\]Y\ÝÛÛ^™YYY
+Kˆˆˆ‚ˆØ]Ú\ÝHÙ]ÝØ]Ú\ÝÜÝØÚÜÊÛÚY
+HYˆÛÚY[ÙH×BˆÝ˜YWÛ[ÙHHÙ]ÜÙ][™Ê˜Y[™×Û[ÙHŠHÜˆ”ÕÒS‘ÈQH‚ˆ[Ù]HHÙ]Ø[ÜÝØÚ×Ù]J
+Bˆ]WÛX\HÜÖÈXÚÙ\ˆ—NˆÈ›ÜˆÈ[ˆ[Ù]_BˆÝšYÙÙ\—Ù^X×ÜÝ]WÜ™Yœ™\Ú
+ÛÚY
+HÈ›Û‹X›ØÚÚ[™ÎÈ™]\›œÈÝ[H]H\ÈØ[ˆÝØÚÜÈHØ[››Ý]J]WÛX\ÝK˜YWÛ[ÙOWÝ˜YWÛ[ÙJH›Üˆ[ˆØ]Ú\ÝYˆ[ˆ]WÛX\Bˆ˜[šÙYH˜[š×ÜÝØÚÜÊÝØÚÜÊBˆ˜[YHÜÈ›ÜˆÈ[ˆ˜[šÙYYˆ›ÝË™Ù]
+˜]›ÚYØ›ØÚÙYŠH[™Ë™Ù]
+˜YWØšX\ÈŠHOH]›ÚY—Bˆ™]\›ˆÂˆ\HŽˆœ]ZXÚÈ‹ˆœÙ\™\—Ý[YHŽˆÙ]Û›ÝÊ
+KœÝ™[YJ‰RN‰SH	\ŠK›Ýš\
+ŒŠH
+ÈˆU‹ˆ›Ü˜—ÜÙ\ÜÚ[ÛˆŽˆÙ]ÛÜ˜—ÜÙ\ÜÚ[Û—Ø˜[›™\Š
+KˆœÝØÚÜÈŽˆ×ÜÝØÚ×ÜÝ[[X\žJÊH›ÜˆÈ[ˆ˜[YKˆ›ZÝØÝŽˆÙÙ]ÛZÝØÝ
+
+KˆœÛX\Ø[\ÈŽˆÜÛX\Ø[\Ê
+KˆB‚‚\œ›Ý]J‹Ø\KÙ\Ú›Ø\™ŠB™Yˆ\WÙ\Ú›Ø\™
+
+N‚ˆˆˆ’”ÓÓˆ[™Ú[›Üˆ]™H\Ú›Ø\™\]\È
+šXÙKÝ]KÔ‹ØÛÜ™\ÊKˆˆˆ‚ˆžN‚ˆ™]\›ˆœÛÛšYžJØZ[Ù\Ú›Ø\™Ü^[ØY
+Ù]ØXÝ]™WÝÛÚY
+
+JJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÙ\Ú›Ø\™˜Z[Yˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆ™\Ú›Ø\™™Yœ™\Ú˜Z[YŸJKL‚‚\œ›Ý]J‹Ø\KÛX\šÙ]ØÛÛ^ŠB™Yˆ\WÛX\šÙ]ØÛÛ^
+
+N‚ˆˆˆ‘TÈ]\™\È
+ÈÙXÝÜˆUˆ]H›Üˆ]™HØ]YÙH\]\ËˆØXÚYÌËˆˆˆ‚ˆžN‚ˆ™]\›ˆœÛÛšYžJÙÙ]ÛX\šÙ]ØÛÛ^
+
+JBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÛX\šÙ]ØÛÛ^˜Z[Yˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆ›X\šÙ]ÛÛ^[˜]˜Z[X›HŸJKL‚‚\œ›Ý]J‹Ø\KÜØØ[›™\ˆŠB™Yˆ\WÜØØ[›™\Š
+N‚ˆˆˆ‚ˆ]™H[ÛY[[HØØ[›™\ˆ™\Ý[È8 %ÛY]™\žHŒÈžHH\Ú›Ø\™‚ˆ™]\›œÈÝ\œ™[ÜÜ[š]Y\Ë\ÝØØ[ˆ[YK[™X\šÙ]ZÝ\œÈ›YË‚ˆˆˆ‚ˆžN‚ˆ™]\›ˆœÛÛšYžJÜØØ[›™\‹™Ù]ÜØØ[—Ü™\Ý[Ê
+JBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÜØØ[›™\ˆ˜Z[Yˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆœØØ[›™\ˆ[˜]˜Z[X›HŸJKL‚‚ÜÜ™‹™^[\\œ›Ý]J‹Ø\KÜØØ[›™\‹ØY‹Y]ÙÏVÈ”ÔÕ—JB™Yˆ\WÜØØ[›™\—ØY
+
+N‚ˆˆˆ‚ˆYHØØ[›™\‹Y]XÝYXÚÙ\ˆÈHXÝ]™HØ]Ú\ÝšXHRV‚ˆ›ÙNˆÈXÚÙ\ˆŽˆ“•‘HŸBˆˆˆ‚ˆ]HH™\]Y\Ý™Ù]ÚœÛÛŠÚ[[UYJHÜˆßBˆXÚÙ\ˆH
+]K™Ù]
+XÚÙ\ˆŠHÜˆˆŠKœÝš\
+
+K\\Š
+BˆYˆ›ÝXÚÙ\ˆÜˆ›ÝXÚÙ\‹š\Ø[J
+HÜˆ[ŠXÚÙ\ŠHˆŽ‚ˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆš[˜[YXÚÙ\ˆŸJK‚ˆÛÚYHÙ]ØXÝ]™WÝÛÚY
+
+BˆYˆ›ÝÛÚY‚ˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆ››ÈXÝ]™HØ]Ú\ÝŸJK‚ˆžN‚ˆYÝXÚÙ\—Ý×ÝØ]Ú\Ý
+ÛÚYXÚÙ\ŠBˆÈÙYYHØY[™ÈXÙZÛ\ˆÛÈH›ÝÈ\X\œÈ[[YYX][Bˆ\Ù\ÛØY[™×ÜXÙZÛ\ŠXÚÙ\ŠBˆÙÙÙ\‹š[™›ÊœØØ[›™\—ØYXÚÙ\I\ÈÛI\È‹XÚÙ\‹ÛÚY
+Bˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYKXÚÙ\ˆŽˆXÚÙ\ŸJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÜØØ[›™\—ØY˜Z[Yˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆ˜ÛÝ[›ÝYXÚÙ\ˆŸJKL‚‚\œ›Ý]J‹Ø\KÜØØ[›™\‹Ø[\ÈŠB™Yˆ\WÜØØ[›™\—Ø[\Ê
+N‚ˆˆˆ”™]\›ˆH[ÜÝ\™XÙ[ØØ[›™\ˆ[\È
+‹\\œÚ\ÝY
+H\È”ÓÓ‹ˆˆˆ‚ˆžN‚ˆ™]\›ˆœÛÛšYžJÙ]ÜØØ[›™\—Ø[\Ê[Z]LÌ
+JBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÜØØ[›™\—Ø[\È˜Z[Yˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJ×JKL‚‚ÜÜ™‹™^[\\œ›Ý]J‹Ø\KÜØØ[›™\‹Ø[\ËÜÙY[ˆ‹Y]ÙÏVÈ”ÔÕ—JB™Yˆ\WÜØØ[›™\—Ø[\×ÜÙY[Š
+N‚ˆˆˆ“X\šÈ[ØØ[›™\ˆ[\È\ÈÙY[ˆ
+ÛX\œÈH[œÙY[ˆ˜YÙJKˆˆˆ‚ˆžN‚ˆX\š×ÜØØ[›™\—Ø[\×ÜÙY[Š
+Bˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆY_JBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÜØØ[›™\—Ø[\×ÜÙY[ˆ˜Z[Yˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚ÜÜ™‹™^[\\œ›Ý]J‹Ø\KÜØØ[›™\‹Ø[\ËØÛX\ˆ‹Y]ÙÏVÈ”ÔÕ—JB™Yˆ\WÜØØ[›™\—Ø[\×ØÛX\Š
+N‚ˆˆˆ‘[]H[ØØ[›™\ˆ[\›ÝÜËˆˆˆ‚ˆžN‚ˆÛX\—ÜØØ[›™\—Ø[\Ê
+Bˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆY_JBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÜØØ[›™\—Ø[\×ØÛX\ˆ˜Z[Yˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÜÝØÚËÏXÚÙ\‹Û]™HŠB™Yˆ\WÜÝØÚ×Û]™JXÚÙ\ŠN‚ˆˆˆ’”ÓÓˆ[™Ú[›Üˆ]™HÚ[™ÛK\ÝØÚÈ]Z[\]\Ëˆˆˆ‚ˆXÚÙ\ˆHXÚÙ\‹\\Š
+BˆÝØÚÈHÙ]ÜÝØÚ×Ù]JXÚÙ\ŠBˆYˆ›ÝÝØÚÎ‚ˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆ››Ý›Ý[™ŸJKˆÈ™KY]˜[X]H^X×ÜÝ]HÚ]œ™\Ú]™H]BˆžN‚ˆÝØÚÈH]™WÜ™Yœ™\ÚÜÝØÚÊXÚÙ\‹ÝØÚÊBˆ\]WÛ]™WÙšY[ÊÝØÚÊBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹Ø\›š[™Ê›]™WÜ™Yœ™\ÚÜÝØÚÈ˜Z[Y›Üˆ	\Îˆ	\È‹XÚÙ\‹^ÊBˆ[››Ý]JÝØÚÊBˆ™\Ý[HÜÝØÚ×ÜÝ[[X\žJÝØÚÊBˆ™\Ý[ÈœÙ\™\—Ý[YH—HHÙ]Û›ÝÊ
+KœÝ™[YJ‰RN‰SH	\ŠK›Ýš\
+ŒŠH
+ÈˆU‚ˆÈ[˜ÛYHÛØXÚÛÈH]Z[YÙHØ[ˆ]ÚHÛØXÚØ\™Ûˆ]™\žHÛˆžN‚ˆÝZYHÝ\œ™[Ý\Ù\—ÚY
+
+BˆÜ[ˆHÙ]Ý˜YWÜ[ŠXÚÙ\‹ÝZY
+BˆÛ]HÙÙ]ÛX\šÙ]Ý[\\˜]\™J
+BˆÜœÈHÙ]Üš\Ú×ÜÙ][™ÜÊÝZY
+Bˆ™\Ý[È˜ÛØXÚ—HHÛÛ\]WÝ˜YWØÛØXÚ
+ÝØÚËÜ[‹Û]ÜœÊBˆ^Ù\^Ù\[Ûˆ\ÈØÙN‚ˆÙÙÙ\‹Ø\›š[™Ê˜\WÜÝØÚ×Û]™HÛØXÚ˜Z[Y›Üˆ	\Îˆ	\È‹XÚÙ\‹ØÙJBˆ™]\›ˆœÛÛšYžJ™\Ý[
+B‚‚\œ›Ý]J‹Ø\KÜÝØÚËÏXÚÙ\‹Ü›Ùš[HŠB™Yˆ\WÜÝØÚ×Ü›Ùš[JXÚÙ\ŠN‚ˆˆˆ’”ÓÓˆ[™Ú[ˆÛÛ\[žH˜[YKÙXÝÜ‹[™\ÝžK\ØÜš\[Ûˆ›\˜‹‚ˆØXÚY[ˆHˆ›ÜˆÌ^\È8 %š\œÝØ[\ˆXÚÙ\ˆ]Èš[›šX‹ÞYš[˜[˜ÙKˆ]™\žHØ[Y\ˆ]\È[œÝ[ˆˆˆ‚ˆXÚÙ\ˆHXÚÙ\‹\\Š
+BˆžN‚ˆœ›ÛH[[Ù[™Ú[™H[\Ü™]ÚØÛÛ\[žWÜ›Ùš[Bˆ›Ùš[HH™]ÚØÛÛ\[žWÜ›Ùš[JXÚÙ\ŠBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYKXÚÙ\ˆŽˆXÚÙ\‹œ›Ùš[HŽˆ›Ùš[_JBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹Ø\›š[™Ê˜\WÜÝØÚ×Ü›Ùš[H˜Z[Y›Üˆ	\Îˆ	\È‹XÚÙ\‹^ÊBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÝXÚÙ\‹\Ý]\ÈŠB™Yˆ\WÝXÚÙ\—ÜÝ]\Ê
+N‚ˆˆˆ‚ˆ™]\›ˆHÝ\œ™[XÚÙ\—ÜÝ]H›Üˆ]™\žHXÚÙ\ˆ[ˆHXÝ]™HØ]Ú\Ý‚‚ˆ\ÙYžHH\Ú›Ø\™”ÈÈÛ›ÜˆÝ]HÚ[™Ù\ÈÛˆØY[™ËÜ\X[ˆXÚÙ\œÈ[™šYÙÙ\ˆHYÙH™[ØYÚ[ˆ^H˜[œÚ][ÛˆÈHÝX›HÝ]K‚‚ˆ™\ÜÛœÙN‚ˆÈœÝ]\ÈŽˆÈSQŽˆœ\X[‹“UŽˆœ™XYH‹‹‹ˆHBˆˆˆ‚ˆÛÚYHÙ]ØXÝ]™WÝÛÚY
+
+BˆØ]Ú\ÝHÙ]ÝØ]Ú\ÝÜÝØÚÜÊÛÚY
+HYˆÛÚY[ÙH×Bˆ[Ù]HHÙ]Ø[ÜÝØÚ×Ù]J
+Bˆ]WÛX\HÜÖÈXÚÙ\ˆ—NˆÈ›ÜˆÈ[ˆ[Ù]_BˆÝ]\ÈHÂˆˆ
+]WÛX\ÝK™Ù]
+XÚÙ\—ÜÝ]HŠHÜˆ›ØY[™ÈŠHYˆ[ˆ]WÛX\[ÙH›ØY[™È‚ˆ›Üˆ[ˆØ]Ú\ÝˆBˆ™]\›ˆœÛÛšYžJÈœÝ]\ÈŽˆÝ]\ßJB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ[\]HÛÛ^8 %[\œÈ]˜Z[X›H[ˆ]™\žH[\]BˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ[šYšYYÜ˜YHØØ[H
+TÔVHÓ“H8 %Ù\È›ÝÚ[™ÙHÝÈÝÚ[™×ÜØÛÜ™HÜˆBˆÈ[™Ú[™IÜÈÝÚ[™×ÙÜ˜YH\™HÛÛ\]Y
+Kˆ›Ü›X[\Ù\ÈH[™Ú[™IÜÈY™™XÝ]™BˆÈÝÚ[™×ÙÜ˜YH
+Û\ÜÚYšY\‹—ÙÜ˜YWÙ›Ü—ØXÚÙ]8¡¤ˆJËÐKÐŠËÐ‹Ð‹KÐËÑø )ŠHÈHÚ[™ÛBˆÈØØ[H\ÙYXÜ›ÜÜÈ]™\žHÝ\™˜XÙNˆJËKŠË‹[™S‘ÔQQ
+]™\ž][™È[ÙKˆÈ˜[šÙY\ÝÈ›È]\ˆÚÝÛŠK‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB—ÕQÔQWÓPTHÂˆJÈŽˆ
+JÈ‹YÜ˜YKX\\ÈŠKˆHŽˆ
+H‹ËYÜ˜YKXHŠKˆŠÈŽˆ
+ŠÈ‹‹YÜ˜YKXœ\ÈŠKˆˆŽˆ
+ˆ‹KYÜ˜YKXˆŠKŸB‚™YˆÝYÜ˜YWÚ[™›ÊÝÚ[™×ÙÜ˜YJN‚ˆˆˆŠX™[˜[šËÜÜÊH›ÜˆH˜]È[™Ú[™HÜ˜YKˆS‘ÔQQ8¡¤ˆ
+	ÉË	ÝYÜ˜YK[›Û™IÊKˆˆˆ‚ˆ™]\›ˆÕQÔQWÓPT™Ù]
+
+ÝÚ[™×ÙÜ˜YHÜˆˆŠKœÝš\
+
+K\\Š
+K
+ˆ‹YÜ˜YK[›Û™HŠJB‚\[\]WÙš[\ŠYÜ˜YHŠB™YˆÝ—ÝYÜ˜YJÊN‚ˆˆˆ•[šYšYYÜ˜YH]\ˆ
+	ÉÈÚ[ˆ[™Ü˜YY
+Kˆˆˆ‚ˆ™]\›ˆÝYÜ˜YWÚ[™›ÊÊVÌB‚\[\]WÙš[\ŠYÜ˜[šÈŠB™YˆÝ—ÝYÜ˜[šÊÊN‚ˆˆˆ”ÛÜ˜[šÈ›ÜˆHÜ˜YH
+JÏM8 )ˆLK[™Ü˜YYL
+Kˆˆˆ‚ˆ™]\›ˆÝYÜ˜YWÚ[™›ÊÊVÌWB‚\[\]WÙš[\ŠYØÜÜÈŠB™YˆÝ—ÝYØÜÜÊÊN‚ˆˆˆÔÔÈÛ\ÜÈ›ÜˆH[šYšYYÜ˜YH˜YÙKˆˆˆ‚ˆ™]\›ˆÝYÜ˜YWÚ[™›ÊÊVÌ—B‚‚\˜ÛÛ^Ü›ØÙ\ÜÛÜ‚™Yˆ[š™XÝÚ[\œÊ
+N‚ˆ™]\›ˆÂˆ™Ù]ÜØÛÜ™WØÛ\ÜÈŽˆÙ]ÜØÛÜ™WØÛ\ÜËˆ™Ù]ØšX\×ØÛ\ÜÈŽˆÙ]ØšX\×ØÛ\ÜËˆ™Ù]ÜÙ]\Ý\WØÛ\ÜÈŽˆÙ]ÜÙ]\Ý\WØÛ\ÜËˆ™Ù]ØÛÛ™šY[˜ÙWØÛ\ÜÈŽˆÙ]ØÛÛ™šY[˜ÙWØÛ\ÜËˆ™Ù]ÛÜ˜—ØÛ\ÜÈŽˆÙ]ÛÜ˜—ØÛ\ÜËˆ™Ù]ÛØ—ØÛ\ÜÈŽˆÙ]ÛØ—ØÛ\ÜËˆ™Ù]Ù[žWØÛ\ÜÈŽˆÙ]Ù[žWØÛ\ÜËˆ™Ù]Ù^X×ØÛ\ÜÈŽˆÙ]Ù^X×ØÛ\ÜËˆ™Ù]ÛÜ˜—ÜÝ]\×ØÛ\ÜÈŽˆÙ]ÛÜ˜—ÜÝ]\×ØÛ\ÜËˆ™Ù]ÛÜ˜—Ü\ÙWÛX™[ŽˆÙ]ÛÜ˜—Ü\ÙWÛX™[ˆ™Ù]ÛÜ˜—ØXÝ[ÛˆŽˆÙ]ÛÜ˜—ØXÝ[Û‹ˆ™Ù]Ùœ™\Ú™\Ü×ØÛ\ÜÈŽˆÙ]Ùœ™\Ú™\Ü×ØÛ\ÜËˆB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈY™\œ™YÝ\\8 %ÙYY[[È]H[ˆH˜XÚÙÜ›Ý[™™XYÛÈÝ[šXÛÜ›ˆØ[‚ˆÈš[™È]ÈÜ[[YYX][KˆÙYYÙ[[×Ù]J
+HXZÙ\ÈYš[˜[˜ÙHTHØ[ÂˆÈÚXÚØ[ˆZÙHÌLLŒÎÈ[›š[™È]Þ[˜Ú›Û›Ý\ÛH][\Ü[YH›ØÚÜÂˆÈÝ[šXÛÜ›ˆœ›ÛH]™\ˆÜ[š[™ÈHÛØÚÙ]Ø]\Ú[™È™[™\ˆÈ[YK[Ý]H\ÞK‚ˆÈH[[×ÜÙYYY›YÈ[œÚYHH[˜Ý[Ûˆ™]™[È™K\ÙYY[™ÈÛˆ™\Ý\‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB™YˆÙY™\œ™YÜÝ\\
+
+N‚ˆžN‚ˆÙYYÙ[[×Ù]J
+Bˆ^Ù\^Ù\[Ûˆ\ÈÙN‚ˆÙÙÙ\‹™\œ›ÜŠ™Y™\œ™YÜÝ\\ÙYY\œ›ÜŽˆ	\È‹ÙK^×Ú[™›ÏUYJBˆžN‚ˆÜÝ\\ÝÛÈHÙ]Ø[ÝØ]Ú\ÝÊ›Û™JHÈ›Û™HH[\Ù\œË˜XÚÙÜ›Ý[™ÛÛ^ˆ›ÜˆÝÛ[ˆÜÝ\\ÝÛÎ‚ˆÝXÚÙ\œÈHÙ]ÝØ]Ú\ÝÜÝØÚÜÊÝÛÈšY—JBˆÙÙÙ\‹š[™›Êˆ”ÕT•TØ]Ú\Ý	É\ÉÈ
+YI\ÊNˆ	\È‹ˆÝÛÈ›˜[YH—KÝÛÈšY—KÝXÚÙ\œËˆ
+Bˆ^Ù\^Ù\[Ûˆ\ÈÙN‚ˆÙÙÙ\‹™\œ›ÜŠ™Y™\œ™YÜÝ\\Ø]Ú\ÝÙÈ\œ›ÜŽˆ	\È‹ÙK^×Ú[™›ÏUYJB‚™XY[™Ë•™XY
+\™Ù]WÙY™\œ™YÜÝ\\Y[[ÛUYK˜[YOHœÝ\\\ÙYYŠKœÝ\
+
+B‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈØÚØXˆXØÛÝ[[YÜ˜][Ûˆ
+\ÙHH8 %™XY[Û›JBˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ™\]Z\™Y[ˆ˜\œÎˆÐÒÐP—ÐÓQS•ÒQÐÒÐP—ÐÓQS•ÔÑPÔ‘UÐÒÐP—Ô‘QT‘PÕÕT’BˆÈ[›Ý]\ÈÝX\™YØZ[œÝZ\ÜÚ[™ÈÜ™Y[X[ÈÜ˜XÙY[K‚ˆÈ“ÈÜ™\‹\XÙ[Y[›Ý]\È^\Ý[ˆ\È\ÙK‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚—ÜØÚØX—ØXØÛÝ[ØØXÚNˆXÝHßHÈÙ^YYžH\Ù\—ÚY8¡¤ˆÈ™]HŽˆ‹‹‹ÈŽˆ‹‹ŸB—ÔÐÒÐP—ÐÐPÒWÕHŒÈ™Yœ™\ÚXØÛÝ[]H]™\žHŒÂ‚‚™YˆÙÙ]ÜØÚØX—Ù]J\Ù\—ÚYˆ[HK›Ü˜ÙNˆ›ÛÛH˜[ÙJHOˆXÝ‚ˆˆˆ”™]\›ˆØXÚYØÚØXˆXØÛÝ[Ý[[X\žH›ÜˆH\Ù\‹™Yœ™\Ú[™ÈÚ[ˆÝ[Kˆˆˆ‚ˆ›ÝÈHÝ[YK[YJ
+Bˆ[žHHÜØÚØX—ØXØÛÝ[ØØXÚK™Ù]
+\Ù\—ÚYÈ™]HŽˆ›Û™KÈŽˆŒJBˆYˆ›Ý›Ü˜ÙH[™[žVÈÈ—H[™›ÝÈH[žVÈÈ—HÔÐÒÐP—ÐÐPÒWÕ‚ˆ™]\›ˆ[žVÈ™]H—BˆžN‚ˆ[\ÜØÚØXˆ\ÈÜØÚØX‚ˆ]HHÜØÚØX‹™Ù]ØXØÛÝ[ÜÝ[[X\žJ\Ù\—ÚY
+BˆÜØÚØX—ØXØÛÝ[ØØXÚVÝ\Ù\—ÚYHHÈ™]HŽˆ]KÈŽˆ›ÝßBˆ™]\›ˆ]Bˆ^Ù\^Ù\[Ûˆ\ÈÙN‚ˆÙÙÙ\‹Ø\›š[™ÊœØÚØXˆØXÚH™Yœ™\Ú˜Z[Yˆ	\È‹ÙJBˆ™]\›ˆ
+[žVÈ™]H—HÜˆÂˆ˜ÛÛ›™XÝYŽˆ˜[ÙKÝ[Ý˜[YHŽˆ›Û™K˜^Z[™×ÜÝÙ\ˆŽˆ›Û™Kˆ™Z[WÜ›Žˆ›Û™KÝ[Ý[œ™X[^™YŽˆ›Û™Kˆ›Ü[—ÜÜÚ][ÛœÈŽˆ˜XØÛÝ[ÈŽˆ×K™\œ›ÜˆŽˆÝŠÙJKˆJB‚‚\œ›Ý]J‹ÜØÚØX‹ØXØÛÝ[ŠB™YˆØÚØX—ØXØÛÝ[
+
+N‚ˆˆˆ”ØÚØXˆXØÛÝ[Ý™\šY]ÈYÙH8 %™XY[Û›K\ÙHKˆˆˆ‚ˆ[\ÜØÚØXˆ\ÈÜØÚØX‚ˆZYHÝ\œ™[Ý\Ù\—ÚY
+
+BˆÛÛ™šYÝ\™YHÜØÚØX‹š\×ØÛÛ™šYÝ\™Y
+
+BˆÚ×ÜÝ]\ÈHÜØÚØX‹ÚÙ[—ÜÝ]\ÊZY
+B‚ˆXØÛÝ[Ù]HH›Û™BˆÜ™\œ×ØžWØXØÛÝ[HßBˆ\œ›Ü—Û\ÙÈH›Û™B‚ˆYˆÚ×ÜÝ]\ÖÈ˜ÛÛ›™XÝY—N‚ˆžN‚ˆXØÛÝ[Ù]HHÙÙ]ÜØÚØX—Ù]JZY
+BˆYˆXØÛÝ[Ù]K™Ù]
+™\œ›ÜˆŠN‚ˆ\œ›Ü—Û\ÙÈHXØÛÝ[Ù]VÈ™\œ›Üˆ—Bˆ[ÙN‚ˆ›ÜˆXØÝ[ˆXØÛÝ[Ù]K™Ù]
+˜XØÛÝ[È‹×JN‚ˆZHXØÝ™Ù]
+˜XØÛÝ[Ú\Ú‹ˆŠBˆYˆZ‚ˆžN‚ˆÜ™\œ×ØžWØXØÛÝ[ØZHHÜØÚØX‹™™]ÚÛÜ™\œÊZ^\×Ø˜XÚÏLK\Ù\—ÚY]ZY
+Bˆ^Ù\^Ù\[Ûˆ\ÈÛÙN‚ˆÙÙÙ\‹Ø\›š[™ÊœØÚØXˆÜ™\œÈ™]Ú˜Z[Y\ÚI\Îˆ	\È‹ZÛÙJBˆÜ™\œ×ØžWØXØÛÝ[ØZHH×Bˆ^Ù\^Ù\[Ûˆ\ÈÙN‚ˆ\œ›Ü—Û\ÙÈHÝŠÙJBˆÙÙÙ\‹Ø\›š[™ÊœØÚØX—ØXØÛÝ[YÙH\œ›ÜŽˆ	\È‹ÙJB‚ˆ™]\›ˆ™[™\—Ý[\]JˆœØÚØX—ØXØÛÝ[š[‹ˆÛÛ™šYÝ\™YXÛÛ™šYÝ\™YˆÚ×ÜÝ]\Ï]Ú×ÜÝ]\ËˆXØÛÝ[Ù]OXXØÛÝ[Ù]KˆÜ™\œ×ØžWØXØÛÝ[[Ü™\œ×ØžWØXØÛÝ[ˆ\œ›Ü—Û\ÙÏY\œ›Ü—Û\ÙËˆ
+B‚‚\œ›Ý]J‹ÜØÚØX‹Ø]]ŠB™YˆØÚØX—Ø]]
+
+N‚ˆˆˆ”Ý\HØÚØXˆÐ]]‹ŒÐÑH›ÝËˆˆˆ‚ˆ[\ÜØÚØXˆ\ÈÜØÚØX‚‚ˆYˆ›ÝÜØÚØX‹š\×ØÛÛ™šYÝ\™Y
+
+N‚ˆ›\Ú
+”ØÚØXˆTHÜ™Y[X[È›ÝÛÛ™šYÝ\™YˆÙ]ÐÒÐP—ÐÓQS•ÒQ‚ˆ”ÐÒÐP—ÐÓQS•ÔÑPÔ‘U[™ÐÒÐP—Ô‘QT‘PÕÕT’H[š\›Û›Y[˜\šXX›\Ëˆ‹Ø\›š[™ÈŠBˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠœØÚØX—ØXØÛÝ[ŠJB‚ˆÛÙWÝ™\šYšY\‹ÛÙWØÚ[[™ÙHHÜØÚØX‹—ÜØÙWÜZ\Š
+BˆÝ]HHÙXÜ™]ËÚÙ[—Ý\›ØY™J
+B‚ˆÈÝÜ™HÐÑH™\šYšY\ˆ[™Ý]H[ˆ›\ÚÈÙ\ÜÚ[Ûˆ
+Ù\™\‹\ÚYKÚYÛ™YÛÛÚÚYJBˆÙ\ÜÚ[Û–ÈœØÚØX—ØÛÙWÝ™\šYšY\ˆ—HHÛÙWÝ™\šYšY\‚ˆÙ\ÜÚ[Û–ÈœØÚØX—ÜÝ]H—HHÝ]B‚ˆ]]Ý\›HÜØÚØX‹˜Z[Ø]]Ý\›
+Ý]KÛÙWØÚ[[™ÙJBˆÙÙÙ\‹š[™›ÊœØÚØX—Ø]]™Y\™XÝ[™ÈÈØÚØXˆÝ]OI\È‹Ý]JBˆ™]\›ˆ™Y\™XÝ
+]]Ý\›
+B‚‚\œ›Ý]J‹ÜØÚØX‹ØØ[˜XÚÈŠB™YˆØÚØX—ØØ[˜XÚÊ
+N‚ˆˆˆ“Ð]]Ø[˜XÚÈ8 %^Ú[™ÙHÛÙH›ÜˆÚÙ[œÈ[™ÝÜ™H[Kˆˆˆ‚ˆ[\ÜØÚØXˆ\ÈÜØÚØX‚‚ˆÛÙHH™\]Y\Ý˜\™ÜË™Ù]
+˜ÛÙH‹ˆŠBˆÝ]HH™\]Y\Ý˜\™ÜË™Ù]
+œÝ]H‹ˆŠBˆ\œ›ÜˆH™\]Y\Ý˜\™ÜË™Ù]
+™\œ›Üˆ‹ˆŠBˆ\œ›Ü—Ù\ØÏH™\]Y\Ý˜\™ÜË™Ù]
+™\œ›Ü—Ù\ØÜš\[Ûˆ‹ˆŠB‚ˆYˆ\œ›ÜŽ‚ˆ›\Ú
+ˆ”ØÚØXˆ]]Üš^˜][Ûˆ[šYYˆÙ\œ›Ü—Ù\ØÈÜˆ\œ›ÜŸH‹™[™Ù\ˆŠBˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠœØÚØX—ØXØÛÝ[ŠJB‚ˆÈ˜[Y]HÝ]HÈ™]™[ÔÔ‘‚ˆ^XÝYÜÝ]HHÙ\ÜÚ[Û‹œÜ
+œØÚØX—ÜÝ]H‹›Û™JBˆÛÙWÝ™\šYšY\ˆHÙ\ÜÚ[Û‹œÜ
+œØÚØX—ØÛÙWÝ™\šYšY\ˆ‹›Û™JB‚ˆYˆ›ÝÝ]HÜˆÝ]HOH^XÝYÜÝ]N‚ˆ›\Ú
+“Ð]]Ý]HZ\ÛX]Ú8 %ÜÜÚX›HÔÔ‘‹ˆX\ÙHžHYØZ[‹ˆ‹™[™Ù\ˆŠBˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠœØÚØX—ØXØÛÝ[ŠJB‚ˆYˆ›ÝÛÙN‚ˆ›\Ú
+“›È]]Üš^˜][ÛˆÛÙH™XÙZ]™Yœ›ÛHØÚØX‹ˆ‹™[™Ù\ˆŠBˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠœØÚØX—ØXØÛÝ[ŠJB‚ˆžN‚ˆZYHÝ\œ™[Ý\Ù\—ÚY
+
+BˆÚÙ[œÈHÜØÚØX‹™^Ú[™ÙWØÛÙWÙ›Ü—ÝÚÙ[œÊÛÙKÛÙWÝ™\šYšY\ˆÜˆˆŠBˆÜØÚØX‹œØ]™WÝÚÙ[œÊÚÙ[œËZY
+BˆÜØÚØX—ØXØÛÝ[ØØXÚKœÜ
+ZY›Û™JHÈ[˜[Y]HØXÚH›Üˆ\È\Ù\‚ˆÙÙÙ\‹š[™›ÊœØÚØX—ØØ[˜XÚÈÚÙ[œÈØ]™YÝXØÙ\ÜÙ[HŠBˆ›\Ú
+”ØÚØXˆXØÛÝ[ÛÛ›™XÝYÝXØÙ\ÜÙ[KˆXØÛÝ[]H\ÈØY[™Ëˆ‹œÝXØÙ\ÜÈŠBˆ^Ù\^Ù\[Ûˆ\ÈN‚ˆÙÙÙ\‹™\œ›ÜŠœØÚØX—ØØ[˜XÚÈÚÙ[ˆ^Ú[™ÙH˜Z[Yˆ	\È‹JBˆ›\Ú
+ˆ‘˜Z[YÈÛÛ›™XÝØÚØXˆXØÛÝ[ˆÙ_H‹™[™Ù\ˆŠB‚ˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠœØÚØX—ØXØÛÝ[ŠJB‚‚ÜÜ™‹™^[\\œ›Ý]J‹ÜØÚØX‹Ù\ØÛÛ›™XÝ‹Y]ÙÏVÈ”ÔÕ—JB™YˆØÚØX—Ù\ØÛÛ›™XÝ
+
+N‚ˆˆˆÛX\ˆÝÜ™YØÚØXˆÚÙ[œÈ
+™XY[Û›H\ØÛÛ›™XÝ›Èœ›ÚÙ\‹\ÚYH™]›ØØ][ÛŠKˆˆˆ‚ˆ[\ÜØÚØXˆ\ÈÜØÚØX‚ˆZYHÝ\œ™[Ý\Ù\—ÚY
+
+BˆÜØÚØX‹˜ÛX\—ÝÚÙ[œÊZY
+BˆÜØÚØX—ØXØÛÝ[ØØXÚKœÜ
+ZY›Û™JBˆ›\Ú
+”ØÚØXˆXØÛÝ[\ØÛÛ›™XÝYˆ[Ý\ˆ]H\È™Y[ˆÛX\™Yœ›ÛH\È\ˆ‹œÝXØÙ\ÜÈŠBˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠœØÚØX—ØXØÛÝ[ŠJB‚‚\œ›Ý]J‹ÜØÚØX‹ÜÞ[˜Ë\™]šY]ÈŠB™YˆØÚØX—ÜÞ[˜×Ü™]šY]Ê
+N‚ˆˆˆ‚ˆ™]\›ˆH”ÓÓˆ™]šY]ÈÙˆØÚØXˆš[Y˜Y\È]Ø[ˆ™H[\ÜYÈH›Ý\›˜[‚ˆÛ›H™]\›œÈÛÛ\]Y›Ý[™]š\È
+•VH8¡¤ˆÑSZ\œÊHœ›ÛHH\ÝÌ^\Ë‚ˆ›YÜÈ˜Y\È[™XYH[\ÜYÛÈHRHØ[ˆÜ™^H[HÝ]‚ˆˆˆ‚ˆ[\ÜØÚØXˆ\ÈÜØÚØX‚ˆZYHÝ\œ™[Ý\Ù\—ÚY
+
+BˆYˆ›ÝÜØÚØX‹š\×ØÛÛ›™XÝY
+ZY
+N‚ˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆ”ØÚØXˆ›ÝÛÛ›™XÝYŸJKÂˆžN‚ˆ˜Y\ÈHÜØÚØX‹›X]ÚÜØÚØX—Ý˜Y\Ê^\×Ø˜XÚÏLÌ\Ù\—ÚY]ZY
+Bˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK˜Y\ÈŽˆ˜Y\Ë˜ÛÝ[Žˆ[Š˜Y\Ê_JBˆ^Ù\^Ù\[Ûˆ\ÈN‚ˆÙÙÙ\‹™\œ›ÜŠœØÚØX—ÜÞ[˜×Ü™]šY]È\œ›ÜŽˆ	\È‹K^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆÝŠJ_JKL‚‚ÜÜ™‹™^[\\œ›Ý]J‹ÜØÚØX‹ÜÞ[˜ËZ[\Ü‹Y]ÙÏVÈ”ÔÕ—JB™YˆØÚØX—ÜÞ[˜×Ú[\Ü
+
+N‚ˆˆˆ‚ˆ[\ÜÛÛ™š\›YYØÚØXˆ˜YHZ\œÈ[ÈH›Ý\›˜[‚ˆXØÙ\È”ÓÓˆ›ÙNˆÈ˜Y\ÈŽˆË‹‹—HHÚ\™HXXÚ˜YH\ÈHØ[YBˆÚ\H™]\›™YžHÜØÚØX‹ÜÞ[˜Ë\™]šY]Ë‚ˆÚÚ\È˜Y\È[™XYH[\ÜY
+žH[\ÜÚÙ^JK‚ˆˆˆ‚ˆ[\ÜØÚØXˆ\ÈÜØÚØX‚ˆœ›ÛH]X˜\ÙH[\ÜØÚØX—Ú[\ÜÙ^\ÝË™XÛÜ™ÜØÚØX—Ú[\ÜˆZYHÝ\œ™[Ý\Ù\—ÚY
+
+BˆYˆ›ÝÜØÚØX‹š\×ØÛÛ›™XÝY
+ZY
+N‚ˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆ”ØÚØXˆ›ÝÛÛ›™XÝYŸJKÂˆžN‚ˆ›ÙHH™\]Y\Ý™Ù]ÚœÛÛŠ›Ü˜ÙOUYJHÜˆßBˆ˜Y\ÈH›ÙK™Ù]
+˜Y\ÈŠHÜˆ×Bˆ[\ÜYH×BˆÚÚ\YH×Bˆ›Üˆ[ˆ˜Y\Î‚ˆÙ^HH™Ù]
+š[\ÜÚÙ^H‹ˆŠBˆYˆ›ÝÙ^HÜˆØÚØX—Ú[\ÜÙ^\ÝÊÙ^KZY
+N‚ˆÚÚ\Y˜\[™
+™Ù]
+XÚÙ\ˆ‹ÈŠJBˆÛÛ[YBˆžN‚ˆ›ÜÝH™Ù]
+œ›ÜÝ‹Œ
+Bˆ™\Ý[H™Ù]
+œ™\Ý[‹œ™XZÈ]™[ˆŠBˆ›Ý\›˜[ÚYHYÚ›Ý\›˜[Ù[žJˆXÚÙ\ˆHÈXÚÙ\ˆ—Kˆ˜YWÙ]HHÈ˜YWÙ]H—Kˆ\™XÝ[ÛˆH™Ù]
+™\™XÝ[Ûˆ‹“Û™ÈŠKˆ[žWÜšXÙHHÈ™[žWÜšXÙH—Kˆ^]ÜšXÙHHÈ™^]ÜšXÙH—KˆÚ\™\ÈH™Ù]
+œÚ\™\ÈŠKˆÙ]\Ý\HH™Ù]
+œÙ]\Ý\HŠKˆ[ÛY[[WÜØÛÜ™HH›Û™Kˆ›ÜÝH›ÜÝˆ™\Ý[H™\Ý[ˆ›Ý\ÈHˆ–ÔØÚØXˆ[\ÜH^HÞÝ™Ù]
+	Ø^WÛÜ™\—ÚY	Ë	ÉÊ_H0­ÈÙ[ÞÝ™Ù]
+	ÜÙ[ÛÜ™\—ÚY	Ë	ÉÊ_H‹ˆ˜YWÛ[ÙHH™Ù]
+˜YWÛ[ÙH‹”ÕÒS‘ÈQHŠKˆ\Ù\—ÚYHZYˆ
+Bˆ™XÛÜ™ÜØÚØX—Ú[\Ü
+Ù^K›Ý\›˜[ÚYÈXÚÙ\ˆ—KÈ˜YWÙ]H—KZY
+Bˆ[\ÜY˜\[™
+ÈXÚÙ\ˆ—JBˆ^Ù\^Ù\[Ûˆ\ÈÙN‚ˆÙÙÙ\‹Ø\›š[™ÊœØÚØX—ÜÞ[˜×Ú[\Üˆ\œ›Üˆ[\Ü[™È	\Îˆ	\È‹™Ù]
+XÚÙ\ˆŠKÙJBˆÚÚ\Y˜\[™
+™Ù]
+XÚÙ\ˆ‹ÈŠJBˆ™]\›ˆœÛÛšYžJÂˆ›ÚÈŽˆYKˆš[\ÜYŽˆ[\ÜYˆœÚÚ\YŽˆÚÚ\Yˆ˜ÛÝ[Žˆ[Š[\ÜY
+KˆJBˆ^Ù\^Ù\[Ûˆ\ÈN‚ˆÙÙÙ\‹™\œ›ÜŠœØÚØX—ÜÞ[˜×Ú[\Ü\œ›ÜŽˆ	\È‹K^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆÝŠJ_JKL‚‚\œ›Ý]J‹Ø\KÜØÚØX‹ÜÝ[[X\žHŠB™Yˆ\WÜØÚØX—ÜÝ[[X\žJ
+N‚ˆˆˆ‚ˆ”ÓÓˆ[™Ú[›ÜˆXØÛÝ[Ý[[X\žK‚ˆ\ÙYžH\Ú›Ø\™ÚYÙ]ÈÈ[]™HXØÛÝ[˜[[˜ÙHÈ^Z[™ÈÝÙ\‹‚ˆ™XY[Û›H\ÙHH8 %›È]]][ÛœË‚ˆˆˆ‚ˆ[\ÜØÚØXˆ\ÈÜØÚØX‚ˆZYHÝ\œ™[Ý\Ù\—ÚY
+
+BˆYˆ›ÝÜØÚØX‹ÚÙ[—ÜÝ]\ÊZY
+VÈ˜ÛÛ›™XÝY—N‚ˆ™]\›ˆœÛÛšYžJÈ˜ÛÛ›™XÝYŽˆ˜[ÙK™\œ›ÜˆŽˆ“›Ý]][XØ]YŸJBˆ]HHÙÙ]ÜØÚØX—Ù]JZY
+BˆÈ™]\›ˆÛ›HHØY™HÝ[[X\žHšY[È
+›ÈÚÙ[ˆ]JBˆ™]\›ˆœÛÛšYžJÂˆ˜ÛÛ›™XÝYŽˆ]K™Ù]
+˜ÛÛ›™XÝY‹˜[ÙJKˆÝ[Ý˜[YHŽˆ]K™Ù]
+Ý[Ý˜[YHŠKˆ˜^Z[™×ÜÝÙ\ˆŽˆ]K™Ù]
+˜^Z[™×ÜÝÙ\ˆŠKˆ™Z[WÜ›Žˆ]K™Ù]
+™Z[WÜ›ŠKˆÝ[Ý[œ™X[^™YŽˆ]K™Ù]
+Ý[Ý[œ™X[^™YŠKˆ›Ü[—ÜÜÚ][ÛœÈŽˆ]K™Ù]
+›Ü[—ÜÜÚ][ÛœÈŠKˆ™\œ›ÜˆŽˆ]K™Ù]
+™\œ›ÜˆŠKˆJB‚‚‚™YˆÚ[[Ù\œ›Ü—Ü^[ØY
+\ÙÎˆÝŠHOˆXÝ‚ˆˆˆ”Ý[™\™”ÓÓˆ\œ›Üˆ^[ØY›ÜˆØ\KÚ[[ˆˆˆ‚ˆ™]\›ˆÂˆ›ÚÈŽˆ˜[ÙKˆ™\œ›ÜœÈŽˆÛ\Ù×Kˆ›\ÝÝ\]YŽˆ¸ %‹ˆ›™]ÜÈŽˆ×Kˆ›X\šÙ]Û™]ÜÈŽˆ×Kˆ™X\›š[™ÜÈŽˆÈÙ^HŽˆ×KÛ[Üœ›ÝÈŽˆ×K\×ÝÙYZÈŽˆ×_KˆœÜ]ÈŽˆ×Kˆ™]šY[™ÈŽˆ×Kˆ™XÛÛ›ÛZX×Ù]™[ÈŽˆ×Kˆ˜[\×ÜÙ[Žˆ×Kˆ™œ›ÛWØØXÚHŽˆ˜[ÙKˆœ™Yœ™\Ú[™ÈŽˆ˜[ÙKˆB‚‚\œ›Ý]J‹Ø\KÚ[[ŠBÜÜ™‹™^[\™Yˆ\WÚ[[
+
+N‚ˆˆˆ”™]\›œÈ[[[™YYÈ\È”ÓÓˆ8 %[Ø^\È™]\›œÈ”ÓÓ‹™]™\ˆSˆˆˆ‚ˆžN‚ˆYˆ™\]Y\Ý˜\™ÜË™Ù]
+™XYÈŠHOHŒHŽ‚ˆ™]\›ˆœÛÛšYžJÂˆ›ÚÈŽˆYKˆ›™]ÜÈŽˆÞÈXÚÙ\ˆŽˆ•TÕ‹šXY[™HŽˆ‘XYÈ™]ÜÈ][H‹š[\XÝŽˆ’QÒ‹ˆ[YHŽˆŒNŒ‹œ™X\ÛÛˆŽˆ‘XYÈ\Ý^[ØY‹œÛÝ\˜ÙHŽˆ‘XYÈ‹ˆ›Û—ÝØ]Ú\ÝŽˆ˜[Ù_WKˆ›X\šÙ]Û™]ÜÈŽˆÞÈXÚÙ\ˆŽˆ•TÕ‹šXY[™HŽˆ‘XYÈ™]ÜÈ][H‹š[\XÝŽˆ’QÒ‹ˆ[YHŽˆŒNŒ‹œ™X\ÛÛˆŽˆ‘XYÈ\Ý^[ØY‹œÛÝ\˜ÙHŽˆ‘XYÈ‹ˆ›Û—ÝØ]Ú\ÝŽˆ˜[Ù_WKˆ™X\›š[™ÜÈŽˆÂˆÙ^HŽˆ×KˆÛ[Üœ›ÝÈŽˆ×Kˆ\×ÝÙYZÈŽˆÞÈXÚÙ\ˆŽˆ•TÕ‹™]HŽˆŒŒ‹LKLLH‹™]WÛX™[Žˆ•\ÈÙYZÈ‹ˆ[YWÛX™[Žˆ“SÈ‹™^\×Ø]Ø^HŽˆK›Û—ÝØ]Ú\ÝŽˆ˜[Ù_WKˆKˆœÜ]ÈŽˆÞÈXÚÙ\ˆŽˆ•TÕ‹œ˜][ÈŽˆŒŽŒH‹™Y™™XÝ]™WÙ]HŽˆŒŒ‹LKLMH‹ˆ™Y™—Ù]HŽˆŒŒ‹LKLMH‹\HŽˆ‘›ÜØ\™‹œÝ]\ÈŽˆ•\ÛÛZ[™È‹ˆš\×Û™]ÈŽˆ˜[ÙK™^\×Ø]Ø^HŽˆ_WKˆ™]šY[™ÈŽˆ×Kˆ™XÛÛ›ÛZX×Ù]™[ÈŽˆÞÈ›˜[YHŽˆ‘XYÈÔH]™[‹™]HŽˆŒŒ‹LKLLˆ‹š[\XÝŽˆ’QÒ‹ˆ™]™[Žˆ‘XYÈÔH]™[‹™]WÛX™[Žˆ“[ÛˆX^HLˆ‹ˆ[YHŽˆŽŒÌSH‹œ™X\ÛÛˆŽˆ‘XYÈ^[ØY‹š\×ÝÙ^HŽˆ˜[Ù_WKˆ™\œ›ÜœÈŽˆ×Kˆ›\ÝÝ\]YŽˆ™XYÈ‹ˆ™œ›ÛWØØXÚHŽˆ˜[ÙKˆœ™Yœ™\Ú[™ÈŽˆ˜[ÙKˆJB‚ˆYˆ™\]Y\Ý˜\™ÜË™Ù]
+œ™Yœ™\ÚŠHOHŒHŽ‚ˆÚ[[˜ÛX\—Ú[[ØØXÚJ
+B‚ˆ]HHÚ[[™Ù]Ú[[ÜÝ[[X\žJ
+Bˆ™]\›ˆœÛÛšYžJ]JB‚ˆ^Ù\^Ù\[Ûˆ\ÈN‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÚ[[\œ›ÜŽˆ	\È‹K^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÚ[[Ù\œ›Ü—Ü^[ØY
+ÝŠJJJKŒ‚‚\œ›Ý]J‹Ø\KÛ™ÝØ]ÚŠBÜÜ™‹™^[\™Yˆ\WÛ™ÝØ]Ú
+
+N‚ˆˆˆ”™]\›ˆ˜\Ù\KLLÛÛœÝ]Y[Ø]Ú]H
+™XÙ[Ú[™Ù\È
+ÈÜÛ[™ÜÊKˆˆˆ‚ˆžN‚ˆ™Yœ™\ÚH™\]Y\Ý˜\™ÜË™Ù]
+œ™Yœ™\ÚŠHOHŒH‚ˆYˆ™Yœ™\Ú‚ˆÚ]Ú[[—ØØXÚWÛØÚÎ‚ˆÚ[[—ØØXÚKœÜ
+›™‹›Û™JBˆÚ[[œ[—Û™ØÛÛœÝ]Y[ØÚXÚÊ
+Bˆ™]\›ˆœÛÛšYžJÚ[[™Ù]Û™ÝØ]ÚÙ]J
+JBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÛ™ÝØ]Úˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆÝŠ^ÊKœ™XÙ[ØÚ[™Ù\ÈŽˆ×KÜÚÛ[™ÜÈŽˆ×KÝ[ÛY[X™\œÈŽˆJKŒ‚‚\œ›Ý]J‹Ø\KÚ[[ÙXYÈŠB™Yˆ\WÚ[[ÙXYÊ
+N‚ˆˆˆ‘XYÈ[™Ú[8 %ÚÝÜÈ]HÛÝ\˜ÙHX[›ÜˆH[[[™Ú[™Kˆ›ÈTHÙ^\È^ÜÙYˆˆˆ‚ˆžN‚ˆÝ[[X\žHHÚ[[™Ù]Ú[[ÜÝ[[X\žJ
+BˆX\›—Ù™ÈHÝ[[X\žK™Ù]
+™X\›š[™Ü×ÙXYÈ‹ßJBˆXXÜ›ÈHÝ[[X\žK™Ù]
+›X\šÙ]Ù[š\›Û›Y[‹ßJBˆÙXÝÜ—ÚHÝ[[X\žK™Ù]
+œÙXÝÜ—ÚX]‹×JB‚ˆØXÚWØYÙ\ÎˆXÝHßBˆÚ]Ú[[—ØØXÚWÛØÚÎ‚ˆ›ÜˆÙ^K[žH[ˆ\Ý
+Ú[[—ØØXÚKš][\Ê
+JN‚ˆYÙWÜÈH[
+Ý[YK›[Û›ÝÛšXÊ
+HH[žVÈÈ—JBˆØXÚWØYÙ\ÖÚÙ^WHHˆžØYÙWÜß\ÈYÛÈ‚‚ˆšÛ[Z]YHÚ[[—ÙšÚ\×Ü˜]WÛ[Z]Y
+
+BˆšÜÙXÜÈHX^
+[
+Ú[[—ÙšÜ›Ý[[HÝ[YK›[Û›ÝÛšXÊ
+JJHYˆšÛ[Z]Y[ÙHˆX\›ˆHÝ[[X\žK™Ù]
+™X\›š[™ÜÈ‹ßJB‚ˆ™]\›ˆœÛÛšYžJÂˆ›ÚÈŽˆÝ[[X\žK™Ù]
+›ÚÈŠKˆ™š[›šX—Ü˜]WÛ[Z]YŽˆšÛ[Z]Yˆ™š[›šX—Ü›Ü™[XZ[š[™ÈŽˆˆžÙšÜÙXÜß\ÈˆYˆšÛ[Z]Y[ÙH››Ý[Z]Y‹ˆ™\œ›ÜœÈŽˆÝ[[X\žK™Ù]
+™\œ›ÜœÈ‹×JKˆ˜ØXÚWØYÙ\ÈŽˆØXÚWØYÙ\Ëˆ›™]Ü×ØÛÝ[Žˆ[ŠÝ[[X\žK™Ù]
+›™]ÜÈ‹×JJKˆ™X\›š[™Ü×ÝÙ^HŽˆ[ŠX\›‹™Ù]
+Ù^H‹×JJKˆ™X\›š[™Ü×ÝÛ[Üœ›ÝÈŽˆ[ŠX\›‹™Ù]
+Û[Üœ›ÝÈ‹×JJKˆ™X\›š[™Ü×Ý\×ÝÙYZÈŽˆ[ŠX\›‹™Ù]
+\×ÝÙYZÈ‹×JJKˆ™X\›š[™Ü×ÝXÚÙ\œ×ØÚXÚÙYŽˆX\›—Ù™Ë™Ù]
+XÚÙ\œ×ØÚXÚÙY‹
+Kˆ™X\›š[™Ü×ÜÛÝ\˜ÙHŽˆX\›—Ù™Ë™Ù]
+™X\›š[™Ü×ÜÛÝ\˜ÙWÝ\ÙY‹¸ %ŠKˆ™X\›š[™Ü×ÞYš[˜[˜ÙHŽˆX\›—Ù™Ë™Ù]
+žYš[˜[˜ÙWÙ›Ý[™‹
+Kˆ™X\›š[™Ü×Ùš[›šXˆŽˆX\›—Ù™Ë™Ù]
+™š[›šX—Ù›Ý[™‹
+Kˆ™X\›š[™Ü×ÛÝ™\œšY\ÈŽˆX\›—Ù™Ë™Ù]
+›Ý™\œšY\×Ú[š™XÝY‹
+KˆœÜ]×ØÛÝ[Žˆ[ŠÝ[[X\žK™Ù]
+œÜ]È‹×JJKˆ™]šY[™×ØÛÝ[Žˆ[ŠÝ[[X\žK™Ù]
+™]šY[™È‹×JJKˆœÙXÝÜ—ÚX]ØÛÝ[Žˆ[ŠÙXÝÜ—Ú
+KˆžZY[ÌLHŽˆXXÜ›Ë™Ù]
+žZY[ÌLHŠKˆžZY[ØÚ[™ÙWØœÈŽˆXXÜ›Ë™Ù]
+žZY[ØÚ[™ÙWØœÈŠKˆžZY[Ý™[™ŽˆXXÜ›Ë™Ù]
+žZY[Ý™[™ŠKˆ™WÜšXÙHŽˆXXÜ›Ë™Ù]
+™WÜšXÙHŠKˆš^Û]™[ŽˆXXÜ›Ë™Ù]
+š^Û]™[ŠKˆœ™YÚ[YHŽˆXXÜ›Ë™Ù]
+œ™YÚ[YHŠKˆJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÚ[[ÙXYÎˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÚ[œÝ]][Û˜[ÛX\šÙ]Z[\›˜[ÈŠB™Yˆ\WÛX\šÙ]Ú[\›˜[Ê
+N‚ˆˆˆ“X\šÙ][\›˜[Îˆœ™XYQ›ÞKÙXÝÜˆ\XÚ\][Û‹œ™XZÛÝ]ÛÛ™][ÛœËˆˆˆ‚ˆžN‚ˆ[\Ü[œÝ]][Û˜[Ù[™Ú[™H\ÈÚ[œÝˆÝHÛZÝ™Ù]ÛX\šÙ]ØÛÛ^
+
+HYˆÓRÕÐURSP“H[ÙHßBˆ[\›˜[ÈHÚ[œÝ™Ù]ÛX\šÙ]Ú[\›˜[ÊÝ
+BˆXXÜ›ÈHÚ[œÝ™Ù]ÛXXÜ›×ØÛÛ^
+Ý
+Bˆ™]\›ˆœÛÛšYžJÂˆ›ÚÈŽˆYKˆš[\›˜[ÈŽˆ[\›˜[Ëˆ›XXÜ›ÈŽˆXXÜ›Ëˆœ™YÚ[YHŽˆÝ™Ù]
+œ™YÚ[YHŠKˆœ™YÚ[YWÛX™[ŽˆÝ™Ù]
+œ™YÚ[YWÛX™[ŠKˆš^ŽˆÝ™Ù]
+š^Û]™[ŠKˆœ\\WÌYŽˆÝ™Ù]
+œ\\WÌYÜÝŠKˆœÜWÌYŽˆÝ™Ù]
+œÜWÌYÜÝŠKˆJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÛX\šÙ]Ú[\›˜[Îˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÚ[œÝ]][Û˜[ÏXÚÙ\ˆŠB™Yˆ\WÚ[œÝ]][Û˜[ÝXÚÙ\ŠXÚÙ\ŽˆÝŠN‚ˆˆˆ‚ˆ[[œÝ]][Û˜[[˜[\Ú\È›ÜˆHÚ[™ÛHXÚÙ\‹‚ˆ™]\›œÈ[MH[™Ú[™HÝ]]Îˆ›Û][]HÛÛ\™\ÜÚ[Û‹\]ZY]HX\ˆ]\›œË›Ø˜Xš[]HØÛÜ™KÛÛ[X][Û‹š\ÚÈ]™[Ë\ØÚ\[™HRK‚ˆˆˆ‚ˆžN‚ˆ[\Ü[œÝ]][Û˜[Ù[™Ú[™H\ÈÚ[œÝˆXÚÙ\ˆHXÚÙ\‹\\Š
+KœÝš\
+
+BˆÝHÛZÝ™Ù]ÛX\šÙ]ØÛÛ^
+
+HYˆÓRÕÐURSP“H[ÙHßB‚ˆÈžHÈÙ]^\Ý[™ÈÝØÚÈ]Hœ›ÛH‚ˆÝØÚÈHÙ]ÜÝØÚ×Ù]JXÚÙ\ŠHÜˆÈXÚÙ\ˆŽˆXÚÙ\ŸB‚ˆ™\Ý[HÚ[œÝ˜[˜[^™WÚ[œÝ]][Û˜[
+ÝØÚËÝ
+BˆÈ\[™X\šÙ][\›˜[È[™XXÜ›È›ÜˆÛÛ\][™\ÜÂˆ™\Ý[Èš[\›˜[È—HHÚ[œÝ™Ù]ÛX\šÙ]Ú[\›˜[ÊÝ
+Bˆ™\Ý[È›XXÜ›È—HHÚ[œÝ™Ù]ÛXXÜ›×ØÛÛ^
+Ý
+Bˆ™\Ý[ÈXÚÙ\ˆ—HHXÚÙ\‚ˆ™\Ý[È›ÚÈ—HHYBˆ™]\›ˆœÛÛšYžJ™\Ý[
+Bˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÚ[œÝ]][Û˜[ÝXÚÙ\ˆ	\Îˆ	\È‹XÚÙ\‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙKXÚÙ\ˆŽˆXÚÙ\‹™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÚ[œÝ]][Û˜[ÜÛX\]Ø]Ú\ÝŠB™Yˆ\WÜÛX\ÝØ]Ú\Ý
+
+N‚ˆˆˆ‚ˆRK\˜[šÙYÛX\Ø]Ú\ÝˆJËÐKÐˆY\œËX\›š[™ÜÈ^\ËˆÔˆØ[™Y]\ËÛÛ[X][ÛˆÙ]\ËÜ]YY^™H^\Ë‚ˆˆˆ‚ˆžN‚ˆ[\Ü[œÝ]][Û˜[Ù[™Ú[™H\ÈÚ[œÝˆÝHÛZÝ™Ù]ÛX\šÙ]ØÛÛ^
+
+HYˆÓRÕÐURSP“H[ÙHßBˆÝØÚÜÈHÙ]Ø[ÜÝØÚ×Ù]J
+HÈ\ÝÙˆXÝÈœ›ÛH‚‚ˆÈ[œÝ\™HXXÚÝØÚÈ\ÈH›Ø—ÜØÛÜ™H
+X^H[™XYH™HÙ]œ›ÛH[˜[\Ú\ÊBˆØÛÜ™YH×Bˆ›ÜˆÈ[ˆÝØÚÜÎ‚ˆYˆ›ÝË™Ù]
+œ›Ø—ÜØÛÜ™HŠN‚ˆÖÈœ›Ø—ÜØÛÜ™H—HHÚ[œÝ˜ÛÛ\]WÜ›Ø˜Xš[]WÜØÛÜ™JËÝ
+VÈœ›Ø—ÜØÛÜ™H—BˆØÛÜ™Y˜\[™
+ÊB‚ˆØ]Ú\ÝÈHÚ[œÝ˜Z[ÜÛX\ÝØ]Ú\Ý
+ØÛÜ™YÝ
+Bˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK
+ŠØ]Ú\ÝßJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÜÛX\ÝØ]Ú\Ýˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÚ[œÝ]][Û˜[ØY\]™KZ[œÚYÚÈŠB™Yˆ\WØY\]™WÚ[œÚYÚÊ
+N‚ˆˆˆY\]™HX\›š[™ÎˆÙ]\Ú[ˆ˜]\Ë™\Ý™YÚ[Y\ËRH™XÛÛ[Y[™][ÛœËˆˆˆ‚ˆžN‚ˆ[\Ü[œÝ]][Û˜[Ù[™Ú[™H\ÈÚ[œÝˆ[œÚYÚÈHÚ[œÝ™Ù]ØY\]™WÚ[œÚYÚÊ
+Bˆ—ÜÝ]ÈHÙ]ÜÙ]\ÛÝ]ÛÛYWÜÝ]ÊÝ\œ™[Ý\Ù\—ÚY
+
+JBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK
+Šš[œÚYÚË™—ÜÝ]ÈŽˆ—ÜÝ]ßJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WØY\]™WÚ[œÚYÚÎˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÚ[œÝ]][Û˜[Ü™XÛÜ™[Ý]ÛÛYH‹Y]ÙÏVÈ”ÔÕ—JBÜÜ™‹™^[\™Yˆ\WÜ™XÛÜ™ÛÝ]ÛÛYJ
+N‚ˆˆˆ‚ˆ™XÛÜ™H˜YHÝ]ÛÛYH›ÜˆY\]™HX\›š[™Ë‚ˆÔÕ”ÓÓŽˆÈXÚÙ\ˆŽˆ“•‘H‹œÙ]\Ý\HŽˆ[›YÈ‹›Ý]ÛÛYHŽˆÚ[ˆ‹œ™YÚ[YHŽˆ”’TÒ×ÓÓˆŸBˆˆˆ‚ˆžN‚ˆ[\Ü[œÝ]][Û˜[Ù[™Ú[™H\ÈÚ[œÝˆ›ÙHH™\]Y\Ý™Ù]ÚœÛÛŠ›Ü˜ÙOUYJHÜˆßBˆÙ]\Ý\HH›ÙK™Ù]
+œÙ]\Ý\H‹ˆŠBˆÝ]ÛÛYHH›ÙK™Ù]
+›Ý]ÛÛYH‹ˆŠHÈÚ[ˆˆ›ÜÜÈˆ˜œ™XZÙ]™[ˆ‚ˆ™YÚ[YHH›ÙK™Ù]
+œ™YÚ[YH‹ˆŠBˆ]\›ˆH›ÙK™Ù]
+œ]\›ˆ‹ˆŠB‚ˆYˆÝ]ÛÛYH›Ý[ˆ
+Ú[ˆ‹›ÜÜÈ‹˜œ™XZÙ]™[ˆŠN‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆ›Ý]ÛÛYH]\Ý™HÚ[ŸÜÜßœ™XZÙ]™[ˆŸJK‚ˆXÚÙ\ˆH›ÙK™Ù]
+XÚÙ\ˆ‹ˆŠBˆ›Ø—ÜØÛÜ™HH[
+›ÙK™Ù]
+œ›Ø—ÜØÛÜ™H‹
+JBˆ›Ý\ÈH›ÙK™Ù]
+››Ý\È‹ˆŠB‚ˆÚ[œÝœ™XÛÜ™ÜÙ]\ÛÝ]ÛÛYJÙ]\Ý\KÝ]ÛÛYK™YÚ[YK]\›ŠBˆØ]™WÜÙ]\ÛÝ]ÛÛYJXÚÙ\‹Ù]\Ý\KÝ]ÛÛYK™YÚ[YK]\›‹›Ø—ÜØÛÜ™K›Ý\ËˆÝ\œ™[Ý\Ù\—ÚY
+
+JBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYKœ™XÛÜ™YŽˆÈXÚÙ\ˆŽˆXÚÙ\‹œÙ]\Ý\HŽˆÙ]\Ý\K›Ý]ÛÛYHŽˆÝ]ÛÛY__JBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÜ™XÛÜ™ÛÝ]ÛÛYNˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÚ[œÝ]][Û˜[ÙZ[K\™]šY]ÈŠB™Yˆ\WÙZ[WÜ™]šY]Ê
+N‚ˆˆˆ‘[™[Ù‹Y^H\™›Ü›X[˜ÙH™]šY]ÈXÜ›ÜÜÈ[ØØ[›™YÙ]\Ëˆˆˆ‚ˆžN‚ˆ[\Ü[œÝ]][Û˜[Ù[™Ú[™H\ÈÚ[œÝˆÝHÛZÝ™Ù]ÛX\šÙ]ØÛÛ^
+
+HYˆÓRÕÐURSP“H[ÙHßBˆÝØÚÜÈHÙ]Ø[ÜÝØÚ×Ù]J
+B‚ˆÈZ[[˜[\Ú\ÈXÝÈ›Üˆ[ÝØÚÜÈ
+˜\Ý8 %\Ù\ÈØXÚY]JBˆ[˜[^™YH×Bˆ›ÜˆÈ[ˆÝØÚÜÎ‚ˆžN‚ˆ™\Ý[HÚ[œÝ˜[˜[^™WÚ[œÝ]][Û˜[
+ËÝ
+Bˆ[˜[^™Y˜\[™
+ÊŠœË
+Šœ™\Ý[JBˆ^Ù\^Ù\[ÛŽ‚ˆ[˜[^™Y˜\[™
+ÊB‚ˆ™]šY]ÈHÚ[œÝ™Ù[™\˜]WÙZ[WÜ™]šY]Ê[˜[^™Y
+Bˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK
+Šœ™]šY]ßJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÙZ[WÜ™]šY]Îˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ú[[ŠB™Yˆ[[
+
+N‚ˆˆˆ•˜Y\ÝX\ˆX\šÙ][™]ÜÈ[™ÛX\[[Û™^HX‹‚‚ˆ[Ø\™È\™HZ[œ›ÛHH^\Ý[™ÈØXÚKYš\œÝ[™Ú[™\Ëˆ\š]™Y˜[Y\Âˆ
+XY[™HÙ[[Y[[™ÛÝ™\˜YÙH[ÛY[[JH\™H^XÚ]HX™[YÛÈ^BˆØ[››Ý™HZ\ÝZÙ[ˆ›Üˆ^Ú[™ÙH›Û[YHÜˆH\™\\HÙ[[Y[™YY‚ˆˆˆ‚ˆZÝHÙÙ]ÛZÝØÝ
+
+B‚ˆ\K[Û™^WÙ›ÝÈHßK×BˆžN‚ˆ[\Ü\]ZY]WÙ[™Ú[™H\ÈÛ\Bˆ\HHÛ\K™Ù]Û\]ZY]WÜÝ]\Ê
+HÜˆßBˆ[Û™^WÙ›ÝÈHÛ\K™Ù]Û[Û™^WÙ›ÝÊ
+HÜˆ×Bˆ^Ù\^Ù\[Ûˆ\ÈÙN‚ˆÙÙÙ\‹™XYÊš[[ˆ\]ZY]H™]Ú˜Z[Yˆ	\È‹ÙJB‚ˆ]™[Ë™]ÜËX\›š[™ÜÈH×K×K×BˆžN‚ˆÝ[[HHÚ[[™Ù]Ú[[ÜÝ[[X\žJ
+HÜˆßBˆ]™[ÈHÝ[[K™Ù]
+™XÛÛ›ÛZX×Ù]™[ÈŠHÜˆ×Bˆ™]ÜÈHÝ[[K™Ù]
+›X\šÙ]Û™]ÜÈŠHÜˆÝ[[K™Ù]
+›™]ÜÈŠHÜˆ×BˆX\›ˆHÝ[[K™Ù]
+™X\›š[™ÜÈŠHÜˆßBˆX\›š[™ÜÈH
+ˆ\Ý
+X\›‹™Ù]
+Ù^HŠHÜˆ×JBˆ
+È\Ý
+X\›‹™Ù]
+Û[Üœ›ÝÈŠHÜˆ×JBˆ
+È\Ý
+X\›‹™Ù]
+\×ÝÙYZÈŠHÜˆ×JBˆ
+È\Ý
+X\›‹™Ù]
+˜ÛÛZ[™×Ý\ŠHÜˆ×JBˆ
+Bˆ^Ù\^Ù\[Ûˆ\ÈÙN‚ˆÙÙÙ\‹™XYÊš[[ˆ[[ÜÝ[[X\žH˜Z[Yˆ	\È‹ÙJB‚ˆXÝ]™WÚYHÙ]ØXÝ]™WÝÛÚY
+
+BˆžN‚ˆØ]Ú\ÝHÙ]ÝØ]Ú\ÝÜÝØÚÜÊXÝ]™WÚY
+HYˆXÝ]™WÚY[ÙH×Bˆ^Ù\^Ù\[ÛŽ‚ˆØ]Ú\ÝH×B‚ˆÈ[]H™]ÜÈØØ[›™\ˆ˜[Y\È\™H]\›Z[š\ÝXÈ[™]Y]X›Kˆ^H\ØÜšX™BˆÈXY[™HÛ™H[™Ø][\Ý[\Ü[˜ÙK›Ý[˜[\ÝÛÛœÙ[œÝ\ÈÜˆYšXÙK‚ˆœ›ÛHÙ[[Y[Ù[™Ú[™H[\Ü[œšXÚÛ™]Ü×Ø\XÛBˆ[œšXÚYÛ™]ÜÈH×BˆÛÝ™\˜YÙHHßBˆ›Üˆ˜]È[ˆ™]ÜÎ‚ˆ][HH[œšXÚÛ™]Ü×Ø\XÛJ˜]ËØ]Ú\Ý
+BˆXÚÙ\ˆHÝŠ][K™Ù]
+XÚÙ\ˆŠHÜˆˆŠK\\Š
+BˆYˆXÚÙ\Ž‚ˆØÛÜ™HHÈÔ’UPÐSŽˆ’QÒŽˆË“QQUSHŽˆŸK™Ù]
+][K™Ù]
+š[\XÝŠKJBˆ[žHHÛÝ™\˜YÙKœÙ]Y˜][
+XÚÙ\‹ÈXÚÙ\ˆŽˆXÚÙ\‹›Y[[ÛœÈŽˆœØÛÜ™HŽˆJBˆ[žVÈ›Y[[ÛœÈ—H
+ÏHBˆ[žVÈœØÛÜ™H—H
+ÏHØÛÜ™Bˆ[œšXÚYÛ™]ÜË˜\[™
+][JBˆ[œšXÚYÛ™]ÜËœÛÜ
+Ù^O[[X™H›ÝÎˆ
+\›ÝÖÈš[\Ü[˜ÙH—K›ÝË™Ù]
+[YHŠHÜˆˆŠJBˆ™[™[™ÈHÛÜY
+ÛÝ™\˜YÙK˜[Y\Ê
+KÙ^O[[X™H›ÝÎˆ
+\›ÝÖÈœØÛÜ™H—K\›ÝÖÈ›Y[[ÛœÈ—K›ÝÖÈXÚÙ\ˆ—JJVÎ—B‚ˆœšYYš[™ÈH›Û™BˆžN‚ˆœšYYš[™ÈHÙ]ØZWØœšYYš[™ÊÙ]Û›ÝÊ
+KœÝ™[YJ‰VKI[KIYŠJBˆ^Ù\^Ù\[ÛŽ‚ˆ\ÜÂˆÝÜžHHßBˆYˆ›ÝœšYYš[™È[™ÓRÕÐURSP“N‚ˆžN‚ˆÝÜžHHÛZÝ™Ù[™\˜]WÛX\šÙ]ÜÝÜžJZÝ
+\K™Ù]
+œØÛÜ™HŠHYˆ\H[ÙH›Û™JJBˆ^Ù\^Ù\[Ûˆ\ÈÙN‚ˆÙÙÙ\‹™XYÊš[[ˆÝÜžH˜Z[Yˆ	\È‹ÙJB‚ˆ™]\›ˆ™[™\—Ý[\]Jˆš[[š[‹ˆZÝ[ZÝ\O[\K[Û™^WÙ›ÝÏ[[Û™^WÙ›ÝÖÎŽKˆ]™[ÏY]™[ÖÎŽK™]ÜÏY[œšXÚYÛ™]ÜÖÎŒKX\›š[™ÜÏYX\›š[™ÜÖÎŒL—Kˆ™[™[™Ï]™[™[™ËœšYYš[™ÏXœšYYš[™ËÝÜžO\ÝÜžKˆ
+B‚‚\œ›Ý]J‹ÜÙ[[Y[ŠB™YˆÙ[[Y[
+
+N‚ˆˆˆ•˜[œÜ\™[™]ÜÈÛ™HÚ][ˆ^XÚ]ÛØÚX[Y]H]˜Z[Xš[]HÝ]Kˆˆˆ‚ˆ™]ÜÈH×BˆžN‚ˆÝ[[X\žHHÚ[[™Ù]Ú[[ÜÝ[[X\žJ
+HÜˆßBˆ™]ÜÈHÝ[[X\žK™Ù]
+›X\šÙ]Û™]ÜÈŠHÜˆÝ[[X\žK™Ù]
+›™]ÜÈŠHÜˆ×Bˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™XYÊœÙ[[Y[ˆ™]ÜÈÝ[[X\žH[˜]˜Z[X›Nˆ	\È‹^ÊB‚ˆXÝ]™WÚYHÙ]ØXÝ]™WÝÛÚY
+
+BˆžN‚ˆØ]Ú\ÝHÙ]ÝØ]Ú\ÝÜÝØÚÜÊXÝ]™WÚY
+HYˆXÝ]™WÚY[ÙH×Bˆ^Ù\^Ù\[ÛŽ‚ˆØ]Ú\ÝH×B‚ˆœ›ÛHÙ[[Y[Ù[™Ú[™H[\ÜZ[ÜÙ[[Y[ÜÛ˜\ÚÝˆÛ˜\ÚÝHZ[ÜÙ[[Y[ÜÛ˜\ÚÝ
+™]ÜËØ]Ú\Ý
+Bˆ™]\›ˆ™[™\—Ý[\]JœÙ[[Y[š[‹Û˜\ÚÝ\Û˜\ÚÝ
+B‚‚\œ›Ý]J‹ÜÛX\[[Û™^HŠB™YˆÛX\Û[Û™^J
+N‚ˆˆˆ•™\šYšYYÑPÈ[œÚY\ˆš[[™ÜÈ[™ÛÛ™Ü™\ÜÚ[Û˜[˜YH\ØÛÜÝ\™\Ëˆˆˆ‚ˆXÝ]™WÚYHÙ]ØXÝ]™WÝÛÚY
+
+BˆžN‚ˆXÚÙ\œÈHÙ]ÝØ]Ú\ÝÜÝØÚÜÊXÝ]™WÚY
+HYˆXÝ]™WÚY[ÙH×Bˆ^Ù\^Ù\[ÛŽ‚ˆXÚÙ\œÈH×B‚ˆœ›ÛHÛX\Û[Û™^H[\Ü™]ÚØÛÛ™Ü™\Ü×Ý˜Y\Ë™]ÚÜÙX×Ù›Ü›Mˆ[œÚY\œË[œÚY\—ÜÝ]\ÈH™]ÚÜÙX×Ù›Ü›M
+XÚÙ\œÊBˆÛÛ™Ü™\ÜËÛÛ™Ü™\Ü×ÜÝ]\ÈH™]ÚØÛÛ™Ü™\Ü×Ý˜Y\Ê
+Bˆ™]\›ˆ™[™\—Ý[\]JˆœÛX\Û[Û™^Kš[‹ˆ[œÚY\œÏZ[œÚY\œËˆÛÛ™Ü™\ÜÏXÛÛ™Ü™\ÜËˆ[œÚY\—ÜÝ]\ÏZ[œÚY\—ÜÝ]\ËˆÛÛ™Ü™\Ü×ÜÝ]\ÏXÛÛ™Ü™\Ü×ÜÝ]\ËˆØ]ÚYÝXÚÙ\œÏ]XÚÙ\œÖÎŒLKˆ
+B‚‚™YˆØZ[ØØ][\ÝØØ[[™\ŠÝ[[X\žKØ]Ú\ÝÝXÚÙ\œÏS›Û™JN‚ˆˆˆ“›Ü›X[^™HØXÚYX\›š[™ÜÈ[™XXÜ›È]™[È›ÜˆHØ[[™\ˆRK‚‚ˆH[[YÙ[˜ÙH[™Ú[™H[[[Û˜[H\ÈY™™\™[ØÚ[X\È›ÜˆÛÛ\[žBˆX\›š[™ÜÈ[™XÛÛ›ÛZXÈ™[X\Ù\ËˆÙY\[™ÈH›Ü›X[^˜][Ûˆ\™HÚ]™\ÈBˆ[\]HÛ™HÝX›HÛÛ˜XÝ[™XZÙ\ÈHš[\œÈ]\›Z[š\ÝXËÛÙ™›[™K‚ˆˆˆ‚ˆØ]Ú\ÝHÜÝŠ
+K\\Š
+H›Üˆ[ˆ
+Ø]Ú\ÝÝXÚÙ\œÈÜˆ×J_Bˆ›ÝÜÈH×BˆX\›š[™ÜÈH
+Ý[[X\žHÜˆßJK™Ù]
+™X\›š[™ÜÈŠHÜˆßBˆÙY[—ÙX\›š[™ÜÈHÙ]
+
+Bˆ›ÜˆXÚÙ][ˆ
+Ù^H‹Û[Üœ›ÝÈ‹\×ÝÙYZÈ‹˜ÛÛZ[™×Ý\ŠN‚ˆ›Üˆ˜]È[ˆX\›š[™ÜË™Ù]
+XÚÙ]
+HÜˆ×N‚ˆXÚÙ\ˆHÝŠ˜]Ë™Ù]
+XÚÙ\ˆŠHÜˆˆŠK\\Š
+Bˆ]HHÝŠ˜]Ë™Ù]
+™]HŠHÜˆˆŠVÎŒLBˆÙ^HH
+XÚÙ\‹]JBˆYˆ›ÝXÚÙ\ˆÜˆÙ^H[ˆÙY[—ÙX\›š[™ÜÎ‚ˆÛÛ[YBˆÙY[—ÙX\›š[™ÜË˜Y
+Ù^JBˆ^\ÈH˜]Ë™Ù]
+™^\×Ø]Ø^HŠBˆžN‚ˆ^\ÈH[
+^\ÊBˆ^Ù\
+\Q\œ›Ü‹˜[YQ\œ›ÜŠN‚ˆ^\ÈHNBˆ›ÝÜË˜\[™
+ÂˆšÚ[™Žˆ‘PT“’S‘ÔÈ‹™]HŽˆ]Kˆ™]WÛX™[Žˆ˜]Ë™Ù]
+™]WÛX™[ŠHÜˆ]HÜˆ‘]H‘‹ˆ[YHŽˆ˜]Ë™Ù]
+[YWÛX™[ŠHÜˆ•‘‹ˆ]HŽˆˆžÝXÚÙ\ŸHX\›š[™ÜÈ‹ˆXÚÙ\ˆŽˆXÚÙ\‹ˆ˜ÛÛ\[žWÛ˜[YHŽˆ˜]Ë™Ù]
+˜ÛÛ\[žWÛ˜[YHŠHÜˆXÚÙ\‹ˆš[\XÝŽˆ’QÒˆYˆXÚÙ\ˆ[ˆØ]Ú\Ý[ÙH“QQUSH‹ˆœ™X\ÛÛˆŽˆ”]X\\›HX\›š[™ÜÈØ[ˆÜ™X]HšXÙHØ\È[™›Û][]Kˆ‹ˆ™^\×Ø]Ø^HŽˆ^\Ëˆ›Û—ÝØ]Ú\ÝŽˆXÚÙ\ˆ[ˆØ]Ú\Ýˆ™\×Ù\ÝŽˆ˜]Ë™Ù]
+™\×Ù\ÝŠKˆœ™]—Ù\ÝŽˆ˜]Ë™Ù]
+œ™]—Ù\ÝŠKˆ›X\šÙ]ØØ\Žˆ˜]Ë™Ù]
+›X\šÙ]ØØ\ŠKˆ˜Ø\ÝY\ˆŽˆ˜]Ë™Ù]
+˜Ø\ÝY\ˆŠHÜˆ
+•Ø]Ú\ÝˆYˆXÚÙ\ˆ[ˆØ]Ú\Ý[ÙHˆŠKˆJB‚ˆ›Üˆ˜]È[ˆ
+Ý[[X\žHÜˆßJK™Ù]
+™XÛÛ›ÛZX×Ù]™[ÈŠHÜˆ×N‚ˆ^\ÈH˜]Ë™Ù]
+™^\×Ø]Ø^HŠBˆžN‚ˆ^\ÈH[
+^\ÊBˆ^Ù\
+\Q\œ›Ü‹˜[YQ\œ›ÜŠN‚ˆ^\ÈHNBˆ›ÝÜË˜\[™
+ÂˆšÚ[™Žˆ‘PÓÓ“ÓRPÈ‹™]HŽˆÝŠ˜]Ë™Ù]
+™]HŠHÜˆˆŠVÎŒLKˆ™]WÛX™[Žˆ˜]Ë™Ù]
+™]WÛX™[ŠHÜˆ˜]Ë™Ù]
+™]HŠHÜˆ‘]H‘‹ˆ[YHŽˆ˜]Ë™Ù]
+[YHŠHÜˆ•‘‹ˆ]HŽˆ˜]Ë™Ù]
+™]™[ŠHÜˆ‘XÛÛ›ÛZXÈ]™[‹ˆXÚÙ\ˆŽˆˆ‹˜ÛÛ\[žWÛ˜[YHŽˆ•TÈXXÜ›È‹ˆš[\XÝŽˆÝŠ˜]Ë™Ù]
+š[\XÝŠHÜˆ“QQUSHŠK\\Š
+Kˆœ™X\ÛÛˆŽˆ˜]Ë™Ù]
+œ™X\ÛÛˆŠHÜˆ“XXÜ›È™[X\Ù\ÈØ[ˆY™™XÝ˜]\ËÙXÝÜœË[™œ›ØYX\šÙ]š\ÚËˆ‹ˆ™^\×Ø]Ø^HŽˆ^\Ë›Û—ÝØ]Ú\ÝŽˆ˜[ÙKˆ™\×Ù\ÝŽˆ›Û™Kœ™]—Ù\ÝŽˆ›Û™Kˆ›X\šÙ]ØØ\Žˆ›Û™K˜Ø\ÝY\ˆŽˆˆ‹ˆJB‚ˆ™]\›ˆÛÜY
+›ÝÜËÙ^O[[X™H›ÝÎˆ
+ˆ›ÝÖÈ™^\×Ø]Ø^H—K›ÝÖÈ™]H—K›ÝÖÈ[YH—HOH•‘‹›ÝÖÈ[YH—K›ÝÖÈ]H—Bˆ
+JB‚‚\œ›Ý]J‹ØØ[[™\ˆŠB™YˆØ][\ÝØØ[[™\Š
+N‚ˆˆˆ“[Øš[KYš\œÝX\›š[™ÜÈ[™XÛÛ›ÛZXÈØ][\ÝØ[[™\‹ˆˆˆ‚ˆžN‚ˆÝ[[X\žHHÚ[[™Ù]Ú[[ÜÝ[[X\žJ
+HÜˆßBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™XYÊ˜Ø][\ÝØØ[[™\Žˆ[[Ý[[X\žH˜Z[Yˆ	\È‹^ÊBˆÝ[[X\žHHßB‚ˆXÝ]™WÚYHÙ]ØXÝ]™WÝÛÚY
+
+BˆžN‚ˆXÝ]™WÝXÚÙ\œÈHÙ]ÝØ]Ú\ÝÜÝØÚÜÊXÝ]™WÚY
+HYˆXÝ]™WÚY[ÙH×Bˆ^Ù\^Ù\[ÛŽ‚ˆXÝ]™WÝXÚÙ\œÈH×Bˆ›ÝÜÈHØZ[ØØ][\ÝØØ[[™\ŠÝ[[X\žKXÝ]™WÝXÚÙ\œÊBˆ™]\›ˆ™[™\—Ý[\]Jˆ˜Ø][\ÝØØ[[™\‹š[‹]™[Ï\›ÝÜËˆX\›š[™Ü×ØÛÝ[\Ý[J›ÝÖÈšÚ[™—HOH‘PT“’S‘ÔÈˆ›Üˆ›ÝÈ[ˆ›ÝÜÊKˆXÛÛ›ÛZX×ØÛÝ[\Ý[J›ÝÖÈšÚ[™—HOH‘PÓÓ“ÓRPÈˆ›Üˆ›ÝÈ[ˆ›ÝÜÊKˆØ]Ú\ÝØÛÝ[\Ý[J›ÝÖÈ›Û—ÝØ]Ú\Ý—H›Üˆ›ÝÈ[ˆ›ÝÜÊKˆ
+B‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ\]ZY]H	ˆÜÜ[š]H™\ÙX\˜Ú[™Ú[™BˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚\œ›Ý]J‹ÈŠB\œ›Ý]J‹ÛÜÜ[š]HŠB™Yˆ\]ZY]WÜYÙJ
+N‚ˆˆˆ“[Ü›š[™ÈÛÛ[X[™Ù[\ˆ8 %\]ZY]Kš\ÚËÙXÝÜˆ›ÝËY[ˆÜÜ[š]Y\Ëˆˆˆ‚ˆ™]\›ˆ™[™\—Ý[\]J›\]ZY]Kš[ŠB‚‚\œ›Ý]J‹Ø\KÛ\]ZY]KÜÝ]\ÈŠB™Yˆ\WÛ\]ZY]WÜÝ]\Ê
+N‚ˆˆˆ‘™Y\]ZY]H[Ûš]ÜŽˆ”‘Q]KZY[Ý\™K\]ZY]HØÛÜ™Kˆˆˆ‚ˆžN‚ˆ[\Ü\]ZY]WÙ[™Ú[™H\ÈÛ\BˆÝHÛ\K™Ù]Û\]ZY]WÜÝ]\Ê
+Bˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK
+Š˜ÝJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÛ\]ZY]WÜÝ]\Îˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÛ\]ZY]KÛ[Û™^KY›ÝÈŠB™Yˆ\WÛ[Û™^WÙ›ÝÊ
+N‚ˆˆˆ”ÙXÝÜˆUˆ[Û™^H›ÝÈ˜[šÚ[™ÜËˆˆˆ‚ˆžN‚ˆ[\Ü\]ZY]WÙ[™Ú[™H\ÈÛ\BˆY›ÝÈHÛ\K™Ù]Û[Û™^WÙ›ÝÊ
+BˆÝHÛ\K™Ù]Û\]ZY]WÜÝ]\Ê
+Bˆ™]\›ˆœÛÛšYžJÂˆ›ÚÈŽˆYKˆ›[Û™^WÙ›ÝÈŽ›Y›ÝËˆ›\WÜÝ]\ÈŽ˜Ý™Ù]
+œÝ]\ÈŠKˆ›\WÜØÛÜ™HŽˆÝ™Ù]
+œØÛÜ™HŠKˆJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÛ[Û™^WÙ›ÝÎˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÛÜÜ[š]KÜØØ[ˆŠB™Yˆ\WÛÜÜ[š]WÜØØ[Š
+N‚ˆˆˆ‚ˆ[ˆH[Y[ˆÜÜ[š]HØØ[‹‚ˆ]Y\žH\˜[\Î‚ˆ[ÙOX›Ý˜Y_[™\Ý
+Y˜][ˆ›Ý
+BˆXÚÙ\œÏS•‘KÔ•Ñ‹‹ˆ
+^˜HXÚÙ\œÈÈ[˜ÛYJBˆˆˆ‚ˆžN‚ˆ[\ÜÜÜ[š]WÙ[™Ú[™H\ÈÛÜˆ[\Ü\]ZY]WÙ[™Ú[™H\ÈÛ\Bˆ[ÙHH™\]Y\Ý˜\™ÜË™Ù]
+›[ÙH‹˜›ÝŠBˆ^˜WÜ˜]ÈH™\]Y\Ý˜\™ÜË™Ù]
+XÚÙ\œÈ‹ˆŠBˆ^˜WÝXÚÙ\œÈHÝœÝš\
+
+K\\Š
+H›Üˆ[ˆ^˜WÜ˜]ËœÜ]
+‹ŠHYˆœÝš\
+
+WBˆZÝØÝHÛZÝ™Ù]ÛX\šÙ]ØÛÛ^
+
+HYˆÓRÕÐURSP“H[ÙHßBˆ\WØÝHÛ\K™Ù]Û\]ZY]WÜÝ]\Ê
+Bˆ™\Ý[ÈHÛÜœ[—ÛÜÜ[š]WÜØØ[Š^˜WÝXÚÙ\œËZÝØÝ\WØÝ[ÙJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK
+Šœ™\Ý[ßJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÛÜÜ[š]WÜØØ[Žˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÛÜÜ[š]KÝXÚÙ\‹ÏXÚÙ\ˆŠB™Yˆ\WÛÜÜ[š]WÝXÚÙ\ŠXÚÙ\ŽˆÝŠN‚ˆˆˆ‘[ÜÜ[š]H[˜[\Ú\È
+È™\ÙX\˜Ú™\Ü›ÜˆHÚ[™ÛHXÚÙ\‹ˆˆˆ‚ˆžN‚ˆ[\ÜÜÜ[š]WÙ[™Ú[™H\ÈÛÜˆ[\Ü\]ZY]WÙ[™Ú[™H\ÈÛ\BˆXÚÙ\ˆHXÚÙ\‹\\Š
+KœÝš\
+
+BˆZÝØÝHÛZÝ™Ù]ÛX\šÙ]ØÛÛ^
+
+HYˆÓRÕÐURSP“H[ÙHßBˆ\WØÝHÛ\K™Ù]Û\]ZY]WÜÝ]\Ê
+BˆÛÜ™Ù]Ù[™[Y[[×ÜÞ[˜ÊXÚÙ\ŠHÈ[œÝ\™H]H\È™XYH™Y›Ü™HZ[[™È™\Üˆ™\Ý[HÛÜœØØ[—ÝXÚÙ\ŠXÚÙ\‹ZÝØÝ\WØÝ
+Bˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK
+Šœ™\Ý[JBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÛÜÜ[š]WÝXÚÙ\ˆ	\Îˆ	\È‹XÚÙ\‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙKXÚÙ\ˆŽˆXÚÙ\‹™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÛÜÜ[š]KØ[\ÈŠB™Yˆ\WÛÜÜ[š]WØ[\Ê
+N‚ˆˆˆÛÛXš[™YÜÜ[š]H
+È\]ZY]H[\Ëˆˆˆ‚ˆžN‚ˆ[\ÜÜÜ[š]WÙ[™Ú[™H\ÈÛÜˆ[\Ü\]ZY]WÙ[™Ú[™H\ÈÛ\BˆZÝØÝHÛZÝ™Ù]ÛX\šÙ]ØÛÛ^
+
+HYˆÓRÕÐURSP“H[ÙHßBˆ\WØÝHÛ\K™Ù]Û\]ZY]WÜÝ]\Ê
+BˆÈ]ZXÚÈØØ[ˆÙˆÜXÚÙ\œÈÛ›H›ÜˆÜYYˆ˜\ÝÝ[š]™\œÙHHÈ“•‘H‹Ô•Ñ‹SQ‹“QUH‹”ˆ‹“T•“‹‘ÑÈ‹“‘U‹SV“ˆ‹ÓÒSˆ—Bˆ™\Ý[ÈH×Bˆ›Üˆ[ˆ˜\ÝÝ[š]™\œÙN‚ˆžN‚ˆ™\Ý[Ë˜\[™
+ÛÜœØØ[—ÝXÚÙ\ŠZÝØÝ\WØÝ
+JBˆ^Ù\^Ù\[ÛŽ‚ˆ\ÜÂˆ[\ÈHÛÜ™Ù[™\˜]WÛÜÜ[š]WØ[\Ê™\Ý[ËZÝØÝ\WØÝ
+Bˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK˜[\ÈŽˆ[\Ë˜ÛÝ[Žˆ[Š[\Ê_JBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÛÜÜ[š]WØ[\Îˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚\œ›Ý]J‹Ø\KÛÜÜ[š]KÜ™Yœ™\Ú‹Y]ÙÏVÈ”ÔÕ—JBÜÜ™‹™^[\™Yˆ\WÛÜÜ[š]WÜ™Yœ™\Ú
+
+N‚ˆˆˆ•šYÙÙ\ˆ˜XÚÙÜ›Ý[™™Yœ™\ÚÙˆ\]ZY]H]Kˆˆˆ‚ˆžN‚ˆ[\Ü\]ZY]WÙ[™Ú[™H\ÈÛ\BˆÛ\Kœ™Yœ™\ÚÛ\]ZY]WØ™Ê
+Bˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK›\ÙÈŽˆ“\]ZY]H™Yœ™\ÚšYÙÙ\™YˆŸJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™\œ›ÜŠ˜\WÛÜÜ[š]WÜ™Yœ™\Úˆ	\È‹^Ë^×Ú[™›ÏUYJBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ]][XØ][Ûˆ›Ý]\ÂˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚\œ›Ý]J‹ÛÙÚ[ˆ‹Y]ÙÏVÈ‘ÑU‹”ÔÕ—JBÜÜ™‹™^[\™YˆÙÚ[—ÜYÙJ
+N‚ˆˆˆ“][K]\Ù\ˆÙÚ[ˆYÙKˆˆˆ‚ˆYˆÙ\ÜÚ[Û‹™Ù]
+\Ù\—ÚYŠN‚ˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠ›\]ZY]WÜYÙHŠJBˆ\œ›ÜˆH›Û™BˆYˆ™\]Y\Ý›Y]ÙOH”ÔÕŽ‚ˆ\Ù\›˜[YHH™\]Y\Ý™›Ü›K™Ù]
+\Ù\›˜[YH‹ˆŠKœÝš\
+
+Bˆ\ÜÝÛÜ™H™\]Y\Ý™›Ü›K™Ù]
+œ\ÜÝÛÜ™‹ˆŠKœÝš\
+
+Bˆ\Ù\ˆHÚXÚ×Ý\Ù\—Ü\ÜÝÛÜ™
+\Ù\›˜[YK\ÜÝÛÜ™
+BˆYˆ\Ù\Ž‚ˆ™[Y[X™\ˆH™\]Y\Ý™›Ü›K™Ù]
+œ™[Y[X™\—ÛYHŠHOHŒH‚ˆÙ\ÜÚ[Û‹œ\›X[™[H™[Y[X™\‚ˆÙ\ÜÚ[Û–È\Ù\—ÚY—HH\Ù\–ÈšY—BˆÙ\ÜÚ[Û–È\Ù\›˜[YH—HH\Ù\–È\Ù\›˜[YH—BˆÙ\ÜÚ[Û–Èš\×ØYZ[ˆ—HH\Ù\–Èš\×ØYZ[ˆ—Bˆ™^Ý\›H™\]Y\Ý™›Ü›K™Ù]
+›™^ŠHÜˆ\›Ù›ÜŠ›\]ZY]WÜYÙHŠBˆYˆ›Ý™^Ý\›œÝ\ÝÚ]
+‹ÈŠHÜˆ™^Ý\›œÝ\ÝÚ]
+‹ËÈŠN‚ˆ™^Ý\›H\›Ù›ÜŠ›\]ZY]WÜYÙHŠBˆ™]\›ˆ™Y\™XÝ
+™^Ý\›
+Bˆ\œ›ÜˆH’[˜[Y\Ù\›˜[YHÜˆ\ÜÝÛÜ™ˆ‚ˆ™]\›ˆ™[™\—Ý[\]J›ÙÚ[‹š[‹ˆ™^\™\]Y\Ý˜\™ÜË™Ù]
+›™^‹ˆŠKˆ\œ›ÜY\œ›ÜŠB‚‚\œ›Ý]J‹ÛÙÛÝ]‹Y]ÙÏVÈ”ÔÕ—JB™YˆÙÛÝ]
+
+N‚ˆˆˆÛX\ˆÙ\ÜÚ[Ûˆ[™™Y\™XÝÈÙÚ[‹ˆˆˆ‚ˆÙ\ÜÚ[Û‹˜ÛX\Š
+Bˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠ›ÙÚ[—ÜYÙHŠJB‚‚\œ›Ý]J‹Ü™YÚ\Ý\ˆ‹Y]ÙÏVÈ‘ÑU‹”ÔÕ—JBÜÜ™‹™^[\™Yˆ™YÚ\Ý\—ÜYÙJ
+N‚ˆˆˆ”Ù[‹\™YÚ\Ý˜][ÛˆYÙKˆÜ™X]\ÈH™YÝ[\ˆ
+›Û‹XYZ[ŠH\Ù\ˆXØÛÝ[ˆˆˆ‚ˆYˆÙ\ÜÚ[Û‹™Ù]
+\Ù\—ÚYŠN‚ˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠ›\]ZY]WÜYÙHŠJBˆ\œ›ÜˆH›Û™Bˆ[\™YÝ\Ù\›˜[YHHˆ‚ˆYˆ™\]Y\Ý›Y]ÙOH”ÔÕŽ‚ˆ[\™YÝ\Ù\›˜[YHH™\]Y\Ý™›Ü›K™Ù]
+\Ù\›˜[YH‹ˆŠKœÝš\
+
+Bˆ\ÜÝÛÜ™H™\]Y\Ý™›Ü›K™Ù]
+œ\ÜÝÛÜ™‹ˆŠBˆÛÛ™š\›HH™\]Y\Ý™›Ü›K™Ù]
+˜ÛÛ™š\›WÜ\ÜÝÛÜ™‹ˆŠB‚ˆYˆ›Ý[\™YÝ\Ù\›˜[YN‚ˆ\œ›ÜˆH•\Ù\›˜[YH\È™\]Z\™Yˆ‚ˆ[Yˆ[Š[\™YÝ\Ù\›˜[YJHÎ‚ˆ\œ›ÜˆH•\Ù\›˜[YH]\Ý™H]X\ÝÈÚ\˜XÝ\œËˆ‚ˆ[Yˆ[Š[\™YÝ\Ù\›˜[YJHˆL‚ˆ\œ›ÜˆH•\Ù\›˜[YH]\Ý™HLÚ\˜XÝ\œÈÜˆ™]Ù\‹ˆ‚ˆ[Yˆ›Ý[\™YÝ\Ù\›˜[YKœ™\XÙJ—È‹ˆŠKœ™\XÙJ‹H‹ˆŠKš\Ø[[J
+N‚ˆ\œ›ÜˆH•\Ù\›˜[YHX^HÛ›HÛÛZ[ˆ]\œË[X™\œË\[œË[™[™\œØÛÜ™\Ëˆ‚ˆ[Yˆ[Š\ÜÝÛÜ™
+H‚ˆ\œ›ÜˆH”\ÜÝÛÜ™]\Ý™H]X\ÝÚ\˜XÝ\œËˆ‚ˆ[Yˆ\ÜÝÛÜ™OHÛÛ™š\›N‚ˆ\œ›ÜˆH”\ÜÝÛÜ™ÈÈ›ÝX]Úˆ‚ˆ[YˆÙ]Ý\Ù\—ØžWÝ\Ù\›˜[YJ[\™YÝ\Ù\›˜[YJN‚ˆ\œ›ÜˆH•]\Ù\›˜[YH\È[™XYHZÙ[‹ˆ‚ˆ[ÙN‚ˆžN‚ˆZYHÜ™X]WÝ\Ù\Š[\™YÝ\Ù\›˜[YK\ÜÝÛÜ™\×ØYZ[Q˜[ÙJBˆÙ\ÜÚ[Û‹œ\›X[™[H˜[ÙBˆÙ\ÜÚ[Û–È\Ù\—ÚY—HHZYˆÙ\ÜÚ[Û–È\Ù\›˜[YH—HH[\™YÝ\Ù\›˜[YK›ÝÙ\Š
+BˆÙ\ÜÚ[Û–Èš\×ØYZ[ˆ—HHˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠ›\]ZY]WÜYÙHŠJBˆ^Ù\^Ù\[ÛŽ‚ˆ\œ›ÜˆHÛÝ[›ÝÜ™X]HXØÛÝ[8 %X\ÙHžHYØZ[‹ˆ‚‚ˆ™]\›ˆ™[™\—Ý[\]Jœ™YÚ\Ý\‹š[‹\œ›ÜY\œ›Ü‹\Ù\›˜[YOY[\™YÝ\Ù\›˜[YJB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈYZ[ˆ8 %\Ù\ˆX[˜YÙ[Y[ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚\œ›Ý]J‹ØYZ[‹Ý\Ù\œÈŠB™\]Z\™WØYZ[‚™YˆYZ[—Ý\Ù\œÊ
+N‚ˆˆˆYZ[ˆYÙNˆ\Ý[\Ù\œËˆˆˆ‚ˆ\Ù\œÈHÙ]Ø[Ý\Ù\œÊ
+Bˆ™]\›ˆ™[™\—Ý[\]J˜YZ[—Ý\Ù\œËš[‹\Ù\œÏ]\Ù\œËˆÝ\œ™[ÝZYXÝ\œ™[Ý\Ù\—ÚY
+
+JB‚‚\œ›Ý]J‹ØYZ[‹Ý\Ù\œËØÜ™X]H‹Y]ÙÏVÈ”ÔÕ—JB™\]Z\™WØYZ[‚™YˆYZ[—Ý\Ù\—ØÜ™X]J
+N‚ˆˆˆYZ[ŽˆÜ™X]HH™]È\Ù\‹ˆˆˆ‚ˆ\Ù\›˜[YHH™\]Y\Ý™›Ü›K™Ù]
+\Ù\›˜[YH‹ˆŠKœÝš\
+
+Bˆ\ÜÝÛÜ™H™\]Y\Ý™›Ü›K™Ù]
+œ\ÜÝÛÜ™‹ˆŠKœÝš\
+
+Bˆ\×ØYZ[ˆH›ÛÛ
+™\]Y\Ý™›Ü›K™Ù]
+š\×ØYZ[ˆŠJBˆYˆ›Ý\Ù\›˜[YHÜˆ›Ý\ÜÝÛÜ™‚ˆ›\Ú
+•\Ù\›˜[YH[™\ÜÝÛÜ™\™H™\]Z\™Yˆ‹™\œ›ÜˆŠBˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠ˜YZ[—Ý\Ù\œÈŠJBˆžN‚ˆÜ™X]WÝ\Ù\Š\Ù\›˜[YK\ÜÝÛÜ™\×ØYZ[Z\×ØYZ[ŠBˆ›\Ú
+ˆ•\Ù\ˆ	ÞÝ\Ù\›˜[Y_IÈÜ™X]Yˆ‹œÝXØÙ\ÜÈŠBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆ›\Ú
+ˆÛÝ[›ÝÜ™X]H\Ù\ŽˆÙ^ßH‹™\œ›ÜˆŠBˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠ˜YZ[—Ý\Ù\œÈŠJB‚‚\œ›Ý]J‹ØYZ[‹Ý\Ù\œËÏ[ZY‹Ù[]H‹Y]ÙÏVÈ”ÔÕ—JB™\]Z\™WØYZ[‚™YˆYZ[—Ý\Ù\—Ù[]JZY
+N‚ˆˆˆYZ[Žˆ[]HH\Ù\ˆ
+Ø[››Ý[]HYZ[‹YLJKˆˆˆ‚ˆžN‚ˆ[]WÝ\Ù\ŠZY
+Bˆ›\Ú
+•\Ù\ˆ[]Yˆ‹š[™›ÈŠBˆ^Ù\˜[YQ\œ›Üˆ\È^Î‚ˆ›\Ú
+ÝŠ^ÊK™\œ›ÜˆŠBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆ›\Ú
+ˆ‘\œ›Üˆ[][™È\Ù\ŽˆÙ^ßH‹™\œ›ÜˆŠBˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠ˜YZ[—Ý\Ù\œÈŠJB‚‚\œ›Ý]J‹ØYZ[‹Ý\Ù\œËÏ[ZY‹Ü\ÜÝÛÜ™‹Y]ÙÏVÈ”ÔÕ—JB™\]Z\™WØYZ[‚™YˆYZ[—Ý\Ù\—Ü\ÜÝÛÜ™
+ZY
+N‚ˆˆˆYZ[ŽˆÚ[™ÙHH\Ù\‰ÜÈ\ÜÝÛÜ™ˆˆˆ‚ˆ™]×Ü\ÜÝÛÜ™H™\]Y\Ý™›Ü›K™Ù]
+œ\ÜÝÛÜ™‹ˆŠKœÝš\
+
+BˆYˆ›Ý™]×Ü\ÜÝÛÜ™‚ˆ›\Ú
+”\ÜÝÛÜ™Ø[››Ý™H[\Kˆ‹™\œ›ÜˆŠBˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠ˜YZ[—Ý\Ù\œÈŠJBˆ\]WÝ\Ù\—Ü\ÜÝÛÜ™
+ZY™]×Ü\ÜÝÛÜ™
+Bˆ›\Ú
+”\ÜÝÛÜ™\]Yˆ‹œÝXØÙ\ÜÈŠBˆ™]\›ˆ™Y\™XÝ
+\›Ù›ÜŠ˜YZ[—Ý\Ù\œÈŠJB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ™\ÙX\˜Ú\ÚÂˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚\œ›Ý]J‹Ü™\ÙX\˜ÚŠB™Yˆ™\ÙX\˜ÚÜYÙJ
+N‚ˆ™]\›ˆ™[™\—Ý[\]Jœ™\ÙX\˜Úš[ŠB‚‚\œ›Ý]J‹Ù[™[Y[[ÈŠB™Yˆ[™[Y[[×ÜYÙJ
+N‚ˆˆˆ‘[™[Y[[È[˜[^™\ˆ
+ÈYXØ][Ûˆ[Ù[Kˆˆˆ‚ˆXÚÙ\ˆH
+™\]Y\Ý˜\™ÜË™Ù]
+XÚÙ\ˆŠHÜˆˆŠKœÝš\
+
+K\\Š
+Bˆ]HH›Û™Bˆ\œ›ÜˆH›Û™B‚ˆYˆXÚÙ\Ž‚ˆ›Ü˜ÙHH™\]Y\Ý˜\™ÜË™Ù]
+œ™Yœ™\ÚŠHOHŒH‚ˆžN‚ˆœ›ÛH[™[Y[[×Ù[™Ú[™H[\ÜÙ]Ù[™[Y[[Âˆ]HHÙ]Ù[™[Y[[ÊXÚÙ\‹›Ü˜ÙWÜ™Yœ™\ÚY›Ü˜ÙJBˆYˆ]K™Ù]
+™\œ›ÜˆŠN‚ˆ\œ›ÜˆH]VÈ™\œ›Üˆ—Bˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™^Ù\[ÛŠ™[™[Y[[×ÜYÙH\œ›Üˆ›Üˆ	\È‹XÚÙ\ŠBˆ\œ›ÜˆHÝŠ^ÊB‚ˆ™]\›ˆ™[™\—Ý[\]J™[™[Y[[Ëš[‹XÚÙ\]XÚÙ\‹]OY]K\œ›ÜY\œ›ÜŠB‚‚™YˆØÛÛ\\š\ÛÛ—ÜÛ˜\ÚÝ
+XÚÙ\ŽˆÝŠHOˆXÝ‚ˆˆˆZ[HÛÛ\XÝÛÝ\˜ÙK[X™[YÛÛ\\š\ÛÛˆ™XÛÜ™›ÜˆÛ™HXÚÙ\‹ˆˆˆ‚ˆœ›ÛH[™[Y[[×Ù[™Ú[™H[\ÜÙ]Ù[™[Y[[Â‚ˆ]HHÙ]Ù[™[Y[[ÊXÚÙ\ŠBˆY]šXÜÈHßBˆ›ÜˆÙXÝ[Ûˆ[ˆ]K™Ù]
+œÙXÝ[ÛœÈ‹×JN‚ˆ›Üˆ›ÝÈ[ˆÙXÝ[Û‹™Ù]
+œ›ÝÜÈ‹×JN‚ˆX™[H›ÝË™Ù]
+›X™[ŠBˆYˆX™[‚ˆY]šXÜÖÛX™[HH›ÝÂ‚ˆÝØÚÈHÙ]ÜÝØÚ×Ù]JXÚÙ\ŠHÜˆßBˆ™]\›ˆÂˆXÚÙ\ˆŽˆXÚÙ\‹ˆ˜ÛÛ\[žWÛ˜[YHŽˆ]K™Ù]
+˜ÛÛ\[žWÛ˜[YHŠHÜˆXÚÙ\‹ˆœÙXÝÜˆŽˆ]K™Ù]
+œÙXÝÜˆŠKˆš[™\ÝžHŽˆ]K™Ù]
+š[™\ÝžHŠKˆœØÛÜ™HŽˆ]K™Ù]
+››Ü›X[^™YÜØÛÜ™HŠKˆ™X\›™YŽˆ]K™Ù]
+Ý[ÙX\›™YŠKˆœÜÜÚX›HŽˆ]K™Ù]
+Ý[ÜÜÜÚX›HŠKˆ™\™XÝŽˆ]K™Ù]
+™\™XÝŠKˆ™\™XÝØÛ\ÜÈŽˆ]K™Ù]
+™\™XÝØÛ\ÜÈŠKˆœšXÙHŽˆÝØÚË™Ù]
+˜Ý\œ™[ÜšXÙHŠHÜˆÝØÚË™Ù]
+œšXÙHŠKˆ˜Ú[™ÙWÜÝŽˆÝØÚË™Ù]
+˜Ú[™ÙWÜÝŠKˆœ›ÙHŽˆ]K™Ù]
+œ›ÙHŠKˆœ›ÚXÈŽˆ]K™Ù]
+œ›ÚXÈŠKˆš[œÚY\—ÜÝŽˆ]K™Ù]
+š[œÚY\—ÜÝŠKˆ›Y]šXÜÈŽˆY]šXÜËˆœ™YÙ›YÜÈŽˆ]K™Ù]
+œ™YÙ›YÜÈ‹×JKˆ›Z\ÜÚ[™×ÙšY[ÈŽˆ]K™Ù]
+›Z\ÜÚ[™×ÙšY[È‹×JKˆ™\œ›ÜˆŽˆ]K™Ù]
+™\œ›ÜˆŠKˆB‚‚\œ›Ý]J‹ØÛÛ\\™HŠB™YˆÝØÚ×ØÛÛ\\™J
+N‚ˆˆˆÛÛ\\™HÛÈÜˆ™YHÝØÚÜÈ\Ú[™ÈH^\Ý[™È[™[Y[[È\[[™Kˆˆˆ‚ˆ˜]ÈH™\]Y\Ý˜\™ÜË™Ù]
+œÞ[X›ÛÈ‹ˆŠBˆÞ[X›ÛÈH×Bˆ›Üˆ˜[YH[ˆ˜]ËœÜ]
+‹ŠN‚ˆXÚÙ\ˆH˜[YKœÝš\
+
+K\\Š
+BˆYˆXÚÙ\ˆ[™™K™[X]Ú
+ˆ–ÐKV—VÐKVŒNK‹W^ÌßH‹XÚÙ\ŠH[™XÚÙ\ˆ›Ý[ˆÞ[X›ÛÎ‚ˆÞ[X›ÛË˜\[™
+XÚÙ\ŠBˆÞ[X›ÛÈHÞ[X›ÛÖÎŒ×B‚ˆÛÛ\\š\ÛÛœÈH×Bˆ\œ›ÜœÈH×Bˆ›ÜˆXÚÙ\ˆ[ˆÞ[X›ÛÎ‚ˆžN‚ˆÛ˜\ÚÝHØÛÛ\\š\ÛÛ—ÜÛ˜\ÚÝ
+XÚÙ\ŠBˆYˆÛ˜\ÚÝ™Ù]
+™\œ›ÜˆŠN‚ˆ\œ›ÜœË˜\[™
+ˆžÝXÚÙ\ŸNˆÜÛ˜\ÚÝÉÙ\œ›Ü‰×_HŠBˆÛÛ\\š\ÛÛœË˜\[™
+Û˜\ÚÝ
+Bˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™^Ù\[ÛŠœÝØÚ×ØÛÛ\\™H\œ›Üˆ›Üˆ	\È‹XÚÙ\ŠBˆ\œ›ÜœË˜\[™
+ˆžÝXÚÙ\ŸNˆÛÛ\\š\ÛÛˆ]H\È[\Ü˜\š[H[˜]˜Z[X›KˆŠB‚ˆ™]\›ˆ™[™\—Ý[\]Jˆ˜ÛÛ\\™Kš[‹Þ[X›ÛÏ\Þ[X›ÛËÛÛ\\š\ÛÛœÏXÛÛ\\š\ÛÛœË\œ›ÜœÏY\œ›ÜœËˆ
+B‚‚\œ›Ý]J‹Ø\KÜ™\ÙX\˜ÚØ\ÚÈ‹Y]ÙÏVÈ”ÔÕ—JBÜÜ™‹™^[\™Yˆ\WÜ™\ÙX\˜ÚØ\ÚÊ
+N‚ˆˆˆØ[[›ÜXÈÚ]ÙX—ÜÙX\˜Ú[˜X›Y[™™]\›ˆH[œÝÙ\‹ˆˆˆ‚ˆ\WÚÙ^HHÜË™[š\›Û‹™Ù]
+S•“ÔP×ÐTWÒÑVH‹ˆŠBˆYˆ›Ý\WÚÙ^N‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆS•“ÔP×ÐTWÒÑVH\È›ÝÛÛ™šYÝ\™YÛˆ\ÈÙ\™\‹ˆŸJKLÂ‚ˆ]HH™\]Y\Ý™Ù]ÚœÛÛŠ›Ü˜ÙOUYKÚ[[UYJHÜˆßBˆ]Y\Ý[ÛˆH
+]K™Ù]
+œ]Y\Ý[ÛˆŠHÜˆˆŠKœÝš\
+
+BˆYˆ›Ý]Y\Ý[ÛŽ‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆœ]Y\Ý[Ûˆ\È™\]Z\™YŸJK‚ˆžN‚ˆ[\Ü[›ÜXÈ\ÈØ[›ÜXÂˆÛY[HØ[›ÜXË[›ÜXÊ\WÚÙ^OX\WÚÙ^JBˆ™\ÜÛœÙHHÛY[›Y\ÜØYÙ\Ë˜Ü™X]Jˆ[Ù[H˜Û]YK\ÛÛ›™]MMˆ‹ˆX^ÝÚÙ[œÏLŒˆÛÛÏVÞÈ\HŽˆÙX—ÜÙX\˜ÚÌŒLÌH‹›˜[YHŽˆÙX—ÜÙX\˜Ú‹›X^Ý\Ù\ÈŽˆßWKˆY\ÜØYÙ\ÏVÞÈœ›ÛHŽˆ\Ù\ˆ‹˜ÛÛ[Žˆ]Y\Ý[ÛŸWKˆ
+BˆÈÛÛXÝ[^›ØÚÜÈœ›ÛHH™\ÜÛœÙBˆ[œÝÙ\—Ü\ÈH×Bˆ›Üˆ›ØÚÈ[ˆ™\ÜÛœÙK˜ÛÛ[‚ˆYˆ\Ø]Š›ØÚË^ŠN‚ˆ[œÝÙ\—Ü\Ë˜\[™
+›ØÚË^
+Bˆ[œÝÙ\ˆH——ˆ‹š›Ú[Š[œÝÙ\—Ü\ÊKœÝš\
+
+HÜˆŠ›È^™\ÜÛœÙJH‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK˜[œÝÙ\ˆŽˆ[œÝÙ\ŸJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™^Ù\[ÛŠ”™\ÙX\˜Ú\ÚÈ\œ›ÜˆŠBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆÝŠ^Ê_JKL‚‚ˆÈ8¥ 8¥ ˜Y\ÝX\ˆRH8 %Ü›Ý[™YXØÛÝ[X]Ø\™H™\ÙX\˜Ú\ÜÚ\Ý[8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ™YˆÝ˜Y\ÝX\—ØZWØÛÛ^
+\Ù\—ÚYˆ[]Y\Ý[ÛŽˆÝˆHˆŠHOˆXÝ‚ˆˆˆZ[HÛÛ\XÝØXÚKYš\œÝÛÛ^XÚÙ]ØÛÜYÈÛ™H\Ù\‹ˆˆˆ‚ˆXÝ]™WÚYHÙ]ØXÝ]™WÝÛÚY
+
+BˆØ]Ú\ÝHÙ]ÝØ]Ú\ÝÜÝØÚÜÊXÝ]™WÚY
+HYˆXÝ]™WÚY[ÙH×Bˆ]WÛX\HÜÝŠ›ÝË™Ù]
+XÚÙ\ˆ‹ˆŠJK\\Š
+Nˆ›ÝÈ›Üˆ›ÝÈ[ˆÙ]Ø[ÜÝØÚ×Ù]J
+_BˆYÛ›Ü™YHÈH‹RH‹’H‹•H‹‘“Ôˆ‹S‘‹“Ôˆ‹“VH‹•È‹’TÈŸBˆ™\]Y\ÝYHÝ›Üˆ[ˆ™K™š[™[
+ˆ—–ÐKV—^ÌK_Wˆ‹]Y\Ý[Û‹\\Š
+JHYˆ›Ý[ˆYÛ›Ü™YBˆ›ØÝ\ÈH\Ý
+XÝ™œ›ÛZÙ^\Ê™\]Y\ÝY
+ÈØ]Ú\Ý
+JVÎŽBˆÝØÚÜÈH×Bˆ›ÜˆXÚÙ\ˆ[ˆ›ØÝ\Î‚ˆ›ÝÈH]WÛX\™Ù]
+XÚÙ\ŠHÜˆÙ]ÜÝØÚ×Ù]JXÚÙ\ŠHÜˆßBˆYˆ›ÝÎ‚ˆÝØÚÜË˜\[™
+ÂˆXÚÙ\ˆŽˆXÚÙ\‹ˆœšXÙHŽˆ›ÝË™Ù]
+˜Ý\œ™[ÜšXÙHŠHÜˆ›ÝË™Ù]
+œšXÙHŠHÜˆ›ÝË™Ù]
+˜ÛÜÙHŠKˆ˜Ú[™ÙWÜÝŽˆ›ÝË™Ù]
+˜Ú[™ÙWÜÝŠHÜˆ›ÝË™Ù]
+™Z[WØÚ[™ÙWÜÝŠKˆœ™[]]™WÝ›Û[YHŽˆ›ÝË™Ù]
+œ™[]]™WÝ›Û[YHŠHÜˆ›ÝË™Ù]
+œ™[Ý›Û[YHŠKˆ™Ü˜YHŽˆ›ÝË™Ù]
+œÝÚ[™×ÙÜ˜YHŠHÜˆ›ÝË™Ù]
+™Ü˜YHŠKˆœÙ]\Žˆ›ÝË™Ù]
+œÙ]\Ý\HŠHÜˆ›ÝË™Ù]
+œÝÚ[™×ÜÙ]\ŠKˆ™X\›š[™Ü×Ù]HŽˆ›ÝË™Ù]
+™X\›š[™Ü×Ù]HŠKˆ\]YØ]Žˆ›ÝË™Ù]
+\]YØ]ŠHÜˆ›ÝË™Ù]
+›\ÝÝ\]YŠKˆJBˆXØÛÝ[HÙ]Ü\\—ØXØÛÝ[
+\Ù\—ÚY
+BˆÜÚ][ÛœÈH×Bˆ›ÜˆÜÚ][Ûˆ[ˆÙ]Ü\\—ÜÜÚ][ÛœÊ\Ù\—ÚY
+VÎŒLN‚ˆ][ÝHH]WÛX\™Ù]
+ÜÚ][Û–ÈXÚÙ\ˆ—JHÜˆßBˆÜÚ][ÛœË˜\[™
+ÂˆXÚÙ\ˆŽˆÜÚ][Û–ÈXÚÙ\ˆ—KœÚ\™\ÈŽˆÜÚ][Û–Èœ]X[]H—Kˆ˜]™\˜YÙWØÛÜÝŽˆÜÚ][Û–È˜]™×ÜšXÙH—Kˆ˜ØXÚYÜšXÙHŽˆ][ÝK™Ù]
+˜Ý\œ™[ÜšXÙHŠHÜˆ][ÝK™Ù]
+œšXÙHŠHÜˆ][ÝK™Ù]
+˜ÛÜÙHŠKˆJBˆXY[™\ÈH×BˆžN‚ˆÝ[[X\žHHÚ[[™Ù]Ú[[ÜÝ[[X\žJ
+HÜˆßBˆ›Üˆ][H[ˆ
+Ý[[X\žK™Ù]
+›X\šÙ]Û™]ÜÈŠHÜˆÝ[[X\žK™Ù]
+›™]ÜÈŠHÜˆ×JVÎŒL—N‚ˆXÚÙ\ˆHÝŠ][K™Ù]
+XÚÙ\ˆŠHÜˆˆŠK\\Š
+BˆYˆ›Ý›ØÝ\ÈÜˆ›ÝXÚÙ\ˆÜˆXÚÙ\ˆ[ˆ›ØÝ\Î‚ˆXY[™\Ë˜\[™
+ÈXÚÙ\ˆŽˆXÚÙ\ˆÜˆ“PT’ÑU‹šXY[™HŽˆ][K™Ù]
+šXY[™HŠKˆœÛÝ\˜ÙHŽˆ][K™Ù]
+œÛÝ\˜ÙHŠKˆœX›\ÚYŽˆ][K™Ù]
+œX›\ÚYŠHÜˆ][K™Ù]
+œX›\ÚYØ]ŠHÜˆ][K™Ù]
+[YHŠ_JBˆYˆ[ŠXY[™\ÊHOHŽ‚ˆœ™XZÂˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™XYÊ•˜Y\ÝX\ˆRH™]ÜÈÛÛ^[˜]˜Z[X›Nˆ	\È‹^ÊBˆX\šÙ]HÙÙ]ÛZÝØÝ
+
+Bˆ™]\›ˆÂˆ˜\×ÛÙˆŽˆÙ]Û›ÝÊ
+Kš\ÛÙ›Ü›X]
+
+KØ]Ú\ÝŽˆØ]Ú\ÝÎŒŒKœÝØÚÜÈŽˆÝØÚÜËˆœ\\—ØXØÛÝ[ŽˆÈ˜Ø\ÚØ˜[[˜ÙHŽˆXØÛÝ[™Ù]
+˜Ø\ÚØ˜[[˜ÙHŠKœÜÚ][ÛœÈŽˆÜÚ][ÛœßKˆ›X\šÙ]ŽˆÚÙ^NˆX\šÙ]™Ù]
+Ù^JH›ÜˆÙ^H[‚ˆ
+œ™YÚ[YH‹œ™YÚ[YWÛX™[‹œÜWÌYÜÝ‹œ\\WÌYÜÝ‹š^Û]™[Š_KˆšXY[™\ÈŽˆXY[™\ËˆB‚‚\œ›Ý]J‹ØZHŠB™Yˆ˜Y\ÝX\—ØZJ
+N‚ˆˆˆ“[Øš[KYš\œÝ˜Y\ÝX\ˆRH™\ÙX\˜ÚÛÜšÜÜXÙKˆˆˆ‚ˆ™]\›ˆ™[™\—Ý[\]J˜Y\ÝX\—ØZKš[‹ZWØÛÛ^WÝ˜Y\ÝX\—ØZWØÛÛ^
+Ý\œ™[Ý\Ù\—ÚY
+
+JJB‚‚\œ›Ý]J‹Ø\KØ\ÚÈ‹Y]ÙÏVÈ”ÔÕ—JBÜÜ™‹™^[\™Yˆ\WØ\ÚÊ
+N‚ˆˆˆ•˜Y\ÝX\ˆRHÚ]›Ý[™Y\ÝÜžH[™™\šYšYY[‹X\ÛÛ^ˆˆˆ‚ˆœ›ÛHÜ[˜ZH[\ÜÜ[RH\ÈÓÜ[RBˆ[\Ü]][YH\ÈÙ‚ˆ]HH™\]Y\Ý™Ù]ÚœÛÛŠ›Ü˜ÙOUYKÚ[[UYJHÜˆßBˆ]Y\Ý[ÛˆH
+]K™Ù]
+œ]Y\Ý[ÛˆŠHÜˆˆŠKœÝš\
+
+BˆYˆ›Ý]Y\Ý[ÛŽ‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆ“›È]Y\Ý[Ûˆ›ÝšYYˆŸJKˆYˆ[Š]Y\Ý[ÛŠHˆLŒ‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆ”]Y\Ý[Ûˆ]\Ý™HKŒÚ\˜XÝ\œÈÜˆ\ÜËˆŸJKˆYˆ›ÝÜË™[š\›Û‹™Ù]
+“‘P’UT×ÐTWÒÑVHŠN‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆ•˜Y\ÝX\ˆRH\È›ÝÛÛ™šYÝ\™YÛˆ\ÈÙ\™\‹ˆŸJKLÂˆØY™WÚ\ÝÜžHH×Bˆ\ÝÜžHH]K™Ù]
+š\ÝÜžHŠHÜˆ×BˆYˆ\Ú[œÝ[˜ÙJ\ÝÜžK\Ý
+N‚ˆ›Üˆ][H[ˆ\ÝÜžVËMŽ—N‚ˆYˆ\Ú[œÝ[˜ÙJ][KXÝ
+H[™][K™Ù]
+œ›ÛHŠH[ˆ
+\Ù\ˆ‹˜\ÜÚ\Ý[ŠN‚ˆÛÛ[HÝŠ][K™Ù]
+˜ÛÛ[ŠHÜˆˆŠKœÝš\
+
+VÎŒŒBˆYˆÛÛ[‚ˆØY™WÚ\ÝÜžK˜\[™
+Èœ›ÛHŽˆ][VÈœ›ÛH—K˜ÛÛ[ŽˆÛÛ[JBˆÜ›Ý[™YHÝ˜Y\ÝX\—ØZWØÛÛ^
+Ý\œ™[Ý\Ù\—ÚY
+
+K]Y\Ý[ÛŠB‚ˆÈ8¥ 8¥ Z[X\›š[™ÜÈÛÛ^œ›ÛH]™HØ[[™\ˆ8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ ˆžN‚ˆœ›ÛH[[Ù[™Ú[™H[\Ü™]ÚÙX\›š[™Ü×ØØ[[™\ˆ\ÈÙ™]ÚÙX\›‚ˆØ[HÙ™]ÚÙX\›Š
+BˆÙ^HHÙ™]KÙ^J
+B‚ˆYˆÙ›]ØXÚÙ]
+][\ÊN‚ˆYˆ›Ý][\Î‚ˆ™]\›ˆˆ
+›Û™JH‚ˆ[™\ÈH×Bˆ›ÜˆH[ˆ][\Î‚ˆ˜[YHHK™Ù]
+˜ÛÛ\[žWÛ˜[YHŠHÜˆK™Ù]
+XÚÙ\ˆŠBˆ[™\Ë˜\[™
+ˆˆˆ8 (ˆÙVÉÝXÚÙ\‰×_H
+Û˜[Y_JH8 %ÙK™Ù]
+	Ù]IË	ÏÉÊ_H‚ˆˆžÙK™Ù]
+	Ý[YWÛX™[	Ë	Õ‘	Ê_H
+ÙK™Ù]
+	Ù^\×Ø]Ø^IË	ÏÉÊ_Y]Ø^JH‚ˆ
+Bˆ™]\›ˆ—ˆ‹š›Ú[Š[™\ÊB‚ˆX\›—ØÝH
+ˆˆ•ÑVHTÎˆÝÙ^KœÝ™[YJ	ÉPK	Pˆ	Y	VIÊ_W—ˆ‚ˆˆÓÓ‘’T“QQTÓÓRS‘ÈPT“’S‘ÔÈ
+™^ŒH^\Èœ›ÛH]™HØ[[™\ŠN—ˆ‚ˆˆ•ÑVN—ž×Ù›]ØXÚÙ]
+Ø[™Ù]
+	ÝÙ^IË×JJ_Wˆ‚ˆˆ•ÓSÔ”“ÕÎ—ž×Ù›]ØXÚÙ]
+Ø[™Ù]
+	ÝÛ[Üœ›ÝÉË×JJ_Wˆ‚ˆˆ•TÈÑQRÎ—ž×Ù›]ØXÚÙ]
+Ø[™Ù]
+	Ý\×ÝÙYZÉË×JJ_Wˆ‚ˆˆ“‘VÈÑQRÔÎ—ž×Ù›]ØXÚÙ]
+Ø[™Ù]
+	ØÛÛZ[™×Ý\	Ë×JJ_Wˆ‚ˆ
+Bˆ^Ù\^Ù\[ÛŽ‚ˆX\›—ØÝHˆ•ÑVHTÎˆ×Ù™]KÙ^J
+KœÝ™[YJ	ÉPK	Pˆ	Y	VIÊ_WŠ]™HØ[[™\ˆ[˜]˜Z[X›JH‚‚ˆÞ\Ý[WÜ›Û\H
+ˆ–[ÝH\™H˜Y\ÝX\ˆRH8 %HÚ\œÛ›ÝÛYÙXX›H˜Y[™È\ÜÚ\Ý[[œÚYH˜Y\ÝX\ˆ[]K——ˆ‚ˆ•\ÙHH]Y‘T’Q’QQTÓÓ•V[™ÛÛ™š\›YYØ[[™\ˆ™[ÝËˆØXÚY˜[Y\ÈX^H™H[^YY——ˆ‚ˆ••US‘ÐQ‘UH•STÎ—ˆ‚ˆ‹H™]™\ˆ[™[HšXÙKš[[™ËXY[™KÜÚ][Û‹˜][™Ë[™[Y[[ÜˆX\›š[™ÜÈ]K—ˆ‚ˆ‹H™Y™\ˆ‘T’Q’QQTÓÓ•VˆYˆH˜XÝ\ÈXœÙ[Ø^H]\È[˜]˜Z[X›K—ˆ‚ˆ‹HX™[[\œ™]][ÛœÈ[™YXØ][Û˜[^[\\Ëˆ™]™\ˆ›ÛZ\ÙH™]\›œË—ˆ‚ˆ‹H™]™\ˆ™]™X[]H™[Û™Ú[™ÈÈ[›Ý\ˆXØÛÝ[——ˆ‚ˆ’ÕÈÈS”ÕÑTŽ——ˆ‚ˆ‘PT“’S‘ÔÈUHUQTÕSÓ”Î—ˆ‚ˆ‹Hš\œÝÚXÚÈHÛÛ™š\›YYØ[[™\ˆX›Ý™KˆYˆHXÚÙ\ˆ\È\ÝYÚ]™H]^XÝ]K—ˆ‚ˆ‹HYˆ“Õ[ˆHØ[[™\‹Ø^HH™\šYšYY]H\È[˜]˜Z[X›KˆÈ›ÝÝY\ÜÈH]K——ˆ‚ˆ‘•S‘SQS•SÈUQTÕSÓ”Î—ˆ‚ˆ‹H\ÙHÛ›HšYÝ\™\È™\Ù[[ˆ‘T’Q’QQTÓÓ•Vˆ\™XÝ\Ù\œÈÈ[™[Y[[ÈÚ[ˆXœÙ[——ˆ‚ˆ•QHÑUTUQTÕSÓ”Î—ˆ‚ˆ‹H\ÙHXÚšXØ[™X\ÛÛš[™ÎˆSPH[YÛ›Y[•ÐT™[][ÛœÚ\ÝXÝ\™K›Û[YK‹Ô‹——ˆ‚ˆ”ÕSNˆ\™XÝÜXÚYšXË›Èš[\‹›ÈÙ[™\šXÈ›Û‹X[œÝÙ\œËˆ[Ø^\ÈÚ]™HH™X[[œÝÙ\‹——ˆ‚ˆ
+ÈX\›—ØÝ
+È—•‘T’Q’QQTÓÓ•V
+”ÓÓŠN—ˆˆ
+ÈÚœÛÛ‹™[\ÊÜ›Ý[™YY˜][\ÝŠBˆ
+B‚ˆžN‚ˆÛY[HÓÜ[RJˆ˜\ÙWÝ\›HšÎ‹ËØ\KÚÙ[™˜XÝÜžK›™Xš]\Ë˜ÛÛKÝŒKÈ‹ˆ\WÚÙ^O[ÜË™[š\›Û‹™Ù]
+“‘P’UT×ÐTWÒÑVHŠKˆ
+Bˆ™\ÜHÛY[˜Ú]˜ÛÛ\][ÛœË˜Ü™X]Jˆ[Ù[H›Y]K[[XKÓ[XKLËŒËMÌ‹R[œÝXÝ‹ˆX^ÝÚÙ[œÏMŒˆ[\\˜]\™OLŒËˆY\ÜØYÙ\ÏVÞÈœ›ÛHŽˆœÞ\Ý[H‹˜ÛÛ[ŽˆÞ\Ý[WÜ›Û\K
+œØY™WÚ\ÝÜžKˆÈœ›ÛHŽˆ\Ù\ˆ‹˜ÛÛ[Žˆ]Y\Ý[ÛŸWKˆ
+Bˆ[œÝÙ\ˆH
+™\Ü˜ÚÚXÙ\ÖÌK›Y\ÜØYÙK˜ÛÛ[ÜˆˆŠKœÝš\
+
+HÜˆ“›È™\ÜÛœÙKˆ‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK˜[œÝÙ\ˆŽˆ[œÝÙ\‹˜ÛÛ^ŽˆÜ›Ý[™Yˆ™\ØÛZ[Y\ˆŽˆRH™\ÙX\˜ÚØ[ˆ™HÜ›Û™Ëˆ™\šYžH™Y›Ü™H˜Y[™ËˆŸJBˆ^Ù\^Ù\[Ûˆ\È^Î‚ˆÙÙÙ\‹™^Ù\[ÛŠ•˜Y\ÝX\ˆRH\ÚÈ\œ›ÜˆŠBˆYˆ›ÝÜË™[š\›Û‹™Ù]
+“‘P’UT×ÐTWÒÑVHŠN‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆ•˜Y\ÝX\ˆRH\È›ÝÛÛ™šYÝ\™YÛˆ\ÈÙ\™\‹ˆŸJKLÂˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆ•˜Y\ÝX\ˆRH\È[\Ü˜\š[H[˜]˜Z[X›KˆŸJKL‚‚‚\œ›Ý]J‹Ø\KÜÝYK[ÙÈ‹Y]ÙÏVÈ‘ÑU—JB™Yˆ\WÜÝYWÛÙ×ÙÙ]
+
+N‚ˆ[šY\ÈHÙ]ÜÝYWÛÙÊÝ\œ™[Ý\Ù\—ÚY
+
+JBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYK™[šY\ÈŽˆ[šY\ßJB‚‚\œ›Ý]J‹Ø\KÜÝYK[ÙÈ‹Y]ÙÏVÈ”ÔÕ—JBÜÜ™‹™^[\™Yˆ\WÜÝYWÛÙ×ÜØ]™J
+N‚ˆ]HH™\]Y\Ý™Ù]ÚœÛÛŠ›Ü˜ÙOUYKÚ[[UYJHÜˆßBˆ]Y\Ý[ÛˆH
+]K™Ù]
+œ]Y\Ý[ÛˆŠHÜˆˆŠKœÝš\
+
+Bˆ[œÝÙ\ˆH
+]K™Ù]
+˜[œÝÙ\ˆŠHÜˆˆŠKœÝš\
+
+BˆYˆ›Ý]Y\Ý[ÛˆÜˆ›Ý[œÝÙ\Ž‚ˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆ˜[ÙK™\œ›ÜˆŽˆœ]Y\Ý[Ûˆ[™[œÝÙ\ˆ\™H™\]Z\™YŸJKˆ[žWÚYHØ]™WÜÝYWÛÙ×Ù[žJÝ\œ™[Ý\Ù\—ÚY
+
+K]Y\Ý[Û‹[œÝÙ\ŠBˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆYKšYŽˆ[žWÚYJB‚‚\œ›Ý]J‹Ø\KÜÝYK[ÙËÏ[™[žWÚYˆ‹Y]ÙÏVÈ‘SUH—JBÜÜ™‹™^[\™Yˆ\WÜÝYWÛÙ×Ù[]J[žWÚY
+N‚ˆ[]WÜÝYWÛÙ×Ù[žJÝ\œ™[Ý\Ù\—ÚY
+
+K[žWÚY
+Bˆ™]\›ˆœÛÛšYžJÈ›ÚÈŽˆY_JB‚‚ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBˆÈ[žHÚ[ˆÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB‚šYˆ×Û˜[YW×ÈOH—×ÛXZ[—×ÈŽ‚ˆÜH[
+ÜË™[š\›Û‹™Ù]
+”Ô•‹L
+JBˆš[
+ˆ—•˜Y\ÝX\ˆ[]H[›š[™ÈÛˆÜÜÜK‹‹—ˆŠBˆ\œ[ŠÜÝHŒŒŒŒ‹Ü\ÜXYÏQ˜[ÙJB

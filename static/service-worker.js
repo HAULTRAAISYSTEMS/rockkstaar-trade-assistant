@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tradestaar-shell-v6';
+const CACHE_NAME = 'tradestaar-shell-v7';
 const SHELL_ASSETS = [
   '/static/logo.png',
   '/static/icon-192.png',
