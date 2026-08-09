@@ -109,8 +109,9 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
       <div class="schwab-bal-val">
         {% if account_data.daily_pnl is not none %}
           {{ '+' if account_data.daily_pnl >= 0 else '' }}${{ "{:,.2f}".format(account_data.daily_pnl) }}
-          {% if account_data.daily_pnl_pct is not none %}
-          <span class="schwab-pnl-pct">({{ '%+.2f'|format(account_data.daily_pnl_pct) }}%)</span>
+          {% set daily_pnl_pct = account_data.get('daily_pnl_pct') %}
+          {% if daily_pnl_pct is not none %}
+          <span class="schwab-pnl-pct">({{ '%+.2f'|format(daily_pnl_pct) }}%)</span>
           {% endif %}
         {% else %}—{% endif %}
       </div>
