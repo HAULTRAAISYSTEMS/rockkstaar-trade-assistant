@@ -4649,18 +4649,17 @@ def terminal():
     except Exception as _we:
         logger.debug("terminal win_rate failed: %s", _we)
 
-    # Schwab account snapshot (buying power, P&L, positions) — live when connected
+       # Schwab account snapshot (buying power, P&L, positions) — live when connected
     acct = None
     try:
-  uid = current_user_id()
-tok = _schwab.token_status(uid)
-if tok.get("connected"):
-    acct = _get_schwab_data(uid)
-    if acct.get("error"):
-        acct = None
+        uid = current_user_id()
+        tok = _schwab.token_status(uid)
+        if tok.get("connected"):
+            acct = _get_schwab_data(uid)
+            if acct.get("error"):
+                acct = None
     except Exception as _ae:
         logger.debug("terminal: schwab account fetch skipped: %s", _ae)
-
     # Today's Setups panel — top 3 by grade then swing score (display only)
     today_setups = sorted(
         valid,
