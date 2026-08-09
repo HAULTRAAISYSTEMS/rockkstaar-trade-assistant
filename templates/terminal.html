@@ -460,7 +460,8 @@
           <div class="tw-stat-lbl">Day P&amp;L</div>
           {% if connected and acct.daily_pnl is not none %}
           <div class="tw-stat-val {{ 'chg-pos' if acct.daily_pnl >= 0 else 'chg-neg' }}">{{ '{:+,.0f}'.format(acct.daily_pnl) }}</div>
-          {% if acct.daily_pnl_pct is not none %}<div class="tw-stat-sub {{ 'chg-pos' if acct.daily_pnl_pct >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(acct.daily_pnl_pct) }}%</div>{% endif %}
+          {% set daily_pnl_pct = acct.get('daily_pnl_pct') %}
+          {% if daily_pnl_pct is not none %}<div class="tw-stat-sub {{ 'chg-pos' if daily_pnl_pct >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(daily_pnl_pct) }}%</div>{% endif %}
           {% else %}<div class="tw-stat-val">—</div>{% endif %}
         </div>
         <div class="tw-stat {{ '' if connected else 'paper' }}">
