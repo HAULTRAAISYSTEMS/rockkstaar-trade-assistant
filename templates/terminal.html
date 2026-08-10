@@ -378,7 +378,7 @@
           <span class="tw-session-key overnight">O/N</span><strong id="tw-overnight-quote">No overnight print</strong>
           <span class="tw-session-key pre">PRE</span><strong id="tw-pre-quote">No premarket print</strong>
           <span class="tw-session-key post">POST</span><strong id="tw-post-quote">No after-hours print</strong>
-          <small>Extended-hours volume can be thin and prices more volatile.</small>
+          <small id="tw-overnight-status">Extended-hours volume can be thin and prices more volatile.</small>
         </div>
 
         <div class="tw-study-settings" id="tw-study-settings" hidden>
@@ -1067,14 +1067,14 @@ function twOhlcv(bars){
 }
 function twExtendedQuote(row){if(!row)return 'No recent print';var change=row.change_pct==null?'':(' · '+(row.change_pct>=0?'+':'')+Number(row.change_pct).toFixed(2)+'%'),date=row.date?(' · '+row.date):'';return '$'+Number(row.price).toFixed(2)+change+' · '+twFmtVol(row.volume)+date;}
 function twRestoreRegularQuote(){var row=document.querySelector('.tw-wl-row.active');if(!row)return;twNum('tw-c-price',row.dataset.price||'—');var chg=document.getElementById('tw-c-chg'),dir=row.dataset.chgdir;if(chg){chg.textContent=row.dataset.chg||'0.00%';chg.className='tw-sym-chg '+(dir==='pos'?'chg-pos':(dir==='neg'?'chg-neg':'chg-flat'));}}
-function twRenderExtendedSummary(summary){
-  var strip=document.getElementById('tw-session-strip');if(!strip)return;strip.hidden=!twChartState.extended;if(!twChartState.extended){twRestoreRegularQuote();return;}twNum('tw-overnight-quote',twExtendedQuote(summary&&summary.latest));twNum('tw-pre-quote',twExtendedQuote(summary&&summary.premarket));twNum('tw-post-quote',twExtendedQuote(summary&&summary.after_hours));
-  var latest=summary&&summary.latest;if(latest){twNum('tw-c-price',Number(latest.price).toFixed(2));var chg=document.getElementById('tw-c-chg');if(chg&&latest.change_pct!=null){var pct=Number(latest.change_pct);chg.textContent=(latest.session==='premarket'?'PRE ':'POST ')+(pct>=0?'+':'')+pct.toFixed(2)+'%';chg.className='tw-sym-chg '+(pct>=0?'chg-pos':'chg-neg');}}
+function twRenderExtendedSummary(summary,status){
+  var strip=document.getElementById('tw-session-strip');if(!strip)return;strip.hidden=!twChartState.extended;if(!twChartState.extended){twRestoreRegularQuote();return;}var overnight=summary&&summary.overnight;if(status&&status.state==='not_configured')twNum('tw-overnight-quote','Connect Alpaca BOATS');else twNum('tw-overnight-quote',twExtendedQuote(overnight));twNum('tw-pre-quote',twExtendedQuote(summary&&summary.premarket));twNum('tw-post-quote',twExtendedQuote(summary&&summary.after_hours));twNum('tw-overnight-status',(status&&status.message)||'Overnight prices use the Alpaca BOATS ATS feed.');
+  var latest=summary&&summary.latest;if(latest){twNum('tw-c-price',Number(latest.price).toFixed(2));var chg=document.getElementById('tw-c-chg');if(chg&&latest.change_pct!=null){var pct=Number(latest.change_pct),labels={overnight:'O/N ',premarket:'PRE ',after_hours:'POST '};chg.textContent=(labels[latest.session]||'EXT ')+(pct>=0?'+':'')+pct.toFixed(2)+'%';chg.className='tw-sym-chg '+(pct>=0?'chg-pos':'chg-neg');}}
 }
 function twCandleDatum(bar){
-  var datum={time:bar.time,open:bar.open,high:bar.high,low:bar.low,close:bar.close};if(bar.session==='premarket'){datum.color=bar.close>=bar.open?'#4aa3ff':'#7569e8';datum.wickColor=datum.color;datum.borderColor=datum.color;}else if(bar.session==='after_hours'){datum.color=bar.close>=bar.open?'#c77dff':'#ff6aa9';datum.wickColor=datum.color;datum.borderColor=datum.color;}return datum;
+  var datum={time:bar.time,open:bar.open,high:bar.high,low:bar.low,close:bar.close};if(bar.session==='overnight'){datum.color=bar.close>=bar.open?'#f0b53f':'#ff8c42';datum.wickColor=datum.color;datum.borderColor=datum.color;}else if(bar.session==='premarket'){datum.color=bar.close>=bar.open?'#4aa3ff':'#7569e8';datum.wickColor=datum.color;datum.borderColor=datum.color;}else if(bar.session==='after_hours'){datum.color=bar.close>=bar.open?'#c77dff':'#ff6aa9';datum.wickColor=datum.color;datum.borderColor=datum.color;}return datum;
 }
-function twVolumeColor(bar){if(bar.session==='premarket')return bar.close>=bar.open?'rgba(74,163,255,.48)':'rgba(117,105,232,.48)';if(bar.session==='after_hours')return bar.close>=bar.open?'rgba(199,125,255,.48)':'rgba(255,106,169,.48)';return bar.close>=bar.open?'rgba(34,197,139,0.45)':'rgba(255,77,69,0.45)';}
+function twVolumeColor(bar){if(bar.session==='overnight')return bar.close>=bar.open?'rgba(240,181,63,.5)':'rgba(255,140,66,.5)';if(bar.session==='premarket')return bar.close>=bar.open?'rgba(74,163,255,.48)':'rgba(117,105,232,.48)';if(bar.session==='after_hours')return bar.close>=bar.open?'rgba(199,125,255,.48)':'rgba(255,106,169,.48)';return bar.close>=bar.open?'rgba(34,197,139,0.45)':'rgba(255,77,69,0.45)';}
 
 function twLoadChart(ticker, interval, range){
   if(!ticker) return;
@@ -1115,7 +1115,7 @@ function twLoadChart(ticker, interval, range){
       twRenderIndicators();
       twRenderEmas();
       twOhlcv(bars);
-      twRenderExtendedSummary(d.extended_summary);
+      twRenderExtendedSummary(d.extended_summary,d.overnight_status);
       twEstCost();
       var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent=interval.toUpperCase()+' · '+range.toUpperCase()+' · '+bars.length.toLocaleString()+' bars · '+(d.session||'regular')+' · '+(d.adjustment||'split-adjusted');
       twChartHideMsg();

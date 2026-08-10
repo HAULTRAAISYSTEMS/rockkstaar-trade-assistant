@@ -104,7 +104,9 @@ def annotate_market_sessions(
         bar = dict(source)
         local = datetime.fromtimestamp(bar["time"], timezone.utc).astimezone(market_tz)
         minutes = local.hour * 60 + local.minute
-        if minutes < 9 * 60 + 30:
+        if minutes >= 20 * 60 or minutes < 4 * 60:
+            session = "overnight"
+        elif minutes < 9 * 60 + 30:
             session = "premarket"
         elif minutes < 16 * 60:
             session = "regular"
@@ -119,7 +121,9 @@ def annotate_market_sessions(
 def summarize_extended_sessions(bars: list[dict]) -> dict:
     """Return the latest verified pre/post-market prints and comparisons."""
     last_regular = None
-    result: dict[str, Any] = {"premarket": None, "after_hours": None, "latest": None}
+    result: dict[str, Any] = {
+        "overnight": None, "premarket": None, "after_hours": None, "latest": None
+    }
     for bar in bars:
         session = bar.get("session", "regular")
         if session == "regular":

@@ -297,6 +297,10 @@ def debug_status():
         "NEWS_API_KEY":       os.environ.get("NEWS_API_KEY"),
         "POLYGON_API_KEY":    os.environ.get("POLYGON_API_KEY"),
         "SCHWAB_CLIENT_ID":   os.environ.get("SCHWAB_CLIENT_ID"),
+        "ALPACA_OVERNIGHT":   (
+            (os.environ.get("ALPACA_API_KEY") or os.environ.get("APCA_API_KEY_ID"))
+            and (os.environ.get("ALPACA_SECRET_KEY") or os.environ.get("APCA_API_SECRET_KEY"))
+        ),
     }
     env_detail = {}
     env_ok = True
@@ -4759,6 +4763,7 @@ def api_terminal_candles(ticker):
                         "range": range_str,
                         "bars": cached["bars"], "cached": True,
                         "extended_summary": cached.get("extended_summary"),
+                        "overnight_status": cached.get("overnight_status"),
                         "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
 
     data = None
@@ -4780,7 +4785,12 @@ def api_terminal_candles(ticker):
     )
     bars = normalize_ohlcv_data(data)
     extended_summary = None
+    overnight_status = None
     if session_mode == "extended":
+        from overnight_data import fetch_overnight_bars, merge_session_bars
+        overnight_result = fetch_overnight_bars(ticker, interval, range_str)
+        bars = merge_session_bars(bars, overnight_result["bars"])
+        overnight_status = overnight_result["status"]
         bars = annotate_market_sessions(
             bars, (data or {}).get("exchange_timezone") or "America/New_York"
         )
@@ -4805,12 +4815,14 @@ def api_terminal_candles(ticker):
     _TERMINAL_CANDLE_CACHE[key] = {
         "ts": _time.time(), "bars": bars, "source_interval": source_interval,
         "extended_summary": extended_summary,
+        "overnight_status": overnight_status,
     }
     return jsonify({"ok": True, "ticker": ticker, "tf": legacy_tf or None,
                     "interval": interval, "source_interval": source_interval,
                     "session": session_mode, "adjustment": "split-adjusted",
                     "range": range_str, "bars": bars,
                     "extended_summary": extended_summary,
+                    "overnight_status": overnight_status,
                     "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
 
 

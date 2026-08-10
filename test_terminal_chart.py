@@ -23,6 +23,15 @@ class TerminalChartAggregationTests(unittest.TestCase):
         self.assertEqual(summary["after_hours"]["reference_close"], 101)
         self.assertEqual(summary["latest"]["session"], "after_hours")
 
+    def test_true_overnight_session_is_separate_from_premarket(self):
+        # 01:00 and 08:00 New York.
+        bars = [
+            {"time": 1767592800, "open": 100, "high": 101, "low": 99, "close": 100.5},
+            {"time": 1767618000, "open": 101, "high": 102, "low": 100, "close": 101.5},
+        ]
+        labeled = annotate_market_sessions(bars)
+        self.assertEqual([row["session"] for row in labeled], ["overnight", "premarket"])
+
     def test_normalization_sorts_deduplicates_and_rejects_invalid_candles(self):
         data = {
             "timestamps": [2, 1, 2, 3],
