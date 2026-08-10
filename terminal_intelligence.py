@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 def _text(value: Any) -> str:
@@ -31,6 +32,32 @@ def _is_upcoming(value: Any) -> bool:
         return event_date >= datetime.now(timezone.utc).date()
     except (TypeError, ValueError):
         return False
+
+
+def aggregate_ohlcv_bars(bars: list[dict], size: int = 4) -> list[dict]:
+    """Aggregate intraday OHLCV bars without crossing US trading sessions."""
+    if size < 1:
+        raise ValueError("size must be positive")
+    sessions: dict[str, list[dict]] = {}
+    for bar in sorted(bars, key=lambda row: row["time"]):
+        day = datetime.fromtimestamp(bar["time"], tz=timezone.utc).astimezone(
+            ZoneInfo("America/New_York")
+        ).date().isoformat()
+        sessions.setdefault(day, []).append(bar)
+
+    aggregated = []
+    for day_bars in sessions.values():
+        for start in range(0, len(day_bars), size):
+            chunk = day_bars[start:start + size]
+            aggregated.append({
+                "time": chunk[0]["time"],
+                "open": chunk[0]["open"],
+                "high": max(row["high"] for row in chunk),
+                "low": min(row["low"] for row in chunk),
+                "close": chunk[-1]["close"],
+                "volume": sum(row.get("volume") or 0 for row in chunk),
+            })
+    return aggregated
 
 
 def _news_row(raw: Any, fallback_ticker: str = "") -> dict | None:

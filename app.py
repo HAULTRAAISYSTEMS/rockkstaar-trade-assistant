@@ -4696,9 +4696,9 @@ def terminal():
 
 
 # Terminal chart candle series — reuses the SAME price feed the watchlist /
-# Execution engine uses (data_fetcher's Yahoo chart OHLCV, via institutional
-# engine). No new provider. Six timeframe tabs map to interval/range pairs the
-# feed supports; unsupported/empty ranges return [] so the UI can disable them.
+# execution engine uses. Candle interval and visible history range are separate
+# controls, matching professional charting conventions. The legacy tf mapping
+# remains supported for sparklines and older clients.
 _TERMINAL_TF_MAP = {
     "1D":  ("5m",  "1d"),
     "1W":  ("30m", "5d"),
@@ -4707,35 +4707,56 @@ _TERMINAL_TF_MAP = {
     "1Y":  ("1d",  "1y"),
     "ALL": ("1wk", "max"),
 }
-_TERMINAL_CANDLE_CACHE: dict = {}          # (ticker, tf) -> {"ts": epoch, "bars": [...]}
-_TERMINAL_CANDLE_TTL = {"1D": 60, "1W": 120}   # seconds; others fall back to 600
+_TERMINAL_INTERVALS = {
+    "1m": {"fetch": "1m", "ranges": ("1d", "5d"), "default": "1d"},
+    "5m": {"fetch": "5m", "ranges": ("1d", "5d", "1mo"), "default": "5d"},
+    "15m": {"fetch": "15m", "ranges": ("1d", "5d", "1mo"), "default": "5d"},
+    "1h": {"fetch": "1h", "ranges": ("5d", "1mo", "3mo", "1y"), "default": "1mo"},
+    "4h": {"fetch": "1h", "ranges": ("5d", "1mo", "3mo", "1y"), "default": "3mo"},
+    "1d": {"fetch": "1d", "ranges": ("1mo", "3mo", "1y", "5y", "max"), "default": "1y"},
+}
+_TERMINAL_CANDLE_CACHE: dict = {}  # (ticker, interval, range) -> {"ts": epoch, "bars": [...]}
 
 
 @app.route("/api/terminal/candles/<ticker>")
 def api_terminal_candles(ticker):
     """Return OHLCV bars for the terminal chart from the existing data feed."""
-    tf = (request.args.get("tf") or "1D").upper()
-    if tf not in _TERMINAL_TF_MAP:
-        return jsonify({"ok": False, "error": "unsupported timeframe"}), 400
+    requested_interval = (request.args.get("interval") or "").lower()
+    legacy_tf = (request.args.get("tf") or "").upper()
+    if requested_interval:
+        config = _TERMINAL_INTERVALS.get(requested_interval)
+        if not config:
+            return jsonify({"ok": False, "error": "unsupported interval"}), 400
+        range_str = (request.args.get("range") or config["default"]).lower()
+        if range_str not in config["ranges"]:
+            return jsonify({"ok": False, "error": "unsupported interval/range combination"}), 400
+        interval = requested_interval
+        fetch_interval = config["fetch"]
+    else:
+        legacy_tf = legacy_tf or "1D"
+        if legacy_tf not in _TERMINAL_TF_MAP:
+            return jsonify({"ok": False, "error": "unsupported timeframe"}), 400
+        fetch_interval, range_str = _TERMINAL_TF_MAP[legacy_tf]
+        interval = fetch_interval
     ticker = (ticker or "").upper().strip()
     if not ticker or len(ticker) > 12:
         return jsonify({"ok": False, "error": "bad ticker"}), 400
 
-    ttl = _TERMINAL_CANDLE_TTL.get(tf, 600)
-    key = (ticker, tf)
+    ttl = 60 if interval in {"1m", "5m", "15m"} else 120 if interval in {"1h", "4h"} else 600
+    key = (ticker, interval, range_str)
     cached = _TERMINAL_CANDLE_CACHE.get(key)
     if cached and (_time.time() - cached["ts"]) < ttl:
-        return jsonify({"ok": True, "ticker": ticker, "tf": tf,
+        return jsonify({"ok": True, "ticker": ticker, "tf": legacy_tf or None,
+                        "interval": interval, "range": range_str,
                         "bars": cached["bars"], "cached": True,
                         "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
 
-    interval, range_str = _TERMINAL_TF_MAP[tf]
     data = None
     try:
         from data_fetcher import _fetch_ohlcv_via_chart_api
-        data = _fetch_ohlcv_via_chart_api(ticker, interval=interval, range_str=range_str)
+        data = _fetch_ohlcv_via_chart_api(ticker, interval=fetch_interval, range_str=range_str)
     except Exception as _e:
-        logger.debug("terminal candles %s %s failed: %s", ticker, tf, _e)
+        logger.debug("terminal candles %s %s/%s failed: %s", ticker, interval, range_str, _e)
 
     bars = []
     if data and data.get("closes"):
@@ -4758,8 +4779,12 @@ def api_terminal_candles(ticker):
                 bar["volume"] = int(vol[i] or 0)
             bars.append(bar)
 
+    if interval == "4h" and bars:
+        from terminal_intelligence import aggregate_ohlcv_bars
+        bars = aggregate_ohlcv_bars(bars, 4)
+
     _TERMINAL_CANDLE_CACHE[key] = {"ts": _time.time(), "bars": bars}
-    return jsonify({"ok": True, "ticker": ticker, "tf": tf,
+    return jsonify({"ok": True, "ticker": ticker, "tf": legacy_tf or None,
                     "interval": interval, "range": range_str, "bars": bars,
                     "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
 

@@ -348,21 +348,49 @@
         </div>
 
         <div class="tw-chart-toolbar">
-          <div class="tw-tf">
-            {% for tf in ['1D','1W','1M','3M','1Y','ALL'] %}
-            <button class="tw-tf-btn {{ 'active' if tf == '1D' }}" data-tf="{{ tf }}" onclick="twTf(this)">{{ tf }}</button>
+          <div class="tw-interval-wrap">
+            <span class="tw-control-label">Interval</span>
+            <div class="tw-tf">
+            {% for value, label in [('1m','1m'),('5m','5m'),('15m','15m'),('1h','1H'),('4h','4H'),('1d','1D')] %}
+            <button class="tw-tf-btn {{ 'active' if value == '5m' }}" data-interval="{{ value }}" onclick="twInterval(this)">{{ label }}</button>
             {% endfor %}
+            </div>
           </div>
+          <label class="tw-range-wrap"><span class="tw-control-label">Range</span><select id="tw-range" class="tw-range-select" onchange="twRange(this.value)"></select></label>
           <div class="tw-type">
-            <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Area">〰</button>
-            <button class="tw-type-btn" data-type="candles" onclick="twType(this)" title="Candles">▮</button>
+            <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Area chart">〰</button>
+            <button class="tw-type-btn" data-type="candles" onclick="twType(this)" title="Candlestick chart">▮</button>
             <button class="tw-type-btn active" id="tw-volume-btn" onclick="twToggleVolume(this)" title="Toggle volume">VOL</button>
             <button class="tw-type-btn active" id="tw-rsi-btn" onclick="twToggleIndicator('rsi',this)" title="Toggle RSI (14)">RSI</button>
             <button class="tw-type-btn active" id="tw-macd-btn" onclick="twToggleIndicator('macd',this)" title="Toggle MACD (12, 26, 9)">MACD</button>
-            <button class="tw-type-btn" id="tw-line-btn" onclick="twStartDrawing('line',this)" title="Draw trend line">╱ LINE</button>
-            <button class="tw-type-btn" id="tw-fib-btn" onclick="twStartDrawing('fib',this)" title="Draw Fibonacci retracement">FIB</button>
-            <button class="tw-type-btn" onclick="twClearDrawings()" title="Clear drawings">CLR</button>
+            <button class="tw-type-btn" id="tw-edit-btn" onclick="twStartDrawing('select',this)" title="Select, move, or resize a drawing">↖ EDIT</button>
+            <button class="tw-type-btn" id="tw-line-btn" onclick="twStartDrawing('line',this)" title="Drag to draw a trend line">╱ LINE</button>
+            <button class="tw-type-btn" id="tw-fib-btn" onclick="twStartDrawing('fib',this)" title="Drag to draw Fibonacci retracement">FIB</button>
+            <button class="tw-type-btn" id="tw-delete-btn" onclick="twDeleteSelected()" title="Delete selected drawing">DEL</button>
+            <button class="tw-type-btn" onclick="twClearDrawings()" title="Clear all drawings">CLR</button>
+            <button class="tw-type-btn" id="tw-studies-btn" onclick="twToggleStudySettings()" title="Indicator and drawing styles">⚙ STUDIES</button>
             <button class="tw-type-btn" onclick="twResetView()" title="Reset chart view">↺</button>
+          </div>
+        </div>
+
+        <div class="tw-study-settings" id="tw-study-settings" hidden>
+          <div class="tw-study-head"><div><strong>Chart studies &amp; styles</strong><span>Saved on this device</span></div><button type="button" onclick="twToggleStudySettings()">×</button></div>
+          <div class="tw-study-grid">
+            <div class="tw-study-group"><h4>EMA overlays</h4>
+              {% for period, color, enabled in [(9,'#f5b942',true),(20,'#38d6c5',true),(50,'#6fa8ff',true),(100,'#c084fc',false),(200,'#ff6b7a',false)] %}
+              <label class="tw-study-row"><input id="tw-ema-{{ period }}" type="checkbox" {{ 'checked' if enabled }} onchange="twSetEma({{ period }},this.checked)"><span>EMA {{ period }}</span><input id="tw-color-ema{{ period }}" type="color" value="{{ color }}" oninput="twSetColor('ema{{ period }}',this.value)"></label>
+              {% endfor %}
+            </div>
+            <div class="tw-study-group"><h4>Oscillators</h4>
+              <label class="tw-study-row"><span>RSI line</span><input id="tw-color-rsi" type="color" value="#e7b84b" oninput="twSetColor('rsi',this.value)"></label>
+              <label class="tw-study-row"><span>MACD line</span><input id="tw-color-macd" type="color" value="#e7b84b" oninput="twSetColor('macd',this.value)"></label>
+              <label class="tw-study-row"><span>Signal line</span><input id="tw-color-signal" type="color" value="#6fa8ff" oninput="twSetColor('signal',this.value)"></label>
+            </div>
+            <div class="tw-study-group"><h4>Drawing tools</h4>
+              <label class="tw-study-row"><span>Trend line</span><input id="tw-color-drawing" type="color" value="#f0b53f" oninput="twSetColor('drawing',this.value)"></label>
+              <label class="tw-study-row"><span>Fibonacci</span><input id="tw-color-fib" type="color" value="#f0b53f" oninput="twSetColor('fib',this.value)"></label>
+              <label class="tw-study-row"><span>Line width</span><select id="tw-drawing-width" onchange="twSetDrawingWidth(this.value)"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+            </div>
           </div>
         </div>
 
@@ -679,22 +707,28 @@ function twSelect(row){
   if(bias){ var b=d.bias||'neutral'; bias.className='tw-bias '+b; bias.textContent=(b==='bull'?'BULLISH':(b==='bear'?'BEARISH':'NEUTRAL')); }
   var sym=document.getElementById('tw-ot-symbol'); if(sym){ sym.value=d.ticker; }
   twEstCost();
-  twResetTabs();
-  twLoadChart(d.ticker, twChartState.tf);
+  twLoadChart(d.ticker, twChartState.interval, twChartState.range);
   twLoadIntelligence(d.ticker);
 }
 
-/* ── Timeframe tabs ── */
-function twTf(btn){
+/* ── Candle interval + history range ── */
+function twInterval(btn){
   if (btn.disabled || btn.classList.contains('disabled')) return;
   btn.parentElement.querySelectorAll('.tw-tf-btn').forEach(function(b){ b.classList.remove('active'); });
   btn.classList.add('active');
-  twChartState.tf = btn.dataset.tf || '1D';
-  try { localStorage.setItem('tradestaar.chartTimeframe', twChartState.tf); } catch(e) {}
-  if (twChartState.ticker) twLoadChart(twChartState.ticker, twChartState.tf);
+  twChartState.interval = btn.dataset.interval || '5m';
+  var allowed=twIntervalConfig[twChartState.interval];
+  if(allowed.ranges.indexOf(twChartState.range)<0)twChartState.range=allowed.defaultRange;
+  twPopulateRanges();
+  try { localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range); } catch(e) {}
+  if (twChartState.ticker) twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);
 }
-function twSetTfDisabled(tf, dis){ var b=document.querySelector('.tw-tf-btn[data-tf="'+tf+'"]'); if(b){ b.disabled=!!dis; b.classList.toggle('disabled',!!dis); } }
-function twResetTabs(){ document.querySelectorAll('.tw-tf-btn').forEach(function(b){ b.disabled=false; b.classList.remove('disabled'); }); }
+function twRange(value){twChartState.range=value;try{localStorage.setItem('tradestaar.chartRange',value);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);}
+function twPopulateRanges(){
+  var select=document.getElementById('tw-range'),config=twIntervalConfig[twChartState.interval];if(!select||!config)return;select.innerHTML='';
+  var labels={"1d":"1 Day","5d":"5 Days","1mo":"1 Month","3mo":"3 Months","1y":"1 Year","5y":"5 Years","max":"Max"};
+  config.ranges.forEach(function(value){var option=document.createElement('option');option.value=value;option.textContent=labels[value]||value;option.selected=value===twChartState.range;select.appendChild(option);});
+}
 
 /* ── Chart type toggle (area / candles) ── */
 function twType(btn){
@@ -727,6 +761,20 @@ function twApplyIndicatorVisibility(){
   if(rsi) rsi.hidden=!twChartState.indicators.rsi; if(macd) macd.hidden=!twChartState.indicators.macd;
   if(wrap){wrap.hidden=!twChartState.indicators.rsi&&!twChartState.indicators.macd;wrap.classList.toggle('single',twChartState.indicators.rsi!==twChartState.indicators.macd);}
 }
+function twSaveStyles(){try{localStorage.setItem('tradestaar.chartStyles',JSON.stringify(twChartState.styles));}catch(e){}}
+function twToggleStudySettings(){var panel=document.getElementById('tw-study-settings'),btn=document.getElementById('tw-studies-btn');if(!panel)return;panel.hidden=!panel.hidden;if(btn)btn.classList.toggle('active',!panel.hidden);if(!panel.hidden)twSyncStudySettings();}
+function twSyncStudySettings(){
+  ['9','20','50','100','200'].forEach(function(period){var check=document.getElementById('tw-ema-'+period),color=document.getElementById('tw-color-ema'+period);if(check)check.checked=!!twChartState.styles.emas[period].enabled;if(color)color.value=twChartState.styles.emas[period].color;});
+  ['rsi','macd','signal','drawing','fib'].forEach(function(key){var input=document.getElementById('tw-color-'+key);if(input)input.value=twChartState.styles[key];});var width=document.getElementById('tw-drawing-width');if(width)width.value=String(twChartState.styles.drawingWidth);
+}
+function twSetColor(key,value){
+  if(key.indexOf('ema')===0){var period=key.slice(3);if(twChartState.styles.emas[period])twChartState.styles.emas[period].color=value;}else twChartState.styles[key]=value;
+  if(key==='drawing'||key==='fib'){twChartState.drawings.forEach(function(d){if((key==='drawing'&&d.type==='line')||(key==='fib'&&d.type==='fib'))d.color=value;});twSaveDrawings();}
+  twSaveStyles();twApplyStudyStyles();twRenderIndicators();twRenderDrawings();
+}
+function twSetEma(period,enabled){var style=twChartState.styles.emas[String(period)];if(!style)return;style.enabled=!!enabled;twSaveStyles();twApplyStudyStyles();twRenderEmas();}
+function twSetDrawingWidth(value){twChartState.styles.drawingWidth=Math.max(1,Math.min(4,Number(value)||2));twChartState.drawings.forEach(function(d){d.width=twChartState.styles.drawingWidth;});twSaveDrawings();twSaveStyles();twRenderDrawings();}
+function twApplyStudyStyles(){Object.keys(twChartState.emaSeries).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period].applyOptions({color:style.color,visible:!!style.enabled});});}
 
 /* ── Order ticket ── */
 function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; }
@@ -764,19 +812,29 @@ function twPreview(){
 
 /* ═══ Price chart ═══ */
 var twSavedChartType = 'area';
-var twSavedTimeframe = '1D';
+var twIntervalConfig={
+  '1m':{ranges:['1d','5d'],defaultRange:'1d'},'5m':{ranges:['1d','5d','1mo'],defaultRange:'5d'},
+  '15m':{ranges:['1d','5d','1mo'],defaultRange:'5d'},'1h':{ranges:['5d','1mo','3mo','1y'],defaultRange:'1mo'},
+  '4h':{ranges:['5d','1mo','3mo','1y'],defaultRange:'3mo'},'1d':{ranges:['1mo','3mo','1y','5y','max'],defaultRange:'1y'}
+};
+var twSavedInterval = '5m', twSavedRange = '5d';
 var twSavedVolume = true;
 var twSavedIndicators = {rsi:true,macd:true};
+var twDefaultStyles={rsi:'#e7b84b',macd:'#e7b84b',signal:'#6fa8ff',drawing:'#f0b53f',fib:'#f0b53f',drawingWidth:2,emas:{'9':{enabled:true,color:'#f5b942'},'20':{enabled:true,color:'#38d6c5'},'50':{enabled:true,color:'#6fa8ff'},'100':{enabled:false,color:'#c084fc'},'200':{enabled:false,color:'#ff6b7a'}}};
+var twSavedStyles=JSON.parse(JSON.stringify(twDefaultStyles));
 try {
   var twStoredType = localStorage.getItem('tradestaar.chartType');
   if (twStoredType === 'candles' || twStoredType === 'area') twSavedChartType = twStoredType;
-  var twStoredTf = localStorage.getItem('tradestaar.chartTimeframe');
-  if (['1D','1W','1M','3M','1Y','ALL'].indexOf(twStoredTf)>=0) twSavedTimeframe=twStoredTf;
+  var twStoredInterval=localStorage.getItem('tradestaar.chartInterval'),twStoredRange=localStorage.getItem('tradestaar.chartRange');
+  if(twIntervalConfig[twStoredInterval])twSavedInterval=twStoredInterval;
+  if(twIntervalConfig[twSavedInterval].ranges.indexOf(twStoredRange)>=0)twSavedRange=twStoredRange;
+  else if(!twStoredInterval){var legacy=localStorage.getItem('tradestaar.chartTimeframe'),legacyMap={'1D':['5m','1d'],'1W':['15m','5d'],'1M':['1d','1mo'],'3M':['1d','3mo'],'1Y':['1d','1y'],'ALL':['1d','max']};if(legacyMap[legacy]){twSavedInterval=legacyMap[legacy][0];twSavedRange=legacyMap[legacy][1];}}
   if (localStorage.getItem('tradestaar.chartVolume') === '0') twSavedVolume=false;
   var twStoredIndicators=JSON.parse(localStorage.getItem('tradestaar.chartIndicators')||'null');
   if(twStoredIndicators&&typeof twStoredIndicators==='object') twSavedIndicators={rsi:twStoredIndicators.rsi!==false,macd:twStoredIndicators.macd!==false};
+  var storedStyles=JSON.parse(localStorage.getItem('tradestaar.chartStyles')||'null');if(storedStyles&&typeof storedStyles==='object'){Object.keys(twDefaultStyles).forEach(function(key){if(key!=='emas'&&storedStyles[key]!=null)twSavedStyles[key]=storedStyles[key];});Object.keys(twDefaultStyles.emas).forEach(function(period){if(storedStyles.emas&&storedStyles.emas[period])twSavedStyles.emas[period]=Object.assign({},twDefaultStyles.emas[period],storedStyles.emas[period]);});}
 } catch(e) {}
-var twChartState = { chart:null, area:null, candle:null, vol:null, ticker:null, tf:twSavedTimeframe, type:twSavedChartType, showVolume:twSavedVolume, indicators:twSavedIndicators, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[] };
+var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, indicators:twSavedIndicators, styles:twSavedStyles, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
 
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
 function twChartHideMsg(){ var box=document.getElementById('tw-chart-empty'); if(box) box.classList.add('hidden'); }
@@ -801,7 +859,9 @@ function twInitChart(){
   var vol=chart.addHistogramSeries({ priceFormat:{type:'volume'}, priceScaleId:'' });
   vol.priceScale().applyOptions({ scaleMargins:{ top:0.85, bottom:0 } });
   twChartState.chart=chart; twChartState.area=area; twChartState.candle=candle; twChartState.vol=vol;
+  Object.keys(twChartState.styles.emas).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period]=chart.addLineSeries({color:style.color,lineWidth:1,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,title:'EMA '+period});});
   vol.applyOptions({visible:twChartState.showVolume});
+  twApplyStudyStyles();
   chart.subscribeCrosshairMove(function(param){
     if(twChartState.pinnedTime) return;
     var key=twTimeKey(param&&param.time), bar=twChartState.barMap[key];
@@ -819,7 +879,7 @@ function twInitChart(){
 }
 
 /* ═══ Drawing tools ═══ */
-function twDrawingKey(){ return 'tradestaar.drawings.'+(twChartState.ticker||'none')+'.'+twChartState.tf; }
+function twDrawingKey(){ return 'tradestaar.drawings.'+(twChartState.ticker||'none')+'.'+twChartState.interval+'.'+twChartState.range; }
 function twLoadDrawings(){
   twChartState.drawings=[]; twChartState.drawDraft=[];
   try { var saved=JSON.parse(localStorage.getItem(twDrawingKey())||'[]'); if(Array.isArray(saved))twChartState.drawings=saved.slice(0,30); } catch(e) {}
@@ -828,29 +888,56 @@ function twLoadDrawings(){
 function twSaveDrawings(){ try { localStorage.setItem(twDrawingKey(),JSON.stringify(twChartState.drawings.slice(-30))); } catch(e) {} }
 function twStartDrawing(mode,btn){
   if(twChartState.drawMode===mode){twStopDrawing();return;}
-  twChartState.drawMode=mode; twChartState.drawDraft=[];
-  document.querySelectorAll('#tw-line-btn,#tw-fib-btn').forEach(function(b){b.classList.remove('active');}); btn.classList.add('active');
+  twChartState.drawMode=mode; twChartState.drawDraft=[];twChartState.pointerAction=null;
+  document.querySelectorAll('#tw-edit-btn,#tw-line-btn,#tw-fib-btn').forEach(function(b){b.classList.remove('active');}); btn.classList.add('active');
   var canvas=document.getElementById('tw-chart-drawing'); if(canvas)canvas.classList.add('active');
-  var status=document.getElementById('tw-draw-status'); if(status){status.hidden=false;status.textContent=(mode==='fib'?'Fibonacci':'Trend line')+': click the first point, then the second point. Click the active tool again to cancel.';}
+  var status=document.getElementById('tw-draw-status'); if(status){status.hidden=false;status.textContent=mode==='select'?'Edit: drag a line, Fib, or endpoint. Press Delete to remove it.':(mode==='fib'?'Fibonacci':'Trend line')+': press and drag freely between any two points.';}
+  twRenderDrawings();
 }
 function twStopDrawing(){
-  twChartState.drawMode=null;twChartState.drawDraft=[];
-  document.querySelectorAll('#tw-line-btn,#tw-fib-btn').forEach(function(b){b.classList.remove('active');});
+  twChartState.drawMode=null;twChartState.drawDraft=[];twChartState.pointerAction=null;
+  document.querySelectorAll('#tw-edit-btn,#tw-line-btn,#tw-fib-btn').forEach(function(b){b.classList.remove('active');});
   var canvas=document.getElementById('tw-chart-drawing');if(canvas)canvas.classList.remove('active');
   var status=document.getElementById('tw-draw-status');if(status)status.hidden=true;
+  twRenderDrawings();
 }
-function twClearDrawings(){ twChartState.drawings=[];twSaveDrawings();twStopDrawing();twRenderDrawings(); }
+function twClearDrawings(){ twChartState.drawings=[];twChartState.selectedDrawing=null;twSaveDrawings();twStopDrawing();twRenderDrawings(); }
+function twDeleteSelected(){if(twChartState.selectedDrawing==null)return;twChartState.drawings.splice(twChartState.selectedDrawing,1);twChartState.selectedDrawing=null;twSaveDrawings();twRenderDrawings();}
+function twPointerPoint(canvas,ev){
+  var rect=canvas.getBoundingClientRect(),x=ev.clientX-rect.left,y=ev.clientY-rect.top,time=twChartState.chart.timeScale().coordinateToTime(x),price=twChartState.candle.coordinateToPrice(y);
+  return time==null||price==null||!isFinite(price)?null:{x:x,y:y,time:time,price:Number(price)};
+}
+function twDistanceToSegment(p,a,b){var dx=b.x-a.x,dy=b.y-a.y,len=dx*dx+dy*dy;if(!len)return Math.hypot(p.x-a.x,p.y-a.y);var t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/len));return Math.hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy));}
+function twHitDrawing(point){
+  for(var i=twChartState.drawings.length-1;i>=0;i--){var d=twChartState.drawings[i];if(!d.points||d.points.length<2)continue;var a=twPointCoords(d.points[0]),b=twPointCoords(d.points[1]);if(!a||!b)continue;
+    if(Math.hypot(point.x-a.x,point.y-a.y)<=11)return {index:i,part:'a'};if(Math.hypot(point.x-b.x,point.y-b.y)<=11)return {index:i,part:'b'};
+    if(d.type==='line'&&twDistanceToSegment(point,a,b)<=8)return {index:i,part:'move'};
+    if(d.type==='fib'){var left=Math.min(a.x,b.x)-8,right=Math.max(a.x,b.x)+8,top=Math.min(a.y,b.y)-8,bottom=Math.max(a.y,b.y)+8;if(point.x>=left&&point.x<=right&&point.y>=top&&point.y<=bottom)return {index:i,part:'move'};}
+  }return null;
+}
 function twInitDrawingLayer(){
   var canvas=document.getElementById('tw-chart-drawing'),box=document.getElementById('tw-chart-box');if(!canvas||!box)return;
-  canvas.addEventListener('click',function(ev){
-    if(!twChartState.drawMode||!twChartState.chart||!twChartState.candle)return;
-    var rect=canvas.getBoundingClientRect(),x=ev.clientX-rect.left,y=ev.clientY-rect.top;
-    var time=twChartState.chart.timeScale().coordinateToTime(x),price=twChartState.candle.coordinateToPrice(y);
-    if(time==null||price==null||!isFinite(price))return;
-    twChartState.drawDraft.push({time:time,price:Number(price)});
-    if(twChartState.drawDraft.length===2){twChartState.drawings.push({type:twChartState.drawMode,points:twChartState.drawDraft.slice()});twSaveDrawings();twStopDrawing();}
+  canvas.addEventListener('pointerdown',function(ev){
+    if(!twChartState.drawMode||!twChartState.chart||!twChartState.candle)return;var p=twPointerPoint(canvas,ev);if(!p)return;canvas.setPointerCapture(ev.pointerId);ev.preventDefault();
+    if(twChartState.drawMode==='line'||twChartState.drawMode==='fib'){twChartState.drawDraft=[{time:p.time,price:p.price},{time:p.time,price:p.price}];twChartState.pointerAction={kind:'create',start:{x:p.x,y:p.y}};}
+    else {var hit=twHitDrawing(p);twChartState.selectedDrawing=hit?hit.index:null;if(hit){var d=twChartState.drawings[hit.index];twChartState.pointerAction={kind:hit.part,index:hit.index,start:{x:p.x,y:p.y},original:JSON.parse(JSON.stringify(d.points))};}}
     twRenderDrawings();
   });
+  canvas.addEventListener('pointermove',function(ev){
+    var action=twChartState.pointerAction;if(!action)return;var p=twPointerPoint(canvas,ev);if(!p)return;ev.preventDefault();
+    if(action.kind==='create'){twChartState.drawDraft[1]={time:p.time,price:p.price};}
+    else {var drawing=twChartState.drawings[action.index];if(!drawing)return;if(action.kind==='a'||action.kind==='b')drawing.points[action.kind==='a'?0:1]={time:p.time,price:p.price};else if(action.kind==='move'){var originalCoords=action.original.map(twPointCoords);if(originalCoords[0]&&originalCoords[1])drawing.points=originalCoords.map(function(coord){var time=twChartState.chart.timeScale().coordinateToTime(coord.x+(p.x-action.start.x)),price=twChartState.candle.coordinateToPrice(coord.y+(p.y-action.start.y));return time==null||price==null?null:{time:time,price:Number(price)};}).filter(Boolean);}}
+    twRenderDrawings();
+  });
+  function finishPointer(ev){
+    var action=twChartState.pointerAction;if(!action)return;twChartState.pointerAction=null;
+    if(action.kind==='create'&&twChartState.drawDraft.length===2){var a=twPointCoords(twChartState.drawDraft[0]),b=twPointCoords(twChartState.drawDraft[1]);if(a&&b&&Math.hypot(a.x-b.x,a.y-b.y)>5){var type=twChartState.drawMode,color=type==='fib'?twChartState.styles.fib:twChartState.styles.drawing;twChartState.drawings.push({id:Date.now().toString(36),type:type,points:twChartState.drawDraft.slice(),color:color,width:twChartState.styles.drawingWidth});twChartState.selectedDrawing=twChartState.drawings.length-1;twSaveDrawings();}twChartState.drawDraft=[];}
+    else twSaveDrawings();twRenderDrawings();
+    try{canvas.releasePointerCapture(ev.pointerId);}catch(e){}
+  }
+  canvas.addEventListener('pointerup',finishPointer);canvas.addEventListener('pointercancel',finishPointer);
+  document.addEventListener('keydown',function(ev){if((ev.key==='Delete'||ev.key==='Backspace')&&twChartState.drawMode==='select'&&twChartState.selectedDrawing!=null){ev.preventDefault();twDeleteSelected();}if(ev.key==='Escape')twStopDrawing();});
+  canvas.addEventListener('dblclick',function(){if(twChartState.drawMode==='select')twDeleteSelected();});
   if(window.ResizeObserver)new ResizeObserver(function(){twRenderDrawings();twRenderIndicators();}).observe(box);
   else window.addEventListener('resize',function(){twRenderDrawings();twRenderIndicators();});
 }
@@ -866,21 +953,27 @@ function twPointCoords(point){
 }
 function twRenderDrawings(){
   var fit=twCanvasContext(document.getElementById('tw-chart-drawing'));if(!fit)return;var ctx=fit.ctx;
-  (twChartState.drawings||[]).forEach(function(drawing){
+  var all=(twChartState.drawings||[]).slice();if(twChartState.drawDraft.length===2)all.push({type:twChartState.drawMode,points:twChartState.drawDraft,color:twChartState.drawMode==='fib'?twChartState.styles.fib:twChartState.styles.drawing,width:twChartState.styles.drawingWidth,draft:true});
+  all.forEach(function(drawing,index){
     if(!drawing.points||drawing.points.length<2)return;var a=twPointCoords(drawing.points[0]),b=twPointCoords(drawing.points[1]);if(!a||!b)return;
-    if(drawing.type==='line'){ctx.save();ctx.strokeStyle='#F0B53F';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.fillStyle='#F0B53F';[a,b].forEach(function(p){ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();});ctx.restore();}
-    if(drawing.type==='fib')twDrawFib(ctx,drawing.points,a,b);
+    var selected=!drawing.draft&&index===twChartState.selectedDrawing,color=drawing.color||(drawing.type==='fib'?twChartState.styles.fib:twChartState.styles.drawing),width=drawing.width||twChartState.styles.drawingWidth;
+    if(drawing.type==='line'){ctx.save();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.restore();}
+    if(drawing.type==='fib')twDrawFib(ctx,drawing.points,a,b,color,width);
+    if(selected||drawing.draft){ctx.save();ctx.fillStyle='#0b0f12';ctx.strokeStyle=color;ctx.lineWidth=2;[a,b].forEach(function(p){ctx.beginPath();ctx.arc(p.x,p.y,selected?5:3,0,Math.PI*2);ctx.fill();ctx.stroke();});ctx.restore();}
   });
-  if(twChartState.drawDraft.length===1){var p=twPointCoords(twChartState.drawDraft[0]);if(p){ctx.fillStyle='#F0B53F';ctx.beginPath();ctx.arc(p.x,p.y,4,0,Math.PI*2);ctx.fill();}}
 }
-function twDrawFib(ctx,points,a,b){
+function twDrawFib(ctx,points,a,b,color,width){
   var high=Math.max(points[0].price,points[1].price),low=Math.min(points[0].price,points[1].price),x1=Math.min(a.x,b.x),x2=Math.max(a.x,b.x),levels=[0,.236,.382,.5,.618,.786,1];
-  ctx.save();ctx.font='9px ui-monospace,monospace';levels.forEach(function(ratio){var price=high-(high-low)*ratio,y=twChartState.candle.priceToCoordinate(price);if(y==null)return;ctx.strokeStyle=ratio===.5||ratio===.618?'rgba(240,181,63,.9)':'rgba(240,181,63,.46)';ctx.lineWidth=ratio===.5||ratio===.618?1.4:1;ctx.setLineDash(ratio===0||ratio===1?[]:[4,3]);ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#E7B84B';ctx.fillText((ratio*100).toFixed(ratio===0||ratio===1?0:1)+'%  '+price.toFixed(2),Math.min(x2+5,fitTextX(ctx,fitWidth(ctx),92)),y-3);});ctx.restore();
+  ctx.save();ctx.font='9px ui-monospace,monospace';levels.forEach(function(ratio){var price=high-(high-low)*ratio,y=twChartState.candle.priceToCoordinate(price);if(y==null)return;ctx.globalAlpha=ratio===.5||ratio===.618?1:.58;ctx.strokeStyle=color;ctx.lineWidth=(ratio===.5||ratio===.618)?Math.max(1.4,width):Math.max(1,width-1);ctx.setLineDash(ratio===0||ratio===1?[]:[4,3]);ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;ctx.fillStyle=color;ctx.fillText((ratio*100).toFixed(ratio===0||ratio===1?0:1)+'%  '+price.toFixed(2),Math.min(x2+5,fitTextX(ctx,fitWidth(ctx),92)),y-3);});ctx.restore();
 }
 function fitWidth(ctx){return ctx.canvas.width/(window.devicePixelRatio||1);}function fitTextX(ctx,width,labelWidth){return Math.max(4,width-labelWidth-4);}
 
 /* ═══ RSI + MACD indicator canvases ═══ */
 function twEma(values,period){var out=[],k=2/(period+1),ema=null;values.forEach(function(value){ema=ema==null?value:(value*k+ema*(1-k));out.push(ema);});return out;}
+function twRenderEmas(){
+  if(!twChartState.bars.length)return;var closes=twChartState.bars.map(function(b){return Number(b.close);});
+  Object.keys(twChartState.emaSeries).forEach(function(period){var values=twEma(closes,Number(period)),series=twChartState.emaSeries[period],style=twChartState.styles.emas[period];series.setData(twChartState.bars.map(function(bar,i){return {time:bar.time,value:values[i]};}));series.applyOptions({color:style.color,visible:!!style.enabled});});
+}
 function twRsi(values,period){
   var out=new Array(values.length).fill(null);if(values.length<=period)return out;var gain=0,loss=0;
   for(var i=1;i<=period;i++){var d=values[i]-values[i-1];gain+=Math.max(d,0);loss+=Math.max(-d,0);}gain/=period;loss/=period;out[period]=loss===0?100:100-(100/(1+gain/loss));
@@ -894,11 +987,11 @@ function twRenderIndicators(){
 function twPlotLine(ctx,values,x,y,color,width){ctx.strokeStyle=color;ctx.lineWidth=width||1.5;ctx.beginPath();var started=false;values.forEach(function(v,i){if(v==null||!isFinite(v))return;var px=x(i),py=y(v);if(!started){ctx.moveTo(px,py);started=true;}else ctx.lineTo(px,py);});if(started)ctx.stroke();}
 function twDrawRsi(values){
   var fit=twCanvasContext(document.getElementById('tw-rsi-canvas'));if(!fit)return;var ctx=fit.ctx,pad={l:8,r:8,t:25,b:10},n=values.length,x=function(i){return pad.l+(fit.w-pad.l-pad.r)*(i/Math.max(1,n-1));},y=function(v){return pad.t+(fit.h-pad.t-pad.b)*(1-v/100);};
-  [70,50,30].forEach(function(v){ctx.strokeStyle=v===50?'rgba(255,255,255,.08)':'rgba(240,181,63,.22)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(pad.l,y(v));ctx.lineTo(fit.w-pad.r,y(v));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#65707c';ctx.font='8px ui-monospace,monospace';ctx.fillText(String(v),fit.w-18,y(v)-2);});twPlotLine(ctx,values,x,y,'#E7B84B',1.7);var last=values.filter(function(v){return v!=null;}).pop();twNum('tw-rsi-value',last==null?'—':last.toFixed(1));
+  [70,50,30].forEach(function(v){ctx.strokeStyle=v===50?'rgba(255,255,255,.08)':'rgba(240,181,63,.22)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(pad.l,y(v));ctx.lineTo(fit.w-pad.r,y(v));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#65707c';ctx.font='8px ui-monospace,monospace';ctx.fillText(String(v),fit.w-18,y(v)-2);});twPlotLine(ctx,values,x,y,twChartState.styles.rsi,1.7);var last=values.filter(function(v){return v!=null;}).pop();twNum('tw-rsi-value',last==null?'—':last.toFixed(1));
 }
 function twDrawMacd(macd,signal,hist){
   var fit=twCanvasContext(document.getElementById('tw-macd-canvas'));if(!fit)return;var ctx=fit.ctx,pad={l:8,r:8,t:25,b:10},n=macd.length,max=Math.max.apply(null,macd.concat(signal,hist).map(function(v){return Math.abs(v)||0;}))||1,x=function(i){return pad.l+(fit.w-pad.l-pad.r)*(i/Math.max(1,n-1));},y=function(v){return pad.t+(fit.h-pad.t-pad.b)*(1-(v+max)/(2*max));},zero=y(0),barW=Math.max(1,(fit.w-pad.l-pad.r)/Math.max(1,n)*.7);
-  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.beginPath();ctx.moveTo(pad.l,zero);ctx.lineTo(fit.w-pad.r,zero);ctx.stroke();hist.forEach(function(v,i){ctx.fillStyle=v>=0?'rgba(34,197,139,.58)':'rgba(255,77,69,.58)';ctx.fillRect(x(i)-barW/2,Math.min(zero,y(v)),barW,Math.max(1,Math.abs(y(v)-zero)));});twPlotLine(ctx,macd,x,y,'#E7B84B',1.5);twPlotLine(ctx,signal,x,y,'#6FA8FF',1.25);var i=n-1;twNum('tw-macd-value',macd[i].toFixed(2)+' · '+signal[i].toFixed(2)+' · '+hist[i].toFixed(2));
+  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.beginPath();ctx.moveTo(pad.l,zero);ctx.lineTo(fit.w-pad.r,zero);ctx.stroke();hist.forEach(function(v,i){ctx.fillStyle=v>=0?'rgba(34,197,139,.58)':'rgba(255,77,69,.58)';ctx.fillRect(x(i)-barW/2,Math.min(zero,y(v)),barW,Math.max(1,Math.abs(y(v)-zero)));});twPlotLine(ctx,macd,x,y,twChartState.styles.macd,1.5);twPlotLine(ctx,signal,x,y,twChartState.styles.signal,1.25);var i=n-1;twNum('tw-macd-value',macd[i].toFixed(2)+' · '+signal[i].toFixed(2)+' · '+hist[i].toFixed(2));
 }
 
 function twTimeKey(time){
@@ -920,46 +1013,33 @@ function twShowBar(bar,point,pinned){
   if(point){ var host=document.getElementById('tw-chart-box'); var left=Math.min(Math.max(8,point.x+14),Math.max(8,host.clientWidth-215)); box.style.left=left+'px'; box.style.top=(point.y>100?10:Math.min(host.clientHeight-90,point.y+18))+'px'; }
   twSetOhlcvBar(bar);
 }
-function twHideTooltip(){ var box=document.getElementById('tw-chart-tooltip'); if(box) box.hidden=true; if(twChartState.bars.length) twOhlcv(twChartState.bars,twChartState.tf); }
+function twHideTooltip(){ var box=document.getElementById('tw-chart-tooltip'); if(box) box.hidden=true; if(twChartState.bars.length) twOhlcv(twChartState.bars); }
 function twSetOhlcvBar(bar){
   twNum('tw-o-open',Number(bar.open).toFixed(2)); twNum('tw-o-high',Number(bar.high).toFixed(2));
   twNum('tw-o-low',Number(bar.low).toFixed(2)); twNum('tw-o-close',Number(bar.close).toFixed(2)); twNum('tw-o-vol',twFmtVol(bar.volume));
 }
 
-function twOhlcv(bars, tf){
-  var open, high, low, vol;
-  if (tf === '1D'){
-    open = bars[0].open; high=-Infinity; low=Infinity; vol=0;
-    bars.forEach(function(b){ if(b.high>high)high=b.high; if(b.low<low)low=b.low; vol+=(b.volume||0); });
-  } else {
-    var last=bars[bars.length-1];
-    open=last.open; high=last.high; low=last.low; vol=last.volume||0;
-  }
-  twNum('tw-o-open', open!=null?open.toFixed(2):'—');
-  twNum('tw-o-high', high!=null&&isFinite(high)?high.toFixed(2):'—');
-  twNum('tw-o-low',  low!=null&&isFinite(low)?low.toFixed(2):'—');
-  twNum('tw-o-close', bars.length?Number(bars[bars.length-1].close).toFixed(2):'—');
-  twNum('tw-o-vol',  twFmtVol(vol));
+function twOhlcv(bars){
+  if(!bars.length)return;var last=bars[bars.length-1];twSetOhlcvBar(last);
 }
 
-function twLoadChart(ticker, tf){
+function twLoadChart(ticker, interval, range){
   if(!ticker) return;
   if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load. Quotes, %, and levels above are still live.'); return; }
-  twChartState.ticker=ticker; twChartState.tf=tf;
+  twChartState.ticker=ticker; twChartState.interval=interval;twChartState.range=range;
   var myReq=++twChartState.reqId;
-  twChartMsg('Loading '+ticker+' · '+tf+'…','');
-  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?tf='+encodeURIComponent(tf))
+  twChartMsg('Loading '+ticker+' · '+interval+' · '+range+'…','');
+  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range))
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(myReq!==twChartState.reqId) return;
       var bars=(d&&d.bars)||[];
       if(!bars.length){
-        twSetTfDisabled(tf,true);
         twChartState.area.setData([]); twChartState.candle.setData([]); twChartState.vol.setData([]);
-        twChartMsg('No '+tf+' data','The price feed returned no bars for '+ticker+' at this range.');
+        Object.keys(twChartState.emaSeries).forEach(function(period){twChartState.emaSeries[period].setData([]);});
+        twChartMsg('No '+interval+' data','The price feed returned no bars for '+ticker+' at '+range+'.');
         return;
       }
-      twSetTfDisabled(tf,false);
       var up = bars[bars.length-1].close >= bars[0].close;
       twChartState.area.applyOptions({
         lineColor: up ? '#22C58B' : '#FF4D45',
@@ -977,7 +1057,8 @@ function twLoadChart(ticker, tf){
       twChartState.chart.timeScale().fitContent();
       twLoadDrawings();
       twRenderIndicators();
-      twOhlcv(bars, tf);
+      twRenderEmas();
+      twOhlcv(bars);
       twEstCost();
       twChartHideMsg();
     })
@@ -1036,14 +1117,15 @@ function twRenderInsiders(data){
   document.querySelectorAll('.tw-type-btn').forEach(function(btn){
     if(btn.dataset.type) btn.classList.toggle('active', btn.dataset.type === twChartState.type);
   });
-  document.querySelectorAll('.tw-tf-btn').forEach(function(btn){btn.classList.toggle('active',btn.dataset.tf===twChartState.tf);});
+  document.querySelectorAll('.tw-tf-btn').forEach(function(btn){btn.classList.toggle('active',btn.dataset.interval===twChartState.interval);});
+  twPopulateRanges();twSyncStudySettings();
   var volBtn=document.getElementById('tw-volume-btn'); if(volBtn) volBtn.classList.toggle('active',twChartState.showVolume);
   var rsiBtn=document.getElementById('tw-rsi-btn'); if(rsiBtn) rsiBtn.classList.toggle('active',twChartState.indicators.rsi);
   var macdBtn=document.getElementById('tw-macd-btn'); if(macdBtn) macdBtn.classList.toggle('active',twChartState.indicators.macd);
   twApplyIndicatorVisibility();
   twApplyType();
   var first=document.querySelector('.tw-wl-row.active')||document.querySelector('.tw-wl-row');
-  if(first && first.dataset.ticker){ twLoadChart(first.dataset.ticker,twChartState.tf); twLoadIntelligence(first.dataset.ticker); }
+  if(first && first.dataset.ticker){ twLoadChart(first.dataset.ticker,twChartState.interval,twChartState.range); twLoadIntelligence(first.dataset.ticker); }
   else if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load.'); }
   twEstCost();
 })();
