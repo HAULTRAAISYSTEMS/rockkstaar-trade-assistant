@@ -4705,7 +4705,7 @@ _TERMINAL_TF_MAP = {
     "1M":  ("1d",  "1mo"),
     "3M":  ("1d",  "3mo"),
     "1Y":  ("1d",  "1y"),
-    "ALL": ("1wk", "max"),
+    "ALL": ("1d", "10y"),
 }
 _TERMINAL_INTERVALS = {
     "1m": {"fetch": "1m", "ranges": ("1d", "5d"), "default": "1d"},
@@ -4713,7 +4713,7 @@ _TERMINAL_INTERVALS = {
     "15m": {"fetch": "15m", "ranges": ("1d", "5d", "1mo"), "default": "5d"},
     "1h": {"fetch": "1h", "ranges": ("5d", "1mo", "3mo", "1y"), "default": "1mo"},
     "4h": {"fetch": "1h", "ranges": ("5d", "1mo", "3mo", "1y"), "default": "3mo"},
-    "1d": {"fetch": "1d", "ranges": ("1mo", "3mo", "1y", "5y", "max"), "default": "1y"},
+    "1d": {"fetch": "1d", "ranges": ("1mo", "3mo", "6mo", "1y", "2y", "5y", "10y"), "default": "1y"},
 }
 _TERMINAL_CANDLE_CACHE: dict = {}  # (ticker, interval, range) -> {"ts": epoch, "bars": [...]}
 
@@ -4747,7 +4747,10 @@ def api_terminal_candles(ticker):
     cached = _TERMINAL_CANDLE_CACHE.get(key)
     if cached and (_time.time() - cached["ts"]) < ttl:
         return jsonify({"ok": True, "ticker": ticker, "tf": legacy_tf or None,
-                        "interval": interval, "range": range_str,
+                        "interval": interval,
+                        "source_interval": cached.get("source_interval", fetch_interval),
+                        "session": "regular", "adjustment": "split-adjusted",
+                        "range": range_str,
                         "bars": cached["bars"], "cached": True,
                         "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
 
@@ -4758,34 +4761,32 @@ def api_terminal_candles(ticker):
     except Exception as _e:
         logger.debug("terminal candles %s %s/%s failed: %s", ticker, interval, range_str, _e)
 
-    bars = []
-    if data and data.get("closes"):
-        ts  = data.get("timestamps") or []
-        op  = data.get("opens")  or []
-        hi  = data.get("highs")  or []
-        lo  = data.get("lows")   or []
-        cl  = data.get("closes") or []
-        vol = data.get("volumes") or []
-        n = min(len(ts), len(op), len(hi), len(lo), len(cl))
-        for i in range(n):
-            bar = {
-                "time":  int(ts[i]),
-                "open":  round(float(op[i]), 4),
-                "high":  round(float(hi[i]), 4),
-                "low":   round(float(lo[i]), 4),
-                "close": round(float(cl[i]), 4),
-            }
-            if i < len(vol):
-                bar["volume"] = int(vol[i] or 0)
-            bars.append(bar)
+    from terminal_intelligence import normalize_ohlcv_data
+    bars = normalize_ohlcv_data(data)
+
+    source_interval = (data or {}).get("data_granularity") or fetch_interval
+    # Do not label silently downsampled monthly or quarterly data as daily.
+    if requested_interval and interval != "4h" and source_interval != fetch_interval:
+        logger.warning(
+            "terminal candles %s requested %s but provider returned %s",
+            ticker, fetch_interval, source_interval,
+        )
+        return jsonify({"ok": False,
+                        "error": "provider returned a different candle interval",
+                        "requested_interval": interval,
+                        "source_interval": source_interval}), 502
 
     if interval == "4h" and bars:
         from terminal_intelligence import aggregate_ohlcv_bars
         bars = aggregate_ohlcv_bars(bars, 4)
 
-    _TERMINAL_CANDLE_CACHE[key] = {"ts": _time.time(), "bars": bars}
+    _TERMINAL_CANDLE_CACHE[key] = {
+        "ts": _time.time(), "bars": bars, "source_interval": source_interval,
+    }
     return jsonify({"ok": True, "ticker": ticker, "tf": legacy_tf or None,
-                    "interval": interval, "range": range_str, "bars": bars,
+                    "interval": interval, "source_interval": source_interval,
+                    "session": "regular", "adjustment": "split-adjusted",
+                    "range": range_str, "bars": bars,
                     "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
 
 

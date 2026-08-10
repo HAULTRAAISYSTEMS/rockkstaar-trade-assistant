@@ -1,9 +1,23 @@
 import unittest
 
-from terminal_intelligence import aggregate_ohlcv_bars
+from terminal_intelligence import aggregate_ohlcv_bars, normalize_ohlcv_data
 
 
 class TerminalChartAggregationTests(unittest.TestCase):
+    def test_normalization_sorts_deduplicates_and_rejects_invalid_candles(self):
+        data = {
+            "timestamps": [2, 1, 2, 3],
+            "opens": [20, 10, 21, 30],
+            "highs": [22, 12, 24, 29],
+            "lows": [19, 9, 20, 28],
+            "closes": [21, 11, 23, 31],
+            "volumes": [200, 100, 250, 300],
+        }
+        result = normalize_ohlcv_data(data)
+        self.assertEqual([row["time"] for row in result], [1, 2])
+        self.assertEqual(result[-1]["open"], 21)
+        self.assertEqual(result[-1]["volume"], 250)
+
     def test_four_hour_aggregation_preserves_ohlcv(self):
         base = 1786300200  # four same-session hourly bars
         bars = [

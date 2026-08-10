@@ -390,6 +390,7 @@ def _fetch_ohlcv_via_chart_api(
             data        = r.json()
             result_node = data["chart"]["result"][0]
             timestamps  = result_node.get("timestamp", [])
+            metadata    = result_node.get("meta") or {}
             quote       = result_node["indicators"]["quote"][0]
 
             closes  = quote.get("close",  [])
@@ -402,7 +403,7 @@ def _fetch_ohlcv_via_chart_api(
             valid = [
                 (t, o, c, h, lo, v)
                 for t, o, c, h, lo, v in zip(timestamps, opens, closes, highs, lows, volumes)
-                if c is not None and c > 0
+                if all(x is not None for x in (o, c, h, lo)) and c > 0
             ]
             if not valid:
                 continue
@@ -415,6 +416,9 @@ def _fetch_ohlcv_via_chart_api(
                 "highs":      [float(x) for x in hs],
                 "lows":       [float(x) for x in ls],
                 "volumes":    [int(x) if x else 0 for x in vs],
+                "data_granularity": metadata.get("dataGranularity"),
+                "exchange_timezone": metadata.get("exchangeTimezoneName"),
+                "currency": metadata.get("currency"),
             }
         except Exception as _e:
             logger.debug(

@@ -7,6 +7,7 @@ missing data explicit instead of filling panels with guessed values.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -58,6 +59,36 @@ def aggregate_ohlcv_bars(bars: list[dict], size: int = 4) -> list[dict]:
                 "volume": sum(row.get("volume") or 0 for row in chunk),
             })
     return aggregated
+
+
+def normalize_ohlcv_data(data: dict | None) -> list[dict]:
+    """Build sorted, unique, internally consistent candles from provider arrays."""
+    if not data:
+        return []
+    keys = ("timestamps", "opens", "highs", "lows", "closes")
+    arrays = [data.get(key) or [] for key in keys]
+    volumes = data.get("volumes") or []
+    bars_by_time: dict[int, dict] = {}
+    for index, values in enumerate(zip(*arrays)):
+        try:
+            timestamp = int(values[0])
+            open_, high, low, close = (float(value) for value in values[1:])
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not all(math.isfinite(value) and value > 0 for value in (open_, high, low, close)):
+            continue
+        if high < max(open_, close) or low > min(open_, close) or low > high:
+            continue
+        bar = {
+            "time": timestamp,
+            "open": round(open_, 4),
+            "high": round(high, 4),
+            "low": round(low, 4),
+            "close": round(close, 4),
+            "volume": int(volumes[index] or 0) if index < len(volumes) else 0,
+        }
+        bars_by_time[timestamp] = bar
+    return [bars_by_time[timestamp] for timestamp in sorted(bars_by_time)]
 
 
 def _news_row(raw: Any, fallback_ticker: str = "") -> dict | None:

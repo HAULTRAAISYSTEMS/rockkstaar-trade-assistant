@@ -382,7 +382,13 @@
               {% endfor %}
             </div>
             <div class="tw-study-group"><h4>Oscillators</h4>
+              <label class="tw-study-row"><span>RSI length</span><input id="tw-rsi-period" type="number" min="2" max="100" value="14" onchange="twSetStudyParam('rsiPeriod',this.value)"></label>
+              <label class="tw-study-row"><span>RSI upper</span><input id="tw-rsi-upper" type="number" min="51" max="99" value="70" onchange="twSetStudyParam('rsiUpper',this.value)"></label>
+              <label class="tw-study-row"><span>RSI lower</span><input id="tw-rsi-lower" type="number" min="1" max="49" value="30" onchange="twSetStudyParam('rsiLower',this.value)"></label>
               <label class="tw-study-row"><span>RSI line</span><input id="tw-color-rsi" type="color" value="#e7b84b" oninput="twSetColor('rsi',this.value)"></label>
+              <label class="tw-study-row"><span>MACD fast</span><input id="tw-macd-fast" type="number" min="2" max="100" value="12" onchange="twSetStudyParam('macdFast',this.value)"></label>
+              <label class="tw-study-row"><span>MACD slow</span><input id="tw-macd-slow" type="number" min="3" max="200" value="26" onchange="twSetStudyParam('macdSlow',this.value)"></label>
+              <label class="tw-study-row"><span>MACD signal</span><input id="tw-macd-signal" type="number" min="2" max="100" value="9" onchange="twSetStudyParam('macdSignal',this.value)"></label>
               <label class="tw-study-row"><span>MACD line</span><input id="tw-color-macd" type="color" value="#e7b84b" oninput="twSetColor('macd',this.value)"></label>
               <label class="tw-study-row"><span>Signal line</span><input id="tw-color-signal" type="color" value="#6fa8ff" oninput="twSetColor('signal',this.value)"></label>
             </div>
@@ -410,11 +416,11 @@
 
         <div class="tw-indicators" id="tw-indicators">
           <section class="tw-indicator" id="tw-rsi-panel">
-            <div class="tw-indicator-label"><strong>RSI 14</strong><span id="tw-rsi-value">—</span><small>70 overbought · 30 oversold</small></div>
+            <div class="tw-indicator-label"><strong id="tw-rsi-title">RSI 14</strong><span id="tw-rsi-value">—</span><small id="tw-rsi-zones">70 overbought · 30 oversold</small></div>
             <canvas id="tw-rsi-canvas" height="86"></canvas>
           </section>
           <section class="tw-indicator" id="tw-macd-panel">
-            <div class="tw-indicator-label"><strong>MACD 12 · 26 · 9</strong><span id="tw-macd-value">—</span><small>MACD · signal · histogram</small></div>
+            <div class="tw-indicator-label"><strong id="tw-macd-title">MACD 12 · 26 · 9</strong><span id="tw-macd-value">—</span><small>MACD · signal · histogram</small></div>
             <canvas id="tw-macd-canvas" height="104"></canvas>
           </section>
         </div>
@@ -726,7 +732,7 @@ function twInterval(btn){
 function twRange(value){twChartState.range=value;try{localStorage.setItem('tradestaar.chartRange',value);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);}
 function twPopulateRanges(){
   var select=document.getElementById('tw-range'),config=twIntervalConfig[twChartState.interval];if(!select||!config)return;select.innerHTML='';
-  var labels={"1d":"1 Day","5d":"5 Days","1mo":"1 Month","3mo":"3 Months","1y":"1 Year","5y":"5 Years","max":"Max"};
+  var labels={"1d":"1 Day","5d":"5 Days","1mo":"1 Month","3mo":"3 Months","6mo":"6 Months","1y":"1 Year","2y":"2 Years","5y":"5 Years","10y":"10 Years"};
   config.ranges.forEach(function(value){var option=document.createElement('option');option.value=value;option.textContent=labels[value]||value;option.selected=value===twChartState.range;select.appendChild(option);});
 }
 
@@ -766,7 +772,15 @@ function twToggleStudySettings(){var panel=document.getElementById('tw-study-set
 function twSyncStudySettings(){
   ['9','20','50','100','200'].forEach(function(period){var check=document.getElementById('tw-ema-'+period),color=document.getElementById('tw-color-ema'+period);if(check)check.checked=!!twChartState.styles.emas[period].enabled;if(color)color.value=twChartState.styles.emas[period].color;});
   ['rsi','macd','signal','drawing','fib'].forEach(function(key){var input=document.getElementById('tw-color-'+key);if(input)input.value=twChartState.styles[key];});var width=document.getElementById('tw-drawing-width');if(width)width.value=String(twChartState.styles.drawingWidth);
+  var ids={rsiPeriod:'tw-rsi-period',rsiUpper:'tw-rsi-upper',rsiLower:'tw-rsi-lower',macdFast:'tw-macd-fast',macdSlow:'tw-macd-slow',macdSignal:'tw-macd-signal'};Object.keys(ids).forEach(function(key){var input=document.getElementById(ids[key]);if(input)input.value=String(twChartState.studies[key]);});twSyncIndicatorLabels();
 }
+function twSaveStudies(){try{localStorage.setItem('tradestaar.chartStudies',JSON.stringify(twChartState.studies));}catch(e){}}
+function twSetStudyParam(key,value){
+  var ranges={rsiPeriod:[2,100],rsiUpper:[51,99],rsiLower:[1,49],macdFast:[2,100],macdSlow:[3,200],macdSignal:[2,100]},range=ranges[key];if(!range)return;var parsed=Math.max(range[0],Math.min(range[1],Math.round(Number(value)||twChartState.studies[key])));twChartState.studies[key]=parsed;
+  if(twChartState.studies.macdFast>=twChartState.studies.macdSlow)twChartState.studies.macdSlow=Math.min(200,twChartState.studies.macdFast+1);if(twChartState.studies.rsiLower>=twChartState.studies.rsiUpper)twChartState.studies.rsiLower=Math.max(1,twChartState.studies.rsiUpper-1);
+  twSaveStudies();twSyncStudySettings();twRenderIndicators();
+}
+function twSyncIndicatorLabels(){var s=twChartState.studies;twNum('tw-rsi-title','RSI '+s.rsiPeriod);twNum('tw-rsi-zones',s.rsiUpper+' overbought · '+s.rsiLower+' oversold');twNum('tw-macd-title','MACD '+s.macdFast+' · '+s.macdSlow+' · '+s.macdSignal);}
 function twSetColor(key,value){
   if(key.indexOf('ema')===0){var period=key.slice(3);if(twChartState.styles.emas[period])twChartState.styles.emas[period].color=value;}else twChartState.styles[key]=value;
   if(key==='drawing'||key==='fib'){twChartState.drawings.forEach(function(d){if((key==='drawing'&&d.type==='line')||(key==='fib'&&d.type==='fib'))d.color=value;});twSaveDrawings();}
@@ -815,11 +829,13 @@ var twSavedChartType = 'area';
 var twIntervalConfig={
   '1m':{ranges:['1d','5d'],defaultRange:'1d'},'5m':{ranges:['1d','5d','1mo'],defaultRange:'5d'},
   '15m':{ranges:['1d','5d','1mo'],defaultRange:'5d'},'1h':{ranges:['5d','1mo','3mo','1y'],defaultRange:'1mo'},
-  '4h':{ranges:['5d','1mo','3mo','1y'],defaultRange:'3mo'},'1d':{ranges:['1mo','3mo','1y','5y','max'],defaultRange:'1y'}
+  '4h':{ranges:['5d','1mo','3mo','1y'],defaultRange:'3mo'},'1d':{ranges:['1mo','3mo','6mo','1y','2y','5y','10y'],defaultRange:'1y'}
 };
 var twSavedInterval = '5m', twSavedRange = '5d';
 var twSavedVolume = true;
 var twSavedIndicators = {rsi:true,macd:true};
+var twDefaultStudies={rsiPeriod:14,rsiUpper:70,rsiLower:30,macdFast:12,macdSlow:26,macdSignal:9};
+var twSavedStudies=Object.assign({},twDefaultStudies);
 var twDefaultStyles={rsi:'#e7b84b',macd:'#e7b84b',signal:'#6fa8ff',drawing:'#f0b53f',fib:'#f0b53f',drawingWidth:2,emas:{'9':{enabled:true,color:'#f5b942'},'20':{enabled:true,color:'#38d6c5'},'50':{enabled:true,color:'#6fa8ff'},'100':{enabled:false,color:'#c084fc'},'200':{enabled:false,color:'#ff6b7a'}}};
 var twSavedStyles=JSON.parse(JSON.stringify(twDefaultStyles));
 try {
@@ -828,13 +844,14 @@ try {
   var twStoredInterval=localStorage.getItem('tradestaar.chartInterval'),twStoredRange=localStorage.getItem('tradestaar.chartRange');
   if(twIntervalConfig[twStoredInterval])twSavedInterval=twStoredInterval;
   if(twIntervalConfig[twSavedInterval].ranges.indexOf(twStoredRange)>=0)twSavedRange=twStoredRange;
-  else if(!twStoredInterval){var legacy=localStorage.getItem('tradestaar.chartTimeframe'),legacyMap={'1D':['5m','1d'],'1W':['15m','5d'],'1M':['1d','1mo'],'3M':['1d','3mo'],'1Y':['1d','1y'],'ALL':['1d','max']};if(legacyMap[legacy]){twSavedInterval=legacyMap[legacy][0];twSavedRange=legacyMap[legacy][1];}}
+  else if(!twStoredInterval){var legacy=localStorage.getItem('tradestaar.chartTimeframe'),legacyMap={'1D':['5m','1d'],'1W':['15m','5d'],'1M':['1d','1mo'],'3M':['1d','3mo'],'1Y':['1d','1y'],'ALL':['1d','10y']};if(legacyMap[legacy]){twSavedInterval=legacyMap[legacy][0];twSavedRange=legacyMap[legacy][1];}}
   if (localStorage.getItem('tradestaar.chartVolume') === '0') twSavedVolume=false;
   var twStoredIndicators=JSON.parse(localStorage.getItem('tradestaar.chartIndicators')||'null');
   if(twStoredIndicators&&typeof twStoredIndicators==='object') twSavedIndicators={rsi:twStoredIndicators.rsi!==false,macd:twStoredIndicators.macd!==false};
   var storedStyles=JSON.parse(localStorage.getItem('tradestaar.chartStyles')||'null');if(storedStyles&&typeof storedStyles==='object'){Object.keys(twDefaultStyles).forEach(function(key){if(key!=='emas'&&storedStyles[key]!=null)twSavedStyles[key]=storedStyles[key];});Object.keys(twDefaultStyles.emas).forEach(function(period){if(storedStyles.emas&&storedStyles.emas[period])twSavedStyles.emas[period]=Object.assign({},twDefaultStyles.emas[period],storedStyles.emas[period]);});}
+  var storedStudies=JSON.parse(localStorage.getItem('tradestaar.chartStudies')||'null');if(storedStudies&&typeof storedStudies==='object')Object.keys(twDefaultStudies).forEach(function(key){var value=Number(storedStudies[key]);if(isFinite(value))twSavedStudies[key]=Math.round(value);});
 } catch(e) {}
-var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, indicators:twSavedIndicators, styles:twSavedStyles, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
+var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
 
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
 function twChartHideMsg(){ var box=document.getElementById('tw-chart-empty'); if(box) box.classList.add('hidden'); }
@@ -873,7 +890,7 @@ function twInitChart(){
     twChartState.pinnedTime=(twChartState.pinnedTime===key)?null:key;
     if(twChartState.pinnedTime) twShowBar(bar,param.point,true); else twHideTooltip();
   });
-  chart.timeScale().subscribeVisibleTimeRangeChange(function(){ twRenderDrawings(); });
+  chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ twRenderDrawings();twRenderIndicators(); });
   twInitDrawingLayer();
   return true;
 }
@@ -969,10 +986,12 @@ function twDrawFib(ctx,points,a,b,color,width){
 function fitWidth(ctx){return ctx.canvas.width/(window.devicePixelRatio||1);}function fitTextX(ctx,width,labelWidth){return Math.max(4,width-labelWidth-4);}
 
 /* ═══ RSI + MACD indicator canvases ═══ */
-function twEma(values,period){var out=[],k=2/(period+1),ema=null;values.forEach(function(value){ema=ema==null?value:(value*k+ema*(1-k));out.push(ema);});return out;}
+function twEma(values,period){
+  var out=new Array(values.length).fill(null);if(values.length<period)return out;var seed=0;for(var i=0;i<period;i++)seed+=Number(values[i]);var ema=seed/period,k=2/(period+1);out[period-1]=ema;for(var j=period;j<values.length;j++){ema=Number(values[j])*k+ema*(1-k);out[j]=ema;}return out;
+}
 function twRenderEmas(){
   if(!twChartState.bars.length)return;var closes=twChartState.bars.map(function(b){return Number(b.close);});
-  Object.keys(twChartState.emaSeries).forEach(function(period){var values=twEma(closes,Number(period)),series=twChartState.emaSeries[period],style=twChartState.styles.emas[period];series.setData(twChartState.bars.map(function(bar,i){return {time:bar.time,value:values[i]};}));series.applyOptions({color:style.color,visible:!!style.enabled});});
+  Object.keys(twChartState.emaSeries).forEach(function(period){var values=twEma(closes,Number(period)),series=twChartState.emaSeries[period],style=twChartState.styles.emas[period];series.setData(twChartState.bars.map(function(bar,i){return values[i]==null?null:{time:bar.time,value:values[i]};}).filter(Boolean));series.applyOptions({color:style.color,visible:!!style.enabled});});
 }
 function twRsi(values,period){
   var out=new Array(values.length).fill(null);if(values.length<=period)return out;var gain=0,loss=0;
@@ -980,18 +999,19 @@ function twRsi(values,period){
   for(var j=period+1;j<values.length;j++){var diff=values[j]-values[j-1];gain=(gain*(period-1)+Math.max(diff,0))/period;loss=(loss*(period-1)+Math.max(-diff,0))/period;out[j]=loss===0?100:100-(100/(1+gain/loss));}return out;
 }
 function twRenderIndicators(){
-  if(!twChartState.bars.length)return;var closes=twChartState.bars.map(function(b){return Number(b.close);});
-  if(twChartState.indicators.rsi)twDrawRsi(twRsi(closes,14));
-  if(twChartState.indicators.macd){var fast=twEma(closes,12),slow=twEma(closes,26),macd=fast.map(function(v,i){return v-slow[i];}),signal=twEma(macd,9),hist=macd.map(function(v,i){return v-signal[i];});twDrawMacd(macd,signal,hist);}
+  if(!twChartState.bars.length)return;var closes=twChartState.bars.map(function(b){return Number(b.close);}),windowRange=twIndicatorWindow(),s=twChartState.studies;
+  if(twChartState.indicators.rsi)twDrawRsi(twRsi(closes,s.rsiPeriod).slice(windowRange.start,windowRange.end));
+  if(twChartState.indicators.macd){var fast=twEma(closes,s.macdFast),slow=twEma(closes,s.macdSlow),macd=fast.map(function(v,i){return v==null||slow[i]==null?null:v-slow[i];}),first=macd.findIndex(function(v){return v!=null;}),signal=new Array(macd.length).fill(null);if(first>=0){var signalCompact=twEma(macd.slice(first),s.macdSignal);signalCompact.forEach(function(v,i){signal[first+i]=v;});}var hist=macd.map(function(v,i){return v==null||signal[i]==null?null:v-signal[i];});twDrawMacd(macd.slice(windowRange.start,windowRange.end),signal.slice(windowRange.start,windowRange.end),hist.slice(windowRange.start,windowRange.end));}
 }
+function twIndicatorWindow(){var total=twChartState.bars.length,range=twChartState.chart&&twChartState.chart.timeScale().getVisibleLogicalRange?twChartState.chart.timeScale().getVisibleLogicalRange():null;if(!range)return {start:0,end:total};return {start:Math.max(0,Math.floor(range.from)),end:Math.min(total,Math.ceil(range.to)+1)};}
 function twPlotLine(ctx,values,x,y,color,width){ctx.strokeStyle=color;ctx.lineWidth=width||1.5;ctx.beginPath();var started=false;values.forEach(function(v,i){if(v==null||!isFinite(v))return;var px=x(i),py=y(v);if(!started){ctx.moveTo(px,py);started=true;}else ctx.lineTo(px,py);});if(started)ctx.stroke();}
 function twDrawRsi(values){
   var fit=twCanvasContext(document.getElementById('tw-rsi-canvas'));if(!fit)return;var ctx=fit.ctx,pad={l:8,r:8,t:25,b:10},n=values.length,x=function(i){return pad.l+(fit.w-pad.l-pad.r)*(i/Math.max(1,n-1));},y=function(v){return pad.t+(fit.h-pad.t-pad.b)*(1-v/100);};
-  [70,50,30].forEach(function(v){ctx.strokeStyle=v===50?'rgba(255,255,255,.08)':'rgba(240,181,63,.22)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(pad.l,y(v));ctx.lineTo(fit.w-pad.r,y(v));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#65707c';ctx.font='8px ui-monospace,monospace';ctx.fillText(String(v),fit.w-18,y(v)-2);});twPlotLine(ctx,values,x,y,twChartState.styles.rsi,1.7);var last=values.filter(function(v){return v!=null;}).pop();twNum('tw-rsi-value',last==null?'—':last.toFixed(1));
+  var upper=twChartState.studies.rsiUpper,lower=twChartState.studies.rsiLower;ctx.fillStyle='rgba(255,77,69,.055)';ctx.fillRect(pad.l,pad.t,fit.w-pad.l-pad.r,y(upper)-pad.t);ctx.fillStyle='rgba(34,197,139,.055)';ctx.fillRect(pad.l,y(lower),fit.w-pad.l-pad.r,fit.h-pad.b-y(lower));[upper,50,lower].forEach(function(v){ctx.strokeStyle=v===50?'rgba(255,255,255,.08)':'rgba(240,181,63,.28)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(pad.l,y(v));ctx.lineTo(fit.w-pad.r,y(v));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#65707c';ctx.font='8px ui-monospace,monospace';ctx.fillText(String(v),fit.w-18,y(v)-2);});twPlotLine(ctx,values,x,y,twChartState.styles.rsi,1.8);var last=values.filter(function(v){return v!=null;}).pop();twNum('tw-rsi-value',last==null?'—':last.toFixed(1));
 }
 function twDrawMacd(macd,signal,hist){
-  var fit=twCanvasContext(document.getElementById('tw-macd-canvas'));if(!fit)return;var ctx=fit.ctx,pad={l:8,r:8,t:25,b:10},n=macd.length,max=Math.max.apply(null,macd.concat(signal,hist).map(function(v){return Math.abs(v)||0;}))||1,x=function(i){return pad.l+(fit.w-pad.l-pad.r)*(i/Math.max(1,n-1));},y=function(v){return pad.t+(fit.h-pad.t-pad.b)*(1-(v+max)/(2*max));},zero=y(0),barW=Math.max(1,(fit.w-pad.l-pad.r)/Math.max(1,n)*.7);
-  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.beginPath();ctx.moveTo(pad.l,zero);ctx.lineTo(fit.w-pad.r,zero);ctx.stroke();hist.forEach(function(v,i){ctx.fillStyle=v>=0?'rgba(34,197,139,.58)':'rgba(255,77,69,.58)';ctx.fillRect(x(i)-barW/2,Math.min(zero,y(v)),barW,Math.max(1,Math.abs(y(v)-zero)));});twPlotLine(ctx,macd,x,y,twChartState.styles.macd,1.5);twPlotLine(ctx,signal,x,y,twChartState.styles.signal,1.25);var i=n-1;twNum('tw-macd-value',macd[i].toFixed(2)+' · '+signal[i].toFixed(2)+' · '+hist[i].toFixed(2));
+  var fit=twCanvasContext(document.getElementById('tw-macd-canvas'));if(!fit)return;var ctx=fit.ctx,pad={l:8,r:8,t:25,b:10},n=macd.length,finite=macd.concat(signal,hist).filter(function(v){return v!=null&&isFinite(v);}),max=finite.length?(Math.max.apply(null,finite.map(function(v){return Math.abs(v);}))||1):1,x=function(i){return pad.l+(fit.w-pad.l-pad.r)*(i/Math.max(1,n-1));},y=function(v){return pad.t+(fit.h-pad.t-pad.b)*(1-(v+max)/(2*max));},zero=y(0),barW=Math.max(1,(fit.w-pad.l-pad.r)/Math.max(1,n)*.72);
+  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.beginPath();ctx.moveTo(pad.l,zero);ctx.lineTo(fit.w-pad.r,zero);ctx.stroke();hist.forEach(function(v,i){if(v==null)return;ctx.fillStyle=v>=0?'rgba(34,197,139,.62)':'rgba(255,77,69,.62)';ctx.fillRect(x(i)-barW/2,Math.min(zero,y(v)),barW,Math.max(1,Math.abs(y(v)-zero)));});twPlotLine(ctx,macd,x,y,twChartState.styles.macd,1.7);twPlotLine(ctx,signal,x,y,twChartState.styles.signal,1.45);var valid=[];for(var i=n-1;i>=0;i--){if(macd[i]!=null&&signal[i]!=null&&hist[i]!=null){valid=[macd[i],signal[i],hist[i]];break;}}twNum('tw-macd-value',valid.length?valid.map(function(v){return v.toFixed(2);}).join(' · '):'—');
 }
 
 function twTimeKey(time){
@@ -1033,6 +1053,8 @@ function twLoadChart(ticker, interval, range){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(myReq!==twChartState.reqId) return;
+      if(!d||d.ok===false)throw new Error((d&&d.error)||'Market-data provider unavailable');
+      if(d.source_interval&&interval!=='4h'&&d.source_interval!==interval)throw new Error('Feed returned '+d.source_interval+' candles instead of '+interval);
       var bars=(d&&d.bars)||[];
       if(!bars.length){
         twChartState.area.setData([]); twChartState.candle.setData([]); twChartState.vol.setData([]);
@@ -1060,6 +1082,7 @@ function twLoadChart(ticker, interval, range){
       twRenderEmas();
       twOhlcv(bars);
       twEstCost();
+      var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent=interval.toUpperCase()+' · '+range.toUpperCase()+' · '+bars.length.toLocaleString()+' bars · '+(d.session||'regular')+' · '+(d.adjustment||'split-adjusted');
       twChartHideMsg();
     })
     .catch(function(e){ if(myReq===twChartState.reqId) twChartMsg('Chart error',(e&&e.message)||String(e)); });
