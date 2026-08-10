@@ -15,9 +15,10 @@
   .te-alert-grid{display:grid;grid-template-columns:minmax(260px,.75fr) minmax(340px,1.25fr);gap:14px}
   .te-alert-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}.te-alert-form .full{grid-column:1/-1}
   .te-alert-card{display:grid;grid-template-columns:1fr auto;gap:10px;padding:13px 14px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.025)}
+  .te-list-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:0 0 14px}.te-list-guide article{padding:13px 14px;border:1px solid var(--elite-border);border-radius:12px;background:linear-gradient(145deg,rgba(229,185,79,.08),rgba(255,255,255,.018))}.te-list-guide b{display:block;color:var(--elite-gold-bright);font:700 12px var(--font-display);letter-spacing:.08em}.te-list-guide span{display:block;margin-top:4px;color:var(--elite-muted);font-size:11px;line-height:1.45}
   .te-alert-card.hit{border-color:rgba(52,211,153,.55);box-shadow:inset 3px 0 #34d399}.te-alert-card.paused{opacity:.62}
   .te-alert-price{font:700 17px var(--font-mono);color:#f5d66d}.te-alert-actions{display:flex;gap:5px;align-items:center}
-  @media(max-width:720px){.hx-topbar{display:none}.acct-2col,.te-alert-grid{grid-template-columns:1fr}.te-watch-hero{margin-top:2px}.te-watch-hero h1{font-size:25px}.card-hd{padding:13px 14px}.card-bd{padding:14px}.tbl-wrap{display:none}.te-watch-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;padding-bottom:2px}.te-watch-tabs form,.te-watch-tabs button{width:100%;min-width:0}.te-watch-tabs button{overflow:hidden;text-overflow:ellipsis}.te-alert-form{grid-template-columns:1fr}.te-alert-form .full{grid-column:auto}.te-symbol-grid{grid-template-columns:1fr 1fr}.te-alert-card{grid-template-columns:1fr}.te-alert-actions{justify-content:flex-start}}
+  @media(max-width:720px){.hx-topbar{display:none}.acct-2col,.te-alert-grid,.te-list-guide{grid-template-columns:1fr}.te-watch-hero{margin-top:2px}.te-watch-hero h1{font-size:25px}.card-hd{padding:13px 14px}.card-bd{padding:14px}.tbl-wrap{display:none}.te-watch-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;padding-bottom:2px}.te-watch-tabs form,.te-watch-tabs button{width:100%;min-width:0}.te-watch-tabs button{overflow:hidden;text-overflow:ellipsis}.te-alert-form{grid-template-columns:1fr}.te-alert-form .full{grid-column:auto}.te-symbol-grid{grid-template-columns:1fr 1fr}.te-alert-card{grid-template-columns:1fr}.te-alert-actions{justify-content:flex-start}}
 </style>
 
 <section class="te-watch-hero">
@@ -26,11 +27,10 @@
   <div class="faint" style="font-size:13px">Track the names that matter and set your exact price targets.</div>
 </section>
 
-<div class="hx-topbar">
-  <div class="col gap-1">
-    <div class="hx-h1">Watchlists</div>
-    <div class="faint" style="font-size:13px">Manage your scanner lists · the <b class="muted">active</b> list feeds Setups &amp; Terminal</div>
-  </div>
+<div class="te-list-guide" aria-label="Personal watchlist guide">
+  <article><b>BUY &amp; HOLD</b><span>Long-term companies you want to own through normal market noise.</span></article>
+  <article><b>BATTLEFIELD</b><span>Active names at important levels that need close monitoring and a plan.</span></article>
+  <article><b>WATCHING</b><span>Ideas worth following before they earn a place in a strategy list.</span></article>
 </div>
 
 <div class="acct-2col">
@@ -86,8 +86,11 @@
   <!-- Active list tickers -->
   <div class="card"><div class="card-hd">{{ active_wl.name if active_wl else 'Active list' }} · Tickers<span class="badge badge-neutral">{{ active_tickers|length }}</span></div>
     <div class="card-bd col gap-3">
-      <form action="{{ url_for('watchlist_add') }}" method="POST" class="row gap-2" style="margin:0">
+      <form action="{{ url_for('watchlist_add') }}" method="POST" class="row gap-2" style="margin:0;flex-wrap:wrap">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}">
+        <select class="hx-input" name="watchlist_id" aria-label="Destination watchlist" style="min-width:165px">
+          {% for w in all_wls %}<option value="{{ w.id }}" {{ 'selected' if w.id == active_id }}>{{ w.name }}</option>{% endfor %}
+        </select>
         <input class="hx-input" name="tickers" placeholder="ADD TICKERS · e.g. NVDA AMD" autocomplete="off" style="flex:1;text-transform:uppercase;font-family:var(--font-mono)">
         <button class="btn btn-primary btn-sm" type="submit">Add</button>
       </form>

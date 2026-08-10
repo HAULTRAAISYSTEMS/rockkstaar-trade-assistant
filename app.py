@@ -22,7 +22,7 @@ from werkzeug.exceptions import HTTPException
 logger = logging.getLogger(__name__)
 from database import (
     init_db,
-    DEFAULT_WATCHLISTS,
+    DEFAULT_WATCHLISTS, PERSONAL_WATCHLISTS,
     get_setting, set_setting,
     get_user_setting, set_user_setting,
     create_user, get_user_by_id, get_user_by_username,
@@ -65,6 +65,7 @@ from news_fetcher import CATALYST_CATEGORIES as _CAT_DEFS, freshness_label as _f
 import scanner as _scanner
 import intel_engine as _intel
 import schwab as _schwab
+from watchlist_utils import parse_watchlist_symbols
 _mkt = None  # set below if market_engine is available
 try:
     import market_engine as _mkt
@@ -3534,17 +3535,29 @@ def _onboard_ticker_bg(ticker: str) -> None:
 
 @app.route("/watchlist/add", methods=["POST"])
 def watchlist_add():
-    """Add one or more tickers to the active watchlist."""
-    wl_id  = get_active_wl_id()
+    """Add one or more tickers to an owned list (active list by default)."""
+    uid = current_user_id()
+    owned_wls = {w["id"]: w for w in get_all_watchlists(uid)}
+    requested_id = request.form.get("watchlist_id", "")
+    wl_id = int(requested_id) if requested_id.isdigit() and int(requested_id) in owned_wls else get_active_wl_id()
     raw    = request.form.get("tickers", "")
     queued = []
-    for t in re.split(r"[\s,]+", raw.upper()):
-        t = t.strip()
-        if not (t and re.match(r'^[A-Z]{1,5}$', t) and wl_id):
+    failed = []
+    already = []
+    existing = set(get_watchlist_stocks(wl_id)) if wl_id else set()
+    for t in parse_watchlist_symbols(raw):
+        if not wl_id:
+            failed.append(t)
+            continue
+        if t in existing:
+            already.append(t)
             continue
         # Claim the watchlist slot + insert a Loading placeholder so the
         # ticker appears on the dashboard immediately.
         add_ticker_to_watchlist(wl_id, t)
+        if t not in set(get_watchlist_stocks(wl_id)):
+            failed.append(t)
+            continue
         upsert_loading_placeholder(t)
         logger.info("watchlist_add  ticker=%s  wl_id=%s  stage=placeholder_queued", t, wl_id)
         # Fire the two-stage onboarding pipeline in a background thread so the
@@ -3557,6 +3570,9 @@ def watchlist_add():
         ).start()
         queued.append(t)
 
+    if wl_id:
+        session["active_wl_id"] = wl_id
+
     if queued:
         flash(
             f"Adding {', '.join(queued)}… "
@@ -3565,8 +3581,12 @@ def watchlist_add():
             "success",
         )
         logger.info("watchlist_add  queued=%s  wl_id=%s", queued, wl_id)
-    else:
-        flash("No valid tickers found. Use 1–5 letter stock symbols.", "error")
+    if already:
+        flash(f"Already in {owned_wls.get(wl_id, {}).get('name', 'this list')}: {', '.join(already)}.", "info")
+    if failed:
+        flash(f"Could not add {', '.join(failed)}. Please try again.", "error")
+    if not queued and not already and not failed:
+        flash("No valid tickers found. Use symbols such as NVDA, BRK.B, or BF-B.", "error")
     return _wl_next()
 
 
@@ -4512,7 +4532,8 @@ def watchlists_page():
         "watchlists.html",
         all_wls=all_wls, active_id=active_id, active_wl=active_wl,
         wl_counts=wl_counts, active_tickers=active_tickers,
-        price_alerts=price_alerts,
+        price_alerts=price_alerts, personal_watchlists=PERSONAL_WATCHLISTS,
+        automatic_watchlists=DEFAULT_WATCHLISTS,
     )
 
 
@@ -4653,6 +4674,7 @@ def terminal():
     _get_mkt_ctx / _get_schwab_data). No new API calls, no logic changes.
     """
     wl_id     = get_active_wl_id()
+    active_wl = get_watchlist_by_id(wl_id) if wl_id else None
     watchlist = get_watchlist_stocks(wl_id) if wl_id else []
 
     # Seed a starter watchlist the first time the Terminal is opened empty.
@@ -4724,6 +4746,7 @@ def terminal():
     return render_template(
         "terminal.html",
         stocks=valid,
+        active_wl=active_wl,
         orb_session=get_orb_session_banner(),
         mkt=mkt_ctx,
         acct=acct,

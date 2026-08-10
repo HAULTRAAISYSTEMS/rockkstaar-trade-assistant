@@ -265,6 +265,14 @@ DEFAULT_WATCHLISTS = [
     "AVOID / BLOCKED",
 ]
 
+# Personal lists are intentionally separate from the automatic setup buckets.
+# Auto-classification never moves a ticker into or out of these lists.
+PERSONAL_WATCHLISTS = [
+    "BUY & HOLD",
+    "BATTLEFIELD",
+    "WATCHING",
+]
+
 
 # ---------------------------------------------------------------------------
 # App settings helpers
@@ -1004,6 +1012,30 @@ def init_db():
             (admin_id, "TREND WATCH", now_iso),
         )
 
+    # One-time starter-list migration for existing accounts. The marker means
+    # a user can later rename or delete a personal list without it reappearing.
+    for _user in cursor.execute("SELECT id FROM users").fetchall():
+        _uid = _user["id"]
+        _starter_key = "personal_watchlists_v1_seeded"
+        if cursor.execute(
+            "SELECT 1 FROM user_settings WHERE user_id = ? AND key = ?",
+            (_uid, _starter_key),
+        ).fetchone():
+            continue
+        for _name in PERSONAL_WATCHLISTS:
+            if not cursor.execute(
+                "SELECT 1 FROM watchlists WHERE user_id = ? AND name = ?",
+                (_uid, _name),
+            ).fetchone():
+                cursor.execute(
+                    "INSERT INTO watchlists (user_id, name, created_at) VALUES (?, ?, ?)",
+                    (_uid, _name, now_iso),
+                )
+        cursor.execute(
+            "INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)",
+            (_uid, _starter_key, "1"),
+        )
+
     conn.commit()
     conn.close()
 
@@ -1131,14 +1163,14 @@ def set_user_setting(user_id: int, key: str, value: str) -> None:
 # ---------------------------------------------------------------------------
 
 def ensure_user_watchlists(user_id: int) -> None:
-    """Seed the 5 default watchlists for a user if they have none yet."""
+    """Seed automatic buckets and personal starter lists for a new account."""
     conn = get_db()
     count = conn.execute(
         "SELECT COUNT(*) AS cnt FROM watchlists WHERE user_id = ?", (user_id,)
     ).fetchone()["cnt"]
     if count == 0:
         now_iso = datetime.now().isoformat()
-        for name in DEFAULT_WATCHLISTS:
+        for name in DEFAULT_WATCHLISTS + PERSONAL_WATCHLISTS:
             existing = conn.execute(
                 "SELECT 1 FROM watchlists WHERE user_id = ? AND name = ?",
                 (user_id, name)
@@ -1157,6 +1189,10 @@ def ensure_user_watchlists(user_id: int) -> None:
                 "INSERT INTO watchlists (user_id, name, created_at) VALUES (?, ?, ?)",
                 (user_id, "TREND WATCH", now_iso)
             )
+        conn.execute(
+            "INSERT OR IGNORE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)",
+            (user_id, "personal_watchlists_v1_seeded", "1"),
+        )
         conn.commit()
     conn.close()
 

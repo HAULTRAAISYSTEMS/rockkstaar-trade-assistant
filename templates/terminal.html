@@ -46,6 +46,8 @@
 /* ── LEFT: watchlist ── */
 .tw-add-btn { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius: var(--r-sm); border:1px solid var(--border-subtle); background: var(--ink-750); color: var(--orange-400); font-size:15px; line-height:1; cursor:pointer; transition: all var(--dur-fast) var(--ease-out); }
 .tw-add-btn:hover { border-color: var(--orange-500); color: var(--orange-500); }
+.tw-manage-link { color:var(--elite-muted); font:700 9px var(--font-display); letter-spacing:.06em; text-decoration:none; text-transform:uppercase; }
+.tw-manage-link:hover { color:var(--elite-gold-bright); }
 .tw-add-row { display:none; gap:6px; padding: var(--sp-2) var(--sp-3); border-bottom:1px solid var(--border-subtle); }
 .tw-add-row.open { display:flex; }
 .tw-add-input { flex:1; min-width:0; background: var(--surface-inset); border:1px solid var(--border-subtle); border-radius: var(--r-sm); color: var(--text-hi); font-family: var(--font-mono); font-size: var(--fs-sm); padding: 6px 9px; outline:none; text-transform:uppercase; }
@@ -291,14 +293,15 @@
     <!-- LEFT: Watchlist -->
     <div class="tw-panel">
       <div class="tw-panel-hd">
-        <h3>Watchlist</h3>
+        <h3>{{ active_wl.name if active_wl else 'Watchlist' }}</h3>
         <span style="display:flex;align-items:center;gap:8px;">
+          <a class="tw-manage-link" href="{{ url_for('watchlists_page') }}">Manage</a>
           <span class="tw-count">{{ stocks|length }}</span>
           <button class="tw-add-btn" title="Add symbol" onclick="twToggleAdd()">+</button>
         </span>
       </div>
       <form class="tw-add-row" id="tw-add-row" onsubmit="twAddSymbol(event)">
-        <input class="tw-add-input" id="tw-add-input" type="text" placeholder="ADD SYMBOL" autocomplete="off" maxlength="6">
+        <input class="tw-add-input" id="tw-add-input" type="text" placeholder="ADD SYMBOL" autocomplete="off" maxlength="10">
         <button class="tw-add-go" type="submit">ADD</button>
       </form>
       <div class="tw-wl">
@@ -678,7 +681,7 @@ function twAddSymbol(ev){
   if (ev) ev.preventDefault();
   var inp=document.getElementById('tw-add-input');
   var t=(inp.value||'').trim().toUpperCase();
-  if(!/^[A-Z]{1,6}$/.test(t)) return;
+  if(!/^[A-Z][A-Z0-9.-]{0,9}$/.test(t)) return;
   var m=document.querySelector('meta[name="csrf-token"]');
   var tok=m?m.getAttribute('content'):'';
   fetch('/watchlist/add',{method:'POST',
