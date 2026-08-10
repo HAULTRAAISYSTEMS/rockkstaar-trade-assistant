@@ -741,6 +741,7 @@ function twInterval(btn){
 function twRange(value){twChartState.range=value;try{localStorage.setItem('tradestaar.chartRange',value);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);}
 function twPopulateRanges(){
   var select=document.getElementById('tw-range'),config=twIntervalConfig[twChartState.interval];if(!select||!config)return;select.innerHTML='';
+  if(config.ranges.indexOf(twChartState.range)<0)twChartState.range=config.defaultRange;
   var labels={"1d":"1 Day","5d":"5 Days","1mo":"1 Month","3mo":"3 Months","6mo":"6 Months","1y":"1 Year","2y":"2 Years","5y":"5 Years","10y":"10 Years"};
   config.ranges.forEach(function(value){var option=document.createElement('option');option.value=value;option.textContent=labels[value]||value;option.selected=value===twChartState.range;select.appendChild(option);});
 }
@@ -869,6 +870,7 @@ try {
   var storedStyles=JSON.parse(localStorage.getItem('tradestaar.chartStyles')||'null');if(storedStyles&&typeof storedStyles==='object'){Object.keys(twDefaultStyles).forEach(function(key){if(key!=='emas'&&storedStyles[key]!=null)twSavedStyles[key]=storedStyles[key];});Object.keys(twDefaultStyles.emas).forEach(function(period){if(storedStyles.emas&&storedStyles.emas[period])twSavedStyles.emas[period]=Object.assign({},twDefaultStyles.emas[period],storedStyles.emas[period]);});}
   var storedStudies=JSON.parse(localStorage.getItem('tradestaar.chartStudies')||'null');if(storedStudies&&typeof storedStudies==='object')Object.keys(twDefaultStudies).forEach(function(key){var value=Number(storedStudies[key]);if(isFinite(value))twSavedStudies[key]=Math.round(value);});
 } catch(e) {}
+if(twIntervalConfig[twSavedInterval].ranges.indexOf(twSavedRange)<0)twSavedRange=twIntervalConfig[twSavedInterval].defaultRange;
 if(['4h','1d'].indexOf(twSavedInterval)>=0)twSavedExtended=false;
 var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
 
@@ -1074,6 +1076,7 @@ function twVolumeColor(bar){if(bar.session==='premarket')return bar.close>=bar.o
 
 function twLoadChart(ticker, interval, range){
   if(!ticker) return;
+  var intervalConfig=twIntervalConfig[interval];if(!intervalConfig)return;if(intervalConfig.ranges.indexOf(range)<0){range=intervalConfig.defaultRange;twChartState.range=range;twPopulateRanges();try{localStorage.setItem('tradestaar.chartRange',range);}catch(e){}}
   if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load. Quotes, %, and levels above are still live.'); return; }
   twChartState.ticker=ticker; twChartState.interval=interval;twChartState.range=range;
   var myReq=++twChartState.reqId;
