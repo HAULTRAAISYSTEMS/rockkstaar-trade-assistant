@@ -52,7 +52,7 @@ def _timestamp(value: Any) -> int | None:
         return None
 
 
-def _parse_bar(raw: dict) -> dict | None:
+def _parse_bar(raw: dict, source: str = "alpaca_boats") -> dict | None:
     timestamp = _timestamp(raw.get("t"))
     try:
         bar = {
@@ -62,11 +62,36 @@ def _parse_bar(raw: dict) -> dict | None:
             "low": float(raw["l"]),
             "close": float(raw["c"]),
             "volume": int(raw.get("v") or 0),
-            "source": "alpaca_boats",
+            "source": source,
         }
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
     return bar if timestamp and min(bar["open"], bar["high"], bar["low"], bar["close"]) > 0 else None
+
+
+def _fetch_basic_overnight_latest(ticker: str, headers: dict[str, str]) -> dict:
+    """Return Alpaca Basic's derived latest overnight bar when BOATS is gated.
+
+    The free ``overnight`` feed does not expose historical candles.  Keeping its
+    latest verified bar separate from BOATS avoids implying that a complete
+    overnight history was loaded.
+    """
+    try:
+        response = requests.get(
+            f"{_BASE_URL}/{ticker}/bars/latest",
+            params={"feed": "overnight"},
+            headers=headers,
+            timeout=8,
+        )
+        if response.status_code != 200:
+            return {"bar": None, "http_status": response.status_code}
+        payload = response.json()
+        return {
+            "bar": _parse_bar(payload.get("bar") or {}, "alpaca_overnight"),
+            "http_status": 200,
+        }
+    except (requests.RequestException, ValueError):
+        return {"bar": None, "http_status": None}
 
 
 def fetch_overnight_bars(ticker: str, interval: str, range_str: str) -> dict:
@@ -100,7 +125,35 @@ def fetch_overnight_bars(ticker: str, interval: str, range_str: str) -> dict:
             f"{_BASE_URL}/{ticker}/bars", params=params, headers=headers, timeout=8
         )
         if response.status_code != 200:
-            state = "unauthorized" if response.status_code in {401, 403} else "unavailable"
+            if response.status_code == 403:
+                fallback = _fetch_basic_overnight_latest(ticker, headers)
+                if fallback["bar"]:
+                    return {
+                        "bars": [fallback["bar"]],
+                        "status": {
+                            **status,
+                            "state": "limited",
+                            "message": (
+                                "Basic overnight feed: latest verified print only. "
+                                "Full BOATS candle history requires Algo Trader Plus."
+                            ),
+                            "bar_count": 1,
+                            "historical": False,
+                        },
+                    }
+                return {
+                    "bars": [],
+                    "status": {
+                        **status,
+                        "state": "restricted",
+                        "message": (
+                            "BOATS history requires Algo Trader Plus; Alpaca's free "
+                            "latest overnight feed is unavailable right now."
+                        ),
+                        "historical": False,
+                    },
+                }
+            state = "unauthorized" if response.status_code == 401 else "unavailable"
             return {
                 "bars": [],
                 "status": {**status, "state": state, "message": f"Alpaca BOATS returned HTTP {response.status_code}."},

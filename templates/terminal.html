@@ -349,7 +349,7 @@
 
         <div class="tw-chart-toolbar">
           <div class="tw-interval-wrap">
-            <span class="tw-control-label">Interval</span>
+            <span class="tw-control-label">Interval · Eastern Time</span>
             <div class="tw-tf">
             {% for value, label in [('1m','1m'),('5m','5m'),('15m','15m'),('1h','1H'),('4h','4H'),('1d','1D')] %}
             <button class="tw-tf-btn {{ 'active' if value == '5m' }}" data-interval="{{ value }}" onclick="twInterval(this)">{{ label }}</button>
@@ -879,6 +879,16 @@ var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{},
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
 function twChartHideMsg(){ var box=document.getElementById('tw-chart-empty'); if(box) box.classList.add('hidden'); }
 
+var twEasternDateTime=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'});
+var twEasternDate=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric'});
+var twEasternClock=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit'});
+function twChartDate(time){
+  if(time&&typeof time==='object'&&time.year)return new Date(Date.UTC(time.year,(time.month||1)-1,time.day||1,12));
+  var seconds=Number(time);return isFinite(seconds)?new Date(seconds*1000):null;
+}
+function twEasternTimeLabel(time){var date=twChartDate(time);return date?twEasternDateTime.format(date):'';}
+function twEasternTickLabel(time,tickMarkType){var date=twChartDate(time);if(!date)return'';return Number(tickMarkType)<=2?twEasternDate.format(date):twEasternClock.format(date);}
+
 function twInitChart(){
   var el=document.getElementById('tw-chart');
   if(!el || !window.LightweightCharts) return false;
@@ -888,7 +898,8 @@ function twInitChart(){
     layout:{ background:{type:'solid',color:'transparent'}, textColor:'#AEB7C2', fontFamily:"'IBM Plex Mono', ui-monospace, monospace", fontSize:11 },
     grid:{ vertLines:{color:'rgba(255,255,255,0.04)'}, horzLines:{color:'rgba(255,255,255,0.04)'} },
     rightPriceScale:{ borderColor:'rgba(255,255,255,0.08)' },
-    timeScale:{ borderColor:'rgba(255,255,255,0.08)', timeVisible:true, secondsVisible:false },
+    localization:{locale:'en-US',timeFormatter:twEasternTimeLabel},
+    timeScale:{ borderColor:'rgba(255,255,255,0.08)', timeVisible:true, secondsVisible:false,tickMarkFormatter:twEasternTickLabel },
     crosshair:{ mode:LC.CrosshairMode.Normal,
       vertLine:{color:'rgba(255,122,24,0.55)',labelBackgroundColor:'#FF7A18'},
       horzLine:{color:'rgba(255,122,24,0.55)',labelBackgroundColor:'#FF7A18'} }
