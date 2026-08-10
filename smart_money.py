@@ -32,6 +32,9 @@ _OFFICIAL_CONGRESS_HOSTS = {
 }
 _cache: dict[str, tuple[float, object]] = {}
 _cache_lock = threading.Lock()
+_sec_request_lock = threading.Lock()
+_sec_last_request = 0.0
+_SEC_MIN_INTERVAL = 0.12  # stay below the SEC's published 10 requests/second ceiling
 
 
 def _cached(key: str, ttl: int, loader):
@@ -46,10 +49,38 @@ def _cached(key: str, ttl: int, loader):
     return value
 
 
+def _sec_get(url: str, timeout: int = 12):
+    """Make a globally paced SEC request across the bounded worker pool."""
+    global _sec_last_request
+    with _sec_request_lock:
+        wait = _SEC_MIN_INTERVAL - (time.monotonic() - _sec_last_request)
+        if wait > 0:
+            time.sleep(wait)
+        response = requests.get(url, headers=SEC_HEADERS, timeout=timeout)
+        _sec_last_request = time.monotonic()
+    return response
+
+
 def _get_json(url: str, timeout: int = 12):
-    response = requests.get(url, headers=SEC_HEADERS, timeout=timeout)
+    response = _sec_get(url, timeout=timeout)
     response.raise_for_status()
     return response.json()
+
+
+def _filing_urls(cik: str, accession: str, primary_document: str) -> tuple[str, str]:
+    """Return raw XML and human-readable SEC filing index URLs.
+
+    SEC submission metadata may prefix a primary document with an ``xsl.../``
+    display directory. That URL returns rendered HTML, not ownership XML.
+    """
+    cik_plain = str(int(cik))
+    accession_plain = accession.replace("-", "")
+    raw_name = str(primary_document).rsplit("/", 1)[-1]
+    base = f"https://www.sec.gov/Archives/edgar/data/{cik_plain}/{accession_plain}"
+    return (
+        f"{base}/{raw_name}",
+        f"{base}/{accession}-index.html",
+    )
 
 
 def _ticker_ciks() -> dict[str, str]:
@@ -156,10 +187,8 @@ def fetch_sec_form4(tickers, limit: int = 30) -> tuple[list[dict], dict]:
                     accession = recent["accessionNumber"][idx]
                     primary = recent["primaryDocument"][idx]
                     filed_at = recent["filingDate"][idx]
-                    accession_plain = accession.replace("-", "")
-                    cik_plain = str(int(cik))
-                    filing_url = f"https://www.sec.gov/Archives/edgar/data/{cik_plain}/{accession_plain}/{primary}"
-                    response = requests.get(filing_url, headers=SEC_HEADERS, timeout=12)
+                    raw_url, filing_url = _filing_urls(cik, accession, primary)
+                    response = _sec_get(raw_url, timeout=12)
                     response.raise_for_status()
                     ticker_rows.extend(_transaction_rows(response.content, ticker, filing_url, filed_at))
                     filing_count += 1
@@ -184,11 +213,21 @@ def fetch_sec_form4(tickers, limit: int = 30) -> tuple[list[dict], dict]:
 
     try:
         rows, errors = _cached("sec:form4:" + ",".join(clean), 15 * 60, load)
+        available = errors < len(clean)
+        partial = 0 < errors < len(clean)
+        if not available:
+            message = "The SEC filing service could not refresh this watchlist. Try again shortly."
+        elif not rows:
+            message = "No qualifying transactions were found in the latest verified Form 4 filings."
+        else:
+            message = "SEC filings may appear after the underlying transaction and can be amended."
         return rows, {
-            "available": errors < len(clean),
-            "partial": bool(errors),
+            "available": available,
+            "partial": partial,
+            "checked_tickers": len(clean),
+            "failed_tickers": errors,
             "updated_at": datetime.now(timezone.utc).isoformat(),
-            "message": "SEC filings may appear after the underlying transaction and can be amended.",
+            "message": message,
         }
     except requests.RequestException:
         return [], {"available": False, "message": "The SEC filing service is temporarily unavailable."}

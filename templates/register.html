@@ -285,6 +285,7 @@
       {% endif %}
 
       <form method="POST" action="/register" autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div style="display:flex;flex-direction:column;gap:20px;">
 
           <div class="login-field">

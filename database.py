@@ -847,9 +847,12 @@ def init_db():
     if admin_count == 0:
         _admin_pass = (
             os.environ.get("APP_PASSWORD") or
-            os.environ.get("LOGIN_PASS") or
-            "changeme"
+            os.environ.get("LOGIN_PASS")
         )
+        if not _admin_pass:
+            raise RuntimeError(
+                "APP_PASSWORD is required when provisioning the first administrator account."
+            )
         _admin_hash = generate_password_hash(_admin_pass)
         _now_u = datetime.now().isoformat()
         cursor.execute(

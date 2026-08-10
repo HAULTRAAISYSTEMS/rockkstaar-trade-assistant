@@ -34,6 +34,21 @@ class TestSecForm4Parser(unittest.TestCase):
         rows = smart_money._transaction_rows(xml, "TEST", "https://www.sec.gov/filing", "2026-08-03")
         self.assertEqual(rows[0]["kind"], "OTHER")
 
+    def test_xsl_primary_document_is_normalized_to_raw_xml(self):
+        raw_url, filing_url = smart_money._filing_urls(
+            "0001326801",
+            "0000950103-26-011964",
+            "xslF345X06/ownership.xml",
+        )
+        self.assertEqual(
+            raw_url,
+            "https://www.sec.gov/Archives/edgar/data/1326801/000095010326011964/ownership.xml",
+        )
+        self.assertEqual(
+            filing_url,
+            "https://www.sec.gov/Archives/edgar/data/1326801/000095010326011964/0000950103-26-011964-index.html",
+        )
+
 
 class TestCongressVerification(unittest.TestCase):
     def tearDown(self):

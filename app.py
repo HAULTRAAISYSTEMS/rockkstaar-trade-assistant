@@ -73,6 +73,17 @@ except Exception:
     _MKT_AVAILABLE = False
 
 app = Flask(__name__)
+_is_production = bool(
+    os.environ.get("RENDER")
+    or os.environ.get("DATABASE_URL")
+    or os.environ.get("APP_ENV", "").lower() == "production"
+)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=_is_production,
+    MAX_CONTENT_LENGTH=2 * 1024 * 1024,
+)
 
 # ---------------------------------------------------------------------------
 # Secret key — always supplied by the deployment environment.
@@ -115,6 +126,18 @@ def _auth_required() -> bool:
     """Return True if the users table has at least one user (auth is active)."""
     try:
         return bool(get_all_users())
+    except Exception:
+        # A production database outage must never silently turn authentication off.
+        return _is_production
+
+
+def _registration_enabled() -> bool:
+    """Require explicit opt-in before exposing public self-registration."""
+    allow = os.environ.get("ALLOW_REGISTRATION", "").strip().lower()
+    if allow in {"1", "true", "yes", "on"}:
+        return True
+    try:
+        return not bool(get_all_users())
     except Exception:
         return False
 
@@ -249,7 +272,15 @@ def et_time_filter(value: str | None) -> str:
 # still has this route and Render's health check succeeds.
 @app.route("/health")
 def health():
-    return jsonify({"ok": True}), 200
+    try:
+        from database import get_db
+        conn = get_db()
+        conn.execute("SELECT 1")
+        conn.close()
+        return jsonify({"ok": True, "database": "ready"}), 200
+    except Exception:
+        logger.exception("health check failed")
+        return jsonify({"ok": False, "database": "unavailable"}), 503
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +291,9 @@ def _add_security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if _is_production:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
 
 
@@ -400,6 +434,8 @@ try:
     init_db()
 except Exception as _init_err:
     logger.error("init_db failed at startup: %s — will retry on first request", _init_err)
+    if _is_production:
+        raise
 
 # Start the background momentum scanner daemon (no-op if already running).
 try:
@@ -6809,7 +6845,6 @@ def api_opportunity_refresh():
 # ---------------------------------------------------------------------------
 
 @app.route("/login", methods=["GET", "POST"])
-@csrf.exempt
 def login_page():
     """Multi-user login page."""
     if session.get("user_id"):
@@ -6832,7 +6867,8 @@ def login_page():
         error = "Invalid username or password."
     return render_template("login.html",
                            next=request.args.get("next", ""),
-                           error=error)
+                           error=error,
+                           registration_enabled=_registration_enabled())
 
 
 @app.route("/logout", methods=["POST"])
@@ -6843,9 +6879,11 @@ def logout():
 
 
 @app.route("/register", methods=["GET", "POST"])
-@csrf.exempt
 def register_page():
     """Self-registration page. Creates a regular (non-admin) user account."""
+    if not _registration_enabled():
+        return render_template("login.html", next="", error="Registration is disabled.",
+                               registration_enabled=False), 403
     if session.get("user_id"):
         return redirect(url_for("liquidity_page"))
     error = None
@@ -6863,8 +6901,8 @@ def register_page():
             error = "Username must be 50 characters or fewer."
         elif not entered_username.replace("_", "").replace("-", "").isalnum():
             error = "Username may only contain letters, numbers, hyphens, and underscores."
-        elif len(password) < 8:
-            error = "Password must be at least 8 characters."
+        elif len(password) < 12:
+            error = "Password must be at least 12 characters."
         elif password != confirm:
             error = "Passwords do not match."
         elif get_user_by_username(entered_username):
@@ -6903,8 +6941,8 @@ def admin_user_create():
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "").strip()
     is_admin = bool(request.form.get("is_admin"))
-    if not username or not password:
-        flash("Username and password are required.", "error")
+    if not username or len(password) < 12:
+        flash("Username and a password of at least 12 characters are required.", "error")
         return redirect(url_for("admin_users"))
     try:
         create_user(username, password, is_admin=is_admin)
@@ -6933,8 +6971,8 @@ def admin_user_delete(uid):
 def admin_user_password(uid):
     """Admin: change a user's password."""
     new_password = request.form.get("password", "").strip()
-    if not new_password:
-        flash("Password cannot be empty.", "error")
+    if len(new_password) < 12:
+        flash("Password must be at least 12 characters.", "error")
         return redirect(url_for("admin_users"))
     update_user_password(uid, new_password)
     flash("Password updated.", "success")

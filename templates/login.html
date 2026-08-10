@@ -299,6 +299,7 @@
       {% endif %}
 
       <form method="POST" action="/login" autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="next" value="{{ next }}">
 
         <div style="display:flex;flex-direction:column;gap:20px;">
@@ -339,12 +340,12 @@
         </div>
       </form>
 
-      <div class="login-footer">
+      {% if registration_enabled %}<div class="login-footer">
         <a href="/register" style="color:var(--cyan);text-decoration:none;opacity:0.75;transition:opacity 0.15s;"
            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.75'">
           Create an account →
         </a>
-      </div>
+      </div>{% endif %}
 
     </div>
   </div>
