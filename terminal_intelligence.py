@@ -91,6 +91,57 @@ def normalize_ohlcv_data(data: dict | None) -> list[dict]:
     return [bars_by_time[timestamp] for timestamp in sorted(bars_by_time)]
 
 
+def annotate_market_sessions(
+    bars: list[dict], timezone_name: str = "America/New_York"
+) -> list[dict]:
+    """Label intraday bars as premarket, regular, or after-hours."""
+    try:
+        market_tz = ZoneInfo(timezone_name)
+    except (KeyError, ValueError):
+        market_tz = ZoneInfo("America/New_York")
+    annotated = []
+    for source in bars:
+        bar = dict(source)
+        local = datetime.fromtimestamp(bar["time"], timezone.utc).astimezone(market_tz)
+        minutes = local.hour * 60 + local.minute
+        if minutes < 9 * 60 + 30:
+            session = "premarket"
+        elif minutes < 16 * 60:
+            session = "regular"
+        else:
+            session = "after_hours"
+        bar["session"] = session
+        bar["market_date"] = local.date().isoformat()
+        annotated.append(bar)
+    return annotated
+
+
+def summarize_extended_sessions(bars: list[dict]) -> dict:
+    """Return the latest verified pre/post-market prints and comparisons."""
+    last_regular = None
+    result: dict[str, Any] = {"premarket": None, "after_hours": None, "latest": None}
+    for bar in bars:
+        session = bar.get("session", "regular")
+        if session == "regular":
+            last_regular = bar
+            continue
+        row = {
+            "price": bar["close"],
+            "time": bar["time"],
+            "date": bar.get("market_date"),
+            "volume": bar.get("volume", 0),
+            "reference_close": last_regular["close"] if last_regular else None,
+        }
+        if row["reference_close"]:
+            row["change_pct"] = round(
+                (row["price"] - row["reference_close"]) / row["reference_close"] * 100,
+                2,
+            )
+        result[session] = row
+        result["latest"] = {**row, "session": session}
+    return result
+
+
 def _news_row(raw: Any, fallback_ticker: str = "") -> dict | None:
     if isinstance(raw, str):
         headline = raw.strip()

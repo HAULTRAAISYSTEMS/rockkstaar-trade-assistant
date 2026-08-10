@@ -342,6 +342,7 @@ def _fetch_ohlcv_via_chart_api(
     ticker: str,
     interval: str = "1d",
     range_str: str = "1y",
+    include_prepost: bool = False,
 ) -> dict | None:
     """
     Fetch OHLCV bars directly from Yahoo Finance's chart API.
@@ -357,6 +358,7 @@ def _fetch_ohlcv_via_chart_api(
                 Use "1y" for daily EMAs/fibs (≥252 bars for 200 EMA).
                 Use "30d" for hourly 4H-proxy bars.
                 Use "5d" for 15m confirmation bars.
+    include_prepost : include exchange-reported premarket and after-hours bars.
 
     Returns a dict:
         timestamps  list[int]   — Unix timestamps
@@ -379,7 +381,12 @@ def _fetch_ohlcv_via_chart_api(
         ),
         "Accept": "application/json",
     }
-    params = {"interval": interval, "range": range_str}
+    params = {
+        "interval": interval,
+        "range": range_str,
+        "includePrePost": "true" if include_prepost else "false",
+        "events": "div,splits",
+    }
 
     for url in _CHART_URLS:
         try:

@@ -1,9 +1,28 @@
 import unittest
 
-from terminal_intelligence import aggregate_ohlcv_bars, normalize_ohlcv_data
+from terminal_intelligence import (
+    aggregate_ohlcv_bars,
+    annotate_market_sessions,
+    normalize_ohlcv_data,
+    summarize_extended_sessions,
+)
 
 
 class TerminalChartAggregationTests(unittest.TestCase):
+    def test_extended_hours_are_labeled_and_summarized(self):
+        # 08:00, 10:00 and 17:00 New York on the same winter trading day.
+        base = 1767618000
+        bars = [
+            {"time": base, "open": 99, "high": 101, "low": 98, "close": 100, "volume": 5},
+            {"time": base + 7200, "open": 100, "high": 102, "low": 99, "close": 101, "volume": 10},
+            {"time": base + 32400, "open": 101, "high": 104, "low": 100, "close": 103, "volume": 7},
+        ]
+        labeled = annotate_market_sessions(bars)
+        self.assertEqual([row["session"] for row in labeled], ["premarket", "regular", "after_hours"])
+        summary = summarize_extended_sessions(labeled)
+        self.assertEqual(summary["after_hours"]["reference_close"], 101)
+        self.assertEqual(summary["latest"]["session"], "after_hours")
+
     def test_normalization_sorts_deduplicates_and_rejects_invalid_candles(self):
         data = {
             "timestamps": [2, 1, 2, 3],

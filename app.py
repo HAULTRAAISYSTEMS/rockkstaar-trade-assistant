@@ -4723,6 +4723,9 @@ def api_terminal_candles(ticker):
     """Return OHLCV bars for the terminal chart from the existing data feed."""
     requested_interval = (request.args.get("interval") or "").lower()
     legacy_tf = (request.args.get("tf") or "").upper()
+    session_mode = (request.args.get("session") or "regular").lower()
+    if session_mode not in {"regular", "extended"}:
+        return jsonify({"ok": False, "error": "unsupported market session"}), 400
     if requested_interval:
         config = _TERMINAL_INTERVALS.get(requested_interval)
         if not config:
@@ -4738,31 +4741,50 @@ def api_terminal_candles(ticker):
             return jsonify({"ok": False, "error": "unsupported timeframe"}), 400
         fetch_interval, range_str = _TERMINAL_TF_MAP[legacy_tf]
         interval = fetch_interval
+    if session_mode == "extended" and interval not in {"1m", "5m", "15m", "1h"}:
+        return jsonify({"ok": False,
+                        "error": "extended hours require an intraday interval"}), 400
     ticker = (ticker or "").upper().strip()
     if not ticker or len(ticker) > 12:
         return jsonify({"ok": False, "error": "bad ticker"}), 400
 
     ttl = 60 if interval in {"1m", "5m", "15m"} else 120 if interval in {"1h", "4h"} else 600
-    key = (ticker, interval, range_str)
+    key = (ticker, interval, range_str, session_mode)
     cached = _TERMINAL_CANDLE_CACHE.get(key)
     if cached and (_time.time() - cached["ts"]) < ttl:
         return jsonify({"ok": True, "ticker": ticker, "tf": legacy_tf or None,
                         "interval": interval,
                         "source_interval": cached.get("source_interval", fetch_interval),
-                        "session": "regular", "adjustment": "split-adjusted",
+                        "session": session_mode, "adjustment": "split-adjusted",
                         "range": range_str,
                         "bars": cached["bars"], "cached": True,
+                        "extended_summary": cached.get("extended_summary"),
                         "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
 
     data = None
     try:
         from data_fetcher import _fetch_ohlcv_via_chart_api
-        data = _fetch_ohlcv_via_chart_api(ticker, interval=fetch_interval, range_str=range_str)
+        data = _fetch_ohlcv_via_chart_api(
+            ticker,
+            interval=fetch_interval,
+            range_str=range_str,
+            include_prepost=session_mode == "extended",
+        )
     except Exception as _e:
         logger.debug("terminal candles %s %s/%s failed: %s", ticker, interval, range_str, _e)
 
-    from terminal_intelligence import normalize_ohlcv_data
+    from terminal_intelligence import (
+        annotate_market_sessions,
+        normalize_ohlcv_data,
+        summarize_extended_sessions,
+    )
     bars = normalize_ohlcv_data(data)
+    extended_summary = None
+    if session_mode == "extended":
+        bars = annotate_market_sessions(
+            bars, (data or {}).get("exchange_timezone") or "America/New_York"
+        )
+        extended_summary = summarize_extended_sessions(bars)
 
     source_interval = (data or {}).get("data_granularity") or fetch_interval
     # Do not label silently downsampled monthly or quarterly data as daily.
@@ -4782,11 +4804,13 @@ def api_terminal_candles(ticker):
 
     _TERMINAL_CANDLE_CACHE[key] = {
         "ts": _time.time(), "bars": bars, "source_interval": source_interval,
+        "extended_summary": extended_summary,
     }
     return jsonify({"ok": True, "ticker": ticker, "tf": legacy_tf or None,
                     "interval": interval, "source_interval": source_interval,
-                    "session": "regular", "adjustment": "split-adjusted",
+                    "session": session_mode, "adjustment": "split-adjusted",
                     "range": range_str, "bars": bars,
+                    "extended_summary": extended_summary,
                     "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
 
 

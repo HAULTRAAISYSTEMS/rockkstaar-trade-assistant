@@ -361,6 +361,7 @@
             <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Area chart">〰</button>
             <button class="tw-type-btn" data-type="candles" onclick="twType(this)" title="Candlestick chart">▮</button>
             <button class="tw-type-btn active" id="tw-volume-btn" onclick="twToggleVolume(this)" title="Toggle volume">VOL</button>
+            <button class="tw-type-btn" id="tw-extended-btn" onclick="twToggleExtended(this)" title="Show premarket and after-hours candles">EXT</button>
             <button class="tw-type-btn active" id="tw-rsi-btn" onclick="twToggleIndicator('rsi',this)" title="Toggle RSI (14)">RSI</button>
             <button class="tw-type-btn active" id="tw-macd-btn" onclick="twToggleIndicator('macd',this)" title="Toggle MACD (12, 26, 9)">MACD</button>
             <button class="tw-type-btn" id="tw-edit-btn" onclick="twStartDrawing('select',this)" title="Select, move, or resize a drawing">↖ EDIT</button>
@@ -371,6 +372,12 @@
             <button class="tw-type-btn" id="tw-studies-btn" onclick="twToggleStudySettings()" title="Indicator and drawing styles">⚙ STUDIES</button>
             <button class="tw-type-btn" onclick="twResetView()" title="Reset chart view">↺</button>
           </div>
+        </div>
+
+        <div class="tw-session-strip" id="tw-session-strip" hidden>
+          <span class="tw-session-key pre">PRE</span><strong id="tw-pre-quote">No premarket print</strong>
+          <span class="tw-session-key post">POST</span><strong id="tw-post-quote">No after-hours print</strong>
+          <small>Extended-hours volume can be thin and prices more volatile.</small>
         </div>
 
         <div class="tw-study-settings" id="tw-study-settings" hidden>
@@ -725,8 +732,10 @@ function twInterval(btn){
   twChartState.interval = btn.dataset.interval || '5m';
   var allowed=twIntervalConfig[twChartState.interval];
   if(allowed.ranges.indexOf(twChartState.range)<0)twChartState.range=allowed.defaultRange;
+  if(['4h','1d'].indexOf(twChartState.interval)>=0)twChartState.extended=false;
   twPopulateRanges();
-  try { localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range); } catch(e) {}
+  twRefreshExtendedAvailability();
+  try { localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range);localStorage.setItem('tradestaar.chartExtended',twChartState.extended?'1':'0'); } catch(e) {}
   if (twChartState.ticker) twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);
 }
 function twRange(value){twChartState.range=value;try{localStorage.setItem('tradestaar.chartRange',value);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);}
@@ -755,6 +764,14 @@ function twToggleVolume(btn){
   btn.classList.toggle('active',twChartState.showVolume);
   if(twChartState.vol) twChartState.vol.applyOptions({visible:twChartState.showVolume});
   try { localStorage.setItem('tradestaar.chartVolume',twChartState.showVolume?'1':'0'); } catch(e) {}
+}
+function twRefreshExtendedAvailability(){
+  var btn=document.getElementById('tw-extended-btn'),supported=['1m','5m','15m','1h'].indexOf(twChartState.interval)>=0;if(!btn)return;btn.disabled=!supported;btn.classList.toggle('active',supported&&twChartState.extended);btn.title=supported?'Show premarket and after-hours candles':'Extended hours are available on intraday intervals';
+  var strip=document.getElementById('tw-session-strip');if(strip&&!twChartState.extended)strip.hidden=true;
+}
+function twToggleExtended(btn){
+  if(btn.disabled)return;twChartState.extended=!twChartState.extended;btn.classList.toggle('active',twChartState.extended);if(twChartState.extended&&twChartState.type!=='candles'){twChartState.type='candles';document.querySelectorAll('.tw-type-btn[data-type]').forEach(function(b){b.classList.toggle('active',b.dataset.type==='candles');});twApplyType();}
+  try{localStorage.setItem('tradestaar.chartExtended',twChartState.extended?'1':'0');localStorage.setItem('tradestaar.chartType',twChartState.type);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);
 }
 function twResetView(){ if(twChartState.chart) twChartState.chart.timeScale().fitContent(); twRenderDrawings(); }
 function twToggleIndicator(name,btn){
@@ -832,7 +849,7 @@ var twIntervalConfig={
   '4h':{ranges:['5d','1mo','3mo','1y'],defaultRange:'3mo'},'1d':{ranges:['1mo','3mo','6mo','1y','2y','5y','10y'],defaultRange:'1y'}
 };
 var twSavedInterval = '5m', twSavedRange = '5d';
-var twSavedVolume = true;
+var twSavedVolume = true, twSavedExtended = false;
 var twSavedIndicators = {rsi:true,macd:true};
 var twDefaultStudies={rsiPeriod:14,rsiUpper:70,rsiLower:30,macdFast:12,macdSlow:26,macdSignal:9};
 var twSavedStudies=Object.assign({},twDefaultStudies);
@@ -846,12 +863,14 @@ try {
   if(twIntervalConfig[twSavedInterval].ranges.indexOf(twStoredRange)>=0)twSavedRange=twStoredRange;
   else if(!twStoredInterval){var legacy=localStorage.getItem('tradestaar.chartTimeframe'),legacyMap={'1D':['5m','1d'],'1W':['15m','5d'],'1M':['1d','1mo'],'3M':['1d','3mo'],'1Y':['1d','1y'],'ALL':['1d','10y']};if(legacyMap[legacy]){twSavedInterval=legacyMap[legacy][0];twSavedRange=legacyMap[legacy][1];}}
   if (localStorage.getItem('tradestaar.chartVolume') === '0') twSavedVolume=false;
+  if (localStorage.getItem('tradestaar.chartExtended') === '1') twSavedExtended=true;
   var twStoredIndicators=JSON.parse(localStorage.getItem('tradestaar.chartIndicators')||'null');
   if(twStoredIndicators&&typeof twStoredIndicators==='object') twSavedIndicators={rsi:twStoredIndicators.rsi!==false,macd:twStoredIndicators.macd!==false};
   var storedStyles=JSON.parse(localStorage.getItem('tradestaar.chartStyles')||'null');if(storedStyles&&typeof storedStyles==='object'){Object.keys(twDefaultStyles).forEach(function(key){if(key!=='emas'&&storedStyles[key]!=null)twSavedStyles[key]=storedStyles[key];});Object.keys(twDefaultStyles.emas).forEach(function(period){if(storedStyles.emas&&storedStyles.emas[period])twSavedStyles.emas[period]=Object.assign({},twDefaultStyles.emas[period],storedStyles.emas[period]);});}
   var storedStudies=JSON.parse(localStorage.getItem('tradestaar.chartStudies')||'null');if(storedStudies&&typeof storedStudies==='object')Object.keys(twDefaultStudies).forEach(function(key){var value=Number(storedStudies[key]);if(isFinite(value))twSavedStudies[key]=Math.round(value);});
 } catch(e) {}
-var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
+if(['4h','1d'].indexOf(twSavedInterval)>=0)twSavedExtended=false;
+var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
 
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
 function twChartHideMsg(){ var box=document.getElementById('tw-chart-empty'); if(box) box.classList.add('hidden'); }
@@ -896,7 +915,7 @@ function twInitChart(){
 }
 
 /* ═══ Drawing tools ═══ */
-function twDrawingKey(){ return 'tradestaar.drawings.'+(twChartState.ticker||'none')+'.'+twChartState.interval+'.'+twChartState.range; }
+function twDrawingKey(){ return 'tradestaar.drawings.'+(twChartState.ticker||'none')+'.'+twChartState.interval+'.'+twChartState.range+'.'+(twChartState.extended?'extended':'regular'); }
 function twLoadDrawings(){
   twChartState.drawings=[]; twChartState.drawDraft=[];
   try { var saved=JSON.parse(localStorage.getItem(twDrawingKey())||'[]'); if(Array.isArray(saved))twChartState.drawings=saved.slice(0,30); } catch(e) {}
@@ -1042,14 +1061,24 @@ function twSetOhlcvBar(bar){
 function twOhlcv(bars){
   if(!bars.length)return;var last=bars[bars.length-1];twSetOhlcvBar(last);
 }
+function twExtendedQuote(row){if(!row)return 'No recent print';var change=row.change_pct==null?'':(' · '+(row.change_pct>=0?'+':'')+Number(row.change_pct).toFixed(2)+'%'),date=row.date?(' · '+row.date):'';return '$'+Number(row.price).toFixed(2)+change+' · '+twFmtVol(row.volume)+date;}
+function twRestoreRegularQuote(){var row=document.querySelector('.tw-wl-row.active');if(!row)return;twNum('tw-c-price',row.dataset.price||'—');var chg=document.getElementById('tw-c-chg'),dir=row.dataset.chgdir;if(chg){chg.textContent=row.dataset.chg||'0.00%';chg.className='tw-sym-chg '+(dir==='pos'?'chg-pos':(dir==='neg'?'chg-neg':'chg-flat'));}}
+function twRenderExtendedSummary(summary){
+  var strip=document.getElementById('tw-session-strip');if(!strip)return;strip.hidden=!twChartState.extended;if(!twChartState.extended){twRestoreRegularQuote();return;}twNum('tw-pre-quote',twExtendedQuote(summary&&summary.premarket));twNum('tw-post-quote',twExtendedQuote(summary&&summary.after_hours));
+  var latest=summary&&summary.latest;if(latest){twNum('tw-c-price',Number(latest.price).toFixed(2));var chg=document.getElementById('tw-c-chg');if(chg&&latest.change_pct!=null){var pct=Number(latest.change_pct);chg.textContent=(latest.session==='premarket'?'PRE ':'POST ')+(pct>=0?'+':'')+pct.toFixed(2)+'%';chg.className='tw-sym-chg '+(pct>=0?'chg-pos':'chg-neg');}}
+}
+function twCandleDatum(bar){
+  var datum={time:bar.time,open:bar.open,high:bar.high,low:bar.low,close:bar.close};if(bar.session==='premarket'){datum.color=bar.close>=bar.open?'#4aa3ff':'#7569e8';datum.wickColor=datum.color;datum.borderColor=datum.color;}else if(bar.session==='after_hours'){datum.color=bar.close>=bar.open?'#c77dff':'#ff6aa9';datum.wickColor=datum.color;datum.borderColor=datum.color;}return datum;
+}
+function twVolumeColor(bar){if(bar.session==='premarket')return bar.close>=bar.open?'rgba(74,163,255,.48)':'rgba(117,105,232,.48)';if(bar.session==='after_hours')return bar.close>=bar.open?'rgba(199,125,255,.48)':'rgba(255,106,169,.48)';return bar.close>=bar.open?'rgba(34,197,139,0.45)':'rgba(255,77,69,0.45)';}
 
 function twLoadChart(ticker, interval, range){
   if(!ticker) return;
   if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load. Quotes, %, and levels above are still live.'); return; }
   twChartState.ticker=ticker; twChartState.interval=interval;twChartState.range=range;
   var myReq=++twChartState.reqId;
-  twChartMsg('Loading '+ticker+' · '+interval+' · '+range+'…','');
-  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range))
+  var session=twChartState.extended?'extended':'regular';twChartMsg('Loading '+ticker+' · '+interval+' · '+range+' · '+session+'…','');
+  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session)
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(myReq!==twChartState.reqId) return;
@@ -1069,8 +1098,8 @@ function twLoadChart(ticker, interval, range){
         bottomColor: up ? 'rgba(34,197,139,0.0)' : 'rgba(255,77,69,0.0)'
       });
       twChartState.area.setData(bars.map(function(b){ return { time:b.time, value:b.close }; }));
-      twChartState.candle.setData(bars.map(function(b){ return { time:b.time, open:b.open, high:b.high, low:b.low, close:b.close }; }));
-      twChartState.vol.setData(bars.map(function(b){ return { time:b.time, value:b.volume||0, color:(b.close>=b.open)?'rgba(34,197,139,0.45)':'rgba(255,77,69,0.45)' }; }));
+      twChartState.candle.setData(bars.map(twCandleDatum));
+      twChartState.vol.setData(bars.map(function(b){ return { time:b.time, value:b.volume||0, color:twVolumeColor(b) }; }));
       twChartState.bars=bars; twChartState.barMap={}; twChartState.pinnedTime=null;
       bars.forEach(function(b){ twChartState.barMap[twTimeKey(b.time)]=b; });
       twChartState.lastPrice = bars[bars.length-1].close;
@@ -1081,6 +1110,7 @@ function twLoadChart(ticker, interval, range){
       twRenderIndicators();
       twRenderEmas();
       twOhlcv(bars);
+      twRenderExtendedSummary(d.extended_summary);
       twEstCost();
       var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent=interval.toUpperCase()+' · '+range.toUpperCase()+' · '+bars.length.toLocaleString()+' bars · '+(d.session||'regular')+' · '+(d.adjustment||'split-adjusted');
       twChartHideMsg();
@@ -1145,6 +1175,7 @@ function twRenderInsiders(data){
   var volBtn=document.getElementById('tw-volume-btn'); if(volBtn) volBtn.classList.toggle('active',twChartState.showVolume);
   var rsiBtn=document.getElementById('tw-rsi-btn'); if(rsiBtn) rsiBtn.classList.toggle('active',twChartState.indicators.rsi);
   var macdBtn=document.getElementById('tw-macd-btn'); if(macdBtn) macdBtn.classList.toggle('active',twChartState.indicators.macd);
+  twRefreshExtendedAvailability();
   twApplyIndicatorVisibility();
   twApplyType();
   var first=document.querySelector('.tw-wl-row.active')||document.querySelector('.tw-wl-row');
