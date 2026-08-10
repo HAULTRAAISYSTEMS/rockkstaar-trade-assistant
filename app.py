@@ -65,6 +65,7 @@ from news_fetcher import CATALYST_CATEGORIES as _CAT_DEFS, freshness_label as _f
 import scanner as _scanner
 import intel_engine as _intel
 import schwab as _schwab
+from navigation import safe_post_login_path
 _mkt = None  # set below if market_engine is available
 try:
     import market_engine as _mkt
@@ -6733,11 +6734,16 @@ def catalyst_calendar():
 # Liquidity & Opportunity Research Engine
 # ---------------------------------------------------------------------------
 
-@app.route("/")
 @app.route("/opportunity")
 def liquidity_page():
     """Morning Command Center — liquidity, risk, sector flow, hidden opportunities."""
     return render_template("liquidity.html")
+
+
+@app.route("/")
+def home_page():
+    """Canonical signed-in landing page."""
+    return redirect(url_for("terminal"))
 
 
 @app.route("/api/liquidity/status")
@@ -6854,7 +6860,7 @@ def api_opportunity_refresh():
 def login_page():
     """Multi-user login page."""
     if session.get("user_id"):
-        return redirect(url_for("liquidity_page"))
+        return redirect(url_for("terminal"))
     error = None
     if request.method == "POST":
         username = request.form.get("username", "").strip()
@@ -6866,9 +6872,10 @@ def login_page():
             session["user_id"]   = user["id"]
             session["username"]  = user["username"]
             session["is_admin"]  = user["is_admin"]
-            next_url = request.form.get("next") or url_for("liquidity_page")
-            if not next_url.startswith("/") or next_url.startswith("//"):
-                next_url = url_for("liquidity_page")
+            next_url = safe_post_login_path(
+                request.form.get("next"),
+                default=url_for("terminal"),
+            )
             return redirect(next_url)
         error = "Invalid username or password."
     return render_template("login.html",
@@ -6891,7 +6898,7 @@ def register_page():
         return render_template("login.html", next="", error="Registration is disabled.",
                                registration_enabled=False), 403
     if session.get("user_id"):
-        return redirect(url_for("liquidity_page"))
+        return redirect(url_for("terminal"))
     error = None
     entered_username = ""
     if request.method == "POST":
@@ -6920,7 +6927,7 @@ def register_page():
                 session["user_id"]  = uid
                 session["username"] = entered_username.lower()
                 session["is_admin"] = 0
-                return redirect(url_for("liquidity_page"))
+                return redirect(url_for("terminal"))
             except Exception:
                 error = "Could not create account — please try again."
 
