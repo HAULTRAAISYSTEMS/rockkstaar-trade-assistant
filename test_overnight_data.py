@@ -44,6 +44,7 @@ class OvernightDataTests(unittest.TestCase):
     def test_basic_plan_falls_back_to_latest_derived_overnight_bar(self, get):
         get.side_effect = [
             _Response(403),
+            _Response(403),
             _Response(200, {"bar": {
                 "t": "2026-08-10T02:15:00Z", "o": 100, "h": 101,
                 "l": 99.5, "c": 100.5, "v": 42,
@@ -57,11 +58,11 @@ class OvernightDataTests(unittest.TestCase):
         self.assertEqual(result["status"]["state"], "limited")
         self.assertFalse(result["status"]["historical"])
         self.assertEqual(result["bars"][0]["source"], "alpaca_overnight")
-        self.assertEqual(get.call_args_list[1].kwargs["params"], {"feed": "overnight"})
+        self.assertEqual(get.call_args_list[2].kwargs["params"], {"feed": "overnight"})
 
     @patch("overnight_data.requests.get")
     def test_basic_fallback_failure_explains_plan_requirement(self, get):
-        get.side_effect = [_Response(403), _Response(403)]
+        get.side_effect = [_Response(403), _Response(403), _Response(403)]
         with patch.dict(os.environ, {
             "APCA_API_KEY_ID": "paper-key",
             "APCA_API_SECRET_KEY": "paper-secret",
@@ -70,6 +71,25 @@ class OvernightDataTests(unittest.TestCase):
         self.assertEqual(result["bars"], [])
         self.assertEqual(result["status"]["state"], "restricted")
         self.assertIn("Algo Trader Plus", result["status"]["message"])
+
+    @patch("overnight_data.requests.get")
+    def test_basic_plan_uses_delayed_boats_history_when_available(self, get):
+        get.side_effect = [
+            _Response(403),
+            _Response(200, {"bars": [{
+                "t": "2026-08-10T02:15:00Z", "o": 100, "h": 101,
+                "l": 99.5, "c": 100.5, "v": 42,
+            }]}),
+        ]
+        with patch.dict(os.environ, {
+            "APCA_API_KEY_ID": "paper-key",
+            "APCA_API_SECRET_KEY": "paper-secret",
+        }):
+            result = fetch_overnight_bars("META", "5m", "1d")
+        self.assertEqual(result["status"]["state"], "delayed")
+        self.assertTrue(result["status"]["historical"])
+        self.assertEqual(result["status"]["delay_seconds"], 900)
+        self.assertEqual(result["bars"][0]["source"], "alpaca_boats")
 
 
 if __name__ == "__main__":

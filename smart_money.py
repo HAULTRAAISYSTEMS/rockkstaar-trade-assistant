@@ -36,6 +36,29 @@ _sec_request_lock = threading.Lock()
 _sec_last_request = 0.0
 _SEC_MIN_INTERVAL = 0.12  # stay below the SEC's published 10 requests/second ceiling
 
+_FORM4_CODES = {
+    "P": ("OPEN-MARKET BUY", "Insider purchased shares on the open market or privately."),
+    "S": ("OPEN-MARKET SALE", "Insider sold shares on the open market or privately."),
+    "A": ("STOCK AWARD", "Company grant, award, or other compensation-related acquisition."),
+    "D": ("RETURN TO COMPANY", "Shares were disposed of back to the company."),
+    "F": ("TAX WITHHOLDING", "Shares were withheld or delivered for taxes or an exercise price."),
+    "I": ("DISCRETIONARY PLAN", "Transaction reported under a company discretionary plan."),
+    "M": ("OPTION EXERCISE", "Exercise or conversion of a company-issued derivative security."),
+    "C": ("DERIVATIVE CONVERSION", "A derivative security was converted."),
+    "E": ("SHORT POSITION EXPIRED", "A short derivative position expired."),
+    "H": ("OPTION EXPIRED", "A long derivative position expired or was cancelled for value."),
+    "O": ("OPTION EXERCISE", "An out-of-the-money derivative security was exercised."),
+    "X": ("OPTION EXERCISE", "An in- or at-the-money derivative security was exercised."),
+    "G": ("GIFT", "A bona fide gift transferred shares to or from the insider."),
+    "L": ("SMALL ACQUISITION", "A small acquisition was reported under Rule 16a-6."),
+    "W": ("WILL / ESTATE TRANSFER", "Shares changed ownership by will or laws of descent."),
+    "Z": ("VOTING TRUST", "Shares moved into or out of a voting trust."),
+    "J": ("OTHER — SEE FOOTNOTE", "The filing footnote describes this uncommon transaction."),
+    "K": ("EQUITY SWAP", "Equity swap or similar hedging transaction."),
+    "U": ("TENDER OF SHARES", "Shares were tendered in a change-of-control transaction."),
+    "V": ("VOLUNTARY REPORT", "The insider voluntarily reported this transaction early."),
+}
+
 
 def _cached(key: str, ttl: int, loader):
     now = time.time()
@@ -136,12 +159,15 @@ def _transaction_rows(xml: bytes, ticker: str, filing_url: str, filed_at: str):
             kind = "BUY"
         elif code == "S":
             kind = "SELL"
+        label, explanation = form4_code_details(code)
         rows.append({
             "ticker": ticker,
             "owner": owner,
             "role": ", ".join(dict.fromkeys(roles)) or "Reporting owner",
             "kind": kind,
             "code": code or "—",
+            "label": label,
+            "explanation": explanation,
             "shares": shares_n,
             "price": price_n,
             "value": shares_n * price_n if price_n is not None else None,
@@ -159,6 +185,15 @@ def _float_or_none(value):
         return float(value) if value not in (None, "") else None
     except (TypeError, ValueError):
         return None
+
+
+def form4_code_details(code: str) -> tuple[str, str]:
+    """Return a plain-English SEC transaction label and restrained explanation."""
+    normalized = str(code or "").strip().upper()
+    return _FORM4_CODES.get(
+        normalized,
+        (f"CODE {normalized}" if normalized else "UNSPECIFIED", "Open the official filing for transaction details."),
+    )
 
 
 def fetch_sec_form4(tickers, limit: int = 30) -> tuple[list[dict], dict]:

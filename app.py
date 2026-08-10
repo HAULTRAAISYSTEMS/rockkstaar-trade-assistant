@@ -4788,28 +4788,32 @@ def api_terminal_candles(ticker):
     if not ticker or len(ticker) > 12:
         return jsonify({"ok": False, "error": "bad ticker"}), 400
 
-    ttl = 60 if interval in {"1m", "5m", "15m"} else 120 if interval in {"1h", "4h"} else 600
+    ttl = 15 if interval in {"1m", "5m", "15m"} else 60 if interval in {"1h", "4h"} else 300
     key = (ticker, interval, range_str, session_mode)
     cached = _TERMINAL_CANDLE_CACHE.get(key)
     if cached and (_time.time() - cached["ts"]) < ttl:
+        market_data = dict(cached.get("market_data") or {})
+        market_data["cache_age_seconds"] = max(0, int(_time.time() - cached["ts"]))
         return jsonify({"ok": True, "ticker": ticker, "tf": legacy_tf or None,
                         "interval": interval,
                         "source_interval": cached.get("source_interval", fetch_interval),
                         "session": session_mode, "adjustment": "split-adjusted",
                         "range": range_str,
                         "bars": cached["bars"], "cached": True,
+                        "market_data": market_data,
                         "extended_summary": cached.get("extended_summary"),
                         "overnight_status": cached.get("overnight_status"),
                         "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
 
     data = None
+    market_data = {}
     try:
-        from data_fetcher import _fetch_ohlcv_via_chart_api
-        data = _fetch_ohlcv_via_chart_api(
+        from market_data import fetch_chart_bars
+        data, market_data = fetch_chart_bars(
             ticker,
             interval=fetch_interval,
             range_str=range_str,
-            include_prepost=session_mode == "extended",
+            include_extended=session_mode == "extended",
         )
     except Exception as _e:
         logger.debug("terminal candles %s %s/%s failed: %s", ticker, interval, range_str, _e)
@@ -4850,6 +4854,7 @@ def api_terminal_candles(ticker):
 
     _TERMINAL_CANDLE_CACHE[key] = {
         "ts": _time.time(), "bars": bars, "source_interval": source_interval,
+        "market_data": market_data,
         "extended_summary": extended_summary,
         "overnight_status": overnight_status,
     }
@@ -4857,6 +4862,7 @@ def api_terminal_candles(ticker):
                     "interval": interval, "source_interval": source_interval,
                     "session": session_mode, "adjustment": "split-adjusted",
                     "range": range_str, "bars": bars,
+                    "market_data": {**market_data, "cache_age_seconds": 0},
                     "extended_summary": extended_summary,
                     "overnight_status": overnight_status,
                     "event_endpoint": f"/api/terminal/intelligence/{ticker}"})

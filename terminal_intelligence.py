@@ -288,6 +288,8 @@ def build_insider_payload(ticker: str, rows: list[dict] | None, status: dict | N
             "title": _text(raw.get("role")) or "Reporting owner",
             "kind": _text(raw.get("kind")) or "OTHER",
             "code": _text(raw.get("code")) or "—",
+            "label": _text(raw.get("label")) or _text(raw.get("kind")) or "UNSPECIFIED",
+            "explanation": _text(raw.get("explanation")),
             "shares": raw.get("shares"),
             "price": raw.get("price"),
             "value": raw.get("value"),

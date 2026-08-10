@@ -126,6 +126,35 @@ def fetch_overnight_bars(ticker: str, interval: str, range_str: str) -> dict:
         )
         if response.status_code != 200:
             if response.status_code == 403:
+                # Alpaca Basic permits historical BOATS data when the request
+                # ends at least 15 minutes in the past. Prefer those complete,
+                # genuine candles to a single derived latest print.
+                delayed_params = dict(params)
+                delayed_params["end"] = (end - timedelta(minutes=16)).isoformat().replace("+00:00", "Z")
+                delayed_response = requests.get(
+                    f"{_BASE_URL}/{ticker}/bars",
+                    params=delayed_params,
+                    headers=headers,
+                    timeout=8,
+                )
+                if delayed_response.status_code == 200:
+                    delayed_payload = delayed_response.json()
+                    delayed_bars = [
+                        parsed for raw in (delayed_payload.get("bars") or [])
+                        if (parsed := _parse_bar(raw))
+                    ]
+                    if delayed_bars:
+                        return {
+                            "bars": delayed_bars,
+                            "status": {
+                                **status,
+                                "state": "delayed",
+                                "message": "Alpaca BOATS history loaded with an approximately 15-minute delay.",
+                                "delay_seconds": 900,
+                                "bar_count": len(delayed_bars),
+                                "historical": True,
+                            },
+                        }
                 fallback = _fetch_basic_overnight_latest(ticker, headers)
                 if fallback["bar"]:
                     return {

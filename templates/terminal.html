@@ -87,6 +87,9 @@
 .tw-type { display:flex; gap:4px; margin-left:auto; }
 .tw-type-btn { display:inline-flex; align-items:center; justify-content:center; width:30px; height:28px; font-size:14px; color:var(--text-faint); background: var(--ink-750); border:1px solid var(--border-subtle); border-radius: var(--r-sm); cursor:pointer; transition: all var(--dur-fast); }
 .tw-type-btn.active { color: var(--orange-500); border-color: var(--orange-500); }
+.tw-feed-strip{display:flex;align-items:center;gap:9px;margin:0 var(--sp-5) var(--sp-3);padding:8px 10px;border:1px solid var(--border-subtle);border-radius:var(--r-sm);background:#0b0e11;font:10px var(--font-mono);color:var(--text-faint);min-height:34px}
+.tw-feed-badge{font-weight:800;letter-spacing:.06em;padding:3px 7px;border-radius:999px;color:var(--text-body);background:var(--ink-700);white-space:nowrap}.tw-feed-badge.live{color:var(--pos-500);background:rgba(34,197,139,.12)}.tw-feed-badge.delayed{color:var(--warn-500);background:rgba(255,176,32,.12)}.tw-feed-badge.partial{color:#72b7ff;background:rgba(74,163,255,.12)}.tw-feed-badge.fallback{color:var(--neg-500);background:rgba(255,77,69,.12)}
+.tw-feed-asof{margin-left:auto;white-space:nowrap}.tw-feed-detail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .tw-chart { position: relative; margin: 0 var(--sp-5); height: 330px; border-radius: var(--r-md); border:1px solid var(--border-subtle); background: var(--surface-inset); overflow:hidden; }
 .tw-chart-canvas { position:absolute; inset:0; }
@@ -372,6 +375,12 @@
             <button class="tw-type-btn" id="tw-studies-btn" onclick="twToggleStudySettings()" title="Indicator and drawing styles">⚙ STUDIES</button>
             <button class="tw-type-btn" onclick="twResetView()" title="Reset chart view">↺</button>
           </div>
+        </div>
+
+        <div class="tw-feed-strip" id="tw-feed-strip" title="The chart always identifies its provider, exchange coverage, and delay.">
+          <span class="tw-feed-badge" id="tw-feed-badge">CHECKING FEED</span>
+          <span class="tw-feed-detail" id="tw-feed-detail">Loading provider and freshness information…</span>
+          <span class="tw-feed-asof" id="tw-feed-asof">—</span>
         </div>
 
         <div class="tw-session-strip" id="tw-session-strip" hidden>
@@ -875,6 +884,7 @@ try {
 if(twIntervalConfig[twSavedInterval].ranges.indexOf(twSavedRange)<0)twSavedRange=twIntervalConfig[twSavedInterval].defaultRange;
 if(['4h','1d'].indexOf(twSavedInterval)>=0)twSavedExtended=false;
 var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
+var twChartRefreshTimer=null;
 
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
 function twChartHideMsg(){ var box=document.getElementById('tw-chart-empty'); if(box) box.classList.add('hidden'); }
@@ -888,6 +898,17 @@ function twChartDate(time){
 }
 function twEasternTimeLabel(time){var date=twChartDate(time);return date?twEasternDateTime.format(date):'';}
 function twEasternTickLabel(time,tickMarkType){var date=twChartDate(time);if(!date)return'';return Number(tickMarkType)<=2?twEasternDate.format(date):twEasternClock.format(date);}
+function twRenderMarketData(meta){
+  meta=meta||{};var badge=document.getElementById('tw-feed-badge'),detail=document.getElementById('tw-feed-detail'),asof=document.getElementById('tw-feed-asof');if(!badge||!detail||!asof)return;
+  var cls=meta.fallback?'fallback':(meta.realtime?(meta.comprehensive?'live':'partial'):'delayed');badge.className='tw-feed-badge '+cls;badge.textContent=meta.feed_label||'FEED UNKNOWN';
+  var delay=meta.delay_seconds==null?'delay unknown':(Number(meta.delay_seconds)>0?Math.round(Number(meta.delay_seconds)/60)+' min delayed':'real-time');detail.textContent=[meta.provider,meta.coverage,delay].filter(Boolean).join(' · ');detail.title=meta.message||'';
+  var stamp=meta.as_of?new Date(meta.as_of):null;asof.textContent=stamp&&!isNaN(stamp.getTime())?'As of '+twEasternDateTime.format(stamp):'As-of unavailable';
+}
+function twScheduleChartRefresh(){
+  if(twChartRefreshTimer)clearTimeout(twChartRefreshTimer);twChartRefreshTimer=null;
+  if(!twChartState.ticker||['1m','5m','15m','1h'].indexOf(twChartState.interval)<0)return;
+  twChartRefreshTimer=setTimeout(function(){if(document.hidden){twScheduleChartRefresh();return;}twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range,true);},30000);
+}
 
 function twInitChart(){
   var el=document.getElementById('tw-chart');
@@ -1076,6 +1097,12 @@ function twSetOhlcvBar(bar){
 function twOhlcv(bars){
   if(!bars.length)return;var last=bars[bars.length-1];twSetOhlcvBar(last);
 }
+function twMarketDateKey(time){var date=twChartDate(time);if(!date)return'';var parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date),out={};parts.forEach(function(p){out[p.type]=p.value;});return [out.year,out.month,out.day].join('-');}
+function twUpdateRegularQuote(bars){
+  if(!bars||!bars.length)return;var last=bars[bars.length-1];twNum('tw-c-price',Number(last.close).toFixed(2));var today=twMarketDateKey(last.time),previous=null;
+  for(var i=bars.length-2;i>=0;i--){if(twMarketDateKey(bars[i].time)!==today){previous=bars[i].close;break;}}
+  if(previous){var pct=(last.close-previous)/previous*100,chg=document.getElementById('tw-c-chg');if(chg){chg.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';chg.className='tw-sym-chg '+(pct>0?'chg-pos':(pct<0?'chg-neg':'chg-flat'));}}
+}
 function twExtendedQuote(row){if(!row)return 'No recent print';var change=row.change_pct==null?'':(' · '+(row.change_pct>=0?'+':'')+Number(row.change_pct).toFixed(2)+'%'),date=row.date?(' · '+row.date):'';return '$'+Number(row.price).toFixed(2)+change+' · '+twFmtVol(row.volume)+date;}
 function twRestoreRegularQuote(){var row=document.querySelector('.tw-wl-row.active');if(!row)return;twNum('tw-c-price',row.dataset.price||'—');var chg=document.getElementById('tw-c-chg'),dir=row.dataset.chgdir;if(chg){chg.textContent=row.dataset.chg||'0.00%';chg.className='tw-sym-chg '+(dir==='pos'?'chg-pos':(dir==='neg'?'chg-neg':'chg-flat'));}}
 function twRenderExtendedSummary(summary,status){
@@ -1087,13 +1114,14 @@ function twCandleDatum(bar){
 }
 function twVolumeColor(bar){if(bar.session==='overnight')return bar.close>=bar.open?'rgba(240,181,63,.5)':'rgba(255,140,66,.5)';if(bar.session==='premarket')return bar.close>=bar.open?'rgba(74,163,255,.48)':'rgba(117,105,232,.48)';if(bar.session==='after_hours')return bar.close>=bar.open?'rgba(199,125,255,.48)':'rgba(255,106,169,.48)';return bar.close>=bar.open?'rgba(34,197,139,0.45)':'rgba(255,77,69,0.45)';}
 
-function twLoadChart(ticker, interval, range){
+function twLoadChart(ticker, interval, range, refreshOnly){
   if(!ticker) return;
+  if(twChartRefreshTimer)clearTimeout(twChartRefreshTimer);twChartRefreshTimer=null;
   var intervalConfig=twIntervalConfig[interval];if(!intervalConfig)return;if(intervalConfig.ranges.indexOf(range)<0){range=intervalConfig.defaultRange;twChartState.range=range;twPopulateRanges();try{localStorage.setItem('tradestaar.chartRange',range);}catch(e){}}
   if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load. Quotes, %, and levels above are still live.'); return; }
   twChartState.ticker=ticker; twChartState.interval=interval;twChartState.range=range;
   var myReq=++twChartState.reqId;
-  var session=twChartState.extended?'extended':'regular';twChartMsg('Loading '+ticker+' · '+interval+' · '+range+' · '+session+'…','');
+  var session=twChartState.extended?'extended':'regular';if(!refreshOnly)twChartMsg('Loading '+ticker+' · '+interval+' · '+range+' · '+session+'…','');
   fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session)
     .then(function(r){ return r.json(); })
     .then(function(d){
@@ -1121,17 +1149,19 @@ function twLoadChart(ticker, interval, range){
       twChartState.lastPrice = bars[bars.length-1].close;
       twApplyType();
       twApplyEvents(twChartState.events);
-      twChartState.chart.timeScale().fitContent();
-      twLoadDrawings();
+      if(!refreshOnly){twChartState.chart.timeScale().fitContent();twLoadDrawings();}else{twRenderDrawings();}
       twRenderIndicators();
       twRenderEmas();
       twOhlcv(bars);
       twRenderExtendedSummary(d.extended_summary,d.overnight_status);
+      if(!twChartState.extended)twUpdateRegularQuote(bars);
+      twRenderMarketData(d.market_data);
       twEstCost();
-      var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent=interval.toUpperCase()+' · '+range.toUpperCase()+' · '+bars.length.toLocaleString()+' bars · '+(d.session||'regular')+' · '+(d.adjustment||'split-adjusted');
+      var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent=interval.toUpperCase()+' · '+range.toUpperCase()+' · '+bars.length.toLocaleString()+' bars · '+(d.session||'regular')+' · '+(d.adjustment||'split-adjusted')+' · '+((d.market_data&&d.market_data.feed_label)||'feed unknown');
       twChartHideMsg();
+      twScheduleChartRefresh();
     })
-    .catch(function(e){ if(myReq===twChartState.reqId) twChartMsg('Chart error',(e&&e.message)||String(e)); });
+    .catch(function(e){if(myReq!==twChartState.reqId)return;if(refreshOnly){var detail=document.getElementById('tw-feed-detail');if(detail)detail.textContent='Refresh failed · displaying last loaded bars';twScheduleChartRefresh();}else twChartMsg('Chart error',(e&&e.message)||String(e));});
 }
 
 /* ═══ Ticker intelligence ═══ */
@@ -1176,7 +1206,7 @@ function twRenderInsiders(data){
   var status=data.status||{}, rows=data.rows||[], summary=data.summary;
   twNum('tw-context-insiders',summary?summary.label:(status.message||'No recent verified filings'));
   if(!rows.length){twPanel('insiders',twEmpty(status.message||'No verified recent Form 4 transactions were found.','<a class="tw-intel-action" href="/smart-money">Open Smart Money →</a>'));return;}
-  var html=rows.map(function(row){return '<article class="tw-intel-row"><div><strong><span class="tw-insider-kind '+twEsc(row.kind)+'">'+twEsc(row.kind)+'</span>'+twEsc(row.person)+' · '+twEsc(row.title)+'</strong><div class="tw-intel-meta">'+twValue(row.shares,' shares')+' · '+twMoney(row.value)+' · transaction '+twEsc(row.transaction_date||'—')+' · filed '+twEsc(row.filing_date||'—')+' · ownership after '+twValue(row.ownership_after)+'</div></div><a href="'+twEsc(row.sec_url)+'" target="_blank" rel="noopener noreferrer">SEC filing ↗</a></article>';}).join('');
+  var html=rows.map(function(row){return '<article class="tw-intel-row"><div><strong><span class="tw-insider-kind '+twEsc(row.kind)+'">'+twEsc(row.label||row.kind)+'</span>'+twEsc(row.person)+' · '+twEsc(row.title)+'</strong><div class="tw-intel-meta">Code '+twEsc(row.code||'—')+' · '+twEsc(row.explanation||'')+'<br>'+twValue(row.shares,' shares')+' · reported value '+twMoney(row.value)+' · transaction '+twEsc(row.transaction_date||'—')+' · filed '+twEsc(row.filing_date||'—')+' · ownership after '+twValue(row.ownership_after)+'</div></div><a href="'+twEsc(row.sec_url)+'" target="_blank" rel="noopener noreferrer">SEC filing ↗</a></article>';}).join('');
   twPanel('insiders','<div class="tw-intel-list">'+html+'</div>');
 }
 

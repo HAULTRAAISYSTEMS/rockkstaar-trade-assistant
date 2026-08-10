@@ -49,6 +49,12 @@ class TestSecForm4Parser(unittest.TestCase):
             "https://www.sec.gov/Archives/edgar/data/1326801/000095010326011964/0000950103-26-011964-index.html",
         )
 
+    def test_compensation_codes_have_plain_english_non_buy_labels(self):
+        self.assertEqual(smart_money.form4_code_details("F")[0], "TAX WITHHOLDING")
+        self.assertEqual(smart_money.form4_code_details("G")[0], "GIFT")
+        self.assertEqual(smart_money.form4_code_details("A")[0], "STOCK AWARD")
+        self.assertEqual(smart_money.form4_code_details("P")[0], "OPEN-MARKET BUY")
+
 
 class TestCongressVerification(unittest.TestCase):
     def tearDown(self):
