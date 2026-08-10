@@ -294,6 +294,7 @@ def debug_status():
         "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN"),
         "TELEGRAM_CHAT_ID":   os.environ.get("TELEGRAM_CHAT_ID"),
         "FINNHUB_API_KEY":    os.environ.get("FINNHUB_API_KEY"),
+        "NEWS_API_KEY":       os.environ.get("NEWS_API_KEY"),
         "POLYGON_API_KEY":    os.environ.get("POLYGON_API_KEY"),
         "SCHWAB_CLIENT_ID":   os.environ.get("SCHWAB_CLIENT_ID"),
     }
@@ -6225,6 +6226,7 @@ def api_intel_debug():
     try:
         summary    = _intel.get_intel_summary()
         earn_dbg   = summary.get("earnings_debug", {})
+        news_dbg   = summary.get("news_status", {})
         macro      = summary.get("market_environment", {})
         sector_ht  = summary.get("sector_heat", [])
 
@@ -6245,6 +6247,9 @@ def api_intel_debug():
             "errors":               summary.get("errors", []),
             "cache_ages":           cache_ages,
             "news_count":           len(summary.get("news", [])),
+            "news_configured":      news_dbg.get("configured"),
+            "news_sources":         news_dbg.get("configured_sources", []),
+            "news_message":         news_dbg.get("message"),
             "earnings_today":       len(earn.get("today", [])),
             "earnings_tomorrow":    len(earn.get("tomorrow", [])),
             "earnings_this_week":   len(earn.get("this_week", [])),
@@ -6430,8 +6435,10 @@ def intel():
         logger.debug("intel: liquidity fetch failed: %s", _e)
 
     events, news, earnings = [], [], []
+    intel_status = {"refreshing": False, "message": "News status unavailable.", "configured": False}
     try:
         summ = _intel.get_intel_summary() or {}
+        intel_status = summ.get("news_status") or intel_status
         events = summ.get("economic_events") or []
         news = summ.get("market_news") or summ.get("news") or []
         earn = summ.get("earnings") or {}
@@ -6483,7 +6490,7 @@ def intel():
         "intel.html",
         mkt=mkt, liq=liq, money_flow=money_flow[:8],
         events=events[:8], news=enriched_news[:24], earnings=earnings[:12],
-        trending=trending, briefing=briefing, story=story,
+        trending=trending, briefing=briefing, story=story, intel_status=intel_status,
     )
 
 

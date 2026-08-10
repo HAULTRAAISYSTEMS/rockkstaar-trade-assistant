@@ -50,6 +50,7 @@
   .intel-tone{padding:4px 7px;border-radius:5px;font:700 9px var(--font-mono)}
   .intel-tone.BULLISH{color:#32d49b;background:rgba(50,212,155,.1)}.intel-tone.BEARISH{color:#ff6973;background:rgba(255,105,115,.1)}.intel-tone.NEUTRAL{color:#8d97a4;background:#1b2128}
   .intel-foot{padding:12px 18px;border-top:1px solid rgba(255,255,255,.055);color:#626c77;font-size:10px;line-height:1.5}
+  .intel-feed-state{margin:14px 0;padding:18px;border:1px solid rgba(231,184,75,.2);border-radius:12px;background:rgba(231,184,75,.045);color:#8f99a5;font-size:12px;line-height:1.55}.intel-feed-state strong{display:block;margin-bottom:5px;color:#d9ad48;font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase}.intel-feed-state button{margin-top:11px;border:1px solid rgba(231,184,75,.4);border-radius:8px;background:rgba(231,184,75,.08);color:var(--elite-gold-2);padding:8px 11px;cursor:pointer;font:700 10px var(--font-ui)}
   .intel-rail{display:flex;flex-direction:column;gap:16px}
   .intel-list{padding:5px 17px}
   .intel-list-row{display:grid;grid-template-columns:58px 1fr auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.05)}.intel-list-row:last-child{border-bottom:0}
@@ -114,7 +115,7 @@
           <div><a class="intel-headline" href="{{ url_for('stock_detail', ticker=n.ticker) if n.ticker != 'MARKET' else '#' }}">{{ n.headline }}</a><span class="intel-meta">{{ n.source }} · {{ n.time or 'recent' }}{% if n.reason %} · {{ n.reason }}{% endif %}</span><p class="scanner-why"><b>Why this matters</b><br>{{ n.why_it_matters }}</p><div class="scanner-actions">{% if n.ticker != 'MARKET' %}<a href="{{ url_for('stock_detail', ticker=n.ticker) }}">Research {{ n.ticker }} →</a>{% endif %}<span>Headline tone {{ '%+d'|format(n.score) }}</span></div></div>
           <div class="scanner-rank"><span class="intel-tone {{ n.label }}">{{ n.label }}</span><div class="scanner-score">{{ n.importance }}<small>/100</small></div><div class="scanner-meter" title="Importance score"><i style="width:{{ n.importance }}%"></i></div><span class="scanner-impact">{{ n.impact }} impact</span></div>
         </article>
-        {% else %}<div class="intel-foot">The news cache is warming. Live headlines will appear when the feed is ready.</div>{% endfor %}
+        {% else %}<div class="intel-feed-state" id="intel-feed-state" data-refreshing="{{ '1' if intel_status.refreshing else '0' }}"><strong>{{ 'Refreshing news feeds' if intel_status.refreshing else 'News feed needs attention' }}</strong>{{ intel_status.message }}<br><button type="button" onclick="refreshIntelNews(this)">Refresh news now</button></div>{% endfor %}
         <div id="intel-empty" class="intel-foot" style="display:none">No headlines match this filter.</div>
       </div>
       <div class="intel-foot">Tone and importance are explainable headline-derived research context—not financial advice, analyst consensus, or a prediction of price direction.</div>
@@ -166,5 +167,11 @@ function applyScannerFilters(){
 }
 document.querySelectorAll('.intel-tab').forEach(function(button){button.addEventListener('click',function(){document.querySelectorAll('.intel-tab').forEach(function(b){b.classList.remove('active')});button.classList.add('active');scannerFilter=button.dataset.filter;applyScannerFilters()})});
 document.getElementById('scanner-query').addEventListener('input',applyScannerFilters);
+function refreshIntelNews(button){
+  button.disabled=true;button.textContent='Refreshing…';
+  fetch('/api/intel?refresh=1').finally(function(){setTimeout(function(){location.reload();},4500);});
+}
+var intelFeedState=document.getElementById('intel-feed-state');
+if(intelFeedState&&intelFeedState.dataset.refreshing==='1')setTimeout(function(){location.reload();},12000);
 </script>
 {% endblock %}

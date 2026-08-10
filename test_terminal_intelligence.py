@@ -25,6 +25,11 @@ class TerminalIntelligenceTests(unittest.TestCase):
         self.assertEqual(payload["events"][0]["type"], "earnings")
         self.assertEqual(payload["events"][0]["date"], "2026-08-12")
 
+    def test_stale_stock_snapshot_is_not_presented_as_next_earnings(self):
+        payload = build_terminal_intelligence("META", {"earnings_date": "2020-04-30"}, {})
+        self.assertEqual(payload["earnings"], [])
+        self.assertIsNone(payload["context"]["next_earnings"])
+
     def test_insider_summary_uses_only_reported_values(self):
         payload = build_insider_payload("META", [
             {"ticker": "META", "owner": "Jane Doe", "role": "Director", "kind": "BUY", "code": "P",

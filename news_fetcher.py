@@ -54,6 +54,29 @@ def _log_key_status() -> None:
 _log_key_status()
 
 
+def news_source_status() -> dict:
+    """Describe source availability without exposing credentials."""
+    configured = [
+        label
+        for env_name, label in (
+            ("FINNHUB_API_KEY", "Finnhub"),
+            ("NEWS_API_KEY", "NewsAPI"),
+            ("POLYGON_API_KEY", "Polygon"),
+        )
+        if os.environ.get(env_name, "").strip()
+    ]
+    return {
+        "configured": bool(configured),
+        "configured_sources": configured,
+        "fallback_sources": ["Yahoo Finance", "Yahoo RSS", "Seeking Alpha RSS"],
+        "message": (
+            "Connected news sources: " + ", ".join(configured) + "."
+            if configured
+            else "No keyed news provider is configured; using free Yahoo and RSS fallbacks."
+        ),
+    }
+
+
 @contextlib.contextmanager
 def _silence_yf():
     """Temporarily raise yfinance's logger to ERROR to suppress known 404 noise."""

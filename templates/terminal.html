@@ -357,12 +357,20 @@
             <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Area">〰</button>
             <button class="tw-type-btn" data-type="candles" onclick="twType(this)" title="Candles">▮</button>
             <button class="tw-type-btn active" id="tw-volume-btn" onclick="twToggleVolume(this)" title="Toggle volume">VOL</button>
+            <button class="tw-type-btn active" id="tw-rsi-btn" onclick="twToggleIndicator('rsi',this)" title="Toggle RSI (14)">RSI</button>
+            <button class="tw-type-btn active" id="tw-macd-btn" onclick="twToggleIndicator('macd',this)" title="Toggle MACD (12, 26, 9)">MACD</button>
+            <button class="tw-type-btn" id="tw-line-btn" onclick="twStartDrawing('line',this)" title="Draw trend line">╱ LINE</button>
+            <button class="tw-type-btn" id="tw-fib-btn" onclick="twStartDrawing('fib',this)" title="Draw Fibonacci retracement">FIB</button>
+            <button class="tw-type-btn" onclick="twClearDrawings()" title="Clear drawings">CLR</button>
             <button class="tw-type-btn" onclick="twResetView()" title="Reset chart view">↺</button>
           </div>
         </div>
 
+        <div class="tw-draw-status" id="tw-draw-status" hidden></div>
+
         <div class="tw-chart" id="tw-chart-box">
           <div class="tw-chart-canvas" id="tw-chart"></div>
+          <canvas class="tw-chart-drawing" id="tw-chart-drawing" aria-label="Chart drawing layer"></canvas>
           <div class="tw-chart-tooltip" id="tw-chart-tooltip" hidden></div>
           <div class="tw-chart-hint" id="tw-chart-hint">Hover for OHLCV · click a candle to pin</div>
           <div class="tw-chart-empty" id="tw-chart-empty">
@@ -370,6 +378,17 @@
             <div class="tw-chart-msg" id="tw-chart-msg">{{ 'Loading chart…' if stocks else 'No symbol' }}</div>
             <div class="tw-chart-sub" id="tw-chart-sub">{{ 'Select a watchlist symbol to load its chart.' if stocks else 'The starter watchlist is seeding — refresh shortly.' }}</div>
           </div>
+        </div>
+
+        <div class="tw-indicators" id="tw-indicators">
+          <section class="tw-indicator" id="tw-rsi-panel">
+            <div class="tw-indicator-label"><strong>RSI 14</strong><span id="tw-rsi-value">—</span><small>70 overbought · 30 oversold</small></div>
+            <canvas id="tw-rsi-canvas" height="86"></canvas>
+          </section>
+          <section class="tw-indicator" id="tw-macd-panel">
+            <div class="tw-indicator-label"><strong>MACD 12 · 26 · 9</strong><span id="tw-macd-value">—</span><small>MACD · signal · histogram</small></div>
+            <canvas id="tw-macd-canvas" height="104"></canvas>
+          </section>
         </div>
 
         <div class="tw-ohlcv">
@@ -697,7 +716,17 @@ function twToggleVolume(btn){
   if(twChartState.vol) twChartState.vol.applyOptions({visible:twChartState.showVolume});
   try { localStorage.setItem('tradestaar.chartVolume',twChartState.showVolume?'1':'0'); } catch(e) {}
 }
-function twResetView(){ if(twChartState.chart) twChartState.chart.timeScale().fitContent(); }
+function twResetView(){ if(twChartState.chart) twChartState.chart.timeScale().fitContent(); twRenderDrawings(); }
+function twToggleIndicator(name,btn){
+  twChartState.indicators[name]=!twChartState.indicators[name]; btn.classList.toggle('active',twChartState.indicators[name]);
+  try { localStorage.setItem('tradestaar.chartIndicators',JSON.stringify(twChartState.indicators)); } catch(e) {}
+  twApplyIndicatorVisibility(); twRenderIndicators();
+}
+function twApplyIndicatorVisibility(){
+  var rsi=document.getElementById('tw-rsi-panel'),macd=document.getElementById('tw-macd-panel'),wrap=document.getElementById('tw-indicators');
+  if(rsi) rsi.hidden=!twChartState.indicators.rsi; if(macd) macd.hidden=!twChartState.indicators.macd;
+  if(wrap){wrap.hidden=!twChartState.indicators.rsi&&!twChartState.indicators.macd;wrap.classList.toggle('single',twChartState.indicators.rsi!==twChartState.indicators.macd);}
+}
 
 /* ── Order ticket ── */
 function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; }
@@ -737,14 +766,17 @@ function twPreview(){
 var twSavedChartType = 'area';
 var twSavedTimeframe = '1D';
 var twSavedVolume = true;
+var twSavedIndicators = {rsi:true,macd:true};
 try {
   var twStoredType = localStorage.getItem('tradestaar.chartType');
   if (twStoredType === 'candles' || twStoredType === 'area') twSavedChartType = twStoredType;
   var twStoredTf = localStorage.getItem('tradestaar.chartTimeframe');
   if (['1D','1W','1M','3M','1Y','ALL'].indexOf(twStoredTf)>=0) twSavedTimeframe=twStoredTf;
   if (localStorage.getItem('tradestaar.chartVolume') === '0') twSavedVolume=false;
+  var twStoredIndicators=JSON.parse(localStorage.getItem('tradestaar.chartIndicators')||'null');
+  if(twStoredIndicators&&typeof twStoredIndicators==='object') twSavedIndicators={rsi:twStoredIndicators.rsi!==false,macd:twStoredIndicators.macd!==false};
 } catch(e) {}
-var twChartState = { chart:null, area:null, candle:null, vol:null, ticker:null, tf:twSavedTimeframe, type:twSavedChartType, showVolume:twSavedVolume, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[] };
+var twChartState = { chart:null, area:null, candle:null, vol:null, ticker:null, tf:twSavedTimeframe, type:twSavedChartType, showVolume:twSavedVolume, indicators:twSavedIndicators, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[] };
 
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
 function twChartHideMsg(){ var box=document.getElementById('tw-chart-empty'); if(box) box.classList.add('hidden'); }
@@ -781,7 +813,92 @@ function twInitChart(){
     twChartState.pinnedTime=(twChartState.pinnedTime===key)?null:key;
     if(twChartState.pinnedTime) twShowBar(bar,param.point,true); else twHideTooltip();
   });
+  chart.timeScale().subscribeVisibleTimeRangeChange(function(){ twRenderDrawings(); });
+  twInitDrawingLayer();
   return true;
+}
+
+/* ═══ Drawing tools ═══ */
+function twDrawingKey(){ return 'tradestaar.drawings.'+(twChartState.ticker||'none')+'.'+twChartState.tf; }
+function twLoadDrawings(){
+  twChartState.drawings=[]; twChartState.drawDraft=[];
+  try { var saved=JSON.parse(localStorage.getItem(twDrawingKey())||'[]'); if(Array.isArray(saved))twChartState.drawings=saved.slice(0,30); } catch(e) {}
+  twRenderDrawings();
+}
+function twSaveDrawings(){ try { localStorage.setItem(twDrawingKey(),JSON.stringify(twChartState.drawings.slice(-30))); } catch(e) {} }
+function twStartDrawing(mode,btn){
+  if(twChartState.drawMode===mode){twStopDrawing();return;}
+  twChartState.drawMode=mode; twChartState.drawDraft=[];
+  document.querySelectorAll('#tw-line-btn,#tw-fib-btn').forEach(function(b){b.classList.remove('active');}); btn.classList.add('active');
+  var canvas=document.getElementById('tw-chart-drawing'); if(canvas)canvas.classList.add('active');
+  var status=document.getElementById('tw-draw-status'); if(status){status.hidden=false;status.textContent=(mode==='fib'?'Fibonacci':'Trend line')+': click the first point, then the second point. Click the active tool again to cancel.';}
+}
+function twStopDrawing(){
+  twChartState.drawMode=null;twChartState.drawDraft=[];
+  document.querySelectorAll('#tw-line-btn,#tw-fib-btn').forEach(function(b){b.classList.remove('active');});
+  var canvas=document.getElementById('tw-chart-drawing');if(canvas)canvas.classList.remove('active');
+  var status=document.getElementById('tw-draw-status');if(status)status.hidden=true;
+}
+function twClearDrawings(){ twChartState.drawings=[];twSaveDrawings();twStopDrawing();twRenderDrawings(); }
+function twInitDrawingLayer(){
+  var canvas=document.getElementById('tw-chart-drawing'),box=document.getElementById('tw-chart-box');if(!canvas||!box)return;
+  canvas.addEventListener('click',function(ev){
+    if(!twChartState.drawMode||!twChartState.chart||!twChartState.candle)return;
+    var rect=canvas.getBoundingClientRect(),x=ev.clientX-rect.left,y=ev.clientY-rect.top;
+    var time=twChartState.chart.timeScale().coordinateToTime(x),price=twChartState.candle.coordinateToPrice(y);
+    if(time==null||price==null||!isFinite(price))return;
+    twChartState.drawDraft.push({time:time,price:Number(price)});
+    if(twChartState.drawDraft.length===2){twChartState.drawings.push({type:twChartState.drawMode,points:twChartState.drawDraft.slice()});twSaveDrawings();twStopDrawing();}
+    twRenderDrawings();
+  });
+  if(window.ResizeObserver)new ResizeObserver(function(){twRenderDrawings();twRenderIndicators();}).observe(box);
+  else window.addEventListener('resize',function(){twRenderDrawings();twRenderIndicators();});
+}
+function twCanvasContext(canvas){
+  if(!canvas)return null;var rect=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+  if(rect.width<=0||rect.height<=0)return null;
+  var w=Math.round(rect.width*dpr),h=Math.round(rect.height*dpr);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
+  var ctx=canvas.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,rect.width,rect.height);return {ctx:ctx,w:rect.width,h:rect.height};
+}
+function twPointCoords(point){
+  if(!twChartState.chart||!twChartState.candle)return null;var x=twChartState.chart.timeScale().timeToCoordinate(point.time),y=twChartState.candle.priceToCoordinate(point.price);
+  return x==null||y==null?null:{x:x,y:y};
+}
+function twRenderDrawings(){
+  var fit=twCanvasContext(document.getElementById('tw-chart-drawing'));if(!fit)return;var ctx=fit.ctx;
+  (twChartState.drawings||[]).forEach(function(drawing){
+    if(!drawing.points||drawing.points.length<2)return;var a=twPointCoords(drawing.points[0]),b=twPointCoords(drawing.points[1]);if(!a||!b)return;
+    if(drawing.type==='line'){ctx.save();ctx.strokeStyle='#F0B53F';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.fillStyle='#F0B53F';[a,b].forEach(function(p){ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();});ctx.restore();}
+    if(drawing.type==='fib')twDrawFib(ctx,drawing.points,a,b);
+  });
+  if(twChartState.drawDraft.length===1){var p=twPointCoords(twChartState.drawDraft[0]);if(p){ctx.fillStyle='#F0B53F';ctx.beginPath();ctx.arc(p.x,p.y,4,0,Math.PI*2);ctx.fill();}}
+}
+function twDrawFib(ctx,points,a,b){
+  var high=Math.max(points[0].price,points[1].price),low=Math.min(points[0].price,points[1].price),x1=Math.min(a.x,b.x),x2=Math.max(a.x,b.x),levels=[0,.236,.382,.5,.618,.786,1];
+  ctx.save();ctx.font='9px ui-monospace,monospace';levels.forEach(function(ratio){var price=high-(high-low)*ratio,y=twChartState.candle.priceToCoordinate(price);if(y==null)return;ctx.strokeStyle=ratio===.5||ratio===.618?'rgba(240,181,63,.9)':'rgba(240,181,63,.46)';ctx.lineWidth=ratio===.5||ratio===.618?1.4:1;ctx.setLineDash(ratio===0||ratio===1?[]:[4,3]);ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#E7B84B';ctx.fillText((ratio*100).toFixed(ratio===0||ratio===1?0:1)+'%  '+price.toFixed(2),Math.min(x2+5,fitTextX(ctx,fitWidth(ctx),92)),y-3);});ctx.restore();
+}
+function fitWidth(ctx){return ctx.canvas.width/(window.devicePixelRatio||1);}function fitTextX(ctx,width,labelWidth){return Math.max(4,width-labelWidth-4);}
+
+/* ═══ RSI + MACD indicator canvases ═══ */
+function twEma(values,period){var out=[],k=2/(period+1),ema=null;values.forEach(function(value){ema=ema==null?value:(value*k+ema*(1-k));out.push(ema);});return out;}
+function twRsi(values,period){
+  var out=new Array(values.length).fill(null);if(values.length<=period)return out;var gain=0,loss=0;
+  for(var i=1;i<=period;i++){var d=values[i]-values[i-1];gain+=Math.max(d,0);loss+=Math.max(-d,0);}gain/=period;loss/=period;out[period]=loss===0?100:100-(100/(1+gain/loss));
+  for(var j=period+1;j<values.length;j++){var diff=values[j]-values[j-1];gain=(gain*(period-1)+Math.max(diff,0))/period;loss=(loss*(period-1)+Math.max(-diff,0))/period;out[j]=loss===0?100:100-(100/(1+gain/loss));}return out;
+}
+function twRenderIndicators(){
+  if(!twChartState.bars.length)return;var closes=twChartState.bars.map(function(b){return Number(b.close);});
+  if(twChartState.indicators.rsi)twDrawRsi(twRsi(closes,14));
+  if(twChartState.indicators.macd){var fast=twEma(closes,12),slow=twEma(closes,26),macd=fast.map(function(v,i){return v-slow[i];}),signal=twEma(macd,9),hist=macd.map(function(v,i){return v-signal[i];});twDrawMacd(macd,signal,hist);}
+}
+function twPlotLine(ctx,values,x,y,color,width){ctx.strokeStyle=color;ctx.lineWidth=width||1.5;ctx.beginPath();var started=false;values.forEach(function(v,i){if(v==null||!isFinite(v))return;var px=x(i),py=y(v);if(!started){ctx.moveTo(px,py);started=true;}else ctx.lineTo(px,py);});if(started)ctx.stroke();}
+function twDrawRsi(values){
+  var fit=twCanvasContext(document.getElementById('tw-rsi-canvas'));if(!fit)return;var ctx=fit.ctx,pad={l:8,r:8,t:25,b:10},n=values.length,x=function(i){return pad.l+(fit.w-pad.l-pad.r)*(i/Math.max(1,n-1));},y=function(v){return pad.t+(fit.h-pad.t-pad.b)*(1-v/100);};
+  [70,50,30].forEach(function(v){ctx.strokeStyle=v===50?'rgba(255,255,255,.08)':'rgba(240,181,63,.22)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(pad.l,y(v));ctx.lineTo(fit.w-pad.r,y(v));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#65707c';ctx.font='8px ui-monospace,monospace';ctx.fillText(String(v),fit.w-18,y(v)-2);});twPlotLine(ctx,values,x,y,'#E7B84B',1.7);var last=values.filter(function(v){return v!=null;}).pop();twNum('tw-rsi-value',last==null?'—':last.toFixed(1));
+}
+function twDrawMacd(macd,signal,hist){
+  var fit=twCanvasContext(document.getElementById('tw-macd-canvas'));if(!fit)return;var ctx=fit.ctx,pad={l:8,r:8,t:25,b:10},n=macd.length,max=Math.max.apply(null,macd.concat(signal,hist).map(function(v){return Math.abs(v)||0;}))||1,x=function(i){return pad.l+(fit.w-pad.l-pad.r)*(i/Math.max(1,n-1));},y=function(v){return pad.t+(fit.h-pad.t-pad.b)*(1-(v+max)/(2*max));},zero=y(0),barW=Math.max(1,(fit.w-pad.l-pad.r)/Math.max(1,n)*.7);
+  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.beginPath();ctx.moveTo(pad.l,zero);ctx.lineTo(fit.w-pad.r,zero);ctx.stroke();hist.forEach(function(v,i){ctx.fillStyle=v>=0?'rgba(34,197,139,.58)':'rgba(255,77,69,.58)';ctx.fillRect(x(i)-barW/2,Math.min(zero,y(v)),barW,Math.max(1,Math.abs(y(v)-zero)));});twPlotLine(ctx,macd,x,y,'#E7B84B',1.5);twPlotLine(ctx,signal,x,y,'#6FA8FF',1.25);var i=n-1;twNum('tw-macd-value',macd[i].toFixed(2)+' · '+signal[i].toFixed(2)+' · '+hist[i].toFixed(2));
 }
 
 function twTimeKey(time){
@@ -858,6 +975,8 @@ function twLoadChart(ticker, tf){
       twApplyType();
       twApplyEvents(twChartState.events);
       twChartState.chart.timeScale().fitContent();
+      twLoadDrawings();
+      twRenderIndicators();
       twOhlcv(bars, tf);
       twEstCost();
       twChartHideMsg();
@@ -919,6 +1038,9 @@ function twRenderInsiders(data){
   });
   document.querySelectorAll('.tw-tf-btn').forEach(function(btn){btn.classList.toggle('active',btn.dataset.tf===twChartState.tf);});
   var volBtn=document.getElementById('tw-volume-btn'); if(volBtn) volBtn.classList.toggle('active',twChartState.showVolume);
+  var rsiBtn=document.getElementById('tw-rsi-btn'); if(rsiBtn) rsiBtn.classList.toggle('active',twChartState.indicators.rsi);
+  var macdBtn=document.getElementById('tw-macd-btn'); if(macdBtn) macdBtn.classList.toggle('active',twChartState.indicators.macd);
+  twApplyIndicatorVisibility();
   twApplyType();
   var first=document.querySelector('.tw-wl-row.active')||document.querySelector('.tw-wl-row');
   if(first && first.dataset.ticker){ twLoadChart(first.dataset.ticker,twChartState.tf); twLoadIntelligence(first.dataset.ticker); }

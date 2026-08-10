@@ -702,7 +702,8 @@ def _earnings_universe() -> list[str]:
 def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
     """
     Fetch and classify news for the watchlist + scanner universe.
-    Returns MEDIUM+ impact items only, sorted CRITICAL → HIGH → MEDIUM.
+    Returns verified provider headlines sorted by impact. LOW-impact headlines
+    remain visible as ordinary coverage instead of producing a blank scanner.
     Cached for 15 minutes.
     """
     cached = _cget("market_news")
@@ -719,11 +720,11 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
     def _fetch_one(ticker: str) -> list[dict]:
         try:
             news = _fetch_hl(ticker)
+            if news.source == "none":
+                return []
             items = []
             for headline in news.headlines[:3]:
                 impact, reason = classify_news_impact(headline, news.categories)
-                if impact == "LOW":
-                    continue
                 items.append({
                     "ticker":       ticker,
                     "headline":     headline,
@@ -763,7 +764,7 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
             unique.append(item)
 
     _cset("market_news", unique)
-    logger.info("intel/news: %d items (MEDIUM+) from %d tickers", len(unique), len(all_tickers))
+    logger.info("intel/news: %d provider headlines from %d tickers", len(unique), len(all_tickers))
     return unique
 
 
@@ -2224,7 +2225,10 @@ def get_intel_summary() -> dict:
     c_econ  = _cget("economic")
     c_macro = _cget("macro")
 
-    is_cold = (c_earn is None) or (c_split is None) or (c_econ is None)
+    # Every feed must independently re-trigger its refresh when its own TTL
+    # expires. Previously news could remain None forever while longer-lived
+    # earnings/economic caches were still warm.
+    is_cold = (c_news is None) or (c_earn is None) or (c_split is None) or (c_econ is None)
     errors: list[str] = []
 
     if is_cold:
@@ -2246,6 +2250,21 @@ def get_intel_summary() -> dict:
         remaining = max(0, int((_fh_rl_until - _time.monotonic()) / 60))
         errors.append(f"Finnhub rate-limited — using cached data ({remaining} min remaining)")
         logger.warning("get_intel_summary: Finnhub rate-limited, serving cache")
+
+    from news_fetcher import news_source_status
+    news_status = news_source_status()
+    news_status.update({
+        "count": len(c_news or []),
+        "refreshing": currently_refreshing,
+        "empty": not bool(c_news),
+    })
+    if not c_news:
+        if currently_refreshing:
+            news_status["message"] = "News refresh is running. This page will update when provider responses arrive."
+        elif news_status["configured"]:
+            news_status["message"] = "Connected news providers returned no headlines. Refresh the feed or check provider limits."
+        else:
+            news_status["message"] = "Free news fallbacks returned no headlines. Add FINNHUB_API_KEY, NEWS_API_KEY, or POLYGON_API_KEY on Render for reliable coverage."
 
     # Extract earnings buckets and debug meta separately
     _earn       = c_earn or {}
@@ -2270,6 +2289,7 @@ def get_intel_summary() -> dict:
         "last_updated":       _et_now().strftime("%I:%M %p ET"),
         "market_news":        c_news  or [],
         "news":               c_news  or [],   # alias — frontend checks both keys
+        "news_status":        news_status,
         "earnings":           earn_buckets,
         "splits":             c_split or [],
         "dividends":          c_div   or [],

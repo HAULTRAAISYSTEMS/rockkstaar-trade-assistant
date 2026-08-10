@@ -25,6 +25,14 @@ def _rows(value: Any) -> list:
     return value if isinstance(value, list) else [value]
 
 
+def _is_upcoming(value: Any) -> bool:
+    try:
+        event_date = datetime.fromisoformat(_text(value)[:10]).date()
+        return event_date >= datetime.now(timezone.utc).date()
+    except (TypeError, ValueError):
+        return False
+
+
 def _news_row(raw: Any, fallback_ticker: str = "") -> dict | None:
     if isinstance(raw, str):
         headline = raw.strip()
@@ -50,7 +58,7 @@ def _earnings_rows(summary: dict, ticker: str) -> list[dict]:
     earnings = (summary or {}).get("earnings") or {}
     for bucket in ("today", "tomorrow", "this_week", "coming_up"):
         for raw in earnings.get(bucket) or []:
-            if _ticker(raw.get("ticker")) != ticker:
+            if _ticker(raw.get("ticker")) != ticker or not _is_upcoming(raw.get("date")):
                 continue
             matches.append({
                 "ticker": ticker,
@@ -86,7 +94,7 @@ def build_terminal_intelligence(ticker: str, stock: dict | None, intel_summary: 
             break
 
     earnings = _earnings_rows(summary, ticker)
-    if not earnings and stock.get("earnings_date"):
+    if not earnings and _is_upcoming(stock.get("earnings_date")):
         earnings.append({
             "ticker": ticker,
             "date": _text(stock.get("earnings_date")),
