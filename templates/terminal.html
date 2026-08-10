@@ -375,6 +375,7 @@
         </div>
 
         <div class="tw-session-strip" id="tw-session-strip" hidden>
+          <span class="tw-session-key overnight">O/N</span><strong id="tw-overnight-quote">No overnight print</strong>
           <span class="tw-session-key pre">PRE</span><strong id="tw-pre-quote">No premarket print</strong>
           <span class="tw-session-key post">POST</span><strong id="tw-post-quote">No after-hours print</strong>
           <small>Extended-hours volume can be thin and prices more volatile.</small>
@@ -767,12 +768,13 @@ function twToggleVolume(btn){
   try { localStorage.setItem('tradestaar.chartVolume',twChartState.showVolume?'1':'0'); } catch(e) {}
 }
 function twRefreshExtendedAvailability(){
-  var btn=document.getElementById('tw-extended-btn'),supported=['1m','5m','15m','1h'].indexOf(twChartState.interval)>=0;if(!btn)return;btn.disabled=!supported;btn.classList.toggle('active',supported&&twChartState.extended);btn.title=supported?'Show premarket and after-hours candles':'Extended hours are available on intraday intervals';
+  var btn=document.getElementById('tw-extended-btn'),supported=['1m','5m','15m','1h'].indexOf(twChartState.interval)>=0;if(!btn)return;btn.disabled=false;btn.classList.toggle('active',supported&&twChartState.extended);btn.title=supported?'Show premarket and after-hours candles':'Open extended hours in a 5-minute overnight view';
   var strip=document.getElementById('tw-session-strip');if(strip&&!twChartState.extended)strip.hidden=true;
 }
 function twToggleExtended(btn){
-  if(btn.disabled)return;twChartState.extended=!twChartState.extended;btn.classList.toggle('active',twChartState.extended);if(twChartState.extended&&twChartState.type!=='candles'){twChartState.type='candles';document.querySelectorAll('.tw-type-btn[data-type]').forEach(function(b){b.classList.toggle('active',b.dataset.type==='candles');});twApplyType();}
-  try{localStorage.setItem('tradestaar.chartExtended',twChartState.extended?'1':'0');localStorage.setItem('tradestaar.chartType',twChartState.type);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);
+  var enable=!twChartState.extended,supported=['1m','5m','15m','1h'].indexOf(twChartState.interval)>=0;if(enable&&!supported){twChartState.interval='5m';twChartState.range='1d';document.querySelectorAll('.tw-tf-btn').forEach(function(b){b.classList.toggle('active',b.dataset.interval==='5m');});twPopulateRanges();}
+  twChartState.extended=enable;twRefreshExtendedAvailability();if(twChartState.extended&&twChartState.type!=='candles'){twChartState.type='candles';document.querySelectorAll('.tw-type-btn[data-type]').forEach(function(b){b.classList.toggle('active',b.dataset.type==='candles');});twApplyType();}
+  try{localStorage.setItem('tradestaar.chartExtended',twChartState.extended?'1':'0');localStorage.setItem('tradestaar.chartType',twChartState.type);localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);
 }
 function twResetView(){ if(twChartState.chart) twChartState.chart.timeScale().fitContent(); twRenderDrawings(); }
 function twToggleIndicator(name,btn){
@@ -1066,7 +1068,7 @@ function twOhlcv(bars){
 function twExtendedQuote(row){if(!row)return 'No recent print';var change=row.change_pct==null?'':(' · '+(row.change_pct>=0?'+':'')+Number(row.change_pct).toFixed(2)+'%'),date=row.date?(' · '+row.date):'';return '$'+Number(row.price).toFixed(2)+change+' · '+twFmtVol(row.volume)+date;}
 function twRestoreRegularQuote(){var row=document.querySelector('.tw-wl-row.active');if(!row)return;twNum('tw-c-price',row.dataset.price||'—');var chg=document.getElementById('tw-c-chg'),dir=row.dataset.chgdir;if(chg){chg.textContent=row.dataset.chg||'0.00%';chg.className='tw-sym-chg '+(dir==='pos'?'chg-pos':(dir==='neg'?'chg-neg':'chg-flat'));}}
 function twRenderExtendedSummary(summary){
-  var strip=document.getElementById('tw-session-strip');if(!strip)return;strip.hidden=!twChartState.extended;if(!twChartState.extended){twRestoreRegularQuote();return;}twNum('tw-pre-quote',twExtendedQuote(summary&&summary.premarket));twNum('tw-post-quote',twExtendedQuote(summary&&summary.after_hours));
+  var strip=document.getElementById('tw-session-strip');if(!strip)return;strip.hidden=!twChartState.extended;if(!twChartState.extended){twRestoreRegularQuote();return;}twNum('tw-overnight-quote',twExtendedQuote(summary&&summary.latest));twNum('tw-pre-quote',twExtendedQuote(summary&&summary.premarket));twNum('tw-post-quote',twExtendedQuote(summary&&summary.after_hours));
   var latest=summary&&summary.latest;if(latest){twNum('tw-c-price',Number(latest.price).toFixed(2));var chg=document.getElementById('tw-c-chg');if(chg&&latest.change_pct!=null){var pct=Number(latest.change_pct);chg.textContent=(latest.session==='premarket'?'PRE ':'POST ')+(pct>=0?'+':'')+pct.toFixed(2)+'%';chg.className='tw-sym-chg '+(pct>=0?'chg-pos':'chg-neg');}}
 }
 function twCandleDatum(bar){
