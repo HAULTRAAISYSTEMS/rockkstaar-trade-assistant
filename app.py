@@ -4725,7 +4725,8 @@ def api_terminal_candles(ticker):
     cached = _TERMINAL_CANDLE_CACHE.get(key)
     if cached and (_time.time() - cached["ts"]) < ttl:
         return jsonify({"ok": True, "ticker": ticker, "tf": tf,
-                        "bars": cached["bars"], "cached": True})
+                        "bars": cached["bars"], "cached": True,
+                        "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
 
     interval, range_str = _TERMINAL_TF_MAP[tf]
     data = None
@@ -4758,7 +4759,61 @@ def api_terminal_candles(ticker):
 
     _TERMINAL_CANDLE_CACHE[key] = {"ts": _time.time(), "bars": bars}
     return jsonify({"ok": True, "ticker": ticker, "tf": tf,
-                    "interval": interval, "range": range_str, "bars": bars})
+                    "interval": interval, "range": range_str, "bars": bars,
+                    "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
+
+
+@app.route("/api/terminal/intelligence/<ticker>")
+def api_terminal_intelligence(ticker):
+    """Return fast, ticker-scoped context from data already owned by the app.
+
+    SEC filings intentionally live behind a second endpoint so a slow public
+    filing service can never delay price charts, news, earnings, or Schwab UI.
+    """
+    ticker = (ticker or "").upper().strip()
+    if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
+        return jsonify({"ok": False, "error": "bad ticker"}), 400
+    try:
+        stock = get_stock_data(ticker) or {}
+    except Exception as exc:
+        logger.debug("terminal intelligence stock %s unavailable: %s", ticker, exc)
+        stock = {}
+    try:
+        summary = _intel.get_intel_summary() or {}
+    except Exception as exc:
+        logger.debug("terminal intelligence intel %s unavailable: %s", ticker, exc)
+        summary = {}
+
+    from terminal_intelligence import build_terminal_intelligence
+    payload = build_terminal_intelligence(
+        ticker,
+        stock,
+        summary,
+        ai_configured=bool(os.environ.get("NEBIUS_API_KEY")),
+    )
+    payload["links"] = {
+        "stock": url_for("stock_detail", ticker=ticker),
+        "fundamentals": url_for("fundamentals_page", ticker=ticker),
+        "ai": url_for("tradestaar_ai", ticker=ticker),
+        "smart_money": url_for("smart_money"),
+    }
+    return jsonify(payload)
+
+
+@app.route("/api/terminal/insiders/<ticker>")
+def api_terminal_insiders(ticker):
+    """Return verified corporate-insider transactions from SEC Form 4 filings."""
+    ticker = (ticker or "").upper().strip()
+    if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
+        return jsonify({"ok": False, "error": "bad ticker"}), 400
+    from smart_money import fetch_sec_form4
+    from terminal_intelligence import build_insider_payload
+    try:
+        rows, status = fetch_sec_form4([ticker], limit=20)
+    except Exception as exc:
+        logger.warning("terminal insiders %s unavailable: %s", ticker, exc)
+        rows, status = [], {"available": False, "message": "The SEC filing service is temporarily unavailable."}
+    return jsonify(build_insider_payload(ticker, rows, status))
 
 
 @app.route("/api/quick")

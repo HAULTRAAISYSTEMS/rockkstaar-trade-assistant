@@ -3,6 +3,7 @@
 {% block title %}Terminal — Tradestaar Elite{% endblock %}
 
 {% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/terminal.css') }}">
 <style>
 /* ═══════════════════════════════════════════════════════════════════
    TRADESTAAR ELITE — TRADE TERMINAL
@@ -355,11 +356,15 @@
           <div class="tw-type">
             <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Area">〰</button>
             <button class="tw-type-btn" data-type="candles" onclick="twType(this)" title="Candles">▮</button>
+            <button class="tw-type-btn active" id="tw-volume-btn" onclick="twToggleVolume(this)" title="Toggle volume">VOL</button>
+            <button class="tw-type-btn" onclick="twResetView()" title="Reset chart view">↺</button>
           </div>
         </div>
 
         <div class="tw-chart" id="tw-chart-box">
           <div class="tw-chart-canvas" id="tw-chart"></div>
+          <div class="tw-chart-tooltip" id="tw-chart-tooltip" hidden></div>
+          <div class="tw-chart-hint" id="tw-chart-hint">Hover for OHLCV · click a candle to pin</div>
           <div class="tw-chart-empty" id="tw-chart-empty">
             <div class="tw-chart-icn">📈</div>
             <div class="tw-chart-msg" id="tw-chart-msg">{{ 'Loading chart…' if stocks else 'No symbol' }}</div>
@@ -371,9 +376,37 @@
           <div><div class="k">Open</div><div class="v" id="tw-o-open">—</div></div>
           <div><div class="k">High</div><div class="v" id="tw-o-high">—</div></div>
           <div><div class="k">Low</div><div class="v" id="tw-o-low">—</div></div>
-          <div><div class="k">Vol</div><div class="v" id="tw-o-vol">—</div></div>
-          <div><div class="k">Mkt Cap</div><div class="v" id="tw-o-mcap">—</div></div>
+          <div><div class="k">Close</div><div class="v" id="tw-o-close">—</div></div>
+          <div><div class="k">Volume</div><div class="v" id="tw-o-vol">—</div></div>
         </div>
+
+        <div class="tw-context" aria-label="Ticker context">
+          <article class="tw-context-card tw-context-wide"><span>Why moving</span><strong id="tw-context-why">Loading verified context…</strong></article>
+          <article class="tw-context-card"><span>Relative volume</span><strong id="tw-context-rvol">—</strong></article>
+          <article class="tw-context-card"><span>Next earnings</span><strong id="tw-context-earnings">—</strong></article>
+          <article class="tw-context-card"><span>Insider pulse</span><strong id="tw-context-insiders">Checking SEC filings…</strong></article>
+        </div>
+      </div>
+
+      <div class="tw-panel tw-intel" id="tw-intel">
+        <div class="tw-intel-head">
+          <div><span class="tw-intel-kicker">Stock Intelligence</span><h3><span id="tw-intel-ticker">{{ stocks[0].ticker if stocks else '—' }}</span> command deck</h3></div>
+          <span class="tw-count" id="tw-intel-asof">ticker scoped</span>
+        </div>
+        <div class="tw-intel-tabs" role="tablist" aria-label="Stock intelligence sections">
+          {% for tab in ['Overview','News','Earnings','Fundamentals','Insiders','AI'] %}
+          <button class="tw-intel-tab {{ 'active' if loop.first }}" data-tab="{{ tab|lower }}" role="tab" aria-selected="{{ 'true' if loop.first else 'false' }}" onclick="twIntelTab(this)">{{ tab }}</button>
+          {% endfor %}
+        </div>
+        <div class="tw-intel-body" id="tw-intel-body">
+          <section class="tw-intel-panel active" data-panel="overview"><div class="tw-intel-loading">Loading selected ticker intelligence…</div></section>
+          <section class="tw-intel-panel" data-panel="news" hidden></section>
+          <section class="tw-intel-panel" data-panel="earnings" hidden></section>
+          <section class="tw-intel-panel" data-panel="fundamentals" hidden></section>
+          <section class="tw-intel-panel" data-panel="insiders" hidden><div class="tw-intel-loading">Checking verified SEC Form 4 filings…</div></section>
+          <section class="tw-intel-panel" data-panel="ai" hidden></section>
+        </div>
+        <div class="tw-intel-foot">Corporate insiders are sourced from SEC Form 4 filings. Congressional disclosures remain a separate feed in Smart Money.</div>
       </div>
 
       <!-- Positions -->
@@ -550,6 +583,9 @@ function twFmtVol(n){
   return String(Math.round(n));
 }
 function twNum(id, val){ var el=document.getElementById(id); if(el) el.textContent=val; }
+function twEsc(value){ return String(value==null?'':value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+function twMoney(value){ if(value===null||value===undefined||value==='') return '—'; var n=Number(value); return isFinite(n)?'$'+n.toLocaleString(undefined,{maximumFractionDigits:0}):'—'; }
+function twValue(value, suffix){ return value===null||value===undefined||value===''?'—':twEsc(value)+(suffix||''); }
 
 /* ── Mobile stock-discovery tabs ── */
 function twDiscoveryTab(name){
@@ -626,6 +662,7 @@ function twSelect(row){
   twEstCost();
   twResetTabs();
   twLoadChart(d.ticker, twChartState.tf);
+  twLoadIntelligence(d.ticker);
 }
 
 /* ── Timeframe tabs ── */
@@ -634,6 +671,7 @@ function twTf(btn){
   btn.parentElement.querySelectorAll('.tw-tf-btn').forEach(function(b){ b.classList.remove('active'); });
   btn.classList.add('active');
   twChartState.tf = btn.dataset.tf || '1D';
+  try { localStorage.setItem('tradestaar.chartTimeframe', twChartState.tf); } catch(e) {}
   if (twChartState.ticker) twLoadChart(twChartState.ticker, twChartState.tf);
 }
 function twSetTfDisabled(tf, dis){ var b=document.querySelector('.tw-tf-btn[data-tf="'+tf+'"]'); if(b){ b.disabled=!!dis; b.classList.toggle('disabled',!!dis); } }
@@ -641,7 +679,7 @@ function twResetTabs(){ document.querySelectorAll('.tw-tf-btn').forEach(function
 
 /* ── Chart type toggle (area / candles) ── */
 function twType(btn){
-  btn.parentElement.querySelectorAll('.tw-type-btn').forEach(function(b){ b.classList.remove('active'); });
+  btn.parentElement.querySelectorAll('.tw-type-btn[data-type]').forEach(function(b){ b.classList.remove('active'); });
   btn.classList.add('active');
   twChartState.type = btn.dataset.type;
   try { localStorage.setItem('tradestaar.chartType', twChartState.type); } catch(e) {}
@@ -653,6 +691,13 @@ function twApplyType(){
   twChartState.area.applyOptions({ visible: isArea });
   twChartState.candle.applyOptions({ visible: !isArea });
 }
+function twToggleVolume(btn){
+  twChartState.showVolume=!twChartState.showVolume;
+  btn.classList.toggle('active',twChartState.showVolume);
+  if(twChartState.vol) twChartState.vol.applyOptions({visible:twChartState.showVolume});
+  try { localStorage.setItem('tradestaar.chartVolume',twChartState.showVolume?'1':'0'); } catch(e) {}
+}
+function twResetView(){ if(twChartState.chart) twChartState.chart.timeScale().fitContent(); }
 
 /* ── Order ticket ── */
 function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; }
@@ -690,11 +735,16 @@ function twPreview(){
 
 /* ═══ Price chart ═══ */
 var twSavedChartType = 'area';
+var twSavedTimeframe = '1D';
+var twSavedVolume = true;
 try {
   var twStoredType = localStorage.getItem('tradestaar.chartType');
   if (twStoredType === 'candles' || twStoredType === 'area') twSavedChartType = twStoredType;
+  var twStoredTf = localStorage.getItem('tradestaar.chartTimeframe');
+  if (['1D','1W','1M','3M','1Y','ALL'].indexOf(twStoredTf)>=0) twSavedTimeframe=twStoredTf;
+  if (localStorage.getItem('tradestaar.chartVolume') === '0') twSavedVolume=false;
 } catch(e) {}
-var twChartState = { chart:null, area:null, candle:null, vol:null, ticker:null, tf:'1D', type:twSavedChartType, reqId:0, lastPrice:null };
+var twChartState = { chart:null, area:null, candle:null, vol:null, ticker:null, tf:twSavedTimeframe, type:twSavedChartType, showVolume:twSavedVolume, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[] };
 
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
 function twChartHideMsg(){ var box=document.getElementById('tw-chart-empty'); if(box) box.classList.add('hidden'); }
@@ -719,7 +769,44 @@ function twInitChart(){
   var vol=chart.addHistogramSeries({ priceFormat:{type:'volume'}, priceScaleId:'' });
   vol.priceScale().applyOptions({ scaleMargins:{ top:0.85, bottom:0 } });
   twChartState.chart=chart; twChartState.area=area; twChartState.candle=candle; twChartState.vol=vol;
+  vol.applyOptions({visible:twChartState.showVolume});
+  chart.subscribeCrosshairMove(function(param){
+    if(twChartState.pinnedTime) return;
+    var key=twTimeKey(param&&param.time), bar=twChartState.barMap[key];
+    if(bar) twShowBar(bar,param.point); else twHideTooltip();
+  });
+  chart.subscribeClick(function(param){
+    var key=twTimeKey(param&&param.time), bar=twChartState.barMap[key];
+    if(!bar){ twChartState.pinnedTime=null; twHideTooltip(); return; }
+    twChartState.pinnedTime=(twChartState.pinnedTime===key)?null:key;
+    if(twChartState.pinnedTime) twShowBar(bar,param.point,true); else twHideTooltip();
+  });
   return true;
+}
+
+function twTimeKey(time){
+  if(time==null) return '';
+  if(typeof time==='object') return [time.year,time.month,time.day].join('-');
+  return String(time);
+}
+function twBarDate(time){
+  if(typeof time==='object') return time.year+'-'+String(time.month).padStart(2,'0')+'-'+String(time.day).padStart(2,'0');
+  var d=new Date(Number(time)*1000); return isNaN(d.getTime())?String(time):d.toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+}
+function twShowBar(bar,point,pinned){
+  var box=document.getElementById('tw-chart-tooltip'); if(!box) return;
+  var move=bar.open?((bar.close-bar.open)/bar.open*100):0, cls=move>=0?'up':'down';
+  box.innerHTML='<b>'+twEsc(twChartState.ticker)+' · '+twEsc(twBarDate(bar.time))+'</b><br>'+
+    'O '+Number(bar.open).toFixed(2)+' &nbsp; H '+Number(bar.high).toFixed(2)+'<br>L '+Number(bar.low).toFixed(2)+' &nbsp; C '+Number(bar.close).toFixed(2)+
+    '<br>VOL '+twFmtVol(bar.volume)+' &nbsp; <span class="'+cls+'">'+(move>=0?'+':'')+move.toFixed(2)+'%</span>'+(pinned?' · PINNED':'');
+  box.hidden=false;
+  if(point){ var host=document.getElementById('tw-chart-box'); var left=Math.min(Math.max(8,point.x+14),Math.max(8,host.clientWidth-215)); box.style.left=left+'px'; box.style.top=(point.y>100?10:Math.min(host.clientHeight-90,point.y+18))+'px'; }
+  twSetOhlcvBar(bar);
+}
+function twHideTooltip(){ var box=document.getElementById('tw-chart-tooltip'); if(box) box.hidden=true; if(twChartState.bars.length) twOhlcv(twChartState.bars,twChartState.tf); }
+function twSetOhlcvBar(bar){
+  twNum('tw-o-open',Number(bar.open).toFixed(2)); twNum('tw-o-high',Number(bar.high).toFixed(2));
+  twNum('tw-o-low',Number(bar.low).toFixed(2)); twNum('tw-o-close',Number(bar.close).toFixed(2)); twNum('tw-o-vol',twFmtVol(bar.volume));
 }
 
 function twOhlcv(bars, tf){
@@ -734,8 +821,8 @@ function twOhlcv(bars, tf){
   twNum('tw-o-open', open!=null?open.toFixed(2):'—');
   twNum('tw-o-high', high!=null&&isFinite(high)?high.toFixed(2):'—');
   twNum('tw-o-low',  low!=null&&isFinite(low)?low.toFixed(2):'—');
+  twNum('tw-o-close', bars.length?Number(bars[bars.length-1].close).toFixed(2):'—');
   twNum('tw-o-vol',  twFmtVol(vol));
-  twNum('tw-o-mcap', '—');   // no market-cap source wired
 }
 
 function twLoadChart(ticker, tf){
@@ -765,8 +852,11 @@ function twLoadChart(ticker, tf){
       twChartState.area.setData(bars.map(function(b){ return { time:b.time, value:b.close }; }));
       twChartState.candle.setData(bars.map(function(b){ return { time:b.time, open:b.open, high:b.high, low:b.low, close:b.close }; }));
       twChartState.vol.setData(bars.map(function(b){ return { time:b.time, value:b.volume||0, color:(b.close>=b.open)?'rgba(34,197,139,0.45)':'rgba(255,77,69,0.45)' }; }));
+      twChartState.bars=bars; twChartState.barMap={}; twChartState.pinnedTime=null;
+      bars.forEach(function(b){ twChartState.barMap[twTimeKey(b.time)]=b; });
       twChartState.lastPrice = bars[bars.length-1].close;
       twApplyType();
+      twApplyEvents(twChartState.events);
       twChartState.chart.timeScale().fitContent();
       twOhlcv(bars, tf);
       twEstCost();
@@ -775,15 +865,63 @@ function twLoadChart(ticker, tf){
     .catch(function(e){ if(myReq===twChartState.reqId) twChartMsg('Chart error',(e&&e.message)||String(e)); });
 }
 
+/* ═══ Ticker intelligence ═══ */
+function twIntelTab(btn){
+  document.querySelectorAll('.tw-intel-tab').forEach(function(tab){ var on=tab===btn; tab.classList.toggle('active',on); tab.setAttribute('aria-selected',on?'true':'false'); });
+  document.querySelectorAll('.tw-intel-panel').forEach(function(panel){ var on=panel.dataset.panel===btn.dataset.tab; panel.hidden=!on; panel.classList.toggle('active',on); });
+}
+function twPanel(name,html){ var panel=document.querySelector('.tw-intel-panel[data-panel="'+name+'"]'); if(panel) panel.innerHTML=html; }
+function twEmpty(message,action){ return '<div class="tw-intel-empty">'+twEsc(message)+(action?'<br><br>'+action:'')+'</div>'; }
+function twApplyEvents(events){
+  twChartState.events=events||[];
+  var markers=(events||[]).map(function(event){
+    var date=new Date(event.date+'T12:00:00Z'); if(isNaN(date.getTime())) return null;
+    return {time:Math.floor(date.getTime()/1000),position:'aboveBar',color:'#F0B53F',shape:'circle',text:event.type==='earnings'?'E':'•'};
+  }).filter(Boolean);
+  try { twChartState.area.setMarkers(markers); twChartState.candle.setMarkers(markers); } catch(e) {}
+}
+function twRenderIntelligence(data){
+  twNum('tw-intel-ticker',data.ticker); twNum('tw-intel-asof','updated '+new Date(data.as_of).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));
+  var o=data.overview||{}, f=data.fundamentals||{}, links=data.links||{};
+  twPanel('overview','<div class="tw-intel-grid">'+
+    [['Bias',o.bias],['Setup grade',o.grade],['Daily trend',o.daily_trend],['VWAP',o.vwap==null?'—':Number(o.vwap).toFixed(2)],['EMA 20',o.ema20==null?'—':Number(o.ema20).toFixed(2)],['EMA 50',o.ema50==null?'—':Number(o.ema50).toFixed(2)],['Relative volume',o.relative_volume==null?'—':Number(o.relative_volume).toFixed(2)+'x'],['Avg volume',twFmtVol(o.average_volume)]].map(function(x){return '<div class="tw-intel-metric"><span>'+twEsc(x[0])+'</span><strong>'+twEsc(x[1]||'—')+'</strong></div>';}).join('')+
+    '</div>'+(o.catalyst?'<p class="tw-intel-copy">'+twEsc(o.catalyst)+'</p>':'') );
+  var news=(data.news||[]).map(function(row){ var title=twEsc(row.headline), href=/^https?:\/\//.test(row.url||'')?'<a href="'+twEsc(row.url)+'" target="_blank" rel="noopener noreferrer">Source ↗</a>':''; return '<article class="tw-intel-row"><div><strong>'+title+'</strong><div class="tw-intel-meta">'+twEsc([row.source,row.published].filter(Boolean).join(' · ')||'Cached app news')+'</div></div>'+href+'</article>'; }).join('');
+  twPanel('news',news?'<div class="tw-intel-list">'+news+'</div>':twEmpty('No ticker-specific headlines are available from the connected news feeds.'));
+  var earns=(data.earnings||[]).map(function(row){return '<article class="tw-intel-row"><div><strong>'+twEsc(row.date||'Date unavailable')+' · '+twEsc(row.time||'TBD')+'</strong><div class="tw-intel-meta">EPS est '+twValue(row.eps_est)+' · Revenue est '+twValue(row.revenue_est)+' · '+twEsc(row.source||'app calendar')+'</div></div></article>';}).join('');
+  twPanel('earnings',earns?'<div class="tw-intel-list">'+earns+'</div>':twEmpty('No verified upcoming earnings event is available for this ticker.'));
+  twPanel('fundamentals','<div class="tw-intel-grid"><div class="tw-intel-metric"><span>Sector</span><strong>'+twEsc(f.sector||'—')+'</strong></div><div class="tw-intel-metric"><span>Industry</span><strong>'+twEsc(f.industry||'—')+'</strong></div><div class="tw-intel-metric"><span>Relative strength</span><strong>'+twValue(f.relative_strength)+'</strong></div><div class="tw-intel-metric"><span>Trend</span><strong>'+twEsc(f.trend||'—')+'</strong></div></div><p class="tw-intel-copy">'+twEsc(f.message||'Detailed fundamentals are available in the analyzer.')+' <a class="tw-intel-action" href="'+twEsc(links.fundamentals||'/fundamentals?ticker='+data.ticker)+'">Open Fundamentals →</a></p>');
+  twPanel('ai','<p class="tw-intel-copy">'+twEsc((data.ai||{}).message||'AI context is unavailable.')+'</p><a class="tw-intel-action" href="'+twEsc(links.ai||'/ai')+'">Open Tradestaar AI with '+twEsc(data.ticker)+' →</a>');
+  var c=data.context||{}; twNum('tw-context-why',c.why_moving||'No verified catalyst or ticker headline available.');
+  twNum('tw-context-rvol',c.relative_volume==null?'—':Number(c.relative_volume).toFixed(2)+'x');
+  twNum('tw-context-earnings',c.next_earnings?(c.next_earnings.date+' · '+c.next_earnings.time):'No verified date');
+  twApplyEvents(data.events||[]);
+}
+function twLoadIntelligence(ticker){
+  var req=++twChartState.intelReqId; twNum('tw-intel-ticker',ticker); twNum('tw-context-why','Loading verified context…'); twNum('tw-context-insiders','Checking SEC filings…');
+  fetch('/api/terminal/intelligence/'+encodeURIComponent(ticker)).then(function(r){return r.json();}).then(function(data){if(req!==twChartState.intelReqId)return;if(!data.ok)throw new Error(data.error||'Unavailable');twRenderIntelligence(data);}).catch(function(){if(req===twChartState.intelReqId){twPanel('overview',twEmpty('Ticker intelligence is temporarily unavailable.'));twNum('tw-context-why','Context temporarily unavailable.');}});
+  var insiderReq=++twChartState.insiderReqId;
+  fetch('/api/terminal/insiders/'+encodeURIComponent(ticker)).then(function(r){return r.json();}).then(function(data){if(insiderReq!==twChartState.insiderReqId)return;twRenderInsiders(data);}).catch(function(){if(insiderReq===twChartState.insiderReqId){twPanel('insiders',twEmpty('The SEC filing service is temporarily unavailable.'));twNum('tw-context-insiders','SEC service unavailable');}});
+}
+function twRenderInsiders(data){
+  var status=data.status||{}, rows=data.rows||[], summary=data.summary;
+  twNum('tw-context-insiders',summary?summary.label:(status.message||'No recent verified filings'));
+  if(!rows.length){twPanel('insiders',twEmpty(status.message||'No verified recent Form 4 transactions were found.','<a class="tw-intel-action" href="/smart-money">Open Smart Money →</a>'));return;}
+  var html=rows.map(function(row){return '<article class="tw-intel-row"><div><strong><span class="tw-insider-kind '+twEsc(row.kind)+'">'+twEsc(row.kind)+'</span>'+twEsc(row.person)+' · '+twEsc(row.title)+'</strong><div class="tw-intel-meta">'+twValue(row.shares,' shares')+' · '+twMoney(row.value)+' · transaction '+twEsc(row.transaction_date||'—')+' · filed '+twEsc(row.filing_date||'—')+' · ownership after '+twValue(row.ownership_after)+'</div></div><a href="'+twEsc(row.sec_url)+'" target="_blank" rel="noopener noreferrer">SEC filing ↗</a></article>';}).join('');
+  twPanel('insiders','<div class="tw-intel-list">'+html+'</div>');
+}
+
 /* Boot */
 (function twBoot(){
   twInitChart();
   document.querySelectorAll('.tw-type-btn').forEach(function(btn){
-    btn.classList.toggle('active', btn.dataset.type === twChartState.type);
+    if(btn.dataset.type) btn.classList.toggle('active', btn.dataset.type === twChartState.type);
   });
+  document.querySelectorAll('.tw-tf-btn').forEach(function(btn){btn.classList.toggle('active',btn.dataset.tf===twChartState.tf);});
+  var volBtn=document.getElementById('tw-volume-btn'); if(volBtn) volBtn.classList.toggle('active',twChartState.showVolume);
   twApplyType();
   var first=document.querySelector('.tw-wl-row.active')||document.querySelector('.tw-wl-row');
-  if(first && first.dataset.ticker){ twLoadChart(first.dataset.ticker,'1D'); }
+  if(first && first.dataset.ticker){ twLoadChart(first.dataset.ticker,twChartState.tf); twLoadIntelligence(first.dataset.ticker); }
   else if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load.'); }
   twEstCost();
 })();
