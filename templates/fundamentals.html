@@ -1,614 +1,19 @@
-{% extends "base.html" %}
+{% extends "hx_base.html" %}
 {% block title %}Fundamentals Analyzer — Tradestaar Elite{% endblock %}
 
 {% block head_extra %}
-<style>
-  /* ── CSS variables (match Intel page) ─────────────────────────────────── */
-  .page {
-    --bg-primary:    #060708;
-    --bg-surface:    #0B0D10;
-    --bg-card:       rgba(8, 14, 36, 0.88);
-    --bg-card-hover: rgba(12, 22, 50, 0.95);
-    --bg-inset:      rgba(2, 6, 16, 0.92);
-    --border:        rgba(255, 122, 24, 0.11);
-    --border-accent: rgba(255, 122, 24, 0.26);
-    --text-primary:  #E8ECFF;
-    --text-secondary:#94A3B8;
-    --text-muted:    #4a5a72;
-    --green:      #22c55e;
-    --green-dim:  rgba(34,197,94,0.12);
-    --red:        #ef4444;
-    --red-dim:    rgba(239,68,68,0.12);
-    --amber:      #f59e0b;
-    --amber-dim:  rgba(245,158,11,0.12);
-    --purple:     #a78bfa;
-    --purple-dim: rgba(167,139,250,0.10);
-    --blue:       #FFA94D;
-    --blue-dim:   rgba(255, 169, 77,0.10);
-    --accent:      #FF7A18;
-    --accent-glow: rgba(255, 122, 24,0.22);
-    --font:    'JetBrains Mono','Fira Code','SF Mono',monospace;
-    --font-ui: 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-  }
-
-  .page {
-    max-width: 1300px;
-    margin: 0 auto;
-    padding: 24px 20px 64px;
-    font-family: var(--font-ui);
-    color: var(--text-primary);
-  }
-
-  /* ── Page header ────────────────────────────────────────────────────────── */
-  .page-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-bottom: 24px;
-    padding-bottom: 18px;
-    border-bottom: 1px solid var(--border);
-  }
-  .page-title {
-    font-size: 19px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .page-title::before {
-    content: '';
-    width: 3px;
-    height: 20px;
-    background: linear-gradient(180deg, var(--accent), rgba(255, 122, 24,0.2));
-    border-radius: 2px;
-    flex-shrink: 0;
-  }
-  .page-sub {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 3px;
-    font-family: var(--font);
-    padding-left: 13px;
-    letter-spacing: 0.02em;
-  }
-
-  /* ── Tab bar ────────────────────────────────────────────────────────────── */
-  .tab-bar {
-    display: flex;
-    gap: 0;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 28px;
-  }
-  .tab-btn {
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    padding: 10px 22px;
-    font-family: var(--font);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.10em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: color .15s, border-color .15s;
-    margin-bottom: -1px;
-  }
-  .tab-btn:hover { color: var(--text-secondary); }
-  .tab-btn.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-  }
-
-  /* ── Search form ────────────────────────────────────────────────────────── */
-  .search-wrap {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    flex-wrap: wrap;
-    margin-bottom: 28px;
-  }
-  .ticker-input {
-    background: var(--bg-inset);
-    border: 1px solid var(--border-accent);
-    border-radius: 6px;
-    color: var(--text-primary);
-    font-family: var(--font);
-    font-size: 15px;
-    font-weight: 700;
-    letter-spacing: 0.10em;
-    padding: 9px 14px;
-    text-transform: uppercase;
-    width: 130px;
-    outline: none;
-    transition: border-color .15s;
-  }
-  .ticker-input::placeholder { color: var(--text-muted); font-weight: 400; }
-  .ticker-input:focus { border-color: var(--accent); }
-  .btn-analyze {
-    background: var(--accent);
-    border: none;
-    border-radius: 6px;
-    color: #060708;
-    font-family: var(--font);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.10em;
-    padding: 10px 20px;
-    cursor: pointer;
-    text-transform: uppercase;
-    transition: opacity .15s;
-  }
-  .btn-analyze:hover { opacity: .85; }
-  .btn-refresh-link {
-    font-family: var(--font);
-    font-size: 10px;
-    color: var(--text-muted);
-    text-decoration: none;
-    letter-spacing: 0.08em;
-    transition: color .15s;
-  }
-  .btn-refresh-link:hover { color: var(--accent); }
-
-  /* ── Error banner ───────────────────────────────────────────────────────── */
-  .error-banner {
-    background: var(--red-dim);
-    border: 1px solid rgba(239,68,68,0.22);
-    border-radius: 8px;
-    color: var(--red);
-    font-size: 13px;
-    padding: 12px 16px;
-    margin-bottom: 20px;
-  }
-
-  /* ── Verdict badge (big) ────────────────────────────────────────────────── */
-  .verdict-bar {
-    display: flex;
-    align-items: center;
-    gap: 18px;
-    flex-wrap: wrap;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 18px 24px;
-    margin-bottom: 20px;
-  }
-  .verdict-badge {
-    font-family: var(--font);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    padding: 7px 16px;
-    border-radius: 6px;
-    border: 1px solid;
-  }
-  .verdict-great  { background: rgba(34,197,94,.14); color: #22c55e; border-color: rgba(34,197,94,.30); }
-  .verdict-good   { background: rgba(255, 122, 24,.14); color: #FF7A18; border-color: rgba(255, 122, 24,.30); }
-  .verdict-caution{ background: var(--amber-dim); color: var(--amber); border-color: rgba(245,158,11,.30); }
-  .verdict-avoid  { background: var(--red-dim); color: var(--red); border-color: rgba(239,68,68,.30); }
-
-  .verdict-score {
-    font-family: var(--font);
-    font-size: 24px;
-    font-weight: 800;
-    color: var(--text-primary);
-  }
-  .verdict-score-label {
-    font-family: var(--font);
-    font-size: 10px;
-    color: var(--text-muted);
-    letter-spacing: 0.08em;
-  }
-  .verdict-company {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-  .verdict-meta {
-    font-size: 11px;
-    color: var(--text-muted);
-    font-family: var(--font);
-  }
-
-  /* ── Score bar (mini) ───────────────────────────────────────────────────── */
-  .score-bar-wrap {
-    flex: 1;
-    min-width: 160px;
-  }
-  .score-bar-bg {
-    background: rgba(255,255,255,0.06);
-    border-radius: 4px;
-    height: 6px;
-    overflow: hidden;
-  }
-  .score-bar-fill {
-    height: 100%;
-    border-radius: 4px;
-    background: linear-gradient(90deg, var(--accent), #22c55e);
-    transition: width .5s ease;
-  }
-
-  /* ── Red flags ──────────────────────────────────────────────────────────── */
-  .red-flags {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-bottom: 20px;
-  }
-  .red-flag-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    background: var(--red-dim);
-    border: 1px solid rgba(239,68,68,.20);
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 12.5px;
-    color: var(--red);
-  }
-  .red-flag-icon { flex-shrink: 0; font-size: 14px; }
-
-  /* ── Section cards ──────────────────────────────────────────────────────── */
-  .sections-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    margin-bottom: 28px;
-  }
-  .section-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    overflow: hidden;
-  }
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 18px;
-    cursor: pointer;
-    user-select: none;
-    transition: background .15s;
-  }
-  .section-header:hover { background: var(--bg-card-hover); }
-  .section-header-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .section-icon { font-size: 16px; }
-  .section-name {
-    font-family: var(--font);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.10em;
-    text-transform: uppercase;
-    color: var(--text-primary);
-  }
-  .section-pts {
-    font-family: var(--font);
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--accent);
-  }
-  .section-pts-label {
-    font-size: 10px;
-    color: var(--text-muted);
-    font-family: var(--font);
-    margin-left: 4px;
-  }
-  .section-chevron {
-    font-size: 12px;
-    color: var(--text-muted);
-    transition: transform .2s;
-  }
-  .section-card.open .section-chevron { transform: rotate(180deg); }
-  .section-body {
-    display: none;
-    border-top: 1px solid var(--border);
-  }
-  .section-card.open .section-body { display: block; }
-
-  /* ── Metric rows ────────────────────────────────────────────────────────── */
-  .metric-row {
-    border-bottom: 1px solid rgba(255, 122, 24,0.06);
-    padding: 12px 18px;
-  }
-  .metric-row:last-child { border-bottom: none; }
-  .metric-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-  .metric-left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 1;
-  }
-  .metric-status {
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    font-weight: 700;
-    flex-shrink: 0;
-  }
-  .ms-pass    { background: var(--green-dim); color: var(--green); }
-  .ms-fail    { background: var(--red-dim);   color: var(--red); }
-  .ms-missing { background: rgba(100,116,139,0.12); color: var(--text-muted); }
-  .ms-manual  { background: var(--amber-dim); color: var(--amber); }
-
-  .metric-label {
-    font-size: 12.5px;
-    color: var(--text-secondary);
-    flex: 1;
-  }
-  .metric-value {
-    font-family: var(--font);
-    font-size: 11px;
-    color: var(--text-primary);
-    white-space: nowrap;
-  }
-  .metric-pts {
-    font-family: var(--font);
-    font-size: 10px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    min-width: 40px;
-    text-align: right;
-  }
-  .metric-pts-earned { color: var(--green); }
-  .edu-toggle {
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-family: var(--font);
-    font-size: 9px;
-    font-weight: 700;
-    padding: 2px 6px;
-    transition: all .15s;
-    flex-shrink: 0;
-  }
-  .edu-toggle:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .edu-panel {
-    display: none;
-    background: var(--bg-inset);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: 12px;
-    line-height: 1.65;
-    margin-top: 10px;
-    padding: 12px 14px;
-  }
-  .edu-panel.open { display: block; }
-  .edu-def   { color: var(--text-secondary); margin-bottom: 7px; }
-  .edu-why   { color: var(--text-muted); margin-bottom: 7px; }
-  .edu-formula {
-    background: rgba(255, 122, 24,0.07);
-    border-left: 2px solid var(--accent);
-    border-radius: 4px;
-    color: var(--accent);
-    font-family: var(--font);
-    font-size: 11px;
-    margin-top: 8px;
-    padding: 6px 10px;
-  }
-  .edu-label {
-    font-family: var(--font);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    margin-bottom: 3px;
-  }
-
-  /* ── History table ──────────────────────────────────────────────────────── */
-  .history-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    overflow: hidden;
-    margin-bottom: 28px;
-  }
-  .history-header {
-    padding: 12px 18px;
-    border-bottom: 1px solid var(--border);
-    font-family: var(--font);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-  }
-  .history-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 11.5px;
-    font-family: var(--font);
-  }
-  .history-table th {
-    padding: 8px 14px;
-    text-align: right;
-    color: var(--text-muted);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    border-bottom: 1px solid var(--border);
-  }
-  .history-table th:first-child { text-align: left; }
-  .history-table td {
-    padding: 9px 14px;
-    text-align: right;
-    color: var(--text-secondary);
-    border-bottom: 1px solid rgba(255, 122, 24,0.05);
-  }
-  .history-table td:first-child { text-align: left; color: var(--text-primary); font-weight: 600; }
-  .history-table tr:last-child td { border-bottom: none; }
-
-  /* ── LEARN tab ──────────────────────────────────────────────────────────── */
-  .learn-section {
-    margin-bottom: 32px;
-  }
-  .learn-title {
-    font-family: var(--font);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin-bottom: 14px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .learn-title::before {
-    content: '';
-    width: 3px;
-    height: 14px;
-    background: var(--accent);
-    border-radius: 2px;
-  }
-  .learn-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 20px 22px;
-    margin-bottom: 14px;
-  }
-  .learn-card h3 {
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 0 0 10px;
-  }
-  .learn-card p {
-    font-size: 13px;
-    line-height: 1.70;
-    color: var(--text-secondary);
-    margin: 0 0 10px;
-  }
-  .learn-card p:last-child { margin-bottom: 0; }
-  .learn-card ul {
-    list-style: none;
-    margin: 0 0 10px;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .learn-card ul li {
-    font-size: 12.5px;
-    color: var(--text-secondary);
-    line-height: 1.60;
-    padding-left: 14px;
-    position: relative;
-  }
-  .learn-card ul li::before {
-    content: '→';
-    position: absolute;
-    left: 0;
-    color: var(--accent);
-    font-size: 11px;
-  }
-  .learn-formula-block {
-    background: var(--bg-inset);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: 6px;
-    font-family: var(--font);
-    font-size: 11.5px;
-    color: var(--accent);
-    padding: 10px 14px;
-    margin: 12px 0 0;
-    line-height: 1.8;
-  }
-  .waterfall {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    margin: 14px 0 0;
-  }
-  .waterfall-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 12px;
-  }
-  .waterfall-row:nth-child(odd) { background: rgba(255, 122, 24,0.04); }
-  .waterfall-minus {
-    font-family: var(--font);
-    color: var(--red);
-    font-weight: 700;
-    width: 14px;
-  }
-  .waterfall-label { flex: 1; color: var(--text-secondary); }
-  .waterfall-result { font-family: var(--font); color: var(--text-primary); font-weight: 700; }
-  .wf-accent { color: var(--green); }
-
-  /* ── Missing-data chips ─────────────────────────────────────────────────── */
-  .missing-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 16px;
-  }
-  .missing-chip {
-    background: var(--amber-dim);
-    border: 1px solid rgba(245,158,11,.25);
-    border-radius: 4px;
-    color: var(--amber);
-    font-family: var(--font);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    padding: 3px 9px;
-    text-transform: uppercase;
-  }
-
-  /* ── Empty / landing state ──────────────────────────────────────────────── */
-  .landing-hint {
-    text-align: center;
-    padding: 56px 20px;
-    color: var(--text-muted);
-  }
-  .landing-hint-icon { font-size: 40px; margin-bottom: 14px; }
-  .landing-hint-text { font-size: 14px; line-height: 1.7; }
-
-  @media (max-width: 700px) {
-    .page { padding: 16px 12px 48px; }
-    .verdict-bar { padding: 14px; gap: 12px; }
-    .history-table { font-size: 10px; }
-    .history-table th, .history-table td { padding: 7px 8px; }
-  }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/fundamentals.css') }}" />
 {% endblock %}
 
-{% block content %}
-<div class="page">
+{% block hx_content %}
+<div class="fundamentals-shell">
 
   <!-- ── Page header ────────────────────────────────────────────────── -->
   <div class="page-header">
     <div>
+      <div class="fund-kicker">Tradestaar Elite Research Desk</div>
       <div class="page-title">Fundamentals Analyzer</div>
-      <div class="page-sub">Quality scorecard · 40-pt scale · Inline education</div>
+      <div class="page-sub">Grade balance-sheet strength, earnings quality, cash generation, and capital efficiency from one command center.</div>
     </div>
   </div>
 
@@ -637,8 +42,8 @@
          class="btn-refresh-link">↺ Force refresh</a>
       {% endif %}
     </form>
-    <div style="margin:-8px 0 18px;text-align:right;">
-      <a href="{{ url_for('stock_compare', symbols=ticker if ticker else '') }}" style="color:var(--amber);font:700 11px var(--mono);text-decoration:none;letter-spacing:.06em;">COMPARE STOCKS →</a>
+    <div class="compare-link-wrap">
+      <a href="{{ url_for('stock_compare', symbols=ticker if ticker else '') }}" class="compare-link">Compare stocks →</a>
     </div>
 
     <!-- Error -->
@@ -651,7 +56,7 @@
       <!-- Missing data notice -->
       {% if data.missing_fields %}
       <div class="missing-chips">
-        <span style="font-size:11px;color:var(--text-muted);align-self:center;margin-right:4px;">Missing data:</span>
+        <span class="missing-label">Missing data:</span>
         {% for f in data.missing_fields %}
         <span class="missing-chip">{{ f }}</span>
         {% endfor %}
@@ -661,10 +66,10 @@
       <!-- Verdict bar -->
       <div class="verdict-bar">
         <div>
-          <div class="verdict-score">{{ data.total_earned }}<span style="font-size:14px;color:var(--text-muted)">/{{ data.total_possible }}</span></div>
+          <div class="verdict-score">{{ data.total_earned }}<span class="verdict-score-total">/{{ data.total_possible }}</span></div>
           <div class="verdict-score-label">pts scored</div>
           {% if data.total_possible < 40 %}
-          <div style="font-size:10px;color:var(--amber);font-family:var(--font);margin-top:2px;">
+          <div class="score-availability">
             ({{ data.total_possible }} pts available — some data missing)
           </div>
           {% endif %}
@@ -672,13 +77,13 @@
         <div>
           <span class="verdict-badge {{ data.verdict_class }}">{{ data.verdict }}</span>
           {% if data.verdict_reason %}
-          <div style="margin-top:8px;max-width:360px;font-size:12px;line-height:1.5;color:var(--text-muted);font-family:var(--font);">
+          <div class="verdict-reason">
             {{ data.verdict_reason }}
           </div>
           {% endif %}
         </div>
         <div class="score-bar-wrap">
-          <div style="font-size:10px;color:var(--text-muted);font-family:var(--font);margin-bottom:5px;letter-spacing:0.06em;">QUALITY SCORE</div>
+          <div class="score-bar-label">Quality score</div>
           <div class="score-bar-bg">
             <div class="score-bar-fill"
                  style="width: {{ [(data.total_earned / data.total_possible * 100) if data.total_possible > 0 else 0, 100] | min }}%">
@@ -719,7 +124,7 @@
               <span class="section-icon">{{ icons.get(sec.name, '📋') }}</span>
               <span class="section-name">{{ sec.name }}</span>
             </div>
-            <div style="display:flex;align-items:center;gap:14px;">
+            <div class="section-summary">
               <div>
                 <span class="section-pts">{{ sec.earned }}/{{ sec.possible }}</span>
                 <span class="section-pts-label">pts</span>
@@ -745,7 +150,7 @@
                   {% endif %}
                   <span class="metric-label">{{ row.label }}</span>
                 </div>
-                <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+                <div class="metric-data">
                   <span class="metric-value">{{ row.value }}</span>
                   {% if row.points > 0 %}
                   <span class="metric-pts {% if row.earned > 0 %}metric-pts-earned{% endif %}">
@@ -785,7 +190,7 @@
       {% if data.history %}
       <div class="history-card">
         <div class="history-header">Historical Financial Snapshot</div>
-        <div style="overflow-x:auto;">
+        <div class="history-scroll">
           <table class="history-table">
             <thead>
               <tr>
@@ -829,7 +234,7 @@
       <div class="landing-hint-icon">📊</div>
       <div class="landing-hint-text">
         Enter a ticker above to run a full fundamental quality scorecard.<br>
-        <span style="color:var(--text-muted);font-size:12px;">Balance sheet · Income statement · Cash flow · Quality metrics · Education built in</span>
+        <span class="landing-subtext">Balance sheet · Income statement · Cash flow · Quality metrics · Education built in</span>
       </div>
     </div>
     {% endif %}
@@ -850,7 +255,7 @@
         <h3>The Core Equation</h3>
         <p>Every balance sheet is built on one identity that never breaks:</p>
         <div class="learn-formula-block">Assets = Liabilities + Shareholders' Equity</div>
-        <p style="margin-top:12px;">This means everything the company owns (assets) was funded either by borrowing (liabilities) or by the owners/retained profits (equity). If a company has $10B in assets and $6B in debt, the other $4B is the equity "cushion" protecting shareholders.</p>
+        <p class="learn-spacer">This means everything the company owns (assets) was funded either by borrowing (liabilities) or by the owners/retained profits (equity). If a company has $10B in assets and $6B in debt, the other $4B is the equity "cushion" protecting shareholders.</p>
       </div>
 
       <div class="learn-card">
@@ -890,9 +295,9 @@
           <div class="waterfall-row">
             <span class="waterfall-minus">−</span>
             <span class="waterfall-label">Cost of Goods Sold (COGS)</span>
-            <span class="waterfall-result" style="color:var(--red)">$4,000</span>
+            <span class="waterfall-result waterfall-neg">$4,000</span>
           </div>
-          <div class="waterfall-row" style="background:rgba(34,197,94,0.06)">
+          <div class="waterfall-row waterfall-subtotal">
             <span class="waterfall-minus">=</span>
             <span class="waterfall-label"><strong>Gross Profit</strong></span>
             <span class="waterfall-result">$6,000</span>
@@ -900,9 +305,9 @@
           <div class="waterfall-row">
             <span class="waterfall-minus">−</span>
             <span class="waterfall-label">Operating Expenses (SG&amp;A, R&amp;D)</span>
-            <span class="waterfall-result" style="color:var(--red)">$2,000</span>
+            <span class="waterfall-result waterfall-neg">$2,000</span>
           </div>
-          <div class="waterfall-row" style="background:rgba(34,197,94,0.06)">
+          <div class="waterfall-row waterfall-subtotal">
             <span class="waterfall-minus">=</span>
             <span class="waterfall-label"><strong>Operating Income (EBIT)</strong></span>
             <span class="waterfall-result">$4,000</span>
@@ -910,9 +315,9 @@
           <div class="waterfall-row">
             <span class="waterfall-minus">−</span>
             <span class="waterfall-label">Interest Expense &amp; Taxes</span>
-            <span class="waterfall-result" style="color:var(--red)">$1,200</span>
+            <span class="waterfall-result waterfall-neg">$1,200</span>
           </div>
-          <div class="waterfall-row" style="background:rgba(34,197,94,0.10);border-radius:6px;">
+          <div class="waterfall-row waterfall-total">
             <span class="waterfall-minus">=</span>
             <span class="waterfall-label"><strong>Net Income</strong></span>
             <span class="waterfall-result wf-accent">$2,800</span>
@@ -952,7 +357,7 @@
       <div class="learn-card">
         <h3>Free Cash Flow — Why It's the Gold Standard</h3>
         <div class="learn-formula-block">Free Cash Flow = Operating Cash Flow − Capital Expenditures</div>
-        <p style="margin-top:12px;">FCF is the cash a company generates after paying for everything needed to keep the business running. It's what the company can actually return to shareholders or reinvest in growth — without needing new debt or diluting investors. Buffett calls it "owner earnings."</p>
+        <p class="learn-spacer">FCF is the cash a company generates after paying for everything needed to keep the business running. It's what the company can actually return to shareholders or reinvest in growth — without needing new debt or diluting investors. Buffett calls it "owner earnings."</p>
         <p>When FCF ≥ Net Income, reported profits are backed by real cash (high earnings quality). When FCF &lt; Net Income, profits may be driven by accounting adjustments rather than cash changing hands — a warning sign.</p>
       </div>
 
@@ -967,17 +372,17 @@
       <div class="learn-card">
         <h3>Scorecard Verdict Guide</h3>
         <ul>
-          <li><span class="verdict-badge verdict-great" style="font-size:10px;padding:4px 10px;">34–40 pts Great Company</span> — Exceptional fundamentals across all four pillars. Strong moat candidate.</li>
-          <li><span class="verdict-badge verdict-good" style="font-size:10px;padding:4px 10px;">26–33 pts Good</span> — Solid fundamentals with minor weaknesses. Worth a closer look for long-term holding.</li>
-          <li><span class="verdict-badge verdict-caution" style="font-size:10px;padding:4px 10px;">18–25 pts Caution</span> — Mixed picture. Some areas of strength but material weaknesses present. Requires deeper due diligence.</li>
-          <li><span class="verdict-badge verdict-avoid" style="font-size:10px;padding:4px 10px;">Below 18 Avoid</span> — Significant fundamental deterioration. Not suitable for swing trading or long-term holds without a clear turnaround thesis.</li>
+          <li><span class="verdict-badge verdict-badge-compact verdict-great">34–40 pts Great Company</span> — Exceptional fundamentals across all four pillars. Strong moat candidate.</li>
+          <li><span class="verdict-badge verdict-badge-compact verdict-good">26–33 pts Good</span> — Solid fundamentals with minor weaknesses. Worth a closer look for long-term holding.</li>
+          <li><span class="verdict-badge verdict-badge-compact verdict-caution">18–25 pts Caution</span> — Mixed picture. Some areas of strength but material weaknesses present. Requires deeper due diligence.</li>
+          <li><span class="verdict-badge verdict-badge-compact verdict-avoid">Below 18 Avoid</span> — Significant fundamental deterioration. Not suitable for swing trading or long-term holds without a clear turnaround thesis.</li>
         </ul>
       </div>
     </div>
 
   </div>{# /tab-learn #}
 
-</div>{# /page #}
+</div>{# /fundamentals-shell #}
 {% endblock %}
 
 {% block scripts %}
