@@ -3,360 +3,271 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#060708" />
-  <title>Authenticate — Tradestaar Elite</title>
+  <meta name="theme-color" content="#070809" />
+  <title>Sign in — Tradestaar Elite</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet" />
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
 
     :root {
-      --bg:      #060708;
-      --card:    #071830;
-      --border:  rgba(255, 169, 77,0.18);
-      --cyan:    #FFA94D;
-      --green:   #22c55e;
-      --red:     #ef4444;
-      --amber:   #f59e0b;
-      --text:    #dde8ff;
-      --muted:   #5b7a9d;
-      --dim:     #2e4a65;
-      --mono:    'JetBrains Mono', 'Fira Code', monospace;
-      --ui:      'Inter', -apple-system, sans-serif;
+      --bg:#070809;
+      --panel:#171b21;
+      --panel-inset:#0d1014;
+      --gold:#e5b94f;
+      --gold-bright:#ffd873;
+      --copy:#f4f1e9;
+      --muted:#96999e;
+      --faint:#63676d;
+      --border:rgba(229,185,79,.24);
+      --hairline:rgba(255,255,255,.09);
+      --green:#26c68a;
+      --red:#ff6666;
+      --mono:'JetBrains Mono','Fira Code',monospace;
+      --ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     }
 
-    html, body {
-      height: 100%;
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--ui);
+    html, body { min-height:100%; }
+    body {
+      min-height:100vh;
+      overflow-x:hidden;
+      background:
+        radial-gradient(circle at 18% 42%,rgba(229,185,79,.08),transparent 31rem),
+        linear-gradient(145deg,#0c0e11 0%,var(--bg) 58%,#050607 100%);
+      color:var(--copy);
+      font-family:var(--ui);
     }
-
-    /* ── Animated grid background ── */
     body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
+      content:"";
+      position:fixed;
+      inset:0;
+      pointer-events:none;
       background-image:
-        linear-gradient(rgba(255, 169, 77,0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 169, 77,0.025) 1px, transparent 1px);
-      background-size: 40px 40px;
-      pointer-events: none;
-      z-index: 0;
+        linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
+        linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
+      background-size:54px 54px;
+      mask-image:linear-gradient(90deg,#000,transparent 75%);
     }
 
-    /* ── Glow orb ── */
-    body::after {
-      content: '';
-      position: fixed;
-      top: 20%;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 600px;
-      height: 600px;
-      background: radial-gradient(circle, rgba(255, 169, 77,0.05) 0%, transparent 65%);
-      pointer-events: none;
-      z-index: 0;
+    .login-page {
+      position:relative;
+      min-height:100vh;
+      display:grid;
+      place-items:center;
+      padding:clamp(24px,4vw,64px);
+      isolation:isolate;
+    }
+    .login-backdrop {
+      position:absolute;
+      z-index:-1;
+      left:clamp(-150px,-8vw,-40px);
+      top:50%;
+      width:min(66vw,850px);
+      aspect-ratio:1;
+      transform:translateY(-50%);
+      object-fit:contain;
+      opacity:.095;
+      filter:grayscale(1) sepia(.8) saturate(1.5) drop-shadow(0 0 70px rgba(229,185,79,.28));
+      mask-image:linear-gradient(90deg,#000 8%,rgba(0,0,0,.9) 55%,transparent 93%);
+      pointer-events:none;
+      user-select:none;
     }
 
-    /* ── Layout ── */
-    .login-wrap {
-      position: relative;
-      z-index: 1;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 2rem 1rem;
-      gap: 2rem;
+    .login-shell {
+      width:min(1160px,100%);
+      display:grid;
+      grid-template-columns:minmax(0,1.15fr) minmax(360px,.72fr);
+      align-items:center;
+      gap:clamp(52px,8vw,112px);
     }
 
-    /* ── Brand ── */
-    .login-brand {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 6px;
+    .brand-panel { min-width:0; padding:28px 0; }
+    .brand-lockup { display:flex; align-items:center; gap:13px; margin-bottom:clamp(58px,9vh,100px); }
+    .brand-mark {
+      width:42px;
+      height:42px;
+      object-fit:contain;
+      border-radius:10px;
+      filter:drop-shadow(0 8px 18px rgba(229,185,79,.2));
     }
-    .login-brand-line {
-      font-family: var(--mono);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.25em;
-      color: var(--dim);
-      text-transform: uppercase;
-    }
-    .login-brand-logo {
-      width: 112px;
-      height: 112px;
-      object-fit: contain;
-      border-radius: 22px;
-      filter: drop-shadow(0 10px 28px rgba(255, 178, 76, 0.22));
-    }
-    .login-brand-name {
-      font-family: var(--mono);
-      font-size: 28px;
-      font-weight: 900;
-      letter-spacing: 0.10em;
-      color: var(--cyan);
-      text-shadow: 0 0 24px rgba(255, 169, 77,0.40), 0 0 60px rgba(255, 169, 77,0.15);
-      text-transform: uppercase;
-    }
-    .login-brand-sub {
-      font-family: var(--mono);
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.20em;
-      color: var(--muted);
-      text-transform: uppercase;
-    }
+    .brand-wordmark { display:flex; align-items:baseline; gap:10px; font-family:var(--mono); text-transform:uppercase; }
+    .brand-name { color:var(--gold-bright); font-size:14px; font-weight:800; letter-spacing:.13em; }
+    .brand-tier { padding-left:10px; border-left:1px solid var(--border); color:var(--muted); font-size:10px; font-weight:700; letter-spacing:.2em; }
 
-    /* ── Card ── */
-    .login-card {
-      width: 100%;
-      max-width: 380px;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-top: 2px solid rgba(255, 169, 77,0.30);
-      border-radius: 6px;
-      overflow: hidden;
-      box-shadow:
-        0 0 0 1px rgba(255, 169, 77,0.05),
-        0 8px 32px rgba(0,0,0,0.6),
-        0 0 60px rgba(255, 169, 77,0.04);
+    .brand-eyebrow {
+      display:flex;
+      align-items:center;
+      gap:9px;
+      margin-bottom:18px;
+      color:var(--gold);
+      font:800 10px var(--mono);
+      letter-spacing:.18em;
+      text-transform:uppercase;
     }
+    .brand-eyebrow::before { content:""; width:28px; height:1px; background:var(--gold); }
+    .brand-heading {
+      max-width:720px;
+      color:var(--copy);
+      font-size:clamp(42px,5.2vw,76px);
+      font-weight:800;
+      letter-spacing:-.055em;
+      line-height:.97;
+    }
+    .brand-heading span { color:var(--gold); }
+    .brand-copy { max-width:590px; margin-top:22px; color:var(--muted); font-size:clamp(14px,1.35vw,17px); line-height:1.7; }
+    .brand-features { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:36px; max-width:650px; }
+    .brand-feature {
+      padding:14px 15px;
+      border:1px solid var(--hairline);
+      border-radius:12px;
+      background:rgba(17,20,24,.66);
+      backdrop-filter:blur(10px);
+    }
+    .brand-feature b { display:block; margin-bottom:4px; color:var(--gold-bright); font:800 9px var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+    .brand-feature span { color:var(--faint); font:600 10px/1.45 var(--mono); }
 
-    .login-card-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 14px 20px;
-      background: rgba(0,0,0,0.35);
-      border-bottom: 1px solid rgba(255, 169, 77,0.10);
+    .auth-card {
+      position:relative;
+      overflow:hidden;
+      border:1px solid var(--border);
+      border-radius:18px;
+      background:linear-gradient(150deg,rgba(25,29,35,.97),rgba(12,15,19,.99));
+      box-shadow:0 30px 90px rgba(0,0,0,.5),inset 0 1px rgba(255,255,255,.035);
     }
-    .login-card-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--cyan);
-      box-shadow: 0 0 6px var(--cyan);
-      animation: pulse 2s ease-in-out infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.35; }
-    }
-    .login-card-title {
-      font-family: var(--mono);
-      font-size: 10px;
-      font-weight: 800;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--cyan);
-    }
-
-    .login-card-body {
-      padding: 28px 24px 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
-
-    /* ── Error banner ── */
-    .login-error {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      background: rgba(239,68,68,0.10);
-      border: 1px solid rgba(239,68,68,0.25);
-      border-radius: 4px;
-      font-family: var(--mono);
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--red);
-    }
-
-    /* ── Field ── */
-    .login-field {
-      display: flex;
-      flex-direction: column;
-      gap: 7px;
-    }
-    .login-label {
-      font-family: var(--mono);
-      font-size: 9px;
-      font-weight: 800;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--dim);
-    }
+    .auth-card::before { content:""; position:absolute; inset:0 0 auto; height:1px; background:linear-gradient(90deg,transparent,var(--gold-bright),transparent); opacity:.72; }
+    .auth-header { padding:28px 30px 22px; border-bottom:1px solid var(--hairline); }
+    .auth-status { display:flex; align-items:center; gap:8px; margin-bottom:15px; color:var(--gold); font:800 9px var(--mono); letter-spacing:.16em; text-transform:uppercase; }
+    .auth-status-dot { width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 0 4px rgba(38,198,138,.1),0 0 15px rgba(38,198,138,.7); animation:pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity:.5; transform:scale(.82); } }
+    .auth-title { color:var(--copy); font-size:28px; font-weight:800; letter-spacing:-.035em; }
+    .auth-subtitle { margin-top:7px; color:var(--muted); font-size:12px; line-height:1.5; }
+    .auth-body { padding:27px 30px 30px; }
+    .login-error { margin-bottom:18px; padding:11px 13px; border:1px solid rgba(255,102,102,.3); border-radius:9px; background:rgba(255,102,102,.08); color:var(--red); font:700 10px/1.5 var(--mono); }
+    .auth-form { display:flex; flex-direction:column; gap:18px; }
+    .login-field { display:flex; flex-direction:column; gap:8px; }
+    .login-label { color:var(--muted); font:800 9px var(--mono); letter-spacing:.15em; text-transform:uppercase; }
     .login-input {
-      width: 100%;
-      padding: 11px 14px;
-      background: rgba(0,0,0,0.50);
-      border: 1px solid rgba(255, 169, 77,0.15);
-      border-radius: 4px;
-      font-family: var(--mono);
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text);
-      outline: none;
-      transition: border-color 0.15s, box-shadow 0.15s;
-      letter-spacing: 0.08em;
+      width:100%;
+      padding:13px 14px;
+      border:1px solid var(--hairline);
+      border-radius:9px;
+      outline:none;
+      background:var(--panel-inset);
+      color:var(--copy);
+      font:600 14px var(--mono);
+      letter-spacing:.035em;
+      transition:border-color .18s,box-shadow .18s,background .18s;
     }
-    .login-input::placeholder { color: var(--dim); letter-spacing: 0.05em; }
-    .login-input:focus {
-      border-color: rgba(255, 169, 77,0.40);
-      box-shadow: 0 0 0 3px rgba(255, 169, 77,0.06);
-    }
-
-    /* ── Button ── */
+    .login-input::placeholder { color:#45494f; font-weight:500; }
+    .login-input:hover { border-color:rgba(229,185,79,.2); }
+    .login-input:focus { border-color:var(--gold); background:#0a0c0f; box-shadow:0 0 0 3px rgba(229,185,79,.09); }
+    .remember-row { display:flex; align-items:center; gap:10px; cursor:pointer; user-select:none; }
+    .remember-row input { width:15px; height:15px; accent-color:var(--gold); cursor:pointer; }
+    .remember-row span { color:var(--faint); font:700 9px var(--mono); letter-spacing:.1em; text-transform:uppercase; }
     .login-btn {
-      width: 100%;
-      padding: 13px;
-      background: rgba(255, 169, 77,0.10);
-      border: 1px solid rgba(255, 169, 77,0.28);
-      border-radius: 4px;
-      font-family: var(--mono);
-      font-size: 12px;
-      font-weight: 900;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--cyan);
-      cursor: pointer;
-      transition: all 0.15s;
+      width:100%;
+      margin-top:2px;
+      padding:14px;
+      border:1px solid #f1c75e;
+      border-radius:9px;
+      background:linear-gradient(135deg,var(--gold-bright),#c9942c);
+      box-shadow:0 11px 26px rgba(229,185,79,.16);
+      color:#17120a;
+      cursor:pointer;
+      font:900 11px var(--mono);
+      letter-spacing:.15em;
+      text-transform:uppercase;
+      transition:transform .18s,filter .18s,box-shadow .18s;
     }
-    .login-btn:hover {
-      background: rgba(255, 169, 77,0.18);
-      border-color: rgba(255, 169, 77,0.50);
-      box-shadow: 0 0 16px rgba(255, 169, 77,0.12);
-    }
-    .login-btn:active {
-      transform: scale(0.99);
-    }
+    .login-btn:hover { filter:brightness(1.06); transform:translateY(-1px); box-shadow:0 15px 34px rgba(229,185,79,.24); }
+    .login-btn:active { transform:translateY(0); }
+    .login-footer { margin-top:21px; padding-top:19px; border-top:1px solid var(--hairline); text-align:center; }
+    .login-footer a { color:var(--gold-bright); font:700 10px var(--mono); letter-spacing:.05em; text-decoration:none; }
+    .login-footer a:hover { text-decoration:underline; }
+    .security-note { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:21px; color:var(--faint); font:600 8px var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+    .security-note span:last-child { color:var(--green); }
 
-    /* ── Footer note ── */
-    .login-footer {
-      font-family: var(--mono);
-      font-size: 9px;
-      color: var(--dim);
-      text-align: center;
-      letter-spacing: 0.05em;
+    @media (max-width:900px) {
+      .login-page { padding:28px 20px 42px; }
+      .login-backdrop { left:50%; top:2%; width:min(110vw,700px); transform:translateX(-50%); opacity:.075; mask-image:linear-gradient(#000,transparent 86%); }
+      .login-shell { grid-template-columns:1fr; width:min(500px,100%); gap:30px; }
+      .brand-panel { padding:0; text-align:center; }
+      .brand-lockup { justify-content:center; margin-bottom:30px; }
+      .brand-eyebrow { justify-content:center; margin-bottom:12px; }
+      .brand-heading { font-size:clamp(34px,9vw,52px); }
+      .brand-copy { margin:15px auto 0; font-size:13px; }
+      .brand-features { display:none; }
     }
-
-    /* ── Status row (bottom of page) ── */
-    .login-status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-family: var(--mono);
-      font-size: 9px;
-      color: var(--dim);
-      letter-spacing: 0.08em;
+    @media (max-width:480px) {
+      .login-page { place-items:start center; padding:22px 14px 34px; }
+      .brand-mark { width:34px; height:34px; }
+      .brand-name { font-size:12px; }
+      .brand-tier { font-size:8px; }
+      .brand-heading { font-size:34px; }
+      .brand-copy { max-width:330px; }
+      .auth-card { border-radius:15px; }
+      .auth-header { padding:23px 22px 19px; }
+      .auth-body { padding:23px 22px 25px; }
+      .auth-title { font-size:24px; }
     }
-    .login-status-dot {
-      width: 5px; height: 5px;
-      border-radius: 50%;
-      background: var(--green);
-      box-shadow: 0 0 4px var(--green);
-    }
-
-    @media(max-width:420px) {
-      .login-brand-name { font-size: 22px; }
-      .login-card { border-radius: 5px; }
+    @media (prefers-reduced-motion:reduce) {
+      *, *::before, *::after { scroll-behavior:auto !important; animation:none !important; transition:none !important; }
     }
   </style>
 </head>
 <body>
+  <main class="login-page">
+    <img class="login-backdrop" src="{{ url_for('static', filename='icon-512.png') }}" alt="" aria-hidden="true" />
 
-<div class="login-wrap">
-
-  <!-- Brand -->
-  <div class="login-brand">
-    <img src="{{ url_for('static', filename='logo.png') }}" alt="Tradestaar Elite" class="login-brand-logo">
-    <span class="login-brand-line">TRADESTAAR ELITE</span>
-    <span class="login-brand-name">TRADESTAAR</span>
-    <span class="login-brand-sub">Elite Market Intelligence · Terminal Access</span>
-  </div>
-
-  <!-- Login card -->
-  <div class="login-card">
-
-    <div class="login-card-header">
-      <span class="login-card-dot"></span>
-      <span class="login-card-title">Secure Access Required</span>
-    </div>
-
-    <div class="login-card-body">
-
-      {% if error %}
-      <div class="login-error">
-        ⚠ {{ error }}
-      </div>
-      {% endif %}
-
-      <form method="POST" action="/login" autocomplete="off">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="next" value="{{ next }}">
-
-        <div style="display:flex;flex-direction:column;gap:20px;">
-          <div class="login-field">
-            <label class="login-label" for="username">Username</label>
-            <input
-              class="login-input"
-              type="text"
-              id="username"
-              name="username"
-              placeholder="Enter username"
-              autofocus
-              autocomplete="username"
-            />
-          </div>
-
-          <div class="login-field">
-            <label class="login-label" for="password">Password</label>
-            <input
-              class="login-input"
-              type="password"
-              id="password"
-              name="password"
-              placeholder="Enter password"
-              autocomplete="current-password"
-            />
-          </div>
-
-          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;">
-            <input type="checkbox" name="remember_me" value="1"
-              style="width:15px;height:15px;accent-color:var(--cyan);cursor:pointer;" />
-            <span style="font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:0.10em;color:var(--muted);text-transform:uppercase;">
-              Remember me for 30 days
-            </span>
-          </label>
-
-          <button type="submit" class="login-btn">⚡ Authenticate</button>
+    <div class="login-shell">
+      <section class="brand-panel" aria-labelledby="login-brand-heading">
+        <div class="brand-lockup">
+          <img class="brand-mark" src="{{ url_for('static', filename='icon-512.png') }}" alt="Tradestaar Elite" />
+          <div class="brand-wordmark"><span class="brand-name">Tradestaar</span><span class="brand-tier">Elite</span></div>
         </div>
-      </form>
+        <div class="brand-eyebrow">Market intelligence system</div>
+        <h1 class="brand-heading" id="login-brand-heading">Read the market.<br><span>Find your edge.</span></h1>
+        <p class="brand-copy">One command center for market context, high-conviction setups, research, and disciplined execution.</p>
+        <div class="brand-features" aria-label="Tradestaar platform features">
+          <div class="brand-feature"><b>Command Center</b><span>Market regime and liquidity</span></div>
+          <div class="brand-feature"><b>Elite Terminal</b><span>Charts, studies, and context</span></div>
+          <div class="brand-feature"><b>Smart Money</b><span>Verified filing intelligence</span></div>
+        </div>
+      </section>
 
-      {% if registration_enabled %}<div class="login-footer">
-        <a href="/register" style="color:var(--cyan);text-decoration:none;opacity:0.75;transition:opacity 0.15s;"
-           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.75'">
-          Create an account →
-        </a>
-      </div>{% endif %}
+      <section class="auth-card" aria-labelledby="auth-title">
+        <header class="auth-header">
+          <div class="auth-status"><span class="auth-status-dot"></span>Secure workspace</div>
+          <h2 class="auth-title" id="auth-title">Welcome back</h2>
+          <p class="auth-subtitle">Sign in to open your Tradestaar command center.</p>
+        </header>
+        <div class="auth-body">
+          {% if error %}<div class="login-error" role="alert">⚠ {{ error }}</div>{% endif %}
 
+          <form method="POST" action="/login" autocomplete="off" class="auth-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ next }}">
+            <div class="login-field">
+              <label class="login-label" for="username">Username</label>
+              <input class="login-input" type="text" id="username" name="username" placeholder="Enter username" autofocus autocomplete="username" />
+            </div>
+            <div class="login-field">
+              <label class="login-label" for="password">Password</label>
+              <input class="login-input" type="password" id="password" name="password" placeholder="Enter password" autocomplete="current-password" />
+            </div>
+            <label class="remember-row">
+              <input type="checkbox" name="remember_me" value="1" />
+              <span>Remember me for 30 days</span>
+            </label>
+            <button type="submit" class="login-btn">Enter Tradestaar →</button>
+          </form>
+
+          {% if registration_enabled %}<div class="login-footer"><a href="/register">Create an account →</a></div>{% endif %}
+          <div class="security-note"><span>Encrypted session</span><span>● System online</span></div>
+        </div>
+      </section>
     </div>
-  </div>
-
-  <!-- Status -->
-  <div class="login-status">
-    <span class="login-status-dot"></span>
-    SYSTEM ONLINE
-  </div>
-
-</div>
-
+  </main>
 </body>
 </html>
