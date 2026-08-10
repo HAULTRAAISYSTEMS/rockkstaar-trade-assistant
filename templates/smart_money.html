@@ -25,9 +25,9 @@
   {% for row in insiders %}<article class="sm-row">
     <div><a class="sm-ticker" href="{{ url_for('stock_detail', ticker=row.ticker) }}">{{ row.ticker }}</a><span class="sm-kind {{ row.kind }}">{{ row.kind }}</span></div>
     <div class="col gap-1"><strong>{{ row.owner }}</strong><span class="faint sm-role" style="font-size:11px">{{ row.role }} · Form 4 code {{ row.code }}</span></div>
-    <div class="mono sm-value">{{ '{:,.0f}'.format(row.shares) }} shares{% if row.price is not none %}<br><span class="faint">@ ${{ '%.2f'|format(row.price) }}</span>{% endif %}</div>
+    <div class="mono sm-value">{{ '{:,.0f}'.format(row.shares) }} shares{% if row.price is not none %}<br><span class="faint">@ ${{ '%.2f'|format(row.price) }}</span>{% endif %}{% if row.get('ownership_after') is not none %}<br><span class="faint">{{ '{:,.0f}'.format(row.ownership_after) }} owned after</span>{% endif %}</div>
     <div class="mono sm-value">{% if row.value is not none %}${{ '{:,.0f}'.format(row.value) }}{% else %}<span class="faint">Value unavailable</span>{% endif %}</div>
-    <div class="sm-date"><span class="mono faint" style="font-size:10px">TRADE {{ row.trade_date }}</span><br><a class="sm-source" href="{{ row.source_url }}" target="_blank" rel="noopener noreferrer">View SEC filing ↗</a></div>
+    <div class="sm-date"><span class="mono faint" style="font-size:10px">TRADE {{ row.trade_date }}<br>FILED {{ row.filed_at }}</span><br><a class="sm-source" href="{{ row.source_url }}" target="_blank" rel="noopener noreferrer">View SEC filing ↗</a></div>
   </article>{% else %}<div class="sm-empty"><strong>No verified Form 4 transactions loaded.</strong><p class="faint">Add public companies to the active watchlist or try again after the SEC feed refreshes.</p></div>{% endfor %}
   <div class="card-ft sm-disclaimer">Form 4 codes matter: grants, awards, option exercises, and open-market trades are different events. Tradestaar shows the reported code and does not treat every acquisition as bullish.</div>
 </section>

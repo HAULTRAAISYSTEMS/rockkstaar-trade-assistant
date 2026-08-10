@@ -91,7 +91,6 @@ def _transaction_rows(xml: bytes, ticker: str, filing_url: str, filed_at: str):
     rows = []
     for tx in root.findall(".//{*}nonDerivativeTransaction"):
         code = _text(tx, "transactionCode").upper()
-        acquired = _text(tx, "transactionAcquiredDisposedCode").upper()
         shares = _text(tx, "transactionShares")
         price = _text(tx, "transactionPricePerShare")
         try:
@@ -99,7 +98,7 @@ def _transaction_rows(xml: bytes, ticker: str, filing_url: str, filed_at: str):
             price_n = float(price) if price else None
         except (TypeError, ValueError):
             continue
-        kind = "BUY" if acquired == "A" else "SELL" if acquired == "D" else "OTHER"
+        kind = "OTHER"
         # P is an open-market purchase; S is an open-market sale. Other codes
         # remain visible but are never mislabeled as discretionary buying/selling.
         if code == "P":
@@ -115,12 +114,20 @@ def _transaction_rows(xml: bytes, ticker: str, filing_url: str, filed_at: str):
             "shares": shares_n,
             "price": price_n,
             "value": shares_n * price_n if price_n is not None else None,
+            "ownership_after": _float_or_none(_text(tx, "sharesOwnedFollowingTransaction")),
             "trade_date": _text(tx, "transactionDate") or filed_at,
             "filed_at": filed_at,
             "source": "SEC Form 4",
             "source_url": filing_url,
         })
     return rows
+
+
+def _float_or_none(value):
+    try:
+        return float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
 
 
 def fetch_sec_form4(tickers, limit: int = 30) -> tuple[list[dict], dict]:

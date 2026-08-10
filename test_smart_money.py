@@ -14,6 +14,7 @@ FORM4_XML = b"""<ownershipDocument>
 <transactionAmounts><transactionShares><value>100</value></transactionShares>
 <transactionPricePerShare><value>25.50</value></transactionPricePerShare>
 <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode></transactionAmounts>
+<postTransactionAmounts><sharesOwnedFollowingTransaction><value>450</value></sharesOwnedFollowingTransaction></postTransactionAmounts>
 </nonDerivativeTransaction></nonDerivativeTable></ownershipDocument>"""
 
 
@@ -26,6 +27,12 @@ class TestSecForm4Parser(unittest.TestCase):
         self.assertEqual(rows[0]["code"], "P")
         self.assertEqual(rows[0]["value"], 2550)
         self.assertEqual(rows[0]["role"], "Director")
+        self.assertEqual(rows[0]["ownership_after"], 450)
+
+    def test_non_market_acquisition_is_not_mislabeled_as_buy(self):
+        xml = FORM4_XML.replace(b"<transactionCode>P</transactionCode>", b"<transactionCode>A</transactionCode>")
+        rows = smart_money._transaction_rows(xml, "TEST", "https://www.sec.gov/filing", "2026-08-03")
+        self.assertEqual(rows[0]["kind"], "OTHER")
 
 
 class TestCongressVerification(unittest.TestCase):
