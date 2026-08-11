@@ -7,7 +7,9 @@ from news_fetcher import CatalystNews
 
 class IntelNewsTests(unittest.TestCase):
     def tearDown(self):
-        intel_engine._cache.clear()
+        intel_engine.clear_intel_cache()
+        with intel_engine._news_state_lock:
+            intel_engine._news_refreshing = False
 
     def test_news_only_cache_clear_preserves_other_feeds(self):
         intel_engine._cache.update({
@@ -19,6 +21,20 @@ class IntelNewsTests(unittest.TestCase):
 
         self.assertNotIn("market_news", intel_engine._cache)
         self.assertIn("earnings", intel_engine._cache)
+
+    @patch("intel_engine._get_watchlist_tickers", return_value=[])
+    @patch("news_fetcher.fetch_headlines")
+    def test_failed_refresh_enters_cooldown_instead_of_refreshing_forever(self, fetch, _watchlist):
+        fetch.return_value = CatalystNews([], "", [], None, "none")
+
+        self.assertEqual(intel_engine.fetch_market_news(["META"]), [])
+        intel_engine._cset("earnings", {"today": [], "tomorrow": [], "this_week": [], "coming_up": []})
+        intel_engine._cset("splits", [])
+        intel_engine._cset("economic", [])
+        summary = intel_engine.get_intel_summary()
+
+        self.assertFalse(summary["news_status"]["refreshing"])
+        self.assertIn("retry automatically", summary["news_status"]["message"])
 
     @patch("intel_engine._get_watchlist_tickers", return_value=["META"])
     @patch("news_fetcher.fetch_headlines")

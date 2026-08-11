@@ -82,6 +82,10 @@ def _format_freshness(minutes: Optional[int]) -> str:
 
 _cache_lock = threading.Lock()
 _cache: dict = {}
+_news_state_lock = threading.Lock()
+_news_refreshing = False
+_news_retry_after = 0.0
+_news_last_failure = ""
 
 _CACHE_TTL: dict[str, int] = {
     "market_news": 600,    # 10 min  — news changes often
@@ -176,13 +180,18 @@ def _cset(key: str, data) -> None:
 
 def clear_intel_cache(namespace: str | None = None) -> None:
     """Clear every intel cache entry or only one feed namespace."""
+    global _news_retry_after, _news_last_failure
     with _cache_lock:
         if namespace is None:
             _cache.clear()
-            return
-        for key in list(_cache):
-            if key.split(":")[0] == namespace:
-                _cache.pop(key, None)
+        else:
+            for key in list(_cache):
+                if key.split(":")[0] == namespace:
+                    _cache.pop(key, None)
+    if namespace is None or namespace == "market_news":
+        with _news_state_lock:
+            _news_retry_after = 0.0
+            _news_last_failure = ""
 
 
 # ── Alert dedup ───────────────────────────────────────────────────────────────
@@ -712,9 +721,15 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
     remain visible as ordinary coverage instead of producing a blank scanner.
     Cached for 15 minutes.
     """
+    global _news_refreshing, _news_retry_after, _news_last_failure
+
     cached = _cget("market_news")
     if cached is not None:
         return cached
+    with _news_state_lock:
+        if _time.monotonic() < _news_retry_after:
+            return []
+        _news_refreshing = True
 
     wl_tickers = _get_watchlist_tickers()
     wl_set = set(wl_tickers)
@@ -774,6 +789,8 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
         # Pending work is cancelled and running calls finish independently;
         # the request never waits beyond the global deadline.
         pool.shutdown(wait=False, cancel_futures=True)
+        with _news_state_lock:
+            _news_refreshing = False
 
     # Sort by impact descending
     results.sort(key=lambda x: -_IMPACT_ORDER.get(x["impact"], 0))
@@ -791,6 +808,16 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
     # later request may retry while keyed/RSS services recover.
     if unique:
         _cset("market_news", unique)
+        with _news_state_lock:
+            _news_retry_after = 0.0
+            _news_last_failure = ""
+    else:
+        with _news_state_lock:
+            _news_retry_after = _time.monotonic() + 60
+            _news_last_failure = (
+                "No connected news source returned a usable story. "
+                "The app will retry automatically in about one minute."
+            )
     logger.info("intel/news: %d provider headlines from %d tickers", len(unique), len(all_tickers))
     return unique
 
@@ -2255,7 +2282,17 @@ def get_intel_summary() -> dict:
     # Every feed must independently re-trigger its refresh when its own TTL
     # expires. Previously news could remain None forever while longer-lived
     # earnings/economic caches were still warm.
-    is_cold = (c_news is None) or (c_earn is None) or (c_split is None) or (c_econ is None)
+    with _news_state_lock:
+        news_in_cooldown = c_news is None and _time.monotonic() < _news_retry_after
+        news_is_refreshing = _news_refreshing
+        news_failure = _news_last_failure
+    news_refresh_requested = c_news is None and not news_in_cooldown and not news_failure
+    is_cold = (
+        (c_news is None and not news_in_cooldown)
+        or (c_earn is None)
+        or (c_split is None)
+        or (c_econ is None)
+    )
     errors: list[str] = []
 
     if is_cold:
@@ -2280,14 +2317,18 @@ def get_intel_summary() -> dict:
 
     from news_fetcher import news_source_status
     news_status = news_source_status()
+    news_status_refreshing = news_is_refreshing or news_refresh_requested
     news_status.update({
         "count": len(c_news or []),
-        "refreshing": currently_refreshing,
+        "refreshing": news_status_refreshing,
         "empty": not bool(c_news),
+        "last_error": news_failure,
     })
     if not c_news:
-        if currently_refreshing:
+        if news_status_refreshing:
             news_status["message"] = "News refresh is running. This page will update when provider responses arrive."
+        elif news_failure:
+            news_status["message"] = news_failure
         elif news_status["configured"]:
             news_status["message"] = "Connected news providers returned no headlines. Refresh the feed or check provider limits."
         else:

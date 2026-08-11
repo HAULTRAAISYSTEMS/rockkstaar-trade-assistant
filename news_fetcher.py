@@ -5,8 +5,9 @@ Source priority (first available API key wins):
   1. Finnhub company-news    env FINNHUB_API_KEY
   2. NewsAPI everything      env NEWS_API_KEY
   3. Polygon ticker-news     env POLYGON_API_KEY
-  4. Yahoo / Seeking Alpha RSS (no key required)
-  5. yfinance .news          (no key required — always last resort)
+  4. Yahoo Finance search JSON (no key required)
+  5. Google / Yahoo / Seeking Alpha RSS (no key required)
+  6. yfinance .news          (no key required — always last resort)
 
 Usage:
     from news_fetcher import fetch_headlines, parse_catalyst_categories
@@ -496,6 +497,75 @@ def _try_polygon(ticker: str) -> CatalystNews | None:
         return None
 
 
+def _try_yahoo_search(ticker: str) -> CatalystNews | None:
+    """Bounded Yahoo Finance search endpoint with article thumbnails.
+
+    This avoids yfinance's internal request stack, which can hang when Yahoo
+    rate-limits a hosted IP. The endpoint itself remains optional: a 401/429 or
+    schema change simply falls through to the RSS providers.
+    """
+    try:
+        import urllib.parse
+        import urllib.request
+
+        query = urllib.parse.urlencode({
+            "q": ticker,
+            "quotesCount": 1,
+            "newsCount": 8,
+            "enableFuzzyQuery": "false",
+        })
+        req = urllib.request.Request(
+            f"https://query1.finance.yahoo.com/v1/finance/search?{query}",
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; TradestaarElite/1.0)",
+                "Accept": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+        rich_articles = []
+        freshness_dt = None
+        for item in payload.get("news", [])[:8]:
+            if not isinstance(item, dict) or not item.get("title"):
+                continue
+            published_at = ""
+            published = item.get("providerPublishTime")
+            if published:
+                try:
+                    published_dt = datetime.fromtimestamp(int(published), tz=timezone.utc)
+                    published_at = published_dt.isoformat()
+                    freshness_dt = freshness_dt or published_dt
+                except (TypeError, ValueError, OSError):
+                    pass
+            rich_articles.append(_article(
+                item.get("title"),
+                source=item.get("publisher") or "Yahoo Finance",
+                url=item.get("link", ""),
+                image=_thumbnail_url(item.get("thumbnail")),
+                summary=item.get("summary") or item.get("description") or "",
+                published_at=published_at,
+            ))
+            if len(rich_articles) >= 5:
+                break
+
+        headlines = [article["headline"] for article in rich_articles]
+        if not headlines:
+            return None
+        cats = parse_catalyst_categories(headlines)
+        return CatalystNews(
+            headlines=headlines,
+            summary=headlines[0],
+            categories=cats,
+            freshness_minutes=_minutes_ago(freshness_dt),
+            source="yahoo_search",
+            articles=tuple(rich_articles),
+        )
+    except Exception as exc:
+        logger.debug("Yahoo search failed for %s: %s", ticker, exc)
+        return None
+
+
 def _try_yfinance(ticker: str) -> CatalystNews | None:
     """Fallback: yfinance .news (no key required).
 
@@ -603,12 +673,26 @@ def _try_rss(ticker: str) -> CatalystNews | None:
     Falls back to MarketWatch RSS if Yahoo RSS returns nothing.
     This is a last-resort free fallback for when all keyed sources fail.
     """
+    import urllib.parse as _urlparse
     import urllib.request as _urlreq
+    from email.utils import parsedate_to_datetime
     import html
     import re
     import xml.etree.ElementTree as ET
 
     _RSS_SOURCES = [
+        # Google News is generally reachable from hosted servers even when
+        # finance-specific Yahoo endpoints rate-limit the same IP.
+        (
+            "https://news.google.com/rss/search?"
+            + _urlparse.urlencode({
+                "q": f"{ticker} stock when:3d",
+                "hl": "en-US",
+                "gl": "US",
+                "ceid": "US:en",
+            }),
+            "google_news",
+        ),
         # Yahoo Finance RSS — different endpoint from the blocked v8 API
         (f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US",
          "yahoo_rss"),
@@ -633,6 +717,7 @@ def _try_rss(ticker: str) -> CatalystNews | None:
             root = ET.fromstring(raw)
             nodes = root.findall(".//item") or root.findall(".//{*}entry")
             rich_articles = []
+            freshness_dt = None
             for node in nodes[:8]:
                 def _find(name: str):
                     found = node.find(name)
@@ -657,13 +742,28 @@ def _try_rss(ticker: str) -> CatalystNews | None:
                         if "image" in mime or tag.endswith("thumbnail"):
                             image = child.get("url", "")
                             break
+                published_at = _text("pubDate") or _text("published") or _text("updated")
+                if published_at and freshness_dt is None:
+                    try:
+                        freshness_dt = parsedate_to_datetime(published_at)
+                    except (TypeError, ValueError, OverflowError):
+                        try:
+                            freshness_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+                        except (TypeError, ValueError):
+                            pass
+                provider = _text("source")
+                default_provider = {
+                    "google_news": "Google News",
+                    "yahoo_rss": "Yahoo Finance",
+                    "seeking_alpha": "Seeking Alpha",
+                }.get(source_name, source_name.replace("_", " ").title())
                 rich_articles.append(_article(
                     title,
-                    source="Yahoo Finance" if source_name == "yahoo_rss" else "Seeking Alpha",
+                    source=provider or default_provider,
                     url=link,
                     image=image,
                     summary=description,
-                    published_at=_text("pubDate") or _text("published") or _text("updated"),
+                    published_at=published_at,
                 ))
                 if len(rich_articles) >= 5:
                     break
@@ -677,7 +777,7 @@ def _try_rss(ticker: str) -> CatalystNews | None:
                     headlines=headlines,
                     summary=headlines[0],
                     categories=cats,
-                    freshness_minutes=None,
+                    freshness_minutes=_minutes_ago(freshness_dt),
                     source=source_name,
                     articles=tuple(rich_articles),
                 )
@@ -708,12 +808,19 @@ _EMPTY = CatalystNews(
 def fetch_headlines(ticker: str) -> CatalystNews:
     """
     Fetch catalyst headlines using the best available source.
-    Priority: Finnhub → NewsAPI → Polygon → RSS → yfinance → empty fallback.
+    Priority: Finnhub → NewsAPI → Polygon → Yahoo search → RSS → yfinance.
     Never raises — always returns a CatalystNews.
     """
     # RSS is attempted before yfinance because it is a bounded HTTP request;
     # yfinance can hang behind Yahoo rate limits on hosted environments.
-    for fn in (_try_finnhub, _try_newsapi, _try_polygon, _try_rss, _try_yfinance):
+    for fn in (
+        _try_finnhub,
+        _try_newsapi,
+        _try_polygon,
+        _try_yahoo_search,
+        _try_rss,
+        _try_yfinance,
+    ):
         result = fn(ticker)
         if result is not None:
             logger.info("fetch_headlines  ticker=%s  source=%s  headlines=%d",
