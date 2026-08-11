@@ -55,6 +55,29 @@ class WatchlistSectionTests(unittest.TestCase):
         self.assertEqual(structure["sections"], [])
         self.assertEqual(structure["unsectioned"], ["GLD"])
 
+    def test_personal_ticker_is_mirrored_to_exactly_one_automatic_bucket(self):
+        lists = {row["name"]: row["id"] for row in database.get_all_watchlists(1)}
+        database.add_ticker_to_watchlist(lists["BATTLEFIELD"], "NVDA")
+        database.add_ticker_to_watchlist(lists["SETUPS FORMING"], "NVDA")
+
+        changed = database.sync_ticker_auto_bucket("NVDA", 1, "A+ READY")
+
+        self.assertTrue(changed)
+        memberships = set(database.get_ticker_watchlist_ids("NVDA", 1))
+        self.assertIn(lists["BATTLEFIELD"], memberships)
+        self.assertIn(lists["A+ READY"], memberships)
+        self.assertNotIn(lists["SETUPS FORMING"], memberships)
+        self.assertEqual(
+            memberships & {lists[name] for name in database.DEFAULT_WATCHLISTS},
+            {lists["A+ READY"]},
+        )
+
+    def test_untracked_ticker_is_not_inserted_into_automatic_bucket(self):
+        changed = database.sync_ticker_auto_bucket("GHOST", 1, "SETUPS FORMING")
+
+        self.assertFalse(changed)
+        self.assertEqual(database.get_ticker_watchlist_ids("GHOST", 1), [])
+
 
 if __name__ == "__main__":
     unittest.main()

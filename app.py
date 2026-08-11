@@ -35,7 +35,7 @@ from database import (
     move_watchlist_ticker, save_watchlist_order,
     add_ticker_to_watchlist, remove_ticker_from_watchlist,
     remove_ticker_from_defaults,
-    get_ticker_watchlist_ids, set_ticker_watchlists,
+    get_ticker_watchlist_ids, set_ticker_watchlists, sync_ticker_auto_bucket,
     upsert_stock_data, get_stock_data, get_all_stock_data,
     update_live_fields,
     set_stock_classify, set_auto_classify,
@@ -558,7 +558,9 @@ def _prev_trading_day() -> str:
     return candidate.isoformat()
 
 
-def auto_refresh_stale_closes(tickers: list, data_map: dict | None = None) -> list:
+def auto_refresh_stale_closes(
+    tickers: list, data_map: dict | None = None, user_id: int = 1
+) -> list:
     """
     Identify stale tickers and kick off a background refresh for each one.
 
@@ -624,7 +626,7 @@ def auto_refresh_stale_closes(tickers: list, data_map: dict | None = None) -> li
                 fresh  = generate_stock_data(ticker)
                 result = _upsert_or_keep_snapshot(fresh, existing=_all_existing.get(ticker))
                 if result == "updated":
-                    run_auto_classification(ticker)
+                    run_auto_classification(ticker, user_id)
                 logger.info(
                     "auto_refresh  ticker=%s  stage=complete  "
                     "prev_close_date=%s  state=%s  result=%s",
@@ -1001,9 +1003,8 @@ def get_active_wl_id() -> int | None:
 
 def run_auto_classification(ticker: str, user_id: int = 1):
     """
-    Classify a ticker and, if auto_classify is ON, move it to the appropriate
-    default watchlist. Only reorganizes memberships within the four DEFAULT_WATCHLISTS;
-    never touches user-created custom watchlists.
+    Classify a ticker and, if auto_classify is ON, mirror it into the appropriate
+    automatic setup bucket. Personal/custom memberships are preserved.
 
     Called after every upsert_stock_data (add, refresh, refresh-single).
     """
@@ -1027,28 +1028,9 @@ def run_auto_classification(ticker: str, user_id: int = 1):
     if not default_wl_map:
         return
 
-    target_id = default_wl_map.get(target_name)
-    if not target_id:
+    if target_name not in default_wl_map:
         return
-
-    # Only reorganize if the stock is already in at least one default list
-    current_ids = set(get_ticker_watchlist_ids(ticker, user_id))
-    default_ids = set(default_wl_map.values())
-    in_defaults = current_ids & default_ids
-
-    if not in_defaults:
-        # Stock lives only in custom lists — don't auto-insert into defaults
-        return
-
-    if target_id in in_defaults and len(in_defaults) == 1:
-        # Already in the correct list and only that list — nothing to do
-        return
-
-    # Move: add to target first (preserves stock_data), then remove from others
-    add_ticker_to_watchlist(target_id, ticker)
-    for wid in in_defaults:
-        if wid != target_id:
-            remove_ticker_from_watchlist(wid, ticker)
+    sync_ticker_auto_bucket(ticker, user_id, target_name)
 
 
 def seed_demo_data():
@@ -3267,7 +3249,7 @@ def _dashboard_inner():
 
     # Pass data_map so auto_refresh and expire don't make additional DB calls.
     if watchlist:
-        auto_refresh_stale_closes(watchlist, data_map=data_map)
+        auto_refresh_stale_closes(watchlist, data_map=data_map, user_id=uid)
         _expire_stuck_loading(watchlist, data_map=data_map)
 
     # Annotate per ticker — one bad ticker must not crash the whole dashboard
@@ -3393,7 +3375,7 @@ def _dashboard_inner():
     )
 
 
-def _onboard_ticker_bg(ticker: str) -> None:
+def _onboard_ticker_bg(ticker: str, user_id: int = 1) -> None:
     """
     Background onboarding pipeline for a newly added ticker.
 
@@ -3513,7 +3495,7 @@ def _onboard_ticker_bg(ticker: str) -> None:
         fresh  = generate_stock_data(ticker)
         result = _upsert_or_keep_snapshot(fresh, existing=_stage1_snap)
         if result == "updated":
-            run_auto_classification(ticker)
+            run_auto_classification(ticker, user_id)
         logger.info(
             "onboard_bg  ticker=%s  stage=2_complete  state=%s  result=%s",
             ticker, fresh.get("ticker_state"), result,
@@ -3566,7 +3548,7 @@ def watchlist_add():
         # HTTP response returns immediately and the UI shows the Loading badge.
         threading.Thread(
             target=_onboard_ticker_bg,
-            args=(t,),
+            args=(t, uid),
             daemon=True,
             name=f"onboard-{t}",
         ).start()
@@ -3616,7 +3598,7 @@ def watchlist_remove(ticker):
     return _wl_next()
 
 
-def _refresh_all_worker(watchlist: list) -> None:
+def _refresh_all_worker(watchlist: list, user_id: int = 1) -> None:
     """
     Background worker for refresh_all.  Runs in a daemon thread so the HTTP
     response returns immediately (no gunicorn timeout).
@@ -3630,7 +3612,7 @@ def _refresh_all_worker(watchlist: list) -> None:
                 fresh  = generate_stock_data(ticker)
                 result = _upsert_or_keep_snapshot(fresh, existing=_all_existing.get(ticker))
                 if result == "updated":
-                    run_auto_classification(ticker)
+                    run_auto_classification(ticker, user_id)
                 logger.info(
                     "refresh_all  ticker=%s  state=%s  result=%s",
                     ticker, fresh.get("ticker_state"), result,
@@ -3681,7 +3663,11 @@ def refresh_all():
             return redirect(url_for("dashboard"))
 
         _refresh_all_running = True
-        t = threading.Thread(target=_refresh_all_worker, args=(watchlist,), daemon=True)
+        t = threading.Thread(
+            target=_refresh_all_worker,
+            args=(watchlist, current_user_id()),
+            daemon=True,
+        )
         t.start()
         logger.info("refresh_all  stage=bg_thread_started  tickers=%s", watchlist)
     finally:
@@ -4776,7 +4762,7 @@ def terminal():
             try:
                 add_ticker_to_watchlist(wl_id, t)
                 upsert_loading_placeholder(t)
-                threading.Thread(target=_onboard_ticker_bg, args=(t,),
+                threading.Thread(target=_onboard_ticker_bg, args=(t, current_user_id()),
                                  daemon=True, name=f"seed-{t}").start()
             except Exception as _se:
                 logger.debug("terminal seed %s failed: %s", t, _se)
@@ -4787,7 +4773,9 @@ def terminal():
     data_map = {s["ticker"]: s for s in all_data}
 
     if watchlist:
-        auto_refresh_stale_closes(watchlist, data_map=data_map)
+        auto_refresh_stale_closes(
+            watchlist, data_map=data_map, user_id=current_user_id()
+        )
     stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked  = rank_stocks(stocks)
     # The left rail follows the user's saved watchlist order. Ranking remains

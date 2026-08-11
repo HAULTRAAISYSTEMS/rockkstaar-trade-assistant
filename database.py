@@ -1602,6 +1602,64 @@ def get_ticker_watchlist_ids(ticker: str, user_id=None) -> list:
     return [r["watchlist_id"] for r in rows]
 
 
+def sync_ticker_auto_bucket(ticker: str, user_id: int, target_name: str) -> bool:
+    """Mirror a user's tracked ticker into exactly one automatic setup bucket.
+
+    Personal/custom memberships are never removed.  The ticker must already
+    belong to at least one watchlist owned by the user, which prevents a global
+    stock-data refresh from inserting names the user is not tracking.
+    """
+    if target_name not in DEFAULT_WATCHLISTS:
+        return False
+
+    conn = get_db()
+    t = ticker.upper().strip()
+    target = conn.execute(
+        "SELECT id FROM watchlists WHERE user_id = ? AND name = ?",
+        (user_id, target_name),
+    ).fetchone()
+    if not target:
+        conn.close()
+        return False
+
+    membership = conn.execute(
+        "SELECT 1 FROM watchlist_stocks ws "
+        "JOIN watchlists wl ON wl.id = ws.watchlist_id "
+        "WHERE ws.ticker = ? AND wl.user_id = ? LIMIT 1",
+        (t, user_id),
+    ).fetchone()
+    if not membership:
+        conn.close()
+        return False
+
+    target_id = target["id"]
+    next_order = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order "
+        "FROM watchlist_stocks WHERE watchlist_id = ? AND section_id IS NULL",
+        (target_id,),
+    ).fetchone()["next_order"]
+    conn.execute(
+        "INSERT OR IGNORE INTO watchlist_stocks "
+        "(watchlist_id, ticker, added_date, section_id, sort_order) "
+        "VALUES (?, ?, ?, NULL, ?)",
+        (target_id, t, datetime.now().isoformat(), next_order),
+    )
+
+    other_defaults = conn.execute(
+        "SELECT id FROM watchlists WHERE user_id = ? AND name IN "
+        f"({','.join(['?'] * len(DEFAULT_WATCHLISTS))}) AND id != ?",
+        (user_id, *DEFAULT_WATCHLISTS, target_id),
+    ).fetchall()
+    for row in other_defaults:
+        conn.execute(
+            "DELETE FROM watchlist_stocks WHERE watchlist_id = ? AND ticker = ?",
+            (row["id"], t),
+        )
+    conn.commit()
+    conn.close()
+    return True
+
+
 def set_ticker_watchlists(ticker: str, watchlist_ids: list):
     """Replace all watchlist memberships for a ticker with the provided list."""
     conn = get_db()
