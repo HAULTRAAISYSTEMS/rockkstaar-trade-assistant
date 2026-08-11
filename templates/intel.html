@@ -137,10 +137,10 @@
         <div class="intel-list" id="intel-trending">{% include "_intel_trending.html" %}</div>
       </div>
       <div class="intel-card">
-        <div class="intel-card-head"><h2>Earnings Radar</h2><span>Next up</span></div>
+        <div class="intel-card-head"><h2>Earnings Radar</h2><a class="elite-link" href="{{ url_for('intel', refresh='earnings') }}">Refresh ↻</a></div>
         <div class="intel-list">
           {% for e in earnings[:6] %}<div class="intel-list-row"><a class="intel-symbol" href="{{ url_for('stock_detail', ticker=e.ticker) }}">{{ e.ticker }}</a><span class="intel-mini">{{ e.company_name or 'Earnings' }}</span><span class="intel-mini" style="text-align:right">{{ e.date_label or e.date }}<br>{{ e.time_label or 'TBD' }}</span></div>
-          {% else %}<p class="intel-mini">No earnings events are currently cached.</p>{% endfor %}
+          {% else %}<p class="intel-mini">{{ earnings_status.message }}</p>{% endfor %}
         </div>
       </div>
       <div class="intel-card">

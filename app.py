@@ -6416,7 +6416,10 @@ def api_intel():
             })
 
         if request.args.get("refresh") == "1":
-            namespace = "market_news" if request.args.get("feed") == "news" else None
+            namespace = {
+                "news": "market_news",
+                "earnings": "earnings",
+            }.get(request.args.get("feed"))
             _intel.clear_intel_cache(namespace)
 
         data = _intel.get_intel_summary()
@@ -6569,6 +6572,7 @@ def api_intel_debug():
             "earnings_source":      earn_dbg.get("earnings_source_used", "—"),
             "earnings_yfinance":    earn_dbg.get("yfinance_found", 0),
             "earnings_finnhub":     earn_dbg.get("finnhub_found", 0),
+            "earnings_nasdaq":      earn_dbg.get("nasdaq_found", 0),
             "earnings_overrides":   earn_dbg.get("overrides_injected", 0),
             "splits_count":         len(summary.get("splits", [])),
             "dividends_count":      len(summary.get("dividends", [])),
@@ -6736,6 +6740,8 @@ def intel():
     (headline sentiment and coverage momentum) are explicitly labelled so they
     cannot be mistaken for exchange volume or a third-party sentiment feed.
     """
+    if request.args.get("refresh") == "earnings":
+        _intel.clear_intel_cache("earnings")
     mkt = _get_mkt_ctx()
 
     liq, money_flow = {}, []
@@ -6747,6 +6753,7 @@ def intel():
         logger.debug("intel: liquidity fetch failed: %s", _e)
 
     events, news, earnings = [], [], []
+    earnings_status = {"refreshing": False, "message": "Upcoming reports unavailable."}
     intel_status = {"refreshing": False, "message": "News status unavailable.", "configured": False}
     try:
         summ = _intel.get_intel_summary() or {}
@@ -6760,6 +6767,13 @@ def intel():
             + list(earn.get("this_week") or [])
             + list(earn.get("coming_up") or [])
         )
+        earnings_status = {
+            "refreshing": bool(summ.get("refreshing") and not earnings),
+            "message": (
+                "Refreshing upcoming reports…" if summ.get("refreshing") and not earnings
+                else "No upcoming reports were returned. The feed will retry automatically."
+            ),
+        }
     except Exception as _e:
         logger.debug("intel: intel_summary failed: %s", _e)
 
@@ -6802,6 +6816,7 @@ def intel():
         mkt=mkt, liq=liq, money_flow=money_flow[:8],
         events=events[:8], news=enriched_news[:24], earnings=earnings[:12],
         trending=trending, briefing=briefing, story=story, intel_status=intel_status,
+        earnings_status=earnings_status,
     )
 
 

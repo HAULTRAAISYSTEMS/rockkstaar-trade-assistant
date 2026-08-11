@@ -31,7 +31,7 @@ import logging
 import os
 import threading
 import time as _time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from datetime import datetime, timedelta, date
 from typing import Optional
 
@@ -168,6 +168,11 @@ def _cget(key: str):
     ttl = _CACHE_TTL.get(ns, 900)
     with _cache_lock:
         e = _cache.get(key)
+        if ns == "earnings" and e:
+            data = e.get("data") or {}
+            count = sum(len(data.get(bucket) or []) for bucket in ("today", "tomorrow", "this_week", "coming_up"))
+            if count == 0:
+                ttl = min(ttl, 300)
         if e and (_time.monotonic() - e["ts"]) < ttl:
             return e["data"]
     return None
@@ -974,6 +979,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
         "overrides_injected":   0,
         "yfinance_found":       0,
         "finnhub_found":        0,
+        "nasdaq_found":         0,
         "earnings_errors":      [],
         "earnings_source_used": "overrides+yfinance",
     }
@@ -1320,6 +1326,7 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
     for item in nasdaq_items:
         _bucket_item(item)
         nasdaq_found += 1
+    meta["nasdaq_found"] = nasdaq_found
     if nasdaq_found:
         meta["earnings_source_used"] = meta.get("earnings_source_used", "") + "+nasdaq_marketwide"
         logger.info("intel/earnings nasdaq market-wide: %d large/mid-cap items added", nasdaq_found)
@@ -1459,8 +1466,9 @@ def _earnings_from_nasdaq(today: date, wl_set: set, already_added: set) -> list[
     def _fetch_day(ds: str) -> list[dict]:
         return _nasdaq_cal("earnings", ds)
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futs = {pool.submit(_fetch_day, ds): ds for ds in date_strs}
+    pool = ThreadPoolExecutor(max_workers=4)
+    futs = {pool.submit(_fetch_day, ds): ds for ds in date_strs}
+    try:
         for fut in as_completed(futs, timeout=20):
             ds = futs[fut]
             d  = datetime.strptime(ds, "%Y-%m-%d").date()
@@ -1503,6 +1511,17 @@ def _earnings_from_nasdaq(today: date, wl_set: set, already_added: set) -> list[
                     "is_override":  False,
                 })
                 already_added.add(ticker)
+    except FuturesTimeoutError:
+        pending = sum(not fut.done() for fut in futs)
+        logger.warning(
+            "intel/earnings nasdaq: timed out with %d day request(s) pending; keeping %d partial results",
+            pending, len(results),
+        )
+    finally:
+        for fut in futs:
+            if not fut.done():
+                fut.cancel()
+        pool.shutdown(wait=False, cancel_futures=True)
     return results
 
 
@@ -2376,6 +2395,7 @@ def get_intel_summary() -> dict:
             "overrides_injected":   earn_meta.get("overrides_injected", 0),
             "yfinance_found":       earn_meta.get("yfinance_found", 0),
             "finnhub_found":        earn_meta.get("finnhub_found", 0),
+            "nasdaq_found":         earn_meta.get("nasdaq_found", 0),
             "splits_count":         len(c_split or []),
             "dividends_count":      len(c_div   or []),
         },

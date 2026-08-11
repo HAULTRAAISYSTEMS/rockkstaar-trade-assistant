@@ -371,20 +371,28 @@
             </div>
           </div>
           <label class="tw-range-wrap"><span class="tw-control-label">Range</span><select id="tw-range" class="tw-range-select" onchange="twRange(this.value)"></select></label>
-          <div class="tw-type">
-            <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Area chart">〰</button>
-            <button class="tw-type-btn" data-type="candles" onclick="twType(this)" title="Candlestick chart">▮</button>
-            <button class="tw-type-btn active" id="tw-volume-btn" onclick="twToggleVolume(this)" title="Toggle volume">VOL</button>
-            <button class="tw-type-btn" id="tw-extended-btn" onclick="twToggleExtended(this)" title="Show premarket and after-hours candles">EXT</button>
-            <button class="tw-type-btn active" id="tw-rsi-btn" onclick="twToggleIndicator('rsi',this)" title="Toggle RSI (14)">RSI</button>
-            <button class="tw-type-btn active" id="tw-macd-btn" onclick="twToggleIndicator('macd',this)" title="Toggle MACD (12, 26, 9)">MACD</button>
-            <button class="tw-type-btn" id="tw-edit-btn" onclick="twStartDrawing('select',this)" title="Select, move, or resize a drawing">↖ EDIT</button>
-            <button class="tw-type-btn" id="tw-line-btn" onclick="twStartDrawing('line',this)" title="Drag to draw a trend line">╱ LINE</button>
-            <button class="tw-type-btn" id="tw-fib-btn" onclick="twStartDrawing('fib',this)" title="Drag to draw Fibonacci retracement">FIB</button>
-            <button class="tw-type-btn" id="tw-delete-btn" onclick="twDeleteSelected()" title="Delete selected drawing">DEL</button>
-            <button class="tw-type-btn" onclick="twClearDrawings()" title="Clear all drawings">CLR</button>
-            <button class="tw-type-btn" id="tw-studies-btn" onclick="twToggleStudySettings()" title="Indicator and drawing styles">⚙ STUDIES</button>
-            <button class="tw-type-btn" onclick="twResetView()" title="Reset chart view">↺</button>
+          <div class="tw-type" aria-label="Chart tools">
+            <div class="tw-tool-group"><span class="tw-tool-label">Chart</span><div class="tw-tool-buttons">
+              <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Line chart"><span class="tw-tool-icon">⌁</span>Line</button>
+              <button class="tw-type-btn" data-type="candles" onclick="twType(this)" title="Candlestick chart"><span class="tw-tool-icon">▮</span>Candles</button>
+            </div></div>
+            <div class="tw-tool-group"><span class="tw-tool-label">Overlays</span><div class="tw-tool-buttons">
+              <button class="tw-type-btn active" id="tw-volume-btn" onclick="twToggleVolume(this)" title="Toggle volume">Volume</button>
+              <button class="tw-type-btn" id="tw-extended-btn" onclick="twToggleExtended(this)" title="Show premarket and after-hours candles">Extended</button>
+            </div></div>
+            <div class="tw-tool-group"><span class="tw-tool-label">Indicators</span><div class="tw-tool-buttons">
+              <button class="tw-type-btn active" id="tw-rsi-btn" onclick="twToggleIndicator('rsi',this)" title="Toggle RSI (14)">RSI</button>
+              <button class="tw-type-btn active" id="tw-macd-btn" onclick="twToggleIndicator('macd',this)" title="Toggle MACD (12, 26, 9)">MACD</button>
+              <button class="tw-type-btn" id="tw-studies-btn" onclick="twToggleStudySettings()" title="Indicator settings"><span class="tw-tool-icon">⚙</span>Settings</button>
+            </div></div>
+            <div class="tw-tool-group"><span class="tw-tool-label">Draw</span><div class="tw-tool-buttons">
+              <button class="tw-type-btn" id="tw-edit-btn" onclick="twStartDrawing('select',this)" title="Select, move, or resize a drawing">Select</button>
+              <button class="tw-type-btn" id="tw-line-btn" onclick="twStartDrawing('line',this)" title="Drag to draw a trend line">Trend</button>
+              <button class="tw-type-btn" id="tw-fib-btn" onclick="twStartDrawing('fib',this)" title="Drag to draw Fibonacci retracement">Fib</button>
+              <button class="tw-type-btn tw-icon-btn" id="tw-delete-btn" onclick="twDeleteSelected()" title="Delete selected drawing" aria-label="Delete selected drawing">⌫</button>
+              <button class="tw-type-btn tw-icon-btn" onclick="twClearDrawings()" title="Clear all drawings" aria-label="Clear all drawings">×</button>
+              <button class="tw-type-btn tw-icon-btn" onclick="twResetView()" title="Reset chart view" aria-label="Reset chart view">↺</button>
+            </div></div>
           </div>
         </div>
 
@@ -431,6 +439,7 @@
         <div class="tw-draw-status" id="tw-draw-status" hidden></div>
 
         <div class="tw-chart" id="tw-chart-box">
+          <div class="tw-ema-legend" id="tw-ema-legend" aria-label="Active EMA overlays"></div>
           <div class="tw-chart-canvas" id="tw-chart"></div>
           <canvas class="tw-chart-drawing" id="tw-chart-drawing" aria-label="Chart drawing layer"></canvas>
           <div class="tw-chart-tooltip" id="tw-chart-tooltip" hidden></div>
@@ -828,7 +837,7 @@ function twSetColor(key,value){
 }
 function twSetEma(period,enabled){var style=twChartState.styles.emas[String(period)];if(!style)return;style.enabled=!!enabled;twSaveStyles();twApplyStudyStyles();twRenderEmas();}
 function twSetDrawingWidth(value){twChartState.styles.drawingWidth=Math.max(1,Math.min(4,Number(value)||2));twChartState.drawings.forEach(function(d){d.width=twChartState.styles.drawingWidth;});twSaveDrawings();twSaveStyles();twRenderDrawings();}
-function twApplyStudyStyles(){Object.keys(twChartState.emaSeries).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period].applyOptions({color:style.color,visible:!!style.enabled});});}
+function twApplyStudyStyles(){Object.keys(twChartState.emaSeries).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period].applyOptions({color:style.color,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,title:''});});}
 
 /* ── Order ticket ── */
 function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; }
@@ -942,7 +951,7 @@ function twInitChart(){
   var vol=chart.addHistogramSeries({ priceFormat:{type:'volume'}, priceScaleId:'' });
   vol.priceScale().applyOptions({ scaleMargins:{ top:0.85, bottom:0 } });
   twChartState.chart=chart; twChartState.area=area; twChartState.candle=candle; twChartState.vol=vol;
-  Object.keys(twChartState.styles.emas).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period]=chart.addLineSeries({color:style.color,lineWidth:1,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,title:'EMA '+period});});
+  Object.keys(twChartState.styles.emas).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period]=chart.addLineSeries({color:style.color,lineWidth:1,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,title:''});});
   vol.applyOptions({visible:twChartState.showVolume});
   twApplyStudyStyles();
   chart.subscribeCrosshairMove(function(param){
@@ -1057,8 +1066,9 @@ function twEma(values,period){
 }
 function twRenderEmas(){
   if(!twChartState.bars.length)return;var closes=twChartState.bars.map(function(b){return Number(b.close);});
-  Object.keys(twChartState.emaSeries).forEach(function(period){var values=twEma(closes,Number(period)),series=twChartState.emaSeries[period],style=twChartState.styles.emas[period];series.setData(twChartState.bars.map(function(bar,i){return values[i]==null?null:{time:bar.time,value:values[i]};}).filter(Boolean));series.applyOptions({color:style.color,visible:!!style.enabled});});
+  var legend=[];Object.keys(twChartState.emaSeries).forEach(function(period){var values=twEma(closes,Number(period)),series=twChartState.emaSeries[period],style=twChartState.styles.emas[period],last=values.filter(function(v){return v!=null;}).pop();series.setData(twChartState.bars.map(function(bar,i){return values[i]==null?null:{time:bar.time,value:values[i]};}).filter(Boolean));series.applyOptions({color:style.color,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,title:''});if(style.enabled&&last!=null)legend.push({period:period,value:last,color:style.color});});twRenderEmaLegend(legend);
 }
+function twRenderEmaLegend(items){var host=document.getElementById('tw-ema-legend');if(!host)return;host.replaceChildren();items.forEach(function(item){var chip=document.createElement('span'),dot=document.createElement('i'),label=document.createElement('b');dot.style.backgroundColor=item.color;label.textContent='EMA '+item.period+'  '+Number(item.value).toFixed(2);chip.appendChild(dot);chip.appendChild(label);host.appendChild(chip);});host.hidden=!items.length;}
 function twRsi(values,period){
   var out=new Array(values.length).fill(null);if(values.length<=period)return out;var gain=0,loss=0;
   for(var i=1;i<=period;i++){var d=values[i]-values[i-1];gain+=Math.max(d,0);loss+=Math.max(-d,0);}gain/=period;loss/=period;out[period]=loss===0?100:100-(100/(1+gain/loss));

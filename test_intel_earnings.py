@@ -1,6 +1,7 @@
 import unittest
 from datetime import date
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import intel_engine
 
@@ -44,6 +45,41 @@ class NasdaqEarningsTests(unittest.TestCase):
         with patch("intel_engine._get_watchlist_tickers", return_value=tickers):
             universe = intel_engine._earnings_universe()
         self.assertTrue(set(tickers).issubset(universe))
+
+    @patch("intel_engine.as_completed")
+    @patch("intel_engine._nasdaq_cal")
+    def test_marketwide_feed_keeps_partial_results_when_one_day_times_out(self, calendar, completed):
+        calendar.return_value = []
+        successful = MagicMock()
+        successful.done.return_value = True
+        successful.result.return_value = [
+            {"symbol": "MEGA", "name": "Mega Corp", "marketCap": "$42B", "time": "after hours"},
+        ]
+
+        def partial_then_timeout(_futures, timeout):
+            yield successful
+            raise intel_engine.FuturesTimeoutError()
+
+        completed.side_effect = partial_then_timeout
+        with patch("intel_engine.ThreadPoolExecutor") as executor:
+            pool = executor.return_value
+            pool.submit.side_effect = [successful] + [MagicMock() for _ in range(7)]
+            items = intel_engine._earnings_from_nasdaq(date(2026, 8, 11), set(), set())
+
+        self.assertEqual([item["ticker"] for item in items], ["MEGA"])
+        pool.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+
+    def test_empty_earnings_cache_expires_after_five_minutes(self):
+        empty = {"today": [], "tomorrow": [], "this_week": [], "coming_up": [], "meta": {}}
+        intel_engine._cache["earnings"] = {"data": empty, "ts": 100.0}
+        with patch("intel_engine._time.monotonic", return_value=401.0):
+            self.assertIsNone(intel_engine._cget("earnings"))
+        intel_engine._cache.pop("earnings", None)
+
+    def test_intel_card_exposes_earnings_refresh_control(self):
+        template = Path("templates/intel.html").read_text()
+
+        self.assertIn("url_for('intel', refresh='earnings')", template)
 
 
 if __name__ == "__main__":
