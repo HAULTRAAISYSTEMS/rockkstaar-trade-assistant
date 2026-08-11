@@ -162,6 +162,10 @@ class _Cursor:
     def lastrowid(self):
         return self._pg_lastrowid if _USE_POSTGRES else self._c.lastrowid
 
+    @property
+    def rowcount(self):
+        return self._c.rowcount
+
     def __iter__(self):
         return iter(self.fetchall())
 
@@ -362,10 +366,38 @@ def init_db():
             watchlist_id INTEGER NOT NULL,
             ticker       TEXT    NOT NULL,
             added_date   TEXT    NOT NULL,
+            section_id   INTEGER,
+            sort_order   INTEGER,
             UNIQUE(watchlist_id, ticker),
             FOREIGN KEY(watchlist_id) REFERENCES watchlists(id)
         )
     """))
+
+    # Optional user-defined groups inside a watchlist (Foundation, Growth,
+    # Safe Haven, etc.). Automatic setup lists can remain flat.
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS watchlist_sections (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            watchlist_id INTEGER NOT NULL,
+            name         TEXT    NOT NULL,
+            sort_order   INTEGER NOT NULL DEFAULT 0,
+            created_at   TEXT    NOT NULL,
+            UNIQUE(watchlist_id, name),
+            FOREIGN KEY(watchlist_id) REFERENCES watchlists(id)
+        )
+    """))
+
+    # Existing databases predate section and manual-order support.
+    for _col, _type in (("section_id", "INTEGER"), ("sort_order", "INTEGER")):
+        if _USE_POSTGRES:
+            cursor.execute(
+                f"ALTER TABLE watchlist_stocks ADD COLUMN IF NOT EXISTS {_col} {_type}"
+            )
+        else:
+            try:
+                cursor.execute(f"ALTER TABLE watchlist_stocks ADD COLUMN {_col} {_type}")
+            except Exception:
+                pass
 
     # User-defined price thresholds. These are intentionally separate from
     # scanner_alerts, which represent system-generated setup signals.
@@ -1107,6 +1139,7 @@ def delete_user(user_id: int) -> None:
         ).fetchall()]
         for wl_id in wl_ids:
             conn.execute("DELETE FROM watchlist_stocks WHERE watchlist_id = ?", (wl_id,))
+            conn.execute("DELETE FROM watchlist_sections WHERE watchlist_id = ?", (wl_id,))
     for tbl in ("watchlists", "notes", "trade_plans", "journal",
                 "daily_sessions", "schwab_imports", "setup_outcomes", "user_settings"):
         conn.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
@@ -1256,16 +1289,22 @@ def delete_watchlist(wl_id: int):
     """Delete a watchlist and its memberships. Stock data kept (may be in other lists)."""
     conn = get_db()
     conn.execute("DELETE FROM watchlist_stocks WHERE watchlist_id = ?", (wl_id,))
+    conn.execute("DELETE FROM watchlist_sections WHERE watchlist_id = ?", (wl_id,))
     conn.execute("DELETE FROM watchlists WHERE id = ?", (wl_id,))
     conn.commit()
     conn.close()
 
 
 def get_watchlist_stocks(wl_id: int) -> list:
-    """Return list of tickers in a watchlist, newest first."""
+    """Return tickers in saved section/order sequence, with ungrouped names last."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT ticker FROM watchlist_stocks WHERE watchlist_id = ? ORDER BY added_date DESC",
+        "SELECT ws.ticker FROM watchlist_stocks ws "
+        "LEFT JOIN watchlist_sections sec ON sec.id = ws.section_id "
+        "WHERE ws.watchlist_id = ? "
+        "ORDER BY CASE WHEN ws.section_id IS NULL THEN 1 ELSE 0 END, "
+        "COALESCE(sec.sort_order, 2147483647), "
+        "COALESCE(ws.sort_order, 2147483647), ws.added_date DESC",
         (wl_id,)
     ).fetchall()
     conn.close()
@@ -1308,9 +1347,15 @@ def add_ticker_to_watchlist(wl_id: int, ticker: str):
         conn.close()
         return
     try:
+        next_order = conn.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order "
+            "FROM watchlist_stocks WHERE watchlist_id = ? AND section_id IS NULL",
+            (wl_id,),
+        ).fetchone()["next_order"]
         conn.execute(
-            "INSERT INTO watchlist_stocks (watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
-            (wl_id, t, datetime.now().isoformat())
+            "INSERT INTO watchlist_stocks "
+            "(watchlist_id, ticker, added_date, section_id, sort_order) VALUES (?, ?, ?, ?, ?)",
+            (wl_id, t, datetime.now().isoformat(), None, next_order)
         )
         conn.commit()
         logger.info("DB ADD  ticker=%s wl_id=%s", t, wl_id)
@@ -1318,6 +1363,165 @@ def add_ticker_to_watchlist(wl_id: int, ticker: str):
         logger.warning("DB ADD failed  ticker=%s wl_id=%s err=%s", t, wl_id, exc)
     finally:
         conn.close()
+
+
+def get_watchlist_structure(wl_id: int) -> dict:
+    """Return ordered sections plus an ordered ungrouped ticker bucket."""
+    conn = get_db()
+    section_rows = conn.execute(
+        "SELECT id, name, sort_order FROM watchlist_sections "
+        "WHERE watchlist_id = ? ORDER BY sort_order, id",
+        (wl_id,),
+    ).fetchall()
+    stock_rows = conn.execute(
+        "SELECT ticker, section_id, sort_order, added_date FROM watchlist_stocks "
+        "WHERE watchlist_id = ? "
+        "ORDER BY COALESCE(sort_order, 2147483647), added_date DESC",
+        (wl_id,),
+    ).fetchall()
+    conn.close()
+
+    sections = [dict(row) | {"tickers": []} for row in section_rows]
+    by_id = {section["id"]: section for section in sections}
+    unsectioned = []
+    for row in stock_rows:
+        ticker = row["ticker"]
+        section = by_id.get(row["section_id"])
+        if section:
+            section["tickers"].append(ticker)
+        else:
+            unsectioned.append(ticker)
+    return {"sections": sections, "unsectioned": unsectioned}
+
+
+def create_watchlist_section(wl_id: int, name: str) -> int:
+    """Create an ordered section in a watchlist and return its id."""
+    conn = get_db()
+    clean_name = name.strip()
+    existing = conn.execute(
+        "SELECT id FROM watchlist_sections WHERE watchlist_id = ? AND name = ?",
+        (wl_id, clean_name),
+    ).fetchone()
+    if existing:
+        conn.close()
+        raise ValueError(f"Section '{clean_name}' already exists.")
+    next_order = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order "
+        "FROM watchlist_sections WHERE watchlist_id = ?",
+        (wl_id,),
+    ).fetchone()["next_order"]
+    cur = conn.execute(
+        "INSERT INTO watchlist_sections (watchlist_id, name, sort_order, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        (wl_id, clean_name, next_order, datetime.now().isoformat()),
+        returning_id=True,
+    )
+    section_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return section_id
+
+
+def rename_watchlist_section(section_id: int, wl_id: int, name: str) -> None:
+    conn = get_db()
+    conn.execute(
+        "UPDATE watchlist_sections SET name = ? WHERE id = ? AND watchlist_id = ?",
+        (name.strip(), section_id, wl_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_watchlist_section(section_id: int, wl_id: int) -> None:
+    """Delete a section without deleting its tickers; they become ungrouped."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE watchlist_stocks SET section_id = NULL WHERE watchlist_id = ? AND section_id = ?",
+        (wl_id, section_id),
+    )
+    conn.execute(
+        "DELETE FROM watchlist_sections WHERE id = ? AND watchlist_id = ?",
+        (section_id, wl_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def move_watchlist_ticker(wl_id: int, ticker: str, section_id=None) -> bool:
+    """Move one ticker to a section (or None for ungrouped) and append it there."""
+    conn = get_db()
+    resolved_section = None
+    if section_id not in (None, "", "none"):
+        row = conn.execute(
+            "SELECT id FROM watchlist_sections WHERE id = ? AND watchlist_id = ?",
+            (int(section_id), wl_id),
+        ).fetchone()
+        if not row:
+            conn.close()
+            return False
+        resolved_section = row["id"]
+    if resolved_section is None:
+        next_row = conn.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order "
+            "FROM watchlist_stocks WHERE watchlist_id = ? AND section_id IS NULL",
+            (wl_id,),
+        ).fetchone()
+    else:
+        next_row = conn.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order "
+            "FROM watchlist_stocks WHERE watchlist_id = ? AND section_id = ?",
+            (wl_id, resolved_section),
+        ).fetchone()
+    next_order = next_row["next_order"]
+    cur = conn.execute(
+        "UPDATE watchlist_stocks SET section_id = ?, sort_order = ? "
+        "WHERE watchlist_id = ? AND ticker = ?",
+        (resolved_section, next_order, wl_id, ticker.upper().strip()),
+    )
+    conn.commit()
+    changed = cur.rowcount > 0
+    conn.close()
+    return changed
+
+
+def save_watchlist_order(wl_id: int, groups: list) -> None:
+    """Persist section order and ticker order from a validated UI payload."""
+    conn = get_db()
+    valid_sections = {
+        row["id"] for row in conn.execute(
+            "SELECT id FROM watchlist_sections WHERE watchlist_id = ?", (wl_id,)
+        ).fetchall()
+    }
+    valid_tickers = {
+        row["ticker"] for row in conn.execute(
+            "SELECT ticker FROM watchlist_stocks WHERE watchlist_id = ?", (wl_id,)
+        ).fetchall()
+    }
+    seen_tickers = set()
+    seen_sections = set()
+    for section_order, group in enumerate(groups):
+        raw_section = group.get("section_id")
+        section_id = None if raw_section in (None, "", "none") else int(raw_section)
+        if section_id is not None:
+            if section_id not in valid_sections or section_id in seen_sections:
+                continue
+            seen_sections.add(section_id)
+            conn.execute(
+                "UPDATE watchlist_sections SET sort_order = ? WHERE id = ? AND watchlist_id = ?",
+                (section_order, section_id, wl_id),
+            )
+        for ticker_order, raw_ticker in enumerate(group.get("tickers") or []):
+            ticker = str(raw_ticker).upper().strip()
+            if ticker not in valid_tickers or ticker in seen_tickers:
+                continue
+            seen_tickers.add(ticker)
+            conn.execute(
+                "UPDATE watchlist_stocks SET section_id = ?, sort_order = ? "
+                "WHERE watchlist_id = ? AND ticker = ?",
+                (section_id, ticker_order, wl_id, ticker),
+            )
+    conn.commit()
+    conn.close()
 
 
 def remove_ticker_from_watchlist(wl_id: int, ticker: str):

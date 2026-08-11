@@ -12,13 +12,17 @@
   .te-symbol-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px}
   .te-symbol{display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid var(--border);border-radius:13px;background:rgba(255,255,255,.025)}
   .te-symbol-main{color:inherit;text-decoration:none;min-width:0;flex:1}.te-symbol-ticker{font:700 16px var(--font-mono);color:#f5d66d}
+  .te-organizer{display:flex;flex-direction:column;gap:10px}.te-organizer-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.te-organizer-help{color:var(--elite-faint);font-size:11px;line-height:1.45}.te-save-state{color:var(--elite-faint);font:700 9px var(--font-mono);letter-spacing:.08em;text-transform:uppercase}.te-save-state.saving{color:var(--elite-gold)}.te-save-state.saved{color:var(--pos-500)}
+  .te-section{overflow:hidden;border:1px solid var(--elite-hairline);border-radius:13px;background:rgba(255,255,255,.018)}.te-section.is-dragging,.te-ticker-row.is-dragging{opacity:.45}.te-section.is-over{border-color:var(--elite-gold)}
+  .te-section-hd{display:flex;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--elite-hairline);background:linear-gradient(90deg,rgba(229,185,79,.09),rgba(255,255,255,.015))}.te-drag-handle{display:inline-flex;align-items:center;justify-content:center;width:24px;height:28px;color:var(--elite-faint);font:800 13px var(--font-mono);cursor:grab;user-select:none}.te-drag-handle:active{cursor:grabbing}.te-section-name-form{display:flex;align-items:center;gap:6px;flex:1;min-width:0}.te-section-name{width:min(250px,100%);padding:7px 9px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--elite-gold-bright);font:700 11px var(--font-display);letter-spacing:.08em;text-transform:uppercase}.te-section-name:focus{outline:none;border-color:var(--elite-border);background:var(--elite-panel-inset)}.te-section-count{color:var(--elite-faint);font:700 9px var(--font-mono)}
+  .te-section-list{min-height:48px;padding:6px}.te-section-list:empty:after{content:"Drop tickers here";display:block;padding:10px;color:var(--elite-faint);font:600 10px var(--font-mono);text-align:center}.te-ticker-row{display:grid;grid-template-columns:28px minmax(90px,1fr) minmax(120px,170px) 30px;align-items:center;gap:7px;padding:7px 8px;border:1px solid transparent;border-radius:9px}.te-ticker-row:hover{border-color:var(--elite-hairline);background:rgba(255,255,255,.025)}.te-ticker-link{color:var(--elite-copy);font:800 13px var(--font-mono);text-decoration:none}.te-ticker-link:hover{color:var(--elite-gold-bright)}.te-section-select{width:100%;padding:6px 7px;border:1px solid var(--elite-hairline);border-radius:7px;background:var(--elite-panel-inset);color:var(--elite-muted);font:600 9px var(--font-mono)}.te-section-add{display:grid;grid-template-columns:minmax(170px,1fr) auto;gap:8px;padding:11px;border:1px dashed var(--elite-border);border-radius:12px;background:rgba(229,185,79,.025)}
   .te-alert-grid{display:grid;grid-template-columns:minmax(260px,.75fr) minmax(340px,1.25fr);gap:14px}
   .te-alert-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}.te-alert-form .full{grid-column:1/-1}
   .te-alert-card{display:grid;grid-template-columns:1fr auto;gap:10px;padding:13px 14px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.025)}
   .te-list-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:0 0 14px}.te-list-guide article{padding:13px 14px;border:1px solid var(--elite-border);border-radius:12px;background:linear-gradient(145deg,rgba(229,185,79,.08),rgba(255,255,255,.018))}.te-list-guide b{display:block;color:var(--elite-gold-bright);font:700 12px var(--font-display);letter-spacing:.08em}.te-list-guide span{display:block;margin-top:4px;color:var(--elite-muted);font-size:11px;line-height:1.45}
   .te-alert-card.hit{border-color:rgba(52,211,153,.55);box-shadow:inset 3px 0 #34d399}.te-alert-card.paused{opacity:.62}
   .te-alert-price{font:700 17px var(--font-mono);color:#f5d66d}.te-alert-actions{display:flex;gap:5px;align-items:center}
-  @media(max-width:720px){.hx-topbar{display:none}.acct-2col,.te-alert-grid,.te-list-guide{grid-template-columns:1fr}.te-watch-hero{margin-top:2px}.te-watch-hero h1{font-size:25px}.card-hd{padding:13px 14px}.card-bd{padding:14px}.tbl-wrap{display:none}.te-watch-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;padding-bottom:2px}.te-watch-tabs form,.te-watch-tabs button{width:100%;min-width:0}.te-watch-tabs button{overflow:hidden;text-overflow:ellipsis}.te-alert-form{grid-template-columns:1fr}.te-alert-form .full{grid-column:auto}.te-symbol-grid{grid-template-columns:1fr 1fr}.te-alert-card{grid-template-columns:1fr}.te-alert-actions{justify-content:flex-start}}
+  @media(max-width:720px){.hx-topbar{display:none}.acct-2col,.te-alert-grid,.te-list-guide{grid-template-columns:1fr}.te-watch-hero{margin-top:2px}.te-watch-hero h1{font-size:25px}.card-hd{padding:13px 14px}.card-bd{padding:14px}.tbl-wrap{display:none}.te-watch-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;padding-bottom:2px}.te-watch-tabs form,.te-watch-tabs button{width:100%;min-width:0}.te-watch-tabs button{overflow:hidden;text-overflow:ellipsis}.te-alert-form{grid-template-columns:1fr}.te-alert-form .full{grid-column:auto}.te-symbol-grid{grid-template-columns:1fr 1fr}.te-alert-card{grid-template-columns:1fr}.te-alert-actions{justify-content:flex-start}.te-ticker-row{grid-template-columns:28px 1fr 30px}.te-ticker-row .te-move-form{grid-column:2/3}.te-section-hd{flex-wrap:wrap}.te-section-name-form{min-width:180px}.te-section-add{grid-template-columns:1fr}.te-organizer-head{align-items:flex-start;flex-direction:column}}
 </style>
 
 <section class="te-watch-hero">
@@ -94,18 +98,80 @@
         <input class="hx-input" name="tickers" placeholder="ADD TICKERS · e.g. NVDA AMD" autocomplete="off" style="flex:1;text-transform:uppercase;font-family:var(--font-mono)">
         <button class="btn btn-primary btn-sm" type="submit">Add</button>
       </form>
-      {% if active_tickers %}
-      <div class="te-symbol-grid">
-        {% for t in active_tickers %}
-        <div class="te-symbol">
-          <a class="te-symbol-main" href="{{ url_for('stock_detail', ticker=t) }}"><div class="te-symbol-ticker">{{ t }}</div><div class="faint" style="font-size:11px">Open profile</div></a>
-          <form action="{{ url_for('watchlist_remove', ticker=t) }}" method="POST" style="margin:0;display:inline-flex"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}"><button type="submit" class="chip-x" title="Remove {{ t }}">×</button></form>
+      {% if can_organize %}
+      <div class="te-organizer" id="organize-watchlist" data-watchlist-id="{{ active_id }}">
+        <div class="te-organizer-head">
+          <div><b style="color:var(--elite-copy);font-size:13px">Organize {{ active_wl.name }}</b><div class="te-organizer-help">Drag the handles to reorder sections or tickers. Use the menu to move a ticker precisely.</div></div>
+          <span class="te-save-state" id="te-save-state">Order saved</span>
         </div>
-        {% endfor %}
+
+        <form class="te-section-add" action="{{ url_for('watchlist_section_create', wl_id=active_id) }}" method="POST">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input class="hx-input" name="name" maxlength="40" required placeholder="New section · e.g. Foundation, Growth, Safe Haven">
+          <button class="btn btn-primary btn-sm" type="submit">+ Add Section</button>
+        </form>
+
+        <div class="te-section-stack" style="display:flex;flex-direction:column;gap:9px">
+          {% for section in active_structure.sections %}
+          <section class="te-section" data-section-id="{{ section.id }}">
+            <header class="te-section-hd">
+              <span class="te-drag-handle te-section-handle" draggable="true" title="Drag section" aria-label="Drag {{ section.name }} section">⋮⋮</span>
+              <form class="te-section-name-form" action="{{ url_for('watchlist_section_rename', wl_id=active_id, section_id=section.id) }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input class="te-section-name" name="name" value="{{ section.name }}" maxlength="40" aria-label="Section name">
+                <button class="btn btn-ghost btn-sm" type="submit">Save</button>
+              </form>
+              <span class="te-section-count">{{ section.tickers|length }}</span>
+              <form action="{{ url_for('watchlist_section_delete', wl_id=active_id, section_id=section.id) }}" method="POST" style="margin:0" onsubmit="return confirm('Remove section “{{ section.name }}”? Its tickers will move to Unsorted.')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="chip-x" type="submit" title="Remove {{ section.name }} section">×</button>
+              </form>
+            </header>
+            <div class="te-section-list">
+              {% for t in section.tickers %}
+              <div class="te-ticker-row" data-ticker="{{ t }}">
+                <span class="te-drag-handle te-ticker-handle" draggable="true" title="Drag {{ t }}" aria-label="Drag {{ t }}">⠿</span>
+                <a class="te-ticker-link" href="{{ url_for('stock_detail', ticker=t) }}">{{ t }}</a>
+                <form class="te-move-form" action="{{ url_for('watchlist_ticker_section', wl_id=active_id, ticker=t) }}" method="POST">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <select class="te-section-select" name="section_id" aria-label="Move {{ t }} to section" onchange="this.form.submit()">
+                    {% for target in active_structure.sections %}<option value="{{ target.id }}" {{ 'selected' if target.id == section.id }}>{{ target.name }}</option>{% endfor %}
+                    <option value="">Unsorted</option>
+                  </select>
+                </form>
+                <form action="{{ url_for('watchlist_remove', ticker=t) }}" method="POST" style="margin:0;display:inline-flex"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}"><button type="submit" class="chip-x" title="Remove {{ t }}">×</button></form>
+              </div>
+              {% endfor %}
+            </div>
+          </section>
+          {% endfor %}
+
+          <section class="te-section" data-section-id="none">
+            <header class="te-section-hd"><span class="te-drag-handle" aria-hidden="true">·</span><div class="te-section-name" style="padding-left:0">Unsorted</div><span class="te-section-count">{{ active_structure.unsectioned|length }}</span></header>
+            <div class="te-section-list">
+              {% for t in active_structure.unsectioned %}
+              <div class="te-ticker-row" data-ticker="{{ t }}">
+                <span class="te-drag-handle te-ticker-handle" draggable="true" title="Drag {{ t }}" aria-label="Drag {{ t }}">⠿</span>
+                <a class="te-ticker-link" href="{{ url_for('stock_detail', ticker=t) }}">{{ t }}</a>
+                <form class="te-move-form" action="{{ url_for('watchlist_ticker_section', wl_id=active_id, ticker=t) }}" method="POST">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <select class="te-section-select" name="section_id" aria-label="Move {{ t }} to section" onchange="this.form.submit()">
+                    <option value="" selected>Unsorted</option>
+                    {% for target in active_structure.sections %}<option value="{{ target.id }}">{{ target.name }}</option>{% endfor %}
+                  </select>
+                </form>
+                <form action="{{ url_for('watchlist_remove', ticker=t) }}" method="POST" style="margin:0;display:inline-flex"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}"><button type="submit" class="chip-x" title="Remove {{ t }}">×</button></form>
+              </div>
+              {% endfor %}
+            </div>
+          </section>
+        </div>
       </div>
-      {% else %}
-      <div class="faint" style="font-size:13px">No tickers in this list yet — add some above. Newly added tickers load in the background (Loading → Partial → Ready).</div>
-      {% endif %}
+      {% elif active_tickers %}
+      <div class="te-organizer-help" style="padding:2px 0 8px">This automatic setup list is managed by the scanner. Activate a personal or custom list to create sections and save a manual order.</div>
+      <div class="te-symbol-grid">
+        {% for t in active_tickers %}<div class="te-symbol"><a class="te-symbol-main" href="{{ url_for('stock_detail', ticker=t) }}"><div class="te-symbol-ticker">{{ t }}</div><div class="faint" style="font-size:11px">Open profile</div></a><form action="{{ url_for('watchlist_remove', ticker=t) }}" method="POST" style="margin:0;display:inline-flex"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}"><button type="submit" class="chip-x" title="Remove {{ t }}">×</button></form></div>{% endfor %}
+      </div>
+      {% else %}<div class="faint" style="font-size:13px">No tickers in this list yet — add some above. Newly added tickers load in the background.</div>{% endif %}
     </div>
   </div>
 </div>
@@ -152,4 +218,114 @@
 <div class="faint" style="font-size:11px;line-height:1.6;margin-top:8px">
   The active list drives the <a href="{{ url_for('dashboard') }}" style="color:#d4af37">Setups</a> scanner and the <a href="{{ url_for('terminal') }}" style="color:#d4af37">Terminal</a> watchlist. Adding a ticker kicks off the same two-stage onboarding the app uses everywhere.
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(function () {
+  const organizer = document.getElementById('organize-watchlist');
+  if (!organizer) return;
+  const stack = organizer.querySelector('.te-section-stack');
+  const state = document.getElementById('te-save-state');
+  const watchlistId = organizer.dataset.watchlistId;
+  let draggedTicker = null;
+  let draggedSection = null;
+
+  function setState(text, className) {
+    state.textContent = text;
+    state.className = 'te-save-state ' + (className || '');
+  }
+
+  function syncMoveMenus() {
+    organizer.querySelectorAll('.te-section').forEach(section => {
+      const value = section.dataset.sectionId === 'none' ? '' : section.dataset.sectionId;
+      section.querySelectorAll('.te-section-select').forEach(select => { select.value = value; });
+      const count = section.querySelector('.te-section-count');
+      if (count) count.textContent = section.querySelectorAll('.te-ticker-row').length;
+    });
+  }
+
+  function payload() {
+    return Array.from(stack.querySelectorAll(':scope > .te-section')).map(section => ({
+      section_id: section.dataset.sectionId,
+      tickers: Array.from(section.querySelectorAll('.te-ticker-row')).map(row => row.dataset.ticker)
+    }));
+  }
+
+  async function saveOrder() {
+    syncMoveMenus();
+    setState('Saving order…', 'saving');
+    const token = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    try {
+      const response = await fetch(`/watchlists/${watchlistId}/reorder`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': token},
+        body: JSON.stringify({groups: payload()})
+      });
+      if (!response.ok) throw new Error('save failed');
+      setState('Order saved', 'saved');
+      window.setTimeout(() => setState('Order saved', ''), 1400);
+    } catch (error) {
+      setState('Could not save · retry', '');
+    }
+  }
+
+  function insertionPoint(list, y, selector) {
+    const items = Array.from(list.querySelectorAll(selector)).filter(item => item !== draggedTicker && item !== draggedSection);
+    return items.reduce((closest, item) => {
+      const box = item.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      return offset < 0 && offset > closest.offset ? {offset, item} : closest;
+    }, {offset: Number.NEGATIVE_INFINITY, item: null}).item;
+  }
+
+  organizer.addEventListener('dragstart', event => {
+    const tickerHandle = event.target.closest('.te-ticker-handle');
+    const sectionHandle = event.target.closest('.te-section-handle');
+    if (tickerHandle) {
+      draggedTicker = tickerHandle.closest('.te-ticker-row');
+      draggedTicker.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', draggedTicker.dataset.ticker);
+    } else if (sectionHandle) {
+      draggedSection = sectionHandle.closest('.te-section');
+      draggedSection.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', 'section-' + draggedSection.dataset.sectionId);
+    }
+  });
+
+  organizer.addEventListener('dragover', event => {
+    if (draggedTicker) {
+      const list = event.target.closest('.te-section-list');
+      if (!list) return;
+      event.preventDefault();
+      const before = insertionPoint(list, event.clientY, '.te-ticker-row');
+      if (before) list.insertBefore(draggedTicker, before); else list.appendChild(draggedTicker);
+    } else if (draggedSection) {
+      const target = event.target.closest('.te-section');
+      if (!target || target === draggedSection) return;
+      event.preventDefault();
+      const unsorted = stack.querySelector('.te-section[data-section-id="none"]');
+      if (target === unsorted) {
+        stack.insertBefore(draggedSection, unsorted);
+      } else {
+        const box = target.getBoundingClientRect();
+        stack.insertBefore(draggedSection, event.clientY < box.top + box.height / 2 ? target : target.nextSibling);
+        if (unsorted && unsorted.nextSibling) stack.appendChild(unsorted);
+      }
+    }
+  });
+
+  organizer.addEventListener('dragend', () => {
+    if (draggedTicker) draggedTicker.classList.remove('is-dragging');
+    if (draggedSection) draggedSection.classList.remove('is-dragging');
+    const changed = Boolean(draggedTicker || draggedSection);
+    draggedTicker = null;
+    draggedSection = null;
+    if (changed) saveOrder();
+  });
+})();
+</script>
 {% endblock %}

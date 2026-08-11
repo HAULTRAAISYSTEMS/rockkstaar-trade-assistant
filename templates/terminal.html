@@ -48,6 +48,8 @@
 .tw-add-btn:hover { border-color: var(--orange-500); color: var(--orange-500); }
 .tw-manage-link { color:var(--elite-muted); font:700 9px var(--font-display); letter-spacing:.06em; text-decoration:none; text-transform:uppercase; }
 .tw-manage-link:hover { color:var(--elite-gold-bright); }
+.tw-wl-section { display:flex;align-items:center;gap:7px;padding:8px 12px 6px;border-bottom:1px solid var(--border-subtle);background:rgba(229,185,79,.035);color:var(--elite-gold-bright);font:700 9px var(--font-display);letter-spacing:.11em;text-transform:uppercase; }
+.tw-wl-section:before { content:"";width:12px;height:1px;background:var(--elite-gold);opacity:.7; }
 .tw-add-row { display:none; gap:6px; padding: var(--sp-2) var(--sp-3); border-bottom:1px solid var(--border-subtle); }
 .tw-add-row.open { display:flex; }
 .tw-add-input { flex:1; min-width:0; background: var(--surface-inset); border:1px solid var(--border-subtle); border-radius: var(--r-sm); color: var(--text-hi); font-family: var(--font-mono); font-size: var(--fs-sm); padding: 6px 9px; outline:none; text-transform:uppercase; }
@@ -305,9 +307,9 @@
         <button class="tw-add-go" type="submit">ADD</button>
       </form>
       <div class="tw-wl">
-        {% for s in stocks %}
+        {% macro render_watch_row(s) -%}
         {% set bias = 'bull' if s.trade_bias == 'Long' else ('bear' if s.trade_bias == 'Short' else 'neutral') %}
-        <div class="tw-wl-row {{ 'active' if loop.first }}"
+        <div class="tw-wl-row {{ 'active' if stocks and s.ticker == stocks[0].ticker }}"
              data-ticker="{{ s.ticker }}"
              data-name="{{ s.company_name or '' }}"
              data-price="{{ '%.2f'|format(s.current_price) if s.current_price else '' }}"
@@ -326,9 +328,15 @@
             <div class="tw-wl-chg {{ 'chg-pos' if (s.gap_pct or 0) > 0 else ('chg-neg' if (s.gap_pct or 0) < 0 else 'chg-flat') }}">{{ s.gap_display or '0.00%' }}</div>
           </div>
         </div>
+        {%- endmacro %}
+        {% if stocks %}
+          {% for group in terminal_groups %}
+            {% if group.name %}<div class="tw-wl-section">{{ group.name }}</div>{% endif %}
+            {% for s in group.stocks %}{{ render_watch_row(s) }}{% endfor %}
+          {% endfor %}
         {% else %}
         <div class="tw-empty">Seeding starter watchlist…<br>Refresh in a moment, or add a symbol with <b>+</b>.</div>
-        {% endfor %}
+        {% endif %}
       </div>
     </div>
 

@@ -30,7 +30,9 @@ from database import (
     ensure_user_watchlists,
     get_all_watchlists, get_watchlist_by_id, create_watchlist,
     rename_watchlist, delete_watchlist,
-    get_watchlist_stocks, get_watchlist_stock_counts,
+    get_watchlist_stocks, get_watchlist_stock_counts, get_watchlist_structure,
+    create_watchlist_section, rename_watchlist_section, delete_watchlist_section,
+    move_watchlist_ticker, save_watchlist_order,
     add_ticker_to_watchlist, remove_ticker_from_watchlist,
     remove_ticker_from_defaults,
     get_ticker_watchlist_ids, set_ticker_watchlists,
@@ -4501,6 +4503,14 @@ def _wl_next():
     return redirect(url_for("dashboard"))
 
 
+def _owned_watchlist(wl_id: int):
+    """Resolve a watchlist only when it belongs to the signed-in user."""
+    watchlist = get_watchlist_by_id(wl_id)
+    if watchlist and watchlist.get("user_id") == current_user_id():
+        return watchlist
+    return None
+
+
 @app.route("/watchlists")
 def watchlists_page():
     """Watchlists settings — create / rename / activate / delete lists and
@@ -4517,6 +4527,8 @@ def watchlists_page():
             wl_counts[w["id"]] = 0
     active_tickers = get_watchlist_stocks(active_id) if active_id else []
     active_wl      = get_watchlist_by_id(active_id) if active_id else None
+    active_structure = get_watchlist_structure(active_id) if active_id else {"sections": [], "unsectioned": []}
+    can_organize = bool(active_wl and active_wl.get("name") not in DEFAULT_WATCHLISTS)
     stock_data     = {row["ticker"]: row for row in get_all_stock_data()}
     price_alerts   = get_price_alerts(uid)
     for alert in price_alerts:
@@ -4532,9 +4544,81 @@ def watchlists_page():
         "watchlists.html",
         all_wls=all_wls, active_id=active_id, active_wl=active_wl,
         wl_counts=wl_counts, active_tickers=active_tickers,
+        active_structure=active_structure, can_organize=can_organize,
         price_alerts=price_alerts, personal_watchlists=PERSONAL_WATCHLISTS,
         automatic_watchlists=DEFAULT_WATCHLISTS,
     )
+
+
+@app.route("/watchlists/<int:wl_id>/sections/create", methods=["POST"])
+def watchlist_section_create(wl_id):
+    if not _owned_watchlist(wl_id):
+        return ("Not found", 404)
+    name = request.form.get("name", "").strip()[:40]
+    if not name:
+        flash("Enter a section name such as Foundation, Growth, or Safe Haven.", "error")
+    else:
+        try:
+            create_watchlist_section(wl_id, name)
+            flash(f"Section '{name}' created.", "success")
+        except Exception:
+            flash("That section name already exists in this watchlist.", "error")
+    session["active_wl_id"] = wl_id
+    return redirect(url_for("watchlists_page") + "#organize-watchlist")
+
+
+@app.route("/watchlists/<int:wl_id>/sections/<int:section_id>/rename", methods=["POST"])
+def watchlist_section_rename(wl_id, section_id):
+    if not _owned_watchlist(wl_id):
+        return ("Not found", 404)
+    name = request.form.get("name", "").strip()[:40]
+    if name:
+        try:
+            rename_watchlist_section(section_id, wl_id, name)
+            flash(f"Section renamed to '{name}'.", "success")
+        except Exception:
+            flash("That section name is already used.", "error")
+    session["active_wl_id"] = wl_id
+    return redirect(url_for("watchlists_page") + "#organize-watchlist")
+
+
+@app.route("/watchlists/<int:wl_id>/sections/<int:section_id>/delete", methods=["POST"])
+def watchlist_section_delete(wl_id, section_id):
+    if not _owned_watchlist(wl_id):
+        return ("Not found", 404)
+    delete_watchlist_section(section_id, wl_id)
+    session["active_wl_id"] = wl_id
+    flash("Section removed. Its tickers are now in Unsorted.", "info")
+    return redirect(url_for("watchlists_page") + "#organize-watchlist")
+
+
+@app.route("/watchlists/<int:wl_id>/ticker/<ticker>/section", methods=["POST"])
+def watchlist_ticker_section(wl_id, ticker):
+    if not _owned_watchlist(wl_id):
+        return ("Not found", 404)
+    section_id = request.form.get("section_id") or None
+    if move_watchlist_ticker(wl_id, ticker, section_id):
+        flash(f"Moved {ticker.upper()}.", "success")
+    else:
+        flash("That ticker or section could not be found.", "error")
+    session["active_wl_id"] = wl_id
+    return redirect(url_for("watchlists_page") + "#organize-watchlist")
+
+
+@app.route("/watchlists/<int:wl_id>/reorder", methods=["POST"])
+def watchlist_reorder(wl_id):
+    if not _owned_watchlist(wl_id):
+        return jsonify({"ok": False, "error": "watchlist not found"}), 404
+    payload = request.get_json(silent=True) or {}
+    groups = payload.get("groups")
+    if not isinstance(groups, list) or len(groups) > 100:
+        return jsonify({"ok": False, "error": "invalid order payload"}), 400
+    try:
+        save_watchlist_order(wl_id, groups)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "invalid order payload"}), 400
+    session["active_wl_id"] = wl_id
+    return jsonify({"ok": True})
 
 
 @app.route("/price-alerts/create", methods=["POST"])
@@ -4576,6 +4660,8 @@ def price_alert_delete(alert_id):
 @app.route("/watchlists/activate/<int:wl_id>", methods=["POST"])
 def watchlist_activate(wl_id):
     """Switch the active watchlist (stored in session)."""
+    if not _owned_watchlist(wl_id):
+        return ("Not found", 404)
     session["active_wl_id"] = wl_id
     return _wl_next()
 
@@ -4599,6 +4685,8 @@ def watchlist_create():
 @app.route("/watchlists/rename/<int:wl_id>", methods=["POST"])
 def watchlist_rename(wl_id):
     """Rename an existing watchlist."""
+    if not _owned_watchlist(wl_id):
+        return ("Not found", 404)
     name = request.form.get("name", "").strip()[:50]
     if name:
         try:
@@ -4613,6 +4701,8 @@ def watchlist_rename(wl_id):
 def watchlist_delete(wl_id):
     """Delete a watchlist. Refuses to delete the last one."""
     uid     = current_user_id()
+    if not _owned_watchlist(wl_id):
+        return ("Not found", 404)
     all_wls = get_all_watchlists(uid)
     if len(all_wls) <= 1:
         flash("Cannot delete the last watchlist.", "error")
@@ -4700,7 +4790,23 @@ def terminal():
         auto_refresh_stale_closes(watchlist, data_map=data_map)
     stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked  = rank_stocks(stocks)
-    valid   = [s for s in ranked if s.get("trade_bias") != "Avoid"]
+    # The left rail follows the user's saved watchlist order. Ranking remains
+    # available for the setups panel without silently rearranging the list.
+    valid   = [s for s in stocks if s.get("trade_bias") != "Avoid"]
+    valid_map = {s["ticker"]: s for s in valid}
+    saved_structure = get_watchlist_structure(wl_id) if wl_id else {"sections": [], "unsectioned": []}
+    terminal_groups = []
+    grouped_tickers = set()
+    for section in saved_structure["sections"]:
+        group_stocks = [valid_map[t] for t in section["tickers"] if t in valid_map]
+        grouped_tickers.update(s["ticker"] for s in group_stocks)
+        if group_stocks:
+            terminal_groups.append({"name": section["name"], "stocks": group_stocks})
+    ungrouped = [valid_map[t] for t in saved_structure["unsectioned"] if t in valid_map]
+    grouped_tickers.update(s["ticker"] for s in ungrouped)
+    ungrouped.extend(s for s in valid if s["ticker"] not in grouped_tickers)
+    if ungrouped:
+        terminal_groups.append({"name": "Unsorted" if saved_structure["sections"] else "", "stocks": ungrouped})
 
     mkt_ctx = _get_mkt_ctx()
 
@@ -4726,7 +4832,7 @@ def terminal():
         logger.debug("terminal: schwab account fetch skipped: %s", _ae)
     # Today's Setups panel — top 3 by grade then swing score (display only)
     today_setups = sorted(
-        valid,
+        ranked,
         key=lambda s: (_ugrade_info(s.get("swing_grade"))[1], s.get("swing_score") or 0),
         reverse=True,
     )[:3]
@@ -4747,6 +4853,7 @@ def terminal():
         "terminal.html",
         stocks=valid,
         active_wl=active_wl,
+        terminal_groups=terminal_groups,
         orb_session=get_orb_session_banner(),
         mkt=mkt_ctx,
         acct=acct,
