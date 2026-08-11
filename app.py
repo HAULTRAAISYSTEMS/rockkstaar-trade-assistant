@@ -6427,6 +6427,71 @@ def api_intel():
         return jsonify(_intel_error_payload(str(e))), 200
 
 
+@app.route("/api/intel/news-refresh", methods=["POST"])
+@csrf.exempt
+def api_intel_news_refresh():
+    """Fetch news in the request and return rendered story cards.
+
+    Unlike the general cache-first Intel endpoint, this request waits for the
+    bounded provider fan-out. The browser can therefore display the result
+    directly without relying on a background thread surviving a Gunicorn
+    recycle or on a later page reload landing in the same process.
+    """
+    try:
+        _intel.clear_intel_cache("market_news")
+        raw_news = _intel.fetch_market_news()
+
+        active_id = get_active_wl_id()
+        try:
+            watchlist = get_watchlist_stocks(active_id) if active_id else []
+        except Exception:
+            watchlist = []
+
+        from sentiment_engine import enrich_news_article
+        enriched = [enrich_news_article(row, watchlist) for row in raw_news]
+        enriched.sort(key=lambda row: (-row["importance"], row.get("time") or ""))
+        enriched = enriched[:24]
+
+        if enriched:
+            status = {
+                "refreshing": False,
+                "message": f"Loaded {len(enriched)} live stories.",
+            }
+        else:
+            status = {
+                "refreshing": False,
+                "message": (
+                    "No provider returned a usable story in this refresh. "
+                    "The request completed; try again in about one minute."
+                ),
+            }
+
+        return jsonify({
+            "ok": bool(enriched),
+            "count": len(enriched),
+            "html": render_template(
+                "_intel_news_items.html",
+                news=enriched,
+                intel_status=status,
+            ),
+        })
+    except Exception as exc:
+        logger.error("api_intel_news_refresh: %s", exc, exc_info=True)
+        status = {
+            "refreshing": False,
+            "message": "The news refresh completed with a server error. Please try again.",
+        }
+        return jsonify({
+            "ok": False,
+            "count": 0,
+            "html": render_template(
+                "_intel_news_items.html",
+                news=[],
+                intel_status=status,
+            ),
+        }), 200
+
+
 @app.route("/api/ndx_watch")
 @csrf.exempt
 def api_ndx_watch():

@@ -113,15 +113,7 @@
     <main class="intel-card">
       <div class="intel-card-head"><h2>Elite News Scanner</h2><span id="scanner-count">{{ news|length }} catalysts</span></div>
       <div class="intel-news" id="intel-news">
-        {% for n in news %}
-        <article class="intel-news-item" data-tone="{{ n.label }}" data-impact="{{ n.impact }}" data-watchlist="{{ '1' if n.on_watchlist else '0' }}" data-search="{{ n.search_text }}">
-          {% set article_url = n.url if n.url and (n.url.startswith('https://') or n.url.startswith('http://')) else (url_for('stock_detail', ticker=n.ticker) if n.ticker != 'MARKET' else '#') %}
-          <a class="intel-story-media" href="{{ article_url }}"{% if n.url %} target="_blank" rel="noopener noreferrer"{% endif %}><span>{{ n.ticker }}</span>{% if n.image %}<img src="{{ n.image }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">{% endif %}</a>
-          <div><div class="intel-story-topline"><a class="intel-symbol" href="{{ url_for('stock_detail', ticker=n.ticker) if n.ticker != 'MARKET' else '#' }}">{{ n.ticker }}</a>{% if n.on_watchlist %}<span class="scanner-watch">★ Watchlist</span>{% endif %}</div><a class="intel-headline" href="{{ article_url }}"{% if n.url %} target="_blank" rel="noopener noreferrer"{% endif %}>{{ n.headline }}</a><span class="intel-meta">{{ n.source }} · {{ n.time or 'recent' }}{% if n.reason %} · {{ n.reason }}{% endif %}</span>{% if n.summary %}<p class="intel-summary">{{ n.summary }}</p>{% endif %}<p class="scanner-why"><b>Why this matters</b><br>{{ n.why_it_matters }}</p><div class="scanner-actions">{% if n.url %}<a href="{{ article_url }}" target="_blank" rel="noopener noreferrer">Read full story ↗</a>{% endif %}{% if n.ticker != 'MARKET' %}<a href="{{ url_for('stock_detail', ticker=n.ticker) }}">Research {{ n.ticker }} →</a>{% endif %}<span>Headline tone {{ '%+d'|format(n.score) }}</span></div></div>
-          <div class="scanner-rank"><span class="intel-tone {{ n.label }}">{{ n.label }}</span><div class="scanner-score">{{ n.importance }}<small>/100</small></div><div class="scanner-meter" title="Importance score"><i style="width:{{ n.importance }}%"></i></div><span class="scanner-impact">{{ n.impact }} impact</span></div>
-        </article>
-        {% else %}<div class="intel-feed-state" id="intel-feed-state" data-refreshing="{{ '1' if intel_status.refreshing else '0' }}"><strong>{{ 'Refreshing news feeds' if intel_status.refreshing else 'News feed needs attention' }}</strong>{{ intel_status.message }}<br><button type="button" onclick="refreshIntelNews(this)">Refresh news now</button></div>{% endfor %}
-        <div id="intel-empty" class="intel-foot" style="display:none">No headlines match this filter.</div>
+        {% include "_intel_news_items.html" %}
       </div>
       <div class="intel-foot">Tone and importance are explainable headline-derived research context—not financial advice, analyst consensus, or a prediction of price direction.</div>
     </main>
@@ -173,10 +165,23 @@ function applyScannerFilters(){
 document.querySelectorAll('.intel-tab').forEach(function(button){button.addEventListener('click',function(){document.querySelectorAll('.intel-tab').forEach(function(b){b.classList.remove('active')});button.classList.add('active');scannerFilter=button.dataset.filter;applyScannerFilters()})});
 document.getElementById('scanner-query').addEventListener('input',applyScannerFilters);
 function refreshIntelNews(button){
-  button.disabled=true;button.textContent='Refreshing…';
-  fetch('/api/intel?refresh=1&feed=news').finally(function(){setTimeout(function(){location.reload();},4500);});
+  if(button){button.disabled=true;button.textContent='Refreshing…';}
+  var state=document.getElementById('intel-feed-state'),message=state&&state.querySelector('.intel-feed-message');
+  if(state){state.dataset.refreshing='1';state.querySelector('strong').textContent='REFRESHING NEWS FEEDS';}
+  if(message)message.textContent=' Contacting live providers. This can take up to 20 seconds.';
+  return fetch('/api/intel/news-refresh',{method:'POST',headers:{'Accept':'application/json'}})
+    .then(function(response){if(!response.ok)throw new Error('Refresh request failed');return response.json();})
+    .then(function(data){
+      document.getElementById('intel-news').innerHTML=data.html;
+      document.getElementById('scanner-count').textContent=data.count+' catalyst'+(data.count===1?'':'s');
+      applyScannerFilters();
+    })
+    .catch(function(){
+      if(button){button.disabled=false;button.textContent='Try again';}
+      if(message)message.textContent=' The refresh request failed. Please try again.';
+    });
 }
 var intelFeedState=document.getElementById('intel-feed-state');
-if(intelFeedState&&intelFeedState.dataset.refreshing==='1')setTimeout(function(){location.reload();},12000);
+if(intelFeedState)setTimeout(function(){refreshIntelNews(intelFeedState.querySelector('button'));},500);
 </script>
 {% endblock %}

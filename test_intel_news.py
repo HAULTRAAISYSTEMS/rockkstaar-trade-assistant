@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import intel_engine
@@ -21,6 +22,12 @@ class IntelNewsTests(unittest.TestCase):
 
         self.assertNotIn("market_news", intel_engine._cache)
         self.assertIn("earnings", intel_engine._cache)
+
+    def test_intel_page_injects_refresh_response_without_reloading(self):
+        template = Path("templates/intel.html").read_text()
+
+        self.assertIn("/api/intel/news-refresh", template)
+        self.assertNotIn("location.reload()", template)
 
     @patch("intel_engine._get_watchlist_tickers", return_value=[])
     @patch("news_fetcher.fetch_headlines")
