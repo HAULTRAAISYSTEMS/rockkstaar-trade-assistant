@@ -19,6 +19,20 @@ FORM4_XML = b"""<ownershipDocument>
 
 
 class TestSecForm4Parser(unittest.TestCase):
+    def tearDown(self):
+        smart_money._cache.clear()
+
+    def test_form4_refresh_clears_results_but_preserves_cik_map(self):
+        smart_money._cache.update({
+            "sec:ticker-ciks": (1, {"META": "0001326801"}),
+            "sec:form4:META": (1, [{"ticker": "META"}]),
+        })
+
+        smart_money.clear_sec_form4_cache()
+
+        self.assertIn("sec:ticker-ciks", smart_money._cache)
+        self.assertNotIn("sec:form4:META", smart_money._cache)
+
     def test_open_market_purchase_preserves_code_and_value(self):
         rows = smart_money._transaction_rows(
             FORM4_XML, "TEST", "https://www.sec.gov/filing", "2026-08-03"

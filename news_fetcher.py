@@ -150,6 +150,14 @@ def _thumbnail_url(value: object) -> str:
     return str(value.get("url") or "")
 
 
+def _display_image(source: object, thumbnail: object) -> str:
+    """Keep real publisher art but suppress Yahoo's repeated brand placeholder."""
+    publisher = str(source or "").strip().lower()
+    if publisher in {"yahoo", "yahoo finance"}:
+        return ""
+    return _thumbnail_url(thumbnail)
+
+
 # ---------------------------------------------------------------------------
 # Category definitions
 # ---------------------------------------------------------------------------
@@ -538,11 +546,12 @@ def _try_yahoo_search(ticker: str) -> CatalystNews | None:
                     freshness_dt = freshness_dt or published_dt
                 except (TypeError, ValueError, OSError):
                     pass
+            publisher = item.get("publisher") or "Yahoo Finance"
             rich_articles.append(_article(
                 item.get("title"),
-                source=item.get("publisher") or "Yahoo Finance",
+                source=publisher,
                 url=item.get("link", ""),
-                image=_thumbnail_url(item.get("thumbnail")),
+                image=_display_image(publisher, item.get("thumbnail")),
                 summary=item.get("summary") or item.get("description") or "",
                 published_at=published_at,
             ))
@@ -597,11 +606,12 @@ def _try_yfinance(ticker: str) -> CatalystNews | None:
                 title = content.get("title", "").strip()
                 provider = content.get("provider") or {}
                 pub = content.get("pubDate") or content.get("displayTime")
+                publisher = (provider.get("displayName") if isinstance(provider, dict) else provider) or "Yahoo Finance"
                 article = _article(
                     title,
-                    source=(provider.get("displayName") if isinstance(provider, dict) else provider) or "Yahoo Finance",
+                    source=publisher,
                     url=_nested_url(content.get("canonicalUrl") or content.get("clickThroughUrl")),
-                    image=_thumbnail_url(content.get("thumbnail")),
+                    image=_display_image(publisher, content.get("thumbnail")),
                     summary=content.get("summary") or content.get("description") or "",
                     published_at=pub or "",
                 )
@@ -621,11 +631,12 @@ def _try_yfinance(ticker: str) -> CatalystNews | None:
                         published_at = datetime.fromtimestamp(int(pt), tz=timezone.utc).isoformat()
                     except Exception:
                         pass
+                publisher = item.get("publisher") or "Yahoo Finance"
                 article = _article(
                     title,
-                    source=item.get("publisher") or "Yahoo Finance",
+                    source=publisher,
                     url=item.get("link", ""),
-                    image=_thumbnail_url(item.get("thumbnail")),
+                    image=_display_image(publisher, item.get("thumbnail")),
                     summary=item.get("summary") or item.get("description") or "",
                     published_at=published_at,
                 )

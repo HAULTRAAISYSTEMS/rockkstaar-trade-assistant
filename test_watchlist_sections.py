@@ -78,6 +78,19 @@ class WatchlistSectionTests(unittest.TestCase):
         self.assertFalse(changed)
         self.assertEqual(database.get_ticker_watchlist_ids("GHOST", 1), [])
 
+    def test_all_tracked_tickers_prioritize_personal_lists_and_deduplicate(self):
+        lists = {row["name"]: row["id"] for row in database.get_all_watchlists(1)}
+        database.add_ticker_to_watchlist(lists["A+ READY"], "AUTO")
+        database.add_ticker_to_watchlist(lists["A+ READY"], "NVDA")
+        database.add_ticker_to_watchlist(lists["BATTLEFIELD"], "NVDA")
+        database.add_ticker_to_watchlist(lists["BATTLEFIELD"], "META")
+
+        tickers = database.get_user_tracked_tickers(1)
+
+        self.assertEqual(tickers[:2], ["NVDA", "META"])
+        self.assertEqual(tickers.count("NVDA"), 1)
+        self.assertIn("AUTO", tickers)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -72,6 +72,14 @@ def _cached(key: str, ttl: int, loader):
     return value
 
 
+def clear_sec_form4_cache() -> None:
+    """Clear only cached Form 4 results; retain the daily ticker/CIK map."""
+    with _cache_lock:
+        for key in list(_cache):
+            if key.startswith("sec:form4:"):
+                _cache.pop(key, None)
+
+
 def _sec_get(url: str, timeout: int = 12):
     """Make a globally paced SEC request across the bounded worker pool."""
     global _sec_last_request
@@ -202,7 +210,7 @@ def fetch_sec_form4(tickers, limit: int = 30) -> tuple[list[dict], dict]:
         str(t).strip().upper() for t in tickers if _TICKER_RE.fullmatch(str(t).strip().upper())
     ))[:10]
     if not clean:
-        return [], {"available": True, "message": "Add tickers to your active watchlist to monitor SEC Form 4 filings."}
+        return [], {"available": True, "message": "Add tickers to any watchlist to monitor SEC Form 4 filings."}
 
     def load():
         cik_map = _ticker_ciks()

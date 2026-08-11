@@ -71,6 +71,19 @@
   @media(max-width:1050px){.intel-hero{grid-template-columns:1fr}.intel-grid{grid-template-columns:1fr}.intel-rail{display:grid;grid-template-columns:repeat(2,1fr)}.intel-rail .intel-card:last-child{grid-column:1/-1}}
   @media(max-width:820px){.intel-shell{gap:14px}.intel-hero{padding:24px 20px;border-radius:19px}.intel-kpis{grid-template-columns:repeat(2,1fr)}.intel-toolbar{grid-template-columns:1fr}.intel-lower{grid-template-columns:1fr}.intel-rail{display:flex}.intel-title{font-size:43px}.intel-subtitle{font-size:13px}.intel-news-item{grid-template-columns:124px minmax(0,1fr)}.intel-story-media{width:124px}.scanner-rank{grid-column:2;align-items:flex-start;display:grid;grid-template-columns:auto minmax(70px,110px) auto;align-items:center;width:100%}}
   @media(max-width:520px){.intel-hero{padding:22px 16px}.intel-title{font-size:38px}.intel-search-panel{padding:14px}.intel-search{grid-template-columns:1fr}.intel-search button{min-height:46px}.intel-quicklinks{grid-template-columns:1fr}.intel-kpis{gap:8px}.intel-kpi{padding:14px 13px;border-radius:13px}.intel-kpi strong{font-size:20px}.intel-news{padding:0 14px}.intel-news-item{grid-template-columns:88px minmax(0,1fr);gap:11px}.intel-story-media{width:88px;border-radius:9px}.scanner-rank{grid-column:1/-1}.scanner-score{font-size:16px}.intel-card-head{padding:14px}.calendar-row{grid-template-columns:58px 1fr auto;padding:11px 14px}.flow-wrap{grid-template-columns:1fr 1fr}.scanner-why{display:none}}
+  /* Compact editorial cards: two columns on desktop, one on narrow screens. */
+  .intel-news{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;padding:16px}
+  .intel-news-item{grid-template-columns:142px minmax(0,1fr);gap:0;overflow:hidden;min-height:205px;padding:0;border:1px solid rgba(255,255,255,.075);border-radius:14px;background:linear-gradient(145deg,#12171d,#0c1014);box-shadow:0 12px 28px rgba(0,0,0,.16)}
+  .intel-news-item:last-child{border-bottom:1px solid rgba(255,255,255,.075)}
+  .intel-story-media{width:128px;height:96px;min-height:0;aspect-ratio:auto;margin:14px 0 0 13px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:radial-gradient(circle at 30% 20%,rgba(231,184,75,.2),transparent 40%),#090c10}
+  .intel-story-media .intel-story-fallback{flex-direction:column;gap:4px;background:linear-gradient(145deg,rgba(231,184,75,.08),transparent)}.intel-story-fallback b{color:var(--elite-gold-2);font:800 20px var(--font-mono);letter-spacing:.04em}.intel-story-fallback small{color:#737e8a;font:700 7px var(--font-ui);letter-spacing:.14em;text-transform:uppercase}
+  .intel-story-media img{background:#0b0e12;filter:saturate(.82) contrast(1.04)}
+  .intel-news-item>div:nth-child(2){padding:14px 14px 10px}
+  .intel-story-topline{margin-bottom:8px}.intel-headline{font-size:14px;line-height:1.36}.intel-meta{font-size:9px}.intel-summary{-webkit-line-clamp:3;font-size:10px}
+  .scanner-why{display:none}.scanner-actions{flex-wrap:wrap;margin-top:10px}.scanner-actions span{display:none}
+  .scanner-rank{grid-column:1/-1;display:flex;flex-direction:row;align-items:center;gap:9px;width:auto;padding:0 13px 12px}.scanner-score{font-size:15px;margin-left:auto}.scanner-meter{width:64px}.scanner-impact{white-space:nowrap}
+  .intel-feed-state,#intel-empty{grid-column:1/-1}
+  @media(max-width:720px){.intel-news{grid-template-columns:1fr;padding:13px}.intel-news-item{grid-template-columns:116px minmax(0,1fr);min-height:178px}.intel-story-media{width:102px;height:82px;min-height:0;margin:12px 0 0 12px}.scanner-rank{grid-column:1/-1}.intel-summary{-webkit-line-clamp:2}}
 </style>
 {% endblock %}
 
@@ -97,8 +110,8 @@
 
   <section class="intel-kpis" aria-label="Market intelligence summary">
     <div class="intel-kpi"><small><span class="live-dot"></span>Market regime</small><strong>{{ rlabel }}</strong></div>
-    <div class="intel-kpi"><small>Live catalysts</small><strong>{{ news|length }}</strong></div>
-    <div class="intel-kpi"><small>Bullish / Bearish</small><strong><span class="pos">{{ bull_count }}</span> / <span class="neg">{{ bear_count }}</span></strong></div>
+    <div class="intel-kpi"><small>Live catalysts</small><strong id="intel-live-count">{{ news|length }}</strong></div>
+    <div class="intel-kpi"><small>Bullish / Bearish</small><strong id="intel-tone-counts"><span class="pos">{{ bull_count }}</span> / <span class="neg">{{ bear_count }}</span></strong></div>
     <div class="intel-kpi"><small>Earnings radar</small><strong>{{ earnings|length }}</strong></div>
   </section>
 
@@ -121,10 +134,7 @@
     <aside class="intel-rail">
       <div class="intel-card">
         <div class="intel-card-head"><h2>Trending Coverage</h2><span>Impact rank</span></div>
-        <div class="intel-list">
-          {% for row in trending %}<div class="intel-list-row"><a class="intel-symbol" href="{{ url_for('stock_detail', ticker=row.ticker) }}">{{ row.ticker }}</a><div><div class="coverage-bar"><i style="width:{{ [row.score * 12,100]|min }}%"></i></div><span class="intel-mini">{{ row.mentions }} catalyst mention{{ '' if row.mentions==1 else 's' }}</span></div><span class="mono muted">{{ row.score }}</span></div>
-          {% else %}<p class="intel-mini">Coverage momentum appears after headlines load.</p>{% endfor %}
-        </div>
+        <div class="intel-list" id="intel-trending">{% include "_intel_trending.html" %}</div>
       </div>
       <div class="intel-card">
         <div class="intel-card-head"><h2>Earnings Radar</h2><span>Next up</span></div>
@@ -174,6 +184,9 @@ function refreshIntelNews(button){
     .then(function(data){
       document.getElementById('intel-news').innerHTML=data.html;
       document.getElementById('scanner-count').textContent=data.count+' catalyst'+(data.count===1?'':'s');
+      document.getElementById('intel-live-count').textContent=data.count;
+      document.getElementById('intel-tone-counts').innerHTML='<span class="pos">'+data.bullish_count+'</span> / <span class="neg">'+data.bearish_count+'</span>';
+      document.getElementById('intel-trending').innerHTML=data.trending_html;
       applyScannerFilters();
     })
     .catch(function(){

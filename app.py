@@ -30,7 +30,7 @@ from database import (
     ensure_user_watchlists,
     get_all_watchlists, get_watchlist_by_id, create_watchlist,
     rename_watchlist, delete_watchlist,
-    get_watchlist_stocks, get_watchlist_stock_counts, get_watchlist_structure,
+    get_watchlist_stocks, get_user_tracked_tickers, get_watchlist_stock_counts, get_watchlist_structure,
     create_watchlist_section, rename_watchlist_section, delete_watchlist_section,
     move_watchlist_ticker, save_watchlist_order,
     add_ticker_to_watchlist, remove_ticker_from_watchlist,
@@ -6441,9 +6441,8 @@ def api_intel_news_refresh():
         _intel.clear_intel_cache("market_news")
         raw_news = _intel.fetch_market_news()
 
-        active_id = get_active_wl_id()
         try:
-            watchlist = get_watchlist_stocks(active_id) if active_id else []
+            watchlist = get_user_tracked_tickers(current_user_id())
         except Exception:
             watchlist = []
 
@@ -6451,6 +6450,19 @@ def api_intel_news_refresh():
         enriched = [enrich_news_article(row, watchlist) for row in raw_news]
         enriched.sort(key=lambda row: (-row["importance"], row.get("time") or ""))
         enriched = enriched[:24]
+        coverage = {}
+        for item in enriched:
+            ticker = str(item.get("ticker") or "").upper()
+            if not ticker:
+                continue
+            score = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2}.get(item.get("impact"), 1)
+            entry = coverage.setdefault(ticker, {"ticker": ticker, "mentions": 0, "score": 0})
+            entry["mentions"] += 1
+            entry["score"] += score
+        trending = sorted(
+            coverage.values(),
+            key=lambda row: (-row["score"], -row["mentions"], row["ticker"]),
+        )[:6]
 
         if enriched:
             status = {
@@ -6469,10 +6481,16 @@ def api_intel_news_refresh():
         return jsonify({
             "ok": bool(enriched),
             "count": len(enriched),
+            "bullish_count": sum(row.get("label") == "BULLISH" for row in enriched),
+            "bearish_count": sum(row.get("label") == "BEARISH" for row in enriched),
             "html": render_template(
                 "_intel_news_items.html",
                 news=enriched,
                 intel_status=status,
+            ),
+            "trending_html": render_template(
+                "_intel_trending.html",
+                trending=trending,
             ),
         })
     except Exception as exc:
@@ -6484,10 +6502,16 @@ def api_intel_news_refresh():
         return jsonify({
             "ok": False,
             "count": 0,
+            "bullish_count": 0,
+            "bearish_count": 0,
             "html": render_template(
                 "_intel_news_items.html",
                 news=[],
                 intel_status=status,
+            ),
+            "trending_html": render_template(
+                "_intel_trending.html",
+                trending=[],
             ),
         }), 200
 
@@ -6739,9 +6763,8 @@ def intel():
     except Exception as _e:
         logger.debug("intel: intel_summary failed: %s", _e)
 
-    active_id = get_active_wl_id()
     try:
-        watchlist = get_watchlist_stocks(active_id) if active_id else []
+        watchlist = get_user_tracked_tickers(current_user_id())
     except Exception:
         watchlist = []
 
@@ -6792,9 +6815,8 @@ def sentiment():
     except Exception as exc:
         logger.debug("sentiment: news summary unavailable: %s", exc)
 
-    active_id = get_active_wl_id()
     try:
-        watchlist = get_watchlist_stocks(active_id) if active_id else []
+        watchlist = get_user_tracked_tickers(current_user_id())
     except Exception:
         watchlist = []
 
@@ -6806,13 +6828,14 @@ def sentiment():
 @app.route("/smart-money")
 def smart_money():
     """Verified SEC insider filings and congressional trade disclosures."""
-    active_id = get_active_wl_id()
     try:
-        tickers = get_watchlist_stocks(active_id) if active_id else []
+        tickers = get_user_tracked_tickers(current_user_id())
     except Exception:
         tickers = []
 
-    from smart_money import fetch_congress_trades, fetch_sec_form4
+    from smart_money import clear_sec_form4_cache, fetch_congress_trades, fetch_sec_form4
+    if request.args.get("refresh") == "1":
+        clear_sec_form4_cache()
     insiders, insider_status = fetch_sec_form4(tickers)
     congress, congress_status = fetch_congress_trades()
     return render_template(

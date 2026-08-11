@@ -1,0 +1,5 @@
+{% for row in trending %}
+<div class="intel-list-row"><a class="intel-symbol" href="{{ url_for('stock_detail', ticker=row.ticker) }}">{{ row.ticker }}</a><div><div class="coverage-bar"><i style="width:{{ [row.score * 12,100]|min }}%"></i></div><span class="intel-mini">{{ row.mentions }} catalyst mention{{ '' if row.mentions==1 else 's' }}</span></div><span class="mono muted">{{ row.score }}</span></div>
+{% else %}
+<p class="intel-mini">Coverage momentum appears after headlines load.</p>
+{% endfor %}

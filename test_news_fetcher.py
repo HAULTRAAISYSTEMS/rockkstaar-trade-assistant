@@ -16,6 +16,12 @@ class NewsFetcherTests(unittest.TestCase):
         }
         self.assertEqual(news_fetcher._thumbnail_url(thumbnail), "large.jpg")
 
+    def test_yahoo_brand_placeholder_is_suppressed(self):
+        thumbnail = {"resolutions": [{"url": "purple-yahoo-placeholder.jpg", "width": 640}]}
+
+        self.assertEqual(news_fetcher._display_image("Yahoo", thumbnail), "")
+        self.assertEqual(news_fetcher._display_image("Reuters", thumbnail), "purple-yahoo-placeholder.jpg")
+
     @patch("urllib.request.urlopen")
     def test_yahoo_search_normalizes_thumbnail_and_story_link(self, urlopen):
         response = MagicMock()

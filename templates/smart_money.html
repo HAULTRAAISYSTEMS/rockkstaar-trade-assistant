@@ -20,7 +20,7 @@
 </div>
 
 <section class="card sm-panel" id="sm-insiders">
-  <div class="card-hd"><span>SEC Form 4 Filings</span><span class="faint mono" style="font-size:10px">ACTIVE WATCHLIST · {{ watched_tickers|length }} TICKERS</span></div>
+  <div class="card-hd"><span>SEC Form 4 Filings</span><span class="faint mono" style="font-size:10px">ALL TRACKED LISTS · {{ watched_tickers|length }} TICKERS &nbsp; <a class="sm-source" href="{{ url_for('smart_money', refresh=1) }}">REFRESH ↻</a></span></div>
   <div class="sm-status">{{ insider_status.message }}{% if insider_status.partial %} Some watchlist symbols could not be refreshed.{% endif %}</div>
   <div class="sm-guide"><strong>P</strong> open-market buy · <strong>S</strong> open-market sale · <strong>F</strong> tax withholding · <strong>G</strong> gift · awards and exercises are compensation events, not market buys</div>
   {% for row in insiders %}<article class="sm-row">
@@ -29,7 +29,7 @@
     <div class="mono sm-value">{{ '{:,.0f}'.format(row.shares) }} shares{% if row.price is not none %}<br><span class="faint">@ ${{ '%.2f'|format(row.price) }}</span>{% endif %}{% if row.get('ownership_after') is not none %}<br><span class="faint">{{ '{:,.0f}'.format(row.ownership_after) }} owned after</span>{% endif %}</div>
     <div class="mono sm-value">{% if row.value is not none %}<span class="faint" style="font-size:9px">REPORTED VALUE</span><br>${{ '{:,.0f}'.format(row.value) }}{% else %}<span class="faint">Value unavailable</span>{% endif %}</div>
     <div class="sm-date"><span class="mono faint" style="font-size:10px">TRADE {{ row.trade_date }}<br>FILED {{ row.filed_at }}</span><br><a class="sm-source" href="{{ row.source_url }}" target="_blank" rel="noopener noreferrer">View SEC filing ↗</a></div>
-  </article>{% else %}<div class="sm-empty"><strong>No verified Form 4 transactions loaded.</strong><p class="faint">Add public companies to the active watchlist or try again after the SEC feed refreshes.</p></div>{% endfor %}
+  </article>{% else %}<div class="sm-empty"><strong>No verified Form 4 transactions loaded.</strong><p class="faint">Add public companies to any watchlist or try again after the SEC feed refreshes.</p></div>{% endfor %}
   <div class="card-ft sm-disclaimer">Form 4 codes matter: grants, awards, option exercises, and open-market trades are different events. Tradestaar shows the reported code and does not treat every acquisition as bullish.</div>
 </section>
 

@@ -1313,6 +1313,30 @@ def get_watchlist_stocks(wl_id: int) -> list:
     return tickers
 
 
+def get_user_tracked_tickers(user_id: int) -> list[str]:
+    """Return every unique ticker tracked by a user across all watchlists.
+
+    Personal and custom lists are prioritized ahead of automatic setup buckets,
+    which keeps bounded external feeds focused on names the user chose directly.
+    """
+    personal_placeholders = ",".join(["?"] * len(PERSONAL_WATCHLISTS))
+    automatic_placeholders = ",".join(["?"] * len(DEFAULT_WATCHLISTS))
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT ws.ticker, wl.name, wl.id AS watchlist_id, "
+        "COALESCE(ws.sort_order, 2147483647) AS ticker_order "
+        "FROM watchlist_stocks ws "
+        "JOIN watchlists wl ON wl.id = ws.watchlist_id "
+        "WHERE wl.user_id = ? "
+        f"ORDER BY CASE WHEN wl.name IN ({personal_placeholders}) THEN 0 "
+        f"WHEN wl.name IN ({automatic_placeholders}) THEN 2 ELSE 1 END, "
+        "wl.id, ticker_order, ws.added_date DESC",
+        (user_id, *PERSONAL_WATCHLISTS, *DEFAULT_WATCHLISTS),
+    ).fetchall()
+    conn.close()
+    return list(dict.fromkeys(str(row["ticker"]).upper() for row in rows if row["ticker"]))
+
+
 def get_watchlist_stock_counts(user_id=None) -> dict:
     """Return {watchlist_id: count} for the given user's watchlists (all if user_id=None)."""
     conn = get_db()
