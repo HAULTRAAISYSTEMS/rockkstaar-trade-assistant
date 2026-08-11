@@ -9,6 +9,17 @@ class IntelNewsTests(unittest.TestCase):
     def tearDown(self):
         intel_engine._cache.clear()
 
+    def test_news_only_cache_clear_preserves_other_feeds(self):
+        intel_engine._cache.update({
+            "market_news": {"ts": 1, "data": ["story"]},
+            "earnings": {"ts": 1, "data": {"today": []}},
+        })
+
+        intel_engine.clear_intel_cache("market_news")
+
+        self.assertNotIn("market_news", intel_engine._cache)
+        self.assertIn("earnings", intel_engine._cache)
+
     @patch("intel_engine._get_watchlist_tickers", return_value=["META"])
     @patch("news_fetcher.fetch_headlines")
     def test_ordinary_low_impact_provider_headline_remains_visible(self, fetch, _watchlist):
@@ -21,6 +32,43 @@ class IntelNewsTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["impact"], "LOW")
         self.assertEqual(rows[0]["source"], "Finnhub")
+
+    @patch("intel_engine._get_watchlist_tickers", return_value=["META"])
+    @patch("news_fetcher.fetch_headlines")
+    def test_rich_article_metadata_reaches_news_cards(self, fetch, _watchlist):
+        fetch.return_value = CatalystNews(
+            ["Meta launches a new product"],
+            "Meta launches a new product",
+            ["product_launch"], 2, "finnhub",
+            articles=({
+                "headline": "Meta launches a new product",
+                "source": "Reuters",
+                "url": "https://example.com/meta",
+                "image": "https://example.com/meta.jpg",
+                "summary": "A provider-supplied story summary.",
+                "published_at": "2026-08-10T20:00:00+00:00",
+            },),
+        )
+
+        row = intel_engine.fetch_market_news(["META"])[0]
+
+        self.assertEqual(row["source"], "Reuters")
+        self.assertEqual(row["url"], "https://example.com/meta")
+        self.assertEqual(row["image"], "https://example.com/meta.jpg")
+        self.assertEqual(row["summary"], "A provider-supplied story summary.")
+
+    @patch("intel_engine._get_watchlist_tickers", return_value=["USER1", "USER2"])
+    @patch("news_fetcher.fetch_headlines")
+    def test_news_fanout_is_bounded_and_watchlist_first(self, fetch, _watchlist):
+        fetch.return_value = CatalystNews([], "", [], None, "none")
+
+        intel_engine.fetch_market_news([f"T{i}" for i in range(30)])
+
+        requested = [call.args[0] for call in fetch.call_args_list]
+        self.assertEqual(len(requested), 18)
+        self.assertIn("USER1", requested)
+        self.assertIn("USER2", requested)
+        self.assertNotIn("T16", requested)
 
     @patch("intel_engine._get_watchlist_tickers", return_value=["META"])
     @patch("news_fetcher.fetch_headlines")

@@ -6416,7 +6416,8 @@ def api_intel():
             })
 
         if request.args.get("refresh") == "1":
-            _intel.clear_intel_cache()
+            namespace = "market_news" if request.args.get("feed") == "news" else None
+            _intel.clear_intel_cache(namespace)
 
         data = _intel.get_intel_summary()
         return jsonify(data)

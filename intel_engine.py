@@ -174,9 +174,15 @@ def _cset(key: str, data) -> None:
         _cache[key] = {"data": data, "ts": _time.monotonic()}
 
 
-def clear_intel_cache() -> None:
+def clear_intel_cache(namespace: str | None = None) -> None:
+    """Clear every intel cache entry or only one feed namespace."""
     with _cache_lock:
-        _cache.clear()
+        if namespace is None:
+            _cache.clear()
+            return
+        for key in list(_cache):
+            if key.split(":")[0] == namespace:
+                _cache.pop(key, None)
 
 
 # ── Alert dedup ───────────────────────────────────────────────────────────────
@@ -710,8 +716,12 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
     if cached is not None:
         return cached
 
+    wl_tickers = _get_watchlist_tickers()
+    wl_set = set(wl_tickers)
     all_tickers = tickers if tickers is not None else _merged_universe()
-    wl_set = set(_get_watchlist_tickers())
+    # News is latency-sensitive. Put personally tracked symbols first and cap
+    # the fan-out so blocked providers cannot starve the entire feed on Render.
+    all_tickers = list(dict.fromkeys(list(wl_tickers) + list(all_tickers)))[:18]
 
     from news_fetcher import fetch_headlines as _fetch_hl
 
@@ -722,13 +732,24 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
             news = _fetch_hl(ticker)
             if news.source == "none":
                 return []
+            articles = list(news.articles) or [
+                {"headline": headline, "source": news.source.capitalize()}
+                for headline in news.headlines
+            ]
             items = []
-            for headline in news.headlines[:3]:
+            for article in articles[:3]:
+                headline = str(article.get("headline") or "").strip()
+                if not headline:
+                    continue
                 impact, reason = classify_news_impact(headline, news.categories)
                 items.append({
                     "ticker":       ticker,
                     "headline":     headline,
-                    "source":       news.source.capitalize(),
+                    "source":       article.get("source") or news.source.replace("_", " ").title(),
+                    "url":          article.get("url") or "",
+                    "image":        article.get("image") or "",
+                    "summary":      article.get("summary") or "",
+                    "published_at": article.get("published_at") or "",
                     "impact":       impact,
                     "reason":       reason,
                     "time":         _format_freshness(news.freshness_minutes),
@@ -739,17 +760,20 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
             logger.debug("intel/news %s: %s", ticker, e)
             return []
 
-    pool = ThreadPoolExecutor(max_workers=3)
+    pool = ThreadPoolExecutor(max_workers=min(8, max(1, len(all_tickers))))
     futs = [pool.submit(_fetch_one, t) for t in all_tickers]
-    pool.shutdown(wait=False)  # don't block when as_completed times out
     try:
-        for fut in as_completed(futs, timeout=20):
+        for fut in as_completed(futs, timeout=16):
             try:
                 results.extend(fut.result())
             except Exception:
                 pass
     except Exception:
         pass
+    finally:
+        # Pending work is cancelled and running calls finish independently;
+        # the request never waits beyond the global deadline.
+        pool.shutdown(wait=False, cancel_futures=True)
 
     # Sort by impact descending
     results.sort(key=lambda x: -_IMPACT_ORDER.get(x["impact"], 0))
@@ -763,7 +787,10 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
             seen.add(key)
             unique.append(item)
 
-    _cset("market_news", unique)
+    # Do not turn a provider timeout into a ten-minute cached empty feed. A
+    # later request may retry while keyed/RSS services recover.
+    if unique:
+        _cset("market_news", unique)
     logger.info("intel/news: %d provider headlines from %d tickers", len(unique), len(all_tickers))
     return unique
 

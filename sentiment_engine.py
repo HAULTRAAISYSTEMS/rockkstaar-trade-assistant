@@ -92,7 +92,7 @@ def enrich_news_article(raw: dict, watchlist: list[str] | set[str] | None = None
         "importance": importance,
         "on_watchlist": ticker in watch or bool(item.get("on_watchlist")),
         "why_it_matters": explain_headline(headline, item.get("reason")),
-        "search_text": " ".join((ticker, headline, _clean(item.get("source")), _clean(item.get("reason")))).lower(),
+        "search_text": " ".join((ticker, headline, _clean(item.get("source")), _clean(item.get("summary")), _clean(item.get("reason")))).lower(),
     })
     return item
 

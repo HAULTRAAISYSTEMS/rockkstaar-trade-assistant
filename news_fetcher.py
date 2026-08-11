@@ -5,7 +5,8 @@ Source priority (first available API key wins):
   1. Finnhub company-news    env FINNHUB_API_KEY
   2. NewsAPI everything      env NEWS_API_KEY
   3. Polygon ticker-news     env POLYGON_API_KEY
-  4. yfinance .news          (no key required — always last resort)
+  4. Yahoo / Seeking Alpha RSS (no key required)
+  5. yfinance .news          (no key required — always last resort)
 
 Usage:
     from news_fetcher import fetch_headlines, parse_catalyst_categories
@@ -31,8 +32,8 @@ import contextlib
 import json
 import logging
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -95,12 +96,57 @@ HEADLINE_REFRESH_MINUTES = 5   # minimum gap between headline refreshes during m
 # Return type
 # ---------------------------------------------------------------------------
 
-class CatalystNews(NamedTuple):
+@dataclass(frozen=True)
+class CatalystNews:
     headlines:         list[str]
     summary:           str
     categories:        list[str]     # detected category keys
     freshness_minutes: int | None    # minutes since newest article (None = unknown)
     source:            str           # "finnhub" | "newsapi" | "polygon" | "yfinance" | "none"
+    articles:          tuple[dict, ...] = ()  # normalized provider metadata for story cards
+
+
+def _article(
+    title: object,
+    *,
+    source: object = "",
+    url: object = "",
+    image: object = "",
+    summary: object = "",
+    published_at: object = "",
+) -> dict:
+    """Normalize provider fields without inventing unavailable metadata."""
+    return {
+        "headline": str(title or "").strip(),
+        "source": str(source or "").strip(),
+        "url": str(url or "").strip(),
+        "image": str(image or "").strip(),
+        "summary": str(summary or "").strip(),
+        "published_at": str(published_at or "").strip(),
+    }
+
+
+def _nested_url(value: object) -> str:
+    """Extract a URL from either a string or Yahoo's nested URL objects."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return str(value.get("url") or value.get("href") or "")
+    return ""
+
+
+def _thumbnail_url(value: object) -> str:
+    """Choose the largest supplied thumbnail resolution."""
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return ""
+    resolutions = value.get("resolutions") or []
+    if isinstance(resolutions, list):
+        candidates = [row for row in resolutions if isinstance(row, dict) and row.get("url")]
+        if candidates:
+            return str(max(candidates, key=lambda row: row.get("width", 0)).get("url") or "")
+    return str(value.get("url") or "")
 
 
 # ---------------------------------------------------------------------------
@@ -307,13 +353,28 @@ def _try_finnhub(ticker: str) -> CatalystNews | None:
             f"https://finnhub.io/api/v1/company-news"
             f"?symbol={ticker}&from={from_d}&to={to_d}&token={api_key}"
         )
-        with urllib.request.urlopen(url, timeout=6) as resp:
+        with urllib.request.urlopen(url, timeout=4) as resp:
             articles = json.loads(resp.read().decode())
         if not articles:
             logger.info("Finnhub  ticker=%s  0 articles returned", ticker)
             return None
         articles.sort(key=lambda x: x.get("datetime", 0), reverse=True)
-        headlines = [a["headline"] for a in articles[:5] if a.get("headline")]
+        rich_articles = tuple(
+            _article(
+                a.get("headline", ""),
+                source=a.get("source") or "Finnhub",
+                url=a.get("url", ""),
+                image=a.get("image", ""),
+                summary=a.get("summary", ""),
+                published_at=(
+                    datetime.fromtimestamp(a["datetime"], tz=timezone.utc).isoformat()
+                    if a.get("datetime") else ""
+                ),
+            )
+            for a in articles[:5]
+            if a.get("headline")
+        )
+        headlines = [a["headline"] for a in rich_articles]
         if not headlines:
             return None
         freshness = None
@@ -325,6 +386,7 @@ def _try_finnhub(ticker: str) -> CatalystNews | None:
         return CatalystNews(
             headlines=headlines, summary=headlines[0],
             categories=cats, freshness_minutes=freshness, source="finnhub",
+            articles=rich_articles,
         )
     except Exception as exc:
         logger.warning("Finnhub fetch failed for %s: %s", ticker, exc)
@@ -344,10 +406,22 @@ def _try_newsapi(ticker: str) -> CatalystNews | None:
             f"?q={query}&sortBy=publishedAt&pageSize=5"
             f"&language=en&apiKey={api_key}"
         )
-        with urllib.request.urlopen(url, timeout=6) as resp:
+        with urllib.request.urlopen(url, timeout=4) as resp:
             data = json.loads(resp.read().decode())
         articles = data.get("articles", [])
-        headlines = [a["title"] for a in articles if a.get("title")][:5]
+        rich_articles = tuple(
+            _article(
+                a.get("title", ""),
+                source=(a.get("source") or {}).get("name") or "NewsAPI",
+                url=a.get("url", ""),
+                image=a.get("urlToImage", ""),
+                summary=a.get("description", ""),
+                published_at=a.get("publishedAt", ""),
+            )
+            for a in articles[:5]
+            if a.get("title")
+        )
+        headlines = [a["headline"] for a in rich_articles]
         if not headlines:
             logger.info("NewsAPI  ticker=%s  0 headlines returned  status=%s", ticker, data.get("status"))
             return None
@@ -364,6 +438,7 @@ def _try_newsapi(ticker: str) -> CatalystNews | None:
         return CatalystNews(
             headlines=headlines, summary=headlines[0],
             categories=cats, freshness_minutes=freshness, source="newsapi",
+            articles=rich_articles,
         )
     except Exception as exc:
         logger.warning("NewsAPI fetch failed for %s: %s", ticker, exc)
@@ -382,10 +457,22 @@ def _try_polygon(ticker: str) -> CatalystNews | None:
             f"?ticker={ticker}&order=desc&limit=5&sort=published_utc"
             f"&apiKey={api_key}"
         )
-        with urllib.request.urlopen(url, timeout=6) as resp:
+        with urllib.request.urlopen(url, timeout=4) as resp:
             data = json.loads(resp.read().decode())
         results = data.get("results", [])
-        headlines = [r["title"] for r in results if r.get("title")][:5]
+        rich_articles = tuple(
+            _article(
+                r.get("title", ""),
+                source=(r.get("publisher") or {}).get("name") or "Polygon",
+                url=r.get("article_url", ""),
+                image=r.get("image_url", ""),
+                summary=r.get("description", ""),
+                published_at=r.get("published_utc", ""),
+            )
+            for r in results[:5]
+            if r.get("title")
+        )
+        headlines = [a["headline"] for a in rich_articles]
         if not headlines:
             logger.info("Polygon  ticker=%s  0 headlines returned", ticker)
             return None
@@ -402,6 +489,7 @@ def _try_polygon(ticker: str) -> CatalystNews | None:
         return CatalystNews(
             headlines=headlines, summary=headlines[0],
             categories=cats, freshness_minutes=freshness, source="polygon",
+            articles=rich_articles,
         )
     except Exception as exc:
         logger.warning("Polygon fetch failed for %s: %s", ticker, exc)
@@ -426,7 +514,7 @@ def _try_yfinance(ticker: str) -> CatalystNews | None:
             logger.info("yfinance  ticker=%s  news list is empty", ticker)
             return None
 
-        headlines = []
+        rich_articles = []
         freshness_dt = None
 
         for item in news[:10]:  # scan up to 10 to get 5 real titles
@@ -437,8 +525,17 @@ def _try_yfinance(ticker: str) -> CatalystNews | None:
             content = item.get("content")
             if isinstance(content, dict):
                 title = content.get("title", "").strip()
+                provider = content.get("provider") or {}
+                pub = content.get("pubDate") or content.get("displayTime")
+                article = _article(
+                    title,
+                    source=(provider.get("displayName") if isinstance(provider, dict) else provider) or "Yahoo Finance",
+                    url=_nested_url(content.get("canonicalUrl") or content.get("clickThroughUrl")),
+                    image=_thumbnail_url(content.get("thumbnail")),
+                    summary=content.get("summary") or content.get("description") or "",
+                    published_at=pub or "",
+                )
                 if title and not freshness_dt:
-                    pub = content.get("pubDate") or content.get("displayTime")
                     if pub:
                         try:
                             freshness_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
@@ -447,8 +544,22 @@ def _try_yfinance(ticker: str) -> CatalystNews | None:
             else:
                 # Old format: flat dict
                 title = item.get("title", "").strip()
+                pt = item.get("providerPublishTime")
+                published_at = ""
+                if pt:
+                    try:
+                        published_at = datetime.fromtimestamp(int(pt), tz=timezone.utc).isoformat()
+                    except Exception:
+                        pass
+                article = _article(
+                    title,
+                    source=item.get("publisher") or "Yahoo Finance",
+                    url=item.get("link", ""),
+                    image=_thumbnail_url(item.get("thumbnail")),
+                    summary=item.get("summary") or item.get("description") or "",
+                    published_at=published_at,
+                )
                 if title and not freshness_dt:
-                    pt = item.get("providerPublishTime")
                     if pt:
                         try:
                             freshness_dt = datetime.fromtimestamp(int(pt), tz=timezone.utc)
@@ -456,10 +567,11 @@ def _try_yfinance(ticker: str) -> CatalystNews | None:
                             pass
 
             if title:
-                headlines.append(title)
-            if len(headlines) >= 5:
+                rich_articles.append(article)
+            if len(rich_articles) >= 5:
                 break
 
+        headlines = [a["headline"] for a in rich_articles]
         if not headlines:
             logger.warning(
                 "yfinance  ticker=%s  news items present (%d) but no titles extracted — "
@@ -474,6 +586,7 @@ def _try_yfinance(ticker: str) -> CatalystNews | None:
         return CatalystNews(
             headlines=headlines, summary=headlines[0],
             categories=cats, freshness_minutes=freshness, source="yfinance",
+            articles=tuple(rich_articles),
         )
     except Exception as exc:
         logger.warning("yfinance news failed for %s: %s", ticker, exc)
@@ -493,6 +606,7 @@ def _try_rss(ticker: str) -> CatalystNews | None:
     import urllib.request as _urlreq
     import html
     import re
+    import xml.etree.ElementTree as ET
 
     _RSS_SOURCES = [
         # Yahoo Finance RSS — different endpoint from the blocked v8 API
@@ -513,24 +627,48 @@ def _try_rss(ticker: str) -> CatalystNews | None:
     for url, source_name in _RSS_SOURCES:
         try:
             req  = _urlreq.Request(url, headers=_hdrs)
-            with _urlreq.urlopen(req, timeout=6) as resp:
+            with _urlreq.urlopen(req, timeout=4) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
 
-            # Extract <title> tags from RSS items (skip channel title)
-            titles = re.findall(r"<item[^>]*>.*?<title[^>]*>(.*?)</title>", raw,
-                                re.DOTALL | re.IGNORECASE)
-            if not titles:
-                # Atom feed style
-                titles = re.findall(r"<entry[^>]*>.*?<title[^>]*>(.*?)</title>", raw,
-                                    re.DOTALL | re.IGNORECASE)
+            root = ET.fromstring(raw)
+            nodes = root.findall(".//item") or root.findall(".//{*}entry")
+            rich_articles = []
+            for node in nodes[:8]:
+                def _find(name: str):
+                    found = node.find(name)
+                    return found if found is not None else node.find(f"{{*}}{name}")
 
-            headlines = []
-            for t in titles[:8]:
-                t = html.unescape(re.sub(r"<[^>]+>", "", t)).strip()
-                if t and len(t) > 10:
-                    headlines.append(t)
-                if len(headlines) >= 5:
+                def _text(name: str) -> str:
+                    found = _find(name)
+                    return (found.text or "").strip() if found is not None else ""
+
+                title = html.unescape(re.sub(r"<[^>]+>", "", _text("title"))).strip()
+                if not title or len(title) <= 10:
+                    continue
+                link_node = _find("link")
+                link = _text("link") or (link_node.get("href", "") if link_node is not None else "")
+                description = html.unescape(re.sub(r"<[^>]+>", " ", _text("description") or _text("summary")))
+                description = re.sub(r"\s+", " ", description).strip()
+                image = ""
+                for child in node.iter():
+                    tag = child.tag.lower() if isinstance(child.tag, str) else ""
+                    if tag.endswith(("thumbnail", "content", "enclosure")) and child.get("url"):
+                        mime = (child.get("type") or "").lower()
+                        if "image" in mime or tag.endswith("thumbnail"):
+                            image = child.get("url", "")
+                            break
+                rich_articles.append(_article(
+                    title,
+                    source="Yahoo Finance" if source_name == "yahoo_rss" else "Seeking Alpha",
+                    url=link,
+                    image=image,
+                    summary=description,
+                    published_at=_text("pubDate") or _text("published") or _text("updated"),
+                ))
+                if len(rich_articles) >= 5:
                     break
+
+            headlines = [a["headline"] for a in rich_articles]
 
             if headlines:
                 cats = parse_catalyst_categories(headlines)
@@ -541,6 +679,7 @@ def _try_rss(ticker: str) -> CatalystNews | None:
                     categories=cats,
                     freshness_minutes=None,
                     source=source_name,
+                    articles=tuple(rich_articles),
                 )
         except Exception as exc:
             logger.debug("rss  ticker=%s  source=%s  error: %s", ticker, source_name, exc)
@@ -558,6 +697,7 @@ _EMPTY = CatalystNews(
     categories=[],
     freshness_minutes=None,
     source="none",
+    articles=(),
 )
 
 
@@ -568,10 +708,12 @@ _EMPTY = CatalystNews(
 def fetch_headlines(ticker: str) -> CatalystNews:
     """
     Fetch catalyst headlines using the best available source.
-    Priority: Finnhub → NewsAPI → Polygon → yfinance → empty fallback.
+    Priority: Finnhub → NewsAPI → Polygon → RSS → yfinance → empty fallback.
     Never raises — always returns a CatalystNews.
     """
-    for fn in (_try_finnhub, _try_newsapi, _try_polygon, _try_yfinance, _try_rss):
+    # RSS is attempted before yfinance because it is a bounded HTTP request;
+    # yfinance can hang behind Yahoo rate limits on hosted environments.
+    for fn in (_try_finnhub, _try_newsapi, _try_polygon, _try_rss, _try_yfinance):
         result = fn(ticker)
         if result is not None:
             logger.info("fetch_headlines  ticker=%s  source=%s  headlines=%d",
