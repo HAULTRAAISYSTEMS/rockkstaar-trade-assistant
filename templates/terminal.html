@@ -903,7 +903,7 @@ try {
 } catch(e) {}
 if(twIntervalConfig[twSavedInterval].ranges.indexOf(twSavedRange)<0)twSavedRange=twIntervalConfig[twSavedInterval].defaultRange;
 if(['4h','1d'].indexOf(twSavedInterval)>=0)twSavedExtended=false;
-var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, assetType:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, sessionVwap:null, intelVwap:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
+var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, assetType:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, vwapReqId:0, lastPrice:null, sessionVwap:null, intelVwap:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
 var twChartRefreshTimer=null;
 
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
@@ -926,6 +926,16 @@ function twSessionVwap(bars,interval){
   var sessionKey=twEasternSessionDate.format(twChartDate(eligible[eligible.length-1].time)),weighted=0,volume=0;
   eligible.forEach(function(bar){if(twEasternSessionDate.format(twChartDate(bar.time))!==sessionKey)return;var v=Number(bar.volume),typical=(Number(bar.high)+Number(bar.low)+Number(bar.close))/3;if(!isFinite(v)||v<=0||!isFinite(typical))return;weighted+=typical*v;volume+=v;});
   return volume>0?weighted/volume:null;
+}
+function twShowSessionVwap(){
+  if(twChartState.intelVwap==null)twNum('tw-intel-vwap',twChartState.sessionVwap==null?'Unavailable':Number(twChartState.sessionVwap).toFixed(2));
+}
+function twLoadSessionVwap(ticker){
+  var requestId=++twChartState.vwapReqId;
+  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval=5m&range=1d&session=regular')
+    .then(function(response){return response.json();})
+    .then(function(data){if(requestId!==twChartState.vwapReqId||ticker!==twChartState.ticker)return;twChartState.sessionVwap=twSessionVwap((data&&data.bars)||[],'5m');twShowSessionVwap();})
+    .catch(function(){if(requestId===twChartState.vwapReqId&&ticker===twChartState.ticker){twChartState.sessionVwap=null;twShowSessionVwap();}});
 }
 function twRenderMarketData(meta){
   meta=meta||{};var badge=document.getElementById('tw-feed-badge'),detail=document.getElementById('tw-feed-detail'),asof=document.getElementById('tw-feed-asof');if(!badge||!detail||!asof)return;
@@ -1177,7 +1187,8 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       twChartState.vol.setData(bars.map(function(b){ return { time:b.time, value:b.volume||0, color:twVolumeColor(b) }; }));
       twChartState.bars=bars; twChartState.barMap={}; twChartState.pinnedTime=null;
       twChartState.sessionVwap=twSessionVwap(bars,interval);
-      if(twChartState.intelVwap==null)twNum('tw-intel-vwap',twChartState.sessionVwap==null?'Unavailable':Number(twChartState.sessionVwap).toFixed(2));
+      twShowSessionVwap();
+      if(twChartState.sessionVwap==null)twLoadSessionVwap(ticker);
       bars.forEach(function(b){ twChartState.barMap[twTimeKey(b.time)]=b; });
       twChartState.lastPrice = bars[bars.length-1].close;
       twApplyType();

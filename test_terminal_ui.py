@@ -19,6 +19,8 @@ class TerminalUiTests(unittest.TestCase):
         self.assertIn("function twSessionVwap(bars,interval)", template)
         self.assertIn("typical*v", template)
         self.assertIn("'tw-intel-vwap'", template)
+        self.assertIn("function twLoadSessionVwap(ticker)", template)
+        self.assertIn("?interval=5m&range=1d&session=regular", template)
 
 
 if __name__ == "__main__":
