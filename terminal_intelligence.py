@@ -191,6 +191,12 @@ def build_terminal_intelligence(ticker: str, stock: dict | None, intel_summary: 
     ticker = _ticker(ticker)
     stock = stock or {}
     summary = intel_summary or {}
+    etf_tickers = {
+        "DIA", "IWM", "QQQ", "SCHD", "SMH", "SPY", "VOO", "VTI", "VTV", "VUG",
+        "VFH", "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
+    }
+    company_name = _text(stock.get("company_name") or stock.get("name"))
+    asset_type = "ETF" if ticker in etf_tickers or " etf" in company_name.lower() else "EQUITY"
 
     news = []
     seen = set()
@@ -254,6 +260,7 @@ def build_terminal_intelligence(ticker: str, stock: dict | None, intel_summary: 
     return {
         "ok": True,
         "ticker": ticker,
+        "asset_type": asset_type,
         "as_of": datetime.now(timezone.utc).isoformat(),
         "overview": overview,
         "news": news,

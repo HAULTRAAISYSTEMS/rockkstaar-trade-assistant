@@ -79,7 +79,19 @@ class NasdaqEarningsTests(unittest.TestCase):
     def test_intel_card_exposes_earnings_refresh_control(self):
         template = Path("templates/intel.html").read_text()
 
-        self.assertIn("url_for('intel', refresh='earnings')", template)
+        self.assertIn("/api/intel/earnings-radar", template)
+        self.assertIn("refreshEarningsRadar", template)
+
+    @patch("intel_engine._get_watchlist_tickers", return_value=["MINE"])
+    @patch("intel_engine._earnings_from_nasdaq")
+    def test_bounded_radar_returns_direct_calendar_results(self, calendar, _watchlist):
+        calendar.return_value = [
+            {"ticker": "LARGE", "days_away": 0, "on_watchlist": False, "market_cap": 50_000_000_000},
+            {"ticker": "MINE", "days_away": 0, "on_watchlist": True, "market_cap": 1_000_000_000},
+        ]
+        with patch.object(intel_engine, "EARNINGS_OVERRIDES", []):
+            rows = intel_engine.fetch_earnings_radar(limit=2)
+        self.assertEqual([row["ticker"] for row in rows], ["MINE", "LARGE"])
 
 
 if __name__ == "__main__":

@@ -92,7 +92,7 @@
 .tw-type-btn { display:inline-flex; align-items:center; justify-content:center; width:30px; height:28px; font-size:14px; color:var(--text-faint); background: var(--ink-750); border:1px solid var(--border-subtle); border-radius: var(--r-sm); cursor:pointer; transition: all var(--dur-fast); }
 .tw-type-btn.active { color: var(--orange-500); border-color: var(--orange-500); }
 .tw-feed-strip{display:flex;align-items:center;gap:9px;margin:0 var(--sp-5) var(--sp-3);padding:8px 10px;border:1px solid var(--border-subtle);border-radius:var(--r-sm);background:#0b0e11;font:10px var(--font-mono);color:var(--text-faint);min-height:34px}
-.tw-feed-badge{font-weight:800;letter-spacing:.06em;padding:3px 7px;border-radius:999px;color:var(--text-body);background:var(--ink-700);white-space:nowrap}.tw-feed-badge.live{color:var(--pos-500);background:rgba(34,197,139,.12)}.tw-feed-badge.delayed{color:var(--warn-500);background:rgba(255,176,32,.12)}.tw-feed-badge.partial{color:#72b7ff;background:rgba(74,163,255,.12)}.tw-feed-badge.fallback{color:var(--neg-500);background:rgba(255,77,69,.12)}
+.tw-feed-badge{font-weight:800;letter-spacing:.06em;padding:3px 7px;border-radius:999px;color:var(--text-body);background:var(--ink-700);white-space:nowrap}.tw-feed-badge.live{color:var(--pos-500);background:rgba(34,197,139,.12)}.tw-feed-badge.delayed,.tw-feed-badge.fallback{color:var(--warn-500);background:rgba(255,176,32,.12)}.tw-feed-badge.partial{color:#72b7ff;background:rgba(74,163,255,.12)}
 .tw-feed-asof{margin-left:auto;white-space:nowrap}.tw-feed-detail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .tw-chart { position: relative; margin: 0 var(--sp-5); height: 330px; border-radius: var(--r-md); border:1px solid var(--border-subtle); background: var(--surface-inset); overflow:hidden; }
@@ -903,7 +903,7 @@ try {
 } catch(e) {}
 if(twIntervalConfig[twSavedInterval].ranges.indexOf(twSavedRange)<0)twSavedRange=twIntervalConfig[twSavedInterval].defaultRange;
 if(['4h','1d'].indexOf(twSavedInterval)>=0)twSavedExtended=false;
-var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
+var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, assetType:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
 var twChartRefreshTimer=null;
 
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
@@ -921,7 +921,7 @@ function twEasternTickLabel(time,tickMarkType){var date=twChartDate(time);if(!da
 function twRenderMarketData(meta){
   meta=meta||{};var badge=document.getElementById('tw-feed-badge'),detail=document.getElementById('tw-feed-detail'),asof=document.getElementById('tw-feed-asof');if(!badge||!detail||!asof)return;
   var cls=meta.fallback?'fallback':(meta.realtime?(meta.comprehensive?'live':'partial'):'delayed');badge.className='tw-feed-badge '+cls;badge.textContent=meta.feed_label||'FEED UNKNOWN';
-  var delay=meta.delay_seconds==null?'delay unknown':(Number(meta.delay_seconds)>0?Math.round(Number(meta.delay_seconds)/60)+' min delayed':'real-time');detail.textContent=[meta.provider,meta.coverage,delay].filter(Boolean).join(' · ');detail.title=meta.message||'';
+  var delay=meta.delay_label||(meta.delay_seconds==null?'freshness unavailable':(Number(meta.delay_seconds)>0?Math.round(Number(meta.delay_seconds)/60)+' min delayed':'real-time'));detail.textContent=[meta.provider,meta.coverage,delay].filter(Boolean).join(' · ');detail.title=meta.message||'';
   var stamp=meta.as_of?new Date(meta.as_of):null;asof.textContent=stamp&&!isNaN(stamp.getTime())?'As of '+twEasternDateTime.format(stamp):'As-of unavailable';
 }
 function twScheduleChartRefresh(){
@@ -1201,20 +1201,22 @@ function twApplyEvents(events){
   try { twChartState.area.setMarkers(markers); twChartState.candle.setMarkers(markers); } catch(e) {}
 }
 function twRenderIntelligence(data){
+  twChartState.assetType=data.asset_type||'EQUITY';
   twNum('tw-intel-ticker',data.ticker); twNum('tw-intel-asof','updated '+new Date(data.as_of).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));
   var o=data.overview||{}, f=data.fundamentals||{}, links=data.links||{};
   twPanel('overview','<div class="tw-intel-grid">'+
-    [['Bias',o.bias],['Setup grade',o.grade],['Daily trend',o.daily_trend],['VWAP',o.vwap==null?'—':Number(o.vwap).toFixed(2)],['EMA 20',o.ema20==null?'—':Number(o.ema20).toFixed(2)],['EMA 50',o.ema50==null?'—':Number(o.ema50).toFixed(2)],['Relative volume',o.relative_volume==null?'—':Number(o.relative_volume).toFixed(2)+'x'],['Avg volume',twFmtVol(o.average_volume)]].map(function(x){return '<div class="tw-intel-metric"><span>'+twEsc(x[0])+'</span><strong>'+twEsc(x[1]||'—')+'</strong></div>';}).join('')+
+    [['Bias',o.bias],['Setup grade',o.grade||'Not scored'],['Daily trend',o.daily_trend],['VWAP',o.vwap==null?'Unavailable':Number(o.vwap).toFixed(2)],['EMA 20',o.ema20==null?'Unavailable':Number(o.ema20).toFixed(2)],['EMA 50',o.ema50==null?'Unavailable':Number(o.ema50).toFixed(2)],['Relative volume',o.relative_volume==null?'Unavailable':Number(o.relative_volume).toFixed(2)+'x'],['Avg volume',twFmtVol(o.average_volume)]].map(function(x){return '<div class="tw-intel-metric"><span>'+twEsc(x[0])+'</span><strong>'+twEsc(x[1]||'Unavailable')+'</strong></div>';}).join('')+
     '</div>'+(o.catalyst?'<p class="tw-intel-copy">'+twEsc(o.catalyst)+'</p>':'') );
   var news=(data.news||[]).map(function(row){ var title=twEsc(row.headline), href=/^https?:\/\//.test(row.url||'')?'<a href="'+twEsc(row.url)+'" target="_blank" rel="noopener noreferrer">Source ↗</a>':''; return '<article class="tw-intel-row"><div><strong>'+title+'</strong><div class="tw-intel-meta">'+twEsc([row.source,row.published].filter(Boolean).join(' · ')||'Cached app news')+'</div></div>'+href+'</article>'; }).join('');
   twPanel('news',news?'<div class="tw-intel-list">'+news+'</div>':twEmpty('No ticker-specific headlines are available from the connected news feeds.'));
   var earns=(data.earnings||[]).map(function(row){return '<article class="tw-intel-row"><div><strong>'+twEsc(row.date||'Date unavailable')+' · '+twEsc(row.time||'TBD')+'</strong><div class="tw-intel-meta">EPS est '+twValue(row.eps_est)+' · Revenue est '+twValue(row.revenue_est)+' · '+twEsc(row.source||'app calendar')+'</div></div></article>';}).join('');
-  twPanel('earnings',earns?'<div class="tw-intel-list">'+earns+'</div>':twEmpty('No verified upcoming earnings event is available for this ticker.'));
+  twPanel('earnings',earns?'<div class="tw-intel-list">'+earns+'</div>':twEmpty(data.asset_type==='ETF'?'Earnings are not applicable to an ETF.':'No verified upcoming earnings event is available for this ticker.'));
   twPanel('fundamentals','<div class="tw-intel-grid"><div class="tw-intel-metric"><span>Sector</span><strong>'+twEsc(f.sector||'—')+'</strong></div><div class="tw-intel-metric"><span>Industry</span><strong>'+twEsc(f.industry||'—')+'</strong></div><div class="tw-intel-metric"><span>Relative strength</span><strong>'+twValue(f.relative_strength)+'</strong></div><div class="tw-intel-metric"><span>Trend</span><strong>'+twEsc(f.trend||'—')+'</strong></div></div><p class="tw-intel-copy">'+twEsc(f.message||'Detailed fundamentals are available in the analyzer.')+' <a class="tw-intel-action" href="'+twEsc(links.fundamentals||'/fundamentals?ticker='+data.ticker)+'">Open Fundamentals →</a></p>');
   twPanel('ai','<p class="tw-intel-copy">'+twEsc((data.ai||{}).message||'AI context is unavailable.')+'</p><a class="tw-intel-action" href="'+twEsc(links.ai||'/ai')+'">Open Tradestaar AI with '+twEsc(data.ticker)+' →</a>');
   var c=data.context||{}; twNum('tw-context-why',c.why_moving||'No verified catalyst or ticker headline available.');
   twNum('tw-context-rvol',c.relative_volume==null?'—':Number(c.relative_volume).toFixed(2)+'x');
-  twNum('tw-context-earnings',c.next_earnings?(c.next_earnings.date+' · '+c.next_earnings.time):'No verified date');
+  twNum('tw-context-earnings',c.next_earnings?(c.next_earnings.date+' · '+c.next_earnings.time):(data.asset_type==='ETF'?'Not applicable · ETF':'No verified date'));
+  if(data.asset_type==='ETF'){twNum('tw-context-insiders','Not applicable · ETF');twPanel('insiders',twEmpty('Corporate Form 4 insider filings are not applicable to an ETF.'));}
   twApplyEvents(data.events||[]);
 }
 function twLoadIntelligence(ticker){
@@ -1224,6 +1226,7 @@ function twLoadIntelligence(ticker){
   fetch('/api/terminal/insiders/'+encodeURIComponent(ticker)).then(function(r){return r.json();}).then(function(data){if(insiderReq!==twChartState.insiderReqId)return;twRenderInsiders(data);}).catch(function(){if(insiderReq===twChartState.insiderReqId){twPanel('insiders',twEmpty('The SEC filing service is temporarily unavailable.'));twNum('tw-context-insiders','SEC service unavailable');}});
 }
 function twRenderInsiders(data){
+  if(twChartState.assetType==='ETF'){twNum('tw-context-insiders','Not applicable · ETF');twPanel('insiders',twEmpty('Corporate Form 4 insider filings are not applicable to an ETF.'));return;}
   var status=data.status||{}, rows=data.rows||[], summary=data.summary;
   twNum('tw-context-insiders',summary?summary.label:(status.message||'No recent verified filings'));
   if(!rows.length){twPanel('insiders',twEmpty(status.message||'No verified recent Form 4 transactions were found.','<a class="tw-intel-action" href="/smart-money">Open Smart Money →</a>'));return;}

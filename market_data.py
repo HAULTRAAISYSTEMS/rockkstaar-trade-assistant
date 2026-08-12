@@ -186,12 +186,14 @@ def fetch_chart_bars(ticker: str, interval: str, range_str: str,
         ticker, interval=interval, range_str=range_str, include_prepost=include_extended
     )
     timestamps = (fallback or {}).get("timestamps") or []
+    credentials_configured = all(_credentials())
     return fallback, {
         "provider": "Yahoo",
         "feed": "yahoo_chart",
-        "feed_label": "YAHOO FALLBACK",
-        "coverage": "Unofficial fallback",
+        "feed_label": "YAHOO BACKUP",
+        "coverage": "US equities · delayed/unofficial",
         "delay_seconds": None,
+        "delay_label": "freshness varies",
         "realtime": False,
         "comprehensive": False,
         "official": False,
@@ -200,5 +202,11 @@ def fetch_chart_bars(ticker: str, interval: str, range_str: str,
             datetime.fromtimestamp(timestamps[-1], timezone.utc).isoformat()
             if timestamps else None
         ),
-        "message": "Alpaca was unavailable. This fallback is not labelled as real-time market data.",
+        "message": (
+            "The primary Alpaca feed did not return bars, so the chart is using Yahoo backup data. "
+            "Yahoo backup bars are not labelled as real-time."
+            if credentials_configured else
+            "Alpaca market-data credentials are not configured on this server, so the chart is "
+            "using Yahoo backup data. Yahoo backup bars are not labelled as real-time."
+        ),
     }

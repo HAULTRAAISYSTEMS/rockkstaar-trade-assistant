@@ -55,6 +55,8 @@ class MarketDataContractTests(unittest.TestCase):
         self.assertTrue(meta["fallback"])
         self.assertFalse(meta["realtime"])
         self.assertFalse(meta["official"])
+        self.assertEqual(meta["feed_label"], "YAHOO BACKUP")
+        self.assertEqual(meta["delay_label"], "freshness varies")
 
 
 if __name__ == "__main__":

@@ -6519,6 +6519,38 @@ def api_intel_news_refresh():
         }), 200
 
 
+@app.route("/api/intel/earnings-radar")
+def api_intel_earnings_radar():
+    """Refresh the compact earnings slate synchronously and return its HTML."""
+    try:
+        earnings = _intel.fetch_earnings_radar(limit=12)
+        message = (
+            ""
+            if earnings else
+            "The calendar request completed, but no upcoming large-, mid-cap, or watchlist reports were returned."
+        )
+        return jsonify({
+            "ok": bool(earnings),
+            "count": len(earnings),
+            "html": render_template(
+                "_intel_earnings_items.html",
+                earnings=earnings,
+                earnings_message=message,
+            ),
+        })
+    except Exception as exc:
+        logger.error("api_intel_earnings_radar: %s", exc, exc_info=True)
+        return jsonify({
+            "ok": False,
+            "count": 0,
+            "html": render_template(
+                "_intel_earnings_items.html",
+                earnings=[],
+                earnings_message="The earnings calendar is temporarily unavailable. Please try again.",
+            ),
+        }), 200
+
+
 @app.route("/api/ndx_watch")
 @csrf.exempt
 def api_ndx_watch():

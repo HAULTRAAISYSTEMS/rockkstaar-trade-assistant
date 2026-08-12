@@ -30,6 +30,11 @@ class TerminalIntelligenceTests(unittest.TestCase):
         self.assertEqual(payload["earnings"], [])
         self.assertIsNone(payload["context"]["next_earnings"])
 
+    def test_etf_is_labelled_so_corporate_events_are_not_shown_as_missing(self):
+        payload = build_terminal_intelligence("VOO", {"company_name": "Vanguard S&P 500 ETF"}, {})
+        self.assertEqual(payload["asset_type"], "ETF")
+        self.assertIsNone(payload["context"]["next_earnings"])
+
     def test_insider_summary_uses_only_reported_values(self):
         payload = build_insider_payload("META", [
             {"ticker": "META", "owner": "Jane Doe", "role": "Director", "kind": "BUY", "code": "P",

@@ -1403,7 +1403,7 @@ def _apply_overrides_to_buckets(buckets: dict, today: date, wl_set: set) -> None
 
 def _nasdaq_cal(endpoint: str, date_str: str) -> list[dict]:
     """Single GET to Nasdaq calendar API. Returns row list or [] on any error."""
-    import urllib.request as _urlreq
+    import requests as _requests
     url = f"https://api.nasdaq.com/api/calendar/{endpoint}?date={date_str}"
     hdrs = {
         "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -1415,9 +1415,9 @@ def _nasdaq_cal(endpoint: str, date_str: str) -> list[dict]:
         "Referer":         f"https://www.nasdaq.com/market-activity/{endpoint}",
     }
     try:
-        req = _urlreq.Request(url, headers=hdrs)
-        with _urlreq.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read())
+        response = _requests.get(url, headers=hdrs, timeout=8)
+        response.raise_for_status()
+        data = response.json()
         return (data.get("data") or {}).get("rows") or []
     except Exception as exc:
         logger.debug("intel/nasdaq/%s %s: %s", endpoint, date_str, exc)
@@ -1523,6 +1523,36 @@ def _earnings_from_nasdaq(today: date, wl_set: set, already_added: set) -> list[
                 fut.cancel()
         pool.shutdown(wait=False, cancel_futures=True)
     return results
+
+
+def fetch_earnings_radar(limit: int = 12) -> list[dict]:
+    """Return a bounded, request-scoped earnings slate for the Intel card.
+
+    The general earnings refresh also checks symbols one by one and can take
+    much longer.  The radar only needs the next seven calendar days, so this
+    direct Nasdaq request gives the browser a result in the same HTTP request
+    and does not depend on a process-local background worker.
+    """
+    today = _today_et()
+    watchlist = set(_get_watchlist_tickers())
+    rows = _earnings_from_nasdaq(today, watchlist, set())
+
+    buckets = {"today": [], "tomorrow": [], "this_week": [], "coming_up": []}
+    _apply_overrides_to_buckets(buckets, today, watchlist)
+    seen = {row.get("ticker") for row in rows}
+    for bucket in buckets.values():
+        for row in bucket:
+            if row.get("ticker") not in seen and 0 <= int(row.get("days_away", 99)) <= 7:
+                rows.append(row)
+                seen.add(row.get("ticker"))
+
+    rows.sort(key=lambda row: (
+        int(row.get("days_away", 99)),
+        not bool(row.get("on_watchlist")),
+        -(row.get("market_cap") or 0),
+        row.get("ticker") or "",
+    ))
+    return rows[:max(1, int(limit))]
 
 
 def _splits_from_nasdaq(today: date) -> list[dict]:

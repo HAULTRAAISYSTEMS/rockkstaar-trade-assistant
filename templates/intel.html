@@ -63,6 +63,7 @@
   .verified-box{margin:14px;padding:15px;border:1px solid var(--elite-line);border-radius:12px;background:var(--elite-soft)}
   .verified-box p{margin:6px 0 12px;color:#8994a1;font-size:12px;line-height:1.5}
   .elite-link{display:inline-flex;align-items:center;gap:7px;color:var(--elite-gold-2);font-size:11px;font-weight:750;text-decoration:none;letter-spacing:.04em}.elite-link:after{content:"→"}
+  button.elite-link{border:0;background:transparent;padding:0;font-family:inherit;cursor:pointer}button.elite-link:disabled{cursor:wait;opacity:.65}
   .intel-lower{display:grid;grid-template-columns:1.15fr 1fr;gap:16px}
   .calendar-row{display:grid;grid-template-columns:72px 1fr auto;gap:12px;align-items:center;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px}.calendar-row:last-child{border-bottom:0}
   .impact{padding:3px 6px;border-radius:5px;background:rgba(231,184,75,.09);color:var(--elite-gold);font:700 9px var(--font-mono)}.impact.high{color:#ff7c83;background:rgba(255,105,115,.1)}
@@ -112,7 +113,7 @@
     <div class="intel-kpi"><small><span class="live-dot"></span>Market regime</small><strong>{{ rlabel }}</strong></div>
     <div class="intel-kpi"><small>Live catalysts</small><strong id="intel-live-count">{{ news|length }}</strong></div>
     <div class="intel-kpi"><small>Bullish / Bearish</small><strong id="intel-tone-counts"><span class="pos">{{ bull_count }}</span> / <span class="neg">{{ bear_count }}</span></strong></div>
-    <div class="intel-kpi"><small>Earnings radar</small><strong>{{ earnings|length }}</strong></div>
+    <div class="intel-kpi"><small>Earnings radar</small><strong id="intel-earnings-count">{{ earnings|length }}</strong></div>
   </section>
 
   <div class="intel-toolbar">
@@ -137,10 +138,9 @@
         <div class="intel-list" id="intel-trending">{% include "_intel_trending.html" %}</div>
       </div>
       <div class="intel-card">
-        <div class="intel-card-head"><h2>Earnings Radar</h2><a class="elite-link" href="{{ url_for('intel', refresh='earnings') }}">Refresh ↻</a></div>
-        <div class="intel-list">
-          {% for e in earnings[:6] %}<div class="intel-list-row"><a class="intel-symbol" href="{{ url_for('stock_detail', ticker=e.ticker) }}">{{ e.ticker }}</a><span class="intel-mini">{{ e.company_name or 'Earnings' }}</span><span class="intel-mini" style="text-align:right">{{ e.date_label or e.date }}<br>{{ e.time_label or 'TBD' }}</span></div>
-          {% else %}<p class="intel-mini">{{ earnings_status.message }}</p>{% endfor %}
+        <div class="intel-card-head"><h2>Earnings Radar</h2><button type="button" class="elite-link" id="intel-earnings-refresh" onclick="refreshEarningsRadar(this)">Refresh ↻</button></div>
+        <div class="intel-list" id="intel-earnings-radar" data-empty="{{ 0 if earnings else 1 }}">
+          {% set earnings_message = earnings_status.message %}{% include "_intel_earnings_items.html" %}
         </div>
       </div>
       <div class="intel-card">
@@ -194,7 +194,18 @@ function refreshIntelNews(button){
       if(message)message.textContent=' The refresh request failed. Please try again.';
     });
 }
+function refreshEarningsRadar(button){
+  var host=document.getElementById('intel-earnings-radar');if(!host)return Promise.resolve();
+  if(button){button.disabled=true;button.textContent='Refreshing…';}
+  host.innerHTML='<p class="intel-mini">Contacting the upcoming earnings calendar…</p>';
+  return fetch('/api/intel/earnings-radar',{headers:{'Accept':'application/json'},cache:'no-store'})
+    .then(function(response){if(!response.ok)throw new Error('Refresh request failed');return response.json();})
+    .then(function(data){host.innerHTML=data.html;host.dataset.empty=data.count?'0':'1';document.getElementById('intel-earnings-count').textContent=data.count;if(button){button.disabled=false;button.textContent=data.ok?'Refresh ↻':'Try again';}})
+    .catch(function(){host.innerHTML='<p class="intel-mini">The earnings calendar could not be reached. Please try again.</p>';if(button){button.disabled=false;button.textContent='Try again';}});
+}
 var intelFeedState=document.getElementById('intel-feed-state');
 if(intelFeedState)setTimeout(function(){refreshIntelNews(intelFeedState.querySelector('button'));},500);
+var earningsRadar=document.getElementById('intel-earnings-radar');
+if(earningsRadar&&earningsRadar.dataset.empty==='1')setTimeout(function(){refreshEarningsRadar(document.getElementById('intel-earnings-refresh'));},700);
 </script>
 {% endblock %}
