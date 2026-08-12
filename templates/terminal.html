@@ -903,7 +903,7 @@ try {
 } catch(e) {}
 if(twIntervalConfig[twSavedInterval].ranges.indexOf(twSavedRange)<0)twSavedRange=twIntervalConfig[twSavedInterval].defaultRange;
 if(['4h','1d'].indexOf(twSavedInterval)>=0)twSavedExtended=false;
-var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, assetType:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
+var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, assetType:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, lastPrice:null, sessionVwap:null, intelVwap:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
 var twChartRefreshTimer=null;
 
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
@@ -912,12 +912,21 @@ function twChartHideMsg(){ var box=document.getElementById('tw-chart-empty'); if
 var twEasternDateTime=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'});
 var twEasternDate=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric'});
 var twEasternClock=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit'});
+var twEasternSessionDate=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'});
 function twChartDate(time){
   if(time&&typeof time==='object'&&time.year)return new Date(Date.UTC(time.year,(time.month||1)-1,time.day||1,12));
   var seconds=Number(time);return isFinite(seconds)?new Date(seconds*1000):null;
 }
 function twEasternTimeLabel(time){var date=twChartDate(time);return date?twEasternDateTime.format(date):'';}
 function twEasternTickLabel(time,tickMarkType){var date=twChartDate(time);if(!date)return'';return Number(tickMarkType)<=2?twEasternDate.format(date):twEasternClock.format(date);}
+function twSessionVwap(bars,interval){
+  if(['1m','5m','15m','1h'].indexOf(interval)<0)return null;
+  var eligible=(bars||[]).filter(function(bar){return bar&&bar.session!=='overnight'&&bar.session!=='premarket'&&bar.session!=='after_hours'&&Number(bar.volume)>0&&twChartDate(bar.time);});
+  if(!eligible.length)return null;
+  var sessionKey=twEasternSessionDate.format(twChartDate(eligible[eligible.length-1].time)),weighted=0,volume=0;
+  eligible.forEach(function(bar){if(twEasternSessionDate.format(twChartDate(bar.time))!==sessionKey)return;var v=Number(bar.volume),typical=(Number(bar.high)+Number(bar.low)+Number(bar.close))/3;if(!isFinite(v)||v<=0||!isFinite(typical))return;weighted+=typical*v;volume+=v;});
+  return volume>0?weighted/volume:null;
+}
 function twRenderMarketData(meta){
   meta=meta||{};var badge=document.getElementById('tw-feed-badge'),detail=document.getElementById('tw-feed-detail'),asof=document.getElementById('tw-feed-asof');if(!badge||!detail||!asof)return;
   var cls=meta.fallback?'fallback':(meta.realtime?(meta.comprehensive?'live':'partial'):'delayed');badge.className='tw-feed-badge '+cls;badge.textContent=meta.feed_label||'FEED UNKNOWN';
@@ -1140,6 +1149,7 @@ function twLoadChart(ticker, interval, range, refreshOnly){
   if(twChartRefreshTimer)clearTimeout(twChartRefreshTimer);twChartRefreshTimer=null;
   var intervalConfig=twIntervalConfig[interval];if(!intervalConfig)return;if(intervalConfig.ranges.indexOf(range)<0){range=intervalConfig.defaultRange;twChartState.range=range;twPopulateRanges();try{localStorage.setItem('tradestaar.chartRange',range);}catch(e){}}
   if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load. Quotes, %, and levels above are still live.'); return; }
+  if(twChartState.ticker!==ticker){twChartState.sessionVwap=null;twChartState.intelVwap=null;}
   twChartState.ticker=ticker; twChartState.interval=interval;twChartState.range=range;
   var myReq=++twChartState.reqId;
   var session=twChartState.extended?'extended':'regular';if(!refreshOnly)twChartMsg('Loading '+ticker+' · '+interval+' · '+range+' · '+session+'…','');
@@ -1166,6 +1176,8 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       twChartState.candle.setData(bars.map(twCandleDatum));
       twChartState.vol.setData(bars.map(function(b){ return { time:b.time, value:b.volume||0, color:twVolumeColor(b) }; }));
       twChartState.bars=bars; twChartState.barMap={}; twChartState.pinnedTime=null;
+      twChartState.sessionVwap=twSessionVwap(bars,interval);
+      if(twChartState.intelVwap==null)twNum('tw-intel-vwap',twChartState.sessionVwap==null?'Unavailable':Number(twChartState.sessionVwap).toFixed(2));
       bars.forEach(function(b){ twChartState.barMap[twTimeKey(b.time)]=b; });
       twChartState.lastPrice = bars[bars.length-1].close;
       twApplyType();
@@ -1204,8 +1216,10 @@ function twRenderIntelligence(data){
   twChartState.assetType=data.asset_type||'EQUITY';
   twNum('tw-intel-ticker',data.ticker); twNum('tw-intel-asof','updated '+new Date(data.as_of).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));
   var o=data.overview||{}, f=data.fundamentals||{}, links=data.links||{};
+  twChartState.intelVwap=o.vwap==null?null:Number(o.vwap);
+  var displayedVwap=twChartState.intelVwap==null?twChartState.sessionVwap:twChartState.intelVwap;
   twPanel('overview','<div class="tw-intel-grid">'+
-    [['Bias',o.bias],['Setup grade',o.grade||'Not scored'],['Daily trend',o.daily_trend],['VWAP',o.vwap==null?'Unavailable':Number(o.vwap).toFixed(2)],['EMA 20',o.ema20==null?'Unavailable':Number(o.ema20).toFixed(2)],['EMA 50',o.ema50==null?'Unavailable':Number(o.ema50).toFixed(2)],['Relative volume',o.relative_volume==null?'Unavailable':Number(o.relative_volume).toFixed(2)+'x'],['Avg volume',twFmtVol(o.average_volume)]].map(function(x){return '<div class="tw-intel-metric"><span>'+twEsc(x[0])+'</span><strong>'+twEsc(x[1]||'Unavailable')+'</strong></div>';}).join('')+
+    [['Bias',o.bias],['Setup grade',o.grade||'Not scored'],['Daily trend',o.daily_trend],['VWAP',displayedVwap==null?'Unavailable':Number(displayedVwap).toFixed(2),'tw-intel-vwap'],['EMA 20',o.ema20==null?'Unavailable':Number(o.ema20).toFixed(2)],['EMA 50',o.ema50==null?'Unavailable':Number(o.ema50).toFixed(2)],['Relative volume',o.relative_volume==null?'Unavailable':Number(o.relative_volume).toFixed(2)+'x'],['Avg volume',twFmtVol(o.average_volume)]].map(function(x){return '<div class="tw-intel-metric"><span>'+twEsc(x[0])+'</span><strong'+(x[2]?' id="'+x[2]+'"':'')+'>'+twEsc(x[1]||'Unavailable')+'</strong></div>';}).join('')+
     '</div>'+(o.catalyst?'<p class="tw-intel-copy">'+twEsc(o.catalyst)+'</p>':'') );
   var news=(data.news||[]).map(function(row){ var title=twEsc(row.headline), href=/^https?:\/\//.test(row.url||'')?'<a href="'+twEsc(row.url)+'" target="_blank" rel="noopener noreferrer">Source ↗</a>':''; return '<article class="tw-intel-row"><div><strong>'+title+'</strong><div class="tw-intel-meta">'+twEsc([row.source,row.published].filter(Boolean).join(' · ')||'Cached app news')+'</div></div>'+href+'</article>'; }).join('');
   twPanel('news',news?'<div class="tw-intel-list">'+news+'</div>':twEmpty('No ticker-specific headlines are available from the connected news feeds.'));

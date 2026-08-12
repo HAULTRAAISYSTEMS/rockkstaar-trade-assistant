@@ -13,6 +13,13 @@ class TerminalUiTests(unittest.TestCase):
         self.assertIn("lastValueVisible:false", template)
         self.assertNotIn("title:'EMA '+period", template)
 
+    def test_command_deck_calculates_session_vwap_from_intraday_bars(self):
+        template = Path("templates/terminal.html").read_text()
+
+        self.assertIn("function twSessionVwap(bars,interval)", template)
+        self.assertIn("typical*v", template)
+        self.assertIn("'tw-intel-vwap'", template)
+
 
 if __name__ == "__main__":
     unittest.main()
