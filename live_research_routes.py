@@ -1,4 +1,4 @@
-"""Flask Blueprint for Tradestaar Live Research Feed Phase 2."""
+"""Flask Blueprint for Tradestaar Live Research Feed Phase 2/3."""
 from __future__ import annotations
 from flask import Blueprint, jsonify, render_template, request, session
 import research_feed as rf
@@ -27,7 +27,9 @@ def create_live_research_blueprint(*, require_admin, current_user, tracked_ticke
     @bp.get('/api/live-research/posts')
     def posts_api():
         user=uid(); watched=tracked_tickers(user) if request.args.get('watchlist')=='1' else None
-        return jsonify({'ok':True,'posts':svc.list_published(ticker=request.args.get('ticker') or None,category=request.args.get('category') or None,sentiment=request.args.get('sentiment') or None,search=request.args.get('q') or None,watchlist_tickers=watched,saved_by_user=user if request.args.get('saved')=='1' else None,user_id=user,limit=request.args.get('limit',50))})
+        posts=svc.list_published(ticker=request.args.get('ticker') or None,category=request.args.get('category') or None,sentiment=request.args.get('sentiment') or None,search=request.args.get('q') or None,watchlist_tickers=watched,saved_by_user=user if request.args.get('saved')=='1' else None,user_id=user,limit=request.args.get('limit',50))
+        tickers=sorted({p['ticker'] for p in posts})
+        return jsonify({'ok':True,'posts':posts,'alert_prefs':svc.get_alert_preferences(user,tickers)})
     @bp.post('/api/live-research/posts/<post_id>/bookmark')
     def bookmark(post_id):
         d=request.get_json(silent=True) or {}; saved=bool(d.get('saved',True)); svc.set_bookmark(uid(),post_id,saved); return jsonify({'ok':True,'saved':saved})
