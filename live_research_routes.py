@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, render_template, request, session
 import research_feed as rf
 import research_feed_phase2 as svc
 import live_research_realtime as realtime
+import live_research_search as research_search
 
 def create_live_research_blueprint(*, require_admin, current_user, tracked_tickers):
     bp=Blueprint('live_research',__name__)
@@ -45,6 +46,14 @@ def create_live_research_blueprint(*, require_admin, current_user, tracked_ticke
         enabled=bool((request.get_json(silent=True) or {}).get('enabled')); svc.set_alert_preference(uid(),ticker,enabled); return jsonify({'ok':True,'ticker':rf.normalize_ticker(ticker),'enabled':enabled})
     def admin_page(): return render_template('admin_live_research.html',posts=svc.list_admin_posts(actor()),categories=rf.CATEGORIES,sentiments=rf.SENTIMENTS,metric_types=rf.METRIC_TYPES,comparisons=rf.COMPARISONS)
     bp.add_url_rule('/admin/live-research','admin_page',require_admin(admin_page),methods=['GET'])
+    def research_lookup():
+        result=research_search.search(request.args.get('q') or '')
+        return jsonify({'ok':True,**result})
+    bp.add_url_rule('/api/admin/live-research/research-search','admin_research_search',require_admin(research_lookup),methods=['GET'])
+    def research_draft():
+        d=request.get_json(force=True) or {}; result=research_search.create_draft_from_result(d,actor())
+        return jsonify({'ok':True,**result}),201 if result.get('status')=='draft' else 200
+    bp.add_url_rule('/api/admin/live-research/research-search/draft','admin_research_search_draft',require_admin(research_draft),methods=['POST'])
     def create():
         d=request.get_json(force=True) or {}; post_id=rf.create_draft(d,actor(),metrics=metrics(d))
         if d.get('publish_now'):
