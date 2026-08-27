@@ -1,78 +1,54 @@
-"""Scheduled production runner for Tradestaar Live Research.
+"""Scheduled Live Research runner: market-wide discovery + priority ticker coverage.
 
-Reuses the app's existing news provider stack and Phase 6 ingestion service.
-Every provider item is persisted as an ADMIN-REVIEWABLE DRAFT only. This module
-contains no publish, realtime announcement, or notification call.
+All provider content crosses the Phase 6 draft-only ingestion boundary. This
+module has no publication, public notification, or realtime announcement call.
 """
 from __future__ import annotations
-
-import argparse
-import json
-import os
+import argparse, json, os
 from typing import Iterable
-
 from database import get_db
 from news_fetcher import fetch_headlines
 from live_research_ingestion import finnhub_articles_to_items, ingest
+from live_research_discovery import discover_market_news
 
-DEFAULT_TICKERS = ("NVDA", "META", "AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "AMD")
+DEFAULT_TICKERS=("NVDA","META","AAPL","MSFT","AMZN","GOOGL","TSLA","AMD")
 
-
-def _tickers_from_env() -> list[str]:
-    raw = os.environ.get("LIVE_RESEARCH_TICKERS", "")
-    values = [x.strip().upper() for x in raw.split(",") if x.strip()]
+def _tickers_from_env():
+    values=[x.strip().upper() for x in os.environ.get("LIVE_RESEARCH_TICKERS","").split(",") if x.strip()]
     return values or list(DEFAULT_TICKERS)
+def _company_name(ticker): return ticker
+def _admin_actor(conn):
+    row=conn.execute("SELECT id, username, is_admin FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1").fetchone()
+    if not row: raise RuntimeError("Live Research ingestion requires at least one admin user")
+    return {"id":row["id"],"username":row["username"],"is_admin":bool(row["is_admin"])}
+def _merge(total, summary, prefix=""):
+    total["drafts_created"] += summary["created"]; total["duplicates"] += summary["duplicates"]; total["malformed_skipped"] += summary["skipped"]
+    total["errors"].extend((prefix+e) for e in summary["errors"])
 
-
-def _company_name(ticker: str) -> str:
-    # Do not fabricate a company name. The ticker is a truthful fallback label.
-    return ticker
-
-
-def _admin_actor(conn) -> dict:
-    row = conn.execute(
-        "SELECT id, username, is_admin FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1"
-    ).fetchone()
-    if not row:
-        raise RuntimeError("Live Research ingestion requires at least one admin user")
-    return {"id": row["id"], "username": row["username"], "is_admin": bool(row["is_admin"])}
-
-
-def run(tickers: Iterable[str] | None = None) -> dict:
-    tickers = [str(t).strip().upper() for t in (tickers or _tickers_from_env()) if str(t).strip()]
-    conn = get_db()
+def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
+    priority=[str(t).strip().upper() for t in (tickers or _tickers_from_env()) if str(t).strip()]
+    conn=get_db()
+    total={"priority_tickers":len(priority),"events_discovered":0,"tickers_resolved":0,"drafts_created":0,"duplicates":0,"low_importance_skipped":0,"stale_skipped":0,"malformed_skipped":0,"provider_failures":[],"errors":[]}
     try:
-        actor = _admin_actor(conn)
-        total = {"tickers": len(tickers), "created": 0, "duplicates": 0, "skipped": 0, "errors": []}
-        for ticker in tickers:
+        actor=_admin_actor(conn)
+        try:
+            items, stats=discover_market_news(fetchers=discovery_fetchers)
+            total["events_discovered"] += stats["events_discovered"]; total["tickers_resolved"] += stats["tickers_resolved"]
+            total["low_importance_skipped"] += stats["low_importance"]; total["stale_skipped"] += stats["stale"]; total["malformed_skipped"] += stats["malformed"]
+            total["provider_failures"].extend(stats["provider_failures"])
+            _merge(total, ingest(items, actor, conn), "discovery:")
+        except Exception as exc: total["provider_failures"].append("discovery:"+type(exc).__name__)
+        for ticker in priority:
             try:
-                news = fetch_headlines(ticker)
-                # Phase 6's adapter is intentionally strict: articles without a real
-                # source URL + summary are skipped rather than guessed or fabricated.
-                items = finnhub_articles_to_items(ticker, _company_name(ticker), news.articles)
-                summary = ingest(items, actor, conn)
-                total["created"] += summary["created"]
-                total["duplicates"] += summary["duplicates"]
-                total["skipped"] += summary["skipped"]
-                total["errors"].extend(f"{ticker}:{err}" for err in summary["errors"])
-            except Exception as exc:
-                total["skipped"] += 1
-                total["errors"].append(f"{ticker}:{type(exc).__name__}")
-        conn.commit()
-        return total
-    finally:
-        conn.close()
+                news=fetch_headlines(ticker); items=finnhub_articles_to_items(ticker,_company_name(ticker),news.articles)
+                _merge(total, ingest(items,actor,conn),ticker+":")
+            except Exception as exc: total["provider_failures"].append(ticker+":"+type(exc).__name__)
+        conn.commit(); return total
+    finally: conn.close()
 
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Create draft-only Live Research suggestions")
-    parser.add_argument("--tickers", help="Comma-separated ticker override")
-    args = parser.parse_args()
-    tickers = [x.strip().upper() for x in args.tickers.split(",") if x.strip()] if args.tickers else None
-    result = run(tickers)
-    print(json.dumps(result, sort_keys=True))
-    return 0 if not result["errors"] else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+def main():
+    parser=argparse.ArgumentParser(description="Discover market catalysts and create draft-only Live Research suggestions")
+    parser.add_argument("--tickers",help="Comma-separated priority ticker override"); args=parser.parse_args()
+    tickers=[x.strip().upper() for x in args.tickers.split(",") if x.strip()] if args.tickers else None
+    result=run(tickers); print(json.dumps(result,sort_keys=True)); return 0
+if __name__=="__main__": raise SystemExit(main())
