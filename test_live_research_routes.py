@@ -50,6 +50,24 @@ class LiveResearchRouteContractTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         announce.assert_called_once_with("a", ticker="NVDA")
 
+    @patch("live_research_routes.svc.get_alert_preferences", return_value={})
+    @patch("live_research_routes.svc.list_published", return_value=[])
+    def test_public_posts_api_forwards_validated_sort(self, listed, _alerts):
+        response = self.client.get("/api/live-research/posts?sort=priority&q=cloud&category=Earnings&sentiment=Bullish")
+        self.assertEqual(200, response.status_code)
+        kwargs = listed.call_args.kwargs
+        self.assertEqual("priority", kwargs["sort"]);self.assertEqual("cloud", kwargs["search"])
+        self.assertEqual("Earnings", kwargs["category"]);self.assertEqual("Bullish", kwargs["sentiment"])
+
+    @patch("live_research_routes.svc.get_alert_preferences", return_value={})
+    @patch("live_research_routes.realtime.list_incremental", return_value=[])
+    def test_realtime_rest_fallback_forwards_active_filters(self, incremental, _alerts):
+        response = self.client.get("/api/live-research/updates?since=2026-01-01&sort=watchlist&ticker=NVDA&watchlist=1&saved=1")
+        self.assertEqual(200, response.status_code)
+        kwargs = incremental.call_args.kwargs
+        self.assertEqual("watchlist", kwargs["sort"]);self.assertEqual("NVDA", kwargs["ticker"])
+        self.assertEqual(1, kwargs["saved_by_user"]);self.assertEqual([], kwargs["watchlist_tickers"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,19 +24,21 @@ def create_live_research_blueprint(*, require_admin, current_user, tracked_ticke
     def denied(e): return jsonify({'ok':False,'error':str(e)}),403
     @bp.get('/live-research')
     def feed():
-        user=uid(); watched=tracked_tickers(user) if request.args.get('watchlist')=='1' else None
-        posts=svc.list_published(ticker=request.args.get('ticker') or None,category=request.args.get('category') or None,sentiment=request.args.get('sentiment') or None,search=request.args.get('q') or None,watchlist_tickers=watched,saved_by_user=user if request.args.get('saved')=='1' else None,user_id=user)
-        return render_template('live_research.html',posts=posts,categories=rf.CATEGORIES,sentiments=rf.SENTIMENTS,alert_prefs=svc.get_alert_preferences(user,sorted({p['ticker'] for p in posts})),filters=request.args)
+        user=uid();sort=request.args.get('sort') or 'newest';need_watch=request.args.get('watchlist')=='1' or sort=='watchlist';watched=tracked_tickers(user) if need_watch else []
+        query=dict(ticker=request.args.get('ticker') or None,category=request.args.get('category') or None,sentiment=request.args.get('sentiment') or None,search=request.args.get('q') or None,watchlist_tickers=watched if request.args.get('watchlist')=='1' else None,watchlist_rank_tickers=watched,saved_by_user=user if request.args.get('saved')=='1' else None,user_id=user)
+        posts=svc.list_published(sort=sort,**query);featured=svc.list_published(sort='priority',featured=True,limit=6,**query)
+        tickers=sorted({p['ticker'] for p in posts+featured})
+        return render_template('live_research.html',posts=posts,featured_posts=featured,categories=rf.CATEGORIES,sentiments=rf.SENTIMENTS,catalyst_types=rf.CATALYST_TYPES,priorities=rf.PRIORITIES,sorts=svc.PUBLIC_SORTS,alert_prefs=svc.get_alert_preferences(user,tickers),filters=request.args,watchlist_tickers=watched)
     @bp.get('/api/live-research/posts')
     def posts_api():
-        user=uid(); watched=tracked_tickers(user) if request.args.get('watchlist')=='1' else None
-        posts=svc.list_published(ticker=request.args.get('ticker') or None,category=request.args.get('category') or None,sentiment=request.args.get('sentiment') or None,search=request.args.get('q') or None,watchlist_tickers=watched,saved_by_user=user if request.args.get('saved')=='1' else None,user_id=user,limit=request.args.get('limit',50))
+        user=uid();sort=request.args.get('sort') or 'newest';need_watch=request.args.get('watchlist')=='1' or sort=='watchlist';watched=tracked_tickers(user) if need_watch else []
+        posts=svc.list_published(ticker=request.args.get('ticker') or None,category=request.args.get('category') or None,sentiment=request.args.get('sentiment') or None,search=request.args.get('q') or None,watchlist_tickers=watched if request.args.get('watchlist')=='1' else None,watchlist_rank_tickers=watched,saved_by_user=user if request.args.get('saved')=='1' else None,user_id=user,sort=sort,limit=request.args.get('limit',50))
         tickers=sorted({p['ticker'] for p in posts})
         return jsonify({'ok':True,'posts':posts,'alert_prefs':svc.get_alert_preferences(user,tickers)})
     @bp.get('/api/live-research/updates')
     def updates_api():
-        user=uid(); watched=tracked_tickers(user) if request.args.get('watchlist')=='1' else None
-        posts=realtime.list_incremental(since=request.args.get('since') or None,user_id=user,watchlist_tickers=watched,limit=request.args.get('limit',50))
+        user=uid();sort=request.args.get('sort') or 'newest';need_watch=request.args.get('watchlist')=='1' or sort=='watchlist';watched=tracked_tickers(user) if need_watch else []
+        posts=realtime.list_incremental(since=request.args.get('since') or None,user_id=user,ticker=request.args.get('ticker') or None,category=request.args.get('category') or None,sentiment=request.args.get('sentiment') or None,search=request.args.get('q') or None,watchlist_tickers=watched if request.args.get('watchlist')=='1' else None,watchlist_rank_tickers=watched,saved_by_user=user if request.args.get('saved')=='1' else None,sort=sort,limit=request.args.get('limit',50))
         tickers=sorted({p['ticker'] for p in posts}); cursor=max([realtime.published_cursor(p) for p in posts],default=request.args.get('since') or '')
         return jsonify({'ok':True,'posts':posts,'cursor':cursor,'alert_prefs':svc.get_alert_preferences(user,tickers)})
     @bp.post('/api/live-research/posts/<post_id>/bookmark')

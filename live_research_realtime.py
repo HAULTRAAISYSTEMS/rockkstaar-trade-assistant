@@ -25,17 +25,25 @@ def published_cursor(post):
     return post.get("published_at") or post.get("updated_at") or ""
 
 
-def list_incremental(*, since=None, user_id=None, watchlist_tickers=None, limit=50, conn=None):
+def list_incremental(*, since=None, user_id=None, ticker=None, category=None,
+                     sentiment=None, search=None, watchlist_tickers=None,
+                     watchlist_rank_tickers=None, saved_by_user=None,
+                     sort='newest', limit=50, conn=None):
     """Return published posts newer than *since*; drafts can never enter here."""
     posts = svc.list_published(
+        ticker=ticker,
+        category=category,
+        sentiment=sentiment,
+        search=search,
         watchlist_tickers=watchlist_tickers,
+        watchlist_rank_tickers=watchlist_rank_tickers,
+        saved_by_user=saved_by_user,
         user_id=user_id,
+        sort=sort,
+        since=since,
         limit=max(1, min(int(limit), 100)),
         conn=conn,
     )
-    if since:
-        posts = [p for p in posts if published_cursor(p) > str(since)]
-    posts.sort(key=published_cursor)
     return posts
 
 

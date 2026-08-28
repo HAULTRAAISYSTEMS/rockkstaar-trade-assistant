@@ -19,4 +19,25 @@ class Phase2ServiceTests(unittest.TestCase):
   p=core.create_draft(BASE,ADMIN,[],self.c)
   with self.assertRaises(core.ResearchPermissionError):rf.delete_post(p,USER,self.c)
   rf.delete_post(p,ADMIN,self.c);self.assertIsNone(self.c.execute('SELECT 1 FROM research_posts WHERE id=?',(p,)).fetchone())
+ def test_public_sort_modes_are_validated(self):
+  low=core.create_draft(dict(BASE,ticker='LOW',company_name='Low',priority='Low'),ADMIN,[],self.c);core.publish_post(low,ADMIN,self.c)
+  high=core.create_draft(dict(BASE,ticker='HIGH',company_name='High',priority='Critical'),ADMIN,[],self.c);core.publish_post(high,ADMIN,self.c)
+  self.c.execute("UPDATE research_posts SET published_at='2026-01-01T00:00:00+00:00' WHERE id=?",(high,));self.c.execute("UPDATE research_posts SET published_at='2026-01-02T00:00:00+00:00' WHERE id=?",(low,));self.c.commit()
+  self.assertEqual([low,high],[p['id'] for p in rf.list_published(sort='newest',conn=self.c)])
+  self.assertEqual([high,low],[p['id'] for p in rf.list_published(sort='priority',conn=self.c)])
+  self.assertEqual([high,low],[p['id'] for p in rf.list_published(sort='watchlist',watchlist_rank_tickers=['HIGH'],conn=self.c)])
+  with self.assertRaises(core.ResearchValidationError):rf.list_published(sort='unknown',conn=self.c)
+ def test_featured_query_is_published_only(self):
+  draft=core.create_draft(dict(BASE,ticker='DRAFT',company_name='Draft',priority='Critical'),ADMIN,[],self.c)
+  medium=core.create_draft(dict(BASE,ticker='MED',company_name='Medium',priority='Medium',catalyst_type='ANALYST'),ADMIN,[],self.c);core.publish_post(medium,ADMIN,self.c)
+  breaking=core.create_draft(dict(BASE,ticker='BRK',company_name='Breaking',priority='Medium',catalyst_type='BREAKING'),ADMIN,[],self.c);core.publish_post(breaking,ADMIN,self.c)
+  high=core.create_draft(dict(BASE,ticker='HIGH',company_name='High',priority='High'),ADMIN,[],self.c);core.publish_post(high,ADMIN,self.c)
+  ids={p['id'] for p in rf.list_published(featured=True,conn=self.c)}
+  self.assertEqual({breaking,high},ids);self.assertNotIn(draft,ids);self.assertNotIn(medium,ids)
+ def test_public_notes_are_sanitized_without_changing_storage(self):
+  raw='Verified facts.\n\nSource: Reuters — https://example.com/earnings\n[ingestion:abc123]'
+  post=core.create_draft(dict(BASE,research_notes=raw),ADMIN,[],self.c);core.publish_post(post,ADMIN,self.c)
+  public=rf.list_published(conn=self.c)[0]
+  self.assertEqual('Verified facts.',public['research_notes']);self.assertNotIn('ingestion:',public['research_notes']);self.assertNotIn('https://',public['research_notes'])
+  stored=self.c.execute('SELECT research_notes FROM research_posts WHERE id=?',(post,)).fetchone()['research_notes'];self.assertEqual(raw,stored)
 if __name__=='__main__':unittest.main()

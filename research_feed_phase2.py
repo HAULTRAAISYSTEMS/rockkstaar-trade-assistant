@@ -1,6 +1,7 @@
 """Phase 2 query/edit/user-state services for Tradestaar Live Research Feed."""
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
+import re
 from uuid import uuid4
 from database import get_db
 import research_feed as core
@@ -125,7 +126,28 @@ def bulk_transition(post_ids,action,actor,conn=None):
     finally:
         if owns:conn.close()
 
-def list_published(*,ticker=None,category=None,sentiment=None,search=None,watchlist_tickers=None,saved_by_user=None,user_id=None,limit=50,conn=None):
+PUBLIC_SORTS=('newest','priority','watchlist')
+_INGESTION_MARKER=re.compile(r'^\s*\[ingestion:[^\]]+\]\s*$',re.IGNORECASE)
+_INGESTION_SOURCE=re.compile(r'^\s*Source:\s+.*https?://\S+\s*$',re.IGNORECASE)
+
+def clean_public_notes(value):
+    """Remove ingestion-only provenance lines without changing stored notes."""
+    lines=[]
+    for line in str(value or '').splitlines():
+        if _INGESTION_MARKER.match(line) or _INGESTION_SOURCE.match(line):continue
+        lines.append(line.rstrip())
+    while lines and not lines[-1]:lines.pop()
+    return '\n'.join(lines).strip()
+
+def _public_post(post,watchlist_rank_tickers=None):
+    public=dict(post);public['research_notes']=clean_public_notes(public.get('research_notes'))
+    watched={core.normalize_ticker(t) for t in (watchlist_rank_tickers or []) if core._text(t)}
+    public['watchlisted']=public.get('ticker') in watched
+    return public
+
+def list_published(*,ticker=None,category=None,sentiment=None,search=None,watchlist_tickers=None,
+                   watchlist_rank_tickers=None,saved_by_user=None,user_id=None,sort='newest',
+                   featured=False,since=None,limit=50,conn=None):
     clauses=["p.status='published'"]; params=[]
     if ticker:clauses.append('p.ticker=?');params.append(core.normalize_ticker(ticker))
     if category:clauses.append('p.category=?');params.append(core._choice(category,core.CATEGORIES,'category'))
@@ -137,9 +159,19 @@ def list_published(*,ticker=None,category=None,sentiment=None,search=None,watchl
         if not clean:return []
         clauses.append('p.ticker IN ('+','.join('?' for _ in clean)+')');params.extend(clean)
     if saved_by_user is not None:clauses.append('EXISTS (SELECT 1 FROM research_saved_posts s WHERE s.post_id=p.id AND s.user_id=?)');params.append(int(saved_by_user))
+    if featured:clauses.append("(p.priority IN ('Critical','High') OR p.catalyst_type='BREAKING')")
+    if since:clauses.append('p.published_at>?');params.append(str(since))
+    sort=core._choice(sort or 'newest',PUBLIC_SORTS,'sort')
+    order='p.published_at DESC'
+    if sort=='priority':
+        order="CASE p.priority WHEN 'Critical' THEN 1 WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 ELSE 4 END, p.published_at DESC"
+    elif sort=='watchlist':
+        ranked=[core.normalize_ticker(t) for t in (watchlist_rank_tickers or []) if core._text(t)]
+        if ranked:
+            order='CASE WHEN p.ticker IN ('+','.join('?' for _ in ranked)+') THEN 0 ELSE 1 END, p.published_at DESC';params.extend(ranked)
     params.append(max(1,min(int(limit),100))); owns=conn is None; conn=conn or get_db()
     try:
-        posts=[dict(r) for r in conn.execute(f"SELECT p.* FROM research_posts p WHERE {' AND '.join(clauses)} ORDER BY p.published_at DESC LIMIT ?",tuple(params)).fetchall()]; mm=_metric_map(conn,[p['id'] for p in posts]); saved=set()
+        posts=[_public_post(dict(r),watchlist_rank_tickers) for r in conn.execute(f"SELECT p.* FROM research_posts p WHERE {' AND '.join(clauses)} ORDER BY {order} LIMIT ?",tuple(params)).fetchall()]; mm=_metric_map(conn,[p['id'] for p in posts]); saved=set()
         if user_id is not None and posts:
             ids=[p['id'] for p in posts]; ph=','.join('?' for _ in ids); saved={r['post_id'] for r in conn.execute(f"SELECT post_id FROM research_saved_posts WHERE user_id=? AND post_id IN ({ph})",(int(user_id),*ids)).fetchall()}
         for p in posts:p['metrics']=mm.get(p['id'],[]);p['saved']=p['id'] in saved

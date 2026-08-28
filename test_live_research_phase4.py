@@ -42,4 +42,10 @@ class Phase4RealtimeTests(unittest.TestCase):
         rows=realtime.list_incremental(user_id=1,conn=c)
         self.assertFalse(rows);self.assertEqual('draft',dict(c.execute('SELECT status FROM research_posts WHERE id=?',(post,)).fetchone())['status'])
 
+    def test_incremental_updates_respect_active_filters(self):
+        c=db(); earnings=rf.create_draft(dict(payload('NVDA'),category='Earnings'),ADMIN,conn=c);rf.publish_post(earnings,ADMIN,conn=c)
+        analyst=rf.create_draft(dict(payload('AMD'),category='Analyst'),ADMIN,conn=c);rf.publish_post(analyst,ADMIN,conn=c)
+        rows=realtime.list_incremental(category='Earnings',ticker='NVDA',search='Research',sort='priority',user_id=1,conn=c)
+        self.assertEqual([earnings],[p['id'] for p in rows])
+
 if __name__=='__main__': unittest.main()

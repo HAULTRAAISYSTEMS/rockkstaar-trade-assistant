@@ -1,10 +1,53 @@
 {% extends "base.html" %}
-{% block title %}Tradestaar Live Research Feed{% endblock %}
+{% block title %}Tradestaar Live Research Terminal{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/live_research.css') }}">{% endblock %}
+{% macro metric_strip(metrics) %}
+{% if metrics %}<div class="lr-public-metrics">{% for m in metrics %}<div class="lr-public-metric metric-{{ m.comparison }}"><b>{{ m.label }}</b><span>{% if m.actual_value is not none %}{{ m.actual_value }}{{ m.unit or '' }}{% endif %}{% if m.expected_value is not none %} <i>vs</i> {{ m.expected_value }}{{ m.unit or '' }}{% endif %}{% if m.previous_value is not none and m.expected_value is none %} <i>prev</i> {{ m.previous_value }}{{ m.unit or '' }}{% endif %}</span><em>{{ m.comparison.replace('_',' ') }}</em></div>{% endfor %}</div>{% endif %}
+{% endmacro %}
+{% macro research_item(post, featured=false) %}
+{% set exact_time = post.published_at or post.updated_at %}
+{% set source_time = post.source_published_at or exact_time %}
+<article class="lr-public-item priority-{{ post.priority|lower }}{% if featured %} is-featured{% endif %}" data-post-id="{{ post.id }}" data-published-at="{{ exact_time }}" data-priority="{{ post.priority }}" data-ticker="{{ post.ticker }}" data-watchlisted="{{ '1' if post.watchlisted else '0' }}">
+  <div class="lr-public-item-head">
+    <div class="lr-public-identity"><a class="lr-public-ticker" href="{{ url_for('stock_detail', ticker=post.ticker) }}#stock-research-panel">{{ post.ticker }}</a><span class="lr-public-company">{{ post.company_name }}</span></div>
+    <div class="lr-public-badges"><span class="lr-catalyst">{{ post.catalyst_type }}</span><span class="lr-priority-badge">{{ post.priority }}</span><span class="lr-sentiment lr-{{ post.sentiment|lower }}">{{ post.sentiment }}</span></div>
+    <time class="lr-relative-time" datetime="{{ exact_time }}" data-exact-time="{{ exact_time }}" title="{{ exact_time }}">{{ exact_time }}</time>
+  </div>
+  <h2>{{ post.headline }}</h2>
+  {{ metric_strip(post.metrics) }}
+  {% if not featured %}<div class="lr-public-notes lr-detail-only">{{ post.research_notes }}</div>{% endif %}
+  {% if post.tradestaar_take and not featured %}<div class="lr-public-take lr-detail-only"><b>TRADESTAAR TAKE</b><div>{{ post.tradestaar_take }}</div><small>Research and AI-assisted analysis can be wrong. Verify source information before trading.</small></div>{% endif %}
+  <footer class="lr-public-footer">
+    <div class="lr-public-source"><span>{{ post.source_name or 'Tradestaar Research' }}</span> · <time class="lr-relative-time" datetime="{{ source_time }}" data-exact-time="{{ source_time }}" title="{{ source_time }}">{{ source_time }}</time>{% if post.catalyst_type in ['8-K','10-Q','10-K'] %} · <span>{{ post.catalyst_type }}</span>{% endif %}{% if post.source_url %} · <a href="{{ post.source_url }}" target="_blank" rel="noopener noreferrer">Original source ↗</a>{% endif %}</div>
+    <div class="lr-public-actions"><button type="button" class="lr-save {{ 'is-saved' if post.saved }}" data-saved="{{ '1' if post.saved else '0' }}">{{ '★ Saved' if post.saved else '☆ Save' }}</button><button type="button" class="lr-alert {{ 'is-on' if alert_prefs.get(post.ticker) }}" data-ticker="{{ post.ticker }}" data-enabled="{{ '1' if alert_prefs.get(post.ticker) else '0' }}">{{ '🔔 Alert on' if alert_prefs.get(post.ticker) else '🔕 Alert' }}</button></div>
+  </footer>
+</article>
+{% endmacro %}
 {% block content %}
-<section class="lr-shell"><header class="lr-hero"><div><div class="lr-kicker">TRADESTAAR ELITE • LIVE INTELLIGENCE</div><h1>Live Research Feed</h1><p>Earnings, guidance, filings, analyst moves and market-moving research — newest first.</p></div>{% if session.get('is_admin') %}<a class="lr-admin-link" href="{{ url_for('live_research.admin_page') }}">Research Editor</a>{% endif %}</header>
-<form class="lr-filters" method="get"><label>Search<input name="q" value="{{ filters.get('q','') }}" placeholder="Ticker, company, headline…"></label><label>Ticker<input name="ticker" value="{{ filters.get('ticker','') }}" placeholder="NVDA"></label><label>Category<select name="category"><option value="">All</option>{% for c in categories %}<option value="{{ c }}" {{ 'selected' if filters.get('category') == c }}>{{ c }}</option>{% endfor %}</select></label><label>Sentiment<select name="sentiment"><option value="">All</option>{% for s in sentiments %}<option value="{{ s }}" {{ 'selected' if filters.get('sentiment') == s }}>{{ s }}</option>{% endfor %}</select></label><label class="lr-check"><input type="checkbox" name="watchlist" value="1" {{ 'checked' if filters.get('watchlist') == '1' }}> Watchlist only</label><label class="lr-check"><input type="checkbox" name="saved" value="1" {{ 'checked' if filters.get('saved') == '1' }}> Saved only</label><button>Apply</button><a class="lr-clear" href="{{ url_for('live_research.feed') }}">Clear</a></form>
-<div class="lr-feed">{% for post in posts %}<article class="lr-card" data-post-id="{{ post.id }}" data-published-at="{{ post.published_at or post.updated_at }}"><div class="lr-card-top"><div><a class="lr-ticker" href="{{ url_for('stock_detail', ticker=post.ticker) }}#stock-research-panel">{{ post.ticker }}</a> <span class="lr-company">{{ post.company_name }}</span></div><div class="lr-time">{{ post.published_at or post.updated_at }}</div></div><div class="lr-meta"><span class="lr-badge">{{ post.category }}</span><span class="lr-badge lr-{{ post.sentiment|lower }}">{{ post.sentiment }}</span><button type="button" class="lr-save {{ 'is-saved' if post.saved }}" data-saved="{{ '1' if post.saved else '0' }}">{{ '★ Saved' if post.saved else '☆ Save' }}</button><button type="button" class="lr-alert {{ 'is-on' if alert_prefs.get(post.ticker) }}" data-ticker="{{ post.ticker }}" data-enabled="{{ '1' if alert_prefs.get(post.ticker) else '0' }}">{{ '🔔 Alerts on' if alert_prefs.get(post.ticker) else '🔕 Alerts off' }}</button></div><h2>{{ post.headline }}</h2><div class="lr-notes">{{ post.research_notes }}</div>
-{% if post.metrics %}<div class="lr-metrics">{% for m in post.metrics %}<div class="lr-metric lr-metric-{{ m.comparison }}"><b>{{ m.label }}</b><div>{% if m.actual_value is not none %}<strong>{{ m.actual_value }}{{ m.unit }}</strong>{% endif %}{% if m.expected_value is not none %} vs {{ m.expected_value }}{{ m.unit }} expected{% endif %}{% if m.previous_value is not none %} • {{ m.previous_value }}{{ m.unit }} previous{% endif %}</div><span>{{ m.comparison.replace('_',' ')|title }}</span>{% if m.notes %}<small>{{ m.notes }}</small>{% endif %}</div>{% endfor %}</div>{% endif %}
-{% if post.tradestaar_take %}<div class="lr-take"><b>Tradestaar Take</b><div>{{ post.tradestaar_take }}</div><small>Research and AI-assisted analysis can be wrong. Verify source information before trading.</small></div>{% endif %}<footer class="lr-source-row">{% if post.source_url %}<a href="{{ post.source_url }}" target="_blank" rel="noopener noreferrer">Original source{% if post.source_name %} • {{ post.source_name }}{% endif %} ↗</a>{% elif post.source_name %}<span>Source: {{ post.source_name }}</span>{% endif %}</footer></article>{% else %}<div class="lr-empty">No published research matches these filters.</div>{% endfor %}</div></section>
-{% endblock %}{% block scripts %}<script src="{{ url_for('static', filename='js/live_research.js') }}"></script>{% endblock %}
+<section class="lr-shell lr-public-shell" data-view="{{ filters.get('view','detailed') if filters.get('view') in ['compact','detailed'] else 'detailed' }}" data-sort="{{ filters.get('sort','newest') }}">
+  <header class="lr-hero"><div><div class="lr-kicker">TRADESTAAR ELITE · PUBLISHED INTELLIGENCE</div><h1>Live Research Terminal</h1><p>Verified earnings, guidance, filings, analyst moves and market-moving research.</p></div>{% if session.get('is_admin') %}<a class="lr-admin-link" href="{{ url_for('live_research.admin_page') }}">Research Triage</a>{% endif %}</header>
+
+  <section class="lr-public-breaking" aria-labelledby="breaking-title">
+    <div class="lr-public-section-head"><div><span class="lr-pulse"></span><b id="breaking-title">Breaking / Priority</b><small>Fresh published Critical, High and Breaking intelligence</small></div><span id="featured-count">{{ featured_posts|length }} live</span></div>
+    <div class="lr-public-featured-list" id="featured-feed">{% for post in featured_posts %}{{ research_item(post, true) }}{% else %}<div class="lr-public-state lr-featured-empty">No priority research is live right now.</div>{% endfor %}</div>
+  </section>
+
+  <form class="lr-public-filters" method="get">
+    <label class="lr-filter-search">Search<input name="q" value="{{ filters.get('q','') }}" placeholder="Ticker, company, headline…"></label>
+    <label>Ticker<input name="ticker" value="{{ filters.get('ticker','') }}" placeholder="NVDA"></label>
+    <label>Category<select name="category"><option value="">All</option>{% for c in categories %}<option value="{{ c }}" {{ 'selected' if filters.get('category') == c }}>{{ c }}</option>{% endfor %}</select></label>
+    <label>Sentiment<select name="sentiment"><option value="">All</option>{% for s in sentiments %}<option value="{{ s }}" {{ 'selected' if filters.get('sentiment') == s }}>{{ s }}</option>{% endfor %}</select></label>
+    <label>Sort<select name="sort"><option value="newest" {{ 'selected' if filters.get('sort','newest') == 'newest' }}>Newest</option><option value="priority" {{ 'selected' if filters.get('sort') == 'priority' }}>Highest Priority</option><option value="watchlist" {{ 'selected' if filters.get('sort') == 'watchlist' }}>Watchlist</option></select></label>
+    <label class="lr-check"><input type="checkbox" name="watchlist" value="1" {{ 'checked' if filters.get('watchlist') == '1' }}> Watchlist only</label>
+    <label class="lr-check"><input type="checkbox" name="saved" value="1" {{ 'checked' if filters.get('saved') == '1' }}> Saved only</label>
+    <input type="hidden" name="view" id="feed-view-input" value="{{ filters.get('view','detailed') }}">
+    <button type="submit" class="lr-filter-apply">Apply</button><a class="lr-clear" href="{{ url_for('live_research.feed') }}">Clear</a>
+  </form>
+
+  <div class="lr-public-toolbar"><div><b>Published Research</b><span id="feed-count">{{ posts|length }} results</span><span class="lr-live-state" id="live-state">● Connecting</span></div><div class="lr-view-toggle" role="group" aria-label="Feed view"><button type="button" data-view="compact" aria-pressed="false">Compact</button><button type="button" data-view="detailed" aria-pressed="true">Detailed</button></div></div>
+  <div class="lr-public-message" id="feed-message" role="status" hidden></div>
+  <div class="lr-feed lr-public-feed" id="research-feed">{% for post in posts %}{{ research_item(post) }}{% else %}<div class="lr-public-state lr-feed-empty"><b>No published research found</b><span>Try clearing a filter or switching away from Saved/Watchlist-only.</span></div>{% endfor %}</div>
+</section>
+<script>window.LR_PUBLIC_CONFIG={posts:{{ posts|tojson }},featuredPosts:{{ featured_posts|tojson }},alertPrefs:{{ alert_prefs|tojson }},watchlistTickers:{{ watchlist_tickers|tojson }},stockUrlTemplate:{{ (url_for('stock_detail',ticker='__TICKER__') ~ '#stock-research-panel')|tojson }},sort:{{ filters.get('sort','newest')|tojson }},view:{{ filters.get('view','detailed')|tojson }}};</script>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/live_research.js') }}"></script>{% endblock %}
