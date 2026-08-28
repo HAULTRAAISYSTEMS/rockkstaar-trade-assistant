@@ -216,6 +216,14 @@ def _safe_int(value, default: int = 0) -> int:
         return default
 
 
+def _safe_float(value, default: float = 0.0) -> float:
+    """Normalize optional Schwab numeric fields without dropping the account."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def save_tokens(token_response: dict, user_id: int = 1, *, is_refresh: bool = False) -> None:
     """
     Persist Schwab tokens for the given user.
@@ -502,23 +510,56 @@ def _normalize_account(raw: dict) -> dict:
     daily_pnl      = round(current_value - open_value, 2) if open_value else None
     daily_pnl_pct  = round(daily_pnl / open_value * 100, 2) if open_value and daily_pnl is not None else None
 
-    # Positions split by type
-    positions_raw = acct.get("positions", [])
+    # Keep the legacy asset-specific lists for the dedicated Schwab page, and a
+    # canonical list for consumers that render all open positions together.
+    positions_raw = acct.get("positions") or []
+    positions = []
     equity_positions = []
     option_positions = []
 
     total_unrealized = 0.0
 
     for pos in positions_raw:
-        instrument = pos.get("instrument", {})
-        asset_type = instrument.get("assetType", "EQUITY")
-        symbol     = instrument.get("symbol", "")
-        qty        = (pos.get("longQuantity") or 0) - (pos.get("shortQuantity") or 0)
-        avg_price  = pos.get("averagePrice") or pos.get("averageLongPrice") or 0.0
-        mkt_val    = pos.get("marketValue") or 0.0
-        day_pnl    = pos.get("currentDayProfitLoss") or 0.0
-        day_pnl_pct= pos.get("currentDayProfitLossPercentage") or 0.0
-        unrealized = pos.get("longOpenProfitLoss") or 0.0
+        if not isinstance(pos, dict):
+            continue
+        instrument = pos.get("instrument") or {}
+        if not isinstance(instrument, dict):
+            continue
+        asset_type = str(instrument.get("assetType") or "EQUITY").upper()
+        symbol = str(instrument.get("symbol") or "").strip().upper()
+        long_qty = _safe_float(pos.get("longQuantity"))
+        short_qty = _safe_float(pos.get("shortQuantity"))
+        qty = long_qty - short_qty
+        # Schwab can retain zero-quantity position records after a close. They
+        # are not open positions and must not affect the count or table.
+        if not symbol or qty == 0:
+            continue
+
+        if qty > 0:
+            avg_price = _safe_float(
+                pos.get("averagePrice")
+                if pos.get("averagePrice") is not None
+                else pos.get("averageLongPrice")
+            )
+            unrealized = _safe_float(pos.get("longOpenProfitLoss"))
+        else:
+            avg_price = _safe_float(
+                pos.get("averagePrice")
+                if pos.get("averagePrice") is not None
+                else pos.get("averageShortPrice")
+            )
+            unrealized = _safe_float(pos.get("shortOpenProfitLoss"))
+
+        mkt_val = _safe_float(pos.get("marketValue"))
+        day_pnl = _safe_float(pos.get("currentDayProfitLoss"))
+        day_pnl_pct = _safe_float(pos.get("currentDayProfitLossPercentage"))
+        multiplier = _safe_float(instrument.get("multiplier"), 100.0) if asset_type == "OPTION" else 1.0
+        if multiplier <= 0:
+            multiplier = 100.0 if asset_type == "OPTION" else 1.0
+        units = abs(qty) * multiplier
+        cost_basis = abs(avg_price) * units
+        last_price = abs(mkt_val) / units if units else 0.0
+        unrealized_pct = unrealized / cost_basis * 100 if cost_basis else 0.0
         total_unrealized += unrealized
 
         norm = {
@@ -531,6 +572,10 @@ def _normalize_account(raw: dict) -> dict:
             "day_pnl":     round(day_pnl, 2),
             "day_pnl_pct": round(day_pnl_pct, 2),
             "unrealized":  round(unrealized, 2),
+            "unrealized_pct": round(unrealized_pct, 2),
+            "cost_basis": round(cost_basis, 2),
+            "last_price": round(last_price, 4),
+            "multiplier": multiplier,
         }
 
         if asset_type == "OPTION":
@@ -540,14 +585,15 @@ def _normalize_account(raw: dict) -> dict:
             norm["expiration_date"] = instrument.get("expirationDate", "")
             norm["underlying"]      = instrument.get("underlyingSymbol", symbol[:4])
             norm["contracts"]       = abs(qty)
-            norm["cost_basis"]      = round(avg_price * abs(qty) * 100, 2)
             option_positions.append(norm)
         else:
             equity_positions.append(norm)
+        positions.append(norm)
 
     # Sort by market value desc
     equity_positions.sort(key=lambda p: abs(p["market_value"]), reverse=True)
     option_positions.sort(key=lambda p: abs(p["market_value"]), reverse=True)
+    positions.sort(key=lambda p: abs(p["market_value"]), reverse=True)
 
     return {
         "account_number":    acct.get("accountNumber", ""),
@@ -575,7 +621,8 @@ def _normalize_account(raw: dict) -> dict:
         # Positions
         "equity_positions":  equity_positions,
         "option_positions":  option_positions,
-        "position_count":    len(equity_positions) + len(option_positions),
+        "positions":         positions,
+        "position_count":    len(positions),
     }
 
 

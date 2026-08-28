@@ -70,19 +70,16 @@
       <table class="tbl">
         <thead><tr><th>Symbol</th><th class="c">Grade</th><th class="r">Qty</th><th class="r">Entry</th><th class="r">Last</th><th class="r">P&amp;L</th><th class="r">%</th></tr></thead>
         <tbody>
-          {% for a in acct.accounts %}{% for p in a.equity_positions %}
+          {% for a in acct.accounts %}{% for p in a.positions %}
             {% set ns.rows = ns.rows + 1 %}
-            {% set last = (p.market_value / p.quantity) if p.quantity else 0 %}
-            {% set basis = (p.avg_price * (p.quantity if p.quantity >= 0 else -p.quantity)) %}
-            {% set pct = (p.unrealized / basis * 100) if basis else 0 %}
             <tr>
               <td class="mono hi">{{ p.symbol }}</td>
               <td class="c">{{ grade_badge('', 'row') }}</td>
               <td class="r mono">{{ '{:,.0f}'.format(p.quantity) }}</td>
               <td class="r mono">{{ '%.2f'|format(p.avg_price) }}</td>
-              <td class="r mono">{{ '%.2f'|format(last) }}</td>
+              <td class="r mono">{{ '%.2f'|format(p.last_price) }}</td>
               <td class="r mono {{ 'pos' if (p.unrealized or 0) >= 0 else 'neg' }}">{{ '{:+,.2f}'.format(p.unrealized or 0) }}</td>
-              <td class="r mono {{ 'pos' if pct >= 0 else 'neg' }}">{{ '%+.1f'|format(pct) }}%</td>
+              <td class="r mono {{ 'pos' if (p.unrealized_pct or 0) >= 0 else 'neg' }}">{{ '%+.1f'|format(p.unrealized_pct or 0) }}%</td>
             </tr>
           {% endfor %}{% endfor %}
         </tbody>

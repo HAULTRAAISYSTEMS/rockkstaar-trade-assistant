@@ -1,4 +1,5 @@
 import unittest
+from datetime import date, timedelta
 
 from terminal_intelligence import build_insider_payload, build_terminal_intelligence
 
@@ -17,13 +18,14 @@ class TerminalIntelligenceTests(unittest.TestCase):
         self.assertIsNone(payload["context"]["next_earnings"])
 
     def test_earnings_becomes_chart_event_contract(self):
+        earnings_date = (date.today() + timedelta(days=1)).isoformat()
         payload = build_terminal_intelligence(
             "META", {}, {"earnings": {"this_week": [
-                {"ticker": "META", "date": "2026-08-12", "time_label": "After close", "source": "NASDAQ"}
+                {"ticker": "META", "date": earnings_date, "time_label": "After close", "source": "NASDAQ"}
             ]}}
         )
         self.assertEqual(payload["events"][0]["type"], "earnings")
-        self.assertEqual(payload["events"][0]["date"], "2026-08-12")
+        self.assertEqual(payload["events"][0]["date"], earnings_date)
 
     def test_stale_stock_snapshot_is_not_presented_as_next_earnings(self):
         payload = build_terminal_intelligence("META", {"earnings_date": "2020-04-30"}, {})
