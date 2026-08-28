@@ -414,6 +414,19 @@ def init_db():
         )
     """))
 
+    # Dashboard-only SEC Form 4 match rules. These preferences do not imply a
+    # background poller or push delivery; they highlight matching verified
+    # filings whenever the user opens or refreshes Smart Money.
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS insider_alert_rules (
+            user_id    INTEGER NOT NULL,
+            rule_key   TEXT    NOT NULL,
+            enabled    INTEGER NOT NULL DEFAULT 1,
+            updated_at TEXT    NOT NULL,
+            PRIMARY KEY (user_id, rule_key)
+        )
+    """))
+
     # Stock data: stores enriched data for each ticker (refreshed on demand)
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS stock_data (
@@ -2795,6 +2808,33 @@ def delete_price_alert(alert_id: int, user_id: int) -> None:
         "DELETE FROM price_alerts WHERE id = ? AND user_id = ?",
         (alert_id, user_id),
     )
+    conn.commit()
+    conn.close()
+
+
+# ── Insider dashboard alert-rule preferences ────────────────────────────────
+
+def get_insider_alert_rules(user_id: int) -> dict[str, bool]:
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT rule_key, enabled FROM insider_alert_rules WHERE user_id = ?",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return {str(row["rule_key"]): bool(row["enabled"]) for row in rows}
+
+
+def set_insider_alert_rules(user_id: int, rules: dict[str, bool]) -> None:
+    now = _et_now().isoformat()
+    conn = get_db()
+    for rule_key, enabled in rules.items():
+        conn.execute(
+            "INSERT INTO insider_alert_rules (user_id, rule_key, enabled, updated_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(user_id, rule_key) DO UPDATE SET "
+            "enabled = excluded.enabled, updated_at = excluded.updated_at",
+            (user_id, str(rule_key), 1 if enabled else 0, now),
+        )
     conn.commit()
     conn.close()
 

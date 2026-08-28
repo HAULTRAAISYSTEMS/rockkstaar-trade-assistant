@@ -49,6 +49,7 @@ from database import (
     get_unseen_scanner_alert_count, clear_scanner_alerts,
     create_price_alert, get_price_alerts, set_price_alert_enabled,
     delete_price_alert,
+    get_insider_alert_rules, set_insider_alert_rules,
     save_setup_outcome, get_setup_outcome_stats,
     save_study_log_entry, get_study_log, delete_study_log_entry,
     get_ai_briefing, save_ai_briefing,
@@ -6880,19 +6881,44 @@ def smart_money():
     except Exception:
         tickers = []
 
-    from smart_money import clear_sec_form4_cache, fetch_congress_trades, fetch_sec_form4
+    from smart_money import build_insider_dashboard, clear_sec_form4_cache, fetch_congress_trades, fetch_sec_form4
     if request.args.get("refresh") == "1":
         clear_sec_form4_cache()
-    insiders, insider_status = fetch_sec_form4(tickers)
+    filters = {
+        "ticker": str(request.args.get("ticker") or "").strip().upper()[:12],
+        "role": str(request.args.get("role") or "").strip()[:80],
+        "transaction_type": str(request.args.get("transaction_type") or "all").strip(),
+        "minimum_value": str(request.args.get("minimum_value") or "0").strip(),
+        "cluster": request.args.get("cluster") == "1",
+        "days": 7 if request.args.get("days") == "7" else 30,
+    }
+    if filters["ticker"] and not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", filters["ticker"]):
+        filters["ticker"] = ""
+    if filters["transaction_type"] not in {"all", "buy", "sell", "non_market", "P", "S", "F", "G", "A", "M"}:
+        filters["transaction_type"] = "all"
+    insiders, insider_status = fetch_sec_form4(tickers, limit=None, history_days=30)
+    alert_rules = get_insider_alert_rules(current_user_id())
+    dashboard = build_insider_dashboard(insiders, filters=filters, alert_rules=alert_rules)
     congress, congress_status = fetch_congress_trades()
     return render_template(
         "smart_money.html",
         insiders=insiders,
+        dashboard=dashboard,
         congress=congress,
         insider_status=insider_status,
         congress_status=congress_status,
         watched_tickers=tickers[:10],
     )
+
+
+@app.route("/smart-money/alert-rules", methods=["POST"])
+def smart_money_alert_rules():
+    """Persist dashboard-only Form 4 match rules; no push delivery is implied."""
+    from smart_money import INSIDER_ALERT_RULES
+    rules = {key: request.form.get(key) == "1" for key in INSIDER_ALERT_RULES}
+    set_insider_alert_rules(current_user_id(), rules)
+    flash("Insider dashboard match rules updated.", "success")
+    return redirect(url_for("smart_money"))
 
 
 def _build_catalyst_calendar(summary, watchlist_tickers=None):
