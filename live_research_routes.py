@@ -1,6 +1,7 @@
 """Flask Blueprint for Tradestaar Live Research Feed Phase 2/3/4."""
 from __future__ import annotations
 from flask import Blueprint, jsonify, render_template, request, session
+from database import get_user_setting, set_user_setting
 import research_feed as rf
 import research_feed_phase2 as svc
 import live_research_realtime as realtime
@@ -44,7 +45,32 @@ def create_live_research_blueprint(*, require_admin, current_user, tracked_ticke
     @bp.put('/api/live-research/alerts/<ticker>')
     def alert(ticker):
         enabled=bool((request.get_json(silent=True) or {}).get('enabled')); svc.set_alert_preference(uid(),ticker,enabled); return jsonify({'ok':True,'ticker':rf.normalize_ticker(ticker),'enabled':enabled})
-    def admin_page(): return render_template('admin_live_research.html',posts=svc.list_admin_posts(actor()),categories=rf.CATEGORIES,sentiments=rf.SENTIMENTS,metric_types=rf.METRIC_TYPES,comparisons=rf.COMPARISONS)
+    def admin_page():
+        admin=actor();status=request.args.get('status') or 'incoming'
+        filters={
+            'query':request.args.get('q') or None,'catalyst':request.args.get('catalyst') or None,
+            'source':request.args.get('source') or None,'priority':request.args.get('priority') or None,
+            'time_window':request.args.get('window') or None,'status':status,
+        }
+        posts=svc.list_admin_posts(admin,**filters)
+        urgent=svc.list_admin_posts(admin,status='incoming',limit=8)
+        urgent=[p for p in urgent if p.get('priority') in {'Critical','High'}]
+        all_posts=svc.list_admin_posts(admin,limit=500)
+        return render_template(
+            'admin_live_research.html',posts=posts,urgent_posts=urgent,
+            status_counts=svc.admin_status_counts(admin),active_status=status,
+            filters={
+                'status':status,'q':request.args.get('q') or '',
+                'catalyst':request.args.get('catalyst') or '',
+                'source':request.args.get('source') or '',
+                'priority':request.args.get('priority') or '',
+                'time_window':request.args.get('window') or '',
+            },
+            sources=sorted({p.get('source_name') for p in all_posts if p.get('source_name')}),
+            categories=rf.CATEGORIES,sentiments=rf.SENTIMENTS,metric_types=rf.METRIC_TYPES,
+            comparisons=rf.COMPARISONS,priorities=rf.PRIORITIES,catalyst_types=rf.CATALYST_TYPES,
+            last_review_at=get_user_setting(int(admin['id']),'live_research_last_review_at',''),
+        )
     bp.add_url_rule('/admin/live-research','admin_page',require_admin(admin_page),methods=['GET'])
     def research_lookup():
         result=research_search.search(request.args.get('q') or '')
@@ -68,4 +94,16 @@ def create_live_research_blueprint(*, require_admin, current_user, tracked_ticke
     bp.add_url_rule('/api/admin/live-research/posts/<post_id>/publish','admin_publish',require_admin(publish),methods=['POST'])
     def delete(post_id): svc.delete_post(post_id,actor()); return jsonify({'ok':True})
     bp.add_url_rule('/api/admin/live-research/posts/<post_id>','admin_delete',require_admin(delete),methods=['DELETE'])
+    def review(post_id,action):
+        status=svc.transition_post(post_id,action,actor());return jsonify({'ok':True,'status':status})
+    bp.add_url_rule('/api/admin/live-research/posts/<post_id>/<action>','admin_review',require_admin(review),methods=['POST'])
+    def bulk():
+        d=request.get_json(force=True) or {};result=svc.bulk_transition(d.get('post_ids'),d.get('action'),actor())
+        if result['action']=='publish':
+            for post in result['posts']:realtime.announce_published(post['id'],ticker=post['ticker'])
+        return jsonify({'ok':True,**result})
+    bp.add_url_rule('/api/admin/live-research/bulk','admin_bulk',require_admin(bulk),methods=['POST'])
+    def mark_reviewed():
+        timestamp=rf._now();set_user_setting(uid(),'live_research_last_review_at',timestamp);return jsonify({'ok':True,'reviewed_at':timestamp})
+    bp.add_url_rule('/api/admin/live-research/review-session','admin_mark_reviewed',require_admin(mark_reviewed),methods=['POST'])
     return bp

@@ -2,7 +2,7 @@
 
 This module turns already-retrieved provider/primary-source facts into admin-reviewable
 research suggestions. It has deliberately NO publication, realtime-announcement, or
-notification dependency. Every suggestion is persisted through research_feed.create_draft.
+notification dependency. Automatic suggestions enter the incoming review queue.
 """
 from __future__ import annotations
 
@@ -117,6 +117,43 @@ def _comparison(actual, expected):
     return "inline"
 
 
+def catalyst_type(item: ProviderItem) -> str:
+    form = str(item.metadata.get("form") or "").upper()
+    if form in {"8-K", "10-Q", "10-K"}:
+        return form
+    event = str(item.metadata.get("event_type") or "").lower()
+    event_map = {
+        "earnings": "EARNINGS", "earnings_beat": "EARNINGS", "earnings_miss": "EARNINGS",
+        "guidance_raise": "GUIDANCE", "guidance_cut": "GUIDANCE",
+        "acquisition_merger": "M&A", "analyst_upgrade": "ANALYST",
+        "analyst_downgrade": "ANALYST", "partnership_deal": "PARTNERSHIP",
+        "government_contract": "PARTNERSHIP", "fda": "REGULATORY",
+        "sec_legal": "REGULATORY", "sec_filing": "SEC FILING",
+        "breaking_news": "BREAKING",
+    }
+    category_map = {
+        "Earnings": "EARNINGS", "Guidance": "GUIDANCE", "Acquisition": "M&A",
+        "Analyst": "ANALYST", "Partnership": "PARTNERSHIP", "Regulatory": "REGULATORY",
+        "SEC Filing": "SEC FILING", "Breaking News": "BREAKING",
+    }
+    return event_map.get(event) or category_map.get(item.category, "OTHER")
+
+
+def priority_level(item: ProviderItem) -> str:
+    requested = str(item.metadata.get("priority") or "").title()
+    if requested in rf.PRIORITIES:
+        return requested
+    catalyst = catalyst_type(item)
+    primary = is_primary_source(item)
+    if catalyst in {"M&A", "GUIDANCE"} or (catalyst == "EARNINGS" and (primary or item.metrics)):
+        return "Critical"
+    if catalyst in {"EARNINGS", "8-K", "10-Q", "10-K", "REGULATORY", "PARTNERSHIP"}:
+        return "High"
+    if catalyst in {"ANALYST", "SEC FILING", "BREAKING"} or primary:
+        return "Medium"
+    return "Low"
+
+
 def earnings_metrics(payload: dict) -> list[dict]:
     """Extract only explicitly supplied earnings facts. Missing values remain missing."""
     if not isinstance(payload, dict):
@@ -141,8 +178,9 @@ def earnings_metrics(payload: dict) -> list[dict]:
     return out
 
 
-def create_suggestion(item: ProviderItem | dict, actor: dict, conn, *, take_provider=None) -> dict:
-    """Create one idempotent provider suggestion. Always draft; never announces/notifies."""
+def create_suggestion(item: ProviderItem | dict, actor: dict, conn, *, take_provider=None,
+                      as_draft: bool = False) -> dict:
+    """Create one idempotent suggestion; automatic ingestion always enters review."""
     rf._assert_admin(actor)
     item = normalize_item(item)
     fp = fingerprint(item)
@@ -162,9 +200,14 @@ def create_suggestion(item: ProviderItem | dict, actor: dict, conn, *, take_prov
         "tradestaar_take": "",
         "take_origin": "provider",
         "should_notify": False,
+        "priority": priority_level(item),
+        "catalyst_type": catalyst_type(item),
+        "source_published_at": item.published_at,
     }
-    post_id = rf.create_draft(post, actor, metrics=list(item.metrics), conn=conn)
-    result = {"status": "draft", "post_id": post_id, "fingerprint": fp, "primary_source": is_primary_source(item)}
+    creator = rf.create_draft if as_draft else rf.create_incoming
+    post_id = creator(post, actor, metrics=list(item.metrics), conn=conn)
+    result = {"status": "draft" if as_draft else "incoming", "post_id": post_id,
+              "fingerprint": fp, "primary_source": is_primary_source(item)}
     # Optional AI is intentionally a separate draft. Failure never changes/publishes provider draft.
     if take_provider is not None:
         import tradestaar_take

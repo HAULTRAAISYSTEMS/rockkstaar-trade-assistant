@@ -4,6 +4,7 @@ import unittest
 import research_feed as rf
 import live_research_ingestion as ing
 from migrations.m0001_live_research_feed import upgrade
+from migrations.m0002_live_research_triage import upgrade as triage_upgrade
 
 
 ADMIN = {"id": 1, "is_admin": True}
@@ -20,6 +21,7 @@ class Phase6Tests(unittest.TestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
         upgrade(self.db)
+        triage_upgrade(self.db)
 
     def item(self, **overrides):
         data = dict(provider="sec", external_id="0001", ticker="NVDA", company_name="NVIDIA Corp",
@@ -30,10 +32,10 @@ class Phase6Tests(unittest.TestCase):
         data.update(overrides)
         return data
 
-    def test_primary_source_creates_draft_only(self):
+    def test_primary_source_creates_incoming_only(self):
         result = ing.create_suggestion(self.item(), ADMIN, self.db)
         row = self.db.execute("select * from research_posts where id=?", (result["post_id"],)).fetchone()
-        self.assertEqual("draft", row["status"])
+        self.assertEqual("incoming", row["status"])
         self.assertEqual("provider", row["take_origin"])
         self.assertEqual(0, row["should_notify"])
         self.assertIsNone(row["published_at"])
@@ -42,7 +44,7 @@ class Phase6Tests(unittest.TestCase):
     def test_deduplication(self):
         first = ing.create_suggestion(self.item(), ADMIN, self.db)
         second = ing.create_suggestion(self.item(), ADMIN, self.db)
-        self.assertEqual("draft", first["status"])
+        self.assertEqual("incoming", first["status"])
         self.assertEqual("duplicate", second["status"])
         self.assertEqual(1, self.db.execute("select count(*) from research_posts").fetchone()[0])
 
@@ -74,8 +76,8 @@ class Phase6Tests(unittest.TestCase):
         result = ing.create_suggestion(self.item(), ADMIN, self.db, take_provider=FakeTakeProvider())
         rows = self.db.execute("select status,take_origin,should_notify,published_at from research_posts order by created_at").fetchall()
         self.assertEqual(2, len(rows))
+        self.assertEqual({"incoming", "draft"}, {row["status"] for row in rows})
         for row in rows:
-            self.assertEqual("draft", row["status"])
             self.assertEqual(0, row["should_notify"])
             self.assertIsNone(row["published_at"])
         self.assertEqual({"provider","ai"}, {r["take_origin"] for r in rows})

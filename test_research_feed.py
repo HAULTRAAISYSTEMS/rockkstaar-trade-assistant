@@ -2,7 +2,7 @@ import sqlite3
 import unittest
 
 import research_feed
-from migrations import m0001_live_research_feed
+from migrations import m0001_live_research_feed, m0002_live_research_triage
 
 
 class ResearchFeedPhase1Tests(unittest.TestCase):
@@ -13,6 +13,7 @@ class ResearchFeedPhase1Tests(unittest.TestCase):
         self.conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, is_admin INTEGER NOT NULL)")
         self.conn.execute("INSERT INTO users (id, is_admin) VALUES (1, 1), (2, 0)")
         m0001_live_research_feed.upgrade(self.conn)
+        m0002_live_research_triage.upgrade(self.conn)
         self.admin = {"id": 1, "is_admin": True}
         self.user = {"id": 2, "is_admin": False}
         self.base = {

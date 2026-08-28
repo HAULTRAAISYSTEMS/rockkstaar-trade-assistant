@@ -18,10 +18,15 @@ from database import get_db
 CATEGORIES = (
     "Earnings", "Guidance", "Revenue", "EPS", "AI", "Partnership",
     "Acquisition", "SEC Filing", "Analyst", "Product", "Management",
-    "Macro", "Breaking News",
+    "Macro", "Regulatory", "Breaking News",
 )
 SENTIMENTS = ("Bullish", "Neutral", "Bearish")
-STATUSES = ("draft", "published")
+STATUSES = ("incoming", "draft", "published", "rejected")
+PRIORITIES = ("Critical", "High", "Medium", "Low")
+CATALYST_TYPES = (
+    "EARNINGS", "GUIDANCE", "8-K", "10-Q", "10-K", "M&A", "ANALYST",
+    "PARTNERSHIP", "REGULATORY", "BREAKING", "SEC FILING", "OTHER",
+)
 TAKE_ORIGINS = ("manual", "ai", "provider")
 METRIC_TYPES = ("revenue", "eps", "guidance", "other")
 COMPARISONS = ("beat", "miss", "inline", "raised", "lowered", "not_applicable")
@@ -78,24 +83,39 @@ def _required(value, field: str, max_length: int) -> str:
 
 
 def validate_post(data: dict) -> dict:
+    category = _choice(data.get("category"), CATEGORIES, "category")
+    catalyst_default = {
+        "Earnings": "EARNINGS", "Guidance": "GUIDANCE", "Acquisition": "M&A",
+        "Analyst": "ANALYST", "Partnership": "PARTNERSHIP",
+        "SEC Filing": "SEC FILING", "Breaking News": "BREAKING",
+    }.get(category, "OTHER")
     return {
         "ticker": normalize_ticker(data.get("ticker")),
         "company_name": _required(data.get("company_name"), "company_name", 200),
         "headline": _required(data.get("headline"), "headline", 500),
         "research_notes": _required(data.get("research_notes"), "research_notes", 20000),
-        "category": _choice(data.get("category"), CATEGORIES, "category"),
+        "category": category,
         "sentiment": _choice(data.get("sentiment"), SENTIMENTS, "sentiment"),
         "source_name": _text(data.get("source_name"))[:200],
         "source_url": validate_source_url(data.get("source_url")),
         "tradestaar_take": _text(data.get("tradestaar_take"))[:10000],
         "take_origin": _choice(data.get("take_origin") or "manual", TAKE_ORIGINS, "take_origin"),
         "should_notify": 1 if bool(data.get("should_notify")) else 0,
+        "priority": _choice(data.get("priority") or "Medium", PRIORITIES, "priority"),
+        "catalyst_type": _choice(
+            str(data.get("catalyst_type") or catalyst_default).upper(),
+            CATALYST_TYPES,
+            "catalyst_type",
+        ),
+        "source_published_at": _text(data.get("source_published_at"))[:100] or None,
     }
 
 
 def validate_metric(data: dict, sort_order: int = 0) -> dict:
-    metric_type = _choice(data.get("metric_type") or "other", METRIC_TYPES, "metric_type")
-    comparison = _choice(data.get("comparison") or "not_applicable", COMPARISONS, "comparison")
+    # Provider payloads historically used title case. Normalize only these
+    # enum-like metric fields; stored values remain the existing lowercase API.
+    metric_type = _choice(_text(data.get("metric_type") or "other").lower(), METRIC_TYPES, "metric_type")
+    comparison = _choice(_text(data.get("comparison") or "not_applicable").lower(), COMPARISONS, "comparison")
     result = {
         "metric_type": metric_type,
         "label": _required(data.get("label"), "metric label", 200),
@@ -129,8 +149,7 @@ def _assert_admin(actor: dict | None) -> int:
         raise ResearchPermissionError("authenticated administrator required")
 
 
-def create_draft(data: dict, actor: dict, metrics: list[dict] | None = None, conn=None) -> str:
-    """Create a draft. Provider/AI-originated content is always forced to draft."""
+def _create_post(data: dict, actor: dict, metrics: list[dict] | None, conn, status: str) -> str:
     author_id = _assert_admin(actor)
     clean = validate_post(data)
     post_id = str(uuid4())
@@ -142,13 +161,15 @@ def create_draft(data: dict, actor: dict, metrics: list[dict] | None = None, con
             """INSERT INTO research_posts
             (id,ticker,company_name,headline,research_notes,category,sentiment,
              source_name,source_url,tradestaar_take,take_origin,status,should_notify,
-             notification_status,author_user_id,created_at,updated_at,published_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             notification_status,author_user_id,created_at,updated_at,published_at,
+             priority,catalyst_type,source_published_at,reviewed_at,reviewed_by_user_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (post_id, clean["ticker"], clean["company_name"], clean["headline"],
              clean["research_notes"], clean["category"], clean["sentiment"],
              clean["source_name"], clean["source_url"], clean["tradestaar_take"],
-             clean["take_origin"], "draft", clean["should_notify"], "not_requested",
-             author_id, timestamp, timestamp, None),
+             clean["take_origin"], status, clean["should_notify"] if status == "draft" else 0,
+             "not_requested", author_id, timestamp, timestamp, None, clean["priority"],
+             clean["catalyst_type"], clean["source_published_at"], None, None),
         )
         for index, raw in enumerate(metrics or []):
             metric = validate_metric(raw, index)
@@ -171,6 +192,22 @@ def create_draft(data: dict, actor: dict, metrics: list[dict] | None = None, con
             conn.close()
 
 
+def create_draft(data: dict, actor: dict, metrics: list[dict] | None = None, conn=None) -> str:
+    """Create an admin-authored or explicitly requested research draft."""
+    return _create_post(data, actor, metrics, conn, "draft")
+
+
+def create_incoming(data: dict, actor: dict, metrics: list[dict] | None = None, conn=None) -> str:
+    """Persist automatic provider intelligence for review, never publication."""
+    origin = _text(data.get("take_origin") or "provider")
+    if origin not in {"provider", "ai"}:
+        raise ResearchValidationError("incoming intelligence must be provider or AI sourced")
+    incoming = dict(data)
+    incoming["take_origin"] = origin
+    incoming["should_notify"] = False
+    return _create_post(incoming, actor, metrics, conn, "incoming")
+
+
 def publish_post(post_id: str, actor: dict, conn=None) -> None:
     """Explicit admin-only publication boundary. Nothing calls this automatically."""
     _assert_admin(actor)
@@ -180,6 +217,8 @@ def publish_post(post_id: str, actor: dict, conn=None) -> None:
         row = conn.execute("SELECT id, status FROM research_posts WHERE id = ?", (post_id,)).fetchone()
         if not row:
             raise ResearchValidationError("research post not found")
+        if row["status"] != "draft":
+            raise ResearchValidationError("only approved drafts can be published")
         timestamp = _now()
         conn.execute(
             "UPDATE research_posts SET status='published', published_at=?, updated_at=? WHERE id=?",

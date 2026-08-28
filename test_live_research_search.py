@@ -50,7 +50,7 @@ def test_create_is_draft_only_and_existing_is_not_duplicated(monkeypatch):
 def test_new_result_delegates_to_phase6_draft_boundary(monkeypatch):
     monkeypatch.setattr(s,'resolve_company',lambda q:('MRVL','Marvell'))
     conn=Conn(None); captured=[]
-    def create(item,actor,db): captured.append(item); return {'status':'draft','post_id':'d1'}
+    def create(item,actor,db,**kwargs): captured.append((item,kwargs)); return {'status':'draft','post_id':'d1'}
     monkeypatch.setattr(s,'create_suggestion',create)
     out=s.create_draft_from_result({'ticker':'MRVL','source_url':'https://example.com/x','headline':'MRVL earnings','source_name':'Provider','summary':'verified fact','category':'Earnings'}, {'id':1,'is_admin':True}, conn)
-    assert out['status']=='draft' and captured[0].ticker=='MRVL' and conn.committed
+    assert out['status']=='draft' and captured[0][0].ticker=='MRVL' and captured[0][1]['as_draft'] is True and conn.committed

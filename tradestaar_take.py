@@ -67,7 +67,10 @@ class OpenAICompatibleTakeProvider(TakeProvider):
 def generate_take_draft(data, actor, provider, conn=None):
     """Generate and save an AI Take as a DRAFT only. There is intentionally no publish flag."""
     rf._assert_admin(actor); context=build_verified_context(data); result=provider.generate(context)
-    cited=set(result['source_ids']); sources=[s for s in context['sources'] if s.id in cited]
+    allowed={source.id for source in context['sources']}; cited_ids=[str(value) for value in result.get('source_ids') or []]
+    if not cited_ids or any(source_id not in allowed for source_id in cited_ids):
+        raise TakeProviderError('provider returned invalid source attribution')
+    cited=set(cited_ids); sources=[s for s in context['sources'] if s.id in cited]
     source_label='; '.join(s.label for s in sources); source_urls=[s.url for s in sources if s.url]
     draft={'ticker':context['ticker'],'company_name':context['company_name'],'headline':context['headline'] or f"{context['ticker']} research update",'research_notes':context['research_notes'] or 'AI-assisted Tradestaar Take generated from admin-verified research data.','category':context['category'],'sentiment':context['sentiment'],'source_name':source_label,'source_url':source_urls[0] if len(source_urls)==1 else None,'tradestaar_take':result['take'],'take_origin':'ai','should_notify':False}
     post_id=rf.create_draft(draft,actor,metrics=context['metrics'],conn=conn)

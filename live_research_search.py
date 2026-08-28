@@ -121,7 +121,9 @@ def create_draft_from_result(data: dict, actor: dict, conn=None) -> dict:
             source_kind=str(data.get("source_kind") or "provider"),metadata={"event_type":str(data.get("catalyst_type") or "")})
         existing=_existing(conn,ticker,item.source_url)
         if existing: return {"status":"existing","post":existing}
-        result=create_suggestion(item,actor,conn); conn.commit(); return result
+        # This is an explicit admin request, not automatic discovery, so it
+        # remains an editable draft and does not enter the incoming queue.
+        result=create_suggestion(item,actor,conn,as_draft=True); conn.commit(); return result
     except Exception:
         conn.rollback(); raise
     finally:

@@ -10,7 +10,7 @@ ADMIN={'id':1,'is_admin':1}
 def db():
     c=sqlite3.connect(':memory:');c.row_factory=sqlite3.Row
     c.executescript('''
-    CREATE TABLE research_posts(id TEXT PRIMARY KEY,ticker TEXT,company_name TEXT,headline TEXT,research_notes TEXT,category TEXT,sentiment TEXT,source_name TEXT,source_url TEXT,tradestaar_take TEXT,take_origin TEXT,status TEXT,should_notify INTEGER,notification_status TEXT,author_user_id INTEGER,created_at TEXT,updated_at TEXT,published_at TEXT);
+    CREATE TABLE research_posts(id TEXT PRIMARY KEY,ticker TEXT,company_name TEXT,headline TEXT,research_notes TEXT,category TEXT,sentiment TEXT,source_name TEXT,source_url TEXT,tradestaar_take TEXT,take_origin TEXT,status TEXT,should_notify INTEGER,notification_status TEXT,author_user_id INTEGER,created_at TEXT,updated_at TEXT,published_at TEXT,priority TEXT DEFAULT 'Medium',catalyst_type TEXT DEFAULT 'BREAKING',source_published_at TEXT,reviewed_at TEXT,reviewed_by_user_id INTEGER);
     CREATE TABLE research_metrics(id TEXT PRIMARY KEY,post_id TEXT,metric_type TEXT,label TEXT,actual_value REAL,expected_value REAL,previous_value REAL,unit TEXT,period TEXT,comparison TEXT,notes TEXT,sort_order INTEGER);
     CREATE TABLE research_saved_posts(user_id INTEGER,post_id TEXT,saved_at TEXT);
     CREATE TABLE research_alert_preferences(user_id INTEGER,ticker TEXT,enabled INTEGER,created_at TEXT,updated_at TEXT);

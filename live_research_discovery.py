@@ -20,12 +20,16 @@ from news_fetcher import CATALYST_CATEGORIES, parse_catalyst_categories
 EVENT_CATEGORY = {
     "earnings_beat": "Earnings", "earnings_miss": "Earnings",
     "guidance_raise": "Guidance", "guidance_cut": "Guidance",
-    "analyst_upgrade": "Analyst Move", "analyst_downgrade": "Analyst Move",
+    "analyst_upgrade": "Analyst", "analyst_downgrade": "Analyst",
     "partnership_deal": "Partnership", "government_contract": "Partnership",
-    "acquisition_merger": "M&A", "fda": "Regulatory", "sec_legal": "SEC Filing",
+    "acquisition_merger": "Acquisition", "fda": "Regulatory", "sec_legal": "SEC Filing",
 }
 HIGH_VALUE_FORMS = {"8-K", "10-Q", "10-K"}
-GENERIC_PATTERNS = ("stocks to watch", "top stocks", "why these stocks", "market roundup", "stock market today")
+GENERIC_PATTERNS = (
+    "stocks to watch", "top stocks", "why these stocks", "market roundup",
+    "stock market today", "better buy", "which stock is better", "class action",
+    "shareholder alert", "law firm", "investigation on behalf", "deadline reminder",
+)
 TICKER_RE = re.compile(r"\b(?:NASDAQ|NYSE|AMEX)\s*:\s*([A-Z][A-Z0-9.-]{0,5})\b|\$([A-Z][A-Z0-9.-]{0,5})\b")
 
 
