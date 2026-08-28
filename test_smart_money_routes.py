@@ -58,6 +58,10 @@ class SmartMoneyPageContractTests(unittest.TestCase):
         self.assertIn("underlying transaction", self.template)
         self.assertIn("Official SEC filing", self.template)
         self.assertIn("Open complete Form", self.template)
+        self.assertIn("Shares reported", self.template)
+        self.assertIn("Reported value", self.template)
+        self.assertIn("not open-market activity", self.template)
+        self.assertIn("Open raw facts for security-level holdings", self.template)
 
     def test_page_exposes_dashboard_controls_and_explanations(self):
         for text in (

@@ -75,12 +75,16 @@
           <div class="sm-signal sm-signal-{{ event.signal.label|lower|replace(' ','-') }}"><span>Insider Signal</span><strong>{{ event.signal.label }}</strong><small>Score {{ '%+d'|format(event.signal.score) }}</small></div>
         </header>
 
-        <div class="sm-event-grid">
+        <div class="sm-event-grid sm-event-grid-{{ event.activity|lower }}">
           <div><span>Transaction date</span><strong>{{ event.trade_date or '—' }}</strong><small>Filed {{ event.filed_at or '—' }}{% if event.form_type == '4/A' %} · Amendment{% endif %}</small></div>
           {% if event.activity in ('BUY','MIXED') %}<div><span>Shares purchased</span><strong class="sm-positive">{{ shares(event.buy_shares) }}</strong><small>{% if event.buy_average_price is not none %}@ ${{ '%.2f'|format(event.buy_average_price) }} · {% endif %}{{ money(event.buy_value) }}</small></div>{% endif %}
           {% if event.activity in ('SELL','MIXED') %}<div><span>Shares sold</span><strong class="sm-negative">{{ shares(event.sell_shares) }}</strong><small>{% if event.sell_average_price is not none %}@ ${{ '%.2f'|format(event.sell_average_price) }} · {% endif %}{{ money(event.sell_value) }}</small></div>{% endif %}
-          <div class="sm-holdings"><span>Holdings change</span>{% if event.holdings_change_pct is not none %}<strong class="{{ 'sm-positive' if event.holdings_change_pct > 0 else 'sm-negative' }}">{{ '%+.1f'|format(event.holdings_change_pct) }}%</strong><small>{{ shares(event.holdings_before) }} before → {{ shares(event.holdings_after) }} after</small>{% else %}<strong>Not calculable</strong><small>Security/ownership data is not comparable</small>{% endif %}</div>
-          <div><span>Ownership</span><strong>{{ 'Direct' if event.direct_indirect == 'D' else 'Indirect' if event.direct_indirect == 'I' else 'Not reported' }}</strong><small>{{ event.nature_of_ownership or 'No additional ownership description' }}</small></div>
+          {% if event.activity == 'NON_MARKET' %}
+          <div><span>Shares reported</span><strong>A {{ shares(event.non_market_acquired_shares) }} · D {{ shares(event.non_market_disposed_shares) }}</strong><small>Across {{ event.non_market_count }} filing rows; not netted</small></div>
+          <div><span>Reported value</span><strong>{{ money(event.non_market_reported_value) }}</strong><small>{{ event.non_market_priced_count }} of {{ event.non_market_count }} rows priced · not open-market activity</small></div>
+          {% endif %}
+          <div class="sm-holdings"><span>Holdings change</span>{% if event.holdings_change_pct is not none %}<strong class="{{ 'sm-positive' if event.holdings_change_pct > 0 else 'sm-negative' }}">{{ '%+.1f'|format(event.holdings_change_pct) }}%</strong><small>{{ shares(event.holdings_before) }} before → {{ shares(event.holdings_after) }} after</small>{% else %}<strong>Not comparable</strong><small>Open raw facts for security-level holdings</small>{% endif %}</div>
+          <div><span>Ownership</span><strong>{{ 'Direct' if event.direct_indirect == 'D' else 'Indirect' if event.direct_indirect == 'I' else 'Not reported' }}</strong><small>{{ event.nature_of_ownership or 'No additional ownership description reported' }}</small></div>
         </div>
 
         {% if event.alert_matches %}<div class="sm-alert-match"><b>Rule match</b>{% for match in event.alert_matches %}<span>{{ match }}</span>{% endfor %}</div>{% endif %}

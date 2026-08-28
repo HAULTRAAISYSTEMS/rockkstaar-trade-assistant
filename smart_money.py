@@ -379,6 +379,13 @@ def aggregate_form4_events(rows: list[dict]) -> list[dict]:
         non_market = [row for row in transactions if row.get("code") not in {"P", "S"}]
         buy_value, buy_priced, buy_count = _sum_values(buys)
         sell_value, sell_priced, sell_count = _sum_values(sells)
+        non_market_value, non_market_priced, non_market_count = _sum_values(non_market)
+        non_market_acquired_shares = sum(
+            row.get("shares", 0) for row in non_market if row.get("acquired_disposed") == "A"
+        )
+        non_market_disposed_shares = sum(
+            row.get("shares", 0) for row in non_market if row.get("acquired_disposed") == "D"
+        )
         before, after, change_pct = _event_holdings_change(transactions)
         ownership_row = next(
             (row for row in transactions if row.get("code") in {"P", "S"} and not row.get("derivative") and row.get("direct_indirect") not in {None, "", "—"}),
@@ -417,7 +424,12 @@ def aggregate_form4_events(rows: list[dict]) -> list[dict]:
             "sell_value_complete": sell_priced == sell_count,
             "buy_average_price": _weighted_price(buys),
             "sell_average_price": _weighted_price(sells),
-            "non_market_count": len(non_market),
+            "non_market_count": non_market_count,
+            "non_market_acquired_shares": non_market_acquired_shares,
+            "non_market_disposed_shares": non_market_disposed_shares,
+            "non_market_reported_value": non_market_value if non_market_priced else None,
+            "non_market_priced_count": non_market_priced,
+            "non_market_value_complete": non_market_priced == non_market_count,
             "holdings_before": before,
             "holdings_after": after,
             "holdings_change_pct": change_pct,

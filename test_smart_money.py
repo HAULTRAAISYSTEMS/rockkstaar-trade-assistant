@@ -161,6 +161,19 @@ class TestInsiderDashboard(unittest.TestCase):
         self.assertTrue(all(event["signal"]["label"] == "Neutral" for event in dashboard["events"]))
         self.assertTrue(all(event["signal"]["score"] == 0 for event in dashboard["events"]))
 
+    def test_non_market_event_exposes_reported_facts_without_netting_them(self):
+        non_market = [copy.deepcopy(row) for row in self.rows if row["code"] in {"F", "M"}]
+        event = smart_money.aggregate_form4_events(non_market)[0]
+
+        self.assertEqual("NON_MARKET", event["activity"])
+        self.assertEqual(2, event["non_market_count"])
+        self.assertEqual(0, event["non_market_acquired_shares"])
+        self.assertEqual(75, event["non_market_disposed_shares"])
+        self.assertEqual(5000, event["non_market_reported_value"])
+        self.assertEqual(2, event["non_market_priced_count"])
+        self.assertTrue(event["non_market_value_complete"])
+        self.assertIsNone(event["holdings_change_pct"])
+
     def test_executive_purchase_can_be_strong_bullish_with_reasons(self):
         purchase = [copy.deepcopy(row) for row in self.rows if row["code"] == "P"]
         dashboard = smart_money.build_insider_dashboard(purchase, today=date(2026, 8, 27))
