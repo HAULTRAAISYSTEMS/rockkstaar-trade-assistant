@@ -19,6 +19,7 @@
     <a href="{{ url_for('dashboard') }}" class="nav-link {{ 'nav-link-active' if ep in ('dashboard', 'quick_mode') }}">Setups</a>
     <a href="{{ url_for('watchlists_page') }}" class="nav-link {{ 'nav-link-active' if ep == 'watchlists_page' }}">Watchlists</a>
     <a href="{{ url_for('fundamentals_page') }}" class="nav-link {{ 'nav-link-active' if ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare') }}">Research</a>
+    <a href="{{ url_for('live_research.feed') }}" class="nav-link nav-link-research {{ 'nav-link-active' if ep and ep.startswith('live_research.') }}">Live Research</a>
     <a href="{{ url_for('intel') }}" class="nav-link nav-link-research {{ 'nav-link-active' if ep in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money') }}">Intel</a>
     <a href="{{ url_for('account') }}" class="nav-link nav-link-account {{ 'nav-link-active' if ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'tradestaar_ai', 'schwab_account') }}">Account</a>
   </div>
@@ -54,6 +55,9 @@
   </a>
   <a href="{{ url_for('terminal') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('terminal', 'dashboard', 'quick_mode') }}" {% if ep in ('terminal', 'dashboard', 'quick_mode') %}aria-current="page"{% endif %}>
     <span class="mobile-app-nav__icon" aria-hidden="true">⌁</span><span>Trade</span>
+  </a>
+  <a href="{{ url_for('live_research.feed') }}" class="mobile-app-nav__item {{ 'is-active' if ep and ep.startswith('live_research.') }}" {% if ep and ep.startswith('live_research.') %}aria-current="page"{% endif %}>
+    <span class="mobile-app-nav__icon" aria-hidden="true">◉</span><span>Live</span>
   </a>
   <a href="{{ url_for('intel') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money') }}" {% if ep in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money') %}aria-current="page"{% endif %}>
     <span class="mobile-app-nav__icon" aria-hidden="true">▥</span><span>Intel</span>
