@@ -37,12 +37,30 @@ _sec_request_lock = threading.Lock()
 _sec_last_request = 0.0
 _SEC_MIN_INTERVAL = 0.12  # stay below the SEC's published 10 requests/second ceiling
 
+# Dollar threshold for the large-sale alert. Override with INSIDER_LARGE_SALE_USD.
+LARGE_SALE_THRESHOLD = int(os.environ.get("INSIDER_LARGE_SALE_USD", "1000000") or 1_000_000)
+
 INSIDER_ALERT_RULES = {
-    "executive_buy_100k": "CEO/CFO open-market buy over $100K",
+    "executive_buy_100k": "Senior officer open-market buy over $100K",
     "cluster_buy_3": "3+ insiders buy the same ticker within 30 days",
     "holdings_increase_5": "Insider increases holdings by more than 5%",
     "holdings_sale_10": "Insider sells more than 10% of prior holdings",
+    "large_sale_1m": f"Insider open-market sale over ${LARGE_SALE_THRESHOLD:,}",
+    "cluster_sell_3": "3+ insiders sell the same ticker within 30 days",
 }
+
+# A rule with no stored row falls back to this. Existing users have rows for the
+# original four, so only the newer rules switch themselves on.
+INSIDER_ALERT_DEFAULTS = {key: True for key in INSIDER_ALERT_RULES}
+
+
+def resolve_alert_rules(stored: dict | None) -> dict[str, bool]:
+    """Merge a user's saved rule toggles over the defaults."""
+    resolved = dict(INSIDER_ALERT_DEFAULTS)
+    for key, value in (stored or {}).items():
+        if key in resolved:
+            resolved[key] = bool(value)
+    return resolved
 
 _FORM4_CODES = {
     "P": ("OPEN-MARKET BUY", "Insider purchased shares on the open market or privately."),
@@ -445,8 +463,21 @@ def aggregate_form4_events(rows: list[dict]) -> list[dict]:
 
 
 def _is_executive(role: str) -> bool:
+    """Senior officers whose trades carry the most signal.
+
+    Originally CEO/CFO only, which under-weighted COO/President/Chairman exits.
+    """
     normalized = re.sub(r"[^A-Z]", "", str(role or "").upper())
-    return any(token in normalized for token in ("CEO", "CFO", "CHIEFEXECUTIVE", "CHIEFFINANCIAL"))
+    return any(token in normalized for token in (
+        "CEO", "CFO", "COO", "CHIEFEXECUTIVE", "CHIEFFINANCIAL", "CHIEFOPERATING",
+        "PRESIDENT", "CHAIRMAN", "CHAIRPERSON",
+    ))
+
+
+def _is_major_holder(role: str) -> bool:
+    """A 10% owner is often the largest holder in the filing."""
+    normalized = re.sub(r"[^A-Z0-9]", "", str(role or "").upper())
+    return "10OWNER" in normalized or "TENPERCENT" in normalized or "10PERCENT" in normalized
 
 
 def _score_event(event: dict, all_events: list[dict]) -> dict:
@@ -469,8 +500,21 @@ def _score_event(event: dict, all_events: list[dict]) -> dict:
         and (other.get("owner_cik") or str(other.get("owner") or "").upper()) == owner_key
         and other.get("activity") in {"BUY", "MIXED"}
     )
+    sellers = {
+        other.get("owner_cik") or str(other.get("owner") or "").upper()
+        for other in all_events
+        if other.get("ticker") == ticker and other.get("activity") in {"SELL", "MIXED"}
+    }
+    repeat_sells = sum(
+        1 for other in all_events
+        if other.get("ticker") == ticker
+        and (other.get("owner_cik") or str(other.get("owner") or "").upper()) == owner_key
+        and other.get("activity") in {"SELL", "MIXED"}
+    )
     event["cluster_buyers"] = len(buyers)
     event["repeat_purchase_count"] = repeat_buys
+    event["cluster_sellers"] = len(sellers)
+    event["repeat_sale_count"] = repeat_sells
 
     if has_buy:
         score += 35
@@ -515,6 +559,33 @@ def _score_event(event: dict, all_events: list[dict]) -> dict:
             if size_points:
                 sale_points += size_points
                 reasons.append(f"{size_points} sale represented {sold_pct:.1f}% of calculated prior holdings")
+        # Seniority. Mirrors the buy side, which already weights CEO/CFO and
+        # directors; without this a CEO exit scored the same as a junior VP's.
+        if _is_executive(role):
+            sale_points -= 15
+            reasons.append("-15 senior officer open-market sale")
+        elif _is_major_holder(role):
+            sale_points -= 12
+            reasons.append("-12 10% owner open-market sale")
+        elif "DIRECTOR" in role.upper():
+            sale_points -= 8
+            reasons.append("-8 director open-market sale")
+        # Dollar size. sell_value was already computed on every event but never
+        # scored, so a $50M sale tied with a $180K one.
+        sell_value = event.get("sell_value") or 0
+        sale_value_points = -15 if sell_value >= 1_000_000 else -10 if sell_value >= 500_000 else -5 if sell_value >= 100_000 else 0
+        if sale_value_points:
+            sale_points += sale_value_points
+            reasons.append(f"{sale_value_points} reported sale value is ${sell_value:,.0f}")
+        if repeat_sells > 1:
+            sale_points -= 10
+            reasons.append(f"-10 repeat seller: {repeat_sells} sale filings in 30 days")
+        if len(sellers) >= 3:
+            sale_points -= 20
+            reasons.append(f"-20 cluster selling: {len(sellers)} insiders in 30 days")
+        elif len(sellers) == 2:
+            sale_points -= 10
+            reasons.append("-10 two insiders sold this ticker in 30 days")
         if event.get("planned_10b5_1"):
             original = sale_points
             sale_points = int(round(sale_points * 0.35))
@@ -597,6 +668,8 @@ def match_alert_rules(event: dict, enabled_rules: dict | None) -> list[str]:
         "cluster_buy_3": event["activity"] in {"BUY", "MIXED"} and event.get("cluster_buyers", 0) >= 3,
         "holdings_increase_5": change_pct is not None and change_pct > 5,
         "holdings_sale_10": change_pct is not None and change_pct < -10,
+        "large_sale_1m": event["activity"] in {"SELL", "MIXED"} and (event.get("sell_value") or 0) >= LARGE_SALE_THRESHOLD,
+        "cluster_sell_3": event["activity"] in {"SELL", "MIXED"} and event.get("cluster_sellers", 0) >= 3,
     }
     for key, matched in checks.items():
         if enabled.get(key) and matched:

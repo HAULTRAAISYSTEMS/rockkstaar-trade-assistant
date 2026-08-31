@@ -6844,13 +6844,40 @@ def intel():
         except Exception as _e:
             logger.debug("intel: story failed: %s", _e)
 
+    # Command Center alert feed. Earnings alerts are derived from the slate this
+    # page already loaded; insider alerts are written by /smart-money when it
+    # fetches Form 4 data. Never fatal - the page renders without the card.
+    command_alerts, unseen_alerts = [], 0
+    try:
+        import command_center_alerts as _cca
+        from database import add_scanner_alert, get_scanner_alerts, get_unseen_scanner_alert_count
+        existing = get_scanner_alerts(limit=120)
+        _cca.sync_alerts(_cca.build_earnings_alerts(earnings), existing, add_scanner_alert)
+        command_alerts = get_scanner_alerts(limit=12)
+        unseen_alerts = get_unseen_scanner_alert_count()
+    except Exception as _e:
+        logger.debug("intel: alert feed unavailable: %s", _e)
+
     return render_template(
         "intel.html",
         mkt=mkt, liq=liq, money_flow=money_flow[:8],
         events=events[:8], news=enriched_news[:24], earnings=earnings[:12],
         trending=trending, briefing=briefing, story=story, intel_status=intel_status,
         earnings_status=earnings_status,
+        command_alerts=command_alerts, unseen_alerts=unseen_alerts,
     )
+
+
+@app.route("/api/intel/alerts/seen", methods=["POST"])
+def api_intel_alerts_seen():
+    """Clear the Command Center unseen-alert badge."""
+    try:
+        from database import mark_scanner_alerts_seen
+        mark_scanner_alerts_seen()
+        return jsonify({"ok": True})
+    except Exception as exc:
+        logger.error("api_intel_alerts_seen: %s", exc, exc_info=True)
+        return jsonify({"ok": False}), 200
 
 
 @app.route("/sentiment")
@@ -6897,8 +6924,20 @@ def smart_money():
     if filters["transaction_type"] not in {"all", "buy", "sell", "non_market", "P", "S", "F", "G", "A", "M"}:
         filters["transaction_type"] = "all"
     insiders, insider_status = fetch_sec_form4(tickers, limit=None, history_days=30)
-    alert_rules = get_insider_alert_rules(current_user_id())
+    from smart_money import resolve_alert_rules
+    alert_rules = resolve_alert_rules(get_insider_alert_rules(current_user_id()))
     dashboard = build_insider_dashboard(insiders, filters=filters, alert_rules=alert_rules)
+    try:
+        import command_center_alerts as _cca
+        from database import add_scanner_alert, get_scanner_alerts
+        _cca.sync_alerts(
+            _cca.build_insider_alerts(dashboard.get("events")),
+            get_scanner_alerts(limit=120),
+            add_scanner_alert,
+        )
+    except Exception as _e:
+        logger.debug("smart_money: alert sync skipped: %s", _e)
+
     congress, congress_status = fetch_congress_trades()
     return render_template(
         "smart_money.html",

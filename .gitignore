@@ -4,3 +4,8 @@ __pycache__/
 .env
 instance/
 *.db
+
+# runtime caches and local editor state
+.DS_Store
+cache/
+.claude/
