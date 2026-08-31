@@ -80,3 +80,61 @@ def test_missing_ticker_is_reported_separately_from_malformed():
 def test_genuinely_unparseable_row_is_still_malformed():
     items,stats=d.discover_market_news(fetchers=(("test",lambda:[{"related":"NVDA"}]),))
     assert items==[] and stats["malformed"]==1 and stats["no_ticker"]==0
+
+# --- Catalyst classification --------------------------------------------------
+# Regression: the keyword lists only matched very literal phrasings, so common
+# wire-service wording fell through and was dropped as low_importance.
+# Baseline before this fix was 2/20 on the headlines below.
+
+import pytest
+
+CATALYST_HEADLINES = [
+    ("guidance_raise", "Microsoft lifts full-year guidance"),
+    ("guidance_raise", "Broadcom boosts guidance for fiscal 2026"),
+    ("guidance_raise", "Costco hikes full-year outlook"),
+    ("guidance_raise", "Salesforce raises FY27 revenue forecast"),
+    ("guidance_raise", "Delta upgrades its full-year profit outlook"),
+    ("guidance_cut", "Nike trims full-year guidance"),
+    ("guidance_cut", "Intel slashes outlook for the year"),
+    ("guidance_cut", "FedEx cuts full-year forecast"),
+    ("guidance_cut", "Target warns on full-year profit"),
+    ("earnings_beat", "Nvidia tops revenue estimates"),
+    ("earnings_beat", "Alphabet reports better-than-expected results"),
+    ("earnings_miss", "Boeing posts wider-than-expected loss"),
+    ("earnings_miss", "Ford results come in light"),
+    ("acquisition_merger", "Pfizer to acquire biotech in $4 billion deal"),
+    ("acquisition_merger", "Chevron strikes deal for Hess"),
+    ("fda", "FDA approves Lilly's obesity drug"),
+    ("analyst_upgrade", "Morgan Stanley double-upgrades Tesla"),
+    ("analyst_downgrade", "Goldman cuts Apple to neutral"),
+    ("partnership_deal", "Palantir and Boeing announce partnership"),
+    ("government_contract", "Lockheed awarded $2B Army contract"),
+]
+
+@pytest.mark.parametrize("expected,headline", CATALYST_HEADLINES)
+def test_common_wire_phrasings_are_classified(expected, headline):
+    assert d.classify(headline, "") == expected
+
+@pytest.mark.parametrize("headline", [
+    "Top stocks to watch after the bell",
+    "3 stocks to buy right now",
+    "Better buy: Apple vs Microsoft",
+    "Stock market today: Dow rises 200 points",
+    "Why these stocks are moving",
+    "Market roundup: energy leads gains",
+    "The company upgraded its data center servers",
+    "Shareholder alert: law firm investigation on behalf of investors",
+    "Five things to know before the open",
+])
+def test_noise_headlines_are_not_ingested(headline):
+    """Broadening the vocabulary must not start admitting filler."""
+    assert d.importance(d.classify(headline, ""), headline) <= 0
+
+def test_highest_weight_catalyst_wins_when_several_fire():
+    """'upgrades its full-year outlook' is both analyst-ish and a guidance raise.
+    Guidance (weight 4) must beat analyst upgrade (weight 3)."""
+    assert d.classify("Delta upgrades its full-year profit outlook", "") == "guidance_raise"
+
+def test_product_upgrade_is_not_an_analyst_upgrade():
+    """Bare 'upgrade' used to fire on infrastructure news."""
+    assert d.classify("The company upgraded its data center servers", "") != "analyst_upgrade"

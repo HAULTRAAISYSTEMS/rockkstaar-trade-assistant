@@ -52,7 +52,11 @@ def is_recent(value, hours=24):
 
 def classify(headline, summary=""):
     cats = parse_catalyst_categories([f"{headline} {summary}"])
-    if cats: return cats[0]
+    if cats:
+        # Several categories can fire on one headline ("upgrades its full-year
+        # outlook" is both analyst-ish and a guidance raise). Prefer the
+        # highest-weight catalyst rather than dict insertion order.
+        return max(cats, key=lambda c: (CATALYST_CATEGORIES.get(c, {}).get("weight", 0), c))
     text = f"{headline} {summary}".lower()
     if any(k in text for k in ("quarterly results", "reports results", "earnings", "eps", "revenue")): return "earnings"
     if any(k in text for k in ("8-k", "10-q", "10-k", "material agreement")): return "sec_filing"
