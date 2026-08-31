@@ -63,9 +63,35 @@ def importance(event_type, headline):
     if event_type in EVENT_CATEGORY or event_type in {"earnings", "sec_filing"}: return 5
     return 0
 
+def _valid_symbol(value):
+    candidate = str(value or "").strip().upper()
+    return candidate if re.fullmatch(r"[A-Z][A-Z0-9.-]{0,5}", candidate) else ""
+
+
 def resolve_ticker(row):
-    direct = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
-    if re.fullmatch(r"[A-Z][A-Z0-9.-]{0,5}", direct): return direct
+    """Resolve a ticker from a provider row.
+
+    Providers disagree on where the symbol lives. Finnhub's market-news feed
+    supplies it in `related` (comma-separated, occasionally several symbols);
+    Polygon's adapter sets `ticker`; some feeds use `symbol` or a `tickers`
+    list. Reading only ticker/symbol silently discarded every Finnhub
+    general-news story as malformed.
+    """
+    for key in ("ticker", "symbol"):
+        direct = _valid_symbol(row.get(key))
+        if direct: return direct
+    related = row.get("related")
+    if isinstance(related, str):
+        # "NVDA,AMD" -> first well-formed symbol
+        for part in related.split(","):
+            symbol = _valid_symbol(part)
+            if symbol: return symbol
+    for key in ("tickers", "related"):
+        value = row.get(key)
+        if isinstance(value, (list, tuple)):
+            for part in value:
+                symbol = _valid_symbol(part)
+                if symbol: return symbol
     match = TICKER_RE.search(f"{row.get('headline','')} {row.get('summary','')}")
     return next((g for g in match.groups() if g), "") if match else ""
 
@@ -74,7 +100,8 @@ def normalize_news(row, provider="market-news", recency_hours=24):
     headline, summary = str(row.get("headline") or row.get("title") or "").strip(), str(row.get("summary") or row.get("description") or "").strip()
     url = str(row.get("url") or "").strip(); published = row.get("published_at") or row.get("datetime") or row.get("publishedAt")
     ticker = resolve_ticker(row); event_type = classify(headline, summary)
-    if not headline or not summary or not url or not ticker: return None, "malformed"
+    if not headline or not summary or not url: return None, "malformed"
+    if not ticker: return None, "no_ticker"
     if not is_recent(published, recency_hours): return None, "stale"
     if importance(event_type, headline) <= 0: return None, "low_importance"
     source = str(row.get("source") or provider).strip()
@@ -118,7 +145,7 @@ def fetch_polygon_market_news(limit=100):
 def discover_market_news(fetchers=None, recency_hours=None):
     hours = int(recency_hours or os.environ.get("LIVE_RESEARCH_RECENCY_HOURS", "24"))
     fetchers = fetchers or (("finnhub-market", fetch_finnhub_market_news), ("polygon-market", fetch_polygon_market_news))
-    stats={"events_discovered":0,"tickers_resolved":0,"low_importance":0,"stale":0,"malformed":0,"provider_failures":[]}; items=[]
+    stats={"events_discovered":0,"tickers_resolved":0,"low_importance":0,"stale":0,"malformed":0,"no_ticker":0,"provider_failures":[]}; items=[]
     for name, fetcher in fetchers:
         try: rows=fetcher() or []
         except Exception as exc:

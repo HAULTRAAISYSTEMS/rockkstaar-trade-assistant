@@ -29,13 +29,13 @@ def _merge(total, summary, prefix=""):
 def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
     priority=[str(t).strip().upper() for t in (tickers or _tickers_from_env()) if str(t).strip()]
     conn=get_db()
-    total={"priority_tickers":len(priority),"events_discovered":0,"tickers_resolved":0,"drafts_created":0,"duplicates":0,"low_importance_skipped":0,"stale_skipped":0,"malformed_skipped":0,"provider_failures":[],"errors":[],"auto_published":0,"auto_publish_enabled":False}
+    total={"priority_tickers":len(priority),"events_discovered":0,"tickers_resolved":0,"drafts_created":0,"duplicates":0,"low_importance_skipped":0,"stale_skipped":0,"malformed_skipped":0,"no_ticker_skipped":0,"provider_failures":[],"errors":[],"auto_published":0,"auto_publish_enabled":False}
     try:
         actor=_admin_actor(conn)
         try:
             items, stats=discover_market_news(fetchers=discovery_fetchers)
             total["events_discovered"] += stats["events_discovered"]; total["tickers_resolved"] += stats["tickers_resolved"]
-            total["low_importance_skipped"] += stats["low_importance"]; total["stale_skipped"] += stats["stale"]; total["malformed_skipped"] += stats["malformed"]
+            total["low_importance_skipped"] += stats["low_importance"]; total["stale_skipped"] += stats["stale"]; total["malformed_skipped"] += stats["malformed"]; total["no_ticker_skipped"] += stats.get("no_ticker",0)
             total["provider_failures"].extend(stats["provider_failures"])
             _merge(total, ingest(items, actor, conn), "discovery:")
         except Exception as exc: total["provider_failures"].append("discovery:"+type(exc).__name__)

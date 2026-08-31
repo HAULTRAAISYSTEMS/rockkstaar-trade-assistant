@@ -5,7 +5,12 @@
 # not touch services that a blueprint does not declare, so adopting this file
 # will not rewrite the web service's settings.
 #
-# Cadence: every 15 minutes. Render evaluates cron schedules in UTC.
+# Cadence: every 5 minutes, matching the existing dashboard-created cron job
+# "rockkstaar-trade-assistant" (service crn-da7qbhk9v7es73fbgsc0). Render
+# evaluates cron schedules in UTC.
+#
+# NOTE: that cron job already exists and is running. This file documents its
+# configuration; it is not required for the job to work.
 #
 # What one run does (stage one):
 #   1. discover_market_news()  -> market-wide catalyst sweep
@@ -21,7 +26,7 @@ services:
     name: live-research-runner
     runtime: python
     plan: starter
-    schedule: "*/15 * * * *"
+    schedule: "*/5 * * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python live_research_runner.py
     envVars:
@@ -45,7 +50,7 @@ services:
         value: "NVDA,META,AAPL,MSFT,AMZN,GOOGL,TSLA,AMD"
 
       # Discovery window. Items older than this are skipped as stale.
-      # 6h suits a 15-minute cadence; the app default of 24h re-scans a lot of
+      # 6h suits a 5-minute cadence; the app default of 24h re-scans a lot of
       # already-seen material (deduplicated, but wasteful).
       - key: LIVE_RESEARCH_RECENCY_HOURS
         value: "6"

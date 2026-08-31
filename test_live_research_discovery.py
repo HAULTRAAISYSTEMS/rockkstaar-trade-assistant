@@ -33,3 +33,50 @@ def test_old_news_is_filtered():
     row=event(published_at="2020-01-01T00:00:00+00:00")
     items,stats=d.discover_market_news(fetchers=(("test",lambda:[row]),))
     assert items==[] and stats["stale"]==1
+
+# --- Ticker resolution across provider shapes -------------------------------
+# Regression: Finnhub's market-news feed supplies the symbol in `related`, not
+# `ticker`. resolve_ticker() read only ticker/symbol, so every Finnhub general
+# news story fell through to the regex, failed, and was counted as "malformed"
+# (~102 discarded per production run).
+
+def finnhub_row(**kw):
+    row={"id":1,"headline":"Nvidia reports quarterly results and earnings beat estimates",
+         "summary":"Nvidia reported quarterly revenue and EPS above estimates.",
+         "url":"https://news.example/nvda","published_at":now(),"source":"Reuters","related":"NVDA"}
+    row.update(kw); return row
+
+def test_finnhub_related_field_resolves_ticker():
+    assert d.resolve_ticker(finnhub_row())=="NVDA"
+
+def test_finnhub_story_is_ingested_not_discarded():
+    items,stats=d.discover_market_news(fetchers=(("finnhub-market",lambda:[finnhub_row()]),))
+    assert [x.ticker for x in items]==["NVDA"]
+    assert stats["malformed"]==0 and stats["no_ticker"]==0
+
+def test_related_takes_first_well_formed_symbol():
+    assert d.resolve_ticker(finnhub_row(related="NVDA,AMD,INTC"))=="NVDA"
+    assert d.resolve_ticker(finnhub_row(related=",,AMD"))=="AMD"
+
+def test_related_as_list_is_supported():
+    assert d.resolve_ticker(finnhub_row(related=["AMD","NVDA"]))=="AMD"
+    assert d.resolve_ticker(finnhub_row(related=None,tickers=["MSFT"]))=="MSFT"
+
+def test_explicit_ticker_field_still_wins():
+    assert d.resolve_ticker(finnhub_row(ticker="AAPL",related="NVDA"))=="AAPL"
+
+def test_garbage_related_value_does_not_resolve():
+    for junk in ("", "   ", "not-a-symbol-at-all", "TOOLONGSYMBOL", 12345):
+        assert d.resolve_ticker(finnhub_row(related=junk, headline="Company reports results",
+                                            summary="No symbol anywhere."))==""
+
+def test_missing_ticker_is_reported_separately_from_malformed():
+    """A story with every field but no resolvable symbol is 'no_ticker', not 'malformed'."""
+    row=finnhub_row(related="",headline="Chip demand rises across the sector",
+                    summary="Sector commentary with no company attached.")
+    items,stats=d.discover_market_news(fetchers=(("finnhub-market",lambda:[row]),))
+    assert items==[] and stats["no_ticker"]==1 and stats["malformed"]==0
+
+def test_genuinely_unparseable_row_is_still_malformed():
+    items,stats=d.discover_market_news(fetchers=(("test",lambda:[{"related":"NVDA"}]),))
+    assert items==[] and stats["malformed"]==1 and stats["no_ticker"]==0
