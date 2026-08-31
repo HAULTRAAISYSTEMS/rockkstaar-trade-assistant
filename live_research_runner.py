@@ -10,6 +10,7 @@ from database import get_db
 from news_fetcher import fetch_headlines
 from live_research_ingestion import finnhub_articles_to_items, ingest
 from live_research_discovery import discover_market_news
+import live_research_autopublish as autopublish
 
 DEFAULT_TICKERS=("NVDA","META","AAPL","MSFT","AMZN","GOOGL","TSLA","AMD")
 
@@ -28,7 +29,7 @@ def _merge(total, summary, prefix=""):
 def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
     priority=[str(t).strip().upper() for t in (tickers or _tickers_from_env()) if str(t).strip()]
     conn=get_db()
-    total={"priority_tickers":len(priority),"events_discovered":0,"tickers_resolved":0,"drafts_created":0,"duplicates":0,"low_importance_skipped":0,"stale_skipped":0,"malformed_skipped":0,"provider_failures":[],"errors":[]}
+    total={"priority_tickers":len(priority),"events_discovered":0,"tickers_resolved":0,"drafts_created":0,"duplicates":0,"low_importance_skipped":0,"stale_skipped":0,"malformed_skipped":0,"provider_failures":[],"errors":[],"auto_published":0,"auto_publish_enabled":False}
     try:
         actor=_admin_actor(conn)
         try:
@@ -43,6 +44,11 @@ def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
                 news=fetch_headlines(ticker); items=finnhub_articles_to_items(ticker,_company_name(ticker),news.articles)
                 _merge(total, ingest(items,actor,conn),ticker+":")
             except Exception as exc: total["provider_failures"].append(ticker+":"+type(exc).__name__)
+        try:
+            gate=autopublish.auto_publish(conn, actor)
+            total["auto_publish_enabled"]=gate["enabled"]; total["auto_published"]=gate["published"]
+            total["errors"].extend("autopublish:"+e for e in gate["errors"])
+        except Exception as exc: total["errors"].append("autopublish:"+type(exc).__name__)
         conn.commit(); return total
     finally: conn.close()
 
