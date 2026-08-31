@@ -6524,7 +6524,7 @@ def api_intel_news_refresh():
 def api_intel_earnings_radar():
     """Refresh the compact earnings slate synchronously and return its HTML."""
     try:
-        earnings = _intel.fetch_earnings_radar(limit=12)
+        earnings = _intel.fetch_earnings_radar(limit=6)
         message = (
             ""
             if earnings else
@@ -6800,6 +6800,11 @@ def intel():
             + list(earn.get("this_week") or [])
             + list(earn.get("coming_up") or [])
         )
+        try:
+            earnings = _intel.select_radar_rows(earnings, 6)
+        except Exception as _e:
+            logger.debug("intel: radar selection unavailable: %s", _e)
+            earnings = earnings[:6]
         earnings_status = {
             "refreshing": bool(summ.get("refreshing") and not earnings),
             "message": (
@@ -6861,7 +6866,7 @@ def intel():
     return render_template(
         "intel.html",
         mkt=mkt, liq=liq, money_flow=money_flow[:8],
-        events=events[:8], news=enriched_news[:24], earnings=earnings[:12],
+        events=events[:8], news=enriched_news[:24], earnings=earnings,
         trending=trending, briefing=briefing, story=story, intel_status=intel_status,
         earnings_status=earnings_status,
         command_alerts=command_alerts, unseen_alerts=unseen_alerts,

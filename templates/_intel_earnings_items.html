@@ -1,5 +1,5 @@
-{% for e in earnings[:6] %}
-<div class="intel-list-row"><a class="intel-symbol" href="{{ url_for('stock_detail', ticker=e.ticker) }}">{{ e.ticker }}</a><span class="intel-mini">{{ e.company_name or 'Earnings' }}</span><span class="intel-mini" style="text-align:right">{{ e.date_label or e.date }}<br>{{ e.time_label or 'TBD' }}</span></div>
+{% for e in earnings %}
+<div class="intel-list-row"><a class="intel-symbol" href="{{ url_for('stock_detail', ticker=e.ticker) }}">{{ e.ticker }}</a>{% if e.on_watchlist %}<span class="intel-watch-dot" title="On your watchlist">&#9679;</span>{% endif %}<span class="intel-mini">{{ e.company_name or 'Earnings' }}</span><span class="intel-mini" style="text-align:right">{{ e.date_label or e.date }}<br>{{ e.time_label or 'TBD' }}</span></div>
 {% else %}
 <p class="intel-mini">{{ earnings_message or 'No upcoming large-, mid-cap, or watchlist reports were returned.' }}</p>
 {% endfor %}

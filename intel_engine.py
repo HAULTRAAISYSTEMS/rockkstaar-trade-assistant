@@ -1546,13 +1546,40 @@ def fetch_earnings_radar(limit: int = 12) -> list[dict]:
                 rows.append(row)
                 seen.add(row.get("ticker"))
 
-    rows.sort(key=lambda row: (
+    return select_radar_rows(rows, limit)
+
+
+def _radar_sort_key(row: dict):
+    return (
         int(row.get("days_away", 99)),
         not bool(row.get("on_watchlist")),
         -(row.get("market_cap") or 0),
         row.get("ticker") or "",
-    ))
-    return rows[:max(1, int(limit))]
+    )
+
+
+def select_radar_rows(rows: list[dict], limit: int = 12) -> list[dict]:
+    """Order the radar so watchlist names can never be crowded off the card.
+
+    Sorting by date alone meant a held ticker reporting on Friday lost its slot
+    to every mega-cap reporting Monday. In earnings season that pushed the
+    user's own positions off the card entirely - the one week the card matters
+    most. Watchlist rows are now reserved first, then the market-wide slate
+    fills whatever room is left, and the whole card is re-sorted by date so it
+    still reads as a calendar.
+    """
+    limit = max(1, int(limit))
+    ordered = sorted(rows or [], key=_radar_sort_key)
+    watch = [row for row in ordered if row.get("on_watchlist")]
+    market = [row for row in ordered if not row.get("on_watchlist")]
+    # Watchlist names never take more than half the card, so a large watchlist
+    # cannot hide the market-wide prints that move the tape.
+    reserved = watch[:max(1, limit // 2)] if market else watch[:limit]
+    selected = reserved + market[:limit - len(reserved)]
+    if len(selected) < limit:
+        remaining = [row for row in ordered if row not in selected]
+        selected += remaining[:limit - len(selected)]
+    return sorted(selected, key=_radar_sort_key)
 
 
 def _splits_from_nasdaq(today: date) -> list[dict]:
