@@ -37,6 +37,7 @@ def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
             total["events_discovered"] += stats["events_discovered"]; total["tickers_resolved"] += stats["tickers_resolved"]
             total["low_importance_skipped"] += stats["low_importance"]; total["stale_skipped"] += stats["stale"]; total["malformed_skipped"] += stats["malformed"]; total["no_ticker_skipped"] += stats.get("no_ticker",0)
             total["provider_failures"].extend(stats["provider_failures"])
+            if stats.get("samples"): total["samples"]=stats["samples"]
             _merge(total, ingest(items, actor, conn), "discovery:")
         except Exception as exc: total["provider_failures"].append("discovery:"+type(exc).__name__)
         for ticker in priority:

@@ -150,6 +150,11 @@ def discover_market_news(fetchers=None, recency_hours=None):
     hours = int(recency_hours or os.environ.get("LIVE_RESEARCH_RECENCY_HOURS", "24"))
     fetchers = fetchers or (("finnhub-market", fetch_finnhub_market_news), ("polygon-market", fetch_polygon_market_news))
     stats={"events_discovered":0,"tickers_resolved":0,"low_importance":0,"stale":0,"malformed":0,"no_ticker":0,"provider_failures":[]}; items=[]
+    # Diagnostic sample: a handful of headlines per rejection reason, so a run
+    # log shows WHAT is being dropped rather than only how many. Bounded and
+    # truncated; set LIVE_RESEARCH_SAMPLE=0 to switch off.
+    sample_size = int(os.environ.get("LIVE_RESEARCH_SAMPLE", "8") or 0)
+    samples = {}
     for name, fetcher in fetchers:
         try: rows=fetcher() or []
         except Exception as exc:
@@ -158,6 +163,12 @@ def discover_market_news(fetchers=None, recency_hours=None):
         for row in rows:
             item, reason=normalize_news(row, name, hours)
             if item: items.append(item); stats["tickers_resolved"] += 1
-            else: stats[reason] += 1
+            else:
+                stats[reason] += 1
+                if sample_size and len(samples.setdefault(reason, [])) < sample_size:
+                    headline = str(row.get("headline") or row.get("title") or "")[:110] if isinstance(row, dict) else ""
+                    related = str(row.get("related") or "")[:40] if isinstance(row, dict) else ""
+                    samples[reason].append(f"{headline} | related={related!r}")
     preferred=prefer_primary(items); stats["source_duplicates"] = len(items)-len(preferred)
+    if samples: stats["samples"] = samples
     return preferred, stats
