@@ -172,3 +172,48 @@ def test_sync_survives_a_failing_write():
     added = cca.sync_alerts(
         [{"ticker": "NVDA", "alert_type": "insider", "message": "m", "severity": "high"}], [], boom)
     assert added == 0, "a storage failure must not raise into the page render"
+
+
+# --- reporting slot ---------------------------------------------------------
+# Nasdaq supplies the slot as time_label (BMO/AMC/TBD). The builder previously
+# looked only at session/time, so the slot never reached the alert.
+
+@pytest.mark.parametrize("raw,expected", [
+    ("BMO", "pre-market"), ("bmo", "pre-market"), ("Before market open", "pre-market"),
+    ("Pre-Market", "pre-market"),
+    ("AMC", "after close"), ("amc", "after close"), ("After market close", "after close"),
+    ("Post-market", "after close"),
+    ("TBD", "time TBD"), ("unknown", "time TBD"),
+])
+def test_session_label_variants(raw, expected):
+    assert cca.session_label({"time_label": raw}) == expected
+
+
+def test_session_label_absent_is_empty():
+    assert cca.session_label({}) == ""
+    assert cca.session_label({"time_label": ""}) == ""
+
+
+def test_earnings_alert_states_premarket_or_after_close():
+    rows = [
+        {"ticker": "AAPL", "date": "2026-09-01", "days_away": 1, "time_label": "BMO"},
+        {"ticker": "NVDA", "date": "2026-08-31", "days_away": 0, "time_label": "AMC"},
+    ]
+    alerts = cca.build_earnings_alerts(rows, today=date(2026, 8, 31))
+    assert "reports tomorrow, pre-market" in alerts[0]["message"]
+    assert "reports today, after close" in alerts[1]["message"]
+
+
+def test_earnings_alert_without_a_slot_omits_it():
+    alerts = cca.build_earnings_alerts(
+        [{"ticker": "AMD", "date": "2026-09-05", "days_away": 5}], today=date(2026, 8, 31))
+    assert alerts[0]["message"] == "Earnings: AMD reports in 5 days (2026-09-05)"
+
+
+def test_slot_changes_the_message_so_dedupe_sees_them_apart():
+    """A corrected slot must produce a new alert, not be swallowed as a dupe."""
+    bmo = cca.build_earnings_alerts([{"ticker": "AAPL", "date": "2026-09-01", "days_away": 1,
+                                      "time_label": "BMO"}], today=date(2026, 8, 31))
+    amc = cca.build_earnings_alerts([{"ticker": "AAPL", "date": "2026-09-01", "days_away": 1,
+                                      "time_label": "AMC"}], today=date(2026, 8, 31))
+    assert bmo[0]["message"] != amc[0]["message"]

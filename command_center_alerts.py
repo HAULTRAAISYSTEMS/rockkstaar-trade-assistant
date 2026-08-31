@@ -21,6 +21,30 @@ EARNINGS_ALERT_TYPE = "earnings"
 _STRONG_SCORE = 60
 _DEFAULT_EARNINGS_WINDOW = 7
 
+# Nasdaq reports the slot as BMO / AMC / TBD. Spell it out: which side of the
+# session a report lands on decides whether an overnight hold is exposed to it.
+_SESSION_LABELS = {
+    "BMO": "pre-market",
+    "AMC": "after close",
+    "TBD": "time TBD",
+}
+
+
+def session_label(row: dict) -> str:
+    """Human-readable reporting slot, or '' when the source gave nothing."""
+    raw = str(row.get("time_label") or row.get("session") or row.get("time") or "").strip()
+    if not raw:
+        return ""
+    key = raw.upper()
+    if key in _SESSION_LABELS:
+        return _SESSION_LABELS[key]
+    lowered = raw.lower()
+    if any(token in lowered for token in ("before", "bmo", "pre")):
+        return _SESSION_LABELS["BMO"]
+    if any(token in lowered for token in ("after", "amc", "post")):
+        return _SESSION_LABELS["AMC"]
+    return _SESSION_LABELS["TBD"] if lowered in {"tbd", "unknown", "--"} else raw
+
 
 def _as_date(value):
     text = str(value or "")[:10]
@@ -107,12 +131,14 @@ def build_earnings_alerts(rows: list[dict] | None, within_days: int = _DEFAULT_E
             phrase = "reports tomorrow"
         else:
             phrase = f"reports in {days} days"
+        session = session_label(row)
+        # "AAPL reports tomorrow pre-market" reads better than appending the
+        # slot after the date, and it is the part that changes a hold decision.
         detail = f"Earnings: {ticker} {phrase}"
+        if session:
+            detail += f", {session}"
         if when:
             detail += f" ({when.isoformat()})"
-        session = str(row.get("session") or row.get("time") or "").strip()
-        if session:
-            detail += f" - {session}"
         alerts.append({
             "ticker": ticker,
             "alert_type": EARNINGS_ALERT_TYPE,
