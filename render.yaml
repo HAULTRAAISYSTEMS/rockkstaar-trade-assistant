@@ -1,0 +1,61 @@
+# Render Blueprint — Live Research scheduler
+#
+# This file intentionally declares ONLY the cron job. The existing
+# "rockkstaar-trade-assistant" web service stays dashboard-managed; Render does
+# not touch services that a blueprint does not declare, so adopting this file
+# will not rewrite the web service's settings.
+#
+# Cadence: every 15 minutes. Render evaluates cron schedules in UTC.
+#
+# What one run does (stage one):
+#   1. discover_market_news()  -> market-wide catalyst sweep
+#   2. fetch_headlines(ticker) -> per-ticker sweep over LIVE_RESEARCH_TICKERS
+#   3. ingest(...)             -> creates rows with status 'incoming'
+#   4. autopublish.auto_publish() -> NO-OP while LIVE_RESEARCH_AUTO_PUBLISH is unset
+#
+# Nothing reaches the public feed until an admin approves it in the review queue.
+# See docs/live_research_scheduling.md for the stage-two auto-publish switch.
+
+services:
+  - type: cron
+    name: live-research-runner
+    runtime: python
+    plan: starter
+    schedule: "*/15 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python live_research_runner.py
+    envVars:
+      # Must point at the SAME database as the web service. In the Render
+      # dashboard use "Add from database" and select the existing instance
+      # rather than pasting a literal connection string.
+      - key: DATABASE_URL
+        sync: false
+
+      # Provider credentials — same values as the web service.
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: NEWS_API_KEY
+        sync: false
+      - key: POLYGON_API_KEY
+        sync: false
+
+      # Priority tickers swept every run. Comma-separated.
+      # Defaults to NVDA,META,AAPL,MSFT,AMZN,GOOGL,TSLA,AMD when unset.
+      - key: LIVE_RESEARCH_TICKERS
+        value: "NVDA,META,AAPL,MSFT,AMZN,GOOGL,TSLA,AMD"
+
+      # Discovery window. Items older than this are skipped as stale.
+      # 6h suits a 15-minute cadence; the app default of 24h re-scans a lot of
+      # already-seen material (deduplicated, but wasteful).
+      - key: LIVE_RESEARCH_RECENCY_HOURS
+        value: "6"
+
+      # ---- Stage two: auto-publish gate. Leave OFF until the queue is proven. ----
+      # Set to "1" to let primary-source SEC filings skip review. Wire-service
+      # headlines are never eligible regardless of this value.
+      - key: LIVE_RESEARCH_AUTO_PUBLISH
+        value: "0"
+      - key: LIVE_RESEARCH_AUTO_PUBLISH_MAX_AGE_HOURS
+        value: "6"
+      - key: LIVE_RESEARCH_AUTO_PUBLISH_LIMIT
+        value: "10"
