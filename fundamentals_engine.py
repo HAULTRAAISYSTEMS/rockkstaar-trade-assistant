@@ -656,10 +656,18 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
     # ── 6. Cash flow ─────────────────────────────────────────────────────────
     ocf = _annual(["NetCashProvidedByUsedInOperatingActivities",
                    "CashFlowsFromUsedInOperatingActivities"])   # IFRS
+    # The IFRS element is PurchaseOf..., not AcquisitionOf.... Getting that one
+    # name wrong cost a 20-F filer three rows: with no capex there is no free
+    # cash flow, and with no free cash flow the FCF-positive test, the earnings
+    # quality test and the capex-to-revenue test all read N/A while operating
+    # cash flow sat right there on the same card.
     cap = _annual(["PaymentsToAcquirePropertyPlantAndEquipment",
+                   "PaymentsToAcquireProductiveAssets",
                    "CapitalExpendituresIncurredButNotYetPaid",
                    # IFRS equivalents
+                   "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
                    "PurchaseOfPropertyPlantAndEquipment",
+                   "PurchaseOfIntangibleAssetsClassifiedAsInvestingActivities",
                    "AcquisitionOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"])
     fin = _annual(["NetCashProvidedByUsedInFinancingActivities",
                    "CashFlowsFromUsedInFinancingActivities"])   # IFRS
@@ -2556,7 +2564,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-02.9"
+SCORECARD_VERSION = "2026-09-02.10"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
