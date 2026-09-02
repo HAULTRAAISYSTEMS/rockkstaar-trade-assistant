@@ -1697,17 +1697,38 @@ def sync_ticker_auto_bucket(ticker: str, user_id: int, target_name: str) -> bool
     return True
 
 
-def set_ticker_watchlists(ticker: str, watchlist_ids: list):
-    """Replace all watchlist memberships for a ticker with the provided list."""
+def set_ticker_watchlists(ticker: str, watchlist_ids: list, user_id: int):
+    """Replace this user's watchlist memberships for a ticker.
+
+    Both statements are constrained to watchlists the caller owns. Without
+    that, the DELETE was global by ticker — posting an empty form to one
+    stock's page removed it from every other account's watchlists — and any
+    integer in the form inserted the ticker into a stranger's list.
+    """
     conn = get_db()
     t = ticker.upper().strip()
-    conn.execute("DELETE FROM watchlist_stocks WHERE ticker = ?", (t,))
+    conn.execute(
+        "DELETE FROM watchlist_stocks WHERE ticker = ? AND watchlist_id IN "
+        "(SELECT id FROM watchlists WHERE user_id = ?)",
+        (t, int(user_id)),
+    )
     now_iso = datetime.now().isoformat()
+    owned = {
+        int(r["id"]) for r in conn.execute(
+            "SELECT id FROM watchlists WHERE user_id = ?", (int(user_id),)
+        ).fetchall()
+    }
     for wl_id in watchlist_ids:
+        try:
+            wl = int(wl_id)
+        except (TypeError, ValueError):
+            continue
+        if wl not in owned:
+            continue
         conn.execute(
             "INSERT OR IGNORE INTO watchlist_stocks "
             "(watchlist_id, ticker, added_date) VALUES (?, ?, ?)",
-            (int(wl_id), t, now_iso)
+            (wl, t, now_iso)
         )
     conn.commit()
     conn.close()
@@ -3189,7 +3210,12 @@ def save_score_narration(ticker: str, date: str, score_key: str, data: dict) -> 
 # ---------------------------------------------------------------------------
 
 def get_journal_summary(week_key: str):
-    """Return cached journal summary dict for a week_key (e.g. '2026-W27'), or None."""
+    """Return cached journal summary dict for a cache key, or None.
+
+    The caller scopes the key to a user. This cache used to be keyed on the
+    week alone, so the first user to generate a summary had it served to
+    everyone else who asked for that week.
+    """
     import json as _json
     conn = get_db()
     row = conn.execute(

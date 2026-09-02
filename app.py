@@ -114,8 +114,16 @@ csrf = CSRFProtect(app)
 # ---------------------------------------------------------------------------
 
 def current_user_id() -> int:
-    """Return the logged-in user_id from session (default 1 for backward compat)."""
-    return session.get("user_id", 1)
+    """The signed-in user's id.
+
+    This defaulted to 1 — the bootstrap admin — for any caller without a
+    session. Almost everything is behind _require_login, so it rarely
+    mattered, but a handler reached without one operated as the admin rather
+    than failing, and the public-path allowlist is the only thing standing
+    between that default and an account-takeover primitive. Anonymous callers
+    now get 0, which owns nothing.
+    """
+    return int(session.get("user_id") or 0)
 
 
 def current_user() -> dict | None:
@@ -152,9 +160,14 @@ def require_admin(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get("is_admin"):
-            return jsonify({"ok": False, "error": "admin required"}), 403 \
-                if request.path.startswith("/api/") \
-                else (render_template("login.html", error="Admin access required.", next=""), 403)
+            # The conditional used to sit inside the tuple, so a non-API path
+            # returned (Response, (html, 403)) — Flask read the inner tuple as
+            # headers and raised, turning every 403 into a 500 and never
+            # rendering the login page it was meant to show.
+            if request.path.startswith("/api/"):
+                return jsonify({"ok": False, "error": "admin required"}), 403
+            return render_template(
+                "login.html", error="Admin access required.", next=""), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -305,6 +318,7 @@ def _add_security_headers(response):
 # /debug/status — production health check (no secret values exposed)
 # ---------------------------------------------------------------------------
 @app.route("/debug/status")
+@require_admin
 def debug_status():
     """
     Read-only diagnostics endpoint.
@@ -4710,7 +4724,7 @@ def stock_set_watchlists(ticker):
     t = ticker.upper()
     raw_ids    = request.form.getlist("watchlist_ids")
     wl_ids     = [int(i) for i in raw_ids if i.isdigit()]
-    set_ticker_watchlists(t, wl_ids)
+    set_ticker_watchlists(t, wl_ids, current_user_id())
     flash("Watchlist assignment updated.", "success")
     return redirect(url_for("stock_detail", ticker=t))
 
@@ -5357,7 +5371,11 @@ def api_journal_summary():
         iso_cal  = now_et.isocalendar()
         week_key = f"{iso_cal[0]}-W{iso_cal[1]:02d}"
 
-    cached = get_journal_summary(week_key)
+    # Per user: the cache is keyed on the week alone in the table, so the key
+    # itself has to carry the identity or one account's summary is served to
+    # every other account asking for the same week.
+    cache_key = f"u{current_user_id()}:{week_key}"
+    cached = get_journal_summary(cache_key)
     if cached:
         return jsonify({"ok": True, "summary": cached, "week_key": week_key, "cached": True})
 
@@ -5370,9 +5388,13 @@ def api_journal_summary():
         sunday  = monday + _dt.timedelta(days=6)
         from database import get_db as _get_db
         conn = _get_db()
+        # Scoped to the caller. Every other journal query in the app filters on
+        # user_id; this one did not, so the summary it returned described every
+        # account's trades for the week — tickers, prices, P&L and notes.
         rows = conn.execute(
-            "SELECT * FROM journal WHERE trade_date >= ? AND trade_date <= ? ORDER BY trade_date ASC",
-            (str(monday), str(sunday)),
+            "SELECT * FROM journal WHERE user_id = ? AND trade_date >= ? "
+            "AND trade_date <= ? ORDER BY trade_date ASC",
+            (current_user_id(), str(monday), str(sunday)),
         ).fetchall()
         conn.close()
         trades = [dict(r) for r in rows]
@@ -5427,7 +5449,7 @@ def api_journal_summary():
         result.setdefault("rule_adherence",  "")
         result.setdefault("top_mistake",     "")
         result.setdefault("one_improvement", "")
-        save_journal_summary(week_key, result)
+        save_journal_summary(cache_key, result)
         return jsonify({"ok": True, "summary": result, "week_key": week_key, "cached": False})
     except Exception as exc:
         logger.error("api_journal_summary Nebius call failed: %s", exc, exc_info=True)
@@ -6569,6 +6591,7 @@ def api_ndx_watch():
 
 
 @app.route("/api/intel/debug")
+@require_admin
 def api_intel_debug():
     """Debug endpoint — shows data source health for the intel engine. No API keys exposed."""
     try:
