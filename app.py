@@ -7315,7 +7315,30 @@ def admin_user_password(uid):
 
 @app.route("/research")
 def research_page():
-    return render_template("research.html")
+    """Research Desk: 40-point fundamental scorecard plus the study log.
+
+    The scorecard is rendered from fundamentals_engine, the same engine behind
+    /fundamentals, so both pages always report the same score. Presentation is
+    all that differs between them.
+    """
+    ticker = (request.args.get("ticker") or "").strip().upper()[:12]
+    if ticker and not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
+        ticker = ""
+    data, error, stock = None, None, {}
+    if ticker:
+        try:
+            from fundamentals_engine import get_fundamentals
+            data = get_fundamentals(ticker, force_refresh=request.args.get("refresh") == "1")
+            if data.get("error"):
+                error = data["error"]
+        except Exception as exc:
+            logger.exception("research_page fundamentals failed for %s", ticker)
+            error = str(exc)
+        try:
+            stock = get_stock_data(ticker) or {}
+        except Exception as exc:
+            logger.debug("research_page price lookup failed: %s", exc)
+    return render_template("research.html", ticker=ticker, data=data, error=error, stock=stock)
 
 
 @app.route("/fundamentals")

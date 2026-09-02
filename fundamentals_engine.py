@@ -577,7 +577,36 @@ RED_FLAG_DEFS = {
     "debt_growing_faster_than_revenue": "Total debt is growing faster than revenue year-over-year — leverage is increasing relative to the business.",
     "goodwill_impairment": "Goodwill impairment detected in the most recent year — a prior acquisition has declined in value.",
     "current_ratio_below_1": "Current ratio is below 1.0 — current liabilities exceed liquid assets, a near-term liquidity risk.",
+    "goodwill_over_30pct": "Goodwill + intangibles exceed 30% of total assets — a write-down could vaporize earnings.",
 }
+
+# Flags that drop the verdict one full band. current_ratio_below_1 is shown as a
+# warning but deliberately excluded: liquidity is already scored in Section 1,
+# and downgrading on it as well would count the same weakness twice.
+DOWNGRADE_TRIGGERS = {
+    "income_positive_fcf_negative",
+    "debt_growing_faster_than_revenue",
+    "goodwill_impairment",
+    "goodwill_over_30pct",
+}
+
+# Worst-first, so a downgrade can step exactly one band.
+VERDICT_BANDS = ["Avoid", "Caution", "Good", "Great Company"]
+
+
+def apply_downgrade(verdict: str, red_flags: list) -> tuple[str, list]:
+    """Drop the verdict one band if any auto-downgrade trigger fired.
+
+    The rubric has always said a trigger drops the verdict a full band, but the
+    verdict was computed from the score alone and the flags were only ever
+    displayed. A company could report a goodwill impairment and FCF below net
+    income and still read "Great Company".
+    """
+    fired = [flag for flag in (red_flags or []) if flag.get("key") in DOWNGRADE_TRIGGERS]
+    if not fired or verdict not in VERDICT_BANDS:
+        return verdict, fired
+    index = VERDICT_BANDS.index(verdict)
+    return VERDICT_BANDS[max(0, index - 1)], fired
 
 
 # ─── Data fetching ────────────────────────────────────────────────────────────
@@ -1508,6 +1537,23 @@ def score_fundamentals(raw: dict) -> dict:
             "key": "current_ratio_below_1",
             "label": RED_FLAG_DEFS["current_ratio_below_1"],
         })
+    # Goodwill + intangibles above 30% of assets. Scored in Section 1 and also a
+    # downgrade trigger: the rubric treats the write-down risk as structural.
+    if gw_ratio is not None and gw_ratio > 0.30:
+        red_flags.append({
+            "key": "goodwill_over_30pct",
+            "label": RED_FLAG_DEFS["goodwill_over_30pct"],
+        })
+    # Goodwill impairment. This flag was defined and referenced by the narrative
+    # builder but never appended anywhere, so it could not fire. A material
+    # year-over-year fall in goodwill is the available proxy; divestitures and FX
+    # can also cause it, so the threshold is deliberately conservative.
+    gw_now, gw_prior = v(raw.get("goodwill", []), 0), v(raw.get("goodwill", []), 1)
+    if gw_now is not None and gw_prior is not None and gw_prior > 0 and gw_now < gw_prior * 0.90:
+        red_flags.append({
+            "key": "goodwill_impairment",
+            "label": RED_FLAG_DEFS["goodwill_impairment"],
+        })
 
     # ── Verdict ───────────────────────────────────────────────────────────────
     score_pct = (total_earned / total_possible * 40) if total_possible > 0 else 0
@@ -1516,6 +1562,10 @@ def score_fundamentals(raw: dict) -> dict:
     elif score_pct >= 26: verdict = "Good"
     elif score_pct >= 18: verdict = "Caution"
     else:                 verdict = "Avoid"
+
+    base_verdict = verdict
+    verdict, fired_triggers = apply_downgrade(verdict, red_flags)
+    downgraded = verdict != base_verdict
 
     verdict_class = {
         "Great Company": "verdict-great",
@@ -1624,6 +1674,7 @@ def score_fundamentals(raw: dict) -> dict:
                 "year_offset": i,
                 "label": f"Year -{i}" if i > 0 else "Latest",
                 "revenue":  _fmt(rev),
+                "revenue_num": rev,   # raw value so the UI can draw a bar chart
                 "net_income": _fmt(ni),
                 "fcf": _fmt(fcf),
                 "ocf": _fmt(ocf),
@@ -1659,6 +1710,9 @@ def score_fundamentals(raw: dict) -> dict:
         "total_possible":   total_possible,
         "normalized_score": round(score_pct),
         "verdict":          verdict,
+        "base_verdict":     base_verdict,
+        "downgraded":       downgraded,
+        "downgrade_triggers": fired_triggers,
         "verdict_class":    verdict_class,
         "verdict_reason":   verdict_reason,
         "red_flags":        red_flags,
