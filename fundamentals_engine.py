@@ -1518,11 +1518,33 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
 
 # ─── Scoring ──────────────────────────────────────────────────────────────────
 
-def _score_check(condition: bool | None, points: int) -> tuple[int, int, bool | None]:
-    """Returns (earned, available, passed) — if condition is None, skip (data missing)."""
+def _score_check(condition, points: int) -> tuple[int, int, object]:
+    """Score one row. Returns (earned, available, passed).
+
+    ``condition`` is True, False, None for missing — or a fraction between 0
+    and 1 for partial credit. Some criteria are not honestly binary: a company
+    two years into a three-year revenue streak has not met the test, but it is
+    not in the same position as one whose revenue is falling, and scoring both
+    zero throws away the distinction. Free cash flow at 0.78x of net income is
+    the same shape of answer.
+
+    Partial always earns at least one point and always less than full, so it
+    can never be mistaken for either neighbour.
+    """
     if condition is None:
-        return 0, 0, None  # data missing — don't count against score
-    return (points if condition else 0), points, bool(condition)
+        return 0, 0, None
+    if condition is True or condition is False:
+        return (points if condition else 0), points, bool(condition)
+    try:
+        fraction = float(condition)
+    except (TypeError, ValueError):
+        return 0, 0, None
+    if fraction >= 1:
+        return points, points, True
+    if fraction <= 0:
+        return 0, points, False
+    earned = min(max(1, round(points * fraction)), max(points - 1, 0))
+    return earned, points, "partial"
 
 
 def score_fundamentals(raw: dict) -> dict:
@@ -1679,7 +1701,9 @@ def score_fundamentals(raw: dict) -> dict:
         else:
             break
     if len(valid_rev) >= 4:
-        rev_growth = rev_streak >= 3
+        # Two years into a three-year streak is not a pass, and it is not the
+        # same answer as revenue going backwards either.
+        rev_growth = True if rev_streak >= 3 else (0.5 if rev_streak == 2 else False)
     elif len(valid_rev) >= 2:
         # Not enough history to prove three years; judge what is available rather
         # than passing or failing on absent data.
@@ -1773,7 +1797,24 @@ def score_fundamentals(raw: dict) -> dict:
     ocf0 = v(raw.get("operating_cash_flow", []))
 
     fcf_positive = (fcf0 > 0 if fcf0 is not None else None)
-    fcf_ge_ni    = ((fcf0 >= ni0) if fcf0 is not None and ni0 is not None else None)
+    # Earnings quality is a spectrum, not a gate. Cash at or above reported
+    # profit is the pass. Cash at three-quarters of it is a company absorbing
+    # working capital, which is worth flagging and worth distinguishing from
+    # one whose earnings are barely backed by cash at all.
+    def _earnings_quality(fcf, ni):
+        if fcf is None or ni is None or ni <= 0:
+            return None
+        ratio = fcf / ni
+        if ratio >= 1.0:
+            return True
+        # A fixed single point of the three, not a sliding scale. Scaling with
+        # the ratio would hand 0.78x two of three marks, which reads as a near
+        # pass; it is the one line on a strong card that actually fails, and
+        # the score should say so while still separating it from a company
+        # whose earnings are barely backed by cash at all.
+        return (1 / 3) if ratio >= 0.75 else False
+
+    fcf_ge_ni    = _earnings_quality(fcf0, ni0)
 
     ocf_vals = [v(raw.get("operating_cash_flow", []), i) for i in range(min(4, len(raw.get("operating_cash_flow", []))))]
     ocf_growing = _trending_up(ocf_vals) if len([x for x in ocf_vals if x is not None]) >= 2 else None
@@ -1844,6 +1885,7 @@ def score_fundamentals(raw: dict) -> dict:
         nonlocal total_earned, total_possible, total_metrics_count, scored_metrics_count
         sec_earned = 0
         sec_possible = 0
+        sec_partial = 0
         rows = []
         for m in metrics:
             earned, avail, passed = _score_check(m["condition"], m["points"])
@@ -1852,6 +1894,8 @@ def score_fundamentals(raw: dict) -> dict:
             total_metrics_count += 1
             if passed is not None:
                 scored_metrics_count += 1
+            if passed == "partial":
+                sec_partial += 1
             rows.append({
                 "key":     m["key"],
                 "label":   m["label"],
@@ -1870,6 +1914,7 @@ def score_fundamentals(raw: dict) -> dict:
             "name":     name,
             "earned":   sec_earned,
             "possible": sec_possible,
+            "partials": sec_partial,
             "rows":     rows,
         })
 
@@ -2285,6 +2330,24 @@ def score_fundamentals(raw: dict) -> dict:
     verdict, fired_triggers = apply_downgrade(verdict, red_flags)
     downgraded = verdict != base_verdict
 
+    # Show that the triggers ran, not only that one caught something. A card
+    # that stays silent when everything is clean leaves the reader unable to
+    # tell a company that passed every integrity check from one where the
+    # check never happened — and those are very different reasons to see no
+    # warning.
+    _fired = {f["key"] for f in red_flags}
+    downgrade_check = {
+        "any_fired": bool(fired_triggers),
+        "verdict_before": base_verdict,
+        "verdict_after": verdict,
+        "checks": [
+            {"key": key,
+             "label": RED_FLAG_DEFS.get(key, key),
+             "fired": key in _fired}
+            for key in sorted(DOWNGRADE_TRIGGERS)
+        ],
+    }
+
     verdict_class = {
         "Great Company": "verdict-great",
         "Good":          "verdict-good",
@@ -2455,6 +2518,7 @@ def score_fundamentals(raw: dict) -> dict:
         "history":          history,
         "charts":           charts,
         "filing_signals":   filing_signals,
+        "downgrade_check":  downgrade_check,
         "valuation":        raw.get("_valuation") or {"available": False, "rows": []},
         # A split makes every per-share figure on the page incomparable with
         # anything a reader has seen from an older source. Say so at the top
@@ -2491,7 +2555,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-02.7"
+SCORECARD_VERSION = "2026-09-02.8"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:

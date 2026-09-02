@@ -153,8 +153,16 @@ def _streak_row(revs):
 
 
 def test_broken_streak_no_longer_passes():
-    """KLA: FY24 declined, so the run is two years, not three."""
-    assert _streak_row([13579., 12160., 9812., 10496., 9212.])["passed"] is False
+    """KLA: FY24 declined, so the run is two years, not three.
+
+    Two of three now earns partial credit rather than nothing — it is still
+    not a pass, which is what this test has always been guarding, but it is a
+    different answer from revenue going backwards, and the score says so.
+    """
+    row = _streak_row([13579., 12160., 9812., 10496., 9212.])
+    assert row["passed"] is not True
+    assert row["passed"] == "partial"
+    assert row["earned"] == 1 and row["avail"] == 2
 
 
 def test_three_consecutive_years_passes():

@@ -628,3 +628,49 @@
   .signal { grid-template-columns: 1fr auto }
   .signal-date { grid-column: 1 / -1 }
 }
+
+/* ── Partial credit ──────────────────────────────────────────────────────── */
+.metric-status.ms-partial {
+  color: var(--warn-500);
+  border-color: color-mix(in srgb, var(--warn-500) 45%, transparent);
+  background: color-mix(in srgb, var(--warn-500) 12%, transparent);
+}
+.metric-pts.metric-pts-partial { color: var(--warn-500) }
+
+/* ── Auto-downgrade check ────────────────────────────────────────────────
+   Shown whether or not anything fires. Silence when everything is clean is
+   indistinguishable from silence because the check never ran. */
+.dg-card {
+  margin: 14px 0 4px;
+  padding: 13px 16px;
+  border-radius: var(--elite-radius-lg);
+  border: 1px solid var(--elite-border);
+  background: var(--fund-panel, var(--elite-panel));
+}
+
+.dg-card.dg-fired { border-color: color-mix(in srgb, var(--neg-500) 45%, transparent) }
+.dg-card.dg-clean { border-color: color-mix(in srgb, var(--pos-500) 32%, transparent) }
+
+.dg-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 9px }
+
+.dg-title {
+  font: 700 10px/1.3 var(--font-ui, system-ui);
+  letter-spacing: .15em; text-transform: uppercase;
+}
+.dg-clean .dg-title { color: var(--pos-500) }
+.dg-fired .dg-title { color: var(--neg-500) }
+
+.dg-sub { font: 500 11.5px/1.5 var(--font-ui, system-ui); color: var(--elite-muted) }
+
+.dg-list {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 5px 16px;
+}
+
+.dg-item { display: grid; grid-template-columns: 14px 1fr; gap: 7px; align-items: start }
+.dg-mark { font: 700 11px/1.55 var(--font-ui, system-ui); color: var(--pos-500) }
+.dg-item.is-fired .dg-mark { color: var(--neg-500) }
+.dg-text { font: 500 11.5px/1.55 var(--font-ui, system-ui); color: var(--elite-muted) }
+.dg-item.is-fired .dg-text { color: var(--elite-copy) }
+
+@media (max-width: 640px) { .dg-list { grid-template-columns: 1fr } }

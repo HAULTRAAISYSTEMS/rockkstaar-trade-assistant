@@ -142,6 +142,29 @@
       </div>
       {% endif %}
 
+      <!-- Auto-downgrade check -->
+      {% if data.downgrade_check and data.downgrade_check.checks %}
+      <div class="dg-card{{ ' dg-fired' if data.downgrade_check.any_fired else ' dg-clean' }}">
+        <div class="dg-head">
+          {% if data.downgrade_check.any_fired %}
+          <span class="dg-title">Auto-downgrade — {{ data.downgrade_check.verdict_before }} lowered to {{ data.downgrade_check.verdict_after }}</span>
+          <span class="dg-sub">A trigger fired. The band drops regardless of the points scored.</span>
+          {% else %}
+          <span class="dg-title">Auto-downgrade check — none fire</span>
+          <span class="dg-sub">Every trigger ran and none caught anything. The {{ data.total_earned }} stands, no band adjustment.</span>
+          {% endif %}
+        </div>
+        <ul class="dg-list">
+          {% for c in data.downgrade_check.checks %}
+          <li class="dg-item{{ ' is-fired' if c.fired }}">
+            <span class="dg-mark">{{ '✗' if c.fired else '✓' }}</span>
+            <span class="dg-text">{{ c.label }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
       <!-- Section cards -->
       <div class="sections-grid">
         {% set icons = {"Balance Sheet": "⚖", "Income Statement": "📈", "Cash Flow": "💵", "Quality Metrics": "⭐"} %}
@@ -171,6 +194,8 @@
                     {% else %}
                     <div class="metric-status ms-missing" title="Data unavailable">—</div>
                     {% endif %}
+                  {% elif row.passed == 'partial' %}
+                  <div class="metric-status ms-partial" title="Partial credit">◐</div>
                   {% elif row.passed %}
                   <div class="metric-status ms-pass" title="Pass">✓</div>
                   {% else %}
@@ -183,7 +208,7 @@
                 <div class="metric-data">
                   <span class="metric-value">{{ row.value }}</span>
                   {% if row.points > 0 %}
-                  <span class="metric-pts {% if row.earned > 0 %}metric-pts-earned{% endif %}">
+                  <span class="metric-pts {% if row.passed == 'partial' %}metric-pts-partial{% elif row.earned > 0 %}metric-pts-earned{% endif %}">
                     {% if row.passed is none %}?{% else %}{{ row.earned }}{% endif %}/{{ row.points }}
                   </span>
                   {% endif %}
