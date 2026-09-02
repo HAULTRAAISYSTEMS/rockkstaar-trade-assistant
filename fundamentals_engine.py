@@ -213,8 +213,8 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
         return None
 
     # ── 3. Helper: extract up to n annual values, most recent first ──────────
-    def _annual(concepts, n: int = 5):
-        """Try each concept name in order; search both us-gaap and ifrs-full."""
+    def _annual_dated(concepts, n: int = 5):
+        """Try each concept in order; return (period_end, value) newest-first."""
         if isinstance(concepts, str):
             concepts = [concepts]
         namespaces = []
@@ -254,34 +254,68 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                             _period_days(incumbent), str(incumbent.get("accn", ""))):
                         by_end[end] = v
                 sorted_vals = sorted(by_end.values(), key=lambda x: x["end"], reverse=True)
-                return [v["val"] for v in sorted_vals[:n]]
+                return [(v["end"], v["val"]) for v in sorted_vals[:n]]
         return []
+
+    def _annual(concepts, n: int = 5):
+        return [val for _end, val in _annual_dated(concepts, n)]
+
+    def _align(dated_series: dict, timeline: list) -> dict:
+        """Line every series up on the same fiscal year ends.
+
+        _annual returned bare values and the scoring engine paired them by
+        index, assuming every concept covered the same years. Concepts differ:
+        a filer can tag Revenues for five years and OperatingIncomeLoss for
+        four, or start a concept later. Index pairing then divided one year's
+        operating income into another year's revenue, which is how operating
+        margin came out as 11.1% against a real 38%. Missing years become None
+        rather than silently shifting the rest of the series.
+        """
+        aligned = {}
+        for field, pairs in dated_series.items():
+            by_end = {end: val for end, val in pairs}
+            aligned[field] = [by_end.get(end) for end in timeline]
+        return aligned
 
     # ── 4. Income statement ──────────────────────────────────────────────────
     # US-GAAP names first, then IFRS equivalents (for 20-F filers like TSM)
-    rev = _annual(["RevenueFromContractWithCustomerExcludingAssessedTax",
+    rev_d = _annual_dated(["RevenueFromContractWithCustomerExcludingAssessedTax",
                    "RevenueFromContractWithCustomerIncludingAssessedTax",
                    "Revenues", "SalesRevenueNet", "SalesRevenueGoodsNet",
                    # IFRS equivalents
                    "Revenue", "RevenueFromContractWithCustomer",
                    "SalesRevenueFromContractsWithCustomers"])
-    gp  = _annual(["GrossProfit",
+    gp_d  = _annual_dated(["GrossProfit",
                    "GrossProfitLoss"])       # IFRS
-    oi  = _annual(["OperatingIncomeLoss",
+    oi_d  = _annual_dated(["OperatingIncomeLoss",
                    "ProfitLossFromOperatingActivities",  # IFRS
                    "OperatingProfit"])
-    ni  = _annual(["NetIncomeLoss", "NetIncome",
+    ni_d  = _annual_dated(["NetIncomeLoss", "NetIncome",
                    "NetIncomeLossAvailableToCommonStockholdersBasic",
                    # IFRS equivalents
                    "ProfitLoss",
                    "ProfitLossAttributableToOwnersOfParent",
                    "ComprehensiveIncome"])
-    eps = _annual(["EarningsPerShareDiluted", "EarningsPerShareBasic",
+    eps_d = _annual_dated(["EarningsPerShareDiluted", "EarningsPerShareBasic",
                    "DilutedEarningsLossPerShare",        # IFRS
                    "BasicEarningsLossPerShare"])
 
-    result.update(revenue=rev, gross_profit=gp, operating_income=oi,
-                  net_income=ni, diluted_eps=eps)
+    # Align the income statement on one set of fiscal year ends before the
+    # scoring engine pairs them by index.
+    _dated = {
+        "revenue": rev_d, "gross_profit": gp_d, "operating_income": oi_d,
+        "net_income": ni_d, "diluted_eps": eps_d,
+    }
+    _timeline = sorted(
+        {end for pairs in _dated.values() for end, _val in pairs}, reverse=True)[:5]
+    _aligned = _align(_dated, _timeline)
+    result.update(
+        revenue=_aligned["revenue"], gross_profit=_aligned["gross_profit"],
+        operating_income=_aligned["operating_income"],
+        net_income=_aligned["net_income"], diluted_eps=_aligned["diluted_eps"],
+        fiscal_period_ends=_timeline,
+    )
+    rev, ni = _aligned["revenue"], _aligned["net_income"]
     if not rev and not ni:
         missing.append("income_statement")
 

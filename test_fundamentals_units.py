@@ -378,3 +378,59 @@ def test_eps_growth_survives_the_split():
 def test_degenerate_series_are_safe(series):
     kept, trimmed = fe.split_adjusted_series(series, KLA_NI)
     assert trimmed is False and kept == list(series or [])
+
+
+# --- fiscal-year alignment ---------------------------------------------------
+# _annual returned bare values and the scoring engine paired them by index,
+# assuming every XBRL concept covered the same years. Concepts differ. When the
+# newest period of one series is not the newest of another, every pair after it
+# is off by a year and the margins are silently wrong.
+
+def _align(dated, timeline):
+    return {f: [dict(pairs).get(end) for end in timeline] for f, pairs in dated.items()}
+
+
+def _timeline(dated):
+    return sorted({end for pairs in dated.values() for end, _ in pairs}, reverse=True)[:5]
+
+
+def test_series_with_an_extra_recent_period_no_longer_shifts():
+    """The dangerous case: one concept has a period the other lacks."""
+    rev = [("2026-06-30", 13579), ("2025-06-30", 12160), ("2024-06-30", 9812)]
+    oi = [("2026-09-30", 1400), ("2026-06-30", 5661), ("2025-06-30", 5016)]
+    dated = {"rev": rev, "oi": oi}
+    aligned = _align(dated, _timeline(dated))
+    pairs = [(r, o) for r, o in zip(aligned["rev"], aligned["oi"]) if r and o]
+    assert all(abs(o / r) > 0.3 for r, o in pairs), "aligned margins must be plausible"
+    # Index pairing would have divided 1400 into 13579 -> 10.3%, the shape of the bug.
+    assert abs(oi[0][1] / rev[0][1]) < 0.15
+
+
+def test_missing_year_becomes_none_not_a_shift():
+    rev = [("2026-06-30", 13579), ("2025-06-30", 12160), ("2024-06-30", 9812)]
+    oi = [("2026-06-30", 5661), ("2024-06-30", 3636)]      # 2025 absent
+    dated = {"rev": rev, "oi": oi}
+    aligned = _align(dated, _timeline(dated))
+    assert aligned["oi"] == [5661, None, 3636], "a gap must stay a gap"
+
+
+def test_timeline_is_the_union_newest_first():
+    dated = {"a": [("2026-06-30", 1), ("2024-06-30", 2)], "b": [("2025-06-30", 3)]}
+    assert _timeline(dated) == ["2026-06-30", "2025-06-30", "2024-06-30"]
+
+
+def test_timeline_capped_at_five_years():
+    dated = {"a": [(f"202{i}-06-30", i) for i in range(9, 1, -1)]}
+    assert len(_timeline(dated)) == 5
+
+
+def test_aligned_margins_match_the_filing():
+    """KLA FY22-FY26 operating margins, from the 10-K."""
+    rev = [("2026-06-30", 13579), ("2025-06-30", 12160), ("2024-06-30", 9812),
+           ("2023-06-30", 10496), ("2022-06-30", 9212)]
+    oi = [("2026-06-30", 5661), ("2025-06-30", 5016), ("2024-06-30", 3636),
+          ("2023-06-30", 3995), ("2022-06-30", 3652)]
+    dated = {"rev": rev, "oi": oi}
+    aligned = _align(dated, _timeline(dated))
+    margins = [round(o / r * 100, 1) for r, o in zip(aligned["rev"], aligned["oi"])]
+    assert margins == [41.7, 41.2, 37.1, 38.1, 39.6]
