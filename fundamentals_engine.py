@@ -386,7 +386,8 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
     # ── 7. Derived ratios ────────────────────────────────────────────────────
     ni0_d = ni[0] if ni else None
     eq0_d = eq[0] if eq else None
-    oi0_d = oi[0] if oi else None
+    _oi_aligned = _aligned["operating_income"]
+    oi0_d = _oi_aligned[0] if _oi_aligned else None
     td0_d = td[0] if td else 0
 
     if ni0_d is not None and eq0_d and eq0_d != 0:
