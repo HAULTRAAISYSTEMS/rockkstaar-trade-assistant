@@ -23,7 +23,7 @@ SHARES = "WeightedAverageNumberOfDilutedSharesOutstanding"
 
 def duration(values):
     return {"units": {"USD": [
-        {"start": s, "end": e, "val": v, "form": "10-K", "accn": f"d-{i}"}
+        {"start": s, "end": e, "val": v, "form": "10-K", "accn": "0000319201-26-000001"}
         for i, (s, e, v) in enumerate(zip(STARTS, YEARS, values))]}}
 
 
@@ -158,7 +158,7 @@ def test_a_flat_count_still_passes():
 
 def test_the_working_line_names_both_endpoints():
     working = row(scored(), "share_dilution")["working"]
-    assert "148M" in working and "132M" in working and "-10.8%" in working
+    assert "148.0M" in working and "132.0M" in working and "-10.8%" in working
 
 
 def test_a_missing_share_count_is_unscored_not_failed():

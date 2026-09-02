@@ -262,8 +262,17 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
         return gap > 2200          # five reported years plus slack
 
     # ── 3. Helper: extract up to n annual values, most recent first ──────────
-    def _annual_dated(concepts, n: int = 5, merge: bool = False):
+    def _annual_dated(concepts, n: int = 5, merge: bool = False,
+                      same_filing: bool = False):
         """Try each concept in order; return (period_end, value) newest-first.
+
+        ``same_filing`` keeps only the facts carried by the single newest
+        filing that reports this concept. One report's comparative columns are
+        always stated on one basis, which is what a series spanning a stock
+        split needs: a filer restates prior years post-split inside the new
+        report but the older reports keep their pre-split figures, so pulling
+        each year from whichever report first mentioned it splices two bases
+        together and turns a 10-for-1 split into 770% dilution.
 
         ``merge`` keeps going past the first concept that has facts and lets
         later concepts fill period ends the earlier ones did not cover. Filers
@@ -320,6 +329,12 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                         by_end[end] = v
                 if _is_stale(max(by_end)):
                     continue          # retired concept; try the next name
+                if same_filing:
+                    newest_accn = max(str(f.get("accn", "")) for f in by_end.values())
+                    by_end = {end: f for end, f in by_end.items()
+                              if str(f.get("accn", "")) == newest_accn}
+                    if not by_end:
+                        continue
                 if not merge:
                     sorted_vals = sorted(by_end.values(),
                                          key=lambda x: x["end"], reverse=True)
@@ -571,6 +586,7 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
     re  = _annual(["RetainedEarningsAccumulatedDeficit",
                    "RetainedEarnings"])         # IFRS
 
+    result["balance_period_ends"] = _cash_ends
     result.update(total_assets=ta, total_liabilities=tl, total_equity=eq,
                   current_assets=ca, current_liabilities=cl, cash=csh,
                   cash_and_st_investments=liquid, short_term_debt=std,
@@ -628,15 +644,22 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
     # statement's fiscal year ends. A company can grow revenue and earnings
     # while issuing so much stock that per-share value falls, which no other
     # row on the card would catch.
-    _shares_map = dict(_annual_dated(["WeightedAverageNumberOfDilutedSharesOutstanding",
-                   "WeightedAverageNumberOfDilutedSharesOutstandingAdjustment",
-                   "WeightedAverageNumberOfSharesOutstandingDiluted",
-                   # IFRS
-                   "WeightedAverageShares"], merge=True))
+    _share_concepts = ["WeightedAverageNumberOfDilutedSharesOutstanding",
+                       "WeightedAverageNumberOfSharesOutstandingDiluted",
+                       "WeightedAverageNumberOfDilutedSharesOutstandingAdjustment"]
+    # One filing's comparative columns first, since they are guaranteed to sit
+    # on one split basis. A 10-K carries about three years, so fall back to the
+    # merged series when that leaves too little to measure a trend; the split
+    # guard in the scoring layer catches a spliced basis either way.
+    _shares_map = dict(_annual_dated(_share_concepts, same_filing=True))
+    if len(_shares_map) < 3:
+        _merged_shares = dict(_annual_dated(_share_concepts, merge=True))
+        if len(_merged_shares) > len(_shares_map):
+            _shares_map = _merged_shares
     if not _shares_map:
         _shares_map = dict(_annual_dated(["CommonStockSharesOutstanding",
                        "CommonStockSharesIssued",
-                       "EntityCommonStockSharesOutstanding"], merge=True))
+                       "EntityCommonStockSharesOutstanding"], same_filing=True))
     result["diluted_shares"] = [_shares_map.get(end) for end in _timeline]
 
     # Return on invested capital for every year, not just the latest. One good
@@ -1534,6 +1557,8 @@ def score_fundamentals(raw: dict) -> dict:
     if liquid0 is None:
         liquid0 = cash0
     near_term_debt = None
+    _cover_period = None
+    _balance_ends = raw.get("balance_period_ends") or []
     for _i in range(max(len(_std_list), len(_liquid_list), len(_cash_list))):
         _debt_i = v(_std_list, _i)
         _liq_i = v(_liquid_list, _i)
@@ -1542,6 +1567,8 @@ def score_fundamentals(raw: dict) -> dict:
         if _debt_i is not None and _liq_i is not None:
             near_term_debt, liquid0 = _debt_i, _liq_i
             cash0 = v(_cash_list, _i)
+            if _i < len(_balance_ends):
+                _cover_period = _balance_ends[_i]
             break
     liquid_label = ("cash and short-term investments"
                     if liquid0 is not None and cash0 is not None and liquid0 != cash0
@@ -1719,7 +1746,14 @@ def score_fundamentals(raw: dict) -> dict:
     # ── Share count: is your slice growing or shrinking? ─────────────────────
     # Replaces a row that awarded two points for an insider-ownership field
     # merely being present, from a provider this host cannot reach.
-    share_vals = [(i, x) for i, x in enumerate(raw.get("diluted_shares") or [])
+    # A split multiplies the share count and leaves earnings alone, which is
+    # the same signature the EPS series already guards against, in the opposite
+    # direction. KLA's count read 152M -> 1,320M and the row reported 770%
+    # dilution. If a break survives the same-filing rule, drop everything on
+    # the far side of it rather than compare two bases.
+    share_series, shares_split_trimmed = split_adjusted_series(
+        raw.get("diluted_shares") or [], raw.get("net_income") or [])
+    share_vals = [(i, x) for i, x in enumerate(share_series)
                   if x is not None and x > 0]
     share_change = None
     if len(share_vals) >= 2:
@@ -1855,7 +1889,11 @@ def score_fundamentals(raw: dict) -> dict:
             f"{_ratio_or_blank(total_debt, total_equity)}" if total_debt is not None and total_equity else ""),
         "cash_covers_debt": (
             f"{_usd(liquid0)} {liquid_label} against {_usd(near_term_debt)} "
-            f"of {cash_cover_basis}" if liquid0 is not None else ""),
+            f"of {cash_cover_basis}"
+            # Both sides are read at the newest period end carrying both, which
+            # is not always the newest year on the card. Say which one.
+            + (f", at {_cover_period}" if _cover_period else "")
+            if liquid0 is not None else ""),
         "retained_earnings_growth": _usd_series(raw.get("retained_earnings", [])),
         "goodwill_ratio": (
             f"({_usd(gw0)} goodwill + {_usd(ia0)} intangibles) / {_usd(ta0)} total assets = "
@@ -1907,9 +1945,14 @@ def score_fundamentals(raw: dict) -> dict:
                  if gm_erosion is not None else "")))
             if roic_years else ""),
         "share_dilution": (
-            f"{share_vals[-1][1]/1e6:,.0f}M shares -> {share_vals[0][1]/1e6:,.0f}M = "
+            f"{share_vals[-1][1]/1e6:,.1f}M shares -> {share_vals[0][1]/1e6:,.1f}M = "
             f"{share_change*100:+.1f}% over {len(share_vals)} reported years"
-            if share_change is not None else ""),
+            + (" (earlier years dropped - the reported series crosses a stock split)"
+               if shares_split_trimmed else "")
+            if share_change is not None else
+            ("Share counts either side of a stock split are not comparable and "
+             "only one year survives the break"
+             if shares_split_trimmed else "")),
     }
 
     add_section("Balance Sheet", [
@@ -2344,7 +2387,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-02.3"
+SCORECARD_VERSION = "2026-09-02.4"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:

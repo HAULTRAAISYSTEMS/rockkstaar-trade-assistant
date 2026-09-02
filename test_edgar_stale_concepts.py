@@ -32,13 +32,13 @@ STALE_STARTS = ["2014-07-01", "2013-07-01", "2012-07-01", "2011-07-01", "2010-07
 def duration(values, ends=None, starts=None):
     ends, starts = ends or MODERN, starts or MODERN_STARTS
     return {"units": {"USD": [
-        {"start": s, "end": e, "val": v, "form": "10-K", "accn": f"d{i}"}
+        {"start": s, "end": e, "val": v, "form": "10-K", "accn": "0000319201-26-000001"}
         for i, (s, e, v) in enumerate(zip(starts, ends, values))]}}
 
 
 def instants(values, ends=None, unit="USD"):
     return {"units": {unit: [
-        {"end": e, "val": v, "form": "10-K", "accn": f"i{i}"}
+        {"end": e, "val": v, "form": "10-K", "accn": "0000319201-26-000001"}
         for i, (e, v) in enumerate(zip(ends or MODERN, values))]}}
 
 
@@ -46,7 +46,7 @@ def shares(values, ends=None, starts=None):
     """Share counts live in a "shares" unit bucket, not USD."""
     ends, starts = ends or MODERN, starts or MODERN_STARTS
     return {"units": {"shares": [
-        {"start": s, "end": e, "val": v, "form": "10-K", "accn": f"s{i}"}
+        {"start": s, "end": e, "val": v, "form": "10-K", "accn": "0000319201-26-000001"}
         for i, (s, e, v) in enumerate(zip(starts, ends, values))]}}
 
 
@@ -191,3 +191,48 @@ def test_every_quality_row_resolves():
                    if sec["name"] == "Quality Metrics")
     assert quality["possible"] == 10
     assert all(r["value"] != "N/A" for r in quality["rows"])
+
+
+# ── Stock splits ─────────────────────────────────────────────────────────────
+
+SPLIT_SHARES = "WeightedAverageNumberOfDilutedSharesOutstanding"
+
+
+def test_a_split_is_not_reported_as_dilution():
+    """The live card read "152M shares -> 1,320M = +770.7%" and failed the row.
+    A ten-for-one split multiplies the count and leaves earnings alone; the
+    filer restates prior years inside the new report but older reports keep
+    their pre-split figures, so splicing the two bases invents 770% issuance.
+    """
+    facts = kla_shaped(**{SPLIT_SHARES: shares(
+        [1320.0e6, 133.75e6, 136.19e6, 140.24e6, 151.56e6])})
+    with patch.object(fe, "_edgar_cik", return_value=("0000319201", "KLA")), \
+         patch.object(fe._req_module, "get", return_value=_Resp(facts)):
+        c = fe.score_fundamentals(fe.fetch_fundamentals_edgar("KLAC"))
+    dilution = row(c, "share_dilution")
+    assert dilution["passed"] is not False, dilution["working"]
+    assert "+770" not in (dilution["value"] or "")
+
+
+def test_a_split_that_leaves_one_year_is_unscored_and_says_why():
+    facts = kla_shaped(**{SPLIT_SHARES: shares(
+        [1320.0e6, 133.75e6, 136.19e6, 140.24e6, 151.56e6])})
+    with patch.object(fe, "_edgar_cik", return_value=("0000319201", "KLA")), \
+         patch.object(fe._req_module, "get", return_value=_Resp(facts)):
+        c = fe.score_fundamentals(fe.fetch_fundamentals_edgar("KLAC"))
+    dilution = row(c, "share_dilution")
+    assert dilution["passed"] is None
+    assert "split" in dilution["working"]
+
+
+def test_a_real_decline_is_still_reported_after_the_guard():
+    """The guard must not swallow ordinary buybacks."""
+    dilution = row(card(), "share_dilution")
+    assert dilution["passed"] is True and dilution["value"] == "-12.9%"
+
+
+def test_the_coverage_row_names_the_period_it_read():
+    """It falls back to an earlier year when the newest lacks a current-debt
+    tag, so the balance sheet date has to be on the page."""
+    working = row(card(), "cash_covers_debt")["working"]
+    assert "2025-06-30" in working
