@@ -47,6 +47,59 @@ _CIK_OVERRIDES: dict[str, tuple[str, str]] = {
 }
 
 
+# A per-share series spanning a stock split mixes two scales. KLA's reported
+# diluted EPS reads 21.92 -> 24.15 -> 2.03 -> 3.04 -> 3.66 across a 10-for-1
+# split in June 2026: the first two are pre-split. Comparing newest against
+# oldest then reports a collapse in earnings that never happened.
+SPLIT_BREAK_RATIO = 4.0
+# A split leaves net income untouched. If earnings moved with the per-share
+# figure, the break is an operating event and must not be hidden.
+SPLIT_NI_STABLE_BAND = (0.5, 2.0)
+
+
+def detect_split_break(series, net_income=None) -> int | None:
+    """Index (newest-first) where a per-share series crosses a split boundary.
+
+    A 4x or larger year-over-year move in per-share terms is the candidate. It
+    is only treated as a split when net income for the same pair stayed roughly
+    flat: a split multiplies the share count and leaves earnings alone, while an
+    earnings collapse moves both together. Getting this wrong in the permissive
+    direction would silently drop a genuine collapse out of the series, so the
+    default when earnings also moved is to leave the data alone.
+    """
+    values = [(i, x) for i, x in enumerate(series or [])
+              if isinstance(x, (int, float)) and x not in (None, 0)]
+    incomes = list(net_income or [])
+    for (newer_index, newer), (older_index, older) in zip(values, values[1:]):
+        if (newer > 0) != (older > 0):
+            continue                       # a swing through zero is real
+        ratio = abs(older) / abs(newer)
+        if not (ratio >= SPLIT_BREAK_RATIO or ratio <= 1 / SPLIT_BREAK_RATIO):
+            continue
+        newer_ni = incomes[newer_index] if newer_index < len(incomes) else None
+        older_ni = incomes[older_index] if older_index < len(incomes) else None
+        if newer_ni and older_ni and newer_ni > 0 and older_ni > 0:
+            ni_ratio = older_ni / newer_ni
+            low, high = SPLIT_NI_STABLE_BAND
+            if not (low <= ni_ratio <= high):
+                continue                   # earnings moved too - not a split
+        return older_index
+    return None
+
+
+def split_adjusted_series(series, net_income=None) -> tuple[list, bool]:
+    """Trim a per-share series at a split boundary. Returns (series, trimmed).
+
+    Pre-split values are dropped rather than rescaled: inferring the ratio from
+    a year whose earnings also changed would be a guess, and a wrong scale
+    factor is worse than a shorter series.
+    """
+    break_index = detect_split_break(series, net_income)
+    if break_index is None:
+        return list(series or []), False
+    return list(series or [])[:break_index], True
+
+
 def _period_days(fact: dict) -> int:
     """Length of an XBRL fact's period in days. Instantaneous facts return 0."""
     start, end = fact.get("start"), fact.get("end")
@@ -1308,7 +1361,8 @@ def score_fundamentals(raw: dict) -> dict:
     nm_ok = (nm_positive and _margin_ok(nm_series, abs_threshold=0.05)) if nm_positive else (False if nm_positive is False else None)
 
     # EPS growing — use TTM EPS growth if available
-    eps_vals = raw.get("diluted_eps", [])
+    eps_vals, eps_split_trimmed = split_adjusted_series(
+        raw.get("diluted_eps", []), raw.get("net_income", []))
     eps_growing = None
     eps_source = "annual"
     ttm_eps_growth = ttm.get("eps_growth_ttm_yoy")  # percentage, e.g. 15.4
@@ -1497,9 +1551,11 @@ def score_fundamentals(raw: dict) -> dict:
         "gross_margin": _pct_series(gm_series),
         "operating_margin": _pct_series(om_series),
         "net_margin": _pct_series(nm_series),
-        "eps_growth": (" -> ".join(
-            f"${x:,.2f}" for x in reversed([e for e in (raw.get("diluted_eps") or [])[:5] if e is not None]))
-            if len([e for e in (raw.get("diluted_eps") or [])[:5] if e is not None]) >= 2 else ""),
+        "eps_growth": (
+            (" -> ".join(f"${x:,.2f}" for x in reversed([e for e in eps_vals[:5] if e is not None]))
+             + (" (earlier years dropped - the reported series crosses a stock split)"
+                if eps_split_trimmed else ""))
+            if len([e for e in eps_vals[:5] if e is not None]) >= 2 else ""),
         "fcf_positive": (
             f"{_usd(fcf0)} free cash flow on {_usd(rev0)} revenue = {fcf0/rev0*100:.1f}% FCF margin"
             if fcf0 is not None and rev0 else ""),

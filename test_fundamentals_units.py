@@ -316,3 +316,65 @@ def test_alternatives_are_tried_without_boolean_coercion():
 
 def test_absent_metric_returns_none():
     assert _match(_inc(), "Deferred Revenue") is None
+
+
+# --- stock splits in per-share series ---------------------------------------
+# KLA's reported diluted EPS reads 21.92 -> 24.15 -> 2.03 -> 3.04 -> 3.66 across
+# a 10-for-1 split in June 2026. Comparing newest against oldest reports a
+# collapse in earnings that never happened. A split changes EPS but leaves net
+# income alone, which is what separates it from a real earnings event.
+
+KLA_EPS = [3.66, 3.04, 2.03, 24.15, 21.92]
+KLA_NI = [4831e6, 4062e6, 2762e6, 3387e6, 3322e6]
+CRASH_EPS = [0.40, 3.04, 2.55, 2.30, 2.10]
+CRASH_NI = [640e6, 4062e6, 3800e6, 3600e6, 3400e6]
+
+
+def test_split_is_detected_and_pre_split_years_dropped():
+    kept, trimmed = fe.split_adjusted_series(KLA_EPS, KLA_NI)
+    assert trimmed is True
+    assert kept == [3.66, 3.04, 2.03], "pre-split values must not sit beside post-split ones"
+
+
+def test_earnings_collapse_is_not_mistaken_for_a_split():
+    """The dangerous direction: hiding a real collapse behind a split label."""
+    kept, trimmed = fe.split_adjusted_series(CRASH_EPS, CRASH_NI)
+    assert trimmed is False
+    assert kept == CRASH_EPS, "a genuine collapse must stay visible in the series"
+
+
+def test_ordinary_growth_is_untouched():
+    kept, trimmed = fe.split_adjusted_series([3.66, 3.04, 2.55, 2.30, 2.10], KLA_NI)
+    assert trimmed is False and len(kept) == 5
+
+
+def test_swing_through_zero_is_an_earnings_event():
+    _, trimmed = fe.split_adjusted_series([1.20, -0.30, 2.55, 2.30], KLA_NI)
+    assert trimmed is False
+
+
+def test_reverse_split_detected():
+    """Older values much smaller than newer ones."""
+    ni = [3000e6, 3100e6, 3050e6, 2900e6]
+    assert fe.detect_split_break([40.0, 3.5, 3.0, 2.8], ni) == 1
+
+
+def test_split_detected_without_net_income_data():
+    """No earnings to cross-check against still trims on the per-share break."""
+    _, trimmed = fe.split_adjusted_series([3.66, 3.04, 2.03, 24.15], [])
+    assert trimmed is True
+
+
+def test_eps_growth_survives_the_split():
+    """Newest vs oldest was 3.66 against 21.92 - a false decline."""
+    raw = _raw(diluted_eps=KLA_EPS, net_income=KLA_NI, revenue=[13579e6])
+    raw.pop("_ttm_metrics", None)
+    row = _row(fe.score_fundamentals(raw), "eps_growth")
+    assert "21.92" not in row["working"], "pre-split values must not be shown as a trend"
+    assert "stock split" in row["working"]
+
+
+@pytest.mark.parametrize("series", [None, [], [3.66], [None, None]])
+def test_degenerate_series_are_safe(series):
+    kept, trimmed = fe.split_adjusted_series(series, KLA_NI)
+    assert trimmed is False and kept == list(series or [])
