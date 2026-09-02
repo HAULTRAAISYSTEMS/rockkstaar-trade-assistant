@@ -613,8 +613,18 @@
 
 @media (max-width: 640px) {
   .chart-card { padding: 12px 12px 8px }
-  .val-grid { grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); gap: 8px }
-  .val-val { font-size: 17px }
+  /* Cost sits above the score, so on a phone this strip is what stands
+     between the reader and the verdict. Tightened rather than truncated —
+     every figure still shows, in less vertical space. */
+  .val-grid { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 7px }
+  .val-cell { padding: 8px 10px; gap: 2px }
+  .val-val { font-size: 16px; line-height: 1.1 }
+  .val-lbl { font-size: 9px; letter-spacing: .12em }
+  .val-note { font-size: 10px; line-height: 1.32 }
+  .val-head { margin-bottom: 8px }
+  .val-card { padding: 12px 13px }
+  .split-notice { padding: 11px 13px }
+  .split-notice p { font-size: 12px; line-height: 1.5 }
   .signal { grid-template-columns: 1fr auto }
   .signal-date { grid-column: 1 / -1 }
 }

@@ -103,3 +103,30 @@ def test_market_cap_is_scaled_from_finnhubs_millions():
 def test_the_fallback_pe_field_is_used_when_the_primary_is_absent():
     c = cells(build_valuation({"peExclExtraTTM": 21.5}, {"c": 50.0}))
     assert c["pe"]["value"] == "21.5x"
+
+
+# ── Where it sits on the page ────────────────────────────────────────────────
+
+def _template():
+    return open("templates/fundamentals.html").read()
+
+
+def test_price_is_read_before_the_score():
+    """A reader who meets the score first anchors on "Great Company" and then
+    reads the price as confirmation. Cost comes first."""
+    tpl = _template()
+    assert tpl.index("<!-- Valuation -->") < tpl.index("<!-- Verdict bar -->")
+
+
+def test_the_split_warning_comes_before_everything():
+    tpl = _template()
+    assert tpl.index("<!-- Split notice -->") < tpl.index("<!-- Valuation -->")
+    assert tpl.index("<!-- Split notice -->") < tpl.index("<!-- Verdict bar -->")
+
+
+def test_the_copy_points_forward_at_the_score_not_back():
+    """It used to say "the scorecard says..." while sitting above it."""
+    tpl = _template()
+    block = tpl[tpl.index("<!-- Valuation -->"):tpl.index("<!-- Verdict bar -->")]
+    assert "score below" in block
+    assert "The scorecard says whether" not in block
