@@ -1206,11 +1206,22 @@ def score_fundamentals(raw: dict) -> dict:
     # Revenue growth 3+ consecutive years
     rev_vals = [v(raw.get("revenue", []), i) for i in range(min(4, len(raw.get("revenue", []))))]
     valid_rev = [(i, x) for i, x in enumerate(rev_vals) if x is not None]
+    # The label and the rubric both say "3+ consecutive years", but this checked
+    # only two year-over-year increases. KLA passed on a two-year run while FY24
+    # revenue had fallen 6.5%, which breaks the streak the label claims.
     rev_growth = None
-    if len(valid_rev) >= 3:
-        rev_growth = all(valid_rev[i][1] > valid_rev[i+1][1] for i in range(min(2, len(valid_rev)-1)))
+    rev_streak = 0
+    for i in range(len(valid_rev) - 1):
+        if valid_rev[i][1] > valid_rev[i + 1][1]:
+            rev_streak += 1
+        else:
+            break
+    if len(valid_rev) >= 4:
+        rev_growth = rev_streak >= 3
     elif len(valid_rev) >= 2:
-        rev_growth = valid_rev[0][1] > valid_rev[1][1]
+        # Not enough history to prove three years; judge what is available rather
+        # than passing or failing on absent data.
+        rev_growth = rev_streak >= (len(valid_rev) - 1)
     elif len(valid_rev) == 1:
         rev_growth = valid_rev[0][1] > 0
 
@@ -1353,6 +1364,7 @@ def score_fundamentals(raw: dict) -> dict:
                 "avail":   avail,
                 "passed":  passed,       # True/False/None(missing)
                 "edu":     EDUCATION.get(m["key"], {}),
+                "working": WORKING.get(m["key"], ""),
                 "metadata": m.get("metadata", {}),  # TTM provenance data
             })
         total_earned   += sec_earned
@@ -1398,6 +1410,90 @@ def score_fundamentals(raw: dict) -> dict:
     )
 
     # ── Section 1: Balance Sheet ──────────────────────────────────────────────
+
+    def _usd(val, unit="M"):
+        """Format a raw USD figure the way a filing states it."""
+        if val is None:
+            return "n/a"
+        try:
+            val = float(val)
+        except (TypeError, ValueError):
+            return "n/a"
+        if abs(val) >= 1_000_000_000:
+            return f"${val/1_000_000_000:,.2f}B"
+        if abs(val) >= 1_000_000:
+            return f"${val/1_000_000:,.0f}M"
+        return f"${val:,.0f}"
+
+    def _pct_series(series, limit=5):
+        """Oldest-to-newest percentage trail, e.g. '61.0% -> 59.8% -> 61.3%'."""
+        vals = [x for x in (series or [])[:limit] if x is not None]
+        if len(vals) < 2:
+            return ""
+        return " -> ".join(f"{x*100:.1f}%" for x in reversed(vals))
+
+    def _usd_series(series, limit=5):
+        vals = [x for x in (series or [])[:limit] if x is not None]
+        if len(vals) < 2:
+            return ""
+        return " -> ".join(_usd(x) for x in reversed(vals))
+
+    def _ratio_or_blank(num, den, fmt="{:.2f}"):
+        if num is None or not den:
+            return ""
+        return fmt.format(num / den)
+
+    ca0 = v(raw.get("current_assets", []))
+    cl0 = v(raw.get("current_liabilities", []))
+    ta0 = v(raw.get("total_assets", []))
+    gw0 = v(raw.get("goodwill", []))
+    ia0 = v(raw.get("intangible_assets", []))
+    rev0, rev1 = v(raw.get("revenue", []), 0), v(raw.get("revenue", []), 1)
+    ocf0 = v(raw.get("operating_cash_flow", []))
+    capex0 = v(raw.get("capex", []))
+
+    WORKING = {
+        "current_ratio": (
+            f"{_usd(ca0)} current assets / {_usd(cl0)} current liabilities = "
+            f"{_ratio_or_blank(ca0, cl0)}" if ca0 is not None and cl0 else ""),
+        "debt_to_equity": (
+            f"{_usd(total_debt)} total debt / {_usd(total_equity)} equity = "
+            f"{_ratio_or_blank(total_debt, total_equity)}" if total_debt is not None and total_equity else ""),
+        "cash_covers_debt": (
+            f"{_usd(liquid0)} cash and short-term investments against {_usd(near_term_debt)} "
+            f"of {cash_cover_basis}" if liquid0 is not None else ""),
+        "retained_earnings_growth": _usd_series(raw.get("retained_earnings", [])),
+        "goodwill_ratio": (
+            f"({_usd(gw0)} goodwill + {_usd(ia0)} intangibles) / {_usd(ta0)} total assets = "
+            f"{gw_ratio*100:.1f}%" if gw_ratio is not None else ""),
+        "revenue_growth": (
+            (_usd_series(raw.get("revenue", [])) +
+             (f"  ({rev_streak} consecutive year{'' if rev_streak == 1 else 's'} of growth)"
+              if rev_streak else "  (most recent year declined)"))
+            if _usd_series(raw.get("revenue", [])) else ""),
+        "gross_margin": _pct_series(gm_series),
+        "operating_margin": _pct_series(om_series),
+        "net_margin": _pct_series(nm_series),
+        "eps_growth": (" -> ".join(
+            f"${x:,.2f}" for x in reversed([e for e in (raw.get("diluted_eps") or [])[:5] if e is not None]))
+            if len([e for e in (raw.get("diluted_eps") or [])[:5] if e is not None]) >= 2 else ""),
+        "fcf_positive": (
+            f"{_usd(fcf0)} free cash flow on {_usd(rev0)} revenue = {fcf0/rev0*100:.1f}% FCF margin"
+            if fcf0 is not None and rev0 else ""),
+        "fcf_vs_net_income": (
+            f"{_usd(fcf0)} FCF / {_usd(ni0)} net income = {fcf0/ni0:.2f}x"
+            if fcf0 is not None and ni0 else ""),
+        "ocf_trend": _usd_series(raw.get("operating_cash_flow", [])),
+        "capex_ratio": (
+            f"{_usd(abs(capex0))} capex / {_usd(rev0)} revenue = {abs(capex0)/rev0*100:.1f}%"
+            if capex0 is not None and rev0 else ""),
+        "debt_financing": _usd_series(raw.get("total_debt", [])),
+        "roe": (f"{_usd(ni0)} net income / {_usd(total_equity)} equity = {raw.get('roe'):.1f}%"
+                if ni0 is not None and total_equity and raw.get("roe") is not None else ""),
+        "roic": (f"Return on invested capital = {raw.get('roic'):.1f}%"
+                 if raw.get("roic") is not None else ""),
+    }
+
     add_section("Balance Sheet", [
         {
             "key": "current_ratio",
@@ -1417,7 +1513,7 @@ def score_fundamentals(raw: dict) -> dict:
         },
         {
             "key": "cash_covers_debt",
-            "label": "Cash covers 1+ yr of total debt",
+            "label": "Cash covers 1+ yr of debt obligations",
             "condition": cash_covers_debt,
             "points": 2,
             "display_value": (f"{_fmt(cash0)} vs {_fmt(total_debt)} debt"

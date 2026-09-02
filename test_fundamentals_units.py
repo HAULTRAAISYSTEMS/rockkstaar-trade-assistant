@@ -138,3 +138,63 @@ def test_quarterly_fact_would_have_produced_a_single_digit_margin():
     annual_gp, quarterly_gp, revenue = 8_324_000_000, 1_220_000_000, 13_579_000_000
     assert round(quarterly_gp / revenue * 100) == 9
     assert round(annual_gp / revenue * 100) == 61
+
+
+# --- revenue streak ---------------------------------------------------------
+# The label and the rubric both say "3+ consecutive years"; the check required
+# only two. KLA passed on a two-year run while FY24 revenue had fallen 6.5%.
+
+def _rev_raw(revs):
+    return _raw(revenue=list(revs), gross_profit=[], operating_income=[])
+
+
+def _streak_row(revs):
+    return _row(fe.score_fundamentals(_rev_raw(revs)), "revenue_growth")
+
+
+def test_broken_streak_no_longer_passes():
+    """KLA: FY24 declined, so the run is two years, not three."""
+    assert _streak_row([13579., 12160., 9812., 10496., 9212.])["passed"] is False
+
+
+def test_three_consecutive_years_passes():
+    assert _streak_row([140., 130., 120., 110., 100.])["passed"] is True
+
+
+def test_latest_year_declining_fails():
+    assert _streak_row([120., 130., 110., 100.])["passed"] is False
+
+
+def test_working_line_states_the_streak():
+    assert "2 consecutive years of growth" in _streak_row([13579., 12160., 9812., 10496.])["working"]
+    assert "most recent year declined" in _streak_row([120., 130., 110., 100.])["working"]
+
+
+def test_short_history_judged_on_what_exists():
+    """Two data points cannot prove three years; judge what is available."""
+    assert _streak_row([120., 100.])["passed"] is True
+    assert _streak_row([100., 120.])["passed"] is False
+
+
+# --- arithmetic layer -------------------------------------------------------
+
+def test_every_computable_row_shows_its_working():
+    result = fe.score_fundamentals(_raw())
+    need = {"current_ratio", "debt_to_equity", "cash_covers_debt", "goodwill_ratio",
+            "fcf_positive", "fcf_vs_net_income", "capex_ratio"}
+    for section in result["sections"]:
+        for row in section["rows"]:
+            if row["key"] in need:
+                assert row.get("working"), f"{row['key']} has no working shown"
+                need.discard(row["key"])
+    assert not need, f"rows never scored: {need}"
+
+
+def test_working_shows_the_actual_division():
+    row = _row(fe.score_fundamentals(_raw()), "current_ratio")
+    assert "/" in row["working"] and "=" in row["working"]
+
+
+def test_working_is_blank_not_broken_when_data_missing():
+    result = fe.score_fundamentals(_raw(current_assets=[None], current_liabilities=[None]))
+    assert _row(result, "current_ratio")["working"] == ""
