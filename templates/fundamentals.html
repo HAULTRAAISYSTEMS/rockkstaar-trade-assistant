@@ -148,7 +148,9 @@
                   {% else %}
                   <div class="metric-status ms-fail" title="Fail">✗</div>
                   {% endif %}
-                  <span class="metric-label">{{ row.label }}</span>
+                  <span class="metric-label">{{ row.label }}
+                    {% if row.working %}<span class="metric-working">{{ row.working }}</span>{% endif %}
+                  </span>
                 </div>
                 <div class="metric-data">
                   <span class="metric-value">{{ row.value }}</span>

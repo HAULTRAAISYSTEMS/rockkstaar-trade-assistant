@@ -399,3 +399,13 @@
   .fundamentals-shell .history-table td { padding: 8px 9px; }
   .fundamentals-shell .learn-card { padding: 17px 15px; }
 }
+
+/* Arithmetic behind each score: the division or the multi-year trail. */
+.metric-working{
+  display:block;
+  margin-top:3px;
+  color:#7f8996;
+  font:500 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break:break-word;
+}
+@media(max-width:640px){ .metric-working{ font-size:10.5px; } }

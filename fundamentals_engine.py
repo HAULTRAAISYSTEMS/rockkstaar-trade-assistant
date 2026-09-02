@@ -1167,7 +1167,12 @@ def score_fundamentals(raw: dict) -> dict:
         # Guard against a provider unit change. If the quarterly figure disagrees
         # with the balance-sheet computation by more than 10x, something is being
         # reported in different units - keep the number we derived ourselves.
-        if de_ratio is None or de_ratio <= 0 or 0.1 <= (provider_de / de_ratio) <= 10:
+        accepted = de_ratio is None or de_ratio <= 0 or 0.1 <= (provider_de / de_ratio) <= 10
+        logger.info(
+            "fundamentals D/E  ticker=%s  computed=%s (debt=%s equity=%s)  provider=%s  accepted=%s",
+            raw.get("ticker"), de_ratio, total_debt, total_equity, provider_de, accepted,
+        )
+        if accepted:
             de_ratio = provider_de
         de_source = "finnhub_metric"
         de_period = "Quarterly (latest)"
