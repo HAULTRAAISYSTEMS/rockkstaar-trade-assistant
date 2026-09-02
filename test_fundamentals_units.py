@@ -242,3 +242,77 @@ def test_no_working_line_claims_a_division_it_cannot_support():
                 scale = {"B": 1e9, "M": 1e6, None: 1.0}
                 got = (float(num.replace(",", "")) * scale[nu]) / (float(den.replace(",", "")) * scale[du]) * 100
                 assert abs(got - float(stated)) < 0.5, f"{chunk!r} does not compute to {stated}%"
+
+
+# --- yfinance income-statement row matching ---------------------------------
+# Two defects in one helper. Callers chained alternatives with
+# `_row(a) or _row(b)`, but `or` on a pandas Series raises ValueError, and the
+# whole block sits under a bare `except Exception` - so any successful match
+# silently discarded the entire income statement. Separately, a bare substring
+# test let "ebit" match "ebitda".
+
+import pandas as pd
+
+
+def _inc():
+    return pd.DataFrame(
+        [[8324e6, 7407e6], [5661e6, 5016e6], [6800e6, 6100e6], [4831e6, 4062e6], [13579e6, 12160e6]],
+        index=["Gross Profit", "Operating Income", "EBITDA", "Net Income", "Total Revenue"],
+        columns=["2026", "2025"])
+
+
+def _norm(text):
+    return str(text).lower().replace(" ", "").replace("_", "")
+
+
+def _match(inc, *labels):
+    """Mirrors the fixed helper in fetch_fundamentals_raw."""
+    keys = {_norm(k): k for k in inc.index}
+    for label in labels:
+        key = keys.get(_norm(label))
+        if key is not None:
+            return inc.loc[key]
+    for label in labels:
+        norm = _norm(label)
+        if len(norm) < 5:
+            continue
+        for key_norm, original in keys.items():
+            if key_norm.startswith(norm):
+                return inc.loc[original]
+    return None
+
+
+def test_series_or_chaining_raises():
+    """The pattern the old code used, which the bare except then swallowed."""
+    inc = _inc()
+    with pytest.raises(ValueError):
+        _ = inc.loc["Total Revenue"] or inc.loc["Net Income"]
+
+
+def test_short_label_no_longer_matches_a_longer_metric():
+    """'ebit' must not resolve to EBITDA."""
+    assert _match(_inc(), "EBIT") is None or _match(_inc(), "EBIT").name != "EBITDA"
+
+
+def test_operating_income_resolves_before_falling_back_to_ebit():
+    assert _match(_inc(), "Operating Income", "OperatingIncome", "EBIT").name == "Operating Income"
+
+
+@pytest.mark.parametrize("labels,expected", [
+    (("Total Revenue", "Revenue"), "Total Revenue"),
+    (("Gross Profit", "GrossProfit"), "Gross Profit"),
+    (("Net Income", "NetIncome"), "Net Income"),
+])
+def test_each_line_item_resolves(labels, expected):
+    assert _match(_inc(), *labels).name == expected
+
+
+def test_alternatives_are_tried_without_boolean_coercion():
+    """A missing first label falls through to the second and returns a Series."""
+    inc = _inc().drop(index=["Total Revenue"])
+    row = _match(inc, "Total Revenue", "Gross Profit")
+    assert row is not None and row.name == "Gross Profit"
+
+
+def test_absent_metric_returns_none():
+    assert _match(_inc(), "Deferred Revenue") is None

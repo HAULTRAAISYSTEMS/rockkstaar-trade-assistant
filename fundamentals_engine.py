@@ -825,19 +825,37 @@ def fetch_fundamentals_raw(ticker: str) -> dict:
                 except Exception:
                     continue
             if inc is not None and not inc.empty:
-                def _row(label):
-                    # Normalize: strip spaces/underscores for robust matching
-                    label_norm = label.lower().replace(" ", "").replace("_", "")
-                    for key in inc.index:
-                        key_norm = str(key).lower().replace(" ", "").replace("_", "")
-                        if label_norm == key_norm or label_norm in key_norm:
+                def _norm(text):
+                    return str(text).lower().replace(" ", "").replace("_", "")
+
+                def _row(*labels):
+                    """First row matching any label, exact match preferred.
+
+                    Two bugs lived here. Callers chained alternatives with
+                    `_row(a) or _row(b)`, but `or` on a pandas Series raises
+                    ValueError - and the whole block sits under a bare `except`,
+                    so any successful match silently killed the entire income
+                    statement. And a bare substring test let a short label match
+                    a different metric: "ebit" matches "ebitda".
+                    """
+                    keys = {_norm(k): k for k in inc.index}
+                    for label in labels:                       # exact wins
+                        key = keys.get(_norm(label))
+                        if key is not None:
                             return inc.loc[key]
+                    for label in labels:                       # then prefix
+                        norm = _norm(label)
+                        if len(norm) < 5:
+                            continue    # too short to disambiguate safely
+                        for key_norm, original in keys.items():
+                            if key_norm.startswith(norm):
+                                return inc.loc[original]
                     return None
 
-                rev_row  = _row("Total Revenue") or _row("Revenue")
-                gp_row   = _row("Gross Profit") or _row("GrossProfit")
-                oi_row   = _row("Operating Income") or _row("OperatingIncome") or _row("EBIT")
-                ni_row   = _row("Net Income") or _row("NetIncome") or _row("Net Income Common Stockholders")
+                rev_row  = _row("Total Revenue", "Revenue")
+                gp_row   = _row("Gross Profit", "GrossProfit")
+                oi_row   = _row("Operating Income", "OperatingIncome", "EBIT")
+                ni_row   = _row("Net Income", "NetIncome", "Net Income Common Stockholders")
 
                 n_years = min(5, inc.shape[1])
                 for i in range(n_years):
