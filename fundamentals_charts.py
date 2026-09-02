@@ -23,6 +23,7 @@ FCF_COLOR = "#c792ea"
 GROSS_COLOR = "#4f9cf9"
 OPERATING_COLOR = "#41c98d"
 NET_COLOR = "#f2b544"
+ROIC_COLOR = "#4f9cf9"
 
 
 def _plot_box():
@@ -241,6 +242,11 @@ def build_charts(history: list[dict] | None) -> list[dict]:
              {"key": "net_income_num", "name": "Net income", "color": INCOME_COLOR},
              {"key": "fcf_num", "name": "Free cash flow", "color": FCF_COLOR},
          ], money, require=["fcf_num", "net_income_num"])),
+        ("roic", "Return on invested capital",
+         "Competition drags returns toward the cost of capital. Staying above it is what a moat looks like in the numbers.",
+         lambda: _lines(history, [
+             {"key": "roic_num", "name": "ROIC", "color": ROIC_COLOR},
+         ])),
     ]
     charts = []
     for key, title, caption, build in specs:

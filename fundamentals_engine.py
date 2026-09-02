@@ -534,30 +534,45 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
         except Exception:
             pass
 
-    # ── 8. Insider ownership — quick yfinance probe with hard timeout ────────
-    # EDGAR company facts don't include insider %; yfinance does but can hang.
-    # We run it in a separate thread and abandon after 8 seconds so it never
-    # blocks the page render.
-    try:
-        from concurrent.futures import ThreadPoolExecutor, as_completed as _asc
+    # ── 8. Share count ───────────────────────────────────────────────────────
+    # Diluted weighted-average shares, oldest-last, aligned to the income
+    # statement's fiscal year ends. A company can grow revenue and earnings
+    # while issuing so much stock that per-share value falls, which no other
+    # row on the card would catch.
+    _shares_map = dict(_annual_dated(["WeightedAverageNumberOfDilutedSharesOutstanding",
+                   "WeightedAverageNumberOfDilutedSharesOutstandingAdjustment",
+                   "WeightedAverageNumberOfSharesOutstandingDiluted",
+                   # IFRS
+                   "WeightedAverageShares"], merge=True))
+    if not _shares_map:
+        _shares_map = dict(_annual_dated(["CommonStockSharesOutstanding",
+                       "CommonStockSharesIssued",
+                       "EntityCommonStockSharesOutstanding"], merge=True))
+    result["diluted_shares"] = [_shares_map.get(end) for end in _timeline]
 
-        def _yf_insider(tkr: str):
-            import yfinance as _yf
-            info = _yf.Ticker(tkr).info
-            pct = info.get("heldPercentInsiders")
-            return float(pct) * 100 if pct is not None else None
-
-        with ThreadPoolExecutor(max_workers=1) as _ex:
-            _fut = _ex.submit(_yf_insider, ticker)
-        # Wait up to 8 s; if Yahoo hangs we get TimeoutError and skip
-        try:
-            _pct = _fut.result(timeout=8)
-            if _pct is not None:
-                result["insider_pct"] = _pct
-        except Exception:
-            pass
-    except Exception:
-        pass
+    # Return on invested capital for every year, not just the latest. One good
+    # year is a cycle; a decade of them is the arithmetic signature of a moat.
+    _td_map = dict(_annual_dated(["LongTermDebt",
+                   "LongTermDebtAndCapitalLeaseObligation",
+                   "LongTermDebtAndCapitalLeaseObligations",
+                   "LongTermDebtNoncurrent",
+                   "Borrowings", "BorrowingsAndBankOverdrafts",
+                   "LongtermBorrowings", "DebtCurrent", "ShorttermBorrowings"]))
+    _eq_map = dict(_annual_dated(["StockholdersEquity",
+                   "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+                   "Equity", "EquityAttributableToOwnersOfParent"]))
+    roic_series = []
+    for _i, _end in enumerate(_timeline):
+        _oi = _aligned["operating_income"][_i]
+        _ni = _aligned["net_income"][_i]
+        _eq = _eq_map.get(_end)
+        _capital = (_eq or 0) + (_td_map.get(_end) or 0)
+        if not _oi or _ni is None or _eq is None or _capital <= 0:
+            roic_series.append(None)
+            continue
+        _tax = max(0.0, min(0.40, 1.0 - (_ni / _oi)))
+        roic_series.append((_oi * (1.0 - _tax) / _capital) * 100)
+    result["roic_series"] = roic_series
 
     # Return None only if ALL major sections are missing
     if len(missing) >= 3:
@@ -823,14 +838,14 @@ EDUCATION: dict[str, dict[str, str]] = {
         "formula": "NOPAT ÷ Invested Capital × 100  (NOPAT = Operating Income × (1 − Tax Rate))",
     },
     "moat": {
-        "def": "An economic moat is a durable competitive advantage that protects a company's profits from competition.",
-        "why": "Companies with moats (brand loyalty, network effects, switching costs, cost advantages, patents) sustain high returns on capital for decades. This requires reading 10-Ks and understanding the business — it cannot be auto-scored.",
-        "formula": "Manual review: brand strength, market share stability, pricing power, switching costs",
+        "def": "An economic moat is a durable competitive advantage that protects a company's profits from competition. This row scores the evidence a moat leaves in the numbers, not the moat itself.",
+        "why": "Competition drives returns on capital down toward the cost of capital. A company that holds ROIC above 10% year after year while its gross margin does not erode is being protected by something — brand, switching costs, network effects, scale. What that something is still requires reading the 10-K; this row only tells you whether there is anything there to look for.",
+        "formula": "ROIC above 10% in every reported year AND gross margin not down more than 3 points across the trail",
     },
-    "insider_ownership": {
-        "def": "The percentage of shares owned by company insiders (executives and directors).",
-        "why": "High insider ownership aligns management's interests with shareholders. Insider buying (purchasing in the open market) is a strong signal that management believes the stock is undervalued.",
-        "formula": "Insider shares ÷ Total shares outstanding × 100",
+    "share_dilution": {
+        "def": "Whether the diluted share count is shrinking (buybacks) or growing (issuance).",
+        "why": "You own a fraction of a company, not the company. Revenue and earnings can both rise while the share count rises faster, leaving you with less than you started with. A falling count means every remaining share owns more of the same business — it is the one line on the card that measures what happens to your slice rather than the pie.",
+        "formula": "Newest diluted share count ÷ oldest reported count − 1",
     },
 }
 
@@ -1580,8 +1595,32 @@ def score_fundamentals(raw: dict) -> dict:
     roe_source  = "finnhub_metric" if ttm.get("roe_ttm") is not None else "annual"
     roic_source = "finnhub_metric" if ttm.get("roi_ttm") is not None else "annual"
 
-    insider_pct = raw.get("insider_pct")
-    insider_ok  = (insider_pct is not None)  # 2pts if data exists at all
+    # ── Moat evidence: durable returns on capital ────────────────────────────
+    # This row used to be unscorable by design, which quietly removed its
+    # points from the denominator. A moat cannot be read off a single number,
+    # but the trace one leaves can: competition drags returns on capital down,
+    # so a company that holds ROIC above its cost of capital for years while
+    # its gross margin holds is being protected by something.
+    roic_years = [x for x in (raw.get("roic_series") or []) if x is not None]
+    gm_valid = [x for x in gm_series if x is not None]
+    gm_erosion = (gm_valid[-1] - gm_valid[0]) if len(gm_valid) >= 2 else None
+    moat_ok = None
+    if len(roic_years) >= 3:
+        moat_ok = (all(x > 10.0 for x in roic_years)
+                   and (gm_erosion is None or gm_erosion <= 0.03))
+
+    # ── Share count: is your slice growing or shrinking? ─────────────────────
+    # Replaces a row that awarded two points for an insider-ownership field
+    # merely being present, from a provider this host cannot reach.
+    share_vals = [(i, x) for i, x in enumerate(raw.get("diluted_shares") or [])
+                  if x is not None and x > 0]
+    share_change = None
+    if len(share_vals) >= 2:
+        newest, oldest = share_vals[0][1], share_vals[-1][1]
+        share_change = (newest / oldest) - 1.0
+    # Flat counts pass: not every good company buys back stock, but a company
+    # issuing shares faster than 2% a year is charging you for its own growth.
+    dilution_ok = (share_change <= 0.02) if share_change is not None else None
 
     # ── Score each section ────────────────────────────────────────────────────
 
@@ -1752,6 +1791,18 @@ def score_fundamentals(raw: dict) -> dict:
                    if ni0 is not None and total_equity else ""))),
         "roic": (f"TTM return on invested capital = {raw.get('roic'):.1f}% (provider)"
                  if raw.get("roic") is not None else ""),
+        "moat": (
+            ("ROIC by year: " + " -> ".join(f"{x:.1f}%" for x in reversed(roic_years))
+             + (".  Gross margin held flat across the trail"
+                if gm_erosion is not None and abs(gm_erosion) < 0.001 else
+                (f".  Gross margin {'fell' if gm_erosion > 0 else 'rose'} "
+                 f"{abs(gm_erosion)*100:.1f} points across the trail"
+                 if gm_erosion is not None else "")))
+            if roic_years else ""),
+        "share_dilution": (
+            f"{share_vals[-1][1]/1e6:,.0f}M shares -> {share_vals[0][1]/1e6:,.0f}M = "
+            f"{share_change*100:+.1f}% over {len(share_vals)} reported years"
+            if share_change is not None else ""),
     }
 
     add_section("Balance Sheet", [
@@ -1920,19 +1971,22 @@ def score_fundamentals(raw: dict) -> dict:
         },
         {
             "key": "moat",
-            "label": "Economic Moat",
-            "condition": None,  # always manual — no auto-score
-            "points": 0,
-            "display_value": "Needs manual review",
+            "label": "Moat evidence: returns hold up",
+            "condition": moat_ok,
+            "points": 2,
+            "display_value": (f"ROIC {min(roic_years):.0f}–{max(roic_years):.0f}% "
+                              f"over {len(roic_years)} yrs"
+                              if len(roic_years) >= 3 else "N/A"),
             "metadata": _meta("moat"),
         },
         {
-            "key": "insider_ownership",
-            "label": "Insider ownership data available",
-            "condition": (True if insider_ok else None),
+            "key": "share_dilution",
+            "label": "Share count not diluting",
+            "condition": dilution_ok,
             "points": 2,
-            "display_value": f"{insider_pct:.1f}%" if insider_pct is not None else "N/A",
-            "metadata": _meta("insider_ownership"),
+            "display_value": (f"{share_change*100:+.1f}%"
+                              if share_change is not None else "N/A"),
+            "metadata": _meta("share_dilution"),
         },
     ])
 
@@ -2092,6 +2146,8 @@ def score_fundamentals(raw: dict) -> dict:
             gm   = gm_series[i] if i < len(gm_series) else None
             om   = om_series[i] if i < len(om_series) else None
             nm   = nm_series[i] if i < len(nm_series) else None
+            _rc  = (raw_data.get("roic_series") or [None] * (i + 1))
+            rc   = (_rc[i] / 100.0) if i < len(_rc) and _rc[i] is not None else None
             rows.append({
                 "year_offset": i,
                 "label": f"Year -{i}" if i > 0 else "Latest",
@@ -2113,6 +2169,7 @@ def score_fundamentals(raw: dict) -> dict:
                 "gross_margin_num": gm,
                 "operating_margin_num": om,
                 "net_margin_num": nm,
+                "roic_num": rc,
             })
         return rows
 
@@ -2180,7 +2237,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-02.1"
+SCORECARD_VERSION = "2026-09-02.2"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:

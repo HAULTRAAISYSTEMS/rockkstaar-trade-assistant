@@ -141,3 +141,18 @@ def test_an_empty_series_leaves_the_bar_legend():
         row["net_income_num"] = None
     panel = chart(fc.build_charts(rows), "revenue_income")
     assert [item["name"] for item in panel["legend"]] == ["Revenue"]
+
+
+def test_the_roic_panel_appears_when_the_series_is_present():
+    """It backs the moat row: the reader can see whether returns held."""
+    rows = history()
+    for i, row in enumerate(rows):
+        row["roic_num"] = 0.40 - i * 0.02
+    panel = chart(fc.build_charts(rows), "roic")
+    assert len(panel["lines"]) == 1
+    assert len(panel["lines"][0]["points"].split()) == 5
+    assert [item["name"] for item in panel["legend"]] == ["ROIC"]
+
+
+def test_no_roic_panel_without_the_series():
+    assert "roic" not in [c["key"] for c in fc.build_charts(history())]
