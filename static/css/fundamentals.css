@@ -409,3 +409,15 @@
   word-break:break-word;
 }
 @media(max-width:640px){ .metric-working{ font-size:10.5px; } }
+
+/* EDGAR / Finnhub reconciliation: a disagreement between sources belongs on the
+   page, not only in a log. */
+.src-notes{margin:16px 0;padding:14px 16px;border:1px solid rgba(255,181,71,.34);
+  border-radius:12px;background:rgba(255,181,71,.06)}
+.src-notes-hd{color:#ffb547;font:700 10px/1 var(--font-ui,system-ui);
+  letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px}
+.src-notes-warn{margin:0;color:#f0dcae;font:500 12.5px/1.6 var(--font-ui,system-ui)}
+.src-notes-info{margin:8px 0 0;color:#8d9aad;font:500 12px/1.5 var(--font-ui,system-ui)}
+.src-notes-list{margin:9px 0 0;padding-left:18px;color:#c3cad3;
+  font:500 11.5px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
+.src-notes-list code{color:#ffd978}

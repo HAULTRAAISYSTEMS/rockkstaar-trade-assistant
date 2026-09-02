@@ -247,6 +247,26 @@
   <!-- ══════════════════════════════════════════════════════════════════
        LEARN TAB
   ══════════════════════════════════════════════════════════════════ -->
+  {% if data and data.source_notes %}
+    {% set disagreements = data.source_notes | selectattr('kind', 'equalto', 'disagreement') | list %}
+    {% set filled = data.source_notes | selectattr('kind', 'equalto', 'filled') | list %}
+    <div class="src-notes">
+      <div class="src-notes-hd">Data source reconciliation</div>
+      {% if disagreements %}
+      <p class="src-notes-warn"><strong>{{ disagreements | length }} figure{{ '' if disagreements|length == 1 else 's' }} disagree{{ 's' if disagreements|length == 1 else '' }} between SEC EDGAR and Finnhub.</strong>
+         The filing value is what the score uses. Treat these rows as unverified until you check the 10-K.</p>
+      <ul class="src-notes-list">
+        {% for note in disagreements[:8] %}
+        <li><code>{{ note.field }}</code> {{ note.period }} — EDGAR {{ '{:,.0f}'.format(note.edgar) }} vs Finnhub {{ '{:,.0f}'.format(note.finnhub) }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if filled %}
+      <p class="src-notes-info">{{ filled | length }} value{{ '' if filled|length == 1 else 's' }} EDGAR did not report {{ 'was' if filled|length == 1 else 'were' }} filled from Finnhub.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+
   <div id="tab-learn" class="tab-pane" {% if not request.args.get('tab') or request.args.get('tab') != 'learn' %}style="display:none"{% endif %}>
 
     <!-- ── Balance Sheet ──────────────────────────────────────────────── -->

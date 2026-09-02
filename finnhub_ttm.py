@@ -246,6 +246,30 @@ def _try_save_metrics_cache(ticker: str, data: dict) -> None:
 
 # ── Endpoint 2: /stock/financials-reported ─────────────────────────────────────
 
+def fetch_finnhub_annual(ticker: str) -> list | None:
+    """Fetch /stock/financials-reported with freq=annual.
+
+    The quarterly fetch above powers the TTM overlay. This one supplies the
+    historical annual statements used to cross-check EDGAR, which reports
+    period dates directly instead of requiring XBRL duration inference.
+
+    Returns None on failure, [] when the endpoint is premium-gated.
+    """
+    ticker = ticker.upper().strip()
+    data = _finnhub_get("/stock/financials-reported", {"symbol": ticker, "freq": "annual"})
+    if data is None:
+        return None
+    if isinstance(data, dict) and data.get("_gated"):
+        logger.info("finnhub_ttm: annual financials premium-gated for %s", ticker)
+        return []
+    reports = data.get("data", []) if isinstance(data, dict) else []
+    try:
+        reports = sorted(reports, key=lambda r: str(r.get("endDate") or ""), reverse=True)
+    except Exception:
+        pass
+    return reports[:6]
+
+
 def fetch_finnhub_financials(ticker: str, force_refresh: bool = False) -> list | None:
     """
     Fetch /stock/financials-reported?symbol={ticker}&freq=quarterly.

@@ -2069,8 +2069,21 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
             "total_metrics": None, "gated_fields": [],
         })
 
+    # ── Step 2b: cross-check the annual series against Finnhub ───────────────
+    # EDGAR stays the source of record. Finnhub fills years EDGAR has no fact
+    # for, and any material disagreement is recorded rather than silently
+    # resolved in favour of whichever source was consulted first.
+    try:
+        from finnhub_annual import cross_check
+        from finnhub_ttm import fetch_finnhub_annual
+        raw = cross_check(raw, fetch_finnhub_annual(ticker))
+    except Exception as exc:
+        logger.debug("fundamentals annual cross-check unavailable for %s: %s", ticker, exc)
+
     # ── Step 3: score ─────────────────────────────────────────────────────────
     result = score_fundamentals(raw)
+    result["source_notes"] = raw.get("_source_notes", [])
+    result["fiscal_period_ends"] = raw.get("fiscal_period_ends", [])
 
     # ── Save to cache ─────────────────────────────────────────────────────────
     try:
