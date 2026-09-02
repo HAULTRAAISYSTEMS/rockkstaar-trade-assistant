@@ -87,6 +87,28 @@
           </div>
           {% endfor %}
         </div>
+        {% if data.valuation_history and data.valuation_history.available %}
+        <div class="vh-wrap">
+          <div class="vh-title">Against its own history</div>
+          <div class="vh-scroll">
+            <table class="vh-table">
+              <thead><tr><th>Period</th><th>Price</th><th>Trailing P/E</th><th>Price / FCF</th></tr></thead>
+              <tbody>
+                {% for r in data.valuation_history.rows %}
+                <tr class="{{ 'is-today' if r.is_today }}">
+                  <td>{{ r.label }}{% if r.period_end %} <span class="vh-end">{{ r.period_end }}</span>{% endif %}</td>
+                  <td>{{ r.price_txt }}</td>
+                  <td>{{ r.pe_txt }}</td>
+                  <td>{{ r.pfcf_txt }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if data.valuation_history.note %}<p class="vh-note">{{ data.valuation_history.note }}</p>{% endif %}
+          <p class="vh-caveat">Covers the {{ data.valuation_history.comparable_years }} years the current annual report states on one basis. Prices are split-adjusted and filed per-share figures are not, so reaching further back would compare two different scales.</p>
+        </div>
+        {% endif %}
         <p class="val-foot">A great business bought at any price is not a great investment. The score below establishes <strong>what</strong> is worth owning; the figures above are what it costs.</p>
       </div>
       {% endif %}

@@ -674,3 +674,46 @@
 .dg-item.is-fired .dg-text { color: var(--elite-copy) }
 
 @media (max-width: 640px) { .dg-list { grid-template-columns: 1fr } }
+
+/* ── Multiples against the company's own history ─────────────────────────── */
+.vh-wrap { margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--elite-hairline) }
+
+.vh-title {
+  font: 700 10px/1 var(--font-ui, system-ui);
+  letter-spacing: .15em; text-transform: uppercase;
+  color: var(--elite-faint); margin-bottom: 8px;
+}
+
+.vh-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch }
+.vh-table { width: 100%; border-collapse: collapse; font: 500 12px/1.5 var(--font-mono, ui-monospace) }
+
+.vh-table th {
+  font: 700 9.5px/1 var(--font-ui, system-ui);
+  letter-spacing: .12em; text-transform: uppercase; color: var(--elite-faint);
+  text-align: right; padding: 0 10px 7px 0; white-space: nowrap;
+  border-bottom: 1px solid var(--elite-hairline);
+}
+
+.vh-table td {
+  padding: 8px 10px 8px 0; text-align: right; white-space: nowrap;
+  font-variant-numeric: tabular-nums; color: var(--elite-copy);
+  border-bottom: 1px solid var(--elite-hairline);
+}
+
+.vh-table th:first-child, .vh-table td:first-child { text-align: left; padding-right: 18px }
+.vh-table tr:last-child td { border-bottom: 0 }
+.vh-end { color: var(--elite-faint); font-size: 10px; margin-left: 5px }
+
+.vh-table tr.is-today td {
+  color: var(--elite-gold-bright); font-weight: 700;
+  border-top: 1px solid var(--elite-border-strong);
+}
+.vh-table tr.is-today .vh-end { color: inherit }
+
+.vh-note {
+  margin: 9px 0 0;
+  font: 600 11.5px/1.5 var(--font-ui, system-ui);
+  color: var(--elite-copy);
+}
+
+.vh-caveat { margin: 5px 0 0; font: 500 10.5px/1.45 var(--font-ui, system-ui); color: var(--elite-faint) }

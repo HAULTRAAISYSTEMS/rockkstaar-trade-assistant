@@ -2520,6 +2520,7 @@ def score_fundamentals(raw: dict) -> dict:
         "filing_signals":   filing_signals,
         "downgrade_check":  downgrade_check,
         "valuation":        raw.get("_valuation") or {"available": False, "rows": []},
+        "valuation_history": raw.get("_valuation_history") or {"available": False, "rows": []},
         # A split makes every per-share figure on the page incomparable with
         # anything a reader has seen from an older source. Say so at the top
         # rather than in a parenthetical halfway down.
@@ -2555,7 +2556,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-02.8"
+SCORECARD_VERSION = "2026-09-02.9"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
@@ -2611,6 +2612,31 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
                 _metrics.get("_raw_metric") or {}, fetch_finnhub_quote(ticker))
     except Exception as exc:
         logger.debug("valuation unavailable for %s: %s", ticker, exc)
+
+    # ── Step 1d: what it cost in its own past ────────────────────────────────
+    # Today's multiple against the multiple at its own recent year ends. Only
+    # the years the newest filing states on one split basis, because the price
+    # series is split-adjusted and filed per-share figures are not.
+    try:
+        from market_data import fetch_chart_bars
+        from valuation_history import build_history
+        if isinstance(raw, dict) and (raw.get("_valuation") or {}).get("available"):
+            _bars, _ = fetch_chart_bars(ticker, "1d", "5y")
+            _val = raw["_valuation"]
+            _shares = [x for x in (raw.get("diluted_shares") or []) if x]
+            raw["_valuation_history"] = build_history(
+                period_ends=raw.get("fiscal_period_ends") or [],
+                eps=raw.get("diluted_eps") or [],
+                fcf=raw.get("free_cash_flow") or [],
+                shares=raw.get("diluted_shares") or [],
+                bars=_bars,
+                today_price=_val.get("price"),
+                today_pe=_val.get("pe"),
+                today_pfcf=_val.get("pfcf"),
+                comparable_years=max(len(_shares), 3),
+            )
+    except Exception as exc:
+        logger.debug("valuation history unavailable for %s: %s", ticker, exc)
 
     # ── Step 2: augment with Finnhub TTM data ─────────────────────────────────
     try:
