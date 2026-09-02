@@ -53,12 +53,18 @@ _OCF_CONCEPTS = [
     "NetCashFromOperatingActivities",
     "OperatingActivities",
 ]
+# CapitalExpendituresIncurredButNotYetPaid was ranked second here. It is the
+# supplemental non-cash accrual — capex incurred but unpaid — usually a small
+# fraction of the real figure. A filer tagging it but not PaymentsToAcquire...
+# got a tiny capex, so free cash flow came out as operating cash flow minus
+# almost nothing and was materially overstated. It stays as a last resort.
 _CAPEX_CONCEPTS = [
     "PaymentsToAcquirePropertyPlantAndEquipment",
-    "CapitalExpendituresIncurredButNotYetPaid",
+    "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
     "PurchaseOfPropertyPlantAndEquipment",
     "AcquisitionOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
     "CapitalExpenditures",
+    "CapitalExpendituresIncurredButNotYetPaid",
 ]
 _REVENUE_CONCEPTS = [
     "Revenues",
@@ -355,6 +361,35 @@ def _try_save_financials_cache(ticker: str, data: list) -> None:
 
 # ── TTM computation from quarterly reports ─────────────────────────────────────
 
+_QUARTER_MIN_DAYS = 60
+_QUARTER_MAX_DAYS = 115
+
+
+def _is_quarter(report: dict) -> bool:
+    """True when a report covers roughly three months.
+
+    The feed labels its rows but also carries annual ones. Measuring the period
+    is the check that cannot be fooled by a mislabelled form: a 10-K row summed
+    as though it were a quarter overstates a trailing year by the size of the
+    whole year.
+    """
+    form = str(report.get("form") or "").upper()
+    if form in ("10-K", "20-F", "40-F"):
+        return False
+    start, end = report.get("startDate"), report.get("endDate")
+    if not (start and end):
+        # No period to measure. Trust an explicit quarterly form, reject the
+        # rest rather than guess.
+        return form.startswith("10-Q")
+    try:
+        from datetime import datetime as _dt
+        days = (_dt.strptime(str(end)[:10], "%Y-%m-%d")
+                - _dt.strptime(str(start)[:10], "%Y-%m-%d")).days
+    except (TypeError, ValueError):
+        return False
+    return _QUARTER_MIN_DAYS <= days <= _QUARTER_MAX_DAYS
+
+
 def compute_ttm(quarterly_reports: list) -> dict:
     """
     Sum the trailing four quarters of income statement and cash flow items.
@@ -370,7 +405,7 @@ def compute_ttm(quarterly_reports: list) -> dict:
         "ttm_fcf":        float | None,   # raw USD (OCF − CapEx)
         "period_end":     str | None,     # endDate of most-recent quarter
         "quarters_used":  int,            # how many quarters contributed
-        "computed":       bool,           # True if at least 2 quarters found
+        "computed":       bool,           # True only on four full quarters
     }
     """
     result: dict[str, Any] = {
@@ -382,12 +417,26 @@ def compute_ttm(quarterly_reports: list) -> dict:
     if not quarterly_reports:
         return result
 
-    trailing = quarterly_reports[:4]
+    # Only actual quarters may be summed. The feed mixes 10-K rows in with the
+    # 10-Q rows, and nothing filtered them: three quarters of 100 plus an
+    # annual 400 produced a "trailing twelve months" of 700 against a true 400.
+    # Every report carries startDate and endDate and they were never read.
+    trailing = [q for q in quarterly_reports if _is_quarter(q)][:4]
+
+    # Four quarters or it is not a trailing year. A two- or three-quarter sum
+    # was being labelled TTM and fed to the scored rows at face value.
+    if len(trailing) < 4:
+        result["quarters_used"] = len(trailing)
+        result["period_end"] = trailing[0].get("endDate") if trailing else None
+        result["incomplete_reason"] = (
+            f"only {len(trailing)} quarterly reports available")
+        return result
+
     result["quarters_used"] = len(trailing)
     result["period_end"] = trailing[0].get("endDate") if trailing else None
 
     rev_sum = ni_sum = ocf_sum = cap_sum = 0.0
-    rev_ok = ni_ok = ocf_ok = cap_ok = False
+    rev_n = ni_n = ocf_n = cap_n = 0
 
     for q in trailing:
         report = q.get("report", {})
@@ -397,35 +446,40 @@ def compute_ttm(quarterly_reports: list) -> dict:
         rev = _find_concept(ic, _REVENUE_CONCEPTS)
         if rev is not None:
             rev_sum += rev
-            rev_ok = True
+            rev_n += 1
 
         ni = _find_concept(ic, _NET_INCOME_CONCEPTS)
         if ni is not None:
             ni_sum += ni
-            ni_ok = True
+            ni_n += 1
 
         ocf = _find_concept(cf, _OCF_CONCEPTS)
         if ocf is not None:
             ocf_sum += ocf
-            ocf_ok = True
+            ocf_n += 1
 
         cap = _find_concept(cf, _CAPEX_CONCEPTS)
         if cap is not None:
             cap_sum += abs(cap)  # CapEx is often reported as negative in CF statement
-            cap_ok = True
+            cap_n += 1
 
-    if rev_ok:
+    # Coverage is per line, not per report. Revenue present in all four
+    # quarters and operating cash flow in two produced a full-year revenue
+    # beside a half-year cash flow, both labelled TTM, with quarters_used
+    # reporting 4 — true only of revenue.
+    if rev_n == 4:
         result["ttm_revenue"] = rev_sum
-    if ni_ok:
+    if ni_n == 4:
         result["ttm_net_income"] = ni_sum
-    if ocf_ok:
+    if ocf_n == 4:
         result["ttm_ocf"] = ocf_sum
-    if cap_ok:
+    if cap_n == 4:
         result["ttm_capex"] = cap_sum
-    if ocf_ok and cap_ok:
+    if ocf_n == 4 and cap_n == 4:
         result["ttm_fcf"] = ocf_sum - cap_sum
 
-    result["computed"] = rev_ok or ni_ok or ocf_ok
+    result["computed"] = any(result[k] is not None for k in
+                             ("ttm_revenue", "ttm_net_income", "ttm_ocf"))
     return result
 
 

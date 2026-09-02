@@ -97,11 +97,17 @@ def detect_split_break(series, net_income=None) -> int | None:
             continue
         newer_ni = incomes[newer_index] if newer_index < len(incomes) else None
         older_ni = incomes[older_index] if older_index < len(incomes) else None
-        if newer_ni and older_ni and newer_ni > 0 and older_ni > 0:
-            ni_ratio = older_ni / newer_ni
-            low, high = SPLIT_NI_STABLE_BAND
-            if not (low <= ni_ratio <= high):
-                continue                   # earnings moved too - not a split
+        if not (newer_ni and older_ni and newer_ni > 0 and older_ni > 0):
+            # No earnings to corroborate with. The docstring's promise is to
+            # leave the data alone when a split cannot be confirmed, and
+            # trimming here did the opposite: an 87% earnings collapse looked
+            # identical to a split and was quietly cut from the series, with
+            # the page telling the reader it crossed one.
+            continue
+        ni_ratio = older_ni / newer_ni
+        low, high = SPLIT_NI_STABLE_BAND
+        if not (low <= ni_ratio <= high):
+            continue                   # earnings moved too - not a split
         return older_index
     return None
 
@@ -710,9 +716,14 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
     # statement's fiscal year ends. A company can grow revenue and earnings
     # while issuing so much stock that per-share value falls, which no other
     # row on the card would catch.
+    # ...Adjustment is the dilutive increment — single-digit millions — not a
+    # share count. In the merged lookup it filled period ends the real concepts
+    # did not cover, producing a series like [150M, 148M, 2.1M] that either
+    # tripped the split detector or reported several thousand percent dilution.
     _share_concepts = ["WeightedAverageNumberOfDilutedSharesOutstanding",
                        "WeightedAverageNumberOfSharesOutstandingDiluted",
-                       "WeightedAverageNumberOfDilutedSharesOutstandingAdjustment"]
+                       # IFRS
+                       "WeightedAverageNumberOfOrdinarySharesOutstanding"]
     # One filing's comparative columns first, since they are guaranteed to sit
     # on one split basis. A 10-K carries about three years, so fall back to the
     # merged series when that leaves too little to measure a trend; the split
@@ -1634,10 +1645,15 @@ def score_fundamentals(raw: dict) -> dict:
             "fundamentals D/E  ticker=%s  computed=%s (debt=%s equity=%s)  provider=%s  accepted=%s",
             raw.get("ticker"), de_ratio, total_debt, total_equity, provider_de, accepted,
         )
+        # Only claim the provider when the provider's figure was actually used.
+        # These sat outside the branch, so a value rejected as a unit mismatch —
+        # the exact case this guard exists for — still displayed as reported by
+        # Finnhub for the latest quarter, when it was computed here from the
+        # annual balance sheet.
         if accepted:
             de_ratio = provider_de
-        de_source = "finnhub_metric"
-        de_period = "Quarterly (latest)"
+            de_source = "finnhub_metric"
+            de_period = "Quarterly (latest)"
 
     # Liquidity: cash plus short-term investments against obligations due inside a
     # year. The previous check compared bare cash against TOTAL debt, which failed
@@ -1713,11 +1729,15 @@ def score_fundamentals(raw: dict) -> dict:
         # same answer as revenue going backwards either.
         rev_growth = True if rev_streak >= 3 else (0.5 if rev_streak == 2 else False)
     elif len(valid_rev) >= 2:
-        # Not enough history to prove three years; judge what is available rather
-        # than passing or failing on absent data.
-        rev_growth = rev_streak >= (len(valid_rev) - 1)
+        # Not enough history to prove three consecutive years. An unbroken run
+        # across what there is earns partial credit; a decline still fails.
+        # This used to award full marks for clearing a bar the data cannot
+        # reach — two years of history and one increase read as a three-year
+        # streak.
+        rev_growth = 0.5 if rev_streak >= (len(valid_rev) - 1) else False
     elif len(valid_rev) == 1:
-        rev_growth = valid_rev[0][1] > 0
+        # One number is not a trend in either direction.
+        rev_growth = None
 
     # Gross margin trend
     def _margin(num_vals, den_vals):
@@ -1774,12 +1794,20 @@ def score_fundamentals(raw: dict) -> dict:
 
     gm_ok = _margin_ok(gm_series, abs_threshold=0.30)
     om_ok = _margin_ok(om_series, abs_threshold=0.10)
-    nm_positive = (
-        nm_series[0] is not None and nm_series[0] > 0
-        if nm_series and nm_series[0] is not None
-        else (v(raw.get("net_income", []), 0) is not None and v(raw.get("net_income", []), 0) > 0)
-    )
-    nm_ok = (nm_positive and _margin_ok(nm_series, abs_threshold=0.05)) if nm_positive else (False if nm_positive is False else None)
+    # Missing data must leave the row unscored, not fail it. Both branches here
+    # returned a bool, so the `else None` was unreachable and a company with no
+    # net income figure at all was marked failed — it entered the denominator
+    # and pushed the verdict down while the row displayed "N/A".
+    _nm_latest = nm_series[0] if nm_series else None
+    if _nm_latest is None:
+        _ni_latest = v(raw.get("net_income", []), 0)
+        _nm_latest = None if _ni_latest is None else (1.0 if _ni_latest > 0 else -1.0)
+    if _nm_latest is None:
+        nm_ok = None
+    elif _nm_latest <= 0:
+        nm_ok = False
+    else:
+        nm_ok = _margin_ok(nm_series, abs_threshold=0.05)
 
     # EPS growing — use TTM EPS growth if available
     eps_vals, eps_split_trimmed = split_adjusted_series(
@@ -2564,7 +2592,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-02.10"
+SCORECARD_VERSION = "2026-09-02.11"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:

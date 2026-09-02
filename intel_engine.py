@@ -927,12 +927,15 @@ def _earnings_from_finnhub(
         rev_est = None
         try:
             v = e.get("epsEstimate")
-            if v: eps_est = round(float(v), 2)
+            # A breakeven consensus of 0.00 is routine for pre-profit names —
+            # exactly the ones where the estimate matters — and truthiness
+            # dropped it, rendering an em dash as though nothing was published.
+            if v is not None: eps_est = round(float(v), 2)
         except Exception:
             pass
         try:
             v = e.get("revenueEstimate")
-            if v: rev_est = int(v)
+            if v is not None: rev_est = int(v)
         except Exception:
             pass
         results.append({
@@ -1789,10 +1792,13 @@ def _splits_from_yfinance(tickers: list[str], today: date) -> list[dict]:
                     continue
                 days_away  = (sd - today).days
                 split_type = "Forward" if ratio > 1 else "Reverse"
-                if ratio > 1:
-                    ratio_str = f"{int(ratio)}:1"
-                elif ratio > 0:
-                    ratio_str = f"1:{int(round(1 / ratio))}"
+                # int() truncated, so a 3-for-2 split (1.5) announced itself
+                # as "1:1" — a Forward split at a ratio meaning no split at all.
+                # A fraction keeps 3:2 and 5:4 intact and still renders 10:1.
+                if ratio > 0:
+                    from fractions import Fraction
+                    frac = Fraction(ratio).limit_denominator(50)
+                    ratio_str = f"{frac.numerator}:{frac.denominator}"
                 else:
                     ratio_str = "?"
                 items.append({

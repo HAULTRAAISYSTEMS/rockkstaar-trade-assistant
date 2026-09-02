@@ -178,10 +178,20 @@ def test_working_line_states_the_streak():
     assert "most recent year declined" in _streak_row([120., 130., 110., 100.])["working"]
 
 
-def test_short_history_judged_on_what_exists():
-    """Two data points cannot prove three years; judge what is available."""
-    assert _streak_row([120., 100.])["passed"] is True
+def test_short_history_earns_partial_not_full():
+    """Two data points cannot prove three years, so they cannot earn the full
+    marks for a row labelled "3+ consecutive years". One comparison used to
+    score 2/2 against a claim the data could not reach. An unbroken run across
+    what exists earns half; a decline still fails outright."""
+    row = _streak_row([120., 100.])
+    assert row["passed"] == "partial" and (row["earned"], row["avail"]) == (1, 2)
     assert _streak_row([100., 120.])["passed"] is False
+
+
+def test_a_single_year_is_unscored():
+    """One number is not a trend in either direction. It used to score full
+    marks for being positive."""
+    assert _streak_row([120.])["passed"] is None
 
 
 # --- arithmetic layer -------------------------------------------------------
@@ -367,10 +377,21 @@ def test_reverse_split_detected():
     assert fe.detect_split_break([40.0, 3.5, 3.0, 2.8], ni) == 1
 
 
-def test_split_detected_without_net_income_data():
-    """No earnings to cross-check against still trims on the per-share break."""
-    _, trimmed = fe.split_adjusted_series([3.66, 3.04, 2.03, 24.15], [])
-    assert trimmed is True
+def test_no_split_claimed_without_earnings_to_corroborate():
+    """A fourfold per-share move with no earnings alongside it is not evidence
+    of a split — it looks identical to an earnings collapse. Trimming here cut
+    the collapse out of the series and told the reader the data crossed a
+    split. The detector's own docstring promises to leave the data alone when
+    it cannot confirm; now it does."""
+    series, trimmed = fe.split_adjusted_series([3.66, 3.04, 2.03, 24.15], [])
+    assert trimmed is False
+    assert series == [3.66, 3.04, 2.03, 24.15]
+
+
+def test_a_split_is_still_detected_when_earnings_confirm_it():
+    ni = [4831e6, 4062e6, 2762e6, 2900e6]
+    series, trimmed = fe.split_adjusted_series([3.66, 3.04, 2.03, 24.15], ni)
+    assert trimmed is True and series == [3.66, 3.04, 2.03]
 
 
 def test_eps_growth_survives_the_split():
