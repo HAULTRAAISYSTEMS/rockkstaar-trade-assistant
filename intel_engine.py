@@ -2096,6 +2096,12 @@ def _econ_from_finnhub() -> list[dict]:
                 "reason":     _econ_reason(event_name),
                 "days_away":  days_away,
                 "is_today":   days_away == 0,
+                # Consensus / prior — carried through from the raw Finnhub payload
+                # (these were previously dropped). None when Finnhub omits them.
+                "estimate":   e.get("estimate"),
+                "previous":   e.get("prev"),
+                "actual":     e.get("actual"),
+                "unit":       e.get("unit") or "",
             })
         events.sort(key=lambda x: x["days_away"])
         return events
@@ -2154,6 +2160,11 @@ def _econ_static_fallback() -> list[dict]:
             "reason":     _econ_reason(event_name),
             "days_away":  days_away,
             "is_today":   days_away == 0,
+            # Static fallback has no consensus/prior data — leave None (→ shown as —)
+            "estimate":   None,
+            "previous":   None,
+            "actual":     None,
+            "unit":       "",
         })
     return events
 

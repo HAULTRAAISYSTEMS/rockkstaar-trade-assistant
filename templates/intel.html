@@ -77,6 +77,10 @@
   button.elite-link{border:0;background:transparent;padding:0;font-family:inherit;cursor:pointer}button.elite-link:disabled{cursor:wait;opacity:.65}
   .intel-lower{display:grid;grid-template-columns:1.15fr 1fr;gap:16px}
   .calendar-row{display:grid;grid-template-columns:72px 1fr auto;gap:12px;align-items:center;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px}.calendar-row:last-child{border-bottom:0}
+  /* Consensus and prior sit under the event name rather than in their own grid
+     columns, so a long release name still wraps sanely on a phone. Hidden
+     entirely when the feed omits both, instead of printing a pair of dashes. */
+  .cal-consensus{display:block;margin-top:3px;font-size:10.5px;letter-spacing:.02em;color:rgba(255,255,255,.42)}
   .impact{padding:3px 6px;border-radius:5px;background:rgba(231,184,75,.09);color:var(--elite-gold);font:700 9px var(--font-mono)}.impact.high{color:#ff7c83;background:rgba(255,105,115,.1)}
   .flow-wrap{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;padding:14px}
   .flow-tile{padding:12px;border:1px solid rgba(255,255,255,.055);border-radius:11px;background:#0c1014}.flow-tile>div{display:flex;justify-content:space-between;gap:10px;color:#b9c0c8;font-size:11px}.flow-track{height:4px;margin-top:8px;border-radius:4px;background:#07090b;overflow:hidden}.flow-track i{display:block;height:100%;border-radius:4px}
@@ -182,7 +186,7 @@
 
   <section class="intel-lower">
     <div class="intel-card"><div class="intel-card-head"><h2>Economic Catalyst Calendar</h2><a class="elite-link" href="{{ url_for('catalyst_calendar') }}">Full calendar</a></div>
-      {% for e in events %}<div class="calendar-row"><span class="mono {{ 'warn' if e.impact=='HIGH' else 'faint' }}">{{ e.time or e.date_label or '—' }}</span><span class="{{ 'hi' if e.impact=='HIGH' else 'muted' }}">{{ e.event }}</span><span class="impact {{ 'high' if e.impact=='HIGH' }}">{{ e.impact|title }}</span></div>{% else %}<div class="intel-foot">No upcoming events cached.</div>{% endfor %}
+      {% for e in events %}<div class="calendar-row"><span class="mono {{ 'warn' if e.impact=='HIGH' else 'faint' }}">{{ e.time or e.date_label or '—' }}</span><span class="{{ 'hi' if e.impact=='HIGH' else 'muted' }}">{{ e.event }}{% if e.estimate is not none or e.previous is not none %}<span class="cal-consensus mono">est {{ e.estimate if e.estimate is not none else '—' }}{{ e.unit }} · prev {{ e.previous if e.previous is not none else '—' }}{{ e.unit }}</span>{% endif %}</span><span class="impact {{ 'high' if e.impact=='HIGH' }}">{{ e.impact|title }}</span></div>{% else %}<div class="intel-foot">No upcoming events cached.</div>{% endfor %}
     </div>
     <div class="intel-card"><div class="intel-card-head"><h2>Sector Money Flow</h2><span>1-day move</span></div><div class="flow-wrap">
       {% for s in money_flow %}{% set p=s.chg_1d or 0 %}<div class="flow-tile"><div><span>{{ s.name or s.ticker }}</span><span class="mono {{ 'pos' if p>0 else ('neg' if p<0 else 'faint') }}">{{ '%+.1f'|format(p) }}%</span></div><div class="flow-track"><i style="width:{{ s.flow_score if s.flow_score is not none else 50 }}%;background:{{ 'var(--pos-500)' if p>0 else 'var(--neg-500)' }}"></i></div></div>{% else %}<span class="intel-mini">Sector data unavailable.</span>{% endfor %}
