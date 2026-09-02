@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+from datetime import datetime
 import requests as _req_module
 from typing import Any
 
@@ -44,6 +45,33 @@ _CIK_OVERRIDES: dict[str, tuple[str, str]] = {
     "GEHC": ("0001835016", "GE HealthCare Technologies Inc."),
     "SOLV": ("0001974964", "Solventum Corp"),        # 3M spinoff Apr 2024
 }
+
+
+def _period_days(fact: dict) -> int:
+    """Length of an XBRL fact's period in days. Instantaneous facts return 0."""
+    start, end = fact.get("start"), fact.get("end")
+    if not start or not end:
+        return 0
+    try:
+        return (datetime.strptime(end, "%Y-%m-%d").date()
+                - datetime.strptime(start, "%Y-%m-%d").date()).days
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_annual_period(fact: dict) -> bool:
+    """True for balance-sheet instants and for full-year duration facts.
+
+    Income-statement and cash-flow concepts are durations. A 10-K reports the
+    fiscal year AND its fourth quarter for the same period end, so without a
+    duration filter a quarterly GrossProfit could be paired with annual revenue.
+    Revenue and net income happened to survive this; gross profit and operating
+    income did not.
+    """
+    if "start" not in fact:
+        return True                      # instant - balance sheet item
+    days = _period_days(fact)
+    return 300 <= days <= 400            # a fiscal year, 52/53-week years included
 
 
 def _edgar_cik(ticker: str) -> tuple[str, str] | tuple[None, None]:
@@ -153,13 +181,24 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                     v for v in usd_vals
                     if v.get("form") in ("10-K", "20-F", "40-F")
                     and "end" in v and "val" in v
+                    and _is_annual_period(v)
                 ]
                 if not annual:
                     continue
                 by_end: dict[str, dict] = {}
                 for v in annual:
                     end = v["end"]
-                    if end not in by_end or v.get("accn", "") > by_end[end].get("accn", ""):
+                    incumbent = by_end.get(end)
+                    if incumbent is None:
+                        by_end[end] = v
+                        continue
+                    # Prefer the longer period first, then the later filing. A 10-K
+                    # carries both 12-month and 3-month facts for the same concept
+                    # and the same period end; picking by accession alone could
+                    # select the quarter, which then divided into annual revenue
+                    # produced single-digit margins.
+                    if (_period_days(v), str(v.get("accn", ""))) > (
+                            _period_days(incumbent), str(incumbent.get("accn", ""))):
                         by_end[end] = v
                 sorted_vals = sorted(by_end.values(), key=lambda x: x["end"], reverse=True)
                 return [v["val"] for v in sorted_vals[:n]]

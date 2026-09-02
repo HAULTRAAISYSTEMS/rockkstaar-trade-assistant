@@ -88,3 +88,53 @@ def test_missing_current_portion_falls_back_to_total_debt():
 def test_missing_st_investments_falls_back_to_cash():
     result = fe.score_fundamentals(_raw(cash_and_st_investments=[None], short_term_debt=[100.0]))
     assert _row(result, "cash_covers_debt")["passed"] is True
+
+
+# --- EDGAR period selection -------------------------------------------------
+# Prior-year gross and operating margins showed single digits where the filing
+# gives ~60% and ~37%. _annual() filtered XBRL facts by FORM but not by period
+# duration, and broke ties on accession number. A 10-K carries both the fiscal
+# year and its fourth quarter for the same period end, so a quarterly GrossProfit
+# could win and then be divided into annual revenue.
+
+def fact(start=None, end="2026-06-30", val=1.0, accn="a-1", form="10-K"):
+    row = {"end": end, "val": val, "accn": accn, "form": form}
+    if start:
+        row["start"] = start
+    return row
+
+
+def test_full_year_duration_is_annual():
+    assert fe._is_annual_period(fact(start="2025-07-01")) is True
+
+
+@pytest.mark.parametrize("start", ["2026-04-01", "2026-01-01", "2026-06-01"])
+def test_sub_annual_durations_rejected(start):
+    assert fe._is_annual_period(fact(start=start)) is False
+
+
+def test_balance_sheet_instants_are_kept():
+    """Instantaneous facts have no start date and must not be filtered out."""
+    assert fe._is_annual_period(fact()) is True
+
+
+def test_53_week_fiscal_year_accepted():
+    """Retailers and some tech filers run 52/53-week years."""
+    assert fe._is_annual_period(fact(start="2025-06-24", end="2026-06-30")) is True
+
+
+def test_multi_year_duration_rejected():
+    assert fe._is_annual_period(fact(start="2024-07-01", end="2026-06-30")) is False
+
+
+def test_period_days_is_malformed_safe():
+    assert fe._period_days({"start": "nonsense", "end": "2026-06-30"}) == 0
+    assert fe._period_days({"end": "2026-06-30"}) == 0
+    assert fe._period_days({}) == 0
+
+
+def test_quarterly_fact_would_have_produced_a_single_digit_margin():
+    """Guards the arithmetic that made this visible in the first place."""
+    annual_gp, quarterly_gp, revenue = 8_324_000_000, 1_220_000_000, 13_579_000_000
+    assert round(quarterly_gp / revenue * 100) == 9
+    assert round(annual_gp / revenue * 100) == 61
