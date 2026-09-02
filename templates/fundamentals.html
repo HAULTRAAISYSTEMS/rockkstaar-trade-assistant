@@ -199,6 +199,34 @@
       </p>
       {% endif %}
 
+      <!-- Split notice -->
+      {% if data.split_notice %}
+      <div class="split-notice">
+        <span class="split-notice-hd">Read this before the numbers</span>
+        <p>{{ data.split_notice }}</p>
+      </div>
+      {% endif %}
+
+      <!-- Valuation -->
+      {% if data.valuation and data.valuation.available %}
+      <div class="val-card">
+        <div class="val-head">
+          <span class="val-title">What it costs</span>
+          <span class="val-sub">The scorecard says whether the business is worth owning. It says nothing about price — this does.</span>
+        </div>
+        <div class="val-grid">
+          {% for r in data.valuation.rows %}
+          <div class="val-cell">
+            <span class="val-lbl">{{ r.label }}</span>
+            <span class="val-val tone-{{ r.tone }}">{{ r.value }}</span>
+            {% if r.note %}<span class="val-note">{{ r.note }}</span>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        <p class="val-foot">A great business bought at any price is not a great investment. Fundamentals establish <strong>what</strong> is worth owning; these figures are what the market is charging for it today.</p>
+      </div>
+      {% endif %}
+
       <!-- Filing signals -->
       {% if data.filing_signals %}
       <div class="signals-card{{ ' is-clean' if data.filing_signals.available and not data.filing_signals.signals }}">

@@ -2455,6 +2455,16 @@ def score_fundamentals(raw: dict) -> dict:
         "history":          history,
         "charts":           charts,
         "filing_signals":   filing_signals,
+        "valuation":        raw.get("_valuation") or {"available": False, "rows": []},
+        # A split makes every per-share figure on the page incomparable with
+        # anything a reader has seen from an older source. Say so at the top
+        # rather than in a parenthetical halfway down.
+        "split_notice":     (
+            "The reported per-share series crosses a stock split. Earlier "
+            "years are dropped where the two sides are not comparable, and "
+            "every per-share figure here is on the current basis — a price or "
+            "EPS from before the split will not reconcile with this page."
+            if (eps_split_trimmed or shares_split_trimmed) else ""),
         "derived_lines":    raw.get("derived_lines", []),
         "roe":              raw.get("roe"),
         "roic":             raw.get("roic"),
@@ -2481,7 +2491,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-02.6"
+SCORECARD_VERSION = "2026-09-02.7"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
@@ -2524,6 +2534,19 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
             raw["_filing_signals"] = fetch_filing_signals(ticker)
     except Exception as exc:
         logger.debug("filing signals unavailable for %s: %s", ticker, exc)
+
+    # ── Step 1c: what it costs ───────────────────────────────────────────────
+    # The scorecard says whether a business is worth owning and nothing about
+    # price. A reader who stops there buys a great company at any number.
+    try:
+        from finnhub_ttm import fetch_finnhub_metrics, fetch_finnhub_quote
+        from valuation import build_valuation
+        _metrics = fetch_finnhub_metrics(ticker) or {}
+        if isinstance(raw, dict):
+            raw["_valuation"] = build_valuation(
+                _metrics.get("_raw_metric") or {}, fetch_finnhub_quote(ticker))
+    except Exception as exc:
+        logger.debug("valuation unavailable for %s: %s", ticker, exc)
 
     # ── Step 2: augment with Finnhub TTM data ─────────────────────────────────
     try:

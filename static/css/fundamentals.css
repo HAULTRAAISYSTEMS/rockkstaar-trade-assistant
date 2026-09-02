@@ -545,9 +545,80 @@
 .signal-body strong { font-size: 0.82rem; font-weight: 600; }
 .signal-code { font-size: 0.7rem; letter-spacing: .02em; color: var(--fund-muted, #8b95a7); }
 .signal-why { font-size: 0.74rem; line-height: 1.45; color: rgba(255, 255, 255, .58); }
-.signal-link { font-size: 0.72rem; white-space: nowrap; }
+.signal-link { font-size: 0.72rem; white-space: nowrap; color: #e5b94f;
+  text-decoration: none; border-bottom: 1px solid rgba(229, 185, 79, .35); }
+.signal-link:hover { border-bottom-color: #e5b94f; }
 
 @media (max-width: 640px) {
   .signal { grid-template-columns: 1fr auto; }
   .signal-date { grid-column: 1 / -1; }
+}
+
+/* ── Split notice + valuation ──────────────────────────────────────────────
+   A split makes every per-share figure incomparable with anything the reader
+   has seen elsewhere, so it is stated before the numbers, not after them.
+   ------------------------------------------------------------------------ */
+.split-notice {
+  margin: 16px 0 4px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(242, 181, 68, .45);
+  border-left: 4px solid #f2b544;
+  background: linear-gradient(90deg, rgba(242, 181, 68, .12), rgba(242, 181, 68, .03));
+}
+
+.split-notice-hd {
+  display: block;
+  font-size: .72rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: #f2b544;
+  margin-bottom: 6px;
+}
+
+.split-notice p { margin: 0; font-size: .82rem; line-height: 1.5; }
+
+.val-card {
+  margin: 18px 0 6px;
+  padding: 16px 18px;
+  background: rgba(255, 255, 255, .02);
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 12px;
+}
+
+.val-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+.val-title { font-size: .9rem; font-weight: 600; color: var(--fund-text, #e8ecf3); }
+.val-sub, .val-foot { font-size: .75rem; line-height: 1.45; color: var(--fund-muted, #8b95a7); }
+
+.val-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.val-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid rgba(255, 255, 255, .06);
+  min-width: 0;
+}
+
+.val-lbl { font-size: .66rem; letter-spacing: .12em; text-transform: uppercase; color: var(--fund-muted, #8b95a7); font-weight: 600; }
+.val-val { font-size: 1.32rem; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.val-note { font-size: .7rem; line-height: 1.4; color: rgba(255, 255, 255, .5); }
+
+.tone-pos { color: #41c98d; }
+.tone-neg { color: #f2685c; }
+.tone-warn { color: #f2b544; }
+
+.val-foot { margin: 12px 0 0; }
+
+@media (max-width: 640px) {
+  .val-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+  .val-val { font-size: 1.15rem; }
 }

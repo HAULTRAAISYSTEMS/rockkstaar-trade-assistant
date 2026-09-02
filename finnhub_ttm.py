@@ -236,6 +236,17 @@ def fetch_finnhub_metrics(ticker: str, force_refresh: bool = False) -> dict | No
     return result
 
 
+def fetch_finnhub_quote(ticker: str) -> dict:
+    """Spot price. /stock/metric carries the 52-week range but not the price,
+    and "44% off the high" needs both. Never raises — the valuation strip
+    simply renders without a price if this is unavailable."""
+    try:
+        data = _finnhub_get("/quote", {"symbol": ticker})
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 def _try_save_metrics_cache(ticker: str, data: dict) -> None:
     try:
         from database import save_finnhub_metrics_cache
