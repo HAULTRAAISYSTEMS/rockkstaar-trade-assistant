@@ -81,13 +81,18 @@ def _fiscal_labels(history: list[dict]) -> list[str]:
 
 
 def _grouped_bars(history: list[dict], series_defs: list[dict], fmt,
-                  require: list[str] | None = None) -> dict | None:
+                  require: list[str] | None = None,
+                  mark_declines: str | None = None) -> dict | None:
     """Grouped bar chart. ``series_defs`` is [{key, name, cls}, ...].
 
     A series with no values is dropped from the bars and the legend. Keys named
     in ``require`` must have data or the whole panel is dropped, so a chart
     titled "Free cash flow vs net income" never renders with the cash flow half
     silently missing.
+
+    ``mark_declines`` names a series whose down years get their own class. A
+    year the top line went backwards is the one bar on the chart worth pointing
+    at, and a reader should not have to compare heights to find it.
     """
     rows = list(reversed(history or []))
     if len(rows) < 2:
@@ -123,7 +128,12 @@ def _grouped_bars(history: list[dict], series_defs: list[dict], fmt,
             if value is None:
                 continue
             vy = y_of(value)
+            declined = False
+            if mark_declines and spec["key"] == mark_declines and gi > 0:
+                prior = values[spec["key"]][gi - 1]
+                declined = prior is not None and value < prior
             bars.append({
+                "cls_extra": " is-decline" if declined else "",
                 "x": round(left + si * bar_w, 2),
                 "y": round(min(vy, zero_y), 2),
                 "w": round(max(bar_w - 2, 1), 2),
@@ -231,7 +241,7 @@ def build_charts(history: list[dict] | None) -> list[dict]:
          lambda: _grouped_bars(history, [
              {"key": "revenue_num", "name": "Revenue", "cls": REVENUE_SERIES},
              {"key": "net_income_num", "name": "Net income", "cls": INCOME_SERIES},
-         ], money, require=["revenue_num"])),
+         ], money, require=["revenue_num"], mark_declines="revenue_num")),
         ("margins", "Margin trend",
          "Widening margins mean pricing power; narrowing means competition.",
          lambda: _lines(history, [

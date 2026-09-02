@@ -195,7 +195,7 @@
           <div class="section-header" onclick="toggleSection('sec-{{ loop.index }}')">
             <div class="section-header-left">
               <span class="section-icon">{{ icons.get(sec.name, '📋') }}</span>
-              <span class="section-name">{{ sec.name }}</span>
+              <span class="section-name"><span class="section-ord">Section {{ loop.index }}</span>{{ sec.name }}</span>
             </div>
             <div class="section-summary">
               <div>
@@ -240,6 +240,13 @@
                   {% endif %}
                 </div>
               </div>
+
+              {% if row.points > 0 and row.passed is not none %}
+              <div class="metric-bar" aria-hidden="true">
+                <i class="mb-{{ 'partial' if row.passed == 'partial' else ('pass' if row.passed else 'fail') }}"
+                   style="width: {{ (row.earned / row.points * 100) | round(0, 'floor') | int }}%"></i>
+              </div>
+              {% endif %}
 
               {% if row.edu %}
               <div class="edu-panel" id="edu-{{ sec.name | replace(' ','') }}-{{ loop.index }}">
@@ -329,7 +336,7 @@
             {% if chart.kind == 'bars' %}
               {% for bar in chart.bars %}
               <rect x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.w }}" height="{{ bar.h }}"
-                    rx="2" class="chart-bar {{ bar.cls }}"><title>{{ bar.title }}</title></rect>
+                    rx="2" class="chart-bar {{ bar.cls }}{{ bar.cls_extra }}"><title>{{ bar.title }}</title></rect>
               {% endfor %}
             {% else %}
               {% for line in chart.lines %}

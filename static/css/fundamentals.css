@@ -717,3 +717,31 @@
 }
 
 .vh-caveat { margin: 5px 0 0; font: 500 10.5px/1.45 var(--font-ui, system-ui); color: var(--elite-faint) }
+
+/* ── Per-criterion fill bar ──────────────────────────────────────────────────
+   A points badge tells you the result; a bar lets you see a section's shape at
+   a glance — which rows carried it and which ones only half did. */
+.metric-bar {
+  height: 3px;
+  margin: 9px 0 2px;
+  border-radius: 2px;
+  background: var(--elite-hairline);
+  overflow: hidden;
+}
+
+.metric-bar i { display: block; height: 100%; border-radius: 2px }
+.metric-bar .mb-pass    { background: var(--pos-500) }
+.metric-bar .mb-partial { background: var(--warn-500) }
+.metric-bar .mb-fail    { background: var(--neg-500) }
+
+/* Section headers numbered the way a report numbers them. */
+.section-ord {
+  display: block;
+  font: 700 9px/1 var(--font-ui, system-ui);
+  letter-spacing: .18em; text-transform: uppercase;
+  color: var(--elite-faint); margin-bottom: 3px;
+}
+
+/* A year the top line went backwards is the one bar worth pointing at. */
+.chart-bar.is-decline { fill: var(--warn-500) }
+.chart-key i.is-decline { background: var(--warn-500) }

@@ -156,3 +156,28 @@ def test_the_roic_panel_appears_when_the_series_is_present():
 
 def test_no_roic_panel_without_the_series():
     assert "roic" not in [c["key"] for c in fc.build_charts(history())]
+
+
+def test_a_year_the_top_line_fell_is_marked():
+    """FY24 revenue fell. That is the one bar on the chart worth pointing at,
+    and a reader should not have to compare heights to find it."""
+    rows = history()          # FY24 revenue 9812 against FY23's 10496
+    panel = chart(fc.build_charts(rows), "revenue_income")
+    revenue = [b for b in panel["bars"] if b["cls"] == fc.REVENUE_SERIES]
+    marked = [i for i, b in enumerate(revenue) if b["cls_extra"]]
+    assert marked == [2]      # FY22, FY23, FY24 -> the third bar
+
+
+def test_only_the_top_line_gets_the_treatment():
+    """A dip in net income is not the same statement about the business."""
+    panel = chart(fc.build_charts(history()), "revenue_income")
+    income = [b for b in panel["bars"] if b["cls"] == fc.INCOME_SERIES]
+    assert all(not b["cls_extra"] for b in income)
+
+
+def test_a_chart_with_no_declines_marks_nothing():
+    rows = history()
+    for i, row in enumerate(rows):
+        row["revenue_num"] = 200e8 - i * 10e8      # newest-first, rising
+    panel = chart(fc.build_charts(rows), "revenue_income")
+    assert all(not b["cls_extra"] for b in panel["bars"])
