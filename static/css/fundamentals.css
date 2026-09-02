@@ -500,3 +500,54 @@
   .chart-grid { grid-template-columns: 1fr; gap: 12px; }
   .chart-card { padding: 12px 12px 8px; }
 }
+
+/* ── Filing signals ────────────────────────────────────────────────────────
+   Governance red flags read from 8-K item codes. Severity carries the colour
+   because the reader needs to know a restatement is not an auditor change.
+   ------------------------------------------------------------------------ */
+.signals-card {
+  margin: 18px 0 6px;
+  padding: 16px 18px;
+  background: rgba(242, 104, 92, 0.04);
+  border: 1px solid rgba(242, 104, 92, 0.22);
+  border-radius: 12px;
+}
+
+.signals-card.is-clean {
+  background: rgba(65, 201, 141, 0.04);
+  border-color: rgba(65, 201, 141, 0.20);
+}
+
+.signals-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.signals-title { font-size: 0.9rem; font-weight: 600; color: var(--fund-text, #e8ecf3); }
+.signals-sub, .signals-note { font-size: 0.75rem; line-height: 1.45; color: var(--fund-muted, #8b95a7); }
+.signals-note { margin: 0; }
+
+.signals-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+
+.signal {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 3px solid rgba(255, 255, 255, 0.2);
+}
+
+.signal.sev-critical { border-left-color: #f2685c; }
+.signal.sev-high     { border-left-color: #f2b544; }
+.signal.sev-medium   { border-left-color: #8b95a7; }
+
+.signal-date { font-size: 0.73rem; font-variant-numeric: tabular-nums; color: var(--fund-muted, #8b95a7); padding-top: 1px; }
+.signal-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.signal-body strong { font-size: 0.82rem; font-weight: 600; }
+.signal-code { font-size: 0.7rem; letter-spacing: .02em; color: var(--fund-muted, #8b95a7); }
+.signal-why { font-size: 0.74rem; line-height: 1.45; color: rgba(255, 255, 255, .58); }
+.signal-link { font-size: 0.72rem; white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .signal { grid-template-columns: 1fr auto; }
+  .signal-date { grid-column: 1 / -1; }
+}

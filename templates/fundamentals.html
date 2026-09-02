@@ -199,6 +199,36 @@
       </p>
       {% endif %}
 
+      <!-- Filing signals -->
+      {% if data.filing_signals %}
+      <div class="signals-card{{ ' is-clean' if data.filing_signals.available and not data.filing_signals.signals }}">
+        <div class="signals-head">
+          <span class="signals-title">What the filings disclose</span>
+          <span class="signals-sub">8-K item codes over the last 3 years — filed facts, not inferences</span>
+        </div>
+        {% if not data.filing_signals.available %}
+        <p class="signals-note">Could not check ({{ data.filing_signals.reason or 'unavailable' }}). This is not a clean record — it means the filing index could not be read.</p>
+        {% elif not data.filing_signals.signals %}
+        <p class="signals-note">No restatements, auditor changes, late filings or delisting notices in the period.</p>
+        {% else %}
+        <ul class="signals-list">
+          {% for s in data.filing_signals.signals %}
+          <li class="signal sev-{{ s.severity }}">
+            <span class="signal-date">{{ s.date }}</span>
+            <span class="signal-body">
+              <strong>{{ s.label }}</strong>
+              {% if s.item %}<span class="signal-code">{{ s.form }} item {{ s.item }}</span>
+              {% else %}<span class="signal-code">{{ s.form }}</span>{% endif %}
+              <span class="signal-why">{{ s.why }}</span>
+            </span>
+            {% if s.url %}<a class="signal-link" href="{{ s.url }}" target="_blank" rel="noopener">Filing ↗</a>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endif %}
+
       <!-- Charts -->
       {% if data.charts %}
       <div class="chart-grid">

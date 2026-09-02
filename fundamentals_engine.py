@@ -1022,6 +1022,11 @@ EDUCATION: dict[str, dict[str, str]] = {
 # ─── Red flag definitions ─────────────────────────────────────────────────────
 
 RED_FLAG_DEFS = {
+    "restated_financials": "The company has told investors its previously issued financial statements cannot be relied on (8-K item 4.02).",
+    "bankruptcy_filing": "The company has filed for bankruptcy or entered receivership (8-K item 1.03).",
+    "delisting_notice": "The company has received a delisting or listing-standard notice from its exchange (8-K item 3.01).",
+    "auditor_changed": "The company changed its accounting firm (8-K item 4.01).",
+    "late_filing": "The company told the SEC it could not file a periodic report on time.",
     "income_positive_fcf_negative": "Net income is positive but Free Cash Flow is negative — earnings may not be backed by real cash.",
     "debt_growing_faster_than_revenue": "Total debt is growing faster than revenue year-over-year — leverage is increasing relative to the business.",
     "goodwill_impairment": "Goodwill impairment detected in the most recent year — a prior acquisition has declined in value.",
@@ -1037,6 +1042,12 @@ DOWNGRADE_TRIGGERS = {
     "debt_growing_faster_than_revenue",
     "goodwill_impairment",
     "goodwill_over_30pct",
+    # Filed disclosures, not derived from the statements. A restatement says
+    # the numbers every other row is built from cannot be relied on, so no
+    # score computed from them earns a top verdict.
+    "restated_financials",
+    "bankruptcy_filing",
+    "delisting_notice",
 }
 
 # Worst-first, so a downgrade can step exactly one band.
@@ -2238,6 +2249,30 @@ def score_fundamentals(raw: dict) -> dict:
             "label": RED_FLAG_DEFS["goodwill_impairment"],
         })
 
+    # Filed disclosures become red flags alongside the derived ones. These are
+    # not inferred from the statements — an 8-K item code is the company saying
+    # the thing outright — and a restatement in particular says the numbers
+    # every other row is built from cannot be relied on.
+    _signal_flags = {
+        "4.02": "restated_financials",
+        "1.03": "bankruptcy_filing",
+        "3.01": "delisting_notice",
+        "4.01": "auditor_changed",
+    }
+    filing_signals = raw.get("_filing_signals") or {}
+    _seen_flags = {f["key"] for f in red_flags}
+    for signal in (filing_signals.get("signals") or []):
+        key = _signal_flags.get(signal.get("item"))
+        if key is None and signal.get("form", "").startswith("NT "):
+            key = "late_filing"
+        if not key or key in _seen_flags:
+            continue
+        _seen_flags.add(key)
+        red_flags.append({
+            "key": key,
+            "label": f"{RED_FLAG_DEFS[key]} Filed {signal.get('date', '')}.",
+        })
+
     # ── Verdict ───────────────────────────────────────────────────────────────
     score_pct = (total_earned / total_possible * 40) if total_possible > 0 else 0
 
@@ -2419,6 +2454,7 @@ def score_fundamentals(raw: dict) -> dict:
         "error":            raw.get("error"),
         "history":          history,
         "charts":           charts,
+        "filing_signals":   filing_signals,
         "derived_lines":    raw.get("derived_lines", []),
         "roe":              raw.get("roe"),
         "roic":             raw.get("roic"),
@@ -2445,7 +2481,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-02.5"
+SCORECARD_VERSION = "2026-09-02.6"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
@@ -2478,6 +2514,16 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
 
     # ── Step 1: fetch historical annual data ──────────────────────────────────
     raw = fetch_fundamentals_raw(ticker)
+
+    # ── Step 1b: what the company had to disclose ────────────────────────────
+    # Never fatal: a page whose statements loaded fine should still render if
+    # the filing index is unreachable.
+    try:
+        from filing_signals import fetch_filing_signals
+        if isinstance(raw, dict):
+            raw["_filing_signals"] = fetch_filing_signals(ticker)
+    except Exception as exc:
+        logger.debug("filing signals unavailable for %s: %s", ticker, exc)
 
     # ── Step 2: augment with Finnhub TTM data ─────────────────────────────────
     try:
