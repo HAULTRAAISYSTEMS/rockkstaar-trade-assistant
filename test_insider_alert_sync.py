@@ -77,3 +77,17 @@ def test_sync_skipped_when_no_tickers(monkeypatch):
     monkeypatch.setattr(database, "get_setting", lambda *a, **k: None, raising=False)
     result = sync.sync_insider_alerts(object(), [], now=NOW)
     assert result["ran"] is False and result["reason"] == "no_tickers"
+
+
+def test_run_distinguishes_skipped_from_ran_with_nothing_found(monkeypatch):
+    """0 added must not mean both 'interval-gated' and 'ran, found nothing'."""
+    monkeypatch.setattr(sync, "sync_insider_alerts",
+                        lambda *a, **k: {"ran": False, "reason": "interval", "added": 0})
+    monkeypatch.setattr(sync, "sync_earnings_alerts",
+                        lambda *a, **k: {"ran": True, "added": 0})
+    result = sync.run(object(), ["NVDA"])
+    assert result["insider_sync_ran"] is False
+    assert result["insider_sync_skipped"] == "interval"
+    assert result["earnings_sync_ran"] is True
+    assert "earnings_sync_skipped" not in result
+    assert result["insider_alerts_added"] == result["earnings_alerts_added"] == 0

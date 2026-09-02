@@ -135,6 +135,11 @@ def run(conn, tickers, *, now=None, force: bool = False) -> dict:
         try:
             result = call()
             summary[f"{label}_alerts_added"] = result.get("added", 0)
+            # Without this, 0 means both "interval-gated, did not run" and
+            # "ran and found nothing" - two very different things to debug.
+            summary[f"{label}_sync_ran"] = bool(result.get("ran"))
+            if not result.get("ran") and result.get("reason"):
+                summary[f"{label}_sync_skipped"] = result["reason"]
         except Exception as exc:
             summary["alert_sync_errors"].append(f"{label}:{type(exc).__name__}")
     return summary

@@ -30,7 +30,7 @@ def _merge(total, summary, prefix=""):
 def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
     priority=[str(t).strip().upper() for t in (tickers or _tickers_from_env()) if str(t).strip()]
     conn=get_db()
-    total={"priority_tickers":len(priority),"events_discovered":0,"tickers_resolved":0,"drafts_created":0,"duplicates":0,"low_importance_skipped":0,"stale_skipped":0,"malformed_skipped":0,"no_ticker_skipped":0,"provider_failures":[],"errors":[],"auto_published":0,"auto_publish_enabled":False,"insider_alerts_added":0,"earnings_alerts_added":0,"alert_sync_errors":[]}
+    total={"priority_tickers":len(priority),"events_discovered":0,"tickers_resolved":0,"drafts_created":0,"duplicates":0,"low_importance_skipped":0,"stale_skipped":0,"malformed_skipped":0,"no_ticker_skipped":0,"provider_failures":[],"errors":[],"auto_published":0,"auto_publish_enabled":False,"insider_alerts_added":0,"earnings_alerts_added":0,"alert_sync_errors":[],"queue_incoming":None,"queue_newest":""}
     try:
         actor=_admin_actor(conn)
         try:
@@ -56,6 +56,17 @@ def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
         try:
             total.update(insider_alert_sync.run(conn, priority))
         except Exception as exc: total["errors"].append("alert_sync:"+type(exc).__name__)
+        # Queue depth. drafts_created is 0 on most firings by design - a story
+        # creates a draft once, on the first run after it appears, and the next
+        # 5-minute run correctly sees it as a duplicate. Reading a single run
+        # therefore says nothing about whether ingestion is working. These two
+        # numbers do: how much is waiting for review, and how recently anything
+        # was added.
+        try:
+            row = conn.execute("SELECT COUNT(*) AS n, MAX(created_at) AS newest FROM research_posts WHERE status = ?", ("incoming",)).fetchone()
+            total["queue_incoming"] = int(row["n"] or 0)
+            total["queue_newest"] = str(row["newest"] or "")
+        except Exception as exc: total["errors"].append("queue_depth:"+type(exc).__name__)
         conn.commit(); return total
     finally: conn.close()
 
