@@ -193,8 +193,56 @@
         {% if data.fiscal_period_ends %}Statement data covers fiscal years ending
           {{ data.fiscal_period_ends | last }} through {{ data.fiscal_period_ends | first }}.{% endif %}
         {% if data.ttm_period_end %} Latest figures are trailing twelve months to {{ data.ttm_period_end }}{% if data.ttm_quarters_used %} ({{ data.ttm_quarters_used }} quarters){% endif %}.{% endif %}
+        {% if data.derived_lines %}Subtotals the filer does not present were rebuilt from
+          lines it does tag: {{ data.derived_lines | join('; ') }}.{% endif %}
         Fundamentals establish <strong>what</strong> is worth owning, not <strong>when</strong> to buy.
       </p>
+      {% endif %}
+
+      <!-- Charts -->
+      {% if data.charts %}
+      <div class="chart-grid">
+        {% for chart in data.charts %}
+        <figure class="chart-card">
+          <figcaption class="chart-head">
+            <span class="chart-title">{{ chart.title }}</span>
+            <span class="chart-caption">{{ chart.caption }}</span>
+          </figcaption>
+          <div class="chart-legend">
+            {% for item in chart.legend %}
+            <span class="chart-key"><i style="background:{{ item.color }}"></i>{{ item.name }}</span>
+            {% endfor %}
+          </div>
+          <svg class="chart-svg" viewBox="0 0 {{ chart.width }} {{ chart.height }}"
+               role="img" aria-label="{{ chart.title }}" preserveAspectRatio="xMidYMid meet">
+            {% for g in chart.gridlines %}
+            <line class="chart-grid-line{{ ' is-zero' if g.zero }}"
+                  x1="{{ g.x1 }}" y1="{{ g.y }}" x2="{{ g.x2 }}" y2="{{ g.y }}"/>
+            <text class="chart-axis-label" x="{{ g.x1 - 6 }}" y="{{ g.y + 3 }}"
+                  text-anchor="end">{{ g.text }}</text>
+            {% endfor %}
+            {% if chart.kind == 'bars' %}
+              {% for bar in chart.bars %}
+              <rect x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.w }}" height="{{ bar.h }}"
+                    rx="2" fill="{{ bar.color }}"><title>{{ bar.title }}</title></rect>
+              {% endfor %}
+            {% else %}
+              {% for line in chart.lines %}
+              <polyline class="chart-line" points="{{ line.points }}" stroke="{{ line.color }}"/>
+              {% endfor %}
+              {% for pt in chart.points %}
+              <circle cx="{{ pt.cx }}" cy="{{ pt.cy }}" r="3" fill="{{ pt.color }}">
+                <title>{{ pt.title }}</title></circle>
+              {% endfor %}
+            {% endif %}
+            {% for lbl in chart.x_labels %}
+            <text class="chart-axis-label" x="{{ lbl.x }}" y="{{ lbl.y }}"
+                  text-anchor="middle">{{ lbl.text }}</text>
+            {% endfor %}
+          </svg>
+        </figure>
+        {% endfor %}
+      </div>
       {% endif %}
 
       <!-- Historical table -->
@@ -210,6 +258,7 @@
                 <th>Net Income</th>
                 <th>Gross Margin</th>
                 <th>Op. Margin</th>
+                <th>Net Margin</th>
                 <th>Free Cash Flow</th>
                 <th>FCF ÷ NI</th>
                 <th>Op. Cash Flow</th>
@@ -223,6 +272,7 @@
                 <td>{{ yr.net_income }}</td>
                 <td>{{ yr.gross_margin }}</td>
                 <td>{{ yr.operating_margin }}</td>
+                <td>{{ yr.net_margin }}</td>
                 <td>{{ yr.fcf }}</td>
                 <td class="{% if yr.fcf_over_ni %}{{ 'hq-good' if yr.fcf_over_ni >= 1 else ('hq-warn' if yr.fcf_over_ni >= 0.85 else 'hq-bad') }}{% endif %}">
                   {% if yr.fcf_over_ni %}{{ '%.2f'|format(yr.fcf_over_ni) }}x{% else %}—{% endif %}

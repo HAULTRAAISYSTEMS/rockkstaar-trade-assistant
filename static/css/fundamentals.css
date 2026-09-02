@@ -429,3 +429,68 @@
 .fund-provenance{margin:14px 0 4px;padding:11px 14px;border:1px dashed rgba(255,255,255,.13);
   border-radius:10px;color:#8d9aad;font:500 11.5px/1.65 var(--font-ui,system-ui)}
 .fund-provenance strong{color:#c3cad3}
+
+/* ── Charts ────────────────────────────────────────────────────────────────
+   Inline SVG, no chart library. Geometry comes from fundamentals_charts.py so
+   the numbers behind a bar are unit-tested like every other figure on the page.
+   ------------------------------------------------------------------------ */
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  margin: 18px 0 6px;
+}
+
+.chart-card {
+  margin: 0;
+  padding: 14px 16px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.chart-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+
+.chart-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--fund-text, #e8ecf3);
+}
+
+.chart-caption {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--fund-muted, #8b95a7);
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 4px;
+  font-size: 0.72rem;
+  color: var(--fund-muted, #8b95a7);
+}
+
+.chart-key { display: inline-flex; align-items: center; gap: 5px; }
+.chart-key i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+.chart-svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.chart-grid-line { stroke: rgba(255, 255, 255, 0.07); stroke-width: 1; }
+.chart-grid-line.is-zero { stroke: rgba(255, 255, 255, 0.22); }
+
+.chart-axis-label {
+  font-size: 10px;
+  fill: var(--fund-muted, #8b95a7);
+  font-family: inherit;
+}
+
+.chart-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+
+@media (max-width: 640px) {
+  .chart-grid { grid-template-columns: 1fr; gap: 12px; }
+  .chart-card { padding: 12px 12px 8px; }
+}

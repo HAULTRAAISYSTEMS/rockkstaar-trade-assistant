@@ -1,0 +1,254 @@
+"""Chart geometry for the fundamentals scorecard.
+
+Pure functions that turn the year-by-year history into SVG coordinates. There
+is no rendering, no Flask and no fetching here, so the arithmetic that places a
+bar can be tested exactly the way the arithmetic behind a metric is. The
+template walks the returned dicts and emits ``<rect>``/``<polyline>`` elements.
+
+Every chart reads oldest year on the left, newest on the right, which is the
+reverse of the history table's newest-first ordering.
+"""
+from __future__ import annotations
+
+WIDTH = 560
+HEIGHT = 220
+PAD_LEFT = 52
+PAD_RIGHT = 10
+PAD_TOP = 16
+PAD_BOTTOM = 30
+
+REVENUE_COLOR = "#4f9cf9"
+INCOME_COLOR = "#41c98d"
+FCF_COLOR = "#c792ea"
+GROSS_COLOR = "#4f9cf9"
+OPERATING_COLOR = "#41c98d"
+NET_COLOR = "#f2b544"
+
+
+def _plot_box():
+    return (PAD_LEFT, PAD_TOP,
+            WIDTH - PAD_LEFT - PAD_RIGHT,
+            HEIGHT - PAD_TOP - PAD_BOTTOM)
+
+
+def money(value) -> str:
+    """Compact dollar label. Mirrors the formatting used in the score rows."""
+    if value is None:
+        return "N/A"
+    sign = "-" if value < 0 else ""
+    n = abs(float(value))
+    for cutoff, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if n >= cutoff:
+            return f"{sign}${n / cutoff:.2f}{suffix}".replace(".00", "")
+    return f"{sign}${n:,.0f}"
+
+
+def percent(value) -> str:
+    return "N/A" if value is None else f"{value * 100:.1f}%"
+
+
+def _nice_bounds(values: list[float], include_zero: bool = True):
+    """A low/high pair with a little headroom, always spanning zero for bars."""
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return 0.0, 1.0
+    lo, hi = min(vals), max(vals)
+    if include_zero:
+        lo, hi = min(lo, 0.0), max(hi, 0.0)
+    if hi == lo:
+        hi = lo + (abs(lo) or 1.0)
+    span = hi - lo
+    # An all-positive bar chart gets an axis that starts exactly at zero, so a
+    # gridline lands on the baseline instead of just below it.
+    pad_lo = 0.0 if (include_zero and lo == 0.0) else span * 0.02
+    return lo - pad_lo, hi + span * 0.08
+
+
+def _fiscal_labels(history: list[dict]) -> list[str]:
+    """FY labels oldest-first, falling back to the row's own label."""
+    labels = []
+    for row in history:
+        end = row.get("period_end")
+        if end and len(str(end)) >= 4:
+            labels.append(f"FY{str(end)[2:4]}")
+        else:
+            labels.append(str(row.get("label") or ""))
+    return labels
+
+
+def _grouped_bars(history: list[dict], series_defs: list[dict], fmt,
+                  require: list[str] | None = None) -> dict | None:
+    """Grouped bar chart. ``series_defs`` is [{key, name, color}, ...].
+
+    A series with no values is dropped from the bars and the legend. Keys named
+    in ``require`` must have data or the whole panel is dropped, so a chart
+    titled "Free cash flow vs net income" never renders with the cash flow half
+    silently missing.
+    """
+    rows = list(reversed(history or []))
+    if len(rows) < 2:
+        return None
+    values = {spec["key"]: [row.get(spec["key"]) for row in rows]
+              for spec in series_defs}
+    for key in require or []:
+        if not any(v is not None for v in values.get(key, [])):
+            return None
+    series_defs = [s for s in series_defs
+                   if any(v is not None for v in values[s["key"]])]
+    if not series_defs:
+        return None
+    flat = [v for spec in series_defs for v in values[spec["key"]] if v is not None]
+    if len(flat) < 2:
+        return None
+
+    lo, hi = _nice_bounds(flat)
+    x0, y0, w, h = _plot_box()
+    group_w = w / len(rows)
+    inner = group_w * 0.68
+    bar_w = inner / len(series_defs)
+
+    def y_of(value):
+        return y0 + h - ((value - lo) / (hi - lo)) * h
+
+    zero_y = y_of(0.0)
+    bars = []
+    for gi, row in enumerate(rows):
+        left = x0 + gi * group_w + (group_w - inner) / 2
+        for si, spec in enumerate(series_defs):
+            value = values[spec["key"]][gi]
+            if value is None:
+                continue
+            vy = y_of(value)
+            bars.append({
+                "x": round(left + si * bar_w, 2),
+                "y": round(min(vy, zero_y), 2),
+                "w": round(max(bar_w - 2, 1), 2),
+                "h": round(abs(zero_y - vy), 2),
+                "color": spec["color"],
+                "title": f"{spec['name']} {_fiscal_labels(rows)[gi]}: {fmt(value)}",
+            })
+    return {
+        "kind": "bars",
+        "width": WIDTH, "height": HEIGHT,
+        "bars": bars,
+        "zero_y": round(zero_y, 2),
+        "gridlines": _with_zero_line(_gridlines(lo, hi, y_of, fmt), zero_y, fmt),
+        "x_labels": [
+            {"x": round(x0 + i * group_w + group_w / 2, 2),
+             "y": HEIGHT - PAD_BOTTOM + 16, "text": label}
+            for i, label in enumerate(_fiscal_labels(rows))
+        ],
+        "legend": [{"name": s["name"], "color": s["color"]} for s in series_defs],
+    }
+
+
+def _with_zero_line(lines, zero_y, fmt):
+    """Guarantee a baseline. Bars that cross zero need one to read correctly,
+    and evenly spaced gridlines will not always land on it."""
+    if any(line["zero"] for line in lines):
+        return lines
+    lines.append({"y": round(zero_y, 2), "x1": PAD_LEFT, "x2": WIDTH - PAD_RIGHT,
+                  "text": fmt(0), "zero": True})
+    return sorted(lines, key=lambda line: line["y"], reverse=True)
+
+
+def _gridlines(lo, hi, y_of, fmt, count: int = 4):
+    lines = []
+    for i in range(count + 1):
+        value = lo + (hi - lo) * i / count
+        lines.append({
+            "y": round(y_of(value), 2),
+            "x1": PAD_LEFT, "x2": WIDTH - PAD_RIGHT,
+            "text": fmt(value),
+            "zero": abs(value) < (hi - lo) * 1e-9,
+        })
+    return lines
+
+
+def _lines(history: list[dict], series_defs: list[dict]) -> dict | None:
+    """Multi-line chart for percentage series."""
+    rows = list(reversed(history or []))
+    if len(rows) < 2:
+        return None
+    columns = {s["key"]: [row.get(s["key"]) for row in rows] for s in series_defs}
+    flat = [v for col in columns.values() for v in col if v is not None]
+    if len(flat) < 2:
+        return None
+
+    lo, hi = _nice_bounds(flat, include_zero=False)
+    lo = min(lo, 0.0) if min(flat) < 0 else max(0.0, lo)
+    x0, y0, w, h = _plot_box()
+    step = w / max(len(rows) - 1, 1)
+
+    def y_of(value):
+        return y0 + h - ((value - lo) / (hi - lo)) * h
+
+    lines, points = [], []
+    for spec in series_defs:
+        coords = []
+        for i, value in enumerate(columns[spec["key"]]):
+            if value is None:
+                continue
+            px, py = round(x0 + i * step, 2), round(y_of(value), 2)
+            coords.append(f"{px},{py}")
+            points.append({"cx": px, "cy": py, "color": spec["color"],
+                           "title": f"{spec['name']}: {percent(value)}"})
+        if len(coords) >= 2:
+            lines.append({"points": " ".join(coords), "color": spec["color"],
+                          "name": spec["name"]})
+    if not lines:
+        return None
+    return {
+        "kind": "lines",
+        "width": WIDTH, "height": HEIGHT,
+        "lines": lines, "points": points,
+        "gridlines": _gridlines(lo, hi, y_of, percent),
+        "x_labels": [
+            {"x": round(x0 + i * step, 2), "y": HEIGHT - PAD_BOTTOM + 16, "text": label}
+            for i, label in enumerate(_fiscal_labels(rows))
+        ],
+        "legend": [{"name": s["name"], "color": s["color"]}
+                   for s in series_defs
+                   if any(v is not None for v in columns[s["key"]])],
+    }
+
+
+def build_charts(history: list[dict] | None) -> list[dict]:
+    """Charts for the fundamentals page, in display order.
+
+    A chart that cannot be drawn from at least two years of data is dropped
+    rather than rendered as an empty frame, so a thin filer shows fewer panels
+    instead of misleading ones.
+    """
+    history = history or []
+    specs = [
+        ("revenue_income", "Revenue and net income",
+         "Top line against what actually reaches shareholders.",
+         lambda: _grouped_bars(history, [
+             {"key": "revenue_num", "name": "Revenue", "color": REVENUE_COLOR},
+             {"key": "net_income_num", "name": "Net income", "color": INCOME_COLOR},
+         ], money, require=["revenue_num"])),
+        ("margins", "Margin trend",
+         "Widening margins mean pricing power; narrowing means competition.",
+         lambda: _lines(history, [
+             {"key": "gross_margin_num", "name": "Gross", "color": GROSS_COLOR},
+             {"key": "operating_margin_num", "name": "Operating", "color": OPERATING_COLOR},
+             {"key": "net_margin_num", "name": "Net", "color": NET_COLOR},
+         ])),
+        ("cash_quality", "Free cash flow vs net income",
+         "Cash above reported earnings is the sign of honest accounting.",
+         lambda: _grouped_bars(history, [
+             {"key": "net_income_num", "name": "Net income", "color": INCOME_COLOR},
+             {"key": "fcf_num", "name": "Free cash flow", "color": FCF_COLOR},
+         ], money, require=["fcf_num", "net_income_num"])),
+    ]
+    charts = []
+    for key, title, caption, build in specs:
+        try:
+            chart = build()
+        except Exception:
+            chart = None
+        if chart:
+            chart.update(key=key, title=title, caption=caption)
+            charts.append(chart)
+    return charts

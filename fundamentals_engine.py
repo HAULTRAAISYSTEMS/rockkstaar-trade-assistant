@@ -17,6 +17,8 @@ from datetime import datetime
 import requests as _req_module
 from typing import Any
 
+from fundamentals_charts import build_charts
+
 logger = logging.getLogger(__name__)
 
 # ─── SEC EDGAR data source (primary — completely free, no API key needed) ────
@@ -213,8 +215,19 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
         return None
 
     # ── 3. Helper: extract up to n annual values, most recent first ──────────
-    def _annual_dated(concepts, n: int = 5):
-        """Try each concept in order; return (period_end, value) newest-first."""
+    def _annual_dated(concepts, n: int = 5, merge: bool = False):
+        """Try each concept in order; return (period_end, value) newest-first.
+
+        ``merge`` keeps going past the first concept that has facts and lets
+        later concepts fill period ends the earlier ones did not cover. Filers
+        rename lines as the taxonomy moves - revenue went from ``Revenues`` to
+        ``RevenueFromContractWithCustomerExcludingAssessedTax`` in 2019 - so
+        stopping at the first match returned only whatever coverage that one
+        era happened to have. Pass merge=True only for concepts that are
+        genuine renames of the same line: basic and diluted EPS, or net income
+        and comprehensive income, are different numbers and must not blend.
+        """
+        collected: dict[str, dict] = {}
         if isinstance(concepts, str):
             concepts = [concepts]
         namespaces = []
@@ -253,9 +266,17 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                     if (_period_days(v), str(v.get("accn", ""))) > (
                             _period_days(incumbent), str(incumbent.get("accn", ""))):
                         by_end[end] = v
-                sorted_vals = sorted(by_end.values(), key=lambda x: x["end"], reverse=True)
-                return [(v["end"], v["val"]) for v in sorted_vals[:n]]
-        return []
+                if not merge:
+                    sorted_vals = sorted(by_end.values(),
+                                         key=lambda x: x["end"], reverse=True)
+                    return [(v["end"], v["val"]) for v in sorted_vals[:n]]
+                # Earlier concepts win outright; later ones only fill gaps.
+                for _end, _fact in by_end.items():
+                    collected.setdefault(_end, _fact)
+        if not collected:
+            return []
+        sorted_vals = sorted(collected.values(), key=lambda x: x["end"], reverse=True)
+        return [(v["end"], v["val"]) for v in sorted_vals[:n]]
 
     def _annual(concepts, n: int = 5):
         return [val for _end, val in _annual_dated(concepts, n)]
@@ -284,12 +305,24 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                    "Revenues", "SalesRevenueNet", "SalesRevenueGoodsNet",
                    # IFRS equivalents
                    "Revenue", "RevenueFromContractWithCustomer",
-                   "SalesRevenueFromContractsWithCustomers"])
+                   "SalesRevenueFromContractsWithCustomers"], merge=True)
     gp_d  = _annual_dated(["GrossProfit",
-                   "GrossProfitLoss"])       # IFRS
+                   "GrossProfitLoss"], merge=True)       # IFRS
     oi_d  = _annual_dated(["OperatingIncomeLoss",
                    "ProfitLossFromOperatingActivities",  # IFRS
-                   "OperatingProfit"])
+                   "OperatingProfit"], merge=True)
+    # Components used to rebuild subtotals a filer may never present on the
+    # face of its income statement.
+    cor_d = _annual_dated(["CostOfRevenue",
+                   "CostOfGoodsAndServicesSold",
+                   "CostOfGoodsSold", "CostOfSales", "CostOfServices",
+                   "CostOfRevenueFromContractWithCustomerExcludingAssessedTax",
+                   # IFRS
+                   "CostOfSalesIfrs"], merge=True)
+    tce_d = _annual_dated(["CostsAndExpenses",
+                   "BenefitsLossesAndExpenses"], merge=True)
+    opex_d = _annual_dated(["OperatingExpenses",
+                   "OperatingCostsAndExpenses"], merge=True)
     ni_d  = _annual_dated(["NetIncomeLoss", "NetIncome",
                    "NetIncomeLossAvailableToCommonStockholdersBasic",
                    # IFRS equivalents
@@ -309,6 +342,60 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
     _timeline = sorted(
         {end for pairs in _dated.values() for end, _val in pairs}, reverse=True)[:5]
     _aligned = _align(_dated, _timeline)
+
+    # ── 4b. Rebuild the subtotals the filer never tagged ─────────────────────
+    # KLA runs "Total revenues" straight into "Costs and expenses" with no
+    # gross profit subtotal on the face of the statement, so EDGAR carries no
+    # GrossProfit fact for any year. The margin trail was therefore blank for
+    # every historical year while the TTM provider supplied the newest point
+    # alone - the page showed 61.6% and then four N/As. Both subtotals are
+    # identities over lines the filer does tag, so rebuild them instead of
+    # reporting the history as unavailable. Only gaps are filled; a directly
+    # tagged value is never overwritten.
+    _rev_a = _aligned["revenue"]
+    _gp_a  = _aligned["gross_profit"]
+    _oi_a  = _aligned["operating_income"]
+    _cor_a = _align({"x": cor_d}, _timeline)["x"]
+    _tce_a = _align({"x": tce_d}, _timeline)["x"]
+    _opx_a = _align({"x": opex_d}, _timeline)["x"]
+    derived_lines: list[str] = []
+
+    def _fill_gaps(target, compute, plausible) -> int:
+        filled = 0
+        for i in range(len(_timeline)):
+            if target[i] is not None:
+                continue
+            candidate = compute(i)
+            if candidate is None or not plausible(candidate, i):
+                continue
+            target[i] = candidate
+            filled += 1
+        return filled
+
+    def _plausible_gp(value, i):
+        rev = _rev_a[i]
+        return rev is not None and rev > 0 and 0 < value <= rev
+
+    def _plausible_oi(value, i):
+        rev = _rev_a[i]
+        if rev is None or rev <= 0 or value > rev:
+            return False
+        gp = _gp_a[i]
+        # Operating income cannot exceed gross profit; 2% of slack absorbs
+        # rounding and the odd credit booked below the gross line.
+        return gp is None or value <= gp * 1.02
+
+    def _diff(a, b):
+        return lambda i: (a[i] - b[i]) if a[i] is not None and b[i] is not None else None
+
+    if _fill_gaps(_gp_a, _diff(_rev_a, _cor_a), _plausible_gp):
+        derived_lines.append("gross profit = revenue - cost of revenue")
+    if _fill_gaps(_oi_a, _diff(_rev_a, _tce_a), _plausible_oi):
+        derived_lines.append("operating income = revenue - total costs and expenses")
+    if _fill_gaps(_oi_a, _diff(_gp_a, _opx_a), _plausible_oi):
+        derived_lines.append("operating income = gross profit - operating expenses")
+
+    result["derived_lines"] = derived_lines
     result.update(
         revenue=_aligned["revenue"], gross_profit=_aligned["gross_profit"],
         operating_income=_aligned["operating_income"],
@@ -330,12 +417,54 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                    "CurrentAssets"])            # IFRS
     cl  = _annual(["LiabilitiesCurrent",
                    "CurrentLiabilities"])       # IFRS
-    csh = _annual(["CashAndCashEquivalentsAtCarryingValue",
+    csh_pairs = _annual_dated(["CashAndCashEquivalentsAtCarryingValue",
                    "CashCashEquivalentsAndShortTermInvestments",
                    "CashAndCashEquivalents",
                    # IFRS equivalents
                    "CashAndCashEquivalentsIfrs",
                    "CashAndBankBalancesAtCentralBanks"])
+    csh = [val for _end, val in csh_pairs]
+    _cash_ends = [end for end, _val in csh_pairs]
+
+    # Liquidity and near-term obligations. Neither of these was ever populated
+    # on the EDGAR path, so the cash-coverage row compared bare cash against
+    # TOTAL debt and reported "current portion unavailable" - it could not pass
+    # for any company carrying termed-out long-term debt. Both series are keyed
+    # to the cash series' period ends so index 0 compares the same balance
+    # sheet date on both sides rather than whichever date each concept happened
+    # to cover.
+    _csi_map = dict(_annual_dated(["CashCashEquivalentsAndShortTermInvestments"]))
+    _sti_map = dict(_annual_dated(["ShortTermInvestments",
+                   "AvailableForSaleSecuritiesDebtSecuritiesCurrent",
+                   "MarketableSecuritiesCurrent",
+                   "AvailableForSaleSecuritiesCurrent",
+                   "OtherShortTermInvestments",
+                   # IFRS
+                   "CurrentInvestments"], merge=True))
+    # DebtCurrent is every borrowing due inside a year and comes first because
+    # a coverage test wants the whole near-term obligation, not just the
+    # current slice of long-term notes.
+    _std_map = dict(_annual_dated(["DebtCurrent",
+                   "LongTermDebtCurrent",
+                   "LongTermDebtAndCapitalLeaseObligationsCurrent",
+                   "ShortTermBorrowings",
+                   "OtherShortTermBorrowings",
+                   "CommercialPaper",
+                   "LinesOfCreditCurrent",
+                   # IFRS
+                   "ShorttermBorrowings",
+                   "CurrentPortionOfLongtermBorrowings"]))
+    liquid, std = [], []
+    for _i, _end in enumerate(_cash_ends):
+        _direct = _csi_map.get(_end)
+        if _direct is not None:
+            liquid.append(_direct)
+        else:
+            _c, _s = csh[_i], _sti_map.get(_end)
+            liquid.append((_c + _s) if _c is not None and _s is not None else _c)
+        std.append(_std_map.get(_end))
+    if not any(x is not None for x in std):
+        std = []
     td  = _annual(["LongTermDebt",
                                       "LongTermDebtAndCapitalLeaseObligation",   # correct XBRL concept (no trailing 's')
                                       "LongTermDebtAndCapitalLeaseObligations",  # alternate spelling as fallback
@@ -355,6 +484,7 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
 
     result.update(total_assets=ta, total_liabilities=tl, total_equity=eq,
                   current_assets=ca, current_liabilities=cl, cash=csh,
+                  cash_and_st_investments=liquid, short_term_debt=std,
                   total_debt=td, goodwill=gw, intangible_assets=ia,
                   retained_earnings=re)
     if not ta and not eq:
@@ -618,8 +748,8 @@ EDUCATION: dict[str, dict[str, str]] = {
         "formula": "Total Debt ÷ Total Shareholders' Equity",
     },
     "cash_covers_debt": {
-        "def": "Checks if the company's cash on hand could pay off its entire debt load in under a year.",
-        "why": "A company with enough cash to wipe out its debt overnight is nearly impossible to bankrupt in the short term. This is a core safety signal.",
+        "def": "Checks whether cash and short-term investments cover every borrowing that comes due inside a year.",
+        "why": "A company that can retire its near-term maturities out of liquid assets never has to refinance on someone else's terms. Comparing cash against the entire debt stack instead would fail every healthy company that has termed out its borrowing.",
         "formula": "Cash & Short-Term Investments ≥ Debt Due Within 12 Months",
     },
     "retained_earnings_growth": {
@@ -1290,8 +1420,11 @@ def score_fundamentals(raw: dict) -> dict:
     liquid0 = v(raw.get("cash_and_st_investments", []))
     if liquid0 is None:
         liquid0 = cash0
+    liquid_label = ("cash and short-term investments"
+                    if liquid0 is not None and cash0 is not None and liquid0 != cash0
+                    else "cash and equivalents")
     near_term_debt = v(raw.get("short_term_debt", []))
-    cash_cover_basis = "near-term maturities"
+    cash_cover_basis = "debt due within a year"
     if near_term_debt is None:
         # No current-portion disclosure available; fall back to the old, stricter
         # comparison rather than silently passing everything.
@@ -1338,8 +1471,11 @@ def score_fundamentals(raw: dict) -> dict:
 
     # Gross margin trend
     def _margin(num_vals, den_vals):
+        # Five years, matching the history table. This capped at four, so the
+        # oldest row in the table always read N/A even when both inputs were
+        # present for it.
         margins = []
-        for i in range(min(4, max(len(num_vals), len(den_vals)))):
+        for i in range(min(5, max(len(num_vals), len(den_vals)))):
             num, den = v(num_vals, i), v(den_vals, i)
             if num is not None and den and den != 0:
                 margins.append(num / den)
@@ -1572,7 +1708,7 @@ def score_fundamentals(raw: dict) -> dict:
             f"{_usd(total_debt)} total debt / {_usd(total_equity)} equity = "
             f"{_ratio_or_blank(total_debt, total_equity)}" if total_debt is not None and total_equity else ""),
         "cash_covers_debt": (
-            f"{_usd(liquid0)} cash and short-term investments against {_usd(near_term_debt)} "
+            f"{_usd(liquid0)} {liquid_label} against {_usd(near_term_debt)} "
             f"of {cash_cover_basis}" if liquid0 is not None else ""),
         "retained_earnings_growth": _usd_series(raw.get("retained_earnings", [])),
         "goodwill_ratio": (
@@ -1640,8 +1776,8 @@ def score_fundamentals(raw: dict) -> dict:
             "label": "Cash covers 1+ yr of debt obligations",
             "condition": cash_covers_debt,
             "points": 2,
-            "display_value": (f"{_fmt(cash0)} vs {_fmt(total_debt)} debt"
-                              if cash0 is not None and total_debt is not None else "N/A"),
+            "display_value": (f"{_fmt(liquid0)} vs {_fmt(near_term_debt)} due"
+                              if liquid0 is not None and near_term_debt is not None else "N/A"),
             "metadata": _meta("cash_covers_debt"),
         },
         {
@@ -1955,6 +2091,7 @@ def score_fundamentals(raw: dict) -> dict:
             ocf  = v(raw_data["operating_cash_flow"], i)
             gm   = gm_series[i] if i < len(gm_series) else None
             om   = om_series[i] if i < len(om_series) else None
+            nm   = nm_series[i] if i < len(nm_series) else None
             rows.append({
                 "year_offset": i,
                 "label": f"Year -{i}" if i > 0 else "Latest",
@@ -1970,10 +2107,17 @@ def score_fundamentals(raw: dict) -> dict:
                 "ocf": _fmt(ocf),
                 "gross_margin": _pct_fmt(gm),
                 "operating_margin": _pct_fmt(om),
+                "net_margin": _pct_fmt(nm),
+                # Raw ratios for the charts. The formatted strings above stay
+                # for the table; geometry needs numbers.
+                "gross_margin_num": gm,
+                "operating_margin_num": om,
+                "net_margin_num": nm,
             })
         return rows
 
     history = _history_table(raw)
+    charts = build_charts(history)
 
     # ── Partial score bookkeeping ─────────────────────────────────────────────
     ttm_partial = raw.get("_ttm_partial", {}) or {}
@@ -2009,6 +2153,8 @@ def score_fundamentals(raw: dict) -> dict:
         "missing_fields":   raw.get("missing_fields", []),
         "error":            raw.get("error"),
         "history":          history,
+        "charts":           charts,
+        "derived_lines":    raw.get("derived_lines", []),
         "roe":              raw.get("roe"),
         "roic":             raw.get("roic"),
         "insider_pct":      raw.get("insider_pct"),
@@ -2034,7 +2180,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-01.7"
+SCORECARD_VERSION = "2026-09-02.1"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
