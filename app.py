@@ -6873,6 +6873,26 @@ def intel():
     )
 
 
+@app.route("/api/fundamentals/debug/<ticker>")
+@require_admin
+def api_fundamentals_debug(ticker):
+    """What EDGAR and Finnhub actually return for one ticker.
+
+    Neither the laptop nor the cloud sandbox can reach data.sec.gov, so the
+    running app is the only place this question can be answered. Read-only:
+    no cache write, no scoring.
+    """
+    clean = (ticker or "").strip().upper()[:12]
+    if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", clean):
+        return jsonify({"ok": False, "error": "invalid ticker"}), 400
+    try:
+        from fundamentals_debug import inspect
+        return jsonify({"ok": True, **inspect(clean)})
+    except Exception as exc:
+        logger.exception("fundamentals debug failed for %s", clean)
+        return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 200
+
+
 @app.route("/api/intel/alerts/seen", methods=["POST"])
 def api_intel_alerts_seen():
     """Clear the Command Center unseen-alert badge."""
