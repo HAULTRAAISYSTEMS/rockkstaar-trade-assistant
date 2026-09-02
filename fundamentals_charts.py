@@ -17,13 +17,16 @@ PAD_RIGHT = 10
 PAD_TOP = 16
 PAD_BOTTOM = 30
 
-REVENUE_COLOR = "#4f9cf9"
-INCOME_COLOR = "#41c98d"
-FCF_COLOR = "#c792ea"
-GROSS_COLOR = "#4f9cf9"
-OPERATING_COLOR = "#41c98d"
-NET_COLOR = "#f2b544"
-ROIC_COLOR = "#4f9cf9"
+# Series identity is a CSS class, not a hex value. The page is themed from
+# Elite's tokens and a chart that hardcodes its own palette drifts away from
+# the rest of the app the first time a token changes.
+REVENUE_SERIES = "s-revenue"
+INCOME_SERIES = "s-income"
+FCF_SERIES = "s-fcf"
+GROSS_SERIES = "s-gross"
+OPERATING_SERIES = "s-operating"
+NET_SERIES = "s-net"
+ROIC_SERIES = "s-roic"
 
 
 def _plot_box():
@@ -79,7 +82,7 @@ def _fiscal_labels(history: list[dict]) -> list[str]:
 
 def _grouped_bars(history: list[dict], series_defs: list[dict], fmt,
                   require: list[str] | None = None) -> dict | None:
-    """Grouped bar chart. ``series_defs`` is [{key, name, color}, ...].
+    """Grouped bar chart. ``series_defs`` is [{key, name, cls}, ...].
 
     A series with no values is dropped from the bars and the legend. Keys named
     in ``require`` must have data or the whole panel is dropped, so a chart
@@ -125,7 +128,7 @@ def _grouped_bars(history: list[dict], series_defs: list[dict], fmt,
                 "y": round(min(vy, zero_y), 2),
                 "w": round(max(bar_w - 2, 1), 2),
                 "h": round(abs(zero_y - vy), 2),
-                "color": spec["color"],
+                "cls": spec["cls"],
                 "title": f"{spec['name']} {_fiscal_labels(rows)[gi]}: {fmt(value)}",
             })
     return {
@@ -139,7 +142,7 @@ def _grouped_bars(history: list[dict], series_defs: list[dict], fmt,
              "y": HEIGHT - PAD_BOTTOM + 16, "text": label}
             for i, label in enumerate(_fiscal_labels(rows))
         ],
-        "legend": [{"name": s["name"], "color": s["color"]} for s in series_defs],
+        "legend": [{"name": s["name"], "cls": s["cls"]} for s in series_defs],
     }
 
 
@@ -192,10 +195,10 @@ def _lines(history: list[dict], series_defs: list[dict]) -> dict | None:
                 continue
             px, py = round(x0 + i * step, 2), round(y_of(value), 2)
             coords.append(f"{px},{py}")
-            points.append({"cx": px, "cy": py, "color": spec["color"],
+            points.append({"cx": px, "cy": py, "cls": spec["cls"],
                            "title": f"{spec['name']}: {percent(value)}"})
         if len(coords) >= 2:
-            lines.append({"points": " ".join(coords), "color": spec["color"],
+            lines.append({"points": " ".join(coords), "cls": spec["cls"],
                           "name": spec["name"]})
     if not lines:
         return None
@@ -208,7 +211,7 @@ def _lines(history: list[dict], series_defs: list[dict]) -> dict | None:
             {"x": round(x0 + i * step, 2), "y": HEIGHT - PAD_BOTTOM + 16, "text": label}
             for i, label in enumerate(_fiscal_labels(rows))
         ],
-        "legend": [{"name": s["name"], "color": s["color"]}
+        "legend": [{"name": s["name"], "cls": s["cls"]}
                    for s in series_defs
                    if any(v is not None for v in columns[s["key"]])],
     }
@@ -226,26 +229,26 @@ def build_charts(history: list[dict] | None) -> list[dict]:
         ("revenue_income", "Revenue and net income",
          "Top line against what actually reaches shareholders.",
          lambda: _grouped_bars(history, [
-             {"key": "revenue_num", "name": "Revenue", "color": REVENUE_COLOR},
-             {"key": "net_income_num", "name": "Net income", "color": INCOME_COLOR},
+             {"key": "revenue_num", "name": "Revenue", "cls": REVENUE_SERIES},
+             {"key": "net_income_num", "name": "Net income", "cls": INCOME_SERIES},
          ], money, require=["revenue_num"])),
         ("margins", "Margin trend",
          "Widening margins mean pricing power; narrowing means competition.",
          lambda: _lines(history, [
-             {"key": "gross_margin_num", "name": "Gross", "color": GROSS_COLOR},
-             {"key": "operating_margin_num", "name": "Operating", "color": OPERATING_COLOR},
-             {"key": "net_margin_num", "name": "Net", "color": NET_COLOR},
+             {"key": "gross_margin_num", "name": "Gross", "cls": GROSS_SERIES},
+             {"key": "operating_margin_num", "name": "Operating", "cls": OPERATING_SERIES},
+             {"key": "net_margin_num", "name": "Net", "cls": NET_SERIES},
          ])),
         ("cash_quality", "Free cash flow vs net income",
          "Cash above reported earnings is the sign of honest accounting.",
          lambda: _grouped_bars(history, [
-             {"key": "net_income_num", "name": "Net income", "color": INCOME_COLOR},
-             {"key": "fcf_num", "name": "Free cash flow", "color": FCF_COLOR},
+             {"key": "net_income_num", "name": "Net income", "cls": INCOME_SERIES},
+             {"key": "fcf_num", "name": "Free cash flow", "cls": FCF_SERIES},
          ], money, require=["fcf_num", "net_income_num"])),
         ("roic", "Return on invested capital",
          "Competition drags returns toward the cost of capital. Staying above it is what a moat looks like in the numbers.",
          lambda: _lines(history, [
-             {"key": "roic_num", "name": "ROIC", "color": ROIC_COLOR},
+             {"key": "roic_num", "name": "ROIC", "cls": ROIC_SERIES},
          ])),
     ]
     charts = []

@@ -53,7 +53,7 @@ def test_years_read_oldest_to_newest():
 
 def test_bar_height_is_proportional_to_its_value():
     bars = chart(fc.build_charts(history()), "revenue_income")["bars"]
-    revenue_bars = [b for b in bars if b["color"] == fc.REVENUE_COLOR]
+    revenue_bars = [b for b in bars if b["cls"] == fc.REVENUE_SERIES]
     tallest = max(revenue_bars, key=lambda b: b["h"])
     shortest = min(revenue_bars, key=lambda b: b["h"])
     # FY26 revenue is 13579/9212 = 1.474x FY22's.
@@ -63,7 +63,7 @@ def test_bar_height_is_proportional_to_its_value():
 def test_a_loss_year_draws_below_the_zero_line():
     rows = history(net_income_num=-1200e6)
     panel = chart(fc.build_charts(rows), "revenue_income")
-    loss_bar = [b for b in panel["bars"] if b["color"] == fc.INCOME_COLOR][-1]
+    loss_bar = [b for b in panel["bars"] if b["cls"] == fc.INCOME_SERIES][-1]
     assert loss_bar["y"] == pytest.approx(panel["zero_y"], abs=0.5)
     assert loss_bar["h"] > 0
 
