@@ -4,7 +4,9 @@ All provider content crosses the Phase 6 draft-only ingestion boundary. This
 module has no publication, public notification, or realtime announcement call.
 """
 from __future__ import annotations
-import argparse, json, os
+import argparse
+
+import live_research_expiry, json, os
 from typing import Iterable
 from database import get_db
 from news_fetcher import fetch_headlines
@@ -56,6 +58,12 @@ def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
         try:
             total.update(insider_alert_sync.run(conn, priority))
         except Exception as exc: total["errors"].append("alert_sync:"+type(exc).__name__)
+        # Retire items nobody reviewed in time, before measuring depth so the
+        # number reported is what is actually still waiting. No-op unless
+        # LIVE_RESEARCH_EXPIRE_DAYS is set.
+        try:
+            total.update(live_research_expiry.run(conn))
+        except Exception as exc: total["errors"].append("expiry:"+type(exc).__name__)
         # Queue depth. drafts_created is 0 on most firings by design - a story
         # creates a draft once, on the first run after it appears, and the next
         # 5-minute run correctly sees it as a duplicate. Reading a single run
