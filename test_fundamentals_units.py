@@ -198,3 +198,47 @@ def test_working_shows_the_actual_division():
 def test_working_is_blank_not_broken_when_data_missing():
     result = fe.score_fundamentals(_raw(current_assets=[None], current_liabilities=[None]))
     assert _row(result, "current_ratio")["working"] == ""
+
+
+# --- working lines must be internally consistent ----------------------------
+# The ROE row read "$4.83B net income / $6.35B equity = 85.4%". That division is
+# 76.1%. The inputs were computed from the balance sheet while the result came
+# from the TTM provider, which uses average equity and trailing income.
+# Arithmetic on screen that does not produce its own stated result is worse than
+# no arithmetic at all.
+
+def test_roe_working_line_arithmetic_is_self_consistent():
+    row = _row(fe.score_fundamentals(_raw(net_income=[4831.0], total_equity=[6350.0], roe=85.4)), "roe")
+    working = row["working"]
+    assert "76.1%" in working, "the stated division must show its own true result"
+    assert "provider" in working, "the TTM figure must be labelled as the provider's"
+
+
+def test_roe_without_provider_shows_plain_division():
+    raw = _raw(net_income=[4831.0], total_equity=[6350.0])
+    raw.pop("roe", None)
+    row = _row(fe.score_fundamentals(raw), "roe")
+    assert "provider" not in row["working"]
+    assert "76.1%" in row["working"]
+
+
+def test_roic_is_labelled_as_provider_ttm():
+    row = _row(fe.score_fundamentals(_raw(roic=41.9)), "roic")
+    assert "41.9%" in row["working"] and "provider" in row["working"]
+
+
+def test_no_working_line_claims_a_division_it_cannot_support():
+    """Any line containing '=' must not pair inputs with an unrelated result."""
+    import re
+    result = fe.score_fundamentals(_raw(net_income=[4831.0], total_equity=[6350.0], roe=85.4))
+    for section in result["sections"]:
+        for row in section["rows"]:
+            w = row.get("working") or ""
+            for chunk in w.split(". "):
+                m = re.search(r"\$?([\d,.]+)([BM])?\s*/\s*\$?([\d,.]+)([BM])?\s*=\s*([\d.]+)%", chunk)
+                if not m:
+                    continue
+                num, nu, den, du, stated = m.groups()
+                scale = {"B": 1e9, "M": 1e6, None: 1.0}
+                got = (float(num.replace(",", "")) * scale[nu]) / (float(den.replace(",", "")) * scale[du]) * 100
+                assert abs(got - float(stated)) < 0.5, f"{chunk!r} does not compute to {stated}%"

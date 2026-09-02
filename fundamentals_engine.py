@@ -1493,9 +1493,19 @@ def score_fundamentals(raw: dict) -> dict:
             f"{_usd(abs(capex0))} capex / {_usd(rev0)} revenue = {abs(capex0)/rev0*100:.1f}%"
             if capex0 is not None and rev0 else ""),
         "debt_financing": _usd_series(raw.get("total_debt", [])),
-        "roe": (f"{_usd(ni0)} net income / {_usd(total_equity)} equity = {raw.get('roe'):.1f}%"
-                if ni0 is not None and total_equity and raw.get("roe") is not None else ""),
-        "roic": (f"Return on invested capital = {raw.get('roic'):.1f}%"
+        # ROE/ROIC come from the TTM provider when available, and a TTM figure
+        # uses average equity and trailing income - so it will not equal the
+        # year-end division shown beside it. Pairing the two was worse than
+        # showing nothing: the arithmetic on screen did not produce the result.
+        "roe": (
+            f"TTM return on equity {raw.get('roe'):.1f}% (provider). Year-end basis: "
+            f"{_usd(ni0)} net income / {_usd(total_equity)} equity = {ni0/total_equity*100:.1f}%"
+            if raw.get("roe") is not None and ni0 is not None and total_equity
+            else (f"TTM return on equity = {raw.get('roe'):.1f}% (provider)"
+                  if raw.get("roe") is not None else
+                  (f"{_usd(ni0)} net income / {_usd(total_equity)} equity = {ni0/total_equity*100:.1f}%"
+                   if ni0 is not None and total_equity else ""))),
+        "roic": (f"TTM return on invested capital = {raw.get('roic'):.1f}% (provider)"
                  if raw.get("roic") is not None else ""),
     }
 
