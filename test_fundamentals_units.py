@@ -434,3 +434,36 @@ def test_aligned_margins_match_the_filing():
     aligned = _align(dated, _timeline(dated))
     margins = [round(o / r * 100, 1) for r, o in zip(aligned["rev"], aligned["oi"])]
     assert margins == [41.7, 41.2, 37.1, 38.1, 39.6]
+
+
+# --- cache versioning --------------------------------------------------------
+# The 24-hour cache stores the finished scorecard, not the raw inputs. Every fix
+# tonight deployed correctly and then appeared not to work, because the page
+# kept serving a scorecard computed by the previous build. A version stamp makes
+# a deploy invalidate the cache instead of a human having to know to force it.
+
+def _is_served(entry):
+    return bool(entry) and entry.get("scorecard_version") == fe.SCORECARD_VERSION
+
+
+def test_current_version_is_served():
+    assert _is_served({"scorecard_version": fe.SCORECARD_VERSION}) is True
+
+
+def test_scorecard_from_an_older_build_is_discarded():
+    assert _is_served({"scorecard_version": "2026-09-01.1"}) is False
+
+
+def test_entry_cached_before_versioning_is_discarded():
+    """Entries already in the database carry no version and must not be trusted."""
+    assert _is_served({"ticker": "KLAC", "verdict": "Great Company"}) is False
+
+
+def test_result_carries_the_version():
+    result = fe.score_fundamentals(_raw())
+    result["scorecard_version"] = fe.SCORECARD_VERSION      # set by get_fundamentals
+    assert result["scorecard_version"] == fe.SCORECARD_VERSION
+
+
+def test_version_is_a_non_empty_string():
+    assert isinstance(fe.SCORECARD_VERSION, str) and fe.SCORECARD_VERSION.strip()

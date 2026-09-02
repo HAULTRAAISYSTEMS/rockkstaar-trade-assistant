@@ -2019,6 +2019,18 @@ def score_fundamentals(raw: dict) -> dict:
 
 # ─── Public entry point ───────────────────────────────────────────────────────
 
+# Bump when scoring logic, units, series construction or the shape of the
+# result changes. A cached scorecard computed under a different version is
+# discarded rather than served.
+#
+# The 24-hour cache stores the FINISHED scorecard, not the raw inputs. Every
+# fix tonight - the debt-to-equity unit, the liquidity definition, the revenue
+# streak, the ROE line, split handling - shipped and deployed correctly and then
+# appeared not to work, because the page kept serving a scorecard computed by the
+# previous code. Hours went into re-diagnosing bugs that were already fixed.
+SCORECARD_VERSION = "2026-09-01.7"
+
+
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
     """
     Main entry point. Returns fully scored fundamentals dict for ticker.
@@ -2036,9 +2048,14 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
         try:
             from database import get_fundamentals_cache
             cached = get_fundamentals_cache(ticker)
-            if cached:
+            if cached and cached.get("scorecard_version") == SCORECARD_VERSION:
                 logger.debug("fundamentals cache hit for %s", ticker)
                 return cached
+            if cached:
+                logger.info(
+                    "fundamentals cache discarded for %s: built by %s, current is %s",
+                    ticker, cached.get("scorecard_version") or "an older build",
+                    SCORECARD_VERSION)
         except Exception as e:
             logger.debug("fundamentals cache read error: %s", e)
 
@@ -2082,6 +2099,7 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
 
     # ── Step 3: score ─────────────────────────────────────────────────────────
     result = score_fundamentals(raw)
+    result["scorecard_version"] = SCORECARD_VERSION
     result["source_notes"] = raw.get("_source_notes", [])
     result["fiscal_period_ends"] = raw.get("fiscal_period_ends", [])
 
