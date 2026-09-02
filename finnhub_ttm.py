@@ -13,8 +13,11 @@ Unit conventions (Finnhub specific):
   - roeTTM / roiTTM: percentage (e.g. 25.0 = 25%)
     → same format as raw["roe"] / raw["roic"] — no conversion needed
   - currentRatioQuarterly: ratio (e.g. 2.3) — no conversion
-  - totalDebt/totalEquityQuarterly: percentage (e.g. 45.0 = 0.45 ratio)
-    → divide by 100 to get ratio format used in score_fundamentals()
+  - totalDebt/totalEquityQuarterly: ratio (e.g. 0.97) — no conversion.
+    This was previously assumed to be a percentage and divided by 100, which
+    reported KLA's 0.97 debt-to-equity as 0.01. Finnhub returns this in the same
+    ratio form as currentRatioQuarterly, which was already documented correctly
+    and was already producing the right number.
   - freeCashFlowTTM: millions USD (e.g. 12500.0 = $12.5B)
     → multiply by 1_000_000 to get raw USD
   - revenueGrowthTTMYoy / epsGrowthTTMYoy: percentage (e.g. 8.5 = 8.5%)
@@ -89,6 +92,14 @@ def _safe_get(d: dict, *keys: str, default=None):
     return cur
 
 
+def _as_float(val) -> float | None:
+    """Pass a numeric metric through unchanged. None-safe."""
+    try:
+        return float(val) if val is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _pct_to_ratio(val: float | None) -> float | None:
     """Convert a percentage value (e.g. 65.2) to a ratio (0.652). None-safe."""
     return val / 100.0 if val is not None else None
@@ -155,7 +166,7 @@ def fetch_finnhub_metrics(ticker: str, force_refresh: bool = False) -> dict | No
         "roe_ttm":              float | None,  # percentage (e.g. 25.0)
         "roi_ttm":              float | None,  # percentage
         "current_ratio_q":      float | None,  # ratio
-        "de_ratio_q":           float | None,  # ratio (converted from pct)
+        "de_ratio_q":           float | None,  # ratio, as returned
         "rev_growth_ttm_yoy":   float | None,  # percentage
         "eps_growth_ttm_yoy":   float | None,  # percentage
         "fcf_ttm_usd":          float | None,  # raw USD
@@ -210,7 +221,7 @@ def fetch_finnhub_metrics(ticker: str, force_refresh: bool = False) -> dict | No
         # Balance sheet ratios
         "current_ratio_q":      metric.get("currentRatioQuarterly"),
         # D/E: Finnhub returns as % (e.g. 45.0 = 0.45 ratio) — convert
-        "de_ratio_q":           _pct_to_ratio(metric.get("totalDebt/totalEquityQuarterly")),
+        "de_ratio_q":           _as_float(metric.get("totalDebt/totalEquityQuarterly")),
         # Growth rates: percentage form
         "rev_growth_ttm_yoy":   metric.get("revenueGrowthTTMYoy"),
         "eps_growth_ttm_yoy":   metric.get("epsGrowthTTMYoy"),

@@ -93,7 +93,7 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
         "net_income": [], "diluted_eps": [],
         "total_assets": [], "total_liabilities": [], "total_equity": [],
         "current_assets": [], "current_liabilities": [],
-        "cash": [], "total_debt": [], "goodwill": [],
+        "cash": [], "cash_and_st_investments": [], "short_term_debt": [], "total_debt": [], "goodwill": [],
         "intangible_assets": [], "retained_earnings": [],
         "operating_cash_flow": [], "capex": [], "free_cash_flow": [],
         "financing_cash_flow": [],
@@ -380,7 +380,7 @@ def fetch_fundamentals_fmp(ticker: str) -> dict | None:
         "net_income": [], "diluted_eps": [],
         "total_assets": [], "total_liabilities": [], "total_equity": [],
         "current_assets": [], "current_liabilities": [],
-        "cash": [], "total_debt": [], "goodwill": [],
+        "cash": [], "cash_and_st_investments": [], "short_term_debt": [], "total_debt": [], "goodwill": [],
         "intangible_assets": [], "retained_earnings": [],
         "operating_cash_flow": [], "capex": [], "free_cash_flow": [],
         "financing_cash_flow": [],
@@ -422,6 +422,13 @@ def fetch_fundamentals_fmp(ticker: str) -> dict | None:
                 result["current_assets"].append(row.get("totalCurrentAssets"))
                 result["current_liabilities"].append(row.get("totalCurrentLiabilities"))
                 result["cash"].append(row.get("cashAndCashEquivalents"))
+                # Cash alone understates liquidity for companies that park money in
+                # short-term investments (KLA: $1.6B cash vs $4.9B cash+STI).
+                result["cash_and_st_investments"].append(
+                    row.get("cashAndShortTermInvestments") or row.get("cashAndCashEquivalents"))
+                # Obligations actually due inside 12 months. The rubric asks whether
+                # cash covers a year of obligations, not the entire debt stack.
+                result["short_term_debt"].append(row.get("shortTermDebt"))
                 result["total_debt"].append(row.get("totalDebt"))
                 result["goodwill"].append(row.get("goodwill"))
                 result["intangible_assets"].append(row.get("intangibleAssets"))
@@ -486,7 +493,7 @@ EDUCATION: dict[str, dict[str, str]] = {
     "cash_covers_debt": {
         "def": "Checks if the company's cash on hand could pay off its entire debt load in under a year.",
         "why": "A company with enough cash to wipe out its debt overnight is nearly impossible to bankrupt in the short term. This is a core safety signal.",
-        "formula": "Cash & Equivalents ≥ Total Debt",
+        "formula": "Cash & Short-Term Investments ≥ Debt Due Within 12 Months",
     },
     "retained_earnings_growth": {
         "def": "Retained earnings are the cumulative profits the company has kept (not paid out as dividends) over its life.",
@@ -1117,12 +1124,31 @@ def score_fundamentals(raw: dict) -> dict:
 
     # Prefer Finnhub quarterly D/E ratio
     if ttm.get("de_ratio_q") is not None:
-        de_ratio = ttm["de_ratio_q"]
+        provider_de = ttm["de_ratio_q"]
+        # Guard against a provider unit change. If the quarterly figure disagrees
+        # with the balance-sheet computation by more than 10x, something is being
+        # reported in different units - keep the number we derived ourselves.
+        if de_ratio is None or de_ratio <= 0 or 0.1 <= (provider_de / de_ratio) <= 10:
+            de_ratio = provider_de
         de_source = "finnhub_metric"
         de_period = "Quarterly (latest)"
 
+    # Liquidity: cash plus short-term investments against obligations due inside a
+    # year. The previous check compared bare cash against TOTAL debt, which failed
+    # any company carrying termed-out long-term debt regardless of when it matures.
     cash0 = v(raw.get("cash", []))
-    cash_covers_debt = (cash0 >= total_debt if cash0 is not None and total_debt is not None else None)
+    liquid0 = v(raw.get("cash_and_st_investments", []))
+    if liquid0 is None:
+        liquid0 = cash0
+    near_term_debt = v(raw.get("short_term_debt", []))
+    cash_cover_basis = "near-term maturities"
+    if near_term_debt is None:
+        # No current-portion disclosure available; fall back to the old, stricter
+        # comparison rather than silently passing everything.
+        near_term_debt = total_debt
+        cash_cover_basis = "total debt (current portion unavailable)"
+    cash_covers_debt = (liquid0 >= near_term_debt
+                        if liquid0 is not None and near_term_debt is not None else None)
 
     # Retained earnings growing?
     re_vals = [v(raw.get("retained_earnings", []), i) for i in range(min(4, len(raw.get("retained_earnings", []))))]
