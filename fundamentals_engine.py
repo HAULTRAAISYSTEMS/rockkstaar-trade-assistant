@@ -214,6 +214,53 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
         logger.warning("EDGAR: no us-gaap or ifrs-full facts for %s", ticker)
         return None
 
+    # ── 3a. How current is this filer's data? ────────────────────────────────
+    # Filers retire concepts. KLA stopped tagging OperatingIncomeLoss and
+    # CostsAndExpenses in 2015 but both still carry a decade of facts, so a
+    # lookup found them, returned 2011-2015 values, and every one aligned to
+    # None against a 2022-2026 timeline — the operating margin trail read N/A
+    # with no error anywhere. Worse, a bare list lookup would have handed a
+    # 2015 balance sheet back as if it were current. Probing a few concepts
+    # every filer keeps current gives a reference point to measure staleness
+    # against.
+    def _concept_latest_end(name: str):
+        for ns in ([us_gaap] if us_gaap else []) + ([ifrs_data] if ifrs_data else []):
+            concept = ns.get(name)
+            if not concept:
+                continue
+            ends = [f["end"] for unit in concept.get("units", {}).values()
+                    for f in unit
+                    if f.get("form") in ("10-K", "20-F", "40-F") and f.get("end")]
+            if ends:
+                return max(ends)
+        return None
+
+    _reference_end = max(
+        (e for e in (_concept_latest_end(n) for n in (
+            "Assets", "NetIncomeLoss", "StockholdersEquity", "ProfitLoss",
+            "RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues",
+            "CashAndCashEquivalentsAtCarryingValue")) if e),
+        default=None)
+
+    def _is_stale(newest_end: str) -> bool:
+        """True when a concept cannot reach the window this card reports.
+
+        The test is not "did the filer stop using it" — a line renamed three
+        years ago still holds four years of history worth showing. It is
+        whether the concept's newest fact falls outside the five years the
+        page displays at all, in which case it can only contribute nulls to an
+        aligned series or, worse, hand a decade-old balance to a lookup that
+        reads index zero as current.
+        """
+        if not _reference_end or not newest_end:
+            return False
+        try:
+            gap = (datetime.strptime(_reference_end, "%Y-%m-%d").date()
+                   - datetime.strptime(newest_end, "%Y-%m-%d").date()).days
+        except (TypeError, ValueError):
+            return False
+        return gap > 2200          # five reported years plus slack
+
     # ── 3. Helper: extract up to n annual values, most recent first ──────────
     def _annual_dated(concepts, n: int = 5, merge: bool = False):
         """Try each concept in order; return (period_end, value) newest-first.
@@ -240,9 +287,14 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                 concept = ns.get(name)
                 if not concept:
                     continue
-                usd_vals = concept.get("units", {}).get("USD", [])
-                if not usd_vals:
-                    usd_vals = concept.get("units", {}).get("USD/shares", [])
+                _units = concept.get("units", {})
+                # Share counts are denominated in "shares", not USD. Reading
+                # only the dollar buckets made every share-count concept look
+                # absent, so the dilution row could never resolve.
+                usd_vals = (_units.get("USD")
+                            or _units.get("USD/shares")
+                            or _units.get("shares")
+                            or [])
                 annual = [
                     v for v in usd_vals
                     if v.get("form") in ("10-K", "20-F", "40-F")
@@ -266,6 +318,8 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                     if (_period_days(v), str(v.get("accn", ""))) > (
                             _period_days(incumbent), str(incumbent.get("accn", ""))):
                         by_end[end] = v
+                if _is_stale(max(by_end)):
+                    continue          # retired concept; try the next name
                 if not merge:
                     sorted_vals = sorted(by_end.values(),
                                          key=lambda x: x["end"], reverse=True)
@@ -323,6 +377,21 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                    "BenefitsLossesAndExpenses"], merge=True)
     opex_d = _annual_dated(["OperatingExpenses",
                    "OperatingCostsAndExpenses"], merge=True)
+    # When no operating-expense subtotal is tagged either, add up the lines
+    # below the gross profit line that the filer does still report. KLA tags
+    # R&D and SG&A through the current quarter while its operating subtotal
+    # went stale a decade ago.
+    _opex_parts = [
+        ["ResearchAndDevelopmentExpense",
+         "ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost"],
+        ["SellingGeneralAndAdministrativeExpense",
+         "GeneralAndAdministrativeExpense"],
+        ["RestructuringCharges", "RestructuringSettlementAndImpairmentProvisions"],
+        ["AmortizationOfIntangibleAssets"],
+        ["GoodwillAndIntangibleAssetImpairment", "GoodwillImpairmentLoss"],
+        ["OtherOperatingIncomeExpenseNet"],
+    ]
+    _opex_maps = [dict(_annual_dated(names, merge=True)) for names in _opex_parts]
     ni_d  = _annual_dated(["NetIncomeLoss", "NetIncome",
                    "NetIncomeLossAvailableToCommonStockholdersBasic",
                    # IFRS equivalents
@@ -394,6 +463,26 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
         derived_lines.append("operating income = revenue - total costs and expenses")
     if _fill_gaps(_oi_a, _diff(_gp_a, _opx_a), _plausible_oi):
         derived_lines.append("operating income = gross profit - operating expenses")
+
+    def _summed_opex(i):
+        """Gross profit less every operating expense line that is tagged.
+
+        Requires the two that dominate an operating cost base - research and
+        development, and selling, general and administrative. Without both,
+        the sum understates expenses and would overstate operating income,
+        which is the direction that flatters a company.
+        """
+        end = _timeline[i]
+        parts = [m.get(end) for m in _opex_maps]
+        if parts[0] is None or parts[1] is None:
+            return None
+        total = sum(x for x in parts if x is not None)
+        gp = _gp_a[i]
+        return (gp - total) if gp is not None else None
+
+    if _fill_gaps(_oi_a, _summed_opex, _plausible_oi):
+        derived_lines.append(
+            "operating income = gross profit - R&D - SG&A - other operating costs")
 
     result["derived_lines"] = derived_lines
     result.update(
@@ -1431,14 +1520,32 @@ def score_fundamentals(raw: dict) -> dict:
     # Liquidity: cash plus short-term investments against obligations due inside a
     # year. The previous check compared bare cash against TOTAL debt, which failed
     # any company carrying termed-out long-term debt regardless of when it matures.
-    cash0 = v(raw.get("cash", []))
-    liquid0 = v(raw.get("cash_and_st_investments", []))
+    # Both sides of this comparison are read at the newest period end that
+    # actually carries both. Taking index 0 on each meant that a year where the
+    # filer had not yet tagged its current maturities produced None on one side
+    # only, and the row fell back to comparing cash against the entire debt
+    # stack — which is how a company with zero current maturities kept failing
+    # a test it passes trivially.
+    _cash_list = raw.get("cash", []) or []
+    _liquid_list = raw.get("cash_and_st_investments", []) or []
+    _std_list = raw.get("short_term_debt", []) or []
+    cash0 = v(_cash_list)
+    liquid0 = v(_liquid_list)
     if liquid0 is None:
         liquid0 = cash0
+    near_term_debt = None
+    for _i in range(max(len(_std_list), len(_liquid_list), len(_cash_list))):
+        _debt_i = v(_std_list, _i)
+        _liq_i = v(_liquid_list, _i)
+        if _liq_i is None:
+            _liq_i = v(_cash_list, _i)
+        if _debt_i is not None and _liq_i is not None:
+            near_term_debt, liquid0 = _debt_i, _liq_i
+            cash0 = v(_cash_list, _i)
+            break
     liquid_label = ("cash and short-term investments"
                     if liquid0 is not None and cash0 is not None and liquid0 != cash0
                     else "cash and equivalents")
-    near_term_debt = v(raw.get("short_term_debt", []))
     cash_cover_basis = "debt due within a year"
     if near_term_debt is None:
         # No current-portion disclosure available; fall back to the old, stricter
@@ -2237,7 +2344,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-02.2"
+SCORECARD_VERSION = "2026-09-02.3"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
