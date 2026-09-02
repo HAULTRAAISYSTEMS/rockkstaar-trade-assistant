@@ -177,7 +177,48 @@ def _edgar_cik(ticker: str) -> tuple[str, str] | tuple[None, None]:
     return None, None
 
 
+# Extracting one company's facts means downloading and parsing the whole XBRL
+# company-facts document — tens of megabytes for a large filer — and that parse
+# is CPU-bound, so it holds the interpreter lock and stalls every other thread
+# in the worker, health checks included. Force refresh is meant to bypass the
+# finished-scorecard cache, not to re-download the filing on every click, and
+# repeatedly checking a fix is exactly when that happens most.
+#
+# Keyed by the scorecard version as well as the ticker, so a deploy that
+# changes how facts are read still gets a clean fetch — the cache can never be
+# the reason a fix appears not to have shipped, which cost hours earlier today.
+_EDGAR_EXTRACT_TTL = 900          # seconds
+_EDGAR_EXTRACT_MAX = 32           # tickers held per worker
+_EDGAR_EXTRACT_CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
+
+
+def clear_edgar_extract_cache() -> None:
+    """Drop the extraction cache. Tests call this between cases."""
+    _EDGAR_EXTRACT_CACHE.clear()
+
+
 def fetch_fundamentals_edgar(ticker: str) -> dict | None:
+    """Cached wrapper. See _fetch_fundamentals_edgar for the extraction."""
+    import copy
+    import time as _time
+
+    key = (ticker.upper().strip(), SCORECARD_VERSION)
+    hit = _EDGAR_EXTRACT_CACHE.get(key)
+    if hit and (_time.time() - hit[0]) < _EDGAR_EXTRACT_TTL:
+        # A copy, because the TTM layer augments what it is handed and the
+        # cached extraction must stay as EDGAR reported it.
+        return copy.deepcopy(hit[1])
+
+    result = _fetch_fundamentals_edgar(ticker)
+    if result is not None:
+        if len(_EDGAR_EXTRACT_CACHE) >= _EDGAR_EXTRACT_MAX:
+            oldest = min(_EDGAR_EXTRACT_CACHE, key=lambda k: _EDGAR_EXTRACT_CACHE[k][0])
+            _EDGAR_EXTRACT_CACHE.pop(oldest, None)
+        _EDGAR_EXTRACT_CACHE[key] = (_time.time(), copy.deepcopy(result))
+    return result
+
+
+def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
     """
     Fetch fundamental data from SEC EDGAR XBRL API.
     Free, no API key, works for US-listed companies and ADRs (20-F filers).
@@ -211,7 +252,7 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
     try:
         resp = _req_module.get(
             _EDGAR_FACTS_URL.format(cik=cik),
-            timeout=30,
+            timeout=12,
             headers=_EDGAR_HEADERS,
         )
         if resp.status_code != 200:
