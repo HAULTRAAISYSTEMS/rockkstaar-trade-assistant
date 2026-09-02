@@ -62,6 +62,9 @@
   <a href="{{ url_for('intel') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money') }}" {% if ep in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money') %}aria-current="page"{% endif %}>
     <span class="mobile-app-nav__icon" aria-hidden="true">▥</span><span>Intel</span>
   </a>
+  <a href="{{ url_for('fundamentals_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare') }}" {% if ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare') %}aria-current="page"{% endif %}>
+    <span class="mobile-app-nav__icon" aria-hidden="true">◆</span><span>Research</span>
+  </a>
   <a href="{{ url_for('watchlists_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep == 'watchlists_page' }}" {% if ep == 'watchlists_page' %}aria-current="page"{% endif %}>
     <span class="mobile-app-nav__icon" aria-hidden="true">★</span><span>Watchlist</span>
   </a>

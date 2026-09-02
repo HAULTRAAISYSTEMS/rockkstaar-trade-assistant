@@ -71,8 +71,7 @@
     position: fixed;
     inset: auto 0 0;
     z-index: 9997;
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: flex;
     padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
     background: rgba(6, 7, 8, 0.97);
     border-top: 1px solid rgba(214, 166, 63, 0.22);
@@ -82,6 +81,7 @@
   }
 
   .mobile-app-nav__item {
+    flex: 1 1 0;
     min-width: 0;
     min-height: 50px;
     display: flex;
@@ -816,4 +816,25 @@ label,
   .mobile-stock-tabs a { flex:0 0 auto; padding:9px 12px; border-radius:999px; background:#1a1710; color:#d5c79e; font-size:11px; font-weight:700; text-decoration:none; }
   .detail-header { display:none; }
   .detail-wrap { scroll-behavior:smooth; }
+}
+
+
+/* The Ask-AI pill is fixed bottom-centre at z-index 9998; the mobile nav sits at
+   9997, so on a phone the pill covered the tabs beneath it. Lift it above the
+   bar, including the home-indicator inset. !important beats the inline style and
+   the hover handlers on the button. */
+@media (max-width: 768px) {
+  #ask-fab {
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px)) !important;
+    padding: 10px 20px !important;
+    font-size: 13px !important;
+  }
+  .mobile-app-nav__item { font-size: 9.5px; }
+  .mobile-app-nav__icon { font-size: 17px; }
+}
+
+@media (max-width: 380px) {
+  .mobile-app-nav__item { font-size: 8.5px; gap: 2px; }
+  .mobile-app-nav__icon { font-size: 15px; }
+  #ask-fab { padding: 9px 16px !important; font-size: 12px !important; }
 }
