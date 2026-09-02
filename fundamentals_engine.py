@@ -1959,7 +1959,12 @@ def score_fundamentals(raw: dict) -> dict:
                 "year_offset": i,
                 "label": f"Year -{i}" if i > 0 else "Latest",
                 "revenue":  _fmt(rev),
-                "revenue_num": rev,   # raw value so the UI can draw a bar chart
+                "revenue_num": rev,   # raw values so the UI can chart and compute
+                "net_income_num": ni,
+                "fcf_num": fcf,
+                "period_end": (raw_data.get("fiscal_period_ends") or [None] * (i + 1))[i]
+                              if i < len(raw_data.get("fiscal_period_ends") or []) else None,
+                "fcf_over_ni": (fcf / ni) if (fcf is not None and ni) else None,
                 "net_income": _fmt(ni),
                 "fcf": _fmt(fcf),
                 "ocf": _fmt(ocf),

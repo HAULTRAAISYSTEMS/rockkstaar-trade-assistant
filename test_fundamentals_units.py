@@ -467,3 +467,46 @@ def test_result_carries_the_version():
 
 def test_version_is_a_non_empty_string():
     assert isinstance(fe.SCORECARD_VERSION, str) and fe.SCORECARD_VERSION.strip()
+
+
+# --- earnings quality by year ------------------------------------------------
+# The rubric calls the cash-flow section the lie detector, but the page only
+# showed the latest FCF/NI ratio. The trend is the signal: 1.10x -> 0.92x ->
+# 0.78x says something a single 0.78x does not.
+
+def _history(**kw):
+    raw = _raw(
+        revenue=[13579e6, 12160e6, 9812e6],
+        net_income=[4831e6, 4062e6, 2762e6],
+        free_cash_flow=[3767e6, 3747e6, 3031e6],
+        operating_cash_flow=[4143e6, 4082e6, 3309e6],
+        fiscal_period_ends=["2026-06-30", "2025-06-30", "2024-06-30"])
+    raw.update(kw)
+    return fe.score_fundamentals(raw)["history"]
+
+
+def test_each_year_carries_its_fcf_over_net_income():
+    ratios = [round(row["fcf_over_ni"], 2) for row in _history() if row.get("fcf_over_ni")]
+    assert ratios == [0.78, 0.92, 1.10], "the KLA trend from the filing"
+
+
+def test_rows_state_their_fiscal_period_end():
+    assert _history()[0]["period_end"] == "2026-06-30"
+
+
+def test_raw_values_are_available_for_charting():
+    row = _history()[0]
+    assert row["revenue_num"] == 13579e6
+    assert row["net_income_num"] == 4831e6 and row["fcf_num"] == 3767e6
+
+
+def test_zero_or_missing_net_income_does_not_divide():
+    rows = _history(net_income=[0.0, None, 2762e6])
+    assert rows[0]["fcf_over_ni"] is None and rows[1]["fcf_over_ni"] is None
+
+
+def test_period_end_is_none_when_the_timeline_is_short():
+    """History can run longer than the fiscal timeline; that must not raise."""
+    rows = _history(fiscal_period_ends=["2026-06-30"])
+    assert rows[0]["period_end"] == "2026-06-30"
+    assert all(row["period_end"] is None for row in rows[1:])

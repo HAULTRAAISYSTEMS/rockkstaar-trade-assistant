@@ -421,3 +421,11 @@
 .src-notes-list{margin:9px 0 0;padding-left:18px;color:#c3cad3;
   font:500 11.5px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
 .src-notes-list code{color:#ffd978}
+
+/* Earnings quality: FCF as a multiple of net income, the rubric's lie detector. */
+.hq-good{color:#3fd68c;font-weight:700}
+.hq-warn{color:#ffb547;font-weight:700}
+.hq-bad{color:#ff5c6c;font-weight:700}
+.fund-provenance{margin:14px 0 4px;padding:11px 14px;border:1px dashed rgba(255,255,255,.13);
+  border-radius:10px;color:#8d9aad;font:500 11.5px/1.65 var(--font-ui,system-ui)}
+.fund-provenance strong{color:#c3cad3}

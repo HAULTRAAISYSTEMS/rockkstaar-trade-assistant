@@ -188,6 +188,15 @@
         {% endfor %}
       </div>
 
+      {% if data.fiscal_period_ends or data.ttm_period_end %}
+      <p class="fund-provenance">
+        {% if data.fiscal_period_ends %}Statement data covers fiscal years ending
+          {{ data.fiscal_period_ends | last }} through {{ data.fiscal_period_ends | first }}.{% endif %}
+        {% if data.ttm_period_end %} Latest figures are trailing twelve months to {{ data.ttm_period_end }}{% if data.ttm_quarters_used %} ({{ data.ttm_quarters_used }} quarters){% endif %}.{% endif %}
+        Fundamentals establish <strong>what</strong> is worth owning, not <strong>when</strong> to buy.
+      </p>
+      {% endif %}
+
       <!-- Historical table -->
       {% if data.history %}
       <div class="history-card">
@@ -196,24 +205,28 @@
           <table class="history-table">
             <thead>
               <tr>
-                <th>Period</th>
+                <th>Fiscal year</th>
                 <th>Revenue</th>
                 <th>Net Income</th>
                 <th>Gross Margin</th>
                 <th>Op. Margin</th>
                 <th>Free Cash Flow</th>
+                <th>FCF ÷ NI</th>
                 <th>Op. Cash Flow</th>
               </tr>
             </thead>
             <tbody>
               {% for yr in data.history %}
               <tr>
-                <td>{{ yr.label }}</td>
+                <td>{{ yr.period_end or yr.label }}</td>
                 <td>{{ yr.revenue }}</td>
                 <td>{{ yr.net_income }}</td>
                 <td>{{ yr.gross_margin }}</td>
                 <td>{{ yr.operating_margin }}</td>
                 <td>{{ yr.fcf }}</td>
+                <td class="{% if yr.fcf_over_ni %}{{ 'hq-good' if yr.fcf_over_ni >= 1 else ('hq-warn' if yr.fcf_over_ni >= 0.85 else 'hq-bad') }}{% endif %}">
+                  {% if yr.fcf_over_ni %}{{ '%.2f'|format(yr.fcf_over_ni) }}x{% else %}—{% endif %}
+                </td>
                 <td>{{ yr.ocf }}</td>
               </tr>
               {% endfor %}
