@@ -59,6 +59,23 @@ SPLIT_BREAK_RATIO = 4.0
 SPLIT_NI_STABLE_BAND = (0.5, 2.0)
 
 
+def _fact_rank(fact: dict) -> tuple:
+    """Ordering for two facts covering the same period end.
+
+    Longest period first: a 10-K carries both the twelve-month and the
+    three-month figure for the same end date, and picking the quarter would
+    divide one quarter's earnings into a full year's revenue.
+
+    Then the filing DATE, not the accession number. Accession prefixes belong
+    to whoever transmitted the filing, so a company that changes filing agent
+    gets numbers that no longer sort chronologically — and "the newest report"
+    is exactly what decides whether a series comes back on one side of a stock
+    split or straddles it. The accession stays as a last tiebreak so the choice
+    is deterministic when two facts were filed the same day.
+    """
+    return (_period_days(fact), str(fact.get("filed", "")), str(fact.get("accn", "")))
+
+
 def detect_split_break(series, net_income=None) -> int | None:
     """Index (newest-first) where a per-share series crosses a split boundary.
 
@@ -324,13 +341,13 @@ def fetch_fundamentals_edgar(ticker: str) -> dict | None:
                     # and the same period end; picking by accession alone could
                     # select the quarter, which then divided into annual revenue
                     # produced single-digit margins.
-                    if (_period_days(v), str(v.get("accn", ""))) > (
-                            _period_days(incumbent), str(incumbent.get("accn", ""))):
+                    if _fact_rank(v) > _fact_rank(incumbent):
                         by_end[end] = v
                 if _is_stale(max(by_end)):
                     continue          # retired concept; try the next name
                 if same_filing:
-                    newest_accn = max(str(f.get("accn", "")) for f in by_end.values())
+                    newest = max(by_end.values(), key=lambda f: str(f.get("filed", "")))
+                    newest_accn = str(newest.get("accn", ""))
                     by_end = {end: f for end, f in by_end.items()
                               if str(f.get("accn", "")) == newest_accn}
                     if not by_end:
@@ -2387,7 +2404,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-02.4"
+SCORECARD_VERSION = "2026-09-02.5"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:

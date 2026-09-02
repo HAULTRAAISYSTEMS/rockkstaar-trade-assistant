@@ -236,3 +236,41 @@ def test_the_coverage_row_names_the_period_it_read():
     tag, so the balance sheet date has to be on the page."""
     working = row(card(), "cash_covers_debt")["working"]
     assert "2025-06-30" in working
+
+
+def filed_shares(entries):
+    """entries: (end, start, value, filed, accn) — one bucket, several filings."""
+    return {"units": {"shares": [
+        {"start": st, "end": e, "val": v, "form": "10-K", "filed": f, "accn": a}
+        for e, st, v, f, a in entries]}}
+
+
+def test_the_newest_filing_wins_by_date_not_accession_number():
+    """Accession prefixes belong to whoever transmitted the filing. A company
+    that changes filing agent gets numbers that no longer sort chronologically,
+    and picking the wrong one here is the difference between a share series
+    that sits on one side of a stock split and one that straddles it.
+
+    Here the newer FY26 report carries the lower accession. Ordering by
+    accession string would take the older report's pre-split figures, splice
+    them against the post-split year, and read a 10-for-1 split as issuance.
+    """
+    facts = kla_shaped(**{SPLIT_SHARES: filed_shares([
+        # FY26 report: post-split, restated, filed most recently, LOWER accn.
+        ("2026-06-30", "2025-07-01", 1320.0e6, "2026-08-07", "0000319201-26-000010"),
+        ("2025-06-30", "2024-07-01", 1337.5e6, "2026-08-07", "0000319201-26-000010"),
+        ("2024-06-30", "2023-07-01", 1361.9e6, "2026-08-07", "0000319201-26-000010"),
+        # FY25 report: pre-split, filed a year earlier, HIGHER accn.
+        ("2025-06-30", "2024-07-01", 133.75e6, "2025-08-08", "0001564590-25-000099"),
+        ("2024-06-30", "2023-07-01", 136.19e6, "2025-08-08", "0001564590-25-000099"),
+        ("2023-06-30", "2022-07-01", 140.24e6, "2025-08-08", "0001564590-25-000099"),
+    ])})
+    with patch.object(fe, "_edgar_cik", return_value=("0000319201", "KLA")), \
+         patch.object(fe._req_module, "get", return_value=_Resp(facts)):
+        raw = fe.fetch_fundamentals_edgar("KLAC")
+        c = fe.score_fundamentals(raw)
+    # One basis, three years, no split break to trim.
+    assert raw["diluted_shares"][:3] == [1320.0e6, 1337.5e6, 1361.9e6]
+    dilution = row(c, "share_dilution")
+    assert dilution["passed"] is True
+    assert dilution["value"] == "-3.1%"
