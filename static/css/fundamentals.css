@@ -775,3 +775,18 @@
   border-color: var(--elite-border);
   background: var(--elite-panel-inset);
 }
+
+/* Marks a margin that is trailing-twelve-month rather than the fiscal year
+   its row is labelled with. Small and quiet — it qualifies the number, it is
+   not a warning about it. */
+.fundamentals-shell .ttm-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 3px;
+  border: 1px solid var(--elite-border);
+  border-radius: 2px;
+  font: 600 8px/1.5 var(--font-mono);
+  letter-spacing: .06em;
+  color: var(--elite-muted);
+  vertical-align: 1px;
+}

@@ -388,9 +388,11 @@
                 <td>{{ yr.period_end or yr.label }}</td>
                 <td>{{ yr.revenue }}</td>
                 <td>{{ yr.net_income }}</td>
-                <td>{{ yr.gross_margin }}</td>
-                <td>{{ yr.operating_margin }}</td>
-                <td>{{ yr.net_margin }}</td>
+                {# The newest margins come from a trailing-twelve-month feed,
+                   not from the fiscal year this row is labelled with. #}
+                <td>{{ yr.gross_margin }}{% if yr.margins_are_ttm %}<span class="ttm-tag" title="{{ yr.margin_period }}">TTM</span>{% endif %}</td>
+                <td>{{ yr.operating_margin }}{% if yr.margins_are_ttm %}<span class="ttm-tag" title="{{ yr.margin_period }}">TTM</span>{% endif %}</td>
+                <td>{{ yr.net_margin }}{% if yr.margins_are_ttm %}<span class="ttm-tag" title="{{ yr.margin_period }}">TTM</span>{% endif %}</td>
                 <td>{{ yr.fcf }}</td>
                 <td class="{% if yr.fcf_over_ni %}{{ 'hq-good' if yr.fcf_over_ni >= 1 else ('hq-warn' if yr.fcf_over_ni >= 0.85 else 'hq-bad') }}{% endif %}">
                   {% if yr.fcf_over_ni %}{{ '%.2f'|format(yr.fcf_over_ni) }}x{% else %}—{% endif %}

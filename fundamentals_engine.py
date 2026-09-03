@@ -731,21 +731,27 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
     eq0_d = eq[0] if eq else None
     _oi_aligned = _aligned["operating_income"]
     oi0_d = _oi_aligned[0] if _oi_aligned else None
-    td0_d = td[0] if td else 0
 
     if ni0_d is not None and eq0_d and eq0_d != 0:
         result["roe"] = (ni0_d / eq0_d) * 100
 
     # ROIC = NOPAT / Invested Capital  (NOPAT = OperatingIncome × (1 - tax_rate))
-    if oi0_d and ni0_d and eq0_d is not None and oi0_d != 0:
-        try:
-            tax_rate = max(0.0, min(0.40, 1.0 - (ni0_d / oi0_d)))
-            nopat = oi0_d * (1.0 - tax_rate)
-            invested_capital = (eq0_d or 0) + (td0_d or 0)
-            if invested_capital > 0:
-                result["roic"] = (nopat / invested_capital) * 100
-        except Exception:
-            pass
+    # The headline figure and the year-by-year trail were computed twice from
+    # two different lookups with two different guards, so the card could show a
+    # headline ROIC that did not match the first point of its own chart. There
+    # is one calculation now and the headline is its newest year.
+    def _roic_at(index: int) -> float | None:
+        _oi = _oi_aligned[index] if index < len(_oi_aligned) else None
+        _ni = ni[index] if index < len(ni) else None
+        _eq = eq[index] if index < len(eq) else None
+        _td = td[index] if index < len(td) else None
+        if not _oi or _ni is None or _eq is None:
+            return None
+        capital = _eq + (_td or 0)
+        if capital <= 0:
+            return None
+        tax_rate = max(0.0, min(0.40, 1.0 - (_ni / _oi)))
+        return (_oi * (1.0 - tax_rate) / capital) * 100
 
     # ── 8. Share count ───────────────────────────────────────────────────────
     # Diluted weighted-average shares, oldest-last, aligned to the income
@@ -777,27 +783,9 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
 
     # Return on invested capital for every year, not just the latest. One good
     # year is a cycle; a decade of them is the arithmetic signature of a moat.
-    _td_map = dict(_annual_dated(["LongTermDebt",
-                   "LongTermDebtAndCapitalLeaseObligation",
-                   "LongTermDebtAndCapitalLeaseObligations",
-                   "LongTermDebtNoncurrent",
-                   "Borrowings", "BorrowingsAndBankOverdrafts",
-                   "LongtermBorrowings", "DebtCurrent", "ShorttermBorrowings"]))
-    _eq_map = dict(_annual_dated(["StockholdersEquity",
-                   "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
-                   "Equity", "EquityAttributableToOwnersOfParent"]))
-    roic_series = []
-    for _i, _end in enumerate(_timeline):
-        _oi = _aligned["operating_income"][_i]
-        _ni = _aligned["net_income"][_i]
-        _eq = _eq_map.get(_end)
-        _capital = (_eq or 0) + (_td_map.get(_end) or 0)
-        if not _oi or _ni is None or _eq is None or _capital <= 0:
-            roic_series.append(None)
-            continue
-        _tax = max(0.0, min(0.40, 1.0 - (_ni / _oi)))
-        roic_series.append((_oi * (1.0 - _tax) / _capital) * 100)
+    roic_series = [_roic_at(i) for i in range(len(_timeline))]
     result["roic_series"] = roic_series
+    result["roic"] = roic_series[0] if roic_series else None
 
     # Return None only if ALL major sections are missing
     if len(missing) >= 3:
@@ -2567,6 +2555,13 @@ def score_fundamentals(raw: dict) -> dict:
     verdict_reason = _build_verdict_reason()
 
     # ── Historical table data (for sparkline display) ─────────────────────────
+    _ttm_margin_sources = [name for name, source in
+                           (("gross", gm_source), ("operating", om_source),
+                            ("net", nm_source))
+                           if source != "annual"]
+    _ttm_period_label = ("TTM through " + ttm["period_end"]
+                         if ttm.get("period_end") else "trailing twelve months")
+
     def _history_table(raw_data: dict) -> list[dict]:
         """Build a year-by-year summary table (up to 5 years)."""
         n = max(
@@ -2587,6 +2582,13 @@ def score_fundamentals(raw: dict) -> dict:
             gm   = gm_series[i] if i < len(gm_series) else None
             om   = om_series[i] if i < len(om_series) else None
             nm   = nm_series[i] if i < len(nm_series) else None
+            # Position 0 of the margin series is replaced with a trailing
+            # twelve month figure when the metric provider has one, which is
+            # what the scoring wants - a fiscal year end can be eleven months
+            # stale. The table did not say so, so a TTM margin was printed
+            # under a fiscal year label, in the same row as that year's
+            # revenue and net income. The row now carries the fact.
+            _margins_are_ttm = bool(i == 0 and _ttm_margin_sources)
             _rc  = (raw_data.get("roic_series") or [None] * (i + 1))
             rc   = (_rc[i] / 100.0) if i < len(_rc) and _rc[i] is not None else None
             rows.append({
@@ -2610,6 +2612,9 @@ def score_fundamentals(raw: dict) -> dict:
                 "gross_margin_num": gm,
                 "operating_margin_num": om,
                 "net_margin_num": nm,
+                "margins_are_ttm": _margins_are_ttm,
+                "margin_period": (_ttm_period_label if _margins_are_ttm
+                                  else None),
                 "roic_num": rc,
             })
         return rows
@@ -2692,7 +2697,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-03.2"
+SCORECARD_VERSION = "2026-09-03.3"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:

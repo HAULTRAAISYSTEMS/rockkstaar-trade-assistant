@@ -68,10 +68,20 @@ def _nice_bounds(values: list[float], include_zero: bool = True):
     return lo - pad_lo, hi + span * 0.08
 
 
-def _fiscal_labels(history: list[dict]) -> list[str]:
-    """FY labels oldest-first, falling back to the row's own label."""
+def _fiscal_labels(history: list[dict], ttm_flag: str | None = None) -> list[str]:
+    """FY labels oldest-first, falling back to the row's own label.
+
+    ``ttm_flag`` names a row key marking a point drawn from a trailing twelve
+    month figure rather than the fiscal year the row is labelled with. The
+    margin series is like this: its newest point comes from a metric feed
+    because a fiscal year end can be eleven months stale, and drawing it under
+    an FY label said the year closed at a number it did not close at.
+    """
     labels = []
     for row in history:
+        if ttm_flag and row.get(ttm_flag):
+            labels.append("TTM")
+            continue
         end = row.get("period_end")
         if end and len(str(end)) >= 4:
             labels.append(f"FY{str(end)[2:4]}")
@@ -179,7 +189,8 @@ def _gridlines(lo, hi, y_of, fmt, count: int = 4):
     return lines
 
 
-def _lines(history: list[dict], series_defs: list[dict]) -> dict | None:
+def _lines(history: list[dict], series_defs: list[dict],
+           ttm_flag: str | None = None) -> dict | None:
     """Multi-line chart for percentage series."""
     rows = list(reversed(history or []))
     if len(rows) < 2:
@@ -197,6 +208,7 @@ def _lines(history: list[dict], series_defs: list[dict]) -> dict | None:
     def y_of(value):
         return y0 + h - ((value - lo) / (hi - lo)) * h
 
+    labels = _fiscal_labels(rows, ttm_flag)
     lines, points = [], []
     for spec in series_defs:
         coords = []
@@ -206,7 +218,7 @@ def _lines(history: list[dict], series_defs: list[dict]) -> dict | None:
             px, py = round(x0 + i * step, 2), round(y_of(value), 2)
             coords.append(f"{px},{py}")
             points.append({"cx": px, "cy": py, "cls": spec["cls"],
-                           "title": f"{spec['name']}: {percent(value)}"})
+                           "title": f"{spec['name']} {labels[i]}: {percent(value)}"})
         if len(coords) >= 2:
             lines.append({"points": " ".join(coords), "cls": spec["cls"],
                           "name": spec["name"]})
@@ -219,7 +231,7 @@ def _lines(history: list[dict], series_defs: list[dict]) -> dict | None:
         "gridlines": _gridlines(lo, hi, y_of, percent),
         "x_labels": [
             {"x": round(x0 + i * step, 2), "y": HEIGHT - PAD_BOTTOM + 16, "text": label}
-            for i, label in enumerate(_fiscal_labels(rows))
+            for i, label in enumerate(labels)
         ],
         "legend": [{"name": s["name"], "cls": s["cls"]}
                    for s in series_defs
@@ -248,7 +260,7 @@ def build_charts(history: list[dict] | None) -> list[dict]:
              {"key": "gross_margin_num", "name": "Gross", "cls": GROSS_SERIES},
              {"key": "operating_margin_num", "name": "Operating", "cls": OPERATING_SERIES},
              {"key": "net_margin_num", "name": "Net", "cls": NET_SERIES},
-         ])),
+         ], ttm_flag="margins_are_ttm")),
         ("cash_quality", "Free cash flow vs net income",
          "Cash above reported earnings is the sign of honest accounting.",
          lambda: _grouped_bars(history, [
