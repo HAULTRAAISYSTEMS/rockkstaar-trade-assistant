@@ -72,17 +72,17 @@ class TestTheShimItself:
 
 @pytest.fixture(scope="module")
 def client():
-    import app as legacy
-    return legacy.app.test_client()
+    import web_app
+    return web_app.app.test_client()
 
 
 @pytest.fixture(scope="module")
 def signed(client):
     """A client whose session carries a token, and the token to send."""
-    import app as legacy
+    import web_app
     from flask import session as flask_session
     from flask_wtf.csrf import generate_csrf
-    with legacy.app.test_request_context():
+    with web_app.app.test_request_context():
         header_token = generate_csrf()
         session_token = flask_session.get("csrf_token")
     with client.session_transaction() as sess:
