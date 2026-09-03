@@ -35,16 +35,20 @@ def _plot_box():
             HEIGHT - PAD_TOP - PAD_BOTTOM)
 
 
-def money(value) -> str:
-    """Compact dollar label. Mirrors the formatting used in the score rows."""
+def money(value, symbol: str = "$") -> str:
+    """Compact currency label. Mirrors the formatting used in the score rows.
+
+    A 20-F filer states its accounts in its own currency, so the axis has to
+    be able to say NT$ or EUR rather than always a dollar sign.
+    """
     if value is None:
         return "N/A"
     sign = "-" if value < 0 else ""
     n = abs(float(value))
     for cutoff, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
         if n >= cutoff:
-            return f"{sign}${n / cutoff:.2f}{suffix}".replace(".00", "")
-    return f"{sign}${n:,.0f}"
+            return f"{sign}{symbol}{n / cutoff:.2f}{suffix}".replace(".00", "")
+    return f"{sign}{symbol}{n:,.0f}"
 
 
 def percent(value) -> str:
@@ -239,7 +243,7 @@ def _lines(history: list[dict], series_defs: list[dict],
     }
 
 
-def build_charts(history: list[dict] | None) -> list[dict]:
+def build_charts(history: list[dict] | None, currency: str = "$") -> list[dict]:
     """Charts for the fundamentals page, in display order.
 
     A chart that cannot be drawn from at least two years of data is dropped
@@ -247,13 +251,14 @@ def build_charts(history: list[dict] | None) -> list[dict]:
     instead of misleading ones.
     """
     history = history or []
+    _money = lambda value: money(value, currency)   # noqa: E731
     specs = [
         ("revenue_income", "Revenue and net income",
          "Top line against what actually reaches shareholders.",
          lambda: _grouped_bars(history, [
              {"key": "revenue_num", "name": "Revenue", "cls": REVENUE_SERIES},
              {"key": "net_income_num", "name": "Net income", "cls": INCOME_SERIES},
-         ], money, require=["revenue_num"], mark_declines="revenue_num")),
+         ], _money, require=["revenue_num"], mark_declines="revenue_num")),
         ("margins", "Margin trend",
          "Widening margins mean pricing power; narrowing means competition.",
          lambda: _lines(history, [
@@ -266,7 +271,7 @@ def build_charts(history: list[dict] | None) -> list[dict]:
          lambda: _grouped_bars(history, [
              {"key": "net_income_num", "name": "Net income", "cls": INCOME_SERIES},
              {"key": "fcf_num", "name": "Free cash flow", "cls": FCF_SERIES},
-         ], money, require=["fcf_num", "net_income_num"])),
+         ], _money, require=["fcf_num", "net_income_num"])),
         ("roic", "Return on invested capital",
          "Competition drags returns toward the cost of capital. Staying above it is what a moat looks like in the numbers.",
          lambda: _lines(history, [

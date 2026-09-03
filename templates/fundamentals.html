@@ -126,6 +126,13 @@
         </div>
         <div>
           <span class="verdict-badge {{ data.verdict_class }}">{{ data.verdict }}</span>
+          {% if data.currency and data.currency != "USD" %}
+          <div class="currency-note currency-note-block">
+            This company reports in {{ data.currency }}. Every figure on this
+            card is as filed, in {{ data.currency }} — the price above is in
+            US dollars and the two are not comparable.
+          </div>
+          {% endif %}
           {% if data.coverage_note %}
           <div class="verdict-capped">
             <span class="verdict-capped-tag">Held back — thin data</span>
@@ -366,7 +373,11 @@
       <!-- Historical table -->
       {% if data.history %}
       <div class="history-card">
-        <div class="history-header">Historical Financial Snapshot</div>
+        <div class="history-header">Historical Financial Snapshot
+          {% if data.currency and data.currency != "USD" %}
+          <span class="currency-note">Figures as filed, in {{ data.currency }}</span>
+          {% endif %}
+        </div>
         <div class="history-scroll">
           <table class="history-table">
             <thead>

@@ -790,3 +790,23 @@
   color: var(--elite-muted);
   vertical-align: 1px;
 }
+
+/* Names the currency a foreign filer states its accounts in. The figures are
+   as filed and the price strip above them is in dollars, so the reader has to
+   be told not to compare the two. */
+.fundamentals-shell .currency-note {
+  font: 500 9px/1.6 var(--font-mono);
+  letter-spacing: .04em;
+  color: var(--elite-muted);
+}
+.fundamentals-shell .currency-note-block {
+  display: block;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-left: 2px solid var(--elite-border-strong);
+  background: var(--elite-panel-inset);
+  border-radius: 0 var(--elite-radius-sm) var(--elite-radius-sm) 0;
+  font: 400 11px/1.5 var(--font-ui);
+  letter-spacing: 0;
+  max-width: 46ch;
+}

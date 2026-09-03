@@ -306,6 +306,44 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
             "CashAndCashEquivalentsAtCarryingValue")) if e),
         default=None)
 
+    # ── 2b. Reporting currency ───────────────────────────────────────────────
+    # One currency for the whole extract. Mixing them silently is far worse
+    # than a missing row: a TWD cost of sales over a USD revenue is a gross
+    # margin wrong by a factor of thirty, and it would look plausible.
+    #
+    # Coverage decides, then recency, then USD - the currency the filer states
+    # its accounts in is the one with facts on every line and every year; a
+    # convenience translation covers a subset of both.
+    _CURRENCY_PROBE = ("Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax",
+                       "Revenue", "Assets", "NetIncomeLoss", "ProfitLoss",
+                       "StockholdersEquity", "Equity")
+
+    def _pick_currency() -> str:
+        tally: dict[str, list] = {}
+        for ns in ([us_gaap] if us_gaap else []) + ([ifrs_data] if ifrs_data else []):
+            for name in _CURRENCY_PROBE:
+                concept = ns.get(name)
+                if not concept:
+                    continue
+                for unit, unit_facts in (concept.get("units") or {}).items():
+                    # Currency buckets are three-letter ISO codes. "shares",
+                    # "pure" and "USD/shares" are not currencies.
+                    if len(unit) != 3 or not unit.isalpha() or not unit.isupper():
+                        continue
+                    ends = {f["end"] for f in unit_facts
+                            if f.get("form") in ("10-K", "20-F", "40-F") and f.get("end")}
+                    if not ends:
+                        continue
+                    entry = tally.setdefault(unit, [set(), ""])
+                    entry[0] |= ends
+                    entry[1] = max(entry[1], max(ends))
+        if not tally:
+            return "USD"
+        return max(tally, key=lambda u: (len(tally[u][0]), tally[u][1], u == "USD"))
+
+    _currency = _pick_currency()
+    _per_share_unit = f"{_currency}/shares"
+
     def _is_stale(newest_end: str) -> bool:
         """True when a concept cannot reach the window this card reports.
 
@@ -364,8 +402,11 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
                 # Share counts are denominated in "shares", not USD. Reading
                 # only the dollar buckets made every share-count concept look
                 # absent, so the dilution row could never resolve.
-                usd_vals = (_units.get("USD")
-                            or _units.get("USD/shares")
+                # No cross-currency fallback. A concept the filer only
+                # tagged in its convenience translation is left missing
+                # rather than dropped into a series stated in another unit.
+                usd_vals = (_units.get(_currency)
+                            or _units.get(_per_share_unit)
                             or _units.get("shares")
                             or [])
                 annual = [
@@ -477,9 +518,8 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
     cor_d = _annual_dated(["CostOfRevenue",
                    "CostOfGoodsAndServicesSold",
                    "CostOfGoodsSold", "CostOfSales", "CostOfServices",
-                   "CostOfRevenueFromContractWithCustomerExcludingAssessedTax",
-                   # IFRS
-                   "CostOfSalesIfrs"], merge=True)
+                   "CostOfRevenueFromContractWithCustomerExcludingAssessedTax"],
+                   merge=True)   # "CostOfSales" above is the IFRS element too
     tce_d = _annual_dated(["CostsAndExpenses",
                    "BenefitsLossesAndExpenses"], merge=True)
     opex_d = _annual_dated(["OperatingExpenses",
@@ -615,10 +655,8 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
                    "CurrentLiabilities"], _timeline)       # IFRS
     _cash_concepts = ["CashAndCashEquivalentsAtCarryingValue",
                    "CashCashEquivalentsAndShortTermInvestments",
-                   "CashAndCashEquivalents",
-                   # IFRS equivalents
-                   "CashAndCashEquivalentsIfrs",
-                   "CashAndBankBalancesAtCentralBanks"]
+                   # IFRS: CashAndCashEquivalents is the element name
+                   "CashAndCashEquivalents"]
     csh = _on_timeline(_cash_concepts, _timeline)
     # Every balance-sheet series now sits on the income statement's fiscal
     # year ends, so index i means the same year on both sides.
@@ -681,6 +719,8 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
     re  = _on_timeline(["RetainedEarningsAccumulatedDeficit",
                    "RetainedEarnings"], _timeline)         # IFRS
 
+    result["currency"] = _currency
+    result["currency_symbol"] = currency_symbol(_currency)
     result["balance_period_ends"] = _cash_ends
     result.update(total_assets=ta, total_liabilities=tl, total_equity=eq,
                   current_assets=ca, current_liabilities=cl, cash=csh,
@@ -1887,10 +1927,16 @@ def score_fundamentals(raw: dict) -> dict:
         valid_eps = [(i, x) for i, x in enumerate(eps_vals) if x is not None]
         eps_growing = (valid_eps[0][1] > valid_eps[-1][1]) if valid_eps else None
 
-    # FCF — prefer TTM FCF over annual snapshot
+    # FCF — prefer TTM FCF over annual snapshot.
+    # The TTM figure is in dollars. Revenue and net income come from the
+    # filing, which for a 20-F filer is its own currency, and the rows below
+    # divide one by the other: a dollar FCF over a New Taiwan dollar revenue
+    # is an FCF margin off by a factor of thirty, and it reads as plausible.
+    # A filer that does not report in dollars keeps its annual figure.
+    _reports_in_usd = (raw.get("currency") or "USD") == "USD"
     fcf0 = v(raw.get("free_cash_flow", []))
     fcf_source = "annual"
-    if ttm.get("fcf_ttm_usd") is not None:
+    if _reports_in_usd and ttm.get("fcf_ttm_usd") is not None:
         fcf0 = ttm["fcf_ttm_usd"]
         fcf_source = ttm.get("sources", {}).get("fcf", "finnhub_metric")
 
@@ -2019,15 +2065,19 @@ def score_fundamentals(raw: dict) -> dict:
             "rows":     rows,
         })
 
+    # Every figure below comes from the filing, so it is stated in the
+    # currency the filer reports in - not necessarily dollars.
+    _cur = raw.get("currency_symbol") or "$"
+
     def _fmt(val, suffix="", scale=1, decimals=2):
         if val is None:
             return "N/A"
         v_s = val * scale
         if abs(v_s) >= 1e9:
-            return f"${v_s/1e9:.1f}B{suffix}"
+            return f"{_cur}{v_s/1e9:.1f}B{suffix}"
         if abs(v_s) >= 1e6:
-            return f"${v_s/1e6:.1f}M{suffix}"
-        return f"${v_s:,.{decimals}f}{suffix}"
+            return f"{_cur}{v_s/1e6:.1f}M{suffix}"
+        return f"{_cur}{v_s:,.{decimals}f}{suffix}"
 
     def _pct_fmt(val):
         if val is None:
@@ -2063,10 +2113,10 @@ def score_fundamentals(raw: dict) -> dict:
         except (TypeError, ValueError):
             return "n/a"
         if abs(val) >= 1_000_000_000:
-            return f"${val/1_000_000_000:,.2f}B"
+            return f"{_cur}{val/1_000_000_000:,.2f}B"
         if abs(val) >= 1_000_000:
-            return f"${val/1_000_000:,.0f}M"
-        return f"${val:,.0f}"
+            return f"{_cur}{val/1_000_000:,.0f}M"
+        return f"{_cur}{val:,.0f}"
 
     def _pct_series(series, limit=5):
         """Oldest-to-newest percentage trail, e.g. '61.0% -> 59.8% -> 61.3%'."""
@@ -2122,7 +2172,7 @@ def score_fundamentals(raw: dict) -> dict:
         "operating_margin": _pct_series(om_series),
         "net_margin": _pct_series(nm_series),
         "eps_growth": (
-            (" -> ".join(f"${x:,.2f}" for x in reversed([e for e in eps_vals[:5] if e is not None]))
+            (" -> ".join(f"{_cur}{x:,.2f}" for x in reversed([e for e in eps_vals[:5] if e is not None]))
              + (" (earlier years dropped - the reported series crosses a stock split)"
                 if eps_split_trimmed else ""))
             if len([e for e in eps_vals[:5] if e is not None]) >= 2 else ""),
@@ -2258,7 +2308,7 @@ def score_fundamentals(raw: dict) -> dict:
             "points": 2,
             "display_value": (
                 f"{ttm.get('eps_growth_ttm_yoy'):+.1f}% YoY (TTM)" if eps_source == "finnhub_metric" and ttm.get("eps_growth_ttm_yoy") is not None
-                else (f"${eps_vals[0]:.2f}" if eps_vals and eps_vals[0] is not None else "N/A")
+                else (f"{_cur}{eps_vals[0]:.2f}" if eps_vals and eps_vals[0] is not None else "N/A")
             ),
             "metadata": _meta("eps_growth_ttm_yoy", eps_source,
                                _ttm_period if eps_source == "finnhub_metric" else "Annual"),
@@ -2620,7 +2670,7 @@ def score_fundamentals(raw: dict) -> dict:
         return rows
 
     history = _history_table(raw)
-    charts = build_charts(history)
+    charts = build_charts(history, currency=_cur)
 
     # ── Partial score bookkeeping ─────────────────────────────────────────────
     ttm_partial = raw.get("_ttm_partial", {}) or {}
@@ -2646,6 +2696,8 @@ def score_fundamentals(raw: dict) -> dict:
         "total_earned":     total_earned,
         "total_possible":   total_possible,
         "coverage_note":    coverage_note,
+        "currency":         raw.get("currency") or "USD",
+        "currency_symbol":  _cur,
         "normalized_score": round(score_pct),
         "verdict":          verdict,
         "base_verdict":     base_verdict,
@@ -2697,7 +2749,33 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-03.3"
+SCORECARD_VERSION = "2026-09-03.4"
+
+# The unit buckets in EDGAR are keyed by currency. Everything read only "USD",
+# so a filer that reports in its own currency lost every figure with no USD
+# equivalent: TSMC tags its 20-F in TWD and supplies a convenience translation
+# for some lines and some years only - revenue in USD stopped a full year
+# before the TWD series did - and the card came out a year stale with most
+# rows N/A under a dollar sign.
+CURRENCY_SYMBOLS = {
+    "USD": "$",   "EUR": "\u20ac", "GBP": "\u00a3", "JPY": "\u00a5",
+    "CNY": "\u00a5", "TWD": "NT$", "KRW": "\u20a9", "HKD": "HK$",
+    "CAD": "C$",  "AUD": "A$",  "NZD": "NZ$", "SGD": "S$",
+    "INR": "\u20b9", "BRL": "R$",  "MXN": "MX$", "ILS": "\u20aa",
+    "ZAR": "R",   "CHF": "CHF ", "SEK": "kr ", "NOK": "kr ",
+    "DKK": "kr ", "PLN": "z\u0142 ",
+}
+
+
+def currency_symbol(code: str | None) -> str:
+    """A symbol for a reporting currency, falling back to the code itself.
+
+    An unknown code prints as "XYZ 1.2B" rather than a wrong symbol - a
+    number under the wrong currency mark is a worse error than an ugly one.
+    """
+    if not code:
+        return "$"
+    return CURRENCY_SYMBOLS.get(code.upper(), code.upper() + " ")
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
@@ -2761,7 +2839,12 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
     try:
         from market_data import fetch_chart_bars
         from valuation_history import build_history
-        if isinstance(raw, dict) and (raw.get("_valuation") or {}).get("available"):
+        # The price series is in dollars and the per-share figures come from
+        # the filing. For a filer reporting in another currency the division
+        # is meaningless, so the panel is left off rather than shown wrong.
+        if (isinstance(raw, dict)
+                and (raw.get("currency") or "USD") == "USD"
+                and (raw.get("_valuation") or {}).get("available")):
             _bars, _ = fetch_chart_bars(ticker, "1d", "5y")
             _val = raw["_valuation"]
             _shares = [x for x in (raw.get("diluted_shares") or []) if x]
