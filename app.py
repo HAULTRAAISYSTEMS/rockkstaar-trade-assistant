@@ -455,9 +455,19 @@ except Exception as _init_err:
     if _is_production:
         raise
 
+# Importing this module started five daemon threads that hit the network and
+# write to the database: the momentum scanner, the intel alert loop, two cache
+# pre-warms and the demo seed. That is right for the web process and wrong
+# everywhere else — a test run, a management script, or anything that imports
+# app.py to read one function fires all of it. TRADESTAAR_NO_BACKGROUND=1
+# keeps the routes and leaves the daemons unstarted.
+_BACKGROUND_ENABLED = os.environ.get("TRADESTAAR_NO_BACKGROUND", "").strip().lower() \
+    not in ("1", "true", "yes", "on")
+
 # Start the background momentum scanner daemon (no-op if already running).
 try:
-    _scanner.start_scanner()
+    if _BACKGROUND_ENABLED:
+        _scanner.start_scanner()
 except Exception as _scan_err:
     logger.error("scanner start failed at startup: %s", _scan_err)
 
@@ -474,19 +484,21 @@ def _intel_alert_loop():
         _time.sleep(1800)  # every 30 minutes
 
 try:
-    threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
+    if _BACKGROUND_ENABLED:
+        threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
 except Exception as _loop_err:
     logger.error("intel alert loop failed to start: %s", _loop_err)
 
 # Pre-warm the intel cache so the first page load is instant
 try:
-    _intel.trigger_background_refresh()
+    if _BACKGROUND_ENABLED:
+        _intel.trigger_background_refresh()
 except Exception as _warm_err:
     logger.error("intel bg refresh failed at startup: %s", _warm_err)
 
 # Pre-warm the market context cache (regime, sectors, RS baseline)
 try:
-    if _MKT_AVAILABLE:
+    if _MKT_AVAILABLE and _BACKGROUND_ENABLED:
         _mkt.refresh_market_context_bg()
 except Exception as _mkt_warm_err:
     logger.error("market context bg refresh failed at startup: %s", _mkt_warm_err)
@@ -4325,40 +4337,71 @@ def journal():
     )
 
 
+class JournalFormError(ValueError):
+    """A journal field the user typed cannot be read as a number."""
+
+
+# People type prices the way they read them: $182.50, 1,240, 47.90 with a
+# stray space. The form has no client-side validation, so all of that arrived
+# at a bare float() and returned a 500 error page with the trade unsaved and
+# the form cleared.
+_MONEY_STRIP = str.maketrans("", "", "$, \t\u00a0")
+
+
+def _parse_money(raw: str, label: str):
+    """A price field as a number, or None when the field was left empty."""
+    text = (raw or "").strip().translate(_MONEY_STRIP)
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        raise JournalFormError(
+            f"{label} must be a number — {raw.strip()!r} could not be read.")
+
+
 def _parse_journal_form(form) -> dict:
-    """Parse all journal form fields (shared by add and edit routes)."""
+    """Parse all journal form fields (shared by add and edit routes).
+
+    Raises JournalFormError when a number field cannot be read, so the route
+    can say which field and keep the trade unsaved rather than crashing.
+    """
     direction   = form.get("direction", "Long")
-    entry_price = form.get("entry_price", "")
-    exit_price  = form.get("exit_price", "")
-    pnl_pct, result = compute_pnl(direction, entry_price, exit_price)
+    entry_price = _parse_money(form.get("entry_price", ""), "Entry price")
+    exit_price  = _parse_money(form.get("exit_price", ""), "Exit price")
+    pnl_pct, result = compute_pnl(direction, entry_price or 0, exit_price or 0)
 
-    def _int(k):
-        v = form.get(k, "")
-        try: return int(v) if v else None
-        except ValueError: return None
+    def _int(k, label):
+        v = (form.get(k, "") or "").strip().translate(_MONEY_STRIP)
+        if not v:
+            return None
+        try:
+            return int(float(v))
+        except ValueError:
+            raise JournalFormError(
+                f"{label} must be a whole number — {form.get(k).strip()!r} "
+                f"could not be read.")
 
-    def _float(k):
-        v = form.get(k, "")
-        try: return float(v) if v else None
-        except ValueError: return None
+    def _float(k, label):
+        return _parse_money(form.get(k, ""), label)
 
     is_aplus = form.get("is_aplus_setup") == "1"
 
     return dict(
         direction      = direction,
-        entry_price    = float(entry_price) if entry_price else 0,
-        exit_price     = float(exit_price)  if exit_price  else 0,
-        shares         = _int("shares"),
+        entry_price    = entry_price if entry_price is not None else 0,
+        exit_price     = exit_price  if exit_price  is not None else 0,
+        shares         = _int("shares", "Shares"),
         setup_type     = form.get("setup_type", ""),
-        momentum_score = _int("momentum_score"),
+        momentum_score = _int("momentum_score", "Momentum score"),
         pnl_pct        = pnl_pct,
         result         = result,
         notes          = form.get("notes", ""),
         trade_mode     = form.get("trade_mode") or None,
         option_side    = form.get("option_side") or None,
-        option_premium = _float("option_premium"),
-        contracts      = _int("contracts"),
-        stop_price     = _float("stop_price"),
+        option_premium = _float("option_premium", "Option premium"),
+        contracts      = _int("contracts", "Contracts"),
+        stop_price     = _float("stop_price", "Stop price"),
         is_aplus_setup = is_aplus,
     )
 
@@ -4367,7 +4410,11 @@ def _parse_journal_form(form) -> dict:
 def journal_add():
     """Add a new journal entry."""
     uid = current_user_id()
-    f = _parse_journal_form(request.form)
+    try:
+        f = _parse_journal_form(request.form)
+    except JournalFormError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("journal"))
     add_journal_entry(
         ticker         = request.form.get("ticker", "").upper(),
         trade_date     = request.form.get("trade_date", _et_now().strftime("%Y-%m-%d")),
@@ -4394,7 +4441,11 @@ def journal_add():
 @app.route("/journal/<int:entry_id>/edit", methods=["POST"])
 def journal_edit(entry_id):
     """Update an existing journal entry."""
-    f = _parse_journal_form(request.form)
+    try:
+        f = _parse_journal_form(request.form)
+    except JournalFormError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("journal"))
     update_journal_entry(
         entry_id   = entry_id,
         ticker     = request.form.get("ticker", "").upper(),
@@ -5284,7 +5335,6 @@ def api_ai_briefing():
 
 
 @app.route("/api/narrate_score")
-@csrf.exempt
 def api_narrate_score():
     """
     Return a 2-3 sentence AI narration of why a ticker scored the way it did.
@@ -5353,7 +5403,6 @@ def api_narrate_score():
 
 
 @app.route("/api/journal_summary")
-@csrf.exempt
 def api_journal_summary():
     """
     Return an AI weekly trading journal summary.
@@ -5457,7 +5506,6 @@ def api_journal_summary():
 
 
 @app.route("/api/earnings_digest")
-@csrf.exempt
 def api_earnings_digest():
     """
     Return an AI earnings digest for swing-trading watch tickers.
@@ -5931,7 +5979,6 @@ def api_scanner():
         return jsonify({"error": "scanner unavailable"}), 500
 
 
-@csrf.exempt
 @app.route("/api/scanner/add", methods=["POST"])
 def api_scanner_add():
     """
@@ -5968,7 +6015,6 @@ def api_scanner_alerts():
         return jsonify([]), 500
 
 
-@csrf.exempt
 @app.route("/api/scanner/alerts/seen", methods=["POST"])
 def api_scanner_alerts_seen():
     """Mark all scanner alerts as seen (clears the unseen badge)."""
@@ -5980,7 +6026,6 @@ def api_scanner_alerts_seen():
         return jsonify({"error": str(exc)}), 500
 
 
-@csrf.exempt
 @app.route("/api/scanner/alerts/clear", methods=["POST"])
 def api_scanner_alerts_clear():
     """Delete all scanner alert rows."""
@@ -6136,7 +6181,8 @@ def _deferred_startup():
     except Exception as _e:
         logger.error("deferred_startup watchlist log error: %s", _e, exc_info=True)
 
-threading.Thread(target=_deferred_startup, daemon=True, name="startup-seed").start()
+if _BACKGROUND_ENABLED:
+    threading.Thread(target=_deferred_startup, daemon=True, name="startup-seed").start()
 
 
 # ---------------------------------------------------------------------------
@@ -6273,7 +6319,6 @@ def schwab_callback():
     return redirect(url_for("schwab_account"))
 
 
-@csrf.exempt
 @app.route("/schwab/disconnect", methods=["POST"])
 def schwab_disconnect():
     """Clear stored Schwab tokens (read-only disconnect, no broker-side revocation)."""
@@ -6304,7 +6349,6 @@ def schwab_sync_preview():
         return jsonify({"error": str(e)}), 500
 
 
-@csrf.exempt
 @app.route("/schwab/sync-import", methods=["POST"])
 def schwab_sync_import():
     """
@@ -6406,7 +6450,6 @@ def _intel_error_payload(msg: str) -> dict:
 
 
 @app.route("/api/intel")
-@csrf.exempt
 def api_intel():
     """Returns all intel feeds as JSON — always returns JSON, never HTML."""
     try:
@@ -6454,7 +6497,6 @@ def api_intel():
 
 
 @app.route("/api/intel/news-refresh", methods=["POST"])
-@csrf.exempt
 def api_intel_news_refresh():
     """Fetch news in the request and return rendered story cards.
 
@@ -6575,7 +6617,6 @@ def api_intel_earnings_radar():
 
 
 @app.route("/api/ndx_watch")
-@csrf.exempt
 def api_ndx_watch():
     """Return Nasdaq-100 constituent watch data (recent changes + top holdings)."""
     try:
@@ -6734,7 +6775,6 @@ def api_adaptive_insights():
 
 
 @app.route("/api/institutional/record-outcome", methods=["POST"])
-@csrf.exempt
 def api_record_outcome():
     """
     Record a trade outcome for adaptive learning.
@@ -7201,7 +7241,6 @@ def api_opportunity_alerts():
 
 
 @app.route("/api/opportunity/refresh", methods=["POST"])
-@csrf.exempt
 def api_opportunity_refresh():
     """Trigger background refresh of liquidity data."""
     try:
@@ -7506,7 +7545,6 @@ def stock_compare():
 
 
 @app.route("/api/research/ask", methods=["POST"])
-@csrf.exempt
 def api_research_ask():
     """Call Anthropic with web_search enabled and return the answer."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -7601,7 +7639,6 @@ def tradestaar_ai():
 
 
 @app.route("/api/ask", methods=["POST"])
-@csrf.exempt
 def api_ask():
     """Tradestaar AI with bounded history and verified in-app context."""
     from openai import OpenAI as _OpenAI
@@ -7703,7 +7740,6 @@ def api_study_log_get():
 
 
 @app.route("/api/study-log", methods=["POST"])
-@csrf.exempt
 def api_study_log_save():
     data = request.get_json(force=True, silent=True) or {}
     question = (data.get("question") or "").strip()
@@ -7715,7 +7751,6 @@ def api_study_log_save():
 
 
 @app.route("/api/study-log/<int:entry_id>", methods=["DELETE"])
-@csrf.exempt
 def api_study_log_delete(entry_id):
     delete_study_log_entry(current_user_id(), entry_id)
     return jsonify({"ok": True})
