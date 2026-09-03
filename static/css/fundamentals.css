@@ -745,3 +745,33 @@
 /* A year the top line went backwards is the one bar worth pointing at. */
 .chart-bar.is-decline { fill: var(--warn-500) }
 .chart-key i.is-decline { background: var(--warn-500) }
+
+
+/* Verdict held back because too little of the scorecard could be answered.
+   Styled as a caution note, not an error: the data is thin, not wrong. */
+.fundamentals-shell .verdict-capped {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-left: 2px solid var(--warn-500);
+  background: color-mix(in srgb, var(--warn-500) 8%, transparent);
+  border-radius: 0 var(--elite-radius-sm) var(--elite-radius-sm) 0;
+  font: 400 11px/1.5 var(--font-ui);
+  color: var(--elite-muted);
+  max-width: 46ch;
+}
+.fundamentals-shell .verdict-capped-tag {
+  display: block;
+  font: 700 9px/1.4 var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--warn-500);
+  margin-bottom: 2px;
+}
+
+/* No verdict at all. Neutral, not a judgement — the scorecard had nothing
+   to work with. */
+.fundamentals-shell .verdict-na {
+  color: var(--elite-muted);
+  border-color: var(--elite-border);
+  background: var(--elite-panel-inset);
+}

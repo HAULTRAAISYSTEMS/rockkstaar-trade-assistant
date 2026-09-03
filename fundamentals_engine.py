@@ -1108,6 +1108,47 @@ DOWNGRADE_TRIGGERS = {
 # Worst-first, so a downgrade can step exactly one band.
 VERDICT_BANDS = ["Avoid", "Caution", "Good", "Great Company"]
 
+# Not a band. Zero resolved rows scored zero out of zero, which fell through
+# the bands to "Avoid" - a confident negative claim about a company the
+# scorecard knows nothing about. Saying nothing is the honest answer.
+NO_DATA_VERDICT = "Insufficient Data"
+
+
+# How much of the 40-point scorecard a filer's data has to answer before the
+# verdict is allowed to say so. The score renormalises to 40 regardless of how
+# many rows resolved, so a company whose filings supported only six points of
+# tests could pass all six and read "Great Company" on that evidence - the
+# card said "6 pts available" in small type beside a confident headline.
+#
+# A cap never lowers a verdict the evidence already earns; it refuses to state
+# more confidence than the data supports. Below half the scorecard the verdict
+# stops at Caution, and below 70% at Good.
+COVERAGE_CAPS = ((0.50, "Caution"), (0.70, "Good"))
+
+
+def cap_for_coverage(verdict: str, total_possible: float,
+                     scale: float = 40) -> tuple[str, str | None]:
+    """Verdict limited by how much of the scorecard the filings answered.
+
+    Returns the verdict and, when it was capped, a sentence explaining why.
+    """
+    if verdict not in VERDICT_BANDS or not scale or total_possible >= scale:
+        return verdict, None
+    coverage = total_possible / scale
+    for threshold, ceiling in COVERAGE_CAPS:
+        if coverage >= threshold:
+            continue
+        if VERDICT_BANDS.index(verdict) <= VERDICT_BANDS.index(ceiling):
+            return verdict, None
+        return ceiling, (
+            f"Only {total_possible:g} of {scale:g} points could be scored from "
+            f"this company's filings, so the verdict is held at {ceiling}. "
+            f"The rows that did resolve came out at "
+            f"{VERDICT_BANDS[VERDICT_BANDS.index(verdict)]} level, but too "
+            f"little of the scorecard was answerable to say that with "
+            f"confidence.")
+    return verdict, None
+
 
 def apply_downgrade(verdict: str, red_flags: list) -> tuple[str, list]:
     """Drop the verdict one band if any auto-downgrade trigger fired.
@@ -2401,6 +2442,18 @@ def score_fundamentals(raw: dict) -> dict:
     base_verdict = verdict
     verdict, fired_triggers = apply_downgrade(verdict, red_flags)
     downgraded = verdict != base_verdict
+    # The downgrade panel reports what the triggers did, so it has to be told
+    # the verdict as the triggers left it - the coverage cap that follows is a
+    # separate statement about the data, not a trigger firing.
+    _after_triggers = verdict
+    # Coverage last, so a thin scorecard caps whatever the downgrade left.
+    verdict, coverage_note = cap_for_coverage(verdict, total_possible)
+    if total_possible <= 0:
+        verdict = NO_DATA_VERDICT
+        coverage_note = ("None of the 40 scorecard points could be evaluated "
+                         "from the data available for this company, so no "
+                         "verdict is stated. This is a gap in the filings or "
+                         "the data feed, not a judgement about the business.")
 
     # Show that the triggers ran, not only that one caught something. A card
     # that stays silent when everything is clean leaves the reader unable to
@@ -2411,7 +2464,7 @@ def score_fundamentals(raw: dict) -> dict:
     downgrade_check = {
         "any_fired": bool(fired_triggers),
         "verdict_before": base_verdict,
-        "verdict_after": verdict,
+        "verdict_after": _after_triggers,
         "checks": [
             {"key": key,
              "label": RED_FLAG_DEFS.get(key, key),
@@ -2425,6 +2478,7 @@ def score_fundamentals(raw: dict) -> dict:
         "Good":          "verdict-good",
         "Caution":       "verdict-caution",
         "Avoid":         "verdict-avoid",
+        NO_DATA_VERDICT: "verdict-na",
     }.get(verdict, "verdict-caution")
 
     # ── Verdict reason — 1-2 sentences explaining the score ──────────────────
@@ -2460,6 +2514,11 @@ def score_fundamentals(raw: dict) -> dict:
             "goodwill_impairment":               "a prior acquisition has lost value",
         }
         flag_text = next((flag_phrases[k] for k in flags if k in flag_phrases), None)
+
+        if verdict == NO_DATA_VERDICT:
+            return ("Nothing on the scorecard could be evaluated. Check the "
+                    "ticker, or try again once the company's next annual "
+                    "report is filed.")
 
         if verdict == "Great Company":
             parts = []
@@ -2517,10 +2576,14 @@ def score_fundamentals(raw: dict) -> dict:
         )
         rows = []
         for i in range(min(n, 5)):
-            rev  = v(raw_data["revenue"], i)
-            ni   = v(raw_data["net_income"], i)
-            fcf  = v(raw_data["free_cash_flow"], i)
-            ocf  = v(raw_data["operating_cash_flow"], i)
+            # .get, not subscript: the row count above already tolerates a
+            # missing series, and a provider that returns an income statement
+            # with no cash flow statement raised KeyError here and took the
+            # whole page down with a 500.
+            rev  = v(raw_data.get("revenue"), i)
+            ni   = v(raw_data.get("net_income"), i)
+            fcf  = v(raw_data.get("free_cash_flow"), i)
+            ocf  = v(raw_data.get("operating_cash_flow"), i)
             gm   = gm_series[i] if i < len(gm_series) else None
             om   = om_series[i] if i < len(om_series) else None
             nm   = nm_series[i] if i < len(nm_series) else None
@@ -2577,6 +2640,7 @@ def score_fundamentals(raw: dict) -> dict:
         "sections":         sections,
         "total_earned":     total_earned,
         "total_possible":   total_possible,
+        "coverage_note":    coverage_note,
         "normalized_score": round(score_pct),
         "verdict":          verdict,
         "base_verdict":     base_verdict,
@@ -2628,7 +2692,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-03.1"
+SCORECARD_VERSION = "2026-09-03.2"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:

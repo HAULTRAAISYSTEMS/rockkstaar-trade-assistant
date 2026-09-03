@@ -126,6 +126,12 @@
         </div>
         <div>
           <span class="verdict-badge {{ data.verdict_class }}">{{ data.verdict }}</span>
+          {% if data.coverage_note %}
+          <div class="verdict-capped">
+            <span class="verdict-capped-tag">Held back — thin data</span>
+            {{ data.coverage_note }}
+          </div>
+          {% endif %}
           {% if data.verdict_reason %}
           <div class="verdict-reason">
             {{ data.verdict_reason }}
