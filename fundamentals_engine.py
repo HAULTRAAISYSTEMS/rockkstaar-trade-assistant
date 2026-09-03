@@ -414,6 +414,34 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
     def _annual(concepts, n: int = 5):
         return [val for _end, val in _annual_dated(concepts, n)]
 
+    def _has_values(series) -> bool:
+        """A timeline-shaped series can be all-None and still non-empty.
+
+        The missing-section checks used plain truthiness, so once these
+        series became one slot per fiscal year a company with no balance
+        sheet data at all produced ``[None, None, None]`` - truthy - and the
+        section was never reported as missing.
+        """
+        return any(v is not None for v in (series or []))
+
+    def _on_timeline(concepts, timeline, **kw):
+        """Values positioned on ``timeline``, one slot per fiscal year end.
+
+        Only the income statement was aligned. Every other series — cash flow
+        and the whole balance sheet — was a bare list ordered by whatever
+        period ends that particular concept happened to cover, and then read
+        by index against the aligned ones. A concept that starts a year later
+        or skips a year shifts silently: free cash flow lands under the wrong
+        fiscal year on the chart and in the table, and the debt-versus-revenue
+        and goodwill-impairment downgrade triggers compare two different
+        years. Missing slots stay None rather than pulling the next value
+        forward.
+        """
+        pairs = dict(_annual_dated(concepts, **kw))
+        if not timeline:
+            return [val for _end, val in _annual_dated(concepts, **kw)]
+        return [pairs.get(end) for end in timeline]
+
     def _align(dated_series: dict, timeline: list) -> dict:
         """Line every series up on the same fiscal year ends.
 
@@ -575,24 +603,27 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
         missing.append("income_statement")
 
     # ── 5. Balance sheet ─────────────────────────────────────────────────────
-    ta  = _annual(["Assets"])                   # same in IFRS
-    tl  = _annual(["Liabilities"])              # same in IFRS
-    eq  = _annual(["StockholdersEquity",
+    ta  = _on_timeline(["Assets"], _timeline)   # same in IFRS
+    tl  = _on_timeline(["Liabilities"], _timeline)   # same in IFRS
+    eq  = _on_timeline(["StockholdersEquity",
                    "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
                    # IFRS equivalents
-                   "Equity", "EquityAttributableToOwnersOfParent"])
-    ca  = _annual(["AssetsCurrent",
-                   "CurrentAssets"])            # IFRS
-    cl  = _annual(["LiabilitiesCurrent",
-                   "CurrentLiabilities"])       # IFRS
-    csh_pairs = _annual_dated(["CashAndCashEquivalentsAtCarryingValue",
+                   "Equity", "EquityAttributableToOwnersOfParent"], _timeline)
+    ca  = _on_timeline(["AssetsCurrent",
+                   "CurrentAssets"], _timeline)            # IFRS
+    cl  = _on_timeline(["LiabilitiesCurrent",
+                   "CurrentLiabilities"], _timeline)       # IFRS
+    _cash_concepts = ["CashAndCashEquivalentsAtCarryingValue",
                    "CashCashEquivalentsAndShortTermInvestments",
                    "CashAndCashEquivalents",
                    # IFRS equivalents
                    "CashAndCashEquivalentsIfrs",
-                   "CashAndBankBalancesAtCentralBanks"])
-    csh = [val for _end, val in csh_pairs]
-    _cash_ends = [end for end, _val in csh_pairs]
+                   "CashAndBankBalancesAtCentralBanks"]
+    csh = _on_timeline(_cash_concepts, _timeline)
+    # Every balance-sheet series now sits on the income statement's fiscal
+    # year ends, so index i means the same year on both sides.
+    _cash_ends = list(_timeline) if _timeline else [
+        end for end, _val in _annual_dated(_cash_concepts)]
 
     # Liquidity and near-term obligations. Neither of these was ever populated
     # on the EDGAR path, so the cash-coverage row compared bare cash against
@@ -633,7 +664,7 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
         std.append(_std_map.get(_end))
     if not any(x is not None for x in std):
         std = []
-    td  = _annual(["LongTermDebt",
+    td  = _on_timeline(["LongTermDebt",
                                       "LongTermDebtAndCapitalLeaseObligation",   # correct XBRL concept (no trailing 's')
                                       "LongTermDebtAndCapitalLeaseObligations",  # alternate spelling as fallback
                                       "LongTermDebtNoncurrent",
@@ -642,13 +673,13 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
                                       "LongtermBorrowings",
                                       # Current/short-term debt as final fallbacks
                                       "DebtCurrent",
-                                      "ShorttermBorrowings"])
-    gw  = _annual(["Goodwill"])                 # same in IFRS
-    ia  = _annual(["IntangibleAssetsNetExcludingGoodwill",
+                                      "ShorttermBorrowings"], _timeline)
+    gw  = _on_timeline(["Goodwill"], _timeline)   # same in IFRS
+    ia  = _on_timeline(["IntangibleAssetsNetExcludingGoodwill",
                    "FiniteLivedIntangibleAssetsNet",
-                   "IntangibleAssetsOtherThanGoodwill"])   # IFRS
-    re  = _annual(["RetainedEarningsAccumulatedDeficit",
-                   "RetainedEarnings"])         # IFRS
+                   "IntangibleAssetsOtherThanGoodwill"], _timeline)   # IFRS
+    re  = _on_timeline(["RetainedEarningsAccumulatedDeficit",
+                   "RetainedEarnings"], _timeline)         # IFRS
 
     result["balance_period_ends"] = _cash_ends
     result.update(total_assets=ta, total_liabilities=tl, total_equity=eq,
@@ -656,29 +687,34 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
                   cash_and_st_investments=liquid, short_term_debt=std,
                   total_debt=td, goodwill=gw, intangible_assets=ia,
                   retained_earnings=re)
-    if not ta and not eq:
+    if not _has_values(ta) and not _has_values(eq):
         missing.append("balance_sheet")
 
     # ── 6. Cash flow ─────────────────────────────────────────────────────────
-    ocf = _annual(["NetCashProvidedByUsedInOperatingActivities",
-                   "CashFlowsFromUsedInOperatingActivities"])   # IFRS
+    ocf = _on_timeline(["NetCashProvidedByUsedInOperatingActivities",
+                   "CashFlowsFromUsedInOperatingActivities"], _timeline)   # IFRS
     # The IFRS element is PurchaseOf..., not AcquisitionOf.... Getting that one
     # name wrong cost a 20-F filer three rows: with no capex there is no free
     # cash flow, and with no free cash flow the FCF-positive test, the earnings
     # quality test and the capex-to-revenue test all read N/A while operating
     # cash flow sat right there on the same card.
-    cap = _annual(["PaymentsToAcquirePropertyPlantAndEquipment",
+    # Intangibles are not property, plant and equipment, so that concept is
+    # gone rather than standing in for capex. The not-yet-paid accrual moves
+    # last: it is a small non-cash disclosure, and preferring it over the real
+    # figure made free cash flow look far larger than it was.
+    cap = _on_timeline(["PaymentsToAcquirePropertyPlantAndEquipment",
                    "PaymentsToAcquireProductiveAssets",
-                   "CapitalExpendituresIncurredButNotYetPaid",
                    # IFRS equivalents
                    "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
                    "PurchaseOfPropertyPlantAndEquipment",
-                   "PurchaseOfIntangibleAssetsClassifiedAsInvestingActivities",
-                   "AcquisitionOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"])
-    fin = _annual(["NetCashProvidedByUsedInFinancingActivities",
-                   "CashFlowsFromUsedInFinancingActivities"])   # IFRS
+                   "AcquisitionOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
+                   "CapitalExpendituresIncurredButNotYetPaid"], _timeline)
+    fin = _on_timeline(["NetCashProvidedByUsedInFinancingActivities",
+                   "CashFlowsFromUsedInFinancingActivities"], _timeline)   # IFRS
 
     cap_abs = [abs(c) if c is not None else None for c in cap]
+    # Both sides now sit on the same timeline, so index i really is one fiscal
+    # year on both.
     fcf = []
     for i in range(max(len(ocf), len(cap_abs))):
         o = ocf[i] if i < len(ocf) else None
@@ -687,7 +723,7 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
 
     result.update(operating_cash_flow=ocf, capex=cap_abs,
                   free_cash_flow=fcf, financing_cash_flow=fin)
-    if not ocf:
+    if not _has_values(ocf):
         missing.append("cash_flow")
 
     # ── 7. Derived ratios ────────────────────────────────────────────────────
@@ -2592,7 +2628,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-02.11"
+SCORECARD_VERSION = "2026-09-03.1"
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:

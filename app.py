@@ -7226,7 +7226,44 @@ def login_page():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "").strip()
+
+        # Throttle before checking the password. Nothing counted attempts, so
+        # a known username could be guessed against as fast as the network
+        # allowed. The scope pairs address with username: keying on the
+        # username alone would let anyone lock a real user out on purpose, and
+        # keying on the address alone would lock out a whole office behind one
+        # NAT.
+        import login_throttle as _throttle
+        from database import get_db as _tdb
+        _scope = _throttle.scope_key(
+            (request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+             or request.remote_addr or ""), username)
+        _conn = None
+        try:
+            _conn = _tdb()
+            _wait = _throttle.lockout_seconds(
+                _throttle.recent_failures(_conn, _scope))
+        except Exception:
+            _wait = 0
+        if _wait > 0:
+            if _conn is not None:
+                _conn.close()
+            return render_template(
+                "login.html", next=request.form.get("next", ""),
+                error=_throttle.describe(_wait),
+                registration_enabled=_registration_enabled()), 429
+
         user = check_user_password(username, password)
+        try:
+            if _conn is not None:
+                if user:
+                    _throttle.clear(_conn, _scope)
+                else:
+                    _throttle.record_failure(_conn, _scope)
+                _conn.close()
+        except Exception:
+            pass
+
         if user:
             remember = request.form.get("remember_me") == "1"
             session.permanent = remember
