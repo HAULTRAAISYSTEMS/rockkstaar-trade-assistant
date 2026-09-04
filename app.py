@@ -7128,11 +7128,20 @@ def catalyst_calendar():
     except Exception:
         active_tickers = []
     rows = _build_catalyst_calendar(summary, active_tickers)
+    # The macro schedule is a list in the source, so it has an end date. Tell
+    # the page how far it reaches: an exhausted calendar reads exactly like a
+    # quiet fortnight otherwise.
+    try:
+        econ_coverage = _intel.static_econ_coverage()
+    except Exception as exc:
+        logger.debug("catalyst_calendar: econ coverage failed: %s", exc)
+        econ_coverage = None
     return render_template(
         "catalyst_calendar.html", events=rows,
         earnings_count=sum(row["kind"] == "EARNINGS" for row in rows),
         economic_count=sum(row["kind"] == "ECONOMIC" for row in rows),
         watchlist_count=sum(row["on_watchlist"] for row in rows),
+        econ_coverage=econ_coverage,
     )
 
 

@@ -2062,6 +2062,8 @@ _ECON_REASONS: dict[str, str] = {
     "consumer sentiment":"Consumer confidence — spending outlook, sector mover.",
     "retail sales":      "Retail sales — consumer spending direct read.",
     "pce":               "PCE inflation — Fed's preferred inflation gauge. High impact.",
+    "press conference":  "Fed press conference — the tone often moves more than the decision itself.",
+    "projections":       "The dot plot — where the committee sees rates going. Moves the long end.",
     "ism":               "ISM survey — manufacturing/services health check.",
     "housing":           "Housing data — rate-sensitive sector indicator.",
     "default":           "High-impact event — reduce size, wait for market reaction.",
@@ -2162,34 +2164,119 @@ def _econ_from_finnhub() -> list[dict]:
         return []
 
 
-# Static fallback calendar — update each quarter with real dates
+# Static fallback calendar.
+#
+# Finnhub's economic-calendar endpoint is on a premium plan, so in practice
+# this list IS the macro calendar, not a fallback. It ran out on 2026-09-16 —
+# twelve days after it was last read — and the card would simply have gone
+# empty with nothing to say why.
+#
+# Every date below is taken from the issuing agency's own published schedule:
+# BLS for payrolls, CPI and PPI; Census for retail sales; BEA for GDP and
+# personal income; the Federal Reserve for FOMC. All times are Eastern, which
+# is what these agencies publish in. The previous list had CPI on 2026-09-10 —
+# that is the PPI date; August CPI is released on the 11th.
+#
+# BLS, Census and BEA publish about a year ahead, so this reaches the end of
+# 2026; the Fed publishes two years ahead, so FOMC reaches the end of 2027.
+# STATIC_ECON_HORIZON below is derived from the last row, and the calendar
+# page says the schedule ends rather than showing an empty card.
 _STATIC_ECON: list[tuple] = [
     # (date_str, time_str, event_name, impact)
-    # ── July 2026 ──
-    ("2026-07-02", "8:30 AM ET",  "Non-Farm Payrolls (NFP)",           "HIGH"),
-    ("2026-07-02", "8:30 AM ET",  "Unemployment Rate",                 "HIGH"),
-    ("2026-07-10", "8:30 AM ET",  "Consumer Price Index (CPI)",        "HIGH"),
-    ("2026-07-10", "8:30 AM ET",  "Core CPI (MoM)",                    "HIGH"),
-    ("2026-07-11", "8:30 AM ET",  "Producer Price Index (PPI)",        "HIGH"),
-    ("2026-07-15", "8:30 AM ET",  "Retail Sales (MoM)",                "HIGH"),
-    ("2026-07-17", "8:30 AM ET",  "Initial Jobless Claims",            "MEDIUM"),
-    ("2026-07-25", "8:30 AM ET",  "GDP (Advance Estimate Q2)",         "HIGH"),
-    ("2026-07-29", "8:30 AM ET",  "PCE Price Index",                   "HIGH"),
-    ("2026-07-29", "8:30 AM ET",  "Core PCE (MoM)",                    "HIGH"),
-    ("2026-07-30", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
-    ("2026-07-30", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
-    # ── August 2026 ──
-    ("2026-08-06", "8:30 AM ET",  "Non-Farm Payrolls (NFP)",           "HIGH"),
-    ("2026-08-12", "8:30 AM ET",  "Consumer Price Index (CPI)",        "HIGH"),
-    ("2026-08-13", "8:30 AM ET",  "Producer Price Index (PPI)",        "HIGH"),
-    ("2026-08-14", "8:30 AM ET",  "Retail Sales (MoM)",                "HIGH"),
-    ("2026-08-28", "8:30 AM ET",  "PCE Price Index",                   "HIGH"),
     # ── September 2026 ──
-    ("2026-09-03", "8:30 AM ET",  "Non-Farm Payrolls (NFP)",           "HIGH"),
-    ("2026-09-10", "8:30 AM ET",  "Consumer Price Index (CPI)",        "HIGH"),
+    ("2026-09-04", "8:30 AM ET",  "Non-Farm Payrolls (NFP)",           "HIGH"),
+    ("2026-09-04", "8:30 AM ET",  "Unemployment Rate",                 "HIGH"),
+    ("2026-09-10", "8:30 AM ET",  "Producer Price Index (PPI)",        "HIGH"),
+    ("2026-09-11", "8:30 AM ET",  "Consumer Price Index (CPI)",        "HIGH"),
+    ("2026-09-11", "8:30 AM ET",  "Core CPI (MoM)",                    "HIGH"),
+    ("2026-09-16", "8:30 AM ET",  "Retail Sales (MoM)",                "HIGH"),
     ("2026-09-16", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2026-09-16", "2:00 PM ET",  "FOMC Economic Projections",         "HIGH"),
     ("2026-09-16", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
+    ("2026-09-30", "8:30 AM ET",  "GDP (Third Estimate, Q2)",          "MEDIUM"),
+    ("2026-09-30", "8:30 AM ET",  "PCE Price Index",                   "HIGH"),
+    ("2026-09-30", "8:30 AM ET",  "Core PCE (MoM)",                    "HIGH"),
+    # ── October 2026 ──
+    ("2026-10-02", "8:30 AM ET",  "Non-Farm Payrolls (NFP)",           "HIGH"),
+    ("2026-10-02", "8:30 AM ET",  "Unemployment Rate",                 "HIGH"),
+    ("2026-10-14", "8:30 AM ET",  "Consumer Price Index (CPI)",        "HIGH"),
+    ("2026-10-14", "8:30 AM ET",  "Core CPI (MoM)",                    "HIGH"),
+    ("2026-10-15", "8:30 AM ET",  "Producer Price Index (PPI)",        "HIGH"),
+    ("2026-10-15", "8:30 AM ET",  "Retail Sales (MoM)",                "HIGH"),
+    ("2026-10-28", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2026-10-28", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
+    ("2026-10-29", "8:30 AM ET",  "GDP (Advance Estimate, Q3)",        "HIGH"),
+    ("2026-10-29", "8:30 AM ET",  "PCE Price Index",                   "HIGH"),
+    ("2026-10-29", "8:30 AM ET",  "Core PCE (MoM)",                    "HIGH"),
+    # ── November 2026 ──
+    ("2026-11-06", "8:30 AM ET",  "Non-Farm Payrolls (NFP)",           "HIGH"),
+    ("2026-11-06", "8:30 AM ET",  "Unemployment Rate",                 "HIGH"),
+    ("2026-11-10", "8:30 AM ET",  "Consumer Price Index (CPI)",        "HIGH"),
+    ("2026-11-10", "8:30 AM ET",  "Core CPI (MoM)",                    "HIGH"),
+    ("2026-11-13", "8:30 AM ET",  "Producer Price Index (PPI)",        "HIGH"),
+    ("2026-11-17", "8:30 AM ET",  "Retail Sales (MoM)",                "HIGH"),
+    ("2026-11-25", "8:30 AM ET",  "GDP (Second Estimate, Q3)",         "MEDIUM"),
+    ("2026-11-25", "8:30 AM ET",  "PCE Price Index",                   "HIGH"),
+    ("2026-11-25", "8:30 AM ET",  "Core PCE (MoM)",                    "HIGH"),
+    # ── December 2026 ──
+    ("2026-12-04", "8:30 AM ET",  "Non-Farm Payrolls (NFP)",           "HIGH"),
+    ("2026-12-04", "8:30 AM ET",  "Unemployment Rate",                 "HIGH"),
+    ("2026-12-09", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2026-12-09", "2:00 PM ET",  "FOMC Economic Projections",         "HIGH"),
+    ("2026-12-09", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
+    ("2026-12-10", "8:30 AM ET",  "Consumer Price Index (CPI)",        "HIGH"),
+    ("2026-12-10", "8:30 AM ET",  "Core CPI (MoM)",                    "HIGH"),
+    ("2026-12-15", "8:30 AM ET",  "Producer Price Index (PPI)",        "HIGH"),
+    ("2026-12-16", "8:30 AM ET",  "Retail Sales (MoM)",                "HIGH"),
+    ("2026-12-23", "8:30 AM ET",  "GDP (Third Estimate, Q3)",          "MEDIUM"),
+    ("2026-12-23", "8:30 AM ET",  "PCE Price Index",                   "HIGH"),
+    ("2026-12-23", "8:30 AM ET",  "Core PCE (MoM)",                    "HIGH"),
+    # ── FOMC through 2027. The Fed publishes two years out; the statistical
+    #    agencies do not, so these stand alone until the 2027 schedules post.
+    ("2027-01-27", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2027-01-27", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
+    ("2027-03-17", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2027-03-17", "2:00 PM ET",  "FOMC Economic Projections",         "HIGH"),
+    ("2027-03-17", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
+    ("2027-04-28", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2027-04-28", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
+    ("2027-06-09", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2027-06-09", "2:00 PM ET",  "FOMC Economic Projections",         "HIGH"),
+    ("2027-06-09", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
+    ("2027-07-28", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2027-07-28", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
+    ("2027-09-15", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2027-09-15", "2:00 PM ET",  "FOMC Economic Projections",         "HIGH"),
+    ("2027-09-15", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
+    ("2027-10-27", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2027-10-27", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
+    ("2027-12-08", "2:00 PM ET",  "FOMC Interest Rate Decision",       "HIGH"),
+    ("2027-12-08", "2:00 PM ET",  "FOMC Economic Projections",         "HIGH"),
+    ("2027-12-08", "2:30 PM ET",  "Fed Press Conference",              "HIGH"),
 ]
+
+# The last date this schedule knows about. A hardcoded calendar always runs
+# out; the only question is whether it says so or goes quietly blank.
+STATIC_ECON_HORIZON: str = max(row[0] for row in _STATIC_ECON)
+
+# The statistical agencies stop well before the Fed does, so past this date
+# the calendar is FOMC meetings and nothing else - which would read as a
+# quiet couple of months rather than a gap in the data.
+STATIC_ECON_FULL_THROUGH: str = max(
+    row[0] for row in _STATIC_ECON
+    if "FOMC" not in row[2] and "Fed Press" not in row[2])
+
+
+def static_econ_coverage(today=None) -> dict:
+    """How far the built-in schedule still reaches, for the page to report."""
+    today = today or _today_et()
+    return {
+        "horizon": STATIC_ECON_HORIZON,
+        "full_through": STATIC_ECON_FULL_THROUGH,
+        "days_of_full_coverage": (
+            datetime.strptime(STATIC_ECON_FULL_THROUGH, "%Y-%m-%d").date() - today).days,
+        "exhausted": today.isoformat() > STATIC_ECON_HORIZON,
+    }
 
 
 def _econ_static_fallback() -> list[dict]:
