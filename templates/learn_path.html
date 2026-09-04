@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ path.name }} — Learn — Tradestaar Elite{% endblock %}
+{% block body_class %}learn-shell{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/learn.css') }}" />
+{% endblock %}
+
+{% block content %}
+<div class="learn-wrap learn-wrap-narrow">
+  <nav class="learn-crumbs">
+    <a href="{{ url_for('learn_index') }}">Learn</a><span>/</span>
+    <a href="{{ url_for('learn_paths') }}">Paths</a><span>/</span><span>{{ path.name }}</span>
+  </nav>
+
+  <header class="concept-head">
+    <h1 class="concept-name">{{ path.name }}</h1>
+    <p class="concept-line">{{ path.blurb }}</p>
+  </header>
+
+  <section class="path-outcome">
+    <div class="path-outcome-label">What you will be able to do</div>
+    <p>{{ path.outcome }}</p>
+  </section>
+
+  <div class="path-progress">
+    <div class="path-bar"><div class="path-bar-fill" style="width: {{ path.percent }}%"></div></div>
+    <span class="path-progress-text">
+      {% if path.complete %}All {{ path.total }} steps behind you.
+      {% else %}{{ path.done }} of {{ path.total }} steps behind you.{% endif %}
+    </span>
+  </div>
+
+  <ol class="path-steps">
+    {% for step in path.steps %}
+    <li class="path-step
+               {{ ' is-done' if step.done }}
+               {{ ' is-next' if step.slug == path.next_step }}">
+      <div class="path-step-n">{{ '✓' if step.done else step.n }}</div>
+      <div class="path-step-body">
+        <a class="path-step-name" href="{{ url_for('learn_concept', slug=step.slug) }}">{{ step.concept.name }}</a>
+        {% if step.slug == path.next_step %}<span class="path-step-tag">Next</span>
+        {% elif step.seen and not step.done %}<span class="path-step-tag path-step-tag-soft">Met</span>{% endif %}
+        <p class="path-step-why">{{ step.why }}</p>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+
+  <div class="rev-actions">
+    {% if path.next_step %}
+    <a class="rev-next" href="{{ url_for('learn_concept', slug=path.next_step) }}">Continue &rarr;</a>
+    {% else %}
+    <a class="rev-next" href="{{ url_for('learn_review') }}">Keep it fresh &rarr;</a>
+    {% endif %}
+    <a class="rev-secondary" href="{{ url_for('learn_paths') }}">All paths</a>
+  </div>
+</div>
+{% endblock %}

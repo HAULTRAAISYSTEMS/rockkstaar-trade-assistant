@@ -82,6 +82,17 @@
   </section>
   {% endif %}
 
+  {% if on_paths %}
+  <section class="concept-block">
+    <h2>Part of</h2>
+    <div class="path-inline">
+      {% for pth in on_paths %}
+      <a class="path-chip" href="{{ url_for('learn_path', slug=pth.slug) }}">{{ pth.name }}</a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   {% if concept.sources %}
   <footer class="concept-sources">
     Checked against:

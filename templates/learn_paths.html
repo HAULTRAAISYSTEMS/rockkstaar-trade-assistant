@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Reading paths — Learn — Tradestaar Elite{% endblock %}
+{% block body_class %}learn-shell{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/learn.css') }}" />
+{% endblock %}
+
+{% block content %}
+<div class="learn-wrap">
+  <nav class="learn-crumbs">
+    <a href="{{ url_for('learn_index') }}">Learn</a><span>/</span><span>Paths</span>
+  </nav>
+
+  <header class="learn-head">
+    <h1 class="learn-title">Reading paths</h1>
+    <p class="learn-sub">
+      A library assumes you know what you are looking for. These are the orders
+      to meet the ideas in — each step says why it follows the one before, because
+      the connections between them are most of the subject.
+    </p>
+  </header>
+
+  {% if not_found %}
+  <div class="learn-missing">
+    There is no path called <strong>{{ not_found }}</strong>. The ones that exist
+    are below.
+  </div>
+  {% endif %}
+
+  <div class="path-list">
+    {% for p in paths %}
+    <a class="path-card {{ 'is-complete' if p.complete }}" href="{{ url_for('learn_path', slug=p.slug) }}">
+      <div class="path-card-head">
+        <span class="path-card-name">{{ p.name }}</span>
+        <span class="path-card-count">{{ p.done }}/{{ p.total }}</span>
+      </div>
+      <p class="path-card-blurb">{{ p.blurb }}</p>
+      <div class="path-bar"><div class="path-bar-fill" style="width: {{ p.percent }}%"></div></div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

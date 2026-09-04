@@ -7523,6 +7523,33 @@ def learn_index():
         total=len(_concepts.CONCEPTS),
         levels=_concepts.LEVELS,
         progress=_learning.progress(slugs, get_concept_reviews(current_user_id())),
+        paths=__import__("paths").ALL[:4],
+    )
+
+
+@app.route("/learn/paths")
+def learn_paths():
+    """The reading paths, with how far this learner has come on each."""
+    import paths as _paths
+    return render_template(
+        "learn_paths.html",
+        paths=_paths.all_with_progress(get_concept_reviews(current_user_id())),
+    )
+
+
+@app.route("/learn/path/<slug>")
+def learn_path(slug):
+    """One path: the order, why each step follows the last, and where you are."""
+    import paths as _paths
+    path = _paths.get(slug)
+    if path is None:
+        return render_template(
+            "learn_paths.html",
+            paths=_paths.all_with_progress(get_concept_reviews(current_user_id())),
+            not_found=slug), 404
+    return render_template(
+        "learn_path.html",
+        path=_paths.with_progress(path, get_concept_reviews(current_user_id())),
     )
 
 
@@ -7609,12 +7636,14 @@ def learn_concept(slug):
             "learn.html", query=slug, results=[],
             topics=_concepts.by_topic(), total=len(_concepts.CONCEPTS),
             levels=_concepts.LEVELS, not_found=slug), 404
+    import paths as _paths
     return render_template(
         "learn_concept.html",
         concept=concept,
         topic=_concepts.TOPICS.get(concept["topic"], {}),
         level_label=_concepts.LEVELS.get(concept["level"], ""),
         related=_concepts.related_to(slug),
+        on_paths=_paths.paths_containing(slug),
     )
 
 

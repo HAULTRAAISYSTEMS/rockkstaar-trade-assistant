@@ -73,6 +73,25 @@
   </section>
   {% endif %}
 
+  {% if paths and results is none %}
+  <section class="learn-topic">
+    <h2 class="learn-h2">Start somewhere</h2>
+    <p class="learn-blurb">
+      Ordered routes through the library, each step saying why it follows the
+      last. <a class="learn-inline-link" href="{{ url_for('learn_paths') }}">See all paths &rarr;</a>
+    </p>
+    <div class="learn-grid">
+      {% for p in paths %}
+      <a class="learn-card" href="{{ url_for('learn_path', slug=p.slug) }}">
+        <span class="learn-card-topic">{{ p.steps|length }} steps</span>
+        <span class="learn-card-name">{{ p.name }}</span>
+        <span class="learn-card-line">{{ p.blurb }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   {% for topic in topics %}
   <section class="learn-topic">
     <h2 class="learn-h2">{{ topic.name }}</h2>

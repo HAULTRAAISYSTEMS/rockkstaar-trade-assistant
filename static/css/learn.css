@@ -409,3 +409,114 @@
 .learn-progress-stats { color: var(--elite-muted); font: 400 11.5px/1.5 var(--font-mono) }
 .learn-progress-stats strong { color: var(--elite-copy) }
 .learn-shaky { color: var(--warn-500) !important }
+
+/* ── Reading paths ────────────────────────────────────────────────────── */
+
+.path-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  margin-top: 28px;
+}
+.path-card {
+  display: block;
+  padding: 16px 17px;
+  border: 1px solid var(--elite-border);
+  border-radius: var(--elite-radius);
+  background: var(--elite-panel);
+  text-decoration: none;
+  transition: border-color .12s ease, transform .12s ease;
+}
+.path-card:hover { border-color: var(--elite-gold); transform: translateY(-1px) }
+.path-card.is-complete { border-color: color-mix(in srgb, var(--pos-500) 45%, transparent) }
+.path-card-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline }
+.path-card-name { color: var(--elite-copy); font: 600 15px/1.35 var(--font-ui) }
+.path-card-count { color: var(--elite-faint); font: 600 10px/1.5 var(--font-mono); letter-spacing: .06em }
+.path-card-blurb { margin: 6px 0 12px; color: var(--elite-muted); font: 400 12.5px/1.6 var(--font-ui) }
+
+.path-bar { height: 3px; border-radius: 2px; background: var(--elite-panel-inset); overflow: hidden }
+.path-bar-fill { height: 100%; background: var(--elite-gold); transition: width .3s ease }
+.is-complete .path-bar-fill { background: var(--pos-500) }
+
+.path-outcome {
+  margin: 0 0 22px;
+  padding: 14px 16px;
+  border-left: 2px solid var(--elite-gold);
+  background: var(--elite-panel-inset);
+  border-radius: 0 var(--elite-radius-sm) var(--elite-radius-sm) 0;
+}
+.path-outcome-label {
+  color: var(--elite-gold);
+  font: 700 9px/1.5 var(--font-mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.path-outcome p { margin: 5px 0 0; color: var(--elite-copy); font: 400 14px/1.7 var(--font-ui) }
+
+.path-progress { margin: 0 0 26px }
+.path-progress-text {
+  display: block;
+  margin-top: 7px;
+  color: var(--elite-muted);
+  font: 400 11px/1.5 var(--font-mono);
+  letter-spacing: .04em;
+}
+
+.path-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px }
+.path-step {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 12px;
+  padding: 14px 14px 14px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--elite-radius-sm);
+}
+.path-step.is-next { border-color: var(--elite-gold); background: var(--elite-panel) }
+.path-step-n {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--elite-border);
+  border-radius: 50%;
+  color: var(--elite-muted);
+  font: 700 11px/1 var(--font-mono);
+}
+.path-step.is-done .path-step-n {
+  border-color: color-mix(in srgb, var(--pos-500) 50%, transparent);
+  background: color-mix(in srgb, var(--pos-500) 12%, transparent);
+  color: var(--pos-500);
+}
+.path-step.is-next .path-step-n { border-color: var(--elite-gold); color: var(--elite-gold) }
+.path-step-name {
+  color: var(--elite-copy);
+  font: 600 14.5px/1.4 var(--font-ui);
+  text-decoration: none;
+}
+.path-step-name:hover { color: var(--elite-gold) }
+.path-step-tag {
+  margin-left: 8px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--elite-gold) 14%, transparent);
+  color: var(--elite-gold);
+  font: 700 8px/1.7 var(--font-mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
+.path-step-tag-soft { background: var(--elite-panel-inset); color: var(--elite-muted) }
+.path-step-why { margin: 5px 0 0; color: var(--elite-muted); font: 400 13px/1.65 var(--font-ui) }
+
+.path-inline { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px }
+.path-chip {
+  padding: 5px 10px;
+  border: 1px solid var(--elite-border);
+  border-radius: 20px;
+  background: var(--elite-panel-inset);
+  color: var(--elite-muted);
+  font: 500 12px/1.4 var(--font-ui);
+  text-decoration: none;
+}
+.path-chip:hover { border-color: var(--elite-gold); color: var(--elite-gold) }
+.learn-inline-link { color: var(--elite-gold); text-decoration: none }
