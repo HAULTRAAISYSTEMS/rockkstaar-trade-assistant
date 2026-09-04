@@ -299,7 +299,11 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
                 "short_float":       info.get("shortPercentOfFloat"),
                 "institutional_pct": info.get("heldPercentInstitutions"),
                 "insider_pct":       info.get("heldPercentInsiders"),
-                "dividend_yield":    info.get("yield") or info.get("dividendYield"),
+                # Same units as the intel card - a percentage, computed from
+                # the rate and the price rather than trusting a field whose
+                # convention changed upstream. This one was passed through
+                # raw, so the two surfaces disagreed by a factor of a hundred.
+                "dividend_yield":    _normalize_yield(info),
                 "expense_ratio":     info.get("annualReportExpenseRatio") or info.get("totalExpenseRatio"),
                 "business_summary":  (info.get("longBusinessSummary") or "")[:500],
             })
@@ -310,6 +314,19 @@ def _fetch_fundamentals_bg(ticker: str) -> None:
     finally:
         with _fetch_set_lock:
             _fetch_active_set.discard(ticker)
+
+
+def _normalize_yield(info: dict):
+    """Dividend yield as a percentage. See intel_engine for why this is not
+    a straight field read."""
+    try:
+        from intel_engine import normalize_dividend_yield
+    except Exception:
+        return None
+    try:
+        return normalize_dividend_yield(info)
+    except Exception:
+        return None
 
 
 def get_fundamentals(ticker: str) -> dict:

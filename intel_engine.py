@@ -1913,6 +1913,48 @@ def _dividends_from_finnhub(
     return results
 
 
+def normalize_dividend_yield(info: dict) -> Optional[float]:
+    """Annual dividend yield as a percentage, e.g. 1.52 for 1.52%.
+
+    info["dividendYield"] cannot be trusted on its own. Yahoo returned it as
+    a fraction (0.0152) for years and switched to a percentage (1.52) during
+    2025, and which one arrives depends on the yfinance version and on what
+    the endpoint happens to be serving that day. The old code multiplied by
+    100 unconditionally, which turns a 1.5% yield into 152% the moment the
+    upstream convention flips - and the intel card prints it to one decimal
+    beside a ticker, so it reads as a real number.
+
+    The dividend rate and the share price are unambiguous, so the yield is
+    computed from those wherever both are present. The ambiguous field is a
+    last resort, disambiguated by magnitude: no listed equity yields 100%,
+    so a value above 1 is already a percentage.
+    """
+    def _num(*keys):
+        for key in keys:
+            try:
+                value = float(info.get(key))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                return value
+        return None
+
+    rate = _num("dividendRate", "trailingAnnualDividendRate")
+    price = _num("currentPrice", "regularMarketPrice", "previousClose")
+    if rate and price:
+        return round(rate / price * 100, 2)
+
+    # trailingAnnualDividendYield has always been a fraction.
+    fraction = _num("trailingAnnualDividendYield")
+    if fraction:
+        return round(fraction * 100, 2)
+
+    raw = _num("dividendYield")
+    if raw is None:
+        return None
+    return round(raw if raw > 1 else raw * 100, 2)
+
+
 def _dividends_from_yfinance(tickers: list[str], today: date, wl_set: set) -> list[dict]:
     """Fallback: read exDividendDate + dividendYield from yfinance Ticker.info."""
     from datetime import timezone
@@ -1936,7 +1978,7 @@ def _dividends_from_yfinance(tickers: list[str], today: date, wl_set: set) -> li
             if days_away < 0 or days_away > 30:
                 return None
             amount    = info.get("lastDividendValue") or info.get("dividendRate")
-            div_yield = info.get("dividendYield")
+            div_yield = normalize_dividend_yield(info)
             company   = _company_name(ticker) or info.get("shortName", "")
             return {
                 "ticker":        ticker,
@@ -1946,7 +1988,7 @@ def _dividends_from_yfinance(tickers: list[str], today: date, wl_set: set) -> li
                 "payment_date":  None,
                 "days_away":     days_away,
                 "div_amount":    round(float(amount), 4) if amount else None,
-                "div_yield":     round(float(div_yield) * 100, 2) if div_yield else None,
+                "div_yield":     div_yield,
                 "on_watchlist":  ticker in wl_set,
                 "source":        "yfinance",
             }
@@ -2084,7 +2126,7 @@ def _econ_from_finnhub() -> list[dict]:
             try:
                 dt        = datetime.strptime(raw_time[:16], "%Y-%m-%d %H:%M")
                 date_lbl  = f"{_month_abbr(dt.month)} {dt.day}"
-                time_lbl  = _format_time_12h(dt.hour, dt.minute)
+                time_lbl  = _format_time_12h(dt.hour, dt.minute, tz_label="")
                 days_away = (dt.date() - today).days
             except Exception:
                 date_lbl  = date_str
@@ -2102,6 +2144,10 @@ def _econ_from_finnhub() -> list[dict]:
                 "reason":     _econ_reason(event_name),
                 "days_away":  days_away,
                 "is_today":   days_away == 0,
+                # The provider does not document the timezone of its time
+                # field, so the card must not claim one. Consumers use this to
+                # mark the time rather than dressing it as Eastern.
+                "time_zone":  "",
                 # Consensus / prior — carried through from the raw Finnhub payload
                 # (these were previously dropped). None when Finnhub omits them.
                 "estimate":   e.get("estimate"),
@@ -2162,6 +2208,7 @@ def _econ_static_fallback() -> list[dict]:
             "date":       date_str,
             "date_label": f"{_month_abbr(d.month)} {d.day}",
             "time":       time_str,
+            "time_zone":  "ET",
             "impact":     impact,
             "reason":     _econ_reason(event_name),
             "days_away":  days_away,
@@ -2180,10 +2227,20 @@ def _month_abbr(m: int) -> str:
             "Jul","Aug","Sep","Oct","Nov","Dec"][m - 1]
 
 
-def _format_time_12h(hour: int, minute: int) -> str:
+def _format_time_12h(hour: int, minute: int, tz_label: str = "ET") -> str:
+    """A clock time, with a timezone label only where one is known.
+
+    This stamped " ET" on every macro event, including the ones parsed
+    straight out of the Finnhub payload — whose timezone Finnhub does not
+    document. If that field is UTC, every release on the card was labelled
+    Eastern and was four or five hours wrong, which for an 8:30 print is the
+    difference between before the open and after lunch. The static fallback
+    times below are hand-entered Eastern and keep the label; the provider's
+    are shown as supplied until the convention is confirmed.
+    """
     suffix = "AM" if hour < 12 else "PM"
     h = hour % 12 or 12
-    return f"{h}:{minute:02d} {suffix} ET"
+    return f"{h}:{minute:02d} {suffix}{' ' + tz_label if tz_label else ''}"
 
 
 # ── Intel Telegram Alerts ─────────────────────────────────────────────────────

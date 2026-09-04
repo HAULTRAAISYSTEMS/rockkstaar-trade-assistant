@@ -107,20 +107,26 @@ STATE_CHANGING = [
 ]
 
 
+def _is_csrf_rejection(response) -> bool:
+    body = response.get_data(as_text=True).lower()
+    return response.status_code == 400 and "csrf" in body
+
+
 @pytest.mark.parametrize("method,path", STATE_CHANGING)
 def test_an_unsigned_request_is_rejected(client, method, path):
     response = client.open(path, method=method, json={})
-    assert response.status_code == 400
+    assert _is_csrf_rejection(response), response.get_data(as_text=True)[:200]
 
 
 @pytest.mark.parametrize("method,path", STATE_CHANGING)
 def test_a_signed_request_gets_past_the_csrf_layer(signed, method, path):
-    """Past CSRF, not necessarily to a 200 - these all need a login.
+    """Past CSRF, not necessarily to a 200.
 
-    What matters is that the shim's header is accepted, so the app's own
-    calls still work.
+    These all need a login, and some validate their body before anything
+    else, so the handler's own 400 is a pass - it means the request reached
+    the handler. Only a CSRF rejection is a failure here.
     """
     client, token = signed
     response = client.open(path, method=method, json={},
                            headers={"X-CSRFToken": token})
-    assert response.status_code != 400, response.get_data(as_text=True)[:200]
+    assert not _is_csrf_rejection(response), response.get_data(as_text=True)[:200]
