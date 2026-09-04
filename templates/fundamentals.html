@@ -87,6 +87,9 @@
           </div>
           {% endfor %}
         </div>
+        {% if data.valuation.notice %}
+        <p class="val-basis">{{ data.valuation.notice }}</p>
+        {% endif %}
         {% if data.valuation_history and data.valuation_history.available %}
         <div class="vh-wrap">
           <div class="vh-title">Against its own history</div>

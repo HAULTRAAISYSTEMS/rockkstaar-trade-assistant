@@ -810,3 +810,17 @@
   letter-spacing: 0;
   max-width: 46ch;
 }
+
+/* The provider states the 52-week range and market cap for a company's home
+   listing while the quote is the US line. When those disagree the card says
+   so here instead of drawing a comparison between them. */
+.fundamentals-shell .val-basis {
+  margin: 10px 0 0;
+  padding: 7px 9px;
+  border-left: 2px solid var(--elite-border-strong);
+  background: var(--elite-panel-inset);
+  border-radius: 0 var(--elite-radius-sm) var(--elite-radius-sm) 0;
+  font: 400 11px/1.5 var(--font-ui);
+  color: var(--elite-muted);
+  max-width: 62ch;
+}

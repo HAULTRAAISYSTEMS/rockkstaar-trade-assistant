@@ -2749,7 +2749,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-03.4"
+SCORECARD_VERSION = "2026-09-04.1"
 
 # The unit buckets in EDGAR are keyed by currency. Everything read only "USD",
 # so a filer that reports in its own currency lost every figure with no USD
@@ -2828,7 +2828,8 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
         _metrics = fetch_finnhub_metrics(ticker) or {}
         if isinstance(raw, dict):
             raw["_valuation"] = build_valuation(
-                _metrics.get("_raw_metric") or {}, fetch_finnhub_quote(ticker))
+                _metrics.get("_raw_metric") or {}, fetch_finnhub_quote(ticker),
+                home_symbol=raw.get("currency_symbol"))
     except Exception as exc:
         logger.debug("valuation unavailable for %s: %s", ticker, exc)
 
