@@ -1779,7 +1779,15 @@ def score_fundamentals(raw: dict) -> dict:
     near_term_debt = None
     _cover_period = None
     _balance_ends = raw.get("balance_period_ends") or []
-    for _i in range(max(len(_std_list), len(_liquid_list), len(_cash_list))):
+    # The scan was unbounded, so a filer that stopped tagging its current
+    # maturities kept scoring full marks off whichever old year still had
+    # them - TSMC passed this row on a 2021 balance sheet in 2026, four years
+    # of debt issuance later. One year of lag is a filing that has not landed
+    # yet; beyond that the figure is not evidence about today, and the row
+    # falls through to the stricter cash-against-all-debt comparison below.
+    _MAX_COVER_LAG = 2
+    for _i in range(min(_MAX_COVER_LAG,
+                        max(len(_std_list), len(_liquid_list), len(_cash_list)))):
         _debt_i = v(_std_list, _i)
         _liq_i = v(_liquid_list, _i)
         if _liq_i is None:
@@ -2070,14 +2078,18 @@ def score_fundamentals(raw: dict) -> dict:
     _cur = raw.get("currency_symbol") or "$"
 
     def _fmt(val, suffix="", scale=1, decimals=2):
+        # The sign goes before the currency mark. "$-2.5B" is not how anyone
+        # writes money, and it appeared wherever a cash flow was negative.
         if val is None:
             return "N/A"
         v_s = val * scale
-        if abs(v_s) >= 1e9:
-            return f"{_cur}{v_s/1e9:.1f}B{suffix}"
-        if abs(v_s) >= 1e6:
-            return f"{_cur}{v_s/1e6:.1f}M{suffix}"
-        return f"{_cur}{v_s:,.{decimals}f}{suffix}"
+        sign = "-" if v_s < 0 else ""
+        mag = abs(v_s)
+        if mag >= 1e9:
+            return f"{sign}{_cur}{mag/1e9:.1f}B{suffix}"
+        if mag >= 1e6:
+            return f"{sign}{_cur}{mag/1e6:.1f}M{suffix}"
+        return f"{sign}{_cur}{mag:,.{decimals}f}{suffix}"
 
     def _pct_fmt(val):
         if val is None:
@@ -2112,11 +2124,13 @@ def score_fundamentals(raw: dict) -> dict:
             val = float(val)
         except (TypeError, ValueError):
             return "n/a"
-        if abs(val) >= 1_000_000_000:
-            return f"{_cur}{val/1_000_000_000:,.2f}B"
-        if abs(val) >= 1_000_000:
-            return f"{_cur}{val/1_000_000:,.0f}M"
-        return f"{_cur}{val:,.0f}"
+        sign = "-" if val < 0 else ""
+        mag = abs(val)
+        if mag >= 1_000_000_000:
+            return f"{sign}{_cur}{mag/1_000_000_000:,.2f}B"
+        if mag >= 1_000_000:
+            return f"{sign}{_cur}{mag/1_000_000:,.0f}M"
+        return f"{sign}{_cur}{mag:,.0f}"
 
     def _pct_series(series, limit=5):
         """Oldest-to-newest percentage trail, e.g. '61.0% -> 59.8% -> 61.3%'."""
@@ -2186,7 +2200,16 @@ def score_fundamentals(raw: dict) -> dict:
         "capex_ratio": (
             f"{_usd(abs(capex0))} capex / {_usd(rev0)} revenue = {abs(capex0)/rev0*100:.1f}%"
             if capex0 is not None and rev0 else ""),
-        "debt_financing": _usd_series(raw.get("total_debt", [])),
+        # This row tests financing cash flow against operating cash flow. It
+        # showed the total-debt series instead - three different numbers on
+        # one row: a debt trail as the working, a financing figure as the
+        # value, and a pass/fail computed from neither of them together.
+        "debt_financing": (
+            f"{_usd(fin_cf0)} financing cash flow against "
+            f"{_usd(ocf0)} from operations"
+            + (f" = {fin_cf0 / abs(ocf0) * 100:+.0f}% of operating cash flow"
+               if ocf0 else "")
+            if fin_cf0 is not None else ""),
         # ROE/ROIC come from the TTM provider when available, and a TTM figure
         # uses average equity and trailing income - so it will not equal the
         # year-end division shown beside it. Pairing the two was worse than
@@ -2749,7 +2772,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-04.1"
+SCORECARD_VERSION = "2026-09-04.2"
 
 # The unit buckets in EDGAR are keyed by currency. Everything read only "USD",
 # so a filer that reports in its own currency lost every figure with no USD

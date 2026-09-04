@@ -194,8 +194,11 @@
         </div>
         <ul class="dg-list">
           {% for c in data.downgrade_check.checks %}
+          {# Each label states the bad thing. A tick beside "the company has
+             filed for bankruptcy" reads as "yes, it did" — which is the
+             opposite of what a passed check means. The outcome is a word. #}
           <li class="dg-item{{ ' is-fired' if c.fired }}">
-            <span class="dg-mark">{{ '✗' if c.fired else '✓' }}</span>
+            <span class="dg-status">{{ 'FIRED' if c.fired else 'CLEAR' }}</span>
             <span class="dg-text">{{ c.label }}</span>
           </li>
           {% endfor %}
