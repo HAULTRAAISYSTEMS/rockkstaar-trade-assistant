@@ -52,6 +52,7 @@ from database import (
     get_insider_alert_rules, set_insider_alert_rules,
     save_setup_outcome, get_setup_outcome_stats,
     save_study_log_entry, get_study_log, delete_study_log_entry,
+    get_concept_reviews, save_concept_review, reset_concept_reviews,
     get_ai_briefing, save_ai_briefing,
     get_score_narration, save_score_narration,
     get_journal_summary, save_journal_summary,
@@ -7512,6 +7513,8 @@ def learn_index():
     import concepts as _concepts
     query = (request.args.get("q") or "").strip()[:80]
     results = _concepts.search(query) if query else None
+    import learning as _learning
+    slugs = [c["slug"] for c in _concepts.CONCEPTS]
     return render_template(
         "learn.html",
         query=query,
@@ -7519,7 +7522,80 @@ def learn_index():
         topics=_concepts.by_topic(),
         total=len(_concepts.CONCEPTS),
         levels=_concepts.LEVELS,
+        progress=_learning.progress(slugs, get_concept_reviews(current_user_id())),
     )
+
+
+@app.route("/learn/review", methods=["GET", "POST"])
+def learn_review():
+    """Ask one question, mark it, and schedule when to ask it again.
+
+    Reading a definition and agreeing with it is not learning it. This is the
+    other half: recall on a first meeting, judgement once a concept has been
+    answered correctly a few times, and the ones that were got wrong coming
+    back sooner than the ones that were not.
+    """
+    import concepts as _concepts
+    import learning as _learning
+    import questions as _questions
+
+    uid = current_user_id()
+    slugs = [c["slug"] for c in _concepts.CONCEPTS]
+    records = get_concept_reviews(uid)
+    result = None
+    just_answered = None
+
+    if request.method == "POST":
+        slug = (request.form.get("slug") or "").strip()
+        kind = (request.form.get("kind") or "").strip()
+        chosen = request.form.get("choice") or ""
+        result = _questions.grade(slug, kind, chosen)
+        if result is not None:
+            # An unanswered submission is not a wrong answer — it means the
+            # form came back without a selection, so nothing is recorded and
+            # the question is simply asked again.
+            if not result["unanswered"]:
+                state = _learning.schedule(records.get(slug), result["correct"])
+                save_concept_review(uid, slug, state)
+                records[slug] = {**(records.get(slug) or {}), "slug": slug, **state}
+            just_answered = slug
+            return render_template(
+                "learn_review.html",
+                concept=_concepts.get(slug),
+                result=result,
+                question=result["question"],
+                progress=_learning.progress(slugs, records),
+            )
+
+    # Do not re-ask the concept just answered as the very next card.
+    slug = _learning.pick_next(slugs, records,
+                               exclude={just_answered} if just_answered else None)
+    if slug is None:
+        return render_template(
+            "learn_review.html", finished=True,
+            progress=_learning.progress(slugs, records))
+
+    box = int((records.get(slug) or {}).get("box") or 0)
+    question = _questions.pick(slug, box)
+    if question is None:
+        return render_template(
+            "learn_review.html", finished=True,
+            progress=_learning.progress(slugs, records))
+    return render_template(
+        "learn_review.html",
+        concept=_concepts.get(slug),
+        question=question,
+        first_time=not (records.get(slug) or {}).get("seen"),
+        progress=_learning.progress(slugs, records),
+    )
+
+
+@app.route("/learn/reset", methods=["POST"])
+def learn_reset():
+    """Forget everything this user's review history knows."""
+    reset_concept_reviews(current_user_id())
+    flash("Review history cleared. Every concept starts fresh.", "info")
+    return redirect(url_for("learn_index"))
 
 
 @app.route("/learn/<slug>")

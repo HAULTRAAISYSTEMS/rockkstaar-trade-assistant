@@ -17,6 +17,21 @@
       ways it misleads people.
     </p>
 
+    {% if progress %}
+    <div class="learn-progress">
+      <a class="learn-review-cta" href="{{ url_for('learn_review') }}">
+        {% if progress.seen == 0 %}Start learning &rarr;
+        {% elif progress.due %}Review {{ progress.due }} due &rarr;
+        {% else %}Nothing due — browse below{% endif %}
+      </a>
+      <span class="learn-progress-stats">
+        <strong>{{ progress.learned }}</strong> learned ·
+        <strong>{{ progress.seen }}</strong> of {{ progress.total }} met{% if progress.struggling %} ·
+        <strong class="learn-shaky">{{ progress.struggling }}</strong> shaky{% endif %}
+      </span>
+    </div>
+    {% endif %}
+
     <form class="learn-search" method="get" action="{{ url_for('learn_index') }}" role="search">
       <input type="search" name="q" value="{{ query }}" autocomplete="off"
              placeholder="EPS, the VIX, free cash flow, 10-K…"

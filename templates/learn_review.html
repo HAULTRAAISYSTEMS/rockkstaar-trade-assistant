@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Review — Learn — Tradestaar Elite{% endblock %}
+{% block body_class %}learn-shell{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/learn.css') }}" />
+{% endblock %}
+
+{% block content %}
+<div class="learn-wrap learn-wrap-narrow">
+
+  <nav class="learn-crumbs">
+    <a href="{{ url_for('learn_index') }}">Learn</a><span>/</span><span>Review</span>
+  </nav>
+
+  {% if progress %}
+  <div class="rev-progress">
+    <div class="rev-bar"><div class="rev-bar-fill" style="width: {{ progress.percent_learned }}%"></div></div>
+    <div class="rev-stats">
+      <span><strong>{{ progress.learned }}</strong> learned</span>
+      <span><strong>{{ progress.seen }}</strong> of {{ progress.total }} met</span>
+      {% if progress.struggling %}<span class="rev-stat-warn"><strong>{{ progress.struggling }}</strong> shaky</span>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if finished %}
+  <section class="rev-done">
+    <h1>Nothing due.</h1>
+    <p>
+      You have met every concept in the library and none is ready to come back
+      yet. Cards return at widening intervals — a day, then most of a week, then
+      a fortnight — so the gap is the point rather than a gap in the app.
+    </p>
+    <a class="concept-cta" href="{{ url_for('learn_index') }}">Browse the library &rarr;</a>
+  </section>
+
+  {% elif result %}
+  {# Answered. Show what was picked, why, and what the right answer teaches. #}
+  <section class="rev-card">
+    <div class="rev-verdict {{ 'is-right' if result.correct else 'is-wrong' }}">
+      {{ 'Correct' if result.correct else 'Not quite' }}
+    </div>
+    <p class="rev-prompt">{{ question.prompt }}</p>
+
+    <ul class="rev-options rev-options-marked">
+      {% for opt in question.options %}
+      <li class="rev-option
+                 {{ ' is-answer' if opt.correct }}
+                 {{ ' is-picked' if result.picked and opt.text == result.picked.text }}">
+        <span class="rev-option-text">{{ opt.text }}</span>
+        {% if opt.correct or (result.picked and opt.text == result.picked.text) %}
+        <span class="rev-option-why">{{ opt.why }}</span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+
+    {% if question.explain %}
+    <div class="rev-explain">
+      <div class="rev-explain-label">The idea</div>
+      <p>{{ question.explain }}</p>
+    </div>
+    {% endif %}
+
+    <div class="rev-actions">
+      <a class="rev-next" href="{{ url_for('learn_review') }}">Next question &rarr;</a>
+      {% if concept %}
+      <a class="rev-secondary" href="{{ url_for('learn_concept', slug=concept.slug) }}">Read the full page on {{ concept.name }}</a>
+      {% endif %}
+    </div>
+  </section>
+
+  {% else %}
+  {# Asking. #}
+  <section class="rev-card">
+    <div class="rev-meta">
+      <span class="rev-kind">{{ {'definition': 'Recall', 'formula': 'Arithmetic', 'judgement': 'Judgement'}.get(question.kind, question.kind) }}</span>
+      {% if first_time %}<span class="rev-new">First time</span>{% endif %}
+    </div>
+    <p class="rev-prompt">{{ question.prompt }}</p>
+
+    <form method="post" action="{{ url_for('learn_review') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="slug" value="{{ question.concept }}">
+      <input type="hidden" name="kind" value="{{ question.kind }}">
+      <ul class="rev-options">
+        {% for opt in question.options %}
+        <li>
+          <label class="rev-option rev-option-choice">
+            <input type="radio" name="choice" value="{{ opt.text }}" required>
+            <span class="rev-option-text">{{ opt.text }}</span>
+          </label>
+        </li>
+        {% endfor %}
+      </ul>
+      <button class="rev-submit" type="submit">Check</button>
+    </form>
+  </section>
+  {% endif %}
+
+</div>
+{% endblock %}

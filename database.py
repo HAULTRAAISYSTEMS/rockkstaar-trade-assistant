@@ -802,6 +802,33 @@ def init_db():
         )
     """))
 
+    # Concept review schedule — one row per user per concept.
+    #
+    # The scheduling rule lives in learning.py as pure functions; this table
+    # only remembers the state it produces. box is the Leitner box (0 unseen),
+    # due_at is when the concept should next be asked, and seen/correct are
+    # kept for the progress summary rather than being recomputed from a log.
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS concept_reviews (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            slug         TEXT    NOT NULL,
+            box          INTEGER NOT NULL DEFAULT 0,
+            due_at       TEXT,
+            seen         INTEGER NOT NULL DEFAULT 0,
+            correct      INTEGER NOT NULL DEFAULT 0,
+            last_correct INTEGER NOT NULL DEFAULT 0,
+            last_seen_at TEXT,
+            UNIQUE(user_id, slug)
+        )
+    """))
+    try:
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_concept_reviews_user "
+            "ON concept_reviews(user_id)")
+    except Exception:
+        pass
+
     # Fundamentals cache — stores yfinance fundamental data per ticker, 24-hr TTL
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS fundamentals_cache (
@@ -3059,6 +3086,69 @@ def get_ndx_latest_constituents(limit: int = 15) -> list:
 # ---------------------------------------------------------------------------
 # Study log helpers
 # ---------------------------------------------------------------------------
+
+def get_concept_reviews(user_id: int) -> dict:
+    """Every concept this user has been asked about, keyed by slug."""
+    if not user_id:
+        return {}
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT slug, box, due_at, seen, correct, last_correct, last_seen_at "
+            "FROM concept_reviews WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        row["slug"]: {
+            "slug": row["slug"],
+            "box": row["box"],
+            "due_at": row["due_at"],
+            "seen": row["seen"],
+            "correct": row["correct"],
+            "last_correct": bool(row["last_correct"]),
+            "last_seen_at": row["last_seen_at"],
+        }
+        for row in rows
+    }
+
+
+def save_concept_review(user_id: int, slug: str, state: dict) -> None:
+    """Write back the state learning.schedule() produced for one concept."""
+    if not user_id or not slug:
+        return
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO concept_reviews "
+            "(user_id, slug, box, due_at, seen, correct, last_correct, last_seen_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id, slug) DO UPDATE SET "
+            "box = excluded.box, due_at = excluded.due_at, seen = excluded.seen, "
+            "correct = excluded.correct, last_correct = excluded.last_correct, "
+            "last_seen_at = excluded.last_seen_at",
+            (user_id, slug, int(state["box"]), state["due_at"], int(state["seen"]),
+             int(state["correct"]), 1 if state["last_correct"] else 0,
+             state["last_seen_at"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def reset_concept_reviews(user_id: int) -> int:
+    """Forget a user's whole review history. Returns rows removed."""
+    if not user_id:
+        return 0
+    conn = get_db()
+    try:
+        cur = conn.execute("DELETE FROM concept_reviews WHERE user_id = ?", (user_id,))
+        conn.commit()
+        return cur.rowcount or 0
+    finally:
+        conn.close()
+
 
 def save_study_log_entry(user_id: int, question: str, answer: str) -> int:
     """Save a Q&A pair to the study log. Returns the new entry id."""
