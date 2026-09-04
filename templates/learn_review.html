@@ -74,7 +74,8 @@
   {# Asking. #}
   <section class="rev-card">
     <div class="rev-meta">
-      <span class="rev-kind">{{ {'definition': 'Recall', 'formula': 'Arithmetic', 'judgement': 'Judgement'}.get(question.kind, question.kind) }}</span>
+      <span class="rev-kind">{{ {'definition': 'Recall', 'formula': 'Arithmetic', 'judgement': 'Judgement', 'live-compute': 'Work it out', 'live-threshold': 'Apply it', 'live-trend': 'Read the trail'}.get(question.kind, question.kind) }}</span>
+      {% if question.ticker %}<span class="rev-live">Live · {{ question.ticker }}</span>{% endif %}
       {% if first_time %}<span class="rev-new">First time</span>{% endif %}
     </div>
     <p class="rev-prompt">{{ question.prompt }}</p>
@@ -83,6 +84,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="slug" value="{{ question.concept }}">
       <input type="hidden" name="kind" value="{{ question.kind }}">
+      {% if question.ticker %}<input type="hidden" name="ticker" value="{{ question.ticker }}">{% endif %}
       <ul class="rev-options">
         {% for opt in question.options %}
         <li>

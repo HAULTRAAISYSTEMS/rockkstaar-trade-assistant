@@ -53,6 +53,7 @@ from database import (
     save_setup_outcome, get_setup_outcome_stats,
     save_study_log_entry, get_study_log, delete_study_log_entry,
     get_concept_reviews, save_concept_review, reset_concept_reviews,
+    get_fundamentals_cache,
     get_ai_briefing, save_ai_briefing,
     get_score_narration, save_score_narration,
     get_journal_summary, save_journal_summary,
@@ -7527,6 +7528,36 @@ def learn_index():
     )
 
 
+def _learning_ticker(uid: int) -> str:
+    """A company to build live questions from — the first on the active watchlist.
+
+    Nothing here fetches. A learner should be asked about a company they
+    actually follow, but a review page that stalls for eight seconds on a cold
+    EDGAR call teaches nothing, so this only names the ticker and the caller
+    only reads what is already cached.
+    """
+    try:
+        active = get_active_wl_id()
+        tickers = get_watchlist_stocks(active) if active else []
+        return str(tickers[0]).upper() if tickers else ""
+    except Exception:
+        return ""
+
+
+def _cached_scorecard(ticker: str):
+    """A scorecard only if it is already in the cache and still current."""
+    if not ticker:
+        return None
+    try:
+        from fundamentals_engine import SCORECARD_VERSION
+        cached = get_fundamentals_cache(ticker)
+        if cached and cached.get("scorecard_version") == SCORECARD_VERSION:
+            return cached
+    except Exception as exc:
+        logger.debug("learning: no cached scorecard for %s: %s", ticker, exc)
+    return None
+
+
 @app.route("/learn/paths")
 def learn_paths():
     """The reading paths, with how far this learner has come on each."""
@@ -7565,6 +7596,7 @@ def learn_review():
     import concepts as _concepts
     import learning as _learning
     import questions as _questions
+    import live_questions as _live
 
     uid = current_user_id()
     slugs = [c["slug"] for c in _concepts.CONCEPTS]
@@ -7576,7 +7608,11 @@ def learn_review():
         slug = (request.form.get("slug") or "").strip()
         kind = (request.form.get("kind") or "").strip()
         chosen = request.form.get("choice") or ""
-        result = _questions.grade(slug, kind, chosen)
+        if kind.startswith("live-"):
+            ticker = (request.form.get("ticker") or "").strip().upper()[:12]
+            result = _live.grade(_cached_scorecard(ticker), ticker, kind, slug, chosen)
+        else:
+            result = _questions.grade(slug, kind, chosen)
         if result is not None:
             # An unanswered submission is not a wrong answer — it means the
             # form came back without a selection, so nothing is recorded and
@@ -7603,7 +7639,18 @@ def learn_review():
             progress=_learning.progress(slugs, records))
 
     box = int((records.get(slug) or {}).get("box") or 0)
-    question = _questions.pick(slug, box)
+    # Recall first, then apply it to a real company. A live question on a first
+    # meeting asks someone to use an idea they have not met yet; once they have
+    # answered it correctly once, the actual filings are the better teacher.
+    question = None
+    if box >= 1:
+        ticker = _learning_ticker(uid)
+        scorecard = _cached_scorecard(ticker)
+        live = _live.for_concept(scorecard, ticker, slug) if scorecard else []
+        if live:
+            question = live[box % len(live)]
+    if question is None:
+        question = _questions.pick(slug, box)
     if question is None:
         return render_template(
             "learn_review.html", finished=True,

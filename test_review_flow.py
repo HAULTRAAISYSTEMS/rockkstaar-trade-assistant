@@ -230,3 +230,85 @@ class TestTheLibraryIndex:
     def test_it_reports_progress(self, client):
         html = client.get("/learn").get_data(as_text=True)
         assert "learned" in html
+
+
+class TestLiveQuestionsInTheLoop:
+    """A live question is asked once the idea has been met, and graded off the
+    same cached scorecard it was built from."""
+
+    def _card(self):
+        from unittest.mock import patch
+        import fundamentals_engine as fe
+        from test_edgar_pipeline import facts, _Resp
+        with patch.object(fe, "_edgar_cik", return_value=("1", "KLA Corporation")), \
+             patch.object(fe._req_module, "get", return_value=_Resp(facts())):
+            card = fe.score_fundamentals(fe.fetch_fundamentals_edgar("KLAC"))
+        card["scorecard_version"] = fe.SCORECARD_VERSION
+        return card
+
+    def test_a_first_meeting_is_never_a_live_question(self, client, monkeypatch):
+        """Applying an idea to real data before meeting it teaches nothing."""
+        import app as legacy
+        monkeypatch.setattr(legacy, "_learning_ticker", lambda uid: "KLAC")
+        monkeypatch.setattr(legacy, "_cached_scorecard", lambda t: self._card())
+        html = client.get("/learn/review").get_data(as_text=True)
+        assert asked(html)["kind"] in ("definition", "formula", "judgement")
+
+    def test_a_met_concept_is_asked_about_a_real_company(self, client, monkeypatch):
+        import app as legacy
+        import database
+        monkeypatch.setattr(legacy, "_learning_ticker", lambda uid: "KLAC")
+        monkeypatch.setattr(legacy, "_cached_scorecard", lambda t: self._card())
+        # Put every concept out of reach except one that has a live question,
+        # and mark that one as already met.
+        for concept in C.CONCEPTS:
+            if concept["slug"] != "current-ratio":
+                database.save_concept_review(1, concept["slug"], {
+                    "box": 5, "due_at": "2099-01-01T00:00:00+00:00", "seen": 5,
+                    "correct": 5, "last_correct": True, "last_seen_at": "x"})
+        database.save_concept_review(1, "current-ratio", {
+            "box": 1, "due_at": "2020-01-01T00:00:00+00:00", "seen": 1,
+            "correct": 1, "last_correct": True, "last_seen_at": "x"})
+        html = client.get("/learn/review").get_data(as_text=True)
+        question = asked(html)
+        assert question["slug"] == "current-ratio"
+        assert question["kind"].startswith("live-")
+        assert "KLAC" in html
+
+    def test_it_falls_back_to_the_written_bank_with_no_cached_card(self, client, monkeypatch):
+        """A cold cache must not stall the page or leave it blank."""
+        import app as legacy
+        monkeypatch.setattr(legacy, "_learning_ticker", lambda uid: "KLAC")
+        monkeypatch.setattr(legacy, "_cached_scorecard", lambda t: None)
+        html = client.get("/learn/review").get_data(as_text=True)
+        assert asked(html)["kind"] in ("definition", "formula", "judgement")
+
+    def test_a_live_answer_is_graded_and_recorded(self, client, token, monkeypatch):
+        import app as legacy
+        import database
+        import live_questions as LQ
+        monkeypatch.setattr(legacy, "_learning_ticker", lambda uid: "KLAC")
+        monkeypatch.setattr(legacy, "_cached_scorecard", lambda t: self._card())
+        header, stored = token
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = stored
+        question = LQ.for_concept(self._card(), "KLAC", "current-ratio")[0]
+        right = next(o["text"] for o in question["options"] if o["correct"])
+        response = client.post("/learn/review", data={
+            "slug": "current-ratio", "kind": question["kind"],
+            "ticker": "KLAC", "choice": right}, headers={"X-CSRFToken": header})
+        assert response.status_code == 200
+        assert "Correct" in response.get_data(as_text=True)
+        assert database.get_concept_reviews(1)["current-ratio"]["seen"] == 1
+
+    def test_an_expired_cache_between_asking_and_answering_does_not_crash(
+            self, client, token, monkeypatch):
+        import app as legacy
+        monkeypatch.setattr(legacy, "_cached_scorecard", lambda t: None)
+        header, stored = token
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = stored
+        response = client.post("/learn/review", data={
+            "slug": "current-ratio", "kind": "live-compute",
+            "ticker": "KLAC", "choice": "2.88"}, headers={"X-CSRFToken": header})
+        assert response.status_code == 200

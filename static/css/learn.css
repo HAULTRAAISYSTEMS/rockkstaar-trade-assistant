@@ -520,3 +520,15 @@
 }
 .path-chip:hover { border-color: var(--elite-gold); color: var(--elite-gold) }
 .learn-inline-link { color: var(--elite-gold); text-decoration: none }
+
+/* Marks a question built from a real company's filings rather than written
+   in advance. Worth calling out — it is the reason to trust the numbers. */
+.rev-live {
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--pos-500) 12%, transparent);
+  color: var(--pos-500);
+  font: 700 8.5px/1.6 var(--font-mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
