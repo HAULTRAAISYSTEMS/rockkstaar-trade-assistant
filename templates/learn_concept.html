@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ concept.name }} — Learn — Tradestaar Elite{% endblock %}
+{% block body_class %}learn-shell{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/learn.css') }}" />
+{% endblock %}
+
+{% block content %}
+<div class="learn-wrap learn-wrap-narrow">
+
+  <nav class="learn-crumbs">
+    <a href="{{ url_for('learn_index') }}">Learn</a>
+    <span>/</span>
+    <span>{{ topic.name }}</span>
+  </nav>
+
+  <header class="concept-head">
+    <div class="concept-level">{{ level_label }}</div>
+    <h1 class="concept-name">{{ concept.name }}</h1>
+    <p class="concept-line">{{ concept.one_liner }}</p>
+    {% if concept.aka %}
+    <p class="concept-aka">Also called: {{ concept.aka | join(', ') }}</p>
+    {% endif %}
+  </header>
+
+  <section class="concept-block">
+    <h2>What it is</h2>
+    <p>{{ concept.what }}</p>
+  </section>
+
+  {% if concept.formula %}
+  <section class="concept-block">
+    <h2>The arithmetic</h2>
+    <p class="concept-formula">{{ concept.formula }}</p>
+  </section>
+  {% endif %}
+
+  <section class="concept-block">
+    <h2>Why it matters</h2>
+    <p>{{ concept.why }}</p>
+  </section>
+
+  <section class="concept-block">
+    <h2>How to read it</h2>
+    <p>{{ concept.read_it }}</p>
+  </section>
+
+  {% if concept.traps %}
+  <section class="concept-block concept-traps">
+    <h2>Where it misleads</h2>
+    <ul>
+      {% for trap in concept.traps %}<li>{{ trap }}</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if concept.see_live %}
+  <section class="concept-live">
+    <h2>See it on a real company</h2>
+    <p>{{ concept.see_live.note }}</p>
+    {% if concept.see_live.surface == 'fundamentals' %}
+    <a class="concept-cta" href="{{ url_for('fundamentals_page') }}">Open the fundamentals analyzer &rarr;</a>
+    {% elif concept.see_live.surface == 'calendar' %}
+    <a class="concept-cta" href="{{ url_for('catalyst_calendar') }}">Open the catalyst calendar &rarr;</a>
+    {% elif concept.see_live.surface == 'intel' %}
+    <a class="concept-cta" href="{{ url_for('intel') }}">Open market intel &rarr;</a>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if related %}
+  <section class="concept-block">
+    <h2>Next</h2>
+    <div class="learn-grid">
+      {% for c in related %}
+      <a class="learn-card" href="{{ url_for('learn_concept', slug=c.slug) }}">
+        <span class="learn-card-name">{{ c.name }}</span>
+        <span class="learn-card-line">{{ c.one_liner }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if concept.sources %}
+  <footer class="concept-sources">
+    Checked against:
+    {% for src in concept.sources %}
+    <a href="{{ src }}" target="_blank" rel="noopener noreferrer">{{ src }}</a>{% if not loop.last %}, {% endif %}
+    {% endfor %}
+  </footer>
+  {% endif %}
+
+</div>
+{% endblock %}

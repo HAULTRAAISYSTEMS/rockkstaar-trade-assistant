@@ -280,6 +280,22 @@
                 {% if row.edu.formula %}
                 <div class="edu-formula">{{ row.edu.formula }}</div>
                 {% endif %}
+                {# The expander used to stop at the formula. How to read the
+                   number, and the ways it misleads, are the parts a glossary
+                   leaves out and a learner needs. #}
+                {% if row.edu.read_it %}
+                <div class="edu-label">How to read it</div>
+                <div class="edu-why">{{ row.edu.read_it }}</div>
+                {% endif %}
+                {% if row.edu.traps %}
+                <div class="edu-label">Where it misleads</div>
+                <ul class="edu-traps">
+                  {% for trap in row.edu.traps %}<li>{{ trap }}</li>{% endfor %}
+                </ul>
+                {% endif %}
+                {% if row.edu.slug %}
+                <a class="edu-more" href="{{ url_for('learn_concept', slug=row.edu.slug) }}">Full explanation and related ideas &rarr;</a>
+                {% endif %}
               </div>
               {% endif %}
             </div>

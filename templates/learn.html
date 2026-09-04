@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Learn — Tradestaar Elite{% endblock %}
+{% block body_class %}learn-shell{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/learn.css') }}" />
+{% endblock %}
+
+{% block content %}
+<div class="learn-wrap">
+
+  <header class="learn-head">
+    <div class="learn-eyebrow">Tradestaar Elite Research Desk</div>
+    <h1 class="learn-title">Learn the market</h1>
+    <p class="learn-sub">
+      {{ total }} ideas, each written to be read against a real company's real
+      filings. Every one tells you what it is, how to read it, and the specific
+      ways it misleads people.
+    </p>
+
+    <form class="learn-search" method="get" action="{{ url_for('learn_index') }}" role="search">
+      <input type="search" name="q" value="{{ query }}" autocomplete="off"
+             placeholder="EPS, the VIX, free cash flow, 10-K…"
+             aria-label="Search the concept library" />
+      <button type="submit">Search</button>
+      {% if query %}<a class="learn-clear" href="{{ url_for('learn_index') }}">Clear</a>{% endif %}
+    </form>
+  </header>
+
+  {% if not_found %}
+  <div class="learn-missing">
+    There is no concept called <strong>{{ not_found }}</strong> yet. Everything
+    that does exist is below.
+  </div>
+  {% endif %}
+
+  {% if results is not none %}
+  <section class="learn-results">
+    <h2 class="learn-h2">
+      {{ results|length }} result{{ '' if results|length == 1 else 's' }}
+      {% if query %}for "{{ query }}"{% endif %}
+    </h2>
+    {% if results %}
+    <div class="learn-grid">
+      {% for c in results %}
+      <a class="learn-card" href="{{ url_for('learn_concept', slug=c.slug) }}">
+        <span class="learn-card-topic">{{ topics | selectattr('key','equalto',c.topic) | map(attribute='name') | first }}</span>
+        <span class="learn-card-name">{{ c.name }}</span>
+        <span class="learn-card-line">{{ c.one_liner }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="learn-empty">
+      Nothing matches that yet. Try a shorter term — "cash", "margin", "debt" —
+      or browse the topics below.
+    </p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% for topic in topics %}
+  <section class="learn-topic">
+    <h2 class="learn-h2">{{ topic.name }}</h2>
+    <p class="learn-blurb">{{ topic.blurb }}</p>
+    <div class="learn-grid">
+      {% for c in topic.concepts %}
+      <a class="learn-card" href="{{ url_for('learn_concept', slug=c.slug) }}">
+        <span class="learn-card-topic">{{ levels.get(c.level, '') }}</span>
+        <span class="learn-card-name">{{ c.name }}</span>
+        <span class="learn-card-line">{{ c.one_liner }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+
+</div>
+{% endblock %}

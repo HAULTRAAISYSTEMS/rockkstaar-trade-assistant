@@ -7497,6 +7497,51 @@ def research_page():
     return render_template("research.html", ticker=ticker, data=data, error=error, stock=stock)
 
 
+# ---------------------------------------------------------------------------
+# The concept library
+#
+# The scorecard has always taught by showing its arithmetic, but the teaching
+# lived inside one page and stopped at a definition and a formula. These two
+# routes give it somewhere to live: a browsable library, and a page per idea
+# that every "?" on the scorecard links into.
+# ---------------------------------------------------------------------------
+
+@app.route("/learn")
+def learn_index():
+    """Browse or search the concept library."""
+    import concepts as _concepts
+    query = (request.args.get("q") or "").strip()[:80]
+    results = _concepts.search(query) if query else None
+    return render_template(
+        "learn.html",
+        query=query,
+        results=results,
+        topics=_concepts.by_topic(),
+        total=len(_concepts.CONCEPTS),
+        levels=_concepts.LEVELS,
+    )
+
+
+@app.route("/learn/<slug>")
+def learn_concept(slug):
+    """One concept, with what it is, how to read it, and where it misleads."""
+    import concepts as _concepts
+    concept = _concepts.get(slug)
+    if concept is None:
+        # A dead link should offer the library rather than a bare 404 page.
+        return render_template(
+            "learn.html", query=slug, results=[],
+            topics=_concepts.by_topic(), total=len(_concepts.CONCEPTS),
+            levels=_concepts.LEVELS, not_found=slug), 404
+    return render_template(
+        "learn_concept.html",
+        concept=concept,
+        topic=_concepts.TOPICS.get(concept["topic"], {}),
+        level_label=_concepts.LEVELS.get(concept["level"], ""),
+        related=_concepts.related_to(slug),
+    )
+
+
 @app.route("/fundamentals")
 def fundamentals_page():
     """Fundamentals Analyzer + Education Module."""

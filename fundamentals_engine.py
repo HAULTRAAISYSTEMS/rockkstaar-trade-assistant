@@ -1002,105 +1002,14 @@ def fetch_fundamentals_fmp(ticker: str) -> dict | None:
     return result
 
 # ─── Education blurbs ────────────────────────────────────────────────────────
-# Each entry: {"def": plain-English definition, "why": why it matters, "formula": formula string}
-
-EDUCATION: dict[str, dict[str, str]] = {
-    "current_ratio": {
-        "def": "Measures whether a company can pay its short-term bills using its short-term assets.",
-        "why": "Above 1.5 is healthy — the company has a comfortable cushion. Below 1.0 means current liabilities exceed liquid assets, which is a stress signal.",
-        "formula": "Current Assets ÷ Current Liabilities",
-    },
-    "debt_to_equity": {
-        "def": "Shows how much of the company is financed by debt vs. shareholder equity.",
-        "why": "Below 1.0 means the company relies more on equity than debt. High D/E amplifies both gains and losses — fine in stable businesses, risky in cyclical ones.",
-        "formula": "Total Debt ÷ Total Shareholders' Equity",
-    },
-    "cash_covers_debt": {
-        "def": "Checks whether cash and short-term investments cover every borrowing that comes due inside a year.",
-        "why": "A company that can retire its near-term maturities out of liquid assets never has to refinance on someone else's terms. Comparing cash against the entire debt stack instead would fail every healthy company that has termed out its borrowing.",
-        "formula": "Cash & Short-Term Investments ≥ Debt Due Within 12 Months",
-    },
-    "retained_earnings_growth": {
-        "def": "Retained earnings are the cumulative profits the company has kept (not paid out as dividends) over its life.",
-        "why": "Growing retained earnings means the business is compounding wealth over time. Shrinking retained earnings often signal persistent losses or excessive buybacks funded by debt.",
-        "formula": "Retained Earnings (Year N) > Retained Earnings (Year N−1)",
-    },
-    "goodwill_ratio": {
-        "def": "Goodwill is the premium paid above fair value in acquisitions. Intangibles are non-physical assets (patents, brand value).",
-        "why": "When goodwill + intangibles exceed 30% of total assets, a write-down (impairment) can vaporize earnings overnight. High goodwill is a risk hidden on the balance sheet.",
-        "formula": "(Goodwill + Intangible Assets) ÷ Total Assets",
-    },
-    "revenue_growth": {
-        "def": "Whether revenue (the top line) is growing year over year for 3+ consecutive years.",
-        "why": "Consistent revenue growth shows the business has real demand. A single good year can be luck; three consecutive years is a trend.",
-        "formula": "Revenue(Year N) > Revenue(Year N−1) for 3+ years",
-    },
-    "gross_margin": {
-        "def": "The percentage of revenue left after subtracting the direct cost of making the product or delivering the service.",
-        "why": "Gross margin reveals pricing power and production efficiency. A stable or rising margin means the company isn't sacrificing profit to grow.",
-        "formula": "(Revenue − Cost of Goods Sold) ÷ Revenue × 100",
-    },
-    "operating_margin": {
-        "def": "Profit as a percentage of revenue after paying all operating expenses (salaries, rent, R&D) but before interest and taxes.",
-        "why": "Operating margin shows how well management runs the core business. A rising margin is a signal of improving efficiency or pricing power.",
-        "formula": "Operating Income ÷ Revenue × 100",
-    },
-    "net_margin": {
-        "def": "The percentage of each revenue dollar that flows through to the bottom line as profit.",
-        "why": "This is the final measure of profitability after everything — taxes, interest, one-time charges. A positive and rising net margin is the gold standard.",
-        "formula": "Net Income ÷ Revenue × 100",
-    },
-    "eps_growth": {
-        "def": "Earnings Per Share (EPS) — the share of profit allocated to each outstanding share.",
-        "why": "EPS growth is what drives share price appreciation over time. A company that grows EPS consistently is compounding investor wealth.",
-        "formula": "Net Income ÷ Diluted Shares Outstanding",
-    },
-    "fcf_positive": {
-        "def": "Free Cash Flow (FCF) is the cash a company generates after paying for capital expenditures needed to maintain or grow the business.",
-        "why": "FCF is harder to manipulate than net income. A company that consistently generates positive FCF can fund dividends, buybacks, and acquisitions without borrowing.",
-        "formula": "Operating Cash Flow − Capital Expenditures",
-    },
-    "fcf_vs_net_income": {
-        "def": "Compares Free Cash Flow to Net Income to check whether reported profits are backed by real cash.",
-        "why": "When FCF ≥ Net Income, earnings are of high quality — cash is actually arriving. When FCF < Net Income, profits may be coming from accounting adjustments rather than cash payments.",
-        "formula": "Free Cash Flow ÷ Net Income ≥ 1.0",
-    },
-    "ocf_trend": {
-        "def": "Whether Operating Cash Flow (the cash generated by the core business) is growing over 3–5 years.",
-        "why": "A growing OCF trend tells you the business engine is getting stronger over time, not just the accounting line items.",
-        "formula": "OCF(Year N) > OCF(Year N−1) for 3+ years",
-    },
-    "capex_ratio": {
-        "def": "Capital Expenditures (CapEx) as a percentage of revenue — shows how much the company must reinvest just to keep running.",
-        "why": "Low CapEx businesses (software, consumer brands) generate cash cheaply. High CapEx businesses (airlines, utilities) need to constantly reinvest. Above 10% of revenue is a flag worth monitoring.",
-        "formula": "CapEx ÷ Revenue × 100",
-    },
-    "debt_financing": {
-        "def": "Whether the company is relying on new debt issuance (borrowing) to fund its operations and investments.",
-        "why": "A business that can't fund itself without constantly borrowing is fragile — any credit tightening can threaten its survival. Look for positive financing cash flow dominated by debt issuance as a warning sign.",
-        "formula": "Financing Cash Flow — check for large positive debt issuance",
-    },
-    "roe": {
-        "def": "Return on Equity (ROE) measures how much profit a company generates for every dollar of shareholder equity.",
-        "why": "ROE > 15% over multiple years is the hallmark of a great business. Warren Buffett's core filter is consistent high ROE without excessive debt.",
-        "formula": "Net Income ÷ Average Shareholders' Equity × 100",
-    },
-    "roic": {
-        "def": "Return on Invested Capital (ROIC) measures how efficiently a company uses all the capital invested in it (both equity and debt).",
-        "why": "ROIC > 10% means the company earns more than its cost of capital — it's creating value. ROIC < cost of capital means it's destroying value even if it shows profit.",
-        "formula": "NOPAT ÷ Invested Capital × 100  (NOPAT = Operating Income × (1 − Tax Rate))",
-    },
-    "moat": {
-        "def": "An economic moat is a durable competitive advantage that protects a company's profits from competition. This row scores the evidence a moat leaves in the numbers, not the moat itself.",
-        "why": "Competition drives returns on capital down toward the cost of capital. A company that holds ROIC above 10% year after year while its gross margin does not erode is being protected by something — brand, switching costs, network effects, scale. What that something is still requires reading the 10-K; this row only tells you whether there is anything there to look for.",
-        "formula": "ROIC above 10% in every reported year AND gross margin not down more than 3 points across the trail",
-    },
-    "share_dilution": {
-        "def": "Whether the diluted share count is shrinking (buybacks) or growing (issuance).",
-        "why": "You own a fraction of a company, not the company. Revenue and earnings can both rise while the share count rises faster, leaving you with less than you started with. A falling count means every remaining share owns more of the same business — it is the one line on the card that measures what happens to your slice rather than the pie.",
-        "formula": "Newest diluted share count ÷ oldest reported count − 1",
-    },
-}
+# The scorecard's "?" content lives in concepts.py now, alongside the rest of
+# the library, so a row expander and the concept page cannot drift apart. This
+# name is kept because the template and several tests read it, and because the
+# engine has no business owning the teaching copy.
+#
+# Entries carry the original def/why/formula plus the fields the concept store
+# adds: slug (to link into the library), name, one_liner, read_it and traps.
+from concepts import EDUCATION            # noqa: E402  (re-exported on purpose)
 
 # ─── Red flag definitions ─────────────────────────────────────────────────────
 

@@ -835,3 +835,22 @@
   color: var(--elite-muted);
   max-width: 62ch;
 }
+
+/* The row expander now carries how to read the number and where it misleads,
+   not just a definition and a formula. */
+.fundamentals-shell .edu-traps {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--elite-muted);
+  font: 400 11.5px/1.6 var(--font-ui);
+}
+.fundamentals-shell .edu-traps li { margin-bottom: 4px }
+.fundamentals-shell .edu-more {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--elite-gold);
+  font: 600 11px/1.5 var(--font-ui);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--elite-gold) 35%, transparent);
+}
+.fundamentals-shell .edu-more:hover { border-bottom-color: var(--elite-gold) }
