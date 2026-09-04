@@ -2050,6 +2050,10 @@ def fetch_dividends(tickers: Optional[list[str]] = None) -> list[dict]:
 _ECON_REASONS: dict[str, str] = {
     "cpi":               "CPI release — market moves hard on surprise. Reduce size.",
     "ppi":               "PPI release — producer inflation leads CPI. Watch trend.",
+    # More specific keys first: "FOMC Economic Projections" also contains
+    # "fomc", and the dot plot is a different event from the rate decision.
+    "projections":       "The dot plot — where the committee sees rates going. Moves the long end.",
+    "press conference":  "Fed press conference — the tone often moves more than the decision itself.",
     "fomc":              "Fed decision — rate move possible. No new positions day-of.",
     "fed speak":         "Fed commentary — rate expectations can shift fast.",
     "federal reserve":   "Federal Reserve event — watch for policy signals.",
@@ -2062,8 +2066,6 @@ _ECON_REASONS: dict[str, str] = {
     "consumer sentiment":"Consumer confidence — spending outlook, sector mover.",
     "retail sales":      "Retail sales — consumer spending direct read.",
     "pce":               "PCE inflation — Fed's preferred inflation gauge. High impact.",
-    "press conference":  "Fed press conference — the tone often moves more than the decision itself.",
-    "projections":       "The dot plot — where the committee sees rates going. Moves the long end.",
     "ism":               "ISM survey — manufacturing/services health check.",
     "housing":           "Housing data — rate-sensitive sector indicator.",
     "default":           "High-impact event — reduce size, wait for market reaction.",

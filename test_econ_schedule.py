@@ -132,3 +132,75 @@ class TestThePageReportsIt:
 
     def test_the_route_passes_it(self):
         assert "econ_coverage=econ_coverage" in open("app.py").read()
+
+
+class TestTheDayIsInOrder:
+    """Times were sorted as strings, so "2:00 PM ET" sorted before
+    "8:30 AM ET" — "2" comes before "8". September 16 listed the Fed decision
+    and the press conference above a retail sales print six hours earlier.
+    """
+    import os
+    os.environ.setdefault("SECRET_KEY", "test-only-not-a-real-key")
+    os.environ.setdefault("TRADESTAAR_NO_BACKGROUND", "1")
+
+    @staticmethod
+    def _minutes(label):
+        import app as legacy
+        return legacy._minutes_of_day(label)
+
+    @pytest.mark.parametrize("label,expected", [
+        ("8:30 AM ET", 8 * 60 + 30),
+        ("2:00 PM ET", 14 * 60),
+        ("2:30 PM ET", 14 * 60 + 30),
+        ("12:00 AM ET", 0),
+        ("12:30 PM ET", 12 * 60 + 30),
+        ("9:05 AM", 9 * 60 + 5),
+    ])
+    def test_a_clock_time_becomes_minutes(self, label, expected):
+        assert self._minutes(label) == expected
+
+    def test_the_morning_release_sorts_before_the_afternoon_one(self):
+        assert self._minutes("8:30 AM ET") < self._minutes("2:00 PM ET")
+
+    def test_the_decision_sorts_before_its_press_conference(self):
+        assert self._minutes("2:00 PM ET") < self._minutes("2:30 PM ET")
+
+    @pytest.mark.parametrize("label,expected", [
+        ("Before Open", 8 * 60),
+        ("After Close", 16 * 60 + 30),
+        ("BMO", 8 * 60),
+        ("AMC", 16 * 60 + 30),
+    ])
+    def test_an_earnings_session_gets_a_sensible_slot(self, label, expected):
+        assert self._minutes(label) == expected
+
+    @pytest.mark.parametrize("label", ["TBD", "", None, "sometime"])
+    def test_an_unknown_time_sorts_last(self, label):
+        assert self._minutes(label) > self._minutes("11:59 PM ET")
+
+    def test_a_full_day_comes_out_in_order(self):
+        import app as legacy
+        summary = {"economic_events": [
+            {"date": "2026-09-16", "date_label": "Sep 16", "time": "2:30 PM ET",
+             "event": "Fed Press Conference", "impact": "HIGH", "days_away": 12},
+            {"date": "2026-09-16", "date_label": "Sep 16", "time": "8:30 AM ET",
+             "event": "Retail Sales (MoM)", "impact": "HIGH", "days_away": 12},
+            {"date": "2026-09-16", "date_label": "Sep 16", "time": "2:00 PM ET",
+             "event": "FOMC Interest Rate Decision", "impact": "HIGH", "days_away": 12},
+        ]}
+        titles = [r["title"] for r in legacy._build_catalyst_calendar(summary)]
+        assert titles == ["Retail Sales (MoM)",
+                          "FOMC Interest Rate Decision",
+                          "Fed Press Conference"]
+
+
+class TestTheDotPlotIsItsOwnEvent:
+    def test_projections_are_not_described_as_the_rate_decision(self):
+        assert ie._econ_reason("FOMC Economic Projections") != \
+               ie._econ_reason("FOMC Interest Rate Decision")
+
+    def test_it_is_described_as_the_dot_plot(self):
+        assert "dot plot" in ie._econ_reason("FOMC Economic Projections")
+
+    def test_the_decision_still_reads_as_the_decision(self):
+        assert "rate move possible" in ie._econ_reason("FOMC Interest Rate Decision")

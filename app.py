@@ -7048,6 +7048,34 @@ def smart_money_alert_rules():
     return redirect(url_for("smart_money"))
 
 
+# Times were sorted as strings, so "2:00 PM ET" sorted before "8:30 AM ET" —
+# the character "2" comes before "8". September 16 listed the Fed decision and
+# the press conference above a retail sales print that lands six hours before
+# either of them.
+_TIME_RE = re.compile(r"(\d{1,2}):(\d{2})\s*([AaPp])[Mm]")
+_UNKNOWN_TIME = 24 * 60 + 1   # sorts after every real clock time
+
+
+def _minutes_of_day(label) -> int:
+    """A sortable minute-of-day from a calendar time label."""
+    text = str(label or "").strip().lower()
+    if not text:
+        return _UNKNOWN_TIME
+    match = _TIME_RE.search(text)
+    if match:
+        hour, minute, half = int(match.group(1)), int(match.group(2)), match.group(3)
+        hour = hour % 12
+        if half == "p":
+            hour += 12
+        return hour * 60 + minute
+    # Earnings carry a session rather than a clock time.
+    if any(word in text for word in ("before open", "bmo", "pre-market", "premarket")):
+        return 8 * 60
+    if any(word in text for word in ("after close", "amc", "post-market", "postmarket")):
+        return 16 * 60 + 30
+    return _UNKNOWN_TIME
+
+
 def _build_catalyst_calendar(summary, watchlist_tickers=None):
     """Normalize cached earnings and macro events for the calendar UI.
 
@@ -7109,7 +7137,7 @@ def _build_catalyst_calendar(summary, watchlist_tickers=None):
         })
 
     return sorted(rows, key=lambda row: (
-        row["days_away"], row["date"], row["time"] == "TBD", row["time"], row["title"]
+        row["days_away"], row["date"], _minutes_of_day(row["time"]), row["title"]
     ))
 
 
