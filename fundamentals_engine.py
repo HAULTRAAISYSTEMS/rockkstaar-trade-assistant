@@ -1724,6 +1724,11 @@ def score_fundamentals(raw: dict) -> dict:
            else None)
     cr0_source = "annual"
     cr0_period = "Annual"
+    # Keep the figure the balance sheet gives, because the working line shows
+    # that division. Replacing the headline without it produced a row reading
+    # "3,088.35B / 1,308.66B = 2.36" beside a value of 2.46, with nothing on
+    # the row to say the second number came from somewhere else.
+    cr0_annual = cr0
 
     # Prefer Finnhub quarterly current ratio
     if ttm.get("current_ratio_q") is not None:
@@ -1738,6 +1743,7 @@ def score_fundamentals(raw: dict) -> dict:
                 else None)
     de_source = "annual"
     de_period = "Annual"
+    de_annual = de_ratio
 
     # Prefer Finnhub quarterly D/E ratio
     if ttm.get("de_ratio_q") is not None:
@@ -2159,13 +2165,34 @@ def score_fundamentals(raw: dict) -> dict:
     ocf0 = v(raw.get("operating_cash_flow", []))
     capex0 = v(raw.get("capex", []))
 
+    def _quarterly_note(source, annual_value, shown_value) -> str:
+        """Says where a headline came from when it is not the line above it.
+
+        The current-ratio and debt-to-equity headlines are replaced with the
+        provider's latest-quarter figure, which is fresher and right to show.
+        The working line still shows the annual division, so without this the
+        row displayed two different numbers and explained neither.
+        """
+        if source != "finnhub_metric":
+            return ""
+        if annual_value is None or shown_value is None:
+            return ""
+        if abs(shown_value - annual_value) < 0.005:
+            return ""
+        return (f" at the last fiscal year end; the {shown_value:.2f} shown "
+                f"is the provider's latest quarter")
+
     WORKING = {
         "current_ratio": (
             f"{_usd(ca0)} current assets / {_usd(cl0)} current liabilities = "
-            f"{_ratio_or_blank(ca0, cl0)}" if ca0 is not None and cl0 else ""),
+            f"{_ratio_or_blank(ca0, cl0)}"
+            + _quarterly_note(cr0_source, cr0_annual, cr0)
+            if ca0 is not None and cl0 else ""),
         "debt_to_equity": (
             f"{_usd(total_debt)} total debt / {_usd(total_equity)} equity = "
-            f"{_ratio_or_blank(total_debt, total_equity)}" if total_debt is not None and total_equity else ""),
+            f"{_ratio_or_blank(total_debt, total_equity)}"
+            + _quarterly_note(de_source, de_annual, de_ratio)
+            if total_debt is not None and total_equity else ""),
         "cash_covers_debt": (
             f"{_usd(liquid0)} {liquid_label} against {_usd(near_term_debt)} "
             f"of {cash_cover_basis}"
@@ -2772,7 +2799,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-04.2"
+SCORECARD_VERSION = "2026-09-04.3"
 
 # The unit buckets in EDGAR are keyed by currency. Everything read only "USD",
 # so a filer that reports in its own currency lost every figure with no USD

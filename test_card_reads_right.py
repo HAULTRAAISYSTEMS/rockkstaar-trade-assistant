@@ -128,3 +128,57 @@ class TestARowShowsItsOwnArithmetic:
 
     def test_it_shows_the_proportion_the_test_actually_uses(self, scored):
         assert "% of operating cash flow" in self._row(scored, "debt_financing")["working"]
+
+
+class TestAHeadlineSaysWhereItCameFrom:
+    """The current-ratio and debt-to-equity headlines are replaced with the
+    provider's latest-quarter figure — fresher, and right to show. The working
+    line still shows the annual division, so the row displayed two different
+    numbers and explained neither: "NT$3,088.35B / NT$1,308.66B = 2.36" beside
+    a value of 2.46.
+    """
+
+    @staticmethod
+    def _row(scored, key):
+        for section in scored["sections"]:
+            for row in section["rows"]:
+                if row["key"] == key:
+                    return row
+        return None
+
+    @staticmethod
+    def _scored(ttm=None):
+        with patch.object(fe, "_edgar_cik", return_value=("0000319201", "KLA")), \
+             patch.object(fe._req_module, "get", return_value=_Resp(facts())):
+            raw = fe.fetch_fundamentals_edgar("KLAC")
+        if ttm:
+            raw["_ttm_metrics"] = dict(ttm)
+        return fe.score_fundamentals(raw)
+
+    def test_a_quarterly_headline_is_labelled(self):
+        scored = self._scored({"current_ratio_q": 2.46})
+        working = self._row(scored, "current_ratio")["working"]
+        assert "provider's latest quarter" in working
+        assert "2.46" in working
+
+    def test_the_annual_division_is_still_shown(self):
+        scored = self._scored({"current_ratio_q": 2.46})
+        working = self._row(scored, "current_ratio")["working"]
+        assert "current assets" in working and "current liabilities" in working
+
+    def test_an_annual_headline_gets_no_note(self):
+        working = self._row(self._scored(), "current_ratio")["working"]
+        assert "provider" not in working
+
+    def test_a_quarterly_figure_that_agrees_gets_no_note(self):
+        """Nothing to explain when the two numbers are the same."""
+        annual = self._row(self._scored(), "current_ratio")["value"]
+        scored = self._scored({"current_ratio_q": float(annual)})
+        assert "provider" not in self._row(scored, "current_ratio")["working"]
+
+    def test_debt_to_equity_is_covered_too(self):
+        scored = self._scored({"debt_to_equity_q": 0.42})
+        row = self._row(scored, "debt_to_equity")
+        if row["value"] not in ("N/A", ""):
+            assert ("provider's latest quarter" in row["working"]
+                    or "0.42" not in row["value"])
