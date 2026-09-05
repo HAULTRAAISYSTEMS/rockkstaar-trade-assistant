@@ -12,3 +12,4 @@ anthropic>=0.40.0
 openai>=1.30.0
 # Optional: set POLYGON_API_KEY env var to use Polygon.io as primary data source
 # polygon-api-client>=1.12.0
+snaptrade-python-sdk==13.0.14

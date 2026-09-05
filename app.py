@@ -3161,6 +3161,20 @@ def dashboard():
         return render_template("dashboard.html", **_DASHBOARD_EMPTY)
 
 
+def _snaptrade_connected(user_id: int) -> bool:
+    """Is any brokerage linked through SnapTrade? False on any failure.
+
+    The Account page must render on a deploy where SnapTrade was never set up,
+    so this answers rather than raises.
+    """
+    try:
+        import snaptrade as _snaptrade
+        return _snaptrade.is_connected(user_id)
+    except Exception as exc:
+        logger.debug("snaptrade connected check failed: %s", exc)
+        return False
+
+
 @app.route("/account")
 def account():
     """ACCOUNT & Performance — Schwab balances/positions, journal performance
@@ -3203,6 +3217,7 @@ def account():
         trades_today=trades_today,
         losses_today=losses_today,
         risk_settings=risk_s,
+        snap_connected=_snaptrade_connected(uid),
     )
 
 
@@ -6631,6 +6646,159 @@ def api_schwab_summary():
         "error":            data.get("error"),
     })
 
+
+
+# ---------------------------------------------------------------------------
+# SnapTrade — Robinhood and the other aggregated brokerages (read-only)
+# ---------------------------------------------------------------------------
+
+_snaptrade_cache: dict = {}          # user_id → {"data": ..., "ts": ...}
+_SNAPTRADE_CACHE_TTL = 90            # aggregated data is slower to move than
+                                     # Schwab's direct feed; do not hammer it
+
+
+def _get_snaptrade_data(user_id: int = 1, force: bool = False) -> dict:
+    """Cached SnapTrade account summary, refreshed when stale."""
+    now = _time.time()
+    entry = _snaptrade_cache.get(user_id, {"data": None, "ts": 0.0})
+    if not force and entry["ts"] and now - entry["ts"] < _SNAPTRADE_CACHE_TTL:
+        return entry["data"]
+    try:
+        import snaptrade as _snaptrade
+        data = _snaptrade.get_account_summary(user_id)
+        _snaptrade_cache[user_id] = {"data": data, "ts": now}
+        return data
+    except Exception as exc:
+        logger.warning("snaptrade cache refresh failed: %s", exc)
+        return (entry["data"] or {
+            "connected": False, "total_value": None, "buying_power": None,
+            "daily_pnl": None, "total_unrealized": None,
+            "open_positions": 0, "accounts": [], "error": str(exc),
+        })
+
+
+@app.route("/brokers")
+def brokers_page():
+    """One page for every brokerage connection, direct or aggregated."""
+    import schwab as _schwab
+    import snaptrade as _snaptrade
+
+    uid = current_user_id()
+    schwab_status = _schwab.token_status(uid)
+    snap_status = _snaptrade.token_status(uid)
+
+    schwab_data = _get_schwab_data(uid) if schwab_status["connected"] else None
+    snap_data = _get_snaptrade_data(uid) if snap_status["connected"] else None
+
+    return render_template(
+        "brokers.html",
+        schwab_status=schwab_status,
+        schwab_data=schwab_data,
+        snap_status=snap_status,
+        snap_data=snap_data,
+    )
+
+
+@app.route("/brokers/snaptrade/connect")
+def snaptrade_connect():
+    """Send the user to SnapTrade's Connection Portal.
+
+    The portal is where the brokerage login happens — on Robinhood's own page,
+    against SnapTrade, never against this app. No credential passes through
+    here, which is the whole reason this route exists instead of a login form.
+    """
+    import snaptrade as _snaptrade
+
+    if not _snaptrade.is_configured():
+        flash("SnapTrade is not configured. Set SNAPTRADE_CLIENT_ID and "
+              "SNAPTRADE_CONSUMER_KEY, then try again.", "warning")
+        return redirect(url_for("brokers_page"))
+
+    broker = (request.args.get("broker") or "").strip().upper() or None
+    if broker and not broker.replace("_", "").isalnum():
+        broker = None                      # never forward junk into the portal
+
+    uid = current_user_id()
+    try:
+        url = _snaptrade.build_portal_url(
+            uid,
+            redirect_to=url_for("snaptrade_callback", _external=True),
+            broker=broker,
+        )
+        _snaptrade_cache.pop(uid, None)
+        return redirect(url)
+    except Exception as exc:
+        logger.warning("snaptrade connect failed: %s", exc)
+        flash(f"Could not open the brokerage connection page: {exc}", "danger")
+        return redirect(url_for("brokers_page"))
+
+
+@app.route("/brokers/snaptrade/callback")
+def snaptrade_callback():
+    """Where the Connection Portal returns the browser.
+
+    Nothing is exchanged here. The link is made server-side between SnapTrade
+    and the brokerage, so this only drops the cache and says what happened.
+    """
+    import snaptrade as _snaptrade
+
+    uid = current_user_id()
+    _snaptrade_cache.pop(uid, None)
+
+    if request.args.get("error"):
+        flash("Brokerage connection was cancelled or refused.", "warning")
+        return redirect(url_for("brokers_page"))
+
+    try:
+        summary = _get_snaptrade_data(uid, force=True)
+        count = len(summary.get("accounts") or [])
+        if count:
+            from database import set_user_setting
+            set_user_setting(uid, "snaptrade_linked_at",
+                             _et_now().isoformat())
+            flash(f"Connected — {count} account{'s' if count != 1 else ''} linked.",
+                  "success")
+        else:
+            # The portal can return before the first sync has finished.
+            flash("Connection saved. Balances and positions appear once the "
+                  "brokerage finishes its first sync — usually under a minute.",
+                  "info")
+    except Exception as exc:
+        logger.warning("snaptrade callback summary failed: %s", exc)
+        flash("Connected, but the first read failed. Refresh in a moment.", "warning")
+
+    return redirect(url_for("brokers_page"))
+
+
+@app.route("/brokers/snaptrade/disconnect", methods=["POST"])
+def snaptrade_disconnect():
+    """Revoke every brokerage linked through SnapTrade for this user."""
+    import snaptrade as _snaptrade
+    uid = current_user_id()
+    _snaptrade.clear_tokens(uid)
+    _snaptrade_cache.pop(uid, None)
+    flash("Brokerage connections removed. Your data has been cleared from "
+          "this app and the access has been revoked at SnapTrade.", "success")
+    return redirect(url_for("brokers_page"))
+
+
+@app.route("/api/snaptrade/summary")
+def api_snaptrade_summary():
+    """Summary fields only — never tokens, never the user secret."""
+    import snaptrade as _snaptrade
+    uid = current_user_id()
+    if not _snaptrade.token_status(uid)["connected"]:
+        return jsonify({"connected": False, "error": "Not connected"})
+    data = _get_snaptrade_data(uid)
+    return jsonify({
+        "connected":        data.get("connected", False),
+        "total_value":      data.get("total_value"),
+        "buying_power":     data.get("buying_power"),
+        "daily_pnl":        data.get("daily_pnl"),
+        "total_unrealized": data.get("total_unrealized"),
+        "open_positions":   data.get("open_positions"),
+        "error":            data.get("error"),
+    })
 
 
 def _intel_error_payload(msg: str) -> dict:

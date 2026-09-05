@@ -23,7 +23,7 @@
     <a href="{{ url_for('learn_index') }}" class="nav-link {{ 'nav-link-active' if ep in ('learn_index', 'learn_concept', 'learn_paths', 'learn_path', 'learn_review') }}">Learn</a>
     <a href="{{ url_for('live_research.feed') }}" class="nav-link nav-link-research {{ 'nav-link-active' if ep and ep.startswith('live_research.') }}">Live Research</a>
     <a href="{{ url_for('intel') }}" class="nav-link nav-link-research {{ 'nav-link-active' if ep in ('intel', 'catalyst_calendar', 'sentiment', 'smart_money') }}">Intel</a>
-    <a href="{{ url_for('account') }}" class="nav-link nav-link-account {{ 'nav-link-active' if ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'tradestaar_ai', 'schwab_account') }}">Account</a>
+    <a href="{{ url_for('account') }}" class="nav-link nav-link-account {{ 'nav-link-active' if ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'tradestaar_ai', 'schwab_account', 'brokers_page') }}">Account</a>
   </div>
 
   <div class="nav-actions">
@@ -73,7 +73,7 @@
   <a href="{{ url_for('watchlists_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep == 'watchlists_page' }}" {% if ep == 'watchlists_page' %}aria-current="page"{% endif %}>
     <span class="mobile-app-nav__icon" aria-hidden="true">★</span><span>Watchlist</span>
   </a>
-  <a href="{{ url_for('account') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('account', 'journal', 'risk_settings', 'schwab_account', 'paper_trading', 'tradestaar_ai') }}" {% if ep in ('account', 'journal', 'risk_settings', 'schwab_account', 'paper_trading', 'tradestaar_ai') %}aria-current="page"{% endif %}>
+  <a href="{{ url_for('account') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('account', 'journal', 'risk_settings', 'schwab_account', 'brokers_page', 'paper_trading', 'tradestaar_ai') }}" {% if ep in ('account', 'journal', 'risk_settings', 'schwab_account', 'brokers_page', 'paper_trading', 'tradestaar_ai') %}aria-current="page"{% endif %}>
     <span class="mobile-app-nav__icon" aria-hidden="true">●</span><span>Account</span>
   </a>
 </nav>

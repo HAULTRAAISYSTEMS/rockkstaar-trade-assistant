@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Brokerages — Tradestaar Elite{% endblock %}
+
+{% block head_extra %}
+<style>
+.bk { max-width: 980px; margin: 0 auto; }
+.bk-head { padding: var(--sp-4) var(--sp-1) var(--sp-3); }
+.bk-head h1 { font-family: var(--font-display); font-size: var(--fs-h1); color: var(--text-hi); margin: 0 0 6px; letter-spacing: var(--track-display); }
+.bk-head p { color: var(--text-muted); font-size: var(--fs-sm); margin: 0; max-width: 62ch; line-height: 1.55; }
+
+.bk-card { background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: var(--r-md); margin-bottom: var(--sp-4); overflow: hidden; }
+.bk-card-hd { display:flex; align-items:center; gap: var(--sp-3); flex-wrap:wrap; padding: var(--sp-4); border-bottom: 1px solid var(--border-subtle); }
+.bk-name { font-family: var(--font-display); font-size: var(--fs-h3); color: var(--text-hi); margin:0; }
+.bk-via { color: var(--text-faint); font-size: var(--fs-xs); font-family: var(--font-mono); }
+.bk-pill { margin-left:auto; display:inline-flex; align-items:center; gap:6px; font-family: var(--font-mono); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing:.06em; padding: 3px 10px; border-radius: var(--r-full); border:1px solid var(--border-subtle); background: var(--ink-750); color: var(--text-muted); }
+.bk-pill.on { color: var(--pos-500); border-color: rgba(46,204,113,.35); background: rgba(46,204,113,.08); }
+.bk-body { padding: var(--sp-4); }
+.bk-body p { color: var(--text-muted); font-size: var(--fs-sm); line-height:1.6; margin: 0 0 var(--sp-3); }
+.bk-body p:last-child { margin-bottom: 0; }
+.bk-body code { font-family: var(--font-mono); font-size: .92em; color: var(--text-body); background: var(--surface-inset); padding: 1px 5px; border-radius: 3px; }
+
+.bk-stats { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.bk-stat { background: var(--surface-inset); border:1px solid var(--border-subtle); border-radius: var(--r-sm); padding: var(--sp-3); }
+.bk-stat-lbl { color: var(--text-faint); font-size: 10px; letter-spacing:.08em; text-transform: uppercase; }
+.bk-stat-val { color: var(--text-hi); font-family: var(--font-mono); font-size: var(--fs-h3); margin-top: 4px; }
+
+.bk-acct { border-top: 1px solid var(--border-subtle); padding-top: var(--sp-3); margin-top: var(--sp-3); }
+.bk-acct-hd { display:flex; align-items:baseline; gap: var(--sp-2); flex-wrap:wrap; margin-bottom: var(--sp-2); }
+.bk-acct-name { color: var(--text-hi); font-weight: var(--fw-semi); font-size: var(--fs-sm); }
+.bk-acct-meta { color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-xs); }
+.bk-table { width:100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--fs-xs); }
+.bk-table th { text-align:left; color: var(--text-faint); font-weight: var(--fw-semi); text-transform: uppercase; letter-spacing:.06em; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); }
+.bk-table td { color: var(--text-body); padding: 7px 8px; border-bottom: 1px solid var(--border-subtle); }
+.bk-table tr:last-child td { border-bottom: 0; }
+.bk-table .num { text-align: right; }
+.bk-sym { color: var(--text-hi); font-weight: var(--fw-semi); }
+
+.bk-btn { display:inline-flex; align-items:center; gap:7px; font-family: var(--font-display); font-size: var(--fs-sm); font-weight: var(--fw-bold); letter-spacing:.04em; padding: 10px 18px; border-radius: var(--r-sm); border:0; background: var(--grad-brand); color: var(--text-on-accent); text-decoration:none; cursor:pointer; }
+.bk-btn.ghost { background: transparent; border:1px solid var(--border-subtle); color: var(--text-muted); }
+.bk-actions { display:flex; gap: var(--sp-3); flex-wrap:wrap; align-items:center; margin-top: var(--sp-4); }
+
+.bk-note { border-left: 2px solid var(--orange-500); padding-left: var(--sp-3); color: var(--text-muted); font-size: var(--fs-xs); line-height:1.6; }
+.bk-err { border:1px solid rgba(231,76,60,.35); background: rgba(231,76,60,.07); color: var(--neg-500); border-radius: var(--r-sm); padding: var(--sp-3); font-size: var(--fs-sm); margin-bottom: var(--sp-3); }
+.chg-pos { color: var(--pos-500); } .chg-neg { color: var(--neg-500); }
+</style>
+{% endblock %}
+
+
+{# One renderer for both cards: the two brokers are normalised to the same
+   account shape upstream, so the page has no reason to know which is which.
+   Day P&L is None for an aggregated account — no start-of-day mark exists —
+   and prints as an em dash rather than a confident zero. #}
+{% macro money(v, signed=False) -%}
+  {%- if v is none -%}—{%- elif signed -%}{{ '{:+,.2f}'.format(v) }}{%- else -%}${{ '{:,.2f}'.format(v) }}{%- endif -%}
+{%- endmacro %}
+
+{% macro broker_stats(data) %}
+  <div class="bk-stats">
+    <div class="bk-stat"><div class="bk-stat-lbl">Total value</div><div class="bk-stat-val">{{ money(data.total_value) }}</div></div>
+    <div class="bk-stat"><div class="bk-stat-lbl">Buying power</div><div class="bk-stat-val">{{ money(data.buying_power) }}</div></div>
+    <div class="bk-stat"><div class="bk-stat-lbl">Day P&amp;L</div>
+      <div class="bk-stat-val {{ 'chg-pos' if (data.daily_pnl or 0) > 0 else ('chg-neg' if (data.daily_pnl or 0) < 0 else '') }}">{{ money(data.daily_pnl, True) }}</div></div>
+    <div class="bk-stat"><div class="bk-stat-lbl">Open P&amp;L</div>
+      <div class="bk-stat-val {{ 'chg-pos' if (data.total_unrealized or 0) > 0 else ('chg-neg' if (data.total_unrealized or 0) < 0 else '') }}">{{ money(data.total_unrealized, True) }}</div></div>
+    <div class="bk-stat"><div class="bk-stat-lbl">Positions</div><div class="bk-stat-val">{{ data.open_positions }}</div></div>
+  </div>
+
+  {% for acct in data.accounts %}
+  <div class="bk-acct">
+    <div class="bk-acct-hd">
+      <span class="bk-acct-name">{{ acct.institution or 'Account' }}{% if acct.account_type %} · {{ acct.account_type }}{% endif %}</span>
+      <span class="bk-acct-meta">
+        {%- if acct.account_number %}···{{ acct.account_number[-4:] }} · {% endif -%}
+        {{ money(acct.total_value) }}
+      </span>
+    </div>
+    {% if acct.positions %}
+    <table class="bk-table">
+      <thead><tr><th>Symbol</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">Last</th><th class="num">Value</th><th class="num">Open P&amp;L</th></tr></thead>
+      <tbody>
+        {% for p in acct.positions %}
+        <tr>
+          <td class="bk-sym">{{ p.symbol }}{% if p.asset_type == 'OPTION' %} <span class="bk-acct-meta">{{ p.option_type }} {{ p.strike_price }} {{ p.expiration_date }}</span>{% endif %}</td>
+          <td class="num">{{ '{:,.4g}'.format(p.quantity) }}</td>
+          <td class="num">{{ money(p.avg_price) }}</td>
+          <td class="num">{{ money(p.last_price) }}</td>
+          <td class="num">{{ money(p.market_value) }}</td>
+          <td class="num {{ 'chg-pos' if p.unrealized > 0 else ('chg-neg' if p.unrealized < 0 else '') }}">{{ money(p.unrealized, True) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="bk-acct-meta">No open positions.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+{% endmacro %}
+
+{% block content %}
+<div class="bk">
+
+  <div class="bk-head">
+    <h1>Brokerages</h1>
+    <p>Read-only connections. Balances, positions and orders come in; no order
+       ever goes out from here. Disconnecting revokes this app's access.</p>
+  </div>
+
+  <!-- ══════════ Schwab — direct ══════════ -->
+  <section class="bk-card">
+    <div class="bk-card-hd">
+      <div>
+        <h2 class="bk-name">Charles Schwab</h2>
+        <span class="bk-via">direct · Schwab Trader API</span>
+      </div>
+      <span class="bk-pill {{ 'on' if schwab_status.connected }}">
+        {{ 'Connected' if schwab_status.connected else 'Not connected' }}
+      </span>
+    </div>
+    <div class="bk-body">
+      {% if schwab_data and schwab_data.connected %}
+        {{ broker_stats(schwab_data) }}
+      {% endif %}
+      <div class="bk-actions">
+        <a class="bk-btn {{ 'ghost' if schwab_status.connected }}" href="{{ url_for('schwab_account') }}">
+          {{ 'Open Schwab account' if schwab_status.connected else 'Connect Schwab' }}
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ SnapTrade — Robinhood and the rest ══════════ -->
+  <section class="bk-card">
+    <div class="bk-card-hd">
+      <div>
+        <h2 class="bk-name">Robinhood &amp; others</h2>
+        <span class="bk-via">via SnapTrade</span>
+      </div>
+      <span class="bk-pill {{ 'on' if snap_status.connected }}">
+        {{ 'Connected' if snap_status.connected else 'Not connected' }}
+      </span>
+    </div>
+    <div class="bk-body">
+
+      {% if snap_data and snap_data.error %}
+      <div class="bk-err">{{ snap_data.error }}</div>
+      {% endif %}
+
+      {% if not snap_status.configured %}
+        <p>Robinhood publishes no brokerage API of its own — its only official
+           programmatic surface is crypto. The supported way to read a
+           Robinhood account is SnapTrade, an aggregator that holds the broker
+           relationships. You sign in on Robinhood's own page; this app never
+           sees a Robinhood password.</p>
+        <p>To switch it on, create an app at
+           <a href="https://dashboard.snaptrade.com" target="_blank" rel="noopener noreferrer">dashboard.snaptrade.com</a>
+           — the free tier covers five connected accounts — and set
+           <code>SNAPTRADE_CLIENT_ID</code> and
+           <code>SNAPTRADE_CONSUMER_KEY</code> in the environment.</p>
+        <p class="bk-note">Robinhood through SnapTrade is read-only: positions,
+           balances and order history. Placing trades is not available for
+           Robinhood on any third-party integration.</p>
+
+      {% elif not snap_status.connected %}
+        <p>Connect a brokerage account. You'll be handed to SnapTrade's
+           connection page, then to your broker's own login — no credential is
+           typed into Tradestaar.</p>
+        <div class="bk-actions">
+          <a class="bk-btn" href="{{ url_for('snaptrade_connect', broker='ROBINHOOD') }}">Connect Robinhood</a>
+          <a class="bk-btn ghost" href="{{ url_for('snaptrade_connect') }}">Choose another brokerage</a>
+        </div>
+
+      {% else %}
+        {% if snap_data %}{{ broker_stats(snap_data) }}{% endif %}
+        <div class="bk-actions">
+          <a class="bk-btn ghost" href="{{ url_for('snaptrade_connect') }}">Link another account</a>
+          <form method="post" action="{{ url_for('snaptrade_disconnect') }}" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="bk-btn ghost">Disconnect all</button>
+          </form>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+</div>
+{% endblock %}

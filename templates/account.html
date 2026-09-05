@@ -105,7 +105,23 @@
 
 <div class="card app-preferences-card"><div class="card-hd">App Preferences<span class="badge badge-info">Saved on this device</span></div><div class="card-bd app-preferences-grid"><div><div class="hi" style="font-size:14px;font-weight:700">Default market chart</div><div class="faint" style="font-size:12px;margin-top:4px">Your choice stays selected when you return to the Terminal.</div></div><div class="preference-segment" role="group" aria-label="Default chart type"><button type="button" data-chart-preference="area">Area</button><button type="button" data-chart-preference="candles">Candles</button></div><a class="btn btn-outline btn-sm" href="{{ url_for('risk_settings') }}">Trading &amp; Risk Settings</a></div></div>
 
-<div class="card"><div class="card-hd">Broker Connection</div><div class="card-bd">{% if connected %}<div class="between" style="padding:16px;background:var(--surface-inset);border:1px solid rgba(34,197,139,.3);border-radius:var(--r-md)"><div class="row gap-3"><div style="width:38px;height:38px;border-radius:var(--r-md);background:rgba(34,197,139,.14);display:flex;align-items:center;justify-content:center;color:var(--pos-500)">✓</div><div class="col"><span class="hi" style="font-weight:600;font-size:14px">Charles Schwab</span><span class="faint" style="font-size:12px">Connected · live balances, positions &amp; fills</span></div></div><a class="btn btn-ghost btn-sm" href="{{ url_for('schwab_account') }}">Manage</a></div>{% else %}<div class="between" style="padding:16px;background:var(--surface-inset);border:1px dashed var(--border-strong);border-radius:var(--r-md)"><div class="row gap-3"><div style="width:38px;height:38px;border-radius:var(--r-md);background:var(--surface-raised);display:flex;align-items:center;justify-content:center;color:var(--text-faint)">○</div><div class="col"><span class="hi" style="font-weight:600;font-size:14px">Charles Schwab</span><span class="faint" style="font-size:12px">Not connected · manual entry only</span></div></div><a class="btn btn-primary btn-sm" href="{{ url_for('schwab_account') }}">Connect</a></div>{% endif %}</div></div>
+<div class="card"><div class="card-hd">Broker Connections</div><div class="card-bd">
+  {% macro broker_row(name, sub, is_on, href) %}
+  <div class="between" style="padding:16px;background:var(--surface-inset);border:1px {{ 'solid rgba(34,197,139,.3)' if is_on else 'dashed var(--border-strong)' }};border-radius:var(--r-md);margin-bottom:10px">
+    <div class="row gap-3">
+      <div style="width:38px;height:38px;border-radius:var(--r-md);background:{{ 'rgba(34,197,139,.14)' if is_on else 'var(--surface-raised)' }};display:flex;align-items:center;justify-content:center;color:{{ 'var(--pos-500)' if is_on else 'var(--text-faint)' }}">{{ '✓' if is_on else '○' }}</div>
+      <div class="col"><span class="hi" style="font-weight:600;font-size:14px">{{ name }}</span><span class="faint" style="font-size:12px">{{ sub }}</span></div>
+    </div>
+    <a class="btn {{ 'btn-ghost' if is_on else 'btn-primary' }} btn-sm" href="{{ href }}">{{ 'Manage' if is_on else 'Connect' }}</a>
+  </div>
+  {% endmacro %}
+  {{ broker_row('Charles Schwab',
+                'Connected · live balances, positions & fills' if connected else 'Not connected · manual entry only',
+                connected, url_for('schwab_account')) }}
+  {{ broker_row('Robinhood & others',
+                'Connected via SnapTrade · read-only' if snap_connected else 'Not connected · read-only via SnapTrade',
+                snap_connected, url_for('brokers_page')) }}
+</div></div>
 
 <div class="faint" style="font-size:11px;line-height:1.6">Live broker balances and positions are read-only. Position <b class="muted">Grade</b> badges remain <span class="mono">—</span> until scanner grades are joined to broker holdings.</div>
 {% endblock %}
