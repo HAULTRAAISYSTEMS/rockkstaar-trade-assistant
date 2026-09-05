@@ -35,6 +35,14 @@ class TestTheLayout:
         assert TEMPLATE.count("tw-chip-spy") == 2       # the element, and the JS
         assert TEMPLATE.count("tw-chip-vix") == 2
 
+    def test_the_pill_does_not_repeat_the_navigations_market_badge(self):
+        """The nav already says MARKET CLOSED; twice, inches apart, is clutter.
+
+        This pill is about the quotes below it, so it names them.
+        """
+        assert _app.SESSION_LABELS["closed"] == "At the close"
+        assert "Market closed" not in _app.SESSION_LABELS.values()
+
     def test_the_page_says_whether_the_tape_is_moving(self):
         assert 'id="tw-live"' in TEMPLATE
         assert 'data-session="{{ market_session }}"' in TEMPLATE
@@ -113,3 +121,29 @@ class TestTheQuotesEndpoint:
 
     def test_the_page_renders(self, client):
         assert client.get("/terminal").status_code == 200
+
+
+class TestTodaysSetups:
+    """A row of four dashes is not a setup."""
+
+    def _panel(self, ranked):
+        """The filter the Terminal applies before it takes the top three."""
+        return [
+            s for s in ranked
+            if (s.get("entry_zone_display") or "—") != "—" and s.get("stop_level")
+        ]
+
+    def test_a_plan_with_no_levels_is_not_shown(self):
+        ranked = [{"ticker": "SPY", "entry_zone_display": "—", "stop_level": None}]
+        assert self._panel(ranked) == []
+
+    def test_a_plan_with_an_entry_but_no_stop_is_not_shown(self):
+        """Half a plan is worse than none — there is nothing to risk against."""
+        ranked = [{"ticker": "MU", "entry_zone_display": "$88.10 – $89.40",
+                   "stop_level": None}]
+        assert self._panel(ranked) == []
+
+    def test_a_real_plan_survives(self):
+        row = {"ticker": "AMD", "entry_zone_display": "$477.00 – $479.50",
+               "stop_level": 468.0}
+        assert self._panel([row]) == [row]

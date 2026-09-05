@@ -4887,8 +4887,12 @@ def terminal():
     except Exception as _ae:
         logger.debug("terminal: schwab account fetch skipped: %s", _ae)
     # Today's Setups panel — top 3 by grade then swing score (display only)
+    tradeable = [
+        s for s in ranked
+        if (s.get("entry_zone_display") or "—") != "—" and s.get("stop_level")
+    ]
     today_setups = sorted(
-        ranked,
+        tradeable,
         key=lambda s: (_ugrade_info(s.get("swing_grade"))[1], s.get("swing_score") or 0),
         reverse=True,
     )[:3]
@@ -4909,7 +4913,7 @@ def terminal():
         win_rate=win_rate,
         today_setups=today_setups,
         market_session=_session,
-        market_session_label=SESSION_LABELS.get(_session, "Market closed"),
+        market_session_label=SESSION_LABELS.get(_session, "At the close"),
     )
 
 
@@ -4942,7 +4946,7 @@ SESSION_LABELS = {
     "pre_market":  "Pre-market",
     "regular":     "Live",
     "after_hours": "After hours",
-    "closed":      "Market closed",
+    "closed":      "At the close",
 }
 
 
@@ -5007,7 +5011,7 @@ def api_terminal_quotes():
         "quotes": rows,
         "chips": chips,
         "session": _session,
-        "session_label": SESSION_LABELS.get(_session, "Market closed"),
+        "session_label": SESSION_LABELS.get(_session, "At the close"),
         "server_time": _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
     })
 
