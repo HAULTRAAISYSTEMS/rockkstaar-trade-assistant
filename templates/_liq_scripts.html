@@ -606,7 +606,10 @@ document.addEventListener('DOMContentLoaded', () => {
   runScan();
   loadAlerts();
   loadAIBrief(false);
-  fetch('/api/opportunity/refresh', {method:'POST'}).catch(()=>{});
+  // Warming the scan is only worth a request on the page that shows it.
+  if (document.getElementById('liq-scan-content')) {
+    fetch('/api/opportunity/refresh', {method:'POST'}).catch(()=>{});
+  }
 });
 
 /* ─────────────────────────────────────────────────────────────
@@ -743,10 +746,15 @@ async function loadLiquidity() {
 }
 
 function renderLiquidityStatus(d) {
+  // The Fed liquidity panel lives on the macro page. The command centre loads
+  // the same data for its risk meter and its headline, so this renderer has to
+  // stand down rather than throw and take the rest of the load with it.
+  const badge = document.getElementById('liq-status-badge');
+  if (!badge) return;
+
   const loading = d.is_loading || false;
 
   // Badge
-  const badge = document.getElementById('liq-status-badge');
   badge.textContent  = d.status_label || d.status;
   badge.className    = 'liq-badge ' + ({RISK_ON:'liq-badge-risk-on',NEUTRAL:'liq-badge-neutral',RISK_OFF:'liq-badge-risk-off'}[d.status] || 'liq-badge-neutral');
 
@@ -926,6 +934,7 @@ function renderRiskMeter(d) {
     </div>`;
   }
 
+  if (!grid) return;                 // meter is drawn; the tables are elsewhere
   grid.innerHTML = [
     yieldRow('10Y Yield',     yc.y10 != null ? yc.y10 + '%' : null,     yc.y10_arrow, '', yc.data_as_of),
     yieldRow('2Y Yield',      yc.y2  != null ? yc.y2  + '%' : null,     yc.y2_arrow,  '', yc.data_as_of),
@@ -935,7 +944,7 @@ function renderRiskMeter(d) {
 
   // Regime box
   const regime = document.getElementById('liq-regime-box');
-  if (d.status) {
+  if (regime && d.status) {
     regime.innerHTML = `
       <div class="reg-label">${d.status_label || d.status}</div>
       <div class="reg-signal">${d.summary || ''}</div>
@@ -948,6 +957,7 @@ function renderRiskMeter(d) {
    2. MONEY FLOW
 ───────────────────────────────────────────────────────────── */
 async function loadMoneyFlow() {
+  if (!document.getElementById('liq-flow-grid')) return;   // panel is elsewhere
   try {
     const r = await fetch('/api/liquidity/money-flow');
     const d = await r.json();
@@ -958,6 +968,7 @@ async function loadMoneyFlow() {
 
 function renderMoneyFlow(mflow) {
   const grid = document.getElementById('liq-flow-grid');
+  if (!grid) return;
   if (!mflow.length) { grid.innerHTML = '<div class="liq-fred-loading">No flow data yet — fetching…</div>'; return; }
   grid.innerHTML = mflow.map(f => {
     const chg1d = f.chg_1d != null ? `<div class="liq-flow-chg ${f.chg_1d >= 0 ? 'pos':'neg'}">${f.chg_1d >= 0 ? '+' : ''}${f.chg_1d}% today</div>` : '';
@@ -977,7 +988,11 @@ function renderMoneyFlow(mflow) {
    3. OPPORTUNITY SCAN
 ───────────────────────────────────────────────────────────── */
 async function runScan() {
-  const extra = document.getElementById('extra-tickers-input').value.trim();
+  // The scanner is a macro-page panel. Reading its input on a page that does
+  // not have it threw an uncaught TypeError on every refresh cycle.
+  if (!document.getElementById('liq-scan-content')) return;
+  const input = document.getElementById('extra-tickers-input');
+  const extra = input ? input.value.trim() : '';
   const url   = `/api/opportunity/scan?mode=${_mode}${extra ? '&tickers='+encodeURIComponent(extra) : ''}`;
   panelEl('scan-sub').textContent = 'Scanning…';
   try {
@@ -1006,6 +1021,7 @@ function showTab(tab) {
 function renderScanTab(tab) {
   if (!_scanData) return;
   const content = document.getElementById('liq-scan-content');
+  if (!content) return;
   let rows = [];
   if      (tab === 'hidden_gems') rows = _scanData.hidden_gems    || [];
   else if (tab === 'accumulate')  rows = _scanData.accumulate     || [];
@@ -1177,6 +1193,7 @@ function renderReport(d) {
    6. OPPORTUNITY ALERTS
 ───────────────────────────────────────────────────────────── */
 async function loadAlerts() {
+  if (!document.getElementById('liq-opp-alerts-list')) return;
   try {
     const r = await fetch('/api/opportunity/alerts');
     const d = await r.json();
@@ -1184,6 +1201,7 @@ async function loadAlerts() {
     const alerts = d.alerts || [];
     panelEl('opp-alert-count').textContent = alerts.length;
     const list = document.getElementById('liq-opp-alerts-list');
+    if (!list) return;
     if (!alerts.length) {
       list.innerHTML = '<div class="liq-fred-loading">No active alerts.</div>';
       return;
