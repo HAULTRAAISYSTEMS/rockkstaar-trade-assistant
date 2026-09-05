@@ -19,7 +19,7 @@ import contextlib
 import logging
 import os
 import threading
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -1804,10 +1804,68 @@ def fetch_swing_data(ticker: str) -> dict | None:
         return None
 
 
-def fetch_news_headlines(ticker: str) -> tuple[str, list[str]]:
+def _news_item(raw: dict) -> dict | None:
+    """One story, keeping the parts that make it verifiable.
+
+    The provider returns a publisher, a link and a publish time with every
+    story, and this function used to keep only the title. Everything
+    downstream then showed headlines with no source, no date and nothing to
+    click — a headline you cannot attribute or go and read is barely news at
+    all. yfinance moved these fields under a "content" key in later versions,
+    so both shapes are read.
+    """
+    if not isinstance(raw, dict):
+        return None
+    body = raw.get("content") if isinstance(raw.get("content"), dict) else raw
+    title = str(body.get("title") or raw.get("title") or "").strip()
+    if not title:
+        return None
+
+    provider = body.get("provider")
+    source = ""
+    if isinstance(provider, dict):
+        source = str(provider.get("displayName") or "").strip()
+    source = source or str(body.get("publisher") or raw.get("publisher") or "").strip()
+
+    url = ""
+    for candidate in (body.get("canonicalUrl"), body.get("clickThroughUrl"),
+                      body.get("link"), raw.get("link")):
+        if isinstance(candidate, dict):
+            candidate = candidate.get("url")
+        if candidate:
+            url = str(candidate).strip()
+            break
+
+    published = str(body.get("pubDate") or body.get("displayTime") or "").strip()
+    if not published:
+        stamp = raw.get("providerPublishTime") or body.get("providerPublishTime")
+        try:
+            published = datetime.fromtimestamp(
+                int(stamp), tz=timezone.utc).strftime("%Y-%m-%d") if stamp else ""
+        except (TypeError, ValueError, OSError, OverflowError):
+            # A nonsense timestamp is a missing date, not a crashed fetch.
+            published = ""
+
+    return {"headline": title, "source": source, "url": url, "published": published}
+
+
+def headline_text(item) -> str:
+    """The headline out of either shape.
+
+    Rows stored before this change are bare strings, and they stay in the
+    database until the ticker is next refreshed, so every consumer has to read
+    both.
+    """
+    if isinstance(item, dict):
+        return str(item.get("headline") or "").strip()
+    return str(item or "").strip()
+
+
+def fetch_news_headlines(ticker: str) -> tuple[str, list]:
     """
     Attempt to pull recent news headlines for an unknown ticker via yfinance.
-    Returns (catalyst_summary, headlines_list).
+    Returns (catalyst_summary, headlines_list) where each headline is a dict
+    carrying its source, link and publish date.
     Falls back to placeholder strings if unavailable.
     """
     if not _YF_AVAILABLE:
@@ -1820,8 +1878,9 @@ def fetch_news_headlines(ticker: str) -> tuple[str, list[str]]:
         t = yf.Ticker(ticker, session=_get_yf_session())
         news = t.news  # list of dicts with 'title', 'publisher', etc.
         if news:
-            headlines = [item.get("title", "") for item in news[:5] if item.get("title")]
-            summary = headlines[0] if headlines else "Recent news activity — see headlines."
+            headlines = [item for item in (_news_item(row) for row in news[:5]) if item]
+            summary = (headlines[0]["headline"] if headlines
+                       else "Recent news activity — see headlines.")
             return summary, headlines
     except Exception as e:
         logger.debug("News fetch failed for %s: %s", ticker, e)

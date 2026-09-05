@@ -5538,8 +5538,19 @@ def api_earnings_digest():
             WATCH_TICKERS,
         ).fetchall()
         conn.close()
+        from data_fetcher import headline_text as _headline_text
         for r in rows:
-            earnings_info.append(dict(r))
+            row = dict(r)
+            # Headlines are stored as JSON and may be bare strings or records.
+            # The prompt wants the text either way, not a dict repr.
+            try:
+                import json as _json
+                parsed = _json.loads(row.get("news_headlines") or "[]")
+                row["news_headlines"] = [_headline_text(h) for h in parsed
+                                         if _headline_text(h)]
+            except Exception:
+                row["news_headlines"] = []
+            earnings_info.append(row)
     except Exception as exc:
         logger.debug("api_earnings_digest: db lookup failed: %s", exc)
 

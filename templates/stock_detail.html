@@ -937,8 +937,21 @@
           {% endif %}
         </h3>
         <ul class="headlines-list" id="detail-headlines-list">
+          {# Rows written before headlines carried their metadata are bare
+             strings, and they stay that way until the ticker next refreshes,
+             so both shapes have to render. #}
           {% for headline in stock.news_headlines %}
+          {% if headline is mapping %}
+          <li>
+            {% if headline.url %}<a href="{{ headline.url }}" target="_blank" rel="noopener noreferrer">{{ headline.headline }}</a>
+            {% else %}{{ headline.headline }}{% endif %}
+            {% if headline.source or headline.published %}
+            <span class="headline-meta">{{ [headline.source, headline.published] | select | join(' · ') }}</span>
+            {% endif %}
+          </li>
+          {% else %}
           <li>{{ headline }}</li>
+          {% endif %}
           {% else %}
           <li class="no-data">No headlines available — set FINNHUB_API_KEY, NEWS_API_KEY, or POLYGON_API_KEY.</li>
           {% endfor %}
