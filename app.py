@@ -5282,6 +5282,86 @@ def _generate_nebius_briefing(market_data_text: str) -> dict:
     return _j.loads(response.choices[0].message.content)
 
 
+# A briefing older than this is written before most of the session happened,
+# so it is shown as a record of the morning rather than as a current read.
+BRIEFING_STALE_MINUTES = 180
+
+
+def _age_briefing(briefing: dict) -> dict:
+    """Tell the reader when the briefing was written and whether it still holds.
+
+    The briefing is generated once per ET day, which is a sensible way to spend
+    one model call. What was not sensible was rendering it with only a date, so
+    a read written at 4am sat under a live market story all day — one saying
+    RISK ON above the fold and the other RISK OFF below it, with different VIX
+    values and opposite claims about the 20 EMA, and nothing on the page to say
+    which was fresher.
+
+    Nothing here regenerates it. It reports the age, and where the live regime
+    now disagrees with what the briefing concluded, it says so plainly instead
+    of leaving the reader to notice two contradictory panels.
+    """
+    written = briefing.get("generated_at") or ""
+    age_minutes = None
+    if written:
+        try:
+            stamp = datetime.fromisoformat(str(written))
+            now = _et_now()
+            # Stamps written before this change are naive; _et_now() may be
+            # aware. Subtracting one from the other raises, and the age then
+            # silently came back as unknown — which is the state this was
+            # meant to fix.
+            if stamp.tzinfo and not now.tzinfo:
+                stamp = stamp.replace(tzinfo=None)
+            elif now.tzinfo and not stamp.tzinfo:
+                stamp = stamp.replace(tzinfo=now.tzinfo)
+            age_minutes = max(0, int((now - stamp).total_seconds() // 60))
+        except (TypeError, ValueError):
+            age_minutes = None
+
+    briefing["age_minutes"] = age_minutes
+    briefing["stale"] = bool(age_minutes is not None
+                             and age_minutes > BRIEFING_STALE_MINUTES)
+    briefing["written_label"] = ""
+    if written:
+        try:
+            briefing["written_label"] = datetime.fromisoformat(
+                str(written)).strftime("%-I:%M %p ET")
+        except (TypeError, ValueError):
+            briefing["written_label"] = ""
+
+    briefing["conflict"] = ""
+    try:
+        live = _live_regime_bias()
+        stated = str(briefing.get("macro_bias") or "").lower().replace("-", "_")
+        if live and stated and live != stated and stated in ("risk_on", "risk_off"):
+            when = briefing["written_label"] or "earlier today"
+            briefing["conflict"] = (
+                f"Written at {when}, when the read was "
+                f"{stated.replace('_', ' ')}. The live regime is now "
+                f"{live.replace('_', ' ')}."
+            )
+    except Exception as exc:
+        logger.debug("briefing conflict check failed: %s", exc)
+    return briefing
+
+
+def _live_regime_bias() -> str:
+    """The current regime as risk_on / risk_off / neutral, or "" if unknown."""
+    try:
+        context = _get_mkt_ctx() or {}
+    except Exception:
+        return ""
+    raw = str(context.get("regime") or context.get("market_regime") or "").lower()
+    if not raw:
+        return ""
+    if "risk" in raw and "on" in raw:
+        return "risk_on"
+    if "risk" in raw and "off" in raw:
+        return "risk_off"
+    return "neutral"
+
+
 @app.route("/api/ai_briefing")
 def api_ai_briefing():
     """
@@ -5299,7 +5379,7 @@ def api_ai_briefing():
         if cached:
             cached["cached"] = True
             cached["date"]   = today_et
-            return jsonify({"ok": True, "briefing": cached})
+            return jsonify({"ok": True, "briefing": _age_briefing(cached)})
 
     # Build market data snapshot and call Nebius
     try:
@@ -5312,8 +5392,12 @@ def api_ai_briefing():
         result.setdefault("tickers_flagged", [])
         result["cached"] = False
         result["date"]   = today_et
+        # Stamp the moment, not just the day. One call per day is a reasonable
+        # cost decision; presenting a 4am read at 8pm as though it were current
+        # is not, and that is what a date-only stamp did.
+        result["generated_at"] = _et_now().isoformat()
         save_ai_briefing(today_et, result)
-        return jsonify({"ok": True, "briefing": result})
+        return jsonify({"ok": True, "briefing": _age_briefing(result)})
     except Exception as exc:
         logger.error("api_ai_briefing Nebius call failed: %s", exc, exc_info=True)
         _last_err = str(exc)
@@ -5324,7 +5408,7 @@ def api_ai_briefing():
         fallback["cached"] = True
         fallback["date"]   = today_et
         fallback["error"]  = _last_err
-        return jsonify({"ok": True, "briefing": fallback})
+        return jsonify({"ok": True, "briefing": _age_briefing(fallback)})
 
     return jsonify({
         "ok": False,

@@ -61,6 +61,22 @@
     </div>
   </div>
 
+  <style>
+  /* The briefing is written once in the morning. When it is old, or when the
+     live regime has moved away from what it concluded, the card says so
+     rather than presenting a stale read as a current one. */
+  .ai-brief-time.is-stale { color: #f0b53f }
+  .ai-brief-conflict {
+    margin: 8px 0 0;
+    padding: 7px 9px;
+    border-left: 2px solid #f0b53f;
+    background: rgba(240, 181, 63, .08);
+    border-radius: 0 5px 5px 0;
+    color: #f5f0e6;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  </style>
   <!-- ══ AI MORNING BRIEFING ═════════════════════════════════════════════ -->
   <div class="ai-brief-card" id="ai-brief-card">
     <div class="ai-brief-header">
@@ -74,6 +90,7 @@
       </div>
     </div>
     <div id="ai-brief-body"><div class="ai-brief-skeleton"></div></div>
+    <div class="ai-brief-conflict" id="ai-brief-conflict" style="display:none;"></div>
     <div class="ai-brief-footer">
       <span class="ai-brief-time" id="ai-brief-time">Fetching briefing…</span>
       <button class="ai-brief-refresh" id="ai-brief-refresh-btn" onclick="refreshAIBrief()">↻ Refresh</button>
@@ -566,6 +583,7 @@ document.addEventListener('DOMContentLoaded', () => {
 /* ─────────────────────────────────────────────────────────────
    AI MORNING BRIEFING
 ───────────────────────────────────────────────────────────── */
+/* Styles for the age and conflict line live here beside the renderer. */
 function _escB(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -599,7 +617,24 @@ function loadAIBrief(forceRefresh) {
           `<div class="ai-brief-text">${_escB(b.briefing || 'No briefing available.')}</div>` +
           (chips ? `<div class="ai-brief-tickers"><span style="font-size:.65rem;color:#475569;align-self:center;">Flagged:</span>${chips}</div>` : '');
       }
-      if (time) time.textContent = (b.cached ? 'Cached · ' : 'Generated · ') + (b.date || new Date().toLocaleDateString());
+      // A briefing written at 4am used to render with only a date, so it sat
+      // under a live market story all day looking equally current. Say when it
+      // was written, and where the live regime has since moved away from it,
+      // say that too rather than leaving two contradictory panels on screen.
+      if (time) {
+        var age = b.age_minutes == null ? '' :
+          (b.age_minutes < 60 ? b.age_minutes + 'm ago'
+            : Math.round(b.age_minutes / 60) + 'h ago');
+        time.textContent = (b.written_label
+          ? 'Written ' + b.written_label + (age ? ' · ' + age : '')
+          : (b.cached ? 'Cached · ' : 'Generated · ') + (b.date || ''));
+        time.classList.toggle('is-stale', !!b.stale);
+      }
+      var note = document.getElementById('ai-brief-conflict');
+      if (note) {
+        note.textContent = b.conflict || '';
+        note.style.display = b.conflict ? '' : 'none';
+      }
     })
     .catch(err => {
       if (body) body.innerHTML = `<div class="ai-brief-err">Briefing unavailable — ${_escB(err.message)}</div>`;
