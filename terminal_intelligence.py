@@ -185,8 +185,102 @@ def _earnings_rows(summary: dict, ticker: str) -> list[dict]:
     return matches
 
 
+# How many rows the Fundamentals tab surfaces. Enough to explain a verdict,
+# few enough that the tab stays a summary rather than a second scorecard — the
+# analyzer is one click away and does the full job.
+FUNDAMENTAL_HIGHLIGHTS = 4
+
+
+def _highlight_rank(row: dict) -> tuple:
+    """Order rows by how much they explain the verdict.
+
+    Outright failures first, because they are what cost the points. Then
+    partial credit, which is the interesting middle. Passes only fill the
+    remaining space, and unscored rows never make it — an N/A explains
+    nothing.
+    """
+    passed = row.get("passed")
+    if passed is False:
+        rank = 0
+    elif passed == "partial":
+        rank = 1
+    elif passed is True:
+        rank = 2
+    else:
+        rank = 3
+    # Within a rank, the heavier rows first: two points lost matters more.
+    return (rank, -int(row.get("points") or 0), str(row.get("label") or ""))
+
+
+def summarize_scorecard(scored: dict | None) -> dict:
+    """The Terminal's read on a company's fundamentals.
+
+    The Fundamentals tab used to be a sentence and a link to another page,
+    which is the least useful thing a tab can be — the reader is already
+    looking at the company and the whole scorecard is already computed. This
+    turns it into the verdict, where the points went, and the handful of rows
+    that decided it, each carrying the concept behind it so the tab can teach
+    rather than only report.
+
+    Takes an already-scored card. Nothing here fetches: a Terminal panel that
+    blocks on a cold EDGAR call is worse than one that says it has no data.
+    """
+    if not scored or scored.get("error"):
+        return {"available": False}
+
+    rows = [row for section in (scored.get("sections") or [])
+            for row in (section.get("rows") or [])]
+    if not rows:
+        return {"available": False}
+
+    try:
+        import concepts as _concepts
+    except Exception:
+        _concepts = None
+
+    highlights = []
+    for row in sorted(rows, key=_highlight_rank)[:FUNDAMENTAL_HIGHLIGHTS]:
+        if row.get("passed") is None:
+            continue
+        concept = _concepts.for_row(row.get("key", "")) if _concepts else None
+        highlights.append({
+            "key": row.get("key"),
+            "label": row.get("label"),
+            "value": row.get("value"),
+            "working": row.get("working"),
+            "passed": row.get("passed"),
+            "earned": row.get("earned"),
+            "points": row.get("points"),
+            "concept": concept["slug"] if concept else "",
+            "concept_name": concept["name"] if concept else "",
+            "one_liner": concept["one_liner"] if concept else "",
+        })
+
+    return {
+        "available": True,
+        "verdict": _text(scored.get("verdict")),
+        "verdict_class": _text(scored.get("verdict_class")),
+        "verdict_reason": _text(scored.get("verdict_reason")),
+        "earned": scored.get("total_earned"),
+        "possible": scored.get("total_possible"),
+        "currency": _text(scored.get("currency")) or "USD",
+        "coverage_note": _text(scored.get("coverage_note")),
+        "sections": [
+            {"name": _text(section.get("name")),
+             "earned": section.get("earned"),
+             "possible": section.get("possible")}
+            for section in (scored.get("sections") or [])
+        ],
+        "red_flags": [_text(flag.get("label"))
+                      for flag in (scored.get("red_flags") or [])][:3],
+        "highlights": highlights,
+        "as_of": _text(scored.get("last_updated") or scored.get("fetched_at")),
+    }
+
+
 def build_terminal_intelligence(ticker: str, stock: dict | None, intel_summary: dict | None,
-                                ai_configured: bool = False) -> dict:
+                                ai_configured: bool = False,
+                                scored: dict | None = None) -> dict:
     """Build the fast, provider-free portion of the Terminal intelligence UI."""
     ticker = _ticker(ticker)
     stock = stock or {}
@@ -245,13 +339,21 @@ def build_terminal_intelligence(ticker: str, stock: dict | None, intel_summary: 
         "daily_trend": _text(stock.get("daily_trend")),
         "last_updated": _text(stock.get("last_updated")),
     }
+    scorecard = summarize_scorecard(scored)
     fundamentals = {
         "sector": _text(stock.get("company_sector") or stock.get("sector_name") or stock.get("sector_etf")),
         "industry": _text(stock.get("company_industry")),
         "relative_strength": stock.get("rs_score"),
         "trend": _text(stock.get("daily_trend")),
         "available_in_analyzer": True,
-        "message": "Open the existing Fundamentals analyzer for source-labelled financial statements and scoring.",
+        "scorecard": scorecard,
+        # The message is now the fallback rather than the whole panel.
+        "message": (
+            "Earnings and balance sheets are not applicable to an ETF."
+            if asset_type == "ETF" else
+            "This company has not been scored yet. Opening the analyzer runs it, "
+            "and the result appears here afterwards."
+        ) if not scorecard.get("available") else "",
     }
     why_moving = overview["catalyst"]
     if not why_moving and news:

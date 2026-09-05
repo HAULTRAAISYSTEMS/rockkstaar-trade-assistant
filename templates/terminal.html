@@ -1236,7 +1236,42 @@ function twRenderIntelligence(data){
   twPanel('news',news?'<div class="tw-intel-list">'+news+'</div>':twEmpty('No ticker-specific headlines are available from the connected news feeds.'));
   var earns=(data.earnings||[]).map(function(row){return '<article class="tw-intel-row"><div><strong>'+twEsc(row.date||'Date unavailable')+' · '+twEsc(row.time||'TBD')+'</strong><div class="tw-intel-meta">EPS est '+twValue(row.eps_est)+' · Revenue est '+twValue(row.revenue_est)+' · '+twEsc(row.source||'app calendar')+'</div></div></article>';}).join('');
   twPanel('earnings',earns?'<div class="tw-intel-list">'+earns+'</div>':twEmpty(data.asset_type==='ETF'?'Earnings are not applicable to an ETF.':'No verified upcoming earnings event is available for this ticker.'));
-  twPanel('fundamentals','<div class="tw-intel-grid"><div class="tw-intel-metric"><span>Sector</span><strong>'+twEsc(f.sector||'—')+'</strong></div><div class="tw-intel-metric"><span>Industry</span><strong>'+twEsc(f.industry||'—')+'</strong></div><div class="tw-intel-metric"><span>Relative strength</span><strong>'+twValue(f.relative_strength)+'</strong></div><div class="tw-intel-metric"><span>Trend</span><strong>'+twEsc(f.trend||'—')+'</strong></div></div><p class="tw-intel-copy">'+twEsc(f.message||'Detailed fundamentals are available in the analyzer.')+' <a class="tw-intel-action" href="'+twEsc(links.fundamentals||'/fundamentals?ticker='+data.ticker)+'">Open Fundamentals →</a></p>');
+  // The Fundamentals tab used to be a sentence and a link to another page,
+  // which is the least useful thing a tab can be — the reader is already
+  // looking at the company and the scorecard is already computed. It now shows
+  // the verdict, where the points went, and the rows that decided it, each
+  // linking to the idea behind it.
+  var sc=f.scorecard||{};
+  if(sc.available){
+    var bars=(sc.sections||[]).filter(function(x){return x.possible>0;}).map(function(x){
+      var pct=Math.round((x.earned/x.possible)*100);
+      return '<div class="tw-fund-sec"><span class="tw-fund-sec-name">'+twEsc(x.name)+'</span>'+
+             '<span class="tw-fund-sec-bar"><i style="width:'+pct+'%"></i></span>'+
+             '<span class="tw-fund-sec-pts">'+x.earned+'/'+x.possible+'</span></div>';
+    }).join('');
+    var rows=(sc.highlights||[]).map(function(h){
+      var mark=h.passed===true?'pass':(h.passed==='partial'?'partial':'fail');
+      var label=h.passed===true?'PASS':(h.passed==='partial'?'PARTIAL':'MISS');
+      var teach=h.concept?'<a class="tw-fund-learn" href="/learn/'+twEsc(h.concept)+'">'+twEsc(h.one_liner||h.concept_name)+' →</a>':'';
+      return '<article class="tw-fund-row is-'+mark+'">'+
+             '<div class="tw-fund-row-top"><span class="tw-fund-mark">'+label+'</span>'+
+             '<strong>'+twEsc(h.label)+'</strong><span class="tw-fund-val">'+twEsc(h.value||'—')+'</span></div>'+
+             (h.working?'<div class="tw-fund-work">'+twEsc(h.working)+'</div>':'')+teach+'</article>';
+    }).join('');
+    var flags=(sc.red_flags||[]).map(function(t){return '<li>'+twEsc(t)+'</li>';}).join('');
+    twPanel('fundamentals',
+      '<div class="tw-fund-head"><span class="tw-fund-verdict '+twEsc(sc.verdict_class||'')+'">'+twEsc(sc.verdict||'—')+'</span>'+
+      '<span class="tw-fund-score">'+twValue(sc.earned)+'<em>/'+twValue(sc.possible)+' pts</em></span></div>'+
+      (sc.verdict_reason?'<p class="tw-intel-copy">'+twEsc(sc.verdict_reason)+'</p>':'')+
+      (sc.coverage_note?'<p class="tw-fund-note">'+twEsc(sc.coverage_note)+'</p>':'')+
+      (sc.currency&&sc.currency!=='USD'?'<p class="tw-fund-note">Figures as filed, in '+twEsc(sc.currency)+'.</p>':'')+
+      '<div class="tw-fund-secs">'+bars+'</div>'+
+      (flags?'<ul class="tw-fund-flags">'+flags+'</ul>':'')+
+      '<div class="tw-fund-rows">'+rows+'</div>'+
+      '<a class="tw-intel-action" href="'+twEsc(links.fundamentals||'/fundamentals?ticker='+data.ticker)+'">Full scorecard →</a>');
+  } else {
+    twPanel('fundamentals','<div class="tw-intel-grid"><div class="tw-intel-metric"><span>Sector</span><strong>'+twEsc(f.sector||'—')+'</strong></div><div class="tw-intel-metric"><span>Industry</span><strong>'+twEsc(f.industry||'—')+'</strong></div><div class="tw-intel-metric"><span>Relative strength</span><strong>'+twValue(f.relative_strength)+'</strong></div><div class="tw-intel-metric"><span>Trend</span><strong>'+twEsc(f.trend||'—')+'</strong></div></div><p class="tw-intel-copy">'+twEsc(f.message||'Detailed fundamentals are available in the analyzer.')+' <a class="tw-intel-action" href="'+twEsc(links.fundamentals||'/fundamentals?ticker='+data.ticker)+'">Open Fundamentals →</a></p>');
+  }
   twPanel('ai','<p class="tw-intel-copy">'+twEsc((data.ai||{}).message||'AI context is unavailable.')+'</p><a class="tw-intel-action" href="'+twEsc(links.ai||'/ai')+'">Open Tradestaar AI with '+twEsc(data.ticker)+' →</a>');
   var c=data.context||{}; twNum('tw-context-why',c.why_moving||'No verified catalyst or ticker headline available.');
   twNum('tw-context-rvol',c.relative_volume==null?'—':Number(c.relative_volume).toFixed(2)+'x');

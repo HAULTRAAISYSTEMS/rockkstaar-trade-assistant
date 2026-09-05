@@ -5076,11 +5076,15 @@ def api_terminal_intelligence(ticker):
         summary = {}
 
     from terminal_intelligence import build_terminal_intelligence
+    # Cache-only. The Terminal must not block on a cold EDGAR call, so a
+    # company that has never been analyzed shows a prompt rather than a spinner.
+    _scored = _cached_scorecard(ticker)
     payload = build_terminal_intelligence(
         ticker,
         stock,
         summary,
         ai_configured=bool(os.environ.get("NEBIUS_API_KEY")),
+        scored=_scored,
     )
     payload["links"] = {
         "stock": url_for("stock_detail", ticker=ticker),

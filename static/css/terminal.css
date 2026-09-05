@@ -24,3 +24,70 @@
 .tw-insider-kind{display:inline-block;margin-right:6px;padding:2px 6px;border-radius:4px;font:700 9px var(--font-mono)}.tw-insider-kind.BUY{color:var(--pos-500);background:rgba(34,197,139,.12)}.tw-insider-kind.SELL{color:var(--neg-500);background:rgba(255,77,69,.12)}
 @media(max-width:900px){.tw-context{grid-template-columns:1fr 1fr}.tw-context-wide{grid-column:1/-1}.tw-intel-grid{grid-template-columns:1fr 1fr}.tw-indicators{grid-template-columns:1fr}.tw-study-grid{grid-template-columns:1fr 1fr}.tw-study-group:first-child{grid-row:span 2}}
 @media(max-width:600px){.tw-chart-toolbar{align-items:flex-start;flex-direction:row;flex-wrap:wrap}.tw-interval-wrap{width:100%}.tw-type{width:100%;margin-left:0;justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;padding-bottom:3px}.tw-tool-group{flex:0 0 auto}.tw-tf{width:100%;overflow:auto}.tw-tf-btn{padding:5px 10px}.tw-session-strip{margin-left:12px;margin-right:12px;flex-wrap:wrap}.tw-session-strip small{width:100%;margin-left:0}.tw-study-settings{margin-left:12px;margin-right:12px}.tw-study-grid{grid-template-columns:1fr}.tw-study-group:first-child{grid-row:auto}.tw-draw-status{margin-left:12px;margin-right:12px}.tw-chart{height:300px;margin:0 12px}.tw-ema-legend{margin-left:12px;margin-right:12px}.tw-ema-legend b{font-size:7px}.tw-indicators{margin:8px 12px 0}.tw-indicator-label small{display:none}.tw-ohlcv{padding:12px;gap:7px}.tw-ohlcv .v{font-size:11px}.tw-context{padding:0 12px 14px}.tw-intel-head{align-items:flex-start;padding:15px}.tw-intel-head h3{font-size:16px}.tw-intel-panel{padding:12px}.tw-intel-grid{grid-template-columns:1fr 1fr}.tw-intel-row{grid-template-columns:1fr}.tw-intel-foot{padding:10px 12px}}
+
+/* ── Terminal Fundamentals tab ────────────────────────────────────────────
+   The scorecard, summarised where the reader already is. Each row links to
+   the idea behind it, so the tab teaches rather than only reporting. */
+.tw-fund-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px }
+.tw-fund-verdict {
+  padding: 3px 9px;
+  border: 1px solid var(--elite-border-strong, #2a3038);
+  border-radius: 4px;
+  font: 700 10px/1.6 var(--font-mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.tw-fund-score { color: var(--elite-copy, #f5f0e6); font: 700 20px/1 var(--font-mono) }
+.tw-fund-score em { color: var(--elite-muted, #9aa4b2); font: 400 11px/1 var(--font-mono); font-style: normal }
+.tw-fund-note {
+  margin: 6px 0 0;
+  color: var(--elite-muted, #9aa4b2);
+  font: 400 11px/1.55 var(--font-ui);
+}
+
+.tw-fund-secs { display: grid; gap: 5px; margin: 14px 0 }
+.tw-fund-sec { display: grid; grid-template-columns: 108px 1fr 42px; gap: 9px; align-items: center }
+.tw-fund-sec-name { color: var(--elite-muted, #9aa4b2); font: 500 10px/1.5 var(--font-mono); letter-spacing: .04em }
+.tw-fund-sec-bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,.06); overflow: hidden }
+.tw-fund-sec-bar i { display: block; height: 100%; background: var(--elite-gold, #f0b53f) }
+.tw-fund-sec-pts { color: var(--elite-copy, #f5f0e6); font: 600 10px/1.5 var(--font-mono); text-align: right }
+
+.tw-fund-flags {
+  margin: 0 0 12px;
+  padding-left: 16px;
+  color: var(--warn-500, #f0b53f);
+  font: 400 11.5px/1.6 var(--font-ui);
+}
+
+.tw-fund-rows { display: grid; gap: 7px }
+.tw-fund-row {
+  padding: 9px 11px;
+  border: 1px solid var(--elite-border, #22272e);
+  border-left-width: 2px;
+  border-radius: 0 5px 5px 0;
+  background: rgba(255,255,255,.02);
+}
+.tw-fund-row.is-pass { border-left-color: var(--pos-500, #3fbf7f) }
+.tw-fund-row.is-partial { border-left-color: var(--warn-500, #f0b53f) }
+.tw-fund-row.is-fail { border-left-color: var(--neg-500, #ff5263) }
+.tw-fund-row-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline }
+.tw-fund-row-top strong { flex: 1 1 auto; color: var(--elite-copy, #f5f0e6); font: 600 12.5px/1.4 var(--font-ui) }
+.tw-fund-mark { font: 700 8px/1.7 var(--font-mono); letter-spacing: .1em }
+.is-pass .tw-fund-mark { color: var(--pos-500, #3fbf7f) }
+.is-partial .tw-fund-mark { color: var(--warn-500, #f0b53f) }
+.is-fail .tw-fund-mark { color: var(--neg-500, #ff5263) }
+.tw-fund-val { color: var(--elite-copy, #f5f0e6); font: 700 12px/1.4 var(--font-mono) }
+.tw-fund-work {
+  margin-top: 4px;
+  color: var(--elite-muted, #9aa4b2);
+  font: 400 10.5px/1.55 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.tw-fund-learn {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--elite-gold, #f0b53f);
+  font: 400 11px/1.5 var(--font-ui);
+  text-decoration: none;
+}
+.tw-fund-learn:hover { text-decoration: underline }
