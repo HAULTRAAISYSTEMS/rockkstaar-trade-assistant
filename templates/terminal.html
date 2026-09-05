@@ -1235,7 +1235,16 @@ function twRenderIntelligence(data){
   var news=(data.news||[]).map(function(row){ var title=twEsc(row.headline), href=/^https?:\/\//.test(row.url||'')?'<a href="'+twEsc(row.url)+'" target="_blank" rel="noopener noreferrer">Source ↗</a>':''; return '<article class="tw-intel-row"><div><strong>'+title+'</strong><div class="tw-intel-meta">'+twEsc([row.source,row.published].filter(Boolean).join(' · ')||'Cached app news')+'</div></div>'+href+'</article>'; }).join('');
   twPanel('news',news?'<div class="tw-intel-list">'+news+'</div>':twEmpty('No ticker-specific headlines are available from the connected news feeds.'));
   var earns=(data.earnings||[]).map(function(row){return '<article class="tw-intel-row"><div><strong>'+twEsc(row.date||'Date unavailable')+' · '+twEsc(row.time||'TBD')+'</strong><div class="tw-intel-meta">EPS est '+twValue(row.eps_est)+' · Revenue est '+twValue(row.revenue_est)+' · '+twEsc(row.source||'app calendar')+'</div></div></article>';}).join('');
-  twPanel('earnings',earns?'<div class="tw-intel-list">'+earns+'</div>':twEmpty(data.asset_type==='ETF'?'Earnings are not applicable to an ETF.':'No verified upcoming earnings event is available for this ticker.'));
+  // An empty Earnings tab used to say only that nothing was found. It now
+  // says why nothing is there, and explains what a results release contains —
+  // this is where someone is looking at a company and wondering.
+  var eNote=data.earnings_note||'', eC=data.earnings_concept||{};
+  var eTeach=eC.slug?'<div class="tw-fund-row"><div class="tw-fund-row-top"><strong>What an earnings report is</strong></div>'+
+    '<div class="tw-fund-work">'+twEsc(eC.blurb||'')+'</div>'+
+    '<a class="tw-fund-learn" href="/learn/'+twEsc(eC.slug)+'">Read the full explanation →</a></div>':'';
+  twPanel('earnings',
+    (earns?'<div class="tw-intel-list">'+earns+'</div>':twEmpty(eNote||'No verified upcoming earnings event is available for this ticker.'))
+    +eTeach);
   // The Fundamentals tab used to be a sentence and a link to another page,
   // which is the least useful thing a tab can be — the reader is already
   // looking at the company and the scorecard is already computed. It now shows

@@ -292,19 +292,32 @@ def build_terminal_intelligence(ticker: str, stock: dict | None, intel_summary: 
     company_name = _text(stock.get("company_name") or stock.get("name"))
     asset_type = "ETF" if ticker in etf_tickers or " etf" in company_name.lower() else "EQUITY"
 
-    news = []
-    seen = set()
+    # Two sources feed this. The per-ticker cache stores bare headline strings
+    # with no source, date or link; the market news feed stores full records.
+    # The old loop took the first of each headline it saw and the bare strings
+    # came first, so a story that had a source and a link on one path arrived
+    # with neither — five headlines you could not attribute or go and read.
+    # Both are collected now and the richer record wins.
+    def _detail(row: dict) -> int:
+        return sum(1 for field in ("source", "published", "url") if row.get(field))
+
+    news: list[dict] = []
+    by_headline: dict[str, int] = {}
     for raw in _rows(stock.get("news_headlines")) + _rows(summary.get("market_news") or summary.get("news")):
         row = _news_row(raw, ticker)
         if not row or (row["ticker"] and row["ticker"] != ticker):
             continue
         key = row["headline"].lower()
-        if key in seen:
+        if key in by_headline:
+            existing = news[by_headline[key]]
+            if _detail(row) > _detail(existing):
+                # Same story, better record. Keep its position in the list.
+                news[by_headline[key]] = row
             continue
-        seen.add(key)
+        if len(news) >= 12:
+            continue
+        by_headline[key] = len(news)
         news.append(row)
-        if len(news) == 12:
-            break
 
     earnings = _earnings_rows(summary, ticker)
     if not earnings and _is_upcoming(stock.get("earnings_date")):
@@ -339,6 +352,12 @@ def build_terminal_intelligence(ticker: str, stock: dict | None, intel_summary: 
         "daily_trend": _text(stock.get("daily_trend")),
         "last_updated": _text(stock.get("last_updated")),
     }
+    earnings_note = (
+        "Earnings do not apply to an ETF — it holds companies rather than being one."
+        if asset_type == "ETF" else
+        "No confirmed date yet. Companies usually announce two to four weeks ahead."
+    ) if not earnings else ""
+
     scorecard = summarize_scorecard(scored)
     fundamentals = {
         "sector": _text(stock.get("company_sector") or stock.get("sector_name") or stock.get("sector_etf")),
@@ -367,6 +386,16 @@ def build_terminal_intelligence(ticker: str, stock: dict | None, intel_summary: 
         "overview": overview,
         "news": news,
         "earnings": earnings,
+        # The Terminal is where someone is looking at a company and wondering
+        # what a results release even contains, so the tab points at the idea
+        # rather than assuming it.
+        "earnings_note": earnings_note,
+        "earnings_concept": {
+            "slug": "earnings-report",
+            "blurb": "Read the release in four steps: revenue and EPS against "
+                     "expectations, then guidance, then margins, then the call. "
+                     "The surprise moves the stock, not the number.",
+        },
         "fundamentals": fundamentals,
         "events": events,
         "context": {

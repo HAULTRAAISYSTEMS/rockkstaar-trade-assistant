@@ -159,3 +159,79 @@ class TestTheTemplateRendersIt:
                      "tw-fund-val", "tw-fund-work", "tw-fund-learn",
                      "tw-fund-flags", "tw-fund-note"):
             assert f".{name}" in css, name
+
+
+class TestTheNewsTabCanAttributeItsStories:
+    """Two sources feed it: a per-ticker cache of bare headline strings with no
+    metadata, and a market feed of full records. The old loop kept whichever it
+    saw first and the bare strings came first, so stories arrived with no
+    source, no date and no link."""
+
+    STOCK = {"news_headlines": ["Chips rally on memory demand", "A bare headline"]}
+    FEED = {"market_news": [
+        {"ticker": "NVDA", "headline": "Chips rally on memory demand",
+         "source": "Reuters", "published_at": "2026-09-04",
+         "url": "https://example.com/a"},
+        {"ticker": "NVDA", "headline": "Only in the feed",
+         "source": "Bloomberg", "url": "https://example.com/b"},
+    ]}
+
+    def _news(self):
+        return TI.build_terminal_intelligence("NVDA", self.STOCK, self.FEED)["news"]
+
+    def test_the_richer_record_wins(self):
+        story = next(n for n in self._news()
+                     if n["headline"] == "Chips rally on memory demand")
+        assert story["source"] == "Reuters"
+        assert story["url"] == "https://example.com/a"
+        assert story["published"] == "2026-09-04"
+
+    def test_the_story_keeps_its_original_position(self):
+        assert self._news()[0]["headline"] == "Chips rally on memory demand"
+
+    def test_a_headline_with_no_richer_version_is_still_shown(self):
+        assert any(n["headline"] == "A bare headline" for n in self._news())
+
+    def test_a_story_only_in_the_feed_is_included(self):
+        assert any(n["headline"] == "Only in the feed" for n in self._news())
+
+    def test_nothing_is_duplicated(self):
+        headlines = [n["headline"] for n in self._news()]
+        assert len(headlines) == len(set(headlines))
+
+    def test_the_cap_still_holds(self):
+        many = {"market_news": [
+            {"ticker": "NVDA", "headline": f"Story {i}", "source": "X"}
+            for i in range(30)]}
+        assert len(TI.build_terminal_intelligence("NVDA", {}, many)["news"]) == 12
+
+    def test_a_late_rich_record_upgrades_an_early_one_even_past_the_cap(self):
+        stock = {"news_headlines": [f"Story {i}" for i in range(12)]}
+        feed = {"market_news": [{"ticker": "NVDA", "headline": "Story 0",
+                                 "source": "Reuters", "url": "https://x/a"}]}
+        news = TI.build_terminal_intelligence("NVDA", stock, feed)["news"]
+        assert news[0]["source"] == "Reuters"
+
+
+class TestTheEarningsTabExplainsItself:
+    def test_an_empty_tab_says_why_rather_than_only_that_it_is_empty(self):
+        payload = TI.build_terminal_intelligence("NVDA", {}, {})
+        assert "announce two to four weeks ahead" in payload["earnings_note"]
+
+    def test_an_etf_is_told_earnings_do_not_apply(self):
+        payload = TI.build_terminal_intelligence("SPY", {}, {})
+        assert "ETF" in payload["earnings_note"]
+
+    def test_it_points_at_the_concept(self):
+        payload = TI.build_terminal_intelligence("NVDA", {}, {})
+        assert payload["earnings_concept"]["slug"] == "earnings-report"
+        assert C.get(payload["earnings_concept"]["slug"]) is not None
+
+    def test_the_blurb_says_something_useful(self):
+        blurb = TI.build_terminal_intelligence("NVDA", {}, {})["earnings_concept"]["blurb"]
+        assert "guidance" in blurb and len(blurb) > 80
+
+    def test_the_template_renders_the_explainer(self):
+        page = open("templates/terminal.html").read()
+        assert "earnings_concept" in page
+        assert "What an earnings report is" in page
