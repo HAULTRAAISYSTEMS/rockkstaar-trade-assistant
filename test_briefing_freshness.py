@@ -76,15 +76,16 @@ class TestOlderRowsStillWork:
 
 
 class TestItFlagsAContradiction:
-    def _with_regime(self, monkeypatch, live):
-        monkeypatch.setattr(legacy, "_live_regime_bias", lambda: live)
+    def _with_regime(self, monkeypatch, live, label=None):
+        monkeypatch.setattr(legacy, "_live_regime",
+                            lambda: (live, label or live.replace("_", " ").title()))
 
     def test_a_disagreement_is_stated_plainly(self, monkeypatch):
         self._with_regime(monkeypatch, "risk_on")
         aged = legacy._age_briefing({"macro_bias": "risk_off",
                                      "generated_at": written(16)})
         assert "risk off" in aged["conflict"]
-        assert "risk on" in aged["conflict"]
+        assert "Risk On" in aged["conflict"]
 
     def test_the_note_says_when_the_briefing_was_written(self, monkeypatch):
         self._with_regime(monkeypatch, "risk_on")
@@ -114,7 +115,7 @@ class TestItFlagsAContradiction:
     def test_a_failing_regime_lookup_does_not_break_the_briefing(self, monkeypatch):
         def _boom():
             raise RuntimeError("market context unavailable")
-        monkeypatch.setattr(legacy, "_live_regime_bias", _boom)
+        monkeypatch.setattr(legacy, "_live_regime", _boom)
         aged = legacy._age_briefing({"macro_bias": "risk_off",
                                      "generated_at": written(16)})
         assert aged["conflict"] == ""
@@ -160,7 +161,7 @@ class TestThePageShowsIt:
 
 class TestTheConflictNoteReadsAsASentence:
     def test_with_a_stamp_it_names_the_time(self, monkeypatch):
-        monkeypatch.setattr(legacy, "_live_regime_bias", lambda: "risk_on")
+        monkeypatch.setattr(legacy, "_live_regime", lambda: ("risk_on", "Risk On"))
         note = legacy._age_briefing({"macro_bias": "risk_off",
                                      "generated_at": written(16)})["conflict"]
         assert note.startswith("Written at ")
@@ -168,7 +169,63 @@ class TestTheConflictNoteReadsAsASentence:
 
     def test_without_a_stamp_it_still_reads_properly(self, monkeypatch):
         """"Written at earlier today" is not a sentence."""
-        monkeypatch.setattr(legacy, "_live_regime_bias", lambda: "risk_on")
+        monkeypatch.setattr(legacy, "_live_regime", lambda: ("risk_on", "Risk On"))
         note = legacy._age_briefing({"macro_bias": "risk_off"})["conflict"]
         assert note.startswith("Written earlier today,")
         assert "at earlier" not in note
+
+
+class TestTheNoteUsesThePagesOwnWords:
+    """The strip said Caution, the market story said CAUTION, and the note
+    underneath announced "the live regime is now neutral" — the internal
+    bucket Caution falls into, and a word nothing else on the page used."""
+
+    def _regime(self, monkeypatch, raw):
+        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: {"regime": raw})
+
+    def test_it_names_the_regime_the_reader_can_see(self, monkeypatch):
+        self._regime(monkeypatch, "Caution — Choppy")
+        note = legacy._age_briefing({"macro_bias": "risk_off",
+                                     "generated_at": written(16)})["conflict"]
+        assert "Caution" in note
+        assert "neutral" not in note
+
+    def test_a_softening_is_not_described_as_a_reversal(self, monkeypatch):
+        """Risk-off against a cautious read is the same call having softened."""
+        self._regime(monkeypatch, "Caution — Choppy")
+        note = legacy._age_briefing({"macro_bias": "risk_off",
+                                     "generated_at": written(16)})["conflict"]
+        assert "has since moved to" in note
+        assert "the other way" not in note
+
+    def test_an_actual_reversal_is_described_as_one(self, monkeypatch):
+        self._regime(monkeypatch, "Risk-On")
+        note = legacy._age_briefing({"macro_bias": "risk_off",
+                                     "generated_at": written(16)})["conflict"]
+        assert "reads the other way" in note
+
+    def test_agreement_still_produces_nothing(self, monkeypatch):
+        self._regime(monkeypatch, "Risk-On")
+        assert legacy._age_briefing({"macro_bias": "risk_on",
+                                     "generated_at": written(16)})["conflict"] == ""
+
+
+class TestTheRegimeLabel:
+    @pytest.mark.parametrize("raw,bucket,label", [
+        ("Risk-On", "risk_on", "Risk On"),
+        ("risk_off", "risk_off", "Risk Off"),
+        ("Caution — Choppy", "neutral", "Caution — Choppy"),
+        ("NEUTRAL", "neutral", "Neutral"),
+    ])
+    def test_it_returns_both_a_bucket_and_a_readable_label(self, monkeypatch,
+                                                           raw, bucket, label):
+        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: {"regime": raw})
+        assert legacy._live_regime() == (bucket, label)
+
+    def test_no_context_is_not_a_regime(self, monkeypatch):
+        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: {})
+        assert legacy._live_regime() == ("", "")
+
+    def test_the_bucket_helper_still_answers_for_older_callers(self, monkeypatch):
+        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: {"regime": "Risk-On"})
+        assert legacy._live_regime_bias() == "risk_on"

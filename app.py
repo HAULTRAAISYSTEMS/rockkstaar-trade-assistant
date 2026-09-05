@@ -5332,36 +5332,57 @@ def _age_briefing(briefing: dict) -> dict:
 
     briefing["conflict"] = ""
     try:
-        live = _live_regime_bias()
+        live, live_label = _live_regime()
         stated = str(briefing.get("macro_bias") or "").lower().replace("-", "_")
         if live and stated and live != stated and stated in ("risk_on", "risk_off"):
             # "Written at earlier today" is not a sentence. With a stamp the
             # note names the time; without one it says the day and stops.
             label = briefing["written_label"]
             opening = f"Written at {label}" if label else "Written earlier today"
-            briefing["conflict"] = (
-                f"{opening}, when the read was {stated.replace('_', ' ')}. "
-                f"The live regime is now {live.replace('_', ' ')}."
-            )
+            said = stated.replace("_", " ")
+            # Risk-on against risk-off is a contradiction. Risk-off against a
+            # cautious or neutral read is the same call having softened, and
+            # saying "contradicts" of it would overstate the case.
+            opposed = {"risk_on", "risk_off"} == {live, stated}
+            moved = ("The live regime now reads the other way, "
+                     f"{live_label}." if opposed else
+                     f"The live regime has since moved to {live_label}.")
+            briefing["conflict"] = f"{opening}, when the read was {said}. {moved}"
     except Exception as exc:
         logger.debug("briefing conflict check failed: %s", exc)
     return briefing
 
 
-def _live_regime_bias() -> str:
-    """The current regime as risk_on / risk_off / neutral, or "" if unknown."""
+def _live_regime() -> tuple[str, str]:
+    """The current regime as (bucket, label).
+
+    The bucket is for comparing; the label is what the reader is looking at.
+    Printing the bucket put a fourth word on a page that already had one: the
+    pulse strip said Caution, the market story said CAUTION, and the briefing
+    note underneath announced that "the live regime is now neutral" — which is
+    the internal bucket "Caution" falls into, and a word nothing else on the
+    page uses.
+    """
     try:
         context = _get_mkt_ctx() or {}
     except Exception:
-        return ""
-    raw = str(context.get("regime") or context.get("market_regime") or "").lower()
-    if not raw:
-        return ""
+        return "", ""
+    label = str(context.get("regime") or context.get("market_regime") or "").strip()
+    if not label:
+        return "", ""
+    raw = label.lower()
     if "risk" in raw and "on" in raw:
-        return "risk_on"
-    if "risk" in raw and "off" in raw:
-        return "risk_off"
-    return "neutral"
+        bucket = "risk_on"
+    elif "risk" in raw and "off" in raw:
+        bucket = "risk_off"
+    else:
+        bucket = "neutral"
+    return bucket, label.replace("_", " ").replace("-", " ").title()
+
+
+def _live_regime_bias() -> str:
+    """The regime bucket alone. Kept because the briefing check reads it."""
+    return _live_regime()[0]
 
 
 @app.route("/api/ai_briefing")
