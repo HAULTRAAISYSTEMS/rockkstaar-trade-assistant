@@ -7332,7 +7332,24 @@ def _command_center_context() -> dict:
     feed is cold is worse than one that renders with a gap in it.
     """
     context = {"week": [], "news": [], "setups": [], "watchlist": [],
-               "watchlist_name": ""}
+               "watchlist_name": "", "pulse": {}, "next_up": None}
+
+    # The pulse strip: the four numbers that set the tone for everything under
+    # them, rendered server-side so the top of the page is never a row of
+    # spinners. Same context the market story is written from.
+    try:
+        mkt = _get_mkt_ctx() or {}
+        context["pulse"] = {
+            "regime": mkt.get("regime") or mkt.get("market_regime") or "",
+            "vix": mkt.get("vix_level"),
+            "spy": mkt.get("spy_1d_pct"),
+            "qqq": mkt.get("qqq_1d_pct"),
+            "spy_trend": mkt.get("spy_trend") or "",
+            "qqq_trend": mkt.get("qqq_trend") or "",
+            "leading": (mkt.get("leading_sectors") or [])[:2],
+        }
+    except Exception as exc:
+        logger.debug("command centre: market context unavailable: %s", exc)
 
     summary = {}
     try:
@@ -7350,7 +7367,13 @@ def _command_center_context() -> dict:
     # already merged and sorted by the calendar builder.
     try:
         rows = _build_catalyst_calendar(summary, tickers)
-        context["week"] = [r for r in rows if (r.get("days_away") or 99) <= 7][:COMMAND_WEEK]
+        upcoming = [r for r in rows if (r.get("days_away") or 99) <= 7]
+        context["week"] = upcoming[:COMMAND_WEEK]
+        # The nearest high-impact event, so the strip can count down to the
+        # thing that will actually move the tape rather than to the next row.
+        context["next_up"] = next(
+            (r for r in upcoming if str(r.get("impact", "")).upper() == "HIGH"),
+            upcoming[0] if upcoming else None)
     except Exception as exc:
         logger.debug("command centre: calendar unavailable: %s", exc)
 

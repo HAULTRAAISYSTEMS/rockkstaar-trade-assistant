@@ -130,7 +130,8 @@ class TestOneColdFeedIsAGapNotAnErrorPage:
         monkeypatch.setattr(legacy, "get_active_wl_id", self._blow_up)
         with web_app.app.test_request_context("/opportunity"):
             context = legacy._command_center_context()
-        assert set(context) == {"week", "news", "setups", "watchlist", "watchlist_name"}
+        assert set(context) == {"week", "news", "setups", "watchlist",
+                                "watchlist_name", "pulse", "next_up"}
 
     def test_no_watchlist_is_not_an_error(self, monkeypatch):
         monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: SUMMARY)
@@ -176,11 +177,17 @@ class TestThePage:
 
     def test_every_class_the_sections_use_is_styled(self):
         page = open("templates/liquidity.html").read()
-        for name in ("cc-card", "cc-pair", "cc-head", "cc-empty", "cc-week",
+        for name in ("cc-hero", "cc-eyebrow", "cc-dot", "cc-title",
+                     "cc-pulse", "cc-pulse-cell", "cc-pulse-k", "cc-pulse-v",
+                     "cc-pulse-next", "cc-split", "cc-trio",
+                     "cc-card", "cc-head", "cc-empty", "cc-week",
                      "cc-week-row", "cc-when", "cc-what", "cc-impact",
+                     "cc-story-glow", "cc-story-badges", "cc-chip",
+                     "cc-story-headline", "cc-story-bullets", "cc-story-perms",
                      "cc-news", "cc-news-row", "cc-sym", "cc-tag",
                      "cc-headline", "cc-meta", "cc-why", "cc-rows", "cc-row",
-                     "cc-row-sym", "cc-row-mid", "cc-row-score"):
+                     "cc-row-sym", "cc-row-mid", "cc-row-price", "cc-score",
+                     "cc-rise"):
             assert f".{name}" in page, name
 
 
@@ -278,3 +285,104 @@ class TestWhichWatchlistIsShown:
         """With nine lists the reader should never have to guess which one."""
         page = open("templates/liquidity.html").read()
         assert "watchlist_name" in page
+
+
+class TestTheLayout:
+    """The page opened on a 400px narrative banner and named itself second,
+    then ran a column of identical full-width slabs."""
+
+    PAGE = open("templates/liquidity.html").read()
+
+    def test_the_title_comes_before_the_market_story(self):
+        assert self.PAGE.index("Command Center") < self.PAGE.index("market-story-banner")
+
+    def test_the_header_is_a_band_not_a_card(self):
+        assert "<header class=\"cc-hero\">" in self.PAGE
+        assert "liq-hero" not in self.PAGE
+
+    def test_the_pulse_strip_is_above_the_sections(self):
+        assert self.PAGE.index("cc-pulse") < self.PAGE.index("Today's read")
+
+    def test_the_story_and_the_week_share_a_row(self):
+        assert "cc-split" in self.PAGE
+
+    def test_the_three_lists_share_a_row(self):
+        assert "cc-trio" in self.PAGE
+
+    def test_the_market_story_hooks_survived_the_rearrangement(self):
+        """The banner is populated by JS; renaming its ids would blank it."""
+        for hook in ("market-story-banner", "ms-glow", "ms-sentiment-badge",
+                     "ms-regime-badge", "ms-headline", "ms-bullets",
+                     "ms-permissions"):
+            assert f'id="{hook}"' in self.PAGE, hook
+
+    def test_the_controls_survived(self):
+        for hook in ("setMode('both')", "refreshAll()", 'id="liq-last-updated"'):
+            assert hook in self.PAGE, hook
+
+    def test_nothing_loops_except_the_live_dot_and_loading_skeletons(self):
+        """A page that keeps moving is harder to read a number off. A pulse on
+        the live indicator earns its place; a shimmer on a skeleton stops when
+        the data lands. Anything else is decoration competing with the data."""
+        import re
+        looping = re.findall(r"animation:\s*([a-z-]+)[^;]*infinite", self.PAGE)
+        allowed = {"cc-pulse-dot", "brief-shimmer", "elite-pulse", "liq-shimmer"}
+        assert set(looping) <= allowed, set(looping) - allowed
+
+    def test_reduced_motion_is_honoured(self):
+        assert "prefers-reduced-motion" in self.PAGE
+
+    def test_it_collapses_to_one_column_on_a_phone(self):
+        assert "max-width: 900px" in self.PAGE
+
+
+class TestThePulseStrip:
+    @pytest.fixture
+    def client(self):
+        c = web_app.app.test_client()
+        with c.session_transaction() as sess:
+            sess["user_id"] = 1
+        return c
+
+    def test_it_renders_the_four_tone_setting_numbers(self, client):
+        html = client.get("/").get_data(as_text=True)
+        for label in ("Regime", "VIX", "SPY", "QQQ"):
+            assert f">{label}<" in html
+
+    def test_it_counts_down_to_the_next_event(self, monkeypatch):
+        monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: SUMMARY)
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: None)
+        monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: [])
+        with web_app.app.test_request_context("/opportunity"):
+            context = legacy._command_center_context()
+        assert context["next_up"]["title"].startswith("Consumer Price Index")
+
+    def test_it_prefers_a_high_impact_event_to_the_merely_nearest(self, monkeypatch):
+        summary = {"economic_events": [
+            {"date": "2026-09-06", "date_label": "Sep 6", "time": "9:00 AM ET",
+             "event": "Minor print", "impact": "MEDIUM", "days_away": 1},
+            {"date": "2026-09-08", "date_label": "Sep 8", "time": "8:30 AM ET",
+             "event": "CPI", "impact": "HIGH", "days_away": 3},
+        ]}
+        monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: summary)
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: None)
+        monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: [])
+        with web_app.app.test_request_context("/opportunity"):
+            context = legacy._command_center_context()
+        assert context["next_up"]["title"] == "CPI"
+
+    def test_no_events_means_no_countdown_rather_than_a_guess(self, monkeypatch):
+        monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: {})
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: None)
+        monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: [])
+        with web_app.app.test_request_context("/opportunity"):
+            assert legacy._command_center_context()["next_up"] is None
+
+    def test_a_failing_market_context_leaves_the_strip_blank_not_broken(self, monkeypatch):
+        monkeypatch.setattr(legacy, "_get_mkt_ctx",
+                            lambda: (_ for _ in ()).throw(RuntimeError("x")))
+        monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: {})
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: None)
+        monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: [])
+        with web_app.app.test_request_context("/opportunity"):
+            assert legacy._command_center_context()["pulse"] == {}
