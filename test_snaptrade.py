@@ -363,3 +363,21 @@ class TestTheSummaryEndpoint:
     def test_a_disconnected_user_gets_a_clean_answer(self, client):
         body = client.get("/api/snaptrade/summary").get_json()
         assert body["connected"] is False
+
+
+class TestThePageReadsCleanly:
+    """Small things, on the page a person checks their money on."""
+
+    def test_negative_zero_is_not_printed(self):
+        """Schwab returned -0.00 for a flat day. That is not a number."""
+        from pathlib import Path
+        page = Path("templates/brokers.html").read_text()
+        assert "'{:+,.2f}'.format(v + 0)" in page
+        assert "{:+,.2f}".format(-0.0 + 0) == "+0.00"
+
+    def test_a_schwab_account_is_labelled_schwab_not_account(self):
+        """Schwab's accounts carry no institution name — they are all Schwab."""
+        from pathlib import Path
+        page = Path("templates/brokers.html").read_text()
+        assert "broker_stats(schwab_data, 'Charles Schwab')" in page
+        assert "acct.institution or label" in page

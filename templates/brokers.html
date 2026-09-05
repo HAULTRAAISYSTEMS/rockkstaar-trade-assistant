@@ -51,10 +51,10 @@
    Day P&L is None for an aggregated account — no start-of-day mark exists —
    and prints as an em dash rather than a confident zero. #}
 {% macro money(v, signed=False) -%}
-  {%- if v is none -%}—{%- elif signed -%}{{ '{:+,.2f}'.format(v) }}{%- else -%}${{ '{:,.2f}'.format(v) }}{%- endif -%}
+  {%- if v is none -%}—{%- elif signed -%}{{ '{:+,.2f}'.format(v + 0) }}{%- else -%}${{ '{:,.2f}'.format(v + 0) }}{%- endif -%}
 {%- endmacro %}
 
-{% macro broker_stats(data) %}
+{% macro broker_stats(data, label) %}
   <div class="bk-stats">
     <div class="bk-stat"><div class="bk-stat-lbl">Total value</div><div class="bk-stat-val">{{ money(data.total_value) }}</div></div>
     <div class="bk-stat"><div class="bk-stat-lbl">Buying power</div><div class="bk-stat-val">{{ money(data.buying_power) }}</div></div>
@@ -68,7 +68,7 @@
   {% for acct in data.accounts %}
   <div class="bk-acct">
     <div class="bk-acct-hd">
-      <span class="bk-acct-name">{{ acct.institution or 'Account' }}{% if acct.account_type %} · {{ acct.account_type }}{% endif %}</span>
+      <span class="bk-acct-name">{{ acct.institution or label }}{% if acct.account_type %} · {{ acct.account_type }}{% endif %}</span>
       <span class="bk-acct-meta">
         {%- if acct.account_number %}···{{ acct.account_number[-4:] }} · {% endif -%}
         {{ money(acct.total_value) }}
@@ -119,7 +119,7 @@
     </div>
     <div class="bk-body">
       {% if schwab_data and schwab_data.connected %}
-        {{ broker_stats(schwab_data) }}
+        {{ broker_stats(schwab_data, 'Charles Schwab') }}
       {% endif %}
       <div class="bk-actions">
         <a class="bk-btn {{ 'ghost' if schwab_status.connected }}" href="{{ url_for('schwab_account') }}">
@@ -171,7 +171,7 @@
         </div>
 
       {% else %}
-        {% if snap_data %}{{ broker_stats(snap_data) }}{% endif %}
+        {% if snap_data %}{{ broker_stats(snap_data, 'Brokerage') }}{% endif %}
         <div class="bk-actions">
           <a class="bk-btn ghost" href="{{ url_for('snaptrade_connect') }}">Link another account</a>
           <form method="post" action="{{ url_for('snaptrade_disconnect') }}" style="display:inline">
