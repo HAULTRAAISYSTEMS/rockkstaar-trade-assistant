@@ -7288,6 +7288,38 @@ COMMAND_SETUPS = 5
 COMMAND_WATCHLIST = 8
 
 
+def _command_watchlist() -> tuple[list, str]:
+    """The watchlist worth showing on the landing page, and its name.
+
+    get_active_wl_id() falls back to the first list when the session names
+    none, and several of these lists are automatic buckets that are routinely
+    empty — A+ Ready holds nothing most days. The landing page therefore
+    reported "no tickers on the active watchlist" to a reader with twenty-two
+    names in Buy & Hold and thirty in Trend Watch.
+
+    The active list still wins whenever it has something in it. Only when it is
+    empty does this fall through to the first list that is not, and the page
+    names whichever it settled on so the reader is never guessing which of nine
+    lists they are looking at.
+    """
+    active = get_active_wl_id()
+    tickers = get_watchlist_stocks(active) if active else []
+    lists = get_all_watchlists(current_user_id()) or []
+    names = {row["id"]: row["name"] for row in lists}
+    if tickers:
+        return tickers, names.get(active, "")
+    for row in lists:
+        if row["id"] == active:
+            continue
+        try:
+            found = get_watchlist_stocks(row["id"])
+        except Exception:
+            continue
+        if found:
+            return found, row["name"]
+    return [], names.get(active, "")
+
+
 def _command_center_context() -> dict:
     """The four things the command centre used to link to instead of showing.
 
@@ -7309,8 +7341,7 @@ def _command_center_context() -> dict:
         logger.debug("command centre: intel summary unavailable: %s", exc)
 
     try:
-        active = get_active_wl_id()
-        tickers = get_watchlist_stocks(active) if active else []
+        tickers, context["watchlist_name"] = _command_watchlist()
     except Exception as exc:
         logger.debug("command centre: watchlist unavailable: %s", exc)
         tickers = []

@@ -142,7 +142,7 @@
 
     <div class="cc-card">
       <div class="cc-head">
-        <h2>Watchlist</h2>
+        <h2>Watchlist{% if watchlist_name %} · {{ watchlist_name }}{% endif %}</h2>
         <a href="{{ url_for('watchlists_page') }}">Manage →</a>
       </div>
       {% if watchlist %}

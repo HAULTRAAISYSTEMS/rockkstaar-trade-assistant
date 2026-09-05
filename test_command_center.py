@@ -211,3 +211,70 @@ class TestOneBadTickerDoesNotEmptyTheSection:
         with web_app.app.test_request_context("/opportunity"):
             row = legacy._command_center_context()["watchlist"][0]
         assert row["ticker"] == "BAD" and row["price"] is None and row["setup"] == ""
+
+
+class TestWhichWatchlistIsShown:
+    """The reader has nine lists and several are automatic buckets that sit
+    empty. Defaulting to the first one showed "no tickers" to someone with
+    twenty-two names in another list."""
+
+    LISTS = [
+        {"id": 1, "name": "A+ Ready"},
+        {"id": 2, "name": "Setups Forming"},
+        {"id": 3, "name": "Buy & Hold"},
+    ]
+
+    def _wire(self, monkeypatch, active, contents):
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: active)
+        monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: self.LISTS)
+        monkeypatch.setattr(legacy, "get_watchlist_stocks",
+                            lambda wl: contents.get(wl, []))
+
+    def test_the_active_list_wins_when_it_has_names(self, monkeypatch):
+        self._wire(monkeypatch, 1, {1: ["NVDA"], 3: ["AAPL", "MSFT"]})
+        with web_app.app.test_request_context("/opportunity"):
+            tickers, name = legacy._command_watchlist()
+        assert tickers == ["NVDA"] and name == "A+ Ready"
+
+    def test_an_empty_active_list_falls_through_to_one_with_names(self, monkeypatch):
+        self._wire(monkeypatch, 1, {1: [], 3: ["AAPL", "MSFT"]})
+        with web_app.app.test_request_context("/opportunity"):
+            tickers, name = legacy._command_watchlist()
+        assert tickers == ["AAPL", "MSFT"] and name == "Buy & Hold"
+
+    def test_it_takes_the_first_non_empty_list_predictably(self, monkeypatch):
+        self._wire(monkeypatch, 1, {1: [], 2: ["TSLA"], 3: ["AAPL"]})
+        with web_app.app.test_request_context("/opportunity"):
+            tickers, name = legacy._command_watchlist()
+        assert name == "Setups Forming"
+
+    def test_all_lists_empty_reports_nothing_rather_than_guessing(self, monkeypatch):
+        self._wire(monkeypatch, 1, {})
+        with web_app.app.test_request_context("/opportunity"):
+            tickers, name = legacy._command_watchlist()
+        assert tickers == [] and name == "A+ Ready"
+
+    def test_no_lists_at_all_is_not_an_error(self, monkeypatch):
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: None)
+        monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: [])
+        with web_app.app.test_request_context("/opportunity"):
+            assert legacy._command_watchlist() == ([], "")
+
+    def test_a_list_that_cannot_be_read_is_skipped_not_fatal(self, monkeypatch):
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 1)
+        monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: self.LISTS)
+
+        def _stocks(wl):
+            if wl == 2:
+                raise RuntimeError("unreadable")
+            return {1: [], 3: ["AAPL"]}.get(wl, [])
+
+        monkeypatch.setattr(legacy, "get_watchlist_stocks", _stocks)
+        with web_app.app.test_request_context("/opportunity"):
+            tickers, name = legacy._command_watchlist()
+        assert tickers == ["AAPL"] and name == "Buy & Hold"
+
+    def test_the_page_names_the_list_it_settled_on(self, monkeypatch):
+        """With nine lists the reader should never have to guess which one."""
+        page = open("templates/liquidity.html").read()
+        assert "watchlist_name" in page
