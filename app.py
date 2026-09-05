@@ -3182,16 +3182,14 @@ def account():
     Schwab, Journal, and Risk data sources (no new logic)."""
     uid = current_user_id()
 
-    # Schwab snapshot (buying power, P&L, positions) — live when connected
+    # Every connected brokerage, added up — Schwab direct, the rest through
+    # SnapTrade. One balance, because the money is one balance.
     acct = None
     try:
-        tok = _schwab.token_status(uid)
-        if tok.get("connected"):
-            acct = _get_schwab_data(uid)
-            if acct.get("error"):
-                acct = None
+        combined = _get_portfolio_data(uid)
+        acct = combined if combined.get("connected") else None
     except Exception as _ae:
-        logger.debug("account: schwab fetch skipped: %s", _ae)
+        logger.debug("account: portfolio fetch skipped: %s", _ae)
 
     # Journal performance (same store the Journal page uses)
     entries = get_all_journal_entries(uid)
@@ -4890,17 +4888,16 @@ def terminal():
     except Exception as _we:
         logger.debug("terminal win_rate failed: %s", _we)
 
-       # Schwab account snapshot (buying power, P&L, positions) — live when connected
+    # Account snapshot across every connected brokerage — Schwab direct, the
+    # rest through SnapTrade. The Positions panel below merges them, so each
+    # account carries the broker it came from.
     acct = None
     try:
         uid = current_user_id()
-        tok = _schwab.token_status(uid)
-        if tok.get("connected"):
-            acct = _get_schwab_data(uid)
-            if acct.get("error"):
-                acct = None
+        combined = _get_portfolio_data(uid)
+        acct = combined if combined.get("connected") else None
     except Exception as _ae:
-        logger.debug("terminal: schwab account fetch skipped: %s", _ae)
+        logger.debug("terminal: account fetch skipped: %s", _ae)
     # Today's Setups panel — top 3 by grade then swing score (display only)
     tradeable = [
         s for s in ranked
@@ -6677,6 +6674,21 @@ def _get_snaptrade_data(user_id: int = 1, force: bool = False) -> dict:
         })
 
 
+def _get_portfolio_data(user_id: int = 1, force: bool = False) -> dict:
+    """Every connected brokerage added up, through the same caches.
+
+    portfolio.combine() folds the two per-broker summaries, and those are
+    already cached, so this costs nothing beyond the fold. The alternative —
+    a third cache over the top — would be a third thing that can go stale
+    against the two under it.
+    """
+    import portfolio as _portfolio
+    return _portfolio.combine([
+        ("schwab", "Charles Schwab", _get_schwab_data(user_id, force)),
+        ("snaptrade", "Robinhood & others", _get_snaptrade_data(user_id, force)),
+    ])
+
+
 @app.route("/brokers")
 def brokers_page():
     """One page for every brokerage connection, direct or aggregated."""
@@ -6696,6 +6708,7 @@ def brokers_page():
         schwab_data=schwab_data,
         snap_status=snap_status,
         snap_data=snap_data,
+        combined=_get_portfolio_data(uid),
     )
 
 
@@ -6798,6 +6811,31 @@ def api_snaptrade_summary():
         "total_unrealized": data.get("total_unrealized"),
         "open_positions":   data.get("open_positions"),
         "error":            data.get("error"),
+    })
+
+
+@app.route("/api/portfolio/summary")
+def api_portfolio_summary():
+    """Combined balance across every connected brokerage. Summary fields only."""
+    uid = current_user_id()
+    data = _get_portfolio_data(uid)
+    return jsonify({
+        "connected":         data.get("connected", False),
+        "broker_count":      data.get("broker_count", 0),
+        "total_value":       data.get("total_value"),
+        "buying_power":      data.get("buying_power"),
+        "daily_pnl":         data.get("daily_pnl"),
+        "daily_pnl_partial": data.get("daily_pnl_partial", False),
+        "daily_pnl_label":   data.get("daily_pnl_label"),
+        "total_unrealized":  data.get("total_unrealized"),
+        "open_positions":    data.get("open_positions"),
+        # Per-broker totals, so a caller can show the split without a
+        # second round trip. No account numbers, no tokens.
+        "sources": [
+            {"broker": s.get("broker"), "label": s.get("label"),
+             "connected": s.get("connected"), "total_value": s.get("total_value")}
+            for s in (data.get("sources") or [])
+        ],
     })
 
 

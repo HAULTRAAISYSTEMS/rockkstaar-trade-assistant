@@ -218,8 +218,9 @@
     <span class="tw-chip">VIX <b id="tw-chip-vix">{{ '%.2f'|format(mkt.vix_level) if mkt and mkt.vix_level is not none else '—' }}</b></span>
     <span class="tw-chip">SPY <b id="tw-chip-spy" class="{{ 'chg-pos' if (mkt and (mkt.spy_1d_pct or 0) >= 0) else 'chg-neg' }}">{{ '%+.2f'|format(mkt.spy_1d_pct) ~ '%' if mkt and mkt.spy_1d_pct is not none else '—' }}</b></span>
     {% if connected and acct.total_value is not none %}
-    <span class="tw-chip tw-acct-chip">ACCT <b>{{ '${:,.0f}'.format(acct.total_value) }}</b>
-      {% if acct.daily_pnl is not none %}<b class="{{ 'chg-pos' if acct.daily_pnl >= 0 else 'chg-neg' }}">{{ '{:+,.0f}'.format(acct.daily_pnl) }} today</b>{% endif %}
+    <span class="tw-chip tw-acct-chip" title="{% if acct.broker_count and acct.broker_count > 1 %}Across {{ acct.broker_count }} brokerages. {% endif %}{% if acct.daily_pnl_partial %}Day change is {{ acct.daily_pnl_label }} only — {{ acct.daily_pnl_missing|join(', ') }} reports no start-of-day value.{% endif %}">
+      ACCT <b>{{ '${:,.0f}'.format(acct.total_value) }}</b>
+      {% if acct.daily_pnl is not none %}<b class="{{ 'chg-pos' if acct.daily_pnl >= 0 else 'chg-neg' }}">{{ '{:+,.0f}'.format(acct.daily_pnl + 0) }} today{% if acct.daily_pnl_partial %}*{% endif %}</b>{% endif %}
     </span>
     {% endif %}
     <span class="tw-chip tw-paper-flag {{ '' if connected }}" style="{{ 'margin-left:0' if connected else 'margin-left:auto' }}" title="Order ticket is paper/preview. Chart, quotes, account and positions are live.">PAPER TICKET</span>
@@ -446,7 +447,7 @@
           {% set ns = namespace(rows=0) %}
           {% if connected %}
           <table class="tw-pos-table">
-            <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg</th><th>Last</th><th>P&amp;L</th><th>%</th></tr></thead>
+            <thead><tr><th>Symbol</th><th>Broker</th><th>Side</th><th>Qty</th><th>Avg</th><th>Last</th><th>P&amp;L</th><th>%</th></tr></thead>
             <tbody>
               {% for a in acct.accounts %}
                 {% for p in a.equity_positions %}
@@ -456,6 +457,7 @@
                   {% set pct = (p.unrealized / basis * 100) if basis else 0 %}
                   <tr>
                     <td class="tw-pos-sym">{{ p.symbol }}</td>
+                    <td style="color:var(--text-faint);font-size:11px">{{ a.institution or a.broker_label or '—' }}</td>
                     <td><span class="tw-side-badge {{ 'long' if p.quantity >= 0 else 'short' }}">{{ 'Long' if p.quantity >= 0 else 'Short' }}</span></td>
                     <td>{{ '{:,.0f}'.format(p.quantity) }}</td>
                     <td>{{ '%.2f'|format(p.avg_price) }}</td>
@@ -469,7 +471,7 @@
           </table>
           {% if ns.rows == 0 %}<div class="tw-empty">No open positions.</div>{% endif %}
           {% else %}
-          <div class="tw-empty">No live positions — Schwab not connected.<br>Connect via the <a href="{{ url_for('schwab_account') }}">Schwab</a> tab to populate positions, buying power &amp; P&amp;L.</div>
+          <div class="tw-empty">No live positions — no brokerage connected.<br>Connect Schwab or Robinhood on the <a href="{{ url_for('brokers_page') }}">Brokerages</a> page to populate positions, buying power &amp; P&amp;L.</div>
           {% endif %}
         </div>
       </div>
@@ -514,14 +516,19 @@
         <div class="tw-stat {{ '' if connected else 'paper' }}">
           <div class="tw-stat-lbl">Buying Power</div>
           <div class="tw-stat-val">{{ '${:,.0f}'.format(acct.buying_power) if connected and acct.buying_power is not none else '—' }}</div>
-          {% if not connected %}<div class="tw-stat-sub">connect Schwab</div>{% endif %}
+          {% if not connected %}<div class="tw-stat-sub">connect a brokerage</div>{% endif %}
         </div>
         <div class="tw-stat {{ '' if connected else 'paper' }}">
           <div class="tw-stat-lbl">Day P&amp;L</div>
           {% if connected and acct.daily_pnl is not none %}
-          <div class="tw-stat-val {{ 'chg-pos' if acct.daily_pnl >= 0 else 'chg-neg' }}">{{ '{:+,.0f}'.format(acct.daily_pnl) }}</div>
-          {% set daily_pnl_pct = acct.get('daily_pnl_pct') %}
-          {% if daily_pnl_pct is not none %}<div class="tw-stat-sub {{ 'chg-pos' if daily_pnl_pct >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(daily_pnl_pct) }}%</div>{% endif %}
+          <div class="tw-stat-val {{ 'chg-pos' if acct.daily_pnl >= 0 else 'chg-neg' }}">{{ '{:+,.0f}'.format(acct.daily_pnl + 0) }}</div>
+          {# Only some brokerages report a start-of-day value. Naming the ones
+             that do is the difference between a figure and a claim. #}
+          {% if acct.daily_pnl_partial %}<div class="tw-stat-sub">{{ acct.daily_pnl_label }} only</div>
+          {% else %}
+            {% set daily_pnl_pct = acct.get('daily_pnl_pct') %}
+            {% if daily_pnl_pct is not none %}<div class="tw-stat-sub {{ 'chg-pos' if daily_pnl_pct >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(daily_pnl_pct) }}%</div>{% endif %}
+          {% endif %}
           {% else %}<div class="tw-stat-val">—</div>{% endif %}
         </div>
         <div class="tw-stat {{ '' if connected else 'paper' }}">

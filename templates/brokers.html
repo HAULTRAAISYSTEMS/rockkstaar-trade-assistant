@@ -40,6 +40,11 @@
 .bk-actions { display:flex; gap: var(--sp-3); flex-wrap:wrap; align-items:center; margin-top: var(--sp-4); }
 
 .bk-note { border-left: 2px solid var(--orange-500); padding-left: var(--sp-3); color: var(--text-muted); font-size: var(--fs-xs); line-height:1.6; }
+.bk-total { border-color: rgba(214,166,63,.35); background: linear-gradient(180deg, rgba(214,166,63,.06), transparent 60%), var(--surface-card); }
+.bk-total-lbl { color: var(--text-faint); font-size: 10px; letter-spacing:.09em; text-transform: uppercase; }
+.bk-total-val { color: var(--text-hi); font-family: var(--font-mono); font-size: 34px; font-weight: var(--fw-semi); line-height:1.1; margin: 6px 0 10px; }
+.bk-total-parts { display:flex; gap: var(--sp-4); flex-wrap:wrap; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-faint); }
+.bk-total-parts b { color: var(--text-muted); font-weight: var(--fw-semi); }
 .bk-err { border:1px solid rgba(231,76,60,.35); background: rgba(231,76,60,.07); color: var(--neg-500); border-radius: var(--r-sm); padding: var(--sp-3); font-size: var(--fs-sm); margin-bottom: var(--sp-3); }
 .chg-pos { color: var(--pos-500); } .chg-neg { color: var(--neg-500); }
 </style>
@@ -105,6 +110,40 @@
     <p>Read-only connections. Balances, positions and orders come in; no order
        ever goes out from here. Disconnecting revokes this app's access.</p>
   </div>
+
+  {# The combined figure only earns its place when there is more than one
+     broker to combine — otherwise it is the card below it, repeated. #}
+  {% if combined.connected and combined.broker_count > 1 %}
+  <section class="bk-card bk-total">
+    <div class="bk-body">
+      <div class="bk-total-lbl">Total across {{ combined.broker_count }} brokerages</div>
+      <div class="bk-total-val">${{ '{:,.2f}'.format(combined.total_value) }}</div>
+      <div class="bk-total-parts">
+        {% for src in combined.sources if src.connected %}
+        <span><b>{{ src.label }}</b> {{ '${:,.2f}'.format(src.total_value) if src.total_value is not none else '—' }}</span>
+        {% endfor %}
+      </div>
+      <div class="bk-stats" style="margin-top:var(--sp-4);margin-bottom:0">
+        <div class="bk-stat"><div class="bk-stat-lbl">Buying power</div><div class="bk-stat-val">{{ money(combined.buying_power) }}</div></div>
+        <div class="bk-stat"><div class="bk-stat-lbl">Day P&amp;L</div>
+          <div class="bk-stat-val {{ 'chg-pos' if (combined.daily_pnl or 0) > 0 else ('chg-neg' if (combined.daily_pnl or 0) < 0 else '') }}">{{ money(combined.daily_pnl, True) }}</div>
+          {% if combined.daily_pnl_partial %}<div class="bk-acct-meta" style="margin-top:4px">{{ combined.daily_pnl_label }} only</div>{% endif %}
+        </div>
+        <div class="bk-stat"><div class="bk-stat-lbl">Open P&amp;L</div>
+          <div class="bk-stat-val {{ 'chg-pos' if (combined.total_unrealized or 0) > 0 else ('chg-neg' if (combined.total_unrealized or 0) < 0 else '') }}">{{ money(combined.total_unrealized, True) }}</div></div>
+        <div class="bk-stat"><div class="bk-stat-lbl">Positions</div><div class="bk-stat-val">{{ combined.open_positions }}</div></div>
+      </div>
+      {% if combined.daily_pnl_partial %}
+      <p class="bk-note" style="margin-top:var(--sp-4)">Day P&amp;L covers {{ combined.daily_pnl_label }}.
+         {{ combined.daily_pnl_missing|join(' and ') }} report no start-of-day value through the aggregator,
+         so today's change cannot be computed there — it is left out rather than counted as zero.</p>
+      {% endif %}
+      <p class="bk-note" style="margin-top:var(--sp-3)">Buying power is added up for the total only. The two
+         pools are not interchangeable — cash at one broker cannot settle an order at the other — so position
+         sizing still uses the account size in Risk settings.</p>
+    </div>
+  </section>
+  {% endif %}
 
   <!-- ══════════ Schwab — direct ══════════ -->
   <section class="bk-card">
