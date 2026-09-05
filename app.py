@@ -5335,11 +5335,13 @@ def _age_briefing(briefing: dict) -> dict:
         live = _live_regime_bias()
         stated = str(briefing.get("macro_bias") or "").lower().replace("-", "_")
         if live and stated and live != stated and stated in ("risk_on", "risk_off"):
-            when = briefing["written_label"] or "earlier today"
+            # "Written at earlier today" is not a sentence. With a stamp the
+            # note names the time; without one it says the day and stops.
+            label = briefing["written_label"]
+            opening = f"Written at {label}" if label else "Written earlier today"
             briefing["conflict"] = (
-                f"Written at {when}, when the read was "
-                f"{stated.replace('_', ' ')}. The live regime is now "
-                f"{live.replace('_', ' ')}."
+                f"{opening}, when the read was {stated.replace('_', ' ')}. "
+                f"The live regime is now {live.replace('_', ' ')}."
             )
     except Exception as exc:
         logger.debug("briefing conflict check failed: %s", exc)
@@ -7341,18 +7343,24 @@ def _command_center_context() -> dict:
     # Watchlist and setups, both from the scanner's own cached view. Day change
     # is not stored, and eight quote calls on a landing page is the wrong
     # trade, so these show what the scanner concluded rather than a price move.
-    try:
-        rows = []
-        for ticker in tickers[:COMMAND_WATCHLIST]:
+    rows = []
+    for ticker in tickers[:COMMAND_WATCHLIST]:
+        # Per ticker, not per section. One row that cannot be read should cost
+        # that row, not the whole watchlist and the setups built from it.
+        try:
             data = get_stock_data(ticker) or {}
-            rows.append({
-                "ticker": ticker,
-                "name": data.get("company_name") or "",
-                "price": data.get("current_price"),
-                "score": data.get("swing_score") or data.get("setup_score"),
-                "setup": data.get("swing_setup_type") or data.get("setup_type") or "",
-                "grade": data.get("swing_confidence") or "",
-            })
+        except Exception as exc:
+            logger.debug("command centre: %s unavailable: %s", ticker, exc)
+            data = {}
+        rows.append({
+            "ticker": ticker,
+            "name": data.get("company_name") or "",
+            "price": data.get("current_price"),
+            "score": data.get("swing_score") or data.get("setup_score"),
+            "setup": data.get("swing_setup_type") or data.get("setup_type") or "",
+            "grade": data.get("swing_confidence") or "",
+        })
+    try:
         context["watchlist"] = rows
         context["setups"] = sorted(
             [r for r in rows if (r.get("score") or 0) > 0],

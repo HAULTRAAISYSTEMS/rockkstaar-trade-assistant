@@ -182,3 +182,32 @@ class TestThePage:
                      "cc-headline", "cc-meta", "cc-why", "cc-rows", "cc-row",
                      "cc-row-sym", "cc-row-mid", "cc-row-score"):
             assert f".{name}" in page, name
+
+
+class TestOneBadTickerDoesNotEmptyTheSection:
+    def test_a_ticker_that_cannot_be_read_costs_only_its_own_row(self, monkeypatch):
+        """It used to cost the whole watchlist, and the setups built from it."""
+        monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: {})
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 1)
+        monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: ["OK", "BAD", "FINE"])
+
+        def _lookup(ticker):
+            if ticker == "BAD":
+                raise RuntimeError("row unreadable")
+            return {"company_name": f"{ticker} Inc", "swing_score": 50}
+
+        monkeypatch.setattr(legacy, "get_stock_data", _lookup)
+        with web_app.app.test_request_context("/opportunity"):
+            context = legacy._command_center_context()
+        assert [r["ticker"] for r in context["watchlist"]] == ["OK", "BAD", "FINE"]
+        assert [r["ticker"] for r in context["setups"]] == ["OK", "FINE"]
+
+    def test_the_unreadable_row_is_blank_rather_than_invented(self, monkeypatch):
+        monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: {})
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 1)
+        monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: ["BAD"])
+        monkeypatch.setattr(legacy, "get_stock_data",
+                            lambda t: (_ for _ in ()).throw(RuntimeError("x")))
+        with web_app.app.test_request_context("/opportunity"):
+            row = legacy._command_center_context()["watchlist"][0]
+        assert row["ticker"] == "BAD" and row["price"] is None and row["setup"] == ""

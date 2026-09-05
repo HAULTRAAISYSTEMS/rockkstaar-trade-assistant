@@ -153,3 +153,19 @@ class TestThePageShowsIt:
     def test_it_has_somewhere_to_put_the_conflict(self):
         assert 'id="ai-brief-conflict"' in self.PAGE
         assert ".ai-brief-conflict" in self.PAGE
+
+
+class TestTheConflictNoteReadsAsASentence:
+    def test_with_a_stamp_it_names_the_time(self, monkeypatch):
+        monkeypatch.setattr(legacy, "_live_regime_bias", lambda: "risk_on")
+        note = legacy._age_briefing({"macro_bias": "risk_off",
+                                     "generated_at": written(16)})["conflict"]
+        assert note.startswith("Written at ")
+        assert " at earlier today" not in note
+
+    def test_without_a_stamp_it_still_reads_properly(self, monkeypatch):
+        """"Written at earlier today" is not a sentence."""
+        monkeypatch.setattr(legacy, "_live_regime_bias", lambda: "risk_on")
+        note = legacy._age_briefing({"macro_bias": "risk_off"})["conflict"]
+        assert note.startswith("Written earlier today,")
+        assert "at earlier" not in note
