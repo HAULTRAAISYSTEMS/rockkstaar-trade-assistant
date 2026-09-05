@@ -1108,7 +1108,7 @@ function renderLiquidityStatus(d) {
     fredCell('Fed Balance Sheet',
       bs.value != null ? '$' + bs.value + 'T' : null,
       bs.trend_arrow,
-      chgDiv(bs.chg_wow, bs.expanding, 'T WoW'),
+      chgDiv(bs.chg_wow, bs.expanding, 'B WoW'),
       bs.signal, bs.data_as_of, loading),
 
     fredCell('Reverse Repo',
@@ -1138,7 +1138,7 @@ function renderLiquidityStatus(d) {
     fredCell('Treasury Gen Acct',
       tga.value != null ? '$' + tga.value + 'T' : null,
       tga.trend_arrow,
-      tga.chg_mow != null ? chgDiv(tga.chg_mow, tga.draining, 'T/mo') : '',
+      tga.chg_mow != null ? chgDiv(tga.chg_mow, tga.draining, 'B/mo') : '',
       tga.signal, tga.data_as_of, loading),
   ].join('');
 

@@ -20,7 +20,6 @@ import liquidity_engine as L
 PUBLISHED_UNITS = {
     "WALCL": "millions",      # Millions of U.S. Dollars, Not Seasonally Adjusted
     "WTREGEN": "millions",    # Millions of U.S. Dollars, Not Seasonally Adjusted
-    "WRESBAL": "millions",    # Millions of U.S. Dollars, Not Seasonally Adjusted
     "M2SL": "billions",       # Billions of Dollars, Seasonally Adjusted
     "RRPONTSYD": "billions",  # Billions of US Dollars, Not Seasonally Adjusted
 }
@@ -84,8 +83,12 @@ class TestNothingIsPlausibleButWrong:
         value = L.to_trillions("WTREGEN", 967_935)
         assert 0 < value < 5, value
 
-    def test_bank_reserves_land_in_a_believable_range(self):
-        assert 0 < L.to_trillions("WRESBAL", 3_100_000, 1) < 10
+    def test_a_weekly_change_is_readable_rather_than_rounded_away(self):
+        """The balance sheet moves by tens of billions. In trillions that is
+        "0.0T", which is accurate and says nothing."""
+        weekly_move_of_six_billion = 6_300
+        assert L.to_billions("WALCL", weekly_move_of_six_billion) == pytest.approx(6.3)
+        assert round(L.to_trillions("WALCL", weekly_move_of_six_billion), 1) == 0.0
 
 
 class TestTheThresholdsAreInTheRightUnit:
@@ -118,3 +121,29 @@ class TestNoBareDivisionsRemain:
                 if re.search(r"/\s*1000\b", line) and "to_trillions" not in line
                 and "to_billions" not in line and "_TO_BILLIONS" not in line]
         assert bare == [], bare
+
+
+class TestLevelsAndChangesUseDifferentUnits:
+    """A level reads naturally in trillions; a week's move does not."""
+
+    def test_the_engine_reports_a_change_unit(self):
+        source = open("liquidity_engine.py").read()
+        assert source.count('"chg_unit"') >= 3
+
+    def test_the_page_labels_changes_in_billions(self):
+        page = open("templates/liquidity.html").read()
+        assert "'B WoW'" in page and "'B/mo'" in page
+        assert "'T WoW'" not in page and "'T/mo'" not in page
+
+    def test_the_alert_text_matches_the_unit_it_prints(self):
+        source = open("liquidity_engine.py").read()
+        assert "balance sheet expanding +${bs.get('chg_wow','?')}B WoW" in source
+
+
+class TestNoDeadSeries:
+    def test_every_declared_series_is_actually_fetched(self):
+        """WRESBAL was declared and never fetched, so the diagnostics panel
+        reported it missing on every single load."""
+        source = open("liquidity_engine.py").read()
+        for series in L._FRED_SERIES:
+            assert f'_fetch_fred("{series}")' in source, series

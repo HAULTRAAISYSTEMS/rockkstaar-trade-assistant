@@ -138,8 +138,6 @@ _FRED_SERIES = {
                   "source": "millions"},
     "M2SL":      {"name": "M2 Money Supply",         "unit": "$B",   "freq": "monthly",
                   "source": "billions"},
-    "WRESBAL":   {"name": "Bank Reserves",           "unit": "$B",   "freq": "weekly",
-                  "source": "millions"},
     "RRPONTSYD": {"name": "Reverse Repo",            "unit": "$B",   "freq": "daily",
                   "source": "billions"},
     "WTREGEN":   {"name": "Treasury Gen Account",    "unit": "$B",   "freq": "weekly",
@@ -312,7 +310,11 @@ def _analyze_balance_sheet() -> dict:
     result = {
         "value":       to_trillions("WALCL", cur, 1) if cur else None,
         "unit":        "$T",
-        "chg_wow":     to_trillions("WALCL", chg, 1) if chg else None,
+        # Levels read naturally in trillions; a week's move does not. The
+        # balance sheet shifts by tens of billions, which rounds to "0.0T" and
+        # tells the reader nothing. Changes are in billions, and say so.
+        "chg_wow":     round(to_billions("WALCL", chg), 1) if chg else None,
+        "chg_unit":    "$B",
         "trend_4w":    trend_4w,
         "expanding":   expanding,
         "trend_arrow": _trend_arrow(chg),
@@ -338,7 +340,8 @@ def _analyze_reverse_repo() -> dict:
     result = {
         "value":        to_trillions("RRPONTSYD", cur) if cur else None,
         "unit":         "$T",
-        "chg_dod":      to_trillions("RRPONTSYD", chg, 3) if chg else None,
+        "chg_dod":      round(to_billions("RRPONTSYD", chg), 1) if chg else None,
+        "chg_unit":     "$B",
         "trend_5d":     trend,
         "falling_fast": falling_fast,
         "trend_arrow":  "↓" if falling_fast else ("↑" if rising else "→"),
@@ -492,7 +495,8 @@ def _analyze_tga() -> dict:
     return {
         "value":       to_trillions("WTREGEN", cur) if cur else None,
         "unit":        "$T",
-        "chg_mow":     to_trillions("WTREGEN", chg) if chg else None,
+        "chg_mow":     round(to_billions("WTREGEN", chg), 1) if chg else None,
+        "chg_unit":    "$B",
         "draining":    draining,
         "filling":     filling,
         "trend_arrow": "↓" if draining else ("↑" if filling else "→"),
@@ -544,7 +548,7 @@ def _build_interpretation(score: int, bs: dict, rrp: dict, m2: dict,
         lines.append("Reverse repo draining fast — excess cash flowing into markets.")
     if bs.get("expanding"):
         lines.append("Balance sheet expanding — accommodative conditions.")
-    elif bs.get("chg_wow") is not None and bs["chg_wow"] < -10:
+    elif bs.get("chg_wow") is not None and bs["chg_wow"] < -10:   # $10B contraction
         lines.append("QT in progress — reducing system liquidity.")
 
     return " ".join(lines)
@@ -568,7 +572,7 @@ def _build_liquidity_context() -> dict:
 
     if bs.get("expanding"):
         score += 15
-        alerts.append({"type": "bullish", "msg": f"Fed balance sheet expanding +${bs.get('chg_wow','?')}T WoW."})
+        alerts.append({"type": "bullish", "msg": f"Fed balance sheet expanding +${bs.get('chg_wow','?')}B WoW."})
     elif bs.get("chg_wow") and bs["chg_wow"] < -10:
         score -= 15
         alerts.append({"type": "bearish", "msg": "Fed balance sheet contracting — QT in progress."})
