@@ -126,18 +126,48 @@ _liq_ctx, _liq_ctx_at = _load_ctx_from_disk()
 
 
 # ── FRED series manifest ───────────────────────────────────────────────────────
+# ``source`` is the unit FRED publishes the series in, and it is not the same
+# for all of them. Every dollar series here was declared as billions and then
+# divided by 1000 to reach trillions, which is right for the two that really
+# are billions and wrong by a factor of a thousand for the three that are
+# millions. The Fed balance sheet rendered as "$6737.2T" — a thousand times
+# world GDP — and the Treasury General Account as "$967.93T" when it holds
+# about $968 billion. Checked against each series page on fred.stlouisfed.org.
 _FRED_SERIES = {
-    "WALCL":     {"name": "Fed Balance Sheet",      "unit": "$B",   "freq": "weekly"},
-    "M2SL":      {"name": "M2 Money Supply",         "unit": "$B",   "freq": "monthly"},
-    "WRESBAL":   {"name": "Bank Reserves",           "unit": "$B",   "freq": "weekly"},
-    "RRPONTSYD": {"name": "Reverse Repo",            "unit": "$B",   "freq": "daily"},
-    "WTREGEN":   {"name": "Treasury Gen Account",    "unit": "$B",   "freq": "weekly"},
+    "WALCL":     {"name": "Fed Balance Sheet",      "unit": "$B",   "freq": "weekly",
+                  "source": "millions"},
+    "M2SL":      {"name": "M2 Money Supply",         "unit": "$B",   "freq": "monthly",
+                  "source": "billions"},
+    "WRESBAL":   {"name": "Bank Reserves",           "unit": "$B",   "freq": "weekly",
+                  "source": "millions"},
+    "RRPONTSYD": {"name": "Reverse Repo",            "unit": "$B",   "freq": "daily",
+                  "source": "billions"},
+    "WTREGEN":   {"name": "Treasury Gen Account",    "unit": "$B",   "freq": "weekly",
+                  "source": "millions"},
     "DFF":       {"name": "Fed Funds Rate",          "unit": "%",    "freq": "daily"},
     "SOFR":      {"name": "SOFR",                    "unit": "%",    "freq": "daily"},
     "DGS10":     {"name": "10Y Treasury Yield",      "unit": "%",    "freq": "daily"},
     "DGS2":      {"name": "2Y Treasury Yield",       "unit": "%",    "freq": "daily"},
     "T10Y2Y":    {"name": "10Y-2Y Yield Spread",     "unit": "%",    "freq": "daily"},
 }
+
+# Divisors from a series' published unit to billions and to trillions.
+_TO_BILLIONS = {"millions": 1_000.0, "billions": 1.0}
+
+
+def to_billions(series_id: str, value):
+    """A raw FRED value in billions, whatever unit the series is published in."""
+    if value is None:
+        return None
+    scale = _FRED_SERIES.get(series_id, {}).get("source", "billions")
+    return value / _TO_BILLIONS.get(scale, 1.0)
+
+
+def to_trillions(series_id: str, value, digits: int = 2):
+    """A raw FRED value in trillions, rounded for display."""
+    billions = to_billions(series_id, value)
+    return None if billions is None else round(billions / 1000.0, digits)
+
 
 # Sector ETF universe for money flow
 _SECTOR_ETFS = {
@@ -280,9 +310,9 @@ def _analyze_balance_sheet() -> dict:
 
     expanding = bool(chg and chg > 0)
     result = {
-        "value":       round(cur / 1000, 1) if cur else None,   # M→T
+        "value":       to_trillions("WALCL", cur, 1) if cur else None,
         "unit":        "$T",
-        "chg_wow":     round(chg / 1000, 1) if chg else None,
+        "chg_wow":     to_trillions("WALCL", chg, 1) if chg else None,
         "trend_4w":    trend_4w,
         "expanding":   expanding,
         "trend_arrow": _trend_arrow(chg),
@@ -290,7 +320,7 @@ def _analyze_balance_sheet() -> dict:
         "signal":      ("Expanding — liquidity bullish" if expanding else "Contracting — QT in progress")
                        if cur is not None else "",
         "dates":       (d or {}).get("dates", [])[-8:],
-        "values":      [round(v / 1000, 2) for v in (d or {}).get("values", [])[-8:]],
+        "values":      [to_trillions("WALCL", v) for v in (d or {}).get("values", [])[-8:]],
     }
     return result
 
@@ -306,9 +336,9 @@ def _analyze_reverse_repo() -> dict:
     falling_fast = bool(trend and trend < -5)
     rising       = bool(chg and chg > 0)
     result = {
-        "value":        round(cur / 1000, 2) if cur else None,   # M→T
+        "value":        to_trillions("RRPONTSYD", cur) if cur else None,
         "unit":         "$T",
-        "chg_dod":      round(chg / 1000, 3) if chg else None,
+        "chg_dod":      to_trillions("RRPONTSYD", chg, 3) if chg else None,
         "trend_5d":     trend,
         "falling_fast": falling_fast,
         "trend_arrow":  "↓" if falling_fast else ("↑" if rising else "→"),
@@ -319,7 +349,7 @@ def _analyze_reverse_repo() -> dict:
             "Falling — cash moving to markets"
         ) if cur is not None else "",
         "dates":  (d or {}).get("dates", [])[-10:],
-        "values": [round(v / 1000, 3) for v in (d or {}).get("values", [])[-10:]],
+        "values": [to_trillions("RRPONTSYD", v, 3) for v in (d or {}).get("values", [])[-10:]],
     }
     return result
 
@@ -333,7 +363,7 @@ def _analyze_m2() -> dict:
     chg_yoy = _pct_chg(cur, prev12)
 
     result = {
-        "value":       round(cur / 1000, 1) if cur else None,
+        "value":       to_trillions("M2SL", cur, 1) if cur else None,
         "unit":        "$T",
         "chg_mom":     chg_mom,
         "chg_yoy":     chg_yoy,
@@ -346,7 +376,7 @@ def _analyze_m2() -> dict:
             "M2 stable — neutral monetary backdrop"
         ) if cur is not None else "",
         "dates":  (d or {}).get("dates", [])[-12:],
-        "values": [round(v / 1000, 2) for v in (d or {}).get("values", [])[-12:]],
+        "values": [to_trillions("M2SL", v) for v in (d or {}).get("values", [])[-12:]],
     }
     return result
 
@@ -452,13 +482,17 @@ def _analyze_tga() -> dict:
     cur  = _last(d)
     prev = _prev(d, 4)
     chg  = _abs_chg(cur, prev)
-    draining = bool(chg and chg < -50)
-    filling  = bool(chg and chg > 50)
+    # The thresholds are $50B moves, so they have to be compared in billions.
+    # Against raw millions they fired on a $50m change, which for an account
+    # that moves in tens of billions is every reading.
+    chg_b = to_billions("WTREGEN", chg)
+    draining = bool(chg_b and chg_b < -50)
+    filling  = bool(chg_b and chg_b > 50)
 
     return {
-        "value":       round(cur / 1000, 2) if cur else None,
+        "value":       to_trillions("WTREGEN", cur) if cur else None,
         "unit":        "$T",
-        "chg_mow":     round(chg / 1000, 2) if chg else None,
+        "chg_mow":     to_trillions("WTREGEN", chg) if chg else None,
         "draining":    draining,
         "filling":     filling,
         "trend_arrow": "↓" if draining else ("↑" if filling else "→"),
