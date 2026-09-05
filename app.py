@@ -7332,7 +7332,8 @@ def _command_center_context() -> dict:
     feed is cold is worse than one that renders with a gap in it.
     """
     context = {"week": [], "news": [], "setups": [], "watchlist": [],
-               "watchlist_name": "", "pulse": {}, "next_up": None}
+               "watchlist_name": "", "pulse": {}, "next_up": None,
+               "news_refreshing": False}
 
     # The pulse strip: the four numbers that set the tone for everything under
     # them, rendered server-side so the top of the page is never a row of
@@ -7403,6 +7404,19 @@ def _command_center_context() -> dict:
         } for n in stories[:COMMAND_NEWS]]
     except Exception as exc:
         logger.debug("command centre: news unavailable: %s", exc)
+
+    # The intel caches live in memory, so every deploy empties them and the
+    # news section renders "nothing cached yet" until something asks for a
+    # refill. Only startup ever did. The command centre reads that cache on
+    # every load, so it is the natural place to notice it is empty and say so
+    # — the call is debounced and returns immediately, and the section fills
+    # on the next load rather than blocking this one.
+    if not context["news"]:
+        try:
+            _intel.trigger_background_refresh()
+            context["news_refreshing"] = True
+        except Exception as exc:
+            logger.debug("command centre: could not request a news refill: %s", exc)
 
     # Watchlist and setups, both from the scanner's own cached view. Day change
     # is not stored, and eight quote calls on a landing page is the wrong

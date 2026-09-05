@@ -131,7 +131,8 @@ class TestOneColdFeedIsAGapNotAnErrorPage:
         with web_app.app.test_request_context("/opportunity"):
             context = legacy._command_center_context()
         assert set(context) == {"week", "news", "setups", "watchlist",
-                                "watchlist_name", "pulse", "next_up"}
+                                "watchlist_name", "pulse", "next_up",
+                                "news_refreshing"}
 
     def test_no_watchlist_is_not_an_error(self, monkeypatch):
         monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: SUMMARY)
@@ -441,3 +442,73 @@ class TestTheStripReadsAsEnglish:
         """The first thing the page said was that a lower panel was fetching."""
         page = rendered()
         assert page.index("Command Center") < page.index('id="liq-status-banner"')
+
+
+class TestTheNewsSectionAsksToBeFilled:
+    """The intel caches live in memory, so every deploy empties them. The
+    section rendered "nothing cached yet" until something asked for a refill,
+    and only startup ever did — so the news stayed blank for anyone who did not
+    happen to visit the Intel page first."""
+
+    def _wire(self, monkeypatch, stories, calls):
+        monkeypatch.setattr(legacy._intel, "get_intel_summary",
+                            lambda: {"market_news": stories})
+        monkeypatch.setattr(legacy._intel, "trigger_background_refresh",
+                            lambda: calls.append(1))
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: None)
+        monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: [])
+
+    def test_an_empty_feed_asks_for_a_refill(self, monkeypatch):
+        calls = []
+        self._wire(monkeypatch, [], calls)
+        with web_app.app.test_request_context("/opportunity"):
+            context = legacy._command_center_context()
+        assert calls == [1]
+        assert context["news_refreshing"] is True
+
+    def test_a_full_feed_asks_for_nothing(self, monkeypatch):
+        calls = []
+        self._wire(monkeypatch, [{"headline": "A story", "ticker": "NVDA"}], calls)
+        with web_app.app.test_request_context("/opportunity"):
+            context = legacy._command_center_context()
+        assert calls == []
+        assert context["news_refreshing"] is False
+
+    def test_the_request_never_blocks_the_page(self, monkeypatch):
+        """It is fire-and-forget: a refill that raises must not cost the load."""
+        monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: {})
+        monkeypatch.setattr(legacy._intel, "trigger_background_refresh",
+                            lambda: (_ for _ in ()).throw(RuntimeError("busy")))
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: None)
+        monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: [])
+        with web_app.app.test_request_context("/opportunity"):
+            context = legacy._command_center_context()
+        assert context["news_refreshing"] is False
+
+    def test_the_empty_state_says_what_is_happening(self, monkeypatch):
+        """"Nothing cached" to someone who cannot act on it is a shrug."""
+        calls = []
+        self._wire(monkeypatch, [], calls)
+        client = web_app.app.test_client()
+        with client.session_transaction() as sess:
+            sess["user_id"] = 1
+        html = client.get("/opportunity").get_data(as_text=True)
+        assert "Fetching catalysts now" in html
+
+
+class TestTheHeaderRow:
+    def test_the_timestamp_shares_the_row_with_the_controls(self):
+        """flex-wrap sent it to a line of its own the moment the row ran short
+        of space, so the header grew a mostly-empty row."""
+        css = open("templates/_liq_scripts.html").read()
+        assert ".cc-hero-right { display: flex; flex-wrap: nowrap;" in css
+
+    def test_it_shrinks_rather_than_wrapping(self):
+        css = open("templates/_liq_scripts.html").read()
+        block = css[css.index(".cc-updated {"):css.index(".cc-updated {") + 300]
+        assert "text-overflow: ellipsis" in block
+        assert "min-width: 0" in block
+
+    def test_a_phone_is_still_allowed_to_wrap(self):
+        css = open("templates/_liq_scripts.html").read()
+        assert ".cc-hero-right { flex-wrap: wrap }" in css

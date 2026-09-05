@@ -146,7 +146,12 @@
         {% endfor %}
       </div>
       {% else %}
-      <p class="cc-empty">No catalysts cached yet — the feed fills within a minute of a refresh.</p>
+      {# Saying "nothing cached" to someone who cannot do anything about it is
+         not an empty state, it is a shrug. This one says what is happening. #}
+      <p class="cc-empty">
+        {% if news_refreshing %}Fetching catalysts now — they appear on your next load.
+        {% else %}No catalysts available from the connected news feeds.{% endif %}
+      </p>
       {% endif %}
     </div>
 

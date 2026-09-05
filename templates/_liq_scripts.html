@@ -55,8 +55,19 @@
     letter-spacing: .005em;
   }
   .cc-title span { color: #f0b53f }
-  .cc-hero-right { display: flex; flex-wrap: wrap; gap: 10px; align-items: center }
-  .cc-updated { color: #64707e; font: 500 10.5px/1.5 var(--font-mono, monospace); white-space: nowrap }
+  /* The controls and the timestamp belong on one line. flex-wrap sent the
+     timestamp to a line of its own the moment the row ran short of space, so
+     the header grew a mostly-empty row. It sits inline and shrinks instead. */
+  .cc-hero-right { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; min-width: 0 }
+  .cc-updated {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #64707e;
+    font: 500 10.5px/1.5 var(--font-mono, monospace);
+    white-space: nowrap;
+  }
 
   /* Pulse strip */
   .cc-pulse {
@@ -259,6 +270,9 @@
     .cc-rotation a { margin-left: 0 }
     .cc-pulse-next { grid-column: 1 / -1 }
     .cc-title { font-size: 24px }
+    /* On a phone the controls need the whole width; the timestamp goes last
+       and stays on the same row as the refresh button. */
+    .cc-hero-right { flex-wrap: wrap }
   }
 
   /* The briefing is written once in the morning. When it is old, or when the
