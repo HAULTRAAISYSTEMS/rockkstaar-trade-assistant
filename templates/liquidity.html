@@ -4,9 +4,6 @@
 {% block content %}
 <div class="liq-page">
 
-  <!-- Weekend / stale data banner -->
-  <div class="liq-status-banner" id="liq-status-banner" style="display:none;"></div>
-
   <!-- ══ HEADER ═══════════════════════════════════════════════════════════
        The title used to sit below a 400px banner, so the page opened on a
        narrative and named itself second. It is first now, and the whole
@@ -23,9 +20,14 @@
         <button class="liq-mode-btn"        data-mode="trade"  onclick="setMode('trade')">Trading</button>
       </div>
       <button class="btn-liq-refresh" onclick="refreshAll()" title="Refresh all data">↺ Refresh</button>
-      <span class="liq-last-updated" id="liq-last-updated">Loading…</span>
+      <span class="liq-last-updated cc-updated" id="liq-last-updated">Loading…</span>
     </div>
   </header>
+
+  {# The FRED loading and weekend notices sat above the page title, so the
+     first thing the page said was that one of its lower panels was still
+     fetching. They belong under the header, with everything else. #}
+  <div class="liq-status-banner" id="liq-status-banner" style="display:none;"></div>
 
   <!-- ══ PULSE ════════════════════════════════════════════════════════════
        The numbers that set the tone for everything under them, on one line.
@@ -33,7 +35,7 @@
   <div class="cc-pulse cc-rise">
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k">Regime</span>
-      <b class="cc-pulse-v {{ 'is-up' if 'on' in (pulse.regime or '')|lower else ('is-down' if 'off' in (pulse.regime or '')|lower else '') }}">{{ pulse.regime|title if pulse.regime else '—' }}</b>
+      <b class="cc-pulse-v {{ 'is-up' if 'on' in (pulse.regime or '')|lower else ('is-down' if 'off' in (pulse.regime or '')|lower else '') }}">{{ pulse.regime|replace('_', ' ')|replace('-', ' ')|title if pulse.regime else '—' }}</b>
     </div>
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k">VIX</span>
@@ -234,6 +236,7 @@
   }
   .cc-title span { color: #f0b53f }
   .cc-hero-right { display: flex; flex-wrap: wrap; gap: 10px; align-items: center }
+  .cc-updated { color: #64707e; font: 500 10.5px/1.5 var(--font-mono, monospace); white-space: nowrap }
 
   /* Pulse strip */
   .cc-pulse {

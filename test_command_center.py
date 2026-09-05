@@ -386,3 +386,30 @@ class TestThePulseStrip:
         monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: [])
         with web_app.app.test_request_context("/opportunity"):
             assert legacy._command_center_context()["pulse"] == {}
+
+
+class TestTheStripReadsAsEnglish:
+    @pytest.fixture
+    def client(self):
+        c = web_app.app.test_client()
+        with c.session_transaction() as sess:
+            sess["user_id"] = 1
+        return c
+
+    def test_the_regime_is_not_shown_as_a_key(self, client, monkeypatch):
+        """It rendered "Risk_on" — the underscore is how the value is stored,
+        not how it is read."""
+        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: {"regime": "risk_on"})
+        html = client.get("/").get_data(as_text=True)
+        assert "Risk On" in html
+        assert "Risk_on" not in html and "Risk_On" not in html
+
+    def test_a_hyphenated_regime_reads_the_same_way(self, client, monkeypatch):
+        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: {"regime": "Risk-Off"})
+        html = client.get("/").get_data(as_text=True)
+        assert "Risk Off" in html
+
+    def test_the_loading_notice_does_not_sit_above_the_title(self):
+        """The first thing the page said was that a lower panel was fetching."""
+        page = open("templates/liquidity.html").read()
+        assert page.index("Command Center") < page.index('id="liq-status-banner"')
