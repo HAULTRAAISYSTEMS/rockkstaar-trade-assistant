@@ -103,7 +103,11 @@
           <span class="cc-what">
             {{ e.title }}
             {% if e.on_watchlist %}<em class="cc-tag">watchlist</em>{% endif %}
-            {% if e.reason %}<small>{{ e.reason }}</small>{% endif %}
+            {# Every earnings row carries the same boilerplate sentence, which
+               says nothing eight times over. Macro reasons are specific and
+               worth the line. #}
+            {% if e.reason and e.kind != 'EARNINGS' %}<small>{{ e.reason }}</small>
+            {% elif e.company_name and e.company_name != e.ticker %}<small>{{ e.company_name }}</small>{% endif %}
           </span>
           <span class="cc-impact {{ 'is-high' if e.impact == 'HIGH' }}">{{ e.impact|title }}</span>
         </div>

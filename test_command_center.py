@@ -548,3 +548,81 @@ class TestTheHeaderRow:
     def test_a_phone_is_still_allowed_to_wrap(self):
         css = open("templates/_liq_scripts.html").read()
         assert ".cc-hero-right { flex-wrap: wrap }" in css
+
+
+class TestThisWeekShowsWhatMatters:
+    """Chronological order alone filled the section with whatever reported
+    soonest. When the earnings feed warmed, eight medium-impact reports for
+    companies the reader does not hold pushed CPI and PPI off the list."""
+
+    def _week(self, monkeypatch, events, earnings, watch=()):
+        summary = {"economic_events": events,
+                   "earnings": {"this_week": earnings}}
+        monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: summary)
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 1)
+        monkeypatch.setattr(legacy, "get_all_watchlists",
+                            lambda uid: [{"id": 1, "name": "Main"}])
+        monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: list(watch))
+        monkeypatch.setattr(legacy, "get_stock_data", lambda t: {})
+        with web_app.app.test_request_context("/opportunity"):
+            return legacy._command_center_context()
+
+    MACRO = [{"date": "2026-09-11", "date_label": "Sep 11", "time": "8:30 AM ET",
+              "event": "Consumer Price Index (CPI)", "impact": "HIGH", "days_away": 6}]
+    NOISE = [{"ticker": f"T{i}", "date": "2026-09-07", "date_label": "Sep 7",
+              "time_label": "TBD", "days_away": 2} for i in range(9)]
+
+    def test_a_high_impact_release_is_not_pushed_off_by_earnings_noise(self, monkeypatch):
+        week = self._week(monkeypatch, self.MACRO, self.NOISE)["week"]
+        assert any("Consumer Price Index" in r["title"] for r in week)
+
+    def test_noise_never_dominates_the_card(self, monkeypatch):
+        """One high-impact release plus nine irrelevant reports used to render
+        as one row of signal and seven of filler."""
+        week = self._week(monkeypatch, self.MACRO, self.NOISE)["week"]
+        assert len(week) == legacy.COMMAND_WEEK_MIN
+
+    def test_a_week_full_of_signal_carries_no_filler_at_all(self, monkeypatch):
+        macro = [dict(self.MACRO[0], event=f"Release {i}", days_away=i + 1)
+                 for i in range(5)]
+        week = self._week(monkeypatch, macro, self.NOISE)["week"]
+        assert len(week) == 5
+        assert not any(r["title"].startswith("T") for r in week)
+
+    def test_a_watchlist_name_reporting_counts_as_signal(self, monkeypatch):
+        earnings = [{"ticker": "NVDA", "date": "2026-09-07", "date_label": "Sep 7",
+                     "time_label": "AMC", "days_away": 2}]
+        week = self._week(monkeypatch, self.MACRO, earnings + self.NOISE,
+                          watch=["NVDA"])["week"]
+        assert any(r["title"].startswith("NVDA") for r in week)
+
+    def test_a_quiet_week_backfills_rather_than_showing_almost_nothing(self, monkeypatch):
+        week = self._week(monkeypatch, [], self.NOISE)["week"]
+        assert len(week) >= 4
+
+    def test_the_backfilled_week_is_still_in_date_order(self, monkeypatch):
+        mixed = ([{"ticker": "LATE", "date": "2026-09-09", "date_label": "Sep 9",
+                   "time_label": "AMC", "days_away": 4}]
+                 + [{"ticker": "SOON", "date": "2026-09-06", "date_label": "Sep 6",
+                     "time_label": "BMO", "days_away": 1}])
+        week = self._week(monkeypatch, [], mixed)["week"]
+        assert [r["days_away"] for r in week] == sorted(r["days_away"] for r in week)
+
+    def test_it_is_still_capped(self, monkeypatch):
+        many = [dict(self.MACRO[0], event=f"Release {i}") for i in range(20)]
+        week = self._week(monkeypatch, many, [])["week"]
+        assert len(week) <= legacy.COMMAND_WEEK
+
+    def test_the_countdown_still_finds_the_high_impact_release(self, monkeypatch):
+        context = self._week(monkeypatch, self.MACRO, self.NOISE)
+        assert "Consumer Price Index" in context["next_up"]["title"]
+
+    def test_nothing_at_all_is_not_an_error(self, monkeypatch):
+        context = self._week(monkeypatch, [], [])
+        assert context["week"] == [] and context["next_up"] is None
+
+    def test_the_earnings_boilerplate_is_not_repeated_down_the_list(self):
+        """Every earnings row carries the same sentence, which says nothing
+        eight times over."""
+        page = open("templates/liquidity.html").read()
+        assert "e.kind != 'EARNINGS'" in page

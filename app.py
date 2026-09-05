@@ -7284,6 +7284,8 @@ def catalyst_calendar():
 # not an archive — anything longer belongs on the page that owns it.
 COMMAND_NEWS = 6
 COMMAND_WEEK = 8
+# A quiet week is padded up to this many rows so the card is not almost empty.
+COMMAND_WEEK_MIN = 4
 COMMAND_SETUPS = 5
 COMMAND_WATCHLIST = 8
 
@@ -7379,12 +7381,34 @@ def _command_center_context() -> dict:
     try:
         rows = _build_catalyst_calendar(summary, tickers)
         upcoming = [r for r in rows if (r.get("days_away") or 99) <= 7]
-        context["week"] = upcoming[:COMMAND_WEEK]
+
+        # Chronological order alone fills this section with whatever reports
+        # soonest. The moment the earnings feed warmed, eight medium-impact
+        # reports for companies the reader does not hold pushed CPI and PPI
+        # off the list — the two things they opened the page to see.
+        #
+        # Filter rather than reorder: a week is a timeline and shuffling it by
+        # importance makes it unreadable. Keep the rows that will move the
+        # market or move something owned, in date order, and only backfill
+        # with the rest if that leaves the section thin.
+        def _matters(row):
+            return (str(row.get("impact", "")).upper() == "HIGH"
+                    or row.get("on_watchlist"))
+
+        signal = [r for r in upcoming if _matters(r)][:COMMAND_WEEK]
+        if len(signal) < COMMAND_WEEK_MIN:
+            # Pad a quiet week up to a card's worth, and no further — the point
+            # is to avoid an almost-empty section, not to let the filler back
+            # in around the rows that matter.
+            rest = [r for r in upcoming if not _matters(r)]
+            signal = signal + rest[:COMMAND_WEEK_MIN - len(signal)]
+        signal.sort(key=lambda r: (r.get("days_away") or 99, r.get("time") or ""))
+        context["week"] = signal
         # The nearest high-impact event, so the strip can count down to the
         # thing that will actually move the tape rather than to the next row.
         context["next_up"] = next(
             (r for r in upcoming if str(r.get("impact", "")).upper() == "HIGH"),
-            upcoming[0] if upcoming else None)
+            (context["week"] or upcoming or [None])[0])
     except Exception as exc:
         logger.debug("command centre: calendar unavailable: %s", exc)
 
