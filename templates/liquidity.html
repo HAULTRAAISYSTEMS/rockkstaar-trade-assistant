@@ -148,10 +148,10 @@
       {% else %}
       {# Saying "nothing cached" to someone who cannot do anything about it is
          not an empty state, it is a shrug. This one says what is happening. #}
-      <p class="cc-empty">
-        {% if news_refreshing %}Fetching catalysts now — they appear on your next load.
-        {% else %}No catalysts available from the connected news feeds.{% endif %}
-      </p>
+      {# The engine records why the feed is empty. Saying "nothing cached" to
+         a reader who cannot act on it is a shrug; its own answer distinguishes
+         a refresh in flight from a missing key from a provider error. #}
+      <p class="cc-empty">{{ news_note or 'No catalysts available from the connected news feeds.' }}</p>
       {% endif %}
     </div>
 

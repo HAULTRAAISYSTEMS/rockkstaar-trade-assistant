@@ -132,7 +132,7 @@ class TestOneColdFeedIsAGapNotAnErrorPage:
             context = legacy._command_center_context()
         assert set(context) == {"week", "news", "setups", "watchlist",
                                 "watchlist_name", "pulse", "next_up",
-                                "news_refreshing"}
+                                "news_refreshing", "news_note"}
 
     def test_no_watchlist_is_not_an_error(self, monkeypatch):
         monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: SUMMARY)
@@ -450,9 +450,10 @@ class TestTheNewsSectionAsksToBeFilled:
     and only startup ever did — so the news stayed blank for anyone who did not
     happen to visit the Intel page first."""
 
-    def _wire(self, monkeypatch, stories, calls):
+    def _wire(self, monkeypatch, stories, calls, status=None):
         monkeypatch.setattr(legacy._intel, "get_intel_summary",
-                            lambda: {"market_news": stories})
+                            lambda: {"market_news": stories,
+                                     "news_status": status or {}})
         monkeypatch.setattr(legacy._intel, "trigger_background_refresh",
                             lambda: calls.append(1))
         monkeypatch.setattr(legacy, "get_active_wl_id", lambda: None)
@@ -494,6 +495,41 @@ class TestTheNewsSectionAsksToBeFilled:
             sess["user_id"] = 1
         html = client.get("/opportunity").get_data(as_text=True)
         assert "Fetching catalysts now" in html
+
+    def test_it_prefers_the_engines_own_explanation(self, monkeypatch):
+        """The engine knows whether it is mid-refresh, missing a key, or
+        holding a provider error. That beats a guess made from an empty list."""
+        calls = []
+        self._wire(monkeypatch, [], calls, status={
+            "configured": True,
+            "message": "News refresh is running. This page will update when "
+                       "provider responses arrive."})
+        with web_app.app.test_request_context("/opportunity"):
+            note = legacy._command_center_context()["news_note"]
+        assert "provider responses arrive" in note
+
+    def test_a_provider_error_is_shown_rather_than_hidden(self, monkeypatch):
+        calls = []
+        self._wire(monkeypatch, [], calls,
+                   status={"configured": True, "last_error": "Finnhub 429 rate limited"})
+        with web_app.app.test_request_context("/opportunity"):
+            note = legacy._command_center_context()["news_note"]
+        assert "429" in note
+
+    def test_a_missing_api_key_says_which_keys(self, monkeypatch):
+        """The one empty state the reader can actually do something about."""
+        calls = []
+        self._wire(monkeypatch, [], calls, status={"configured": False})
+        with web_app.app.test_request_context("/opportunity"):
+            note = legacy._command_center_context()["news_note"]
+        assert "FINNHUB_API_KEY" in note
+
+    def test_no_status_still_says_something_useful(self, monkeypatch):
+        calls = []
+        self._wire(monkeypatch, [], calls, status={})
+        with web_app.app.test_request_context("/opportunity"):
+            note = legacy._command_center_context()["news_note"]
+        assert note
 
 
 class TestTheHeaderRow:

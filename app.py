@@ -7333,7 +7333,7 @@ def _command_center_context() -> dict:
     """
     context = {"week": [], "news": [], "setups": [], "watchlist": [],
                "watchlist_name": "", "pulse": {}, "next_up": None,
-               "news_refreshing": False}
+               "news_refreshing": False, "news_note": ""}
 
     # The pulse strip: the four numbers that set the tone for everything under
     # them, rendered server-side so the top of the page is never a row of
@@ -7417,6 +7417,24 @@ def _command_center_context() -> dict:
             context["news_refreshing"] = True
         except Exception as exc:
             logger.debug("command centre: could not request a news refill: %s", exc)
+        # The engine already knows why the feed is empty — mid-refresh, no
+        # providers configured, or a provider error it has recorded. Its answer
+        # is better than a guess made from the fact that a list is empty.
+        try:
+            status = summary.get("news_status") or {}
+            context["news_note"] = (
+                status.get("last_error")
+                or status.get("message")
+                or ("Fetching catalysts now — they appear on your next load."
+                    if context["news_refreshing"] else
+                    "No catalysts available from the connected news feeds.")
+            )
+            if not status.get("configured", True):
+                context["news_note"] = (
+                    "No news provider is configured. Set FINNHUB_API_KEY, "
+                    "NEWS_API_KEY or POLYGON_API_KEY to fill this section.")
+        except Exception as exc:
+            logger.debug("command centre: news status unavailable: %s", exc)
 
     # Watchlist and setups, both from the scanner's own cached view. Day change
     # is not stored, and eight quote calls on a landing page is the wrong
