@@ -131,7 +131,7 @@ class TestLevelsAndChangesUseDifferentUnits:
         assert source.count('"chg_unit"') >= 3
 
     def test_the_page_labels_changes_in_billions(self):
-        page = open("templates/liquidity.html").read()
+        page = open("templates/_liq_scripts.html").read()
         assert "'B WoW'" in page and "'B/mo'" in page
         assert "'T WoW'" not in page and "'T/mo'" not in page
 

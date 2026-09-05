@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Macro & Liquidity — Tradestaar Elite{% endblock %}
+
+{% block content %}
+<div class="liq-page">
+
+  <header class="cc-hero">
+    <div class="cc-hero-left">
+      <div class="cc-eyebrow"><span class="cc-dot"></span>Tradestaar Intelligence</div>
+      <h1 class="cc-title">Macro <span>&amp; Liquidity</span></h1>
+    </div>
+    <div class="cc-hero-right">
+      <button class="btn-liq-refresh" onclick="refreshAll()" title="Refresh all data">↺ Refresh</button>
+      <span class="liq-last-updated cc-updated" id="liq-last-updated">Loading…</span>
+    </div>
+  </header>
+
+  <div class="liq-status-banner" id="liq-status-banner" style="display:none;"></div>
+
+{% include "_macro_panels.html" %}
+
+</div><!-- /liq-page -->
+{% endblock %}
+
+{% block scripts %}
+{% include "_liq_scripts.html" %}
+{% endblock %}

@@ -160,12 +160,28 @@ class TestThePage:
     def test_each_section_is_on_the_page(self, client, heading):
         assert heading in client.get("/opportunity").get_data(as_text=True)
 
-    def test_the_pieces_the_reader_asked_to_keep_are_still_there(self, client):
-        """Risk meter, sector money flow and the AI briefing."""
+    def test_the_briefing_stays_on_the_home_page(self, client):
+        assert "ai-brief-card" in client.get("/opportunity").get_data(as_text=True)
+
+    def test_the_deep_macro_panels_moved_off_the_home_page(self, client):
+        """Worth having, not worth scrolling past every morning."""
         html = client.get("/opportunity").get_data(as_text=True)
+        assert "liq-card-flow" not in html
+        assert "liq-card-scanner" not in html
+        assert "liq-card-opp-alerts" not in html
+
+    def test_they_are_all_on_the_macro_page(self, client):
+        html = client.get("/macro").get_data(as_text=True)
         assert "MARKET RISK METER" in html.upper()
         assert "MONEY FLOW" in html.upper()
-        assert "ai-brief-card" in html
+        assert "liq-card-scanner" in html
+
+    def test_the_home_page_keeps_their_headline(self, client):
+        """Nothing is lost — the liquidity score and the sector rotation come
+        up into the pulse strip, with a way through to the detail."""
+        html = client.get("/opportunity").get_data(as_text=True)
+        assert "Liquidity" in html
+        assert "/macro" in html
 
     def test_nothing_leaked_an_unrendered_expression(self, client):
         html = client.get("/opportunity").get_data(as_text=True)
@@ -176,7 +192,7 @@ class TestThePage:
         assert "liq-command-strip" not in page
 
     def test_every_class_the_sections_use_is_styled(self):
-        page = open("templates/liquidity.html").read()
+        page = rendered()
         for name in ("cc-hero", "cc-eyebrow", "cc-dot", "cc-title",
                      "cc-pulse", "cc-pulse-cell", "cc-pulse-k", "cc-pulse-v",
                      "cc-pulse-next", "cc-split", "cc-trio",
@@ -287,11 +303,23 @@ class TestWhichWatchlistIsShown:
         assert "watchlist_name" in page
 
 
+def rendered(path="/"):
+    """What actually reaches the browser.
+
+    The page is composed from several templates now, so reading one file no
+    longer tells you what the reader sees.
+    """
+    client = web_app.app.test_client()
+    with client.session_transaction() as sess:
+        sess["user_id"] = 1
+    return client.get(path).get_data(as_text=True)
+
+
 class TestTheLayout:
     """The page opened on a 400px narrative banner and named itself second,
     then ran a column of identical full-width slabs."""
 
-    PAGE = open("templates/liquidity.html").read()
+    PAGE = rendered()
 
     def test_the_title_comes_before_the_market_story(self):
         assert self.PAGE.index("Command Center") < self.PAGE.index("market-story-banner")
@@ -411,5 +439,5 @@ class TestTheStripReadsAsEnglish:
 
     def test_the_loading_notice_does_not_sit_above_the_title(self):
         """The first thing the page said was that a lower panel was fetching."""
-        page = open("templates/liquidity.html").read()
+        page = rendered()
         assert page.index("Command Center") < page.index('id="liq-status-banner"')

@@ -1,0 +1,1271 @@
+{# Styles and behaviour shared by the command centre and the macro page.
+
+   Each page renders a subset of the panels, which is why the element lookups
+   for optional panels go through panelEl(): a missing panel has to be a no-op
+   rather than an error that stops everything after it. #}
+
+<style>
+  /* ── Command centre ──────────────────────────────────────────────────────
+     The page used to open on a 400px narrative banner and name itself second,
+     then run a column of identical full-width slabs. Everything read at the
+     same weight, so nothing did.
+
+     Three changes carry the rest: the title comes first in a band rather than
+     a card; the four numbers that set the tone sit on one line above the fold;
+     and the sections run in a grid, so a wide screen shows a glance instead of
+     a scroll. Movement is limited to a rise on load and a lift on hover —
+     enough to feel live, little enough to read a number off. */
+
+  /* Header */
+  .cc-hero {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin: 4px 0 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255,255,255,.07);
+  }
+  .cc-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: #9aa4b2;
+    font: 700 9px/1.6 var(--font-mono, monospace);
+    letter-spacing: .18em;
+    text-transform: uppercase;
+  }
+  .cc-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #3fbf7f;
+    box-shadow: 0 0 0 0 rgba(63,191,127,.7);
+    animation: cc-pulse-dot 2.4s ease-out infinite;
+  }
+  @keyframes cc-pulse-dot {
+    0%   { box-shadow: 0 0 0 0 rgba(63,191,127,.55) }
+    70%  { box-shadow: 0 0 0 7px rgba(63,191,127,0) }
+    100% { box-shadow: 0 0 0 0 rgba(63,191,127,0) }
+  }
+  .cc-title {
+    margin: 5px 0 0;
+    color: #f5f0e6;
+    font: 700 30px/1.1 var(--font-display, system-ui);
+    letter-spacing: .005em;
+  }
+  .cc-title span { color: #f0b53f }
+  .cc-hero-right { display: flex; flex-wrap: wrap; gap: 10px; align-items: center }
+  .cc-updated { color: #64707e; font: 500 10.5px/1.5 var(--font-mono, monospace); white-space: nowrap }
+
+  /* Pulse strip */
+  .cc-pulse {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0,1fr)) 1.7fr;
+    gap: 1px;
+    margin-bottom: 14px;
+    border: 1px solid rgba(255,255,255,.07);
+    border-radius: 12px;
+    background: rgba(255,255,255,.07);
+    overflow: hidden;
+  }
+  .cc-pulse-cell { padding: 11px 14px; background: #0b0d0f }
+  .cc-pulse-k {
+    display: block;
+    color: #64707e;
+    font: 700 8.5px/1.6 var(--font-mono, monospace);
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+  .cc-pulse-v {
+    display: block;
+    margin-top: 2px;
+    color: #f5f0e6;
+    font: 700 19px/1.2 var(--font-mono, monospace);
+  }
+  .cc-pulse-v.is-up { color: #3fbf7f }
+  .cc-pulse-v.is-down { color: #ff6575 }
+  .cc-pulse-next .cc-pulse-v { font-size: 14px; line-height: 1.3 }
+  .cc-pulse-next .cc-pulse-v a { color: #f0b53f; text-decoration: none }
+  .cc-pulse-next .cc-pulse-v a:hover { text-decoration: underline }
+  .cc-pulse-next small { display: block; margin-top: 2px; color: #9aa4b2; font: 500 10px var(--font-mono, monospace) }
+  .cc-pulse-v a { color: inherit; text-decoration: none }
+  .cc-pulse-v a:hover { color: #f0b53f }
+  .cc-pulse-v small { color: #64707e; font-size: 11px; font-weight: 500 }
+
+  /* Sector rotation in one line, where the money-flow panel used to be. */
+  .cc-rotation {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+    margin-bottom: 14px; padding: 9px 14px;
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 10px;
+    background: rgba(255,255,255,.015);
+    color: #f5f0e6;
+    font: 500 12px/1.5 var(--font-ui, system-ui);
+  }
+  .cc-rotation em {
+    margin-right: 6px; color: #3fbf7f;
+    font: 700 8.5px var(--font-mono, monospace);
+    letter-spacing: .12em; text-transform: uppercase; font-style: normal;
+  }
+  .cc-rotation .is-weak em { color: #ff6575 }
+  .cc-rotation a { margin-left: auto; color: #f0b53f; font-size: 11px; text-decoration: none; white-space: nowrap }
+  .cc-rotation a:hover { text-decoration: underline }
+
+  /* Layout */
+  .cc-split { display: grid; grid-template-columns: 1.1fr 1fr; gap: 14px; margin-bottom: 14px }
+  .cc-trio  { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 14px; margin-bottom: 14px }
+
+  .cc-card {
+    position: relative;
+    padding: 15px 17px;
+    border: 1px solid rgba(255,255,255,.07);
+    border-radius: 12px;
+    background: #0b0d0f;
+    overflow: hidden;
+  }
+  .cc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 4px }
+  .cc-head h2 {
+    margin: 0;
+    color: #f5f0e6;
+    font: 700 12px/1.3 var(--font-display, system-ui);
+    letter-spacing: .11em;
+    text-transform: uppercase;
+  }
+  .cc-head h2 em { color: #64707e; font-style: normal; font-weight: 500 }
+  .cc-head a { color: #f0b53f; font-size: 10.5px; text-decoration: none; white-space: nowrap }
+  .cc-head a:hover { text-decoration: underline }
+  .cc-empty { margin: 12px 0 0; color: #9aa4b2; font-size: 12.5px; line-height: 1.55 }
+
+  /* Today's read */
+  .cc-story-glow { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent, #f0b53f); opacity: .75 }
+  .cc-story-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 6px }
+  .cc-chip {
+    padding: 2px 7px;
+    border-radius: 3px;
+    font: 700 9px/1.6 var(--font-mono, monospace);
+    letter-spacing: .07em;
+  }
+  .cc-chip-gold { background: rgba(240,181,63,.09); color: #f0b53f; border: 1px solid rgba(240,181,63,.2) }
+  .cc-story-headline { margin-bottom: 7px; color: #f5f0e6; font: 700 15px/1.35 var(--font-ui, system-ui) }
+  .cc-story-bullets { display: flex; flex-direction: column; gap: 4px }
+  .cc-story-perms { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px }
+
+  /* This week */
+  .cc-week { display: grid; gap: 1px; margin-top: 10px }
+  .cc-week-row {
+    display: grid;
+    grid-template-columns: 72px minmax(0,1fr) auto;
+    gap: 11px;
+    align-items: start;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border-left: 2px solid transparent;
+    transition: background .15s ease;
+  }
+  .cc-week-row:hover { background: rgba(255,255,255,.035) }
+  .cc-week-row.is-high { border-left-color: rgba(255,101,117,.5) }
+  /* The next day or two carries the most weight — it is the thing you can
+     still act on. */
+  .cc-week-row.is-imminent { background: rgba(240,181,63,.06); border-left-color: #f0b53f }
+  .cc-when { display: grid }
+  .cc-when b { color: #f5f0e6; font: 700 11px/1.4 var(--font-mono, monospace) }
+  .cc-when small { color: #64707e; font: 500 9.5px/1.4 var(--font-mono, monospace) }
+  .cc-what { color: #f5f0e6; font-size: 13px; line-height: 1.4; min-width: 0 }
+  .cc-what small { display: block; margin-top: 2px; color: #9aa4b2; font-size: 11.5px; line-height: 1.5 }
+  .cc-impact { color: #64707e; font: 700 8.5px/1.6 var(--font-mono, monospace); letter-spacing: .08em }
+  .cc-impact.is-high { color: #ff6575 }
+
+  /* News */
+  .cc-news { display: grid; gap: 11px; margin-top: 10px }
+  .cc-news-row { padding-bottom: 11px; border-bottom: 1px solid rgba(255,255,255,.05) }
+  .cc-news-row:last-child { border-bottom: 0; padding-bottom: 0 }
+  .cc-news-top { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 3px }
+  .cc-sym { color: #f0b53f; font: 700 11px/1.4 var(--font-mono, monospace); text-decoration: none }
+  .cc-tag {
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(255,255,255,.06);
+    color: #9aa4b2;
+    font: 700 8px/1.6 var(--font-mono, monospace);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    font-style: normal;
+  }
+  .cc-tag-critical, .cc-tag-high { background: rgba(255,82,99,.14); color: #ff6575 }
+  .cc-headline { display: block; color: #f5f0e6; font-size: 13px; line-height: 1.42; text-decoration: none }
+  a.cc-headline:hover { color: #f0b53f }
+  .cc-meta { margin-top: 3px; color: #64707e; font: 500 10px/1.5 var(--font-mono, monospace) }
+  .cc-why { margin: 5px 0 0; color: #9aa4b2; font-size: 11.5px; line-height: 1.5 }
+
+  /* Rows */
+  .cc-rows { display: grid; gap: 1px; margin-top: 10px }
+  .cc-row {
+    display: grid;
+    grid-template-columns: 50px minmax(0,1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 10px;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: background .15s ease, transform .15s ease;
+  }
+  .cc-row:hover { background: rgba(255,255,255,.045); transform: translateX(2px) }
+  .cc-row-sym { color: #f0b53f; font: 700 12px/1.4 var(--font-mono, monospace) }
+  .cc-row-mid { min-width: 0 }
+  .cc-row-mid b { display: block; color: #f5f0e6; font: 500 12.5px/1.35 var(--font-ui, system-ui); overflow-wrap: anywhere }
+  .cc-row-mid small { color: #64707e; font-size: 10.5px }
+  .cc-row-price { color: #f5f0e6; font: 700 13px/1.3 var(--font-mono, monospace) }
+  /* The score doubles as its own bar, so a 9 and a 5 differ at a glance
+     rather than only on reading. */
+  .cc-score {
+    position: relative;
+    min-width: 30px;
+    padding: 3px 0 5px;
+    color: #f5f0e6;
+    font: 700 14px/1 var(--font-mono, monospace);
+    text-align: center;
+  }
+  .cc-score::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 2px;
+    border-radius: 1px;
+    background: linear-gradient(90deg, #f0b53f var(--fill, 0%), rgba(255,255,255,.08) var(--fill, 0%));
+  }
+
+  /* Load-in. One rise, staggered, then still — a page that keeps moving is
+     harder to read a number off, not easier. */
+  .cc-rise { animation: cc-rise .42s cubic-bezier(.22,.61,.36,1) both }
+  .cc-d1 { animation-delay: .04s } .cc-d2 { animation-delay: .08s }
+  .cc-d3 { animation-delay: .12s } .cc-d4 { animation-delay: .16s }
+  .cc-d5 { animation-delay: .20s }
+  @keyframes cc-rise { from { opacity: 0; transform: translateY(9px) } to { opacity: 1; transform: none } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cc-rise { animation: none }
+    .cc-dot { animation: none }
+    .cc-row:hover { transform: none }
+  }
+
+  @media (max-width: 1100px) { .cc-trio { grid-template-columns: 1fr 1fr } }
+  @media (max-width: 900px) {
+    .cc-split, .cc-trio { grid-template-columns: 1fr }
+    .cc-pulse { grid-template-columns: repeat(2, minmax(0,1fr)) }
+    .cc-rotation a { margin-left: 0 }
+    .cc-pulse-next { grid-column: 1 / -1 }
+    .cc-title { font-size: 24px }
+  }
+
+  /* The briefing is written once in the morning. When it is old, or when the
+     live regime has moved away from what it concluded, the card says so
+     rather than presenting a stale read as a current one. */
+  .ai-brief-time.is-stale { color: #f0b53f }
+  .ai-brief-conflict {
+    margin: 8px 0 0;
+    padding: 7px 9px;
+    border-left: 2px solid #f0b53f;
+    background: rgba(240, 181, 63, .08);
+    border-radius: 0 5px 5px 0;
+    color: #f5f0e6;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  
+/* ── Liquidity Page Styles ───────────────────────────────────────────── */
+.liq-page { --elite-ink:#060708; padding:0 0 4rem; max-width:1600px; margin:0 auto; position:relative; font-family:var(--font-ui); }
+.liq-page:before { display:none; }
+.market-story-banner { position:relative; overflow:hidden; margin-bottom:1rem; padding:14px 16px; border:1px solid var(--elite-border); border-radius:var(--elite-radius-lg); background:linear-gradient(145deg,rgba(23,27,33,.96),rgba(13,16,20,.98)); box-shadow:var(--elite-shadow); }
+.market-story-kicker { color:var(--elite-gold); font:800 9px var(--font-display); letter-spacing:.14em; text-transform:uppercase; }
+.market-story-headline { margin-bottom:6px; color:var(--elite-copy); font:700 14px/1.35 var(--font-ui); }
+.market-story-action { flex-shrink:0; padding:4px 0; color:var(--elite-gold-bright); font:700 9px var(--font-display); letter-spacing:.08em; text-decoration:none; white-space:nowrap; }
+
+/* Status banner (weekend / stale / loading) */
+.liq-status-banner { padding:.55rem 1.25rem; border-radius:8px; font-size:.78rem; margin-bottom:.75rem;
+  display:flex; align-items:center; gap:.6rem; }
+.liq-status-banner.banner-weekend { background:rgba(229,185,79,.08); border:1px solid var(--elite-border); color:var(--elite-gold-bright); }
+.liq-status-banner.banner-stale   { background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.2); color:#fde68a; }
+.liq-status-banner.banner-loading { background:rgba(100,116,139,.08);border:1px solid rgba(100,116,139,.2); color:#94a3b8; }
+
+@keyframes elite-pulse { 50% { opacity:.5; transform:scale(.8); } }
+
+.liq-mode-toggle{ display:flex; gap:.25rem; background:rgba(3,6,12,.72); border:1px solid rgba(246,185,74,.14); border-radius:10px; padding:.24rem; backdrop-filter:blur(12px); }
+.liq-mode-btn{ background:transparent; border:none; color:#64748b; padding:.35rem .75rem; border-radius:6px; cursor:pointer; font-size:.8rem; font-weight:600; transition:.15s; }
+.liq-mode-btn.active{ background:linear-gradient(135deg,#f5c15e,#d98b18); color:#171006; box-shadow:0 5px 18px rgba(246,185,74,.2); }
+
+.btn-liq-refresh{ background:rgba(15,20,30,.82); border:1px solid #2b3444; color:#bdc6d5; padding:.42rem .8rem; border-radius:8px; cursor:pointer; font-size:.76rem; }
+.btn-liq-refresh:hover{ border-color:var(--elite-gold); color:var(--elite-gold-bright); }
+.liq-last-updated{ font-size:.72rem; color:#475569; }
+
+/* ── Cards ────────────────────────────────────────────────────── */
+.liq-card{ position:relative; overflow:hidden; background:linear-gradient(145deg,rgba(23,27,33,.94),rgba(13,16,20,.96)); border:1px solid var(--elite-hairline); border-radius:var(--elite-radius-lg); padding:1.25rem; margin-bottom:1rem; box-shadow:var(--elite-shadow); transition:border-color .2s,transform .2s; }
+.liq-card:before { content:""; position:absolute; left:0; right:0; top:0; height:1px; background:linear-gradient(90deg,transparent,rgba(246,185,74,.45),transparent); opacity:.45; }
+.liq-card:hover { border-color:rgba(246,185,74,.22); }
+.liq-card-header{ display:flex; align-items:center; gap:.75rem; margin-bottom:1rem; flex-wrap:wrap; }
+.liq-card-title{ font-size:.95rem; font-weight:750; color:#f4f7fb; letter-spacing:-.01em; }
+.liq-card-sub{ font-size:.75rem; color:#64748b; }
+.liq-badge{ padding:.2rem .65rem; border-radius:20px; font-size:.72rem; font-weight:700; background:#1e293b; color:#94a3b8; }
+.liq-badge-risk-on  { background:rgba(16,185,129,.15); color:#10b981; border:1px solid rgba(16,185,129,.3); }
+.liq-badge-neutral  { background:rgba(245,158,11,.1);  color:#f59e0b; border:1px solid rgba(245,158,11,.25); }
+.liq-badge-risk-off { background:rgba(239,68,68,.12);  color:#ef4444; border:1px solid rgba(239,68,68,.25); }
+
+/* ── Row 1 ────────────────────────────────────────────────────── */
+.liq-row-top{ display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+@media(max-width:900px){ .liq-row-top{ grid-template-columns:1fr; } }
+
+/* Score ring */
+.liq-score-ring-wrap{ display:flex; align-items:center; gap:1.25rem; margin-bottom:1rem; }
+.liq-score-ring{ width:80px; height:80px; border-radius:50%; border:4px solid #1e293b; display:flex; flex-direction:column; align-items:center; justify-content:center; flex-shrink:0; transition:border-color .4s; }
+.liq-score-ring.ring-green { border-color:#10b981; box-shadow:0 0 20px rgba(16,185,129,.25); }
+.liq-score-ring.ring-yellow{ border-color:#f59e0b; box-shadow:0 0 20px rgba(245,158,11,.2); }
+.liq-score-ring.ring-red   { border-color:#ef4444; box-shadow:0 0 20px rgba(239,68,68,.2); }
+.liq-score-num{ font-size:1.5rem; font-weight:800; color:#f1f5f9; line-height:1; }
+.liq-score-lbl{ font-size:.65rem; color:#475569; }
+.liq-score-label  { font-size:.9rem; font-weight:700; color:#f1f5f9; }
+.liq-score-summary{ font-size:.75rem; color:#64748b; margin-top:.35rem; max-width:280px; line-height:1.4; }
+
+/* FRED grid */
+.liq-fred-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.6rem; margin-bottom:1rem; }
+.liq-fred-row{ background:var(--elite-panel-inset); border:1px solid var(--elite-hairline); border-radius:10px; padding:.75rem .9rem; transition:border-color .18s,transform .18s; }
+.liq-fred-row:hover{ border-color:rgba(246,185,74,.28); transform:translateY(-1px); }
+.liq-fred-row.loading-cell{ opacity:.55; }
+.liq-fred-name{ font-size:.68rem; color:#475569; text-transform:uppercase; letter-spacing:.04em; }
+.liq-fred-val { font-size:1rem; font-weight:700; color:#f1f5f9; margin:.1rem 0; display:flex; align-items:center; gap:.3rem; }
+.liq-fred-arrow{ font-size:.85rem; }
+.liq-fred-arrow.up{ color:#10b981; } .liq-fred-arrow.down{ color:#ef4444; } .liq-fred-arrow.flat{ color:#64748b; }
+.liq-fred-chg { font-size:.72rem; }
+.liq-fred-chg.pos{ color:#10b981; } .liq-fred-chg.neg{ color:#ef4444; }
+.liq-fred-sig { font-size:.68rem; color:#64748b; margin-top:.2rem; line-height:1.3; }
+.liq-fred-date{ font-size:.62rem; color:#334155; margin-top:.2rem; }
+.liq-fred-loading{ color:#475569; font-size:.8rem; padding:1rem; }
+.liq-fred-note{ font-size:.65rem; color:#334155; margin-top:.5rem; }
+/* Interpretation text */
+.liq-interpretation{ font-size:.78rem; color:#94a3b8; line-height:1.55; padding:.6rem .75rem;
+  background:#060d18; border:1px solid #1e293b; border-radius:7px; margin-top:.5rem; }
+/* Diagnostics */
+.liq-diag { margin-top:.75rem; padding-top:.65rem; border-top:1px solid #1e293b; }
+.liq-diag-title { font-size:.65rem; color:#475569; text-transform:uppercase; letter-spacing:.06em; margin-bottom:.4rem; }
+.liq-diag-grid { display:flex; flex-wrap:wrap; gap:.35rem; }
+.liq-diag-pill { padding:.15rem .55rem; border-radius:12px; font-size:.65rem; font-weight:600; }
+.diag-ok  { background:rgba(16,185,129,.1); color:#10b981; }
+.diag-warn{ background:rgba(245,158,11,.1); color:#f59e0b; }
+.diag-err { background:rgba(239,68,68,.1);  color:#ef4444; }
+.diag-info{ background:rgba(100,116,139,.1);color:#94a3b8; }
+
+/* Alerts */
+.liq-alerts-section{ margin:.5rem 0; }
+.liq-alert-row{ display:flex; align-items:flex-start; gap:.6rem; padding:.5rem .7rem; border-radius:7px; margin-bottom:.4rem; font-size:.78rem; line-height:1.4; }
+.liq-alert-row.bullish { background:rgba(16,185,129,.08); border-left:3px solid #10b981; color:#a7f3d0; }
+.liq-alert-row.bearish { background:rgba(239,68,68,.08);  border-left:3px solid #ef4444; color:#fca5a5; }
+.liq-alert-row.caution { background:rgba(245,158,11,.08); border-left:3px solid #f59e0b; color:#fde68a; }
+
+/* Yield grid */
+.liq-yield-grid{ display:grid; grid-template-columns:1fr 1fr; gap:.5rem; margin-bottom:.75rem; }
+.liq-yield-row{ background:var(--elite-panel-inset); border:1px solid var(--elite-hairline); border-radius:10px; padding:.7rem .8rem; }
+.liq-yield-name{ font-size:.68rem; color:#475569; }
+.liq-yield-val { font-size:.95rem; font-weight:700; color:#f1f5f9; }
+.liq-yield-sub { font-size:.68rem; color:#64748b; }
+
+/* Risk bar */
+.liq-risk-meter-wrap{ margin-bottom:1rem; }
+.liq-risk-bar-container{ position:relative; }
+.liq-risk-bar-track{ height:12px; border-radius:6px; background:linear-gradient(to right,#ef4444 0%,#f59e0b 40%,#10b981 100%); position:relative; margin:.5rem 0; }
+.liq-risk-pointer{ position:absolute; top:-4px; width:20px; height:20px; border-radius:50%; background:#f1f5f9; border:3px solid #0f172a; transform:translateX(-50%); transition:left .5s ease; }
+.liq-risk-labels{ display:flex; justify-content:space-between; font-size:.68rem; color:#475569; }
+
+.liq-regime-box{ background:#080f1a; border:1px solid #1e293b; border-radius:8px; padding:.75rem; font-size:.8rem; line-height:1.5; }
+.liq-regime-box .reg-label{ font-weight:700; color:#f1f5f9; font-size:.9rem; margin-bottom:.25rem; }
+.liq-regime-box .reg-signal{ color:#94a3b8; }
+
+/* ── Money Flow Grid ───────────────────────────────────────────── */
+.liq-flow-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:.5rem; }
+.liq-flow-cell{ background:var(--elite-panel-inset); border:1px solid var(--elite-hairline); border-radius:11px; padding:.75rem .85rem; cursor:pointer; transition:.18s; }
+.liq-flow-cell:hover{ border-color:var(--elite-border-strong); background:var(--elite-panel-raised); transform:translateY(-2px); box-shadow:0 10px 24px rgba(0,0,0,.22); }
+.liq-flow-ticker{ font-size:.85rem; font-weight:700; color:#f1f5f9; }
+.liq-flow-name  { font-size:.65rem; color:#475569; margin:.05rem 0 .3rem; }
+.liq-flow-score { font-size:.72rem; font-weight:600; padding:.15rem .45rem; border-radius:4px; display:inline-block; }
+.flow-strong { background:rgba(16,185,129,.15); color:#10b981; }
+.flow-in     { background:rgba(52,211,153,.1);  color:#34d399; }
+.flow-neutral{ background:rgba(100,116,139,.12);color:#94a3b8; }
+.flow-out    { background:rgba(251,146,60,.1);  color:#fb923c; }
+.flow-weak   { background:rgba(239,68,68,.12);  color:#ef4444; }
+.liq-flow-chg{ font-size:.72rem; margin-top:.25rem; }
+.liq-flow-chg.pos{ color:#10b981; } .liq-flow-chg.neg{ color:#ef4444; }
+
+/* ── Scanner ──────────────────────────────────────────────────── */
+.liq-scan-controls{ display:flex; gap:.5rem; align-items:center; margin-left:auto; }
+.liq-ticker-input{ background:#080f1a; border:1px solid #1e293b; color:#f1f5f9; border-radius:6px; padding:.35rem .65rem; font-size:.8rem; width:200px; }
+.btn-liq-scan{ background:linear-gradient(135deg,#f5c15e,#dc8c17); border:none; color:#171006; padding:.42rem .85rem; border-radius:7px; cursor:pointer; font-size:.78rem; font-weight:800; }
+.btn-liq-scan:hover{ filter:brightness(1.08); }
+
+.liq-scan-tabs{ display:flex; gap:.25rem; flex-wrap:wrap; border-bottom:1px solid #1e293b; margin-bottom:1rem; padding-bottom:.5rem; }
+.liq-tab{ background:transparent; border:1px solid transparent; color:#64748b; padding:.35rem .75rem; border-radius:7px; cursor:pointer; font-size:.78rem; font-weight:600; transition:.15s; }
+.liq-tab:hover{ color:#94a3b8; border-color:#1e293b; }
+.liq-tab.active{ background:rgba(246,185,74,.12); color:var(--elite-gold-bright); border-color:rgba(246,185,74,.28); }
+
+/* Scanner table */
+.liq-scan-table{ width:100%; border-collapse:collapse; font-size:.8rem; }
+.liq-scan-table th{ color:#475569; font-weight:600; text-align:left; padding:.5rem .75rem; border-bottom:1px solid #1e293b; font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; }
+.liq-scan-table td{ padding:.6rem .75rem; border-bottom:1px solid #0f1724; color:#cbd5e1; }
+.liq-scan-table tr:hover td{ background:#080f1a; }
+.liq-scan-table tr:last-child td{ border-bottom:none; }
+
+.grade-badge{ display:inline-block; padding:.15rem .5rem; border-radius:5px; font-size:.72rem; font-weight:700; }
+.grade-Ap   { background:rgba(16,185,129,.2); color:#10b981; }
+.grade-A    { background:rgba(52,211,153,.15);color:#34d399; }
+.grade-Bp   { background:rgba(255, 122, 24,.15);color:#FFA94D; }
+.grade-B    { background:rgba(100,116,139,.15);color:#94a3b8; }
+.grade-C    { background:rgba(239,68,68,.1);  color:#f87171; }
+
+.action-badge{ display:inline-block; padding:.15rem .55rem; border-radius:5px; font-size:.72rem; font-weight:600; white-space:nowrap; }
+.action-Accumulate { background:rgba(16,185,129,.15); color:#10b981; }
+.action-Watch      { background:rgba(255, 122, 24,.12); color:#FFA94D; }
+.action-Breakout   { background:rgba(245,158,11,.15); color:#f59e0b; }
+.action-Extended   { background:rgba(239,68,68,.1);   color:#f87171; }
+.action-Avoid      { background:rgba(100,116,139,.12);color:#64748b; }
+.action-Pullback   { background:rgba(251,146,60,.1);  color:#fb923c; }
+
+.btn-view-report{ background:#1e293b; border:1px solid #334155; color:#94a3b8; padding:.25rem .6rem; border-radius:5px; cursor:pointer; font-size:.72rem; }
+.btn-view-report:hover{ background:#334155; color:#f1f5f9; }
+
+.liq-empty-state{ padding:2rem; text-align:center; color:#475569; font-size:.85rem; }
+
+/* ── Research Report ──────────────────────────────────────────── */
+.liq-report-ticker{ font-size:1.1rem; font-weight:800; color:#FF7A18; }
+.btn-close-report{ margin-left:auto; background:#1e293b; border:1px solid #334155; color:#94a3b8; padding:.3rem .7rem; border-radius:6px; cursor:pointer; font-size:.8rem; }
+
+.liq-report-body{ display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:1rem; }
+.liq-report-section{ background:#080f1a; border:1px solid #1e293b; border-radius:10px; padding:1rem; }
+.liq-report-section h4{ font-size:.8rem; font-weight:700; color:#FF7A18; text-transform:uppercase; letter-spacing:.06em; margin:0 0 .75rem; }
+.liq-report-row{ display:flex; justify-content:space-between; align-items:flex-start; padding:.35rem 0; border-bottom:1px solid #0f1724; font-size:.8rem; }
+.liq-report-row:last-child{ border-bottom:none; }
+.liq-report-label{ color:#64748b; }
+.liq-report-val  { color:#f1f5f9; font-weight:600; text-align:right; max-width:55%; }
+.liq-report-val.pos{ color:#10b981; } .liq-report-val.neg{ color:#ef4444; }
+
+.liq-thesis-box{ background:#080f1a; border:1px solid #1e293b; border-radius:10px; padding:1rem; grid-column:1/-1; }
+.liq-thesis-box h4{ font-size:.8rem; font-weight:700; color:#FF7A18; text-transform:uppercase; letter-spacing:.06em; margin:0 0 .5rem; }
+.liq-thesis-text{ font-size:.82rem; color:#94a3b8; line-height:1.6; }
+
+.liq-score-bar-wrap{ margin:1rem 0; }
+.liq-score-bar-row{ display:flex; align-items:center; gap:.5rem; margin-bottom:.35rem; font-size:.75rem; }
+.liq-score-bar-label{ width:150px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.liq-score-bar-track{ flex:1; height:6px; background:#1e293b; border-radius:3px; overflow:hidden; }
+.liq-score-bar-fill { height:100%; border-radius:3px; background:#FF7A18; transition:width .4s; }
+.liq-score-bar-pts  { width:30px; text-align:right; color:#94a3b8; }
+
+/* Opportunity alerts */
+.liq-opp-alerts-list{ display:flex; flex-direction:column; gap:.4rem; }
+.liq-opp-alert{ display:flex; align-items:flex-start; gap:.75rem; padding:.6rem .85rem; border-radius:8px; font-size:.8rem; line-height:1.4; }
+.liq-opp-alert.breakout   { background:rgba(245,158,11,.08); border-left:3px solid #f59e0b; }
+.liq-opp-alert.hidden_gem { background:rgba(16,185,129,.08); border-left:3px solid #10b981; }
+.liq-opp-alert.rs_leader  { background:rgba(255, 122, 24,.08); border-left:3px solid #FF7A18; }
+.liq-opp-alert.macro      { background:rgba(100,116,139,.08);border-left:3px solid #475569; }
+.liq-opp-alert.w52_high   { background:rgba(245,158,11,.08); border-left:3px solid #f59e0b; }
+.liq-opp-alert-ticker{ font-weight:700; color:#f1f5f9; min-width:45px; }
+.liq-opp-alert-msg   { color:#cbd5e1; flex:1; }
+.liq-opp-score{ font-size:.68rem; color:#475569; margin-left:auto; white-space:nowrap; }
+.liq-badge-count{ min-width:24px; text-align:center; }
+
+/* ── AI Morning Briefing card ── */
+.ai-brief-card {
+  position:relative;
+  overflow:hidden;
+  background: linear-gradient(120deg, rgba(34,25,10,.62) 0%, rgba(12,16,24,.98) 42%, rgba(8,12,19,.98) 100%);
+  border: 1px solid rgba(246,185,74,.24);
+  border-radius: 16px;
+  padding: 1.15rem 1.3rem;
+  margin-bottom: 1rem;
+  box-shadow:0 14px 35px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.025);
+  transition: border-color .2s,transform .2s;
+}
+.ai-brief-card:after { content:"AI"; position:absolute; right:1rem; bottom:-1.5rem; font-size:6.5rem; line-height:1; font-weight:900; letter-spacing:-.1em; color:rgba(246,185,74,.025); pointer-events:none; }
+.ai-brief-card:hover { border-color: rgba(246,185,74,.4); transform:translateY(-1px); }
+.ai-brief-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:.6rem; }
+.ai-brief-label { font-size:.72rem; font-weight:800; color:var(--elite-gold); text-transform:uppercase; letter-spacing:.1em; display:flex; align-items:center; gap:.45rem; }
+.ai-brief-badge { padding:.15rem .55rem; border-radius:10px; font-size:.68rem; font-weight:700; letter-spacing:.04em; }
+.ai-brief-badge.risk-on  { background:rgba(34,197,94,.14);  color:#22c55e; border:1px solid rgba(34,197,94,.3); }
+.ai-brief-badge.risk-off { background:rgba(239,68,68,.14);  color:#ef4444; border:1px solid rgba(239,68,68,.3); }
+.ai-brief-badge.neutral  { background:rgba(148,163,184,.12);color:#94a3b8; border:1px solid rgba(148,163,184,.25); }
+.ai-brief-vix { font-size:.72rem; color:#64748b; margin-bottom:.45rem; }
+.ai-brief-text { font-size:.82rem; line-height:1.55; color:#cbd5e1; margin-bottom:.6rem; }
+.ai-brief-tickers { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.5rem; }
+.ai-brief-chip { font-size:.68rem; font-weight:700; padding:.15rem .5rem; border-radius:6px; background:rgba(246,185,74,.1); color:var(--elite-gold-bright); border:1px solid rgba(246,185,74,.2); text-decoration:none; transition:.15s; }
+.ai-brief-chip:hover { background:rgba(246,185,74,.22); }
+.ai-brief-footer { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding-top:.5rem; border-top:1px solid rgba(30,41,59,.7); }
+.ai-brief-time { font-size:.65rem; color:#475569; }
+.ai-brief-refresh { font-size:.68rem; padding:.2rem .6rem; border-radius:6px; background:transparent; border:1px solid #334155; color:#94a3b8; cursor:pointer; transition:.15s; }
+.ai-brief-refresh:hover { border-color:#FFA94D; color:#FFA94D; }
+.ai-brief-skeleton { height:56px; border-radius:6px; background:linear-gradient(90deg,rgba(30,41,59,.6) 25%,rgba(51,65,85,.5) 50%,rgba(30,41,59,.6) 75%); background-size:200% 100%; animation:brief-shimmer 1.4s infinite; }
+@keyframes brief-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+.ai-brief-err { font-size:.75rem; color:#475569; padding:.25rem 0; }
+
+/* Shared Tradestaar neutral/gold vocabulary. Green and red remain reserved
+   for actual market direction; decorative blue/slate surfaces are removed. */
+.liq-subtitle,.liq-last-updated,.liq-card-sub,.liq-score-summary,
+.liq-fred-sig,.liq-yield-sub,.liq-flow-name,.liq-report-label,
+.liq-score-bar-label,.liq-opp-score,.ai-brief-vix,.ai-brief-time { color:var(--elite-faint); }
+.liq-card-title,.liq-score-num,.liq-score-label,.liq-fred-val,
+.liq-yield-val,.liq-regime-box .reg-label,.liq-flow-ticker,
+.liq-report-val,.liq-opp-alert-ticker { color:var(--elite-copy); }
+.liq-interpretation,.liq-regime-box,.liq-ticker-input,.liq-report-section,
+.liq-thesis-box { background:var(--elite-panel-inset); border-color:var(--elite-hairline); }
+.liq-scan-tabs,.liq-scan-table th,.liq-scan-table td,.liq-report-row,
+.ai-brief-footer { border-color:var(--elite-hairline); }
+.liq-scan-table tr:hover td { background:rgba(229,185,79,.035); }
+.liq-badge,.btn-view-report,.btn-close-report { background:var(--elite-panel-raised); border-color:var(--elite-hairline); color:var(--elite-muted); }
+.btn-view-report:hover,.btn-close-report:hover { background:rgba(229,185,79,.08); border-color:var(--elite-border-strong); color:var(--elite-gold-bright); }
+.ai-brief-card { background:linear-gradient(145deg,rgba(23,27,33,.96),rgba(13,16,20,.98) 65%,rgba(43,32,11,.5)); border-color:var(--elite-border); border-radius:var(--elite-radius-lg); box-shadow:var(--elite-shadow); }
+.ai-brief-text,.liq-thesis-text,.liq-opp-alert-msg { color:var(--elite-copy); }
+.ai-brief-refresh { border-color:var(--elite-hairline); color:var(--elite-muted); }
+.ai-brief-refresh:hover { border-color:var(--elite-gold); color:var(--elite-gold-bright); }
+
+@media(max-width:1100px) {
+}
+@media(max-width:700px) {
+  .liq-page { padding:0 0 6rem; }
+  .liq-last-updated { width:100%; }
+}
+@media(max-width:420px) {
+}
+</style>
+
+<script>
+/* The command centre and the macro page share this script, and each renders a
+ * subset of the panels. A lookup for a panel that is not on this page has to
+ * be a no-op rather than a thrown error that stops everything after it, so
+ * these reads go through panelEl(), which hands back a detached element to
+ * absorb the write. Use it only where a panel may genuinely be absent — a
+ * mistyped id should still fail loudly everywhere else.
+ */
+function panelEl(id) {
+  return document.getElementById(id) || document.createElement('div');
+}
+
+/* ─────────────────────────────────────────────────────────────
+   STATE
+───────────────────────────────────────────────────────────── */
+let _mode        = 'both';
+let _scanData    = null;
+let _activeTab   = 'hidden_gems';
+let _liqData     = null;
+let _liqLoading  = true;   // true until first successful load
+
+/* ─────────────────────────────────────────────────────────────
+   UTILS
+───────────────────────────────────────────────────────────── */
+function isWeekend() {
+  const day = new Date().getDay(); // 0=Sun, 6=Sat
+  return day === 0 || day === 6;
+}
+
+function fmtDate(iso) {
+  if (!iso) return null;
+  try {
+    const d = new Date(iso + 'T12:00:00');
+    return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+  } catch { return iso; }
+}
+
+function arrowCss(arrow) {
+  if (arrow === '↑') return 'up';
+  if (arrow === '↓') return 'down';
+  return 'flat';
+}
+
+function fredVal(raw, suffix, loading) {
+  if (raw != null) return raw + (suffix || '');
+  return loading ? '<span style="color:#475569;font-style:italic;font-size:.75rem">Fetching…</span>' : '—';
+}
+
+/* ─────────────────────────────────────────────────────────────
+   INIT
+───────────────────────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  showStatusBanner();
+  loadLiquidity();
+  loadMoneyFlow();
+  runScan();
+  loadAlerts();
+  loadAIBrief(false);
+  fetch('/api/opportunity/refresh', {method:'POST'}).catch(()=>{});
+});
+
+/* ─────────────────────────────────────────────────────────────
+   AI MORNING BRIEFING
+───────────────────────────────────────────────────────────── */
+/* Styles for the age and conflict line live here beside the renderer. */
+function _escB(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function loadAIBrief(forceRefresh) {
+  const url    = '/api/ai_briefing' + (forceRefresh ? '?refresh=true' : '');
+  const body   = document.getElementById('ai-brief-body');
+  const badge  = document.getElementById('ai-brief-badge');
+  const cached = document.getElementById('ai-brief-cached');
+  const time   = document.getElementById('ai-brief-time');
+  const btn    = document.getElementById('ai-brief-refresh-btn');
+  if (btn)  { btn.textContent = '…'; btn.disabled = true; }
+  if (body && forceRefresh) body.innerHTML = '<div class="ai-brief-skeleton"></div>';
+
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      const b    = data.briefing || {};
+      const bias = (b.macro_bias || 'neutral').toLowerCase();
+      if (badge) {
+        badge.className = 'ai-brief-badge ' + (bias === 'risk_on' ? 'risk-on' : bias === 'risk_off' ? 'risk-off' : 'neutral');
+        badge.textContent = bias === 'risk_on' ? '🟢 RISK ON' : bias === 'risk_off' ? '🔴 RISK OFF' : '⚪ NEUTRAL';
+      }
+      if (cached) cached.style.display = b.cached ? '' : 'none';
+      if (body) {
+        const chips = (b.tickers_flagged || []).map(t =>
+          `<a class="ai-brief-chip" href="/stock/${encodeURIComponent(t)}">${_escB(t)}</a>`
+        ).join('');
+        body.innerHTML =
+          (b.vix_level ? `<div class="ai-brief-vix">${_escB(b.vix_level)}</div>` : '') +
+          `<div class="ai-brief-text">${_escB(b.briefing || 'No briefing available.')}</div>` +
+          (chips ? `<div class="ai-brief-tickers"><span style="font-size:.65rem;color:#475569;align-self:center;">Flagged:</span>${chips}</div>` : '');
+      }
+      // A briefing written at 4am used to render with only a date, so it sat
+      // under a live market story all day looking equally current. Say when it
+      // was written, and where the live regime has since moved away from it,
+      // say that too rather than leaving two contradictory panels on screen.
+      if (time) {
+        var age = b.age_minutes == null ? '' :
+          (b.age_minutes < 60 ? b.age_minutes + 'm ago'
+            : Math.round(b.age_minutes / 60) + 'h ago');
+        time.textContent = (b.written_label
+          ? 'Written ' + b.written_label + (age ? ' · ' + age : '')
+          : (b.cached ? 'Cached · ' : 'Generated · ') + (b.date || ''));
+        time.classList.toggle('is-stale', !!b.stale);
+      }
+      var note = document.getElementById('ai-brief-conflict');
+      if (note) {
+        note.textContent = b.conflict || '';
+        note.style.display = b.conflict ? '' : 'none';
+      }
+    })
+    .catch(err => {
+      if (body) body.innerHTML = `<div class="ai-brief-err">Briefing unavailable — ${_escB(err.message)}</div>`;
+      if (time) time.textContent = 'Error loading briefing';
+    })
+    .finally(() => { if (btn) { btn.textContent = '↻ Refresh'; btn.disabled = false; } });
+}
+
+function refreshAIBrief() { loadAIBrief(true); }
+
+/* ─────────────────────────────────────────────────────────────
+   STATUS BANNER (weekend / stale / loading)
+───────────────────────────────────────────────────────────── */
+function showStatusBanner(d) {
+  const el = document.getElementById('liq-status-banner');
+  if (!el) return;
+  const weekend = isWeekend();
+  const stale   = d && d.is_stale;
+  const loading = !d || d.is_loading;
+
+  if (loading && !weekend) {
+    el.className = 'liq-status-banner banner-loading';
+    el.innerHTML = '⏳ Fetching latest macro data from FRED… Available in ~15 seconds.';
+    el.style.display = '';
+  } else if (weekend) {
+    const ageStr = d && d.data_age_hours != null ? ` · Data from ${d.data_age_hours}h ago` : '';
+    el.className = 'liq-status-banner banner-weekend';
+    el.innerHTML = `📅 Weekend — markets closed. Showing latest cached FRED data.${ageStr} Fed balance sheet, yields, and M2 update on business days.`;
+    el.style.display = '';
+  } else if (stale && d.data_age_hours != null) {
+    el.className = 'liq-status-banner banner-stale';
+    el.innerHTML = `⚡ Using cached data from ${d.data_age_hours}h ago · Refreshing in background…`;
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   REFRESH ALL
+───────────────────────────────────────────────────────────── */
+function refreshAll() {
+  panelEl('liq-last-updated').textContent = 'Refreshing…';
+  fetch('/api/opportunity/refresh', {method:'POST'}).catch(()=>{});
+  setTimeout(() => {
+    loadLiquidity();
+    loadMoneyFlow();
+    runScan();
+    loadAlerts();
+  }, 500);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   MODE TOGGLE
+───────────────────────────────────────────────────────────── */
+function setMode(mode) {
+  _mode = mode;
+  document.querySelectorAll('.liq-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  runScan();
+}
+
+/* ─────────────────────────────────────────────────────────────
+   1. FED LIQUIDITY STATUS
+───────────────────────────────────────────────────────────── */
+async function loadLiquidity() {
+  try {
+    const r = await fetch('/api/liquidity/status');
+    const d = await r.json();
+    if (!d.ok) return;
+    _liqData    = d;
+    _liqLoading = false;
+    showStatusBanner(d);
+    renderLiquidityStatus(d);
+    renderRiskMeter(d);
+    updateTimestamp(d);
+  } catch(e) { console.warn('loadLiquidity:', e); }
+}
+
+function renderLiquidityStatus(d) {
+  const loading = d.is_loading || false;
+
+  // Badge
+  const badge = document.getElementById('liq-status-badge');
+  badge.textContent  = d.status_label || d.status;
+  badge.className    = 'liq-badge ' + ({RISK_ON:'liq-badge-risk-on',NEUTRAL:'liq-badge-neutral',RISK_OFF:'liq-badge-risk-off'}[d.status] || 'liq-badge-neutral');
+
+  // Score ring
+  const ring = document.getElementById('liq-score-ring');
+  panelEl('liq-score-num').textContent = loading ? '…' : (d.score ?? '—');
+  ring.className = 'liq-score-ring ' + (loading ? 'ring-yellow' : d.score >= 65 ? 'ring-green' : d.score >= 35 ? 'ring-yellow' : 'ring-red');
+  panelEl('liq-score-label').textContent   = d.status_label || '';
+  panelEl('liq-score-summary').textContent = d.summary || '';
+
+  // Interpretation text
+  const grid = document.getElementById('liq-fred-grid');
+  const bs   = d.balance_sheet || {};
+  const rrp  = d.reverse_repo  || {};
+  const m2   = d.m2            || {};
+  const yc   = d.yield_curve   || {};
+  const rate = d.fed_rate      || {};
+  const tga  = d.tga           || {};
+
+  // Helper: build a FRED cell with value, trend arrow, change, signal, and data date
+  function fredCell(name, val, arrow, chgHtml, sig, dateStr, isLoading) {
+    const arrowHtml = arrow
+      ? `<span class="liq-fred-arrow ${arrowCss(arrow)}">${arrow}</span>` : '';
+    const valHtml = (val != null)
+      ? `<span>${val}</span>${arrowHtml}`
+      : isLoading
+        ? `<span style="color:#475569;font-style:italic;font-size:.78rem">Fetching…</span>`
+        : `<span style="color:#334155">—</span>`;
+    const dateHtml = dateStr
+      ? `<div class="liq-fred-date">As of ${fmtDate(dateStr)}</div>` : '';
+    return `
+    <div class="liq-fred-row${isLoading && val == null ? ' loading-cell' : ''}">
+      <div class="liq-fred-name">${name}</div>
+      <div class="liq-fred-val">${valHtml}</div>
+      ${chgHtml || ''}
+      ${sig ? `<div class="liq-fred-sig">${sig}</div>` : ''}
+      ${dateHtml}
+    </div>`;
+  }
+
+  function chgDiv(val, pos, suffix) {
+    if (val == null) return '';
+    const sign = val > 0 ? '+' : '';
+    const css  = pos === true ? 'pos' : pos === false ? 'neg' : (val > 0 ? 'pos' : val < 0 ? 'neg' : '');
+    return `<div class="liq-fred-chg ${css}">${sign}${val}${suffix || ''}</div>`;
+  }
+
+  grid.innerHTML = [
+    fredCell('Fed Balance Sheet',
+      bs.value != null ? '$' + bs.value + 'T' : null,
+      bs.trend_arrow,
+      chgDiv(bs.chg_wow, bs.expanding, 'B WoW'),
+      bs.signal, bs.data_as_of, loading),
+
+    fredCell('Reverse Repo',
+      rrp.value != null ? '$' + rrp.value + 'T' : null,
+      rrp.trend_arrow,
+      rrp.trend_5d != null ? chgDiv(rrp.trend_5d?.toFixed(1), !rrp.falling_fast && rrp.trend_5d > 0 ? false : true, '% 5d') : '',
+      rrp.signal, rrp.data_as_of, loading),
+
+    fredCell('M2 Money Supply',
+      m2.value != null ? '$' + m2.value + 'T' : null,
+      m2.trend_arrow,
+      m2.chg_yoy != null ? chgDiv(m2.chg_yoy?.toFixed(1), m2.expanding, '% YoY') : '',
+      m2.signal, m2.data_as_of, loading),
+
+    fredCell('Fed Funds Rate',
+      rate.fed_funds != null ? rate.fed_funds + '%' : null,
+      rate.trend_arrow,
+      `<div class="liq-fred-chg ${rate.cutting ? 'pos' : rate.hiking ? 'neg' : ''}">${rate.cutting ? 'Cutting ↓' : rate.hiking ? 'Hiking ↑' : rate.stable ? 'On Hold →' : ''}</div>`,
+      rate.signal, rate.data_as_of, loading),
+
+    fredCell('SOFR',
+      rate.sofr != null ? rate.sofr + '%' : null,
+      null,
+      '',
+      '', rate.sofr_data_as_of || rate.data_as_of, loading),
+
+    fredCell('Treasury Gen Acct',
+      tga.value != null ? '$' + tga.value + 'T' : null,
+      tga.trend_arrow,
+      tga.chg_mow != null ? chgDiv(tga.chg_mow, tga.draining, 'B/mo') : '',
+      tga.signal, tga.data_as_of, loading),
+  ].join('');
+
+  // Interpretation
+  if (d.interpretation && !loading) {
+    const existing = document.getElementById('liq-interpretation');
+    if (!existing) {
+      const interp = document.createElement('div');
+      interp.id = 'liq-interpretation';
+      interp.className = 'liq-interpretation';
+      interp.textContent = d.interpretation;
+      grid.parentNode.insertBefore(interp, grid.nextSibling);
+    } else {
+      existing.textContent = d.interpretation;
+    }
+  }
+
+  // Alerts
+  const alertsEl = document.getElementById('liq-alerts-section');
+  const alerts   = (d.alerts || []).slice(0, 6);
+  if (alerts.length) {
+    alertsEl.innerHTML = alerts.map(a => `
+      <div class="liq-alert-row ${a.type}">
+        <span>${a.type === 'bullish' ? '▲' : a.type === 'bearish' ? '▼' : '◆'}</span>
+        <span>${a.msg}</span>
+      </div>`).join('');
+  }
+
+  // FRED API key note
+  const note = document.getElementById('liq-key-note');
+  if (!d.has_fred_key) {
+    note.innerHTML = ' · <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank" style="color:#FF7A18">Get free FRED API key</a> for higher rate limits → set env var <code style="color:#94a3b8">FRED_API_KEY</code>.';
+  }
+
+  // Diagnostics panel
+  renderDiagnostics(d);
+}
+
+function renderDiagnostics(d) {
+  const diag   = d.diagnostics || {};
+  const el     = document.getElementById('liq-diag');
+  const grid   = document.getElementById('liq-diag-grid');
+  if (!el || !grid) return;
+
+  const pills = [];
+  const keyOk = diag.fred_key_configured;
+  pills.push(`<span class="liq-diag-pill ${keyOk ? 'diag-ok' : 'diag-warn'}">${keyOk ? '✓ FRED API key' : '⚠ No API key (rate-limited)'}</span>`);
+
+  const cnt    = diag.series_count  ?? 0;
+  const total  = diag.series_total  ?? 10;
+  const allOk  = cnt >= total;
+  pills.push(`<span class="liq-diag-pill ${allOk ? 'diag-ok' : cnt > 0 ? 'diag-warn' : 'diag-err'}">${cnt}/${total} series loaded</span>`);
+
+  if (d.data_age_hours != null) {
+    const ageOk = d.data_age_hours < 9;
+    pills.push(`<span class="liq-diag-pill ${ageOk ? 'diag-info' : 'diag-warn'}">Last sync: ${d.data_age_hours}h ago</span>`);
+  } else if (d.is_loading) {
+    pills.push(`<span class="liq-diag-pill diag-warn">Syncing now…</span>`);
+  }
+
+  if (d.is_stale) pills.push(`<span class="liq-diag-pill diag-warn">⚡ Cached data</span>`);
+  if (isWeekend())pills.push(`<span class="liq-diag-pill diag-info">📅 Weekend — FRED updates Mon</span>`);
+
+  // Series availability
+  const seriesOk   = Object.entries(diag.series_loaded || {}).filter(([,v]) => v).map(([k]) => k);
+  const seriesFail = Object.entries(diag.series_loaded || {}).filter(([,v]) => !v).map(([k]) => k);
+  if (seriesFail.length) {
+    pills.push(`<span class="liq-diag-pill diag-err">Missing: ${seriesFail.join(', ')}</span>`);
+  }
+
+  grid.innerHTML = pills.join('');
+  el.style.display = '';
+}
+
+function renderRiskMeter(d) {
+  const score   = d.is_loading ? 50 : (d.score || 50);
+  const pct     = score + '%';
+  panelEl('liq-risk-fill').style.width   = pct;
+  panelEl('liq-risk-pointer').style.left = pct;
+
+  const loading = d.is_loading || false;
+  const yc   = d.yield_curve || {};
+  const rate = d.fed_rate    || {};
+  const grid = document.getElementById('liq-yield-grid');
+
+  function yieldRow(name, val, arrow, sub, dateStr) {
+    const arrowHtml = arrow ? `<span class="liq-fred-arrow ${arrowCss(arrow)}" style="font-size:.8rem">${arrow}</span>` : '';
+    const valHtml   = val != null ? val : (loading ? '<span style="color:#475569;font-size:.75rem;font-style:italic">Fetching…</span>' : '—');
+    const dateHtml  = dateStr ? `<div class="liq-yield-sub" style="font-size:.6rem;margin-top:.15rem">As of ${fmtDate(dateStr)}</div>` : '';
+    return `<div class="liq-yield-row">
+      <div class="liq-yield-name">${name}</div>
+      <div class="liq-yield-val" style="display:flex;align-items:center;gap:.3rem">${valHtml}${arrowHtml}</div>
+      ${sub ? `<div class="liq-yield-sub">${sub}</div>` : ''}
+      ${dateHtml}
+    </div>`;
+  }
+
+  grid.innerHTML = [
+    yieldRow('10Y Yield',     yc.y10 != null ? yc.y10 + '%' : null,     yc.y10_arrow, '', yc.data_as_of),
+    yieldRow('2Y Yield',      yc.y2  != null ? yc.y2  + '%' : null,     yc.y2_arrow,  '', yc.data_as_of),
+    yieldRow('10Y–2Y Spread', yc.spread != null ? yc.spread + '%' : null, null,         yc.status || '', yc.data_as_of),
+    yieldRow('SOFR',          rate.sofr != null ? rate.sofr + '%' : null, null, '', rate.sofr_data_as_of || rate.data_as_of),
+  ].join('');
+
+  // Regime box
+  const regime = document.getElementById('liq-regime-box');
+  if (d.status) {
+    regime.innerHTML = `
+      <div class="reg-label">${d.status_label || d.status}</div>
+      <div class="reg-signal">${d.summary || ''}</div>
+      ${yc.signal ? `<div class="reg-signal" style="margin-top:.35rem">${yc.signal}</div>` : ''}
+    `;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   2. MONEY FLOW
+───────────────────────────────────────────────────────────── */
+async function loadMoneyFlow() {
+  try {
+    const r = await fetch('/api/liquidity/money-flow');
+    const d = await r.json();
+    if (!d.ok) return;
+    renderMoneyFlow(d.money_flow || []);
+  } catch(e) { console.warn('loadMoneyFlow:', e); }
+}
+
+function renderMoneyFlow(mflow) {
+  const grid = document.getElementById('liq-flow-grid');
+  if (!mflow.length) { grid.innerHTML = '<div class="liq-fred-loading">No flow data yet — fetching…</div>'; return; }
+  grid.innerHTML = mflow.map(f => {
+    const chg1d = f.chg_1d != null ? `<div class="liq-flow-chg ${f.chg_1d >= 0 ? 'pos':'neg'}">${f.chg_1d >= 0 ? '+' : ''}${f.chg_1d}% today</div>` : '';
+    const chg5d = f.chg_5d != null ? ` / ${f.chg_5d >= 0 ? '+' : ''}${f.chg_5d}% 5d` : '';
+    return `
+    <div class="liq-flow-cell" onclick="loadOpportunityTicker('${f.ticker}')">
+      <div class="liq-flow-ticker">${f.ticker}</div>
+      <div class="liq-flow-name">${f.name}</div>
+      <span class="liq-flow-score ${f.flow_css}">${f.flow_label}</span>
+      ${f.price ? `<div class="liq-flow-chg" style="color:#64748b;font-size:.68rem;margin-top:.2rem">$${f.price}</div>` : ''}
+      ${chg1d}
+    </div>`;
+  }).join('');
+}
+
+/* ─────────────────────────────────────────────────────────────
+   3. OPPORTUNITY SCAN
+───────────────────────────────────────────────────────────── */
+async function runScan() {
+  const extra = document.getElementById('extra-tickers-input').value.trim();
+  const url   = `/api/opportunity/scan?mode=${_mode}${extra ? '&tickers='+encodeURIComponent(extra) : ''}`;
+  panelEl('scan-sub').textContent = 'Scanning…';
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    if (!d.ok) return;
+    _scanData = d;
+    panelEl('scan-sub').textContent =
+      `${d.total_scanned} stocks scanned — ${(d.hidden_gems||[]).length} hidden gems found`;
+    // When user enters custom tickers, switch to All Results so they can see them
+    if (extra) {
+      showTab('all');
+    } else {
+      renderScanTab(_activeTab);
+    }
+    updateTimestamp();
+  } catch(e) { console.warn('runScan:', e); }
+}
+
+function showTab(tab) {
+  _activeTab = tab;
+  document.querySelectorAll('.liq-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  renderScanTab(tab);
+}
+
+function renderScanTab(tab) {
+  if (!_scanData) return;
+  const content = document.getElementById('liq-scan-content');
+  let rows = [];
+  if      (tab === 'hidden_gems') rows = _scanData.hidden_gems    || [];
+  else if (tab === 'accumulate')  rows = _scanData.accumulate     || [];
+  else if (tab === 'breakouts')   rows = _scanData.breakouts      || [];
+  else if (tab === 'developing')  rows = _scanData.developing     || [];
+  else if (tab === 'invest')      rows = _scanData.invest_watchlist|| [];
+  else                            rows = (_scanData.results || []).slice(0, 50);
+
+  if (!rows.length) {
+    const allCount = (_scanData.results || []).length;
+    const hint = allCount > 0 && tab !== 'all'
+      ? `<br><button class="btn-liq-scan" style="margin-top:.75rem;font-size:.78rem;padding:.3rem .65rem" onclick="showTab('all')">View all ${allCount} scanned results →</button>`
+      : '';
+    content.innerHTML = `<div class="liq-empty-state">No ${tab.replace('_',' ')} opportunities found yet.<br>Fundamentals load in background — check back in ~30 seconds.${hint}</div>`;
+    return;
+  }
+  content.innerHTML = `
+    <table class="liq-scan-table">
+      <thead>
+        <tr>
+          <th>Ticker</th><th>Company / Theme</th><th>Score</th><th>Grade</th>
+          <th>Action</th><th>RS</th><th>Rev Growth</th><th>EPS Growth</th>
+          <th>Analyst</th><th>Reason</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => renderScanRow(r)).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderScanRow(r) {
+  const grade = r.grade || 'C';
+  const gradeKey = grade.replace('+','p');
+  const action = r.action || 'Watch';
+  const actionKey = action.split(' ')[0];
+  const rs     = r.rs_score  != null ? r.rs_score  : '—';
+  const revG   = r.revenue_growth   != null ? `${(r.revenue_growth*100).toFixed(0)}%`  : '—';
+  const epsG   = r.earnings_growth  != null ? `${(r.earnings_growth*100).toFixed(0)}%` : '—';
+  const upside = r.analyst_upside != null ? `+${r.analyst_upside.toFixed(0)}%` : (r.analyst_rec || '—');
+  const reason = (r.reason || '').substring(0, 80);
+
+  return `<tr>
+    <td style="font-weight:700;color:#f1f5f9">${r.ticker}</td>
+    <td style="color:#64748b;font-size:.75rem">${(r.company_name || r.ticker).substring(0,20)}<br><span style="color:#475569;font-size:.68rem">${r.theme || ''}</span></td>
+    <td><span style="font-weight:700;color:${r.confluence_score >= 75 ? '#10b981' : r.confluence_score >= 55 ? '#f59e0b' : '#ef4444'}">${r.confluence_score}</span></td>
+    <td><span class="grade-badge grade-${gradeKey}">${grade} — ${r.grade_label || ''}</span></td>
+    <td><span class="action-badge action-${actionKey.replace(' ','')}">${action}</span></td>
+    <td style="color:${rs >= 70 ? '#10b981' : rs >= 50 ? '#94a3b8' : '#ef4444'}">${rs}</td>
+    <td style="color:${r.revenue_growth > 0.15 ? '#10b981' : '#94a3b8'}">${revG}</td>
+    <td style="color:${r.earnings_growth > 0.15 ? '#10b981' : '#94a3b8'}">${epsG}</td>
+    <td style="font-size:.72rem;color:#94a3b8">${upside}</td>
+    <td style="font-size:.72rem;color:#64748b;max-width:200px">${reason}</td>
+    <td><button class="btn-view-report" onclick="loadReport('${r.ticker}')">Report</button></td>
+  </tr>`;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   7. RESEARCH REPORT
+───────────────────────────────────────────────────────────── */
+async function loadReport(ticker) {
+  panelEl('liq-report-panel').style.display = '';
+  panelEl('report-ticker-label').textContent = ticker;
+  panelEl('liq-report-body').innerHTML = '<div class="liq-fred-loading">Loading research report…</div>';
+  panelEl('liq-report-panel').scrollIntoView({behavior:'smooth'});
+
+  try {
+    const r = await fetch(`/api/opportunity/ticker/${ticker}`);
+    const d = await r.json();
+    if (!d.ok) { panelEl('liq-report-body').innerHTML = '<div class="liq-fred-loading">Error loading report.</div>'; return; }
+    renderReport(d);
+  } catch(e) { console.warn('loadReport:', e); }
+}
+
+function loadOpportunityTicker(ticker) { loadReport(ticker); }
+
+function closeReport() { panelEl('liq-report-panel').style.display = 'none'; }
+
+function renderReport(d) {
+  const rpt = d.report || d;
+  const pctRow = (label, val, isPos) => `
+    <div class="liq-report-row">
+      <span class="liq-report-label">${label}</span>
+      <span class="liq-report-val ${isPos === true ? 'pos' : isPos === false ? 'neg' : ''}">${val || '—'}</span>
+    </div>`;
+
+  // Score breakdown bars
+  const bd = rpt.breakdown || {};
+  const bdHtml = Object.entries(bd).map(([k, v]) => `
+    <div class="liq-score-bar-row">
+      <div class="liq-score-bar-label">${k}</div>
+      <div class="liq-score-bar-track"><div class="liq-score-bar-fill" style="width:${v * 10}%"></div></div>
+      <div class="liq-score-bar-pts">${v}</div>
+    </div>`).join('');
+
+  const grade    = rpt.grade || 'C';
+  const gradeKey = grade.replace('+','p');
+  const action   = rpt.action || 'Watch';
+  const actionKey= action.split(' ')[0];
+
+  panelEl('liq-report-body').innerHTML = `
+    <!-- Header metrics -->
+    <div class="liq-report-section">
+      <h4>Overview</h4>
+      ${pctRow('Company',    rpt.company_name)}
+      ${pctRow('Sector',     rpt.sector)}
+      ${pctRow('Theme',      rpt.theme)}
+      ${pctRow('Price',      rpt.current_price ? '$' + parseFloat(rpt.current_price).toFixed(2) : '—')}
+      ${pctRow('52W High',   rpt.high_52w ? '$' + parseFloat(rpt.high_52w).toFixed(2) : '—')}
+      ${pctRow('52W Low',    rpt.low_52w  ? '$' + parseFloat(rpt.low_52w).toFixed(2)  : '—')}
+      ${pctRow('Market Cap', rpt.market_cap)}
+      <div class="liq-report-row" style="margin-top:.5rem">
+        <span class="grade-badge grade-${gradeKey}" style="font-size:.8rem">${grade} — ${rpt.grade_label || ''}</span>
+        <span class="action-badge action-${actionKey.replace(' ','')}" style="font-size:.8rem">${action}</span>
+      </div>
+    </div>
+
+    <!-- Financials -->
+    <div class="liq-report-section">
+      <h4>${rpt.is_etf ? 'ETF Performance' : 'Financials'}</h4>
+      ${pctRow(rpt.is_etf ? '1Y Return'       : 'Revenue Growth', rpt.revenue_growth,   !rpt.is_etf)}
+      ${pctRow(rpt.is_etf ? '6M Return'       : 'EPS Growth',     rpt.earnings_growth,  !rpt.is_etf)}
+      ${pctRow(rpt.is_etf ? '3M Return'       : 'Op. Margins',    rpt.operating_margins)}
+      ${pctRow(rpt.is_etf ? 'AUM'             : 'Free Cash Flow', rpt.free_cashflow)}
+      ${pctRow(rpt.is_etf ? '30D Volatility'  : 'Debt/Equity',    rpt.debt_to_equity)}
+      ${pctRow('Forward P/E',    rpt.pe_forward)}
+      ${pctRow('PEG Ratio',      rpt.peg_ratio ? rpt.peg_ratio.toFixed(2) + 'x' : '—')}
+    </div>
+
+    <!-- Technicals -->
+    <div class="liq-report-section">
+      <h4>Technical Setup</h4>
+      ${pctRow('EMA 20',       rpt.ema20 ? '$'+rpt.ema20 : '—')}
+      ${pctRow('EMA 50',       rpt.ema50 ? '$'+rpt.ema50 : '—')}
+      ${pctRow('Buy Zone',     rpt.buy_zone)}
+      ${pctRow('Add Zone',     rpt.add_zone)}
+      ${pctRow('Stop Level',   rpt.stop_level)}
+      ${pctRow('Analyst Target', rpt.analyst_target)}
+      ${pctRow('Analyst Rec',  rpt.analyst_rec)}
+      ${pctRow('# Analysts',   rpt.num_analysts)}
+    </div>
+
+    <!-- Macro -->
+    <div class="liq-report-section">
+      <h4>Macro Context</h4>
+      ${pctRow('Liq. Status', rpt.liq_status)}
+      ${pctRow('Risk Level',  rpt.risk_level)}
+      ${(rpt.macro_tailwinds||[]).map(t => pctRow('✅ Tailwind', t, true)).join('')}
+      ${(rpt.macro_headwinds||[]).map(h => pctRow('⚠️ Headwind', h, false)).join('')}
+    </div>
+
+    <!-- Score breakdown -->
+    <div class="liq-report-section">
+      <h4>Confluence Score — ${rpt.confluence_score || d.confluence_score || 0}/100</h4>
+      <div class="liq-score-bar-wrap">${bdHtml}</div>
+      <div style="font-size:.75rem;color:#64748b;margin-top:.5rem">${rpt.reason || ''}</div>
+    </div>
+
+    <!-- Thesis -->
+    <div class="liq-thesis-box">
+      <h4>6–12 Month Investment Thesis</h4>
+      <p class="liq-thesis-text">${rpt.thesis || 'Insufficient data. Fundamentals still loading.'}</p>
+      ${rpt.business_summary ? `<p class="liq-thesis-text" style="margin-top:.75rem;color:#475569;font-size:.75rem">${rpt.business_summary}</p>` : ''}
+    </div>
+  `;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   6. OPPORTUNITY ALERTS
+───────────────────────────────────────────────────────────── */
+async function loadAlerts() {
+  try {
+    const r = await fetch('/api/opportunity/alerts');
+    const d = await r.json();
+    if (!d.ok) return;
+    const alerts = d.alerts || [];
+    panelEl('opp-alert-count').textContent = alerts.length;
+    const list = document.getElementById('liq-opp-alerts-list');
+    if (!alerts.length) {
+      list.innerHTML = '<div class="liq-fred-loading">No active alerts.</div>';
+      return;
+    }
+    list.innerHTML = alerts.slice(0, 20).map(a => {
+      const typeLabel = {breakout:'🚀',hidden_gem:'🌟',rs_leader:'📈','52w_high':'🏔️',macro:'📡'}[a.type] || '◆';
+      return `<div class="liq-opp-alert ${a.type}" onclick="${a.ticker && a.ticker !== 'MACRO' ? `loadReport('${a.ticker}')` : ''}">
+        <span class="liq-opp-alert-ticker">${typeLabel} ${a.ticker || ''}</span>
+        <span class="liq-opp-alert-msg">${a.msg}</span>
+        ${a.score ? `<span class="liq-opp-score">${a.score}/100</span>` : ''}
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('loadAlerts:', e); }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   TIMESTAMP
+───────────────────────────────────────────────────────────── */
+function updateTimestamp(d) {
+  const el  = panelEl('liq-last-updated');
+  if (!el) return;
+  const now = new Date();
+  const time = now.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit',hour12:true});
+  if (d && d.is_stale && d.data_age_hours != null) {
+    el.textContent = `Cached ${d.data_age_hours}h ago · checked ${time}`;
+  } else if (d && d.is_loading) {
+    el.textContent = 'Fetching…';
+  } else {
+    el.textContent = 'Updated ' + time;
+  }
+}
+
+// ── Market Story Banner ──────────────────────────────────────────────────
+const SENTIMENT_STYLES = {
+  bullish:  { bg:'rgba(34,197,94,0.12)',  color:'#22c55e', border:'rgba(34,197,94,0.25)',  glow:'#22c55e' },
+  bearish:  { bg:'rgba(239,68,68,0.12)',  color:'#ef4444', border:'rgba(239,68,68,0.25)',  glow:'#ef4444' },
+  cautious: { bg:'rgba(245,158,11,0.10)', color:'#f59e0b', border:'rgba(245,158,11,0.22)', glow:'#f59e0b' },
+  neutral:  { bg:'rgba(255, 169, 77,0.08)', color:'#FFA94D', border:'rgba(255, 169, 77,0.18)', glow:'#FFA94D' },
+};
+const PERM_STYLES = {
+  'Longs ✓':    'background:rgba(34,197,94,0.10);color:#22c55e;border:1px solid rgba(34,197,94,0.20);',
+  'Longs ✗':    'background:rgba(239,68,68,0.08);color:#ef4444;border:1px solid rgba(239,68,68,0.18);',
+  'Shorts ✓':   'background:rgba(245,158,11,0.10);color:#f59e0b;border:1px solid rgba(245,158,11,0.20);',
+  'Reduce size':'background:rgba(245,158,11,0.10);color:#f59e0b;border:1px solid rgba(245,158,11,0.20);',
+  'Stand aside':'background:rgba(239,68,68,0.10);color:#ef4444;border:1px solid rgba(239,68,68,0.20);',
+};
+
+async function loadMarketStory() {
+  try {
+    const resp = await fetch('/api/market-story');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.ok || !data.story) return;
+
+    const s    = data.story;
+    const st   = SENTIMENT_STYLES[s.sentiment] || SENTIMENT_STYLES.neutral;
+    const banner = document.getElementById('market-story-banner');
+    const glow   = document.getElementById('ms-glow');
+    const hl     = document.getElementById('ms-headline');
+    const sentBadge  = document.getElementById('ms-sentiment-badge');
+    const regimeBadge= document.getElementById('ms-regime-badge');
+    const bulletsDiv = document.getElementById('ms-bullets');
+    const permsDiv   = document.getElementById('ms-permissions');
+
+    if (!banner) return;
+
+    if (glow)  glow.style.background = st.glow;
+    if (hl)    hl.textContent = s.headline || '';
+    if (sentBadge) {
+      sentBadge.textContent = (s.sentiment || 'neutral').toUpperCase();
+      sentBadge.style.cssText = `font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.07em;padding:2px 7px;border-radius:3px;background:${st.bg};color:${st.color};border:1px solid ${st.border};`;
+    }
+    if (regimeBadge && s.regime) regimeBadge.textContent = s.regime.replace(/_/g,' ');
+
+    if (bulletsDiv && s.bullets && s.bullets.length) {
+      bulletsDiv.innerHTML = s.bullets.map(b =>
+        `<div style="font-family:'Inter',sans-serif;font-size:11px;color:#94A3B8;line-height:1.4;">
+           <span style="color:${st.color};margin-right:5px;">›</span>${escapeHtml(b)}
+         </div>`
+      ).join('');
+    }
+
+    if (permsDiv && s.permissions && s.permissions.length) {
+      permsDiv.innerHTML = s.permissions.map(p => {
+        const ps = PERM_STYLES[p] || 'background:rgba(100,116,139,0.08);color:#94A3B8;border:1px solid rgba(100,116,139,0.15);';
+        return `<span style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.07em;padding:2px 8px;border-radius:3px;${ps}">${escapeHtml(p)}</span>`;
+      }).join('');
+    }
+
+    banner.style.display = 'block';
+  } catch(e) {
+    console.warn('market story load failed:', e);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Load story on page init (after a short delay so liquidity data loads first)
+setTimeout(loadMarketStory, 800);
+</script>

@@ -7347,7 +7347,17 @@ def _command_center_context() -> dict:
             "spy_trend": mkt.get("spy_trend") or "",
             "qqq_trend": mkt.get("qqq_trend") or "",
             "leading": (mkt.get("leading_sectors") or [])[:2],
+            "lagging": (mkt.get("weak_sectors") or [])[:2],
         }
+        # The liquidity score is the one number worth keeping from the Fed
+        # panel now that the panel itself lives on /macro.
+        try:
+            import liquidity_engine as _liq
+            status = _liq.get_liquidity_status() or {}
+            context["pulse"]["liquidity"] = status.get("score")
+            context["pulse"]["liquidity_label"] = status.get("status_label") or ""
+        except Exception as exc:
+            logger.debug("command centre: liquidity score unavailable: %s", exc)
     except Exception as exc:
         logger.debug("command centre: market context unavailable: %s", exc)
 
@@ -7428,8 +7438,20 @@ def _command_center_context() -> dict:
 @app.route("/")
 @app.route("/opportunity")
 def liquidity_page():
-    """Morning Command Center — liquidity, risk, sector flow, hidden opportunities."""
+    """Morning Command Center — the market read, in one screen."""
     return render_template("liquidity.html", **_command_center_context())
+
+
+@app.route("/macro")
+def macro_page():
+    """Fed liquidity, the risk meter, sector money flow and the scanner.
+
+    All of this used to sit under the command centre, which is why the landing
+    page ran to several screens. It is worth having and it is not worth
+    scrolling past every morning, so it has its own page and the command
+    centre carries the headline.
+    """
+    return render_template("macro.html")
 
 
 @app.route("/api/liquidity/status")

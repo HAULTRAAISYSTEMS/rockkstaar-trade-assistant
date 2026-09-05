@@ -1,0 +1,146 @@
+{# The deep macro panels: Fed liquidity, the risk meter, sector money flow,
+   the opportunity scanner and its alerts.
+
+   These used to sit on the command centre, which meant the landing page ran
+   to several screens before it finished. They are all worth having and none
+   of them is worth scrolling past every morning, so they live on /macro now
+   and the command centre carries their headline instead. #}
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       ROW 1: FED LIQUIDITY STATUS  +  MARKET RISK METER
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="liq-row liq-row-top">
+
+    <!-- Fed Liquidity Status -->
+    <div class="liq-card liq-card-fed" id="card-fed">
+      <div class="liq-card-header">
+        <span class="liq-card-title">📡 Fed Liquidity Monitor</span>
+        <span class="liq-badge" id="liq-status-badge">—</span>
+      </div>
+      <div class="liq-score-ring-wrap">
+        <div class="liq-score-ring" id="liq-score-ring">
+          <span class="liq-score-num" id="liq-score-num">—</span>
+          <span class="liq-score-lbl">/ 100</span>
+        </div>
+        <div class="liq-score-meta">
+          <div class="liq-score-label" id="liq-score-label">Fetching…</div>
+          <div class="liq-score-summary" id="liq-score-summary"></div>
+        </div>
+      </div>
+
+      <div class="liq-fred-grid" id="liq-fred-grid">
+        <!-- Populated by JS -->
+        <div class="liq-fred-loading">Loading FRED data…</div>
+      </div>
+
+      <div class="liq-alerts-section" id="liq-alerts-section"></div>
+
+      <div class="liq-fred-note" id="liq-fred-note">
+        Data: FRED (Federal Reserve Economic Data). Updated every 8 hours.
+        Cached on disk — available 24/7 including weekends &amp; holidays.
+        <span id="liq-key-note"></span>
+      </div>
+
+      <!-- API Diagnostics -->
+      <div class="liq-diag" id="liq-diag" style="display:none;">
+        <div class="liq-diag-title">API Diagnostics</div>
+        <div class="liq-diag-grid" id="liq-diag-grid"></div>
+      </div>
+    </div>
+
+    <!-- Market Risk Meter -->
+    <div class="liq-card liq-card-risk" id="card-risk">
+      <div class="liq-card-header">
+        <span class="liq-card-title">⚡ Market Risk Meter</span>
+      </div>
+      <div class="liq-risk-meter-wrap">
+        <div class="liq-risk-bar-container">
+          <div class="liq-risk-bar-track">
+            <div class="liq-risk-bar-fill" id="liq-risk-fill"></div>
+            <div class="liq-risk-pointer" id="liq-risk-pointer"></div>
+          </div>
+          <div class="liq-risk-labels">
+            <span>Risk Off</span><span>Neutral</span><span>Risk On</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="liq-yield-grid" id="liq-yield-grid">
+        <!-- Yield curve + rates -->
+      </div>
+
+      <div class="liq-regime-box" id="liq-regime-box">
+        <!-- Market regime from market_engine -->
+      </div>
+    </div>
+
+  </div><!-- /row1 -->
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       ROW 2: SECTOR MONEY FLOW
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="liq-card liq-card-flow">
+    <div class="liq-card-header">
+      <span class="liq-card-title">💸 Sector Money Flow</span>
+      <span class="liq-card-sub">Where institutional capital is rotating</span>
+    </div>
+    <div class="liq-flow-grid" id="liq-flow-grid">
+      <div class="liq-fred-loading">Loading sector flow data…</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       ROW 3: OPPORTUNITY SCANNER  (full-width)
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="liq-card liq-card-scanner">
+    <div class="liq-card-header">
+      <span class="liq-card-title">🎯 Hidden Opportunity Scanner</span>
+      <span class="liq-card-sub" id="scan-sub">Scanning universe…</span>
+      <div class="liq-scan-controls">
+        <input id="extra-tickers-input" class="liq-ticker-input"
+               placeholder="Add tickers: DELL, SMH…" maxlength="80" />
+        <button class="btn-liq-scan" onclick="runScan()">Scan</button>
+      </div>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="liq-scan-tabs">
+      <button class="liq-tab active" data-tab="hidden_gems"   onclick="showTab('hidden_gems')">🌟 Hidden Gems</button>
+      <button class="liq-tab"        data-tab="accumulate"    onclick="showTab('accumulate')">📈 Accumulate</button>
+      <button class="liq-tab"        data-tab="breakouts"     onclick="showTab('breakouts')">🚀 Breakouts</button>
+      <button class="liq-tab"        data-tab="developing"    onclick="showTab('developing')">🔭 Developing</button>
+      <button class="liq-tab"        data-tab="invest"        onclick="showTab('invest')">📊 Invest Watchlist</button>
+      <button class="liq-tab"        data-tab="all"           onclick="showTab('all')">All Results</button>
+    </div>
+
+    <div class="liq-scan-content" id="liq-scan-content">
+      <div class="liq-fred-loading">Scan loading…</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       ROW 4: RESEARCH REPORT PANEL  (slide-in when ticker selected)
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="liq-card liq-card-report" id="liq-report-panel" style="display:none;">
+    <div class="liq-card-header">
+      <span class="liq-card-title">📋 Investment Research Report</span>
+      <span class="liq-report-ticker" id="report-ticker-label">—</span>
+      <button class="btn-close-report" onclick="closeReport()">✕ Close</button>
+    </div>
+    <div class="liq-report-body" id="liq-report-body">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       ROW 5: OPPORTUNITY ALERTS
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="liq-card liq-card-opp-alerts">
+    <div class="liq-card-header">
+      <span class="liq-card-title">🔔 Opportunity Alerts</span>
+      <span class="liq-badge liq-badge-count" id="opp-alert-count">0</span>
+    </div>
+    <div class="liq-opp-alerts-list" id="liq-opp-alerts-list">
+      <div class="liq-fred-loading">Loading alerts…</div>
+    </div>
+  </div>
+

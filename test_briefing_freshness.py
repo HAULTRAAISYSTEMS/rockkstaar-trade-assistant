@@ -138,7 +138,10 @@ class TestReadingTheLiveRegime:
 
 
 class TestThePageShowsIt:
-    PAGE = open("templates/liquidity.html").read()
+    # The renderer moved into the shared script partial when the command
+    # centre and the macro page were split.
+    PAGE = (open("templates/liquidity.html").read()
+            + open("templates/_liq_scripts.html").read())
 
     def test_it_renders_when_the_briefing_was_written(self):
         assert "b.written_label" in self.PAGE
