@@ -4990,6 +4990,12 @@ def api_terminal_quotes():
                     "gap_display": annotated.get("gap_display") or "0.00%",
                     "gap_class": annotated.get("gap_class") or "",
                     "bias": annotated.get("trade_bias") or "",
+                    # The chart derives the header's percentage itself. Without
+                    # the official previous close it used the previous day's
+                    # last five-minute bar instead, which misses the closing
+                    # auction — so SPY read -0.38% in the header and -0.39%
+                    # everywhere else on the same screen.
+                    "prev_close": annotated.get("prev_close"),
                 })
         except Exception as exc:
             logger.warning("terminal quotes: read failed: %s", exc)

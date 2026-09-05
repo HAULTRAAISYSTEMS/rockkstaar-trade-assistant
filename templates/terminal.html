@@ -251,6 +251,7 @@
              data-price="{{ '%.2f'|format(s.current_price) if s.current_price else '' }}"
              data-chg="{{ s.gap_display or '0.00%' }}"
              data-chgdir="{{ 'pos' if (s.gap_pct or 0) > 0 else ('neg' if (s.gap_pct or 0) < 0 else 'flat') }}"
+             data-prevclose="{{ '%.4f'|format(s.prev_close) if s.prev_close else '' }}"
              data-bias="{{ bias }}"
              data-href="{{ url_for('stock_detail', ticker=s.ticker) }}"
              onclick="twSelect(this)">
@@ -1066,7 +1067,12 @@ function twMarketDateKey(time){var date=twChartDate(time);if(!date)return'';var 
 function twUpdateRegularQuote(bars){
   if(!bars||!bars.length)return;var last=bars[bars.length-1];twNum('tw-c-price',Number(last.close).toFixed(2));var today=twMarketDateKey(last.time),previous=null;
   for(var i=bars.length-2;i>=0;i--){if(twMarketDateKey(bars[i].time)!==today){previous=bars[i].close;break;}}
-  if(previous){var pct=(last.close-previous)/previous*100,chg=document.getElementById('tw-c-chg');if(chg){chg.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';chg.className='tw-sym-chg '+(pct>0?'chg-pos':(pct<0?'chg-neg':'chg-flat'));}}
+  // Prefer the official previous close. Falling back to the previous day's
+  // last intraday bar misses the closing auction and prints a percentage a
+  // basis point or two away from the one in the tape beside it.
+  var baseline=twPrevClose[twChartState.ticker];
+  if(!isFinite(baseline)||!baseline)baseline=previous;
+  if(baseline){var pct=(last.close-baseline)/baseline*100,chg=document.getElementById('tw-c-chg');if(chg){chg.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';chg.className='tw-sym-chg '+(pct>0?'chg-pos':(pct<0?'chg-neg':'chg-flat'));}}
 }
 function twExtendedQuote(row){if(!row)return 'No recent print';var change=row.change_pct==null?'':(' · '+(row.change_pct>=0?'+':'')+Number(row.change_pct).toFixed(2)+'%'),date=row.date?(' · '+row.date):'';return '$'+Number(row.price).toFixed(2)+change+' · '+twFmtVol(row.volume)+date;}
 function twRestoreRegularQuote(){var row=document.querySelector('.tw-wl-row.active');if(!row)return;twNum('tw-c-price',row.dataset.price||'—');var chg=document.getElementById('tw-c-chg'),dir=row.dataset.chgdir;if(chg){chg.textContent=row.dataset.chg||'0.00%';chg.className='tw-sym-chg '+(dir==='pos'?'chg-pos':(dir==='neg'?'chg-neg':'chg-flat'));}}
@@ -1240,6 +1246,7 @@ function twRenderInsiders(data){
    selected. Nothing is written when a value comes back null — a gap in the
    feed should leave the last good print on screen, not blank it. */
 var twLast = {};
+var twPrevClose = {};      // official previous close, per ticker
 
 function twFlash(el, up){
   if(!el) return;
@@ -1260,6 +1267,9 @@ function twApplyQuote(q){
   var text = px.toFixed(2);
   var chg  = q.gap_display || '0.00%';
   var cls  = twChgClass(Number(q.gap_pct) || 0);
+  if(q.prev_close !== null && q.prev_close !== undefined && isFinite(q.prev_close)){
+    twPrevClose[q.ticker] = Number(q.prev_close);
+  }
   var prev = twLast[q.ticker];
   var moved = prev !== undefined && prev !== px;
   twLast[q.ticker] = px;
@@ -1351,6 +1361,8 @@ window._arRefreshFn = twQuotesRefresh;
   document.querySelectorAll('.tw-wl-row[data-ticker]').forEach(function(r){
     var v = parseFloat(r.dataset.price);
     if(isFinite(v)) twLast[r.dataset.ticker] = v;
+    var pc = parseFloat(r.dataset.prevclose);
+    if(isFinite(pc)) twPrevClose[r.dataset.ticker] = pc;
   });
   twQuotesRefresh();          // stamp the status pill without waiting 4 s
 })();

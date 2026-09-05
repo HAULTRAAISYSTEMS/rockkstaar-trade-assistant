@@ -147,3 +147,26 @@ class TestTodaysSetups:
         row = {"ticker": "AMD", "entry_zone_display": "$477.00 – $479.50",
                "stop_level": 468.0}
         assert self._panel([row]) == [row]
+
+
+class TestOnePercentageForOneStock:
+    """SPY read -0.38% in the chart header and -0.39% in the tape beside it.
+
+    The header's percentage is computed on the client from the chart's own
+    bars. Without the official previous close it used the previous day's last
+    five-minute bar as the baseline, which misses the closing auction — so the
+    same stock's day change appeared twice on one screen with two values.
+    """
+
+    def test_the_quote_carries_the_official_previous_close(self, client):
+        body = client.get("/api/terminal/quotes").get_json()
+        for row in body["quotes"]:
+            assert "prev_close" in row
+
+    def test_the_watchlist_row_carries_it_too(self):
+        """So the first chart load has a baseline before the first poll."""
+        assert 'data-prevclose="' in TEMPLATE
+
+    def test_the_chart_prefers_it_over_the_previous_days_last_bar(self):
+        assert "var baseline=twPrevClose[twChartState.ticker];" in TEMPLATE
+        assert "if(!isFinite(baseline)||!baseline)baseline=previous;" in TEMPLATE
