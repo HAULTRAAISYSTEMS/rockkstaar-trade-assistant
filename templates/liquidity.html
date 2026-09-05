@@ -53,13 +53,200 @@
     </div>
     </div>
 
-    <div class="liq-command-strip">
-      <a href="/intel" class="liq-command-link"><span class="liq-command-icon">⌁</span><span><b>Elite News</b><small>Live catalyst feed</small></span><i>→</i></a>
-      <a href="/calendar" class="liq-command-link"><span class="liq-command-icon">◫</span><span><b>Earnings</b><small>Upcoming events</small></span><i>→</i></a>
-      <a href="/watchlists" class="liq-command-link"><span class="liq-command-icon">☆</span><span><b>Watchlist</b><small>Track your names</small></span><i>→</i></a>
-      <a href="/quick" class="liq-command-link command-primary"><span class="liq-command-icon">⚡</span><span><b>Trade Setup</b><small>Build an execution plan</small></span><i>→</i></a>
+  </div>
+
+  {# The four things this page used to advertise and then link away for. They
+     are rendered from data the app has already cached, so the page gains four
+     sections and no new round trips. Each is guarded server-side, so one cold
+     feed leaves a gap rather than an error page. #}
+
+  <!-- ══ THIS WEEK ═══════════════════════════════════════════════════════ -->
+  <div class="cc-card">
+    <div class="cc-head">
+      <h2>This week</h2>
+      <a href="{{ url_for('catalyst_calendar') }}">Full calendar →</a>
+    </div>
+    {% if week %}
+    <div class="cc-week">
+      {% for e in week %}
+      <div class="cc-week-row {{ 'is-high' if e.impact == 'HIGH' }}">
+        <span class="cc-when"><b>{{ e.date_label }}</b><small>{{ e.time }}</small></span>
+        <span class="cc-what">
+          {{ e.title }}
+          {% if e.on_watchlist %}<em class="cc-tag">watchlist</em>{% endif %}
+          {% if e.reason %}<small>{{ e.reason }}</small>{% endif %}
+        </span>
+        <span class="cc-impact {{ 'is-high' if e.impact == 'HIGH' }}">{{ e.impact|title }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="cc-empty">Nothing scheduled in the next seven days that the calendar knows about.</p>
+    {% endif %}
+  </div>
+
+  <!-- ══ ELITE NEWS ══════════════════════════════════════════════════════ -->
+  <div class="cc-card">
+    <div class="cc-head">
+      <h2>Elite news</h2>
+      <a href="{{ url_for('intel') }}">All catalysts →</a>
+    </div>
+    {% if news %}
+    <div class="cc-news">
+      {% for n in news %}
+      <article class="cc-news-row">
+        <div class="cc-news-top">
+          {% if n.ticker and n.ticker != 'MARKET' %}
+          <a class="cc-sym" href="{{ url_for('stock_detail', ticker=n.ticker) }}">{{ n.ticker }}</a>
+          {% endif %}
+          {% if n.on_watchlist %}<em class="cc-tag">watchlist</em>{% endif %}
+          {% if n.impact %}<em class="cc-tag cc-tag-{{ n.impact|lower }}">{{ n.impact|title }}</em>{% endif %}
+        </div>
+        {% if n.url %}
+        <a class="cc-headline" href="{{ n.url }}" target="_blank" rel="noopener noreferrer">{{ n.headline }}</a>
+        {% else %}<span class="cc-headline">{{ n.headline }}</span>{% endif %}
+        <div class="cc-meta">{{ [n.source, n.time] | select | join(' · ') }}</div>
+        {% if n.why %}<p class="cc-why">{{ n.why }}</p>{% endif %}
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="cc-empty">No catalysts cached yet — the news feed fills within a minute of a refresh.</p>
+    {% endif %}
+  </div>
+
+  <!-- ══ SETUPS + WATCHLIST ══════════════════════════════════════════════ -->
+  <div class="cc-pair">
+    <div class="cc-card">
+      <div class="cc-head">
+        <h2>Trade setups</h2>
+        <a href="{{ url_for('dashboard') }}">All setups →</a>
+      </div>
+      {% if setups %}
+      <div class="cc-rows">
+        {% for r in setups %}
+        <a class="cc-row" href="{{ url_for('terminal') }}?ticker={{ r.ticker }}">
+          <span class="cc-row-sym">{{ r.ticker }}</span>
+          <span class="cc-row-mid">
+            <b>{{ r.setup or 'Setup' }}</b>
+            {% if r.grade %}<small>{{ r.grade }}</small>{% endif %}
+          </span>
+          <span class="cc-row-score">{{ r.score }}</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="cc-empty">The scanner has not confirmed a qualifying setup yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="cc-card">
+      <div class="cc-head">
+        <h2>Watchlist</h2>
+        <a href="{{ url_for('watchlists_page') }}">Manage →</a>
+      </div>
+      {% if watchlist %}
+      <div class="cc-rows">
+        {% for r in watchlist %}
+        <a class="cc-row" href="{{ url_for('fundamentals_page') }}?ticker={{ r.ticker }}">
+          <span class="cc-row-sym">{{ r.ticker }}</span>
+          <span class="cc-row-mid">
+            <b>{{ r.name or r.ticker }}</b>
+            {% if r.setup %}<small>{{ r.setup }}</small>{% endif %}
+          </span>
+          <span class="cc-row-score">{% if r.price %}{{ '%.2f'|format(r.price) }}{% else %}—{% endif %}</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="cc-empty">No tickers on the active watchlist yet.</p>
+      {% endif %}
     </div>
   </div>
+
+  <style>
+  /* ── Command centre sections ────────────────────────────────────────────
+     Four blocks that used to be links to four other pages. Deliberately quiet
+     next to the meters above them: this is reading matter, not instrumentation. */
+  .cc-card {
+    margin: 14px 0;
+    padding: 16px 18px;
+    border: 1px solid rgba(255,255,255,.07);
+    border-radius: 12px;
+    background: #0b0d0f;
+  }
+  .cc-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px }
+  .cc-pair .cc-card { margin: 0 }
+  .cc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px }
+  .cc-head h2 {
+    margin: 0;
+    color: #f5f0e6;
+    font: 700 13px/1.3 var(--font-display, system-ui);
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  .cc-head a { color: #f0b53f; font-size: 11px; text-decoration: none }
+  .cc-head a:hover { text-decoration: underline }
+  .cc-empty { margin: 12px 0 0; color: #9aa4b2; font-size: 12.5px; line-height: 1.55 }
+
+  .cc-week { display: grid; gap: 2px; margin-top: 12px }
+  .cc-week-row {
+    display: grid;
+    grid-template-columns: 76px minmax(0,1fr) auto;
+    gap: 12px;
+    align-items: start;
+    padding: 9px 10px;
+    border-radius: 7px;
+  }
+  .cc-week-row.is-high { background: rgba(255,255,255,.03) }
+  .cc-when { display: grid }
+  .cc-when b { color: #f5f0e6; font: 700 11px/1.4 var(--font-mono, monospace) }
+  .cc-when small { color: #9aa4b2; font: 500 9.5px/1.4 var(--font-mono, monospace) }
+  .cc-what { color: #f5f0e6; font-size: 13px; line-height: 1.45; min-width: 0 }
+  .cc-what small { display: block; margin-top: 2px; color: #9aa4b2; font-size: 11.5px }
+  .cc-impact { color: #9aa4b2; font: 700 9px/1.6 var(--font-mono, monospace); letter-spacing: .08em }
+  .cc-impact.is-high { color: #ff6575 }
+
+  .cc-news { display: grid; gap: 12px; margin-top: 12px }
+  .cc-news-row { padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,.05) }
+  .cc-news-row:last-child { border-bottom: 0; padding-bottom: 0 }
+  .cc-news-top { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px }
+  .cc-sym { color: #f0b53f; font: 700 11px/1.4 var(--font-mono, monospace); text-decoration: none }
+  .cc-tag {
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(255,255,255,.06);
+    color: #9aa4b2;
+    font: 700 8px/1.6 var(--font-mono, monospace);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    font-style: normal;
+  }
+  .cc-tag-critical, .cc-tag-high { background: rgba(255,82,99,.14); color: #ff6575 }
+  .cc-headline { display: block; color: #f5f0e6; font-size: 13.5px; line-height: 1.45; text-decoration: none }
+  a.cc-headline:hover { color: #f0b53f }
+  .cc-meta { margin-top: 3px; color: #64707e; font: 500 10.5px/1.5 var(--font-mono, monospace) }
+  .cc-why { margin: 5px 0 0; color: #9aa4b2; font-size: 12px; line-height: 1.55 }
+
+  .cc-rows { display: grid; gap: 2px; margin-top: 12px }
+  .cc-row {
+    display: grid;
+    grid-template-columns: 54px minmax(0,1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 10px;
+    border-radius: 7px;
+    text-decoration: none;
+  }
+  .cc-row:hover { background: rgba(255,255,255,.04) }
+  .cc-row-sym { color: #f0b53f; font: 700 12px/1.4 var(--font-mono, monospace) }
+  .cc-row-mid { min-width: 0 }
+  .cc-row-mid b { display: block; color: #f5f0e6; font: 500 12.5px/1.4 var(--font-ui, system-ui); overflow-wrap: anywhere }
+  .cc-row-mid small { color: #9aa4b2; font-size: 11px }
+  .cc-row-score { color: #f5f0e6; font: 700 13px/1.3 var(--font-mono, monospace) }
+
+  @media (max-width: 820px) { .cc-pair { grid-template-columns: 1fr } }
+  </style>
 
   <style>
   /* The briefing is written once in the morning. When it is old, or when the
@@ -277,15 +464,6 @@
 .btn-liq-refresh{ background:rgba(15,20,30,.82); border:1px solid #2b3444; color:#bdc6d5; padding:.42rem .8rem; border-radius:8px; cursor:pointer; font-size:.76rem; }
 .btn-liq-refresh:hover{ border-color:var(--elite-gold); color:var(--elite-gold-bright); }
 .liq-last-updated{ font-size:.72rem; color:#475569; }
-.liq-command-strip { position:relative; z-index:1; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.65rem; }
-.liq-command-link { min-width:0; display:flex; align-items:center; gap:.7rem; padding:.75rem .85rem; color:#dbe2ec; text-decoration:none; border:1px solid rgba(255,255,255,.065); border-radius:12px; background:rgba(5,8,13,.62); transition:transform .18s,border-color .18s,background .18s; }
-.liq-command-link:hover { transform:translateY(-2px); border-color:rgba(246,185,74,.38); background:rgba(18,20,25,.9); }
-.liq-command-link.command-primary { border-color:rgba(246,185,74,.28); background:linear-gradient(135deg,rgba(246,185,74,.14),rgba(246,185,74,.04)); }
-.liq-command-icon { width:30px; height:30px; display:grid; place-items:center; flex:0 0 30px; border-radius:9px; background:rgba(246,185,74,.1); color:var(--elite-gold-bright); font-size:.9rem; }
-.liq-command-link span:nth-child(2) { min-width:0; display:flex; flex-direction:column; }
-.liq-command-link b { font-size:.76rem; line-height:1.15; }
-.liq-command-link small { margin-top:.18rem; color:#657083; font-size:.62rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.liq-command-link i { margin-left:auto; color:#78643e; font-style:normal; }
 
 /* ── Cards ────────────────────────────────────────────────────── */
 .liq-card{ position:relative; overflow:hidden; background:linear-gradient(145deg,rgba(23,27,33,.94),rgba(13,16,20,.96)); border:1px solid var(--elite-hairline); border-radius:var(--elite-radius-lg); padding:1.25rem; margin-bottom:1rem; box-shadow:var(--elite-shadow); transition:border-color .2s,transform .2s; }
@@ -511,7 +689,6 @@
 .ai-brief-refresh:hover { border-color:var(--elite-gold); color:var(--elite-gold-bright); }
 
 @media(max-width:1100px) {
-  .liq-command-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 @media(max-width:700px) {
   .liq-page { padding:0 0 6rem; }
@@ -519,14 +696,9 @@
   .liq-header { align-items:flex-start; }
   .liq-header-right { width:100%; }
   .liq-last-updated { width:100%; }
-  .liq-command-strip { grid-template-columns:1fr 1fr; gap:.45rem; }
-  .liq-command-link { padding:.65rem; }
-  .liq-command-link small { display:none; }
-  .liq-command-link i { display:none; }
   .liq-title { font-size:1.8rem; }
 }
 @media(max-width:420px) {
-  .liq-command-strip { grid-template-columns:1fr; }
 }
 </style>
 

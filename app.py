@@ -7278,11 +7278,96 @@ def catalyst_calendar():
 # Liquidity & Opportunity Research Engine
 # ---------------------------------------------------------------------------
 
+# How many rows each command-centre section shows. A landing page is a read,
+# not an archive — anything longer belongs on the page that owns it.
+COMMAND_NEWS = 6
+COMMAND_WEEK = 8
+COMMAND_SETUPS = 5
+COMMAND_WATCHLIST = 8
+
+
+def _command_center_context() -> dict:
+    """The four things the command centre used to link to instead of showing.
+
+    The header advertised Elite News, Earnings, Watchlist and Trade Setup and
+    then sent the reader to four other pages for all four — a menu wearing the
+    name of a command centre. These are assembled here from data the app has
+    already cached, so the page gains four sections and no new round trips.
+
+    Every block is guarded on its own. A landing page that fails because one
+    feed is cold is worse than one that renders with a gap in it.
+    """
+    context = {"week": [], "news": [], "setups": [], "watchlist": [],
+               "watchlist_name": ""}
+
+    summary = {}
+    try:
+        summary = _intel.get_intel_summary() or {}
+    except Exception as exc:
+        logger.debug("command centre: intel summary unavailable: %s", exc)
+
+    try:
+        active = get_active_wl_id()
+        tickers = get_watchlist_stocks(active) if active else []
+    except Exception as exc:
+        logger.debug("command centre: watchlist unavailable: %s", exc)
+        tickers = []
+
+    # This week — the macro releases and earnings the reader asked to see,
+    # already merged and sorted by the calendar builder.
+    try:
+        rows = _build_catalyst_calendar(summary, tickers)
+        context["week"] = [r for r in rows if (r.get("days_away") or 99) <= 7][:COMMAND_WEEK]
+    except Exception as exc:
+        logger.debug("command centre: calendar unavailable: %s", exc)
+
+    # Elite news — the same feed the Intel page ranks, trimmed to a read.
+    try:
+        watch = {str(t).upper() for t in tickers}
+        stories = (summary.get("market_news") or summary.get("news") or [])
+        context["news"] = [{
+            "ticker": str(n.get("ticker") or "").upper(),
+            "headline": n.get("headline") or "",
+            "source": n.get("source") or "",
+            "time": n.get("time_ago") or n.get("published_at") or "",
+            "url": n.get("url") or "",
+            "impact": str(n.get("impact") or "").upper(),
+            "why": n.get("why_it_matters") or n.get("reason") or "",
+            "on_watchlist": str(n.get("ticker") or "").upper() in watch,
+        } for n in stories[:COMMAND_NEWS]]
+    except Exception as exc:
+        logger.debug("command centre: news unavailable: %s", exc)
+
+    # Watchlist and setups, both from the scanner's own cached view. Day change
+    # is not stored, and eight quote calls on a landing page is the wrong
+    # trade, so these show what the scanner concluded rather than a price move.
+    try:
+        rows = []
+        for ticker in tickers[:COMMAND_WATCHLIST]:
+            data = get_stock_data(ticker) or {}
+            rows.append({
+                "ticker": ticker,
+                "name": data.get("company_name") or "",
+                "price": data.get("current_price"),
+                "score": data.get("swing_score") or data.get("setup_score"),
+                "setup": data.get("swing_setup_type") or data.get("setup_type") or "",
+                "grade": data.get("swing_confidence") or "",
+            })
+        context["watchlist"] = rows
+        context["setups"] = sorted(
+            [r for r in rows if (r.get("score") or 0) > 0],
+            key=lambda r: -(r.get("score") or 0))[:COMMAND_SETUPS]
+    except Exception as exc:
+        logger.debug("command centre: watchlist rows unavailable: %s", exc)
+
+    return context
+
+
 @app.route("/")
 @app.route("/opportunity")
 def liquidity_page():
     """Morning Command Center — liquidity, risk, sector flow, hidden opportunities."""
-    return render_template("liquidity.html")
+    return render_template("liquidity.html", **_command_center_context())
 
 
 @app.route("/api/liquidity/status")
