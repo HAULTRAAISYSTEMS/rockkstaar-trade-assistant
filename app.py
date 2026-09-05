@@ -4893,17 +4893,10 @@ def terminal():
         reverse=True,
     )[:3]
 
-    # Mobile discovery rails.  The momentum scanner covers a curated liquid
-    # universe while the activity list uses verified relative-volume values
-    # already stored for the active watchlist.  Keep the two concepts separate:
-    # a fast price move is not automatically high-volume activity.
-    scanner_snapshot = _scanner.get_scan_results() or {}
-    trending_stocks = (scanner_snapshot.get("opportunities") or [])[:6]
-    most_active = sorted(
-        [s for s in valid if s.get("rel_volume") is not None],
-        key=lambda s: (s.get("rel_volume") or 0, s.get("today_volume") or 0),
-        reverse=True,
-    )[:6]
+    # Whether the tape is moving or frozen is the first thing the page has to
+    # say, so the session is rendered into the status line rather than left to
+    # the first poll to discover.
+    _session = market_session_now()
 
     return render_template(
         "terminal.html",
@@ -4915,9 +4908,8 @@ def terminal():
         acct=acct,
         win_rate=win_rate,
         today_setups=today_setups,
-        trending_stocks=trending_stocks,
-        most_active=most_active,
-        scanner_last_scan=scanner_snapshot.get("last_scan"),
+        market_session=_session,
+        market_session_label=SESSION_LABELS.get(_session, "Market closed"),
     )
 
 
@@ -4942,6 +4934,82 @@ _TERMINAL_INTERVALS = {
     "1d": {"fetch": "1d", "ranges": ("1mo", "3mo", "6mo", "1y", "2y", "5y", "10y"), "default": "1y"},
 }
 _TERMINAL_CANDLE_CACHE: dict = {}  # (ticker, interval, range) -> {"ts": epoch, "bars": [...]}
+
+
+# What the Terminal's status pill says for each trading session. One place,
+# because the page renders it and the quotes poll re-sends it.
+SESSION_LABELS = {
+    "pre_market":  "Pre-market",
+    "regular":     "Live",
+    "after_hours": "After hours",
+    "closed":      "Market closed",
+}
+
+
+@app.route("/api/terminal/quotes")
+def api_terminal_quotes():
+    """Live prices for the Terminal's tape, watchlist and market chips.
+
+    The Terminal never registered a refresh function, so its tape, its
+    watchlist column and its market chips were whatever the page happened to
+    be rendered with — frozen from the moment of load, through the open and
+    for as long as the tab stayed up. Every number on the busiest page in the
+    app was quietly stale.
+
+    This is polled every four seconds, so it does no fetching of its own. It
+    kicks the same fire-and-forget background refresh the dashboard uses
+    (rate-limited to one run per 45 s, in a thread) and then answers out of
+    the database, which is where that refresh lands. A poll is therefore a
+    read: no yfinance call is ever waited on inside a request.
+    """
+    try:
+        wl_id = get_active_wl_id()
+        watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+    except Exception as exc:
+        logger.debug("terminal quotes: watchlist unavailable: %s", exc)
+        wl_id, watchlist = None, []
+
+    rows = []
+    if watchlist:
+        try:
+            data_map = {d["ticker"]: d for d in (get_all_stock_data() or [])}
+            _trigger_exec_state_refresh(wl_id)   # non-blocking; lands next poll
+            for ticker in watchlist:
+                stock = data_map.get(ticker)
+                if not stock:
+                    continue
+                annotated = annotate(dict(stock))
+                rows.append({
+                    "ticker": ticker,
+                    "price": annotated.get("current_price"),
+                    "gap_pct": annotated.get("gap_pct"),
+                    "gap_display": annotated.get("gap_display") or "0.00%",
+                    "gap_class": annotated.get("gap_class") or "",
+                    "bias": annotated.get("trade_bias") or "",
+                })
+        except Exception as exc:
+            logger.warning("terminal quotes: read failed: %s", exc)
+
+    chips = {}
+    try:
+        mkt = _get_mkt_ctx() or {}
+        chips = {
+            "regime": mkt.get("regime_label") or mkt.get("regime") or "",
+            "vix": mkt.get("vix_level"),
+            "spy": mkt.get("spy_1d_pct"),
+        }
+    except Exception as exc:
+        logger.debug("terminal quotes: market context unavailable: %s", exc)
+
+    _session = market_session_now()
+    return jsonify({
+        "ok": True,
+        "quotes": rows,
+        "chips": chips,
+        "session": _session,
+        "session_label": SESSION_LABELS.get(_session, "Market closed"),
+        "server_time": _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
+    })
 
 
 @app.route("/api/terminal/candles/<ticker>")

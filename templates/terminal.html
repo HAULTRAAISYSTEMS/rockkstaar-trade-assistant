@@ -11,7 +11,6 @@
    Paper: order ticket only.  Market cap: no source → shows "—".
    ═══════════════════════════════════════════════════════════════════ */
 .tw { max-width: 1720px; margin: 0 auto; }
-.mobile-home { display:none; }
 
 /* ── Status line ── */
 .tw-status { display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap; padding: var(--sp-2) var(--sp-1) var(--sp-3); }
@@ -21,6 +20,27 @@
 .tw-chip b { color: var(--text-hi); font-weight: var(--fw-semi); }
 .tw-acct-chip { margin-left:auto; }
 .tw-paper-flag { color: var(--warn-500); border-color: rgba(255,176,32,.35); background: rgba(255,176,32,.08); }
+
+/* The tape and the chips are polled, so the page has to say whether what you
+   are reading is moving or frozen. A green pulsing dot means quotes are
+   updating; amber means extended hours; grey means the market is shut and the
+   last print is the close. */
+.tw-live { display:inline-flex; align-items:center; gap:7px; font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing:.06em; text-transform:uppercase; padding: 3px 10px; border-radius: var(--r-full); border:1px solid var(--border-subtle); background: var(--ink-750); color: var(--text-muted); white-space:nowrap; }
+.tw-live-dot { width:7px; height:7px; border-radius:50%; background: var(--text-faint); flex:0 0 auto; }
+.tw-live[data-session="regular"] { color: var(--pos-500); border-color: rgba(46,204,113,.35); background: rgba(46,204,113,.08); }
+.tw-live[data-session="regular"] .tw-live-dot { background: var(--pos-500); animation: tw-pulse 2s ease-in-out infinite; }
+.tw-live[data-session="pre_market"], .tw-live[data-session="after_hours"] { color: var(--warn-500); border-color: rgba(255,176,32,.35); background: rgba(255,176,32,.08); }
+.tw-live[data-session="pre_market"] .tw-live-dot, .tw-live[data-session="after_hours"] .tw-live-dot { background: var(--warn-500); animation: tw-pulse 2.6s ease-in-out infinite; }
+@keyframes tw-pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.35; transform:scale(.8); } }
+@media (prefers-reduced-motion: reduce) { .tw-live-dot { animation: none !important; } }
+
+/* A number that just changed gets a one-shot tint, so a move catches the eye
+   without the whole row repainting. */
+@keyframes tw-flash-up   { from { background: rgba(46,204,113,.28); } to { background: transparent; } }
+@keyframes tw-flash-down { from { background: rgba(231,76,60,.28); }  to { background: transparent; } }
+.tw-flash-up   { animation: tw-flash-up .9s ease-out; border-radius:3px; }
+.tw-flash-down { animation: tw-flash-down .9s ease-out; border-radius:3px; }
+@media (prefers-reduced-motion: reduce) { .tw-flash-up, .tw-flash-down { animation: none; } }
 
 /* ── Ticker tape ── */
 .tw-tape { position: relative; overflow: hidden; background: var(--surface-inset); border:1px solid var(--border-subtle); border-radius: var(--r-md); margin-bottom: var(--sp-4); box-shadow: var(--shadow-inset); }
@@ -162,38 +182,6 @@
   .tw-stats { grid-template-columns: repeat(4,1fr); }
 }
 @media (max-width: 780px) {
-  .mobile-home { display:block; margin-bottom:var(--sp-4); }
-  .mobile-home__eyebrow { color:var(--orange-400); font-family:var(--font-display); font-size:10px; font-weight:var(--fw-bold); letter-spacing:.16em; text-transform:uppercase; }
-  .mobile-home__title { color:var(--text-hi); font-family:var(--font-display); font-size:26px; margin:4px 0 14px; }
-  .mobile-home__search { display:flex; gap:8px; margin-bottom:12px; }
-  .mobile-home__search input { flex:1; min-width:0; background:var(--surface-inset); border:1px solid var(--border-subtle); border-radius:12px; color:var(--text-hi); font-family:var(--font-mono); font-size:16px; padding:12px 14px; text-transform:uppercase; }
-  .mobile-home__search button { border:0; border-radius:12px; background:var(--grad-brand); color:var(--text-on-accent); font-family:var(--font-display); font-weight:var(--fw-bold); padding:0 18px; }
-  .mobile-home__grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
-  .mobile-home__metric { background:var(--surface-card); border:1px solid var(--border-subtle); border-radius:14px; padding:12px 10px; }
-  .mobile-home__metric span { display:block; color:var(--text-faint); font-size:9px; letter-spacing:.08em; text-transform:uppercase; }
-  .mobile-home__metric b { display:block; color:var(--text-hi); font-family:var(--font-mono); font-size:14px; margin-top:5px; }
-  .mobile-home__actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
-  .mobile-home__action { background:var(--surface-card); border:1px solid var(--border-subtle); border-radius:14px; color:var(--text-body); font-size:12px; font-weight:var(--fw-semi); padding:12px; text-align:center; text-decoration:none; }
-  .mobile-home__action:first-child { border-color:rgba(214,166,63,.45); color:var(--orange-400); }
-  .mobile-discovery { margin-top:18px; }
-  .mobile-discovery__head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:10px; }
-  .mobile-discovery__head h2 { color:var(--text-hi); font-family:var(--font-display); font-size:18px; margin:0; }
-  .mobile-discovery__head a { color:var(--orange-400); font-size:11px; text-decoration:none; }
-  .mobile-discovery__tabs { display:grid; grid-template-columns:1fr 1fr; gap:5px; background:var(--surface-inset); border:1px solid var(--border-subtle); border-radius:12px; padding:4px; }
-  .mobile-discovery__tab { border:0; border-radius:9px; background:transparent; color:var(--text-faint); font-family:var(--font-display); font-size:11px; font-weight:var(--fw-bold); letter-spacing:.04em; padding:9px 6px; text-transform:uppercase; }
-  .mobile-discovery__tab.active { background:var(--surface-card); box-shadow:var(--shadow-sm); color:var(--orange-400); }
-  .mobile-discovery__panel { display:none; margin-top:8px; }
-  .mobile-discovery__panel.active { display:block; }
-  .mobile-discovery__row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:12px; background:var(--surface-card); border-bottom:1px solid var(--border-subtle); color:inherit; min-height:60px; padding:9px 12px; text-decoration:none; }
-  .mobile-discovery__row:first-child { border-radius:14px 14px 0 0; }
-  .mobile-discovery__row:last-child { border-bottom:0; border-radius:0 0 14px 14px; }
-  .mobile-discovery__row:only-child { border-radius:14px; }
-  .mobile-discovery__symbol { color:var(--text-hi); font-family:var(--font-mono); font-size:14px; font-weight:var(--fw-bold); }
-  .mobile-discovery__tag { color:var(--text-faint); font-size:10px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .mobile-discovery__price { color:var(--text-body); font-family:var(--font-mono); font-size:12px; text-align:right; }
-  .mobile-discovery__move { font-family:var(--font-mono); font-size:12px; font-weight:var(--fw-bold); min-width:52px; text-align:right; }
-  .mobile-discovery__empty { background:var(--surface-card); border:1px solid var(--border-subtle); border-radius:14px; color:var(--text-faint); font-size:12px; line-height:1.5; padding:18px; text-align:center; }
-  .mobile-discovery__note { color:var(--text-faint); font-size:9px; line-height:1.4; margin:8px 3px 0; }
   .tw-body { grid-template-columns: 1fr; }
   .tw-stats { grid-template-columns: 1fr 1fr; }
   .tw-wl { max-height: 320px; }
@@ -205,67 +193,30 @@
 {% set connected = acct and acct.connected %}
 <div class="tw">
 
-  <section class="mobile-home" aria-label="Market home">
-    <div class="mobile-home__eyebrow">Tradestaar Elite</div>
-    <h1 class="mobile-home__title">Your market, at a glance.</h1>
-    <form class="mobile-home__search" action="{{ url_for('fundamentals_page') }}" method="get">
-      <input name="ticker" type="search" maxlength="6" placeholder="Search a ticker" aria-label="Search a ticker" required>
-      <button type="submit">Search</button>
-    </form>
-    <div class="mobile-home__grid">
-      <div class="mobile-home__metric"><span>SPY today</span><b class="{{ 'chg-pos' if (mkt.spy_1d_pct or 0) >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(mkt.spy_1d_pct) ~ '%' if mkt and mkt.spy_1d_pct is not none else '—' }}</b></div>
-      <div class="mobile-home__metric"><span>VIX</span><b>{{ '%.2f'|format(mkt.vix_level) if mkt and mkt.vix_level is not none else '—' }}</b></div>
-      <div class="mobile-home__metric"><span>Top setups</span><b>{{ today_setups|length }}</b></div>
+  <!-- ===== Ticker tape — the first thing on the page ===== -->
+  {% if stocks %}
+  <div class="tw-tape" aria-label="Watchlist tape">
+    <div class="tw-tape-track">
+      {% for s in stocks + stocks %}
+      <span class="tw-tape-item" data-tape="{{ s.ticker }}">
+        <span class="tw-tape-sym">{{ s.ticker }}</span>
+        <span class="tw-tape-px" data-tape-px>{{ '%.2f'|format(s.current_price) if s.current_price else '—' }}</span>
+        <span class="tw-tape-chg {{ 'chg-pos' if (s.gap_pct or 0) > 0 else ('chg-neg' if (s.gap_pct or 0) < 0 else 'chg-flat') }}" data-tape-chg>{{ s.gap_display or '0.00%' }}</span>
+      </span>
+      {% endfor %}
     </div>
-    <div class="mobile-home__actions">
-      <a class="mobile-home__action" href="{{ url_for('intel') }}">Breaking market news</a>
-      <a class="mobile-home__action" href="{{ url_for('watchlists_page') }}">Watchlist movers</a>
-    </div>
-
-    <section class="mobile-discovery" aria-labelledby="mobile-discovery-title">
-      <div class="mobile-discovery__head">
-        <h2 id="mobile-discovery-title">Discover stocks</h2>
-        <a href="{{ url_for('dashboard') }}">View setups</a>
-      </div>
-      <div class="mobile-discovery__tabs" role="tablist" aria-label="Stock discovery lists">
-        <button class="mobile-discovery__tab active" id="discovery-trending-tab" type="button" role="tab" aria-selected="true" aria-controls="discovery-trending" onclick="twDiscoveryTab('trending')">Trending</button>
-        <button class="mobile-discovery__tab" id="discovery-active-tab" type="button" role="tab" aria-selected="false" aria-controls="discovery-active" onclick="twDiscoveryTab('active')">Most active</button>
-      </div>
-      <div class="mobile-discovery__panel active" id="discovery-trending" role="tabpanel" aria-labelledby="discovery-trending-tab">
-        {% for s in trending_stocks %}
-        <a class="mobile-discovery__row" href="{{ url_for('stock_detail', ticker=s.ticker) }}">
-          <span><span class="mobile-discovery__symbol">{{ s.ticker }}</span><span class="mobile-discovery__tag">{{ s.primary_tag or 'Momentum watch' }}</span></span>
-          <span class="mobile-discovery__price">{{ '$%.2f'|format(s.price) if s.price else '—' }}</span>
-          <span class="mobile-discovery__move {{ 'chg-pos' if (s.day_chg_pct or 0) >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(s.day_chg_pct or 0) }}%</span>
-        </a>
-        {% else %}
-        <div class="mobile-discovery__empty">No live momentum signals yet. This list fills when the scanner confirms a qualifying move.</div>
-        {% endfor %}
-        <p class="mobile-discovery__note">Trending is derived from Tradestaar's curated momentum scanner{% if scanner_last_scan %} · last scan {{ scanner_last_scan }}{% endif %}.</p>
-      </div>
-      <div class="mobile-discovery__panel" id="discovery-active" role="tabpanel" aria-labelledby="discovery-active-tab" hidden>
-        {% for s in most_active %}
-        <a class="mobile-discovery__row" href="{{ url_for('stock_detail', ticker=s.ticker) }}">
-          <span><span class="mobile-discovery__symbol">{{ s.ticker }}</span><span class="mobile-discovery__tag">Relative volume</span></span>
-          <span class="mobile-discovery__price">{{ '$%.2f'|format(s.current_price) if s.current_price else '—' }}</span>
-          <span class="mobile-discovery__move {{ 'chg-pos' if (s.gap_pct or 0) >= 0 else 'chg-neg' }}">{{ '%.1f'|format(s.rel_volume) }}x</span>
-        </a>
-        {% else %}
-        <div class="mobile-discovery__empty">Relative-volume data is not available for the current watchlist yet.</div>
-        {% endfor %}
-        <p class="mobile-discovery__note">Most active ranks verified relative volume inside your active watchlist—not the entire market.</p>
-      </div>
-    </section>
-  </section>
+  </div>
+  {% endif %}
 
   <!-- ===== Status line ===== -->
   <div class="tw-status">
     <span class="tw-title"><span class="accent">◧</span> TERMINAL</span>
-    {% if mkt %}
-      {% if mkt.regime_label %}<span class="tw-chip">REGIME <b>{{ mkt.regime_label }}</b></span>{% endif %}
-      {% if mkt.vix_level is not none %}<span class="tw-chip">VIX <b>{{ '%.2f'|format(mkt.vix_level) }}</b></span>{% endif %}
-      {% if mkt.spy_1d_pct is not none %}<span class="tw-chip">SPY <b class="{{ 'chg-pos' if mkt.spy_1d_pct >= 0 else 'chg-neg' }}">{{ '%+.2f'|format(mkt.spy_1d_pct) }}%</b></span>{% endif %}
-    {% endif %}
+    <span class="tw-live" id="tw-live" data-session="{{ market_session }}" title="Quotes refresh every few seconds while the market is open.">
+      <i class="tw-live-dot"></i><span id="tw-live-label">{{ market_session_label }}</span>
+    </span>
+    <span class="tw-chip">REGIME <b id="tw-chip-regime">{{ mkt.regime_label if mkt and mkt.regime_label else '—' }}</b></span>
+    <span class="tw-chip">VIX <b id="tw-chip-vix">{{ '%.2f'|format(mkt.vix_level) if mkt and mkt.vix_level is not none else '—' }}</b></span>
+    <span class="tw-chip">SPY <b id="tw-chip-spy" class="{{ 'chg-pos' if (mkt and (mkt.spy_1d_pct or 0) >= 0) else 'chg-neg' }}">{{ '%+.2f'|format(mkt.spy_1d_pct) ~ '%' if mkt and mkt.spy_1d_pct is not none else '—' }}</b></span>
     {% if connected and acct.total_value is not none %}
     <span class="tw-chip tw-acct-chip">ACCT <b>{{ '${:,.0f}'.format(acct.total_value) }}</b>
       {% if acct.daily_pnl is not none %}<b class="{{ 'chg-pos' if acct.daily_pnl >= 0 else 'chg-neg' }}">{{ '{:+,.0f}'.format(acct.daily_pnl) }} today</b>{% endif %}
@@ -273,21 +224,6 @@
     {% endif %}
     <span class="tw-chip tw-paper-flag {{ '' if connected }}" style="{{ 'margin-left:0' if connected else 'margin-left:auto' }}" title="Order ticket is paper/preview. Chart, quotes, account and positions are live.">PAPER TICKET</span>
   </div>
-
-  <!-- ===== Ticker tape ===== -->
-  {% if stocks %}
-  <div class="tw-tape">
-    <div class="tw-tape-track">
-      {% for s in stocks + stocks %}
-      <span class="tw-tape-item">
-        <span class="tw-tape-sym">{{ s.ticker }}</span>
-        <span class="tw-tape-px">{{ '%.2f'|format(s.current_price) if s.current_price else '—' }}</span>
-        <span class="tw-tape-chg {{ 'chg-pos' if (s.gap_pct or 0) > 0 else ('chg-neg' if (s.gap_pct or 0) < 0 else 'chg-flat') }}">{{ s.gap_display or '0.00%' }}</span>
-      </span>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
 
   <!-- ===== 3-column body ===== -->
   <div class="tw-body">
@@ -676,17 +612,6 @@ function twNum(id, val){ var el=document.getElementById(id); if(el) el.textConte
 function twEsc(value){ return String(value==null?'':value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 function twMoney(value){ if(value===null||value===undefined||value==='') return '—'; var n=Number(value); return isFinite(n)?'$'+n.toLocaleString(undefined,{maximumFractionDigits:0}):'—'; }
 function twValue(value, suffix){ return value===null||value===undefined||value===''?'—':twEsc(value)+(suffix||''); }
-
-/* ── Mobile stock-discovery tabs ── */
-function twDiscoveryTab(name){
-  ['trending','active'].forEach(function(tabName){
-    var selected = tabName === name;
-    var tab = document.getElementById('discovery-' + tabName + '-tab');
-    var panel = document.getElementById('discovery-' + tabName);
-    if(tab){ tab.classList.toggle('active', selected); tab.setAttribute('aria-selected', selected ? 'true' : 'false'); }
-    if(panel){ panel.classList.toggle('active', selected); panel.hidden = !selected; }
-  });
-}
 
 /* ── Watchlist add (reuses existing /watchlist/add write path + CSRF) ── */
 function twToggleAdd(){
@@ -1303,6 +1228,106 @@ function twRenderInsiders(data){
   twPanel('insiders','<div class="tw-intel-list">'+html+'</div>');
 }
 
+/* ── Live quotes ────────────────────────────────────────────────────────────
+   Every price on this page — the tape, the watchlist column, the selected
+   symbol's header, the market chips — used to be frozen at whatever the
+   server rendered. The tab could sit open through the whole session showing
+   yesterday's close.
+
+   /api/terminal/quotes is a database read, not a fetch, so polling it is
+   cheap. Patch text in place rather than re-rendering: the marquee keeps its
+   position, the chart is untouched, and a row the user has selected stays
+   selected. Nothing is written when a value comes back null — a gap in the
+   feed should leave the last good print on screen, not blank it. */
+var twLast = {};
+
+function twFlash(el, up){
+  if(!el) return;
+  el.classList.remove('tw-flash-up','tw-flash-down');
+  void el.offsetWidth;                       // restart the animation
+  el.classList.add(up ? 'tw-flash-up' : 'tw-flash-down');
+}
+
+function twChgClass(pct){
+  return pct > 0 ? 'chg-pos' : (pct < 0 ? 'chg-neg' : 'chg-flat');
+}
+
+function twApplyQuote(q){
+  if(!q || !q.ticker) return;
+  var px = (q.price === null || q.price === undefined) ? null : Number(q.price);
+  if(px === null || !isFinite(px)) return;   // keep the last good print
+
+  var text = px.toFixed(2);
+  var chg  = q.gap_display || '0.00%';
+  var cls  = twChgClass(Number(q.gap_pct) || 0);
+  var prev = twLast[q.ticker];
+  var moved = prev !== undefined && prev !== px;
+  twLast[q.ticker] = px;
+
+  document.querySelectorAll('[data-tape="' + q.ticker + '"]').forEach(function(item){
+    var p = item.querySelector('[data-tape-px]');
+    var c = item.querySelector('[data-tape-chg]');
+    if(p && p.textContent !== text){ p.textContent = text; if(moved) twFlash(p, px > prev); }
+    if(c){ c.textContent = chg; c.className = 'tw-tape-chg ' + cls; }
+  });
+
+  var row = document.querySelector('.tw-wl-row[data-ticker="' + q.ticker + '"]');
+  if(row){
+    var rp = row.querySelector('.tw-wl-px');
+    var rc = row.querySelector('.tw-wl-chg');
+    if(rp && rp.textContent !== text){ rp.textContent = text; if(moved) twFlash(rp, px > prev); }
+    if(rc){ rc.textContent = chg; rc.className = 'tw-wl-chg ' + cls; }
+    // twSelect() reads these when the row is clicked, so they have to move too.
+    row.dataset.price  = text;
+    row.dataset.chg    = chg;
+    row.dataset.chgdir = cls === 'chg-pos' ? 'pos' : (cls === 'chg-neg' ? 'neg' : 'flat');
+  }
+
+  var head = document.getElementById('tw-c-ticker');
+  if(head && head.textContent === q.ticker){
+    var hp = document.getElementById('tw-c-price');
+    var hc = document.getElementById('tw-c-chg');
+    if(hp && hp.textContent !== text){ hp.textContent = text; if(moved) twFlash(hp, px > prev); }
+    if(hc){ hc.textContent = chg; hc.className = 'tw-sym-chg ' + cls; }
+  }
+}
+
+function twApplyChips(chips){
+  if(!chips) return;
+  var regime = document.getElementById('tw-chip-regime');
+  if(regime && chips.regime) regime.textContent = chips.regime;
+  var vix = document.getElementById('tw-chip-vix');
+  if(vix && chips.vix !== null && chips.vix !== undefined) vix.textContent = Number(chips.vix).toFixed(2);
+  var spy = document.getElementById('tw-chip-spy');
+  if(spy && chips.spy !== null && chips.spy !== undefined){
+    var v = Number(chips.spy);
+    spy.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+    spy.className = v >= 0 ? 'chg-pos' : 'chg-neg';
+  }
+}
+
+async function twQuotesRefresh(){
+  try {
+    var resp = await fetch('/api/terminal/quotes', {headers:{'Accept':'application/json'}});
+    if(!resp.ok) return;
+    var data = await resp.json();
+    (data.quotes || []).forEach(twApplyQuote);
+    twApplyChips(data.chips);
+    var pill = document.getElementById('tw-live');
+    var label = document.getElementById('tw-live-label');
+    if(pill && data.session) pill.dataset.session = data.session;
+    if(label && data.session_label){
+      label.textContent = data.session === 'closed'
+        ? data.session_label
+        : data.session_label + ' · ' + (data.server_time || '');
+    }
+  } catch(e){
+    console.warn('terminal quotes refresh failed:', e);
+  }
+}
+
+window._arRefreshFn = twQuotesRefresh;
+
 /* Boot */
 (function twBoot(){
   twInitChart();
@@ -1321,6 +1346,13 @@ function twRenderInsiders(data){
   if(first && first.dataset.ticker){ twLoadChart(first.dataset.ticker,twChartState.interval,twChartState.range); twLoadIntelligence(first.dataset.ticker); }
   else if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load.'); }
   twEstCost();
+  // Seed the change-detector from what the server rendered, so the first poll
+  // only flashes prices that actually moved since the page was built.
+  document.querySelectorAll('.tw-wl-row[data-ticker]').forEach(function(r){
+    var v = parseFloat(r.dataset.price);
+    if(isFinite(v)) twLast[r.dataset.ticker] = v;
+  });
+  twQuotesRefresh();          // stamp the status pill without waiting 4 s
 })();
 </script>
 {% endblock %}
