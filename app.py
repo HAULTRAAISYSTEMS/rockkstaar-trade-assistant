@@ -8344,6 +8344,52 @@ def fundamentals_page():
     return render_template("fundamentals.html", ticker=ticker, data=data, error=error)
 
 
+@app.route("/api/quarter/check", methods=["POST"])
+def api_quarter_check():
+    """Grade one quarter from figures the reader typed out of a 10-Q.
+
+    Nothing is fetched here. The whole point of the drill is that the reader
+    pulls the lines themselves; the separate answer-key endpoint is what
+    checks their extraction.
+    """
+    import quarter_checks
+
+    payload = request.get_json(silent=True) or request.form.to_dict() or {}
+    try:
+        return jsonify(quarter_checks.run(payload))
+    except Exception as exc:
+        logger.exception("quarter check failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/quarter/filed/<ticker>")
+def api_quarter_filed(ticker):
+    """What the company actually filed for its latest quarter.
+
+    Answers with a field-by-field comparison against whatever was typed, so
+    the reader learns which line they picked wrong — and which XBRL tag the
+    comparison used, because filers choose their own and the reader may be
+    right and the tag wrong.
+    """
+    import quarter_facts, quarter_checks
+
+    ticker = (ticker or "").strip().upper()
+    if not ticker or not ticker.replace(".", "").replace("-", "").isalnum():
+        return jsonify({"available": False, "error": "Invalid ticker"}), 400
+
+    typed = quarter_checks.parse(request.args.to_dict())
+    try:
+        filed = quarter_facts.latest_quarter(ticker)
+    except Exception as exc:
+        logger.warning("quarter filed lookup failed for %s: %s", ticker, exc)
+        return jsonify({"available": False,
+                        "error": "Could not read the filing right now."})
+    if not filed:
+        return jsonify({"available": False,
+                        "error": f"No quarterly XBRL data found for {ticker}."})
+    return jsonify(quarter_facts.compare(typed, filed))
+
+
 def _comparison_snapshot(ticker: str) -> dict:
     """Build a compact, source-labelled comparison record for one ticker."""
     from fundamentals_engine import get_fundamentals

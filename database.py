@@ -35,7 +35,13 @@ logger = logging.getLogger(__name__)
 
 # ─── Backend selection ────────────────────────────────────────────────────────
 
-DB_PATH = "rockkstaar.db"
+# Relative to the working directory by default, which is what a local run
+# wants. TRADESTAAR_DB_PATH moves it — needed wherever the checkout lives on a
+# filesystem SQLite cannot manage its own journal on, such as a network mount
+# that refuses unlink: the rollback journal is then undeletable and every
+# subsequent write fails with "disk I/O error". Production sets DATABASE_URL
+# and uses Postgres, so this affects local SQLite only.
+DB_PATH = os.environ.get("TRADESTAAR_DB_PATH") or "rockkstaar.db"
 _DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # Render (and Heroku) supply postgres:// but psycopg2 2.9+ requires postgresql://

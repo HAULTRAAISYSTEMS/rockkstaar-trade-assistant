@@ -21,6 +21,8 @@
   <div class="tab-bar">
     <button class="tab-btn {% if not request.args.get('tab') or request.args.get('tab') == 'analyze' %}active{% endif %}"
             onclick="switchTab('analyze', this)">Analyze</button>
+    <button class="tab-btn {% if request.args.get('tab') == 'quarter' %}active{% endif %}"
+            onclick="switchTab('quarter', this)">This quarter</button>
     <button class="tab-btn {% if request.args.get('tab') == 'learn' %}active{% endif %}"
             onclick="switchTab('learn', this)">Learn</button>
   </div>
@@ -28,7 +30,7 @@
   <!-- ══════════════════════════════════════════════════════════════════
        ANALYZE TAB
   ══════════════════════════════════════════════════════════════════ -->
-  <div id="tab-analyze" class="tab-pane" {% if request.args.get('tab') == 'learn' %}style="display:none"{% endif %}>
+  <div id="tab-analyze" class="tab-pane" {% if request.args.get('tab') in ('learn', 'quarter') %}style="display:none"{% endif %}>
 
     <!-- Search form -->
     <form method="GET" action="{{ url_for('fundamentals_page') }}" class="search-wrap">
@@ -483,6 +485,97 @@
     </div>
   {% endif %}
 
+  <!-- ══════════════════════════════════════════════════════════════════
+       THIS QUARTER — the seven-check drill
+  ══════════════════════════════════════════════════════════════════ -->
+  <div id="tab-quarter" class="tab-pane" {% if request.args.get('tab') != 'quarter' %}style="display:none"{% endif %}>
+
+    <div class="qd-intro">
+      <h2>Seven checks on one quarter</h2>
+      <p>The score on the Analyze tab reads annual filings and asks whether the
+         business is worth owning. This asks a different question: what did the
+         most recent quarter say? Open the company's 10-Q and pull the figures
+         out yourself — that is the part worth practising. Leave anything blank
+         and its check is skipped.</p>
+      <p class="qd-key">When you have run it, <strong>Check my numbers</strong>
+         pulls the same figures from the company's XBRL filing and shows you
+         where yours differ. Filers choose their own tags, so a difference is a
+         question, not a verdict.</p>
+    </div>
+
+    <div class="qd-grid">
+      <section class="qd-form">
+        <div class="qd-id">
+          <input type="text" id="q-co" placeholder="Ticker" maxlength="8"
+                 value="{{ ticker }}" autocomplete="off" spellcheck="false">
+          <input type="text" id="q-per" placeholder="Quarter, e.g. Q3 FY26" autocomplete="off">
+        </div>
+
+        <fieldset>
+          <legend>Income statement — the quarter</legend>
+          <p class="qd-hint">Three-month columns: this quarter and the same
+             quarter last year. Revenue may be called net sales or total revenue.</p>
+          <div class="qd-row qd-head"><span></span><span>This qtr</span><span>Year ago</span></div>
+          {% for key, label in [('rev','Revenue'), ('cogs','Cost of revenue'),
+                                ('opex','Total operating expenses'),
+                                ('opinc','Operating income'), ('ni','Net income'),
+                                ('sh','Diluted share count'), ('eps','Diluted EPS')] %}
+          <div class="qd-row">
+            <label for="q-{{ key }}">{{ label }}</label>
+            <input type="text" id="q-{{ key }}" inputmode="decimal" autocomplete="off">
+            <input type="text" id="q-{{ key }}P" inputmode="decimal" autocomplete="off">
+          </div>
+          {% endfor %}
+        </fieldset>
+
+        <fieldset>
+          <legend>Balance sheet</legend>
+          <p class="qd-hint">Two dates, not two periods. Use the subtotals the
+             company already computed.</p>
+          <div class="qd-row qd-head"><span></span><span>Now</span><span>Prior</span></div>
+          {% for key, label in [('ca','Total current assets'),
+                                ('cl','Total current liabilities'),
+                                ('ar','Accounts receivable, net')] %}
+          <div class="qd-row">
+            <label for="q-{{ key }}">{{ label }}</label>
+            <input type="text" id="q-{{ key }}" inputmode="decimal" autocomplete="off">
+            <input type="text" id="q-{{ key }}P" inputmode="decimal" autocomplete="off">
+          </div>
+          {% endfor %}
+        </fieldset>
+
+        <fieldset>
+          <legend>Cash flow — year to date</legend>
+          <p class="qd-hint">This statement is always cumulative, never
+             quarterly. Match it with the year-to-date net income printed at the
+             top of it.</p>
+          {% for key, label in [('niy','Net income (year to date)'),
+                                ('cfo','Cash from operating activities'),
+                                ('capex','Purchases of property &amp; equipment'),
+                                ('revYtd','Revenue (year to date) — optional')] %}
+          <div class="qd-row qd-single">
+            <label for="q-{{ key }}">{{ label|safe }}</label>
+            <input type="text" id="q-{{ key }}" inputmode="decimal" autocomplete="off">
+          </div>
+          {% endfor %}
+        </fieldset>
+
+        <div class="qd-actions">
+          <button type="button" class="qd-primary" onclick="qdRun()">Run the seven checks</button>
+          <button type="button" class="qd-ghost" onclick="qdCheck()">Check my numbers</button>
+          <button type="button" class="qd-ghost" onclick="qdClear()">Clear</button>
+        </div>
+        <p class="qd-status" id="q-status"></p>
+      </section>
+
+      <section class="qd-results" id="q-results" aria-live="polite">
+        <h3>Results</h3>
+        <p class="qd-empty">Fill in what you have and run the drill. Every check
+           with its inputs grades itself; the rest say what they were missing.</p>
+      </section>
+    </div>
+  </div>
+
   <div id="tab-learn" class="tab-pane" {% if not request.args.get('tab') or request.args.get('tab') != 'learn' %}style="display:none"{% endif %}>
 
     <!-- ── Balance Sheet ──────────────────────────────────────────────── -->
@@ -623,6 +716,71 @@
 </div>{# /fundamentals-shell #}
 {% endblock %}
 
+<style>
+/* ── The seven-check drill ───────────────────────────────────────────────── */
+.qd-intro { max-width: 74ch; margin-bottom: var(--sp-5); }
+.qd-intro h2 { font-family: var(--font-display); font-size: var(--fs-h2); color: var(--text-hi); margin: 0 0 10px; }
+.qd-intro p { color: var(--text-muted); font-size: var(--fs-sm); line-height: 1.65; margin: 0 0 10px; }
+.qd-key { border-left: 2px solid var(--orange-500); padding-left: var(--sp-3); }
+.qd-key strong { color: var(--text-hi); }
+
+.qd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-5); align-items: start; }
+@media (max-width: 900px) { .qd-grid { grid-template-columns: 1fr; } }
+
+.qd-form fieldset { border: 1px solid var(--border-subtle); border-radius: var(--r-md); padding: var(--sp-4); margin: 0 0 var(--sp-4); background: var(--surface-card); }
+.qd-form legend { font-family: var(--font-display); font-size: var(--fs-sm); font-weight: var(--fw-bold); letter-spacing: .05em; text-transform: uppercase; color: var(--text-hi); padding: 0 8px; }
+.qd-hint { color: var(--text-faint); font-size: var(--fs-xs); line-height: 1.55; margin: 0 0 var(--sp-3); font-style: italic; }
+.qd-id { display: flex; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.qd-id input { flex: 1; min-width: 0; }
+
+.qd-row { display: grid; grid-template-columns: minmax(0, 1.4fr) 1fr 1fr; gap: 8px; align-items: center; margin-bottom: 7px; }
+.qd-row.qd-single { grid-template-columns: minmax(0, 1.4fr) 1fr; }
+.qd-row label { color: var(--text-body); font-size: var(--fs-sm); }
+.qd-head span { color: var(--text-faint); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; text-align: right; padding-right: 10px; }
+.qd-form input, .qd-id input { background: var(--surface-inset); border: 1px solid var(--border-subtle); border-radius: var(--r-sm); color: var(--text-hi); font-family: var(--font-mono); font-size: var(--fs-sm); padding: 8px 10px; text-align: right; width: 100%; }
+.qd-id input { text-align: left; text-transform: uppercase; }
+.qd-form input:focus, .qd-id input:focus { outline: none; border-color: var(--orange-500); }
+
+.qd-actions { display: flex; gap: var(--sp-3); flex-wrap: wrap; }
+.qd-primary, .qd-ghost { font-family: var(--font-display); font-size: var(--fs-sm); font-weight: var(--fw-bold); letter-spacing: .04em; padding: 10px 18px; border-radius: var(--r-sm); cursor: pointer; border: 0; }
+.qd-primary { background: var(--grad-brand); color: var(--text-on-accent); }
+.qd-ghost { background: transparent; border: 1px solid var(--border-subtle); color: var(--text-muted); }
+.qd-ghost:hover { color: var(--text-hi); border-color: var(--border-strong); }
+.qd-status { color: var(--text-faint); font-size: var(--fs-xs); margin-top: var(--sp-3); min-height: 1em; line-height: 1.5; }
+.qd-status.err { color: var(--neg-500); }
+
+.qd-results { background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: var(--r-md); padding: var(--sp-4); position: sticky; top: var(--sp-4); }
+.qd-results h3 { font-family: var(--font-display); font-size: var(--fs-h3); color: var(--text-hi); margin: 0 0 var(--sp-4); }
+.qd-empty { color: var(--text-faint); font-size: var(--fs-sm); line-height: 1.6; }
+
+.qd-item { border-top: 1px solid var(--border-subtle); padding: var(--sp-4) 0; }
+.qd-item:first-of-type { border-top: 0; padding-top: 0; }
+.qd-top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.qd-name { color: var(--text-body); font-size: var(--fs-sm); }
+.qd-val { color: var(--text-hi); font-family: var(--font-mono); font-size: var(--fs-h3); font-weight: var(--fw-semi); white-space: nowrap; }
+.qd-badge { display: inline-block; font-family: var(--font-mono); font-size: 9px; letter-spacing: .09em; text-transform: uppercase; padding: 2px 7px; border-radius: 3px; margin-left: 8px; vertical-align: middle; }
+.qd-clean { background: rgba(46,204,113,.12); color: var(--pos-500); border: 1px solid rgba(46,204,113,.3); }
+.qd-watch { background: rgba(255,176,32,.12); color: var(--warn-500); border: 1px solid rgba(255,176,32,.32); }
+.qd-flag  { background: rgba(231,76,60,.12); color: var(--neg-500); border: 1px solid rgba(231,76,60,.3); }
+.qd-basis { color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-xs); margin-top: 4px; }
+.qd-says { color: var(--text-muted); font-size: var(--fs-sm); line-height: 1.6; margin: 8px 0 0; }
+.qd-says a { color: var(--orange-400); text-decoration: none; border-bottom: 1px dotted currentColor; }
+.qd-skipped { color: var(--text-faint); font-size: var(--fs-xs); font-style: italic; }
+.qd-summary { border-top: 1px solid var(--border-subtle); margin-top: var(--sp-4); padding-top: var(--sp-4); color: var(--text-muted); font-size: var(--fs-xs); line-height: 1.65; }
+
+/* Answer key */
+.qd-key-block { border-top: 1px solid var(--border-subtle); margin-top: var(--sp-4); padding-top: var(--sp-4); }
+.qd-key-block h4 { font-family: var(--font-display); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .06em; color: var(--text-hi); margin: 0 0 4px; }
+.qd-key-sub { color: var(--text-faint); font-size: var(--fs-xs); line-height: 1.55; margin: 0 0 var(--sp-3); }
+.qd-cmp { display: grid; grid-template-columns: minmax(0,1.3fr) 1fr 1fr auto; gap: 6px 10px; align-items: baseline; font-family: var(--font-mono); font-size: var(--fs-xs); padding: 6px 0; border-bottom: 1px solid var(--border-subtle); }
+.qd-cmp:last-child { border-bottom: 0; }
+.qd-cmp-label { font-family: var(--font-sans); color: var(--text-body); }
+.qd-cmp-tag { color: var(--text-faint); font-size: 10px; display: block; }
+.qd-cmp-num { text-align: right; color: var(--text-muted); }
+.qd-cmp .ok { color: var(--pos-500); }
+.qd-cmp .no { color: var(--neg-500); }
+.qd-note { color: var(--warn-500); font-size: 10px; grid-column: 1 / -1; margin: 0; }
+</style>
 {% block scripts %}
 <script>
   // ── Tab switching ─────────────────────────────────────────────────────────
@@ -639,6 +797,162 @@
     if (!card) return;
     card.classList.toggle('open');
   }
+
+  // ── Seven-check drill ─────────────────────────────────────────────────────
+  // The grading is server-side, in quarter_checks.py, so the thresholds live
+  // in one tested place rather than being reimplemented here and drifting.
+  const QD_FIELDS = ['rev','revP','cogs','cogsP','opex','opexP','opinc','opincP',
+    'ni','niP','sh','shP','eps','epsP','ca','caP','cl','clP','ar','arP',
+    'niy','cfo','capex','revYtd'];
+
+  function qdEsc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g,
+      c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function qdValues() {
+    const out = {};
+    QD_FIELDS.forEach(k => {
+      const el = document.getElementById('q-' + k);
+      if (el && el.value.trim()) out[k] = el.value.trim();
+    });
+    return out;
+  }
+  function qdStatus(msg, isErr) {
+    const el = document.getElementById('q-status');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.className = 'qd-status' + (isErr ? ' err' : '');
+  }
+
+  async function qdRun() {
+    const body = qdValues();
+    qdStatus('');
+    try {
+      const resp = await fetch('/api/quarter/check', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') || {}).content || ''
+        },
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json();
+      if (data.error) { qdStatus(data.error, true); return; }
+      qdRender(data);
+    } catch (e) {
+      qdStatus('Could not run the checks: ' + e.message, true);
+    }
+  }
+
+  function qdRender(data) {
+    const ticker = (document.getElementById('q-co').value || '').trim().toUpperCase();
+    const period = (document.getElementById('q-per').value || '').trim();
+    let html = '<h3>' + qdEsc(ticker || 'This company') +
+               (period ? ' — ' + qdEsc(period) : '') + '</h3>';
+
+    if (!data.graded) {
+      html += '<p class="qd-empty">Nothing to compute yet. Each check needs its ' +
+              'own inputs — enter at least cash from operations and year-to-date ' +
+              'net income to grade the first one.</p>';
+    }
+    (data.checks || []).forEach(c => {
+      if (c.skipped) {
+        html += '<div class="qd-item"><div class="qd-top"><span class="qd-name">' +
+          qdEsc(c.name) + '</span></div><p class="qd-skipped">Skipped — needs ' +
+          qdEsc(c.skipped) + '.</p></div>';
+        return;
+      }
+      const link = c.concept
+        ? ' <a href="/learn/' + qdEsc(c.concept) + '" target="_blank" rel="noopener">What is this?</a>'
+        : '';
+      html += '<div class="qd-item"><div class="qd-top">' +
+        '<span class="qd-name">' + qdEsc(c.name) + '</span>' +
+        '<span class="qd-val">' + qdEsc(c.value) +
+        '<span class="qd-badge qd-' + qdEsc(c.verdict) + '">' +
+        (c.verdict === 'clean' ? 'Clean' : c.verdict === 'watch' ? 'Watch' : 'Flag') +
+        '</span></span></div>' +
+        (c.basis ? '<div class="qd-basis">' + qdEsc(c.basis) + '</div>' : '') +
+        '<p class="qd-says">' + qdEsc(c.says) + link + '</p></div>';
+    });
+    if (data.summary) html += '<div class="qd-summary">' + qdEsc(data.summary) + '</div>';
+    document.getElementById('q-results').innerHTML = html;
+  }
+
+  // The answer key. Runs against the reader's own entries, so it can only
+  // report a difference — never overwrite what they typed.
+  async function qdCheck() {
+    const ticker = (document.getElementById('q-co').value || '').trim().toUpperCase();
+    if (!ticker) { qdStatus('Enter a ticker first — the filing is looked up by it.', true); return; }
+    const params = new URLSearchParams(qdValues()).toString();
+    qdStatus('Reading ' + ticker + "'s filing…");
+    try {
+      const resp = await fetch('/api/quarter/filed/' + encodeURIComponent(ticker) +
+                               (params ? '?' + params : ''));
+      const data = await resp.json();
+      if (!data.available) { qdStatus(data.error || 'No filing found.', true); return; }
+      qdStatus('');
+      qdRenderKey(data);
+    } catch (e) {
+      qdStatus('Could not read the filing: ' + e.message, true);
+    }
+  }
+
+  function qdNum(v) {
+    if (v === null || v === undefined) return '—';
+    const n = Number(v);
+    if (!isFinite(n)) return '—';
+    return Math.abs(n) < 1000 ? n.toLocaleString(undefined, {maximumFractionDigits: 2})
+                              : n.toLocaleString(undefined, {maximumFractionDigits: 0});
+  }
+
+  function qdRenderKey(data) {
+    const entered = data.rows.filter(r => r.state === 'match' || r.state === 'differs');
+    let html = '<div class="qd-key-block"><h4>Against the filing</h4>' +
+      '<p class="qd-key-sub">' + qdEsc(data.company || '') +
+      (data.period_end ? ' · quarter ending ' + qdEsc(data.period_end) : '') +
+      (data.form ? ' · ' + qdEsc(data.form) : '') +
+      (data.filed_on ? ' filed ' + qdEsc(data.filed_on) : '') +
+      '. ' + data.matched + ' of ' + entered.length + ' matched. ' +
+      'Filers choose their own tags, so a difference is a question, not a verdict.</p>';
+
+    data.rows.forEach(r => {
+      if (r.state === 'blank') return;          // nothing typed; nothing to grade
+      let mark = '', cls = '';
+      if (r.state === 'match')   { mark = '✓'; cls = 'ok'; }
+      else if (r.state === 'differs') { mark = '✕'; cls = 'no'; }
+      else { mark = '—'; }
+      html += '<div class="qd-cmp"><span class="qd-cmp-label">' + qdEsc(r.label) +
+        (r.tag ? '<span class="qd-cmp-tag">' + qdEsc(r.tag) + '</span>' : '') + '</span>' +
+        '<span class="qd-cmp-num">' + qdNum(r.typed) + '</span>' +
+        '<span class="qd-cmp-num">' +
+          (r.state === 'unfiled' ? 'not tagged' : qdNum(r.filed)) + '</span>' +
+        '<span class="' + cls + '">' + mark + '</span>' +
+        (r.scaled ? '<p class="qd-note">Same line, different scale — the filing ' +
+                    'reports in units and the statement you read was in thousands ' +
+                    'or millions.</p>' : '') +
+        '</div>';
+    });
+    html += '</div>';
+    const box = document.getElementById('q-results');
+    const existing = box.querySelector('.qd-key-block');
+    if (existing) existing.remove();
+    box.insertAdjacentHTML('beforeend', html);
+  }
+
+  function qdClear() {
+    QD_FIELDS.forEach(k => { const el = document.getElementById('q-' + k); if (el) el.value = ''; });
+    document.getElementById('q-per').value = '';
+    qdStatus('');
+    document.getElementById('q-results').innerHTML =
+      '<h3>Results</h3><p class="qd-empty">Fill in what you have and run the drill. ' +
+      'Every check with its inputs grades itself; the rest say what they were missing.</p>';
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const pane = document.getElementById('tab-quarter');
+    if (pane && pane.style.display !== 'none' && e.target.id && e.target.id.startsWith('q-')) qdRun();
+  });
 
   // ── Education panel toggle ────────────────────────────────────────────────
   function toggleEdu(id) {

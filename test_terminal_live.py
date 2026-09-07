@@ -98,8 +98,15 @@ class TestTheQuotesEndpoint:
         """A four-second poll cannot hold a request open behind yfinance.
 
         The refresh is fired into a thread; the response is a database read.
+        The watchlist is stubbed rather than read from whatever database the
+        run happens to find — the point under test is which function the
+        endpoint calls, not what this machine's dev data contains.
         """
-        with patch.object(_app, "_trigger_exec_state_refresh") as trigger, \
+        with patch.object(_app, "get_active_wl_id", return_value=1), \
+             patch.object(_app, "get_watchlist_stocks", return_value=["NVDA"]), \
+             patch.object(_app, "get_all_stock_data",
+                          return_value=[{"ticker": "NVDA", "current_price": 230.36}]), \
+             patch.object(_app, "_trigger_exec_state_refresh") as trigger, \
              patch.object(_app, "batch_refresh_exec_states") as blocking:
             client.get("/api/terminal/quotes")
         assert trigger.called
