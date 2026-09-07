@@ -566,6 +566,18 @@
       <button type="button" class="qd-ghost" onclick="qdClear()">Clear</button>
     </div>
 
+    <!-- Reading a filing takes twenty minutes. Losing it to a refresh, or
+         retyping it to compare against last quarter, is what stops the drill
+         becoming a habit. -->
+    <section class="qd-saved" id="q-saved" hidden>
+      <div class="qd-saved-hd">
+        <h3>Saved quarters</h3>
+        <span class="qd-saved-hint">Click one to reopen it. Saving the same
+              ticker and quarter again updates it rather than making a copy.</span>
+      </div>
+      <div class="qd-saved-list" id="q-saved-list"></div>
+    </section>
+
     <div class="qd-grid">
       <section class="qd-form">
         <div class="qd-id">
@@ -621,6 +633,7 @@
         <div class="qd-actions">
           <button type="button" class="qd-primary" onclick="qdRun()">Run the seven checks</button>
           <button type="button" class="qd-ghost" onclick="qdCheck()">Check my numbers</button>
+          <button type="button" class="qd-ghost" onclick="qdSave()">Save this quarter</button>
         </div>
         <p class="qd-status" id="q-status"></p>
       </section>
@@ -1008,6 +1021,116 @@
     if (existing) existing.remove();
     box.insertAdjacentHTML('beforeend', html);
   }
+
+  // ── Saved quarters ────────────────────────────────────────────────────────
+  // The store keeps the typed figures only. Grades are recomputed on the way
+  // out, so a threshold that moves later reflows every saved quarter rather
+  // than leaving verdicts computed under rules the app has moved on from.
+  function qdCsrf() {
+    return (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+  }
+
+  async function qdSave() {
+    const ticker = (qdEl('co').value || '').trim().toUpperCase();
+    if (!ticker) { qdStatus('Enter a ticker before saving — it is how you find it again.', true); return; }
+    const figures = qdValues();
+    if (!Object.keys(figures).length) {
+      qdStatus('Nothing to save yet — fill in some figures first.', true); return;
+    }
+    try {
+      const resp = await fetch('/api/quarter/saved', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': qdCsrf()},
+        body: JSON.stringify({
+          ticker: ticker,
+          period: (qdEl('per').value || '').trim(),
+          figures: figures
+        })
+      });
+      const data = await resp.json();
+      if (data.error) { qdStatus(data.error, true); return; }
+      qdRenderSaved(data.entries);
+      const period = (qdEl('per').value || '').trim();
+      qdStatus('Saved ' + ticker + (period ? ' ' + period : '') +
+               '. It is in Saved quarters above, and will be there next time.');
+    } catch (e) {
+      qdStatus('Could not save: ' + e.message, true);
+    }
+  }
+
+  async function qdLoadSavedList() {
+    try {
+      const resp = await fetch('/api/quarter/saved');
+      const data = await resp.json();
+      qdRenderSaved(data.entries || []);
+    } catch (e) { /* the shelf simply stays hidden */ }
+  }
+
+  function qdRenderSaved(entries) {
+    const box = document.getElementById('q-saved');
+    const list = document.getElementById('q-saved-list');
+    if (!box || !list) return;
+    if (!entries || !entries.length) { box.hidden = true; list.innerHTML = ''; return; }
+    box.hidden = false;
+    list.innerHTML = entries.map(e => {
+      const c = e.counts || {};
+      const tally = e.graded
+        ? '<span class="t-clean">' + c.clean + '</span>' +
+          '<span class="t-watch">' + c.watch + '</span>' +
+          '<span class="t-flag">' + c.flag + '</span>'
+        : '<span class="qd-chip-none">not graded</span>';
+      return '<div class="qd-chip">' +
+        '<button type="button" class="qd-chip-open" onclick="qdOpenSaved(' + e.id + ')" ' +
+          'title="Reopen ' + qdEsc(e.ticker) + '">' +
+          '<span class="qd-chip-sym">' + qdEsc(e.ticker) + '</span>' +
+          (e.period ? '<span class="qd-chip-per">' + qdEsc(e.period) + '</span>' : '') +
+          '<span class="qd-chip-tally">' + tally + '</span>' +
+        '</button>' +
+        '<button type="button" class="qd-chip-del" onclick="qdDeleteSaved(' + e.id + ', \'' +
+          qdEsc(e.ticker).replace(/'/g, "") + '\')" aria-label="Forget this saved quarter" ' +
+          'title="Forget this saved quarter">×</button>' +
+        '</div>';
+    }).join('');
+  }
+
+  async function qdOpenSaved(id) {
+    try {
+      const resp = await fetch('/api/quarter/saved/' + id);
+      const data = await resp.json();
+      if (data.error) { qdStatus(data.error, true); return; }
+      qdEl('co').value = data.ticker || '';
+      qdEl('per').value = data.period || '';
+      QD_FIELDS.forEach(k => {
+        const el = qdEl(k);
+        if (el) el.value = (data.figures && data.figures[k] !== undefined) ? data.figures[k] : '';
+      });
+      qdMarkFilled();
+      qdStatus('Reopened ' + (data.ticker || '') + (data.period ? ' ' + data.period : '') +
+               '. Change anything and save again to update it.');
+      qdRun();
+      document.getElementById('q-results').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    } catch (e) {
+      qdStatus('Could not reopen that quarter: ' + e.message, true);
+    }
+  }
+
+  async function qdDeleteSaved(id, label) {
+    // Twenty minutes of reading goes with it, so ask once.
+    if (!window.confirm('Forget the saved quarter for ' + label + '? The figures go with it.')) return;
+    try {
+      const resp = await fetch('/api/quarter/saved/' + id, {
+        method: 'DELETE', headers: {'X-CSRFToken': qdCsrf()}
+      });
+      const data = await resp.json();
+      if (data.error) { qdStatus(data.error, true); return; }
+      qdRenderSaved(data.entries);
+      qdStatus('Forgot ' + label + '.');
+    } catch (e) {
+      qdStatus('Could not delete that: ' + e.message, true);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', qdLoadSavedList);
 
   function qdClear() {
     QD_FIELDS.forEach(k => { const el = qdEl(k); if (el) el.value = ''; });

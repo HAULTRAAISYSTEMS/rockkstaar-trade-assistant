@@ -11,6 +11,7 @@ from database import get_db
 MIGRATIONS = (
     "migrations.m0001_live_research_feed",
     "migrations.m0002_live_research_triage",
+    "migrations.m0003_quarter_entries",
 )
 
 

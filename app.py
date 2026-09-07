@@ -41,6 +41,8 @@ from database import (
     set_stock_classify, set_auto_classify,
     set_ticker_state, upsert_loading_placeholder,
     get_note, save_note, get_all_notes, update_setup_type,
+    save_quarter_entry, get_quarter_entries, get_quarter_entry,
+    delete_quarter_entry,
     get_trade_plan, save_trade_plan, get_all_trade_plans,
     add_journal_entry, update_journal_entry, delete_journal_entry,
     get_journal_entry, get_all_journal_entries, get_journal_entries_for_date,
@@ -456,6 +458,23 @@ except Exception as _init_err:
     logger.error("init_db failed at startup: %s — will retry on first request", _init_err)
     if _is_production:
         raise
+
+# init_db() creates the tables it knows about; anything added since ships as a
+# migration, and until now nothing ran them. The two existing migrations were
+# applied by hand, which is a deploy step nobody remembers and a table that
+# quietly does not exist on the next environment. Migrations are idempotent and
+# tracked in schema_migrations, so running them at startup costs one query when
+# there is nothing to do.
+try:
+    from migration_runner import run_migrations as _run_migrations
+    _applied = _run_migrations()
+    if _applied:
+        logger.info("migrations applied at startup: %s", ", ".join(_applied))
+except Exception as _mig_err:
+    # A failed migration must not take the process down: the app served every
+    # page fine before this ran, and a crash loop is worse than a missing
+    # feature.
+    logger.error("migrations failed at startup: %s", _mig_err)
 
 # Importing this module started five daemon threads that hit the network and
 # write to the database: the momentum scanner, the intel alert loop, two cache
@@ -8360,6 +8379,94 @@ def api_quarter_check():
     except Exception as exc:
         logger.exception("quarter check failed")
         return jsonify({"error": str(exc)}), 500
+
+
+def _quarter_card(entry: dict) -> dict:
+    """A saved quarter as the list renders it.
+
+    The grades are recomputed from the stored figures rather than read back,
+    so a threshold that changes later reflows every saved quarter instead of
+    leaving a museum of verdicts computed under rules the app has moved on
+    from.
+    """
+    import quarter_checks
+
+    graded = quarter_checks.run(entry.get("figures") or {})
+    return {
+        "id":         entry.get("id"),
+        "ticker":     entry.get("ticker"),
+        "period":     entry.get("period") or "",
+        "note":       entry.get("note") or "",
+        "updated_at": entry.get("updated_at"),
+        "counts":     graded["counts"],
+        "graded":     graded["graded"],
+    }
+
+
+@app.route("/api/quarter/saved", methods=["GET"])
+def api_quarter_saved():
+    """Every quarter this user has saved, newest first."""
+    try:
+        entries = get_quarter_entries(current_user_id())
+    except Exception as exc:
+        logger.warning("saved quarters list failed: %s", exc)
+        return jsonify({"entries": [], "error": "Could not read saved quarters."})
+    return jsonify({"entries": [_quarter_card(e) for e in entries]})
+
+
+@app.route("/api/quarter/saved", methods=["POST"])
+def api_quarter_save():
+    """Save the figures as typed. Re-saving the same quarter edits it."""
+    import quarter_checks
+
+    payload = request.get_json(silent=True) or {}
+    ticker = (payload.get("ticker") or "").strip().upper()
+    if not ticker:
+        return jsonify({"error": "Enter a ticker before saving."}), 400
+
+    figures = {k: v for k, v in (payload.get("figures") or {}).items()
+               if k in quarter_checks.FIELDS}
+    if not figures:
+        return jsonify({"error": "Nothing to save yet — fill in some figures first."}), 400
+
+    try:
+        entry_id = save_quarter_entry(
+            ticker,
+            (payload.get("period") or "").strip(),
+            figures,
+            (payload.get("note") or "").strip() or None,
+            current_user_id(),
+        )
+    except Exception as exc:
+        logger.warning("saving a quarter failed: %s", exc)
+        return jsonify({"error": "Could not save that quarter."}), 500
+
+    entries = get_quarter_entries(current_user_id())
+    return jsonify({"id": entry_id,
+                    "entries": [_quarter_card(e) for e in entries]})
+
+
+@app.route("/api/quarter/saved/<int:entry_id>", methods=["GET"])
+def api_quarter_saved_one(entry_id):
+    """Reopen one saved quarter — the figures, to put back in the form."""
+    entry = get_quarter_entry(entry_id, current_user_id())
+    if not entry:
+        return jsonify({"error": "That saved quarter is not there."}), 404
+    return jsonify({
+        "id": entry["id"], "ticker": entry["ticker"],
+        "period": entry.get("period") or "", "note": entry.get("note") or "",
+        "figures": entry.get("figures") or {},
+        "updated_at": entry.get("updated_at"),
+    })
+
+
+@app.route("/api/quarter/saved/<int:entry_id>", methods=["DELETE"])
+def api_quarter_delete(entry_id):
+    """Forget one saved quarter."""
+    uid = current_user_id()
+    if not delete_quarter_entry(entry_id, uid):
+        return jsonify({"error": "That saved quarter is not there."}), 404
+    return jsonify({"entries": [_quarter_card(e) for e in get_quarter_entries(uid)]})
 
 
 @app.route("/api/quarter/filed/<ticker>")

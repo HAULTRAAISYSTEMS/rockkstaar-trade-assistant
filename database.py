@@ -2675,6 +2675,120 @@ def get_journal_entries_for_date(date_str: str, user_id: int = 1) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Saved quarters (the seven-check drill)
+# ---------------------------------------------------------------------------
+
+def save_quarter_entry(ticker: str, period: str, figures: dict,
+                       note: str | None = None, user_id: int = 1) -> int:
+    """Store one worked quarter, replacing any earlier save of the same one.
+
+    Only the typed figures are kept. Grades are derived from them, and a
+    threshold that moves later should reflow every saved quarter rather than
+    leaving behind verdicts computed under rules the app no longer uses.
+    """
+    import json
+    from datetime import datetime, timezone
+
+    ticker = (ticker or "").strip().upper()
+    if not ticker:
+        raise ValueError("A saved quarter needs a ticker")
+    period = (period or "").strip()
+    payload = json.dumps({k: v for k, v in (figures or {}).items() if v not in (None, "")})
+    # Microseconds, not seconds. The list claims "most recently touched", and
+    # two saves inside the same second tie on a second-precision stamp — which
+    # is exactly what happens when someone corrects a figure and saves again.
+    now = datetime.now(timezone.utc).isoformat()
+
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT id, created_at FROM quarter_entries "
+            "WHERE user_id = ? AND ticker = ? AND period = ?",
+            (user_id, ticker, period),
+        ).fetchone()
+        if row:
+            entry_id = row["id"]
+            conn.execute(
+                "UPDATE quarter_entries SET figures = ?, note = ?, updated_at = ? "
+                "WHERE id = ?",
+                (payload, note, now, entry_id),
+            )
+        else:
+            cur = conn.execute(
+                "INSERT INTO quarter_entries "
+                "(user_id, ticker, period, figures, note, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, ticker, period, payload, note, now, now),
+                returning_id=True,      # the id has to survive Postgres too
+            )
+            entry_id = cur.lastrowid
+        conn.commit()
+        return entry_id
+    finally:
+        conn.close()
+
+
+def get_quarter_entries(user_id: int = 1, limit: int = 60) -> list:
+    """Saved quarters, most recently touched first."""
+    import json
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM quarter_entries WHERE user_id = ? "
+            "ORDER BY updated_at DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for row in rows:
+        entry = dict(row)
+        try:
+            entry["figures"] = json.loads(entry.get("figures") or "{}")
+        except (TypeError, ValueError):
+            # A row this app cannot parse is still worth listing so the reader
+            # can delete it, but it must not carry junk into the form.
+            entry["figures"] = {}
+        out.append(entry)
+    return out
+
+
+def get_quarter_entry(entry_id: int, user_id: int = 1) -> dict | None:
+    """One saved quarter, or None. Scoped so an id alone opens nothing."""
+    import json
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT * FROM quarter_entries WHERE id = ? AND user_id = ?",
+            (entry_id, user_id),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    entry = dict(row)
+    try:
+        entry["figures"] = json.loads(entry.get("figures") or "{}")
+    except (TypeError, ValueError):
+        entry["figures"] = {}
+    return entry
+
+
+def delete_quarter_entry(entry_id: int, user_id: int = 1) -> bool:
+    """Remove one saved quarter. True when a row belonging to this user went."""
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            "DELETE FROM quarter_entries WHERE id = ? AND user_id = ?",
+            (entry_id, user_id),
+        )
+        conn.commit()
+        return bool(getattr(cur, "rowcount", 0))
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Daily session helpers (risk engine)
 # ---------------------------------------------------------------------------
 
