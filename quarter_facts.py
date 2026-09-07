@@ -41,6 +41,15 @@ TOLERANCE = 0.005
 QUARTER_DAYS = (80, 100)
 YTD_DAYS = (150, 400)          # six, nine or twelve months into the year
 
+# A 52/53-week fiscal year does not repeat on the same calendar date. NVIDIA's
+# quarters end on a Sunday, so the same quarter a year earlier ended 26 July
+# one year and 27 July the next — and a 53-week year shifts one quarter by a
+# further week. Requiring an exact date silently dropped every prior-year
+# column for every filer on that calendar, which is most retailers and a good
+# deal of tech. Ten days is wide enough for the drift and far short of the
+# ninety-odd between one quarter and the next.
+PERIOD_SLACK_DAYS = 10
+
 # Each field: the label the form uses, and the XBRL tags to try in order.
 # Order matters — the first tag a filer actually used wins.
 QUARTER_TAGS = {
@@ -105,17 +114,43 @@ def _days(fact: dict) -> int | None:
         return None
 
 
-def _pick(facts, tags, *, window, end=None):
-    """The most recently filed fact matching a duration window, or an instant.
+def _pick(facts, tags, *, window, end=None, near=None, slack=0):
+    """The best fact matching a duration window, or an instant.
 
-    `window` is None for instants. `end` pins the period end so the prior-year
-    comparison lands on the same quarter rather than on whatever is newest.
+    `window` is None for instants. `end` pins the period end exactly. `near`
+    pins it approximately, within `slack` days, and takes the closest.
+
+    Tag order expresses preference, not priority. It used to short-circuit on
+    the first tag with any data at all, which is wrong whenever a filer has
+    changed tags: NVIDIA's older revenue tag stops in 2020, so the walkthrough
+    confidently returned a quarter from six years ago and every other figure
+    was then filtered to that same dead date. Candidates are gathered across
+    every tag and the most recent period wins; the tag list only breaks ties
+    within one period.
     """
-    for tag in tags:
-        candidates = []
+    from datetime import datetime
+
+    def _date(text):
+        try:
+            return datetime.strptime(text, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            return None
+
+    target = _date(near) if near else None
+    candidates = []
+    for rank, tag in enumerate(tags):
         for fact in _facts_for(tag, facts):
-            if end and fact.get("end") != end:
+            fact_end = fact.get("end")
+            if end and fact_end != end:
                 continue
+            distance = 0
+            if target:
+                actual = _date(fact_end)
+                if actual is None:
+                    continue
+                distance = abs((actual - target).days)
+                if distance > slack:
+                    continue
             if window is None:
                 if "start" in fact:
                     continue                      # a duration, not an instant
@@ -123,17 +158,21 @@ def _pick(facts, tags, *, window, end=None):
                 length = _days(fact)
                 if length is None or not (window[0] <= length <= window[1]):
                     continue
-            candidates.append(fact)
-        if not candidates:
-            continue
-        # Latest period end, then latest filing — an amended figure supersedes.
-        candidates.sort(key=lambda f: (f.get("end") or "", f.get("filed") or ""))
-        best = candidates[-1]
-        return {"value": best.get("val"), "tag": tag,
-                "end": best.get("end"), "start": best.get("start"),
-                "form": best.get("form"), "filed": best.get("filed"),
-                "accn": best.get("accn")}
-    return None
+            candidates.append((distance, fact, rank, tag))
+
+    if not candidates:
+        return None
+
+    # Nearest to the target date first when one was given; then the latest
+    # period; then the preferred tag; then the latest filing, so an amended
+    # figure supersedes.
+    candidates.sort(key=lambda c: (-c[0], c[1].get("end") or "", -c[2],
+                                   c[1].get("filed") or ""))
+    _distance, best, _rank, tag = candidates[-1]
+    return {"value": best.get("val"), "tag": tag,
+            "end": best.get("end"), "start": best.get("start"),
+            "form": best.get("form"), "filed": best.get("filed"),
+            "accn": best.get("accn")}
 
 
 def _prior_instant(facts, tags, current, prior_end):
@@ -166,7 +205,8 @@ def _prior_instant(facts, tags, current, prior_end):
                         "start": None, "form": best.get("form"),
                         "filed": best.get("filed"), "comparative": True}
     if prior_end:
-        return _pick(facts, tags, window=None, end=prior_end)
+        return _pick(facts, tags, window=None, near=prior_end,
+                     slack=PERIOD_SLACK_DAYS)
     return None
 
 
@@ -235,7 +275,8 @@ def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
         if found:
             fields[key] = dict(found, label=label)
         if prior_end:
-            found_prior = _pick(facts, tags, window=QUARTER_DAYS, end=prior_end)
+            found_prior = _pick(facts, tags, window=QUARTER_DAYS,
+                                near=prior_end, slack=PERIOD_SLACK_DAYS)
             if found_prior:
                 fields[key + "P"] = dict(found_prior, label=label + ", year ago")
 
@@ -270,6 +311,8 @@ def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
 
 
 def _derive_operating_expenses(facts, fields, end, prior_end):
+    # Note: the prior column is matched near its date, not on it, for the same
+    # 52/53-week reason as everything else here.
     """Total operating expenses, when the filer never tagged it directly.
 
     Many filers present one "Total costs and expenses" line — CostsAndExpenses
@@ -285,14 +328,18 @@ def _derive_operating_expenses(facts, fields, end, prior_end):
     for key, period in (("opex", end), ("opexP", prior_end)):
         if key in fields or not period:
             continue
-        total = _pick(facts, ["CostsAndExpenses"], window=QUARTER_DAYS, end=period)
-        cogs = _pick(facts, QUARTER_TAGS["cogs"][1], window=QUARTER_DAYS, end=period)
+        exact = (period == end)
+        where = {"end": period} if exact else {"near": period, "slack": PERIOD_SLACK_DAYS}
+        total = _pick(facts, ["CostsAndExpenses"], window=QUARTER_DAYS, **where)
+        cogs = _pick(facts, QUARTER_TAGS["cogs"][1], window=QUARTER_DAYS, **where)
         if not total or not cogs:
             continue
         try:
             value = float(total["value"]) - float(cogs["value"])
         except (TypeError, ValueError):
             continue
+        if total.get("end") != cogs.get("end"):
+            continue                    # two different periods is not a subtotal
         label = QUARTER_TAGS["opex"][0] + ("" if key == "opex" else ", year ago")
         fields[key] = {
             "value": value,
@@ -452,7 +499,8 @@ def _row_values(facts, tags, *, window, now, prior, current_fact=None):
         second = _prior_instant(facts, tags, first, prior)
     else:
         first = _pick(facts, tags, window=window, end=now)
-        second = _pick(facts, tags, window=window, end=prior) if prior else None
+        second = (_pick(facts, tags, window=window, near=prior,
+                        slack=PERIOD_SLACK_DAYS) if prior else None)
     return first, second
 
 

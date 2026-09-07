@@ -568,3 +568,107 @@ class TestTheTickerHasSomethingToPress:
         assert "function qdBusy" in page
         assert "Reading the filing…" in page
         assert "b.disabled = true;" in page
+
+
+class TestAFilerWhoChangedTags:
+    """NVDA came back as the quarter ended 2020-01-26. Six years stale.
+
+    Tag order was being read as priority: _pick returned the first tag with
+    any data at all, so an older revenue tag whose history stops in 2020 won
+    over the tag the company files under now. Every other figure was then
+    filtered to that dead date, which is why most of the form came back empty
+    and the label said 10-K.
+
+    Preference between tags only matters within one period. Across periods,
+    the most recent filing wins.
+    """
+
+    SWITCHED = facts(
+        # The old tag, abandoned in 2020.
+        duration("Revenues", [
+            ("2019-10-28", "2020-01-26", 3105, "10-K", "2020-02-20")]),
+        # The tag in use now.
+        duration("RevenueFromContractWithCustomerExcludingAssessedTax", [
+            ("2026-04-27", "2026-07-26", 96221, "10-Q", "2026-08-27"),
+            ("2025-04-28", "2025-07-27", 46743, "10-Q", "2025-08-27")]),
+    )
+
+    def test_the_current_tag_wins_over_a_dead_one(self):
+        found = qf.latest_quarter("NVDA", facts=self.SWITCHED)
+        assert found["period_end"] == "2026-07-26"
+        assert found["fields"]["rev"]["value"] == 96221
+
+    def test_the_stale_period_is_not_what_the_page_reports(self):
+        found = qf.latest_quarter("NVDA", facts=self.SWITCHED)
+        assert found["form"] == "10-Q"
+        assert found["fields"]["rev"]["value"] != 3105
+
+    def test_tag_order_still_decides_within_one_period(self):
+        """Two tags for the same quarter: the preferred one is used."""
+        both = facts(
+            duration("RevenueFromContractWithCustomerExcludingAssessedTax", [
+                ("2026-04-27", "2026-07-26", 96221, "10-Q", "2026-08-27")]),
+            duration("Revenues", [
+                ("2026-04-27", "2026-07-26", 99999, "10-Q", "2026-08-27")]),
+        )
+        found = qf.latest_quarter("NVDA", facts=both)
+        assert found["fields"]["rev"]["tag"] == \
+            "RevenueFromContractWithCustomerExcludingAssessedTax"
+
+
+class TestAFiftyTwoWeekFiscalYear:
+    """NVIDIA's quarters end on a Sunday, so the year-ago column moves.
+
+    The quarter ended 26 July 2026; the same quarter a year before ended
+    27 July 2025. Matching the prior period on an exact date found nothing,
+    so every year-ago figure came back blank and the checks that need two
+    periods — gross margin's trend, operating leverage, the EPS-against-
+    profit read — all said they were waiting on numbers that were there.
+    """
+
+    DRIFTED = facts(
+        duration("RevenueFromContractWithCustomerExcludingAssessedTax", [
+            ("2026-04-27", "2026-07-26", 96221, "10-Q", "2026-08-27"),
+            ("2025-04-28", "2025-07-27", 46743, "10-Q", "2025-08-27")]),
+        duration("CostOfRevenue", [
+            ("2026-04-27", "2026-07-26", 24079, "10-Q", "2026-08-27"),
+            ("2025-04-28", "2025-07-27", 12890, "10-Q", "2025-08-27")]),
+        duration("OperatingExpenses", [
+            ("2026-04-27", "2026-07-26", 8408, "10-Q", "2026-08-27"),
+            ("2025-04-28", "2025-07-27", 5413, "10-Q", "2025-08-27")]),
+        duration("OperatingIncomeLoss", [
+            ("2026-04-27", "2026-07-26", 63734, "10-Q", "2026-08-27"),
+            ("2025-04-28", "2025-07-27", 28440, "10-Q", "2025-08-27")]),
+    )
+
+    def test_the_year_ago_column_is_found_a_day_off(self):
+        found = qf.latest_quarter("NVDA", facts=self.DRIFTED)
+        assert found["fields"]["revP"]["value"] == 46743
+        assert found["fields"]["revP"]["end"] == "2025-07-27"
+
+    def test_the_checks_that_need_two_periods_can_now_run(self):
+        import quarter_checks
+        found = qf.latest_quarter("NVDA", facts=self.DRIFTED)
+        figures = {k: v["value"] for k, v in found["fields"].items()}
+        graded = {c["key"]: c for c in quarter_checks.run(figures)["checks"]}
+        assert not graded["operating_leverage"]["skipped"]
+        # 49,478 / 46,743 = 105.8511%, which rounds to 105.9. The original
+        # walkthrough wrote 105.8 by truncating; rounding is the right read.
+        assert graded["operating_leverage"]["value"] == "+105.9% / +55.3%"
+        assert graded["operating_leverage"]["verdict"] == "clean"
+
+    def test_a_neighbouring_quarter_is_never_mistaken_for_the_year_ago_one(self):
+        """Ten days of slack, and ninety between quarters."""
+        near = facts(duration("RevenueFromContractWithCustomerExcludingAssessedTax", [
+            ("2026-04-27", "2026-07-26", 96221, "10-Q", "2026-08-27"),
+            ("2025-07-28", "2025-10-26", 57006, "10-Q", "2025-11-19")]))
+        found = qf.latest_quarter("NVDA", facts=near)
+        assert "revP" not in found["fields"]
+
+    def test_the_closest_match_wins_when_two_are_in_range(self):
+        pair = facts(duration("RevenueFromContractWithCustomerExcludingAssessedTax", [
+            ("2026-04-27", "2026-07-26", 96221, "10-Q", "2026-08-27"),
+            ("2025-04-28", "2025-07-27", 46743, "10-Q", "2025-08-27"),
+            ("2025-04-22", "2025-07-21", 11111, "10-Q", "2025-08-20")]))
+        found = qf.latest_quarter("NVDA", facts=pair)
+        assert found["fields"]["revP"]["value"] == 46743
