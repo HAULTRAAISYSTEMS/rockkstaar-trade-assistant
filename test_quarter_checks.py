@@ -169,3 +169,85 @@ class TestTheInferredDenominatorIsGone:
     def test_and_stated_against_a_real_figure_when_it_is(self):
         result = by_key(qc.run(dict(META_Q3, revYtd=168000)))["free_cash_flow"]
         assert "29.2% of year-to-date revenue" in result["basis"]
+
+
+class TestTheWorkedExampleIsOnTheFiling:
+    """Every figure in Load a worked example, against Meta's 10-Q.
+
+    The example shipped with two wrong numbers: Meta's TOTAL assets and TOTAL
+    liabilities (449,956 and 188,735) where the current subtotals belong
+    (125,475 and 56,379). That is the exact mistake the balance-sheet hint
+    warns about, and it put the current ratio at 2.38 when the filing says
+    2.23 — which the app's own annual scorecard had right all along.
+
+    Source: META 10-Q for the period ended 2026-06-30.
+      Three months ended June 30      2026        2025
+        Revenue                     60,801      47,516
+        Cost of revenue             11,330       8,491
+        Total costs and expenses    42,026      27,075
+        Income from operations      18,775      20,441
+        Net income                  15,848      18,337
+        Diluted EPS                   6.18        7.14
+        Diluted shares               2,566       2,570
+      Balance sheet            30 Jun 2026  31 Dec 2025
+        Total current assets       125,475     108,722
+        Total current liabilities   56,379      41,836
+        Accounts receivable         21,752      19,769
+      Six months ended June 30 2026
+        Revenue                    117,111
+        Net income                  42,621
+        Operating cash flow         64,088
+        Capex                       49,113
+    """
+    FILING = {
+        "rev": 60801, "revP": 47516, "cogs": 11330, "cogsP": 8491,
+        "opex": 30696, "opexP": 18584, "opinc": 18775, "opincP": 20441,
+        "ni": 15848, "niP": 18337, "sh": 2566, "shP": 2570,
+        "eps": 6.18, "epsP": 7.14,
+        "ca": 125475, "caP": 108722, "cl": 56379, "clP": 41836,
+        "ar": 21752, "arP": 19769,
+        "niy": 42621, "cfo": 64088, "capex": 49113, "revYtd": 117111,
+    }
+
+    @staticmethod
+    def example():
+        """The figures the page actually loads."""
+        import re
+        from pathlib import Path
+        page = Path("templates/fundamentals.html").read_text()
+        block = page[page.index("const QD_EXAMPLE = {"):]
+        block = block[:block.index("};")]
+        out = {}
+        for key, value in re.findall(r"(\w+):\s*([\d.]+)", block):
+            out[key] = float(value) if "." in value else int(value)
+        return out
+
+    def test_every_figure_matches_the_filing(self):
+        assert self.example() == self.FILING
+
+    def test_operating_expenses_are_the_combined_line_less_cost_of_revenue(self):
+        """Meta prints only "Total costs and expenses"; 42,026 includes COGS."""
+        assert 42026 - 11330 == self.FILING["opex"]
+        assert 27075 - 8491 == self.FILING["opexP"]
+
+    def test_the_totals_are_not_mistaken_for_the_current_subtotals(self):
+        loaded = self.example()
+        assert loaded["ca"] != 449956, "that is Total assets"
+        assert loaded["cl"] != 188735, "that is Total liabilities"
+
+    def test_the_current_ratio_agrees_with_the_annual_scorecard(self):
+        """The Analyze tab reads 2.23 latest and 2.60 at the last year end."""
+        result = by_key(qc.run(self.FILING))["current_ratio"]
+        assert result["value"] == "2.23"
+        assert "prior 2.60" in result["basis"]
+
+    def test_capex_intensity_uses_the_real_year_to_date_revenue(self):
+        result = by_key(qc.run(self.FILING))["free_cash_flow"]
+        assert "41.9% of year-to-date revenue" in result["basis"]
+
+    def test_the_quarter_is_labelled_correctly(self):
+        """Three months ended 30 June is Q2 for a calendar-year filer."""
+        from pathlib import Path
+        page = Path("templates/fundamentals.html").read_text()
+        block = page[page.index("const QD_EXAMPLE = {"):]
+        assert "per: 'Q2 2026'" in block[:block.index("};")]

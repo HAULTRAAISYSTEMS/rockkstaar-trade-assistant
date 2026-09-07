@@ -519,10 +519,10 @@
     ] %}
     {% set qd_balance = [
       ('ca', 'Total current assets',
-       'Balance sheet, the subtotal that closes the current-assets block — cash, receivables, inventory and the rest due within a year.',
+       'Balance sheet, the subtotal that closes the current-assets block — cash, receivables and the rest due within a year. Not <b>Total assets</b>, which is several rows further down and counts buildings and goodwill.',
        'Total current assets'),
       ('cl', 'Total current liabilities',
-       'Balance sheet, the subtotal closing the current-liabilities block — what is owed within a year.',
+       'Balance sheet, the subtotal closing the current-liabilities block — what is owed within a year. Not <b>Total liabilities</b>, which includes long-term debt.',
        'Total current liabilities'),
       ('ar', 'Accounts receivable, net',
        'Balance sheet, near the top of current assets. Money billed but not yet collected.',
@@ -615,9 +615,13 @@
         <fieldset>
           <legend>Balance sheet</legend>
           <p class="qd-where"><b>Two dates, not two periods.</b> A balance sheet
-             is a photograph, not a film. Use the subtotals the company already
-             computed rather than adding the lines up yourself.</p>
-          <div class="qd-row qd-head"><span></span><span>Now</span><span>Prior</span><span></span></div>
+             is a photograph, not a film. The column beside today&rsquo;s is the
+             <b>previous fiscal year end</b> — not the same quarter a year ago,
+             which is what the income statement gives you. And take the
+             <b>current</b> subtotals, not the totals four rows below them:
+             mixing those up is the single most common way this page gets a
+             wrong answer.</p>
+          <div class="qd-row qd-head"><span></span><span>Now</span><span>Last year end</span><span></span></div>
           {% for key, label, where, aliases in qd_balance %}{{ qd_field(key, label, where, aliases) }}{% endfor %}
         </fieldset>
 
@@ -869,15 +873,31 @@
   } catch (e) {}
 
   // ── A worked example ──────────────────────────────────────────────────────
-  // Meta's September quarter — the case the drill was built on, and one where
-  // the interesting answer is a flag rather than a clean sweep.
+  // Meta's June quarter, checked line by line against the 10-Q for the period
+  // ended 30 June 2026. Every figure below is on that filing.
+  //
+  // The balance-sheet pair is the one worth knowing about. An earlier version
+  // of this example carried 449,956 and 188,735 — Meta's TOTAL assets and
+  // TOTAL liabilities. The current subtotals are 125,475 and 56,379, four rows
+  // higher up the same statement. That is precisely the mistake the "use the
+  // subtotals the company already computed" hint exists to prevent, and it put
+  // the current ratio at 2.38 when the filing says 2.23.
+  //
+  // The prior column on a balance sheet in a 10-Q is the previous FISCAL YEAR
+  // END — 31 December 2025 here — not the same quarter a year earlier. Two
+  // dates, not two periods.
   const QD_EXAMPLE = {
-    co: 'META', per: 'Q3',
+    co: 'META', per: 'Q2 2026',
+    // Three months ended June 30 — 2026 against 2025.
     rev: 60801, revP: 47516, cogs: 11330, cogsP: 8491,
+    // Meta prints one "Total costs and expenses" (42,026 / 27,075); operating
+    // expenses are that less cost of revenue, and also R&D + M&S + G&A.
     opex: 30696, opexP: 18584, opinc: 18775, opincP: 20441,
     ni: 15848, niP: 18337, sh: 2566, shP: 2570, eps: 6.18, epsP: 7.14,
-    ca: 449956, caP: 366021, cl: 188735, clP: 148778, ar: 21752, arP: 19769,
-    niy: 42621, cfo: 64088, capex: 49113
+    // June 30 2026 against December 31 2025.
+    ca: 125475, caP: 108722, cl: 56379, clP: 41836, ar: 21752, arP: 19769,
+    // Six months ended June 30 2026 — the cash flow statement is cumulative.
+    niy: 42621, cfo: 64088, capex: 49113, revYtd: 117111
   };
   function qdExample() {
     qdEl('co').value = QD_EXAMPLE.co;
@@ -887,8 +907,8 @@
       if (el) el.value = (QD_EXAMPLE[k] !== undefined) ? QD_EXAMPLE[k] : '';
     });
     qdMarkFilled();
-    qdStatus('Loaded Meta’s September quarter, in millions. Run it, then read ' +
-             'the flagged check — costs grew more than twice as fast as sales.');
+    qdStatus('Loaded Meta’s June 2026 quarter from the 10-Q, in millions. Run it, ' +
+             'then read the flagged check — costs grew more than twice as fast as sales.');
     qdRun();
   }
 

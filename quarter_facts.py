@@ -131,7 +131,42 @@ def _pick(facts, tags, *, window, end=None):
         best = candidates[-1]
         return {"value": best.get("val"), "tag": tag,
                 "end": best.get("end"), "start": best.get("start"),
-                "form": best.get("form"), "filed": best.get("filed")}
+                "form": best.get("form"), "filed": best.get("filed"),
+                "accn": best.get("accn")}
+    return None
+
+
+def _prior_instant(facts, tags, current, prior_end):
+    """The comparative balance-sheet column, as the filing presents it.
+
+    Income-statement columns in a 10-Q are this quarter against the same
+    quarter a year ago. Balance-sheet columns are not: they are this date
+    against the previous fiscal year end. Meta's June 2026 10-Q prints
+    31 December 2025 beside 30 June 2026, so a reader typing what is on the
+    page must be compared against that date and not against June 2025.
+
+    The filing states which date it means: both columns are tagged in the same
+    submission, so the fact sharing this one's accession number is the column
+    printed beside it. The year-ago instant remains the fallback for filers
+    whose data does not carry one.
+    """
+    accn = (current or {}).get("accn")
+    if accn:
+        best = None
+        for tag in tags:
+            for fact in _facts_for(tag, facts):
+                if fact.get("accn") != accn or "start" in fact:
+                    continue
+                if not fact.get("end") or fact["end"] >= (current or {}).get("end", ""):
+                    continue
+                if best is None or fact["end"] > best["end"]:
+                    best = fact
+            if best:
+                return {"value": best.get("val"), "tag": tag, "end": best.get("end"),
+                        "start": None, "form": best.get("form"),
+                        "filed": best.get("filed"), "comparative": True}
+    if prior_end:
+        return _pick(facts, tags, window=None, end=prior_end)
     return None
 
 
@@ -196,10 +231,13 @@ def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
         found = _pick(facts, tags, window=None, end=end)
         if found:
             fields[key] = dict(found, label=label)
-        if prior_end:
-            found_prior = _pick(facts, tags, window=None, end=prior_end)
-            if found_prior:
-                fields[key + "P"] = dict(found_prior, label=label + ", prior")
+        # The comparative column on a balance sheet in a 10-Q is the previous
+        # FISCAL YEAR END, not the same date a year earlier. Reading it as a
+        # year-ago instant compares the reader against a date the filing in
+        # front of them does not print.
+        found_prior = _prior_instant(facts, tags, found, prior_end)
+        if found_prior:
+            fields[key + "P"] = dict(found_prior, label=label + ", prior")
 
     for key, (label, tags) in YTD_TAGS.items():
         found = _pick(facts, tags, window=YTD_DAYS, end=end)

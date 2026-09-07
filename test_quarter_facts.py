@@ -17,15 +17,19 @@ import quarter_facts as qf
 
 
 def duration(tag, rows):
-    """rows: (start, end, value, form, filed)"""
+    """rows: (start, end, value, form, filed). Accession keyed off the filing date."""
     return {tag: {"units": {"USD": [
-        {"start": s, "end": e, "val": v, "form": f, "filed": d}
+        {"start": s, "end": e, "val": v, "form": f, "filed": d, "accn": "acc-" + d}
         for s, e, v, f, d in rows]}}}
 
 
 def instant(tag, rows):
+    """rows: (end, value, form, filed) — both balance-sheet columns of one
+    filing share its accession number, which is how the comparative column is
+    identified."""
     return {tag: {"units": {"USD": [
-        {"end": e, "val": v, "form": f, "filed": d} for e, v, f, d in rows]}}}
+        {"end": e, "val": v, "form": f, "filed": d, "accn": "acc-" + d}
+        for e, v, f, d in rows]}}}
 
 
 def facts(*groups):
@@ -58,11 +62,19 @@ FIXTURE = facts(
     duration("PaymentsToAcquirePropertyPlantAndEquipment", [
         ("2026-01-01", "2026-06-30", 49113, "10-Q", "2026-07-30"),
     ]),
+    # Meta's real shape: 125,475 at 30 June 2026 against 108,722 at the
+    # previous fiscal year end, both tagged in the July 2026 submission. The
+    # June 2025 instant exists too, from the prior year's 10-Q, and is NOT the
+    # column this filing prints.
     instant("AssetsCurrent", [
-        ("2026-06-30", 449956, "10-Q", "2026-07-30"),
-        ("2025-06-30", 366021, "10-Q", "2025-07-31"),
+        ("2026-06-30", 125475, "10-Q", "2026-07-30"),
+        ("2025-12-31", 108722, "10-Q", "2026-07-30"),
+        ("2025-06-30", 999999, "10-Q", "2025-07-31"),
     ]),
-    instant("LiabilitiesCurrent", [("2026-06-30", 188735, "10-Q", "2026-07-30")]),
+    instant("LiabilitiesCurrent", [
+        ("2026-06-30", 56379, "10-Q", "2026-07-30"),
+        ("2025-12-31", 41836, "10-Q", "2026-07-30"),
+    ]),
 )
 
 
@@ -93,8 +105,17 @@ class TestItReadsTheQuarterNotTheYearToDate:
         assert filed["fields"]["cogsP"]["value"] == 8491
 
     def test_balance_sheet_instants_come_from_the_period_end(self, filed):
-        assert filed["fields"]["ca"]["value"] == 449956
-        assert filed["fields"]["caP"]["value"] == 366021
+        assert filed["fields"]["ca"]["value"] == 125475
+
+    def test_the_prior_column_is_the_fiscal_year_end_not_a_year_ago(self, filed):
+        """A 10-Q's balance sheet is this date against the last year end.
+
+        Meta's June 2026 filing prints 31 December 2025 beside it. Comparing
+        the reader against June 2025 marks them wrong for typing what is on
+        the page — the fixture's 999,999 is that trap.
+        """
+        assert filed["fields"]["caP"]["value"] == 108722
+        assert filed["fields"]["caP"]["end"] == "2025-12-31"
 
     def test_the_tag_used_is_reported_so_it_can_be_argued_with(self, filed):
         assert filed["fields"]["rev"]["tag"] == \
@@ -113,6 +134,11 @@ class TestWhenThereIsNothingToRead:
 
 
 class TestTheComparison:
+    def test_the_comparative_column_a_reader_can_see_matches(self, filed):
+        out = qf.compare({"caP": 108722, "clP": 41836}, filed)
+        assert all(r["state"] == "match" for r in out["rows"]
+                   if r["key"] in ("caP", "clP"))
+
     def test_a_figure_typed_correctly_matches(self, filed):
         out = qf.compare({"rev": 60801}, filed)
         row = next(r for r in out["rows"] if r["key"] == "rev")
