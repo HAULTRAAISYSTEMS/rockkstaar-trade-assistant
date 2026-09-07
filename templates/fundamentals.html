@@ -550,9 +550,12 @@
          latest quarter actually say? Open the company&rsquo;s 10-Q, find each
          figure yourself, and type it in — that is the part worth practising.
          Leave anything blank and its check is skipped.</p>
-      <p>Every field has a <strong>?</strong> that tells you which statement the
-         number lives on and what else it might be called. Turn them all on with
-         <strong>Show me where</strong> if you are new to this.</p>
+      <p>New to this? Put a ticker in and press <strong>Walk me through it</strong>.
+         It fills every field from the company&rsquo;s own filing and shows the
+         statement beside each check with the lines it read lit up — so you see
+         where the numbers live before you go hunting for them yourself. Every
+         field also has a <strong>?</strong> saying which statement it is on and
+         what else it gets called.</p>
       <p>Once you have run it, <strong>Check my numbers</strong> pulls the same
          quarter from the company&rsquo;s own filing and shows where yours differ.
          Filers choose their own labels, so a difference is a question worth
@@ -561,6 +564,7 @@
 
     <div class="qd-toolbar">
       <button type="button" class="qd-ghost" id="q-hints-btn" onclick="qdToggleHints()">Show me where</button>
+      <button type="button" class="qd-primary qd-walk-btn" onclick="qdWalk()">Walk me through it</button>
       <button type="button" class="qd-ghost" onclick="qdExample()">Load a worked example</button>
       <span class="qd-spacer"></span>
       <button type="button" class="qd-ghost" onclick="qdClear()">Clear</button>
@@ -913,7 +917,8 @@
   }
 
   // ── Run ───────────────────────────────────────────────────────────────────
-  async function qdRun() {
+  async function qdRun(keepStatements) {
+    if (!keepStatements && !qdWalking) qdStatements = null;
     try {
       const resp = await fetch('/api/quarter/check', {
         method: 'POST',
@@ -967,10 +972,75 @@
         '<span class="qd-val">' + qdEsc(ch.value) +
         '<span class="qd-badge qd-' + qdEsc(ch.verdict) + '">' + label + '</span></span></div>' +
         (ch.basis ? '<div class="qd-basis">' + qdEsc(ch.basis) + '</div>' : '') +
-        '<p class="qd-says">' + qdEsc(ch.says) + link + '</p></div>';
+        '<p class="qd-says">' + qdEsc(ch.says) + link + '</p>' +
+        qdStatementFor(ch) + '</div>';
     });
     if (data.summary) html += '<div class="qd-summary">' + qdEsc(data.summary) + '</div>';
     document.getElementById('q-results').innerHTML = html;
+  }
+
+  // ── Walk me through it ────────────────────────────────────────────────────
+  // Studying a worked example beats solving a blank one while you are new to
+  // something. What makes it teach rather than merely answer is that the
+  // statement comes with it — a number in a box shows where the form's fields
+  // are; a number on its line shows where the filing's are.
+  var qdStatements = null;
+  var qdWalking = false;
+
+  async function qdWalk() {
+    const ticker = (qdEl('co').value || '').trim().toUpperCase();
+    if (!ticker) { qdStatus('Put a ticker in first — the filing is looked up by it.', true); return; }
+    qdStatus('Reading ' + ticker + '’s latest filing…');
+    try {
+      const resp = await fetch('/api/quarter/walkthrough/' + encodeURIComponent(ticker));
+      const data = await resp.json();
+      if (!data.available) { qdStatus(data.error || 'No filing found.', true); return; }
+
+      qdStatements = data;
+      qdEl('co').value = data.ticker || ticker;
+      if (data.period_end) qdEl('per').value = 'Quarter ended ' + data.period_end;
+      QD_FIELDS.forEach(k => {
+        const el = qdEl(k);
+        if (el) el.value = (data.figures && data.figures[k] !== undefined) ? data.figures[k] : '';
+      });
+      qdMarkFilled();
+      qdWalking = true;
+      qdStatus('Filled from ' + (data.company || ticker) + '’s ' + (data.form || 'filing') +
+               ' for the quarter ended ' + (data.period_end || '') +
+               '. Each check below shows the statement it read.');
+      qdRun(true);
+      qdWalking = false;
+    } catch (e) {
+      qdWalking = false;
+      qdStatus('Could not read the filing: ' + e.message, true);
+    }
+  }
+
+  // Rendered under a check, with the rows it used lit up.
+  function qdStatementFor(check) {
+    if (!qdStatements || !check.rows) return '';
+    const st = qdStatements.statements || {};
+    let html = '';
+    Object.keys(check.rows).forEach(name => {
+      const sheet = st[name];
+      if (!sheet || !sheet.rows || !sheet.rows.length) return;
+      const lit = check.rows[name] || [];
+      html += '<div class="qd-stmt"><div class="qd-stmt-hd">' +
+        '<span>' + qdEsc(sheet.title) + '</span>' +
+        (sheet.sub ? '<span class="qd-stmt-sub">' + qdEsc(sheet.sub) + '</span>' : '') +
+        '</div><table class="qd-stmt-tbl">';
+      sheet.rows.forEach(r => {
+        const on = lit.indexOf(r.key) >= 0;
+        html += '<tr class="' + (on ? 'is-lit' : '') + (r.indent ? ' is-ind' : '') + '">' +
+          '<td>' + qdEsc(r.label) +
+            (r.derived ? '<span class="qd-stmt-note">computed — this filer prints only the combined line</span>' : '') +
+          '</td>' +
+          '<td class="qd-stmt-num">' + qdNum(r.now) + '</td>' +
+          '<td class="qd-stmt-num">' + qdNum(r.prior) + '</td></tr>';
+      });
+      html += '</table></div>';
+    });
+    return html;
   }
 
   // ── The answer key ────────────────────────────────────────────────────────

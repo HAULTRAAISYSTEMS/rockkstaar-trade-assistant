@@ -48,6 +48,20 @@ CHECK_CONCEPTS = {
 }
 
 
+# Which statement rows each check reads. The guided walkthrough lights these
+# up on the statement beside the result, because a number without the line it
+# came from teaches where the form's fields are, not where the filing's are.
+CHECK_ROWS = {
+    "cash_conversion":    {"cash":   ["niy", "cfo"]},
+    "gross_margin":       {"income": ["rev", "cogs"]},
+    "operating_leverage": {"income": ["rev", "opex", "opinc"]},
+    "current_ratio":      {"balance": ["ca", "cl"]},
+    "dso":                {"balance": ["ar"], "income": ["rev"]},
+    "share_count":        {"income": ["ni", "eps", "sh"]},
+    "free_cash_flow":     {"cash":   ["cfo", "capex"]},
+}
+
+
 def _num(value):
     """Parse a figure a person typed. Returns None for anything unusable.
 
@@ -91,6 +105,7 @@ def _check(key, name, value, basis, says, verdict, skipped=None):
         "says": says,
         "verdict": verdict,
         "concept": CHECK_CONCEPTS.get(key),
+        "rows": CHECK_ROWS.get(key, {}),
         "skipped": skipped,
     }
 

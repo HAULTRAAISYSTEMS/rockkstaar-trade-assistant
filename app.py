@@ -8381,6 +8381,33 @@ def api_quarter_check():
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/quarter/walkthrough/<ticker>")
+def api_quarter_walkthrough(ticker):
+    """Fill the drill from the filing, and say where each number came from.
+
+    Studying a worked example beats solving a blank one while you are new to
+    something — the search burns the attention the understanding needs. What
+    makes it teach rather than just answer is that the statement comes with
+    it, so this returns the rebuilt statements alongside the figures and every
+    check names the rows it read.
+    """
+    import quarter_facts
+
+    ticker = (ticker or "").strip().upper()
+    if not ticker or not ticker.replace(".", "").replace("-", "").isalnum():
+        return jsonify({"available": False, "error": "Invalid ticker"}), 400
+    try:
+        found = quarter_facts.walkthrough(ticker)
+    except Exception as exc:
+        logger.warning("quarter walkthrough failed for %s: %s", ticker, exc)
+        return jsonify({"available": False,
+                        "error": "Could not read the filing right now."})
+    if not found:
+        return jsonify({"available": False,
+                        "error": f"No quarterly filing found for {ticker}."})
+    return jsonify(dict(found, available=True))
+
+
 def _quarter_card(entry: dict) -> dict:
     """A saved quarter as the list renders it.
 

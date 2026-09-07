@@ -1273,3 +1273,61 @@
   cursor: pointer;
 }
 .fundamentals-shell .qd-chip-del:hover { color: var(--neg-500); background: rgba(255, 77, 69, .08); }
+
+/* ── The statement, shown beside the check that read it ───────────────────── */
+.fundamentals-shell .qd-walk-btn { font-size: 10px; }
+.fundamentals-shell .qd-stmt {
+  margin-top: 12px;
+  border: 1px solid var(--elite-hairline);
+  border-radius: var(--elite-radius-md, 8px);
+  background: var(--elite-panel-inset);
+  overflow: hidden;
+}
+.fundamentals-shell .qd-stmt-hd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  align-items: baseline;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--elite-hairline);
+  color: var(--elite-muted);
+  font: 700 9px var(--font-ui);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.fundamentals-shell .qd-stmt-sub {
+  color: var(--elite-faint);
+  font-weight: 500;
+  letter-spacing: .06em;
+}
+.fundamentals-shell .qd-stmt-tbl { width: 100%; border-collapse: collapse; }
+.fundamentals-shell .qd-stmt-tbl td {
+  padding: 4px 11px;
+  color: var(--elite-faint);
+  font: 400 11px var(--font-ui);
+  border-bottom: 1px solid rgba(255, 255, 255, .028);
+}
+.fundamentals-shell .qd-stmt-tbl tr:last-child td { border-bottom: 0; }
+.fundamentals-shell .qd-stmt-tbl .qd-stmt-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.fundamentals-shell .qd-stmt-tbl tr.is-ind td:first-child { padding-left: 26px; }
+
+/* The line the check actually read. */
+.fundamentals-shell .qd-stmt-tbl tr.is-lit td {
+  color: var(--ink-050);
+  background: var(--fund-gold-soft);
+  font-weight: 600;
+}
+.fundamentals-shell .qd-stmt-tbl tr.is-lit td:first-child {
+  box-shadow: inset 2px 0 0 var(--elite-gold);
+}
+.fundamentals-shell .qd-stmt-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--elite-faint);
+  font: 400 9.5px var(--font-ui);
+  font-style: italic;
+}

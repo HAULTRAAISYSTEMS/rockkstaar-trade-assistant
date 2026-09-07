@@ -183,31 +183,43 @@ def _prior_year_end(end: str) -> str | None:
         return d.replace(year=d.year - 1, day=28).isoformat()
 
 
+def fetch_facts(ticker: str) -> tuple[dict | None, str | None]:
+    """The company-facts document and the CIK, or (None, None).
+
+    Separated so the guided walkthrough can download it once and use it for
+    both the figures and the rebuilt statements. It is tens of megabytes for a
+    large filer; fetching it twice in one request doubles the slowest part of
+    the page.
+    """
+    import fundamentals_engine as fe
+    cik, _name = fe._edgar_cik(ticker)
+    if not cik:
+        return None, None
+    try:
+        resp = fe._req_module.get(
+            fe._EDGAR_FACTS_URL.format(cik=cik),
+            timeout=15, headers=fe._EDGAR_HEADERS,
+        )
+        if resp.status_code != 200:
+            logger.warning("quarter facts: EDGAR %s for %s", resp.status_code, ticker)
+            return None, cik
+        return resp.json(), cik
+    except Exception as exc:
+        logger.warning("quarter facts: fetch failed for %s: %s", ticker, exc)
+        return None, cik
+
+
 def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
     """Every figure the drill asks for, as the company filed it.
 
-    Returns {"period": ..., "fields": {key: {value, tag, ...}}} or None when
-    the company cannot be resolved or has filed no usable quarter.
+    Returns {"period_end": ..., "fields": {key: {value, tag, ...}}} or None
+    when the company cannot be resolved or has filed no usable quarter.
     """
     if facts is None:
-        import fundamentals_engine as fe
-        cik, name = fe._edgar_cik(ticker)
-        if not cik:
+        facts, _cik = fetch_facts(ticker)
+        if facts is None:
             return None
-        try:
-            resp = fe._req_module.get(
-                fe._EDGAR_FACTS_URL.format(cik=cik),
-                timeout=15, headers=fe._EDGAR_HEADERS,
-            )
-            if resp.status_code != 200:
-                logger.warning("quarter facts: EDGAR %s for %s", resp.status_code, ticker)
-                return None
-            facts = resp.json()
-        except Exception as exc:
-            logger.warning("quarter facts: fetch failed for %s: %s", ticker, exc)
-            return None
-    else:
-        name = facts.get("entityName")
+    name = facts.get("entityName")
 
     # Anchor on revenue: it is the one line every filer tags, and its period
     # end defines which quarter the rest of the figures must come from.
@@ -362,3 +374,180 @@ def _looks_scaled(entered: float, value: float) -> bool:
     ratio = abs(value / entered)
     return any(abs(ratio - scale) / scale <= 0.02
                for scale in (1e3, 1e6, 1e9, 1e-3, 1e-6, 1e-9))
+
+
+# ── Rebuilding the statements ─────────────────────────────────────────────────
+#
+# A number that appears in a box teaches where the form's fields are. A number
+# with the line it came from teaches where the filing's are, which is the
+# actual skill. XBRL gives the values, the tags and the periods but not the
+# printed layout, so the statements are reconstructed here: the same rows in
+# the same order, with the ones each check reads lit up beside it.
+#
+# This is a reconstruction and says so on the page. A filer who presents an
+# unusual line will not have it here, and the link to the filing itself is
+# always the authority.
+
+# (row key, label, indent, tags). Indent mirrors how statements are set:
+# 0 flush left for totals and headline lines, 1 for components.
+INCOME_ROWS = [
+    ("rev",    "Revenue", 0, QUARTER_TAGS["rev"][1]),
+    ("cogs",   "Cost of revenue", 1, QUARTER_TAGS["cogs"][1]),
+    ("gross",  "Gross profit", 0, ["GrossProfit"]),
+    ("rnd",    "Research and development", 1, ["ResearchAndDevelopmentExpense"]),
+    ("sales",  "Sales and marketing", 1, ["SellingAndMarketingExpense", "MarketingExpense"]),
+    ("admin",  "General and administrative", 1,
+     ["GeneralAndAdministrativeExpense", "SellingGeneralAndAdministrativeExpense"]),
+    ("opex",   "Total operating expenses", 0, ["OperatingExpenses"]),
+    ("costs",  "Total costs and expenses", 0, ["CostsAndExpenses"]),
+    ("opinc",  "Operating income", 0, QUARTER_TAGS["opinc"][1]),
+    ("pretax", "Income before income taxes", 1,
+     ["IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+      "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"]),
+    ("tax",    "Provision for income taxes", 1, ["IncomeTaxExpenseBenefit"]),
+    ("ni",     "Net income", 0, QUARTER_TAGS["ni"][1]),
+    ("eps",    "Diluted earnings per share", 1, QUARTER_TAGS["eps"][1]),
+    ("sh",     "Weighted-average shares, diluted", 1, QUARTER_TAGS["sh"][1]),
+]
+
+BALANCE_ROWS = [
+    ("cash",   "Cash and cash equivalents", 1, ["CashAndCashEquivalentsAtCarryingValue"]),
+    ("secs",   "Marketable securities", 1,
+     ["MarketableSecuritiesCurrent", "AvailableForSaleSecuritiesDebtSecuritiesCurrent",
+      "ShortTermInvestments"]),
+    ("ar",     "Accounts receivable, net", 1, INSTANT_TAGS["ar"][1]),
+    ("inv",    "Inventories", 1, ["InventoryNet"]),
+    ("ca",     "Total current assets", 0, INSTANT_TAGS["ca"][1]),
+    ("assets", "Total assets", 0, ["Assets"]),
+    ("ap",     "Accounts payable", 1, ["AccountsPayableCurrent"]),
+    ("cl",     "Total current liabilities", 0, INSTANT_TAGS["cl"][1]),
+    ("ltd",    "Long-term debt", 1,
+     ["LongTermDebtNoncurrent", "LongTermDebt"]),
+    ("liab",   "Total liabilities", 0, ["Liabilities"]),
+    ("equity", "Total stockholders' equity", 0, ["StockholdersEquity"]),
+]
+
+CASH_ROWS = [
+    ("niy",    "Net income", 0, YTD_TAGS["niy"][1]),
+    ("dep",    "Depreciation and amortization", 1,
+     ["DepreciationDepletionAndAmortization", "DepreciationAmortizationAndAccretionNet"]),
+    ("sbc",    "Stock-based compensation", 1, ["ShareBasedCompensation"]),
+    ("cfo",    "Net cash provided by operating activities", 0, YTD_TAGS["cfo"][1]),
+    ("capex",  "Purchases of property and equipment", 1, YTD_TAGS["capex"][1]),
+]
+
+STATEMENT_TITLES = {
+    "income":  ("Condensed consolidated statements of income", "Three months ended"),
+    "balance": ("Condensed consolidated balance sheets", ""),
+    "cash":    ("Condensed consolidated statements of cash flows", "Year to date"),
+}
+
+_FILING_URL = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=10-Q"
+
+
+def _row_values(facts, tags, *, window, now, prior, current_fact=None):
+    """(now, prior) for one statement row, or (None, None) when untagged."""
+    if window is None:
+        first = _pick(facts, tags, window=None, end=now)
+        second = _prior_instant(facts, tags, first, prior)
+    else:
+        first = _pick(facts, tags, window=window, end=now)
+        second = _pick(facts, tags, window=window, end=prior) if prior else None
+    return first, second
+
+
+def statements(facts: dict, period_end: str, prior_end: str | None,
+               ytd_prior_end: str | None = None) -> dict:
+    """The three statements, rebuilt, with only the rows this filer tagged.
+
+    A row the company never tagged is dropped rather than shown empty: a
+    statement full of blanks teaches nothing and looks broken.
+    """
+    out = {}
+    for name, rows, window, now, prior in (
+        ("income",  INCOME_ROWS,  QUARTER_DAYS, period_end, prior_end),
+        ("balance", BALANCE_ROWS, None,         period_end, prior_end),
+        ("cash",    CASH_ROWS,    YTD_DAYS,     period_end, ytd_prior_end or prior_end),
+    ):
+        built = []
+        for key, label, indent, tags in rows:
+            first, second = _row_values(facts, tags, window=window, now=now, prior=prior)
+            if not first:
+                continue
+            built.append({
+                "key": key, "label": label, "indent": indent,
+                "now": first.get("value"), "prior": (second or {}).get("value"),
+                "tag": first.get("tag"),
+                "prior_end": (second or {}).get("end"),
+            })
+        if name == "income":
+            _insert_derived_opex(built)
+        title, sub = STATEMENT_TITLES[name]
+        out[name] = {"title": title, "sub": sub, "rows": built}
+    return out
+
+
+def _insert_derived_opex(rows: list) -> None:
+    """Show the operating-expense subtotal a filer never printed.
+
+    Meta files one "Total costs and expenses" that includes cost of revenue.
+    The drill asks for operating expenses, and the check that reads them has
+    to have a row to point at — otherwise the guided walkthrough highlights
+    nothing on the line the reader most needs to see. It is inserted where the
+    subtotal would sit, labelled as computed rather than filed.
+    """
+    by_key = {r["key"]: r for r in rows}
+    if "opex" in by_key or "costs" not in by_key or "cogs" not in by_key:
+        return
+    costs, cogs = by_key["costs"], by_key["cogs"]
+
+    def less(a, b):
+        return None if a is None or b is None else a - b
+
+    derived = {
+        "key": "opex",
+        "label": "Total operating expenses",
+        "indent": 0,
+        "now": less(costs.get("now"), cogs.get("now")),
+        "prior": less(costs.get("prior"), cogs.get("prior")),
+        "tag": "CostsAndExpenses − " + (cogs.get("tag") or "cost of revenue"),
+        "derived": True,
+        "prior_end": costs.get("prior_end"),
+    }
+    if derived["now"] is None:
+        return
+    rows.insert(rows.index(costs) + 1, derived)
+
+
+def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) -> dict | None:
+    """Everything the guided mode needs: the figures, and where they came from."""
+    if facts is None:
+        facts, cik = fetch_facts(ticker)
+        if facts is None:
+            return None
+    filed = latest_quarter(ticker, facts=facts)
+    if not filed:
+        return None
+
+    fields = filed.get("fields") or {}
+    figures = {key: entry.get("value") for key, entry in fields.items()
+               if entry.get("value") is not None}
+
+    # The cash flow's prior column is the same year-to-date span a year back.
+    ytd_prior = None
+    ytd = fields.get("cfo") or fields.get("niy")
+    if ytd and ytd.get("end"):
+        ytd_prior = _prior_year_end(ytd["end"])
+
+    return {
+        "ticker": filed.get("ticker"),
+        "company": filed.get("company"),
+        "period_end": filed.get("period_end"),
+        "prior_end": filed.get("prior_end"),
+        "form": filed.get("form"),
+        "filed_on": filed.get("filed"),
+        "figures": figures,
+        "statements": statements(facts, filed.get("period_end"),
+                                 filed.get("prior_end"), ytd_prior),
+        "filing_url": _FILING_URL.format(cik=cik.lstrip("0")) if cik else None,
+    }

@@ -358,3 +358,171 @@ class TestThePageTeaches:
     def test_the_hints_can_all_be_opened_at_once(self, page):
         assert "Show me where" in page
         assert "qdToggleHints" in page
+
+
+# ── The guided walkthrough ────────────────────────────────────────────────────
+
+def meta_facts():
+    """Meta's June 2026 filing, in the shape XBRL carries it."""
+    Q, QP = ("2026-04-01", "2026-06-30"), ("2025-04-01", "2025-06-30")
+    Y, YP = ("2026-01-01", "2026-06-30"), ("2025-01-01", "2025-06-30")
+    F, FP = "2026-07-30", "2025-07-31"
+    groups = [
+        duration("RevenueFromContractWithCustomerExcludingAssessedTax",
+                 [(*Q, 60801, "10-Q", F), (*QP, 47516, "10-Q", FP),
+                  (*Y, 117111, "10-Q", F), (*YP, 89830, "10-Q", F)]),
+        duration("CostOfRevenue", [(*Q, 11330, "10-Q", F), (*QP, 8491, "10-Q", FP)]),
+        duration("ResearchAndDevelopmentExpense",
+                 [(*Q, 21656, "10-Q", F), (*QP, 12942, "10-Q", FP)]),
+        # Meta prints one combined line; operating expenses are not tagged.
+        duration("CostsAndExpenses", [(*Q, 42026, "10-Q", F), (*QP, 27075, "10-Q", FP)]),
+        duration("OperatingIncomeLoss", [(*Q, 18775, "10-Q", F), (*QP, 20441, "10-Q", FP)]),
+        duration("NetIncomeLoss",
+                 [(*Q, 15848, "10-Q", F), (*QP, 18337, "10-Q", FP),
+                  (*Y, 42621, "10-Q", F), (*YP, 34981, "10-Q", F)]),
+        duration("NetCashProvidedByUsedInOperatingActivities",
+                 [(*Y, 64088, "10-Q", F), (*YP, 49587, "10-Q", F)]),
+        duration("PaymentsToAcquirePropertyPlantAndEquipment",
+                 [(*Y, 49113, "10-Q", F), (*YP, 29479, "10-Q", F)]),
+        instant("AssetsCurrent", [("2026-06-30", 125475, "10-Q", F),
+                                  ("2025-12-31", 108722, "10-Q", F)]),
+        instant("LiabilitiesCurrent", [("2026-06-30", 56379, "10-Q", F),
+                                       ("2025-12-31", 41836, "10-Q", F)]),
+        instant("AccountsReceivableNetCurrent", [("2026-06-30", 21752, "10-Q", F),
+                                                 ("2025-12-31", 19769, "10-Q", F)]),
+        instant("Assets", [("2026-06-30", 449956, "10-Q", F),
+                           ("2025-12-31", 366021, "10-Q", F)]),
+        instant("Liabilities", [("2026-06-30", 188735, "10-Q", F),
+                                ("2025-12-31", 148778, "10-Q", F)]),
+        {"EarningsPerShareDiluted": {"units": {"USD/shares": [
+            {"start": Q[0], "end": Q[1], "val": 6.18, "form": "10-Q", "filed": F, "accn": "a-" + F},
+            {"start": QP[0], "end": QP[1], "val": 7.14, "form": "10-Q", "filed": FP, "accn": "a-" + FP},
+        ]}}},
+        {"WeightedAverageNumberOfDilutedSharesOutstanding": {"units": {"shares": [
+            {"start": Q[0], "end": Q[1], "val": 2566, "form": "10-Q", "filed": F, "accn": "a-" + F},
+            {"start": QP[0], "end": QP[1], "val": 2570, "form": "10-Q", "filed": FP, "accn": "a-" + FP},
+        ]}}},
+    ]
+    return facts(*groups)
+
+
+@pytest.fixture(scope="module")
+def walk():
+    return qf.walkthrough("META", facts=meta_facts())
+
+
+def row(sheet, key):
+    return next(r for r in sheet["rows"] if r["key"] == key)
+
+
+class TestTheStatementsAreRebuilt:
+    def test_the_income_statement_reads_in_order(self, walk):
+        keys = [r["key"] for r in walk["statements"]["income"]["rows"]]
+        assert keys.index("rev") < keys.index("cogs") < keys.index("opinc") < keys.index("ni")
+
+    def test_the_current_subtotal_sits_directly_above_the_total(self, walk):
+        """Seeing 125,475 next to 449,956 is the whole lesson."""
+        sheet = walk["statements"]["balance"]
+        keys = [r["key"] for r in sheet["rows"]]
+        assert keys.index("ca") + 1 == keys.index("assets")
+        assert row(sheet, "ca")["now"] == 125475
+        assert row(sheet, "assets")["now"] == 449956
+
+    def test_the_balance_sheet_prior_column_is_the_last_year_end(self, walk):
+        assert row(walk["statements"]["balance"], "ca")["prior_end"] == "2025-12-31"
+
+    def test_the_cash_flow_is_the_cumulative_column(self, walk):
+        """Six months, not the quarter — which is why niy is 42,621."""
+        assert row(walk["statements"]["cash"], "niy")["now"] == 42621
+        assert row(walk["statements"]["cash"], "cfo")["now"] == 64088
+
+    def test_a_row_the_filer_never_tagged_is_dropped_not_shown_empty(self, walk):
+        """A statement full of blanks teaches nothing and looks broken."""
+        keys = [r["key"] for r in walk["statements"]["income"]["rows"]]
+        assert "sales" not in keys          # never tagged in this fixture
+
+    def test_the_operating_expense_subtotal_is_derived_and_labelled(self, walk):
+        """Meta prints only the combined line; the check needs a row to point at."""
+        opex = row(walk["statements"]["income"], "opex")
+        assert opex["now"] == 30696 and opex["prior"] == 18584
+        assert opex["derived"] is True
+        assert "CostsAndExpenses" in opex["tag"]
+
+
+class TestEachCheckNamesTheRowsItRead:
+    def test_every_graded_check_points_at_something(self):
+        import quarter_checks
+        graded = [c for c in quarter_checks.run(
+            {k: v for k, v in TestTheWorkedExample.__dict__.items()} if False else
+            dict(rev=60801, revP=47516, cogs=11330, cogsP=8491, opex=30696,
+                 opexP=18584, opinc=18775, opincP=20441, ni=15848, niP=18337,
+                 sh=2566, shP=2570, eps=6.18, epsP=7.14, ca=125475, caP=108722,
+                 cl=56379, clP=41836, ar=21752, arP=19769, niy=42621,
+                 cfo=64088, capex=49113))["checks"] if c["verdict"]]
+        assert graded and all(c["rows"] for c in graded)
+
+    def test_the_rows_named_exist_on_the_statement(self, walk):
+        """A check that highlights a row the statement does not carry is a
+        check whose explanation points at nothing."""
+        import quarter_checks
+        for check_key, sheets in quarter_checks.CHECK_ROWS.items():
+            for sheet_name, keys in sheets.items():
+                present = {r["key"] for r in walk["statements"][sheet_name]["rows"]}
+                missing = set(keys) - present
+                assert not missing, f"{check_key} points at {missing} on {sheet_name}"
+
+    def test_a_filer_who_tags_almost_nothing_still_renders(self):
+        """Degrade to a short statement rather than an exception."""
+        bare = facts(duration("Revenues", [
+            ("2026-04-01", "2026-06-30", 100, "10-Q", "2026-07-30")]))
+        out = qf.walkthrough("TINY", facts=bare)
+        assert out["statements"]["income"]["rows"]
+        assert out["statements"]["balance"]["rows"] == []
+
+
+class TestTheWalkthroughEndpoint:
+    @pytest.fixture
+    def client(self):
+        from unittest.mock import patch
+        import web_app, app as _app
+        c = web_app.app.test_client()
+        with c.session_transaction() as sess:
+            sess["user_id"] = 1
+            sess["logged_in"] = True
+        with patch.object(_app, "_auth_required", lambda *a, **k: False):
+            yield c
+
+    def test_it_returns_figures_and_statements_together(self, client):
+        from unittest.mock import patch
+        with patch.object(qf, "walkthrough", return_value=qf.walkthrough("META", facts=meta_facts())):
+            body = client.get("/api/quarter/walkthrough/META").get_json()
+        assert body["available"] is True
+        assert body["figures"]["rev"] == 60801
+        assert body["statements"]["income"]["rows"]
+
+    def test_the_document_is_fetched_once_for_both_halves(self):
+        """It is tens of megabytes; twice would double the slowest step."""
+        from unittest.mock import patch
+        with patch.object(qf, "fetch_facts", return_value=(meta_facts(), "0001326801")) as fetch:
+            qf.walkthrough("META")
+        assert fetch.call_count == 1
+
+    def test_a_junk_ticker_never_reaches_the_fetch(self, client):
+        """Refused by the route or by the handler — either way, not fetched."""
+        from unittest.mock import patch
+        with patch.object(qf, "walkthrough") as walked:
+            for junk in ("..%2Fetc", "A B", "'; DROP--"):
+                assert client.get("/api/quarter/walkthrough/" + junk).status_code in (400, 404)
+        assert not walked.called
+
+    def test_an_unreadable_filing_answers_rather_than_500s(self, client):
+        from unittest.mock import patch
+        with patch.object(qf, "walkthrough", side_effect=RuntimeError("EDGAR 503")):
+            body = client.get("/api/quarter/walkthrough/META").get_json()
+        assert body["available"] is False
+        assert "EDGAR 503" not in str(body)
+
+    def test_the_page_offers_it(self, client):
+        page = client.get("/fundamentals?tab=quarter").get_data(as_text=True)
+        assert "Walk me through it" in page
+        assert "qdStatementFor" in page
