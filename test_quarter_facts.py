@@ -202,3 +202,71 @@ class TestTheEndpoints:
         page = client.get("/fundamentals").get_data(as_text=True)
         assert 'id="tab-quarter"' in page
         assert "This quarter" in page
+
+
+class TestTotalOperatingExpenses:
+    """The line most filers never tag under the name the drill asks for.
+
+    Meta presents one "Total costs and expenses" — CostsAndExpenses — which
+    includes cost of revenue. For the September quarter that is 42,026 against
+    operating expenses of 30,696. Substituting it would tell a reader who read
+    the statement correctly that they were twelve billion dollars wrong.
+    """
+
+    COMBINED = facts(
+        duration("RevenueFromContractWithCustomerExcludingAssessedTax", [
+            ("2026-04-01", "2026-06-30", 60801, "10-Q", "2026-07-30"),
+            ("2025-04-01", "2025-06-30", 47516, "10-Q", "2025-07-31")]),
+        duration("CostOfRevenue", [
+            ("2026-04-01", "2026-06-30", 11330, "10-Q", "2026-07-30"),
+            ("2025-04-01", "2025-06-30", 8491, "10-Q", "2025-07-31")]),
+        duration("CostsAndExpenses", [
+            ("2026-04-01", "2026-06-30", 42026, "10-Q", "2026-07-30"),
+            ("2025-04-01", "2025-06-30", 27075, "10-Q", "2025-07-31")]),
+    )
+
+    def test_the_combined_line_is_never_handed_back_as_operating_expenses(self):
+        filed = qf.latest_quarter("TEST", facts=self.COMBINED)
+        assert filed["fields"]["opex"]["value"] != 42026
+
+    def test_it_is_derived_by_taking_cost_of_revenue_back_out(self):
+        filed = qf.latest_quarter("TEST", facts=self.COMBINED)
+        assert filed["fields"]["opex"]["value"] == 30696          # 42,026 − 11,330
+        assert filed["fields"]["opexP"]["value"] == 18584         # 27,075 − 8,491
+
+    def test_the_derivation_is_labelled_as_one(self):
+        """A figure this app computed is not a figure the company filed."""
+        filed = qf.latest_quarter("TEST", facts=self.COMBINED)
+        assert filed["fields"]["opex"]["derived"] is True
+        assert "CostsAndExpenses −" in filed["fields"]["opex"]["tag"]
+
+    def test_a_reader_who_read_the_statement_right_is_told_they_were_right(self):
+        filed = qf.latest_quarter("TEST", facts=self.COMBINED)
+        out = qf.compare({"opex": 30696}, filed)
+        assert next(r for r in out["rows"] if r["key"] == "opex")["state"] == "match"
+
+    def test_a_direct_tag_always_wins_over_the_derivation(self):
+        direct = facts(
+            duration("RevenueFromContractWithCustomerExcludingAssessedTax", [
+                ("2026-04-01", "2026-06-30", 60801, "10-Q", "2026-07-30")]),
+            duration("CostOfRevenue", [
+                ("2026-04-01", "2026-06-30", 11330, "10-Q", "2026-07-30")]),
+            duration("OperatingExpenses", [
+                ("2026-04-01", "2026-06-30", 30696, "10-Q", "2026-07-30")]),
+            duration("CostsAndExpenses", [
+                ("2026-04-01", "2026-06-30", 42026, "10-Q", "2026-07-30")]),
+        )
+        filed = qf.latest_quarter("TEST", facts=direct)
+        assert filed["fields"]["opex"]["tag"] == "OperatingExpenses"
+        assert not filed["fields"]["opex"].get("derived")
+
+    def test_half_a_derivation_is_no_derivation(self):
+        """Without cost of revenue there is nothing to subtract."""
+        partial = facts(
+            duration("RevenueFromContractWithCustomerExcludingAssessedTax", [
+                ("2026-04-01", "2026-06-30", 60801, "10-Q", "2026-07-30")]),
+            duration("CostsAndExpenses", [
+                ("2026-04-01", "2026-06-30", 42026, "10-Q", "2026-07-30")]),
+        )
+        filed = qf.latest_quarter("TEST", facts=partial)
+        assert "opex" not in filed["fields"]

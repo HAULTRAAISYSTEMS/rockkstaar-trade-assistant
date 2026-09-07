@@ -930,6 +930,9 @@
         (r.scaled ? '<p class="qd-note">Same line, different scale — the filing ' +
                     'reports in units and the statement you read was in thousands ' +
                     'or millions.</p>' : '') +
+        (r.derived ? '<p class="qd-note">Not tagged directly by this filer — ' +
+                     'computed from the tags shown, so check it against the ' +
+                     'statement rather than the other way round.</p>' : '') +
         '</div>';
     });
     html += '</div>';

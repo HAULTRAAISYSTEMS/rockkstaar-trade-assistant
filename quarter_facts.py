@@ -49,7 +49,7 @@ QUARTER_TAGS = {
                            "SalesRevenueNet"]),
     "cogs":   ("Cost of revenue", ["CostOfRevenue", "CostOfGoodsAndServicesSold",
                                    "CostOfGoodsSold"]),
-    "opex":   ("Total operating expenses", ["OperatingExpenses", "CostsAndExpenses"]),
+    "opex":   ("Total operating expenses", ["OperatingExpenses"]),
     "opinc":  ("Operating income", ["OperatingIncomeLoss"]),
     "ni":     ("Net income", ["NetIncomeLoss", "ProfitLoss"]),
     "sh":     ("Diluted share count",
@@ -206,6 +206,8 @@ def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
         if found:
             fields[key] = dict(found, label=label)
 
+    _derive_operating_expenses(facts, fields, end, prior_end)
+
     return {
         "ticker": ticker.upper(),
         "company": name,
@@ -215,6 +217,41 @@ def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
         "filed": anchor.get("filed"),
         "fields": fields,
     }
+
+
+def _derive_operating_expenses(facts, fields, end, prior_end):
+    """Total operating expenses, when the filer never tagged it directly.
+
+    Many filers present one "Total costs and expenses" line — CostsAndExpenses
+    — which includes cost of revenue and is therefore not what the drill asks
+    for. Meta files 42,026 there for a quarter whose operating expenses are
+    30,696; handing that back as the answer would tell a reader who read the
+    statement correctly that they were twelve billion dollars wrong.
+
+    So it is derived rather than substituted, and only when both halves are
+    present for the same period. The derivation is labelled, because a figure
+    this app computed is not a figure the company filed.
+    """
+    for key, period in (("opex", end), ("opexP", prior_end)):
+        if key in fields or not period:
+            continue
+        total = _pick(facts, ["CostsAndExpenses"], window=QUARTER_DAYS, end=period)
+        cogs = _pick(facts, QUARTER_TAGS["cogs"][1], window=QUARTER_DAYS, end=period)
+        if not total or not cogs:
+            continue
+        try:
+            value = float(total["value"]) - float(cogs["value"])
+        except (TypeError, ValueError):
+            continue
+        label = QUARTER_TAGS["opex"][0] + ("" if key == "opex" else ", year ago")
+        fields[key] = {
+            "value": value,
+            "tag": "CostsAndExpenses − " + cogs["tag"],
+            "derived": True,
+            "end": period, "start": total.get("start"),
+            "form": total.get("form"), "filed": total.get("filed"),
+            "label": label,
+        }
 
 
 def compare(typed: dict, filed: dict | None) -> dict:
@@ -254,6 +291,7 @@ def compare(typed: dict, filed: dict | None) -> dict:
             "key": key, "label": label,
             "state": "match" if close else "differs",
             "typed": entered, "filed": value, "tag": found.get("tag"),
+            "derived": bool(found.get("derived")),
             "scaled": (not close and _looks_scaled(entered, value)),
         })
         if close:
