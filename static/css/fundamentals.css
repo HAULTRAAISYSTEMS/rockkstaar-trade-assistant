@@ -2,6 +2,7 @@
 .fundamentals-shell {
   --fund-gold-soft: rgba(229, 185, 79, .08);
   --fund-gold-line: rgba(229, 185, 79, .22);
+  --fund-on-gold: #171006;   /* ink that sits on a gold fill */
   --fund-panel: linear-gradient(145deg, rgba(23, 27, 33, .96), rgba(11, 13, 16, .98));
   width: 100%;
   max-width: 1480px;
@@ -854,3 +855,355 @@
   border-bottom: 1px solid color-mix(in srgb, var(--elite-gold) 35%, transparent);
 }
 .fundamentals-shell .edu-more:hover { border-bottom-color: var(--elite-gold) }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE SEVEN-CHECK DRILL — "This quarter"
+   The annual scorecard is read; this one is worked. The form is the teaching
+   surface, so it carries the same weight as the results panel rather than
+   sitting beside it as an afterthought.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.fundamentals-shell .qd-intro {
+  margin: 0 0 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--elite-hairline);
+  border-left: 2px solid var(--elite-gold);
+  border-radius: var(--elite-radius-lg);
+  background: var(--fund-panel);
+  box-shadow: var(--elite-shadow);
+}
+.fundamentals-shell .qd-intro h2 {
+  margin: 0 0 8px;
+  color: var(--ink-050);
+  font: 700 17px var(--font-display);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.fundamentals-shell .qd-intro p {
+  max-width: 78ch;
+  margin: 0 0 8px;
+  color: var(--elite-muted);
+  font: 400 12.5px/1.7 var(--font-ui);
+}
+.fundamentals-shell .qd-intro p:last-child { margin-bottom: 0; }
+.fundamentals-shell .qd-intro strong { color: var(--elite-copy); font-weight: 600; }
+
+/* Toolbar: hints and the worked example sit above the form, not inside it. */
+.fundamentals-shell .qd-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 14px;
+}
+.fundamentals-shell .qd-toolbar .qd-spacer { flex: 1 1 auto; }
+
+.fundamentals-shell .qd-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* ── The form ─────────────────────────────────────────────────────────────── */
+.fundamentals-shell .qd-form fieldset {
+  margin: 0 0 14px;
+  padding: 16px 18px 14px;
+  border: 1px solid var(--elite-hairline);
+  border-radius: var(--elite-radius-lg);
+  background: var(--fund-panel);
+  box-shadow: var(--elite-shadow);
+}
+.fundamentals-shell .qd-form legend {
+  padding: 0 9px;
+  color: var(--elite-gold);
+  font: 700 10px var(--font-ui);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+.fundamentals-shell .qd-where {
+  margin: 0 0 12px;
+  padding: 8px 11px;
+  border-radius: 7px;
+  background: var(--elite-panel-inset);
+  color: var(--elite-muted);
+  font: 400 11px/1.6 var(--font-ui);
+}
+.fundamentals-shell .qd-where b { color: var(--elite-copy); font-weight: 600; }
+
+.fundamentals-shell .qd-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) 1fr 1fr auto;
+  gap: 7px 9px;
+  align-items: center;
+  padding: 5px 0;
+}
+.fundamentals-shell .qd-row.qd-single { grid-template-columns: minmax(0, 1.5fr) 1fr auto; }
+.fundamentals-shell .qd-row label {
+  color: var(--elite-copy);
+  font: 400 12.5px/1.35 var(--font-ui);
+}
+.fundamentals-shell .qd-head { padding-bottom: 2px; }
+.fundamentals-shell .qd-head span {
+  color: var(--elite-faint);
+  font: 700 9px var(--font-ui);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  text-align: right;
+  padding-right: 12px;
+}
+
+.fundamentals-shell .qd-form input,
+.fundamentals-shell .qd-id input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 11px;
+  border: 1px solid var(--elite-border);
+  border-radius: 7px;
+  color: var(--ink-050);
+  background: var(--elite-panel-inset);
+  font: 500 12.5px var(--font-mono);
+  text-align: right;
+}
+.fundamentals-shell .qd-form input:focus,
+.fundamentals-shell .qd-id input:focus {
+  outline: none;
+  border-color: var(--elite-gold);
+  box-shadow: 0 0 0 3px rgba(229, 185, 79, .12);
+}
+.fundamentals-shell .qd-form input.qd-filled { border-color: rgba(229, 185, 79, .32); }
+
+.fundamentals-shell .qd-id { display: flex; gap: 10px; margin: 0 0 14px; }
+.fundamentals-shell .qd-id input {
+  text-align: left;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+/* The "where do I find this" affordance, one per row. */
+.fundamentals-shell .qd-find {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--elite-border);
+  border-radius: 50%;
+  color: var(--elite-faint);
+  background: transparent;
+  font: 700 10px var(--font-ui);
+  line-height: 1;
+  cursor: pointer;
+}
+.fundamentals-shell .qd-find:hover,
+.fundamentals-shell .qd-find[aria-expanded="true"] {
+  color: var(--elite-gold);
+  border-color: var(--elite-border-strong);
+  background: var(--fund-gold-soft);
+}
+.fundamentals-shell .qd-tip {
+  grid-column: 1 / -1;
+  margin: 2px 0 8px;
+  padding: 9px 12px;
+  border-left: 2px solid var(--elite-gold-deep);
+  border-radius: 0 7px 7px 0;
+  background: var(--elite-panel-inset);
+  color: var(--elite-muted);
+  font: 400 11.5px/1.65 var(--font-ui);
+}
+.fundamentals-shell .qd-tip b { color: var(--elite-copy); font-weight: 600; }
+.fundamentals-shell .qd-tip .qd-alias {
+  display: block;
+  margin-top: 4px;
+  color: var(--elite-faint);
+  font: 500 10.5px var(--font-mono);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.fundamentals-shell .qd-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.fundamentals-shell .qd-primary,
+.fundamentals-shell .qd-ghost {
+  min-height: 36px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  font: 700 10px var(--font-ui);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.fundamentals-shell .qd-primary {
+  color: var(--fund-on-gold);
+  border: 1px solid var(--elite-gold);
+  background: linear-gradient(145deg, var(--elite-gold-bright), var(--elite-gold) 55%, var(--elite-gold-deep));
+  box-shadow: 0 7px 20px -12px rgba(229, 185, 79, .7);
+}
+.fundamentals-shell .qd-ghost {
+  color: var(--elite-muted);
+  border: 1px solid var(--elite-hairline);
+  background: rgba(6, 7, 8, .5);
+}
+.fundamentals-shell .qd-ghost:hover { color: var(--ink-050); border-color: var(--elite-border-strong); }
+.fundamentals-shell .qd-status {
+  min-height: 1.2em;
+  margin: 11px 0 0;
+  color: var(--elite-faint);
+  font: 400 11px/1.55 var(--font-ui);
+}
+.fundamentals-shell .qd-status.err { color: var(--neg-500); }
+
+/* ── Results ──────────────────────────────────────────────────────────────── */
+.fundamentals-shell .qd-results {
+  position: sticky;
+  top: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--elite-hairline);
+  border-radius: var(--elite-radius-lg);
+  background: var(--fund-panel);
+  box-shadow: var(--elite-shadow);
+}
+.fundamentals-shell .qd-results h3 {
+  margin: 0 0 4px;
+  color: var(--ink-050);
+  font: 700 15px var(--font-display);
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.fundamentals-shell .qd-tally {
+  display: flex;
+  gap: 14px;
+  margin: 0 0 14px;
+  color: var(--elite-faint);
+  font: 500 10px var(--font-mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.fundamentals-shell .qd-tally b { font-weight: 700; }
+.fundamentals-shell .qd-tally .t-clean b { color: var(--pos-500); }
+.fundamentals-shell .qd-tally .t-watch b { color: var(--warn-500); }
+.fundamentals-shell .qd-tally .t-flag  b { color: var(--neg-500); }
+.fundamentals-shell .qd-empty {
+  color: var(--elite-muted);
+  font: 400 12.5px/1.7 var(--font-ui);
+}
+
+.fundamentals-shell .qd-item {
+  padding: 14px 0;
+  border-top: 1px solid var(--elite-hairline);
+}
+.fundamentals-shell .qd-item:first-of-type { padding-top: 4px; border-top: 0; }
+.fundamentals-shell .qd-item.is-skipped { opacity: .55; }
+.fundamentals-shell .qd-top {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.fundamentals-shell .qd-name {
+  color: var(--elite-copy);
+  font: 500 12.5px var(--font-ui);
+}
+.fundamentals-shell .qd-val {
+  color: var(--ink-050);
+  font: 700 19px var(--font-mono);
+  white-space: nowrap;
+}
+.fundamentals-shell .qd-badge {
+  display: inline-block;
+  margin-left: 9px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font: 700 9px var(--font-ui);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
+.fundamentals-shell .qd-clean { color: var(--pos-500); border-color: rgba(34,197,139,.3); background: rgba(34,197,139,.1); }
+.fundamentals-shell .qd-watch { color: var(--warn-500); border-color: rgba(255,176,32,.3); background: rgba(255,176,32,.1); }
+.fundamentals-shell .qd-flag  { color: var(--neg-500);  border-color: rgba(255,77,69,.3);  background: rgba(255,77,69,.1); }
+.fundamentals-shell .qd-basis {
+  margin-top: 5px;
+  color: var(--elite-faint);
+  font: 500 11px var(--font-mono);
+}
+.fundamentals-shell .qd-says {
+  margin: 8px 0 0;
+  color: var(--elite-muted);
+  font: 400 12px/1.65 var(--font-ui);
+}
+.fundamentals-shell .qd-says a { color: var(--elite-gold); text-decoration: none; border-bottom: 1px solid rgba(229,185,79,.3); }
+.fundamentals-shell .qd-says a:hover { color: var(--elite-gold-bright); }
+.fundamentals-shell .qd-skipped {
+  margin: 6px 0 0;
+  color: var(--elite-faint);
+  font: 400 11.5px/1.6 var(--font-ui);
+}
+.fundamentals-shell .qd-summary {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--elite-hairline);
+  color: var(--elite-faint);
+  font: 400 11px/1.7 var(--font-ui);
+}
+
+/* ── Answer key ───────────────────────────────────────────────────────────── */
+.fundamentals-shell .qd-key-block {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--fund-gold-line);
+}
+.fundamentals-shell .qd-key-block h4 {
+  margin: 0 0 4px;
+  color: var(--elite-gold);
+  font: 700 10px var(--font-ui);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+.fundamentals-shell .qd-key-sub {
+  margin: 0 0 12px;
+  color: var(--elite-muted);
+  font: 400 11px/1.65 var(--font-ui);
+}
+.fundamentals-shell .qd-cmp {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) 1fr 1fr 18px;
+  gap: 3px 10px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--elite-hairline);
+}
+.fundamentals-shell .qd-cmp:last-child { border-bottom: 0; }
+.fundamentals-shell .qd-cmp-label { color: var(--elite-copy); font: 400 11.5px var(--font-ui); }
+.fundamentals-shell .qd-cmp-tag {
+  display: block;
+  margin-top: 2px;
+  color: var(--elite-faint);
+  font: 500 9.5px var(--font-mono);
+  word-break: break-all;
+}
+.fundamentals-shell .qd-cmp-num { color: var(--elite-muted); font: 500 11.5px var(--font-mono); text-align: right; }
+.fundamentals-shell .qd-cmp .ok { color: var(--pos-500); font: 700 12px var(--font-ui); text-align: center; }
+.fundamentals-shell .qd-cmp .no { color: var(--neg-500); font: 700 12px var(--font-ui); text-align: center; }
+.fundamentals-shell .qd-cmp .na { color: var(--elite-faint); text-align: center; }
+.fundamentals-shell .qd-cmp-head { border-bottom-color: var(--elite-border); }
+.fundamentals-shell .qd-cmp-head span {
+  color: var(--elite-faint);
+  font: 700 9px var(--font-ui);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.fundamentals-shell .qd-note {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  color: var(--warn-500);
+  font: 400 10.5px/1.55 var(--font-ui);
+}
+
+@media (max-width: 1000px) {
+  .fundamentals-shell .qd-grid { grid-template-columns: 1fr; }
+  .fundamentals-shell .qd-results { position: static; }
+}
+@media (max-width: 560px) {
+  .fundamentals-shell .qd-row { grid-template-columns: minmax(0, 1fr) 1fr 1fr auto; gap: 5px 6px; }
+  .fundamentals-shell .qd-row label { font-size: 11.5px; }
+  .fundamentals-shell .qd-cmp { grid-template-columns: minmax(0, 1.3fr) 1fr 1fr 16px; }
+}

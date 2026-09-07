@@ -270,3 +270,65 @@ class TestTotalOperatingExpenses:
         )
         filed = qf.latest_quarter("TEST", facts=partial)
         assert "opex" not in filed["fields"]
+
+
+class TestThePageTeaches:
+    """The reader is learning to read a filing, not to fill in a form.
+
+    The styling bug that prompted this: the stylesheet was written into the
+    template between {% endblock %} and {% block scripts %}, which Jinja
+    discards, so the whole tab rendered as unstyled HTML.
+    """
+
+    @classmethod
+    @pytest.fixture(scope="class")
+    def page(cls):
+        from unittest.mock import patch
+        import web_app, app as _app
+        c = web_app.app.test_client()
+        with c.session_transaction() as sess:
+            sess["user_id"] = 1
+            sess["logged_in"] = True
+        with patch.object(_app, "_auth_required", lambda *a, **k: False):
+            return c.get("/fundamentals?tab=quarter").get_data(as_text=True)
+
+    def test_no_markup_is_stranded_outside_a_jinja_block(self):
+        """Anything outside a block in a child template is silently dropped."""
+        from pathlib import Path
+        import re
+        src = Path("templates/fundamentals.html").read_text()
+        body = re.sub(r"\{%\s*block .*?%\}.*?\{%\s*endblock\s*%\}", "",
+                      src, flags=re.S)
+        assert "<style" not in body
+        assert "<div" not in body
+
+    def test_the_drill_styles_ship_in_the_stylesheet(self):
+        from pathlib import Path
+        css = Path("static/css/fundamentals.css").read_text()
+        for rule in (".qd-intro", ".qd-tip", ".qd-badge", ".qd-cmp", ".qd-results"):
+            assert rule in css
+
+    def test_every_field_says_where_to_find_it(self, page):
+        """A learner needs the statement and the line, not just a label."""
+        for probe in ("Income statement, the very first line.",
+                      "Cash flow statement, its first line",
+                      "Balance sheet, near the top of current assets"):
+            assert probe in page
+
+    def test_every_field_lists_what_else_the_line_is_called(self, page):
+        for alias in ("Net sales", "Cost of goods sold",
+                      "Weighted-average shares", "Capital expenditures"):
+            assert alias in page
+
+    def test_it_warns_about_the_trap_that_breaks_every_ratio(self, page):
+        """Taking the year-to-date column for the quarter."""
+        assert "Three-month columns" in page
+        assert "Always cumulative, never quarterly" in page
+
+    def test_a_worked_example_is_one_click_away(self, page):
+        assert "Load a worked example" in page
+        assert "qdExample" in page
+
+    def test_the_hints_can_all_be_opened_at_once(self, page):
+        assert "Show me where" in page
+        assert "qdToggleHints" in page

@@ -487,20 +487,83 @@
 
   <!-- ══════════════════════════════════════════════════════════════════
        THIS QUARTER — the seven-check drill
+
+       Every field carries where to find it in the filing and what else the
+       line gets called, because the skill being practised is reading the
+       statement, not typing into a form.
   ══════════════════════════════════════════════════════════════════ -->
   <div id="tab-quarter" class="tab-pane" {% if request.args.get('tab') != 'quarter' %}style="display:none"{% endif %}>
 
+    {% set qd_income = [
+      ('rev', 'Revenue',
+       'Income statement, the very first line.',
+       'Net sales · Total revenue · Total net sales'),
+      ('cogs', 'Cost of revenue',
+       'Income statement, directly under revenue. What it cost to deliver what was sold — not the whole cost base.',
+       'Cost of sales · Cost of goods sold'),
+      ('opex', 'Total operating expenses',
+       'Income statement, the subtotal of R&amp;D, sales and marketing, and general and administrative. If the company only prints "Total costs and expenses", subtract cost of revenue from it.',
+       'Total operating expenses · Total costs and expenses − cost of revenue'),
+      ('opinc', 'Operating income',
+       'Income statement, the line after operating expenses — before interest and tax.',
+       'Income from operations · Operating profit'),
+      ('ni', 'Net income',
+       'Income statement, the bottom line. Take the three-month column, not the year-to-date one beside it.',
+       'Net income · Net earnings · Profit for the period'),
+      ('sh', 'Diluted share count',
+       'Income statement, near the bottom under earnings per share. Use the diluted figure, which counts options and convertibles as if exercised.',
+       'Weighted-average shares — diluted'),
+      ('eps', 'Diluted EPS',
+       'Income statement, the last line. Diluted, not basic.',
+       'Diluted earnings per share'),
+    ] %}
+    {% set qd_balance = [
+      ('ca', 'Total current assets',
+       'Balance sheet, the subtotal that closes the current-assets block — cash, receivables, inventory and the rest due within a year.',
+       'Total current assets'),
+      ('cl', 'Total current liabilities',
+       'Balance sheet, the subtotal closing the current-liabilities block — what is owed within a year.',
+       'Total current liabilities'),
+      ('ar', 'Accounts receivable, net',
+       'Balance sheet, near the top of current assets. Money billed but not yet collected.',
+       'Accounts receivable, net · Trade receivables'),
+    ] %}
+    {% set qd_cash = [
+      ('niy', 'Net income (year to date)',
+       'Cash flow statement, its first line — the statement starts from net income and works down to cash. This is the cumulative figure, so it will be larger than the quarter above.',
+       'Net income'),
+      ('cfo', 'Cash from operating activities',
+       'Cash flow statement, the subtotal that closes the operating section.',
+       'Net cash provided by operating activities'),
+      ('capex', 'Purchases of property &amp; equipment',
+       'Cash flow statement, in the investing section. Usually printed as a negative — type it either way.',
+       'Purchases of property and equipment · Capital expenditures'),
+      ('revYtd', 'Revenue (year to date)',
+       'Income statement, the six or nine month column beside the quarter. Optional — it only sets capex against sales.',
+       'Total revenue, cumulative'),
+    ] %}
+
     <div class="qd-intro">
       <h2>Seven checks on one quarter</h2>
-      <p>The score on the Analyze tab reads annual filings and asks whether the
-         business is worth owning. This asks a different question: what did the
-         most recent quarter say? Open the company's 10-Q and pull the figures
-         out yourself — that is the part worth practising. Leave anything blank
-         and its check is skipped.</p>
-      <p class="qd-key">When you have run it, <strong>Check my numbers</strong>
-         pulls the same figures from the company's XBRL filing and shows you
-         where yours differ. Filers choose their own tags, so a difference is a
-         question, not a verdict.</p>
+      <p>The <strong>Analyze</strong> tab reads annual filings and scores whether
+         a business is worth owning. This asks a different question: what did the
+         latest quarter actually say? Open the company&rsquo;s 10-Q, find each
+         figure yourself, and type it in — that is the part worth practising.
+         Leave anything blank and its check is skipped.</p>
+      <p>Every field has a <strong>?</strong> that tells you which statement the
+         number lives on and what else it might be called. Turn them all on with
+         <strong>Show me where</strong> if you are new to this.</p>
+      <p>Once you have run it, <strong>Check my numbers</strong> pulls the same
+         quarter from the company&rsquo;s own filing and shows where yours differ.
+         Filers choose their own labels, so a difference is a question worth
+         chasing, not a mark against you.</p>
+    </div>
+
+    <div class="qd-toolbar">
+      <button type="button" class="qd-ghost" id="q-hints-btn" onclick="qdToggleHints()">Show me where</button>
+      <button type="button" class="qd-ghost" onclick="qdExample()">Load a worked example</button>
+      <span class="qd-spacer"></span>
+      <button type="button" class="qd-ghost" onclick="qdClear()">Clear</button>
     </div>
 
     <div class="qd-grid">
@@ -511,59 +574,53 @@
           <input type="text" id="q-per" placeholder="Quarter, e.g. Q3 FY26" autocomplete="off">
         </div>
 
+        {% macro qd_field(key, label, where, aliases, paired=True) %}
+        <div class="qd-row {{ '' if paired else 'qd-single' }}">
+          <label for="q-{{ key }}">{{ label|safe }}</label>
+          <input type="text" id="q-{{ key }}" inputmode="decimal" autocomplete="off"
+                 aria-label="{{ label|striptags }}, this period">
+          {% if paired %}<input type="text" id="q-{{ key }}P" inputmode="decimal" autocomplete="off"
+                 aria-label="{{ label|striptags }}, prior period">{% endif %}
+          <button type="button" class="qd-find" aria-expanded="false"
+                  aria-controls="tip-{{ key }}" onclick="qdTip('{{ key }}', this)"
+                  title="Where do I find this?">?</button>
+          <div class="qd-tip" id="tip-{{ key }}" hidden>
+            <b>Where:</b> {{ where|safe }}
+            <span class="qd-alias">Also printed as: {{ aliases|safe }}</span>
+          </div>
+        </div>
+        {% endmacro %}
+
         <fieldset>
           <legend>Income statement — the quarter</legend>
-          <p class="qd-hint">Three-month columns: this quarter and the same
-             quarter last year. Revenue may be called net sales or total revenue.</p>
-          <div class="qd-row qd-head"><span></span><span>This qtr</span><span>Year ago</span></div>
-          {% for key, label in [('rev','Revenue'), ('cogs','Cost of revenue'),
-                                ('opex','Total operating expenses'),
-                                ('opinc','Operating income'), ('ni','Net income'),
-                                ('sh','Diluted share count'), ('eps','Diluted EPS')] %}
-          <div class="qd-row">
-            <label for="q-{{ key }}">{{ label }}</label>
-            <input type="text" id="q-{{ key }}" inputmode="decimal" autocomplete="off">
-            <input type="text" id="q-{{ key }}P" inputmode="decimal" autocomplete="off">
-          </div>
-          {% endfor %}
+          <p class="qd-where"><b>Three-month columns.</b> A 10-Q prints the
+             quarter and the year-to-date side by side. Take the three-month
+             pair: this quarter, and the same quarter a year ago.</p>
+          <div class="qd-row qd-head"><span></span><span>This qtr</span><span>Year ago</span><span></span></div>
+          {% for key, label, where, aliases in qd_income %}{{ qd_field(key, label, where, aliases) }}{% endfor %}
         </fieldset>
 
         <fieldset>
           <legend>Balance sheet</legend>
-          <p class="qd-hint">Two dates, not two periods. Use the subtotals the
-             company already computed.</p>
-          <div class="qd-row qd-head"><span></span><span>Now</span><span>Prior</span></div>
-          {% for key, label in [('ca','Total current assets'),
-                                ('cl','Total current liabilities'),
-                                ('ar','Accounts receivable, net')] %}
-          <div class="qd-row">
-            <label for="q-{{ key }}">{{ label }}</label>
-            <input type="text" id="q-{{ key }}" inputmode="decimal" autocomplete="off">
-            <input type="text" id="q-{{ key }}P" inputmode="decimal" autocomplete="off">
-          </div>
-          {% endfor %}
+          <p class="qd-where"><b>Two dates, not two periods.</b> A balance sheet
+             is a photograph, not a film. Use the subtotals the company already
+             computed rather than adding the lines up yourself.</p>
+          <div class="qd-row qd-head"><span></span><span>Now</span><span>Prior</span><span></span></div>
+          {% for key, label, where, aliases in qd_balance %}{{ qd_field(key, label, where, aliases) }}{% endfor %}
         </fieldset>
 
         <fieldset>
           <legend>Cash flow — year to date</legend>
-          <p class="qd-hint">This statement is always cumulative, never
-             quarterly. Match it with the year-to-date net income printed at the
-             top of it.</p>
-          {% for key, label in [('niy','Net income (year to date)'),
-                                ('cfo','Cash from operating activities'),
-                                ('capex','Purchases of property &amp; equipment'),
-                                ('revYtd','Revenue (year to date) — optional')] %}
-          <div class="qd-row qd-single">
-            <label for="q-{{ key }}">{{ label|safe }}</label>
-            <input type="text" id="q-{{ key }}" inputmode="decimal" autocomplete="off">
-          </div>
-          {% endfor %}
+          <p class="qd-where"><b>Always cumulative, never quarterly.</b> This
+             statement covers everything since the start of the fiscal year, so
+             match it with the year-to-date net income printed at the top of it —
+             not the quarter you entered above.</p>
+          {% for key, label, where, aliases in qd_cash %}{{ qd_field(key, label, where, aliases, paired=False) }}{% endfor %}
         </fieldset>
 
         <div class="qd-actions">
           <button type="button" class="qd-primary" onclick="qdRun()">Run the seven checks</button>
           <button type="button" class="qd-ghost" onclick="qdCheck()">Check my numbers</button>
-          <button type="button" class="qd-ghost" onclick="qdClear()">Clear</button>
         </div>
         <p class="qd-status" id="q-status"></p>
       </section>
@@ -571,7 +628,10 @@
       <section class="qd-results" id="q-results" aria-live="polite">
         <h3>Results</h3>
         <p class="qd-empty">Fill in what you have and run the drill. Every check
-           with its inputs grades itself; the rest say what they were missing.</p>
+           with its inputs grades itself; the rest say which figure they were
+           waiting on. Nothing here is a verdict — the thresholds are starting
+           points, and what counts as healthy differs at a retailer, a bank and
+           a chipmaker.</p>
       </section>
     </div>
   </div>
@@ -716,71 +776,6 @@
 </div>{# /fundamentals-shell #}
 {% endblock %}
 
-<style>
-/* ── The seven-check drill ───────────────────────────────────────────────── */
-.qd-intro { max-width: 74ch; margin-bottom: var(--sp-5); }
-.qd-intro h2 { font-family: var(--font-display); font-size: var(--fs-h2); color: var(--text-hi); margin: 0 0 10px; }
-.qd-intro p { color: var(--text-muted); font-size: var(--fs-sm); line-height: 1.65; margin: 0 0 10px; }
-.qd-key { border-left: 2px solid var(--orange-500); padding-left: var(--sp-3); }
-.qd-key strong { color: var(--text-hi); }
-
-.qd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-5); align-items: start; }
-@media (max-width: 900px) { .qd-grid { grid-template-columns: 1fr; } }
-
-.qd-form fieldset { border: 1px solid var(--border-subtle); border-radius: var(--r-md); padding: var(--sp-4); margin: 0 0 var(--sp-4); background: var(--surface-card); }
-.qd-form legend { font-family: var(--font-display); font-size: var(--fs-sm); font-weight: var(--fw-bold); letter-spacing: .05em; text-transform: uppercase; color: var(--text-hi); padding: 0 8px; }
-.qd-hint { color: var(--text-faint); font-size: var(--fs-xs); line-height: 1.55; margin: 0 0 var(--sp-3); font-style: italic; }
-.qd-id { display: flex; gap: var(--sp-3); margin-bottom: var(--sp-4); }
-.qd-id input { flex: 1; min-width: 0; }
-
-.qd-row { display: grid; grid-template-columns: minmax(0, 1.4fr) 1fr 1fr; gap: 8px; align-items: center; margin-bottom: 7px; }
-.qd-row.qd-single { grid-template-columns: minmax(0, 1.4fr) 1fr; }
-.qd-row label { color: var(--text-body); font-size: var(--fs-sm); }
-.qd-head span { color: var(--text-faint); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; text-align: right; padding-right: 10px; }
-.qd-form input, .qd-id input { background: var(--surface-inset); border: 1px solid var(--border-subtle); border-radius: var(--r-sm); color: var(--text-hi); font-family: var(--font-mono); font-size: var(--fs-sm); padding: 8px 10px; text-align: right; width: 100%; }
-.qd-id input { text-align: left; text-transform: uppercase; }
-.qd-form input:focus, .qd-id input:focus { outline: none; border-color: var(--orange-500); }
-
-.qd-actions { display: flex; gap: var(--sp-3); flex-wrap: wrap; }
-.qd-primary, .qd-ghost { font-family: var(--font-display); font-size: var(--fs-sm); font-weight: var(--fw-bold); letter-spacing: .04em; padding: 10px 18px; border-radius: var(--r-sm); cursor: pointer; border: 0; }
-.qd-primary { background: var(--grad-brand); color: var(--text-on-accent); }
-.qd-ghost { background: transparent; border: 1px solid var(--border-subtle); color: var(--text-muted); }
-.qd-ghost:hover { color: var(--text-hi); border-color: var(--border-strong); }
-.qd-status { color: var(--text-faint); font-size: var(--fs-xs); margin-top: var(--sp-3); min-height: 1em; line-height: 1.5; }
-.qd-status.err { color: var(--neg-500); }
-
-.qd-results { background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: var(--r-md); padding: var(--sp-4); position: sticky; top: var(--sp-4); }
-.qd-results h3 { font-family: var(--font-display); font-size: var(--fs-h3); color: var(--text-hi); margin: 0 0 var(--sp-4); }
-.qd-empty { color: var(--text-faint); font-size: var(--fs-sm); line-height: 1.6; }
-
-.qd-item { border-top: 1px solid var(--border-subtle); padding: var(--sp-4) 0; }
-.qd-item:first-of-type { border-top: 0; padding-top: 0; }
-.qd-top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
-.qd-name { color: var(--text-body); font-size: var(--fs-sm); }
-.qd-val { color: var(--text-hi); font-family: var(--font-mono); font-size: var(--fs-h3); font-weight: var(--fw-semi); white-space: nowrap; }
-.qd-badge { display: inline-block; font-family: var(--font-mono); font-size: 9px; letter-spacing: .09em; text-transform: uppercase; padding: 2px 7px; border-radius: 3px; margin-left: 8px; vertical-align: middle; }
-.qd-clean { background: rgba(46,204,113,.12); color: var(--pos-500); border: 1px solid rgba(46,204,113,.3); }
-.qd-watch { background: rgba(255,176,32,.12); color: var(--warn-500); border: 1px solid rgba(255,176,32,.32); }
-.qd-flag  { background: rgba(231,76,60,.12); color: var(--neg-500); border: 1px solid rgba(231,76,60,.3); }
-.qd-basis { color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-xs); margin-top: 4px; }
-.qd-says { color: var(--text-muted); font-size: var(--fs-sm); line-height: 1.6; margin: 8px 0 0; }
-.qd-says a { color: var(--orange-400); text-decoration: none; border-bottom: 1px dotted currentColor; }
-.qd-skipped { color: var(--text-faint); font-size: var(--fs-xs); font-style: italic; }
-.qd-summary { border-top: 1px solid var(--border-subtle); margin-top: var(--sp-4); padding-top: var(--sp-4); color: var(--text-muted); font-size: var(--fs-xs); line-height: 1.65; }
-
-/* Answer key */
-.qd-key-block { border-top: 1px solid var(--border-subtle); margin-top: var(--sp-4); padding-top: var(--sp-4); }
-.qd-key-block h4 { font-family: var(--font-display); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .06em; color: var(--text-hi); margin: 0 0 4px; }
-.qd-key-sub { color: var(--text-faint); font-size: var(--fs-xs); line-height: 1.55; margin: 0 0 var(--sp-3); }
-.qd-cmp { display: grid; grid-template-columns: minmax(0,1.3fr) 1fr 1fr auto; gap: 6px 10px; align-items: baseline; font-family: var(--font-mono); font-size: var(--fs-xs); padding: 6px 0; border-bottom: 1px solid var(--border-subtle); }
-.qd-cmp:last-child { border-bottom: 0; }
-.qd-cmp-label { font-family: var(--font-sans); color: var(--text-body); }
-.qd-cmp-tag { color: var(--text-faint); font-size: 10px; display: block; }
-.qd-cmp-num { text-align: right; color: var(--text-muted); }
-.qd-cmp .ok { color: var(--pos-500); }
-.qd-cmp .no { color: var(--neg-500); }
-.qd-note { color: var(--warn-500); font-size: 10px; grid-column: 1 / -1; margin: 0; }
-</style>
 {% block scripts %}
 <script>
   // ── Tab switching ─────────────────────────────────────────────────────────
@@ -799,8 +794,8 @@
   }
 
   // ── Seven-check drill ─────────────────────────────────────────────────────
-  // The grading is server-side, in quarter_checks.py, so the thresholds live
-  // in one tested place rather than being reimplemented here and drifting.
+  // Grading is server-side, in quarter_checks.py, so the thresholds live in one
+  // tested place rather than being reimplemented here and drifting from it.
   const QD_FIELDS = ['rev','revP','cogs','cogsP','opex','opexP','opinc','opincP',
     'ni','niP','sh','shP','eps','epsP','ca','caP','cl','clP','ar','arP',
     'niy','cfo','capex','revYtd'];
@@ -809,10 +804,11 @@
     return String(v == null ? '' : v).replace(/[&<>"']/g,
       c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
+  function qdEl(k) { return document.getElementById('q-' + k); }
   function qdValues() {
     const out = {};
     QD_FIELDS.forEach(k => {
-      const el = document.getElementById('q-' + k);
+      const el = qdEl(k);
       if (el && el.value.trim()) out[k] = el.value.trim();
     });
     return out;
@@ -823,10 +819,68 @@
     el.textContent = msg || '';
     el.className = 'qd-status' + (isErr ? ' err' : '');
   }
+  // A filled field is worth seeing at a glance on a form this long.
+  function qdMarkFilled() {
+    QD_FIELDS.forEach(k => {
+      const el = qdEl(k);
+      if (el) el.classList.toggle('qd-filled', !!el.value.trim());
+    });
+  }
+  document.addEventListener('input', e => {
+    if (e.target && e.target.id && e.target.id.startsWith('q-')) qdMarkFilled();
+  });
 
+  // ── Where do I find this ──────────────────────────────────────────────────
+  function qdTip(key, btn) {
+    const tip = document.getElementById('tip-' + key);
+    if (!tip) return;
+    tip.hidden = !tip.hidden;
+    btn.setAttribute('aria-expanded', tip.hidden ? 'false' : 'true');
+  }
+  function qdToggleHints(force) {
+    const tips = document.querySelectorAll('#tab-quarter .qd-tip');
+    const showing = (force !== undefined) ? force : tips[0].hidden;
+    tips.forEach(t => { t.hidden = !showing; });
+    document.querySelectorAll('#tab-quarter .qd-find')
+      .forEach(b => b.setAttribute('aria-expanded', showing ? 'true' : 'false'));
+    const btn = document.getElementById('q-hints-btn');
+    if (btn) btn.textContent = showing ? 'Hide the hints' : 'Show me where';
+    try { localStorage.setItem('tradestaar.qdHints', showing ? '1' : '0'); } catch (e) {}
+  }
+  // Someone learning leaves them on. Remember that rather than making them
+  // click it every visit.
+  try {
+    if (localStorage.getItem('tradestaar.qdHints') === '1') {
+      document.addEventListener('DOMContentLoaded', () => qdToggleHints(true));
+    }
+  } catch (e) {}
+
+  // ── A worked example ──────────────────────────────────────────────────────
+  // Meta's September quarter — the case the drill was built on, and one where
+  // the interesting answer is a flag rather than a clean sweep.
+  const QD_EXAMPLE = {
+    co: 'META', per: 'Q3',
+    rev: 60801, revP: 47516, cogs: 11330, cogsP: 8491,
+    opex: 30696, opexP: 18584, opinc: 18775, opincP: 20441,
+    ni: 15848, niP: 18337, sh: 2566, shP: 2570, eps: 6.18, epsP: 7.14,
+    ca: 449956, caP: 366021, cl: 188735, clP: 148778, ar: 21752, arP: 19769,
+    niy: 42621, cfo: 64088, capex: 49113
+  };
+  function qdExample() {
+    qdEl('co').value = QD_EXAMPLE.co;
+    qdEl('per').value = QD_EXAMPLE.per;
+    QD_FIELDS.forEach(k => {
+      const el = qdEl(k);
+      if (el) el.value = (QD_EXAMPLE[k] !== undefined) ? QD_EXAMPLE[k] : '';
+    });
+    qdMarkFilled();
+    qdStatus('Loaded Meta’s September quarter, in millions. Run it, then read ' +
+             'the flagged check — costs grew more than twice as fast as sales.');
+    qdRun();
+  }
+
+  // ── Run ───────────────────────────────────────────────────────────────────
   async function qdRun() {
-    const body = qdValues();
-    qdStatus('');
     try {
       const resp = await fetch('/api/quarter/check', {
         method: 'POST',
@@ -834,7 +888,7 @@
           'Content-Type': 'application/json',
           'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') || {}).content || ''
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(qdValues())
       });
       const data = await resp.json();
       if (data.error) { qdStatus(data.error, true); return; }
@@ -845,46 +899,55 @@
   }
 
   function qdRender(data) {
-    const ticker = (document.getElementById('q-co').value || '').trim().toUpperCase();
-    const period = (document.getElementById('q-per').value || '').trim();
+    const ticker = (qdEl('co').value || '').trim().toUpperCase();
+    const period = (qdEl('per').value || '').trim();
+    const c = data.counts || {};
     let html = '<h3>' + qdEsc(ticker || 'This company') +
                (period ? ' — ' + qdEsc(period) : '') + '</h3>';
 
-    if (!data.graded) {
+    if (data.graded) {
+      html += '<div class="qd-tally">' +
+        '<span class="t-clean"><b>' + c.clean + '</b> clean</span>' +
+        '<span class="t-watch"><b>' + c.watch + '</b> watching</span>' +
+        '<span class="t-flag"><b>' + c.flag + '</b> flagged</span>' +
+        '<span>' + data.graded + ' of 7 graded</span></div>';
+    } else {
       html += '<p class="qd-empty">Nothing to compute yet. Each check needs its ' +
               'own inputs — enter at least cash from operations and year-to-date ' +
               'net income to grade the first one.</p>';
     }
-    (data.checks || []).forEach(c => {
-      if (c.skipped) {
-        html += '<div class="qd-item"><div class="qd-top"><span class="qd-name">' +
-          qdEsc(c.name) + '</span></div><p class="qd-skipped">Skipped — needs ' +
-          qdEsc(c.skipped) + '.</p></div>';
+
+    (data.checks || []).forEach(ch => {
+      if (ch.skipped) {
+        html += '<div class="qd-item is-skipped"><div class="qd-top">' +
+          '<span class="qd-name">' + qdEsc(ch.name) + '</span></div>' +
+          '<p class="qd-skipped">Waiting on ' + qdEsc(ch.skipped) + '.</p></div>';
         return;
       }
-      const link = c.concept
-        ? ' <a href="/learn/' + qdEsc(c.concept) + '" target="_blank" rel="noopener">What is this?</a>'
+      const label = ch.verdict === 'clean' ? 'Clean'
+                  : ch.verdict === 'watch' ? 'Watch' : 'Flag';
+      const link = ch.concept
+        ? ' <a href="/learn/' + qdEsc(ch.concept) + '" target="_blank" rel="noopener">Learn this →</a>'
         : '';
       html += '<div class="qd-item"><div class="qd-top">' +
-        '<span class="qd-name">' + qdEsc(c.name) + '</span>' +
-        '<span class="qd-val">' + qdEsc(c.value) +
-        '<span class="qd-badge qd-' + qdEsc(c.verdict) + '">' +
-        (c.verdict === 'clean' ? 'Clean' : c.verdict === 'watch' ? 'Watch' : 'Flag') +
-        '</span></span></div>' +
-        (c.basis ? '<div class="qd-basis">' + qdEsc(c.basis) + '</div>' : '') +
-        '<p class="qd-says">' + qdEsc(c.says) + link + '</p></div>';
+        '<span class="qd-name">' + qdEsc(ch.name) + '</span>' +
+        '<span class="qd-val">' + qdEsc(ch.value) +
+        '<span class="qd-badge qd-' + qdEsc(ch.verdict) + '">' + label + '</span></span></div>' +
+        (ch.basis ? '<div class="qd-basis">' + qdEsc(ch.basis) + '</div>' : '') +
+        '<p class="qd-says">' + qdEsc(ch.says) + link + '</p></div>';
     });
     if (data.summary) html += '<div class="qd-summary">' + qdEsc(data.summary) + '</div>';
     document.getElementById('q-results').innerHTML = html;
   }
 
-  // The answer key. Runs against the reader's own entries, so it can only
-  // report a difference — never overwrite what they typed.
+  // ── The answer key ────────────────────────────────────────────────────────
+  // Runs against the reader's own entries, so it can only report a difference.
+  // It never writes into the form — that would turn the drill into a fetch.
   async function qdCheck() {
-    const ticker = (document.getElementById('q-co').value || '').trim().toUpperCase();
+    const ticker = (qdEl('co').value || '').trim().toUpperCase();
     if (!ticker) { qdStatus('Enter a ticker first — the filing is looked up by it.', true); return; }
     const params = new URLSearchParams(qdValues()).toString();
-    qdStatus('Reading ' + ticker + "'s filing…");
+    qdStatus('Reading ' + ticker + '’s filing…');
     try {
       const resp = await fetch('/api/quarter/filed/' + encodeURIComponent(ticker) +
                                (params ? '?' + params : ''));
@@ -911,28 +974,32 @@
       '<p class="qd-key-sub">' + qdEsc(data.company || '') +
       (data.period_end ? ' · quarter ending ' + qdEsc(data.period_end) : '') +
       (data.form ? ' · ' + qdEsc(data.form) : '') +
-      (data.filed_on ? ' filed ' + qdEsc(data.filed_on) : '') +
-      '. ' + data.matched + ' of ' + entered.length + ' matched. ' +
-      'Filers choose their own tags, so a difference is a question, not a verdict.</p>';
+      (data.filed_on ? ' filed ' + qdEsc(data.filed_on) : '') + '. ' +
+      '<strong>' + data.matched + ' of ' + entered.length + '</strong> matched. ' +
+      'Filers choose their own tags, so a difference is a question, not a verdict.</p>' +
+      '<div class="qd-cmp qd-cmp-head"><span>Line</span><span>You</span>' +
+      '<span>Filed</span><span></span></div>';
 
     data.rows.forEach(r => {
-      if (r.state === 'blank') return;          // nothing typed; nothing to grade
-      let mark = '', cls = '';
-      if (r.state === 'match')   { mark = '✓'; cls = 'ok'; }
-      else if (r.state === 'differs') { mark = '✕'; cls = 'no'; }
-      else { mark = '—'; }
+      if (r.state === 'blank') return;            // nothing typed; nothing to grade
+      const mark = r.state === 'match' ? '<span class="ok">✓</span>'
+                 : r.state === 'differs' ? '<span class="no">✕</span>'
+                 : '<span class="na">—</span>';
       html += '<div class="qd-cmp"><span class="qd-cmp-label">' + qdEsc(r.label) +
         (r.tag ? '<span class="qd-cmp-tag">' + qdEsc(r.tag) + '</span>' : '') + '</span>' +
         '<span class="qd-cmp-num">' + qdNum(r.typed) + '</span>' +
         '<span class="qd-cmp-num">' +
           (r.state === 'unfiled' ? 'not tagged' : qdNum(r.filed)) + '</span>' +
-        '<span class="' + cls + '">' + mark + '</span>' +
-        (r.scaled ? '<p class="qd-note">Same line, different scale — the filing ' +
-                    'reports in units and the statement you read was in thousands ' +
-                    'or millions.</p>' : '') +
+        mark +
+        (r.state === 'unfiled' ? '<p class="qd-note">This filer never tagged that ' +
+            'line under a name we know. Nothing to check it against — which is not ' +
+            'the same as you being wrong.</p>' : '') +
+        (r.scaled ? '<p class="qd-note">Same line, different scale. The filing ' +
+            'reports in whole dollars and the statement you read was headed ' +
+            '“in millions” or “in thousands”.</p>' : '') +
         (r.derived ? '<p class="qd-note">Not tagged directly by this filer — ' +
-                     'computed from the tags shown, so check it against the ' +
-                     'statement rather than the other way round.</p>' : '') +
+            'computed from the tags shown, so check it against the statement ' +
+            'rather than the other way round.</p>' : '') +
         '</div>';
     });
     html += '</div>';
@@ -943,12 +1010,14 @@
   }
 
   function qdClear() {
-    QD_FIELDS.forEach(k => { const el = document.getElementById('q-' + k); if (el) el.value = ''; });
-    document.getElementById('q-per').value = '';
+    QD_FIELDS.forEach(k => { const el = qdEl(k); if (el) el.value = ''; });
+    const per = qdEl('per'); if (per) per.value = '';
+    qdMarkFilled();
     qdStatus('');
     document.getElementById('q-results').innerHTML =
       '<h3>Results</h3><p class="qd-empty">Fill in what you have and run the drill. ' +
-      'Every check with its inputs grades itself; the rest say what they were missing.</p>';
+      'Every check with its inputs grades itself; the rest say which figure they ' +
+      'were waiting on.</p>';
   }
 
   document.addEventListener('keydown', e => {
