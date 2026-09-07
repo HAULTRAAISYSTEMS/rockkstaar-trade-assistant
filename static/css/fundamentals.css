@@ -973,7 +973,22 @@
 }
 .fundamentals-shell .qd-form input.qd-filled { border-color: rgba(229, 185, 79, .32); }
 
-.fundamentals-shell .qd-id { display: flex; gap: 10px; margin: 0 0 14px; }
+.fundamentals-shell .qd-id {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
+  gap: 10px;
+  margin: 0 0 8px;
+}
+.fundamentals-shell .qd-go { white-space: nowrap; }
+.fundamentals-shell .qd-id-hint {
+  margin: 0 0 16px;
+  color: var(--elite-faint);
+  font: 400 11px/1.6 var(--font-ui);
+}
+@media (max-width: 620px) {
+  .fundamentals-shell .qd-id { grid-template-columns: 1fr 1fr; }
+  .fundamentals-shell .qd-go { grid-column: 1 / -1; }
+}
 .fundamentals-shell .qd-id input {
   text-align: left;
   font-weight: 700;
@@ -1331,3 +1346,6 @@
   font: 400 9.5px var(--font-ui);
   font-style: italic;
 }
+.fundamentals-shell .qd-id-hint.is-live { color: var(--elite-copy); }
+.fundamentals-shell .qd-id-hint.err { color: var(--neg-500); }
+.fundamentals-shell .qd-go:disabled { opacity: .6; cursor: progress; }

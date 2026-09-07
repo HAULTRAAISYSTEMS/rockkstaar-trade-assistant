@@ -526,3 +526,45 @@ class TestTheWalkthroughEndpoint:
         page = client.get("/fundamentals?tab=quarter").get_data(as_text=True)
         assert "Walk me through it" in page
         assert "qdStatementFor" in page
+
+
+class TestTheTickerHasSomethingToPress:
+    """A ticker was typed and nothing happened.
+
+    The action lived in a toolbar above a form taller than a screen, so by the
+    time you reach the fields every button is scrolled away — and the ticker
+    box had nothing beside it. The Analyze tab has ANALYZE right there; this
+    one did not.
+    """
+
+    @classmethod
+    @pytest.fixture(scope="class")
+    def page(cls):
+        from unittest.mock import patch
+        import web_app, app as _app
+        c = web_app.app.test_client()
+        with c.session_transaction() as sess:
+            sess["user_id"] = 1
+            sess["logged_in"] = True
+        with patch.object(_app, "_auth_required", lambda *a, **k: False):
+            return c.get("/fundamentals?tab=quarter").get_data(as_text=True)
+
+    def test_the_button_sits_in_the_same_row_as_the_ticker(self, page):
+        row = page[page.index('<div class="qd-id">'):]
+        row = row[:row.index("</div>")]
+        assert 'id="q-co"' in row
+        assert "qdWalk()" in row
+
+    def test_enter_on_the_ticker_fetches_rather_than_grading_an_empty_form(self, page):
+        assert "if (e.target.id === 'q-co' || e.target.id === 'q-per') qdWalk();" in page
+
+    def test_the_status_is_repeated_at_the_top(self, page):
+        """The message about a click at the top must not print at the bottom."""
+        assert 'id="q-status-top"' in page
+        assert page.index('id="q-status-top"') < page.index('id="q-status"')
+
+    def test_the_button_says_it_is_working(self, page):
+        """EDGAR company facts is tens of megabytes; silence reads as a dead click."""
+        assert "function qdBusy" in page
+        assert "Reading the filing…" in page
+        assert "b.disabled = true;" in page

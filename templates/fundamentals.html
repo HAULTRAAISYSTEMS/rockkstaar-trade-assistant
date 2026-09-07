@@ -564,7 +564,6 @@
 
     <div class="qd-toolbar">
       <button type="button" class="qd-ghost" id="q-hints-btn" onclick="qdToggleHints()">Show me where</button>
-      <button type="button" class="qd-primary qd-walk-btn" onclick="qdWalk()">Walk me through it</button>
       <button type="button" class="qd-ghost" onclick="qdExample()">Load a worked example</button>
       <span class="qd-spacer"></span>
       <button type="button" class="qd-ghost" onclick="qdClear()">Clear</button>
@@ -586,9 +585,16 @@
       <section class="qd-form">
         <div class="qd-id">
           <input type="text" id="q-co" placeholder="Ticker" maxlength="8"
-                 value="{{ ticker }}" autocomplete="off" spellcheck="false">
-          <input type="text" id="q-per" placeholder="Quarter, e.g. Q3 FY26" autocomplete="off">
+                 value="{{ ticker }}" autocomplete="off" spellcheck="false"
+                 aria-label="Ticker">
+          <input type="text" id="q-per" placeholder="Quarter, e.g. Q3 FY26"
+                 autocomplete="off" aria-label="Quarter">
+          <button type="button" class="qd-primary qd-go" onclick="qdWalk()">Walk me through it</button>
         </div>
+        <p class="qd-id-hint" id="q-status-top">Fills every field from the
+           company&rsquo;s own filing and shows you the statement each number came
+           from. Or leave it blank and type the figures in yourself — that is the
+           drill.</p>
 
         {% macro qd_field(key, label, where, aliases, paired=True) %}
         <div class="qd-row {{ '' if paired else 'qd-single' }}">
@@ -834,11 +840,38 @@
     });
     return out;
   }
+  const QD_HINT = 'Fills every field from the company’s own filing and shows ' +
+    'you the statement each number came from. Or leave it blank and type the ' +
+    'figures in yourself — that is the drill.';
+
   function qdStatus(msg, isErr) {
     const el = document.getElementById('q-status');
-    if (!el) return;
-    el.textContent = msg || '';
-    el.className = 'qd-status' + (isErr ? ' err' : '');
+    if (el) {
+      el.textContent = msg || '';
+      el.className = 'qd-status' + (isErr ? ' err' : '');
+    }
+    // Repeated at the top, because the button that starts most of this is up
+    // there and the form between them is taller than a screen.
+    const top = document.getElementById('q-status-top');
+    if (top) {
+      top.textContent = msg || QD_HINT;
+      top.className = 'qd-id-hint' + (isErr ? ' err' : (msg ? ' is-live' : ''));
+    }
+  }
+
+  // Reading company facts from EDGAR is tens of megabytes and takes seconds.
+  // Without the button saying so, it reads as a dead click.
+  function qdBusy(on, label) {
+    document.querySelectorAll('#tab-quarter .qd-go').forEach(b => {
+      if (on) {
+        if (!b.dataset.idle) b.dataset.idle = b.textContent;
+        b.textContent = label || 'Reading…';
+        b.disabled = true;
+      } else {
+        if (b.dataset.idle) b.textContent = b.dataset.idle;
+        b.disabled = false;
+      }
+    });
   }
   // A filled field is worth seeing at a glance on a form this long.
   function qdMarkFilled() {
@@ -990,7 +1023,9 @@
   async function qdWalk() {
     const ticker = (qdEl('co').value || '').trim().toUpperCase();
     if (!ticker) { qdStatus('Put a ticker in first — the filing is looked up by it.', true); return; }
-    qdStatus('Reading ' + ticker + '’s latest filing…');
+    qdStatus('Reading ' + ticker + '’s latest filing from SEC EDGAR — this can ' +
+             'take a few seconds for a large company.');
+    qdBusy(true, 'Reading the filing…');
     try {
       const resp = await fetch('/api/quarter/walkthrough/' + encodeURIComponent(ticker));
       const data = await resp.json();
@@ -1013,6 +1048,8 @@
     } catch (e) {
       qdWalking = false;
       qdStatus('Could not read the filing: ' + e.message, true);
+    } finally {
+      qdBusy(false);
     }
   }
 
@@ -1236,7 +1273,13 @@
   document.addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
     const pane = document.getElementById('tab-quarter');
-    if (pane && pane.style.display !== 'none' && e.target.id && e.target.id.startsWith('q-')) qdRun();
+    if (!pane || pane.style.display === 'none') return;
+    if (!e.target.id || !e.target.id.startsWith('q-')) return;
+    e.preventDefault();
+    // Enter on the ticker means "go and get it", not "grade the empty form
+    // I have not filled in yet".
+    if (e.target.id === 'q-co' || e.target.id === 'q-per') qdWalk();
+    else qdRun();
   });
 
   // ── Education panel toggle ────────────────────────────────────────────────
