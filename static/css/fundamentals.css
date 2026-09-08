@@ -1349,3 +1349,64 @@
 .fundamentals-shell .qd-id-hint.is-live { color: var(--elite-copy); }
 .fundamentals-shell .qd-id-hint.err { color: var(--neg-500); }
 .fundamentals-shell .qd-go:disabled { opacity: .6; cursor: progress; }
+
+/* ── The shape of the filer ────────────────────────────────────────────────
+   Three of the seven checks are not thin or fat at a bank; they are
+   undefined. Saying so needs its own visual register — neither a verdict nor
+   a warning, but a note about what kind of statement is being read. */
+.fundamentals-shell .qd-shape {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--elite-hairline);
+  border-left: 2px solid var(--elite-gold);
+  border-radius: var(--elite-radius);
+  background: var(--elite-panel-inset);
+}
+.fundamentals-shell .qd-shape-hd {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.fundamentals-shell .qd-shape-tag {
+  color: var(--elite-gold);
+  font: 700 10px var(--font-ui);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.fundamentals-shell .qd-shape-sub {
+  color: var(--elite-faint);
+  font: 500 10px var(--font-mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.fundamentals-shell .qd-shape-why {
+  margin: 8px 0 0;
+  color: var(--elite-muted);
+  font: 400 12px/1.7 var(--font-ui);
+}
+
+/* A field with nothing to fill it stays legible. Hiding it would leave the
+   reader wondering where it went; dimming it says the line is not there. */
+.fundamentals-shell .qd-row.qd-na label { color: var(--elite-faint); }
+.fundamentals-shell .qd-row.qd-na input {
+  opacity: .45;
+  border-style: dashed;
+}
+.fundamentals-shell .qd-na-note {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  color: var(--elite-faint);
+  font: 400 10.5px/1.5 var(--font-ui);
+  font-style: italic;
+}
+
+.fundamentals-shell .qd-tally .t-na b { color: var(--elite-gold); }
+.fundamentals-shell .qd-item.is-na { opacity: .8; }
+.fundamentals-shell .qd-item.is-na .qd-name { color: var(--elite-muted); }
+.fundamentals-shell .qd-badge.qd-na-badge {
+  color: var(--elite-gold);
+  border-color: rgba(229, 185, 79, .28);
+  background: rgba(229, 185, 79, .09);
+  margin-left: 0;
+}

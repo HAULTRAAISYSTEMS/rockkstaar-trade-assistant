@@ -50,16 +50,45 @@ YTD_DAYS = (150, 400)          # six, nine or twelve months into the year
 # ninety-odd between one quarter and the next.
 PERIOD_SLACK_DAYS = 10
 
+# Pre-tax income, which is where a bank's income statement stops. There is no
+# OperatingIncomeLoss anywhere in JPMorgan's filings — a bank has no operating
+# section separate from a financing one, because financing IS the operation.
+PRETAX_TAGS = [
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+]
+
 # Each field: the label the form uses, and the XBRL tags to try in order.
-# Order matters — the first tag a filer actually used wins.
+#
+# Order is preference, not priority — _pick gathers candidates across every
+# tag and takes the most recent period, falling back to this order only to
+# break a tie inside one period. So the general tags lead and the sector
+# variants follow: a software company that tags both keeps the general
+# reading, and a bank that tags neither of the first four still resolves.
+#
+# The sector tags are not decoration. A bank files RevenuesNetOfInterestExpense
+# and NoninterestExpense and nothing else; an insurer files PremiumsEarnedNet
+# and BenefitsLossesAndExpenses; a utility files RegulatedAndUnregulated-
+# OperatingRevenue. Without them the drill anchored on nothing and the whole
+# walkthrough came back empty for every company outside tech and retail.
 QUARTER_TAGS = {
     "rev":    ("Revenue", ["RevenueFromContractWithCustomerExcludingAssessedTax",
                            "Revenues", "RevenueFromContractWithCustomerIncludingAssessedTax",
-                           "SalesRevenueNet"]),
+                           "SalesRevenueNet",
+                           # sector variants
+                           "RevenuesNetOfInterestExpense",
+                           "RegulatedAndUnregulatedOperatingRevenue",
+                           "PremiumsEarnedNet",
+                           "InterestAndDividendIncomeOperating"]),
     "cogs":   ("Cost of revenue", ["CostOfRevenue", "CostOfGoodsAndServicesSold",
-                                   "CostOfGoodsSold"]),
-    "opex":   ("Total operating expenses", ["OperatingExpenses"]),
-    "opinc":  ("Operating income", ["OperatingIncomeLoss"]),
+                                   "CostOfGoodsSold", "CostOfServices",
+                                   "CostOfGoodsAndServiceExcludingDepreciationDepletionAndAmortization"]),
+    "opex":   ("Total operating expenses", ["OperatingExpenses",
+                                            # sector variants
+                                            "NoninterestExpense",
+                                            "BenefitsLossesAndExpenses",
+                                            "OperatingCostsAndExpenses"]),
+    "opinc":  ("Operating income", ["OperatingIncomeLoss"] + PRETAX_TAGS),
     "ni":     ("Net income", ["NetIncomeLoss", "ProfitLoss"]),
     "sh":     ("Diluted share count",
                ["WeightedAverageNumberOfDilutedSharesOutstanding",
@@ -86,8 +115,33 @@ YTD_TAGS = {
                 "PaymentsToAcquireProductiveAssets"]),
     "revYtd": ("Revenue (year to date)",
                ["RevenueFromContractWithCustomerExcludingAssessedTax",
-                "Revenues", "RevenueFromContractWithCustomerIncludingAssessedTax"]),
+                "Revenues", "RevenueFromContractWithCustomerIncludingAssessedTax",
+                "RevenuesNetOfInterestExpense",
+                "RegulatedAndUnregulatedOperatingRevenue",
+                "PremiumsEarnedNet"]),
 }
+
+# When a sector tag wins, the generic label is wrong on the page. "Revenue"
+# for a bank is "Total net revenue" and it is net of interest expense, which
+# is a different thing from the top line of a software company. Naming the
+# line the way the filing names it is most of what makes the drill teach.
+TAG_LABELS = {
+    "RevenuesNetOfInterestExpense":            "Total net revenue",
+    "InterestAndDividendIncomeOperating":      "Interest and dividend income",
+    "RegulatedAndUnregulatedOperatingRevenue": "Operating revenues",
+    "PremiumsEarnedNet":                       "Net premiums earned",
+    "NoninterestExpense":                      "Total noninterest expense",
+    "BenefitsLossesAndExpenses":               "Total benefits, losses and expenses",
+    "OperatingCostsAndExpenses":               "Total operating costs and expenses",
+    PRETAX_TAGS[0]:                            "Income before income taxes",
+    PRETAX_TAGS[1]:                            "Income before income taxes",
+}
+
+
+def _label_for(found: dict | None, default: str, suffix: str = "") -> str:
+    """The filing's own name for the line, when the tag tells us one."""
+    base = TAG_LABELS.get((found or {}).get("tag")) or default
+    return base + suffix
 
 
 def _facts_for(tag: str, facts: dict) -> list[dict]:
@@ -223,6 +277,218 @@ def _prior_year_end(end: str) -> str | None:
         return d.replace(year=d.year - 1, day=28).isoformat()
 
 
+# ── What kind of company is this ──────────────────────────────────────────────
+#
+# Three of the seven checks are not "missing data" at a bank. They are category
+# errors. JPMorgan has never tagged AssetsCurrent in its life — not because the
+# figure is late, but because a bank does not present a classified balance
+# sheet at all. There is no twelve-month line drawn through its assets, so
+# there is no current ratio to compute. Likewise CostOfRevenue: a bank has no
+# cost of revenue, so gross margin is not thin or fat, it is undefined.
+#
+# Saying "waiting on total current assets" to someone reading a bank filing
+# sends them hunting for a subtotal that does not exist and will never exist.
+# That is worse than saying nothing. So the shape of the filer is detected
+# first, and a check that cannot apply says so and explains why.
+#
+# Detection reads which concepts the filer has EVER tagged, across its whole
+# history, rather than this quarter alone — a tag missing from one quarter is
+# a gap, a tag missing from twenty years is a structure.
+
+SHAPE_SIGNATURES = (
+    ("bank", ["RevenuesNetOfInterestExpense", "NoninterestExpense",
+              "InterestIncomeExpenseNet", "Deposits",
+              "ProvisionForLoanLeaseAndOtherLosses"]),
+    ("insurer", ["PremiumsEarnedNet", "BenefitsLossesAndExpenses",
+                 "PolicyholderBenefitsAndClaimsIncurredNet",
+                 "LiabilityForClaimsAndClaimsAdjustmentExpense"]),
+    ("reit", ["RealEstateInvestmentPropertyNet", "RealEstateRevenueNet",
+              "OperatingLeaseLeaseIncome"]),
+    ("utility", ["RegulatedAndUnregulatedOperatingRevenue",
+                 "PublicUtilitiesPropertyPlantAndEquipmentNet",
+                 "UtilitiesOperatingExpense"]),
+)
+
+SHAPES = {
+    "bank": {
+        "phrase": "a bank",
+        "label": "Bank / financial",
+        "explains": (
+            "A bank's statements are built differently. Money is the inventory, "
+            "so there is no cost of revenue and no gross margin; the balance "
+            "sheet is unclassified, so nothing is split into current and "
+            "long-term; and lending is the operation, so the income statement "
+            "runs interest income, interest expense, net interest income, "
+            "provision for credit losses, noninterest expense, pre-tax income. "
+            "Read a bank on net interest margin, efficiency ratio, credit "
+            "provisions and capital — not on the three checks below that a "
+            "bank filing has no lines for."
+        ),
+    },
+    "insurer": {
+        "phrase": "an insurer",
+        "label": "Insurer",
+        "explains": (
+            "An insurer collects premiums now and pays claims later, so its "
+            "balance sheet is unclassified — reserves have no twelve-month "
+            "line through them — and it has no cost of revenue. Read it on "
+            "the combined ratio, reserve development and investment income."
+        ),
+    },
+    "reit": {
+        "phrase": "a REIT",
+        "label": "REIT / real estate",
+        "explains": (
+            "A REIT's assets are buildings, so nothing on its balance sheet is "
+            "current and there is no cost of revenue. Depreciation on property "
+            "also swamps reported net income, which is why REITs are read on "
+            "funds from operations rather than on earnings or free cash flow."
+        ),
+    },
+    "utility": {
+        "phrase": "a regulated utility",
+        "label": "Regulated utility",
+        "explains": (
+            "A regulated utility earns an allowed return set by its regulator, "
+            "so margin is an outcome of the rate case rather than a sign of "
+            "competitive strength. Read it on rate base growth, allowed return "
+            "on equity and the capital plan."
+        ),
+    },
+    "unclassified": {
+        "phrase": "a company that does not classify its balance sheet",
+        "label": "Unclassified balance sheet",
+        "explains": (
+            "This filer does not split its balance sheet into current and "
+            "long-term, so there is no current-assets subtotal to divide. "
+            "That is a presentation choice its industry allows, not a gap."
+        ),
+    },
+    "operating": {
+        "phrase": "this kind of company",
+        "label": "Operating company",
+        "explains": "",
+    },
+}
+
+# Why each check cannot run, by shape. Pure lookup on one word, so a saved
+# quarter can be regraded later without going back to EDGAR.
+_NA_NO_COGS = ("There is no cost-of-revenue line in this filing, so there is "
+               "no gross profit to take a margin on. This is not a missing "
+               "number — the statement is not built that way.")
+_NA_UNCLASSIFIED = ("This company does not present a classified balance sheet, "
+                    "so there is no \u201ctotal current assets\u201d or "
+                    "\u201ctotal current liabilities\u201d subtotal to divide. "
+                    "The ratio is undefined here rather than unknown.")
+_NA_NO_DSO = ("Days sales outstanding measures how long a customer takes to "
+              "pay an invoice. This company does not sell on invoice terms, "
+              "so there is no collection cycle to measure.")
+
+SHAPE_NOT_APPLICABLE = {
+    "bank": {
+        "gross_margin": _NA_NO_COGS + " A bank's equivalent question is net "
+                        "interest margin: what it earns on assets minus what "
+                        "it pays for funding.",
+        "current_ratio": _NA_UNCLASSIFIED + " A bank's liquidity is read on "
+                         "the liquidity coverage ratio and its deposit mix "
+                         "instead.",
+        "dso": _NA_NO_DSO + " The equivalent question at a bank is credit "
+               "quality: net charge-offs and non-performing loans.",
+        "free_cash_flow": ("Capital expenditure is not what constrains a bank. "
+                           "Its capacity to lend, pay dividends and buy back "
+                           "stock is set by regulatory capital \u2014 read CET1 "
+                           "instead of free cash flow."),
+    },
+    "insurer": {
+        "gross_margin": _NA_NO_COGS + " An insurer's equivalent is the combined "
+                        "ratio: claims plus expenses against premiums earned. "
+                        "Below 100% means the underwriting itself made money.",
+        "current_ratio": _NA_UNCLASSIFIED,
+        "dso": _NA_NO_DSO,
+        "free_cash_flow": ("An insurer holds float \u2014 premiums collected "
+                           "before claims are paid \u2014 so operating cash "
+                           "flow is a timing artefact as much as a result. "
+                           "Read underwriting profit and reserve development."),
+    },
+    "reit": {
+        "gross_margin": _NA_NO_COGS,
+        "current_ratio": _NA_UNCLASSIFIED,
+        "dso": _NA_NO_DSO,
+        "free_cash_flow": ("A REIT's capital spending is acquiring buildings, "
+                           "not maintaining them, and the two are not split out. "
+                           "Read funds from operations (FFO) and the payout "
+                           "ratio against it instead."),
+    },
+    "utility": {
+        "gross_margin": ("A regulated utility's margin is set by its rate case, "
+                         "not by pricing power, so the level says more about "
+                         "the regulator than the business."),
+    },
+    "unclassified": {
+        "current_ratio": _NA_UNCLASSIFIED,
+    },
+    "operating": {},
+}
+
+# The names the form should use for a field when the shape changes what the
+# line is called on the statement.
+SHAPE_FIELD_LABELS = {
+    "bank": {"rev": "Total net revenue", "opex": "Total noninterest expense",
+             "opinc": "Income before income taxes"},
+    "insurer": {"rev": "Total revenues",
+                "opex": "Total benefits, losses and expenses",
+                "opinc": "Income before income taxes"},
+    "utility": {"rev": "Operating revenues"},
+}
+
+
+def _ever(facts: dict, tags) -> bool:
+    """Has this filer ever tagged any of these concepts, in any period?"""
+    return any(_facts_for(tag, facts) for tag in tags)
+
+
+def detect_shape(facts: dict) -> str:
+    """Which of the shapes above this filer is, from its own tag history."""
+    for shape, signature in SHAPE_SIGNATURES:
+        if _ever(facts, signature):
+            return shape
+    if not _ever(facts, INSTANT_TAGS["ca"][1]):
+        return "unclassified"
+    return "operating"
+
+
+def context_for(shape: str | None) -> dict:
+    """What the grader needs to know about this kind of company.
+
+    A pure function of one word, deliberately: a saved quarter stores the
+    shape and is regraded from it offline, without a second trip to EDGAR.
+    """
+    shape = shape if shape in SHAPES else "operating"
+    return {
+        "shape": shape,
+        "shape_label": SHAPES[shape]["label"],
+        "shape_phrase": SHAPES[shape]["phrase"],
+        "explains": SHAPES[shape]["explains"],
+        "not_applicable": dict(SHAPE_NOT_APPLICABLE.get(shape) or {}),
+        "labels": dict(SHAPE_FIELD_LABELS.get(shape) or {}),
+    }
+
+
+def profile(facts: dict) -> dict:
+    """The filer's shape and everything that follows from it."""
+    return context_for(detect_shape(facts))
+
+
+def all_contexts() -> dict:
+    """Every shape, keyed by name — handed to the page once at render.
+
+    A quarter saved months ago stores one word. Reopening it should put the
+    same explanations back on screen without a network round trip just to
+    learn that banks have no current ratio, which has not changed since.
+    """
+    return {shape: context_for(shape) for shape in SHAPES}
+
+
 def fetch_facts(ticker: str) -> tuple[dict | None, str | None]:
     """The company-facts document and the CIK, or (None, None).
 
@@ -273,35 +539,38 @@ def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
     for key, (label, tags) in QUARTER_TAGS.items():
         found = _pick(facts, tags, window=QUARTER_DAYS, end=end)
         if found:
-            fields[key] = dict(found, label=label)
+            fields[key] = dict(found, label=_label_for(found, label))
         if prior_end:
             found_prior = _pick(facts, tags, window=QUARTER_DAYS,
                                 near=prior_end, slack=PERIOD_SLACK_DAYS)
             if found_prior:
-                fields[key + "P"] = dict(found_prior, label=label + ", year ago")
+                fields[key + "P"] = dict(
+                    found_prior, label=_label_for(found_prior, label, ", year ago"))
 
     for key, (label, tags) in INSTANT_TAGS.items():
         found = _pick(facts, tags, window=None, end=end)
         if found:
-            fields[key] = dict(found, label=label)
+            fields[key] = dict(found, label=_label_for(found, label))
         # The comparative column on a balance sheet in a 10-Q is the previous
         # FISCAL YEAR END, not the same date a year earlier. Reading it as a
         # year-ago instant compares the reader against a date the filing in
         # front of them does not print.
         found_prior = _prior_instant(facts, tags, found, prior_end)
         if found_prior:
-            fields[key + "P"] = dict(found_prior, label=label + ", prior")
+            fields[key + "P"] = dict(
+                found_prior, label=_label_for(found_prior, label, ", prior"))
 
     for key, (label, tags) in YTD_TAGS.items():
         found = _pick(facts, tags, window=YTD_DAYS, end=end)
         if found:
-            fields[key] = dict(found, label=label)
+            fields[key] = dict(found, label=_label_for(found, label))
 
     _derive_operating_expenses(facts, fields, end, prior_end)
 
     return {
         "ticker": ticker.upper(),
         "company": name,
+        "profile": profile(facts),
         "period_end": end,
         "prior_end": prior_end,
         "form": anchor.get("form"),
@@ -398,6 +667,7 @@ def compare(typed: dict, filed: dict | None) -> dict:
 
     return {
         "available": True,
+        "profile": filed.get("profile") or context_for(None),
         "period_end": filed.get("period_end"),
         "form": filed.get("form"),
         "filed_on": filed.get("filed"),
@@ -483,6 +753,73 @@ CASH_ROWS = [
     ("capex",  "Purchases of property and equipment", 1, YTD_TAGS["capex"][1]),
 ]
 
+# A bank's income statement is not the generic one with different numbers in
+# it — it is a different sequence of lines. Rebuilding it as revenue, cost of
+# revenue, gross profit would show a reader three blank rows and none of the
+# lines they are actually looking at on the page in front of them.
+BANK_INCOME_ROWS = [
+    ("intinc", "Interest income", 1,
+     ["InterestAndDividendIncomeOperating", "InterestIncomeOperating"]),
+    ("intexp", "Interest expense", 1, ["InterestExpense", "InterestExpenseOperating"]),
+    ("nii",    "Net interest income", 0,
+     ["InterestIncomeExpenseNet",
+      "InterestIncomeExpenseAfterProvisionForLoanLoss"]),
+    ("nonint", "Noninterest revenue", 1, ["NoninterestIncome"]),
+    ("rev",    "Total net revenue", 0,
+     ["RevenuesNetOfInterestExpense", "Revenues"]),
+    ("prov",   "Provision for credit losses", 1,
+     ["ProvisionForLoanLeaseAndOtherLosses", "ProvisionForLoanAndLeaseLosses",
+      "ProvisionForCreditLossesExpenseReversal"]),
+    ("opex",   "Total noninterest expense", 0, ["NoninterestExpense"]),
+    ("opinc",  "Income before income taxes", 0, PRETAX_TAGS),
+    ("tax",    "Provision for income taxes", 1, ["IncomeTaxExpenseBenefit"]),
+    ("ni",     "Net income", 0, QUARTER_TAGS["ni"][1]),
+    ("eps",    "Diluted earnings per share", 1, QUARTER_TAGS["eps"][1]),
+    ("sh",     "Weighted-average shares, diluted", 1, QUARTER_TAGS["sh"][1]),
+]
+
+BANK_BALANCE_ROWS = [
+    ("cash",   "Cash and due from banks", 1,
+     ["CashAndDueFromBanks", "CashAndCashEquivalentsAtCarryingValue"]),
+    ("depbk",  "Deposits with banks", 1, ["InterestBearingDepositsInBanks"]),
+    ("secs",   "Investment securities", 1,
+     ["DebtSecuritiesAvailableForSaleExcludingAccruedInterest",
+      "AvailableForSaleSecuritiesDebtSecurities", "MarketableSecurities"]),
+    ("loans",  "Loans", 1,
+     ["LoansAndLeasesReceivableNetReportedAmount",
+      "FinancingReceivableExcludingAccruedInterestBeforeAllowanceForCreditLoss",
+      "NotesReceivableNet"]),
+    ("alll",   "Allowance for loan losses", 1,
+     ["FinancingReceivableAllowanceForCreditLosses",
+      "LoansAndLeasesReceivableAllowance"]),
+    ("assets", "Total assets", 0, ["Assets"]),
+    ("deposits", "Deposits", 1, ["Deposits"]),
+    ("ltd",    "Long-term debt", 1, ["LongTermDebt", "LongTermDebtNoncurrent"]),
+    ("liab",   "Total liabilities", 0, ["Liabilities"]),
+    ("equity", "Total stockholders' equity", 0, ["StockholdersEquity"]),
+]
+
+INSURER_INCOME_ROWS = [
+    ("prem",   "Net premiums earned", 1, ["PremiumsEarnedNet"]),
+    ("invinc", "Net investment income", 1,
+     ["NetInvestmentIncome", "GrossInvestmentIncomeOperating"]),
+    ("rev",    "Total revenues", 0,
+     ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"]),
+    ("losses", "Losses and loss adjustment expenses", 1,
+     ["PolicyholderBenefitsAndClaimsIncurredNet",
+      "LiabilityForClaimsAndClaimsAdjustmentExpenseClaimsIncurredNet"]),
+    ("opex",   "Total benefits, losses and expenses", 0,
+     ["BenefitsLossesAndExpenses", "OperatingCostsAndExpenses"]),
+    ("opinc",  "Income before income taxes", 0, PRETAX_TAGS),
+    ("tax",    "Provision for income taxes", 1, ["IncomeTaxExpenseBenefit"]),
+    ("ni",     "Net income", 0, QUARTER_TAGS["ni"][1]),
+    ("eps",    "Diluted earnings per share", 1, QUARTER_TAGS["eps"][1]),
+    ("sh",     "Weighted-average shares, diluted", 1, QUARTER_TAGS["sh"][1]),
+]
+
+INCOME_ROWS_BY_SHAPE = {"bank": BANK_INCOME_ROWS, "insurer": INSURER_INCOME_ROWS}
+BALANCE_ROWS_BY_SHAPE = {"bank": BANK_BALANCE_ROWS}
+
 STATEMENT_TITLES = {
     "income":  ("Condensed consolidated statements of income", "Three months ended"),
     "balance": ("Condensed consolidated balance sheets", ""),
@@ -505,16 +842,19 @@ def _row_values(facts, tags, *, window, now, prior, current_fact=None):
 
 
 def statements(facts: dict, period_end: str, prior_end: str | None,
-               ytd_prior_end: str | None = None) -> dict:
+               ytd_prior_end: str | None = None, shape: str | None = None) -> dict:
     """The three statements, rebuilt, with only the rows this filer tagged.
 
     A row the company never tagged is dropped rather than shown empty: a
     statement full of blanks teaches nothing and looks broken.
     """
+    income_rows = INCOME_ROWS_BY_SHAPE.get(shape) or INCOME_ROWS
+    balance_rows = BALANCE_ROWS_BY_SHAPE.get(shape) or BALANCE_ROWS
+
     out = {}
     for name, rows, window, now, prior in (
-        ("income",  INCOME_ROWS,  QUARTER_DAYS, period_end, prior_end),
-        ("balance", BALANCE_ROWS, None,         period_end, prior_end),
+        ("income",  income_rows,  QUARTER_DAYS, period_end, prior_end),
+        ("balance", balance_rows, None,         period_end, prior_end),
         ("cash",    CASH_ROWS,    YTD_DAYS,     period_end, ytd_prior_end or prior_end),
     ):
         built = []
@@ -528,7 +868,9 @@ def statements(facts: dict, period_end: str, prior_end: str | None,
                 "tag": first.get("tag"),
                 "prior_end": (second or {}).get("end"),
             })
-        if name == "income":
+        # Only the generic layout needs the derived subtotal; the sector
+        # layouts read a total the filer prints outright.
+        if name == "income" and rows is INCOME_ROWS:
             _insert_derived_opex(built)
         title, sub = STATEMENT_TITLES[name]
         out[name] = {"title": title, "sub": sub, "rows": built}
@@ -587,15 +929,19 @@ def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) 
     if ytd and ytd.get("end"):
         ytd_prior = _prior_year_end(ytd["end"])
 
+    prof = filed.get("profile") or context_for(None)
+
     return {
         "ticker": filed.get("ticker"),
         "company": filed.get("company"),
+        "profile": prof,
         "period_end": filed.get("period_end"),
         "prior_end": filed.get("prior_end"),
         "form": filed.get("form"),
         "filed_on": filed.get("filed"),
         "figures": figures,
         "statements": statements(facts, filed.get("period_end"),
-                                 filed.get("prior_end"), ytd_prior),
+                                 filed.get("prior_end"), ytd_prior,
+                                 shape=prof.get("shape")),
         "filing_url": _FILING_URL.format(cik=cik.lstrip("0")) if cik else None,
     }

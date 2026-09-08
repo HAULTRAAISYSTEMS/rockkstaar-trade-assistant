@@ -8360,7 +8360,9 @@ def fundamentals_page():
             logger.exception("fundamentals_page error for %s", ticker)
             error = str(exc)
 
-    return render_template("fundamentals.html", ticker=ticker, data=data, error=error)
+    import quarter_facts
+    return render_template("fundamentals.html", ticker=ticker, data=data,
+                           error=error, qd_shapes=quarter_facts.all_contexts())
 
 
 @app.route("/api/quarter/check", methods=["POST"])
@@ -8371,11 +8373,15 @@ def api_quarter_check():
     pulls the lines themselves; the separate answer-key endpoint is what
     checks their extraction.
     """
-    import quarter_checks
+    import quarter_checks, quarter_facts
 
     payload = request.get_json(silent=True) or request.form.to_dict() or {}
+    # The client passes back the shape the walkthrough already told it, so
+    # grading stays a pure local computation instead of a second EDGAR fetch
+    # on every keystroke. context_for validates it against the known shapes.
+    context = quarter_facts.context_for(payload.get("shape"))
     try:
-        return jsonify(quarter_checks.run(payload))
+        return jsonify(quarter_checks.run(payload, context))
     except Exception as exc:
         logger.exception("quarter check failed")
         return jsonify({"error": str(exc)}), 500
@@ -8416,15 +8422,23 @@ def _quarter_card(entry: dict) -> dict:
     leaving a museum of verdicts computed under rules the app has moved on
     from.
     """
-    import quarter_checks
+    import quarter_checks, quarter_facts
 
-    graded = quarter_checks.run(entry.get("figures") or {})
+    figures = entry.get("figures") or {}
+    # The shape rode along in the saved payload precisely so that reopening a
+    # bank six months later does not need EDGAR again to know a bank has no
+    # current ratio. Saves made before this existed have no shape and grade
+    # the way they always did.
+    context = quarter_facts.context_for(figures.get("_shape"))
+    graded = quarter_checks.run(figures, context)
     return {
         "id":         entry.get("id"),
         "ticker":     entry.get("ticker"),
         "period":     entry.get("period") or "",
         "note":       entry.get("note") or "",
         "updated_at": entry.get("updated_at"),
+        "shape":      graded.get("shape"),
+        "shape_label": graded.get("shape_label"),
         "counts":     graded["counts"],
         "graded":     graded["graded"],
     }
@@ -8454,7 +8468,15 @@ def api_quarter_save():
     figures = {k: v for k, v in (payload.get("figures") or {}).items()
                if k in quarter_checks.FIELDS}
     if not figures:
-        return jsonify({"error": "Nothing to save yet — fill in some figures first."}), 400
+        return jsonify({"error": "Nothing to save yet \u2014 fill in some figures first."}), 400
+
+    # Stored beside the figures rather than in a column of its own: it is one
+    # word, it belongs to this reading of this quarter, and a migration for it
+    # would be a table change for a string.
+    import quarter_facts
+    shape = quarter_facts.context_for(payload.get("shape"))["shape"]
+    if shape != "operating":
+        figures["_shape"] = shape
 
     try:
         entry_id = save_quarter_entry(
@@ -8482,7 +8504,9 @@ def api_quarter_saved_one(entry_id):
     return jsonify({
         "id": entry["id"], "ticker": entry["ticker"],
         "period": entry.get("period") or "", "note": entry.get("note") or "",
-        "figures": entry.get("figures") or {},
+        "figures": {k: v for k, v in (entry.get("figures") or {}).items()
+                    if not k.startswith("_")},
+        "shape": (entry.get("figures") or {}).get("_shape"),
         "updated_at": entry.get("updated_at"),
     })
 

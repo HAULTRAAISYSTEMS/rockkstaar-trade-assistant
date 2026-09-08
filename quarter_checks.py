@@ -48,6 +48,20 @@ CHECK_CONCEPTS = {
 }
 
 
+# The name each check goes by. Kept in one place because the shape-aware
+# grader has to name a check it is declining to run, and a second copy of the
+# string is a second thing to forget to change.
+CHECK_NAMES = {
+    "cash_conversion":    "Cash flow \u00f7 net income",
+    "gross_margin":       "Gross margin",
+    "operating_leverage": "Revenue vs expense growth",
+    "current_ratio":      "Current ratio",
+    "dso":                "Days sales outstanding",
+    "share_count":        "Diluted share count",
+    "free_cash_flow":     "Free cash flow",
+}
+
+
 # Which statement rows each check reads. The guided walkthrough lights these
 # up on the statement beside the result, because a number without the line it
 # came from teaches where the form's fields are, not where the filing's are.
@@ -96,7 +110,8 @@ def _com(x):
     return f"{x:,.0f}"
 
 
-def _check(key, name, value, basis, says, verdict, skipped=None):
+def _check(key, name, value, basis, says, verdict, skipped=None,
+           applies=True, why=None):
     return {
         "key": key,
         "name": name,
@@ -107,7 +122,22 @@ def _check(key, name, value, basis, says, verdict, skipped=None):
         "concept": CHECK_CONCEPTS.get(key),
         "rows": CHECK_ROWS.get(key, {}),
         "skipped": skipped,
+        "applies": applies,
+        "why": why,
     }
+
+
+def _not_applicable(key, why):
+    """A check this kind of company has no lines for.
+
+    Distinct from a skip, and the distinction is the whole point. A skip says
+    "type the figure and I will grade it". This says the figure does not exist
+    in this filing and never will, and explains what to read instead. Told the
+    first, someone reading a bank\u2019s 10-Q goes hunting for a total-current-
+    assets subtotal that no bank has ever printed.
+    """
+    return _check(key, CHECK_NAMES[key], None, None, None, None,
+                  applies=False, why=why)
 
 
 def _skip(key, name, needs):
@@ -121,7 +151,7 @@ def _skip(key, name, needs):
 
 # ── The seven ─────────────────────────────────────────────────────────────────
 
-def _cash_conversion(f):
+def _cash_conversion(f, labels=None):
     """1. Cash from operations against reported profit, both year-to-date.
 
     The cash flow statement is cumulative, never quarterly, so it has to be
@@ -142,7 +172,7 @@ def _cash_conversion(f):
                   f"{ratio:.2f}", f"{_com(cfo)} ÷ {_com(niy)}", says, verdict)
 
 
-def _gross_margin(f):
+def _gross_margin(f, labels=None):
     """2. Gross margin, and which way it moved."""
     rev, cogs = f.get("rev"), f.get("cogs")
     if not rev or cogs is None:
@@ -169,7 +199,7 @@ def _gross_margin(f):
     return _check("gross_margin", "Gross margin", _pct(margin), basis, says, verdict)
 
 
-def _operating_leverage(f):
+def _operating_leverage(f, labels=None):
     """3. Did costs grow slower than sales.
 
     The original skipped silently when prior operating expenses were zero,
@@ -197,7 +227,10 @@ def _operating_leverage(f):
     op_inc, op_inc_p = f.get("opinc"), f.get("opincP")
     if op_inc is not None and op_inc_p:
         inc_growth = (op_inc - op_inc_p) / op_inc_p
-        says += f" Operating income {_signed(inc_growth)}."
+        # A bank has no operating income line; the equivalent is pre-tax
+        # income, and calling it the wrong thing teaches the wrong thing.
+        line = (labels or {}).get("opinc") or "Operating income"
+        says += f" {line} {_signed(inc_growth)}."
         if inc_growth < 0:
             verdict = FLAG
     return _check("operating_leverage", "Revenue vs expense growth",
@@ -205,7 +238,7 @@ def _operating_leverage(f):
                   "revenue growth / operating expense growth", says, verdict)
 
 
-def _current_ratio(f):
+def _current_ratio(f, labels=None):
     """4. Cover on the bills due within twelve months."""
     ca, cl = f.get("ca"), f.get("cl")
     if not ca or not cl:
@@ -229,7 +262,7 @@ def _current_ratio(f):
     return _check("current_ratio", "Current ratio", f"{ratio:.2f}", basis, says, verdict)
 
 
-def _dso(f):
+def _dso(f, labels=None):
     """5. How long after a sale the cash arrives."""
     ar, rev = f.get("ar"), f.get("rev")
     if not ar or not rev:
@@ -245,7 +278,7 @@ def _dso(f):
                   f"{_com(ar)} ÷ {_com(rev)} × 90", says, verdict)
 
 
-def _share_count(f):
+def _share_count(f, labels=None):
     """6. Dilution, and whether EPS growth is the business or the buyback."""
     sh, sh_p = f.get("sh"), f.get("shP")
     if not sh or not sh_p:
@@ -279,7 +312,7 @@ def _share_count(f):
                   f"{_com(sh)} vs {_com(sh_p)}", says, verdict)
 
 
-def _free_cash_flow(f):
+def _free_cash_flow(f, labels=None):
     """7. What is left after paying for the assets that keep it running.
 
     Capex intensity is stated against year-to-date revenue when that is
@@ -309,8 +342,15 @@ def _free_cash_flow(f):
     return _check("free_cash_flow", "Free cash flow", _com(fcf), basis, says, verdict)
 
 
-CHECKS = (_cash_conversion, _gross_margin, _operating_leverage,
-          _current_ratio, _dso, _share_count, _free_cash_flow)
+CHECKS = (
+    ("cash_conversion",    _cash_conversion),
+    ("gross_margin",       _gross_margin),
+    ("operating_leverage", _operating_leverage),
+    ("current_ratio",      _current_ratio),
+    ("dso",                _dso),
+    ("share_count",        _share_count),
+    ("free_cash_flow",     _free_cash_flow),
+)
 
 # The fields the form collects, in the order the filing presents them.
 FIELDS = ("rev", "revP", "cogs", "cogsP", "opex", "opexP", "opinc", "opincP",
@@ -325,26 +365,60 @@ def parse(raw: dict) -> dict:
     return {key: _num(raw.get(key)) for key in FIELDS}
 
 
-def run(raw: dict) -> dict:
-    """Grade a quarter. Returns the checks that ran and the ones that could not."""
+def run(raw: dict, context: dict | None = None) -> dict:
+    """Grade a quarter. Returns the checks that ran and the ones that could not.
+
+    `context` is what quarter_facts learned about the filer: which checks its
+    industry has no lines for, and what its statements call the fields. Without
+    it every check is attempted, which is the right behaviour for figures typed
+    with no company attached.
+    """
+    context = context if isinstance(context, dict) else {}
+    unavailable = context.get("not_applicable") or {}
+    labels = context.get("labels") or {}
+
     figures = parse(raw)
-    results = [check(figures) for check in CHECKS]
+    results = []
+    for key, check in CHECKS:
+        if key in unavailable:
+            results.append(_not_applicable(key, unavailable[key]))
+        else:
+            results.append(check(figures, labels))
+
     graded = [r for r in results if r["verdict"]]
+    na = [r for r in results if not r["applies"]]
     counts = {
         "clean": sum(1 for r in graded if r["verdict"] == CLEAN),
         "watch": sum(1 for r in graded if r["verdict"] == WATCH),
         "flag":  sum(1 for r in graded if r["verdict"] == FLAG),
+        "n_a":   len(na),
     }
-    return {
-        "checks":   results,
-        "graded":   len(graded),
-        "counts":   counts,
-        "figures":  figures,
-        "summary": (
-            f"{counts['clean']} clean · {counts['watch']} worth watching · "
+
+    summary = None
+    if graded:
+        summary = (
+            f"{counts['clean']} clean \u00b7 {counts['watch']} worth watching \u00b7 "
             f"{counts['flag']} flagged. Thresholds are starting points, not "
             "verdicts. A thin current ratio and a long collection cycle mean "
-            "different things at a retailer, a bank and a chipmaker — read the "
+            "different things at a retailer, a bank and a chipmaker \u2014 read the "
             "lines around the number before you grade it."
-        ) if graded else None,
+        )
+        if na:
+            shape = context.get("shape_phrase") or "this kind of company"
+            summary += (
+                f" {len(na)} of the seven do not apply to {shape}. Those are "
+                "category errors here rather than missing figures, and each one "
+                "says what to read in its place."
+            )
+
+    return {
+        "checks":      results,
+        "graded":      len(graded),
+        "counts":      counts,
+        "figures":     figures,
+        "shape":       context.get("shape"),
+        "shape_label": context.get("shape_label"),
+        "shape_phrase": context.get("shape_phrase"),
+        "explains":    context.get("explains"),
+        "summary":     summary,
     }

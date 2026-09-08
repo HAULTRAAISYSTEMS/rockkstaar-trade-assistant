@@ -50,7 +50,8 @@ class TestTheWorkedExample:
         assert meta[key]["verdict"] == verdict
 
     def test_the_tally(self):
-        assert qc.run(META_Q3)["counts"] == {"clean": 5, "watch": 1, "flag": 1}
+        assert qc.run(META_Q3)["counts"] == {"clean": 5, "watch": 1,
+                                            "flag": 1, "n_a": 0}
 
     def test_costs_outrunning_sales_is_what_gets_flagged(self, meta):
         """Revenue +28%, operating expenses +65%. The quarter's real story."""

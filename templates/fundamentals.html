@@ -496,17 +496,17 @@
 
     {% set qd_income = [
       ('rev', 'Revenue',
-       'Income statement, the very first line.',
-       'Net sales · Total revenue · Total net sales'),
+       'Income statement, the very first line. At a bank it is the subtotal after interest expense has already been netted off; at an insurer it is the total below premiums and investment income.',
+       'Net sales · Total revenue · Total net sales · <b>Bank:</b> total net revenue · <b>Insurer:</b> total revenues · <b>Utility:</b> operating revenues'),
       ('cogs', 'Cost of revenue',
-       'Income statement, directly under revenue. What it cost to deliver what was sold — not the whole cost base.',
-       'Cost of sales · Cost of goods sold'),
+       'Income statement, directly under revenue. What it cost to deliver what was sold — not the whole cost base. Banks, insurers and REITs have no such line at all: money is the inventory, so there is nothing to subtract.',
+       'Cost of sales · Cost of goods sold · <b>Banks and insurers:</b> no equivalent'),
       ('opex', 'Total operating expenses',
        'Income statement, the subtotal of R&amp;D, sales and marketing, and general and administrative. If the company only prints "Total costs and expenses", subtract cost of revenue from it.',
-       'Total operating expenses · Total costs and expenses − cost of revenue'),
+       'Total operating expenses · Total costs and expenses − cost of revenue · <b>Bank:</b> total noninterest expense · <b>Insurer:</b> total benefits, losses and expenses'),
       ('opinc', 'Operating income',
-       'Income statement, the line after operating expenses — before interest and tax.',
-       'Income from operations · Operating profit'),
+       'Income statement, the line after operating expenses — before interest and tax. A bank has no operating section separate from a financing one, because financing is the operation; its equivalent line is income before income taxes.',
+       'Income from operations · Operating profit · <b>Bank and insurer:</b> income before income taxes'),
       ('ni', 'Net income',
        'Income statement, the bottom line. Take the three-month column, not the year-to-date one beside it.',
        'Net income · Net earnings · Profit for the period'),
@@ -519,8 +519,8 @@
     ] %}
     {% set qd_balance = [
       ('ca', 'Total current assets',
-       'Balance sheet, the subtotal that closes the current-assets block — cash, receivables and the rest due within a year. Not <b>Total assets</b>, which is several rows further down and counts buildings and goodwill.',
-       'Total current assets'),
+       'Balance sheet, the subtotal that closes the current-assets block — cash, receivables and the rest due within a year. Not <b>Total assets</b>, which is several rows further down and counts buildings and goodwill. Banks, insurers and REITs do not draw a twelve-month line through their balance sheets at all, so this subtotal simply does not exist in their filings.',
+       'Total current assets · <b>Banks, insurers, REITs:</b> not presented'),
       ('cl', 'Total current liabilities',
        'Balance sheet, the subtotal closing the current-liabilities block — what is owed within a year. Not <b>Total liabilities</b>, which includes long-term debt.',
        'Total current liabilities'),
@@ -556,6 +556,13 @@
          where the numbers live before you go hunting for them yourself. Every
          field also has a <strong>?</strong> saying which statement it is on and
          what else it gets called.</p>
+      <p><strong>Not every check fits every company.</strong> A bank has no cost
+         of revenue and does not split its balance sheet into current and
+         long-term, so gross margin and the current ratio are not thin or fat
+         there — they are undefined. Put a bank, insurer, REIT or utility in and
+         the page says which kind of filing it is reading, marks those checks
+         <em>does not apply</em> rather than pretending a figure is missing, and
+         tells you what that industry gets read on instead.</p>
       <p>Once you have run it, <strong>Check my numbers</strong> pulls the same
          quarter from the company&rsquo;s own filing and shows where yours differ.
          Filers choose their own labels, so a difference is a question worth
@@ -580,6 +587,17 @@
       </div>
       <div class="qd-saved-list" id="q-saved-list"></div>
     </section>
+
+    <!-- What kind of company this is changes which of the seven can even be
+         asked. Announced before the fields rather than after the results,
+         because it changes what the reader should be hunting for. -->
+    <div class="qd-shape" id="q-shape" hidden>
+      <div class="qd-shape-hd">
+        <span class="qd-shape-tag" id="q-shape-tag"></span>
+        <span class="qd-shape-sub" id="q-shape-sub"></span>
+      </div>
+      <p class="qd-shape-why" id="q-shape-why"></p>
+    </div>
 
     <div class="qd-grid">
       <section class="qd-form">
@@ -832,13 +850,90 @@
       c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
   function qdEl(k) { return document.getElementById('q-' + k); }
+
+  // Which kind of company the figures belong to. Set by the walkthrough, sent
+  // back with every grade, and saved with the quarter — so grading stays one
+  // local computation instead of a second trip to EDGAR, and reopening a bank
+  // months later still knows it is a bank.
+  var qdShape = null;
+  var qdProfile = null;
+  const QD_SHAPES = {{ (qd_shapes or {})|tojson }};
+
   function qdValues() {
     const out = {};
     QD_FIELDS.forEach(k => {
       const el = qdEl(k);
       if (el && el.value.trim()) out[k] = el.value.trim();
     });
+    if (qdShape) out.shape = qdShape;
     return out;
+  }
+
+  // Fields whose check the filing has no lines for. Left on the form and
+  // legible rather than hidden: a reader who goes looking for total current
+  // assets in a bank's 10-Q should find out here why it is not there, not
+  // after ten minutes of scrolling.
+  const QD_SHAPE_FIELDS = {
+    gross_margin:  ['cogs'],
+    current_ratio: ['ca', 'cl'],
+    dso:           ['ar'],
+    free_cash_flow: ['capex'],
+  };
+
+  function qdApplyShape(profile) {
+    qdProfile = profile || null;
+    qdShape = (profile && profile.shape) || null;
+
+    const box = document.getElementById('q-shape');
+    const na = (profile && profile.not_applicable) || {};
+    const labels = (profile && profile.labels) || {};
+
+    // Relabel the fields the filing calls something else. "Revenue" at a bank
+    // is "Total net revenue" and it is already net of interest expense.
+    QD_FIELDS.forEach(k => {
+      const el = qdEl(k);
+      if (!el) return;
+      const row = el.closest('.qd-row');
+      const lab = row && row.querySelector('label');
+      if (!lab) return;
+      if (lab.dataset.base === undefined) lab.dataset.base = lab.innerHTML;
+      lab.innerHTML = labels[k] ? qdEsc(labels[k]) : lab.dataset.base;
+    });
+
+    // Mark the fields that have nothing to be filled from.
+    const dim = {};
+    Object.keys(na).forEach(check => {
+      (QD_SHAPE_FIELDS[check] || []).forEach(k => { dim[k] = na[check]; });
+    });
+    QD_FIELDS.forEach(k => {
+      const el = qdEl(k);
+      if (!el) return;
+      const row = el.closest('.qd-row');
+      if (!row) return;
+      const base = k.replace(/P$/, '');
+      row.classList.toggle('qd-na', !!dim[base]);
+      let note = row.querySelector('.qd-na-note');
+      if (dim[base]) {
+        if (!note) {
+          note = document.createElement('p');
+          note.className = 'qd-na-note';
+          row.appendChild(note);
+        }
+        note.textContent = 'Not in this filing — see the results panel.';
+      } else if (note) {
+        note.remove();
+      }
+    });
+
+    if (!box) return;
+    if (!profile || !profile.explains) { box.hidden = true; return; }
+    box.hidden = false;
+    document.getElementById('q-shape-tag').textContent = profile.shape_label || '';
+    const count = Object.keys(na).length;
+    document.getElementById('q-shape-sub').textContent = count
+      ? count + ' of the seven checks do not apply to this kind of company'
+      : 'All seven checks apply';
+    document.getElementById('q-shape-why').textContent = profile.explains;
   }
   const QD_HINT = 'Fills every field from the company’s own filing and shows ' +
     'you the statement each number came from. Or leave it blank and type the ' +
@@ -981,7 +1076,8 @@
         '<span class="t-clean"><b>' + c.clean + '</b> clean</span>' +
         '<span class="t-watch"><b>' + c.watch + '</b> watching</span>' +
         '<span class="t-flag"><b>' + c.flag + '</b> flagged</span>' +
-        '<span>' + data.graded + ' of 7 graded</span></div>';
+        (c.n_a ? '<span class="t-na"><b>' + c.n_a + '</b> n/a</span>' : '') +
+        '<span>' + data.graded + ' of ' + (7 - (c.n_a || 0)) + ' graded</span></div>';
     } else {
       html += '<p class="qd-empty">Nothing to compute yet. Each check needs its ' +
               'own inputs — enter at least cash from operations and year-to-date ' +
@@ -989,6 +1085,16 @@
     }
 
     (data.checks || []).forEach(ch => {
+      // Not the same thing as a skip, and the difference is the point. A skip
+      // is a figure not yet typed. This is a figure the filing does not
+      // contain and never will, so it says what to read in its place.
+      if (ch.applies === false) {
+        html += '<div class="qd-item is-na"><div class="qd-top">' +
+          '<span class="qd-name">' + qdEsc(ch.name) + '</span>' +
+          '<span class="qd-val"><span class="qd-badge qd-na-badge">Does not apply</span></span>' +
+          '</div><p class="qd-says">' + qdEsc(ch.why) + '</p></div>';
+        return;
+      }
       if (ch.skipped) {
         html += '<div class="qd-item is-skipped"><div class="qd-top">' +
           '<span class="qd-name">' + qdEsc(ch.name) + '</span></div>' +
@@ -1032,6 +1138,7 @@
       if (!data.available) { qdStatus(data.error || 'No filing found.', true); return; }
 
       qdStatements = data;
+      qdApplyShape(data.profile);
       qdEl('co').value = data.ticker || ticker;
       if (data.period_end) qdEl('per').value = 'Quarter ended ' + data.period_end;
       QD_FIELDS.forEach(k => {
@@ -1040,9 +1147,11 @@
       });
       qdMarkFilled();
       qdWalking = true;
+      const shaped = (data.profile && data.profile.explains)
+        ? ' Read as a ' + (data.profile.shape_label || '').toLowerCase() + '.' : '';
       qdStatus('Filled from ' + (data.company || ticker) + '’s ' + (data.form || 'filing') +
                ' for the quarter ended ' + (data.period_end || '') +
-               '. Each check below shows the statement it read.');
+               '. Each check below shows the statement it read.' + shaped);
       qdRun(true);
       qdWalking = false;
     } catch (e) {
@@ -1093,6 +1202,7 @@
                                (params ? '?' + params : ''));
       const data = await resp.json();
       if (!data.available) { qdStatus(data.error || 'No filing found.', true); return; }
+      if (data.profile) qdApplyShape(data.profile);
       qdStatus('');
       qdRenderKey(data);
     } catch (e) {
@@ -1171,6 +1281,7 @@
         body: JSON.stringify({
           ticker: ticker,
           period: (qdEl('per').value || '').trim(),
+          shape: qdShape,
           figures: figures
         })
       });
@@ -1225,6 +1336,9 @@
       const resp = await fetch('/api/quarter/saved/' + id);
       const data = await resp.json();
       if (data.error) { qdStatus(data.error, true); return; }
+      // A saved bank reopens as a bank: the one stored word maps back to the
+      // same explanations, without going near EDGAR again.
+      qdApplyShape(data.shape ? (QD_SHAPES[data.shape] || null) : null);
       qdEl('co').value = data.ticker || '';
       qdEl('per').value = data.period || '';
       QD_FIELDS.forEach(k => {
@@ -1260,6 +1374,7 @@
   document.addEventListener('DOMContentLoaded', qdLoadSavedList);
 
   function qdClear() {
+    qdApplyShape(null);
     QD_FIELDS.forEach(k => { const el = qdEl(k); if (el) el.value = ''; });
     const per = qdEl('per'); if (per) per.value = '';
     qdMarkFilled();
