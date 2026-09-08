@@ -204,7 +204,7 @@ class TestTheModelIsNeverASourceOfFacts:
                          ytd_prior_end="2025-06-30")
         assert out["brief"] is None
         assert out["plain"]                 # the explanation still arrives
-        assert out["note"] and "ANTHROPIC_API_KEY" in out["note"]
+        assert out["note"] and "No ANTHROPIC_API_KEY is set" in out["note"]
         assert out["evidence"]
         assert any("data centers" in q for q in out["quotes"])
 
@@ -223,10 +223,12 @@ class TestTheModelIsNeverASourceOfFacts:
         monkeypatch.setitem(__import__("sys").modules, "anthropic",
                             type("m", (), {"Anthropic": _Client}))
         rows = qb.decompose(META, "operating_leverage", "2026-06-30", "2025-06-30")
-        assert qb.compose({"name": "Revenue vs expense growth", "verdict": "flag",
-                           "value": "+28% / +65%", "basis": "b"},
-                          rows, ["data centers"], company="Meta",
-                          period_end="2026-06-30", api_key="k") is None
+        brief, why = qb.compose({"name": "Revenue vs expense growth",
+                                 "verdict": "flag", "value": "+28% / +65%",
+                                 "basis": "b"},
+                                rows, ["data centers"], company="Meta",
+                                period_end="2026-06-30", api_key="k")
+        assert brief is None and "stop here" in why
         prompt = seen["messages"][0]["content"]
         assert "Research and development" in prompt
         assert "data centers" in prompt
@@ -245,8 +247,10 @@ class TestTheModelIsNeverASourceOfFacts:
 
         monkeypatch.setitem(__import__("sys").modules, "anthropic",
                             type("m", (), {"Anthropic": _Client}))
-        assert qb.compose({"name": "n"}, [], [], company="c",
-                          period_end="p", api_key="k") is None
+        brief, why = qb.compose({"name": "n"}, [], [], company="c",
+                                period_end="p", api_key="k")
+        assert brief is None
+        assert "prose rather than the JSON" in why
 
     def test_a_well_formed_answer_is_kept(self, monkeypatch):
         class _Msgs:
@@ -261,8 +265,9 @@ class TestTheModelIsNeverASourceOfFacts:
 
         monkeypatch.setitem(__import__("sys").modules, "anthropic",
                             type("m", (), {"Anthropic": _Client}))
-        out = qb.compose({"name": "n"}, [], [], company="c",
-                         period_end="p", api_key="k")
+        out, why = qb.compose({"name": "n"}, [], [], company="c",
+                              period_end="p", api_key="k")
+        assert why is None
         assert out["headline"] == "Data centres"
         assert out["paragraphs"] == ["a", "b"]
         assert out["grounded"] is True
@@ -304,9 +309,9 @@ def client(store, monkeypatch):
     monkeypatch.setattr(qf, "fetch_facts", lambda t: (META, "0001326801"))
     monkeypatch.setattr(qb, "filing_text", lambda cik, accn: (DISCUSSION, "url"))
     monkeypatch.setattr(qb, "compose",
-                        lambda *a, **k: {"headline": "Data centres",
-                                         "paragraphs": ["p"], "watch": ["capex"],
-                                         "grounded": True})
+                        lambda *a, **k: ({"headline": "Data centres",
+                                          "paragraphs": ["p"], "watch": ["capex"],
+                                          "grounded": True}, None))
     c = web_app.app.test_client()
     with c.session_transaction() as sess:
         sess["user_id"] = 1
@@ -637,3 +642,99 @@ class TestTheChecksWhoseStoryIsNotOneLineMoving:
             said = qb.narrate({"key": key, "name": key}, rows)
             assert said
             assert "not tagged in enough detail" not in " ".join(said), key
+
+
+class TestAFailureIsNotAnAnswerToKeepForever:
+    """The key WAS set. Every failure — a missing package, a rejected model, a
+    rate limit, an answer cut off by the token budget — surfaced as the same
+    sentence telling the reader to set the key they had already set. And the
+    failure was then written to the cache, so the fix deployed afterwards
+    changed nothing they could see."""
+
+    def _stub(self, monkeypatch, brief, why):
+        monkeypatch.setattr(qb, "compose", lambda *a, **k: (brief, why))
+
+    def test_the_reason_is_reported_not_guessed_at(self, client, monkeypatch):
+        self._stub(monkeypatch, None, "The model call failed: 404 not_found")
+        body = client.post("/api/quarter/brief",
+                           json={"ticker": "META", "check": "operating_leverage",
+                                 "figures": FLAGGING},
+                           headers={"X-CSRFToken": csrf(client)}).get_json()
+        assert "404 not_found" in body["note"]
+        assert "ANTHROPIC_API_KEY" not in body["note"]
+
+    def test_a_failure_is_never_cached(self, client, monkeypatch):
+        token = csrf(client)
+        self._stub(monkeypatch, None, "temporarily rate limited")
+        first = client.post("/api/quarter/brief",
+                            json={"ticker": "META", "check": "operating_leverage",
+                                  "figures": FLAGGING},
+                            headers={"X-CSRFToken": token}).get_json()
+        assert first["brief"] is None
+
+        self._stub(monkeypatch, {"headline": "Data centres", "paragraphs": ["p"],
+                                 "watch": [], "grounded": True}, None)
+        again = client.post("/api/quarter/brief",
+                            json={"ticker": "META", "check": "operating_leverage",
+                                  "figures": FLAGGING},
+                            headers={"X-CSRFToken": token}).get_json()
+        assert again["brief"]["headline"] == "Data centres"
+
+    def test_a_brief_from_an_older_build_is_not_served_forever(self, client, monkeypatch):
+        """Written before the filings could be reached at all."""
+        import database as _db
+        _db.save_quarter_brief("META", "2026-06-30", "operating_leverage",
+                               {"available": True, "version": 1, "quotes": [],
+                                "brief": {"headline": "stale", "paragraphs": ["x"]}})
+        self._stub(monkeypatch, {"headline": "fresh", "paragraphs": ["p"],
+                                 "watch": [], "grounded": True}, None)
+        body = client.post("/api/quarter/brief",
+                           json={"ticker": "META", "check": "operating_leverage",
+                                 "figures": FLAGGING},
+                           headers={"X-CSRFToken": csrf(client)}).get_json()
+        assert body["brief"]["headline"] == "fresh"
+
+    def test_an_answer_cut_off_by_the_budget_says_so(self, monkeypatch):
+        class _Msgs:
+            def create(self, **kw):
+                return type("r", (), {
+                    "content": [type("b", (), {"text": '{"headline": "Data cen'})()],
+                    "stop_reason": "max_tokens"})()
+
+        class _Client:
+            def __init__(self, api_key=None):
+                self.messages = _Msgs()
+
+        monkeypatch.setitem(__import__("sys").modules, "anthropic",
+                            type("m", (), {"Anthropic": _Client}))
+        brief, why = qb.compose({"name": "n"}, [], [], company="c",
+                                period_end="p", api_key="k")
+        assert brief is None
+        assert "cut off by the token budget" in why
+
+    def test_the_budget_is_big_enough_for_what_is_asked_for(self):
+        """A headline, three paragraphs and three watch items, as JSON."""
+        assert qb.MAX_TOKENS >= 2000
+
+    def test_a_missing_package_says_which(self, monkeypatch):
+        import builtins
+        real = builtins.__import__
+
+        def _no_anthropic(name, *a, **k):
+            if name == "anthropic":
+                raise ImportError("No module named 'anthropic'")
+            return real(name, *a, **k)
+
+        monkeypatch.setattr(builtins, "__import__", _no_anthropic)
+        brief, why = qb.compose({"name": "n"}, [], [], company="c",
+                                period_end="p", api_key="k")
+        assert brief is None
+        assert "anthropic package is not installed" in why
+
+    def test_no_quotes_says_so_rather_than_showing_nothing(self, monkeypatch):
+        monkeypatch.setattr(qb, "filing_text", lambda cik, accn: ("", None))
+        out = qb.explain("META", {"key": "gross_margin", "name": "Gross margin",
+                                  "verdict": "watch", "value": "81%"},
+                         facts=META, cik="1", accn="a", api_key="",
+                         period_end="2026-06-30", prior_end="2025-06-30")
+        assert out["quotes_note"] and "could not be read" in out["quotes_note"]

@@ -8576,7 +8576,11 @@ def api_quarter_brief():
 
     period_end = filed.get("period_end") or ""
     cached = get_quarter_brief(ticker, period_end, wanted)
-    if cached:
+    # A brief written by an older build — before the filings could be reached
+    # at all, or while the model call was failing silently — is not worth
+    # serving forever. Only a complete one from the current build is a hit.
+    if cached and cached.get("version") == quarter_brief.BRIEF_VERSION \
+            and cached.get("brief"):
         return jsonify(cached)
 
     fields = filed.get("fields") or {}
@@ -8598,10 +8602,14 @@ def api_quarter_brief():
 
     out["company"] = filed.get("company")
     out["cached"] = False
-    try:
-        save_quarter_brief(ticker, period_end, wanted, out)
-    except Exception as exc:
-        logger.warning("could not keep the brief for %s: %s", ticker, exc)
+    # Only a complete brief is kept. Caching a failure made every later press
+    # replay the first bad answer, so a fix deployed afterwards changed
+    # nothing the reader could see.
+    if out.get("brief"):
+        try:
+            save_quarter_brief(ticker, period_end, wanted, out)
+        except Exception as exc:
+            logger.warning("could not keep the brief for %s: %s", ticker, exc)
     return jsonify(out)
 
 

@@ -1322,6 +1322,7 @@
 
     const foot = [];
     if (d.note) foot.push(d.note);
+    if (d.quotes_note) foot.push(d.quotes_note);
     if (b && b.grounded === false) {
       foot.push('The filing did not explain this line directly, so the summary ' +
                 'is working from the numbers alone.');

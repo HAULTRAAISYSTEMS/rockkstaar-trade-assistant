@@ -45,7 +45,16 @@ import quarter_facts as qf
 logger = logging.getLogger(__name__)
 
 MODEL = "claude-sonnet-4-6"
-MAX_TOKENS = 1000
+# A headline, three paragraphs and three watch items, as JSON. At 1000 the
+# object was being cut off mid-string, json.loads threw, and the whole brief
+# came back as if no key were configured.
+MAX_TOKENS = 2200
+
+# Stamped into every cached brief. A brief written by an older build — before
+# the filing could be reached at all, or while the model call was failing
+# silently — is not worth serving forever, so a bumped version misses the
+# cache and is written again.
+BRIEF_VERSION = 3
 
 # The filing document is fetched whole and can be tens of megabytes of inline
 # XBRL. Past this it is not worth the wait on a small dyno.
@@ -768,10 +777,18 @@ def _evidence_block(rows):
 
 
 def compose(check: dict, rows: list[dict], quotes: list[str], *,
-            company: str, period_end: str, api_key: str | None) -> dict | None:
-    """Three or four sentences over the evidence. None when no key is set."""
+            company: str, period_end: str, api_key: str | None):
+    """(brief, why_not). Every failure says what happened.
+
+    This used to swallow everything and return None, so a missing package, a
+    rejected model name, a rate limit and a response cut off by the token
+    budget all surfaced to the reader as the same sentence: that no API key
+    was configured. The key was configured. Whatever goes wrong now, it says
+    so.
+    """
     if not api_key:
-        return None
+        return None, ("No ANTHROPIC_API_KEY is set on this server, so the "
+                      "filing's own account of this is not available.")
     import json as _json
 
     prompt = f"""Company: {company}
@@ -800,31 +817,53 @@ Write JSON with these keys and nothing else:
 
     try:
         import anthropic
+    except ImportError:
+        return None, ("The anthropic package is not installed on this server, "
+                      "so the filing's own account of this is not available.")
+
+    try:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model=MODEL, max_tokens=MAX_TOKENS, system=SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = "".join(getattr(b, "text", "") for b in response.content).strip()
     except Exception as exc:
         logger.warning("quarter brief: model call failed: %s", exc)
-        return None
+        return None, f"The model call failed: {exc}"
+
+    text = "".join(getattr(b, "text", "") for b in response.content).strip()
+    stopped = getattr(response, "stop_reason", None)
+    if not text:
+        return None, f"The model returned nothing (stop reason: {stopped})."
+
+    # Truncation first. A JSON object cut off mid-string has no closing brace,
+    # so the "did it answer in prose" test fires and reports the wrong fault.
+    if stopped == "max_tokens":
+        logger.warning("quarter brief: answer truncated at %d tokens", MAX_TOKENS)
+        return None, ("The answer was cut off by the token budget before it "
+                      "was complete.")
 
     match = re.search(r"\{.*\}", text, re.S)
     if not match:
-        return None
+        logger.warning("quarter brief: no JSON in the answer (%s)", text[:200])
+        return None, "The model answered in prose rather than the JSON asked for."
     try:
         out = _json.loads(match.group(0))
-    except ValueError:
-        return None
+    except ValueError as exc:
+        logger.warning("quarter brief: unparseable answer (%s): %s", stopped, exc)
+        return None, f"The model's answer would not parse: {exc}"
     if not isinstance(out, dict):
-        return None
-    return {
+        return None, "The model's answer was not an object."
+
+    brief = {
         "headline": str(out.get("headline") or "").strip(),
         "paragraphs": [str(p).strip() for p in (out.get("paragraphs") or []) if str(p).strip()],
         "watch": [str(w).strip() for w in (out.get("watch") or []) if str(w).strip()],
         "grounded": bool(out.get("grounded")),
     }
+    if not brief["paragraphs"]:
+        return None, "The model returned no paragraphs."
+    return brief, None
 
 
 # ── Putting it together ───────────────────────────────────────────────────────
@@ -848,9 +887,10 @@ def explain(ticker: str, check: dict, *, facts: dict, cik: str | None,
             total += len(quote)
         quotes = kept
 
-    brief = compose(check, rows, quotes,
-                    company=(facts or {}).get("entityName") or ticker.upper(),
-                    period_end=period_end, api_key=api_key)
+    brief, why_not = compose(
+        check, rows, quotes,
+        company=(facts or {}).get("entityName") or ticker.upper(),
+        period_end=period_end, api_key=api_key)
 
     return {
         "available": True,
@@ -867,8 +907,12 @@ def explain(ticker: str, check: dict, *, facts: dict, cik: str | None,
         "quotes": quotes,
         "filing_url": url,
         "brief": brief,
+        "version": BRIEF_VERSION,
+        # Said plainly. Guessing at the reason is what sent the reader to
+        # check an API key that was already set.
         "note": None if brief else (
-            "Written from the figures in the filing. Set ANTHROPIC_API_KEY on "
-            "the server and the brief also carries what management said about "
-            "them, in their own words."),
+            "Written from the figures in the filing. " + (why_not or "")),
+        "quotes_note": None if quotes else (
+            "Management's own discussion of this could not be read out of the "
+            "filing document."),
     }
