@@ -1135,7 +1135,21 @@
     try {
       const resp = await fetch('/api/quarter/walkthrough/' + encodeURIComponent(ticker));
       const data = await resp.json();
-      if (!data.available) { qdStatus(data.error || 'No filing found.', true); return; }
+      if (!data.available) {
+        // Why this ticker cannot be read is often a paragraph — SKHY is a
+        // Korean ADR that files 6-Ks under IFRS, not a 10-Q — and a paragraph
+        // does not fit on a status line.
+        qdStatus('Nothing quarterly to read for ' + ticker + '.', true);
+        qdApplyShape(null);
+        document.getElementById('q-results').innerHTML =
+          '<h3>' + qdEsc(ticker) + '</h3>' +
+          '<div class="qd-item is-na"><div class="qd-top">' +
+          '<span class="qd-name">No quarterly filing to read</span>' +
+          '<span class="qd-val"><span class="qd-badge qd-na-badge">Not an SEC quarterly filer</span></span>' +
+          '</div><p class="qd-says">' + qdEsc(data.error || 'No filing found.') +
+          '</p></div>';
+        return;
+      }
 
       qdStatements = data;
       qdApplyShape(data.profile);

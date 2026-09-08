@@ -384,8 +384,25 @@ _NA_NO_DSO = ("Days sales outstanding measures how long a customer takes to "
               "pay an invoice. This company does not sell on invoice terms, "
               "so there is no collection cycle to measure.")
 
+# Morgan Stanley's operating cash flow for the six months to June 2026 was
+# NEGATIVE 9.8 billion against 11.1 billion of net income, and there is
+# nothing wrong with the company. A dealer's operating section is dominated
+# by changes in trading inventory; a bank's by loan origination and deposit
+# flows. The figure swings tens of billions between quarters and says nothing
+# about earnings quality, which is the only thing this check was asking.
+# Grading it "Flag" taught the exact opposite of the truth.
+_NA_FINANCIAL_CASH = (
+    "Operating cash flow at a financial firm is dominated by changes in "
+    "trading inventory, loans and deposits, not by whether profits turn into "
+    "cash. It swings tens of billions between quarters and can be deeply "
+    "negative in a strong one \u2014 Morgan Stanley's was minus 9.8 billion "
+    "in the first half of 2026 on 11.1 billion of profit. Nothing is wrong "
+    "there; the ratio is simply measuring something else.")
+
 SHAPE_NOT_APPLICABLE = {
     "bank": {
+        "cash_conversion": _NA_FINANCIAL_CASH + " Read return on tangible "
+                           "common equity and the efficiency ratio instead.",
         "gross_margin": _NA_NO_COGS + " A bank's equivalent question is net "
                         "interest margin: what it earns on assets minus what "
                         "it pays for funding.",
@@ -400,6 +417,9 @@ SHAPE_NOT_APPLICABLE = {
                            "instead of free cash flow."),
     },
     "insurer": {
+        "cash_conversion": _NA_FINANCIAL_CASH + " For an insurer the cash "
+                           "arrives with the premium and leaves with the "
+                           "claim, years apart.",
         "gross_margin": _NA_NO_COGS + " An insurer's equivalent is the combined "
                         "ratio: claims plus expenses against premiums earned. "
                         "Below 100% means the underwriting itself made money.",
@@ -513,6 +533,97 @@ def fetch_facts(ticker: str) -> tuple[dict | None, str | None]:
     except Exception as exc:
         logger.warning("quarter facts: fetch failed for %s: %s", ticker, exc)
         return None, cik
+
+
+# ── When there is nothing to read ─────────────────────────────────────────────
+#
+# "No quarterly filing found for SKHY" is true and useless. SKHY is SK hynix,
+# a Korean company that listed an ADR on Nasdaq in July 2026: it is a foreign
+# private issuer, so it files a 20-F once a year and 6-K interim reports, and
+# it reports under IFRS rather than US GAAP. Its SEC company facts contain
+# nothing but filing-fee data. No amount of extra tag coverage will ever make
+# that readable, and a reader who is told only "not found" will reasonably
+# assume the app is broken and try again.
+#
+# So the failure says which of these it is, and names the forms the company
+# actually files, so the next question is obvious.
+
+_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+
+# Forms a foreign private issuer files instead of the 10-Q and 10-K.
+FOREIGN_FORMS = {"20-F", "20-F/A", "40-F", "40-F/A", "6-K", "6-K/A",
+                 "F-1", "F-1/A", "F-3", "F-3/A", "F-4", "F-6", "F-10"}
+DOMESTIC_QUARTERLY = {"10-Q", "10-Q/A"}
+
+
+def _recent_forms(cik: str) -> list[str]:
+    """The form types this filer has actually submitted, newest first."""
+    if not cik:
+        return []
+    try:
+        import fundamentals_engine as fe
+        resp = fe._req_module.get(_SUBMISSIONS_URL.format(cik=cik),
+                                  timeout=10, headers=fe._EDGAR_HEADERS)
+        if resp.status_code != 200:
+            return []
+        recent = ((resp.json().get("filings") or {}).get("recent") or {})
+        seen, out = set(), []
+        for form in (recent.get("form") or []):
+            if form not in seen:
+                seen.add(form)
+                out.append(form)
+        return out
+    except Exception as exc:
+        logger.warning("quarter facts: submissions lookup failed for %s: %s",
+                       cik, exc)
+        return []
+
+
+def _listed(forms, limit=4):
+    return ", ".join(forms[:limit]) if forms else ""
+
+
+def explain_gap(ticker: str, facts: dict | None, cik: str | None) -> str:
+    """Why this ticker has no quarter to read, in the reader's terms."""
+    ticker = (ticker or "").upper()
+
+    if not cik:
+        return (f"{ticker} is not in the SEC's list of registered filers. ETFs, "
+                "index funds, trusts, and many foreign and over-the-counter "
+                "listings never file with the SEC at all, so there is no 10-Q "
+                "behind them to read. The drill works on US-listed operating "
+                "companies that file quarterly.")
+
+    us_gaap = ((facts or {}).get("facts") or {}).get("us-gaap") or {}
+    name = (facts or {}).get("entityName") or ticker
+    forms = _recent_forms(cik)
+    foreign = [f for f in forms if f in FOREIGN_FORMS]
+
+    if not us_gaap:
+        if foreign:
+            return (f"{name} is a foreign private issuer. It files "
+                    f"{_listed(foreign)} with the SEC \u2014 a 20-F once a year "
+                    "and 6-K interim reports \u2014 not the quarterly 10-Q this "
+                    "drill reads, and it reports under IFRS rather than US "
+                    "GAAP, so there is no tagged quarterly data here at all. "
+                    "Its numbers are published on its own investor-relations "
+                    "site on its home market's calendar.")
+        return (f"{name} has filed with the SEC"
+                + (f" ({_listed(forms)})" if forms else "")
+                + ", but has no tagged US GAAP financial data. That is usual "
+                  "for a company that has only registered so far and not yet "
+                  "filed its first financial report.")
+
+    if forms and not any(f in DOMESTIC_QUARTERLY for f in forms):
+        return (f"{name} files US GAAP figures"
+                + (f" ({_listed(forms)})" if forms else "")
+                + ", but no 10-Q. Some filers report only annually, and the "
+                  "drill is built on the quarterly statements.")
+
+    return (f"{name} has US GAAP data at the SEC, but no quarterly period this "
+            "could anchor on \u2014 usually a filer between its registration "
+            "and its first 10-Q, or one that tags its revenue under a name "
+            "this does not know yet.")
 
 
 def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:

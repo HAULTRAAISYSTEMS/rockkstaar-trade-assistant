@@ -8403,14 +8403,21 @@ def api_quarter_walkthrough(ticker):
     if not ticker or not ticker.replace(".", "").replace("-", "").isalnum():
         return jsonify({"available": False, "error": "Invalid ticker"}), 400
     try:
-        found = quarter_facts.walkthrough(ticker)
+        facts, cik = quarter_facts.fetch_facts(ticker)
+        found = quarter_facts.walkthrough(ticker, facts=facts, cik=cik) if facts else None
     except Exception as exc:
         logger.warning("quarter walkthrough failed for %s: %s", ticker, exc)
         return jsonify({"available": False,
                         "error": "Could not read the filing right now."})
     if not found:
-        return jsonify({"available": False,
-                        "error": f"No quarterly filing found for {ticker}."})
+        # "No quarterly filing found" is true and useless. Say which of the
+        # several quite different reasons it is, so the reader knows whether
+        # to try again, try another ticker, or go somewhere else entirely.
+        try:
+            why = quarter_facts.explain_gap(ticker, facts, cik)
+        except Exception:
+            why = f"No quarterly filing found for {ticker}."
+        return jsonify({"available": False, "error": why})
     return jsonify(dict(found, available=True))
 
 
@@ -8537,14 +8544,18 @@ def api_quarter_filed(ticker):
 
     typed = quarter_checks.parse(request.args.to_dict())
     try:
-        filed = quarter_facts.latest_quarter(ticker)
+        facts, cik = quarter_facts.fetch_facts(ticker)
+        filed = quarter_facts.latest_quarter(ticker, facts=facts) if facts else None
     except Exception as exc:
         logger.warning("quarter filed lookup failed for %s: %s", ticker, exc)
         return jsonify({"available": False,
                         "error": "Could not read the filing right now."})
     if not filed:
-        return jsonify({"available": False,
-                        "error": f"No quarterly XBRL data found for {ticker}."})
+        try:
+            why = quarter_facts.explain_gap(ticker, facts, cik)
+        except Exception:
+            why = f"No quarterly XBRL data found for {ticker}."
+        return jsonify({"available": False, "error": why})
     return jsonify(quarter_facts.compare(typed, filed))
 
 

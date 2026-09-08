@@ -157,7 +157,7 @@ class TestTheChecksABankHasNoLinesFor:
                 for c in qc.run(figures, filed["profile"])["checks"]}
 
     @pytest.mark.parametrize("key", ["gross_margin", "current_ratio", "dso",
-                                     "free_cash_flow"])
+                                     "free_cash_flow", "cash_conversion"])
     def test_it_does_not_apply_rather_than_waiting(self, graded, key):
         assert graded[key]["applies"] is False
         assert graded[key]["skipped"] is None
@@ -169,9 +169,8 @@ class TestTheChecksABankHasNoLinesFor:
         assert "charge-offs" in graded["dso"]["why"]
         assert "CET1" in graded["free_cash_flow"]["why"]
 
-    def test_the_three_that_do_apply_still_grade(self, graded):
-        for key in ("cash_conversion", "operating_leverage"):
-            assert graded[key]["verdict"], key
+    def test_the_ones_that_do_apply_still_grade(self, graded):
+        assert graded["operating_leverage"]["verdict"]
 
     def test_revenue_and_expenses_come_from_the_bank_s_own_tags(self):
         filed = qf.latest_quarter("JPM", facts=BANK)
@@ -199,7 +198,7 @@ class TestTheChecksABankHasNoLinesFor:
         filed = qf.latest_quarter("JPM", facts=BANK)
         figures = {k: v["value"] for k, v in filed["fields"].items()}
         result = qc.run(figures, filed["profile"])
-        assert result["counts"]["n_a"] == 4
+        assert result["counts"]["n_a"] == 5
         assert "do not apply" in result["summary"]
 
 
@@ -293,3 +292,78 @@ class TestTheNamesAreKeptInOnePlace:
             assert ctx["shape"] == shape
             assert ctx["shape_label"]
             assert isinstance(ctx["not_applicable"], dict)
+
+
+class TestWhenThereIsNothingToRead:
+    """"No quarterly filing found for SKHY" is true and useless.
+
+    SKHY is SK hynix, a Korean company whose ADR listed on Nasdaq in July
+    2026. It is a foreign private issuer: 20-F once a year, 6-K interim,
+    IFRS rather than US GAAP, and SEC company facts holding nothing but
+    filing-fee data. Told only "not found", a reader reasonably concludes the
+    app is broken and types it again.
+    """
+
+    def test_a_ticker_the_sec_has_never_heard_of(self):
+        why = qf.explain_gap("SPYX", None, None)
+        assert "ETFs" in why and "SPYX" in why
+
+    def test_a_foreign_private_issuer_is_named_as_one(self, monkeypatch):
+        monkeypatch.setattr(qf, "_recent_forms",
+                            lambda cik: ["6-K", "424B4", "F-1", "F-6"])
+        skhy = {"entityName": "SK hynix Inc.", "facts": {"ffd": {}}}
+        why = qf.explain_gap("SKHY", skhy, "0002120882")
+        assert "foreign private issuer" in why
+        assert "20-F" in why and "6-K" in why
+        assert "IFRS" in why
+
+    def test_a_registrant_with_no_financials_yet(self, monkeypatch):
+        monkeypatch.setattr(qf, "_recent_forms", lambda cik: ["S-1", "8-A12B"])
+        why = qf.explain_gap("NEWCO", {"entityName": "Newco, Inc.",
+                                       "facts": {"dei": {}}}, "0001111111")
+        assert "not yet" in why
+
+    def test_an_annual_only_filer(self, monkeypatch):
+        monkeypatch.setattr(qf, "_recent_forms", lambda cik: ["20-F", "6-K"])
+        annual = facts("Annual Only Ltd.", duration(
+            "Revenues", [("2025-01-01", "2025-12-31", 100, "2026-02-01")]))
+        why = qf.explain_gap("ANN", annual, "0002222222")
+        assert "no 10-Q" in why
+
+    def test_the_lookup_never_takes_the_page_down_with_it(self, monkeypatch):
+        def boom(cik):
+            raise RuntimeError("EDGAR is having a day")
+        monkeypatch.setattr(qf, "_recent_forms", boom)
+        with pytest.raises(RuntimeError):
+            qf.explain_gap("X", {"facts": {}}, "1")
+
+
+class TestAFinancialFirmsCashFlow:
+    """Morgan Stanley's operating cash flow for the six months to June 2026
+    was minus 9.8 billion against 11.1 billion of profit, and nothing is
+    wrong with the company. A dealer's operating section is trading
+    inventory. Grading that "Flag" taught the opposite of the truth."""
+
+    def test_it_does_not_apply_at_a_bank(self):
+        na = qf.context_for("bank")["not_applicable"]
+        assert "cash_conversion" in na
+        assert "trading inventory" in na["cash_conversion"]
+        assert "return on tangible common equity" in na["cash_conversion"]
+
+    def test_it_does_not_apply_at_an_insurer(self):
+        assert "cash_conversion" in qf.context_for("insurer")["not_applicable"]
+
+    def test_a_reit_keeps_it(self):
+        """Operating cash flow is exactly what funds from operations is
+        built from, so it stays."""
+        assert "cash_conversion" not in qf.context_for("reit")["not_applicable"]
+
+    def test_an_ordinary_company_keeps_it(self):
+        assert "cash_conversion" not in qf.context_for("operating")["not_applicable"]
+
+    def test_negative_operating_cash_flow_is_no_longer_graded_at_a_bank(self):
+        result = qc.run({"cfo": -9845e6, "niy": 11148e6},
+                        qf.context_for("bank"))
+        check = [c for c in result["checks"] if c["key"] == "cash_conversion"][0]
+        assert check["applies"] is False
+        assert check["verdict"] is None

@@ -493,12 +493,23 @@ class TestTheWalkthroughEndpoint:
             yield c
 
     def test_it_returns_figures_and_statements_together(self, client):
+        """The route fetches the document itself now, so that a filing it
+        cannot read can be explained rather than merely reported missing."""
         from unittest.mock import patch
-        with patch.object(qf, "walkthrough", return_value=qf.walkthrough("META", facts=meta_facts())):
+        with patch.object(qf, "fetch_facts",
+                          return_value=(meta_facts(), "0001326801")):
             body = client.get("/api/quarter/walkthrough/META").get_json()
         assert body["available"] is True
         assert body["figures"]["rev"] == 60801
         assert body["statements"]["income"]["rows"]
+
+    def test_a_filing_it_cannot_read_says_which_kind_of_nothing(self):
+        """"No quarterly filing found" is true and useless."""
+        from unittest.mock import patch
+        with patch.object(qf, "_recent_forms", return_value=["6-K", "F-1"]):
+            why = qf.explain_gap("SKHY", {"entityName": "SK hynix Inc.",
+                                          "facts": {"ffd": {}}}, "0002120882")
+        assert "foreign private issuer" in why
 
     def test_the_document_is_fetched_once_for_both_halves(self):
         """It is tens of megabytes; twice would double the slowest step."""
