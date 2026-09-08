@@ -1484,6 +1484,21 @@
   color: var(--elite-muted);
   border-bottom: 1px solid var(--elite-hairline);
 }
+/* Nine-figure numbers in a monospace column run into each other without
+   somewhere to breathe: "109,417,000,00094,036,000,000+16.4%" was one cell
+   touching the next. */
+.fundamentals-shell .qd-why-tbl td.qd-stmt-num,
+.fundamentals-shell .qd-why-tbl th:not(:first-child) {
+  padding-left: 16px;
+  text-align: right;
+  white-space: nowrap;
+}
+.fundamentals-shell .qd-why-tbl td:first-child { padding-right: 8px; }
+.fundamentals-shell .qd-why-tbl { table-layout: auto; }
+@media (max-width: 760px) {
+  .fundamentals-shell .qd-why-tbl { font-size: 10.5px; }
+  .fundamentals-shell .qd-why-tbl td.qd-stmt-num { padding-left: 9px; }
+}
 .fundamentals-shell .qd-why-tbl tr.is-lit td {
   color: var(--ink-050);
   font-weight: 600;

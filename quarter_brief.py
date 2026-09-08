@@ -55,6 +55,22 @@ MAX_QUOTES = 6
 
 _ARCHIVE = "https://www.sec.gov/Archives/edgar/data/{cik}/{accn}/"
 
+# Its own headers, deliberately. fundamentals_engine pins Host: data.sec.gov,
+# which is right for the XBRL API and silently fatal here: the filings live on
+# www.sec.gov, and a request carrying the wrong Host is routed by that header,
+# not by the URL. Both the file index and the document came back empty every
+# time, so every brief showed its table and no filing at all.
+_HEADERS = {
+    "User-Agent": "Tradestaar Elite (contact@haultra.ai)",
+    "Accept-Encoding": "gzip, deflate",
+}
+
+# The XBRL viewer renders every statement as R1.htm, R2.htm and so on, and
+# the certifications come as exhibits. Matching those by prefix threw away
+# the 10-Q of any company whose ticker begins with an r or an e.
+_VIEWER_PAGE = re.compile(r"^r\d+\.html?$", re.I)
+_EXHIBIT = re.compile(r"(^|[-_])ex[-_]?\d|cert|graphic", re.I)
+
 
 # ── 1. What actually moved ────────────────────────────────────────────────────
 #
@@ -174,7 +190,235 @@ def decompose(facts: dict, check_key: str, period_end: str,
             "change": _growth(now.get("value"), (prior or {}).get("value")),
             "tag": now.get("tag"),
         })
+
+    _add_derived_opex(facts, rows, check_key, period_end, prior_end)
     return rows
+
+
+def _add_derived_opex(facts, rows, check_key, period_end, prior_end):
+    """The operating-expense subtotal a filer never printed.
+
+    Meta files one "Total costs and expenses" that includes cost of revenue,
+    so without this the evidence has no subtotal for the components to be a
+    share OF, and the reader is told which line moved but not how much of the
+    increase it was. The form already shows this derivation; the brief should
+    agree with the form.
+    """
+    if check_key != "operating_leverage":
+        return
+    if any(r["label"] == "Total operating expenses" for r in rows):
+        return
+
+    def _pair(tags, end):
+        return (qf._pick(facts, tags, window=qf.QUARTER_DAYS, end=end)
+                if end == period_end else
+                qf._pick(facts, tags, window=qf.QUARTER_DAYS, near=end,
+                         slack=qf.PERIOD_SLACK_DAYS))
+
+    def _less(period):
+        total = _pair(["CostsAndExpenses"], period)
+        cogs = _pair(qf.QUARTER_TAGS["cogs"][1], period)
+        if not total or not cogs or total.get("end") != cogs.get("end"):
+            return None
+        try:
+            return float(total["value"]) - float(cogs["value"])
+        except (TypeError, ValueError):
+            return None
+
+    now = _less(period_end)
+    if now is None:
+        return
+    prior = _less(prior_end) if prior_end else None
+    row = {"label": "Total operating expenses", "now": now, "prior": prior,
+           "change": _growth(now, prior), "derived": True,
+           "tag": "CostsAndExpenses less cost of revenue"}
+    # Where the subtotal belongs on a statement: after its components.
+    after = max((i for i, r in enumerate(rows)
+                 if r["label"] in ("Cost of revenue", "Research and development",
+                                   "Sales and marketing",
+                                   "General and administrative")), default=-1)
+    rows.insert(after + 1, row)
+
+
+# ── 1b. The explanation the arithmetic already supports ───────────────────────
+#
+# The first version left the reader with a table and an apology when no model
+# was configured, which is not what they asked for. They asked why.
+#
+# Most of "why" is arithmetic. If operating expenses grew 22.9% and research
+# and development grew 32.3% and accounts for two thirds of the increase in
+# money, then research and development is the answer, and no language model is
+# required to notice it. If capital expenditure and depreciation are both
+# climbing steeply, the money is going into physical capacity; if capex is
+# falling, it is not a build-out. If operating income grew anyway, the
+# spending is being carried.
+#
+# So this is written from the figures, always, with or without a key. It never
+# names a cause it cannot compute — it will say the filing has to be read for
+# that — and the model, when configured, adds what management actually said on
+# top of it.
+
+# The subtotal each check is about, and the lines that add up to it.
+DRIVERS = {
+    # Cost of revenue is NOT one of these. Every filer presents operating
+    # expenses net of it — Apple's 19,075 excludes a 54,647 cost of revenue,
+    # and Meta's is literally total costs LESS cost of revenue. Counting it as
+    # a component made it the "biggest mover" of a subtotal it is not inside,
+    # and the share of the change came out over 100%.
+    "operating_leverage": ("Total operating expenses",
+                           ["Research and development", "Sales and marketing",
+                            "General and administrative"]),
+    "gross_margin": ("Cost of revenue", []),
+    "cash_conversion": ("Cash from operations, year to date", []),
+    "free_cash_flow": ("Cash from operations, year to date", []),
+    "current_ratio": ("Total current liabilities",
+                      ["Accounts payable", "Debt due within a year"]),
+    "dso": ("Accounts receivable", []),
+    "share_count": ("Diluted share count", []),
+}
+
+
+def _by_label(rows):
+    return {row["label"]: row for row in rows}
+
+
+def _pct_words(change):
+    return f"{change * 100:+.1f}%"
+
+
+def _delta(row):
+    try:
+        return float(row["now"]) - float(row["prior"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _biggest_mover(rows, parts):
+    """The line that put the most money into the change, not the biggest %.
+
+    A tiny line doubling is a bigger percentage and a smaller cause. What the
+    reader wants is the line the money actually went to.
+    """
+    best, best_size = None, 0.0
+    for label in parts:
+        row = _by_label(rows).get(label)
+        if not row:
+            continue
+        moved = _delta(row)
+        if moved is None:
+            continue
+        if abs(moved) > best_size:
+            best, best_size = row, abs(moved)
+    return best
+
+
+def narrate(check: dict, rows: list[dict]) -> list[str]:
+    """Why this graded the way it did, from the figures alone."""
+    key = check.get("key") or ""
+    lookup = _by_label(rows)
+    total_label, parts = DRIVERS.get(key, (None, []))
+    out = []
+
+    # 1. The line that moved the money.
+    total = lookup.get(total_label) if total_label else None
+    mover = _biggest_mover(rows, parts)
+    if mover and total:
+        share = None
+        total_moved, mover_moved = _delta(total), _delta(mover)
+        if total_moved and mover_moved is not None and total_moved != 0:
+            share = mover_moved / total_moved
+        line = (f"{mover['label']} is the line that moved: "
+                f"{_fmt(mover['prior'])} to {_fmt(mover['now'])}, "
+                f"{_pct_words(mover['change'])}.")
+        if share is not None and 0 < share <= 1.2:
+            line += (f" That one line is {share * 100:.0f}% of the whole "
+                     f"change in {total_label.lower()}.")
+        out.append(line)
+    elif mover:
+        out.append(f"{mover['label']} moved most: {_fmt(mover['prior'])} to "
+                   f"{_fmt(mover['now'])}, {_pct_words(mover['change'])}.")
+
+    # 2. Is this building something, or is it just costing more? Capital
+    #    spending and depreciation answer that without anybody's opinion.
+    capex = lookup.get("Capital expenditure, year to date")
+    dep = lookup.get("Depreciation and amortization, year to date")
+    if capex and capex.get("change") is not None:
+        moved = capex["change"]
+        if moved >= 0.25:
+            said = (f"Capital expenditure is {_pct_words(moved)} year to date, "
+                    f"at {_fmt(capex['now'])}")
+            if dep and dep.get("change") is not None:
+                said += (f", and depreciation {_pct_words(dep['change'])} behind "
+                         "it — capacity that was bought earlier arriving on the "
+                         "income statement")
+            said += (". Money on that scale goes into physical capacity: "
+                     "buildings, equipment, data centres. The filing names what "
+                     "it was.")
+            out.append(said)
+        elif moved <= -0.15:
+            out.append(
+                f"Capital expenditure is {_pct_words(moved)} year to date, at "
+                f"{_fmt(capex['now'])}, so this is not a build-out quarter. "
+                "Whatever grew, it was not the cost of new capacity.")
+
+    # 3. Did it still work? A cost line growing is only a problem if the
+    #    profit it was supposed to produce did not follow.
+    op = lookup.get("Operating income")
+    if op and op.get("change") is not None:
+        if op["change"] > 0:
+            out.append(
+                f"Operating income still grew {op['change'] * 100:.1f}%, so "
+                "the extra spending is being carried rather than eating the "
+                "business. Costs outrunning sales matters when profit stops "
+                "growing; here it has not.")
+        else:
+            out.append(
+                f"Operating income fell {abs(op['change']) * 100:.1f}%. The "
+                "spending is not being carried this quarter, which is what "
+                "turns a cost increase from an investment into a problem "
+                "worth naming.")
+
+    # Check-specific closers where the arithmetic says something particular.
+    if key == "dso":
+        ar, rev = lookup.get("Accounts receivable"), lookup.get("Revenue")
+        if ar and rev and ar.get("change") is not None and rev.get("change") is not None:
+            gap = ar["change"] - rev["change"]
+            out.append(
+                f"Receivables moved {_pct_words(ar['change'])} against revenue "
+                f"{_pct_words(rev['change'])}. "
+                + ("Receivables growing faster than sales is the pattern to "
+                   "watch: it means the sales are being made but the cash is "
+                   "arriving later."
+                   if gap > 0.05 else
+                   "Receivables are not outrunning sales, so the collection "
+                   "cycle is holding."))
+    if key == "share_count":
+        buyback = lookup.get("Share repurchases, year to date")
+        sbc = lookup.get("Stock-based compensation, year to date")
+        if buyback and sbc and buyback.get("now") and sbc.get("now"):
+            out.append(
+                f"They spent {_fmt(buyback['now'])} buying stock back against "
+                f"{_fmt(sbc['now'])} issued as compensation. The share count "
+                "is the net of those two, which is why it moves so little "
+                "either way.")
+    if key == "free_cash_flow":
+        cfo, capex_row = lookup.get("Cash from operations, year to date"), capex
+        if cfo and capex_row and cfo.get("now") is not None and capex_row.get("now") is not None:
+            try:
+                left = float(cfo["now"]) - abs(float(capex_row["now"]))
+                out.append(
+                    f"{_fmt(cfo['now'])} came in from operations and "
+                    f"{_fmt(abs(float(capex_row['now'])))} went straight back "
+                    f"out into assets, leaving {_fmt(left)}. That remainder is "
+                    "what pays dividends, buybacks and debt.")
+            except (TypeError, ValueError):
+                pass
+
+    if not out:
+        out.append(
+            "The lines underneath this check were not tagged in enough detail "
+            "to say which one moved. The filing itself is the place to look.")
+    return out
 
 
 # ── 2. What the company said about it ─────────────────────────────────────────
@@ -313,7 +557,7 @@ def _primary_document(cik: str, accn: str) -> str | None:
     base = _ARCHIVE.format(cik=str(cik).lstrip("0"), accn=accn.replace("-", ""))
     try:
         resp = fe._req_module.get(base + "index.json", timeout=15,
-                                  headers=fe._EDGAR_HEADERS)
+                                  headers=_HEADERS)
         if resp.status_code != 200:
             return None
         items = ((resp.json().get("directory") or {}).get("item") or [])
@@ -327,8 +571,9 @@ def _primary_document(cik: str, accn: str) -> str | None:
         if not name.lower().endswith((".htm", ".html")):
             continue
         low = name.lower()
-        # Exhibits, certifications and the XBRL viewer shell are not the 10-Q.
-        if low.startswith(("ex", "r")) or "cert" in low or low == "index.htm":
+        if _VIEWER_PAGE.match(low) or _EXHIBIT.search(low):
+            continue
+        if "index" in low or low.startswith("filingsummary"):
             continue
         try:
             size = int(item.get("size") or 0)
@@ -348,7 +593,7 @@ def filing_text(cik: str, accn: str) -> tuple[str, str | None]:
         return "", None
     import fundamentals_engine as fe
     try:
-        resp = fe._req_module.get(url, timeout=30, headers=fe._EDGAR_HEADERS)
+        resp = fe._req_module.get(url, timeout=30, headers=_HEADERS)
         if resp.status_code != 200:
             return "", url
         raw = resp.content or b""
@@ -488,11 +733,15 @@ def explain(ticker: str, check: dict, *, facts: dict, cik: str | None,
         "verdict": check.get("verdict"),
         "period_end": period_end,
         "evidence": rows,
+        # Written from the figures, always. Most of "why" is arithmetic, and
+        # a reader who pressed a button labelled "why is this flagged" should
+        # never be handed a table and an apology.
+        "plain": narrate(check, rows),
         "quotes": quotes,
         "filing_url": url,
         "brief": brief,
         "note": None if brief else (
-            "The AI summary is not configured on this server, so this is the "
-            "evidence on its own: which line moved, and what the filing says "
-            "about it."),
+            "Written from the figures in the filing. Set ANTHROPIC_API_KEY on "
+            "the server and the brief also carries what management said about "
+            "them, in their own words."),
     }

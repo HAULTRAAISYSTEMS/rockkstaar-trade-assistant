@@ -1283,9 +1283,13 @@
     if (b && b.headline) {
       html += '<p class="qd-why-head">' + qdEsc(b.headline) + '</p>';
     }
-    (b && b.paragraphs ? b.paragraphs : []).forEach(p => {
-      html += '<p class="qd-why-para">' + qdEsc(p) + '</p>';
-    });
+    // The written explanation. The model's when there is one; otherwise the
+    // one the arithmetic already supports — which line moved, whether it is
+    // capacity being built, and whether profit followed anyway. Pressing a
+    // button marked "why" should never return a table and an apology.
+    const said = (b && b.paragraphs && b.paragraphs.length)
+      ? b.paragraphs : (d.plain || []);
+    said.forEach(p => { html += '<p class="qd-why-para">' + qdEsc(p) + '</p>'; });
 
     // The evidence sits under the prose, not behind it. It is the part that
     // cannot be wrong, and it is what the reader should be checking.

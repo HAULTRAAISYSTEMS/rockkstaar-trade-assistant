@@ -203,7 +203,8 @@ class TestTheModelIsNeverASourceOfFacts:
                          period_end="2026-06-30", prior_end="2025-06-30",
                          ytd_prior_end="2025-06-30")
         assert out["brief"] is None
-        assert out["note"] and "not configured" in out["note"]
+        assert out["plain"]                 # the explanation still arrives
+        assert out["note"] and "ANTHROPIC_API_KEY" in out["note"]
         assert out["evidence"]
         assert any("data centers" in q for q in out["quotes"])
 
@@ -398,3 +399,147 @@ class TestTheBriefEndpoint:
         page = client.get("/fundamentals?tab=quarter").get_data(as_text=True)
         assert "Why is this flagged?" in page
         assert "qdWhy" in page
+
+
+# ── The explanation the arithmetic already supports ──────────────────────────
+
+def _row(label, now, prior):
+    change = None if not prior else (now - prior) / abs(prior)
+    return {"label": label, "now": now, "prior": prior, "change": change, "tag": "t"}
+
+
+# Meta's June 2026 quarter: spending hard, profit down.
+BUILDING = [
+    _row("Revenue", 60801, 47516),
+    _row("Cost of revenue", 11330, 8491),
+    _row("Research and development", 21656, 12942),
+    _row("Sales and marketing", 3457, 3005),
+    _row("Total operating expenses", 30696, 18584),
+    _row("Operating income", 18775, 20441),
+    _row("Depreciation and amortization, year to date", 12440, 7900),
+    _row("Capital expenditure, year to date", 49113, 30703),
+]
+
+# Apple: same shape of flag, opposite story — capex falling, profit growing.
+CARRYING = [
+    _row("Revenue", 109417e6, 94036e6),
+    _row("Cost of revenue", 54647e6, 50318e6),
+    _row("Research and development", 11729e6, 8866e6),
+    _row("General and administrative", 2312e6, 1881e6),
+    _row("Total operating expenses", 19075e6, 15516e6),
+    _row("Operating income", 35695e6, 28202e6),
+    _row("Capital expenditure, year to date", 6799e6, 9473e6),
+]
+
+LEVERAGE = {"key": "operating_leverage", "name": "Revenue vs expense growth",
+            "verdict": "flag", "value": "+28.0% / +65.2%"}
+
+
+class TestWhyWithoutAModel:
+    """Pressing a button marked "why is this flagged" and getting a table and
+    an apology is not an answer. Most of why is arithmetic."""
+
+    def test_it_names_the_line_that_moved(self):
+        said = " ".join(qb.narrate(LEVERAGE, BUILDING))
+        assert "Research and development" in said
+        assert "+67.3%" in said
+
+    def test_it_says_how_much_of_the_increase_that_line_was(self):
+        said = " ".join(qb.narrate(LEVERAGE, BUILDING))
+        assert "72% of the whole change" in said
+
+    def test_the_biggest_mover_is_money_not_percentage(self):
+        """A small line doubling is a bigger percentage and a smaller cause."""
+        rows = [_row("Total operating expenses", 1100, 1000),
+                _row("Research and development", 990, 900),
+                _row("Sales and marketing", 20, 10)]     # +100%, and irrelevant
+        picked = qb._biggest_mover(rows, ["Research and development",
+                                          "Sales and marketing"])
+        assert picked["label"] == "Research and development"
+
+    def test_cost_of_revenue_is_not_part_of_operating_expenses(self):
+        """Apple's operating expenses exclude a cost of revenue three times
+        their size. Counting it in made it the biggest mover of a subtotal it
+        is not inside, and the share came out over 100%."""
+        assert "Cost of revenue" not in qb.DRIVERS["operating_leverage"][1]
+        said = " ".join(qb.narrate(LEVERAGE, CARRYING))
+        assert "Research and development is the line that moved" in said
+        assert "80% of the whole change" in said
+
+    def test_heavy_capital_spending_reads_as_capacity(self):
+        said = " ".join(qb.narrate(LEVERAGE, BUILDING))
+        assert "physical capacity" in said
+        assert "data centres" in said
+
+    def test_falling_capital_spending_says_the_opposite(self):
+        said = " ".join(qb.narrate(LEVERAGE, CARRYING))
+        assert "not a build-out quarter" in said
+        assert "physical capacity" not in said
+
+    def test_it_says_whether_the_spending_was_carried(self):
+        assert "not being carried" in " ".join(qb.narrate(LEVERAGE, BUILDING))
+        assert "being carried rather than eating" in " ".join(
+            qb.narrate(LEVERAGE, CARRYING))
+
+    def test_a_fall_is_not_described_as_falling_minus(self):
+        assert "fell -" not in " ".join(qb.narrate(LEVERAGE, BUILDING))
+
+    def test_it_never_invents_a_cause_it_cannot_compute(self):
+        """With nothing tagged underneath, it says so and points at the
+        filing rather than reaching for a reason."""
+        said = qb.narrate(LEVERAGE, [_row("Revenue", 10, 8)])
+        assert len(said) == 1
+        assert "not tagged in enough detail" in said[0]
+
+    def test_receivables_outrunning_sales_is_named(self):
+        said = " ".join(qb.narrate(
+            {"key": "dso", "name": "Days sales outstanding"},
+            [_row("Accounts receivable", 200, 100), _row("Revenue", 110, 100)]))
+        assert "arriving later" in said
+
+    def test_free_cash_flow_shows_what_is_left(self):
+        said = " ".join(qb.narrate(
+            {"key": "free_cash_flow", "name": "Free cash flow"},
+            [_row("Cash from operations, year to date", 64088, 49587),
+             _row("Capital expenditure, year to date", 49113, 30703)]))
+        assert "leaving 14,975" in said
+
+    def test_every_check_can_be_narrated_without_raising(self):
+        for key in qc.CHECK_NAMES:
+            assert qb.narrate({"key": key, "name": key}, BUILDING)
+            assert qb.narrate({"key": key, "name": key}, [])
+
+    def test_the_brief_carries_it_even_with_no_key(self, monkeypatch):
+        monkeypatch.setattr(qb, "filing_text", lambda cik, accn: ("", None))
+        out = qb.explain("META", dict(LEVERAGE), facts=META, cik="1", accn="a",
+                         api_key="", period_end="2026-06-30",
+                         prior_end="2025-06-30", ytd_prior_end="2025-06-30")
+        assert out["plain"]
+        assert "Research and development" in " ".join(out["plain"])
+
+
+class TestReachingTheFilingAtAll:
+    def test_it_does_not_send_the_xbrl_api_host_header_to_the_archives(self):
+        """fundamentals_engine pins Host: data.sec.gov, which is right for the
+        XBRL API and silently fatal for the filings on www.sec.gov — a request
+        is routed by that header, not by the URL. Every brief came back with
+        no filing and no link."""
+        import fundamentals_engine as fe
+        assert fe._EDGAR_HEADERS.get("Host") == "data.sec.gov"
+        assert "Host" not in qb._HEADERS
+        assert qb._HEADERS["User-Agent"]
+
+    @pytest.mark.parametrize("name, kept", [
+        ("meta-20260630.htm", True),
+        ("rgld-20260630.htm", True),        # a ticker starting with r
+        ("exas-20260630.htm", True),        # and one starting with ex
+        ("R1.htm", False),
+        ("R60.htm", False),
+        ("meta06302026-ex311.htm", False),
+        ("0001628280-26-050705-index.html", False),
+    ])
+    def test_it_picks_the_filing_not_the_viewer_pages(self, name, kept):
+        low = name.lower()
+        skipped = bool(qb._VIEWER_PAGE.match(low) or qb._EXHIBIT.search(low)
+                       or "index" in low or low.startswith("filingsummary"))
+        assert skipped is (not kept), name
