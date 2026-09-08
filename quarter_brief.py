@@ -111,12 +111,14 @@ EVIDENCE = {
         ("Revenue", qf.QUARTER_TAGS["rev"][1], "q"),
         ("Cost of revenue", qf.QUARTER_TAGS["cogs"][1], "q"),
         ("Gross profit", ["GrossProfit"], "q"),
+        ("Operating income", qf.QUARTER_TAGS["opinc"][1], "q"),
         ("Depreciation and amortization, year to date", _DA, "ytd"),
         ("Capital expenditure, year to date", qf.YTD_TAGS["capex"][1], "ytd"),
     ],
     "cash_conversion": [
         ("Net income, year to date", qf.YTD_TAGS["niy"][1], "ytd"),
         ("Cash from operations, year to date", qf.YTD_TAGS["cfo"][1], "ytd"),
+        ("Revenue, year to date", qf.YTD_TAGS["revYtd"][1], "ytd"),
         ("Depreciation and amortization, year to date", _DA, "ytd"),
         ("Stock-based compensation, year to date", _SBC, "ytd"),
         ("Accounts receivable", qf.INSTANT_TAGS["ar"][1], "instant"),
@@ -312,6 +314,118 @@ def _biggest_mover(rows, parts):
     return best
 
 
+def _cash_story(lookup) -> list[str]:
+    """Where the profit went, if it did not arrive as cash.
+
+    A cash-flow statement starts at net income and walks down to cash. The
+    walk has two kinds of step: non-cash charges added back, and the
+    balance-sheet lines that swallowed or released money. Both are in the
+    evidence, so the gap can be attributed rather than described.
+    """
+    ni = lookup.get("Net income, year to date")
+    cfo = lookup.get("Cash from operations, year to date")
+    if not ni or not cfo or ni.get("now") is None or cfo.get("now") is None:
+        return []
+    try:
+        profit, cash = float(ni["now"]), float(cfo["now"])
+    except (TypeError, ValueError):
+        return []
+    gap = profit - cash
+    if gap <= 0:
+        return [f"Cash of {_fmt(cash)} came in against {_fmt(profit)} of "
+                "reported profit. Cash ahead of profit is the normal, healthy "
+                "direction: depreciation and stock compensation are charged "
+                "against profit but never leave the building."]
+
+    out = [f"{_fmt(profit)} of profit turned into {_fmt(cash)} of cash, a gap "
+           f"of {_fmt(gap)}. That gap is the whole question here."]
+
+    adds = 0.0
+    named = []
+    for label, short in (("Depreciation and amortization, year to date", "depreciation"),
+                         ("Stock-based compensation, year to date", "stock compensation")):
+        row = lookup.get(label)
+        try:
+            if row and row.get("now") is not None:
+                adds += float(row["now"])
+                named.append(f"{short} {_fmt(row['now'])}")
+        except (TypeError, ValueError):
+            pass
+
+    absorbed = gap + adds
+    if named:
+        out.append(
+            f"Working the other way first: {' and '.join(named)} are charges "
+            "against profit that never leave the building, so they push cash "
+            f"UP by {_fmt(adds)}. Which means the balance sheet absorbed "
+            f"roughly {_fmt(absorbed)} — more than the headline gap.")
+
+    swallowed, parts = 0.0, []
+    for label, short in (("Accounts receivable", "receivables"),
+                         ("Inventories", "inventories")):
+        row = lookup.get(label)
+        moved = _delta(row) if row else None
+        if moved and moved > 0:
+            swallowed += moved
+            parts.append(f"{short} grew {_fmt(moved)}")
+    if parts:
+        line = ("And there it is: " + " and ".join(parts) + ".")
+        if absorbed > 0:
+            line += f" Together {_fmt(swallowed)}, about " \
+                    f"{min(swallowed / absorbed, 1.0) * 100:.0f}% of it."
+        line += (" Receivables are sales already booked as profit whose money "
+                 "has not arrived. Inventory is cash already spent on goods "
+                 "not yet sold. Both sit between the profit and the cash.")
+        out.append(line)
+
+        ar = lookup.get("Accounts receivable")
+        if ar and ar.get("change") is not None:
+            # Deliberately no verdict here. The receivable figures move from
+            # the last fiscal year end, matching the year-to-date cash flow,
+            # which is why they explain the gap. Revenue growth is measured
+            # against the same quarter a year earlier. Setting one percentage
+            # against the other reads like a comparison and is not one.
+            out.append(
+                f"Receivables are {_pct_words(ar['change'])} since the last "
+                "fiscal year end, the same span the cash flow covers, which "
+                "is why they account for the gap. Whether the balance is "
+                "proportionate to the sales behind it is a different question, "
+                "and it is the one Days sales outstanding answers above — that "
+                "check puts the balance against a quarter of revenue, so both "
+                "sides are on one basis. Building working capital ahead of "
+                "sales is what fast growth looks like; it turns into a problem "
+                "only when the collection cycle keeps stretching after growth "
+                "slows.")
+    return out
+
+
+def _margin_story(lookup) -> list[str]:
+    """Margin is two growth rates, and which one won."""
+    rev, cogs = lookup.get("Revenue"), lookup.get("Cost of revenue")
+    if not rev or not cogs:
+        return []
+    if rev.get("change") is None or cogs.get("change") is None:
+        return []
+    out = [f"Revenue grew {_pct_words(rev['change'])} and the cost of "
+           f"delivering it {_pct_words(cogs['change'])}. Margin is nothing "
+           "more than which of those two ran faster."]
+    spread = rev["change"] - cogs["change"]
+    if spread > 0.02:
+        out.append(
+            "Sales outran costs, so more of every dollar stayed in the "
+            "business. That is either pricing power or a cheaper mix, and the "
+            "filing is where it says which.")
+    elif spread < -0.02:
+        out.append(
+            "Costs outran sales, so each dollar of revenue is carrying more "
+            "cost than it did. Either competitors are pressing on price or "
+            "inputs got dearer — this shows up here well before it shows up "
+            "in the revenue line.")
+    else:
+        out.append("The two moved together, so the margin is holding.")
+    return out
+
+
 def narrate(check: dict, rows: list[dict]) -> list[str]:
     """Why this graded the way it did, from the figures alone."""
     key = check.get("key") or ""
@@ -319,9 +433,15 @@ def narrate(check: dict, rows: list[dict]) -> list[str]:
     total_label, parts = DRIVERS.get(key, (None, []))
     out = []
 
-    # 1. The line that moved the money.
+    # 1. The line that moved the money — or, where the story is not "one
+    #    component moved", the story that check actually has.
+    if key == "cash_conversion":
+        out.extend(_cash_story(lookup))
+    elif key == "gross_margin":
+        out.extend(_margin_story(lookup))
+
     total = lookup.get(total_label) if total_label else None
-    mover = _biggest_mover(rows, parts)
+    mover = _biggest_mover(rows, parts) if not out else None
     if mover and total:
         share = None
         total_moved, mover_moved = _delta(total), _delta(mover)
@@ -362,8 +482,9 @@ def narrate(check: dict, rows: list[dict]) -> list[str]:
                 "Whatever grew, it was not the cost of new capacity.")
 
     # 3. Did it still work? A cost line growing is only a problem if the
-    #    profit it was supposed to produce did not follow.
-    op = lookup.get("Operating income")
+    #    profit it was supposed to produce did not follow. This belongs to the
+    #    check about operating expenses and nowhere else.
+    op = lookup.get("Operating income") if key == "operating_leverage" else None
     if op and op.get("change") is not None:
         if op["change"] > 0:
             out.append(
@@ -380,18 +501,24 @@ def narrate(check: dict, rows: list[dict]) -> list[str]:
 
     # Check-specific closers where the arithmetic says something particular.
     if key == "dso":
+        # No growth-rate comparison here: the receivable balance moves from
+        # the last fiscal year end and quarterly revenue from the same quarter
+        # a year ago, so setting one percentage against the other reads like a
+        # comparison and is not one. The ratio is the honest form, and the
+        # check already computes it.
         ar, rev = lookup.get("Accounts receivable"), lookup.get("Revenue")
-        if ar and rev and ar.get("change") is not None and rev.get("change") is not None:
-            gap = ar["change"] - rev["change"]
+        try:
+            balance, quarter = float(ar["now"]), float(rev["now"])
+        except (TypeError, ValueError, KeyError):
+            balance = quarter = None
+        if balance and quarter:
             out.append(
-                f"Receivables moved {_pct_words(ar['change'])} against revenue "
-                f"{_pct_words(rev['change'])}. "
-                + ("Receivables growing faster than sales is the pattern to "
-                   "watch: it means the sales are being made but the cash is "
-                   "arriving later."
-                   if gap > 0.05 else
-                   "Receivables are not outrunning sales, so the collection "
-                   "cycle is holding."))
+                f"{_fmt(balance)} is owed to them against {_fmt(quarter)} of "
+                f"sales in the quarter — that ratio is the {balance / quarter * 90:.0f} "
+                "days above. Receivables rise with sales, so the level on its "
+                "own says little; it is the direction over three or four "
+                "quarters that tells you whether customers are taking longer "
+                "to pay, and that matters most when revenue growth is slowing.")
     if key == "share_count":
         buyback = lookup.get("Share repurchases, year to date")
         sbc = lookup.get("Stock-based compensation, year to date")

@@ -491,11 +491,13 @@ class TestWhyWithoutAModel:
         assert len(said) == 1
         assert "not tagged in enough detail" in said[0]
 
-    def test_receivables_outrunning_sales_is_named(self):
+    def test_the_receivable_balance_is_put_against_a_quarter_of_sales(self):
+        """The ratio, not two growth rates measured from different dates."""
         said = " ".join(qb.narrate(
             {"key": "dso", "name": "Days sales outstanding"},
             [_row("Accounts receivable", 200, 100), _row("Revenue", 110, 100)]))
-        assert "arriving later" in said
+        assert "164 days above" in said
+        assert "direction over three or four quarters" in said
 
     def test_free_cash_flow_shows_what_is_left(self):
         said = " ".join(qb.narrate(
@@ -543,3 +545,95 @@ class TestReachingTheFilingAtAll:
         skipped = bool(qb._VIEWER_PAGE.match(low) or qb._EXHIBIT.search(low)
                        or "index" in low or low.startswith("filingsummary"))
         assert skipped is (not kept), name
+
+
+class TestTheChecksWhoseStoryIsNotOneLineMoving:
+    """Cash conversion and gross margin had no branch of their own, so they
+    fell through to "not tagged in enough detail" while printing six rows of
+    detail underneath. NVIDIA's flagged cash conversion had its answer right
+    there in the table: receivables up 63.9%, inventories up 47.5%."""
+
+    NVDA = [
+        _row("Net income, year to date", 118010e6, 45197e6),
+        _row("Cash from operations, year to date", 74421e6, 42779e6),
+        _row("Depreciation and amortization, year to date", 2124e6, 1280e6),
+        _row("Stock-based compensation, year to date", 3954e6, 3099e6),
+        _row("Accounts receivable", 63059e6, 38466e6),
+        _row("Inventories", 31575e6, 21403e6),
+    ]
+    CASH = {"key": "cash_conversion", "name": "Cash flow / net income",
+            "verdict": "flag", "value": "0.63"}
+
+    def test_it_no_longer_says_it_cannot_tell(self):
+        said = " ".join(qb.narrate(self.CASH, self.NVDA))
+        assert "not tagged in enough detail" not in said
+
+    def test_it_states_the_gap(self):
+        said = " ".join(qb.narrate(self.CASH, self.NVDA))
+        assert "43,589,000,000" in said
+
+    def test_it_adds_the_non_cash_charges_back_first(self):
+        """They push cash up, so the balance sheet absorbed MORE than the
+        headline gap, not less."""
+        said = " ".join(qb.narrate(self.CASH, self.NVDA))
+        assert "6,078,000,000" in said
+        assert "49,667,000,000" in said
+
+    def test_it_names_receivables_and_inventory_as_the_cause(self):
+        said = " ".join(qb.narrate(self.CASH, self.NVDA))
+        assert "receivables grew 24,593,000,000" in said
+        assert "inventories grew 10,172,000,000" in said
+        assert "70% of it" in said
+
+    def test_cash_ahead_of_profit_is_not_treated_as_a_problem(self):
+        said = " ".join(qb.narrate(self.CASH, [
+            _row("Net income, year to date", 100, 80),
+            _row("Cash from operations, year to date", 140, 100)]))
+        assert "normal, healthy direction" in said
+
+    def test_gross_margin_is_two_growth_rates(self):
+        said = " ".join(qb.narrate(
+            {"key": "gross_margin", "name": "Gross margin"},
+            [_row("Revenue", 96221e6, 46743e6),
+             _row("Cost of revenue", 24079e6, 12890e6)]))
+        assert "+105.9%" in said and "+86.8%" in said
+        assert "Sales outran costs" in said
+
+    def test_compressing_margin_says_so(self):
+        said = " ".join(qb.narrate(
+            {"key": "gross_margin", "name": "Gross margin"},
+            [_row("Revenue", 110, 100), _row("Cost of revenue", 130, 100)]))
+        assert "Costs outran sales" in said
+
+    def test_operating_income_talk_belongs_to_the_expense_check_only(self):
+        """On gross margin it arrived first and talked about "the extra
+        spending being carried", which is not what gross margin asks."""
+        said = " ".join(qb.narrate(
+            {"key": "gross_margin", "name": "Gross margin"},
+            [_row("Revenue", 110, 100), _row("Cost of revenue", 105, 100),
+             _row("Operating income", 200, 100)]))
+        assert "being carried" not in said
+
+    def test_no_percentage_is_set_against_one_on_a_different_basis(self):
+        """The receivable balance moves from the last fiscal year end and
+        quarterly revenue from the same quarter a year ago. Putting the two
+        percentages side by side reads as a comparison and is not one."""
+        cash = " ".join(qb.narrate(self.CASH, self.NVDA))
+        assert "against revenue +" not in cash
+        dso = " ".join(qb.narrate(
+            {"key": "dso", "name": "Days sales outstanding"},
+            [_row("Accounts receivable", 63059e6, 38466e6),
+             _row("Revenue", 96221e6, 46743e6)]))
+        assert "against revenue +" not in dso
+        assert "59 days above" in dso
+
+    def test_every_check_still_says_something_real(self):
+        rows = self.NVDA + BUILDING + [
+            _row("Share repurchases, year to date", 30000, 15000),
+            _row("Stock-based compensation, year to date", 3954, 3099),
+            _row("Accounts payable", 12000, 8000),
+            _row("Total current liabilities", 50000, 40000)]
+        for key in qc.CHECK_NAMES:
+            said = qb.narrate({"key": key, "name": key}, rows)
+            assert said
+            assert "not tagged in enough detail" not in " ".join(said), key
