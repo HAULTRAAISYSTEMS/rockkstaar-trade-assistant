@@ -1410,3 +1410,107 @@
   background: rgba(229, 185, 79, .09);
   margin-left: 0;
 }
+
+/* ── Why is this flagged ───────────────────────────────────────────────────
+   The check says what happened; this says what the money went on, out of the
+   filing itself. It reads as a note pinned under the result rather than a
+   second verdict, so the grade stays the thing you look at first. */
+.fundamentals-shell .qd-why { margin-top: 10px; }
+.fundamentals-shell .qd-why-btn {
+  padding: 6px 13px;
+  border: 1px solid var(--elite-hairline);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--elite-gold);
+  font: 600 10.5px var(--font-ui);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease;
+}
+.fundamentals-shell .qd-why-btn:hover:not(:disabled) {
+  border-color: var(--elite-gold);
+  color: var(--elite-gold-bright);
+}
+.fundamentals-shell .qd-why-btn:disabled { opacity: .55; cursor: default; }
+
+.fundamentals-shell .qd-why-out {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--elite-hairline);
+  border-left: 2px solid var(--elite-gold);
+  border-radius: var(--elite-radius);
+  background: var(--elite-panel-inset);
+}
+.fundamentals-shell .qd-why-head {
+  margin: 0 0 10px;
+  color: var(--ink-050);
+  font: 600 13.5px/1.55 var(--font-display);
+}
+.fundamentals-shell .qd-why-para {
+  margin: 0 0 9px;
+  color: var(--elite-copy);
+  font: 400 12.5px/1.7 var(--font-ui);
+}
+.fundamentals-shell .qd-why-wait {
+  margin: 0;
+  color: var(--elite-muted);
+  font: 400 12px/1.65 var(--font-ui);
+}
+.fundamentals-shell .qd-why-sub {
+  margin: 14px 0 7px;
+  color: var(--elite-gold);
+  font: 700 9.5px var(--font-ui);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.fundamentals-shell .qd-why-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font: 400 11.5px var(--font-mono);
+}
+.fundamentals-shell .qd-why-tbl th {
+  padding: 3px 0 6px;
+  border-bottom: 1px solid var(--elite-hairline);
+  color: var(--elite-faint);
+  font: 500 9px var(--font-ui);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  text-align: right;
+}
+.fundamentals-shell .qd-why-tbl th:first-child { text-align: left; }
+.fundamentals-shell .qd-why-tbl td {
+  padding: 4px 0;
+  color: var(--elite-muted);
+  border-bottom: 1px solid var(--elite-hairline);
+}
+.fundamentals-shell .qd-why-tbl tr.is-lit td {
+  color: var(--ink-050);
+  font-weight: 600;
+}
+.fundamentals-shell .qd-why-quote {
+  margin: 0 0 8px;
+  padding-left: 11px;
+  border-left: 1px solid var(--elite-hairline);
+  color: var(--elite-muted);
+  font: 400 11.5px/1.65 var(--font-ui);
+  font-style: italic;
+}
+.fundamentals-shell .qd-why-watch {
+  margin: 0;
+  padding-left: 17px;
+  color: var(--elite-muted);
+  font: 400 11.5px/1.7 var(--font-ui);
+}
+.fundamentals-shell .qd-why-foot {
+  margin: 13px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--elite-hairline);
+  color: var(--elite-faint);
+  font: 400 10.5px/1.6 var(--font-ui);
+}
+.fundamentals-shell .qd-why-foot a {
+  color: var(--elite-gold);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(229, 185, 79, .3);
+}

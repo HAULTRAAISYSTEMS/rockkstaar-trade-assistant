@@ -1106,13 +1106,21 @@
       const link = ch.concept
         ? ' <a href="/learn/' + qdEsc(ch.concept) + '" target="_blank" rel="noopener">Learn this →</a>'
         : '';
+      // "Costs outran sales" is what happened. What the money went on is
+      // written in the filing, so there is something to press.
+      const why = (ch.verdict === 'flag' || ch.verdict === 'watch')
+        ? '<div class="qd-why"><button type="button" class="qd-why-btn" ' +
+            'onclick="qdWhy(\'' + qdEsc(ch.key) + '\', this)">' +
+            'Why is this flagged?</button>' +
+          '<div class="qd-why-out" id="why-' + qdEsc(ch.key) + '" hidden></div></div>'
+        : '';
       html += '<div class="qd-item"><div class="qd-top">' +
         '<span class="qd-name">' + qdEsc(ch.name) + '</span>' +
         '<span class="qd-val">' + qdEsc(ch.value) +
         '<span class="qd-badge qd-' + qdEsc(ch.verdict) + '">' + label + '</span></span></div>' +
         (ch.basis ? '<div class="qd-basis">' + qdEsc(ch.basis) + '</div>' : '') +
         '<p class="qd-says">' + qdEsc(ch.says) + link + '</p>' +
-        qdStatementFor(ch) + '</div>';
+        why + qdStatementFor(ch) + '</div>';
     });
     if (data.summary) html += '<div class="qd-summary">' + qdEsc(data.summary) + '</div>';
     document.getElementById('q-results').innerHTML = html;
@@ -1200,6 +1208,130 @@
       });
       html += '</table></div>';
     });
+    return html;
+  }
+
+  // ── Why is this flagged ───────────────────────────────────────────────────
+  // The seven checks say what happened. What the money went on is in the
+  // filing: Meta's own discussion of this quarter says cost of revenue rose
+  // "primarily due to higher infrastructure expenses related to our data
+  // centers". So the server assembles the component lines and the company's
+  // own paragraphs, and the model writes over that and nothing else.
+  //
+  // One call per press, and the answer is kept — a filing never changes, so
+  // the same question about the same quarter is only ever paid for once.
+  async function qdWhy(key, btn) {
+    const box = document.getElementById('why-' + key);
+    if (!box) return;
+    if (!box.hidden && box.dataset.done) {      // a second press closes it
+      box.hidden = true;
+      btn.textContent = 'Why is this flagged?';
+      return;
+    }
+    if (box.dataset.done) {
+      box.hidden = false;
+      btn.textContent = 'Hide the brief';
+      return;
+    }
+    const ticker = (qdEl('co').value || '').trim().toUpperCase();
+    if (!ticker) { qdStatus('Put a ticker in first — the brief is read out of that company\u2019s filing.', true); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Reading the filing\u2026';
+    box.hidden = false;
+    box.innerHTML = '<p class="qd-why-wait">Pulling the lines underneath this ' +
+      'check and what ' + qdEsc(ticker) + ' said about them in the filing itself. ' +
+      'This takes a few seconds \u2014 the document is large.</p>';
+    try {
+      const resp = await fetch('/api/quarter/brief', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': qdCsrf()},
+        body: JSON.stringify({ticker: ticker, check: key,
+                              shape: qdShape, figures: qdValues()})
+      });
+      const data = await resp.json();
+      if (!data || data.available === false) {
+        box.innerHTML = '<p class="qd-why-wait">' +
+          qdEsc((data && data.error) || 'Could not put that brief together.') + '</p>';
+        btn.disabled = false;
+        btn.textContent = 'Try again';
+        return;
+      }
+      box.innerHTML = qdWhyHtml(data);
+      box.dataset.done = '1';
+      btn.disabled = false;
+      btn.textContent = 'Hide the brief';
+    } catch (e) {
+      box.innerHTML = '<p class="qd-why-wait">Could not read the filing: ' +
+        qdEsc(e.message) + '</p>';
+      btn.disabled = false;
+      btn.textContent = 'Try again';
+    }
+  }
+
+  function qdPct(v) {
+    if (v === null || v === undefined) return '';
+    const n = Number(v) * 100;
+    if (!isFinite(n)) return '';
+    return (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
+  }
+
+  function qdWhyHtml(d) {
+    let html = '';
+    const b = d.brief;
+
+    if (b && b.headline) {
+      html += '<p class="qd-why-head">' + qdEsc(b.headline) + '</p>';
+    }
+    (b && b.paragraphs ? b.paragraphs : []).forEach(p => {
+      html += '<p class="qd-why-para">' + qdEsc(p) + '</p>';
+    });
+
+    // The evidence sits under the prose, not behind it. It is the part that
+    // cannot be wrong, and it is what the reader should be checking.
+    if (d.evidence && d.evidence.length) {
+      html += '<div class="qd-why-sub">What moved, from the same filing</div>' +
+              '<table class="qd-why-tbl"><tr><th></th><th>Now</th><th>Prior</th><th>Change</th></tr>';
+      d.evidence.forEach(r => {
+        const pct = qdPct(r.change);
+        const big = (r.change !== null && r.change !== undefined && Math.abs(r.change) >= 0.25);
+        html += '<tr' + (big ? ' class="is-lit"' : '') + '><td>' + qdEsc(r.label) + '</td>' +
+          '<td class="qd-stmt-num">' + qdNum(r.now) + '</td>' +
+          '<td class="qd-stmt-num">' + qdNum(r.prior) + '</td>' +
+          '<td class="qd-stmt-num">' + qdEsc(pct) + '</td></tr>';
+      });
+      html += '</table>';
+    }
+
+    if (d.quotes && d.quotes.length) {
+      html += '<div class="qd-why-sub">In the company\u2019s own words</div>';
+      d.quotes.slice(0, 3).forEach(q => {
+        html += '<blockquote class="qd-why-quote">' + qdEsc(q) + '</blockquote>';
+      });
+    }
+
+    if (b && b.watch && b.watch.length) {
+      html += '<div class="qd-why-sub">What to check next quarter</div><ul class="qd-why-watch">';
+      b.watch.forEach(w => { html += '<li>' + qdEsc(w) + '</li>'; });
+      html += '</ul>';
+    }
+
+    const foot = [];
+    if (d.note) foot.push(d.note);
+    if (b && b.grounded === false) {
+      foot.push('The filing did not explain this line directly, so the summary ' +
+                'is working from the numbers alone.');
+    }
+    if (d.cached && d.written_at) {
+      foot.push('Written earlier and kept — a filing does not change.');
+    }
+    if (d.filing_url) {
+      foot.push('<a href="' + qdEsc(d.filing_url) + '" target="_blank" rel="noopener">' +
+                'Read the filing itself \u2192</a>');
+    }
+    if (foot.length) {
+      html += '<p class="qd-why-foot">' + foot.join(' ') + '</p>';
+    }
     return html;
   }
 

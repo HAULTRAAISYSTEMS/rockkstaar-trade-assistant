@@ -42,7 +42,7 @@ from database import (
     set_ticker_state, upsert_loading_placeholder,
     get_note, save_note, get_all_notes, update_setup_type,
     save_quarter_entry, get_quarter_entries, get_quarter_entry,
-    delete_quarter_entry,
+    delete_quarter_entry, get_quarter_brief, save_quarter_brief,
     get_trade_plan, save_trade_plan, get_all_trade_plans,
     add_journal_entry, update_journal_entry, delete_journal_entry,
     get_journal_entry, get_all_journal_entries, get_journal_entries_for_date,
@@ -8525,6 +8525,84 @@ def api_quarter_delete(entry_id):
     if not delete_quarter_entry(entry_id, uid):
         return jsonify({"error": "That saved quarter is not there."}), 404
     return jsonify({"entries": [_quarter_card(e) for e in get_quarter_entries(uid)]})
+
+
+@app.route("/api/quarter/brief", methods=["POST"])
+def api_quarter_brief():
+    """Why one check flagged, from the filing and nothing else.
+
+    "Costs outran sales, +28% against +65%" is correct and, to someone
+    learning, not yet an answer: it does not say what the money went on. That
+    is written down. Meta's own discussion in this same 10-Q says cost of
+    revenue rose "primarily due to higher infrastructure expenses related to
+    our data centers" — so the brief is assembled from the component lines in
+    the XBRL and the company's own paragraphs, and the model writes over that
+    evidence rather than recalling anything about the company.
+
+    The grade is recomputed here rather than taken from the request. The
+    figures are the reader's own, but a verdict and a basis string arriving
+    from the browser would be text going straight into a prompt.
+    """
+    import quarter_checks, quarter_facts, quarter_brief
+
+    payload = request.get_json(silent=True) or {}
+    ticker = (payload.get("ticker") or "").strip().upper()
+    wanted = (payload.get("check") or "").strip()
+    if not ticker or not ticker.replace(".", "").replace("-", "").isalnum():
+        return jsonify({"available": False, "error": "Invalid ticker"}), 400
+    if wanted not in quarter_checks.CHECK_NAMES:
+        return jsonify({"available": False, "error": "Unknown check"}), 400
+
+    figures = {k: v for k, v in (payload.get("figures") or {}).items()
+               if k in quarter_checks.FIELDS}
+    context = quarter_facts.context_for(payload.get("shape"))
+    graded = quarter_checks.run(figures, context)
+    check = next((c for c in graded["checks"] if c["key"] == wanted), None)
+    if not check or not check.get("verdict"):
+        return jsonify({"available": False,
+                        "error": "That check did not grade, so there is "
+                                 "nothing to explain yet."}), 400
+
+    try:
+        facts, cik = quarter_facts.fetch_facts(ticker)
+        filed = quarter_facts.latest_quarter(ticker, facts=facts) if facts else None
+    except Exception as exc:
+        logger.warning("quarter brief lookup failed for %s: %s", ticker, exc)
+        return jsonify({"available": False,
+                        "error": "Could not read the filing right now."})
+    if not filed:
+        return jsonify({"available": False,
+                        "error": f"No filing to read for {ticker}."})
+
+    period_end = filed.get("period_end") or ""
+    cached = get_quarter_brief(ticker, period_end, wanted)
+    if cached:
+        return jsonify(cached)
+
+    fields = filed.get("fields") or {}
+    accn = next((f.get("accn") for f in fields.values() if f.get("accn")), None)
+    ytd = fields.get("cfo") or fields.get("niy") or {}
+    ytd_prior = quarter_facts._prior_year_end(ytd.get("end")) if ytd.get("end") else None
+
+    try:
+        out = quarter_brief.explain(
+            ticker, check, facts=facts, cik=cik, accn=accn,
+            period_end=period_end, prior_end=filed.get("prior_end"),
+            ytd_prior_end=ytd_prior,
+            api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        )
+    except Exception:
+        logger.exception("quarter brief failed for %s %s", ticker, wanted)
+        return jsonify({"available": False,
+                        "error": "Could not put that brief together."})
+
+    out["company"] = filed.get("company")
+    out["cached"] = False
+    try:
+        save_quarter_brief(ticker, period_end, wanted, out)
+    except Exception as exc:
+        logger.warning("could not keep the brief for %s: %s", ticker, exc)
+    return jsonify(out)
 
 
 @app.route("/api/quarter/filed/<ticker>")

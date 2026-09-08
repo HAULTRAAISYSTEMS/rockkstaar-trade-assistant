@@ -3668,3 +3668,78 @@ def execute_paper_order(user_id: int, ticker: str, side: str, quantity: int,
     conn.close()
     return {"ticker": ticker, "side": side, "quantity": quantity,
             "fill_price": fill_price, "gross_value": gross, "realized_pnl": realized}
+
+
+# ── Briefs explaining a flagged check ────────────────────────────────────────
+#
+# Each one costs a model call, and the evidence behind it is fixed the moment
+# the 10-Q is filed. So the same company, quarter and check is answered once
+# and read from here afterwards. Shared rather than per-user: the filing is
+# public, and the second reader should not be billed for the first one's
+# question.
+
+def get_quarter_brief(ticker: str, period: str, check_key: str) -> dict | None:
+    """A brief already written for this company, quarter and check."""
+    import json
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT payload, created_at FROM quarter_briefs "
+            "WHERE ticker = ? AND period = ? AND check_key = ?",
+            ((ticker or "").strip().upper(), (period or "").strip(),
+             (check_key or "").strip()),
+        ).fetchone()
+    except Exception:
+        return None                     # before the migration runs, simply miss
+    finally:
+        conn.close()
+    if not row:
+        return None
+    try:
+        payload = json.loads(row["payload"])
+    except (TypeError, ValueError):
+        return None
+    if isinstance(payload, dict):
+        payload["cached"] = True
+        payload["written_at"] = row["created_at"]
+    return payload
+
+
+def save_quarter_brief(ticker: str, period: str, check_key: str,
+                       payload: dict) -> None:
+    """Keep one brief. Writing the same one again replaces it."""
+    import json
+    from datetime import datetime, timezone
+
+    ticker = (ticker or "").strip().upper()
+    period = (period or "").strip()
+    check_key = (check_key or "").strip()
+    if not ticker or not check_key:
+        return
+    body = json.dumps(payload)
+    now = datetime.now(timezone.utc).isoformat()
+
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT id FROM quarter_briefs "
+            "WHERE ticker = ? AND period = ? AND check_key = ?",
+            (ticker, period, check_key),
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE quarter_briefs SET payload = ?, created_at = ? WHERE id = ?",
+                (body, now, row["id"]),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO quarter_briefs "
+                "(ticker, period, check_key, payload, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (ticker, period, check_key, body, now),
+            )
+        conn.commit()
+    except Exception as exc:
+        logger.warning("saving a quarter brief failed: %s", exc)
+    finally:
+        conn.close()

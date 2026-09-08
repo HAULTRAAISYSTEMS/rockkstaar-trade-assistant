@@ -236,8 +236,15 @@ class TestMigrationsRunThemselves:
         assert "raise" not in boot
 
     def test_every_migration_is_registered_in_order(self):
+        """Naming the newest one pinned this to a moment rather than to the
+        rule. A migration file that nobody registers creates no table, and
+        the first thing anyone hears about it is a missing-table error in
+        production."""
+        from pathlib import Path
         import migration_runner
-        assert migration_runner.MIGRATIONS[-1].endswith("m0003_quarter_entries")
+        on_disk = sorted(p.stem for p in Path("migrations").glob("m[0-9]*.py"))
+        registered = [name.split(".")[-1] for name in migration_runner.MIGRATIONS]
+        assert registered == on_disk
 
     def test_running_them_twice_applies_nothing_the_second_time(self, store):
         import migration_runner
