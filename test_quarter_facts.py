@@ -683,3 +683,118 @@ class TestAFiftyTwoWeekFiscalYear:
             ("2025-04-22", "2025-07-21", 11111, "10-Q", "2025-08-20")]))
         found = qf.latest_quarter("NVDA", facts=pair)
         assert found["fields"]["revP"]["value"] == 46743
+
+
+class TestTheFilerWhoPrintsNoSubtotalAtAll:
+    """KLA's income statement runs revenue, cost of revenue, R&D, SG&A,
+    straight to operating income. There is no "total operating expenses" line
+    on it, KLA has never tagged OperatingExpenses in its life, and its
+    CostsAndExpenses stops in 2015 — so the check sat waiting forever for a
+    figure the filing does not contain and never will.
+
+    The figure is computable anyway. An income statement is an identity:
+    revenue less cost of revenue less operating income IS operating expenses.
+    That form is forced by the arithmetic rather than assembled from
+    components, which is its virtue — it picks up whatever else sits in the
+    operating section. For KLA that matters: R&D plus SG&A comes to 679,897
+    against a derived 670,645, so there is another line in there. Adding up
+    components would have quietly missed it.
+    """
+
+    KLA = facts(
+        duration("RevenueFromContractWithCustomerExcludingAssessedTax", [
+            ("2026-01-01", "2026-03-31", 3415078, "10-Q", "2026-05-01"),
+            ("2025-01-01", "2025-03-31", 3063029, "10-Q", "2025-05-01")]),
+        duration("CostOfRevenue", [
+            ("2026-01-01", "2026-03-31", 1327672, "10-Q", "2026-05-01"),
+            ("2025-01-01", "2025-03-31", 1175689, "10-Q", "2025-05-01")]),
+        duration("ResearchAndDevelopmentExpense", [
+            ("2026-01-01", "2026-03-31", 388763, "10-Q", "2026-05-01"),
+            ("2025-01-01", "2025-03-31", 338043, "10-Q", "2025-05-01")]),
+        duration("OperatingIncomeLoss", [
+            ("2026-01-01", "2026-03-31", 1416761, "10-Q", "2026-05-01"),
+            ("2025-01-01", "2025-03-31", 1264433, "10-Q", "2025-05-01")]),
+    )
+
+    def test_operating_expenses_come_out_of_the_identity(self):
+        filed = qf.latest_quarter("KLAC", facts=self.KLA)
+        assert filed["fields"]["opex"]["value"] == 3415078 - 1327672 - 1416761
+        assert filed["fields"]["opex"]["value"] == 670645
+
+    def test_the_prior_column_too_so_the_check_can_run(self):
+        filed = qf.latest_quarter("KLAC", facts=self.KLA)
+        assert filed["fields"]["opexP"]["value"] == 622907
+
+    def test_the_check_that_waited_forever_now_grades(self):
+        import quarter_checks as qc
+        filed = qf.latest_quarter("KLAC", facts=self.KLA)
+        figures = {k: v["value"] for k, v in filed["fields"].items()}
+        check = [c for c in qc.run(figures, filed["profile"])["checks"]
+                 if c["key"] == "operating_leverage"][0]
+        assert check["verdict"] == "clean"
+        assert check["value"] == "+11.5% / +7.7%"
+
+    def test_it_is_labelled_as_computed_not_filed(self):
+        filed = qf.latest_quarter("KLAC", facts=self.KLA)
+        opex = filed["fields"]["opex"]
+        assert opex["derived"] is True
+        assert "OperatingIncomeLoss" in opex["tag"]
+
+    def test_the_rebuilt_statement_shows_the_row_where_it_belongs(self):
+        """Before the operating income it produces, after the lines it
+        totals — otherwise the walkthrough has nothing to light up on the
+        line the reader most needs to see."""
+        st = qf.statements(self.KLA, "2026-03-31", "2025-03-31")
+        keys = [r["key"] for r in st["income"]["rows"]]
+        assert keys.index("opex") == keys.index("opinc") - 1
+        assert keys.index("opex") > keys.index("cogs")
+        row = [r for r in st["income"]["rows"] if r["key"] == "opex"][0]
+        assert (row["now"], row["prior"]) == (670645, 622907)
+        assert row["derived"] is True
+
+    def test_the_combined_total_is_still_preferred_when_a_filer_prints_one(self):
+        """Meta's shape must not change: it prints one "Total costs and
+        expenses" including cost of revenue, and that subtraction stays the
+        first choice."""
+        both = facts(
+            duration("Revenues", [
+                ("2026-04-01", "2026-06-30", 60801, "10-Q", "2026-07-30")]),
+            duration("CostOfRevenue", [
+                ("2026-04-01", "2026-06-30", 11330, "10-Q", "2026-07-30")]),
+            duration("CostsAndExpenses", [
+                ("2026-04-01", "2026-06-30", 42026, "10-Q", "2026-07-30")]),
+            duration("OperatingIncomeLoss", [
+                ("2026-04-01", "2026-06-30", 18775, "10-Q", "2026-07-30")]),
+        )
+        filed = qf.latest_quarter("META", facts=both)
+        assert filed["fields"]["opex"]["value"] == 42026 - 11330
+        assert "CostsAndExpenses" in filed["fields"]["opex"]["tag"]
+
+    def test_a_bank_is_never_handed_a_derived_number(self):
+        """No cost of revenue, and "operating income" would be pre-tax
+        income — the subtraction would give a confident wrong answer rather
+        than nothing. Both derivations gate on cost of revenue."""
+        bank = facts(
+            duration("RevenuesNetOfInterestExpense", [
+                ("2026-04-01", "2026-06-30", 57347, "10-Q", "2026-08-04")]),
+            duration("NoninterestExpense", [
+                ("2026-04-01", "2026-06-30", 27316, "10-Q", "2026-08-04")]),
+        )
+        fields = {}
+        qf._derive_operating_expenses(bank, fields, "2026-06-30", "2025-06-30")
+        assert fields == {}
+
+    def test_three_different_periods_are_not_a_subtotal(self):
+        """Revenue from this quarter minus a cost of revenue from another is
+        not an operating expense figure, it is noise."""
+        mismatched = facts(
+            duration("Revenues", [
+                ("2026-01-01", "2026-03-31", 1000, "10-Q", "2026-05-01")]),
+            duration("CostOfRevenue", [
+                ("2025-10-01", "2025-12-31", 400, "10-K", "2026-02-01")]),
+            duration("OperatingIncomeLoss", [
+                ("2026-01-01", "2026-03-31", 300, "10-Q", "2026-05-01")]),
+        )
+        fields = {}
+        qf._derive_operating_expenses(mismatched, fields, "2026-03-31", None)
+        assert "opex" not in fields

@@ -226,23 +226,41 @@ def _add_derived_opex(facts, rows, check_key, period_end, prior_end):
                 qf._pick(facts, tags, window=qf.QUARTER_DAYS, near=end,
                          slack=qf.PERIOD_SLACK_DAYS))
 
+    # Two derivations, matching quarter_facts. Meta prints a combined total to
+    # subtract from; KLA prints no subtotal at all, so it comes out of the
+    # income-statement identity instead. Both need a cost of revenue, which is
+    # what keeps them away from banks.
     def _less(period):
-        total = _pair(["CostsAndExpenses"], period)
         cogs = _pair(qf.QUARTER_TAGS["cogs"][1], period)
-        if not total or not cogs or total.get("end") != cogs.get("end"):
-            return None
+        if not cogs:
+            return None, None
+        total = _pair(["CostsAndExpenses"], period)
+        if total and total.get("end") == cogs.get("end"):
+            try:
+                return (float(total["value"]) - float(cogs["value"]),
+                        "CostsAndExpenses less cost of revenue")
+            except (TypeError, ValueError):
+                pass
+        revenue = _pair(qf.QUARTER_TAGS["rev"][1], period)
+        operating = _pair(["OperatingIncomeLoss"], period)
+        if not revenue or not operating:
+            return None, None
+        if not (revenue.get("end") == cogs.get("end") == operating.get("end")):
+            return None, None
         try:
-            return float(total["value"]) - float(cogs["value"])
+            return (float(revenue["value"]) - float(cogs["value"])
+                    - float(operating["value"]),
+                    "revenue less cost of revenue less operating income")
         except (TypeError, ValueError):
-            return None
+            return None, None
 
-    now = _less(period_end)
+    now, source = _less(period_end)
     if now is None:
         return
-    prior = _less(prior_end) if prior_end else None
+    prior = (_less(prior_end)[0] if prior_end else None)
     row = {"label": "Total operating expenses", "now": now, "prior": prior,
            "change": _growth(now, prior), "derived": True,
-           "tag": "CostsAndExpenses less cost of revenue"}
+           "tag": source}
     # Where the subtotal belongs on a statement: after its components.
     after = max((i for i, r in enumerate(rows)
                  if r["label"] in ("Cost of revenue", "Research and development",

@@ -704,26 +704,67 @@ def _derive_operating_expenses(facts, fields, end, prior_end):
     So it is derived rather than substituted, and only when both halves are
     present for the same period. The derivation is labelled, because a figure
     this app computed is not a figure the company filed.
+
+    Two derivations, tried in order:
+
+      CostsAndExpenses less cost of revenue. Meta's shape.
+
+      Revenue less cost of revenue less operating income. KLA's shape, and
+      the reason it exists: KLA has never tagged OperatingExpenses in its
+      life, and its CostsAndExpenses stops in 2015. Its income statement runs
+      revenue, cost of revenue, R&D, SG&A, straight to operating income, with
+      no subtotal in between — so the check sat waiting for a line the filing
+      does not contain. This second form is forced by the arithmetic of an
+      income statement rather than assembled from components, which is its
+      virtue: it captures whatever else sits in the operating section. For
+      KLA that matters, because R&D plus SG&A comes to 679,897 against a
+      derived 670,645, so there is another line in there. Adding up the
+      components would have quietly missed it.
+
+    Both self-gate on cost of revenue, which is what keeps them away from
+    financial filers: a bank has no such line, and its "operating income" is
+    pre-tax income, so the subtraction would produce a confident wrong
+    answer rather than nothing.
     """
     for key, period in (("opex", end), ("opexP", prior_end)):
         if key in fields or not period:
             continue
         exact = (period == end)
         where = {"end": period} if exact else {"near": period, "slack": PERIOD_SLACK_DAYS}
-        total = _pick(facts, ["CostsAndExpenses"], window=QUARTER_DAYS, **where)
+
         cogs = _pick(facts, QUARTER_TAGS["cogs"][1], window=QUARTER_DAYS, **where)
-        if not total or not cogs:
-            continue
-        try:
-            value = float(total["value"]) - float(cogs["value"])
-        except (TypeError, ValueError):
-            continue
-        if total.get("end") != cogs.get("end"):
-            continue                    # two different periods is not a subtotal
+        if not cogs:
+            continue                    # no cost of revenue: not this shape of filer
+
+        total = _pick(facts, ["CostsAndExpenses"], window=QUARTER_DAYS, **where)
+        value = source = None
+        if total and total.get("end") == cogs.get("end"):
+            try:
+                value = float(total["value"]) - float(cogs["value"])
+                source = "CostsAndExpenses \u2212 " + cogs["tag"]
+            except (TypeError, ValueError):
+                value = None
+
+        if value is None:
+            revenue = _pick(facts, QUARTER_TAGS["rev"][1], window=QUARTER_DAYS, **where)
+            operating = _pick(facts, ["OperatingIncomeLoss"], window=QUARTER_DAYS, **where)
+            if not revenue or not operating:
+                continue
+            if not (revenue.get("end") == cogs.get("end") == operating.get("end")):
+                continue                # three different periods is not a subtotal
+            try:
+                value = (float(revenue["value"]) - float(cogs["value"])
+                         - float(operating["value"]))
+            except (TypeError, ValueError):
+                continue
+            total = revenue
+            source = (revenue["tag"] + " \u2212 " + cogs["tag"]
+                      + " \u2212 " + operating["tag"])
+
         label = QUARTER_TAGS["opex"][0] + ("" if key == "opex" else ", year ago")
         fields[key] = {
             "value": value,
-            "tag": "CostsAndExpenses − " + cogs["tag"],
+            "tag": source,
             "derived": True,
             "end": period, "start": total.get("start"),
             "form": total.get("form"), "filed": total.get("filed"),
@@ -998,26 +1039,55 @@ def _insert_derived_opex(rows: list) -> None:
     subtotal would sit, labelled as computed rather than filed.
     """
     by_key = {r["key"]: r for r in rows}
-    if "opex" in by_key or "costs" not in by_key or "cogs" not in by_key:
+    if "opex" in by_key or "cogs" not in by_key:
         return
-    costs, cogs = by_key["costs"], by_key["cogs"]
+    cogs = by_key["cogs"]
 
-    def less(a, b):
-        return None if a is None or b is None else a - b
+    def less(*values):
+        if any(v is None for v in values):
+            return None
+        total = values[0]
+        for v in values[1:]:
+            total -= v
+        return total
+
+    # Meta's shape: one combined "Total costs and expenses" to subtract from.
+    anchor = by_key.get("costs")
+    if anchor:
+        now = less(anchor.get("now"), cogs.get("now"))
+        prior = less(anchor.get("prior"), cogs.get("prior"))
+        tag = "CostsAndExpenses − " + (cogs.get("tag") or "cost of revenue")
+    else:
+        # KLA's shape: no subtotal anywhere on the statement, so take it out
+        # of the identity instead. Revenue less cost of revenue less
+        # operating income IS operating expenses, by the construction of an
+        # income statement.
+        revenue, operating = by_key.get("rev"), by_key.get("opinc")
+        if not revenue or not operating:
+            return
+        anchor = operating
+        now = less(revenue.get("now"), cogs.get("now"), operating.get("now"))
+        prior = less(revenue.get("prior"), cogs.get("prior"), operating.get("prior"))
+        tag = "revenue − cost of revenue − operating income"
+
+    if now is None:
+        return
 
     derived = {
         "key": "opex",
         "label": "Total operating expenses",
         "indent": 0,
-        "now": less(costs.get("now"), cogs.get("now")),
-        "prior": less(costs.get("prior"), cogs.get("prior")),
-        "tag": "CostsAndExpenses − " + (cogs.get("tag") or "cost of revenue"),
+        "now": now,
+        "prior": prior,
+        "tag": tag,
         "derived": True,
-        "prior_end": costs.get("prior_end"),
+        "prior_end": anchor.get("prior_end"),
     }
-    if derived["now"] is None:
-        return
-    rows.insert(rows.index(costs) + 1, derived)
+    # Where the subtotal belongs on the statement: after the expense lines it
+    # totals, immediately before the operating income it produces.
+    at = next((i for i, r in enumerate(rows) if r["key"] == "opinc"),
+              rows.index(cogs) + 1)
+    rows.insert(at, derived)
 
 
 def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) -> dict | None:
