@@ -747,7 +747,19 @@ def _derive_operating_expenses(facts, fields, end, prior_end):
 
         if value is None:
             revenue = _pick(facts, QUARTER_TAGS["rev"][1], window=QUARTER_DAYS, **where)
-            operating = _pick(facts, ["OperatingIncomeLoss"], window=QUARTER_DAYS, **where)
+            # The operating income this filer actually resolved to, not the
+            # raw OperatingIncomeLoss tag. KLA never tags that one \u2014 its
+            # operating income comes through the pre-tax concept, so hunting
+            # for the literal tag found nothing and the derivation bailed,
+            # while the rebuilt statement, which reads the resolved row,
+            # printed the subtotal perfectly. Subtracting the same figure the
+            # page shows also keeps the identity checkable by eye: take
+            # revenue, take off cost of revenue, take off the operating
+            # income printed above, and you land on this number.
+            operating = fields.get("opinc" if key == "opex" else "opincP")
+            if not operating:
+                operating = _pick(facts, QUARTER_TAGS["opinc"][1],
+                                  window=QUARTER_DAYS, **where)
             if not revenue or not operating:
                 continue
             if not (revenue.get("end") == cogs.get("end") == operating.get("end")):
@@ -758,8 +770,8 @@ def _derive_operating_expenses(facts, fields, end, prior_end):
             except (TypeError, ValueError):
                 continue
             total = revenue
-            source = (revenue["tag"] + " \u2212 " + cogs["tag"]
-                      + " \u2212 " + operating["tag"])
+            source = (revenue["tag"] + " \u2212 " + cogs["tag"] + " \u2212 "
+                      + (operating.get("tag") or "operating income"))
 
         label = QUARTER_TAGS["opex"][0] + ("" if key == "opex" else ", year ago")
         fields[key] = {
@@ -1068,7 +1080,9 @@ def _insert_derived_opex(rows: list) -> None:
         anchor = operating
         now = less(revenue.get("now"), cogs.get("now"), operating.get("now"))
         prior = less(revenue.get("prior"), cogs.get("prior"), operating.get("prior"))
-        tag = "revenue − cost of revenue − operating income"
+        tag = ((revenue.get("tag") or "revenue") + " − "
+               + (cogs.get("tag") or "cost of revenue") + " − "
+               + (operating.get("tag") or "operating income"))
 
     if now is None:
         return

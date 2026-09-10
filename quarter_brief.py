@@ -242,7 +242,9 @@ def _add_derived_opex(facts, rows, check_key, period_end, prior_end):
             except (TypeError, ValueError):
                 pass
         revenue = _pair(qf.QUARTER_TAGS["rev"][1], period)
-        operating = _pair(["OperatingIncomeLoss"], period)
+        # The resolved operating-income tags, not the literal
+        # OperatingIncomeLoss \u2014 KLA never tags that one.
+        operating = _pair(qf.QUARTER_TAGS["opinc"][1], period)
         if not revenue or not operating:
             return None, None
         if not (revenue.get("end") == cogs.get("end") == operating.get("end")):

@@ -711,10 +711,21 @@ class TestTheFilerWhoPrintsNoSubtotalAtAll:
         duration("ResearchAndDevelopmentExpense", [
             ("2026-01-01", "2026-03-31", 388763, "10-Q", "2026-05-01"),
             ("2025-01-01", "2025-03-31", 338043, "10-Q", "2025-05-01")]),
-        duration("OperatingIncomeLoss", [
+        # KLA does not tag OperatingIncomeLoss AT ALL. Its operating income
+        # is only reachable through the pre-tax concept, which is why looking
+        # for the literal tag found nothing and the derivation bailed even
+        # though the rebuilt statement — which reads the resolved row —
+        # printed the subtotal perfectly.
+        duration(qf.PRETAX_TAGS[0], [
             ("2026-01-01", "2026-03-31", 1416761, "10-Q", "2026-05-01"),
             ("2025-01-01", "2025-03-31", 1264433, "10-Q", "2025-05-01")]),
     )
+
+    def test_this_filer_really_does_not_tag_operating_income(self):
+        """The fixture is only worth anything if it keeps that true."""
+        assert qf._facts_for("OperatingIncomeLoss", self.KLA) == []
+        assert qf.latest_quarter("KLAC", facts=self.KLA)["fields"]["opinc"]["tag"] \
+            == qf.PRETAX_TAGS[0]
 
     def test_operating_expenses_come_out_of_the_identity(self):
         filed = qf.latest_quarter("KLAC", facts=self.KLA)
@@ -738,7 +749,8 @@ class TestTheFilerWhoPrintsNoSubtotalAtAll:
         filed = qf.latest_quarter("KLAC", facts=self.KLA)
         opex = filed["fields"]["opex"]
         assert opex["derived"] is True
-        assert "OperatingIncomeLoss" in opex["tag"]
+        assert opex["tag"].startswith("Revenue")
+        assert opex["tag"].endswith(qf.PRETAX_TAGS[0])   # names what it subtracted
 
     def test_the_rebuilt_statement_shows_the_row_where_it_belongs(self):
         """Before the operating income it produces, after the lines it
