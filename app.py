@@ -319,6 +319,42 @@ def _add_security_headers(response):
 
 
 # ---------------------------------------------------------------------------
+# Nothing signed-in gets cached
+# ---------------------------------------------------------------------------
+@app.after_request
+def _do_not_cache_private_pages(response):
+    """Pages and API responses were going out with no cache headers at all.
+
+    Not "cache this for a while" — nothing. No Cache-Control, no ETag, no
+    Expires, no Last-Modified. A browser given nothing to go on does not
+    refetch; it applies heuristic caching, and Safari on iOS is the most
+    willing of the lot. So a phone kept serving a page whose JavaScript was
+    weeks old against JSON that was just as stale: a saved quarter came back
+    with a revenue figure the database had not held since it was corrected,
+    and the drill graded nothing because the page doing the grading was not
+    the page that had been deployed. On the desktop, freshly loaded, the same
+    account worked perfectly \u2014 which is exactly how a caching fault
+    presents, and exactly why it looks like the server is broken when it is
+    not.
+
+    It is also a privacy fault. Account balances, positions and saved work
+    were sitting in whatever cache the device or an intermediary kept.
+
+    Static files are left alone: Flask gives those a Last-Modified and an
+    ETag, so they revalidate rather than going stale, and they carry nothing
+    about anybody.
+    """
+    if request.path.startswith("/static/"):
+        return response
+    content_type = (response.headers.get("Content-Type") or "")
+    if request.path.startswith("/api/") or content_type.startswith("text/html"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"          # HTTP/1.0 caches
+        response.headers["Expires"] = "0"
+    return response
+
+
+# ---------------------------------------------------------------------------
 # /debug/status — production health check (no secret values exposed)
 # ---------------------------------------------------------------------------
 @app.route("/debug/status")
