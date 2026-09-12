@@ -70,6 +70,18 @@ class TestTheLiveNumbers:
         """twSelect() reads data-price, so the poll has to update it too."""
         assert "row.dataset.price  = text;" in TEMPLATE
 
+    def test_live_quote_patches_the_active_intraday_candle(self):
+        assert "function twPatchActiveCandle(q,px)" in TEMPLATE
+        assert "twChartState.candle.update(twCandleDatum(bar));" in TEMPLATE
+        assert "q.market_session=data.session;q.as_of_epoch=data.server_epoch" in TEMPLATE
+
+    def test_live_candle_keeps_the_providers_session_alignment(self):
+        assert "lastTime+Math.floor((stamp-lastTime)/seconds)*seconds" in TEMPLATE
+
+    def test_provider_candles_still_reconcile_every_thirty_seconds(self):
+        assert "twScheduleChartRefresh();" in TEMPLATE
+        assert "},30000);" in TEMPLATE
+
 
 @pytest.fixture
 def client():
@@ -93,6 +105,7 @@ class TestTheQuotesEndpoint:
         body = client.get("/api/terminal/quotes").get_json()
         assert body["session"] in _app.SESSION_LABELS
         assert body["session_label"] == _app.SESSION_LABELS[body["session"]]
+        assert isinstance(body["server_epoch"], int)
 
     def test_it_never_waits_on_a_price_fetch(self, client):
         """A four-second poll cannot hold a request open behind yfinance.
