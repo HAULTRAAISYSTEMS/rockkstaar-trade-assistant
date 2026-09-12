@@ -5085,6 +5085,7 @@ def api_terminal_quotes():
         "chips": chips,
         "session": _session,
         "session_label": SESSION_LABELS.get(_session, "At the close"),
+        "server_epoch": int(_time.time()),
         "server_time": _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
     })
 

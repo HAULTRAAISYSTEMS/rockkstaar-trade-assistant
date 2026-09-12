@@ -23,6 +23,12 @@ def duration(values):
         for i, (s, e, v) in enumerate(zip(STARTS, YEARS, values))]}}
 
 
+def per_share_duration(values):
+    return {"units": {"USD/shares": [
+        {"start": s, "end": e, "val": v, "form": "10-K", "accn": f"a-{i}"}
+        for i, (s, e, v) in enumerate(zip(STARTS, YEARS, values))]}}
+
+
 def instant(value):
     return {"units": {"USD": [
         {"end": YEARS[0], "val": value, "form": "10-K", "accn": "a-0"}]}}
@@ -34,6 +40,7 @@ def facts():
         "GrossProfit": duration([8324e6, 7407e6, 5884e6, 6281e6, 5619e6]),
         "OperatingIncomeLoss": duration([5661e6, 5016e6, 3636e6, 3995e6, 3652e6]),
         "NetIncomeLoss": duration([4831e6, 4062e6, 2762e6, 3387e6, 3322e6]),
+        "EarningsPerShareDiluted": per_share_duration([35.84, 29.81, 20.28, 24.15, 23.20]),
         "Assets": instant(17952e6),
         "Liabilities": instant(11602e6),
         "StockholdersEquity": instant(6350e6),
@@ -71,9 +78,18 @@ def test_edgar_fetch_returns_a_result(edgar):
 
 def test_series_are_populated_and_aligned(edgar):
     result = fe.fetch_fundamentals_edgar("KLAC")
-    for field in ("revenue", "gross_profit", "operating_income", "net_income"):
+    for field in ("revenue", "gross_profit", "operating_income", "net_income", "diluted_eps"):
         assert len(result[field]) == 5, f"{field} is not aligned to the timeline"
     assert result["fiscal_period_ends"][0] == "2026-06-30"
+
+
+def test_reported_earnings_numbers_survive_the_full_edgar_path(edgar):
+    """Direct filing facts retain their value and fiscal-year alignment."""
+    result = fe.fetch_fundamentals_edgar("KLAC")
+    assert result["revenue"][0] == 13579e6
+    assert result["operating_income"][0] == 5661e6
+    assert result["net_income"][0] == 4831e6
+    assert result["diluted_eps"][0] == 35.84
 
 
 def test_operating_margins_match_the_filing(edgar):

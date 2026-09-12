@@ -1092,6 +1092,35 @@ function twCandleDatum(bar){
 }
 function twVolumeColor(bar){if(bar.session==='overnight')return bar.close>=bar.open?'rgba(240,181,63,.5)':'rgba(255,140,66,.5)';if(bar.session==='premarket')return bar.close>=bar.open?'rgba(74,163,255,.48)':'rgba(117,105,232,.48)';if(bar.session==='after_hours')return bar.close>=bar.open?'rgba(199,125,255,.48)':'rgba(255,106,169,.48)';return bar.close>=bar.open?'rgba(34,197,139,0.45)':'rgba(255,77,69,0.45)';}
 
+/* The quote poll is fresher than a completed provider candle. Move the active
+   intraday candle on each quote, then let the normal 30-second candle request
+   replace it with authoritative OHLCV. Historical candles are never changed. */
+function twPatchActiveCandle(q,px){
+  if(!q||q.ticker!==twChartState.ticker||q.market_session!=='regular')return;
+  var seconds={"1m":60,"5m":300,"15m":900,"1h":3600}[twChartState.interval];
+  if(!seconds||!twChartState.bars.length)return;
+  var stamp=Number(q.as_of_epoch);if(!isFinite(stamp)||stamp<=0)return;
+  var last=twChartState.bars[twChartState.bars.length-1],lastTime=Number(last.time);
+  if(!isFinite(lastTime)||stamp<lastTime)return;
+  /* Anchor new bars to the provider's final timestamp.  This preserves its
+     exchange-session alignment (notably 9:30-based hourly candles). */
+  var bucket=lastTime+Math.floor((stamp-lastTime)/seconds)*seconds;
+  var bar;
+  if(bucket===lastTime){
+    if(Number(last.close)===px)return;
+    bar=Object.assign({},last,{close:px,high:Math.max(Number(last.high),px),low:Math.min(Number(last.low),px)});
+    twChartState.bars[twChartState.bars.length-1]=bar;
+  }else{
+    bar={time:bucket,open:px,high:px,low:px,close:px,volume:0,session:'regular',live_quote:true};
+    twChartState.bars.push(bar);
+  }
+  twChartState.barMap[twTimeKey(bar.time)]=bar;twChartState.lastPrice=px;
+  twChartState.area.update({time:bar.time,value:bar.close});
+  twChartState.candle.update(twCandleDatum(bar));
+  twChartState.vol.update({time:bar.time,value:bar.volume||0,color:twVolumeColor(bar)});
+  twRenderIndicators();twRenderEmas();twOhlcv(twChartState.bars);twRenderDrawings();
+}
+
 function twLoadChart(ticker, interval, range, refreshOnly){
   if(!ticker) return;
   if(twChartRefreshTimer)clearTimeout(twChartRefreshTimer);twChartRefreshTimer=null;
@@ -1280,6 +1309,7 @@ function twApplyQuote(q){
   var prev = twLast[q.ticker];
   var moved = prev !== undefined && prev !== px;
   twLast[q.ticker] = px;
+  twPatchActiveCandle(q,px);
 
   document.querySelectorAll('[data-tape="' + q.ticker + '"]').forEach(function(item){
     var p = item.querySelector('[data-tape-px]');
@@ -1328,7 +1358,9 @@ async function twQuotesRefresh(){
     var resp = await fetch('/api/terminal/quotes', {headers:{'Accept':'application/json'}});
     if(!resp.ok) return;
     var data = await resp.json();
-    (data.quotes || []).forEach(twApplyQuote);
+    (data.quotes || []).forEach(function(q){
+      q.market_session=data.session;q.as_of_epoch=data.server_epoch;twApplyQuote(q);
+    });
     twApplyChips(data.chips);
     var pill = document.getElementById('tw-live');
     var label = document.getElementById('tw-live-label');
