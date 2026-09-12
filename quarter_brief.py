@@ -226,38 +226,43 @@ def _add_derived_opex(facts, rows, check_key, period_end, prior_end):
                 qf._pick(facts, tags, window=qf.QUARTER_DAYS, near=end,
                          slack=qf.PERIOD_SLACK_DAYS))
 
-    # Two derivations, matching quarter_facts. Meta prints a combined total to
-    # subtract from; KLA prints no subtotal at all, so it comes out of the
-    # income-statement identity instead. Both need a cost of revenue, which is
-    # what keeps them away from banks.
+    # Two derivations, matching quarter_facts. A combined total is preferred;
+    # otherwise the identity requires an actual OperatingIncomeLoss fact.
     def _less(period):
         cogs = _pair(qf.QUARTER_TAGS["cogs"][1], period)
         if not cogs:
             return None, None
         total = _pair(["CostsAndExpenses"], period)
-        if total and total.get("end") == cogs.get("end"):
+        if total and qf._same_duration(total, cogs):
             try:
                 return (float(total["value"]) - float(cogs["value"]),
                         "CostsAndExpenses less cost of revenue")
             except (TypeError, ValueError):
                 pass
         revenue = _pair(qf.QUARTER_TAGS["rev"][1], period)
-        # The resolved operating-income tags, not the literal
-        # OperatingIncomeLoss \u2014 KLA never tags that one.
-        operating = _pair(qf.QUARTER_TAGS["opinc"][1], period)
+        # Pre-tax income is not interchangeable with operating income here.
+        operating = _pair(qf.OPERATING_INCOME_TAGS, period)
         if not revenue or not operating:
             return None, None
-        if not (revenue.get("end") == cogs.get("end") == operating.get("end")):
+        if not qf._same_duration(revenue, cogs, operating):
             return None, None
         try:
-            return (float(revenue["value"]) - float(cogs["value"])
-                    - float(operating["value"]),
+            value = (float(revenue["value"]) - float(cogs["value"])
+                     - float(operating["value"]))
+            if value < 0:
+                return None, None
+            return (value,
                     "revenue less cost of revenue less operating income")
         except (TypeError, ValueError):
             return None, None
 
     now, source = _less(period_end)
-    if now is None:
+    components = [r.get("now") for r in rows
+                  if r["label"] in ("Research and development",
+                                    "Sales and marketing",
+                                    "General and administrative")
+                  and r.get("now") is not None]
+    if now is None or now < 0 or (components and now < sum(components)):
         return
     prior = (_less(prior_end)[0] if prior_end else None)
     row = {"label": "Total operating expenses", "now": now, "prior": prior,
