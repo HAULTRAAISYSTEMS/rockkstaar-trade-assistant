@@ -57,6 +57,7 @@ PRETAX_TAGS = [
     "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
     "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
 ]
+OPERATING_INCOME_TAGS = ["OperatingIncomeLoss"]
 
 # Each field: the label the form uses, and the XBRL tags to try in order.
 #
@@ -88,7 +89,9 @@ QUARTER_TAGS = {
                                             "NoninterestExpense",
                                             "BenefitsLossesAndExpenses",
                                             "OperatingCostsAndExpenses"]),
-    "opinc":  ("Operating income", ["OperatingIncomeLoss"] + PRETAX_TAGS),
+    # PRETAX_TAGS are selected separately for banks and insurers.  They are
+    # not interchangeable with operating income for an operating company.
+    "opinc":  ("Operating income", OPERATING_INCOME_TAGS),
     "ni":     ("Net income", ["NetIncomeLoss", "ProfitLoss"]),
     "sh":     ("Diluted share count",
                ["WeightedAverageNumberOfDilutedSharesOutstanding",
@@ -166,6 +169,20 @@ def _days(fact: dict) -> int | None:
                 - datetime.strptime(start, "%Y-%m-%d").date()).days
     except (TypeError, ValueError):
         return None
+
+
+def _same_duration(*items: dict) -> bool:
+    """True when facts describe the same duration and filing context."""
+    if not items:
+        return False
+    first = items[0]
+    for item in items[1:]:
+        if item.get("start") != first.get("start") or item.get("end") != first.get("end"):
+            return False
+        for key in ("form", "accn"):
+            if first.get(key) and item.get(key) and first.get(key) != item.get(key):
+                return False
+    return True
 
 
 def _pick(facts, tags, *, window, end=None, near=None, slack=0):
@@ -646,8 +663,12 @@ def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
     end = anchor["end"]
     prior_end = _prior_year_end(end)
 
+    company_profile = profile(facts)
+    shape = company_profile["shape"]
     fields: dict[str, dict] = {}
     for key, (label, tags) in QUARTER_TAGS.items():
+        if key == "opinc" and shape in ("bank", "insurer"):
+            tags = PRETAX_TAGS
         found = _pick(facts, tags, window=QUARTER_DAYS, end=end)
         if found:
             fields[key] = dict(found, label=_label_for(found, label))
@@ -681,7 +702,7 @@ def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
     return {
         "ticker": ticker.upper(),
         "company": name,
-        "profile": profile(facts),
+        "profile": company_profile,
         "period_end": end,
         "prior_end": prior_end,
         "form": anchor.get("form"),
@@ -709,22 +730,14 @@ def _derive_operating_expenses(facts, fields, end, prior_end):
 
       CostsAndExpenses less cost of revenue. Meta's shape.
 
-      Revenue less cost of revenue less operating income. KLA's shape, and
-      the reason it exists: KLA has never tagged OperatingExpenses in its
-      life, and its CostsAndExpenses stops in 2015. Its income statement runs
-      revenue, cost of revenue, R&D, SG&A, straight to operating income, with
-      no subtotal in between — so the check sat waiting for a line the filing
-      does not contain. This second form is forced by the arithmetic of an
-      income statement rather than assembled from components, which is its
-      virtue: it captures whatever else sits in the operating section. For
-      KLA that matters, because R&D plus SG&A comes to 679,897 against a
-      derived 670,645, so there is another line in there. Adding up the
-      components would have quietly missed it.
+      Revenue less cost of revenue less OperatingIncomeLoss. This identity is
+      valid only when the filer reports an actual operating-income subtotal.
+      Pre-tax income is excluded because interest and other non-operating
+      items sit between those two subtotals.
 
-    Both self-gate on cost of revenue, which is what keeps them away from
-    financial filers: a bank has no such line, and its "operating income" is
-    pre-tax income, so the subtraction would produce a confident wrong
-    answer rather than nothing.
+    Both self-gate on cost of revenue and matching duration/filing provenance.
+    A derived value must also be non-negative and no smaller than the visible
+    operating-expense components from that filing.
     """
     for key, period in (("opex", end), ("opexP", prior_end)):
         if key in fields or not period:
@@ -738,7 +751,7 @@ def _derive_operating_expenses(facts, fields, end, prior_end):
 
         total = _pick(facts, ["CostsAndExpenses"], window=QUARTER_DAYS, **where)
         value = source = None
-        if total and total.get("end") == cogs.get("end"):
+        if total and _same_duration(total, cogs):
             try:
                 value = float(total["value"]) - float(cogs["value"])
                 source = "CostsAndExpenses \u2212 " + cogs["tag"]
@@ -747,22 +760,14 @@ def _derive_operating_expenses(facts, fields, end, prior_end):
 
         if value is None:
             revenue = _pick(facts, QUARTER_TAGS["rev"][1], window=QUARTER_DAYS, **where)
-            # The operating income this filer actually resolved to, not the
-            # raw OperatingIncomeLoss tag. KLA never tags that one \u2014 its
-            # operating income comes through the pre-tax concept, so hunting
-            # for the literal tag found nothing and the derivation bailed,
-            # while the rebuilt statement, which reads the resolved row,
-            # printed the subtotal perfectly. Subtracting the same figure the
-            # page shows also keeps the identity checkable by eye: take
-            # revenue, take off cost of revenue, take off the operating
-            # income printed above, and you land on this number.
+            # Only an actual operating-income fact makes this identity valid.
+            # Pre-tax income includes interest and other non-operating items.
             operating = fields.get("opinc" if key == "opex" else "opincP")
-            if not operating:
-                operating = _pick(facts, QUARTER_TAGS["opinc"][1],
-                                  window=QUARTER_DAYS, **where)
             if not revenue or not operating:
                 continue
-            if not (revenue.get("end") == cogs.get("end") == operating.get("end")):
+            if operating.get("tag") not in OPERATING_INCOME_TAGS:
+                continue
+            if not _same_duration(revenue, cogs, operating):
                 continue                # three different periods is not a subtotal
             try:
                 value = (float(revenue["value"]) - float(cogs["value"])
@@ -773,6 +778,19 @@ def _derive_operating_expenses(facts, fields, end, prior_end):
             source = (revenue["tag"] + " \u2212 " + cogs["tag"] + " \u2212 "
                       + (operating.get("tag") or "operating income"))
 
+        components = []
+        for tags in (["ResearchAndDevelopmentExpense"],
+                     ["SellingAndMarketingExpense", "MarketingExpense"],
+                     ["GeneralAndAdministrativeExpense",
+                      "SellingGeneralAndAdministrativeExpense"]):
+            component = _pick(facts, tags, window=QUARTER_DAYS, **where)
+            if component and _same_duration(total, component):
+                try:
+                    components.append(float(component["value"]))
+                except (TypeError, ValueError):
+                    pass
+        if value is None or value < 0 or (components and value < sum(components)):
+            continue
         label = QUARTER_TAGS["opex"][0] + ("" if key == "opex" else ", year ago")
         fields[key] = {
             "value": value,
@@ -881,7 +899,7 @@ INCOME_ROWS = [
      ["GeneralAndAdministrativeExpense", "SellingGeneralAndAdministrativeExpense"]),
     ("opex",   "Total operating expenses", 0, ["OperatingExpenses"]),
     ("costs",  "Total costs and expenses", 0, ["CostsAndExpenses"]),
-    ("opinc",  "Operating income", 0, QUARTER_TAGS["opinc"][1]),
+    ("opinc",  "Operating income", 0, OPERATING_INCOME_TAGS),
     ("pretax", "Income before income taxes", 1,
      ["IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
       "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"]),
@@ -1031,11 +1049,16 @@ def statements(facts: dict, period_end: str, prior_end: str | None,
                 "now": first.get("value"), "prior": (second or {}).get("value"),
                 "tag": first.get("tag"),
                 "prior_end": (second or {}).get("end"),
+                "_now_fact": first,
+                "_prior_fact": second,
             })
         # Only the generic layout needs the derived subtotal; the sector
         # layouts read a total the filer prints outright.
         if name == "income" and rows is INCOME_ROWS:
             _insert_derived_opex(built)
+        for row in built:
+            row.pop("_now_fact", None)
+            row.pop("_prior_fact", None)
         title, sub = STATEMENT_TITLES[name]
         out[name] = {"title": title, "sub": sub, "rows": built}
     return out
@@ -1066,25 +1089,39 @@ def _insert_derived_opex(rows: list) -> None:
     # Meta's shape: one combined "Total costs and expenses" to subtract from.
     anchor = by_key.get("costs")
     if anchor:
+        if not _same_duration(anchor.get("_now_fact") or {}, cogs.get("_now_fact") or {}):
+            return
         now = less(anchor.get("now"), cogs.get("now"))
-        prior = less(anchor.get("prior"), cogs.get("prior"))
+        prior = (less(anchor.get("prior"), cogs.get("prior"))
+                 if anchor.get("_prior_fact") and cogs.get("_prior_fact")
+                 and _same_duration(anchor["_prior_fact"], cogs["_prior_fact"])
+                 else None)
         tag = "CostsAndExpenses − " + (cogs.get("tag") or "cost of revenue")
     else:
-        # KLA's shape: no subtotal anywhere on the statement, so take it out
-        # of the identity instead. Revenue less cost of revenue less
-        # operating income IS operating expenses, by the construction of an
-        # income statement.
+        # When actual operating income is filed, the statement identity can
+        # supply the missing subtotal. Pre-tax income never enters this row.
         revenue, operating = by_key.get("rev"), by_key.get("opinc")
         if not revenue or not operating:
             return
+        if not _same_duration(revenue.get("_now_fact") or {},
+                              cogs.get("_now_fact") or {},
+                              operating.get("_now_fact") or {}):
+            return
         anchor = operating
         now = less(revenue.get("now"), cogs.get("now"), operating.get("now"))
-        prior = less(revenue.get("prior"), cogs.get("prior"), operating.get("prior"))
+        prior_facts = [r.get("_prior_fact") for r in (revenue, cogs, operating)]
+        prior = (less(revenue.get("prior"), cogs.get("prior"), operating.get("prior"))
+                 if all(prior_facts) and _same_duration(*prior_facts) else None)
         tag = ((revenue.get("tag") or "revenue") + " − "
                + (cogs.get("tag") or "cost of revenue") + " − "
                + (operating.get("tag") or "operating income"))
 
     if now is None:
+        return
+
+    components = [by_key[k].get("now") for k in ("rnd", "sales", "admin")
+                  if k in by_key and by_key[k].get("now") is not None]
+    if now < 0 or (components and now < sum(components)):
         return
 
     derived = {

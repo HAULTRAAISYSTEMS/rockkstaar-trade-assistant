@@ -692,13 +692,9 @@ class TestTheFilerWhoPrintsNoSubtotalAtAll:
     CostsAndExpenses stops in 2015 — so the check sat waiting forever for a
     figure the filing does not contain and never will.
 
-    The figure is computable anyway. An income statement is an identity:
-    revenue less cost of revenue less operating income IS operating expenses.
-    That form is forced by the arithmetic rather than assembled from
-    components, which is its virtue — it picks up whatever else sits in the
-    operating section. For KLA that matters: R&D plus SG&A comes to 679,897
-    against a derived 670,645, so there is another line in there. Adding up
-    components would have quietly missed it.
+    KLA's available pre-tax concept is not operating income. In the current
+    quarter R&D plus SG&A is already 679,897, greater than the old 670,645
+    derivation. The safe result is to leave the check ungraded.
     """
 
     KLA = facts(
@@ -711,6 +707,9 @@ class TestTheFilerWhoPrintsNoSubtotalAtAll:
         duration("ResearchAndDevelopmentExpense", [
             ("2026-01-01", "2026-03-31", 388763, "10-Q", "2026-05-01"),
             ("2025-01-01", "2025-03-31", 338043, "10-Q", "2025-05-01")]),
+        duration("SellingGeneralAndAdministrativeExpense", [
+            ("2026-01-01", "2026-03-31", 291134, "10-Q", "2026-05-01"),
+            ("2025-01-01", "2025-03-31", 284864, "10-Q", "2025-05-01")]),
         # KLA does not tag OperatingIncomeLoss AT ALL. Its operating income
         # is only reachable through the pre-tax concept, which is why looking
         # for the literal tag found nothing and the derivation bailed even
@@ -724,45 +723,28 @@ class TestTheFilerWhoPrintsNoSubtotalAtAll:
     def test_this_filer_really_does_not_tag_operating_income(self):
         """The fixture is only worth anything if it keeps that true."""
         assert qf._facts_for("OperatingIncomeLoss", self.KLA) == []
-        assert qf.latest_quarter("KLAC", facts=self.KLA)["fields"]["opinc"]["tag"] \
-            == qf.PRETAX_TAGS[0]
+        assert "opinc" not in qf.latest_quarter("KLAC", facts=self.KLA)["fields"]
 
-    def test_operating_expenses_come_out_of_the_identity(self):
+    def test_pretax_income_is_not_used_to_invent_operating_expenses(self):
         filed = qf.latest_quarter("KLAC", facts=self.KLA)
-        assert filed["fields"]["opex"]["value"] == 3415078 - 1327672 - 1416761
-        assert filed["fields"]["opex"]["value"] == 670645
+        assert "opex" not in filed["fields"]
+        assert "opexP" not in filed["fields"]
 
-    def test_the_prior_column_too_so_the_check_can_run(self):
-        filed = qf.latest_quarter("KLAC", facts=self.KLA)
-        assert filed["fields"]["opexP"]["value"] == 622907
-
-    def test_the_check_that_waited_forever_now_grades(self):
+    def test_an_unprovable_check_stays_ungraded(self):
         import quarter_checks as qc
         filed = qf.latest_quarter("KLAC", facts=self.KLA)
         figures = {k: v["value"] for k, v in filed["fields"].items()}
         check = [c for c in qc.run(figures, filed["profile"])["checks"]
                  if c["key"] == "operating_leverage"][0]
-        assert check["verdict"] == "clean"
-        assert check["value"] == "+11.5% / +7.7%"
+        assert check["verdict"] is None
+        assert check["skipped"]
 
-    def test_it_is_labelled_as_computed_not_filed(self):
-        filed = qf.latest_quarter("KLAC", facts=self.KLA)
-        opex = filed["fields"]["opex"]
-        assert opex["derived"] is True
-        assert opex["tag"].startswith("Revenue")
-        assert opex["tag"].endswith(qf.PRETAX_TAGS[0])   # names what it subtracted
-
-    def test_the_rebuilt_statement_shows_the_row_where_it_belongs(self):
-        """Before the operating income it produces, after the lines it
-        totals — otherwise the walkthrough has nothing to light up on the
-        line the reader most needs to see."""
+    def test_the_rebuilt_statement_keeps_pretax_in_its_own_row(self):
         st = qf.statements(self.KLA, "2026-03-31", "2025-03-31")
-        keys = [r["key"] for r in st["income"]["rows"]]
-        assert keys.index("opex") == keys.index("opinc") - 1
-        assert keys.index("opex") > keys.index("cogs")
-        row = [r for r in st["income"]["rows"] if r["key"] == "opex"][0]
-        assert (row["now"], row["prior"]) == (670645, 622907)
-        assert row["derived"] is True
+        by_key = {r["key"]: r for r in st["income"]["rows"]}
+        assert "opex" not in by_key and "opinc" not in by_key
+        assert by_key["pretax"]["now"] == 1416761
+        assert by_key["rnd"]["now"] + by_key["admin"]["now"] == 679897
 
     def test_the_combined_total_is_still_preferred_when_a_filer_prints_one(self):
         """Meta's shape must not change: it prints one "Total costs and
@@ -810,3 +792,40 @@ class TestTheFilerWhoPrintsNoSubtotalAtAll:
         fields = {}
         qf._derive_operating_expenses(mismatched, fields, "2026-03-31", None)
         assert "opex" not in fields
+
+    def test_same_end_but_different_starts_are_not_a_subtotal(self):
+        mismatched = facts(
+            duration("Revenues", [
+                ("2026-04-01", "2026-06-30", 1000, "10-Q", "2026-08-01")]),
+            duration("CostOfRevenue", [
+                ("2026-04-01", "2026-06-30", 400, "10-Q", "2026-08-01")]),
+            duration("CostsAndExpenses", [
+                ("2026-03-25", "2026-06-30", 700, "10-Q", "2026-08-01")]),
+        )
+        assert "opex" not in qf.latest_quarter("EDGE", facts=mismatched)["fields"]
+
+    def test_a_negative_derived_expense_is_rejected(self):
+        impossible = facts(
+            duration("Revenues", [
+                ("2026-04-01", "2026-06-30", 1000, "10-Q", "2026-08-01")]),
+            duration("CostOfRevenue", [
+                ("2026-04-01", "2026-06-30", 400, "10-Q", "2026-08-01")]),
+            duration("OperatingIncomeLoss", [
+                ("2026-04-01", "2026-06-30", 700, "10-Q", "2026-08-01")]),
+        )
+        assert "opex" not in qf.latest_quarter("EDGE", facts=impossible)["fields"]
+
+    def test_a_derived_subtotal_cannot_be_less_than_visible_components(self):
+        contradictory = facts(
+            duration("Revenues", [
+                ("2026-04-01", "2026-06-30", 1000, "10-Q", "2026-08-01")]),
+            duration("CostOfRevenue", [
+                ("2026-04-01", "2026-06-30", 400, "10-Q", "2026-08-01")]),
+            duration("CostsAndExpenses", [
+                ("2026-04-01", "2026-06-30", 650, "10-Q", "2026-08-01")]),
+            duration("ResearchAndDevelopmentExpense", [
+                ("2026-04-01", "2026-06-30", 200, "10-Q", "2026-08-01")]),
+            duration("SellingGeneralAndAdministrativeExpense", [
+                ("2026-04-01", "2026-06-30", 100, "10-Q", "2026-08-01")]),
+        )
+        assert "opex" not in qf.latest_quarter("EDGE", facts=contradictory)["fields"]
