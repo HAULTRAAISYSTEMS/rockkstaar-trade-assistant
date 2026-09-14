@@ -127,6 +127,44 @@ PLAIN = facts(
     instant("LiabilitiesCurrent", [("2026-06-30", 500, "2026-07-30")]),
 )
 
+# AMD reports a normal operating-company income statement and classified
+# balance sheet, but also uses InterestIncomeExpenseNet for the ordinary
+# below-the-line interest item.  That generic tag must never make it a bank.
+AMD_LIKE = facts(
+    "Advanced Micro Devices, Inc.",
+    duration("RevenueFromContractWithCustomerExcludingAssessedTax", [
+        ("2026-03-29", "2026-06-27", 11536e6, "2026-08-05"),
+        ("2025-03-30", "2025-06-28", 7685e6, "2025-08-06"),
+    ]),
+    duration("CostOfGoodsAndServicesSold", [
+        ("2026-03-29", "2026-06-27", 5333e6, "2026-08-05"),
+        ("2025-03-30", "2025-06-28", 4626e6, "2025-08-06"),
+    ]),
+    duration("OperatingExpenses", [
+        ("2026-03-29", "2026-06-27", 4213e6, "2026-08-05"),
+        ("2025-03-30", "2025-06-28", 3193e6, "2025-08-06"),
+    ]),
+    duration("OperatingIncomeLoss", [
+        ("2026-03-29", "2026-06-27", 1990e6, "2026-08-05"),
+        ("2025-03-30", "2025-06-28", -134e6, "2025-08-06"),
+    ]),
+    duration("InterestIncomeExpenseNet", [
+        ("2025-01-01", "2025-12-27", 215e6, "2026-02-04"),
+    ]),
+    instant("AssetsCurrent", [
+        ("2026-06-27", 31522e6, "2026-08-05"),
+        ("2025-12-27", 26947e6, "2026-08-05"),
+    ]),
+    instant("LiabilitiesCurrent", [
+        ("2026-06-27", 12081e6, "2026-08-05"),
+        ("2025-12-27", 9455e6, "2026-08-05"),
+    ]),
+    instant("AccountsReceivableNetCurrent", [
+        ("2026-06-27", 7281e6, "2026-08-05"),
+        ("2025-12-27", 6315e6, "2026-08-05"),
+    ]),
+)
+
 
 class TestWhatKindOfCompanyItIs:
     @pytest.mark.parametrize("fixture, expected", [
@@ -146,6 +184,52 @@ class TestWhatKindOfCompanyItIs:
         is a structure, and only the second should change the questions."""
         assert qf.detect_shape(PLAIN) == "operating"
         assert qf.context_for("operating")["not_applicable"] == {}
+
+    def test_amd_s_interest_line_does_not_make_it_a_bank(self):
+        filed = qf.latest_quarter("AMD", facts=AMD_LIKE)
+        assert filed["profile"]["shape"] == "operating"
+        assert filed["fields"]["opinc"]["tag"] == "OperatingIncomeLoss"
+        assert filed["fields"]["cogs"]["value"] == 5333e6
+        assert filed["fields"]["ca"]["value"] == 31522e6
+        assert filed["profile"]["not_applicable"] == {}
+
+    def test_a_generic_interest_line_alone_is_not_a_bank_signature(self):
+        operating = facts(
+            "Interest-Earning Operating Co.",
+            duration("InterestIncomeExpenseNet", [
+                ("2025-01-01", "2025-12-31", 20, "2026-02-01")]),
+            instant("AssetsCurrent", [
+                ("2025-12-31", 100, "2026-02-01")]),
+        )
+        assert qf.detect_shape(operating) == "operating"
+
+    def test_customer_deposits_alone_do_not_make_an_operating_company_a_bank(self):
+        operating = facts(
+            "Deposit-Taking Operating Co.",
+            instant("Deposits", [("2026-06-30", 25, "2026-07-30")]),
+            instant("AssetsCurrent", [
+                ("2026-06-30", 100, "2026-07-30")]),
+        )
+        assert qf.detect_shape(operating) == "operating"
+
+    def test_deposits_plus_net_interest_still_identify_a_bank(self):
+        sparse_bank = facts(
+            "Sparse Bank",
+            instant("Deposits", [("2026-06-30", 1000, "2026-07-30")]),
+            duration("InterestIncomeExpenseNet", [
+                ("2026-04-01", "2026-06-30", 20, "2026-07-30")]),
+        )
+        assert qf.detect_shape(sparse_bank) == "bank"
+
+    def test_lease_income_alone_does_not_make_an_operating_lessor_a_reit(self):
+        lessor = facts(
+            "Equipment Lessor",
+            duration("OperatingLeaseLeaseIncome", [
+                ("2026-04-01", "2026-06-30", 20, "2026-07-30")]),
+            instant("AssetsCurrent", [
+                ("2026-06-30", 100, "2026-07-30")]),
+        )
+        assert qf.detect_shape(lessor) == "operating"
 
 
 class TestTheChecksABankHasNoLinesFor:

@@ -158,9 +158,23 @@ def _cash_conversion(f, labels=None):
     matched against the year-to-date net income printed at the top of it.
     """
     cfo, niy = f.get("cfo"), f.get("niy")
-    if cfo is None or not niy:
+    if cfo is None or niy is None or niy == 0:
         return _skip("cash_conversion", "Cash flow ÷ net income",
                      "cash from operations and year-to-date net income")
+    if niy < 0:
+        verdict = WATCH if cfo >= 0 else FLAG
+        says = (
+            "The company reported a year-to-date accounting loss, so dividing "
+            "cash flow by net income would produce a misleading conversion "
+            "ratio. Operating cash flow is positive despite that loss."
+            if cfo >= 0 else
+            "The company reported both an accounting loss and negative operating "
+            "cash flow. The conversion ratio is not meaningful; inspect the cash "
+            "burn and working-capital movements directly."
+        )
+        return _check("cash_conversion", "Cash flow ÷ net income", "n/m",
+                      f"{_com(cfo)} cash flow · {_com(niy)} net income",
+                      says, verdict)
     ratio = cfo / niy
     verdict = CLEAN if ratio >= 1 else (WATCH if ratio >= 0.8 else FLAG)
     says = ("Cash exceeded reported profit. Normal and healthy — non-cash "
@@ -212,9 +226,11 @@ def _operating_leverage(f, labels=None):
                      "revenue and total operating expenses, both periods")
     rev_growth = (rev - rev_p) / rev_p
     opex_growth = (opex - opex_p) / opex_p
-    if opex_growth <= rev_growth:
+    growth_gap = opex_growth - rev_growth
+    if growth_gap <= 0:
         verdict = CLEAN
-    elif opex_growth <= rev_growth * 1.5:
+    elif ((rev_growth >= 0 and opex_growth <= rev_growth * 1.5) or
+          (rev_growth < 0 and growth_gap <= 0.05)):
         verdict = WATCH
     else:
         verdict = FLAG
@@ -225,14 +241,34 @@ def _operating_leverage(f, labels=None):
             "operating income still grew.")
 
     op_inc, op_inc_p = f.get("opinc"), f.get("opincP")
-    if op_inc is not None and op_inc_p:
-        inc_growth = (op_inc - op_inc_p) / op_inc_p
+    if op_inc is not None and op_inc_p is not None:
         # A bank has no operating income line; the equivalent is pre-tax
         # income, and calling it the wrong thing teaches the wrong thing.
         line = (labels or {}).get("opinc") or "Operating income"
-        says += f" {line} {_signed(inc_growth)}."
-        if inc_growth < 0:
-            verdict = FLAG
+        if op_inc_p > 0:
+            inc_growth = (op_inc - op_inc_p) / op_inc_p
+            says += f" {line} {_signed(inc_growth)}."
+            if inc_growth < 0:
+                verdict = FLAG
+        elif op_inc_p < 0 <= op_inc:
+            says += (f" {line} swung from a {_com(abs(op_inc_p))} loss to "
+                     f"{_com(op_inc)} of profit; a percentage change across "
+                     "zero is not meaningful.")
+        elif op_inc_p < 0 and op_inc < 0:
+            if op_inc > op_inc_p:
+                says += (f" The {line.lower()} loss narrowed from "
+                         f"{_com(abs(op_inc_p))} to {_com(abs(op_inc))}; a "
+                         "percentage change across negative values is not "
+                         "meaningful.")
+            else:
+                says += (f" The {line.lower()} loss widened from "
+                         f"{_com(abs(op_inc_p))} to {_com(abs(op_inc))}.")
+                verdict = FLAG
+        else:  # prior period was exactly break-even
+            says += (f" {line} moved from break-even to {_com(op_inc)}; a "
+                     "percentage growth rate is not meaningful.")
+            if op_inc < 0:
+                verdict = FLAG
     return _check("operating_leverage", "Revenue vs expense growth",
                   f"{_signed(rev_growth)} / {_signed(opex_growth)}",
                   "revenue growth / operating expense growth", says, verdict)
@@ -292,7 +328,8 @@ def _share_count(f, labels=None):
 
     ni, ni_p = f.get("ni"), f.get("niP")
     eps, eps_p = f.get("eps"), f.get("epsP")
-    if ni and ni_p and eps and eps_p:
+    if (ni is not None and ni_p is not None and eps is not None and
+            eps_p is not None and ni_p > 0 and eps_p > 0):
         ni_growth = (ni - ni_p) / ni_p
         eps_growth = (eps - eps_p) / eps_p
         gap = (eps_growth - ni_growth) * 100
@@ -308,6 +345,16 @@ def _share_count(f, labels=None):
         # Profit falling while EPS rises is the buyback masking the business.
         if ni_growth <= 0 and eps_growth > 0:
             verdict = FLAG
+    elif ni is not None and ni_p is not None and ni_p <= 0:
+        if ni_p < 0 <= ni:
+            says += (" Net income turned from a loss to a profit; percentage "
+                     "growth across zero is not meaningful, so dilution is "
+                     "read from the share count itself.")
+        elif ni_p < 0 and ni < 0:
+            direction = "narrowed" if ni > ni_p else "widened"
+            says += (f" The net loss {direction}; percentage growth on a "
+                     "negative base is not meaningful, so dilution is read "
+                     "from the share count itself.")
     return _check("share_count", "Diluted share count", _signed(change),
                   f"{_com(sh)} vs {_com(sh_p)}", says, verdict)
 

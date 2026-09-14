@@ -312,18 +312,32 @@ def _prior_year_end(end: str) -> str | None:
 # history, rather than this quarter alone — a tag missing from one quarter is
 # a gap, a tag missing from twenty years is a structure.
 
+# Only concepts that are specific enough to identify the industry belong in
+# this table.  InterestIncomeExpenseNet is not a bank signature: AMD and many
+# other operating companies use it for the ordinary interest line below
+# operating income.  Deposits can likewise describe customer or contract
+# deposits outside banking.  Treating either concept as sufficient evidence
+# used to turn AMD into a bank and suppress five checks that its filing fully
+# supports.
 SHAPE_SIGNATURES = (
     ("bank", ["RevenuesNetOfInterestExpense", "NoninterestExpense",
-              "InterestIncomeExpenseNet", "Deposits",
               "ProvisionForLoanLeaseAndOtherLosses"]),
     ("insurer", ["PremiumsEarnedNet", "BenefitsLossesAndExpenses",
                  "PolicyholderBenefitsAndClaimsIncurredNet",
                  "LiabilityForClaimsAndClaimsAdjustmentExpense"]),
-    ("reit", ["RealEstateInvestmentPropertyNet", "RealEstateRevenueNet",
-              "OperatingLeaseLeaseIncome"]),
+    ("reit", ["RealEstateInvestmentPropertyNet", "RealEstateRevenueNet"]),
     ("utility", ["RegulatedAndUnregulatedOperatingRevenue",
                  "PublicUtilitiesPropertyPlantAndEquipmentNet",
                  "UtilitiesOperatingExpense"]),
+)
+
+# A conjunction of weaker concepts can still be meaningful.  A bank normally
+# reports both deposits and net interest income; either concept by itself is
+# common enough outside banking that the conservative answer is not to infer a
+# bank.  False negatives merely leave a check ungraded, while false positives
+# actively hide valid financial analysis.
+SHAPE_CONJUNCTIONS = (
+    ("bank", ["Deposits", "InterestIncomeExpenseNet"]),
 )
 
 SHAPES = {
@@ -488,6 +502,9 @@ def detect_shape(facts: dict) -> str:
     """Which of the shapes above this filer is, from its own tag history."""
     for shape, signature in SHAPE_SIGNATURES:
         if _ever(facts, signature):
+            return shape
+    for shape, signature in SHAPE_CONJUNCTIONS:
+        if all(_ever(facts, [tag]) for tag in signature):
             return shape
     if not _ever(facts, INSTANT_TAGS["ca"][1]):
         return "unclassified"

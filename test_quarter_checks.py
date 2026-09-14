@@ -136,6 +136,53 @@ class TestTheBands:
         assert result["verdict"] == "flag"
         assert result["value"] == "-50"
 
+    def test_cash_conversion_does_not_divide_by_a_negative_loss(self):
+        result = by_key(qc.run({"cfo": 40, "niy": -20}))["cash_conversion"]
+        assert result["value"] == "n/m"
+        assert result["verdict"] == "watch"
+        assert "misleading" in result["says"]
+
+    def test_cash_burn_with_a_net_loss_is_flagged_without_a_fake_ratio(self):
+        result = by_key(qc.run({"cfo": -40, "niy": -20}))["cash_conversion"]
+        assert result["value"] == "n/m"
+        assert result["verdict"] == "flag"
+
+
+class TestNegativeComparisonBases:
+    def test_a_profit_turnaround_is_not_reported_as_negative_growth(self):
+        result = by_key(qc.run({
+            "rev": 11536, "revP": 7685,
+            "opex": 4213, "opexP": 3193,
+            "opinc": 1990, "opincP": -134,
+        }))["operating_leverage"]
+        assert result["verdict"] == "clean"
+        assert "swung from a 134 loss to 1,990 of profit" in result["says"]
+        assert "-1585.1%" not in result["says"]
+
+    def test_a_narrowing_loss_is_not_called_negative_growth(self):
+        result = by_key(qc.run({
+            "rev": 110, "revP": 100, "opex": 105, "opexP": 100,
+            "opinc": -5, "opincP": -10,
+        }))["operating_leverage"]
+        assert result["verdict"] == "clean"
+        assert "loss narrowed" in result["says"]
+
+    def test_a_widening_loss_is_flagged(self):
+        result = by_key(qc.run({
+            "rev": 110, "revP": 100, "opex": 105, "opexP": 100,
+            "opinc": -20, "opincP": -10,
+        }))["operating_leverage"]
+        assert result["verdict"] == "flag"
+        assert "loss widened" in result["says"]
+
+    def test_dilution_analysis_does_not_compute_growth_from_a_net_loss(self):
+        result = by_key(qc.run({
+            "sh": 110, "shP": 100, "ni": 20, "niP": -10,
+            "eps": 0.20, "epsP": -0.10,
+        }))["share_count"]
+        assert result["verdict"] == "watch"
+        assert "turned from a loss to a profit" in result["says"]
+
 
 class TestBuybacksVersusTheBusiness:
     def test_eps_rising_while_profit_falls_is_flagged(self):
