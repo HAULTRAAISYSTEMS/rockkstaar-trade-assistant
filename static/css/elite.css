@@ -94,6 +94,11 @@ body::before {
   min-width: 0;
   margin-inline: auto;
 }
+/* style.css makes this row horizontally scrollable. That also creates a
+   vertical clipping context, so the absolutely positioned details panels
+   open but remain invisible. Desktop Elite navigation has its own compact
+   breakpoints and must allow those panels to escape the row. */
+.elite-navbar .nav-links { overflow: visible; }
 .nav-link {
   position: relative;
   display: inline-flex;
@@ -139,6 +144,7 @@ body::before {
   border: 1px solid var(--elite-border-strong);
   border-radius: 12px;
   box-shadow: 0 22px 54px rgba(0,0,0,.58);
+  max-width: min(340px, calc(100vw - 24px));
 }
 .nav-menu__panel { left: 0; }
 .nav-menu__panel--compact { width: 310px; }
