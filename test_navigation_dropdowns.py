@@ -18,6 +18,12 @@ def test_research_learn_and_account_are_native_dropdowns():
     assert template.count('<details class="nav-menu">') == 3
 
 
+def test_account_dropdown_links_to_free_browser_alerts():
+    template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
+    assert "'browser_push.settings'" in template
+    assert '>Browser Alerts</a>' in template
+
+
 def test_navigation_script_closes_sibling_and_outside_menus():
     script = (ROOT / "static/js/main.js").read_text(encoding="utf-8")
     assert '".elite-navbar details.nav-menu, .elite-navbar details.nav-system"' in script

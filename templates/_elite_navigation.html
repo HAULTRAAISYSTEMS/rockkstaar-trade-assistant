@@ -1,7 +1,7 @@
 {% set ep = request.endpoint %}
 {% set research_active = ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare', 'intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'macro_page') or (ep and (ep.startswith('live_research.') or ep.startswith('research_memory.'))) %}
 {% set learn_active = ep in ('learn_index', 'learn_concept', 'learn_paths', 'learn_path', 'learn_review', 'tradestaar_ai') %}
-{% set account_active = ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'schwab_account', 'brokers_page') %}
+{% set account_active = ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'schwab_account', 'brokers_page', 'browser_push.settings') %}
 <nav class="navbar elite-navbar" aria-label="Primary navigation">
   <a href="{{ url_for('liquidity_page') }}" class="nav-brand" aria-label="Tradestaar Elite Today">
     <img src="{{ url_for('static', filename='logo.png') }}" alt="Tradestaar Elite" class="nav-logo"
@@ -47,7 +47,7 @@
         <div class="nav-menu__grid">
           <a href="{{ url_for('account') }}">Overview</a><a href="{{ url_for('journal') }}">Journal</a>
           <a href="{{ url_for('risk_settings') }}">Risk</a><a href="{{ url_for('paper_trading') }}">Paper Trading</a>
-          <a href="{{ url_for('brokers_page') }}">Brokers</a>
+          <a href="{{ url_for('brokers_page') }}">Brokers</a><a href="{{ url_for('browser_push.settings') }}">Browser Alerts</a>
           {% if session.get('is_admin') %}<a href="{{ url_for('admin_users') }}">Admin</a>{% endif %}
         </div>
       </div>
