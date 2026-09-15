@@ -8156,14 +8156,107 @@ def admin_user_password(uid):
 # Research Desk
 # ---------------------------------------------------------------------------
 
+def _research_url(value: str) -> str:
+    """Keep only links that are safe to render in the company workspace."""
+    value = str(value or "").strip()
+    return value if value.startswith(("https://", "http://", "/")) else ""
+
+
+def _research_sort_time(value) -> float:
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        return parsed.timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _company_research_context(user_id: int, ticker: str, data: dict | None, stock: dict) -> dict:
+    """Join the company's evidence into one read model without copying it."""
+    import research_feed_phase2 as _research_feed
+    import research_memory as _research_memory
+
+    try:
+        published = _research_feed.list_published(ticker=ticker, user_id=user_id, limit=12)
+    except Exception as exc:
+        logger.debug("company research feed unavailable for %s: %s", ticker, exc)
+        published = []
+    try:
+        memory_cards = _research_memory.list_cards(user_id, ticker=ticker, limit=50)
+    except Exception as exc:
+        logger.debug("company research memory unavailable for %s: %s", ticker, exc)
+        memory_cards = []
+
+    try:
+        intel = _intel.get_intel_summary() or {}
+    except Exception as exc:
+        logger.debug("company research intel unavailable for %s: %s", ticker, exc)
+        intel = {}
+
+    headlines = []
+    for item in (intel.get("market_news") or intel.get("news") or []):
+        if str(item.get("ticker") or "").upper() != ticker:
+            continue
+        headlines.append({
+            "kind": "News", "headline": item.get("headline"),
+            "summary": item.get("summary") or item.get("reason") or "",
+            "source": item.get("source") or "Connected news source",
+            "url": _research_url(item.get("url")),
+            "published_at": item.get("published_at") or item.get("published") or item.get("time") or "",
+            "sentiment": item.get("impact") or "",
+        })
+        if len(headlines) == 12:
+            break
+
+    reviewed_at = get_user_setting(user_id, f"company_research_reviewed:{ticker}", "") or ""
+    changes = []
+    for post in published:
+        timestamp = post.get("source_published_at") or post.get("published_at") or post.get("updated_at") or ""
+        changes.append({
+            "kind": post.get("catalyst_type") or post.get("category") or "Research",
+            "headline": post.get("headline"), "summary": post.get("tradestaar_take") or post.get("research_notes") or "",
+            "source": post.get("source_name") or "Tradestaar Live Research",
+            "url": _research_url(post.get("source_url")), "published_at": timestamp,
+            "sentiment": post.get("sentiment") or "", "priority": post.get("priority") or "",
+            "memory_url": f"/research-memory?post_id={post.get('id')}",
+            "is_new": bool(reviewed_at and _research_sort_time(timestamp) > _research_sort_time(reviewed_at)),
+            "sort_time": _research_sort_time(timestamp),
+        })
+    for item in headlines:
+        timestamp = item.get("published_at") or ""
+        changes.append(dict(item, is_new=bool(reviewed_at and _research_sort_time(timestamp) > _research_sort_time(reviewed_at)),
+                            sort_time=_research_sort_time(timestamp), memory_url=""))
+    changes.sort(key=lambda item: item.get("sort_time") or 0, reverse=True)
+
+    earnings = None
+    earnings_data = intel.get("earnings") or {}
+    for bucket in ("today", "tomorrow", "this_week", "coming_up"):
+        for event in earnings_data.get(bucket, []) or []:
+            if str(event.get("ticker") or "").upper() == ticker:
+                earnings = event
+                break
+        if earnings:
+            break
+    if not earnings and stock.get("earnings_date"):
+        earnings = {"date": stock.get("earnings_date"), "time_label": stock.get("earnings_time") or "TBD",
+                    "source": stock.get("earnings_source") or "Cached company snapshot"}
+
+    latest = ((data or {}).get("history") or [{}])[0]
+    fundamentals_as_of = (data or {}).get("ttm_period_end") or latest.get("period_end") or ""
+    return {
+        "published": published, "memory_cards": memory_cards, "headlines": headlines,
+        "changes": changes[:12], "new_count": sum(1 for item in changes if item.get("is_new")),
+        "reviewed_at": reviewed_at, "earnings": earnings,
+        "fundamentals_as_of": fundamentals_as_of, "latest_financials": latest,
+        "price": stock.get("current_price") or stock.get("price") or stock.get("close"),
+        "change_pct": stock.get("change_pct") if stock.get("change_pct") is not None else stock.get("daily_change_pct"),
+        "market_as_of": stock.get("updated_at") or stock.get("last_updated") or stock.get("live_updated_at") or "",
+        "description": stock.get("company_description") or "",
+        "source_count": len(published) + len(headlines) + (1 if data else 0),
+    }
+
 @app.route("/research")
 def research_page():
-    """Research Desk: 40-point fundamental scorecard plus the study log.
-
-    The scorecard is rendered from fundamentals_engine, the same engine behind
-    /fundamentals, so both pages always report the same score. Presentation is
-    all that differs between them.
-    """
+    """One company workspace across fundamentals, changes, filings, and memory."""
     ticker = (request.args.get("ticker") or "").strip().upper()[:12]
     if ticker and not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
         ticker = ""
@@ -8181,7 +8274,26 @@ def research_page():
             stock = get_stock_data(ticker) or {}
         except Exception as exc:
             logger.debug("research_page price lookup failed: %s", exc)
-    return render_template("research.html", ticker=ticker, data=data, error=error, stock=stock)
+    research = None
+    if ticker:
+        research = _company_research_context(current_user_id(), ticker, data, stock)
+    try:
+        suggestions = get_user_tracked_tickers(current_user_id())[:12]
+    except Exception:
+        suggestions = []
+    return render_template("research.html", ticker=ticker, data=data, error=error, stock=stock,
+                           research=research, suggestions=suggestions)
+
+
+@app.route("/research/<ticker>/reviewed", methods=["POST"])
+def company_research_reviewed(ticker):
+    """Advance the explicit 'what changed' checkpoint for one user and ticker."""
+    ticker = (ticker or "").strip().upper()[:12]
+    if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
+        return redirect(url_for("research_page"))
+    set_user_setting(current_user_id(), f"company_research_reviewed:{ticker}", _et_now().isoformat())
+    flash(f"{ticker} research marked reviewed. New changes will stand out next time.", "success")
+    return redirect(url_for("research_page", ticker=ticker, section="changes"))
 
 
 # ---------------------------------------------------------------------------

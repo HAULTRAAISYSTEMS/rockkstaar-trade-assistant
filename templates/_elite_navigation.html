@@ -19,7 +19,7 @@
       <summary class="nav-link {{ 'nav-link-active' if research_active }}">Research <span aria-hidden="true">⌄</span></summary>
       <div class="nav-menu__panel">
         <span class="nav-menu__label">Understand the market</span>
-        <a href="{{ url_for('fundamentals_page') }}"><strong>Company Research</strong><small>Financials, filings, quality and valuation</small></a>
+        <a href="{{ url_for('research_page') }}"><strong>Company Research</strong><small>One workspace for financials, changes, filings and thesis</small></a>
         <a href="{{ url_for('live_research.feed') }}"><strong>Live Research</strong><small>Curated changes, catalysts and source notes</small></a>
         <a href="{{ url_for('intel') }}"><strong>Market Intel</strong><small>Latest news, sentiment and institutional activity</small></a>
         <div class="nav-menu__grid">
@@ -79,7 +79,7 @@
 <nav class="mobile-app-nav" aria-label="Primary mobile navigation">
   <a href="{{ url_for('liquidity_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep == 'liquidity_page' }}" {% if ep == 'liquidity_page' %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">⌂</span><span>Today</span></a>
   <a href="{{ url_for('terminal') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('terminal', 'dashboard', 'quick_mode') }}" {% if ep in ('terminal', 'dashboard', 'quick_mode') %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">⌁</span><span>Terminal</span></a>
-  <a href="{{ url_for('fundamentals_page') }}" class="mobile-app-nav__item {{ 'is-active' if research_active }}" {% if research_active %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">◆</span><span>Research</span></a>
+  <a href="{{ url_for('research_page') }}" class="mobile-app-nav__item {{ 'is-active' if research_active }}" {% if research_active %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">◆</span><span>Research</span></a>
   <a href="{{ url_for('watchlists_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep == 'watchlists_page' }}" {% if ep == 'watchlists_page' %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">★</span><span>Watchlists</span></a>
   <a href="{{ url_for('learn_index') }}" class="mobile-app-nav__item {{ 'is-active' if learn_active }}" {% if learn_active %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">◈</span><span>Learn</span></a>
   <a href="{{ url_for('account') }}" class="mobile-app-nav__item {{ 'is-active' if account_active }}" {% if account_active %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">●</span><span>Account</span></a>
