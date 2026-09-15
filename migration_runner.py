@@ -15,6 +15,7 @@ MIGRATIONS = (
     "migrations.m0004_quarter_briefs",
     "migrations.m0005_research_memory",
     "migrations.m0006_sms_alerts",
+    "migrations.m0007_browser_push",
 )
 
 

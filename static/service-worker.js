@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tradestaar-shell-v9';
+const CACHE_NAME = 'tradestaar-shell-v10';
 const SHELL_ASSETS = [
   '/static/logo.png',
   '/static/icon-192.png',
@@ -51,4 +51,33 @@ self.addEventListener('fetch', (event) => {
       ))
     );
   }
+});
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch (_) { payload = {}; }
+  const title = payload.title || 'Tradestaar research alert';
+  const options = {
+    body: payload.body || 'A material change matched one of your saved theses.',
+    icon: '/static/icon-192.png?v=5',
+    badge: '/static/favicon-32.png?v=5',
+    tag: payload.tag || 'tradestaar-research',
+    data: { url: payload.url || '/opportunity' }
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const requested = new URL((event.notification.data || {}).url || '/opportunity', self.location.origin);
+  const destination = requested.origin === self.location.origin ? requested.href : new URL('/opportunity', self.location.origin).href;
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+    for (const client of clients) {
+      if (client.url.startsWith(self.location.origin) && 'focus' in client) {
+        if ('navigate' in client) return client.navigate(destination).then(() => client.focus());
+        return client.focus();
+      }
+    }
+    return self.clients.openWindow ? self.clients.openWindow(destination) : undefined;
+  }));
 });

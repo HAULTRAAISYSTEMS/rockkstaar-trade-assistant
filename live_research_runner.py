@@ -15,6 +15,7 @@ from live_research_discovery import discover_market_news
 import live_research_autopublish as autopublish
 import insider_alert_sync
 import sms_alerts
+import browser_push
 
 DEFAULT_TICKERS=("NVDA","META","AAPL","MSFT","AMZN","GOOGL","TSLA","AMD")
 
@@ -71,6 +72,12 @@ def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
             total.update(sms_alerts.deliver_pending(conn))
         except Exception as exc:
             total["errors"].append("sms:"+type(exc).__name__)
+        # Standards-based browser push has no paid provider. Subscriptions are
+        # explicit per device and delivery uses the same thesis-aware boundary.
+        try:
+            total.update(browser_push.deliver_pending(conn))
+        except Exception as exc:
+            total["errors"].append("push:"+type(exc).__name__)
         # Queue depth. drafts_created is 0 on most firings by design - a story
         # creates a draft once, on the first run after it appears, and the next
         # 5-minute run correctly sees it as a duplicate. Reading a single run
