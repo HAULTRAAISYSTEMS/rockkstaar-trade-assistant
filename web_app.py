@@ -3,9 +3,11 @@ import app as legacy
 from live_research_routes import create_live_research_blueprint
 from stock_research_integration import install_stock_research
 from live_research_realtime import websocket_loop
+from research_memory_routes import create_research_memory_blueprint
 
 app=legacy.app
 app.register_blueprint(create_live_research_blueprint(require_admin=legacy.require_admin,current_user=legacy.current_user,tracked_tickers=legacy.get_user_tracked_tickers))
+app.register_blueprint(create_research_memory_blueprint(current_user=legacy.current_user))
 install_stock_research(app)
 
 @legacy.sock.route('/ws/live-research')

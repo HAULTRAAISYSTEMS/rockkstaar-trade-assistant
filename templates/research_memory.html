@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Research Memory — Tradestaar Elite{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/research_memory.css') }}">{% endblock %}
+{% block body_class %}memory-page{% endblock %}
+{% block content %}
+<section class="rm-shell">
+  <header class="rm-hero"><div><div class="rm-kicker">CAPTURE → DISTILL → RECALL</div><h1>Research Memory</h1><p>Turn market information into conclusions you can still explain next week.</p></div><a class="rm-review-cta" href="{{ url_for('research_memory.review') }}"><strong>{{ summary.due }}</strong><span>due for review</span></a></header>
+  <nav class="rm-tabs" aria-label="Research Memory sections"><a class="active" href="{{ url_for('research_memory.notebook') }}">Notebook</a><a href="{{ url_for('research_memory.review') }}">Review{% if summary.due %}<span>{{ summary.due }}</span>{% endif %}</a><a href="{{ url_for('live_research.feed') }}">Research Inbox</a></nav>
+  <section class="rm-stats" aria-label="Memory summary"><div><strong>{{ summary.total }}</strong><span>active notes</span></div><div><strong>{{ summary.this_week }}</strong><span>added this week</span></div><div><strong>{{ summary.learned }}</strong><span>retained</span></div><div><strong>{{ summary.tickers|length }}</strong><span>companies</span></div></section>
+
+  <details class="rm-capture" {% if source_post or not cards %}open{% endif %}>
+    <summary><span>＋ Capture research</span><small>Saving the link is not the work. Write the conclusion.</small></summary>
+    <form method="post" action="{{ url_for('research_memory.create') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% if source_post %}
+      <input type="hidden" name="research_post_id" value="{{ source_post.id }}">
+      <div class="rm-source-preview"><div><strong>{{ source_post.ticker }}</strong><span>{{ source_post.company_name }}</span></div><h2>{{ source_post.headline }}</h2><small>{{ source_post.source_name or 'Tradestaar Research' }}</small></div>
+      {% else %}
+      <div class="rm-form-row rm-form-source"><label>Ticker <input name="ticker" required maxlength="20" placeholder="AMD" autocomplete="off"></label><label>Company <input name="company_name" maxlength="160" placeholder="Advanced Micro Devices"></label><label>Source <input name="source_name" maxlength="160" placeholder="Company IR, SEC, Reuters…"></label></div>
+      <label>Headline or research claim <input name="headline" required maxlength="300" placeholder="What happened?"></label>
+      <label>Original source URL <input type="url" name="source_url" maxlength="2000" placeholder="https://…"></label>
+      {% endif %}
+      <label class="rm-required">Why does this matter? <textarea name="why_it_matters" required rows="3" maxlength="4000" placeholder="Explain the investment implication in your own words—not the article's summary."></textarea></label>
+      <div class="rm-form-row"><label>Important number or change <textarea name="key_change" rows="2" maxlength="2000" placeholder="Revenue guidance rose from…"></textarea></label><label>Thesis impact <select name="thesis_impact">{% for impact in impacts %}<option value="{{ impact }}">{{ impact|capitalize }}</option>{% endfor %}</select></label></div>
+      <label>What would prove this interpretation wrong? <textarea name="disconfirming_evidence" rows="2" maxlength="3000" placeholder="A future result, risk, or competing explanation…"></textarea></label>
+      <label>Supporting notes <textarea name="notes" rows="3" maxlength="8000" placeholder="Evidence, management language, comparisons, or follow-up work.">{% if source_post %}{{ source_post.tradestaar_take or source_post.research_notes }}{% endif %}</textarea></label>
+      <label>Your recall question <input name="review_question" maxlength="600" placeholder="Leave blank to use Tradestaar's question"></label>
+      <div class="rm-capture-actions"><button type="submit">Save to Research Memory</button><span>Your first review is available immediately.</span></div>
+    </form>
+  </details>
+
+  <section class="rm-notebook">
+    <header class="rm-section-head"><div><h2>Company Memory</h2><p>A timeline of what changed and how it affected your thinking.</p></div><form method="get"><label>Company<select name="ticker" onchange="this.form.submit()"><option value="">All companies</option>{% for ticker in summary.tickers %}<option value="{{ ticker }}" {{ 'selected' if selected_ticker == ticker }}>{{ ticker }}</option>{% endfor %}</select></label>{% if selected_ticker %}<a href="{{ url_for('research_memory.notebook') }}">Clear</a>{% endif %}</form></header>
+    <div class="rm-card-list">
+      {% for card in cards %}
+      <article class="rm-card impact-{{ card.thesis_impact }}" id="card-{{ card.id }}">
+        <header><div><a href="{{ url_for('stock_detail', ticker=card.ticker) }}">{{ card.ticker }}</a>{% if card.company_name %}<span>{{ card.company_name }}</span>{% endif %}</div><time datetime="{{ card.created_at }}">{{ card.created_at[:10] }}</time></header>
+        <h3>{{ card.headline }}</h3><div class="rm-impact"><span>{{ card.thesis_impact }} thesis</span>{% if card.key_change %}<b>{{ card.key_change }}</b>{% endif %}</div>
+        <div class="rm-why"><small>WHY IT MATTERS</small><p>{{ card.why_it_matters }}</p></div>
+        {% if card.disconfirming_evidence %}<details class="rm-evidence"><summary>What could prove this wrong?</summary><p>{{ card.disconfirming_evidence }}</p></details>{% endif %}{% if card.notes %}<details class="rm-evidence"><summary>Supporting notes</summary><p>{{ card.notes }}</p></details>{% endif %}
+        <footer><div>{% if card.source_url %}<a href="{{ card.source_url }}" target="_blank" rel="noopener noreferrer">{{ card.source_name or 'Original source' }} ↗</a>{% elif card.source_name %}<span>{{ card.source_name }}</span>{% endif %}<span>Box {{ card.box }} · {{ card.review_count }} reviews</span></div><form method="post" action="{{ url_for('research_memory.archive', card_id=card.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Archive</button></form></footer>
+      </article>
+      {% else %}<div class="rm-empty"><strong>No research cards yet.</strong><span>Capture one above or send an item here from Live Research.</span><a href="{{ url_for('live_research.feed') }}">Open Research Inbox →</a></div>{% endfor %}
+    </div>
+  </section>
+</section>
+{% endblock %}

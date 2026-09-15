@@ -69,7 +69,9 @@
     add(source, node("span", "", post.source_name || "Tradestaar Research")); source.appendChild(document.createTextNode(" · ")); source.appendChild(timeNode(sourceTime(post)));
     if (["8-K", "10-Q", "10-K"].indexOf(post.catalyst_type) >= 0) { source.appendChild(document.createTextNode(" · ")); add(source, node("span", "", post.catalyst_type)); }
     if (post.source_url) { source.appendChild(document.createTextNode(" · ")); var link = add(source, node("a", "", "Original source ↗")); link.href = post.source_url; link.target = "_blank"; link.rel = "noopener noreferrer"; }
-    var actions = add(footer, node("div", "lr-public-actions")); actions.appendChild(actionButton("save", post)); actions.appendChild(actionButton("alert", post));
+    var actions = add(footer, node("div", "lr-public-actions"));
+    var remember = add(actions, node("a", "lr-remember", "＋ Remember")); remember.href = String(config.memoryUrlTemplate || "/research-memory?post_id=__POST_ID__").replace("__POST_ID__", encodeURIComponent(post.id));
+    actions.appendChild(actionButton("save", post)); actions.appendChild(actionButton("alert", post));
     return article;
   }
 

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Review Research — Tradestaar Elite{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/research_memory.css') }}">{% endblock %}
+{% block body_class %}memory-page{% endblock %}
+{% block content %}
+<section class="rm-shell rm-review-shell"><nav class="rm-crumbs"><a href="{{ url_for('research_memory.notebook') }}">Research Memory</a><span>/</span><span>Review</span></nav>
+  {% if card %}
+  <header class="rm-review-head"><div class="rm-kicker">ACTIVE RECALL · {{ summary.due }} DUE</div><h1>Answer before you reveal.</h1><p>Recognition feels familiar. Recall is what makes the research usable.</p></header>
+  <article class="rm-review-card"><div class="rm-review-meta"><a href="{{ url_for('stock_detail', ticker=card.ticker) }}">{{ card.ticker }}</a><span>Memory box {{ card.box }}</span></div><h2>{{ card.review_question }}</h2><p class="rm-review-instruction">Say or write your answer now. Include what changed, why it mattered, and what could make your conclusion wrong.</p>
+    <details class="rm-reveal"><summary>Reveal my research</summary><div><h3>{{ card.headline }}</h3><small>WHY IT MATTERS</small><p>{{ card.why_it_matters }}</p>{% if card.key_change %}<small>IMPORTANT CHANGE</small><p>{{ card.key_change }}</p>{% endif %}{% if card.disconfirming_evidence %}<small>WHAT COULD PROVE IT WRONG</small><p>{{ card.disconfirming_evidence }}</p>{% endif %}{% if card.notes %}<small>SUPPORTING NOTES</small><p>{{ card.notes }}</p>{% endif %}</div></details>
+    <form class="rm-rating" method="post" action="{{ url_for('research_memory.rate', card_id=card.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><p>How well did you remember it?</p><div><button name="rating" value="forgot" class="forgot">Forgot <small>again in 10 min</small></button><button name="rating" value="partial" class="partial">Partly remembered <small>again tomorrow</small></button><button name="rating" value="remembered" class="remembered">Remembered <small>longer interval</small></button></div></form>
+  </article>
+  {% else %}<section class="rm-review-done"><div>✓</div><h1>Nothing is due.</h1><p>The gap is part of the learning. New cards begin immediately; remembered cards return at widening intervals.</p><a href="{{ url_for('research_memory.notebook') }}">Return to your notebook</a><a class="secondary" href="{{ url_for('live_research.feed') }}">Find new research</a></section>{% endif %}
+</section>
+{% endblock %}

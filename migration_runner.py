@@ -13,6 +13,7 @@ MIGRATIONS = (
     "migrations.m0002_live_research_triage",
     "migrations.m0003_quarter_entries",
     "migrations.m0004_quarter_briefs",
+    "migrations.m0005_research_memory",
 )
 
 

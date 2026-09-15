@@ -19,7 +19,7 @@
   {% if post.tradestaar_take and not featured %}<div class="lr-public-take lr-detail-only"><b>TRADESTAAR TAKE</b><div>{{ post.tradestaar_take }}</div><small>Research and AI-assisted analysis can be wrong. Verify source information before trading.</small></div>{% endif %}
   <footer class="lr-public-footer">
     <div class="lr-public-source"><span>{{ post.source_name or 'Tradestaar Research' }}</span> · <time class="lr-relative-time" datetime="{{ source_time }}" data-exact-time="{{ source_time }}" title="{{ source_time }}">{{ source_time }}</time>{% if post.catalyst_type in ['8-K','10-Q','10-K'] %} · <span>{{ post.catalyst_type }}</span>{% endif %}{% if post.source_url %} · <a href="{{ post.source_url }}" target="_blank" rel="noopener noreferrer">Original source ↗</a>{% endif %}</div>
-    <div class="lr-public-actions"><button type="button" class="lr-save {{ 'is-saved' if post.saved }}" data-saved="{{ '1' if post.saved else '0' }}">{{ '★ Saved' if post.saved else '☆ Save' }}</button><button type="button" class="lr-alert {{ 'is-on' if alert_prefs.get(post.ticker) }}" data-ticker="{{ post.ticker }}" data-enabled="{{ '1' if alert_prefs.get(post.ticker) else '0' }}">{{ '🔔 Alert on' if alert_prefs.get(post.ticker) else '🔕 Alert' }}</button></div>
+    <div class="lr-public-actions"><a class="lr-remember" href="{{ url_for('research_memory.notebook', post_id=post.id) }}">＋ Remember</a><button type="button" class="lr-save {{ 'is-saved' if post.saved }}" data-saved="{{ '1' if post.saved else '0' }}">{{ '★ Saved' if post.saved else '☆ Save' }}</button><button type="button" class="lr-alert {{ 'is-on' if alert_prefs.get(post.ticker) }}" data-ticker="{{ post.ticker }}" data-enabled="{{ '1' if alert_prefs.get(post.ticker) else '0' }}">{{ '🔔 Alert on' if alert_prefs.get(post.ticker) else '🔕 Alert' }}</button></div>
   </footer>
 </article>
 {% endmacro %}
@@ -48,6 +48,6 @@
   <div class="lr-public-message" id="feed-message" role="status" hidden></div>
   <div class="lr-feed lr-public-feed" id="research-feed">{% for post in posts %}{{ research_item(post) }}{% else %}<div class="lr-public-state lr-feed-empty"><b>No published research found</b><span>Try clearing a filter or switching away from Saved/Watchlist-only.</span></div>{% endfor %}</div>
 </section>
-<script>window.LR_PUBLIC_CONFIG={posts:{{ posts|tojson }},featuredPosts:{{ featured_posts|tojson }},alertPrefs:{{ alert_prefs|tojson }},watchlistTickers:{{ watchlist_tickers|tojson }},stockUrlTemplate:{{ (url_for('stock_detail',ticker='__TICKER__') ~ '#stock-research-panel')|tojson }},sort:{{ filters.get('sort','newest')|tojson }},view:{{ filters.get('view','detailed')|tojson }}};</script>
+<script>window.LR_PUBLIC_CONFIG={posts:{{ posts|tojson }},featuredPosts:{{ featured_posts|tojson }},alertPrefs:{{ alert_prefs|tojson }},watchlistTickers:{{ watchlist_tickers|tojson }},stockUrlTemplate:{{ (url_for('stock_detail',ticker='__TICKER__') ~ '#stock-research-panel')|tojson }},memoryUrlTemplate:{{ url_for('research_memory.notebook',post_id='__POST_ID__')|tojson }},sort:{{ filters.get('sort','newest')|tojson }},view:{{ filters.get('view','detailed')|tojson }}};</script>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='js/live_research.js') }}"></script>{% endblock %}
