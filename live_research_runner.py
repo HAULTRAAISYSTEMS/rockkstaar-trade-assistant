@@ -14,6 +14,7 @@ from live_research_ingestion import finnhub_articles_to_items, ingest
 from live_research_discovery import discover_market_news
 import live_research_autopublish as autopublish
 import insider_alert_sync
+import sms_alerts
 
 DEFAULT_TICKERS=("NVDA","META","AAPL","MSFT","AMZN","GOOGL","TSLA","AMD")
 
@@ -64,6 +65,12 @@ def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
         try:
             total.update(live_research_expiry.run(conn))
         except Exception as exc: total["errors"].append("expiry:"+type(exc).__name__)
+        # Delivery is a separate, opt-in boundary. It sees published research
+        # only and is a no-op unless SMS_ALERTS_ENABLED is explicitly enabled.
+        try:
+            total.update(sms_alerts.deliver_pending(conn))
+        except Exception as exc:
+            total["errors"].append("sms:"+type(exc).__name__)
         # Queue depth. drafts_created is 0 on most firings by design - a story
         # creates a draft once, on the first run after it appears, and the next
         # 5-minute run correctly sees it as a duplicate. Reading a single run
