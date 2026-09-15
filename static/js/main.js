@@ -44,6 +44,31 @@ document.addEventListener("DOMContentLoaded", function () {
   tc.className = "trigger-toast-container";
   document.body.appendChild(tc);
 
+  // ---- Navigation dropdown coordination ----
+  // Native <details> elements do not close their siblings. Treat the desktop
+  // header as one menu group so opening Research, Learn, Account, or Status
+  // dismisses the previously open panel. Clicking outside or pressing Escape
+  // closes the group as users expect from an application navigation bar.
+  const navMenus = Array.from(document.querySelectorAll(
+    ".elite-navbar details.nav-menu, .elite-navbar details.nav-system"
+  ));
+  navMenus.forEach(function (menu) {
+    menu.addEventListener("toggle", function () {
+      if (!menu.open) return;
+      navMenus.forEach(function (other) {
+        if (other !== menu) other.open = false;
+      });
+    });
+  });
+  document.addEventListener("click", function (event) {
+    if (event.target.closest(".elite-navbar details")) return;
+    navMenus.forEach(function (menu) { menu.open = false; });
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") return;
+    navMenus.forEach(function (menu) { menu.open = false; });
+  });
+
   // ---- Kick off auto-refresh ----
   scheduleRefresh();
 });

@@ -16,3 +16,11 @@ def test_research_learn_and_account_are_native_dropdowns():
         assert f'<summary class="nav-link' in template
         assert f">{label} <span" in template
     assert template.count('<details class="nav-menu">') == 3
+
+
+def test_navigation_script_closes_sibling_and_outside_menus():
+    script = (ROOT / "static/js/main.js").read_text(encoding="utf-8")
+    assert '".elite-navbar details.nav-menu, .elite-navbar details.nav-system"' in script
+    assert "if (other !== menu) other.open = false" in script
+    assert 'event.target.closest(".elite-navbar details")' in script
+    assert 'event.key !== "Escape"' in script
