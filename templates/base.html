@@ -163,6 +163,8 @@
     border-radius:10px;padding:16px;color:var(--ink-100,#D6DCE3);font-size:14px;
     line-height:1.7;max-height:45vh;overflow-y:auto;white-space:pre-wrap;"></div>
 
+  <div id="ask-sources" aria-label="Sources used" style="display:none;flex-wrap:wrap;gap:6px;"></div>
+
   <div id="ask-spinner" style="display:none;text-align:center;color:var(--ink-300,#7B8794);font-size:13px;">
     ⏳ Thinking…
   </div>
@@ -175,6 +177,8 @@
     document.getElementById('ask-modal').style.display='flex';
     document.getElementById('ask-input').value='';
     document.getElementById('ask-answer').style.display='none';
+    document.getElementById('ask-sources').style.display='none';
+    document.getElementById('ask-sources').replaceChildren();
     document.getElementById('ask-spinner').style.display='none';
     document.getElementById('ask-send-btn').disabled=false;
     setTimeout(()=>document.getElementById('ask-input').focus(),60);
@@ -187,6 +191,8 @@
     var q=(document.getElementById('ask-input').value||'').trim();
     if(!q)return;
     document.getElementById('ask-answer').style.display='none';
+    document.getElementById('ask-sources').style.display='none';
+    document.getElementById('ask-sources').replaceChildren();
     document.getElementById('ask-spinner').style.display='block';
     document.getElementById('ask-send-btn').disabled=true;
     fetch('/api/ask',{
@@ -201,6 +207,7 @@
       var box=document.getElementById('ask-answer');
       box.textContent=d.answer||d.error||'No response.';
       box.style.display='block';
+      if(d.answer&&Array.isArray(d.sources))renderAskSources(d.answer,d.sources);
     })
     .catch(function(e){
       document.getElementById('ask-spinner').style.display='none';
@@ -209,6 +216,21 @@
       box.textContent='Error: '+e.message;
       box.style.display='block';
     });
+  }
+  function renderAskSources(answer,sources){
+    var used=new Set((answer.match(/\[S\d+\]/g)||[]).map(function(id){return id.slice(1,-1);}));
+    var wrap=document.getElementById('ask-sources');
+    sources.filter(function(source){return used.has(source.id);}).forEach(function(source){
+      var link=document.createElement('a'),href='';
+      try{if(source.url){var parsed=new URL(source.url,window.location.origin);if(parsed.protocol==='http:'||parsed.protocol==='https:')href=parsed.href;}}catch(e){}
+      if(href){link.href=href;link.target='_blank';link.rel='noopener noreferrer';}else{link.style.cursor='default';}
+      link.style.cssText='display:grid;gap:2px;max-width:260px;padding:7px 9px;border:1px solid var(--ink-500,#3A424F);border-radius:8px;background:var(--ink-850,#0B0D10);color:var(--ink-100,#D6DCE3);font-size:10px;text-decoration:none';
+      var label=document.createElement('span'),title=document.createElement('strong'),meta=document.createElement('small');
+      label.textContent=source.id+' · '+String(source.kind||'source').replaceAll('_',' ');label.style.color='var(--orange-500,#FF7A18)';
+      title.textContent=source.title||'Tradestaar source';meta.textContent=[source.publisher,source.published_at].filter(Boolean).join(' · ');meta.style.color='var(--ink-300,#7B8794)';
+      link.append(label,title,meta);wrap.appendChild(link);
+    });
+    if(wrap.children.length)wrap.style.display='flex';
   }
   window.openAsk=openAsk;
   window.closeAsk=closeAsk;

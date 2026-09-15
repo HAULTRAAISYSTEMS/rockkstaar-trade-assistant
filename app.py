@@ -8780,18 +8780,49 @@ def api_research_ask():
 
 # ── Tradestaar AI — grounded, account-aware research assistant ────────
 def _tradestaar_ai_context(user_id: int, question: str = "") -> dict:
-    """Build a compact, cache-first context packet scoped to one user."""
+    """Build a compact, cited, cache-first context packet scoped to one user."""
     active_id = get_active_wl_id()
     watchlist = get_watchlist_stocks(active_id) if active_id else []
     data_map = {str(row.get("ticker", "")).upper(): row for row in get_all_stock_data()}
-    ignored = {"A", "AI", "I", "THE", "FOR", "AND", "OR", "MY", "TO", "IS"}
-    requested = [t for t in re.findall(r"\b[A-Z]{1,5}\b", question.upper()) if t not in ignored]
+    ignored = {
+        "A", "AI", "AN", "AND", "ARE", "AS", "AT", "BE", "BY", "CAN", "DID", "DO",
+        "DOES", "FOR", "FROM", "HOW", "I", "IN", "IS", "IT", "LATEST", "ME", "MY",
+        "NEWS", "OF", "ON", "OR", "THE", "THIS", "TO", "UP", "WAS", "WHAT", "WHEN",
+        "WHERE", "WHICH", "WHO", "WHY", "WITH", "YOU",
+    }
+    # Known symbols work in normal prose. Explicit uppercase symbols and
+    # cashtags remain escape hatches for a company not cached in the app yet.
+    known_tickers = set(data_map) | {str(t).upper() for t in watchlist}
+    cashtags = re.findall(r"\$([A-Z][A-Z0-9.\-]{0,9})\b", question.upper())
+    explicit_upper = [t for t in re.findall(r"\b[A-Z][A-Z0-9.\-]{0,9}\b", question) if t not in ignored]
+    bare_tokens = re.findall(r"\b[A-Z][A-Z0-9.\-]{0,9}\b", question.upper())
+    requested = cashtags + explicit_upper + [t for t in bare_tokens if t not in ignored and t in known_tickers]
     focus = list(dict.fromkeys(requested + watchlist))[:8]
+    sources = []
+
+    def clip(value, limit=1200):
+        return str(value or "").strip()[:limit]
+
+    def add_source(kind, title, *, ticker="", publisher="Tradestaar", url="", published_at=""):
+        source_id = f"S{len(sources) + 1}"
+        sources.append({
+            "id": source_id, "kind": kind, "title": str(title or kind)[:240],
+            "ticker": str(ticker or "").upper(), "publisher": str(publisher or "Tradestaar")[:120],
+            "url": str(url or "")[:2000], "published_at": str(published_at or "")[:100],
+        })
+        return source_id
+
     stocks = []
     for ticker in focus:
         row = data_map.get(ticker) or get_stock_data(ticker) or {}
         if row:
+            updated_at = row.get("updated_at") or row.get("last_updated")
+            source_id = add_source(
+                "market_snapshot", f"{ticker} cached market snapshot", ticker=ticker,
+                url=f"/stock/{ticker}", published_at=updated_at,
+            )
             stocks.append({
+                "source_id": source_id,
                 "ticker": ticker,
                 "price": row.get("current_price") or row.get("price") or row.get("close"),
                 "change_pct": row.get("change_pct") or row.get("daily_change_pct"),
@@ -8799,8 +8830,37 @@ def _tradestaar_ai_context(user_id: int, question: str = "") -> dict:
                 "grade": row.get("swing_grade") or row.get("grade"),
                 "setup": row.get("setup_type") or row.get("swing_setup"),
                 "earnings_date": row.get("earnings_date"),
-                "updated_at": row.get("updated_at") or row.get("last_updated"),
+                "updated_at": updated_at,
             })
+
+    fundamentals = []
+    for ticker in focus:
+        try:
+            from fundamentals_engine import SCORECARD_VERSION
+            cached = get_fundamentals_cache(ticker)
+        except Exception as exc:
+            logger.debug("Tradestaar AI fundamentals cache unavailable for %s: %s", ticker, exc)
+            cached = None
+        if not cached or cached.get("error") or cached.get("scorecard_version") != SCORECARD_VERSION:
+            continue
+        latest = (cached.get("history") or [{}])[0]
+        source_id = add_source(
+            "fundamental_scorecard", f"{ticker} fundamentals scorecard", ticker=ticker,
+            publisher="Tradestaar fundamentals engine", url=f"/fundamentals?ticker={ticker}",
+            published_at=cached.get("ttm_period_end") or latest.get("period_end") or "",
+        )
+        fundamentals.append({
+            "source_id": source_id, "ticker": ticker, "company_name": cached.get("company_name"),
+            "sector": cached.get("sector"), "industry": cached.get("industry"),
+            "normalized_score": cached.get("normalized_score"), "verdict": cached.get("verdict"),
+            "verdict_reason": cached.get("verdict_reason"), "coverage_note": cached.get("coverage_note"),
+            "red_flags": (cached.get("red_flags") or [])[:8],
+            "latest_financials": {key: latest.get(key) for key in (
+                "period_end", "revenue", "net_income", "fcf", "gross_margin",
+                "operating_margin", "net_margin", "fcf_over_ni",
+            )},
+            "valuation": (cached.get("valuation") or {}).get("rows", [])[:8],
+        })
     account = get_paper_account(user_id)
     positions = []
     for position in get_paper_positions(user_id)[:10]:
@@ -8816,20 +8876,75 @@ def _tradestaar_ai_context(user_id: int, question: str = "") -> dict:
         for item in (summary.get("market_news") or summary.get("news") or [])[:12]:
             ticker = str(item.get("ticker") or "").upper()
             if not focus or not ticker or ticker in focus:
-                headlines.append({"ticker": ticker or "MARKET", "headline": item.get("headline"),
-                                  "source": item.get("source"),
-                                  "published": item.get("published") or item.get("published_at") or item.get("time")})
+                published = item.get("published") or item.get("published_at") or item.get("time")
+                source_id = add_source(
+                    "news", item.get("headline"), ticker=ticker,
+                    publisher=item.get("source") or "Connected news source",
+                    url=item.get("url") or "", published_at=published,
+                )
+                headlines.append({"source_id": source_id, "ticker": ticker or "MARKET",
+                                  "headline": item.get("headline"), "source": item.get("source"),
+                                  "published": published, "summary": item.get("summary")})
             if len(headlines) == 6:
                 break
     except Exception as exc:
         logger.debug("Tradestaar AI news context unavailable: %s", exc)
+
+    published_research = []
+    try:
+        import research_feed_phase2 as _research_feed
+        posts = _research_feed.list_published(
+            watchlist_tickers=focus, watchlist_rank_tickers=focus,
+            user_id=user_id, sort="watchlist", limit=8,
+        ) if focus else []
+        for post in posts:
+            source_id = add_source(
+                "published_research", post.get("headline"), ticker=post.get("ticker"),
+                publisher=post.get("source_name") or "Tradestaar Live Research",
+                url=post.get("source_url") or "/live-research",
+                published_at=post.get("source_published_at") or post.get("published_at"),
+            )
+            published_research.append({
+                "source_id": source_id, "ticker": post.get("ticker"),
+                "headline": post.get("headline"), "research_notes": clip(post.get("research_notes")),
+                "tradestaar_take": clip(post.get("tradestaar_take"), 800), "sentiment": post.get("sentiment"),
+                "priority": post.get("priority"),
+            })
+    except Exception as exc:
+        logger.debug("Tradestaar AI published research context unavailable: %s", exc)
+
+    memory_cards = []
+    try:
+        import research_memory as _research_memory
+        cards = _research_memory.list_cards(user_id, limit=30)
+        relevant = [card for card in cards if not focus or card.get("ticker") in focus][:8]
+        for card in relevant:
+            source_id = add_source(
+                "private_memory", f"Your note: {card.get('headline')}", ticker=card.get("ticker"),
+                publisher=card.get("source_name") or "Research Memory",
+                url="/research-memory",
+                published_at=card.get("source_published_at") or card.get("updated_at"),
+            )
+            memory_cards.append({
+                "source_id": source_id, "ticker": card.get("ticker"),
+                "headline": card.get("headline"), "why_it_matters": clip(card.get("why_it_matters"), 800),
+                "key_change": clip(card.get("key_change"), 500), "thesis_impact": card.get("thesis_impact"),
+                "disconfirming_evidence": clip(card.get("disconfirming_evidence"), 700),
+            })
+    except Exception as exc:
+        logger.debug("Tradestaar AI research memory context unavailable: %s", exc)
+
     market = _get_mkt_ctx()
+    market_source_id = add_source("market_regime", "Tradestaar market regime snapshot",
+                                  url="/macro", published_at=_et_now().isoformat())
     return {
         "as_of": _et_now().isoformat(), "watchlist": watchlist[:20], "stocks": stocks,
         "paper_account": {"cash_balance": account.get("cash_balance"), "positions": positions},
         "market": {key: market.get(key) for key in
                    ("regime", "regime_label", "spy_1d_pct", "qqq_1d_pct", "vix_level")},
-        "headlines": headlines,
+        "market_source_id": market_source_id, "headlines": headlines, "fundamentals": fundamentals,
+        "published_research": published_research, "memory_cards": memory_cards,
+        "sources": sources,
     }
 
 
@@ -8869,14 +8984,27 @@ def api_ask():
         cal   = _fetch_earn()
         today = _dt.date.today()
 
+        calendar_sources = {}
+
         def _fmt_bucket(items):
             if not items:
                 return "  (none)"
             lines = []
             for e in items:
                 name = e.get("company_name") or e.get("ticker")
+                event_key = (e.get("ticker"), e.get("date"), e.get("time_label"))
+                source_id = calendar_sources.get(event_key)
+                if not source_id:
+                    source_id = f"S{len(grounded['sources']) + 1}"
+                    grounded["sources"].append({
+                        "id": source_id, "kind": "earnings_calendar",
+                        "title": f"{e.get('ticker', 'Company')} earnings — {e.get('date', 'date unavailable')}",
+                        "ticker": e.get("ticker") or "", "publisher": e.get("source") or "Tradestaar calendar",
+                        "url": "/calendar", "published_at": grounded.get("as_of") or "",
+                    })
+                    calendar_sources[event_key] = source_id
                 lines.append(
-                    f"  • {e['ticker']} ({name}) — {e.get('date','?')} "
+                    f"  • [{source_id}] {e['ticker']} ({name}) — {e.get('date','?')} "
                     f"{e.get('time_label','TBD')} ({e.get('days_away','?')}d away)"
                 )
             return "\n".join(lines)
@@ -8900,6 +9028,11 @@ def api_ask():
         "- Prefer VERIFIED APP CONTEXT. If a fact is absent, say it is unavailable.\n"
         "- Label interpretations and educational examples. Never promise returns.\n"
         "- Never reveal data belonging to another account.\n\n"
+        "SOURCE RULES:\n"
+        "- Cite factual claims from VERIFIED APP CONTEXT with the matching source id, for example [S2].\n"
+        "- Never create a source id that is not present in the sources array.\n"
+        "- Treat private_memory as the user's prior conclusion, not as an independently verified fact.\n"
+        "- If the available sources do not support an answer, say what is missing and where to verify it.\n\n"
         "HOW TO ANSWER:\n\n"
         "EARNINGS DATE QUESTIONS:\n"
         "- First check the confirmed calendar above. If the ticker is listed, give that exact date.\n"
@@ -8926,6 +9059,7 @@ def api_ask():
         )
         answer = (resp.choices[0].message.content or "").strip() or "No response."
         return jsonify({"ok": True, "answer": answer, "context": grounded,
+                        "sources": grounded.get("sources", []),
                         "disclaimer": "AI research can be wrong. Verify before trading."})
     except Exception as exc:
         logger.exception("Tradestaar AI ask error")
