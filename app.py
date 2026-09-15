@@ -7651,6 +7651,32 @@ COMMAND_SETUPS = 5
 COMMAND_WATCHLIST = 8
 
 
+def _personal_research_digest(user_id: int, watchlist_tickers: list) -> dict:
+    """Join watchlist research to this user's saved theses and read state."""
+    import research_digest as _digest
+    import research_feed_phase2 as _research_feed
+    import research_memory as _research_memory
+
+    reviewed_at = get_user_setting(user_id, "research_digest_reviewed_at", "") or ""
+    cards = _research_memory.list_cards(user_id, limit=500)
+    tickers = list(dict.fromkeys(
+        [str(t).upper() for t in (watchlist_tickers or [])]
+        + [str(card.get("ticker") or "").upper() for card in cards if card.get("ticker")]
+    ))
+    if not tickers:
+        return _digest.build_digest([], cards, reviewed_at=reviewed_at)
+    posts = _research_feed.list_published(
+        watchlist_tickers=tickers, watchlist_rank_tickers=tickers,
+        user_id=user_id, sort="priority", limit=100,
+    )
+    result = _digest.build_digest(posts, cards, reviewed_at=reviewed_at)
+    for item in result["items"]:
+        url = str(item.get("source_url") or "").strip()
+        item["source_url"] = url if url.startswith(("https://", "http://")) else ""
+    result["tracked_tickers"] = len(tickers)
+    return result
+
+
 def _command_watchlist() -> tuple[list, str]:
     """The watchlist worth showing on the landing page, and its name.
 
@@ -7696,7 +7722,10 @@ def _command_center_context() -> dict:
     """
     context = {"week": [], "news": [], "setups": [], "watchlist": [],
                "watchlist_name": "", "pulse": {}, "next_up": None,
-               "news_refreshing": False, "news_note": ""}
+               "news_refreshing": False, "news_note": "", "research_digest": {
+                   "items": [], "material_count": 0, "alert_count": 0,
+                   "reviewed_at": "", "tracked_theses": 0, "tracked_tickers": 0,
+               }}
 
     # The pulse strip: the four numbers that set the tone for everything under
     # them, rendered server-side so the top of the page is never a row of
@@ -7736,6 +7765,14 @@ def _command_center_context() -> dict:
     except Exception as exc:
         logger.debug("command centre: watchlist unavailable: %s", exc)
         tickers = []
+
+    # Personalized "What changed?" — only published, timestamped research
+    # that crosses a deterministic materiality threshold. Its own guard means
+    # a cold research database cannot take down the morning page.
+    try:
+        context["research_digest"] = _personal_research_digest(current_user_id(), tickers)
+    except Exception as exc:
+        logger.debug("command centre: personal research digest unavailable: %s", exc)
 
     # This week — the macro releases and earnings the reader asked to see,
     # already merged and sorted by the calendar builder.
@@ -7857,6 +7894,14 @@ def _command_center_context() -> dict:
 def liquidity_page():
     """Morning Command Center — the market read, in one screen."""
     return render_template("liquidity.html", **_command_center_context())
+
+
+@app.route("/research-digest/reviewed", methods=["POST"])
+def research_digest_reviewed():
+    """Advance the user's global material-research checkpoint."""
+    set_user_setting(current_user_id(), "research_digest_reviewed_at", _et_now().isoformat())
+    flash("Research briefing reviewed. Only newer material changes will appear here.", "success")
+    return redirect(url_for("liquidity_page", _anchor="what-changed"))
 
 
 @app.route("/macro")

@@ -132,7 +132,7 @@ class TestOneColdFeedIsAGapNotAnErrorPage:
             context = legacy._command_center_context()
         assert set(context) == {"week", "news", "setups", "watchlist",
                                 "watchlist_name", "pulse", "next_up",
-                                "news_refreshing", "news_note"}
+                                "news_refreshing", "news_note", "research_digest"}
 
     def test_no_watchlist_is_not_an_error(self, monkeypatch):
         monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: SUMMARY)
@@ -156,7 +156,7 @@ class TestThePage:
     def test_the_landing_route_is_the_same_page(self, client):
         assert client.get("/").status_code == 200
 
-    @pytest.mark.parametrize("heading", ["This week", "Elite news",
+    @pytest.mark.parametrize("heading", ["This week", "What changed for you", "Elite news",
                                          "Trade setups", "Watchlist"])
     def test_each_section_is_on_the_page(self, client, heading):
         assert heading in client.get("/opportunity").get_data(as_text=True)

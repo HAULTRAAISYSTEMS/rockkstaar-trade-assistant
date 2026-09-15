@@ -120,6 +120,61 @@
 
   </div>
 
+  <!-- ══ PERSONAL RESEARCH DIGEST ════════════════════════════════════════ -->
+  <section class="cc-card cc-digest cc-rise cc-d2" id="what-changed">
+    <div class="cc-head cc-digest-head">
+      <div>
+        <div class="cc-digest-kicker">Your watchlist + saved theses</div>
+        <h2>What changed for you</h2>
+      </div>
+      <div class="cc-digest-actions">
+        {% if research_digest.alert_count %}<span class="cc-digest-alert">{{ research_digest.alert_count }} thesis {{ 'alert' if research_digest.alert_count == 1 else 'alerts' }}</span>{% endif %}
+        <a href="{{ url_for('live_research.feed') }}">Open research →</a>
+      </div>
+    </div>
+    <p class="cc-digest-intro">
+      Material, source-ranked changes only. Low-signal repeats are suppressed.
+      {% if research_digest.first_run %}Showing the last seven days.{% elif research_digest.reviewed_at %}Showing items since your last review.{% endif %}
+    </p>
+    {% if research_digest['items'] %}
+    <div class="cc-digest-list">
+      {% for item in research_digest['items'] %}
+      <article class="cc-digest-item {{ 'is-alert' if item.alert }}">
+        <div class="cc-digest-topline">
+          <a class="cc-sym" href="{{ url_for('research_page', ticker=item.ticker) }}">{{ item.ticker }}</a>
+          <span class="cc-source-rank is-{{ item.quality.key }}">{{ item.quality.label }}</span>
+          <span class="cc-digest-kind">{{ item.catalyst_type }}</span>
+          {% if item.alert %}<strong class="cc-thesis-alert">Thesis alert</strong>{% endif %}
+        </div>
+        {% if item.source_url %}<a class="cc-digest-title" href="{{ item.source_url }}" target="_blank" rel="noopener noreferrer">{{ item.headline }}</a>
+        {% else %}<div class="cc-digest-title">{{ item.headline }}</div>{% endif %}
+        {% if item.why %}<p class="cc-digest-why">{{ item.why }}</p>{% endif %}
+        <div class="cc-digest-proof">
+          <span>{{ item.reasons | join(' · ') }}</span>
+          <span>{{ item.source_name }}</span>
+        </div>
+        {% if item.thesis %}
+        <div class="cc-thesis-match">
+          <b>Saved thesis · {{ item.thesis_impact or 'uncertain' }}</b>
+          <span>{{ item.thesis.why_it_matters }}</span>
+        </div>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+    <form class="cc-digest-review" method="post" action="{{ url_for('research_digest_reviewed') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <span>{{ research_digest.material_count }} material {{ 'change' if research_digest.material_count == 1 else 'changes' }} found</span>
+      <button type="submit">Mark briefing reviewed</button>
+    </form>
+    {% else %}
+    <div class="cc-digest-clear">
+      <span class="cc-digest-check">✓</span>
+      <div><b>No new material thesis changes.</b><p>Your tracked companies are quiet, or the latest items did not clear the evidence threshold.</p></div>
+    </div>
+    {% endif %}
+  </section>
+
   {# Elite news, setups and the watchlist across one row on a wide screen.
      Stacked full-width they read as three more slabs; side by side they read
      as one glance. #}
