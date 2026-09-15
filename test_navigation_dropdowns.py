@@ -30,3 +30,25 @@ def test_navigation_script_closes_sibling_and_outside_menus():
     assert "if (other !== menu) other.open = false" in script
     assert 'event.target.closest(".elite-navbar details")' in script
     assert 'event.key !== "Escape"' in script
+
+
+def test_mobile_research_learn_and_account_open_menu_sheets():
+    template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
+    for menu_id in ("mobile-research-menu", "mobile-learn-menu", "mobile-account-menu"):
+        assert f'aria-controls="{menu_id}"' in template
+        assert f'data-mobile-menu="{menu_id}"' in template
+        assert f'id="{menu_id}" hidden' in template
+    assert template.count("mobile-app-nav__menu-trigger") == 3
+    assert "Company Research" in template
+    assert "Review Queue" in template
+    assert "Browser Alerts" in template
+
+
+def test_mobile_menu_sheets_are_usable_and_mutually_exclusive():
+    script = (ROOT / "static/js/main.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/elite.css").read_text(encoding="utf-8")
+    assert 'document.querySelectorAll("[data-mobile-menu]")' in script
+    assert "closeMobileMenus(willOpen ? panelId : null)" in script
+    assert 'event.target.closest(".mobile-app-nav__group")' in script
+    assert ".mobile-app-menu[hidden] { display: none !important; }" in css
+    assert "bottom: calc(73px + env(safe-area-inset-bottom, 0px));" in css

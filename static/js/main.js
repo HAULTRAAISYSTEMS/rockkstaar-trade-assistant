@@ -69,6 +69,42 @@ document.addEventListener("DOMContentLoaded", function () {
     navMenus.forEach(function (menu) { menu.open = false; });
   });
 
+  // ---- Mobile navigation menu sheets ----
+  // Research, Learn, and Account contain several destinations that do not fit
+  // in the iPhone bottom bar. Their buttons open one accessible sheet at a
+  // time while the primary Today, Terminal, and Watchlists links stay direct.
+  const mobileMenuTriggers = Array.from(document.querySelectorAll("[data-mobile-menu]"));
+  function closeMobileMenus(exceptId) {
+    mobileMenuTriggers.forEach(function (trigger) {
+      const panelId = trigger.getAttribute("data-mobile-menu");
+      if (panelId === exceptId) return;
+      const panel = document.getElementById(panelId);
+      trigger.setAttribute("aria-expanded", "false");
+      if (panel) panel.hidden = true;
+    });
+  }
+  mobileMenuTriggers.forEach(function (trigger) {
+    trigger.addEventListener("click", function () {
+      const panelId = trigger.getAttribute("data-mobile-menu");
+      const panel = document.getElementById(panelId);
+      if (!panel) return;
+      const willOpen = trigger.getAttribute("aria-expanded") !== "true";
+      closeMobileMenus(willOpen ? panelId : null);
+      trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+      panel.hidden = !willOpen;
+    });
+  });
+  document.addEventListener("click", function (event) {
+    if (event.target.closest(".mobile-app-nav__group")) return;
+    closeMobileMenus();
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") closeMobileMenus();
+  });
+  document.querySelectorAll(".mobile-app-menu a").forEach(function (link) {
+    link.addEventListener("click", function () { closeMobileMenus(); });
+  });
+
   // ---- Kick off auto-refresh ----
   scheduleRefresh();
 });

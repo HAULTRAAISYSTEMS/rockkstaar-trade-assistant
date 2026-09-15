@@ -79,8 +79,42 @@
 <nav class="mobile-app-nav" aria-label="Primary mobile navigation">
   <a href="{{ url_for('liquidity_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep == 'liquidity_page' }}" {% if ep == 'liquidity_page' %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">⌂</span><span>Today</span></a>
   <a href="{{ url_for('terminal') }}" class="mobile-app-nav__item {{ 'is-active' if ep in ('terminal', 'dashboard', 'quick_mode') }}" {% if ep in ('terminal', 'dashboard', 'quick_mode') %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">⌁</span><span>Terminal</span></a>
-  <a href="{{ url_for('research_page') }}" class="mobile-app-nav__item {{ 'is-active' if research_active }}" {% if research_active %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">◆</span><span>Research</span></a>
+  <div class="mobile-app-nav__group">
+    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if research_active }}" aria-expanded="false" aria-controls="mobile-research-menu" data-mobile-menu="mobile-research-menu"><span class="mobile-app-nav__icon" aria-hidden="true">◆</span><span>Research</span></button>
+    <div class="mobile-app-menu" id="mobile-research-menu" hidden>
+      <div class="mobile-app-menu__head"><strong>Research</strong><span>Understand the market</span></div>
+      <div class="mobile-app-menu__links">
+        <a href="{{ url_for('research_page') }}"><strong>Company Research</strong><small>Financials, changes, filings and thesis</small></a>
+        <a href="{{ url_for('live_research.feed') }}"><strong>Live Research</strong><small>Latest sources and published research</small></a>
+        <a href="{{ url_for('intel') }}"><strong>Market Intel</strong><small>News, sentiment and institutional activity</small></a>
+        <a href="{{ url_for('macro_page') }}">Macro</a><a href="{{ url_for('catalyst_calendar') }}">Calendar</a>
+        <a href="{{ url_for('smart_money') }}">Smart Money</a><a href="{{ url_for('research_memory.notebook') }}">Memory</a>
+      </div>
+    </div>
+  </div>
   <a href="{{ url_for('watchlists_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep == 'watchlists_page' }}" {% if ep == 'watchlists_page' %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">★</span><span>Watchlists</span></a>
-  <a href="{{ url_for('learn_index') }}" class="mobile-app-nav__item {{ 'is-active' if learn_active }}" {% if learn_active %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">◈</span><span>Learn</span></a>
-  <a href="{{ url_for('account') }}" class="mobile-app-nav__item {{ 'is-active' if account_active }}" {% if account_active %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true">●</span><span>Account</span></a>
+  <div class="mobile-app-nav__group">
+    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if learn_active }}" aria-expanded="false" aria-controls="mobile-learn-menu" data-mobile-menu="mobile-learn-menu"><span class="mobile-app-nav__icon" aria-hidden="true">◈</span><span>Learn</span></button>
+    <div class="mobile-app-menu" id="mobile-learn-menu" hidden>
+      <div class="mobile-app-menu__head"><strong>Learn</strong><span>Learn, practice and remember</span></div>
+      <div class="mobile-app-menu__links mobile-app-menu__links--single">
+        <a href="{{ url_for('learn_index') }}"><strong>Learning Center</strong><small>Market concepts in plain language</small></a>
+        <a href="{{ url_for('learn_review') }}"><strong>Review Queue</strong><small>Recall what you studied</small></a>
+        <a href="{{ url_for('learn_paths') }}"><strong>Learning Paths</strong><small>Follow a guided sequence</small></a>
+        <a href="{{ url_for('tradestaar_ai') }}"><strong>AI Research Coach</strong><small>Ask, explain and challenge your thesis</small></a>
+      </div>
+    </div>
+  </div>
+  <div class="mobile-app-nav__group">
+    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if account_active }}" aria-expanded="false" aria-controls="mobile-account-menu" data-mobile-menu="mobile-account-menu"><span class="mobile-app-nav__icon" aria-hidden="true">●</span><span>Account</span></button>
+    <div class="mobile-app-menu" id="mobile-account-menu" hidden>
+      <div class="mobile-app-menu__head"><strong>Account</strong><span>Your workspace</span></div>
+      <div class="mobile-app-menu__links">
+        <a href="{{ url_for('account') }}">Overview</a><a href="{{ url_for('journal') }}">Journal</a>
+        <a href="{{ url_for('risk_settings') }}">Risk</a><a href="{{ url_for('paper_trading') }}">Paper Trading</a>
+        <a href="{{ url_for('brokers_page') }}">Brokers</a><a href="{{ url_for('browser_push.settings') }}">Browser Alerts</a>
+        {% if session.get('is_admin') %}<a href="{{ url_for('admin_users') }}">Admin</a>{% endif %}
+      </div>
+    </div>
+  </div>
 </nav>
