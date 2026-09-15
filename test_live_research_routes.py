@@ -59,6 +59,15 @@ class LiveResearchRouteContractTests(unittest.TestCase):
         self.assertEqual("priority", kwargs["sort"]);self.assertEqual("cloud", kwargs["search"])
         self.assertEqual("Earnings", kwargs["category"]);self.assertEqual("Bullish", kwargs["sentiment"])
 
+    @patch("live_research_routes.svc.list_live_headlines", return_value=[{"id": "h1", "ticker": "NVDA"}])
+    def test_live_headlines_api_returns_fresh_source_feed(self, headlines):
+        response = self.client.get("/api/live-research/headlines?ticker=NVDA&watchlist=1")
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("h1", response.get_json()["headlines"][0]["id"])
+        self.assertEqual(24, response.get_json()["window_hours"])
+        self.assertEqual("NVDA", headlines.call_args.kwargs["ticker"])
+        self.assertEqual([], headlines.call_args.kwargs["watchlist_tickers"])
+
     @patch("live_research_routes.svc.get_alert_preferences", return_value={})
     @patch("live_research_routes.realtime.list_incremental", return_value=[])
     def test_realtime_rest_fallback_forwards_active_filters(self, incremental, _alerts):

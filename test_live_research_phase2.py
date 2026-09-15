@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from datetime import datetime, timedelta, timezone
 import research_feed as core
 import research_feed_phase2 as rf
 SCHEMA="""CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,is_admin INTEGER);CREATE TABLE research_posts(id TEXT PRIMARY KEY,ticker TEXT,company_name TEXT,headline TEXT,research_notes TEXT,category TEXT,sentiment TEXT,source_name TEXT,source_url TEXT,tradestaar_take TEXT,take_origin TEXT,status TEXT,should_notify INTEGER,notification_status TEXT,author_user_id INTEGER,created_at TEXT,updated_at TEXT,published_at TEXT,priority TEXT DEFAULT 'Medium',catalyst_type TEXT DEFAULT 'BREAKING',source_published_at TEXT,reviewed_at TEXT,reviewed_by_user_id INTEGER);CREATE TABLE research_metrics(id TEXT PRIMARY KEY,post_id TEXT,metric_type TEXT,label TEXT,actual_value REAL,expected_value REAL,previous_value REAL,unit TEXT,period TEXT,comparison TEXT,notes TEXT,sort_order INTEGER);CREATE TABLE research_saved_posts(user_id INTEGER,post_id TEXT,saved_at TEXT,PRIMARY KEY(user_id,post_id));CREATE TABLE research_alert_preferences(user_id INTEGER,ticker TEXT,enabled INTEGER,created_at TEXT,updated_at TEXT,PRIMARY KEY(user_id,ticker));"""
@@ -34,6 +35,16 @@ class Phase2ServiceTests(unittest.TestCase):
   high=core.create_draft(dict(BASE,ticker='HIGH',company_name='High',priority='High'),ADMIN,[],self.c);core.publish_post(high,ADMIN,self.c)
   ids={p['id'] for p in rf.list_published(featured=True,conn=self.c)}
   self.assertEqual({breaking,high},ids);self.assertNotIn(draft,ids);self.assertNotIn(medium,ids)
+ def test_live_headlines_are_fresh_incoming_source_rows_only(self):
+  now=datetime(2026,9,14,20,0,tzinfo=timezone.utc)
+  incoming=dict(BASE,take_origin='provider',should_notify=False)
+  fresh=core.create_incoming(dict(incoming,ticker='NOW',company_name='Now',priority='High',source_published_at=(now-timedelta(minutes=10)).isoformat()),ADMIN,[],self.c)
+  epoch=core.create_incoming(dict(incoming,ticker='EPOCH',company_name='Epoch',priority='High',source_published_at=str(int((now-timedelta(minutes=5)).timestamp()))),ADMIN,[],self.c)
+  old=core.create_incoming(dict(incoming,ticker='OLD',company_name='Old',priority='Critical',source_published_at=(now-timedelta(days=3)).isoformat()),ADMIN,[],self.c)
+  published=core.create_draft(dict(incoming,ticker='PUB',company_name='Published',priority='High',source_published_at=(now-timedelta(minutes=5)).isoformat()),ADMIN,[],self.c);core.publish_post(published,ADMIN,self.c)
+  rows=rf.list_live_headlines(now=now,conn=self.c)
+  self.assertEqual([epoch,fresh],[p['id'] for p in rows]);self.assertNotIn(old,[p['id'] for p in rows]);self.assertNotIn(published,[p['id'] for p in rows])
+  self.assertEqual('source_feed',rows[0]['verification_state']);self.assertNotIn('research_notes',rows[0]);self.assertNotIn('tradestaar_take',rows[0])
  def test_public_notes_are_sanitized_without_changing_storage(self):
   raw='Verified facts.\n\nSource: Reuters — https://example.com/earnings\n[ingestion:abc123]'
   post=core.create_draft(dict(BASE,research_notes=raw),ADMIN,[],self.c);core.publish_post(post,ADMIN,self.c)

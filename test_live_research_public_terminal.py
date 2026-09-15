@@ -11,8 +11,9 @@ class PublicResearchTerminalContractTests(unittest.TestCase):
         cls.styles = (root / "static/css/live_research.css").read_text()
 
     def test_template_exposes_terminal_controls_and_safe_source(self):
-        for text in ("Breaking / Priority", "Highest Priority", "Watchlist", "Compact", "Detailed", "Original source ↗", "TRADESTAAR TAKE"):
+        for text in ("Breaking Sources", "Highest Priority", "Watchlist", "Compact", "Detailed", "Original source ↗", "TRADESTAAR TAKE"):
             self.assertIn(text, self.template)
+        self.assertIn("Open and verify source ↗", self.template)
         self.assertIn("stock-research-panel", self.template)
         self.assertNotIn("[ingestion:", self.template)
 

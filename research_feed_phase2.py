@@ -145,6 +145,66 @@ def _public_post(post,watchlist_rank_tickers=None):
     public['watchlisted']=public.get('ticker') in watched
     return public
 
+def _source_timestamp(value):
+    text=str(value or '').strip()
+    if not text:return None
+    try:
+        if re.fullmatch(r'\d+(?:\.\d+)?',text):
+            return datetime.fromtimestamp(float(text),tz=timezone.utc)
+        parsed=datetime.fromisoformat(text.replace('Z','+00:00'))
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    except (OverflowError,TypeError,ValueError):
+        return None
+
+def _public_headline(post,watchlist_rank_tickers=None):
+    """Expose only source attribution fields from an unreviewed incoming row."""
+    fields=('id','ticker','company_name','headline','category','sentiment','source_name',
+            'source_url','priority','catalyst_type','source_published_at')
+    public={key:post.get(key) for key in fields}
+    watched={core.normalize_ticker(t) for t in (watchlist_rank_tickers or []) if core._text(t)}
+    public['watchlisted']=public.get('ticker') in watched
+    public['verification_state']='source_feed'
+    return public
+
+def list_live_headlines(*,ticker=None,category=None,sentiment=None,search=None,
+                        watchlist_tickers=None,watchlist_rank_tickers=None,
+                        max_age_hours=24,limit=12,now=None,conn=None):
+    """Return fresh, attributed incoming headlines without publishing them.
+
+    This powers the immediate source feed. Rows remain in the review queue and
+    are deliberately stripped to a small public-safe field set; reviewed notes
+    and Tradestaar analysis still require the normal publish transition.
+    """
+    clauses=["p.status='incoming'","p.source_published_at IS NOT NULL","p.source_url<>''"]
+    params=[]
+    if ticker:clauses.append('p.ticker=?');params.append(core.normalize_ticker(ticker))
+    if category:clauses.append('p.category=?');params.append(core._choice(category,core.CATEGORIES,'category'))
+    if sentiment:clauses.append('p.sentiment=?');params.append(core._choice(sentiment,core.SENTIMENTS,'sentiment'))
+    if search:
+        term='%'+core._text(search)[:100]+'%';clauses.append('(p.ticker LIKE ? OR p.company_name LIKE ? OR p.headline LIKE ?)');params.extend([term]*3)
+    if watchlist_tickers is not None:
+        clean=[core.normalize_ticker(t) for t in watchlist_tickers if core._text(t)]
+        if not clean:return []
+        clauses.append('p.ticker IN ('+','.join('?' for _ in clean)+')');params.extend(clean)
+    owns=conn is None;conn=conn or get_db();current=now or datetime.now(timezone.utc)
+    if current.tzinfo is None:current=current.replace(tzinfo=timezone.utc)
+    else:current=current.astimezone(timezone.utc)
+    try:
+        # Some providers use Unix seconds and others ISO timestamps, so parse in
+        # Python instead of trusting a lexical SQL comparison across formats.
+        rows=[dict(r) for r in conn.execute(
+            f"SELECT p.* FROM research_posts p WHERE {' AND '.join(clauses)} ORDER BY p.created_at DESC LIMIT 1000",
+            tuple(params)).fetchall()]
+        fresh=[];window=timedelta(hours=max(1,min(int(max_age_hours),72)))
+        for row in rows:
+            stamp=_source_timestamp(row.get('source_published_at'))
+            if stamp is None or stamp>current+timedelta(minutes=5) or current-stamp>window:continue
+            fresh.append((stamp,_public_headline(row,watchlist_rank_tickers)))
+        fresh.sort(key=lambda pair:pair[0],reverse=True)
+        return [post for _,post in fresh[:max(1,min(int(limit),50))]]
+    finally:
+        if owns:conn.close()
+
 def list_published(*,ticker=None,category=None,sentiment=None,search=None,watchlist_tickers=None,
                    watchlist_rank_tickers=None,saved_by_user=None,user_id=None,sort='newest',
                    featured=False,since=None,limit=50,conn=None):

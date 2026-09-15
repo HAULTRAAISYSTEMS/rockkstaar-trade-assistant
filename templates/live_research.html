@@ -23,13 +23,25 @@
   </footer>
 </article>
 {% endmacro %}
+{% macro source_headline(post) %}
+{% set source_time = post.source_published_at %}
+<article class="lr-public-item priority-{{ post.priority|lower }} is-featured" data-post-id="{{ post.id }}" data-published-at="{{ source_time }}" data-priority="{{ post.priority }}" data-ticker="{{ post.ticker }}">
+  <div class="lr-public-item-head">
+    <div class="lr-public-identity"><a class="lr-public-ticker" href="{{ url_for('stock_detail', ticker=post.ticker) }}#stock-research-panel">{{ post.ticker }}</a><span class="lr-public-company">{{ post.company_name }}</span></div>
+    <div class="lr-public-badges"><span class="lr-catalyst">SOURCE FEED</span><span class="lr-priority-badge">{{ post.catalyst_type }}</span></div>
+    <time class="lr-relative-time" datetime="{{ source_time }}" data-exact-time="{{ source_time }}" title="{{ source_time }}">{{ source_time }}</time>
+  </div>
+  <h2>{{ post.headline }}</h2>
+  <footer class="lr-public-footer"><div class="lr-public-source"><span>{{ post.source_name }}</span> · <time class="lr-relative-time" datetime="{{ source_time }}" data-exact-time="{{ source_time }}" title="{{ source_time }}">{{ source_time }}</time> · <a href="{{ post.source_url }}" target="_blank" rel="noopener noreferrer">Open and verify source ↗</a></div></footer>
+</article>
+{% endmacro %}
 {% block content %}
 <section class="lr-shell lr-public-shell" data-view="{{ filters.get('view','detailed') if filters.get('view') in ['compact','detailed'] else 'detailed' }}" data-sort="{{ filters.get('sort','newest') }}">
-  <header class="lr-hero"><div><div class="lr-kicker">TRADESTAAR ELITE · PUBLISHED INTELLIGENCE</div><h1>Live Research Terminal</h1><p>Verified earnings, guidance, filings, analyst moves and market-moving research.</p></div>{% if session.get('is_admin') %}<a class="lr-admin-link" href="{{ url_for('live_research.admin_page') }}">Research Triage</a>{% endif %}</header>
+  <header class="lr-hero"><div><div class="lr-kicker">TRADESTAAR ELITE · LIVE SOURCES + PUBLISHED RESEARCH</div><h1>Live Research Terminal</h1><p>Current market headlines first; reviewed earnings, guidance, filings and research below.</p></div>{% if session.get('is_admin') %}<a class="lr-admin-link" href="{{ url_for('live_research.admin_page') }}">Research Triage</a>{% endif %}</header>
 
   <section class="lr-public-breaking" aria-labelledby="breaking-title">
-    <div class="lr-public-section-head"><div><span class="lr-pulse"></span><b id="breaking-title">Breaking / Priority</b><small>Fresh published Critical, High and Breaking intelligence</small></div><span id="featured-count">{{ featured_posts|length }} live</span></div>
-    <div class="lr-public-featured-list" id="featured-feed">{% for post in featured_posts %}{{ research_item(post, true) }}{% else %}<div class="lr-public-state lr-featured-empty">No priority research is live right now.</div>{% endfor %}</div>
+    <div class="lr-public-section-head"><div><span class="lr-pulse"></span><b id="breaking-title">Breaking Sources</b><small>Latest attributed headlines from the last 24 hours — open the original source before acting</small></div><span id="featured-count">{{ live_headlines|length }} live</span></div>
+    <div class="lr-public-featured-list" id="featured-feed">{% for post in live_headlines %}{{ source_headline(post) }}{% else %}<div class="lr-public-state lr-featured-empty">No fresh source headlines in the last 24 hours.</div>{% endfor %}</div>
   </section>
 
   <form class="lr-public-filters" method="get">
@@ -48,6 +60,6 @@
   <div class="lr-public-message" id="feed-message" role="status" hidden></div>
   <div class="lr-feed lr-public-feed" id="research-feed">{% for post in posts %}{{ research_item(post) }}{% else %}<div class="lr-public-state lr-feed-empty"><b>No published research found</b><span>Try clearing a filter or switching away from Saved/Watchlist-only.</span></div>{% endfor %}</div>
 </section>
-<script>window.LR_PUBLIC_CONFIG={posts:{{ posts|tojson }},featuredPosts:{{ featured_posts|tojson }},alertPrefs:{{ alert_prefs|tojson }},watchlistTickers:{{ watchlist_tickers|tojson }},stockUrlTemplate:{{ (url_for('stock_detail',ticker='__TICKER__') ~ '#stock-research-panel')|tojson }},memoryUrlTemplate:{{ url_for('research_memory.notebook',post_id='__POST_ID__')|tojson }},sort:{{ filters.get('sort','newest')|tojson }},view:{{ filters.get('view','detailed')|tojson }}};</script>
+<script>window.LR_PUBLIC_CONFIG={posts:{{ posts|tojson }},liveHeadlines:{{ live_headlines|tojson }},alertPrefs:{{ alert_prefs|tojson }},watchlistTickers:{{ watchlist_tickers|tojson }},stockUrlTemplate:{{ (url_for('stock_detail',ticker='__TICKER__') ~ '#stock-research-panel')|tojson }},memoryUrlTemplate:{{ url_for('research_memory.notebook',post_id='__POST_ID__')|tojson }},sort:{{ filters.get('sort','newest')|tojson }},view:{{ filters.get('view','detailed')|tojson }}};</script>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='js/live_research.js') }}"></script>{% endblock %}

@@ -26,9 +26,15 @@ def create_live_research_blueprint(*, require_admin, current_user, tracked_ticke
     def feed():
         user=uid();sort=request.args.get('sort') or 'newest';need_watch=request.args.get('watchlist')=='1' or sort=='watchlist';watched=tracked_tickers(user) if need_watch else []
         query=dict(ticker=request.args.get('ticker') or None,category=request.args.get('category') or None,sentiment=request.args.get('sentiment') or None,search=request.args.get('q') or None,watchlist_tickers=watched if request.args.get('watchlist')=='1' else None,watchlist_rank_tickers=watched,saved_by_user=user if request.args.get('saved')=='1' else None,user_id=user)
-        posts=svc.list_published(sort=sort,**query);featured=svc.list_published(sort='priority',featured=True,limit=6,**query)
-        tickers=sorted({p['ticker'] for p in posts+featured})
-        return render_template('live_research.html',posts=posts,featured_posts=featured,categories=rf.CATEGORIES,sentiments=rf.SENTIMENTS,catalyst_types=rf.CATALYST_TYPES,priorities=rf.PRIORITIES,sorts=svc.PUBLIC_SORTS,alert_prefs=svc.get_alert_preferences(user,tickers),filters=request.args,watchlist_tickers=watched)
+        headline_query={key:query[key] for key in ('ticker','category','sentiment','search','watchlist_tickers','watchlist_rank_tickers')}
+        posts=svc.list_published(sort=sort,**query);headlines=svc.list_live_headlines(limit=12,**headline_query)
+        tickers=sorted({p['ticker'] for p in posts})
+        return render_template('live_research.html',posts=posts,live_headlines=headlines,categories=rf.CATEGORIES,sentiments=rf.SENTIMENTS,catalyst_types=rf.CATALYST_TYPES,priorities=rf.PRIORITIES,sorts=svc.PUBLIC_SORTS,alert_prefs=svc.get_alert_preferences(user,tickers),filters=request.args,watchlist_tickers=watched)
+    @bp.get('/api/live-research/headlines')
+    def headlines_api():
+        user=uid();watched=tracked_tickers(user) if request.args.get('watchlist')=='1' else []
+        headlines=svc.list_live_headlines(ticker=request.args.get('ticker') or None,category=request.args.get('category') or None,sentiment=request.args.get('sentiment') or None,search=request.args.get('q') or None,watchlist_tickers=watched if request.args.get('watchlist')=='1' else None,watchlist_rank_tickers=watched,limit=request.args.get('limit',12))
+        return jsonify({'ok':True,'headlines':headlines,'window_hours':24})
     @bp.get('/api/live-research/posts')
     def posts_api():
         user=uid();sort=request.args.get('sort') or 'newest';need_watch=request.args.get('watchlist')=='1' or sort=='watchlist';watched=tracked_tickers(user) if need_watch else []

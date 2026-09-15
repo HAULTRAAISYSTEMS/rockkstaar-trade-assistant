@@ -75,6 +75,20 @@
     return article;
   }
 
+  function sourceHeadlineItem(post) {
+    var published = sourceTime(post), article = node("article", "lr-public-item priority-" + String(post.priority || "Medium").toLowerCase() + " is-featured");
+    article.dataset.postId = post.id; article.dataset.publishedAt = published; article.dataset.priority = post.priority || "Medium"; article.dataset.ticker = post.ticker;
+    var head = add(article, node("div", "lr-public-item-head")), identity = add(head, node("div", "lr-public-identity"));
+    var ticker = add(identity, node("a", "lr-public-ticker", post.ticker)); ticker.href = String(config.stockUrlTemplate || "/stock/__TICKER__").replace("__TICKER__", encodeURIComponent(post.ticker));
+    add(identity, node("span", "lr-public-company", post.company_name));
+    var badges = add(head, node("div", "lr-public-badges")); add(badges, node("span", "lr-catalyst", "SOURCE FEED")); add(badges, node("span", "lr-priority-badge", post.catalyst_type || "BREAKING")); head.appendChild(timeNode(published));
+    add(article, node("h2", "", post.headline));
+    var footer = add(article, node("footer", "lr-public-footer")), source = add(footer, node("div", "lr-public-source"));
+    add(source, node("span", "", post.source_name || "Market source")); source.appendChild(document.createTextNode(" · ")); source.appendChild(timeNode(published)); source.appendChild(document.createTextNode(" · "));
+    var link = add(source, node("a", "", "Open and verify source ↗")); link.href = post.source_url; link.target = "_blank"; link.rel = "noopener noreferrer";
+    return article;
+  }
+
   function compareItems(left, right) {
     var sort = shell.dataset.sort || "newest";
     if (sort === "priority") { var leftRank = priorityRank[left.dataset.priority], rightRank = priorityRank[right.dataset.priority]; var rank = (leftRank === undefined ? 9 : leftRank) - (rightRank === undefined ? 9 : rightRank); if (rank) return rank; }
@@ -84,12 +98,16 @@
   function sortContainer(container) { Array.from(container.querySelectorAll(".lr-public-item")).sort(compareItems).forEach(function (item) { container.appendChild(item); }); }
   function removeEmpty(container) { var empty = container.querySelector(".lr-public-state"); if (empty) empty.remove(); }
   function updateCounts() { var count = feed.querySelectorAll(".lr-public-item").length, featured = featuredFeed.querySelectorAll(".lr-public-item").length; document.getElementById("feed-count").textContent = count + (count === 1 ? " result" : " results"); document.getElementById("featured-count").textContent = featured + " live"; }
-  function qualifiesFeatured(post) { return ["Critical", "High"].indexOf(post.priority) >= 0 || post.catalyst_type === "BREAKING"; }
   function insertPost(post) {
     if (feed.querySelector('[data-post-id="' + CSS.escape(String(post.id)) + '"]')) return false;
     removeEmpty(feed); feed.appendChild(researchItem(post, false)); sortContainer(feed);
-    if (qualifiesFeatured(post) && !featuredFeed.querySelector('[data-post-id="' + CSS.escape(String(post.id)) + '"]')) { removeEmpty(featuredFeed); featuredFeed.appendChild(researchItem(post, true)); sortContainer(featuredFeed); }
     updateCounts(); refreshTimes(); return true;
+  }
+  function renderHeadlines(headlines) {
+    featuredFeed.replaceChildren();
+    (headlines || []).forEach(function (post) { featuredFeed.appendChild(sourceHeadlineItem(post)); });
+    if (!headlines || !headlines.length) featuredFeed.appendChild(node("div", "lr-public-state lr-featured-empty", "No fresh source headlines in the last 24 hours."));
+    updateCounts(); refreshTimes();
   }
   function newestCursor() { var value = ""; document.querySelectorAll(".lr-public-feed .lr-public-item[data-published-at]").forEach(function (item) { if ((item.dataset.publishedAt || "") > value) value = item.dataset.publishedAt; }); return value; }
   function setMessage(text, kind) { if (!text) { feedMessage.hidden = true; feedMessage.textContent = ""; return; } feedMessage.hidden = false; feedMessage.className = "lr-public-message " + (kind || ""); feedMessage.textContent = text; }
@@ -102,10 +120,15 @@
       liveState.textContent = "● Live"; setMessage(inserted ? inserted + " new published update" + (inserted === 1 ? "" : "s") + " added." : "", inserted ? "is-success" : "");
     }).catch(function () { failures += 1; liveState.textContent = "● REST fallback"; if (failures > 1) setMessage("Live updates are temporarily unavailable. The feed will retry automatically.", "is-error"); });
   }
-  function startPolling() { if (!pollTimer) pollTimer = setInterval(refreshIncremental, 15000); }
+  function refreshHeadlines() {
+    var query = new URLSearchParams(location.search); query.delete("saved"); query.delete("sort"); query.delete("view"); query.set("limit", "12");
+    fetch("/api/live-research/headlines?" + query.toString(), {headers: {Accept: "application/json"}}).then(function (response) { return response.json().then(function (payload) { if (!response.ok) throw new Error(payload.error || "Headline update failed"); return payload; }); }).then(function (payload) { renderHeadlines(payload.headlines || []); }).catch(function () { /* Keep the last known headline set until the next poll. */ });
+  }
+  function refreshAll() { refreshIncremental(); refreshHeadlines(); }
+  function startPolling() { if (!pollTimer) pollTimer = setInterval(refreshAll, 15000); }
   function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
   function startRealtime() {
-    if (!feed) return; cursor = newestCursor(); refreshTimes(); startPolling();
+    if (!feed) return; cursor = newestCursor(); refreshTimes(); refreshHeadlines(); startPolling();
     if (typeof window._wsConnect === "function") { window._wsConnect("/ws/live-research", function (message) { if (message && message.type === "research.published") refreshIncremental(); }); statusTimer = setInterval(function () { if (window._wsGetStatus && window._wsGetStatus() === "live") { stopPolling(); liveState.textContent = "● Live"; } else { startPolling(); liveState.textContent = "● REST fallback"; } }, 3000); }
   }
 
