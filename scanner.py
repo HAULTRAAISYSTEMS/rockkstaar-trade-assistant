@@ -390,7 +390,13 @@ def _scanner_loop() -> None:
                 first_run = False
 
             try:
-                opps = _run_scan()
+                from telegram_policy import watchlist, send_setups
+                try:
+                    tracked = watchlist()
+                except Exception:
+                    tracked = set()
+                    logger.warning("Telegram watchlist unavailable; scanning default universe")
+                opps = _run_scan(extra_tickers=sorted(tracked))
                 ts   = _et_now().strftime("%I:%M %p").lstrip("0") + " ET"
 
                 with _scan_lock:
@@ -404,6 +410,8 @@ def _scanner_loop() -> None:
                         threading.Thread(
                             target=_persist_alert, args=(opp,), daemon=True
                         ).start()
+
+                send_setups(opps, tracked, _et_now())
 
                 logger.info(
                     "scanner: cycle=%d  found=%d  time=%s",
