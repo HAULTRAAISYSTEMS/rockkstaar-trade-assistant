@@ -7,6 +7,7 @@ feed leaves a gap rather than an error page, and that nothing here starts a
 round trip on page load.
 """
 import os
+from datetime import datetime
 
 import pytest
 
@@ -616,6 +617,23 @@ class TestThisWeekShowsWhatMatters:
     def test_the_countdown_still_finds_the_high_impact_release(self, monkeypatch):
         context = self._week(monkeypatch, self.MACRO, self.NOISE)
         assert "Consumer Price Index" in context["next_up"]["title"]
+
+    def test_today_zero_is_not_treated_as_missing(self, monkeypatch):
+        monkeypatch.setattr(legacy, "_et_now", lambda: datetime(2026, 9, 16, 5, 19))
+        fomc = [{"date": "2026-09-16", "date_label": "Sep 16",
+                 "time": "2:00 PM ET", "event": "FOMC Interest Rate Decision",
+                 "impact": "HIGH", "days_away": 0}]
+        context = self._week(monkeypatch, fomc, [])
+        assert any("FOMC" in row["title"] for row in context["week"])
+        assert "FOMC" in context["next_up"]["title"]
+
+    def test_a_same_day_event_that_already_happened_is_not_next(self, monkeypatch):
+        monkeypatch.setattr(legacy, "_et_now", lambda: datetime(2026, 9, 16, 15, 0))
+        fomc = [{"date": "2026-09-16", "date_label": "Sep 16",
+                 "time": "2:00 PM ET", "event": "FOMC Interest Rate Decision",
+                 "impact": "HIGH", "days_away": 0}]
+        context = self._week(monkeypatch, fomc, [])
+        assert context["week"] == [] and context["next_up"] is None
 
     def test_nothing_at_all_is_not_an_error(self, monkeypatch):
         context = self._week(monkeypatch, [], [])

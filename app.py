@@ -5268,7 +5268,7 @@ def api_quick():
 
 
 # ---------------------------------------------------------------------------
-# AI Morning Briefing — powered by Nebius (Llama-3.3-70B)
+# AI Morning Briefing — provider-backed with a live-data fallback
 # ---------------------------------------------------------------------------
 
 _NEBIUS_SYSTEM_PROMPT = """You are an elite institutional trading assistant providing a pre-market morning briefing.
@@ -5403,29 +5403,189 @@ def _build_briefing_market_text() -> str:
     return "\n".join(lines)
 
 
-def _generate_nebius_briefing(market_data_text: str) -> dict:
-    """
-    Call Nebius (Llama-3.3-70B) with market data and return parsed JSON.
-    Raises on any error so the caller can fall back to cache.
-    """
-    import json as _j
-    from openai import OpenAI
-    client = OpenAI(
-        base_url="https://api.tokenfactory.nebius.com/v1/",
-        api_key=os.environ.get("NEBIUS_API_KEY"),
-    )
+def _briefing_json(text: str) -> dict:
+    """Parse a provider response without assuming JSON-mode support."""
+    raw = str(text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw)
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("Briefing provider did not return a JSON object")
+    parsed = _json.loads(raw[start:end + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("Briefing provider returned the wrong JSON shape")
+    return parsed
+
+
+def _nebius_completion(client, model: str, market_data_text: str) -> dict:
     response = client.chat.completions.create(
-        model="meta-llama/Llama-3.3-70B-Instruct",
+        model=model,
         max_tokens=512,
         temperature=0.3,
         top_p=0.9,
-        response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": _NEBIUS_SYSTEM_PROMPT},
             {"role": "user",   "content": market_data_text},
         ],
     )
-    return _j.loads(response.choices[0].message.content)
+    result = _briefing_json(response.choices[0].message.content)
+    result["provider"] = f"Nebius · {model.rsplit('/', 1)[-1]}"
+    return result
+
+
+def _accessible_nebius_model(client, excluded: str) -> str:
+    """Choose a text/chat model the current Nebius project can actually list."""
+    models = getattr(client.models.list(), "data", []) or []
+    choices = []
+    for item in models:
+        model_id = str(getattr(item, "id", "") or "")
+        lower = model_id.lower()
+        if not model_id or model_id == excluded:
+            continue
+        if any(word in lower for word in (
+                "embed", "rerank", "vision", "image", "audio", "whisper", "tts")):
+            continue
+        score = 0
+        if "instruct" in lower or "chat" in lower:
+            score += 8
+        if any(word in lower for word in ("qwen", "llama", "gpt", "deepseek", "mistral")):
+            score += 4
+        if any(size in lower for size in ("70b", "32b", "20b", "14b", "8b")):
+            score += 1
+        choices.append((score, model_id))
+    return max(choices, default=(0, ""))[1]
+
+
+def _generate_nebius_briefing(market_data_text: str) -> dict:
+    """
+    Call Nebius (Llama-3.3-70B) with market data and return parsed JSON.
+    Raises on any error so the caller can fall back to cache.
+    """
+    from openai import OpenAI
+    client = OpenAI(
+        base_url="https://api.tokenfactory.nebius.com/v1/",
+        api_key=os.environ.get("NEBIUS_API_KEY"),
+    )
+    model = os.environ.get("NEBIUS_BRIEFING_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
+    try:
+        return _nebius_completion(client, model, market_data_text)
+    except Exception as first_error:
+        replacement = _accessible_nebius_model(client, model)
+        if not replacement:
+            raise first_error
+        logger.warning("briefing model %s unavailable; retrying with %s", model, replacement)
+        return _nebius_completion(client, replacement, market_data_text)
+
+
+def _generate_anthropic_briefing(market_data_text: str) -> dict:
+    """Use the app's existing Anthropic connection when Nebius is unavailable."""
+    import anthropic as _anthropic
+    client = _anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    model = os.environ.get("ANTHROPIC_BRIEFING_MODEL", "claude-sonnet-4-6")
+    response = client.messages.create(
+        model=model,
+        max_tokens=512,
+        temperature=0.3,
+        system=_NEBIUS_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": market_data_text}],
+    )
+    text = "\n".join(
+        str(block.text) for block in response.content if hasattr(block, "text")
+    )
+    result = _briefing_json(text)
+    result["provider"] = f"Anthropic · {model}"
+    return result
+
+
+def _generate_ai_briefing(market_data_text: str) -> dict:
+    """Try configured AI providers without one vendor becoming a single point of failure."""
+    errors = []
+    if os.environ.get("NEBIUS_API_KEY"):
+        try:
+            return _generate_nebius_briefing(market_data_text)
+        except Exception as exc:
+            errors.append(f"Nebius: {type(exc).__name__}")
+            logger.warning("Nebius morning briefing unavailable: %s", exc)
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        try:
+            return _generate_anthropic_briefing(market_data_text)
+        except Exception as exc:
+            errors.append(f"Anthropic: {type(exc).__name__}")
+            logger.warning("Anthropic morning briefing unavailable: %s", exc)
+    raise RuntimeError("; ".join(errors) or "No briefing AI provider is configured")
+
+
+def _live_data_briefing() -> dict:
+    """Build a useful, honest briefing when every AI provider is unavailable."""
+    try:
+        mkt = _get_mkt_ctx() or {}
+    except Exception:
+        mkt = {}
+    regime = str(mkt.get("regime") or mkt.get("market_regime") or "Neutral").strip()
+    raw_regime = regime.lower().replace("_", " ").replace("-", " ")
+    if "risk" in raw_regime and "on" in raw_regime:
+        bias = "risk_on"
+    elif "risk" in raw_regime and "off" in raw_regime:
+        bias = "risk_off"
+    else:
+        bias = "neutral"
+
+    vix = mkt.get("vix_level")
+    if vix is None:
+        vix_line = "VIX is unavailable; use smaller size until volatility data refreshes."
+    else:
+        try:
+            level = float(vix)
+            tone = "elevated volatility" if level >= 25 else "moderate volatility" if level >= 18 else "relatively calm volatility"
+            vix_line = f"VIX at {level:.1f} — {tone}; size positions accordingly."
+        except (TypeError, ValueError):
+            vix_line = f"VIX reads {vix}; confirm volatility before sizing trades."
+
+    pieces = [f"The live market regime is {regime}."]
+    spy, qqq = mkt.get("spy_1d_pct"), mkt.get("qqq_1d_pct")
+    if spy is not None or qqq is not None:
+        moves = []
+        for ticker, value in (("SPY", spy), ("QQQ", qqq)):
+            if value is not None:
+                try:
+                    moves.append(f"{ticker} {float(value):+.1f}%")
+                except (TypeError, ValueError):
+                    pass
+        if moves:
+            pieces.append("Broad-market tone: " + ", ".join(moves) + ".")
+    leading = [str(x) for x in (mkt.get("leading_sectors") or [])[:2]]
+    weak = [str(x) for x in (mkt.get("weak_sectors") or [])[:2]]
+    if leading or weak:
+        rotation = []
+        if leading:
+            rotation.append("leading: " + ", ".join(leading))
+        if weak:
+            rotation.append("lagging: " + ", ".join(weak))
+        pieces.append("Sector rotation is " + "; ".join(rotation) + ".")
+
+    flagged = []
+    try:
+        wl_id = get_active_wl_id()
+        for stock in (get_all_stock_data(wl_id) if wl_id else [])[:30]:
+            score = stock.get("swing_score") or 0
+            catalyst = stock.get("catalyst_score") or 0
+            if float(score) >= 70 or float(catalyst) >= 7:
+                ticker = str(stock.get("ticker") or "").upper()
+                if ticker and ticker not in flagged:
+                    flagged.append(ticker)
+            if len(flagged) == 3:
+                break
+    except Exception:
+        pass
+    return {
+        "macro_bias": bias,
+        "vix_level": vix_line,
+        "briefing": " ".join(pieces) + " AI analysis is temporarily unavailable, so this read uses verified live market fields only.",
+        "tickers_flagged": flagged,
+        "provider": "Live market-data fallback",
+        "degraded": True,
+    }
 
 
 # A briefing older than this is written before most of the session happened,
@@ -5553,7 +5713,7 @@ def api_ai_briefing():
     # Build market data snapshot and call Nebius
     try:
         market_text = _build_briefing_market_text()
-        result      = _generate_nebius_briefing(market_text)
+        result      = _generate_ai_briefing(market_text)
         # Validate required fields; fill defaults if LLM omits them
         result.setdefault("macro_bias",      "neutral")
         result.setdefault("vix_level",       "VIX data unavailable")
@@ -5568,7 +5728,7 @@ def api_ai_briefing():
         save_ai_briefing(today_et, result)
         return jsonify({"ok": True, "briefing": _age_briefing(result)})
     except Exception as exc:
-        logger.error("api_ai_briefing Nebius call failed: %s", exc, exc_info=True)
+        logger.error("api_ai_briefing provider call failed: %s", exc, exc_info=True)
         _last_err = str(exc)
 
     # Fall back to today's cached briefing (if any) rather than returning an error
@@ -5579,18 +5739,13 @@ def api_ai_briefing():
         fallback["error"]  = _last_err
         return jsonify({"ok": True, "briefing": _age_briefing(fallback)})
 
-    return jsonify({
-        "ok": False,
-        "error": _last_err or "Briefing unavailable",
-        "briefing": {
-            "macro_bias": "neutral",
-            "vix_level":  "Data unavailable",
-            "briefing":   f"Nebius error: {_last_err or 'unknown — check NEBIUS_API_KEY on Render'}",
-            "tickers_flagged": [],
-            "cached": False,
-            "date": today_et,
-        }
-    }), 503
+    # Never make a vendor/model entitlement error the content of the product.
+    fallback = _live_data_briefing()
+    fallback["cached"] = False
+    fallback["date"] = today_et
+    fallback["generated_at"] = _et_now().isoformat()
+    save_ai_briefing(today_et, fallback)
+    return jsonify({"ok": True, "briefing": _age_briefing(fallback)})
 
 
 @app.route("/api/narrate_score")
@@ -7647,6 +7802,29 @@ COMMAND_NEWS = 6
 COMMAND_WEEK = 8
 # A quiet week is padded up to this many rows so the card is not almost empty.
 COMMAND_WEEK_MIN = 4
+
+
+def _calendar_days(row, default=99) -> int:
+    """Return days-away without turning today's zero into a missing value."""
+    value = row.get("days_away")
+    try:
+        return int(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _calendar_event_is_upcoming(row, now=None) -> bool:
+    """Keep future events and today's events that have not happened yet."""
+    days = _calendar_days(row)
+    if days < 0 or days > 7:
+        return False
+    if days > 0:
+        return True
+    event_minute = _minutes_of_day(row.get("time"))
+    if event_minute == _UNKNOWN_TIME:
+        return True
+    now = now or _et_now()
+    return event_minute >= now.hour * 60 + now.minute
 COMMAND_SETUPS = 5
 COMMAND_WATCHLIST = 8
 
@@ -7778,7 +7956,7 @@ def _command_center_context() -> dict:
     # already merged and sorted by the calendar builder.
     try:
         rows = _build_catalyst_calendar(summary, tickers)
-        upcoming = [r for r in rows if (r.get("days_away") or 99) <= 7]
+        upcoming = [r for r in rows if _calendar_event_is_upcoming(r)]
 
         # Chronological order alone fills this section with whatever reports
         # soonest. The moment the earnings feed warmed, eight medium-impact
@@ -7800,7 +7978,9 @@ def _command_center_context() -> dict:
             # in around the rows that matter.
             rest = [r for r in upcoming if not _matters(r)]
             signal = signal + rest[:COMMAND_WEEK_MIN - len(signal)]
-        signal.sort(key=lambda r: (r.get("days_away") or 99, r.get("time") or ""))
+        signal.sort(key=lambda r: (
+            _calendar_days(r), _minutes_of_day(r.get("time")), r.get("title") or ""
+        ))
         context["week"] = signal
         # The nearest high-impact event, so the strip can count down to the
         # thing that will actually move the tape rather than to the next row.

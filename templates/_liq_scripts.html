@@ -692,9 +692,10 @@ function loadAIBrief(forceRefresh) {
         var age = b.age_minutes == null ? '' :
           (b.age_minutes < 60 ? b.age_minutes + 'm ago'
             : Math.round(b.age_minutes / 60) + 'h ago');
+        var provider = b.provider ? ' · ' + b.provider : '';
         time.textContent = (b.written_label
           ? 'Written ' + b.written_label + (age ? ' · ' + age : '')
-          : (b.cached ? 'Cached · ' : 'Generated · ') + (b.date || ''));
+          : (b.cached ? 'Cached · ' : 'Generated · ') + (b.date || '')) + provider;
         time.classList.toggle('is-stale', !!b.stale);
       }
       var note = document.getElementById('ai-brief-conflict');
