@@ -533,8 +533,8 @@ def _intel_alert_loop():
     while True:
         try:
             now = _intel._et_now()
-            # Run during extended market hours (7 AM – 6 PM ET, weekdays)
-            if now.weekday() < 5 and 7 <= now.hour < 18:
+            # Weekday intel sweeps plus the Sunday evening weekly calendar.
+            if (now.weekday() < 5 and 7 <= now.hour < 18) or (now.weekday() == 6 and 18 <= now.hour < 21):
                 _intel.check_and_send_intel_alerts()
         except Exception as _ie:
             logger.warning("intel alert loop error: %s", _ie)
