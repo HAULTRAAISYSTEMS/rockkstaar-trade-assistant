@@ -1,0 +1,381 @@
+name: Telegram alert policy v2
+
+on:
+  push:
+    branches:
+      - feature/telegram-alerts-v2
+    paths:
+      - .github/workflows/telegram-alerts-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/telegram-alerts-v2
+          fetch-depth: 0
+
+      - name: Patch source and add tests
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          intel_path = Path('intel_engine.py')
+          src = intel_path.read_text()
+          start = src.index('# ── Intel Telegram Alerts')
+          end = src.index('# ── Convenience rollup for /api/intel')
+
+          replacement = '''# ── Intel Telegram Alerts ─────────────────────────────────────────────────────
+
+
+def _telegram_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _telegram_signal_policy() -> dict:
+    """Return the signal-first Telegram policy.
+
+    Telegram is intentionally reserved for high-value information. Routine
+    dividends, ordinary splits, and one-off earnings reminders stay inside the
+    app unless explicitly enabled through environment variables.
+    """
+    return {
+        "morning_brief": _telegram_bool("TELEGRAM_MORNING_BRIEF", True),
+        "weekly_calendar": _telegram_bool("TELEGRAM_WEEKLY_CALENDAR", True),
+        "breaking_news": _telegram_bool("TELEGRAM_BREAKING_NEWS", True),
+        "macro_alerts": _telegram_bool("TELEGRAM_MACRO_ALERTS", True),
+        "volatility_alerts": _telegram_bool("TELEGRAM_VOLATILITY_ALERTS", True),
+        "earnings_alerts": _telegram_bool("TELEGRAM_EARNINGS_ALERTS", False),
+        "split_alerts": _telegram_bool("TELEGRAM_SPLIT_ALERTS", False),
+        "dividend_alerts": _telegram_bool("TELEGRAM_DIVIDEND_ALERTS", False),
+    }
+
+
+def _brief_earnings(earnings: dict, buckets=("today", "tomorrow", "this_week"), limit: int = 6) -> list[str]:
+    rows: list[str] = []
+    seen: set[str] = set()
+    for bucket in buckets:
+        for item in earnings.get(bucket, []) or []:
+            if not item.get("on_watchlist"):
+                continue
+            ticker = item.get("ticker") or ""
+            if not ticker or ticker in seen:
+                continue
+            seen.add(ticker)
+            rows.append(
+                f"• {ticker} — {item.get('date_label') or item.get('date') or bucket} "
+                f"{item.get('time_label', 'TBD')}"
+            )
+            if len(rows) >= limit:
+                return rows
+    return rows
+
+
+def _brief_macro(events: list[dict], days: int, limit: int = 8) -> list[str]:
+    rows: list[str] = []
+    for item in events:
+        away = int(item.get("days_away", 99))
+        if away < 0 or away > days or item.get("impact") != "HIGH":
+            continue
+        when = item.get("date_label") or item.get("date") or ""
+        clock = item.get("time") or "TBD"
+        rows.append(f"• {when} {clock} — {item.get('event', 'Macro event')}")
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _send_morning_brief(sent: list[dict]) -> None:
+    now = _et_now()
+    if now.weekday() >= 5 or not (6 <= now.hour <= 11):
+        return
+    key = _daily_key("TELEGRAM", "morning_brief")
+    if not should_send_alert(key):
+        return
+
+    earnings = fetch_earnings_calendar()
+    econ = fetch_economic_calendar()
+    macro = fetch_macro_environment()
+    earn_rows = _brief_earnings(earnings, ("today", "tomorrow"), 5)
+    macro_rows = _brief_macro(econ, 0, 6)
+
+    lines = [f"🌅 <b>TRADESTAAR MORNING BRIEF — {now.strftime('%a %b %d')}</b>"]
+    if macro_rows:
+        lines += ["", "<b>Important data today</b>", *macro_rows]
+    if earn_rows:
+        lines += ["", "<b>Watchlist earnings</b>", *earn_rows]
+
+    vix = macro.get("vix_level")
+    yld = macro.get("yield_10y")
+    regime = macro.get("regime")
+    market_bits = []
+    if vix is not None:
+        market_bits.append(f"VIX {vix:.1f}")
+    if yld is not None:
+        market_bits.append(f"10Y {yld:.2f}%")
+    if regime:
+        market_bits.append(str(regime))
+    if market_bits:
+        lines += ["", "<b>Market environment</b>", " • ".join(market_bits)]
+
+    if len(lines) == 1:
+        lines.append("No high-impact macro or watchlist earnings scheduled today.")
+    send_intel_alert("\n".join(lines), priority="HIGH")
+    sent.append({"type": "morning_brief"})
+
+
+def _send_weekly_calendar(sent: list[dict]) -> None:
+    now = _et_now()
+    # Monday morning is deliberate: the alert worker is not guaranteed to run
+    # on Sunday, and this still gives the user the entire trading week.
+    if now.weekday() != 0 or not (6 <= now.hour <= 12):
+        return
+    iso = now.isocalendar()
+    key = f"TELEGRAM:weekly_calendar:{iso.year}-W{iso.week:02d}"
+    if not should_send_alert(key, window_minutes=6 * 24 * 60):
+        return
+
+    earnings = fetch_earnings_calendar()
+    econ = fetch_economic_calendar()
+    earn_rows = _brief_earnings(earnings, ("today", "tomorrow", "this_week"), 8)
+    macro_rows = _brief_macro(econ, 7, 10)
+    wl_set = set(_get_watchlist_tickers())
+
+    split_rows: list[str] = []
+    for item in fetch_stock_splits():
+        if item.get("ticker") not in wl_set:
+            continue
+        days = int(item.get("days_away", 99))
+        if 0 <= days <= 7:
+            split_rows.append(
+                f"• {item['ticker']} — {item.get('ratio', '?')} "
+                f"{item.get('type', '')} · {item.get('eff_date', '')}"
+            )
+        if len(split_rows) >= 4:
+            break
+
+    lines = [f"📅 <b>TRADESTAAR WEEKLY CALENDAR — Week {iso.week}</b>"]
+    if macro_rows:
+        lines += ["", "<b>High-impact macro</b>", *macro_rows]
+    if earn_rows:
+        lines += ["", "<b>Watchlist earnings</b>", *earn_rows]
+    if split_rows:
+        lines += ["", "<b>Watchlist corporate actions</b>", *split_rows]
+    if len(lines) == 1:
+        lines.append("No high-impact events are currently on the calendar.")
+
+    send_intel_alert("\n".join(lines), priority="HIGH")
+    sent.append({"type": "weekly_calendar"})
+
+
+def check_and_send_intel_alerts() -> list[dict]:
+    """Send a signal-first Telegram feed instead of one message per event.
+
+    Default behavior:
+      • one weekday morning brief
+      • one Monday weekly calendar
+      • immediate CRITICAL watchlist/major-index news
+      • immediate extreme volatility / yield shocks
+      • no routine dividend, split, or earnings spam
+
+    TELEGRAM_* environment flags can re-enable the legacy event classes.
+    """
+    sent: list[dict] = []
+    policy = _telegram_signal_policy()
+    wl_set = set(_get_watchlist_tickers())
+
+    if policy["morning_brief"]:
+        try:
+            _send_morning_brief(sent)
+        except Exception as exc:
+            logger.warning("intel: morning brief failed: %s", exc)
+
+    if policy["weekly_calendar"]:
+        try:
+            _send_weekly_calendar(sent)
+        except Exception as exc:
+            logger.warning("intel: weekly calendar failed: %s", exc)
+
+    if policy["breaking_news"]:
+        try:
+            for item in fetch_market_news():
+                impact = item.get("impact", "LOW")
+                ticker = item.get("ticker", "")
+                if impact != "CRITICAL" or (ticker not in wl_set and ticker not in {"SPY", "QQQ"}):
+                    continue
+                headline_key = (item.get("headline") or "")[:80].lower()
+                dk = f"news:{ticker}:{headline_key}"
+                if should_send_alert(dk, window_minutes=12 * 60):
+                    msg = (
+                        f"🚨 <b>BREAKING — {ticker}</b>\n"
+                        f"{item.get('headline', '')}\n"
+                        f"<i>{item.get('reason', 'Market-moving news')}</i>"
+                    )
+                    send_intel_alert(msg, priority="CRITICAL")
+                    sent.append({"type": "news", "ticker": ticker, "impact": impact})
+        except Exception as exc:
+            logger.warning("intel: breaking-news sweep failed: %s", exc)
+
+    if policy["macro_alerts"]:
+        try:
+            today_high = [
+                e for e in fetch_economic_calendar()
+                if e.get("is_today") and e.get("impact") == "HIGH"
+            ]
+            # The morning brief carries the schedule. This fallback only fires
+            # if the worker's first useful run happens after the morning window.
+            if today_high and _et_now().hour >= 12:
+                dk = _daily_key("MACRO", "high_impact_fallback")
+                if should_send_alert(dk):
+                    rows = _brief_macro(today_high, 0, 6)
+                    send_intel_alert(
+                        "⚠️ <b>HIGH-IMPACT MACRO TODAY</b>\n" + "\n".join(rows),
+                        priority="HIGH",
+                    )
+                    sent.append({"type": "economic", "events": [e.get("event") for e in today_high]})
+        except Exception as exc:
+            logger.warning("intel: macro alert sweep failed: %s", exc)
+
+    if policy["volatility_alerts"]:
+        try:
+            macro = fetch_macro_environment()
+            vix = macro.get("vix_level")
+            if vix and vix >= 35:
+                dk = _daily_key("VIX", "extreme")
+                if should_send_alert(dk):
+                    send_intel_alert(
+                        f"🚨 <b>VIX EXTREME — {vix:.1f}</b>\n"
+                        "<i>Volatility is unusually elevated. Treat new entries with extra caution.</i>",
+                        priority="CRITICAL",
+                    )
+                    sent.append({"type": "vix_extreme", "vix": vix})
+
+            yield_10y = macro.get("yield_10y")
+            change_bps = macro.get("yield_change_bps")
+            if yield_10y and change_bps is not None and abs(change_bps) >= 15:
+                direction = "SURGING" if change_bps > 0 else "DROPPING"
+                dk = _daily_key("TNX", f"extreme_{direction}")
+                if should_send_alert(dk):
+                    send_intel_alert(
+                        f"⚠️ <b>10Y YIELD {direction} — {yield_10y:.3f}%</b>\n"
+                        f"Daily move: {change_bps:+.1f} bps",
+                        priority="HIGH",
+                    )
+                    sent.append({
+                        "type": "yield_extreme",
+                        "yield_10y": yield_10y,
+                        "change_bps": change_bps,
+                    })
+        except Exception as exc:
+            logger.warning("intel: volatility sweep failed: %s", exc)
+
+    # Legacy event classes are opt-in only.
+    if policy["earnings_alerts"]:
+        try:
+            earnings = fetch_earnings_calendar()
+            for bucket in ("today", "tomorrow"):
+                for item in earnings.get(bucket, []):
+                    if not item.get("on_watchlist"):
+                        continue
+                    ticker = item["ticker"]
+                    dk = _daily_key(ticker, f"earnings_{bucket}")
+                    if should_send_alert(dk):
+                        send_intel_alert(
+                            f"⚠️ <b>Earnings: {ticker}</b> — "
+                            f"{item.get('date_label', bucket)} {item.get('time_label', 'TBD')}",
+                            priority="HIGH",
+                        )
+                        sent.append({"type": "earnings", "ticker": ticker})
+        except Exception as exc:
+            logger.warning("intel: earnings alert sweep failed: %s", exc)
+
+    if policy["split_alerts"]:
+        try:
+            for item in fetch_stock_splits():
+                if item.get("ticker") not in wl_set or not item.get("is_new"):
+                    continue
+                ticker = item["ticker"]
+                dk = _daily_key(ticker, "split_alert")
+                if should_send_alert(dk):
+                    send_intel_alert(
+                        f"📢 <b>Split — {ticker}</b>\n"
+                        f"{item.get('ratio')} {item.get('type')} · {item.get('eff_date')}",
+                        priority="HIGH",
+                    )
+                    sent.append({"type": "split", "ticker": ticker})
+        except Exception as exc:
+            logger.warning("intel: split alert sweep failed: %s", exc)
+
+    if policy["dividend_alerts"]:
+        try:
+            for item in fetch_dividends():
+                if not item.get("on_watchlist") or not (0 <= int(item.get("days_away", 99)) <= 1):
+                    continue
+                ticker = item["ticker"]
+                dk = _daily_key(ticker, "div_exdate")
+                if should_send_alert(dk):
+                    send_intel_alert(
+                        f"💰 <b>Dividend ex-date — {ticker}</b> · "
+                        f"{item.get('ex_date_label', item.get('ex_date', ''))}",
+                        priority="HIGH",
+                    )
+                    sent.append({"type": "dividend", "ticker": ticker})
+        except Exception as exc:
+            logger.warning("intel: dividend alert sweep failed: %s", exc)
+
+    if sent:
+        logger.info("intel: sent %d signal-first Telegram alerts", len(sent))
+    return sent
+
+
+'''
+          intel_path.write_text(src[:start] + replacement + src[end:])
+
+          scanner_path = Path('scanner.py')
+          scanner = scanner_path.read_text()
+          marker = '# ── Core scan cycle ────────────────────────────────────────────────────────────\n'
+          helper = '''def _is_telegram_setup(opp: dict) -> bool:\n    """Only the strongest confirmed momentum setup is allowed to buzz the phone."""\n    return bool(\n        opp.get("primary_tag") == "MOMENTUM SPIKE"\n        and int(opp.get("scan_score", 0)) >= 10\n        and float(opp.get("volume_ratio", 0)) >= 1.5\n        and opp.get("above_vwap")\n        and opp.get("breaking_high")\n    )\n\n\n'''
+          if '_is_telegram_setup' not in scanner:
+              scanner = scanner.replace(marker, helper + marker, 1)
+
+          old = '''                # Persist new alerts to DB (dedup-guarded, fire-and-forget)\n                for opp in opps:\n                    if _should_notify(opp["ticker"], opp["primary_tag"]):\n                        threading.Thread(\n                            target=_persist_alert, args=(opp,), daemon=True\n                        ).start()\n'''
+          new = '''                # Persist all scanner opportunities in-app, but only send\n                # the strongest confirmed setup to Telegram.\n                for opp in opps:\n                    if _should_notify(opp["ticker"], opp["primary_tag"]):\n                        threading.Thread(\n                            target=_persist_alert, args=(opp,), daemon=True\n                        ).start()\n                        if _is_telegram_setup(opp):\n                            msg = (\n                                f"🎯 <b>TRADESTAAR SETUP — {opp['ticker']}</b>\\n"\n                                f"{opp['primary_tag']} · Score {opp['scan_score']}/10\\n"\n                                f"Price ${opp['price']} · Entry {opp['entry_zone']}\\n"\n                                f"{opp['reason']}"\n                            )\n                            threading.Thread(\n                                target=_send_telegram, args=(msg,), daemon=True\n                            ).start()\n'''
+          if old not in scanner:
+              raise SystemExit('scanner patch target not found')
+          scanner_path.write_text(scanner.replace(old, new, 1))
+
+          Path('test_telegram_alert_policy.py').write_text('''import os\n\nimport intel_engine\nimport scanner\n\n\ndef test_signal_first_defaults(monkeypatch):\n    for name in (\n        "TELEGRAM_MORNING_BRIEF", "TELEGRAM_WEEKLY_CALENDAR",\n        "TELEGRAM_BREAKING_NEWS", "TELEGRAM_MACRO_ALERTS",\n        "TELEGRAM_VOLATILITY_ALERTS", "TELEGRAM_EARNINGS_ALERTS",\n        "TELEGRAM_SPLIT_ALERTS", "TELEGRAM_DIVIDEND_ALERTS",\n    ):\n        monkeypatch.delenv(name, raising=False)\n    policy = intel_engine._telegram_signal_policy()\n    assert policy["morning_brief"] is True\n    assert policy["weekly_calendar"] is True\n    assert policy["breaking_news"] is True\n    assert policy["macro_alerts"] is True\n    assert policy["volatility_alerts"] is True\n    assert policy["earnings_alerts"] is False\n    assert policy["split_alerts"] is False\n    assert policy["dividend_alerts"] is False\n\n\ndef test_legacy_classes_can_be_opted_in(monkeypatch):\n    monkeypatch.setenv("TELEGRAM_EARNINGS_ALERTS", "true")\n    monkeypatch.setenv("TELEGRAM_SPLIT_ALERTS", "1")\n    monkeypatch.setenv("TELEGRAM_DIVIDEND_ALERTS", "yes")\n    policy = intel_engine._telegram_signal_policy()\n    assert policy["earnings_alerts"] is True\n    assert policy["split_alerts"] is True\n    assert policy["dividend_alerts"] is True\n\n\ndef test_only_confirmed_momentum_spike_reaches_telegram():\n    base = {\n        "primary_tag": "MOMENTUM SPIKE",\n        "scan_score": 10,\n        "volume_ratio": 1.7,\n        "above_vwap": True,\n        "breaking_high": True,\n    }\n    assert scanner._is_telegram_setup(base) is True\n    assert scanner._is_telegram_setup({**base, "primary_tag": "BREAKOUT WATCH"}) is False\n    assert scanner._is_telegram_setup({**base, "volume_ratio": 1.2}) is False\n    assert scanner._is_telegram_setup({**base, "above_vwap": False}) is False\n    assert scanner._is_telegram_setup({**base, "breaking_high": False}) is False\n''')
+          PY
+
+      - name: Syntax check
+        run: python -m py_compile intel_engine.py scanner.py test_telegram_alert_policy.py
+
+      - name: Focused tests
+        run: |
+          python -m pytest -q \
+            test_telegram_alert_policy.py \
+            test_intel_news.py \
+            test_intel_earnings.py \
+            test_econ_schedule.py \
+            test_economic_calendar_time.py \
+            test_dividend_yield.py
+
+      - name: Remove rollout workflows
+        run: |
+          rm -f .github/workflows/apply-telegram-signal-policy.yml
+          rm -f .github/workflows/telegram-alerts-v2.yml
+
+      - name: Commit tested source
+        run: |
+          git config user.name "tradestaar-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add intel_engine.py scanner.py test_telegram_alert_policy.py .github/workflows
+          git commit -m "feat: make Telegram alerts signal-first"
+          git push origin feature/telegram-alerts-v2
