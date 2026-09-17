@@ -22,7 +22,7 @@
     <button class="tab-btn {% if not request.args.get('tab') or request.args.get('tab') == 'analyze' %}active{% endif %}"
             onclick="switchTab('analyze', this)">Analyze</button>
     <button class="tab-btn {% if request.args.get('tab') == 'quarter' %}active{% endif %}"
-            onclick="switchTab('quarter', this)">This quarter</button>
+            onclick="switchTab('quarter', this)">Seven Checks</button>
     <button class="tab-btn {% if request.args.get('tab') == 'learn' %}active{% endif %}"
             onclick="switchTab('learn', this)">Learn</button>
   </div>

@@ -227,7 +227,7 @@ class TestTheEndpoints:
     def test_the_tab_is_on_the_page(self, client):
         page = client.get("/fundamentals").get_data(as_text=True)
         assert 'id="tab-quarter"' in page
-        assert "This quarter" in page
+        assert "Seven Checks" in page
 
 
 class TestTotalOperatingExpenses:

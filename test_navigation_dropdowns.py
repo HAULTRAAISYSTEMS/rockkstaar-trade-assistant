@@ -40,6 +40,8 @@ def test_mobile_research_learn_and_account_open_menu_sheets():
         assert f'id="{menu_id}" hidden' in template
     assert template.count("mobile-app-nav__menu-trigger") == 3
     assert "Company Research" in template
+    assert template.count("<strong>Seven Checks</strong>") == 2
+    assert template.count("url_for('fundamentals_page', tab='quarter')") == 2
     assert "Review Queue" in template
     assert "Browser Alerts" in template
 
