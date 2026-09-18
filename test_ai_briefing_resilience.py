@@ -58,3 +58,45 @@ def test_live_data_fallback_is_actionable(monkeypatch):
     assert "Caution" in result["briefing"]
     assert "SPY -0.5%" in result["briefing"]
     assert result["degraded"] is True
+
+
+def test_cached_briefing_is_rejected_after_a_material_vix_move():
+    cached = {"vix_level": "VIX at 17.7 — calm markets"}
+    assert legacy._cached_briefing_matches_market(
+        cached, {"vix_level": 15.2}) is False
+
+
+def test_cached_briefing_survives_normal_vix_noise():
+    cached = {"market_snapshot": {"vix_level": 15.2}}
+    assert legacy._cached_briefing_matches_market(
+        cached, {"vix_level": 15.4}) is True
+
+
+def test_api_rebuilds_a_cached_briefing_when_vix_has_moved(monkeypatch):
+    saved = {}
+    stale = {
+        "macro_bias": "neutral",
+        "vix_level": "VIX at 17.7 — calm markets",
+        "briefing": "Old pre-session read.",
+        "tickers_flagged": [],
+    }
+    monkeypatch.setattr(legacy, "get_ai_briefing", lambda date: stale.copy())
+    monkeypatch.setattr(legacy, "_briefing_market_snapshot", lambda: {
+        "vix_level": 15.2, "regime": "Caution", "vix_as_of": "now",
+    })
+    monkeypatch.setattr(legacy, "_build_briefing_market_text", lambda: "VIX: 15.2")
+    monkeypatch.setattr(legacy, "_generate_ai_briefing", lambda text: {
+        "macro_bias": "neutral",
+        "vix_level": "VIX at 15.2 — calm markets",
+        "briefing": "Fresh live read.",
+        "tickers_flagged": [],
+    })
+    monkeypatch.setattr(legacy, "save_ai_briefing",
+                        lambda date, data: saved.update(data))
+
+    with legacy.app.test_request_context("/api/ai_briefing"):
+        payload = legacy.api_ai_briefing().get_json()
+
+    assert payload["briefing"]["cached"] is False
+    assert payload["briefing"]["vix_level"].startswith("VIX at 15.2")
+    assert saved["market_snapshot"]["vix_level"] == 15.2

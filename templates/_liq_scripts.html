@@ -782,6 +782,7 @@ async function refreshAll() {
     if (data.market) _renderLivePulse(data.market);
     if (stamp) stamp.textContent = data.ok ? 'Updated just now' : (data.msg || 'Refresh pending');
     loadMarketStory();
+    loadAIBrief(false);
   } catch (err) {
     if (stamp) stamp.textContent = 'Refresh failed — try again';
   } finally {

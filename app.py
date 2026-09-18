@@ -5591,6 +5591,47 @@ def _live_data_briefing() -> dict:
 # A briefing older than this is written before most of the session happened,
 # so it is shown as a record of the morning rather than as a current read.
 BRIEFING_STALE_MINUTES = 180
+BRIEFING_VIX_REFRESH_POINTS = 1.0
+
+
+def _briefing_market_snapshot() -> dict:
+    """Return the live fields that can make a cached briefing misleading."""
+    try:
+        context = _get_mkt_ctx() or {}
+    except Exception:
+        return {}
+    try:
+        vix = float(context.get("vix_level"))
+    except (TypeError, ValueError):
+        vix = None
+    return {
+        "vix_level": vix,
+        "regime": str(context.get("regime") or "").strip(),
+        "vix_as_of": context.get("vix_as_of") or "",
+    }
+
+
+def _cached_briefing_matches_market(briefing: dict, snapshot: dict) -> bool:
+    """Reject a briefing when its VIX premise has materially changed.
+
+    Older cache rows did not store a structured snapshot, so recover the
+    number from the displayed VIX sentence. This is deliberately a material
+    threshold rather than every tick: it keeps model usage bounded without
+    letting a pre-session close masquerade as the live volatility regime.
+    """
+    current = snapshot.get("vix_level")
+    if current is None:
+        return True
+
+    saved = (briefing.get("market_snapshot") or {}).get("vix_level")
+    if saved is None:
+        match = re.search(r"\bVIX\s+(?:at\s+)?(\d+(?:\.\d+)?)",
+                          str(briefing.get("vix_level") or ""), re.I)
+        saved = match.group(1) if match else None
+    try:
+        return abs(float(current) - float(saved)) < BRIEFING_VIX_REFRESH_POINTS
+    except (TypeError, ValueError):
+        return True
 
 
 def _age_briefing(briefing: dict) -> dict:
@@ -5702,13 +5743,17 @@ def api_ai_briefing():
     force_refresh = request.args.get("refresh", "").lower() == "true"
     today_et = _et_now().strftime("%Y-%m-%d")
     _last_err = None
+    cached = None
+    snapshot = _briefing_market_snapshot()
+    rejected_stale_cache = False
 
     if not force_refresh:
         cached = get_ai_briefing(today_et)
-        if cached:
+        if cached and _cached_briefing_matches_market(cached, snapshot):
             cached["cached"] = True
             cached["date"]   = today_et
             return jsonify({"ok": True, "briefing": _age_briefing(cached)})
+        rejected_stale_cache = bool(cached)
 
     # Build market data snapshot and call Nebius
     try:
@@ -5721,6 +5766,7 @@ def api_ai_briefing():
         result.setdefault("tickers_flagged", [])
         result["cached"] = False
         result["date"]   = today_et
+        result["market_snapshot"] = snapshot
         # Stamp the moment, not just the day. One call per day is a reasonable
         # cost decision; presenting a 4am read at 8pm as though it were current
         # is not, and that is what a date-only stamp did.
@@ -5733,7 +5779,7 @@ def api_ai_briefing():
 
     # Fall back to today's cached briefing (if any) rather than returning an error
     fallback = get_ai_briefing(today_et)
-    if fallback:
+    if fallback and not rejected_stale_cache:
         fallback["cached"] = True
         fallback["date"]   = today_et
         fallback["error"]  = _last_err
@@ -5744,6 +5790,7 @@ def api_ai_briefing():
     fallback["cached"] = False
     fallback["date"] = today_et
     fallback["generated_at"] = _et_now().isoformat()
+    fallback["market_snapshot"] = snapshot
     save_ai_briefing(today_et, fallback)
     return jsonify({"ok": True, "briefing": _age_briefing(fallback)})
 
