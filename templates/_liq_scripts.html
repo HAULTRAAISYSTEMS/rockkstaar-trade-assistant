@@ -103,6 +103,7 @@
   .cc-pulse-v a { color: inherit; text-decoration: none }
   .cc-pulse-v a:hover { color: #f0b53f }
   .cc-pulse-v small { color: #64707e; font-size: 11px; font-weight: 500 }
+  .cc-pulse-meta { display:block; margin-top:3px; color:#64707e; font:500 8.5px/1.25 var(--font-mono, monospace) }
 
   /* Sector rotation in one line, where the money-flow panel used to be. */
   .cc-rotation {
@@ -744,15 +745,52 @@ function showStatusBanner(d) {
 /* ─────────────────────────────────────────────────────────────
    REFRESH ALL
 ───────────────────────────────────────────────────────────── */
-function refreshAll() {
-  panelEl('liq-last-updated').textContent = 'Refreshing…';
-  fetch('/api/opportunity/refresh', {method:'POST'}).catch(()=>{});
-  setTimeout(() => {
+function _setPulseMove(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (value == null) { el.textContent = '—'; el.classList.remove('is-up', 'is-down'); return; }
+  const n = Number(value);
+  el.textContent = (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+  el.classList.toggle('is-up', n > 0);
+  el.classList.toggle('is-down', n < 0);
+}
+
+function _renderLivePulse(market) {
+  if (!market) return;
+  const regime = document.getElementById('cc-regime');
+  const vix = document.getElementById('cc-vix');
+  const vixMeta = document.getElementById('cc-vix-meta');
+  if (regime && market.regime) {
+    regime.textContent = String(market.regime).replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    regime.classList.toggle('is-up', String(market.regime).toUpperCase() === 'RISK_ON');
+    regime.classList.toggle('is-down', ['RISK_OFF','NO_TRADE'].includes(String(market.regime).toUpperCase()));
+  }
+  if (vix) vix.textContent = market.vix == null ? '—' : Number(market.vix).toFixed(1);
+  if (vixMeta) vixMeta.textContent = market.vix_as_of ? 'As of ' + market.vix_as_of : 'Latest available';
+  _setPulseMove('cc-spy', market.spy);
+  _setPulseMove('cc-qqq', market.qqq);
+}
+
+async function refreshAll() {
+  const stamp = panelEl('liq-last-updated');
+  const btn = document.getElementById('cc-refresh-btn');
+  if (stamp) stamp.textContent = 'Refreshing market data…';
+  if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
+  try {
+    const response = await fetch('/api/opportunity/refresh', {method:'POST'});
+    const data = await response.json();
+    if (data.market) _renderLivePulse(data.market);
+    if (stamp) stamp.textContent = data.ok ? 'Updated just now' : (data.msg || 'Refresh pending');
+    loadMarketStory();
+  } catch (err) {
+    if (stamp) stamp.textContent = 'Refresh failed — try again';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↺ Refresh'; }
     loadLiquidity();
     loadMoneyFlow();
     runScan();
     loadAlerts();
-  }, 500);
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────

@@ -7913,6 +7913,8 @@ def _command_center_context() -> dict:
         context["pulse"] = {
             "regime": mkt.get("regime") or mkt.get("market_regime") or "",
             "vix": mkt.get("vix_level"),
+            "vix_as_of": mkt.get("vix_as_of_label") or "",
+            "vix_source": mkt.get("vix_source") or "",
             "spy": mkt.get("spy_1d_pct"),
             "qqq": mkt.get("qqq_1d_pct"),
             "spy_trend": mkt.get("spy_trend") or "",
@@ -8191,14 +8193,39 @@ def api_opportunity_alerts():
 
 @app.route("/api/opportunity/refresh", methods=["POST"])
 def api_opportunity_refresh():
-    """Trigger background refresh of liquidity data."""
+    """Refresh both the live market pulse and slower liquidity inputs."""
+    errors = []
+    market = {}
     try:
         import liquidity_engine as _liq
         _liq.refresh_liquidity_bg()
-        return jsonify({"ok": True, "msg": "Liquidity refresh triggered."})
     except Exception as exc:
-        logger.error("api_opportunity_refresh: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
+        logger.error("api_opportunity_refresh liquidity: %s", exc, exc_info=True)
+        errors.append("Liquidity refresh could not start.")
+
+    try:
+        if _MKT_AVAILABLE:
+            market = _mkt.refresh_market_context()
+        else:
+            errors.append("Market feed is unavailable.")
+    except Exception as exc:
+        logger.error("api_opportunity_refresh market: %s", exc, exc_info=True)
+        errors.append("Market pulse could not refresh.")
+
+    return jsonify({
+        "ok": bool(market),
+        "errors": errors,
+        "msg": "Market pulse refreshed." if market else "Refresh is still pending.",
+        "market": {
+            "regime": market.get("regime"),
+            "vix": market.get("vix_level"),
+            "vix_as_of": market.get("vix_as_of_label") or "",
+            "vix_source": market.get("vix_source") or "",
+            "spy": market.get("spy_1d_pct"),
+            "qqq": market.get("qqq_1d_pct"),
+            "fetched_at": market.get("fetched_at"),
+        },
+    }), 200
 
 
 # ---------------------------------------------------------------------------

@@ -87,3 +87,10 @@ class TestLoadersDoNotFetchForPanelsThatAreNotThere:
         """/api/opportunity/refresh kicked a scan the home page never showed."""
         init = SCRIPT[SCRIPT.index("document.addEventListener('DOMContentLoaded'"):][:600]
         assert "if (document.getElementById('liq-scan-content')) {" in init
+
+
+def test_manual_refresh_waits_for_and_renders_the_new_market_pulse():
+    body = SCRIPT[SCRIPT.index("async function refreshAll() {"):]
+    assert "await fetch('/api/opportunity/refresh'" in body
+    assert "_renderLivePulse(data.market)" in body
+    assert "loadMarketStory();" in body

@@ -19,7 +19,7 @@
         <button class="liq-mode-btn"        data-mode="invest" onclick="setMode('invest')">Investing</button>
         <button class="liq-mode-btn"        data-mode="trade"  onclick="setMode('trade')">Trading</button>
       </div>
-      <button class="btn-liq-refresh" onclick="refreshAll()" title="Refresh all data">↺ Refresh</button>
+      <button class="btn-liq-refresh" id="cc-refresh-btn" onclick="refreshAll()" title="Refresh all data">↺ Refresh</button>
       <span class="liq-last-updated cc-updated" id="liq-last-updated">Loading…</span>
     </div>
   </header>
@@ -35,19 +35,20 @@
   <div class="cc-pulse cc-rise">
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k">Regime</span>
-      <b class="cc-pulse-v {{ 'is-up' if 'on' in (pulse.regime or '')|lower else ('is-down' if 'off' in (pulse.regime or '')|lower else '') }}">{{ pulse.regime|replace('_', ' ')|replace('-', ' ')|title if pulse.regime else '—' }}</b>
+      <b class="cc-pulse-v {{ 'is-up' if 'on' in (pulse.regime or '')|lower else ('is-down' if 'off' in (pulse.regime or '')|lower else '') }}" id="cc-regime">{{ pulse.regime|replace('_', ' ')|replace('-', ' ')|title if pulse.regime else '—' }}</b>
     </div>
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k">VIX</span>
-      <b class="cc-pulse-v">{% if pulse.vix %}{{ '%.1f'|format(pulse.vix) }}{% else %}—{% endif %}</b>
+      <b class="cc-pulse-v" id="cc-vix">{% if pulse.vix %}{{ '%.1f'|format(pulse.vix) }}{% else %}—{% endif %}</b>
+      <small class="cc-pulse-meta" id="cc-vix-meta">{% if pulse.vix_as_of %}As of {{ pulse.vix_as_of }}{% else %}Latest available{% endif %}</small>
     </div>
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k">SPY</span>
-      <b class="cc-pulse-v {{ 'is-up' if (pulse.spy or 0) > 0 else ('is-down' if (pulse.spy or 0) < 0 else '') }}">{% if pulse.spy is not none %}{{ '%+.2f'|format(pulse.spy) }}%{% else %}—{% endif %}</b>
+      <b class="cc-pulse-v {{ 'is-up' if (pulse.spy or 0) > 0 else ('is-down' if (pulse.spy or 0) < 0 else '') }}" id="cc-spy">{% if pulse.spy is not none %}{{ '%+.2f'|format(pulse.spy) }}%{% else %}—{% endif %}</b>
     </div>
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k">QQQ</span>
-      <b class="cc-pulse-v {{ 'is-up' if (pulse.qqq or 0) > 0 else ('is-down' if (pulse.qqq or 0) < 0 else '') }}">{% if pulse.qqq is not none %}{{ '%+.2f'|format(pulse.qqq) }}%{% else %}—{% endif %}</b>
+      <b class="cc-pulse-v {{ 'is-up' if (pulse.qqq or 0) > 0 else ('is-down' if (pulse.qqq or 0) < 0 else '') }}" id="cc-qqq">{% if pulse.qqq is not none %}{{ '%+.2f'|format(pulse.qqq) }}%{% else %}—{% endif %}</b>
     </div>
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k">Liquidity</span>

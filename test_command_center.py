@@ -379,6 +379,12 @@ class TestThePulseStrip:
         for label in ("Regime", "VIX", "SPY", "QQQ"):
             assert f">{label}<" in html
 
+    def test_the_live_pulse_has_refreshable_hooks_and_vix_freshness(self, client):
+        html = client.get("/").get_data(as_text=True)
+        for hook in ("cc-regime", "cc-vix", "cc-vix-meta", "cc-spy", "cc-qqq"):
+            assert f'id="{hook}"' in html
+        assert "Latest available" in html or "As of" in html
+
     def test_it_counts_down_to_the_next_event(self, monkeypatch):
         monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: SUMMARY)
         monkeypatch.setattr(legacy, "get_active_wl_id", lambda: None)

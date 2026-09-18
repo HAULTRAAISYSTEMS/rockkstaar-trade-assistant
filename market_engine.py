@@ -26,8 +26,9 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ except ImportError:
 _cache_lock      = threading.Lock()
 _market_cache:   dict = {}
 _market_cache_at: Optional[datetime] = None
-_CACHE_TTL_MIN   = 60          # refresh market context every hour
+_CACHE_TTL_MIN   = 2           # VIX can move quickly, including before the cash open
 
 _rs_cache: dict  = {}          # {ticker: (score, vs_qqq, fetched_at)}
 _RS_TTL_MIN      = 120         # 2-hour RS cache (intraday drift is slow)
@@ -270,6 +271,80 @@ def _fetch_prices_chart(tickers: list[str], period: str = "60d") -> dict[str, li
             pass  # timeout — return whatever we collected so far
 
     return result
+
+
+def _fetch_vix_quote() -> dict:
+    """Return Yahoo's current VIX quote rather than yesterday's daily close.
+
+    A cache built before Cboe starts publishing the new session can contain the
+    prior close for as long as the market-context TTL.  Yahoo's chart metadata
+    exposes the current index value and its exchange timestamp even when the
+    daily candle list has not caught up yet, so use that field for the live
+    pulse and retain daily candles only for trend history.
+    """
+    try:
+        import requests as _req
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json",
+        }
+        for base in (
+            "https://query1.finance.yahoo.com/v8/finance/chart",
+            "https://query2.finance.yahoo.com/v8/finance/chart",
+        ):
+            try:
+                response = _req.get(
+                    f"{base}/^VIX",
+                    params={"interval": "5m", "range": "5d"},
+                    headers=headers,
+                    timeout=8,
+                )
+                if response.status_code != 200:
+                    continue
+                node = response.json()["chart"]["result"][0]
+                meta = node.get("meta") or {}
+                level = meta.get("regularMarketPrice")
+                stamp = meta.get("regularMarketTime")
+
+                # Some Yahoo responses omit quote metadata while still
+                # carrying fresh bars.  The newest valid close is equivalent.
+                if level is None:
+                    quote = (node.get("indicators") or {}).get("quote") or []
+                    closes = quote[0].get("close", []) if quote else []
+                    timestamps = node.get("timestamp") or []
+                    valid = [(ts, close) for ts, close in zip(timestamps, closes)
+                             if close is not None and float(close) > 0]
+                    if valid:
+                        stamp, level = valid[-1]
+
+                level = float(level)
+                if level <= 0:
+                    continue
+                as_of = None
+                label = ""
+                if stamp:
+                    dt = datetime.fromtimestamp(float(stamp), tz=timezone.utc)
+                    as_of = dt.isoformat()
+                    label = dt.astimezone(ZoneInfo("America/New_York")).strftime(
+                        "%I:%M %p ET"
+                    ).lstrip("0")
+                return {
+                    "level": level,
+                    "as_of": as_of,
+                    "as_of_label": label,
+                    "source": "Yahoo 5-minute VIX",
+                }
+            except Exception as exc:
+                logger.debug("market_engine VIX quote fetch failed: %s", exc)
+                continue
+    except Exception as exc:
+        logger.debug("market_engine VIX quote unavailable: %s", exc)
+    return {}
 
 
 def _pct_change(prices: list[float], lookback: int) -> Optional[float]:
@@ -509,7 +584,17 @@ def _build_context() -> dict:
 
     qqq = core_prices.get("QQQ", [])
     spy = core_prices.get("SPY", [])
-    vix = core_prices.get("^VIX", [])
+    vix = list(core_prices.get("^VIX", []))
+
+    # Do not let the previous daily close masquerade as a live VIX reading.
+    # This matters most between Cboe's early-session start and the cash open,
+    # when the new daily candle may lag the quote metadata.
+    vix_quote = _fetch_vix_quote()
+    if vix_quote.get("level") is not None:
+        if vix:
+            vix[-1] = float(vix_quote["level"])
+        else:
+            vix = [float(vix_quote["level"])]
 
     regime  = _compute_regime(qqq, spy, vix)
     sectors = _compute_sectors(core_prices)
@@ -532,6 +617,9 @@ def _build_context() -> dict:
         "spy_price":       round(spy[-1], 2) if spy else None,
         "_qqq_prices":     qqq,     # kept for compute_rs_score_20d
         "fetched_at":      datetime.now().isoformat(),
+        "vix_as_of":       vix_quote.get("as_of"),
+        "vix_as_of_label": vix_quote.get("as_of_label") or "",
+        "vix_source":      vix_quote.get("source") or "Yahoo daily VIX",
     }
 
 
@@ -558,6 +646,9 @@ def _empty_context() -> dict:
         "es_1d_chg":       None,
         "nq_futures":      None,
         "nq_1d_chg":       None,
+        "vix_as_of":       None,
+        "vix_as_of_label": "",
+        "vix_source":      "",
     }
 
 
@@ -565,16 +656,23 @@ def _do_refresh() -> None:
     """Background worker: fetch all market data and update the cache."""
     global _market_cache, _market_cache_at, _bg_refresh_active
     try:
-        ctx = _build_context()
-        with _cache_lock:
-            _market_cache    = ctx
-            _market_cache_at = datetime.now()
+        ctx = refresh_market_context()
         logger.info("market_engine: cache refreshed  regime=%s", ctx.get("regime"))
     except Exception as exc:
         logger.warning("market_engine._build_context failed: %s", exc)
     finally:
         with _bg_refresh_lock:
             _bg_refresh_active = False
+
+
+def refresh_market_context() -> dict:
+    """Fetch a new context now and atomically replace the shared cache."""
+    global _market_cache, _market_cache_at
+    ctx = _build_context()
+    with _cache_lock:
+        _market_cache = ctx
+        _market_cache_at = datetime.now()
+    return dict(ctx)
 
 
 def get_market_context() -> dict:
