@@ -24,6 +24,7 @@ https://www.sec.gov/Archives/edgar/data/927003/000155837024012709/aeis-20240909x
 - Deduplicate quarterly amendments and require four consecutive quarters for computed TTM values.
 - Describe broad 8-K categories without inventing a departure, default, or missed filing extension; disclose the actual returned-index coverage.
 - Add source-linked recent SEC filings to the company's changes, and reject past calendar earnings dates.
+- Live verification exposed an unrelated Portuguese sports-club description selected by the old Wikipedia ticker fallback. Removed that fallback, validate legacy cached descriptions against the company name, and supply a company-release-backed AEIS description. A failed profile request cannot resurrect an unverified description from the market cache.
 
 ## Limitations and verification
 

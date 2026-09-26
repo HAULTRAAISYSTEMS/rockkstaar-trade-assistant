@@ -108,8 +108,9 @@ def build_valuation(metric: dict | None, quote: dict | None = None,
         })
         if off is not None:
             rows.append({
-                "key": "off_high", "label": "Off the high", "value": f"{off:.1f}%",
-                "note": f"${price:,.2f} against ${high:,.2f}",
+                "key": "off_high", "label": "Above reported high" if off > 0 else "Off the high", "value": f"{off:.1f}%",
+                "note": ("Quote exceeds the provider's high; its range may lag." if off > 0
+                         else f"${price:,.2f} against ${high:,.2f}"),
                 "tone": "neg" if off <= -25 else "neutral",
             })
 

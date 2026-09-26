@@ -118,3 +118,30 @@ def test_company_workspace_renders_when_fundamentals_are_unavailable():
                                    "memory_cards": [], "source_count": 0})
     assert "Historical filing data is unavailable" in html
     assert "Filing check unavailable" in html
+
+
+def test_profile_rejects_unrelated_acronym_match_and_repairs_cached_aeis(monkeypatch):
+    import intel_engine as intel
+    bad = "Associação de Estudantes is a Portuguese multisports club."
+    assert not intel._profile_description_matches("Advanced Energy Industries Inc", bad)
+    assert intel._profile_description_matches("Advanced Energy Industries Inc", "Advanced Energy Industries designs precision power solutions.")
+    monkeypatch.setattr("database.get_company_profile", lambda ticker: {
+        "company_name": "Advanced Energy Industries Inc", "description": bad,
+        "fetched_at": datetime.now().isoformat()})
+    assert "precision power" in intel.fetch_company_profile("AEIS")["description"]
+
+
+def test_failed_profile_refresh_does_not_resurrect_an_unverified_stock_description(monkeypatch):
+    monkeypatch.setattr(app, "get_user_setting", lambda *a: "")
+    monkeypatch.setattr(app._intel, "get_intel_summary", lambda: {})
+    with patch("research_feed_phase2.list_published", return_value=[]), patch("research_memory.list_cards", return_value=[]):
+        result = app._company_research_context(1, "TEST", None, {"company_description": "Wrong old entity"}, {"profile": {}})
+    assert result["description"] == ""
+
+
+def test_quote_above_provider_high_identifies_a_lagging_range():
+    from valuation import build_valuation
+    value = build_valuation({"52WeekHigh": 624.69, "52WeekLow": 154.78}, {"c": 630.63, "pc": 629.24})
+    row = next(row for row in value["rows"] if row["key"] == "off_high")
+    assert row["label"] == "Above reported high"
+    assert "range may lag" in row["note"]

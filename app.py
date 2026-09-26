@@ -8587,7 +8587,7 @@ def _company_research_context(user_id: int, ticker: str, data: dict | None, stoc
         "fundamentals_as_of": fundamentals_as_of, "latest_financials": latest,
         "price": price, "change_pct": change_pct,
         "market_as_of": market_as_of, "market_source": market_source,
-        "description": profile.get("description") or stock.get("company_description") or "",
+        "description": (profile.get("description") or "") if "profile" in snapshot else (stock.get("company_description") or ""),
         "latest_filing": filing_data.get("latest_financial_report"),
         "source_count": len(changes) + (1 if data and not data.get("error") else 0),
     }

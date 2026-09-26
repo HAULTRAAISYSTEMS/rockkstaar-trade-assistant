@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
@@ -438,6 +439,7 @@ EARNINGS_OVERRIDES: list[dict] = [
 
 # Static company names for the scanner universe — avoids slow .info API call
 _COMPANY_NAMES: dict[str, str] = {
+    "AEIS": "Advanced Energy Industries",
     "NVDA": "NVIDIA",              "AMD":  "Advanced Micro Devices",
     "TSLA": "Tesla",               "AAPL": "Apple",
     "META": "Meta Platforms",      "GOOGL": "Alphabet",
@@ -493,6 +495,8 @@ def _company_name(ticker: str) -> str:
 # primary source for known tickers, with yfinance only as best-effort for
 # tickers outside this list.
 _COMPANY_DESCRIPTIONS: dict[str, str] = {
+    # Company FY2025 release, checked 2026-09-25 (see company research audit).
+    "AEIS": "Designs and manufactures precision power conversion, measurement and control solutions for semiconductor equipment, data centers, industrial and medical applications.",
     "NVDA": "Designs GPUs and AI accelerator chips that power data centers, gaming, and machine learning workloads.",
     "AMD":  "Designs CPUs and GPUs for PCs, servers, and data centers, competing directly with Intel and NVIDIA.",
     "TSLA": "Designs and manufactures electric vehicles, batteries, and solar energy products.",
@@ -589,6 +593,18 @@ def _wikipedia_description(name: str, max_chars: int = 320) -> Optional[str]:
 _PROFILE_MAX_AGE_DAYS = 30
 
 
+def _profile_description_matches(name: str, description: str) -> bool:
+    """Reject legacy descriptions that cannot be tied to the named company.
+
+    Old cached descriptions could come from the first Wikipedia ticker match.
+    Prefer an unavailable description over a plausible-sounding wrong entity.
+    """
+    words = re.findall(r"[a-z0-9]+", (name or "").lower())
+    words = [w for w in words if w not in {"inc", "incorporated", "corp", "corporation", "ltd", "limited", "plc", "co", "company", "the"}]
+    text_words = set(re.findall(r"[a-z0-9]+", (description or "").lower()))
+    return bool(words) and all(w in text_words for w in words)
+
+
 def fetch_company_profile(ticker: str, force: bool = False) -> dict:
     """
     Return {company_name, sector, industry, description, logo_url}.
@@ -604,11 +620,15 @@ def fetch_company_profile(ticker: str, force: bool = False) -> dict:
 
     if not force:
         cached = get_company_profile(ticker)
+        if cached:
+            curated = _company_description(ticker)
+            if curated:
+                cached = dict(cached, description=curated)
+            elif not _profile_description_matches(cached.get("company_name"), cached.get("description")):
+                cached = None
         if cached and cached.get("fetched_at"):
-            # A cached row with no description at all means an earlier fetch
-            # failed before the Wikipedia fallback existed (or hit a dead
-            # end). Re-run instead of serving that gap for up to 30 days —
-            # the Wikipedia step below makes a hit far more likely now.
+            # Retry missing descriptions rather than cache a failed provider
+            # response as if it were a complete profile for thirty days.
             if not cached.get("description"):
                 cached = None
         if cached and cached.get("fetched_at"):
@@ -662,15 +682,9 @@ def fetch_company_profile(ticker: str, force: bool = False) -> dict:
 
     profile["company_name"] = profile.get("company_name") or _company_name(ticker) or ticker
 
-    # Universal fallback — covers any ticker not in the curated static list
-    # (e.g. new tickers the user adds) without depending on Yahoo at all.
-    if not profile.get("description"):
-        wiki_name = profile.get("company_name") or ticker
-        wiki_desc = _wikipedia_description(wiki_name)
-        if not wiki_desc and wiki_name != ticker:
-            wiki_desc = _wikipedia_description(ticker)  # retry with bare ticker
-        if wiki_desc:
-            profile["description"] = wiki_desc
+    # Do not search Wikipedia by ticker: acronyms routinely identify an
+    # unrelated organization. Only curated or symbol-bound provider summaries
+    # are eligible; a missing description is safer than an entity mismatch.
 
     if profile.get("description") or profile.get("sector") or profile.get("industry"):
         try:
