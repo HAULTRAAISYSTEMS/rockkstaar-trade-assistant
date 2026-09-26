@@ -8469,10 +8469,12 @@ def _research_sort_time(value) -> float:
         return 0.0
 
 
-def _company_research_context(user_id: int, ticker: str, data: dict | None, stock: dict) -> dict:
+def _company_research_context(user_id: int, ticker: str, data: dict | None, stock: dict,
+                              snapshot: dict | None = None) -> dict:
     """Join the company's evidence into one read model without copying it."""
     import research_feed_phase2 as _research_feed
     import research_memory as _research_memory
+    snapshot = snapshot or {}
 
     try:
         published = _research_feed.list_published(ticker=ticker, user_id=user_id, limit=12)
@@ -8492,11 +8494,13 @@ def _company_research_context(user_id: int, ticker: str, data: dict | None, stoc
         intel = {}
 
     headlines = []
-    for item in (intel.get("market_news") or intel.get("news") or []):
+    news_rows = [dict(item, ticker=ticker) for item in snapshot.get("news", [])]
+    news_rows += (intel.get("market_news") or intel.get("news") or [])
+    for item in news_rows:
         if str(item.get("ticker") or "").upper() != ticker:
             continue
         headlines.append({
-            "kind": "News", "headline": item.get("headline"),
+            "kind": "Related news", "headline": item.get("headline"),
             "summary": item.get("summary") or item.get("reason") or "",
             "source": item.get("source") or "Connected news source",
             "url": _research_url(item.get("url")),
@@ -8524,33 +8528,68 @@ def _company_research_context(user_id: int, ticker: str, data: dict | None, stoc
         timestamp = item.get("published_at") or ""
         changes.append(dict(item, is_new=bool(reviewed_at and _research_sort_time(timestamp) > _research_sort_time(reviewed_at)),
                             sort_time=_research_sort_time(timestamp), memory_url=""))
+    filing_data = (data or {}).get("filing_signals") or {}
+    for filing in filing_data.get("recent_filings", []):
+        stamp = filing.get("filed") or ""
+        changes.append({"kind": "SEC filing", "headline": f"{ticker} filed {filing['form']}",
+                        "summary": f"Report period: {filing['period_end']}" if filing.get("period_end") else "Open the filing for the disclosure details.",
+                        "source": "SEC EDGAR", "url": _research_url(filing.get("url")),
+                        "published_at": stamp, "sort_time": _research_sort_time(stamp), "memory_url": "",
+                        "is_new": bool(reviewed_at and _research_sort_time(stamp) > _research_sort_time(reviewed_at))})
     changes.sort(key=lambda item: item.get("sort_time") or 0, reverse=True)
+    deduped, seen = [], set()
+    for item in changes:
+        key = item.get("url") or (item.get("headline"), item.get("published_at"))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(item)
+    changes = deduped
 
     earnings = None
+    candidates = list(snapshot.get("earnings") or [])
     earnings_data = intel.get("earnings") or {}
     for bucket in ("today", "tomorrow", "this_week", "coming_up"):
         for event in earnings_data.get(bucket, []) or []:
             if str(event.get("ticker") or "").upper() == ticker:
-                earnings = event
-                break
-        if earnings:
-            break
-    if not earnings and stock.get("earnings_date"):
-        earnings = {"date": stock.get("earnings_date"), "time_label": stock.get("earnings_time") or "TBD",
-                    "source": stock.get("earnings_source") or "Cached company snapshot"}
+                candidates.append(event)
+    if stock.get("earnings_date"):
+        candidates.append({"date": stock.get("earnings_date"), "time_label": stock.get("earnings_time") or "TBD",
+                           "source": stock.get("earnings_source") or "Cached company snapshot", "estimated": True})
+    future = []
+    for event in candidates:
+        try:
+            day = datetime.strptime(str(event.get("date") or "")[:10], "%Y-%m-%d").date()
+            if _et_now().date() <= day <= _et_now().date() + timedelta(days=120):
+                future.append(dict(event, date=day.isoformat()))
+        except (TypeError, ValueError):
+            continue
+    if future:
+        earnings = min(future, key=lambda row: row["date"])
 
     latest = ((data or {}).get("history") or [{}])[0]
-    fundamentals_as_of = (data or {}).get("ttm_period_end") or latest.get("period_end") or ""
+    fundamentals_as_of = str(latest.get("period_end") or "")[:10]
+    valuation = (data or {}).get("valuation") or snapshot.get("valuation") or {}
+    # All price displays use the same quote, including its original timestamp.
+    price = valuation.get("price")
+    change_pct = valuation.get("change_pct")
+    market_as_of = valuation.get("quote_as_of") or ""
+    market_source = valuation.get("source") or ""
+    if price is None:
+        price = stock.get("current_price") or stock.get("price") or stock.get("close")
+        change_pct = stock.get("change_pct") if stock.get("change_pct") is not None else stock.get("daily_change_pct")
+        market_as_of = stock.get("live_updated_at") or ""
+        market_source = "Saved market quote" if price else ""
+    profile = snapshot.get("profile") or {}
     return {
         "published": published, "memory_cards": memory_cards, "headlines": headlines,
         "changes": changes[:12], "new_count": sum(1 for item in changes if item.get("is_new")),
         "reviewed_at": reviewed_at, "earnings": earnings,
         "fundamentals_as_of": fundamentals_as_of, "latest_financials": latest,
-        "price": stock.get("current_price") or stock.get("price") or stock.get("close"),
-        "change_pct": stock.get("change_pct") if stock.get("change_pct") is not None else stock.get("daily_change_pct"),
-        "market_as_of": stock.get("updated_at") or stock.get("last_updated") or stock.get("live_updated_at") or "",
-        "description": stock.get("company_description") or "",
-        "source_count": len(published) + len(headlines) + (1 if data else 0),
+        "price": price, "change_pct": change_pct,
+        "market_as_of": market_as_of, "market_source": market_source,
+        "description": profile.get("description") or stock.get("company_description") or "",
+        "latest_filing": filing_data.get("latest_financial_report"),
+        "source_count": len(changes) + (1 if data and not data.get("error") else 0),
     }
 
 @app.route("/research")
@@ -8575,7 +8614,19 @@ def research_page():
             logger.debug("research_page price lookup failed: %s", exc)
     research = None
     if ticker:
-        research = _company_research_context(current_user_id(), ticker, data, stock)
+        from company_research_data import fetch_company_snapshot
+        snapshot = fetch_company_snapshot(ticker, (data or {}).get("currency_symbol") or "$",
+                                          force=request.args.get("refresh") == "1")
+        if data:
+            # Do not mutate the shared scorecard cache when refreshing market data.
+            data = dict(data)
+            current_valuation = snapshot.get("valuation") or {}
+            if current_valuation.get("price") is not None or not (data.get("valuation") or {}).get("price"):
+                data["valuation"] = current_valuation
+            profile = snapshot.get("profile") or {}
+            for field in ("sector", "industry"):
+                data[field] = data.get(field) or profile.get(field)
+        research = _company_research_context(current_user_id(), ticker, data, stock, snapshot)
     try:
         suggestions = get_user_tracked_tickers(current_user_id())[:12]
     except Exception:

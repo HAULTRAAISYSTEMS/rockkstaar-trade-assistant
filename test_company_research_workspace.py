@@ -11,7 +11,8 @@ import app
 def sample_fundamentals():
     return {
         "ticker": "AMD", "company_name": "Advanced Micro Devices", "sector": "Technology",
-        "industry": "Semiconductors", "normalized_score": 82, "verdict": "Strong Company",
+        "industry": "Semiconductors", "normalized_score": 34, "score_percent": 85,
+        "total_earned": 34, "total_possible": 40, "verdict": "Strong Company",
         "verdict_reason": "Cash generation and returns are improving.", "coverage_note": "",
         "ttm_period_end": "2026-06-27", "scored_metrics": 18, "total_metrics": 20,
         "history": [{"period_end": "2026-06-27", "label": "Latest", "revenue": "$11.5B",
@@ -93,7 +94,7 @@ def test_unified_company_workspace_renders_all_five_research_steps():
                                stock={}, research=research, suggestions=[])
 
     for heading in ("Business quality and price", "What changed", "Financial history",
-                    "Filing integrity signals", "Your AMD thesis"):
+                    "Filing disclosures to review", "Your AMD thesis"):
         assert heading in html
     assert "Open detailed fundamentals" in html
     assert "What the company does" in html

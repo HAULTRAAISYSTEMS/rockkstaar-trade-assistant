@@ -543,8 +543,7 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
                    "NetIncomeLossAvailableToCommonStockholdersBasic",
                    # IFRS equivalents
                    "ProfitLoss",
-                   "ProfitLossAttributableToOwnersOfParent",
-                   "ComprehensiveIncome"])
+                   "ProfitLossAttributableToOwnersOfParent"], merge=True)
     eps_d = _annual_dated(["EarningsPerShareDiluted", "EarningsPerShareBasic",
                    "DilutedEarningsLossPerShare",        # IFRS
                    "BasicEarningsLossPerShare"])
@@ -1784,6 +1783,9 @@ def score_fundamentals(raw: dict) -> dict:
     gm_series = _margin(raw.get("gross_profit", []), raw.get("revenue", []))
     om_series = _margin(raw.get("operating_income", []), raw.get("revenue", []))
     nm_series = _margin(raw.get("net_income", []), raw.get("revenue", []))
+    annual_gm_series = list(gm_series)
+    annual_om_series = list(om_series)
+    annual_nm_series = list(nm_series)
 
     # ── TTM margin injection: replace position-0 with TTM scalars ─────────────
     # This is the core fix: annual FY snapshots at [0] may lag a TTM recovery.
@@ -2588,16 +2590,12 @@ def score_fundamentals(raw: dict) -> dict:
             ni   = v(raw_data.get("net_income"), i)
             fcf  = v(raw_data.get("free_cash_flow"), i)
             ocf  = v(raw_data.get("operating_cash_flow"), i)
-            gm   = gm_series[i] if i < len(gm_series) else None
-            om   = om_series[i] if i < len(om_series) else None
-            nm   = nm_series[i] if i < len(nm_series) else None
-            # Position 0 of the margin series is replaced with a trailing
-            # twelve month figure when the metric provider has one, which is
-            # what the scoring wants - a fiscal year end can be eleven months
-            # stale. The table did not say so, so a TTM margin was printed
-            # under a fiscal year label, in the same row as that year's
-            # revenue and net income. The row now carries the fact.
-            _margins_are_ttm = bool(i == 0 and _ttm_margin_sources)
+            gm   = annual_gm_series[i] if i < len(annual_gm_series) else None
+            om   = annual_om_series[i] if i < len(annual_om_series) else None
+            nm   = annual_nm_series[i] if i < len(annual_nm_series) else None
+            # Scoring can use a separate TTM overlay; historical rows must
+            # retain the fiscal-year margins saved before that overlay.
+            _margins_are_ttm = False  # annual rows must use annual numerators and denominators
             _rc  = (raw_data.get("roic_series") or [None] * (i + 1))
             rc   = (_rc[i] / 100.0) if i < len(_rc) and _rc[i] is not None else None
             rows.append({
@@ -2657,7 +2655,9 @@ def score_fundamentals(raw: dict) -> dict:
         "coverage_note":    coverage_note,
         "currency":         raw.get("currency") or "USD",
         "currency_symbol":  _cur,
-        "normalized_score": round(score_pct),
+        "normalized_score": round(score_pct, 1),
+        "score_scale":      40,
+        "score_percent":    round(total_earned / total_possible * 100, 1) if total_possible else None,
         "verdict":          verdict,
         "base_verdict":     base_verdict,
         "downgraded":       downgraded,
@@ -2692,6 +2692,13 @@ def score_fundamentals(raw: dict) -> dict:
         "total_metrics":       total_metrics_count,
         "gated_fields":        ttm_partial.get("gated_fields", []),
         "ttm_period_end":      (raw.get("_ttm_metrics") or {}).get("period_end"),
+        "ttm_margins": {
+            "gross_margin": _pct_fmt(ttm.get("gross_margin_ttm")),
+            "operating_margin": _pct_fmt(ttm.get("operating_margin_ttm")),
+            "net_margin": _pct_fmt(ttm.get("net_margin_ttm")),
+            "available": bool(_ttm_margin_sources),
+            "source": "Finnhub metrics",
+        },
         "ttm_quarters_used":   (raw.get("_ttm_metrics") or {}).get("quarters_used", 0),
         "divergence_warnings": divergence_warnings,
     }
@@ -2708,7 +2715,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-04.3"
+SCORECARD_VERSION = "2026-09-25.1"
 
 # The unit buckets in EDGAR are keyed by currency. Everything read only "USD",
 # so a filer that reports in its own currency lost every figure with no USD

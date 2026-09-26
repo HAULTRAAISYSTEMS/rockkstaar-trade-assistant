@@ -10,6 +10,7 @@ Nothing here is an opinion or a recommendation. "47.9x trailing earnings" is a
 fact about the price; whether that is too much is the reader's call.
 """
 from __future__ import annotations
+from datetime import datetime, timezone
 
 # Finnhub's /stock/metric?metric=all payload keys.
 _HIGH = "52WeekHigh"
@@ -162,6 +163,9 @@ def build_valuation(metric: dict | None, quote: dict | None = None,
         "available": bool(rows),
         "rows": rows,
         "price": price,
+        "change_pct": ((price / prev - 1) * 100) if price and prev else None,
+        "quote_as_of": _quote_time(quote.get("t")),
+        "source": "Finnhub",
         "one_basis": one_basis,
         "notice": notice,
         "off_high_pct": (((price / high) - 1.0) * 100
@@ -169,6 +173,14 @@ def build_valuation(metric: dict | None, quote: dict | None = None,
         "pe": pe,
         "pfcf": pfcf,
     }
+
+
+def _quote_time(value) -> str:
+    try:
+        stamp = float(value)
+        return datetime.fromtimestamp(stamp, timezone.utc).isoformat() if stamp > 0 else ""
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
 
 
 def _date(value) -> str:

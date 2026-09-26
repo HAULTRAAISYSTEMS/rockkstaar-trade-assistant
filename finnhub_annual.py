@@ -35,7 +35,8 @@ CONCEPTS: dict[str, list[str]] = {
     "gross_profit":     ["GrossProfit", "GrossProfitLoss"],
     "operating_income": ["OperatingIncomeLoss", "OperatingProfit"],
     "net_income":       ["NetIncomeLoss", "NetIncome",
-                         "NetIncomeLossAvailableToCommonStockholdersBasic"],
+                         "NetIncomeLossAvailableToCommonStockholdersBasic", "ProfitLoss",
+                         "ProfitLossAttributableToOwnersOfParent"],
     "diluted_eps":      ["EarningsPerShareDiluted", "EarningsPerShareBasic"],
 }
 

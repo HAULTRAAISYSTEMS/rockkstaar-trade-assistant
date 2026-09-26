@@ -1,17 +1,9 @@
-"""Governance and filing red flags, straight from a company's 8-K item codes.
+"""Disclosure categories from the SEC submissions index, with source links.
 
-The scorecard reads what a company reports. This reads what it had to disclose
-and would rather you skipped: that it restated earnings, changed auditors,
-lost its CFO, filed late, or got a delisting notice. None of that shows up in
-a margin trend, and all of it changes what the margins are worth.
-
-Every signal here is a filed fact with a date and a document behind it, not an
-inference. An 8-K's item codes say exactly which disclosure obligation the
-filing satisfied — 4.02 IS "non-reliance on previously issued financial
-statements", nothing softer — so there is no keyword guessing and no judgment
-call. When the submissions feed does not carry item codes the layer reports
-itself unavailable rather than reading the absence as a clean record, because
-"nothing filed" and "we could not look" are very different answers.
+An item code establishes a disclosure category, not the underlying cause or
+whether it remains unresolved. Broad categories must not be turned into a
+claim of default, executive departure, or misconduct without reading the filing.
+Coverage is limited to the returned index and is reported explicitly.
 """
 from __future__ import annotations
 
@@ -20,10 +12,8 @@ from datetime import date, datetime, timedelta
 # 8-K item code -> (label, why it matters, severity)
 # https://www.sec.gov/files/form8-k.pdf
 ITEM_SIGNALS: dict[str, tuple[str, str, str]] = {
-    "4.02": ("Financial statements restated",
-             "The company told investors its own previously issued numbers "
-             "cannot be relied on. Every ratio built from that period is "
-             "suspect until the restated figures land.", "critical"),
+    "4.02": ("Non-reliance on financial statements or audit report",
+             "This item covers non-reliance on previously issued financial statements or an audit report. Read the filing for the affected periods and any subsequent correction.", "critical"),
     "1.03": ("Bankruptcy or receivership",
              "Filed under Chapter 11 or 7, or entered receivership.", "critical"),
     "3.01": ("Delisting or listing-standard notice",
@@ -33,31 +23,27 @@ ITEM_SIGNALS: dict[str, tuple[str, str, str]] = {
              "A new accounting firm signs the numbers. Sometimes routine, "
              "sometimes a disagreement the outgoing auditor had to disclose.",
              "high"),
-    "5.02": ("Officer or director departure",
-             "A named executive or board member left, was appointed, or had "
-             "their compensation changed. A finance chief leaving shortly "
-             "before a restatement is a pattern worth knowing.", "medium"),
-    "2.06": ("Material asset impairment",
-             "The company wrote down assets it had been carrying at a higher "
-             "value.", "high"),
+    "5.02": ("Leadership or compensation disclosure",
+             "This item covers departures, appointments, elections, and compensation arrangements. The item code does not identify which occurred or establish a governance problem.", "info"),
+    "2.06": ("Material impairment disclosure",
+             "This item reports a conclusion that a material impairment charge is required. Read the filing for the assets, amount, and timing.", "high"),
     "1.02": ("Material agreement terminated",
              "A contract the company had called material has ended.", "medium"),
-    "2.04": ("Debt acceleration or covenant trigger",
-             "An obligation came due early, usually because a covenant was "
-             "breached.", "high"),
+    "2.04": ("Financial obligation trigger disclosure",
+             "This item covers events that accelerate or increase a financial obligation. It can include a repayment or refinancing; the code alone does not establish a default or covenant breach.", "review"),
 }
 
 # Forms that are themselves the signal.
 FORM_SIGNALS: dict[str, tuple[str, str, str]] = {
-    "NT 10-K": ("Annual report filed late",
-                "The company told the SEC it could not file its 10-K on time.",
+    "NT 10-K": ("Annual report delay notification",
+                "The company filed a notice of inability to file on time. Check the notice and subsequent filing; this does not establish that an extension deadline was missed.",
                 "high"),
-    "NT 10-Q": ("Quarterly report filed late",
-                "The company told the SEC it could not file its 10-Q on time.",
+    "NT 10-Q": ("Quarterly report delay notification",
+                "The company filed a notice of inability to file on time. Check the notice and subsequent filing for resolution.",
                 "medium"),
 }
 
-SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2}
+SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "review": 3, "info": 4}
 DEFAULT_LOOKBACK_DAYS = 1095          # three years
 
 
@@ -92,6 +78,8 @@ def _rows(recent: dict) -> list[dict]:
             "items": str(items[i] or "") if i < len(items) else "",
             "accn": str(accns[i] or "") if i < len(accns) else "",
             "doc": str(docs[i] or "") if i < len(docs) else "",
+            "report_date": str((recent.get("reportDate") or [])[i] or "")[:10]
+                           if i < len(recent.get("reportDate") or []) else "",
         })
     return out
 
@@ -120,7 +108,11 @@ def extract_signals(submissions: dict, *, cik: str = "",
         return {"available": False, "reason": "no filing index returned",
                 "signals": [], "lookback_days": lookback_days}
 
-    saw_items_column = bool(recent.get("items"))
+    window_rows = [r for r in rows if _as_date(r["filed"]) and floor <= _as_date(r["filed"]) <= today]
+    saw_items_column = any(r["items"] for r in window_rows if r["form"] in ("8-K", "8-K/A"))
+    # A full parallel items column is meaningful when there are no 8-Ks.
+    if not any(r["form"] in ("8-K", "8-K/A") for r in window_rows):
+        saw_items_column = len(recent.get("items") or []) >= len(recent.get("form") or [])
     signals = []
     for row in rows:
         filed = _as_date(row["filed"])
@@ -130,7 +122,8 @@ def extract_signals(submissions: dict, *, cik: str = "",
         if row["form"] in FORM_SIGNALS:
             label, why, sev = FORM_SIGNALS[row["form"]]
             found.append(("", label, why, sev))
-        for code in [c.strip() for c in row["items"].split(",") if c.strip()]:
+        codes = row["items"].split(",") if row["form"] in ("8-K", "8-K/A") else []
+        for code in [c.strip() for c in codes if c.strip()]:
             if code in ITEM_SIGNALS:
                 label, why, sev = ITEM_SIGNALS[code]
                 found.append((code, label, why, sev))
@@ -145,12 +138,25 @@ def extract_signals(submissions: dict, *, cik: str = "",
                                 s["date"]), reverse=False)
     signals.sort(key=lambda s: s["date"], reverse=True)
     signals.sort(key=lambda s: SEVERITY_RANK.get(s["severity"], 9))
+    financials = sorted([r for r in window_rows if r["form"] in ("10-K", "10-Q", "20-F", "40-F")],
+                        key=lambda r: (r["report_date"], r["filed"]), reverse=True)
+    latest = financials[0] if financials else None
+    oldest = min((_as_date(r["filed"]) for r in rows if _as_date(r["filed"])), default=today)
+    recent_filings = sorted([r for r in window_rows if r["form"] in ("10-K", "10-Q", "20-F", "40-F", "8-K", "6-K")],
+                            key=lambda r: r["filed"], reverse=True)[:8]
     return {
         "available": True if saw_items_column else False,
         "reason": "" if saw_items_column else "filing index carried no item codes",
         "signals": signals,
         "lookback_days": lookback_days,
-        "filings_scanned": len(rows),
+        "filings_scanned": len(window_rows),
+        "coverage_start": max(floor, oldest).isoformat(),
+        "coverage_end": today.isoformat(),
+        "coverage_complete": oldest <= floor,
+        "latest_financial_report": ({"form": latest["form"], "period_end": latest["report_date"],
+                                     "filed": latest["filed"], "url": _filing_url(cik, latest["accn"], latest["doc"])} if latest else None),
+        "recent_filings": [{"form": r["form"], "filed": r["filed"], "period_end": r["report_date"],
+                            "url": _filing_url(cik, r["accn"], r["doc"])} for r in recent_filings],
         "worst": signals[0]["severity"] if signals else None,
     }
 

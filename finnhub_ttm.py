@@ -421,7 +421,11 @@ def compute_ttm(quarterly_reports: list) -> dict:
     # 10-Q rows, and nothing filtered them: three quarters of 100 plus an
     # annual 400 produced a "trailing twelve months" of 700 against a true 400.
     # Every report carries startDate and endDate and they were never read.
-    trailing = [q for q in quarterly_reports if _is_quarter(q)][:4]
+    unique = {}
+    for q in sorted(quarterly_reports, key=lambda r: str(r.get("filedDate") or r.get("acceptedDate") or ""), reverse=True):
+        if _is_quarter(q):
+            unique.setdefault(str(q.get("endDate") or "")[:10], q)
+    trailing = [unique[end] for end in sorted(unique, reverse=True)][:4]
 
     # Four quarters or it is not a trailing year. A two- or three-quarter sum
     # was being labelled TTM and fed to the scored rows at face value.
@@ -434,6 +438,20 @@ def compute_ttm(quarterly_reports: list) -> dict:
 
     result["quarters_used"] = len(trailing)
     result["period_end"] = trailing[0].get("endDate") if trailing else None
+
+    # Four filings can skip Q4, duplicate a quarter, or span more than a year.
+    # Only a consecutive year is a TTM denominator.
+    try:
+        ends = [datetime.fromisoformat(str(q["endDate"])[:10]) for q in trailing]
+        starts = [datetime.fromisoformat(str(q["startDate"])[:10]) for q in trailing]
+        contiguous = all(abs((starts[i] - ends[i + 1]).days) <= 7 for i in range(3))
+        span = (ends[0] - starts[-1]).days
+        if not contiguous or not 350 <= span <= 380:
+            result["incomplete_reason"] = "quarterly reports do not cover one consecutive year"
+            return result
+    except (KeyError, TypeError, ValueError):
+        result["incomplete_reason"] = "quarter dates unavailable for TTM verification"
+        return result
 
     rev_sum = ni_sum = ocf_sum = cap_sum = 0.0
     rev_n = ni_n = ocf_n = cap_n = 0

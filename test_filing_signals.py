@@ -35,13 +35,13 @@ def labels(result):
 # ── What it catches ──────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("code,expected", [
-    ("4.02", "Financial statements restated"),
+    ("4.02", "Non-reliance on financial statements or audit report"),
     ("4.01", "Auditor changed"),
-    ("5.02", "Officer or director departure"),
+    ("5.02", "Leadership or compensation disclosure"),
     ("1.03", "Bankruptcy or receivership"),
     ("3.01", "Delisting or listing-standard notice"),
-    ("2.06", "Material asset impairment"),
-    ("2.04", "Debt acceleration or covenant trigger"),
+    ("2.06", "Material impairment disclosure"),
+    ("2.04", "Financial obligation trigger disclosure"),
 ])
 def test_each_item_code_is_recognised(code, expected):
     r = fs.extract_signals(submissions([("8-K", "2026-05-01", code)]), today=TODAY)
@@ -51,13 +51,13 @@ def test_each_item_code_is_recognised(code, expected):
 def test_a_late_annual_report_is_its_own_signal():
     """No item code involved — the form type is the disclosure."""
     r = fs.extract_signals(submissions([("NT 10-K", "2026-05-01", "")]), today=TODAY)
-    assert labels(r) == ["Annual report filed late"]
+    assert labels(r) == ["Annual report delay notification"]
 
 
 def test_several_items_on_one_filing_all_register():
     r = fs.extract_signals(
         submissions([("8-K", "2026-05-01", "4.01,5.02,9.01")]), today=TODAY)
-    assert set(labels(r)) == {"Auditor changed", "Officer or director departure"}
+    assert set(labels(r)) == {"Auditor changed", "Leadership or compensation disclosure"}
 
 
 def test_routine_filings_produce_nothing():
@@ -72,7 +72,7 @@ def test_the_worst_thing_is_listed_first():
     rows = [("8-K", "2026-08-01", "5.02"), ("8-K", "2026-07-01", "4.02"),
             ("8-K", "2026-06-01", "4.01")]
     r = fs.extract_signals(submissions(rows), today=TODAY)
-    assert labels(r)[0] == "Financial statements restated"
+    assert labels(r)[0] == "Non-reliance on financial statements or audit report"
     assert r["worst"] == "critical"
 
 

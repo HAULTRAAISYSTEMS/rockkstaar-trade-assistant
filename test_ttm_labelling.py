@@ -29,9 +29,11 @@ def scored(ttm=None):
 
 
 class TestTheHistoryTable:
-    def test_the_newest_row_is_marked_when_the_margins_are_ttm(self):
+    def test_the_newest_annual_row_keeps_annual_margins(self):
         rows = scored(TTM)["history"]
-        assert rows[0]["margins_are_ttm"] is True
+        assert rows[0]["margins_are_ttm"] is False
+        assert rows[0]["gross_margin_num"] == pytest.approx(8324 / 13579)
+        assert rows[0]["net_margin_num"] == pytest.approx(4831 / 13579)
 
     def test_no_other_row_is_marked(self):
         rows = scored(TTM)["history"]
@@ -39,7 +41,8 @@ class TestTheHistoryTable:
 
     def test_the_mark_names_the_period_it_actually_covers(self):
         rows = scored(TTM)["history"]
-        assert rows[0]["margin_period"] == "TTM through 2026-03-31"
+        assert rows[0]["margin_period"] is None
+        assert scored(TTM)["ttm_margins"]["gross_margin"] == "61.5%"
 
     def test_without_a_ttm_feed_nothing_is_marked(self):
         rows = scored()["history"]
@@ -60,9 +63,9 @@ class TestTheChart:
     def _revenue(scorecard):
         return next(c for c in scorecard["charts"] if c["key"] == "revenue_income")
 
-    def test_the_newest_margin_tick_reads_ttm(self):
+    def test_the_newest_margin_tick_reads_fiscal_year(self):
         chart = self._margins(scored(TTM))
-        assert chart["x_labels"][-1]["text"] == "TTM"
+        assert chart["x_labels"][-1]["text"].startswith("FY")
 
     def test_the_older_margin_ticks_are_still_fiscal_years(self):
         chart = self._margins(scored(TTM))
@@ -76,7 +79,7 @@ class TestTheChart:
 
     def test_a_hovered_point_says_which_period_it_is(self):
         chart = self._margins(scored(TTM))
-        assert any("TTM" in point["title"] for point in chart["points"])
+        assert all("TTM" not in point["title"] for point in chart["points"])
 
     def test_without_a_ttm_feed_every_tick_is_a_fiscal_year(self):
         chart = self._margins(scored())
