@@ -534,6 +534,17 @@ def test_zero_or_missing_net_income_does_not_divide():
     assert rows[0]["fcf_over_ni"] is None and rows[1]["fcf_over_ni"] is None
 
 
+def test_negative_net_income_does_not_produce_a_coverage_ratio():
+    # A loss year divides two negatives into a positive "coverage" number
+    # (Intel FY2025: -$4.9B FCF on -$267M net income read as 18.54x).
+    # The ratio is only meaningful on positive earnings.
+    rows = _history(net_income=[-267e6, -18.8e9, 2762e6],
+                    free_cash_flow=[-4.9e9, -15.7e9, 3031e6])
+    assert rows[0]["fcf_over_ni"] is None
+    assert rows[1]["fcf_over_ni"] is None
+    assert round(rows[2]["fcf_over_ni"], 2) == 1.10
+
+
 def test_period_end_is_none_when_the_timeline_is_short():
     """History can run longer than the fiscal timeline; that must not raise."""
     rows = _history(fiscal_period_ends=["2026-06-30"])
