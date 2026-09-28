@@ -7,7 +7,19 @@ from news_fetcher import CatalystNews
 
 
 class IntelNewsTests(unittest.TestCase):
+    def setUp(self):
+        self._reset_news_state()
+
     def tearDown(self):
+        self._reset_news_state()
+
+    @staticmethod
+    def _reset_news_state():
+        # fetch_market_news() reads a shared module-level cache, so every
+        # test must start from a clean slate — not just end with one. A
+        # background refresh (or an earlier test file) can otherwise leave
+        # real cached news behind and this test would read the cache instead
+        # of its mock.
         intel_engine.clear_intel_cache()
         with intel_engine._news_state_lock:
             intel_engine._news_refreshing = False

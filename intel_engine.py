@@ -238,6 +238,18 @@ def trigger_background_refresh() -> None:
     No-op if a refresh is already running.
     Fetches econ first (fastest/static fallback) so partial data appears quickly.
     """
+    # The test/CI workflow sets TRADESTAAR_NO_BACKGROUND=1 so that importing
+    # the app never starts daemons. Route handlers (command centre) and
+    # get_intel_summary() can still reach this function, so the gate lives
+    # here — one place — instead of at every call site. Without it, page-
+    # render tests spawn a real refresh daemon that warms the shared news
+    # cache with live provider data, and later news tests read that cache
+    # instead of their mocks (order-dependent failure).
+    if os.environ.get("TRADESTAAR_NO_BACKGROUND", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    ):
+        logger.debug("intel bg-refresh: skipped (TRADESTAAR_NO_BACKGROUND is set)")
+        return
     global _bg_refreshing
     with _bg_refresh_lock:
         if _bg_refreshing:
