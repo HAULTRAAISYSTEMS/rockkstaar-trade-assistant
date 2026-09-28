@@ -95,6 +95,20 @@
     <div class="cr-table-wrap"><table class="cr-table"><thead><tr><th>Period</th><th>Revenue</th><th>Net income</th><th>Free cash flow</th><th>Gross margin</th><th>Operating margin</th><th>FCF / net income</th></tr></thead><tbody>{% for row in data.history[:5] %}<tr><td>{{ row.period_end or row.label }}</td><td>{{ row.revenue }}</td><td>{{ row.net_income }}</td><td>{{ row.fcf }}</td><td>{{ row.gross_margin }}{% if row.margins_are_ttm %}<small> TTM</small>{% endif %}</td><td>{{ row.operating_margin }}{% if row.margins_are_ttm %}<small> TTM</small>{% endif %}</td><td>{% if row.fcf_over_ni is not none %}{{ '%.2f'|format(row.fcf_over_ni) }}x{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div>
     <div class="cr-score-sections">{% for section in data.sections %}<article><div><span>{{ section.name }}</span><b>{{ section.earned }}/{{ section.possible }}</b></div><div><i style="width:{{ (section.earned / section.possible * 100) if section.possible else 0 }}%"></i></div></article>{% endfor %}</div>
     {% else %}<div class="cr-empty">Historical filing data is unavailable for this ticker.</div>{% endif %}
+    {% if data and data.statements %}
+    <div class="cr-statements">
+      {% for stmt in data.statements %}
+      <article class="cr-statement">
+        <h4>{{ stmt.title }}</h4>
+        <div class="cr-table-wrap"><table class="cr-table">
+          <thead><tr><th>Line item</th>{% for p in stmt.periods %}<th>{{ p }}</th>{% endfor %}</tr></thead>
+          <tbody>{% for row in stmt.rows %}<tr><td>{{ row.label }}</td>{% for v in row["values"] %}<td>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+        </table></div>
+      </article>
+      {% endfor %}
+      <small>Annual figures from SEC EDGAR filings, newest first. "—" means the filing did not report that line item for the period.</small>
+    </div>
+    {% endif %}
   </section>
 
   <section id="filings" class="cr-section">
