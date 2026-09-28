@@ -2133,7 +2133,10 @@ def score_fundamentals(raw: dict) -> dict:
             if fcf0 is not None and rev0 else ""),
         "fcf_vs_net_income": (
             f"{_usd(fcf0)} FCF / {_usd(ni0)} net income = {fcf0/ni0:.2f}x"
-            if fcf0 is not None and ni0 else ""),
+            if fcf0 is not None and ni0 and ni0 > 0
+            else (f"{_usd(fcf0)} FCF on {_usd(ni0)} net income "
+                  f"(coverage ratio not meaningful on a loss)"
+                  if fcf0 is not None and ni0 else "")),
         "ocf_trend": _usd_series(raw.get("operating_cash_flow", [])),
         "capex_ratio": (
             f"{_usd(abs(capex0))} capex / {_usd(rev0)} revenue = {abs(capex0)/rev0*100:.1f}%"
@@ -2607,7 +2610,10 @@ def score_fundamentals(raw: dict) -> dict:
                 "fcf_num": fcf,
                 "period_end": (raw_data.get("fiscal_period_ends") or [None] * (i + 1))[i]
                               if i < len(raw_data.get("fiscal_period_ends") or []) else None,
-                "fcf_over_ni": (fcf / ni) if (fcf is not None and ni) else None,
+                # A coverage ratio needs positive earnings underneath it. On a loss year
+                # (Intel FY2025: -$4.9B FCF on -$267M net income) the division comes out
+                # positive and reads as strong coverage — the opposite of the truth.
+                "fcf_over_ni": (fcf / ni) if (fcf is not None and ni and ni > 0) else None,
                 "net_income": _fmt(ni),
                 "fcf": _fmt(fcf),
                 "ocf": _fmt(ocf),
@@ -2716,7 +2722,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-28.1"
+SCORECARD_VERSION = "2026-09-28.2"
 
 # The unit buckets in EDGAR are keyed by currency. Everything read only "USD",
 # so a filer that reports in its own currency lost every figure with no USD
