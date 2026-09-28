@@ -2668,6 +2668,7 @@ def score_fundamentals(raw: dict) -> dict:
         "missing_fields":   raw.get("missing_fields", []),
         "error":            raw.get("error"),
         "history":          history,
+        "statements":       _build_statements(raw),
         "charts":           charts,
         "filing_signals":   filing_signals,
         "downgrade_check":  downgrade_check,
@@ -2715,7 +2716,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-25.1"
+SCORECARD_VERSION = "2026-09-28.1"
 
 # The unit buckets in EDGAR are keyed by currency. Everything read only "USD",
 # so a filer that reports in its own currency lost every figure with no USD
@@ -2742,6 +2743,91 @@ def currency_symbol(code: str | None) -> str:
     if not code:
         return "$"
     return CURRENCY_SYMBOLS.get(code.upper(), code.upper() + " ")
+
+
+# ── Full financial statements for the research page ──────────────────────────
+# The scorecard surfaces only a summary table; the raw XBRL arrays already
+# hold every line item, so expose them as proper Balance Sheet / Income
+# Statement / Cash Flow Statement tables. Each block carries its own period
+# labels because the balance sheet and the flow statements can sit on
+# different fiscal timelines.
+
+_STATEMENT_DEFS = (
+    ("income_statement", "Income Statement", "fiscal_period_ends", [
+        ("Revenue", "revenue"),
+        ("Gross profit", "gross_profit"),
+        ("Operating income", "operating_income"),
+        ("Net income", "net_income"),
+        ("Diluted EPS", "diluted_eps"),
+    ]),
+    ("balance_sheet", "Balance Sheet", "balance_period_ends", [
+        ("Total assets", "total_assets"),
+        ("Total liabilities", "total_liabilities"),
+        ("Total equity", "total_equity"),
+        ("Current assets", "current_assets"),
+        ("Current liabilities", "current_liabilities"),
+        ("Cash & equivalents", "cash"),
+        ("Total debt", "total_debt"),
+        ("Goodwill", "goodwill"),
+        ("Intangible assets", "intangible_assets"),
+        ("Retained earnings", "retained_earnings"),
+    ]),
+    ("cash_flow", "Cash Flow Statement", "fiscal_period_ends", [
+        ("Operating cash flow", "operating_cash_flow"),
+        ("Capital expenditures", "capex"),
+        ("Free cash flow", "free_cash_flow"),
+        ("Financing cash flow", "financing_cash_flow"),
+    ]),
+)
+
+
+def _fmt_statement_value(val, symbol: str, per_share: bool = False) -> str:
+    """Format one statement cell: $52.9B, -$4.9B, $1.23, or — when missing."""
+    if val is None:
+        return "—"
+    if per_share:
+        sign = "-" if val < 0 else ""
+        return f"{sign}{symbol}{abs(val):,.2f}"
+    sign = "-" if val < 0 else ""
+    mag = abs(val)
+    if mag >= 1e9:
+        return f"{sign}{symbol}{mag / 1e9:.1f}B"
+    if mag >= 1e6:
+        return f"{sign}{symbol}{mag / 1e6:.1f}M"
+    if mag >= 1e3:
+        return f"{sign}{symbol}{mag / 1e3:.1f}K"
+    return f"{sign}{symbol}{mag:,.2f}"
+
+
+def _build_statements(raw: dict) -> list:
+    """Build Balance Sheet / Income Statement / Cash Flow tables from raw arrays."""
+    symbol = currency_symbol(raw.get("currency") or "USD")
+    statements = []
+    for key, title, periods_key, rows in _STATEMENT_DEFS:
+        periods = raw.get(periods_key) or []
+        n = min(5, len(periods))
+        if n == 0:
+            continue
+        table_rows = []
+        for label, rkey in rows:
+            vals = raw.get(rkey) or []
+            window = [vals[i] if i < len(vals) else None for i in range(n)]
+            if not any(v is not None for v in window):
+                continue
+            per_share = (rkey == "diluted_eps")
+            table_rows.append({
+                "label": label,
+                "values": [_fmt_statement_value(v, symbol, per_share) for v in window],
+            })
+        if not table_rows:
+            continue
+        statements.append({
+            "key": key,
+            "title": title,
+            "periods": [str(periods[i])[:10] if periods[i] else "" for i in range(n)],
+            "rows": table_rows,
+        })
+    return statements
 
 
 def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
