@@ -549,6 +549,16 @@ _COMPANY_DESCRIPTIONS: dict[str, str] = {
     "OXY":  "An oil and gas exploration and production company with growing carbon capture operations.",
     "LMT":  "A leading defense contractor making fighter jets, missiles, and aerospace systems.",
     "RTX":  "Aerospace and defense systems maker (formerly Raytheon) — jet engines, missiles, and avionics.",
+    "INTC": "Designs and manufactures microprocessors and semiconductor chips for PCs, data centers, and AI workloads.",
+    "QCOM": "Designs wireless chips and licenses mobile patents; Snapdragon powers most Android phones.",
+    "AVGO": "Broadcom — semiconductor and infrastructure software for data centers, networking, and broadband.",
+    "MU":   "Makes DRAM and NAND memory chips used in computers, phones, and data centers.",
+    "AMAT": "The largest maker of semiconductor manufacturing equipment (chip fabrication tools).",
+    "NFLX": "Global streaming service producing and distributing films, series, and games.",
+    "UBER": "Ridesharing, food delivery (Uber Eats), and freight logistics platform.",
+    "CRM":  "Salesforce — cloud CRM software for sales, service, and marketing teams.",
+    "ADBE": "Creative and document software (Photoshop, Acrobat) plus digital marketing cloud tools.",
+    "ORCL": "Enterprise database and cloud infrastructure software provider.",
 }
 
 
@@ -694,9 +704,16 @@ def fetch_company_profile(ticker: str, force: bool = False) -> dict:
 
     profile["company_name"] = profile.get("company_name") or _company_name(ticker) or ticker
 
-    # Do not search Wikipedia by ticker: acronyms routinely identify an
-    # unrelated organization. Only curated or symbol-bound provider summaries
-    # are eligible; a missing description is safer than an entity mismatch.
+    # Universal description fallback: Wikipedia by company NAME (never by
+    # ticker — acronyms routinely identify an unrelated organization). The
+    # name-match guard rejects extracts that don't mention the company, so a
+    # missing description stays missing rather than becoming a wrong entity.
+    # Results are cached in the DB for 30 days, so this costs two HTTP calls
+    # at most once per ticker per month.
+    if not profile.get("description"):
+        wiki = _wikipedia_description(profile.get("company_name") or ticker)
+        if wiki and _profile_description_matches(profile.get("company_name") or ticker, wiki):
+            profile["description"] = wiki
 
     if profile.get("description") or profile.get("sector") or profile.get("industry"):
         try:
