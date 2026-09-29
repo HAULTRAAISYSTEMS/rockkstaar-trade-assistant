@@ -288,6 +288,35 @@ def et_time_filter(value: str | None) -> str:
     return s
 
 
+@app.template_filter("quote_time")
+def quote_time_filter(value: str | None) -> str:
+    """Turn a quote timestamp like "2026-09-28T20:00:00+00:00" into
+    "Sep 28, 4:00 PM ET" for display. Date-only input renders as "Sep 28".
+    Unknown formats pass through unchanged rather than going blank.
+    """
+    if not value:
+        return "—"
+    s = str(value).strip()
+    if len(s) <= 10:
+        try:
+            return datetime.strptime(s[:10], "%Y-%m-%d").strftime("%b %d").replace(" 0", " ")
+        except ValueError:
+            return s
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return s
+    try:
+        from datetime import timezone
+        import zoneinfo as _zi
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt_et = dt.astimezone(_zi.ZoneInfo("America/New_York"))
+        return dt_et.strftime("%b %d, %I:%M %p ET").replace(" 0", " ")
+    except Exception:
+        return s
+
+
 # /health MUST be registered immediately — before any code that could crash
 # during import. If anything below line 44 raises an exception, gunicorn
 # still has this route and Render's health check succeeds.

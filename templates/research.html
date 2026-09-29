@@ -36,7 +36,7 @@
     </div>
     <div class="cr-company__market">
       <div><span>Market price</span><strong>{% if research.price is not none %}${{ '%.2f'|format(research.price) }}{% else %}Unavailable{% endif %}</strong>{% if research.change_pct is not none %}<em class="{{ 'is-up' if research.change_pct >= 0 else 'is-down' }}">{{ '+' if research.change_pct >= 0 else '' }}{{ '%.2f'|format(research.change_pct) }}%</em>{% endif %}</div>
-      <small>{{ research.market_source }}{% if research.market_as_of %} · Quote as of {{ research.market_as_of }}{% else %} · Quote timestamp unavailable{% endif %}</small>
+      <small>{{ research.market_source or 'Market quote' }}{% if research.market_as_of %} · as of {{ research.market_as_of|quote_time }}{% endif %}</small>
     </div>
     <div class="cr-company__actions"><button type="button" onclick="askAboutCompany()">✦ Ask AI about {{ ticker }}</button><a href="{{ url_for('stock_compare', symbols=ticker) }}">Compare</a><a href="{{ url_for('stock_detail', ticker=ticker) }}">Market profile</a></div>
   </section>
@@ -57,15 +57,14 @@
       </article>
       <article class="cr-valuation">
         <span>What the market charges</span>
-        <small>Quote: {{ research.market_as_of or 'timestamp unavailable' }} · {{ research.market_source or 'source unavailable' }}. Valuation ratios are provider-reported and may update separately.</small>
         {% if data.valuation and data.valuation.available %}<div class="cr-valuation__grid">{% for row in data.valuation.rows[:6] %}<div><small>{{ row.label }}</small><strong class="tone-{{ row.tone }}">{{ row.value }}</strong>{% if row.note %}<em>{{ row.note }}</em>{% endif %}</div>{% endfor %}</div>{% if data.valuation.notice %}<p>{{ data.valuation.notice }}</p>{% endif %}
         {% else %}<div class="cr-unavailable"><b>Valuation unavailable</b><span>The business score can still be useful, but it is not a buy decision without price.</span></div>{% endif %}
       </article>
       <article class="cr-business">
-        <span>What the company does</span><p>{% if research.description %}{{ research.description }}{% else %}The connected company-profile sources did not return a description. Read the business section in the latest annual filing.{% endif %}</p>{% if research.description %}<small>Company-profile summary · confirm current operations in the annual filing.</small>{% endif %}
+        <span>What the company does</span><p>{% if research.description %}{{ research.description }}{% else %}No company description available — check the business section in the latest annual filing.{% endif %}</p>
       </article>
       <article class="cr-catalyst">
-        <span>Next reported earnings date</span>{% if research.earnings %}<strong>{{ research.earnings.date or 'Date unavailable' }}</strong><em>{{ research.earnings.time_label or 'Time TBD' }}</em><small>Source: {{ research.earnings.source or 'Tradestaar calendar' }}. Confirm with company investor relations; calendar dates may be estimates.</small>{% else %}<div class="cr-unavailable"><b>Upcoming date unavailable</b><span>The connected calendars have not supplied a future date for this company.</span></div>{% endif %}
+        <span>Next reported earnings date</span>{% if research.earnings %}<strong>{{ research.earnings.date or 'Date unavailable' }}</strong><em>{{ research.earnings.time_label or 'Time TBD' }}</em><small>Dates may be estimates — confirm with investor relations.</small>{% else %}<div class="cr-unavailable"><b>Upcoming date unavailable</b><span>No future date published yet.</span></div>{% endif %}
       </article>
     </div>
     <div class="cr-deep-link"><div><b>Need every scoring test and formula?</b><span>The Fundamentals Analyzer remains the audit trail for the 40-point filing scorecard.</span></div><a href="{{ url_for('fundamentals_page', ticker=ticker) }}">Open detailed fundamentals →</a></div>
@@ -90,7 +89,7 @@
     <div class="cr-section__head"><div><span>03 · Verify</span><h2>Financial history</h2></div><small>{% if research.fundamentals_as_of %}Latest annual period {{ research.fundamentals_as_of }}{% else %}Annual period unavailable{% endif %}</small></div>
     {% if research.latest_filing %}<p>Latest financial filing: <a href="{{ research.latest_filing.url }}" target="_blank" rel="noopener noreferrer">{{ research.latest_filing.form }} · period {{ research.latest_filing.period_end or 'unavailable' }} · filed {{ research.latest_filing.filed }} ↗</a></p>{% endif %}
     <p>Annual figures in {{ data.currency or 'the reporting currency' }}. Free cash flow is operating cash flow less purchases of property and equipment. Each margin uses that row’s annual revenue.</p>
-    {% if data and data.ttm_margins and data.ttm_margins.available %}<p>Separate trailing-twelve-month metrics (Finnhub): gross margin {{ data.ttm_margins.gross_margin }}, operating margin {{ data.ttm_margins.operating_margin }}, net margin {{ data.ttm_margins.net_margin }}. The metrics feed does not supply their exact period end.</p>{% endif %}
+    {% if data and data.ttm_margins and data.ttm_margins.available %}<p>Trailing-twelve-month margins (Finnhub): gross margin {{ data.ttm_margins.gross_margin }}, operating margin {{ data.ttm_margins.operating_margin }}, net margin {{ data.ttm_margins.net_margin }}. Finnhub doesn't state the exact period end for these.</p>{% endif %}
     {% if data and data.history %}
     <div class="cr-table-wrap"><table class="cr-table"><thead><tr><th>Period</th><th>Revenue</th><th>Net income</th><th>Free cash flow</th><th>Gross margin</th><th>Operating margin</th><th>FCF / net income</th></tr></thead><tbody>{% for row in data.history[:5] %}<tr><td>{{ row.period_end or row.label }}</td><td>{{ row.revenue }}</td><td>{{ row.net_income }}</td><td>{{ row.fcf }}</td><td>{{ row.gross_margin }}{% if row.margins_are_ttm %}<small> TTM</small>{% endif %}</td><td>{{ row.operating_margin }}{% if row.margins_are_ttm %}<small> TTM</small>{% endif %}</td><td>{% if row.fcf_over_ni is not none %}{{ '%.2f'|format(row.fcf_over_ni) }}x{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div>
     <div class="cr-score-sections">{% for section in data.sections %}<article><div><span>{{ section.name }}</span><b>{{ section.earned }}/{{ section.possible }}</b></div><div><i style="width:{{ (section.earned / section.possible * 100) if section.possible else 0 }}%"></i></div></article>{% endfor %}</div>
@@ -129,7 +128,7 @@
     <a class="cr-primary-link" href="{{ url_for('research_memory.notebook', ticker=ticker) }}">＋ Add or edit {{ ticker }} research memory</a>
   </section>
 
-  <footer class="cr-source-footer"><div><b>{{ research.source_count }} connected evidence records</b><span>Current availability is not proof of completeness. Prices may be delayed; filing periods and market timestamps are shown separately.</span></div><div><a href="{{ url_for('live_research.feed', ticker=ticker) }}">All {{ ticker }} research</a><a href="{{ url_for('fundamentals_page', ticker=ticker, tab='quarter') }}">Read the latest quarter</a></div></footer>
+  <footer class="cr-source-footer"><div><b>{{ research.source_count }} connected evidence records</b><span>Data sources: SEC EDGAR filings · Finnhub prices, estimates, and calendar · company profiles. Current availability is not proof of completeness — prices may be delayed.</span></div><div><a href="{{ url_for('live_research.feed', ticker=ticker) }}">All {{ ticker }} research</a><a href="{{ url_for('fundamentals_page', ticker=ticker, tab='quarter') }}">Read the latest quarter</a></div></footer>
   {% endif %}
 </main>
 {% endblock %}

@@ -106,3 +106,53 @@ def test_wide_financial_table_cannot_force_mobile_page_overflow():
     assert ".cr-shell{" in css and "width:100%;min-width:0" in css
     assert ".cr-section{min-width:0" in css
     assert ".cr-table-wrap{width:100%;min-width:0;max-width:100%;overflow:auto" in css
+
+
+def test_quote_time_filter_formats_iso_timestamps_for_display():
+    f = app.app.jinja_env.filters["quote_time"]
+    assert f("2026-09-28T20:00:00+00:00") == "Sep 28, 4:00 PM ET"
+    assert f("2026-09-14T18:05:00Z") == "Sep 14, 2:05 PM ET"
+    assert f("2026-09-28") == "Sep 28"
+    assert f("") == "—"
+    assert f(None) == "—"
+    # Unknown formats pass through unchanged rather than going blank.
+    assert f("sometime yesterday") == "sometime yesterday"
+
+
+def test_research_page_consolidates_source_labels_into_footer():
+    import web_app
+
+    research = {
+        "price": 259.25, "change_pct": 2.82, "market_as_of": "2026-09-28T20:00:00+00:00",
+        "market_source": "Finnhub", "description": "", "earnings": None, "new_count": 0,
+        "reviewed_at": "", "changes": [], "memory_cards": [], "fundamentals_as_of": "2026-01-31",
+        "source_count": 3,
+    }
+    with web_app.app.test_request_context("/research?ticker=CRWD"):
+        session.update(user_id=7, username="researcher", is_admin=0)
+        html = render_template("research.html", ticker="CRWD", data=sample_fundamentals(), error=None,
+                               stock={}, research=research, suggestions=[])
+
+    # Quote appears once, human-readable — not as a raw ISO timestamp, and not
+    # repeated in every section.
+    assert "Sep 28, 4:00 PM ET" in html
+    assert "2026-09-28T20:00:00" not in html
+    assert "timestamp unavailable" not in html
+    assert "source unavailable" not in html
+    assert "provider-reported" not in html
+    # Robot copy is gone; the plain-words fallbacks are in.
+    assert "The connected company-profile sources did not return a description" not in html
+    assert "No company description available" in html
+    assert "The connected calendars have not supplied" not in html
+    assert "No future date published yet." in html
+    # One consolidated source line in the footer names every provider once.
+    assert "Data sources: SEC EDGAR filings" in html
+    assert "Finnhub prices, estimates, and calendar" in html
+
+
+def test_curated_descriptions_cover_crwd_klac_and_panw():
+    from intel_engine import _company_description
+    assert "CrowdStrike" in _company_description("CRWD")
+    assert "KLA" in _company_description("KLAC")
+    assert "Palo Alto" in _company_description("PANW")
+    assert _company_description("ZZZZ") == ""
