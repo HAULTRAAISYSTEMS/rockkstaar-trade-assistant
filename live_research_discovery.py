@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from live_research_ingestion import ProviderItem
+from live_research_ingestion import ProviderItem, headline_subject_ticker
 from news_fetcher import CATALYST_CATEGORIES, parse_catalyst_categories
 
 EVENT_CATEGORY = {
@@ -86,10 +86,12 @@ def resolve_ticker(row):
         if direct: return direct
     related = row.get("related")
     if isinstance(related, str):
-        # "NVDA,AMD" -> first well-formed symbol
-        for part in related.split(","):
-            symbol = _valid_symbol(part)
-            if symbol: return symbol
+        candidates = [s for s in (_valid_symbol(part) for part in related.split(",")) if s]
+        if candidates:
+            # "NVDA,AMD" with a headline about AMD names AMD, not NVDA: the
+            # provider lists every related symbol, the headline names the subject.
+            named = headline_subject_ticker(row.get("headline"), row.get("summary"))
+            return named if named in candidates else candidates[0]
     for key in ("tickers", "related"):
         value = row.get(key)
         if isinstance(value, (list, tuple)):

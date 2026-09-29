@@ -138,3 +138,17 @@ def test_highest_weight_catalyst_wins_when_several_fire():
 def test_product_upgrade_is_not_an_analyst_upgrade():
     """Bare 'upgrade' used to fire on infrastructure news."""
     assert d.classify("The company upgraded its data center servers", "") != "analyst_upgrade"
+
+def test_related_prefers_headline_named_symbol():
+    """Finnhub's `related` lists every related symbol; the headline names the
+    subject. A QCOM story tagged "AAPL,QCOM" must resolve to QCOM, not AAPL."""
+    row = finnhub_row(related="AAPL,QCOM",
+                      headline="Why Qualcomm (QCOM) Stock Is Down Today",
+                      summary="Qualcomm fell 3% on weak guidance.")
+    assert d.resolve_ticker(row) == "QCOM"
+
+def test_related_falls_back_to_first_symbol_when_headline_is_ambiguous():
+    row = finnhub_row(related="NVDA,AMD,INTC",
+                      headline="Chip stocks rally on strong sector demand",
+                      summary="Semiconductor shares rose broadly.")
+    assert d.resolve_ticker(row) == "NVDA"

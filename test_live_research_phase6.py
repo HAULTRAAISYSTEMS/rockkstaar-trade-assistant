@@ -92,6 +92,34 @@ class Phase6Tests(unittest.TestCase):
         self.assertEqual(1, len(items)); self.assertEqual("finnhub", items[0].provider)
         self.assertEqual("https://example.com/a", items[0].source_url)
 
+    def _article(self, headline, summary="s"):
+        return {"id":1,"headline":headline,"url":"https://example.com/a","source":"Yahoo","summary":summary,"datetime":123}
+
+    def test_adapter_retags_related_company_story(self):
+        # Yahoo's per-ticker RSS includes related-company stories; the
+        # headline's own "Name (TICKER)" outranks the queried ticker.
+        items = ing.finnhub_articles_to_items("AAPL", "AAPL",
+            [self._article("Why Qualcomm (QCOM) Stock Is Down Today", "Qualcomm fell 3%.")])
+        self.assertEqual("QCOM", items[0].ticker)
+        self.assertEqual("QCOM", items[0].company_name)
+
+    def test_adapter_retags_on_company_name_mention(self):
+        items = ing.finnhub_articles_to_items("NVDA", "NVDA",
+            [self._article("Micron Reports Again Wednesday", "Micron reports Q3 results.")])
+        self.assertEqual("MU", items[0].ticker)
+
+    def test_adapter_keeps_feed_ticker_when_headline_agrees_or_is_ambiguous(self):
+        items = ing.finnhub_articles_to_items("AAPL", "AAPL",
+            [self._article("Apple (AAPL) unveils new iPhone"),
+             self._article("Apple (AAPL) and Qualcomm (QCOM) settle dispute"),
+             self._article("TSLA heads into Friday's delivery print")])
+        # third article has no subject of its own; stays on the queried ticker
+        items_tsla = ing.finnhub_articles_to_items("TSLA", "TSLA",
+            [self._article("TSLA heads into Friday's delivery print")])
+        for item in items:
+            self.assertEqual("AAPL", item.ticker)
+        self.assertEqual("TSLA", items_tsla[0].ticker)
+
 
 if __name__ == "__main__":
     unittest.main()

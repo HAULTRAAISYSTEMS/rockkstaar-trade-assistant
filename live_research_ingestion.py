@@ -49,6 +49,51 @@ def _source_host(url: str) -> str:
         return ""
 
 
+# A headline's own "Name (TICKER)" is the author's statement of the story's
+# subject — journalistic convention, not a guess.
+_HEADLINE_SUBJECT_RE = re.compile(
+    r"\b([A-Z][\w&.'-]{2,}(?:\s+[A-Z][\w&.'-]{2,}){0,3})\s+\(([A-Z][A-Z0-9.-]{1,5})\)"
+)
+
+# Company names likely to appear in market headlines, for stories that name
+# the company without the ticker symbol ("Micron Reports Again Wednesday").
+_COMPANY_NAME_TICKERS = {
+    "nvidia": "NVDA", "apple": "AAPL", "microsoft": "MSFT", "amazon": "AMZN",
+    "tesla": "TSLA", "meta platforms": "META", "alphabet": "GOOGL",
+    "google": "GOOGL", "advanced micro devices": "AMD", "qualcomm": "QCOM",
+    "broadcom": "AVGO", "intel": "INTC", "micron": "MU",
+    "micron technology": "MU", "sandisk": "SNDK", "crowdstrike": "CRWD",
+    "palo alto networks": "PANW", "palantir": "PLTR", "sofi": "SOFI",
+    "coinbase": "COIN", "netflix": "NFLX", "disney": "DIS", "walmart": "WMT",
+    "costco": "COST", "jpmorgan": "JPM", "goldman sachs": "GS",
+    "bank of america": "BAC", "morgan stanley": "MS", "exxon": "XOM",
+    "chevron": "CVX", "oracle": "ORCL", "salesforce": "CRM", "adobe": "ADBE",
+    "cisco": "CSCO", "ibm": "IBM", "eli lilly": "LLY",
+}
+
+
+def headline_subject_ticker(headline: str, summary: str = "", fallback: str = "") -> str:
+    """Return the ticker the story itself is about, or "" when unclear.
+
+    Per-ticker provider feeds (e.g. Yahoo's ?s=AAPL RSS) routinely include
+    stories about related companies, and blindly tagging every row with the
+    queried ticker mislabels them ("Why Qualcomm (QCOM) Stock Is Down Today"
+    filed under AAPL). The headline's own "Name (TICKER)" outranks the feed;
+    failing that, a lone company-name mention does. Multi-subject stories
+    return "" so the caller keeps its existing ticker.
+    """
+    found = [t for _, t in _HEADLINE_SUBJECT_RE.findall(headline or "")]
+    if not found:
+        text = f"{headline or ''} {summary or ''}".lower()
+        hits = {sym for name, sym in _COMPANY_NAME_TICKERS.items()
+                if re.search(r"\b" + re.escape(name) + r"\b", text)}
+        found = sorted(hits)
+    distinct = list(dict.fromkeys(found))
+    if len(distinct) == 1 and distinct[0] != (fallback or "").upper():
+        return distinct[0]
+    return ""
+
+
 def is_primary_source(item: ProviderItem) -> bool:
     host = _source_host(item.source_url)
     return item.source_kind in {"primary", "sec"} or host.endswith("sec.gov") or "investor" in host or host.startswith("ir.")
@@ -251,6 +296,11 @@ def finnhub_articles_to_items(ticker: str, company_name: str, articles: Iterable
             continue
         source = _clean_text(row.get("source") or "Finnhub", 200)
         external_id = _clean_text(row.get("id") or row.get("datetime") or url, 300)
-        out.append(ProviderItem("finnhub", external_id, ticker, company_name, headline, source, url,
+        # The feed was queried for `ticker`, but the story may be about a
+        # related company — trust the headline's own subject when it names one.
+        subject = headline_subject_ticker(headline, summary, ticker)
+        resolved = subject or ticker
+        name = company_name if resolved == ticker else resolved
+        out.append(ProviderItem("finnhub", external_id, resolved, name, headline, source, url,
                                 facts=(summary,), published_at=_clean_text(row.get("published_at") or row.get("datetime"), 100)))
     return out
