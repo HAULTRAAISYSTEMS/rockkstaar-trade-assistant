@@ -1,0 +1,107 @@
+{% extends "hx_base.html" %}
+{% block title %}Thesis — Tradestaar Elite{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/thesis.css') }}">{% endblock %}
+
+{% block hx_content %}
+<main class="th-shell">
+  <header class="th-header">
+    <div><span class="th-eyebrow">Tradestaar Thesis</span><h1>Should I own this?</h1><p>Bear, base and bull targets with the math on screen — built from the same filing-based fundamentals as Company Research. A starting point for judgment, not a prediction.</p></div>
+    <form class="th-search" method="get" action="{{ url_for('thesis_view') }}">
+      <label for="thesis-ticker">Company ticker</label>
+      <div><input id="thesis-ticker" name="ticker" value="{{ ticker or '' }}" placeholder="NVDA" maxlength="12" autocomplete="off" spellcheck="false" required><button type="submit">Thesis</button></div>
+    </form>
+  </header>
+
+  {% if not ticker %}
+  <section class="th-start">
+    <div><span class="th-index">01</span><h2>One screen, one decision.</h2><p>Type a ticker. Tradestaar assembles the upside case, the downside case, and every factor that earned or lost its quality score — with the assumptions in plain sight.</p>
+      {% if suggestions %}<div class="th-suggestions"><span>Your companies</span>{% for symbol in suggestions %}<a href="{{ url_for('thesis_view', ticker=symbol) }}">{{ symbol }}</a>{% endfor %}</div>{% endif %}
+    </div>
+    <div class="th-how">
+      <article><b>BEAR</b><div><strong>The growth story breaks</strong><span>Revenue stalls, the multiple compresses. What you could lose.</span></div></article>
+      <article><b>BASE</b><div><strong>History repeats</strong><span>Growth continues at its historical pace, valued at a fair multiple.</span></div></article>
+      <article><b>BULL</b><div><strong>It accelerates</strong><span>Growth picks up and the market pays up. What you could make.</span></div></article>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if error %}<div class="th-error"><b>Could not build the {{ ticker }} thesis.</b><span>{{ error }}</span></div>{% endif %}
+
+  {% if ticker and thesis and not thesis.error %}
+  {% set t = thesis.targets %}
+  <section class="th-company">
+    <div class="th-identity">
+      <span class="th-symbol">{{ thesis.ticker }}</span>
+      <div><h2>{{ thesis.company_name }}</h2><p>{% if thesis.sector %}{{ thesis.sector }}{% endif %}{% if thesis.sector and thesis.industry %} · {% endif %}{% if thesis.industry %}{{ thesis.industry }}{% endif %}</p></div>
+    </div>
+    <div class="th-market">
+      <div><span>Market price</span><strong>{{ thesis.price_fmt }}</strong>{% if thesis.change_pct is not none %}<em class="{{ 'is-up' if thesis.change_pct >= 0 else 'is-down' }}">{{ '+' if thesis.change_pct >= 0 else '' }}{{ '%.2f'|format(thesis.change_pct) }}%</em>{% endif %}</div>
+    </div>
+    <div class="th-score">
+      <div><span>Quality score</span><strong>{{ thesis.score if thesis.score is not none else '—' }}<small>/40</small></strong></div>
+      <em class="th-verdict">{{ thesis.verdict }}</em>
+    </div>
+  </section>
+
+  <section class="th-section">
+    <div class="th-section__head"><div><span>01 · The call</span><h2>Estimated upside</h2></div><small>Base target vs. market price</small></div>
+    {% if t.available %}
+    <div class="th-hero">
+      <div class="th-upside"><span>Est. upside</span><strong class="tone-{{ t.upside_tone }}">{{ t.upside_pct }}</strong><em>Base {{ t.base_fmt }} vs. {{ t.price_fmt }} today</em></div>
+      <div class="th-range">
+        <div class="th-range__bar">
+          <i class="th-range__fill" style="left:{{ t.bar.bear_pct }}%;width:{{ (t.bar.bull_pct - t.bar.bear_pct) }}%"></i>
+          {% if t.bar.price_pct is not none %}<b class="th-range__price" style="left:{{ t.bar.price_pct }}%" title="Market price {{ t.price_fmt }}"></b>{% endif %}
+          <b class="th-range__mark is-bear" style="left:{{ t.bar.bear_pct }}%"></b>
+          <b class="th-range__mark is-base" style="left:{{ t.bar.base_pct }}%"></b>
+          <b class="th-range__mark is-bull" style="left:{{ t.bar.bull_pct }}%"></b>
+        </div>
+        <div class="th-range__labels"><span>Bear {{ t.bear_fmt }}</span><span>Base {{ t.base_fmt }}</span><span>Bull {{ t.bull_fmt }}</span></div>
+      </div>
+    </div>
+    <div class="th-scenarios">
+      {% for s in t.scenarios %}
+      <article class="th-scenario is-{{ s.key }}">
+        <div><b>{{ s.label }}</b><strong>{{ s.target_fmt }}</strong></div>
+        <p><span class="tone-{{ 'pos' if s.upside is not none and s.upside >= 0 else 'neg' }}">{{ s.upside_pct }}</span> · growth {{ s.growth_pct }} · {{ s.multiple }}</p>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="th-unavailable"><b>Targets unavailable.</b><span>{{ t.note }}</span></div>
+    {% endif %}
+  </section>
+
+  <section class="th-section">
+    <div class="th-section__head"><div><span>02 · The evidence</span><h2>Factor flags</h2></div><small>From the {{ thesis.score }}/40 filing scorecard</small></div>
+    <div class="th-flags">
+      {% for group in thesis.flags %}
+      <article class="th-flag-group">
+        <h3>{{ group.name }}</h3>
+        {% for f in group.rows %}
+        <div class="th-flag is-{{ f.status }}"><i></i><div><b>{{ f.label }}</b><span>{{ f.value }}</span></div></div>
+        {% endfor %}
+      </article>
+      {% endfor %}
+    </div>
+    {% if thesis.red_flags %}
+    <div class="th-redflags"><b>Red flags</b>{% for rf in thesis.red_flags %}<span>{{ rf.label }}</span>{% endfor %}</div>
+    {% endif %}
+  </section>
+
+  {% if t.available %}
+  <section class="th-section">
+    <div class="th-section__head"><div><span>03 · The math</span><h2>Assumptions, on screen</h2></div><small>Simple by design</small></div>
+    <div class="th-math">
+      <div><span>Earnings power</span><strong>{{ t.power_fmt }}</strong><em>median of positive annual {{ t.basis }}</em></div>
+      <div><span>Growth anchor</span><strong>{{ t.growth_pct }}</strong><em>historical revenue CAGR, clamped ±</em></div>
+      <div><span>Method</span><strong>Forward {{ t.basis }} × scenario multiple</strong><em>base {{ '%.1f'|format(t.base_multiple) }}x, scaled to growth · bear 0.6x · bull 1.35x</em></div>
+    </div>
+    <p class="th-disclaimer">{{ t.note }} Nothing here is investment advice — verify the fundamentals yourself before acting.</p>
+  </section>
+  {% endif %}
+
+  <div class="th-deep-link"><div><b>Want the full evidence trail?</b><span>Statements, filings, catalysts, changes and your notes live on the Company Research page.</span></div><a href="{{ url_for('research_page', ticker=thesis.ticker) }}">Open Company Research →</a></div>
+  {% endif %}
+</main>
+{% endblock %}

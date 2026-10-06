@@ -8664,6 +8664,38 @@ def research_page():
                            research=research, suggestions=suggestions)
 
 
+@app.route("/thesis")
+def thesis_view():
+    """Thesis view: bear/base/bull targets, est. upside, and factor flags.
+
+    One screen answering "should I own this" — built from the same
+    filing-based fundamentals as Company Research, repackaged for an
+    investing decision. The valuation model lives in thesis.py and shows
+    its assumptions on screen.
+    """
+    ticker = (request.args.get("ticker") or "").strip().upper()[:12]
+    if ticker and not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
+        ticker = ""
+    thesis, error = None, None
+    if ticker:
+        try:
+            from fundamentals_engine import get_fundamentals
+            from thesis import build_thesis
+            data = get_fundamentals(ticker, force_refresh=request.args.get("refresh") == "1")
+            if data.get("error"):
+                error = data["error"]
+            thesis = build_thesis(data, ticker)
+        except Exception as exc:
+            logger.exception("thesis view failed for %s", ticker)
+            error = str(exc)
+    try:
+        suggestions = get_user_tracked_tickers(current_user_id())[:12]
+    except Exception:
+        suggestions = []
+    return render_template("thesis.html", ticker=ticker, thesis=thesis,
+                           error=error, suggestions=suggestions)
+
+
 @app.route("/research/<ticker>/reviewed", methods=["POST"])
 def company_research_reviewed(ticker):
     """Advance the explicit 'what changed' checkpoint for one user and ticker."""

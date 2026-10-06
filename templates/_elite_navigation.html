@@ -20,6 +20,7 @@
       <div class="nav-menu__panel">
         <span class="nav-menu__label">Understand the market</span>
         <a href="{{ url_for('research_page') }}"><strong>Company Research</strong><small>One workspace for financials, changes, filings and thesis</small></a>
+        <a href="{{ url_for('thesis_view') }}"><strong>Thesis</strong><small>Bear, base and bull targets with the math on screen</small></a>
         <a href="{{ url_for('fundamentals_page', tab='quarter') }}"><strong>Seven Checks</strong><small>Read and grade the latest quarter from the company filing</small></a>
         <a href="{{ url_for('live_research.feed') }}"><strong>Live Research</strong><small>Curated changes, catalysts and source notes</small></a>
         <a href="{{ url_for('intel') }}"><strong>Market Intel</strong><small>Latest news, sentiment and institutional activity</small></a>
@@ -86,6 +87,7 @@
       <div class="mobile-app-menu__head"><strong>Research</strong><span>Understand the market</span></div>
       <div class="mobile-app-menu__links">
         <a href="{{ url_for('research_page') }}"><strong>Company Research</strong><small>Financials, changes, filings and thesis</small></a>
+        <a href="{{ url_for('thesis_view') }}"><strong>Thesis</strong><small>Bear, base and bull targets</small></a>
         <a href="{{ url_for('fundamentals_page', tab='quarter') }}"><strong>Seven Checks</strong><small>Read and grade the latest quarter from the company filing</small></a>
         <a href="{{ url_for('live_research.feed') }}"><strong>Live Research</strong><small>Latest sources and published research</small></a>
         <a href="{{ url_for('intel') }}"><strong>Market Intel</strong><small>News, sentiment and institutional activity</small></a>
