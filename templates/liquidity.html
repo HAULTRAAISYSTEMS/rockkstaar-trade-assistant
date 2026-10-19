@@ -32,8 +32,8 @@
   <!-- ══ PULSE ════════════════════════════════════════════════════════════
        The numbers that set the tone for everything under them, on one line.
        Rendered server-side so the top of the page is never a row of spinners. -->
-  <div class="cc-pulse cc-rise">
-    <div class="cc-pulse-cell">
+  <div class="cc-pulse cc-rise pulse-{{ (pulse.regime or 'neutral')|lower }}">
+    <div class="cc-pulse-cell cc-pulse-regime">
       <span class="cc-pulse-k">Regime</span>
       <b class="cc-pulse-v {{ 'is-up' if 'on' in (pulse.regime or '')|lower else ('is-down' if 'off' in (pulse.regime or '')|lower else '') }}" id="cc-regime">{{ pulse.regime|replace('_', ' ')|replace('-', ' ')|title if pulse.regime else '—' }}</b>
     </div>
@@ -76,19 +76,38 @@
   <!-- ══ TODAY'S READ + THIS WEEK ═════════════════════════════════════════ -->
   <div class="cc-split">
 
-    <div id="market-story-banner" class="cc-card cc-story cc-rise cc-d1" style="display:none;">
-      <div id="ms-glow" class="cc-story-glow"></div>
+    {# The read is written server-side from the same market snapshot as the
+       pulse strip above, so the two can never describe different markets.
+       The refresh button re-renders #ms-body from one fresh snapshot. #}
+    <div id="market-story-banner" class="cc-card cc-story cc-rise cc-d1 sent-{{ story.sentiment if story else 'neutral' }}">
       <div class="cc-head">
         <h2>Today's read</h2>
         <a href="{{ url_for('terminal') }}" class="market-story-action">Open terminal →</a>
       </div>
-      <div class="cc-story-badges">
-        <span id="ms-sentiment-badge" class="cc-chip"></span>
-        <span id="ms-regime-badge" class="cc-chip cc-chip-gold"></span>
+      <div id="ms-body">
+      {% if story %}
+        <div id="ms-glow" class="cc-story-glow"></div>
+        <div class="cc-story-badges">
+          <span id="ms-sentiment-badge" class="cc-chip ms-sent">{{ story.sentiment|upper }}</span>
+          <span id="ms-regime-badge" class="cc-chip cc-chip-gold">{{ story.regime|replace('_', ' ') }}</span>
+        </div>
+        <div id="ms-headline" class="cc-story-headline">{{ story.headline }}</div>
+        <div id="ms-bullets" class="cc-story-bullets">
+          {% for b in story.bullets %}
+          <div class="ms-bullet"><span>›</span>{{ b }}</div>
+          {% endfor %}
+        </div>
+        {% if story.permissions %}
+        <div id="ms-permissions" class="cc-story-perms">
+          {% for p in story.permissions %}
+          <span class="cc-chip ms-perm {{ 'ms-perm-ok' if '✓' in p else ('ms-perm-no' if '✗' in p else ('ms-perm-warn' if p == 'Reduce size' else 'ms-perm-stop')) }}">{{ p }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      {% else %}
+        <p class="cc-empty">Market data is still loading — the read appears on the next refresh.</p>
+      {% endif %}
       </div>
-      <div id="ms-headline" class="cc-story-headline"></div>
-      <div id="ms-bullets" class="cc-story-bullets"></div>
-      <div id="ms-permissions" class="cc-story-perms"></div>
     </div>
 
     <div class="cc-card cc-rise cc-d2">
@@ -115,7 +134,7 @@
         {% endfor %}
       </div>
       {% else %}
-      <p class="cc-empty">Nothing scheduled in the next seven days that the calendar knows about.</p>
+      <p class="cc-empty">Nothing on the calendar for the next seven days — no macro releases, no tracked earnings in range.</p>
       {% endif %}
     </div>
 

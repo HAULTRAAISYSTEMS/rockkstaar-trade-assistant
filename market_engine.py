@@ -798,6 +798,23 @@ def is_sector_leading(ticker_etf: str, ctx: dict | None = None) -> bool:
 
 # ── AI Market Story Engine ─────────────────────────────────────────────────────
 
+def _day_label(now: datetime | None = None) -> str:
+    """'today' while the market is open, else the last trading day's name.
+
+    Index day-changes are computed on daily candles, so on a Monday morning
+    the "1-day change" is Friday's move. Calling it "today" then is wrong,
+    and it is the kind of wrong a reader notices before anything else.
+    """
+    et = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("America/New_York"))
+    if et.weekday() < 5 and (et.hour, et.minute) >= (9, 30) and (et.hour, et.minute) < (16, 0):
+        return "today"
+    d = et.date()
+    while True:
+        d -= timedelta(days=1)
+        if d.weekday() < 5:
+            return d.strftime("%A")
+
+
 def generate_market_story(mkt_ctx: dict, liq_score: int | None = None) -> dict:
     """
     Generate a human-readable AI market narrative for the Morning Command Center.
@@ -890,9 +907,12 @@ def generate_market_story(mkt_ctx: dict, liq_score: int | None = None) -> dict:
         )
     elif qqq_1d is not None:
         dir_str = f"up {qqq_1d:.1f}%" if qqq_1d > 0 else f"down {abs(qqq_1d):.1f}%"
-        bullets.append(f"QQQ {dir_str} today — {qqq_trend.lower()}")
+        bullets.append(f"QQQ {dir_str} {_day_label()} — {qqq_trend.lower()}")
 
-    # VIX context
+    # VIX context — the read must agree with the regime it sits under. A
+    # calm-VIX "trade away" bullet under a RISK OFF headline is the page
+    # arguing with itself, which is what the reader actually saw.
+    defensive = regime in ("RISK_OFF", "NO_TRADE")
     if vix is not None:
         if vix > 28:
             bullets.append(
@@ -908,6 +928,11 @@ def generate_market_story(mkt_ctx: dict, liq_score: int | None = None) -> dict:
             bullets.append(
                 f"VIX compressed at {vix} — "
                 "complacency risk; tighten stops on open winners"
+            )
+        elif defensive:
+            bullets.append(
+                f"VIX at {vix} — volatility contained, but the trend "
+                "says wait; no new longs until structure rebuilds"
             )
         else:
             bullets.append(

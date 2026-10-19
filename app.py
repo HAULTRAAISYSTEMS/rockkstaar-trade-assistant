@@ -7976,6 +7976,7 @@ def _command_center_context() -> dict:
     """
     context = {"week": [], "news": [], "setups": [], "watchlist": [],
                "watchlist_name": "", "pulse": {}, "next_up": None,
+               "story": None,
                "news_refreshing": False, "news_note": "", "research_digest": {
                    "items": [], "material_count": 0, "alert_count": 0,
                    "reviewed_at": "", "tracked_theses": 0, "tracked_tickers": 0,
@@ -7983,7 +7984,14 @@ def _command_center_context() -> dict:
 
     # The pulse strip: the four numbers that set the tone for everything under
     # them, rendered server-side so the top of the page is never a row of
-    # spinners. Same context the market story is written from.
+    # spinners.
+    #
+    # The market story is written from this exact snapshot — never from a
+    # later fetch. The story used to load 800ms after the page from its own
+    # API call, and a background cache refresh landing in between meant the
+    # strip and the read could describe two different markets (VIX 18.6 up
+    # top, a different sector read below). One snapshot per render, always.
+    liq_score = None
     try:
         mkt = _get_mkt_ctx() or {}
         context["pulse"] = {
@@ -8005,8 +8013,17 @@ def _command_center_context() -> dict:
             status = _liq.get_liquidity_status() or {}
             context["pulse"]["liquidity"] = status.get("score")
             context["pulse"]["liquidity_label"] = status.get("status_label") or ""
+            liq_score = status.get("score")
         except Exception as exc:
             logger.debug("command centre: liquidity score unavailable: %s", exc)
+        try:
+            if _MKT_AVAILABLE:
+                context["story"] = _mkt.generate_market_story(mkt, liq_score)
+            else:
+                context["story"] = None
+        except Exception as exc:
+            logger.debug("command centre: market story unavailable: %s", exc)
+            context["story"] = None
     except Exception as exc:
         logger.debug("command centre: market context unavailable: %s", exc)
 
@@ -8288,10 +8305,21 @@ def api_opportunity_refresh():
         logger.error("api_opportunity_refresh market: %s", exc, exc_info=True)
         errors.append("Market pulse could not refresh.")
 
+    # The story is written from this same fresh snapshot, so a refresh can
+    # never leave the strip and the read describing different markets.
+    story = None
+    try:
+        if _MKT_AVAILABLE and market:
+            liq_score = _liq.get_liquidity_status().get("score")
+            story = _mkt.generate_market_story(market, liq_score)
+    except Exception as exc:
+        logger.debug("api_opportunity_refresh story: %s", exc)
+
     return jsonify({
         "ok": bool(market),
         "errors": errors,
         "msg": "Market pulse refreshed." if market else "Refresh is still pending.",
+        "story": story,
         "market": {
             "regime": market.get("regime"),
             "vix": market.get("vix_level"),

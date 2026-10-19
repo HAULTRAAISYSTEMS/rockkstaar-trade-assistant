@@ -93,4 +93,7 @@ def test_manual_refresh_waits_for_and_renders_the_new_market_pulse():
     body = SCRIPT[SCRIPT.index("async function refreshAll() {"):]
     assert "await fetch('/api/opportunity/refresh'" in body
     assert "_renderLivePulse(data.market)" in body
-    assert "loadMarketStory();" in body
+    # The story renders from the same refresh response — never a second fetch —
+    # so the strip and the read cannot describe different markets.
+    assert "if (data.story) _renderStory(data.story);" in body
+    assert "loadMarketStory" not in body

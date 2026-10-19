@@ -183,6 +183,37 @@
   .cc-digest-clear b { color: #e5e9ed; font-size: 12.5px }
   .cc-digest-clear p { margin: 3px 0 0; color: #8f99a6; font-size: 11.5px; line-height: 1.45 }
 
+  /* ── Market weather: the pulse strip takes on the regime's mood ──────────
+     A glance should tell you the weather before you read a single number:
+     red glow for risk-off, green for risk-on, amber for chop. The regime
+     cell reads larger — it is the headline the other five numbers support. */
+  .cc-pulse.pulse-risk_off { border-color: rgba(255,101,117,.28); box-shadow: 0 0 42px rgba(255,101,117,.09) }
+  .cc-pulse.pulse-no_trade { border-color: rgba(255,101,117,.45); box-shadow: 0 0 48px rgba(255,101,117,.16) }
+  .cc-pulse.pulse-risk_on  { border-color: rgba(63,191,127,.28);  box-shadow: 0 0 42px rgba(63,191,127,.09) }
+  .cc-pulse.pulse-caution  { border-color: rgba(240,181,63,.28);  box-shadow: 0 0 42px rgba(240,181,63,.08) }
+  .cc-pulse-regime .cc-pulse-v { font-size: 23px; letter-spacing: .015em }
+
+  /* ── The read, tinted by sentiment ───────────────────────────────────────
+     Bearish mornings feel bearish: a red wash behind the card and a red
+     spine. Bullish mornings glow green. The card and the pulse strip always
+     agree, because they are rendered from the same snapshot. */
+  .cc-story.sent-bearish { --accent: #ff6575; background: linear-gradient(155deg, rgba(255,101,117,.06), rgba(11,13,15,.98) 62%) }
+  .cc-story.sent-bullish { --accent: #3fbf7f; background: linear-gradient(155deg, rgba(63,191,127,.055), rgba(11,13,15,.98) 62%) }
+  .cc-story.sent-cautious { --accent: #f0b53f; background: linear-gradient(155deg, rgba(240,181,63,.055), rgba(11,13,15,.98) 62%) }
+  .cc-story.sent-neutral { --accent: #9aa4b2 }
+  .ms-sent { border: 1px solid }
+  .sent-bearish .ms-sent { color: #ff7c89; border-color: rgba(255,101,117,.35); background: rgba(255,101,117,.10) }
+  .sent-bullish .ms-sent { color: #58d49a; border-color: rgba(63,191,127,.35); background: rgba(63,191,127,.10) }
+  .sent-cautious .ms-sent { color: #f0b53f; border-color: rgba(240,181,63,.35); background: rgba(240,181,63,.08) }
+  .sent-neutral .ms-sent { color: #9aa4b2; border-color: rgba(154,164,178,.30); background: rgba(154,164,178,.08) }
+  .ms-bullet { color: #b9c0ca; font: 400 12px/1.6 var(--font-ui, system-ui) }
+  .ms-bullet > span { margin-right: 7px; color: var(--accent, #f0b53f); font-weight: 800 }
+  .ms-perm { border: 1px solid }
+  .ms-perm-ok   { color: #58d49a; border-color: rgba(63,191,127,.28); background: rgba(63,191,127,.09) }
+  .ms-perm-no   { color: #ff7c89; border-color: rgba(255,101,117,.28); background: rgba(255,101,117,.09) }
+  .ms-perm-warn { color: #f0b53f; border-color: rgba(240,181,63,.28);  background: rgba(240,181,63,.09) }
+  .ms-perm-stop { color: #ff7c89; border-color: rgba(255,101,117,.28); background: rgba(255,101,117,.09) }
+
   /* Today's read */
   .cc-story-glow { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent, #f0b53f); opacity: .75 }
   .cc-story-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 6px }
@@ -193,7 +224,7 @@
     letter-spacing: .07em;
   }
   .cc-chip-gold { background: rgba(240,181,63,.09); color: #f0b53f; border: 1px solid rgba(240,181,63,.2) }
-  .cc-story-headline { margin-bottom: 7px; color: #f5f0e6; font: 700 15px/1.35 var(--font-ui, system-ui) }
+  .cc-story-headline { margin: 2px 0 9px; color: #f5f0e6; font: 700 16.5px/1.42 var(--font-ui, system-ui); letter-spacing: .002em }
   .cc-story-bullets { display: flex; flex-direction: column; gap: 4px }
   .cc-story-perms { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px }
 
@@ -781,7 +812,7 @@ async function refreshAll() {
     const data = await response.json();
     if (data.market) _renderLivePulse(data.market);
     if (stamp) stamp.textContent = data.ok ? 'Updated just now' : (data.msg || 'Refresh pending');
-    loadMarketStory();
+    if (data.story) _renderStory(data.story);
     loadAIBrief(false);
   } catch (err) {
     if (stamp) stamp.textContent = 'Refresh failed — try again';
@@ -1310,72 +1341,37 @@ function updateTimestamp(d) {
 }
 
 // ── Market Story Banner ──────────────────────────────────────────────────
-const SENTIMENT_STYLES = {
-  bullish:  { bg:'rgba(34,197,94,0.12)',  color:'#22c55e', border:'rgba(34,197,94,0.25)',  glow:'#22c55e' },
-  bearish:  { bg:'rgba(239,68,68,0.12)',  color:'#ef4444', border:'rgba(239,68,68,0.25)',  glow:'#ef4444' },
-  cautious: { bg:'rgba(245,158,11,0.10)', color:'#f59e0b', border:'rgba(245,158,11,0.22)', glow:'#f59e0b' },
-  neutral:  { bg:'rgba(255, 169, 77,0.08)', color:'#FFA94D', border:'rgba(255, 169, 77,0.18)', glow:'#FFA94D' },
-};
-const PERM_STYLES = {
-  'Longs ✓':    'background:rgba(34,197,94,0.10);color:#22c55e;border:1px solid rgba(34,197,94,0.20);',
-  'Longs ✗':    'background:rgba(239,68,68,0.08);color:#ef4444;border:1px solid rgba(239,68,68,0.18);',
-  'Shorts ✓':   'background:rgba(245,158,11,0.10);color:#f59e0b;border:1px solid rgba(245,158,11,0.20);',
-  'Reduce size':'background:rgba(245,158,11,0.10);color:#f59e0b;border:1px solid rgba(245,158,11,0.20);',
-  'Stand aside':'background:rgba(239,68,68,0.10);color:#ef4444;border:1px solid rgba(239,68,68,0.20);',
-};
-
-async function loadMarketStory() {
-  try {
-    const resp = await fetch('/api/market-story');
-    if (!resp.ok) return;
-    const data = await resp.json();
-    if (!data.ok || !data.story) return;
-
-    const s    = data.story;
-    const st   = SENTIMENT_STYLES[s.sentiment] || SENTIMENT_STYLES.neutral;
-    const banner = document.getElementById('market-story-banner');
-    const glow   = document.getElementById('ms-glow');
-    const hl     = document.getElementById('ms-headline');
-    const sentBadge  = document.getElementById('ms-sentiment-badge');
-    const regimeBadge= document.getElementById('ms-regime-badge');
-    const bulletsDiv = document.getElementById('ms-bullets');
-    const permsDiv   = document.getElementById('ms-permissions');
-
-    if (!banner) return;
-
-    if (glow)  glow.style.background = st.glow;
-    if (hl)    hl.textContent = s.headline || '';
-    if (sentBadge) {
-      sentBadge.textContent = (s.sentiment || 'neutral').toUpperCase();
-      sentBadge.style.cssText = `font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.07em;padding:2px 7px;border-radius:3px;background:${st.bg};color:${st.color};border:1px solid ${st.border};`;
-    }
-    if (regimeBadge && s.regime) regimeBadge.textContent = s.regime.replace(/_/g,' ');
-
-    if (bulletsDiv && s.bullets && s.bullets.length) {
-      bulletsDiv.innerHTML = s.bullets.map(b =>
-        `<div style="font-family:'Inter',sans-serif;font-size:11px;color:#94A3B8;line-height:1.4;">
-           <span style="color:${st.color};margin-right:5px;">›</span>${escapeHtml(b)}
-         </div>`
-      ).join('');
-    }
-
-    if (permsDiv && s.permissions && s.permissions.length) {
-      permsDiv.innerHTML = s.permissions.map(p => {
-        const ps = PERM_STYLES[p] || 'background:rgba(100,116,139,0.08);color:#94A3B8;border:1px solid rgba(100,116,139,0.15);';
-        return `<span style="font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.07em;padding:2px 8px;border-radius:3px;${ps}">${escapeHtml(p)}</span>`;
-      }).join('');
-    }
-
-    banner.style.display = 'block';
-  } catch(e) {
-    console.warn('market story load failed:', e);
-  }
+// The read is server-rendered from the same snapshot as the pulse strip.
+// Refresh re-renders it from the one fresh snapshot the refresh endpoint
+// returns — there is no separate story fetch anymore, so the strip and the
+// read can never describe different markets.
+function _permClass(p) {
+  if (p.indexOf('\u2713') !== -1) return 'ms-perm-ok';
+  if (p.indexOf('\u2717') !== -1) return 'ms-perm-no';
+  if (p === 'Reduce size') return 'ms-perm-warn';
+  return 'ms-perm-stop';
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function _renderStory(story) {
+  const banner = document.getElementById('market-story-banner');
+  const body = document.getElementById('ms-body');
+  if (!banner || !body || !story) return;
+  banner.className = 'cc-card cc-story cc-rise cc-d1 sent-' + (story.sentiment || 'neutral');
+  const perms = (story.permissions || []).map(p =>
+    '<span class="cc-chip ms-perm ' + _permClass(p) + '">' + escapeHtml(p) + '</span>'
+  ).join('');
+  const bullets = (story.bullets || []).map(b =>
+    '<div class="ms-bullet"><span>\u203a</span>' + escapeHtml(b) + '</div>'
+  ).join('');
+  body.innerHTML =
+    '<div id="ms-glow" class="cc-story-glow"></div>' +
+    '<div class="cc-story-badges">' +
+      '<span id="ms-sentiment-badge" class="cc-chip ms-sent">' + escapeHtml(String(story.sentiment || 'neutral').toUpperCase()) + '</span>' +
+      '<span id="ms-regime-badge" class="cc-chip cc-chip-gold">' + escapeHtml(String(story.regime || '').replace(/_/g, ' ')) + '</span>' +
+    '</div>' +
+    '<div id="ms-headline" class="cc-story-headline">' + escapeHtml(story.headline || '') + '</div>' +
+    '<div id="ms-bullets" class="cc-story-bullets">' + bullets + '</div>' +
+    (perms ? '<div id="ms-permissions" class="cc-story-perms">' + perms + '</div>' : '');
 }
 
-// Load story on page init (after a short delay so liquidity data loads first)
-setTimeout(loadMarketStory, 800);
 </script>

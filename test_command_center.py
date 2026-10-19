@@ -132,7 +132,7 @@ class TestOneColdFeedIsAGapNotAnErrorPage:
         with web_app.app.test_request_context("/opportunity"):
             context = legacy._command_center_context()
         assert set(context) == {"week", "news", "setups", "watchlist",
-                                "watchlist_name", "pulse", "next_up",
+                                "watchlist_name", "pulse", "next_up", "story",
                                 "news_refreshing", "news_note", "research_digest"}
 
     def test_no_watchlist_is_not_an_error(self, monkeypatch):
