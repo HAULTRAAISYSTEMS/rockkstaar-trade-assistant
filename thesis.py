@@ -119,7 +119,7 @@ def _shares_outstanding(ticker: str, price: float | None) -> float | None:
         raw = metrics.get("_raw_metric") or {}
         shares = raw.get("shareOutstanding")
         if isinstance(shares, (int, float)) and shares > 0:
-            return float(shares)
+            return float(shares) * 1e6  # Finnhub reports in millions
         cap_m = raw.get("marketCapitalization")  # Finnhub: USD millions
         if (isinstance(cap_m, (int, float)) and cap_m > 0
                 and isinstance(price, (int, float)) and price > 0):

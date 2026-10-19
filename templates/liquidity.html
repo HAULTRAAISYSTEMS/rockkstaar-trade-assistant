@@ -8,12 +8,12 @@
        The title used to sit below a 400px banner, so the page opened on a
        narrative and named itself second. It is first now, and the whole
        header is one band rather than a card of its own. -->
-  <header class="cc-hero">
-    <div class="cc-hero-left">
-      <div class="cc-eyebrow"><span class="cc-dot"></span>Tradestaar Intelligence</div>
-      <h1 class="cc-title">Morning <span>Command Center</span></h1>
+  <header class="elite-hero is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
+    <div>
+      <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Intelligence</div>
+      <h1 class="elite-hero-title">Morning <span class="accent">Command Center</span></h1>
     </div>
-    <div class="cc-hero-right">
+    <div class="elite-hero-actions">
       <div class="liq-mode-toggle">
         <button class="liq-mode-btn active" data-mode="both"   onclick="setMode('both')">All</button>
         <button class="liq-mode-btn"        data-mode="invest" onclick="setMode('invest')">Investing</button>

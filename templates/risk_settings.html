@@ -4,10 +4,13 @@
 {% block content %}
 <div class="risk-wrap">
 
-  <div class="risk-header">
-    <h1 class="risk-title">Risk &amp; Discipline Control</h1>
-    <span class="risk-date">{{ today }}</span>
-  </div>
+  <header class="elite-hero">
+    <div>
+      <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Elite</div>
+      <h1 class="elite-hero-title">Risk <span class="accent">&amp; Discipline</span></h1>
+    </div>
+    <div class="elite-hero-actions"><span class="risk-date">{{ today }}</span></div>
+  </header>
 
   <!-- ===== TODAY'S STATUS ===== -->
   <div class="risk-status-row">
@@ -203,31 +206,21 @@ async function useLiveSchwabBalance() {
   if (!btn || !status || !input) return;
 
   btn.disabled = true;
-  btn.textContent = 'Loading Schwab…';
-  status.textContent = 'Reading your live Account dashboard…';
+  btn.textContent = 'Loading\u2026';
+  status.textContent = 'Reading your live portfolio total\u2026';
 
   try {
-    const response = await fetch('/account', { credentials: 'same-origin', cache: 'no-store' });
-    if (!response.ok) throw new Error('Account page unavailable');
-    const html = await response.text();
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    let balance = null;
-
-    doc.querySelectorAll('.stat').forEach(function(card) {
-      const label = card.querySelector('.stat-lbl');
-      const value = card.querySelector('.stat-val');
-      if (!balance && label && value && label.textContent.trim() === 'Portfolio Value') {
-        const cleaned = value.textContent.replace(/USD/gi, '').replace(/[$,\s]/g, '');
-        const parsed = parseFloat(cleaned);
-        if (Number.isFinite(parsed) && parsed > 0) balance = parsed;
-      }
-    });
-
-    if (!balance) throw new Error('No live Schwab portfolio value found. Confirm Schwab is connected.');
+    const response = await fetch('/api/account/summary', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) throw new Error('Account summary unavailable');
+    const data = await response.json();
+    const balance = data && data.ok ? Number(data.total_value) : NaN;
+    if (!Number.isFinite(balance) || balance <= 0) {
+      throw new Error((data && data.error) || 'No live portfolio value found. Confirm a brokerage is connected.');
+    }
 
     input.value = balance.toFixed(2);
     calcRiskPreview();
-    status.textContent = 'Live Schwab balance loaded: $' + balance.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '. Click Save Settings to use it in every Position Sizer.';
+    status.textContent = 'Live balance loaded: $' + balance.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '. Click Save Settings to use it in every Position Sizer.';
     status.style.color = 'var(--green, #22c55e)';
   } catch (err) {
     status.textContent = err.message || 'Could not load live Schwab balance.';

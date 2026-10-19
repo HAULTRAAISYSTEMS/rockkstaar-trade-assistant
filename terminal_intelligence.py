@@ -146,6 +146,15 @@ def summarize_extended_sessions(bars: list[dict]) -> dict:
     return result
 
 
+def _headline_subject(fallback_ticker: str, headline: str) -> str:
+    """Ticker the story itself names, when it differs from the queried one."""
+    try:
+        from live_research_ingestion import headline_subject_ticker
+        return headline_subject_ticker(headline, "", fallback_ticker)
+    except Exception:
+        return ""
+
+
 def _news_row(raw: Any, fallback_ticker: str = "") -> dict | None:
     if isinstance(raw, str):
         headline = raw.strip()
@@ -157,8 +166,10 @@ def _news_row(raw: Any, fallback_ticker: str = "") -> dict | None:
     headline = _text(raw.get("headline") or raw.get("title") or raw.get("summary"))
     if not headline:
         return None
+    claimed = _ticker(raw.get("ticker") or fallback_ticker)
+    subject = _headline_subject(claimed, headline)
     return {
-        "ticker": _ticker(raw.get("ticker") or fallback_ticker),
+        "ticker": subject or claimed,
         "headline": headline,
         "source": _text(raw.get("source") or raw.get("publisher")),
         "published": _text(raw.get("published") or raw.get("published_at") or raw.get("time")),

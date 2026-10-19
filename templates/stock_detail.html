@@ -26,8 +26,8 @@
       </form>
     </div>
     <div class="mobile-stock-profile__price">
-      <strong>${{ "%.2f"|format(stock.current_price) if stock.current_price is not none else "—" }}</strong>
-      <span class="{{ stock.gap_class }}">{{ stock.gap_display }}</span>
+      <strong id="detail-mobile-price">${{ "%.2f"|format(stock.current_price) if stock.current_price is not none else "—" }}</strong>
+      <span id="detail-mobile-gap" class="{{ stock.gap_class }}">{{ stock.gap_display }}</span>
     </div>
     <div class="mobile-stock-chart" id="mobile-stock-chart" data-ticker="{{ stock.ticker }}">
       <div class="mobile-stock-chart__state">Loading 3-month chart…</div>
@@ -1855,6 +1855,10 @@ async function stockDetailRefresh() {
     // ── Price / market data ──────────────────────────────────────────────────
     const priceEl = document.getElementById('detail-cur-price');
     if (priceEl && s.current_price != null) priceEl.textContent = '$' + s.current_price.toFixed(2);
+    const mPriceEl = document.getElementById('detail-mobile-price');
+    if (mPriceEl && s.current_price != null) mPriceEl.textContent = '$' + s.current_price.toFixed(2);
+    const mGapEl = document.getElementById('detail-mobile-gap');
+    if (mGapEl && s.gap_display) { mGapEl.className = s.gap_class || ''; mGapEl.textContent = s.gap_display; }
 
     const gapEl = document.getElementById('detail-gap');
     if (gapEl && s.gap_display) {
@@ -2234,7 +2238,12 @@ console.log('[detail] Auto-refresh armed for', DETAIL_TICKER,
       const points = data && data.ok ? data.points : [];
       if (points.length < 2) throw new Error('No chart data');
       const values = points.map(p => Number(p.c));
-      const low = Math.min(...values), high = Math.max(...values);
+      // True 3M range comes from daily highs/lows, not closes (a wick day's
+      // low never appears in the close series). Fall back to closes if h/l
+      // are absent.
+      const lows = points.map(p => p.l != null ? Number(p.l) : Number(p.c));
+      const highs = points.map(p => p.h != null ? Number(p.h) : Number(p.c));
+      const low = Math.min(...lows), high = Math.max(...highs);
       const spread = high - low || 1;
       const coords = values.map((v, i) => `${(i/(values.length-1)*320).toFixed(1)},${(108-(v-low)/spread*96).toFixed(1)}`).join(' ');
       const rising = values[values.length - 1] >= values[0];

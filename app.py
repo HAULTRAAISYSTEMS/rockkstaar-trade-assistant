@@ -859,6 +859,7 @@ def _get_mkt_ctx() -> dict:
         "sectors": [], "leading_sectors": [], "weak_sectors": [],
         "top_sector": None, "qqq_price": None, "spy_price": None,
         "vix_level": None,
+        "fallback": True,  # market data unavailable — don't present as a read
     }
 
 
@@ -1472,7 +1473,10 @@ def compute_journal_summary(entries: list) -> dict:
     losses = [e for e in entries if e.get("result") == "Loss"]
     bes    = [e for e in entries if e.get("result") == "Break Even"]
 
-    win_rate  = round(len(wins) / len(entries) * 100, 1) if entries else None
+    # Win rate is wins over decided trades — break-evens are neither wins
+    # nor losses, so they don't dilute the rate or inflate the loss count.
+    decided   = wins + losses
+    win_rate  = round(len(wins) / len(decided) * 100, 1) if decided else None
     avg_win   = round(sum(e["pnl_pct"] for e in wins)   / len(wins),   2) if wins   else None
     avg_loss  = round(sum(e["pnl_pct"] for e in losses) / len(losses), 2) if losses else None
     total_pnl = round(sum(e.get("pnl_pct") or 0 for e in entries), 2)
@@ -1485,8 +1489,10 @@ def compute_journal_summary(entries: list) -> dict:
 
     setups = []
     for st, trades in setup_map.items():
-        st_wins = [t for t in trades if t.get("result") == "Win"]
-        st_wr   = round(len(st_wins) / len(trades) * 100, 1)
+        st_wins   = [t for t in trades if t.get("result") == "Win"]
+        st_losses = [t for t in trades if t.get("result") == "Loss"]
+        st_decided = st_wins + st_losses
+        st_wr   = round(len(st_wins) / len(st_decided) * 100, 1) if st_decided else 0.0
         st_pnl  = round(sum(t.get("pnl_pct") or 0 for t in trades) / len(trades), 2)
         setups.append({
             "setup_type": st,
@@ -1494,7 +1500,7 @@ def compute_journal_summary(entries: list) -> dict:
             "win_rate":   st_wr,
             "avg_pnl":    st_pnl,
             "wins":       len(st_wins),
-            "losses":     len(trades) - len(st_wins),
+            "losses":     len(st_losses),
         })
     setups.sort(key=lambda s: (s["win_rate"], s["avg_pnl"]), reverse=True)
 
@@ -1641,6 +1647,16 @@ def compute_trade_coach(stock: dict, plan: dict, market_temp: dict, risk_setting
             "message": "Blocked. Market is trending up — shorting here is against the tape. Wait for a topping structure.",
             "level": "blocked", "css": "coach-blocked", "reduce_size": True,
             "signals": [f"Regime: {regime} — shorts suppressed", "Wait for clear topping structure or trend shift"],
+        }
+
+    # Fail-closed: when the market read is unknown (fetch failed / still
+    # loading), never bless a trade. Cap the verdict at WATCH.
+    if regime in ("UNKNOWN", "LOADING") or longs_ok is None or shorts_ok is None:
+        return {
+            "coach_status": "WATCH",
+            "message": "Watch. Market data is unavailable right now, so no trade gets a green light until the read is back.",
+            "level": "watch", "css": "coach-watch", "reduce_size": True,
+            "signals": ["Market data unavailable — verdict capped at WATCH"],
         }
 
     # ── Missing plan elements ────────────────────────────────────────────────
@@ -3300,6 +3316,7 @@ def account():
         losses_today=losses_today,
         risk_settings=risk_s,
         snap_connected=_snaptrade_connected(uid),
+        market_closed=market_session_now() == "closed",
     )
 
 
@@ -3310,12 +3327,22 @@ def _paper_snapshot(uid: int) -> dict:
     market_value = unrealized = 0.0
     for pos in positions:
         quote = quotes.get(pos["ticker"], {})
-        last = float(quote.get("current_price") or pos["avg_price"])
-        pos["last_price"] = last
-        pos["market_value"] = round(last * pos["quantity"], 2)
-        pos["unrealized_pnl"] = round((last - pos["avg_price"]) * pos["quantity"], 2)
-        market_value += pos["market_value"]
-        unrealized += pos["unrealized_pnl"]
+        # Never silently value a position at its cost basis: a missing
+        # quote means "unknown", not "$0.00 P&L". Show — instead.
+        raw_last = quote.get("current_price")
+        if raw_last:
+            last = float(raw_last)
+            pos["last_price"] = last
+            pos["market_value"] = round(last * pos["quantity"], 2)
+            pos["unrealized_pnl"] = round((last - pos["avg_price"]) * pos["quantity"], 2)
+            pos["quote_stale"] = False
+            market_value += pos["market_value"]
+            unrealized += pos["unrealized_pnl"]
+        else:
+            pos["last_price"] = None
+            pos["market_value"] = None
+            pos["unrealized_pnl"] = None
+            pos["quote_stale"] = True
     orders = get_paper_orders(uid)
     realized = round(sum(float(o.get("realized_pnl") or 0) for o in orders), 2)
     equity = round(float(account["cash_balance"]) + market_value, 2)
@@ -3841,14 +3868,23 @@ def stock_detail(ticker):
     # On the detail page, always try the chart API to fill in any missing price
     # fields so the user always sees current data regardless of DB state.
     # This is a lightweight read-only call (~200ms) — it does NOT write to the DB.
+    #
+    # Session guard: outside regular hours the chart API's "current" price is
+    # the last regular-session close, not the live print — overwriting with it
+    # makes first paint show yesterday's close while the terminal shows the
+    # pre-market print. Only refresh current_price during the regular session.
     try:
         from data_fetcher import _fetch_price_via_chart_api
         _chart = _fetch_price_via_chart_api(ticker)
+        _regular_session = market_session_now() == "regular"
         if _chart:
             _src_map = {}
             for _field in ("current_price", "prev_close", "prev_day_high", "prev_day_low"):
                 _db_val   = stock.get(_field)
                 _live_val = _chart.get(_field)
+                if _field == "current_price" and not _regular_session:
+                    _src_map[_field] = "db_only_outside_hours"
+                    continue
                 if _live_val:
                     if _db_val != _live_val:
                         stock[_field] = _live_val   # always prefer freshly-fetched
@@ -3969,10 +4005,17 @@ def stock_chart(ticker):
         bars = _fetch_ohlcv_via_chart_api(ticker, interval="1d", range_str="3mo")
         if not bars or not bars.get("closes"):
             return jsonify({"ok": False, "error": "Chart data unavailable"}), 503
-        points = [
-            {"t": int(ts), "c": round(float(close), 2)}
-            for ts, close in zip(bars.get("timestamps", []), bars["closes"])
-        ][-65:]
+        highs = bars.get("highs") or []
+        lows = bars.get("lows") or []
+        have_hl = len(highs) == len(bars["closes"]) and len(lows) == len(bars["closes"])
+        points = []
+        for i, (ts, close) in enumerate(zip(bars.get("timestamps", []), bars["closes"])):
+            pt = {"t": int(ts), "c": round(float(close), 2)}
+            if have_hl:
+                pt["h"] = round(float(highs[i]), 2)
+                pt["l"] = round(float(lows[i]), 2)
+            points.append(pt)
+        points = points[-65:]
         return jsonify({"ok": True, "ticker": ticker, "points": points})
     except Exception as exc:
         logger.warning("stock_chart ticker=%s err=%s", ticker, exc)
@@ -5100,7 +5143,7 @@ def api_terminal_quotes():
     try:
         mkt = _get_mkt_ctx() or {}
         chips = {
-            "regime": mkt.get("regime_label") or mkt.get("regime") or "",
+            "regime": "" if mkt.get("fallback") else (mkt.get("regime_label") or mkt.get("regime") or ""),
             "vix": mkt.get("vix_level"),
             "spy": mkt.get("spy_1d_pct"),
         }
@@ -6098,32 +6141,26 @@ def api_earnings_digest():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
-@app.route("/api/market-story")
-def api_market_story():
-    """AI market narrative for the Morning Command Center header."""
+@app.route("/api/account/summary")
+def api_account_summary():
+    """Portfolio total as JSON.
+
+    The Risk page's position sizer used to scrape the rendered /account
+    HTML for the number — one markup change away from silently breaking.
+    This is the stable contract instead.
+    """
     try:
-        mkt_ctx   = _get_mkt_ctx()
-        liq_score = None
-        try:
-            import liquidity_engine as _liq
-            liq_score = _liq.get_liquidity_status().get("score")
-        except Exception:
-            pass
-        if _MKT_AVAILABLE:
-            story = _mkt.generate_market_story(mkt_ctx, liq_score)
-        else:
-            story = {
-                "headline": "Market data loading…",
-                "body": "Fetching regime and sector data.",
-                "sentiment": "neutral",
-                "bullets": [],
-                "permissions": [],
-                "regime": "NEUTRAL",
-            }
-        return jsonify({"ok": True, "story": story, "mkt_ctx": mkt_ctx})
+        combined = _get_portfolio_data(current_user_id()) or {}
+        if not combined.get("connected"):
+            return jsonify({"ok": False, "error": "No brokerage connected."})
+        return jsonify({
+            "ok": True,
+            "total_value": combined.get("total_value"),
+            "broker_count": combined.get("broker_count"),
+        })
     except Exception as exc:
-        logger.error("api_market_story: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
+        logger.error("api_account_summary: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "error": "Portfolio unavailable right now."})
 
 
 # ---------------------------------------------------------------------------
@@ -7592,7 +7629,13 @@ def intel():
             entry["mentions"] += 1
             entry["score"] += score
         enriched_news.append(item)
-    enriched_news.sort(key=lambda row: (-row["importance"], row.get("time") or ""))
+    # Sort: importance first, then recency. "time" is a display string
+    # ("2h ago") — lexicographic sort on it is wrong ("10m ago" > "2h ago"),
+    # so sort on published_at (ISO-8601, chronological as strings).
+    # Python's sort is stable: recency first, then importance keeps the
+    # recency order within each importance band.
+    enriched_news.sort(key=lambda row: row.get("published_at") or "", reverse=True)
+    enriched_news.sort(key=lambda row: -row["importance"])
     trending = sorted(coverage.values(), key=lambda row: (-row["score"], -row["mentions"], row["ticker"]))[:6]
 
     briefing = None
@@ -9376,7 +9419,8 @@ def _tradestaar_ai_context(user_id: int, question: str = "") -> dict:
                 "source_id": source_id,
                 "ticker": ticker,
                 "price": row.get("current_price") or row.get("price") or row.get("close"),
-                "change_pct": row.get("change_pct") or row.get("daily_change_pct"),
+                "change_pct": (row.get("change_pct") if row.get("change_pct") is not None
+                               else row.get("daily_change_pct")),
                 "relative_volume": row.get("relative_volume") or row.get("rel_volume"),
                 "grade": row.get("swing_grade") or row.get("grade"),
                 "setup": row.get("setup_type") or row.get("swing_setup"),

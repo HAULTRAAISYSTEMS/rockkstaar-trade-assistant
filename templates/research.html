@@ -4,9 +4,13 @@
 
 {% block hx_content %}
 <main class="cr-shell">
-  <header class="cr-header">
-    <div><span class="cr-eyebrow">Tradestaar Research System</span><h1>Company Research</h1><p>One evidence trail from business quality and price to current changes, filing risk, and your evolving thesis.</p></div>
-    <form class="cr-search" method="get" action="{{ url_for('research_page') }}">
+  <header class="elite-hero">
+    <div>
+      <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Research System</div>
+      <h1 class="elite-hero-title">Company <span class="accent">Research</span></h1>
+      <p class="elite-hero-sub">One evidence trail from business quality and price to current changes, filing risk, and your evolving thesis.</p>
+    </div>
+    <form class="cr-search elite-hero-actions" method="get" action="{{ url_for('research_page') }}">
       <label for="company-ticker">Company ticker</label>
       <div><input id="company-ticker" name="ticker" value="{{ ticker or '' }}" placeholder="AMD" maxlength="12" autocomplete="off" spellcheck="false" required><button type="submit">Research</button></div>
     </form>

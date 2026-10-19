@@ -66,6 +66,19 @@ def _date_label(d: date, today: date) -> str:
     return f"{day_names[d.weekday()]} {mon_names[d.month - 1]} {d.day}"
 
 
+def _headline_subject_ticker(headline: str, summary: str, fallback: str) -> str:
+    """Ticker the story itself is about, when the headline names one.
+
+    Per-ticker provider feeds include stories about related companies;
+    blindly tagging with the queried ticker mislabels them.
+    """
+    try:
+        from live_research_ingestion import headline_subject_ticker
+        return headline_subject_ticker(headline, summary, fallback)
+    except Exception:
+        return ""
+
+
 def _format_freshness(minutes: Optional[int]) -> str:
     if minutes is None:
         return "—"
@@ -808,8 +821,10 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
                 if not headline:
                     continue
                 impact, reason = classify_news_impact(headline, news.categories)
+                subject = _headline_subject_ticker(
+                    headline, str(article.get("summary") or ""), ticker)
                 items.append({
-                    "ticker":       ticker,
+                    "ticker":       subject or ticker,
                     "headline":     headline,
                     "source":       article.get("source") or news.source.replace("_", " ").title(),
                     "url":          article.get("url") or "",

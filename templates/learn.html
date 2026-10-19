@@ -8,14 +8,16 @@
 {% block content %}
 <div class="learn-wrap">
 
-  <header class="learn-head">
-    <div class="learn-eyebrow">Tradestaar Elite Research Desk</div>
-    <h1 class="learn-title">Learn the market</h1>
-    <p class="learn-sub">
-      {{ total }} ideas, each written to be read against a real company's real
-      filings. Every one tells you what it is, how to read it, and the specific
-      ways it misleads people.
-    </p>
+  <header class="elite-hero">
+    <div>
+      <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Elite Research Desk</div>
+      <h1 class="elite-hero-title">Learn the <span class="accent">market</span></h1>
+      <p class="elite-hero-sub">
+        {{ total }} ideas, each written to be read against a real company's real
+        filings. Every one tells you what it is, how to read it, and the specific
+        ways it misleads people.
+      </p>
+    </div>
 
     {% if progress %}
     <div class="learn-progress">
@@ -32,7 +34,7 @@
     </div>
     {% endif %}
 
-    <form class="learn-search" method="get" action="{{ url_for('learn_index') }}" role="search">
+    <form class="learn-search elite-hero-actions" method="get" action="{{ url_for('learn_index') }}" role="search">
       <input type="search" name="q" value="{{ query }}" autocomplete="off"
              placeholder="EPS, the VIX, free cash flow, 10-K…"
              aria-label="Search the concept library" />

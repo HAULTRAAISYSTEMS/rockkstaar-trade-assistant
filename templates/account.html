@@ -9,21 +9,20 @@
 {% set live_daily_pct = acct.get('daily_pnl_pct') if connected else none %}
 
 <!-- topbar -->
-<div class="hx-topbar">
-  <div class="col gap-1">
-    <div class="hx-h1">Account</div>
-    <div class="faint" style="font-size:13px">Swing book · performance &amp; discipline</div>
+<header class="elite-hero">
+  <div>
+    <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Elite</div>
+    <h1 class="elite-hero-title">Account</h1>
+    <p class="elite-hero-sub">Swing book · performance &amp; discipline</p>
   </div>
-  {% if connected %}
-  <div class="row gap-2" style="padding:8px 12px;background:var(--surface-card);border:1px solid rgba(34,197,139,.35);border-radius:var(--r-md)">
-    <span class="badge badge-pos"><span class="dot"></span>{{ acct.broker_count }} broker{{ '' if acct.broker_count == 1 else 's' }}</span><span class="hi" style="font-size:12px;font-weight:600">Live</span>
+  <div class="elite-hero-actions">
+    {% if connected %}
+    <span class="elite-chip is-bull"><span class="elite-live-dot"></span>{{ acct.broker_count }} broker{{ '' if acct.broker_count == 1 else 's' }} · Live</span>
+    {% else %}
+    <span class="elite-chip is-neutral">Brokerage · Not connected</span>
+    {% endif %}
   </div>
-  {% else %}
-  <div class="row gap-2" style="padding:8px 12px;background:var(--surface-card);border:1px dashed var(--border-strong);border-radius:var(--r-md)">
-    <span class="badge badge-neutral">Brokerage</span><span class="faint" style="font-size:12px">Not connected</span>
-  </div>
-  {% endif %}
-</div>
+</header>
 
 <!-- KPI tiles -->
 <div class="kpis">
@@ -31,11 +30,11 @@
     <div class="stat-val">{{ '{:,.2f}'.format(acct.total_value) if connected and acct.total_value is not none else '—' }}{% if connected and acct.total_value is not none %}<span class="u">USD</span>{% endif %}</div>
     {% if connected %}<span class="stat-delta pos">● live from {{ acct.sources | selectattr('connected') | map(attribute='label') | join(' + ') }}</span>{% else %}<a class="stat-delta faint" href="{{ url_for('brokers_page') }}">connect a brokerage</a>{% endif %}
   </div>
-  <div class="stat"><div class="stat-lbl">Day P&amp;L</div>
+  <div class="stat"><div class="stat-lbl">{% if market_closed %}Last session P&amp;L{% else %}Day P&amp;L{% endif %}</div>
     {% if connected and acct.daily_pnl is not none %}<div class="stat-val {{ 'pos' if acct.daily_pnl >= 0 else 'neg' }}">{{ '{:+,.2f}'.format(acct.daily_pnl + 0) }}</div>
     {% if acct.daily_pnl_partial %}<span class="stat-delta faint">{{ acct.daily_pnl_label }} only</span>
     {% elif live_daily_pct is not none %}<span class="stat-delta {{ 'pos' if live_daily_pct >= 0 else 'neg' }}">{{ '%+.2f'|format(live_daily_pct) }}%</span>
-    {% else %}<span class="stat-delta faint">live broker value</span>{% endif %}
+    {% else %}<span class="stat-delta faint">{% if market_closed %}last session{% else %}live broker value{% endif %}</span>{% endif %}
     {% else %}<div class="stat-val">—</div>{% endif %}
   </div>
   <div class="stat"><div class="stat-lbl">Buying Power</div>

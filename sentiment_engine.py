@@ -71,11 +71,26 @@ def explain_headline(headline: object, reason: object = "") -> str:
     return "This headline is on the scanner because the live feed classified it as a market-relevant catalyst."
 
 
+def _subject_ticker(headline: str, summary: str, fallback: str) -> str:
+    """The ticker the story itself is about, when the headline names one.
+
+    Per-ticker provider feeds routinely include stories about related
+    companies; tagging every row with the queried ticker mislabels them
+    ("Why Qualcomm (QCOM) Stock Is Down Today" filed under AAPL).
+    """
+    try:
+        from live_research_ingestion import headline_subject_ticker
+        return headline_subject_ticker(headline, summary, fallback)
+    except Exception:
+        return ""
+
+
 def enrich_news_article(raw: dict, watchlist: list[str] | set[str] | None = None) -> dict:
     """Build the auditable fields used by Elite News Scanner cards."""
     item = dict(raw or {})
     headline = _clean(item.get("headline"))
-    ticker = _clean(item.get("ticker")).upper() or "MARKET"
+    raw_ticker = _clean(item.get("ticker")).upper()
+    ticker = _subject_ticker(headline, _clean(item.get("summary")), raw_ticker) or raw_ticker or "MARKET"
     watch = {str(value).upper() for value in (watchlist or [])}
     scored = score_headline(headline)
     impact = _clean(item.get("impact")).upper() or "MEDIUM"
@@ -108,7 +123,8 @@ def build_sentiment_snapshot(news: list[dict] | None, watchlist: list[str] | Non
         headline = _clean(raw.get("headline"))
         if not headline:
             continue
-        ticker = _clean(raw.get("ticker")).upper() or "MARKET"
+        raw_ticker = _clean(raw.get("ticker")).upper()
+        ticker = _subject_ticker(headline, _clean(raw.get("summary")), raw_ticker) or raw_ticker or "MARKET"
         source = _clean(raw.get("source")) or "Market feed"
         scored = score_headline(headline)
         article = {

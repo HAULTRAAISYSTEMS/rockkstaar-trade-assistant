@@ -37,7 +37,7 @@
 {% endmacro %}
 {% block content %}
 <section class="lr-shell lr-public-shell" data-view="{{ filters.get('view','detailed') if filters.get('view') in ['compact','detailed'] else 'detailed' }}" data-sort="{{ filters.get('sort','newest') }}">
-  <header class="lr-hero"><div><div class="lr-kicker">TRADESTAAR ELITE · LIVE SOURCES + PUBLISHED RESEARCH</div><h1>Live Research Terminal</h1><p>Current market headlines first; reviewed earnings, guidance, filings and research below.</p></div>{% if session.get('is_admin') %}<a class="lr-admin-link" href="{{ url_for('live_research.admin_page') }}">Research Triage</a>{% endif %}</header>
+  <header class="elite-hero"><div><div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Elite · Live sources + published research</div><h1 class="elite-hero-title">Live Research <span class="accent">Terminal</span></h1><p class="elite-hero-sub">Current market headlines first; reviewed earnings, guidance, filings and research below.</p></div>{% if session.get('is_admin') %}<div class="elite-hero-actions"><a class="lr-admin-link" href="{{ url_for('live_research.admin_page') }}">Research Triage</a></div>{% endif %}</header>
 
   <section class="lr-public-breaking" aria-labelledby="breaking-title">
     <div class="lr-public-section-head"><div><span class="lr-pulse"></span><b id="breaking-title">Breaking Sources</b><small>Latest attributed headlines from the last 24 hours — open the original source before acting</small></div><span id="featured-count">{{ live_headlines|length }} live</span></div>

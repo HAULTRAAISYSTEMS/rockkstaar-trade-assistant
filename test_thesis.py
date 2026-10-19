@@ -199,7 +199,9 @@ def test_thesis_route_start_state_without_ticker():
     ):
         resp = client.get("/thesis")
     assert resp.status_code == 200
-    assert "Should I own this?" in resp.get_data(as_text=True)
+    html = resp.get_data(as_text=True)
+    assert "Should I" in html and "own this?" in html
+    assert "elite-hero" in html
 
 
 def test_thesis_route_rejects_bad_ticker():
@@ -211,4 +213,21 @@ def test_thesis_route_rejects_bad_ticker():
     ):
         resp = client.get("/thesis?ticker=<script>")
     assert resp.status_code == 200
-    assert "Should I own this?" in resp.get_data(as_text=True)
+    html = resp.get_data(as_text=True)
+    assert "Should I" in html and "own this?" in html
+
+
+def test_shares_outstanding_treats_finnhub_millions_as_millions():
+    """Finnhub reports shareOutstanding in MILLIONS — the model must scale it.
+    Regression: raw millions used as units inflated every target 1,000,000x."""
+    from unittest.mock import patch
+    import importlib
+    import thesis
+    import finnhub_ttm
+    # The autouse fixture replaces thesis._shares_outstanding with a stub;
+    # reload to get the real function back for this test.
+    importlib.reload(thesis)
+    with patch.object(finnhub_ttm, "fetch_finnhub_metrics",
+                      return_value={"_raw_metric": {"shareOutstanding": 24000.0}}):
+        shares = thesis._shares_outstanding("NVDA", 200.0)
+    assert shares == 24_000.0 * 1e6  # 24,000 million = 24B shares

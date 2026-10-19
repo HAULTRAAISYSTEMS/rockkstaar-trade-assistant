@@ -15,9 +15,13 @@
 {% endmacro %}
 {% block hx_content %}
 <main class="sm-dashboard">
-  <section class="sm-hero">
-    <div><span class="eyebrow">Tradestaar Elite · Official SEC Facts</span><h1>Insider <em>Intelligence</em></h1><p>Verified Form 4 activity grouped into explainable events. Every underlying transaction and official filing remains available.</p></div>
-    <div class="sm-hero-meta"><span>Tracked universe</span><strong>{{ watched_tickers|length }} tickers</strong><a href="{{ url_for('smart_money', refresh=1) }}">Refresh SEC data ↻</a></div>
+  <section class="elite-hero">
+    <div>
+      <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Elite · Official SEC Facts</div>
+      <h1 class="elite-hero-title">Insider <span class="accent">Intelligence</span></h1>
+      <p class="elite-hero-sub">Verified Form 4 activity grouped into explainable events. Every underlying transaction and official filing remains available.</p>
+    </div>
+    <div class="sm-hero-meta elite-hero-actions"><span>Tracked universe</span><strong>{{ watched_tickers|length }} tickers</strong><a href="{{ url_for('smart_money', refresh=1) }}">Refresh SEC data ↻</a></div>
   </section>
 
   <div class="sm-tabs" role="tablist" aria-label="Smart money feed">

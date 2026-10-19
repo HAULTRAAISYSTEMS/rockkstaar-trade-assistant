@@ -16,16 +16,18 @@
 </style>
 {% endblock %}
 {% block hx_content %}
-<section class="sent-hero col gap-2">
-  <span class="eyebrow">Tradestaar Elite Research</span>
-  <h1 class="sent-title">News &amp; <em>Social Sentiment</em></h1>
-  <span class="faint">Explainable coverage tone from connected news feeds. Every score can be traced to its headline evidence.</span>
+<section class="elite-hero">
+  <div>
+    <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Elite Research</div>
+    <h1 class="elite-hero-title">News &amp; <span class="accent">Social Sentiment</span></h1>
+    <p class="elite-hero-sub">Explainable coverage tone from connected news feeds. Every score can be traced to its headline evidence.</p>
+  </div>
 </section>
 
-<div class="sent-kpis">
-  <div class="sent-kpi"><span class="eyebrow">News Tone</span><strong class="{{ 'pos' if snapshot.overall_score > 0 else ('neg' if snapshot.overall_score < 0 else 'faint') }}">{{ '%+d'|format(snapshot.overall_score) }}</strong><span class="faint">{{ snapshot.overall_label }}</span></div>
-  <div class="sent-kpi"><span class="eyebrow">Headlines Scored</span><strong>{{ snapshot.article_count }}</strong><span class="faint">current cached feed</span></div>
-  <div class="sent-kpi"><span class="eyebrow">Source Coverage</span><strong>{{ snapshot.sources|length }}</strong><span class="faint">identified publishers/feeds</span></div>
+<div class="elite-stats">
+  <div class="elite-stat"><span class="elite-stat-k">News Tone</span><strong class="elite-stat-v {{ 'is-up' if snapshot.overall_score > 0 else ('is-down' if snapshot.overall_score < 0 else '') }}">{{ '%+d'|format(snapshot.overall_score) }}</strong><span class="elite-stat-meta">{{ snapshot.overall_label }}</span></div>
+  <div class="elite-stat"><span class="elite-stat-k">Headlines Scored</span><strong class="elite-stat-v">{{ snapshot.article_count }}</strong><span class="elite-stat-meta">current cached feed</span></div>
+  <div class="elite-stat"><span class="elite-stat-k">Source Coverage</span><strong class="elite-stat-v">{{ snapshot.sources|length }}</strong><span class="elite-stat-meta">identified publishers/feeds</span></div>
 </div>
 
 <div class="sent-grid">

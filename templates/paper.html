@@ -8,7 +8,14 @@
 {% endblock %}
 {% block content %}
 <main class="paper-wrap">
-  <header class="paper-head"><div><h1 class="paper-title">Paper Trading</h1><div class="paper-note">Practice with simulated money and verified cached quotes.</div></div><span class="paper-badge">SIMULATION</span></header>
+  <header class="elite-hero">
+    <div>
+      <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Elite</div>
+      <h1 class="elite-hero-title">Paper <span class="accent">Trading</span></h1>
+      <p class="elite-hero-sub">Practice with simulated money and verified cached quotes.</p>
+    </div>
+    <div class="elite-hero-actions"><span class="elite-chip is-gold">Simulation</span></div>
+  </header>
   <section class="paper-kpis">
     <div class="paper-kpi"><div class="paper-label">Portfolio Equity</div><div class="paper-value">${{ '{:,.2f}'.format(paper.equity) }}</div></div>
     <div class="paper-kpi"><div class="paper-label">Buying Power</div><div class="paper-value">${{ '{:,.2f}'.format(paper.account.cash_balance) }}</div></div>
@@ -18,7 +25,7 @@
   </section>
   <div class="paper-grid">
     <section class="paper-card"><div class="paper-card-hd">Market Order <span class="paper-label">Paper</span></div><form class="paper-form" method="post" action="{{ url_for('paper_order') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="paper-field"><label>Ticker</label><input class="paper-input" name="ticker" maxlength="6" required placeholder="NVDA" autocapitalize="characters"></div><div class="paper-field"><label>Side</label><select class="paper-select" name="side"><option>BUY</option><option>SELL</option></select></div><div class="paper-field"><label>Whole shares</label><input class="paper-input" type="number" name="quantity" min="1" step="1" value="1" required></div><button class="paper-submit">Place Paper Order</button><p class="paper-note">Orders fill at Tradestaar's latest cached quote. No live brokerage order is transmitted. Long positions only.</p></form></section>
-    <section class="paper-card"><div class="paper-card-hd">Open Positions <span class="paper-label">{{ paper.positions|length }}</span></div>{% if paper.positions %}<div style="overflow-x:auto"><table class="paper-table"><thead><tr><th>Symbol</th><th>Shares</th><th>Avg</th><th>Last</th><th>Value</th><th>P&amp;L</th></tr></thead><tbody>{% for p in paper.positions %}<tr><td><a href="{{ url_for('stock_detail', ticker=p.ticker) }}">{{ p.ticker }}</a></td><td>{{ p.quantity }}</td><td>${{ '%.2f'|format(p.avg_price) }}</td><td>${{ '%.2f'|format(p.last_price) }}</td><td>${{ '{:,.2f}'.format(p.market_value) }}</td><td class="{{ 'pos' if p.unrealized_pnl >= 0 else 'neg' }}">${{ '{:+,.2f}'.format(p.unrealized_pnl) }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="paper-empty">No paper positions yet. Place a buy order to begin.</div>{% endif %}</section>
+    <section class="paper-card"><div class="paper-card-hd">Open Positions <span class="paper-label">{{ paper.positions|length }}</span></div>{% if paper.positions %}<div style="overflow-x:auto"><table class="paper-table"><thead><tr><th>Symbol</th><th>Shares</th><th>Avg</th><th>Last</th><th>Value</th><th>P&amp;L</th></tr></thead><tbody>{% for p in paper.positions %}<tr><td><a href="{{ url_for('stock_detail', ticker=p.ticker) }}">{{ p.ticker }}</a></td><td>{{ p.quantity }}</td><td>${{ '%.2f'|format(p.avg_price) }}</td><td>{% if p.last_price is not none %}${{ '%.2f'|format(p.last_price) }}{% else %}<span class="faint" title="No live quote — value unknown">—</span>{% endif %}</td><td>{% if p.market_value is not none %}${{ '{:,.2f}'.format(p.market_value) }}{% else %}<span class="faint">—</span>{% endif %}</td><td class="{{ 'pos' if (p.unrealized_pnl or 0) >= 0 else 'neg' }}">{% if p.unrealized_pnl is not none %}${{ '{:+,.2f}'.format(p.unrealized_pnl) }}{% else %}<span class="faint" title="No live quote — P&L unknown">—</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="paper-empty">No paper positions yet. Place a buy order to begin.</div>{% endif %}</section>
   </div>
   <section class="paper-card paper-history"><div class="paper-card-hd">Order History <span class="paper-label">Latest 50</span></div>{% if paper.orders %}<div style="overflow-x:auto"><table class="paper-table"><thead><tr><th>Symbol</th><th>Side</th><th>Shares</th><th>Fill</th><th>Value</th><th>Realized</th></tr></thead><tbody>{% for o in paper.orders %}<tr><td>{{ o.ticker }}</td><td class="paper-side {{ o.side|lower }}">{{ o.side }}</td><td>{{ o.quantity }}</td><td>${{ '%.2f'|format(o.fill_price) }}</td><td>${{ '{:,.2f}'.format(o.gross_value) }}</td><td class="{{ 'pos' if o.realized_pnl >= 0 else 'neg' }}">${{ '{:+,.2f}'.format(o.realized_pnl) }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="paper-empty">Your simulated fills will appear here.</div>{% endif %}</section>
 </main>

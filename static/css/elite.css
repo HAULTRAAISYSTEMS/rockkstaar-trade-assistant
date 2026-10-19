@@ -642,3 +642,181 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ================================================================
+   ELITE INTELLIGENCE CENTER — unified page language (2026-10-19)
+   One hero, one stat strip, one section header, one empty state.
+   Pages keep their character; they stop inventing their own chrome.
+   ================================================================ */
+
+:root {
+  --sent-bull: #3fbf7f;
+  --sent-bear: #ff6575;
+  --sent-caution: #f0b53f;
+  --sent-neutral: #9aa4b2;
+  --elite-glow-soft: 0 0 42px rgba(229, 185, 79, .07);
+}
+
+/* ── Page hero ───────────────────────────────────────────────────
+   Eyebrow (live dot + label), title, one-line sub, optional actions.
+   Replaces the bespoke .te-watch-hero / .intel-hero / .cc-hero per page. */
+.elite-hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin: 2px 0 18px;
+  padding: 20px 22px 18px;
+  border: 1px solid var(--elite-hairline);
+  border-radius: var(--elite-radius-lg);
+  background:
+    radial-gradient(420px 160px at 12% -40%, rgba(229, 185, 79, .10), transparent 70%),
+    linear-gradient(145deg, rgba(23, 27, 33, .96), rgba(10, 12, 15, .98));
+  box-shadow: var(--elite-shadow);
+}
+.elite-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 55%, rgba(255, 255, 255, .022) 55.2%, transparent 55.5%);
+}
+.elite-hero-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--elite-muted);
+  font: 700 10px/1.6 var(--font-display);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+.elite-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sent-bull);
+  box-shadow: 0 0 0 0 rgba(63, 191, 127, .55);
+  animation: elite-live-pulse 2.4s ease-out infinite;
+}
+@keyframes elite-live-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(63, 191, 127, .55); }
+  70%  { box-shadow: 0 0 0 8px rgba(63, 191, 127, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(63, 191, 127, 0); }
+}
+.elite-hero-title {
+  margin: 0;
+  color: #f5f0e6;
+  font: 700 clamp(26px, 3vw, 34px)/1.05 var(--font-display);
+  letter-spacing: .01em;
+}
+.elite-hero-title .accent { color: var(--elite-gold-bright); }
+.elite-hero-sub {
+  margin: 7px 0 0;
+  max-width: 62ch;
+  color: var(--elite-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.elite-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+/* Regime-tinted heroes — the page takes on the market's weather. */
+.elite-hero.is-risk-off  { border-color: rgba(255,101,117,.30); box-shadow: 0 0 46px rgba(255,101,117,.10), var(--elite-shadow); }
+.elite-hero.is-risk-on   { border-color: rgba(63,191,127,.30);  box-shadow: 0 0 46px rgba(63,191,127,.10),  var(--elite-shadow); }
+.elite-hero.is-caution   { border-color: rgba(240,181,63,.30);  box-shadow: 0 0 46px rgba(240,181,63,.09),  var(--elite-shadow); }
+.elite-hero.is-no-trade  { border-color: rgba(255,101,117,.45); box-shadow: 0 0 54px rgba(255,101,117,.16), var(--elite-shadow); }
+
+/* ── Stat strip ──────────────────────────────────────────────────
+   The command-center pulse pattern, reusable: label over a mono value,
+   hairline dividers, optional regime glow. */
+.elite-stats {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 1px;
+  margin-bottom: 16px;
+  border: 1px solid var(--elite-hairline);
+  border-radius: var(--elite-radius);
+  background: var(--elite-hairline);
+  overflow: hidden;
+}
+.elite-stat { padding: 12px 16px; background: #0b0d0f; }
+.elite-stat-k {
+  display: block;
+  color: var(--elite-faint);
+  font: 700 9px/1.6 var(--font-mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.elite-stat-v {
+  display: block;
+  margin-top: 3px;
+  color: #f5f0e6;
+  font: 700 20px/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.elite-stat-v.is-up { color: var(--sent-bull); }
+.elite-stat-v.is-down { color: var(--sent-bear); }
+.elite-stat-meta { display: block; margin-top: 3px; color: var(--elite-faint); font: 500 9px/1.4 var(--font-mono); }
+.elite-stats.is-risk-off { border-color: rgba(255,101,117,.28); box-shadow: 0 0 42px rgba(255,101,117,.09); }
+.elite-stats.is-risk-on  { border-color: rgba(63,191,127,.28);  box-shadow: 0 0 42px rgba(63,191,127,.09); }
+.elite-stats.is-caution  { border-color: rgba(240,181,63,.28);  box-shadow: 0 0 42px rgba(240,181,63,.08); }
+
+/* ── Section header ────────────────────────────────────────────── */
+.elite-sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 10px;
+}
+.elite-sec-title {
+  margin: 0;
+  color: #f5f0e6;
+  font: 700 13px/1.3 var(--font-display);
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+.elite-sec-title .dim { color: var(--elite-faint); font-weight: 500; letter-spacing: .04em; }
+.elite-sec-link { color: var(--elite-gold); font-size: 11.5px; text-decoration: none; white-space: nowrap; }
+.elite-sec-link:hover { text-decoration: underline; }
+
+/* ── Empty state ───────────────────────────────────────────────── */
+.elite-empty {
+  padding: 18px;
+  border: 1px dashed rgba(255, 255, 255, .12);
+  border-radius: var(--elite-radius);
+  background: rgba(255, 255, 255, .015);
+  color: var(--elite-muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+  text-align: center;
+}
+.elite-empty b { display: block; margin-bottom: 4px; color: #e5e9ed; font-size: 13px; }
+
+/* ── Sentiment chips (shared) ──────────────────────────────────── */
+.elite-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--elite-hairline);
+  border-radius: 999px;
+  font: 700 9.5px/1.5 var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.elite-chip.is-bull    { color: #58d49a; border-color: rgba(63,191,127,.30);  background: rgba(63,191,127,.09); }
+.elite-chip.is-bear    { color: #ff7c89; border-color: rgba(255,101,117,.30); background: rgba(255,101,117,.09); }
+.elite-chip.is-caution { color: #f0b53f; border-color: rgba(240,181,63,.30);  background: rgba(240,181,63,.09); }
+.elite-chip.is-neutral { color: #9aa4b2; border-color: rgba(154,164,178,.28); background: rgba(154,164,178,.08); }
+.elite-chip.is-gold    { color: var(--elite-gold-bright); border-color: var(--elite-border-strong); background: rgba(229,185,79,.08); }
+
+@media (max-width: 720px) {
+  .elite-hero { padding: 16px; }
+  .elite-stats { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

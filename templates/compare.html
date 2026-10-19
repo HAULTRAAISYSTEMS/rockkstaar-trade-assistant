@@ -24,7 +24,7 @@
       <div class="compare-head">
         <div class="compare-symbol">{{ stock.ticker }}</div><div class="compare-company">{{ stock.company_name }}</div>
         <div class="compare-meta">{{ stock.sector or 'Sector unavailable' }}{% if stock.industry %} · {{ stock.industry }}{% endif %}</div>
-        <div class="compare-score"><div><strong>{{ stock.score if stock.score is not none else '—' }}</strong><small>/100</small></div><span class="verdict-badge {{ stock.verdict_class }}">{{ stock.verdict or 'Unrated' }}</span></div>
+        <div class="compare-score"><div><strong>{{ stock.score if stock.score is not none else '—' }}</strong><small>/40</small></div><span class="verdict-badge {{ stock.verdict_class }}">{{ stock.verdict or 'Unrated' }}</span></div>
       </div>
       <div class="compare-chart"><div class="compare-chart-state">Loading 3-month performance…</div></div>
       <div class="compare-section">MARKET SNAPSHOT</div>

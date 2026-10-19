@@ -176,3 +176,91 @@ def test_command_center_page_renders_story_server_side():
     assert "ms-bullet" in html
     # ...and the strip carries the regime tint class.
     assert "pulse-risk_off" in html
+
+
+# ── /api/account/summary (replaces HTML scraping) ──────────────────────────
+
+def test_account_summary_returns_portfolio_total():
+    from unittest.mock import patch
+    import web_app  # noqa: F401
+    import app as app_module
+    app_module.app.config["TESTING"] = True
+    client = app_module.app.test_client()
+    with (
+        patch.object(app_module, "_auth_required", return_value=False),
+        patch.object(app_module, "_get_portfolio_data",
+                     return_value={"connected": True, "total_value": 125000.0, "broker_count": 2}),
+    ):
+        resp = client.get("/api/account/summary")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["total_value"] == 125000.0
+
+
+def test_account_summary_no_brokerage_is_not_an_error():
+    from unittest.mock import patch
+    import web_app  # noqa: F401
+    import app as app_module
+    app_module.app.config["TESTING"] = True
+    client = app_module.app.test_client()
+    with (
+        patch.object(app_module, "_auth_required", return_value=False),
+        patch.object(app_module, "_get_portfolio_data",
+                     return_value={"connected": False}),
+    ):
+        resp = client.get("/api/account/summary")
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is False
+
+
+def test_dead_market_story_endpoint_is_gone():
+    import web_app  # noqa: F401
+    import app as app_module
+    assert "api_market_story" not in app_module.app.view_functions
+
+
+# ── Ticker badge shows the story's subject, not the queried ticker ───────────
+
+def test_enrich_news_article_retags_mislabeled_headline():
+    from sentiment_engine import enrich_news_article
+    item = enrich_news_article({
+        "ticker": "AAPL",
+        "headline": "Why Qualcomm (QCOM) Stock Is Down Today",
+        "summary": "",
+    })
+    assert item["ticker"] == "QCOM"
+
+
+def test_enrich_news_article_keeps_ticker_when_headline_is_silent():
+    from sentiment_engine import enrich_news_article
+    item = enrich_news_article({
+        "ticker": "AAPL",
+        "headline": "Apple supplier stocks rally on strong iPhone demand",
+        "summary": "",
+    })
+    assert item["ticker"] == "AAPL"
+
+
+# ── Trade coach fails closed when the market read is unknown ────────────────
+
+def test_trade_coach_caps_at_watch_when_market_unknown():
+    import app as app_module
+    stock = {"trade_bias": "Long", "swing_score": 9, "catalyst_score": 8,
+             "risk_reward": 3, "daily_trend": "Bullish"}
+    plan = {"entry_level": 100, "stop_loss": 95, "target_price": 115}
+    market_temp = {"regime": "UNKNOWN", "longs_ok": None, "shorts_ok": None}
+    out = app_module.compute_trade_coach(stock, plan, market_temp, {"trading_mode": "SWING TRADE"})
+    assert out["coach_status"] == "WATCH"
+    assert "unavailable" in out["message"].lower()
+
+
+def test_trade_coach_still_allows_when_market_known():
+    import app as app_module
+    stock = {"trade_bias": "Long", "swing_score": 9, "catalyst_score": 8,
+             "risk_reward": 3, "daily_trend": "Bullish",
+             "trade_permission": {"permission": "TRADE ALLOWED"}}
+    plan = {"entry_level": 100, "stop_loss": 95, "target_price": 115}
+    market_temp = {"regime": "RISK_ON", "longs_ok": True, "shorts_ok": True}
+    out = app_module.compute_trade_coach(stock, plan, market_temp, {"trading_mode": "SWING TRADE"})
+    assert out["coach_status"] == "TRADE ALLOWED"

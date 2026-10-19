@@ -93,6 +93,6 @@ def test_ai_workspace_and_grouped_navigation_render_together():
         session.update(user_id=7, username="researcher", is_admin=0)
         html = render_template("tradestaar_ai.html", ai_context=context)
 
-    assert "Tradestaar <em>AI</em>" in html
+    assert 'Tradestaar <span class="accent">AI</span>' in html
     assert "Understand the market" in html
     assert "Data status and account menu" in html

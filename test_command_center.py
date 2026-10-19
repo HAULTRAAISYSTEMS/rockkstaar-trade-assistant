@@ -327,7 +327,7 @@ class TestTheLayout:
         assert self.PAGE.index("Command Center") < self.PAGE.index("market-story-banner")
 
     def test_the_header_is_a_band_not_a_card(self):
-        assert "<header class=\"cc-hero\">" in self.PAGE
+        assert "<header class=\"elite-hero" in self.PAGE
         assert "liq-hero" not in self.PAGE
 
     def test_the_pulse_strip_is_above_the_sections(self):

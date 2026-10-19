@@ -214,7 +214,7 @@
     <span class="tw-live" id="tw-live" data-session="{{ market_session }}" title="Quotes refresh every few seconds while the market is open.">
       <i class="tw-live-dot"></i><span id="tw-live-label">{{ market_session_label }}</span>
     </span>
-    <span class="tw-chip">REGIME <b id="tw-chip-regime">{{ mkt.regime_label if mkt and mkt.regime_label else '—' }}</b></span>
+    <span class="tw-chip">REGIME <b id="tw-chip-regime">{% if mkt and not mkt.get('fallback') %}{{ mkt.regime_label or '—' }}{% else %}—{% endif %}</b></span>
     <span class="tw-chip">VIX <b id="tw-chip-vix">{{ '%.2f'|format(mkt.vix_level) if mkt and mkt.vix_level is not none else '—' }}</b></span>
     <span class="tw-chip">SPY <b id="tw-chip-spy" class="{{ 'chg-pos' if (mkt and (mkt.spy_1d_pct or 0) >= 0) else 'chg-neg' }}">{{ '%+.2f'|format(mkt.spy_1d_pct) ~ '%' if mkt and mkt.spy_1d_pct is not none else '—' }}</b></span>
     {% if connected and acct.total_value is not none %}
@@ -483,7 +483,7 @@
       <div class="hx" style="margin-bottom:var(--sp-4)">
         <div class="card">
           {% set apn = today_setups|selectattr('swing_grade','equalto','A+')|list|length if today_setups else 0 %}
-          <div class="card-hd">Today's Setups{% if today_setups %}<span class="badge badge-accent"><span class="dot"></span>{{ apn }} A+</span>{% endif %}</div>
+          <div class="card-hd">Today's Setups{% if today_setups %}<span class="badge badge-accent"><span class="dot"></span>{{ apn }} A+</span>{% endif %}<span class="faint" style="font-weight:400" title="Snapshot at page load — tape and watchlist update live">as of load</span></div>
           {% if today_setups %}
             {% for s in today_setups %}
             {% set is_ap = (s.swing_grade|ugrade) == 'A+' %}
@@ -1072,7 +1072,13 @@ function twOhlcv(bars){
 }
 function twMarketDateKey(time){var date=twChartDate(time);if(!date)return'';var parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date),out={};parts.forEach(function(p){out[p.type]=p.value;});return [out.year,out.month,out.day].join('-');}
 function twUpdateRegularQuote(bars){
-  if(!bars||!bars.length)return;var last=bars[bars.length-1];twNum('tw-c-price',Number(last.close).toFixed(2));var today=twMarketDateKey(last.time),previous=null;
+  if(!bars||!bars.length)return;var last=bars[bars.length-1];
+  // Outside regular hours the candle feed's last bar is a completed
+  // session (e.g. yesterday's 16:00 close) — a different day's number
+  // than the live quote poll's. The poll owns the header then.
+  var lastDay=twMarketDateKey(last.time),nowDay=twMarketDateKey(Math.floor(Date.now()/1000));
+  if(lastDay!==nowDay)return;
+  twNum('tw-c-price',Number(last.close).toFixed(2));var today=lastDay,previous=null;
   for(var i=bars.length-2;i>=0;i--){if(twMarketDateKey(bars[i].time)!==today){previous=bars[i].close;break;}}
   // Prefer the official previous close. Falling back to the previous day's
   // last intraday bar misses the closing auction and prints a percentage a
@@ -1331,7 +1337,9 @@ function twApplyQuote(q){
   }
 
   var head = document.getElementById('tw-c-ticker');
-  if(head && head.textContent === q.ticker){
+  // Extended mode owns the header (PRE/POST/O/N prefixes) — the plain
+  // DB quote would stomp it every 4s poll.
+  if(head && head.textContent === q.ticker && !twChartState.extended){
     var hp = document.getElementById('tw-c-price');
     var hc = document.getElementById('tw-c-chg');
     if(hp && hp.textContent !== text){ hp.textContent = text; if(moved) twFlash(hp, px > prev); }
