@@ -290,3 +290,40 @@ def test_story_has_no_futures_bullet_during_regular_hours():
     with patch.object(market_engine, "market_session", return_value="regular"):
         story = market_engine.generate_market_story(ctx, None)
     assert not any("Premarket futures" in b for b in story["bullets"])
+
+
+# ── Tape: futures ride along permanently, names beside tickers (2026-10-20) ──
+
+def test_tape_carries_futures_and_names():
+    ctx = {"spy_price": 766.48, "qqq_price": 718.36,
+           "spy_1d_pct": 0.42, "qqq_1d_pct": 1.21,
+           "es_futures": 7727.75, "es_1d_chg": -0.09,
+           "nq_futures": 29593.75, "nq_1d_chg": -0.43,
+           "vix_level": 18.4}
+    series = {"DIA": [100.0, 101.0], "IWM": [50.0, 49.0], "^VIX": [18.0, 18.4]}
+    with patch.object(market_engine, "get_market_context", return_value=ctx), \
+         patch.object(market_engine, "_fetch_prices_chart", return_value=series):
+        items = market_engine._build_tape_items()
+    by = {i["symbol"]: i for i in items}
+    assert {"SPY", "QQQ", "ES", "NQ", "DIA", "IWM", "VIX"} <= set(by)
+    assert by["ES"]["price"] == 7727.75 and by["ES"]["change_pct"] == -0.09
+    assert by["NQ"]["change_pct"] == -0.43
+    assert by["ES"]["name"] == "S&P 500 Futures"
+    assert by["SPY"]["name"] == "S&P 500"
+    assert by["SPY"]["price"] == 766.48  # ETF close stays — no silent swap
+
+
+def test_ticker_names_fetch_and_cache():
+    market_engine._NAME_CACHE.pop("ZZTEST", None)
+
+    class _Resp:
+        def json(self):
+            return {"chart": {"result": [{"meta": {"shortName": "Zeta Test Co"}}]}}
+
+    with patch("requests.get", return_value=_Resp()) as mock_get:
+        names = market_engine.ticker_names(["ZZTEST"])
+        assert names["ZZTEST"] == "Zeta Test Co"
+        again = market_engine.ticker_names(["ZZTEST"])
+        assert again["ZZTEST"] == "Zeta Test Co"
+        assert mock_get.call_count == 1  # fetched once; second call served from cache
+    market_engine._NAME_CACHE.pop("ZZTEST", None)

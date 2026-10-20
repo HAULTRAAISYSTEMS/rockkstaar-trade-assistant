@@ -50,6 +50,18 @@
       <span class="cc-pulse-k">{{ pulse.qqq_label or 'QQQ' }}</span>
       <b class="cc-pulse-v {{ 'is-up' if (pulse.qqq or 0) > 0 else ('is-down' if (pulse.qqq or 0) < 0 else '') }}" id="cc-qqq">{% if pulse.qqq is not none %}{{ '%+.2f'|format(pulse.qqq) }}%{% else %}—{% endif %}</b>
     </div>
+    {% if pulse.es is not none %}
+    <div class="cc-pulse-cell">
+      <span class="cc-pulse-k">ES Futures</span>
+      <b class="cc-pulse-v {{ 'is-up' if (pulse.es or 0) > 0 else ('is-down' if (pulse.es or 0) < 0 else '') }}" id="cc-es">{{ '%+.2f'|format(pulse.es) }}%</b>
+    </div>
+    {% endif %}
+    {% if pulse.nq is not none %}
+    <div class="cc-pulse-cell">
+      <span class="cc-pulse-k">NQ Futures</span>
+      <b class="cc-pulse-v {{ 'is-up' if (pulse.nq or 0) > 0 else ('is-down' if (pulse.nq or 0) < 0 else '') }}" id="cc-nq">{{ '%+.2f'|format(pulse.nq) }}%</b>
+    </div>
+    {% endif %}
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k">Liquidity</span>
       <b class="cc-pulse-v">{% if pulse.liquidity is not none %}<a href="{{ url_for('macro_page') }}">{{ pulse.liquidity }}<small>/100</small></a>{% else %}—{% endif %}</b>

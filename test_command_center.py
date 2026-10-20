@@ -650,3 +650,40 @@ class TestThisWeekShowsWhatMatters:
         eight times over."""
         page = open("templates/liquidity.html").read()
         assert "e.kind != 'EARNINGS'" in page
+
+
+class TestPulseFutures:
+    """All four tiles: SPY/QQQ keep their numbers; ES/NQ ride beside them."""
+
+    def _ctx(self, monkeypatch, session):
+        mkt = {
+            "regime": "CAUTION", "vix_level": 18.4, "vix_as_of_label": "4:15 PM ET",
+            "vix_source": "test", "spy_1d_pct": 0.42, "qqq_1d_pct": 1.21,
+            "spy_trend": "Above 20 EMA", "qqq_trend": "Above 20 EMA",
+            "leading_sectors": ["XLY"], "weak_sectors": ["XLE"],
+            "es_1d_chg": -0.09, "nq_1d_chg": -0.43,
+            "longs_ok": True, "shorts_ok": False, "signal": "",
+            "qqq_5d_pct": 1.0, "yield_10y": None, "yield_1d_chg": None,
+        }
+        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: mkt)
+        monkeypatch.setattr(legacy._mkt, "market_session", lambda: session)
+        monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: SUMMARY)
+        monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 1)
+        monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: ["NVDA"])
+        monkeypatch.setattr(legacy, "get_stock_data", lambda t: {
+            "company_name": "NVDA Inc", "current_price": 100.0,
+            "swing_score": 0, "swing_setup_type": "", "swing_confidence": ""})
+        with web_app.app.test_request_context("/"):
+            return legacy._command_center_context()
+
+    def test_premarket_shows_all_four(self, monkeypatch):
+        pulse = self._ctx(monkeypatch, "pre")["pulse"]
+        assert pulse["spy"] == 0.42 and pulse["qqq"] == 1.21  # closes stay
+        assert pulse["es"] == -0.09 and pulse["nq"] == -0.43  # futures join
+        assert pulse["spy_label"] == "SPY CLOSE"
+        assert pulse["qqq_label"] == "QQQ CLOSE"
+
+    def test_regular_hours_plain_labels(self, monkeypatch):
+        pulse = self._ctx(monkeypatch, "regular")["pulse"]
+        assert pulse["spy_label"] == "SPY" and pulse["qqq_label"] == "QQQ"
+        assert pulse["es"] == -0.09  # futures tiles still available

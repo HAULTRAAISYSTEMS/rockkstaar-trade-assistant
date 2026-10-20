@@ -1140,23 +1140,64 @@ def _build_tape_items() -> list[dict]:
         raw = [
             ("SPY", spy_px, ctx.get("spy_1d_pct")),
             ("QQQ", qqq_px, ctx.get("qqq_1d_pct")),
+            ("ES", ctx.get("es_futures"), ctx.get("es_1d_chg")),
+            ("NQ", ctx.get("nq_futures"), ctx.get("nq_1d_chg")),
             ("DIA", round(dia[-1], 2) if dia else None, _pct(dia)),
             ("IWM", round(iwm[-1], 2) if iwm else None, _pct(iwm)),
             ("VIX", vix, vix_chg),
         ]
-        if market_session() == "pre":
-            # Premarket: ES/NQ futures are the live direction — yesterday's
-            # ETF closes are not this morning's read.
-            if ctx.get("es_futures") is not None and ctx.get("es_1d_chg") is not None:
-                raw[0] = ("ES", ctx["es_futures"], ctx["es_1d_chg"])
-            if ctx.get("nq_futures") is not None and ctx.get("nq_1d_chg") is not None:
-                raw[1] = ("NQ", ctx["nq_futures"], ctx["nq_1d_chg"])
         for sym, px, chg in raw:
-            items.append({"symbol": sym, "price": px, "change_pct": chg})
+            items.append({"symbol": sym, "name": _TAPE_NAMES.get(sym, ""),
+                          "price": px, "change_pct": chg})
         _TAPE_CACHE.update(at=_time.time(), items=items)
     except Exception as exc:
         logger.debug("_build_tape_items failed: %s", exc)
     return _TAPE_CACHE["items"]
+
+_NAME_CACHE: dict[str, str] = {}
+
+_TAPE_NAMES = {
+    "SPY": "S&P 500", "QQQ": "Nasdaq-100", "ES": "S&P 500 Futures",
+    "NQ": "Nasdaq-100 Futures", "DIA": "Dow 30", "IWM": "Russell 2000",
+    "VIX": "Volatility Index",
+}
+
+
+def ticker_names(tickers: list[str]) -> dict[str, str]:
+    """Best-effort company names from Yahoo chart metadata.
+
+    Names don't change, so they are cached for the life of the process;
+    only uncached tickers hit the network, in parallel.
+    """
+    missing = [t for t in tickers if t and t not in _NAME_CACHE]
+    if missing:
+        try:
+            import requests as _req
+            from concurrent.futures import ThreadPoolExecutor
+            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+
+            def _one(t):
+                for base in ("https://query1.finance.yahoo.com/v8/finance/chart",
+                             "https://query2.finance.yahoo.com/v8/finance/chart"):
+                    try:
+                        r = _req.get(f"{base}/{t}", params={"range": "1d", "interval": "1d"},
+                                     headers=headers, timeout=6)
+                        meta = (r.json().get("chart", {}).get("result") or [{}])[0].get("meta", {})
+                        name = meta.get("shortName") or meta.get("longName") or ""
+                        if name:
+                            return t, name
+                    except Exception:
+                        continue
+                return t, ""
+
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                for t, name in ex.map(_one, missing):
+                    _NAME_CACHE[t] = name
+        except Exception:
+            for t in missing:
+                _NAME_CACHE.setdefault(t, "")
+    return {t: _NAME_CACHE.get(t, "") for t in tickers}
+
 
 def get_market_tape() -> list[dict]:
     """SPY/QQQ/DIA/IWM/VIX for the global tape — NEVER blocks the request.

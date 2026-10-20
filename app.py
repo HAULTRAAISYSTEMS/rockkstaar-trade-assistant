@@ -6177,14 +6177,55 @@ def api_earnings_digest():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+_WL_TAPE_CACHE = {"at": 0.0, "user": None, "items": []}
+
+
+def _tape_watchlist_items(limit=8):
+    """The signed-in user's watchlist as banner tape items.
+
+    Cached 60s per user so the tape's 45s poll doesn't refetch quotes.
+    Prices use the same last-two-closes basis as the index tape.
+    """
+    import time as _time
+    try:
+        uid = current_user_id()
+    except Exception:
+        return []
+    now = _time.time()
+    if _WL_TAPE_CACHE["user"] == uid and now - _WL_TAPE_CACHE["at"] < 60:
+        return list(_WL_TAPE_CACHE["items"])
+    items = []
+    try:
+        tickers, _wl_name = _command_watchlist()
+        seen = {"SPY", "QQQ", "DIA", "IWM", "VIX", "ES", "NQ"}
+        tickers = [t for t in (tickers or [])
+                   if t and t.upper() not in seen][:limit]
+        if tickers and _MKT_AVAILABLE:
+            prices = _mkt._fetch_prices_chart(tickers, period="5d")
+            names = _mkt.ticker_names(tickers)
+            for t in tickers:
+                series = prices.get(t) or []
+                px = round(series[-1], 2) if series else None
+                pct = (round((series[-1] / series[-2] - 1) * 100, 2)
+                       if len(series) >= 2 and series[-2] else None)
+                items.append({"symbol": t, "name": names.get(t, ""),
+                              "price": px, "change_pct": pct,
+                              "watchlist": True})
+    except Exception as exc:
+        logger.debug("tape watchlist items unavailable: %s", exc)
+    _WL_TAPE_CACHE.update(at=now, user=uid, items=items)
+    return list(items)
+
+
 @app.route("/api/market-tape")
 def api_market_tape():
-    """Index tape (SPY/QQQ/DIA/IWM/VIX) for the global market banner."""
+    """Market banner tape: indexes, futures, and the user's watchlist."""
     try:
         if _MKT_AVAILABLE:
-            items = _mkt.get_market_tape()
+            items = list(_mkt.get_market_tape())
         else:
             items = []
+        items += _tape_watchlist_items()
         return jsonify({"ok": True, "items": items})
     except Exception as exc:
         logger.error("api_market_tape: %s", exc, exc_info=True)
@@ -6749,7 +6790,8 @@ def inject_helpers():
     try:
         _ep = (request.endpoint or "")
         if _ep != "account" and _MKT_AVAILABLE:
-            helpers["market_tape"] = _mkt.get_market_tape()
+            helpers["market_tape"] = (list(_mkt.get_market_tape())
+                                      + _tape_watchlist_items())
         else:
             helpers["market_tape"] = []
     except Exception:
@@ -8119,23 +8161,20 @@ def _command_center_context() -> dict:
             "lagging": (mkt.get("weak_sectors") or [])[:2],
             "spy_label": "SPY",
             "qqq_label": "QQQ",
+            "es": mkt.get("es_1d_chg"),
+            "nq": mkt.get("nq_1d_chg"),
             "session": "",
-            "futures": False,
         }
-        # Before the 9:30 open, yesterday's daily % is history presented as
-        # news. When futures are available the pulse leads with them — the
-        # only live direction there is at 7 AM.
+        # Before the open the ETF tiles are the last close, so say so —
+        # the futures tiles beside them carry the live direction.
         try:
             session = _mkt.market_session() if _MKT_AVAILABLE else ""
         except Exception:
             session = ""
         context["pulse"]["session"] = session
-        if session == "pre" and mkt.get("es_1d_chg") is not None:
-            context["pulse"]["spy"] = mkt.get("es_1d_chg")
-            context["pulse"]["qqq"] = mkt.get("nq_1d_chg")
-            context["pulse"]["spy_label"] = "ES FUTURES"
-            context["pulse"]["qqq_label"] = "NQ FUTURES"
-            context["pulse"]["futures"] = True
+        if session == "pre":
+            context["pulse"]["spy_label"] = "SPY CLOSE"
+            context["pulse"]["qqq_label"] = "QQQ CLOSE"
         # The liquidity score is the one number worth keeping from the Fed
         # panel now that the panel itself lives on /macro.
         try:
