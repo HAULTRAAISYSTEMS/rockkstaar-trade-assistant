@@ -188,7 +188,13 @@
 .tw-feed-badge{font-weight:800;letter-spacing:.06em;padding:3px 7px;border-radius:999px;color:var(--text-body);background:var(--ink-700);white-space:nowrap}.tw-feed-badge.live{color:var(--pos-500);background:rgba(34,197,139,.12)}.tw-feed-badge.delayed,.tw-feed-badge.fallback{color:var(--warn-500);background:rgba(255,176,32,.12)}.tw-feed-badge.partial{color:#72b7ff;background:rgba(74,163,255,.12)}
 .tw-feed-asof{margin-left:auto;white-space:nowrap}.tw-feed-detail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-.tw-chart { position: relative; margin: 0 var(--sp-5); height: 330px; border-radius: var(--r-md); border:1px solid var(--border-subtle); background: var(--surface-inset); overflow:hidden; }
+.tw-chart-stack { margin: 0 var(--sp-5); border: 1px solid rgba(229,185,79,.28); border-radius: var(--r-md); background: var(--surface-inset); overflow: hidden; box-shadow: 0 8px 28px rgba(0,0,0,.35), 0 0 24px rgba(229,185,79,.06); }
+.tw-chart { position: relative; margin: 0; height: 330px; border: none; border-radius: 0; background: transparent; overflow:hidden; }
+.tw-indicators { display: flex !important; flex-direction: column; gap: 0; margin: 0; }
+.tw-indicator { position: relative; min-width: 0; border: none !important; border-top: 1px solid rgba(255,255,255,.07) !important; border-radius: 0; background: transparent; overflow: hidden; }
+#tw-rsi-panel { height: 112px; } #tw-macd-panel { height: 132px; }
+.tw-indicator canvas { display: block; width: 100%; height: 100%; }
+.tw-time-axis { display: block; width: 100%; border-top: 1px solid rgba(255,255,255,.07); background: rgba(0,0,0,.22); }
 .tw-chart-canvas { position:absolute; inset:0; }
 .tw-chart-empty { position:absolute; inset:0; z-index:2; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; text-align:center; padding: var(--sp-4); pointer-events:none; background: var(--surface-inset); }
 .tw-chart-empty.hidden { display:none; }
@@ -197,7 +203,7 @@
 .tw-chart-sub { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-faint); max-width: 400px; line-height:1.5; }
 
 /* OHLCV row */
-.tw-ohlcv { display:grid; grid-template-columns: repeat(5, 1fr); gap: var(--sp-3); padding: var(--sp-4) var(--sp-5) var(--sp-5); border-top:1px solid var(--border-subtle); margin-top: var(--sp-4); }
+.tw-ohlcv { display:grid; grid-template-columns: repeat(5, 1fr); gap: var(--sp-3); padding: 10px var(--sp-4); border-top:1px solid rgba(255,255,255,.07); margin-top: 0; background: rgba(0,0,0,.28); }
 .tw-ohlcv .k { font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-size: 10px; color: var(--text-faint); }
 .tw-ohlcv .v { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-body); margin-top:3px; }
 
@@ -462,6 +468,7 @@
         <div class="tw-draw-status" id="tw-draw-status" hidden></div>
 
         <div class="tw-ema-legend" id="tw-ema-legend" aria-label="Active EMA overlays"></div>
+        <div class="tw-chart-stack" id="tw-chart-stack">
         <div class="tw-chart" id="tw-chart-box">
           <div class="tw-chart-canvas" id="tw-chart"></div>
           <canvas class="tw-chart-drawing" id="tw-chart-drawing" aria-label="Chart drawing layer"></canvas>
@@ -484,7 +491,7 @@
             <canvas id="tw-macd-canvas" height="104"></canvas>
           </section>
         </div>
-
+        <canvas class="tw-time-axis" id="tw-time-axis" height="22" aria-label="Shared time axis"></canvas>
         <div class="tw-ohlcv">
           <div><div class="k">Open</div><div class="v" id="tw-o-open">—</div></div>
           <div><div class="k">High</div><div class="v" id="tw-o-high">—</div></div>
@@ -492,6 +499,8 @@
           <div><div class="k">Close</div><div class="v" id="tw-o-close">—</div></div>
           <div><div class="k">Volume</div><div class="v" id="tw-o-vol">—</div></div>
         </div>
+        </div>
+
 
         <div class="tw-context" aria-label="Ticker context">
           <article class="tw-context-card tw-context-wide"><span>Why moving</span><strong id="tw-context-why">Loading verified context…</strong></article>
@@ -856,6 +865,11 @@ function twApplyIndicatorVisibility(){
   var rsi=document.getElementById('tw-rsi-panel'),macd=document.getElementById('tw-macd-panel'),wrap=document.getElementById('tw-indicators');
   if(rsi) rsi.hidden=!twChartState.indicators.rsi; if(macd) macd.hidden=!twChartState.indicators.macd;
   if(wrap){wrap.hidden=!twChartState.indicators.rsi&&!twChartState.indicators.macd;wrap.classList.toggle('single',twChartState.indicators.rsi!==twChartState.indicators.macd);}
+  // With any indicator pane open, the shared bottom axis owns the time scale;
+  // otherwise the price chart keeps its own.
+  var anyInd=twChartState.indicators.rsi||twChartState.indicators.macd;
+  if(twChartState.chart){ try{ twChartState.chart.applyOptions({timeScale:{visible:!anyInd}}); }catch(e){} }
+  twRenderIndicators(); twRenderDrawings();
 }
 function twSaveStyles(){try{localStorage.setItem('tradestaar.chartStyles',JSON.stringify(twChartState.styles));}catch(e){}}
 function twToggleStudySettings(){var panel=document.getElementById('tw-study-settings'),btn=document.getElementById('tw-studies-btn');if(!panel)return;panel.hidden=!panel.hidden;if(btn)btn.classList.toggle('active',!panel.hidden);if(!panel.hidden)twSyncStudySettings();}
@@ -944,7 +958,7 @@ try {
 } catch(e) {}
 if(twIntervalConfig[twSavedInterval].ranges.indexOf(twSavedRange)<0)twSavedRange=twIntervalConfig[twSavedInterval].defaultRange;
 if(['4h','1d'].indexOf(twSavedInterval)>=0)twSavedExtended=false;
-var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, assetType:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, vwapReqId:0, lastPrice:null, sessionVwap:null, intelVwap:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null };
+var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, assetType:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, vwapReqId:0, lastPrice:null, sessionVwap:null, intelVwap:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null, barIdx:{}, hoverIdx:null, indWindow:{start:0,end:0}, axisW:64, _hoverRaf:null };
 var twChartRefreshTimer=null;
 
 function twChartMsg(t, s){ var box=document.getElementById('tw-chart-empty'); twNum('tw-chart-msg',t); twNum('tw-chart-sub',s||''); if(box) box.classList.remove('hidden'); }
@@ -1018,8 +1032,16 @@ function twInitChart(){
   vol.applyOptions({visible:twChartState.showVolume});
   twApplyStudyStyles();
   chart.subscribeCrosshairMove(function(param){
+    // One crosshair for the whole stack: mirror the hover position into the
+    // RSI/MACD panes and the shared time axis.
+    var t=(param&&param.time!=null)?param.time:null, idx=null;
+    if(t!=null){ idx=twChartState.barIdx[twTimeKey(t)]; if(idx==null||!isFinite(idx)) idx=null; }
+    if(idx!==twChartState.hoverIdx){
+      twChartState.hoverIdx=idx;
+      if(!twChartState._hoverRaf){ twChartState._hoverRaf=requestAnimationFrame(function(){ twChartState._hoverRaf=null; twRenderIndicators(); }); }
+    }
     if(twChartState.pinnedTime) return;
-    var key=twTimeKey(param&&param.time), bar=twChartState.barMap[key];
+    var key=twTimeKey(t), bar=twChartState.barMap[key];
     if(bar) twShowBar(bar,param.point); else twHideTooltip();
   });
   chart.subscribeClick(function(param){
@@ -1139,18 +1161,73 @@ function twRsi(values,period){
 }
 function twRenderIndicators(){
   if(!twChartState.bars.length)return;var closes=twChartState.bars.map(function(b){return Number(b.close);}),windowRange=twIndicatorWindow(),s=twChartState.studies;
+  twChartState.indWindow=windowRange;
+  try{ var pw=twChartState.chart&&twChartState.chart.priceScale('right').width(); if(pw&&isFinite(pw)&&pw>20&&pw<200) twChartState.axisW=pw; }catch(e){}
   if(twChartState.indicators.rsi)twDrawRsi(twRsi(closes,s.rsiPeriod).slice(windowRange.start,windowRange.end));
   if(twChartState.indicators.macd){var fast=twEma(closes,s.macdFast),slow=twEma(closes,s.macdSlow),macd=fast.map(function(v,i){return v==null||slow[i]==null?null:v-slow[i];}),first=macd.findIndex(function(v){return v!=null;}),signal=new Array(macd.length).fill(null);if(first>=0){var signalCompact=twEma(macd.slice(first),s.macdSignal);signalCompact.forEach(function(v,i){signal[first+i]=v;});}var hist=macd.map(function(v,i){return v==null||signal[i]==null?null:v-signal[i];});twDrawMacd(macd.slice(windowRange.start,windowRange.end),signal.slice(windowRange.start,windowRange.end),hist.slice(windowRange.start,windowRange.end));}
+  twDrawTimeAxis();
 }
 function twIndicatorWindow(){var total=twChartState.bars.length,range=twChartState.chart&&twChartState.chart.timeScale().getVisibleLogicalRange?twChartState.chart.timeScale().getVisibleLogicalRange():null;if(!range)return {start:0,end:total};return {start:Math.max(0,Math.floor(range.from)),end:Math.min(total,Math.ceil(range.to)+1)};}
 function twPlotLine(ctx,values,x,y,color,width){ctx.strokeStyle=color;ctx.lineWidth=width||1.5;ctx.beginPath();var started=false;values.forEach(function(v,i){if(v==null||!isFinite(v))return;var px=x(i),py=y(v);if(!started){ctx.moveTo(px,py);started=true;}else ctx.lineTo(px,py);});if(started)ctx.stroke();}
+function twIndX(i,n,w,ax){ return 2+(w-2-ax)*(i/Math.max(1,n-1)); }
+function twIndCrosshair(ctx,fit,pad,xFn,yFn,val,txt){
+  var win=twChartState.indWindow,hov=twChartState.hoverIdx;
+  if(hov==null||!win||hov<win.start||hov>=win.end) return;
+  var hx=xFn(hov-win.start),ax=twChartState.axisW||64;
+  ctx.save();
+  ctx.strokeStyle='rgba(255,122,24,.65)';ctx.lineWidth=1;ctx.setLineDash([4,3]);
+  ctx.beginPath();ctx.moveTo(hx,pad.t);ctx.lineTo(hx,fit.h-pad.b);ctx.stroke();ctx.setLineDash([]);
+  if(val!=null&&isFinite(val)){
+    var hy=yFn(val);
+    ctx.fillStyle='#FF7A18';ctx.beginPath();ctx.arc(hx,hy,3.4,0,6.3);ctx.fill();
+    ctx.font='700 9px ui-monospace,monospace';
+    var bw=ax-6;
+    ctx.fillRect(fit.w-ax+2,hy-8,bw,15);
+    ctx.fillStyle='#0b0e11';ctx.textAlign='center';ctx.fillText(txt,fit.w-ax+2+bw/2,hy+3.5);ctx.textAlign='left';
+  }
+  ctx.restore();
+}
 function twDrawRsi(values){
-  var fit=twCanvasContext(document.getElementById('tw-rsi-canvas'));if(!fit)return;var ctx=fit.ctx,pad={l:8,r:8,t:25,b:10},n=values.length,x=function(i){return pad.l+(fit.w-pad.l-pad.r)*(i/Math.max(1,n-1));},y=function(v){return pad.t+(fit.h-pad.t-pad.b)*(1-v/100);};
-  var upper=twChartState.studies.rsiUpper,lower=twChartState.studies.rsiLower;ctx.fillStyle='rgba(255,77,69,.055)';ctx.fillRect(pad.l,pad.t,fit.w-pad.l-pad.r,y(upper)-pad.t);ctx.fillStyle='rgba(34,197,139,.055)';ctx.fillRect(pad.l,y(lower),fit.w-pad.l-pad.r,fit.h-pad.b-y(lower));[upper,50,lower].forEach(function(v){ctx.strokeStyle=v===50?'rgba(255,255,255,.08)':'rgba(240,181,63,.28)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(pad.l,y(v));ctx.lineTo(fit.w-pad.r,y(v));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#65707c';ctx.font='8px ui-monospace,monospace';ctx.fillText(String(v),fit.w-18,y(v)-2);});twPlotLine(ctx,values,x,y,twChartState.styles.rsi,1.8);var last=values.filter(function(v){return v!=null;}).pop();twNum('tw-rsi-value',last==null?'—':last.toFixed(1));
+  var fit=twCanvasContext(document.getElementById('tw-rsi-canvas'));if(!fit)return;var ax=twChartState.axisW||64;
+  var ctx=fit.ctx,pad={l:2,r:ax,t:22,b:6},n=values.length,x=function(i){return twIndX(i,n,fit.w,ax);},y=function(v){return pad.t+(fit.h-pad.t-pad.b)*(1-v/100);};
+  var upper=twChartState.studies.rsiUpper,lower=twChartState.studies.rsiLower;ctx.fillStyle='rgba(255,77,69,.055)';ctx.fillRect(pad.l,pad.t,fit.w-pad.l-pad.r,y(upper)-pad.t);ctx.fillStyle='rgba(34,197,139,.055)';ctx.fillRect(pad.l,y(lower),fit.w-pad.l-pad.r,fit.h-pad.b-y(lower));[upper,50,lower].forEach(function(v){ctx.strokeStyle=v===50?'rgba(255,255,255,.08)':'rgba(240,181,63,.28)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(pad.l,y(v));ctx.lineTo(fit.w-pad.r,y(v));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#65707c';ctx.font='8px ui-monospace,monospace';ctx.textAlign='right';ctx.fillText(String(v),fit.w-6,y(v)-2);ctx.textAlign='left';});twPlotLine(ctx,values,x,y,twChartState.styles.rsi,1.8);
+  var win=twChartState.indWindow,hov=twChartState.hoverIdx,hv=(hov!=null&&win&&hov>=win.start&&hov<win.end)?values[hov-win.start]:null;
+  twIndCrosshair(ctx,fit,pad,x,y,hv,hv==null?'':hv.toFixed(1));
+  var last=values.filter(function(v){return v!=null;}).pop();twNum('tw-rsi-value',last==null?'—':last.toFixed(1));
 }
 function twDrawMacd(macd,signal,hist){
-  var fit=twCanvasContext(document.getElementById('tw-macd-canvas'));if(!fit)return;var ctx=fit.ctx,pad={l:8,r:8,t:25,b:10},n=macd.length,finite=macd.concat(signal,hist).filter(function(v){return v!=null&&isFinite(v);}),max=finite.length?(Math.max.apply(null,finite.map(function(v){return Math.abs(v);}))||1):1,x=function(i){return pad.l+(fit.w-pad.l-pad.r)*(i/Math.max(1,n-1));},y=function(v){return pad.t+(fit.h-pad.t-pad.b)*(1-(v+max)/(2*max));},zero=y(0),barW=Math.max(1,(fit.w-pad.l-pad.r)/Math.max(1,n)*.72);
-  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.beginPath();ctx.moveTo(pad.l,zero);ctx.lineTo(fit.w-pad.r,zero);ctx.stroke();hist.forEach(function(v,i){if(v==null)return;ctx.fillStyle=v>=0?'rgba(34,197,139,.62)':'rgba(255,77,69,.62)';ctx.fillRect(x(i)-barW/2,Math.min(zero,y(v)),barW,Math.max(1,Math.abs(y(v)-zero)));});twPlotLine(ctx,macd,x,y,twChartState.styles.macd,1.7);twPlotLine(ctx,signal,x,y,twChartState.styles.signal,1.45);var valid=[];for(var i=n-1;i>=0;i--){if(macd[i]!=null&&signal[i]!=null&&hist[i]!=null){valid=[macd[i],signal[i],hist[i]];break;}}twNum('tw-macd-value',valid.length?valid.map(function(v){return v.toFixed(2);}).join(' · '):'—');
+  var fit=twCanvasContext(document.getElementById('tw-macd-canvas'));if(!fit)return;var ax=twChartState.axisW||64;
+  var ctx=fit.ctx,pad={l:2,r:ax,t:22,b:6},n=macd.length,finite=macd.concat(signal,hist).filter(function(v){return v!=null&&isFinite(v);}),max=finite.length?(Math.max.apply(null,finite.map(function(v){return Math.abs(v);}))||1):1,x=function(i){return twIndX(i,n,fit.w,ax);},y=function(v){return pad.t+(fit.h-pad.t-pad.b)*(1-(v+max)/(2*max));},zero=y(0),barW=Math.max(1,(fit.w-pad.l-pad.r)/Math.max(1,n)*.72);
+  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.beginPath();ctx.moveTo(pad.l,zero);ctx.lineTo(fit.w-pad.r,zero);ctx.stroke();hist.forEach(function(v,i){if(v==null)return;ctx.fillStyle=v>=0?'rgba(34,197,139,.62)':'rgba(255,77,69,.62)';ctx.fillRect(x(i)-barW/2,Math.min(zero,y(v)),barW,Math.max(1,Math.abs(y(v)-zero)));});twPlotLine(ctx,macd,x,y,twChartState.styles.macd,1.7);twPlotLine(ctx,signal,x,y,twChartState.styles.signal,1.45);
+  var win=twChartState.indWindow,hov=twChartState.hoverIdx,hv=(hov!=null&&win&&hov>=win.start&&hov<win.end)?macd[hov-win.start]:null;
+  twIndCrosshair(ctx,fit,pad,x,y,hv,hv==null?'':hv.toFixed(2));
+  var valid=[];for(var i=n-1;i>=0;i--){if(macd[i]!=null&&signal[i]!=null&&hist[i]!=null){valid=[macd[i],signal[i],hist[i]];break;}}twNum('tw-macd-value',valid.length?valid.map(function(v){return v.toFixed(2);}).join(' · '):'—');
+}
+function twDrawTimeAxis(){
+  var cv=document.getElementById('tw-time-axis');if(!cv)return;
+  var anyInd=twChartState.indicators.rsi||twChartState.indicators.macd;
+  cv.style.display=anyInd?'block':'none';
+  if(!anyInd||!twChartState.bars.length)return;
+  var fit=twCanvasContext(cv);if(!fit)return;var ax=twChartState.axisW||64;
+  var ctx=fit.ctx,win=twChartState.indWindow,n=win.end-win.start;if(n<2)return;
+  var x=function(i){return twIndX(i,n,fit.w,ax);};
+  ctx.font='9px ui-monospace,monospace';ctx.fillStyle='#8a93a0';
+  var ticks=6;
+  for(var k=0;k<ticks;k++){
+    var i=Math.round(k*(n-1)/(ticks-1)),bar=twChartState.bars[win.start+i];
+    if(!bar)continue;var px=x(i),lbl=twBarDate(bar.time);
+    ctx.textAlign=px<36?'left':(px>fit.w-ax-36?'right':'center');
+    ctx.fillText(lbl,px,15);
+  }
+  var hov=twChartState.hoverIdx;
+  if(hov!=null&&hov>=win.start&&hov<win.end){
+    var hbar=twChartState.bars[hov],hpx=x(hov-win.start),hlbl=twBarDate(hbar.time);
+    ctx.font='700 9px ui-monospace,monospace';var twd=ctx.measureText(hlbl).width+12;
+    var rx=Math.min(Math.max(hpx-twd/2,2),Math.max(2,fit.w-ax-twd-2));
+    ctx.fillStyle='#FF7A18';
+    if(ctx.roundRect){ctx.beginPath();ctx.roundRect(rx,3,twd,16,8);ctx.fill();}else{ctx.fillRect(rx,3,twd,16);}
+    ctx.fillStyle='#0b0e11';ctx.textAlign='center';ctx.fillText(hlbl,rx+twd/2,15);ctx.textAlign='left';
+  }
 }
 
 function twTimeKey(time){
@@ -1294,7 +1371,7 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       twChartState.sessionVwap=twSessionVwap(bars,interval);
       twShowSessionVwap();
       if(twChartState.sessionVwap==null)twLoadSessionVwap(ticker);
-      bars.forEach(function(b){ twChartState.barMap[twTimeKey(b.time)]=b; });
+      bars.forEach(function(b,i){ twChartState.barMap[twTimeKey(b.time)]=b; twChartState.barIdx[twTimeKey(b.time)]=i; });
       twChartState.lastPrice = bars[bars.length-1].close;
       twApplyType();
       twApplyEvents(twChartState.events);
