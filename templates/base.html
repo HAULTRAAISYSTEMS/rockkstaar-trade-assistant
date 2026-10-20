@@ -254,12 +254,11 @@
   var ptr = document.getElementById('ptr-indicator');
   if(!ptr) return;
   var startY = 0, pulling = false, THRESHOLD = 90;
-  // Activate when the touch STARTS in the top 160px and the page is at the top.
+  // Activate on any downward pull when the page is scrolled to the top.
   document.addEventListener('touchstart', function(e){
     if(e.touches.length !== 1){ pulling = false; return; }
-    var y = e.touches[0].clientY;
-    if(window.scrollY <= 2 && y <= 160){
-      startY = y; pulling = true;
+    if(window.scrollY <= 2){
+      startY = e.touches[0].clientY; pulling = true;
     } else { pulling = false; }
   }, {passive:true});
   document.addEventListener('touchmove', function(e){
@@ -282,7 +281,7 @@
       ptr.classList.add('spinning');
       ptr.style.opacity = '1';
       ptr.style.transform = 'translateX(-50%) translateY(0px) scale(1)';
-      setTimeout(function(){ location.reload(); }, 700);
+      setTimeout(function(){ location.reload(); }, 400);
     } else {
       ptr.style.opacity = '0';
       ptr.style.transform = 'translateX(-50%) translateY(-96px) scale(0.6)';

@@ -1060,18 +1060,27 @@ _TAPE_CACHE: dict = {"at": 0.0, "items": []}
 _TAPE_TTL_S = 60
 
 
-def get_market_tape() -> list[dict]:
-    """SPY/QQQ/DIA/IWM/VIX with price + day change for the global tape.
+_TAPE_REFRESHING = False
 
-    SPY/QQQ/VIX come from the cached market context (no extra fetch);
-    DIA/IWM get their own short-TTL cache. Never raises, never blocks
-    the request — returns the last good snapshot on failure.
-    """
+def _refresh_tape_bg():
+    """Refresh the tape cache in a background thread — never blocks a request."""
+    global _TAPE_REFRESHING
     import time as _time
-    now = _time.time()
-    if _TAPE_CACHE["items"] and now - _TAPE_CACHE["at"] < _TAPE_TTL_S:
-        return _TAPE_CACHE["items"]
+    import threading as _th
+    if _TAPE_REFRESHING:
+        return
+    _TAPE_REFRESHING = True
+    def _work():
+        global _TAPE_REFRESHING
+        try:
+            _build_tape_items()
+        finally:
+            _TAPE_REFRESHING = False
+    _th.Thread(target=_work, daemon=True, name="tape_refresh").start()
 
+def _build_tape_items() -> list[dict]:
+    """Fetch and cache tape items. Runs in background — may do network I/O."""
+    import time as _time
     items: list[dict] = []
     try:
         ctx = get_market_context() or {}
@@ -1107,7 +1116,26 @@ def get_market_tape() -> list[dict]:
         ]
         for sym, px, chg in raw:
             items.append({"symbol": sym, "price": px, "change_pct": chg})
-        _TAPE_CACHE.update(at=now, items=items)
+        _TAPE_CACHE.update(at=_time.time(), items=items)
     except Exception as exc:
-        logger.debug("get_market_tape failed: %s", exc)
-    return items or _TAPE_CACHE["items"]
+        logger.debug("_build_tape_items failed: %s", exc)
+    return _TAPE_CACHE["items"]
+
+def get_market_tape() -> list[dict]:
+    """SPY/QQQ/DIA/IWM/VIX for the global tape — NEVER blocks the request.
+
+    Returns the cached snapshot immediately. If the cache is stale, kicks
+    off a background refresh and returns the stale data; the 45s JS poll
+    picks up the fresh numbers without a page reload.
+    """
+    import time as _time
+    now = _time.time()
+    items = _TAPE_CACHE["items"]
+    if items and now - _TAPE_CACHE["at"] < _TAPE_TTL_S:
+        return items
+    if items:
+        _refresh_tape_bg()
+        return items
+    # Cold cache: build synchronously once so the first render isn't empty.
+    # (Only happens once per process boot.)
+    return _build_tape_items()
