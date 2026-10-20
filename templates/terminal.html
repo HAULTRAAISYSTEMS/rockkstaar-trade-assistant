@@ -43,16 +43,34 @@
 @media (prefers-reduced-motion: reduce) { .tw-flash-up, .tw-flash-down { animation: none; } }
 
 /* ── Ticker tape ── */
-.tw-tape { position: relative; overflow: hidden; background: var(--surface-inset); border:1px solid var(--border-subtle); border-radius: var(--r-md); margin-bottom: var(--sp-4); box-shadow: var(--shadow-inset); }
+.tw-tape { position: relative; overflow: hidden; border:1px solid rgba(229,185,79,.55); border-radius: var(--r-md); margin-bottom: var(--sp-4);
+  background:
+    linear-gradient(180deg, rgba(229,185,79,.10), rgba(229,185,79,0) 75%),
+    radial-gradient(420px 60px at 18% 50%, rgba(229,185,79,.14), transparent 70%),
+    linear-gradient(180deg, #151009, #0a0805);
+  box-shadow: 0 10px 28px rgba(0,0,0,.5), 0 6px 22px rgba(229,185,79,.16); }
+.tw-tape::before { content:""; position:absolute; top:0; bottom:0; left:0; width:45%;
+  background: linear-gradient(100deg, transparent, rgba(240,201,93,.10) 45%, rgba(255,236,170,.16) 50%, rgba(240,201,93,.10) 55%, transparent);
+  transform: translateX(-110%); animation: tw-tape-sheen 8s ease-in-out infinite; pointer-events:none; }
+@keyframes tw-tape-sheen { 0%, 55% { transform: translateX(-110%); } 90%, 100% { transform: translateX(240%); } }
+.tw-tape::after { content:""; position:absolute; top:0; bottom:0; left:0; right:0; pointer-events:none;
+  background:
+    linear-gradient(90deg, rgba(10,8,5,.94), transparent) left / 44px 100% no-repeat,
+    linear-gradient(-90deg, rgba(10,8,5,.94), transparent) right / 44px 100% no-repeat; }
 .tw-tape-track { display:flex; align-items:center; gap: var(--sp-6); padding: var(--sp-2) var(--sp-4); white-space:nowrap; width: max-content; animation: tw-marquee 60s linear infinite; }
 .tw-tape:hover .tw-tape-track { animation-play-state: paused; }
 @keyframes tw-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-.tw-tape-item { display:inline-flex; align-items:baseline; gap:8px; font-family: var(--font-mono); font-size: var(--fs-sm); }
-.tw-tape-sym { color: var(--text-hi); font-weight: var(--fw-semi); letter-spacing:.03em; }
-.tw-tape-index .tw-tape-sym { color: var(--elite-gold-bright, #f3d37a); font-weight: 800; }
+.tw-tape-item { display:inline-flex; align-items:center; gap:8px; font-family: var(--font-mono); font-size: var(--fs-sm); }
+.tw-tape-sym { color: #fff; font-weight: 700; letter-spacing:.04em; }
+.tw-tape-index .tw-tape-sym { color: var(--elite-gold-bright, #f3d37a); font-weight: 800; text-shadow: 0 0 14px rgba(240,201,93,.45); }
 .tw-tape-index + .tw-tape-item:not(.tw-tape-index) { margin-left: 8px; }
-.tw-tape-px { color: var(--text-body); }
-.tw-tape-chg { font-size: var(--fs-xs); font-weight: var(--fw-semi); }
+.tw-tape-px { color: #fff; font-weight: 700; }
+.tw-tape-chg { display:inline-flex; align-items:center; gap:3px; font-size: var(--fs-xs); font-weight: 800; padding: 2px 8px; border-radius: 999px; border: 1px solid transparent; line-height: 1.35; }
+.tw-tape-chg.chg-pos { color: #4ade80; background: rgba(34,197,94,.16); border-color: rgba(34,197,94,.45); box-shadow: 0 0 12px rgba(34,197,94,.18); }
+.tw-tape-chg.chg-pos::before { content: "▲"; font-size: 7px; }
+.tw-tape-chg.chg-neg { color: #f87171; background: rgba(239,68,68,.16); border-color: rgba(239,68,68,.45); box-shadow: 0 0 12px rgba(239,68,68,.18); }
+.tw-tape-chg.chg-neg::before { content: "▼"; font-size: 7px; }
+.tw-tape-chg.chg-flat { color: #b9b2a2; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.14); }
 .chg-pos { color: var(--pos-500); }
 .chg-neg { color: var(--neg-500); }
 .chg-flat{ color: var(--text-faint); }
