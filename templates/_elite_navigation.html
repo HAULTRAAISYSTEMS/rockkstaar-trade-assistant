@@ -119,6 +119,9 @@
         <a href="{{ url_for('brokers_page') }}">Brokers</a><a href="{{ url_for('browser_push.settings') }}">Browser Alerts</a>
         {% if session.get('is_admin') %}<a href="{{ url_for('admin_users') }}">Admin</a>{% endif %}
       </div>
+      <form action="{{ url_for('logout') }}" method="post" class="mobile-logout-form">
+        <button type="submit" class="mobile-logout-btn"><span aria-hidden="true">⏻</span> Log Out</button>
+      </form>
     </div>
   </div>
 </nav>

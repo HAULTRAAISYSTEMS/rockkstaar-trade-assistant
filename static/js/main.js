@@ -104,6 +104,22 @@ document.addEventListener("DOMContentLoaded", function () {
   document.querySelectorAll(".mobile-app-menu a").forEach(function (link) {
     link.addEventListener("click", function () { closeMobileMenus(); });
   });
+  // Swipe down on an open menu sheet to dismiss it.
+  document.querySelectorAll(".mobile-app-menu").forEach(function (menu) {
+    var swipeStartY = 0;
+    menu.addEventListener("touchstart", function (e) {
+      if (e.touches.length === 1) swipeStartY = e.touches[0].clientY;
+    }, { passive: true });
+    menu.addEventListener("touchmove", function (e) {
+      if (e.touches.length !== 1) return;
+      var dy = e.touches[0].clientY - swipeStartY;
+      if (dy > 70) {
+        menu.hidden = true;
+        var trigger = document.querySelector('[data-mobile-menu="' + menu.id + '"]');
+        if (trigger) trigger.setAttribute("aria-expanded", "false");
+      }
+    }, { passive: true });
+  });
 
   // ---- Kick off auto-refresh ----
   scheduleRefresh();
