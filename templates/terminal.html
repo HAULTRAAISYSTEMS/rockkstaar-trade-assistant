@@ -237,10 +237,21 @@
 .tw-tag-paper { display:inline-block; font-family: var(--font-mono); font-size: 9px; letter-spacing:.08em; text-transform:uppercase; padding:1px 5px; border-radius: var(--r-xs); color: var(--warn-500); background: rgba(255,176,32,.10); border:1px solid rgba(255,176,32,.30); margin-top:6px; }
 
 .tw-ticket { padding: var(--sp-4); }
-.tw-side { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom: var(--sp-4); }
-.tw-side-btn { font-family: var(--font-display); text-transform:uppercase; letter-spacing:var(--track-label); font-size: var(--fs-sm); font-weight: var(--fw-bold); padding: 9px 0; border-radius: var(--r-sm); cursor:pointer; background: var(--ink-750); border:1px solid var(--border-subtle); color: var(--text-muted); transition: all var(--dur-fast) var(--ease-out); }
-.tw-side-btn.buy.active { background: rgba(34,197,139,.16); border-color: var(--pos-600); color: var(--pos-500); }
-.tw-side-btn.sell.active { background: rgba(255,77,69,.14); border-color: var(--neg-600); color: var(--neg-500); }
+.tw-ticket[data-side="BUY"]  { --side: #22c58b; --side-dim: rgba(34,197,139,.55); --side-bg: rgba(34,197,139,.14); }
+.tw-ticket[data-side="SELL"] { --side: #ff4d45; --side-dim: rgba(255,77,69,.55);  --side-bg: rgba(255,77,69,.12); }
+.tw-side { display:grid; grid-template-columns:1fr 1fr; gap:0; padding:3px; border-radius:10px; background: rgba(0,0,0,.4); border:1px solid rgba(255,255,255,.07); margin-bottom: var(--sp-4); }
+.tw-side-btn { font-family: var(--font-display); text-transform:uppercase; letter-spacing:var(--track-label); font-size: var(--fs-sm); font-weight: var(--fw-bold); padding: 10px 0; border-radius:8px; cursor:pointer; background: transparent; border:1px solid transparent; color: var(--text-muted); transition: all var(--dur-fast) var(--ease-out); }
+.tw-side-btn.buy.active { background: linear-gradient(180deg, #2bd492, #17a674); border-color: rgba(43,212,146,.6); color: #04150d; box-shadow: 0 4px 16px rgba(34,197,139,.35); }
+.tw-side-btn.sell.active { background: linear-gradient(180deg, #ff6a62, #e0342c); border-color: rgba(255,106,98,.6); color: #1c0503; box-shadow: 0 4px 16px rgba(255,77,69,.35); }
+.tw-ticket .tw-input:focus, .tw-ticket .tw-select:focus { border-color: var(--side-dim, var(--orange-500)); box-shadow: 0 0 0 2px var(--side-bg, rgba(255,122,24,.20)); }
+.tw-ticket .tw-input, .tw-ticket .tw-select { background: rgba(0,0,0,.35); border-color: rgba(255,255,255,.09); border-radius: 8px; padding: 9px 10px; }
+.tw-estcost { border-top:1px solid rgba(255,255,255,.08); padding-top: var(--sp-3); }
+.tw-estcost .v { color: var(--elite-gold-bright, #f3d37a); font-size: var(--fs-xl); font-weight: 800; }
+#tw-ot-preview-btn { background: linear-gradient(180deg, #2bd492, #17a674); color: #04150d; box-shadow: 0 6px 20px rgba(34,197,139,.3); border-radius: 10px; padding: 12px 0; }
+.tw-ticket[data-side="SELL"] #tw-ot-preview-btn { background: linear-gradient(180deg, #ff6a62, #e0342c); color: #1c0503; box-shadow: 0 6px 20px rgba(255,77,69,.3); }
+.tw-submit-ghost { display:block; text-align:center; text-decoration:none; margin-top:8px; width:100%; padding: 10px 0; font-family: var(--font-display); text-transform:uppercase; letter-spacing:var(--track-label); font-size: var(--fs-xs); font-weight: var(--fw-bold); color: var(--elite-gold-bright, #f3d37a); background: rgba(229,185,79,.08); border:1px solid rgba(229,185,79,.4); border-radius: 10px; }
+.tw-submit-ghost:hover { background: rgba(229,185,79,.16); }
+
 .tw-field { margin-bottom: var(--sp-3); }
 .tw-field label { display:block; font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-size: 10px; color: var(--text-faint); margin-bottom:5px; }
 .tw-input, .tw-select { width:100%; background: var(--surface-inset); border:1px solid var(--border-subtle); border-radius: var(--r-sm); color: var(--text-hi); font-family: var(--font-mono); font-size: var(--fs-sm); padding: 8px 10px; outline:none; transition: border-color var(--dur-fast), box-shadow var(--dur-fast); }
@@ -443,11 +454,6 @@
           </div>
         </div>
 
-        <div class="tw-feed-strip" id="tw-feed-strip" title="The chart always identifies its provider, exchange coverage, and delay.">
-          <span class="tw-feed-badge" id="tw-feed-badge">CHECKING FEED</span>
-          <span class="tw-feed-detail" id="tw-feed-detail">Loading provider and freshness information…</span>
-          <span class="tw-feed-asof" id="tw-feed-asof">—</span>
-        </div>
 
         <div class="tw-session-strip" id="tw-session-strip" hidden>
           <span class="tw-session-key overnight">O/N</span><strong id="tw-overnight-quote">No overnight print</strong>
@@ -663,7 +669,7 @@
       <!-- Order ticket (paper) -->
       <div class="tw-panel">
         <div class="tw-panel-hd"><h3>Order Ticket</h3><span class="tw-count">PAPER</span></div>
-        <div class="tw-ticket">
+        <div class="tw-ticket" id="tw-ticket" data-side="BUY">
           <div class="tw-side">
             <button type="button" class="tw-side-btn buy active" data-side="BUY" onclick="twSide(this)">Buy</button>
             <button type="button" class="tw-side-btn sell" data-side="SELL" onclick="twSide(this)">Sell</button>
@@ -704,8 +710,8 @@
             <span class="k">Est. cost</span>
             <span class="v" id="tw-ot-est">—</span>
           </div>
-          <button type="button" class="tw-submit" onclick="twPreview()">Preview Order</button>
-          <a class="tw-submit" href="{{ url_for('paper_trading') }}" style="display:block;text-align:center;text-decoration:none;margin-top:8px">Open Paper Portfolio</a>
+          <button type="button" class="tw-submit" id="tw-ot-preview-btn" onclick="twPreview()">Preview Order</button>
+          <a class="tw-submit-ghost" href="{{ url_for('paper_trading') }}">Open Paper Portfolio</a>
           <div class="tw-ticket-note">Preview here, then use the paper portfolio for simulated fills. No live order is transmitted.</div>
           <div class="tw-preview" id="tw-preview"></div>
         </div>
@@ -913,7 +919,7 @@ function twSetDrawingWidth(value){twChartState.styles.drawingWidth=Math.max(1,Ma
 function twApplyStudyStyles(){Object.keys(twChartState.emaSeries).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period].applyOptions({color:style.color,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,title:''});});}
 
 /* ── Order ticket ── */
-function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; }
+function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; var tk=document.getElementById('tw-ticket'); if(tk) tk.dataset.side=btn.dataset.side; }
 function twTypeChange(){ var t=document.getElementById('tw-ot-type').value; var lim=document.getElementById('tw-ot-limit'); var need=(t!=='MARKET'); lim.disabled=!need; if(!need) lim.value=''; twEstCost(); }
 /* Today's Setups row tap → prefill the order ticket with entry/stop/target */
 function twSetupPrefill(sym, entry, stop, target){
@@ -1009,12 +1015,6 @@ function twLoadSessionVwap(ticker){
     .then(function(response){return response.json();})
     .then(function(data){if(requestId!==twChartState.vwapReqId||ticker!==twChartState.ticker)return;twChartState.sessionVwap=twSessionVwap((data&&data.bars)||[],'5m');twShowSessionVwap();})
     .catch(function(){if(requestId===twChartState.vwapReqId&&ticker===twChartState.ticker){twChartState.sessionVwap=null;twShowSessionVwap();}});
-}
-function twRenderMarketData(meta){
-  meta=meta||{};var badge=document.getElementById('tw-feed-badge'),detail=document.getElementById('tw-feed-detail'),asof=document.getElementById('tw-feed-asof');if(!badge||!detail||!asof)return;
-  var cls=meta.fallback?'fallback':(meta.realtime?(meta.comprehensive?'live':'partial'):'delayed');badge.className='tw-feed-badge '+cls;badge.textContent=meta.feed_label||'FEED UNKNOWN';
-  var delay=meta.delay_label||(meta.delay_seconds==null?'freshness unavailable':(Number(meta.delay_seconds)>0?Math.round(Number(meta.delay_seconds)/60)+' min delayed':'real-time'));detail.textContent=[meta.provider,meta.coverage,delay].filter(Boolean).join(' · ');detail.title=meta.message||'';
-  var stamp=meta.as_of?new Date(meta.as_of):null;asof.textContent=stamp&&!isNaN(stamp.getTime())?'As of '+twEasternDateTime.format(stamp):'As-of unavailable';
 }
 function twScheduleChartRefresh(){
   if(twChartRefreshTimer)clearTimeout(twChartRefreshTimer);twChartRefreshTimer=null;
@@ -1412,13 +1412,12 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       twOhlcv(bars);
       twRenderExtendedSummary(d.extended_summary,d.overnight_status);
       if(!twChartState.extended)twUpdateRegularQuote(bars);
-      twRenderMarketData(d.market_data);
       twEstCost();
-      var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent=interval.toUpperCase()+' · '+range.toUpperCase()+' · '+bars.length.toLocaleString()+' bars · '+(d.session||'regular')+' · '+(d.adjustment||'split-adjusted')+' · '+((d.market_data&&d.market_data.feed_label)||'feed unknown');
+      var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent=interval.toUpperCase()+' · '+range.toUpperCase()+' · '+bars.length.toLocaleString()+' bars · '+(d.session||'regular')+' · '+(d.adjustment||'split-adjusted');
       twChartHideMsg();
       twScheduleChartRefresh();
     })
-    .catch(function(e){if(myReq!==twChartState.reqId)return;if(refreshOnly){var detail=document.getElementById('tw-feed-detail');if(detail)detail.textContent='Refresh failed · displaying last loaded bars';twScheduleChartRefresh();}else twChartMsg('Chart error',(e&&e.message)||String(e));});
+    .catch(function(e){if(myReq!==twChartState.reqId)return;if(refreshOnly){var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent='Refresh failed · showing last loaded bars';twScheduleChartRefresh();}else twChartMsg('Chart error',(e&&e.message)||String(e));});
 }
 
 /* ═══ Ticker intelligence ═══ */
