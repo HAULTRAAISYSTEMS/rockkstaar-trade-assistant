@@ -274,6 +274,7 @@
     ptr.style.transform = 'translate(-50%, -50%) scale(' + (0.5 + pct * 0.5).toFixed(2) + ')';
     var ready = dy >= THRESHOLD;
     ptr.classList.toggle('ready', ready);
+    ptr.classList.add('active');
     if(ptrLabel) ptrLabel.textContent = ready ? 'Release' : 'Pull to refresh';
   }, {passive:true});
   document.addEventListener('touchend', function(e){
@@ -282,6 +283,7 @@
     var dy = e.changedTouches[0].clientY - startY;
     if(dy >= THRESHOLD){
       ptr.classList.add('spinning');
+      ptr.classList.add('active');
       ptr.style.opacity = '1';
       ptr.style.transform = 'translate(-50%, -50%) scale(1)';
       if(ptrLabel) ptrLabel.textContent = 'Refreshing';
@@ -290,6 +292,8 @@
       ptr.style.opacity = '0';
       ptr.style.transform = 'translate(-50%, -50%) scale(0.5)';
       ptr.classList.remove('ready');
+      ptr.classList.remove('active');
+      ptr.classList.remove('spinning');
     }
   }, {passive:true});
   document.addEventListener('touchcancel', function(){

@@ -956,6 +956,7 @@ html, body { overscroll-behavior-y: none; }
   -webkit-mask: radial-gradient(farthest-side, transparent 76%, #000 77%);
   mask: radial-gradient(farthest-side, transparent 76%, #000 77%);
   animation: ptr-ring-spin 1.4s linear infinite;
+  animation-play-state: paused;
   opacity: 0.85;
   filter: drop-shadow(0 0 8px rgba(229,185,79,.5));
 }
@@ -980,6 +981,11 @@ html, body { overscroll-behavior-y: none; }
   border: 2px solid var(--elite-gold);
   box-shadow: 0 8px 32px rgba(0,0,0,.6), 0 0 28px rgba(229,185,79,.35);
   animation: ptr-breathe 2.2s ease-in-out infinite;
+  animation-play-state: paused;
+}
+.ptr-indicator.active .ptr-ring::before,
+.ptr-indicator.active .ptr-logo {
+  animation-play-state: running;
 }
 .ptr-label {
   font: 800 10px var(--font-ui);
