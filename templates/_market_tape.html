@@ -4,7 +4,7 @@
   <div class="market-tape-track" id="market-tape-track">
     {% for t in market_tape + market_tape %}
     <span class="market-tape-item" data-mtape="{{ t.symbol }}">
-      <span class="market-tape-sym">{{ t.symbol }}</span>{% if t.name %}<span class="market-tape-name">{{ t.name }}</span>{% endif %}
+      {% if t.logo %}<img class="market-tape-logo" src="{{ t.logo }}" alt="" loading="lazy" onerror="if(!this.dataset.fbk){this.dataset.fbk=1;this.src='https://financialmodelingprep.com/image-stock/{{ t.symbol }}.png';}else{this.remove();}">{% endif %}<span class="market-tape-sym">{{ t.symbol }}</span>
       <span class="market-tape-px" data-mtape-px>{{ '%.2f'|format(t.price) if t.price is not none else '—' }}</span>
       <span class="market-tape-chg {{ 'chg-pos' if (t.change_pct or 0) > 0 else ('chg-neg' if (t.change_pct or 0) < 0 else 'chg-flat') }}" data-mtape-chg>{{ '%+.2f'|format(t.change_pct) ~ '%' if t.change_pct is not none else '—' }}</span>
     </span>
@@ -24,8 +24,8 @@
         var el = document.createElement('span');
         el.className = 'market-tape-item';
         el.setAttribute('data-mtape', t.symbol);
-        el.innerHTML = '<span class="market-tape-sym">' + t.symbol + '</span>' +
-          (t.name ? '<span class="market-tape-name">' + t.name + '</span>' : '') + ' ' +
+        el.innerHTML = (t.logo ? '<img class="market-tape-logo" src="' + t.logo + '" alt="" loading="lazy" onerror="this.remove()">' : '') +
+          '<span class="market-tape-sym">' + t.symbol + '</span> ' +
           '<span class="market-tape-px" data-mtape-px>—</span> ' +
           '<span class="market-tape-chg" data-mtape-chg>—</span>';
         track.appendChild(el);

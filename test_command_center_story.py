@@ -308,22 +308,6 @@ def test_tape_carries_futures_and_names():
     assert {"SPY", "QQQ", "ES", "NQ", "DIA", "IWM", "VIX"} <= set(by)
     assert by["ES"]["price"] == 7727.75 and by["ES"]["change_pct"] == -0.09
     assert by["NQ"]["change_pct"] == -0.43
-    assert by["ES"]["name"] == "S&P 500 Futures"
-    assert by["SPY"]["name"] == "S&P 500"
     assert by["SPY"]["price"] == 766.48  # ETF close stays — no silent swap
-
-
-def test_ticker_names_fetch_and_cache():
-    market_engine._NAME_CACHE.pop("ZZTEST", None)
-
-    class _Resp:
-        def json(self):
-            return {"chart": {"result": [{"meta": {"shortName": "Zeta Test Co"}}]}}
-
-    with patch("requests.get", return_value=_Resp()) as mock_get:
-        names = market_engine.ticker_names(["ZZTEST"])
-        assert names["ZZTEST"] == "Zeta Test Co"
-        again = market_engine.ticker_names(["ZZTEST"])
-        assert again["ZZTEST"] == "Zeta Test Co"
-        assert mock_get.call_count == 1  # fetched once; second call served from cache
-    market_engine._NAME_CACHE.pop("ZZTEST", None)
+    assert "parqet.com" in by["SPY"]["logo"] and "SPY" in by["SPY"]["logo"]
+    assert by["ES"]["logo"] == ""  # futures carry no company mark

@@ -939,7 +939,7 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
   font-size: 11.5px;
   text-shadow: 0 0 14px rgba(240,201,93,.45);
 }
-.market-tape-name { color: var(--text-faint, #8a8f98); font-size: 9.5px; font-weight: 600; letter-spacing: .02em; margin-left: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; display: inline-block; vertical-align: bottom; }
+.market-tape-logo { width: 15px; height: 15px; border-radius: 4px; object-fit: contain; background: #fff; padding: 1px; margin-right: 5px; vertical-align: -3px; }
 .market-tape-px { color: #fff; font-weight: 700; }
 .market-tape-chg {
   display: inline-flex;

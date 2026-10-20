@@ -6202,13 +6202,12 @@ def _tape_watchlist_items(limit=None):
                    if t and t.upper() not in seen][:limit]
         if tickers and _MKT_AVAILABLE:
             prices = _mkt._fetch_prices_chart(tickers, period="5d")
-            names = _mkt.ticker_names(tickers)
             for t in tickers:
                 series = prices.get(t) or []
                 px = round(series[-1], 2) if series else None
                 pct = (round((series[-1] / series[-2] - 1) * 100, 2)
                        if len(series) >= 2 and series[-2] else None)
-                items.append({"symbol": t, "name": names.get(t, ""),
+                items.append({"symbol": t, "logo": _mkt.logo_url(t),
                               "price": px, "change_pct": pct,
                               "watchlist": True})
     except Exception as exc:

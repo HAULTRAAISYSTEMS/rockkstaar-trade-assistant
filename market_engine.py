@@ -1147,56 +1147,25 @@ def _build_tape_items() -> list[dict]:
             ("VIX", vix, vix_chg),
         ]
         for sym, px, chg in raw:
-            items.append({"symbol": sym, "name": _TAPE_NAMES.get(sym, ""),
+            items.append({"symbol": sym,
+                          "logo": logo_url(sym) if sym in _LOGO_OK else "",
                           "price": px, "change_pct": chg})
         _TAPE_CACHE.update(at=_time.time(), items=items)
     except Exception as exc:
         logger.debug("_build_tape_items failed: %s", exc)
     return _TAPE_CACHE["items"]
 
-_NAME_CACHE: dict[str, str] = {}
-
-_TAPE_NAMES = {
-    "SPY": "S&P 500", "QQQ": "Nasdaq-100", "ES": "S&P 500 Futures",
-    "NQ": "Nasdaq-100 Futures", "DIA": "Dow 30", "IWM": "Russell 2000",
-    "VIX": "Volatility Index",
-}
+_LOGO_BASE = "https://assets.parqet.com/logos/symbol/"
+# Futures and the VIX have no company mark — Eversource Energy owns the
+# "ES" ticker, and a wrong logo is worse than none.
+_LOGO_OK = {"SPY", "QQQ", "DIA", "IWM"}
 
 
-def ticker_names(tickers: list[str]) -> dict[str, str]:
-    """Best-effort company names from Yahoo chart metadata.
-
-    Names don't change, so they are cached for the life of the process;
-    only uncached tickers hit the network, in parallel.
-    """
-    missing = [t for t in tickers if t and t not in _NAME_CACHE]
-    if missing:
-        try:
-            import requests as _req
-            from concurrent.futures import ThreadPoolExecutor
-            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-
-            def _one(t):
-                for base in ("https://query1.finance.yahoo.com/v8/finance/chart",
-                             "https://query2.finance.yahoo.com/v8/finance/chart"):
-                    try:
-                        r = _req.get(f"{base}/{t}", params={"range": "1d", "interval": "1d"},
-                                     headers=headers, timeout=6)
-                        meta = (r.json().get("chart", {}).get("result") or [{}])[0].get("meta", {})
-                        name = meta.get("shortName") or meta.get("longName") or ""
-                        if name:
-                            return t, name
-                    except Exception:
-                        continue
-                return t, ""
-
-            with ThreadPoolExecutor(max_workers=6) as ex:
-                for t, name in ex.map(_one, missing):
-                    _NAME_CACHE[t] = name
-        except Exception:
-            for t in missing:
-                _NAME_CACHE.setdefault(t, "")
-    return {t: _NAME_CACHE.get(t, "") for t in tickers}
+def logo_url(symbol: str) -> str:
+    """Company logo for a tape item, or '' when the symbol has no mark."""
+    if not symbol:
+        return ""
+    return f"{_LOGO_BASE}{symbol}?format=png"
 
 
 def get_market_tape() -> list[dict]:
