@@ -49,6 +49,8 @@
 @keyframes tw-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .tw-tape-item { display:inline-flex; align-items:baseline; gap:8px; font-family: var(--font-mono); font-size: var(--fs-sm); }
 .tw-tape-sym { color: var(--text-hi); font-weight: var(--fw-semi); letter-spacing:.03em; }
+.tw-tape-index .tw-tape-sym { color: var(--elite-gold-bright, #f3d37a); font-weight: 800; }
+.tw-tape-index + .tw-tape-item:not(.tw-tape-index) { margin-left: 8px; }
 .tw-tape-px { color: var(--text-body); }
 .tw-tape-chg { font-size: var(--fs-xs); font-weight: var(--fw-semi); }
 .chg-pos { color: var(--pos-500); }
@@ -110,7 +112,60 @@
 .tw-tf-btn:disabled:hover { color: var(--text-faint); border-color: var(--border-subtle); background: var(--ink-750); }
 .tw-type { display:flex; gap:4px; margin-left:auto; }
 .tw-type-btn { display:inline-flex; align-items:center; justify-content:center; width:30px; height:28px; font-size:14px; color:var(--text-faint); background: var(--ink-750); border:1px solid var(--border-subtle); border-radius: var(--r-sm); cursor:pointer; transition: all var(--dur-fast); }
-.tw-type-btn.active { color: var(--orange-500); border-color: var(--orange-500); }
+.tw-type-btn.active { color: var(--elite-gold-bright, #f3d37a); border-color: rgba(229,185,79,.55); background: linear-gradient(180deg, rgba(229,185,79,.16), rgba(229,185,79,.04)); box-shadow: 0 0 12px rgba(229,185,79,.12), inset 0 0 0 1px rgba(229,185,79,.12); }
+/* Elite chart toolbar */
+.tw-tool-group {
+  background: rgba(255,255,255,.018);
+  border: 1px solid var(--elite-hairline, rgba(255,255,255,.06));
+  border-radius: 10px;
+  padding: 6px 8px 7px;
+}
+.tw-tool-label {
+  font-size: 8.5px !important;
+  font-weight: 800 !important;
+  letter-spacing: .14em !important;
+  text-transform: uppercase !important;
+  color: var(--elite-faint, #8a8f98) !important;
+}
+.tw-tool-buttons { gap: 5px !important; }
+.tw-type-btn {
+  border-radius: 8px !important;
+  font-weight: 700;
+}
+.tw-type-btn:hover { color: var(--elite-gold-bright, #f3d37a); border-color: rgba(229,185,79,.35); }
+/* Indicator dropdown */
+.tw-ind-dropdown { position: relative; }
+.tw-ind-count {
+  min-width: 18px; height: 18px; padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800; border-radius: 9px;
+  color: #171006; background: var(--elite-gold-bright, #f3d37a);
+}
+.tw-ind-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 9999;
+  min-width: 210px; padding: 8px;
+  background: linear-gradient(180deg, rgba(23,27,33,.99), rgba(13,16,21,.99));
+  border: 1px solid var(--elite-border-strong, rgba(229,185,79,.34));
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.65), 0 0 20px rgba(229,185,79,.06);
+}
+.tw-ind-menu[hidden] { display: none !important; }
+.tw-ind-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 8px; cursor: pointer;
+  color: var(--text-body);
+}
+.tw-ind-row:hover { background: rgba(229,185,79,.07); }
+.tw-ind-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: #e5b94f; }
+.tw-ind-row strong { display: block; font-size: 13px; color: var(--text-hi); }
+.tw-ind-row small { display: block; font-size: 10px; color: var(--text-faint); }
+.tw-ind-settings {
+  width: 100%; margin-top: 4px; padding: 9px 10px;
+  display: flex; align-items: center; gap: 8px;
+  background: transparent; border: 1px solid var(--border-subtle);
+  border-radius: 8px; color: var(--text-faint); font-size: 12px; cursor: pointer;
+}
+.tw-ind-settings:hover { color: var(--elite-gold-bright, #f3d37a); border-color: var(--elite-border-strong, rgba(229,185,79,.34)); }
 .tw-feed-strip{display:flex;align-items:center;gap:9px;margin:0 var(--sp-5) var(--sp-3);padding:8px 10px;border:1px solid var(--border-subtle);border-radius:var(--r-sm);background:#0b0e11;font:10px var(--font-mono);color:var(--text-faint);min-height:34px}
 .tw-feed-badge{font-weight:800;letter-spacing:.06em;padding:3px 7px;border-radius:999px;color:var(--text-body);background:var(--ink-700);white-space:nowrap}.tw-feed-badge.live{color:var(--pos-500);background:rgba(34,197,139,.12)}.tw-feed-badge.delayed,.tw-feed-badge.fallback{color:var(--warn-500);background:rgba(255,176,32,.12)}.tw-feed-badge.partial{color:#72b7ff;background:rgba(74,163,255,.12)}
 .tw-feed-asof{margin-left:auto;white-space:nowrap}.tw-feed-detail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -193,10 +248,17 @@
 {% set connected = acct and acct.connected %}
 <div class="tw">
 
-  <!-- ===== Ticker tape — the first thing on the page ===== -->
-  {% if stocks %}
-  <div class="tw-tape" aria-label="Watchlist tape">
+  <!-- ===== Ticker tape — market indices first, then watchlist ===== -->
+  <div class="tw-tape" aria-label="Market and watchlist tape">
     <div class="tw-tape-track">
+      {% for t in market_tape + market_tape %}
+      <span class="tw-tape-item tw-tape-index" data-mtape="{{ t.symbol }}">
+        <span class="tw-tape-sym">{{ t.symbol }}</span>
+        <span class="tw-tape-px" data-mtape-px>{{ '%.2f'|format(t.price) if t.price is not none else '—' }}</span>
+        <span class="tw-tape-chg {{ 'chg-pos' if (t.change_pct or 0) > 0 else ('chg-neg' if (t.change_pct or 0) < 0 else 'chg-flat') }}" data-mtape-chg>{{ '%+.2f'|format(t.change_pct) ~ '%' if t.change_pct is not none else '—' }}</span>
+      </span>
+      {% endfor %}
+      {% if stocks %}
       {% for s in stocks + stocks %}
       <span class="tw-tape-item" data-tape="{{ s.ticker }}">
         <span class="tw-tape-sym">{{ s.ticker }}</span>
@@ -204,9 +266,9 @@
         <span class="tw-tape-chg {{ 'chg-pos' if (s.gap_pct or 0) > 0 else ('chg-neg' if (s.gap_pct or 0) < 0 else 'chg-flat') }}" data-tape-chg>{{ s.gap_display or '0.00%' }}</span>
       </span>
       {% endfor %}
+      {% endif %}
     </div>
   </div>
-  {% endif %}
 
   <!-- ===== Status line ===== -->
   <div class="tw-status">
@@ -318,11 +380,16 @@
               <button class="tw-type-btn active" id="tw-volume-btn" onclick="twToggleVolume(this)" title="Toggle volume">Volume</button>
               <button class="tw-type-btn" id="tw-extended-btn" onclick="twToggleExtended(this)" title="Show premarket and after-hours candles">Extended</button>
             </div></div>
-            <div class="tw-tool-group"><span class="tw-tool-label">Indicators</span><div class="tw-tool-buttons">
-              <button class="tw-type-btn active" id="tw-rsi-btn" onclick="twToggleIndicator('rsi',this)" title="Toggle RSI (14)">RSI</button>
-              <button class="tw-type-btn active" id="tw-macd-btn" onclick="twToggleIndicator('macd',this)" title="Toggle MACD (12, 26, 9)">MACD</button>
-              <button class="tw-type-btn" id="tw-studies-btn" onclick="twToggleStudySettings()" title="Indicator settings"><span class="tw-tool-icon">⚙</span>Settings</button>
-            </div></div>
+            <div class="tw-tool-group"><span class="tw-tool-label">Indicators</span>
+              <div class="tw-ind-dropdown">
+                <button class="tw-type-btn" id="tw-indicators-btn" onclick="twToggleIndicatorMenu(event)" title="Add indicators" aria-haspopup="true" aria-expanded="false"><span class="tw-tool-icon">◔</span>Indicators <span class="tw-ind-count" id="tw-ind-count">2</span></button>
+                <div class="tw-ind-menu" id="tw-indicator-menu" hidden role="menu">
+                  <label class="tw-ind-row"><input type="checkbox" id="tw-ind-rsi" checked onchange="twToggleIndicator('rsi', this)"><span><strong>RSI</strong><small>Relative Strength · 14</small></span></label>
+                  <label class="tw-ind-row"><input type="checkbox" id="tw-ind-macd" checked onchange="twToggleIndicator('macd', this)"><span><strong>MACD</strong><small>12, 26, 9</small></span></label>
+                  <button type="button" class="tw-ind-settings" id="tw-studies-btn" onclick="twToggleStudySettings(); twToggleIndicatorMenu()"><span class="tw-tool-icon">⚙</span>Indicator settings</button>
+                </div>
+              </div>
+            </div>
             <div class="tw-tool-group"><span class="tw-tool-label">Draw</span><div class="tw-tool-buttons">
               <button class="tw-type-btn" id="tw-edit-btn" onclick="twStartDrawing('select',this)" title="Select, move, or resize a drawing">Select</button>
               <button class="tw-type-btn" id="tw-line-btn" onclick="twStartDrawing('line',this)" title="Drag to draw a trend line">Trend</button>
@@ -739,10 +806,33 @@ function twToggleExtended(btn){
   try{localStorage.setItem('tradestaar.chartExtended',twChartState.extended?'1':'0');localStorage.setItem('tradestaar.chartType',twChartState.type);localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);
 }
 function twResetView(){ if(twChartState.chart) twChartState.chart.timeScale().fitContent(); twRenderDrawings(); }
+function twToggleIndicatorMenu(ev){
+  if(ev) ev.stopPropagation();
+  var menu = document.getElementById('tw-indicator-menu');
+  var btn = document.getElementById('tw-indicators-btn');
+  if(!menu) return;
+  var open = menu.hidden;
+  menu.hidden = !open;
+  if(btn) btn.setAttribute('aria-expanded', String(open));
+}
+document.addEventListener('click', function(){
+  var menu = document.getElementById('tw-indicator-menu');
+  var btn = document.getElementById('tw-indicators-btn');
+  if(menu && !menu.hidden){ menu.hidden = true; if(btn) btn.setAttribute('aria-expanded','false'); }
+});
+function twSyncIndicatorMenu(){
+  var r = document.getElementById('tw-ind-rsi'), m = document.getElementById('tw-ind-macd');
+  var c = document.getElementById('tw-ind-count');
+  if(r) r.checked = !!twChartState.indicators.rsi;
+  if(m) m.checked = !!twChartState.indicators.macd;
+  if(c) c.textContent = (twChartState.indicators.rsi ? 1 : 0) + (twChartState.indicators.macd ? 1 : 0);
+}
 function twToggleIndicator(name,btn){
-  twChartState.indicators[name]=!twChartState.indicators[name]; btn.classList.toggle('active',twChartState.indicators[name]);
+  var on;
+  if(btn && btn.type === 'checkbox'){ on = btn.checked; twChartState.indicators[name] = on; }
+  else { twChartState.indicators[name]=!twChartState.indicators[name]; on = twChartState.indicators[name]; if(btn) btn.classList.toggle('active', on); }
   try { localStorage.setItem('tradestaar.chartIndicators',JSON.stringify(twChartState.indicators)); } catch(e) {}
-  twApplyIndicatorVisibility(); twRenderIndicators();
+  twSyncIndicatorMenu(); twApplyIndicatorVisibility(); twRenderIndicators();
 }
 function twApplyIndicatorVisibility(){
   var rsi=document.getElementById('tw-rsi-panel'),macd=document.getElementById('tw-macd-panel'),wrap=document.getElementById('tw-indicators');
@@ -902,7 +992,10 @@ function twInitChart(){
   var candle=chart.addCandlestickSeries({ upColor:'#22C58B', downColor:'#FF4D45', wickUpColor:'#22C58B', wickDownColor:'#FF4D45', borderVisible:false, visible:false });
   var vol=chart.addHistogramSeries({ priceFormat:{type:'volume'}, priceScaleId:'' });
   vol.priceScale().applyOptions({ scaleMargins:{ top:0.85, bottom:0 } });
-  twChartState.chart=chart; twChartState.area=area; twChartState.candle=candle; twChartState.vol=vol;
+  // Extended-hours background shading (TradingView-style separation).
+  var shade=chart.addHistogramSeries({ priceScaleId:'shade', lastValueVisible:false, priceLineVisible:false, crosshairMarkerVisible:false });
+  chart.priceScale('shade').applyOptions({ scaleMargins:{ top:0, bottom:0 }, visible:false });
+  twChartState.chart=chart; twChartState.area=area; twChartState.candle=candle; twChartState.vol=vol; twChartState.shade=shade;
   Object.keys(twChartState.styles.emas).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period]=chart.addLineSeries({color:style.color,lineWidth:1,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,title:''});});
   vol.applyOptions({visible:twChartState.showVolume});
   twApplyStudyStyles();
@@ -1102,7 +1195,12 @@ function twVolumeColor(bar){if(bar.session==='overnight')return bar.close>=bar.o
    intraday candle on each quote, then let the normal 30-second candle request
    replace it with authoritative OHLCV. Historical candles are never changed. */
 function twPatchActiveCandle(q,px){
-  if(!q||q.ticker!==twChartState.ticker||q.market_session!=='regular')return;
+  if(!q||q.ticker!==twChartState.ticker)return;
+  // Tick during regular hours always; during extended hours only when the
+  // Extended toggle is on (otherwise there are no extended bars to move).
+  var sess = q.market_session;
+  var isExt = (sess==='pre_market'||sess==='after_hours');
+  if(sess!=='regular' && !(isExt && twChartState.extended)) return;
   var seconds={"1m":60,"5m":300,"15m":900,"1h":3600}[twChartState.interval];
   if(!seconds||!twChartState.bars.length)return;
   var stamp=Number(q.as_of_epoch);if(!isFinite(stamp)||stamp<=0)return;
@@ -1117,8 +1215,14 @@ function twPatchActiveCandle(q,px){
     bar=Object.assign({},last,{close:px,high:Math.max(Number(last.high),px),low:Math.min(Number(last.low),px)});
     twChartState.bars[twChartState.bars.length-1]=bar;
   }else{
-    bar={time:bucket,open:px,high:px,low:px,close:px,volume:0,session:'regular',live_quote:true};
+    var liveSess = (q.market_session==='pre_market') ? 'premarket' : ((q.market_session==='after_hours') ? 'after_hours' : 'regular');
+    bar={time:bucket,open:px,high:px,low:px,close:px,volume:0,session:liveSess,live_quote:true};
     twChartState.bars.push(bar);
+    // Shade the new extended bar's background too.
+    if(twChartState.shade && liveSess!=='regular'){
+      var c = liveSess==='premarket' ? 'rgba(74,163,255,0.055)' : 'rgba(199,125,255,0.055)';
+      try { twChartState.shade.update({time:bucket, value:1, color:c}); } catch(e){}
+    }
   }
   twChartState.barMap[twTimeKey(bar.time)]=bar;twChartState.lastPrice=px;
   twChartState.area.update({time:bar.time,value:bar.close});
@@ -1145,6 +1249,7 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       var bars=(d&&d.bars)||[];
       if(!bars.length){
         twChartState.area.setData([]); twChartState.candle.setData([]); twChartState.vol.setData([]);
+        if(twChartState.shade) twChartState.shade.setData([]);
         Object.keys(twChartState.emaSeries).forEach(function(period){twChartState.emaSeries[period].setData([]);});
         twChartMsg('No '+interval+' data','The price feed returned no bars for '+ticker+' at '+range+'.');
         return;
@@ -1158,6 +1263,15 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       twChartState.area.setData(bars.map(function(b){ return { time:b.time, value:b.close }; }));
       twChartState.candle.setData(bars.map(twCandleDatum));
       twChartState.vol.setData(bars.map(function(b){ return { time:b.time, value:b.volume||0, color:twVolumeColor(b) }; }));
+      // Shade extended-hours regions like TradingView.
+      if(twChartState.shade){
+        var shadeData = bars.filter(function(b){ return b.session==='premarket'||b.session==='after_hours'||b.session==='overnight'; })
+          .map(function(b){
+            var c = b.session==='premarket' ? 'rgba(74,163,255,0.055)' : (b.session==='after_hours' ? 'rgba(199,125,255,0.055)' : 'rgba(240,181,63,0.05)');
+            return { time:b.time, value:1, color:c };
+          });
+        twChartState.shade.setData(shadeData);
+      }
       twChartState.bars=bars; twChartState.barMap={}; twChartState.pinnedTime=null;
       twChartState.sessionVwap=twSessionVwap(bars,interval);
       twShowSessionVwap();
@@ -1394,8 +1508,7 @@ window._arRefreshFn = twQuotesRefresh;
   document.querySelectorAll('.tw-tf-btn').forEach(function(btn){btn.classList.toggle('active',btn.dataset.interval===twChartState.interval);});
   twPopulateRanges();twSyncStudySettings();
   var volBtn=document.getElementById('tw-volume-btn'); if(volBtn) volBtn.classList.toggle('active',twChartState.showVolume);
-  var rsiBtn=document.getElementById('tw-rsi-btn'); if(rsiBtn) rsiBtn.classList.toggle('active',twChartState.indicators.rsi);
-  var macdBtn=document.getElementById('tw-macd-btn'); if(macdBtn) macdBtn.classList.toggle('active',twChartState.indicators.macd);
+  twSyncIndicatorMenu();
   twRefreshExtendedAvailability();
   twApplyIndicatorVisibility();
   twApplyType();
@@ -1412,6 +1525,30 @@ window._arRefreshFn = twQuotesRefresh;
     if(isFinite(pc)) twPrevClose[r.dataset.ticker] = pc;
   });
   twQuotesRefresh();          // stamp the status pill without waiting 4 s
+
+  // Market-index tape items: refresh from /api/market-tape every 45s.
+  function twTapeRefresh(){
+    fetch('/api/market-tape', {headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if(!d || !d.ok || !d.items) return;
+        d.items.forEach(function(t){
+          document.querySelectorAll('[data-mtape="' + t.symbol + '"]').forEach(function(el){
+            var px = el.querySelector('[data-mtape-px]');
+            var chg = el.querySelector('[data-mtape-chg]');
+            if(px && t.price != null) px.textContent = Number(t.price).toFixed(2);
+            if(chg && t.change_pct != null){
+              var v = Number(t.change_pct);
+              chg.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+              chg.className = 'tw-tape-chg ' + (v > 0 ? 'chg-pos' : (v < 0 ? 'chg-neg' : 'chg-flat'));
+            }
+          });
+        });
+      })
+      .catch(function(){});
+  }
+  twTapeRefresh();
+  setInterval(twTapeRefresh, 45000);
 })();
 </script>
 {% endblock %}

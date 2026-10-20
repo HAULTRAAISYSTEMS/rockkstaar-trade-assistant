@@ -34,6 +34,8 @@
 
   {% include "_elite_navigation.html" %}
 
+  {% if request.endpoint != 'terminal' %}{% include "_market_tape.html" %}{% endif %}
+
   <!-- ===== FLASH MESSAGES ===== -->
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}

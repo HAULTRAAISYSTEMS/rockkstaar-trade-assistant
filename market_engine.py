@@ -1053,3 +1053,61 @@ def market_temperature_from_context(ctx: dict) -> dict:
         "vix":           vix,
         "signal":        signal,
     }
+
+
+# ── Market tape: index banner for every page ────────────────────────────────
+_TAPE_CACHE: dict = {"at": 0.0, "items": []}
+_TAPE_TTL_S = 60
+
+
+def get_market_tape() -> list[dict]:
+    """SPY/QQQ/DIA/IWM/VIX with price + day change for the global tape.
+
+    SPY/QQQ/VIX come from the cached market context (no extra fetch);
+    DIA/IWM get their own short-TTL cache. Never raises, never blocks
+    the request — returns the last good snapshot on failure.
+    """
+    import time as _time
+    now = _time.time()
+    if _TAPE_CACHE["items"] and now - _TAPE_CACHE["at"] < _TAPE_TTL_S:
+        return _TAPE_CACHE["items"]
+
+    items: list[dict] = []
+    try:
+        ctx = get_market_context() or {}
+
+        def _pct(prices: list[float]) -> float | None:
+            if len(prices) >= 2 and prices[-2]:
+                return round((prices[-1] / prices[-2] - 1) * 100, 2)
+            return None
+
+        # DIA + IWM: short dedicated fetch (SPY/QQQ/VIX already in ctx)
+        extra = _fetch_prices_chart(["DIA", "IWM"], period="5d")
+        dia, iwm = extra.get("DIA", []), extra.get("IWM", [])
+
+        qqq_px = ctx.get("qqq_price")
+        spy_px = ctx.get("spy_price")
+        vix = ctx.get("vix_level")
+        # VIX change: derive from its own series when available
+        vix_chg = None
+        try:
+            vix_series = _fetch_prices_chart(["^VIX"], period="5d").get("^VIX", [])
+            vix_chg = _pct(vix_series)
+            if vix_series:
+                vix = round(vix_series[-1], 2)
+        except Exception:
+            pass
+
+        raw = [
+            ("SPY", spy_px, ctx.get("spy_1d_pct")),
+            ("QQQ", qqq_px, ctx.get("qqq_1d_pct")),
+            ("DIA", round(dia[-1], 2) if dia else None, _pct(dia)),
+            ("IWM", round(iwm[-1], 2) if iwm else None, _pct(iwm)),
+            ("VIX", vix, vix_chg),
+        ]
+        for sym, px, chg in raw:
+            items.append({"symbol": sym, "price": px, "change_pct": chg})
+        _TAPE_CACHE.update(at=now, items=items)
+    except Exception as exc:
+        logger.debug("get_market_tape failed: %s", exc)
+    return items or _TAPE_CACHE["items"]

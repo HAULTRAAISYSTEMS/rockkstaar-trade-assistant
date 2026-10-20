@@ -3785,6 +3785,42 @@ def _refresh_all_worker(watchlist: list, user_id: int = 1) -> None:
         logger.info("refresh_all  bg_worker  done")
 
 
+
+
+
+def _refresh_on_signin(user_id: int):
+    """Kick off a silent background data refresh after sign-in.
+
+    The user shouldn't have to hit refresh to see fresh numbers — this
+    warms the watchlist quotes and market context in a daemon thread so
+    the landing page renders current data.
+    """
+    try:
+        if not _refresh_all_lock.acquire(blocking=False):
+            return  # a refresh is already running
+        try:
+            global _refresh_all_running
+            if _refresh_all_running:
+                return
+            wl_id = get_active_wl_id()
+            watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+            if not watchlist:
+                return
+            _refresh_all_running = True
+            t = threading.Thread(
+                target=_refresh_all_worker,
+                args=(watchlist, user_id),
+                daemon=True,
+                name="signin_refresh",
+            )
+            t.start()
+            logger.info("signin_refresh  stage=bg_thread_started  tickers=%d", len(watchlist))
+        finally:
+            _refresh_all_lock.release()
+    except Exception as exc:
+        logger.debug("signin_refresh skipped: %s", exc)
+
+
 @app.route("/refresh", methods=["POST"])
 def refresh_all():
     """
@@ -6141,6 +6177,20 @@ def api_earnings_digest():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+@app.route("/api/market-tape")
+def api_market_tape():
+    """Index tape (SPY/QQQ/DIA/IWM/VIX) for the global market banner."""
+    try:
+        if _MKT_AVAILABLE:
+            items = _mkt.get_market_tape()
+        else:
+            items = []
+        return jsonify({"ok": True, "items": items})
+    except Exception as exc:
+        logger.error("api_market_tape: %s", exc, exc_info=True)
+        return jsonify({"ok": False, "items": []})
+
+
 @app.route("/api/account/summary")
 def api_account_summary():
     """Portfolio total as JSON.
@@ -6680,7 +6730,7 @@ def _tf_ugcss(g):
 
 @app.context_processor
 def inject_helpers():
-    return {
+    helpers = {
         "get_score_class":      get_score_class,
         "get_bias_class":       get_bias_class,
         "get_setup_type_class": get_setup_type_class,
@@ -6694,6 +6744,17 @@ def inject_helpers():
         "get_orb_action":        get_orb_action,
         "get_freshness_class":   get_freshness_class,
     }
+    # Global market tape for the index banner (every page except Account).
+    # Cached 60s in market_engine — cheap after the first render.
+    try:
+        _ep = (request.endpoint or "")
+        if _ep != "account" and _MKT_AVAILABLE:
+            helpers["market_tape"] = _mkt.get_market_tape()
+        else:
+            helpers["market_tape"] = []
+    except Exception:
+        helpers["market_tape"] = []
+    return helpers
 
 
 # ---------------------------------------------------------------------------
@@ -8435,6 +8496,7 @@ def login_page():
             next_url = request.form.get("next") or url_for("liquidity_page")
             if not next_url.startswith("/") or next_url.startswith("//"):
                 next_url = url_for("liquidity_page")
+            _refresh_on_signin(user["id"])
             return redirect(next_url)
         error = "Invalid username or password."
     return render_template("login.html",
