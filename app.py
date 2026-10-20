@@ -6217,6 +6217,21 @@ def _tape_watchlist_items():
     now = _time.time()
     if _WL_TAPE_CACHE["user"] == uid and now - _WL_TAPE_CACHE["at"] < 60:
         return list(_WL_TAPE_CACHE["items"])
+    # Stale or cold: never block the page on ~85 quote fetches. Serve what
+    # we have (possibly nothing) and rebuild in the background — the tape's
+    # 45s poll picks the stocks up, same as the index tape's cold start.
+    if _WL_TAPE_CACHE.get("refreshing_for") != uid:
+        _WL_TAPE_CACHE["refreshing_for"] = uid
+        import threading as _th
+        _th.Thread(target=_rebuild_tape_watchlist, args=(uid,),
+                   daemon=True, name="wl_tape_refresh").start()
+    return list(_WL_TAPE_CACHE["items"]
+                if _WL_TAPE_CACHE["user"] == uid else [])
+
+
+def _rebuild_tape_watchlist(uid):
+    """Background rebuild of one user's banner watchlist items."""
+    import time as _time
     items = []
     try:
         seen = {"SPY", "QQQ", "DIA", "IWM", "VIX", "ES", "NQ"}
@@ -6254,8 +6269,8 @@ def _tape_watchlist_items():
                     _item["change_pct"] = _q["pct"]
     except Exception as exc:
         logger.debug("tape watchlist items unavailable: %s", exc)
-    _WL_TAPE_CACHE.update(at=now, user=uid, items=items)
-    return list(items)
+    _WL_TAPE_CACHE.update(at=_time.time(), user=uid, items=items)
+    _WL_TAPE_CACHE["refreshing_for"] = None
 
 
 @app.route("/api/market-tape")

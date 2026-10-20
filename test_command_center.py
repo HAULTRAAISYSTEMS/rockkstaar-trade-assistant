@@ -710,7 +710,9 @@ class TestTapeWatchlistTiers:
                             lambda tickers, period="5d":
                             {t: [100.0, 101.0] for t in tickers})
         monkeypatch.setattr(legacy._mkt, "extended_quotes", lambda t: {})
-        legacy._WL_TAPE_CACHE.update(at=0.0, user=None, items=[])
+        legacy._WL_TAPE_CACHE.update(at=0.0, user=None, items=[],
+                                     refreshing_for=None)
+        legacy._rebuild_tape_watchlist(1)  # background in prod; direct here
         return legacy._tape_watchlist_items()
 
     def test_all_lists_contribute(self, monkeypatch):
