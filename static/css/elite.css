@@ -923,3 +923,31 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
   .market-tape-track { gap: 26px; padding: 6px 14px; }
   .market-tape-item { font-size: 11px; }
 }
+
+/* ── Pull-to-refresh: Tradestaar Elite logo spinner ─────────────────────── */
+html, body { overscroll-behavior-y: none; }
+.ptr-indicator {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-90px) scale(0.6);
+  opacity: 0;
+  z-index: 10000;
+  pointer-events: none;
+}
+.ptr-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background-image: url('/static/img/tradestaar-elite-logo.jpg');
+  background-size: 230%;
+  background-position: 50% 28%;
+  border: 2px solid var(--elite-gold);
+  box-shadow: 0 6px 24px rgba(0,0,0,.55), 0 0 18px rgba(229,185,79,.4);
+}
+.ptr-indicator.ready .ptr-logo {
+  box-shadow: 0 6px 24px rgba(0,0,0,.55), 0 0 28px rgba(229,185,79,.65);
+  border-color: var(--elite-gold-bright);
+}
+.ptr-indicator.spinning .ptr-logo { animation: ptr-spin 0.9s linear infinite; }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
