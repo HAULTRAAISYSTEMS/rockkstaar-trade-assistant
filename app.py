@@ -6180,11 +6180,34 @@ def api_earnings_digest():
 _WL_TAPE_CACHE = {"at": 0.0, "user": None, "items": []}
 
 
-def _tape_watchlist_items(limit=None):
-    """The signed-in user's watchlist as banner tape items.
+# Banner tiers, by list name — the tape styles a stock by the most
+# important list it sits on. A+ is the money signal and leads the tape;
+# blocked names stay visible but dimmed, as a standing warning.
+_TAPE_TIER_RANK = {"aplus": 0, "avoid": 1, "extended": 2, "forming": 3,
+                   "standard": 4}
 
-    Cached 60s per user so the tape's 45s poll doesn't refetch quotes.
-    Prices use the same last-two-closes basis as the index tape.
+
+def _tape_tier(list_name: str) -> str:
+    name = (list_name or "").upper()
+    if "A+" in name:
+        return "aplus"
+    if "AVOID" in name or "BLOCKED" in name:
+        return "avoid"
+    if "EXTENDED" in name or "CHASE" in name:
+        return "extended"
+    if "FORMING" in name or "SETUPS" in name:
+        return "forming"
+    return "standard"
+
+
+def _tape_watchlist_items():
+    """Every stock on every one of the user's lists, as banner tape items.
+
+    A new account has no lists and gets the index tape alone; the moment
+    a list exists, its stocks join the banner. Each item carries the tier
+    of the highest-signal list it belongs to, and items sort A+ first so
+    the ready setups lead the rotation. Cached 60s per user so the tape's
+    45s poll doesn't refetch quotes.
     """
     import time as _time
     try:
@@ -6196,10 +6219,23 @@ def _tape_watchlist_items(limit=None):
         return list(_WL_TAPE_CACHE["items"])
     items = []
     try:
-        tickers, _wl_name = _command_watchlist()
         seen = {"SPY", "QQQ", "DIA", "IWM", "VIX", "ES", "NQ"}
-        tickers = [t for t in (tickers or [])
-                   if t and t.upper() not in seen][:limit]
+        tier_of: dict[str, str] = {}
+        order: list[str] = []
+        for row in (get_all_watchlists(uid) or []):
+            tier = _tape_tier(row["name"] or "")
+            for t in (get_watchlist_stocks(row["id"]) or []):
+                t = (t or "").upper()
+                if not t or t in seen:
+                    continue
+                if t not in tier_of:
+                    tier_of[t] = tier
+                    order.append(t)
+                elif _TAPE_TIER_RANK[tier] < _TAPE_TIER_RANK[tier_of[t]]:
+                    tier_of[t] = tier
+        tickers = sorted(order,
+                         key=lambda t: (_TAPE_TIER_RANK[tier_of[t]],
+                                        order.index(t)))
         if tickers and _MKT_AVAILABLE:
             prices = _mkt._fetch_prices_chart(tickers, period="5d")
             for t in tickers:
@@ -6209,7 +6245,7 @@ def _tape_watchlist_items(limit=None):
                        if len(series) >= 2 and series[-2] else None)
                 items.append({"symbol": t, "logo": _mkt.logo_url(t),
                               "price": px, "change_pct": pct,
-                              "watchlist": True})
+                              "watchlist": True, "tier": tier_of[t]})
             _ext = _mkt.extended_quotes(tickers)
             for _item in items:
                 _q = _ext.get(_item["symbol"])

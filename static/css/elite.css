@@ -940,6 +940,19 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
   text-shadow: 0 0 14px rgba(240,201,93,.45);
 }
 .market-tape-logo { width: 15px; height: 15px; border-radius: 4px; object-fit: contain; background: #fff; padding: 1px; margin-right: 5px; vertical-align: -3px; }
+/* Tape tiers: a stock is styled by the most important list it sits on. */
+.market-tape-item.mt-aplus { background: linear-gradient(180deg, #f3d37a, #d99a2b); border-radius: 8px; padding: 2px 8px; box-shadow: 0 0 14px rgba(229,185,79,.45); animation: mt-aplus-glow 2.6s ease-in-out infinite; }
+.market-tape-item.mt-aplus .market-tape-sym { color: #1a1206; font-weight: 900; }
+.market-tape-item.mt-aplus .market-tape-sym::before { content: "\2605 "; }
+.market-tape-item.mt-aplus .market-tape-px { color: #1a1206; font-weight: 800; }
+.market-tape-item.mt-aplus .market-tape-logo { background: transparent; }
+@keyframes mt-aplus-glow { 0%,100% { box-shadow: 0 0 10px rgba(229,185,79,.35); } 50% { box-shadow: 0 0 20px rgba(229,185,79,.65); } }
+.market-tape-item.mt-avoid { opacity: .5; }
+.market-tape-item.mt-avoid .market-tape-sym { color: #ff7a72; text-decoration: line-through; text-decoration-thickness: 1px; }
+.market-tape-item.mt-extended .market-tape-sym { color: #ffb020; }
+.market-tape-item.mt-extended { border-bottom: 2px solid rgba(255,176,32,.55); }
+.market-tape-item.mt-forming { border: 1px solid rgba(229,185,79,.4); border-radius: 8px; padding: 2px 7px; }
+.market-tape-item.mt-forming .market-tape-sym::before { content: "\25CF "; color: #e5b94f; font-size: 8px; vertical-align: 2px; }
 .market-tape-px { color: #fff; font-weight: 700; }
 .market-tape-chg {
   display: inline-flex;

@@ -687,3 +687,48 @@ class TestPulseFutures:
         pulse = self._ctx(monkeypatch, "regular")["pulse"]
         assert pulse["spy_label"] == "SPY" and pulse["qqq_label"] == "QQQ"
         assert pulse["es"] == -0.09  # futures tiles still available
+
+
+class TestTapeWatchlistTiers:
+    """The banner carries every list's stocks, tiered by their best list."""
+
+    def _items(self, monkeypatch):
+        lists = [
+            {"id": 1, "name": "A+ Ready"},
+            {"id": 2, "name": "Buy & Hold"},
+            {"id": 3, "name": "Avoid / Blocked"},
+            {"id": 4, "name": "Trend Watch"},
+            {"id": 5, "name": "Setups Forming"},
+        ]
+        stocks = {1: ["NVDA"], 2: ["NVDA", "AAPL"], 3: ["TSLA"],
+                  4: ["AMD"], 5: ["PLTR"]}
+        monkeypatch.setattr(legacy, "current_user_id", lambda: 1)
+        monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: lists)
+        monkeypatch.setattr(legacy, "get_watchlist_stocks",
+                            lambda wl: stocks.get(wl, []))
+        monkeypatch.setattr(legacy._mkt, "_fetch_prices_chart",
+                            lambda tickers, period="5d":
+                            {t: [100.0, 101.0] for t in tickers})
+        monkeypatch.setattr(legacy._mkt, "extended_quotes", lambda t: {})
+        legacy._WL_TAPE_CACHE.update(at=0.0, user=None, items=[])
+        return legacy._tape_watchlist_items()
+
+    def test_all_lists_contribute(self, monkeypatch):
+        items = self._items(monkeypatch)
+        assert {i["symbol"] for i in items} == {"NVDA", "AAPL", "TSLA", "AMD", "PLTR"}
+
+    def test_aplus_leads_and_tiers_stick(self, monkeypatch):
+        items = self._items(monkeypatch)
+        assert items[0]["symbol"] == "NVDA" and items[0]["tier"] == "aplus"
+        tiers = {i["symbol"]: i["tier"] for i in items}
+        assert tiers["TSLA"] == "avoid"      # blocked beats standard flow
+        assert tiers["PLTR"] == "forming"
+        assert tiers["AAPL"] == "standard"   # NVDA took aplus from its other list
+
+    def test_tier_classifier(self):
+        assert legacy._tape_tier("A+ Ready") == "aplus"
+        assert legacy._tape_tier("Avoid / Blocked") == "avoid"
+        assert legacy._tape_tier("Extended / Chase Zone") == "extended"
+        assert legacy._tape_tier("Setups Forming") == "forming"
+        assert legacy._tape_tier("Buy & Hold") == "standard"
+        assert legacy._tape_tier("My Custom List") == "standard"
