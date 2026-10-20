@@ -84,6 +84,11 @@
 
     .brand-panel { min-width:0; padding:28px 0; }
     .brand-lockup { display:flex; align-items:center; gap:13px; margin-bottom:clamp(58px,9vh,100px); }
+    .brand-mark-logo {
+      object-fit:cover !important;
+      border-radius:50% !important;
+      border:1.5px solid rgba(229,185,79,.5);
+    }
     .brand-mark {
       width:42px;
       height:42px;
@@ -218,12 +223,12 @@
 </head>
 <body>
   <main class="login-page">
-    <img class="login-backdrop" src="{{ url_for('static', filename='icon-512.png') }}" alt="" aria-hidden="true" />
+    <img class="login-backdrop" src="{{ url_for('static', filename='img/tradestaar-elite-logo.jpg') }}" alt="" aria-hidden="true" />
 
     <div class="login-shell">
       <section class="brand-panel" aria-labelledby="login-brand-heading">
         <div class="brand-lockup">
-          <img class="brand-mark" src="{{ url_for('static', filename='icon-512.png') }}" alt="Tradestaar Elite" />
+          <img class="brand-mark brand-mark-logo" src="{{ url_for('static', filename='img/tradestaar-elite-logo.jpg') }}" alt="Tradestaar Elite" />
           <div class="brand-wordmark"><span class="brand-name">Tradestaar</span><span class="brand-tier">Elite</span></div>
         </div>
         <div class="brand-eyebrow">Market intelligence system</div>
