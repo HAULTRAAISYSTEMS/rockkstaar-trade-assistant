@@ -1150,6 +1150,14 @@ def _build_tape_items() -> list[dict]:
             items.append({"symbol": sym,
                           "logo": logo_url(sym) if sym in _LOGO_OK else "",
                           "price": px, "change_pct": chg})
+        # In extended hours the ETFs' last close is not their price —
+        # override with the latest pre/post print where one exists.
+        _ext = extended_quotes(["SPY", "QQQ", "DIA", "IWM"])
+        for _item in items:
+            _q = _ext.get(_item["symbol"])
+            if _q:
+                _item["price"] = _q["price"]
+                _item["change_pct"] = _q["pct"]
         _TAPE_CACHE.update(at=_time.time(), items=items)
     except Exception as exc:
         logger.debug("_build_tape_items failed: %s", exc)
@@ -1166,6 +1174,74 @@ def logo_url(symbol: str) -> str:
     if not symbol:
         return ""
     return f"{_LOGO_BASE}{symbol}?format=png"
+
+
+def extended_quotes(symbols: list[str]) -> dict[str, dict]:
+    """Latest extended-hours quote per symbol, from Yahoo pre/post bars.
+
+    Only genuine extended prints count: the last bar must be from today
+    and outside regular hours. Premarket % is measured against the prior
+    regular close (meta.regularMarketPrice before the open); post-market
+    % against today's close. Returns {} outside pre/post sessions, and
+    omits symbols with no extended trading yet — callers fall back to
+    the regular close for those.
+    """
+    session = market_session()
+    if session not in ("pre", "post") or not symbols:
+        return {}
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    today = datetime.now(et).date()
+    try:
+        import requests as _req
+        from concurrent.futures import ThreadPoolExecutor
+    except ImportError:
+        return {}
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+
+    def _one(sym):
+        for base in ("https://query1.finance.yahoo.com/v8/finance/chart",
+                     "https://query2.finance.yahoo.com/v8/finance/chart"):
+            try:
+                r = _req.get(f"{base}/{sym}",
+                             params={"range": "1d", "interval": "5m",
+                                     "includePrePost": "true"},
+                             headers=headers, timeout=8)
+                res = (r.json().get("chart", {}).get("result") or [None])[0]
+                if not res:
+                    continue
+                meta = res.get("meta", {})
+                base_px = meta.get("regularMarketPrice")
+                stamps = res.get("timestamp") or []
+                closes = ((res.get("indicators", {}).get("quote") or [{}])[0]
+                          .get("close") or [])
+                pairs = [(t, c) for t, c in zip(stamps, closes) if c is not None]
+                if not pairs or not base_px:
+                    return sym, None
+                last_t, last_px = pairs[-1]
+                last_et = datetime.fromtimestamp(last_t, et)
+                if last_et.date() != today:
+                    return sym, None
+                mins = last_et.hour * 60 + last_et.minute
+                if session == "pre" and mins >= 570:
+                    return sym, None
+                if session == "post" and mins < 960:
+                    return sym, None
+                return sym, {"price": round(float(last_px), 2),
+                             "pct": round((float(last_px) / float(base_px) - 1) * 100, 2)}
+            except Exception:
+                continue
+        return sym, None
+
+    out: dict[str, dict] = {}
+    try:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for sym, quote in ex.map(_one, symbols):
+                if quote:
+                    out[sym] = quote
+    except Exception:
+        pass
+    return out
 
 
 def get_market_tape() -> list[dict]:

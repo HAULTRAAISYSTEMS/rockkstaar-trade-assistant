@@ -6210,6 +6210,12 @@ def _tape_watchlist_items(limit=None):
                 items.append({"symbol": t, "logo": _mkt.logo_url(t),
                               "price": px, "change_pct": pct,
                               "watchlist": True})
+            _ext = _mkt.extended_quotes(tickers)
+            for _item in items:
+                _q = _ext.get(_item["symbol"])
+                if _q:
+                    _item["price"] = _q["price"]
+                    _item["change_pct"] = _q["pct"]
     except Exception as exc:
         logger.debug("tape watchlist items unavailable: %s", exc)
     _WL_TAPE_CACHE.update(at=now, user=uid, items=items)

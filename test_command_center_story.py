@@ -302,7 +302,8 @@ def test_tape_carries_futures_and_names():
            "vix_level": 18.4}
     series = {"DIA": [100.0, 101.0], "IWM": [50.0, 49.0], "^VIX": [18.0, 18.4]}
     with patch.object(market_engine, "get_market_context", return_value=ctx), \
-         patch.object(market_engine, "_fetch_prices_chart", return_value=series):
+         patch.object(market_engine, "_fetch_prices_chart", return_value=series), \
+         patch.object(market_engine, "extended_quotes", return_value={}):
         items = market_engine._build_tape_items()
     by = {i["symbol"]: i for i in items}
     assert {"SPY", "QQQ", "ES", "NQ", "DIA", "IWM", "VIX"} <= set(by)
@@ -311,3 +312,50 @@ def test_tape_carries_futures_and_names():
     assert by["SPY"]["price"] == 766.48  # ETF close stays — no silent swap
     assert "parqet.com" in by["SPY"]["logo"] and "SPY" in by["SPY"]["logo"]
     assert by["ES"]["logo"] == ""  # futures carry no company mark
+
+
+# ── Extended-hours quotes (2026-10-20: banner showed closes as premarket) ──
+
+def _chart_payload(price, bars):
+    return {"chart": {"result": [{
+        "meta": {"regularMarketPrice": price},
+        "timestamp": [t for t, _ in bars],
+        "indicators": {"quote": [{"close": [c for _, c in bars]}]},
+    }]}}
+
+
+class _FakeResp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def test_extended_quotes_premarket_math():
+    et = ZoneInfo("America/New_York")
+    now = datetime.now(et)
+    bar_t = int(now.replace(hour=8, minute=20, second=0).timestamp())
+    payload = _chart_payload(766.48, [(bar_t - 300, 765.10), (bar_t, 764.70)])
+    with patch.object(market_engine, "market_session", return_value="pre"), \
+         patch("requests.get", return_value=_FakeResp(payload)):
+        out = market_engine.extended_quotes(["SPY"])
+    assert out["SPY"]["price"] == 764.70
+    assert out["SPY"]["pct"] == -0.23  # vs yesterday's 766.48 close, not Friday's
+
+
+def test_extended_quotes_ignore_yesterdays_bars():
+    et = ZoneInfo("America/New_York")
+    now = datetime.now(et)
+    bar_t = int(now.replace(hour=8, minute=20, second=0).timestamp()) - 86400
+    payload = _chart_payload(766.48, [(bar_t, 764.70)])
+    with patch.object(market_engine, "market_session", return_value="pre"), \
+         patch("requests.get", return_value=_FakeResp(payload)):
+        out = market_engine.extended_quotes(["SPY"])
+    assert out == {}
+
+
+def test_extended_quotes_silent_during_regular_hours():
+    with patch.object(market_engine, "market_session", return_value="regular"), \
+         patch("requests.get", side_effect=AssertionError("must not fetch")):
+        assert market_engine.extended_quotes(["SPY"]) == {}
