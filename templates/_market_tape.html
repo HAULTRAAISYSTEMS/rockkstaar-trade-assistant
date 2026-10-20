@@ -1,0 +1,42 @@
+{# Global market tape — index banner under the nav on every page except Account. #}
+{% if market_tape %}
+<div class="market-tape" aria-label="Market index tape">
+  <div class="market-tape-track" id="market-tape-track">
+    {% for t in market_tape + market_tape %}
+    <span class="market-tape-item" data-mtape="{{ t.symbol }}">
+      <span class="market-tape-sym">{{ t.symbol }}</span>
+      <span class="market-tape-px" data-mtape-px>{{ '%.2f'|format(t.price) if t.price is not none else '—' }}</span>
+      <span class="market-tape-chg {{ 'chg-pos' if (t.change_pct or 0) > 0 else ('chg-neg' if (t.change_pct or 0) < 0 else 'chg-flat') }}" data-mtape-chg>{{ '%+.2f'|format(t.change_pct) ~ '%' if t.change_pct is not none else '—' }}</span>
+    </span>
+    {% endfor %}
+  </div>
+</div>
+<script>
+(function () {
+  // Live-update the market tape every 45s without a page reload.
+  var track = document.getElementById('market-tape-track');
+  if (!track) return;
+  function paint(items) {
+    if (!items || !items.length) return;
+    items.forEach(function (t) {
+      document.querySelectorAll('[data-mtape="' + t.symbol + '"]').forEach(function (el) {
+        var px = el.querySelector('[data-mtape-px]');
+        var chg = el.querySelector('[data-mtape-chg]');
+        if (px && t.price != null) px.textContent = Number(t.price).toFixed(2);
+        if (chg && t.change_pct != null) {
+          var v = Number(t.change_pct);
+          chg.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+          chg.className = 'market-tape-chg ' + (v > 0 ? 'chg-pos' : (v < 0 ? 'chg-neg' : 'chg-flat'));
+        }
+      });
+    });
+  }
+  setInterval(function () {
+    fetch('/api/market-tape', { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && d.ok) paint(d.items); })
+      .catch(function () {});
+  }, 45000);
+})();
+</script>
+{% endif %}
