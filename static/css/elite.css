@@ -924,33 +924,84 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
   .market-tape-item { font-size: 11px; }
 }
 
-/* ── Pull-to-refresh: Tradestaar Elite logo spinner ─────────────────────── */
+/* ── Pull-to-refresh: center-stage Tradestaar Elite loader ──────────────── */
 html, body { overscroll-behavior-y: none; }
 .ptr-indicator {
   position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%) translateY(-90px) scale(0.6);
+  transform: translate(-50%, -50%) scale(0.5);
   opacity: 0;
   z-index: 10000;
   pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+.ptr-ring {
+  position: relative;
+  width: 124px;
+  height: 124px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ptr-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 5%, var(--elite-gold-bright) 30%, transparent 55%);
+  -webkit-mask: radial-gradient(farthest-side, transparent 76%, #000 77%);
+  mask: radial-gradient(farthest-side, transparent 76%, #000 77%);
+  animation: ptr-ring-spin 1.4s linear infinite;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 8px rgba(229,185,79,.5));
+}
+.ptr-ring::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(229,185,79,.22);
+}
+.ptr-indicator.ready .ptr-ring::before {
+  background: conic-gradient(from 0deg, transparent 5%, #fff2c9 30%, var(--elite-gold-bright) 50%, transparent 70%);
+  opacity: 1;
 }
 .ptr-logo {
-  width: 56px;
-  height: 56px;
+  width: 92px;
+  height: 92px;
   border-radius: 50%;
   background-image: url('/static/img/tradestaar-elite-logo.jpg');
   background-size: 230%;
   background-position: 50% 28%;
   border: 2px solid var(--elite-gold);
-  box-shadow: 0 6px 24px rgba(0,0,0,.55), 0 0 18px rgba(229,185,79,.4);
+  box-shadow: 0 8px 32px rgba(0,0,0,.6), 0 0 28px rgba(229,185,79,.35);
+  animation: ptr-breathe 2.2s ease-in-out infinite;
 }
-.ptr-indicator.ready .ptr-logo {
-  box-shadow: 0 6px 24px rgba(0,0,0,.55), 0 0 28px rgba(229,185,79,.65);
-  border-color: var(--elite-gold-bright);
+.ptr-label {
+  font: 800 10px var(--font-ui);
+  letter-spacing: .3em;
+  text-transform: uppercase;
+  color: var(--elite-gold-bright);
+  text-indent: .3em;
+  opacity: .85;
 }
-.ptr-indicator.spinning .ptr-logo { animation: ptr-spin 0.9s linear infinite; }
-@keyframes ptr-spin { to { transform: rotate(360deg); } }
+.ptr-indicator.spinning .ptr-label::after {
+  content: "";
+  animation: ptr-dots 1.2s steps(4) infinite;
+}
+@keyframes ptr-ring-spin { to { transform: rotate(360deg); } }
+@keyframes ptr-breathe {
+  0%, 100% { box-shadow: 0 8px 32px rgba(0,0,0,.6), 0 0 24px rgba(229,185,79,.3); transform: scale(1); }
+  50% { box-shadow: 0 8px 32px rgba(0,0,0,.6), 0 0 48px rgba(229,185,79,.6); transform: scale(1.03); }
+}
+@keyframes ptr-dots {
+  0% { content: ""; } 25% { content: "."; }
+  50% { content: ".."; } 75% { content: "..."; }
+}
 
 /* ── Mobile logout button ─────────────────────────────────────────────── */
 .mobile-logout-form { padding: 4px 14px 14px; }
