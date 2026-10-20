@@ -1659,11 +1659,37 @@ window._arRefreshFn = twQuotesRefresh;
   twQuotesRefresh();          // stamp the status pill without waiting 4 s
 
   // Market-index tape items: refresh from /api/market-tape every 45s.
+  // If the poll brings symbols the server never rendered (its watchlist
+  // cache was cold at page build), rebuild the tape's market segment so
+  // every list stock joins the rotation instead of staying missing.
+  function twTapeBuild(items){
+    var track = document.querySelector('.tw-tape-track');
+    if(!track) return;
+    track.querySelectorAll('[data-mtape]').forEach(function(el){ el.remove(); });
+    var frag = document.createDocumentFragment();
+    for(var k = 0; k < 2; k++){
+      items.forEach(function(t){
+        var el = document.createElement('span');
+        el.className = 'tw-tape-item tw-tape-index';
+        el.setAttribute('data-mtape', t.symbol);
+        el.innerHTML = '<span class="tw-tape-sym">' + t.symbol + '</span> ' +
+          '<span class="tw-tape-px" data-mtape-px>—</span> ' +
+          '<span class="tw-tape-chg" data-mtape-chg>—</span>';
+        frag.appendChild(el);
+      });
+    }
+    track.insertBefore(frag, track.firstChild);
+  }
   function twTapeRefresh(){
     fetch('/api/market-tape', {headers:{'Accept':'application/json'}})
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(d){
         if(!d || !d.ok || !d.items) return;
+        var have = {};
+        document.querySelectorAll('[data-mtape]').forEach(function(el){
+          have[el.getAttribute('data-mtape')] = 1;
+        });
+        if(d.items.some(function(t){ return !have[t.symbol]; })) twTapeBuild(d.items);
         d.items.forEach(function(t){
           document.querySelectorAll('[data-mtape="' + t.symbol + '"]').forEach(function(el){
             var px = el.querySelector('[data-mtape-px]');
