@@ -878,16 +878,37 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
   position: relative;
   overflow: hidden;
   padding-top: env(safe-area-inset-top, 0px);
-  border-bottom: 1px solid var(--elite-border);
-  background: linear-gradient(180deg, rgba(229,185,79,.045), rgba(229,185,79,0) 70%), rgba(8,10,13,.92);
+  border-bottom: 1px solid rgba(229,185,79,.55);
+  background:
+    linear-gradient(180deg, rgba(229,185,79,.10), rgba(229,185,79,0) 75%),
+    radial-gradient(420px 60px at 18% 50%, rgba(229,185,79,.14), transparent 70%),
+    linear-gradient(180deg, #151009, #0a0805);
+  box-shadow: 0 10px 28px rgba(0,0,0,.5), 0 6px 22px rgba(229,185,79,.16);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+}
+/* Slow gold light sweep drifting across the banner. */
+.market-tape::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 45%;
+  background: linear-gradient(100deg, transparent, rgba(240,201,93,.10) 45%, rgba(255,236,170,.16) 50%, rgba(240,201,93,.10) 55%, transparent);
+  transform: translateX(-110%);
+  animation: market-tape-sheen 8s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes market-tape-sheen {
+  0%, 55% { transform: translateX(-110%); }
+  90%, 100% { transform: translateX(240%); }
 }
 .market-tape::after {
   content: "";
   position: absolute;
-  top: 0; bottom: 0; left: 0; width: 56px;
-  background: linear-gradient(90deg, rgba(8,10,13,.9), transparent);
+  top: 0; bottom: 0; left: 0; right: 0;
+  background:
+    linear-gradient(90deg, rgba(10,8,5,.94), transparent) left / 52px 100% no-repeat,
+    linear-gradient(-90deg, rgba(10,8,5,.94), transparent) right / 52px 100% no-repeat;
   pointer-events: none;
 }
 .market-tape-track {
@@ -895,7 +916,7 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
   align-items: center;
   gap: 34px;
   width: max-content;
-  padding: 7px 18px;
+  padding: 9px 18px;
   white-space: nowrap;
   animation: market-tape-scroll 45s linear infinite;
 }
@@ -906,22 +927,52 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
 }
 .market-tape-item {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 .market-tape-sym {
   color: var(--elite-gold-bright);
   font-weight: 800;
-  letter-spacing: .06em;
-  font-size: 11px;
+  letter-spacing: .07em;
+  font-size: 11.5px;
+  text-shadow: 0 0 14px rgba(240,201,93,.45);
 }
-.market-tape-px { color: var(--elite-text); font-weight: 600; }
-.market-tape-chg { font-size: 11px; font-weight: 700; }
+.market-tape-px { color: #fff; font-weight: 700; }
+.market-tape-chg {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  line-height: 1.35;
+}
+.market-tape-chg.chg-pos {
+  color: #4ade80;
+  background: rgba(34,197,94,.16);
+  border-color: rgba(34,197,94,.45);
+  box-shadow: 0 0 12px rgba(34,197,94,.18);
+}
+.market-tape-chg.chg-pos::before { content: "▲"; font-size: 7px; }
+.market-tape-chg.chg-neg {
+  color: #f87171;
+  background: rgba(239,68,68,.16);
+  border-color: rgba(239,68,68,.45);
+  box-shadow: 0 0 12px rgba(239,68,68,.18);
+}
+.market-tape-chg.chg-neg::before { content: "▼"; font-size: 7px; }
+.market-tape-chg.chg-flat {
+  color: #b9b2a2;
+  background: rgba(255,255,255,.06);
+  border-color: rgba(255,255,255,.14);
+}
 @media (max-width: 768px) {
-  .market-tape-track { gap: 26px; padding: 6px 14px; }
-  .market-tape-item { font-size: 11px; }
+  .market-tape-track { gap: 26px; padding: 8px 14px; }
+  .market-tape-item { font-size: 11.5px; }
 }
 
 /* ── Pull-to-refresh: center-stage Tradestaar Elite loader ──────────────── */
