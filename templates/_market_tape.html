@@ -1,6 +1,6 @@
-{# Global market tape — index banner under the nav on every page except Account. #}
-{% if market_tape %}
-<div class="market-tape" aria-label="Market index tape">
+{# Global market tape — index banner under the nav on every page except Account.
+   Always renders the shell; items hydrate via JS if the server cache was cold. #}
+<div class="market-tape" aria-label="Market index tape" {% if not market_tape %}hidden{% endif %}>
   <div class="market-tape-track" id="market-tape-track">
     {% for t in market_tape + market_tape %}
     <span class="market-tape-item" data-mtape="{{ t.symbol }}">
@@ -16,8 +16,25 @@
   // Live-update the market tape every 45s without a page reload.
   var track = document.getElementById('market-tape-track');
   if (!track) return;
+  function build(items) {
+    // Cold cache: construct the tape items from the API response.
+    var bar = document.querySelector('.market-tape');
+    items.forEach(function (t) {
+      for (var k = 0; k < 2; k++) {
+        var el = document.createElement('span');
+        el.className = 'market-tape-item';
+        el.setAttribute('data-mtape', t.symbol);
+        el.innerHTML = '<span class="market-tape-sym">' + t.symbol + '</span> ' +
+          '<span class="market-tape-px" data-mtape-px>—</span> ' +
+          '<span class="market-tape-chg" data-mtape-chg>—</span>';
+        track.appendChild(el);
+      }
+    });
+    if (bar) bar.hidden = false;
+  }
   function paint(items) {
     if (!items || !items.length) return;
+    if (!track.children.length) build(items);
     items.forEach(function (t) {
       document.querySelectorAll('[data-mtape="' + t.symbol + '"]').forEach(function (el) {
         var px = el.querySelector('[data-mtape-px]');
@@ -31,12 +48,13 @@
       });
     });
   }
-  setInterval(function () {
+  function fetchTape() {
     fetch('/api/market-tape', { headers: { 'Accept': 'application/json' } })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) { if (d && d.ok) paint(d.items); })
       .catch(function () {});
-  }, 45000);
+  }
+  fetchTape(); // hydrate immediately if the server cache was cold
+  setInterval(fetchTape, 45000);
 })();
 </script>
-{% endif %}

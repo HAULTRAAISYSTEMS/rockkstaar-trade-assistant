@@ -1133,9 +1133,7 @@ def get_market_tape() -> list[dict]:
     items = _TAPE_CACHE["items"]
     if items and now - _TAPE_CACHE["at"] < _TAPE_TTL_S:
         return items
-    if items:
-        _refresh_tape_bg()
-        return items
-    # Cold cache: build synchronously once so the first render isn't empty.
-    # (Only happens once per process boot.)
-    return _build_tape_items()
+    # Stale or cold: kick off background refresh, return what we have
+    # (possibly empty). The 45s JS poll fills it in — never block the page.
+    _refresh_tape_bg()
+    return items
