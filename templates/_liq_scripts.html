@@ -127,6 +127,23 @@
   /* Layout */
   .cc-split { display: grid; grid-template-columns: 1.1fr 1fr; gap: 14px; margin-bottom: 14px }
   .cc-trio  { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 14px; margin-bottom: 14px }
+  /* All/Investing/Trading mode: reorder the command-centre sections so the
+     toggle visibly changes the page. Scoped to .liq-page (command centre). */
+  body.mode-invest .liq-page, body.mode-trade .liq-page { display: flex; flex-direction: column }
+  body.mode-invest .liq-page > .cc-split { order: 3 }
+  body.mode-invest .liq-page > #what-changed { order: 1 }
+  body.mode-invest .liq-page > .cc-trio { order: 2 }
+  body.mode-invest .cc-split > #market-story-banner { order: 2 }
+  body.mode-invest .cc-split > .cc-card { order: 1 }
+  body.mode-invest .cc-trio > :nth-child(1) { order: 2 }
+  body.mode-invest .cc-trio > :nth-child(2) { order: 3 }
+  body.mode-invest .cc-trio > :nth-child(3) { order: 1 }
+  body.mode-trade .liq-page > .cc-split { order: 1 }
+  body.mode-trade .liq-page > .cc-trio { order: 2 }
+  body.mode-trade .liq-page > #what-changed { order: 3 }
+  body.mode-trade .cc-trio > :nth-child(1) { order: 2 }
+  body.mode-trade .cc-trio > :nth-child(2) { order: 1 }
+  body.mode-trade .cc-trio > :nth-child(3) { order: 3 }
 
   .cc-card {
     position: relative;
@@ -830,9 +847,23 @@ async function refreshAll() {
 ───────────────────────────────────────────────────────────── */
 function setMode(mode) {
   _mode = mode;
+  try { localStorage.setItem('cc-mode', mode); } catch(e) {}
+  document.body.classList.remove('mode-both', 'mode-invest', 'mode-trade');
+  document.body.classList.add('mode-' + mode);
   document.querySelectorAll('.liq-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   runScan();
 }
+// Restore the last mode on load so the page opens where the user left it.
+document.addEventListener('DOMContentLoaded', function () {
+  var m = 'both';
+  try { m = localStorage.getItem('cc-mode') || 'both'; } catch(e) {}
+  if (['both', 'invest', 'trade'].indexOf(m) === -1) m = 'both';
+  if (m !== 'both') {
+    _mode = m;
+    document.body.classList.add('mode-' + m);
+    document.querySelectorAll('.liq-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+  }
+});
 
 /* ─────────────────────────────────────────────────────────────
    1. FED LIQUIDITY STATUS
