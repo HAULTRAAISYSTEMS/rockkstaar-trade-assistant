@@ -17,14 +17,18 @@
   var track = document.getElementById('market-tape-track');
   if (!track) return;
   function build(items) {
-    // Cold cache: construct the tape items from the API response.
+    // Construct the tape items from the API response. Used on a cold
+    // cache AND whenever the poll brings symbols the page never rendered
+    // (server cache was warm for the indexes but cold for the watchlist,
+    // so only part of the tape made the first paint).
     var bar = document.querySelector('.market-tape');
+    track.innerHTML = '';
     items.forEach(function (t) {
       for (var k = 0; k < 2; k++) {
         var el = document.createElement('span');
         el.className = 'market-tape-item' + (t.tier ? ' mt-' + t.tier : '');
         el.setAttribute('data-mtape', t.symbol);
-        el.innerHTML = (t.logo ? '<img class="market-tape-logo" src="' + t.logo + '" alt="" loading="lazy" onerror="this.remove()">' : '') +
+        el.innerHTML = (t.logo ? '<img class="market-tape-logo" src="' + t.logo + '" alt="" loading="lazy" onerror="if(!this.dataset.fbk){this.dataset.fbk=1;this.src=\'https://financialmodelingprep.com/image-stock/' + t.symbol + '.png\';}else{this.remove();}">' : '') +
           '<span class="market-tape-sym">' + t.symbol + '</span> ' +
           '<span class="market-tape-px" data-mtape-px>—</span> ' +
           '<span class="market-tape-chg" data-mtape-chg>—</span>';
@@ -35,7 +39,12 @@
   }
   function paint(items) {
     if (!items || !items.length) return;
-    if (!track.children.length) build(items);
+    var have = {};
+    track.querySelectorAll('[data-mtape]').forEach(function (el) {
+      have[el.getAttribute('data-mtape')] = 1;
+    });
+    var missing = items.some(function (t) { return !have[t.symbol]; });
+    if (missing) build(items);
     items.forEach(function (t) {
       document.querySelectorAll('[data-mtape="' + t.symbol + '"]').forEach(function (el) {
         var px = el.querySelector('[data-mtape-px]');
