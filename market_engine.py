@@ -675,6 +675,24 @@ def refresh_market_context() -> dict:
     return dict(ctx)
 
 
+def market_session(now=None) -> str:
+    """US equity session in ET: 'pre' 04:00-09:30, 'regular' 09:30-16:00,
+    'post' 16:00-20:00, else 'closed' (including weekends)."""
+    from zoneinfo import ZoneInfo
+    et = (now or datetime.now(ZoneInfo("America/New_York"))).astimezone(
+        ZoneInfo("America/New_York"))
+    if et.weekday() >= 5:
+        return "closed"
+    mins = et.hour * 60 + et.minute
+    if 240 <= mins < 570:
+        return "pre"
+    if 570 <= mins < 960:
+        return "regular"
+    if 960 <= mins < 1200:
+        return "post"
+    return "closed"
+
+
 def get_market_context() -> dict:
     """
     Return cached market context immediately — NEVER blocks the calling thread.
@@ -888,6 +906,18 @@ def generate_market_story(mkt_ctx: dict, liq_score: int | None = None) -> dict:
 
     # ── Supporting bullets ────────────────────────────────────────────────────
     bullets = []
+
+    # Before the open, futures are the only live direction there is — lead
+    # with them. Yesterday's daily moves are history, not a morning read.
+    if market_session() == "pre" and (es_1d is not None or nq_1d is not None):
+        _parts = []
+        if es_1d is not None:
+            _parts.append(f"ES {es_1d:+.2f}%")
+        if nq_1d is not None:
+            _parts.append(f"NQ {nq_1d:+.2f}%")
+        bullets.append(
+            "Premarket futures: " + " · ".join(_parts)
+            + " — ahead of the 9:30 open")
 
     # Index trends
     if "Bullish" in qqq_trend and "Bullish" in spy_trend:
@@ -1114,6 +1144,13 @@ def _build_tape_items() -> list[dict]:
             ("IWM", round(iwm[-1], 2) if iwm else None, _pct(iwm)),
             ("VIX", vix, vix_chg),
         ]
+        if market_session() == "pre":
+            # Premarket: ES/NQ futures are the live direction — yesterday's
+            # ETF closes are not this morning's read.
+            if ctx.get("es_futures") is not None and ctx.get("es_1d_chg") is not None:
+                raw[0] = ("ES", ctx["es_futures"], ctx["es_1d_chg"])
+            if ctx.get("nq_futures") is not None and ctx.get("nq_1d_chg") is not None:
+                raw[1] = ("NQ", ctx["nq_futures"], ctx["nq_1d_chg"])
         for sym, px, chg in raw:
             items.append({"symbol": sym, "price": px, "change_pct": chg})
         _TAPE_CACHE.update(at=_time.time(), items=items)

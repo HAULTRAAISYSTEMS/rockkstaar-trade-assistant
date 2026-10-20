@@ -264,3 +264,29 @@ def test_trade_coach_still_allows_when_market_known():
     market_temp = {"regime": "RISK_ON", "longs_ok": True, "shorts_ok": True}
     out = app_module.compute_trade_coach(stock, plan, market_temp, {"trading_mode": "SWING TRADE"})
     assert out["coach_status"] == "TRADE ALLOWED"
+
+
+# ── Premarket futures lead (reported 2026-10-20: yesterday's closes at 7:52 AM) ──
+
+def test_market_session_labels():
+    assert market_engine.market_session(_et(2026, 10, 20, 7, 52)) == "pre"
+    assert market_engine.market_session(_et(2026, 10, 20, 10, 0)) == "regular"
+    assert market_engine.market_session(_et(2026, 10, 20, 17, 0)) == "post"
+    assert market_engine.market_session(_et(2026, 10, 17, 10, 0)) == "closed"  # Saturday
+
+
+def test_story_leads_with_futures_before_the_open():
+    ctx = _story_ctx(es_1d_chg=-0.09, nq_1d_chg=-0.43)
+    with patch.object(market_engine, "market_session", return_value="pre"):
+        story = market_engine.generate_market_story(ctx, None)
+    assert story["bullets"], "expected bullets"
+    assert "Premarket futures" in story["bullets"][0]
+    assert "ES -0.09%" in story["bullets"][0]
+    assert "NQ -0.43%" in story["bullets"][0]
+
+
+def test_story_has_no_futures_bullet_during_regular_hours():
+    ctx = _story_ctx(es_1d_chg=-0.09, nq_1d_chg=-0.43)
+    with patch.object(market_engine, "market_session", return_value="regular"):
+        story = market_engine.generate_market_story(ctx, None)
+    assert not any("Premarket futures" in b for b in story["bullets"])

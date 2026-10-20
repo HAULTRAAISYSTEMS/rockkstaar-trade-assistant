@@ -8117,7 +8117,25 @@ def _command_center_context() -> dict:
             "qqq_trend": mkt.get("qqq_trend") or "",
             "leading": (mkt.get("leading_sectors") or [])[:2],
             "lagging": (mkt.get("weak_sectors") or [])[:2],
+            "spy_label": "SPY",
+            "qqq_label": "QQQ",
+            "session": "",
+            "futures": False,
         }
+        # Before the 9:30 open, yesterday's daily % is history presented as
+        # news. When futures are available the pulse leads with them — the
+        # only live direction there is at 7 AM.
+        try:
+            session = _mkt.market_session() if _MKT_AVAILABLE else ""
+        except Exception:
+            session = ""
+        context["pulse"]["session"] = session
+        if session == "pre" and mkt.get("es_1d_chg") is not None:
+            context["pulse"]["spy"] = mkt.get("es_1d_chg")
+            context["pulse"]["qqq"] = mkt.get("nq_1d_chg")
+            context["pulse"]["spy_label"] = "ES FUTURES"
+            context["pulse"]["qqq_label"] = "NQ FUTURES"
+            context["pulse"]["futures"] = True
         # The liquidity score is the one number worth keeping from the Fed
         # panel now that the panel itself lives on /macro.
         try:
