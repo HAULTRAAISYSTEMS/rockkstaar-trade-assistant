@@ -877,6 +877,7 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
 .market-tape {
   position: relative;
   overflow: hidden;
+  padding-top: env(safe-area-inset-top, 0px);
   border-bottom: 1px solid var(--elite-border);
   background: linear-gradient(180deg, rgba(229,185,79,.045), rgba(229,185,79,0) 70%), rgba(8,10,13,.92);
   backdrop-filter: blur(14px);
