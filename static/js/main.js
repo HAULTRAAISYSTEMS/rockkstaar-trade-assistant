@@ -112,6 +112,9 @@ document.addEventListener("DOMContentLoaded", function () {
     }, { passive: true });
     menu.addEventListener("touchmove", function (e) {
       if (e.touches.length !== 1) return;
+      // Only dismiss when the sheet itself is scrolled to the top —
+      // otherwise the user is just scrolling the menu's own content.
+      if (menu.scrollTop > 4) return;
       var dy = e.touches[0].clientY - swipeStartY;
       if (dy > 70) {
         menu.hidden = true;
