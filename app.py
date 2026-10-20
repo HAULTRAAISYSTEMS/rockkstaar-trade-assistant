@@ -6180,7 +6180,7 @@ def api_earnings_digest():
 _WL_TAPE_CACHE = {"at": 0.0, "user": None, "items": []}
 
 
-def _tape_watchlist_items(limit=8):
+def _tape_watchlist_items(limit=None):
     """The signed-in user's watchlist as banner tape items.
 
     Cached 60s per user so the tape's 45s poll doesn't refetch quotes.
