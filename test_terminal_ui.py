@@ -9,7 +9,9 @@ class TerminalUiTests(unittest.TestCase):
         for label in ("Chart", "Overlays", "Indicators", "Draw"):
             self.assertIn(f'<span class="tw-tool-label">{label}</span>', template)
         self.assertIn('id="tw-ema-legend"', template)
-        self.assertLess(template.index('id="tw-ema-legend"'), template.index('id="tw-chart-box"'))
+        # TradingView-style: the EMA legend overlays the chart itself.
+        self.assertLess(template.index('id="tw-chart-box"'), template.index('id="tw-ema-legend"'))
+        self.assertLess(template.index('id="tw-ema-legend"'), template.index('id="tw-time-axis"'))
         self.assertIn("lastValueVisible:false", template)
         self.assertNotIn("title:'EMA '+period", template)
 

@@ -13,13 +13,13 @@
 .tw { max-width: 1720px; margin: 0 auto; }
 
 /* ── Status line ── */
-.tw-status { display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap; padding: var(--sp-2) var(--sp-1) var(--sp-3); }
+.tw-status { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin: 0 var(--sp-5) var(--sp-3); padding: 8px 12px; border:1px solid rgba(229,185,79,.28); border-radius:12px; background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0)), var(--surface-inset); box-shadow: 0 6px 20px rgba(0,0,0,.3); }
 .tw-title { font-family: var(--font-display); text-transform: uppercase; letter-spacing: var(--track-display); font-weight: var(--fw-bold); font-size: var(--fs-h2); color: var(--text-hi); line-height: 1; }
 .tw-title .accent { color: var(--orange-500); }
-.tw-chip { display:inline-flex; align-items:center; gap:6px; font-family: var(--font-mono); font-size: var(--fs-xs); padding: 3px 10px; border-radius: var(--r-full); background: var(--ink-750); border:1px solid var(--border-subtle); color: var(--text-muted); white-space:nowrap; }
+.tw-chip { display:inline-flex; align-items:center; gap:6px; font-family: var(--font-mono); font-size: var(--fs-xs); padding: 4px 10px; border-radius:8px; background: rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.09); color: var(--text-muted); white-space:nowrap; }
 .tw-chip b { color: var(--text-hi); font-weight: var(--fw-semi); }
 .tw-acct-chip { margin-left:auto; }
-.tw-paper-flag { color: var(--warn-500); border-color: rgba(255,176,32,.35); background: rgba(255,176,32,.08); }
+.tw-paper-flag { color: #1a1206 !important; border: none !important; background: linear-gradient(180deg, #f3d37a, #d99a2b) !important; font-weight: 800; letter-spacing: .06em; box-shadow: 0 0 14px rgba(229,185,79,.35); }
 
 /* The tape and the chips are polled, so the page has to say whether what you
    are reading is moving or frozen. A green pulsing dot means quotes are
@@ -121,7 +121,22 @@
 .tw-sym-px { font-family: var(--font-mono); font-weight: var(--fw-bold); font-size: 28px; color: var(--text-hi); line-height:1.1; }
 .tw-sym-chg { font-family: var(--font-mono); font-size: var(--fs-lg); font-weight: var(--fw-semi); }
 
-.tw-chart-toolbar { display:flex; align-items:center; gap: var(--sp-3); padding: 0 var(--sp-5) var(--sp-3); }
+.tw-chart-toolbar { display:flex; align-items:center; gap:6px; margin: 0 var(--sp-5) var(--sp-3); padding: 6px 10px; border:1px solid rgba(229,185,79,.28); border-radius:12px; background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0)), var(--surface-inset); overflow-x:auto; white-space:nowrap; scrollbar-width:none; }
+.tw-chart-toolbar::-webkit-scrollbar { display:none; }
+.tw-control-label { display:none !important; }
+.tw-interval-wrap, .tw-range-wrap { display:flex !important; align-items:center; gap:4px; flex:0 0 auto; margin:0; }
+.tw-type { display:flex !important; align-items:center; gap:0; margin:0 !important; width:auto !important; flex:0 0 auto; }
+.tw-tf { display:flex; gap:2px; flex:0 0 auto; }
+.tw-tf-btn { background:transparent !important; border:none !important; color:var(--text-faint); padding:6px 9px !important; border-radius:999px !important; }
+.tw-tf-btn.active { color:#1a1206 !important; background:linear-gradient(180deg,#f3d37a,#d99a2b) !important; font-weight:800; }
+.tw-tool-group { background:none !important; border:none !important; border-radius:0 !important; padding:0 0 0 10px !important; margin-left:10px !important; display:flex !important; align-items:center; flex:0 0 auto; border-left:1px solid rgba(255,255,255,.09) !important; }
+.tw-type > .tw-tool-group:first-child { border-left:none !important; padding-left:0 !important; margin-left:0 !important; }
+.tw-tool-label { display:none !important; }
+.tw-tool-buttons { display:flex !important; gap:4px; align-items:center; }
+.tw-type-btn { width:auto !important; height:30px !important; padding:0 10px !important; font-size:10px !important; font-family:var(--font-mono) !important; background:transparent !important; border:none !important; border-radius:8px !important; color:var(--text-faint); white-space:nowrap; }
+.tw-type-btn.tw-icon-btn { width:30px !important; padding:0 !important; font-size:14px !important; }
+.tw-type-btn.active { color:#f3d37a !important; background:rgba(229,185,79,.14) !important; box-shadow:inset 0 0 0 1px rgba(229,185,79,.4) !important; }
+.tw-range-select { background:transparent !important; border:none !important; height:30px; color:var(--text-body); font:700 10px var(--font-mono); }
 .tw-tf { display:flex; gap:4px; }
 .tw-tf-btn { font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: var(--fw-med); color: var(--text-faint); background: var(--ink-750); border:1px solid var(--border-subtle); border-radius: var(--r-sm); padding: 5px 12px; cursor:pointer; transition: all var(--dur-fast) var(--ease-out); }
 .tw-tf-btn:hover { color: var(--text-body); border-color: var(--border-strong); }
@@ -184,7 +199,7 @@
   border-radius: 8px; color: var(--text-faint); font-size: 12px; cursor: pointer;
 }
 .tw-ind-settings:hover { color: var(--elite-gold-bright, #f3d37a); border-color: var(--elite-border-strong, rgba(229,185,79,.34)); }
-.tw-feed-strip{display:flex;align-items:center;gap:9px;margin:0 var(--sp-5) var(--sp-3);padding:8px 10px;border:1px solid var(--border-subtle);border-radius:var(--r-sm);background:#0b0e11;font:10px var(--font-mono);color:var(--text-faint);min-height:34px}
+.tw-feed-strip{display:flex;align-items:center;gap:8px;margin:0 var(--sp-5) 2px;padding:2px 2px;border:none;border-radius:0;background:none;font:9px var(--font-mono);color:var(--text-faint);min-height:0}
 .tw-feed-badge{font-weight:800;letter-spacing:.06em;padding:3px 7px;border-radius:999px;color:var(--text-body);background:var(--ink-700);white-space:nowrap}.tw-feed-badge.live{color:var(--pos-500);background:rgba(34,197,139,.12)}.tw-feed-badge.delayed,.tw-feed-badge.fallback{color:var(--warn-500);background:rgba(255,176,32,.12)}.tw-feed-badge.partial{color:#72b7ff;background:rgba(74,163,255,.12)}
 .tw-feed-asof{margin-left:auto;white-space:nowrap}.tw-feed-detail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
@@ -195,6 +210,9 @@
 #tw-rsi-panel { height: 112px; } #tw-macd-panel { height: 132px; }
 .tw-indicator canvas { display: block; width: 100%; height: 100%; }
 .tw-time-axis { display: block; width: 100%; border-top: 1px solid rgba(255,255,255,.07); background: rgba(0,0,0,.22); }
+.tw-ema-legend { position:absolute !important; z-index:3; left:10px; top:26px; display:flex !important; flex-wrap:wrap; gap:10px; margin:0 !important; min-height:0 !important; max-width:calc(100% - 96px); pointer-events:none; }
+.tw-ema-legend span { padding:0 !important; border:none !important; background:none !important; }
+.tw-ema-legend b { color:rgba(174,183,194,.85) !important; font:700 9px var(--font-mono) !important; }
 .tw-chart-canvas { position:absolute; inset:0; }
 .tw-chart-empty { position:absolute; inset:0; z-index:2; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; text-align:center; padding: var(--sp-4); pointer-events:none; background: var(--surface-inset); }
 .tw-chart-empty.hidden { display:none; }
@@ -467,11 +485,11 @@
 
         <div class="tw-draw-status" id="tw-draw-status" hidden></div>
 
-        <div class="tw-ema-legend" id="tw-ema-legend" aria-label="Active EMA overlays"></div>
         <div class="tw-chart-stack" id="tw-chart-stack">
         <div class="tw-chart" id="tw-chart-box">
           <div class="tw-chart-canvas" id="tw-chart"></div>
           <canvas class="tw-chart-drawing" id="tw-chart-drawing" aria-label="Chart drawing layer"></canvas>
+          <div class="tw-ema-legend" id="tw-ema-legend" aria-label="Active EMA overlays"></div>
           <div class="tw-chart-tooltip" id="tw-chart-tooltip" hidden></div>
           <div class="tw-chart-hint" id="tw-chart-hint">Hover for OHLCV · click a candle to pin</div>
           <div class="tw-chart-empty" id="tw-chart-empty">
@@ -1203,6 +1221,16 @@ function twDrawMacd(macd,signal,hist){
   twIndCrosshair(ctx,fit,pad,x,y,hv,hv==null?'':hv.toFixed(2));
   var valid=[];for(var i=n-1;i>=0;i--){if(macd[i]!=null&&signal[i]!=null&&hist[i]!=null){valid=[macd[i],signal[i],hist[i]];break;}}twNum('tw-macd-value',valid.length?valid.map(function(v){return v.toFixed(2);}).join(' · '):'—');
 }
+function twAxisLabel(t){
+  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  if(t!=null&&typeof t==='object') return MON[(t.month-1)%12]+" '"+String(t.year).slice(2);
+  var d=new Date(Number(t)*1000); if(isNaN(d.getTime())) return String(t);
+  if(['1m','5m','15m','1h','4h'].indexOf(twChartState.interval)>=0){
+    var h=d.getHours(),m=d.getMinutes(),ap=h>=12?'PM':'AM';h=h%12;if(h===0)h=12;
+    return h+':'+(m<10?'0':'')+m+' '+ap;
+  }
+  return MON[d.getMonth()]+' '+d.getDate();
+}
 function twDrawTimeAxis(){
   var cv=document.getElementById('tw-time-axis');if(!cv)return;
   var anyInd=twChartState.indicators.rsi||twChartState.indicators.macd;
@@ -1212,16 +1240,19 @@ function twDrawTimeAxis(){
   var ctx=fit.ctx,win=twChartState.indWindow,n=win.end-win.start;if(n<2)return;
   var x=function(i){return twIndX(i,n,fit.w,ax);};
   ctx.font='9px ui-monospace,monospace';ctx.fillStyle='#8a93a0';
-  var ticks=6;
-  for(var k=0;k<ticks;k++){
-    var i=Math.round(k*(n-1)/(ticks-1)),bar=twChartState.bars[win.start+i];
-    if(!bar)continue;var px=x(i),lbl=twBarDate(bar.time);
-    ctx.textAlign=px<36?'left':(px>fit.w-ax-36?'right':'center');
-    ctx.fillText(lbl,px,15);
+  // Collision-aware ticks: skip any label that would overlap the last drawn.
+  var maxTicks=Math.max(2,Math.floor((fit.w-ax)/76)),step=Math.max(1,Math.floor((n-1)/maxTicks)),lastR=-1e9;
+  for(var i=0;i<n;i+=step){
+    var bar=twChartState.bars[win.start+i];if(!bar)continue;
+    var lbl=twAxisLabel(bar.time),w=ctx.measureText(lbl).width;
+    var px=Math.min(Math.max(x(i),w/2+2),fit.w-ax-w/2-2);
+    if(px-w/2<lastR+7)continue;
+    ctx.textAlign='center';ctx.fillText(lbl,px,15);
+    lastR=px+w/2;
   }
   var hov=twChartState.hoverIdx;
   if(hov!=null&&hov>=win.start&&hov<win.end){
-    var hbar=twChartState.bars[hov],hpx=x(hov-win.start),hlbl=twBarDate(hbar.time);
+    var hbar=twChartState.bars[hov],hpx=x(hov-win.start),hlbl=twAxisLabel(hbar.time);
     ctx.font='700 9px ui-monospace,monospace';var twd=ctx.measureText(hlbl).width+12;
     var rx=Math.min(Math.max(hpx-twd/2,2),Math.max(2,fit.w-ax-twd-2));
     ctx.fillStyle='#FF7A18';
