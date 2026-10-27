@@ -306,9 +306,14 @@ class TestThePageTeaches:
     discards, so the whole tab rendered as unstyled HTML.
     """
 
-    @classmethod
+    # Not a classmethod. Stacking @classmethod above @pytest.fixture stopped
+    # being honoured in pytest 8, so on any newer pytest these became "fixture
+    # 'page' not found" — nine errors rather than nine failures, which reads
+    # like an environment grumble and not like protection that has gone. The
+    # page itself was fine the whole time; the guards on it were not running.
+    # pytest is pinned nowhere, so one `pip install -U pytest` was all it took.
     @pytest.fixture(scope="class")
-    def page(cls):
+    def page(self):
         from unittest.mock import patch
         import web_app, app as _app
         c = web_app.app.test_client()
@@ -548,9 +553,14 @@ class TestTheTickerHasSomethingToPress:
     one did not.
     """
 
-    @classmethod
+    # Not a classmethod. Stacking @classmethod above @pytest.fixture stopped
+    # being honoured in pytest 8, so on any newer pytest these became "fixture
+    # 'page' not found" — nine errors rather than nine failures, which reads
+    # like an environment grumble and not like protection that has gone. The
+    # page itself was fine the whole time; the guards on it were not running.
+    # pytest is pinned nowhere, so one `pip install -U pytest` was all it took.
     @pytest.fixture(scope="class")
-    def page(cls):
+    def page(self):
         from unittest.mock import patch
         import web_app, app as _app
         c = web_app.app.test_client()
