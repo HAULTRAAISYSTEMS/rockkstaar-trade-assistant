@@ -133,6 +133,7 @@ class TestOneColdFeedIsAGapNotAnErrorPage:
             context = legacy._command_center_context()
         assert set(context) == {"week", "news", "setups", "watchlist",
                                 "watchlist_name", "pulse", "next_up", "story",
+                                "story_note",
                                 "news_refreshing", "news_note", "research_digest"}
 
     def test_no_watchlist_is_not_an_error(self, monkeypatch):
@@ -432,16 +433,33 @@ class TestTheStripReadsAsEnglish:
             sess["user_id"] = 1
         return c
 
+    # A regime string on its own is not a market read — the strip shows a dash
+    # for that now (see test_a_regime_with_no_market_behind_it_shows_a_dash),
+    # so these carry the index moves that make the context a real one.
+    @staticmethod
+    def _ctx(regime):
+        return {"regime": regime, "qqq_1d_pct": -0.4, "spy_1d_pct": -0.2,
+                "fallback": False}
+
+    def test_a_regime_with_no_market_behind_it_shows_a_dash(self, client, monkeypatch):
+        """An empty market cache carries regime NEUTRAL with longs_ok True,
+        and the strip printed it as a finding. A regime with no index data
+        behind it is not a read, and the cell says so instead."""
+        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: {"regime": "NEUTRAL"})
+        html = client.get("/").get_data(as_text=True)
+        assert "not read yet" in html
+        assert 'id="cc-regime">Neutral<' not in html
+
     def test_the_regime_is_not_shown_as_a_key(self, client, monkeypatch):
         """It rendered "Risk_on" — the underscore is how the value is stored,
         not how it is read."""
-        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: {"regime": "risk_on"})
+        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: self._ctx("risk_on"))
         html = client.get("/").get_data(as_text=True)
         assert "Risk On" in html
         assert "Risk_on" not in html and "Risk_On" not in html
 
     def test_a_hyphenated_regime_reads_the_same_way(self, client, monkeypatch):
-        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: {"regime": "Risk-Off"})
+        monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: self._ctx("Risk-Off"))
         html = client.get("/").get_data(as_text=True)
         assert "Risk Off" in html
 

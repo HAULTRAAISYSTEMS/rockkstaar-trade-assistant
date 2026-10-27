@@ -8209,7 +8209,7 @@ def _command_center_context() -> dict:
     """
     context = {"week": [], "news": [], "setups": [], "watchlist": [],
                "watchlist_name": "", "pulse": {}, "next_up": None,
-               "story": None,
+               "story": None, "story_note": "",
                "news_refreshing": False, "news_note": "", "research_digest": {
                    "items": [], "material_count": 0, "alert_count": 0,
                    "reviewed_at": "", "tracked_theses": 0, "tracked_tickers": 0,
@@ -8244,16 +8244,49 @@ def _command_center_context() -> dict:
             "nq": mkt.get("nq_1d_chg"),
             "session": "",
         }
-        # Before the open the ETF tiles are the last close, so say so —
-        # the futures tiles beside them carry the live direction.
+        # Which session these percentages belong to.
+        #
+        # The ETF tiles are day-changes off daily candles. Only the pre-open
+        # case was labelled, so from 4 PM until the next open — and all
+        # weekend — the strip showed a closed session's move under a bare
+        # "SPY", reading as though it were happening now. _day_label names
+        # the session the candle belongs to; the tile carries that name
+        # whenever it is not the one currently trading.
         try:
             session = _mkt.market_session() if _MKT_AVAILABLE else ""
         except Exception:
             session = ""
         context["pulse"]["session"] = session
-        if session == "pre":
-            context["pulse"]["spy_label"] = "SPY CLOSE"
-            context["pulse"]["qqq_label"] = "QQQ CLOSE"
+        try:
+            day = _mkt._day_label() if _MKT_AVAILABLE else "today"
+        except Exception:
+            day = "today"
+        context["pulse"]["day_label"] = day
+        # Only when the session is actually known. An unknown session is not
+        # evidence that the market is shut, so it keeps the bare label.
+        if session and session != "regular":
+            # "SPY FRI" on a Sunday, "SPY CLOSE" after today's close.
+            suffix = "CLOSE" if day == "today" else day[:3].upper()
+            context["pulse"]["spy_label"] = f"SPY {suffix}"
+            context["pulse"]["qqq_label"] = f"QQQ {suffix}"
+
+        # Whether any of this is a reading at all. An empty or cold market
+        # cache hands back regime "NEUTRAL" with longs_ok True, which the
+        # strip printed as a finding; `known` is what lets the page show a
+        # dash instead of a conclusion it does not have.
+        try:
+            context["pulse"]["known"] = _mkt.context_is_real(mkt) if _MKT_AVAILABLE else False
+        except Exception:
+            context["pulse"]["known"] = False
+        # And how old the snapshot is. get_market_context returns a stale
+        # cache immediately and refreshes behind the request, so an hours-old
+        # regime used to render identically to a seconds-old one.
+        try:
+            age = _mkt.snapshot_age_minutes(mkt) if _MKT_AVAILABLE else None
+        except Exception:
+            age = None
+        context["pulse"]["age_minutes"] = age
+        context["pulse"]["snapshot_stale"] = bool(age is not None and age > 30)
         # The liquidity score is the one number worth keeping from the Fed
         # panel now that the panel itself lives on /macro.
         try:
@@ -8272,8 +8305,22 @@ def _command_center_context() -> dict:
         except Exception as exc:
             logger.debug("command centre: market story unavailable: %s", exc)
             context["story"] = None
+        # generate_market_story now declines rather than composing a read out
+        # of an empty context, so the page needs to be able to say why the
+        # card is blank. "Still loading" is true on a cold start and a lie
+        # after a failed refresh, and the two look identical to a reader.
+        if context["story"] is None:
+            context["story_note"] = (
+                "Market data is not loaded yet — the read appears once the "
+                "index and sector snapshot arrives."
+                if not context["pulse"].get("known")
+                else "The market read could not be composed from this snapshot."
+            )
     except Exception as exc:
         logger.debug("command centre: market context unavailable: %s", exc)
+        context["story_note"] = (
+            "Market data is unavailable right now, so there is no read to show."
+        )
 
     summary = {}
     try:
@@ -8563,18 +8610,32 @@ def api_opportunity_refresh():
     except Exception as exc:
         logger.debug("api_opportunity_refresh story: %s", exc)
 
+    # `bool(market)` was the success test, and an empty context is a populated
+    # dict — so a refresh that read nothing still reported "Market pulse
+    # refreshed" and handed the strip a regime of NEUTRAL to display.
+    known = False
+    try:
+        known = _mkt.context_is_real(market) if _MKT_AVAILABLE else False
+    except Exception:
+        known = False
+
     return jsonify({
-        "ok": bool(market),
+        "ok": known,
         "errors": errors,
-        "msg": "Market pulse refreshed." if market else "Refresh is still pending.",
+        "msg": ("Market pulse refreshed." if known else
+                "Refresh is still pending — no market snapshot yet."),
         "story": story,
         "market": {
-            "regime": market.get("regime"),
+            # The client must not paint a regime over a dash unless this is
+            # True; see _renderLivePulse.
+            "known": known,
+            "regime": market.get("regime") if known else None,
             "vix": market.get("vix_level"),
             "vix_as_of": market.get("vix_as_of_label") or "",
             "vix_source": market.get("vix_source") or "",
             "spy": market.get("spy_1d_pct"),
             "qqq": market.get("qqq_1d_pct"),
+            "day_label": _mkt._day_label() if _MKT_AVAILABLE else "",
             "fetched_at": market.get("fetched_at"),
         },
     }), 200

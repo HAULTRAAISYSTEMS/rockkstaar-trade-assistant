@@ -449,7 +449,13 @@ def _compute_regime(
 
 
 def _empty_regime() -> dict:
+    # NOTE: regime "NEUTRAL" here is a placeholder so arithmetic consumers do
+    # not have to special-case None — it is NOT a finding. `fallback` is what
+    # says so, and anything that shows a conclusion to a reader must check it
+    # (see context_is_real). Without it the command centre printed
+    # "Regime · Neutral · longs OK" off an empty cache.
     return {
+        "fallback":     True,
         "regime":       "NEUTRAL",
         "regime_label": "Neutral",
         "qqq_trend":    "Unknown",
@@ -608,6 +614,11 @@ def _build_context() -> dict:
     return {
         **regime,
         **macro,
+        # Whether this one is real is decided by the regime block, not by the
+        # fact that this function ran: _compute_regime hands back
+        # _empty_regime() when the index prices did not arrive, and a context
+        # assembled around that is no more of a read than an empty one.
+        "fallback":        bool(regime.get("fallback")),
         "sectors":         sectors,
         "leading_sectors": leading,
         "weak_sectors":    weak,
@@ -817,20 +828,65 @@ def is_sector_leading(ticker_etf: str, ctx: dict | None = None) -> bool:
 # ── AI Market Story Engine ─────────────────────────────────────────────────────
 
 def _day_label(now: datetime | None = None) -> str:
-    """'today' while the market is open, else the last trading day's name.
+    """'today' when the latest daily candle is today's, else its day name.
 
     Index day-changes are computed on daily candles, so on a Monday morning
     the "1-day change" is Friday's move. Calling it "today" then is wrong,
     and it is the kind of wrong a reader notices before anything else.
+
+    The window after the close belongs to today, not to the session before
+    it. This used to walk back a weekday unconditionally outside 09:30–16:00,
+    so from 4 PM Monday until Tuesday's open the page reported Monday's move
+    as Friday's — every weekday evening, which is when the day gets reviewed.
     """
     et = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("America/New_York"))
-    if et.weekday() < 5 and (et.hour, et.minute) >= (9, 30) and (et.hour, et.minute) < (16, 0):
+    # A weekday from the open onwards: today's candle exists (partial during
+    # the session, final after the close), so the change is today's.
+    if et.weekday() < 5 and (et.hour, et.minute) >= (9, 30):
         return "today"
     d = et.date()
     while True:
         d -= timedelta(days=1)
         if d.weekday() < 5:
             return d.strftime("%A")
+
+
+def snapshot_age_minutes(mkt_ctx: dict) -> float | None:
+    """How old the cached market snapshot is, in minutes, or None.
+
+    get_market_context returns a stale snapshot immediately and refreshes in
+    the background, so what the page renders can be any age. The age was
+    never surfaced, which meant an hours-old regime read the same as a
+    seconds-old one.
+    """
+    stamp = (mkt_ctx or {}).get("fetched_at")
+    if not stamp:
+        return None
+    try:
+        then = datetime.fromisoformat(str(stamp))
+    except (TypeError, ValueError):
+        return None
+    now = datetime.now(then.tzinfo) if then.tzinfo else datetime.now()
+    return max(0.0, round((now - then).total_seconds() / 60, 1))
+
+
+def context_is_real(mkt_ctx: dict) -> bool:
+    """Did this market context come from actual market data?
+
+    _empty_context() carries regime "NEUTRAL", qqq_trend "Unknown" and
+    longs_ok True — a complete, confident-looking read assembled from nothing.
+    Callers that present a conclusion to a reader have to be able to tell it
+    apart from a real neutral market, so every context now says which it is.
+    """
+    ctx = mkt_ctx or {}
+    if ctx.get("fallback") is True:
+        return False
+    if ctx.get("fallback") is False:
+        return True
+    # A context from before this flag existed, or one assembled by hand: fall
+    # back to the thing an empty context can never have, which is an actual
+    # index move. _empty_regime leaves both of these None.
+    return ctx.get("qqq_1d_pct") is not None or ctx.get("spy_1d_pct") is not None
 
 
 def generate_market_story(mkt_ctx: dict, liq_score: int | None = None) -> dict:
@@ -846,7 +902,17 @@ def generate_market_story(mkt_ctx: dict, liq_score: int | None = None) -> dict:
           permissions: list  — e.g. ["Longs ✓", "Reduce size"]
           regime:      str   — raw regime code
         }
+
+    Returns None when the context did not come from market data. With an empty
+    cache this function used to compose "Mixed market signals — patience and
+    selectivity required", sentiment neutral, badges and all, from regime
+    "NEUTRAL" and a qqq_1d of None — a read indistinguishable from a real
+    neutral market, at the top of the first page, granting long permission.
+    A missing read is a thing the page can say; a manufactured one is not.
     """
+    if not context_is_real(mkt_ctx):
+        return None
+
     regime      = mkt_ctx.get("regime", "NEUTRAL")
     vix         = mkt_ctx.get("vix_level")
     qqq_trend   = mkt_ctx.get("qqq_trend", "Unknown")

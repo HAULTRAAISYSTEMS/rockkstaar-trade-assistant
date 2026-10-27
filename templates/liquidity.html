@@ -32,10 +32,19 @@
   <!-- ══ PULSE ════════════════════════════════════════════════════════════
        The numbers that set the tone for everything under them, on one line.
        Rendered server-side so the top of the page is never a row of spinners. -->
-  <div class="cc-pulse cc-rise pulse-{{ (pulse.regime or 'neutral')|lower }}">
+  {# pulse.known is False when the market snapshot is empty or cold. The cells
+     below then carry a dash, because an unread market is not a neutral one —
+     this strip used to print "Regime · Neutral" off no data at all. #}
+  <div class="cc-pulse cc-rise pulse-{{ (pulse.regime or 'neutral')|lower if pulse.known else 'unknown' }}{{ ' is-unknown' if not pulse.known }}">
     <div class="cc-pulse-cell cc-pulse-regime">
       <span class="cc-pulse-k">Regime</span>
+      {% if pulse.known %}
       <b class="cc-pulse-v {{ 'is-up' if 'on' in (pulse.regime or '')|lower else ('is-down' if 'off' in (pulse.regime or '')|lower else '') }}" id="cc-regime">{{ pulse.regime|replace('_', ' ')|replace('-', ' ')|title if pulse.regime else '—' }}</b>
+      {% if pulse.snapshot_stale %}<small class="cc-pulse-meta">snapshot {{ pulse.age_minutes|int }} min old</small>{% endif %}
+      {% else %}
+      <b class="cc-pulse-v is-unknown" id="cc-regime">—</b>
+      <small class="cc-pulse-meta">not read yet</small>
+      {% endif %}
     </div>
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k">VIX</span>
@@ -117,7 +126,9 @@
         </div>
         {% endif %}
       {% else %}
-        <p class="cc-empty">Market data is still loading — the read appears on the next refresh.</p>
+        {# Written by the route, which knows whether the snapshot is cold or
+           simply failed. The old text said "still loading" either way. #}
+        <p class="cc-empty">{{ story_note or 'Market data is still loading — the read appears on the next refresh.' }}</p>
       {% endif %}
       </div>
     </div>
