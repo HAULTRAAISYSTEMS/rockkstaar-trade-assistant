@@ -27,6 +27,14 @@
   .intel-kpi small{display:block;color:#77828f;font:600 10px var(--font-ui);letter-spacing:.13em;text-transform:uppercase}
   .intel-kpi strong{display:block;margin-top:7px;color:#f4f3ef;font:700 clamp(21px,2.5vw,30px) var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .intel-kpi .live-dot{display:inline-block;width:7px;height:7px;margin-right:8px;border-radius:50%;background:#24c78c;box-shadow:0 0 0 5px rgba(36,199,140,.1)}
+  /* Solid dot = a reading. Hollow and dashed = the app has nothing, which is
+     not the same as a neutral market — same rule as the quarter drill and the
+     grade badge. This tile used to carry the live dot regardless. */
+  .intel-kpi .dead-dot{display:inline-block;width:7px;height:7px;margin-right:8px;border-radius:50%;background:transparent;border:1px dashed #6d7783;cursor:help}
+  .intel-kpi.is-unread{border-style:dashed;border-color:rgba(255,255,255,.14)}
+  .intel-kpi.is-unread:first-child{border-color:rgba(109,119,131,.5);background:linear-gradient(145deg,rgba(255,255,255,.02),#101419 62%)}
+  .intel-kpi.is-unread strong{color:#8d97a4}
+  .intel-kpi-note{display:block;margin-top:5px;color:#6d7783;font:500 9px/1.4 var(--font-ui);font-style:normal}
   .intel-toolbar{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,320px);align-items:center;gap:12px}
   .intel-tabs{display:flex;gap:7px;overflow:auto;padding:2px;scrollbar-width:none}
   .intel-tab{border:1px solid rgba(255,255,255,.07);background:#0d1115;color:#7f8996;padding:9px 14px;border-radius:999px;white-space:nowrap;font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
@@ -104,7 +112,12 @@
 {% endblock %}
 
 {% block hx_content %}
-{% set rlabel = (mkt.regime_label if mkt and mkt.regime_label else 'Monitoring') %}
+{# An empty market cache carries regime_label "Neutral", and this tile — the
+   gold one, with a pulsing green live dot on it — printed that as a reading.
+   The old fallback was "Monitoring", which is a reassuring word for "we have
+   nothing". mkt.fallback is what distinguishes the two. #}
+{% set regime_known = mkt and not mkt.fallback and mkt.regime_label %}
+{% set rlabel = mkt.regime_label if regime_known else 'Not read yet' %}
 {% set bull_count = news|selectattr('label','equalto','BULLISH')|list|length %}
 {% set bear_count = news|selectattr('label','equalto','BEARISH')|list|length %}
 
@@ -125,10 +138,15 @@
   </section>
 
   <section class="intel-kpis" aria-label="Market intelligence summary">
-    <div class="intel-kpi"><small><span class="live-dot"></span>Market regime</small><strong>{{ rlabel }}</strong></div>
-    <div class="intel-kpi"><small>Live catalysts</small><strong id="intel-live-count">{{ news|length }}</strong></div>
-    <div class="intel-kpi"><small>Bullish / Bearish</small><strong id="intel-tone-counts"><span class="pos">{{ bull_count }}</span> / <span class="neg">{{ bear_count }}</span></strong></div>
-    <div class="intel-kpi"><small>Earnings radar</small><strong id="intel-earnings-count">{{ earnings|length }}</strong></div>
+    <div class="intel-kpi {{ '' if regime_known else 'is-unread' }}"><small>{% if regime_known %}<span class="live-dot"></span>{% else %}<span class="dead-dot" title="No market snapshot has arrived yet, so there is no regime to report."></span>{% endif %}Market regime</small><strong>{{ rlabel }}</strong></div>
+    {# A count of zero from a cold feed is not "no catalysts today". The route
+       already works out which it is; the tile shows a dash and the reason
+       rather than a confident nought. #}
+    {% set news_loaded = news or not (intel_status and intel_status.message) %}
+    <div class="intel-kpi {{ '' if news_loaded else 'is-unread' }}"><small>Live catalysts</small><strong id="intel-live-count">{% if news_loaded %}{{ news|length }}{% else %}—{% endif %}</strong>{% if not news_loaded %}<em class="intel-kpi-note">{{ intel_status.message }}</em>{% endif %}</div>
+    <div class="intel-kpi {{ '' if news_loaded else 'is-unread' }}"><small>Bullish / Bearish</small><strong id="intel-tone-counts">{% if news_loaded %}<span class="pos">{{ bull_count }}</span> / <span class="neg">{{ bear_count }}</span>{% else %}—{% endif %}</strong></div>
+    {% set earn_loaded = earnings or not (earnings_status and earnings_status.message) %}
+    <div class="intel-kpi {{ '' if earn_loaded else 'is-unread' }}"><small>Earnings radar</small><strong id="intel-earnings-count">{% if earn_loaded %}{{ earnings|length }}{% else %}—{% endif %}</strong>{% if not earn_loaded %}<em class="intel-kpi-note">{{ earnings_status.message }}</em>{% endif %}</div>
   </section>
 
   <div class="intel-toolbar">

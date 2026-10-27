@@ -22,6 +22,9 @@
   .te-list-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:0 0 14px}.te-list-guide article{padding:13px 14px;border:1px solid var(--elite-border);border-radius:12px;background:linear-gradient(145deg,rgba(229,185,79,.08),rgba(255,255,255,.018))}.te-list-guide b{display:block;color:var(--elite-gold-bright);font:700 12px var(--font-display);letter-spacing:.08em}.te-list-guide span{display:block;margin-top:4px;color:var(--elite-muted);font-size:11px;line-height:1.45}
   .te-alert-card.hit{border-color:rgba(52,211,153,.55);box-shadow:inset 3px 0 #34d399}.te-alert-card.paused{opacity:.62}
   .te-alert-price{font:700 17px var(--font-mono);color:#f5d66d}.te-alert-actions{display:flex;gap:5px;align-items:center}
+  /* A hit off a price that is not live is still a hit, but it is dated.
+     Dashed border, same rule as everywhere else in the app. */
+  .badge.is-asof{border-style:dashed;cursor:help}
   @media(max-width:720px){.hx-topbar{display:none}.acct-2col,.te-alert-grid,.te-list-guide{grid-template-columns:1fr}.te-watch-hero{margin-top:2px}.te-watch-hero h1{font-size:25px}.card-hd{padding:13px 14px}.card-bd{padding:14px}.tbl-wrap{display:none}.te-watch-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;padding-bottom:2px}.te-watch-tabs form,.te-watch-tabs button{width:100%;min-width:0}.te-watch-tabs button{overflow:hidden;text-overflow:ellipsis}.te-alert-form{grid-template-columns:1fr}.te-alert-form .full{grid-column:auto}.te-symbol-grid{grid-template-columns:1fr 1fr}.te-alert-card{grid-template-columns:1fr}.te-alert-actions{justify-content:flex-start}.te-ticker-row{grid-template-columns:28px 1fr 30px}.te-ticker-row .te-move-form{grid-column:2/3}.te-section-hd{flex-wrap:wrap}.te-section-name-form{min-width:180px}.te-section-add{grid-template-columns:1fr}.te-organizer-head{align-items:flex-start;flex-direction:column}}
 </style>
 
@@ -200,10 +203,20 @@
       <article class="te-alert-card {{ 'hit' if a.triggered else '' }} {{ 'paused' if not a.enabled else '' }}">
         <div>
           <div class="row gap-2"><a href="{{ url_for('stock_detail', ticker=a.ticker) }}" class="te-alert-price" style="text-decoration:none">{{ a.ticker }}</a>
-            {% if a.triggered %}<span class="badge badge-pos">TARGET HIT</span>{% elif not a.enabled %}<span class="badge badge-neutral">PAUSED</span>{% else %}<span class="badge badge-info">MONITORING</span>{% endif %}
+            {# "TARGET HIT" is a present-tense claim and it is computed from
+               whatever price the table holds — which can be a Friday close
+               being read on a Sunday. The crossing is real either way; when
+               it happened is what was missing, so a hit off a price that is
+               not live says "AS OF" instead of asserting now. #}
+            {% if a.triggered and a.quote and not a.quote.live %}<span class="badge badge-pos is-asof" title="Your target was crossed at this price. It is not a live quote — {{ a.quote.caveat or (a.quote.source_name ~ ' · ' ~ (a.quote.as_of or 'time unknown')) }}">TARGET HIT · AS OF {{ a.quote.as_of or 'UNKNOWN' }}</span>
+            {% elif a.triggered %}<span class="badge badge-pos">TARGET HIT</span>
+            {% elif not a.enabled %}<span class="badge badge-neutral">PAUSED</span>
+            {% else %}<span class="badge badge-info">MONITORING</span>{% endif %}
           </div>
           <div style="font-size:13px;margin-top:5px">Notify when price is <b>{{ a.direction }}</b> <b>${{ '%.2f'|format(a.target_price) }}</b></div>
-          <div class="faint" style="font-size:11px;margin-top:3px">Latest: {{ ('$%.2f'|format(a.current_price)) if a.current_price is not none else 'quote pending' }}</div>
+          <div class="faint" style="font-size:11px;margin-top:3px">Latest: {{ ('$%.2f'|format(a.current_price)) if a.current_price is not none else 'quote pending' }}{%
+            if a.current_price is not none and a.quote %} · {{ a.quote.source_name }}{% if a.quote.as_of %} · {{ a.quote.as_of }}{% else %} · time unknown{% endif %}{%
+            endif %}</div>
         </div>
         <div class="te-alert-actions">
           <form action="{{ url_for('price_alert_toggle', alert_id=a.id) }}" method="POST" style="margin:0"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="enabled" value="{{ 0 if a.enabled else 1 }}"><button class="btn btn-ghost btn-sm" type="submit">{{ 'Pause' if a.enabled else 'Resume' }}</button></form>

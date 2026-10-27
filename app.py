@@ -4784,6 +4784,16 @@ def watchlists_page():
             ((alert["direction"] == "above" and current >= alert["target_price"]) or
              (alert["direction"] == "below" and current <= alert["target_price"]))
         )
+        # An alert reads as a present-tense claim — "NVDA is above your
+        # target" — and it was computed from whatever price the table held,
+        # which can be a Friday close being looked at on a Sunday. The
+        # crossing is real; when it happened is the part that was missing.
+        try:
+            import quote_provenance as _qp
+            alert["quote"] = _qp.describe(dict(quote))
+        except Exception as exc:
+            logger.debug("watchlists: alert provenance unavailable: %s", exc)
+            alert["quote"] = None
     return render_template(
         "watchlists.html",
         all_wls=all_wls, active_id=active_id, active_wl=active_wl,
