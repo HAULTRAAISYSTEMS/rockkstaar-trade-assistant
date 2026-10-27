@@ -982,8 +982,14 @@ def _earnings_from_finnhub(
         days_away = (earn_date - today).days
         if days_away < 0 or days_away > 120:
             continue
+        # Finnhub reports three sessions. This mapped everything that was
+        # not bmo or amc onto TBD, so a company that HAD announced it reports
+        # mid-session was shown as unknown — and, worse, the blank session was
+        # the only evidence on the row about whether the DATE is real.
+        import earnings_timing
         hour       = (e.get("hour") or "").lower()
-        time_label = "BMO" if hour == "bmo" else "AMC" if hour == "amc" else "TBD"
+        timing     = earnings_timing.describe(hour)
+        time_label = earnings_timing.label_for_storage(hour)
         eps_est = None
         rev_est = None
         try:
@@ -1005,8 +1011,17 @@ def _earnings_from_finnhub(
             "date":         earn_date.isoformat(),
             "days_away":    days_away,
             "time_label":   time_label,
+            "time_text":    timing["text"],
+            "time_known":   timing["known"],
+            "date_provisional": timing["provisional"],
             "eps_est":      eps_est,
+            "eps_est_basis": "analyst consensus",
             "rev_est":      rev_est,
+            # Kept rather than discarded: a reader wants to know WHICH
+            # quarter this is, and the feed has been handing it over all
+            # along.
+            "fiscal_quarter": e.get("quarter"),
+            "fiscal_year":    e.get("year"),
             "source":       "finnhub",
             "is_override":  False,
         })

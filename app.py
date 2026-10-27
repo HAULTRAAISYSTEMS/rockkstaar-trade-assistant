@@ -7997,10 +7997,19 @@ def _build_catalyst_calendar(summary, watchlist_tickers=None):
                 days = int(days)
             except (TypeError, ValueError):
                 days = 99
+            import earnings_timing
+            _timing = earnings_timing.describe(
+                raw.get("time_text") or raw.get("time_label"))
             rows.append({
                 "kind": "EARNINGS", "date": date,
                 "date_label": raw.get("date_label") or date or "Date TBD",
-                "time": raw.get("time_label") or "TBD",
+                "time": _timing["short"],
+                "time_text": _timing["text"],
+                "time_known": _timing["known"],
+                "date_provisional": _timing["provisional"],
+                "provisional_note": _timing["note"],
+                "fiscal_quarter": raw.get("fiscal_quarter"),
+                "fiscal_year": raw.get("fiscal_year"),
                 "title": f"{ticker} Earnings",
                 "ticker": ticker,
                 "company_name": raw.get("company_name") or ticker,
