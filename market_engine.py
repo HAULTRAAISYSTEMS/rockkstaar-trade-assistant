@@ -1326,3 +1326,16 @@ def get_market_tape() -> list[dict]:
     # (possibly empty). The 45s JS poll fills it in — never block the page.
     _refresh_tape_bg()
     return items
+
+
+def tape_age_seconds() -> float | None:
+    """How old the cached tape is, or None if it has never been filled.
+
+    get_market_tape hands back stale items rather than blocking, which is the
+    right call for a page load and the wrong one for a reader who cannot tell
+    a scrolling tape from a frozen one.
+    """
+    import time as _time
+    if not _TAPE_CACHE["items"] or not _TAPE_CACHE["at"]:
+        return None
+    return round(_time.time() - _TAPE_CACHE["at"], 1)

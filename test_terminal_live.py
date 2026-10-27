@@ -64,7 +64,15 @@ class TestTheLiveNumbers:
 
     def test_a_null_price_leaves_the_last_good_print_alone(self):
         """A gap in the feed must not blank the screen."""
-        assert "keep the last good print" in TEMPLATE
+        assert "Keep the last good print" in TEMPLATE
+        assert "!isFinite(px)" in TEMPLATE
+
+    def test_but_it_no_longer_leaves_it_looking_live(self):
+        """Keeping the print was right; keeping it unmarked was not. A ticker
+        that stopped being quoted sat there indefinitely, indistinguishable
+        from one still updating, because the early return happened before
+        anything could say so."""
+        assert "No price arrived on the last refresh" in TEMPLATE
 
     def test_clicking_a_row_after_a_refresh_uses_the_refreshed_price(self):
         """twSelect() reads data-price, so the poll has to update it too."""

@@ -42,6 +42,19 @@
 .tw-flash-down { animation: tw-flash-down .9s ease-out; border-radius:3px; }
 @media (prefers-reduced-motion: reduce) { .tw-flash-up, .tw-flash-down { animation: none; } }
 
+/* Per-quote provenance. The session badge says whether the market is open;
+   these say whether the price in front of you actually arrived during it.
+   Solid dot = a trade feed, open session, recent. Hollow and dashed = the app
+   does not know, the same rule as the quarter drill and the grade badge. */
+.tw-wl-stale { font-style: normal; margin-left: 3px; color: var(--warn-500); cursor: help; }
+.tw-tape-age { border-style: dashed !important; color: var(--warn-500); cursor: help; }
+.tw-sym-stamp { display:inline-flex; align-items:center; gap:5px; margin-top:3px;
+  font: 500 9.5px/1.3 var(--font-mono); letter-spacing:.04em; color: var(--text-faint);
+  justify-content:flex-end; white-space:nowrap; }
+.tw-sym-stamp-dot { width:5px; height:5px; border-radius:50%; flex:0 0 auto; }
+.tw-sym-stamp.is-live .tw-sym-stamp-dot { background: var(--pos-500); box-shadow: 0 0 0 2px rgba(46,204,113,.18); }
+.tw-sym-stamp.is-not-live .tw-sym-stamp-dot { background: transparent; border: 1px dashed var(--text-faint); }
+
 /* ── Ticker tape ── */
 .tw-tape { position: relative; overflow: hidden; border:1px solid rgba(229,185,79,.55); border-radius: var(--r-md); margin-bottom: var(--sp-4);
   background:
@@ -336,6 +349,18 @@
     <span class="tw-live" id="tw-live" data-session="{{ market_session }}" title="Quotes refresh every few seconds while the market is open.">
       <i class="tw-live-dot"></i><span id="tw-live-label">{{ market_session_label }}</span>
     </span>
+    {# The tape is served from a cache that returns stale items rather than
+       blocking the page. Past a minute it is not telling you what is
+       happening, so it says how far behind it is. #}
+    {% if tape_age_seconds is not none and tape_age_seconds > 60 %}
+    <span class="tw-chip tw-tape-age" title="The index tape is served from a cache that refreshes in the background. This one has not refreshed recently.">
+      TAPE <b>{{ (tape_age_seconds / 60)|round|int }} min behind</b>
+    </span>
+    {% elif tape_age_seconds is none %}
+    <span class="tw-chip tw-tape-age" title="The index tape cache has not been filled yet — it arrives on the next background refresh.">
+      TAPE <b>not loaded</b>
+    </span>
+    {% endif %}
     <span class="tw-chip">REGIME <b id="tw-chip-regime">{% if mkt and not mkt.get('fallback') %}{{ mkt.regime_label or '—' }}{% else %}—{% endif %}</b></span>
     <span class="tw-chip">VIX <b id="tw-chip-vix">{{ '%.2f'|format(mkt.vix_level) if mkt and mkt.vix_level is not none else '—' }}</b></span>
     <span class="tw-chip">SPY <b id="tw-chip-spy" class="{{ 'chg-pos' if (mkt and (mkt.spy_1d_pct or 0) >= 0) else 'chg-neg' }}">{{ '%+.2f'|format(mkt.spy_1d_pct) ~ '%' if mkt and mkt.spy_1d_pct is not none else '—' }}</b></span>
@@ -375,6 +400,13 @@
              data-chg="{{ s.gap_display or '0.00%' }}"
              data-chgdir="{{ 'pos' if (s.gap_pct or 0) > 0 else ('neg' if (s.gap_pct or 0) < 0 else 'flat') }}"
              data-prevclose="{{ '%.4f'|format(s.prev_close) if s.prev_close else '' }}"
+             {# Per-row provenance. The rail shows one price per ticker, and a
+                ticker whose live fetch failed sat on a stored snapshot looking
+                exactly like one that refreshed a second ago. #}
+             data-live="{{ '1' if s.quote and s.quote.live else '0' }}"
+             data-asof="{{ s.quote.as_of if s.quote else '' }}"
+             data-source="{{ s.quote.source_name if s.quote else '' }}"
+             data-quotenote="{{ s.quote.caveat if s.quote else '' }}"
              data-bias="{{ bias }}"
              data-href="{{ url_for('stock_detail', ticker=s.ticker) }}"
              onclick="twSelect(this)">
@@ -384,7 +416,10 @@
           </div>
           <svg class="tw-spark" width="46" height="24" viewBox="0 0 46 24" preserveAspectRatio="none" data-spark="{{ s.ticker }}" data-dir="{{ 'neg' if (s.gap_pct or 0) < 0 else 'pos' }}"></svg>
           <div class="tw-wl-right">
-            <div class="tw-wl-px">{{ '%.2f'|format(s.current_price) if s.current_price else '—' }}</div>
+            <div class="tw-wl-px">{{ '%.2f'|format(s.current_price) if s.current_price else '—' }}{%
+              if s.quote and not s.quote.live %}<i class="tw-wl-stale" data-wlstale
+                 title="{{ s.quote.caveat or (s.quote.source_name ~ ' · ' ~ (s.quote.as_of or 'time unknown')) }}">·</i>{%
+              endif %}</div>
             <div class="tw-wl-chg {{ 'chg-pos' if (s.gap_pct or 0) > 0 else ('chg-neg' if (s.gap_pct or 0) < 0 else 'chg-flat') }}">{{ s.gap_display or '0.00%' }}</div>
           </div>
         </div>
@@ -418,6 +453,18 @@
             <div class="tw-sym-px" id="tw-c-price">{{ '%.2f'|format(stocks[0].current_price) if stocks and stocks[0].current_price else '—' }}</div>
             {% set c0dir = 'chg-pos' if (stocks and (stocks[0].gap_pct or 0) > 0) else ('chg-neg' if (stocks and (stocks[0].gap_pct or 0) < 0) else 'chg-flat') %}
             <div class="tw-sym-chg {{ c0dir }}" id="tw-c-chg">{{ stocks[0].gap_display if stocks else '0.00%' }}</div>
+            {# Where this one price came from and when. The session badge above
+               says whether the MARKET is open; this says whether THIS quote
+               actually arrived during it. #}
+            {% set q0 = stocks[0].quote if stocks else None %}
+            <div class="tw-sym-stamp {{ 'is-live' if q0 and q0.live else 'is-not-live' }}" id="tw-c-stamp"
+                 title="{{ (q0.caveat or q0.source_note) if q0 else '' }}">
+              <i class="tw-sym-stamp-dot"></i><span id="tw-c-stamp-text">{%
+                if q0 and q0.live %}Live · {{ q0.source_name }} · {{ q0.as_of }}{%
+                elif q0 and q0.as_of %}{{ q0.source_name }} · {{ q0.as_of }}{%
+                elif q0 %}{{ q0.source_name }} · time unknown{%
+                else %}—{% endif %}</span>
+            </div>
           </div>
         </div>
 
@@ -806,6 +853,10 @@ function twSelect(row){
   if(chg){ chg.textContent=d.chg; chg.className='tw-sym-chg '+(d.chgdir==='pos'?'chg-pos':(d.chgdir==='neg'?'chg-neg':'chg-flat')); }
   var bias=document.getElementById('tw-c-bias');
   if(bias){ var b=d.bias||'neutral'; bias.className='tw-bias '+b; bias.textContent=(b==='bull'?'BULLISH':(b==='bear'?'BEARISH':'NEUTRAL')); }
+  // The stamp belongs to the symbol, not the page, so it moves with the
+  // selection rather than describing whichever ticker loaded first.
+  twRenderStamp({live: d.live === '1', as_of: d.asof,
+                 source: d.source, quote_note: d.quotenote});
   var sym=document.getElementById('tw-ot-symbol'); if(sym){ sym.value=d.ticker; }
   twEstCost();
   twLoadChart(d.ticker, twChartState.interval, twChartState.range);
@@ -1550,7 +1601,19 @@ function twChgClass(pct){
 function twApplyQuote(q){
   if(!q || !q.ticker) return;
   var px = (q.price === null || q.price === undefined) ? null : Number(q.price);
-  if(px === null || !isFinite(px)) return;   // keep the last good print
+  if(px === null || !isFinite(px)){
+    // Keep the last good print — but say so. A price that stopped arriving
+    // used to sit on screen indefinitely, indistinguishable from one still
+    // being quoted, because this returned before anything could mark it.
+    var deadRow = document.querySelector('.tw-wl-row[data-ticker="' + q.ticker + '"]');
+    if(deadRow){
+      twApplyRowStamp(deadRow, deadRow.querySelector('.tw-wl-px'), {
+        live: false, as_of: q.as_of, source: q.source,
+        quote_note: q.quote_note || 'No price arrived on the last refresh — this is the last one that did'
+      });
+    }
+    return;
+  }
 
   var text = px.toFixed(2);
   var chg  = q.gap_display || '0.00%';
@@ -1580,6 +1643,7 @@ function twApplyQuote(q){
     row.dataset.price  = text;
     row.dataset.chg    = chg;
     row.dataset.chgdir = cls === 'chg-pos' ? 'pos' : (cls === 'chg-neg' ? 'neg' : 'flat');
+    twApplyRowStamp(row, rp, q);
   }
 
   var head = document.getElementById('tw-c-ticker');
@@ -1590,7 +1654,50 @@ function twApplyQuote(q){
     var hc = document.getElementById('tw-c-chg');
     if(hp && hp.textContent !== text){ hp.textContent = text; if(moved) twFlash(hp, px > prev); }
     if(hc){ hc.textContent = chg; hc.className = 'tw-sym-chg ' + cls; }
+    twRenderStamp(q);
   }
+}
+
+/* A price that is not live keeps the amber marker beside it in the rail. The
+   poll rewrites the price text every four seconds, so without this the marker
+   would survive as a class on an element whose number had already moved on —
+   or vanish on the first poll and never come back. */
+function twApplyRowStamp(row, priceEl, q){
+  if(!row) return;
+  row.dataset.live      = q.live ? '1' : '0';
+  row.dataset.asof      = q.as_of  || '';
+  row.dataset.source    = q.source || '';
+  row.dataset.quotenote = q.quote_note || '';
+  if(!priceEl) return;
+  var mark = priceEl.querySelector('[data-wlstale]');
+  if(q.live){
+    if(mark) mark.remove();
+    return;
+  }
+  if(!mark){
+    mark = document.createElement('i');
+    mark.className = 'tw-wl-stale';
+    mark.setAttribute('data-wlstale', '');
+    mark.textContent = '·';
+    priceEl.appendChild(mark);
+  }
+  mark.title = q.quote_note || ((q.source || 'this feed') + ' · ' + (q.as_of || 'time unknown'));
+}
+
+/* The selected symbol's own stamp. The session badge at the top of the page
+   says whether the market is open; this says whether THIS quote arrived
+   during it, which is a different question and the one that matters before
+   acting on the number. */
+function twRenderStamp(q){
+  var box = document.getElementById('tw-c-stamp');
+  var txt = document.getElementById('tw-c-stamp-text');
+  if(!box || !txt || !q) return;
+  box.classList.toggle('is-live', !!q.live);
+  box.classList.toggle('is-not-live', !q.live);
+  box.title = q.quote_note || '';
+  if(q.live)            txt.textContent = 'Live · ' + (q.source || '') + ' · ' + (q.as_of || '');
+  else if(q.as_of)      txt.textContent = (q.source || 'Unknown source') + ' · ' + q.as_of;
+  else                  txt.textContent = (q.source || 'Unknown source') + ' · time unknown';
 }
 
 function twApplyChips(chips){

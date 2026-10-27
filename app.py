@@ -5103,7 +5103,19 @@ def terminal():
         today_setups=today_setups,
         market_session=_session,
         market_session_label=SESSION_LABELS.get(_session, "At the close"),
+        # get_market_tape returns stale items rather than blocking the page,
+        # so a frozen tape scrolled exactly like a moving one. The status line
+        # says so past a minute.
+        tape_age_seconds=_tape_age(),
     )
+
+
+def _tape_age() -> float | None:
+    """Age of the cached index tape in seconds, or None. Never raises."""
+    try:
+        return _mkt.tape_age_seconds() if _MKT_AVAILABLE else None
+    except Exception:
+        return None
 
 
 # Terminal chart candle series — reuses the SAME price feed the watchlist /
@@ -5185,6 +5197,14 @@ def api_terminal_quotes():
                     # auction — so SPY read -0.38% in the header and -0.39%
                     # everywhere else on the same screen.
                     "prev_close": annotated.get("prev_close"),
+                    # Per-row provenance. The poll refreshes every row from
+                    # the database, and a ticker whose live fetch failed sits
+                    # on a stored snapshot — which looked identical in the
+                    # rail to one that refreshed a second ago.
+                    "live": bool((annotated.get("quote") or {}).get("live")),
+                    "as_of": (annotated.get("quote") or {}).get("as_of") or "",
+                    "source": (annotated.get("quote") or {}).get("source_name") or "",
+                    "quote_note": (annotated.get("quote") or {}).get("caveat") or "",
                 })
         except Exception as exc:
             logger.warning("terminal quotes: read failed: %s", exc)
