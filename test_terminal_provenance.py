@@ -47,7 +47,10 @@ class TestEachRowCarriesItsOwnProvenance:
         assert "data-wlstale" in TERMINAL
 
     def test_the_marker_is_styled_as_a_caution_not_as_decoration(self):
-        assert ".tw-wl-stale { font-style: normal; margin-left: 3px; color: var(--warn-500)" in TERMINAL
+        """Via the shared trust token, so this marker cannot drift away from
+        the other six places the app says "I do not fully know this"."""
+        assert ".tw-wl-stale {" in TERMINAL
+        assert "color: var(--unknown-accent)" in TERMINAL
 
     def test_the_api_sends_it_per_row_not_once_per_page(self):
         body = APP[APP.index("def api_terminal_quotes"):]

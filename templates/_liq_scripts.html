@@ -100,8 +100,8 @@
      the grade badge: solid means measured, dashed means the app does not
      know. This cell used to print "Neutral" in the same weight as a real
      regime, off an empty market cache. */
-  .cc-pulse-v.is-unknown { color: #64707e }
-  .cc-pulse.is-unknown .cc-pulse-regime { border-left: 2px dashed #64707e }
+  .cc-pulse-v.is-unknown { color: var(--unknown-ink, #64707e) }
+  .cc-pulse.is-unknown .cc-pulse-regime { border-left: 2px dashed var(--unknown-line, #64707e) }
   .cc-pulse-next .cc-pulse-v { font-size: 14px; line-height: 1.3 }
   .cc-pulse-next .cc-pulse-v a { color: #f0b53f; text-decoration: none }
   .cc-pulse-next .cc-pulse-v a:hover { text-decoration: underline }

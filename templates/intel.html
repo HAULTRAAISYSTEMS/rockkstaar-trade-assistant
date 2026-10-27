@@ -30,11 +30,11 @@
   /* Solid dot = a reading. Hollow and dashed = the app has nothing, which is
      not the same as a neutral market — same rule as the quarter drill and the
      grade badge. This tile used to carry the live dot regardless. */
-  .intel-kpi .dead-dot{display:inline-block;width:7px;height:7px;margin-right:8px;border-radius:50%;background:transparent;border:1px dashed #6d7783;cursor:help}
+  .intel-kpi .dead-dot{display:inline-block;width:7px;height:7px;margin-right:8px;border-radius:50%;background:transparent;border:1px dashed var(--unknown-line,#6d7783);cursor:help}
   .intel-kpi.is-unread{border-style:dashed;border-color:rgba(255,255,255,.14)}
   .intel-kpi.is-unread:first-child{border-color:rgba(109,119,131,.5);background:linear-gradient(145deg,rgba(255,255,255,.02),#101419 62%)}
-  .intel-kpi.is-unread strong{color:#8d97a4}
-  .intel-kpi-note{display:block;margin-top:5px;color:#6d7783;font:500 9px/1.4 var(--font-ui);font-style:normal}
+  .intel-kpi.is-unread strong{color:var(--unknown-ink,#8d97a4)}
+  .intel-kpi-note{display:block;margin-top:5px;color:var(--unknown-ink,#6d7783);font:500 9px/1.4 var(--font-ui);font-style:normal}
   .intel-toolbar{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,320px);align-items:center;gap:12px}
   .intel-tabs{display:flex;gap:7px;overflow:auto;padding:2px;scrollbar-width:none}
   .intel-tab{border:1px solid rgba(255,255,255,.07);background:#0d1115;color:#7f8996;padding:9px 14px;border-radius:999px;white-space:nowrap;font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
@@ -247,8 +247,9 @@ function refreshIntelNews(button){
     .then(function(data){
       document.getElementById('intel-news').innerHTML=data.html;
       document.getElementById('scanner-count').textContent=data.count+' catalyst'+(data.count===1?'':'s');
-      document.getElementById('intel-live-count').textContent=data.count;
-      document.getElementById('intel-tone-counts').innerHTML='<span class="pos">'+data.bullish_count+'</span> / <span class="neg">'+data.bearish_count+'</span>';
+      setKpi('intel-live-count',data.ok,data.count);
+      setKpi('intel-tone-counts',data.ok,
+             '<span class="pos">'+data.bullish_count+'</span> / <span class="neg">'+data.bearish_count+'</span>',true);
       document.getElementById('intel-trending').innerHTML=data.trending_html;
       applyScannerFilters();
     })
@@ -257,13 +258,37 @@ function refreshIntelNews(button){
       if(message)message.textContent=' The refresh request failed. Please try again.';
     });
 }
+/* A KPI tile the server rendered as a dash, because the feed had not loaded,
+   was then overwritten with the count from the refresh — so a refresh that
+   returned nothing wrote a confident "0" on top of it and left the dashed
+   border and the "no reports were returned" note underneath. Both endpoints
+   already report `ok` honestly; the client was the part not listening.
+
+   A count of zero from a working feed is a real reading and gets written.
+   A count of zero from a feed that did not answer stays a dash. */
+function setKpi(id, ok, value, isHtml){
+  var el=document.getElementById(id); if(!el) return;
+  var tile=el.closest('.intel-kpi');
+  if(!ok){
+    el.textContent='—';
+    if(tile) tile.classList.add('is-unread');
+    return;
+  }
+  if(isHtml) el.innerHTML=value; else el.textContent=value;
+  if(tile){
+    tile.classList.remove('is-unread');
+    var note=tile.querySelector('.intel-kpi-note');
+    if(note) note.remove();
+  }
+}
+
 function refreshEarningsRadar(button){
   var host=document.getElementById('intel-earnings-radar');if(!host)return Promise.resolve();
   if(button){button.disabled=true;button.textContent='Refreshing…';}
   host.innerHTML='<p class="intel-mini">Contacting the upcoming earnings calendar…</p>';
   return fetch('/api/intel/earnings-radar',{headers:{'Accept':'application/json'},cache:'no-store'})
     .then(function(response){if(!response.ok)throw new Error('Refresh request failed');return response.json();})
-    .then(function(data){host.innerHTML=data.html;host.dataset.empty=data.count?'0':'1';document.getElementById('intel-earnings-count').textContent=data.count;if(button){button.disabled=false;button.textContent=data.ok?'Refresh ↻':'Try again';}})
+    .then(function(data){host.innerHTML=data.html;host.dataset.empty=data.count?'0':'1';setKpi('intel-earnings-count',data.ok,data.count);if(button){button.disabled=false;button.textContent=data.ok?'Refresh ↻':'Try again';}})
     .catch(function(){host.innerHTML='<p class="intel-mini">The earnings calendar could not be reached. Please try again.</p>';if(button){button.disabled=false;button.textContent='Try again';}});
 }
 var intelFeedState=document.getElementById('intel-feed-state');

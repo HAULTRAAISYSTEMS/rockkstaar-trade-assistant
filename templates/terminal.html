@@ -46,14 +46,14 @@
    these say whether the price in front of you actually arrived during it.
    Solid dot = a trade feed, open session, recent. Hollow and dashed = the app
    does not know, the same rule as the quarter drill and the grade badge. */
-.tw-wl-stale { font-style: normal; margin-left: 3px; color: var(--warn-500); cursor: help; }
-.tw-tape-age { border-style: dashed !important; color: var(--warn-500); cursor: help; }
+.tw-wl-stale { font-style: normal; margin-left: 3px; color: var(--unknown-accent); cursor: help; }
+.tw-tape-age { border-style: dashed !important; color: var(--unknown-accent); cursor: help; }
 .tw-sym-stamp { display:inline-flex; align-items:center; gap:5px; margin-top:3px;
   font: 500 9.5px/1.3 var(--font-mono); letter-spacing:.04em; color: var(--text-faint);
   justify-content:flex-end; white-space:nowrap; }
 .tw-sym-stamp-dot { width:5px; height:5px; border-radius:50%; flex:0 0 auto; }
-.tw-sym-stamp.is-live .tw-sym-stamp-dot { background: var(--pos-500); box-shadow: 0 0 0 2px rgba(46,204,113,.18); }
-.tw-sym-stamp.is-not-live .tw-sym-stamp-dot { background: transparent; border: 1px dashed var(--text-faint); }
+.tw-sym-stamp.is-live .tw-sym-stamp-dot { background: var(--known-dot); box-shadow: 0 0 0 2px var(--known-dot-halo); }
+.tw-sym-stamp.is-not-live .tw-sym-stamp-dot { background: transparent; border: 1px dashed var(--unknown-line); }
 
 /* ── Ticker tape ── */
 .tw-tape { position: relative; overflow: hidden; border:1px solid rgba(229,185,79,.55); border-radius: var(--r-md); margin-bottom: var(--sp-4);

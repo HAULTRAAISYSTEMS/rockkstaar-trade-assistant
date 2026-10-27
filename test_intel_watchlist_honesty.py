@@ -120,3 +120,52 @@ class TestThePagesStillRender:
         html = client.get("/intel").get_data(as_text=True)
         assert "Not read yet" in html
         assert "dead-dot" in html
+
+
+class TestTheRefreshDoesNotOverwriteTheDash:
+    """The server renders a dash when the feed has not loaded. The refresh
+    then wrote its count over the top — so a refresh that returned nothing
+    produced a confident "0" sitting inside a dashed tile, above a note
+    saying no reports were returned. Both endpoints already reported `ok`
+    honestly; the client was the part not listening."""
+
+    def test_there_is_one_helper_rather_than_three_assignments(self):
+        assert "function setKpi(" in INTEL
+
+    def test_a_feed_that_did_not_answer_leaves_a_dash(self):
+        body = INTEL[INTEL.index("function setKpi("):]
+        body = body[:body.index("function refreshEarningsRadar")]
+        assert "if(!ok){" in body
+        assert r"el.textContent='—'" in body      # an em dash, not a count
+        assert "tile.classList.add('is-unread')" in body
+
+    def test_a_feed_that_answered_clears_the_unread_state_and_its_note(self):
+        body = INTEL[INTEL.index("function setKpi("):]
+        body = body[:body.index("function refreshEarningsRadar")]
+        assert "tile.classList.remove('is-unread')" in body
+        assert "note.remove()" in body
+
+    def test_a_real_zero_is_still_written(self):
+        """Zero catalysts from a feed that answered is a reading, and the
+        same mistake in reverse would be hiding it."""
+        body = INTEL[INTEL.index("function setKpi("):]
+        body = body[:body.index("function refreshEarningsRadar")]
+        assert "el.textContent=value" in body
+
+    @pytest.mark.parametrize("call", [
+        "setKpi('intel-live-count',data.ok,data.count)",
+        "setKpi('intel-earnings-count',data.ok,data.count)",
+    ])
+    def test_every_count_goes_through_it(self, call):
+        assert call in INTEL
+
+    def test_no_tile_is_still_assigned_directly(self):
+        for direct in ("getElementById('intel-live-count').textContent=",
+                       "getElementById('intel-earnings-count').textContent=",
+                       "getElementById('intel-tone-counts').innerHTML="):
+            assert direct not in INTEL, direct
+
+    def test_the_endpoints_report_ok_honestly(self):
+        """Which is what makes the client fix possible rather than a guess."""
+        assert '"ok": bool(enriched)' in APP
+        assert '"ok": bool(earnings)' in APP
