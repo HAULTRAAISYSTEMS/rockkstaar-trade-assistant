@@ -273,6 +273,12 @@ def generate_stock_data(ticker: str) -> dict:
                 "current_price", "prev_close", "prev_close_date", "gap_pct",
                 "premarket_high", "premarket_low",
                 "prev_day_high", "prev_day_low",
+                # Today's session range, which is not the previous day's —
+                # Finnhub and Polygon both report it and it used to be filed
+                # under prev_day_*.
+                "day_high", "day_low", "day_open",
+                # Where the price came from and when it was true.
+                "price_source", "quote_time",
                 "avg_volume", "rel_volume",
                 "earnings_date",
                 "vwap", "momentum_breakout", "candles_above_orb",
@@ -316,12 +322,29 @@ def generate_stock_data(ticker: str) -> dict:
     data.setdefault("premarket_low",    None)
     data.setdefault("prev_day_high",    None)
     data.setdefault("prev_day_low",     None)
+    data.setdefault("day_high",         None)
+    data.setdefault("day_low",          None)
+    data.setdefault("day_open",         None)
+    data.setdefault("price_source",     None)
+    data.setdefault("quote_time",       None)
+
+    # What this price actually is: which feed, how old, which session, and
+    # whether the day change has a dated baseline. The page renders a number
+    # with a dollar sign either way; this is what lets it caption one.
+    try:
+        import quote_provenance
+        data["quote"] = quote_provenance.describe(data)
+    except Exception as exc:
+        _log.warning("quote_provenance failed for %s: %s", ticker, exc)
+        data["quote"] = None
 
     _log.debug(
         "generate_stock_data  ticker=%s  stage=live_data  "
-        "price=%s  prev_close_date=%s  live_failed=%s",
+        "price=%s  source=%s  as_of=%s  prev_close_date=%s  live_failed=%s",
         ticker,
         data.get("current_price"),
+        data.get("price_source"),
+        (data.get("quote") or {}).get("as_of"),
         data.get("prev_close_date"),
         "live_data" in _errors,
     )
@@ -584,6 +607,8 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
                 "current_price", "prev_close", "gap_pct", "prev_close_date",
                 "premarket_high", "premarket_low",
                 "prev_day_high", "prev_day_low",
+                "day_high", "day_low", "day_open",
+                "price_source", "quote_time",
                 "avg_volume", "rel_volume",
                 "vwap", "momentum_breakout", "candles_above_orb",
                 "orb_hold", "trend_structure", "higher_highs", "higher_lows",
@@ -610,6 +635,19 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
     data.setdefault("premarket_low",    None)
     data.setdefault("prev_day_high",    None)
     data.setdefault("prev_day_low",     None)
+    data.setdefault("day_high",         None)
+    data.setdefault("day_low",          None)
+    data.setdefault("day_open",         None)
+    data.setdefault("price_source",     None)
+    data.setdefault("quote_time",       None)
+
+    # A refresh that fell back to the stored snapshot must not look live.
+    try:
+        import quote_provenance
+        data["quote"] = quote_provenance.describe(data)
+    except Exception as exc:
+        _log.warning("quote_provenance failed for %s: %s", ticker, exc)
+        data["quote"] = None
 
     # Structure defaults
     data.setdefault("vwap",                 None)

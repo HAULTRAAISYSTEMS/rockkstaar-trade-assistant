@@ -2448,6 +2448,20 @@ def annotate(stock: dict, trade_mode: str | None = None) -> dict:
         "unavailable":     "Unavailable",
     }.get(_src, "Unknown")
 
+    # ── What the price on screen actually is ─────────────────────────────────
+    # data_source above says which code path produced the number. It does not
+    # say which feed answered, when the quote was taken, whether the market is
+    # even open, or what the day change is measured against — and "Live" was
+    # printed over a Friday close reloaded on a Sunday. quote_provenance reads
+    # the timestamp and source the fetchers now keep, so every surface that
+    # calls annotate() gets the same answer.
+    try:
+        import quote_provenance
+        stock["quote"] = quote_provenance.describe(stock)
+    except Exception as _qp_err:
+        logger.warning("annotate  quote_provenance failed  err=%s", _qp_err)
+        stock["quote"] = None
+
     # Score defaults are always applied — they're needed for JS filter/sort logic.
     _SCORE_DEFAULTS = {
         "catalyst_score":  0,

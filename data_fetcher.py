@@ -33,8 +33,20 @@ _FINNHUB_KEY: str | None = os.environ.get("FINNHUB_API_KEY") or None
 def _fetch_finnhub_quote(ticker: str) -> dict | None:
     """
     Fetch current quote from Finnhub /quote endpoint.
-    Returns dict with current_price, prev_close, gap_pct, today high/low/open,
-    or None on failure.  Free tier: 60 req/min — adequate for on-demand page loads.
+    Returns dict with current_price, prev_close, gap_pct, today's high/low/open
+    and the quote timestamp, or None on failure.
+    Free tier: 60 req/min — adequate for on-demand page loads.
+
+    Note on h and l.  Finnhub documents these as the high and low price OF THE
+    DAY — today's session, not the previous one.  They were being written into
+    prev_day_high / prev_day_low, which three separate scoring rules read as
+    the PREVIOUS session's range.  That made `current > prev_day_high`
+    arithmetically impossible (a price cannot exceed the session high that
+    contains it), so "Demand" order blocks and the "Gap and Go" setup could
+    never fire on this path, while "Range Break" — which asks whether price is
+    within 2.5% of that level — fired almost always.  Finnhub's /quote carries
+    no previous-session range at all, so the honest result is to report today's
+    range under its own name and leave prev_day_* absent.
     """
     if not _FINNHUB_KEY:
         return None
@@ -52,19 +64,30 @@ def _fetch_finnhub_quote(ticker: str) -> dict | None:
         current_price = d.get("c")
         if not current_price or float(current_price) <= 0:
             return None  # market closed / unknown symbol returns 0
-        out: dict = {"current_price": round(float(current_price), 2)}
+        out: dict = {
+            "current_price": round(float(current_price), 2),
+            "price_source":  "finnhub",
+        }
         pc = d.get("pc")
         if pc and float(pc) > 0:
             out["prev_close"] = round(float(pc), 2)
             out["gap_pct"]    = round(
                 (out["current_price"] - out["prev_close"]) / out["prev_close"] * 100, 2
             )
+        # Today's session range and open — NOT the previous day's (see above).
         if d.get("h") and float(d["h"]) > 0:
-            out["prev_day_high"] = round(float(d["h"]), 2)
+            out["day_high"] = round(float(d["h"]), 2)
         if d.get("l") and float(d["l"]) > 0:
-            out["prev_day_low"] = round(float(d["l"]), 2)
-        logger.info("Finnhub quote %s → price=%.2f gap=%s%%",
-                    ticker, out["current_price"], out.get("gap_pct"))
+            out["day_low"] = round(float(d["l"]), 2)
+        if d.get("o") and float(d["o"]) > 0:
+            out["day_open"] = round(float(d["o"]), 2)
+        # `t` is the epoch second of the quote.  Kept so the page can say how
+        # old this price is instead of implying it is current.
+        if d.get("t"):
+            out["quote_time"] = int(d["t"])
+        logger.info("Finnhub quote %s → price=%.2f gap=%s%% t=%s",
+                    ticker, out["current_price"], out.get("gap_pct"),
+                    out.get("quote_time"))
         return out
     except Exception as _e:
         logger.debug("_fetch_finnhub_quote failed %s: %s", ticker, _e)
@@ -116,11 +139,30 @@ def _fetch_polygon_snapshot(ticker: str) -> dict | None:
         day   = ticker_node.get("day") or {}
         prev  = ticker_node.get("prevDay") or {}
 
-        current_price = ticker_node.get("lastTrade", {}).get("p") or day.get("c")
+        last_trade = ticker_node.get("lastTrade") or {}
+        current_price = last_trade.get("p") or day.get("c")
         if not current_price or float(current_price) <= 0:
             return None
 
-        out: dict = {"current_price": round(float(current_price), 2)}
+        out: dict = {
+            "current_price": round(float(current_price), 2),
+            "price_source":  "polygon",
+        }
+
+        # lastTrade.t is nanoseconds, `updated` milliseconds.  Either lets the
+        # page say when this price was true; without one it can only imply now.
+        _t = last_trade.get("t") or ticker_node.get("updated")
+        if _t:
+            out["quote_time"] = _t
+
+        # Today's session range, under its own name.  `day` is today's bar;
+        # the previous session's range comes from the /prev endpoint below.
+        if day.get("h") and float(day["h"]) > 0:
+            out["day_high"] = round(float(day["h"]), 2)
+        if day.get("l") and float(day["l"]) > 0:
+            out["day_low"] = round(float(day["l"]), 2)
+        if day.get("o") and float(day["o"]) > 0:
+            out["day_open"] = round(float(day["o"]), 2)
 
         pc = prev.get("c")
         if pc and float(pc) > 0:
@@ -436,6 +478,24 @@ def _fetch_ohlcv_via_chart_api(
     return None
 
 
+def _bar_date(ts) -> str | None:
+    """YYYY-MM-DD, in US/Eastern, for a daily bar's epoch timestamp.
+
+    Daily bars are stamped at the exchange open, so converting in Eastern
+    rather than UTC keeps a 09:30 ET bar on its own calendar day.
+    """
+    try:
+        import datetime as _d
+        try:
+            import zoneinfo
+            tz = zoneinfo.ZoneInfo("America/New_York")
+        except Exception:
+            tz = _d.timezone(_d.timedelta(hours=-4))
+        return _d.datetime.fromtimestamp(int(ts), tz).strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
 def _fetch_price_via_chart_api(ticker: str) -> dict | None:
     """
     Fetch current price AND prev_close directly from Yahoo Finance's chart API.
@@ -469,16 +529,29 @@ def _fetch_price_via_chart_api(ticker: str) -> dict | None:
             result_node = data["chart"]["result"][0]
             meta        = result_node["meta"]
 
-            # Current price: regularMarketPrice is the live/last traded price
-            price = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
-            if not price or float(price) <= 0:
-                continue
+            out = {"price_source": "yahoo_chart"}
 
-            out = {"current_price": round(float(price), 2)}
+            # Current price: regularMarketPrice is the live/last traded price.
+            #
+            # This used to read `regularMarketPrice or chartPreviousClose`,
+            # which is the one substitution that must never happen here: when
+            # the live field is missing, chartPreviousClose is YESTERDAY'S
+            # CLOSE, and handing it back as current_price produces a quote
+            # that looks live, agrees with prev_close to the cent, and shows a
+            # day change of exactly 0.00%.  A price the app does not have is
+            # now simply absent, which every caller already handles and which
+            # the page can say out loud.
+            price = meta.get("regularMarketPrice")
+            if price and float(price) > 0:
+                out["current_price"] = round(float(price), 2)
+            # Yahoo timestamps the quote in meta; keep it for the same reason.
+            if meta.get("regularMarketTime"):
+                out["quote_time"] = meta["regularMarketTime"]
 
             # ── Pull OHLCV bars from the indicators node ─────────────────────
-            # With range=5d we get ~5 complete trading days.  The last bar in
-            # the series is the most recent completed session (prev trading day).
+            # With range=5d we get ~5 daily bars.  During a session the LAST
+            # bar is today's partial bar, so the previous completed session is
+            # the second to last.
             try:
                 quote      = result_node["indicators"]["quote"][0]
                 timestamps = result_node.get("timestamp", [])
@@ -495,20 +568,40 @@ def _fetch_price_via_chart_api(ticker: str) -> dict | None:
 
                 if len(valid_bars) >= 2:
                     # Second-to-last bar = previous completed trading session
-                    _, prev_c, prev_h, prev_lo = valid_bars[-2]
+                    pt, prev_c, prev_h, prev_lo = valid_bars[-2]
                     out["prev_close"]    = round(float(prev_c),  2)
                     out["prev_day_high"] = round(float(prev_h),  2)
                     out["prev_day_low"]  = round(float(prev_lo), 2)
+                    # Which session that close belongs to.  Without this the
+                    # day change cannot be told apart from a change across a
+                    # weekend or a holiday.
+                    _d = _bar_date(pt)
+                    if _d:
+                        out["prev_close_date"] = _d
+                    # Last bar is today's.
+                    _t, _c, _h, _lo = valid_bars[-1]
+                    out["day_high"] = round(float(_h),  2)
+                    out["day_low"]  = round(float(_lo), 2)
                 elif len(valid_bars) == 1:
-                    _, prev_c, prev_h, prev_lo = valid_bars[0]
-                    out["prev_close"]    = round(float(prev_c),  2)
-                    out["prev_day_high"] = round(float(prev_h),  2)
-                    out["prev_day_low"]  = round(float(prev_lo), 2)
+                    # One bar is today's own partial bar, not a previous
+                    # session.  It was being stored as prev_close and
+                    # prev_day_high/low, which made the previous day's range
+                    # identical to today's and the day change always ~0%.
+                    _t, _c, _h, _lo = valid_bars[0]
+                    out["day_high"] = round(float(_h),  2)
+                    out["day_low"]  = round(float(_lo), 2)
+                    prev = meta.get("previousClose") or meta.get("chartPreviousClose")
+                    if prev and float(prev) > 0:
+                        out["prev_close"] = round(float(prev), 2)
             except Exception:
                 # Fallback: use meta previousClose when bars unavailable
                 prev = meta.get("previousClose") or meta.get("chartPreviousClose")
                 if prev and float(prev) > 0:
                     out["prev_close"] = round(float(prev), 2)
+
+            # Nothing usable at all — try the other host.
+            if "current_price" not in out and "prev_close" not in out:
+                continue
 
             return out
 
@@ -864,6 +957,14 @@ def fetch_live_data(ticker: str) -> dict | None:
                     result["prev_day_high"] = _chart["prev_day_high"]
                 if _chart.get("prev_day_low") and "prev_day_low" not in result:
                     result["prev_day_low"] = _chart["prev_day_low"]
+                # Carry the provenance the chart path now reports: which
+                # session the prev close belongs to, today's range, when the
+                # quote was taken, and the fact that this is the chart API
+                # rather than a trade feed.
+                for _k in ("prev_close_date", "day_high", "day_low",
+                           "quote_time", "price_source"):
+                    if _chart.get(_k) is not None and _k not in result:
+                        result[_k] = _chart[_k]
                 logger.info(
                     "fetch_live_data: chart API fallback for %s → "
                     "price=%.2f prev_close=%s prev_h=%s prev_l=%s",
@@ -1185,6 +1286,12 @@ def fetch_live_data(ticker: str) -> dict | None:
                     )
                 else:
                     logger.debug("Earnings date fetch failed for %s: %s", ticker, e)
+
+        # If a price came out of this path without one of the sub-fetchers
+        # naming itself, it came from yfinance.  Every quote leaves here with
+        # a source, so the page never has to guess.
+        if result.get("current_price") and not result.get("price_source"):
+            result["price_source"] = "yfinance"
 
         return result if result else None
 

@@ -598,6 +598,19 @@ def init_db():
         ("company_description",  "TEXT"),
         ("company_logo_url",     "TEXT"),
         ("profile_fetched_at",   "TEXT"),
+        # Quote provenance (quote_provenance.py).  A stored snapshot used to
+        # come back from this table with no way to tell which feed it came
+        # from or when it was true, so a Friday close reloaded on Sunday was
+        # indistinguishable from a live price.  price_source names the feed;
+        # quote_time is the feed's own epoch-second timestamp for the quote.
+        ("price_source",         "TEXT"),
+        ("quote_time",           "BIGINT" if _USE_POSTGRES else "INTEGER"),
+        # Today's session range — distinct from prev_day_high / prev_day_low,
+        # which are the PREVIOUS session's and which Finnhub's today-range
+        # values were being written into.
+        ("day_high",             "REAL"),
+        ("day_low",              "REAL"),
+        ("day_open",             "REAL"),
     ]
     for col, col_type in _new_columns:
         if _USE_POSTGRES:
@@ -1813,6 +1826,13 @@ def upsert_stock_data(data: dict):
 
     data.setdefault("ticker_state", "ready")
 
+    # Quote provenance is written by the live-fetch paths. Every other caller
+    # of this function (backfills, manual saves, tests) must still bind these
+    # placeholders, and a missing one is a hard binding error rather than a
+    # null — so default them here instead of at each call site.
+    for _k in ("price_source", "quote_time", "day_high", "day_low", "day_open"):
+        data.setdefault(_k, None)
+
     conn.execute("""
         INSERT INTO stock_data
             (ticker, current_price, prev_close, gap_pct, premarket_high,
@@ -1851,7 +1871,8 @@ def upsert_stock_data(data: dict):
              target_1, target_2, risk_reward, swing_data_fetched_at,
              h4_trend, h4_ema20, h4_ema50, h4_hh_hl,
              m15_higher_low, m15_confirmation, ticker_state,
-             rs_score, rs_vs_qqq, sector_etf)
+             rs_score, rs_vs_qqq, sector_etf,
+             price_source, quote_time, day_high, day_low, day_open)
         VALUES
             (:ticker, :current_price, :prev_close, :gap_pct, :premarket_high,
              :premarket_low, :prev_day_high, :prev_day_low, :avg_volume, :rel_volume,
@@ -1889,7 +1910,8 @@ def upsert_stock_data(data: dict):
              :target_1, :target_2, :risk_reward, :swing_data_fetched_at,
              :h4_trend, :h4_ema20, :h4_ema50, :h4_hh_hl,
              :m15_higher_low, :m15_confirmation, :ticker_state,
-             :rs_score, :rs_vs_qqq, :sector_etf)
+             :rs_score, :rs_vs_qqq, :sector_etf,
+             :price_source, :quote_time, :day_high, :day_low, :day_open)
         ON CONFLICT(ticker) DO UPDATE SET
             current_price        = excluded.current_price,
             prev_close           = excluded.prev_close,
@@ -2010,7 +2032,12 @@ def upsert_stock_data(data: dict):
             ticker_state             = excluded.ticker_state,
             rs_score                 = excluded.rs_score,
             rs_vs_qqq                = excluded.rs_vs_qqq,
-            sector_etf               = excluded.sector_etf
+            sector_etf               = excluded.sector_etf,
+            price_source             = excluded.price_source,
+            quote_time               = excluded.quote_time,
+            day_high                 = excluded.day_high,
+            day_low                  = excluded.day_low,
+            day_open                 = excluded.day_open
     """, data)
     conn.commit()
     conn.close()

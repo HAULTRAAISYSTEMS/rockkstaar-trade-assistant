@@ -29,6 +29,22 @@
       <strong id="detail-mobile-price">${{ "%.2f"|format(stock.current_price) if stock.current_price is not none else "—" }}</strong>
       <span id="detail-mobile-gap" class="{{ stock.gap_class }}">{{ stock.gap_display }}</span>
     </div>
+    {# When and where this price is from. A number with a dollar sign reads as
+       "now" unless something says otherwise, and three of the four feeds can
+       be hours or days behind. #}
+    {% if stock.quote %}
+    <div class="quote-stamp {{ 'is-live' if stock.quote.live else 'is-not-live' }}"
+         title="{{ stock.quote.source_name }} — {{ stock.quote.source_note }}">
+      <span class="quote-stamp__dot" aria-hidden="true"></span>
+      {%- if stock.quote.live %}
+      Live · {{ stock.quote.source_name }} · {{ stock.quote.as_of }}
+      {%- elif stock.quote.as_of %}
+      {{ stock.quote.session_label }} · {{ stock.quote.source_name }} · as of {{ stock.quote.as_of }}
+      {%- else %}
+      {{ stock.quote.session_label }} · {{ stock.quote.source_name }} · time unknown
+      {%- endif %}
+    </div>
+    {% endif %}
     <div class="mobile-stock-chart" id="mobile-stock-chart" data-ticker="{{ stock.ticker }}">
       <div class="mobile-stock-chart__state">Loading 3-month chart…</div>
       <svg viewBox="0 0 320 116" preserveAspectRatio="none" role="img" aria-label="{{ stock.ticker }} three-month price chart"></svg>
@@ -881,21 +897,48 @@
 
   <!-- ===== PRICE STATS GRID ===== -->
   <div class="stats-grid">
-    <div class="stat-card">
+    <div class="stat-card {{ '' if stock.quote and stock.quote.live else 'stat-dashed' }}">
       <div class="stat-label">Current Price</div>
       <div class="stat-value">${{ "%.2f"|format(stock.current_price) if stock.current_price is not none else "N/A" }}</div>
+      {% if stock.quote and stock.quote.as_of %}
+      <div class="stat-note">{{ stock.quote.as_of }}{% if not stock.quote.live %} · {{ stock.quote.source_name }}{% endif %}</div>
+      {% endif %}
     </div>
-    <div class="stat-card">
+    <div class="stat-card {{ '' if stock.prev_close_date else 'stat-dashed' }}">
       <div class="stat-label">Prev Close</div>
       <div class="stat-value">${{ "%.2f"|format(stock.prev_close) if stock.prev_close is not none else "N/A" }}</div>
+      {# The date matters: after a holiday the feed's "previous close" can be
+         several sessions back, which turns the day change into a multi-day one. #}
+      <div class="stat-note">
+        {{- stock.prev_close_date if stock.prev_close_date else "session not stated" -}}
+      </div>
     </div>
     <div class="stat-card">
+      <div class="stat-label">Day High</div>
+      <div class="stat-value">${{ "%.2f"|format(stock.day_high) if stock.day_high is not none else "N/A" }}</div>
+      <div class="stat-note">today</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Day Low</div>
+      <div class="stat-value">${{ "%.2f"|format(stock.day_low) if stock.day_low is not none else "N/A" }}</div>
+      <div class="stat-note">today</div>
+    </div>
+    {# Previous session's range. Finnhub's quote has no such thing — its h/l
+       are today's, and were being filed here, which made "price cleared the
+       prior high" impossible to satisfy. An empty cell now says why. #}
+    <div class="stat-card {{ '' if stock.prev_day_high is not none else 'stat-dashed' }}">
       <div class="stat-label">Prev Day High</div>
-      <div class="stat-value">${{ "%.2f"|format(stock.prev_day_high) if stock.prev_day_high is not none else "N/A" }}</div>
+      <div class="stat-value">${{ "%.2f"|format(stock.prev_day_high) if stock.prev_day_high is not none else "—" }}</div>
+      {% if stock.prev_day_high is none %}
+      <div class="stat-note">{{ stock.quote.source_name if stock.quote else "this feed" }} does not report it</div>
+      {% endif %}
     </div>
-    <div class="stat-card">
+    <div class="stat-card {{ '' if stock.prev_day_low is not none else 'stat-dashed' }}">
       <div class="stat-label">Prev Day Low</div>
-      <div class="stat-value">${{ "%.2f"|format(stock.prev_day_low) if stock.prev_day_low is not none else "N/A" }}</div>
+      <div class="stat-value">${{ "%.2f"|format(stock.prev_day_low) if stock.prev_day_low is not none else "—" }}</div>
+      {% if stock.prev_day_low is none %}
+      <div class="stat-note">{{ stock.quote.source_name if stock.quote else "this feed" }} does not report it</div>
+      {% endif %}
     </div>
     <div class="stat-card {{ 'stat-hot' if stock.rel_volume and stock.rel_volume >= 2 else '' }}">
       <div class="stat-label">Rel Volume</div>
@@ -912,6 +955,13 @@
     </div>
     {% endif %}
   </div>
+  {# Everything the app cannot claim about these numbers, said once rather
+     than left for the reader to infer from a confident-looking cell. #}
+  {% if stock.quote and stock.quote.caveats %}
+  <ul class="quote-caveat">
+    {% for note in stock.quote.caveats %}<li>{{ note }}.</li>{% endfor %}
+  </ul>
+  {% endif %}
 
   <!-- ===== CATALYST + NEWS ===== -->
   <span id="profile-news" class="profile-anchor" aria-hidden="true"></span>
