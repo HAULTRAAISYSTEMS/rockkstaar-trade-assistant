@@ -430,11 +430,23 @@ def generate_stock_data(ticker: str) -> dict:
         data["swing_score"]      = swing_sr.score
         data["swing_reason"]     = swing_sr.explanation
         data["swing_confidence"] = swing_sr.confidence
+        # Recorded at the moment of scoring, because it is only true of the
+        # data the scorer actually saw. Every category falls through to a
+        # default when its inputs are absent, so a feed outage and a bad
+        # setup produce the same letter. This is the difference between them.
+        import score_provenance
+        data["swing_inputs"]     = score_provenance.coverage(data)
+        data["swing_caveat"]     = score_provenance.caveat(data)
+        data["swing_trusted"]    = score_provenance.trustworthy(data)
     except Exception as exc:
         _log.error("generate_stock_data  stage=swing_score  ticker=%s  err=%s", ticker, exc)
         data.setdefault("swing_score",      1)
         data.setdefault("swing_reason",     "Score unavailable")
         data.setdefault("swing_confidence", "Low")
+        data.setdefault("swing_caveat",
+                        "The score could not be computed at all, so this is "
+                        "a placeholder rather than an assessment.")
+        data.setdefault("swing_trusted", False)
         _errors.append("swing_score")
 
     # ── Step 9: Swing status ──────────────────────────────────────────────────
@@ -672,11 +684,23 @@ def live_refresh_stock(ticker: str, existing: dict) -> dict:
         data["swing_score"]      = swing_sr.score
         data["swing_reason"]     = swing_sr.explanation
         data["swing_confidence"] = swing_sr.confidence
+        # Recorded at the moment of scoring, because it is only true of the
+        # data the scorer actually saw. Every category falls through to a
+        # default when its inputs are absent, so a feed outage and a bad
+        # setup produce the same letter. This is the difference between them.
+        import score_provenance
+        data["swing_inputs"]     = score_provenance.coverage(data)
+        data["swing_caveat"]     = score_provenance.caveat(data)
+        data["swing_trusted"]    = score_provenance.trustworthy(data)
     except Exception as exc:
         _log.error("live_refresh_stock  stage=swing_score  ticker=%s  err=%s", ticker, exc)
         data.setdefault("swing_score",      1)
         data.setdefault("swing_reason",     "Score unavailable")
         data.setdefault("swing_confidence", "Low")
+        data.setdefault("swing_caveat",
+                        "The score could not be computed at all, so this is "
+                        "a placeholder rather than an assessment.")
+        data.setdefault("swing_trusted", False)
         _errors.append("swing_score")
 
     try:

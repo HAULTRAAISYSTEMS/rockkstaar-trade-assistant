@@ -757,6 +757,20 @@ a { color: inherit; text-decoration: none; }
 }
 .score-strip-label  { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
 .score-strip-reason { font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; margin-top: 0.15rem; }
+/* A grade computed on a dead feed must not look like one computed on a bad
+   setup. Same rule as the earnings calendar: solid is measured, dashed is
+   not fully known. The caveat says which inputs were missing and what that
+   does to the letter, rather than leaving the badge to speak alone. */
+.ugrade-badge.is-partial { border: 1px dashed currentColor; opacity: .82; }
+.score-strip-caveat {
+  margin-top: .35rem;
+  padding-left: .5rem;
+  border-left: 1px dashed var(--elite-gold, #f0b53f);
+  color: var(--text-muted);
+  font-size: .66rem;
+  line-height: 1.45;
+  max-width: 44ch;
+}
 
 /* Big score number inside the strip */
 .score-big {

@@ -132,10 +132,16 @@
       <div class="score-strip-label">Setup Grade</div>
       <div class="score-big-row">
         {% set _gl = stock.swing_grade|ugrade %}
-        {% if _gl %}<span class="ugrade-badge {{ stock.swing_grade|ugcss }}">{{ _gl }}</span>
+        {#  A grade computed on a dead price feed looks exactly like a grade
+            computed on a bad setup. Dashed outline marks the first kind —
+            the same rule the calendar uses: solid is measured, dashed is
+            not fully known. #}
+        {% if _gl %}<span class="ugrade-badge {{ stock.swing_grade|ugcss }}{% if stock.swing_trusted is defined and not stock.swing_trusted %} is-partial{% endif %}"
+              {% if stock.swing_caveat %}title="{{ stock.swing_caveat }}"{% endif %}>{{ _gl }}</span>
         {% else %}<span class="ugrade-dash">UNGRADED</span>{% endif %}
       </div>
       <div class="score-strip-reason">{{ stock.simplified_action or '—' }}</div>
+      {% if stock.swing_caveat %}<div class="score-strip-caveat">{{ stock.swing_caveat }}</div>{% endif %}
     </div>
 
     <div class="score-strip-divider"></div>
