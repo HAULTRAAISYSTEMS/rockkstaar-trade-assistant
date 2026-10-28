@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tradestaar-shell-v10';
+const CACHE_NAME = 'tradestaar-shell-v11';
 const SHELL_ASSETS = [
   '/static/logo.png',
   '/static/icon-192.png',
@@ -21,7 +21,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => Promise.all(
-      keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+      keys.filter((key) => key.startsWith('tradestaar-shell-') && key !== CACHE_NAME).map((key) => caches.delete(key))
     ))
   );
   self.clients.claim();
@@ -33,13 +33,28 @@ self.addEventListener('fetch', (event) => {
   if (requestUrl.origin !== self.location.origin) return;
 
   if (requestUrl.pathname.startsWith('/static/')) {
-    event.respondWith(
-      fetch(event.request).then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return response;
-      }).catch(() => caches.match(event.request))
-    );
+    // A content hash changes whenever a deployed CSS/JS file changes. Reuse
+    // that exact asset immediately; don't delay every navigation on the CDN.
+    // Unversioned assets still check the network so old URLs cannot pin a fix.
+    const versioned = /\.(css|js)$/.test(requestUrl.pathname)
+      && /^[a-f0-9]{20}$/.test(requestUrl.searchParams.get('asset') || '');
+    const assetResponse = (async () => {
+      const cache = await caches.open(CACHE_NAME).catch(() => null);
+      const cached = cache ? await cache.match(event.request).catch(() => null) : null;
+      if (versioned && cached) return cached;
+      try {
+        const response = await fetch(event.request);
+        if (response.ok && cache) {
+          await cache.put(event.request, response.clone()).catch(() => {});
+        }
+        return response.ok ? response : (cached || response);
+      } catch (error) {
+        if (cached) return cached;
+        throw error;
+      }
+    })();
+    event.respondWith(assetResponse);
+    event.waitUntil(assetResponse.catch(() => {}));
     return;
   }
 

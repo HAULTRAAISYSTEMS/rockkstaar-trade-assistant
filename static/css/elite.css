@@ -990,7 +990,11 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
 }
 
 /* ── Pull-to-refresh: center-stage Tradestaar Elite loader ──────────────── */
-html, body { overscroll-behavior-y: none; }
+/* Only touch devices use custom pull-to-refresh. Desktop scrolling and
+   scroll chaining must stay native (including Mac trackpads). */
+@media (hover: none) and (pointer: coarse) {
+  html { overscroll-behavior-y: none; }
+}
 .ptr-indicator {
   position: fixed;
   top: 50%;

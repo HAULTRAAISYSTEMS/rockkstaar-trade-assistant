@@ -85,6 +85,8 @@ except Exception:
     _MKT_AVAILABLE = False
 
 app = Flask(__name__)
+from static_assets import install_asset_versions
+install_asset_versions(app)
 _is_production = bool(
     os.environ.get("RENDER")
     or os.environ.get("DATABASE_URL")
