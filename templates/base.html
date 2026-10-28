@@ -29,8 +29,10 @@
   {% block head_extra %}{% endblock %}
   <!-- Unified Tradestaar Elite shell and component normalization — loaded last. -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/elite.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}" />
 </head>
 <body class="{% block body_class %}{% endblock %}">
+  <a class="workspace-skip" href="#workspace-main">Skip to content</a>
 
   {% include "_elite_navigation.html" %}
 
@@ -41,6 +43,7 @@
   </div>
 
   {% if request.endpoint != 'terminal' %}{% include "_market_tape.html" %}{% endif %}
+  {% include "_workspace_search.html" %}
 
   <!-- ===== FLASH MESSAGES ===== -->
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -54,7 +57,7 @@
   {% endwith %}
 
   <!-- ===== PAGE CONTENT ===== -->
-  <main class="main-content">
+  <main class="main-content" id="workspace-main" tabindex="-1">
     {% block content %}{% endblock %}
   </main>
 
@@ -68,42 +71,7 @@
     }
   </script>
 
-  <script>
-    // Update nav live indicator based on market session
-    (function() {
-      var el = document.getElementById('nav-live-indicator');
-      var lbl = document.getElementById('nav-live-label');
-      if (!el || !lbl) return;
-      var h = new Date().getUTCHours();
-      var etH = (h - 4 + 24) % 24; // rough ET
-      if (etH >= 9 && etH < 16) {
-        el.style.display = 'inline-flex';
-        lbl.textContent = 'MARKET ACTIVE';
-      } else if (etH >= 4 && etH < 9) {
-        el.style.background = 'rgba(245,158,11,0.08)';
-        el.style.borderColor = 'rgba(245,158,11,0.22)';
-        el.style.color = '#f59e0b';
-        el.querySelector('.nav-live-dot').style.background = '#f59e0b';
-        lbl.textContent = 'PREMARKET';
-        el.style.display = 'inline-flex';
-      } else if (etH >= 16 && etH < 20) {
-        el.style.background = 'rgba(245,158,11,0.08)';
-        el.style.borderColor = 'rgba(245,158,11,0.22)';
-        el.style.color = '#f59e0b';
-        el.querySelector('.nav-live-dot').style.background = '#f59e0b';
-        lbl.textContent = 'AFTERHOURS';
-        el.style.display = 'inline-flex';
-      } else {
-        el.style.background = 'rgba(100,116,139,0.08)';
-        el.style.borderColor = 'rgba(100,116,139,0.18)';
-        el.style.color = '#64748b';
-        el.querySelector('.nav-live-dot').style.background = '#64748b';
-        el.querySelector('.nav-live-dot').style.animation = 'none';
-        lbl.textContent = 'MARKET CLOSED';
-        el.style.display = 'inline-flex';
-      }
-    })();
-  </script>
+  <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
 
   {% block scripts %}{% endblock %}
 

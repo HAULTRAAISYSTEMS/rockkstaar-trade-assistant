@@ -689,19 +689,9 @@ def refresh_market_context() -> dict:
 def market_session(now=None) -> str:
     """US equity session in ET: 'pre' 04:00-09:30, 'regular' 09:30-16:00,
     'post' 16:00-20:00, else 'closed' (including weekends)."""
-    from zoneinfo import ZoneInfo
-    et = (now or datetime.now(ZoneInfo("America/New_York"))).astimezone(
-        ZoneInfo("America/New_York"))
-    if et.weekday() >= 5:
-        return "closed"
-    mins = et.hour * 60 + et.minute
-    if 240 <= mins < 570:
-        return "pre"
-    if 570 <= mins < 960:
-        return "regular"
-    if 960 <= mins < 1200:
-        return "post"
-    return "closed"
+    from exchange_schedule import session_status
+    status = session_status(now)["session"]
+    return {"pre_market": "pre", "after_hours": "post", "unknown": "closed"}.get(status, status)
 
 
 def get_market_context() -> dict:
@@ -840,14 +830,19 @@ def _day_label(now: datetime | None = None) -> str:
     as Friday's — every weekday evening, which is when the day gets reviewed.
     """
     et = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("America/New_York"))
-    # A weekday from the open onwards: today's candle exists (partial during
+    from exchange_schedule import is_trading_day
+    if is_trading_day(et.date()) is None:
+        return "unverified"
+    # A trading day from the open onwards: today's candle exists (partial during
     # the session, final after the close), so the change is today's.
-    if et.weekday() < 5 and (et.hour, et.minute) >= (9, 30):
+    if is_trading_day(et.date()) and (et.hour, et.minute) >= (9, 30):
         return "today"
     d = et.date()
     while True:
         d -= timedelta(days=1)
-        if d.weekday() < 5:
+        if is_trading_day(d) is None:
+            return "unverified"
+        if is_trading_day(d):
             return d.strftime("%A")
 
 

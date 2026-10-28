@@ -12,6 +12,7 @@
     <div>
       <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Intelligence</div>
       <h1 class="elite-hero-title">Morning <span class="accent">Command Center</span></h1>
+      <p class="workspace-intro">Understand what changed. Check the evidence. Build your conviction.</p>
     </div>
     <div class="elite-hero-actions">
       <div class="liq-mode-toggle">
@@ -23,6 +24,12 @@
       <span class="liq-last-updated cc-updated" id="liq-last-updated">Loading…</span>
     </div>
   </header>
+
+  <nav class="workspace-paths" aria-label="Research workflow">
+    <a href="{{ url_for('research_page') }}"><span class="workspace-step">01 / DISCOVER</span><strong>Research a company <span aria-hidden="true">↗</span></strong><small>Financials, filings &amp; valuation</small></a>
+    <a href="{{ url_for('fundamentals_page', tab='quarter') }}"><span class="workspace-step">02 / VERIFY</span><strong>Run your Seven Checks <span aria-hidden="true">↗</span></strong><small>Read the quarter, question the numbers</small></a>
+    <a href="{{ url_for('learn_review') }}"><span class="workspace-step">03 / REMEMBER</span><strong>Review what you learned <span aria-hidden="true">↗</span></strong><small>Turn research into lasting knowledge</small></a>
+  </nav>
 
   {# The FRED loading and weekend notices sat above the page title, so the
      first thing the page said was that one of its lower panels was still
@@ -141,7 +148,7 @@
       {% if week %}
       <div class="cc-week">
         {% for e in week %}
-        <div class="cc-week-row {{ 'is-high' if e.impact == 'HIGH' }} {{ 'is-imminent' if (e.days_away or 9) <= 1 }}">
+        <div class="cc-week-row {{ 'is-high' if e.impact == 'HIGH' }} {{ 'is-imminent' if e.days_away is number and 0 <= e.days_away <= 1 }}">
           <span class="cc-when"><b>{{ e.date_label }}</b><small>{{ e.time }}</small></span>
           <span class="cc-what">
             {{ e.title }}
@@ -157,7 +164,7 @@
         {% endfor %}
       </div>
       {% else %}
-      <p class="cc-empty">Nothing on the calendar for the next seven days — no macro releases, no tracked earnings in range.</p>
+      <p class="cc-empty">No upcoming events were returned. This does not confirm an empty week. Open the full calendar to check coverage.</p>
       {% endif %}
     </div>
 

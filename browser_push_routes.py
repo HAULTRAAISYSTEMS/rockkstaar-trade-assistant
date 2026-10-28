@@ -24,6 +24,8 @@ def create_browser_push_blueprint(*, current_user):
     def subscribe():
         try:
             payload = request.get_json(silent=True) or {}
+            if not isinstance(payload, dict):
+                raise browser_push.BrowserPushError("Expected a subscription object.")
             saved = browser_push.save_subscription(
                 uid(), payload.get("subscription") or {}, user_agent=request.headers.get("User-Agent", ""),
             )
@@ -34,6 +36,8 @@ def create_browser_push_blueprint(*, current_user):
     @bp.delete("/api/browser-push/subscriptions")
     def unsubscribe():
         payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            return jsonify({"ok": False, "error": "Expected an endpoint object."}), 400
         browser_push.remove_subscription(uid(), payload.get("endpoint") or "")
         return jsonify({"ok": True})
 

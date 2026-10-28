@@ -710,6 +710,18 @@ function _escB(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+async function fetchDeskJSON(url, options = {}, timeoutMs = 20000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {...options, signal: controller.signal});
+    if (!response.ok) throw new Error(response.status === 401 ? 'Sign in again to continue.' : 'The data service is temporarily unavailable.');
+    const data = await response.json();
+    if (data.ok === false) throw new Error('The data service could not complete this request.');
+    return data;
+  } finally { clearTimeout(timer); }
+}
+
 function loadAIBrief(forceRefresh) {
   const url    = '/api/ai_briefing' + (forceRefresh ? '?refresh=true' : '');
   const body   = document.getElementById('ai-brief-body');
@@ -720,10 +732,10 @@ function loadAIBrief(forceRefresh) {
   if (btn)  { btn.textContent = '…'; btn.disabled = true; }
   if (body && forceRefresh) body.innerHTML = '<div class="ai-brief-skeleton"></div>';
 
-  fetch(url)
-    .then(r => r.json())
+  fetchDeskJSON(url, {}, 45000)
     .then(data => {
       const b    = data.briefing || {};
+      if (!b.briefing) throw new Error('No verified briefing is available yet.');
       const bias = (b.macro_bias || 'neutral').toLowerCase();
       if (badge) {
         badge.className = 'ai-brief-badge ' + (bias === 'risk_on' ? 'risk-on' : bias === 'risk_off' ? 'risk-off' : 'neutral');
@@ -755,12 +767,16 @@ function loadAIBrief(forceRefresh) {
       }
       var note = document.getElementById('ai-brief-conflict');
       if (note) {
-        note.textContent = b.conflict || '';
-        note.style.display = b.conflict ? '' : 'none';
+        note.textContent = b.conflict || (b.error ? 'Refresh unavailable. Showing the dated cached briefing.' : '');
+        note.style.display = (b.conflict || b.error) ? '' : 'none';
       }
     })
     .catch(err => {
       if (body) body.innerHTML = `<div class="ai-brief-err">Briefing unavailable — ${_escB(err.message)}</div>`;
+      if (badge) { badge.textContent = 'UNAVAILABLE'; badge.className = 'ai-brief-badge neutral'; }
+      if (cached) cached.style.display = 'none';
+      const note = document.getElementById('ai-brief-conflict');
+      if (note) note.style.display = 'none';
       if (time) time.textContent = 'Error loading briefing';
     })
     .finally(() => { if (btn) { btn.textContent = '↻ Refresh'; btn.disabled = false; } });
@@ -780,7 +796,7 @@ function showStatusBanner(d) {
 
   if (loading && !weekend) {
     el.className = 'liq-status-banner banner-loading';
-    el.innerHTML = '⏳ Fetching latest macro data from FRED… Available in ~15 seconds.';
+    el.textContent = 'Checking macro data availability…';
     el.style.display = '';
   } else if (weekend) {
     const ageStr = d && d.data_age_hours != null ? ` · Data from ${d.data_age_hours}h ago` : '';
@@ -839,8 +855,7 @@ async function refreshAll() {
   if (stamp) stamp.textContent = 'Refreshing market data…';
   if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
   try {
-    const response = await fetch('/api/opportunity/refresh', {method:'POST'});
-    const data = await response.json();
+    const data = await fetchDeskJSON('/api/opportunity/refresh', {method:'POST'});
     if (data.market) _renderLivePulse(data.market);
     if (stamp) stamp.textContent = data.ok ? 'Updated just now' : (data.msg || 'Refresh pending');
     if (data.story) _renderStory(data.story);
@@ -884,16 +899,23 @@ document.addEventListener('DOMContentLoaded', function () {
 ───────────────────────────────────────────────────────────── */
 async function loadLiquidity() {
   try {
-    const r = await fetch('/api/liquidity/status');
-    const d = await r.json();
-    if (!d.ok) return;
+    const d = await fetchDeskJSON('/api/liquidity/status');
     _liqData    = d;
     _liqLoading = false;
     showStatusBanner(d);
     renderLiquidityStatus(d);
     renderRiskMeter(d);
     updateTimestamp(d);
-  } catch(e) { console.warn('loadLiquidity:', e); }
+  } catch(e) {
+    console.warn('loadLiquidity:', e);
+    const banner = document.getElementById('liq-status-banner');
+    if (banner) {
+      banner.textContent = 'Macro data unavailable. Existing readings may be stale; refresh to try again.';
+      banner.className = 'liq-status-banner banner-stale'; banner.style.display = '';
+    }
+    const stamp = document.getElementById('liq-last-updated');
+    if (stamp) stamp.textContent = 'Update unavailable';
+  }
 }
 
 function renderLiquidityStatus(d) {
@@ -1359,10 +1381,12 @@ async function loadAlerts() {
     }
     list.innerHTML = alerts.slice(0, 20).map(a => {
       const typeLabel = {breakout:'🚀',hidden_gem:'🌟',rs_leader:'📈','52w_high':'🏔️',macro:'📡'}[a.type] || '◆';
-      return `<div class="liq-opp-alert ${a.type}" onclick="${a.ticker && a.ticker !== 'MACRO' ? `loadReport('${a.ticker}')` : ''}">
-        <span class="liq-opp-alert-ticker">${typeLabel} ${a.ticker || ''}</span>
-        <span class="liq-opp-alert-msg">${a.msg}</span>
-        ${a.score ? `<span class="liq-opp-score">${a.score}/100</span>` : ''}
+      const safeType = /^[a-z0-9_]+$/i.test(a.type || '') ? a.type : '';
+      const safeTicker = /^[A-Z][A-Z0-9.-]{0,9}$/.test(a.ticker || '') ? a.ticker : '';
+      return `<div class="liq-opp-alert ${safeType}" onclick="${safeTicker && safeTicker !== 'MACRO' ? `loadReport('${safeTicker}')` : ''}">
+        <span class="liq-opp-alert-ticker">${typeLabel} ${_escB(a.ticker || '')}</span>
+        <span class="liq-opp-alert-msg">${_escB(a.msg || '')}</span>
+        ${a.score ? `<span class="liq-opp-score">${_escB(a.score)}/100</span>` : ''}
       </div>`;
     }).join('');
   } catch(e) { console.warn('loadAlerts:', e); }

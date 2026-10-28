@@ -1,0 +1,18 @@
+<div class="workspace-bar">
+  <span class="workspace-bar-label">YOUR RESEARCH WORKSPACE</span>
+  <button type="button" class="workspace-search-open" id="workspace-search-open" aria-haspopup="dialog"><span aria-hidden="true">⌕</span> Find a company or tool <kbd>/</kbd></button>
+  <a class="workspace-alerts" href="{{ url_for('browser_push.settings') }}">Browser alerts <span aria-hidden="true">↗</span></a>
+</div>
+<dialog id="workspace-search" class="workspace-search" aria-labelledby="workspace-search-title">
+  <div class="workspace-search-head"><div><p class="workspace-step">GO STRAIGHT TO THE SOURCE</p><h2 id="workspace-search-title">What are you researching?</h2></div><button type="button" id="workspace-search-close" aria-label="Close search">×</button></div>
+  <label for="workspace-query" class="workspace-input-label">Company ticker or tool name</label>
+  <input id="workspace-query" type="search" placeholder="Try AMD, Seven Checks, calendar…" autocomplete="off" maxlength="60">
+  <div id="workspace-results" class="workspace-results">
+    <a id="workspace-ticker" href="{{ url_for('research_page') }}" data-research-url="{{ url_for('research_page') }}" hidden><span>COMPANY</span><strong></strong><small>Open financials, filings and valuation →</small></a>
+    {% for endpoint, title, description in [('research_page', 'Company Research', 'Financials, filings, valuation and thesis'), ('fundamentals_page', 'Seven Checks', 'Read and grade the latest quarter'), ('terminal', 'Terminal', 'Charts, watchlists and trade planning'), ('catalyst_calendar', 'Calendar', 'Earnings and economic events'), ('live_research.feed', 'Live Research', 'News and source-backed research'), ('research_memory.notebook', 'Research Memory', 'Your saved notes and theses'), ('learn_review', 'Review Queue', 'Recall what you learned'), ('learn_index', 'Learning Center', 'Build your market knowledge'), ('browser_push.settings', 'Browser Alerts', 'Free push notifications and quiet hours'), ('watchlists_page', 'Watchlists', 'Follow the companies that matter'), ('macro_page', 'Macro', 'Liquidity and market context'), ('account', 'Account', 'Your workspace and settings')] %}
+    <a href="{{ url_for(endpoint, tab='quarter') if endpoint == 'fundamentals_page' else url_for(endpoint) }}" data-workspace-destination><strong>{{ title }}</strong><small>{{ description }}</small></a>
+    {% endfor %}
+  </div>
+  <p id="workspace-empty" hidden>No matching tool. For a company, enter its ticker symbol.</p>
+  <p class="workspace-search-help">↑ ↓ to navigate <span>Enter to open · Esc to close</span></p>
+</dialog>

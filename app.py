@@ -9,6 +9,10 @@ import os
 import pathlib
 import re
 import secrets
+import hashlib
+import hmac
+import ipaddress
+from urllib.parse import unquote, urlsplit
 import threading
 import time as _time
 from collections import defaultdict
@@ -140,6 +144,8 @@ def current_user() -> dict | None:
 
 def _auth_required() -> bool:
     """Return True if the users table has at least one user (auth is active)."""
+    if _is_production:
+        return True
     try:
         return bool(get_all_users())
     except Exception:
@@ -152,10 +158,51 @@ def _registration_enabled() -> bool:
     allow = os.environ.get("ALLOW_REGISTRATION", "").strip().lower()
     if allow in {"1", "true", "yes", "on"}:
         return True
+    if _is_production or allow in {"0", "false", "no", "off"}:
+        return False
     try:
         return not bool(get_all_users())
     except Exception:
         return False
+
+
+def _credential_stamp(user):
+    """Invalidate signed cookies when the stored password changes, without exposing its hash."""
+    return hmac.new(str(app.secret_key).encode(),
+                    str(user.get("password_hash", "")).encode(), hashlib.sha256).hexdigest()
+
+
+def _safe_login_next(value):
+    # Browsers normalize backslashes and encoded separators differently. Only
+    # accept a root-relative path, including after repeated percent decoding.
+    candidate = value or ""
+    for _ in range(4):
+        if (not candidate.startswith("/") or candidate.startswith("//")
+                or "\\" in candidate or any(ord(c) < 32 or ord(c) == 127 for c in candidate)):
+            return url_for("liquidity_page")
+        try:
+            if urlsplit(candidate).netloc:
+                return url_for("liquidity_page")
+        except ValueError:
+            return url_for("liquidity_page")
+        decoded = unquote(candidate)
+        if decoded == candidate:
+            return value
+        candidate = decoded
+    return url_for("liquidity_page")
+
+
+def _login_client_address():
+    """Ignore spoofable forwarding headers unless a trusted proxy count is configured."""
+    direct = request.remote_addr or ""
+    try:
+        hops = int(os.environ.get("TRUSTED_PROXY_HOPS", "0"))
+        forwarded = request.headers.get("X-Forwarded-For", "").split(",")
+        if 0 < hops <= 8 and len(forwarded) >= hops:
+            return str(ipaddress.ip_address(forwarded[-hops].strip()))
+    except ValueError:
+        pass
+    return direct
 
 
 def require_admin(f):
@@ -178,6 +225,20 @@ def require_admin(f):
 
 @app.before_request
 def _require_login():
+    # Re-check production identities on every authenticated request. A signed
+    # cookie must not keep a deleted user or a revoked admin alive for 30 days.
+    if _is_production and session.get("user_id") and not request.path.startswith("/static/"):
+        try:
+            user = get_user_by_id(current_user_id())
+        except Exception:
+            logger.exception("Session verification unavailable")
+            return jsonify({"ok": False, "error": "Sign-in verification temporarily unavailable."}), 503
+        stamp = str(session.get("credential_stamp", ""))
+        if not user or not hmac.compare_digest(stamp, _credential_stamp(user)):
+            session.clear()
+        else:
+            session["is_admin"] = user["is_admin"]
+            session["username"] = user["username"]
     # Always public — Schwab OAuth callback must stay reachable; callback validates PKCE/state.
     if (request.path in ("/login", "/logout", "/register", "/favicon.ico", "/health",
                          "/service-worker.js", "/schwab/callback")
@@ -231,23 +292,30 @@ def _handle_all_errors(e):
             logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
         return jsonify({
             "ok": False,
-            "errors": [f"{type(e).__name__}: {e}"],
+            "errors": ["Service temporarily unavailable. Please try again." if code >= 500 else e.description],
             "news": [], "market_news": [],
             "earnings": {"today": [], "tomorrow": [], "this_week": []},
             "splits": [], "dividends": [], "economic_events": [],
             "from_cache": False, "refreshing": False, "last_updated": "—",
         }), code
-    # For HTTP errors (404, 403, etc.) on frontend routes, return Flask's default response
     if isinstance(e, HTTPException):
-        return e.get_response()
+        headers = [(key, value) for key, value in e.get_headers()
+                   if key.lower() not in {"content-type", "content-length"}]
+        return render_template("error.html", code=code, csrf_failure=type(e).__name__ == "CSRFError"), code, headers
     # Unexpected server errors on frontend routes — log and show a simple message
     logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
-    return "Internal server error", 500
+    return render_template("error.html", code=500), 500
 
 
 @app.route("/favicon.ico")
 def favicon():
     return send_from_directory(app.static_folder or "static", "favicon-32.png", mimetype="image/png")
+
+
+@app.get("/api/session-status")
+def session_status_api():
+    from exchange_schedule import session_status
+    return jsonify(session_status())
 
 
 @app.route("/service-worker.js")
@@ -342,6 +410,19 @@ def _add_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Content-Security-Policy", "base-uri 'self'; object-src 'none'; frame-ancestors 'self'")
+    # Some integrations catch exceptions in their own routes. Never expose
+    # upstream credentials, SQL or internal paths through those JSON errors.
+    if request.path.startswith("/api/") and response.status_code >= 500 and response.is_json:
+        payload = response.get_json(silent=True)
+        if isinstance(payload, dict):
+            safe = "Service temporarily unavailable. Please try again."
+            for key in ("error", "message", "detail"):
+                if key in payload:
+                    payload[key] = safe
+            if "errors" in payload:
+                payload["errors"] = [safe]
+            response.set_data(app.json.dumps(payload))
     if _is_production:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
@@ -5927,7 +6008,7 @@ def api_ai_briefing():
         return jsonify({"ok": True, "briefing": _age_briefing(result)})
     except Exception as exc:
         logger.error("api_ai_briefing provider call failed: %s", exc, exc_info=True)
-        _last_err = str(exc)
+        _last_err = "Briefing refresh unavailable. Showing the dated cached briefing."
 
     # Fall back to today's cached briefing (if any) rather than returning an error
     fallback = get_ai_briefing(today_et)
@@ -8683,7 +8764,7 @@ def login_page():
     error = None
     if request.method == "POST":
         username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
+        password = request.form.get("password", "")
 
         # Throttle before checking the password. Nothing counted attempts, so
         # a known username could be guessed against as fast as the network
@@ -8694,8 +8775,7 @@ def login_page():
         import login_throttle as _throttle
         from database import get_db as _tdb
         _scope = _throttle.scope_key(
-            (request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-             or request.remote_addr or ""), username)
+            _login_client_address(), username)
         _conn = None
         try:
             _conn = _tdb()
@@ -8724,13 +8804,14 @@ def login_page():
 
         if user:
             remember = request.form.get("remember_me") == "1"
+            session.clear()
             session.permanent = remember
             session["user_id"]   = user["id"]
             session["username"]  = user["username"]
             session["is_admin"]  = user["is_admin"]
+            session["credential_stamp"] = _credential_stamp(user)
             next_url = request.form.get("next") or url_for("liquidity_page")
-            if not next_url.startswith("/") or next_url.startswith("//"):
-                next_url = url_for("liquidity_page")
+            next_url = _safe_login_next(next_url)
             _refresh_on_signin(user["id"])
             return redirect(next_url)
         error = "Invalid username or password."
@@ -8779,10 +8860,13 @@ def register_page():
         else:
             try:
                 uid = create_user(entered_username, password, is_admin=False)
+                user = get_user_by_id(uid)
+                session.clear()
                 session.permanent = False
                 session["user_id"]  = uid
                 session["username"] = entered_username.lower()
                 session["is_admin"] = 0
+                session["credential_stamp"] = _credential_stamp(user)
                 return redirect(url_for("liquidity_page"))
             except Exception:
                 error = "Could not create account — please try again."
@@ -8808,7 +8892,7 @@ def admin_users():
 def admin_user_create():
     """Admin: create a new user."""
     username = request.form.get("username", "").strip()
-    password = request.form.get("password", "").strip()
+    password = request.form.get("password", "")
     is_admin = bool(request.form.get("is_admin"))
     if not username or len(password) < 12:
         flash("Username and a password of at least 12 characters are required.", "error")
@@ -8839,7 +8923,7 @@ def admin_user_delete(uid):
 @require_admin
 def admin_user_password(uid):
     """Admin: change a user's password."""
-    new_password = request.form.get("password", "").strip()
+    new_password = request.form.get("password", "")
     if len(new_password) < 12:
         flash("Password must be at least 12 characters.", "error")
         return redirect(url_for("admin_users"))

@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ code }} · Tradestaar Elite</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}"></head>
+<body class="workspace-error"><main>
+<p class="workspace-step">TRADESTAAR ELITE / {{ code }}</p>
+{% if csrf_failure %}<p>Security check (CSRF): reload the page to renew your form token.</p>{% endif %}
+<h1>{% if code == 404 %}This page isn't here.{% elif code == 403 %}This area needs permission.{% elif code == 400 %}Let's try that again.{% else %}We couldn't complete that request.{% endif %}</h1>
+<p>{% if code == 400 %}Your session or form may have expired. Reload the page before trying again.{% elif code >= 500 %}The service hit a problem. Your request may not have completed—check its status before repeating an action.{% else %}Return to your workspace or sign in to continue.{% endif %}</p>
+<a href="/opportunity">Back to Today →</a> <a href="/login">Sign in</a>
+</main></body></html>

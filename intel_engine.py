@@ -726,8 +726,8 @@ def fetch_company_profile(ticker: str, force: bool = False) -> dict:
     # missing description stays missing rather than becoming a wrong entity.
     # Results are cached in the DB for 30 days, so this costs two HTTP calls
     # at most once per ticker per month.
-    if not profile.get("description"):
-        wiki = _wikipedia_description(profile.get("company_name") or ticker)
+    if not profile.get("description") and profile["company_name"].strip().upper() != ticker.upper():
+        wiki = _wikipedia_description(profile["company_name"])
         if wiki and _profile_description_matches(profile.get("company_name") or ticker, wiki):
             profile["description"] = wiki
 

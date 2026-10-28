@@ -74,11 +74,17 @@ def _validate_subscription(value: dict) -> dict:
         raise BrowserPushError("The browser did not provide a valid push subscription.")
     endpoint = str(value.get("endpoint") or "").strip()
     keys = value.get("keys") or {}
+    if not isinstance(keys, dict):
+        raise BrowserPushError("The browser provided invalid subscription keys.")
     auth, p256dh = str(keys.get("auth") or ""), str(keys.get("p256dh") or "")
-    parsed = urlparse(endpoint)
-    host = (parsed.hostname or "").lower()
+    try:
+        parsed = urlparse(endpoint)
+        host = (parsed.hostname or "").lower()
+        invalid_url = parsed.port not in (None, 443) or parsed.username is not None or parsed.password is not None or bool(parsed.fragment)
+    except ValueError as exc:
+        raise BrowserPushError("That push service is not supported.") from exc
     allowed = host in ALLOWED_PUSH_HOSTS or host.endswith(".push.apple.com") or host.endswith(".notify.windows.com")
-    if parsed.scheme != "https" or not allowed or len(endpoint) > 2048:
+    if parsed.scheme != "https" or not allowed or invalid_url or len(endpoint) > 2048:
         raise BrowserPushError("That push service is not supported.")
     token_pattern = re.compile(r"^[A-Za-z0-9_-]+={0,2}$")
     if not (8 <= len(auth) <= 128 and 40 <= len(p256dh) <= 256
@@ -105,6 +111,8 @@ def _decrypt_subscription(ciphertext: str) -> dict:
 
 def save_subscription(user_id: int, subscription: dict, *, user_agent: str = "", conn=None) -> dict:
     user_id = int(user_id)
+    if user_id <= 0:
+        raise BrowserPushError("Sign in before enabling browser notifications.")
     clean = _validate_subscription(subscription)
     endpoint_hash = _endpoint_hash(clean["endpoint"])
     now = _now().isoformat()

@@ -23,8 +23,16 @@
     status.classList.toggle('good', Boolean(good));
   }
   async function subscription() {
-    const registration = await navigator.serviceWorker.ready;
+    const registration = await readyWorker();
     return registration.pushManager.getSubscription();
+  }
+  async function readyWorker() {
+    let timer;
+    try {
+      return await Promise.race([navigator.serviceWorker.ready, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('The notification service is not ready. Reload and try again.')), 12000);
+      })]);
+    } finally { clearTimeout(timer); }
   }
   async function refresh() {
     if (!supported()) {
@@ -52,7 +60,7 @@
       if (isIOS() && !isStandalone()) throw new Error('Add Tradestaar to your iPhone Home Screen first, then open it from the icon.');
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') throw new Error('Notification permission was not granted. Change it in your browser settings and try again.');
-      const registration = await navigator.serviceWorker.ready;
+      const registration = await readyWorker();
       const current = await registration.pushManager.getSubscription();
       const created = current || await registration.pushManager.subscribe({
         userVisibleOnly: true,
@@ -75,10 +83,11 @@
     try {
       const current = await subscription();
       if (current) {
-        await fetch('/api/browser-push/subscriptions', {
+        const response = await fetch('/api/browser-push/subscriptions', {
           method: 'DELETE', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ endpoint: current.endpoint })
         });
+        if (!response.ok) throw new Error('The server could not disable alerts. Please try again.');
         await current.unsubscribe();
       }
       await refresh();
