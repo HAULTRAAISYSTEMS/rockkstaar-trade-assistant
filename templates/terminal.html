@@ -303,16 +303,66 @@
 .tw-empty { padding: var(--sp-8) var(--sp-4); text-align:center; font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-faint); line-height:1.7; }
 .tw-empty a { color: var(--orange-400); text-decoration:underline; }
 
+/* The status card had its own 20px side margins, so it sat visibly narrower
+   than the tape above it and every panel below it on all screen sizes. */
+.tw-status { margin: 0 0 var(--sp-4); }
+.tw-paper-flag { margin-left: auto !important; }
+/* "as of load" inherited the 14px uppercase card title, so it shouted as
+   loudly as "Today's Setups" itself. */
+.tw-right .card-hd .faint { font: 500 10px var(--font-mono); letter-spacing: .04em; text-transform: none; margin-left: auto; }
+.tw-right .card-hd .badge { margin-left: 8px; }
+
 /* ── Responsive ── */
+/* MacBook (≥1241px): three columns. The watchlist follows you down the page
+   instead of ending halfway and leaving an empty gutter. */
+@media (min-width: 781px) {
+  .tw-body > .tw-panel:first-child { position: sticky; top: 12px; }
+  .tw-wl { max-height: calc(100dvh - 140px); }
+}
+/* iPad landscape / small laptops: watchlist + chart; the right rail drops below
+   and splits into two columns so the order ticket isn't a 1000px-wide form. */
 @media (max-width: 1240px) {
   .tw-body { grid-template-columns: 260px minmax(0,1fr); }
-  .tw-right { grid-column: 1 / -1; }
-  .tw-stats { grid-template-columns: repeat(4,1fr); }
+  .tw-right { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: var(--sp-4); align-items: start; }
+  .tw-right > .hx { grid-column: 1; margin-bottom: 0 !important; }
+  .tw-right > .tw-stats { grid-column: 1; grid-template-columns: 1fr 1fr; }
+  .tw-right > :not(.hx):not(.tw-stats) { grid-column: 2; grid-row: 1 / span 3; }
 }
+/* iPad portrait: a narrower watchlist leaves the chart room to breathe. When
+   the chart tools wrap, a group starting the second row kept its divider and
+   left-indent, leaving a stray line before "Select". Use spacing instead. */
+@media (max-width: 1024px) {
+  .tw-tool-group { border-left: none !important; margin-left: 0 !important; padding-left: 0 !important; }
+  .tw-body { grid-template-columns: 220px minmax(0,1fr); }
+  .tw-wl-name { max-width: 150px; }
+  .tw-sym-ticker { font-size: 26px; }
+  .tw-sym-px { font-size: 24px; }
+}
+/* Phones: one column, in reading order. */
 @media (max-width: 780px) {
   .tw-body { grid-template-columns: 1fr; }
+  .tw-right { display: flex; flex-direction: column; }
   .tw-stats { grid-template-columns: 1fr 1fr; }
-  .tw-wl { max-height: 320px; }
+  .tw-wl { max-height: 360px; }
+  .tw-wl-row { padding: 12px 14px; }
+  .tw-wl-name { max-width: none; }
+  .tw-status { gap: 6px; padding: 10px 12px; }
+  .tw-status .tw-title { flex: 1 0 100%; font-size: 26px; }
+  .tw-acct-chip { margin-left: 0; }
+  .tw-sym-hd { padding: var(--sp-4) var(--sp-4) var(--sp-2); }
+  /* Keep the price clear of the floating AI button on the right edge. */
+  .tw-sym-right { padding-right: 4px; }
+  .tw-chart { height: 280px; }
+  .tw-chart-toolbar, .tw-chart-stack, .tw-feed-strip { margin-left: var(--sp-4); margin-right: var(--sp-4); }
+  .tw-ohlcv { grid-template-columns: repeat(5, minmax(0,1fr)); gap: 6px; padding: 10px 12px; }
+  .tw-ohlcv .v { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .tw-pos-table { font-size: 12px; }
+  .tw-pos-table th, .tw-pos-table td { padding: 8px 10px; }
+}
+@media (max-width: 380px) {
+  .tw-sym-ticker { font-size: 24px; }
+  .tw-sym-px { font-size: 22px; }
+  .tw-ohlcv .k { font-size: 9px; letter-spacing: .04em; }
 }
 </style>
 {% endblock %}
@@ -363,7 +413,14 @@
     {% endif %}
     <span class="tw-chip">REGIME <b id="tw-chip-regime">{% if mkt and not mkt.get('fallback') %}{{ mkt.regime_label or '—' }}{% else %}—{% endif %}</b></span>
     <span class="tw-chip">VIX <b id="tw-chip-vix">{{ '%.2f'|format(mkt.vix_level) if mkt and mkt.vix_level is not none else '—' }}</b></span>
-    <span class="tw-chip">SPY <b id="tw-chip-spy" class="{{ 'chg-pos' if (mkt and (mkt.spy_1d_pct or 0) >= 0) else 'chg-neg' }}">{{ '%+.2f'|format(mkt.spy_1d_pct) ~ '%' if mkt and mkt.spy_1d_pct is not none else '—' }}</b></span>
+    {# The SPY chip and the SPY tape item sat side by side reading different
+       numbers (tape −0.22%, chip +0.34%): the chip used the regime engine's
+       daily-bar change, which is yesterday's move until today's bar prints,
+       while the tape is the live quote. One SPY per screen — the tape's —
+       with the daily-bar figure only as a fallback when the tape has none. #}
+    {% set spy_tape = (market_tape or [])|selectattr('symbol', 'equalto', 'SPY')|first %}
+    {% set spy_chip = spy_tape.change_pct if (spy_tape and spy_tape.change_pct is not none) else (mkt.spy_1d_pct if mkt else none) %}
+    <span class="tw-chip">SPY <b id="tw-chip-spy" data-src="{{ 'tape' if (spy_tape and spy_tape.change_pct is not none) else 'daily' }}" class="{{ 'chg-flat' if spy_chip is none else ('chg-pos' if spy_chip >= 0 else 'chg-neg') }}">{{ '%+.2f'|format(spy_chip) ~ '%' if spy_chip is not none else '—' }}</b></span>
     {% if connected and acct.total_value is not none %}
     <span class="tw-chip tw-acct-chip" title="{% if acct.broker_count and acct.broker_count > 1 %}Across {{ acct.broker_count }} brokerages. {% endif %}{% if acct.daily_pnl_partial %}Day change is {{ acct.daily_pnl_label }} only — {{ acct.daily_pnl_missing|join(', ') }} reports no start-of-day value.{% endif %}">
       ACCT <b>{{ '${:,.0f}'.format(acct.total_value) }}</b>
@@ -1706,12 +1763,19 @@ function twApplyChips(chips){
   if(regime && chips.regime) regime.textContent = chips.regime;
   var vix = document.getElementById('tw-chip-vix');
   if(vix && chips.vix !== null && chips.vix !== undefined) vix.textContent = Number(chips.vix).toFixed(2);
-  var spy = document.getElementById('tw-chip-spy');
-  if(spy && chips.spy !== null && chips.spy !== undefined){
-    var v = Number(chips.spy);
-    spy.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
-    spy.className = v >= 0 ? 'chg-pos' : 'chg-neg';
-  }
+  // The tape's live SPY quote owns this chip; the regime engine's daily-bar
+  // change is only a fallback until the tape has reported once.
+  var spyEl = twSpyChip();
+  if(spyEl && spyEl.dataset.src === 'tape') window.twSpyFromTape = true;
+  if(!window.twSpyFromTape && chips.spy !== null && chips.spy !== undefined) twSetSpyChip(chips.spy);
+}
+function twSpyChip(){ return document.getElementById('tw-chip-spy'); }
+function twSetSpyChip(pct){
+  var spy = twSpyChip();
+  if(!spy || pct === null || pct === undefined || isNaN(Number(pct))) return;
+  var v = Number(pct);
+  spy.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+  spy.className = v >= 0 ? 'chg-pos' : 'chg-neg';
 }
 
 async function twQuotesRefresh(){
@@ -1798,6 +1862,10 @@ window._arRefreshFn = twQuotesRefresh;
         });
         if(d.items.some(function(t){ return !have[t.symbol]; })) twTapeBuild(d.items);
         d.items.forEach(function(t){
+          if(t.symbol === 'SPY' && t.change_pct != null){
+            window.twSpyFromTape = true;
+            twSetSpyChip(t.change_pct);
+          }
           document.querySelectorAll('[data-mtape="' + t.symbol + '"]').forEach(function(el){
             var px = el.querySelector('[data-mtape-px]');
             var chg = el.querySelector('[data-mtape-chg]');

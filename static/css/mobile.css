@@ -823,18 +823,31 @@ label,
    9997, so on a phone the pill covered the tabs beneath it. Lift it above the
    bar, including the home-indicator inset. !important beats the inline style and
    the hover handlers on the button. */
+/* This block used to re-apply pill padding and a 13px font to the button the
+   block above turns into a 42px "AI" circle. The two fought: the circle grew,
+   and the hidden "🔍 Ask Tradestaar AI" label spilled out past its right edge.
+   One definition now: a compact circle above the tab bar and home indicator. */
 @media (max-width: 768px) {
   #ask-fab {
-    bottom: calc(74px + env(safe-area-inset-bottom, 0px)) !important;
-    padding: 10px 20px !important;
-    font-size: 13px !important;
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px)) !important;
+    right: max(12px, env(safe-area-inset-right, 0px)) !important;
+    width: 46px !important;
+    height: 46px !important;
+    padding: 0 !important;
+    font-size: 0 !important;
+    line-height: 46px;
+    text-align: center;
+    border: 1px solid rgba(255, 236, 170, 0.55) !important;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55), 0 0 0 4px rgba(8, 10, 13, 0.85) !important;
+    opacity: 1;
   }
-  .mobile-app-nav__item { font-size: 9.5px; }
+  #ask-fab::before { font-size: 12px; color: #1a1206; }
+  .mobile-app-nav__item { font-size: 9.5px; letter-spacing: .02em; }
   .mobile-app-nav__icon { font-size: 17px; }
 }
 
 @media (max-width: 380px) {
-  .mobile-app-nav__item { font-size: 8.5px; gap: 2px; }
+  .mobile-app-nav { gap: 2px !important; padding-left: 4px !important; padding-right: 4px !important; }
+  .mobile-app-nav__item { font-size: 8px; gap: 2px; letter-spacing: 0; }
   .mobile-app-nav__icon { font-size: 15px; }
-  #ask-fab { padding: 9px 16px !important; font-size: 12px !important; }
 }

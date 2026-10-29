@@ -1097,3 +1097,10 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
   -webkit-tap-highlight-color: transparent;
 }
 .mobile-logout-btn:active { background: rgba(255,77,69,.14); }
+
+/* On iPad-width screens the Learn menu sits near the right edge, and its
+   left-anchored 310px panel ran past the viewport. The right-most menus open
+   leftward instead. */
+@media (max-width: 1240px) {
+  .nav-menu:nth-last-of-type(-n+2) > .nav-menu__panel { left: auto; right: 0; }
+}
