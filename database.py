@@ -179,8 +179,12 @@ class _Cursor:
 class _Conn:
     """Wraps sqlite3 / psycopg2 connection with a uniform execute() interface."""
 
-    def __init__(self, raw_conn):
+    def __init__(self, raw_conn, shared: bool = False):
         self._conn = raw_conn
+        # A shared connection belongs to the request, not to the caller that
+        # happened to ask for it first. close() becomes a no-op on these and
+        # the real close happens once, at teardown — see get_db().
+        self._shared = shared
 
     def execute(self, sql: str, params=None, returning_id: bool = False) -> _Cursor:
         """Execute a query.
@@ -211,6 +215,19 @@ class _Conn:
                 raw_cur.execute(sql, params)
         except Exception:
             logger.debug("DB execute failed  sql=%s", sql[:200])
+            # On PostgreSQL a failed statement aborts the whole transaction,
+            # and every later statement on that connection fails with
+            # "current transaction is aborted" until it is rolled back. That
+            # did not matter while each caller had a connection to itself —
+            # the damage died with it. On the request's shared connection one
+            # bad query would take the rest of the page down with it, so undo
+            # the aborted transaction here and let the caller see the real
+            # error. Nothing committed is lost: commit() happens per write.
+            if self._shared and _USE_POSTGRES:
+                try:
+                    self._conn.rollback()
+                except Exception:
+                    pass
             raise
 
         cursor = _Cursor(raw_cur)
@@ -232,9 +249,20 @@ class _Conn:
         self._conn.commit()
 
     def close(self):
+        # Call sites close eagerly, and most of a request's work runs through
+        # several of them. Honouring every close on a shared connection would
+        # mean reopening it for the next query, which is the cost this is
+        # here to avoid.
+        if self._shared:
+            return
+        self._conn.close()
+
+    def _close_for_real(self):
         self._conn.close()
 
     def __del__(self):
+        if getattr(self, "_shared", False):
+            return
         try:
             self._conn.close()
         except Exception:
@@ -253,18 +281,73 @@ class _Conn:
         return False
 
 
-def get_db() -> _Conn:
-    """Return a wrapped database connection (PG or SQLite based on env)."""
+def _new_conn(shared: bool = False) -> _Conn:
     if _USE_POSTGRES and psycopg2 is not None:
         try:
             conn = psycopg2.connect(_DATABASE_URL, connect_timeout=10)
-            return _Conn(conn)
+            return _Conn(conn, shared=shared)
         except Exception as exc:
             logger.error("DB  PostgreSQL connection failed: %s", exc)
             raise
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    return _Conn(conn)
+    return _Conn(conn, shared=shared)
+
+
+def get_db() -> _Conn:
+    """A database connection — one per request, not one per caller.
+
+    This opened a brand new connection every time it was called, and a page
+    calls it many times: Today opened 23, the watchlists page 15, and
+    /api/terminal/quotes 18 — the last of those every four seconds, for as
+    long as a Terminal tab is open. Against SQLite that is cheap. Against
+    Render's Postgres each one is a TCP handshake, a TLS negotiation and an
+    auth round trip before the first query runs, so most of a page's time was
+    spent opening connections, and a single open tab could work through the
+    connection cap on its own.
+
+    Inside a request the connection is created once, stashed on `g`, and
+    closed at teardown; close() on the shared handle is a no-op so the
+    existing call sites need no changes. Outside a request — background
+    refresh threads, scripts, tests at import time — there is no app context
+    and the behaviour is exactly as it was.
+    """
+    try:
+        from flask import g, has_app_context
+        if not has_app_context():
+            return _new_conn()
+    except Exception:
+        return _new_conn()
+
+    conn = g.get("_tradestaar_db")
+    if conn is None:
+        conn = _new_conn(shared=True)
+        g._tradestaar_db = conn
+    return conn
+
+
+def close_request_db(exc=None):
+    """Close the request's shared connection. Registered as a teardown.
+
+    Rolls back first when the request is unwinding from an error, so a half
+    finished transaction is never committed by whatever runs next.
+    """
+    try:
+        from flask import g
+        conn = g.pop("_tradestaar_db", None)
+    except Exception:
+        return
+    if conn is None:
+        return
+    try:
+        if exc is not None:
+            try:
+                conn._conn.rollback()
+            except Exception:
+                pass
+        conn._close_for_real()
+    except Exception as close_exc:
+        logger.debug("DB  request connection close failed: %s", close_exc)
 
 
 DEFAULT_WATCHLISTS = [

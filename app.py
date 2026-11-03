@@ -137,6 +137,12 @@ app.permanent_session_lifetime = timedelta(days=30)
 # ---------------------------------------------------------------------------
 csrf = CSRFProtect(app)
 
+# One database connection per request, released when the request ends.
+# Without this every get_db() call opened its own connection: 23 of them to
+# render Today, 18 on each four-second Terminal poll. See database.get_db.
+import database as _database
+app.teardown_appcontext(_database.close_request_db)
+
 # ---------------------------------------------------------------------------
 # Multi-user session auth helpers
 # ---------------------------------------------------------------------------

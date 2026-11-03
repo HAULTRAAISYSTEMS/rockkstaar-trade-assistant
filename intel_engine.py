@@ -939,21 +939,29 @@ def _earnings_from_finnhub(
     api_key: str,
     today: date,
     already_found: set,
+    market_wide: bool = False,
+    horizon_days: int = 120,
 ) -> tuple[list[dict], list[str]]:
     """ONE bulk call to Finnhub /calendar/earnings (no symbol= filter).
     Returns (results, errors).  Filters locally by tickers_wanted to avoid
     N per-ticker requests that trigger 429s.
+
+    market_wide keeps every company in the window instead of only the named
+    tickers. The request was always market-wide — the symbol filtering only
+    ever happened here, after the response — so this is a second reader of
+    one call, not a second call. It exists so the calendar has a source when
+    Nasdaq stops answering.
     """
     if _fh_is_rate_limited():
         return [], ["Finnhub rate-limited — earnings fallback skipped"]
 
     tickers_wanted = {t.upper() for t in tickers if t.upper() not in already_found}
-    if not tickers_wanted:
+    if not tickers_wanted and not market_wide:
         return [], []
 
     from_d = today.isoformat()
     # Keep enough runway to preserve the next known date for watchlist names.
-    to_d   = (today + timedelta(days=120)).isoformat()
+    to_d   = (today + timedelta(days=horizon_days)).isoformat()
     url = (
         f"https://finnhub.io/api/v1/calendar/earnings"
         f"?from={from_d}&to={to_d}&token={api_key}"
@@ -970,7 +978,7 @@ def _earnings_from_finnhub(
     results: list[dict] = []
     for e in data.get("earningsCalendar", []):
         ticker = (e.get("symbol") or "").upper()
-        if not ticker or ticker not in tickers_wanted:
+        if not ticker or (not market_wide and ticker not in tickers_wanted):
             continue
         date_str = (e.get("date") or "")[:10]
         if not date_str:
@@ -980,7 +988,7 @@ def _earnings_from_finnhub(
         except Exception:
             continue
         days_away = (earn_date - today).days
-        if days_away < 0 or days_away > 120:
+        if days_away < 0 or days_away > horizon_days:
             continue
         # Finnhub reports three sessions. This mapped everything that was
         # not bmo or amc onto TBD, so a company that HAD announced it reports
@@ -1026,7 +1034,8 @@ def _earnings_from_finnhub(
             "is_override":  False,
         })
 
-    logger.info("intel/earnings finnhub bulk: %d found from %d wanted", len(results), len(tickers_wanted))
+    logger.info("intel/earnings finnhub bulk: %d found (%s)", len(results),
+                "market-wide" if market_wide else f"{len(tickers_wanted)} wanted")
     return results, []
 
 
@@ -1499,8 +1508,36 @@ def _nasdaq_cal(endpoint: str, date_str: str) -> list[dict]:
         data = response.json()
         return (data.get("data") or {}).get("rows") or []
     except Exception as exc:
-        logger.debug("intel/nasdaq/%s %s: %s", endpoint, date_str, exc)
+        # Warning, not debug. This is the only earnings source the calendar
+        # had, and when it stops answering the page renders a confident "0"
+        # that reads as "no companies report this week". A feed gone dark
+        # should be findable in the logs without raising the log level.
+        logger.warning("intel/nasdaq/%s %s failed: %s", endpoint, date_str, exc)
         return []
+
+
+def _parse_money(value) -> Optional[float]:
+    """A currency string from a feed, as a number.
+
+    Handles "$1.68", "1.68", "($0.42)" (accounting negative) and the various
+    spellings of absent. Returns None when there is no number in it, which is
+    different from 0.00 — a breakeven consensus is a real forecast and is
+    routine for the pre-profit names where it matters most.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    raw = str(value).strip()
+    if raw in ("", "--", "-", "N/A", "n/a", "NA"):
+        return None
+    negative = raw.startswith("(") and raw.endswith(")")
+    raw = raw.strip("()").replace("$", "").replace(",", "").strip()
+    try:
+        out = float(raw)
+    except ValueError:
+        return None
+    return -out if negative else out
 
 
 def _parse_market_cap(value) -> Optional[int]:
@@ -1571,7 +1608,12 @@ def _earnings_from_nasdaq(today: date, wl_set: set, already_added: set) -> list[
                               else "TBD")
                 try:
                     eps_raw = row.get("epsForecast") or row.get("epsEstimate")
-                    eps_est = float(eps_raw) if eps_raw not in (None, "--", "", "N/A") else None
+                    # Nasdaq sends this as a currency string — "$1.68", and
+                    # "($0.42)" for a forecast loss. float() raised on every
+                    # one, so the consensus was dropped for the entire
+                    # market-wide slate and each row rendered as though no
+                    # estimate had ever been published.
+                    eps_est = _parse_money(eps_raw)
                 except Exception:
                     eps_est = None
                 days_away = (d - today).days
@@ -1615,6 +1657,34 @@ def fetch_earnings_radar(limit: int = 12) -> list[dict]:
     today = _today_et()
     watchlist = set(_get_watchlist_tickers())
     rows = _earnings_from_nasdaq(today, watchlist, set())
+
+    # Nasdaq is a scraped, unkeyed endpoint and it was the only source this
+    # card had. When it stops answering — it refuses some hosting ranges
+    # outright — the page rendered "0 earnings" for a week in which hundreds
+    # of companies report. That is not a quiet market, it is a dead feed.
+    # Finnhub answers the same question with a key we already hold, and this
+    # module already fetches and parses that exact response elsewhere.
+    if not rows:
+        key = os.environ.get("FINNHUB_API_KEY", "").strip()
+        if key:
+            fallback, errs = _earnings_from_finnhub(
+                [], key, today, set(), market_wide=True, horizon_days=7)
+            # Finnhub's calendar carries no market cap, so the Large/Mid tier
+            # test the Nasdaq path applies cannot be reproduced here. A
+            # published consensus is the closest honest proxy for "a company
+            # followed by enough people to belong on this card" — a proxy,
+            # not the same test, so a thinly covered name can slip through.
+            covered = [r for r in fallback
+                       if r.get("rev_est") or r.get("eps_est") is not None]
+            covered.sort(key=lambda r: -(r.get("rev_est") or 0))
+            rows = covered
+            logger.warning(
+                "intel/earnings: Nasdaq returned nothing — fell back to Finnhub "
+                "(%d rows, %d kept)%s",
+                len(fallback), len(rows), f" errors={errs}" if errs else "")
+        else:
+            logger.warning("intel/earnings: Nasdaq returned nothing and "
+                           "FINNHUB_API_KEY is unset — the card will be empty")
 
     buckets = {"today": [], "tomorrow": [], "this_week": [], "coming_up": []}
     _apply_overrides_to_buckets(buckets, today, watchlist)
