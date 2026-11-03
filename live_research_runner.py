@@ -78,6 +78,17 @@ def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
             total.update(browser_push.deliver_pending(conn))
         except Exception as exc:
             total["errors"].append("push:"+type(exc).__name__)
+        # The earnings and catalyst calendar, as a second push source. Its own
+        # counters rather than update(): a research push failing and a
+        # calendar push failing are different problems, and a merged total
+        # would hide which one did.
+        try:
+            cal = browser_push.deliver_calendar_alerts(conn)
+            total["calendar_push_sent"] = cal.get("push_sent", 0)
+            total["calendar_push_skipped"] = cal.get("push_skipped", 0)
+            total["errors"].extend(cal.get("push_errors", []))
+        except Exception as exc:
+            total["errors"].append("calendar_push:" + type(exc).__name__)
         # Queue depth. drafts_created is 0 on most firings by design - a story
         # creates a draft once, on the first run after it appears, and the next
         # 5-minute run correctly sees it as a duplicate. Reading a single run

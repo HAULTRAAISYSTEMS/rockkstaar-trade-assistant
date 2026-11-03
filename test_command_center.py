@@ -673,7 +673,7 @@ class TestThisWeekShowsWhatMatters:
 class TestPulseFutures:
     """All four tiles: SPY/QQQ keep their numbers; ES/NQ ride beside them."""
 
-    def _ctx(self, monkeypatch, session):
+    def _ctx(self, monkeypatch, session, day_label="today"):
         mkt = {
             "regime": "CAUTION", "vix_level": 18.4, "vix_as_of_label": "4:15 PM ET",
             "vix_source": "test", "spy_1d_pct": 0.42, "qqq_1d_pct": 1.21,
@@ -685,6 +685,11 @@ class TestPulseFutures:
         }
         monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: mkt)
         monkeypatch.setattr(legacy._mkt, "market_session", lambda: session)
+        # _day_label reads the real clock, so the tile's suffix depended on
+        # the hour the suite happened to run at: "SPY CLOSE" after a close,
+        # "SPY MON" before the next open. Pin it, and assert the labelling
+        # rule rather than whatever today happens to be.
+        monkeypatch.setattr(legacy._mkt, "_day_label", lambda *a, **k: day_label)
         monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: SUMMARY)
         monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 1)
         monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: ["NVDA"])
@@ -700,6 +705,13 @@ class TestPulseFutures:
         assert pulse["es"] == -0.09 and pulse["nq"] == -0.43  # futures join
         assert pulse["spy_label"] == "SPY CLOSE"
         assert pulse["qqq_label"] == "QQQ CLOSE"
+
+    def test_premarket_names_the_session_the_close_belongs_to(self, monkeypatch):
+        """Before Tuesday's open the number on the tile is Monday's close,
+        and saying "CLOSE" leaves which close unanswered."""
+        pulse = self._ctx(monkeypatch, "pre", day_label="Monday")["pulse"]
+        assert pulse["spy_label"] == "SPY MON"
+        assert pulse["qqq_label"] == "QQQ MON"
 
     def test_regular_hours_plain_labels(self, monkeypatch):
         pulse = self._ctx(monkeypatch, "regular")["pulse"]

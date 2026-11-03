@@ -17,6 +17,7 @@ MIGRATIONS = (
     "migrations.m0006_sms_alerts",
     "migrations.m0007_browser_push",
     "migrations.m0008_telegram_policy",
+    "migrations.m0009_calendar_alerts",
 )
 
 

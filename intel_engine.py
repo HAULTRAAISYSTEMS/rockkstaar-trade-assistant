@@ -1013,6 +1013,16 @@ def _earnings_from_finnhub(
             if v is not None: rev_est = int(v)
         except Exception:
             pass
+        # The actuals are null until the company reports and are filled in
+        # afterwards. They were being discarded, which left no way to tell a
+        # report that has landed from one still pending — the difference the
+        # results notification is built on.
+        eps_actual = None
+        try:
+            v = e.get("epsActual")
+            if v is not None: eps_actual = round(float(v), 2)
+        except Exception:
+            pass
         results.append({
             "ticker":       ticker,
             "company_name": _company_name(ticker),
@@ -1024,6 +1034,7 @@ def _earnings_from_finnhub(
             "date_provisional": timing["provisional"],
             "eps_est":      eps_est,
             "eps_est_basis": "analyst consensus",
+            "eps_actual":   eps_actual,
             "rev_est":      rev_est,
             # Kept rather than discarded: a reader wants to know WHICH
             # quarter this is, and the feed has been handing it over all

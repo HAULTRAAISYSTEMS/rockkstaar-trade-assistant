@@ -49,6 +49,10 @@ def create_browser_push_blueprint(*, current_user):
                 quiet_start=request.form.get("quiet_start", 21), quiet_end=request.form.get("quiet_end", 7),
                 timezone_name=request.form.get("timezone", "America/New_York"),
                 daily_cap=request.form.get("daily_cap", 3),
+                # getlist, not get: these are checkbox groups, and an unticked
+                # group must arrive as [] rather than vanish into the default.
+                calendar_triggers=request.form.getlist("calendar_triggers"),
+                calendar_timings=request.form.getlist("calendar_timings"),
             )
             flash("Browser notification preferences saved.", "success")
         except (browser_push.BrowserPushError, ValueError) as exc:
