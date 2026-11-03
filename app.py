@@ -97,6 +97,24 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=_is_production,
     MAX_CONTENT_LENGTH=2 * 1024 * 1024,
+    # A CSRF token lives as long as the session that owns it.
+    #
+    # Unset, Flask-WTF defaults this to 3600 — one hour — and that is wrong
+    # for an app people leave open. A page loaded on a phone or an iPad sits
+    # there while the device sleeps; an hour later the first button that
+    # posts anything fails with "The CSRF token has expired" and a 400, and
+    # nothing on the page tells the reader that reloading is what fixes it.
+    # The user's session is fine. The form in front of them is not.
+    #
+    # None does not weaken the protection. The token is still a per-session
+    # secret that another origin cannot read, and the session cookie is
+    # SameSite=Lax and HttpOnly. The expiry only ever guarded against a
+    # token stolen and replayed much later — and anyone able to steal the
+    # token has the cookie it is bound to, which is good for 30 days either
+    # way. Rotating the session is what ends a stolen token's life, and
+    # signing out, changing a password and the credential stamp in
+    # _require_login all do exactly that.
+    WTF_CSRF_TIME_LIMIT=None,
 )
 
 # ---------------------------------------------------------------------------
@@ -282,6 +300,34 @@ def _check_write_auth():
 sock = Sock(app)
 
 
+def _same_origin_referrer() -> str:
+    """The page this request came from, when it is one of ours.
+
+    Used only to offer a way back from an error page. The referrer is
+    attacker-influenced, so anything with a host that is not this one, or
+    that is not a plain root-relative path, is discarded rather than put in
+    an href.
+    """
+    raw = request.headers.get("Referer") or ""
+    if not raw:
+        return ""
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return ""
+    if parts.netloc and parts.netloc != request.host:
+        return ""
+    path = parts.path or "/"
+    if not path.startswith("/") or path.startswith("//") or "\\" in path:
+        return ""
+    if any(ord(c) < 32 or ord(c) == 127 for c in path + (parts.query or "")):
+        return ""
+    # Never send them back to the thing that just failed.
+    if path == request.path:
+        return ""
+    return path + (f"?{parts.query}" if parts.query else "")
+
+
 # ---------------------------------------------------------------------------
 # Global JSON error handler — ensures /api/* routes NEVER return HTML
 # ---------------------------------------------------------------------------
@@ -303,7 +349,15 @@ def _handle_all_errors(e):
     if isinstance(e, HTTPException):
         headers = [(key, value) for key, value in e.get_headers()
                    if key.lower() not in {"content-type", "content-length"}]
-        return render_template("error.html", code=code, csrf_failure=type(e).__name__ == "CSRFError"), code, headers
+        return render_template(
+            "error.html", code=code,
+            csrf_failure=type(e).__name__ == "CSRFError",
+            # A failed POST leaves the browser sitting on the posted URL, so
+            # "reload the page" is advice that cannot be followed — there is
+            # no form here to reload. The page the form was on is the one
+            # worth offering.
+            back=_same_origin_referrer(),
+        ), code, headers
     # Unexpected server errors on frontend routes — log and show a simple message
     logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
     return render_template("error.html", code=500), 500

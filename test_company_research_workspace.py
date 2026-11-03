@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from unittest.mock import patch
 
 from flask import render_template, session
@@ -24,6 +25,13 @@ def sample_fundamentals():
     }
 
 
+# _company_research_context keeps only events between today and 120 days out,
+# so a hardcoded date in this fixture is a test that passes until that date
+# and fails every day after. This one was "2026-10-27" and started failing on
+# 2026-10-28. Relative to today it tests the join rather than the calendar.
+UPCOMING = (app._et_now().date() + timedelta(days=14)).isoformat()
+
+
 def test_company_context_joins_changes_fundamentals_and_private_thesis():
     post = {"id": "post-1", "ticker": "AMD", "headline": "AMD raises guidance",
             "tradestaar_take": "The demand outlook improved.", "source_name": "AMD IR",
@@ -41,7 +49,7 @@ def test_company_context_joins_changes_fundamentals_and_private_thesis():
         patch("research_memory.list_cards", return_value=[card]) as memory,
         patch.object(app, "get_user_setting", return_value="2026-09-14T16:00:00+00:00"),
         patch.object(app._intel, "get_intel_summary", return_value={
-            "market_news": [news], "earnings": {"coming_up": [{"ticker": "AMD", "date": "2026-10-27", "time_label": "After close", "source": "Company IR"}]},
+            "market_news": [news], "earnings": {"coming_up": [{"ticker": "AMD", "date": UPCOMING, "time_label": "After close", "source": "Company IR"}]},
         }),
     ):
         result = app._company_research_context(9, "AMD", sample_fundamentals(), stock)
@@ -51,7 +59,7 @@ def test_company_context_joins_changes_fundamentals_and_private_thesis():
     assert result["description"].startswith("AMD designs")
     assert result["new_count"] == 2
     assert result["changes"][0]["headline"] == "AMD raises guidance"
-    assert result["earnings"]["date"] == "2026-10-27"
+    assert result["earnings"]["date"] == UPCOMING
 
 
 def test_unsafe_provider_link_is_not_rendered():
