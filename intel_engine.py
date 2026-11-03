@@ -1050,6 +1050,82 @@ def _earnings_from_finnhub(
     return results, []
 
 
+def _earnings_from_fmp(today: date, horizon_days: int = 7) -> tuple[list[dict], str]:
+    """The market-wide slate from Financial Modeling Prep.
+
+    A third source, added because the first two can both be unavailable on
+    the same deployment: Nasdaq's unkeyed endpoint refuses some hosting
+    ranges, and Finnhub gates its calendar behind a paid plan on some
+    accounts — and when both go quiet the page shows a confident zero on a
+    week when hundreds of companies report.
+
+    FMP carries the EPS consensus and the session on the same row, so this
+    needs no second call per company.
+    """
+    import earnings_timing
+    key = os.environ.get("FMP_API_KEY", "").strip()
+    if not key:
+        return [], "no FMP_API_KEY"
+
+    to_d = (today + timedelta(days=horizon_days)).isoformat()
+    try:
+        import requests as _requests
+        resp = _requests.get(
+            "https://financialmodelingprep.com/api/v3/earning_calendar",
+            params={"from": today.isoformat(), "to": to_d, "apikey": key},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception as exc:
+        logger.warning("intel/earnings fmp calendar failed: %s", exc)
+        return [], f"fmp error: {type(exc).__name__}"
+
+    if not isinstance(payload, list):
+        # FMP returns a dict with an "Error Message" when a plan does not
+        # cover an endpoint. Say which rather than reporting an empty week.
+        note = ""
+        if isinstance(payload, dict):
+            note = str(payload.get("Error Message") or payload.get("message") or "")[:120]
+        logger.warning("intel/earnings fmp calendar refused: %s", note or payload)
+        return [], f"fmp refused: {note}" if note else "fmp returned no list"
+
+    rows: list[dict] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        ticker = str(item.get("symbol") or "").strip().upper()
+        raw_date = str(item.get("date") or "")[:10]
+        if not ticker or not raw_date:
+            continue
+        try:
+            when = datetime.strptime(raw_date, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        days_away = (when - today).days
+        if days_away < 0 or days_away > horizon_days:
+            continue
+        timing = earnings_timing.describe(str(item.get("time") or "").lower())
+        rows.append({
+            "ticker":       ticker,
+            "company_name": _company_name(ticker),
+            "date":         when.isoformat(),
+            "days_away":    days_away,
+            "time_label":   earnings_timing.label_for_storage(str(item.get("time") or "").lower()),
+            "time_text":    timing["text"],
+            "time_known":   timing["known"],
+            "date_provisional": timing["provisional"],
+            "eps_est":      _parse_money(item.get("epsEstimated")),
+            "eps_est_basis": "analyst consensus",
+            "eps_actual":   _parse_money(item.get("eps")),
+            "rev_est":      _parse_money(item.get("revenueEstimated")),
+            "source":       "fmp",
+            "is_override":  False,
+        })
+    logger.info("intel/earnings fmp calendar: %d rows in %d days", len(rows), horizon_days)
+    return rows, ""
+
+
 def _market_wide_earnings(today: date, wl_set: set, exclude: set) -> tuple[list[dict], str]:
     """The market-wide slate, from whichever source will answer.
 
@@ -1068,10 +1144,19 @@ def _market_wide_earnings(today: date, wl_set: set, exclude: set) -> tuple[list[
     if rows:
         return rows, "nasdaq_marketwide"
 
+    # FMP second: it carries the consensus and the session on one row, and
+    # is the key most likely to be present on a deployment that already does
+    # fundamentals.
+    fmp_rows, fmp_note = _earnings_from_fmp(today, horizon_days=7)
+    if fmp_rows:
+        kept = [r for r in fmp_rows if r.get("ticker") not in exclude]
+        logger.warning("intel/earnings: Nasdaq silent — using FMP (%d rows)", len(kept))
+        return kept, "fmp_marketwide"
+
     key = os.environ.get("FINNHUB_API_KEY", "").strip()
     if not key:
-        logger.warning("intel/earnings: Nasdaq returned nothing and "
-                       "FINNHUB_API_KEY is unset — no market-wide slate")
+        logger.warning("intel/earnings: Nasdaq and FMP returned nothing (%s) and "
+                       "FINNHUB_API_KEY is unset — no market-wide slate", fmp_note)
         return [], "none"
 
     fallback, errs = _earnings_from_finnhub(

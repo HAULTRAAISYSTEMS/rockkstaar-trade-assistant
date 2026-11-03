@@ -144,8 +144,7 @@ class TestADeadFeedIsNotAQuietMarket:
         monkeypatch.setattr(ie, "_get_watchlist_tickers", lambda: [])
         with caplog.at_level(logging.WARNING):
             assert ie.fetch_earnings_radar(limit=12) == []
-        assert any("FINNHUB_API_KEY" in r.message % r.args if r.args else
-                   "FINNHUB_API_KEY" in r.message for r in caplog.records)
+        assert any("FINNHUB_API_KEY" in r.getMessage() for r in caplog.records)
 
 
 class TestTheFailureIsVisibleInTheLogs:
@@ -228,3 +227,90 @@ class TestBothSurfacesShareOneFallback:
         monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
         rows, source = ie._market_wide_earnings(ie._today_et(), set(), set())
         assert rows == [] and source == "none"
+
+
+class TestFMPIsTheSecondSource:
+    """Nasdaq's endpoint refuses some hosting ranges and Finnhub gates its
+    calendar behind a paid plan on some accounts — both can be silent on one
+    deployment. FMP is the key most likely to be present on an app that
+    already does fundamentals."""
+
+    @staticmethod
+    def _payload(today):
+        from datetime import timedelta
+        d = (today + timedelta(days=1)).isoformat()
+        return [
+            {"symbol": "AMD", "date": d, "time": "amc",
+             "epsEstimated": "1.68", "eps": None, "revenueEstimated": 9e9},
+            {"symbol": "SHOP", "date": d, "time": "bmo",
+             "epsEstimated": "$0.33", "eps": "0.35", "revenueEstimated": 2.8e9},
+        ]
+
+    def test_it_is_tried_before_finnhub(self):
+        from pathlib import Path
+        src = Path("intel_engine.py").read_text()
+        body = src[src.index("def _market_wide_earnings"):]
+        body = body[:body.index("\ndef ")]
+        assert body.index("_earnings_from_fmp") < body.index("FINNHUB_API_KEY")
+
+    def test_a_working_nasdaq_still_wins(self, monkeypatch):
+        import intel_engine as ie
+        monkeypatch.setattr(ie, "_earnings_from_nasdaq",
+                            lambda *a, **k: [{"ticker": "AAPL"}])
+        called = {"fmp": False}
+        monkeypatch.setattr(ie, "_earnings_from_fmp",
+                            lambda *a, **k: (called.__setitem__("fmp", True), ([], ""))[1])
+        rows, source = ie._market_wide_earnings(ie._today_et(), set(), set())
+        assert source == "nasdaq_marketwide" and called["fmp"] is False
+
+    def test_fmp_fills_a_silent_nasdaq(self, monkeypatch):
+        import intel_engine as ie
+        today = ie._today_et()
+        monkeypatch.setenv("FMP_API_KEY", "key")
+        monkeypatch.setattr(ie, "_earnings_from_nasdaq", lambda *a, **k: [])
+
+        class _R:
+            status_code = 200
+            def raise_for_status(self): pass
+            def json(self): return TestFMPIsTheSecondSource._payload(today)
+        import requests
+        monkeypatch.setattr(requests, "get", lambda *a, **k: _R())
+        rows, source = ie._market_wide_earnings(today, set(), set())
+        assert source == "fmp_marketwide"
+        assert {r["ticker"] for r in rows} == {"AMD", "SHOP"}
+
+    def test_the_currency_strings_are_parsed(self, monkeypatch):
+        import intel_engine as ie
+        today = ie._today_et()
+        monkeypatch.setenv("FMP_API_KEY", "key")
+        monkeypatch.setattr(ie, "_earnings_from_nasdaq", lambda *a, **k: [])
+
+        class _R:
+            def raise_for_status(self): pass
+            def json(self): return TestFMPIsTheSecondSource._payload(today)
+        import requests
+        monkeypatch.setattr(requests, "get", lambda *a, **k: _R())
+        rows, _ = ie._market_wide_earnings(today, set(), set())
+        shop = next(r for r in rows if r["ticker"] == "SHOP")
+        assert shop["eps_est"] == 0.33          # "$0.33"
+        assert shop["eps_actual"] == 0.35
+
+    def test_a_plan_that_does_not_cover_it_is_reported_not_silent(self, monkeypatch):
+        """FMP answers 200 with an Error Message when a plan excludes an
+        endpoint. Reading that as an empty week is the bug being fixed."""
+        import intel_engine as ie
+        monkeypatch.setenv("FMP_API_KEY", "key")
+
+        class _R:
+            def raise_for_status(self): pass
+            def json(self): return {"Error Message": "Exclusive Endpoint"}
+        import requests
+        monkeypatch.setattr(requests, "get", lambda *a, **k: _R())
+        rows, note = ie._earnings_from_fmp(ie._today_et())
+        assert rows == []
+        assert "refused" in note and "Exclusive" in note
+
+    def test_no_key_says_so(self, monkeypatch):
+        import intel_engine as ie
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        assert ie._earnings_from_fmp(ie._today_et()) == ([], "no FMP_API_KEY")

@@ -40,7 +40,16 @@ logger = logging.getLogger(__name__)
 # Below this, a median is noise. Four is already thin and is reported as
 # thin; the panel shows the count so the reader can discount it themselves.
 MIN_PEERS = 4
-MAX_PEERS = 12
+# Each peer costs two provider calls (key metrics + ratios) on top of one
+# for the list, so twelve peers is ~25 calls per company looked at. FMP's
+# free plan allows 250 a day, which is about eight companies — tight enough
+# to matter. Eight peers is ~17 and roughly doubles that, while staying well
+# clear of the four-peer floor below which no median is published at all.
+# Raise it with FMP_PEER_LIMIT on a paid plan.
+try:
+    MAX_PEERS = max(MIN_PEERS, min(20, int(__import__("os").environ.get("FMP_PEER_LIMIT", "8"))))
+except ValueError:
+    MAX_PEERS = 8
 
 # The ratios worth comparing, in the order they read as an argument:
 # can it earn, does it keep what it earns, can it survive, is it growing.
