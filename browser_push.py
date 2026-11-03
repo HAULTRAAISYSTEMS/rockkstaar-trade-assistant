@@ -189,6 +189,8 @@ def get_settings(user_id: int, conn=None) -> dict:
                 item.get("calendar_triggers"), _cal().DEFAULT_TRIGGERS),
             "calendar_timings": _cal().parse_prefs(
                 item.get("calendar_timings"), _cal().DEFAULT_TIMINGS),
+            "fundamentals_triggers": _cal().parse_prefs(
+                item.get("fundamentals_triggers"), _fund().DEFAULT_TRIGGERS),
         }
     finally:
         if owns:
@@ -200,9 +202,15 @@ def _cal():
     return calendar_alerts
 
 
+def _fund():
+    import fundamentals_alerts
+    return fundamentals_alerts
+
+
 def update_settings(user_id: int, *, enabled: bool, quiet_start: int, quiet_end: int,
                     timezone_name: str, daily_cap: int,
-                    calendar_triggers=None, calendar_timings=None, conn=None) -> None:
+                    calendar_triggers=None, calendar_timings=None,
+                    fundamentals_triggers=None, conn=None) -> None:
     user_id = int(user_id)
     quiet_start, quiet_end, daily_cap = int(quiet_start), int(quiet_end), int(daily_cap)
     if not 0 <= quiet_start <= 23 or not 0 <= quiet_end <= 23:
@@ -219,20 +227,24 @@ def update_settings(user_id: int, *, enabled: bool, quiet_start: int, quiet_end:
     try:
         triggers = _cal().serialise_prefs(calendar_triggers or [], _cal().TRIGGERS)
         timings = _cal().serialise_prefs(calendar_timings or [], _cal().TIMINGS)
+        fundamentals = _cal().serialise_prefs(
+            fundamentals_triggers or [], _fund().TRIGGERS)
         exists = conn.execute("SELECT 1 FROM browser_push_preferences WHERE user_id=?", (user_id,)).fetchone()
         if exists:
             conn.execute(
                 "UPDATE browser_push_preferences SET enabled=?,quiet_start=?,quiet_end=?,timezone=?,daily_cap=?,"
-                "calendar_triggers=?,calendar_timings=?,updated_at=? WHERE user_id=?",
+                "calendar_triggers=?,calendar_timings=?,fundamentals_triggers=?,"
+                "updated_at=? WHERE user_id=?",
                 (1 if enabled else 0, quiet_start, quiet_end, timezone_name, daily_cap,
-                 triggers, timings, now, user_id),
+                 triggers, timings, fundamentals, now, user_id),
             )
         else:
             conn.execute(
                 "INSERT INTO browser_push_preferences (user_id,enabled,quiet_start,quiet_end,timezone,daily_cap,"
-                "calendar_triggers,calendar_timings,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "calendar_triggers,calendar_timings,fundamentals_triggers,created_at,updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (user_id, 1 if enabled else 0, quiet_start, quiet_end, timezone_name, daily_cap,
-                 triggers, timings, now, now),
+                 triggers, timings, fundamentals, now, now),
             )
         conn.commit()
     finally:
@@ -597,3 +609,157 @@ def _zone_for(pref: dict):
         return ZoneInfo(pref.get("timezone") or "America/New_York")
     except ZoneInfoNotFoundError:
         return timezone.utc
+
+
+# ---------------------------------------------------------------------------
+# Fundamentals changes — the third push source
+#
+# Same subscriptions, same quiet hours, same daily cap, same once-only
+# guarantee via UNIQUE(subscription_id, alert_key). The only thing that
+# differs is where the items come from and which table records them.
+# ---------------------------------------------------------------------------
+
+def _watched_universe(conn, user_id: int) -> list[str]:
+    """Watchlists plus anything with a saved thesis.
+
+    The same universe the research alerts use, so a company cannot be
+    important enough to write a thesis about but not important enough to be
+    told its balance sheet moved.
+    """
+    try:
+        cards = research_memory.list_cards(user_id, limit=500, conn=conn)
+    except Exception:
+        cards = []
+    return _tracked_tickers(conn, user_id, cards)
+
+
+def _fundamentals_snapshots(conn) -> dict:
+    import json as _json
+    out = {}
+    for row in conn.execute(
+            "SELECT ticker, snapshot_json FROM fundamentals_state").fetchall():
+        try:
+            out[str(row["ticker"]).upper()] = _json.loads(row["snapshot_json"])
+        except Exception:
+            continue
+    return out
+
+
+def _save_fundamentals_snapshot(conn, ticker: str, snap: dict, now) -> None:
+    import json as _json
+    payload = _json.dumps(snap, separators=(",", ":"))
+    stamp = now.isoformat()
+    if conn.execute("SELECT 1 FROM fundamentals_state WHERE ticker=?",
+                    (ticker,)).fetchone():
+        conn.execute("UPDATE fundamentals_state SET snapshot_json=?,updated_at=? "
+                     "WHERE ticker=?", (payload, stamp, ticker))
+    else:
+        conn.execute("INSERT INTO fundamentals_state (ticker,snapshot_json,updated_at) "
+                     "VALUES (?,?,?)", (ticker, payload, stamp))
+    conn.commit()
+
+
+def deliver_fundamentals_alerts(conn=None, *, now=None, loader=None) -> dict:
+    """Notify on material fundamentals changes for watched companies.
+
+    `loader(ticker) -> (data, comparison)` is injectable so this can be
+    exercised without hitting a data provider. Left out, it reads the
+    fundamentals engine and the peer panel.
+    """
+    import fundamentals_alerts
+
+    if os.environ.get("BROWSER_PUSH_ENABLED", "1").lower() in {"0", "false", "no", "off"}:
+        return {"push_enabled": False, "push_sent": 0, "push_skipped": 0, "push_errors": []}
+
+    now = now or _now()
+    owns = conn is None
+    conn = conn or get_db()
+    result = {"push_enabled": True, "push_sent": 0, "push_skipped": 0,
+              "push_errors": [], "tickers_checked": 0}
+
+    def _default_loader(ticker):
+        import fundamentals_engine
+        import peer_comparison
+        data = fundamentals_engine.get_fundamentals(ticker)
+        if not data or data.get("error"):
+            return None, None
+        try:
+            comparison = peer_comparison.build(ticker, data)
+        except Exception:
+            comparison = None
+        return data, comparison
+
+    load = loader or _default_loader
+
+    try:
+        prefs = [dict(row) for row in conn.execute(
+            "SELECT p.* FROM browser_push_preferences p WHERE p.enabled=1 AND EXISTS "
+            "(SELECT 1 FROM browser_push_subscriptions s WHERE s.user_id=p.user_id AND s.enabled=1)"
+        ).fetchall()]
+        if not prefs:
+            return result
+
+        previous = _fundamentals_snapshots(conn)
+        # One read per ticker for everybody, not per user: the balance sheet
+        # is the same whoever is watching it.
+        wanted = sorted({t for pref in prefs
+                         for t in _watched_universe(conn, int(pref["user_id"]))})
+        fresh: dict = {}
+        for ticker in wanted:
+            try:
+                data, comparison = load(ticker)
+            except Exception as exc:
+                logger.debug("fundamentals alert: %s unreadable: %s", ticker, exc)
+                continue
+            if not data:
+                continue
+            fresh[ticker] = fundamentals_alerts.snapshot(ticker, data, comparison)
+            result["tickers_checked"] += 1
+
+        for pref in prefs:
+            user_id = int(pref["user_id"])
+            if _is_quiet(pref, now):
+                result["push_skipped"] += 1
+                continue
+            zone = _zone_for(pref)
+            day_start = now.astimezone(zone).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ).astimezone(timezone.utc).isoformat()
+            sent_today = conn.execute(
+                "SELECT COUNT(*) AS n FROM fundamentals_alert_deliveries "
+                "WHERE user_id=? AND status='sent' AND attempted_at>=?",
+                (user_id, day_start)).fetchone()["n"]
+            remaining = max(0, int(pref["daily_cap"] or 3) - int(sent_today or 0))
+            if not remaining:
+                result["push_skipped"] += 1
+                continue
+
+            triggers = _cal().parse_prefs(
+                pref.get("fundamentals_triggers"), fundamentals_alerts.DEFAULT_TRIGGERS)
+            mine = set(_watched_universe(conn, user_id))
+            subscriptions = [dict(row) for row in conn.execute(
+                "SELECT * FROM browser_push_subscriptions WHERE user_id=? AND enabled=1",
+                (user_id,)).fetchall()]
+
+            found = []
+            for ticker, snap in fresh.items():
+                if ticker not in mine:
+                    continue
+                found.extend(fundamentals_alerts.detect(
+                    previous.get(ticker) or {}, snap, triggers=triggers))
+
+            for alert in found[:remaining]:
+                for subscription in subscriptions:
+                    _send_one(conn, now=now, result=result, user_id=user_id,
+                              subscription=subscription, key=alert["key"],
+                              payload=fundamentals_alerts.payload(alert),
+                              table="fundamentals_alert_deliveries")
+
+        # Written last: a crash before this point re-detects next run rather
+        # than swallowing a change nobody was told about.
+        for ticker, snap in fresh.items():
+            _save_fundamentals_snapshot(conn, ticker, snap, now)
+        return result
+    finally:
+        if owns:
+            conn.close()

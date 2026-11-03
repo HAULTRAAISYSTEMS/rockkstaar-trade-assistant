@@ -53,6 +53,7 @@ def create_browser_push_blueprint(*, current_user):
                 # group must arrive as [] rather than vanish into the default.
                 calendar_triggers=request.form.getlist("calendar_triggers"),
                 calendar_timings=request.form.getlist("calendar_timings"),
+                fundamentals_triggers=request.form.getlist("fundamentals_triggers"),
             )
             flash("Browser notification preferences saved.", "success")
         except (browser_push.BrowserPushError, ValueError) as exc:

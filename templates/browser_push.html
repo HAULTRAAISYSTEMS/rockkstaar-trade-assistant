@@ -24,6 +24,13 @@
   ('morning_of',     'Before the open, for today'),
   ('date_confirmed', 'As soon as a report time is confirmed')] %}
 {% for key, label in timing_labels %}<label class="push-check"><input type="checkbox" name="calendar_timings" value="{{ key }}" {{ 'checked' if key in preference.calendar_timings }}><span>{{ label }}</span></label>{% endfor %}
+</fieldset><fieldset><legend>Fundamentals changes</legend>
+{% set fund_labels = [
+  ('threshold_crossing', 'A line that matters is crossed (profit to loss, debt past equity)'),
+  ('peer_slippage',      'It falls materially behind its peer group'),
+  ('verdict_change',     'The fundamentals scorecard reaches a different conclusion')] %}
+{% for key, label in fund_labels %}<label class="push-check"><input type="checkbox" name="fundamentals_triggers" value="{{ key }}" {{ 'checked' if key in preference.fundamentals_triggers }}><span>{{ label }}</span></label>{% endfor %}
+<p class="push-note">Watchlists and anything with a saved thesis. A ratio that stops arriving is never reported as a change.</p>
 <p class="push-note">Quiet hours and the daily cap above apply to these too — the cap is shared, so a low cap will hold calendar alerts back.</p>
 </fieldset></div><div><button class="push-btn" type="submit">Save schedule</button></div></form>
     </div></section>

@@ -89,6 +89,15 @@ def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
             total["errors"].extend(cal.get("push_errors", []))
         except Exception as exc:
             total["errors"].append("calendar_push:" + type(exc).__name__)
+        # Fundamentals changes — the page was always right, it just never
+        # came to find you when a ratio crossed a line that matters.
+        try:
+            fund = browser_push.deliver_fundamentals_alerts(conn)
+            total["fundamentals_push_sent"] = fund.get("push_sent", 0)
+            total["fundamentals_checked"] = fund.get("tickers_checked", 0)
+            total["errors"].extend(fund.get("push_errors", []))
+        except Exception as exc:
+            total["errors"].append("fundamentals_push:" + type(exc).__name__)
         # Queue depth. drafts_created is 0 on most firings by design - a story
         # creates a draft once, on the first run after it appears, and the next
         # 5-minute run correctly sees it as a duplicate. Reading a single run
