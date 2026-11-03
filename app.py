@@ -560,6 +560,12 @@ def debug_status():
         "FINNHUB_API_KEY":    os.environ.get("FINNHUB_API_KEY"),
         "NEWS_API_KEY":       os.environ.get("NEWS_API_KEY"),
         "POLYGON_API_KEY":    os.environ.get("POLYGON_API_KEY"),
+        # The fundamentals provider. Without it the peer comparison on the
+        # fundamentals page has no peer list and no peer ratios to rank
+        # against, so the panel says it cannot compare rather than inventing
+        # an industry average.
+        "FMP_API_KEY":        os.environ.get("FMP_API_KEY"),
+        "ANTHROPIC_API_KEY":  os.environ.get("ANTHROPIC_API_KEY"),
         "SCHWAB_CLIENT_ID":   os.environ.get("SCHWAB_CLIENT_ID"),
         "ALPACA_OVERNIGHT":   (
             (os.environ.get("ALPACA_API_KEY") or os.environ.get("APCA_API_KEY_ID"))
@@ -9434,9 +9440,22 @@ def fundamentals_page():
             logger.exception("fundamentals_page error for %s", ticker)
             error = str(exc)
 
+    # The ratios on their own say very little — the comparison is the
+    # argument. Built from a named peer group rather than an unnamed
+    # "industry average", so the reader can see which companies the median
+    # came from and discount it themselves when the grouping looks wrong.
+    peers = None
+    if ticker and data and not error:
+        try:
+            import peer_comparison
+            peers = peer_comparison.build(ticker, data)
+        except Exception as exc:
+            logger.warning("fundamentals peers failed for %s: %s", ticker, exc)
+
     import quarter_facts
     return render_template("fundamentals.html", ticker=ticker, data=data,
-                           error=error, qd_shapes=quarter_facts.all_contexts())
+                           error=error, peers=peers,
+                           qd_shapes=quarter_facts.all_contexts())
 
 
 @app.route("/api/quarter/check", methods=["POST"])

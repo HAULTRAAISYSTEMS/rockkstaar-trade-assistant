@@ -307,6 +307,51 @@
         {% endfor %}
       </div>
 
+      <!-- ── Against the field ─────────────────────────────────────────
+           A ratio alone says very little; the comparison is the argument.
+           The peer set is named rather than averaged into an unlabelled
+           "industry", because an industry average cannot be checked and is
+           very sensitive to who was put in the bucket. ── -->
+      {% if peers %}
+      <section class="peer-card{{ '' if peers.usable else ' is-unavailable' }}">
+        <div class="peer-head">
+          <h3>Against the field</h3>
+          {% if peers.usable %}<span class="peer-count">median of {{ peers.peer_count }} peers</span>{% endif %}
+        </div>
+        {% if peers.read %}<div class="peer-read">{% for line in peers.read %}<p>{{ line }}</p>{% endfor %}</div>{% endif %}
+        {% if peers.usable %}
+        <table class="peer-table">
+          <thead><tr><th>Ratio</th><th>{{ ticker }}</th><th>Peer median</th><th>Gap</th><th>Rank</th></tr></thead>
+          <tbody>
+          {% for row in peers.rows %}
+            <tr class="peer-row is-{{ row.verdict }}">
+              <th scope="row"><span class="peer-label">{{ row.label }}</span><small>{{ row.note }}</small></th>
+              <td class="peer-num">{{ ('%.1f%%'|format(row.value)) if row.unit == '%' else ('%.2fx'|format(row.value)) }}</td>
+              {% if row.verdict == 'no_comparison' %}
+              <td class="peer-num peer-none" colspan="3">— {{ row.why_not }}</td>
+              {% else %}
+              <td class="peer-num">{{ ('%.1f%%'|format(row.median)) if row.unit == '%' else ('%.2fx'|format(row.median)) }}</td>
+              <td class="peer-num peer-gap">{{ '+' if row.gap > 0 }}{{ ('%.1f%%'|format(row.gap)) if row.unit == '%' else ('%.2fx'|format(row.gap)) }}</td>
+              {# `is not none`, never truthiness: a percentile of 0 means
+                 worst in the group, which is a reading, not a gap. #}
+              <td class="peer-num">{% if row.percentile is not none %}{{ row.percentile }}<small>/100</small>{% else %}—{% endif %}</td>
+              {% endif %}
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <p class="peer-foot">
+          Peers: {{ peers.peers | join(', ') }}.
+          Each median is built only from the peers that reported that ratio, and the
+          count is shown rather than assumed — a company that did not report one is
+          left out rather than counted as zero.
+        </p>
+        {% elif peers.why_not %}
+        <p class="peer-foot">{{ peers.why_not }}</p>
+        {% endif %}
+      </section>
+      {% endif %}
+
       {% if data.fiscal_period_ends or data.ttm_period_end %}
       <p class="fund-provenance">
         {% if data.fiscal_period_ends %}Statement data covers fiscal years ending
