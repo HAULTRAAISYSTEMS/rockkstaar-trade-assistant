@@ -1039,6 +1039,48 @@ def _earnings_from_finnhub(
     return results, []
 
 
+def _market_wide_earnings(today: date, wl_set: set, exclude: set) -> tuple[list[dict], str]:
+    """The market-wide slate, from whichever source will answer.
+
+    Returns (rows, source_name). Nasdaq first: it carries market cap, so the
+    Large/Mid tier filter is a real test there rather than a proxy. When it
+    returns nothing — it is unkeyed and scraped, and refuses some hosting
+    ranges outright — Finnhub answers the same question with a key already in
+    the environment.
+
+    This lives in one place because it is needed in two: the Intel radar card
+    and the Earnings & Catalyst Calendar both show a market-wide slate, and a
+    fallback added to only one of them leaves the other showing a confident
+    zero on a week when hundreds of companies report.
+    """
+    rows = _earnings_from_nasdaq(today, wl_set, exclude)
+    if rows:
+        return rows, "nasdaq_marketwide"
+
+    key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not key:
+        logger.warning("intel/earnings: Nasdaq returned nothing and "
+                       "FINNHUB_API_KEY is unset — no market-wide slate")
+        return [], "none"
+
+    fallback, errs = _earnings_from_finnhub(
+        [], key, today, set(exclude), market_wide=True, horizon_days=7)
+    # Finnhub's calendar carries no market cap, so the Large/Mid tier test the
+    # Nasdaq path applies cannot be reproduced. A published consensus is the
+    # closest honest proxy for "a company followed by enough people to belong
+    # on this card" — a proxy, not the same test, so a thinly covered name can
+    # slip through.
+    covered = [r for r in fallback
+               if (r.get("rev_est") or r.get("eps_est") is not None)
+               and r.get("ticker") not in exclude]
+    covered.sort(key=lambda r: -(r.get("rev_est") or 0))
+    logger.warning(
+        "intel/earnings: Nasdaq returned nothing — fell back to Finnhub "
+        "(%d rows, %d kept)%s", len(fallback), len(covered),
+        f" errors={errs}" if errs else "")
+    return covered, "finnhub_marketwide"
+
+
 def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
     """
     Returns earnings buckets + debug metadata.
@@ -1409,15 +1451,17 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
         for item in bucket
         if item.get("ticker")
     }
-    nasdaq_items = _earnings_from_nasdaq(today, wl_set, present)
+    nasdaq_items, market_source = _market_wide_earnings(today, wl_set, present)
     nasdaq_found = 0
     for item in nasdaq_items:
         _bucket_item(item)
         nasdaq_found += 1
     meta["nasdaq_found"] = nasdaq_found
+    meta["market_wide_source"] = market_source
     if nasdaq_found:
-        meta["earnings_source_used"] = meta.get("earnings_source_used", "") + "+nasdaq_marketwide"
-        logger.info("intel/earnings nasdaq market-wide: %d large/mid-cap items added", nasdaq_found)
+        meta["earnings_source_used"] = meta.get("earnings_source_used", "") + f"+{market_source}"
+        logger.info("intel/earnings market-wide via %s: %d items added",
+                    market_source, nasdaq_found)
 
     # Sort: overrides first, then watchlist, then by date
     for k in ("today", "tomorrow", "this_week", "coming_up"):
@@ -1656,35 +1700,7 @@ def fetch_earnings_radar(limit: int = 12) -> list[dict]:
     """
     today = _today_et()
     watchlist = set(_get_watchlist_tickers())
-    rows = _earnings_from_nasdaq(today, watchlist, set())
-
-    # Nasdaq is a scraped, unkeyed endpoint and it was the only source this
-    # card had. When it stops answering — it refuses some hosting ranges
-    # outright — the page rendered "0 earnings" for a week in which hundreds
-    # of companies report. That is not a quiet market, it is a dead feed.
-    # Finnhub answers the same question with a key we already hold, and this
-    # module already fetches and parses that exact response elsewhere.
-    if not rows:
-        key = os.environ.get("FINNHUB_API_KEY", "").strip()
-        if key:
-            fallback, errs = _earnings_from_finnhub(
-                [], key, today, set(), market_wide=True, horizon_days=7)
-            # Finnhub's calendar carries no market cap, so the Large/Mid tier
-            # test the Nasdaq path applies cannot be reproduced here. A
-            # published consensus is the closest honest proxy for "a company
-            # followed by enough people to belong on this card" — a proxy,
-            # not the same test, so a thinly covered name can slip through.
-            covered = [r for r in fallback
-                       if r.get("rev_est") or r.get("eps_est") is not None]
-            covered.sort(key=lambda r: -(r.get("rev_est") or 0))
-            rows = covered
-            logger.warning(
-                "intel/earnings: Nasdaq returned nothing — fell back to Finnhub "
-                "(%d rows, %d kept)%s",
-                len(fallback), len(rows), f" errors={errs}" if errs else "")
-        else:
-            logger.warning("intel/earnings: Nasdaq returned nothing and "
-                           "FINNHUB_API_KEY is unset — the card will be empty")
+    rows, _source = _market_wide_earnings(today, watchlist, set())
 
     buckets = {"today": [], "tomorrow": [], "this_week": [], "coming_up": []}
     _apply_overrides_to_buckets(buckets, today, watchlist)

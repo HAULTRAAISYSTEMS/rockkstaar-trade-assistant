@@ -182,3 +182,49 @@ class TestMarketWideModeReadsOneCallDifferently:
         from pathlib import Path
         src = Path("intel_engine.py").read_text()
         assert "market_wide=True, horizon_days=7" in src
+
+
+class TestBothSurfacesShareOneFallback:
+    """The first attempt at this fix went into fetch_earnings_radar only, and
+    the page the user was actually looking at — the Earnings & Catalyst
+    Calendar — runs a different function entirely. It kept showing zero. One
+    helper now, used by both, so the next change cannot land on one surface
+    and miss the other."""
+
+    def test_only_one_place_calls_nasdaq_for_the_market_wide_slate(self):
+        from pathlib import Path
+        src = Path("intel_engine.py").read_text()
+        calls = [l for l in src.splitlines()
+                 if "_earnings_from_nasdaq(today" in l and "def " not in l]
+        assert len(calls) == 1, calls
+
+    def test_the_calendar_goes_through_the_helper(self):
+        from pathlib import Path
+        src = Path("intel_engine.py").read_text()
+        body = src[src.index("def fetch_earnings_calendar"):]
+        body = body[:body.index("\ndef ")]
+        assert "_market_wide_earnings(today, wl_set, present)" in body
+
+    def test_the_radar_goes_through_the_helper(self):
+        from pathlib import Path
+        src = Path("intel_engine.py").read_text()
+        body = src[src.index("def fetch_earnings_radar"):]
+        body = body[:body.index("\ndef ")]
+        assert "_market_wide_earnings(today, watchlist, set())" in body
+
+    def test_the_helper_names_the_source_it_used(self, monkeypatch):
+        """So /api/intel/debug can say which feed answered instead of leaving
+        an empty card unexplained."""
+        import intel_engine as ie
+        today = ie._today_et()
+        monkeypatch.setattr(ie, "_earnings_from_nasdaq",
+                            lambda *a, **k: [{"ticker": "AAPL"}])
+        rows, source = ie._market_wide_earnings(today, set(), set())
+        assert source == "nasdaq_marketwide" and rows
+
+    def test_no_source_is_reported_honestly(self, monkeypatch):
+        import intel_engine as ie
+        monkeypatch.setattr(ie, "_earnings_from_nasdaq", lambda *a, **k: [])
+        monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
+        rows, source = ie._market_wide_earnings(ie._today_et(), set(), set())
+        assert rows == [] and source == "none"
