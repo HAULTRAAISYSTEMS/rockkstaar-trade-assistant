@@ -160,7 +160,16 @@ html {
   min-height: 100%;
   min-height: 100dvh;
   max-width: 100%;
-  overflow-x: clip;
+  /* No overflow-x here, deliberately.
+     This was `hidden`, which made the root a scroll container and trapped
+     Mac wheel and trackpad gestures. It became `clip` to avoid that, but
+     `overflow: clip` on the ROOT element propagates to the viewport and is
+     the least interoperable corner of this property — the engines disagree,
+     and a root that clips both axes cannot scroll at all.
+     Neither is needed. The only thing that overflowed horizontally was the
+     ticker tape, and .market-tape / .tw-tape already clip their own content;
+     with this declaration removed, scrollWidth equals the viewport width on
+     every page at phone, tablet and desktop widths (test_no_root_scroll_trap). */
 }
 
 body {
@@ -176,9 +185,9 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   max-width: 100%;
-  /* Clip horizontal overflow without creating a second vertical scroll
-     container. A body scroller can trap Mac wheel/trackpad gestures. */
-  overflow-x: clip;
+  /* Nothing here either — body's overflow propagates to the viewport when
+     the root's is visible, so clipping here is the same trap one element
+     down. Horizontal containment belongs to the element that overflows. */
   /* iPhone safe-area insets — active because viewport-fit=cover is set in the meta tag */
   padding-top:    env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);

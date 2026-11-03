@@ -343,7 +343,13 @@
   .tw-body { grid-template-columns: 1fr; }
   .tw-right { display: flex; flex-direction: column; }
   .tw-stats { grid-template-columns: 1fr 1fr; }
-  .tw-wl { max-height: 360px; }
+  /* The rail must not be its own scroller here.
+     In three columns it sits beside the page, so a list that scrolls under
+     the cursor is what you expect. In one column it spans the whole screen,
+     and a 360px scroller across the full width is a trap: wherever a finger
+     lands it scrolls the list, the page behind never moves, and the app
+     reads as "I can't scroll down". Let it grow and let the page scroll. */
+  .tw-wl { max-height: none; overflow-y: visible; }
   .tw-wl-row { padding: 12px 14px; }
   .tw-wl-name { max-width: none; }
   .tw-status { gap: 6px; padding: 10px 12px; }
