@@ -26,3 +26,5 @@
 .cr-statement .cr-table th,.cr-statement .cr-table td{min-width:110px;white-space:nowrap}
 .cr-statement .cr-table th:first-child,.cr-statement .cr-table td:first-child{min-width:160px;max-width:190px;white-space:normal;position:sticky;left:0;z-index:1;background:#0b0e12}
 .cr-table-hint{margin:0 0 8px;color:#929da9;font:500 11px/1.5 var(--font-ui)}
+
+.cr-periods{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}.cr-periods a{padding:9px 14px;border:1px solid rgba(229,185,79,.3);border-radius:8px;color:var(--cr-gold-bright);text-decoration:none}.cr-periods a[aria-current]{background:var(--cr-gold);color:#151005;font-weight:700}.cr-table td .cr-period-range{display:block;margin-top:5px;color:#929da9;font-size:9px;white-space:normal}

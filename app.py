@@ -9147,6 +9147,8 @@ def research_page():
     ticker = (request.args.get("ticker") or "").strip().upper()[:12]
     if ticker and not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
         ticker = ""
+    financial_period = "annual" if request.args.get("period") == "annual" else "quarterly"
+    quarter = None
     data, error, stock = None, None, {}
     if ticker:
         try:
@@ -9176,12 +9178,16 @@ def research_page():
             for field in ("sector", "industry"):
                 data[field] = data.get(field) or profile.get(field)
         research = _company_research_context(current_user_id(), ticker, data, stock, snapshot)
+    if ticker and financial_period == "quarterly":
+        from research_financials import get_quarter
+        quarter = get_quarter(ticker, force=request.args.get("refresh") == "1")
     try:
         suggestions = get_user_tracked_tickers(current_user_id())[:12]
     except Exception:
         suggestions = []
     return render_template("research.html", ticker=ticker, data=data, error=error, stock=stock,
-                           research=research, suggestions=suggestions)
+                           research=research, suggestions=suggestions,
+                           financial_period=financial_period, quarter=quarter)
 
 
 @app.route("/thesis")

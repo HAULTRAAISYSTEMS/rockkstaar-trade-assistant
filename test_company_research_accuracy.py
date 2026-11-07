@@ -116,7 +116,7 @@ def test_company_workspace_renders_when_fundamentals_are_unavailable():
                                stock={}, suggestions=[], research={
                                    "price": None, "change_pct": None, "changes": [],
                                    "memory_cards": [], "source_count": 0})
-    assert "Historical filing data is unavailable" in html
+    assert "Quarterly financials unavailable" in html
     assert "Filing check unavailable" in html
 
 
