@@ -13,12 +13,12 @@ function scenario(a){
  if(![requiredEPS,requiredGrowth,...cases.flatMap(c=>[c.eps,c.price,c.annualReturn])].every(Number.isFinite))throw Error('These assumptions exceed the model’s numerical range.');
  return {requiredEPS,requiredGrowth,cases};
 }
-function safeURL(value){try{const u=new URL(value, 'https://tradestaar.invalid');return ['https:','http:'].includes(u.protocol)&&!u.username ? (String(value).startsWith('/')?String(value):u.href):'';}catch(_){return '';}}
+function safeURL(value){if(typeof value!=='string'||!value.trim()||!(/^(https?:\/\/|\/(?!\/))/.test(value.trim())))return '';value=value.trim();try{const u=new URL(value, 'https://tradestaar.invalid');return ['https:','http:'].includes(u.protocol)&&!u.username ? (String(value).startsWith('/')?String(value):u.href):'';}catch(_){return '';}}
 function datedEvents(snapshot){
  const rows=[]; const seen=new Set();
  (snapshot.news||[]).forEach(n=>rows.push({title:n.headline||n.title,date:n.published_at||n.published||n.datetime,source:n.source||'News source',url:n.url,kind:'News'}));
  ((snapshot.filing_signals||{}).recent_filings||[]).forEach(f=>rows.push({title:`${f.form} filing${f.period_end?' · period '+f.period_end:''}`,date:f.filed,source:'SEC EDGAR',url:f.url,kind:'Filing'}));
- return rows.filter(r=>{if(!r.title)return false;const key=safeURL(r.url)||r.title.trim().toLowerCase();if(seen.has(key))return false;seen.add(key);return true;}).map(r=>{let d=r.date;if(typeof d==='number')d=new Date(d*1000).toISOString();const ms=Date.parse(d);return {...r,date:Number.isFinite(ms)?new Date(ms).toISOString():null};}).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+ return rows.filter(r=>{if(!r.title)return false;const key=safeURL(r.url)||r.title.trim().toLowerCase();if(seen.has(key))return false;seen.add(key);return true;}).map(r=>{let d=r.date;if(typeof d==='number')d=Number.isFinite(d)&&Math.abs(d*1000)<=8640000000000000?new Date(d*1000).toISOString():null;const ms=Date.parse(d);return {...r,date:Number.isFinite(ms)?new Date(ms).toISOString():null};}).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
 }
 function replay(events, records, cutoff){
  if(!/^\d{4}-\d{2}-\d{2}$/.test(cutoff)||!Number.isFinite(Date.parse(cutoff)))throw Error('Choose a valid date.');

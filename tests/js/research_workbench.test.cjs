@@ -23,6 +23,7 @@ test('benchmark comparisons reject mismatched sessions and invalid quotes',()=>{
  assert.equal(quoteComparison(c,{...b,c:0}),null);
 });
 test('unsafe source protocols never become links',()=>{
+ for(const value of [undefined,null,'','foo','//example.com'])assert.equal(safeURL(value),'');
  assert.equal(safeURL('javascript:alert(1)'),'');assert.equal(safeURL('https://user:secret@example.com'),'');
  assert.equal(safeURL('https://www.sec.gov/'),'https://www.sec.gov/');
 });
