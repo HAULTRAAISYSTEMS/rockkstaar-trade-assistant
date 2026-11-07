@@ -96,11 +96,11 @@ def test_route_defaults_to_quarter_and_skips_fetch_for_annual():
          patch.object(app, 'render_template', side_effect=lambda *a, **kw: kw), \
          patch.object(rf, 'get_quarter', return_value={'available': False}) as fetch:
         with app.app.test_request_context('/research?ticker=ISRG&refresh=1'):
-            result = app.research_page()
+            result = app.research_detail()
         assert result['financial_period'] == 'quarterly'
         fetch.assert_called_once_with('ISRG', force=True)
         fetch.reset_mock()
         with app.app.test_request_context('/research?ticker=ISRG&period=annual'):
-            result = app.research_page()
+            result = app.research_detail()
         assert result['financial_period'] == 'annual'
         fetch.assert_not_called()
