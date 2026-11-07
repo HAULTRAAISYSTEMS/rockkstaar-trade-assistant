@@ -2873,7 +2873,7 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
     try:
         from filing_signals import fetch_filing_signals
         if isinstance(raw, dict):
-            raw["_filing_signals"] = fetch_filing_signals(ticker)
+            raw["_filing_signals"] = fetch_filing_signals(ticker, force_refresh=force_refresh)
     except Exception as exc:
         logger.debug("filing signals unavailable for %s: %s", ticker, exc)
 
@@ -2883,7 +2883,7 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
     try:
         from finnhub_ttm import fetch_finnhub_metrics, fetch_finnhub_quote
         from valuation import build_valuation
-        _metrics = fetch_finnhub_metrics(ticker) or {}
+        _metrics = fetch_finnhub_metrics(ticker, force_refresh=force_refresh) or {}
         if isinstance(raw, dict):
             raw["_valuation"] = build_valuation(
                 _metrics.get("_raw_metric") or {}, fetch_finnhub_quote(ticker),

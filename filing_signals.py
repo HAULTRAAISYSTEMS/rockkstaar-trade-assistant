@@ -164,7 +164,7 @@ def extract_signals(submissions: dict, *, cik: str = "",
 # ─── Fetch ────────────────────────────────────────────────────────────────────
 
 _SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
-_CACHE_TTL = 3600
+_CACHE_TTL = 900
 _CACHE: dict[str, tuple[float, dict]] = {}
 
 
@@ -172,7 +172,7 @@ def clear_cache() -> None:
     _CACHE.clear()
 
 
-def fetch_filing_signals(ticker: str, *, today: date | None = None) -> dict:
+def fetch_filing_signals(ticker: str, *, today: date | None = None, force_refresh: bool = False) -> dict:
     """Signals for a ticker. Never raises — a failure here must not take down
     a page whose main content is fine without it."""
     import copy
@@ -182,7 +182,7 @@ def fetch_filing_signals(ticker: str, *, today: date | None = None) -> dict:
 
     ticker = (ticker or "").upper().strip()
     hit = _CACHE.get(ticker)
-    if hit and (_time.time() - hit[0]) < _CACHE_TTL:
+    if hit and not force_refresh and (_time.time() - hit[0]) < _CACHE_TTL:
         return copy.deepcopy(hit[1])
 
     try:

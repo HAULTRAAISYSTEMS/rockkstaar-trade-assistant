@@ -375,7 +375,9 @@ class TestThePulseStrip:
             sess["user_id"] = 1
         return c
 
-    def test_it_renders_the_four_tone_setting_numbers(self, client):
+    def test_it_renders_the_four_tone_setting_numbers(self, client, monkeypatch):
+        # Session-specific CLOSE/day labels have separate coverage below.
+        monkeypatch.setattr(legacy._mkt, "market_session", lambda: "regular")
         html = client.get("/").get_data(as_text=True)
         for label in ("Regime", "VIX", "SPY", "QQQ"):
             assert f">{label}<" in html
