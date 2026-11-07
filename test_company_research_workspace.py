@@ -176,7 +176,7 @@ def test_statement_periods_remain_accessible_in_named_scroll_regions():
     template = Path("templates/research.html").read_text()
     start = template.index("    {% if data and data.statements %}")
     end = template.index('  <section id="filings"')
-    fragment = Environment().from_string(template[start:end])
+    fragment = Environment().from_string('{% if True %}' + template[start:end])
     for periods in (["2025-12-31"], [f"{year}-12-31" for year in range(2025, 2020, -1)]):
         html = fragment.render(data={"statements": [{
             "title": "Income statement", "periods": periods,

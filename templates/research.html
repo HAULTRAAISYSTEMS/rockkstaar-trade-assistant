@@ -90,6 +90,32 @@
   </section>
 
   <section id="financials" class="cr-section">
+    {% set selected_period = financial_period|default('quarterly') %}
+    <div class="cr-periods" aria-label="Financial reporting period">
+      <a href="{{ url_for('research_page', ticker=ticker, period='quarterly') }}#financials" {% if selected_period == 'quarterly' %}aria-current="page"{% endif %}>Quarterly</a>
+      <a href="{{ url_for('research_page', ticker=ticker, period='annual') }}#financials" {% if selected_period == 'annual' %}aria-current="page"{% endif %}>Annual</a>
+      <a href="{{ url_for('research_page', ticker=ticker, period=selected_period, refresh='1') }}#financials">Refresh</a>
+    </div>
+    {% if selected_period == 'quarterly' %}
+    <div class="cr-section__head"><div><span>03 · Verify</span><h2>Financial history</h2></div><small>Latest available quarter{% if quarter and quarter.available %} {{ quarter.period_end }}{% endif %}</small></div>
+    {% if quarter and quarter.available %}
+    <p>{{ quarter.form or 'SEC filing' }} · period ended {{ quarter.period_end }} · filed {{ quarter.filed or 'date unavailable' }}{% if quarter.url %} · <a href="{{ quarter.url }}" target="_blank" rel="noopener noreferrer">Open SEC filing ↗</a>{% endif %}</p>
+    {% if research.latest_filing and research.latest_filing.period_end and research.latest_filing.period_end > quarter.period_end %}<p class="cr-caution">A newer financial filing covers {{ research.latest_filing.period_end }}. Quarterly figures for that period are not available in this view yet.</p>{% endif %}
+    <p>USD figures from SEC EDGAR. Income covers the reported quarter; the balance sheet is a snapshot. Cash flow is year to date, not a standalone quarter. Exact date ranges appear under each flow item. Annual scoring remains in the overview.</p>
+    <div class="cr-statements">
+      {% for stmt in quarter.statements %}
+      <article class="cr-statement">
+        <h4 id="quarter-title-{{ loop.index }}">{{ stmt.title }} · {{ stmt.basis }}</h4>
+        <div class="cr-table-wrap" role="region" aria-labelledby="quarter-title-{{ loop.index }}" tabindex="0"><table class="cr-table">
+          <thead><tr><th>Line item</th><th>{{ quarter.period_end }}</th></tr></thead>
+          <tbody>{% for row in stmt.rows %}<tr><td>{{ row.label }}{% if row.period_start %}<small class="cr-period-range">{{ row.period_start }} – {{ row.period_end }}</small>{% endif %}</td><td>{{ row['values'][0] }}</td></tr>{% endfor %}</tbody>
+        </table></div>
+      </article>
+      {% endfor %}
+      <small>Only available tagged line items are shown. Missing data is not zero. This view does not calculate trailing-twelve-month totals.</small>
+    </div>
+    {% else %}<div class="cr-empty"><b>Quarterly financials unavailable</b><span>{{ quarter.error if quarter else 'Try Refresh to load quarterly financials, or select Annual.' }}</span></div>{% endif %}
+    {% else %}
     <div class="cr-section__head"><div><span>03 · Verify</span><h2>Financial history</h2></div><small>{% if research.fundamentals_as_of %}Latest annual period {{ research.fundamentals_as_of }}{% else %}Annual period unavailable{% endif %}</small></div>
     {% if research.latest_filing %}<p>Latest financial filing: <a href="{{ research.latest_filing.url }}" target="_blank" rel="noopener noreferrer">{{ research.latest_filing.form }} · period {{ research.latest_filing.period_end or 'unavailable' }} · filed {{ research.latest_filing.filed }} ↗</a></p>{% endif %}
     <p>Annual figures in {{ data.currency or 'the reporting currency' }}. Free cash flow is operating cash flow less purchases of property and equipment. Each margin uses that row’s annual revenue.</p>
@@ -113,6 +139,7 @@
       {% endfor %}
       <small>Annual figures from SEC EDGAR filings, newest first. "—" means the filing did not report that line item for the period.</small>
     </div>
+    {% endif %}
     {% endif %}
   </section>
 
