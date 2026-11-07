@@ -9077,7 +9077,7 @@ def _company_research_context(user_id: int, ticker: str, data: dict | None, stoc
         timestamp = item.get("published_at") or ""
         changes.append(dict(item, is_new=bool(reviewed_at and _research_sort_time(timestamp) > _research_sort_time(reviewed_at)),
                             sort_time=_research_sort_time(timestamp), memory_url=""))
-    filing_data = (data or {}).get("filing_signals") or {}
+    filing_data = snapshot.get("filing_signals") or (data or {}).get("filing_signals") or {}
     for filing in filing_data.get("recent_filings", []):
         stamp = filing.get("filed") or ""
         changes.append({"kind": "SEC filing", "headline": f"{ticker} filed {filing['form']}",
@@ -9171,6 +9171,8 @@ def research_page():
         if data:
             # Do not mutate the shared scorecard cache when refreshing market data.
             data = dict(data)
+            if "filing_signals" in snapshot:
+                data["filing_signals"] = snapshot["filing_signals"]
             current_valuation = snapshot.get("valuation") or {}
             if current_valuation.get("price") is not None or not (data.get("valuation") or {}).get("price"):
                 data["valuation"] = current_valuation

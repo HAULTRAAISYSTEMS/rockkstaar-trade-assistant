@@ -123,15 +123,24 @@ class TestTheQuotesEndpoint:
         run happens to find — the point under test is which function the
         endpoint calls, not what this machine's dev data contains.
         """
+        import threading
+        request_thread = threading.get_ident()
+        callers = []
+        # Other tests can leave an asynchronous refresh running. Only a fetch
+        # on this request's thread would make the polling endpoint block.
+        def record_fetch(*args, **kwargs):
+            callers.append(threading.get_ident())
+            return {}
+
         with patch.object(_app, "get_active_wl_id", return_value=1), \
              patch.object(_app, "get_watchlist_stocks", return_value=["NVDA"]), \
              patch.object(_app, "get_all_stock_data",
                           return_value=[{"ticker": "NVDA", "current_price": 230.36}]), \
              patch.object(_app, "_trigger_exec_state_refresh") as trigger, \
-             patch.object(_app, "batch_refresh_exec_states") as blocking:
+             patch.object(_app, "batch_refresh_exec_states", side_effect=record_fetch):
             client.get("/api/terminal/quotes")
         assert trigger.called
-        assert not blocking.called
+        assert request_thread not in callers
 
     def test_a_broken_watchlist_still_returns_the_chips(self, client):
         """Half a page of live numbers beats an error."""

@@ -76,10 +76,12 @@ def test_untracked_company_uses_valuation_quote_and_rejects_past_earnings(monkey
 def test_snapshot_fetches_the_requested_symbol_and_caches_per_ticker(monkeypatch):
     cr._CACHE.clear()
     calls = []
-    monkeypatch.setattr(cr, "_market", lambda ticker, *a: {"price": 100 if ticker == "AEIS" else 200})
+    monkeypatch.setattr(cr, "fetch_finnhub_quote", lambda ticker: {"c": 100 if ticker == "AEIS" else 200})
+    monkeypatch.setattr(cr, "fetch_finnhub_metrics", lambda *a, **k: {"_raw_metric": {}})
     monkeypatch.setattr(cr, "_profile", lambda ticker: {"description": ticker})
     monkeypatch.setattr(cr, "_news", lambda ticker: calls.append(ticker) or [])
     monkeypatch.setattr(cr, "_earnings", lambda ticker: [])
+    monkeypatch.setattr(cr, "fetch_filing_signals", lambda *a, **k: {"available": True, "signals": []})
     assert cr.fetch_company_snapshot("AEIS")["valuation"]["price"] == 100
     assert cr.fetch_company_snapshot("AMD")["valuation"]["price"] == 200
     cr.fetch_company_snapshot("AEIS")
