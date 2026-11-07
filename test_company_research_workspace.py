@@ -114,6 +114,9 @@ def test_wide_financial_table_cannot_force_mobile_page_overflow():
     assert ".cr-shell{" in css and "width:100%;min-width:0" in css
     assert ".cr-section{min-width:0" in css
     assert ".cr-table-wrap{width:100%;min-width:0;max-width:100%;overflow:auto" in css
+    # Nested statement grid tracks must shrink before their tables can scroll.
+    assert ".cr-statements{display:grid;grid-template-columns:minmax(0,1fr);min-width:0" in css
+    assert ".cr-statement{min-width:0;max-width:100%}" in css
 
 
 def test_quote_time_filter_formats_iso_timestamps_for_display():
@@ -164,3 +167,24 @@ def test_curated_descriptions_cover_crwd_klac_and_panw():
     assert "KLA" in _company_description("KLAC")
     assert "Palo Alto" in _company_description("PANW")
     assert _company_description("ZZZZ") == ""
+
+
+def test_statement_periods_remain_accessible_in_named_scroll_regions():
+    from jinja2 import Environment
+    from pathlib import Path
+
+    template = Path("templates/research.html").read_text()
+    start = template.index("    {% if data and data.statements %}")
+    end = template.index('  <section id="filings"')
+    fragment = Environment().from_string(template[start:end])
+    for periods in (["2025-12-31"], [f"{year}-12-31" for year in range(2025, 2020, -1)]):
+        html = fragment.render(data={"statements": [{
+            "title": "Income statement", "periods": periods,
+            "rows": [{"label": "Revenue", "values": [f"${i}.1B" for i in range(len(periods))]}],
+        }]})
+        assert 'role="region" aria-labelledby="statement-title-1"' in html
+        assert 'tabindex="0"' in html
+        for i, period in enumerate(periods):
+            assert f"<th>{period}</th>" in html
+            assert f"<td>${i}.1B</td>" in html
+        assert ("earlier years" in html) == (len(periods) > 1)
