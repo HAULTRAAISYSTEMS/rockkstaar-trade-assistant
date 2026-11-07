@@ -7,7 +7,10 @@ from research_memory_routes import create_research_memory_blueprint
 from sms_alert_routes import create_sms_alerts_blueprint
 from browser_push_routes import create_browser_push_blueprint
 
+from research_workbench import create_blueprint as create_research_lab
+
 app=legacy.app
+app.register_blueprint(create_research_lab(current_user=legacy.current_user))
 app.register_blueprint(create_live_research_blueprint(require_admin=legacy.require_admin,current_user=legacy.current_user,tracked_tickers=legacy.get_user_tracked_tickers))
 app.register_blueprint(create_research_memory_blueprint(current_user=legacy.current_user))
 app.register_blueprint(create_sms_alerts_blueprint(current_user=legacy.current_user))

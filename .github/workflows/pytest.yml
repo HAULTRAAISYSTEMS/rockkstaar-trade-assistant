@@ -35,6 +35,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Research workspace calculations
+        run: node --test tests/js/research_workbench.test.cjs
+
       - name: Run test suite
         run: python -m pytest -q
 

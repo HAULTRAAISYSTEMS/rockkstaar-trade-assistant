@@ -9143,6 +9143,15 @@ def _company_research_context(user_id: int, ticker: str, data: dict | None, stoc
 
 @app.route("/research")
 def research_page():
+    """Render immediately; independently polled sections load public data."""
+    ticker = (request.args.get("ticker") or "").strip().upper()[:12]
+    if ticker and not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
+        ticker = ""
+    return render_template("research_workbench.html", ticker=ticker)
+
+
+@app.route("/research/detail")
+def research_detail():
     """One company workspace across fundamentals, changes, filings, and memory."""
     ticker = (request.args.get("ticker") or "").strip().upper()[:12]
     if ticker and not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
