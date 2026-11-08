@@ -10,7 +10,8 @@
     </span>
     {% endfor %}
   </div>
-  <span class="market-tape-freshness" id="market-tape-freshness" role="status" aria-live="off" title="Last successful refresh from Tradestaar quote API">Checking quotes…</span>
+  {# The quote-freshness readout lives in the workspace bar (_workspace_search.html)
+     so it no longer sits on top of the scrolling tape. #}
 </div>
 <script>
 (function () {
@@ -59,14 +60,15 @@
       });
     });
   }
-  var freshness = document.getElementById('market-tape-freshness');
   var pending = false;
   var lastSuccess = 0;
   function updateFreshness() {
+    // Looked up each time: the readout is rendered later in the page, in the workspace bar.
+    var freshness = document.getElementById('market-tape-freshness');
     if (!freshness) return;
-    if (!lastSuccess) { freshness.textContent = 'Quotes unavailable'; return; }
+    if (!lastSuccess) { freshness.textContent = 'Quotes unavailable'; freshness.classList.add('is-stale'); return; }
     var age = Math.floor((Date.now() - lastSuccess) / 60000);
-    freshness.textContent = age < 1 ? 'API checked just now' : 'API checked ' + age + 'm ago';
+    freshness.textContent = age < 1 ? 'Quotes checked just now' : 'Quotes checked ' + age + 'm ago';
     freshness.classList.toggle('is-stale', age >= 3);
   }
   function fetchTape() {
@@ -78,6 +80,8 @@
         if (!d || !d.ok || !Array.isArray(d.items) || !d.items.length) throw new Error('No quotes returned');
         paint(d.items);
         lastSuccess = Date.now();
+        // The 3D market globe listens for this; it never polls on its own.
+        try { document.dispatchEvent(new CustomEvent('tradestaar:tape', { detail: d.items })); } catch (e) {}
         updateFreshness();
       })
       .catch(function () { updateFreshness(); })

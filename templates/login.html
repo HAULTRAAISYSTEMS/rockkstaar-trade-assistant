@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="cc27 cc27-auth">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#070809" />
+  <meta name="theme-color" content="#02040a" />
   <title>Sign in — Tradestaar Elite</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -220,8 +220,13 @@
       *, *::before, *::after { scroll-behavior:auto !important; animation:none !important; transition:none !important; }
     }
   </style>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&display=swap" rel="stylesheet" />
+  <!-- 2027 AI Command Center layer, shared with the app -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/command_center.css') }}" />
 </head>
 <body>
+  <canvas id="cc3d-backdrop" aria-hidden="true"></canvas>
+  <div id="cc3d-veil" aria-hidden="true"></div>
   <main class="login-page">
     <img class="login-backdrop" src="{{ url_for('static', filename='img/tradestaar-elite-logo.jpg') }}" alt="" aria-hidden="true" />
 
@@ -241,6 +246,10 @@
         </div>
       </section>
 
+      <div class="auth-stage">
+      {# Decorative holographic globe behind the sign-in card. No data: the
+         login page has no quotes, so it carries no market nodes or numbers. #}
+      <div class="cc3d-orb cc3d-orb--decor" data-cc3d-orb="decor" aria-hidden="true"><canvas></canvas></div>
       <section class="auth-card" aria-labelledby="auth-title">
         <header class="auth-header">
           <div class="auth-status"><span class="auth-status-dot"></span>Secure workspace</div>
@@ -272,7 +281,9 @@
           <div class="security-note"><span>Encrypted session</span><span>● System online</span></div>
         </div>
       </section>
+      </div>
     </div>
   </main>
+  <script defer src="{{ url_for('static', filename='js/command_center_3d.js') }}"></script>
 </body>
 </html>

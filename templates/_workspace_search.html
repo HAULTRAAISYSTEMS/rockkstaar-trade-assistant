@@ -1,7 +1,13 @@
 <div class="workspace-bar">
   <span class="workspace-bar-label">YOUR RESEARCH WORKSPACE</span>
   <button type="button" class="workspace-search-open" id="workspace-search-open" aria-haspopup="dialog"><span aria-hidden="true">⌕</span> Find a company or tool <kbd>/</kbd></button>
-  <a class="workspace-alerts" href="{{ url_for('browser_push.settings') }}">Browser alerts <span aria-hidden="true">↗</span></a>
+  <div class="workspace-bar-actions">
+    {% if request.endpoint != 'terminal' %}<span class="market-tape-freshness" id="market-tape-freshness" role="status" aria-live="off" title="Last successful refresh from the Tradestaar quote API">Checking quotes…</span>{% endif %}
+    <a class="workspace-alerts" href="{{ url_for('browser_push.settings') }}" aria-label="Browser alerts settings">
+      <svg class="workspace-alerts-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M12 3a6 6 0 0 0-6 6v3.6L4.4 15.4A1 1 0 0 0 5.3 17h13.4a1 1 0 0 0 .9-1.6L18 12.6V9a6 6 0 0 0-6-6Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.8 19.5a2.3 2.3 0 0 0 4.4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span class="workspace-alerts-label">Alerts</span>
+    </a>
+  </div>
 </div>
 <dialog id="workspace-search" class="workspace-search" aria-labelledby="workspace-search-title">
   <div class="workspace-search-head"><div><p class="workspace-step">GO STRAIGHT TO THE SOURCE</p><h2 id="workspace-search-title">What are you researching?</h2></div><button type="button" id="workspace-search-close" aria-label="Close search">×</button></div>
