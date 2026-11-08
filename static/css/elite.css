@@ -1116,3 +1116,13 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(var(--cc-accent-rgb
 .market-tape .market-tape-item .market-tape-chg.chg-neg{color:#ff8d92!important;background:rgba(159,42,49,.22)!important}
 .market-tape .market-tape-item .market-tape-chg.chg-flat{color:#d6dae0!important;background:rgba(255,255,255,.08)!important}
 @media(max-width:700px){.market-tape .market-tape-item{gap:6px;padding:6px 9px!important}.market-tape .market-tape-item .market-tape-chg{min-width:62px}}
+
+/* Terminal split control: the word opens the Terminal, the chevron opens
+   its tools (Setups Board, Watchlists & Alerts). The panel anchors to the
+   whole control, not the chevron, and opens from its left edge. */
+.nav-split { position: relative; display: flex; align-self: stretch; }
+.nav-split > .nav-link { padding-right: 4px; }
+.nav-split .nav-menu--split { position: static; }
+.nav-split .nav-split__toggle { padding: 0 9px 0 3px; }
+.nav-split .nav-split__toggle::after { display: none; }
+.nav-split .nav-menu--split > .nav-menu__panel { left: 0 !important; right: auto !important; }
