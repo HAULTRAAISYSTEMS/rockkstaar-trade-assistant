@@ -2,6 +2,24 @@
 {% from "_hx_macros.html" import grade_badge, swing_fill_color %}
 {% block title %}Setups — Tradestaar Elite{% endblock %}
 
+{% block head_extra %}
+{{ super() }}
+<style>
+.aplus-command{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px 22px;align-items:center;margin:0 0 18px;padding:22px 24px;border:1px solid rgba(239,190,84,.38);border-radius:18px;background:radial-gradient(ellipse at 95% 0%,rgba(239,190,84,.12),transparent 48%),linear-gradient(120deg,#171b21,#0c1016);box-shadow:0 12px 32px rgba(0,0,0,.17)}
+.aplus-command__eyebrow{display:block;margin-bottom:13px;color:#e8bb5e;font-size:10px;font-weight:800;letter-spacing:.17em}
+.aplus-command__title{display:flex;align-items:center;gap:16px;min-width:0}
+.aplus-command__mark{display:grid;place-items:center;flex:none;width:62px;height:62px;border-radius:15px;background:linear-gradient(140deg,#ffe08c,#c99026);color:#17130b;font-size:25px;font-weight:900;box-shadow:0 6px 20px rgba(230,173,60,.18)}
+.aplus-command__title strong{display:block;color:#f7f5ef;font-size:clamp(18px,2.2vw,26px);line-height:1.2;letter-spacing:-.025em}
+.aplus-command__title small{display:block;margin-top:7px;color:#aeb7c3;font-size:12px;line-height:1.45}
+.aplus-command__status{display:flex;align-items:center;gap:12px;padding:12px 17px;border:1px solid rgba(239,190,84,.2);border-radius:12px;background:rgba(239,190,84,.07)}
+.aplus-command__status strong{font-size:30px;color:#f3cb73;font-variant-numeric:tabular-nums}
+.aplus-command__status span{max-width:100px;color:#d7dce4;font-size:10px;font-weight:800;letter-spacing:.09em;line-height:1.4}
+.aplus-command__hint{grid-column:1/-1;padding-top:12px;border-top:1px solid rgba(255,255,255,.09);color:#aeb7c3;font-size:12px;line-height:1.5}
+@media(max-width:640px){.aplus-command{padding:18px;gap:15px}.aplus-command__status{grid-column:1/-1;justify-content:flex-start}.aplus-command__mark{width:52px;height:52px;font-size:21px}.aplus-command__title strong{font-size:19px}.aplus-command__hint{font-size:11px}}
+@media(prefers-reduced-motion:reduce){.aplus-command *{animation:none!important;transition:none!important}}
+</style>
+{% endblock %}
+
 {% block hx_content %}
 {# Bucket definitions in spec tab order #}
 {% set buckets = [
@@ -76,6 +94,13 @@
 {% for key, label, blabel in buckets %}
 {% set rows = ranked|selectattr('bucket','equalto',blabel)|list %}
 <div class="hx-bucket-panel" data-bucket-panel="{{ key }}" style="{{ '' if loop.first else 'display:none' }}">
+  {% if key == 'aplus' %}
+  <section class="aplus-command" aria-label="A plus trading setup command bar">
+    <div class="aplus-command__identity"><span class="aplus-command__eyebrow">TRADESTAAR ELITE / SIGNAL DESK</span><div class="aplus-command__title"><span class="aplus-command__mark">A+</span><div><strong>High-conviction setups</strong><small>Qualified by the existing scanner · not a trade recommendation</small></div></div></div>
+    <div class="aplus-command__status"><strong>{{ rows|length }}</strong><span>{{ 'QUALIFIED SETUP' if rows|length == 1 else 'QUALIFIED SETUPS' }}</span></div>
+    <div class="aplus-command__hint">Review entry, stop, target and risk/reward below. Confirm price and liquidity before acting.</div>
+  </section>
+  {% endif %}
   {% if rows %}
   <div class="setups-grid">
     {% for s in rows %}
