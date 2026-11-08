@@ -26,6 +26,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
   <!-- Mobile / iPad responsive overrides — loaded last to take priority -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/company_market_cap.css') }}">
   {% block head_extra %}{% endblock %}
   <!-- Unified Tradestaar Elite shell and component normalization — loaded last. -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/elite.css') }}" />
@@ -73,6 +74,7 @@
 
   <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
 
+  <script defer src="{{ url_for('static', filename='js/company_market_cap.js') }}"></script>
   {% block scripts %}{% endblock %}
 
   <!-- ===== ASK AI FAB — bottom-center pill ===== -->

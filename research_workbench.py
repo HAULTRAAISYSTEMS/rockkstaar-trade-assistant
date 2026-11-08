@@ -15,7 +15,7 @@ _POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix='research-lab')
 _SLOTS = BoundedSemaphore(6)
 _LOCK = Lock()
 _JOBS = {}
-_TTL = {'snapshot': 30, 'financials': 3600, 'quarter': 900, 'earnings': 900, 'benchmarks': 30, 'ttm': 900}
+_TTL = {'snapshot': 30, 'financials': 3600, 'quarter': 900, 'earnings': 900, 'benchmarks': 30, 'ttm': 900, 'marketcap': 900}
 
 
 def symbol(value):
@@ -26,6 +26,9 @@ def symbol(value):
 
 
 def _load(ticker, part, force):
+    if part == 'marketcap':
+        from company_market_cap import fetch_market_cap
+        return fetch_market_cap(ticker)
     if part == 'snapshot':
         from company_research_data import fetch_company_snapshot
         # Home-listing currency is intentionally unknown until the annual
