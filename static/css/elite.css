@@ -1104,3 +1104,15 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(229,185,79,.035); }
 @media (max-width: 1240px) {
   .nav-menu:nth-last-of-type(-n+2) > .nav-menu__panel { left: auto; right: 0; }
 }
+
+
+/* Tradestaar 2027: accessible, high-contrast market tape on every shared page. */
+.market-tape .market-tape-item{display:inline-flex!important;align-items:center;gap:8px;min-width:max-content;padding:7px 12px!important;border-radius:10px;box-sizing:border-box}
+.market-tape .market-tape-item.mt-aplus,.market-tape .market-tape-item.mt-featured,.market-tape .market-tape-item.mt-star{background:linear-gradient(115deg,rgba(241,189,78,.16),rgba(241,189,78,.045))!important;border:1px solid rgba(241,189,78,.45)!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.035),0 0 14px rgba(241,189,78,.12)!important}
+.market-tape .market-tape-item .market-tape-sym{color:#f1cb77!important;white-space:nowrap}
+.market-tape .market-tape-item .market-tape-px{color:#f8f9fc!important;font-variant-numeric:tabular-nums;white-space:nowrap}
+.market-tape .market-tape-item .market-tape-chg{display:inline-flex!important;align-items:center;justify-content:center;min-width:70px;padding:4px 8px!important;line-height:1.2;white-space:nowrap;font-variant-numeric:tabular-nums;box-sizing:border-box;position:relative;z-index:1}
+.market-tape .market-tape-item .market-tape-chg.chg-pos{color:#54e7a7!important;background:rgba(19,131,79,.25)!important}
+.market-tape .market-tape-item .market-tape-chg.chg-neg{color:#ff8d92!important;background:rgba(159,42,49,.22)!important}
+.market-tape .market-tape-item .market-tape-chg.chg-flat{color:#d6dae0!important;background:rgba(255,255,255,.08)!important}
+@media(max-width:700px){.market-tape .market-tape-item{gap:6px;padding:6px 9px!important}.market-tape .market-tape-item .market-tape-chg{min-width:62px}}
