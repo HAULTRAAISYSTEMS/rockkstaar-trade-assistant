@@ -104,3 +104,10 @@ body::before { opacity: .05; }
 @media(min-width:901px){.liq-page .cc-pulse>.cc-pulse-cell:not(.cc-pulse-next){grid-column:span 1}.liq-page .cc-pulse>.cc-pulse-cell:nth-last-child(2){grid-column:span 2}}
 @media(max-width:900px){.liq-page .cc-pulse{grid-template-columns:repeat(3,minmax(0,1fr))!important}.liq-page .cc-pulse>.cc-pulse-cell{padding:15px!important}.liq-page .cc-pulse>.cc-pulse-cell:nth-last-child(2){grid-column:span 1}}
 @media(max-width:540px){.liq-page .cc-pulse{grid-template-columns:repeat(2,minmax(0,1fr))!important}.liq-page .cc-pulse>.cc-pulse-next{display:flex!important;flex-direction:column;align-items:flex-start;gap:8px;min-height:0;padding:20px!important}.liq-page .cc-pulse-next .cc-pulse-k{margin-bottom:0}.liq-page .cc-pulse-next>small{align-self:flex-start;text-align:left}.liq-page .cc-pulse-next .cc-pulse-v{font-size:21px!important}}
+
+
+/* Shared 2027 market tape: visible API freshness, without implying exchange streaming. */
+.market-tape{position:relative}
+.market-tape-freshness{position:absolute;right:8px;bottom:2px;z-index:5;padding:2px 6px;border:1px solid rgba(244,202,110,.22);border-radius:6px;background:rgba(9,13,19,.91);color:#c4cbd4;font:10px/1.3 var(--font-mono,monospace);pointer-events:none}
+.market-tape-freshness.is-stale{color:#f3c26c;border-color:rgba(243,194,108,.45)}
+@media(max-width:700px){.market-tape-freshness{font-size:9px;right:4px}}
