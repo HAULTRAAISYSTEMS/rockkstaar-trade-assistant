@@ -766,3 +766,11 @@ class TestTapeWatchlistTiers:
         assert legacy._tape_tier("Setups Forming") == "forming"
         assert legacy._tape_tier("Buy & Hold") == "standard"
         assert legacy._tape_tier("My Custom List") == "standard"
+
+
+def test_next_up_pulse_layout_styles():
+    from pathlib import Path
+    css = Path('static/css/workspace.css').read_text(encoding='utf-8')
+    assert '.cc-pulse>.cc-pulse-next' in css
+    assert 'grid-column:1/-1!important' in css
+    assert '@media(max-width:540px)' in css
