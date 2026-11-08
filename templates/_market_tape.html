@@ -10,6 +10,7 @@
     </span>
     {% endfor %}
   </div>
+  <span class="market-tape-freshness" id="market-tape-freshness" role="status" aria-live="off" title="Last successful refresh from Tradestaar quote API">Checking quotes…</span>
 </div>
 <script>
 (function () {
@@ -58,13 +59,32 @@
       });
     });
   }
-  function fetchTape() {
-    fetch('/api/market-tape', { headers: { 'Accept': 'application/json' } })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { if (d && d.ok) paint(d.items); })
-      .catch(function () {});
+  var freshness = document.getElementById('market-tape-freshness');
+  var pending = false;
+  var lastSuccess = 0;
+  function updateFreshness() {
+    if (!freshness) return;
+    if (!lastSuccess) { freshness.textContent = 'Quotes unavailable'; return; }
+    var age = Math.floor((Date.now() - lastSuccess) / 60000);
+    freshness.textContent = age < 1 ? 'API checked just now' : 'API checked ' + age + 'm ago';
+    freshness.classList.toggle('is-stale', age >= 3);
   }
-  fetchTape(); // hydrate immediately if the server cache was cold
-  setInterval(fetchTape, 45000);
+  function fetchTape() {
+    if (pending || document.hidden) return;
+    pending = true;
+    fetch('/api/market-tape', { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('Quote API unavailable'); return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok || !Array.isArray(d.items) || !d.items.length) throw new Error('No quotes returned');
+        paint(d.items);
+        lastSuccess = Date.now();
+        updateFreshness();
+      })
+      .catch(function () { updateFreshness(); })
+      .finally(function () { pending = false; });
+  }
+  fetchTape();
+  setInterval(function () { fetchTape(); updateFreshness(); }, 45000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) fetchTape(); });
 })();
 </script>
