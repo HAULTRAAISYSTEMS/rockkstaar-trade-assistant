@@ -177,6 +177,7 @@
     var canvas = host.querySelector('canvas');
     if (!canvas || !canvas.getContext) return;
     var hud = host.querySelector('[data-cc3d-hud]');
+    var decor = host.getAttribute('data-cc3d-orb') === 'decor';
     var ctx, W = 0, H = 0;
     var nodes = [];
     var lastSync = 0;
@@ -251,11 +252,13 @@
     }
     setInterval(updateSync, 5000);
 
-    setData(readTapeFromDom());
-    document.addEventListener('tradestaar:tape', function (e) { setData(e.detail); });
+    if (!decor) {
+      setData(readTapeFromDom());
+      document.addEventListener('tradestaar:tape', function (e) { setData(e.detail); });
+    }
 
-    // Drag to spin, with inertia
-    host.addEventListener('pointerdown', function (e) { dragging = true; lx = e.clientX; ly = e.clientY; velY = 0; host.setPointerCapture && host.setPointerCapture(e.pointerId); });
+    // Drag to spin, with inertia (data globes only)
+    if (!decor) host.addEventListener('pointerdown', function (e) { dragging = true; lx = e.clientX; ly = e.clientY; velY = 0; host.setPointerCapture && host.setPointerCapture(e.pointerId); });
     host.addEventListener('pointermove', function (e) {
       if (!dragging) return;
       var dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;

@@ -183,13 +183,80 @@ html.cc27 .market-tape .market-tape-item {
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 html.cc27 .market-tape .market-tape-item .market-tape-sym { color: var(--cc-gold-hi) !important; font-family: var(--font-display); font-weight: 700; letter-spacing: 0.06em; }
-html.cc27 .market-tape-freshness {
-  color: var(--cc-cyan);
-  background: rgba(2, 6, 14, 0.9);
-  border-left: 1px solid var(--cc-edge);
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+/* ── Workspace bar: search + system status + alerts ──────────── */
+html.cc27 .workspace-bar {
+  max-width: none;
+  border-bottom: 1px solid var(--cc-hairline);
+  background: linear-gradient(180deg, rgba(4, 8, 16, 0.55), rgba(4, 8, 16, 0.2));
 }
-html.cc27 .market-tape-freshness.is-stale { color: var(--warn-500, #ffb020); }
+html.cc27 .workspace-bar-label { color: var(--cc-cyan); letter-spacing: 0.22em; }
+html.cc27 .workspace-search-open {
+  border: 1px solid var(--cc-edge);
+  border-radius: 999px;
+  background: rgba(3, 7, 15, 0.7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+html.cc27 .workspace-search-open:hover { border-color: var(--cc-edge-hi); box-shadow: var(--cc-glow-cyan); }
+html.cc27 .workspace-search-open > span { color: var(--cc-cyan); }
+html.cc27 .workspace-search-open kbd { border-color: var(--cc-edge); border-radius: 6px; color: var(--cc-cyan); background: rgba(79, 227, 255, 0.06); }
+
+/* Quote freshness: a status chip in the bar, out of the tape's way.
+   Live = solid cyan dot. Stale or unavailable = dashed amber ring (the
+   app's "not fully known" rule). */
+html.cc27 .market-tape-freshness {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 13px;
+  border: 1px solid var(--cc-edge);
+  border-radius: 999px;
+  background: rgba(3, 7, 15, 0.7);
+  color: #cfe9f5;
+  font: 500 10.5px/1 var(--font-mono, 'IBM Plex Mono', monospace);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+html.cc27 .market-tape-freshness::before {
+  content: "";
+  flex: none;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--cc-cyan);
+  box-shadow: 0 0 10px var(--cc-cyan);
+}
+html.cc27 .market-tape-freshness.is-stale { color: var(--warn-500, #ffb020); border-style: dashed; border-color: var(--unknown-accent, #ffb020); }
+html.cc27 .market-tape-freshness.is-stale::before { background: transparent; border: 1px dashed var(--unknown-accent, #ffb020); box-shadow: none; }
+
+html.cc27 .workspace-alerts {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  min-height: 0;
+  margin: 0;
+  padding: 0 15px 0 12px;
+  border: 1px solid rgba(241, 199, 91, 0.35);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(241, 199, 91, 0.14), rgba(79, 227, 255, 0.06));
+  color: var(--cc-gold-hi);
+  font: 700 11px/1 var(--font-display);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: box-shadow 0.2s, border-color 0.2s, color 0.2s;
+}
+html.cc27 .workspace-alerts:hover { color: #fff; border-color: rgba(241, 199, 91, 0.7); box-shadow: var(--cc-glow-gold); }
+html.cc27 .workspace-alerts-icon { flex: none; transform-origin: 50% 15%; }
+html.cc27 .workspace-alerts:hover .workspace-alerts-icon { animation: cc27-bell 0.7s ease; }
+@keyframes cc27-bell {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(14deg); } 40% { transform: rotate(-11deg); }
+  60% { transform: rotate(7deg); }  80% { transform: rotate(-4deg); }
+}
 
 /* ── Page hero: holo command header ───────────────────────────── */
 html.cc27 .elite-hero {
@@ -296,6 +363,110 @@ html.cc27 .liq-page .elite-hero-title { font-size: clamp(34px, 4.2vw, 60px); lin
 }
 /* No live quotes yet: the globe still turns, but says so. Dashed = not known. */
 .cc3d-orb.is-waiting .cc3d-hud { border-top: 1px dashed var(--unknown-line, #7b8794); padding-top: 6px; color: var(--unknown-ink, #7b8794); }
+
+/* ── Sign-in page ─────────────────────────────────────────────── */
+html.cc27-auth body {
+  font-family: 'Inter', var(--font-ui, system-ui), sans-serif;
+}
+html.cc27-auth body::before { opacity: 0.35 !important; }
+html.cc27-auth .login-page { position: relative; z-index: 1; }
+html.cc27-auth .login-backdrop { opacity: 0.06; filter: grayscale(1) drop-shadow(0 0 70px rgba(79, 227, 255, 0.25)); }
+html.cc27-auth .brand-name {
+  color: transparent;
+  background: linear-gradient(90deg, var(--cc-gold-hi), var(--cc-gold));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+html.cc27-auth .brand-mark-logo { border-color: var(--cc-edge-hi) !important; box-shadow: 0 0 0 4px rgba(79, 227, 255, 0.08), 0 0 30px rgba(79, 227, 255, 0.35); }
+html.cc27-auth .brand-eyebrow { color: var(--cc-cyan); }
+html.cc27-auth .brand-eyebrow::before { background: linear-gradient(90deg, var(--cc-cyan), var(--cc-gold)); }
+html.cc27-auth .brand-heading {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 0.98;
+  color: #f4f8ff;
+  text-shadow: 0 0 50px rgba(79, 227, 255, 0.16);
+}
+html.cc27-auth .brand-heading span {
+  color: transparent;
+  background: linear-gradient(100deg, var(--cc-gold-hi) 0%, var(--cc-gold) 45%, var(--cc-cyan) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter: drop-shadow(0 0 24px rgba(241, 199, 91, 0.3));
+}
+html.cc27-auth .brand-copy { color: var(--cc-muted); }
+html.cc27-auth .brand-feature {
+  border: 1px solid var(--cc-edge);
+  border-radius: var(--cc-radius);
+  background: linear-gradient(160deg, rgba(16, 24, 40, 0.7), rgba(7, 11, 21, 0.8));
+  box-shadow: var(--cc-shadow);
+}
+html.cc27-auth .brand-feature b { color: var(--cc-cyan); }
+html.cc27-auth .brand-feature span { color: var(--cc-muted); }
+
+html.cc27-auth .auth-stage { position: relative; display: grid; isolation: isolate; }
+html.cc27-auth .cc3d-orb--decor {
+  position: absolute;
+  z-index: -1;
+  left: 50%; top: 50%;
+  width: min(760px, 150%);
+  max-height: none;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0.85;
+}
+html.cc27-auth .auth-card {
+  border: 1px solid var(--cc-edge-hi);
+  border-radius: var(--cc-radius-lg);
+  background:
+    radial-gradient(420px 200px at 100% 0%, rgba(79, 227, 255, 0.10), transparent 70%),
+    linear-gradient(160deg, rgba(14, 22, 38, 0.78), rgba(5, 9, 18, 0.86));
+  -webkit-backdrop-filter: var(--cc-glass-blur);
+  backdrop-filter: var(--cc-glass-blur);
+  box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.95), 0 0 90px -30px rgba(79, 227, 255, 0.5);
+}
+html.cc27-auth .auth-card::before { background: linear-gradient(90deg, transparent, var(--cc-cyan), var(--cc-gold-hi), transparent); opacity: 0.9; }
+html.cc27-auth .auth-header,
+html.cc27-auth .login-footer { border-color: var(--cc-hairline); }
+html.cc27-auth .auth-status { color: var(--cc-cyan); }
+html.cc27-auth .auth-title { font-family: var(--font-display); font-size: 32px; font-weight: 700; letter-spacing: 0; color: #f4f8ff; }
+html.cc27-auth .login-input {
+  border: 1px solid rgba(130, 200, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(3, 7, 15, 0.72);
+  color: #eef4fb;
+}
+html.cc27-auth .login-input:hover { border-color: var(--cc-edge-hi); }
+html.cc27-auth .login-input:focus { border-color: var(--cc-cyan); background: rgba(3, 7, 15, 0.9); box-shadow: 0 0 0 3px rgba(79, 227, 255, 0.18), 0 0 24px -6px rgba(79, 227, 255, 0.6); }
+html.cc27-auth .remember-row input { accent-color: var(--cc-cyan); }
+html.cc27-auth .login-btn {
+  border-radius: 12px;
+  background: linear-gradient(120deg, var(--cc-gold-hi), var(--cc-gold) 50%, #c79432);
+  box-shadow: var(--cc-glow-gold);
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 0.18em;
+}
+html.cc27-auth .login-btn:hover { box-shadow: 0 0 0 1px rgba(241, 199, 91, 0.6), 0 14px 44px -10px rgba(241, 199, 91, 0.8); }
+html.cc27-auth .login-footer a { color: var(--cc-cyan); }
+/* Create-account page shares the sign-in treatment */
+html.cc27-auth .login-wrap { position: relative; z-index: 1; }
+html.cc27-auth .login-card {
+  border: 1px solid var(--cc-edge-hi) !important;
+  border-radius: var(--cc-radius-lg) !important;
+  background: linear-gradient(160deg, rgba(14, 22, 38, 0.8), rgba(5, 9, 18, 0.88)) !important;
+  -webkit-backdrop-filter: var(--cc-glass-blur);
+  backdrop-filter: var(--cc-glass-blur);
+  box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.95), 0 0 90px -30px rgba(79, 227, 255, 0.5) !important;
+}
+html.cc27-auth .login-card-dot { background: var(--cc-cyan) !important; box-shadow: 0 0 10px var(--cc-cyan) !important; }
+html.cc27-auth .login-brand-name { color: var(--cc-gold-hi) !important; text-shadow: 0 0 30px rgba(241, 199, 91, 0.35); }
+html.cc27-auth .login-brand-sub,
+html.cc27-auth .login-brand-line { color: var(--cc-cyan) !important; }
+@media (max-width: 900px) {
+  html.cc27-auth .cc3d-orb--decor { width: min(560px, 135vw); opacity: 0.6; }
+}
 
 /* ── Workflow rail ────────────────────────────────────────────── */
 html.cc27 .workspace-paths {
@@ -550,6 +721,19 @@ html.cc27 ::-webkit-scrollbar-track { background: transparent; }
   }
   html.cc27 .liq-page .elite-hero.has-orb > .cc3d-orb { justify-self: center; max-width: 320px; }
   html.cc27 .workspace-paths { padding: 8px; gap: 8px; }
+}
+@media (max-width: 768px) {
+  /* Phones: no floating AI button. It sat over content above the tab bar.
+     Ask AI stays in the desktop nav and on the AI Research Coach page. */
+  html.cc27 #ask-fab { display: none !important; }
+  html.cc27 .workspace-bar-actions { gap: 6px; }
+  html.cc27 .workspace-alerts { width: 34px; padding: 0; justify-content: center; }
+  html.cc27 .workspace-alerts-label { display: none; }
+  /* Phones: the freshness chip collapses to its dot (solid cyan = live,
+     dashed amber = stale) so the search field keeps its width. The words
+     stay in the accessible name and the title tooltip. */
+  html.cc27 .market-tape-freshness { width: 34px; padding: 0; justify-content: center; font-size: 0; letter-spacing: 0; overflow: hidden; }
+  html.cc27 .market-tape-freshness::before { width: 9px; height: 9px; }
 }
 @media (max-width: 640px) {
   /* Phones: the scene is quieter and glass drops its blur for battery. */
