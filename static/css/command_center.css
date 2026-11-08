@@ -20,14 +20,12 @@ html.cc27 {
   --cc-panel-solid: #0b111c;
   --cc-panel-raised: rgba(20, 28, 44, 0.72);
 
-  /* Page accent. Every section of the app has its own accent colour
-     (set by data-cc-theme on <html>, see below). Elite gold is the
-     default and the Account/sign-in colour. Cyan stays the constant
-     "AI / live system" colour on every page. */
-  --cc-accent: #f1c75b;
-  --cc-accent-hi: #ffe39a;
-  --cc-accent-deep: #b9862a;
-  --cc-accent-rgb: 241, 199, 91;
+  /* App accent: neon lime on every page. Cyan stays the constant
+     "AI / live system" colour. */
+  --cc-accent: #c4f53b;
+  --cc-accent-hi: #e8ffad;
+  --cc-accent-deep: #7fa819;
+  --cc-accent-rgb: 196, 245, 59;
   --cc-gold: var(--cc-accent);
   --cc-gold-hi: var(--cc-accent-hi);
   --cc-cyan: #4fe3ff;
@@ -77,16 +75,12 @@ html.cc27 {
 }
 
 
-/* ── Page colours ─────────────────────────────────────────────────
-   Each part of the app wears its own accent, so you always know where
-   you are. Red/green (price direction) and amber (caution / not fully
-   known) are never used as accents, so they keep their meaning.        */
-html.cc27[data-cc-theme="today"]      { --cc-accent: #a98bff; --cc-accent-hi: #d8cbff; --cc-accent-deep: #6b4fe0; --cc-accent-rgb: 169, 139, 255; }  /* Ultraviolet */
-html.cc27[data-cc-theme="terminal"]   { --cc-accent: #ff5cd6; --cc-accent-hi: #ffb6ee; --cc-accent-deep: #b52c95; --cc-accent-rgb: 255, 92, 214; }   /* Plasma magenta */
-html.cc27[data-cc-theme="watchlists"] { --cc-accent: #ff9a5c; --cc-accent-hi: #ffd0b0; --cc-accent-deep: #c9612a; --cc-accent-rgb: 255, 154, 92; }  /* Ember */
-html.cc27[data-cc-theme="research"]   { --cc-accent: #5b8cff; --cc-accent-hi: #b9cdff; --cc-accent-deep: #2f57d6; --cc-accent-rgb: 91, 140, 255; }   /* Electric blue */
-html.cc27[data-cc-theme="learn"]      { --cc-accent: #c4f53b; --cc-accent-hi: #e8ffad; --cc-accent-deep: #7fa819; --cc-accent-rgb: 196, 245, 59; }   /* Neon lime */
-html.cc27[data-cc-theme="account"]    { --cc-accent: #f1c75b; --cc-accent-hi: #ffe39a; --cc-accent-deep: #b9862a; --cc-accent-rgb: 241, 199, 91; }   /* Elite gold */
+/* ── Accent colour ────────────────────────────────────────────────
+   One accent across the whole app: neon lime (set above as --cc-accent).
+   Every brand-gold surface reads var(--cc-accent, <old gold>), so this one
+   value recolours them all. Price green/red, caution amber and the cyan
+   "AI / live" colour are separate and unchanged. <html data-cc-theme>
+   still names the section, so a per-page accent can return here later.  */
 
 /* ── The room ─────────────────────────────────────────────────── */
 html.cc27 body {
