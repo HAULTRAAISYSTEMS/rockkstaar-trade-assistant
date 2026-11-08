@@ -110,3 +110,15 @@ def test_research_shell_does_not_fetch_providers():
          patch.object(app, 'render_template', side_effect=lambda name, **kw: (name, kw)):
         with app.app.test_request_context('/research?ticker=ISRG'):
             assert app.research_page() == ('research_workbench.html', {'ticker': 'ISRG'})
+
+
+def test_research_technical_tab_links_to_canonical_profile():
+    from flask import render_template, session
+    import web_app
+    with web_app.app.test_request_context('/research?ticker=PLTR'):
+        session.update(user_id=7, username='researcher', is_admin=0)
+        html = render_template('research_workbench.html', ticker='PLTR')
+        assert 'data-tab="technical"' in html
+        assert 'id="lab-technical"' in html
+        assert 'BLOCKED' in html
+        assert '/stock/PLTR' in html or 'technical analysis' in html
