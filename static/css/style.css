@@ -12,8 +12,8 @@
      ═══════════════════════════════════════════════════════════════ */
 
   /* Compatibility names retained; values now form the Elite gold palette. */
-  --orange-300:#FFE7A3; --orange-400:#F3D37A; --orange-500:#E5B94F;
-  --orange-600:#C9962F; --orange-700:#8C6319; --amber-glow:#F3D37A;
+  --orange-300:var(--cc-accent-hi, #FFE7A3); --orange-400:var(--cc-accent-hi, #F3D37A); --orange-500:var(--cc-accent, #E5B94F);
+  --orange-600:var(--cc-accent-deep, #C9962F); --orange-700:var(--cc-accent-deep, #8C6319); --amber-glow:var(--cc-accent-hi, #F3D37A);
 
   /* Neutral ramp — cool industrial darks */
   --ink-900:#060708; --ink-850:#0B0D10; --ink-800:#101318; --ink-750:#161A20;
@@ -81,9 +81,9 @@
   --pos:var(--pos-500); --neg:var(--neg-500); --warn:var(--warn-500); --info:var(--info-500);
 
   /* Signature gradient (the cube mark) */
-  --grad-brand:linear-gradient(145deg,#FFE7A3 0%,#E5B94F 48%,#A87520 100%);
-  --grad-brand-soft:linear-gradient(145deg,rgba(229,185,79,.17) 0%,rgba(140,99,25,.10) 100%);
-  --glow-accent:0 0 0 1px rgba(229,185,79,.30),0 8px 30px -10px rgba(229,185,79,.34);
+  --grad-brand:linear-gradient(145deg,var(--cc-accent-hi, #FFE7A3) 0%,var(--cc-accent, #E5B94F) 48%,var(--cc-accent-deep, #A87520) 100%);
+  --grad-brand-soft:linear-gradient(145deg,rgba(var(--cc-accent-rgb, 229,185,79),.17) 0%,rgba(140,99,25,.10) 100%);
+  --glow-accent:0 0 0 1px rgba(var(--cc-accent-rgb, 229,185,79),.30),0 8px 30px -10px rgba(var(--cc-accent-rgb, 229,185,79),.34);
 
   /* Type */
   --font-display:'Rajdhani','Chakra Petch',system-ui,sans-serif;
@@ -139,7 +139,7 @@
   --brand-blue:  var(--orange-500);
   --brand-cyan:  var(--orange-400);
   --accent:      var(--orange-500);
-  --accent-glow: rgba(229, 185, 79, 0.18);
+  --accent-glow: rgba(var(--cc-accent-rgb, 229, 185, 79), 0.18);
 
   /* Shape & type */
   --radius:      var(--r-sm);
@@ -152,7 +152,7 @@ html {
   font-size: 14px;
   background-color: #060708;
   background:
-    radial-gradient(ellipse at top left,rgba(229,185,79,.08),transparent 32%),
+    radial-gradient(ellipse at top left,rgba(var(--cc-accent-rgb, 229,185,79),.08),transparent 32%),
     radial-gradient(ellipse at top right,rgba(243,211,122,.04),transparent 28%),
     linear-gradient(180deg, #0B0D10 0%, #060708 100%);
   background-repeat: no-repeat;
@@ -175,7 +175,7 @@ html {
 body {
   background-color: #060708;
   background:
-    radial-gradient(ellipse at top left,rgba(229,185,79,.08),transparent 32%),
+    radial-gradient(ellipse at top left,rgba(var(--cc-accent-rgb, 229,185,79),.08),transparent 32%),
     radial-gradient(ellipse at top right,rgba(243,211,122,.04),transparent 28%),
     linear-gradient(180deg, #0B0D10 0%, #060708 100%);
   background-size: cover;
@@ -5357,8 +5357,8 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
 .app-preferences-card {
   position: relative;
   overflow: hidden;
-  border-color: rgba(214,166,63,.30);
-  background: radial-gradient(circle at 92% 0%, rgba(214,166,63,.13), transparent 34%), var(--surface-card);
+  border-color: rgba(var(--cc-accent-rgb, 214,166,63),.30);
+  background: radial-gradient(circle at 92% 0%, rgba(var(--cc-accent-rgb, 214,166,63),.13), transparent 34%), var(--surface-card);
 }
 .app-preferences-card::before {
   content: "";
@@ -5366,7 +5366,7 @@ img, svg, canvas, video { max-width: 100%; height: auto; }
   inset: 0 auto 0 0;
   width: 3px;
   background: linear-gradient(180deg, #f5d477, #a87216);
-  box-shadow: 0 0 18px rgba(214,166,63,.45);
+  box-shadow: 0 0 18px rgba(var(--cc-accent-rgb, 214,166,63),.45);
 }
 .app-preferences-grid {
   display: grid;

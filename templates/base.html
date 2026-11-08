@@ -1,5 +1,13 @@
 <!DOCTYPE html>
-<html lang="en" class="cc27">
+{%- set _ep = request.endpoint or '' -%}
+{%- if _ep in ('liquidity_page', 'macro_page') -%}{% set cc_theme = 'today' %}
+{%- elif _ep in ('terminal', 'dashboard', 'quick_mode') -%}{% set cc_theme = 'terminal' %}
+{%- elif _ep == 'watchlists_page' -%}{% set cc_theme = 'watchlists' %}
+{%- elif _ep in ('learn_index', 'learn_concept', 'learn_paths', 'learn_path', 'learn_review', 'tradestaar_ai') -%}{% set cc_theme = 'learn' %}
+{%- elif _ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'schwab_account', 'brokers_page', 'browser_push.settings', 'admin_users') -%}{% set cc_theme = 'account' %}
+{%- elif _ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare', 'intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'thesis_view') or _ep.startswith(('live_research.', 'research_memory.', 'research_lab', 'research_workbench')) -%}{% set cc_theme = 'research' %}
+{%- else -%}{% set cc_theme = 'account' %}{%- endif %}
+<html lang="en" class="cc27" data-cc-theme="{{ cc_theme }}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />

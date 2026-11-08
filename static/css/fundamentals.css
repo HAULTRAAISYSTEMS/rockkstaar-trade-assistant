@@ -1,7 +1,7 @@
 /* Tradestaar Elite Fundamentals — page layout built on shared Elite tokens. */
 .fundamentals-shell {
-  --fund-gold-soft: rgba(229, 185, 79, .08);
-  --fund-gold-line: rgba(229, 185, 79, .22);
+  --fund-gold-soft: rgba(var(--cc-accent-rgb, 229, 185, 79), .08);
+  --fund-gold-line: rgba(var(--cc-accent-rgb, 229, 185, 79), .22);
   --fund-on-gold: #171006;   /* ink that sits on a gold fill */
   --fund-panel: linear-gradient(145deg, rgba(23, 27, 33, .96), rgba(11, 13, 16, .98));
   width: 100%;
@@ -22,7 +22,7 @@
   border: 1px solid var(--elite-border-strong);
   border-radius: 20px;
   background:
-    radial-gradient(circle at 88% 8%, rgba(229, 185, 79, .18), transparent 34%),
+    radial-gradient(circle at 88% 8%, rgba(var(--cc-accent-rgb, 229, 185, 79), .18), transparent 34%),
     linear-gradient(135deg, #11151a 0%, #090b0e 62%, #151109 100%);
   box-shadow: var(--elite-shadow);
 }
@@ -110,7 +110,7 @@
   color: #171006;
   border-color: var(--elite-gold);
   background: linear-gradient(145deg, var(--elite-gold-bright), var(--elite-gold) 55%, var(--elite-gold-deep));
-  box-shadow: 0 7px 20px -12px rgba(229, 185, 79, .7);
+  box-shadow: 0 7px 20px -12px rgba(var(--cc-accent-rgb, 229, 185, 79), .7);
 }
 
 .fundamentals-shell .tab-pane { min-width: 0; }
@@ -149,7 +149,7 @@
   border-radius: var(--elite-radius-sm);
   color: #171006;
   background: linear-gradient(145deg, var(--elite-gold-bright), var(--elite-gold) 55%, var(--elite-gold-deep));
-  box-shadow: 0 8px 22px -12px rgba(229,185,79,.7);
+  box-shadow: 0 8px 22px -12px rgba(var(--cc-accent-rgb, 229,185,79),.7);
   font: 700 11px var(--font-ui);
   letter-spacing: .1em;
   text-transform: uppercase;
@@ -216,7 +216,7 @@
   border: 1px solid var(--elite-border-strong);
   border-radius: var(--elite-radius-lg);
   background:
-    linear-gradient(90deg, rgba(229, 185, 79, .10), transparent 32%),
+    linear-gradient(90deg, rgba(var(--cc-accent-rgb, 229, 185, 79), .10), transparent 32%),
     var(--fund-panel);
   box-shadow: var(--elite-shadow);
 }
@@ -259,7 +259,7 @@
 .fundamentals-shell .verdict-meta { margin-top: 2px; color: var(--elite-faint); font: 500 10px var(--font-mono); }
 .fundamentals-shell .score-bar-bg { height: 6px; overflow: hidden; border-radius: 999px; background: var(--elite-panel-inset); }
 .fundamentals-shell .score-bar-label { margin: 0 0 6px; }
-.fundamentals-shell .score-bar-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--elite-gold-deep), var(--elite-gold-bright)); box-shadow: 0 0 14px rgba(229,185,79,.34); }
+.fundamentals-shell .score-bar-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--elite-gold-deep), var(--elite-gold-bright)); box-shadow: 0 0 14px rgba(var(--cc-accent-rgb, 229,185,79),.34); }
 
 .fundamentals-shell .red-flags { display: grid; gap: 8px; margin-bottom: 16px; }
 .fundamentals-shell .red-flag-item { display: flex; gap: 10px; align-items: flex-start; padding: 11px 14px; font-size: 12px; }
@@ -310,7 +310,7 @@
 
 .fundamentals-shell .metric-row { padding: 12px 17px; border-bottom: 1px solid var(--elite-hairline); }
 .fundamentals-shell .metric-row:last-child { border-bottom: 0; }
-.fundamentals-shell .metric-row:hover { background: rgba(229,185,79,.025); }
+.fundamentals-shell .metric-row:hover { background: rgba(var(--cc-accent-rgb, 229,185,79),.025); }
 .fundamentals-shell .metric-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .fundamentals-shell .metric-left,
 .fundamentals-shell .metric-data { display: flex; align-items: center; gap: 10px; }
@@ -969,9 +969,9 @@
 .fundamentals-shell .qd-id input:focus {
   outline: none;
   border-color: var(--elite-gold);
-  box-shadow: 0 0 0 3px rgba(229, 185, 79, .12);
+  box-shadow: 0 0 0 3px rgba(var(--cc-accent-rgb, 229, 185, 79), .12);
 }
-.fundamentals-shell .qd-form input.qd-filled { border-color: rgba(229, 185, 79, .32); }
+.fundamentals-shell .qd-form input.qd-filled { border-color: rgba(var(--cc-accent-rgb, 229, 185, 79), .32); }
 
 .fundamentals-shell .qd-id {
   display: grid;
@@ -1049,7 +1049,7 @@
   color: var(--fund-on-gold);
   border: 1px solid var(--elite-gold);
   background: linear-gradient(145deg, var(--elite-gold-bright), var(--elite-gold) 55%, var(--elite-gold-deep));
-  box-shadow: 0 7px 20px -12px rgba(229, 185, 79, .7);
+  box-shadow: 0 7px 20px -12px rgba(var(--cc-accent-rgb, 229, 185, 79), .7);
 }
 .fundamentals-shell .qd-ghost {
   color: var(--elite-muted);
@@ -1145,7 +1145,7 @@
   color: var(--elite-muted);
   font: 400 12px/1.65 var(--font-ui);
 }
-.fundamentals-shell .qd-says a { color: var(--elite-gold); text-decoration: none; border-bottom: 1px solid rgba(229,185,79,.3); }
+.fundamentals-shell .qd-says a { color: var(--elite-gold); text-decoration: none; border-bottom: 1px solid rgba(var(--cc-accent-rgb, 229,185,79),.3); }
 .fundamentals-shell .qd-says a:hover { color: var(--elite-gold-bright); }
 .fundamentals-shell .qd-skipped {
   margin: 6px 0 0;
@@ -1406,8 +1406,8 @@
 .fundamentals-shell .qd-item.is-na .qd-name { color: var(--elite-muted); }
 .fundamentals-shell .qd-badge.qd-na-badge {
   color: var(--elite-gold);
-  border-color: rgba(229, 185, 79, .28);
-  background: rgba(229, 185, 79, .09);
+  border-color: rgba(var(--cc-accent-rgb, 229, 185, 79), .28);
+  background: rgba(var(--cc-accent-rgb, 229, 185, 79), .09);
   margin-left: 0;
 }
 
@@ -1527,5 +1527,5 @@
 .fundamentals-shell .qd-why-foot a {
   color: var(--elite-gold);
   text-decoration: none;
-  border-bottom: 1px solid rgba(229, 185, 79, .3);
+  border-bottom: 1px solid rgba(var(--cc-accent-rgb, 229, 185, 79), .3);
 }
