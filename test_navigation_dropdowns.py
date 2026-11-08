@@ -34,11 +34,12 @@ def test_navigation_script_closes_sibling_and_outside_menus():
 
 def test_mobile_research_learn_and_account_open_menu_sheets():
     template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
-    for menu_id in ("mobile-research-menu", "mobile-learn-menu", "mobile-account-menu"):
+    for menu_id in ("mobile-terminal-menu", "mobile-research-menu", "mobile-learn-menu", "mobile-account-menu"):
         assert f'aria-controls="{menu_id}"' in template
         assert f'data-mobile-menu="{menu_id}"' in template
         assert f'id="{menu_id}" hidden' in template
-    assert template.count("mobile-app-nav__menu-trigger") == 3
+    # Terminal opens a sheet too (Terminal, Setups Board, Watchlists & Alerts).
+    assert template.count("mobile-app-nav__menu-trigger") == 4
     assert "Company Research" in template
     assert template.count("<strong>Seven Checks</strong>") == 2
     assert template.count("url_for('fundamentals_page', tab='quarter')") == 2
@@ -54,3 +55,14 @@ def test_mobile_menu_sheets_are_usable_and_mutually_exclusive():
     assert 'event.target.closest(".mobile-app-nav__group")' in script
     assert ".mobile-app-menu[hidden] { display: none !important; }" in css
     assert "bottom: calc(73px + env(safe-area-inset-bottom, 0px));" in css
+
+
+def test_watchlists_live_under_terminal_on_desktop_and_phone():
+    """Watchlists moved off the top level: the lists feed the Terminal rail,
+    the setups board and alerts, so they sit in the Terminal menu."""
+    template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
+    assert '<details class="nav-menu nav-menu--split">' in template
+    assert template.count("url_for('watchlists_page')") == 2   # desktop + phone menus
+    assert 'class="nav-link {{ \'nav-link-active\' if ep == \'watchlists_page\' }}">Watchlists</a>' not in template
+    # Five phone tabs: Today, then Terminal, Research, Learn, Account sheets.
+    assert template.count('class="mobile-app-nav__item') == 5
