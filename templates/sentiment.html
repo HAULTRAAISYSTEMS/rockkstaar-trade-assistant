@@ -2,16 +2,16 @@
 {% block title %}News Sentiment — Tradestaar Elite{% endblock %}
 {% block head_extra %}
 <style>
-  .sent-hero{padding:22px;border:1px solid rgba(240,181,63,.3);border-radius:var(--r-lg);background:radial-gradient(circle at 85% 5%,rgba(240,181,63,.14),transparent 35%),#090a0c}
-  .sent-title{font:700 clamp(29px,5vw,46px)/.98 var(--font-display);text-transform:uppercase;color:#f6f1e7}.sent-title em{color:#f0b53f;font-style:normal}
+  .sent-hero{padding:22px;border:1px solid rgba(var(--cc-accent-rgb, 240,181,63),.3);border-radius:var(--r-lg);background:radial-gradient(circle at 85% 5%,rgba(var(--cc-accent-rgb, 240,181,63),.14),transparent 35%),#090a0c}
+  .sent-title{font:700 clamp(29px,5vw,46px)/.98 var(--font-display);text-transform:uppercase;color:#f6f1e7}.sent-title em{color:var(--cc-accent, #f0b53f);font-style:normal}
   .sent-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}.sent-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
   .sent-kpi{padding:15px;border:1px solid var(--border-subtle);border-radius:10px;background:#0b0d0f}.sent-kpi strong{display:block;margin-top:5px;font:700 24px var(--font-mono)}
   .sent-row{display:grid;grid-template-columns:65px 1fr auto;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid var(--border-subtle)}.sent-row:last-child{border:0}
-  .sent-meter{height:6px;background:var(--ink-700);border-radius:8px;overflow:hidden}.sent-meter i{display:block;height:100%;background:#f0b53f}
+  .sent-meter{height:6px;background:var(--ink-700);border-radius:8px;overflow:hidden}.sent-meter i{display:block;height:100%;background:var(--cc-accent, #f0b53f)}
   .sent-article{padding:14px 0;border-bottom:1px solid var(--border-subtle)}.sent-article:last-child{border:0}
   .sent-head{display:flex;justify-content:space-between;gap:10px;color:var(--text-primary);font-weight:600;line-height:1.4}
-  .sent-ticker{font:700 14px var(--font-mono);color:#f0b53f;text-decoration:none}
-  .social-state{padding:18px;border:1px dashed rgba(240,181,63,.35);border-radius:10px;background:rgba(240,181,63,.035)}
+  .sent-ticker{font:700 14px var(--font-mono);color:var(--cc-accent, #f0b53f);text-decoration:none}
+  .social-state{padding:18px;border:1px dashed rgba(var(--cc-accent-rgb, 240,181,63),.35);border-radius:10px;background:rgba(var(--cc-accent-rgb, 240,181,63),.035)}
   @media(max-width:800px){.sent-grid{grid-template-columns:1fr}.sent-kpis{grid-template-columns:1fr 1fr}.sent-kpi:last-child{grid-column:1/-1}.sent-row{grid-template-columns:58px 1fr}}
 </style>
 {% endblock %}

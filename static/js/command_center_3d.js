@@ -33,7 +33,11 @@
   function rgba(rgb, a) { return 'rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',' + a + ')'; }
 
   var CYAN = [79, 227, 255];
-  var GOLD = [241, 199, 91];
+  // The page accent (each section of the app has its own colour).
+  var GOLD = (function () {
+    var v = cssVar('--cc-accent-rgb', '241, 199, 91').split(',').map(function (x) { return parseInt(x, 10); });
+    return v.length === 3 && v.every(isFinite) ? v : [241, 199, 91];
+  })();
   var VIOLET = [139, 124, 255];
   var POS = hexToRgb(cssVar('--pos-500', '#22C58B')) || [34, 197, 139];
   var NEG = hexToRgb(cssVar('--neg-500', '#FF4D45')) || [255, 77, 69];
@@ -282,7 +286,7 @@
     function draw(time, dt) {
       if (!dragging && !reduceMotion) { rotY += velY * dt; velY += (0.18 - velY) * 0.02; }
       ctx.clearRect(0, 0, W, H);
-      var R = Math.min(W, H) * 0.30;
+      var R = Math.min(W, H) * 0.29;
       var cx = W / 2 + pointer.x * 6, cy = H * 0.47 + pointer.y * 6;
 
       // Core glow
@@ -346,11 +350,21 @@
         var mag = nd.chg == null ? 0 : Math.min(Math.abs(nd.chg), 6) / 6;
         var col = nd.chg == null ? FLAT : (nd.chg > 0 ? POS : (nd.chg < 0 ? NEG : FLAT));
         var base = project(nd.x, nd.y, nd.z, R, cx, cy);
-        var k = 1 + 0.08 + mag * 0.42;
+        var k = 1 + 0.06 + mag * 0.30;
         var tip = project(nd.x * k, nd.y * k, nd.z * k, R, cx, cy);
         drawn.push([base, tip, nd, col, mag]);
       }
       drawn.sort(function (a, b) { return a[1][2] - b[1][2]; });
+      // A crowded globe labels only its biggest movers on the near side,
+      // so names never pile on top of each other. Every node still draws.
+      var labelSet = null;
+      if (drawn.length > 16) {
+        labelSet = {};
+        drawn.filter(function (it) { return it[1][2] > 0.15 && it[2].chg != null; })
+          .sort(function (a, b) { return Math.abs(b[2].chg) - Math.abs(a[2].chg); })
+          .slice(0, 12)
+          .forEach(function (it) { labelSet[it[2].symbol] = 1; });
+      }
       ctx.font = '600 10px "IBM Plex Mono", ui-monospace, monospace';
       ctx.textBaseline = 'middle';
       for (var d = 0; d < drawn.length; d++) {
@@ -364,7 +378,7 @@
         ctx.shadowColor = rgba(it[3], 0.9 * A); ctx.shadowBlur = front ? 10 + it[2].flash * 20 : 0;
         ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad, 0, 6.2832); ctx.fill();
         ctx.shadowBlur = 0;
-        if (front && it[1][2] > 0.15) {
+        if (front && it[1][2] > 0.15 && (!labelSet || labelSet[it[2].symbol])) {
           var label = it[2].symbol + (it[2].chg != null ? ' ' + (it[2].chg >= 0 ? '+' : '') + Number(it[2].chg).toFixed(2) + '%' : '');
           var lx2 = it[1][0] + 7, ly2 = it[1][1];
           var tw = ctx.measureText(label).width;
@@ -383,7 +397,7 @@
   /* ─────────────────────────── 3. Tilt ─────────────────────────── */
   function initTilt() {
     if (!finePointer || reduceMotion) return;
-    var SEL = '.liq-page .cc-card, .workspace-paths a, .hx .stat, .risk-stat-card, .schwab-bal-card, .learn-card, .cc-pulse-cell';
+    var SEL = '.liq-page .cc-card, .workspace-paths a, .hx .stat, .risk-stat-card, .schwab-bal-card, .learn-card';
     var active = null, timer = 0;
     function release(el) {
       el.style.removeProperty('--cc-rx'); el.style.removeProperty('--cc-ry');
