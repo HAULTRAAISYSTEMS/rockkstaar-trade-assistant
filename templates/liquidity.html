@@ -26,7 +26,11 @@
     {# Live market globe. Every node is a symbol already on the market tape;
        it repaints when the tape's own poll lands, and says so when it has
        nothing to show rather than inventing a reading. #}
-    <div class="cc3d-orb is-waiting" data-cc3d-orb role="img" aria-label="3D market globe of the symbols on the live market tape. Green spikes are advancing, red are declining; spike length is the size of the move. Drag to rotate.">
+    <div class="cc3d-orb is-waiting" data-cc3d-orb
+         data-chart-url="{{ url_for('stock_detail', ticker='__T__') }}"
+         data-research-url="{{ url_for('research_page', ticker='__T__') }}"
+         data-watch-url="{{ url_for('watchlist_add') }}"
+         role="group" aria-label="3D market globe of the symbols on the live market tape. Green spikes are advancing, red are declining; spike length is the size of the move. Drag to rotate; tap a ticker for its chart and fundamentals.">
       <span class="cc3d-hud-title" aria-hidden="true">Live Market Globe</span>
       <canvas aria-hidden="true"></canvas>
       <div class="cc3d-hud" data-cc3d-hud aria-live="off"><span>Status <b>Awaiting live quotes</b></span></div>

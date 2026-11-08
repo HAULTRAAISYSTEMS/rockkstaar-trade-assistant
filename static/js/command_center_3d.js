@@ -219,6 +219,7 @@
       host.classList.toggle('is-waiting', !known.length);
       if (known.length) lastSync = Date.now();
       renderHud(known);
+      if (selected) { if (nodeFor(selected)) renderCard(); else closeCard(); }
       if (reduceMotion && ctx) draw(0, 0);
     }
 
@@ -261,18 +262,138 @@
       document.addEventListener('tradestaar:tape', function (e) { setData(e.detail); });
     }
 
-    // Drag to spin, with inertia (data globes only)
-    if (!decor) host.addEventListener('pointerdown', function (e) { dragging = true; lx = e.clientX; ly = e.clientY; velY = 0; host.setPointerCapture && host.setPointerCapture(e.pointerId); });
-    host.addEventListener('pointermove', function (e) {
-      if (!dragging) return;
-      var dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
-      rotY += dx * 0.008; rotX = Math.max(-1.1, Math.min(1.1, rotX + dy * 0.006));
-      velY = dx * 0.4;
+    // ── Interaction: drag spins; a tap (barely moves) picks a ticker ──
+    var hits = [];            // screen positions of near-side nodes, rebuilt every frame
+    var hovered = null, selected = null;
+    var downX = 0, downY = 0, downT = 0, moved = 0;
+    var card = decor ? null : buildCard();
+
+    function nearest(clientX, clientY, radius) {
+      var r = canvas.getBoundingClientRect();
+      var x = clientX - r.left, y = clientY - r.top, best = null, bestD = radius * radius;
+      for (var i = 0; i < hits.length; i++) {
+        var dx = hits[i].x - x, dy = hits[i].y - y, d2 = dx * dx + dy * dy;
+        if (d2 < bestD) { bestD = d2; best = hits[i]; }
+      }
+      return best;
+    }
+
+    if (!decor) {
+      host.addEventListener('pointerdown', function (e) {
+        if (e.target.closest('.cc3d-card')) return;
+        dragging = true; lx = downX = e.clientX; ly = downY = e.clientY; downT = Date.now(); moved = 0;
+        host.setPointerCapture && host.setPointerCapture(e.pointerId);
+      });
+      host.addEventListener('pointermove', function (e) {
+        if (!dragging) {
+          if (e.pointerType === 'mouse') {
+            var h = nearest(e.clientX, e.clientY, 16);
+            hovered = h ? h.symbol : null;
+            canvas.style.cursor = h ? 'pointer' : '';
+            if (reduceMotion) draw(0, 0);
+          }
+          return;
+        }
+        var dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
+        moved += Math.abs(dx) + Math.abs(dy);
+        if (moved < 6) return;              // still a tap, not a drag
+        if (selected) closeCard();
+        rotY += dx * 0.008; rotX = Math.max(-1.1, Math.min(1.1, rotX + dy * 0.006));
+        velY = dx * 0.4;
+        if (reduceMotion) draw(0, 0);
+      });
+      host.addEventListener('pointerup', function (e) {
+        if (e.target.closest('.cc3d-card')) return;
+        var wasTap = dragging && moved < 6 && Date.now() - downT < 600;
+        dragging = false;
+        if (wasTap) {
+          var h = nearest(e.clientX, e.clientY, e.pointerType === 'mouse' ? 16 : 26);
+          if (h) openCard(h.symbol); else closeCard();
+        } else if (!selected && !reduceMotion && Math.abs(velY) < 0.12) velY = 0.18;
+      });
+      host.addEventListener('pointercancel', function () { dragging = false; });
+      host.addEventListener('pointerleave', function () { hovered = null; canvas.style.cursor = ''; });
+      document.addEventListener('pointerdown', function (e) { if (selected && !host.contains(e.target)) closeCard(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && selected) closeCard(); });
+    }
+
+    // ── The ticker card ──
+    function buildCard() {
+      var el = document.createElement('div');
+      el.className = 'cc3d-card';
+      el.hidden = true;
+      el.setAttribute('role', 'dialog');
+      el.setAttribute('aria-label', 'Ticker actions');
+      host.appendChild(el);
+      return el;
+    }
+    function nodeFor(sym) { for (var i = 0; i < nodes.length; i++) if (nodes[i].symbol === sym) return nodes[i]; return null; }
+    function urlFor(tpl, sym) { return (tpl || '').replace('__T__', encodeURIComponent(sym)); }
+    function renderCard() {
+      var nd = selected && nodeFor(selected);
+      if (!card || !nd) return;
+      card.replaceChildren();
+      var head = document.createElement('div'); head.className = 'cc3d-card__head';
+      var sym = document.createElement('strong'); sym.textContent = nd.symbol;
+      var close = document.createElement('button'); close.type = 'button'; close.className = 'cc3d-card__close';
+      close.setAttribute('aria-label', 'Close'); close.textContent = '×';
+      close.addEventListener('click', closeCard);
+      head.append(sym, close);
+      var quote = document.createElement('div'); quote.className = 'cc3d-card__quote';
+      var px = document.createElement('span'); px.className = 'cc3d-card__px';
+      px.textContent = nd.price != null ? Number(nd.price).toFixed(2) : '—';
+      var ch = document.createElement('span');
+      ch.className = 'cc3d-card__chg ' + (nd.chg == null ? 'is-unknown' : (nd.chg > 0 ? 'is-up' : (nd.chg < 0 ? 'is-down' : '')));
+      ch.textContent = nd.chg != null ? (nd.chg >= 0 ? '+' : '') + Number(nd.chg).toFixed(2) + '%' : '—';
+      quote.append(px, ch);
+      var src = document.createElement('small'); src.className = 'cc3d-card__src';
+      src.textContent = 'From the live tape' + (lastSync ? ' · synced ' + new Date(lastSync).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+      var acts = document.createElement('div'); acts.className = 'cc3d-card__actions';
+      function link(label, href, primary) {
+        var a = document.createElement('a'); a.href = href; a.textContent = label;
+        a.className = 'cc3d-card__btn' + (primary ? ' is-primary' : '');
+        acts.appendChild(a);
+      }
+      link('Chart', urlFor(host.dataset.chartUrl, nd.symbol), true);
+      link('Fundamentals', urlFor(host.dataset.researchUrl, nd.symbol), false);
+      if (host.dataset.watchUrl) {
+        var f = document.createElement('form'); f.method = 'post'; f.action = host.dataset.watchUrl; f.className = 'cc3d-card__form';
+        function hidden(n, v) { var i = document.createElement('input'); i.type = 'hidden'; i.name = n; i.value = v; f.appendChild(i); }
+        var tok = document.querySelector('meta[name="csrf-token"]');
+        hidden('csrf_token', tok ? tok.content : '');
+        hidden('tickers', nd.symbol);
+        hidden('next', location.pathname + location.search);
+        var b = document.createElement('button'); b.type = 'submit'; b.className = 'cc3d-card__btn'; b.textContent = '+ Watchlist';
+        b.title = 'Add ' + nd.symbol + ' to your active watchlist';
+        f.appendChild(b); acts.appendChild(f);
+      }
+      card.append(head, quote, src, acts);
+    }
+    function placeCard() {
+      if (!card || card.hidden || !selected) return;
+      if (window.matchMedia('(max-width: 640px)').matches) { card.style.left = ''; card.style.top = ''; card.classList.add('is-sheet'); return; }
+      card.classList.remove('is-sheet');
+      var h = null; for (var i = 0; i < hits.length; i++) if (hits[i].symbol === selected) h = hits[i];
+      if (!h) return;
+      var cw = card.offsetWidth || 220, chh = card.offsetHeight || 150;
+      var x = h.x + 18, y = h.y - chh / 2;
+      if (x + cw > W) x = h.x - 18 - cw;
+      card.style.left = Math.max(0, Math.min(W - cw, x)) + 'px';
+      card.style.top = Math.max(0, Math.min(H - chh, y)) + 'px';
+    }
+    function openCard(sym) {
+      selected = sym; velY = 0;
+      host.classList.add('has-selection');
+      renderCard(); card.hidden = false; placeCard();
+      var first = card.querySelector('.cc3d-card__btn'); if (first && document.activeElement !== first && finePointer) first.focus({ preventScroll: true });
       if (reduceMotion) draw(0, 0);
-    });
-    function endDrag() { dragging = false; if (!reduceMotion && Math.abs(velY) < 0.12) velY = 0.18; }
-    host.addEventListener('pointerup', endDrag);
-    host.addEventListener('pointercancel', endDrag);
+    }
+    function closeCard() {
+      if (!selected) return;
+      selected = null; if (card) card.hidden = true;
+      host.classList.remove('has-selection');
+      if (!reduceMotion) velY = 0.18; else draw(0, 0);
+    }
 
     function project(x, y, z, R, cx, cy) {
       // rotate Y then X
@@ -284,7 +405,7 @@
     }
 
     function draw(time, dt) {
-      if (!dragging && !reduceMotion) { rotY += velY * dt; velY += (0.18 - velY) * 0.02; }
+      if (!dragging && !reduceMotion) { rotY += velY * dt; velY += ((selected ? 0 : 0.18) - velY) * (selected ? 0.2 : 0.02); }
       ctx.clearRect(0, 0, W, H);
       var R = Math.min(W, H) * 0.29;
       var cx = W / 2 + pointer.x * 6, cy = H * 0.47 + pointer.y * 6;
@@ -367,8 +488,12 @@
       }
       ctx.font = '600 10px "IBM Plex Mono", ui-monospace, monospace';
       ctx.textBaseline = 'middle';
+      hits = [];
       for (var d = 0; d < drawn.length; d++) {
         var it = drawn[d], front = it[1][2] > -0.1, A = front ? 1 : 0.25;
+        var isSel = selected === it[2].symbol, isHov = hovered === it[2].symbol;
+        if (selected && !isSel) A *= 0.45;
+        if (front && it[1][2] > 0) hits.push({ symbol: it[2].symbol, x: it[1][0], y: it[1][1] });
         it[2].flash = Math.max(0, it[2].flash - dt * 0.6);
         ctx.strokeStyle = rgba(it[3], 0.75 * A);
         ctx.lineWidth = 1.4;
@@ -376,9 +501,14 @@
         var rad = (2 + it[4] * 2.5) * it[1][3];
         ctx.fillStyle = rgba(it[3], A);
         ctx.shadowColor = rgba(it[3], 0.9 * A); ctx.shadowBlur = front ? 10 + it[2].flash * 20 : 0;
-        ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad, 0, 6.2832); ctx.fill();
+        ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad * (isSel || isHov ? 1.8 : 1), 0, 6.2832); ctx.fill();
         ctx.shadowBlur = 0;
-        if (front && it[1][2] > 0.15 && (!labelSet || labelSet[it[2].symbol])) {
+        if (isSel) {
+          var pr = rad * 2.6 + 4 + Math.sin(time * 4) * 2;
+          ctx.strokeStyle = rgba(GOLD, 0.95); ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(it[1][0], it[1][1], pr, 0, 6.2832); ctx.stroke();
+        }
+        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && (!labelSet || labelSet[it[2].symbol])))) {
           var label = it[2].symbol + (it[2].chg != null ? ' ' + (it[2].chg >= 0 ? '+' : '') + Number(it[2].chg).toFixed(2) + '%' : '');
           var lx2 = it[1][0] + 7, ly2 = it[1][1];
           var tw = ctx.measureText(label).width;
@@ -390,6 +520,7 @@
         }
       }
     }
+    tasks.push(function () { placeCard(); });
     tasks.push(draw);
     draw(0, 0);
   }
