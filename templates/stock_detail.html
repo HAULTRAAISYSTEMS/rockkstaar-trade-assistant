@@ -97,13 +97,14 @@
   </div>
 
   <!-- ===== COMPANY OVERVIEW ===== -->
-  <div id="company-overview-card" class="detail-card company-overview-card" style="display:none; margin-bottom: 1rem;">
+  <div id="company-overview-card" class="detail-card company-overview-card" style="margin-bottom: 1rem;">
     <h3 class="card-title">Company Overview</h3>
     <div class="co-meta-row">
       <span id="co-name" class="co-name"></span>
       <span id="co-sector-chip" class="co-chip co-chip-sector" style="display:none;"></span>
       <span id="co-industry-chip" class="co-chip co-chip-industry" style="display:none;"></span>
     </div>
+    {% with market_cap_ticker=stock.ticker %}{% include '_company_market_cap.html' %}{% endwith %}
     <div id="co-description" class="co-description"></div>
   </div>
 

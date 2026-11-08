@@ -51,3 +51,10 @@ test('workspace renders independently loaded sources and escapes provider text',
  assert.doesNotMatch(element('lab-brief-content').innerHTML,/<img/);
  assert.match(element('lab-earnings-content').innerHTML,/2/);
 });
+test('company overview formats capitalization without relabeling foreign currency',()=>{
+ const {formatCap}=require('../../static/js/company_market_cap.js');
+ assert.equal(formatCap(200e9,'USD'),'$200B USD');
+ assert.equal(formatCap(61.8e12,'TWD'),'61.8T TWD');
+ assert.equal(formatCap(null,'USD'),'Unavailable');
+ assert.equal(formatCap(Infinity,'USD'),'Unavailable');
+});
