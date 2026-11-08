@@ -8,7 +8,7 @@
        The title used to sit below a 400px banner, so the page opened on a
        narrative and named itself second. It is first now, and the whole
        header is one band rather than a card of its own. -->
-  <header class="elite-hero is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
+  <header class="elite-hero has-orb is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
     <div>
       <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Intelligence</div>
       <h1 class="elite-hero-title">Morning <span class="accent">Command Center</span></h1>
@@ -22,6 +22,14 @@
       </div>
       <button class="btn-liq-refresh" id="cc-refresh-btn" onclick="refreshAll()" title="Refresh all data">↺ Refresh</button>
       <span class="liq-last-updated cc-updated" id="liq-last-updated">Loading…</span>
+    </div>
+    {# Live market globe. Every node is a symbol already on the market tape;
+       it repaints when the tape's own poll lands, and says so when it has
+       nothing to show rather than inventing a reading. #}
+    <div class="cc3d-orb is-waiting" data-cc3d-orb role="img" aria-label="3D market globe of the symbols on the live market tape. Green spikes are advancing, red are declining; spike length is the size of the move. Drag to rotate.">
+      <span class="cc3d-hud-title" aria-hidden="true">Live Market Globe</span>
+      <canvas aria-hidden="true"></canvas>
+      <div class="cc3d-hud" data-cc3d-hud aria-live="off"><span>Status <b>Awaiting live quotes</b></span></div>
     </div>
   </header>
 

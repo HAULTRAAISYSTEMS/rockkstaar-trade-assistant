@@ -78,6 +78,8 @@
         if (!d || !d.ok || !Array.isArray(d.items) || !d.items.length) throw new Error('No quotes returned');
         paint(d.items);
         lastSuccess = Date.now();
+        // The 3D market globe listens for this; it never polls on its own.
+        try { document.dispatchEvent(new CustomEvent('tradestaar:tape', { detail: d.items })); } catch (e) {}
         updateFreshness();
       })
       .catch(function () { updateFreshness(); })

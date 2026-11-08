@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="cc27">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#0a0d11" />
+  <meta name="theme-color" content="#02040a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black" />
   <meta name="application-name" content="Tradestaar Elite" />
@@ -31,9 +31,13 @@
   <!-- Unified Tradestaar Elite shell and component normalization — loaded last. -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/elite.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}" />
+  <!-- 2027 AI Command Center presentation layer (scoped under html.cc27) — loaded very last. -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/command_center.css') }}" />
 </head>
 <body class="{% block body_class %}{% endblock %}">
   <a class="workspace-skip" href="#workspace-main">Skip to content</a>
+  <canvas id="cc3d-backdrop" aria-hidden="true"></canvas>
+  <div id="cc3d-veil" aria-hidden="true"></div>
 
   {% include "_elite_navigation.html" %}
 
@@ -75,6 +79,7 @@
   <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
 
   <script defer src="{{ url_for('static', filename='js/company_market_cap.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/command_center_3d.js') }}"></script>
   {% block scripts %}{% endblock %}
 
   <!-- ===== ASK AI FAB — bottom-center pill ===== -->
