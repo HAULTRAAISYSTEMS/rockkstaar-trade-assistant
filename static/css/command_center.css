@@ -711,6 +711,118 @@ html.cc27 ::-webkit-scrollbar { width: 10px; height: 10px; }
 html.cc27 ::-webkit-scrollbar-thumb { background: linear-gradient(180deg, rgba(79, 227, 255, 0.4), rgba(241, 199, 91, 0.35)); border-radius: 10px; border: 2px solid var(--cc-void); }
 html.cc27 ::-webkit-scrollbar-track { background: transparent; }
 
+/* ── iPhone tab bar: floating glass dock ──────────────────────
+   Replaces the full-width strip of mixed Unicode glyphs with one set of
+   line icons, sentence-case labels and a lit pill on the active tab.
+   It floats above the home indicator instead of sitting on it. */
+@media (max-width: 768px) {
+  html.cc27 .mobile-app-nav {
+    left: max(10px, env(safe-area-inset-left, 0px));
+    right: max(10px, env(safe-area-inset-right, 0px));
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    gap: 0 !important;
+    padding: 6px !important;
+    border: 1px solid rgba(130, 200, 255, 0.16) !important;
+    border-radius: 26px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 45%),
+      rgba(6, 11, 22, 0.78) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(170%) !important;
+    backdrop-filter: blur(24px) saturate(170%) !important;
+    box-shadow:
+      0 18px 40px -10px rgba(0, 0, 0, 0.9),
+      0 0 0 1px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 0 40px -16px rgba(79, 227, 255, 0.45) !important;
+  }
+  /* Edge light along the top of the dock */
+  html.cc27 .mobile-app-nav::before {
+    content: "";
+    position: absolute;
+    top: -1px; left: 22%; right: 22%;
+    height: 1px;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--cc-cyan), var(--cc-gold-hi), transparent);
+    opacity: 0.7;
+  }
+  html.cc27 .mobile-app-nav__item,
+  html.cc27 .mobile-app-nav__group > .mobile-app-nav__item {
+    min-height: 54px;
+    gap: 4px !important;
+    padding: 0 !important;
+    border-radius: 20px;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: #7f8ba0;
+    font: 600 10px/1 var(--font-ui, system-ui) !important;
+    letter-spacing: 0.01em !important;
+    text-transform: none !important;
+    transition: color 0.2s ease, transform 0.15s ease;
+  }
+  html.cc27 .mobile-app-nav__item::before { display: none !important; }
+  html.cc27 .mobile-app-nav__label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  html.cc27 .mobile-app-nav__icon {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 28px;
+    border-radius: 14px;
+    font-size: 0 !important;
+    transition: background 0.25s ease, box-shadow 0.25s ease, color 0.2s ease;
+  }
+  html.cc27 .mobile-app-nav__icon svg { display: block; width: 22px; height: 22px; }
+
+  /* Active tab: lit capsule behind the icon, gold label */
+  html.cc27 .mobile-app-nav__item.is-active,
+  html.cc27 .mobile-app-nav__menu-trigger[aria-expanded="true"] { color: var(--cc-gold-hi) !important; }
+  html.cc27 .mobile-app-nav__item.is-active .mobile-app-nav__icon {
+    color: #061018;
+    background: linear-gradient(120deg, var(--cc-cyan), #b4f6ff 55%, var(--cc-gold-hi));
+    box-shadow: 0 0 18px -2px rgba(79, 227, 255, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    filter: none !important;
+  }
+  /* An open menu (Research / Learn / Account) gets a quieter ring */
+  html.cc27 .mobile-app-nav__menu-trigger[aria-expanded="true"] .mobile-app-nav__icon {
+    color: var(--cc-cyan);
+    background: rgba(79, 227, 255, 0.12);
+    box-shadow: inset 0 0 0 1px rgba(79, 227, 255, 0.45);
+  }
+  html.cc27 .mobile-app-nav__item.is-active.mobile-app-nav__menu-trigger[aria-expanded="true"] .mobile-app-nav__icon { color: #061018; }
+  html.cc27 .mobile-app-nav__item:active { transform: scale(0.93); }
+
+  /* Menu sheets rise from just above the dock */
+  html.cc27 .mobile-app-menu {
+    left: max(10px, env(safe-area-inset-left, 0px));
+    right: max(10px, env(safe-area-inset-right, 0px));
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    border: 1px solid rgba(130, 200, 255, 0.2) !important;
+    border-radius: 24px;
+    background: linear-gradient(180deg, rgb(14, 21, 35), rgb(6, 10, 19)) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
+    box-shadow: 0 -20px 60px rgba(0, 0, 0, 0.75), 0 0 50px -20px rgba(79, 227, 255, 0.5) !important;
+    animation: cc27-sheet 0.22s var(--ease-out, ease) both;
+  }
+  html.cc27 .mobile-app-menu__head strong { color: #f4f8ff; font-family: var(--font-display); font-size: 17px; letter-spacing: 0.12em; }
+  html.cc27 .mobile-app-menu__head span { color: var(--cc-cyan); }
+  html.cc27 .mobile-app-menu__links a {
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    border-radius: 14px !important;
+    background: rgba(255, 255, 255, 0.025) !important;
+  }
+  html.cc27 .mobile-app-menu__links a:active { background: rgba(79, 227, 255, 0.1) !important; border-color: rgba(79, 227, 255, 0.4) !important; }
+  html.cc27 .main-content { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)) !important; }
+}
+@media (max-width: 380px) {
+  html.cc27 .mobile-app-nav__icon { width: 40px; }
+  html.cc27 .mobile-app-nav__item,
+  html.cc27 .mobile-app-nav__group > .mobile-app-nav__item { font-size: 9px !important; }
+}
+@keyframes cc27-sheet {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* ── Responsive ──────────────────────────────────────────────── */
 @media (max-width: 900px) {
   html.cc27 .liq-page .elite-hero.has-orb {
@@ -745,6 +857,7 @@ html.cc27 ::-webkit-scrollbar-track { background: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
   html.cc27 .elite-hero::before,
+  html.cc27 .mobile-app-menu,
   html.cc27 #ask-fab::after,
   html.cc27 #nav-live-indicator .nav-live-dot { animation: none !important; }
 }
