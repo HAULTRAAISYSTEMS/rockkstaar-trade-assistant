@@ -382,6 +382,50 @@ html.cc27 .liq-page .elite-hero-title { font-size: clamp(34px, 4.2vw, 60px); lin
   color: var(--cc-cyan, #4fe3ff);
   text-shadow: 0 0 14px rgba(79, 227, 255, 0.6);
 }
+/* Ticker card: opens when a globe node is tapped */
+.cc3d-card {
+  position: absolute;
+  z-index: 3;
+  width: 230px;
+  padding: 14px 14px 12px;
+  border: 1px solid rgba(var(--cc-accent-rgb, 196, 245, 59), 0.45);
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(14, 22, 38, 0.96), rgba(5, 9, 18, 0.98));
+  box-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.95), 0 0 40px -14px rgba(var(--cc-accent-rgb, 196, 245, 59), 0.55);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  cursor: default;
+  animation: cc27-card-in 0.18s var(--ease-out, ease) both;
+}
+.cc3d-card[hidden] { display: none; }
+.cc3d-card__head { display: flex; align-items: center; justify-content: space-between; }
+.cc3d-card__head strong { color: #f4f8ff; font: 700 22px/1 var(--font-display, sans-serif); letter-spacing: 0.06em; }
+.cc3d-card__close { width: 28px; height: 28px; border: 0; border-radius: 8px; background: rgba(255, 255, 255, 0.06); color: #b9c4d4; font-size: 18px; line-height: 1; cursor: pointer; }
+.cc3d-card__close:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.cc3d-card__quote { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; font: 600 15px/1.2 var(--font-mono, monospace); font-variant-numeric: tabular-nums; color: #eef4fb; }
+.cc3d-card__chg.is-up { color: var(--pos-500, #22c58b); }
+.cc3d-card__chg.is-down { color: var(--neg-500, #ff4d45); }
+.cc3d-card__chg.is-unknown { color: var(--unknown-ink, #7b8794); }
+.cc3d-card__src { display: block; margin-top: 4px; color: #6f7c91; font: 500 9.5px/1.4 var(--font-mono, monospace); letter-spacing: 0.04em; }
+.cc3d-card__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 12px; }
+.cc3d-card__form { grid-column: 1 / -1; margin: 0; }
+.cc3d-card__btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; min-height: 36px; padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e6edf6; font: 600 12px/1 var(--font-ui, system-ui); text-decoration: none; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.cc3d-card__btn:hover { border-color: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.6); background: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.08); }
+.cc3d-card__btn.is-primary { border: 0; color: #0a0712; background: linear-gradient(120deg, var(--cc-accent-hi, #e8ffad), var(--cc-accent, #c4f53b)); }
+.cc3d-card__btn.is-primary:hover { filter: brightness(1.06); }
+/* Phones: the card is a sheet along the bottom of the globe */
+.cc3d-card.is-sheet { left: 0 !important; right: 0; top: auto !important; bottom: 26px; width: auto; }
+@keyframes cc27-card-in { from { opacity: 0; transform: translateY(6px) scale(0.97); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .cc3d-card { animation: none; } }
+.cc3d-orb.has-selection .cc3d-hud { opacity: 0.35; }
+
 /* No live quotes yet: the globe still turns, but says so. Dashed = not known. */
 .cc3d-orb.is-waiting .cc3d-hud { border-top: 1px dashed var(--unknown-line, #7b8794); padding-top: 6px; color: var(--unknown-ink, #7b8794); }
 
