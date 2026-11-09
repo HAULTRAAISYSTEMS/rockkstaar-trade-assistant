@@ -873,18 +873,35 @@ def fetch_general_market_news(limit: int = 12) -> list[dict]:
     if cached is not None:
         return cached
     import os as _os
-    key = _os.environ.get("FINNHUB_API_KEY", "").strip()
-    if not key or _fh_is_rate_limited():
-        return []
-    try:
-        with _fh_urlopen(f"https://finnhub.io/api/v1/news?category=general&token={key}", timeout=6) as resp:
-            rows = json.loads(resp.read().decode()) or []
-    except Exception as exc:
-        logger.debug("intel/general news: %s", exc)
-        return []
     from datetime import timezone as _tz
     wl_set = set(_get_watchlist_tickers())
     items = []
+    # Benzinga newswire via Alpaca: market-wide, every story ticker-tagged.
+    try:
+        from news_fetcher import fetch_alpaca_news
+        for row in fetch_alpaca_news(None, limit=limit):
+            syms = row.get("symbols") or []
+            ticker = syms[0] if syms else "MARKET"
+            impact, reason = classify_news_impact(row["headline"], [])
+            items.append({
+                "ticker": ticker, "headline": row["headline"], "source": row.get("source") or "Benzinga",
+                "url": row.get("url") or "", "image": row.get("image") or "",
+                "summary": row.get("summary") or "", "published_at": row.get("published_at") or "",
+                "impact": impact, "reason": reason,
+                "time": _article_age_label(row.get("published_at") or "", None),
+                "on_watchlist": ticker in wl_set, "provider": "alpaca_benzinga",
+            })
+    except Exception as exc:
+        logger.debug("intel/general news (alpaca): %s", exc)
+    key = _os.environ.get("FINNHUB_API_KEY", "").strip()
+    rows = []
+    if key and not _fh_is_rate_limited():
+        try:
+            with _fh_urlopen(f"https://finnhub.io/api/v1/news?category=general&token={key}", timeout=6) as resp:
+                rows = json.loads(resp.read().decode()) or []
+        except Exception as exc:
+            logger.debug("intel/general news: %s", exc)
+            rows = []
     for row in sorted(rows, key=lambda r: r.get("datetime", 0), reverse=True)[:limit]:
         headline = str(row.get("headline") or "").strip()
         if not headline:
@@ -903,6 +920,15 @@ def fetch_general_market_news(limit: int = 12) -> list[dict]:
             "time": _article_age_label(published, None),
             "on_watchlist": ticker in wl_set, "provider": "finnhub_general",
         })
+    # One list across both wires, newest first, no repeated headlines.
+    seen: set[str] = set()
+    unique = []
+    for item in sorted(items, key=lambda i: i.get("published_at") or "", reverse=True):
+        norm = " ".join(item["headline"].lower().split())[:70]
+        if norm not in seen:
+            seen.add(norm)
+            unique.append(item)
+    items = unique[:limit * 2]
     if items:
         _cset("general_news", items)
     return items

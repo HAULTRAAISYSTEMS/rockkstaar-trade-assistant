@@ -7956,6 +7956,13 @@ def api_intel_news_refresh():
         }), 200
 
 
+def _news_provider_label(provider: str) -> str:
+    names = {"finnhub": "Finnhub", "alpaca_benzinga": "Benzinga", "newsapi": "NewsAPI",
+             "polygon": "Polygon", "yahoo_search": "Yahoo", "rss": "RSS", "yfinance": "Yahoo"}
+    parts = [p for p in str(provider or "").split("+") if p]
+    return " + ".join(names.get(p, p.replace("_", " ").title()) for p in parts)
+
+
 @app.route("/api/intel/news/<ticker>")
 def api_intel_ticker_news(ticker):
     """The latest headlines for any ticker, for the news scanner's search.
@@ -7983,7 +7990,7 @@ def api_intel_ticker_news(ticker):
             "ok": bool(enriched),
             "ticker": ticker,
             "count": len(enriched),
-            "provider": (raw[0].get("provider") if raw else ""),
+            "provider": _news_provider_label(raw[0].get("provider") if raw else ""),
             "sources": news_source_status().get("configured_sources", []),
             "html": render_template("_intel_news_items.html", news=enriched, intel_status=status)
                     if enriched else "",
