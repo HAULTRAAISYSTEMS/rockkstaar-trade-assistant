@@ -54,15 +54,19 @@
   {# pulse.known is False when the market snapshot is empty or cold. The cells
      below then carry a dash, because an unread market is not a neutral one —
      this strip used to print "Regime · Neutral" off no data at all. #}
-  <div class="cc-pulse cc-rise pulse-{{ (pulse.regime or 'neutral')|lower if pulse.known else 'unknown' }}{{ ' is-unknown' if not pulse.known }}">
+  <div class="cc-pulse cc-rise pulse-{{ (pulse.regime or 'neutral')|lower if pulse.known else 'unknown' }}{{ ' is-unknown' if not pulse.known }}" id="cc-pulse" data-pulse-url="{{ url_for('api_today_pulse') }}" data-session="{{ pulse.session or '' }}">
+    {# Live badge: the strip polls /api/today/pulse, so the numbers move
+       without a reload. The badge says how long ago the last good read
+       landed, and goes dashed when polls stop coming back. #}
+    <span class="cc-pulse-live" id="cc-pulse-live" role="status" aria-live="off" hidden><i aria-hidden="true"></i><span id="cc-pulse-live-text">Live</span></span>
     <div class="cc-pulse-cell cc-pulse-regime">
       <span class="cc-pulse-k">Regime</span>
       {% if pulse.known %}
       <b class="cc-pulse-v {{ 'is-up' if 'on' in (pulse.regime or '')|lower else ('is-down' if 'off' in (pulse.regime or '')|lower else '') }}" id="cc-regime">{{ pulse.regime|replace('_', ' ')|replace('-', ' ')|title if pulse.regime else '—' }}</b>
-      {% if pulse.snapshot_stale %}<small class="cc-pulse-meta">snapshot {{ pulse.age_minutes|int }} min old</small>{% endif %}
+      <small class="cc-pulse-meta" id="cc-regime-meta"{% if not pulse.snapshot_stale %} hidden{% endif %}>{% if pulse.snapshot_stale %}snapshot {{ pulse.age_minutes|int }} min old{% endif %}</small>
       {% else %}
       <b class="cc-pulse-v is-unknown" id="cc-regime">—</b>
-      <small class="cc-pulse-meta">not read yet</small>
+      <small class="cc-pulse-meta" id="cc-regime-meta">not read yet</small>
       {% endif %}
     </div>
     <div class="cc-pulse-cell">
@@ -71,28 +75,24 @@
       <small class="cc-pulse-meta" id="cc-vix-meta">{% if pulse.vix_as_of %}As of {{ pulse.vix_as_of }}{% else %}Latest available{% endif %}</small>
     </div>
     <div class="cc-pulse-cell">
-      <span class="cc-pulse-k">{{ pulse.spy_label or 'SPY' }}</span>
+      <span class="cc-pulse-k{{ ' is-ext' if pulse.spy_ext }}" id="cc-spy-k">{{ pulse.spy_label or 'SPY' }}</span>
       <b class="cc-pulse-v {{ 'is-up' if (pulse.spy or 0) > 0 else ('is-down' if (pulse.spy or 0) < 0 else '') }}" id="cc-spy">{% if pulse.spy is not none %}{{ '%+.2f'|format(pulse.spy) }}%{% else %}—{% endif %}</b>
     </div>
     <div class="cc-pulse-cell">
-      <span class="cc-pulse-k">{{ pulse.qqq_label or 'QQQ' }}</span>
+      <span class="cc-pulse-k{{ ' is-ext' if pulse.qqq_ext }}" id="cc-qqq-k">{{ pulse.qqq_label or 'QQQ' }}</span>
       <b class="cc-pulse-v {{ 'is-up' if (pulse.qqq or 0) > 0 else ('is-down' if (pulse.qqq or 0) < 0 else '') }}" id="cc-qqq">{% if pulse.qqq is not none %}{{ '%+.2f'|format(pulse.qqq) }}%{% else %}—{% endif %}</b>
     </div>
-    {% if pulse.es is not none %}
-    <div class="cc-pulse-cell">
+    <div class="cc-pulse-cell" id="cc-es-cell"{% if pulse.es is none %} hidden{% endif %}>
       <span class="cc-pulse-k">ES Futures</span>
-      <b class="cc-pulse-v {{ 'is-up' if (pulse.es or 0) > 0 else ('is-down' if (pulse.es or 0) < 0 else '') }}" id="cc-es">{{ '%+.2f'|format(pulse.es) }}%</b>
+      <b class="cc-pulse-v {{ 'is-up' if (pulse.es or 0) > 0 else ('is-down' if (pulse.es or 0) < 0 else '') }}" id="cc-es">{% if pulse.es is not none %}{{ '%+.2f'|format(pulse.es) }}%{% else %}—{% endif %}</b>
     </div>
-    {% endif %}
-    {% if pulse.nq is not none %}
-    <div class="cc-pulse-cell">
+    <div class="cc-pulse-cell" id="cc-nq-cell"{% if pulse.nq is none %} hidden{% endif %}>
       <span class="cc-pulse-k">NQ Futures</span>
-      <b class="cc-pulse-v {{ 'is-up' if (pulse.nq or 0) > 0 else ('is-down' if (pulse.nq or 0) < 0 else '') }}" id="cc-nq">{{ '%+.2f'|format(pulse.nq) }}%</b>
+      <b class="cc-pulse-v {{ 'is-up' if (pulse.nq or 0) > 0 else ('is-down' if (pulse.nq or 0) < 0 else '') }}" id="cc-nq">{% if pulse.nq is not none %}{{ '%+.2f'|format(pulse.nq) }}%{% else %}—{% endif %}</b>
     </div>
-    {% endif %}
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k">Liquidity</span>
-      <b class="cc-pulse-v">{% if pulse.liquidity is not none %}<a href="{{ url_for('macro_page') }}">{{ pulse.liquidity }}<small>/100</small></a>{% else %}—{% endif %}</b>
+      <b class="cc-pulse-v" id="cc-liq" data-href="{{ url_for('macro_page') }}">{% if pulse.liquidity is not none %}<a href="{{ url_for('macro_page') }}">{{ pulse.liquidity }}<small>/100</small></a>{% else %}—{% endif %}</b>
     </div>
     <div class="cc-pulse-cell cc-pulse-next">
       <span class="cc-pulse-k">Next up</span>

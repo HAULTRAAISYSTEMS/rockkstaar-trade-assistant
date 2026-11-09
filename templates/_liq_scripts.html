@@ -696,6 +696,7 @@ document.addEventListener('DOMContentLoaded', () => {
   runScan();
   loadAlerts();
   loadAIBrief(false);
+  startLivePulse();
   // Warming the scan is only worth a request on the page that shows it.
   if (document.getElementById('liq-scan-content')) {
     fetch('/api/opportunity/refresh', {method:'POST'}).catch(()=>{});
@@ -820,9 +821,23 @@ function _setPulseMove(id, value) {
   if (!el) return;
   if (value == null) { el.textContent = '—'; el.classList.remove('is-up', 'is-down'); return; }
   const n = Number(value);
+  if (!Number.isFinite(n)) { el.textContent = '—'; el.classList.remove('is-up', 'is-down'); return; }
+  _pulseTick(el, n);
   el.textContent = (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
   el.classList.toggle('is-up', n > 0);
   el.classList.toggle('is-down', n < 0);
+}
+
+/* Flash a reading once when it moves between polls. The previous value is
+   kept on the element, so the first paint after a reload never flashes. */
+function _pulseTick(el, n) {
+  const prev = el.dataset.pulseVal;
+  el.dataset.pulseVal = String(n);
+  if (prev === undefined || prev === '' || Number(prev) === n) return;
+  const cls = n > Number(prev) ? 'is-tick-up' : 'is-tick-down';
+  el.classList.remove('is-tick-up', 'is-tick-down');
+  void el.offsetWidth;  // restart the animation
+  el.classList.add(cls);
 }
 
 function _renderLivePulse(market) {
@@ -838,15 +853,157 @@ function _renderLivePulse(market) {
     regime.classList.remove('is-up', 'is-down');
     regime.classList.add('is-unknown');
   } else if (regime && market.regime) {
-    regime.textContent = String(market.regime).replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    regime.textContent = String(market.regime).toLowerCase().replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     regime.classList.remove('is-unknown');
     regime.classList.toggle('is-up', String(market.regime).toUpperCase() === 'RISK_ON');
     regime.classList.toggle('is-down', ['RISK_OFF','NO_TRADE'].includes(String(market.regime).toUpperCase()));
   }
-  if (vix) vix.textContent = market.vix == null ? '—' : Number(market.vix).toFixed(1);
+  if (vix) {
+    if (market.vix == null || !Number.isFinite(Number(market.vix))) vix.textContent = '—';
+    else { _pulseTick(vix, Number(market.vix)); vix.textContent = Number(market.vix).toFixed(1); }
+  }
   if (vixMeta) vixMeta.textContent = market.vix_as_of ? 'As of ' + market.vix_as_of : 'Latest available';
   _setPulseMove('cc-spy', market.spy);
   _setPulseMove('cc-qqq', market.qqq);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   LIVE PULSE — the strip keeps itself current without a reload.
+   Polls /api/today/pulse every 3s (cached server-side, never waits on an
+   upstream API). Pauses while the tab is hidden, backs off on
+   failure, and never paints a reading over a dash it cannot back.
+───────────────────────────────────────────────────────────── */
+const _PULSE_POLL_MS = (window.__PULSE_MS || 3000);
+const _pulseLive = {timer: null, okAt: 0, fails: 0, session: '', inFlight: false};
+
+function _applyPulse(p) {
+  if (!p) return;
+  const rail = document.getElementById('cc-pulse');
+  _renderLivePulse({
+    known: p.known, regime: p.regime, vix: p.vix, vix_as_of: p.vix_as_of,
+    spy: p.spy, qqq: p.qqq,
+  });
+  if (rail) {
+    rail.classList.toggle('is-unknown', p.known === false);
+    // pulse-<regime> drives the rail's tint; keep it in step with the cell.
+    [...rail.classList].filter(c => c.startsWith('pulse-')).forEach(c => rail.classList.remove(c));
+    rail.classList.add('pulse-' + (p.known ? String(p.regime || 'neutral').toLowerCase() : 'unknown'));
+  }
+  const regimeMeta = document.getElementById('cc-regime-meta');
+  if (regimeMeta) {
+    if (p.known === false) { regimeMeta.textContent = 'not read yet'; regimeMeta.hidden = false; }
+    else if (p.snapshot_stale && p.age_minutes != null) {
+      regimeMeta.textContent = 'snapshot ' + Math.floor(p.age_minutes) + ' min old'; regimeMeta.hidden = false;
+    } else { regimeMeta.textContent = ''; regimeMeta.hidden = true; }
+  }
+  const spyK = document.getElementById('cc-spy-k');
+  const qqqK = document.getElementById('cc-qqq-k');
+  if (spyK && p.spy_label) { spyK.textContent = p.spy_label; spyK.classList.toggle('is-ext', !!p.spy_ext); }
+  if (qqqK && p.qqq_label) { qqqK.textContent = p.qqq_label; qqqK.classList.toggle('is-ext', !!p.qqq_ext); }
+  // Futures cells exist hidden when the first render had no reading, so a
+  // later poll can reveal them; a reading that disappears keeps the last
+  // value rather than collapsing the rail mid-session.
+  [['cc-es', p.es], ['cc-nq', p.nq]].forEach(([id, v]) => {
+    if (v == null) return;
+    const cell = document.getElementById(id + '-cell');
+    if (cell) cell.hidden = false;
+    _setPulseMove(id, v);
+  });
+  const liq = document.getElementById('cc-liq');
+  if (liq && p.liquidity != null && Number.isFinite(Number(p.liquidity))) {
+    const n = Number(p.liquidity);
+    const prev = liq.dataset.pulseVal;
+    if (prev !== String(n)) {
+      const a = document.createElement('a');
+      a.href = liq.dataset.href || '/macro';
+      a.textContent = String(n);
+      const small = document.createElement('small');
+      small.textContent = '/100';
+      a.appendChild(small);
+      liq.replaceChildren(a);
+      _pulseTick(liq, n);
+    }
+  }
+  _pulseLive.session = p.session || '';
+}
+
+function _paintPulseBadge() {
+  const badge = document.getElementById('cc-pulse-live');
+  const text = document.getElementById('cc-pulse-live-text');
+  if (!badge || !text) return;
+  if (!_pulseLive.okAt) {
+    if (_pulseLive.fails) { badge.hidden = false; badge.classList.add('is-stale'); text.textContent = 'Live feed paused'; }
+    return;
+  }
+  badge.hidden = false;
+  const secs = Math.max(0, Math.round((Date.now() - _pulseLive.okAt) / 1000));
+  const ago = secs < 10 ? 'just now' : secs < 60 ? secs + 's ago' : Math.floor(secs / 60) + 'm ago';
+  const stale = _pulseLive.fails >= 4 || secs > 60;
+  badge.classList.toggle('is-stale', stale);
+  if (stale) text.textContent = 'Paused · ' + ago;
+  else {
+    const tag = {regular: 'Live', pre: 'Live · Pre-market', post: 'Live · After hours'}[_pulseLive.session] || 'Auto';
+    text.textContent = tag + ' · ' + ago;
+  }
+  badge.title = stale
+    ? 'The last updates did not come back. Numbers shown are from the last good read.'
+    : 'Updates every 3 seconds without reloading.';
+}
+
+async function _pollPulse() {
+  const rail = document.getElementById('cc-pulse');
+  if (!rail || _pulseLive.inFlight) return;
+  _pulseLive.inFlight = true;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const url = rail.dataset.pulseUrl || '/api/today/pulse';
+    const r = await fetch(url, {cache: 'no-store', credentials: 'same-origin', signal: controller.signal});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    _applyPulse(data.pulse);
+    // A cold snapshot is an answer, not a failure — but it is not a live
+    // reading either, so it does not reset the freshness clock.
+    if (data.ok) { _pulseLive.okAt = Date.now(); _pulseLive.fails = 0; }
+    else _pulseLive.fails += 1;
+  } catch (e) {
+    _pulseLive.fails += 1;
+  } finally {
+    clearTimeout(timer);
+    _pulseLive.inFlight = false;
+    _paintPulseBadge();
+    _schedulePulse();
+  }
+}
+
+function _schedulePulse(delay) {
+  clearTimeout(_pulseLive.timer);
+  if (document.hidden) return;
+  // Back off to 30s after repeated failures so a dead feed is not hammered.
+  const wait = delay != null ? delay : (_pulseLive.fails >= 5 ? 30000 : _PULSE_POLL_MS);
+  _pulseLive.timer = setTimeout(_pollPulse, wait);
+}
+
+function startLivePulse() {
+  if (!document.getElementById('cc-pulse')) return;
+  // Seed each reading from the server render so the first poll can flash
+  // what actually moved since the page loaded.
+  ['cc-vix', 'cc-spy', 'cc-qqq', 'cc-es', 'cc-nq', 'cc-liq'].forEach(id => {
+    const el = document.getElementById(id);
+    const m = el ? String(el.textContent).match(/[+-]?\d+(?:\.\d+)?/) : null;
+    const n = m ? parseFloat(m[0]) : NaN;
+    if (el && Number.isFinite(n)) el.dataset.pulseVal = String(n);
+  });
+  // The server render is a live reading as of page load.
+  if (!document.getElementById('cc-pulse').classList.contains('is-unknown')) _pulseLive.okAt = Date.now();
+  _pulseLive.session = document.getElementById('cc-pulse').dataset.session || '';
+  _paintPulseBadge();
+  _schedulePulse();
+  setInterval(_paintPulseBadge, 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clearTimeout(_pulseLive.timer);
+    else _schedulePulse(0);
+  });
 }
 
 async function refreshAll() {
@@ -857,6 +1014,7 @@ async function refreshAll() {
   try {
     const data = await fetchDeskJSON('/api/opportunity/refresh', {method:'POST'});
     if (data.market) _renderLivePulse(data.market);
+    _schedulePulse(0);
     if (stamp) stamp.textContent = data.ok ? 'Updated just now' : (data.msg || 'Refresh pending');
     if (data.story) _renderStory(data.story);
     loadAIBrief(false);

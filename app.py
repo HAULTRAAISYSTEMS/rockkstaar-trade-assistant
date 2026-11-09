@@ -8375,6 +8375,132 @@ def _command_watchlist() -> tuple[list, str]:
     return [], names.get(active, "")
 
 
+def _build_today_pulse(mkt: dict) -> dict:
+    """The Today pulse strip, built from one market snapshot.
+
+    Shared by the server render and /api/today/pulse so the strip a reader
+    loads and the strip that keeps itself live afterwards can never apply
+    different rules (session labels, `known`, staleness).
+    """
+    pulse = {
+        "regime": mkt.get("regime") or mkt.get("market_regime") or "",
+        "vix": mkt.get("vix_level"),
+        "vix_as_of": mkt.get("vix_as_of_label") or "",
+        "vix_source": mkt.get("vix_source") or "",
+        "spy": mkt.get("spy_1d_pct"),
+        "qqq": mkt.get("qqq_1d_pct"),
+        "spy_trend": mkt.get("spy_trend") or "",
+        "qqq_trend": mkt.get("qqq_trend") or "",
+        "leading": (mkt.get("leading_sectors") or [])[:2],
+        "lagging": (mkt.get("weak_sectors") or [])[:2],
+        "spy_label": "SPY",
+        "qqq_label": "QQQ",
+        "es": mkt.get("es_1d_chg"),
+        "nq": mkt.get("nq_1d_chg"),
+        "session": "",
+    }
+    # Which session these percentages belong to.
+    #
+    # The ETF tiles are day-changes off daily candles. Only the pre-open
+    # case was labelled, so from 4 PM until the next open — and all
+    # weekend — the strip showed a closed session's move under a bare
+    # "SPY", reading as though it were happening now. _day_label names
+    # the session the candle belongs to; the tile carries that name
+    # whenever it is not the one currently trading.
+    try:
+        session = _mkt.market_session() if _MKT_AVAILABLE else ""
+    except Exception:
+        session = ""
+    pulse["session"] = session
+    try:
+        day = _mkt._day_label() if _MKT_AVAILABLE else "today"
+    except Exception:
+        day = "today"
+    pulse["day_label"] = day
+    # Only when the session is actually known. An unknown session is not
+    # evidence that the market is shut, so it keeps the bare label.
+    if session and session != "regular":
+        # "SPY FRI" on a Sunday, "SPY CLOSE" after today's close.
+        suffix = "CLOSE" if day == "today" else day[:3].upper()
+        pulse["spy_label"] = f"SPY {suffix}"
+        pulse["qqq_label"] = f"QQQ {suffix}"
+
+    # Premarket and after hours: the ETFs trade, so the strip shows the
+    # extended-hours move rather than a closed session's. The tape already
+    # fetches those prints (non-blocking, cached ~60s); an item only carries
+    # `ext_session` when it is a genuine pre/post print from today, so a
+    # symbol with no extended trade yet keeps the session-close label above.
+    pulse["spy_ext"] = pulse["qqq_ext"] = False
+    # Fast feed first: a few seconds old, shared by every open page. Anything
+    # it lacks keeps the slower snapshot value (and the tape fallback below).
+    fast = {}
+    if _MKT_AVAILABLE:
+        try:
+            fast = _mkt.fast_pulse_quotes() or {}
+        except Exception:
+            fast = {}
+    tag = {"pre": "PRE", "post": "AH"}.get(session, "")
+    for sym, key in (("SPY", "spy"), ("QQQ", "qqq")):
+        q = fast.get(sym)
+        if not q:
+            continue
+        pulse[key] = q["pct"]
+        if q.get("ext") and q["ext"] == session:
+            pulse[f"{key}_label"] = f"{sym} {tag}"
+            pulse[f"{key}_ext"] = True
+        elif session == "regular":
+            pulse[f"{key}_label"] = sym
+    for sym, key in (("ES", "es"), ("NQ", "nq")):
+        if fast.get(sym):
+            pulse[key] = fast[sym]["pct"]
+    if fast.get("VIX"):
+        pulse["vix"] = fast["VIX"]["price"]
+        if fast["VIX"].get("at"):
+            pulse["vix_as_of"] = fast["VIX"]["at"]
+    if session in ("pre", "post") and _MKT_AVAILABLE and not (pulse["spy_ext"] and pulse["qqq_ext"]):
+        try:
+            tape = {i.get("symbol"): i for i in (_mkt.get_market_tape() or [])}
+        except Exception:
+            tape = {}
+        for sym, key in (("SPY", "spy"), ("QQQ", "qqq")):
+            if pulse[f"{key}_ext"]:
+                continue
+            item = tape.get(sym) or {}
+            pct = item.get("change_pct")
+            if item.get("ext_session") == session and isinstance(pct, (int, float)):
+                pulse[key] = pct
+                pulse[f"{key}_label"] = f"{sym} {tag}"
+                pulse[f"{key}_ext"] = True
+
+    # Whether any of this is a reading at all. An empty or cold market
+    # cache hands back regime "NEUTRAL" with longs_ok True, which the
+    # strip printed as a finding; `known` is what lets the page show a
+    # dash instead of a conclusion it does not have.
+    try:
+        pulse["known"] = _mkt.context_is_real(mkt) if _MKT_AVAILABLE else False
+    except Exception:
+        pulse["known"] = False
+    # And how old the snapshot is. get_market_context returns a stale
+    # cache immediately and refreshes behind the request, so an hours-old
+    # regime used to render identically to a seconds-old one.
+    try:
+        age = _mkt.snapshot_age_minutes(mkt) if _MKT_AVAILABLE else None
+    except Exception:
+        age = None
+    pulse["age_minutes"] = age
+    pulse["snapshot_stale"] = bool(age is not None and age > 30)
+    # The liquidity score is the one number worth keeping from the Fed
+    # panel now that the panel itself lives on /macro.
+    try:
+        import liquidity_engine as _liq
+        status = _liq.get_liquidity_status() or {}
+        pulse["liquidity"] = status.get("score")
+        pulse["liquidity_label"] = status.get("status_label") or ""
+    except Exception as exc:
+        logger.debug("command centre: liquidity score unavailable: %s", exc)
+    return pulse
+
+
 def _command_center_context() -> dict:
     """The four things the command centre used to link to instead of showing.
 
@@ -8406,76 +8532,8 @@ def _command_center_context() -> dict:
     liq_score = None
     try:
         mkt = _get_mkt_ctx() or {}
-        context["pulse"] = {
-            "regime": mkt.get("regime") or mkt.get("market_regime") or "",
-            "vix": mkt.get("vix_level"),
-            "vix_as_of": mkt.get("vix_as_of_label") or "",
-            "vix_source": mkt.get("vix_source") or "",
-            "spy": mkt.get("spy_1d_pct"),
-            "qqq": mkt.get("qqq_1d_pct"),
-            "spy_trend": mkt.get("spy_trend") or "",
-            "qqq_trend": mkt.get("qqq_trend") or "",
-            "leading": (mkt.get("leading_sectors") or [])[:2],
-            "lagging": (mkt.get("weak_sectors") or [])[:2],
-            "spy_label": "SPY",
-            "qqq_label": "QQQ",
-            "es": mkt.get("es_1d_chg"),
-            "nq": mkt.get("nq_1d_chg"),
-            "session": "",
-        }
-        # Which session these percentages belong to.
-        #
-        # The ETF tiles are day-changes off daily candles. Only the pre-open
-        # case was labelled, so from 4 PM until the next open — and all
-        # weekend — the strip showed a closed session's move under a bare
-        # "SPY", reading as though it were happening now. _day_label names
-        # the session the candle belongs to; the tile carries that name
-        # whenever it is not the one currently trading.
-        try:
-            session = _mkt.market_session() if _MKT_AVAILABLE else ""
-        except Exception:
-            session = ""
-        context["pulse"]["session"] = session
-        try:
-            day = _mkt._day_label() if _MKT_AVAILABLE else "today"
-        except Exception:
-            day = "today"
-        context["pulse"]["day_label"] = day
-        # Only when the session is actually known. An unknown session is not
-        # evidence that the market is shut, so it keeps the bare label.
-        if session and session != "regular":
-            # "SPY FRI" on a Sunday, "SPY CLOSE" after today's close.
-            suffix = "CLOSE" if day == "today" else day[:3].upper()
-            context["pulse"]["spy_label"] = f"SPY {suffix}"
-            context["pulse"]["qqq_label"] = f"QQQ {suffix}"
-
-        # Whether any of this is a reading at all. An empty or cold market
-        # cache hands back regime "NEUTRAL" with longs_ok True, which the
-        # strip printed as a finding; `known` is what lets the page show a
-        # dash instead of a conclusion it does not have.
-        try:
-            context["pulse"]["known"] = _mkt.context_is_real(mkt) if _MKT_AVAILABLE else False
-        except Exception:
-            context["pulse"]["known"] = False
-        # And how old the snapshot is. get_market_context returns a stale
-        # cache immediately and refreshes behind the request, so an hours-old
-        # regime used to render identically to a seconds-old one.
-        try:
-            age = _mkt.snapshot_age_minutes(mkt) if _MKT_AVAILABLE else None
-        except Exception:
-            age = None
-        context["pulse"]["age_minutes"] = age
-        context["pulse"]["snapshot_stale"] = bool(age is not None and age > 30)
-        # The liquidity score is the one number worth keeping from the Fed
-        # panel now that the panel itself lives on /macro.
-        try:
-            import liquidity_engine as _liq
-            status = _liq.get_liquidity_status() or {}
-            context["pulse"]["liquidity"] = status.get("score")
-            context["pulse"]["liquidity_label"] = status.get("status_label") or ""
-            liq_score = status.get("score")
-        except Exception as exc:
-            logger.debug("command centre: liquidity score unavailable: %s", exc)
+        context["pulse"] = _build_today_pulse(mkt)
+        liq_score = context["pulse"].get("liquidity")
         try:
             if _MKT_AVAILABLE:
                 context["story"] = _mkt.generate_market_story(mkt, liq_score)
@@ -8643,6 +8701,37 @@ def _command_center_context() -> dict:
 def liquidity_page():
     """Morning Command Center — the market read, in one screen."""
     return render_template("liquidity.html", **_command_center_context())
+
+
+@app.route("/api/today/pulse")
+def api_today_pulse():
+    """The Today pulse strip as JSON, polled by the page to stay live.
+
+    Read-only and cheap: get_market_context answers from its cache and starts
+    one background refresh when the snapshot is past its TTL, so a poll never
+    waits on an upstream API and the next poll picks up the new numbers. The
+    refresh POST is still the way to force a full re-read.
+    """
+    try:
+        pulse = _build_today_pulse(_get_mkt_ctx() or {})
+    except Exception as exc:
+        logger.debug("api_today_pulse: %s", exc)
+        return jsonify({"ok": False, "pulse": {"known": False}}), 200
+    known = bool(pulse.get("known"))
+    # Never hand the client a regime for a snapshot that is not a reading.
+    if not known:
+        pulse["regime"] = None
+    resp = jsonify({
+        "ok": known,
+        "pulse": {k: pulse.get(k) for k in (
+            "known", "regime", "vix", "vix_as_of", "spy", "qqq",
+            "spy_label", "qqq_label", "spy_ext", "qqq_ext", "es", "nq", "liquidity",
+            "session", "age_minutes", "snapshot_stale",
+        )},
+        "server_time": _et_now().isoformat(),
+    })
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/research-digest/reviewed", methods=["POST"])

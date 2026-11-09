@@ -1214,11 +1214,15 @@ def _build_tape_items() -> list[dict]:
         # In extended hours the ETFs' last close is not their price —
         # override with the latest pre/post print where one exists.
         _ext = extended_quotes(["SPY", "QQQ", "DIA", "IWM"])
+        _ext_session = market_session() if _ext else ""
         for _item in items:
             _q = _ext.get(_item["symbol"])
             if _q:
                 _item["price"] = _q["price"]
                 _item["change_pct"] = _q["pct"]
+                # Which extended session the print belongs to ("pre"/"post"),
+                # so the Today pulse can label it instead of guessing.
+                _item["ext_session"] = _ext_session
         _TAPE_CACHE.update(at=_time.time(), items=items)
     except Exception as exc:
         logger.debug("_build_tape_items failed: %s", exc)
@@ -1303,6 +1307,143 @@ def extended_quotes(symbols: list[str]) -> dict[str, dict]:
     except Exception:
         pass
     return out
+
+
+# ── Fast pulse quotes ───────────────────────────────────────────────────────
+# The Today pulse polls every few seconds. The market context refreshes on a
+# 2-minute cycle and the tape on 60s, so a fast poll against those would just
+# re-read the same numbers. This is one small, shared feed for the five
+# readings that actually move tick to tick: SPY, QQQ, ES, NQ and VIX. One
+# background fetch serves every open page; requests never wait on it.
+_FAST_SYMBOLS = {"SPY": "SPY", "QQQ": "QQQ", "ES": "ES=F", "NQ": "NQ=F", "VIX": "^VIX"}
+_FAST_TTL_S = 8          # ~5 Yahoo requests per 8s, shared by all readers
+_FAST_MAX_AGE_S = 120    # older than this and the fast feed says nothing
+_FAST_CACHE: dict = {"at": 0.0, "quotes": {}}
+_FAST_REFRESHING = False
+
+
+def _fast_quote_from_chart(res: dict, key: str, session: str, today) -> dict | None:
+    """One pulse reading from a Yahoo v8 chart result (range=1d, 1m, pre/post).
+
+    Pure so it can be tested without a network. Returns
+    {"price", "pct", "ext", "at"}, or None when this symbol has no reading
+    that fits the session — the caller then keeps the slower value.
+
+    - ES / NQ / VIX trade nearly around the clock: last print vs the
+      previous close (futures settle).
+    - SPY / QQQ in regular hours: last print vs the prior close.
+    - Pre-market: the latest genuine pre print vs the prior close; after
+      hours: the latest post print vs today's close. No extended print yet
+      means None, so the tile keeps its honest "SPY FRI" close label.
+    - Closed: None — the daily-close numbers already describe it.
+    """
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    meta = res.get("meta") or {}
+    prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+    reg = meta.get("regularMarketPrice")
+    stamps = res.get("timestamp") or []
+    closes = ((res.get("indicators", {}).get("quote") or [{}])[0].get("close") or [])
+    pairs = [(t, c) for t, c in zip(stamps, closes) if c is not None]
+    last_t, last_px = pairs[-1] if pairs else (meta.get("regularMarketTime"), reg)
+    if last_px is None:
+        return None
+    last_px = float(last_px)
+    when = datetime.fromtimestamp(last_t, et) if last_t else None
+
+    def _out(price, base, ext=None):
+        if not base:
+            return None
+        return {"price": round(price, 2),
+                "pct": round((price / float(base) - 1) * 100, 2),
+                "ext": ext,
+                "at": when.strftime("%-I:%M:%S %p ET") if when else ""}
+
+    if key in ("ES", "NQ", "VIX"):
+        return _out(last_px, prev)
+    if session == "regular":
+        return _out(last_px, prev)
+    if session in ("pre", "post") and when and when.date() == today:
+        mins = when.hour * 60 + when.minute
+        if session == "pre" and mins < 570:
+            return _out(last_px, reg, "pre")      # reg = prior close before the open
+        if session == "post" and mins >= 960:
+            return _out(last_px, reg, "post")     # reg = today's close
+    return None
+
+
+def _fetch_fast_quotes() -> None:
+    import time as _time
+    from zoneinfo import ZoneInfo
+    try:
+        import requests as _req
+        from concurrent.futures import ThreadPoolExecutor
+    except ImportError:
+        return
+    session = market_session()
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+
+    def _one(item):
+        key, sym = item
+        for base in ("https://query1.finance.yahoo.com/v8/finance/chart",
+                     "https://query2.finance.yahoo.com/v8/finance/chart"):
+            try:
+                r = _req.get(f"{base}/{sym}",
+                             params={"range": "1d", "interval": "1m",
+                                     "includePrePost": "true"},
+                             headers=headers, timeout=5)
+                res = (r.json().get("chart", {}).get("result") or [None])[0]
+                if res:
+                    return key, _fast_quote_from_chart(res, key, session, today)
+            except Exception:
+                continue
+        return key, None
+
+    quotes: dict = {}
+    try:
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            for key, q in ex.map(_one, _FAST_SYMBOLS.items()):
+                if q:
+                    quotes[key] = q
+    except Exception as exc:
+        logger.debug("_fetch_fast_quotes failed: %s", exc)
+    if quotes:
+        quotes["_session"] = session
+        _FAST_CACHE.update(at=_time.time(), quotes=quotes)
+
+
+def fast_pulse_quotes() -> dict:
+    """Latest fast readings keyed SPY/QQQ/ES/NQ/VIX — never blocks.
+
+    Returns {} when the feed has nothing recent; callers then keep the
+    slower market-context values. Disabled under TRADESTAAR_NO_BACKGROUND so
+    a test suite never reads the live market.
+    """
+    global _FAST_REFRESHING
+    import os as _os
+    import time as _time
+    import threading as _th
+    if _os.environ.get("TRADESTAAR_NO_BACKGROUND", "").strip().lower() in ("1", "true", "yes"):
+        return {}
+    now = _time.time()
+    age = now - _FAST_CACHE["at"]
+    if age >= _FAST_TTL_S and not _FAST_REFRESHING:
+        _FAST_REFRESHING = True
+
+        def _work():
+            global _FAST_REFRESHING
+            try:
+                _fetch_fast_quotes()
+            finally:
+                _FAST_REFRESHING = False
+        _th.Thread(target=_work, daemon=True, name="fast_pulse").start()
+    if not _FAST_CACHE["quotes"] or age > _FAST_MAX_AGE_S:
+        return {}
+    # A cached quote from the previous session must not be relabelled as this one.
+    if _FAST_CACHE["quotes"].get("_session") != market_session():
+        return {}
+    return dict(_FAST_CACHE["quotes"])
 
 
 def get_market_tape() -> list[dict]:

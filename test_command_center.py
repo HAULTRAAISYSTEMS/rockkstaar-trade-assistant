@@ -692,6 +692,10 @@ class TestPulseFutures:
         # "SPY MON" before the next open. Pin it, and assert the labelling
         # rule rather than whatever today happens to be.
         monkeypatch.setattr(legacy._mkt, "_day_label", lambda *a, **k: day_label)
+        # No extended-hours prints in these cases. Without this the pre-market
+        # tests read the real tape whenever the suite ran during pre-market.
+        monkeypatch.setattr(legacy._mkt, "get_market_tape", lambda: [])
+        monkeypatch.setattr(legacy._mkt, "fast_pulse_quotes", lambda: {})
         monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: SUMMARY)
         monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 1)
         monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: ["NVDA"])
