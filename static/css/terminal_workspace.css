@@ -127,9 +127,11 @@
     margin: 0 !important; padding: 6px 12px !important; min-height: 0 !important;
     border: 0 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important; border-radius: 0 !important;
     background: none !important; box-shadow: none !important;
-    overflow-x: auto; scrollbar-width: none;
+    /* Wrap instead of scrolling: a mouse can't drag a hidden scroller, and
+       a scroll box would clip the Indicators menu. */
+    flex-wrap: wrap !important; row-gap: 6px !important;
+    overflow: visible !important;
   }
-  .tw-chart-toolbar::-webkit-scrollbar { display: none; }
   .tw-chart-toolbar .tw-control-label { display: none !important; }
   .tw-chart-toolbar .tw-type { margin-left: auto; flex-wrap: nowrap !important; }
   .tw-chart-toolbar .tw-tf-btn { padding: 0 9px !important; height: 28px !important; }
@@ -266,4 +268,25 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
   .tw-center > .tw-panel:fullscreen #tw-rsi-panel { height: 80px !important; }
   .tw-center > .tw-panel.tw-is-fullscreen #tw-macd-panel,
   .tw-center > .tw-panel:fullscreen #tw-macd-panel { height: 90px !important; }
+}
+
+/* ── Indicators menu: never clipped ─────────────────────────────── */
+.tw-chart-toolbar .tw-ind-dropdown { position: relative; }
+.tw-chart-toolbar .tw-type, .tw-chart-toolbar .tw-tool-group { overflow: visible !important; }
+.tw-ind-menu { z-index: 10060 !important; }
+@media (max-width: 1099px) {
+  /* The toolbar scrolls sideways on phones (swipe), so the menu opens as
+     a sheet pinned to the screen instead of inside the scroller. */
+  .tw-chart-toolbar { overflow-x: auto !important; overflow-y: hidden !important; -webkit-overflow-scrolling: touch; touch-action: pan-x; scrollbar-width: none; }
+  .tw-chart-toolbar::-webkit-scrollbar { display: none; }
+  .tw-ind-menu {
+    position: fixed !important;
+    left: max(12px, env(safe-area-inset-left, 0px)) !important;
+    right: max(12px, env(safe-area-inset-right, 0px)) !important;
+    top: auto !important;
+    bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
+    min-width: 0 !important;
+    background: #0b111c !important;
+  }
+  html.tw-fs-lock .tw-ind-menu { bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important; }
 }
