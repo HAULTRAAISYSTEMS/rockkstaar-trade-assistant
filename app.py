@@ -277,13 +277,44 @@ def require_admin(f):
     return decorated
 
 
+# Read-only API polls (prices every few seconds from every open page) used
+# to re-read the user row from the database on every request. Those reuse a
+# verification for a short window; page loads and anything that writes still
+# check the database every time, so a deleted user or a revoked admin is
+# refused on their next real action and, at worst, a few seconds of price
+# polling later.
+_POLL_VERIFY_TTL_S = 30
+_POLL_VERIFY_CACHE: dict = {}
+# Only the price polls. Session and account endpoints always hit the database.
+_POLL_PATHS = ("/api/live/bundle", "/api/market-tape", "/api/today/pulse",
+               "/api/terminal/quotes", "/api/terminal/live/", "/api/quick",
+               "/api/dashboard")
+
+
+def _verified_user_for_request(uid):
+    is_poll = request.method in ("GET", "HEAD") and request.path.startswith(_POLL_PATHS)
+    now = _time.time()
+    if is_poll:
+        hit = _POLL_VERIFY_CACHE.get(uid)
+        if hit and now - hit[0] < _POLL_VERIFY_TTL_S:
+            return hit[1]
+    user = get_user_by_id(uid)
+    if user:
+        _POLL_VERIFY_CACHE[uid] = (now, user)
+        if len(_POLL_VERIFY_CACHE) > 2000:
+            _POLL_VERIFY_CACHE.clear()
+    else:
+        _POLL_VERIFY_CACHE.pop(uid, None)
+    return user
+
+
 @app.before_request
 def _require_login():
     # Re-check production identities on every authenticated request. A signed
     # cookie must not keep a deleted user or a revoked admin alive for 30 days.
     if _is_production and session.get("user_id") and not request.path.startswith("/static/"):
         try:
-            user = get_user_by_id(current_user_id())
+            user = _verified_user_for_request(current_user_id())
         except Exception:
             logger.exception("Session verification unavailable")
             return jsonify({"ok": False, "error": "Sign-in verification temporarily unavailable."}), 503
@@ -5511,6 +5542,46 @@ def api_terminal_quotes():
         "server_epoch": int(_time.time()),
         "server_time": _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
     })
+
+
+@app.route("/api/live/bundle")
+def api_live_bundle():
+    """Everything a page polls for, in one request.
+
+    Every open page used to fire 3-4 separate polls every 3 seconds (banner
+    tape, Today pulse, Terminal rows, chart live price). Each was a full
+    request through the worker pool. live_hub.js now asks once:
+        /api/live/bundle?want=tape,pulse,quotes,live&ticker=SPY
+    and hands each part to the code that used to fetch it. Each part is the
+    exact JSON its own endpoint returns (those stay for anything else), and
+    one part failing never takes the others down.
+    """
+    want = {w for w in (request.args.get("want") or "").split(",") if w}
+    parts = {}
+    handlers = {
+        "tape": api_market_tape,
+        "pulse": api_today_pulse,
+        "quotes": api_terminal_quotes,
+    }
+    for name, view in handlers.items():
+        if name in want:
+            parts[name] = _bundle_part(view)
+    if "live" in want:
+        ticker = (request.args.get("ticker") or "").strip()
+        parts["live"] = _bundle_part(lambda: api_terminal_live(ticker)) if ticker else None
+    resp = jsonify({"ok": True, "parts": parts, "server_epoch": int(_time.time())})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+def _bundle_part(view):
+    try:
+        rv = view()
+        resp = rv[0] if isinstance(rv, tuple) else rv
+        return resp.get_json(silent=True)
+    except Exception as exc:
+        logger.debug("live bundle part failed: %s", exc)
+        return None
 
 
 @app.route("/api/live/status")

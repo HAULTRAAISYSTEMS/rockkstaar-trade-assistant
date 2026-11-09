@@ -1870,10 +1870,21 @@ function twSetSpyChip(pct){
 }
 
 async function twQuotesRefresh(){
+  // With the shared live poll, the rows arrive through TSLive every 3 s and
+  // this only reports whether they are still arriving (for the freshness
+  // badge main.js keeps). Without it, fetch as before.
+  if(window.TSLive){ return Date.now() - TSLive.lastOk('quotes') < 15000; }
   try {
     var resp = await fetch('/api/terminal/quotes', {headers:{'Accept':'application/json'}});
     if(!resp.ok) return;
-    var data = await resp.json();
+    twQuotesApply(await resp.json());
+  } catch(e){
+    console.warn('terminal quotes refresh failed:', e);
+  }
+}
+function twQuotesApply(data){
+  try {
+    if(!data) return;
     (data.quotes || []).forEach(function(q){
       q.market_session=data.session;q.as_of_epoch=data.server_epoch;twApplyQuote(q);
     });
@@ -1906,6 +1917,11 @@ function twToggleDrawbar(force){
   if(on)document.addEventListener('DOMContentLoaded',function(){twToggleDrawbar(true);});})();
 
 window._arRefreshFn = twQuotesRefresh;
+if(window.TSLive){
+  TSLive.on('quotes', twQuotesApply);
+  TSLive.setLiveTicker(function(){ return twChartState && twChartState.ticker; });
+  TSLive.on('live', twLiveApply);
+}
 // Rows, header and chips: every 3 s, from the shared live-quote feed.
 window._arInterval = 3000;
 
@@ -1938,16 +1954,10 @@ function twLiveHeader(t, px, q){
     twRenderStamp({live:true, source:q.source || 'Live feed', as_of:at});
   }
 }
-async function twLivePoll(){
-  var t = twChartState.ticker;
-  if(!t || twLiveFeed.inFlight){ twLiveSchedule(); return; }
-  twLiveFeed.inFlight = true;
-  var ctrl = new AbortController(), kill = setTimeout(function(){ ctrl.abort(); }, 6000);
-  try {
-    var r = await fetch('/api/terminal/live/' + encodeURIComponent(t), {cache:'no-store', credentials:'same-origin', signal:ctrl.signal});
-    if(!r.ok) throw new Error('HTTP ' + r.status);
-    var d = await r.json(), q = d && d.quote;
-    if(q && t === twChartState.ticker){
+function twLiveApply(d){
+  var t = twChartState.ticker, q = d && d.quote;
+  if(!d || (d.ticker && d.ticker !== String(t || '').toUpperCase())) return;
+  if(q && t){
       var px = Number(q.price);
       if(isFinite(px) && px > 0){
         var sess = q.ext ? ({pre:'pre_market', post:'after_hours', overnight:'overnight'})[q.ext] : 'regular';
@@ -1957,12 +1967,25 @@ async function twLivePoll(){
         twLast[t] = px;
         twLiveFeed.ticker = t; twLiveFeed.at = Date.now();
       }
-    }
+  }
+}
+async function twLivePoll(){
+  var t = twChartState.ticker;
+  if(!t || twLiveFeed.inFlight){ twLiveSchedule(); return; }
+  twLiveFeed.inFlight = true;
+  var ctrl = new AbortController(), kill = setTimeout(function(){ ctrl.abort(); }, 6000);
+  try {
+    var r = await fetch('/api/terminal/live/' + encodeURIComponent(t), {cache:'no-store', credentials:'same-origin', signal:ctrl.signal});
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    twLiveApply(await r.json());
     twLiveFeed.fails = 0;
   } catch(e){ twLiveFeed.fails += 1; }
   finally { clearTimeout(kill); twLiveFeed.inFlight = false; twLiveSchedule(); }
 }
 function twLiveSchedule(delay){
+  // With the shared live poll the chart's price rides the page's one
+  // request; a new ticker just asks for an immediate round.
+  if(window.TSLive){ if(delay === 0 || delay != null) TSLive.now(); return; }
   clearTimeout(twLiveFeed.timer);
   if(document.hidden) return;
   twLiveFeed.timer = setTimeout(twLivePoll, delay != null ? delay : (twLiveFeed.fails >= 5 ? 30000 : 3000));
@@ -2064,7 +2087,11 @@ document.addEventListener('keydown',function(e){
   function twTapeRefresh(){
     fetch('/api/market-tape', {headers:{'Accept':'application/json'}})
       .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){
+      .then(twTapeApply)
+      .catch(function(){});
+  }
+  function twTapeApply(d){
+    (function(){
         if(!d || !d.ok || !d.items) return;
         // The "TAPE not loaded / N min behind" chip is rendered once with
         // the page. Live prices arriving is the answer to it.
@@ -2092,11 +2119,11 @@ document.addEventListener('keydown',function(e){
             }
           });
         });
-      })
-      .catch(function(){});
+    })();
   }
-  twTapeRefresh();
-  setInterval(function(){ if(!document.hidden) twTapeRefresh(); }, 3000);
+  // The page's one shared live poll delivers the tape every 3 s.
+  if(window.TSLive){ TSLive.on('tape', twTapeApply); }
+  else { twTapeRefresh(); setInterval(function(){ if(!document.hidden) twTapeRefresh(); }, 3000); }
 })();
 </script>
 {% endblock %}

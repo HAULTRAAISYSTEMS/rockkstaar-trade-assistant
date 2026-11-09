@@ -110,7 +110,8 @@ def test_payload_overlay_moves_price_and_change_only():
 
 class TestThePagesPollEveryThreeSeconds:
     def test_the_banner(self):
-        assert "}, 3000);" in open("templates/_market_tape.html").read()
+        tape = open("templates/_market_tape.html").read()
+        assert "TSLive.on('tape', handleTape);" in tape and "setInterval(fetchTape, 3000);" in tape
 
     def test_the_terminal_tape_and_rows(self):
         page = open("templates/terminal.html").read()
