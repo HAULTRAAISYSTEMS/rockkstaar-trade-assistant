@@ -56,6 +56,8 @@
 .tw-symsearch:hover { border-color: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.55); color: #fff; }
 
 .tw-chart-stack { position: relative; flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.tw-chart-stack > .tw-time-axis { flex: 0 0 22px; height: 22px !important; }
+.tw-chart-stack > .tw-indicators { flex: 0 0 auto; }
 
 /* OHLC legend floats on the chart's first line, like TradingView */
 .tw-chart-stack > .tw-ohlcv {
@@ -142,7 +144,6 @@
   }
   .tw-chart-stack > .tw-chart { flex: 1 1 auto; height: auto !important; min-height: 220px; }
   .tw-chart-stack > .tw-indicators { flex: 0 0 auto; }
-  .tw-chart-stack > .tw-time-axis { flex: 0 0 22px; height: 22px !important; }
   #tw-rsi-panel { height: 96px !important; }
   #tw-macd-panel { height: 112px !important; }
 
@@ -212,4 +213,57 @@
   .tw-chart-stack > .tw-ohlcv .v { font-size: 10px !important; }
   .tw-chart-stack > .tw-ohlcv > div:last-child { display: none; }   /* volume: drop on phones */
   .tw-chart-stack > .tw-chart { height: 52vh !important; }
+}
+
+/* ── Chart surface: solid, no grid, so nothing shows through ───── */
+.tw-chart-stack { background: #060a12 !important; }
+
+/* ── Full-screen chart ─────────────────────────────────────────── */
+.tw-fs-btn {
+  margin-left: 2px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; width: 32px; height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 9px;
+  background: rgba(3, 7, 15, 0.6); color: #c9d3df; cursor: pointer;
+}
+.tw-fs-btn:hover { color: #fff; border-color: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.6); }
+.tw-fs-btn[aria-pressed="true"] { color: #0a0712; background: linear-gradient(135deg, var(--cc-accent-hi, #e8ffad), var(--cc-accent, #c4f53b)); border-color: transparent; }
+.tw-fs-btn .tw-fs-off, .tw-fs-btn[aria-pressed="true"] .tw-fs-on { display: none; }
+.tw-fs-btn[aria-pressed="true"] .tw-fs-off { display: block; }
+
+.tw-center > .tw-panel.tw-is-fullscreen,
+.tw-center > .tw-panel:fullscreen {
+  position: fixed !important; inset: 0 !important; z-index: 10050 !important;
+  width: 100vw !important; height: 100vh !important; height: 100dvh !important;
+  max-width: none !important; margin: 0 !important;
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) !important;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) !important;
+  border: 0 !important; border-radius: 0 !important;
+  background: #050810 !important;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0) !important;
+  overflow: hidden !important;
+}
+.tw-center > .tw-panel:fullscreen::backdrop { background: #050810; }
+.tw-center > .tw-panel.tw-is-fullscreen > .tw-sym-hd,
+.tw-center > .tw-panel:fullscreen > .tw-sym-hd { grid-column: 1; grid-row: 1; }
+.tw-center > .tw-panel.tw-is-fullscreen > .tw-chart-toolbar,
+.tw-center > .tw-panel:fullscreen > .tw-chart-toolbar { grid-column: 2; grid-row: 1; }
+.tw-center > .tw-panel.tw-is-fullscreen > .tw-workspace,
+.tw-center > .tw-panel:fullscreen > .tw-workspace { grid-column: 1 / -1; grid-row: 5; min-height: 0; }
+.tw-center > .tw-panel.tw-is-fullscreen .tw-chart-stack > .tw-chart,
+.tw-center > .tw-panel:fullscreen .tw-chart-stack > .tw-chart { flex: 1 1 auto; height: auto !important; min-height: 0; }
+html.tw-fs-lock, html.tw-fs-lock body { overflow: hidden !important; }
+html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !important; }
+@media (max-width: 1099px) {
+  .tw-center > .tw-panel.tw-is-fullscreen,
+  .tw-center > .tw-panel:fullscreen { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: auto auto auto auto auto minmax(0, 1fr) !important; }
+  .tw-center > .tw-panel.tw-is-fullscreen > .tw-chart-toolbar,
+  .tw-center > .tw-panel:fullscreen > .tw-chart-toolbar { grid-column: 1; grid-row: 2; }
+  .tw-center > .tw-panel.tw-is-fullscreen > .tw-workspace,
+  .tw-center > .tw-panel:fullscreen > .tw-workspace { grid-row: 6; }
+  .tw-center > .tw-panel.tw-is-fullscreen #tw-rsi-panel,
+  .tw-center > .tw-panel:fullscreen #tw-rsi-panel { height: 80px !important; }
+  .tw-center > .tw-panel.tw-is-fullscreen #tw-macd-panel,
+  .tw-center > .tw-panel:fullscreen #tw-macd-panel { height: 90px !important; }
 }

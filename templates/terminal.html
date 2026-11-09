@@ -543,6 +543,7 @@
             </div>
           </div>
           <label class="tw-range-wrap"><span class="tw-control-label">Range</span><select id="tw-range" class="tw-range-select" onchange="twRange(this.value)"></select></label>
+          <button type="button" class="tw-fs-btn" id="tw-fs-btn" onclick="twToggleFullscreen()" title="Full screen chart (Esc to exit)" aria-label="Full screen chart" aria-pressed="false"><svg class="tw-fs-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="tw-fs-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
           <div class="tw-type" aria-label="Chart tools">
             <div class="tw-tool-group"><span class="tw-tool-label">Chart</span><div class="tw-tool-buttons">
               <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Line chart"><span class="tw-tool-icon">⌁</span>Line</button>
@@ -1159,7 +1160,7 @@ function twInitChart(){
   var chart=LC.createChart(el,{
     autoSize:true,
     layout:{ background:{type:'solid',color:'transparent'}, textColor:'#AEB7C2', fontFamily:"'IBM Plex Mono', ui-monospace, monospace", fontSize:11 },
-    grid:{ vertLines:{color:'rgba(255,255,255,0.035)'}, horzLines:{color:'rgba(255,255,255,0.045)'} },
+    grid:{ vertLines:{visible:false}, horzLines:{visible:false} },
     rightPriceScale:{ borderColor:'rgba(255,255,255,0.08)' },
     localization:{locale:'en-US',timeFormatter:twEasternTimeLabel},
     timeScale:{ borderColor:'rgba(255,255,255,0.08)', timeVisible:true, secondsVisible:false,tickMarkFormatter:twEasternTickLabel },
@@ -1323,7 +1324,7 @@ function twIndCrosshair(ctx,fit,pad,xFn,yFn,val,txt){
   if(hov==null||!win||hov<win.start||hov>=win.end) return;
   var hx=xFn(hov-win.start),ax=twChartState.axisW||64;
   ctx.save();
-  ctx.strokeStyle='rgba(255,122,24,.65)';ctx.lineWidth=1;ctx.setLineDash([4,3]);
+  ctx.strokeStyle='rgba(214,224,236,.38)';ctx.lineWidth=1;ctx.setLineDash([4,3]);
   ctx.beginPath();ctx.moveTo(hx,pad.t);ctx.lineTo(hx,fit.h-pad.b);ctx.stroke();ctx.setLineDash([]);
   if(val!=null&&isFinite(val)){
     var hy=yFn(val);
@@ -1816,6 +1817,34 @@ async function twQuotesRefresh(){
 }
 
 window._arRefreshFn = twQuotesRefresh;
+
+/* Full-screen chart. Uses the browser's full-screen mode where it exists
+   (desktop, Android, iPad); iPhone Safari has no element full screen, so
+   the panel is pinned over the page instead. Esc or the button exits. */
+function twChartPanel(){ return document.querySelector('.tw-center > .tw-panel'); }
+function twSetFsState(on){
+  var panel=twChartPanel(), btn=document.getElementById('tw-fs-btn');
+  if(panel) panel.classList.toggle('tw-is-fullscreen', on);
+  document.documentElement.classList.toggle('tw-fs-lock', on);
+  if(btn){ btn.setAttribute('aria-pressed', on?'true':'false'); btn.title=on?'Exit full screen (Esc)':'Full screen chart (Esc to exit)'; }
+  setTimeout(function(){ if(typeof twRenderIndicators==='function')twRenderIndicators(); if(typeof twDrawTimeAxis==='function')twDrawTimeAxis(); if(typeof twRenderDrawings==='function')twRenderDrawings(); }, 60);
+}
+function twToggleFullscreen(){
+  var panel=twChartPanel(); if(!panel) return;
+  var nativeOn=document.fullscreenElement||document.webkitFullscreenElement;
+  var on=panel.classList.contains('tw-is-fullscreen');
+  if(nativeOn){ (document.exitFullscreen||document.webkitExitFullscreen).call(document); return; }
+  if(on){ twSetFsState(false); return; }
+  var req=panel.requestFullscreen||panel.webkitRequestFullscreen;
+  if(req){ try{ var p=req.call(panel); if(p&&p.catch)p.catch(function(){twSetFsState(true);}); }catch(e){ twSetFsState(true); } }
+  else twSetFsState(true);
+}
+['fullscreenchange','webkitfullscreenchange'].forEach(function(ev){
+  document.addEventListener(ev,function(){ twSetFsState(!!(document.fullscreenElement||document.webkitFullscreenElement)); });
+});
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){ var p=twChartPanel(); if(p&&p.classList.contains('tw-is-fullscreen')&&!document.fullscreenElement) twSetFsState(false); }
+});
 
 /* Workspace height: on desktop the chart workspace fills the screen
    below the header. CSS reads --tw-avail; this keeps it current. */
