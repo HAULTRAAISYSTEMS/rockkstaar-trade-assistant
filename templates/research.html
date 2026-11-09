@@ -75,6 +75,8 @@
     {% else %}<div class="cr-empty">The company workspace could not load a filing scorecard. Current changes and your notes remain available below.</div>{% endif %}
   </section>
 
+  <div class="move-tools" data-move-tools="{{ ticker }}"><div class="mt-row"><button type="button" class="mt-btn" data-mt-explain>⚡ Explain today's move</button><details class="mt-replay"><summary>📊 How it reacted to its last 8 earnings</summary><div class="mt-replay-body"></div></details></div><div class="mt-explain" hidden></div></div>
+
   <section id="changes" class="cr-section">
     <div class="cr-section__head"><div><span>02 · Monitor</span><h2>What changed</h2></div><div class="cr-review-state">{% if research.reviewed_at %}Last reviewed {{ research.reviewed_at }}{% else %}No review checkpoint yet{% endif %}</div></div>
     <div class="cr-change-list">
