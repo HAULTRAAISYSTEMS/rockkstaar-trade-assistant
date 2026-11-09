@@ -290,3 +290,106 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
   }
   html.tw-fs-lock .tw-ind-menu { bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important; }
 }
+
+/* ── Chart bar: TradingView-style segmented controls ────────────────
+   One quiet row. Each control family sits in its own pill, active
+   items light in the accent, icons carry the chart-type and overlay
+   toggles (names stay as tooltips and accessible labels).            */
+.tw-chart-toolbar { gap: 6px !important; align-items: center !important; }
+.tw-chart-toolbar .tw-control-label,
+.tw-chart-toolbar .tw-tool-label { display: none !important; }
+.tw-chart-toolbar .tw-interval-wrap,
+.tw-chart-toolbar .tw-range-wrap { margin: 0 !important; padding: 0 !important; }
+
+/* pill containers */
+.tw-chart-toolbar .tw-tf,
+.tw-chart-toolbar .tw-range-wrap,
+.tw-chart-toolbar .tw-tool-buttons {
+  display: inline-flex !important; align-items: center; gap: 2px !important;
+  padding: 2px !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  border-radius: 10px !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  box-shadow: none !important;
+}
+.tw-chart-toolbar .tw-type { display: inline-flex !important; align-items: center; gap: 6px !important; margin-left: 0 !important; }
+.tw-chart-toolbar .tw-tool-group { margin: 0 !important; padding: 0 !important; border: 0 !important; }
+
+/* buttons inside pills */
+.tw-chart-toolbar .tw-tf-btn,
+.tw-chart-toolbar .tw-type-btn {
+  display: inline-flex !important; align-items: center; justify-content: center; gap: 6px;
+  width: auto !important; min-width: 30px; height: 28px !important;
+  padding: 0 9px !important;
+  border: 0 !important; border-radius: 8px !important;
+  background: transparent !important; box-shadow: none !important;
+  color: #8d9bb0 !important;
+  font: 600 11.5px/1 var(--font-mono, monospace) !important; letter-spacing: 0.02em;
+  transition: color 0.15s, background 0.15s;
+}
+.tw-chart-toolbar .tw-tf-btn:hover,
+.tw-chart-toolbar .tw-type-btn:hover { color: #fff !important; background: rgba(255, 255, 255, 0.06) !important; }
+.tw-chart-toolbar .tw-tf-btn.active,
+.tw-chart-toolbar .tw-type-btn.active {
+  color: var(--cc-accent-hi, #e8ffad) !important;
+  background: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.14) !important;
+  box-shadow: inset 0 0 0 1px rgba(var(--cc-accent-rgb, 196, 245, 59), 0.45) !important;
+}
+.tw-chart-toolbar .tw-ico { flex: none; }
+.tw-chart-toolbar .tw-tool-icon { display: none !important; }
+/* Chart type is icon-only; the label stays in the tooltip */
+.tw-chart-toolbar [data-type] .tw-btn-text { display: none; }
+.tw-chart-toolbar [data-type] { padding: 0 8px !important; }
+
+.tw-chart-toolbar .tw-range-select {
+  height: 28px !important; padding: 0 22px 0 9px !important;
+  border: 0 !important; border-radius: 8px !important;
+  background-color: transparent !important;
+  color: #dbe4ef !important; font: 600 11.5px var(--font-mono, monospace) !important;
+  cursor: pointer;
+}
+.tw-chart-toolbar .tw-ind-count {
+  min-width: 17px !important; height: 17px !important; padding: 0 5px !important;
+  border-radius: 999px !important; font: 700 10px/17px var(--font-mono, monospace) !important;
+  color: #0a0712 !important; background: var(--cc-accent, #c4f53b) !important;
+}
+
+/* Search: icon pill; full-screen pinned to the far right */
+.tw-symsearch { height: 32px; padding: 0 11px; border-radius: 10px; }
+.tw-chart-toolbar .tw-type { order: 5; }
+.tw-fs-btn { order: 10; margin-left: auto !important; width: 32px; height: 32px; border-radius: 10px; }
+
+/* Symbol block: tighter and calmer */
+.tw-sym-hd .tw-bias { padding: 2px 7px !important; font-size: 9px !important; letter-spacing: 0.12em !important; border-radius: 6px !important; }
+
+@media (min-width: 1100px) {
+  .tw-chart-toolbar { flex-wrap: nowrap !important; padding: 7px 10px !important; }
+  .tw-sym-hd { padding: 7px 14px !important; gap: 12px !important; }
+  .tw-sym-ticker { font-size: 18px !important; }
+  .tw-sym-px { font-size: 18px !important; }
+}
+/* Narrower desktops: overlay toggles go icon-only, search goes icon-only */
+@media (min-width: 1100px) and (max-width: 1499px) {
+  .tw-chart-toolbar #tw-volume-btn .tw-btn-text,
+  .tw-chart-toolbar #tw-extended-btn .tw-btn-text,
+  .tw-chart-toolbar #tw-indicators-btn .tw-btn-text,
+  .tw-symsearch span { display: none; }
+  .tw-symsearch { width: 32px; padding: 0; justify-content: center; }
+  .tw-sym-hd .tw-bias { display: none !important; }
+}
+@media (min-width: 1100px) and (max-width: 1279px) {
+  .tw-chart-toolbar { flex-wrap: wrap !important; }
+}
+.tw-chart-toolbar .tw-range-wrap { height: 34px; box-sizing: border-box; }
+.tw-chart-toolbar .tw-range-select { min-height: 0 !important; line-height: 28px !important; }
+@media (min-width: 1100px) { body:has(.tw-body) .main-content { max-width: none !important; } }
+@media (max-width: 1099px) {
+  .tw-chart-toolbar {
+    margin: 0 !important; padding: 6px 12px !important; min-height: 0 !important;
+    border: 0 !important; border-top: 1px solid rgba(255, 255, 255, 0.06) !important; border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+    border-radius: 0 !important; background: none !important; box-shadow: none !important;
+    flex-wrap: nowrap !important;
+  }
+  .tw-chart-toolbar > * { flex: 0 0 auto; }
+  .tw-fs-btn { margin-left: 6px !important; }
+}
