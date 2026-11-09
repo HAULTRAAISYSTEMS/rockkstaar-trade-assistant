@@ -447,3 +447,104 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
   .tw-chart-toolbar .tw-type-btn { padding: 0 4px !important; min-width: 26px; }
   .tw-chart-toolbar .tw-range-select { width: 58px !important; padding: 0 15px 0 7px !important; }
 }
+
+/* ── Immersive full screen (phones & tablets) ───────────────────────
+   iPhone Safari has no element full screen, so the panel is pinned over
+   the page instead. The 3D theme's floating-panel rule made that panel
+   transparent, so the Terminal header, the "Why moving" card and the
+   tape showed through and collided with the chart's own controls.
+   Full screen is now its own room:
+     - a solid backdrop with a soft accent glow, nothing behind it shows
+     - a slim header: ticker · price · change, live stamp beneath
+     - a round glass exit button pinned top-right, clear of the notch
+     - the controls in a floating glass dock at the bottom, by the thumb
+     - landscape: one-row dock, oscillators fold away, chart gets it all */
+html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen,
+html.cc27 body .tw .tw-center > .tw-panel:fullscreen {
+  background:
+    radial-gradient(120% 55% at 50% -12%, rgba(var(--cc-accent-rgb, 196, 245, 59), 0.10), transparent 62%),
+    radial-gradient(80% 40% at 100% 100%, rgba(79, 227, 255, 0.06), transparent 70%),
+    #04070c !important;
+  box-shadow: none !important;
+  isolation: isolate;
+}
+html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen::before,
+html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen::after { display: none !important; }
+
+@media (max-width: 1099px) {
+  html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen,
+  html.cc27 body .tw .tw-center > .tw-panel:fullscreen {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto minmax(0, 1fr) auto !important;
+    padding: 0 !important;
+  }
+  .tw-panel.tw-is-fullscreen > *, .tw-panel:fullscreen > * { grid-column: 1 !important; }
+  .tw-panel.tw-is-fullscreen > :not(.tw-sym-hd):not(.tw-workspace):not(.tw-chart-toolbar):not(.tw-study-settings):not(.tw-draw-status),
+  .tw-panel:fullscreen > :not(.tw-sym-hd):not(.tw-workspace):not(.tw-chart-toolbar):not(.tw-study-settings):not(.tw-draw-status) { display: none !important; }
+
+  /* Slim header */
+  .tw-panel.tw-is-fullscreen > .tw-sym-hd,
+  .tw-panel:fullscreen > .tw-sym-hd {
+    grid-row: 1 !important;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 70px 10px calc(env(safe-area-inset-left, 0px) + 16px) !important;
+    background: linear-gradient(180deg, rgba(4, 7, 12, 0.96), rgba(4, 7, 12, 0.7)) !important;
+    border-bottom: 1px solid rgba(var(--cc-accent-rgb, 196, 245, 59), 0.14);
+    gap: 2px 10px !important;
+  }
+  .tw-panel.tw-is-fullscreen .tw-sym-hd .tw-bias { display: none !important; }
+  .tw-panel.tw-is-fullscreen .tw-sym-ticker, .tw-panel:fullscreen .tw-sym-ticker { font-size: 20px !important; }
+  .tw-panel.tw-is-fullscreen .tw-sym-px, .tw-panel:fullscreen .tw-sym-px { font-size: 20px !important; }
+  .tw-panel.tw-is-fullscreen .tw-sym-stamp, .tw-panel:fullscreen .tw-sym-stamp { margin-top: 0 !important; opacity: 0.85; }
+
+  /* Chart takes the middle */
+  .tw-panel.tw-is-fullscreen > .tw-workspace,
+  .tw-panel:fullscreen > .tw-workspace { grid-row: 2 !important; min-height: 0; padding: 0 calc(env(safe-area-inset-right, 0px) + 6px) 0 calc(env(safe-area-inset-left, 0px) + 6px); }
+  .tw-panel.tw-is-fullscreen .tw-chart-stack, .tw-panel:fullscreen .tw-chart-stack { border-radius: 14px; overflow: hidden; }
+  .tw-panel.tw-is-fullscreen #tw-rsi-panel, .tw-panel:fullscreen #tw-rsi-panel { height: 72px !important; }
+  .tw-panel.tw-is-fullscreen #tw-macd-panel, .tw-panel:fullscreen #tw-macd-panel { height: 80px !important; }
+
+  /* Floating glass dock */
+  .tw-panel.tw-is-fullscreen > .tw-chart-toolbar,
+  .tw-panel:fullscreen > .tw-chart-toolbar {
+    grid-row: 3 !important;
+    margin: 8px calc(env(safe-area-inset-right, 0px) + 10px) calc(env(safe-area-inset-bottom, 0px) + 10px) calc(env(safe-area-inset-left, 0px) + 10px) !important;
+    padding: 8px 10px !important;
+    border: 1px solid rgba(var(--cc-accent-rgb, 196, 245, 59), 0.22) !important;
+    border-radius: 18px !important;
+    /* No backdrop-filter: it would make the dock the containing block for
+       the fixed exit button and pin it inside the dock. */
+    background: linear-gradient(180deg, rgba(14, 21, 33, 0.96), rgba(8, 12, 20, 0.96)) !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  }
+
+  /* Exit: round glass button, top-right, clear of the notch */
+  .tw-panel.tw-is-fullscreen .tw-chart-toolbar .tw-fs-btn,
+  .tw-panel:fullscreen .tw-chart-toolbar .tw-fs-btn {
+    position: fixed !important; z-index: 3;
+    top: calc(env(safe-area-inset-top, 0px) + 10px); right: calc(env(safe-area-inset-right, 0px) + 14px);
+    width: 42px !important; height: 42px !important; border-radius: 50% !important; margin: 0 !important;
+    color: #0a0712 !important; border: 0 !important;
+    background: linear-gradient(135deg, var(--cc-accent-hi, #e8ffad), var(--cc-accent, #c4f53b)) !important;
+    box-shadow: 0 0 0 4px rgba(var(--cc-accent-rgb, 196, 245, 59), 0.14), 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .tw-panel.tw-is-fullscreen .tw-chart-toolbar .tw-interval-wrap { flex-basis: 100% !important; }
+
+  /* Indicator sheet sits above the dock */
+  html.tw-fs-lock .tw-ind-menu { bottom: calc(132px + env(safe-area-inset-bottom, 0px)) !important; z-index: 10070 !important; }
+}
+
+/* Landscape phone: one-row dock, oscillators fold away, chart gets the room */
+@media (max-width: 1099px) and (max-height: 520px) and (orientation: landscape) {
+  .tw-panel.tw-is-fullscreen > .tw-sym-hd,
+  .tw-panel:fullscreen > .tw-sym-hd { padding-top: calc(env(safe-area-inset-top, 0px) + 6px) !important; padding-bottom: 6px !important; }
+  .tw-panel.tw-is-fullscreen .tw-sym-stamp, .tw-panel:fullscreen .tw-sym-stamp { display: none !important; }
+  .tw-panel.tw-is-fullscreen #tw-rsi-panel, .tw-panel:fullscreen #tw-rsi-panel,
+  .tw-panel.tw-is-fullscreen #tw-macd-panel, .tw-panel:fullscreen #tw-macd-panel { display: none !important; }
+  .tw-panel.tw-is-fullscreen > .tw-chart-toolbar,
+  .tw-panel:fullscreen > .tw-chart-toolbar { flex-wrap: nowrap !important; overflow-x: auto !important; margin-top: 4px !important; margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 6px) !important; padding: 5px 8px !important; }
+  .tw-panel.tw-is-fullscreen > .tw-chart-toolbar::after { display: none !important; }
+  .tw-panel.tw-is-fullscreen .tw-chart-toolbar .tw-interval-wrap { flex: 0 0 auto !important; flex-basis: auto !important; }
+  .tw-panel.tw-is-fullscreen .tw-chart-toolbar .tw-interval-wrap .tw-tf { width: auto; }
+  .tw-panel.tw-is-fullscreen .tw-chart-toolbar .tw-interval-wrap .tw-tf-btn { flex: 0 0 auto; padding: 0 10px !important; height: 30px !important; }
+  .tw-panel.tw-is-fullscreen .tw-chart-toolbar .tw-fs-btn { top: calc(env(safe-area-inset-top, 0px) + 6px); width: 36px !important; height: 36px !important; }
+}
