@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Position Guardian — Tradestaar Elite{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/trade_tools.css') }}">{% endblock %}
+{% block content %}
+<div class="tt-shell">
+  <header class="tt-hero">
+    <div><span class="tt-kicker">Watching while you work</span><h1>Position Guardian</h1>
+    <p>Your open Schwab positions, checked every few minutes against your stop, VWAP, earnings and fresh news. New warnings land in Alerts and on Telegram.</p></div>
+    <div class="tt-counts" id="gd-counts"></div>
+  </header>
+  <div id="gd-list" class="tt-pos-list" aria-live="polite"><div class="tt-card tt-empty">Loading positions…</div></div>
+  <p class="tt-foot" id="gd-asof"></p>
+</div>
+<script>
+(function(){
+  var list=document.getElementById('gd-list'),counts=document.getElementById('gd-counts'),asof=document.getElementById('gd-asof'),editing=false;
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function n(v,d){return v==null||isNaN(v)?'—':Number(v).toFixed(d==null?2:d)}
+  function pct(v){return v==null?'—':(v>0?'+':'')+Number(v).toFixed(2)+'%'}
+  function card(p){
+    var label={danger:'Danger',watch:'Watch',ok:'OK'}[p.status];
+    return '<article class="tt-card tt-pos '+p.status+'" data-sym="'+esc(p.symbol)+'">'+
+      '<header><div><a href="/stock/'+encodeURIComponent(p.symbol)+'" class="tt-sym">'+esc(p.symbol)+'</a><span>'+n(p.quantity,0)+' sh @ '+n(p.avg_price)+'</span></div><span class="tt-pill '+p.status+'">'+label+'</span></header>'+
+      '<div class="tt-pos-nums"><div><small>Price</small><b>'+n(p.price)+'</b></div><div><small>Day</small><b class="'+(p.day_pnl_pct<0?'neg':'pos')+'">'+pct(p.day_pnl_pct)+'</b></div><div><small>Open P&amp;L</small><b class="'+(p.unrealized<0?'neg':'pos')+'">'+(p.unrealized==null?'—':'$'+Number(p.unrealized).toLocaleString(undefined,{maximumFractionDigits:0}))+' <em>'+pct(p.unrealized_pct)+'</em></b></div><div><small>VWAP</small><b>'+n(p.vwap)+'</b></div></div>'+
+      '<form class="tt-stop"><label>Stop<input name="stop" inputmode="decimal" value="'+(p.stop==null?'':p.stop)+'" placeholder="Set a stop"></label><label>Target<input name="target" inputmode="decimal" value="'+(p.target==null?'':p.target)+'" placeholder="Optional"></label><button type="submit">Save</button></form>'+
+      (p.signals.length?'<ul class="tt-signals">'+p.signals.map(function(s){return '<li class="'+s.severity+'">'+esc(s.text)+'</li>'}).join('')+'</ul>':'<p class="tt-calm">All clear — nothing needs you right now.</p>')+
+      '</article>';
+  }
+  function load(){
+    if(editing)return;
+    fetch('/api/guardian',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
+      if(!d.ok&&!(d.positions||[]).length){list.innerHTML='<div class="tt-card tt-empty">'+esc(d.error||'Positions unavailable.')+(/connect/i.test(d.error||'')?' <a href="/schwab/account">Connect Schwab →</a>':'')+'</div>';counts.innerHTML='';return}
+      if(!d.positions.length){list.innerHTML='<div class="tt-card tt-empty">No open stock positions.</div>';}
+      else list.innerHTML=d.positions.map(card).join('');
+      var c=d.counts||{};counts.innerHTML='<span class="danger">'+(c.danger||0)+' danger</span><span class="watch">'+(c.watch||0)+' watch</span><span class="ok">'+(c.ok||0)+' ok</span>';
+      asof.textContent='Updated '+new Date(d.as_of).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'})+' · refreshes every 30 seconds';
+    }).catch(function(){asof.textContent='Could not refresh. Retrying…'});
+  }
+  list.addEventListener('focusin',function(e){if(e.target.closest('.tt-stop'))editing=true});
+  list.addEventListener('focusout',function(){setTimeout(function(){editing=!!document.activeElement.closest&&!!document.activeElement.closest('.tt-stop')},50)});
+  list.addEventListener('submit',function(e){
+    var form=e.target.closest('.tt-stop');if(!form)return;e.preventDefault();
+    var sym=form.closest('.tt-pos').getAttribute('data-sym'),btn=form.querySelector('button');btn.textContent='Saving…';
+    fetch('/api/guardian/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,stop:form.stop.value,target:form.target.value})})
+      .then(function(r){return r.json()}).then(function(){btn.textContent='Saved ✓';editing=false;setTimeout(load,400)}).catch(function(){btn.textContent='Retry'});
+  });
+  load();setInterval(load,30000);
+})();
+</script>
+{% endblock %}
