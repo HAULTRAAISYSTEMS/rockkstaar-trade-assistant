@@ -15,7 +15,7 @@ and marked ai=False so the sheet says so.
 from __future__ import annotations
 
 import hashlib
-import html as _html
+from html.parser import HTMLParser
 import ipaddress
 import json
 import logging
@@ -23,6 +23,7 @@ import os
 import re
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
 import time
 import urllib.parse
 import urllib.request
@@ -32,12 +33,21 @@ logger = logging.getLogger(__name__)
 MODEL = os.environ.get("ANTHROPIC_NEWS_MODEL", "claude-sonnet-4-6")
 MAX_TOKENS = 1100
 ARTICLE_CHARS = 12000
+PAGE_CHARS = 600_000      # raw HTML read from the article page
+MODEL_TIMEOUT = 25        # seconds for the whole model call
+DEADLINE = 30             # seconds for one summary end to end
+MAX_CONCURRENT = 2        # summaries running at once per worker
 FETCH_TIMEOUT = 5
 CACHE_TTL = 6 * 3600
 IMPACTS = ("strengthened", "weakened", "neutral", "uncertain")
 
 _cache: dict[str, tuple[float, dict]] = {}
 _cache_lock = threading.Lock()
+# Summaries are slow (page fetch + model call). Never let them occupy more
+# than MAX_CONCURRENT of a worker's request threads, and never longer than
+# DEADLINE: the rest of the site, and Render's health check, must keep answering.
+_slots = threading.BoundedSemaphore(MAX_CONCURRENT)
+_pool = ThreadPoolExecutor(max_workers=MAX_CONCURRENT, thread_name_prefix="news-summary")
 
 SYSTEM = (
     "You are a buy-side research assistant writing a trader's notebook entry "
@@ -88,20 +98,62 @@ class _CheckedRedirects(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-_TAG_DROP = re.compile(r"<(script|style|noscript|svg|nav|footer|header|aside|form)\b.*?</\1>", re.S | re.I)
-_PARA = re.compile(r"<p\b[^>]*>(.*?)</p>", re.S | re.I)
-_TAGS = re.compile(r"<[^>]+>")
+class _ParaText(HTMLParser):
+    """Collect <p> text in one linear pass, skipping scripts, menus and forms.
+
+    This replaced a regex that, on pages with unclosed <form>/<nav>/<header>
+    tags, rescanned the rest of the page for every one of them: 40+ seconds of
+    CPU holding the GIL, which froze the whole worker — health checks
+    included — until Render restarted it (the 502 of Nov 9, 6:14 PM).
+    """
+
+    _SKIP = {"script", "style", "noscript", "svg", "nav", "footer", "header", "aside", "form"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.skip = 0
+        self.in_p = 0
+        self.buf: list[str] = []
+        self.paras: list[str] = []
+        self.size = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SKIP:
+            self.skip += 1
+        elif tag == "p":
+            self._flush()
+            self.in_p = 1
+
+    def handle_endtag(self, tag):
+        if tag in self._SKIP:
+            self.skip = max(0, self.skip - 1)
+        elif tag == "p":
+            self._flush()
+            self.in_p = 0
+
+    def handle_data(self, data):
+        if self.in_p and not self.skip:
+            self.buf.append(data)
+
+    def _flush(self):
+        if self.buf:
+            text = " ".join(" ".join(self.buf).split())
+            self.buf = []
+            if len(text) >= 40:  # skip bylines, captions, "Share this" stubs
+                self.paras.append(text)
+                self.size += len(text)
 
 
 def html_to_text(page: str) -> str:
-    """The article's paragraph text, without markup, menus or scripts."""
-    page = _TAG_DROP.sub(" ", page or "")
-    paras = []
-    for raw in _PARA.findall(page):
-        text = " ".join(_html.unescape(_TAGS.sub(" ", raw)).split())
-        if len(text) >= 40:  # skip bylines, captions, "Share this" stubs
-            paras.append(text)
-    return "\n".join(paras)[:ARTICLE_CHARS]
+    """The article's paragraph text, without markup, menus or scripts. Linear time."""
+    parser = _ParaText()
+    try:
+        parser.feed((page or "")[:PAGE_CHARS])
+        parser.close()
+    except Exception:
+        pass
+    parser._flush()
+    return "\n".join(parser.paras)[:ARTICLE_CHARS]
 
 
 def fetch_article_text(url: str) -> str:
@@ -118,7 +170,7 @@ def fetch_article_text(url: str) -> str:
             ctype = resp.headers.get("Content-Type", "")
             if "html" not in ctype.lower():
                 return ""
-            raw = resp.read(1_500_000)
+            raw = resp.read(PAGE_CHARS)
             charset = resp.headers.get_content_charset() or "utf-8"
         return html_to_text(raw.decode(charset, errors="replace"))
     except Exception as exc:
@@ -186,7 +238,7 @@ Return JSON with exactly these keys:
 def _ask_model(item: dict, text: str, api_key: str) -> dict:
     import anthropic  # imported lazily; the app already depends on it
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, timeout=MODEL_TIMEOUT, max_retries=0)
     response = client.messages.create(
         model=MODEL, max_tokens=MAX_TOKENS, temperature=0.2, system=SYSTEM,
         messages=[{"role": "user", "content": _prompt(item, text)}],
@@ -242,6 +294,26 @@ def summarize(item: dict, *, fetch=fetch_article_text, ask=None, fresh: bool = F
         if hit and not fresh and time.time() - hit[0] < CACHE_TTL:
             return dict(hit[1], cached=True)
 
+    if not _slots.acquire(blocking=False):
+        out = dict(rule_based(item, item.get("summary", "") or item["headline"]), ai=False, provider="Story text")
+        out.update({"ok": True, "basis": "provider summary" if item.get("summary") else "headline only",
+                    "note": "The summarizer is busy, so this was filled from the story text. Tap Re-summarize in a moment."})
+        return out
+    try:
+        future = _pool.submit(_summarize_now, item, key, fetch, ask)
+        try:
+            return future.result(timeout=DEADLINE)
+        except _FutTimeout:
+            logger.warning("news summary: over %ss for %s", DEADLINE, item.get("url") or item.get("headline"))
+            out = dict(rule_based(item, item.get("summary", "") or item["headline"]), ai=False, provider="Story text")
+            out.update({"ok": True, "basis": "provider summary" if item.get("summary") else "headline only",
+                        "note": "The AI summary took too long, so this was filled from the story text."})
+            return out
+    finally:
+        _slots.release()
+
+
+def _summarize_now(item: dict, key: str, fetch, ask) -> dict:
     article = fetch(item.get("url", "")) if fetch else ""
     provided = item.get("summary", "").strip()
     text = article if len(article) >= 200 else ""
