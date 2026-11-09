@@ -116,5 +116,18 @@ def main():
     parser=argparse.ArgumentParser(description="Discover market catalysts and create draft-only Live Research suggestions")
     parser.add_argument("--tickers",help="Comma-separated priority ticker override"); args=parser.parse_args()
     tickers=[x.strip().upper() for x in args.tickers.split(",") if x.strip()] if args.tickers else None
-    result=run(tickers); print(json.dumps(result,sort_keys=True)); return 0
+    result=run(tickers); print(json.dumps(result,sort_keys=True))
+    # Weekly Research Memory recall: due questions to each user's devices,
+    # and to Telegram for the owner. Self-gated on day/hour; once per day.
+    try:
+        import memory_edge
+        from schwab import quotes_user_id
+        owner=quotes_user_id(); conn=get_db()
+        try: users=[int(r["user_id"]) for r in conn.execute("SELECT DISTINCT user_id FROM research_memory_cards WHERE status='active'").fetchall()]
+        finally: conn.close()
+        pings={str(u): memory_edge.recall_ping(u, telegram=None if u==owner else (lambda text: False)).get("reason","sent") for u in users}
+        print(json.dumps({"recall": pings}, sort_keys=True))
+    except Exception as exc:
+        print(json.dumps({"recall_error": type(exc).__name__}))
+    return 0
 if __name__=="__main__": raise SystemExit(main())
