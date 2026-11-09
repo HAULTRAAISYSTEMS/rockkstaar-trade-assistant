@@ -5391,6 +5391,30 @@ def api_terminal_quotes():
     })
 
 
+@app.route("/api/terminal/live/<ticker>")
+def api_terminal_live(ticker):
+    """The charted symbol's latest print, for ticking the live candle.
+
+    Polled every few seconds by the Terminal chart. Answers from a shared
+    per-symbol cache refreshed in the background (Yahoo 1m incl. pre/post;
+    Alpaca overnight 8 PM-4 AM), so a poll never waits on a provider.
+    `quote` is null until the first fetch lands or when nothing is recent.
+    """
+    ticker = (ticker or "").upper().strip()
+    if not ticker or len(ticker) > 12 or not all(c.isalnum() or c in ".-^=" for c in ticker):
+        return jsonify({"ok": False, "error": "bad ticker"}), 400
+    quote = None
+    if _MKT_AVAILABLE:
+        try:
+            quote = _mkt.live_ticker_quote(ticker)
+        except Exception as exc:
+            logger.debug("terminal live %s: %s", ticker, exc)
+    resp = jsonify({"ok": True, "ticker": ticker, "quote": quote,
+                    "server_epoch": int(_time.time())})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/api/terminal/candles/<ticker>")
 def api_terminal_candles(ticker):
     """Return OHLCV bars for the terminal chart from the existing data feed."""
@@ -8411,6 +8435,12 @@ def _build_today_pulse(mkt: dict) -> dict:
         session = _mkt.market_session() if _MKT_AVAILABLE else ""
     except Exception:
         session = ""
+    # 8 PM-4 AM on a trading night is the 24-hour-market overnight session.
+    try:
+        if session == "closed" and _MKT_AVAILABLE and _mkt.overnight_window_start() is not None:
+            session = "overnight"
+    except Exception:
+        pass
     pulse["session"] = session
     try:
         day = _mkt._day_label() if _MKT_AVAILABLE else "today"
@@ -8439,7 +8469,7 @@ def _build_today_pulse(mkt: dict) -> dict:
             fast = _mkt.fast_pulse_quotes() or {}
         except Exception:
             fast = {}
-    tag = {"pre": "PRE", "post": "AH"}.get(session, "")
+    tag = {"pre": "PRE", "post": "AH", "overnight": "24H"}.get(session, "")
     for sym, key in (("SPY", "spy"), ("QQQ", "qqq")):
         q = fast.get(sym)
         if not q:
@@ -8448,6 +8478,10 @@ def _build_today_pulse(mkt: dict) -> dict:
         if q.get("ext") and q["ext"] == session:
             pulse[f"{key}_label"] = f"{sym} {tag}"
             pulse[f"{key}_ext"] = True
+            # Overnight prints can lag (Alpaca Basic is derived, not tick-by-
+            # tick), so the tile says when its print is from.
+            if session == "overnight":
+                pulse[f"{key}_at"] = q.get("at") or ""
         elif session == "regular":
             pulse[f"{key}_label"] = sym
     for sym, key in (("ES", "es"), ("NQ", "nq")):
@@ -8725,7 +8759,8 @@ def api_today_pulse():
         "ok": known,
         "pulse": {k: pulse.get(k) for k in (
             "known", "regime", "vix", "vix_as_of", "spy", "qqq",
-            "spy_label", "qqq_label", "spy_ext", "qqq_ext", "es", "nq", "liquidity",
+            "spy_label", "qqq_label", "spy_ext", "qqq_ext", "spy_at", "qqq_at",
+            "es", "nq", "liquidity",
             "session", "age_minutes", "snapshot_stale",
         )},
         "server_time": _et_now().isoformat(),

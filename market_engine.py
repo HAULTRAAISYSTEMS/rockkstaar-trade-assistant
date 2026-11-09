@@ -694,6 +694,39 @@ def market_session(now=None) -> str:
     return {"pre_market": "pre", "after_hours": "post", "unknown": "closed"}.get(status, status)
 
 
+def overnight_window_start(now=None):
+    """Start (ET datetime) of the 24-hour-market overnight session in
+    progress, or None outside it.
+
+    The overnight session runs 8 PM-4 AM ET on the night before a trading
+    day (Sun-Thu nights, holidays excepted) — the hours Robinhood's 24 Hour
+    Market and other ATS venues trade that the exchanges do not.
+    """
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    from exchange_schedule import is_trading_day
+    et = ZoneInfo("America/New_York")
+    now = (now or datetime.now(et)).astimezone(et)
+    minute = now.hour * 60 + now.minute
+    if minute >= 20 * 60:
+        start = now.replace(hour=20, minute=0, second=0, microsecond=0)
+        trading = is_trading_day((now + timedelta(days=1)).date())
+    elif minute < 4 * 60:
+        start = (now - timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
+        trading = is_trading_day(now.date())
+    else:
+        return None
+    return start if trading else None
+
+
+def pulse_session(now=None) -> str:
+    """market_session(), plus 'overnight' for the 8 PM-4 AM ATS session."""
+    session = market_session(now)
+    if session == "closed" and overnight_window_start(now) is not None:
+        return "overnight"
+    return session
+
+
 def get_market_context() -> dict:
     """
     Return cached market context immediately — NEVER blocks the calling thread.
@@ -1372,6 +1405,33 @@ def _fast_quote_from_chart(res: dict, key: str, session: str, today) -> dict | N
     return None
 
 
+def _overnight_quote(key: str, res: dict, window_start) -> dict | None:
+    """SPY/QQQ in the 8 PM-4 AM session: latest Alpaca overnight print
+    against the last regular close (Yahoo's regularMarketPrice)."""
+    base = (res.get("meta") or {}).get("regularMarketPrice")
+    try:
+        from overnight_data import latest_overnight_bar
+        bar = latest_overnight_bar(key)
+    except Exception:
+        bar = None
+    return _overnight_quote_from_bar(bar, base, window_start)
+
+
+def _overnight_quote_from_bar(bar: dict | None, base, window_start) -> dict | None:
+    """Pure: an overnight print only counts if it is from this session."""
+    from zoneinfo import ZoneInfo
+    if not bar or not base or window_start is None:
+        return None
+    when = datetime.fromtimestamp(bar["time"], ZoneInfo("America/New_York"))
+    if when < window_start:
+        return None   # last night's print, not tonight's
+    price = float(bar["close"])
+    return {"price": round(price, 2),
+            "pct": round((price / float(base) - 1) * 100, 2),
+            "ext": "overnight",
+            "at": when.strftime("%-I:%M %p ET")}
+
+
 def _fetch_fast_quotes() -> None:
     import time as _time
     from zoneinfo import ZoneInfo
@@ -1380,9 +1440,10 @@ def _fetch_fast_quotes() -> None:
         from concurrent.futures import ThreadPoolExecutor
     except ImportError:
         return
-    session = market_session()
+    session = pulse_session()
     today = datetime.now(ZoneInfo("America/New_York")).date()
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+    window_start = overnight_window_start() if session == "overnight" else None
 
     def _one(item):
         key, sym = item
@@ -1395,6 +1456,8 @@ def _fetch_fast_quotes() -> None:
                              headers=headers, timeout=5)
                 res = (r.json().get("chart", {}).get("result") or [None])[0]
                 if res:
+                    if session == "overnight" and key in ("SPY", "QQQ"):
+                        return key, _overnight_quote(key, res, window_start)
                     return key, _fast_quote_from_chart(res, key, session, today)
             except Exception:
                 continue
@@ -1441,9 +1504,118 @@ def fast_pulse_quotes() -> dict:
     if not _FAST_CACHE["quotes"] or age > _FAST_MAX_AGE_S:
         return {}
     # A cached quote from the previous session must not be relabelled as this one.
-    if _FAST_CACHE["quotes"].get("_session") != market_session():
+    if _FAST_CACHE["quotes"].get("_session") != pulse_session():
         return {}
     return dict(_FAST_CACHE["quotes"])
+
+
+# ── Live ticker quotes (Terminal chart) ────────────────────────────────────
+# The Terminal chart's active candle ticks from this. One background fetch per
+# symbol per few seconds, shared by every reader of that symbol; requests read
+# the cache and never wait on Yahoo or Alpaca.
+_LIVE_TTL_S = 3
+_LIVE_MAX_AGE_S = 60
+_LIVE_MAX_SYMBOLS = 200
+_LIVE_CACHE: dict = {}          # sym -> {"at": float, "quote": dict | None}
+_LIVE_REFRESHING: set = set()
+
+
+def _live_quote_from_chart(res: dict, session: str) -> dict | None:
+    """Pure: the latest print from a Yahoo 1m pre/post chart.
+
+    Returns {"price", "epoch", "prev_close", "regular_close", "ext"} where
+    `ext` names the extended session the print belongs to (or None for a
+    regular-hours print), judged by the print's own ET clock time.
+    """
+    from zoneinfo import ZoneInfo
+    meta = res.get("meta") or {}
+    stamps = res.get("timestamp") or []
+    closes = ((res.get("indicators", {}).get("quote") or [{}])[0].get("close") or [])
+    pairs = [(t, c) for t, c in zip(stamps, closes) if c is not None]
+    if pairs:
+        epoch, price = pairs[-1]
+    else:
+        epoch, price = meta.get("regularMarketTime"), meta.get("regularMarketPrice")
+    if not epoch or price is None:
+        return None
+    when = datetime.fromtimestamp(int(epoch), ZoneInfo("America/New_York"))
+    mins = when.hour * 60 + when.minute
+    ext = "pre" if mins < 570 else ("post" if mins >= 960 else None)
+    return {"price": round(float(price), 4), "epoch": int(epoch),
+            "prev_close": meta.get("chartPreviousClose") or meta.get("previousClose"),
+            "regular_close": meta.get("regularMarketPrice"),
+            "ext": ext}
+
+
+def _fetch_live_quote(sym: str) -> None:
+    import time as _time
+    session = pulse_session()
+    quote = None
+    try:
+        import requests as _req
+        headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+        for base in ("https://query1.finance.yahoo.com/v8/finance/chart",
+                     "https://query2.finance.yahoo.com/v8/finance/chart"):
+            try:
+                r = _req.get(f"{base}/{sym}",
+                             params={"range": "1d", "interval": "1m", "includePrePost": "true"},
+                             headers=headers, timeout=5)
+                res = (r.json().get("chart", {}).get("result") or [None])[0]
+                if res:
+                    quote = _live_quote_from_chart(res, session)
+                    break
+            except Exception:
+                continue
+        # 8 PM-4 AM: Yahoo has no prints; the overnight ATS feed does.
+        if session == "overnight":
+            start = overnight_window_start()
+            try:
+                from overnight_data import latest_overnight_bar
+                bar = latest_overnight_bar(sym)
+            except Exception:
+                bar = None
+            if bar and start is not None and bar["time"] >= start.timestamp():
+                base_close = (quote or {}).get("regular_close")
+                quote = {"price": round(float(bar["close"]), 4), "epoch": int(bar["time"]),
+                         "prev_close": base_close, "regular_close": base_close,
+                         "ext": "overnight"}
+    except Exception as exc:
+        logger.debug("_fetch_live_quote %s failed: %s", sym, exc)
+    if quote:
+        quote["session"] = session
+        _LIVE_CACHE[sym] = {"at": _time.time(), "quote": quote}
+        if len(_LIVE_CACHE) > _LIVE_MAX_SYMBOLS:
+            oldest = sorted(_LIVE_CACHE.items(), key=lambda kv: kv[1]["at"])
+            for k, _ in oldest[: len(_LIVE_CACHE) - _LIVE_MAX_SYMBOLS]:
+                _LIVE_CACHE.pop(k, None)
+
+
+def live_ticker_quote(sym: str) -> dict | None:
+    """Latest cached print for one symbol, a few seconds old — never blocks.
+
+    The first call for a symbol returns None and starts the fetch; the next
+    poll has it. Off under TRADESTAAR_NO_BACKGROUND.
+    """
+    import os as _os
+    import time as _time
+    import threading as _th
+    sym = (sym or "").upper().strip()
+    if not sym or _os.environ.get("TRADESTAAR_NO_BACKGROUND", "").strip().lower() in ("1", "true", "yes"):
+        return None
+    entry = _LIVE_CACHE.get(sym)
+    age = _time.time() - entry["at"] if entry else None
+    if (age is None or age >= _LIVE_TTL_S) and sym not in _LIVE_REFRESHING and len(_LIVE_REFRESHING) < 8:
+        _LIVE_REFRESHING.add(sym)
+
+        def _work():
+            try:
+                _fetch_live_quote(sym)
+            finally:
+                _LIVE_REFRESHING.discard(sym)
+        _th.Thread(target=_work, daemon=True, name=f"live_{sym}").start()
+    if not entry or age > _LIVE_MAX_AGE_S:
+        return None
+    return dict(entry["quote"], age_seconds=round(age, 1))
 
 
 def get_market_tape() -> list[dict]:

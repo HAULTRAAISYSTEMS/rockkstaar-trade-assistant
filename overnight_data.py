@@ -205,6 +205,31 @@ def fetch_overnight_bars(ticker: str, interval: str, range_str: str) -> dict:
         }
 
 
+def latest_overnight_bar(ticker: str) -> dict | None:
+    """Latest genuine 8 PM-4 AM ET print for the Today pulse, or None.
+
+    Tries the BOATS feed first (real time on paid plans), then Alpaca Basic's
+    derived ``overnight`` feed. Never synthesizes a price; no credentials or
+    no access means None and the pulse keeps its close label.
+    """
+    key, secret = _credentials()
+    if not (key and secret):
+        return None
+    headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
+    try:
+        response = requests.get(
+            f"{_BASE_URL}/{ticker}/bars/latest",
+            params={"feed": "boats"}, headers=headers, timeout=6,
+        )
+        if response.status_code == 200:
+            bar = _parse_bar((response.json() or {}).get("bar") or {})
+            if bar:
+                return bar
+    except (requests.RequestException, ValueError):
+        pass
+    return _fetch_basic_overnight_latest(ticker, headers).get("bar")
+
+
 def merge_session_bars(primary: list[dict], overnight: list[dict]) -> list[dict]:
     """Merge provider bars by timestamp, preferring the dedicated overnight feed."""
     merged = {int(bar["time"]): dict(bar) for bar in primary}

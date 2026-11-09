@@ -226,3 +226,41 @@ def test_a_missing_fast_reading_keeps_the_snapshot_value(client, live_market, mo
     monkeypatch.setattr(legacy._mkt, "fast_pulse_quotes", lambda: {"VIX": FAST["VIX"]})
     p = client.get("/api/today/pulse").get_json()["pulse"]
     assert p["spy"] == 0.62 and p["es"] == 0.55 and p["vix"] == 16.2
+
+
+# ── 24-hour market (8 PM-4 AM ET overnight session) ─────────────────────────
+
+def test_overnight_window_runs_the_night_before_a_trading_day():
+    sun_9pm = _dt(2026, 11, 8, 21, 0, tzinfo=ET)           # Sunday → Monday trades
+    mon_2am = _dt(2026, 11, 10, 2, 0, tzinfo=ET)          # Tuesday 2 AM
+    assert market_engine.overnight_window_start(sun_9pm) == _dt(2026, 11, 8, 20, 0, tzinfo=ET)
+    assert market_engine.overnight_window_start(mon_2am) == _dt(2026, 11, 9, 20, 0, tzinfo=ET)
+
+
+def test_no_overnight_session_into_a_weekend_or_during_the_day():
+    fri_9pm = _dt(2026, 11, 13, 21, 0, tzinfo=ET)          # Saturday does not trade
+    tue_5am = _dt(2026, 11, 10, 5, 0, tzinfo=ET)
+    assert market_engine.overnight_window_start(fri_9pm) is None
+    assert market_engine.overnight_window_start(tue_5am) is None
+
+
+def test_an_overnight_print_counts_only_if_it_is_from_tonight():
+    start = _dt(2026, 11, 9, 20, 0, tzinfo=ET)
+    tonight = {"time": int(_dt(2026, 11, 9, 21, 14, tzinfo=ET).timestamp()), "close": 682.0}
+    last_night = {"time": int(_dt(2026, 11, 8, 23, 0, tzinfo=ET).timestamp()), "close": 682.0}
+    q = market_engine._overnight_quote_from_bar(tonight, 680.0, start)
+    assert q["ext"] == "overnight" and q["pct"] == 0.29 and q["at"] == "9:14 PM ET"
+    assert market_engine._overnight_quote_from_bar(last_night, 680.0, start) is None
+    assert market_engine._overnight_quote_from_bar(None, 680.0, start) is None
+
+
+def test_the_strip_labels_overnight_prints_24h_with_their_time(client, live_market, monkeypatch):
+    monkeypatch.setattr(legacy._mkt, "market_session", lambda: "closed")
+    monkeypatch.setattr(legacy._mkt, "overnight_window_start", lambda *a: object())
+    monkeypatch.setattr(legacy._mkt, "_day_label", lambda: "today")
+    monkeypatch.setattr(legacy._mkt, "fast_pulse_quotes", lambda: {
+        "SPY": {"price": 682.0, "pct": 0.29, "ext": "overnight", "at": "9:14 PM ET"}})
+    p = client.get("/api/today/pulse").get_json()["pulse"]
+    assert p["session"] == "overnight"
+    assert p["spy_label"] == "SPY 24H" and p["spy_ext"] is True and p["spy_at"] == "9:14 PM ET"
+    assert p["qqq_label"] == "QQQ CLOSE"   # no overnight print → honest close label
