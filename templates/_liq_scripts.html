@@ -869,11 +869,11 @@ function _renderLivePulse(market) {
 
 /* ─────────────────────────────────────────────────────────────
    LIVE PULSE — the strip keeps itself current without a reload.
-   Polls /api/today/pulse (cached server-side, never waits on an
+   Polls /api/today/pulse every 3s (cached server-side, never waits on an
    upstream API). Pauses while the tab is hidden, backs off on
    failure, and never paints a reading over a dash it cannot back.
 ───────────────────────────────────────────────────────────── */
-const _PULSE_POLL_MS = (window.__PULSE_MS || 30000);
+const _PULSE_POLL_MS = (window.__PULSE_MS || 3000);
 const _pulseLive = {timer: null, okAt: 0, fails: 0, session: '', inFlight: false};
 
 function _applyPulse(p) {
@@ -938,7 +938,7 @@ function _paintPulseBadge() {
   badge.hidden = false;
   const secs = Math.max(0, Math.round((Date.now() - _pulseLive.okAt) / 1000));
   const ago = secs < 10 ? 'just now' : secs < 60 ? secs + 's ago' : Math.floor(secs / 60) + 'm ago';
-  const stale = _pulseLive.fails >= 2 || secs > 180;
+  const stale = _pulseLive.fails >= 4 || secs > 60;
   badge.classList.toggle('is-stale', stale);
   if (stale) text.textContent = 'Paused · ' + ago;
   else {
@@ -947,7 +947,7 @@ function _paintPulseBadge() {
   }
   badge.title = stale
     ? 'The last updates did not come back. Numbers shown are from the last good read.'
-    : 'Updates every 30 seconds without reloading.';
+    : 'Updates every 3 seconds without reloading.';
 }
 
 async function _pollPulse() {
@@ -955,7 +955,7 @@ async function _pollPulse() {
   if (!rail || _pulseLive.inFlight) return;
   _pulseLive.inFlight = true;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const url = rail.dataset.pulseUrl || '/api/today/pulse';
     const r = await fetch(url, {cache: 'no-store', credentials: 'same-origin', signal: controller.signal});
@@ -979,8 +979,8 @@ async function _pollPulse() {
 function _schedulePulse(delay) {
   clearTimeout(_pulseLive.timer);
   if (document.hidden) return;
-  // Back off to 2 min after repeated failures so a dead feed is not hammered.
-  const wait = delay != null ? delay : (_pulseLive.fails >= 3 ? 120000 : _PULSE_POLL_MS);
+  // Back off to 30s after repeated failures so a dead feed is not hammered.
+  const wait = delay != null ? delay : (_pulseLive.fails >= 5 ? 30000 : _PULSE_POLL_MS);
   _pulseLive.timer = setTimeout(_pollPulse, wait);
 }
 
@@ -999,10 +999,10 @@ function startLivePulse() {
   _pulseLive.session = document.getElementById('cc-pulse').dataset.session || '';
   _paintPulseBadge();
   _schedulePulse();
-  setInterval(_paintPulseBadge, 5000);
+  setInterval(_paintPulseBadge, 1000);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) clearTimeout(_pulseLive.timer);
-    else _schedulePulse(Date.now() - _pulseLive.okAt > 15000 ? 0 : null);
+    else _schedulePulse(0);
   });
 }
 

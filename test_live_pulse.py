@@ -37,6 +37,8 @@ def live_market(monkeypatch):
     monkeypatch.setattr(legacy._mkt, "context_is_real", lambda m: True)
     monkeypatch.setattr(legacy._mkt, "snapshot_age_minutes", lambda m: 1)
     monkeypatch.setattr(legacy._mkt, "market_session", lambda: "regular")
+    monkeypatch.setattr(legacy._mkt, "get_market_tape", lambda: [])
+    monkeypatch.setattr(legacy._mkt, "fast_pulse_quotes", lambda: {})
 
 
 def test_the_endpoint_returns_the_live_strip(client, live_market):
@@ -148,3 +150,79 @@ def test_the_page_renders_premarket_numbers_on_load(client, live_market, monkeyp
     html = client.get("/").get_data(as_text=True)
     assert ">SPY PRE<" in html and "+0.42%" in html
     assert 'data-session="pre"' in html
+
+
+# ── The fast feed ───────────────────────────────────────────────────────────
+from datetime import date, datetime as _dt
+from zoneinfo import ZoneInfo
+import market_engine
+
+ET = ZoneInfo("America/New_York")
+DAY = date(2026, 11, 9)
+
+
+def _chart(prev, reg, bars):
+    stamps = [int(_dt(2026, 11, 9, h, m, tzinfo=ET).timestamp()) for h, m, _ in bars]
+    return {"meta": {"chartPreviousClose": prev, "regularMarketPrice": reg},
+            "timestamp": stamps,
+            "indicators": {"quote": [{"close": [px for _, _, px in bars]}]}}
+
+
+def test_fast_quote_regular_hours_is_last_print_vs_prior_close():
+    q = market_engine._fast_quote_from_chart(
+        _chart(100.0, 101.0, [(10, 0, 100.5), (10, 1, 101.0)]), "SPY", "regular", DAY)
+    assert q["pct"] == 1.0 and q["ext"] is None and q["at"] == "10:01:00 AM ET"
+
+
+def test_fast_quote_premarket_uses_the_pre_print():
+    # Before the open, regularMarketPrice is Friday's close.
+    q = market_engine._fast_quote_from_chart(
+        _chart(99.0, 100.0, [(7, 58, 100.4)]), "SPY", "pre", DAY)
+    assert q["pct"] == 0.4 and q["ext"] == "pre"
+
+
+def test_fast_quote_premarket_without_a_print_today_says_nothing():
+    res = _chart(99.0, 100.0, [])
+    res["meta"]["regularMarketTime"] = int(_dt(2026, 11, 6, 16, 0, tzinfo=ET).timestamp())
+    assert market_engine._fast_quote_from_chart(res, "SPY", "pre", DAY) is None
+
+
+def test_fast_quote_after_hours_is_against_todays_close():
+    q = market_engine._fast_quote_from_chart(
+        _chart(98.0, 100.0, [(16, 30, 99.5)]), "QQQ", "post", DAY)
+    assert q["pct"] == -0.5 and q["ext"] == "post"
+
+
+def test_fast_quote_futures_trade_around_the_clock():
+    q = market_engine._fast_quote_from_chart(
+        _chart(6000.0, 6030.0, [(3, 15, 6030.0)]), "ES", "pre", DAY)
+    assert q["pct"] == 0.5
+
+
+def test_the_fast_feed_is_off_in_tests():
+    assert market_engine.fast_pulse_quotes() == {}
+
+
+FAST = {
+    "SPY": {"price": 681.0, "pct": 0.37, "ext": "pre", "at": "7:58:41 AM ET"},
+    "QQQ": {"price": 612.0, "pct": 0.12, "ext": "pre", "at": "7:58:41 AM ET"},
+    "ES": {"price": 6810.0, "pct": 0.29, "ext": None, "at": "7:58:40 AM ET"},
+    "NQ": {"price": 25210.0, "pct": 0.44, "ext": None, "at": "7:58:40 AM ET"},
+    "VIX": {"price": 16.2, "pct": -2.1, "ext": None, "at": "7:58:39 AM ET"},
+}
+
+
+def test_the_fast_feed_drives_the_strip(client, live_market, monkeypatch):
+    monkeypatch.setattr(legacy._mkt, "market_session", lambda: "pre")
+    monkeypatch.setattr(legacy._mkt, "_day_label", lambda: "Friday")
+    monkeypatch.setattr(legacy._mkt, "fast_pulse_quotes", lambda: dict(FAST))
+    p = client.get("/api/today/pulse").get_json()["pulse"]
+    assert p["spy"] == 0.37 and p["spy_label"] == "SPY PRE"
+    assert p["es"] == 0.29 and p["nq"] == 0.44
+    assert p["vix"] == 16.2 and p["vix_as_of"] == "7:58:39 AM ET"
+
+
+def test_a_missing_fast_reading_keeps_the_snapshot_value(client, live_market, monkeypatch):
+    monkeypatch.setattr(legacy._mkt, "fast_pulse_quotes", lambda: {"VIX": FAST["VIX"]})
+    p = client.get("/api/today/pulse").get_json()["pulse"]
+    assert p["spy"] == 0.62 and p["es"] == 0.55 and p["vix"] == 16.2

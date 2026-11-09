@@ -8431,13 +8431,40 @@ def _build_today_pulse(mkt: dict) -> dict:
     # `ext_session` when it is a genuine pre/post print from today, so a
     # symbol with no extended trade yet keeps the session-close label above.
     pulse["spy_ext"] = pulse["qqq_ext"] = False
-    if session in ("pre", "post") and _MKT_AVAILABLE:
+    # Fast feed first: a few seconds old, shared by every open page. Anything
+    # it lacks keeps the slower snapshot value (and the tape fallback below).
+    fast = {}
+    if _MKT_AVAILABLE:
+        try:
+            fast = _mkt.fast_pulse_quotes() or {}
+        except Exception:
+            fast = {}
+    tag = {"pre": "PRE", "post": "AH"}.get(session, "")
+    for sym, key in (("SPY", "spy"), ("QQQ", "qqq")):
+        q = fast.get(sym)
+        if not q:
+            continue
+        pulse[key] = q["pct"]
+        if q.get("ext") and q["ext"] == session:
+            pulse[f"{key}_label"] = f"{sym} {tag}"
+            pulse[f"{key}_ext"] = True
+        elif session == "regular":
+            pulse[f"{key}_label"] = sym
+    for sym, key in (("ES", "es"), ("NQ", "nq")):
+        if fast.get(sym):
+            pulse[key] = fast[sym]["pct"]
+    if fast.get("VIX"):
+        pulse["vix"] = fast["VIX"]["price"]
+        if fast["VIX"].get("at"):
+            pulse["vix_as_of"] = fast["VIX"]["at"]
+    if session in ("pre", "post") and _MKT_AVAILABLE and not (pulse["spy_ext"] and pulse["qqq_ext"]):
         try:
             tape = {i.get("symbol"): i for i in (_mkt.get_market_tape() or [])}
         except Exception:
             tape = {}
-        tag = "PRE" if session == "pre" else "AH"
         for sym, key in (("SPY", "spy"), ("QQQ", "qqq")):
+            if pulse[f"{key}_ext"]:
+                continue
             item = tape.get(sym) or {}
             pct = item.get("change_pct")
             if item.get("ext_session") == session and isinstance(pct, (int, float)):
