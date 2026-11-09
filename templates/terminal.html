@@ -544,6 +544,7 @@
           </div>
           <label class="tw-range-wrap"><span class="tw-control-label">Range</span><select id="tw-range" class="tw-range-select" onchange="twRange(this.value)"></select></label>
           <button type="button" class="tw-fs-btn" id="tw-fs-btn" onclick="twToggleFullscreen()" title="Full screen chart (Esc to exit)" aria-label="Full screen chart" aria-pressed="false"><svg class="tw-fs-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="tw-fs-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
+          <button type="button" class="tw-draw-toggle" id="tw-draw-toggle" onclick="twToggleDrawbar()" title="Drawing tools" aria-label="Drawing tools" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg></button>
           <div class="tw-type" aria-label="Chart tools">
             <div class="tw-tool-group"><span class="tw-tool-label">Chart</span><div class="tw-tool-buttons">
               <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Line chart" aria-label="Line chart"><svg class="tw-ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-6 4 3 5-7 4 4"/></svg><span class="tw-btn-text">Line</span></button>
@@ -955,7 +956,11 @@ function twPopulateRanges(){
   var select=document.getElementById('tw-range'),config=twIntervalConfig[twChartState.interval];if(!select||!config)return;select.innerHTML='';
   if(config.ranges.indexOf(twChartState.range)<0)twChartState.range=config.defaultRange;
   var labels={"1d":"1 Day","5d":"5 Days","1mo":"1 Month","3mo":"3 Months","6mo":"6 Months","1y":"1 Year","2y":"2 Years","5y":"5 Years","10y":"10 Years"};
-  config.ranges.forEach(function(value){var option=document.createElement('option');option.value=value;option.textContent=labels[value]||value;option.selected=value===twChartState.range;select.appendChild(option);});
+  // Phones: the picker shares a row with the chart tools, so it shows the
+  // short form (5D, 3M, 10Y); the full name stays as the option's label.
+  var shortLabels={"1d":"1D","5d":"5D","1mo":"1M","3mo":"3M","6mo":"6M","1y":"1Y","2y":"2Y","5y":"5Y","10y":"10Y"};
+  var compact=window.matchMedia&&window.matchMedia('(max-width: 1099px)').matches;
+  config.ranges.forEach(function(value){var option=document.createElement('option');option.value=value;option.textContent=(compact?shortLabels[value]:labels[value])||value;option.label=option.textContent;option.title=labels[value]||value;option.selected=value===twChartState.range;select.appendChild(option);});
 }
 
 /* ── Chart type toggle (area / candles) ── */
@@ -1885,6 +1890,20 @@ async function twQuotesRefresh(){
     console.warn('terminal quotes refresh failed:', e);
   }
 }
+
+/* Phones: the drawing rail sits behind the ✎ button so the chart starts
+   higher; the choice is remembered. Desktop always shows the rail. */
+function twToggleDrawbar(force){
+  var ws=document.querySelector('.tw-workspace'), btn=document.getElementById('tw-draw-toggle');
+  if(!ws)return;
+  var on=typeof force==='boolean'?force:!ws.classList.contains('show-draw');
+  ws.classList.toggle('show-draw',on);
+  if(btn)btn.setAttribute('aria-pressed',on?'true':'false');
+  try{localStorage.setItem('tradestaar.drawbar',on?'1':'0');}catch(e){}
+  if(typeof twFitWorkspace==='function')setTimeout(twFitWorkspace,30);
+}
+(function(){var on=false;try{on=localStorage.getItem('tradestaar.drawbar')==='1';}catch(e){}
+  if(on)document.addEventListener('DOMContentLoaded',function(){twToggleDrawbar(true);});})();
 
 window._arRefreshFn = twQuotesRefresh;
 // Rows, header and chips: every 3 s, from the shared live-quote feed.
