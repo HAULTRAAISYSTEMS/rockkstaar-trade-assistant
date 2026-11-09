@@ -372,6 +372,7 @@
 }
 </style>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/terminal_workspace.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/trade_tools.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -544,6 +545,7 @@
           </div>
           <label class="tw-range-wrap"><span class="tw-control-label">Range</span><select id="tw-range" class="tw-range-select" onchange="twRange(this.value)"></select></label>
           <button type="button" class="tw-fs-btn" id="tw-fs-btn" onclick="twToggleFullscreen()" title="Full screen chart (Esc to exit)" aria-label="Full screen chart" aria-pressed="false"><svg class="tw-fs-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="tw-fs-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
+          <button type="button" class="tw-fs-btn tw-size-btn" id="tw-size-btn" onclick="twToggleSize()" title="Size a trade: tap entry, then stop" aria-label="Position size tool" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M5 7h14M5 7l-3 6a3 3 0 0 0 6 0zM19 7l-3 6a3 3 0 0 0 6 0z"/></svg></button>
           <button type="button" class="tw-draw-toggle" id="tw-draw-toggle" onclick="twToggleDrawbar()" title="Drawing tools" aria-label="Drawing tools" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg></button>
           <div class="tw-type" aria-label="Chart tools">
             <div class="tw-tool-group"><span class="tw-tool-label">Chart</span><div class="tw-tool-buttons">
@@ -1204,6 +1206,7 @@ function twInitChart(){
     if(bar) twShowBar(bar,param.point); else twHideTooltip();
   });
   chart.subscribeClick(function(param){
+    if(twChartState.sizeMode&&param&&param.point){ twSizeClick(param.point.y); return; }
     var key=twTimeKey(param&&param.time), bar=twChartState.barMap[key];
     if(!bar){ twChartState.pinnedTime=null; twHideTooltip(); return; }
     twChartState.pinnedTime=(twChartState.pinnedTime===key)?null:key;
@@ -1212,6 +1215,56 @@ function twInitChart(){
   chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ twRenderDrawings();twRenderIndicators(); });
   twInitDrawingLayer();
   return true;
+}
+
+/* ═══ Risk-to-size: tap entry, then stop ═══ */
+function twSizeSettings(){ try{ var g=JSON.parse(localStorage.getItem('ts_gate')||'{}'); return {acct:Number(g.acct)||0, risk:Number(g.risk)||1}; }catch(e){ return {acct:0,risk:1}; } }
+function twToggleSize(force){
+  var on=typeof force==='boolean'?force:!twChartState.sizeMode, btn=document.getElementById('tw-size-btn');
+  twChartState.sizeMode=on; if(btn) btn.setAttribute('aria-pressed',on?'true':'false');
+  var panel=document.getElementById('tw-size-panel');
+  if(!panel){
+    panel=document.createElement('div'); panel.id='tw-size-panel'; panel.className='tw-size-panel';
+    var host=(typeof twChartPanel==='function'&&twChartPanel())||document.getElementById('tw-chart')||document.body; host.appendChild(panel);
+    panel.addEventListener('input',function(e){ if(e.target.name==='acct'||e.target.name==='risk'){ try{ var g=JSON.parse(localStorage.getItem('ts_gate')||'{}'); g[e.target.name]=e.target.value; localStorage.setItem('ts_gate',JSON.stringify(g)); }catch(_){} twSizeRender(); } });
+    panel.addEventListener('click',function(e){ if(e.target.getAttribute('data-act')==='clear'){ twSizeClear(); } if(e.target.getAttribute('data-act')==='close'){ twToggleSize(false); } });
+  }
+  panel.hidden=!on; if(!on) twSizeClear(); else twSizeRender();
+}
+function twSizeLine(price,color,title){ try{ return twChartState.candle.createPriceLine({price:price,color:color,lineWidth:2,lineStyle:2,axisLabelVisible:true,title:title}); }catch(e){ return null; } }
+function twSizeClear(){
+  (twChartState.sizeLines||[]).forEach(function(l){ try{ twChartState.candle.removePriceLine(l); }catch(e){} });
+  twChartState.sizeLines=[]; twChartState.sizeEntry=null; twChartState.sizeStop=null; if(twChartState.sizeMode) twSizeRender();
+}
+function twSizeClick(y){
+  if(!twChartState.candle) return; var price=twChartState.candle.coordinateToPrice(y); if(price==null) return; price=Number(Number(price).toFixed(2));
+  if(twChartState.sizeEntry==null||twChartState.sizeStop!=null){ twSizeClear(); twChartState.sizeEntry=price; }
+  else twChartState.sizeStop=price;
+  twSizeRender();
+}
+function twSizeRender(){
+  var panel=document.getElementById('tw-size-panel'); if(!panel) return;
+  (twChartState.sizeLines||[]).forEach(function(l){ try{ twChartState.candle.removePriceLine(l); }catch(e){} }); twChartState.sizeLines=[];
+  var e=twChartState.sizeEntry, s=twChartState.sizeStop, cfg=twSizeSettings(), out='';
+  if(e!=null) twChartState.sizeLines.push(twSizeLine(e,'#9fdcff','Entry'));
+  if(e!=null&&s!=null&&e!==s){
+    var long=e>s, per=Math.abs(e-s), riskD=cfg.acct*cfg.risk/100, sh=per>0?Math.floor(riskD/per):0, t2=long?e+2*per:e-2*per, t3=long?e+3*per:e-3*per;
+    twChartState.sizeLines.push(twSizeLine(s,'#ff6973','Stop'));
+    twChartState.sizeLines.push(twSizeLine(t2,'#32d49b','2R'));
+    twChartState.sizeLines.push(twSizeLine(t3,'#32d49b','3R'));
+    out='<div class="tw-size-out"><div><small>'+(long?'Long':'Short')+' · risk/share</small><b>$'+per.toFixed(2)+' ('+(per/e*100).toFixed(2)+'%)</b></div>'+
+        (cfg.acct?'<div><small>Shares</small><b>'+sh+'</b></div><div><small>Position</small><b>$'+Math.round(sh*e).toLocaleString()+'</b></div><div><small>Risk</small><b>$'+Math.round(sh*per).toLocaleString()+'</b></div>':'<div><small>Shares</small><b>Set account size</b></div>')+
+        '<div><small>2R / 3R</small><b>'+t2.toFixed(2)+' / '+t3.toFixed(2)+'</b></div></div>'+
+        '<a class="tw-size-gate" href="/trade-gate?ticker='+encodeURIComponent(twChartState.ticker||'')+'&entry='+e+'&stop='+s+'&target='+t2.toFixed(2)+'">Run the Pre-Trade Gate →</a>';
+  }
+  var step=e==null?'Tap the chart at your <b>entry</b> price.':(s==null?'Now tap your <b>stop</b> price.':'Tap again to start over.');
+  if(!panel.querySelector('.tw-size-dyn')){
+    panel.innerHTML='<div class="tw-size-head"><b>Position size</b><button type="button" data-act="close" aria-label="Close">×</button></div>'+
+      '<div class="tw-size-cfg"><label>Account $<input name="acct" inputmode="decimal" value="'+(cfg.acct||'')+'" placeholder="25000"></label><label>Risk %<input name="risk" inputmode="decimal" value="'+cfg.risk+'"></label></div>'+
+      '<div class="tw-size-dyn"></div>';
+  }
+  panel.querySelector('.tw-size-dyn').innerHTML='<p class="tw-size-step">'+step+'</p>'+
+    (e!=null?'<div class="tw-size-pts">Entry <b>'+e.toFixed(2)+'</b>'+(s!=null?' · Stop <b>'+s.toFixed(2)+'</b>':'')+' <button type="button" data-act="clear">Clear</button></div>':'')+out;
 }
 
 /* ═══ Drawing tools ═══ */

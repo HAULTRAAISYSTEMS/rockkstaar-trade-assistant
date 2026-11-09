@@ -845,9 +845,27 @@ def _intel_alert_loop():
             logger.warning("intel alert loop error: %s", _ie)
         _time.sleep(1800)  # every 30 minutes
 
+# Position Guardian: every 3 minutes in market hours, the leader worker checks
+# open Schwab positions against their stops, VWAP, earnings and fresh news and
+# alerts each new signal once a day (in-app + Telegram).
+def _guardian_loop():
+    while True:
+        try:
+            now = _intel._et_now()
+            from background_leader import is_leader as _is_leader
+            mins = now.hour * 60 + now.minute
+            if _is_leader() and now.weekday() < 5 and 9 * 60 + 30 <= mins < 16 * 60 + 5:
+                import position_guardian as _guardian
+                from schwab import quotes_user_id as _quid
+                _guardian.scan_and_alert(_quid())
+        except Exception as _ge:
+            logger.warning("guardian loop error: %s", _ge)
+        _time.sleep(180)
+
 try:
     if _BACKGROUND_ENABLED:
         threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
+        threading.Thread(target=_guardian_loop, daemon=True, name="position-guardian").start()
 except Exception as _loop_err:
     logger.error("intel alert loop failed to start: %s", _loop_err)
 
