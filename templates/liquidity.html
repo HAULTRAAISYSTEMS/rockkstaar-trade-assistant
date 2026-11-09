@@ -77,10 +77,12 @@
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k{{ ' is-ext' if pulse.spy_ext }}" id="cc-spy-k">{{ pulse.spy_label or 'SPY' }}</span>
       <b class="cc-pulse-v {{ 'is-up' if (pulse.spy or 0) > 0 else ('is-down' if (pulse.spy or 0) < 0 else '') }}" id="cc-spy">{% if pulse.spy is not none %}{{ '%+.2f'|format(pulse.spy) }}%{% else %}—{% endif %}</b>
+      <small class="cc-pulse-meta" id="cc-spy-meta"{% if not pulse.spy_at %} hidden{% endif %}>{% if pulse.spy_at %}print {{ pulse.spy_at }}{% endif %}</small>
     </div>
     <div class="cc-pulse-cell">
       <span class="cc-pulse-k{{ ' is-ext' if pulse.qqq_ext }}" id="cc-qqq-k">{{ pulse.qqq_label or 'QQQ' }}</span>
       <b class="cc-pulse-v {{ 'is-up' if (pulse.qqq or 0) > 0 else ('is-down' if (pulse.qqq or 0) < 0 else '') }}" id="cc-qqq">{% if pulse.qqq is not none %}{{ '%+.2f'|format(pulse.qqq) }}%{% else %}—{% endif %}</b>
+      <small class="cc-pulse-meta" id="cc-qqq-meta"{% if not pulse.qqq_at %} hidden{% endif %}>{% if pulse.qqq_at %}print {{ pulse.qqq_at }}{% endif %}</small>
     </div>
     <div class="cc-pulse-cell" id="cc-es-cell"{% if pulse.es is none %} hidden{% endif %}>
       <span class="cc-pulse-k">ES Futures</span>

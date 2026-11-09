@@ -1461,12 +1461,27 @@ function twPatchActiveCandle(q,px){
   // Tick during regular hours always; during extended hours only when the
   // Extended toggle is on (otherwise there are no extended bars to move).
   var sess = q.market_session;
-  var isExt = (sess==='pre_market'||sess==='after_hours');
+  var isExt = (sess==='pre_market'||sess==='after_hours'||sess==='overnight');
   if(sess!=='regular' && !(isExt && twChartState.extended)) return;
-  var seconds={"1m":60,"5m":300,"15m":900,"1h":3600}[twChartState.interval];
-  if(!seconds||!twChartState.bars.length)return;
+  // Bars still on screen from a previous ticker or interval must never take
+  // this ticker's price — the reload has not landed yet.
+  if(twChartState.barsKey!==twChartState.ticker+'|'+twChartState.interval)return;
+  if(!twChartState.bars.length)return;
   var stamp=Number(q.as_of_epoch);if(!isFinite(stamp)||stamp<=0)return;
   var last=twChartState.bars[twChartState.bars.length-1],lastTime=Number(last.time);
+  // Daily chart: today's candle moves with the regular-session price.
+  if(twChartState.interval==='1d'){
+    if(sess!=='regular'||!isFinite(lastTime))return;
+    var etDay=function(e){return new Date(e*1000).toLocaleDateString('en-CA',{timeZone:'America/New_York'});};
+    if(etDay(lastTime)!==etDay(stamp)||Number(last.close)===px)return;
+    var day=Object.assign({},last,{close:px,high:Math.max(Number(last.high),px),low:Math.min(Number(last.low),px)});
+    twChartState.bars[twChartState.bars.length-1]=day;twChartState.barMap[twTimeKey(day.time)]=day;twChartState.lastPrice=px;
+    twChartState.area.update({time:day.time,value:day.close});twChartState.candle.update(twCandleDatum(day));
+    twRenderIndicators();twRenderEmas();twOhlcv(twChartState.bars);
+    return;
+  }
+  var seconds={"1m":60,"5m":300,"15m":900,"1h":3600}[twChartState.interval];
+  if(!seconds)return;
   if(!isFinite(lastTime)||stamp<lastTime)return;
   /* Anchor new bars to the provider's final timestamp.  This preserves its
      exchange-session alignment (notably 9:30-based hourly candles). */
@@ -1477,12 +1492,12 @@ function twPatchActiveCandle(q,px){
     bar=Object.assign({},last,{close:px,high:Math.max(Number(last.high),px),low:Math.min(Number(last.low),px)});
     twChartState.bars[twChartState.bars.length-1]=bar;
   }else{
-    var liveSess = (q.market_session==='pre_market') ? 'premarket' : ((q.market_session==='after_hours') ? 'after_hours' : 'regular');
+    var liveSess = (q.market_session==='pre_market') ? 'premarket' : ((q.market_session==='after_hours') ? 'after_hours' : ((q.market_session==='overnight') ? 'overnight' : 'regular'));
     bar={time:bucket,open:px,high:px,low:px,close:px,volume:0,session:liveSess,live_quote:true};
     twChartState.bars.push(bar);
     // Shade the new extended bar's background too.
     if(twChartState.shade && liveSess!=='regular'){
-      var c = liveSess==='premarket' ? 'rgba(74,163,255,0.055)' : 'rgba(199,125,255,0.055)';
+      var c = liveSess==='premarket' ? 'rgba(74,163,255,0.055)' : (liveSess==='after_hours' ? 'rgba(199,125,255,0.055)' : 'rgba(240,181,63,0.05)');
       try { twChartState.shade.update({time:bucket, value:1, color:c}); } catch(e){}
     }
   }
@@ -1511,6 +1526,7 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       var bars=(d&&d.bars)||[];
       if(!bars.length){
         twChartState.area.setData([]); twChartState.candle.setData([]); twChartState.vol.setData([]);
+        twChartState.bars=[]; twChartState.barsKey='';
         if(twChartState.shade) twChartState.shade.setData([]);
         Object.keys(twChartState.emaSeries).forEach(function(period){twChartState.emaSeries[period].setData([]);});
         twChartMsg('No '+interval+' data','The price feed returned no bars for '+ticker+' at '+range+'.');
@@ -1534,7 +1550,7 @@ function twLoadChart(ticker, interval, range, refreshOnly){
           });
         twChartState.shade.setData(shadeData);
       }
-      twChartState.bars=bars; twChartState.barMap={}; twChartState.pinnedTime=null;
+      twChartState.bars=bars; twChartState.barsKey=ticker+'|'+interval; twChartState.barMap={}; twChartState.pinnedTime=null;
       twChartState.sessionVwap=twSessionVwap(bars,interval);
       twShowSessionVwap();
       if(twChartState.sessionVwap==null)twLoadSessionVwap(ticker);
@@ -1702,7 +1718,10 @@ function twApplyQuote(q){
   var prev = twLast[q.ticker];
   var moved = prev !== undefined && prev !== px;
   twLast[q.ticker] = px;
-  twPatchActiveCandle(q,px);
+  // The live chart feed is seconds old; this database poll can be ~45 s
+  // behind. While the feed is fresh it owns the candle and the header.
+  var liveOwns = (typeof twLiveOwns === 'function') && twLiveOwns(q.ticker);
+  if(!liveOwns) twPatchActiveCandle(q,px);
 
   document.querySelectorAll('[data-tape="' + q.ticker + '"]').forEach(function(item){
     var p = item.querySelector('[data-tape-px]');
@@ -1727,7 +1746,7 @@ function twApplyQuote(q){
   var head = document.getElementById('tw-c-ticker');
   // Extended mode owns the header (PRE/POST/O/N prefixes) — the plain
   // DB quote would stomp it every 4s poll.
-  if(head && head.textContent === q.ticker && !twChartState.extended){
+  if(head && head.textContent === q.ticker && !twChartState.extended && !liveOwns){
     var hp = document.getElementById('tw-c-price');
     var hc = document.getElementById('tw-c-chg');
     if(hp && hp.textContent !== text){ hp.textContent = text; if(moved) twFlash(hp, px > prev); }
@@ -1823,6 +1842,62 @@ async function twQuotesRefresh(){
 
 window._arRefreshFn = twQuotesRefresh;
 
+/* ═══ Live chart feed ═══
+   The charted symbol's latest print every 3 s from /api/terminal/live —
+   a shared server cache (Yahoo 1m with pre/post; Alpaca overnight
+   8 PM-4 AM), so the active candle and the header move tick by tick for
+   any ticker, on the watchlist or not. The 30 s candle reload still
+   replaces the live candle with the provider's authoritative OHLCV. */
+var twLiveFeed = {timer:null, ticker:null, at:0, fails:0, inFlight:false};
+function twLiveOwns(t){ return twLiveFeed.ticker === t && Date.now() - twLiveFeed.at < 15000; }
+function twLiveHeader(t, px, q){
+  var head = document.getElementById('tw-c-ticker');
+  if(!head || head.textContent !== t) return;
+  // Without Extended on, the header shows the regular session; an
+  // extended-hours print belongs to the Extended view.
+  if(q.ext && !twChartState.extended) return;
+  var hp = document.getElementById('tw-c-price'), hc = document.getElementById('tw-c-chg');
+  var text = px.toFixed(2), prev = hp ? parseFloat(hp.textContent) : NaN;
+  if(hp && hp.textContent !== text){ hp.textContent = text; if(isFinite(prev)) twFlash(hp, px > prev); }
+  var base = q.ext ? Number(q.regular_close) : Number(twPrevClose[t] || q.prev_close);
+  if(hc && isFinite(base) && base > 0){
+    var pct = (px - base) / base * 100, tag = {pre:'PRE ', post:'POST ', overnight:'O/N '}[q.ext] || '';
+    hc.textContent = tag + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+    hc.className = 'tw-sym-chg ' + twChgClass(pct);
+  }
+}
+async function twLivePoll(){
+  var t = twChartState.ticker;
+  if(!t || twLiveFeed.inFlight){ twLiveSchedule(); return; }
+  twLiveFeed.inFlight = true;
+  var ctrl = new AbortController(), kill = setTimeout(function(){ ctrl.abort(); }, 6000);
+  try {
+    var r = await fetch('/api/terminal/live/' + encodeURIComponent(t), {cache:'no-store', credentials:'same-origin', signal:ctrl.signal});
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    var d = await r.json(), q = d && d.quote;
+    if(q && t === twChartState.ticker){
+      var px = Number(q.price);
+      if(isFinite(px) && px > 0){
+        var sess = q.ext ? ({pre:'pre_market', post:'after_hours', overnight:'overnight'})[q.ext] : 'regular';
+        twPatchActiveCandle({ticker:t, market_session:sess, as_of_epoch:q.epoch}, px);
+        twLiveHeader(t, px, q);
+        twLast[t] = px;
+        twLiveFeed.ticker = t; twLiveFeed.at = Date.now();
+      }
+    }
+    twLiveFeed.fails = 0;
+  } catch(e){ twLiveFeed.fails += 1; }
+  finally { clearTimeout(kill); twLiveFeed.inFlight = false; twLiveSchedule(); }
+}
+function twLiveSchedule(delay){
+  clearTimeout(twLiveFeed.timer);
+  if(document.hidden) return;
+  twLiveFeed.timer = setTimeout(twLivePoll, delay != null ? delay : (twLiveFeed.fails >= 5 ? 30000 : 3000));
+}
+document.addEventListener('visibilitychange', function(){
+  if(document.hidden) clearTimeout(twLiveFeed.timer); else twLiveSchedule(0);
+});
+
 /* Full-screen chart. Uses the browser's full-screen mode where it exists
    (desktop, Android, iPad); iPhone Safari has no element full screen, so
    the panel is pinned over the page instead. Esc or the button exits. */
@@ -1889,6 +1964,7 @@ document.addEventListener('keydown',function(e){
     if(isFinite(pc)) twPrevClose[r.dataset.ticker] = pc;
   });
   twQuotesRefresh();          // stamp the status pill without waiting 4 s
+  twLiveSchedule(1500);       // live chart feed: first tick once the chart has loaded
 
   // Market-index tape items: refresh from /api/market-tape every 45s.
   // If the poll brings symbols the server never rendered (its watchlist

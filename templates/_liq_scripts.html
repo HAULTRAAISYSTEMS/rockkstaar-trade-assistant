@@ -900,6 +900,12 @@ function _applyPulse(p) {
   const qqqK = document.getElementById('cc-qqq-k');
   if (spyK && p.spy_label) { spyK.textContent = p.spy_label; spyK.classList.toggle('is-ext', !!p.spy_ext); }
   if (qqqK && p.qqq_label) { qqqK.textContent = p.qqq_label; qqqK.classList.toggle('is-ext', !!p.qqq_ext); }
+  [['cc-spy-meta', p.spy_at], ['cc-qqq-meta', p.qqq_at]].forEach(([id, at]) => {
+    const m = document.getElementById(id);
+    if (!m) return;
+    m.hidden = !at;
+    m.textContent = at ? 'print ' + at : '';
+  });
   // Futures cells exist hidden when the first render had no reading, so a
   // later poll can reveal them; a reading that disappears keeps the last
   // value rather than collapsing the rail mid-session.
@@ -942,7 +948,8 @@ function _paintPulseBadge() {
   badge.classList.toggle('is-stale', stale);
   if (stale) text.textContent = 'Paused · ' + ago;
   else {
-    const tag = {regular: 'Live', pre: 'Live · Pre-market', post: 'Live · After hours'}[_pulseLive.session] || 'Auto';
+    const tag = {regular: 'Live', pre: 'Live · Pre-market', post: 'Live · After hours',
+                 overnight: 'Live · 24H market'}[_pulseLive.session] || 'Auto';
     text.textContent = tag + ' · ' + ago;
   }
   badge.title = stale
