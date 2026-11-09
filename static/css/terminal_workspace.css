@@ -284,7 +284,7 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
     left: max(12px, env(safe-area-inset-left, 0px)) !important;
     right: max(12px, env(safe-area-inset-right, 0px)) !important;
     top: auto !important;
-    bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px)) !important;
     min-width: 0 !important;
     background: #0b111c !important;
   }
