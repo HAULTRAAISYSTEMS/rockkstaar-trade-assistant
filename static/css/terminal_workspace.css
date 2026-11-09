@@ -393,3 +393,57 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
   .tw-chart-toolbar > * { flex: 0 0 auto; }
   .tw-fs-btn { margin-left: 6px !important; }
 }
+
+/* ── Phone/tablet chart bar: two organised rows, nothing off-screen ──
+   The bar used to be one sideways-scrolling strip, so chart type,
+   Volume, Extended, Indicators and full screen sat past the right edge
+   with nothing saying they were there.
+   Row 1: time frames across the width, full screen at the end.
+   Row 2: search · range · chart type · overlays · indicators · ✎ draw.
+   The drawing rail opens from ✎ instead of taking a row of its own. */
+.tw-draw-toggle { display: none; }
+@media (max-width: 1099px) {
+  .tw-chart-toolbar {
+    flex-wrap: wrap !important;
+    overflow: visible !important;
+    touch-action: auto !important;
+    row-gap: 8px !important; column-gap: 5px !important;
+    padding: 8px 12px !important;
+  }
+  .tw-chart-toolbar::after { content: ""; order: 3; flex: 0 0 100%; height: 0; }
+  .tw-chart-toolbar > * { flex: 0 0 auto; }
+  .tw-chart-toolbar .tw-interval-wrap { order: 1; flex: 1 1 0 !important; min-width: 0; }
+  .tw-chart-toolbar .tw-interval-wrap .tw-tf { display: flex !important; width: 100%; }
+  .tw-chart-toolbar .tw-interval-wrap .tw-tf-btn { flex: 1 1 0; min-width: 0; height: 32px !important; padding: 0 !important; justify-content: center; }
+  .tw-chart-toolbar .tw-fs-btn {
+    order: 2; margin-left: 2px !important; width: 38px; height: 38px;
+    color: var(--cc-accent, #c4f53b);
+    border-color: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.45);
+    background: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.08);
+  }
+  .tw-chart-toolbar .tw-symsearch { order: 4; width: 32px; height: 32px; padding: 0 !important; justify-content: center; }
+  .tw-chart-toolbar .tw-range-wrap { order: 5; height: 32px; }
+  .tw-chart-toolbar .tw-range-select { width: 62px !important; padding: 0 18px 0 8px !important; font-size: 11.5px !important; }
+  .tw-chart-toolbar .tw-type { order: 6; display: inline-flex !important; gap: 5px !important; margin-left: 0 !important; }
+  .tw-chart-toolbar .tw-type .tw-tool-group { display: inline-flex !important; }
+  .tw-chart-toolbar .tw-type-btn { height: 28px !important; min-width: 28px; padding: 0 6px !important; justify-content: center; }
+  .tw-chart-toolbar #tw-volume-btn .tw-btn-text,
+  .tw-chart-toolbar #tw-extended-btn .tw-btn-text,
+  .tw-chart-toolbar #tw-indicators-btn .tw-btn-text { display: none !important; }
+  .tw-draw-toggle {
+    order: 7; margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(3, 7, 15, 0.6); color: #c9d3df;
+  }
+  .tw-draw-toggle[aria-pressed="true"] {
+    color: #0a0712; border-color: transparent;
+    background: linear-gradient(135deg, var(--cc-accent-hi, #e8ffad), var(--cc-accent, #c4f53b));
+  }
+  .tw-workspace:not(.show-draw) > .tw-drawbar { display: none !important; }
+}
+@media (max-width: 440px) {
+  .tw-chart-toolbar { column-gap: 4px !important; padding: 8px 8px !important; }
+  .tw-chart-toolbar .tw-type { gap: 3px !important; }
+  .tw-chart-toolbar .tw-type-btn { padding: 0 4px !important; min-width: 26px; }
+  .tw-chart-toolbar .tw-range-select { width: 58px !important; padding: 0 15px 0 7px !important; }
+}

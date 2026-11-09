@@ -160,3 +160,24 @@ def test_the_live_status_page(client):
     data = r.get_json()
     for key in ("quotes_by_source", "schwab_market_data", "last_error", "session"):
         assert key in data
+
+
+class TestThePhoneChartBar:
+    """Chart type, overlays, indicators and full screen used to sit past the
+    right edge of a sideways-scrolling strip on phones. Two rows now."""
+    CSS = open("static/css/terminal_workspace.css").read()
+    PAGE = open("templates/terminal.html").read()
+
+    def test_the_bar_wraps_instead_of_scrolling_sideways(self):
+        assert "flex-wrap: wrap !important;" in self.CSS
+        assert ".tw-chart-toolbar::after { content: \"\"; order: 3; flex: 0 0 100%;" in self.CSS
+
+    def test_full_screen_sits_on_the_first_row(self):
+        assert ".tw-chart-toolbar .tw-fs-btn {\n    order: 2;" in self.CSS
+
+    def test_drawing_tools_open_from_a_button_and_are_remembered(self):
+        assert 'id="tw-draw-toggle"' in self.PAGE and "tradestaar.drawbar" in self.PAGE
+        assert ".tw-workspace:not(.show-draw) > .tw-drawbar { display: none !important; }" in self.CSS
+
+    def test_the_range_picker_uses_short_labels_on_phones(self):
+        assert '"10y":"10Y"' in self.PAGE
