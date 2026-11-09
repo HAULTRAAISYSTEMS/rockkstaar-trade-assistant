@@ -395,6 +395,17 @@ _EXTRA_PATTERNS: list[tuple[str, str, str]] = [
     ("going private",           "CRITICAL", "Going-private transaction — potential premium bid"),
     ("short seller",            "HIGH",     "Short seller report — expect sharp volatile move"),
     ("whistle",                 "HIGH",     "Whistleblower report — legal/regulatory risk"),
+    ("guidance raise",          "HIGH",     "Guidance raised — fundamental strength confirmed"),
+    ("raises guidance",         "HIGH",     "Guidance raised — fundamental strength confirmed"),
+    ("guidance cut",            "HIGH",     "Guidance cut — forward expectations lowered"),
+    ("soars",                   "MEDIUM",   "Large price move — check what drove it"),
+    ("surges",                  "MEDIUM",   "Large price move — check what drove it"),
+    ("jumps",                   "MEDIUM",   "Large price move — check what drove it"),
+    ("plunges",                 "MEDIUM",   "Large price move — check what drove it"),
+    ("tumbles",                 "MEDIUM",   "Large price move — check what drove it"),
+    ("earnings call",           "MEDIUM",   "Earnings call — management's account of the quarter"),
+    ("earnings",                "MEDIUM",   "Earnings news — resets growth expectations"),
+    ("quarterly results",       "MEDIUM",   "Earnings news — resets growth expectations"),
 ]
 
 
@@ -812,7 +823,19 @@ def _news_items_for_ticker(ticker: str, wl_set: set, limit: int = 3, fetch=None)
             headline = str(article.get("headline") or "").strip()
             if not headline:
                 continue
-            impact, reason = classify_news_impact(headline, news.categories)
+            # Classify each story on its own words. news.categories covers
+            # every headline in the batch, so one earnings beat used to make
+            # all of a ticker's stories CRITICAL — and a batch with no match
+            # left a "Soars 10% as Guidance Raise" story at LOW.
+            lead = str(article.get("summary") or "")[:280]
+            try:
+                from news_fetcher import parse_catalyst_categories
+                cats = parse_catalyst_categories([headline, lead])
+            except Exception:
+                cats = []
+            impact, reason = classify_news_impact(f"{headline} {lead}", cats)
+            if reason == "General market news":
+                reason = "Company news"
             subject = _headline_subject_ticker(
                 headline, str(article.get("summary") or ""), ticker)
             items.append({

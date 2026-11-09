@@ -248,6 +248,16 @@ class _Conn:
     def commit(self):
         self._conn.commit()
 
+    def rollback(self):
+        # Research Memory, Live Research, push/SMS alerts and the migration
+        # runner all roll back on a failed write. The wrapper had no
+        # rollback(), so a plain validation error ("write why this matters")
+        # turned into AttributeError and a 500 page.
+        try:
+            self._conn.rollback()
+        except Exception:
+            pass
+
     def close(self):
         # Call sites close eagerly, and most of a request's work runs through
         # several of them. Honouring every close on a shared connection would
