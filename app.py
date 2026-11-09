@@ -5527,10 +5527,22 @@ def api_terminal_live(ticker):
         return jsonify({"ok": False, "error": "bad ticker"}), 400
     quote = None
     if _MKT_AVAILABLE:
+        # The shared feed first (Schwab real-time, then fresh Alpaca prints);
+        # a per-symbol Yahoo chart only when it has nothing for this symbol.
         try:
-            quote = _mkt.live_ticker_quote(ticker)
+            q = (_mkt.live_quotes([ticker]) or {}).get(ticker)
+            if q and q.get("price") is not None:
+                base = q.get("prev_close")
+                quote = {"price": q["price"], "epoch": q.get("epoch"),
+                         "prev_close": base, "regular_close": base,
+                         "ext": q.get("ext"), "source": q.get("source") or ""}
         except Exception as exc:
-            logger.debug("terminal live %s: %s", ticker, exc)
+            logger.debug("terminal live (shared) %s: %s", ticker, exc)
+        if quote is None:
+            try:
+                quote = _mkt.live_ticker_quote(ticker)
+            except Exception as exc:
+                logger.debug("terminal live %s: %s", ticker, exc)
     resp = jsonify({"ok": True, "ticker": ticker, "quote": quote,
                     "server_epoch": int(_time.time())})
     resp.headers["Cache-Control"] = "no-store"
@@ -8628,6 +8640,21 @@ def _build_today_pulse(mkt: dict) -> dict:
             fast = _mkt.fast_pulse_quotes() or {}
         except Exception:
             fast = {}
+        # SPY/QQQ from the shared live feed (Schwab real-time first) when it
+        # has a print for this session. After hours stays on the fast feed,
+        # whose AH move is measured from today's close.
+        if session in ("pre", "regular"):
+            try:
+                live = _mkt.live_quotes(["SPY", "QQQ"]) or {}
+            except Exception:
+                live = {}
+            for sym in ("SPY", "QQQ"):
+                q = live.get(sym)
+                if q and q.get("change_pct") is not None and (q.get("ext") or "regular") == (
+                        "regular" if session == "regular" else "pre"):
+                    fast = dict(fast)
+                    fast[sym] = {"price": q["price"], "pct": q["change_pct"],
+                                 "ext": q.get("ext"), "at": ""}
     tag = {"pre": "PRE", "post": "AH", "overnight": "24H"}.get(session, "")
     for sym, key in (("SPY", "spy"), ("QQQ", "qqq")):
         q = fast.get(sym)
