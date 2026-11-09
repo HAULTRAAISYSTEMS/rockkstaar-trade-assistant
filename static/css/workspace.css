@@ -78,9 +78,9 @@ body::before { opacity: .05; }
 
 /* 2027 command workflow — shares the app's black and gold system. */
 .workspace-paths--next{gap:12px!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));background:transparent!important;border:0!important}
-.workspace-paths--next>a{position:relative;display:flex!important;flex-direction:column;align-items:flex-start;gap:10px;min-width:0;min-height:198px;padding:23px!important;border:1px solid rgba(235,194,105,.19)!important;border-radius:18px!important;background:radial-gradient(circle at 100% 0%,rgba(237,188,74,.10),transparent 50%),linear-gradient(145deg,#171d25,#0c1118)!important;text-decoration:none;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;overflow:hidden}
-.workspace-paths--next>a:hover,.workspace-paths--next>a:focus-visible{transform:translateY(-3px);border-color:rgba(242,197,99,.65)!important;box-shadow:0 12px 30px rgba(0,0,0,.25)}
-.workspace-paths--next .workflow-icon{position:absolute;right:22px;top:18px;width:42px;height:42px;display:grid;place-items:center;border:1px solid rgba(239,192,85,.28);border-radius:12px;color:var(--cc-accent, #f0c76b);font-size:26px}
+.workspace-paths--next>a{position:relative;display:flex!important;flex-direction:column;align-items:flex-start;gap:10px;min-width:0;min-height:198px;padding:23px!important;border:1px solid rgba(var(--cc-accent-rgb, 235,194,105),.19)!important;border-radius:18px!important;background:radial-gradient(circle at 100% 0%,rgba(var(--cc-accent-rgb, 237,188,74),.10),transparent 50%),linear-gradient(145deg,#171d25,#0c1118)!important;text-decoration:none;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;overflow:hidden}
+.workspace-paths--next>a:hover,.workspace-paths--next>a:focus-visible{transform:translateY(-3px);border-color:rgba(var(--cc-accent-rgb, 242,197,99),.65)!important;box-shadow:0 12px 30px rgba(0,0,0,.25)}
+.workspace-paths--next .workflow-icon{position:absolute;right:22px;top:18px;width:42px;height:42px;display:grid;place-items:center;border:1px solid rgba(var(--cc-accent-rgb, 239,192,85),.28);border-radius:12px;color:var(--cc-accent, #f0c76b);font-size:26px}
 .workspace-paths--next .workspace-step{color:#edc46a;letter-spacing:.16em;font-size:11px}
 .workspace-paths--next strong{font-size:clamp(18px,1.7vw,25px)!important;line-height:1.25;color:#f7f5f0}
 .workspace-paths--next small{color:#aab4c3;line-height:1.55;font-size:13px}

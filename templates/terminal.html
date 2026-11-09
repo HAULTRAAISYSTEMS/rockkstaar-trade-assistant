@@ -19,7 +19,7 @@
 .tw-chip { display:inline-flex; align-items:center; gap:6px; font-family: var(--font-mono); font-size: var(--fs-xs); padding: 4px 10px; border-radius:8px; background: rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.09); color: var(--text-muted); white-space:nowrap; }
 .tw-chip b { color: var(--text-hi); font-weight: var(--fw-semi); }
 .tw-acct-chip { margin-left:auto; }
-.tw-paper-flag { color: #1a1206 !important; border: none !important; background: linear-gradient(180deg, var(--cc-accent-hi, #f3d37a), #d99a2b) !important; font-weight: 800; letter-spacing: .06em; box-shadow: 0 0 14px rgba(var(--cc-accent-rgb, 229,185,79),.35); }
+.tw-paper-flag { color: #1a1206 !important; border: none !important; background: linear-gradient(180deg, var(--cc-accent-hi, #f3d37a), var(--cc-accent, #d99a2b)) !important; font-weight: 800; letter-spacing: .06em; box-shadow: 0 0 14px rgba(var(--cc-accent-rgb, 229,185,79),.35); }
 
 /* The tape and the chips are polled, so the page has to say whether what you
    are reading is moving or frozen. A green pulsing dot means quotes are
@@ -63,7 +63,7 @@
     linear-gradient(180deg, #151009, #0a0805);
   box-shadow: 0 10px 28px rgba(0,0,0,.5), 0 6px 22px rgba(var(--cc-accent-rgb, 229,185,79),.16); }
 .tw-tape::before { content:""; position:absolute; top:0; bottom:0; left:0; width:45%;
-  background: linear-gradient(100deg, transparent, rgba(240,201,93,.10) 45%, rgba(255,236,170,.16) 50%, rgba(240,201,93,.10) 55%, transparent);
+  background: linear-gradient(100deg, transparent, rgba(var(--cc-accent-rgb, 240,201,93),.10) 45%, rgba(var(--cc-accent-rgb, 255,236,170),.16) 50%, rgba(var(--cc-accent-rgb, 240,201,93),.10) 55%, transparent);
   transform: translateX(-110%); animation: tw-tape-sheen 8s ease-in-out infinite; pointer-events:none; }
 @keyframes tw-tape-sheen { 0%, 55% { transform: translateX(-110%); } 90%, 100% { transform: translateX(240%); } }
 .tw-tape::after { content:""; position:absolute; top:0; bottom:0; left:0; right:0; pointer-events:none;
@@ -75,7 +75,7 @@
 @keyframes tw-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .tw-tape-item { display:inline-flex; align-items:center; gap:8px; font-family: var(--font-mono); font-size: var(--fs-sm); }
 .tw-tape-sym { color: #fff; font-weight: 700; letter-spacing:.04em; }
-.tw-tape-index .tw-tape-sym { color: var(--elite-gold-bright, #f3d37a); font-weight: 800; text-shadow: 0 0 14px rgba(240,201,93,.45); }
+.tw-tape-index .tw-tape-sym { color: var(--elite-gold-bright, #f3d37a); font-weight: 800; text-shadow: 0 0 14px rgba(var(--cc-accent-rgb, 240,201,93),.45); }
 .tw-tape-index + .tw-tape-item:not(.tw-tape-index) { margin-left: 8px; }
 .tw-tape-px { color: #fff; font-weight: 700; }
 .tw-tape-chg { display:inline-flex; align-items:center; gap:3px; font-size: var(--fs-xs); font-weight: 800; padding: 2px 8px; border-radius: 999px; border: 1px solid transparent; line-height: 1.35; }
@@ -141,7 +141,7 @@
 .tw-type { display:flex !important; align-items:center; gap:0; margin:0 !important; width:auto !important; flex:0 0 auto; }
 .tw-tf { display:flex; gap:2px; flex:0 0 auto; }
 .tw-tf-btn { background:transparent !important; border:none !important; color:var(--text-faint); padding:6px 9px !important; border-radius:999px !important; }
-.tw-tf-btn.active { color:#1a1206 !important; background:linear-gradient(180deg,var(--cc-accent-hi, #f3d37a),#d99a2b) !important; font-weight:800; }
+.tw-tf-btn.active { color:#1a1206 !important; background:linear-gradient(180deg,var(--cc-accent-hi, #f3d37a),var(--cc-accent, #d99a2b)) !important; font-weight:800; }
 .tw-tool-group { background:none !important; border:none !important; border-radius:0 !important; padding:0 0 0 10px !important; margin-left:10px !important; display:flex !important; align-items:center; flex:0 0 auto; border-left:1px solid rgba(255,255,255,.09) !important; }
 .tw-type > .tw-tool-group:first-child { border-left:none !important; padding-left:0 !important; margin-left:0 !important; }
 .tw-tool-label { display:none !important; }
@@ -153,7 +153,7 @@
 /* Toolbar visibility: one solid control bar with chip-style buttons. */
 .tw-chart-toolbar { background: linear-gradient(180deg, rgba(var(--cc-accent-rgb, 229,185,79),.10), rgba(var(--cc-accent-rgb, 229,185,79),.02)), #0b0d10 !important; border-color: rgba(var(--cc-accent-rgb, 229,185,79),.45) !important; box-shadow: 0 6px 18px rgba(0,0,0,.45), 0 4px 18px rgba(var(--cc-accent-rgb, 229,185,79),.10); min-height: 44px; }
 .tw-tf-btn { background:#16181d !important; border:1px solid rgba(255,255,255,.10) !important; color:#aeb7c2 !important; }
-.tw-tf-btn.active { color:#1a1206 !important; background:linear-gradient(180deg,var(--cc-accent-hi, #f3d37a),#d99a2b) !important; border-color:transparent !important; }
+.tw-tf-btn.active { color:#1a1206 !important; background:linear-gradient(180deg,var(--cc-accent-hi, #f3d37a),var(--cc-accent, #d99a2b)) !important; border-color:transparent !important; }
 .tw-type-btn { background:#16181d !important; border:1px solid rgba(255,255,255,.10) !important; color:#aeb7c2 !important; }
 .tw-type-btn.active { background:rgba(var(--cc-accent-rgb, 229,185,79),.18) !important; border-color:rgba(var(--cc-accent-rgb, 229,185,79),.55) !important; color:var(--cc-accent-hi, #f3d37a) !important; }
 .tw-range-select { background:#16181d !important; border:1px solid rgba(255,255,255,.10) !important; border-radius:8px; padding:0 22px 0 8px; }

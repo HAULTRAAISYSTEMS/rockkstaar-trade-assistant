@@ -5,13 +5,13 @@
 {% set nexturl = url_for('watchlists_page') %}
 
 <style>
-  .te-watch-hero{padding:18px;border:1px solid rgba(212,175,55,.28);border-radius:18px;background:linear-gradient(145deg,rgba(212,175,55,.11),rgba(8,9,11,.96) 55%);margin-bottom:14px}
-  .te-watch-hero h1{margin:0 0 4px;font:700 28px/1.05 var(--font-display);color:#f5d66d}
+  .te-watch-hero{padding:18px;border:1px solid rgba(var(--cc-accent-rgb, 212,175,55),.28);border-radius:18px;background:linear-gradient(145deg,rgba(var(--cc-accent-rgb, 212,175,55),.11),rgba(8,9,11,.96) 55%);margin-bottom:14px}
+  .te-watch-hero h1{margin:0 0 4px;font:700 28px/1.05 var(--font-display);color:var(--cc-accent-hi, #f5d66d)}
   .te-watch-tabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none}
   .te-watch-tabs::-webkit-scrollbar{display:none}.te-watch-tabs form{flex:0 0 auto;margin:0}
   .te-symbol-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px}
   .te-symbol{display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid var(--border);border-radius:13px;background:rgba(255,255,255,.025)}
-  .te-symbol-main{color:inherit;text-decoration:none;min-width:0;flex:1}.te-symbol-ticker{font:700 16px var(--font-mono);color:#f5d66d}
+  .te-symbol-main{color:inherit;text-decoration:none;min-width:0;flex:1}.te-symbol-ticker{font:700 16px var(--font-mono);color:var(--cc-accent-hi, #f5d66d)}
   .te-organizer{display:flex;flex-direction:column;gap:10px}.te-organizer-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.te-organizer-help{color:var(--elite-faint);font-size:11px;line-height:1.45}.te-save-state{color:var(--elite-faint);font:700 9px var(--font-mono);letter-spacing:.08em;text-transform:uppercase}.te-save-state.saving{color:var(--elite-gold)}.te-save-state.saved{color:var(--pos-500)}
   .te-section{overflow:hidden;border:1px solid var(--elite-hairline);border-radius:13px;background:rgba(255,255,255,.018)}.te-section.is-dragging,.te-ticker-row.is-dragging{opacity:.45}.te-section.is-over{border-color:var(--elite-gold)}
   .te-section-hd{display:flex;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--elite-hairline);background:linear-gradient(90deg,rgba(var(--cc-accent-rgb, 229,185,79),.09),rgba(255,255,255,.015))}.te-drag-handle{display:inline-flex;align-items:center;justify-content:center;width:24px;height:28px;color:var(--elite-faint);font:800 13px var(--font-mono);cursor:grab;user-select:none}.te-drag-handle:active{cursor:grabbing}.te-section-name-form{display:flex;align-items:center;gap:6px;flex:1;min-width:0}.te-section-name{width:min(250px,100%);padding:7px 9px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--elite-gold-bright);font:700 11px var(--font-display);letter-spacing:.08em;text-transform:uppercase}.te-section-name:focus{outline:none;border-color:var(--elite-border);background:var(--elite-panel-inset)}.te-section-count{color:var(--elite-faint);font:700 9px var(--font-mono)}
@@ -21,7 +21,7 @@
   .te-alert-card{display:grid;grid-template-columns:1fr auto;gap:10px;padding:13px 14px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.025)}
   .te-list-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:0 0 14px}.te-list-guide article{padding:13px 14px;border:1px solid var(--elite-border);border-radius:12px;background:linear-gradient(145deg,rgba(var(--cc-accent-rgb, 229,185,79),.08),rgba(255,255,255,.018))}.te-list-guide b{display:block;color:var(--elite-gold-bright);font:700 12px var(--font-display);letter-spacing:.08em}.te-list-guide span{display:block;margin-top:4px;color:var(--elite-muted);font-size:11px;line-height:1.45}
   .te-alert-card.hit{border-color:rgba(52,211,153,.55);box-shadow:inset 3px 0 #34d399}.te-alert-card.paused{opacity:.62}
-  .te-alert-price{font:700 17px var(--font-mono);color:#f5d66d}.te-alert-actions{display:flex;gap:5px;align-items:center}
+  .te-alert-price{font:700 17px var(--font-mono);color:var(--cc-accent-hi, #f5d66d)}.te-alert-actions{display:flex;gap:5px;align-items:center}
   /* A hit off a price that is not live is still a hit, but it is dated.
      Dashed border, same rule as everywhere else in the app. */
   .badge.is-asof{border-style:dashed;cursor:help}

@@ -893,7 +893,7 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(var(--cc-accent-rgb
   position: absolute;
   top: 0; bottom: 0; left: 0;
   width: 45%;
-  background: linear-gradient(100deg, transparent, rgba(240,201,93,.10) 45%, rgba(255,236,170,.16) 50%, rgba(240,201,93,.10) 55%, transparent);
+  background: linear-gradient(100deg, transparent, rgba(var(--cc-accent-rgb, 240,201,93),.10) 45%, rgba(var(--cc-accent-rgb, 255,236,170),.16) 50%, rgba(var(--cc-accent-rgb, 240,201,93),.10) 55%, transparent);
   transform: translateX(-110%);
   animation: market-tape-sheen 8s ease-in-out infinite;
   pointer-events: none;
@@ -937,11 +937,11 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(var(--cc-accent-rgb
   font-weight: 800;
   letter-spacing: .07em;
   font-size: 11.5px;
-  text-shadow: 0 0 14px rgba(240,201,93,.45);
+  text-shadow: 0 0 14px rgba(var(--cc-accent-rgb, 240,201,93),.45);
 }
 .market-tape-logo { width: 15px; height: 15px; border-radius: 4px; object-fit: contain; background: #fff; padding: 1px; margin-right: 5px; vertical-align: -3px; }
 /* Tape tiers: a stock is styled by the most important list it sits on. */
-.market-tape-item.mt-aplus { background: linear-gradient(180deg, var(--cc-accent-hi, #f3d37a), #d99a2b); border-radius: 8px; padding: 2px 8px; box-shadow: 0 0 14px rgba(var(--cc-accent-rgb, 229,185,79),.45); animation: mt-aplus-glow 2.6s ease-in-out infinite; }
+.market-tape-item.mt-aplus { background: linear-gradient(180deg, var(--cc-accent-hi, #f3d37a), var(--cc-accent, #d99a2b)); border-radius: 8px; padding: 2px 8px; box-shadow: 0 0 14px rgba(var(--cc-accent-rgb, 229,185,79),.45); animation: mt-aplus-glow 2.6s ease-in-out infinite; }
 .market-tape-item.mt-aplus .market-tape-sym { color: #1a1206; font-weight: 900; }
 .market-tape-item.mt-aplus .market-tape-sym::before { content: "\2605 "; }
 .market-tape-item.mt-aplus .market-tape-px { color: #1a1206; font-weight: 800; }
@@ -1037,7 +1037,7 @@ table tbody tr:hover, .tbl tbody tr:hover { background: rgba(var(--cc-accent-rgb
   border: 1px solid rgba(var(--cc-accent-rgb, 229,185,79),.22);
 }
 .ptr-indicator.ready .ptr-ring::before {
-  background: conic-gradient(from 0deg, transparent 5%, #fff2c9 30%, var(--elite-gold-bright) 50%, transparent 70%);
+  background: conic-gradient(from 0deg, transparent 5%, var(--cc-accent-hi, #fff2c9) 30%, var(--elite-gold-bright) 50%, transparent 70%);
   opacity: 1;
 }
 .ptr-logo {
