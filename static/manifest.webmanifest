@@ -9,7 +9,10 @@
   "orientation": "portrait-primary",
   "background_color": "#0a0d11",
   "theme_color": "#0a0d11",
-  "categories": ["finance", "business"],
+  "categories": [
+    "finance",
+    "business"
+  ],
   "icons": [
     {
       "src": "/static/icon-192.png?v=5",
@@ -22,6 +25,52 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Live board",
+      "short_name": "Live",
+      "url": "/live-board",
+      "icons": [
+        {
+          "src": "/static/icon-192.png?v=5",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Pre-Trade Gate",
+      "short_name": "Gate",
+      "url": "/trade-gate",
+      "icons": [
+        {
+          "src": "/static/icon-192.png?v=5",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Position Guardian",
+      "short_name": "Guardian",
+      "url": "/guardian",
+      "icons": [
+        {
+          "src": "/static/icon-192.png?v=5",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Research Memory",
+      "short_name": "Memory",
+      "url": "/research-memory",
+      "icons": [
+        {
+          "src": "/static/icon-192.png?v=5",
+          "sizes": "192x192"
+        }
+      ]
     }
   ]
 }
