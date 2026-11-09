@@ -1618,6 +1618,210 @@ def live_ticker_quote(sym: str) -> dict | None:
     return dict(entry["quote"], age_seconds=round(age, 1))
 
 
+# ── Live quotes for every ticker on screen ────────────────────────────────
+# The tape, the Terminal rows and anything else that shows a ticker poll
+# every 3 s. Pages ask for symbols; one background refresher fetches every
+# symbol asked for in the last minute in a single batched request (Alpaca
+# snapshots) and every reader shares the result, so traffic to the provider
+# does not grow with the number of open tabs. Without Alpaca credentials it
+# falls back to Yahoo per-symbol charts at a slower, capped pace.
+_LQ_TTL_S = 3            # batched Alpaca refresh
+_LQ_YAHOO_TTL_S = 10     # per-symbol Yahoo fallback
+_LQ_YAHOO_MAX = 20       # most-recently-wanted symbols the fallback covers
+_LQ_WANT_S = 60          # a symbol stays wanted this long after a request
+_LQ_MAX_AGE_S = 90       # older quotes are not served as live
+_LQ_CACHE: dict = {}     # sym -> {"at": float, "quote": dict}
+_LQ_WANTED: dict = {}    # sym -> last requested (time.time())
+_LQ_STATE: dict = {"at": 0.0, "refreshing": False, "feed": None}
+
+
+def _alpaca_ts(value) -> int | None:
+    """RFC 3339 with up to nanoseconds → epoch seconds."""
+    import re as _re
+    if not value:
+        return None
+    text = str(value).replace("Z", "+00:00")
+    text = _re.sub(r"(\.\d{6})\d+", r"\1", text)
+    try:
+        return int(datetime.fromisoformat(text).timestamp())
+    except ValueError:
+        return None
+
+
+def _quote_from_alpaca_snapshot(snap: dict, today) -> dict | None:
+    """Pure: one live quote from an Alpaca v2 snapshot.
+
+    Before today's session opens, `dailyBar` is still the previous session,
+    so its close is the prior close; once today's bar exists, the prior
+    close is `prevDailyBar`. `ext` names the session of the trade's own ET
+    clock time ("pre", "post", "overnight") or None in regular hours.
+    """
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    trade = (snap or {}).get("latestTrade") or {}
+    price, epoch = trade.get("p"), _alpaca_ts(trade.get("t"))
+    if price is None or not epoch:
+        return None
+    daily = snap.get("dailyBar") or {}
+    prev_bar = snap.get("prevDailyBar") or {}
+    daily_epoch = _alpaca_ts(daily.get("t"))
+    daily_day = datetime.fromtimestamp(daily_epoch, et).date() if daily_epoch else None
+    prev_close = daily.get("c") if (daily_day and daily_day < today) else prev_bar.get("c")
+    when = datetime.fromtimestamp(epoch, et)
+    mins = when.hour * 60 + when.minute
+    ext = None
+    if mins < 240 or mins >= 1200:
+        ext = "overnight"
+    elif mins < 570:
+        ext = "pre"
+    elif mins >= 960:
+        ext = "post"
+    pct = round((float(price) / float(prev_close) - 1) * 100, 2) if prev_close else None
+    return {"price": round(float(price), 4), "epoch": epoch, "prev_close": prev_close,
+            "change_pct": pct, "ext": ext}
+
+
+def _alpaca_snapshots(symbols: list[str]) -> dict:
+    """One batched snapshot call per 100 symbols. {} without credentials."""
+    import os as _os
+    key = (_os.environ.get("ALPACA_API_KEY") or _os.environ.get("APCA_API_KEY_ID") or "").strip()
+    secret = (_os.environ.get("ALPACA_SECRET_KEY") or _os.environ.get("APCA_API_SECRET_KEY") or "").strip()
+    if not (key and secret) or not symbols:
+        return {}
+    import requests as _req
+    from zoneinfo import ZoneInfo
+    headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
+    configured = (_os.environ.get("ALPACA_MARKET_DATA_FEED") or "").strip().lower()
+    feeds = [_LQ_STATE["feed"]] if _LQ_STATE["feed"] else (
+        [configured] if configured in ("sip", "iex") else ["sip", "iex"])
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    out: dict = {}
+    for i in range(0, len(symbols), 100):
+        chunk = symbols[i:i + 100]
+        for feed in feeds:
+            try:
+                r = _req.get("https://data.alpaca.markets/v2/stocks/snapshots",
+                             params={"symbols": ",".join(chunk), "feed": feed},
+                             headers=headers, timeout=6)
+            except Exception:
+                continue
+            if r.status_code in (401, 403, 422) and feed != feeds[-1]:
+                continue   # real-time SIP not on this plan → IEX
+            if r.status_code != 200:
+                break
+            _LQ_STATE["feed"] = feed
+            payload = r.json() or {}
+            snaps = payload.get("snapshots", payload) if isinstance(payload, dict) else {}
+            for sym, snap in (snaps or {}).items():
+                q = _quote_from_alpaca_snapshot(snap or {}, today)
+                if q:
+                    q["source"] = "Alpaca " + feed.upper()
+                    out[sym.upper()] = q
+            break
+    return out
+
+
+def _refresh_live_quotes() -> None:
+    import time as _time
+    now = _time.time()
+    wanted = sorted((s for s, t in _LQ_WANTED.items() if now - t <= _LQ_WANT_S),
+                    key=lambda s: -_LQ_WANTED[s])
+    for s in [s for s, t in _LQ_WANTED.items() if now - t > _LQ_WANT_S]:
+        _LQ_WANTED.pop(s, None)
+    if not wanted:
+        return
+    quotes = {}
+    try:
+        quotes = _alpaca_snapshots(wanted[:300])
+    except Exception as exc:
+        logger.debug("live quotes (alpaca) failed: %s", exc)
+    missing = [s for s in wanted if s not in quotes][:_LQ_YAHOO_MAX]
+    if missing:
+        # Fallback: Yahoo per symbol, at its own slower cadence.
+        stale = [s for s in missing
+                 if now - (_LQ_CACHE.get(s) or {}).get("at", 0) >= _LQ_YAHOO_TTL_S]
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                list(ex.map(_fetch_live_quote, stale))   # fills _LIVE_CACHE
+        except Exception as exc:
+            logger.debug("live quotes (yahoo) failed: %s", exc)
+        for s in stale:
+            lq = (_LIVE_CACHE.get(s) or {}).get("quote")
+            if lq:
+                base = lq.get("prev_close")
+                quotes[s] = {"price": lq["price"], "epoch": lq["epoch"], "prev_close": base,
+                             "change_pct": round((lq["price"] / float(base) - 1) * 100, 2) if base else None,
+                             "ext": lq.get("ext"), "source": "Yahoo"}
+    stamp = _time.time()
+    for s, q in quotes.items():
+        _LQ_CACHE[s] = {"at": stamp, "quote": q}
+
+
+def live_quotes(symbols) -> dict:
+    """Latest shared quotes for these symbols — never blocks.
+
+    Marks the symbols as wanted and starts one background refresh when the
+    batch is older than its TTL. Returns {SYM: quote} for symbols with a
+    quote younger than _LQ_MAX_AGE_S; anything else is simply absent and the
+    caller keeps its slower value. Off under TRADESTAAR_NO_BACKGROUND.
+    """
+    import os as _os
+    import time as _time
+    import threading as _th
+    if _os.environ.get("TRADESTAAR_NO_BACKGROUND", "").strip().lower() in ("1", "true", "yes"):
+        return {}
+    now = _time.time()
+    syms = []
+    for s in symbols or []:
+        s = (s or "").upper().strip()
+        if s and len(s) <= 12 and s not in ("ES", "NQ", "VIX"):
+            syms.append(s)
+            _LQ_WANTED[s] = now
+    if now - _LQ_STATE["at"] >= _LQ_TTL_S and not _LQ_STATE["refreshing"]:
+        _LQ_STATE["refreshing"] = True
+        _LQ_STATE["at"] = now
+
+        def _work():
+            try:
+                _refresh_live_quotes()
+            finally:
+                _LQ_STATE["refreshing"] = False
+        _th.Thread(target=_work, daemon=True, name="live_quotes").start()
+    out = {}
+    for s in syms:
+        entry = _LQ_CACHE.get(s)
+        if entry and now - entry["at"] <= _LQ_MAX_AGE_S:
+            out[s] = dict(entry["quote"])
+    return out
+
+
+def overlay_live_tape(items: list[dict]) -> list[dict]:
+    """Copy of tape items with the freshest prices laid over them.
+
+    Stocks and ETFs from live_quotes(); ES, NQ and VIX from the fast pulse
+    feed. Items without a fresh quote keep the slower cached value.
+    """
+    items = [dict(i) for i in (items or [])]
+    live = live_quotes([i.get("symbol") for i in items])
+    fast = fast_pulse_quotes()
+    for item in items:
+        sym = item.get("symbol")
+        q = live.get(sym)
+        if q and q.get("price") is not None:
+            item["price"] = round(float(q["price"]), 2)
+            if q.get("change_pct") is not None:
+                item["change_pct"] = q["change_pct"]
+            item["live"] = True
+            continue
+        f = fast.get(sym) if sym in ("ES", "NQ", "VIX") else None
+        if f:
+            item["price"] = f["price"]
+            item["change_pct"] = f["pct"]
+            item["live"] = True
+    return items
+
+
 def get_market_tape() -> list[dict]:
     """SPY/QQQ/DIA/IWM/VIX for the global tape — NEVER blocks the request.
 

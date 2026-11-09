@@ -410,11 +410,11 @@
        blocking the page. Past a minute it is not telling you what is
        happening, so it says how far behind it is. #}
     {% if tape_age_seconds is not none and tape_age_seconds > 60 %}
-    <span class="tw-chip tw-tape-age" title="The index tape is served from a cache that refreshes in the background. This one has not refreshed recently.">
+    <span class="tw-chip tw-tape-age" data-tape-age title="The index tape is served from a cache that refreshes in the background. This one has not refreshed recently.">
       TAPE <b>{{ (tape_age_seconds / 60)|round|int }} min behind</b>
     </span>
     {% elif tape_age_seconds is none %}
-    <span class="tw-chip tw-tape-age" title="The index tape cache has not been filled yet — it arrives on the next background refresh.">
+    <span class="tw-chip tw-tape-age" data-tape-age title="The index tape cache has not been filled yet — it arrives on the next background refresh.">
       TAPE <b>not loaded</b>
     </span>
     {% endif %}
@@ -1517,8 +1517,18 @@ function twLoadChart(ticker, interval, range, refreshOnly){
   twChartState.ticker=ticker; twChartState.interval=interval;twChartState.range=range;
   var myReq=++twChartState.reqId;
   var session=twChartState.extended?'extended':'regular';if(!refreshOnly)twChartMsg('Loading '+ticker+' · '+interval+' · '+range+' · '+session+'…','');
-  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session)
-    .then(function(r){ return r.json(); })
+  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session, {cache:'no-store', credentials:'same-origin'})
+    .then(function(r){
+      // A deploy, a restart or a proxy timeout answers with an HTML page.
+      // r.json() on that threw Safari's "The string did not match the
+      // expected pattern" and the chart stayed broken until a reload.
+      var type=(r.headers.get('Content-Type')||'').toLowerCase();
+      if(type.indexOf('application/json')<0){
+        var err=new Error(r.status===401?'Signed out — sign in again to load the chart.':'The chart service did not answer (HTTP '+r.status+').');
+        err.retryable=r.status!==401; throw err;
+      }
+      return r.json();
+    })
     .then(function(d){
       if(myReq!==twChartState.reqId) return;
       if(!d||d.ok===false)throw new Error((d&&d.error)||'Market-data provider unavailable');
@@ -1567,9 +1577,24 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       twEstCost();
       var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent=interval.toUpperCase()+' · '+range.toUpperCase()+' · '+bars.length.toLocaleString()+' bars · '+(d.session||'regular')+' · '+(d.adjustment||'split-adjusted');
       twChartHideMsg();
+      twChartState.retryN=0;clearTimeout(twChartState.retryTimer);
       twScheduleChartRefresh();
     })
-    .catch(function(e){if(myReq!==twChartState.reqId)return;if(refreshOnly){var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent='Refresh failed · showing last loaded bars';twScheduleChartRefresh();}else twChartMsg('Chart error',(e&&e.message)||String(e));});
+    .catch(function(e){
+      if(myReq!==twChartState.reqId)return;
+      if(refreshOnly){var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent='Refresh failed · showing last loaded bars';twScheduleChartRefresh();return;}
+      // Network failures and non-JSON answers are usually momentary: retry
+      // on our own (3 s, 6 s, 12 s, then every 30 s) instead of leaving
+      // the chart blank until someone reloads the page.
+      var retryable=(e&&e.retryable)||(e instanceof TypeError)||/expected pattern|JSON|Load failed|NetworkError/i.test(String(e&&e.message));
+      if(!retryable){twChartMsg('Chart error',(e&&e.message)||String(e));return;}
+      var key=ticker+'|'+interval+'|'+range;
+      if(twChartState.retryKey!==key){twChartState.retryKey=key;twChartState.retryN=0;}
+      var n=++twChartState.retryN, wait=n<=3?3000*Math.pow(2,n-1):30000;
+      twChartMsg('Reconnecting chart…','The chart data did not load. Trying again in '+Math.round(wait/1000)+' s.');
+      clearTimeout(twChartState.retryTimer);
+      twChartState.retryTimer=setTimeout(function(){if(twChartState.ticker===ticker&&twChartState.interval===interval&&twChartState.range===range)twLoadChart(ticker,interval,range,false);},wait);
+    });
 }
 
 /* ═══ Ticker intelligence ═══ */
@@ -1841,6 +1866,8 @@ async function twQuotesRefresh(){
 }
 
 window._arRefreshFn = twQuotesRefresh;
+// Rows, header and chips: every 3 s, from the shared live-quote feed.
+window._arInterval = 3000;
 
 /* ═══ Live chart feed ═══
    The charted symbol's latest print every 3 s from /api/terminal/live —
@@ -1993,6 +2020,11 @@ document.addEventListener('keydown',function(e){
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(d){
         if(!d || !d.ok || !d.items) return;
+        // The "TAPE not loaded / N min behind" chip is rendered once with
+        // the page. Live prices arriving is the answer to it.
+        if(d.items.some(function(t){ return t && t.price != null; })){
+          document.querySelectorAll('[data-tape-age]').forEach(function(el){ el.remove(); });
+        }
         var have = {};
         document.querySelectorAll('[data-mtape]').forEach(function(el){
           have[el.getAttribute('data-mtape')] = 1;
@@ -2018,7 +2050,7 @@ document.addEventListener('keydown',function(e){
       .catch(function(){});
   }
   twTapeRefresh();
-  setInterval(twTapeRefresh, 45000);
+  setInterval(function(){ if(!document.hidden) twTapeRefresh(); }, 3000);
 })();
 </script>
 {% endblock %}

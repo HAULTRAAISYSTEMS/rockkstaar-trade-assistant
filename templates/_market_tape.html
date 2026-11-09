@@ -68,7 +68,7 @@
     if (!freshness) return;
     if (!lastSuccess) { freshness.textContent = 'Quotes unavailable'; freshness.classList.add('is-stale'); return; }
     var age = Math.floor((Date.now() - lastSuccess) / 60000);
-    freshness.textContent = age < 1 ? 'Quotes checked just now' : 'Quotes checked ' + age + 'm ago';
+    freshness.textContent = age < 1 ? 'Live quotes' : 'Quotes checked ' + age + 'm ago';
     freshness.classList.toggle('is-stale', age >= 3);
   }
   function fetchTape() {
@@ -91,7 +91,9 @@
       .finally(function () { pending = false; });
   }
   fetchTape();
-  setInterval(function () { fetchTape(); updateFreshness(); }, 45000);
+  // Every 3 s: the server lays a shared few-seconds-old quote over each
+  // ticker, so this is a cache read, not a quote fetch per tab.
+  setInterval(function () { fetchTape(); updateFreshness(); }, 3000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) fetchTape(); });
 })();
 </script>

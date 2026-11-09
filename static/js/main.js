@@ -135,7 +135,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
 window._arEnabled       = true;
 window._arTimer         = null;
-window._arInterval      = 4000;   // 4 s between live patches during market hours
+window._arInterval      = 3000;   // 3 s between live patches while the market trades (24/5)
 window._arRefreshFn     = null;   // Set by each page that supports live updates
 window._arFailCount     = 0;      // Consecutive poll failures
 window._arLastSuccessMs = 0;      // Date.now() of last successful poll
@@ -145,9 +145,13 @@ function isMarketHours() {
     const etStr = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
     const et    = new Date(etStr);
     const day   = et.getDay();
-    if (day === 0 || day === 6) return false;
     const mins  = et.getHours() * 60 + et.getMinutes();
-    return mins >= 240 && mins < 1200;   // 4:00 AM – 8:00 PM ET
+    // 24/5: pre-market, regular, after hours and the 8 PM–4 AM overnight
+    // session all trade — Sunday 8 PM through Friday 8 PM ET.
+    if (day === 6) return false;
+    if (day === 0) return mins >= 1200;
+    if (day === 5) return mins < 1200;
+    return true;
   } catch (e) {
     return true;
   }
