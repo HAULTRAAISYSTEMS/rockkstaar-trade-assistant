@@ -90,6 +90,12 @@ def create_card(user_id, data: dict, conn=None) -> str:
 
         ticker = _ticker((source or {}).get("ticker") or data.get("ticker"))
         headline = _text((source or {}).get("headline") or data.get("headline"), limit=300, required=True)
+        if not source:
+            # The same story saved twice from the news scanner opens the
+            # card already written instead of making a second one.
+            existing = find_existing(user_id, ticker, headline, data.get("source_url"), conn=conn)
+            if existing:
+                return existing
         why = _multiline(data.get("why_it_matters"), limit=4000)
         if not why:
             raise ResearchMemoryError("Write why this matters before saving it.")
@@ -127,6 +133,51 @@ def create_card(user_id, data: dict, conn=None) -> str:
     except Exception:
         conn.rollback()
         raise
+    finally:
+        if owns:
+            conn.close()
+
+
+def find_existing(user_id, ticker, headline, source_url=None, conn=None) -> str | None:
+    """An active card for this same story (same link, or same ticker + headline)."""
+    owns = conn is None
+    conn = conn or get_db()
+    try:
+        url = _text(source_url, limit=2000)
+        if url:
+            row = conn.execute(
+                "SELECT id FROM research_memory_cards WHERE user_id=? AND source_url=? AND status='active'",
+                (int(user_id), url),
+            ).fetchone()
+            if row:
+                return row["id"]
+        row = conn.execute(
+            "SELECT id FROM research_memory_cards WHERE user_id=? AND ticker=? AND headline=? AND status='active'",
+            (int(user_id), ticker, _text(headline, limit=300)),
+        ).fetchone()
+        return row["id"] if row else None
+    finally:
+        if owns:
+            conn.close()
+
+
+def saved_story_keys(user_id, conn=None) -> dict:
+    """Links and headlines of the user's active cards, to mark saved stories."""
+    owns = conn is None
+    conn = conn or get_db()
+    try:
+        rows = conn.execute(
+            "SELECT id, source_url, headline FROM research_memory_cards WHERE user_id=? AND status='active' "
+            "ORDER BY created_at DESC LIMIT 1000",
+            (int(user_id),),
+        ).fetchall()
+        urls, headlines = {}, {}
+        for row in rows:
+            if row["source_url"]:
+                urls.setdefault(row["source_url"], row["id"])
+            if row["headline"]:
+                headlines.setdefault(" ".join(row["headline"].lower().split()), row["id"])
+        return {"urls": urls, "headlines": headlines}
     finally:
         if owns:
             conn.close()

@@ -17,12 +17,19 @@ BULLISH_TERMS = {
     "upgrade": 2, "price target raised": 2, "approval": 2, "approved": 2,
     "record revenue": 2, "buyback": 2, "wins contract": 2, "partnership": 1,
     "growth": 1, "surge": 1, "rally": 1,
+    # Price-action and results language the wires actually use.
+    "beats": 2, "tops estimates": 3, "tops expectations": 3, "above expectations": 2,
+    "guidance raise": 3, "raises outlook": 3, "raises forecast": 3, "lifts guidance": 3,
+    "boosts guidance": 3, "% beat": 2, "soars": 2, "jumps": 1, "climbs": 1,
+    "record high": 2, "all-time high": 2,
 }
 BEARISH_TERMS = {
     "missed estimates": 3, "cuts guidance": 3, "cut guidance": 3,
     "downgrade": 2, "price target cut": 2, "investigation": 2, "lawsuit": 2,
     "recall": 2, "warning": 2, "offering": 2, "layoffs": 1,
     "decline": 1, "falls": 1, "probe": 1,
+    "misses": 2, "below expectations": 2, "lowers guidance": 3, "lowers outlook": 3,
+    "plunges": 2, "tumbles": 2, "sinks": 1, "slumps": 1, "% miss": 2,
 }
 
 CATALYST_EXPLANATIONS = (
@@ -42,10 +49,16 @@ def _clean(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
-def score_headline(headline: object) -> dict:
-    """Return a bounded, auditable tone score for one headline."""
+def score_headline(headline: object, summary: object = "") -> dict:
+    """Return a bounded, auditable tone score for one headline.
+
+    The story's own lead (first ~280 characters of the provider summary) is
+    read too: "CEG Q3 Earnings Call Summary" says nothing on its own, while its
+    lead says "Adjusted EPS was $5.06 vs $3.72 expected, a 36% beat".
+    """
     text = _clean(headline)
-    lowered = text.lower()
+    lead = _clean(summary)[:280]
+    lowered = f"{text} {lead}".lower() if lead else text.lower()
     positive = [(term, weight) for term, weight in BULLISH_TERMS.items() if term in lowered]
     negative = [(term, weight) for term, weight in BEARISH_TERMS.items() if term in lowered]
     positive_weight = sum(weight for _, weight in positive)
@@ -92,7 +105,7 @@ def enrich_news_article(raw: dict, watchlist: list[str] | set[str] | None = None
     raw_ticker = _clean(item.get("ticker")).upper()
     ticker = _subject_ticker(headline, _clean(item.get("summary")), raw_ticker) or raw_ticker or "MARKET"
     watch = {str(value).upper() for value in (watchlist or [])}
-    scored = score_headline(headline)
+    scored = score_headline(headline, item.get("summary"))
     impact = _clean(item.get("impact")).upper() or "MEDIUM"
     base_importance = {"CRITICAL": 94, "HIGH": 82, "MEDIUM": 66, "LOW": 42}.get(impact, 58)
     evidence_bonus = min(6, scored["evidence_count"] * 2)
