@@ -1,0 +1,269 @@
+/* =================================================================
+   TRADESTAAR ELITE — TERMINAL WORKSPACE (TradingView-style layout)
+   -----------------------------------------------------------------
+   Desktop: the chart owns the screen. Drawing rail on the left, chart
+   with stacked RSI/MACD panes in the middle, watchlist + ticket on a
+   right sidebar, all sized to the viewport (--tw-avail is set by a
+   small script in terminal.html). Context, intelligence and positions
+   follow below the fold.
+   Layout only: every id, handler and data hook is unchanged.
+   ================================================================= */
+
+/* ── Shared: drawing rail, legend, top bar ──────────────────────── */
+.tw-workspace { display: flex; min-height: 0; gap: 0; }
+.tw-drawbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 5px;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(3, 7, 15, 0.55);
+}
+.tw-drawbar .tw-tool-group {
+  display: flex !important; flex-direction: column; align-items: center;
+  margin: 0 !important; padding: 0 !important; border: 0 !important;
+}
+.tw-drawbar .tw-tool-label { display: none !important; }
+.tw-drawbar .tw-tool-buttons { display: flex !important; flex-direction: column; gap: 4px !important; }
+.tw-drawbar .tw-type-btn {
+  position: relative;
+  width: 34px !important; height: 34px !important; padding: 0 !important;
+  border-radius: 9px !important;
+  color: #8d9bb0 !important;
+  background: transparent !important;
+}
+.tw-drawbar .tw-type-btn:hover { color: #fff !important; background: rgba(255, 255, 255, 0.06) !important; }
+.tw-drawbar .tw-type-btn.active {
+  color: #0a0712 !important;
+  background: linear-gradient(135deg, var(--cc-accent-hi, #e8ffad), var(--cc-accent, #c4f53b)) !important;
+  box-shadow: 0 0 16px -2px rgba(var(--cc-accent-rgb, 196, 245, 59), 0.7);
+}
+.tw-drawbar .tw-type-btn:nth-child(4) { margin-top: 10px; }  /* separate edit actions from tools */
+.tw-draw-name {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+.tw-symsearch {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 9px;
+  background: rgba(3, 7, 15, 0.6);
+  color: #c9d3df; font: 600 11px var(--font-ui, system-ui); cursor: pointer;
+  flex: 0 0 auto;
+}
+.tw-symsearch:hover { border-color: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.55); color: #fff; }
+
+.tw-chart-stack { position: relative; flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.tw-chart-stack > .tw-time-axis { flex: 0 0 22px; height: 22px !important; }
+.tw-chart-stack > .tw-indicators { flex: 0 0 auto; }
+
+/* OHLC legend floats on the chart's first line, like TradingView */
+.tw-chart-stack > .tw-ohlcv {
+  position: absolute !important;
+  z-index: 4; top: 7px; left: 12px; right: 90px;
+  display: flex !important; flex-wrap: wrap; gap: 4px 14px !important;
+  margin: 0 !important; padding: 0 !important;
+  border: 0 !important; background: none !important;
+  pointer-events: none;
+}
+.tw-chart-stack > .tw-ohlcv > div { display: flex; align-items: baseline; gap: 5px; }
+.tw-chart-stack > .tw-ohlcv .k { color: #6f7c91 !important; font: 600 9px var(--font-mono, monospace) !important; letter-spacing: 0.08em !important; }
+.tw-chart-stack > .tw-ohlcv .v { margin: 0 !important; color: #e6edf6 !important; font: 600 11px var(--font-mono, monospace) !important; font-variant-numeric: tabular-nums; }
+.tw-chart-stack .tw-chart-hint { top: 27px !important; }
+.tw-chart-stack .tw-ema-legend { top: 44px !important; }
+
+/* ── Desktop workspace ─────────────────────────────────────────── */
+@media (min-width: 1100px) {
+  body:has(.tw-body) .workspace-bar { display: none; }      /* Search lives in the chart bar */
+  body:has(.tw-body) .main-content { padding-top: 8px !important; }
+  .tw { max-width: none !important; padding: 0 10px; }
+
+  .tw-tape { margin-bottom: 6px !important; }
+  .tw-status { margin: 0 0 8px !important; padding: 4px 10px !important; min-height: 0; }
+  .tw-status .tw-title { font-size: 17px !important; }
+
+  .tw-body {
+    --tw-h: var(--tw-avail, 780px);
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 340px !important;
+    grid-template-rows: calc(var(--tw-h) * 0.47) calc(var(--tw-h) * 0.53 - 10px) auto auto auto;
+    gap: 10px !important;
+    align-items: stretch !important;
+  }
+  .tw-center { display: contents !important; }
+
+  /* Chart panel: spans the full viewport height of the workspace */
+  .tw-center > .tw-panel:first-child {
+    grid-column: 1; grid-row: 1 / span 2;
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto minmax(0, 1fr);
+    min-height: 0; overflow: hidden;
+    padding: 0 !important;
+  }
+  .tw-center > .tw-panel:first-child > .tw-sym-hd { grid-column: 1; grid-row: 1; }
+  .tw-center > .tw-panel:first-child > .tw-chart-toolbar { grid-column: 2; grid-row: 1; }
+  .tw-center > .tw-panel:first-child > :not(.tw-sym-hd):not(.tw-chart-toolbar):not(.tw-workspace) { grid-column: 1 / -1; }
+  .tw-center > .tw-panel:first-child > .tw-workspace { grid-column: 1 / -1; grid-row: 5; }
+
+  /* One slim top bar: symbol + price on the left, tools on the right */
+  .tw-sym-hd {
+    display: flex !important; align-items: center !important; gap: 14px !important;
+    margin: 0 !important; padding: 8px 14px !important;
+    border: 0 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+    background: none !important;
+  }
+  .tw-sym-left, .tw-sym-right { display: flex !important; align-items: baseline !important; gap: 10px !important; text-align: left !important; }
+  .tw-sym-toprow { display: flex; align-items: center; gap: 8px; }
+  .tw-sym-ticker { font-size: 20px !important; }
+  .tw-sym-sub { display: none !important; }
+  .tw-sym-px { font-size: 20px !important; line-height: 1 !important; }
+  .tw-sym-chg { font-size: 13px !important; }
+  .tw-sym-stamp { display: none !important; }
+  .tw-chart-toolbar {
+    display: flex !important; flex-wrap: nowrap !important; align-items: center !important; gap: 8px !important;
+    margin: 0 !important; padding: 6px 12px !important; min-height: 0 !important;
+    border: 0 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important; border-radius: 0 !important;
+    background: none !important; box-shadow: none !important;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .tw-chart-toolbar::-webkit-scrollbar { display: none; }
+  .tw-chart-toolbar .tw-control-label { display: none !important; }
+  .tw-chart-toolbar .tw-type { margin-left: auto; flex-wrap: nowrap !important; }
+  .tw-chart-toolbar .tw-tf-btn { padding: 0 9px !important; height: 28px !important; }
+  .tw-chart-toolbar .tw-range-select { width: auto !important; min-width: 0 !important; padding-right: 22px !important; }
+  .tw-chart-toolbar .tw-tool-group { padding-left: 8px !important; margin-left: 8px !important; }
+
+  .tw-workspace { min-height: 0; }
+  .tw-chart-stack {
+    margin: 0 !important; border: 0 !important; border-radius: 0 !important;
+    box-shadow: none !important; background: transparent !important;
+    min-height: 0;
+  }
+  .tw-chart-stack > .tw-chart { flex: 1 1 auto; height: auto !important; min-height: 220px; }
+  .tw-chart-stack > .tw-indicators { flex: 0 0 auto; }
+  #tw-rsi-panel { height: 96px !important; }
+  #tw-macd-panel { height: 112px !important; }
+
+  /* Right sidebar: watchlist on top, setups / account / ticket below */
+  .tw-body > .tw-panel:first-child {
+    grid-column: 2; grid-row: 1;
+    display: flex !important; flex-direction: column;
+    min-height: 0; overflow: hidden;
+    position: static !important;
+  }
+  .tw-body > .tw-panel:first-child .tw-wl { flex: 1 1 auto; max-height: none !important; overflow-y: auto; }
+  .tw-right {
+    grid-column: 2 !important; grid-row: 2 !important;
+    display: flex !important; flex-direction: column; gap: 10px;
+    min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    padding-right: 2px;
+  }
+
+  /* Below the fold, full width */
+  .tw-context { grid-column: 1 / -1; grid-row: 3; padding: 0 !important; }
+  .tw-intel { grid-column: 1 / -1; grid-row: 4; }
+  .tw-center > .tw-panel:last-child:not(.tw-intel) { grid-column: 1 / -1; grid-row: 5; }
+}
+
+/* Watchlist rows: compact, TradingView-style (Symbol · spark · Last · Chg%) */
+.tw-wl-row { padding: 9px 12px !important; }
+.tw-wl-name { display: none !important; }
+.tw-wl-sym { font-size: 13px !important; }
+.tw-wl-px { font-size: 12.5px !important; }
+.tw-wl-chg { font-size: 11px !important; }
+
+/* ── Tablet / phone: stacked, chart still leads ────────────────── */
+@media (max-width: 1099px) {
+  /* Chart first, then watchlist, then everything else */
+  .tw-body { display: grid !important; grid-template-columns: minmax(0, 1fr) !important; gap: 12px !important; }
+  .tw-center { display: contents !important; }
+  .tw-center > .tw-panel:first-child { order: 1; }
+  .tw-context { order: 2; }
+  .tw-body > .tw-panel:first-child { order: 3; position: static !important; }
+  .tw-right { order: 4; grid-column: 1 !important; }
+  .tw-intel { order: 5; }
+  .tw-center > .tw-panel:last-child:not(.tw-intel) { order: 6; }
+  .tw-body > .tw-panel:first-child .tw-wl { max-height: 420px !important; overflow-y: auto !important; }
+  .tw-status { gap: 6px !important; padding: 8px 10px !important; }
+  .tw-status .tw-title { font-size: 18px !important; }
+  .tw-status .tw-chip { padding: 3px 8px !important; font-size: 10px !important; }
+  .tw-workspace { flex-direction: column; }
+  .tw-drawbar { flex-direction: row; justify-content: flex-start; gap: 4px; padding: 5px 8px; border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); overflow-x: auto; }
+  .tw-drawbar .tw-tool-buttons { flex-direction: row; }
+  .tw-drawbar .tw-type-btn:nth-child(4) { margin: 0 0 0 10px; }
+  .tw-chart-stack > .tw-chart { height: min(58vh, 520px) !important; }
+  .tw-symsearch span { display: none; }
+}
+@media (max-width: 1099px) {
+  .tw-sym-hd { display: flex !important; flex-wrap: wrap; align-items: center !important; gap: 4px 12px !important; padding: 12px 14px 8px !important; }
+  .tw-sym-left, .tw-sym-right { display: flex !important; align-items: baseline !important; gap: 10px !important; text-align: left !important; }
+  .tw-sym-right { flex-wrap: wrap; }
+  .tw-sym-ticker { font-size: 22px !important; }
+  .tw-sym-sub { display: none !important; }
+  .tw-sym-px { font-size: 22px !important; }
+  .tw-sym-stamp { flex-basis: 100%; font-size: 9.5px !important; }
+}
+@media (max-width: 600px) {
+  .tw-chart-stack .tw-chart-hint { display: none !important; }
+  .tw-chart-stack .tw-ema-legend { top: 40px !important; }
+  .tw-chart-stack > .tw-ohlcv { right: 70px; gap: 2px 9px !important; }
+  .tw-chart-stack > .tw-ohlcv .v { font-size: 10px !important; }
+  .tw-chart-stack > .tw-ohlcv > div:last-child { display: none; }   /* volume: drop on phones */
+  .tw-chart-stack > .tw-chart { height: 52vh !important; }
+}
+
+/* ── Chart surface: solid, no grid, so nothing shows through ───── */
+.tw-chart-stack { background: #060a12 !important; }
+
+/* ── Full-screen chart ─────────────────────────────────────────── */
+.tw-fs-btn {
+  margin-left: 2px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; width: 32px; height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 9px;
+  background: rgba(3, 7, 15, 0.6); color: #c9d3df; cursor: pointer;
+}
+.tw-fs-btn:hover { color: #fff; border-color: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.6); }
+.tw-fs-btn[aria-pressed="true"] { color: #0a0712; background: linear-gradient(135deg, var(--cc-accent-hi, #e8ffad), var(--cc-accent, #c4f53b)); border-color: transparent; }
+.tw-fs-btn .tw-fs-off, .tw-fs-btn[aria-pressed="true"] .tw-fs-on { display: none; }
+.tw-fs-btn[aria-pressed="true"] .tw-fs-off { display: block; }
+
+.tw-center > .tw-panel.tw-is-fullscreen,
+.tw-center > .tw-panel:fullscreen {
+  position: fixed !important; inset: 0 !important; z-index: 10050 !important;
+  width: 100vw !important; height: 100vh !important; height: 100dvh !important;
+  max-width: none !important; margin: 0 !important;
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) !important;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) !important;
+  border: 0 !important; border-radius: 0 !important;
+  background: #050810 !important;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0) !important;
+  overflow: hidden !important;
+}
+.tw-center > .tw-panel:fullscreen::backdrop { background: #050810; }
+.tw-center > .tw-panel.tw-is-fullscreen > .tw-sym-hd,
+.tw-center > .tw-panel:fullscreen > .tw-sym-hd { grid-column: 1; grid-row: 1; }
+.tw-center > .tw-panel.tw-is-fullscreen > .tw-chart-toolbar,
+.tw-center > .tw-panel:fullscreen > .tw-chart-toolbar { grid-column: 2; grid-row: 1; }
+.tw-center > .tw-panel.tw-is-fullscreen > .tw-workspace,
+.tw-center > .tw-panel:fullscreen > .tw-workspace { grid-column: 1 / -1; grid-row: 5; min-height: 0; }
+.tw-center > .tw-panel.tw-is-fullscreen .tw-chart-stack > .tw-chart,
+.tw-center > .tw-panel:fullscreen .tw-chart-stack > .tw-chart { flex: 1 1 auto; height: auto !important; min-height: 0; }
+html.tw-fs-lock, html.tw-fs-lock body { overflow: hidden !important; }
+html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !important; }
+@media (max-width: 1099px) {
+  .tw-center > .tw-panel.tw-is-fullscreen,
+  .tw-center > .tw-panel:fullscreen { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: auto auto auto auto auto minmax(0, 1fr) !important; }
+  .tw-center > .tw-panel.tw-is-fullscreen > .tw-chart-toolbar,
+  .tw-center > .tw-panel:fullscreen > .tw-chart-toolbar { grid-column: 1; grid-row: 2; }
+  .tw-center > .tw-panel.tw-is-fullscreen > .tw-workspace,
+  .tw-center > .tw-panel:fullscreen > .tw-workspace { grid-row: 6; }
+  .tw-center > .tw-panel.tw-is-fullscreen #tw-rsi-panel,
+  .tw-center > .tw-panel:fullscreen #tw-rsi-panel { height: 80px !important; }
+  .tw-center > .tw-panel.tw-is-fullscreen #tw-macd-panel,
+  .tw-center > .tw-panel:fullscreen #tw-macd-panel { height: 90px !important; }
+}

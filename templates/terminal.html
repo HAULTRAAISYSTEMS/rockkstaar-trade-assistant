@@ -371,6 +371,7 @@
   .tw-ohlcv .k { font-size: 9px; letter-spacing: .04em; }
 }
 </style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/terminal_workspace.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -532,6 +533,7 @@
         </div>
 
         <div class="tw-chart-toolbar">
+          <button type="button" class="tw-symsearch" onclick="var o=document.getElementById('workspace-search-open');if(o)o.click();" title="Search a company or tool (/)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg><span>Search</span></button>
           <div class="tw-interval-wrap">
             <span class="tw-control-label">Interval · Eastern Time</span>
             <div class="tw-tf">
@@ -541,6 +543,7 @@
             </div>
           </div>
           <label class="tw-range-wrap"><span class="tw-control-label">Range</span><select id="tw-range" class="tw-range-select" onchange="twRange(this.value)"></select></label>
+          <button type="button" class="tw-fs-btn" id="tw-fs-btn" onclick="twToggleFullscreen()" title="Full screen chart (Esc to exit)" aria-label="Full screen chart" aria-pressed="false"><svg class="tw-fs-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="tw-fs-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
           <div class="tw-type" aria-label="Chart tools">
             <div class="tw-tool-group"><span class="tw-tool-label">Chart</span><div class="tw-tool-buttons">
               <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Line chart"><span class="tw-tool-icon">⌁</span>Line</button>
@@ -560,14 +563,6 @@
                 </div>
               </div>
             </div>
-            <div class="tw-tool-group"><span class="tw-tool-label">Draw</span><div class="tw-tool-buttons">
-              <button class="tw-type-btn" id="tw-edit-btn" onclick="twStartDrawing('select',this)" title="Select, move, or resize a drawing">Select</button>
-              <button class="tw-type-btn" id="tw-line-btn" onclick="twStartDrawing('line',this)" title="Drag to draw a trend line">Trend</button>
-              <button class="tw-type-btn" id="tw-fib-btn" onclick="twStartDrawing('fib',this)" title="Drag to draw Fibonacci retracement">Fib</button>
-              <button class="tw-type-btn tw-icon-btn" id="tw-delete-btn" onclick="twDeleteSelected()" title="Delete selected drawing" aria-label="Delete selected drawing">⌫</button>
-              <button class="tw-type-btn tw-icon-btn" onclick="twClearDrawings()" title="Clear all drawings" aria-label="Clear all drawings">×</button>
-              <button class="tw-type-btn tw-icon-btn" onclick="twResetView()" title="Reset chart view" aria-label="Reset chart view">↺</button>
-            </div></div>
           </div>
         </div>
 
@@ -608,6 +603,19 @@
 
         <div class="tw-draw-status" id="tw-draw-status" hidden></div>
 
+        <div class="tw-workspace">
+        {# Drawing tools sit on a vertical rail beside the chart, TradingView-style. #}
+        <div class="tw-drawbar" role="toolbar" aria-label="Drawing tools">
+            <div class="tw-tool-group"><span class="tw-tool-label">Draw</span><div class="tw-tool-buttons">
+              <button class="tw-type-btn" id="tw-edit-btn" onclick="twStartDrawing('select',this)" title="Select, move, or resize a drawing"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 3.5l13 7.2-5.6 1.4-2.6 5.4z"/></svg><span class="tw-draw-name">Select</span></button>
+              <button class="tw-type-btn" id="tw-line-btn" onclick="twStartDrawing('line',this)" title="Drag to draw a trend line"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 19 20 5"/><circle cx="4.5" cy="18.5" r="1.8"/><circle cx="19.5" cy="5.5" r="1.8"/></svg><span class="tw-draw-name">Trend</span></button>
+              <button class="tw-type-btn" id="tw-fib-btn" onclick="twStartDrawing('fib',this)" title="Drag to draw Fibonacci retracement"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h18M3 9.5h18M3 14h18M3 19h18"/><path d="M6 19 18 5" stroke-dasharray="2 2.5"/></svg><span class="tw-draw-name">Fib</span></button>
+              <button class="tw-type-btn tw-icon-btn" id="tw-delete-btn" onclick="twDeleteSelected()" title="Delete selected drawing" aria-label="Delete selected drawing"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13"/></svg></button>
+              <button class="tw-type-btn tw-icon-btn" onclick="twClearDrawings()" title="Clear all drawings" aria-label="Clear all drawings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+              <button class="tw-type-btn tw-icon-btn" onclick="twResetView()" title="Reset chart view" aria-label="Reset chart view"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4.5h4.5"/></svg></button>
+            </div></div>
+        </div>
+
         <div class="tw-chart-stack" id="tw-chart-stack">
         <div class="tw-chart" id="tw-chart-box">
           <div class="tw-chart-canvas" id="tw-chart"></div>
@@ -641,15 +649,17 @@
           <div><div class="k">Volume</div><div class="v" id="tw-o-vol">—</div></div>
         </div>
         </div>
+        </div>{# /tw-workspace #}
 
 
-        <div class="tw-context" aria-label="Ticker context">
+      </div>
+
+      <div class="tw-context" aria-label="Ticker context">
           <article class="tw-context-card tw-context-wide"><span>Why moving</span><strong id="tw-context-why">Loading verified context…</strong></article>
           <article class="tw-context-card"><span>Relative volume</span><strong id="tw-context-rvol">—</strong></article>
           <article class="tw-context-card"><span>Next earnings</span><strong id="tw-context-earnings">—</strong></article>
           <article class="tw-context-card"><span>Insider pulse</span><strong id="tw-context-insiders">Checking SEC filings…</strong></article>
         </div>
-      </div>
 
       <div class="tw-panel tw-intel" id="tw-intel">
         <div class="tw-intel-head">
@@ -1150,13 +1160,13 @@ function twInitChart(){
   var chart=LC.createChart(el,{
     autoSize:true,
     layout:{ background:{type:'solid',color:'transparent'}, textColor:'#AEB7C2', fontFamily:"'IBM Plex Mono', ui-monospace, monospace", fontSize:11 },
-    grid:{ vertLines:{color:'rgba(255,255,255,0.04)'}, horzLines:{color:'rgba(255,255,255,0.04)'} },
+    grid:{ vertLines:{visible:false}, horzLines:{visible:false} },
     rightPriceScale:{ borderColor:'rgba(255,255,255,0.08)' },
     localization:{locale:'en-US',timeFormatter:twEasternTimeLabel},
     timeScale:{ borderColor:'rgba(255,255,255,0.08)', timeVisible:true, secondsVisible:false,tickMarkFormatter:twEasternTickLabel },
     crosshair:{ mode:LC.CrosshairMode.Normal,
-      vertLine:{color:'rgba(255,122,24,0.55)',labelBackgroundColor:'#FF7A18'},
-      horzLine:{color:'rgba(255,122,24,0.55)',labelBackgroundColor:'#FF7A18'} }
+      vertLine:{color:'rgba(214,224,236,0.38)',style:LC.LineStyle.Dashed,labelBackgroundColor:'#2b3646'},
+      horzLine:{color:'rgba(214,224,236,0.38)',style:LC.LineStyle.Dashed,labelBackgroundColor:'#2b3646'} }
   });
   // Semantic colours — green = gain, red = loss. Do not restyle.
   var area=chart.addAreaSeries({ lineColor:'#22C58B', topColor:'rgba(34,197,139,0.28)', bottomColor:'rgba(34,197,139,0.0)', lineWidth:2, priceLineVisible:false });
@@ -1314,7 +1324,7 @@ function twIndCrosshair(ctx,fit,pad,xFn,yFn,val,txt){
   if(hov==null||!win||hov<win.start||hov>=win.end) return;
   var hx=xFn(hov-win.start),ax=twChartState.axisW||64;
   ctx.save();
-  ctx.strokeStyle='rgba(255,122,24,.65)';ctx.lineWidth=1;ctx.setLineDash([4,3]);
+  ctx.strokeStyle='rgba(214,224,236,.38)';ctx.lineWidth=1;ctx.setLineDash([4,3]);
   ctx.beginPath();ctx.moveTo(hx,pad.t);ctx.lineTo(hx,fit.h-pad.b);ctx.stroke();ctx.setLineDash([]);
   if(val!=null&&isFinite(val)){
     var hy=yFn(val);
@@ -1807,6 +1817,46 @@ async function twQuotesRefresh(){
 }
 
 window._arRefreshFn = twQuotesRefresh;
+
+/* Full-screen chart. Uses the browser's full-screen mode where it exists
+   (desktop, Android, iPad); iPhone Safari has no element full screen, so
+   the panel is pinned over the page instead. Esc or the button exits. */
+function twChartPanel(){ return document.querySelector('.tw-center > .tw-panel'); }
+function twSetFsState(on){
+  var panel=twChartPanel(), btn=document.getElementById('tw-fs-btn');
+  if(panel) panel.classList.toggle('tw-is-fullscreen', on);
+  document.documentElement.classList.toggle('tw-fs-lock', on);
+  if(btn){ btn.setAttribute('aria-pressed', on?'true':'false'); btn.title=on?'Exit full screen (Esc)':'Full screen chart (Esc to exit)'; }
+  setTimeout(function(){ if(typeof twRenderIndicators==='function')twRenderIndicators(); if(typeof twDrawTimeAxis==='function')twDrawTimeAxis(); if(typeof twRenderDrawings==='function')twRenderDrawings(); }, 60);
+}
+function twToggleFullscreen(){
+  var panel=twChartPanel(); if(!panel) return;
+  var nativeOn=document.fullscreenElement||document.webkitFullscreenElement;
+  var on=panel.classList.contains('tw-is-fullscreen');
+  if(nativeOn){ (document.exitFullscreen||document.webkitExitFullscreen).call(document); return; }
+  if(on){ twSetFsState(false); return; }
+  var req=panel.requestFullscreen||panel.webkitRequestFullscreen;
+  if(req){ try{ var p=req.call(panel); if(p&&p.catch)p.catch(function(){twSetFsState(true);}); }catch(e){ twSetFsState(true); } }
+  else twSetFsState(true);
+}
+['fullscreenchange','webkitfullscreenchange'].forEach(function(ev){
+  document.addEventListener(ev,function(){ twSetFsState(!!(document.fullscreenElement||document.webkitFullscreenElement)); });
+});
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){ var p=twChartPanel(); if(p&&p.classList.contains('tw-is-fullscreen')&&!document.fullscreenElement) twSetFsState(false); }
+});
+
+/* Workspace height: on desktop the chart workspace fills the screen
+   below the header. CSS reads --tw-avail; this keeps it current. */
+(function twFitWorkspace(){
+  var body=document.querySelector('.tw-body'); if(!body) return;
+  function fit(){
+    var top=body.getBoundingClientRect().top+window.scrollY;
+    var avail=Math.max(560, window.innerHeight-top-10);
+    body.style.setProperty('--tw-avail', avail+'px');
+  }
+  fit(); window.addEventListener('resize', fit, {passive:true}); window.addEventListener('load', fit);
+})();
 
 /* Boot */
 (function twBoot(){
