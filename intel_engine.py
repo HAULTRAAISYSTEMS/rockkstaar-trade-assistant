@@ -102,7 +102,9 @@ _news_retry_after = 0.0
 _news_last_failure = ""
 
 _CACHE_TTL: dict[str, int] = {
-    "market_news": 600,    # 10 min  — news changes often
+    "market_news": 300,    # 5 min   — news changes often
+    "ticker_news": 300,    # 5 min   — one company's headlines, fetched on demand
+    "general_news": 300,   # 5 min   — market-wide Finnhub stream
     "earnings":    3600,   # 1 hr    — refreshes more often to catch new dates
     "splits":      43200,  # 12 hrs  — stable; long TTL protects rate limits
     "dividends":   43200,  # 12 hrs  — ex-dates don't change often
@@ -778,6 +780,134 @@ def _earnings_universe() -> list[str]:
 
 # ── Market News ───────────────────────────────────────────────────────────────
 
+def _article_age_label(published_at: str, fallback: Optional[int]) -> str:
+    """Each story's own age ("12m ago"), not the newest story's age for all."""
+    if published_at:
+        try:
+            ts = datetime.fromisoformat(str(published_at).replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                from datetime import timezone as _tz
+                ts = ts.replace(tzinfo=_tz.utc)
+            minutes = int((datetime.now(ts.tzinfo) - ts).total_seconds() // 60)
+            return _format_freshness(max(0, minutes))
+        except (TypeError, ValueError):
+            pass
+    return _format_freshness(fallback)
+
+
+def _news_items_for_ticker(ticker: str, wl_set: set, limit: int = 3, fetch=None) -> list[dict]:
+    """Classified scanner items for one ticker from the best available source."""
+    try:
+        if fetch is None:
+            from news_fetcher import fetch_headlines as fetch
+        news = fetch(ticker)
+        if news.source == "none":
+            return []
+        articles = list(news.articles) or [
+            {"headline": headline, "source": news.source.capitalize()}
+            for headline in news.headlines
+        ]
+        items = []
+        for article in articles[:limit]:
+            headline = str(article.get("headline") or "").strip()
+            if not headline:
+                continue
+            impact, reason = classify_news_impact(headline, news.categories)
+            subject = _headline_subject_ticker(
+                headline, str(article.get("summary") or ""), ticker)
+            items.append({
+                "ticker":       subject or ticker,
+                "headline":     headline,
+                "source":       article.get("source") or news.source.replace("_", " ").title(),
+                "url":          article.get("url") or "",
+                "image":        article.get("image") or "",
+                "summary":      article.get("summary") or "",
+                "published_at": article.get("published_at") or "",
+                "impact":       impact,
+                "reason":       reason,
+                "time":         _article_age_label(article.get("published_at") or "", news.freshness_minutes),
+                "on_watchlist": ticker in wl_set,
+                "provider":     news.source,
+            })
+        return items
+    except Exception as e:
+        logger.debug("intel/news %s: %s", ticker, e)
+        return []
+
+
+def fetch_ticker_news(ticker: str, limit: int = 8) -> list[dict]:
+    """The latest headlines for ANY ticker, fetched on demand.
+
+    The scanner covers a capped universe (watchlist first, then a fixed list
+    of majors), so a search for anything outside it — CEG, say — used to
+    find nothing. This asks the providers for that one company directly.
+    Cached 5 minutes per ticker so repeated searches cost nothing.
+    """
+    ticker = (ticker or "").upper().strip()
+    if not ticker:
+        return []
+    key = f"ticker_news:{ticker}"
+    cached = _cget(key)
+    if cached is not None:
+        return cached
+    wl_set = set(_get_watchlist_tickers())
+    items = _news_items_for_ticker(ticker, wl_set, limit=limit)
+    # A story about another company that merely mentions this one is still
+    # shown, but under this ticker so the search result reads as answered.
+    for item in items:
+        item["ticker"] = ticker
+    if items:
+        _cset(key, items)
+    return items
+
+
+def fetch_general_market_news(limit: int = 12) -> list[dict]:
+    """Finnhub's market-wide headline stream (category=general).
+
+    The per-ticker fan-out only covers the scanner universe; this adds the
+    broad tape of market news so the scanner is never limited to 18 names.
+    Each story keeps the first ticker Finnhub tags it with, or MARKET.
+    Cached 5 minutes; needs FINNHUB_API_KEY, else returns [].
+    """
+    cached = _cget("general_news")
+    if cached is not None:
+        return cached
+    import os as _os
+    key = _os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not key or _fh_is_rate_limited():
+        return []
+    try:
+        with _fh_urlopen(f"https://finnhub.io/api/v1/news?category=general&token={key}", timeout=6) as resp:
+            rows = json.loads(resp.read().decode()) or []
+    except Exception as exc:
+        logger.debug("intel/general news: %s", exc)
+        return []
+    from datetime import timezone as _tz
+    wl_set = set(_get_watchlist_tickers())
+    items = []
+    for row in sorted(rows, key=lambda r: r.get("datetime", 0), reverse=True)[:limit]:
+        headline = str(row.get("headline") or "").strip()
+        if not headline:
+            continue
+        related = [t.strip().upper() for t in str(row.get("related") or "").split(",") if t.strip()]
+        ticker = related[0] if related else "MARKET"
+        published = (datetime.fromtimestamp(row["datetime"], tz=_tz.utc).isoformat()
+                     if row.get("datetime") else "")
+        impact, reason = classify_news_impact(headline, [])
+        items.append({
+            "ticker": ticker, "headline": headline,
+            "source": row.get("source") or "Finnhub",
+            "url": row.get("url") or "", "image": row.get("image") or "",
+            "summary": row.get("summary") or "", "published_at": published,
+            "impact": impact, "reason": reason,
+            "time": _article_age_label(published, None),
+            "on_watchlist": ticker in wl_set, "provider": "finnhub_general",
+        })
+    if items:
+        _cset("general_news", items)
+    return items
+
+
 def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
     """
     Fetch and classify news for the watchlist + scanner universe.
@@ -807,39 +937,7 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
     results: list[dict] = []
 
     def _fetch_one(ticker: str) -> list[dict]:
-        try:
-            news = _fetch_hl(ticker)
-            if news.source == "none":
-                return []
-            articles = list(news.articles) or [
-                {"headline": headline, "source": news.source.capitalize()}
-                for headline in news.headlines
-            ]
-            items = []
-            for article in articles[:3]:
-                headline = str(article.get("headline") or "").strip()
-                if not headline:
-                    continue
-                impact, reason = classify_news_impact(headline, news.categories)
-                subject = _headline_subject_ticker(
-                    headline, str(article.get("summary") or ""), ticker)
-                items.append({
-                    "ticker":       subject or ticker,
-                    "headline":     headline,
-                    "source":       article.get("source") or news.source.replace("_", " ").title(),
-                    "url":          article.get("url") or "",
-                    "image":        article.get("image") or "",
-                    "summary":      article.get("summary") or "",
-                    "published_at": article.get("published_at") or "",
-                    "impact":       impact,
-                    "reason":       reason,
-                    "time":         _format_freshness(news.freshness_minutes),
-                    "on_watchlist": ticker in wl_set,
-                })
-            return items
-        except Exception as e:
-            logger.debug("intel/news %s: %s", ticker, e)
-            return []
+        return _news_items_for_ticker(ticker, wl_set, limit=3, fetch=_fetch_hl)
 
     pool = ThreadPoolExecutor(max_workers=min(8, max(1, len(all_tickers))))
     futs = [pool.submit(_fetch_one, t) for t in all_tickers]
@@ -857,6 +955,12 @@ def fetch_market_news(tickers: Optional[list[str]] = None) -> list[dict]:
         pool.shutdown(wait=False, cancel_futures=True)
         with _news_state_lock:
             _news_refreshing = False
+
+    # The broad market stream, so coverage is not limited to the fan-out.
+    try:
+        results.extend(fetch_general_market_news())
+    except Exception as exc:
+        logger.debug("intel/news general merge: %s", exc)
 
     # Sort by impact descending
     results.sort(key=lambda x: -_IMPACT_ORDER.get(x["impact"], 0))

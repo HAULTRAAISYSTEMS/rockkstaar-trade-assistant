@@ -13,6 +13,10 @@
   .intel-title span{display:block;color:var(--elite-gold-2)}
   .intel-subtitle{max-width:650px;margin:0;color:#9da7b4;font-size:14px;line-height:1.6}
   .intel-search-panel{position:relative;align-self:stretch;display:flex;flex-direction:column;justify-content:center;gap:14px;padding:22px;border:1px solid rgba(255,255,255,.06);border-radius:18px;background:rgba(5,7,9,.72);backdrop-filter:blur(14px)}
+  .intel-ticker-news{margin:0 0 6px;border-bottom:1px solid rgba(var(--cc-accent-rgb,196,245,59),.18);background:linear-gradient(180deg,rgba(var(--cc-accent-rgb,196,245,59),.05),transparent 70%)}
+  .intel-ticker-news-head{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:14px 18px 4px;font:600 11px var(--font-mono);letter-spacing:.12em;text-transform:uppercase}
+  .intel-ticker-news-head b{color:var(--cc-accent,#c4f53b)}
+  .intel-ticker-news-head span{color:#87919e;letter-spacing:.06em}
   .intel-search-label{color:#87919e;font:600 10px var(--font-mono);letter-spacing:.14em;text-transform:uppercase}
   .intel-search{display:grid;grid-template-columns:1fr auto;gap:9px}
   .intel-search input{min-width:0;width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.1);border-radius:11px;background:#080a0d;color:#f7f7f5;padding:14px;font:600 15px var(--font-mono);text-transform:uppercase;outline:none}
@@ -159,6 +163,10 @@
   <section class="intel-grid">
     <main class="intel-card">
       <div class="intel-card-head"><h2>Elite News Scanner</h2><span id="scanner-count">{{ news|length }} catalysts</span></div>
+      <section class="intel-ticker-news" id="intel-ticker-news" hidden aria-live="polite">
+        <div class="intel-ticker-news-head"><b id="intel-ticker-news-title">Latest news</b><span id="intel-ticker-news-meta"></span></div>
+        <div class="intel-news" id="intel-ticker-news-list"></div>
+      </section>
       <div class="intel-news" id="intel-news">
         {% include "_intel_news_items.html" %}
       </div>
@@ -216,15 +224,47 @@
 var scannerFilter='ALL';
 function applyScannerFilters(){
   var query=(document.getElementById('scanner-query').value||'').trim().toLowerCase(),shown=0;
-  document.querySelectorAll('.intel-news-item').forEach(function(item){
+  document.querySelectorAll('#intel-news .intel-news-item').forEach(function(item){
     var matchesFilter=scannerFilter==='ALL'||item.dataset.tone===scannerFilter||item.dataset.impact===scannerFilter||(scannerFilter==='WATCHLIST'&&item.dataset.watchlist==='1');
     var show=matchesFilter&&(!query||(item.dataset.search||'').indexOf(query)!==-1);item.hidden=!show;if(show)shown++;
   });
-  document.getElementById('intel-empty').style.display=shown?'none':'block';
-  document.getElementById('scanner-count').textContent=shown+' catalyst'+(shown===1?'':'s');
+  var tickerBox=document.getElementById('intel-ticker-news'),tickerShown=tickerBox&&!tickerBox.hidden&&tickerBox.querySelector('.intel-news-item');
+  document.getElementById('intel-empty').style.display=(shown||tickerShown)?'none':'block';
+  var total=shown+(tickerShown?tickerBox.querySelectorAll('.intel-news-item').length:0);
+  document.getElementById('scanner-count').textContent=total+' catalyst'+(total===1?'':'s');
 }
 document.querySelectorAll('.intel-tab').forEach(function(button){button.addEventListener('click',function(){document.querySelectorAll('.intel-tab').forEach(function(b){b.classList.remove('active')});button.classList.add('active');scannerFilter=button.dataset.filter;applyScannerFilters()})});
 document.getElementById('scanner-query').addEventListener('input',applyScannerFilters);
+/* Typing a ticker also fetches that company's latest news on demand. The
+   scanner only carries a capped universe, so a search for anything outside
+   it (CEG, say) used to come back empty. */
+(function(){
+  var box=document.getElementById('intel-ticker-news'),list=document.getElementById('intel-ticker-news-list'),
+      title=document.getElementById('intel-ticker-news-title'),meta=document.getElementById('intel-ticker-news-meta'),
+      input=document.getElementById('scanner-query'),timer=null,seq=0;
+  function hide(){box.hidden=true;list.innerHTML='';}
+  function lookup(t){
+    var my=++seq;box.hidden=false;title.textContent='Latest news · '+t;meta.textContent='Checking live sources…';list.innerHTML='';
+    fetch('/api/intel/news/'+encodeURIComponent(t),{headers:{'Accept':'application/json'},cache:'no-store'})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(my!==seq)return;
+        if(d&&d.ok&&d.html){list.innerHTML=d.html;meta.textContent=d.count+' stor'+(d.count===1?'y':'ies')+(d.provider?' · via '+String(d.provider).replace(/_/g,' '):'');
+          list.querySelectorAll('#intel-empty,.intel-feed-state').forEach(function(el){el.remove();});}
+        else{meta.textContent='No recent news found for '+t+'.';}
+        applyScannerFilters();
+      })
+      .catch(function(){if(my===seq)meta.textContent='News lookup failed. Try again.';});
+  }
+  input.addEventListener('input',function(){
+    clearTimeout(timer);
+    var q=(input.value||'').trim().toUpperCase();
+    if(!/^[A-Z][A-Z0-9.\-]{0,5}$/.test(q)){seq++;hide();return;}
+    timer=setTimeout(function(){lookup(q);},450);
+  });
+  var start=new URLSearchParams(location.search).get('q');
+  if(start){input.value=start;input.dispatchEvent(new Event('input'));}
+})();
   function markAlertsSeen(btn){
     if(btn){btn.disabled=true;btn.textContent='Marking…';}
     fetch('/api/intel/alerts/seen',{method:'POST',headers:{'Accept':'application/json'}})

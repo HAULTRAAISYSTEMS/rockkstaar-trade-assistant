@@ -7878,6 +7878,7 @@ def api_intel_news_refresh():
     """
     try:
         _intel.clear_intel_cache("market_news")
+        _intel.clear_intel_cache("general_news")
         raw_news = _intel.fetch_market_news()
 
         try:
@@ -7953,6 +7954,45 @@ def api_intel_news_refresh():
                 trending=[],
             ),
         }), 200
+
+
+@app.route("/api/intel/news/<ticker>")
+def api_intel_ticker_news(ticker):
+    """The latest headlines for any ticker, for the news scanner's search.
+
+    The scanner only fetches a capped universe, so searching a company
+    outside it (CEG, say) found nothing. This fetches that one company on
+    demand (Finnhub first, then the other configured sources) and returns
+    the same story cards the scanner uses. Cached 5 minutes per ticker.
+    """
+    ticker = (ticker or "").strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", ticker):
+        return jsonify({"ok": False, "error": "bad ticker"}), 400
+    try:
+        raw = _intel.fetch_ticker_news(ticker)
+        try:
+            watchlist = get_user_tracked_tickers(current_user_id())
+        except Exception:
+            watchlist = []
+        from sentiment_engine import enrich_news_article
+        enriched = [enrich_news_article(row, watchlist) for row in raw]
+        status = {"refreshing": False,
+                  "message": f"No provider returned recent news for {ticker}. Try again shortly."}
+        from news_fetcher import news_source_status
+        resp = jsonify({
+            "ok": bool(enriched),
+            "ticker": ticker,
+            "count": len(enriched),
+            "provider": (raw[0].get("provider") if raw else ""),
+            "sources": news_source_status().get("configured_sources", []),
+            "html": render_template("_intel_news_items.html", news=enriched, intel_status=status)
+                    if enriched else "",
+        })
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+    except Exception as exc:
+        logger.error("api_intel_ticker_news %s: %s", ticker, exc, exc_info=True)
+        return jsonify({"ok": False, "ticker": ticker, "count": 0, "html": ""}), 200
 
 
 @app.route("/api/intel/earnings-radar")
