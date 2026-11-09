@@ -546,7 +546,11 @@ html.cc27 :is(.card, .detail-card, .intel-card, .intel-kpi:not(.is-unread), .int
   .sm-controls, .sm-events, .rm-capture, .rm-stats, .paper-kpi, .paper-card, .bk-card, .push-card,
   .ps-panel, .options-risk-panel, .score-strip, .qd-intro, .qd-results, .th-how, .lr-public-filters,
   .lr-public-breaking, .verified-box, .flow-tile, .company-size, .te-symbol, .page-header, .cc-rotation,
-  .te-list-guide > article, .lab-nav, .no-setups-state, .intel-feed-state, .liq-flow-cell, .liq-fred-row, .liq-yield-row) {
+  .te-list-guide > article, .lab-nav, .no-setups-state, .intel-feed-state, .liq-flow-cell, .liq-fred-row, .liq-yield-row,
+  .section-card, .history-card, .chart-card, .val-card, .signals-card, .peer-card, .dg-card,
+  .verdict-bar, .fundamentals-shell .search-wrap, .landing-hint, .src-notes, .edu-panel, .qd-saved,
+  .aplus-command, .hx .regime, .schwab-env-block, .sm-code-guide, .cc-digest-clear,
+  .th-start > div, .path-card, .hx .empty, .compare-card) {
   --cc-bracket: rgba(var(--cc-accent-rgb), 0.5);
   --cc-wash: 0.035;
   position: relative;
@@ -575,6 +579,45 @@ html.cc27 :is(.card, .detail-card, .intel-card, .intel-kpi:not(.is-unread), .int
   --cc-wash: 0.09;
 }
 @property --cc-wash { syntax: '<number>'; inherits: false; initial-value: 0.035; }
+
+/* Floating panels that carried meaning in their border keep it as a
+   left rule: a fired auto-downgrade stays red, a clean one stays green. */
+html.cc27 .dg-card.dg-fired { box-shadow: inset 2px 0 0 var(--neg-500) !important; }
+html.cc27 .dg-card.dg-clean { box-shadow: inset 2px 0 0 var(--pos-500) !important; }
+/* Filing signals: rows lose their boxes, keep the severity rule on the left */
+html.cc27 .fundamentals-shell .signal,
+html.cc27 .signal {
+  background: transparent !important;
+  border-top-color: transparent !important; border-right-color: transparent !important; border-bottom-color: transparent !important;
+  border-radius: 0 !important;
+  padding-left: 14px !important;
+}
+html.cc27 .signal + .signal { box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.05); }
+/* Stat strips float like the Today pulse rail */
+html.cc27 .elite-stats { background: none !important; border: 0 !important; gap: 0 !important; }
+html.cc27 .elite-stats > .elite-stat { background: none !important; border: 0 !important; box-shadow: none !important; }
+html.cc27 .elite-stats > .elite-stat + .elite-stat { box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.08) !important; }
+html.cc27 .elite-stats > .elite-stat::after { display: none !important; }
+
+/* Fundamentals tabs (Analyze · Seven Checks · Learn): one even row, phone included */
+html.cc27 .fundamentals-shell .tab-bar {
+  display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 4px !important; padding: 4px !important; width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important; border-radius: 14px !important;
+  background: rgba(3, 7, 15, 0.6) !important; box-shadow: none !important;
+}
+html.cc27 .fundamentals-shell .tab-btn {
+  min-height: 42px; padding: 0 8px !important; border: 0 !important; border-radius: 10px !important;
+  background: transparent !important; box-shadow: none !important;
+  color: #8d9bb0 !important; font: 700 12px/1 var(--font-display) !important; letter-spacing: 0.14em !important;
+}
+@media (max-width: 640px) { html.cc27 .fundamentals-shell .tab-btn { letter-spacing: 0.06em !important; font-size: 11px !important; } }
+html.cc27 .fundamentals-shell .tab-btn.active,
+html.cc27 .fundamentals-shell .tab-btn[aria-selected="true"] {
+  color: #0a0712 !important;
+  background: linear-gradient(120deg, var(--cc-accent-hi), var(--cc-accent)) !important;
+  box-shadow: 0 0 18px -4px rgba(var(--cc-accent-rgb), 0.7) !important;
+}
 
 /* Card headers lose their divider box; a short accent rule takes its place */
 html.cc27 :is(.card-hd, .card-title, .tw-panel-hd, .intel-card-head, .cc-head) {
@@ -1084,3 +1127,7 @@ html.cc27 ::-webkit-scrollbar-track { background: transparent; }
 @media print {
   #cc3d-backdrop, #cc3d-veil, .cc3d-orb { display: none !important; }
 }
+/* Peer card empty state had no inner padding once its box was removed */
+html.cc27 .peer-card { padding: 16px 18px !important; }
+html.cc27 .peer-card h2, html.cc27 .peer-card h3 { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.1em; text-transform: uppercase; }
+html.cc27 .peer-card p { color: var(--cc-muted); font-size: 13px; line-height: 1.6; }
