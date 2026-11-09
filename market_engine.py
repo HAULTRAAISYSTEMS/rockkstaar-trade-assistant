@@ -1513,7 +1513,7 @@ def fast_pulse_quotes() -> dict:
 # The Terminal chart's active candle ticks from this. One background fetch per
 # symbol per few seconds, shared by every reader of that symbol; requests read
 # the cache and never wait on Yahoo or Alpaca.
-_LIVE_TTL_S = 3
+_LIVE_TTL_S = 8          # Yahoo fallback only; the shared feed is the 3 s path
 _LIVE_MAX_AGE_S = 60
 _LIVE_MAX_SYMBOLS = 200
 _LIVE_CACHE: dict = {}          # sym -> {"at": float, "quote": dict | None}
@@ -1627,7 +1627,7 @@ def live_ticker_quote(sym: str) -> dict | None:
 # falls back to Yahoo per-symbol charts at a slower, capped pace.
 _LQ_TTL_S = 3            # batched Alpaca refresh
 _LQ_YAHOO_TTL_S = 10     # per-symbol Yahoo fallback
-_LQ_YAHOO_MAX = 20       # most-recently-wanted symbols the fallback covers
+_LQ_YAHOO_MAX = 12       # most-recently-wanted symbols the fallback covers
 _LQ_WANT_S = 60          # a symbol stays wanted this long after a request
 _LQ_MAX_AGE_S = 90       # older quotes are not served as live
 _LQ_CACHE: dict = {}     # sym -> {"at": float, "quote": dict}
@@ -1721,6 +1721,38 @@ def _alpaca_snapshots(symbols: list[str]) -> dict:
     return out
 
 
+def _lq_is_fresh(q: dict, session: str, now: float) -> bool:
+    """A trade is live if it is recent for the session that is trading.
+
+    While nothing trades (weekend, holiday) the last print is the right one
+    to show however old it is.
+    """
+    if session not in ("pre", "regular", "post", "overnight"):
+        return True
+    limit = 600 if session == "overnight" else 120
+    return bool(q.get("epoch")) and now - q["epoch"] <= limit
+
+
+def _schwab_live(symbols: list[str]) -> dict:
+    """Schwab real-time quotes in the live-quote shape, or {}."""
+    import schwab as _schwab
+    from zoneinfo import ZoneInfo
+    entries = _schwab.fetch_quotes(symbols)
+    out = {}
+    et = ZoneInfo("America/New_York")
+    for sym, entry in entries.items():
+        q = _schwab.parse_quote_entry(entry)
+        if not q:
+            continue
+        when = datetime.fromtimestamp(q["epoch"], et)
+        mins = when.hour * 60 + when.minute
+        q["ext"] = ("overnight" if (mins < 240 or mins >= 1200) else
+                    "pre" if mins < 570 else "post" if mins >= 960 else None)
+        q["source"] = "Schwab real-time"
+        out[sym] = q
+    return out
+
+
 def _refresh_live_quotes() -> None:
     import time as _time
     now = _time.time()
@@ -1731,10 +1763,24 @@ def _refresh_live_quotes() -> None:
     if not wanted:
         return
     quotes = {}
+    # 1. Schwab: real-time, every exchange, pre/post included. Needs the
+    #    owner's Schwab connection with Market Data access.
     try:
-        quotes = _alpaca_snapshots(wanted[:300])
+        quotes.update(_schwab_live(wanted[:400]))
     except Exception as exc:
-        logger.debug("live quotes (alpaca) failed: %s", exc)
+        logger.debug("live quotes (schwab) failed: %s", exc)
+    # 2. Alpaca snapshots for anything Schwab did not answer. The free IEX
+    #    feed sees one exchange: before the open its "latest trade" can be an
+    #    hour old, which is a stale print, not a live one — drop those.
+    rest = [s for s in wanted if s not in quotes]
+    if rest:
+        try:
+            session = pulse_session()
+            for sym, q in _alpaca_snapshots(rest[:300]).items():
+                if _lq_is_fresh(q, session, now):
+                    quotes[sym] = q
+        except Exception as exc:
+            logger.debug("live quotes (alpaca) failed: %s", exc)
     missing = [s for s in wanted if s not in quotes][:_LQ_YAHOO_MAX]
     if missing:
         # Fallback: Yahoo per symbol, at its own slower cadence.

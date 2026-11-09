@@ -461,6 +461,110 @@ def _get(path: str, params: dict = None, *, base: str = _BASE_TRADER,
         raise RuntimeError(f"Schwab API error {e.code}: {body}") from e
 
 
+# ── Market data (real-time quotes) ───────────────────────────────────────────
+#
+# Schwab's Market Data API gives an account holder real-time, consolidated
+# quotes — every exchange, including pre-market and after hours — for many
+# symbols in one request. The live-quote feed calls this every few seconds
+# for every ticker on screen, so it is kept deliberately separate from _get():
+# _get() answers a 401 by refreshing the token, and an app that is not
+# entitled to market data answers *every* call with a 401 — that would be a
+# token refresh every three seconds. Here any failure just backs off.
+_BASE_MARKET = "https://api.schwabapi.com/marketdata/v1"
+_MD_STATE = {"blocked_until": 0.0, "last_error": ""}
+_MD_BACKOFF_S = 300
+
+
+def quotes_user_id() -> int:
+    """Whose Schwab session supplies the shared quote feed (the owner's)."""
+    try:
+        return int(os.environ.get("SCHWAB_QUOTES_USER_ID", "1"))
+    except ValueError:
+        return 1
+
+
+def market_data_status() -> dict:
+    now = time.time()
+    return {"blocked": _MD_STATE["blocked_until"] > now,
+            "retry_in_s": max(0, int(_MD_STATE["blocked_until"] - now)),
+            "last_error": _MD_STATE["last_error"]}
+
+
+def parse_quote_entry(entry: dict) -> dict | None:
+    """Pure: one /marketdata/v1/quotes entry → a live quote.
+
+    `quote.lastPrice` is the latest trade in any session (pre, regular, post);
+    `quote.closePrice` is the previous session's close; `tradeTime` is epoch
+    milliseconds. Returns {"price", "epoch", "prev_close", "change_pct"}.
+    """
+    q = (entry or {}).get("quote") or {}
+    price = q.get("lastPrice") or q.get("mark")
+    stamp = q.get("tradeTime") or q.get("quoteTime")
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        return None
+    if price <= 0 or not stamp:
+        return None
+    prev = q.get("closePrice")
+    try:
+        prev = float(prev) if prev else None
+    except (TypeError, ValueError):
+        prev = None
+    return {"price": round(price, 4), "epoch": int(int(stamp) / 1000),
+            "prev_close": prev,
+            "change_pct": round((price / prev - 1) * 100, 2) if prev else None}
+
+
+def fetch_quotes(symbols: list[str], user_id: int | None = None) -> dict:
+    """Real-time quotes {SYM: entry} for up to a few hundred symbols, or {}.
+
+    Never raises. Any failure (not connected, not entitled to market data,
+    rate limited, network) backs off for five minutes so the 3-second feed
+    falls through to its other sources instead of hammering Schwab.
+    """
+    import urllib.request
+    import urllib.error
+    from urllib.parse import urlencode
+    if not symbols or time.time() < _MD_STATE["blocked_until"]:
+        return {}
+    uid = quotes_user_id() if user_id is None else user_id
+    try:
+        tokens = load_tokens(uid)
+    except Exception as exc:
+        tokens = None
+        _MD_STATE["last_error"] = f"token load failed: {type(exc).__name__}"
+    if not tokens:
+        _MD_STATE["blocked_until"] = time.time() + _MD_BACKOFF_S
+        _MD_STATE["last_error"] = _MD_STATE["last_error"] or "Schwab not connected"
+        return {}
+    out: dict = {}
+    for i in range(0, len(symbols), 200):
+        chunk = symbols[i:i + 200]
+        url = f"{_BASE_MARKET}/quotes?" + urlencode(
+            {"symbols": ",".join(chunk), "fields": "quote", "indicative": "false"})
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {tokens['access_token']}", "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                payload = json.loads(resp.read()) or {}
+        except urllib.error.HTTPError as e:
+            _MD_STATE["blocked_until"] = time.time() + _MD_BACKOFF_S
+            _MD_STATE["last_error"] = f"HTTP {e.code}"
+            logger.warning("schwab market data HTTP %s — backing off %ss", e.code, _MD_BACKOFF_S)
+            return out
+        except Exception as exc:
+            _MD_STATE["blocked_until"] = time.time() + 30
+            _MD_STATE["last_error"] = type(exc).__name__
+            return out
+        if isinstance(payload, dict):
+            for sym, entry in payload.items():
+                if isinstance(entry, dict) and sym != "errors":
+                    out[str(sym).upper()] = entry
+    _MD_STATE["last_error"] = ""
+    return out
+
+
 # ── Read-only data fetchers ───────────────────────────────────────────────────
 
 def fetch_accounts(user_id: int = 1) -> list[dict]:
