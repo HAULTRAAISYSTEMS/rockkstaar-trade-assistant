@@ -36,7 +36,10 @@ def test_empty_production_database_never_opens_auth(client, monkeypatch):
 
 
 def test_every_private_get_route_requires_production_login(client):
-    public = {"/login", "/logout", "/register", "/favicon.ico", "/health", "/service-worker.js", "/schwab/callback"}
+    # /api/csrf-token hands a caller a token bound to their own cookie, so the
+    # sign-in page can refresh a form left open; it reveals nothing.
+    public = {"/login", "/logout", "/register", "/favicon.ico", "/health", "/service-worker.js",
+              "/schwab/callback", "/api/csrf-token"}
     checked = 0
     for rule in server.app.url_map.iter_rules():
         if "GET" not in rule.methods or rule.rule in public or rule.rule.startswith(("/static/", "/ws/")):
