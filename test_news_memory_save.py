@@ -282,3 +282,47 @@ def test_base_layout_loads_the_save_sheet():
     js = open("static/js/memory_save.js", encoding="utf-8").read()
     assert "/research-memory/api/summarize" in js and "/research-memory/api/cards" in js
     assert "tw-save" in open("templates/terminal.html", encoding="utf-8").read()
+
+
+# ── The Nov 9 outage: page parsing froze the worker ─────────────────────────
+
+def test_page_with_unclosed_tags_parses_fast():
+    import time
+    page = (("<div>" + "<form action=x>" * 3 + "<p>" + "word " * 30 + "</p>") * 4000)[:828000]
+    started = time.time()
+    ns.html_to_text(page)
+    assert time.time() - started < 2.0          # was 44 seconds with the regex
+
+
+def test_paragraphs_inside_unclosed_menu_are_skipped_but_later_text_kept():
+    text = ns.html_to_text("<nav><p>Menu link menu link menu link menu link menu</p></nav>"
+                           "<p>The company reported adjusted EPS of $5.06, ahead of estimates.</p>")
+    assert "Menu" not in text and "$5.06" in text
+
+
+def test_slow_summary_returns_story_text_within_deadline(monkeypatch):
+    import time
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setattr(ns, "DEADLINE", 0.3)
+    started = time.time()
+    out = ns.summarize(CEG, fetch=lambda url: "", ask=lambda *a: time.sleep(1.5) or {"summary": "late"})
+    assert time.time() - started < 1.0
+    assert out["ok"] and out["ai"] is False and "too long" in out["note"]
+    time.sleep(1.3)                              # let the pool thread finish
+
+
+def test_busy_summarizer_does_not_queue_requests(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    taken = [ns._slots.acquire(blocking=False) for _ in range(ns.MAX_CONCURRENT)]
+    try:
+        out = ns.summarize(CEG, fetch=lambda url: "", ask=lambda *a: {"summary": "x"})
+        assert out["ok"] and out["ai"] is False and "busy" in out["note"]
+    finally:
+        for ok in taken:
+            if ok:
+                ns._slots.release()
+
+
+def test_model_call_has_a_timeout():
+    src = open("news_summarizer.py", encoding="utf-8").read()
+    assert "timeout=MODEL_TIMEOUT" in src and "max_retries=0" in src
