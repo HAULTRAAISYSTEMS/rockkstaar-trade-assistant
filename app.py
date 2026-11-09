@@ -5464,6 +5464,32 @@ def api_terminal_quotes():
         except Exception as exc:
             logger.warning("terminal quotes: read failed: %s", exc)
 
+    # Lay the shared live quotes over the database rows: the database is
+    # refreshed every ~45 s, the live feed every few seconds.
+    if rows and _MKT_AVAILABLE:
+        try:
+            live = _mkt.live_quotes([r["ticker"] for r in rows])
+        except Exception as exc:
+            logger.debug("terminal quotes live overlay: %s", exc)
+            live = {}
+        for r in rows:
+            q = live.get(r["ticker"])
+            if not q or q.get("price") is None:
+                continue
+            r["price"] = round(float(q["price"]), 2)
+            if q.get("prev_close"):
+                r["prev_close"] = q["prev_close"]
+            if q.get("change_pct") is not None:
+                r["gap_pct"] = q["change_pct"]
+                r["gap_display"] = f"{q['change_pct']:+.2f}%"
+                r["gap_class"] = "positive" if q["change_pct"] >= 0 else "negative"
+            r["live"] = True
+            r["source"] = q.get("source") or r.get("source") or ""
+            if q.get("epoch"):
+                from zoneinfo import ZoneInfo as _ZI
+                r["as_of"] = datetime.fromtimestamp(q["epoch"], _ZI("America/New_York")).strftime("%-I:%M:%S %p ET")
+            r["quote_note"] = ""
+
     chips = {}
     try:
         mkt = _get_mkt_ctx() or {}
@@ -5682,7 +5708,7 @@ def api_terminal_insiders(ticker):
 def api_quick():
     """JSON for Execution Command Center live refresh — all ranked stocks + market context."""
     try:
-        return jsonify(_build_quick_payload(get_active_wl_id()))
+        return jsonify(_overlay_live_prices(_build_quick_payload(get_active_wl_id())))
     except Exception as exc:
         logger.error("api_quick failed: %s", exc, exc_info=True)
         return jsonify({"error": "quick refresh failed"}), 500
@@ -6586,6 +6612,34 @@ def _rebuild_tape_watchlist(uid):
     _WL_TAPE_CACHE["refreshing_for"] = None
 
 
+def _overlay_live_prices(payload):
+    """Lay the shared live quotes over a payload's stock summaries.
+
+    The dashboard and Quick mode poll a database that refreshes every ~45 s.
+    Only the price and the day's change move here; scores and states stay
+    as the scanner computed them.
+    """
+    stocks = (payload or {}).get("stocks") if isinstance(payload, dict) else None
+    if not stocks or not _MKT_AVAILABLE:
+        return payload
+    try:
+        live = _mkt.live_quotes([s.get("ticker") for s in stocks if isinstance(s, dict)])
+    except Exception as exc:
+        logger.debug("live price overlay: %s", exc)
+        return payload
+    for stock in stocks:
+        q = live.get((stock or {}).get("ticker") or "")
+        if not q or q.get("price") is None:
+            continue
+        stock["current_price"] = round(float(q["price"]), 2)
+        if q.get("change_pct") is not None:
+            stock["gap_pct"] = q["change_pct"]
+            stock["gap_display"] = f"{q['change_pct']:+.2f}%"
+            stock["gap_class"] = "positive" if q["change_pct"] >= 0 else "negative"
+        stock["price_live"] = True
+    return payload
+
+
 @app.route("/api/market-tape")
 def api_market_tape():
     """Market banner tape: indexes, futures, and the user's watchlist."""
@@ -6595,7 +6649,16 @@ def api_market_tape():
         else:
             items = []
         items += _tape_watchlist_items()
-        return jsonify({"ok": True, "items": items})
+        # Every ticker on the tape gets the shared few-seconds-old quote
+        # where one exists; the tape polls every 3 s.
+        if _MKT_AVAILABLE:
+            try:
+                items = _mkt.overlay_live_tape(items)
+            except Exception as exc:
+                logger.debug("api_market_tape live overlay: %s", exc)
+        resp = jsonify({"ok": True, "items": items})
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
     except Exception as exc:
         logger.error("api_market_tape: %s", exc, exc_info=True)
         return jsonify({"ok": False, "items": []})
@@ -6948,7 +7011,7 @@ def _build_quick_payload(wl_id: int | None) -> dict:
 def api_dashboard():
     """JSON endpoint for live dashboard updates (price, state, ORB, scores)."""
     try:
-        return jsonify(_build_dashboard_payload(get_active_wl_id()))
+        return jsonify(_overlay_live_prices(_build_dashboard_payload(get_active_wl_id())))
     except Exception as exc:
         logger.error("api_dashboard failed: %s", exc, exc_info=True)
         return jsonify({"error": "dashboard refresh failed"}), 500
