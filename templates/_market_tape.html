@@ -78,6 +78,9 @@
       .then(function (r) { if (!r.ok) throw new Error('Quote API unavailable'); return r.json(); })
       .then(function (d) {
         if (!d || !d.ok || !Array.isArray(d.items) || !d.items.length) throw new Error('No quotes returned');
+        // A reply with symbols but no prices is not a quote check that worked:
+        // the readout should not say "checked just now" over a row of dashes.
+        if (!d.items.some(function (t) { return t && t.price != null && isFinite(Number(t.price)); })) throw new Error('No prices returned');
         paint(d.items);
         lastSuccess = Date.now();
         // The 3D market globe listens for this; it never polls on its own.

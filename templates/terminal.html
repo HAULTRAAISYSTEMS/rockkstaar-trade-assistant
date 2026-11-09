@@ -546,16 +546,16 @@
           <button type="button" class="tw-fs-btn" id="tw-fs-btn" onclick="twToggleFullscreen()" title="Full screen chart (Esc to exit)" aria-label="Full screen chart" aria-pressed="false"><svg class="tw-fs-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="tw-fs-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
           <div class="tw-type" aria-label="Chart tools">
             <div class="tw-tool-group"><span class="tw-tool-label">Chart</span><div class="tw-tool-buttons">
-              <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Line chart"><span class="tw-tool-icon">⌁</span>Line</button>
-              <button class="tw-type-btn" data-type="candles" onclick="twType(this)" title="Candlestick chart"><span class="tw-tool-icon">▮</span>Candles</button>
+              <button class="tw-type-btn active" data-type="area" onclick="twType(this)" title="Line chart" aria-label="Line chart"><svg class="tw-ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-6 4 3 5-7 4 4"/></svg><span class="tw-btn-text">Line</span></button>
+              <button class="tw-type-btn" data-type="candles" onclick="twType(this)" title="Candlestick chart" aria-label="Candlestick chart"><svg class="tw-ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3v4M7 15v6M17 3v3M17 14v7"/><rect x="5" y="7" width="4" height="8" rx="1"/><rect x="15" y="6" width="4" height="8" rx="1"/></svg><span class="tw-btn-text">Candles</span></button>
             </div></div>
             <div class="tw-tool-group"><span class="tw-tool-label">Overlays</span><div class="tw-tool-buttons">
-              <button class="tw-type-btn active" id="tw-volume-btn" onclick="twToggleVolume(this)" title="Toggle volume">Volume</button>
-              <button class="tw-type-btn" id="tw-extended-btn" onclick="twToggleExtended(this)" title="Show premarket and after-hours candles">Extended</button>
+              <button class="tw-type-btn active" id="tw-volume-btn" onclick="twToggleVolume(this)" title="Toggle volume" aria-label="Volume"><svg class="tw-ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20v-6M10 20V9M15 20v-8M20 20V5"/></svg><span class="tw-btn-text">Volume</span></button>
+              <button class="tw-type-btn" id="tw-extended-btn" onclick="twToggleExtended(this)" title="Show premarket and after-hours candles" aria-label="Extended hours"><svg class="tw-ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg><span class="tw-btn-text">Extended</span></button>
             </div></div>
             <div class="tw-tool-group"><span class="tw-tool-label">Indicators</span>
               <div class="tw-ind-dropdown">
-                <button class="tw-type-btn" id="tw-indicators-btn" onclick="twToggleIndicatorMenu(event)" title="Add indicators" aria-haspopup="true" aria-expanded="false"><span class="tw-tool-icon">◔</span>Indicators <span class="tw-ind-count" id="tw-ind-count">2</span></button>
+                <button class="tw-type-btn" id="tw-indicators-btn" onclick="twToggleIndicatorMenu(event)" title="Add indicators" aria-haspopup="true" aria-expanded="false"><svg class="tw-ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17c3-8 5-8 8 0s5 8 10-6"/></svg><span class="tw-btn-text">Indicators</span> <span class="tw-ind-count" id="tw-ind-count">2</span></button>
                 <div class="tw-ind-menu" id="tw-indicator-menu" hidden role="menu">
                   <label class="tw-ind-row"><input type="checkbox" id="tw-ind-rsi" checked onchange="twToggleIndicator('rsi', this)"><span><strong>RSI</strong><small>Relative Strength · 14</small></span></label>
                   <label class="tw-ind-row"><input type="checkbox" id="tw-ind-macd" checked onchange="twToggleIndicator('macd', this)"><span><strong>MACD</strong><small>12, 26, 9</small></span></label>
@@ -987,7 +987,12 @@ function twToggleExtended(btn){
   twChartState.extended=enable;twRefreshExtendedAvailability();if(twChartState.extended&&twChartState.type!=='candles'){twChartState.type='candles';document.querySelectorAll('.tw-type-btn[data-type]').forEach(function(b){b.classList.toggle('active',b.dataset.type==='candles');});twApplyType();}
   try{localStorage.setItem('tradestaar.chartExtended',twChartState.extended?'1':'0');localStorage.setItem('tradestaar.chartType',twChartState.type);localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);
 }
-function twResetView(){ if(twChartState.chart) twChartState.chart.timeScale().fitContent(); twRenderDrawings(); }
+// Dragging or wheel-zooming the price axis switches the axis to manual
+// scaling, and lightweight-charts keeps that manual range across every later
+// setData — a new symbol or timeframe then opened squeezed against an edge
+// or partly off-screen. Each fresh load and Reset view hand scaling back.
+function twAutoScalePrice(){ if(!twChartState.chart) return; try{ twChartState.chart.priceScale('right').applyOptions({autoScale:true}); }catch(e){} }
+function twResetView(){ if(twChartState.chart){ twAutoScalePrice(); twChartState.chart.timeScale().fitContent(); } twRenderDrawings(); }
 function twToggleIndicatorMenu(ev){
   if(ev) ev.stopPropagation();
   var menu = document.getElementById('tw-indicator-menu');
@@ -1537,7 +1542,7 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       twChartState.lastPrice = bars[bars.length-1].close;
       twApplyType();
       twApplyEvents(twChartState.events);
-      if(!refreshOnly){twChartState.chart.timeScale().fitContent();twLoadDrawings();}else{twRenderDrawings();}
+      if(!refreshOnly){twAutoScalePrice();twChartState.chart.timeScale().fitContent();twLoadDrawings();}else{twRenderDrawings();}
       twRenderIndicators();
       twRenderEmas();
       twOhlcv(bars);
