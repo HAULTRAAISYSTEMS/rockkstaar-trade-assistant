@@ -249,7 +249,7 @@ document.getElementById('scanner-query').addEventListener('input',applyScannerFi
       .then(function(r){return r.json();})
       .then(function(d){
         if(my!==seq)return;
-        if(d&&d.ok&&d.html){list.innerHTML=d.html;meta.textContent=d.count+' stor'+(d.count===1?'y':'ies')+(d.provider?' · via '+String(d.provider).replace(/_/g,' '):'');
+        if(d&&d.ok&&d.html){list.innerHTML=d.html;meta.textContent=d.count+' stor'+(d.count===1?'y':'ies')+(d.provider?' · via '+d.provider:'');
           list.querySelectorAll('#intel-empty,.intel-feed-state').forEach(function(el){el.remove();});}
         else{meta.textContent='No recent news found for '+t+'.';}
         applyScannerFilters();

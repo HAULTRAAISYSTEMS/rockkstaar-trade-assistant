@@ -67,6 +67,8 @@ def news_source_status() -> dict:
         )
         if os.environ.get(env_name, "").strip()
     ]
+    if all(_alpaca_keys()):
+        configured.insert(1 if configured[:1] == ["Finnhub"] else 0, "Benzinga (Alpaca)")
     return {
         "configured": bool(configured),
         "configured_sources": configured,
@@ -541,6 +543,114 @@ def _try_finnhub(ticker: str) -> CatalystNews | None:
         return None
 
 
+def _alpaca_keys() -> tuple[str, str]:
+    key = (os.environ.get("ALPACA_API_KEY") or os.environ.get("APCA_API_KEY_ID") or "").strip()
+    secret = (os.environ.get("ALPACA_SECRET_KEY") or os.environ.get("APCA_API_SECRET_KEY") or "").strip()
+    return key, secret
+
+
+def fetch_alpaca_news(symbols: list[str] | None = None, limit: int = 10) -> list[dict]:
+    """Benzinga newswire stories through Alpaca's News API, newest first.
+
+    Uses the same ALPACA_API_KEY / ALPACA_SECRET_KEY the app already has for
+    market data — no extra signup. With symbols, stories tagged with those
+    tickers; without, the latest market-wide stories. Each row keeps
+    Alpaca's `symbols` list. Never raises; [] without keys or on failure.
+    """
+    key, secret = _alpaca_keys()
+    if not (key and secret):
+        return []
+    try:
+        import urllib.request, urllib.parse
+        params = {"limit": max(1, min(int(limit), 50)), "sort": "desc", "include_content": "false"}
+        if symbols:
+            params["symbols"] = ",".join(s.upper() for s in symbols if s)
+        req = urllib.request.Request(
+            "https://data.alpaca.markets/v1beta1/news?" + urllib.parse.urlencode(params),
+            headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret,
+                     "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            payload = json.loads(resp.read().decode()) or {}
+    except Exception as exc:
+        logger.warning("Alpaca news fetch failed for %s: %s", symbols or "market", exc)
+        return []
+    rows = []
+    for n in payload.get("news") or []:
+        headline = str(n.get("headline") or "").strip()
+        if not headline:
+            continue
+        images = n.get("images") or []
+        image = ""
+        for size in ("small", "thumb", "large"):
+            image = next((i.get("url") for i in images if i.get("size") == size and i.get("url")), "")
+            if image:
+                break
+        rows.append({
+            **_article(headline, source=(n.get("source") or "benzinga").title(),
+                       url=n.get("url", ""), image=image, summary=n.get("summary", ""),
+                       published_at=n.get("created_at") or n.get("updated_at") or ""),
+            "symbols": [str(x).upper() for x in (n.get("symbols") or [])],
+        })
+    return rows
+
+
+def _try_alpaca_news(ticker: str) -> CatalystNews | None:
+    """Benzinga via Alpaca (ALPACA_API_KEY / ALPACA_SECRET_KEY)."""
+    rows = fetch_alpaca_news([ticker], limit=10)
+    if not rows:
+        return None
+    articles = tuple({k: v for k, v in r.items() if k != "symbols"} for r in rows)
+    headlines = [a["headline"] for a in articles]
+    newest = _parse_iso(articles[0].get("published_at"))
+    return CatalystNews(
+        headlines=headlines, summary=headlines[0],
+        categories=parse_catalyst_categories(headlines),
+        freshness_minutes=_minutes_ago(newest), source="alpaca_benzinga",
+        articles=articles,
+    )
+
+
+def _parse_iso(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _merge_news(results: list[CatalystNews], limit: int = 10) -> CatalystNews | None:
+    """Combine several providers into one newest-first, de-duplicated feed."""
+    results = [r for r in results if r is not None and r.source != "none"]
+    if not results:
+        return None
+    if len(results) == 1:
+        return results[0]
+    seen: set[str] = set()
+    merged: list[dict] = []
+    for r in results:
+        arts = list(r.articles) or [_article(h, source=r.source) for h in r.headlines]
+        for a in arts:
+            norm = " ".join(str(a.get("headline") or "").lower().split())[:70]
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            merged.append(a)
+    epoch0 = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    merged.sort(key=lambda a: _parse_iso(a.get("published_at")) or epoch0, reverse=True)
+    merged = merged[:limit]
+    headlines = [a["headline"] for a in merged]
+    fresh = [r.freshness_minutes for r in results if r.freshness_minutes is not None]
+    return CatalystNews(
+        headlines=headlines, summary=headlines[0] if headlines else "",
+        categories=parse_catalyst_categories(headlines),
+        freshness_minutes=min(fresh) if fresh else None,
+        source="+".join(r.source for r in results),
+        articles=tuple(merged),
+    )
+
+
 def _try_newsapi(ticker: str) -> CatalystNews | None:
     """NewsAPI everything endpoint (NEWS_API_KEY)."""
     api_key = os.environ.get("NEWS_API_KEY", "").strip()
@@ -961,10 +1071,24 @@ def fetch_headlines(ticker: str) -> CatalystNews:
     Priority: Finnhub → NewsAPI → Polygon → Yahoo search → RSS → yfinance.
     Never raises — always returns a CatalystNews.
     """
-    # RSS is attempted before yfinance because it is a bounded HTTP request;
-    # yfinance can hang behind Yahoo rate limits on hosted environments.
+    # The two keyed newswires are asked together and combined, so one missing
+    # a story — or being down — does not leave the ticker without news.
+    # Both are bounded (4 s each) and run in parallel.
+    primary = []
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            primary = list(ex.map(lambda fn: fn(ticker), (_try_finnhub, _try_alpaca_news)))
+    except Exception as exc:
+        logger.debug("primary news fan-out failed for %s: %s", ticker, exc)
+    merged = _merge_news(primary)
+    if merged is not None:
+        logger.info("fetch_headlines  ticker=%s  source=%s  headlines=%d",
+                    ticker, merged.source, len(merged.headlines))
+        return merged
+    # Backups, in order. RSS is attempted before yfinance because it is a
+    # bounded HTTP request; yfinance can hang behind Yahoo rate limits.
     for fn in (
-        _try_finnhub,
         _try_newsapi,
         _try_polygon,
         _try_yahoo_search,
