@@ -290,6 +290,13 @@ def _should_notify(ticker: str, tag: str) -> bool:
 
 
 def _send_telegram(msg: str) -> None:
+    # Both gunicorn workers scan; only one of them speaks.
+    try:
+        from background_leader import is_leader
+        if not is_leader():
+            return
+    except Exception:
+        pass
     token   = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     if not token or not chat_id:
@@ -306,6 +313,12 @@ def _send_telegram(msg: str) -> None:
 
 
 def _send_discord(msg: str) -> None:
+    try:
+        from background_leader import is_leader
+        if not is_leader():
+            return
+    except Exception:
+        pass
     webhook = os.environ.get("DISCORD_WEBHOOK_URL", "")
     if not webhook:
         return
