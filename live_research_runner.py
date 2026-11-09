@@ -116,5 +116,12 @@ def main():
     parser=argparse.ArgumentParser(description="Discover market catalysts and create draft-only Live Research suggestions")
     parser.add_argument("--tickers",help="Comma-separated priority ticker override"); args=parser.parse_args()
     tickers=[x.strip().upper() for x in args.tickers.split(",") if x.strip()] if args.tickers else None
+    # Uptime first: this cron job runs outside the web service, so it is what
+    # can tell the owner (Telegram) that the site is down — and back up.
+    try:
+        import uptime_watchdog
+        print(json.dumps({"uptime": uptime_watchdog.run()}, sort_keys=True))
+    except Exception as exc:
+        print(json.dumps({"uptime_error": type(exc).__name__}))
     result=run(tickers); print(json.dumps(result,sort_keys=True)); return 0
 if __name__=="__main__": raise SystemExit(main())
