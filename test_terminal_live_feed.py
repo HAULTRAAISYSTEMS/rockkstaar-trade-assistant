@@ -181,3 +181,21 @@ class TestThePhoneChartBar:
 
     def test_the_range_picker_uses_short_labels_on_phones(self):
         assert '"10y":"10Y"' in self.PAGE
+
+
+class TestImmersiveFullScreen:
+    """iPhone full screen pins the panel over the page; the theme made it
+    see-through, so the Terminal header collided with the chart controls."""
+    CSS = open("static/css/terminal_workspace.css").read()
+
+    def test_the_backdrop_is_solid_and_beats_the_floating_panel_theme(self):
+        assert "html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen," in self.CSS
+        assert "#04070c !important;" in self.CSS
+
+    def test_exit_is_pinned_top_right_and_the_dock_does_not_trap_it(self):
+        assert "position: fixed !important; z-index: 3;" in self.CSS
+        dock = self.CSS.split("/* Floating glass dock */")[1].split("/* Exit:")[0]
+        assert "backdrop-filter:" not in dock.replace("No backdrop-filter", "")
+
+    def test_landscape_gives_the_chart_the_room(self):
+        assert "(orientation: landscape)" in self.CSS
