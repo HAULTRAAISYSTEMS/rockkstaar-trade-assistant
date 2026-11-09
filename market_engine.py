@@ -1214,11 +1214,15 @@ def _build_tape_items() -> list[dict]:
         # In extended hours the ETFs' last close is not their price —
         # override with the latest pre/post print where one exists.
         _ext = extended_quotes(["SPY", "QQQ", "DIA", "IWM"])
+        _ext_session = market_session() if _ext else ""
         for _item in items:
             _q = _ext.get(_item["symbol"])
             if _q:
                 _item["price"] = _q["price"]
                 _item["change_pct"] = _q["pct"]
+                # Which extended session the print belongs to ("pre"/"post"),
+                # so the Today pulse can label it instead of guessing.
+                _item["ext_session"] = _ext_session
         _TAPE_CACHE.update(at=_time.time(), items=items)
     except Exception as exc:
         logger.debug("_build_tape_items failed: %s", exc)

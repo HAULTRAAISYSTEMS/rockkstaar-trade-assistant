@@ -767,6 +767,68 @@ html.cc27 .liq-page .cc-pulse-cell:not(.cc-pulse-next) .cc-pulse-v {
 }
 html.cc27 .liq-page .cc-pulse-v small { color: var(--cc-muted); font-size: 0.55em; }
 html.cc27 .liq-page .cc-pulse-meta { margin-top: 6px; color: #6f7c91 !important; }
+/* ── Live pulse ───────────────────────────────────────────────
+   The rail polls /api/today/pulse. A cyan dot means the last poll
+   came back with a real reading; dashed means polls are failing and
+   the numbers on screen are the last good ones.                     */
+html.cc27 .liq-page .cc-pulse > .cc-pulse-cell[hidden],
+html.cc27 .liq-page .cc-pulse-meta[hidden],
+html.cc27 .liq-page .cc-pulse-live[hidden] { display: none !important; }
+html.cc27 .liq-page .cc-pulse-live {
+  position: absolute;
+  right: 0; top: -11px;
+  z-index: 2;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(79, 227, 255, 0.32);
+  background: rgba(6, 12, 20, 0.86);
+  color: #9fefff;
+  font: 600 9px/1.3 var(--font-mono, monospace);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+html.cc27 .liq-page .cc-pulse-live i {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #4fe3ff;
+  box-shadow: 0 0 0 0 rgba(79, 227, 255, 0.6);
+  animation: ccLiveBeat 2s ease-out infinite;
+}
+html.cc27 .liq-page .cc-pulse-live.is-stale {
+  border-style: dashed;
+  border-color: var(--unknown-line, rgba(255,255,255,0.3));
+  color: var(--cc-muted);
+}
+html.cc27 .liq-page .cc-pulse-live.is-stale i {
+  background: transparent;
+  border: 1px dashed var(--unknown-line, rgba(255,255,255,0.4));
+  animation: none;
+}
+@keyframes ccLiveBeat {
+  0%   { box-shadow: 0 0 0 0 rgba(79, 227, 255, 0.6); }
+  70%  { box-shadow: 0 0 0 7px rgba(79, 227, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(79, 227, 255, 0); }
+}
+/* Extended-hours print: the label goes cyan so "SPY PRE" reads as live. */
+html.cc27 .liq-page .cc-pulse-k.is-ext { color: #9fefff !important; }
+html.cc27 .liq-page .cc-pulse-cell:not(.cc-pulse-next) .cc-pulse-k.is-ext::before {
+  background: #4fe3ff; box-shadow: 0 0 8px rgba(79, 227, 255, 0.9);
+}
+/* A value that just changed flashes its direction once. */
+html.cc27 .liq-page .cc-pulse-v.is-tick-up   { animation: ccTickUp 1.4s ease-out; }
+html.cc27 .liq-page .cc-pulse-v.is-tick-down { animation: ccTickDown 1.4s ease-out; }
+@keyframes ccTickUp   { 0% { text-shadow: 0 0 18px rgba(58, 230, 140, 0.95); color: #7dffb8; } 100% { text-shadow: none; } }
+@keyframes ccTickDown { 0% { text-shadow: 0 0 18px rgba(255, 92, 110, 0.95); color: #ff98a3; } 100% { text-shadow: none; } }
+@media (prefers-reduced-motion: reduce) {
+  html.cc27 .liq-page .cc-pulse-live i,
+  html.cc27 .liq-page .cc-pulse-v.is-tick-up,
+  html.cc27 .liq-page .cc-pulse-v.is-tick-down { animation: none; }
+}
+@media (max-width: 720px) {
+  html.cc27 .liq-page .cc-pulse-live { top: -13px; }
+}
 /* Not read = still visibly not read: dashed frame, dim, no glow */
 html.cc27 .liq-page .cc-pulse.is-unknown .cc-pulse-regime { outline: 1px dashed var(--unknown-line); outline-offset: -6px; }
 html.cc27 .liq-page .cc-pulse.is-unknown .cc-pulse-regime .cc-pulse-k::before { background: transparent; border: 1px dashed var(--unknown-line); box-shadow: none; }
