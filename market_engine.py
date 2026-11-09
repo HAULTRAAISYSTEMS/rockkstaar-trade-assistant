@@ -1585,7 +1585,7 @@ def _fetch_live_quote(sym: str) -> None:
         quote["session"] = session
         _LIVE_CACHE[sym] = {"at": _time.time(), "quote": quote}
         if len(_LIVE_CACHE) > _LIVE_MAX_SYMBOLS:
-            oldest = sorted(_LIVE_CACHE.items(), key=lambda kv: kv[1]["at"])
+            oldest = sorted(list(_LIVE_CACHE.items()), key=lambda kv: kv[1]["at"])
             for k, _ in oldest[: len(_LIVE_CACHE) - _LIVE_MAX_SYMBOLS]:
                 _LIVE_CACHE.pop(k, None)
 
@@ -1632,6 +1632,11 @@ _LQ_WANT_S = 60          # a symbol stays wanted this long after a request
 _LQ_MAX_AGE_S = 90       # older quotes are not served as live
 _LQ_CACHE: dict = {}     # sym -> {"at": float, "quote": dict}
 _LQ_WANTED: dict = {}    # sym -> last requested (time.time())
+# Request threads add symbols while the refresher reads them. Iterating the
+# dict while another thread inserts raised "dictionary changed size during
+# iteration" inside the background thread, which died silently every cycle —
+# so the feed never filled under real traffic. Every access goes through this.
+_LQ_LOCK = threading.Lock()
 _LQ_STATE: dict = {"at": 0.0, "refreshing": False, "feed": None}
 
 
@@ -1677,8 +1682,13 @@ def _quote_from_alpaca_snapshot(snap: dict, today) -> dict | None:
     elif mins >= 960:
         ext = "post"
     pct = round((float(price) / float(prev_close) - 1) * 100, 2) if prev_close else None
-    return {"price": round(float(price), 4), "epoch": epoch, "prev_close": prev_close,
-            "change_pct": pct, "ext": ext}
+    out = {"price": round(float(price), 4), "epoch": epoch, "prev_close": prev_close,
+           "change_pct": pct, "ext": ext}
+    if daily_day == today:
+        # Today's session so far, for drawing today's daily candle.
+        out.update(day_open=daily.get("o"), day_high=daily.get("h"),
+                   day_low=daily.get("l"), day_volume=daily.get("v"))
+    return out
 
 
 def _alpaca_snapshots(symbols: list[str]) -> dict:
@@ -1756,10 +1766,11 @@ def _schwab_live(symbols: list[str]) -> dict:
 def _refresh_live_quotes() -> None:
     import time as _time
     now = _time.time()
-    wanted = sorted((s for s, t in _LQ_WANTED.items() if now - t <= _LQ_WANT_S),
-                    key=lambda s: -_LQ_WANTED[s])
-    for s in [s for s, t in _LQ_WANTED.items() if now - t > _LQ_WANT_S]:
-        _LQ_WANTED.pop(s, None)
+    with _LQ_LOCK:
+        for s in [s for s, t in _LQ_WANTED.items() if now - t > _LQ_WANT_S]:
+            _LQ_WANTED.pop(s, None)
+        snapshot = dict(_LQ_WANTED)
+    wanted = sorted(snapshot, key=lambda s: -snapshot[s])
     if not wanted:
         return
     quotes = {}
@@ -1802,6 +1813,11 @@ def _refresh_live_quotes() -> None:
     stamp = _time.time()
     for s, q in quotes.items():
         _LQ_CACHE[s] = {"at": stamp, "quote": q}
+    counts: dict = {}
+    for q in quotes.values():
+        counts[q.get("source") or "?"] = counts.get(q.get("source") or "?", 0) + 1
+    _LQ_STATE["sources"] = counts
+    _LQ_STATE["wanted"] = len(wanted)
 
 
 def live_quotes(symbols) -> dict:
@@ -1823,6 +1839,8 @@ def live_quotes(symbols) -> dict:
         s = (s or "").upper().strip()
         if s and len(s) <= 12 and s not in ("ES", "NQ", "VIX"):
             syms.append(s)
+    with _LQ_LOCK:
+        for s in syms:
             _LQ_WANTED[s] = now
     if now - _LQ_STATE["at"] >= _LQ_TTL_S and not _LQ_STATE["refreshing"]:
         _LQ_STATE["refreshing"] = True
@@ -1831,6 +1849,12 @@ def live_quotes(symbols) -> dict:
         def _work():
             try:
                 _refresh_live_quotes()
+                _LQ_STATE["last_ok"] = _time.time()
+                _LQ_STATE["last_error"] = ""
+            except Exception as exc:
+                # Never die silently again: record it for /api/live/status.
+                _LQ_STATE["last_error"] = f"{type(exc).__name__}: {exc}"[:200]
+                logger.warning("live quotes refresh failed: %s", exc, exc_info=True)
             finally:
                 _LQ_STATE["refreshing"] = False
         _th.Thread(target=_work, daemon=True, name="live_quotes").start()
@@ -1840,6 +1864,28 @@ def live_quotes(symbols) -> dict:
         if entry and now - entry["at"] <= _LQ_MAX_AGE_S:
             out[s] = dict(entry["quote"])
     return out
+
+
+def live_quotes_status() -> dict:
+    """What the shared live feed is doing — for /api/live/status."""
+    import time as _time
+    now = _time.time()
+    last_ok = _LQ_STATE.get("last_ok") or 0
+    try:
+        import schwab as _schwab
+        schwab_md = _schwab.market_data_status()
+    except Exception as exc:
+        schwab_md = {"error": type(exc).__name__}
+    return {
+        "last_refresh_ok_s_ago": round(now - last_ok, 1) if last_ok else None,
+        "last_error": _LQ_STATE.get("last_error") or "",
+        "refreshing": bool(_LQ_STATE.get("refreshing")),
+        "symbols_wanted": _LQ_STATE.get("wanted", 0),
+        "quotes_by_source": _LQ_STATE.get("sources") or {},
+        "alpaca_feed": _LQ_STATE.get("feed"),
+        "schwab_market_data": schwab_md,
+        "session": pulse_session(),
+    }
 
 
 def overlay_live_tape(items: list[dict]) -> list[dict]:
