@@ -31,6 +31,7 @@
   <!-- Attaches the token to every state-changing fetch/XHR. Blocking, and
        before any page script, so no call site can run without it. -->
   <script src="{{ url_for('static', filename='js/csrf.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/live_hub.js') }}"></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
   <!-- Mobile / iPad responsive overrides — loaded last to take priority -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}" />

@@ -983,7 +983,17 @@ async function _pollPulse() {
   }
 }
 
+function _onPulsePart(data) {
+  if (!data) { _pulseLive.fails += 1; _paintPulseBadge(); return; }
+  _applyPulse(data.pulse);
+  if (data.ok) { _pulseLive.okAt = Date.now(); _pulseLive.fails = 0; }
+  else _pulseLive.fails += 1;
+  _paintPulseBadge();
+}
+
 function _schedulePulse(delay) {
+  // Shared live poll: the pulse rides the page's one 3 s request.
+  if (window.TSLive) { if (delay === 0) TSLive.now(); return; }
   clearTimeout(_pulseLive.timer);
   if (document.hidden) return;
   // Back off to 30s after repeated failures so a dead feed is not hammered.
@@ -1005,7 +1015,8 @@ function startLivePulse() {
   if (!document.getElementById('cc-pulse').classList.contains('is-unknown')) _pulseLive.okAt = Date.now();
   _pulseLive.session = document.getElementById('cc-pulse').dataset.session || '';
   _paintPulseBadge();
-  _schedulePulse();
+  if (window.TSLive) TSLive.on('pulse', _onPulsePart);
+  else _schedulePulse();
   setInterval(_paintPulseBadge, 1000);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) clearTimeout(_pulseLive.timer);
