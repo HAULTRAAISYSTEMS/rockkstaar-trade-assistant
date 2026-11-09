@@ -5513,6 +5513,25 @@ def api_terminal_quotes():
     })
 
 
+@app.route("/api/live/status")
+def api_live_status():
+    """Which source the 3-second live feed is getting prices from, and why not.
+
+    Open it in the browser: quotes_by_source shows Schwab / Alpaca / Yahoo
+    counts from the last refresh, and schwab_market_data says whether Schwab
+    is answering (and the HTTP error if not).
+    """
+    status = {"available": _MKT_AVAILABLE}
+    if _MKT_AVAILABLE:
+        try:
+            status.update(_mkt.live_quotes_status())
+        except Exception as exc:
+            status["error"] = f"{type(exc).__name__}: {exc}"
+    resp = jsonify(status)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/api/terminal/live/<ticker>")
 def api_terminal_live(ticker):
     """The charted symbol's latest print, for ticking the live candle.
@@ -5535,7 +5554,9 @@ def api_terminal_live(ticker):
                 base = q.get("prev_close")
                 quote = {"price": q["price"], "epoch": q.get("epoch"),
                          "prev_close": base, "regular_close": base,
-                         "ext": q.get("ext"), "source": q.get("source") or ""}
+                         "ext": q.get("ext"), "source": q.get("source") or "",
+                         "day_open": q.get("day_open"), "day_high": q.get("day_high"),
+                         "day_low": q.get("day_low"), "day_volume": q.get("day_volume")}
         except Exception as exc:
             logger.debug("terminal live (shared) %s: %s", ticker, exc)
         if quote is None:

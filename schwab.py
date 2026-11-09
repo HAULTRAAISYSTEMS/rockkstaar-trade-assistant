@@ -511,9 +511,19 @@ def parse_quote_entry(entry: dict) -> dict | None:
         prev = float(prev) if prev else None
     except (TypeError, ValueError):
         prev = None
-    return {"price": round(price, 4), "epoch": int(int(stamp) / 1000),
-            "prev_close": prev,
-            "change_pct": round((price / prev - 1) * 100, 2) if prev else None}
+    out = {"price": round(price, 4), "epoch": int(int(stamp) / 1000),
+           "prev_close": prev,
+           "change_pct": round((price / prev - 1) * 100, 2) if prev else None}
+    # Today's regular session so far (absent or 0 before the open).
+    for key, field in (("day_open", "openPrice"), ("day_high", "highPrice"),
+                       ("day_low", "lowPrice"), ("day_volume", "totalVolume")):
+        try:
+            v = float(q.get(field) or 0)
+        except (TypeError, ValueError):
+            v = 0
+        if v > 0:
+            out[key] = v
+    return out
 
 
 def fetch_quotes(symbols: list[str], user_id: int | None = None) -> dict:

@@ -92,3 +92,71 @@ class TestTheChartHooks:
 
     def test_overnight_prints_tick_the_extended_chart(self):
         assert "sess==='overnight'" in self.PAGE
+
+
+# ── Concurrency, daily candle, status ───────────────────────────────────────
+import threading
+import time as _time
+
+
+def test_the_refresher_survives_symbols_being_added_while_it_runs(monkeypatch):
+    """Request threads add symbols while the refresher reads them. It used to
+    die with 'dictionary changed size during iteration' every cycle."""
+    market_engine._LQ_WANTED.clear()
+    now = _time.time()
+    for i in range(400):
+        market_engine._LQ_WANTED[f"S{i}"] = now
+    seen = []
+    monkeypatch.setattr(market_engine, "_schwab_live", lambda syms: seen.append(len(syms)) or {})
+    monkeypatch.setattr(market_engine, "_alpaca_snapshots", lambda syms: {})
+    monkeypatch.setattr(market_engine, "_fetch_live_quote", lambda s: None)
+    stop = threading.Event()
+
+    def writer():
+        i = 0
+        while not stop.is_set():
+            with market_engine._LQ_LOCK:
+                market_engine._LQ_WANTED[f"W{i % 500}"] = _time.time()
+            i += 1
+            _time.sleep(0.0005)
+    t = threading.Thread(target=writer); t.start()
+    try:
+        for _ in range(50):
+            market_engine._refresh_live_quotes()
+    finally:
+        stop.set(); t.join()
+        market_engine._LQ_WANTED.clear()
+    assert len(seen) == 50
+
+
+def test_schwab_quotes_carry_todays_session_for_the_daily_candle():
+    import schwab
+    q = schwab.parse_quote_entry({"quote": {"lastPrice": 743.3, "closePrice": 735.29,
+        "tradeTime": 1794238200000, "openPrice": 740.1, "highPrice": 744.0,
+        "lowPrice": 739.5, "totalVolume": 12500000}})
+    assert (q["day_open"], q["day_high"], q["day_low"], q["day_volume"]) == (740.1, 744.0, 739.5, 12500000)
+
+
+def test_alpaca_quotes_carry_todays_bar_only_when_it_is_today():
+    from datetime import date
+    snap = {"latestTrade": {"t": "2026-11-09T14:33:00Z", "p": 743.3},
+            "dailyBar": {"t": "2026-11-09T05:00:00Z", "o": 740.1, "h": 744.0, "l": 739.5, "c": 743.3, "v": 9e6},
+            "prevDailyBar": {"t": "2026-11-06T05:00:00Z", "c": 735.29}}
+    q = market_engine._quote_from_alpaca_snapshot(snap, date(2026, 11, 9))
+    assert q["day_open"] == 740.1 and q["prev_close"] == 735.29
+    snap["dailyBar"]["t"] = "2026-11-06T05:00:00Z"
+    assert "day_open" not in market_engine._quote_from_alpaca_snapshot(snap, date(2026, 11, 9))
+
+
+def test_the_daily_chart_opens_todays_candle():
+    page = open("templates/terminal.html").read()
+    assert "day={time:lastTime+days*86400,open:open," in page
+    assert "day_open:q.day_open" in page
+
+
+def test_the_live_status_page(client):
+    r = client.get("/api/live/status")
+    assert r.status_code == 200 and "no-store" in r.headers["Cache-Control"]
+    data = r.get_json()
+    for key in ("quotes_by_source", "schwab_market_data", "last_error", "session"):
+        assert key in data

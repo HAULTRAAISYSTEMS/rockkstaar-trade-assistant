@@ -1473,10 +1473,31 @@ function twPatchActiveCandle(q,px){
   if(twChartState.interval==='1d'){
     if(sess!=='regular'||!isFinite(lastTime))return;
     var etDay=function(e){return new Date(e*1000).toLocaleDateString('en-CA',{timeZone:'America/New_York'});};
-    if(etDay(lastTime)!==etDay(stamp)||Number(last.close)===px)return;
-    var day=Object.assign({},last,{close:px,high:Math.max(Number(last.high),px),low:Math.min(Number(last.low),px)});
-    twChartState.bars[twChartState.bars.length-1]=day;twChartState.barMap[twTimeKey(day.time)]=day;twChartState.lastPrice=px;
+    var lastDay=etDay(lastTime), today=etDay(stamp);
+    if(today<lastDay)return;
+    var dOpen=Number(q.day_open), dHigh=Number(q.day_high), dLow=Number(q.day_low), dVol=Number(q.day_volume);
+    var day;
+    if(today===lastDay){
+      day=Object.assign({},last,{close:px,
+        high:Math.max(Number(last.high),px,isFinite(dHigh)?dHigh:px),
+        low:Math.min(Number(last.low),px,isFinite(dLow)&&dLow>0?dLow:px)});
+      if(isFinite(dVol)&&dVol>0)day.volume=dVol;
+      twChartState.bars[twChartState.bars.length-1]=day;
+    }else{
+      // The first live print of a new session opens today's candle. The
+      // provider's daily bars are stamped at the same time of day, so the new
+      // one is the last bar's stamp plus whole days (Fri → Mon is +3).
+      var days=Math.round((Date.parse(today+'T12:00:00Z')-Date.parse(lastDay+'T12:00:00Z'))/86400000);
+      var open=isFinite(dOpen)&&dOpen>0?dOpen:px;
+      day={time:lastTime+days*86400,open:open,
+        high:Math.max(open,px,isFinite(dHigh)?dHigh:px),
+        low:Math.min(open,px,isFinite(dLow)&&dLow>0?dLow:px),
+        close:px,volume:isFinite(dVol)&&dVol>0?dVol:0,session:'regular',live_quote:true};
+      twChartState.bars.push(day);
+    }
+    twChartState.barMap[twTimeKey(day.time)]=day;twChartState.lastPrice=px;
     twChartState.area.update({time:day.time,value:day.close});twChartState.candle.update(twCandleDatum(day));
+    twChartState.vol.update({time:day.time,value:day.volume||0,color:twVolumeColor(day)});
     twRenderIndicators();twRenderEmas();twOhlcv(twChartState.bars);
     return;
   }
@@ -1892,6 +1913,11 @@ function twLiveHeader(t, px, q){
     hc.textContent = tag + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
     hc.className = 'tw-sym-chg ' + twChgClass(pct);
   }
+  // Say where this price came from and when it traded, to the second.
+  if(q.epoch){
+    var at = new Date(q.epoch * 1000).toLocaleTimeString('en-US', {timeZone:'America/New_York', hour:'numeric', minute:'2-digit', second:'2-digit'}) + ' ET';
+    twRenderStamp({live:true, source:q.source || 'Live feed', as_of:at});
+  }
 }
 async function twLivePoll(){
   var t = twChartState.ticker;
@@ -1906,7 +1932,8 @@ async function twLivePoll(){
       var px = Number(q.price);
       if(isFinite(px) && px > 0){
         var sess = q.ext ? ({pre:'pre_market', post:'after_hours', overnight:'overnight'})[q.ext] : 'regular';
-        twPatchActiveCandle({ticker:t, market_session:sess, as_of_epoch:q.epoch}, px);
+        twPatchActiveCandle({ticker:t, market_session:sess, as_of_epoch:q.epoch,
+          day_open:q.day_open, day_high:q.day_high, day_low:q.day_low, day_volume:q.day_volume}, px);
         twLiveHeader(t, px, q);
         twLast[t] = px;
         twLiveFeed.ticker = t; twLiveFeed.at = Date.now();
