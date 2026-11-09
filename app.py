@@ -138,6 +138,11 @@ app.permanent_session_lifetime = timedelta(days=30)
 # ---------------------------------------------------------------------------
 csrf = CSRFProtect(app)
 
+# Request timing (/admin/speed) and a worker-freeze detector that names the
+# request responsible in the logs. Installed first so it times everything.
+import perf_monitor as _perf
+_perf.install(app)
+
 
 class _QuietPollSessionInterface(SecureCookieSessionInterface):
     """Don't re-send the session cookie on read-only API polls.
@@ -577,6 +582,17 @@ def quote_time_filter(value: str | None) -> str:
 # /health MUST be registered immediately — before any code that could crash
 # during import. If anything below line 44 raises an exception, gunicorn
 # still has this route and Render's health check succeeds.
+@app.route("/admin/speed")
+@app.route("/api/admin/speed")
+@require_admin
+def admin_speed():
+    """Slowest endpoints, requests in flight and recent freezes (this worker)."""
+    data = _perf.report()
+    if request.path.startswith("/api/") or request.args.get("format") == "json":
+        return jsonify(data)
+    return render_template("admin_speed.html", perf=data)
+
+
 @app.route("/health")
 def health():
     try:
@@ -839,15 +855,37 @@ def _intel_alert_loop():
         try:
             now = _intel._et_now()
             # Weekday intel sweeps plus the Sunday evening weekly calendar.
-            if (now.weekday() < 5 and 7 <= now.hour < 18) or (now.weekday() == 6 and 18 <= now.hour < 21):
+            # Both gunicorn workers run this loop; only the leader sends, so
+            # each alert arrives once. Checked every pass so the surviving
+            # worker takes over when the leader is recycled.
+            from background_leader import is_leader as _is_leader
+            if _is_leader() and ((now.weekday() < 5 and 7 <= now.hour < 18) or (now.weekday() == 6 and 18 <= now.hour < 21)):
                 _intel.check_and_send_intel_alerts()
         except Exception as _ie:
             logger.warning("intel alert loop error: %s", _ie)
         _time.sleep(1800)  # every 30 minutes
 
+# Position Guardian: every 3 minutes in market hours, the leader worker checks
+# open Schwab positions against their stops, VWAP, earnings and fresh news and
+# alerts each new signal once a day (in-app + Telegram).
+def _guardian_loop():
+    while True:
+        try:
+            now = _intel._et_now()
+            from background_leader import is_leader as _is_leader
+            mins = now.hour * 60 + now.minute
+            if _is_leader() and now.weekday() < 5 and 9 * 60 + 30 <= mins < 16 * 60 + 5:
+                import position_guardian as _guardian
+                from schwab import quotes_user_id as _quid
+                _guardian.scan_and_alert(_quid())
+        except Exception as _ge:
+            logger.warning("guardian loop error: %s", _ge)
+        _time.sleep(180)
+
 try:
     if _BACKGROUND_ENABLED:
         threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
+        threading.Thread(target=_guardian_loop, daemon=True, name="position-guardian").start()
 except Exception as _loop_err:
     logger.error("intel alert loop failed to start: %s", _loop_err)
 
@@ -7343,6 +7381,9 @@ def inject_helpers():
 # The demo_seeded flag inside the function prevents re-seeding on restart.
 # ---------------------------------------------------------------------------
 def _deferred_startup():
+    from background_leader import is_leader as _is_leader
+    if not _is_leader():
+        return
     try:
         seed_demo_data()
     except Exception as _e:
