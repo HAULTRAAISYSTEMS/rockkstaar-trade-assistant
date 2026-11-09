@@ -20,7 +20,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, Response, send_from_directory
 from flask_sock import Sock
-from flask_wtf.csrf import CSRFProtect  # type: ignore[import-untyped]
+from flask_wtf.csrf import CSRFProtect, generate_csrf  # type: ignore[import-untyped]
+from flask.sessions import SecureCookieSessionInterface
 from werkzeug.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,33 @@ app.permanent_session_lifetime = timedelta(days=30)
 # The /risk/trading-mode AJAX route sends the token via X-CSRFToken header.
 # ---------------------------------------------------------------------------
 csrf = CSRFProtect(app)
+
+
+class _QuietPollSessionInterface(SecureCookieSessionInterface):
+    """Don't re-send the session cookie on read-only API polls.
+
+    Permanent sessions are re-issued on every response by default. The Today
+    pulse, the Terminal chart and the quote rail now poll every few seconds,
+    so every response carried a Set-Cookie holding whatever session that
+    request started with. A poll in flight when a page wrote something new
+    into the session — most importantly a freshly minted CSRF token — landed
+    afterwards and put the old cookie back, and the next form post failed
+    the security check. A GET to /api/ that did not change the session has
+    nothing to say about the cookie, so it no longer says it. Page loads
+    still refresh it, which is what keeps an active session alive.
+    """
+
+    def should_set_cookie(self, app, session):
+        try:
+            if (request.method in ("GET", "HEAD") and request.path.startswith("/api/")
+                    and not session.modified):
+                return False
+        except RuntimeError:
+            pass
+        return super().should_set_cookie(app, session)
+
+
+app.session_interface = _QuietPollSessionInterface()
 
 # One database connection per request, released when the request ends.
 # Without this every get_db() call opened its own connection: 23 of them to
@@ -263,11 +291,15 @@ def _require_login():
         if not user or not hmac.compare_digest(stamp, _credential_stamp(user)):
             session.clear()
         else:
-            session["is_admin"] = user["is_admin"]
-            session["username"] = user["username"]
+            # Only write what changed: an assignment marks the session
+            # modified and re-sends the cookie even when the value is the same.
+            if session.get("is_admin") != user["is_admin"]:
+                session["is_admin"] = user["is_admin"]
+            if session.get("username") != user["username"]:
+                session["username"] = user["username"]
     # Always public — Schwab OAuth callback must stay reachable; callback validates PKCE/state.
     if (request.path in ("/login", "/logout", "/register", "/favicon.ico", "/health",
-                         "/service-worker.js", "/schwab/callback")
+                         "/service-worker.js", "/schwab/callback", "/api/csrf-token")
             or request.path.startswith("/static/")):
         return
     if session.get("user_id"):
@@ -352,6 +384,10 @@ def _handle_all_errors(e):
             "splits": [], "dividends": [], "economic_events": [],
             "from_cache": False, "refreshing": False, "last_updated": "—",
         }), code
+    if isinstance(e, HTTPException) and type(e).__name__ == "CSRFError":
+        recovered = _recover_from_stale_form()
+        if recovered is not None:
+            return recovered
     if isinstance(e, HTTPException):
         headers = [(key, value) for key, value in e.get_headers()
                    if key.lower() not in {"content-type", "content-length"}]
@@ -367,6 +403,66 @@ def _handle_all_errors(e):
     # Unexpected server errors on frontend routes — log and show a simple message
     logger.error("Unhandled error on %s: %s", request.path, e, exc_info=True)
     return render_template("error.html", code=500), 500
+
+
+def _recover_from_stale_form():
+    """Turn the common stale-form failures into the thing the user wanted.
+
+    On an iPhone the session cookie is dropped when Safari or the home-screen
+    app is suspended (unless "Remember me" was ticked), while the page itself
+    is restored from memory with its old form token. The next post then
+    failed the security check and showed an error page — and on the sign-in
+    page, every attempt failed the same way. None of these needed an error:
+
+    - Sign in / register: show the form again, freshly tokened, with a note.
+    - Sign out: the user wants to be signed out. Do it.
+    - Any other form while signed out: send them to sign in, then back.
+
+    A signed-in user posting a stale form still gets the error page; that
+    one is a real mismatch and is not retried automatically.
+    """
+    path = request.path
+    if path == "/logout":
+        session.clear()
+        return redirect(url_for("login_page"))
+    if path == "/register":
+        session.pop("csrf_token", None)
+        return render_template(
+            "register.html",
+            error="The sign-up form had expired. Please submit it again.",
+            username=(request.form.get("username") or "").strip(),
+        ), 200
+    if path == "/login":
+        session.pop("csrf_token", None)
+        return render_template(
+            "login.html",
+            next=_safe_login_next(request.form.get("next") or ""),
+            error="Your sign-in form had expired. Please sign in again.",
+            registration_enabled=_registration_enabled(),
+        ), 200
+    if not session.get("user_id") and _auth_required():
+        back = _same_origin_referrer() or ""
+        args = {"expired": 1}
+        if back:
+            args["next"] = back
+        return redirect(url_for("login_page", **args))
+    return None
+
+
+@app.route("/api/csrf-token")
+def api_csrf_token():
+    """A fresh form token for the current session.
+
+    csrf.js calls this before submitting a form that has been sitting open,
+    and when a page is restored from the back/forward cache, so a page left
+    open on a phone does not post a token the session no longer holds. The
+    token is bound to the caller's own cookie and the response is not
+    readable cross-origin, so handing it out leaks nothing.
+    """
+    resp = jsonify({"ok": True, "token": generate_csrf(),
+                    "signed_in": bool(session.get("user_id"))})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/favicon.ico")
@@ -9007,6 +9103,8 @@ def login_page():
             _refresh_on_signin(user["id"])
             return redirect(next_url)
         error = "Invalid username or password."
+    if error is None and request.args.get("expired"):
+        error = "You were signed out, so that action did not go through. Sign in and try it again."
     return render_template("login.html",
                            next=request.args.get("next", ""),
                            error=error,

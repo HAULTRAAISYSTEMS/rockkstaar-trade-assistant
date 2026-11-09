@@ -6,7 +6,8 @@
    so a failure is still identifiable to the test suite, to log scraping and
    to anyone debugging a report like "it just said 400". #}
 {% if csrf_failure %}<meta name="error-reason" content="csrf">{% endif %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}"></head>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}">
+<style>.workspace-error .workspace-step,.workspace-error a{color:#c4f53b}.workspace-error a:hover{color:#e8ffad}</style></head>
 <body class="workspace-error"><main>
 <p class="workspace-step">TRADESTAAR ELITE / {{ code }}</p>
 <h1>{% if code == 404 %}This page isn't here.{% elif code == 403 %}This area needs permission.{% elif code == 400 %}Let's try that again.{% else %}We couldn't complete that request.{% endif %}</h1>

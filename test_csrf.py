@@ -109,7 +109,12 @@ STATE_CHANGING = [
 
 def _is_csrf_rejection(response) -> bool:
     body = response.get_data(as_text=True).lower()
-    return response.status_code == 400 and "csrf" in body
+    if response.status_code == 400 and "csrf" in body:
+        return True
+    # Signed out, a failed page-form post is sent to sign in instead of an
+    # error page. The route still never ran; only the explanation changed.
+    location = response.headers.get("Location", "")
+    return response.status_code == 302 and location.startswith("/login") and "expired=1" in location
 
 
 @pytest.mark.parametrize("method,path", STATE_CHANGING)
