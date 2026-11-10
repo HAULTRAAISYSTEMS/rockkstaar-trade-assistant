@@ -66,7 +66,7 @@ class SmartMoneyPageContractTests(unittest.TestCase):
     def test_page_exposes_dashboard_controls_and_explanations(self):
         for text in (
             "Insider Signal", "Why this matters", "Holdings change", "Minimum value",
-            "Cluster activity only", "Dashboard match rules", "No background or push delivery",
+            "Cluster activity only", "Dashboard match rules", "new watchlist buys also alert you",
         ):
             self.assertIn(text, self.template)
 
@@ -81,7 +81,7 @@ class SmartMoneyPageContractTests(unittest.TestCase):
         self.assertIn('selectSummary("30")', self.javascript)
 
     def test_route_uses_history_window_and_separate_dashboard_builder(self):
-        self.assertIn("fetch_sec_form4(tickers, limit=None, history_days=30)", self.app_source)
+        self.assertIn("fetch_sec_form4(detail_tickers, limit=None, history_days=30)", self.app_source)
         self.assertIn("dashboard = build_insider_dashboard", self.app_source)
         self.assertIn('@app.route("/smart-money/alert-rules", methods=["POST"])', self.app_source)
 

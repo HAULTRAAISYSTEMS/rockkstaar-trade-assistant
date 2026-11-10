@@ -15,3 +15,35 @@
 .sm-congress-row{display:grid;grid-template-columns:130px 1fr 180px 270px;gap:14px;align-items:center;padding:15px 18px;border-bottom:1px solid var(--sm-line)}.sm-congress-row>div{display:grid;gap:4px}.sm-congress-row a{font:700 11px var(--font-mono);text-decoration:none}.sm-congress-row>div:first-child>a{font-size:17px}.sm-congress-row span,.sm-congress-row small{color:var(--text-muted);font:10px var(--font-mono)}
 @media(max-width:1100px){.sm-summary-grid{grid-template-columns:repeat(3,1fr)}.sm-summary-grid article{border-bottom:1px solid var(--sm-line)}.sm-controls{grid-template-columns:1fr}.sm-alert-rules{border-top:1px solid var(--sm-line);border-left:0}.sm-event-grid{grid-template-columns:repeat(3,1fr)}.sm-event-head{grid-template-columns:1fr 1fr}.sm-signal{grid-column:2;grid-row:1;text-align:right}.sm-badges{grid-column:1/-1}.sm-congress-row{grid-template-columns:100px 1fr 150px}}
 @media(max-width:720px){.sm-dashboard{padding:10px 10px 90px}.sm-hero{align-items:flex-start;flex-direction:column;padding:18px}.sm-hero-meta{text-align:left}.sm-status{align-items:flex-start;flex-direction:column;gap:4px}.sm-summary-grid{grid-template-columns:repeat(2,1fr)}.sm-summary-grid article{padding:13px}.sm-summary-grid strong{font-size:18px}.sm-filter-form{grid-template-columns:repeat(2,1fr);padding:13px}.sm-check{grid-column:1/-1}.sm-event-head{grid-template-columns:1fr;padding:14px}.sm-identity>a{font-size:20px}.sm-signal{grid-column:1;grid-row:auto;text-align:left}.sm-event-grid{grid-template-columns:repeat(2,1fr)}.sm-event-grid>div{padding:12px}.sm-why{grid-template-columns:1fr;gap:5px}.sm-event-actions{align-items:flex-start;flex-direction:column}.sm-feed-head{align-items:flex-start;flex-direction:column}.sm-code-guide{margin-inline:0}.sm-congress-row{grid-template-columns:90px 1fr;padding:13px}.sm-congress-row>strong,.sm-congress-row>div:last-child{grid-column:2}.sm-tabs{margin-block:12px}}
+
+/* ── Market-wide top buys + watchlist activity ─────────────────────── */
+.sm-dashboard .sm-feed-meta{display:block;color:#8d97a4;font-size:11px;margin:2px 0 4px}
+.sm-dashboard .sm-top,.sm-dashboard .sm-watch{margin:18px 0;padding:18px;border:1px solid #1d262f;border-radius:16px;background:linear-gradient(180deg,#0d1319,#090d12)}
+.sm-dashboard .sm-top-sub{margin:6px 0 0;color:#9aa5b1;font-size:13px;max-width:560px}
+.sm-dashboard .sm-top-filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.sm-dashboard .sm-top-filters label{display:flex;gap:6px;align-items:center;color:#9aa5b1;font-size:12px}
+.sm-dashboard .sm-top-filters select{background:#0b1117;color:#e8edf2;border:1px solid #26303a;border-radius:8px;padding:5px 8px}
+.sm-dashboard .sm-buy-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-top:14px}
+.sm-dashboard .sm-buy{display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid #1d262f;border-left:3px solid #56606b;border-radius:14px;background:#0b1117}
+.sm-dashboard .sm-buy-strong{border-left-color:#32d49b;box-shadow:0 0 0 1px rgba(50,212,155,.18)}.sm-dashboard .sm-buy-notable{border-left-color:#c4f53b}
+.sm-dashboard .sm-buy header{display:flex;align-items:center;gap:8px}
+.sm-dashboard .sm-buy-tk{color:var(--cc-accent,#c4f53b);font:800 20px var(--font-mono,monospace);text-decoration:none}
+.sm-dashboard .sm-buy-co{flex:1;min-width:0;color:#8d97a4;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sm-dashboard .sm-buy-score{display:flex;flex-direction:column;align-items:center;padding:4px 9px;border-radius:10px;background:#111a22;color:#aeb8c3;font:700 9px var(--font-mono,monospace);text-transform:uppercase;letter-spacing:.08em}
+.sm-dashboard .sm-buy-score b{font-size:18px;color:#f2f5f8;letter-spacing:0}.sm-dashboard .sm-buy-strong .sm-buy-score b{color:#32d49b}
+.sm-dashboard .sm-buy-who strong{display:block;font:700 14px var(--font-ui,system-ui);color:#eef2f6}.sm-dashboard .sm-buy-who small{color:#8d97a4;font-size:12px}
+.sm-dashboard .sm-buy-nums{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.sm-dashboard .sm-buy-nums div{padding:8px;border-radius:9px;background:#0e151c}.sm-dashboard .sm-buy-nums span{display:block;color:#8d97a4;font:700 9px var(--font-mono,monospace);text-transform:uppercase;letter-spacing:.08em}
+.sm-dashboard .sm-buy-nums b{font:700 15px var(--font-mono,monospace);color:#eef2f6}.sm-dashboard .sm-buy-nums small{display:block;color:#76818d;font-size:11px}
+.sm-dashboard .sm-buy-tags{display:flex;flex-wrap:wrap;gap:5px}.sm-dashboard .sm-buy-tags span{padding:3px 8px;border-radius:99px;background:#121a22;color:#aeb8c3;font-size:11px}
+.sm-dashboard .sm-tag-cluster{background:rgba(50,212,155,.14)!important;color:#32d49b!important;font-weight:700}.sm-dashboard .sm-tag-plan{background:rgba(244,196,90,.12)!important;color:#f4c45a!important}
+.sm-dashboard .sm-buy footer{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:12px}.sm-dashboard .sm-buy footer a{color:var(--cc-accent,#c4f53b);text-decoration:none}
+.sm-dashboard .sm-track{border:1px solid #2a343e;border-radius:8px;background:#111820;color:#cfd7df;padding:3px 9px;cursor:pointer;font-size:12px}
+.sm-dashboard .sm-track-box{padding:9px 10px;border-radius:9px;background:#0e151c;font-size:12px;color:#cfd7df}.sm-dashboard .sm-track-box ul{margin:6px 0 0;padding-left:16px}
+.sm-dashboard .sm-watch-grid{display:grid;gap:8px;margin-top:12px}
+.sm-dashboard .sm-watch-row{border:1px solid #1d262f;border-radius:11px;background:#0b1117}
+.sm-dashboard .sm-watch-row summary{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:10px 12px;cursor:pointer;font:600 13px var(--font-mono,monospace)}
+.sm-dashboard .sm-watch-row summary a{color:var(--cc-accent,#c4f53b);font-weight:800;min-width:60px;text-decoration:none}.sm-dashboard .sm-watch-row summary small{margin-left:auto;color:#76818d}
+.sm-dashboard .sm-watch-row ul{margin:0;padding:0 14px 12px 28px;display:grid;gap:5px;font-size:12.5px;color:#cfd7df}.sm-dashboard .sm-watch-row li a{color:#9fdcff}
+.sm-dashboard .sm-detail-head{margin:22px 0 8px}.sm-dashboard .sm-detail-head p{margin:4px 0 0;color:#9aa5b1;font-size:13px}
+@media(max-width:720px){.sm-dashboard .sm-buy-grid{grid-template-columns:1fr}.sm-dashboard .sm-top-filters{width:100%}}

@@ -124,6 +124,25 @@ def main():
     except Exception as exc:
         print(json.dumps({"uptime_error": type(exc).__name__}))
     result=run(tickers); print(json.dumps(result,sort_keys=True))
+    # Market-wide SEC Form 4 feed (open-market buys/sells for every ticker),
+    # then alerts for new buys on someone's watchlist or strong/cluster buys.
+    try:
+        import insider_feed
+        from datetime import datetime as _dt, timezone as _tz
+        from schwab import quotes_user_id
+        started=_dt.now(_tz.utc).isoformat()
+        feed=insider_feed.sync()
+        conn=get_db()
+        try:
+            watch={}
+            for r in conn.execute("SELECT w.user_id AS uid, ws.ticker AS t FROM watchlist_stocks ws JOIN watchlists w ON w.id=ws.watchlist_id").fetchall():
+                if r["uid"] is not None: watch.setdefault(int(r["uid"]),set()).add(str(r["t"]).upper())
+            fired=insider_feed.alert_new_buys(conn, since_iso=started, watch_by_user=watch, owner_id=quotes_user_id())
+            conn.commit()
+        finally: conn.close()
+        print(json.dumps({"insider_feed": feed, "insider_alerts": len(fired)}, sort_keys=True, default=str))
+    except Exception as exc:
+        print(json.dumps({"insider_feed_error": type(exc).__name__}))
     # Weekly Research Memory recall: due questions to each user's devices,
     # and to Telegram for the owner. Self-gated on day/hour; once per day.
     try:

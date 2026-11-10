@@ -19,6 +19,7 @@ MIGRATIONS = (
     "migrations.m0008_telegram_policy",
     "migrations.m0009_calendar_alerts",
     "migrations.m0010_fundamentals_alerts",
+    "migrations.m0011_insider_feed",
 )
 
 
