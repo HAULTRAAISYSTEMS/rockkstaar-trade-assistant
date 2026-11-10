@@ -88,3 +88,15 @@ def test_today_page_has_dial_and_manifests():
     assert board["start_url"] == "/live-board" and board["display"] == "standalone"
     js = open("static/js/command_center_ext.js", encoding="utf-8").read()
     assert "speechSynthesis" in js and "/api/briefing/voice" in js
+
+
+def test_briefing_player_follows_iphone_audio_rules():
+    """iPhone: speech must start inside the tap, and the silent switch mutes
+    Web Speech unless a media <audio> element plays in the same tap."""
+    js = open("static/js/command_center_ext.js", encoding="utf-8").read()
+    tap = js[js.index('btn.addEventListener("click"'):]
+    assert tap.index("unlockAudio()") < tap.index("speak(script)")      # unlock first, then speak synchronously
+    assert "loadScript(); setInterval" in js                             # script is fetched before the tap
+    assert "data:audio/wav;base64," in js and "playsinline" in js
+    assert 'new SpeechSynthesisUtterance("")' not in js                  # an empty utterance doesn't unlock iOS
+    assert "Your phone blocked the audio" in js                          # no silent wave forever
