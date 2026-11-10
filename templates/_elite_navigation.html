@@ -1,5 +1,5 @@
 {% set ep = request.endpoint %}
-{% set terminal_active = ep in ('terminal', 'dashboard', 'quick_mode', 'watchlists_page') %}
+{% set terminal_active = ep in ('terminal', 'dashboard', 'quick_mode', 'watchlists_page') or (ep and ep.startswith('trade_tools.')) %}
 {% set research_active = ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare', 'intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'macro_page') or (ep and (ep.startswith('live_research.') or ep.startswith('research_memory.'))) %}
 {% set learn_active = ep in ('learn_index', 'learn_concept', 'learn_paths', 'learn_path', 'learn_review', 'tradestaar_ai') %}
 {% set account_active = ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'schwab_account', 'brokers_page', 'browser_push.settings') %}
@@ -24,6 +24,8 @@
           <span class="nav-menu__label">Trade and track</span>
           <a href="{{ url_for('terminal') }}"><strong>Terminal</strong><small>Charts, levels, order ticket and today's setups</small></a>
           <a href="{{ url_for('dashboard') }}"><strong>Setups Board</strong><small>Every ranked setup, A+ ready to avoid</small></a>
+          <a href="{{ url_for('trade_tools.gate_page') }}"><strong>Pre-Trade Gate</strong><small>GO / WAIT / NO on a planned trade, with size</small></a>
+          <a href="{{ url_for('trade_tools.guardian_page') }}"><strong>Position Guardian</strong><small>Your open positions, watched against your stops</small></a>
           <a href="{{ url_for('watchlists_page') }}"><strong>Watchlists &amp; Alerts</strong><small>Your lists, sections and price targets</small></a>
         </div>
       </details>
@@ -101,6 +103,8 @@
       <div class="mobile-app-menu__links mobile-app-menu__links--single">
         <a href="{{ url_for('terminal') }}"><strong>Terminal</strong><small>Charts, levels, order ticket and today's setups</small></a>
         <a href="{{ url_for('dashboard') }}"><strong>Setups Board</strong><small>Every ranked setup, A+ ready to avoid</small></a>
+        <a href="{{ url_for('trade_tools.gate_page') }}"><strong>Pre-Trade Gate</strong><small>GO / WAIT / NO on a planned trade, with size</small></a>
+        <a href="{{ url_for('trade_tools.guardian_page') }}"><strong>Position Guardian</strong><small>Your open positions, watched against your stops</small></a>
         <a href="{{ url_for('watchlists_page') }}"><strong>Watchlists &amp; Alerts</strong><small>Your lists, sections and price targets</small></a>
       </div>
     </div>

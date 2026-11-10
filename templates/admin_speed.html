@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Speed report — Tradestaar Elite{% endblock %}
+{% block content %}
+<style>
+.sp{max-width:1100px;margin:24px auto;padding:0 18px;color:#dce3ea}.sp h1{font:700 26px var(--font-ui,system-ui);margin:0 0 4px}.sp .muted{color:#8d97a4;font-size:13px}
+.sp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:16px 0}.sp-kpi{padding:14px;border:1px solid #1f2830;border-radius:12px;background:#0d1218}.sp-kpi small{display:block;color:#8d97a4;font:700 10px var(--font-mono,monospace);letter-spacing:.1em;text-transform:uppercase}.sp-kpi strong{font:700 22px var(--font-mono,monospace);color:var(--cc-accent,#c4f53b)}
+.sp table{width:100%;border-collapse:collapse;font:13px var(--font-mono,monospace)}.sp th,.sp td{padding:8px 10px;border-bottom:1px solid #1a2129;text-align:right}.sp th:first-child,.sp td:first-child{text-align:left}.sp th{color:#8d97a4;font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.sp .warn{color:#f4c45a}.sp .bad{color:#ff6973}.sp section{margin:22px 0;padding:16px;border:1px solid #1f2830;border-radius:14px;background:#0b1015;overflow-x:auto}.sp h2{font:700 15px var(--font-ui,system-ui);margin:0 0 10px}
+</style>
+<div class="sp">
+  <h1>Speed report</h1>
+  <p class="muted">Worker pid {{ perf.pid }} · up {{ (perf.uptime_s // 60) }} min · each of the two server workers keeps its own numbers — refresh to sample the other. <a href="?format=json">JSON</a></p>
+  {% set total = perf.endpoints|sum(attribute='count') %}
+  <div class="sp-grid">
+    <div class="sp-kpi"><small>Requests timed</small><strong>{{ total }}</strong></div>
+    <div class="sp-kpi"><small>In flight now</small><strong>{{ perf.active|length }}</strong></div>
+    <div class="sp-kpi"><small>Freezes logged</small><strong class="{{ 'bad' if perf.stalls }}">{{ perf.stalls|length }}</strong></div>
+    <div class="sp-kpi"><small>Slow requests (&gt;3s)</small><strong class="{{ 'warn' if perf.slow }}">{{ perf.slow|length }}</strong></div>
+  </div>
+  {% if perf.stalls %}<section><h2>Freezes</h2><table><tr><th>When (UTC)</th><th>Frozen</th><th>Requests in flight</th></tr>
+  {% for s in perf.stalls %}<tr><td>{{ s.at }}</td><td class="bad">{{ s.seconds }}s</td><td style="text-align:left">{{ s.inflight|join(', ') or 'none' }}</td></tr>{% endfor %}</table></section>{% endif %}
+  <section><h2>Slowest endpoints (by p95)</h2><table><tr><th>Endpoint</th><th>Count</th><th>p50</th><th>p95</th><th>Max</th><th>5xx</th></tr>
+  {% for r in perf.endpoints[:40] %}<tr><td>{{ r.endpoint }}</td><td>{{ r.count }}</td><td>{{ r.p50_ms }}ms</td><td class="{{ 'bad' if r.p95_ms > 3000 else ('warn' if r.p95_ms > 1000) }}">{{ r.p95_ms }}ms</td><td>{{ r.max_ms }}ms</td><td class="{{ 'bad' if r.errors }}">{{ r.errors }}</td></tr>
+  {% else %}<tr><td colspan="6">No requests timed yet.</td></tr>{% endfor %}</table></section>
+  {% if perf.slow %}<section><h2>Recent slow requests</h2><table><tr><th>Path</th><th>Time</th><th>Status</th></tr>
+  {% for s in perf.slow[:30] %}<tr><td>{{ s.path }}</td><td class="warn">{{ s.ms }}ms</td><td>{{ s.status }}</td></tr>{% endfor %}</table></section>{% endif %}
+</div>
+{% endblock %}

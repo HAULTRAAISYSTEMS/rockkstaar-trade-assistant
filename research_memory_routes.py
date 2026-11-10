@@ -1,6 +1,7 @@
 """Authenticated pages for the personal Research Memory workflow."""
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections import defaultdict, deque
@@ -111,6 +112,40 @@ def create_research_memory_blueprint(*, current_user):
             return jsonify({"ok": False, "urls": {}, "headlines": {}}), 401
         keys = memory.saved_story_keys(user_id)
         resp = jsonify({"ok": True, **keys})
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    # ── Memory edge: scorecard, AI bull/bear case, what changed ─────────
+    def _tk(ticker):
+        t = (ticker or "").upper().strip()
+        return t if re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", t) else ""
+
+    @bp.get("/api/memory/scorecard/<ticker>")
+    def api_scorecard(ticker):
+        user_id, t = uid(), _tk(ticker)
+        if not user_id or not t:
+            return jsonify({"ok": False}), 400
+        import memory_edge
+        return jsonify({"ok": True, **memory_edge.thesis_scorecard(user_id, t)})
+
+    @bp.post("/api/memory/case/<ticker>")
+    def api_case(ticker):
+        user_id, t = uid(), _tk(ticker)
+        if not user_id or not t:
+            return jsonify({"ok": False, "error": "Bad request."}), 400
+        if not _allow_summary(user_id):
+            return jsonify({"ok": False, "error": "Too many AI requests. Try again in a few minutes."}), 429
+        import memory_edge
+        out = memory_edge.ai_case(user_id, t)
+        return jsonify(out), (200 if out.get("ok") else 400)
+
+    @bp.get("/api/memory/changed/<ticker>")
+    def api_changed(ticker):
+        user_id, t = uid(), _tk(ticker)
+        if not user_id or not t:
+            return jsonify({"ok": False}), 400
+        import memory_edge
+        resp = jsonify(memory_edge.whats_changed(user_id, t))
         resp.headers["Cache-Control"] = "no-store"
         return resp
 

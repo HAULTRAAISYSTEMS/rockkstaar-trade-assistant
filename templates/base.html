@@ -34,6 +34,7 @@
   <script src="{{ url_for('static', filename='js/live_hub.js') }}"></script>
   <!-- "Save to Memory" on any news card: AI summary pre-fills the note. -->
   <script src="{{ url_for('static', filename='js/memory_save.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/ticker_brief.js') }}" defer></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/memory_save.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
   <!-- Mobile / iPad responsive overrides — loaded last to take priority -->
@@ -290,5 +291,7 @@
   }, {passive:true});
 })();
 </script>
+<script src="{{ url_for('static', filename='js/news_desk.js') }}" defer></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/news_desk.css') }}" />
 </body>
 </html>

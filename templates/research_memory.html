@@ -29,6 +29,7 @@
     </form>
   </details>
 
+  {% if selected_ticker %}<div class="ticker-brief" data-ticker-brief="{{ selected_ticker }}" aria-live="polite"></div>{% endif %}
   <section class="rm-notebook">
     <header class="rm-section-head"><div><h2>Company Memory</h2><p>A timeline of what changed and how it affected your thinking.</p></div><form method="get"><label>Company<select name="ticker" onchange="this.form.submit()"><option value="">All companies</option>{% for ticker in summary.tickers %}<option value="{{ ticker }}" {{ 'selected' if selected_ticker == ticker }}>{{ ticker }}</option>{% endfor %}</select></label>{% if selected_ticker %}<a href="{{ url_for('research_memory.notebook') }}">Clear</a>{% endif %}</form></header>
     <div class="rm-card-list">

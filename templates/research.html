@@ -45,6 +45,8 @@
     <div class="cr-company__actions"><button type="button" onclick="askAboutCompany()">✦ Ask AI about {{ ticker }}</button><a href="{{ url_for('stock_compare', symbols=ticker) }}">Compare</a><a href="{{ url_for('stock_detail', ticker=ticker) }}">Market profile</a></div>
   </section>
 
+  <div class="ticker-brief" data-ticker-brief="{{ ticker }}" aria-live="polite"></div>
+
   <nav class="cr-sections" aria-label="Company research sections">
     <a href="#overview">Overview</a><a href="#changes">What changed {% if research.new_count %}<b>{{ research.new_count }}</b>{% endif %}</a><a href="#financials">Financials</a><a href="#filings">Filings</a><a href="#thesis">Your thesis</a>
   </nav>
@@ -74,6 +76,8 @@
     <div class="cr-deep-link"><div><b>Need every scoring test and formula?</b><span>The Fundamentals Analyzer remains the audit trail for the 40-point filing scorecard.</span></div><a href="{{ url_for('fundamentals_page', ticker=ticker) }}">Open detailed fundamentals →</a></div>
     {% else %}<div class="cr-empty">The company workspace could not load a filing scorecard. Current changes and your notes remain available below.</div>{% endif %}
   </section>
+
+  <div class="move-tools" data-move-tools="{{ ticker }}"><div class="mt-row"><button type="button" class="mt-btn" data-mt-explain>⚡ Explain today's move</button><details class="mt-replay"><summary>📊 How it reacted to its last 8 earnings</summary><div class="mt-replay-body"></div></details></div><div class="mt-explain" hidden></div></div>
 
   <section id="changes" class="cr-section">
     <div class="cr-section__head"><div><span>02 · Monitor</span><h2>What changed</h2></div><div class="cr-review-state">{% if research.reviewed_at %}Last reviewed {{ research.reviewed_at }}{% else %}No review checkpoint yet{% endif %}</div></div>
