@@ -21,15 +21,75 @@
       <h1 class="elite-hero-title">Insider <span class="accent">Intelligence</span></h1>
       <p class="elite-hero-sub">Verified Form 4 activity grouped into explainable events. Every underlying transaction and official filing remains available.</p>
     </div>
-    <div class="sm-hero-meta elite-hero-actions"><span>Tracked universe</span><strong>{{ watched_tickers|length }} tickers</strong><a href="{{ url_for('smart_money', refresh=1) }}">Refresh SEC data ↻</a></div>
+    <div class="sm-hero-meta elite-hero-actions"><span>Coverage</span><strong>Whole market</strong><small class="sm-feed-meta">{{ '{:,}'.format(feed.rows) }} open-market trades stored · {{ feed.backfill_days_done }}/30 days backfilled</small><a href="{{ url_for('smart_money', refresh=1) }}">Refresh SEC data ↻</a></div>
   </section>
 
   <div class="sm-tabs" role="tablist" aria-label="Smart money feed">
-    <button class="sm-tab active" type="button" data-panel="insiders" aria-selected="true">SEC Insider Intelligence <span>{{ dashboard.events|length }}</span></button>
+    <button class="sm-tab active" type="button" data-panel="insiders" aria-selected="true">SEC Insider Intelligence <span>{{ top_buys|length }}</span></button>
     <button class="sm-tab" type="button" data-panel="congress" aria-selected="false">Congressional Trades <span>{{ congress|length }}</span></button>
   </div>
 
   <section class="sm-panel" id="sm-insiders">
+    <section class="sm-top" id="top-buys" aria-label="Top insider buys">
+      <div class="sm-section-head">
+        <div><span class="sm-kicker">Every ticker · open-market purchases only</span><h2>Top insider buys</h2><p class="sm-top-sub">Insiders sell for many reasons. They buy with their own money for one. Ranked by size, who bought, clusters and conviction.</p></div>
+        <form method="get" action="{{ url_for('smart_money') }}#top-buys" class="sm-top-filters">
+          <div class="sm-range-switch" role="group" aria-label="Buy window">
+            <button type="submit" name="buy_days" value="7" class="{{ 'active' if buy_filters.days == 7 }}">7D</button>
+            <button type="submit" name="buy_days" value="30" class="{{ 'active' if buy_filters.days == 30 }}">30D</button>
+          </div>
+          <label>Min $<select name="buy_min" onchange="this.form.submit()">{% for v,l in [(25000,'25K'),(100000,'100K'),(250000,'250K'),(1000000,'1M')] %}<option value="{{ v }}" {{ 'selected' if buy_filters.min == v }}>{{ l }}</option>{% endfor %}</select></label>
+          <label class="sm-check"><input type="checkbox" name="buy_cluster" value="1" {{ 'checked' if buy_filters.cluster }} onchange="this.form.submit()"> Clusters only</label>
+          <input type="hidden" name="buy_days" value="{{ buy_filters.days }}">
+        </form>
+      </div>
+      <div class="sm-buy-grid">
+        {% for b in top_buys %}
+        <article class="sm-buy sm-buy-{{ b.label|lower }}">
+          <header>
+            <a class="sm-buy-tk" href="{{ url_for('stock_detail', ticker=b.ticker) }}">{{ b.ticker }}</a>
+            <span class="sm-buy-co">{{ b.issuer or '' }}</span>
+            <span class="sm-buy-score" title="{{ b.reasons|join(' · ') }}"><b>{{ b.score }}</b>{{ b.label }}</span>
+          </header>
+          <div class="sm-buy-who"><strong>{{ b.owner }}</strong><small>{{ b.role }}</small></div>
+          <div class="sm-buy-nums">
+            <div><span>Bought</span><b>{{ money(b.value) }}</b><small>{{ shares(b.shares) }} sh{% if b.avg_price %} @ ${{ '%.2f'|format(b.avg_price) }}{% endif %}</small></div>
+            <div><span>Since</span>{% if b.since_pct is not none %}<b class="{{ 'sm-positive' if b.since_pct >= 0 else 'sm-negative' }}">{{ '%+.1f'|format(b.since_pct) }}%</b><small>now ${{ '%.2f'|format(b.price_now) }}</small>{% else %}<b>—</b><small>price pending</small>{% endif %}</div>
+            <div><span>Holdings</span>{% if b.holdings_change_pct is not none %}<b class="sm-positive">+{{ '%.0f'|format(b.holdings_change_pct) }}%</b>{% else %}<b>New</b>{% endif %}<small>{{ b.trade_date }}</small></div>
+          </div>
+          <div class="sm-buy-tags">{% if b.cluster_size >= 2 %}<span class="sm-tag-cluster">{{ b.cluster_size }} insiders · 14d</span>{% endif %}{% if b.planned_10b5_1 %}<span class="sm-tag-plan">10b5-1 plan</span>{% endif %}{% for r in b.reasons[1:3] %}<span>{{ r }}</span>{% endfor %}</div>
+          <footer>
+            <a href="{{ b.source_url }}" target="_blank" rel="noopener noreferrer">SEC filing ↗</a>
+            {% if b.owner_cik %}<button type="button" class="sm-track" data-cik="{{ b.owner_cik }}">Track record</button>{% endif %}
+            <a href="{{ url_for('trade_tools.gate_page', ticker=b.ticker) }}">Run Gate →</a>
+            <button type="button" class="scanner-save" data-save='{{ {"ticker": b.ticker, "headline": (b.owner ~ " (" ~ (b.role or "insider") ~ ") bought $" ~ "{:,.0f}".format(b.value or 0) ~ " of " ~ b.ticker ~ " on " ~ b.trade_date), "url": b.source_url, "source": "SEC Form 4", "summary": (b.reasons|join(". ")), "published_at": b.filed_at}|tojson }}'>＋ Memory</button>
+          </footer>
+          <div class="sm-track-box" hidden></div>
+        </article>
+        {% else %}
+        <div class="sm-empty"><strong>{% if feed.rows %}No open-market buys match these filters.{% else %}The market-wide SEC feed is warming up.{% endif %}</strong><p>{% if feed.rows %}Try 30D or a lower minimum.{% else %}The background job reads every new Form 4 every 5 minutes and backfills the last 30 days a slice at a time — the first buys appear within minutes of the next run, the full month within a few hours.{% endif %}</p></div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="sm-watch" aria-label="Your watchlist insider activity">
+      <div class="sm-section-head"><div><span class="sm-kicker">All {{ watched_tickers|length }} tracked tickers · last 30 days</span><h2>Your watchlist — open-market activity</h2></div></div>
+      {% if watch_list %}
+      <div class="sm-watch-grid">
+        {% for w in watch_list %}
+        <details class="sm-watch-row">
+          <summary><a href="{{ url_for('stock_detail', ticker=w.ticker) }}">{{ w.ticker }}</a>
+            <span class="sm-positive">{% if w.buy_value %}▲ {{ money(w.buy_value) }} · {{ w.buyers|length }} buyer{{ 's' if w.buyers|length != 1 }}{% endif %}</span>
+            <span class="sm-negative">{% if w.sell_value %}▼ {{ money(w.sell_value) }} · {{ w.sellers|length }} seller{{ 's' if w.sellers|length != 1 }}{% endif %}</span>
+            <small>latest {{ w.latest }}</small></summary>
+          <ul>{% for r in w.rows %}<li><b class="{{ 'sm-positive' if r.side == 'P' else 'sm-negative' }}">{{ 'BUY' if r.side == 'P' else 'SELL' }}</b> {{ r.owner }} <small>{{ r.role }}</small> · {{ money(r.value) }}{% if r.avg_price %} @ ${{ '%.2f'|format(r.avg_price) }}{% endif %} · {{ r.trade_date }}{% if r.planned_10b5_1 %} · <em>10b5-1</em>{% endif %} <a href="{{ r.source_url }}" target="_blank" rel="noopener noreferrer">filing ↗</a></li>{% endfor %}</ul>
+        </details>
+        {% endfor %}
+      </div>
+      {% else %}<div class="sm-empty"><strong>No open-market insider trades on your watchlist in the stored data yet.</strong><p>Coverage grows as the market-wide feed backfills. Gifts, tax withholding and awards are not counted.</p></div>{% endif %}
+    </section>
+
+    <div class="sm-detail-head"><span class="sm-kicker">Filing-level detail</span><p>{% if dashboard.filters.ticker %}Every Form 4 code for {{ dashboard.filters.ticker }}, read live from the SEC.{% else %}Live SEC read of your first ten tracked names. Enter a ticker below for any company's full filing history.{% endif %}</p></div>
     <div class="sm-status {{ 'is-warning' if not insider_status.available or insider_status.partial else '' }}">
       <strong>{{ 'Verified SEC connection' if insider_status.available else 'SEC refresh unavailable' }}</strong>
       <span>{{ insider_status.message }}{% if insider_status.partial %} Some tracked symbols could not be refreshed.{% endif %}{% if insider_status.truncated_tickers %} {{ insider_status.truncated_tickers }} ticker(s) reached the defensive filing cap; summary coverage is partial.{% endif %}</span>
@@ -43,18 +103,18 @@
 
     <section class="sm-controls">
       <form method="get" action="{{ url_for('smart_money') }}" class="sm-filter-form">
-        <label>Ticker<input name="ticker" value="{{ dashboard.filters.ticker or '' }}" placeholder="NVDA" maxlength="12"></label>
+        <label>Ticker<input name="ticker" value="{{ dashboard.filters.ticker or '' }}" placeholder="Any ticker, e.g. NVDA" maxlength="12"></label>
         <label>Insider role<select name="role"><option value="">All roles</option>{% for role in dashboard.roles %}<option value="{{ role }}" {{ 'selected' if dashboard.filters.role == role }}>{{ role }}</option>{% endfor %}</select></label>
         <label>Transaction type<select name="transaction_type">
-          {% for value,label in [('all','All activity'),('buy','Buys only'),('sell','Sales only'),('non_market','Non-market only'),('P','Code P purchases'),('S','Code S sales'),('F','Tax withholding'),('G','Gifts'),('A','Awards'),('M','Option exercises')] %}<option value="{{ value }}" {{ 'selected' if dashboard.filters.transaction_type == value }}>{{ label }}</option>{% endfor %}
+          {% for value,label in [('market','Open-market buys & sales'),('all','All activity incl. gifts/tax/awards'),('buy','Buys only'),('sell','Sales only'),('non_market','Non-market only'),('P','Code P purchases'),('S','Code S sales'),('F','Tax withholding'),('G','Gifts'),('A','Awards'),('M','Option exercises')] %}<option value="{{ value }}" {{ 'selected' if dashboard.filters.transaction_type == value }}>{{ label }}</option>{% endfor %}
         </select></label>
-        <label>Minimum value<input name="minimum_value" type="number" min="0" step="1000" value="{{ dashboard.filters.minimum_value|int if dashboard.filters.minimum_value else '' }}" placeholder="100000"></label>
+        <label>Minimum value<input name="minimum_value" type="number" min="0" step="1000" value="{{ dashboard.filters.minimum_value|int if dashboard.filters.minimum_value else '' }}" placeholder="e.g. 100000"></label>
         <label>Date range<select name="days"><option value="7" {{ 'selected' if dashboard.filters.days == 7 }}>Last 7 days</option><option value="30" {{ 'selected' if dashboard.filters.days == 30 }}>Last 30 days</option></select></label>
         <label class="sm-check"><input type="checkbox" name="cluster" value="1" {{ 'checked' if dashboard.filters.cluster }}> Cluster activity only</label>
         <button type="submit" class="sm-primary">Apply filters</button><a class="sm-clear" href="{{ url_for('smart_money') }}">Clear</a>
       </form>
       <details class="sm-alert-rules">
-        <summary><span>Dashboard match rules</span><small>No background or push delivery</small></summary>
+        <summary><span>Dashboard match rules</span><small>Highlights on this page · new watchlist buys also alert you</small></summary>
         <form method="post" action="{{ url_for('smart_money_alert_rules') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           {% for key,label in dashboard.alert_rule_labels.items() %}<label><input type="checkbox" name="{{ key }}" value="1" {{ 'checked' if dashboard.alert_rules[key] }}> <span>{{ label }}</span></label>{% endfor %}

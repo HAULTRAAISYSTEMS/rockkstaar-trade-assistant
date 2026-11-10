@@ -8467,16 +8467,22 @@ def smart_money():
     filters = {
         "ticker": str(request.args.get("ticker") or "").strip().upper()[:12],
         "role": str(request.args.get("role") or "").strip()[:80],
-        "transaction_type": str(request.args.get("transaction_type") or "all").strip(),
+        # Default to open-market buys and sales: gifts, tax withholding, awards
+        # and option exercises are not trading decisions and buried the signal.
+        "transaction_type": str(request.args.get("transaction_type") or "market").strip(),
         "minimum_value": str(request.args.get("minimum_value") or "0").strip(),
         "cluster": request.args.get("cluster") == "1",
         "days": 7 if request.args.get("days") == "7" else 30,
     }
     if filters["ticker"] and not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", filters["ticker"]):
         filters["ticker"] = ""
-    if filters["transaction_type"] not in {"all", "buy", "sell", "non_market", "P", "S", "F", "G", "A", "M"}:
-        filters["transaction_type"] = "all"
-    insiders, insider_status = fetch_sec_form4(tickers, limit=None, history_days=30)
+    if filters["transaction_type"] not in {"all", "market", "buy", "sell", "non_market", "P", "S", "F", "G", "A", "M"}:
+        filters["transaction_type"] = "market"
+    # Filing-level detail is a live SEC read, so it covers one chosen ticker
+    # (every code) or the first ten tracked names. The market-wide feed below
+    # covers everything else from stored data.
+    detail_tickers = [filters["ticker"]] if filters["ticker"] else tickers
+    insiders, insider_status = fetch_sec_form4(detail_tickers, limit=None, history_days=30)
     from smart_money import resolve_alert_rules
     alert_rules = resolve_alert_rules(get_insider_alert_rules(current_user_id()))
     dashboard = build_insider_dashboard(insiders, filters=filters, alert_rules=alert_rules)
@@ -8492,6 +8498,31 @@ def smart_money():
         logger.debug("smart_money: alert sync skipped: %s", _e)
 
     congress, congress_status = fetch_congress_trades()
+    # Market-wide open-market buys (stored by the cron's SEC feed) and the
+    # whole watchlist's buys/sells — no ten-ticker cap, no SEC call here.
+    import insider_feed as _ifeed
+    buy_days = 30 if request.args.get("buy_days") == "30" else 7
+    try:
+        buy_min = max(0.0, float(request.args.get("buy_min") or 100000))
+    except ValueError:
+        buy_min = 100000.0
+    buy_cluster = request.args.get("buy_cluster") == "1"
+    try:
+        top_buys = _ifeed.top_buys(days=buy_days, min_value=buy_min, cluster_only=buy_cluster, limit=40)
+        watch_rows = _ifeed.watchlist_trades(tickers, days=30)
+        feed = _ifeed.feed_status()
+    except Exception as exc:
+        logger.warning("smart_money: insider feed unavailable: %s", exc)
+        top_buys, watch_rows, feed = [], [], {"rows": 0, "last_stored": "", "backfill_days_done": 0}
+    watch_summary = {}
+    for r in watch_rows:
+        w = watch_summary.setdefault(r["ticker"], {"ticker": r["ticker"], "buy_value": 0.0, "sell_value": 0.0,
+                                                   "buyers": set(), "sellers": set(), "latest": r["trade_date"], "rows": []})
+        (w["buyers"] if r["side"] == "P" else w["sellers"]).add(r["owner"])
+        w["buy_value" if r["side"] == "P" else "sell_value"] += r.get("value") or 0
+        if len(w["rows"]) < 6:
+            w["rows"].append(r)
+    watch_list = sorted(watch_summary.values(), key=lambda w: (-w["buy_value"], -w["sell_value"]))
     return render_template(
         "smart_money.html",
         insiders=insiders,
@@ -8499,8 +8530,21 @@ def smart_money():
         congress=congress,
         insider_status=insider_status,
         congress_status=congress_status,
-        watched_tickers=tickers[:10],
+        watched_tickers=tickers,
+        top_buys=top_buys,
+        buy_filters={"days": buy_days, "min": int(buy_min), "cluster": buy_cluster},
+        watch_list=watch_list,
+        feed=feed,
     )
+
+
+@app.route("/api/insider/track/<owner_cik>")
+def api_insider_track(owner_cik):
+    """One insider's stored buys and how they've done since."""
+    if not re.fullmatch(r"\d{1,10}", owner_cik or ""):
+        return jsonify({"ok": False}), 400
+    import insider_feed as _ifeed
+    return jsonify({"ok": True, **_ifeed.owner_track_record(owner_cik)})
 
 
 @app.route("/smart-money/alert-rules", methods=["POST"])

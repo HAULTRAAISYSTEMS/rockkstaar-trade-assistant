@@ -708,6 +708,8 @@ def build_insider_dashboard(rows: list[dict], filters: dict | None = None, alert
         filtered = [event for event in filtered if event["activity"] in {"BUY", "MIXED"}]
     elif transaction_mode == "sell":
         filtered = [event for event in filtered if event["activity"] in {"SELL", "MIXED"}]
+    elif transaction_mode == "market":
+        filtered = [event for event in filtered if event["activity"] in {"BUY", "SELL", "MIXED"}]
     elif transaction_mode == "non_market":
         filtered = [event for event in filtered if event["activity"] == "NON_MARKET"]
     elif transaction_type.upper() in {"F", "G", "A", "M", "P", "S"}:
@@ -845,6 +847,8 @@ def fetch_congress_trades(limit: int = 30) -> tuple[list[dict], dict]:
     URL are rejected.
     """
     url = os.environ.get("CONGRESS_TRADES_JSON_URL", "").strip()
+    if not url and os.environ.get("FMP_API_KEY", "").strip():
+        return fetch_fmp_congress_trades(limit)
     if not url:
         return [], {
             "available": False,
@@ -886,3 +890,69 @@ def fetch_congress_trades(limit: int = 30) -> tuple[list[dict], dict]:
         }
     except (requests.RequestException, ValueError):
         return [], {"available": False, "message": "The congressional disclosure feed is temporarily unavailable."}
+
+
+FMP_CONGRESS_URLS = (
+    ("SENATE", "https://financialmodelingprep.com/stable/senate-latest?page=0&limit=100&apikey={key}"),
+    ("HOUSE", "https://financialmodelingprep.com/stable/house-latest?page=0&limit=100&apikey={key}"),
+)
+
+
+def parse_fmp_congress(chamber: str, payload) -> list[dict]:
+    """FMP senate/house rows → our congress rows; official disclosure link required."""
+    rows = []
+    for raw in payload if isinstance(payload, list) else []:
+        link = str(raw.get("link") or "")
+        ticker = str(raw.get("symbol") or "").upper()
+        if not _official_congress_url(link) or not _TICKER_RE.fullmatch(ticker):
+            continue
+        member = " ".join(x for x in (str(raw.get("firstName") or ""), str(raw.get("lastName") or "")) if x).strip() \
+            or str(raw.get("office") or "Member of Congress")
+        rows.append({
+            "ticker": ticker, "member": member, "chamber": chamber,
+            "kind": str(raw.get("type") or "DISCLOSED").upper(),
+            "amount": str(raw.get("amount") or "Not specified"),
+            "trade_date": str(raw.get("transactionDate") or ""),
+            "filed_at": str(raw.get("disclosureDate") or ""),
+            "source_url": link,
+        })
+    return rows
+
+
+def fetch_fmp_congress_trades(limit: int = 30, get=None) -> tuple[list[dict], dict]:
+    """Congressional trades from FMP (needs a plan that includes them)."""
+    key = os.environ.get("FMP_API_KEY", "").strip()
+    get = get or (lambda u: requests.get(u, timeout=12))
+
+    def load():
+        rows, denied, errors = [], 0, 0
+        for chamber, tmpl in FMP_CONGRESS_URLS:
+            try:
+                resp = get(tmpl.format(key=key))
+                if resp.status_code in (401, 402, 403):
+                    denied += 1
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                if isinstance(data, dict) and ("Error Message" in data or "error" in data):
+                    denied += 1
+                    continue
+                rows.extend(parse_fmp_congress(chamber, data))
+            except (requests.RequestException, ValueError):
+                errors += 1
+        rows.sort(key=lambda r: (r["filed_at"], r["trade_date"]), reverse=True)
+        return rows[:limit], denied, errors
+
+    try:
+        rows, denied, errors = _cached("congress:fmp", 30 * 60, load)
+    except Exception:
+        rows, denied, errors = [], 0, 2
+    base = {"house_url": "https://disclosures-clerk.house.gov/FinancialDisclosure",
+            "senate_url": "https://efdsearch.senate.gov/search/", "provider": "FMP"}
+    if rows:
+        return rows, {**base, "available": True, "updated_at": datetime.now(timezone.utc).isoformat(),
+                      "message": "Via FMP, each linked to the official disclosure. Transaction and disclosure dates differ; amounts are statutory ranges."}
+    if denied == len(FMP_CONGRESS_URLS):
+        return [], {**base, "available": False,
+                    "message": "Your FMP plan does not include congressional trading data. Upgrade the FMP plan, or connect another feed via CONGRESS_TRADES_JSON_URL."}
+    return [], {**base, "available": False, "message": "The congressional disclosure feed is temporarily unavailable."}
