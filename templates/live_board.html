@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>TS Live</title>
+<link rel="manifest" href="{{ url_for('static', filename='board.webmanifest') }}">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TS Live">
+<meta name="theme-color" content="#05080c">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+<style>
+:root{--acc:#c4f53b}
+*{box-sizing:border-box}html,body{margin:0;background:#05080c;color:#e8edf2;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.lb{max-width:520px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 18px)}
+.lb-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.lb-brand{font:800 13px ui-monospace,monospace;letter-spacing:.14em;color:var(--acc)}
+.lb-live{display:flex;align-items:center;gap:6px;color:#8d97a4;font:600 11px ui-monospace,monospace}.lb-live i{width:7px;height:7px;border-radius:50%;background:#32d49b;box-shadow:0 0 10px #32d49b;animation:p 1.6s infinite}
+@keyframes p{50%{opacity:.35}}
+.lb-mood{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:16px;background:#0c1218;border:1px solid #1a222b;margin-bottom:12px}
+.lb-mood b{font-size:20px}.lb-mood small{display:block;color:#8d97a4;font-size:12px}
+.lb-bar{flex:1;height:8px;border-radius:9px;background:linear-gradient(90deg,#ff6973,#f4c45a 50%,#32d49b);position:relative}
+.lb-bar i{position:absolute;top:-4px;width:4px;height:16px;border-radius:3px;background:#fff;transition:left 1s}
+.lb-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.lb-tile{padding:14px;border-radius:16px;background:#0c1218;border:1px solid #1a222b;transition:background .4s}
+.lb-tile.big{grid-column:span 1}.lb-tile.flash-up{background:rgba(50,212,155,.16)}.lb-tile.flash-dn{background:rgba(255,105,115,.16)}
+.lb-tile span{font:800 14px ui-monospace,monospace;color:#cfd7df}.lb-tile b{display:block;margin-top:6px;font:700 24px ui-monospace,monospace;letter-spacing:-.02em}
+.lb-tile em{font:700 13px ui-monospace,monospace;font-style:normal}.up{color:#32d49b}.dn{color:#ff6973}
+.lb-foot{margin-top:14px;text-align:center;color:#56606b;font-size:11px}.lb-foot a{color:var(--acc);text-decoration:none}
+.lb-tip{margin-top:12px;padding:10px 12px;border-radius:12px;background:#0c1218;color:#8d97a4;font-size:12px;line-height:1.45}
+</style>
+</head>
+<body>
+<main class="lb">
+  <div class="lb-top"><span class="lb-brand">TRADESTAAR LIVE</span><span class="lb-live"><i></i><span id="lb-time">connecting…</span></span></div>
+  <div class="lb-mood" id="lb-mood"><div><b id="lb-mood-label">—</b><small id="lb-mood-score">Market mood</small></div><div class="lb-bar"><i id="lb-mood-pin" style="left:50%"></i></div></div>
+  <div class="lb-grid" id="lb-grid"></div>
+  <p class="lb-tip" id="lb-tip" hidden>📱 Make this a home-screen widget: tap <b>Share</b> → <b>Add to Home Screen</b>. It opens straight to this live board.</p>
+  <p class="lb-foot"><a href="/terminal">Open Terminal →</a></p>
+</main>
+<script>
+(function(){
+  var grid=document.getElementById('lb-grid'),last={},standalone=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+  if(!standalone)document.getElementById('lb-tip').hidden=false;
+  function fmt(v,d){return v==null?'—':Number(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d})}
+  function tick(){
+    if(document.hidden)return;
+    fetch('/api/live-board',{cache:'no-store',headers:{Accept:'application/json'}}).then(function(r){if(r.redirected||!r.ok)throw 0;return r.json()}).then(function(d){
+      grid.innerHTML=d.rows.map(function(r){
+        var cls=r.change_pct==null?'':(r.change_pct>=0?'up':'dn'),flash='';
+        if(last[r.ticker]!=null&&r.price!=null&&r.price!==last[r.ticker])flash=r.price>last[r.ticker]?' flash-up':' flash-dn';
+        last[r.ticker]=r.price;
+        return '<a class="lb-tile'+flash+'" href="/stock/'+encodeURIComponent(r.ticker)+'" style="text-decoration:none;color:inherit"><span>'+r.ticker+'</span><b>'+fmt(r.price,2)+'</b><em class="'+cls+'">'+(r.change_pct==null?'—':(r.change_pct>0?'+':'')+Number(r.change_pct).toFixed(2)+'%')+'</em></a>';
+      }).join('');
+      var m=d.mood||{};
+      document.getElementById('lb-mood-label').textContent=m.known?m.label:'—';
+      document.getElementById('lb-mood-label').className=m.label==='Risk-On'?'up':(m.label==='Risk-Off'?'dn':'');
+      document.getElementById('lb-mood-score').textContent=m.known?'Market mood · '+m.score+'/100':'Market mood';
+      if(m.known)document.getElementById('lb-mood-pin').style.left='calc('+m.score+'% - 2px)';
+      document.getElementById('lb-time').textContent=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'});
+    }).catch(function(){document.getElementById('lb-time').textContent='reconnecting…';});
+  }
+  tick();setInterval(tick,3000);document.addEventListener('visibilitychange',tick);
+})();
+</script>
+</body>
+</html>

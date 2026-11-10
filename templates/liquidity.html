@@ -115,6 +115,29 @@
   </div>
   {% endif %}
 
+  <!-- ══ MOOD DIAL + VOICE BRIEFING ══════════════════════════════════════ -->
+  <section class="cm-wrap cc-rise cc-d1" id="cm-wrap" aria-label="Market mood">
+    <div class="cm-dial">
+      <svg viewBox="0 0 220 130" class="cm-svg" aria-hidden="true">
+        <defs><linearGradient id="cm-grad" x1="0" x2="1"><stop offset="0" stop-color="#ff6973"/><stop offset=".5" stop-color="#f4c45a"/><stop offset="1" stop-color="#32d49b"/></linearGradient></defs>
+        <path d="M20 115 A90 90 0 0 1 200 115" fill="none" stroke="#141b22" stroke-width="16" stroke-linecap="round"/>
+        <path d="M20 115 A90 90 0 0 1 200 115" fill="none" stroke="url(#cm-grad)" stroke-width="16" stroke-linecap="round" opacity=".9"/>
+        <g id="cm-needle" style="transform-origin:110px 115px;transform:rotate(-90deg)"><line x1="110" y1="115" x2="110" y2="42" stroke="#f2f5f8" stroke-width="4" stroke-linecap="round"/><circle cx="110" cy="115" r="7" fill="#f2f5f8"/></g>
+        <text x="20" y="128" fill="#8d97a4" font-size="9" text-anchor="middle">OFF</text><text x="200" y="128" fill="#8d97a4" font-size="9" text-anchor="middle">ON</text>
+      </svg>
+      <div class="cm-read"><span class="cm-kicker">Market mood</span><b id="cm-label">—</b><em id="cm-score"></em></div>
+    </div>
+    <div class="cm-side">
+      <p class="cm-note" id="cm-note">Reading VIX, the indexes, futures, sector breadth and news tone…</p>
+      <div class="cm-parts" id="cm-parts"></div>
+      <div class="cm-voice">
+        <button type="button" class="cm-play" id="cm-play"><span class="cm-play-ico">▶</span><span id="cm-play-text">Play 60-sec briefing</span></button>
+        <div class="cm-wave" id="cm-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <small id="cm-voice-note">Spoken by your phone — keep the screen on while driving.</small>
+      </div>
+    </div>
+  </section>
+
   <!-- ══ TODAY'S READ + THIS WEEK ═════════════════════════════════════════ -->
   <div class="cc-split">
 
@@ -368,4 +391,5 @@
 
 {% block scripts %}
 {% include "_liq_scripts.html" %}
+<script src="{{ url_for('static', filename='js/command_center_ext.js') }}" defer></script>
 {% endblock %}

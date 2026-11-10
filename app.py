@@ -293,7 +293,7 @@ _POLL_VERIFY_CACHE: dict = {}
 # Only the price polls. Session and account endpoints always hit the database.
 _POLL_PATHS = ("/api/live/bundle", "/api/market-tape", "/api/today/pulse",
                "/api/terminal/quotes", "/api/terminal/live/", "/api/quick",
-               "/api/dashboard")
+               "/api/dashboard", "/api/live-board", "/api/mood")
 
 
 def _verified_user_for_request(uid):
@@ -9101,6 +9101,134 @@ def _command_center_context() -> dict:
 def liquidity_page():
     """Morning Command Center — the market read, in one screen."""
     return render_template("liquidity.html", **_command_center_context())
+
+
+_MOOD_CACHE: dict = {"at": 0.0, "value": None}
+
+
+def _mood_inputs():
+    """Pulse + sector breadth + news tone, all from caches (never blocks). 10 s memo."""
+    if _MOOD_CACHE["value"] is not None and _time.time() - _MOOD_CACHE["at"] < 10:
+        return _MOOD_CACHE["value"]
+    value = _mood_inputs_now()
+    _MOOD_CACHE.update(at=_time.time(), value=value)
+    return value
+
+
+def _mood_inputs_now():
+    import command_center as _cc
+    pulse = {}
+    try:
+        pulse = _build_today_pulse(_get_mkt_ctx() or {}) or {}
+    except Exception as exc:
+        logger.debug("mood pulse: %s", exc)
+    breadth = None
+    try:
+        from market_engine import SECTOR_ETFS as _SE, live_quotes as _lq
+        breadth = _cc.sector_breadth(_lq(list(_SE)) or {})
+    except Exception:
+        pass
+    tone = None
+    try:
+        from sentiment_engine import build_sentiment_snapshot
+        news = (_intel.get_intel_summary() or {}).get("market_news") or []
+        if news:
+            tone = build_sentiment_snapshot(news).get("overall_score")
+    except Exception:
+        pass
+    reading = _cc.mood(vix=pulse.get("vix"), spy=pulse.get("spy"), qqq=pulse.get("qqq"),
+                       es=pulse.get("es"), nq=pulse.get("nq"), breadth=breadth, news_tone=tone)
+    return pulse, reading
+
+
+@app.route("/api/mood")
+def api_mood():
+    _pulse, reading = _mood_inputs()
+    resp = jsonify({"ok": reading.get("known", False), **reading, "session": _pulse.get("session") or ""})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/api/briefing/voice")
+def api_briefing_voice():
+    """A ~60-second script for the phone to read aloud (Web Speech, no audio files)."""
+    import command_center as _cc
+    pulse, reading = _mood_inputs()
+    uid = current_user_id()
+    try:
+        tickers = list(get_user_tracked_tickers(uid) or [])[:25]
+    except Exception:
+        tickers = []
+    movers = []
+    try:
+        from market_engine import live_quotes as _lq
+        q = _lq(tickers) or {}
+    except Exception:
+        q = {}
+    for t in tickers:
+        chg = (q.get(t) or {}).get("change_pct")
+        if chg is None:
+            try:
+                chg = (get_stock_data(t) or {}).get("gap_pct")
+            except Exception:
+                chg = None
+        movers.append({"ticker": t, "change_pct": chg})
+    movers.sort(key=lambda m: -abs(m["change_pct"] or 0))
+    summary = {}
+    try:
+        summary = _intel.get_intel_summary() or {}
+    except Exception:
+        pass
+    wl = set(tickers)
+    earn = []
+    for bucket, when in (("today", "today"), ("tomorrow", "tomorrow")):
+        for row in (summary.get("earnings") or {}).get(bucket) or []:
+            if row.get("ticker") in wl:
+                earn.append({"ticker": row["ticker"], "when": when})
+    events = [e for e in (summary.get("economic_events") or []) if e.get("is_today") and e.get("impact") == "HIGH"]
+    user = current_user() or {}
+    script = _cc.briefing_script(now=_et_now(), pulse=pulse, mood_reading=reading, movers=movers,
+                                 earnings=earn, events=events, name="")
+    resp = jsonify({"ok": True, "script": script, "mood": reading,
+                    "words": len(script.split()), "user": user.get("username") or ""})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/live-board")
+def live_board():
+    """A glanceable live mini-board, installable as its own home-screen icon."""
+    return render_template("live_board.html")
+
+
+@app.route("/api/live-board")
+def api_live_board():
+    uid = current_user_id()
+    try:
+        tickers = list(get_user_tracked_tickers(uid) or [])
+    except Exception:
+        tickers = []
+    syms = ["SPY", "QQQ"] + [t for t in tickers if t not in ("SPY", "QQQ")][:6]
+    try:
+        from market_engine import live_quotes as _lq
+        q = _lq(syms) or {}
+    except Exception:
+        q = {}
+    rows = []
+    for s in syms:
+        live = q.get(s) or {}
+        price, chg = live.get("price"), live.get("change_pct")
+        if price is None:
+            try:
+                snap = get_stock_data(s) or {}
+                price, chg = snap.get("current_price"), snap.get("gap_pct")
+            except Exception:
+                pass
+        rows.append({"ticker": s, "price": price, "change_pct": chg, "live": bool(live)})
+    _p, reading = _mood_inputs()
+    resp = jsonify({"ok": True, "rows": rows, "mood": reading, "as_of": _et_now().isoformat()})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/api/today/pulse")
