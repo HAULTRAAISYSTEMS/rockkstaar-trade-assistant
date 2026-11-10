@@ -129,3 +129,36 @@ def test_ids_the_live_poll_patches_are_kept(page):
                "detail-cat-score", "detail-cur-price", "detail-gap", "detail-poll-time",
                "detail-coach-card", "ps-panel", "notes", "plan", "company-overview-card"):
         assert f'id="{el}"' in page, el
+
+
+def test_live_poll_never_waits_on_the_vendor_refresh(monkeypatch):
+    """The 3-second poll must answer from the DB + shared feed; the slow
+    per-stock refresh runs in the background, once per 20 s per ticker."""
+    import time
+    import threading
+    import app as legacy
+    import web_app
+    calls = []
+    done = threading.Event()
+
+    def slow_refresh(t, s):
+        calls.append(t)
+        time.sleep(1.0)
+        done.set()
+        return s
+
+    monkeypatch.delenv("TRADESTAAR_NO_BACKGROUND", raising=False)
+    monkeypatch.setattr(legacy, "_STOCK_LIVE_STATE", {})
+    monkeypatch.setattr(legacy, "get_stock_data", lambda t: _Row(dict(CEG, swing_score=5, news_headlines=[])))
+    monkeypatch.setattr(legacy, "live_refresh_stock", slow_refresh)
+    monkeypatch.setattr(legacy, "update_live_fields", lambda s: None)
+    monkeypatch.setattr(sp, "live_quote", lambda t: None)
+    c = web_app.app.test_client()
+    with c.session_transaction() as s:
+        s["user_id"] = 1
+    t0 = time.time()
+    for _ in range(3):
+        assert c.get("/api/stock/CEG/live").status_code == 200
+    assert time.time() - t0 < 0.9
+    assert done.wait(3)
+    assert calls == ["CEG"]
