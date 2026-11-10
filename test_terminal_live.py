@@ -112,7 +112,7 @@ class TestTheQuotesEndpoint:
     def test_it_reports_the_session_and_a_label_for_it(self, client):
         body = client.get("/api/terminal/quotes").get_json()
         assert body["session"] in _app.SESSION_LABELS
-        assert body["session_label"] == _app.SESSION_LABELS[body["session"]]
+        assert body["session_label"] == _app._session_label(body["session"])
         assert isinstance(body["server_epoch"], int)
 
     def test_it_never_waits_on_a_price_fetch(self, client):

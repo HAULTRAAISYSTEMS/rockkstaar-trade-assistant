@@ -523,6 +523,17 @@ def parse_quote_entry(entry: dict) -> dict | None:
             v = 0
         if v > 0:
             out[key] = v
+    # The regular session's last price and when it traded: after the bell
+    # `lastPrice` is an after-hours print, but today's daily candle closes at
+    # the regular-session close.
+    reg = (entry or {}).get("regular") or {}
+    try:
+        rclose = float(reg.get("regularMarketLastPrice") or 0)
+        rtime = int(int(reg.get("regularMarketTradeTime") or 0) / 1000)
+    except (TypeError, ValueError):
+        rclose, rtime = 0, 0
+    if rclose > 0 and rtime > 0 and out.get("day_open"):
+        out["day_close"], out["day_epoch"] = rclose, rtime
     return out
 
 

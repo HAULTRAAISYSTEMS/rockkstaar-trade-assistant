@@ -5426,7 +5426,7 @@ def terminal():
         win_rate=win_rate,
         today_setups=today_setups,
         market_session=_session,
-        market_session_label=SESSION_LABELS.get(_session, "At the close"),
+        market_session_label=_session_label(_session),
         # get_market_tape returns stale items rather than blocking the page,
         # so a frozen tape scrolled exactly like a moving one. The status line
         # says so past a minute.
@@ -5473,6 +5473,17 @@ SESSION_LABELS = {
     "after_hours": "After hours",
     "closed":      "At the close",
 }
+
+
+def _session_label(session: str) -> str:
+    """The pill text; 8 PM-4 AM on a trading night reads as the 24H session."""
+    if session == "closed" and _MKT_AVAILABLE:
+        try:
+            if _mkt.overnight_window_start() is not None:
+                return "Overnight 24H"
+        except Exception:
+            pass
+    return SESSION_LABELS.get(session, "At the close")
 
 
 @app.route("/api/terminal/quotes")
@@ -5576,7 +5587,7 @@ def api_terminal_quotes():
         "quotes": rows,
         "chips": chips,
         "session": _session,
-        "session_label": SESSION_LABELS.get(_session, "At the close"),
+        "session_label": _session_label(_session),
         "server_epoch": int(_time.time()),
         "server_time": _et_now().strftime("%I:%M %p").lstrip("0") + " ET",
     })
@@ -5641,6 +5652,38 @@ def api_live_status():
     return resp
 
 
+_OVERNIGHT_BAR_CACHE: dict = {}
+
+
+def _terminal_overnight_bar(ticker: str):
+    """Latest overnight bar for one symbol — never blocks the request.
+
+    Returns what the last background fetch found and starts a new fetch when
+    that is older than 15 s, so a slow provider can't tie up a worker thread.
+    """
+    if not _BACKGROUND_ENABLED:
+        return None
+    now = _time.time()
+    hit = _OVERNIGHT_BAR_CACHE.get(ticker)
+    if (hit is None or now - hit[0] >= 15) and not _OVERNIGHT_BAR_CACHE.get(("busy", ticker)):
+        _OVERNIGHT_BAR_CACHE[("busy", ticker)] = True
+
+        def _work():
+            try:
+                from overnight_data import latest_overnight_bar
+                bar = latest_overnight_bar(ticker)
+                _OVERNIGHT_BAR_CACHE[ticker] = (_time.time(), bar)
+            except Exception as exc:
+                logger.debug("overnight bar %s: %s", ticker, exc)
+                _OVERNIGHT_BAR_CACHE[ticker] = (_time.time(), (hit or (0, None))[1])
+            finally:
+                _OVERNIGHT_BAR_CACHE.pop(("busy", ticker), None)
+        threading.Thread(target=_work, daemon=True, name="overnight-bar").start()
+    if len(_OVERNIGHT_BAR_CACHE) > 400:
+        _OVERNIGHT_BAR_CACHE.clear()
+    return hit[1] if hit else None
+
+
 @app.route("/api/terminal/live/<ticker>")
 def api_terminal_live(ticker):
     """The charted symbol's latest print, for ticking the live candle.
@@ -5665,9 +5708,23 @@ def api_terminal_live(ticker):
                          "prev_close": base, "regular_close": base,
                          "ext": q.get("ext"), "source": q.get("source") or "",
                          "day_open": q.get("day_open"), "day_high": q.get("day_high"),
-                         "day_low": q.get("day_low"), "day_volume": q.get("day_volume")}
+                         "day_low": q.get("day_low"), "day_volume": q.get("day_volume"),
+                         "day_close": q.get("day_close"), "day_epoch": q.get("day_epoch")}
         except Exception as exc:
             logger.debug("terminal live (shared) %s: %s", ticker, exc)
+        # 8 PM-4 AM: the after-hours print goes stale at 8 PM, so the chart
+        # sat still all night. Use the genuine overnight print (Alpaca BOATS /
+        # overnight feed, as on the Today pulse) when it is newer.
+        try:
+            if _mkt.overnight_window_start() is not None:
+                bar = _terminal_overnight_bar(ticker)
+                if bar and bar.get("close") and (quote is None or int(bar.get("time") or 0) > int(quote.get("epoch") or 0)):
+                    base = (quote or {}).get("prev_close")
+                    quote = dict(quote or {}, price=float(bar["close"]), epoch=int(bar["time"]),
+                                 ext="overnight", source="Alpaca overnight", prev_close=base,
+                                 regular_close=(quote or {}).get("regular_close") or base)
+        except Exception as exc:
+            logger.debug("terminal live (overnight) %s: %s", ticker, exc)
         if quote is None:
             try:
                 quote = _mkt.live_ticker_quote(ticker)
