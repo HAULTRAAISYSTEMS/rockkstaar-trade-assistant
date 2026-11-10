@@ -17,10 +17,20 @@ from test_edgar_pipeline import _Resp
 
 
 class CountingGet:
+    """Counts only the company-facts download these tests are about.
+
+    patch.object(fe._req_module, "get") replaces requests.get for the whole
+    process, so a background thread left running by an earlier test (a quote
+    or news refresh) could land a request inside the window and be counted,
+    failing "downloaded once" at random. Those stray calls are refused and not
+    counted; the assertions now measure only this code path.
+    """
     def __init__(self, payload):
         self.payload, self.calls = payload, 0
 
-    def __call__(self, *a, **kw):
+    def __call__(self, url="", *a, **kw):
+        if "/api/xbrl/companyfacts/" not in str(url):
+            raise ConnectionError("stray request outside the EDGAR cache test")
         self.calls += 1
         return _Resp(self.payload)
 
