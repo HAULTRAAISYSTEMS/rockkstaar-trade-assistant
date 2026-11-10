@@ -8936,6 +8936,10 @@ def _build_today_pulse(mkt: dict) -> dict:
                     fast = dict(fast)
                     fast[sym] = {"price": q["price"], "pct": q["change_pct"],
                                  "ext": q.get("ext"), "at": ""}
+    # Whether these numbers are live prints. The page keeps its last live
+    # reading over a poll that only has the slow snapshot, so a missed fetch
+    # can't flip the tiles back to older numbers.
+    pulse["fast_live"] = bool(any(fast.get(k) for k in ("SPY", "QQQ", "ES", "NQ")))
     tag = {"pre": "PRE", "post": "AH", "overnight": "24H"}.get(session, "")
     for sym, key in (("SPY", "spy"), ("QQQ", "qqq")):
         q = fast.get(sym)
@@ -9355,7 +9359,7 @@ def api_today_pulse():
         "pulse": {k: pulse.get(k) for k in (
             "known", "regime", "vix", "vix_as_of", "spy", "qqq",
             "spy_label", "qqq_label", "spy_ext", "qqq_ext", "spy_at", "qqq_at",
-            "es", "nq", "liquidity",
+            "es", "nq", "liquidity", "fast_live",
             "session", "age_minutes", "snapshot_stale",
         )},
         "server_time": _et_now().isoformat(),

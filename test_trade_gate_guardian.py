@@ -207,3 +207,28 @@ def test_terminal_has_size_tool_and_nav_links():
     assert "if(twChartState.sizeMode&&param&&param.point)" in term
     nav = open("templates/_elite_navigation.html", encoding="utf-8").read()
     assert nav.count("trade_tools.gate_page") == 2 and nav.count("trade_tools.guardian_page") == 2
+
+
+def test_guardian_scan_is_parallel_bounded_and_cached(monkeypatch):
+    import time as _t
+    pg._SCAN_CACHE.clear()
+    pos = [{"symbol": s, "quantity": 10, "last_price": 100, "day_pnl_pct": 0} for s in ("AAA", "BBB", "SLOW")]
+    monkeypatch.setattr(pg, "positions", lambda uid: (pos, None))
+    monkeypatch.setattr(pg, "get_stops", lambda uid: {})
+    monkeypatch.setattr(pg, "SCAN_DEADLINE", 0.5)
+    calls = []
+
+    def gather(sym):
+        calls.append(sym)
+        if sym == "SLOW":
+            _t.sleep(2)
+        return {"price": 100}
+    monkeypatch.setattr(tg, "gather", gather)
+    started = _t.time()
+    out = pg.scan(1, with_news=False)
+    assert _t.time() - started < 1.5                       # bounded by the deadline
+    assert {r["symbol"] for r in out["positions"]} == {"AAA", "BBB", "SLOW"}
+    n = len(calls)
+    pg.scan(1, with_news=False)
+    assert len(calls) == n                                  # served from the 60 s cache
+    pg._SCAN_CACHE.clear()

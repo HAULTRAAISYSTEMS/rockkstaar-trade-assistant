@@ -59,6 +59,10 @@ def set_stop(user_id: int, symbol: str, stop: float | None, target: float | None
         stops[symbol] = {"stop": round(float(stop), 4),
                          "target": round(float(target), 4) if target else None}
     set_setting(_key(user_id), json.dumps(stops))
+    try:
+        forget_scan(user_id)
+    except Exception:
+        pass
     return stops
 
 
@@ -142,33 +146,75 @@ def positions(user_id: int) -> tuple[list[dict], str | None]:
         return [], str(exc)
 
 
-def scan(user_id: int, *, with_news: bool = True) -> dict:
-    """The Guardian page's data: every position with its signals."""
+_SCAN_CACHE: dict = {}
+_SCAN_LOCK = __import__("threading").Lock()
+SCAN_TTL = 60          # the page polls every 30 s; one scan serves them
+SCAN_DEADLINE = 20     # seconds for all positions together
+
+
+def _position_row(pos: dict, plan, with_news: bool) -> dict:
     import trade_gate
+    sym = str(pos.get("symbol") or "").upper()
+    try:
+        ind = trade_gate.gather(sym)
+    except Exception:
+        ind = {}
+    news = []
+    if with_news:
+        try:
+            import intel_engine
+            news = intel_engine.fetch_ticker_news(sym, limit=3)
+        except Exception:
+            news = []
+    return evaluate_position(pos, ind, plan, news)
+
+
+def scan(user_id: int, *, with_news: bool = True) -> dict:
+    """The Guardian page's data: every position with its signals.
+
+    Positions are checked in parallel under one deadline and the result is
+    reused for SCAN_TTL seconds. Checked one by one, a cold scan of ten
+    positions (bars + news each) could hold a request for minutes while the
+    page polled again every 30 s — the request pile-up that takes a worker
+    down.
+    """
+    import time as _t
+    from concurrent.futures import ThreadPoolExecutor, wait
+    key = (int(user_id), bool(with_news))
+    with _SCAN_LOCK:
+        hit = _SCAN_CACHE.get(key)
+        if hit and _t.time() - hit[0] < SCAN_TTL:
+            return hit[1]
     pos_list, error = positions(user_id)
     stops = get_stops(user_id)
+    pos_list = [p for p in pos_list if str(p.get("symbol") or "").strip()]
     rows = []
-    for pos in pos_list:
-        sym = str(pos.get("symbol") or "").upper()
-        if not sym:
-            continue
-        try:
-            ind = trade_gate.gather(sym)
-        except Exception:
-            ind = {}
-        news = []
-        if with_news:
-            try:
-                import intel_engine
-                news = intel_engine.fetch_ticker_news(sym, limit=3)
-            except Exception:
-                news = []
-        rows.append(evaluate_position(pos, ind, stops.get(sym), news))
+    if pos_list:
+        pool = ThreadPoolExecutor(max_workers=min(6, len(pos_list)), thread_name_prefix="guardian")
+        futs = {pool.submit(_position_row, p, stops.get(str(p["symbol"]).upper()), with_news): p for p in pos_list}
+        wait(list(futs), timeout=SCAN_DEADLINE)
+        for fut, p in futs.items():
+            if fut.done() and not fut.exception():
+                rows.append(fut.result())
+            else:
+                # Still loading: show the position with what Schwab gave us.
+                rows.append(evaluate_position(p, {}, stops.get(str(p["symbol"]).upper()), []))
+        pool.shutdown(wait=False, cancel_futures=True)
     order = {"danger": 0, "watch": 1, "ok": 2}
     rows.sort(key=lambda r: (order[r["status"]], r["symbol"] or ""))
-    return {"ok": error is None, "error": error, "positions": rows,
-            "counts": {k: sum(1 for r in rows if r["status"] == k) for k in order},
-            "as_of": datetime.now(timezone.utc).isoformat()}
+    result = {"ok": error is None, "error": error, "positions": rows,
+              "counts": {k: sum(1 for r in rows if r["status"] == k) for k in order},
+              "as_of": datetime.now(timezone.utc).isoformat()}
+    with _SCAN_LOCK:
+        _SCAN_CACHE[key] = (_t.time(), result)
+    return result
+
+
+def forget_scan(user_id: int) -> None:
+    """Drop the cached scan (after a stop changes)."""
+    with _SCAN_LOCK:
+        for k in [k for k in _SCAN_CACHE if k[0] == int(user_id)]:
+            _SCAN_CACHE.pop(k, None)
 
 
 # ── Alerts ───────────────────────────────────────────────────────────────────

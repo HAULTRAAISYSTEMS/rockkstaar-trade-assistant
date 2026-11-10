@@ -244,10 +244,13 @@ def whats_changed(user_id: int, ticker: str, *, now: datetime | None = None, pri
     if new_cards:
         lines.append(f"{len(new_cards)} new note{'s' if len(new_cards) != 1 else ''} in your Memory")
     if earnings_days is None:
+        # Cheap: the stored snapshot's date. (trade_gate.gather fetched a year
+        # of daily bars plus intraday bars just to read this one field.)
         try:
             import trade_gate
-            ind = trade_gate.gather(ticker)
-            earnings_days, earnings_date = ind.get("earnings_days"), ind.get("earnings_date")
+            from database import get_stock_data
+            earnings_date = (get_stock_data(ticker) or {}).get("earnings_date") or None
+            earnings_days = trade_gate.days_until(earnings_date)
         except Exception:
             pass
     if earnings_days is not None and 0 <= earnings_days <= 7:

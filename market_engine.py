@@ -1352,6 +1352,35 @@ _FAST_SYMBOLS = {"SPY": "SPY", "QQQ": "QQQ", "ES": "ES=F", "NQ": "NQ=F", "VIX": 
 _FAST_TTL_S = 8          # ~5 Yahoo requests per 8s, shared by all readers
 _FAST_MAX_AGE_S = 120    # older than this and the fast feed says nothing
 _FAST_CACHE: dict = {"at": 0.0, "quotes": {}}
+# Shared by both gunicorn workers on the instance. Each worker kept its own
+# cache, so when one worker's fetch failed (Yahoo rate limits) its polls fell
+# back to the slow snapshot while the other worker's polls had the live print
+# — and the Today strip flipped between the two numbers every few seconds.
+_FAST_SHARED_PATH = "/tmp/tradestaar-fast-pulse.json"
+
+
+def _fast_share_write() -> None:
+    import json as _json
+    import os as _os
+    try:
+        tmp = _FAST_SHARED_PATH + f".{_os.getpid()}"
+        with open(tmp, "w") as fh:
+            _json.dump({"at": _FAST_CACHE["at"], "quotes": _FAST_CACHE["quotes"]}, fh)
+        _os.replace(tmp, _FAST_SHARED_PATH)
+    except Exception:
+        pass
+
+
+def _fast_share_read() -> None:
+    """Adopt the other worker's reading when it is newer than ours."""
+    import json as _json
+    try:
+        with open(_FAST_SHARED_PATH) as fh:
+            data = _json.load(fh)
+        if float(data.get("at") or 0) > _FAST_CACHE["at"] and data.get("quotes"):
+            _FAST_CACHE.update(at=float(data["at"]), quotes=data["quotes"])
+    except Exception:
+        pass
 _FAST_REFRESHING = False
 
 
@@ -1472,8 +1501,15 @@ def _fetch_fast_quotes() -> None:
     except Exception as exc:
         logger.debug("_fetch_fast_quotes failed: %s", exc)
     if quotes:
+        # A partial fetch (one symbol rate-limited) keeps the others' last
+        # reading from this same session rather than dropping them, which
+        # would hand those tiles back to the slow snapshot for a poll.
+        prior = _FAST_CACHE.get("quotes") or {}
+        if prior.get("_session") == session and _time.time() - _FAST_CACHE["at"] < 60:
+            quotes = {**prior, **quotes}
         quotes["_session"] = session
         _FAST_CACHE.update(at=_time.time(), quotes=quotes)
+        _fast_share_write()
 
 
 def fast_pulse_quotes() -> dict:
@@ -1490,6 +1526,8 @@ def fast_pulse_quotes() -> dict:
     if _os.environ.get("TRADESTAAR_NO_BACKGROUND", "").strip().lower() in ("1", "true", "yes"):
         return {}
     now = _time.time()
+    if now - _FAST_CACHE["at"] >= _FAST_TTL_S:
+        _fast_share_read()
     age = now - _FAST_CACHE["at"]
     if age >= _FAST_TTL_S and not _FAST_REFRESHING:
         _FAST_REFRESHING = True
@@ -1766,6 +1804,66 @@ def _schwab_live(symbols: list[str]) -> dict:
     return out
 
 
+# Both gunicorn workers keep a live-quote cache. Sharing the newest print per
+# symbol through one file means every poll — whichever worker answers it —
+# shows the same, newest price instead of alternating between two feeds.
+_LQ_SHARED_PATH = "/tmp/tradestaar-live-quotes.json"
+_LQ_SHARE_STATE: dict = {"read_at": 0.0}
+
+
+def _lq_newer(a: dict | None, b: dict | None) -> bool:
+    """True when quote a is a later print than quote b."""
+    return (a or {}).get("epoch") is not None and ((a or {}).get("epoch") or 0) > ((b or {}).get("epoch") or 0)
+
+
+def _lq_share_write() -> None:
+    import json as _json
+    import os as _os
+    import time as _time
+    now = _time.time()
+    try:
+        try:
+            with open(_LQ_SHARED_PATH) as fh:
+                shared = _json.load(fh) or {}
+        except Exception:
+            shared = {}
+        for sym, entry in list(_LQ_CACHE.items()):
+            if now - entry["at"] > _LQ_MAX_AGE_S:
+                continue
+            other = shared.get(sym)
+            if not other or not _lq_newer(other.get("quote"), entry["quote"]):
+                shared[sym] = {"at": entry["at"], "quote": entry["quote"]}
+        shared = {k: v for k, v in shared.items() if now - float(v.get("at") or 0) <= _LQ_MAX_AGE_S}
+        tmp = _LQ_SHARED_PATH + f".{_os.getpid()}"
+        with open(tmp, "w") as fh:
+            _json.dump(shared, fh)
+        _os.replace(tmp, _LQ_SHARED_PATH)
+    except Exception:
+        pass
+
+
+def _lq_share_read(now: float) -> None:
+    """Adopt the other worker's newer prints (at most once a second)."""
+    import json as _json
+    if now - _LQ_SHARE_STATE["read_at"] < 1.0:
+        return
+    _LQ_SHARE_STATE["read_at"] = now
+    try:
+        with open(_LQ_SHARED_PATH) as fh:
+            shared = _json.load(fh) or {}
+    except Exception:
+        return
+    for sym, entry in shared.items():
+        try:
+            if now - float(entry.get("at") or 0) > _LQ_MAX_AGE_S:
+                continue
+            mine = _LQ_CACHE.get(sym)
+            if not mine or now - mine["at"] > _LQ_MAX_AGE_S or _lq_newer(entry.get("quote"), mine["quote"]):
+                _LQ_CACHE[sym] = {"at": float(entry["at"]), "quote": entry["quote"]}
+        except Exception:
+            continue
+
+
 def _refresh_live_quotes() -> None:
     import time as _time
     now = _time.time()
@@ -1815,7 +1913,14 @@ def _refresh_live_quotes() -> None:
                              "ext": lq.get("ext"), "source": "Yahoo"}
     stamp = _time.time()
     for s, q in quotes.items():
+        # Never step back to an older print: a slower fallback (Yahoo) can
+        # answer with a trade older than the one already shown.
+        held = _LQ_CACHE.get(s)
+        if held and stamp - held["at"] <= _LQ_MAX_AGE_S and \
+                (held["quote"].get("epoch") or 0) > (q.get("epoch") or 0):
+            continue
         _LQ_CACHE[s] = {"at": stamp, "quote": q}
+    _lq_share_write()
     counts: dict = {}
     for q in quotes.values():
         counts[q.get("source") or "?"] = counts.get(q.get("source") or "?", 0) + 1
@@ -1861,6 +1966,7 @@ def live_quotes(symbols) -> dict:
             finally:
                 _LQ_STATE["refreshing"] = False
         _th.Thread(target=_work, daemon=True, name="live_quotes").start()
+    _lq_share_read(now)
     out = {}
     for s in syms:
         entry = _LQ_CACHE.get(s)

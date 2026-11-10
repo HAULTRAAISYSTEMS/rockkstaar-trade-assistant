@@ -876,8 +876,22 @@ function _renderLivePulse(market) {
 const _PULSE_POLL_MS = (window.__PULSE_MS || 3000);
 const _pulseLive = {timer: null, okAt: 0, fails: 0, session: '', inFlight: false};
 
+// The last live reading. A poll whose server copy had no live print (its
+// fetch was rate-limited) carries the slower snapshot numbers; showing them
+// made the tiles jump back and forth. Keep the live reading for up to 3 min.
+let _lastLivePulse = null;
+function _keepLivePulse(p) {
+  if (p.fast_live) { _lastLivePulse = {at: Date.now(), session: p.session, p: Object.assign({}, p)}; return p; }
+  const last = _lastLivePulse;
+  if (!last || last.session !== p.session || Date.now() - last.at > 180000) return p;
+  const keep = ['spy', 'qqq', 'es', 'nq', 'spy_label', 'qqq_label', 'spy_ext', 'qqq_ext', 'spy_at', 'qqq_at'];
+  const out = Object.assign({}, p);
+  keep.forEach(k => { out[k] = last.p[k]; });
+  return out;
+}
 function _applyPulse(p) {
   if (!p) return;
+  p = _keepLivePulse(p);
   const rail = document.getElementById('cc-pulse');
   _renderLivePulse({
     known: p.known, regime: p.regime, vix: p.vix, vix_as_of: p.vix_as_of,
