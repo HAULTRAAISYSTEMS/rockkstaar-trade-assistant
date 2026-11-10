@@ -75,3 +75,23 @@ def test_every_live_view_subscribes_to_the_shared_poll():
         assert part in term
     assert "TSLive.on('pulse', _onPulsePart)" in open("templates/_liq_scripts.html").read()
     assert "js/live_hub.js" in open("templates/base.html").read()
+
+
+def test_gunicorn_hooks_raise_a_low_recycle_limit_from_the_dashboard():
+    """A --max-requests 500 left in the Render Start Command recycled workers
+    every few minutes (≈12 s of 502s each). The config hook lifts it."""
+    import importlib.util
+    import logging
+    from gunicorn.config import Config
+    spec = importlib.util.spec_from_file_location("gconf", "gunicorn.conf.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cfg = Config()
+    cfg.set("max_requests", 500)
+
+    class Server:
+        log = logging.getLogger("gunicorn-test")
+    Server.cfg = cfg
+    mod.on_starting(Server())
+    assert cfg.max_requests == 20000
+    assert callable(mod.worker_abort) and callable(mod.worker_exit)
