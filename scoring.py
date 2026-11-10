@@ -1850,10 +1850,15 @@ def compute_swing_setup_type(data: dict) -> str:
         return "Bull Flag"
 
     # ── 9. Fibonacci retracement levels ──────────────────────────────────────
-    if current and fib_618 and abs(current - fib_618) / current * 100 <= SWING_T["fib_proximity_pct"]:
-        return "Near 61.8% Retracement"
-    if current and fib_50 and abs(current - fib_50) / current * 100 <= SWING_T["fib_proximity_pct"]:
-        return "Near 50% Retracement"
+    # Both levels can sit inside the 2% band; name the one price is closest
+    # to, so the label agrees with the Fibonacci panel's read.
+    _near_fibs = sorted(
+        (abs(current - lvl) / current * 100, name)
+        for lvl, name in ((fib_618, "Near 61.8% Retracement"), (fib_50, "Near 50% Retracement"))
+        if current and lvl and abs(current - lvl) / current * 100 <= SWING_T["fib_proximity_pct"]
+    )
+    if _near_fibs:
+        return _near_fibs[0][1]
 
     # ── 10. EMA pullbacks ────────────────────────────────────────────────────
     if pct_ema20 is not None:

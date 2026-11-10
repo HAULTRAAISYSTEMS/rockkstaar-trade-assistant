@@ -1,0 +1,178 @@
+/* Stock page — hero, decision row, ladder, tabs. Uses the app's tokens. */
+.sd-page { max-width: 1320px; margin: 0 auto; }
+
+/* ── Hero ─────────────────────────────────────────────────────────────── */
+.sd-hero {
+  position: sticky; top: var(--sd-top, 56px); z-index: 40;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 24px; align-items: center;
+  margin: 0 0 14px; padding: 14px 18px 12px;
+  background: linear-gradient(180deg, rgba(10, 13, 20, .97), rgba(10, 13, 20, .92));
+  border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 10px 30px -14px rgba(0, 0, 0, .8);
+  backdrop-filter: blur(8px);
+}
+.sd-hero__back { font-size: 12px; color: var(--text-muted); text-decoration: none; }
+.sd-hero__back:hover { color: var(--accent); }
+.sd-hero__name { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.sd-hero__name .detail-ticker { margin: 2px 0 0; font-size: 34px; line-height: 1; }
+.sd-hero__co { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--text-dim); font-size: 14px; font-weight: 600; }
+.sd-chip {
+  display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border); font: 600 11px/1.5 var(--font-mono); color: var(--text); letter-spacing: .02em;
+}
+.sd-chip--dim { color: var(--text-muted); }
+.sd-chip[hidden] { display: none; }
+
+.sd-hero__quote { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
+.sd-hero__price { font: 700 30px/1 var(--font-mono); color: var(--text); font-variant-numeric: tabular-nums; }
+.sd-hero__chg { font: 700 14px/1.2 var(--font-mono); }
+.sd-hero__chg.positive { color: var(--green); }
+.sd-hero__chg.negative { color: var(--red); }
+.sd-hero__src { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.sd-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); margin-right: 3px; vertical-align: middle; }
+.sd-dot.is-live { background: var(--green); box-shadow: 0 0 0 3px rgba(34, 197, 139, .18); }
+
+.sd-hero__actions { display: flex; gap: 8px; align-items: center; }
+.sd-hero__actions form { margin: 0; }
+
+.sd-hero__status { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  padding-top: 10px; border-top: 1px solid var(--border); }
+.sd-hero__badges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+/* The permission and WAIT/EXECUTE state are spelled out in the sentence beside them. */
+.sd-hero__badges #detail-exec-badge, .sd-hero__badges #detail-perm-badge { display: none; }
+.sd-hero__badges .exec-badge-xl, .sd-hero__badges .setup-pill-lg, .sd-hero__badges .bias-large {
+  font-size: 11px; padding: 4px 10px; }
+.sd-hero__why { flex: 1 1 360px; margin: 0; font-size: 13px; color: var(--text-dim); line-height: 1.4; }
+.sd-hero__why, .sd-hero__why.perm-blocked, .sd-hero__why.perm-watch, .sd-hero__why.perm-allowed {
+  border: 0; background: none; padding: 0; box-shadow: none; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.sd-hero__why b { font-family: var(--font-mono); letter-spacing: .04em; margin-right: 2px; }
+.sd-hero__why.perm-blocked b { color: var(--red); }
+.sd-hero__why.perm-watch b { color: var(--yellow); }
+.sd-hero__why.perm-allowed b { color: var(--green); }
+.sd-hero__meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--text-muted); }
+.sd-hero__meta .detail-poll-row { margin: 0; }
+
+/* Scrolled: one line — ticker, price, change, status word. */
+.sd-hero.is-compact { padding-top: 8px; padding-bottom: 8px; }
+.sd-hero.is-compact .sd-hero__back, .sd-hero.is-compact .sd-hero__co,
+.sd-hero.is-compact .sd-hero__src, .sd-hero.is-compact .sd-hero__meta,
+.sd-hero.is-compact .sd-hero__badges { display: none; }
+.sd-hero.is-compact .sd-hero__name .detail-ticker { font-size: 22px; }
+.sd-hero.is-compact .sd-hero__price { font-size: 20px; }
+.sd-hero.is-compact .sd-hero__quote { flex-direction: row; align-items: baseline; gap: 10px; }
+.sd-hero.is-compact .sd-hero__status { padding-top: 6px; }
+.sd-hero.is-compact .sd-hero__why { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.sd-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 9px;
+  border: 1px solid var(--border); background: rgba(255, 255, 255, .03);
+  color: var(--text); font: 600 12px/1 var(--font-ui, inherit); text-decoration: none; cursor: pointer;
+  transition: border-color var(--dur-fast, .12s), background var(--dur-fast, .12s);
+}
+.sd-btn:hover { border-color: var(--accent); }
+.sd-btn--accent { border-color: rgba(var(--cc-accent-rgb, 229, 185, 79), .55); color: var(--accent); }
+.sd-btn--accent:hover { background: var(--accent-glow); }
+
+/* ── Score strip: tighter under the hero ──────────────────────────────── */
+.sd-page > .score-strip { margin-bottom: 14px; }
+
+/* ── Decision row ─────────────────────────────────────────────────────── */
+.sd-decision {
+  display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr) minmax(0, .95fr);
+  gap: 14px; align-items: start; margin-bottom: 18px;
+}
+.sd-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sd-col .detail-card { height: auto; margin: 0 !important; }
+.sd-col .entry-trigger-banner { margin: 0; }
+
+.sd-watch__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.sd-watch__list li { display: flex; gap: 9px; align-items: flex-start; font-size: 13px; line-height: 1.4; color: var(--text-dim); }
+.sd-watch__list li span { flex: 0 0 16px; text-align: center; font-weight: 700; }
+.sd-watch__list li.is-ok span { color: var(--green); }
+.sd-watch__list li.is-no span { color: var(--yellow); }
+.sd-watch__list li.is-ok { color: var(--text); }
+
+.sd-factors .ai-plan-signals { display: flex; flex-direction: column; gap: 10px; }
+.sd-factors .ai-plan-setup-label { margin-bottom: 8px; }
+
+/* The plan: four numbers in a 2×2 grid instead of a wide row. */
+.sd-col--plan .swing-plan-grid { grid-template-columns: 1fr 1fr; gap: 14px 18px; }
+.sd-col--plan .swing-plan-value { font-size: 20px; }
+.sd-col--plan .swing-plan-col:first-child { grid-column: 1 / -1; }
+.sd-col--plan .swing-plan-entry { white-space: nowrap; }
+.sd-plan__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+/* ── Ladder ───────────────────────────────────────────────────────────── */
+.sd-ladder__hint { float: right; font-weight: 500; letter-spacing: .02em; text-transform: none; font-size: 11px; }
+.sd-ladder { list-style: none; margin: 0; padding: 0 0 0 14px; position: relative; }
+.sd-ladder::before { content: ""; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 2px; background: var(--border); border-radius: 2px; }
+.sd-rung {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto 56px; gap: 8px; align-items: center;
+  padding: 5px 8px; border-radius: 7px; font-size: 12.5px; color: var(--text-dim);
+}
+.sd-rung::before { content: ""; position: absolute; left: -13px; top: 50%; width: 8px; height: 8px; margin-top: -4px;
+  border-radius: 50%; background: var(--bg2); border: 2px solid var(--border); }
+.sd-rung__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-rung__px { font: 600 12.5px/1 var(--font-mono); color: var(--text); font-variant-numeric: tabular-nums; }
+.sd-rung__dist { font: 500 11px/1 var(--font-mono); color: var(--text-muted); text-align: right; }
+.sd-rung--target::before { border-color: var(--green); }
+.sd-rung--target .sd-rung__label, .sd-rung--target .sd-rung__px { color: var(--green); }
+.sd-rung--stop::before { border-color: var(--red); background: var(--red); }
+.sd-rung--stop .sd-rung__label, .sd-rung--stop .sd-rung__px { color: var(--red); }
+.sd-rung--entry { background: rgba(255, 176, 32, .08); }
+.sd-rung--entry::before { border-color: var(--yellow); }
+.sd-rung--entry .sd-rung__label { color: var(--yellow); font-weight: 600; }
+.sd-rung--ema::before { border-color: #7aa7ff; }
+.sd-rung--fib::before { border-color: #c79bff; }
+.sd-rung--supply .sd-rung__label { color: #ff8a80; }
+.sd-rung--demand .sd-rung__label { color: #7be0b5; }
+.sd-rung.is-inside { outline: 1px dashed rgba(255, 255, 255, .18); }
+.sd-rung--you {
+  margin: 4px 0; background: var(--accent-glow); border: 1px solid rgba(var(--cc-accent-rgb, 229, 185, 79), .6);
+  color: var(--accent); font-weight: 700;
+}
+.sd-rung--you::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 4px var(--accent-glow); }
+.sd-rung--you .sd-rung__px { color: var(--accent); font-weight: 700; }
+
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+.sd-tabs {
+  position: sticky; top: calc(var(--sd-top, 56px) + var(--sd-hero-h, 0px) + 6px); z-index: 30;
+  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
+  margin: 0 0 14px; padding: 5px; border: 1px solid var(--border); border-radius: 12px;
+  background: rgba(10, 13, 20, .94); backdrop-filter: blur(8px);
+}
+.sd-tabs::-webkit-scrollbar { display: none; }
+.sd-tabs [role=tab] {
+  flex: 1 0 auto; padding: 9px 14px; border: 0; border-radius: 8px; background: transparent; cursor: pointer;
+  color: var(--text-muted); font: 700 12px/1 var(--font-ui, inherit); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap;
+}
+.sd-tabs [role=tab]:hover { color: var(--text); }
+.sd-tabs [role=tab][aria-selected=true] { background: var(--bg3); color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+.sd-tabs [role=tab]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.sd-panel { display: flex; flex-direction: column; gap: 14px; }
+.sd-panel[hidden] { display: none; }
+.sd-panel > .detail-card, .sd-panel > .detail-row { margin: 0 !important; }
+.sd-panel .detail-card { height: auto; }
+.sd-links { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Market cap: the explainer is behind the disclosure, the number stays. */
+.sd-panel .company-size__context > p, .sd-panel .company-size__context > small:first-of-type { display: none; }
+
+/* ── Responsive ───────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .sd-decision { grid-template-columns: 1fr 1fr; }
+  .sd-col--ladder { grid-column: 1 / -1; }
+}
+@media (max-width: 767px) {
+  .sd-hero { position: static; grid-template-columns: 1fr; padding: 12px 14px; }
+  /* The phone profile card above already shows ticker, price and chart. */
+  .sd-hero__id, .sd-hero__quote { display: none; }
+  .sd-hero__actions { order: 2; }
+  .sd-hero__status { border-top: 0; padding-top: 0; }
+  .sd-decision { grid-template-columns: 1fr; }
+  .sd-tabs { top: var(--sd-top, 56px); margin-left: -4px; margin-right: -4px; }
+  .sd-tabs [role=tab] { flex: 0 0 auto; padding: 10px 12px; }
+  .sd-col--plan .swing-plan-value { font-size: 18px; }
+}
