@@ -1893,6 +1893,26 @@ def _refresh_live_quotes() -> None:
                     quotes[sym] = q
         except Exception as exc:
             logger.debug("live quotes (alpaca) failed: %s", exc)
+    # 8 PM-4 AM: Schwab's last print is the 8 PM after-hours close. The
+    # overnight (24H) session trades on Blue Ocean; use its latest bar for
+    # every symbol when it is newer, so the tape, watchlists and Terminal all
+    # show the same latest trade instead of each its own fallback.
+    try:
+        if pulse_session() == "overnight":
+            from overnight_data import latest_overnight_bars
+            if now - _LQ_STATE.get("overnight_at", 0) >= 10:     # minute bars: 10 s is plenty
+                _LQ_STATE["overnight_at"] = now
+                _LQ_STATE["overnight_bars"] = latest_overnight_bars(wanted[:200])
+            for sym, bar in (_LQ_STATE.get("overnight_bars") or {}).items():
+                held = quotes.get(sym) or {}
+                if bar.get("close") and int(bar.get("time") or 0) > int(held.get("epoch") or 0):
+                    base = held.get("prev_close")
+                    quotes[sym] = dict(held, price=round(float(bar["close"]), 4), epoch=int(bar["time"]),
+                                       ext="overnight", prev_close=base,
+                                       change_pct=round((float(bar["close"]) / float(base) - 1) * 100, 2) if base else None,
+                                       source="Blue Ocean 24H via Alpaca" + (" (may lag)" if bar.get("source") == "alpaca_overnight" else ""))
+    except Exception as exc:
+        logger.debug("live quotes (overnight) failed: %s", exc)
     missing = [s for s in wanted if s not in quotes][:_LQ_YAHOO_MAX]
     if missing:
         # Fallback: Yahoo per symbol, at its own slower cadence.

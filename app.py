@@ -5736,6 +5736,60 @@ def api_terminal_live(ticker):
     return resp
 
 
+def _todays_session_quote(ticker: str) -> dict | None:
+    """Today's regular-session open/high/low/close for one symbol, or None."""
+    q = None
+    if _MKT_AVAILABLE:
+        try:
+            q = (_mkt.live_quotes([ticker]) or {}).get(ticker)
+        except Exception:
+            q = None
+    if not (q and q.get("day_close") and q.get("day_epoch")):
+        try:
+            import schwab as _schwab
+            entry = (_schwab.fetch_quotes([ticker]) or {}).get(ticker)
+            q = _schwab.parse_quote_entry(entry) if entry else None
+        except Exception as exc:
+            logger.debug("today's session quote %s: %s", ticker, exc)
+            q = None
+    if q and q.get("day_close") and q.get("day_epoch") and q.get("day_open"):
+        return q
+    return None
+
+
+def _with_todays_daily_bar(ticker: str, bars: list, quote: dict | None = None) -> list:
+    """Append today's daily candle when the provider's bars stop at the last session.
+
+    Free daily bars often lag the session that just closed, so after 4 PM the
+    chart showed Friday's candle as the latest while the header showed today's
+    move. Today's candle is built from Schwab's official regular-session
+    open / high / low / close — never from an extended-hours print.
+    """
+    from zoneinfo import ZoneInfo
+    try:
+        et = ZoneInfo("America/New_York")
+        last = bars[-1]
+        last_day = datetime.fromtimestamp(int(last["time"]), et).date()
+        q = quote or _todays_session_quote(ticker)
+        if not q:
+            return bars
+        day = datetime.fromtimestamp(int(q["day_epoch"]), et).date()
+        if day <= last_day:
+            return bars
+        close = float(q["day_close"])
+        open_ = float(q["day_open"])
+        high = max(float(q.get("day_high") or close), open_, close)
+        low = min(float(q.get("day_low") or close), open_, close)
+        bar = {"time": int(last["time"]) + (day - last_day).days * 86400,
+               "open": round(open_, 4), "high": round(high, 4), "low": round(low, 4),
+               "close": round(close, 4), "volume": int(float(q.get("day_volume") or 0)),
+               "session": "regular", "source": "schwab_session"}
+        return list(bars) + [bar]
+    except Exception as exc:
+        logger.debug("today's daily bar %s: %s", ticker, exc)
+        return bars
+
+
 @app.route("/api/terminal/candles/<ticker>")
 def api_terminal_candles(ticker):
     """Return OHLCV bars for the terminal chart from the existing data feed."""
@@ -5829,6 +5883,8 @@ def api_terminal_candles(ticker):
     if interval == "4h" and bars:
         from terminal_intelligence import aggregate_ohlcv_bars
         bars = aggregate_ohlcv_bars(bars, 4)
+    if interval == "1d" and bars:
+        bars = _with_todays_daily_bar(ticker, bars)
 
     _TERMINAL_CANDLE_CACHE[key] = {
         "ts": _time.time(), "bars": bars, "source_interval": source_interval,
