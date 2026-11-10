@@ -7,7 +7,8 @@
 <style>
   .te-watch-hero{padding:18px;border:1px solid rgba(var(--cc-accent-rgb, 212,175,55),.28);border-radius:18px;background:linear-gradient(145deg,rgba(var(--cc-accent-rgb, 212,175,55),.11),rgba(8,9,11,.96) 55%);margin-bottom:14px}
   .te-watch-hero h1{margin:0 0 4px;font:700 28px/1.05 var(--font-display);color:var(--cc-accent-hi, #f5d66d)}
-  .te-watch-tabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none}
+  /* Wrap rather than scroll: the strip hid its scrollbar, so on a desktop with a mouse every list past the first row was unreachable. */
+  .te-watch-tabs{display:flex;flex-wrap:wrap;gap:8px;padding:2px 0 10px}
   .te-watch-tabs::-webkit-scrollbar{display:none}.te-watch-tabs form{flex:0 0 auto;margin:0}
   .te-symbol-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px}
   .te-symbol{display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid var(--border);border-radius:13px;background:rgba(255,255,255,.025)}
