@@ -1687,7 +1687,10 @@ def _quote_from_alpaca_snapshot(snap: dict, today) -> dict | None:
     if daily_day == today:
         # Today's session so far, for drawing today's daily candle.
         out.update(day_open=daily.get("o"), day_high=daily.get("h"),
-                   day_low=daily.get("l"), day_volume=daily.get("v"))
+                   day_low=daily.get("l"), day_volume=daily.get("v"),
+                   # The regular session's own close and date, so the daily
+                   # chart can draw today's candle after the bell too.
+                   day_close=daily.get("c"), day_epoch=daily_epoch)
     return out
 
 

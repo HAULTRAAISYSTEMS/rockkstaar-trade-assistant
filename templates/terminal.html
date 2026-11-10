@@ -1520,7 +1520,9 @@ function twPatchActiveCandle(q,px){
   // Extended toggle is on (otherwise there are no extended bars to move).
   var sess = q.market_session;
   var isExt = (sess==='pre_market'||sess==='after_hours'||sess==='overnight');
-  if(sess!=='regular' && !(isExt && twChartState.extended)) return;
+  // The daily chart is decided below: after the bell it still needs today's
+  // candle (from the regular session's own close), whatever Extended says.
+  if(twChartState.interval!=='1d' && sess!=='regular' && !(isExt && twChartState.extended)) return;
   // Bars still on screen from a previous ticker or interval must never take
   // this ticker's price — the reload has not landed yet.
   if(twChartState.barsKey!==twChartState.ticker+'|'+twChartState.interval)return;
@@ -1529,7 +1531,16 @@ function twPatchActiveCandle(q,px){
   var last=twChartState.bars[twChartState.bars.length-1],lastTime=Number(last.time);
   // Daily chart: today's candle moves with the regular-session price.
   if(twChartState.interval==='1d'){
-    if(sess!=='regular'||!isFinite(lastTime))return;
+    if(!isFinite(lastTime))return;
+    if(sess!=='regular'){
+      // After hours / overnight: today's candle is the regular session's
+      // open-high-low-close, not the extended print. Without this the daily
+      // chart showed Friday's candle all evening when the provider's bar for
+      // today had not landed yet.
+      var rc=Number(q.day_close), re=Number(q.day_epoch);
+      if(!(isFinite(rc)&&rc>0&&isFinite(re)&&re>0&&Number(q.day_open)>0))return;
+      px=rc; stamp=re;
+    }
     var etDay=function(e){return new Date(e*1000).toLocaleDateString('en-CA',{timeZone:'America/New_York'});};
     var lastDay=etDay(lastTime), today=etDay(stamp);
     if(today<lastDay)return;
@@ -2015,7 +2026,8 @@ function twLiveApply(d){
       if(isFinite(px) && px > 0){
         var sess = q.ext ? ({pre:'pre_market', post:'after_hours', overnight:'overnight'})[q.ext] : 'regular';
         twPatchActiveCandle({ticker:t, market_session:sess, as_of_epoch:q.epoch,
-          day_open:q.day_open, day_high:q.day_high, day_low:q.day_low, day_volume:q.day_volume}, px);
+          day_open:q.day_open, day_high:q.day_high, day_low:q.day_low, day_volume:q.day_volume,
+          day_close:q.day_close, day_epoch:q.day_epoch}, px);
         twLiveHeader(t, px, q);
         twLast[t] = px;
         twLiveFeed.ticker = t; twLiveFeed.at = Date.now();
