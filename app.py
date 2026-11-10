@@ -293,7 +293,8 @@ _POLL_VERIFY_CACHE: dict = {}
 # Only the price polls. Session and account endpoints always hit the database.
 _POLL_PATHS = ("/api/live/bundle", "/api/market-tape", "/api/today/pulse",
                "/api/terminal/quotes", "/api/terminal/live/", "/api/quick",
-               "/api/dashboard", "/api/live-board", "/api/mood")
+               "/api/dashboard", "/api/live-board", "/api/mood", "/api/stock/",
+               "/api/briefing/voice")
 
 
 def _verified_user_for_request(uid):
@@ -4237,9 +4238,16 @@ def stock_detail(ticker):
     # the last regular-session close, not the live print — overwriting with it
     # makes first paint show yesterday's close while the terminal shows the
     # pre-market print. Only refresh current_price during the regular session.
+    # Skipped when the shared live feed already has this ticker: that print is
+    # newer, and the Yahoo call can take up to ~16 s when Yahoo is slow.
+    try:
+        import stock_page as _sp0
+        _lq0 = _sp0.live_quote(ticker)
+    except Exception:
+        _lq0 = None
     try:
         from data_fetcher import _fetch_price_via_chart_api
-        _chart = _fetch_price_via_chart_api(ticker)
+        _chart = None if _lq0 else _fetch_price_via_chart_api(ticker)
         _regular_session = market_session_now() == "regular"
         if _chart:
             _src_map = {}
@@ -7372,6 +7380,54 @@ def api_scanner_alerts_clear():
         return jsonify({"error": str(exc)}), 500
 
 
+def _stock_live_refresh_now(ticker: str) -> None:
+    stock = get_stock_data(ticker)
+    if not stock:
+        return
+    stock = live_refresh_stock(ticker, stock)
+    update_live_fields(stock)
+
+
+def _kick_stock_live_refresh(ticker: str) -> None:
+    """Re-run the per-stock refresh (headlines, Polygon/Yahoo price + volume,
+    swing structure when stale) at most once per _STOCK_LIVE_MIN_S per ticker,
+    in the background, one at a time.
+
+    The detail page polls every 3 s. Doing this work inside the request meant
+    several uncached vendor calls per poll per open tab; a slow vendor then
+    held all of a worker's threads and the whole site timed out. The price
+    on every poll comes from the shared live feed instead, which is real time.
+    """
+    import threading as _th
+    now = _time.time()
+    with _STOCK_LIVE_LOCK:
+        st = _STOCK_LIVE_STATE.setdefault(ticker, {"at": 0.0, "running": False})
+        if st["running"] or now - st["at"] < _STOCK_LIVE_MIN_S:
+            return
+        st["running"] = True
+        st["at"] = now
+
+    def _work():
+        try:
+            _stock_live_refresh_now(ticker)
+        except Exception as exc:
+            logger.warning("live_refresh_stock failed for %s: %s", ticker, exc)
+        finally:
+            with _STOCK_LIVE_LOCK:
+                st["running"] = False
+                st["at"] = _time.time()
+
+    if os.environ.get("TRADESTAAR_NO_BACKGROUND", "").strip().lower() in ("1", "true", "yes"):
+        _work()
+    else:
+        _th.Thread(target=_work, daemon=True, name=f"stock_live_{ticker}").start()
+
+
+_STOCK_LIVE_STATE: dict = {}
+_STOCK_LIVE_LOCK = __import__("threading").Lock()
+_STOCK_LIVE_MIN_S = 20.0
+
+
 @app.route("/api/stock/<ticker>/live")
 def api_stock_live(ticker):
     """JSON endpoint for live single-stock detail updates."""
@@ -7379,12 +7435,9 @@ def api_stock_live(ticker):
     stock  = get_stock_data(ticker)
     if not stock:
         return jsonify({"error": "not found"}), 404
-    # Re-evaluate exec_state with fresh live data
-    try:
-        stock = live_refresh_stock(ticker, stock)
-        update_live_fields(stock)
-    except Exception as exc:
-        logger.warning("live_refresh_stock failed for %s: %s", ticker, exc)
+    _kick_stock_live_refresh(ticker)
+    if os.environ.get("TRADESTAAR_NO_BACKGROUND", "").strip().lower() in ("1", "true", "yes"):
+        stock = get_stock_data(ticker) or stock
     # Overlay after the save above so the stored snapshot is untouched.
     try:
         import stock_page as _sp

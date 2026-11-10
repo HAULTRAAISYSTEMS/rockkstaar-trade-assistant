@@ -54,7 +54,7 @@
       .then(function (d) { if (d && d.ok && d.script) { script = d; scriptAt = Date.now(); } return script; })
       .catch(function () { return script; });
   }
-  loadScript(); setInterval(function () { if (!speaking) loadScript(); }, 60000);
+  loadScript(); setInterval(function () { if (!speaking && !document.hidden) loadScript(); }, 60000);
 
   function stop() {
     if (watchdog) { clearTimeout(watchdog); watchdog = null; }
