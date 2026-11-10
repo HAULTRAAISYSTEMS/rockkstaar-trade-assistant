@@ -2018,11 +2018,16 @@ function twLiveHeader(t, px, q){
     twRenderStamp({live:true, source:q.source || 'Live feed', as_of:at});
   }
 }
+var twLastEpoch = {};
 function twLiveApply(d){
   var t = twChartState.ticker, q = d && d.quote;
   if(!d || (d.ticker && d.ticker !== String(t || '').toUpperCase())) return;
   if(q && t){
       var px = Number(q.price);
+      // Never step back to an older print (a poll answered by a slower
+      // source): that is what made the price jump back and forth.
+      var ep = Number(q.epoch);
+      if(isFinite(ep) && ep > 0){ if(twLastEpoch[t] && ep < twLastEpoch[t]) return; twLastEpoch[t] = ep; }
       if(isFinite(px) && px > 0){
         var sess = q.ext ? ({pre:'pre_market', post:'after_hours', overnight:'overnight'})[q.ext] : 'regular';
         twPatchActiveCandle({ticker:t, market_session:sess, as_of_epoch:q.epoch,
