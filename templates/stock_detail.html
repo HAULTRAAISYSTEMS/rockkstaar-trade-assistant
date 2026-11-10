@@ -64,6 +64,8 @@
   </section>
   <div class="ticker-brief" data-ticker-brief="{{ stock.ticker }}" aria-live="polite"></div>
 
+  <div class="move-tools" data-move-tools="{{ stock.ticker }}"><div class="mt-row"><button type="button" class="mt-btn" data-mt-explain>⚡ Explain today's move</button><details class="mt-replay"><summary>📊 How it reacted to its last 8 earnings</summary><div class="mt-replay-body"></div></details></div><div class="mt-explain" hidden></div></div>
+
   <!-- ===== HEADER ===== -->
   <div class="detail-header">
     <a href="{{ url_for('research_page', ticker=stock.ticker) }}" class="back-link">← Company Research</a>

@@ -160,6 +160,12 @@
     <input id="scanner-query" class="scanner-query" type="search" placeholder="Search ticker, headline or source" aria-label="Search news scanner">
   </div>
 
+  <section class="nd-heat" id="nd-heat" aria-label="Catalyst heat map">
+    <div class="nd-heat-head"><div><span class="nd-kicker">Catalyst heat map · last 24h</span><h2>Where the news is</h2></div><small id="nd-heat-meta">Loading your watchlist…</small></div>
+    <div class="nd-grid" id="nd-grid"></div>
+    <div class="nd-explain" id="nd-explain" hidden></div>
+  </section>
+
   <section class="intel-grid">
     <main class="intel-card">
       <div class="intel-card-head"><h2>Elite News Scanner</h2><span id="scanner-count">{{ news|length }} catalysts</span></div>
