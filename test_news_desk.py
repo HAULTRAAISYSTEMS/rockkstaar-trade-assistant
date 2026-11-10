@@ -161,3 +161,22 @@ def test_widgets_are_wired():
     assert 'data-move-tools="{{ ticker }}"' in open("templates/research.html", encoding="utf-8").read()
     base = open("templates/base.html", encoding="utf-8").read()
     assert "js/news_desk.js" in base and "css/news_desk.css" in base
+
+
+def test_heat_map_never_queues_a_ticker_twice_and_caches_empty():
+    import threading
+    nd._cache.clear()
+    calls, gate = [], threading.Event()
+
+    def fetch(t):
+        calls.append(t)
+        gate.wait(2)
+        return []
+    nd.heat_map(["AAA", "BBB"], budget=0.05, fetch=fetch, quotes={})
+    nd.heat_map(["AAA", "BBB"], budget=0.05, fetch=fetch, quotes={})    # still pending: no new lookups
+    assert sorted(calls) == ["AAA", "BBB"]
+    gate.set()
+    time.sleep(0.2)
+    out = nd.heat_map(["AAA", "BBB"], budget=0.5, fetch=fetch, quotes={})
+    assert sorted(calls) == ["AAA", "BBB"] and out["pending"] == []     # "no news" was cached
+    nd._cache.clear()

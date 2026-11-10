@@ -27,7 +27,19 @@ def create_trade_tools_blueprint(*, current_user):
     def uid() -> int:
         return int((current_user() or {}).get("id") or 0)
 
+    acct_cache: dict = {}
+
     def account_size(user_id: int) -> tuple[float | None, str]:
+        # One Schwab accounts call per minute per user, not one per keystroke.
+        import time as _t
+        hit = acct_cache.get(user_id)
+        if hit and _t.time() - hit[0] < 60:
+            return hit[1]
+        value = _account_size_now(user_id)
+        acct_cache[user_id] = (_t.time(), value)
+        return value
+
+    def _account_size_now(user_id: int) -> tuple[float | None, str]:
         try:
             import schwab
             if user_id and schwab.is_connected(user_id):

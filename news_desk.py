@@ -59,6 +59,41 @@ def _f(v):
 
 # ── Heat map ─────────────────────────────────────────────────────────────────
 
+_inflight: dict = {}          # ticker -> Future, so a ticker is fetched once at a time
+NEWS_TTL = 300
+
+
+def _news_future(ticker: str, fetch):
+    """One lookup per ticker at a time, results (even "no news") kept 5 min.
+
+    The heat map re-polls every 8 s while any tile is pending, and tickers with
+    no news were never cached, so each poll queued another full provider
+    lookup for every ticker — an ever-growing backlog in the shared pool.
+    """
+    from concurrent.futures import Future
+    hit = _cget(f"news:{ticker}", NEWS_TTL)
+    if hit is not None:
+        f = Future()
+        f.set_result(hit)
+        return f
+    with _lock:
+        fut = _inflight.get(ticker)
+        if fut is not None and not fut.done():
+            return fut
+
+        def run():
+            try:
+                rows = fetch(ticker) or []
+                _cset(f"news:{ticker}", rows)
+                return rows
+            finally:
+                with _lock:
+                    _inflight.pop(ticker, None)
+        fut = _pool.submit(run)
+        _inflight[ticker] = fut
+        return fut
+
+
 def tile(ticker: str, stories: list[dict], change_pct=None, now: datetime | None = None) -> dict:
     """Score one ticker's last-24h coverage."""
     from sentiment_engine import score_headline
@@ -94,7 +129,7 @@ def heat_map(tickers: list[str], *, budget: float = 10.0, fetch=None, quotes=Non
             quotes = live_quotes(tickers) or {}
         except Exception:
             quotes = {}
-    futures = {t: _pool.submit(fetch, t) for t in tickers}
+    futures = {t: _news_future(t, fetch) for t in tickers}
     wait(list(futures.values()), timeout=budget)
     tiles, pending = [], []
     for t, fut in futures.items():
