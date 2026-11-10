@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Pre-Trade Gate — Tradestaar Elite{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/trade_tools.css') }}">{% endblock %}
+{% block content %}
+<div class="tt-shell">
+  <header class="tt-hero">
+    <div><span class="tt-kicker">Capital protection first</span><h1>Pre-Trade Gate</h1>
+    <p>Plan the trade, then let the rules answer: <b class="go">GO</b>, <b class="wait">WAIT</b> or <b class="no">NO</b> — with the share size that fits your risk.</p></div>
+  </header>
+
+  <div class="tt-grid">
+    <form class="tt-card tt-form" id="gate-form" autocomplete="off">
+      <div class="tt-row">
+        <label class="tt-ticker">Ticker<input name="ticker" id="g-ticker" value="{{ ticker }}" placeholder="NVDA" maxlength="10" required></label>
+        <div class="tt-dir" role="radiogroup" aria-label="Direction">
+          <label><input type="radio" name="direction" value="long" checked><span>Long</span></label>
+          <label><input type="radio" name="direction" value="short"><span>Short</span></label>
+        </div>
+      </div>
+      <div class="tt-live" id="g-live" hidden></div>
+      <div class="tt-row tt-3">
+        <label>Entry<input name="entry" id="g-entry" inputmode="decimal" value="{{ entry }}" placeholder="Live price"></label>
+        <label>Stop<input name="stop" id="g-stop" inputmode="decimal" value="{{ stop }}" placeholder="Required" required></label>
+        <label>Target<input name="target" id="g-target" inputmode="decimal" value="{{ target }}" placeholder="Optional"></label>
+      </div>
+      <div class="tt-suggest" id="g-suggest" hidden></div>
+      <div class="tt-row tt-3">
+        <label>Account size<input name="account_size" id="g-acct" inputmode="decimal" placeholder="$"></label>
+        <label>Risk per trade %<input name="risk_pct" id="g-risk" inputmode="decimal" value="1"></label>
+        <label>Max position %<input name="max_position_pct" id="g-maxpos" inputmode="decimal" value="25"></label>
+      </div>
+      <small class="tt-note" id="g-acct-note"></small>
+      <button type="submit" class="tt-primary" id="g-run">Run the gate</button>
+    </form>
+
+    <section class="tt-card tt-result" id="g-result" aria-live="polite">
+      <div class="tt-empty">Enter a ticker and a stop, then run the gate.</div>
+    </section>
+  </div>
+</div>
+<script>
+(function(){
+  var f=document.getElementById('gate-form'),res=document.getElementById('g-result'),live=document.getElementById('g-live'),
+      sug=document.getElementById('g-suggest'),acct=document.getElementById('g-acct'),note=document.getElementById('g-acct-note'),ctx=null,timer=null;
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function n(v,d){return v==null||isNaN(v)?'—':Number(v).toFixed(d==null?2:d)}
+  function money(v){return v==null?'—':'$'+Number(v).toLocaleString(undefined,{maximumFractionDigits:0})}
+  try{var saved=JSON.parse(localStorage.getItem('ts_gate')||'{}');if(saved.acct)acct.value=saved.acct;if(saved.risk)f.risk_pct.value=saved.risk;if(saved.maxpos)f.max_position_pct.value=saved.maxpos;}catch(e){}
+  function dir(){return f.querySelector('input[name=direction]:checked').value}
+  function suggest(){
+    if(!ctx){sug.hidden=true;return}
+    var i=ctx.indicators,p=Number(f.entry.value)||i.price,s=dir()==='long'?-1:1,b=[];
+    if(i.atr&&p)b.push(['1.5× ATR',p+s*1.5*i.atr]);
+    if(i.ema20)b.push(['EMA20',i.ema20+s*0.002*i.ema20]);
+    if(i.vwap)b.push(['VWAP',i.vwap+s*0.002*i.vwap]);
+    sug.innerHTML='<span>Stop ideas:</span>'+b.filter(function(x){return s<0?x[1]<p:x[1]>p}).map(function(x){return '<button type="button" data-v="'+x[1].toFixed(2)+'">'+x[0]+' · '+x[1].toFixed(2)+'</button>'}).join('');
+    sug.hidden=!b.length;
+  }
+  sug.addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v){f.stop.value=v;}});
+  function load(t){
+    if(!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(t))return;
+    live.hidden=false;live.textContent='Loading '+t+'…';
+    fetch('/api/gate/'+t,{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
+      if(!d.ok){live.textContent=d.error||'Not available';return}
+      ctx=d;var i=d.indicators;
+      live.innerHTML='<b>'+esc(t)+'</b> '+n(i.price)+' · VWAP '+n(i.vwap)+' · EMA20 '+n(i.ema20)+' · EMA50 '+n(i.ema50)+' · ATR '+n(i.atr)+' · RVOL '+n(i.rel_volume,1)+'×'+(i.earnings_date?' · Earnings '+esc(i.earnings_date):'');
+      if(!f.entry.value&&i.price)f.entry.placeholder='Live '+n(i.price);
+      if(d.account_size&&!acct.value){acct.value=Math.round(d.account_size);note.textContent='Account size from Schwab.';}
+      suggest();
+    }).catch(function(){live.textContent='Could not load market data.'});
+  }
+  f.ticker.addEventListener('input',function(){f.ticker.value=f.ticker.value.toUpperCase();clearTimeout(timer);timer=setTimeout(function(){load(f.ticker.value.trim())},450)});
+  f.entry.addEventListener('input',suggest);
+  f.querySelectorAll('input[name=direction]').forEach(function(r){r.addEventListener('change',suggest)});
+  function render(d){
+    var cls={GO:'go',WAIT:'wait',NO:'no'}[d.verdict],icon={pass:'✓',warn:'!',fail:'✕',info:'i'},p=d.plan;
+    res.innerHTML='<div class="tt-verdict '+cls+'"><div class="tt-badge">'+d.verdict+'</div><div><strong>'+esc(d.ticker)+' · '+esc(d.direction)+'</strong><p>'+esc(d.reason)+'</p></div><div class="tt-score"><b>'+d.score+'</b><small>/100</small></div></div>'+
+      '<div class="tt-size"><div><small>Shares</small><b>'+(p.shares==null?'—':p.shares)+'</b></div><div><small>Position</small><b>'+money(p.position_value)+'</b></div><div><small>Risk</small><b>'+money(p.risk_dollars)+'</b></div><div><small>Reward : risk</small><b>'+(p.reward_risk==null?'—':p.reward_risk+' : 1')+'</b></div></div>'+
+      '<ul class="tt-checks">'+d.checks.map(function(c){return '<li class="'+c.status+'"><span class="tt-ico">'+icon[c.status]+'</span><div><b>'+esc(c.label)+'</b><p>'+esc(c.detail)+'</p></div></li>'}).join('')+'</ul>'+
+      '<p class="tt-foot">Rules-based checklist from live data — not financial advice. You make the call.</p>';
+  }
+  f.addEventListener('submit',function(e){
+    e.preventDefault();var t=f.ticker.value.trim().toUpperCase(),btn=document.getElementById('g-run');
+    try{localStorage.setItem('ts_gate',JSON.stringify({acct:acct.value,risk:f.risk_pct.value,maxpos:f.max_position_pct.value}))}catch(e){}
+    btn.disabled=true;btn.textContent='Checking…';
+    fetch('/api/gate/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticker:t,direction:dir(),entry:f.entry.value,stop:f.stop.value,target:f.target.value,account_size:acct.value,risk_pct:f.risk_pct.value,max_position_pct:f.max_position_pct.value})})
+      .then(function(r){return r.json()}).then(function(d){btn.disabled=false;btn.textContent='Run the gate';if(!d.ok){res.innerHTML='<div class="tt-empty">'+esc(d.error)+'</div>';return}render(d);if(window.innerWidth<900)res.scrollIntoView({behavior:'smooth'})})
+      .catch(function(){btn.disabled=false;btn.textContent='Run the gate';res.innerHTML='<div class="tt-empty">The gate could not run. Try again.</div>'});
+  });
+  if(f.ticker.value)load(f.ticker.value);
+})();
+</script>
+{% endblock %}

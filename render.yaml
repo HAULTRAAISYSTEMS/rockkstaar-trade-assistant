@@ -65,6 +65,16 @@ services:
       - key: LIVE_RESEARCH_AUTO_PUBLISH_LIMIT
         value: "10"
 
+      # Uptime watchdog: each run checks the site's /health and sends a
+      # Telegram message when it goes down (and when it is back up). Same
+      # values as the web service.
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: UPTIME_URL
+        value: "https://rockkstaar-trade-assistant.onrender.com"
+
       # Opt-in thesis-alert texts. Keep the gate off until Twilio and the web
       # service use the same credentials and SMS_ENCRYPTION_KEY.
       - key: SMS_ALERTS_ENABLED

@@ -45,6 +45,8 @@
     <div class="cr-company__actions"><button type="button" onclick="askAboutCompany()">✦ Ask AI about {{ ticker }}</button><a href="{{ url_for('stock_compare', symbols=ticker) }}">Compare</a><a href="{{ url_for('stock_detail', ticker=ticker) }}">Market profile</a></div>
   </section>
 
+  <div class="ticker-brief" data-ticker-brief="{{ ticker }}" aria-live="polite"></div>
+
   <nav class="cr-sections" aria-label="Company research sections">
     <a href="#overview">Overview</a><a href="#changes">What changed {% if research.new_count %}<b>{{ research.new_count }}</b>{% endif %}</a><a href="#financials">Financials</a><a href="#filings">Filings</a><a href="#thesis">Your thesis</a>
   </nav>

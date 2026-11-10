@@ -337,6 +337,43 @@ def send_test(user_id: int, conn=None) -> dict:
             conn.close()
 
 
+def send_to_user(user_id: int, payload: dict, conn=None) -> dict:
+    """Push one notification to every enabled device of a user.
+
+    Expired subscriptions (404/410) are disabled, like everywhere else.
+    Returns counts; never raises for a user with no devices.
+    """
+    owns = conn is None
+    conn = conn or get_db()
+    result = {"sent": 0, "expired": 0, "errors": 0}
+    try:
+        rows = conn.execute(
+            "SELECT * FROM browser_push_subscriptions WHERE user_id=? AND enabled=1", (int(user_id),),
+        ).fetchall()
+        for raw in rows:
+            row = dict(raw)
+            try:
+                _send(_decrypt_subscription(row["subscription_ciphertext"]), payload)
+                conn.execute("UPDATE browser_push_subscriptions SET last_success_at=?,last_error_code=NULL WHERE id=?",
+                             (_now().isoformat(), row["id"]))
+                result["sent"] += 1
+            except WebPushException as exc:
+                status = _status_code(exc)
+                if status in {404, 410}:
+                    conn.execute("UPDATE browser_push_subscriptions SET enabled=0,last_error_code=? WHERE id=?",
+                                 (str(status), row["id"]))
+                    result["expired"] += 1
+                else:
+                    result["errors"] += 1
+            except Exception:
+                result["errors"] += 1
+        conn.commit()
+        return result
+    finally:
+        if owns:
+            conn.close()
+
+
 def deliver_pending(conn=None, *, now=None) -> dict:
     """Send each qualifying published item once to each opted-in browser."""
     if os.environ.get("BROWSER_PUSH_ENABLED", "1").lower() in {"0", "false", "no", "off"}:
