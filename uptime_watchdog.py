@@ -125,16 +125,19 @@ def run(*, now: float | None = None, checker=check, notify=send_telegram, load=_
     prev = state.get("status", "up")
     remind = int(os.environ.get("UPTIME_REMIND_MINUTES", "30")) * 60
     alerted = None
+    transition = None           # (title, body, severity) for the in-app inbox
 
     if ok:
         if prev == "down":
             down_since = state.get("since", now)
+            transition = ("Site back up", f"Was down about {_minutes(down_since, now)} min. {detail}", "info")
             alerted = notify(f"🟢 Tradestaar Elite is back UP ({_clock(now)}). "
                              f"It was down about {_minutes(down_since, now)} min. {detail}.\n{url}")
         state = {"status": "up", "since": state.get("since", now) if prev == "up" else now,
                  "last_ok": now, "detail": detail}
     else:
         if prev != "down":
+            transition = ("Site down", f"{detail} — check Render → Events and Logs.", "danger")
             alerted = notify(f"🔴 Tradestaar Elite is DOWN ({_clock(now)}).\n{detail}\n{url}\n"
                              "Check Render → Events and Logs.")
             state = {"status": "down", "since": now, "last_alert": now, "detail": detail}
@@ -145,6 +148,13 @@ def run(*, now: float | None = None, checker=check, notify=send_telegram, load=_
                                  f"({_clock(now)}). {detail}\n{url}")
                 state["last_alert"] = now
     save(state)
+    if transition:
+        try:
+            import notify_inbox
+            notify_inbox.add("system", transition[0], transition[1], url="/admin/speed",
+                             severity=transition[2], key=f"uptime|{transition[0]}|{int(now)}")
+        except Exception:
+            pass
     return {"url": url, "ok": ok, "detail": detail, "status": state["status"], "alerted": alerted}
 
 

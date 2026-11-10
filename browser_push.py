@@ -337,6 +337,28 @@ def send_test(user_id: int, conn=None) -> dict:
             conn.close()
 
 
+_TAG_KINDS = (("recall", "memory"), ("thesis", "research"), ("calendar", "calendar"), ("cal-", "calendar"),
+              ("fund", "fundamentals"), ("insider", "insider"))
+
+
+def _inbox_from_payload(user_id: int, payload: dict, conn=None, *, kind: str | None = None,
+                        key: str | None = None) -> None:
+    """Record what we are about to push in the notification inbox, decided
+    here so it lands even when the user has no device subscribed."""
+    try:
+        import notify_inbox
+        tag = str(payload.get("tag") or "")
+        if kind is None:
+            kind = next((k for prefix, k in _TAG_KINDS if tag.startswith(prefix)), "system")
+        if kind == "insider":
+            return              # already recorded once, market-wide, by add_scanner_alert
+        notify_inbox.add(kind, payload.get("title") or "", payload.get("body") or "",
+                         url=payload.get("url") or "", user_id=int(user_id),
+                         key=key or (f"{tag}|{notify_inbox._et_day(_now())}" if tag else None), conn=conn)
+    except Exception as exc:
+        logger.debug("inbox record: %s", exc)
+
+
 def send_to_user(user_id: int, payload: dict, conn=None) -> dict:
     """Push one notification to every enabled device of a user.
 
@@ -346,6 +368,7 @@ def send_to_user(user_id: int, payload: dict, conn=None) -> dict:
     owns = conn is None
     conn = conn or get_db()
     result = {"sent": 0, "expired": 0, "errors": 0}
+    _inbox_from_payload(user_id, payload, conn)
     try:
         rows = conn.execute(
             "SELECT * FROM browser_push_subscriptions WHERE user_id=? AND enabled=1", (int(user_id),),
@@ -419,6 +442,7 @@ def deliver_pending(conn=None, *, now=None) -> dict:
                 "SELECT * FROM browser_push_subscriptions WHERE user_id=? AND enabled=1", (user_id,),
             ).fetchall()]
             for item in [row for row in digest["items"] if row["alert"]][:remaining]:
+                _inbox_from_payload(user_id, _payload(item), conn, kind="research", key=f"thesis|{item['id']}")
                 for subscription in subscriptions:
                     if conn.execute(
                         "SELECT 1 FROM browser_push_deliveries WHERE subscription_id=? AND post_id=?",
@@ -472,6 +496,8 @@ def _send_one(conn, *, now, result, user_id, subscription, key, payload, table):
     pass: a notification about this morning's open, delivered this evening
     because an endpoint recovered, is worse than one that never arrives.
     """
+    _inbox_from_payload(user_id, payload, conn, kind="fundamentals" if "fundamental" in table else "calendar",
+                        key=f"{table}|{key}")
     exists = conn.execute(
         f"SELECT 1 FROM {table} WHERE subscription_id=? AND alert_key=?",
         (subscription["id"], key),

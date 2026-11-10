@@ -3007,6 +3007,17 @@ def add_scanner_alert(
     )
     conn.commit()
     conn.close()
+    try:
+        import notify_inbox
+        t = ticker.upper().strip()
+        at = (alert_type or "").upper()
+        kind = "position" if at.startswith("GUARDIAN") else "insider" if at.startswith("INSIDER") else "setup"
+        notify_inbox.add(kind, f"{t} · {(alert_type or '').replace('_', ' ').title()}", message,
+                         url=("/guardian" if kind == "position" else "/smart-money#top-buys" if kind == "insider"
+                              else f"/stock/{t}"),
+                         ticker=t, severity=notify_inbox.severity_from(severity))
+    except Exception:
+        pass
     return new_id or 0
 
 

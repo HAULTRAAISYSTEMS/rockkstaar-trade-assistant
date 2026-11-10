@@ -294,7 +294,7 @@ _POLL_VERIFY_CACHE: dict = {}
 _POLL_PATHS = ("/api/live/bundle", "/api/market-tape", "/api/today/pulse",
                "/api/terminal/quotes", "/api/terminal/live/", "/api/quick",
                "/api/dashboard", "/api/live-board", "/api/mood", "/api/stock/",
-               "/api/briefing/voice")
+               "/api/briefing/voice", "/api/notifications")
 
 
 def _verified_user_for_request(uid):

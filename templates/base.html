@@ -44,6 +44,7 @@
   <!-- Unified Tradestaar Elite shell and component normalization — loaded last. -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/elite.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/notifications.css') }}" />
   <!-- 2027 AI Command Center presentation layer (scoped under html.cc27) — loaded very last. -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/command_center.css') }}" />
 </head>
@@ -80,6 +81,7 @@
   </main>
 
   <script src="{{ url_for('static', filename='js/ws_manager.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/notifications.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
   <script>
     if ('serviceWorker' in navigator) {
