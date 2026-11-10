@@ -155,5 +155,12 @@ def main():
         print(json.dumps({"recall": pings}, sort_keys=True))
     except Exception as exc:
         print(json.dumps({"recall_error": type(exc).__name__}))
+    # Notification inbox: fresh news on followed tickers and big market
+    # headlines, earnings today/tomorrow and results, economic releases.
+    try:
+        import inbox_feeds
+        print(json.dumps({"inbox_feeds": inbox_feeds.run()}, sort_keys=True, default=str))
+    except Exception as exc:
+        print(json.dumps({"inbox_feeds_error": type(exc).__name__}))
     return 0
 if __name__=="__main__": raise SystemExit(main())

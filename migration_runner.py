@@ -20,6 +20,7 @@ MIGRATIONS = (
     "migrations.m0009_calendar_alerts",
     "migrations.m0010_fundamentals_alerts",
     "migrations.m0011_insider_feed",
+    "migrations.m0012_notifications",
 )
 
 
