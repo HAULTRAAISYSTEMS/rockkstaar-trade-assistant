@@ -179,12 +179,92 @@ def _fmp_history(ticker: str) -> list[dict]:
         return []
 
 
+def _edgar_hour(accepted: str) -> str:
+    """bmo / amc from an EDGAR acceptance time (UTC ISO), '' if it can't tell."""
+    try:
+        from zoneinfo import ZoneInfo
+        ts = datetime.fromisoformat(str(accepted).replace("Z", "+00:00"))
+        et = ts.astimezone(ZoneInfo("America/New_York"))
+    except Exception:
+        return ""
+    minutes = et.hour * 60 + et.minute
+    if minutes < 9 * 60 + 30:
+        return "bmo"
+    if minutes >= 16 * 60:
+        return "amc"
+    return ""
+
+
+def edgar_report_rows(submissions: dict) -> list[dict]:
+    """Earnings release dates from SEC 8-K filings carrying Item 2.02
+    (Results of Operations). Free, official and years deep — the backstop
+    for Finnhub's free plan, which only returns about a month of history."""
+    recent = ((submissions or {}).get("filings") or {}).get("recent") or {}
+    forms = recent.get("form") or []
+    dates = recent.get("filingDate") or []
+    items = recent.get("items") or []
+    accepted = recent.get("acceptanceDateTime") or []
+    out = []
+    for i in range(min(len(forms), len(dates))):
+        if str(forms[i]).strip() not in ("8-K", "8-K/A"):
+            continue
+        codes = [c.strip() for c in str(items[i] if i < len(items) else "").split(",")]
+        if "2.02" not in codes:
+            continue
+        out.append({"date": str(dates[i])[:10], "hour": _edgar_hour(accepted[i]) if i < len(accepted) else "",
+                    "eps": None, "eps_est": None})
+    return out
+
+
+def _edgar_history(ticker: str) -> list[dict]:
+    try:
+        import fundamentals_engine as fe
+        cik, _name = fe._edgar_cik(ticker)
+        if not cik:
+            return []
+        resp = fe._req_module.get(f"https://data.sec.gov/submissions/CIK{cik}.json",
+                                  timeout=10, headers=fe._EDGAR_HEADERS)
+        if resp.status_code != 200:
+            return []
+        return edgar_report_rows(resp.json())
+    except Exception as exc:
+        logger.debug("replay edgar %s: %s", ticker, exc)
+        return []
+
+
 def earnings_dates(ticker: str) -> list[dict]:
-    """Past report dates (newest first), merged from Finnhub and FMP."""
+    """Past report dates (newest first), merged from Finnhub, FMP and SEC
+    8-K Item 2.02 filings. A filing within a day of a date we already have is
+    the same report and only fills in a missing time of day."""
     today = date.today().isoformat()
     merged: dict[str, dict] = {}
+    for row in _edgar_history(ticker):
+        d = row.get("date")
+        if not d or d >= today:
+            continue
+        merged[d] = row
+    # EDGAR rows carry no EPS; vendor rows replace an EDGAR row on the same
+    # or adjacent day so the surprise column still fills in.
+    def _near(d):
+        try:
+            day = date.fromisoformat(d)
+        except ValueError:
+            return None
+        for k in list(merged):
+            try:
+                if abs((date.fromisoformat(k) - day).days) <= 1 and merged[k].get("eps") is None \
+                        and merged[k].get("eps_est") is None and k != d:
+                    return k
+            except ValueError:
+                continue
+        return None
     for row in _finnhub_history(ticker) + _fmp_history(ticker):
         d = row.get("date")
+        if d and d < today and d not in merged:
+            k = _near(d)
+            if k:
+                edgar = merged.pop(k)
+                row = {**row, "hour": row.get("hour") or edgar.get("hour") or ""}
         if not d or d >= today or (row.get("eps") is None and d in merged):
             continue
         prev = merged.get(d, {})

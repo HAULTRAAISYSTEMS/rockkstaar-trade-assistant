@@ -95,6 +95,7 @@ def test_replay_without_history_says_so():
 
 
 def test_earnings_dates_merge_and_skip_future(monkeypatch):
+    monkeypatch.setattr(nd, "_edgar_history", lambda t: [])
     monkeypatch.setattr(nd, "_finnhub_history", lambda t: [{"date": "2026-08-05", "hour": "bmo", "eps": 2.7, "eps_est": 2.6},
                                                             {"date": "2099-01-01", "hour": "amc", "eps": None, "eps_est": 1}])
     monkeypatch.setattr(nd, "_fmp_history", lambda t: [{"date": "2026-08-05", "hour": "", "eps": None, "eps_est": None},
@@ -102,6 +103,30 @@ def test_earnings_dates_merge_and_skip_future(monkeypatch):
     rows = nd.earnings_dates("CEG")
     assert [r["date"] for r in rows] == ["2026-08-05", "2026-05-06"]
     assert rows[0]["hour"] == "bmo" and rows[0]["eps"] == 2.7
+
+
+def test_edgar_8k_item_202_rows_and_hour():
+    subs = {"filings": {"recent": {
+        "form": ["8-K", "8-K", "10-Q", "8-K"],
+        "filingDate": ["2026-08-05", "2026-07-01", "2026-08-06", "2026-05-06"],
+        "items": ["2.02,9.01", "5.02", "", "2.02"],
+        "acceptanceDateTime": ["2026-08-05T10:31:00.000Z", "2026-07-01T20:00:00.000Z",
+                               "2026-08-06T12:00:00.000Z", "2026-05-06T21:05:00.000Z"]}}}
+    rows = nd.edgar_report_rows(subs)
+    assert [(r["date"], r["hour"]) for r in rows] == [("2026-08-05", "bmo"), ("2026-05-06", "amc")]
+
+
+def test_earnings_dates_use_edgar_when_vendors_are_thin(monkeypatch):
+    monkeypatch.setattr(nd, "_edgar_history", lambda t: [
+        {"date": "2026-08-05", "hour": "bmo", "eps": None, "eps_est": None},
+        {"date": "2026-05-06", "hour": "amc", "eps": None, "eps_est": None},
+        {"date": "2026-02-18", "hour": "bmo", "eps": None, "eps_est": None}])
+    # Finnhub free plan: one recent report, a day off from the 8-K.
+    monkeypatch.setattr(nd, "_finnhub_history", lambda t: [{"date": "2026-08-06", "hour": "", "eps": 2.7, "eps_est": 2.6}])
+    monkeypatch.setattr(nd, "_fmp_history", lambda t: [])
+    rows = nd.earnings_dates("CEG")
+    assert [r["date"] for r in rows] == ["2026-08-06", "2026-05-06", "2026-02-18"]
+    assert rows[0]["eps"] == 2.7 and rows[0]["hour"] == "bmo"
 
 
 # ── Explain ──────────────────────────────────────────────────────────────────

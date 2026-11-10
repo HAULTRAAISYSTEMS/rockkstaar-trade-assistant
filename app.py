@@ -4275,6 +4275,14 @@ def stock_detail(ticker):
     except Exception as _enrich_err:
         logger.warning("stock_detail  ticker=%s  live_enrich=failed  err=%s", ticker, _enrich_err)
 
+    # The shared live print (Schwab by day, the 24H session overnight) wins
+    # over the stored snapshot, so this page agrees with the Terminal.
+    try:
+        import stock_page as _sp
+        _sp.overlay_live(stock, _sp.live_quote(ticker))
+    except Exception as _lq_err:
+        logger.debug("stock_detail  ticker=%s  live_overlay=failed  err=%s", ticker, _lq_err)
+
     # Annotate — guarded so a single bad field can't crash the whole detail page
     try:
         annotate(stock)
@@ -4340,6 +4348,14 @@ def stock_detail(ticker):
 
     logger.info("stock_detail  ticker=%s  state=%s  coach=%s", ticker, stock.get("ticker_state"), coach.get("level"))
 
+    try:
+        import stock_page as _sp
+        ladder = _sp.price_ladder(stock)
+        watch = _sp.watch_items(stock)
+    except Exception as _sp_err:
+        logger.warning("stock_detail  ticker=%s  ladder_err=%s", ticker, _sp_err)
+        ladder, watch = [], []
+
     return render_template(
         "stock_detail.html",
         stock=stock,
@@ -4355,6 +4371,9 @@ def stock_detail(ticker):
         risk_settings=rs,
         market_temp=market_temp,
         coach=coach,
+        ladder=ladder,
+        watch=watch,
+        session_label=_session_label(market_session_now()),
     )
 
 
@@ -7366,9 +7385,22 @@ def api_stock_live(ticker):
         update_live_fields(stock)
     except Exception as exc:
         logger.warning("live_refresh_stock failed for %s: %s", ticker, exc)
+    # Overlay after the save above so the stored snapshot is untouched.
+    try:
+        import stock_page as _sp
+        _sp.overlay_live(stock, _sp.live_quote(ticker))
+    except Exception as exc:
+        logger.debug("api_stock_live overlay %s: %s", ticker, exc)
     annotate(stock)
     result = _stock_summary(stock)
     result["server_time"] = _et_now().strftime("%I:%M %p").lstrip("0") + " ET"
+    result["live_quote"] = stock.get("live_quote")
+    result["session_label"] = _session_label(market_session_now())
+    try:
+        result["watch"] = _sp.watch_items(stock)
+    except Exception:
+        result["watch"] = []
+
     # Include coach so the detail page can patch the coach card on every poll
     try:
         _uid  = current_user_id()

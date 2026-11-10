@@ -2,6 +2,7 @@
 {% block title %}{{ stock.ticker }} — Tradestaar Elite{% endblock %}
 
 {% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stock_page.css') }}" />
 <style>
 @keyframes shimmer {
   0%   { background-position: 200% 0; }
@@ -12,7 +13,7 @@
 
 {% block content %}
 
-<div class="detail-wrap">
+<div class="detail-wrap sd-page">
 
   <section class="mobile-stock-profile" aria-label="{{ stock.ticker }} stock overview">
     <div class="mobile-stock-profile__top">
@@ -32,7 +33,12 @@
     {# When and where this price is from. A number with a dollar sign reads as
        "now" unless something says otherwise, and three of the four feeds can
        be hours or days behind. #}
-    {% if stock.quote %}
+    {% if stock.live_quote %}
+    <div class="quote-stamp is-live" id="sd-mobile-stamp">
+      <span class="quote-stamp__dot" aria-hidden="true"></span>
+      {{ session_label }} · {{ stock.live_quote.source }}{% if stock.live_quote.as_of %} · {{ stock.live_quote.as_of }}{% endif %}
+    </div>
+    {% elif stock.quote %}
     <div class="quote-stamp {{ 'is-live' if stock.quote.live else 'is-not-live' }}"
          title="{{ stock.quote.source_name }} — {{ stock.quote.source_note }}">
       <span class="quote-stamp__dot" aria-hidden="true"></span>
@@ -55,22 +61,42 @@
       <div><span>Relative volume</span><strong>{{ "%.1f"|format(stock.rel_volume) if stock.rel_volume is not none else "—" }}x</strong></div>
       <div><span>Earnings</span><strong>{{ stock.earnings_date or "—" }}{% if stock.earnings_date and stock.earnings_time and stock.earnings_time != 'TBD' %}<small> · {{ stock.earnings_time }}</small>{% endif %}</strong></div>
     </div>
-    <nav class="mobile-stock-tabs" aria-label="Stock profile sections">
-      <a href="#company-overview-card">Overview</a>
-      <a href="#profile-analysis">Analysis</a>
-      <a href="#profile-news">News</a>
-      <a href="{{ url_for('fundamentals_page', ticker=stock.ticker) }}">Fundamentals</a>
-    </nav>
   </section>
-  <div class="ticker-brief" data-ticker-brief="{{ stock.ticker }}" aria-live="polite"></div>
 
-  <div class="move-tools" data-move-tools="{{ stock.ticker }}"><div class="mt-row"><button type="button" class="mt-btn" data-mt-explain>⚡ Explain today's move</button><details class="mt-replay"><summary>📊 How it reacted to its last 8 earnings</summary><div class="mt-replay-body"></div></details></div><div class="mt-explain" hidden></div></div>
-
-  <!-- ===== HEADER ===== -->
-  <div class="detail-header">
-    <a href="{{ url_for('research_page', ticker=stock.ticker) }}" class="back-link">← Company Research</a>
-    <div class="detail-title-row">
-      <h1 class="detail-ticker">{{ stock.ticker }}</h1>
+  <!-- ===== HERO (sticky) ===== -->
+  <header class="sd-hero" id="sd-hero" data-ticker="{{ stock.ticker }}">
+    <div class="sd-hero__id">
+      <a href="{{ url_for('research_page', ticker=stock.ticker) }}" class="sd-hero__back">← Company Research</a>
+      <div class="sd-hero__name">
+        <h1 class="detail-ticker">{{ stock.ticker }}</h1>
+        <div class="sd-hero__co">
+          <span id="sd-co-name">{{ stock.company_name or '' }}</span>
+          {% if stock.sector_name %}<span class="sd-chip">{{ stock.sector_name }}</span>{% endif %}
+          {% if stock.sector_etf %}<span class="sd-chip sd-chip--dim">{{ stock.sector_etf }}</span>{% endif %}
+          <span class="sd-chip sd-chip--dim" id="sd-mcap" hidden></span>
+        </div>
+      </div>
+    </div>
+    <div class="sd-hero__quote">
+      {% set _lq = stock.live_quote %}
+      <strong class="sd-hero__price" id="sd-price">{{ "$%.2f"|format(stock.current_price) if stock.current_price is not none else "—" }}</strong>
+      <span class="sd-hero__chg {{ stock.gap_class }}" id="sd-chg">{{ stock.gap_display }}</span>
+      <span class="sd-hero__src" id="sd-src">
+        <span class="sd-dot {{ 'is-live' if _lq or (stock.quote and stock.quote.live) else '' }}" aria-hidden="true"></span>
+        <span id="sd-session">{{ session_label }}</span> ·
+        <span id="sd-source">{% if _lq %}{{ _lq.source }}{% elif stock.quote %}{{ stock.quote.source_name }}{% else %}Snapshot{% endif %}</span>
+        <span id="sd-asof">{% if _lq and _lq.as_of %}· {{ _lq.as_of }}{% elif stock.quote and stock.quote.as_of %}· {{ stock.quote.as_of }}{% endif %}</span>
+      </span>
+    </div>
+    <div class="sd-hero__actions">
+      <form action="{{ url_for('refresh_single', ticker=stock.ticker) }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="sd-btn" title="Re-run the full analysis">⟳ Refresh</button>
+      </form>
+      <a class="sd-btn sd-btn--accent" href="{{ url_for('trade_tools.gate_page', ticker=stock.ticker, entry=stock.entry_zone_high or '', stop=stock.stop_level or '', target=stock.target_1 or '') }}" title="Run this plan through the Pre-Trade Gate">Pre-Trade Gate →</a>
+    </div>
+    <div class="sd-hero__status">
+      <div class="sd-hero__badges">
       <span id="detail-sfa-badge" class="exec-badge exec-badge-xl {{ stock.simplified_action_class }}" title="{{ stock.final_action }}">{{ stock.simplified_action }}</span>
       <span id="detail-exec-badge" class="exec-badge exec-badge-lg {{ stock.exec_class }}">{{ stock.final_action or 'WAIT' }}</span>
       <span id="detail-bias-tag" class="bias-tag {{ stock.bias_class }} bias-large">{{ stock.trade_bias }}</span>
@@ -81,35 +107,23 @@
       <span id="detail-perm-badge" class="perm-badge perm-badge-lg {{ stock.trade_permission.css }}"
             title="{{ stock.trade_permission.reason }}">{{ stock.trade_permission.permission }}</span>
       {% endif %}
-    </div>
-    <div class="detail-subtitle">
-      Last updated: <span id="detail-last-updated">{{ stock.last_updated | et_time }}</span>
-      &nbsp;|&nbsp;
-      <form action="{{ url_for('refresh_single', ticker=stock.ticker) }}" method="POST" style="display:inline;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn-inline-refresh">⟳ Refresh Data</button>
-      </form>
-    </div>
-    <div class="detail-poll-row">
+      </div>
+      <p class="sd-hero__why {{ stock.trade_permission.css if stock.trade_permission else '' }}" id="sd-why">
+        {% if stock.trade_permission and stock.trade_permission.reason %}<b id="sd-why-perm">{{ stock.trade_permission.permission }}</b> — <span id="sd-why-text">{{ stock.trade_permission.reason }}</span>
+        {% else %}<b id="sd-why-perm">{{ stock.final_action or 'WAIT' }}</b> — <span id="sd-why-text">{{ stock.final_action_reason or 'Waiting for the next analysis pass.' }}</span>{% endif %}
+      </p>
+      <div class="sd-hero__meta">
+        Analysis <span id="detail-last-updated">{{ stock.last_updated | et_time }}</span>
+        <div class="detail-poll-row">
       <span class="detail-poll-dot" id="detail-poll-dot">●</span>
       <span class="detail-poll-label">Last poll:</span>
       <span class="detail-poll-time" id="detail-poll-time">—</span>
       <span class="poll-state-badge poll-state-waiting" id="detail-poll-state">WAITING</span>
       <span class="poll-market-note" id="detail-market-note" style="display:none;">Market closed — values may remain unchanged</span>
+        </div>
+      </div>
     </div>
-  </div>
-
-  <!-- ===== COMPANY OVERVIEW ===== -->
-  <div id="company-overview-card" class="detail-card company-overview-card" style="margin-bottom: 1rem;">
-    <h3 class="card-title">Company Overview</h3>
-    <div class="co-meta-row">
-      <span id="co-name" class="co-name"></span>
-      <span id="co-sector-chip" class="co-chip co-chip-sector" style="display:none;"></span>
-      <span id="co-industry-chip" class="co-chip co-chip-industry" style="display:none;"></span>
-    </div>
-    {% with market_cap_ticker=stock.ticker %}{% include '_company_market_cap.html' %}{% endwith %}
-    <div id="co-description" class="co-description"></div>
-  </div>
+  </header>
 
   <!-- ===== TICKER STATE BANNER ===== -->
   {% if stock.ticker_state == 'loading' %}
@@ -219,6 +233,9 @@
 
   </div>
 
+  <!-- ===== DECISION ROW ===== -->
+  <div class="sd-decision">
+    <div class="sd-col sd-col--verdict">
   <!-- ===== EXECUTION TRIGGER ===== -->
   {% if stock.entry_trigger %}
   <div class="entry-trigger-banner {{ stock.entry_trigger_css }}">
@@ -239,7 +256,6 @@
     <span class="entry-trigger-text">{{ stock.entry_trigger }}</span>
   </div>
   {% endif %}
-
   <!-- ===== TRADE COACH ===== -->
   <span id="profile-analysis" class="profile-anchor" aria-hidden="true"></span>
   <div id="detail-coach-card" class="detail-card coach-card {{ coach.css }}">
@@ -254,102 +270,38 @@
       {% endfor %}
     </div>
   </div>
-
-  <!-- ===== AI INSTITUTIONAL TRADE PLAN ===== -->
+  <div class="detail-card sd-watch" id="sd-watch-card">
+    <h3 class="card-title">What has to happen</h3>
+    <ul class="sd-watch__list" id="sd-watch">
+      {% for w in watch %}<li class="{{ 'is-ok' if w.ok else 'is-no' }}"><span aria-hidden="true">{{ '✓' if w.ok else '○' }}</span>{{ w.text }}</li>{% endfor %}
+      {% if not watch %}<li class="is-no"><span aria-hidden="true">○</span>Needs a full analysis pass — tap Refresh.</li>{% endif %}
+    </ul>
+  </div>
+  <!-- ===== WHY: AI factors ===== -->
   {% if stock.ai_trade_plan and stock.ai_trade_plan.has_plan %}
-  {% set plan = stock.ai_trade_plan %}
-  <div class="detail-card ai-plan-card">
-    <h3 class="card-title">
-      AI Institutional Plan
-      <span class="plan-grade-badge {{ plan.grade_css }}">{{ plan.grade }}</span>
-      <span class="plan-prob-badge {% if plan.probability >= 75 %}prob-high{% elif plan.probability >= 55 %}prob-med{% else %}prob-low{% endif %}">
-        {{ plan.probability }}% probability
-      </span>
+  {% set aip = stock.ai_trade_plan %}
+  <div class="detail-card sd-factors">
+    <h3 class="card-title">Why
+      <span class="plan-grade-badge {{ aip.grade_css }}">{{ aip.grade }}</span>
+      <span class="plan-prob-badge {% if aip.probability >= 75 %}prob-high{% elif aip.probability >= 55 %}prob-med{% else %}prob-low{% endif %}">{{ aip.probability }}% probability</span>
     </h3>
-
-    <!-- Setup label + RS + Sector -->
-    <div class="ai-plan-header-row">
-      <span class="ai-plan-setup-label">{{ plan.setup_label }}</span>
-      {% if stock.rs_score_display is defined %}
-      <span class="rs-badge {{ stock.rs_class }}" title="{{ stock.rs_vs_qqq_display | default('') }}">
-        RS {{ stock.rs_score_display }} — {{ stock.rs_label }}
-      </span>
-      {% endif %}
-      {% if stock.sector_name %}
-      <span class="sector-chip {{ stock.sector_class }}" title="Sector">
-        {{ stock.sector_etf }} · {{ stock.sector_name }}
-        {% if stock.sector_leading %} ↑ Leading{% endif %}
-      </span>
-      {% endif %}
-    </div>
-
-    <div class="ai-plan-body">
-      <!-- Left: Levels -->
-      <div class="ai-plan-levels">
-        {% if plan.entry_low or plan.entry_high %}
-        <div class="ai-level-row ai-level-entry">
-          <span class="ai-level-lbl">Entry Zone</span>
-          <span class="ai-level-val">
-            {% if plan.entry_low and plan.entry_high %}
-              ${{ "%.2f"|format(plan.entry_low) }} – ${{ "%.2f"|format(plan.entry_high) }}
-            {% elif plan.entry_low %}
-              ~${{ "%.2f"|format(plan.entry_low) }}
-            {% endif %}
-          </span>
-        </div>
-        {% endif %}
-        {% if plan.stop %}
-        <div class="ai-level-row ai-level-stop">
-          <span class="ai-level-lbl">Stop Loss</span>
-          <span class="ai-level-val text-danger">${{ "%.2f"|format(plan.stop) }}</span>
-        </div>
-        {% endif %}
-        {% if plan.target1 %}
-        <div class="ai-level-row ai-level-target">
-          <span class="ai-level-lbl">Target 1</span>
-          <span class="ai-level-val text-success">${{ "%.2f"|format(plan.target1) }}</span>
-        </div>
-        {% endif %}
-        {% if plan.target2 %}
-        <div class="ai-level-row ai-level-target">
-          <span class="ai-level-lbl">Target 2</span>
-          <span class="ai-level-val text-success">${{ "%.2f"|format(plan.target2) }}</span>
-        </div>
-        {% endif %}
-        {% if plan.rr %}
-        <div class="ai-level-row">
-          <span class="ai-level-lbl">R:R Ratio</span>
-          <span class="ai-level-val {{ 'text-success' if plan.rr >= 2 else ('text-warning' if plan.rr >= 1 else 'text-danger') }}">
-            {{ "%.1f"|format(plan.rr) }}:1
-          </span>
-        </div>
-        {% endif %}
-        <div class="ai-level-row">
-          <span class="ai-level-lbl">Swing Score</span>
-          <span class="ai-level-val">{{ plan.swing_score }}/10</span>
-        </div>
-        <div class="ai-level-row">
-          <span class="ai-level-lbl">Catalyst</span>
-          <span class="ai-level-val">{{ plan.cat_score }}/10</span>
-        </div>
-      </div>
-
+    {% if aip.setup_label %}<div class="ai-plan-setup-label">{{ aip.setup_label }}</div>{% endif %}
       <!-- Right: Reasons + Warnings -->
       <div class="ai-plan-signals">
-        {% if plan.reasons %}
+        {% if aip.reasons %}
         <div class="ai-signals-section">
           <div class="ai-signals-title ai-signals-bull">Bull Factors</div>
-          {% for r in plan.reasons %}
+          {% for r in aip.reasons %}
           <div class="ai-signal-row ai-signal-bull">
             <span class="ai-sig-dot">+</span> {{ r }}
           </div>
           {% endfor %}
         </div>
         {% endif %}
-        {% if plan.warnings %}
+        {% if aip.warnings %}
         <div class="ai-signals-section">
           <div class="ai-signals-title ai-signals-warn">Warnings</div>
-          {% for w in plan.warnings %}
+          {% for w in aip.warnings %}
           <div class="ai-signal-row ai-signal-warn">
             <span class="ai-sig-dot ai-sig-warn-dot">!</span> {{ w }}
           </div>
@@ -357,13 +309,13 @@
         </div>
         {% endif %}
       </div>
-    </div>
   </div>
   {% endif %}
-
+    </div>
+    <div class="sd-col sd-col--plan">
   <!-- ===== SWING TRADE PLAN ===== -->
   <div class="detail-card swing-plan-card">
-    <h3 class="card-title">Swing Trade Plan
+    <h3 class="card-title">The Plan
       {% if stock.swing_plan_stale %}
       <span class="plan-stale-badge">STALE — EMA/swing data missing</span>
       {% elif not stock.swing_plan_valid and not stock.swing_plan_stale %}
@@ -428,6 +380,11 @@
       </div>
 
     </div>
+    <div class="sd-plan__actions">
+      <a class="sd-btn sd-btn--accent" href="#tools" data-sd-goto="tools" data-sd-scroll="ps-panel"
+         data-sd-entry="{{ stock.entry_zone_high or '' }}" data-sd-stop="{{ stock.stop_level or '' }}">Size this trade →</a>
+      <a class="sd-btn" href="#levels" data-sd-goto="levels">See the levels</a>
+    </div>
     {% else %}
     <div class="no-data-msg">
       Trade plan not yet computed — full analysis (EMA + Fibonacci) required.
@@ -435,7 +392,54 @@
     </div>
     {% endif %}
   </div>
+  <!-- ===== AI SCORE READ ===== -->
+  <div class="detail-card" id="ai-read-card" style="margin-bottom:12px;">
+    <h3 class="card-title">🤖 AI Read
+      <span id="ai-read-badge" style="font-size:10px;color:var(--text-muted);font-weight:400;margin-left:8px;"></span>
+    </h3>
+    <div id="ai-read-shimmer" style="
+      background:linear-gradient(90deg,var(--bg-inset) 25%,var(--bg-card-hover) 50%,var(--bg-inset) 75%);
+      background-size:200% 100%;
+      animation:shimmer 1.4s infinite;
+      border-radius:6px;height:52px;margin:6px 0;">
+    </div>
+    <div id="ai-read-body" style="display:none;">
+      <p id="ai-read-narration" style="margin:6px 0 4px;color:var(--text-primary);font-size:13px;line-height:1.5;"></p>
+      <p id="ai-read-watch" style="margin:0;color:var(--text-secondary);font-size:12px;">
+        <strong style="color:var(--accent);">Watch:</strong> <span id="ai-read-watch-text"></span>
+      </p>
+    </div>
+    <div id="ai-read-error" style="display:none;color:var(--text-muted);font-size:12px;"></div>
+  </div>
+    </div>
+    <div class="sd-col sd-col--ladder">
+  <div class="detail-card sd-ladder-card">
+    <h3 class="card-title">Where price is <span class="sd-ladder__hint">every level, high → low</span></h3>
+    {% if ladder %}
+    <ol class="sd-ladder" id="sd-ladder" data-price="{{ stock.current_price or '' }}">
+      {% for r in ladder %}
+      <li class="sd-rung sd-rung--{{ r.kind }}" data-level="{{ r.price }}"{% if r.top %} data-top="{{ r.top }}"{% endif %}>
+        <span class="sd-rung__label">{{ r.label }}</span>
+        <span class="sd-rung__px">{% if r.top %}${{ "%.2f"|format(r.price) }}–{{ "%.2f"|format(r.top) }}{% else %}${{ "%.2f"|format(r.price) }}{% endif %}</span>
+        <span class="sd-rung__dist"></span>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <div class="no-data-msg">Levels appear after a full analysis pass — tap Refresh.</div>
+    {% endif %}
+  </div>
+    </div>
+  </div>
 
+  <nav class="sd-tabs" role="tablist" aria-label="{{ stock.ticker }} sections">
+    <button type="button" role="tab" id="sd-tab-levels" data-tab="levels" aria-selected="true">Levels &amp; Analysis</button>
+    <button type="button" role="tab" id="sd-tab-news" data-tab="news" aria-selected="false">News &amp; Catalysts</button>
+    <button type="button" role="tab" id="sd-tab-thesis" data-tab="thesis" aria-selected="false">Thesis &amp; Notes</button>
+    <button type="button" role="tab" id="sd-tab-fundamentals" data-tab="fundamentals" aria-selected="false">Fundamentals</button>
+    <button type="button" role="tab" id="sd-tab-tools" data-tab="tools" aria-selected="false">Tools</button>
+  </nav>
+  <section class="sd-panel" id="sd-panel-levels" data-panel="levels" role="tabpanel" aria-labelledby="sd-tab-levels">
   <!-- ===== EMA + STRUCTURE ANALYSIS ===== -->
   <div class="detail-row">
 
@@ -967,6 +971,94 @@
   </ul>
   {% endif %}
 
+  <!-- ===== SWING SCORE BREAKDOWN ===== -->
+  <div class="detail-card breakdown-card">
+    <h3 class="card-title">
+      Swing Score Breakdown
+      <span class="score-badge {{ stock.swing_score_class }}{% if stock.swing_score and stock.swing_score >= 8 %} score-badge-elite{% endif %}">
+        {{ stock.swing_score or '—' }}/10
+      </span>
+      {% if stock.swing_confidence %}
+      <span class="conf-badge {{ stock.swing_score_class }}">{{ stock.swing_confidence }}</span>
+      {% endif %}
+    </h3>
+    {% if stock.swing_reason %}
+    <p class="reason-summary {{ stock.swing_score_class }}">{{ stock.swing_reason }}</p>
+    {% endif %}
+    <div class="setup-factors-row">
+      <div class="setup-factor">
+        <div class="setup-factor-label">Daily Trend</div>
+        <div class="setup-factor-value">{{ stock.daily_trend or '—' }}</div>
+      </div>
+      <div class="setup-factor">
+        <div class="setup-factor-label">Structure</div>
+        <div class="setup-factor-value">
+          {% if stock.daily_hh_hl %}<span class="structure-chip structure-bullish">HH/HL</span>{% endif %}
+          {% if stock.daily_lh_ll %}<span class="structure-chip structure-bearish">LH/LL</span>{% endif %}
+          {% if not stock.daily_hh_hl and not stock.daily_lh_ll %}—{% endif %}
+        </div>
+      </div>
+      <div class="setup-factor">
+        <div class="setup-factor-label">Setup Type</div>
+        <span class="setup-pill {{ stock.swing_setup_type_class }}">{{ stock.swing_setup_type or '—' }}</span>
+      </div>
+      <div class="setup-factor">
+        <div class="setup-factor-label">R:R</div>
+        <span class="{{ stock.risk_reward_class }}">{{ stock.risk_reward_display }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== AUTO CLASSIFICATION ===== -->
+  {% set auto_on = stock.auto_classify != 0 %}
+  <div class="detail-card classify-card">
+    <h3 class="card-title">
+      Auto Classification
+      <span class="classify-toggle-status {% if auto_on %}classify-on{% else %}classify-off{% endif %}">
+        {{ "AUTO" if auto_on else "MANUAL" }}
+      </span>
+    </h3>
+    <div class="classify-body">
+      {% if stock.bucket %}
+        {%- if stock.bucket == "A+ READY" -%}
+          {%- set cl_name = "A+ READY" -%}{%- set cl_css = "classify-aplus" -%}
+        {%- elif stock.bucket == "SETUPS FORMING" -%}
+          {%- set cl_name = "SETUPS FORMING" -%}{%- set cl_css = "classify-secondary" -%}
+        {%- elif stock.bucket == "TREND WATCH" -%}
+          {%- set cl_name = "TREND WATCH" -%}{%- set cl_css = "classify-secondary" -%}
+        {%- elif stock.bucket == "EXTENDED / CHASE ZONE" -%}
+          {%- set cl_name = "EXTENDED / CHASE ZONE" -%}{%- set cl_css = "classify-swing" -%}
+        {%- else -%}
+          {%- set cl_name = "AVOID / BLOCKED" -%}{%- set cl_css = "classify-core" -%}
+        {%- endif -%}
+      {% endif %}
+      <div class="classify-target-row">
+        <span class="classify-label">Recommended list</span>
+        <span class="classify-wl-badge {{ cl_css if stock.bucket else 'classify-core' }}">
+          {{ cl_name if stock.bucket else "—" }}
+        </span>
+      </div>
+      {% if stock.classify_reason %}
+      <div class="classify-reason">{{ stock.classify_reason }}</div>
+      {% endif %}
+      <form action="{{ url_for('toggle_auto_classify', ticker=stock.ticker) }}" method="POST" class="classify-toggle-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {% if auto_on %}
+          <input type="hidden" name="auto_classify" value="0">
+          <button type="submit" class="btn-classify-toggle btn-classify-off">Turn OFF — Manual Override</button>
+          <span class="classify-toggle-hint">Auto is ON — stock moves automatically on refresh</span>
+        {% else %}
+          <input type="hidden" name="auto_classify" value="1">
+          <button type="submit" class="btn-classify-toggle btn-classify-on">Turn ON — Re-enable Auto</button>
+          <span class="classify-toggle-hint">Manual mode — stock stays where you put it</span>
+        {% endif %}
+      </form>
+    </div>
+  </div>
+  </section>
+  <section class="sd-panel" id="sd-panel-news" data-panel="news" role="tabpanel" aria-labelledby="sd-tab-news" hidden>
+  <span id="profile-news-tools"></span>
+  <div class="move-tools" data-move-tools="{{ stock.ticker }}"><div class="mt-row"><button type="button" class="mt-btn" data-mt-explain>⚡ Explain today's move</button><details class="mt-replay"><summary>📊 How it reacted to its last 8 earnings</summary><div class="mt-replay-body"></div></details></div><div class="mt-explain" hidden></div></div>
   <!-- ===== CATALYST + NEWS ===== -->
   <span id="profile-news" class="profile-anchor" aria-hidden="true"></span>
   <div class="detail-row">
@@ -1020,64 +1112,6 @@
     </div>
   </div>
 
-  <!-- ===== SWING SCORE BREAKDOWN ===== -->
-  <div class="detail-card breakdown-card">
-    <h3 class="card-title">
-      Swing Score Breakdown
-      <span class="score-badge {{ stock.swing_score_class }}{% if stock.swing_score and stock.swing_score >= 8 %} score-badge-elite{% endif %}">
-        {{ stock.swing_score or '—' }}/10
-      </span>
-      {% if stock.swing_confidence %}
-      <span class="conf-badge {{ stock.swing_score_class }}">{{ stock.swing_confidence }}</span>
-      {% endif %}
-    </h3>
-    {% if stock.swing_reason %}
-    <p class="reason-summary {{ stock.swing_score_class }}">{{ stock.swing_reason }}</p>
-    {% endif %}
-    <div class="setup-factors-row">
-      <div class="setup-factor">
-        <div class="setup-factor-label">Daily Trend</div>
-        <div class="setup-factor-value">{{ stock.daily_trend or '—' }}</div>
-      </div>
-      <div class="setup-factor">
-        <div class="setup-factor-label">Structure</div>
-        <div class="setup-factor-value">
-          {% if stock.daily_hh_hl %}<span class="structure-chip structure-bullish">HH/HL</span>{% endif %}
-          {% if stock.daily_lh_ll %}<span class="structure-chip structure-bearish">LH/LL</span>{% endif %}
-          {% if not stock.daily_hh_hl and not stock.daily_lh_ll %}—{% endif %}
-        </div>
-      </div>
-      <div class="setup-factor">
-        <div class="setup-factor-label">Setup Type</div>
-        <span class="setup-pill {{ stock.swing_setup_type_class }}">{{ stock.swing_setup_type or '—' }}</span>
-      </div>
-      <div class="setup-factor">
-        <div class="setup-factor-label">R:R</div>
-        <span class="{{ stock.risk_reward_class }}">{{ stock.risk_reward_display }}</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== AI SCORE READ ===== -->
-  <div class="detail-card" id="ai-read-card" style="margin-bottom:12px;">
-    <h3 class="card-title">🤖 AI Read
-      <span id="ai-read-badge" style="font-size:10px;color:var(--text-muted);font-weight:400;margin-left:8px;"></span>
-    </h3>
-    <div id="ai-read-shimmer" style="
-      background:linear-gradient(90deg,var(--bg-inset) 25%,var(--bg-card-hover) 50%,var(--bg-inset) 75%);
-      background-size:200% 100%;
-      animation:shimmer 1.4s infinite;
-      border-radius:6px;height:52px;margin:6px 0;">
-    </div>
-    <div id="ai-read-body" style="display:none;">
-      <p id="ai-read-narration" style="margin:6px 0 4px;color:var(--text-primary);font-size:13px;line-height:1.5;"></p>
-      <p id="ai-read-watch" style="margin:0;color:var(--text-secondary);font-size:12px;">
-        <strong style="color:var(--accent);">Watch:</strong> <span id="ai-read-watch-text"></span>
-      </p>
-    </div>
-    <div id="ai-read-error" style="display:none;color:var(--text-muted);font-size:12px;"></div>
-  </div>
-
   <!-- ===== CATALYST SCORE BREAKDOWN ===== -->
   <div class="detail-card breakdown-card">
     <h3 class="card-title">
@@ -1112,92 +1146,45 @@
       {% endif %}
     </div>
   </div>
-
-  <!-- ===== WATCHLIST ASSIGNMENT ===== -->
-  <div class="detail-card wl-assign-card">
-    <h3 class="card-title">Watchlists</h3>
-    <form action="{{ url_for('stock_set_watchlists', ticker=stock.ticker) }}" method="POST" class="wl-assign-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="wl-assign-checks">
-        {% for wl in all_wls %}
-        <label class="wl-assign-label {% if wl.id in ticker_wl_ids %}wl-assign-checked{% endif %}">
-          <input type="checkbox" name="watchlist_ids" value="{{ wl.id }}"
-                 {% if wl.id in ticker_wl_ids %}checked{% endif %}>
-          <span class="wl-assign-name">{{ wl.name }}</span>
-          <span class="wl-assign-check-icon">✓</span>
-        </label>
-        {% endfor %}
-      </div>
-      <button type="submit" class="btn btn-save btn-sm">Update</button>
-    </form>
-  </div>
-
-  <!-- ===== AUTO CLASSIFICATION ===== -->
-  {% set auto_on = stock.auto_classify != 0 %}
-  <div class="detail-card classify-card">
+  </section>
+  <section class="sd-panel" id="sd-panel-thesis" data-panel="thesis" role="tabpanel" aria-labelledby="sd-tab-thesis" hidden>
+  <div class="ticker-brief" data-ticker-brief="{{ stock.ticker }}" aria-live="polite"></div>
+  <!-- ===== TRADE PLAN NOTES ===== -->
+  <div class="detail-card notes-card" id="notes">
     <h3 class="card-title">
-      Auto Classification
-      <span class="classify-toggle-status {% if auto_on %}classify-on{% else %}classify-off{% endif %}">
-        {{ "AUTO" if auto_on else "MANUAL" }}
-      </span>
+      My Notes
+      {% if note %}<span class="notes-saved-badge">Saved</span>{% endif %}
     </h3>
-    <div class="classify-body">
-      {% if stock.bucket %}
-        {%- if stock.bucket == "A+ READY" -%}
-          {%- set cl_name = "A+ READY" -%}{%- set cl_css = "classify-aplus" -%}
-        {%- elif stock.bucket == "SETUPS FORMING" -%}
-          {%- set cl_name = "SETUPS FORMING" -%}{%- set cl_css = "classify-secondary" -%}
-        {%- elif stock.bucket == "TREND WATCH" -%}
-          {%- set cl_name = "TREND WATCH" -%}{%- set cl_css = "classify-secondary" -%}
-        {%- elif stock.bucket == "EXTENDED / CHASE ZONE" -%}
-          {%- set cl_name = "EXTENDED / CHASE ZONE" -%}{%- set cl_css = "classify-swing" -%}
-        {%- else -%}
-          {%- set cl_name = "AVOID / BLOCKED" -%}{%- set cl_css = "classify-core" -%}
-        {%- endif -%}
-      {% endif %}
-      <div class="classify-target-row">
-        <span class="classify-label">Recommended list</span>
-        <span class="classify-wl-badge {{ cl_css if stock.bucket else 'classify-core' }}">
-          {{ cl_name if stock.bucket else "—" }}
-        </span>
-      </div>
-      {% if stock.classify_reason %}
-      <div class="classify-reason">{{ stock.classify_reason }}</div>
-      {% endif %}
-      <form action="{{ url_for('toggle_auto_classify', ticker=stock.ticker) }}" method="POST" class="classify-toggle-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        {% if auto_on %}
-          <input type="hidden" name="auto_classify" value="0">
-          <button type="submit" class="btn-classify-toggle btn-classify-off">Turn OFF — Manual Override</button>
-          <span class="classify-toggle-hint">Auto is ON — stock moves automatically on refresh</span>
-        {% else %}
-          <input type="hidden" name="auto_classify" value="1">
-          <button type="submit" class="btn-classify-toggle btn-classify-on">Turn ON — Re-enable Auto</button>
-          <span class="classify-toggle-hint">Manual mode — stock stays where you put it</span>
-        {% endif %}
-      </form>
-    </div>
-  </div>
-
-  <!-- ===== SETUP TYPE (interactive selector) ===== -->
-  <div class="detail-card setup-type-card">
-    <h3 class="card-title">Setup Type Override</h3>
-    <form action="{{ url_for('set_setup_type', ticker=stock.ticker) }}" method="POST">
+    <form action="{{ url_for('save_stock_note', ticker=stock.ticker) }}" method="POST">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="setup-type-row">
-        {% for stype in setup_types %}
-        <button
-          type="submit"
-          name="setup_type"
-          value="{{ stype }}"
-          class="setup-type-btn setup-pill {{ get_setup_type_class(stype) }} {{ 'active' if stock.swing_setup_type == stype or stock.setup_type == stype else '' }}"
-        >{{ stype }}</button>
-        {% endfor %}
-      </div>
+      <textarea
+        name="note_text"
+        class="notes-textarea"
+        placeholder="Bias: &#10;Entry trigger: &#10;Stop below: &#10;Target 1: &#10;Target 2: &#10;Hold duration: &#10;Notes:"
+        rows="9"
+      >{{ note }}</textarea>
+      <button type="submit" class="btn btn-save">Save Notes</button>
     </form>
-    <div class="setup-type-hint">Auto-classified from swing structure. Click to override manually.</div>
   </div>
-
+  </section>
+  <section class="sd-panel" id="sd-panel-fundamentals" data-panel="fundamentals" role="tabpanel" aria-labelledby="sd-tab-fundamentals" hidden>
+  <!-- ===== COMPANY OVERVIEW ===== -->
+  <div id="company-overview-card" class="detail-card company-overview-card" style="margin-bottom: 1rem;">
+    <h3 class="card-title">Company Overview</h3>
+    <div class="co-meta-row">
+      <span id="co-name" class="co-name"></span>
+      <span id="co-sector-chip" class="co-chip co-chip-sector" style="display:none;"></span>
+      <span id="co-industry-chip" class="co-chip co-chip-industry" style="display:none;"></span>
+    </div>
+    {% with market_cap_ticker=stock.ticker %}{% include '_company_market_cap.html' %}{% endwith %}
+    <div id="co-description" class="co-description"></div>
+  </div>
+  <div class="sd-links">
+    <a class="sd-btn" href="{{ url_for('fundamentals_page', ticker=stock.ticker) }}">Full fundamentals →</a>
+    <a class="sd-btn" href="{{ url_for('research_page', ticker=stock.ticker) }}">Company research →</a>
+  </div>
+  </section>
+  <section class="sd-panel" id="sd-panel-tools" data-panel="tools" role="tabpanel" aria-labelledby="sd-tab-tools" hidden>
   <!-- ===== PRE-MARKET / SWING PLAN ===== -->
   <div class="detail-card plan-card" id="plan">
     <h3 class="card-title">
@@ -1531,29 +1518,51 @@
     </form>
   </div>
 
-  <!-- ===== TRADE PLAN NOTES ===== -->
-  <div class="detail-card notes-card" id="notes">
-    <h3 class="card-title">
-      My Notes
-      {% if note %}<span class="notes-saved-badge">Saved</span>{% endif %}
-    </h3>
-    <form action="{{ url_for('save_stock_note', ticker=stock.ticker) }}" method="POST">
+  <!-- ===== WATCHLIST ASSIGNMENT ===== -->
+  <div class="detail-card wl-assign-card">
+    <h3 class="card-title">Watchlists</h3>
+    <form action="{{ url_for('stock_set_watchlists', ticker=stock.ticker) }}" method="POST" class="wl-assign-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <textarea
-        name="note_text"
-        class="notes-textarea"
-        placeholder="Bias: &#10;Entry trigger: &#10;Stop below: &#10;Target 1: &#10;Target 2: &#10;Hold duration: &#10;Notes:"
-        rows="9"
-      >{{ note }}</textarea>
-      <button type="submit" class="btn btn-save">Save Notes</button>
+      <div class="wl-assign-checks">
+        {% for wl in all_wls %}
+        <label class="wl-assign-label {% if wl.id in ticker_wl_ids %}wl-assign-checked{% endif %}">
+          <input type="checkbox" name="watchlist_ids" value="{{ wl.id }}"
+                 {% if wl.id in ticker_wl_ids %}checked{% endif %}>
+          <span class="wl-assign-name">{{ wl.name }}</span>
+          <span class="wl-assign-check-icon">✓</span>
+        </label>
+        {% endfor %}
+      </div>
+      <button type="submit" class="btn btn-save btn-sm">Update</button>
     </form>
   </div>
+
+  <!-- ===== SETUP TYPE (interactive selector) ===== -->
+  <div class="detail-card setup-type-card">
+    <h3 class="card-title">Setup Type Override</h3>
+    <form action="{{ url_for('set_setup_type', ticker=stock.ticker) }}" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="setup-type-row">
+        {% for stype in setup_types %}
+        <button
+          type="submit"
+          name="setup_type"
+          value="{{ stype }}"
+          class="setup-type-btn setup-pill {{ get_setup_type_class(stype) }} {{ 'active' if stock.swing_setup_type == stype or stock.setup_type == stype else '' }}"
+        >{{ stype }}</button>
+        {% endfor %}
+      </div>
+    </form>
+    <div class="setup-type-hint">Auto-classified from swing structure. Click to override manually.</div>
+  </div>
+  </section>
 
 </div>
 
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/stock_page.js') }}"></script>
 <script>
 function setPlanBias(bias) {
   document.getElementById('plan-bias-input').value = bias;
@@ -1857,6 +1866,8 @@ async function stockDetailRefresh() {
       _setPollState('ERROR', 'poll-state-error');
       return false;
     }
+
+    if (window.sdApplyLive) { try { window.sdApplyLive(s); } catch (e) { console.warn('[detail] hero patch', e); } }
 
     // ── Detect whether anything meaningful changed ──────────────────────────
     const priceChanged = s.current_price !== _prevDetailPrice;
@@ -2278,6 +2289,8 @@ console.log('[detail] Auto-refresh armed for', DETAIL_TICKER,
       const descEl = document.getElementById("co-description");
 
       name.textContent = p.company_name || ticker;
+      const heroName = document.getElementById("sd-co-name");
+      if (heroName && p.company_name) heroName.textContent = p.company_name;
       if (p.sector) { secEl.textContent = p.sector; secEl.style.display = "inline-flex"; }
       if (p.industry) { indEl.textContent = p.industry; indEl.style.display = "inline-flex"; }
       descEl.textContent = p.description || "";
