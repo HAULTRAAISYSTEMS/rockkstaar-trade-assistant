@@ -526,6 +526,18 @@ def parse_quote_entry(entry: dict) -> dict | None:
     # The regular session's last price and when it traded: after the bell
     # `lastPrice` is an after-hours print, but today's daily candle closes at
     # the regular-session close.
+    # Extended hours: when Schwab's extended block has a later trade than the
+    # quote block, that trade is the latest print.
+    ext = (entry or {}).get("extended") or {}
+    try:
+        xp = float(ext.get("lastPrice") or 0)
+        xt = int(int(ext.get("tradeTime") or 0) / 1000)
+    except (TypeError, ValueError):
+        xp, xt = 0, 0
+    if xp > 0 and xt > out["epoch"]:
+        out["price"], out["epoch"] = round(xp, 4), xt
+        if out.get("prev_close"):
+            out["change_pct"] = round((xp / out["prev_close"] - 1) * 100, 2)
     reg = (entry or {}).get("regular") or {}
     try:
         rclose = float(reg.get("regularMarketLastPrice") or 0)
@@ -563,7 +575,7 @@ def fetch_quotes(symbols: list[str], user_id: int | None = None) -> dict:
     for i in range(0, len(symbols), 200):
         chunk = symbols[i:i + 200]
         url = f"{_BASE_MARKET}/quotes?" + urlencode(
-            {"symbols": ",".join(chunk), "fields": "quote", "indicative": "false"})
+            {"symbols": ",".join(chunk), "fields": "quote,regular,extended", "indicative": "false"})
         req = urllib.request.Request(url, headers={
             "Authorization": f"Bearer {tokens['access_token']}", "Accept": "application/json"})
         try:

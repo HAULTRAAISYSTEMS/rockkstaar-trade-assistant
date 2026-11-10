@@ -69,6 +69,35 @@ def _parse_bar(raw: dict, source: str = "alpaca_boats") -> dict | None:
     return bar if timestamp and min(bar["open"], bar["high"], bar["low"], bar["close"]) > 0 else None
 
 
+def latest_overnight_bars(symbols: list[str]) -> dict[str, dict]:
+    """Latest 8 PM-4 AM bar for many symbols in one call: {SYM: bar}.
+
+    BOATS first (real time on paid plans), then Basic's derived ``overnight``
+    feed (may lag). Never synthesizes; no credentials or access means {}.
+    """
+    key, secret = _credentials()
+    syms = [s for s in dict.fromkeys(symbols or []) if s][:200]
+    if not (key and secret and syms):
+        return {}
+    headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
+    for feed, source in (("boats", "alpaca_boats"), ("overnight", "alpaca_overnight")):
+        try:
+            response = requests.get(f"{_BASE_URL}/bars/latest", params={"symbols": ",".join(syms), "feed": feed},
+                                    headers=headers, timeout=6)
+            if response.status_code != 200:
+                continue
+            out = {}
+            for sym, raw in ((response.json() or {}).get("bars") or {}).items():
+                bar = _parse_bar(raw or {}, source)
+                if bar:
+                    out[str(sym).upper()] = bar
+            if out:
+                return out
+        except (requests.RequestException, ValueError):
+            continue
+    return {}
+
+
 def _fetch_basic_overnight_latest(ticker: str, headers: dict[str, str]) -> dict:
     """Return Alpaca Basic's derived latest overnight bar when BOATS is gated.
 
