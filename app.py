@@ -5385,6 +5385,20 @@ def terminal():
         auto_refresh_stale_closes(
             watchlist, data_map=data_map, user_id=current_user_id()
         )
+    # First paint uses the shared live feed's price and previous close, not
+    # the stored row, which can be a session behind.
+    if watchlist and _MKT_AVAILABLE:
+        try:
+            import stock_page as _sp
+            _live = _mkt.live_quotes(watchlist) or {}
+            for _t, _q in _live.items():
+                if _t in data_map and _q.get("price"):
+                    _sp.overlay_live(data_map[_t], {"price": round(float(_q["price"]), 2),
+                                                    "change_pct": _q.get("change_pct"),
+                                                    "prev_close": _q.get("prev_close"),
+                                                    "source": _q.get("source") or ""})
+        except Exception as _lo:
+            logger.debug("terminal live overlay: %s", _lo)
     stocks  = [annotate(data_map[t], trade_mode=_trade_mode) for t in watchlist if t in data_map]
     ranked  = rank_stocks(stocks)
     # The left rail follows the user's saved watchlist order. Ranking remains
