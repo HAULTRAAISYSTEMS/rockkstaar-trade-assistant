@@ -39,7 +39,15 @@ def _load(ticker, part, force):
         return get_fundamentals(ticker, force_refresh=force)
     if part == 'quarter':
         from research_financials import get_quarter
-        return get_quarter(ticker, force=force)
+        data = get_quarter(ticker, force=force)
+        try:
+            import earnings_release
+            rel = earnings_release.latest(ticker)
+            if rel and (not data.get('period_end') or rel['filed'] > (data.get('filed') or '')):
+                data['release'] = rel
+        except Exception:
+            pass
+        return data
     from finnhub_ttm import _finnhub_get, fetch_finnhub_quote
     if part == 'benchmarks':
         return {'SPY': fetch_finnhub_quote('SPY'), 'QQQ': fetch_finnhub_quote('QQQ')}

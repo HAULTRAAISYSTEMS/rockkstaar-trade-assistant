@@ -24,3 +24,11 @@ def _clear_edgar_extract_cache():
     fundamentals_engine.clear_edgar_extract_cache()
     yield
     fundamentals_engine.clear_edgar_extract_cache()
+
+
+@pytest.fixture(autouse=True)
+def _no_live_earnings_release(monkeypatch):
+    """The research page asks SEC for a pending earnings release. Tests stay
+    offline; earnings_release's own tests call fetch() with a stub."""
+    import earnings_release
+    monkeypatch.setattr(earnings_release, "latest", lambda ticker: None)

@@ -102,6 +102,11 @@
     </div>
     {% if selected_period == 'quarterly' %}
     <div class="cr-section__head"><div><span>03 · Verify</span><h2>Financial history</h2></div><small>Latest available quarter{% if quarter and quarter.available %} {{ quarter.period_end }}{% endif %}</small></div>
+    {% if quarter and quarter.release %}{% set rl = quarter.release %}
+    <div class="cr-caution" role="status"><b>New results announced {{ rl.filed }}.</b> {{ ticker }} released earnings; the statements below are from the last 10-Q/10-K and update when the next one is filed.
+      {% if rl.revenue is not none %} Revenue {{ rl.revenue|release_money }}.{% endif %}{% if rl.net_income is not none %} Net {{ 'loss' if rl.net_income < 0 else 'income' }} {{ rl.net_income|abs|release_money }}.{% endif %}{% if rl.eps_diluted is not none %} Diluted EPS {{ '-' if rl.eps_diluted < 0 }}${{ '%.2f'|format(rl.eps_diluted|abs) }}.{% endif %}
+      Unaudited press release (8-K Exhibit 99.1) · <a href="{{ rl.url }}" target="_blank" rel="noopener noreferrer">Read it ↗</a></div>
+    {% endif %}
     {% if quarter and quarter.available %}
     <p>{{ quarter.form or 'SEC filing' }} · period ended {{ quarter.period_end }} · filed {{ quarter.filed or 'date unavailable' }}{% if quarter.url %} · <a href="{{ quarter.url }}" target="_blank" rel="noopener noreferrer">Open SEC filing ↗</a>{% endif %}</p>
     {% if research.latest_filing and research.latest_filing.period_end and research.latest_filing.period_end > quarter.period_end %}<p class="cr-caution">A newer financial filing covers {{ research.latest_filing.period_end }}. Quarterly figures for that period are not available in this view yet.</p>{% endif %}
