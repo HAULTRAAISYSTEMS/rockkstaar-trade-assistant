@@ -10,7 +10,7 @@ import pytest
 @pytest.mark.parametrize("status,payload,expected", [
     (503, {"ok": False, "error": "secret upstream detail"}, "UNAVAILABLE"),
     (200, {"ok": True, "briefing": {}}, "UNAVAILABLE"),
-    (200, {"ok": True, "briefing": {"briefing": "A source-backed summary", "macro_bias": "risk_on"}}, "🟢 RISK ON"),
+    (200, {"ok": True, "briefing": {"briefing": "A source-backed summary", "macro_bias": "risk_on"}}, "🟢 RISK-ON"),
 ])
 def test_briefing_failure_is_not_rendered_as_neutral(status, payload, expected):
     node = shutil.which("node")

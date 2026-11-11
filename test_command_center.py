@@ -459,13 +459,14 @@ class TestTheStripReadsAsEnglish:
         not how it is read."""
         monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: self._ctx("risk_on"))
         html = client.get("/").get_data(as_text=True)
-        assert "Risk On" in html
+        # The trend input reads in trend words; the verdict word is the dial's.
+        assert 'id="cc-regime">Uptrend<' in html
         assert "Risk_on" not in html and "Risk_On" not in html
 
     def test_a_hyphenated_regime_reads_the_same_way(self, client, monkeypatch):
         monkeypatch.setattr(legacy, "_get_mkt_ctx", lambda: self._ctx("Risk-Off"))
         html = client.get("/").get_data(as_text=True)
-        assert "Risk Off" in html
+        assert 'id="cc-regime">Downtrend<' in html
 
     def test_the_loading_notice_does_not_sit_above_the_title(self):
         """The first thing the page said was that a lower panel was fetching."""
