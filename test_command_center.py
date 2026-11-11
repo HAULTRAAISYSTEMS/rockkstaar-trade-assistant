@@ -348,7 +348,8 @@ class TestTheLayout:
             assert f'id="{hook}"' in self.PAGE, hook
 
     def test_the_controls_survived(self):
-        for hook in ("setMode('both')", "refreshAll()", 'id="liq-last-updated"'):
+        # The All / Investing / Trading switch was removed (it changed nothing).
+        for hook in ("refreshAll()", 'id="liq-last-updated"'):
             assert hook in self.PAGE, hook
 
     def test_nothing_loops_except_the_live_dot_and_loading_skeletons(self):

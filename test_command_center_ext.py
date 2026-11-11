@@ -119,3 +119,25 @@ def test_today_page_says_each_thing_once():
     assert "Elite news" not in html and "AI Morning Briefing" not in html.replace("AI morning briefing", "")
     assert html.count('id="ai-brief-body"') == 1 and 'class="cc-now' in html
     assert "reject('story_repeat')" in html and "rejectattr('title', 'equalto'" in html
+
+
+def test_command_center_layout_redesign():
+    """Globe is the hero; All/Investing/Trading is gone; body is two columns
+    with Setups | Watchlist as tabs and the live feed on the side."""
+    html = open("templates/liquidity.html", encoding="utf-8").read()
+    assert "liq-mode-toggle" not in html and "setMode(" not in html
+    assert "cc-hero-xl" in html and 'class="cc-shortcuts"' in html
+    assert "workspace-paths--next" not in html
+    assert html.index('class="cc-col-main"') < html.index('class="cc-col-side"')
+    assert html.index('class="cc-col-side"') < html.index('id="nx-panel"')
+    assert 'data-cc-tab="setups"' in html and 'data-cc-panel="watch" hidden' in html
+    scripts = open("templates/_liq_scripts.html", encoding="utf-8").read()
+    assert "localStorage.removeItem('cc-mode')" in scripts
+    assert "localStorage.getItem('cc-mode')" not in scripts
+
+
+def test_globe_scales_up_on_big_canvas():
+    js = open("static/js/command_center_3d.js", encoding="utf-8").read()
+    assert "Math.min(W, H) > 420 ? 0.34 : 0.29" in js
+    css = open("static/css/today.css", encoding="utf-8").read()
+    assert ".cc-hero-xl > .cc3d-orb" in css and "max-width: 560px" in css

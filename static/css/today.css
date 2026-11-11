@@ -1,18 +1,6 @@
 /* Today page — shorter, no repeats. Loaded after command_center.css rules
    via higher specificity; scoped to .liq-page. */
 
-/* Workflow shortcuts: one slim row instead of three tall cards. */
-.liq-page .workspace-paths--next { gap: 8px !important; margin: 10px 0 !important; }
-.liq-page .workspace-paths--next > a {
-  min-height: 0 !important; padding: 11px 14px !important; gap: 2px !important;
-  border-radius: 12px !important;
-}
-.liq-page .workspace-paths--next > a small,
-.liq-page .workspace-paths--next > a .workflow-icon,
-.liq-page .workspace-paths--next > a .workflow-action { display: none !important; }
-.liq-page .workspace-paths--next > a strong { font-size: 14px !important; line-height: 1.2 !important; }
-.liq-page .workspace-paths--next > a .workspace-step { font-size: 9.5px !important; }
-
 /* ── Market now: dial (the verdict) + numbers + next event + briefing ──── */
 .liq-page .cc-now {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
@@ -53,7 +41,7 @@
 .liq-page .cc-more {
   margin: 10px 0 0; padding: 8px 12px; border-radius: 10px; cursor: pointer;
   border: 1px solid rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .03);
-  color: var(--text, #e6ebf2); font: 600 12px/1 inherit;
+  color: var(--text, #e6ebf2); font-family: inherit; font-weight: 600; font-size: 12px; line-height: 1;
 }
 .liq-page [data-more][hidden] { display: none !important; }
 
@@ -68,9 +56,6 @@
   .liq-page .cc-now { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
-  .liq-page .workspace-paths--next { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-  .liq-page .workspace-paths--next > a { padding: 10px !important; }
-  .liq-page .workspace-paths--next > a strong { font-size: 12.5px !important; }
   .liq-page .cc-now > .cc-pulse { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .liq-page .cc-trio.cc-duo { grid-template-columns: 1fr; }
 }
@@ -78,4 +63,75 @@
 @media (max-width: 720px) {
   .nx-panel__head { flex-wrap: wrap; }
   .nx-panel__title { font-size: 13px !important; }
+}
+
+/* ═══ Command center redesign: globe as the hero, one market band, two columns ═══ */
+
+/* Hero: the globe takes the bigger share of the header. */
+html.cc27 .liq-page .elite-hero.has-orb.cc-hero-xl {
+  grid-template-columns: minmax(0, .85fr) minmax(420px, 1.15fr);
+  gap: 14px 22px; padding: 26px 26px 22px; min-height: 0;
+}
+html.cc27 .liq-page .elite-hero.has-orb.cc-hero-xl > .cc3d-orb {
+  max-width: 560px; max-height: 560px; justify-self: center;
+}
+html.cc27 .liq-page .elite-hero.cc-hero-xl .elite-hero-title { font-size: clamp(32px, 3.6vw, 54px); }
+
+/* Research shortcuts: small pills next to Refresh. */
+.liq-page .elite-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.liq-page .cc-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
+.liq-page .cc-shortcuts a {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .12); background: rgba(4, 8, 16, .55);
+  color: var(--text, #e6ebf2); font-family: inherit; font-weight: 600; font-size: 12px; line-height: 1; text-decoration: none; white-space: nowrap;
+}
+.liq-page .cc-shortcuts a:hover { border-color: rgba(var(--cc-accent-rgb, 79, 227, 255), .6); color: #fff; }
+.liq-page .cc-shortcuts a span { color: var(--cc-accent-hi, #9fefff); }
+
+/* Market band: dial + verdict left, the numbers in a tight row right. */
+.liq-page .cc-now { grid-template-columns: minmax(300px, .9fr) minmax(0, 1.6fr); align-items: center; gap: 18px; }
+.liq-page .cc-now > .cm-wrap {
+  display: grid; grid-template-columns: 170px minmax(0, 1fr) !important; gap: 14px; align-items: center;
+}
+.liq-page .cc-now > .cm-wrap .cm-dial { max-width: 170px; }
+html.cc27 .liq-page .cc-now > .cc-pulse { align-content: flex-start; align-self: center; }
+html.cc27 .liq-page .cc-now > .cc-pulse > .cc-pulse-cell:not(.cc-pulse-next) { flex: 1 1 96px; padding: 12px 14px 10px !important; }
+html.cc27 .liq-page .cc-now > .cc-pulse > .cc-pulse-next { flex: 1 1 100%; margin-top: 6px; padding: 10px 14px !important; }
+
+/* Body: what to read on the left, what is happening on the right. */
+.liq-page .cc-body { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 18px; align-items: start; margin-top: 8px; }
+.liq-page .cc-col-main, .liq-page .cc-col-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.liq-page .cc-col-main > *, .liq-page .cc-col-side > * { margin: 0 !important; }
+
+/* Setups | Watchlist tabs */
+.liq-page .cc-picks-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.liq-page .cc-tabs { display: inline-flex; gap: 4px; padding: 3px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .1); background: rgba(4, 8, 16, .5); }
+.liq-page .cc-tabs button {
+  border: 0; border-radius: 999px; padding: 6px 12px; cursor: pointer; background: none;
+  color: var(--text-muted, #8d97a4); font-family: inherit; font-weight: 600; font-size: 12px; line-height: 1;
+}
+.liq-page .cc-tabs button[aria-selected="true"] { color: #04121a; background: linear-gradient(120deg, var(--cc-cyan, #4fe3ff), #a8f3ff); }
+.liq-page [data-cc-panel][hidden], .liq-page [data-cc-for][hidden] { display: none !important; }
+
+@media (max-width: 1100px) {
+  html.cc27 .liq-page .elite-hero.has-orb.cc-hero-xl { grid-template-columns: minmax(0, 1fr) minmax(340px, 1fr); }
+  .liq-page .cc-now { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  html.cc27 .liq-page .elite-hero.has-orb.cc-hero-xl { grid-template-columns: 1fr; grid-template-areas: "orb" "copy" "actions"; padding: 16px 14px 18px; }
+  html.cc27 .liq-page .elite-hero.has-orb.cc-hero-xl > .cc3d-orb { max-width: 100%; max-height: 420px; width: 100%; }
+  /* Phones read top to bottom: market, notifications, today, week, changes, picks. */
+  .liq-page .cc-body { display: flex; flex-direction: column; gap: 14px; }
+  .liq-page .cc-col-main, .liq-page .cc-col-side { display: contents; }
+  .liq-page .cc-col-side > .nx-panel { order: 1; }
+  .liq-page .cc-col-main > .cc-story { order: 2; }
+  .liq-page .cc-col-side > .cc-weekcard { order: 3; }
+  .liq-page .cc-col-main > .cc-digest { order: 4; }
+  .liq-page .cc-col-main > .cc-picks { order: 5; }
+}
+@media (max-width: 640px) {
+  html.cc27 .liq-page .elite-hero.has-orb.cc-hero-xl > .cc3d-orb { max-width: 100%; max-height: 360px; }
+  .liq-page .cc-now > .cm-wrap { grid-template-columns: 130px minmax(0, 1fr) !important; gap: 10px; }
+  .liq-page .cc-now > .cm-wrap .cm-dial { max-width: 130px; }
+  html.cc27 .liq-page .cc-now > .cc-pulse > .cc-pulse-cell:not(.cc-pulse-next) { flex: 1 1 40%; }
 }

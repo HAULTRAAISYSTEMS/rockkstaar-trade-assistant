@@ -397,9 +397,6 @@
 
 @keyframes elite-pulse { 50% { opacity:.5; transform:scale(.8); } }
 
-.liq-mode-toggle{ display:flex; gap:.25rem; background:rgba(3,6,12,.72); border:1px solid rgba(var(--cc-accent-rgb, 246,185,74),.14); border-radius:10px; padding:.24rem; backdrop-filter:blur(12px); }
-.liq-mode-btn{ background:transparent; border:none; color:#64748b; padding:.35rem .75rem; border-radius:6px; cursor:pointer; font-size:.8rem; font-weight:600; transition:.15s; }
-.liq-mode-btn.active{ background:linear-gradient(135deg,var(--cc-accent, #f5c15e),#d98b18); color:#171006; box-shadow:0 5px 18px rgba(var(--cc-accent-rgb, 246,185,74),.2); }
 
 .btn-liq-refresh{ background:rgba(15,20,30,.82); border:1px solid #2b3444; color:#bdc6d5; padding:.42rem .8rem; border-radius:8px; cursor:pointer; font-size:.76rem; }
 .btn-liq-refresh:hover{ border-color:var(--elite-gold); color:var(--elite-gold-bright); }
@@ -1072,17 +1069,9 @@ function setMode(mode) {
   document.querySelectorAll('.liq-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   runScan();
 }
-// Restore the last mode on load so the page opens where the user left it.
-document.addEventListener('DOMContentLoaded', function () {
-  var m = 'both';
-  try { m = localStorage.getItem('cc-mode') || 'both'; } catch(e) {}
-  if (['both', 'invest', 'trade'].indexOf(m) === -1) m = 'both';
-  if (m !== 'both') {
-    _mode = m;
-    document.body.classList.add('mode-' + m);
-    document.querySelectorAll('.liq-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
-  }
-});
+// The All / Investing / Trading switch is gone (it changed nothing visible).
+// Clear a saved mode so an old "invest"/"trade" choice can't hide sections.
+try { localStorage.removeItem('cc-mode'); } catch(e) {}
 
 /* ─────────────────────────────────────────────────────────────
    1. FED LIQUIDITY STATUS

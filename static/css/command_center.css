@@ -923,16 +923,13 @@ html.cc27 .btn-liq-refresh {
 }
 html.cc27 .btn-primary:hover,
 html.cc27 .btn-liq-refresh:hover { filter: brightness(1.08); }
-html.cc27 .liq-mode-toggle,
 html.cc27 .hx .tabs {
   padding: 4px;
   border: 1px solid var(--cc-edge);
   border-radius: 999px;
   background: rgba(4, 8, 16, 0.6);
 }
-html.cc27 .liq-mode-btn,
 html.cc27 .hx .tab { border-radius: 999px !important; }
-html.cc27 .liq-mode-btn.active,
 html.cc27 .hx .tab.on {
   color: #04121a !important;
   background: linear-gradient(120deg, var(--cc-cyan), #a8f3ff) !important;

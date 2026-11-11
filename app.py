@@ -9347,12 +9347,24 @@ def _command_center_context() -> dict:
         except Exception as exc:
             logger.debug("command centre: %s unavailable: %s", ticker, exc)
             data = {}
+        setup = data.get("swing_setup_type") or data.get("setup_type") or ""
+        # The stored setup label was written at the last analysis, against
+        # that moment's price ("Near 61.8%" after price moved to the 50%).
+        # Re-read it against the live print; the levels themselves don't move.
+        try:
+            import stock_page as _sp
+            _sp.overlay_live(data, _sp.live_quote(ticker))
+            if data.get("swing_setup_type") and data.get("current_price"):
+                from scoring import compute_swing_setup_type as _cst
+                setup = _cst(data) or setup
+        except Exception as exc:
+            logger.debug("command centre: live setup %s: %s", ticker, exc)
         rows.append({
             "ticker": ticker,
             "name": data.get("company_name") or "",
             "price": data.get("current_price"),
             "score": data.get("swing_score") or data.get("setup_score"),
-            "setup": data.get("swing_setup_type") or data.get("setup_type") or "",
+            "setup": setup,
             "grade": data.get("swing_confidence") or "",
         })
     try:
