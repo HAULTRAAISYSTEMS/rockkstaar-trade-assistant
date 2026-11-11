@@ -1619,15 +1619,15 @@ function _renderStory(story) {
   const perms = (story.permissions || []).map(p =>
     '<span class="cc-chip ms-perm ' + _permClass(p) + '">' + escapeHtml(p) + '</span>'
   ).join('');
-  const bullets = (story.bullets || []).map(b =>
+  // Same rule as the server render: no bullet the page already shows (VIX is
+  // in Market now), three at most.
+  const _repeat = /^vix /i;
+  const bullets = (story.bullets || []).filter(b => !_repeat.test(String(b).trim())).slice(0, 3).map(b =>
     '<div class="ms-bullet"><span>\u203a</span>' + escapeHtml(b) + '</div>'
   ).join('');
   body.innerHTML =
     '<div id="ms-glow" class="cc-story-glow"></div>' +
-    '<div class="cc-story-badges">' +
-      '<span id="ms-sentiment-badge" class="cc-chip ms-sent">' + escapeHtml(String(story.sentiment || 'neutral').toUpperCase()) + '</span>' +
-      '<span id="ms-regime-badge" class="cc-chip cc-chip-gold">' + escapeHtml(String(story.regime || '').replace(/_/g, ' ')) + '</span>' +
-    '</div>' +
+
     '<div id="ms-headline" class="cc-story-headline">' + escapeHtml(story.headline || '') + '</div>' +
     '<div id="ms-bullets" class="cc-story-bullets">' + bullets + '</div>' +
     (perms ? '<div id="ms-permissions" class="cc-story-perms">' + perms + '</div>' : '');

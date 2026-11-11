@@ -47,3 +47,23 @@
 .sm-dashboard .sm-watch-row ul{margin:0;padding:0 14px 12px 28px;display:grid;gap:5px;font-size:12.5px;color:#cfd7df}.sm-dashboard .sm-watch-row li a{color:#9fdcff}
 .sm-dashboard .sm-detail-head{margin:22px 0 8px}.sm-dashboard .sm-detail-head p{margin:4px 0 0;color:#9aa5b1;font-size:13px}
 @media(max-width:720px){.sm-dashboard .sm-buy-grid{grid-template-columns:1fr}.sm-dashboard .sm-top-filters{width:100%}}
+
+/* Phones: cards never wider than the screen. A grid track defaults to
+   min-width:auto, so long tags and the button row pushed cards off-screen. */
+.sm-dashboard .sm-buy-grid{grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))}
+.sm-dashboard .sm-buy,.sm-dashboard .sm-buy>*{min-width:0}
+.sm-dashboard .sm-buy-nums{grid-template-columns:repeat(3,minmax(0,1fr))}
+.sm-dashboard .sm-buy-nums b,.sm-dashboard .sm-buy-nums small{overflow-wrap:anywhere}
+.sm-dashboard .sm-buy-tags span{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.sm-dashboard .sm-buy footer{row-gap:8px}
+.sm-dashboard .sm-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+.sm-dashboard .sm-tabs::-webkit-scrollbar{display:none}
+.sm-dashboard .sm-tab{flex:0 0 auto;white-space:nowrap}
+@media(max-width:720px){
+  .sm-dashboard .sm-top,.sm-dashboard .sm-watch{padding:14px 12px}
+  .sm-dashboard .sm-buy-nums{gap:5px}
+  .sm-dashboard .sm-buy-nums div{padding:7px}
+  .sm-dashboard .sm-buy-nums b{font-size:12.5px;white-space:nowrap;overflow-wrap:normal}
+  .sm-dashboard .sm-section-head{flex-direction:column;align-items:stretch;gap:10px}
+  .sm-dashboard .sm-top-filters{flex-direction:row}
+}

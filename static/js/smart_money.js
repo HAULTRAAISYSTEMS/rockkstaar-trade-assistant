@@ -32,6 +32,14 @@
   });
 
   selectSummary("30");
+
+  // Open the tab the visit is about: a filings filter or #filings / #watch
+  // lands on Filings / Your watchlist; #top-buys and everything else on Top buys.
+  var params = new URLSearchParams(location.search), hash = (location.hash || "").slice(1);
+  var filingKeys = ["ticker", "role", "transaction_type", "minimum_value", "days", "cluster"];
+  if (hash === "filings" || filingKeys.some(function (k) { return params.has(k); })) selectPanel("filings");
+  else if (hash === "watch") selectPanel("watch");
+  else if (hash === "congress") selectPanel("congress");
 })();
 
 /* Insider track record: this insider's stored buys and how they've done since. */

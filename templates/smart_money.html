@@ -25,11 +25,14 @@
   </section>
 
   <div class="sm-tabs" role="tablist" aria-label="Smart money feed">
-    <button class="sm-tab active" type="button" data-panel="insiders" aria-selected="true">SEC Insider Intelligence <span>{{ top_buys|length }}</span></button>
+    <button class="sm-tab active" type="button" data-panel="top" aria-selected="true">Top buys <span>{{ top_buys|length }}</span></button>
+    <button class="sm-tab" type="button" data-panel="watch" aria-selected="false">Your watchlist <span>{{ watch_list|length }}</span></button>
+    <button class="sm-tab" type="button" data-panel="filings" aria-selected="false">Filings <span>{{ dashboard.events|length }}</span></button>
     <button class="sm-tab" type="button" data-panel="congress" aria-selected="false">Congressional Trades <span>{{ congress|length }}</span></button>
   </div>
 
-  <section class="sm-panel" id="sm-insiders">
+  {# One place per trade: the ranked buys, your names, then the raw filings. #}
+  <section class="sm-panel" id="sm-top">
     <section class="sm-top" id="top-buys" aria-label="Top insider buys">
       <div class="sm-section-head">
         <div><span class="sm-kicker">Every ticker · open-market purchases only</span><h2>Top insider buys</h2><p class="sm-top-sub">Insiders sell for many reasons. They buy with their own money for one. Ranked by size, who bought, clusters and conviction.</p></div>
@@ -72,6 +75,9 @@
       </div>
     </section>
 
+  </section>
+
+  <section class="sm-panel" id="sm-watch" hidden>
     <section class="sm-watch" aria-label="Your watchlist insider activity">
       <div class="sm-section-head"><div><span class="sm-kicker">All {{ watched_tickers|length }} tracked tickers · last 30 days</span><h2>Your watchlist — open-market activity</h2></div></div>
       {% if watch_list %}
@@ -89,6 +95,9 @@
       {% else %}<div class="sm-empty"><strong>No open-market insider trades on your watchlist in the stored data yet.</strong><p>Coverage grows as the market-wide feed backfills. Gifts, tax withholding and awards are not counted.</p></div>{% endif %}
     </section>
 
+  </section>
+
+  <section class="sm-panel" id="sm-filings" hidden>
     <div class="sm-detail-head"><span class="sm-kicker">Filing-level detail</span><p>{% if dashboard.filters.ticker %}Every Form 4 code for {{ dashboard.filters.ticker }}, read live from the SEC.{% else %}Live SEC read of your first ten tracked names. Enter a ticker below for any company's full filing history.{% endif %}</p></div>
     <div class="sm-status {{ 'is-warning' if not insider_status.available or insider_status.partial else '' }}">
       <strong>{{ 'Verified SEC connection' if insider_status.available else 'SEC refresh unavailable' }}</strong>

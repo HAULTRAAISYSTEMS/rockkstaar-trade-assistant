@@ -1,0 +1,81 @@
+/* Today page — shorter, no repeats. Loaded after command_center.css rules
+   via higher specificity; scoped to .liq-page. */
+
+/* Workflow shortcuts: one slim row instead of three tall cards. */
+.liq-page .workspace-paths--next { gap: 8px !important; margin: 10px 0 !important; }
+.liq-page .workspace-paths--next > a {
+  min-height: 0 !important; padding: 11px 14px !important; gap: 2px !important;
+  border-radius: 12px !important;
+}
+.liq-page .workspace-paths--next > a small,
+.liq-page .workspace-paths--next > a .workflow-icon,
+.liq-page .workspace-paths--next > a .workflow-action { display: none !important; }
+.liq-page .workspace-paths--next > a strong { font-size: 14px !important; line-height: 1.2 !important; }
+.liq-page .workspace-paths--next > a .workspace-step { font-size: 9.5px !important; }
+
+/* ── Market now: dial (the verdict) + numbers + next event + briefing ──── */
+.liq-page .cc-now {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 14px; align-items: stretch; margin: 14px 0;
+}
+.liq-page .cc-now > .cm-wrap { order: -1; margin: 0; grid-template-columns: 1fr; align-content: center; }
+.liq-page .cc-now > .cm-wrap .cm-dial { max-width: 240px; margin: 0 auto; width: 100%; }
+.liq-page .cc-now > .cc-pulse {
+  margin: 0 !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; align-content: stretch;
+}
+.liq-page .cc-now > .cc-pulse > .cc-pulse-next { grid-column: 1 / -1; }
+.liq-page .cm-why { margin: 2px 0 10px; }
+.liq-page .cm-why > summary {
+  cursor: pointer; color: var(--text-muted, #8d97a4); font-size: 12px; list-style: none; width: fit-content;
+}
+.liq-page .cm-why > summary::-webkit-details-marker { display: none; }
+.liq-page .cm-why > summary::after { content: " ▾"; }
+.liq-page .cm-why[open] > summary::after { content: " ▴"; }
+.liq-page .cm-why .cm-parts { margin-top: 8px; }
+
+/* ── Today's read: no verdict chips; the AI briefing folded in ─────────── */
+.liq-page .cc-story-links { display: inline-flex; gap: 14px; }
+.liq-page .cm-trend { display: flex; align-items: baseline; justify-content: center; gap: 6px; margin-top: 6px; font-size: 12px; }
+.liq-page .cm-trend .cc-pulse-k { margin: 0 !important; font-size: 10px !important; }
+.liq-page .cm-trend .cc-pulse-v { font-size: 13px !important; }
+.liq-page .cc-ai-brief { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, .06); }
+.liq-page .cc-ai-brief > summary {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  cursor: pointer; list-style: none;
+}
+.liq-page .cc-ai-brief > summary::-webkit-details-marker { display: none; }
+.liq-page .cc-ai-brief > summary .ai-brief-label::after { content: " ▾"; }
+.liq-page .cc-ai-brief[open] > summary .ai-brief-label::after { content: " ▴"; }
+.liq-page .cc-ai-brief #ai-brief-body { margin-top: 10px; }
+.liq-page .cc-ai-brief .ai-brief-refresh { margin-top: 8px; }
+
+/* ── Show more ────────────────────────────────────────────────────────── */
+.liq-page .cc-more {
+  margin: 10px 0 0; padding: 8px 12px; border-radius: 10px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .03);
+  color: var(--text, #e6ebf2); font: 600 12px/1 inherit;
+}
+.liq-page [data-more][hidden] { display: none !important; }
+
+/* Notifications header links */
+.nx-panel__links { display: inline-flex; gap: 2px; align-items: center; }
+.nx-panel__links a.nx-text-btn { text-decoration: none; }
+
+/* Setups + watchlist side by side (news lives in Notifications now). */
+.liq-page .cc-trio.cc-duo { grid-template-columns: 1fr 1fr; }
+
+@media (max-width: 900px) {
+  .liq-page .cc-now { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .liq-page .workspace-paths--next { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .liq-page .workspace-paths--next > a { padding: 10px !important; }
+  .liq-page .workspace-paths--next > a strong { font-size: 12.5px !important; }
+  .liq-page .cc-now > .cc-pulse { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .liq-page .cc-trio.cc-duo { grid-template-columns: 1fr; }
+}
+.nx-panel__links .nx-text-btn { white-space: nowrap; }
+@media (max-width: 720px) {
+  .nx-panel__head { flex-wrap: wrap; }
+  .nx-panel__title { font-size: 13px !important; }
+}

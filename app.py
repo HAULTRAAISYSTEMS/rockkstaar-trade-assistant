@@ -524,6 +524,16 @@ def service_worker():
     return response
 
 
+# Today's read bullets that the page already says elsewhere: VIX sits in the
+# Market-now card.
+_STORY_REPEAT_PREFIXES = ("vix ",)
+
+
+@app.template_test("story_repeat")
+def _story_repeat(bullet) -> bool:
+    return str(bullet or "").strip().lower().startswith(_STORY_REPEAT_PREFIXES)
+
+
 @app.template_filter("et_time")
 def et_time_filter(value: str | None) -> str:
     """Convert a stored timestamp to a clean ET time string for UI display.
@@ -9397,7 +9407,8 @@ def _mood_inputs_now():
     except Exception:
         pass
     reading = _cc.mood(vix=pulse.get("vix"), spy=pulse.get("spy"), qqq=pulse.get("qqq"),
-                       es=pulse.get("es"), nq=pulse.get("nq"), breadth=breadth, news_tone=tone)
+                       es=pulse.get("es"), nq=pulse.get("nq"), breadth=breadth, news_tone=tone,
+                       regime=pulse.get("regime") if pulse.get("known") else None)
     return pulse, reading
 
 
