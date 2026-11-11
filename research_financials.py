@@ -44,15 +44,53 @@ def build_quarter(facts, cik):
             fact = qf._pick(row_facts, tags, window=window, end=end)
             if not fact or fact.get('value') is None:
                 continue
-            value = _fmt_statement_value(fact['value'], '' if row_key == 'sh' else '$', row_key == 'eps')
-            rows.append({'label': label, 'values': [value],
-                         'period_start': fact.get('start'), 'period_end': end})
+            start, raw, ytd = fact.get('start'), fact['value'], None
+            if key == 'cash':
+                start, raw, ytd = _cash_quarter(facts, fact)
+            value = _fmt_statement_value(raw, '' if row_key == 'sh' else '$', row_key == 'eps')
+            row = {'label': label, 'values': [value], 'period_start': start, 'period_end': end}
+            if ytd is not None:
+                row['ytd_value'] = _fmt_statement_value(ytd, '$', False)
+                row['ytd_start'] = fact.get('start')
+            rows.append(row)
+        if key == 'cash' and rows:
+            quarters = sum(1 for r in rows if 'ytd_value' in r or _span(r) <= 100)
+            basis = 'Quarter' if quarters == len(rows) else ('Year to date' if not quarters else 'Quarter where derivable')
         if rows:
             tables.append({'key': key, 'title': title, 'periods': [end], 'basis': basis, 'rows': rows})
     accn = (latest['fields'].get('rev') or {}).get('accn')
     url = f'https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accn.replace("-", "")}/{accn}-index.html' if cik and accn else None
     return {'available': bool(tables), 'period_end': end, 'filed': latest['filed'],
             'form': latest['form'], 'url': url, 'statements': tables}
+
+
+def _span(row):
+    return qf._days({'start': row.get('period_start'), 'end': row.get('period_end')}) or 0
+
+
+def _cash_quarter(facts, fact):
+    """Cash-flow statements in a 10-Q are year to date (6 or 9 months). The
+    quarter on its own is this filing's year-to-date figure less the previous
+    10-Q's, both on the same tag and fiscal-year start. Returns
+    (start, value, ytd_value); ytd_value is None when the figure already is a
+    single quarter or when the prior figure is not filed."""
+    from datetime import datetime, timedelta
+    days = qf._days(fact)
+    if days is None or days <= 100:
+        return fact.get('start'), fact['value'], None
+    start, end = fact.get('start'), fact.get('end')
+    prior = [f for f in qf._facts_for(fact.get('tag') or '', facts)
+             if f.get('start') == start and (f.get('end') or '') < end
+             and f.get('val') is not None and 80 <= (qf._days(f) or 0) <= days - 80]
+    if not prior:
+        return start, fact['value'], None
+    prior.sort(key=lambda f: (f.get('end') or '', f.get('filed') or ''))
+    best = prior[-1]
+    gap = (datetime.strptime(end, '%Y-%m-%d') - datetime.strptime(best['end'], '%Y-%m-%d')).days
+    if not 80 <= gap <= 100:
+        return start, fact['value'], None
+    q_start = (datetime.strptime(best['end'], '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
+    return q_start, fact['value'] - best['val'], fact['value']
 
 
 def get_quarter(ticker, force=False):
