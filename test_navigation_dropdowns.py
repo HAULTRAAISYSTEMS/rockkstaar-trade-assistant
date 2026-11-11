@@ -41,8 +41,9 @@ def test_mobile_research_learn_and_account_open_menu_sheets():
     # Terminal opens a sheet too (Terminal, Setups Board, Watchlists & Alerts).
     assert template.count("mobile-app-nav__menu-trigger") == 4
     assert "Company Research" in template
-    assert template.count("<strong>Seven Checks</strong>") == 2
-    assert template.count("url_for('fundamentals_page', tab='quarter')") == 2
+    # Research entries are one grouped list rendered in both menus.
+    assert "'Seven Checks'" in template and template.count("for group, items in research_groups") == 2
+    assert template.count("url_for('fundamentals_page', tab='quarter')") == 1
     assert "Review Queue" in template
     assert "Browser Alerts" in template
 
@@ -66,3 +67,14 @@ def test_watchlists_live_under_terminal_on_desktop_and_phone():
     assert 'class="nav-link {{ \'nav-link-active\' if ep == \'watchlists_page\' }}">Watchlists</a>' not in template
     # Five phone tabs: Today, then Terminal, Research, Learn, Account sheets.
     assert template.count('class="mobile-app-nav__item') == 5
+
+
+def test_research_menu_leads_with_market_intel_and_describes_every_tile():
+    import re
+    template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
+    block = template[template.index("research_groups = ["):template.index("] %}")]
+    titles = re.findall(r"\(\s*'\w+',\s*url_for\([^)]*\),\s*'([^']+)',\s*'([^']*)'", block)
+    assert titles[0][0] == "Market Intel"
+    assert [t for t, _ in titles] == ["Market Intel", "Macro", "Calendar", "Smart Money", "Company Research",
+                                      "Seven Checks", "Thesis", "Live Research", "Memory"]
+    assert all(desc for _, desc in titles), "every research tile has a description"

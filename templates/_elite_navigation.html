@@ -1,4 +1,37 @@
 {% set ep = request.endpoint %}
+{# Research menu: one list for the desktop panel and the phone sheet, grouped
+   Markets → Companies → Your research, Market Intel first. Every entry has an
+   icon and a one-line description so no tile is a bare word. #}
+{% set research_groups = [
+  ('Markets', [
+    ('intel', url_for('intel'), 'Market Intel', 'News, heat map and why stocks are moving', 'pulse'),
+    ('macro', url_for('macro_page'), 'Macro', 'Fed liquidity and money flow', 'globe'),
+    ('cal', url_for('catalyst_calendar'), 'Calendar', 'Earnings and the economy', 'calendar'),
+    ('smart', url_for('smart_money'), 'Smart Money', 'Insiders, funds and Congress', 'bank'),
+  ]),
+  ('Companies', [
+    ('research', url_for('research_page'), 'Company Research', 'Financials, filings and changes', 'doc'),
+    ('checks', url_for('fundamentals_page', tab='quarter'), 'Seven Checks', 'Grade the latest quarter', 'checks'),
+    ('thesis', url_for('thesis_view'), 'Thesis', 'Bear, base and bull targets', 'target'),
+    ('live', url_for('live_research.feed'), 'Live Research', 'Sources and published notes', 'book'),
+  ]),
+  ('Your research', [
+    ('memory', url_for('research_memory.notebook'), 'Memory', 'Your saved notes and recall reviews', 'bulb'),
+  ]),
+] %}
+{% macro rm_icon(name) -%}
+<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">
+{%- if name == 'pulse' %}<path d="M3 12h4l2.2-5.5 4.3 11 2.2-5.5H21"/>
+{%- elif name == 'globe' %}<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5c2.6 2.7 2.6 14.3 0 17"/><path d="M12 3.5c-2.6 2.7-2.6 14.3 0 17"/>
+{%- elif name == 'calendar' %}<rect x="4" y="5.5" width="16" height="14.5" rx="2.2"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/><path d="M8 14h2M14 14h2M8 17h2"/>
+{%- elif name == 'bank' %}<path d="M3.5 9.5 12 4.5l8.5 5"/><path d="M6 10.5v6.5M10 10.5v6.5M14 10.5v6.5M18 10.5v6.5"/><path d="M3.5 20h17"/>
+{%- elif name == 'doc' %}<rect x="5" y="3.5" width="14" height="17" rx="2.2"/><path d="M8.5 16.5v-3M12 16.5v-6.5M15.5 16.5v-4.5"/>
+{%- elif name == 'checks' %}<path d="m4 7 1.6 1.6L8.4 5.8"/><path d="m4 13.5 1.6 1.6 2.8-2.8"/><path d="M11.5 7.2h8.5M11.5 13.7h8.5M11.5 19.5h8.5M4.5 19.5h3"/>
+{%- elif name == 'target' %}<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>
+{%- elif name == 'book' %}<path d="M4.5 5.5c2.8-1 5.3-.7 7.5.8 2.2-1.5 4.7-1.8 7.5-.8v13c-2.8-1-5.3-.7-7.5.8-2.2-1.5-4.7-1.8-7.5-.8Z"/><path d="M12 6.3v13"/>
+{%- elif name == 'bulb' %}<path d="M9.5 18h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3Z"/>
+{%- endif %}</svg>
+{%- endmacro %}
 {% set terminal_active = ep in ('terminal', 'dashboard', 'quick_mode', 'watchlists_page') or (ep and ep.startswith('trade_tools.')) %}
 {% set research_active = ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare', 'intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'macro_page') or (ep and (ep.startswith('live_research.') or ep.startswith('research_memory.'))) %}
 {% set learn_active = ep in ('learn_index', 'learn_concept', 'learn_paths', 'learn_path', 'learn_review', 'tradestaar_ai') %}
@@ -33,17 +66,16 @@
 
     <details class="nav-menu">
       <summary class="nav-link {{ 'nav-link-active' if research_active }}">Research <span aria-hidden="true">⌄</span></summary>
-      <div class="nav-menu__panel">
+      <div class="nav-menu__panel nav-menu__panel--research">
         <span class="nav-menu__label">Understand the market</span>
-        <a href="{{ url_for('research_page') }}"><strong>Company Research</strong><small>One workspace for financials, changes, filings and thesis</small></a>
-        <a href="{{ url_for('thesis_view') }}"><strong>Thesis</strong><small>Bear, base and bull targets with the math on screen</small></a>
-        <a href="{{ url_for('fundamentals_page', tab='quarter') }}"><strong>Seven Checks</strong><small>Read and grade the latest quarter from the company filing</small></a>
-        <a href="{{ url_for('live_research.feed') }}"><strong>Live Research</strong><small>Curated changes, catalysts and source notes</small></a>
-        <a href="{{ url_for('intel') }}"><strong>Market Intel</strong><small>Latest news, sentiment and institutional activity</small></a>
-        <div class="nav-menu__grid">
-          <a href="{{ url_for('macro_page') }}">Macro</a><a href="{{ url_for('catalyst_calendar') }}">Calendar</a>
-          <a href="{{ url_for('smart_money') }}">Smart Money</a><a href="{{ url_for('research_memory.notebook') }}">Memory</a>
+        {% for group, items in research_groups %}
+        <span class="rm-sec">{{ group }}</span>
+        <div class="rm-grid{{ ' rm-grid--markets' if loop.first }}">
+          {% for key, href, title, desc, icon in items %}
+          <a href="{{ href }}" class="rm-item{{ ' rm-item--feature' if key == 'intel' }}"><span class="rm-ic">{{ rm_icon(icon) }}</span><span class="rm-txt"><strong>{{ title }}</strong><small>{{ desc }}</small></span></a>
+          {% endfor %}
         </div>
+        {% endfor %}
       </div>
     </details>
 
@@ -113,14 +145,15 @@
     <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if research_active }}" aria-expanded="false" aria-controls="mobile-research-menu" data-mobile-menu="mobile-research-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/><path d="M8 12l1.8-2 1.6 1.4L13.5 9"/></svg></span><span class="mobile-app-nav__label">Research</span></button>
     <div class="mobile-app-menu" id="mobile-research-menu" hidden>
       <div class="mobile-app-menu__head"><strong>Research</strong><span>Understand the market</span></div>
-      <div class="mobile-app-menu__links">
-        <a href="{{ url_for('research_page') }}"><strong>Company Research</strong><small>Financials, changes, filings and thesis</small></a>
-        <a href="{{ url_for('thesis_view') }}"><strong>Thesis</strong><small>Bear, base and bull targets</small></a>
-        <a href="{{ url_for('fundamentals_page', tab='quarter') }}"><strong>Seven Checks</strong><small>Read and grade the latest quarter from the company filing</small></a>
-        <a href="{{ url_for('live_research.feed') }}"><strong>Live Research</strong><small>Latest sources and published research</small></a>
-        <a href="{{ url_for('intel') }}"><strong>Market Intel</strong><small>News, sentiment and institutional activity</small></a>
-        <a href="{{ url_for('macro_page') }}">Macro</a><a href="{{ url_for('catalyst_calendar') }}">Calendar</a>
-        <a href="{{ url_for('smart_money') }}">Smart Money</a><a href="{{ url_for('research_memory.notebook') }}">Memory</a>
+      <div class="rm-sheet">
+        {% for group, items in research_groups %}
+        <span class="rm-sec">{{ group }}</span>
+        <div class="rm-grid{{ ' rm-grid--markets' if loop.first }}">
+          {% for key, href, title, desc, icon in items %}
+          <a href="{{ href }}" class="rm-item{{ ' rm-item--feature' if key == 'intel' }}{{ ' rm-item--wide' if items|length == 1 }}"><span class="rm-ic">{{ rm_icon(icon) }}</span><span class="rm-txt"><strong>{{ title }}</strong><small>{{ desc }}</small></span></a>
+          {% endfor %}
+        </div>
+        {% endfor %}
       </div>
     </div>
   </div>
