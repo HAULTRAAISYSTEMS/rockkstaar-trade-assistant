@@ -105,14 +105,14 @@
     {% if quarter and quarter.available %}
     <p>{{ quarter.form or 'SEC filing' }} · period ended {{ quarter.period_end }} · filed {{ quarter.filed or 'date unavailable' }}{% if quarter.url %} · <a href="{{ quarter.url }}" target="_blank" rel="noopener noreferrer">Open SEC filing ↗</a>{% endif %}</p>
     {% if research.latest_filing and research.latest_filing.period_end and research.latest_filing.period_end > quarter.period_end %}<p class="cr-caution">A newer financial filing covers {{ research.latest_filing.period_end }}. Quarterly figures for that period are not available in this view yet.</p>{% endif %}
-    <p>USD figures from SEC EDGAR. Income covers the reported quarter; the balance sheet is a snapshot. Cash flow is year to date, not a standalone quarter. Exact date ranges appear under each flow item. Annual scoring remains in the overview.</p>
+    <p>USD figures from SEC EDGAR. Income covers the reported quarter; the balance sheet is a snapshot. Cash flow is shown for the quarter (the 10-Q year-to-date figure less the prior 10-Q's, with the year-to-date total underneath); where the prior filing is missing it stays year to date. Exact date ranges appear under each flow item. Annual scoring remains in the overview.</p>
     <div class="cr-statements">
       {% for stmt in quarter.statements %}
       <article class="cr-statement">
         <h4 id="quarter-title-{{ loop.index }}">{{ stmt.title }} · {{ stmt.basis }}</h4>
         <div class="cr-table-wrap" role="region" aria-labelledby="quarter-title-{{ loop.index }}" tabindex="0"><table class="cr-table">
           <thead><tr><th>Line item</th><th>{{ quarter.period_end }}</th></tr></thead>
-          <tbody>{% for row in stmt.rows %}<tr><td>{{ row.label }}{% if row.period_start %}<small class="cr-period-range">{{ row.period_start }} – {{ row.period_end }}</small>{% endif %}</td><td>{{ row['values'][0] }}</td></tr>{% endfor %}</tbody>
+          <tbody>{% for row in stmt.rows %}<tr><td>{{ row.label }}{% if row.period_start %}<small class="cr-period-range">{{ row.period_start }} – {{ row.period_end }}</small>{% endif %}{% if row.ytd_value %}<small class="cr-period-range">Year to date {{ row.ytd_start }} – {{ row.period_end }}: {{ row.ytd_value }}</small>{% endif %}</td><td>{{ row['values'][0] }}</td></tr>{% endfor %}</tbody>
         </table></div>
       </article>
       {% endfor %}

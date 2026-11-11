@@ -104,3 +104,21 @@ def test_route_defaults_to_quarter_and_skips_fetch_for_annual():
             result = app.research_detail()
         assert result['financial_period'] == 'annual'
         fetch.assert_not_called()
+
+
+def test_quarterly_cash_flow_is_the_quarter_not_year_to_date():
+    """CRWV showed -$1.4B net income on Quarterly: that was Jan-Jun. The
+    quarter is the 6-month figure less the Q1 10-Q's 3-month figure."""
+    payload = copy.deepcopy(FIXTURE)
+    cfo = payload['facts']['us-gaap']['NetCashProvidedByUsedInOperatingActivities']['units']['USD']
+    cfo.append({"start": "2026-01-01", "end": "2026-03-31", "val": 30000, "form": "10-Q", "filed": "2026-05-01", "accn": "q1"})
+    cash = next(s for s in rf.build_quarter(payload, '123')['statements'] if s['key'] == 'cash')
+    row = next(r for r in cash['rows'] if 'operating activities' in r['label'])
+    assert row['values'] == ['$34.1K'] and row['period_start'] == '2026-04-01'
+    assert row['ytd_value'] == '$64.1K' and row['ytd_start'] == '2026-01-01'
+
+
+def test_cash_falls_back_to_ytd_when_prior_quarter_missing():
+    cash = next(s for s in rf.build_quarter(FIXTURE, '123')['statements'] if s['key'] == 'cash')
+    row = next(r for r in cash['rows'] if 'operating activities' in r['label'])
+    assert row['period_start'] == '2026-01-01' and 'ytd_value' not in row
