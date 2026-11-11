@@ -2006,7 +2006,12 @@ function twLiveHeader(t, px, q){
   var hp = document.getElementById('tw-c-price'), hc = document.getElementById('tw-c-chg');
   var text = px.toFixed(2), prev = hp ? parseFloat(hp.textContent) : NaN;
   if(hp && hp.textContent !== text){ hp.textContent = text; if(isFinite(prev)) twFlash(hp, px > prev); }
-  var base = q.ext ? Number(q.regular_close) : Number(twPrevClose[t] || q.prev_close);
+  // The live feed's previous close wins: the page-load value comes from the
+  // database row, which can be a session behind (SPY showed +1.77% against
+  // Friday's close on Tuesday while the real move was -0.6%).
+  var live_pc = Number(q.prev_close);
+  if(!q.ext && isFinite(live_pc) && live_pc > 0) twPrevClose[t] = live_pc;
+  var base = q.ext ? Number(q.regular_close) : ((isFinite(live_pc) && live_pc > 0) ? live_pc : Number(twPrevClose[t]));
   if(hc && isFinite(base) && base > 0){
     var pct = (px - base) / base * 100, tag = {pre:'PRE ', post:'POST ', overnight:'O/N '}[q.ext] || '';
     hc.textContent = tag + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';

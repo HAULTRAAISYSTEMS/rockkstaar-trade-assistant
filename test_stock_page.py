@@ -164,3 +164,13 @@ def test_live_poll_never_waits_on_the_vendor_refresh(monkeypatch):
     # Other suites' background threads can refresh other tickers while the
     # env switch is off; what matters is CEG refreshed exactly once.
     assert calls.count("CEG") == 1
+
+
+def test_terminal_header_uses_the_live_previous_close():
+    """SPY read +1.77% (vs Friday's stored close) while the real move vs
+    Monday's close was -0.6%. The live feed's prev close must win."""
+    js = open("templates/terminal.html", encoding="utf-8").read()
+    i = js.index("function twLiveHeader")
+    body = js[i:js.index("var twLastEpoch", i)]
+    assert "var live_pc = Number(q.prev_close);" in body
+    assert "Number(twPrevClose[t] || q.prev_close)" not in body
