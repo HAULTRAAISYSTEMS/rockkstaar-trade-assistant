@@ -4436,6 +4436,18 @@ _MARKET_TEMP_TTL   = 90    # 90-second refresh (was 5 min)
 
 
 def _get_market_temperature() -> dict:
+    """The dashboard meter / Trade Coach reading, speaking the one verdict."""
+    data = _get_market_temperature_raw()
+    if not data or data.get("regime") in ("LOADING",):
+        return data
+    try:
+        import market_verdict as _mv
+        return _mv.apply_temperature(data, market_verdict_now())
+    except Exception:
+        return data
+
+
+def _get_market_temperature_raw() -> dict:
     """Return cached market regime; trigger background refresh when stale."""
     _LOADING: dict = {
         "regime": "LOADING", "label": "Loading…", "css": "mt-loading",
@@ -6454,6 +6466,11 @@ def _age_briefing(briefing: dict) -> dict:
                      f"{live_label}." if opposed else
                      f"The live regime has since moved to {live_label}.")
             briefing["conflict"] = f"{opening}, when the read was {said}. {moved}"
+        if live:
+            # The badge shows the live verdict; what the text was written
+            # under is kept, and the note above explains any difference.
+            briefing["written_bias"] = stated or ""
+            briefing["macro_bias"] = live
     except Exception as exc:
         logger.debug("briefing conflict check failed: %s", exc)
     return briefing
@@ -6477,13 +6494,16 @@ def _live_regime() -> tuple[str, str]:
     if not label:
         return "", ""
     raw = label.lower()
-    if "risk" in raw and "on" in raw:
+    if "no" in raw and "trade" in raw:
+        bucket = "no_trade"
+    elif "risk" in raw and "on" in raw:
         bucket = "risk_on"
     elif "risk" in raw and "off" in raw:
         bucket = "risk_off"
     else:
         bucket = "neutral"
-    return bucket, label.replace("_", " ").replace("-", " ").title()
+    shown = str(context.get("regime_label") or "").strip() or label.replace("_", " ").replace("-", " ").title()
+    return bucket, shown
 
 
 def _live_regime_bias() -> str:
@@ -9031,6 +9051,10 @@ def _build_today_pulse(mkt: dict) -> dict:
     """
     pulse = {
         "regime": mkt.get("regime") or mkt.get("market_regime") or "",
+        # The trend engine's own reading, in trend words (Uptrend / Choppy /
+        # Downtrend): an input to the verdict, never a second verdict.
+        "trend": mkt.get("trend_regime") or mkt.get("regime") or "",
+        "trend_label": __import__("market_verdict").trend_word(mkt.get("trend_regime") or mkt.get("regime")),
         "vix": mkt.get("vix_level"),
         "vix_as_of": mkt.get("vix_as_of_label") or "",
         "vix_source": mkt.get("vix_source") or "",
@@ -9405,9 +9429,13 @@ def _mood_inputs():
 
 def _mood_inputs_now():
     import command_center as _cc
+    import market_verdict as _mv
     pulse = {}
     try:
-        pulse = _build_today_pulse(_get_mkt_ctx() or {}) or {}
+        # The trend engine's raw reading: it is an input to the verdict, so it
+        # must not already be the verdict.
+        raw = _mkt.get_market_context(raw=True) if _MKT_AVAILABLE else _get_mkt_ctx()
+        pulse = _build_today_pulse(raw or {}) or {}
     except Exception as exc:
         logger.debug("mood pulse: %s", exc)
     breadth = None
@@ -9426,8 +9454,18 @@ def _mood_inputs_now():
         pass
     reading = _cc.mood(vix=pulse.get("vix"), spy=pulse.get("spy"), qqq=pulse.get("qqq"),
                        es=pulse.get("es"), nq=pulse.get("nq"), breadth=breadth, news_tone=tone,
-                       regime=pulse.get("regime") if pulse.get("known") else None)
+                       regime=pulse.get("trend") if pulse.get("known") else None)
+    reading = _mv.finalize(reading, pulse.get("trend") if pulse.get("known") else None)
     return pulse, reading
+
+
+def market_verdict_now() -> dict:
+    """The app's one market verdict (see market_verdict.py)."""
+    return _mood_inputs()[1]
+
+
+if _MKT_AVAILABLE:
+    _mkt.set_verdict_provider(market_verdict_now)
 
 
 @app.route("/api/mood")
@@ -9538,10 +9576,11 @@ def api_today_pulse():
     # Never hand the client a regime for a snapshot that is not a reading.
     if not known:
         pulse["regime"] = None
+        pulse["trend_label"] = None
     resp = jsonify({
         "ok": known,
         "pulse": {k: pulse.get(k) for k in (
-            "known", "regime", "vix", "vix_as_of", "spy", "qqq",
+            "known", "regime", "trend", "trend_label", "vix", "vix_as_of", "spy", "qqq",
             "spy_label", "qqq_label", "spy_ext", "qqq_ext", "spy_at", "qqq_at",
             "es", "nq", "liquidity", "fast_live",
             "session", "age_minutes", "snapshot_stale",

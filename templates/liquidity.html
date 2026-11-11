@@ -113,7 +113,7 @@
            second verdict in its own cell. #}
         <small class="cm-trend"><span class="cc-pulse-k">Trend</span>
         {% if pulse.known %}
-        <b class="cc-pulse-v {{ 'is-up' if 'on' in (pulse.regime or '')|lower else ('is-down' if 'off' in (pulse.regime or '')|lower else '') }}" id="cc-regime">{{ pulse.regime|replace('_', ' ')|replace('-', ' ')|title if pulse.regime else '—' }}</b>
+        <b class="cc-pulse-v {{ 'is-up' if pulse.trend_label == 'Uptrend' else ('is-down' if pulse.trend_label in ('Downtrend', 'Extreme volatility') else '') }}" id="cc-regime">{{ pulse.trend_label or '—' }}</b>
         <small class="cc-pulse-meta" id="cc-regime-meta"{% if not pulse.snapshot_stale %} hidden{% endif %}>{% if pulse.snapshot_stale %}snapshot {{ pulse.age_minutes|int }} min old{% endif %}</small>
         {% else %}
         <b class="cc-pulse-v is-unknown" id="cc-regime">—</b>

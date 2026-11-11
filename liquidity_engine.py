@@ -625,17 +625,17 @@ def _build_liquidity_context() -> dict:
 
     if score >= 65:
         status       = "RISK_ON"
-        status_label = "Risk-On — Liquidity Expanding"
+        status_label = "Liquidity Expanding"
         status_color = "green"
         summary      = "Multiple liquidity indicators are bullish. Conditions historically favor risk assets."
     elif score >= 35:
         status       = "NEUTRAL"
-        status_label = "Neutral — Mixed Liquidity"
+        status_label = "Liquidity Mixed"
         status_color = "yellow"
         summary      = "Mixed liquidity signals. Market sensitive to Fed communication and data releases."
     else:
         status       = "RISK_OFF"
-        status_label = "Risk-Off — Liquidity Contracting"
+        status_label = "Liquidity Contracting"
         status_color = "red"
         summary      = "Multiple liquidity headwinds. High-multiple and growth stocks most at risk."
 

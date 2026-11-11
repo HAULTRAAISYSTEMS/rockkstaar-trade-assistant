@@ -727,7 +727,36 @@ def pulse_session(now=None) -> str:
     return session
 
 
-def get_market_context() -> dict:
+# ── One verdict ──────────────────────────────────────────────────────────────
+# The app registers a provider (the Today dial) and every caller of
+# get_market_context() gets its regime from it — see market_verdict.py.
+# raw=True returns the trend engine's own reading, which the dial uses as one
+# of its inputs.
+_verdict_provider = None
+_verdict_local = threading.local()
+
+
+def set_verdict_provider(fn) -> None:
+    global _verdict_provider
+    _verdict_provider = fn
+
+
+def get_market_context(raw: bool = False) -> dict:
+    ctx = _market_context_raw()
+    if raw or _verdict_provider is None or getattr(_verdict_local, "busy", False):
+        return ctx
+    _verdict_local.busy = True
+    try:
+        import market_verdict
+        return market_verdict.apply(ctx, _verdict_provider())
+    except Exception as exc:
+        logger.debug("market verdict overlay failed: %s", exc)
+        return ctx
+    finally:
+        _verdict_local.busy = False
+
+
+def _market_context_raw() -> dict:
     """
     Return cached market context immediately — NEVER blocks the calling thread.
 

@@ -736,8 +736,8 @@ function loadAIBrief(forceRefresh) {
       if (!b.briefing) throw new Error('No verified briefing is available yet.');
       const bias = (b.macro_bias || 'neutral').toLowerCase();
       if (badge) {
-        badge.className = 'ai-brief-badge ' + (bias === 'risk_on' ? 'risk-on' : bias === 'risk_off' ? 'risk-off' : 'neutral');
-        badge.textContent = bias === 'risk_on' ? '🟢 RISK ON' : bias === 'risk_off' ? '🔴 RISK OFF' : '⚪ NEUTRAL';
+        badge.className = 'ai-brief-badge ' + (bias === 'risk_on' ? 'risk-on' : (bias === 'risk_off' || bias === 'no_trade') ? 'risk-off' : 'neutral');
+        badge.textContent = bias === 'risk_on' ? '🟢 RISK-ON' : bias === 'risk_off' ? '🔴 RISK-OFF' : bias === 'no_trade' ? '⛔ NO TRADE' : '⚪ NEUTRAL';
       }
       if (cached) cached.style.display = b.cached ? '' : 'none';
       if (body) {
@@ -849,11 +849,14 @@ function _renderLivePulse(market) {
     regime.textContent = '—';
     regime.classList.remove('is-up', 'is-down');
     regime.classList.add('is-unknown');
-  } else if (regime && market.regime) {
-    regime.textContent = String(market.regime).toLowerCase().replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  } else if (regime && (market.trend_label || market.trend)) {
+    // #cc-regime is the Trend input under the dial, in trend words — the
+    // verdict itself is the dial label.
+    const tw = market.trend_label || '';
+    regime.textContent = tw || '—';
     regime.classList.remove('is-unknown');
-    regime.classList.toggle('is-up', String(market.regime).toUpperCase() === 'RISK_ON');
-    regime.classList.toggle('is-down', ['RISK_OFF','NO_TRADE'].includes(String(market.regime).toUpperCase()));
+    regime.classList.toggle('is-up', tw === 'Uptrend');
+    regime.classList.toggle('is-down', tw === 'Downtrend' || tw === 'Extreme volatility');
   }
   if (vix) {
     if (market.vix == null || !Number.isFinite(Number(market.vix))) vix.textContent = '—';
