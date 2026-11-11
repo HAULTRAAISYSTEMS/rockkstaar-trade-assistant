@@ -85,3 +85,25 @@ def test_streamer_logs_in_subscribes_and_writes(tmp_path, monkeypatch):
     assert {r["service"] for r in ws.sent[1:]} == {"LEVELONE_EQUITIES", "NASDAQ_BOOK", "NYSE_BOOK"}
     s.pump(); s.flush()
     assert json.loads((tmp_path / "NVDA.json").read_text())["book"]["bids"][0]["price"] == 10
+
+
+def test_reconnect_and_quiet_gaps_rebaseline_instead_of_printing():
+    st = md.SymbolState("SPY")
+    st.on_level_one({"key": "SPY", "1": 759.70, "2": 759.72, "3": 759.71, "8": 1_000_000, "9": 100, "12": 750.0, "35": 1_000})
+    st.rebaseline()                                   # what a re-login does
+    st.on_level_one({"key": "SPY", "3": 759.72, "8": 1_300_000, "9": 100, "35": 50_000})
+    assert st.tape == []                              # the 300K jump is not a print
+    st.on_level_one({"key": "SPY", "3": 759.72, "8": 1_300_200, "9": 200, "35": 51_000})
+    st.on_level_one({"key": "SPY", "3": 759.72, "8": 1_400_000, "9": 100, "35": 80_000})  # 29 s quiet gap
+    assert [p["size"] for p in st.tape] == [200]
+    assert st.to_json()["quote"]["prev_close"] == 750.0
+
+
+def test_terminal_shares_the_streamer_quote():
+    term = open("templates/terminal.html", encoding="utf-8").read()
+    js = open("static/js/depth_panel.js", encoding="utf-8").read()
+    assert "new CustomEvent('dp:quote'" in js and "new CustomEvent('dp:price'" in js
+    # Chart candle, header and stamp go through the same ordered path as the live poll.
+    assert "document.addEventListener('dp:quote'" in term and "twLiveApply({ticker:t, quote:q})" in term
+    assert 'id="tw-ot-nbbo"' in term and "document.addEventListener('dp:price'" in term
+    assert "twSetSpyChip((d.last - d.prev_close) / d.prev_close * 100, true)" in term

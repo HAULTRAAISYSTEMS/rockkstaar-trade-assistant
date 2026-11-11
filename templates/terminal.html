@@ -852,6 +852,11 @@
               <option value="STOP_LIMIT">Stop Limit</option>
             </select>
           </div>
+          <div class="tw-ot-nbbo" id="tw-ot-nbbo" aria-label="Live bid and ask — tap to use as the limit price">
+            <button type="button" class="bid" data-ot-px="bid"><small>Bid</small><b id="tw-ot-bid">—</b></button>
+            <button type="button" class="last" data-ot-px="last"><small>Last</small><b id="tw-ot-last">—</b></button>
+            <button type="button" class="ask" data-ot-px="ask"><small>Ask</small><b id="tw-ot-ask">—</b></button>
+          </div>
           <div class="tw-field-row">
             <div class="tw-field">
               <label for="tw-ot-qty">Quantity</label>
@@ -1099,7 +1104,7 @@ function twSetDrawingWidth(value){twChartState.styles.drawingWidth=Math.max(1,Ma
 function twApplyStudyStyles(){Object.keys(twChartState.emaSeries).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period].applyOptions({color:style.color,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,title:''});});}
 
 /* ── Order ticket ── */
-function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; var tk=document.getElementById('tw-ticket'); if(tk) tk.dataset.side=btn.dataset.side; }
+function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; var tk=document.getElementById('tw-ticket'); if(tk) tk.dataset.side=btn.dataset.side; twEstCost(); }
 function twTypeChange(){ var t=document.getElementById('tw-ot-type').value; var lim=document.getElementById('tw-ot-limit'); var need=(t!=='MARKET'); lim.disabled=!need; if(!need) lim.value=''; twEstCost(); }
 /* Today's Setups row tap → prefill the order ticket with entry/stop/target */
 function twSetupPrefill(sym, entry, stop, target){
@@ -1114,7 +1119,12 @@ function twSetupPrefill(sym, entry, stop, target){
 function twEstCost(){
   var qty=parseFloat(document.getElementById('tw-ot-qty').value)||0;
   var lim=parseFloat(document.getElementById('tw-ot-limit').value);
-  var px=!isNaN(lim)&&lim>0 ? lim : twChartState.lastPrice;
+  // A market order fills at the ask when buying and the bid when selling,
+  // so with a live quote for the ticket's symbol use that side, not "last".
+  var nb=window._twNbbo, sym=(document.getElementById('tw-ot-symbol').value||'').toUpperCase();
+  var side=(window._twSide||'BUY'), type=(document.getElementById('tw-ot-type')||{}).value;
+  var mkt=(nb && nb.symbol===sym && type==='MARKET') ? Number(side==='SELL'?nb.bid:nb.ask) : NaN;
+  var px=!isNaN(lim)&&lim>0 ? lim : (isFinite(mkt)&&mkt>0 ? mkt : twChartState.lastPrice);
   var el=document.getElementById('tw-ot-est');
   if(px && qty){ el.textContent='$'+(px*qty).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
   else { el.textContent='—'; }
@@ -1962,9 +1972,13 @@ function twApplyChips(chips){
   if(!window.twSpyFromTape && chips.spy !== null && chips.spy !== undefined) twSetSpyChip(chips.spy);
 }
 function twSpyChip(){ return document.getElementById('tw-chip-spy'); }
-function twSetSpyChip(pct){
+function twSetSpyChip(pct, fromStream){
   var spy = twSpyChip();
   if(!spy || pct === null || pct === undefined || isNaN(Number(pct))) return;
+  // While the Schwab streamer is quoting SPY its print owns the chip; the
+  // slower feeds would otherwise flip it back to an older value.
+  if(fromStream) window.twSpyStreamAt = Date.now();
+  else if(window.twSpyStreamAt && Date.now() - window.twSpyStreamAt < 10000) return;
   var v = Number(pct);
   spy.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
   spy.className = v >= 0 ? 'chg-pos' : 'chg-neg';
@@ -2081,6 +2095,63 @@ function twLiveApply(d){
       }
   }
 }
+/* ── Schwab streamer → chart, header and ticket ──
+   The L2 · Time & Sales panel (depth_panel.js) emits the streamer's quote
+   about once a second. It feeds the same path as the 3 s live poll —
+   twLiveApply — so the candle, header price/% and stamp all show the
+   streamer's print, and older prints never overwrite newer ones. */
+window._twNbbo = null;
+function twEtSession(ms){
+  var p = new Date(ms).toLocaleString('en-US', {timeZone:'America/New_York', hour12:false, hour:'2-digit', minute:'2-digit'}).split(':');
+  var m = Number(p[0]) % 24 * 60 + Number(p[1]);
+  return m < 570 ? 'pre' : (m >= 960 ? 'post' : null);
+}
+document.addEventListener('dp:quote', function(e){
+  var d = e.detail || {}, head = document.getElementById('tw-c-ticker');
+  var t = String((head && head.textContent) || '').trim().toUpperCase();
+  if(!d.symbol || d.symbol !== t || !(d.last > 0)) return;
+  var ms = Number(d.trade_ms) || Date.now();
+  var ext = twEtSession(ms);
+  var q = {price:d.last, epoch:ms/1000, prev_close:ext ? null : d.prev_close,
+           ext:ext, source:'Schwab streamer', day_volume:d.volume};
+  if(String(twChartState.ticker || '').toUpperCase() === t){
+    twLiveApply({ticker:t, quote:q});                 // candle + header + stamp
+  } else if(!(twLastEpoch[t] && q.epoch < twLastEpoch[t])){
+    twLastEpoch[t] = q.epoch;                         // chart still loading: header + stamp
+    twLiveHeader(t, d.last, q);
+  }
+  if(t === 'SPY' && !ext && d.prev_close > 0){ twSetSpyChip((d.last - d.prev_close) / d.prev_close * 100, true); }
+  window._twNbbo = {symbol:t, bid:Number(d.bid), ask:Number(d.ask), last:Number(d.last)};
+  var f = function(v){ return isFinite(Number(v)) && Number(v) > 0 ? Number(v).toFixed(2) : '—'; };
+  var ob = document.getElementById('tw-ot-bid'), oa = document.getElementById('tw-ot-ask'), ol = document.getElementById('tw-ot-last');
+  var osym = (document.getElementById('tw-ot-symbol').value || '').toUpperCase();
+  var mine = osym === t;
+  document.getElementById('tw-ot-nbbo').classList.toggle('is-off', !mine);
+  if(ob) ob.textContent = mine ? f(d.bid) : '—';
+  if(oa) oa.textContent = mine ? f(d.ask) : '—';
+  if(ol) ol.textContent = mine ? f(d.last) : '—';
+  twEstCost();
+});
+function twUseLimit(px){
+  if(!(px > 0)) return;
+  var type = document.getElementById('tw-ot-type');
+  if(type && type.value === 'MARKET'){ type.value = 'LIMIT'; twTypeChange(); }
+  var lim = document.getElementById('tw-ot-limit');
+  if(lim){ lim.disabled = false; lim.value = Number(px).toFixed(2); twFlash(lim, true); }
+  twEstCost();
+}
+// Tap a Level 2 level or a tape print → that price becomes the limit.
+document.addEventListener('dp:price', function(e){
+  var d = e.detail || {}, sym = document.getElementById('tw-ot-symbol');
+  if(sym && d.symbol) sym.value = d.symbol;
+  twUseLimit(d.price);
+});
+document.addEventListener('click', function(e){
+  var b = e.target.closest('[data-ot-px]');
+  if(!b || !window._twNbbo) return;
+  twUseLimit(window._twNbbo[b.getAttribute('data-ot-px')]);
+});
+
 async function twLivePoll(){
   var t = twChartState.ticker;
   if(!t || twLiveFeed.inFlight){ twLiveSchedule(); return; }

@@ -38,9 +38,11 @@ WANT_TTL = 30          # seconds a browser ask keeps a symbol subscribed
 IDLE_CLOSE = 60        # seconds with no asks before the connection closes
 FLUSH_EVERY = 0.25
 TAPE_KEEP = 250
+GAP_RESET_MS = 10_000  # a trade this long after the last one only re-baselines volume
+STATUS_EVERY = 3       # leader heartbeat, so the panel can tell "quiet" from "stalled"
 BOOK_LEVELS = 15
 _SYM = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
-_L1_FIELDS = "0,1,2,3,4,5,8,9,16,34,35"   # sym bid ask last bidsz asksz vol lastsz lastid quote/trade ms
+_L1_FIELDS = "0,1,2,3,4,5,8,9,12,16,34,35"   # sym bid ask last bidsz asksz vol lastsz prevclose lastid quote/trade ms
 _BOOKS = ("NASDAQ_BOOK", "NYSE_BOOK")
 
 _thread: threading.Thread | None = None
@@ -149,13 +151,18 @@ class SymbolState:
     def on_level_one(self, c: dict) -> None:
         prev_vol, prev_t = self.q.get("volume"), self.q.get("trade_ms")
         for f, name in (("1", "bid"), ("2", "ask"), ("3", "last"), ("4", "bid_size"), ("5", "ask_size"),
-                        ("8", "volume"), ("9", "last_size"), ("16", "last_id"), ("35", "trade_ms")):
+                        ("8", "volume"), ("9", "last_size"), ("12", "prev_close"), ("16", "last_id"),
+                        ("35", "trade_ms")):
             if f in c and c[f] is not None:
                 self.q[name] = c[f]
         self.dirty = True
         vol, t = self.q.get("volume"), self.q.get("trade_ms")
         traded = ("35" in c and t != prev_t) or ("8" in c and prev_vol is not None and vol is not None and vol > prev_vol)
         if not traded or self.q.get("last") is None or prev_vol is None and prev_t is None:
+            return
+        # After a reconnect or a long quiet spell the volume jump spans many
+        # trades we never saw; that is a new baseline, not a print.
+        if prev_t and t and t - prev_t > GAP_RESET_MS:
             return
         last_size = int(self.q.get("last_size") or 0)
         delta = int(vol - prev_vol) if (vol is not None and prev_vol is not None) else last_size
@@ -177,6 +184,11 @@ class SymbolState:
                              "ex": self.q.get("last_id") or "", "combined": delta > last_size > 0})
         del self.tape[TAPE_KEEP:]
 
+    def rebaseline(self) -> None:
+        """Forget the last volume/trade time (keeps the tape on screen)."""
+        for k in ("volume", "trade_ms"):
+            self.q.pop(k, None)
+
     def on_book(self, service: str, c: dict) -> None:
         self.books[service] = parse_book(c)
         self.dirty = True
@@ -184,7 +196,8 @@ class SymbolState:
     def to_json(self) -> dict:
         q = self.q
         return {"updated": time.time(), "book": merge_books(list(self.books.values())), "tape": self.tape[:120],
-                "quote": {k: q.get(k) for k in ("bid", "ask", "last", "bid_size", "ask_size", "volume")},
+                "quote": {k: q.get(k) for k in ("bid", "ask", "last", "bid_size", "ask_size", "volume",
+                                                "prev_close", "trade_ms")},
                 "stats": {"buy_vol": self.buy_vol, "sell_vol": self.sell_vol}}
 
 
@@ -240,6 +253,8 @@ class _Streamer:
                     code = (r.get("content") or {}).get("code")
                     if code == 0:
                         self.subs = []
+                        for st in self.states.values():
+                            st.rebaseline()
                         return
                     raise RuntimeError("Schwab streamer login failed: %s" % (r.get("content") or {}).get("msg"))
         raise TimeoutError("Schwab streamer login timed out")
@@ -299,7 +314,7 @@ class _Streamer:
 def _leader_loop(lock_fh):
     import schwab
     user_id = schwab.quotes_user_id()
-    stream, idle_since, backoff, last_flush = _Streamer(user_id), None, 2, 0.0
+    stream, idle_since, backoff, last_flush, last_beat = _Streamer(user_id), None, 2, 0.0, 0.0
     set_status("idle", "Waiting for a symbol")
     while True:
         try:
@@ -324,6 +339,9 @@ def _leader_loop(lock_fh):
             if time.time() - last_flush >= FLUSH_EVERY:
                 stream.flush()
                 last_flush = time.time()
+            if time.time() - last_beat >= STATUS_EVERY:
+                set_status("live", "Schwab streamer connected")
+                last_beat = time.time()
         except PermissionError as exc:
             stream.close()
             set_status("not_connected", str(exc))
