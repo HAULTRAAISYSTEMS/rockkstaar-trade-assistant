@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -21,7 +22,7 @@ def test_research_learn_and_account_are_native_dropdowns():
 def test_account_dropdown_links_to_free_browser_alerts():
     template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
     assert "'browser_push.settings'" in template
-    assert '>Browser Alerts</a>' in template
+    assert "'Browser Alerts'" in template and template.count("nav_tiles(account_groups)") == 2
 
 
 def test_navigation_script_closes_sibling_and_outside_menus():
@@ -42,7 +43,7 @@ def test_mobile_research_learn_and_account_open_menu_sheets():
     assert template.count("mobile-app-nav__menu-trigger") == 4
     assert "Company Research" in template
     # Research entries are one grouped list rendered in both menus.
-    assert "'Seven Checks'" in template and template.count("for group, items in research_groups") == 2
+    assert "'Seven Checks'" in template and template.count("nav_tiles(research_groups)") == 2
     assert template.count("url_for('fundamentals_page', tab='quarter')") == 1
     assert "Review Queue" in template
     assert "Browser Alerts" in template
@@ -63,7 +64,7 @@ def test_watchlists_live_under_terminal_on_desktop_and_phone():
     the setups board and alerts, so they sit in the Terminal menu."""
     template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
     assert '<details class="nav-menu nav-menu--split">' in template
-    assert template.count("url_for('watchlists_page')") == 2   # desktop + phone menus
+    assert template.count("url_for('watchlists_page')") == 1 and template.count("nav_tiles(terminal_groups)") == 2
     assert 'class="nav-link {{ \'nav-link-active\' if ep == \'watchlists_page\' }}">Watchlists</a>' not in template
     # Five phone tabs: Today, then Terminal, Research, Learn, Account sheets.
     assert template.count('class="mobile-app-nav__item') == 5
@@ -72,9 +73,25 @@ def test_watchlists_live_under_terminal_on_desktop_and_phone():
 def test_research_menu_leads_with_market_intel_and_describes_every_tile():
     import re
     template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
-    block = template[template.index("research_groups = ["):template.index("] %}")]
+    start = template.index("research_groups = [")
+    block = template[start:template.index("] %}", start)]
     titles = re.findall(r"\(\s*'\w+',\s*url_for\([^)]*\),\s*'([^']+)',\s*'([^']*)'", block)
     assert titles[0][0] == "Market Intel"
     assert [t for t, _ in titles] == ["Market Intel", "Macro", "Calendar", "Smart Money", "Company Research",
                                       "Seven Checks", "Thesis", "Live Research", "Memory"]
     assert all(desc for _, desc in titles), "every research tile has a description"
+
+
+def test_every_menu_tile_has_an_icon_and_description(client_html=None):
+    """Rendered: every tile in every menu is icon + title + description."""
+    import web_app
+    c = web_app.app.test_client()
+    with c.session_transaction() as sess:
+        sess["user_id"] = 1
+    html = c.get("/intel").get_data(as_text=True)
+    tiles = re.findall(r'<a href="[^"]+" class="rm-item[^"]*"><span class="rm-ic"><svg.*?</svg></span><span class="rm-txt"><strong>([^<]+)</strong><small>([^<]+)</small>', html, re.S)
+    titles = [t for t, _ in tiles]
+    for name in ("Terminal", "Setups Board", "Market Intel", "Memory", "Learning Center", "AI Coach",
+                 "Journal", "Risk", "Browser Alerts"):
+        assert titles.count(name) == 2, name          # desktop dropdown + phone sheet
+    assert all(d.strip() for _, d in tiles)

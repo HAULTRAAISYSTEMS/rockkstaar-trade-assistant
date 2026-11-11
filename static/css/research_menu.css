@@ -51,9 +51,10 @@
 }
 .rm-item--feature .rm-txt strong { font-size: 14.5px; }
 
-/* Desktop dropdown: wider, two columns. */
-.nav-menu__panel.nav-menu__panel--research { width: 540px; max-width: min(540px, calc(100vw - 24px)); padding: 14px; }
-html.cc27 .nav-menu__panel--research .rm-item:hover { background: rgba(79, 227, 255, .07) !important; }
+/* Desktop dropdowns: wider, tiled. */
+.nav-menu__panel.nav-menu__panel--tiles { width: 520px; max-width: min(520px, calc(100vw - 24px)); padding: 14px; }
+.nav-menu__panel.nav-menu__panel--research { width: 540px; max-width: min(540px, calc(100vw - 24px)); }
+html.cc27 .nav-menu__panel--tiles .rm-item:hover { background: rgba(79, 227, 255, .07) !important; }
 
 /* Phone sheet: the grouped grid replaces the old link list. */
 .mobile-app-menu .rm-sheet { padding-top: 6px; }
@@ -74,4 +75,5 @@ html.cc27 .nav-menu__panel--research .rm-item:hover { background: rgba(79, 227, 
 .mobile-app-menu .rm-item { padding: 10px 11px; }
 .mobile-app-menu .rm-sec { margin: 10px 2px 6px; }
 /* Room for the whole grouped sheet on a normal phone; still scrolls on small ones. */
-html .mobile-app-menu#mobile-research-menu { max-height: min(80dvh, 620px); }
+html .mobile-app-menu#mobile-research-menu,
+html .mobile-app-menu#mobile-account-menu { max-height: min(80dvh, 620px); }

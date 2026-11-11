@@ -125,7 +125,7 @@ class TestItIsReachable:
 
     def test_the_mobile_nav_has_one_too(self):
         nav = open("templates/_elite_navigation.html").read()
-        assert nav.count("url_for('learn_index')") >= 2
+        assert nav.count("url_for('learn_index')") == 1 and nav.count("nav_tiles(learn_groups)") == 2
 
     def test_the_link_highlights_on_both_learn_pages(self):
         nav = open("templates/_elite_navigation.html").read()
