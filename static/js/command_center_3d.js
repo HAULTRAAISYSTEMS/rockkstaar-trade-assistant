@@ -407,7 +407,8 @@
     function draw(time, dt) {
       if (!dragging && !reduceMotion) { rotY += velY * dt; velY += ((selected ? 0 : 0.18) - velY) * (selected ? 0.2 : 0.02); }
       ctx.clearRect(0, 0, W, H);
-      var R = Math.min(W, H) * 0.29;
+      // Bigger canvas, bigger globe: fill more of it once there is room.
+      var R = Math.min(W, H) * (Math.min(W, H) > 420 ? 0.34 : 0.29);
       var cx = W / 2 + pointer.x * 6, cy = H * 0.47 + pointer.y * 6;
 
       // Core glow
@@ -483,10 +484,10 @@
         labelSet = {};
         drawn.filter(function (it) { return it[1][2] > 0.15 && it[2].chg != null; })
           .sort(function (a, b) { return Math.abs(b[2].chg) - Math.abs(a[2].chg); })
-          .slice(0, 12)
+          .slice(0, W > 520 ? 18 : 12)
           .forEach(function (it) { labelSet[it[2].symbol] = 1; });
       }
-      ctx.font = '600 10px "IBM Plex Mono", ui-monospace, monospace';
+      ctx.font = '600 ' + (W > 520 ? 12 : 10) + 'px "IBM Plex Mono", ui-monospace, monospace';
       ctx.textBaseline = 'middle';
       hits = [];
       for (var d = 0; d < drawn.length; d++) {
@@ -514,7 +515,7 @@
           var tw = ctx.measureText(label).width;
           if (lx2 + tw > W - 4) lx2 = it[1][0] - 7 - tw;
           ctx.fillStyle = 'rgba(3,7,15,0.72)';
-          ctx.fillRect(lx2 - 3, ly2 - 7, tw + 6, 14);
+          ctx.fillRect(lx2 - 3, ly2 - (W > 520 ? 8 : 7), tw + 6, W > 520 ? 16 : 14);
           ctx.fillStyle = rgba(it[3], Math.min(1, 0.55 + it[1][2]));
           ctx.fillText(label, lx2, ly2);
         }

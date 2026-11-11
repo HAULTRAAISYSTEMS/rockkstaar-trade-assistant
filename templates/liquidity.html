@@ -12,20 +12,20 @@
        The title used to sit below a 400px banner, so the page opened on a
        narrative and named itself second. It is first now, and the whole
        header is one band rather than a card of its own. -->
-  <header class="elite-hero has-orb is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
+  <header class="elite-hero has-orb cc-hero-xl is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
     <div>
       <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Intelligence</div>
       <h1 class="elite-hero-title">Morning <span class="accent">Command Center</span></h1>
       <p class="workspace-intro">Understand what changed. Check the evidence. Build your conviction.</p>
     </div>
     <div class="elite-hero-actions">
-      <div class="liq-mode-toggle">
-        <button class="liq-mode-btn active" data-mode="both"   onclick="setMode('both')">All</button>
-        <button class="liq-mode-btn"        data-mode="invest" onclick="setMode('invest')">Investing</button>
-        <button class="liq-mode-btn"        data-mode="trade"  onclick="setMode('trade')">Trading</button>
-      </div>
       <button class="btn-liq-refresh" id="cc-refresh-btn" onclick="refreshAll()" title="Refresh all data">↺ Refresh</button>
       <span class="liq-last-updated cc-updated" id="liq-last-updated">Loading…</span>
+      <nav class="cc-shortcuts" aria-label="Research workflow">
+        <a href="{{ url_for('research_page') }}"><span aria-hidden="true">⌕</span> Find the edge</a>
+        <a href="{{ url_for('fundamentals_page', tab='quarter') }}"><span aria-hidden="true">◎</span> Verify the thesis</a>
+        <a href="{{ url_for('learn_review') }}"><span aria-hidden="true">◈</span> Review learning</a>
+      </nav>
     </div>
     {# Live market globe. Every node is a symbol already on the market tape;
        it repaints when the tape's own poll lands, and says so when it has
@@ -41,11 +41,6 @@
     </div>
   </header>
 
-  <nav class="workspace-paths workspace-paths--next" aria-label="Research workflow">
-    <a href="{{ url_for('research_page') }}"><span class="workspace-step">01 / DISCOVER</span><span class="workflow-icon" aria-hidden="true">⌕</span><strong>Find the edge</strong><small>Explore companies, fundamentals and valuation</small><span class="workflow-action">OPEN RESEARCH <span aria-hidden="true">›</span></span></a>
-    <a href="{{ url_for('fundamentals_page', tab='quarter') }}"><span class="workspace-step">02 / VERIFY</span><span class="workflow-icon" aria-hidden="true">◎</span><strong>Challenge the thesis</strong><small>Run Seven Checks against the evidence</small><span class="workflow-action">RUN CHECKS <span aria-hidden="true">›</span></span></a>
-    <a href="{{ url_for('learn_review') }}"><span class="workspace-step">03 / REMEMBER</span><span class="workflow-icon" aria-hidden="true">◈</span><strong>Build conviction</strong><small>Review insights and retain what matters</small><span class="workflow-action">REVIEW LEARNING <span aria-hidden="true">›</span></span></a>
-  </nav>
 
   {# The FRED loading and weekend notices sat above the page title, so the
      first thing the page said was that one of its lower panels was still
@@ -139,22 +134,9 @@
   </section>
   </section><!-- /cc-now -->
 
-  <!-- ══ NOTIFICATIONS ═══════════════════════════════════════════════════ -->
-  <section class="cc-card nx-panel cc-rise cc-d1" id="nx-panel" aria-labelledby="nx-panel-title">
-    <header class="nx-panel__head">
-      <h2 class="nx-panel__title" id="nx-panel-title"><span aria-hidden="true">🔔</span> Notifications <span class="nx-panel__count" id="nx-panel-count"></span></h2>
-      <span class="nx-panel__links"><a class="nx-text-btn" href="{{ url_for('intel') }}">All news</a><button type="button" class="nx-text-btn" data-nx-open>Open all →</button></span>
-    </header>
-    <div class="nx-chips" id="nx-panel-chips" role="group" aria-label="Filter notifications"></div>
-    <ol class="nx-list nx-list--panel" id="nx-panel-list" aria-live="polite"><li class="nx-empty"><span>Loading…</span></li></ol>
-  </section>
-
-  <!-- ══ TODAY'S READ + THIS WEEK ═════════════════════════════════════════ -->
-  <div class="cc-split">
-
-    {# The read is written server-side from the same market snapshot as the
-       pulse strip above, so the two can never describe different markets.
-       The refresh button re-renders #ms-body from one fresh snapshot. #}
+  <!-- ══ BODY: reading on the left, the live feed on the right ══════════ -->
+  <div class="cc-body">
+    <div class="cc-col-main">
     <div id="market-story-banner" class="cc-card cc-story cc-rise cc-d1 sent-{{ story.sentiment if story else 'neutral' }}">
       <div class="cc-head">
         <h2>Today's read</h2>
@@ -191,38 +173,8 @@
       </details>
     </div>
 
-    <div class="cc-card cc-rise cc-d2">
-      <div class="cc-head">
-        <h2>This week</h2>
-        <a href="{{ url_for('catalyst_calendar') }}">Full calendar →</a>
-      </div>
-      {% if week %}
-      <div class="cc-week">
-        {% for e in (week | rejectattr('title', 'equalto', next_up.title if next_up else '') | list)[:3] %}
-        <div class="cc-week-row {{ 'is-high' if e.impact == 'HIGH' }} {{ 'is-imminent' if e.days_away is number and 0 <= e.days_away <= 1 }}">
-          <span class="cc-when"><b>{{ e.date_label }}</b><small>{{ e.time }}</small></span>
-          <span class="cc-what">
-            {{ e.title }}
-            {% if e.on_watchlist %}<em class="cc-tag">watchlist</em>{% endif %}
-            {# Every earnings row carries the same boilerplate sentence, which
-               says nothing eight times over. Macro reasons are specific and
-               worth the line. #}
-            {% if e.reason and e.kind != 'EARNINGS' %}<small>{{ e.reason }}</small>
-            {% elif e.company_name and e.company_name != e.ticker %}<small>{{ e.company_name }}</small>{% endif %}
-          </span>
-          <span class="cc-impact {{ 'is-high' if e.impact == 'HIGH' }}">{{ e.impact|title }}</span>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="cc-empty">No upcoming events were returned. This does not confirm an empty week. Open the full calendar to check coverage.</p>
-      {% endif %}
-    </div>
-
-  </div>
-
   <!-- ══ PERSONAL RESEARCH DIGEST ════════════════════════════════════════ -->
-  <section class="cc-card cc-digest cc-rise cc-d2" id="what-changed">
+    <section class="cc-card cc-digest cc-rise cc-d2" id="what-changed">
     <div class="cc-head cc-digest-head">
       <div>
         <div class="cc-digest-kicker">Your watchlist + saved theses</div>
@@ -279,17 +231,15 @@
     {% endif %}
   </section>
 
-  {# Setups and the watchlist side by side on a wide screen (news lives in
-     Notifications now).
-     Stacked full-width they read as three more slabs; side by side they read
-     as one glance. #}
-  <div class="cc-trio cc-duo">
-
-    <div class="cc-card cc-rise cc-d4">
+    <section class="cc-card cc-picks cc-rise cc-d3" aria-label="Setups and watchlist">
       <div class="cc-head">
-        <h2>Trade setups</h2>
-        <a href="{{ url_for('dashboard') }}">All →</a>
+        <div class="cc-tabs" role="tablist" aria-label="Setups or watchlist">
+          <button type="button" role="tab" aria-selected="true" data-cc-tab="setups">Trade setups</button>
+          <button type="button" role="tab" aria-selected="false" data-cc-tab="watch">Watchlist{% if watchlist_name %} · {{ watchlist_name }}{% endif %}</button>
+        </div>
+        <span class="cc-picks-links"><a href="{{ url_for('dashboard') }}" data-cc-for="setups">All setups →</a><a href="{{ url_for('watchlists_page') }}" data-cc-for="watch" hidden>Manage →</a></span>
       </div>
+      <div data-cc-panel="setups">
       {% if setups %}
       <div class="cc-rows">
         {% for r in setups[:5] %}
@@ -306,21 +256,16 @@
       {% else %}
       <p class="cc-empty">The scanner has not confirmed a qualifying setup yet.</p>
       {% endif %}
-    </div>
-
-    <div class="cc-card cc-rise cc-d5">
-      <div class="cc-head">
-        <h2>Watchlist{% if watchlist_name %} <em>{{ watchlist_name }}</em>{% endif %}</h2>
-        <a href="{{ url_for('watchlists_page') }}">Manage →</a>
       </div>
+      <div data-cc-panel="watch" hidden>
       {% if watchlist %}
       <div class="cc-rows">
         {% for r in watchlist[:5] %}
         <a class="cc-row" href="{{ url_for('fundamentals_page') }}?ticker={{ r.ticker }}">
           <span class="cc-row-sym">{{ r.ticker }}</span>
           <span class="cc-row-mid">
-            <b>{{ r.name or r.ticker }}</b>
-            {% if r.setup %}<small>{{ r.setup }}</small>{% endif %}
+            {% if r.name and r.name != r.ticker %}<b>{{ r.name }}</b>{% if r.setup %}<small>{{ r.setup }}</small>{% endif %}
+            {% else %}<b>{{ r.setup or 'No setup' }}</b>{% endif %}
           </span>
           <span class="cc-row-price">{% if r.price %}{{ '%.2f'|format(r.price) }}{% else %}—{% endif %}</span>
         </a>
@@ -329,10 +274,50 @@
       {% else %}
       <p class="cc-empty">No tickers on the active watchlist yet.</p>
       {% endif %}
+      </div>
+    </section>
+    </div>
+    <aside class="cc-col-side" aria-label="Live feed">
+  <!-- ══ NOTIFICATIONS ═══════════════════════════════════════════════════ -->
+  <section class="cc-card nx-panel cc-rise cc-d1" id="nx-panel" aria-labelledby="nx-panel-title">
+    <header class="nx-panel__head">
+      <h2 class="nx-panel__title" id="nx-panel-title"><span aria-hidden="true">🔔</span> Notifications <span class="nx-panel__count" id="nx-panel-count"></span></h2>
+      <span class="nx-panel__links"><a class="nx-text-btn" href="{{ url_for('intel') }}">All news</a><button type="button" class="nx-text-btn" data-nx-open>Open all →</button></span>
+    </header>
+    <div class="nx-chips" id="nx-panel-chips" role="group" aria-label="Filter notifications"></div>
+    <ol class="nx-list nx-list--panel" id="nx-panel-list" aria-live="polite"><li class="nx-empty"><span>Loading…</span></li></ol>
+  </section>
+
+    <div class="cc-card cc-weekcard cc-rise cc-d2">
+      <div class="cc-head">
+        <h2>This week</h2>
+        <a href="{{ url_for('catalyst_calendar') }}">Full calendar →</a>
+      </div>
+      {% if week %}
+      <div class="cc-week">
+        {% for e in (week | rejectattr('title', 'equalto', next_up.title if next_up else '') | list)[:3] %}
+        <div class="cc-week-row {{ 'is-high' if e.impact == 'HIGH' }} {{ 'is-imminent' if e.days_away is number and 0 <= e.days_away <= 1 }}">
+          <span class="cc-when"><b>{{ e.date_label }}</b><small>{{ e.time }}</small></span>
+          <span class="cc-what">
+            {{ e.title }}
+            {% if e.on_watchlist %}<em class="cc-tag">watchlist</em>{% endif %}
+            {# Every earnings row carries the same boilerplate sentence, which
+               says nothing eight times over. Macro reasons are specific and
+               worth the line. #}
+            {% if e.reason and e.kind != 'EARNINGS' %}<small>{{ e.reason }}</small>
+            {% elif e.company_name and e.company_name != e.ticker %}<small>{{ e.company_name }}</small>{% endif %}
+          </span>
+          <span class="cc-impact {{ 'is-high' if e.impact == 'HIGH' }}">{{ e.impact|title }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="cc-empty">No upcoming events were returned. This does not confirm an empty week. Open the full calendar to check coverage.</p>
+      {% endif %}
     </div>
 
+    </aside>
   </div>
-
 
 </div><!-- /liq-page -->
 {% endblock %}
@@ -341,6 +326,14 @@
 {% include "_liq_scripts.html" %}
 <script src="{{ url_for('static', filename='js/command_center_ext.js') }}" defer></script>
 <script>
+// Setups | Watchlist tabs.
+document.addEventListener('click', function (e) {
+  var t = e.target.closest('[data-cc-tab]'); if (!t) return;
+  var box = t.closest('.cc-picks'), name = t.getAttribute('data-cc-tab');
+  box.querySelectorAll('[data-cc-tab]').forEach(function (b) { b.setAttribute('aria-selected', b === t ? 'true' : 'false'); });
+  box.querySelectorAll('[data-cc-panel]').forEach(function (p) { p.hidden = p.getAttribute('data-cc-panel') !== name; });
+  box.querySelectorAll('[data-cc-for]').forEach(function (a) { a.hidden = a.getAttribute('data-cc-for') !== name; });
+});
 // "Show N more" on long Today lists.
 document.addEventListener('click', function (e) {
   var b = e.target.closest('[data-more-toggle]'); if (!b) return;
