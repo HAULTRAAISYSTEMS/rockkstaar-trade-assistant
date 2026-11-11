@@ -210,3 +210,11 @@ def test_heat_map_never_queues_a_ticker_twice_and_caches_empty():
     out = nd.heat_map(["AAA", "BBB"], budget=0.5, fetch=fetch, quotes={})
     assert sorted(calls) == ["AAA", "BBB"] and out["pending"] == []     # "no news" was cached
     nd._cache.clear()
+
+
+def test_heat_tile_click_brings_stories_into_scanner():
+    js = open("static/js/news_desk.js", encoding="utf-8").read()
+    assert 'new CustomEvent("nd:ticker"' in js and "nd-x-stories" in js
+    html = open("templates/intel.html", encoding="utf-8").read()
+    assert "addEventListener('nd:ticker'" in html and "lookup(t)" in html
+    assert "Don't show a story twice" in html

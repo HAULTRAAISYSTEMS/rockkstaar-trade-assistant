@@ -13,7 +13,8 @@
   .intel-title span{display:block;color:var(--elite-gold-2)}
   .intel-subtitle{max-width:650px;margin:0;color:#9da7b4;font-size:14px;line-height:1.6}
   .intel-search-panel{position:relative;align-self:stretch;display:flex;flex-direction:column;justify-content:center;gap:14px;padding:22px;border:1px solid rgba(255,255,255,.06);border-radius:18px;background:rgba(5,7,9,.72);backdrop-filter:blur(14px)}
-  .intel-ticker-news{margin:0 0 6px;border-bottom:1px solid rgba(var(--cc-accent-rgb,196,245,59),.18);background:linear-gradient(180deg,rgba(var(--cc-accent-rgb,196,245,59),.05),transparent 70%)}
+  .intel-grid>.intel-card{scroll-margin-top:110px}
+  .intel-ticker-news{margin:0 0 6px;scroll-margin-top:110px;border-bottom:1px solid rgba(var(--cc-accent-rgb,196,245,59),.18);background:linear-gradient(180deg,rgba(var(--cc-accent-rgb,196,245,59),.05),transparent 70%)}
   .intel-ticker-news-head{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:14px 18px 4px;font:600 11px var(--font-mono);letter-spacing:.12em;text-transform:uppercase}
   .intel-ticker-news-head b{color:var(--cc-accent,#c4f53b)}
   .intel-ticker-news-head span{color:#87919e;letter-spacing:.06em}
@@ -259,6 +260,12 @@ document.getElementById('scanner-query').addEventListener('input',applyScannerFi
           list.querySelectorAll('#intel-empty,.intel-feed-state').forEach(function(el){el.remove();});}
         else{meta.textContent='No recent news found for '+t+'.';}
         applyScannerFilters();
+        // Don't show a story twice: drop ones the scanner list is already showing.
+        var seen={};
+        document.querySelectorAll('#intel-news .intel-news-item:not([hidden]) .intel-headline').forEach(function(h){seen[h.textContent.trim().toLowerCase()]=1;});
+        list.querySelectorAll('.intel-news-item').forEach(function(it){var h=it.querySelector('.intel-headline');if(h&&seen[h.textContent.trim().toLowerCase()])it.remove();});
+        if(d&&d.ok&&d.html&&!list.querySelector('.intel-news-item'))meta.textContent='Every '+t+' story is already in the list below.';
+        applyScannerFilters();
       })
       .catch(function(){if(my===seq)meta.textContent='News lookup failed. Try again.';});
   }
@@ -267,6 +274,16 @@ document.getElementById('scanner-query').addEventListener('input',applyScannerFi
     var q=(input.value||'').trim().toUpperCase();
     if(!/^[A-Z][A-Z0-9.\-]{0,5}$/.test(q)){seq++;hide();return;}
     timer=setTimeout(function(){lookup(q);},450);
+  });
+  // Tapping a heat-map tile brings that ticker's stories up in the scanner.
+  document.addEventListener('nd:ticker',function(e){
+    var t=((e.detail&&e.detail.ticker)||'').toUpperCase();
+    if(!/^[A-Z][A-Z0-9.\-]{0,5}$/.test(t))return;
+    input.value=t;clearTimeout(timer);applyScannerFilters();lookup(t);
+  });
+  document.addEventListener('click',function(e){
+    var a=e.target.closest('.nd-x-stories');if(!a)return;
+    e.preventDefault();(box.closest('.intel-card')||box).scrollIntoView({behavior:'smooth',block:'start'});
   });
   var start=new URLSearchParams(location.search).get('q');
   if(start){input.value=start;input.dispatchEvent(new Event('input'));}

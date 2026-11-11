@@ -22,7 +22,8 @@
         ((f.news || []).length ? '<div class="nd-x-news">' + f.news.map(function (n) {
           return (n.url ? '<a href="' + esc(n.url) + '" target="_blank" rel="noopener noreferrer">' : "<span>") + esc(n.headline) + " <small>" + esc([n.source, n.time].filter(Boolean).join(" · ")) + "</small>" + (n.url ? "</a>" : "</span>");
         }).join("") + "</div>" : "") +
-        '<small class="nd-x-foot">' + (d.ai ? "AI read of the facts above" : "Rule-based read of the facts above") + ' · <a href="/stock/' + encodeURIComponent(ticker) + '">Open ' + esc(ticker) + " →</a></small></div>";
+        '<small class="nd-x-foot">' + (d.ai ? "AI read of the facts above" : "Rule-based read of the facts above") + ' · <a href="/stock/' + encodeURIComponent(ticker) + '">Open ' + esc(ticker) + " →</a>" +
+        (document.getElementById("intel-news") ? ' · <a href="#intel-ticker-news" class="nd-x-stories">All ' + esc(ticker) + " stories ↓</a>" : "") + "</small></div>";
       var x = box.querySelector(".nd-x-close"); if (x) x.addEventListener("click", function () { box.hidden = true; });
     }).catch(function () { box.innerHTML = ""; box.hidden = true; });
   }
@@ -57,6 +58,8 @@
       var b = e.target.closest(".nd-tile"); if (!b) return;
       grid.querySelectorAll(".nd-tile.on").forEach(function (x) { x.classList.remove("on"); });
       b.classList.add("on"); explain(b.getAttribute("data-t"), panel);
+      // Let the page bring the same ticker's stories up in its news list.
+      document.dispatchEvent(new CustomEvent("nd:ticker", { detail: { ticker: b.getAttribute("data-t") } }));
       if (window.innerWidth < 760) panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
     load();
