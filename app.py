@@ -294,7 +294,7 @@ _POLL_VERIFY_CACHE: dict = {}
 _POLL_PATHS = ("/api/live/bundle", "/api/market-tape", "/api/today/pulse",
                "/api/terminal/quotes", "/api/terminal/live/", "/api/quick",
                "/api/dashboard", "/api/live-board", "/api/mood", "/api/stock/",
-               "/api/briefing/voice", "/api/notifications")
+               "/api/briefing/voice", "/api/notifications", "/api/depth/")
 
 
 def _verified_user_for_request(uid):
@@ -7476,6 +7476,24 @@ def _kick_stock_live_refresh(ticker: str) -> None:
 _STOCK_LIVE_STATE: dict = {}
 _STOCK_LIVE_LOCK = __import__("threading").Lock()
 _STOCK_LIVE_MIN_S = 20.0
+
+
+@app.route("/api/depth/<ticker>")
+def api_depth(ticker):
+    """Level 2 book and Time & Sales for one symbol (see market_depth.py).
+    Asking keeps the symbol subscribed on the shared Schwab streamer."""
+    import market_depth
+    sym = market_depth.clean_symbol(ticker)
+    if not sym:
+        return jsonify({"ok": False, "error": "bad symbol"}), 400
+    market_depth.request_symbol(sym)
+    try:
+        market_depth.ensure_started()
+    except Exception as exc:
+        logger.warning("depth streamer start: %s", exc)
+    resp = jsonify({"ok": True, **market_depth.snapshot(sym)})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/api/stock/<ticker>/live")
