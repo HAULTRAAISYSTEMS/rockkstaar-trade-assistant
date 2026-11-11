@@ -529,6 +529,12 @@ def service_worker():
 _STORY_REPEAT_PREFIXES = ("vix ",)
 
 
+@app.template_filter("release_money")
+def _release_money(v):
+    import earnings_release
+    return earnings_release.money(v)
+
+
 @app.template_test("story_repeat")
 def _story_repeat(bullet) -> bool:
     return str(bullet or "").strip().lower().startswith(_STORY_REPEAT_PREFIXES)
@@ -10095,6 +10101,13 @@ def research_detail():
     if ticker and financial_period == "quarterly":
         from research_financials import get_quarter
         quarter = get_quarter(ticker, force=request.args.get("refresh") == "1")
+        try:
+            import earnings_release
+            rel = earnings_release.latest(ticker)
+            if rel and quarter is not None and rel["filed"] > (quarter.get("filed") or ""):
+                quarter["release"] = rel
+        except Exception:
+            pass
     try:
         suggestions = get_user_tracked_tickers(current_user_id())[:12]
     except Exception:

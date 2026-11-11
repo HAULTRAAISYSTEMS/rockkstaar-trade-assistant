@@ -29,7 +29,7 @@ MARKET_WINDOW = timedelta(hours=2)
 MAX_TICKERS = 40
 PER_TICKER = 2
 MARKET_PER_RUN = 6
-EVERY = {"news": 0, "earnings": 30 * 60, "economy": 10 * 60}   # seconds between provider calls
+EVERY = {"news": 0, "earnings": 30 * 60, "economy": 10 * 60, "releases": 20 * 60}   # seconds between provider calls
 
 _SEV = {"CRITICAL": "danger", "HIGH": "watch"}
 
@@ -193,6 +193,29 @@ def earnings(watch: dict[int, set[str]], *, now: datetime, calendar: dict, add) 
     return n
 
 
+def releases(watch: dict[int, set[str]], *, now: datetime, latest, add) -> int:
+    """Watchlist companies whose earnings press release (8-K Item 2.02) is out
+    but whose 10-Q/10-K is not: the headline numbers, once per release."""
+    import earnings_release
+    followers = _followers(watch)
+    cutoff = (now - timedelta(days=3)).date().isoformat()
+    n = 0
+    for t, users in sorted(followers.items()):
+        try:
+            rel = latest(t)
+        except Exception:
+            rel = None
+        if not rel or str(rel.get("filed") or "") < cutoff:
+            continue
+        line = earnings_release.summary(rel)
+        body = (line + ". " if line else "") + "From the company's press release; statements update when the 10-Q is filed."
+        for uid in users:
+            if add("calendar", f"{t} reported results", body, url=f"/research?ticker={t}#financials", ticker=t,
+                   user_id=uid, key=f"release|{t}|{rel.get('accn') or rel.get('filed')}", now=now):
+                n += 1
+    return n
+
+
 # ── Economy ──────────────────────────────────────────────────────────────────
 
 def _num(v, unit=""):
@@ -238,7 +261,8 @@ def economy(*, now: datetime, events: list[dict], add) -> int:
 # ── Cron entry ───────────────────────────────────────────────────────────────
 
 def run(conn=None, *, now: datetime | None = None, ticker_news=None, market_news=None,
-        earnings_calendar=None, economic_calendar=None, add=None, get=None, put=None) -> dict:
+        earnings_calendar=None, economic_calendar=None, add=None, get=None, put=None,
+        release_lookup=None) -> dict:
     now = now or _now()
     add = add or notify_inbox.add
     if get is None or put is None:
@@ -248,7 +272,7 @@ def run(conn=None, *, now: datetime | None = None, ticker_news=None, market_news
     if owns:
         from database import get_db
         conn = get_db()
-    out = {"news": 0, "earnings": 0, "economy": 0, "errors": []}
+    out = {"news": 0, "earnings": 0, "releases": 0, "economy": 0, "errors": []}
     try:
         watch = watch_by_user(conn)
     except Exception as exc:
@@ -273,6 +297,12 @@ def run(conn=None, *, now: datetime | None = None, ticker_news=None, market_news
             out["earnings"] = earnings(watch, now=now, calendar=cal or {}, add=add)
     except Exception as exc:
         out["errors"].append("earnings:" + type(exc).__name__)
+    try:
+        if watch and _due("releases", now, get, put):
+            import earnings_release
+            out["releases"] = releases(watch, now=now, latest=release_lookup or earnings_release.latest, add=add)
+    except Exception as exc:
+        out["errors"].append("releases:" + type(exc).__name__)
     try:
         if _due("economy", now, get, put):
             events = economic_calendar() if economic_calendar else ie.fetch_economic_calendar()
