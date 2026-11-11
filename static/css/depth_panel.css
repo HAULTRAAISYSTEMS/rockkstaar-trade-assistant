@@ -1,0 +1,95 @@
+/* Level 2 + Time & Sales panel (Terminal right column). */
+.dp {
+  flex: 0 0 auto; min-height: max-content;
+  margin-bottom: var(--sp-4, 16px); padding: 12px; border-radius: 16px;
+  background: rgba(8, 13, 24, .82); border: 1px solid rgba(79, 227, 255, .14);
+  font-family: var(--font-mono, ui-monospace, monospace); color: #e6edf6;
+}
+.dp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.dp-title { display: flex; white-space: nowrap; align-items: baseline; gap: 5px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.dp-title strong { font-weight: 700; color: #f2f6fb; }
+.dp-title > span { color: #6f7b8b; }
+.dp-sym { margin-left: 6px; padding: 2px 7px; border-radius: 6px; color: #061018; background: var(--cc-accent, #c8f560); font-size: 11px; }
+.dp-status { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: .06em; color: #8d97a4; white-space: nowrap; }
+.dp-status i { width: 7px; height: 7px; border-radius: 50%; background: #8d97a4; }
+.dp-status[data-state="live"] { color: #39d98a; }
+.dp-status[data-state="live"] i { background: #39d98a; box-shadow: 0 0 8px #39d98a; animation: dp-pulse 2s ease-in-out infinite; }
+.dp-status[data-state="error"] i, .dp-status[data-state="connecting"] i { background: #f5b942; }
+.dp-status[data-state="not_connected"] i { background: #ff5f57; }
+.dp-status a { color: var(--cc-cyan, #4fe3ff); }
+@keyframes dp-pulse { 50% { opacity: .35; } }
+
+.dp-quote { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px; margin-bottom: 8px; }
+.dp-q { padding: 7px 9px; border-radius: 10px; background: rgba(255, 255, 255, .03); border: 1px solid rgba(255, 255, 255, .06); }
+.dp-q small { display: block; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: #6f7b8b; }
+.dp-q b { font-size: 15px; }
+.dp-q span { margin-left: 4px; font-size: 10px; color: #8d97a4; }
+.dp-q.bid b { color: #39d98a; }
+.dp-q.ask { text-align: right; }
+.dp-q.ask b { color: #ff6b62; }
+.dp-q.mid { text-align: center; min-width: 74px; }
+.dp-q.mid span { display: block; margin: 2px 0 0; }
+.dp-q.mid span.up { color: #39d98a; }
+.dp-q.mid span.down { color: #ff6b62; }
+
+.dp-imb, .dp-flow { position: relative; display: flex; height: 6px; border-radius: 99px; overflow: hidden; background: rgba(255, 255, 255, .06); }
+.dp-imb { margin-bottom: 18px; overflow: visible; }
+.dp-imb i, .dp-flow i { display: block; height: 100%; transition: width .4s; }
+.dp-imb i:first-child, .dp-flow i:first-child { background: #39d98a; border-radius: 99px 0 0 99px; }
+.dp-imb i:nth-child(2), .dp-flow i:nth-child(2) { background: #ff6b62; border-radius: 0 99px 99px 0; }
+.dp-imb span { position: absolute; top: 9px; left: 0; right: 0; text-align: center; font-size: 9.5px; color: #8d97a4; }
+
+.dp-tabs { display: flex; gap: 4px; padding: 3px; margin-bottom: 8px; border-radius: 99px; background: rgba(0, 0, 0, .35); }
+.dp-tabs button { flex: 1; border: 0; border-radius: 99px; padding: 7px 0; background: none; color: #8d97a4; font: 700 11px var(--font-ui, system-ui); cursor: pointer; }
+.dp-tabs button.on { color: #061018; background: linear-gradient(120deg, var(--cc-cyan, #4fe3ff), #a8f3ff); }
+
+.dp-body { display: flex; flex-direction: column; gap: 10px; }
+.dp-book { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.dp-colhd { display: grid; grid-template-columns: 1fr 44px 58px; gap: 4px; padding: 0 6px 4px; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: #6f7b8b; }
+.dp-side.asks .dp-colhd { grid-template-columns: 58px 44px 1fr; }
+.dp-row {
+  position: relative; display: grid; grid-template-columns: 1fr 44px 58px; gap: 4px; align-items: center;
+  padding: 3px 6px; font-size: 11px; line-height: 1.35; border-radius: 4px; overflow: hidden;
+}
+.dp-side.asks .dp-row { grid-template-columns: 58px 44px 1fr; }
+.dp-row::before { content: ""; position: absolute; top: 1px; bottom: 1px; width: var(--w, 0); opacity: .16; z-index: 0; }
+.dp-side.bids .dp-row::before { right: 0; background: #39d98a; }
+.dp-side.asks .dp-row::before { left: 0; background: #ff6b62; }
+.dp-row > span { position: relative; z-index: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dp-row .mm { color: #8d97a4; font-size: 10px; }
+.dp-row .sz { text-align: right; }
+.dp-side.bids .p { text-align: right; color: #39d98a; font-weight: 700; }
+.dp-side.asks .p { color: #ff6b62; font-weight: 700; }
+.dp-side.asks .mm { text-align: right; }
+.dp-row.top { background: rgba(255, 255, 255, .05); }
+
+.dp-tape-tools { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; margin-bottom: 6px; font-size: 10px; color: #8d97a4; }
+.dp-tape-tools .dp-flow { grid-column: 1 / -1; }
+.dp-tape-tools label { display: flex; align-items: center; gap: 5px; }
+.dp-tape-tools select { background: #0b1220; color: #e6edf6; border: 1px solid rgba(255, 255, 255, .12); border-radius: 6px; font: inherit; padding: 2px 4px; }
+.dp-tape-hd, .dp-print { grid-template-columns: 1fr 1fr 64px; }
+.dp-tape-hd { display: grid; }
+#dp-tape { overflow-y: auto; scrollbar-width: thin; }
+.dp-print { display: grid; gap: 4px; padding: 2px 6px; font-size: 11px; line-height: 1.4; border-radius: 3px; }
+.dp-print span:nth-child(2), .dp-print span:nth-child(3) { text-align: right; }
+.dp-tape-hd span:nth-child(2), .dp-tape-hd span:nth-child(3) { text-align: right; }
+.dp-print span:first-child { color: #6f7b8b; }
+.dp-print.buy { color: #39d98a; }
+.dp-print.sell { color: #ff6b62; }
+.dp-print.mid { color: #d7dee8; }
+.dp-print.big { font-weight: 700; background: rgba(245, 185, 66, .12); }
+.dp-print.big.buy { background: rgba(57, 217, 138, .16); }
+.dp-print.big.sell { background: rgba(255, 107, 98, .16); }
+.dp-empty { padding: 10px 6px; font-size: 10.5px; color: #6f7b8b; }
+.dp-note { margin: 10px 2px 0; font: 500 10px/1.4 var(--font-ui, system-ui); color: #6f7b8b; }
+
+/* One view at a time (Level 2 or Time & Sales), switched by the tabs, so the
+   panel fits the Terminal's right rail without scrolling it. */
+.dp[data-view="book"] [data-dp-panel="tape"], .dp[data-view="tape"] [data-dp-panel="book"] { display: none; }
+/* Sized to the Terminal's right rail (its height comes from --tw-h). */
+.dp-book, #dp-tape { max-height: max(170px, calc(var(--tw-h, 780px) * .53 - 290px)); }
+.dp-book { overflow-y: auto; scrollbar-width: thin; }
+@media (max-width: 900px) {
+  .dp-book { max-height: none; }
+  #dp-tape { max-height: 380px; }
+}
