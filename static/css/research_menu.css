@@ -1,0 +1,77 @@
+/* Research menu — desktop panel and phone sheet share one grouped layout:
+   Markets (Market Intel featured) → Companies → Your research. Every tile has
+   an icon, a title and one line of description. Loaded after
+   command_center.css so it wins without fighting specificity. */
+
+.rm-sec {
+  display: block; grid-column: 1 / -1;
+  margin: 12px 2px 7px;
+  color: var(--cc-cyan, #4fe3ff);
+  font: 700 9.5px var(--font-mono, ui-monospace, monospace);
+  letter-spacing: .16em; text-transform: uppercase;
+}
+.rm-sec:first-child { margin-top: 2px; }
+.rm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+
+.rm-item {
+  display: flex; align-items: center; gap: 11px; min-width: 0;
+  padding: 11px 12px; border-radius: 14px;
+  color: #eef3fa; text-decoration: none;
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid rgba(255, 255, 255, .07);
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color .15s, background .15s, transform .1s;
+}
+.rm-item:hover { border-color: rgba(79, 227, 255, .35); background: rgba(79, 227, 255, .06); }
+.rm-item:active { transform: scale(.98); background: rgba(79, 227, 255, .1); }
+.rm-ic {
+  flex: 0 0 36px; height: 36px; display: grid; place-items: center; border-radius: 11px;
+  color: var(--cc-cyan, #4fe3ff);
+  background: linear-gradient(145deg, rgba(79, 227, 255, .16), rgba(79, 227, 255, .04));
+  border: 1px solid rgba(79, 227, 255, .22);
+}
+.rm-txt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.rm-txt strong { font: 700 13px/1.15 var(--font-ui, system-ui); color: #f4f8ff; letter-spacing: .01em; }
+.rm-txt small {
+  font: 500 10.5px/1.3 var(--font-ui, system-ui); color: var(--elite-faint, #8d97a4);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* Market Intel leads, full width with the accent. */
+.rm-item--feature, .rm-item--wide { grid-column: 1 / -1; }
+.rm-item--feature {
+  padding: 13px 14px;
+  background: linear-gradient(120deg, rgba(var(--cc-accent-rgb, 214, 255, 99), .16), rgba(79, 227, 255, .06));
+  border-color: rgba(var(--cc-accent-rgb, 214, 255, 99), .35);
+}
+.rm-item--feature .rm-ic {
+  color: #061018; border-color: transparent;
+  background: linear-gradient(120deg, var(--cc-accent-hi, #eaff9e), var(--cc-accent, #c8f560));
+  box-shadow: 0 0 16px -4px rgba(var(--cc-accent-rgb, 214, 255, 99), .8);
+}
+.rm-item--feature .rm-txt strong { font-size: 14.5px; }
+
+/* Desktop dropdown: wider, two columns. */
+.nav-menu__panel.nav-menu__panel--research { width: 540px; max-width: min(540px, calc(100vw - 24px)); padding: 14px; }
+html.cc27 .nav-menu__panel--research .rm-item:hover { background: rgba(79, 227, 255, .07) !important; }
+
+/* Phone sheet: the grouped grid replaces the old link list. */
+.mobile-app-menu .rm-sheet { padding-top: 6px; }
+@media (max-width: 380px) {
+  .rm-item { padding: 10px; gap: 9px; }
+  .rm-ic { flex-basis: 32px; height: 32px; }
+  .rm-txt strong { font-size: 12.5px; }
+}
+
+/* Markets: Market Intel across the top, then Macro / Calendar / Smart Money
+   as three even tiles (icon over title) so no tile sits alone in a row. */
+.rm-grid--markets { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.rm-grid--markets .rm-item:not(.rm-item--feature) {
+  flex-direction: column; align-items: flex-start; gap: 9px; padding: 12px 11px;
+}
+.rm-grid--markets .rm-item:not(.rm-item--feature) .rm-ic { flex-basis: auto; width: 34px; height: 34px; }
+.mobile-app-menu .rm-txt strong { font-size: 13px; }
+.mobile-app-menu .rm-item { padding: 10px 11px; }
+.mobile-app-menu .rm-sec { margin: 10px 2px 6px; }
+/* Room for the whole grouped sheet on a normal phone; still scrolls on small ones. */
+html .mobile-app-menu#mobile-research-menu { max-height: min(80dvh, 620px); }
