@@ -93,3 +93,20 @@
   .dp-book { max-height: none; }
   #dp-tape { max-height: 380px; }
 }
+
+.dp-row[data-px], .dp-print[data-px] { cursor: pointer; }
+.dp-row[data-px]:hover, .dp-print[data-px]:hover { outline: 1px solid rgba(79, 227, 255, .45); }
+
+/* Order ticket: live bid / last / ask from the streamer; tap to use as limit. */
+.tw-ot-nbbo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 2px 0 12px; }
+.tw-ot-nbbo button {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 7px 4px; cursor: pointer;
+  border-radius: 9px; border: 1px solid rgba(255, 255, 255, .08); background: rgba(255, 255, 255, .03);
+  font-family: var(--font-mono, ui-monospace, monospace); color: #e6edf6;
+}
+.tw-ot-nbbo button small { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: #6f7b8b; }
+.tw-ot-nbbo button b { font-size: 13px; }
+.tw-ot-nbbo .bid b { color: #39d98a; }
+.tw-ot-nbbo .ask b { color: #ff6b62; }
+.tw-ot-nbbo button:hover { border-color: rgba(79, 227, 255, .45); }
+.tw-ot-nbbo.is-off { opacity: .45; }

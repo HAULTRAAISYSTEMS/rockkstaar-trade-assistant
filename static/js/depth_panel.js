@@ -49,7 +49,7 @@
       var cells = side === 'bids'
         ? '<span class="mm">' + esc(mm) + '</span><span class="sz">' + sz(lv.size) + '</span><span class="p">' + px(lv.price) + '</span>'
         : '<span class="p">' + px(lv.price) + '</span><span class="sz">' + sz(lv.size) + '</span><span class="mm">' + esc(mm) + '</span>';
-      return '<div class="dp-row' + (i === 0 ? ' top' : '') + '" style="--w:' + w + '%">' + cells + '</div>';
+      return '<div class="dp-row' + (i === 0 ? ' top' : '') + '" data-px="' + lv.price + '" title="Use ' + px(lv.price) + ' in the order ticket" style="--w:' + w + '%">' + cells + '</div>';
     }).join('');
   }
 
@@ -79,7 +79,9 @@
     var min = Number($('dp-min').value || 0);
     var tape = (d.tape || []).filter(function (p) { return p.size >= min; }).slice(0, 80);
     $('dp-tape').innerHTML = tape.length ? tape.map(function (p) {
-      return '<div class="dp-print ' + esc(p.side) + (p.size >= BIG ? ' big' : '') + '"><span>' + hms(p.t) +
+      // A combined (≈) print is several trades in one update, so its size
+      // says nothing about a single big order: only real prints get flagged.
+      return '<div class="dp-print ' + esc(p.side) + (p.size >= BIG && !p.combined ? ' big' : '') + '" data-px="' + p.price + '"><span>' + hms(p.t) +
         '</span><span>' + px(p.price) + '</span><span>' + (p.combined ? '≈' : '') + sz(p.size) + '</span></div>';
     }).join('') : '<div class="dp-empty">' + (d.status && d.status.state === 'live' ? 'Waiting for prints…' : 'No prints yet') + '</div>';
     var st = d.stats || {}, b = st.buy_vol || 0, s = st.sell_vol || 0;
@@ -88,6 +90,16 @@
     $('dp-flow-text').textContent = 'At ask ' + sz(b) + ' · At bid ' + sz(s);
     if (d.status && d.status.state === 'live' && !book.bids.length && !book.asks.length) {
       $('dp-note').textContent = 'The book is empty — Schwab Level 2 fills during market hours.';
+    }
+    // Hand the streamer's quote to the rest of the Terminal (chart candle,
+    // header price and %, order ticket), so every number on the page is
+    // the same real-time print. Only while the feed is actually live.
+    var fresh = d.status && d.status.state === 'live' && d.status.at && (Date.now() / 1000 - d.status.at < 20)
+                && d.updated && (Date.now() / 1000 - d.updated < 120);
+    if (fresh && q.last != null) {
+      document.dispatchEvent(new CustomEvent('dp:quote', {detail: {
+        symbol: sym, last: Number(q.last), bid: q.bid, ask: q.ask, bid_size: q.bid_size, ask_size: q.ask_size,
+        prev_close: q.prev_close, volume: q.volume, trade_ms: q.trade_ms}}));
     }
   }
 
@@ -114,6 +126,11 @@
   };
 
   root.addEventListener('click', function (e) {
+    var row = e.target.closest('[data-px]');
+    if (row) {
+      document.dispatchEvent(new CustomEvent('dp:price', {detail: {symbol: sym, price: Number(row.getAttribute('data-px'))}}));
+      return;
+    }
     var t = e.target.closest('[data-dp-tab]');
     if (!t) return;
     root.querySelectorAll('[data-dp-tab]').forEach(function (b) {
