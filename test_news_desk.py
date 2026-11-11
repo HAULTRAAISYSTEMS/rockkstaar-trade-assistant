@@ -39,7 +39,12 @@ def test_heat_map_marks_slow_tickers_pending_and_sorts_by_heat():
         if t == "SLOW":
             time.sleep(1.0)
             return []
-        return [story(f"{t} jumps", 1, "HIGH")] * (3 if t == "HOT" else 1)
+        # Real clock: heat_map scores the last 24 h against now, so a story
+        # pinned to the module's fixed NOW stopped counting a day later.
+        fresh = {"headline": f"{t} jumps", "impact": "HIGH", "summary": "",
+                 "published_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+                 "url": "https://x/" + t}
+        return [fresh] * (3 if t == "HOT" else 1)
     out = nd.heat_map(["cool", "HOT", "SLOW"], budget=0.3, fetch=fetch, quotes={"HOT": {"change_pct": 4.2}})
     assert [t["ticker"] for t in out["tiles"]][:2] == ["HOT", "COOL"]
     assert out["pending"] == ["SLOW"]

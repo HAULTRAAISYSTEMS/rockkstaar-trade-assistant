@@ -152,7 +152,7 @@
   function refreshPanel() {
     if (!panel) return;
     var host = document.getElementById("nx-panel-list");
-    get(panelState.kind, null, 8).then(function (d) {
+    get(panelState.kind, null, 5).then(function (d) {
       chips(document.getElementById("nx-panel-chips"), d.kinds, panelState.kind, function (k) { panelState.kind = k; refreshPanel(); });
       host.innerHTML = d.items.length ? d.items.map(row).join("") : empty(panelState.kind);
       var c = document.getElementById("nx-panel-count");

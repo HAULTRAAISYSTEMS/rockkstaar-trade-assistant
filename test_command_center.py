@@ -158,7 +158,7 @@ class TestThePage:
     def test_the_landing_route_is_the_same_page(self, client):
         assert client.get("/").status_code == 200
 
-    @pytest.mark.parametrize("heading", ["This week", "What changed for you", "Elite news",
+    @pytest.mark.parametrize("heading", ["This week", "What changed for you",
                                          "Trade setups", "Watchlist"])
     def test_each_section_is_on_the_page(self, client, heading):
         assert heading in client.get("/opportunity").get_data(as_text=True)
@@ -342,8 +342,8 @@ class TestTheLayout:
 
     def test_the_market_story_hooks_survived_the_rearrangement(self):
         """The banner is populated by JS; renaming its ids would blank it."""
-        for hook in ("market-story-banner", "ms-glow", "ms-sentiment-badge",
-                     "ms-regime-badge", "ms-headline", "ms-bullets",
+        # The sentiment/regime chips are gone: the mood dial is the one verdict.
+        for hook in ("market-story-banner", "ms-glow", "ms-headline", "ms-bullets",
                      "ms-permissions"):
             assert f'id="{hook}"' in self.PAGE, hook
 
@@ -379,7 +379,8 @@ class TestThePulseStrip:
         # Session-specific CLOSE/day labels have separate coverage below.
         monkeypatch.setattr(legacy._mkt, "market_session", lambda: "regular")
         html = client.get("/").get_data(as_text=True)
-        for label in ("Regime", "VIX", "SPY", "QQQ"):
+        # The regime is the "Trend" input under the mood dial now, not its own cell.
+        for label in ("Trend", "VIX", "SPY", "QQQ"):
             assert f">{label}<" in html
 
     def test_the_live_pulse_has_refreshable_hooks_and_vix_freshness(self, client):
@@ -520,8 +521,11 @@ class TestTheNewsSectionAsksToBeFilled:
         client = web_app.app.test_client()
         with client.session_transaction() as sess:
             sess["user_id"] = 1
-        html = client.get("/opportunity").get_data(as_text=True)
-        assert "Fetching catalysts now" in html
+        # The news card left the page (news is in Notifications); the route
+        # still says what is happening for the news page that uses it.
+        with web_app.app.test_request_context("/opportunity"):
+            note = legacy._command_center_context()["news_note"]
+        assert "Fetching catalysts now" in note
 
     def test_it_prefers_the_engines_own_explanation(self, monkeypatch):
         """The engine knows whether it is mid-refresh, missing a key, or

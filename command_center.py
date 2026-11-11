@@ -27,8 +27,17 @@ def _clamp(x, lo=0.0, hi=100.0):
 
 # ── Mood dial ────────────────────────────────────────────────────────────────
 
-def mood(*, vix=None, spy=None, qqq=None, es=None, nq=None, breadth=None, news_tone=None) -> dict:
-    """breadth = share of sector ETFs up (0-1); news_tone = -100..100."""
+_TREND_SCORES = {"RISK_ON": 80, "NEUTRAL": 50, "CHOPPY": 45, "RISK_OFF": 20, "NO_TRADE": 15}
+
+
+def mood(*, vix=None, spy=None, qqq=None, es=None, nq=None, breadth=None, news_tone=None,
+         regime=None) -> dict:
+    """breadth = share of sector ETFs up (0-1); news_tone = -100..100.
+
+    regime = the market engine's trend regime (RISK_ON / NEUTRAL / RISK_OFF ...).
+    It is one input here so the dial is the page's single verdict, instead of a
+    "Risk Off" regime cell sitting next to a "Neutral" dial.
+    """
     parts = []
 
     def add(name, score, weight, detail):
@@ -49,6 +58,9 @@ def mood(*, vix=None, spy=None, qqq=None, es=None, nq=None, breadth=None, news_t
     b = _f(breadth)
     if b is not None:
         add("Breadth", _clamp(b * 100), 0.20, f"{round(b * 100)}% of sectors up")
+    r = str(regime or "").upper().replace("-", "_").replace(" ", "_")
+    if r in _TREND_SCORES:
+        add("Trend", _TREND_SCORES[r], 0.25, "Trend regime " + r.replace("_", " ").title())
     t = _f(news_tone)
     if t is not None:
         add("News tone", _clamp(50 + t / 2), 0.10, f"headline tone {t:+.0f}")

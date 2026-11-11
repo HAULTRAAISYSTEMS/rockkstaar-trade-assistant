@@ -161,4 +161,6 @@ def test_live_poll_never_waits_on_the_vendor_refresh(monkeypatch):
         assert c.get("/api/stock/CEG/live").status_code == 200
     assert time.time() - t0 < 0.9
     assert done.wait(3)
-    assert calls == ["CEG"]
+    # Other suites' background threads can refresh other tickers while the
+    # env switch is off; what matters is CEG refreshed exactly once.
+    assert calls.count("CEG") == 1

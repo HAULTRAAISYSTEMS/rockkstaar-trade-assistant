@@ -100,3 +100,22 @@ def test_briefing_player_follows_iphone_audio_rules():
     assert "data:audio/wav;base64," in js and "playsinline" in js
     assert 'new SpeechSynthesisUtterance("")' not in js                  # an empty utterance doesn't unlock iOS
     assert "Your phone blocked the audio" in js                          # no silent wave forever
+
+
+def test_trend_regime_is_one_input_to_the_single_verdict():
+    """The page showed "Risk Off" (regime) beside "Neutral 54" (dial). The
+    regime now feeds the dial as its Trend part."""
+    import command_center as cc
+    base = dict(vix=19.5, spy=0.15, qqq=0.21, es=-0.2, nq=-0.39)
+    plain = cc.mood(**base)
+    off = cc.mood(**base, regime="RISK_OFF")
+    assert any(p["name"] == "Trend" for p in off["parts"])
+    assert off["score"] < plain["score"]
+    assert cc.mood(**base, regime="bogus")["score"] == plain["score"]
+
+
+def test_today_page_says_each_thing_once():
+    html = open("templates/liquidity.html", encoding="utf-8").read()
+    assert "Elite news" not in html and "AI Morning Briefing" not in html.replace("AI morning briefing", "")
+    assert html.count('id="ai-brief-body"') == 1 and 'class="cc-now' in html
+    assert "reject('story_repeat')" in html and "rejectattr('title', 'equalto'" in html
