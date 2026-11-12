@@ -161,12 +161,14 @@ def normalize_ohlcv_data(data: dict | None) -> list[dict]:
             continue
         if high < max(open_, close) or low > min(open_, close) or low > high:
             continue
+        # Decades-old split-adjusted prices can be fractions of a cent.
+        digits = 4 if low >= 1 else 6
         bar = {
             "time": timestamp,
-            "open": round(open_, 4),
-            "high": round(high, 4),
-            "low": round(low, 4),
-            "close": round(close, 4),
+            "open": round(open_, digits),
+            "high": round(high, digits),
+            "low": round(low, digits),
+            "close": round(close, digits),
             "volume": int(volumes[index] or 0) if index < len(volumes) else 0,
         }
         bars_by_time[timestamp] = bar

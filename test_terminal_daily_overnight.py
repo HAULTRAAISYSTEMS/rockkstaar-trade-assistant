@@ -77,7 +77,7 @@ global.twChartState={ticker:'SPY',interval:'1d',extended:false,barsKey:'SPY|1d',
   bars:[{time:Date.parse('2026-11-06T05:00:00Z')/1000,open:740,high:742,low:734,close:735.29,volume:5e7}],
   area:{update:()=>{}},candle:{update:d=>updates.push(d)},vol:{update:()=>{}}};
 global.twTimeKey=t=>String(t);global.twCandleDatum=d=>d;global.twVolumeColor=()=>'#fff';
-global.twRenderIndicators=()=>{};global.twRenderEmas=()=>{};global.twOhlcv=()=>{};
+global.twLongBars=i=>i==='1d'||i==='1w'||i==='1mo';global.twRenderIndicators=()=>{};global.twRenderEmas=()=>{};global.twOhlcv=()=>{};
 eval(s.slice(i,j));
 const q=JSON.parse(process.argv[2]);
 twPatchActiveCandle(q,q.px);

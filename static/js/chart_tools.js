@@ -83,9 +83,13 @@ var CT_PREF_DEFAULTS = {
   vwap: {on: true, color: '#ff9f43', bands: false},
   bb: {on: false, len: 20, mult: 2, color: '#8b93ff'},
   sma: {on: false, len: 50, color: '#d9dee7'},
-  levels: {on: true},
-  labels: {bidask: true, indicators: true, levels: true, drawings: true},
-  candles: {up: '#22C58B', down: '#FF4D45', session: false, shading: true},
+  levels: {on: true, pdh: true, pdl: true, pdc: true, pmh: true, pml: true},
+  labels: {bid: true, ask: true, indicators: true, levels: true, drawings: true},
+  candles: {up: '#22C58B', down: '#FF4D45', session: false, shading: true, style: 'candles', wicks: true},
+  scale: {mode: 'normal', invert: false, lastLine: true, lastLabel: true},
+  view: {grid: 'none', crosshair: 'free', watermark: false, hilo: true, rightOffset: 5, countdown: true,
+         ohlc: true, legend: true, tooltip: true, hint: true, volume: true},
+  draw: {stay: false, hidden: false},
   magnet: false
 };
 var ctPrefs = JSON.parse(JSON.stringify(CT_PREF_DEFAULTS));
@@ -99,6 +103,8 @@ var ctToolDefaults = {};
   } catch (e) {}
 })();
 function ctMergePrefs(saved) {
+  // The single Bid/Ask switch became two.
+  if (saved.labels && saved.labels.bidask === false && saved.labels.bid == null) { saved.labels.bid = false; saved.labels.ask = false; }
   Object.keys(CT_PREF_DEFAULTS).forEach(function (k) {
     if (saved[k] == null) return;
     if (typeof CT_PREF_DEFAULTS[k] === 'object') ctPrefs[k] = Object.assign({}, CT_PREF_DEFAULTS[k], ctPrefs[k], saved[k]);
@@ -142,7 +148,7 @@ function ctPrefChanged() {
 function ctLbl(key) { return !!(ctPrefs.labels && ctPrefs.labels[key]); }
 
 /* ═══ Time ⇄ logical index ⇄ pixels ═══ */
-var CT_STEP = {'1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400};
+var CT_STEP = {'1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800, '1mo': 2629800};
 function ctSec(t) {
   if (t && typeof t === 'object' && t.year) return Date.UTC(t.year, (t.month || 1) - 1, t.day || 1) / 1000;
   var n = Number(t);
@@ -295,7 +301,7 @@ function twLoadDrawings() {
   ctDraft = null; ctAction = null;
   if (ctStore.ticker !== ticker) {
     var local = ctReadLocal(ticker);
-    ctStore = {ticker: ticker, drawings: local.drawings, updated: local.updated, fetchedAt: 0, undo: [], hidden: ctStore.hidden};
+    ctStore = {ticker: ticker, drawings: local.drawings, updated: local.updated, fetchedAt: 0, undo: []};
     twChartState.selectedDrawing = null;
   }
   twRenderDrawings();
@@ -388,7 +394,7 @@ function twRenderDrawings() {
   ctBoxes = {}; ctPaths = {}; ctLabelHits = {};
   ctx.save();
   ctx.beginPath(); ctx.rect(0, 0, dim.W, dim.H); ctx.clip();
-  var list = ctStore.hidden ? [] : ctStore.drawings.slice();
+  var list = ctPrefs.draw.hidden ? [] : ctStore.drawings.slice();
   list.forEach(function (d, i) {
     if (d.hidden) return;
     var sel = i === twChartState.selectedDrawing;
@@ -399,6 +405,7 @@ function twRenderDrawings() {
     draft.id = '_draft';
     try { ctDrawOne(ctx, draft, dim, true, axisLabels, timeLabels, true); } catch (e) {}
   }
+  try { ctDrawExtras(ctx, dim); } catch (e) {}
   ctx.restore();
   ctCurId = null;
   axisLabels.forEach(function (l) { ctAxisLabel(ctx, dim, l.p, l.c, l.text); });
@@ -724,7 +731,7 @@ function ctHandlePoints(d) {
   }
 }
 function ctHit(x, y) {
-  if (ctStore.hidden) return null;
+  if (ctPrefs.draw.hidden) return null;
   var p = {x: x, y: y}, list = ctStore.drawings, order = [], best = null;
   // Selected drawing first so its handles win over anything underneath.
   if (twChartState.selectedDrawing != null) order.push(twChartState.selectedDrawing);
@@ -833,6 +840,7 @@ function ctFinishDraft() {
   if (ctStore.drawings.length > 300) ctStore.drawings.shift();
   ctDraft = null;
   twSaveDrawings();
+  if (ctPrefs.draw.stay && d.type !== 'text') { twRenderDrawings(); return; }
   twStopDrawing();
   ctSelect(ctStore.drawings.length - 1);
   if (d.type === 'text') setTimeout(function () { var inp = document.getElementById('ct-p-text'); if (inp) { inp.focus(); inp.select(); } }, 30);
@@ -1045,7 +1053,7 @@ function ctBuildRail() {
     if (!act) return;
     var a = act.getAttribute('data-ct-act');
     if (a === 'magnet') { ctPrefs.magnet = !ctPrefs.magnet; ctPrefChanged(); ctSyncRail(); }
-    else if (a === 'hide') { ctStore.hidden = !ctStore.hidden; ctSyncRail(); twRenderDrawings(); }
+    else if (a === 'hide') { ctPrefs.draw.hidden = !ctPrefs.draw.hidden; ctPrefChanged(); ctSyncSettingsUI(); ctSyncRail(); twRenderDrawings(); }
     else if (a === 'undo') ctUndo();
     else if (a === 'delete') twDeleteSelected();
     else if (a === 'clear') twClearDrawings();
@@ -1099,7 +1107,7 @@ function ctSyncRail() {
   var mag = document.querySelector('#ct-rail [data-ct-act="magnet"]');
   if (mag) { mag.classList.toggle('active', !!ctPrefs.magnet); mag.setAttribute('aria-pressed', ctPrefs.magnet ? 'true' : 'false'); }
   var hide = document.querySelector('#ct-rail [data-ct-act="hide"]');
-  if (hide) { hide.classList.toggle('active', !!ctStore.hidden); hide.title = ctStore.hidden ? 'Show drawings' : 'Hide all drawings'; }
+  if (hide) { hide.classList.toggle('active', !!ctPrefs.draw.hidden); hide.title = ctPrefs.draw.hidden ? 'Show drawings' : 'Hide all drawings'; }
 }
 
 /* ═══ Properties bar for the selected drawing ═══ */
@@ -1252,7 +1260,94 @@ function ctInitStudies(chart) {
     bbm: mk({}), bbu: mk({}), bbl: mk({}), sma: mk({lineWidth: 2})
   };
   ctApplyCandleColors();
+  ctApplyView();
   setInterval(ctRenderNbbo, 5000);
+  // The bar-close countdown ticks once a second.
+  setInterval(function () { if (ctPrefs.view.countdown && !document.hidden) twRenderDrawings(); }, 1000);
+}
+
+/* ═══ Scale, canvas and status-line settings ═══ */
+var ctViewKey = '', ctTsOffset = null;
+var CT_INTERVAL_NAMES = {'1m': '1m', '5m': '5m', '15m': '15m', '1h': '1H', '4h': '4H', '1d': '1D', '1w': '1W', '1mo': '1M'};
+function ctApplyView(force) {
+  var ch = twChartState.chart, LC = window.LightweightCharts;
+  if (!ch || !LC) return;
+  var v = ctPrefs.view, sc = ctPrefs.scale;
+  var key = JSON.stringify([v, sc, twChartState.ticker, twChartState.interval, twChartState.type]);
+  if (key === ctViewKey && !force) return;
+  ctViewKey = key;
+  try {
+    ch.applyOptions({
+      grid: {vertLines: {visible: v.grid === 'both', color: 'rgba(255,255,255,0.05)'},
+             horzLines: {visible: v.grid !== 'none', color: 'rgba(255,255,255,0.05)'}},
+      crosshair: {mode: v.crosshair === 'magnet' ? LC.CrosshairMode.Magnet : LC.CrosshairMode.Normal},
+      watermark: {visible: !!(v.watermark && twChartState.ticker), text: (twChartState.ticker || '') + '  ' + (CT_INTERVAL_NAMES[twChartState.interval] || ''),
+                  color: 'rgba(255,255,255,0.05)', fontSize: 72, horzAlign: 'center', vertAlign: 'center'}
+    });
+    // Let decades of daily candles fit on one screen when zoomed all the way out.
+    // Only when the value changes: setting time-scale options cancels a
+    // pending fitContent(), which left a new symbol squeezed to the right edge.
+    var ro = Math.max(0, Math.min(60, Number(v.rightOffset) || 0));
+    if (ctTsOffset !== ro) { ctTsOffset = ro; ch.timeScale().applyOptions({rightOffset: ro, minBarSpacing: 0.02}); }
+    ch.priceScale('right').applyOptions({mode: {normal: 0, log: 1, percent: 2, indexed: 3}[sc.mode] || 0, invertScale: !!sc.invert});
+    [twChartState.candle, twChartState.area].forEach(function (ser) {
+      if (ser) ser.applyOptions({priceLineVisible: sc.lastLine !== false, lastValueVisible: sc.lastLabel !== false});
+    });
+  } catch (e) {}
+  var stack = document.getElementById('tw-chart-stack');
+  if (stack) {
+    stack.classList.toggle('ct-no-ohlc', v.ohlc === false);
+    stack.classList.toggle('ct-no-legend', v.legend === false);
+    stack.classList.toggle('ct-no-tooltip', v.tooltip === false);
+    stack.classList.toggle('ct-no-hint', v.hint === false);
+  }
+}
+/* Overlay extras drawn on the drawing canvas: high/low of the visible range
+   and the time left in the current candle. */
+function ctDrawExtras(ctx, dim) {
+  var bars = twChartState.bars || [], ch = twChartState.chart;
+  if (!bars.length || !ch) return;
+  if (ctPrefs.view.hilo) {
+    var r = null;
+    try { r = ch.timeScale().getVisibleLogicalRange(); } catch (e) {}
+    if (r) {
+      var from = Math.max(0, Math.ceil(r.from)), to = Math.min(bars.length - 1, Math.floor(r.to)), hi = -1, lo = -1;
+      for (var i = from; i <= to; i++) {
+        if (hi < 0 || Number(bars[i].high) > Number(bars[hi].high)) hi = i;
+        if (lo < 0 || Number(bars[i].low) < Number(bars[lo].low)) lo = i;
+      }
+      ctx.save();
+      ctx.font = '600 10px "IBM Plex Mono", ui-monospace, monospace'; ctx.fillStyle = 'rgba(214,224,236,0.75)'; ctx.textAlign = 'center';
+      [[hi, 'high', 'bottom', -5, 'H '], [lo, 'low', 'top', 5, 'L ']].forEach(function (m) {
+        if (m[0] < 0) return;
+        var x = ctLogX(m[0]), y = ctY(Number(bars[m[0]][m[1]]));
+        if (x == null || y == null || y < 10 || y > dim.H - 10) return;
+        ctx.textBaseline = m[2];
+        var tx = Math.max(30, Math.min(dim.W - 30, x));
+        ctx.fillText(m[4] + ctFmt(bars[m[0]][m[1]]), tx, y + m[3]);
+      });
+      ctx.restore();
+    }
+  }
+  var step = CT_STEP[twChartState.interval];
+  if (ctPrefs.view.countdown && step && step < 86400 && ctPrefs.scale.lastLabel !== false) {
+    var last = bars[bars.length - 1], left = ctSec(last.time) + step - Date.now() / 1000;
+    if (left > 0 && left <= step) {
+      var y2 = ctY(Number(last.close));
+      if (y2 != null && y2 > 0 && y2 < dim.H - 30) {
+        left = Math.floor(left);
+        var hh = Math.floor(left / 3600), mm = Math.floor(left % 3600 / 60), ss = left % 60;
+        var txt = (hh ? hh + ':' + ('0' + mm).slice(-2) : mm) + ':' + ('0' + ss).slice(-2);
+        ctx.save();
+        ctx.font = '600 10px "IBM Plex Mono", ui-monospace, monospace';
+        var up = Number(last.close) >= Number(last.open);
+        ctx.fillStyle = ctHexA(up ? ctPrefs.candles.up : ctPrefs.candles.down, 0.85);
+        ctx.fillRect(dim.W, y2 + 9, dim.axisW, 15);
+        ctx.fillStyle = '#ffffff'; ctx.textBaseline = 'middle'; ctx.fillText(txt, dim.W + 6, y2 + 16.5);
+        ctx.restore();
+      }
+    }
+  }
 }
 function ctEtDay(sec) { try { return twEasternSessionDate.format(new Date(sec * 1000)); } catch (e) { return ''; } }
 function ctIsRegular(b) { return !b.session || b.session === 'regular'; }
@@ -1315,10 +1410,11 @@ function ctRenderStudies() {
   ctRenderLevels();
   ctRenderNbbo();
   ctRenderStudyLegend();
+  ctApplyView();
 }
 function ctKeyLevels() {
   var bars = twChartState.bars || [], out = [];
-  if (!bars.length) return out;
+  if (!bars.length || twChartState.interval === '1w' || twChartState.interval === '1mo') return out;
   if (twChartState.interval === '1d') {
     var pb = bars[bars.length - 2];
     if (pb) out.push({p: Number(pb.high), t: 'PDH', c: '#7fd1ff'}, {p: Number(pb.low), t: 'PDL', c: '#ffb36b'}, {p: Number(pb.close), t: 'PDC', c: '#b0b8c4'});
@@ -1349,7 +1445,7 @@ function ctRenderLevels() {
   ctStudy.levelLines.forEach(function (l) { try { l.s.removePriceLine(l.line); } catch (e) {} });
   ctStudy.levelLines = [];
   if (!s || !ctPrefs.levels.on) return;
-  ctKeyLevels().forEach(function (lv) {
+  ctKeyLevels().filter(function (lv) { return ctPrefs.levels[lv.t.toLowerCase()] !== false; }).forEach(function (lv) {
     try {
       ctStudy.levelLines.push({s: s, line: s.createPriceLine({price: lv.p, color: lv.c, lineWidth: 1, lineStyle: 2, axisLabelVisible: ctLbl('levels'), title: lv.t})});
     } catch (e) {}
@@ -1357,21 +1453,21 @@ function ctRenderLevels() {
 }
 function ctRenderNbbo() {
   var s = ctSeries(), q = ctStudy.nbbo;
-  var show = s && ctLbl('bidask') && q && q.symbol === twChartState.ticker && Date.now() - q.at < 20000 && q.bid > 0 && q.ask > 0 && q.ask >= q.bid;
-  if (ctStudy.nbboLines.length && (!show || ctStudy.nbboLines[0].s !== s)) {
+  var live = s && q && q.symbol === twChartState.ticker && Date.now() - q.at < 20000 && q.bid > 0 && q.ask > 0 && q.ask >= q.bid;
+  var want = live ? [ctLbl('ask') ? 'ask' : null, ctLbl('bid') ? 'bid' : null].filter(Boolean).join(',') : '';
+  if (ctStudy.nbboLines.length && (ctStudy.nbboWant !== want || ctStudy.nbboLines[0].s !== s)) {
     ctStudy.nbboLines.forEach(function (l) { try { l.s.removePriceLine(l.line); } catch (e) {} });
     ctStudy.nbboLines = [];
   }
-  if (!show) return;
+  ctStudy.nbboWant = want;
+  if (!want) return;
   if (!ctStudy.nbboLines.length) {
     try {
-      ctStudy.nbboLines = [
-        {s: s, line: s.createPriceLine({price: q.ask, color: '#2f7bff', lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: 'Ask'})},
-        {s: s, line: s.createPriceLine({price: q.bid, color: '#b05cff', lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: 'Bid'})}
-      ];
+      if (ctLbl('ask')) ctStudy.nbboLines.push({s: s, k: 'ask', line: s.createPriceLine({price: q.ask, color: '#2f7bff', lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: 'Ask'})});
+      if (ctLbl('bid')) ctStudy.nbboLines.push({s: s, k: 'bid', line: s.createPriceLine({price: q.bid, color: '#b05cff', lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: 'Bid'})});
     } catch (e) {}
   } else {
-    try { ctStudy.nbboLines[0].line.applyOptions({price: q.ask}); ctStudy.nbboLines[1].line.applyOptions({price: q.bid}); } catch (e) {}
+    ctStudy.nbboLines.forEach(function (l) { try { l.line.applyOptions({price: q[l.k]}); } catch (e) {} });
   }
 }
 document.addEventListener('dp:quote', function (e) {
@@ -1410,17 +1506,34 @@ function ctRenderStudyLegend() {
 function ctApplyCandleColors() {
   var c = ctPrefs.candles;
   if (twChartState.candle) {
-    try { twChartState.candle.applyOptions({upColor: c.up, downColor: c.down, wickUpColor: c.up, wickDownColor: c.down, borderUpColor: c.up, borderDownColor: c.down}); } catch (e) {}
+    var hollow = c.style === 'hollow';
+    try {
+      twChartState.candle.applyOptions({upColor: hollow ? 'rgba(0,0,0,0)' : c.up, downColor: c.down, wickUpColor: c.up, wickDownColor: c.down,
+        borderVisible: hollow, borderUpColor: c.up, borderDownColor: c.down, wickVisible: c.wicks !== false});
+    } catch (e) {}
   }
   if (twChartState.shade) { try { twChartState.shade.applyOptions({visible: !!c.shading}); } catch (e) {} }
 }
 /* Per-bar colours. Extended-hours candles use the same green/red as the
    regular session (TradingView-style); the old blue/purple/orange session
    palette is an option in chart settings. */
+var ctHA = [];
+function ctHeikin(bar) {
+  // Bars arrive in order on a full load and one at a time on a live update of
+  // the last bar, so the previous Heikin Ashi candle is the one before it.
+  var t = ctSec(bar.time);
+  while (ctHA.length && ctHA[ctHA.length - 1].t >= t) ctHA.pop();
+  var o = Number(bar.open), h = Number(bar.high), l = Number(bar.low), c = Number(bar.close);
+  var prev = ctHA[ctHA.length - 1], hc = (o + h + l + c) / 4, ho = prev ? (prev.o + prev.c) / 2 : (o + c) / 2;
+  var ha = {t: t, o: ho, c: hc};
+  ctHA.push(ha);
+  return {time: bar.time, open: ho, high: Math.max(h, ho, hc), low: Math.min(l, ho, hc), close: hc};
+}
 function ctCandleDatum(bar) {
-  var datum = {time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close};
+  var datum = ctPrefs.candles.style === 'heikin' ? ctHeikin(bar)
+    : {time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close};
   if (!ctPrefs.candles.session) return datum;
-  var up = bar.close >= bar.open, col = null;
+  var up = datum.close >= datum.open, col = null;
   if (bar.session === 'overnight') col = up ? '#f0b53f' : '#ff8c42';
   else if (bar.session === 'premarket') col = up ? '#4aa3ff' : '#7569e8';
   else if (bar.session === 'after_hours') col = up ? '#c77dff' : '#ff6aa9';
@@ -1440,6 +1553,7 @@ function ctRepaintCandles() {
   var bars = twChartState.bars || [];
   if (!bars.length || !twChartState.candle) return;
   try {
+    ctHA = [];
     twChartState.candle.setData(bars.map(ctCandleDatum));
     twChartState.vol.setData(bars.map(function (b) { return {time: b.time, value: b.volume || 0, color: ctVolumeColor(b)}; }));
   } catch (e) {}
@@ -1457,10 +1571,15 @@ function ctSet(path, value) {
   if (path === 'sma.len') obj.len = Math.max(2, Math.min(400, Math.round(obj.len)));
   ctPrefChanged();
   if (path.indexOf('candles.') === 0) { ctApplyCandleColors(); ctRepaintCandles(); }
+  if (path === 'view.volume' && typeof twToggleVolume === 'function' && !!value !== !!twChartState.showVolume) twToggleVolume(document.getElementById('tw-volume-btn') || document.createElement('button'));
+  if (path.indexOf('view.') === 0 || path.indexOf('scale.') === 0) ctApplyView(true);
+  if (path.indexOf('labels.') === 0 || path.indexOf('levels.') === 0) { ctStudy.nbboWant = null; ctRenderLevels(); }
+  if (path === 'magnet' || path === 'draw.hidden') ctSyncRail();
   if (path === 'labels.indicators' && typeof twApplyStudyStyles === 'function') twApplyStudyStyles();
   ctRenderStudies(); ctSyncSettingsUI(); twRenderDrawings();
 }
 function ctSyncSettingsUI() {
+  if (typeof twChartState !== 'undefined') ctPrefs.view.volume = !!twChartState.showVolume;
   document.querySelectorAll('[data-ct-set]').forEach(function (el) {
     var path = el.getAttribute('data-ct-set').split('.'), v = ctPrefs;
     path.forEach(function (k) { v = v == null ? null : v[k]; });
@@ -1483,3 +1602,43 @@ document.addEventListener('input', function (ev) {
   ctSet(el.getAttribute('data-ct-set'), el.value);
 });
 document.addEventListener('DOMContentLoaded', ctSyncSettingsUI);
+
+/* Settings panel: tabs and the reset buttons. */
+document.addEventListener('click', function (ev) {
+  var tab = ev.target.closest && ev.target.closest('[data-ct-tab]');
+  if (tab) {
+    var grid = document.querySelector('#tw-study-settings .tw-study-grid');
+    if (grid) grid.setAttribute('data-ct-active', tab.getAttribute('data-ct-tab'));
+    document.querySelectorAll('[data-ct-tab]').forEach(function (b) { b.classList.toggle('on', b === tab); b.setAttribute('aria-selected', b === tab ? 'true' : 'false'); });
+    return;
+  }
+  var cmd = ev.target.closest && ev.target.closest('[data-ct-cmdset]');
+  if (!cmd) return;
+  var c = cmd.getAttribute('data-ct-cmdset');
+  if (c === 'resetall') {
+    ctPrefs = JSON.parse(JSON.stringify(CT_PREF_DEFAULTS));
+    ctPrefChanged();
+    if (!twChartState.showVolume && typeof twToggleVolume === 'function') twToggleVolume(document.getElementById('tw-volume-btn') || document.createElement('button'));
+    ctApplyCandleColors(); ctRepaintCandles(); ctApplyView(true); ctStudy.nbboWant = null;
+    if (typeof twApplyStudyStyles === 'function') twApplyStudyStyles();
+    ctRenderStudies(); ctSyncSettingsUI(); ctSyncRail(); twRenderDrawings();
+    cmd.textContent = 'Settings reset ✓';
+    setTimeout(function () { cmd.textContent = 'Reset chart settings to defaults'; }, 2000);
+  } else if (c === 'cleartool') {
+    ctToolDefaults = {}; ctPrefChanged();
+    cmd.textContent = 'Drawing styles reset ✓';
+    setTimeout(function () { cmd.textContent = 'Reset drawing styles to defaults'; }, 2000);
+  } else if (c === 'clearsym') {
+    if (!ctStore.drawings.length) { cmd.textContent = 'No drawings on ' + (ctStore.ticker || 'this symbol'); setTimeout(function () { cmd.textContent = 'Remove all drawings on this symbol'; }, 2000); return; }
+    var armed = cmd.getAttribute('data-armed') === '1';
+    if (!armed) {
+      cmd.setAttribute('data-armed', '1'); cmd.textContent = 'Tap again to remove ' + ctStore.drawings.length + ' drawings on ' + ctStore.ticker;
+      setTimeout(function () { cmd.removeAttribute('data-armed'); cmd.textContent = 'Remove all drawings on this symbol'; }, 3000);
+      return;
+    }
+    cmd.removeAttribute('data-armed');
+    ctPushUndo(); ctStore.drawings = []; twChartState.selectedDrawing = null; twSaveDrawings(); twRenderDrawings();
+    cmd.textContent = 'Removed ✓ (Undo on the rail brings them back)';
+    setTimeout(function () { cmd.textContent = 'Remove all drawings on this symbol'; }, 2500);
+  }
+});

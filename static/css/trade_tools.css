@@ -13,8 +13,8 @@
 .tt-form input,.tt-stop input{width:100%;box-sizing:border-box;min-height:42px;padding:9px 11px;border:1px solid #26303a;border-radius:10px;background:#090d12;color:#eef2f6;font:600 15px var(--font-mono,monospace)}
 .tt-form input:focus,.tt-stop input:focus{outline:none;border-color:rgba(var(--cc-accent-rgb,196,245,59),.6);box-shadow:0 0 0 3px rgba(var(--cc-accent-rgb,196,245,59),.12)}
 .tt-ticker input{text-transform:uppercase;font-size:18px}
-.tt-dir{display:flex;border:1px solid #26303a;border-radius:10px;overflow:hidden;height:42px}
-.tt-dir label{display:flex;flex:none;letter-spacing:0;text-transform:none}.tt-dir input{position:absolute;opacity:0;pointer-events:none}
+.tt-dir{position:relative;display:flex;border:1px solid #26303a;border-radius:10px;overflow:hidden;height:42px}
+.tt-dir label{display:flex;flex:none;letter-spacing:0;text-transform:none}.tt-dir input{position:absolute;opacity:0;pointer-events:none;width:1px!important;height:1px!important;min-height:0!important;padding:0!important}
 .tt-dir span{display:flex;align-items:center;padding:0 14px;color:#9aa5b1;font:700 13px var(--font-ui,system-ui);cursor:pointer}
 .tt-dir input:checked+span{background:rgba(var(--cc-accent-rgb,196,245,59),.16);color:var(--cc-accent,#c4f53b)}
 .tt-live{padding:9px 11px;border-radius:10px;background:#0b1117;color:#aeb8c3;font:12px/1.6 var(--font-mono,monospace)}.tt-live b{color:var(--cc-accent,#c4f53b)}

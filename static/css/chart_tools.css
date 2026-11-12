@@ -86,3 +86,30 @@
 .ct-props .ct-level button { width: 20px !important; height: 20px !important; min-width: 0 !important; padding: 0 !important; }
 .ct-props .ct-level-actions button { height: 24px !important; padding: 0 9px !important; }
 .tw-drawbar .ct-armed-clear { color: #fff !important; background: #c83434 !important; }
+
+/* Chart settings panel */
+.ct-tabs { display: flex; gap: 4px; padding: 8px 12px 0; border-bottom: 1px solid rgba(255,255,255,.07); overflow-x: auto; }
+.ct-tabs button { flex: 0 0 auto; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #8d9bb0; font: 700 11px var(--font-sans, system-ui); letter-spacing: .02em; cursor: pointer; }
+.ct-tabs button:hover { color: #fff; }
+.ct-tabs button.on { color: var(--cc-accent, #c4f53b); border-bottom-color: var(--cc-accent, #c4f53b); }
+.tw-study-grid[data-ct-active] > .tw-study-group { display: none; }
+.tw-study-grid[data-ct-active="candles"] > [data-tab="candles"],
+.tw-study-grid[data-ct-active="scale"] > [data-tab="scale"],
+.tw-study-grid[data-ct-active="labels"] > [data-tab="labels"],
+.tw-study-grid[data-ct-active="indicators"] > [data-tab="indicators"],
+.tw-study-grid[data-ct-active="drawings"] > [data-tab="drawings"] { display: block; }
+.tw-study-grid[data-ct-active] { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)) !important; }
+.tw-study-group:first-child { grid-row: auto !important; }
+.tw-study-row select { height: 24px; padding: 0 4px; }
+.ct-set-btn { display: block; width: 100%; margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 7px; background: #121926; color: #d6dee9; font: 600 12px var(--font-sans, system-ui); text-align: left; cursor: pointer; }
+.ct-set-btn:hover { border-color: rgba(255,255,255,.25); color: #fff; }
+.ct-set-btn.ct-danger, .ct-set-btn[data-armed] { color: #ff8a8a; }
+.ct-set-btn[data-armed] { background: rgba(200,52,52,.18); border-color: rgba(255,107,107,.5); }
+.ct-set-foot { display: flex; justify-content: flex-end; padding: 0 12px 12px; }
+.ct-set-foot .ct-set-btn { width: auto; }
+
+/* Status-line switches */
+.tw-chart-stack.ct-no-ohlc > .tw-ohlcv,
+.tw-chart-stack.ct-no-legend .tw-ema-legend,
+.tw-chart-stack.ct-no-tooltip .tw-chart-tooltip,
+.tw-chart-stack.ct-no-hint .tw-chart-hint { display: none !important; }
