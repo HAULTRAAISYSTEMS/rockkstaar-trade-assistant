@@ -7753,6 +7753,25 @@ def _live_err(msg: str, code: int = 400):
     return jsonify({"ok": False, "error": msg}), code
 
 
+# Schwab or an internal step failing is answered with 424, not 502: a 5xx
+# body is rewritten to "Service temporarily unavailable" by
+# _add_security_headers and can be swapped for an HTML page at Render's edge,
+# so the ticket only ever showed "Server error (502)" and never the reason.
+_LIVE_UPSTREAM = 424
+
+
+def _live_upstream_err(where: str, exc: Exception):
+    """A message the ticket can show: Schwab's own words, or a plain retry."""
+    msg = str(exc)
+    if isinstance(exc, RuntimeError) and msg.startswith("Schwab"):
+        return _live_err(msg, _LIVE_UPSTREAM)
+    logger.exception("live %s failed", where)
+    if isinstance(exc, (TimeoutError, OSError)):
+        return _live_err("Schwab didn't answer in time — try again in a moment", _LIVE_UPSTREAM)
+    return _live_err(f"Couldn't {where} right now ({type(exc).__name__}) — try again in a moment",
+                     _LIVE_UPSTREAM)
+
+
 @app.route("/api/trade/status")
 def api_trade_status():
     import live_trading
@@ -7824,8 +7843,7 @@ def api_trade_preview():
     except PermissionError as exc:
         return _live_err(str(exc), 403)
     except Exception as exc:
-        logger.warning("live preview failed: %s", exc)
-        return _live_err(f"Couldn't reach Schwab: {exc}", 502)
+        return _live_upstream_err("check this order", exc)
     schwab_check = {}
     if not blocks:
         schwab_check = schwab_orders.preview(acct["hash"], payload, uid)
@@ -7854,7 +7872,7 @@ def api_trade_place():
         except PermissionError as exc:
             return _live_err(str(exc), 403)
         except Exception as exc:
-            return _live_err(f"Couldn't reach Schwab: {exc}", 502)
+            return _live_upstream_err("check this order", exc)
         summary = schwab_orders.describe(t)
         try:
             nonce = live_trading.read_token(app.secret_key, d.get("token"), uid, acct["hash"], payload)
@@ -7870,7 +7888,7 @@ def api_trade_place():
         except Exception as exc:
             live_trading.log(uid, t, status="failed", error=str(exc), **common)
             logger.error("LIVE ORDER FAILED user=%s %s: %s", uid, summary, exc)
-            return _live_err(str(exc), 502)
+            return _live_upstream_err("send this order", exc)
         live_trading.log(uid, t, status="placed", order_id=order_id, **common)
     logger.warning("LIVE ORDER PLACED user=%s acct=…%s %s id=%s", uid, acct["last4"], summary, order_id)
     return jsonify({"ok": True, "order_id": order_id, "summary": summary})
@@ -7887,8 +7905,26 @@ def api_trade_orders():
         acct = _live_account(uid, live_trading.settings(uid))
         orders = schwab_orders.todays_orders(acct["hash"], uid)
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc), "orders": [], "log": live_trading.recent(uid)})
-    return jsonify({"ok": True, "orders": orders, "log": live_trading.recent(uid)})
+        logger.warning("live orders: %s", exc)
+        return jsonify({"ok": False, "error": _live_plain(exc), "orders": [], "log": _live_log(uid)})
+    return jsonify({"ok": True, "orders": orders, "log": _live_log(uid)})
+
+
+def _live_plain(exc: Exception) -> str:
+    msg = str(exc)
+    if isinstance(exc, (RuntimeError, PermissionError)) and msg:
+        return msg
+    return "Couldn't load today's Schwab orders — try again in a moment"
+
+
+def _live_log(uid: int) -> list:
+    """Our own order log. Never lets a log problem hide Schwab's orders."""
+    import live_trading
+    try:
+        return live_trading.recent(uid)
+    except Exception as exc:
+        logger.warning("live order log: %s", exc)
+        return []
 
 
 @app.route("/api/trade/cancel/<order_id>", methods=["POST"])
@@ -7904,7 +7940,7 @@ def api_trade_cancel(order_id):
     except schwab_orders.OrderError as exc:
         return _live_err(str(exc))
     except Exception as exc:
-        return _live_err(str(exc), 502)
+        return _live_upstream_err("cancel this order", exc)
     logger.warning("LIVE ORDER CANCEL user=%s id=%s", uid, order_id)
     return jsonify({"ok": True})
 

@@ -68,6 +68,7 @@ else:
 
 _INSERT_OR_IGNORE_RE = re.compile(r"\bINSERT\s+OR\s+IGNORE\b", re.IGNORECASE)
 _INSERT_START_RE     = re.compile(r"^\s*INSERT\b",              re.IGNORECASE)
+_CREATE_TABLE_RE     = re.compile(r"^\s*CREATE\s+TABLE\b",      re.IGNORECASE)
 
 
 def _adapt_sql(sql: str, params=None):
@@ -81,6 +82,14 @@ def _adapt_sql(sql: str, params=None):
     # Positional params  ?  →  %s
     elif params is not None:
         sql = sql.replace("?", "%s")
+
+    # CREATE TABLE with SQLite's AUTOINCREMENT. Modules outside this file
+    # (live_trading, login_throttle) passed their DDL straight to execute()
+    # without _adapt_ddl, so on Postgres the table was never created and
+    # every query on it failed — live order preview and today's orders
+    # returned server errors, and failed logins were never counted.
+    if _CREATE_TABLE_RE.match(sql):
+        sql = _adapt_ddl(sql)
 
     # INSERT OR IGNORE  →  INSERT … ON CONFLICT DO NOTHING
     if _INSERT_OR_IGNORE_RE.search(sql):

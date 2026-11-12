@@ -300,6 +300,9 @@
 .lt-set-status { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-body); margin-bottom: var(--sp-3); }
 .lt-set-status b.on { color:#ff6a62; } .lt-set-status b.off { color: var(--text-muted); }
 .lt-set-actions { display:grid; gap:6px; }
+/* Same display-beats-[hidden] problem: Take profit / Stop loss showed with Bracket off. */
+.tw-field-row[hidden] { display:none !important; }
+.tw-tif-note { margin-top:4px; font-size: var(--fs-2xs, 11px); color: var(--text-muted, #8d9bb0); min-height: 1em; }
 /* .tw-submit-ghost sets display:block, which beat the hidden attribute: "Turn off" showed while live trading was off. */
 .lt-settings [hidden] { display:none !important; }
 .lt-set-actions .lt-on { background: linear-gradient(180deg,#ff6a62,#d62e26); color:#fff; }
@@ -1021,7 +1024,7 @@
               <label for="tw-ot-stop">Stop</label>
               <input class="tw-input" id="tw-ot-stop" type="number" min="0" step="0.01" placeholder="—" disabled oninput="twEstCost()">
             </div>
-            <label class="lt-check" for="tw-ot-ext"><input type="checkbox" id="tw-ot-ext" disabled> Extended hours</label>
+            <label class="lt-check" for="tw-ot-ext"><input type="checkbox" id="tw-ot-ext" disabled onchange="twTifRules()"> Extended hours</label>
           </div>
           <label class="lt-check lt-bracket-toggle" for="tw-ot-bracket"><input type="checkbox" id="tw-ot-bracket" onchange="twBracketToggle()"> Bracket — take profit + stop loss</label>
           <div class="tw-field-row lt-bracket" id="tw-ot-bracket-fields" hidden>
@@ -1036,12 +1039,13 @@
           </div>
           <div class="tw-field">
             <label for="tw-ot-tif">Time in Force</label>
-            <select class="tw-select" id="tw-ot-tif">
+            <select class="tw-select" id="tw-ot-tif" onchange="twTifRules()">
               <option value="DAY">Day</option>
               <option value="GTC">Good 'til Canceled</option>
               <option value="IOC">Immediate or Cancel</option>
               <option value="FOK">Fill or Kill</option>
             </select>
+            <div class="tw-tif-note" id="tw-ot-tif-note" aria-live="polite"></div>
           </div>
           <div class="tw-estcost">
             <span class="k">Est. cost</span>
@@ -1306,7 +1310,23 @@ function twTypeChange(){ var t=document.getElementById('tw-ot-type').value; var 
   var needL=(t==='LIMIT'||t==='STOP_LIMIT'), needS=(t==='STOP'||t==='STOP_LIMIT');
   lim.disabled=!needL; if(!needL) lim.value=''; if(stp){ stp.disabled=!needS; if(!needS) stp.value=''; }
   var ext=document.getElementById('tw-ot-ext'); if(ext){ ext.disabled=(t!=='LIMIT'); if(t!=='LIMIT') ext.checked=false; }
-  twEstCost(); }
+  twTifRules(); twEstCost(); }
+/* Schwab takes market orders as Day only: with Market picked, the other
+   durations are disabled and the ticket switches to Day, so Preview can't be
+   refused for "Market orders are Day only". Extended hours takes Day or GTC. */
+function twTifRules(){
+  var t=(document.getElementById('tw-ot-type')||{}).value, tif=document.getElementById('tw-ot-tif');
+  var ext=document.getElementById('tw-ot-ext'), extOn=!!(ext&&ext.checked);
+  if(!tif) return;
+  Array.prototype.forEach.call(tif.options,function(o){
+    var ok = t==='MARKET' ? o.value==='DAY' : (extOn ? (o.value==='DAY'||o.value==='GTC') : true);
+    o.disabled=!ok;
+  });
+  if(tif.selectedOptions[0]&&tif.selectedOptions[0].disabled){ tif.value='DAY'; }
+  var note=document.getElementById('tw-ot-tif-note');
+  if(note) note.textContent = t==='MARKET' ? 'Market orders are Day only.' : (extOn ? 'Extended hours: Day or GTC.' : '');
+}
+document.addEventListener('DOMContentLoaded',twTifRules); window.addEventListener('pageshow',twTifRules);
 function twBracketToggle(){ var on=document.getElementById('tw-ot-bracket').checked; document.getElementById('tw-ot-bracket-fields').hidden=!on;
   if(on){ var tg=document.getElementById('tw-ot-target'), sl=document.getElementById('tw-ot-sl');
     if(!tg.value && window._twTarget) tg.value=window._twTarget; if(!sl.value && window._twStop) sl.value=window._twStop; } }
