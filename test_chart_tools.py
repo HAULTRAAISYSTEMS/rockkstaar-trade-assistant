@@ -74,7 +74,10 @@ def test_template_uses_chart_tools():
     assert "ctInitStudies(chart);" in TEMPLATE
     # Settings for candles, overlays and the price scale are on the panel.
     for key in ("candles.up", "candles.down", "candles.session", "vwap.on", "bb.on", "sma.on",
-                "levels.on", "labels.bidask", "labels.indicators", "labels.drawings"):
+                "levels.on", "labels.bid", "labels.ask", "labels.indicators", "labels.drawings",
+                "levels.pdh", "levels.pdl", "levels.pdc", "levels.pmh", "levels.pml", "candles.style",
+                "scale.mode", "scale.lastLine", "view.grid", "view.crosshair", "view.watermark",
+                "view.countdown", "view.hilo", "view.ohlc", "view.tooltip", "draw.stay", "draw.hidden"):
         assert 'data-ct-set="%s"' % key in TEMPLATE, key
 
 
@@ -170,3 +173,64 @@ def test_points_between_bars_are_placed_between_bars(tmp_path):
 
 def test_clear_all_does_not_rely_on_browser_dialogs():
     assert "window.confirm" not in JS and "ctClearArmed" in JS
+
+
+def test_weekly_monthly_and_full_history_are_offered():
+    import app as legacy
+    assert "max" in legacy._TERMINAL_INTERVALS["1d"]["ranges"]
+    assert legacy._TERMINAL_INTERVALS["1w"]["fetch"] == "1wk"
+    assert legacy._TERMINAL_INTERVALS["1mo"]["default"] == "max"
+    assert "('1w','1W'),('1mo','1M')" in TEMPLATE and '"max":"All (full history)"' in TEMPLATE
+
+
+def test_full_history_prefers_yahoo_and_keeps_weekly_bars(monkeypatch):
+    import data_fetcher
+    import market_data
+    calls = []
+
+    def fake_yahoo(ticker, interval="1d", range_str="1y", include_prepost=False):
+        calls.append((interval, range_str))
+        return {"timestamps": [-252322200, 0, 86400], "opens": [0.25, 1, 2], "closes": [0.3, 1.1, 2.1],
+                "highs": [0.31, 1.2, 2.2], "lows": [0.24, 0.9, 1.9], "volumes": [1, 2, 3],
+                "data_granularity": interval}
+    monkeypatch.setattr(data_fetcher, "_fetch_ohlcv_via_chart_api", fake_yahoo)
+    monkeypatch.setattr(market_data, "_alpaca_bars", lambda *a, **k: (None, None))
+    data, meta = market_data.fetch_chart_bars("KO", "1d", "max")
+    assert calls[0] == ("1d", "max") and meta["feed_label"] == "FULL HISTORY"
+    assert meta["history_start"] == "1962-01-02" and data["timestamps"][0] == -252322200
+    # Weekly bars are stamped at midnight; they are not intraday bars to filter.
+    rows = [{"t": "2026-11-09T05:00:00Z", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 10}]
+    assert market_data._parse_bars(rows, False, "1wk")["timestamps"] == [1794200400]
+
+
+def test_candles_route_reports_weekly_interval(client, monkeypatch):
+    c, _ = client
+    import app as legacy
+    import market_data
+    legacy._TERMINAL_CANDLE_CACHE.clear()
+    monkeypatch.setattr(market_data, "fetch_chart_bars", lambda *a, **k: (
+        {"timestamps": [1794200400], "opens": [1.0], "closes": [1.5], "highs": [2.0], "lows": [0.5],
+         "volumes": [10], "data_granularity": "1wk"}, {"provider": "Alpaca"}))
+    d = c.get("/api/terminal/candles/SPY?interval=1w&range=max").get_json()
+    assert d["ok"] and d["source_interval"] == "1w" and len(d["bars"]) == 1
+    assert c.get("/api/terminal/candles/SPY?interval=1w&range=1d").status_code == 400
+
+
+def test_header_and_watchlist_agree_overnight(client, monkeypatch):
+    c, _ = client
+    import app as legacy
+    shared = {"SPY": {"price": 757.67, "epoch": 1000, "prev_close": 750.0, "day_close": 759.81, "ext": "overnight"}}
+    monkeypatch.setattr(legacy._mkt, "live_quotes", lambda syms: {k: dict(v) for k, v in shared.items() if k in syms})
+    monkeypatch.setattr(legacy._mkt, "overnight_window_start", lambda *a: object())
+    monkeypatch.setattr(legacy, "_terminal_overnight_bar", lambda t: {"time": 2000, "close": 757.27})
+    monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 1)
+    monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: ["SPY"])
+    monkeypatch.setattr(legacy, "get_all_stock_data", lambda: [{"ticker": "SPY", "current_price": 759.81}])
+    head = c.get("/api/terminal/live/SPY").get_json()["quote"]["price"]
+    row = next(r for r in c.get("/api/terminal/quotes").get_json()["quotes"] if r["ticker"] == "SPY")
+    assert head == row["price"] == 757.27
+
+
+def test_volume_goes_one_color_when_zoomed_far_out():
+    assert "var ctVolDense = false;" in JS and "function ctCheckVolumeDensity()" in JS
+    assert "if (ctVolDense) return 'rgba(120,150,190,0.42)';" in JS

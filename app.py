@@ -5529,7 +5529,9 @@ _TERMINAL_INTERVALS = {
     "15m": {"fetch": "15m", "ranges": ("1d", "5d", "1mo"), "default": "5d"},
     "1h": {"fetch": "1h", "ranges": ("5d", "1mo", "3mo", "1y"), "default": "1mo"},
     "4h": {"fetch": "1h", "ranges": ("5d", "1mo", "3mo", "1y"), "default": "3mo"},
-    "1d": {"fetch": "1d", "ranges": ("1mo", "3mo", "6mo", "1y", "2y", "5y", "10y"), "default": "1y"},
+    "1d": {"fetch": "1d", "ranges": ("1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "max"), "default": "1y"},
+    "1w": {"fetch": "1wk", "ranges": ("1y", "2y", "5y", "10y", "max"), "default": "5y"},
+    "1mo": {"fetch": "1mo", "ranges": ("5y", "10y", "max"), "default": "max"},
 }
 _TERMINAL_CANDLE_CACHE: dict = {}  # (ticker, interval, range) -> {"ts": epoch, "bars": [...]}
 
@@ -5621,10 +5623,20 @@ def api_terminal_quotes():
         except Exception as exc:
             logger.debug("terminal quotes live overlay: %s", exc)
             live = {}
+        overnight = False
+        try:
+            overnight = _mkt.overnight_window_start() is not None
+        except Exception:
+            overnight = False
         for r in rows:
             q = live.get(r["ticker"])
             if not q or q.get("price") is None:
                 continue
+            if overnight:
+                # Same rule as the chart header (/api/terminal/live): the newer
+                # of the shared quote and the overnight ATS print. Without it
+                # the header read SPY 757.27 while its own row read 757.67.
+                q = _newer_overnight_print(r["ticker"], q)
             r["price"] = round(float(q["price"]), 2)
             if q.get("prev_close"):
                 r["prev_close"] = q["prev_close"]
@@ -5765,6 +5777,19 @@ def _terminal_overnight_bar(ticker: str):
     return hit[1] if hit else None
 
 
+def _newer_overnight_print(ticker: str, quote: dict | None) -> dict | None:
+    """The quote, or the overnight ATS print when that is newer (8 PM-4 AM).
+
+    One rule for the chart header and the watchlist rows, so the two can't
+    show different overnight prices for the same symbol.
+    """
+    bar = _terminal_overnight_bar(ticker)
+    if bar and bar.get("close") and (quote is None or int(bar.get("time") or 0) > int(quote.get("epoch") or 0)):
+        return dict(quote or {}, price=float(bar["close"]), epoch=int(bar["time"]),
+                    ext="overnight", source="Alpaca overnight")
+    return quote
+
+
 @app.route("/api/terminal/live/<ticker>")
 def api_terminal_live(ticker):
     """The charted symbol's latest print, for ticking the live candle.
@@ -5802,11 +5827,10 @@ def api_terminal_live(ticker):
         # overnight feed, as on the Today pulse) when it is newer.
         try:
             if _mkt.overnight_window_start() is not None:
-                bar = _terminal_overnight_bar(ticker)
-                if bar and bar.get("close") and (quote is None or int(bar.get("time") or 0) > int(quote.get("epoch") or 0)):
+                newer = _newer_overnight_print(ticker, quote)
+                if newer is not quote:
                     base = (quote or {}).get("prev_close")
-                    quote = dict(quote or {}, price=float(bar["close"]), epoch=int(bar["time"]),
-                                 ext="overnight", source="Alpaca overnight", prev_close=base,
+                    quote = dict(newer, prev_close=base,
                                  regular_close=(quote or {}).get("regular_close") or base)
         except Exception as exc:
             logger.debug("terminal live (overnight) %s: %s", ticker, exc)
@@ -5974,7 +5998,8 @@ def api_terminal_candles(ticker):
     if not ticker or len(ticker) > 12:
         return jsonify({"ok": False, "error": "bad ticker"}), 400
 
-    ttl = 15 if interval in {"1m", "5m", "15m"} else 60 if interval in {"1h", "4h"} else 300
+    ttl = (15 if interval in {"1m", "5m", "15m"} else 60 if interval in {"1h", "4h"}
+           else 3600 if range_str == "max" else 300)
     key = (ticker, interval, range_str, session_mode)
     cached = _TERMINAL_CANDLE_CACHE.get(key)
     if cached and (_time.time() - cached["ts"]) < ttl:
@@ -6037,6 +6062,11 @@ def api_terminal_candles(ticker):
                         "error": "provider returned a different candle interval",
                         "requested_interval": interval,
                         "source_interval": source_interval}), 502
+
+    # The chart names candle sizes its own way (1w, not 1wk); report the size
+    # it asked for once the provider has confirmed it.
+    if requested_interval and interval != "4h" and source_interval == fetch_interval:
+        source_interval = interval
 
     if interval == "4h" and bars:
         from terminal_intelligence import aggregate_extended_4h, aggregate_ohlcv_bars
@@ -6707,6 +6737,8 @@ def api_narrate_score():
         f"Volume score: {volume}/10\n"
         f"Macro gate: {macro_gate}"
     )
+    if not os.environ.get("NEBIUS_API_KEY"):
+        return jsonify({"ok": False, "error": "AI read is not configured"}), 503
     try:
         client = OpenAI(
             base_url="https://api.tokenfactory.nebius.com/v1/",
@@ -6729,8 +6761,10 @@ def api_narrate_score():
         save_score_narration(ticker, today_et, score_key, result)
         return jsonify({"ok": True, "narration": result, "cached": False})
     except Exception as exc:
-        logger.error("api_narrate_score failed: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
+        # An AI-provider outage is not a server error, and its raw message
+        # (URLs, request ids) is not for the page.
+        logger.warning("api_narrate_score failed: %s", exc)
+        return jsonify({"ok": False, "error": "AI read is unavailable right now"}), 503
 
 
 @app.route("/api/journal_summary")

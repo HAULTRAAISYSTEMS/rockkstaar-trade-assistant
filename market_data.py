@@ -22,7 +22,11 @@ _TIMEFRAMES = {
     "15m": "15Min",
     "1h": "1Hour",
     "1d": "1Day",
+    "1wk": "1Week",
+    "1mo": "1Month",
 }
+# Daily-and-longer candles have no trading session to filter on.
+_SESSIONLESS = {"1d", "1wk", "1mo"}
 _RANGE_DAYS = {
     "1d": 2,
     "5d": 7,
@@ -33,6 +37,9 @@ _RANGE_DAYS = {
     "2y": 740,
     "5y": 1830,
     "10y": 3660,
+    # Everything the provider has. Alpaca's history starts in 2016; Yahoo's
+    # goes back to each listing, so "max" asks Yahoo first.
+    "max": 365 * 60,
 }
 _FEED_META = {
     "sip": {
@@ -96,7 +103,7 @@ def _parse_bars(rows: list[dict[str, Any]], include_extended: bool, interval: st
             continue
         if min(values[:4]) <= 0:
             continue
-        if interval != "1d" and not include_extended and not _regular_session(timestamp):
+        if interval not in _SESSIONLESS and not include_extended and not _regular_session(timestamp):
             continue
         parsed.append((timestamp, *values))
     if not parsed:
@@ -176,11 +183,36 @@ def _alpaca_bars(ticker: str, interval: str, range_str: str,
 def fetch_chart_bars(ticker: str, interval: str, range_str: str,
                      include_extended: bool = False) -> tuple[dict | None, dict]:
     """Return chart bars and a truthful provider/freshness contract."""
+    from data_fetcher import _fetch_ohlcv_via_chart_api
+
+    if range_str == "max":
+        # Full history (decades) only exists at Yahoo; use it when it returns
+        # the candle size asked for, otherwise take what Alpaca has.
+        full = _fetch_ohlcv_via_chart_api(
+            ticker, interval=interval, range_str="max", include_prepost=False
+        )
+        if full and (full.get("timestamps") or []) and full.get("data_granularity") in (None, interval):
+            full["data_granularity"] = interval
+            first = datetime.fromtimestamp(full["timestamps"][0], timezone.utc).date().isoformat()
+            return full, {
+                "provider": "Yahoo",
+                "feed": "yahoo_chart",
+                "feed_label": "FULL HISTORY",
+                "coverage": "Full listing history · split-adjusted",
+                "delay_seconds": None,
+                "delay_label": "end of day",
+                "realtime": False,
+                "comprehensive": True,
+                "official": False,
+                "fallback": False,
+                "as_of": datetime.fromtimestamp(full["timestamps"][-1], timezone.utc).isoformat(),
+                "history_start": first,
+                "message": "Full price history since " + first + ".",
+            }
+
     data, meta = _alpaca_bars(ticker, interval, range_str, include_extended)
     if data and meta:
         return data, meta
-
-    from data_fetcher import _fetch_ohlcv_via_chart_api
 
     fallback = _fetch_ohlcv_via_chart_api(
         ticker, interval=interval, range_str=range_str, include_prepost=include_extended

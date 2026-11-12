@@ -543,12 +543,13 @@
           <div class="tw-interval-wrap">
             <span class="tw-control-label">Interval · Eastern Time</span>
             <div class="tw-tf">
-            {% for value, label in [('1m','1m'),('5m','5m'),('15m','15m'),('1h','1H'),('4h','4H'),('1d','1D')] %}
+            {% for value, label in [('1m','1m'),('5m','5m'),('15m','15m'),('1h','1H'),('4h','4H'),('1d','1D'),('1w','1W'),('1mo','1M')] %}
             <button class="tw-tf-btn {{ 'active' if value == '5m' }}" data-interval="{{ value }}" onclick="twInterval(this)">{{ label }}</button>
             {% endfor %}
             </div>
           </div>
           <label class="tw-range-wrap"><span class="tw-control-label">Range</span><select id="tw-range" class="tw-range-select" onchange="twRange(this.value)"></select></label>
+          <button type="button" class="tw-fs-btn" id="tw-settings-btn" onclick="twToggleStudySettings()" title="Chart settings" aria-label="Chart settings"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
           <button type="button" class="tw-fs-btn" id="tw-fs-btn" onclick="twToggleFullscreen()" title="Full screen chart (Esc to exit)" aria-label="Full screen chart" aria-pressed="false"><svg class="tw-fs-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="tw-fs-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
           <button type="button" class="tw-fs-btn tw-size-btn" id="tw-size-btn" onclick="twToggleSize()" title="Size a trade: tap entry, then stop" aria-label="Position size tool" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M5 7h14M5 7l-3 6a3 3 0 0 0 6 0zM19 7l-3 6a3 3 0 0 0 6 0z"/></svg></button>
           <button type="button" class="tw-draw-toggle" id="tw-draw-toggle" onclick="twToggleDrawbar()" title="Drawing tools" aria-label="Drawing tools" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg></button>
@@ -587,14 +588,82 @@
         </div>
 
         <div class="tw-study-settings" id="tw-study-settings" hidden>
-          <div class="tw-study-head"><div><strong>Chart studies &amp; styles</strong><span>Saved to your account · syncs to your devices</span></div><button type="button" onclick="twToggleStudySettings()">×</button></div>
-          <div class="tw-study-grid">
-            <div class="tw-study-group"><h4>EMA overlays</h4>
+          <div class="tw-study-head"><div><strong>Chart settings</strong><span>Saved to your account · syncs to your devices</span></div><button type="button" onclick="twToggleStudySettings()" aria-label="Close chart settings">×</button></div>
+          <div class="ct-tabs" role="tablist">
+            <button type="button" role="tab" data-ct-tab="candles" class="on">Candles</button>
+            <button type="button" role="tab" data-ct-tab="scale">Scale &amp; view</button>
+            <button type="button" role="tab" data-ct-tab="labels">Price labels</button>
+            <button type="button" role="tab" data-ct-tab="indicators">Indicators</button>
+            <button type="button" role="tab" data-ct-tab="drawings">Drawings</button>
+          </div>
+          <div class="tw-study-grid" data-ct-active="candles">
+            <div class="tw-study-group" data-tab="candles"><h4>Style</h4>
+              <label class="tw-study-row"><span>Candle style</span><select data-ct-set="candles.style"><option value="candles">Candles</option><option value="hollow">Hollow candles</option><option value="heikin">Heikin Ashi</option></select></label>
+              <label class="tw-study-row"><span>Up color</span><input type="color" data-ct-set="candles.up" value="#22C58B"></label>
+              <label class="tw-study-row"><span>Down color</span><input type="color" data-ct-set="candles.down" value="#FF4D45"></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.wicks" checked><span>Show wicks</span></label>
+            </div>
+            <div class="tw-study-group" data-tab="candles"><h4>Extended hours</h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.session"><span>Color pre/after-hours candles by session (blue / purple)</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.shading" checked><span>Shade pre/after-hours background</span></label>
+              <p class="tw-study-note">Pre-market and after-hours candles use the same up/down colors as the regular session unless session colors are on.</p>
+            </div>
+            <div class="tw-study-group" data-tab="candles"><h4>Volume</h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.volume" checked><span>Show volume bars</span></label>
+            </div>
+            <div class="tw-study-group" data-tab="scale"><h4>Price scale</h4>
+              <label class="tw-study-row"><span>Scale</span><select data-ct-set="scale.mode"><option value="normal">Regular</option><option value="log">Logarithmic</option><option value="percent">Percent</option><option value="indexed">Indexed to 100</option></select></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="scale.invert"><span>Invert scale</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="scale.lastLine" checked><span>Last price line</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="scale.lastLabel" checked><span>Last price on scale</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.countdown" checked><span>Countdown to bar close</span></label>
+            </div>
+            <div class="tw-study-group" data-tab="scale"><h4>Canvas</h4>
+              <label class="tw-study-row"><span>Grid lines</span><select data-ct-set="view.grid"><option value="none">None</option><option value="horz">Horizontal</option><option value="both">Horizontal + vertical</option></select></label>
+              <label class="tw-study-row"><span>Crosshair</span><select data-ct-set="view.crosshair"><option value="free">Free</option><option value="magnet">Magnet to close</option></select></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.watermark"><span>Symbol watermark</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.hilo" checked><span>High / low of visible range</span></label>
+              <label class="tw-study-row"><span>Space right of last bar</span><input type="number" min="0" max="60" data-ct-set="view.rightOffset" value="5"></label>
+            </div>
+            <div class="tw-study-group" data-tab="scale"><h4>Status line</h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.ohlc" checked><span>Open / high / low / close row</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.legend" checked><span>Indicator legend chips</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.tooltip" checked><span>Candle tooltip on hover</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.hint" checked><span>Interval / bars note</span></label>
+            </div>
+            <div class="tw-study-group" data-tab="labels"><h4>Quote</h4>
+              <label class="tw-study-row" title="From the live L2 feed"><input type="checkbox" data-ct-set="labels.bid" checked><span>Bid line</span></label>
+              <label class="tw-study-row" title="From the live L2 feed"><input type="checkbox" data-ct-set="labels.ask" checked><span>Ask line</span></label>
+              <p class="tw-study-note">Bid/Ask show while the Schwab L2 feed is live (pre-market through after-hours).</p>
+            </div>
+            <div class="tw-study-group" data-tab="labels"><h4>Key levels</h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="levels.on" checked><span>Show key levels</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="levels.pdh" checked><span>PDH · prior day high</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="levels.pdl" checked><span>PDL · prior day low</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="levels.pdc" checked><span>PDC · prior day close</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="levels.pmh" checked><span>PMH · premarket high</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="levels.pml" checked><span>PML · premarket low</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="labels.levels" checked><span>Key-level prices on the scale</span></label>
+            </div>
+            <div class="tw-study-group" data-tab="labels"><h4>On the price scale</h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="labels.indicators" checked><span>EMA / VWAP / BB / SMA values</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="labels.drawings" checked><span>Drawing prices (per drawing ▢ button)</span></label>
+            </div>
+            <div class="tw-study-group" data-tab="indicators"><h4>EMA overlays</h4>
               {% for period, color, enabled in [(9,'#f5b942',true),(20,'#38d6c5',true),(50,'#6fa8ff',true),(100,'#c084fc',false),(200,'#ff6b7a',false)] %}
               <label class="tw-study-row"><input id="tw-ema-{{ period }}" type="checkbox" {{ 'checked' if enabled }} onchange="twSetEma({{ period }},this.checked)"><span>EMA {{ period }}</span><input id="tw-color-ema{{ period }}" type="color" value="{{ color }}" oninput="twSetColor('ema{{ period }}',this.value)"></label>
               {% endfor %}
             </div>
-            <div class="tw-study-group"><h4>Oscillators</h4>
+            <div class="tw-study-group" data-tab="indicators"><h4>Overlays</h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="vwap.on" checked><span>VWAP (intraday)</span><input type="color" data-ct-set="vwap.color" value="#ff9f43"></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="vwap.bands"><span>VWAP ±1σ / ±2σ bands</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="bb.on"><span>Bollinger Bands</span><input type="color" data-ct-set="bb.color" value="#8b93ff"></label>
+              <label class="tw-study-row"><span>BB length</span><input type="number" min="2" max="200" data-ct-set="bb.len" value="20"></label>
+              <label class="tw-study-row"><span>BB std dev</span><input type="number" min="0.5" max="5" step="0.1" data-ct-set="bb.mult" value="2"></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="sma.on"><span>SMA</span><input type="color" data-ct-set="sma.color" value="#d9dee7"></label>
+              <label class="tw-study-row"><span>SMA length</span><input type="number" min="2" max="400" data-ct-set="sma.len" value="50"></label>
+            </div>
+            <div class="tw-study-group" data-tab="indicators"><h4>Oscillators</h4>
               <label class="tw-study-row"><span>RSI length</span><input id="tw-rsi-period" type="number" min="2" max="100" value="14" onchange="twSetStudyParam('rsiPeriod',this.value)"></label>
               <label class="tw-study-row"><span>RSI upper</span><input id="tw-rsi-upper" type="number" min="51" max="99" value="70" onchange="twSetStudyParam('rsiUpper',this.value)"></label>
               <label class="tw-study-row"><span>RSI lower</span><input id="tw-rsi-lower" type="number" min="1" max="49" value="30" onchange="twSetStudyParam('rsiLower',this.value)"></label>
@@ -605,30 +674,18 @@
               <label class="tw-study-row"><span>MACD line</span><input id="tw-color-macd" type="color" value="#e7b84b" oninput="twSetColor('macd',this.value)"></label>
               <label class="tw-study-row"><span>Signal line</span><input id="tw-color-signal" type="color" value="#6fa8ff" oninput="twSetColor('signal',this.value)"></label>
             </div>
-            <div class="tw-study-group"><h4>Candles</h4>
-              <label class="tw-study-row"><span>Up candle</span><input type="color" data-ct-set="candles.up" value="#22C58B"></label>
-              <label class="tw-study-row"><span>Down candle</span><input type="color" data-ct-set="candles.down" value="#FF4D45"></label>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.session"><span>Color pre/after-hours candles by session</span></label>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.shading" checked><span>Shade pre/after-hours background</span></label>
+            <div class="tw-study-group" data-tab="drawings"><h4>Drawing behaviour</h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="magnet"><span>Magnet: snap to open / high / low / close</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="draw.stay"><span>Stay in the tool after placing a drawing</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="draw.hidden"><span>Hide all drawings</span></label>
             </div>
-            <div class="tw-study-group"><h4>Overlays</h4>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="vwap.on" checked><span>VWAP (intraday)</span><input type="color" data-ct-set="vwap.color" value="#ff9f43"></label>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="vwap.bands"><span>VWAP ±1σ / ±2σ bands</span></label>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="bb.on"><span>Bollinger Bands</span><input type="color" data-ct-set="bb.color" value="#8b93ff"></label>
-              <label class="tw-study-row"><span>BB length</span><input type="number" min="2" max="200" data-ct-set="bb.len" value="20"></label>
-              <label class="tw-study-row"><span>BB std dev</span><input type="number" min="0.5" max="5" step="0.1" data-ct-set="bb.mult" value="2"></label>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="sma.on"><span>SMA</span><input type="color" data-ct-set="sma.color" value="#d9dee7"></label>
-              <label class="tw-study-row"><span>SMA length</span><input type="number" min="2" max="400" data-ct-set="sma.len" value="50"></label>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="levels.on" checked><span>Key levels (PDH · PDL · PDC · PMH · PML)</span></label>
-            </div>
-            <div class="tw-study-group"><h4>On the price scale</h4>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="labels.bidask" checked><span>Bid / Ask (live L2 feed)</span></label>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="labels.indicators" checked><span>EMA / VWAP / BB / SMA values</span></label>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="labels.levels" checked><span>Key levels</span></label>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="labels.drawings" checked><span>Drawing prices (when turned on per drawing)</span></label>
-              <p class="tw-study-note">Drawings: select one on the chart to change its color, width, style, fill, levels and labels.</p>
+            <div class="tw-study-group" data-tab="drawings"><h4>This symbol</h4>
+              <p class="tw-study-note">Drawings belong to the symbol, so they show on every timeframe, and sync to your other devices.</p>
+              <button type="button" class="ct-set-btn" data-ct-cmdset="cleartool">Reset drawing styles to defaults</button>
+              <button type="button" class="ct-set-btn ct-danger" data-ct-cmdset="clearsym">Remove all drawings on this symbol</button>
             </div>
           </div>
+          <div class="ct-set-foot"><button type="button" class="ct-set-btn" data-ct-cmdset="resetall">Reset chart settings to defaults</button></div>
         </div>
 
         <div class="tw-draw-status" id="tw-draw-status" hidden></div>
@@ -1013,6 +1070,8 @@ function twSelect(row){
 }
 
 /* ── Candle interval + history range ── */
+// Daily, weekly and monthly candles: no extended session, no intraday buckets.
+function twLongBars(interval){ return interval==='1d'||interval==='1w'||interval==='1mo'; }
 function twInterval(btn){
   if (btn.disabled || btn.classList.contains('disabled')) return;
   btn.parentElement.querySelectorAll('.tw-tf-btn').forEach(function(b){ b.classList.remove('active'); });
@@ -1022,7 +1081,7 @@ function twInterval(btn){
   if(allowed.ranges.indexOf(twChartState.range)<0)twChartState.range=allowed.defaultRange;
   // Daily candles have no extended session; intraday ones (4H included) follow
   // the user's Extended choice again when they come back to them.
-  twChartState.extended = twExtendedPref && twChartState.interval !== '1d';
+  twChartState.extended = twExtendedPref && !twLongBars(twChartState.interval);
   twPopulateRanges();
   twRefreshExtendedAvailability();
   try { localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range); } catch(e) {}
@@ -1032,10 +1091,10 @@ function twRange(value){twChartState.range=value;try{localStorage.setItem('trade
 function twPopulateRanges(){
   var select=document.getElementById('tw-range'),config=twIntervalConfig[twChartState.interval];if(!select||!config)return;select.innerHTML='';
   if(config.ranges.indexOf(twChartState.range)<0)twChartState.range=config.defaultRange;
-  var labels={"1d":"1 Day","5d":"5 Days","1mo":"1 Month","3mo":"3 Months","6mo":"6 Months","1y":"1 Year","2y":"2 Years","5y":"5 Years","10y":"10 Years"};
+  var labels={"1d":"1 Day","5d":"5 Days","1mo":"1 Month","3mo":"3 Months","6mo":"6 Months","1y":"1 Year","2y":"2 Years","5y":"5 Years","10y":"10 Years","max":"All (full history)"};
   // Phones: the picker shares a row with the chart tools, so it shows the
   // short form (5D, 3M, 10Y); the full name stays as the option's label.
-  var shortLabels={"1d":"1D","5d":"5D","1mo":"1M","3mo":"3M","6mo":"6M","1y":"1Y","2y":"2Y","5y":"5Y","10y":"10Y"};
+  var shortLabels={"1d":"1D","5d":"5D","1mo":"1M","3mo":"3M","6mo":"6M","1y":"1Y","2y":"2Y","5y":"5Y","10y":"10Y","max":"ALL"};
   var compact=window.matchMedia&&window.matchMedia('(max-width: 1099px)').matches;
   config.ranges.forEach(function(value){var option=document.createElement('option');option.value=value;option.textContent=(compact?shortLabels[value]:labels[value])||value;option.label=option.textContent;option.title=labels[value]||value;option.selected=value===twChartState.range;select.appendChild(option);});
 }
@@ -1116,7 +1175,7 @@ function twApplyIndicatorVisibility(){
   twRenderIndicators(); twRenderDrawings();
 }
 function twSaveStyles(){try{localStorage.setItem('tradestaar.chartStyles',JSON.stringify(twChartState.styles));}catch(e){}}
-function twToggleStudySettings(){var panel=document.getElementById('tw-study-settings'),btn=document.getElementById('tw-studies-btn');if(!panel)return;panel.hidden=!panel.hidden;if(btn)btn.classList.toggle('active',!panel.hidden);if(!panel.hidden)twSyncStudySettings();}
+function twToggleStudySettings(){var panel=document.getElementById('tw-study-settings'),btn=document.getElementById('tw-studies-btn'),gear=document.getElementById('tw-settings-btn');if(!panel)return;panel.hidden=!panel.hidden;if(btn)btn.classList.toggle('active',!panel.hidden);if(gear)gear.setAttribute('aria-pressed',panel.hidden?'false':'true');if(!panel.hidden){twSyncStudySettings();if(typeof ctSyncSettingsUI==='function')ctSyncSettingsUI();}}
 function twSyncStudySettings(){
   ['9','20','50','100','200'].forEach(function(period){var check=document.getElementById('tw-ema-'+period),color=document.getElementById('tw-color-ema'+period);if(check)check.checked=!!twChartState.styles.emas[period].enabled;if(color)color.value=twChartState.styles.emas[period].color;});
   ['rsi','macd','signal','drawing','fib'].forEach(function(key){var input=document.getElementById('tw-color-'+key);if(input)input.value=twChartState.styles[key];});var width=document.getElementById('tw-drawing-width');if(width)width.value=String(twChartState.styles.drawingWidth);
@@ -1180,7 +1239,8 @@ var twSavedChartType = 'area';
 var twIntervalConfig={
   '1m':{ranges:['1d','5d'],defaultRange:'1d'},'5m':{ranges:['1d','5d','1mo'],defaultRange:'5d'},
   '15m':{ranges:['1d','5d','1mo'],defaultRange:'5d'},'1h':{ranges:['5d','1mo','3mo','1y'],defaultRange:'1mo'},
-  '4h':{ranges:['5d','1mo','3mo','1y'],defaultRange:'3mo'},'1d':{ranges:['1mo','3mo','6mo','1y','2y','5y','10y'],defaultRange:'1y'}
+  '4h':{ranges:['5d','1mo','3mo','1y'],defaultRange:'3mo'},'1d':{ranges:['1mo','3mo','6mo','1y','2y','5y','10y','max'],defaultRange:'1y'},
+  '1w':{ranges:['1y','2y','5y','10y','max'],defaultRange:'5y'},'1mo':{ranges:['5y','10y','max'],defaultRange:'max'}
 };
 var twSavedInterval = '5m', twSavedRange = '5d';
 var twSavedVolume = true, twSavedExtended = false;
@@ -1210,7 +1270,7 @@ try {
 } catch(e) {}
 if(twIntervalConfig[twSavedInterval].ranges.indexOf(twSavedRange)<0)twSavedRange=twIntervalConfig[twSavedInterval].defaultRange;
 var twExtendedPref = twSavedExtended;   // what the user chose with the button
-if(twSavedInterval==='1d')twSavedExtended=false;
+if(twLongBars(twSavedInterval))twSavedExtended=false;
 var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, assetType:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, vwapReqId:0, lastPrice:null, sessionVwap:null, intelVwap:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null, barIdx:{}, hoverIdx:null, indWindow:{start:0,end:0}, axisW:64, _hoverRaf:null };
 var twChartRefreshTimer=null;
 
@@ -1529,13 +1589,32 @@ function twPatchActiveCandle(q,px){
   var isExt = (sess==='pre_market'||sess==='after_hours'||sess==='overnight');
   // The daily chart is decided below: after the bell it still needs today's
   // candle (from the regular session's own close), whatever Extended says.
-  if(twChartState.interval!=='1d' && sess!=='regular' && !(isExt && twChartState.extended)) return;
+  if(!twLongBars(twChartState.interval) && sess!=='regular' && !(isExt && twChartState.extended)) return;
   // Bars still on screen from a previous ticker or interval must never take
   // this ticker's price — the reload has not landed yet.
   if(twChartState.barsKey!==twChartState.ticker+'|'+twChartState.interval)return;
   if(!twChartState.bars.length)return;
   var stamp=Number(q.as_of_epoch);if(!isFinite(stamp)||stamp<=0)return;
   var last=twChartState.bars[twChartState.bars.length-1],lastTime=Number(last.time);
+  // Weekly / monthly: the current week's or month's candle takes today's
+  // regular-session price; a new period's candle comes from the provider.
+  if(twChartState.interval==='1w'||twChartState.interval==='1mo'){
+    if(!isFinite(lastTime))return;
+    if(sess!=='regular'){ var rc2=Number(q.day_close); if(!(isFinite(rc2)&&rc2>0))return; px=rc2; }
+    var etD=function(e){return new Date(e*1000).toLocaleDateString('en-CA',{timeZone:'America/New_York'});};
+    var lastD=etD(lastTime), nowD=etD(stamp);
+    var same=twChartState.interval==='1mo' ? nowD.slice(0,7)===lastD.slice(0,7)
+      : (Date.parse(nowD+'T12:00:00Z')-Date.parse(lastD+'T12:00:00Z'))/86400000 < 7 && nowD>=lastD;
+    if(!same||!(px>0))return;
+    var wk=Object.assign({},last,{close:px,high:Math.max(Number(last.high),px),low:Math.min(Number(last.low),px)});
+    if(wk.close===last.close&&wk.high===last.high&&wk.low===last.low)return;
+    twChartState.bars[twChartState.bars.length-1]=wk;
+    twChartState.barMap[twTimeKey(wk.time)]=wk;twChartState.lastPrice=px;
+    twChartState.area.update({time:wk.time,value:wk.close});twChartState.candle.update(twCandleDatum(wk));
+    twChartState.vol.update({time:wk.time,value:wk.volume||0,color:twVolumeColor(wk)});
+    twRenderIndicators();twRenderEmas();twOhlcv(twChartState.bars);
+    return;
+  }
   // Daily chart: today's candle moves with the regular-session price.
   if(twChartState.interval==='1d'){
     if(!isFinite(lastTime))return;
