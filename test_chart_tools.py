@@ -348,3 +348,22 @@ def test_interval_mismatch_is_shown_not_retried(client, monkeypatch):
     r = c.get("/api/terminal/candles/KLAC?interval=1d&range=max")
     d = r.get_json()
     assert r.status_code == 200 and d["ok"] is False and "3mo" in d["error"]
+
+
+def test_candle_cache_is_bounded(monkeypatch):
+    # Full-history charts are ~12k bars each; the cache used to keep every one
+    # forever and workers ran out of memory.
+    import app as legacy
+    legacy._TERMINAL_CANDLE_CACHE.clear()
+    monkeypatch.setattr(legacy, "_CANDLE_CACHE_MAX_BARS", 30_000)
+    for i in range(10):
+        legacy._candle_cache_put(("T%d" % i, "1d", "max", "regular"),
+                                 {"ts": legacy._time.time(), "ttl": 3600, "bars": [{}] * 12_000})
+    keys = list(legacy._TERMINAL_CANDLE_CACHE)
+    assert len(keys) == 2 and keys[-1][0] == "T9"          # newest kept, oldest dropped
+    assert legacy._candle_cache_get(("T9", "1d", "max", "regular"), 3600)
+    assert legacy._candle_cache_get(("T0", "1d", "max", "regular"), 3600) is None
+    # Expired entries are dropped on read.
+    legacy._TERMINAL_CANDLE_CACHE[("OLD", "5m", "1d", "regular")] = {"ts": 0, "ttl": 15, "bars": []}
+    assert legacy._candle_cache_get(("OLD", "5m", "1d", "regular"), 15) is None
+    assert ("OLD", "5m", "1d", "regular") not in legacy._TERMINAL_CANDLE_CACHE
