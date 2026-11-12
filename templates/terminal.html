@@ -519,6 +519,9 @@
             <div class="tw-sym-px" id="tw-c-price">{{ '%.2f'|format(stocks[0].current_price) if stocks and stocks[0].current_price else '—' }}</div>
             {% set c0dir = 'chg-pos' if (stocks and (stocks[0].gap_pct or 0) > 0) else ('chg-neg' if (stocks and (stocks[0].gap_pct or 0) < 0) else 'chg-flat') %}
             <div class="tw-sym-chg {{ c0dir }}" id="tw-c-chg">{{ stocks[0].gap_display if stocks else '0.00%' }}</div>
+            {# Extended hours on their own line, like a broker: the price and %
+               above stay the regular session's; this is the move since. #}
+            <div class="tw-sym-ext" id="tw-c-ext" hidden></div>
             {# Where this one price came from and when. The session badge above
                says whether the MARKET is open; this says whether THIS quote
                actually arrived during it. #}
@@ -992,7 +995,7 @@ function twInterval(btn){
   if(['4h','1d'].indexOf(twChartState.interval)>=0)twChartState.extended=false;
   twPopulateRanges();
   twRefreshExtendedAvailability();
-  try { localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range);localStorage.setItem('tradestaar.chartExtended',twChartState.extended?'1':'0'); } catch(e) {}
+  try { localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range);localStorage.setItem('tradestaar.chartExtended.v2',twChartState.extended?'1':'0'); } catch(e) {}
   if (twChartState.ticker) twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);
 }
 function twRange(value){twChartState.range=value;try{localStorage.setItem('tradestaar.chartRange',value);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);}
@@ -1034,7 +1037,7 @@ function twRefreshExtendedAvailability(){
 function twToggleExtended(btn){
   var enable=!twChartState.extended,supported=['1m','5m','15m','1h'].indexOf(twChartState.interval)>=0;if(enable&&!supported){twChartState.interval='5m';twChartState.range='1d';document.querySelectorAll('.tw-tf-btn').forEach(function(b){b.classList.toggle('active',b.dataset.interval==='5m');});twPopulateRanges();}
   twChartState.extended=enable;twRefreshExtendedAvailability();if(twChartState.extended&&twChartState.type!=='candles'){twChartState.type='candles';document.querySelectorAll('.tw-type-btn[data-type]').forEach(function(b){b.classList.toggle('active',b.dataset.type==='candles');});twApplyType();}
-  try{localStorage.setItem('tradestaar.chartExtended',twChartState.extended?'1':'0');localStorage.setItem('tradestaar.chartType',twChartState.type);localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);
+  try{localStorage.setItem('tradestaar.chartExtended.v2',twChartState.extended?'1':'0');localStorage.setItem('tradestaar.chartType',twChartState.type);localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);
 }
 // Dragging or wheel-zooming the price axis switches the axis to manual
 // scaling, and lightweight-charts keeps that manual range across every later
@@ -1164,7 +1167,10 @@ try {
   if(twIntervalConfig[twSavedInterval].ranges.indexOf(twStoredRange)>=0)twSavedRange=twStoredRange;
   else if(!twStoredInterval){var legacy=localStorage.getItem('tradestaar.chartTimeframe'),legacyMap={'1D':['5m','1d'],'1W':['15m','5d'],'1M':['1d','1mo'],'3M':['1d','3mo'],'1Y':['1d','1y'],'ALL':['1d','10y']};if(legacyMap[legacy]){twSavedInterval=legacyMap[legacy][0];twSavedRange=legacyMap[legacy][1];}}
   if (localStorage.getItem('tradestaar.chartVolume') === '0') twSavedVolume=false;
-  if (localStorage.getItem('tradestaar.chartExtended') === '1') twSavedExtended=true;
+  // Extended hours show by default (after-hours and pre-market candles).
+  // v2 key: the old one was written as "0" on every interval change.
+  var _xv = localStorage.getItem('tradestaar.chartExtended.v2');
+  twSavedExtended = _xv === null ? true : _xv === '1';
   var twStoredIndicators=JSON.parse(localStorage.getItem('tradestaar.chartIndicators')||'null');
   if(twStoredIndicators&&typeof twStoredIndicators==='object') twSavedIndicators={rsi:twStoredIndicators.rsi!==false,macd:twStoredIndicators.macd!==false};
   var storedStyles=JSON.parse(localStorage.getItem('tradestaar.chartStyles')||'null');if(storedStyles&&typeof storedStyles==='object'){Object.keys(twDefaultStyles).forEach(function(key){if(key!=='emas'&&storedStyles[key]!=null)twSavedStyles[key]=storedStyles[key];});Object.keys(twDefaultStyles.emas).forEach(function(period){if(storedStyles.emas&&storedStyles.emas[period])twSavedStyles.emas[period]=Object.assign({},twDefaultStyles.emas[period],storedStyles.emas[period]);});}
@@ -1551,7 +1557,9 @@ function twExtendedQuote(row){if(!row)return 'No recent print';var change=row.ch
 function twRestoreRegularQuote(){var row=document.querySelector('.tw-wl-row.active');if(!row)return;twNum('tw-c-price',row.dataset.price||'—');var chg=document.getElementById('tw-c-chg'),dir=row.dataset.chgdir;if(chg){chg.textContent=row.dataset.chg||'0.00%';chg.className='tw-sym-chg '+(dir==='pos'?'chg-pos':(dir==='neg'?'chg-neg':'chg-flat'));}}
 function twRenderExtendedSummary(summary,status){
   var strip=document.getElementById('tw-session-strip');if(!strip)return;strip.hidden=!twChartState.extended;if(!twChartState.extended){twRestoreRegularQuote();return;}var overnight=summary&&summary.overnight;if(status&&status.state==='not_configured')twNum('tw-overnight-quote','Connect Alpaca BOATS');else twNum('tw-overnight-quote',twExtendedQuote(overnight));twNum('tw-pre-quote',twExtendedQuote(summary&&summary.premarket));twNum('tw-post-quote',twExtendedQuote(summary&&summary.after_hours));twNum('tw-overnight-status',(status&&status.message)||'Overnight prices use the Alpaca BOATS ATS feed.');
-  var latest=summary&&summary.latest;if(latest){twNum('tw-c-price',Number(latest.price).toFixed(2));var chg=document.getElementById('tw-c-chg');if(chg&&latest.change_pct!=null){var pct=Number(latest.change_pct),labels={overnight:'O/N ',premarket:'PRE ',after_hours:'POST '};chg.textContent=(labels[latest.session]||'EXT ')+(pct>=0?'+':'')+pct.toFixed(2)+'%';chg.className='tw-sym-chg '+(pct>=0?'chg-pos':'chg-neg');}}
+  // The latest extended print goes on the header's extended line; the main
+  // price stays the regular session's (see twLiveHeader).
+  var latest=summary&&summary.latest;if(latest&&latest.change_pct!=null&&Number(latest.price)>0){var lp=Number(latest.price),lpct=Number(latest.change_pct),lb=lp/(1+lpct/100),lx={overnight:'overnight',premarket:'pre',after_hours:'post'}[latest.session];if(lx)twShowExt(twChartState.ticker,lp,lb,lx,'');}
 }
 function twCandleDatum(bar){
   var datum={time:bar.time,open:bar.open,high:bar.high,low:bar.low,close:bar.close};if(bar.session==='overnight'){datum.color=bar.close>=bar.open?'#f0b53f':'#ff8c42';datum.wickColor=datum.color;datum.borderColor=datum.color;}else if(bar.session==='premarket'){datum.color=bar.close>=bar.open?'#4aa3ff':'#7569e8';datum.wickColor=datum.color;datum.borderColor=datum.color;}else if(bar.session==='after_hours'){datum.color=bar.close>=bar.open?'#c77dff':'#ff6aa9';datum.wickColor=datum.color;datum.borderColor=datum.color;}return datum;
@@ -1874,6 +1882,14 @@ function twApplyQuote(q){
   var text = px.toFixed(2);
   var chg  = q.gap_display || '0.00%';
   var cls  = twChgClass(Number(q.gap_pct) || 0);
+  // Extended hours: the row shows the move since the bell, tagged, and keeps
+  // the day's own change in its tooltip.
+  var extTag = {post:'AH ', pre:'PRE ', overnight:'O/N '}[q.ext] || '';
+  if(extTag && q.ext_pct != null){
+    chg = extTag + (q.ext_pct >= 0 ? '+' : '') + Number(q.ext_pct).toFixed(2) + '%';
+    cls = twChgClass(Number(q.ext_pct));
+  }
+  if(q.ext && q.regular_close > 0 && q.ext !== 'pre') twRegClose[q.ticker] = Number(q.regular_close);
   if(q.prev_close !== null && q.prev_close !== undefined && isFinite(q.prev_close)){
     twPrevClose[q.ticker] = Number(q.prev_close);
   }
@@ -1897,7 +1913,11 @@ function twApplyQuote(q){
     var rp = row.querySelector('.tw-wl-px');
     var rc = row.querySelector('.tw-wl-chg');
     if(rp && rp.textContent !== text){ rp.textContent = text; if(moved) twFlash(rp, px > prev); }
-    if(rc){ rc.textContent = chg; rc.className = 'tw-wl-chg ' + cls; }
+    if(rc){
+      rc.textContent = chg; rc.className = 'tw-wl-chg ' + cls;
+      rc.title = (extTag && q.regular_close) ? ('Closed ' + Number(q.regular_close).toFixed(2) +
+        (q.day_pct != null ? ' (' + (q.day_pct >= 0 ? '+' : '') + Number(q.day_pct).toFixed(2) + '% on the day)' : '')) : '';
+    }
     // twSelect() reads these when the row is clicked, so they have to move too.
     row.dataset.price  = text;
     row.dataset.chg    = chg;
@@ -1908,11 +1928,21 @@ function twApplyQuote(q){
   var head = document.getElementById('tw-c-ticker');
   // Extended mode owns the header (PRE/POST/O/N prefixes) — the plain
   // DB quote would stomp it every 4s poll.
-  if(head && head.textContent === q.ticker && !twChartState.extended && !liveOwns){
+  if(head && head.textContent === q.ticker && q.ext && q.ext_pct != null){
+    // After the bell: main price = today's close and day %, extended line = now.
+    var hp0 = document.getElementById('tw-c-price'), hc0 = document.getElementById('tw-c-chg');
+    if(q.ext !== 'pre' && q.regular_close > 0){
+      if(hp0) hp0.textContent = Number(q.regular_close).toFixed(2);
+      if(hc0 && q.day_pct != null){ hc0.textContent = (q.day_pct >= 0 ? '+' : '') + Number(q.day_pct).toFixed(2) + '%'; hc0.className = 'tw-sym-chg ' + twChgClass(Number(q.day_pct)); }
+    }
+    twShowExt(q.ticker, px, Number(q.regular_close), q.ext, q.as_of || '');
+    twRenderStamp(q);
+  } else if(head && head.textContent === q.ticker && !q.ext && !liveOwns){
     var hp = document.getElementById('tw-c-price');
     var hc = document.getElementById('tw-c-chg');
     if(hp && hp.textContent !== text){ hp.textContent = text; if(moved) twFlash(hp, px > prev); }
     if(hc){ hc.textContent = chg; hc.className = 'tw-sym-chg ' + cls; }
+    var xl0 = document.getElementById('tw-c-ext'); if(xl0) xl0.hidden = true;
     twRenderStamp(q);
   }
 }
@@ -2048,12 +2078,34 @@ window._arInterval = 3000;
    replaces the live candle with the provider's authoritative OHLCV. */
 var twLiveFeed = {timer:null, ticker:null, at:0, fails:0, inFlight:false};
 function twLiveOwns(t){ return twLiveFeed.ticker === t && Date.now() - twLiveFeed.at < 15000; }
+var twExtAt = {};
+function twShowExt(t, px, base, ext, at){
+  var head = document.getElementById('tw-c-ticker'), el = document.getElementById('tw-c-ext');
+  if(!el || !head || head.textContent !== t) return;
+  if(!ext || !(px > 0) || !(base > 0)){ el.hidden = true; return; }
+  var chg = px - base, pct = chg / base * 100;
+  var label = {post:'After hours', pre:'Pre-market', overnight:'Overnight'}[ext] || 'Extended';
+  el.innerHTML = '<span class="k">' + label + '</span> <b>' + px.toFixed(2) + '</b> <span class="' + twChgClass(pct) + '">' +
+    (chg >= 0 ? '+' : '') + chg.toFixed(2) + ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%)</span>' + (at ? ' <small>' + at + '</small>' : '');
+  el.hidden = false;
+}
+function twEtTime(epoch){
+  return epoch ? new Date(epoch * 1000).toLocaleTimeString('en-US', {timeZone:'America/New_York', hour:'numeric', minute:'2-digit'}) + ' ET' : '';
+}
 function twLiveHeader(t, px, q){
   var head = document.getElementById('tw-c-ticker');
   if(!head || head.textContent !== t) return;
-  // Without Extended on, the header shows the regular session; an
-  // extended-hours print belongs to the Extended view.
-  if(q.ext && !twChartState.extended) return;
+  // Extended-hours prints go on their own line (vs today's close after the
+  // bell, vs yesterday's close before the open); the main price and % stay
+  // the regular session's, as a broker shows them.
+  if(q.ext){
+    var xb = Number(q.ext === 'pre' ? q.prev_close : q.regular_close);
+    if(!(xb > 0)) xb = Number(twRegClose[t]);
+    if(q.ext !== 'pre' && xb > 0) twRegClose[t] = xb;
+    twShowExt(t, px, xb, q.ext, twEtTime(q.epoch));
+    return;
+  }
+  var xl = document.getElementById('tw-c-ext'); if(xl) xl.hidden = true;
   var hp = document.getElementById('tw-c-price'), hc = document.getElementById('tw-c-chg');
   var text = px.toFixed(2), prev = hp ? parseFloat(hp.textContent) : NaN;
   if(hp && hp.textContent !== text){ hp.textContent = text; if(isFinite(prev)) twFlash(hp, px > prev); }
@@ -2075,6 +2127,7 @@ function twLiveHeader(t, px, q){
   }
 }
 var twLastEpoch = {};
+var twRegClose = {};
 function twLiveApply(d){
   var t = twChartState.ticker, q = d && d.quote;
   if(!d || (d.ticker && d.ticker !== String(t || '').toUpperCase())) return;
@@ -2112,7 +2165,7 @@ document.addEventListener('dp:quote', function(e){
   if(!d.symbol || d.symbol !== t || !(d.last > 0)) return;
   var ms = Number(d.trade_ms) || Date.now();
   var ext = twEtSession(ms);
-  var q = {price:d.last, epoch:ms/1000, prev_close:ext ? null : d.prev_close,
+  var q = {price:d.last, epoch:ms/1000, prev_close:d.prev_close, regular_close:d.regular_close,
            ext:ext, source:'Schwab streamer', day_volume:d.volume};
   if(String(twChartState.ticker || '').toUpperCase() === t){
     twLiveApply({ticker:t, quote:q});                 // candle + header + stamp

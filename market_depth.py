@@ -42,7 +42,7 @@ GAP_RESET_MS = 10_000  # a trade this long after the last one only re-baselines 
 STATUS_EVERY = 3       # leader heartbeat, so the panel can tell "quiet" from "stalled"
 BOOK_LEVELS = 15
 _SYM = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
-_L1_FIELDS = "0,1,2,3,4,5,8,9,12,16,34,35"   # sym bid ask last bidsz asksz vol lastsz prevclose lastid quote/trade ms
+_L1_FIELDS = "0,1,2,3,4,5,8,9,12,16,29,34,35"   # … prevclose lastid regular-session last, quote/trade ms
 _BOOKS = ("NASDAQ_BOOK", "NYSE_BOOK")
 
 _thread: threading.Thread | None = None
@@ -152,7 +152,7 @@ class SymbolState:
         prev_vol, prev_t = self.q.get("volume"), self.q.get("trade_ms")
         for f, name in (("1", "bid"), ("2", "ask"), ("3", "last"), ("4", "bid_size"), ("5", "ask_size"),
                         ("8", "volume"), ("9", "last_size"), ("12", "prev_close"), ("16", "last_id"),
-                        ("35", "trade_ms")):
+                        ("29", "regular_close"), ("35", "trade_ms")):
             if f in c and c[f] is not None:
                 self.q[name] = c[f]
         self.dirty = True
@@ -197,7 +197,7 @@ class SymbolState:
         q = self.q
         return {"updated": time.time(), "book": merge_books(list(self.books.values())), "tape": self.tape[:120],
                 "quote": {k: q.get(k) for k in ("bid", "ask", "last", "bid_size", "ask_size", "volume",
-                                                "prev_close", "trade_ms")},
+                                                "prev_close", "regular_close", "trade_ms")},
                 "stats": {"buy_vol": self.buy_vol, "sell_vol": self.sell_vol}}
 
 

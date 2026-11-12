@@ -110,3 +110,9 @@
 .tw-ot-nbbo .ask b { color: #ff6b62; }
 .tw-ot-nbbo button:hover { border-color: rgba(79, 227, 255, .45); }
 .tw-ot-nbbo.is-off { opacity: .45; }
+
+/* Terminal header: extended-hours line under the regular-session price. */
+.tw-sym-ext { margin-top: 3px; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; color: #d7dee8; white-space: nowrap; }
+.tw-sym-ext .k { padding: 1px 6px; margin-right: 4px; border-radius: 5px; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: #c9a3ff; background: rgba(199, 125, 255, .14); }
+.tw-sym-ext b { color: #f2f6fb; }
+.tw-sym-ext small { margin-left: 4px; color: #6f7b8b; font-size: 10px; }
