@@ -374,6 +374,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/terminal_workspace.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/trade_tools.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/depth_panel.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/chart_tools.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -566,6 +567,10 @@
                 <div class="tw-ind-menu" id="tw-indicator-menu" hidden role="menu">
                   <label class="tw-ind-row"><input type="checkbox" id="tw-ind-rsi" checked onchange="twToggleIndicator('rsi', this)"><span><strong>RSI</strong><small>Relative Strength · 14</small></span></label>
                   <label class="tw-ind-row"><input type="checkbox" id="tw-ind-macd" checked onchange="twToggleIndicator('macd', this)"><span><strong>MACD</strong><small>12, 26, 9</small></span></label>
+                  <label class="tw-ind-row"><input type="checkbox" data-ct-set="vwap.on" checked><span><strong>VWAP</strong><small>Session VWAP · intraday</small></span></label>
+                  <label class="tw-ind-row"><input type="checkbox" data-ct-set="bb.on"><span><strong>Bollinger Bands</strong><small>20, 2</small></span></label>
+                  <label class="tw-ind-row"><input type="checkbox" data-ct-set="sma.on"><span><strong>SMA</strong><small>Simple moving average · 50</small></span></label>
+                  <label class="tw-ind-row"><input type="checkbox" data-ct-set="levels.on" checked><span><strong>Key levels</strong><small>Prior day H/L/C · premarket H/L</small></span></label>
                   <button type="button" class="tw-ind-settings" id="tw-studies-btn" onclick="twToggleStudySettings(); twToggleIndicatorMenu()"><span class="tw-tool-icon">⚙</span>Indicator settings</button>
                 </div>
               </div>
@@ -582,7 +587,7 @@
         </div>
 
         <div class="tw-study-settings" id="tw-study-settings" hidden>
-          <div class="tw-study-head"><div><strong>Chart studies &amp; styles</strong><span>Saved on this device</span></div><button type="button" onclick="twToggleStudySettings()">×</button></div>
+          <div class="tw-study-head"><div><strong>Chart studies &amp; styles</strong><span>Saved to your account · syncs to your devices</span></div><button type="button" onclick="twToggleStudySettings()">×</button></div>
           <div class="tw-study-grid">
             <div class="tw-study-group"><h4>EMA overlays</h4>
               {% for period, color, enabled in [(9,'#f5b942',true),(20,'#38d6c5',true),(50,'#6fa8ff',true),(100,'#c084fc',false),(200,'#ff6b7a',false)] %}
@@ -600,10 +605,28 @@
               <label class="tw-study-row"><span>MACD line</span><input id="tw-color-macd" type="color" value="#e7b84b" oninput="twSetColor('macd',this.value)"></label>
               <label class="tw-study-row"><span>Signal line</span><input id="tw-color-signal" type="color" value="#6fa8ff" oninput="twSetColor('signal',this.value)"></label>
             </div>
-            <div class="tw-study-group"><h4>Drawing tools</h4>
-              <label class="tw-study-row"><span>Trend line</span><input id="tw-color-drawing" type="color" value="#f0b53f" oninput="twSetColor('drawing',this.value)"></label>
-              <label class="tw-study-row"><span>Fibonacci</span><input id="tw-color-fib" type="color" value="#f0b53f" oninput="twSetColor('fib',this.value)"></label>
-              <label class="tw-study-row"><span>Line width</span><select id="tw-drawing-width" onchange="twSetDrawingWidth(this.value)"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+            <div class="tw-study-group"><h4>Candles</h4>
+              <label class="tw-study-row"><span>Up candle</span><input type="color" data-ct-set="candles.up" value="#22C58B"></label>
+              <label class="tw-study-row"><span>Down candle</span><input type="color" data-ct-set="candles.down" value="#FF4D45"></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.session"><span>Color pre/after-hours candles by session</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.shading" checked><span>Shade pre/after-hours background</span></label>
+            </div>
+            <div class="tw-study-group"><h4>Overlays</h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="vwap.on" checked><span>VWAP (intraday)</span><input type="color" data-ct-set="vwap.color" value="#ff9f43"></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="vwap.bands"><span>VWAP ±1σ / ±2σ bands</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="bb.on"><span>Bollinger Bands</span><input type="color" data-ct-set="bb.color" value="#8b93ff"></label>
+              <label class="tw-study-row"><span>BB length</span><input type="number" min="2" max="200" data-ct-set="bb.len" value="20"></label>
+              <label class="tw-study-row"><span>BB std dev</span><input type="number" min="0.5" max="5" step="0.1" data-ct-set="bb.mult" value="2"></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="sma.on"><span>SMA</span><input type="color" data-ct-set="sma.color" value="#d9dee7"></label>
+              <label class="tw-study-row"><span>SMA length</span><input type="number" min="2" max="400" data-ct-set="sma.len" value="50"></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="levels.on" checked><span>Key levels (PDH · PDL · PDC · PMH · PML)</span></label>
+            </div>
+            <div class="tw-study-group"><h4>On the price scale</h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="labels.bidask" checked><span>Bid / Ask (live L2 feed)</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="labels.indicators" checked><span>EMA / VWAP / BB / SMA values</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="labels.levels" checked><span>Key levels</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="labels.drawings" checked><span>Drawing prices (when turned on per drawing)</span></label>
+              <p class="tw-study-note">Drawings: select one on the chart to change its color, width, style, fill, levels and labels.</p>
             </div>
           </div>
         </div>
@@ -613,14 +636,7 @@
         <div class="tw-workspace">
         {# Drawing tools sit on a vertical rail beside the chart, TradingView-style. #}
         <div class="tw-drawbar" role="toolbar" aria-label="Drawing tools">
-            <div class="tw-tool-group"><span class="tw-tool-label">Draw</span><div class="tw-tool-buttons">
-              <button class="tw-type-btn" id="tw-edit-btn" onclick="twStartDrawing('select',this)" title="Select, move, or resize a drawing"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 3.5l13 7.2-5.6 1.4-2.6 5.4z"/></svg><span class="tw-draw-name">Select</span></button>
-              <button class="tw-type-btn" id="tw-line-btn" onclick="twStartDrawing('line',this)" title="Drag to draw a trend line"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 19 20 5"/><circle cx="4.5" cy="18.5" r="1.8"/><circle cx="19.5" cy="5.5" r="1.8"/></svg><span class="tw-draw-name">Trend</span></button>
-              <button class="tw-type-btn" id="tw-fib-btn" onclick="twStartDrawing('fib',this)" title="Drag to draw Fibonacci retracement"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 5h18M3 9.5h18M3 14h18M3 19h18"/><path d="M6 19 18 5" stroke-dasharray="2 2.5"/></svg><span class="tw-draw-name">Fib</span></button>
-              <button class="tw-type-btn tw-icon-btn" id="tw-delete-btn" onclick="twDeleteSelected()" title="Delete selected drawing" aria-label="Delete selected drawing"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13"/></svg></button>
-              <button class="tw-type-btn tw-icon-btn" onclick="twClearDrawings()" title="Clear all drawings" aria-label="Clear all drawings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-              <button class="tw-type-btn tw-icon-btn" onclick="twResetView()" title="Reset chart view" aria-label="Reset chart view"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4.5h4.5"/></svg></button>
-            </div></div>
+            <div class="tw-tool-group"><span class="tw-tool-label">Draw</span><div class="tw-tool-buttons ct-rail" id="ct-rail"></div></div>
         </div>
 
         <div class="tw-chart-stack" id="tw-chart-stack">
@@ -898,6 +914,7 @@
 <!-- Lightweight Charts (TradingView) -->
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="{{ url_for('static', filename='js/depth_panel.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/chart_tools.js') }}"></script>
 <script>
 /* ── helpers ── */
 function twFmtVol(n){
@@ -1036,6 +1053,7 @@ function twApplyType(){
   var isArea = twChartState.type !== 'candles';
   twChartState.area.applyOptions({ visible: isArea });
   twChartState.candle.applyOptions({ visible: !isArea });
+  if(typeof ctOnSeriesChange==='function') ctOnSeriesChange();
 }
 function twToggleVolume(btn){
   twChartState.showVolume=!twChartState.showVolume;
@@ -1078,6 +1096,7 @@ function twSyncIndicatorMenu(){
   if(r) r.checked = !!twChartState.indicators.rsi;
   if(m) m.checked = !!twChartState.indicators.macd;
   if(c) c.textContent = (twChartState.indicators.rsi ? 1 : 0) + (twChartState.indicators.macd ? 1 : 0);
+  if(typeof ctSyncSettingsUI==='function') ctSyncSettingsUI();
 }
 function twToggleIndicator(name,btn){
   var on;
@@ -1112,12 +1131,10 @@ function twSetStudyParam(key,value){
 function twSyncIndicatorLabels(){var s=twChartState.studies;twNum('tw-rsi-title','RSI '+s.rsiPeriod);twNum('tw-rsi-zones',s.rsiUpper+' overbought · '+s.rsiLower+' oversold');twNum('tw-macd-title','MACD '+s.macdFast+' · '+s.macdSlow+' · '+s.macdSignal);}
 function twSetColor(key,value){
   if(key.indexOf('ema')===0){var period=key.slice(3);if(twChartState.styles.emas[period])twChartState.styles.emas[period].color=value;}else twChartState.styles[key]=value;
-  if(key==='drawing'||key==='fib'){twChartState.drawings.forEach(function(d){if((key==='drawing'&&d.type==='line')||(key==='fib'&&d.type==='fib'))d.color=value;});twSaveDrawings();}
   twSaveStyles();twApplyStudyStyles();twRenderIndicators();twRenderDrawings();
 }
 function twSetEma(period,enabled){var style=twChartState.styles.emas[String(period)];if(!style)return;style.enabled=!!enabled;twSaveStyles();twApplyStudyStyles();twRenderEmas();}
-function twSetDrawingWidth(value){twChartState.styles.drawingWidth=Math.max(1,Math.min(4,Number(value)||2));twChartState.drawings.forEach(function(d){d.width=twChartState.styles.drawingWidth;});twSaveDrawings();twSaveStyles();twRenderDrawings();}
-function twApplyStudyStyles(){Object.keys(twChartState.emaSeries).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period].applyOptions({color:style.color,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,title:''});});}
+function twApplyStudyStyles(){Object.keys(twChartState.emaSeries).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period].applyOptions({color:style.color,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:ctLbl('indicators'),title:''});});}
 
 /* ── Order ticket ── */
 function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; var tk=document.getElementById('tw-ticket'); if(tk) tk.dataset.side=btn.dataset.side; twEstCost(); }
@@ -1258,6 +1275,7 @@ function twInitChart(){
   var shade=chart.addHistogramSeries({ priceScaleId:'shade', lastValueVisible:false, priceLineVisible:false, crosshairMarkerVisible:false });
   chart.priceScale('shade').applyOptions({ scaleMargins:{ top:0, bottom:0 }, visible:false });
   twChartState.chart=chart; twChartState.area=area; twChartState.candle=candle; twChartState.vol=vol; twChartState.shade=shade;
+  ctInitStudies(chart);
   Object.keys(twChartState.styles.emas).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period]=chart.addLineSeries({color:style.color,lineWidth:1,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,title:''});});
   vol.applyOptions({visible:twChartState.showVolume});
   twApplyStudyStyles();
@@ -1276,6 +1294,8 @@ function twInitChart(){
   });
   chart.subscribeClick(function(param){
     if(twChartState.sizeMode&&param&&param.point){ twSizeClick(param.point.y); return; }
+    // A tap on a drawing selects it (chart_tools.js); don't pin the candle too.
+    if(param&&param.point&&typeof ctHit==='function'&&ctHit(param.point.x,param.point.y)) return;
     var key=twTimeKey(param&&param.time), bar=twChartState.barMap[key];
     if(!bar){ twChartState.pinnedTime=null; twHideTooltip(); return; }
     twChartState.pinnedTime=(twChartState.pinnedTime===key)?null:key;
@@ -1336,95 +1356,13 @@ function twSizeRender(){
     (e!=null?'<div class="tw-size-pts">Entry <b>'+e.toFixed(2)+'</b>'+(s!=null?' · Stop <b>'+s.toFixed(2)+'</b>':'')+' <button type="button" data-act="clear">Clear</button></div>':'')+out;
 }
 
-/* ═══ Drawing tools ═══ */
-function twDrawingKey(){ return 'tradestaar.drawings.'+(twChartState.ticker||'none')+'.'+twChartState.interval+'.'+twChartState.range+'.'+(twChartState.extended?'extended':'regular'); }
-function twLoadDrawings(){
-  twChartState.drawings=[]; twChartState.drawDraft=[];
-  try { var saved=JSON.parse(localStorage.getItem(twDrawingKey())||'[]'); if(Array.isArray(saved))twChartState.drawings=saved.slice(0,30); } catch(e) {}
-  twRenderDrawings();
-}
-function twSaveDrawings(){ try { localStorage.setItem(twDrawingKey(),JSON.stringify(twChartState.drawings.slice(-30))); } catch(e) {} }
-function twStartDrawing(mode,btn){
-  if(twChartState.drawMode===mode){twStopDrawing();return;}
-  twChartState.drawMode=mode; twChartState.drawDraft=[];twChartState.pointerAction=null;
-  document.querySelectorAll('#tw-edit-btn,#tw-line-btn,#tw-fib-btn').forEach(function(b){b.classList.remove('active');}); btn.classList.add('active');
-  var canvas=document.getElementById('tw-chart-drawing'); if(canvas)canvas.classList.add('active');
-  var status=document.getElementById('tw-draw-status'); if(status){status.hidden=false;status.textContent=mode==='select'?'Edit: drag a line, Fib, or endpoint. Press Delete to remove it.':(mode==='fib'?'Fibonacci':'Trend line')+': press and drag freely between any two points.';}
-  twRenderDrawings();
-}
-function twStopDrawing(){
-  twChartState.drawMode=null;twChartState.drawDraft=[];twChartState.pointerAction=null;
-  document.querySelectorAll('#tw-edit-btn,#tw-line-btn,#tw-fib-btn').forEach(function(b){b.classList.remove('active');});
-  var canvas=document.getElementById('tw-chart-drawing');if(canvas)canvas.classList.remove('active');
-  var status=document.getElementById('tw-draw-status');if(status)status.hidden=true;
-  twRenderDrawings();
-}
-function twClearDrawings(){ twChartState.drawings=[];twChartState.selectedDrawing=null;twSaveDrawings();twStopDrawing();twRenderDrawings(); }
-function twDeleteSelected(){if(twChartState.selectedDrawing==null)return;twChartState.drawings.splice(twChartState.selectedDrawing,1);twChartState.selectedDrawing=null;twSaveDrawings();twRenderDrawings();}
-function twPointerPoint(canvas,ev){
-  var rect=canvas.getBoundingClientRect(),x=ev.clientX-rect.left,y=ev.clientY-rect.top,time=twChartState.chart.timeScale().coordinateToTime(x),price=twChartState.candle.coordinateToPrice(y);
-  return time==null||price==null||!isFinite(price)?null:{x:x,y:y,time:time,price:Number(price)};
-}
-function twDistanceToSegment(p,a,b){var dx=b.x-a.x,dy=b.y-a.y,len=dx*dx+dy*dy;if(!len)return Math.hypot(p.x-a.x,p.y-a.y);var t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/len));return Math.hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy));}
-function twHitDrawing(point){
-  for(var i=twChartState.drawings.length-1;i>=0;i--){var d=twChartState.drawings[i];if(!d.points||d.points.length<2)continue;var a=twPointCoords(d.points[0]),b=twPointCoords(d.points[1]);if(!a||!b)continue;
-    if(Math.hypot(point.x-a.x,point.y-a.y)<=11)return {index:i,part:'a'};if(Math.hypot(point.x-b.x,point.y-b.y)<=11)return {index:i,part:'b'};
-    if(d.type==='line'&&twDistanceToSegment(point,a,b)<=8)return {index:i,part:'move'};
-    if(d.type==='fib'){var left=Math.min(a.x,b.x)-8,right=Math.max(a.x,b.x)+8,top=Math.min(a.y,b.y)-8,bottom=Math.max(a.y,b.y)+8;if(point.x>=left&&point.x<=right&&point.y>=top&&point.y<=bottom)return {index:i,part:'move'};}
-  }return null;
-}
-function twInitDrawingLayer(){
-  var canvas=document.getElementById('tw-chart-drawing'),box=document.getElementById('tw-chart-box');if(!canvas||!box)return;
-  canvas.addEventListener('pointerdown',function(ev){
-    if(!twChartState.drawMode||!twChartState.chart||!twChartState.candle)return;var p=twPointerPoint(canvas,ev);if(!p)return;canvas.setPointerCapture(ev.pointerId);ev.preventDefault();
-    if(twChartState.drawMode==='line'||twChartState.drawMode==='fib'){twChartState.drawDraft=[{time:p.time,price:p.price},{time:p.time,price:p.price}];twChartState.pointerAction={kind:'create',start:{x:p.x,y:p.y}};}
-    else {var hit=twHitDrawing(p);twChartState.selectedDrawing=hit?hit.index:null;if(hit){var d=twChartState.drawings[hit.index];twChartState.pointerAction={kind:hit.part,index:hit.index,start:{x:p.x,y:p.y},original:JSON.parse(JSON.stringify(d.points))};}}
-    twRenderDrawings();
-  });
-  canvas.addEventListener('pointermove',function(ev){
-    var action=twChartState.pointerAction;if(!action)return;var p=twPointerPoint(canvas,ev);if(!p)return;ev.preventDefault();
-    if(action.kind==='create'){twChartState.drawDraft[1]={time:p.time,price:p.price};}
-    else {var drawing=twChartState.drawings[action.index];if(!drawing)return;if(action.kind==='a'||action.kind==='b')drawing.points[action.kind==='a'?0:1]={time:p.time,price:p.price};else if(action.kind==='move'){var originalCoords=action.original.map(twPointCoords);if(originalCoords[0]&&originalCoords[1])drawing.points=originalCoords.map(function(coord){var time=twChartState.chart.timeScale().coordinateToTime(coord.x+(p.x-action.start.x)),price=twChartState.candle.coordinateToPrice(coord.y+(p.y-action.start.y));return time==null||price==null?null:{time:time,price:Number(price)};}).filter(Boolean);}}
-    twRenderDrawings();
-  });
-  function finishPointer(ev){
-    var action=twChartState.pointerAction;if(!action)return;twChartState.pointerAction=null;
-    if(action.kind==='create'&&twChartState.drawDraft.length===2){var a=twPointCoords(twChartState.drawDraft[0]),b=twPointCoords(twChartState.drawDraft[1]);if(a&&b&&Math.hypot(a.x-b.x,a.y-b.y)>5){var type=twChartState.drawMode,color=type==='fib'?twChartState.styles.fib:twChartState.styles.drawing;twChartState.drawings.push({id:Date.now().toString(36),type:type,points:twChartState.drawDraft.slice(),color:color,width:twChartState.styles.drawingWidth});twChartState.selectedDrawing=twChartState.drawings.length-1;twSaveDrawings();}twChartState.drawDraft=[];}
-    else twSaveDrawings();twRenderDrawings();
-    try{canvas.releasePointerCapture(ev.pointerId);}catch(e){}
-  }
-  canvas.addEventListener('pointerup',finishPointer);canvas.addEventListener('pointercancel',finishPointer);
-  document.addEventListener('keydown',function(ev){if((ev.key==='Delete'||ev.key==='Backspace')&&twChartState.drawMode==='select'&&twChartState.selectedDrawing!=null){ev.preventDefault();twDeleteSelected();}if(ev.key==='Escape')twStopDrawing();});
-  canvas.addEventListener('dblclick',function(){if(twChartState.drawMode==='select')twDeleteSelected();});
-  if(window.ResizeObserver)new ResizeObserver(function(){twRenderDrawings();twRenderIndicators();}).observe(box);
-  else window.addEventListener('resize',function(){twRenderDrawings();twRenderIndicators();});
-}
+/* Drawing tools live in static/js/chart_tools.js. */
 function twCanvasContext(canvas){
   if(!canvas)return null;var rect=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
   if(rect.width<=0||rect.height<=0)return null;
   var w=Math.round(rect.width*dpr),h=Math.round(rect.height*dpr);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
   var ctx=canvas.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,rect.width,rect.height);return {ctx:ctx,w:rect.width,h:rect.height};
 }
-function twPointCoords(point){
-  if(!twChartState.chart||!twChartState.candle)return null;var x=twChartState.chart.timeScale().timeToCoordinate(point.time),y=twChartState.candle.priceToCoordinate(point.price);
-  return x==null||y==null?null:{x:x,y:y};
-}
-function twRenderDrawings(){
-  var fit=twCanvasContext(document.getElementById('tw-chart-drawing'));if(!fit)return;var ctx=fit.ctx;
-  var all=(twChartState.drawings||[]).slice();if(twChartState.drawDraft.length===2)all.push({type:twChartState.drawMode,points:twChartState.drawDraft,color:twChartState.drawMode==='fib'?twChartState.styles.fib:twChartState.styles.drawing,width:twChartState.styles.drawingWidth,draft:true});
-  all.forEach(function(drawing,index){
-    if(!drawing.points||drawing.points.length<2)return;var a=twPointCoords(drawing.points[0]),b=twPointCoords(drawing.points[1]);if(!a||!b)return;
-    var selected=!drawing.draft&&index===twChartState.selectedDrawing,color=drawing.color||(drawing.type==='fib'?twChartState.styles.fib:twChartState.styles.drawing),width=drawing.width||twChartState.styles.drawingWidth;
-    if(drawing.type==='line'){ctx.save();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.restore();}
-    if(drawing.type==='fib')twDrawFib(ctx,drawing.points,a,b,color,width);
-    if(selected||drawing.draft){ctx.save();ctx.fillStyle='#0b0f12';ctx.strokeStyle=color;ctx.lineWidth=2;[a,b].forEach(function(p){ctx.beginPath();ctx.arc(p.x,p.y,selected?5:3,0,Math.PI*2);ctx.fill();ctx.stroke();});ctx.restore();}
-  });
-}
-function twDrawFib(ctx,points,a,b,color,width){
-  var high=Math.max(points[0].price,points[1].price),low=Math.min(points[0].price,points[1].price),x1=Math.min(a.x,b.x),x2=Math.max(a.x,b.x),levels=[0,.236,.382,.5,.618,.786,1];
-  ctx.save();ctx.font='9px ui-monospace,monospace';levels.forEach(function(ratio){var price=high-(high-low)*ratio,y=twChartState.candle.priceToCoordinate(price);if(y==null)return;ctx.globalAlpha=ratio===.5||ratio===.618?1:.58;ctx.strokeStyle=color;ctx.lineWidth=(ratio===.5||ratio===.618)?Math.max(1.4,width):Math.max(1,width-1);ctx.setLineDash(ratio===0||ratio===1?[]:[4,3]);ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;ctx.fillStyle=color;ctx.fillText((ratio*100).toFixed(ratio===0||ratio===1?0:1)+'%  '+price.toFixed(2),Math.min(x2+5,fitTextX(ctx,fitWidth(ctx),92)),y-3);});ctx.restore();
-}
-function fitWidth(ctx){return ctx.canvas.width/(window.devicePixelRatio||1);}function fitTextX(ctx,width,labelWidth){return Math.max(4,width-labelWidth-4);}
 
 /* ═══ RSI + MACD indicator canvases ═══ */
 function twEma(values,period){
@@ -1432,7 +1370,7 @@ function twEma(values,period){
 }
 function twRenderEmas(){
   if(!twChartState.bars.length)return;var closes=twChartState.bars.map(function(b){return Number(b.close);});
-  var legend=[];Object.keys(twChartState.emaSeries).forEach(function(period){var values=twEma(closes,Number(period)),series=twChartState.emaSeries[period],style=twChartState.styles.emas[period],last=values.filter(function(v){return v!=null;}).pop();series.setData(twChartState.bars.map(function(bar,i){return values[i]==null?null:{time:bar.time,value:values[i]};}).filter(Boolean));series.applyOptions({color:style.color,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,title:''});if(style.enabled&&last!=null)legend.push({period:period,value:last,color:style.color});});twRenderEmaLegend(legend);
+  var legend=[];Object.keys(twChartState.emaSeries).forEach(function(period){var values=twEma(closes,Number(period)),series=twChartState.emaSeries[period],style=twChartState.styles.emas[period],last=values.filter(function(v){return v!=null;}).pop();series.setData(twChartState.bars.map(function(bar,i){return values[i]==null?null:{time:bar.time,value:values[i]};}).filter(Boolean));series.applyOptions({color:style.color,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:ctLbl('indicators'),title:''});if(style.enabled&&last!=null)legend.push({period:period,value:last,color:style.color});});twRenderEmaLegend(legend);ctRenderStudies();
 }
 function twRenderEmaLegend(items){var host=document.getElementById('tw-ema-legend');if(!host)return;host.replaceChildren();items.forEach(function(item){var chip=document.createElement('span'),dot=document.createElement('i'),label=document.createElement('b');dot.style.backgroundColor=item.color;label.textContent='EMA '+item.period+'  '+Number(item.value).toFixed(2);chip.appendChild(dot);chip.appendChild(label);host.appendChild(chip);});host.hidden=!items.length;}
 function twRsi(values,period){
@@ -1577,10 +1515,8 @@ function twRenderExtendedSummary(summary,status){
   // price stays the regular session's (see twLiveHeader).
   var latest=summary&&summary.latest;if(latest&&latest.change_pct!=null&&Number(latest.price)>0){var lp=Number(latest.price),lpct=Number(latest.change_pct),lb=lp/(1+lpct/100),lx={overnight:'overnight',premarket:'pre',after_hours:'post'}[latest.session];if(lx)twShowExt(twChartState.ticker,lp,lb,lx,'');}
 }
-function twCandleDatum(bar){
-  var datum={time:bar.time,open:bar.open,high:bar.high,low:bar.low,close:bar.close};if(bar.session==='overnight'){datum.color=bar.close>=bar.open?'#f0b53f':'#ff8c42';datum.wickColor=datum.color;datum.borderColor=datum.color;}else if(bar.session==='premarket'){datum.color=bar.close>=bar.open?'#4aa3ff':'#7569e8';datum.wickColor=datum.color;datum.borderColor=datum.color;}else if(bar.session==='after_hours'){datum.color=bar.close>=bar.open?'#c77dff':'#ff6aa9';datum.wickColor=datum.color;datum.borderColor=datum.color;}return datum;
-}
-function twVolumeColor(bar){if(bar.session==='overnight')return bar.close>=bar.open?'rgba(240,181,63,.5)':'rgba(255,140,66,.5)';if(bar.session==='premarket')return bar.close>=bar.open?'rgba(74,163,255,.48)':'rgba(117,105,232,.48)';if(bar.session==='after_hours')return bar.close>=bar.open?'rgba(199,125,255,.48)':'rgba(255,106,169,.48)';return bar.close>=bar.open?'rgba(34,197,139,0.45)':'rgba(255,77,69,0.45)';}
+function twCandleDatum(bar){ return ctCandleDatum(bar); }
+function twVolumeColor(bar){ return ctVolumeColor(bar); }
 
 /* The quote poll is fresher than a completed provider candle. Move the active
    intraday candle on each quote, then let the normal 30-second candle request

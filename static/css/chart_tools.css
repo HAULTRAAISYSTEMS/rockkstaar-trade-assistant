@@ -1,0 +1,87 @@
+/* Terminal chart tools: drawing rail groups, tool menu, properties bar. */
+.tw-chart-drawing.ct-hover, .tw-chart-drawing.ct-armed { pointer-events: auto; }
+.tw-chart-drawing.ct-armed { cursor: default; }
+
+.ct-rail { align-items: center; }
+.ct-group { position: relative; display: flex; }
+.ct-group .ct-more {
+  position: absolute; right: -1px; bottom: -1px; width: 13px; height: 13px; padding: 0;
+  display: grid; place-items: end; border: 0; background: transparent; color: #66738a; cursor: pointer;
+}
+.ct-group .ct-more:hover { color: #fff; }
+.ct-sep { display: block; width: 22px; height: 1px; margin: 6px 0; background: rgba(255,255,255,.1); }
+.tw-drawbar .ct-toggle.active { color: #0a0712 !important; background: rgba(var(--cc-accent-rgb, 196,245,59), .85) !important; box-shadow: none; }
+
+.ct-flyout {
+  position: fixed; z-index: 2000; min-width: 210px; padding: 6px;
+  border: 1px solid rgba(255,255,255,.1); border-radius: 10px;
+  background: rgba(10,14,22,.98); box-shadow: 0 16px 40px rgba(0,0,0,.5);
+  backdrop-filter: blur(10px);
+}
+.ct-flyout button {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px;
+  border: 0; border-radius: 7px; background: transparent; color: #d6dee9;
+  font: 600 13px/1.2 var(--font-sans, system-ui); text-align: left; cursor: pointer;
+}
+.ct-flyout button:hover { background: rgba(255,255,255,.07); color: #fff; }
+.ct-flyout button.on { color: var(--cc-accent, #c4f53b); }
+
+.ct-props {
+  position: absolute; z-index: 7; top: 34px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  max-width: calc(100% - 90px); padding: 5px 6px;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 10px;
+  background: rgba(9,13,21,.96); box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  font: 600 12px var(--font-sans, system-ui); color: #d6dee9;
+}
+.ct-props[hidden] { display: none; }
+.ct-p-name { padding: 0 6px; color: #8d9bb0; font-size: 11px; white-space: nowrap; }
+.ct-props select, .ct-props .ct-p-text, .ct-level input[type=number] {
+  height: 28px; padding: 0 6px; border: 1px solid rgba(255,255,255,.12); border-radius: 6px;
+  background: #121926; color: #e8edf5; font: 600 12px var(--font-sans, system-ui);
+}
+.ct-props .ct-p-text { width: 130px; }
+.ct-p-color { display: inline-flex; width: 28px; height: 28px; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,.18); cursor: pointer; }
+.ct-p-color input, .ct-level input[type=color] { width: 40px; height: 40px; margin: -6px; padding: 0; border: 0; background: none; cursor: pointer; }
+.ct-p-range { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; color: #8d9bb0; font-size: 11px; }
+.ct-p-range input { width: 64px; accent-color: var(--cc-accent, #c4f53b); }
+.ct-p-btn {
+  min-width: 28px; height: 28px; padding: 0 7px; display: inline-grid; place-items: center;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; color: #b8c3d3;
+  font: 700 12px var(--font-sans, system-ui); cursor: pointer;
+}
+.ct-p-btn:hover { background: rgba(255,255,255,.07); color: #fff; }
+.ct-p-btn.on { border-color: rgba(var(--cc-accent-rgb, 196,245,59), .5); color: var(--cc-accent, #c4f53b); background: rgba(var(--cc-accent-rgb, 196,245,59), .08); }
+.ct-p-del:hover { color: #ff6b6b; }
+.ct-levels { flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px; padding: 6px 4px 2px; border-top: 1px solid rgba(255,255,255,.08); margin-top: 4px; }
+.ct-level { display: flex; align-items: center; gap: 5px; }
+.ct-level input[type=checkbox] { accent-color: var(--cc-accent, #c4f53b); }
+.ct-level input[type=number] { width: 70px; height: 26px; }
+.ct-level input[type=color] { width: 34px; height: 34px; margin: -5px; }
+.ct-level > label, .ct-level .ct-sw { width: 24px; height: 24px; }
+.ct-level button { width: 22px; height: 22px; border: 0; border-radius: 5px; background: transparent; color: #8d9bb0; cursor: pointer; }
+.ct-level button:hover { color: #ff6b6b; background: rgba(255,255,255,.06); }
+.ct-level-actions { grid-column: 1 / -1; display: flex; gap: 6px; padding-top: 2px; }
+.ct-level-actions button { height: 26px; padding: 0 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 6px; background: #121926; color: #d6dee9; font: 600 11px var(--font-sans, system-ui); cursor: pointer; }
+.tw-study-note { margin: 6px 0 0; color: #8d9bb0; font-size: 11px; line-height: 1.4; }
+.tw-ema-legend .ct-leg { display: flex; }
+
+@media (max-width: 1099px) {
+  .tw-drawbar .ct-rail { flex-direction: row; }
+  .ct-sep { width: 1px; height: 22px; margin: 0 6px; }
+  .ct-props { top: 6px; max-width: calc(100% - 16px); }
+  .ct-props .ct-p-text { width: 100px; }
+}
+
+/* The terminal styles form controls globally; keep the drawing bar compact. */
+.ct-props input, .ct-props select, .ct-props button { box-sizing: border-box; margin: 0 !important; min-height: 0 !important; line-height: 1 !important; }
+.ct-props select, .ct-props .ct-p-text { height: 28px !important; padding: 0 6px !important; font-size: 12px !important; width: auto; }
+.ct-props .ct-p-text { width: 130px !important; }
+.ct-props .ct-p-btn { height: 28px !important; min-width: 28px !important; padding: 0 7px !important; }
+.ct-props .ct-p-color input { width: 40px !important; height: 40px !important; margin: -6px !important; }
+.ct-props .ct-levels { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 3px 8px; max-height: 190px; overflow: auto; }
+.ct-props .ct-level input[type=checkbox] { width: 14px !important; height: 14px !important; padding: 0 !important; }
+.ct-props .ct-level input[type=number] { width: 62px !important; height: 24px !important; padding: 0 5px !important; font-size: 11px !important; }
+.ct-props .ct-level input[type=color] { width: 22px !important; height: 22px !important; padding: 0 !important; margin: 0 !important; border: 1px solid rgba(255,255,255,.18) !important; border-radius: 5px; }
+.ct-props .ct-level button { width: 20px !important; height: 20px !important; min-width: 0 !important; padding: 0 !important; }
+.ct-props .ct-level-actions button { height: 24px !important; padding: 0 9px !important; }
