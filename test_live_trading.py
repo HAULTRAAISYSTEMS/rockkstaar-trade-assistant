@@ -241,3 +241,12 @@ def test_ticket_ui_is_wired():
     js = open("static/js/live_trading.js", encoding="utf-8").read()
     assert "js/live_trading.js" in html and 'id="lt-mode"' in html and 'id="tw-ot-bracket"' in html
     assert "window.LiveTrading.preview()" in html and "/api/trade/place" in js and "Type LIVE" in html
+
+
+def test_settings_panel_retries_server_errors_and_hides_buttons():
+    js = open("static/js/live_trading.js").read()
+    html = open("templates/terminal.html").read()
+    # A 5xx while checking Schwab is retried, not shown as "not connected".
+    assert "(d._status >= 500 || d._status === 0) && attempt < 4" in js and "id=\"lt-retry\"" in js
+    # .tw-submit-ghost's display:block used to beat [hidden] (Turn off showed while off).
+    assert ".lt-settings [hidden] { display:none !important; }" in html
