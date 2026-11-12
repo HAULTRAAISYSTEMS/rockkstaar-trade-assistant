@@ -20,6 +20,7 @@
     var r = await fetch(path, opt), d = {};
     try { d = await r.json(); } catch (e) { d = {ok: false, error: 'Server error (' + r.status + ')'}; }
     if (!r.ok && d.ok !== false) d.ok = false;
+    d._status = r.status;
     return d;
   }
 
@@ -70,6 +71,7 @@
     var s = state.status || {};
     var st = $('lt-set-status');
     if (s.kill_switch) st.innerHTML = 'Live trading is switched off on the server.';
+    else if (s.server_error) st.innerHTML = 'Couldn’t reach the server (' + esc(s.connect_error || 'error') + '). <a href="#" id="lt-retry">Try again</a>';
     else if (!s.connected) st.innerHTML = 'Schwab: <b class="off">not connected</b> ' + esc(s.connect_error || '') + ' — <a href="/brokers">Connect</a>';
     else st.innerHTML = 'Live trading: <b class="' + (s.enabled ? 'on">ON' : 'off">OFF') + '</b>';
     var sel = $('lt-account');
@@ -82,9 +84,18 @@
     document.querySelector('.lt-enable-row').hidden = !!s.enabled || !s.connected;
   }
 
-  async function loadStatus() {
-    var d = await api('/api/trade/status');
-    if (d.ok === false && !d.accounts) d = {enabled: false, connected: false, connect_error: d.error};
+  async function loadStatus(attempt) {
+    attempt = attempt || 0;
+    var d;
+    try { d = await api('/api/trade/status'); } catch (e) { d = {ok: false, _status: 0, error: 'No connection'}; }
+    // A 5xx (deploy restart, worker busy) or a dropped connection is not an
+    // answer about Schwab: try again a few times before showing it.
+    if ((d._status >= 500 || d._status === 0) && attempt < 4) {
+      $('lt-set-status').innerHTML = 'Checking Schwab… (server busy, retrying)';
+      setTimeout(function () { loadStatus(attempt + 1); }, [2000, 4000, 8000, 15000][attempt]);
+      return;
+    }
+    if (d.ok === false && !d.accounts) d = {enabled: false, connected: false, connect_error: d.error, server_error: d._status >= 500 || d._status === 0};
     (d.accounts || []).forEach(function (a) { if (a.hash === d.account) d.account_last4 = a.last4; });
     state.status = d;
     paint(); paintSettings();
@@ -189,6 +200,9 @@
   // ── Wiring ──────────────────────────────────────────────────────────────
   document.querySelectorAll('#lt-mode [data-mode]').forEach(function (b) {
     b.addEventListener('click', function () { if (b.disabled) return; state.mode = b.getAttribute('data-mode'); paint(); });
+  });
+  document.addEventListener('click', function (e) {
+    if (e.target && e.target.id === 'lt-retry') { e.preventDefault(); $('lt-set-status').textContent = 'Checking Schwab…'; loadStatus(); }
   });
   $('lt-gear').addEventListener('click', function () { var s = $('lt-settings'); s.hidden = !s.hidden; if (!s.hidden) loadStatus(); });
   $('lt-enable').addEventListener('click', function () { saveSettings({enabled: true, confirm: $('lt-confirm-word').value}); });

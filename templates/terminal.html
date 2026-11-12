@@ -300,6 +300,8 @@
 .lt-set-status { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-body); margin-bottom: var(--sp-3); }
 .lt-set-status b.on { color:#ff6a62; } .lt-set-status b.off { color: var(--text-muted); }
 .lt-set-actions { display:grid; gap:6px; }
+/* .tw-submit-ghost sets display:block, which beat the hidden attribute: "Turn off" showed while live trading was off. */
+.lt-settings [hidden] { display:none !important; }
 .lt-set-actions .lt-on { background: linear-gradient(180deg,#ff6a62,#d62e26); color:#fff; }
 .lt-set-note { margin-top: var(--sp-2); font-size: var(--fs-micro); color: var(--text-faint); line-height:1.5; }
 .lt-check { display:flex; align-items:center; gap:8px; font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-size:10px; color: var(--text-muted); margin-bottom: var(--sp-3); cursor:pointer; }
