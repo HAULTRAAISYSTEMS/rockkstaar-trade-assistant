@@ -348,3 +348,28 @@ def test_interval_mismatch_is_shown_not_retried(client, monkeypatch):
     r = c.get("/api/terminal/candles/KLAC?interval=1d&range=max")
     d = r.get_json()
     assert r.status_code == 200 and d["ok"] is False and "3mo" in d["error"]
+
+
+def test_empty_list_still_charts_a_symbol(client, monkeypatch):
+    # An empty list is no longer auto-seeded once the user has several lists;
+    # the chart must still load something instead of sitting on "No symbol".
+    c, _ = client
+    import app as legacy
+    monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid=None: [
+        {"id": 1, "name": "A+ Ready", "user_id": 1}, {"id": 2, "name": "AVOID", "user_id": 1}])
+    monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 2)
+    monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: [])
+    html = c.get("/terminal").get_data(as_text=True)
+    assert "starter watchlist is seeding" not in html and "No symbol" not in html
+    assert 'id="tw-c-ticker">SPY<' in html and 'var bootSym=(first && first.dataset.ticker) || "SPY";' in html
+    assert "This list is empty" in html
+
+
+def test_list_whose_rows_have_not_loaded_charts_its_first_ticker(client, monkeypatch):
+    c, _ = client
+    import app as legacy
+    monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 1)
+    monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: ["NVDA", "AMD"])
+    monkeypatch.setattr(legacy, "get_all_stock_data", lambda: [])
+    html = c.get("/terminal").get_data(as_text=True)
+    assert '|| "NVDA";' in html and 'id="tw-c-ticker">NVDA<' in html
