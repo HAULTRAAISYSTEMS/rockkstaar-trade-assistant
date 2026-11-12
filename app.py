@@ -7731,6 +7731,17 @@ def _live_context(uid: int, t: dict, acct: dict) -> dict:
         last = q.get("price")
     except Exception as exc:
         logger.info("live quote %s: %s", t["symbol"], exc)
+    if last is None and _MKT_AVAILABLE:
+        # schwab.fetch_quotes returns {} for five minutes after any market
+        # data error, so a market order was blocked with "No current price"
+        # while the ticket itself showed bid/last/ask from the shared feed.
+        # Use that same feed (only quotes younger than its max age).
+        try:
+            q = _mkt.live_quotes([t["symbol"]]).get(t["symbol"]) or {}
+            if q.get("price"):
+                last = float(q["price"])
+        except Exception as exc:
+            logger.info("live quote fallback %s: %s", t["symbol"], exc)
     pos_qty, bp = 0.0, None
     for a in schwab.fetch_accounts(user_id=uid):
         if str(a.get("account_number") or "") != acct["number"]:
