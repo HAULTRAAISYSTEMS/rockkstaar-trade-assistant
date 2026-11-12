@@ -291,10 +291,22 @@ class _Conn:
         return False
 
 
+_PG_OPTIONS = os.environ.get(
+    "PG_SESSION_OPTIONS",
+    "-c lock_timeout=30000 -c statement_timeout=120000 "
+    "-c idle_in_transaction_session_timeout=180000",
+)
+
+
 def _new_conn(shared: bool = False) -> _Conn:
     if _USE_POSTGRES and psycopg2 is not None:
         try:
-            conn = psycopg2.connect(_DATABASE_URL, connect_timeout=10)
+            # Server-side limits so one stuck session can't freeze the app:
+            # a transaction left open (e.g. a cron run hung on a network
+            # fetch) is closed after 3 min and its locks released; anyone
+            # waiting on a lock gives up after 30 s instead of forever; and
+            # no single query runs longer than 2 min.
+            conn = psycopg2.connect(_DATABASE_URL, connect_timeout=10, options=_PG_OPTIONS)
             return _Conn(conn, shared=shared)
         except Exception as exc:
             logger.error("DB  PostgreSQL connection failed: %s", exc)

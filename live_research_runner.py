@@ -163,4 +163,22 @@ def main():
     except Exception as exc:
         print(json.dumps({"inbox_feeds_error": type(exc).__name__}))
     return 0
-if __name__=="__main__": raise SystemExit(main())
+def _run_with_deadline(seconds: int = 270) -> int:
+    """Run main(), but never past `seconds`. The job fires every 5 minutes;
+    a run hung on a network fetch used to sit for 35+ minutes holding a
+    database transaction (and its locks) open, freezing the web app."""
+    import signal
+
+    def _expired(signum, frame):
+        raise TimeoutError(f"live research run exceeded {seconds}s")
+    signal.signal(signal.SIGALRM, _expired)
+    signal.alarm(seconds)
+    try:
+        return main()
+    except TimeoutError as exc:
+        print(json.dumps({"run_timeout": str(exc)}))
+        return 1
+    finally:
+        signal.alarm(0)
+
+if __name__=="__main__": raise SystemExit(_run_with_deadline())
