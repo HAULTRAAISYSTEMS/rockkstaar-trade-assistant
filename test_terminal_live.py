@@ -229,6 +229,9 @@ class TestAfterHours:
     def test_terminal_shows_extended_on_its_own_line_and_defaults_extended_on(self):
         assert 'id="tw-c-ext"' in TEMPLATE and "function twShowExt(" in TEMPLATE
         assert "twSavedExtended = _xv === null ? true : _xv === '1';" in TEMPLATE
+        # Switching to 1D/4H must not switch the intraday Extended view off.
+        assert "twChartState.extended = twExtendedPref && twChartState.interval !== '1d';" in TEMPLATE
+        assert "chartExtended.v2" not in TEMPLATE
         assert "var extTag = {post:'AH ', pre:'PRE ', overnight:'O/N '}[q.ext]" in TEMPLATE
 
 
@@ -245,3 +248,27 @@ def test_selecting_a_row_after_hours_and_candle_timeout():
     assert "if(d.ext && d.ext !== 'pre' && Number(d.regclose) > 0){" in TEMPLATE
     assert "row.dataset.regclose = q.regular_close || '';" in TEMPLATE
     assert "candleCtl.abort(); }, 20000)" in TEMPLATE and "e.name==='AbortError'" in TEMPLATE
+
+
+def test_extended_4h_candles_follow_the_et_clock():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from terminal_intelligence import aggregate_extended_4h
+    et = ZoneInfo("America/New_York")
+    def bar(h, m, px, sess):
+        t = int(datetime(2026, 11, 11, h, m, tzinfo=et).timestamp())
+        return {"time": t, "open": px, "high": px + 1, "low": px - 1, "close": px + .5, "volume": 10, "session": sess}
+    bars = [bar(7, 0, 170, "premarket"), bar(9, 30, 171, "regular"), bar(15, 30, 174, "regular"),
+            bar(16, 0, 173, "after_hours"), bar(19, 0, 160, "after_hours")]
+    out = aggregate_extended_4h(bars)
+    starts = [datetime.fromtimestamp(c["time"], et).hour for c in out]
+    assert starts == [4, 8, 12, 16]
+    assert [c["session"] for c in out] == ["premarket", "regular", "regular", "after_hours"]
+    assert out[3]["open"] == 173 and out[3]["close"] == 160.5 and out[3]["low"] == 159
+
+
+def test_4h_accepts_extended_and_the_toggle_allows_it():
+    assert "supported=['1m','5m','15m','1h','4h']" in TEMPLATE
+    assert '"4h":14400' in TEMPLATE
+    src = Path(_app.__file__).read_text()
+    assert 'interval not in {"1m", "5m", "15m", "1h", "4h"}' in src
