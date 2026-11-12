@@ -65,7 +65,7 @@ _DDL = """
 CREATE TABLE IF NOT EXISTS login_failures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     scope TEXT NOT NULL,
-    failed_at REAL NOT NULL
+    failed_at DOUBLE PRECISION NOT NULL
 )
 """
 _INDEX = "CREATE INDEX IF NOT EXISTS idx_login_failures_scope ON login_failures(scope)"
@@ -94,7 +94,9 @@ def recent_failures(conn, scope: str, now: float | None = None) -> list[float]:
             " ORDER BY failed_at",
             (scope, now - WINDOW_SECONDS),
         ).fetchall()
-        return [float(r[0]) for r in rows]
+        # Postgres rows are dicts (r[0] raised KeyError, so the throttle read
+        # nothing and never locked anyone out); SQLite rows may be tuples.
+        return [float(r["failed_at"] if isinstance(r, dict) else r[0]) for r in rows]
     except Exception:
         # A throttle that cannot read its own table must not lock everyone out.
         return []

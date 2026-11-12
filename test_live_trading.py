@@ -250,3 +250,57 @@ def test_settings_panel_retries_server_errors_and_hides_buttons():
     assert "(d._status >= 500 || d._status === 0) && attempt < 4" in js and "id=\"lt-retry\"" in js
     # .tw-submit-ghost's display:block used to beat [hidden] (Turn off showed while off).
     assert ".lt-settings [hidden] { display:none !important; }" in html
+
+
+def test_module_ddl_is_translated_for_postgres(monkeypatch):
+    # live_orders and login_failures used SQLite's AUTOINCREMENT without
+    # _adapt_ddl, so on Postgres the tables were never created: preview and
+    # today's orders failed with a server error, logins were never throttled.
+    import database
+    import login_throttle
+    monkeypatch.setattr(database, "_USE_POSTGRES", True)
+    for ddl in (lt._DDL, login_throttle._DDL):
+        sql, _ = database._adapt_sql(ddl)
+        assert "AUTOINCREMENT" not in sql and "SERIAL PRIMARY KEY" in sql
+    assert "REAL" not in login_throttle._DDL  # float4 on Postgres loses the seconds
+    sql, _ = database._adapt_sql("SELECT 'INTEGER PRIMARY KEY AUTOINCREMENT'")
+    assert "AUTOINCREMENT" in sql  # only CREATE TABLE is touched
+
+
+def test_schwab_rejection_reaches_the_ticket(live, monkeypatch):
+    # A 5xx body is masked by the security headers hook (and can be replaced
+    # at Render's edge), so Schwab failures answer 424 with Schwab's words.
+    c, store, sent, _ = live
+    store[(1, "live_trading_enabled")] = "1"
+    def boom(*a, **k):
+        raise RuntimeError("Schwab said no (400): insufficient buying power")
+    monkeypatch.setattr(so, "place", boom)
+    tok = c.post("/api/trade/preview", json=BASE).get_json()["token"]
+    r = c.post("/api/trade/place", json={"ticket": BASE, "token": tok})
+    assert r.status_code == 424 and r.get_json()["error"] == "Schwab said no (400): insufficient buying power"
+    monkeypatch.setattr(schwab_mod(), "fetch_accounts", lambda user_id=1: (_ for _ in ()).throw(TimeoutError("timed out")))
+    r = c.post("/api/trade/preview", json=BASE)
+    assert r.status_code == 424 and "didn't answer in time" in r.get_json()["error"]
+
+
+def test_orders_survive_a_broken_order_log(live, monkeypatch):
+    c, *_ = live
+    monkeypatch.setattr(so, "todays_orders", lambda h, uid: [])
+    monkeypatch.setattr(lt, "recent", lambda uid, limit=20: (_ for _ in ()).throw(RuntimeError("no table")))
+    d = c.get("/api/trade/orders").get_json()
+    assert d["ok"] is True and d["log"] == []
+
+
+def schwab_mod():
+    import schwab
+    return schwab
+
+
+def test_ticket_keeps_market_orders_on_day():
+    html = open("templates/terminal.html", encoding="utf-8").read()
+    # Market + Good 'til Canceled was refused at Preview; the ticket now
+    # disables the other durations for Market and re-checks on load.
+    assert "function twTifRules()" in html and 'id="tw-ot-tif-note"' in html
+    assert 'id="tw-ot-ext" disabled onchange="twTifRules()"' in html
+    assert "addEventListener('DOMContentLoaded',twTifRules)" in html
+    assert ".tw-field-row[hidden] { display:none !important; }" in html
