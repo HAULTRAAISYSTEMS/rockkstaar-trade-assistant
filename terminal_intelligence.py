@@ -35,6 +35,35 @@ def _is_upcoming(value: Any) -> bool:
         return False
 
 
+def aggregate_calendar_bars(bars: list[dict], period: str) -> list[dict]:
+    """Daily bars → weekly (Monday-start) or monthly candles, on ET dates.
+
+    Each candle opens at its first day's open, closes at its last day's close,
+    takes the period's high and low and summed volume, and is stamped with its
+    first day's time so it sits where TradingView puts it.
+    """
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    out: list[dict] = []
+    current_key = None
+    for bar in sorted(bars, key=lambda row: row["time"]):
+        day = datetime.fromtimestamp(int(bar["time"]), et).date()
+        key = (day - timedelta(days=day.weekday())) if period == "week" else (day.year, day.month)
+        if key != current_key:
+            current_key = key
+            out.append({"time": int(bar["time"]), "open": bar["open"], "high": bar["high"],
+                        "low": bar["low"], "close": bar["close"], "volume": int(bar.get("volume") or 0),
+                        "session": "regular"})
+            continue
+        agg = out[-1]
+        agg["high"] = max(agg["high"], bar["high"])
+        agg["low"] = min(agg["low"], bar["low"])
+        agg["close"] = bar["close"]
+        agg["volume"] += int(bar.get("volume") or 0)
+    return out
+
+
 def aggregate_ohlcv_bars(bars: list[dict], size: int = 4) -> list[dict]:
     """Aggregate intraday OHLCV bars without crossing US trading sessions."""
     if size < 1:

@@ -178,7 +178,7 @@ def test_clear_all_does_not_rely_on_browser_dialogs():
 def test_weekly_monthly_and_full_history_are_offered():
     import app as legacy
     assert "max" in legacy._TERMINAL_INTERVALS["1d"]["ranges"]
-    assert legacy._TERMINAL_INTERVALS["1w"]["fetch"] == "1wk"
+    assert legacy._TERMINAL_INTERVALS["1w"]["fetch"] == "1d"   # built from daily bars
     assert legacy._TERMINAL_INTERVALS["1mo"]["default"] == "max"
     assert "('1w','1W'),('1mo','1M')" in TEMPLATE and '"max":"All (full history)"' in TEMPLATE
 
@@ -203,17 +203,47 @@ def test_full_history_prefers_yahoo_and_keeps_weekly_bars(monkeypatch):
     assert market_data._parse_bars(rows, False, "1wk")["timestamps"] == [1794200400]
 
 
-def test_candles_route_reports_weekly_interval(client, monkeypatch):
+def test_candles_route_builds_weekly_from_daily(client, monkeypatch):
     c, _ = client
     import app as legacy
     import market_data
     legacy._TERMINAL_CANDLE_CACHE.clear()
-    monkeypatch.setattr(market_data, "fetch_chart_bars", lambda *a, **k: (
-        {"timestamps": [1794200400], "opens": [1.0], "closes": [1.5], "highs": [2.0], "lows": [0.5],
-         "volumes": [10], "data_granularity": "1wk"}, {"provider": "Alpaca"}))
+    # Mon 2026-11-02 .. Fri 2026-11-13, 14:30 UTC daily stamps (two weeks).
+    from datetime import datetime, timezone
+    monday = int(datetime(2026, 11, 2, 14, 30, tzinfo=timezone.utc).timestamp())
+    days = [monday + 86400 * i for i in range(12) if i % 7 not in (5, 6)]
+    seen = {}
+
+    def fake(ticker, interval, range_str, include_extended=False):
+        seen["interval"] = interval
+        return ({"timestamps": days, "opens": [10.0 + i for i in range(len(days))],
+                 "closes": [10.5 + i for i in range(len(days))], "highs": [11.0 + i for i in range(len(days))],
+                 "lows": [9.5 + i for i in range(len(days))], "volumes": [100] * len(days),
+                 "data_granularity": "1d"}, {"provider": "Alpaca"})
+    monkeypatch.setattr(market_data, "fetch_chart_bars", fake)
+    monkeypatch.setattr(legacy, "_with_todays_daily_bar", lambda t, bars, quote=None: bars)
     d = c.get("/api/terminal/candles/SPY?interval=1w&range=max").get_json()
-    assert d["ok"] and d["source_interval"] == "1w" and len(d["bars"]) == 1
+    assert seen["interval"] == "1d"
+    assert d["ok"] and d["source_interval"] == "1w" and len(d["bars"]) == 2
+    wk1, wk2 = d["bars"]
+    assert wk1["open"] == 10.0 and wk1["close"] == 14.5 and wk1["high"] == 15.0 and wk1["volume"] == 500
+    assert wk2["open"] == 15.0 and wk2["time"] == days[5]
+    m = c.get("/api/terminal/candles/SPY?interval=1mo&range=max").get_json()
+    assert m["ok"] and len(m["bars"]) == 1 and m["bars"][0]["volume"] == 1000
     assert c.get("/api/terminal/candles/SPY?interval=1w&range=1d").status_code == 400
+
+
+def test_chart_retries_server_errors_instead_of_sticking():
+    assert "if(r.status>=500) return r.json()" in TEMPLATE and "e5.retryable=true" in TEMPLATE
+
+
+def test_terminal_has_watchlist_switcher(client, monkeypatch):
+    c, _ = client
+    import app as legacy
+    monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid=None: [
+        {"id": 1, "name": "A+ Ready", "user_id": 1}, {"id": 2, "name": "Swing Ideas", "user_id": 1}])
+    html = c.get("/terminal").get_data(as_text=True)
+    assert 'id="tw-wl-select"' in html and "Swing Ideas" in html and "twSwitchWatchlist" in html
 
 
 def test_header_and_watchlist_agree_overnight(client, monkeypatch):
@@ -234,3 +264,16 @@ def test_header_and_watchlist_agree_overnight(client, monkeypatch):
 def test_volume_goes_one_color_when_zoomed_far_out():
     assert "var ctVolDense = false;" in JS and "function ctCheckVolumeDensity()" in JS
     assert "if (ctVolDense) return 'rgba(120,150,190,0.42)';" in JS
+
+
+def test_switching_to_an_empty_list_does_not_seed_it(client, monkeypatch):
+    c, _ = client
+    import app as legacy
+    added = []
+    monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid=None: [
+        {"id": 1, "name": "A+ Ready", "user_id": 1}, {"id": 2, "name": "AVOID", "user_id": 1}])
+    monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 2)
+    monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: [])
+    monkeypatch.setattr(legacy, "add_ticker_to_watchlist", lambda wl, t: added.append(t))
+    assert c.get("/terminal").status_code == 200
+    assert added == []
