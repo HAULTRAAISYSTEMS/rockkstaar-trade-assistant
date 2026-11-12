@@ -373,3 +373,15 @@ def test_list_whose_rows_have_not_loaded_charts_its_first_ticker(client, monkeyp
     monkeypatch.setattr(legacy, "get_all_stock_data", lambda: [])
     html = c.get("/terminal").get_data(as_text=True)
     assert '|| "NVDA";' in html and 'id="tw-c-ticker">NVDA<' in html
+
+
+def test_chart_refresh_downloads_only_new_bars(client, monkeypatch):
+    c, _ = client
+    import app as legacy
+    bars = [{"time": t, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1} for t in (100, 160, 220, 280)]
+    legacy._TERMINAL_CANDLE_CACHE[("SPY", "1m", "1d", "regular")] = {"ts": __import__("time").time(), "bars": bars, "source_interval": "1m"}
+    full = c.get("/api/terminal/candles/SPY?interval=1m&range=1d&session=regular").get_json()
+    part = c.get("/api/terminal/candles/SPY?interval=1m&range=1d&session=regular&since=220").get_json()
+    assert len(full["bars"]) == 4 and not full["partial"]
+    assert [b["time"] for b in part["bars"]] == [220, 280] and part["partial"] is True
+    assert "&since='+since" in TEMPLATE and "if(d.partial){" in TEMPLATE and "partialN%10" in TEMPLATE
