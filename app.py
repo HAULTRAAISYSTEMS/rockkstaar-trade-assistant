@@ -5898,7 +5898,7 @@ def api_terminal_candles(ticker):
             return jsonify({"ok": False, "error": "unsupported timeframe"}), 400
         fetch_interval, range_str = _TERMINAL_TF_MAP[legacy_tf]
         interval = fetch_interval
-    if session_mode == "extended" and interval not in {"1m", "5m", "15m", "1h"}:
+    if session_mode == "extended" and interval not in {"1m", "5m", "15m", "1h", "4h"}:
         return jsonify({"ok": False,
                         "error": "extended hours require an intraday interval"}), 400
     ticker = (ticker or "").upper().strip()
@@ -5945,7 +5945,7 @@ def api_terminal_candles(ticker):
     overnight_status = None
     if session_mode == "extended":
         from overnight_data import fetch_overnight_bars, merge_session_bars
-        overnight_result = fetch_overnight_bars(ticker, interval, range_str)
+        overnight_result = fetch_overnight_bars(ticker, fetch_interval, range_str)
         bars = merge_session_bars(bars, overnight_result["bars"])
         overnight_status = overnight_result["status"]
         bars = annotate_market_sessions(
@@ -5966,8 +5966,10 @@ def api_terminal_candles(ticker):
                         "source_interval": source_interval}), 502
 
     if interval == "4h" and bars:
-        from terminal_intelligence import aggregate_ohlcv_bars
-        bars = aggregate_ohlcv_bars(bars, 4)
+        from terminal_intelligence import aggregate_extended_4h, aggregate_ohlcv_bars
+        # Extended: 4-hour candles on the ET clock across pre/after-hours, as
+        # TradingView draws them; regular: four session hours per candle.
+        bars = aggregate_extended_4h(bars) if session_mode == "extended" else aggregate_ohlcv_bars(bars, 4)
     if interval == "1d" and bars:
         bars = _with_todays_daily_bar(ticker, bars)
 

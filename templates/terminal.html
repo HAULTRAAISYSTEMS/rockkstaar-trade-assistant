@@ -1003,9 +1003,9 @@ function twInterval(btn){
   twChartState.interval = btn.dataset.interval || '5m';
   var allowed=twIntervalConfig[twChartState.interval];
   if(allowed.ranges.indexOf(twChartState.range)<0)twChartState.range=allowed.defaultRange;
-  // Daily / 4-hour candles have no extended session; intraday ones follow
+  // Daily candles have no extended session; intraday ones (4H included) follow
   // the user's Extended choice again when they come back to them.
-  twChartState.extended = twExtendedPref && ['4h','1d'].indexOf(twChartState.interval)<0;
+  twChartState.extended = twExtendedPref && twChartState.interval !== '1d';
   twPopulateRanges();
   twRefreshExtendedAvailability();
   try { localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range); } catch(e) {}
@@ -1044,11 +1044,11 @@ function twToggleVolume(btn){
   try { localStorage.setItem('tradestaar.chartVolume',twChartState.showVolume?'1':'0'); } catch(e) {}
 }
 function twRefreshExtendedAvailability(){
-  var btn=document.getElementById('tw-extended-btn'),supported=['1m','5m','15m','1h'].indexOf(twChartState.interval)>=0;if(!btn)return;btn.disabled=false;btn.classList.toggle('active',supported&&twChartState.extended);btn.title=supported?'Show premarket and after-hours candles':'Open extended hours in a 5-minute overnight view';
+  var btn=document.getElementById('tw-extended-btn'),supported=['1m','5m','15m','1h','4h'].indexOf(twChartState.interval)>=0;if(!btn)return;btn.disabled=false;btn.classList.toggle('active',supported&&twChartState.extended);btn.title=supported?'Show premarket and after-hours candles':'Open extended hours in a 5-minute overnight view';
   var strip=document.getElementById('tw-session-strip');if(strip&&!twChartState.extended)strip.hidden=true;
 }
 function twToggleExtended(btn){
-  var enable=!twChartState.extended,supported=['1m','5m','15m','1h'].indexOf(twChartState.interval)>=0;if(enable&&!supported){twChartState.interval='5m';twChartState.range='1d';document.querySelectorAll('.tw-tf-btn').forEach(function(b){b.classList.toggle('active',b.dataset.interval==='5m');});twPopulateRanges();}
+  var enable=!twChartState.extended,supported=['1m','5m','15m','1h','4h'].indexOf(twChartState.interval)>=0;if(enable&&!supported){twChartState.interval='5m';twChartState.range='1d';document.querySelectorAll('.tw-tf-btn').forEach(function(b){b.classList.toggle('active',b.dataset.interval==='5m');});twPopulateRanges();}
   twChartState.extended=enable;twExtendedPref=enable;twRefreshExtendedAvailability();if(twChartState.extended&&twChartState.type!=='candles'){twChartState.type='candles';document.querySelectorAll('.tw-type-btn[data-type]').forEach(function(b){b.classList.toggle('active',b.dataset.type==='candles');});twApplyType();}
   try{localStorage.setItem('tradestaar.chartExtendedPref',twChartState.extended?'1':'0');localStorage.setItem('tradestaar.chartType',twChartState.type);localStorage.setItem('tradestaar.chartInterval',twChartState.interval);localStorage.setItem('tradestaar.chartRange',twChartState.range);}catch(e){}if(twChartState.ticker)twLoadChart(twChartState.ticker,twChartState.interval,twChartState.range);
 }
@@ -1193,7 +1193,7 @@ try {
 } catch(e) {}
 if(twIntervalConfig[twSavedInterval].ranges.indexOf(twSavedRange)<0)twSavedRange=twIntervalConfig[twSavedInterval].defaultRange;
 var twExtendedPref = twSavedExtended;   // what the user chose with the button
-if(['4h','1d'].indexOf(twSavedInterval)>=0)twSavedExtended=false;
+if(twSavedInterval==='1d')twSavedExtended=false;
 var twChartState = { chart:null, area:null, candle:null, vol:null, emaSeries:{}, ticker:null, assetType:null, interval:twSavedInterval, range:twSavedRange, type:twSavedChartType, showVolume:twSavedVolume, extended:twSavedExtended, indicators:twSavedIndicators, styles:twSavedStyles, studies:twSavedStudies, reqId:0, intelReqId:0, insiderReqId:0, vwapReqId:0, lastPrice:null, sessionVwap:null, intelVwap:null, bars:[], barMap:{}, pinnedTime:null, events:[], drawMode:null, drawDraft:[], drawings:[], selectedDrawing:null, pointerAction:null, barIdx:{}, hoverIdx:null, indWindow:{start:0,end:0}, axisW:64, _hoverRaf:null };
 var twChartRefreshTimer=null;
 
@@ -1641,7 +1641,7 @@ function twPatchActiveCandle(q,px){
     twRenderIndicators();twRenderEmas();twOhlcv(twChartState.bars);
     return;
   }
-  var seconds={"1m":60,"5m":300,"15m":900,"1h":3600}[twChartState.interval];
+  var seconds={"1m":60,"5m":300,"15m":900,"1h":3600,"4h":14400}[twChartState.interval];
   if(!seconds)return;
   if(!isFinite(lastTime)||stamp<lastTime)return;
   /* Anchor new bars to the provider's final timestamp.  This preserves its

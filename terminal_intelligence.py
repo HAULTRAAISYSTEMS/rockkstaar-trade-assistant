@@ -61,6 +61,42 @@ def aggregate_ohlcv_bars(bars: list[dict], size: int = 4) -> list[dict]:
     return aggregated
 
 
+def aggregate_extended_4h(bars: list[dict]) -> list[dict]:
+    """Hourly bars incl. pre/after-hours → 4-hour candles on the ET clock
+    (4-8 AM, 8-12, 12-4 PM, 4-8 PM, 8 PM-midnight, midnight-4 AM), the way
+    TradingView draws 4H with extended hours. A candle is tagged with the
+    regular session if any of its hours is regular, else with its first
+    bar's session, so extended-hours candles keep their shading."""
+    et = ZoneInfo("America/New_York")
+    buckets: dict[tuple, list[dict]] = {}
+    order: list[tuple] = []
+    for bar in sorted(bars, key=lambda row: row["time"]):
+        when = datetime.fromtimestamp(bar["time"], tz=timezone.utc).astimezone(et)
+        start = when.replace(hour=when.hour - when.hour % 4, minute=0, second=0, microsecond=0)
+        key = (start.date(), start.hour)
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(bar)
+    out = []
+    for key in order:
+        chunk = buckets[key]
+        sessions = [row.get("session") for row in chunk]
+        start = datetime.combine(key[0], datetime.min.time(), tzinfo=et).replace(hour=key[1])
+        candle = {
+            "time": int(start.timestamp()),
+            "open": chunk[0]["open"],
+            "high": max(row["high"] for row in chunk),
+            "low": min(row["low"] for row in chunk),
+            "close": chunk[-1]["close"],
+            "volume": sum(row.get("volume") or 0 for row in chunk),
+        }
+        if any(sessions):
+            candle["session"] = "regular" if "regular" in sessions else sessions[0]
+        out.append(candle)
+    return out
+
+
 def normalize_ohlcv_data(data: dict | None) -> list[dict]:
     """Build sorted, unique, internally consistent candles from provider arrays."""
     if not data:
