@@ -5519,9 +5519,17 @@ def terminal():
 
 
 def _terminal_watchlists() -> list:
-    """The signed-in user's lists, for the Terminal's switcher. Never raises."""
+    """The signed-in user's lists, with how many symbols each holds, for the
+    Terminal's switcher (so an empty list is visible before you pick it).
+    Never raises."""
     try:
-        return get_all_watchlists(current_user_id())
+        wls = get_all_watchlists(current_user_id())
+        for w in wls:
+            try:
+                w["count"] = len(get_watchlist_stocks(w["id"]))
+            except Exception:
+                w["count"] = None
+        return wls
     except Exception as exc:
         logger.debug("terminal watchlists: %s", exc)
         return []

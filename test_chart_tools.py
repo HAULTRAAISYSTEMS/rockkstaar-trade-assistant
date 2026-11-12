@@ -385,3 +385,37 @@ def test_chart_refresh_downloads_only_new_bars(client, monkeypatch):
     assert len(full["bars"]) == 4 and not full["partial"]
     assert [b["time"] for b in part["bars"]] == [220, 280] and part["partial"] is True
     assert "&since='+since" in TEMPLATE and "if(d.partial){" in TEMPLATE and "partialN%10" in TEMPLATE
+
+
+def test_switcher_shows_how_many_symbols_each_list_has(client, monkeypatch):
+    c, _ = client
+    import app as legacy
+    monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid=None: [
+        {"id": 1, "name": "A+ READY", "user_id": 1}, {"id": 2, "name": "BATTLEFIELD", "user_id": 1}])
+    monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 1)
+    monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: [] if wl == 1 else ["NVDA", "AMD", "TSLA"])
+    html = c.get("/terminal").get_data(as_text=True)
+    assert "A+ READY · 0</option>" in html and "BATTLEFIELD · 3</option>" in html
+
+
+def test_depth_connect_gives_up_instead_of_hanging(monkeypatch):
+    import sys, threading, types
+    import market_depth
+    gate = threading.Event()
+    fake = types.SimpleNamespace(Client=types.SimpleNamespace(connect=lambda url: gate.wait(5)))
+    monkeypatch.setitem(sys.modules, "simple_websocket", fake)
+    monkeypatch.setattr(market_depth, "_streamer_info", lambda uid: ({"streamerSocketUrl": "wss://x"}, "tok"))
+    monkeypatch.setattr(market_depth, "CONNECT_TIMEOUT", 0.2)
+    with pytest.raises(TimeoutError):
+        market_depth._Streamer(1).connect()
+    gate.set()
+
+
+def test_depth_status_stuck_on_connecting_reads_as_reconnecting(monkeypatch, tmp_path):
+    import time
+    import market_depth
+    monkeypatch.setattr(market_depth, "DIR", tmp_path)
+    market_depth._write_json(tmp_path / "status.json", {"state": "connecting", "msg": "", "at": time.time() - 600})
+    assert market_depth.snapshot("SPY")["status"]["state"] == "error"
+    market_depth.set_status("connecting", "Connecting to Schwab")
+    assert market_depth.snapshot("SPY")["status"]["state"] == "connecting"
