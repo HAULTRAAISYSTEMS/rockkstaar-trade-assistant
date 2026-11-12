@@ -85,3 +85,4 @@
 .ct-props .ct-level input[type=color] { width: 22px !important; height: 22px !important; padding: 0 !important; margin: 0 !important; border: 1px solid rgba(255,255,255,.18) !important; border-radius: 5px; }
 .ct-props .ct-level button { width: 20px !important; height: 20px !important; min-width: 0 !important; padding: 0 !important; }
 .ct-props .ct-level-actions button { height: 24px !important; padding: 0 9px !important; }
+.tw-drawbar .ct-armed-clear { color: #fff !important; background: #c83434 !important; }
