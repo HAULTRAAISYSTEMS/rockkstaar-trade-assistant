@@ -180,11 +180,21 @@ function ctLogicalToTime(l) {
 function ctSeries() {
   return twChartState.type === 'candles' ? twChartState.candle : twChartState.area;
 }
+/* lightweight-charts 4.1 answers 0 for a fractional logical index, which threw
+   any point that does not sit exactly on a bar (a 15m point on the 1H, a
+   dragged or resized drawing) to the left edge. Interpolate between the two
+   neighbouring whole bars instead. */
+function ctLogX(l) {
+  var ts = twChartState.chart && twChartState.chart.timeScale();
+  if (!ts || l == null || !isFinite(l)) return null;
+  var i = Math.floor(l), f = l - i, x0 = ts.logicalToCoordinate(i);
+  if (x0 == null) return null;
+  if (f < 1e-9) return x0;
+  var x1 = ts.logicalToCoordinate(i + 1);
+  return x1 == null ? x0 : x0 + (x1 - x0) * f;
+}
 function ctX(t) {
-  var l = ctTimeToLogical(t);
-  if (l == null || !twChartState.chart) return null;
-  var x = twChartState.chart.timeScale().logicalToCoordinate(l);
-  return x == null ? null : x;
+  return ctLogX(ctTimeToLogical(t));
 }
 function ctY(p) {
   var s = ctSeries();
@@ -239,7 +249,7 @@ function ctDashArr(d, w) { return d === 'dashed' ? [6, 4] : (d === 'dotted' ? [M
 
 /* ═══ Drawing store (per ticker, synced to the account) ═══ */
 var ctStore = {ticker: null, drawings: [], updated: 0, fetchedAt: 0, undo: [], hidden: false};
-var ctDraft = null, ctAction = null, ctBoxes = {}, ctPaths = {};
+var ctDraft = null, ctAction = null, ctBoxes = {}, ctPaths = {}, ctLabelHits = {}, ctCurId = null;
 var ctSaveTimer = null;
 function ctLocalKey(t) { return 'tradestaar.draw.v2.' + t; }
 function ctUid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
@@ -375,7 +385,7 @@ function twRenderDrawings() {
   if (!fit) return;
   if (!twChartState.chart || !(twChartState.bars || []).length || ctStore.ticker !== twChartState.ticker) { ctUpdateProps(); return; }
   var ctx = fit.ctx, dim = ctDims(), axisLabels = [], timeLabels = [];
-  ctBoxes = {}; ctPaths = {};
+  ctBoxes = {}; ctPaths = {}; ctLabelHits = {};
   ctx.save();
   ctx.beginPath(); ctx.rect(0, 0, dim.W, dim.H); ctx.clip();
   var list = ctStore.hidden ? [] : ctStore.drawings.slice();
@@ -390,6 +400,7 @@ function twRenderDrawings() {
     try { ctDrawOne(ctx, draft, dim, true, axisLabels, timeLabels, true); } catch (e) {}
   }
   ctx.restore();
+  ctCurId = null;
   axisLabels.forEach(function (l) { ctAxisLabel(ctx, dim, l.p, l.c, l.text); });
   timeLabels.forEach(function (l) { ctTimeLabel(ctx, dim, l.t, l.c); });
   ctUpdateProps();
@@ -473,6 +484,13 @@ function ctLabelText(ctx, text, x, y, color, opts) {
     ctx.fillStyle = opts.bg; ctx.fillRect(bx, by, w + 12, h);
   }
   ctx.fillStyle = color; ctx.fillText(text, x, y);
+  // Labels are part of the drawing: clicking one selects it.
+  if (ctCurId) {
+    var lw = ctx.measureText(text).width, lh = (opts.size || 11) + 4;
+    var lx = ctx.textAlign === 'center' ? x - lw / 2 : (ctx.textAlign === 'right' ? x - lw : x);
+    var ly = ctx.textBaseline === 'middle' ? y - lh / 2 : (ctx.textBaseline === 'top' ? y : y - lh);
+    (ctLabelHits[ctCurId] = ctLabelHits[ctCurId] || []).push({x: lx, y: ly, w: lw, h: lh});
+  }
   ctx.restore();
 }
 function ctPriceLabels(d, sel) {
@@ -480,6 +498,7 @@ function ctPriceLabels(d, sel) {
 }
 function ctDrawOne(ctx, d, dim, sel, axisLabels, timeLabels, isDraft) {
   var s = d.style, pts = d.points.map(ctXY), type = d.type;
+  ctCurId = d.id;
   if (pts.some(function (p) { return !p; })) return;
   var a = pts[0], b = pts[1], color = s.color;
   ctx.save();
@@ -740,6 +759,9 @@ function ctBodyDist(d, p) {
     if (path.kind === 'path') for (var s = 1; s < path.pts.length; s++) take(ctDistSeg(p, path.pts[s - 1], path.pts[s]));
   }
   if (box && x >= box.x - 4 && x <= box.x + box.w + 4 && y >= box.y - 4 && y <= box.y + box.h + 4) take(4);
+  (ctLabelHits[d.id] || []).forEach(function (b) {
+    if (x >= b.x - 3 && x <= b.x + b.w + 3 && y >= b.y - 3 && y <= b.y + b.h + 3) take(3);
+  });
   return out;
 }
 
@@ -770,9 +792,22 @@ function twStopDrawing() {
   ctSyncRail();
   twRenderDrawings();
 }
+var ctClearArmed = 0;
 function twClearDrawings() {
   if (!ctStore.drawings.length) return;
-  if (!window.confirm('Remove every drawing on ' + (ctStore.ticker || 'this chart') + '? You can undo this.')) return;
+  // Two taps instead of a browser confirm(): some app windows block dialogs,
+  // which made Clear all silently do nothing.
+  var btn = document.querySelector('#ct-rail [data-ct-act="clear"]'), now = Date.now();
+  if (now - ctClearArmed > 3000) {
+    ctClearArmed = now;
+    if (btn) { btn.classList.add('ct-armed-clear'); btn.title = 'Tap again to remove all ' + ctStore.drawings.length + ' drawings on ' + (ctStore.ticker || 'this chart'); }
+    var st = document.getElementById('tw-draw-status');
+    if (st) { st.hidden = false; st.textContent = 'Tap ✕ again to remove all ' + ctStore.drawings.length + ' drawings on ' + (ctStore.ticker || 'this chart') + ' (undo brings them back).'; }
+    setTimeout(function () { if (Date.now() - ctClearArmed >= 2900) { ctClearArmed = 0; if (btn) { btn.classList.remove('ct-armed-clear'); btn.title = 'Remove all drawings on this symbol'; } if (st && !ctMode) st.hidden = true; } }, 3000);
+    return;
+  }
+  ctClearArmed = 0;
+  if (btn) { btn.classList.remove('ct-armed-clear'); btn.title = 'Remove all drawings on this symbol'; }
   ctPushUndo(); ctStore.drawings = []; twChartState.selectedDrawing = null;
   twSaveDrawings(); twStopDrawing();
 }
@@ -858,6 +893,10 @@ function ctInitPointer() {
         ctDraft = {type: ctMode, points: [pt, {t: pt.t, p: pt.p}], stage: 'drag', down: c};
         try { cv.setPointerCapture(ev.pointerId); } catch (e) {}
       } else {
+        // A second click on (almost) the same spot would make a drawing with
+        // no size that is nearly impossible to grab again — wait for a real one.
+        var prev = ctXY(ctDraft.points[ctDraft.points.length - 2]), here = ctXY(pt);
+        if (prev && here && Math.hypot(prev.x - here.x, prev.y - here.y) < 8) return;
         ctDraft.points[ctDraft.points.length - 1] = pt;
         if (ctDraft.points.length >= n) { ctFinishDraft(); return; }
         ctDraft.points.push({t: pt.t, p: pt.p});

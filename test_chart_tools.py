@@ -141,3 +141,32 @@ def test_drawings_follow_price_axis_moves():
     assert "function ctViewSignature()" in JS and "requestAnimationFrame(ctWatchView)" in JS
     sig = JS[JS.index("function ctViewSignature()"):JS.index("function ctWatchView()")]
     assert "priceToCoordinate(ref)" in sig and "getVisibleLogicalRange" in sig
+
+
+LOGX_HARNESS = r"""
+const fs=require('fs');
+global.localStorage={_d:{},getItem(k){return this._d[k]===undefined?null:this._d[k];},setItem(k,v){this._d[k]=String(v);},removeItem(k){delete this._d[k];},key(i){return Object.keys(this._d)[i];},get length(){return Object.keys(this._d).length;}};
+global.document={addEventListener(){},getElementById(){return null;},querySelectorAll(){return [];},querySelector(){return null;}};
+global.window={};global.fetch=()=>Promise.resolve({ok:false,json:()=>({})});
+const bars=[];for(let i=0;i<10;i++)bars.push({time:1000+i*3600,open:10,high:11,low:9,close:10.5,volume:100});
+// Like lightweight-charts 4.1: whole indexes map to pixels, fractions answer 0.
+const ts={logicalToCoordinate:l=>Number.isInteger(l)?100+l*20:0};
+global.twChartState={bars:bars,interval:'1h',type:'candles',ticker:'SPY',selectedDrawing:null,chart:{timeScale:()=>ts}};
+eval(fs.readFileSync('static/js/chart_tools.js','utf8')+'\n;global.T={ctX};');
+console.log(JSON.stringify([T.ctX(1000+3*3600), T.ctX(1000+3*3600+900), T.ctX(1000+9*3600+1800)]));
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_points_between_bars_are_placed_between_bars(tmp_path):
+    # A 15m point on the 1H chart sits between two bars; it must land between
+    # them on screen, not at x = 0 (which made a fib impossible to grab).
+    h = tmp_path / "h.js"
+    h.write_text(LOGX_HARNESS)
+    out = json.loads(subprocess.run(["node", str(h)], capture_output=True, text=True, check=True,
+                                    cwd=os.getcwd()).stdout)
+    assert out == [pytest.approx(160), pytest.approx(165), pytest.approx(290)]
+
+
+def test_clear_all_does_not_rely_on_browser_dialogs():
+    assert "window.confirm" not in JS and "ctClearArmed" in JS
