@@ -47,6 +47,7 @@ _BOOKS = ("NASDAQ_BOOK", "NYSE_BOOK")
 
 _thread: threading.Thread | None = None
 _thread_lock = threading.Lock()
+CONNECT_TIMEOUT = 15   # seconds for the streamer socket to open
 
 
 def clean_symbol(sym) -> str | None:
@@ -98,6 +99,9 @@ def snapshot(sym: str) -> dict:
     """What the panel shows for SYM: book, tape, quote and connection status."""
     data = _read_json(DIR / f"{sym}.json") or {}
     status = _read_json(DIR / "status.json") or {"state": "starting", "msg": "", "at": 0}
+    # A "connecting" that never moved on means the attempt is stuck; say so.
+    if status.get("state") == "connecting" and time.time() - float(status.get("at") or 0) > CONNECT_TIMEOUT * 3:
+        status = dict(status, state="error", msg="Reconnecting to Schwab")
     return {"symbol": sym, "status": status, "updated": data.get("updated"),
             "book": data.get("book") or {"bids": [], "asks": []},
             "tape": data.get("tape") or [], "quote": data.get("quote") or {},
@@ -239,7 +243,24 @@ class _Streamer:
     def connect(self):
         import simple_websocket
         self.info, token = _streamer_info(self.user_id)
-        self.ws = simple_websocket.Client.connect(self.info["streamerSocketUrl"])
+        # The socket connect has no timeout of its own; a Schwab endpoint that
+        # never answers left the panel on "Connecting to Schwab…" for good.
+        # Give it CONNECT_TIMEOUT seconds, then fall into the retry path.
+        box: dict = {}
+
+        def _open():
+            try:
+                box["ws"] = simple_websocket.Client.connect(self.info["streamerSocketUrl"])
+            except Exception as exc:          # handed back to the caller below
+                box["err"] = exc
+        opener = threading.Thread(target=_open, name="schwab-depth-connect", daemon=True)
+        opener.start()
+        opener.join(CONNECT_TIMEOUT)
+        if opener.is_alive():
+            raise TimeoutError("Schwab streamer did not answer")
+        if "err" in box:
+            raise box["err"]
+        self.ws = box["ws"]
         self._send("ADMIN", "LOGIN", {"Authorization": token,
                                       "SchwabClientChannel": self.info.get("schwabClientChannel"),
                                       "SchwabClientFunctionId": self.info.get("schwabClientFunctionId")})
