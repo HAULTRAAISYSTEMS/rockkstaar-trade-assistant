@@ -456,7 +456,7 @@
           <input type="hidden" name="next" value="{{ url_for('terminal') }}">
           <label class="tw-wl-switch-label" for="tw-wl-select">Watchlist</label>
           <select id="tw-wl-select" aria-label="Switch watchlist" onchange="twSwitchWatchlist(this)">
-            {% for w in all_wls %}<option value="{{ w.id }}" {{ 'selected' if active_wl and w.id == active_wl.id }}>{{ w.name }}</option>{% endfor %}
+            {% for w in all_wls %}<option value="{{ w.id }}" {{ 'selected' if active_wl and w.id == active_wl.id }}>{{ w.name }}{{ ' · %d'|format(w.count) if w.count is not none }}</option>{% endfor %}
           </select>
         </form>
         {% else %}
