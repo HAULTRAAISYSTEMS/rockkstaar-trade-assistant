@@ -967,10 +967,21 @@ function twSelect(row){
   row.classList.add('active');
   var d=row.dataset;
   twNum('tw-c-ticker', d.ticker);
-  twNum('tw-c-price', d.price || '—');
   twNum('tw-c-sub', d.name || '');
   var chg=document.getElementById('tw-c-chg');
-  if(chg){ chg.textContent=d.chg; chg.className='tw-sym-chg '+(d.chgdir==='pos'?'chg-pos':(d.chgdir==='neg'?'chg-neg':'chg-flat')); }
+  // After the bell the row shows the after-hours move; the header shows the
+  // day (today's close and day %) with the extended move on its own line.
+  if(d.ext && d.ext !== 'pre' && Number(d.regclose) > 0){
+    var dp = Number(d.daypct);
+    twNum('tw-c-price', Number(d.regclose).toFixed(2));
+    if(chg){ chg.textContent = isFinite(dp) && d.daypct !== '' ? (dp >= 0 ? '+' : '') + dp.toFixed(2) + '%' : ''; chg.className = 'tw-sym-chg ' + twChgClass(dp || 0); }
+    twShowExt(d.ticker, Number(d.price), Number(d.regclose), d.ext, d.asof || '');
+  } else {
+    twNum('tw-c-price', d.price || '—');
+    if(chg){ chg.textContent=d.chg; chg.className='tw-sym-chg '+(d.chgdir==='pos'?'chg-pos':(d.chgdir==='neg'?'chg-neg':'chg-flat')); }
+    if(d.ext === 'pre' && Number(d.regclose) > 0) twShowExt(d.ticker, Number(d.price), Number(d.regclose), 'pre', d.asof || '');
+    else { var xl=document.getElementById('tw-c-ext'); if(xl) xl.hidden = true; }
+  }
   var bias=document.getElementById('tw-c-bias');
   if(bias){ var b=d.bias||'neutral'; bias.className='tw-bias '+b; bias.textContent=(b==='bull'?'BULLISH':(b==='bear'?'BEARISH':'NEUTRAL')); }
   // The stamp belongs to the symbol, not the page, so it moves with the
@@ -1662,8 +1673,13 @@ function twLoadChart(ticker, interval, range, refreshOnly){
   twChartState.ticker=ticker; twChartState.interval=interval;twChartState.range=range;
   var myReq=++twChartState.reqId;
   var session=twChartState.extended?'extended':'regular';if(!refreshOnly)twChartMsg('Loading '+ticker+' · '+interval+' · '+range+' · '+session+'…','');
-  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session, {cache:'no-store', credentials:'same-origin'})
+  // A request the server never answers used to leave "Loading…" up for good.
+  // Give up after 20 s and fall into the retry path below.
+  var candleCtl = ('AbortController' in window) ? new AbortController() : null;
+  var candleKill = candleCtl ? setTimeout(function(){ candleCtl.abort(); }, 20000) : null;
+  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session, {cache:'no-store', credentials:'same-origin', signal: candleCtl ? candleCtl.signal : undefined})
     .then(function(r){
+      if(candleKill) clearTimeout(candleKill);
       // A deploy, a restart or a proxy timeout answers with an HTML page.
       // r.json() on that threw Safari's "The string did not match the
       // expected pattern" and the chart stayed broken until a reload.
@@ -1731,7 +1747,8 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       // Network failures and non-JSON answers are usually momentary: retry
       // on our own (3 s, 6 s, 12 s, then every 30 s) instead of leaving
       // the chart blank until someone reloads the page.
-      var retryable=(e&&e.retryable)||(e instanceof TypeError)||/expected pattern|JSON|Load failed|NetworkError/i.test(String(e&&e.message));
+      if(candleKill) clearTimeout(candleKill);
+      var retryable=(e&&e.retryable)||(e instanceof TypeError)||(e&&e.name==='AbortError')||/expected pattern|JSON|Load failed|NetworkError|abort/i.test(String(e&&e.message));
       if(!retryable){twChartMsg('Chart error',(e&&e.message)||String(e));return;}
       var key=ticker+'|'+interval+'|'+range;
       if(twChartState.retryKey!==key){twChartState.retryKey=key;twChartState.retryN=0;}
@@ -1921,6 +1938,9 @@ function twApplyQuote(q){
     // twSelect() reads these when the row is clicked, so they have to move too.
     row.dataset.price  = text;
     row.dataset.chg    = chg;
+    row.dataset.ext      = q.ext || '';
+    row.dataset.regclose = q.regular_close || '';
+    row.dataset.daypct   = q.day_pct == null ? '' : q.day_pct;
     row.dataset.chgdir = cls === 'chg-pos' ? 'pos' : (cls === 'chg-neg' ? 'neg' : 'flat');
     twApplyRowStamp(row, rp, q);
   }

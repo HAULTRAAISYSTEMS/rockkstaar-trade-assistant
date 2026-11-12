@@ -230,3 +230,18 @@ class TestAfterHours:
         assert 'id="tw-c-ext"' in TEMPLATE and "function twShowExt(" in TEMPLATE
         assert "twSavedExtended = _xv === null ? true : _xv === '1';" in TEMPLATE
         assert "var extTag = {post:'AH ', pre:'PRE ', overnight:'O/N '}[q.ext]" in TEMPLATE
+
+
+def test_live_feed_measures_after_hours_from_todays_close(client):
+    live = {"NVDA": {"price": 160.19, "prev_close": 168.89, "ext": "post", "day_close": 173.73,
+                     "epoch": 1_800_000_000, "source": "Schwab real-time"}}
+    with patch.object(_app._mkt, "live_quotes", return_value=live), \
+         patch.object(_app._mkt, "overnight_window_start", return_value=None):
+        q = client.get("/api/terminal/live/NVDA").get_json()["quote"]
+    assert q["regular_close"] == 173.73 and q["prev_close"] == 168.89
+
+
+def test_selecting_a_row_after_hours_and_candle_timeout():
+    assert "if(d.ext && d.ext !== 'pre' && Number(d.regclose) > 0){" in TEMPLATE
+    assert "row.dataset.regclose = q.regular_close || '';" in TEMPLATE
+    assert "candleCtl.abort(); }, 20000)" in TEMPLATE and "e.name==='AbortError'" in TEMPLATE
