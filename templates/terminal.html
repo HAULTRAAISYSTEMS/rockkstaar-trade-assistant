@@ -109,6 +109,10 @@
 .tw-add-input:focus { border-color: var(--orange-500); box-shadow: 0 0 0 2px rgba(255,122,24,.20); }
 .tw-add-go { background: var(--grad-brand); color: var(--text-on-accent); border:none; border-radius: var(--r-sm); font-family: var(--font-display); font-weight: var(--fw-bold); font-size: var(--fs-xs); letter-spacing:.08em; text-transform:uppercase; padding: 0 12px; cursor:pointer; }
 .tw-wl { max-height: 660px; overflow-y:auto; }
+.tw-wl-switch { display:flex; align-items:center; gap:8px; min-width:0; margin:0; }
+.tw-wl-switch-label { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+.tw-wl-switch select { max-width:170px; height:30px; padding:0 26px 0 10px; border:1px solid rgba(255,255,255,.12); border-radius:8px; background:#0d131c url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23c4f53b' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 9px center; -webkit-appearance:none; appearance:none; color:var(--text-hi, #eef2f6); font:700 12px var(--font-display, system-ui); letter-spacing:.06em; text-transform:uppercase; cursor:pointer; text-overflow:ellipsis; }
+.tw-wl-switch select:hover, .tw-wl-switch select:focus { border-color:rgba(var(--cc-accent-rgb,196,245,59),.55); outline:none; }
 .tw-wl-row { display:grid; grid-template-columns: 1fr 46px auto; align-items:center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-bottom:1px solid var(--border-subtle); cursor:pointer; transition: background var(--dur-fast) var(--ease-out); }
 .tw-wl-row:last-child { border-bottom:none; }
 .tw-wl-row:hover { background: var(--surface-raised); }
@@ -446,7 +450,18 @@
     <!-- LEFT: Watchlist -->
     <div class="tw-panel">
       <div class="tw-panel-hd">
+        {% if all_wls and all_wls|length > 1 %}
+        <form class="tw-wl-switch" id="tw-wl-switch" method="post" action="" onsubmit="return false">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="next" value="{{ url_for('terminal') }}">
+          <label class="tw-wl-switch-label" for="tw-wl-select">Watchlist</label>
+          <select id="tw-wl-select" aria-label="Switch watchlist" onchange="twSwitchWatchlist(this)">
+            {% for w in all_wls %}<option value="{{ w.id }}" {{ 'selected' if active_wl and w.id == active_wl.id }}>{{ w.name }}</option>{% endfor %}
+          </select>
+        </form>
+        {% else %}
         <h3>{{ active_wl.name if active_wl else 'Watchlist' }}</h3>
+        {% endif %}
         <span style="display:flex;align-items:center;gap:8px;">
           <a class="tw-manage-link" href="{{ url_for('watchlists_page') }}">Manage</a>
           <span class="tw-count">{{ stocks|length }}</span>
@@ -992,6 +1007,14 @@ function twToggleAdd(){
   var r=document.getElementById('tw-add-row');
   r.classList.toggle('open');
   if (r.classList.contains('open')) document.getElementById('tw-add-input').focus();
+}
+/* Switch lists from the Terminal: same write path as the Watchlists page
+   (POST /watchlists/activate/<id>), then back to the Terminal on that list. */
+function twSwitchWatchlist(sel){
+  var form=document.getElementById('tw-wl-switch'); if(!form||!sel.value) return;
+  sel.disabled=true;
+  form.action='/watchlists/activate/'+encodeURIComponent(sel.value);
+  form.onsubmit=null; form.submit();
 }
 function twAddSymbol(ev){
   if (ev) ev.preventDefault();
@@ -1708,6 +1731,12 @@ function twLoadChart(ticker, interval, range, refreshOnly){
         var err=new Error(r.status===401?'Signed out — sign in again to load the chart.':'The chart service did not answer (HTTP '+r.status+').');
         err.retryable=r.status!==401; throw err;
       }
+      // A server error (5xx) during a deploy or a provider blip is
+      // momentary: retry it instead of leaving "Service temporarily
+      // unavailable" on screen until a reload.
+      if(r.status>=500) return r.json().catch(function(){return {};}).then(function(body){
+        var e5=new Error((body&&body.error)||'The chart service is busy (HTTP '+r.status+'). Retrying…'); e5.retryable=true; throw e5;
+      });
       return r.json();
     })
     .then(function(d){

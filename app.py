@@ -5393,8 +5393,10 @@ def terminal():
     # Seed a starter watchlist the first time the Terminal is opened empty.
     # Reuses the SAME onboarding path as /watchlist/add (Execution) — no new
     # write logic. Runs once (membership is added immediately, so it won't
-    # re-seed on subsequent loads).
-    if wl_id and not watchlist:
+    # re-seed on subsequent loads). Only for a first-time user whose one list
+    # is empty: an empty list picked from the Terminal's switcher (AVOID,
+    # a new list) must stay empty, not fill up with eight starter stocks.
+    if wl_id and not watchlist and len(_terminal_watchlists()) <= 1:
         for t in ("SPY", "QQQ", "NVDA", "TSLA", "AAPL", "AMD", "MSFT", "SMH"):
             try:
                 add_ticker_to_watchlist(wl_id, t)
@@ -5488,6 +5490,7 @@ def terminal():
         "terminal.html",
         stocks=valid,
         active_wl=active_wl,
+        all_wls=_terminal_watchlists(),
         terminal_groups=terminal_groups,
         orb_session=get_orb_session_banner(),
         mkt=mkt_ctx,
@@ -5501,6 +5504,15 @@ def terminal():
         # says so past a minute.
         tape_age_seconds=_tape_age(),
     )
+
+
+def _terminal_watchlists() -> list:
+    """The signed-in user's lists, for the Terminal's switcher. Never raises."""
+    try:
+        return get_all_watchlists(current_user_id())
+    except Exception as exc:
+        logger.debug("terminal watchlists: %s", exc)
+        return []
 
 
 def _tape_age() -> float | None:
@@ -5530,8 +5542,10 @@ _TERMINAL_INTERVALS = {
     "1h": {"fetch": "1h", "ranges": ("5d", "1mo", "3mo", "1y"), "default": "1mo"},
     "4h": {"fetch": "1h", "ranges": ("5d", "1mo", "3mo", "1y"), "default": "3mo"},
     "1d": {"fetch": "1d", "ranges": ("1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "max"), "default": "1y"},
-    "1w": {"fetch": "1wk", "ranges": ("1y", "2y", "5y", "10y", "max"), "default": "5y"},
-    "1mo": {"fetch": "1mo", "ranges": ("5y", "10y", "max"), "default": "max"},
+    # Weekly and monthly candles are built from the daily bars (same source,
+    # same "today" candle as 1D) instead of a separate weekly feed.
+    "1w": {"fetch": "1d", "ranges": ("1y", "2y", "5y", "10y", "max"), "default": "5y"},
+    "1mo": {"fetch": "1d", "ranges": ("5y", "10y", "max"), "default": "max"},
 }
 _TERMINAL_CANDLE_CACHE: dict = {}  # (ticker, interval, range) -> {"ts": epoch, "bars": [...]}
 
@@ -6073,8 +6087,11 @@ def api_terminal_candles(ticker):
         # Extended: 4-hour candles on the ET clock across pre/after-hours, as
         # TradingView draws them; regular: four session hours per candle.
         bars = aggregate_extended_4h(bars) if session_mode == "extended" else aggregate_ohlcv_bars(bars, 4)
-    if interval == "1d" and bars:
+    if interval in ("1d", "1w", "1mo") and bars:
         bars = _with_todays_daily_bar(ticker, bars)
+    if interval in ("1w", "1mo") and bars:
+        from terminal_intelligence import aggregate_calendar_bars
+        bars = aggregate_calendar_bars(bars, "week" if interval == "1w" else "month")
 
     _TERMINAL_CANDLE_CACHE[key] = {
         "ts": _time.time(), "bars": bars, "source_interval": source_interval,
