@@ -46,6 +46,11 @@ def _now() -> datetime:
 
 
 def ensure_tables(conn) -> None:
+    from database import ensure_schema
+    ensure_schema(conn, 'notify_inbox', ['notifications', 'idx_notifications_user_time'], _create_tables)
+
+
+def _create_tables(conn) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS notifications (
             id TEXT PRIMARY KEY,

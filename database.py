@@ -15,6 +15,7 @@ All caller code above this module is unchanged.
 """
 
 import os
+import threading
 import re
 import logging
 import sqlite3
@@ -314,6 +315,46 @@ def _new_conn(shared: bool = False) -> _Conn:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return _Conn(conn, shared=shared)
+
+
+_SCHEMA_READY: set = set()
+_SCHEMA_LOCK = threading.Lock()
+
+
+def ensure_schema(conn, name: str, objects: list, create) -> None:
+    """Create a module's tables/indexes without locking them on hot paths.
+
+    Modules used to run CREATE TABLE / CREATE INDEX IF NOT EXISTS at the top of
+    every call. On Postgres, CREATE INDEX takes a SHARE lock on the table even
+    when the index exists, so it queues behind any transaction writing that
+    table — the 5-minute cron writes notifications and insider trades while it
+    fetches news and SEC filings. The notification bell runs on every page, so
+    each page waited up to lock_timeout (30 s) holding one of the 8 gunicorn
+    threads, and a couple of minutes in the whole app froze.
+
+    On Postgres this now runs once per process: a lock-free catalog check
+    (to_regclass) and, only if something is missing, the DDL on its own short
+    connection, committed at once. SQLite (local dev, tests with in-memory
+    connections) keeps creating on the given connection.
+    """
+    if not _USE_POSTGRES:
+        create(conn)
+        return
+    if name in _SCHEMA_READY:
+        return
+    with _SCHEMA_LOCK:
+        if name in _SCHEMA_READY:
+            return
+        own = _new_conn()
+        try:
+            missing = [o for o in objects
+                       if (own.execute("SELECT to_regclass(?) AS r", (o,)).fetchone() or {}).get("r") is None]
+            if missing:
+                create(own)
+            own.commit()
+        finally:
+            own.close()
+        _SCHEMA_READY.add(name)
 
 
 def get_db() -> _Conn:

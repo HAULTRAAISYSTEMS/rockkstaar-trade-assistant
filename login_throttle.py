@@ -76,6 +76,11 @@ def scope_key(ip: str, username: str) -> str:
 
 
 def _ensure(conn) -> None:
+    from database import ensure_schema
+    ensure_schema(conn, 'login_throttle', ['login_failures', 'idx_login_failures_scope'], _create_tables)
+
+
+def _create_tables(conn) -> None:
     conn.execute(_DDL)
     conn.execute(_INDEX)
 
