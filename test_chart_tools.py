@@ -133,3 +133,11 @@ def test_drawing_maths_and_migration(tmp_path):
     assert out["ahSession"]["color"] == "#c77dff"
     # Old per-interval drawings fold into the one per-symbol list.
     assert out["migrated"] == ["fib:old1", "trend:old2"] and out["oldKeysLeft"] == 0
+
+
+def test_drawings_follow_price_axis_moves():
+    # Zoom, auto-scale and Reset view move the price axis without a time-axis
+    # event; a per-frame check of where prices sit on screen redraws then.
+    assert "function ctViewSignature()" in JS and "requestAnimationFrame(ctWatchView)" in JS
+    sig = JS[JS.index("function ctViewSignature()"):JS.index("function ctWatchView()")]
+    assert "priceToCoordinate(ref)" in sig and "getVisibleLogicalRange" in sig

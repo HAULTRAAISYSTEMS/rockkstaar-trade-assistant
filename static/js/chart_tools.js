@@ -933,9 +933,32 @@ function ctInitPointer() {
     else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'z' || ev.key === 'Z') && !ev.shiftKey) { if (ctStore.undo.length) { ev.preventDefault(); ctUndo(); } }
   });
 }
+/* Keep drawings glued to the chart. The chart reports time-axis moves but not
+   price-axis moves (auto-scale while panning, vertical drag, dragging the
+   price scale), so each frame compares where two reference prices and the
+   visible bars sit on screen and redraws when anything moved. */
+var ctViewSig = '';
+function ctViewSignature() {
+  var s = ctSeries(), ch = twChartState.chart, bars = twChartState.bars || [];
+  if (!s || !ch || !bars.length) return '';
+  var ref = Number(bars[bars.length - 1].close) || 1, r = null;
+  try { r = ch.timeScale().getVisibleLogicalRange(); } catch (e) {}
+  var y1 = s.priceToCoordinate(ref), y2 = s.priceToCoordinate(ref * 1.01), d = ctDims();
+  return [r ? r.from.toFixed(3) : '', r ? r.to.toFixed(3) : '', y1 == null ? '' : y1.toFixed(2), y2 == null ? '' : y2.toFixed(2),
+    d.W, d.H, twChartState.type, bars.length].join('|');
+}
+function ctWatchView() {
+  if (!document.hidden && ctStore.ticker && ctStore.ticker === twChartState.ticker) {
+    var sig = ctViewSignature();
+    if (sig !== ctViewSig) { ctViewSig = sig; twRenderDrawings(); }
+  }
+  requestAnimationFrame(ctWatchView);
+}
+
 function twInitDrawingLayer() {
   ctInitPointer();
   ctBuildRail();
+  requestAnimationFrame(ctWatchView);
   var box = document.getElementById('tw-chart-box');
   if (box && window.ResizeObserver) new ResizeObserver(function () { twRenderDrawings(); if (typeof twRenderIndicators === 'function') twRenderIndicators(); }).observe(box);
   else window.addEventListener('resize', function () { twRenderDrawings(); if (typeof twRenderIndicators === 'function') twRenderIndicators(); });
