@@ -120,6 +120,17 @@ _YF_SECTOR_MAP: dict[str, str] = {
 
 # ── Public: ticker → sector ────────────────────────────────────────────────────
 
+
+def _yahoo_sym(sym: str) -> str:
+    """BRK.B → BRK-B: Yahoo spells US share classes with a dash, while the
+    app, Schwab and Alpaca use a dot, so share-class tickers came back
+    empty (the tape showed BRK.B —). Exchange suffixes such as SHOP.TO or
+    BP.L are left alone."""
+    import re as _re
+    m = _re.fullmatch(r"([A-Z]{1,5})\.([A-DK])", (sym or "").upper())
+    return f"{m.group(1)}-{m.group(2)}" if m else sym
+
+
 def get_sector_for_ticker(ticker: str) -> tuple[str, str]:
     """
     Return (etf_symbol, sector_name) for a ticker.
@@ -238,7 +249,7 @@ def _fetch_prices_chart(tickers: list[str], period: str = "60d") -> dict[str, li
             "https://query2.finance.yahoo.com/v8/finance/chart",
         ):
             try:
-                url = f"{base}/{ticker}"
+                url = f"{base}/{_yahoo_sym(ticker)}"
                 r   = _req.get(
                     url,
                     params={"interval": "1d", "range": period},
@@ -1330,7 +1341,7 @@ def extended_quotes(symbols: list[str]) -> dict[str, dict]:
         for base in ("https://query1.finance.yahoo.com/v8/finance/chart",
                      "https://query2.finance.yahoo.com/v8/finance/chart"):
             try:
-                r = _req.get(f"{base}/{sym}",
+                r = _req.get(f"{base}/{_yahoo_sym(sym)}",
                              params={"range": "1d", "interval": "5m",
                                      "includePrePost": "true"},
                              headers=headers, timeout=8)
@@ -1508,7 +1519,7 @@ def _fetch_fast_quotes() -> None:
         for base in ("https://query1.finance.yahoo.com/v8/finance/chart",
                      "https://query2.finance.yahoo.com/v8/finance/chart"):
             try:
-                r = _req.get(f"{base}/{sym}",
+                r = _req.get(f"{base}/{_yahoo_sym(sym)}",
                              params={"range": "1d", "interval": "1m",
                                      "includePrePost": "true"},
                              headers=headers, timeout=5)
@@ -1624,7 +1635,7 @@ def _fetch_live_quote(sym: str) -> None:
         for base in ("https://query1.finance.yahoo.com/v8/finance/chart",
                      "https://query2.finance.yahoo.com/v8/finance/chart"):
             try:
-                r = _req.get(f"{base}/{sym}",
+                r = _req.get(f"{base}/{_yahoo_sym(sym)}",
                              params={"range": "1d", "interval": "1m", "includePrePost": "true"},
                              headers=headers, timeout=5)
                 res = (r.json().get("chart", {}).get("result") or [None])[0]

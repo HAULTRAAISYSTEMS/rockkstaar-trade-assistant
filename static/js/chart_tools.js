@@ -628,11 +628,17 @@ function ctDrawFibs(ctx, d, dim, sel, pts, axisLabels, isDraft) {
     }
     if (s.showPrice && ctLbl('drawings')) axisLabels.push({p: r.p, c: col});
   });
-  ctx.setLineDash([4, 4]); ctx.strokeStyle = ctHexA(s.color, 0.7); ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); if (ext && c) ctx.lineTo(c.x, c.y); ctx.stroke();
+  // The dashed swing line between the anchors can be switched off (the
+  // "╱" button in the properties bar). While it's selected it still shows
+  // faintly, so you can see what the levels are measured from.
+  var swing = s.swingLine !== false;
+  if (swing || sel) {
+    ctx.setLineDash([4, 4]); ctx.strokeStyle = ctHexA(s.color, swing ? 0.7 : 0.25); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); if (ext && c) ctx.lineTo(c.x, c.y); ctx.stroke();
+  }
   // Selectable on its level lines and the dashed swing line, not the whole
   // box, so lines and drawings inside a fib can still be picked.
-  ctPaths[d.id] = {kind: 'fib', ys: rows.map(function (r) { return r.y; }), x1: x1, x2: x2, diag: ext && c ? [a, b, c] : [a, b]};
+  ctPaths[d.id] = {kind: 'fib', ys: rows.map(function (r) { return r.y; }), x1: x1, x2: x2, diag: swing ? (ext && c ? [a, b, c] : [a, b]) : []};
   if (sel) {
     if (!s.showPrice) { axisLabels.push({p: A.p, c: s.color}); axisLabels.push({p: B.p, c: s.color}); }
     ctHandles(ctx, ext && c ? [a, b, c] : [a, b], s.color);
@@ -1166,6 +1172,7 @@ function ctUpdateProps() {
     html += '<button type="button" class="ct-p-btn' + (ctLevelsOpen ? ' on' : '') + '" data-ct-cmd="levels" title="Edit levels and level colors">Levels</button>';
     if (t === 'fib') html += '<button type="button" class="ct-p-btn' + (s.reverse ? ' on' : '') + '" data-ct-flag="reverse" title="Reverse">⇅</button>';
     html += '<button type="button" class="ct-p-btn' + (s.labels !== false ? ' on' : '') + '" data-ct-flag="labels" title="Level labels">Aa</button>';
+    html += '<button type="button" class="ct-p-btn' + (s.swingLine !== false ? ' on' : '') + '" data-ct-flag="swingLine" title="Dashed line between the anchor points">╱</button>';
   }
   if (t !== 'text' && t !== 'vline' && t !== 'measure') {
     var priceOn = (t === 'hline' || t === 'hray' || t === 'avwap') ? s.showPrice !== false : !!s.showPrice;
@@ -1234,7 +1241,7 @@ function ctPropClick(ev) {
     ctPushUndo();
     var f = flag.getAttribute('data-ct-flag');
     if (f === 'showPrice' && (d.type === 'hline' || d.type === 'hray' || d.type === 'avwap')) d.style.showPrice = d.style.showPrice === false;
-    else if (f === 'labels') d.style.labels = d.style.labels === false;
+    else if (f === 'labels' || f === 'swingLine') d.style[f] = d.style[f] === false;
     else d.style[f] = !d.style[f];
     if (f !== 'reverse') ctRemember(d, [f]);
     ctPropsFor = null; twSaveDrawings(); twRenderDrawings();

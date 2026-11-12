@@ -30,6 +30,16 @@ logger = logging.getLogger(__name__)
 _FINNHUB_KEY: str | None = os.environ.get("FINNHUB_API_KEY") or None
 
 
+
+def _yahoo_sym(sym: str) -> str:
+    """BRK.B → BRK-B: Yahoo spells US share classes with a dash, while the
+    app, Schwab and Alpaca use a dot, so share-class tickers came back
+    empty (the tape showed BRK.B —). Exchange suffixes such as SHOP.TO or
+    BP.L are left alone."""
+    import re as _re
+    m = _re.fullmatch(r"([A-Z]{1,5})\.([A-DK])", (sym or "").upper())
+    return f"{m.group(1)}-{m.group(2)}" if m else sym
+
 def _fetch_finnhub_quote(ticker: str) -> dict | None:
     """
     Fetch current quote from Finnhub /quote endpoint.
@@ -413,8 +423,8 @@ def _fetch_ohlcv_via_chart_api(
     Or None on failure.
     """
     _CHART_URLS = [
-        f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
-        f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}",
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{_yahoo_sym(ticker)}",
+        f"https://query2.finance.yahoo.com/v8/finance/chart/{_yahoo_sym(ticker)}",
     ]
     headers = {
         "User-Agent": (
@@ -573,8 +583,8 @@ def _fetch_price_via_chart_api(ticker: str) -> dict | None:
     or None on any error so callers can fall back further.
     """
     _CHART_URLS = [
-        f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
-        f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}",
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{_yahoo_sym(ticker)}",
+        f"https://query2.finance.yahoo.com/v8/finance/chart/{_yahoo_sym(ticker)}",
     ]
     headers = {
         "User-Agent": (
