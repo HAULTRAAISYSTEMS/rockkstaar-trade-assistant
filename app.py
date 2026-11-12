@@ -7658,6 +7658,221 @@ _STOCK_LIVE_LOCK = __import__("threading").Lock()
 _STOCK_LIVE_MIN_S = 20.0
 
 
+# ── Live trading (Schwab) ────────────────────────────────────────────────────
+# Preview → confirm with a signed, single-use token → place. Guardrails and
+# the audit log live in live_trading.py; Schwab I/O in schwab_orders.py.
+
+_LIVE_ACCT_CACHE: dict = {}
+_LIVE_PLACE_LOCK = threading.Lock()
+
+
+def _live_accounts(uid: int, force: bool = False) -> list:
+    hit = _LIVE_ACCT_CACHE.get(uid)
+    if hit and not force and _time.time() - hit[0] < 600:
+        return hit[1]
+    import schwab_orders
+    accts = schwab_orders.account_numbers(uid)
+    _LIVE_ACCT_CACHE[uid] = (_time.time(), accts)
+    return accts
+
+
+def _live_account(uid: int, cfg: dict) -> dict:
+    accts = _live_accounts(uid)
+    if not accts:
+        raise PermissionError("No Schwab accounts found — reconnect Schwab in Account → Brokers")
+    for a in accts:
+        if a["hash"] == cfg.get("account") or a["last4"] == cfg.get("account"):
+            return a
+    return accts[0]
+
+
+def _live_context(uid: int, t: dict, acct: dict) -> dict:
+    """Fresh numbers the guardrails need: last price, position, buying power."""
+    import schwab
+    last = None
+    try:
+        q = schwab.fetch_quotes([t["symbol"]], user_id=uid).get(t["symbol"]) or {}
+        last = q.get("price")
+    except Exception as exc:
+        logger.info("live quote %s: %s", t["symbol"], exc)
+    pos_qty, bp = 0.0, None
+    for a in schwab.fetch_accounts(user_id=uid):
+        if str(a.get("account_number") or "") != acct["number"]:
+            continue
+        bp = a.get("buying_power")
+        for p in a.get("positions") or []:
+            if str(p.get("symbol") or "").upper() == t["symbol"]:
+                pos_qty += float(p.get("quantity") or 0)
+    today = _et_now().strftime("%Y-%m-%d")
+    import live_trading
+    opening = max(live_trading.opening_orders_today(uid, today),
+                  len(get_journal_entries_for_date(today, uid) or []))
+    locked = bool((get_daily_session(today, uid) or {}).get("locked"))
+    return {"last": last, "position_qty": pos_qty, "buying_power": bp,
+            "opening_today": opening, "session_locked": locked,
+            "market_session": market_session_now(), "trade_date": today}
+
+
+def _live_err(msg: str, code: int = 400):
+    return jsonify({"ok": False, "error": msg}), code
+
+
+@app.route("/api/trade/status")
+def api_trade_status():
+    import live_trading
+    uid = current_user_id()
+    if not uid:
+        return _live_err("Sign in first", 401)
+    cfg = live_trading.settings(uid)
+    out = {"ok": True, **cfg, "accounts": [], "connected": False}
+    try:
+        out["accounts"] = [{"last4": a["last4"], "hash": a["hash"]} for a in _live_accounts(uid)]
+        out["connected"] = bool(out["accounts"])
+        if out["accounts"]:
+            out["account"] = _live_account(uid, cfg)["hash"]
+    except Exception as exc:
+        out["connect_error"] = str(exc)
+    return jsonify(out)
+
+
+@app.route("/api/trade/settings", methods=["POST"])
+def api_trade_settings():
+    import live_trading
+    uid = current_user_id()
+    if not uid:
+        return _live_err("Sign in first", 401)
+    d = request.get_json(silent=True) or {}
+    enabled = d.get("enabled")
+    if enabled is True and str(d.get("confirm") or "").strip().upper() != "LIVE":
+        return _live_err('Type LIVE to turn on real-money trading')
+    acct = d.get("account")
+    if acct is not None and acct not in {a["hash"] for a in _live_accounts(uid)}:
+        return _live_err("Unknown account")
+    try:
+        cfg = live_trading.save_settings(uid, enabled=enabled if isinstance(enabled, bool) else None,
+                                         max_order_value=d.get("max_order_value"), account=acct)
+    except (TypeError, ValueError) as exc:
+        return _live_err(str(exc))
+    logger.warning("live trading settings user=%s enabled=%s max=%s", uid, cfg["enabled"], cfg["max_order_value"])
+    return jsonify({"ok": True, **cfg})
+
+
+def _live_prepare(uid: int, raw: dict):
+    """Validated ticket, payload, account, context and checks for a request."""
+    import live_trading
+    import schwab_orders
+    t = schwab_orders.normalize_ticket(raw)
+    cfg = live_trading.settings(uid)
+    acct = _live_account(uid, cfg)
+    payload = schwab_orders.build_payload(t)
+    ctx = _live_context(uid, t, acct)
+    blocks, warns, nums = live_trading.check(
+        t, cfg=cfg, risk=get_risk_settings(uid), last=ctx["last"],
+        position_qty=ctx["position_qty"], buying_power=ctx["buying_power"],
+        opening_today=ctx["opening_today"], session_locked=ctx["session_locked"],
+        market_session=ctx["market_session"])
+    return t, cfg, acct, payload, ctx, blocks, warns, nums
+
+
+@app.route("/api/trade/preview", methods=["POST"])
+def api_trade_preview():
+    import live_trading
+    import schwab_orders
+    uid = current_user_id()
+    if not uid:
+        return _live_err("Sign in first", 401)
+    try:
+        t, cfg, acct, payload, ctx, blocks, warns, nums = _live_prepare(uid, request.get_json(silent=True) or {})
+    except schwab_orders.OrderError as exc:
+        return _live_err(str(exc))
+    except PermissionError as exc:
+        return _live_err(str(exc), 403)
+    except Exception as exc:
+        logger.warning("live preview failed: %s", exc)
+        return _live_err(f"Couldn't reach Schwab: {exc}", 502)
+    schwab_check = {}
+    if not blocks:
+        schwab_check = schwab_orders.preview(acct["hash"], payload, uid)
+        blocks += [f"Schwab: {r}" for r in schwab_check.get("rejects") or []]
+        warns += [f"Schwab: {w}" for w in schwab_check.get("warnings") or []]
+    token = None if blocks else live_trading.make_token(app.secret_key, uid, acct["hash"], payload)
+    return jsonify({"ok": True, "summary": schwab_orders.describe(t), "account_last4": acct["last4"],
+                    "blocks": blocks, "warnings": warns, "est": nums, "token": token,
+                    "ttl": live_trading.CONFIRM_TTL, "session": ctx["market_session"],
+                    "commission": schwab_check.get("commission")})
+
+
+@app.route("/api/trade/place", methods=["POST"])
+def api_trade_place():
+    import live_trading
+    import schwab_orders
+    uid = current_user_id()
+    if not uid:
+        return _live_err("Sign in first", 401)
+    d = request.get_json(silent=True) or {}
+    with _LIVE_PLACE_LOCK:
+        try:
+            t, cfg, acct, payload, ctx, blocks, warns, nums = _live_prepare(uid, d.get("ticket") or {})
+        except schwab_orders.OrderError as exc:
+            return _live_err(str(exc))
+        except PermissionError as exc:
+            return _live_err(str(exc), 403)
+        except Exception as exc:
+            return _live_err(f"Couldn't reach Schwab: {exc}", 502)
+        summary = schwab_orders.describe(t)
+        try:
+            nonce = live_trading.read_token(app.secret_key, d.get("token"), uid, acct["hash"], payload)
+        except ValueError as exc:
+            return _live_err(str(exc), 409)
+        common = dict(account_last4=acct["last4"], summary=summary, payload=payload,
+                      nonce=nonce, trade_date=ctx["trade_date"])
+        if blocks:
+            live_trading.log(uid, t, status="blocked", error="; ".join(blocks), **common)
+            return jsonify({"ok": False, "error": blocks[0], "blocks": blocks}), 400
+        try:
+            order_id = schwab_orders.place(acct["hash"], payload, uid)
+        except Exception as exc:
+            live_trading.log(uid, t, status="failed", error=str(exc), **common)
+            logger.error("LIVE ORDER FAILED user=%s %s: %s", uid, summary, exc)
+            return _live_err(str(exc), 502)
+        live_trading.log(uid, t, status="placed", order_id=order_id, **common)
+    logger.warning("LIVE ORDER PLACED user=%s acct=…%s %s id=%s", uid, acct["last4"], summary, order_id)
+    return jsonify({"ok": True, "order_id": order_id, "summary": summary})
+
+
+@app.route("/api/trade/orders")
+def api_trade_orders():
+    import live_trading
+    import schwab_orders
+    uid = current_user_id()
+    if not uid:
+        return _live_err("Sign in first", 401)
+    try:
+        acct = _live_account(uid, live_trading.settings(uid))
+        orders = schwab_orders.todays_orders(acct["hash"], uid)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc), "orders": [], "log": live_trading.recent(uid)})
+    return jsonify({"ok": True, "orders": orders, "log": live_trading.recent(uid)})
+
+
+@app.route("/api/trade/cancel/<order_id>", methods=["POST"])
+def api_trade_cancel(order_id):
+    import live_trading
+    import schwab_orders
+    uid = current_user_id()
+    if not uid:
+        return _live_err("Sign in first", 401)
+    try:
+        acct = _live_account(uid, live_trading.settings(uid))
+        schwab_orders.cancel(acct["hash"], order_id, uid)
+    except schwab_orders.OrderError as exc:
+        return _live_err(str(exc))
+    except Exception as exc:
+        return _live_err(str(exc), 502)
+    logger.warning("LIVE ORDER CANCEL user=%s id=%s", uid, order_id)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/depth/<ticker>")
 def api_depth(ticker):
     """Level 2 book and Time & Sales for one symbol (see market_depth.py).

@@ -288,6 +288,36 @@
 .tw-submit { width:100%; margin-top: var(--sp-2); padding: 11px 0; font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-size: var(--fs-sm); font-weight: var(--fw-bold); cursor:pointer; border:none; border-radius: var(--r-sm); color: var(--text-on-accent); background: var(--grad-brand); box-shadow: var(--shadow-sm); transition: filter var(--dur-fast), box-shadow var(--dur-fast); }
 .tw-submit:hover { filter: brightness(1.06); box-shadow: var(--glow-accent); }
 .tw-ticket-note { margin-top: var(--sp-3); font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--warn-500); line-height:1.5; text-align:center; }
+/* Live trading (Schwab) */
+.lt-mode { display:grid; grid-template-columns:1fr 1fr auto; gap:4px; margin-bottom: var(--sp-3); }
+.lt-mode button { font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-size: 10px; font-weight: var(--fw-bold); padding: 8px 6px; border-radius: 8px; border:1px solid rgba(255,255,255,.08); background: rgba(0,0,0,.3); color: var(--text-muted); cursor:pointer; }
+.lt-mode button.active[data-mode="paper"] { color: var(--elite-gold-bright, #f3d37a); border-color: rgba(243,211,122,.45); }
+.lt-mode button.active[data-mode="live"] { color: #fff; background: linear-gradient(180deg,#ff6a62,#d62e26); border-color: rgba(255,106,98,.7); box-shadow: 0 0 14px rgba(255,77,69,.35); }
+.lt-mode button[disabled] { opacity:.4; cursor:not-allowed; }
+.lt-mode .lt-gear { padding: 8px 10px; font-size: 13px; }
+.tw-count.is-live { background:#d62e26; color:#fff; }
+.lt-settings { border:1px solid rgba(255,77,69,.35); border-radius:10px; padding: var(--sp-3); margin-bottom: var(--sp-3); background: rgba(255,77,69,.05); }
+.lt-set-status { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-body); margin-bottom: var(--sp-3); }
+.lt-set-status b.on { color:#ff6a62; } .lt-set-status b.off { color: var(--text-muted); }
+.lt-set-actions { display:grid; gap:6px; }
+.lt-set-actions .lt-on { background: linear-gradient(180deg,#ff6a62,#d62e26); color:#fff; }
+.lt-set-note { margin-top: var(--sp-2); font-size: var(--fs-micro); color: var(--text-faint); line-height:1.5; }
+.lt-check { display:flex; align-items:center; gap:8px; font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-size:10px; color: var(--text-muted); margin-bottom: var(--sp-3); cursor:pointer; }
+.lt-check input { accent-color: var(--side, #22c58b); width:16px; height:16px; }
+.lt-confirm { margin-top: var(--sp-3); padding: var(--sp-3); border-radius:10px; border:1px solid rgba(255,77,69,.55); background: rgba(255,77,69,.07); font-size: var(--fs-xs); color: var(--text-body); }
+.lt-confirm h4 { margin:0 0 6px; font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-size: 11px; color:#ff8a83; }
+.lt-confirm .lt-sum { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-hi); margin-bottom:6px; }
+.lt-confirm ul { margin:6px 0; padding-left:18px; } .lt-confirm li.block { color:#ff8a83; } .lt-confirm li.warn { color: var(--warn-500); }
+.lt-confirm .lt-btns { display:grid; grid-template-columns: 2fr 1fr; gap:6px; margin-top:8px; }
+.lt-confirm .lt-send { background: linear-gradient(180deg,#ff6a62,#d62e26); color:#fff; }
+.lt-confirm .lt-send[disabled] { opacity:.45; cursor:not-allowed; }
+.lt-confirm .ok { color:#2bd492; font-weight:700; }
+.lt-orders { margin-top: var(--sp-3); border-top:1px solid rgba(255,255,255,.08); padding-top: var(--sp-3); }
+.lt-orders-hd { display:flex; justify-content:space-between; align-items:center; font-family: var(--font-display); text-transform:uppercase; letter-spacing: var(--track-label); font-size:10px; color: var(--text-faint); margin-bottom:6px; }
+.lt-orders-hd button { background:none; border:none; color: var(--text-muted); cursor:pointer; font-size:14px; }
+.lt-ord { display:grid; grid-template-columns: 1fr auto; gap:4px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.05); font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text-body); }
+.lt-ord .st { color: var(--text-muted); } .lt-ord .st.open { color: var(--warn-500); } .lt-ord .st.FILLED { color:#2bd492; } .lt-ord .st.REJECTED { color:#ff8a83; }
+.lt-ord button { font-size:10px; padding:4px 8px; border-radius:6px; border:1px solid rgba(255,77,69,.5); background:transparent; color:#ff8a83; cursor:pointer; }
 .tw-preview { display:none; margin-top: var(--sp-3); padding: var(--sp-3); background: var(--surface-inset); border:1px dashed var(--border-strong); border-radius: var(--r-sm); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-body); line-height:1.6; white-space:pre-wrap; }
 
 /* ── Positions table ── */
@@ -924,11 +954,37 @@
 
       <!-- Order ticket (paper) -->
       <div class="tw-panel">
-        <div class="tw-panel-hd"><h3>Order Ticket</h3><span class="tw-count">PAPER</span></div>
+        <div class="tw-panel-hd"><h3>Order Ticket</h3><span class="tw-count" id="tw-ot-mode-tag">PAPER</span></div>
         <div class="tw-ticket" id="tw-ticket" data-side="BUY">
           <div class="tw-side">
             <button type="button" class="tw-side-btn buy active" data-side="BUY" onclick="twSide(this)">Buy</button>
             <button type="button" class="tw-side-btn sell" data-side="SELL" onclick="twSide(this)">Sell</button>
+          </div>
+          <div class="lt-mode" id="lt-mode" role="group" aria-label="Paper or live">
+            <button type="button" class="active" data-mode="paper">Paper</button>
+            <button type="button" data-mode="live">Live · Schwab</button>
+            <button type="button" class="lt-gear" id="lt-gear" aria-label="Live trading settings" title="Live trading settings">⚙</button>
+          </div>
+          <div class="lt-settings" id="lt-settings" hidden>
+            <div class="lt-set-status" id="lt-set-status">Checking Schwab…</div>
+            <div class="tw-field">
+              <label for="lt-account">Schwab account</label>
+              <select class="tw-select" id="lt-account"></select>
+            </div>
+            <div class="tw-field">
+              <label for="lt-max">Max $ per order</label>
+              <input class="tw-input" id="lt-max" type="number" min="1" step="50">
+            </div>
+            <div class="tw-field lt-enable-row">
+              <label for="lt-confirm-word">Type LIVE to allow real-money orders</label>
+              <input class="tw-input" id="lt-confirm-word" type="text" autocomplete="off" placeholder="LIVE">
+            </div>
+            <div class="lt-set-actions">
+              <button type="button" class="tw-submit lt-on" id="lt-enable">Turn on live trading</button>
+              <button type="button" class="tw-submit-ghost lt-off" id="lt-disable">Turn off</button>
+              <button type="button" class="tw-submit-ghost" id="lt-save">Save</button>
+            </div>
+            <div class="lt-set-note">Orders go to your Schwab account for real. Every order is previewed, checked against your Risk page rules, and needs a second tap to send.</div>
           </div>
           <div class="tw-field">
             <label for="tw-ot-symbol">Symbol</label>
@@ -958,6 +1014,24 @@
               <input class="tw-input" id="tw-ot-limit" type="number" min="0" step="0.01" placeholder="—" disabled oninput="twEstCost()">
             </div>
           </div>
+          <div class="tw-field-row">
+            <div class="tw-field">
+              <label for="tw-ot-stop">Stop</label>
+              <input class="tw-input" id="tw-ot-stop" type="number" min="0" step="0.01" placeholder="—" disabled oninput="twEstCost()">
+            </div>
+            <label class="lt-check" for="tw-ot-ext"><input type="checkbox" id="tw-ot-ext" disabled> Extended hours</label>
+          </div>
+          <label class="lt-check lt-bracket-toggle" for="tw-ot-bracket"><input type="checkbox" id="tw-ot-bracket" onchange="twBracketToggle()"> Bracket — take profit + stop loss</label>
+          <div class="tw-field-row lt-bracket" id="tw-ot-bracket-fields" hidden>
+            <div class="tw-field">
+              <label for="tw-ot-target">Take profit</label>
+              <input class="tw-input" id="tw-ot-target" type="number" min="0" step="0.01" placeholder="—">
+            </div>
+            <div class="tw-field">
+              <label for="tw-ot-sl">Stop loss</label>
+              <input class="tw-input" id="tw-ot-sl" type="number" min="0" step="0.01" placeholder="—">
+            </div>
+          </div>
           <div class="tw-field">
             <label for="tw-ot-tif">Time in Force</label>
             <select class="tw-select" id="tw-ot-tif">
@@ -973,8 +1047,13 @@
           </div>
           <button type="button" class="tw-submit" id="tw-ot-preview-btn" onclick="twPreview()">Preview Order</button>
           <a class="tw-submit-ghost" href="{{ url_for('paper_trading') }}">Open Paper Portfolio</a>
-          <div class="tw-ticket-note">Preview here, then use the paper portfolio for simulated fills. No live order is transmitted.</div>
+          <div class="tw-ticket-note" id="tw-ot-note">Paper mode: preview here, then use the paper portfolio for simulated fills. No live order is transmitted.</div>
           <div class="tw-preview" id="tw-preview"></div>
+          <div class="lt-confirm" id="lt-confirm" hidden></div>
+          <div class="lt-orders" id="lt-orders" hidden>
+            <div class="lt-orders-hd"><span>Today's Schwab orders</span><button type="button" id="lt-orders-refresh" aria-label="Refresh orders">↻</button></div>
+            <div id="lt-orders-list"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -986,6 +1065,7 @@
 <!-- Lightweight Charts (TradingView) -->
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="{{ url_for('static', filename='js/depth_panel.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/live_trading.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/chart_tools.js') }}"></script>
 <script>
 /* ── helpers ── */
@@ -1220,7 +1300,14 @@ function twApplyStudyStyles(){Object.keys(twChartState.emaSeries).forEach(functi
 
 /* ── Order ticket ── */
 function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; var tk=document.getElementById('tw-ticket'); if(tk) tk.dataset.side=btn.dataset.side; twEstCost(); }
-function twTypeChange(){ var t=document.getElementById('tw-ot-type').value; var lim=document.getElementById('tw-ot-limit'); var need=(t!=='MARKET'); lim.disabled=!need; if(!need) lim.value=''; twEstCost(); }
+function twTypeChange(){ var t=document.getElementById('tw-ot-type').value; var lim=document.getElementById('tw-ot-limit'), stp=document.getElementById('tw-ot-stop');
+  var needL=(t==='LIMIT'||t==='STOP_LIMIT'), needS=(t==='STOP'||t==='STOP_LIMIT');
+  lim.disabled=!needL; if(!needL) lim.value=''; if(stp){ stp.disabled=!needS; if(!needS) stp.value=''; }
+  var ext=document.getElementById('tw-ot-ext'); if(ext){ ext.disabled=(t!=='LIMIT'); if(t!=='LIMIT') ext.checked=false; }
+  twEstCost(); }
+function twBracketToggle(){ var on=document.getElementById('tw-ot-bracket').checked; document.getElementById('tw-ot-bracket-fields').hidden=!on;
+  if(on){ var tg=document.getElementById('tw-ot-target'), sl=document.getElementById('tw-ot-sl');
+    if(!tg.value && window._twTarget) tg.value=window._twTarget; if(!sl.value && window._twStop) sl.value=window._twStop; } }
 /* Today's Setups row tap → prefill the order ticket with entry/stop/target */
 function twSetupPrefill(sym, entry, stop, target){
   var s=document.getElementById('tw-ot-symbol'); if(s) s.value=sym;
@@ -1228,12 +1315,15 @@ function twSetupPrefill(sym, entry, stop, target){
   var lim=document.getElementById('tw-ot-limit'); var e=parseFloat(entry);
   if(lim && !isNaN(e)){ lim.disabled=false; lim.value=e; }
   window._twStop=stop; window._twTarget=target;
+  var tg=document.getElementById('tw-ot-target'), sl=document.getElementById('tw-ot-sl');
+  if(tg && target) tg.value=target; if(sl && stop) sl.value=stop;
   twEstCost();
   var ot=document.getElementById('tw-ot-symbol'); if(ot) ot.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 function twEstCost(){
   var qty=parseFloat(document.getElementById('tw-ot-qty').value)||0;
   var lim=parseFloat(document.getElementById('tw-ot-limit').value);
+  if(!(lim>0)){ var _st=document.getElementById('tw-ot-stop'); lim=parseFloat(_st?_st.value:''); }
   // A market order fills at the ask when buying and the bid when selling,
   // so with a live quote for the ticket's symbol use that side, not "last".
   var nb=window._twNbbo, sym=(document.getElementById('tw-ot-symbol').value||'').toUpperCase();
@@ -1245,6 +1335,7 @@ function twEstCost(){
   else { el.textContent='—'; }
 }
 function twPreview(){
+  if(window.LiveTrading && window.LiveTrading.isLive()){ window.LiveTrading.preview(); return; }
   var side=window._twSide||'BUY';
   var sym=(document.getElementById('tw-ot-symbol').value||'—').toUpperCase();
   var type=document.getElementById('tw-ot-type').value;
