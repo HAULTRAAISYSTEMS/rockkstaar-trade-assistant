@@ -438,3 +438,50 @@ def test_depth_status_stuck_on_connecting_reads_as_reconnecting(monkeypatch, tmp
     assert market_depth.snapshot("SPY")["status"]["state"] == "error"
     market_depth.set_status("connecting", "Connecting to Schwab")
     assert market_depth.snapshot("SPY")["status"]["state"] == "connecting"
+
+
+FIB_SWING_HARNESS = r"""
+const fs=require('fs');
+global.localStorage={_d:{},getItem(k){return this._d[k]===undefined?null:this._d[k];},setItem(k,v){this._d[k]=String(v);},removeItem(k){delete this._d[k];},key(i){return Object.keys(this._d)[i];},get length(){return Object.keys(this._d).length;}};
+global.document={addEventListener(){},getElementById(){return null;},querySelectorAll(){return [];},querySelector(){return null;}};
+global.window={};global.fetch=()=>Promise.resolve({ok:false,json:()=>({})});
+global.twChartState={bars:[],interval:'1d',type:'candles',ticker:'SPY',selectedDrawing:null,chart:null};
+eval(fs.readFileSync('static/js/chart_tools.js','utf8'));
+ctY=function(p){return 500-p;}; ctXY=function(pt){return {x:pt.t,y:500-pt.p};};
+function run(style, sel){
+  const d=ctNewDrawing('fib',[{t:100,p:100},{t:400,p:300}]); Object.assign(d.style, style); d.id='f';
+  const segs=[]; let last=null;
+  const ctx={save(){},restore(){},setLineDash(){},fillRect(){},beginPath(){},stroke(){},fill(){},fillText(){},measureText(){return {width:10};},strokeRect(){},arc(){},closePath(){},
+    moveTo(x,y){last=[x,y];}, lineTo(x,y){segs.push([last[0],last[1],x,y]); last=[x,y];}};
+  ctDrawFibs(ctx,d,{W:800,H:600},sel,[ctXY(d.points[0]),ctXY(d.points[1])],[],false);
+  return {diagonal:segs.filter(s=>s[1]!==s[3]).length, pick:ctPaths.f.diag.length};
+}
+console.log(JSON.stringify({on:run({},false), off:run({swingLine:false},false), offSel:run({swingLine:false},true)}));
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_fib_swing_line_can_be_turned_off(tmp_path):
+    h = tmp_path / "h.js"
+    h.write_text(FIB_SWING_HARNESS)
+    out = json.loads(subprocess.run(["node", str(h)], capture_output=True, text=True, check=True,
+                                    cwd=os.getcwd()).stdout)
+    assert out["on"] == {"diagonal": 1, "pick": 2}
+    assert out["off"] == {"diagonal": 0, "pick": 0}
+    assert out["offSel"]["diagonal"] == 1      # faint guide while selected
+    assert 'data-ct-flag="swingLine"' in JS
+
+
+def test_yahoo_share_class_symbols():
+    import data_fetcher
+    import market_engine
+    for fn in (market_engine._yahoo_sym, data_fetcher._yahoo_sym):
+        assert fn("BRK.B") == "BRK-B" and fn("BF.B") == "BF-B"
+        assert fn("SHOP.TO") == "SHOP.TO" and fn("AAPL") == "AAPL" and fn("^VIX") == "^VIX"
+
+
+def test_chart_bar_wraps_instead_of_clipping_on_desktop():
+    css = open("static/css/terminal_workspace.css", encoding="utf-8").read()
+    block = css[css.index("@media (min-width: 1100px) {\n  /* Wrap, never clip."):]
+    block = block[:block.index("}\n", block.index(".tw-chart-toolbar {"))]
+    assert "flex-wrap: wrap !important" in block and "flex-wrap: nowrap" not in block
