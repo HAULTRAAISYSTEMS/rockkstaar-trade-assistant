@@ -277,3 +277,74 @@ def test_switching_to_an_empty_list_does_not_seed_it(client, monkeypatch):
     monkeypatch.setattr(legacy, "add_ticker_to_watchlist", lambda wl, t: added.append(t))
     assert c.get("/terminal").status_code == 200
     assert added == []
+
+
+def test_full_history_is_fetched_in_ten_year_windows(monkeypatch):
+    # Yahoo truncates / downsamples range=max for daily candles, so full
+    # history is asked for as explicit 10-year windows and joined.
+    import requests
+    import data_fetcher
+    calls = []
+
+    def fake_get(url, params=None, **k):
+        calls.append(dict(params))
+        p1 = params["period1"]
+
+        class R:
+            status_code = 200
+            def json(self):
+                if p1 < 315532800:          # before 1980: not listed yet
+                    return {"chart": {"result": [{"timestamp": [], "meta": {}, "indicators": {"quote": [{}]}}]}}
+                ts = [p1 + 86400, p1 + 2 * 86400]
+                return {"chart": {"result": [{"timestamp": ts, "meta": {"dataGranularity": "1d"},
+                                              "indicators": {"quote": [{"open": [1, 2], "close": [1, 2], "high": [1, 2],
+                                                                        "low": [1, 2], "volume": [1, 1]}]}}]}}
+        return R()
+    monkeypatch.setattr(requests, "get", fake_get)
+    out = data_fetcher._fetch_ohlcv_via_chart_api("KLAC", interval="1d", range_str="max")
+    assert all("range" not in c for c in calls)
+    assert min(c["period1"] for c in calls) == data_fetcher._FULL_HISTORY_START
+    assert out["data_granularity"] == "1d" and out["timestamps"] == sorted(out["timestamps"])
+    listed = [c for c in calls if c["period1"] >= 315532800]
+    assert len(out["timestamps"]) == 2 * len(listed)
+    assert out["timestamps"][0] >= 315532800
+
+
+def test_full_history_with_a_missing_window_falls_back(monkeypatch):
+    import data_fetcher
+    def fake(ticker, interval="1d", range_str="1y", include_prepost=False, period=None):
+        if period is None:
+            return data_fetcher._fetch_full_history_chunked(ticker, interval)
+        if 1000000000 < period[0] < 1400000000:   # a hole in the middle
+            return None
+        return {"timestamps": [period[0] + 1], "opens": [1], "highs": [1], "lows": [1], "closes": [1],
+                "volumes": [1], "data_granularity": "1d"}
+    monkeypatch.setattr(data_fetcher, "_fetch_ohlcv_via_chart_api", fake)
+    assert data_fetcher._fetch_ohlcv_via_chart_api("KLAC", "1d", "max") is None
+
+
+def test_alpaca_start_is_clamped_to_its_history(monkeypatch):
+    import market_data
+    seen = {}
+    monkeypatch.setattr(market_data, "_credentials", lambda: ("k", "s"))
+
+    class R:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"bars": [{"t": "2016-01-04T05:00:00Z", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 1}]}
+    monkeypatch.setattr(market_data.requests, "get", lambda url, params=None, **k: (seen.update(params), R())[1])
+    data, meta = market_data._alpaca_bars("KLAC", "1d", "max", False)
+    assert data and seen["start"].startswith("2015-01-01")
+
+
+def test_interval_mismatch_is_shown_not_retried(client, monkeypatch):
+    c, _ = client
+    import app as legacy
+    import market_data
+    legacy._TERMINAL_CANDLE_CACHE.clear()
+    monkeypatch.setattr(market_data, "fetch_chart_bars", lambda *a, **k: (
+        {"timestamps": [1794200400], "opens": [1.0], "closes": [1.5], "highs": [2.0], "lows": [0.5],
+         "volumes": [10], "data_granularity": "3mo"}, {"provider": "Yahoo"}))
+    r = c.get("/api/terminal/candles/KLAC?interval=1d&range=max")
+    d = r.get_json()
+    assert r.status_code == 200 and d["ok"] is False and "3mo" in d["error"]

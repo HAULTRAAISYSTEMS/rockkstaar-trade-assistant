@@ -6072,10 +6072,14 @@ def api_terminal_candles(ticker):
             "terminal candles %s requested %s but provider returned %s",
             ticker, fetch_interval, source_interval,
         )
+        # Not a server fault and not fixed by retrying: answer 200 with the
+        # reason so the chart shows it instead of retrying forever behind a
+        # generic "Service temporarily unavailable".
         return jsonify({"ok": False,
-                        "error": "provider returned a different candle interval",
+                        "error": "The data provider sent %s candles instead of %s for %s. Try a shorter range."
+                                 % (source_interval, fetch_interval, range_str),
                         "requested_interval": interval,
-                        "source_interval": source_interval}), 502
+                        "source_interval": source_interval})
 
     # The chart names candle sizes its own way (1w, not 1wk); report the size
     # it asked for once the provider has confirmed it.
