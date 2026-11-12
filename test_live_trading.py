@@ -304,3 +304,18 @@ def test_ticket_keeps_market_orders_on_day():
     assert 'id="tw-ot-ext" disabled onchange="twTifRules()"' in html
     assert "addEventListener('DOMContentLoaded',twTifRules)" in html
     assert ".tw-field-row[hidden] { display:none !important; }" in html
+
+
+def test_market_order_uses_shared_feed_when_schwab_quotes_are_down(live, monkeypatch):
+    # Schwab's quote call backs off for 5 min after any error; the ticket
+    # showed bid/last/ask from the shared feed but Preview said "No current price".
+    import app as legacy
+    import schwab
+    c, store, sent, _ = live
+    store[(1, "live_trading_enabled")] = "1"
+    monkeypatch.setattr(schwab, "fetch_quotes", lambda syms, user_id=None: {})
+    monkeypatch.setattr(legacy, "_MKT_AVAILABLE", True)
+    monkeypatch.setattr(legacy._mkt, "live_quotes", lambda syms: {"NVDA": {"price": 165.37}})
+    d = c.post("/api/trade/preview", json={**BASE, "order_type": "MARKET", "limit": "", "qty": "1"}).get_json()
+    assert d["token"] and d["est"]["last"] == 165.37
+    assert not any("No current price" in b for b in d["blocks"])
