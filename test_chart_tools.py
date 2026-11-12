@@ -229,3 +229,8 @@ def test_header_and_watchlist_agree_overnight(client, monkeypatch):
     head = c.get("/api/terminal/live/SPY").get_json()["quote"]["price"]
     row = next(r for r in c.get("/api/terminal/quotes").get_json()["quotes"] if r["ticker"] == "SPY")
     assert head == row["price"] == 757.27
+
+
+def test_volume_goes_one_color_when_zoomed_far_out():
+    assert "var ctVolDense = false;" in JS and "function ctCheckVolumeDensity()" in JS
+    assert "if (ctVolDense) return 'rgba(120,150,190,0.42)';" in JS

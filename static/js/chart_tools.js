@@ -994,10 +994,23 @@ function ctViewSignature() {
   return [r ? r.from.toFixed(3) : '', r ? r.to.toFixed(3) : '', y1 == null ? '' : y1.toFixed(2), y2 == null ? '' : y2.toFixed(2),
     d.W, d.H, twChartState.type, bars.length].join('|');
 }
+function ctCheckVolumeDensity() {
+  var ch = twChartState.chart, bars = twChartState.bars || [];
+  if (!ch || !bars.length || !twChartState.vol) return;
+  var r = null;
+  try { r = ch.timeScale().getVisibleLogicalRange(); } catch (e) {}
+  if (!r) return;
+  var spacing = ctDims().W / Math.max(1, r.to - r.from);
+  // Hysteresis so a zoom right at the edge doesn't flicker between the two.
+  var dense = ctVolDense ? spacing < 2.2 : spacing < 1.6;
+  if (dense === ctVolDense) return;
+  ctVolDense = dense;
+  try { twChartState.vol.setData(bars.map(function (b) { return {time: b.time, value: b.volume || 0, color: ctVolumeColor(b)}; })); } catch (e) {}
+}
 function ctWatchView() {
   if (!document.hidden && ctStore.ticker && ctStore.ticker === twChartState.ticker) {
     var sig = ctViewSignature();
-    if (sig !== ctViewSig) { ctViewSig = sig; twRenderDrawings(); }
+    if (sig !== ctViewSig) { ctViewSig = sig; twRenderDrawings(); ctCheckVolumeDensity(); }
   }
   requestAnimationFrame(ctWatchView);
 }
@@ -1540,7 +1553,11 @@ function ctCandleDatum(bar) {
   if (col) { datum.color = col; datum.wickColor = col; datum.borderColor = col; }
   return datum;
 }
+var ctVolDense = false;
 function ctVolumeColor(bar) {
+  // Zoomed far out each volume bar is narrower than a pixel and red/green
+  // blurs into stripes; use one soft color until there is room for color again.
+  if (ctVolDense) return 'rgba(120,150,190,0.42)';
   var up = bar.close >= bar.open, ext = bar.session && bar.session !== 'regular';
   if (ctPrefs.candles.session && ext) {
     if (bar.session === 'overnight') return up ? 'rgba(240,181,63,.5)' : 'rgba(255,140,66,.5)';
