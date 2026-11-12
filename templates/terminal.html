@@ -512,7 +512,7 @@
             {% for s in group.stocks %}{{ render_watch_row(s) }}{% endfor %}
           {% endfor %}
         {% else %}
-        <div class="tw-empty">Seeding starter watchlist…<br>Refresh in a moment, or add a symbol with <b>+</b>.</div>
+        <div class="tw-empty">{{ 'This list is empty.' if not watchlist_count else 'Loading your list…' }}<br>Add a symbol with <b>+</b>{{ ' or switch lists above' if all_wls and all_wls|length > 1 }}.</div>
         {% endif %}
       </div>
     </div>
@@ -523,7 +523,7 @@
         <div class="tw-sym-hd">
           <div class="tw-sym-left">
             <div class="tw-sym-toprow">
-              <span class="tw-sym-ticker" id="tw-c-ticker">{{ stocks[0].ticker if stocks else '—' }}</span>
+              <span class="tw-sym-ticker" id="tw-c-ticker">{{ stocks[0].ticker if stocks else chart_symbol }}</span>
               {% if stocks %}
                 {% set b0 = 'bull' if stocks[0].trade_bias == 'Long' else ('bear' if stocks[0].trade_bias == 'Short' else 'neutral') %}
                 <span class="tw-bias {{ b0 }}" id="tw-c-bias">{{ 'BULLISH' if b0=='bull' else ('BEARISH' if b0=='bear' else 'NEUTRAL') }}</span>
@@ -720,8 +720,8 @@
           <div class="tw-chart-hint" id="tw-chart-hint">Hover for OHLCV · click a candle to pin</div>
           <div class="tw-chart-empty" id="tw-chart-empty">
             <div class="tw-chart-icn">📈</div>
-            <div class="tw-chart-msg" id="tw-chart-msg">{{ 'Loading chart…' if stocks else 'No symbol' }}</div>
-            <div class="tw-chart-sub" id="tw-chart-sub">{{ 'Select a watchlist symbol to load its chart.' if stocks else 'The starter watchlist is seeding — refresh shortly.' }}</div>
+            <div class="tw-chart-msg" id="tw-chart-msg">Loading {{ chart_symbol }}…</div>
+            <div class="tw-chart-sub" id="tw-chart-sub">{{ '' if stocks else ('This list is empty — showing ' ~ chart_symbol ~ '. Add a symbol or switch lists.' if not watchlist_count else 'Your list is still loading.') }}</div>
           </div>
         </div>
 
@@ -758,7 +758,7 @@
 
       <div class="tw-panel tw-intel" id="tw-intel">
         <div class="tw-intel-head">
-          <div><span class="tw-intel-kicker">Stock Intelligence</span><h3><span id="tw-intel-ticker">{{ stocks[0].ticker if stocks else '—' }}</span> command deck</h3></div>
+          <div><span class="tw-intel-kicker">Stock Intelligence</span><h3><span id="tw-intel-ticker">{{ stocks[0].ticker if stocks else chart_symbol }}</span> command deck</h3></div>
           <span class="tw-count" id="tw-intel-asof">ticker scoped</span>
         </div>
         <div class="tw-intel-tabs" role="tablist" aria-label="Stock intelligence sections">
@@ -820,9 +820,9 @@
     <!-- RIGHT: stat cards + order ticket -->
     <div class="tw-right">
       <!-- Level 2 + Time & Sales (Schwab streamer, see market_depth.py) -->
-      <section class="dp" id="dp" data-symbol="{{ stocks[0].ticker if stocks else '' }}" aria-label="Level 2 and Time and Sales">
+      <section class="dp" id="dp" data-symbol="{{ stocks[0].ticker if stocks else chart_symbol }}" aria-label="Level 2 and Time and Sales">
         <header class="dp-head">
-          <div class="dp-title"><strong>L2</strong><span>·</span><strong>Time &amp; Sales</strong><b class="dp-sym" id="dp-sym">{{ stocks[0].ticker if stocks else '—' }}</b></div>
+          <div class="dp-title"><strong>L2</strong><span>·</span><strong>Time &amp; Sales</strong><b class="dp-sym" id="dp-sym">{{ stocks[0].ticker if stocks else chart_symbol }}</b></div>
           <span class="dp-status" id="dp-status" data-state="starting"><i></i><span id="dp-status-text">Connecting…</span></span>
         </header>
         <div class="dp-quote" id="dp-quote">
@@ -932,7 +932,7 @@
           </div>
           <div class="tw-field">
             <label for="tw-ot-symbol">Symbol</label>
-            <input class="tw-input" id="tw-ot-symbol" type="text" value="{{ stocks[0].ticker if stocks else '' }}" autocomplete="off" oninput="twEstCost()">
+            <input class="tw-input" id="tw-ot-symbol" type="text" value="{{ stocks[0].ticker if stocks else chart_symbol }}" autocomplete="off" oninput="twEstCost()">
           </div>
           <div class="tw-field">
             <label for="tw-ot-type">Order Type</label>
@@ -2354,8 +2354,11 @@ document.addEventListener('keydown',function(e){
   twApplyIndicatorVisibility();
   twApplyType();
   var first=document.querySelector('.tw-wl-row.active')||document.querySelector('.tw-wl-row');
-  if(first && first.dataset.ticker){ twLoadChart(first.dataset.ticker,twChartState.interval,twChartState.range); twLoadIntelligence(first.dataset.ticker); }
-  else if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load.'); }
+  // No row to start from (empty list, or rows still loading): chart the
+  // server's fallback symbol instead of leaving the chart blank.
+  var bootSym=(first && first.dataset.ticker) || {{ chart_symbol|tojson }};
+  if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load.'); }
+  else if(bootSym){ twLoadChart(bootSym,twChartState.interval,twChartState.range); twLoadIntelligence(bootSym); }
   twEstCost();
   // Seed the change-detector from what the server rendered, so the first poll
   // only flashes prices that actually moved since the page was built.

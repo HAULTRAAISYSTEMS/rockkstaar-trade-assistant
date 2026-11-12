@@ -5486,9 +5486,21 @@ def terminal():
     # the first poll to discover.
     _session = market_session_now()
 
+    # The chart always has a symbol. An empty list (no longer auto-seeded once
+    # the user has several) or a list whose rows haven't loaded yet would
+    # otherwise leave the chart on "No symbol" with nothing to tap.
+    if valid:
+        chart_symbol = valid[0]["ticker"]
+    elif watchlist:
+        chart_symbol = watchlist[0]
+    else:
+        chart_symbol = "SPY"
+
     return render_template(
         "terminal.html",
         stocks=valid,
+        watchlist_count=len(watchlist),
+        chart_symbol=chart_symbol,
         active_wl=active_wl,
         all_wls=_terminal_watchlists(),
         terminal_groups=terminal_groups,
