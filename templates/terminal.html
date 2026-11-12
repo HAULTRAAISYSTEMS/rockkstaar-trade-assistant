@@ -1721,7 +1721,15 @@ function twLoadChart(ticker, interval, range, refreshOnly){
   var candleCtl = ('AbortController' in window) ? new AbortController() : null;
   // Full history is one large first fetch (cached for an hour after); give it longer.
   var candleKill = candleCtl ? setTimeout(function(){ candleCtl.abort(); }, range==='max' ? 45000 : 20000) : null;
-  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session, {cache:'no-store', credentials:'same-origin', signal: candleCtl ? candleCtl.signal : undefined})
+  // Refreshes ask only for the newest bars and merge them in; every 10th
+  // refresh (5 min) reloads the whole range to stay in sync. The live feed
+  // still ticks the forming candle every few seconds either way.
+  var since=0, prevBars=twChartState.bars||[];
+  if(refreshOnly && prevBars.length>3 && twChartState.barsKey===ticker+'|'+interval && twChartState.barsRange===range+'|'+session){
+    twChartState.partialN=(twChartState.partialN||0)+1;
+    if(twChartState.partialN%10) since=Number(prevBars[prevBars.length-3].time)||0;
+  } else if(!refreshOnly){ twChartState.partialN=0; }
+  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session+(since?'&since='+since:''), {cache:'no-store', credentials:'same-origin', signal: candleCtl ? candleCtl.signal : undefined})
     .then(function(r){
       if(candleKill) clearTimeout(candleKill);
       // A deploy, a restart or a proxy timeout answers with an HTML page.
@@ -1745,6 +1753,11 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       if(!d||d.ok===false)throw new Error((d&&d.error)||'Market-data provider unavailable');
       if(d.source_interval&&interval!=='4h'&&d.source_interval!==interval)throw new Error('Feed returned '+d.source_interval+' candles instead of '+interval);
       var bars=(d&&d.bars)||[];
+      if(d.partial){
+        // Keep what's on screen up to the first returned bar, then the new ones.
+        var cut=bars.length?Number(bars[0].time):Infinity;
+        bars=prevBars.filter(function(b){return Number(b.time)<cut;}).concat(bars);
+      }
       if(!bars.length){
         twChartState.area.setData([]); twChartState.candle.setData([]); twChartState.vol.setData([]);
         twChartState.bars=[]; twChartState.barsKey='';
@@ -1771,7 +1784,7 @@ function twLoadChart(ticker, interval, range, refreshOnly){
           });
         twChartState.shade.setData(shadeData);
       }
-      twChartState.bars=bars; twChartState.barsKey=ticker+'|'+interval; twChartState.barMap={}; twChartState.pinnedTime=null;
+      twChartState.bars=bars; twChartState.barsKey=ticker+'|'+interval; twChartState.barsRange=range+'|'+session; twChartState.barMap={}; twChartState.pinnedTime=null;
       twChartState.sessionVwap=twSessionVwap(bars,interval);
       twShowSessionVwap();
       if(twChartState.sessionVwap==null)twLoadSessionVwap(ticker);

@@ -6027,6 +6027,12 @@ def api_terminal_candles(ticker):
     ttl = (15 if interval in {"1m", "5m", "15m"} else 60 if interval in {"1h", "4h"}
            else 3600 if range_str == "max" else 300)
     key = (ticker, interval, range_str, session_mode)
+    # The chart's 30 s refresh sends ?since=<time of a recent bar> and gets
+    # only the bars from there on, instead of the whole range again.
+    try:
+        since = int(request.args.get("since") or 0)
+    except ValueError:
+        since = 0
     cached = _TERMINAL_CANDLE_CACHE.get(key)
     if cached and (_time.time() - cached["ts"]) < ttl:
         market_data = dict(cached.get("market_data") or {})
@@ -6036,7 +6042,8 @@ def api_terminal_candles(ticker):
                         "source_interval": cached.get("source_interval", fetch_interval),
                         "session": session_mode, "adjustment": "split-adjusted",
                         "range": range_str,
-                        "bars": cached["bars"], "cached": True,
+                        "bars": _bars_since(cached["bars"], since), "partial": since > 0,
+                        "cached": True,
                         "market_data": market_data,
                         "extended_summary": cached.get("extended_summary"),
                         "overnight_status": cached.get("overnight_status"),
@@ -6118,11 +6125,18 @@ def api_terminal_candles(ticker):
     return jsonify({"ok": True, "ticker": ticker, "tf": legacy_tf or None,
                     "interval": interval, "source_interval": source_interval,
                     "session": session_mode, "adjustment": "split-adjusted",
-                    "range": range_str, "bars": bars,
+                    "range": range_str, "bars": _bars_since(bars, since), "partial": since > 0,
                     "market_data": {**market_data, "cache_age_seconds": 0},
                     "extended_summary": extended_summary,
                     "overnight_status": overnight_status,
                     "event_endpoint": f"/api/terminal/intelligence/{ticker}"})
+
+
+def _bars_since(bars: list, since: int) -> list:
+    """Bars at or after ``since`` (epoch seconds); all bars when since is 0."""
+    if not since or not bars:
+        return bars
+    return [b for b in bars if int(b.get("time") or 0) >= since]
 
 
 @app.route("/api/terminal/intelligence/<ticker>")
