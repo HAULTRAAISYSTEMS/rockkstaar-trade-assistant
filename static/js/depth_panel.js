@@ -9,6 +9,7 @@
   var sym = (root.getAttribute('data-symbol') || '').toUpperCase();
   var timer = null, inflight = false, lastPrice = null;
   var BIG = 10000;            // shares: a "big print" gets highlighted
+  var NOTE = ($('dp-note') || {}).textContent || '';
   var STATUS = {
     live: 'Live · Schwab', connecting: 'Connecting to Schwab…', starting: 'Connecting…',
     idle: 'Waiting', error: 'Reconnecting…', not_connected: 'Schwab not connected'
@@ -88,9 +89,8 @@
     $('dp-flow-buy').style.width = (b + s) ? (b / (b + s) * 100) + '%' : '50%';
     $('dp-flow-sell').style.width = (b + s) ? (s / (b + s) * 100) + '%' : '50%';
     $('dp-flow-text').textContent = 'At ask ' + sz(b) + ' · At bid ' + sz(s);
-    if (d.status && d.status.state === 'live' && !book.bids.length && !book.asks.length) {
-      $('dp-note').textContent = 'The book is empty — Schwab Level 2 fills during market hours.';
-    }
+    var empty = d.status && d.status.state === 'live' && !book.bids.length && !book.asks.length;
+    $('dp-note').textContent = empty ? 'The book is empty right now — Schwab Level 2 fills while the stock is trading.' : NOTE;
     // Hand the streamer's quote to the rest of the Terminal (chart candle,
     // header price and %, order ticket), so every number on the page is
     // the same real-time print. Only while the feed is actually live.
@@ -99,7 +99,7 @@
     if (fresh && q.last != null) {
       document.dispatchEvent(new CustomEvent('dp:quote', {detail: {
         symbol: sym, last: Number(q.last), bid: q.bid, ask: q.ask, bid_size: q.bid_size, ask_size: q.ask_size,
-        prev_close: q.prev_close, volume: q.volume, trade_ms: q.trade_ms}}));
+        prev_close: q.prev_close, regular_close: q.regular_close, volume: q.volume, trade_ms: q.trade_ms}}));
     }
   }
 

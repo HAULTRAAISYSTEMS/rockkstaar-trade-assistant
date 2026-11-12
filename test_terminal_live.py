@@ -207,3 +207,26 @@ class TestOnePercentageForOneStock:
     def test_the_chart_prefers_it_over_the_previous_days_last_bar(self):
         assert "var baseline=twPrevClose[twChartState.ticker];" in TEMPLATE
         assert "if(!isFinite(baseline)||!baseline)baseline=previous;" in TEMPLATE
+
+
+class TestAfterHours:
+    """After the bell a row's % is the move since today's close, not a mix of
+    the after-hours price against yesterday's close (NVDA read -6.27% when it
+    was +2.87% on the day and -8.88% after hours)."""
+
+    def test_quotes_carry_the_after_hours_move(self, client):
+        live = {"NVDA": {"price": 158.30, "prev_close": 168.88, "change_pct": -6.27, "ext": "post",
+                         "day_close": 173.73, "epoch": 1_800_000_000, "source": "Schwab real-time"}}
+        with patch.object(_app, "get_active_wl_id", return_value=1), \
+             patch.object(_app, "get_watchlist_stocks", return_value=["NVDA"]), \
+             patch.object(_app, "get_all_stock_data", return_value=[{"ticker": "NVDA", "current_price": 173.73}]), \
+             patch.object(_app, "_trigger_exec_state_refresh"), \
+             patch.object(_app._mkt, "live_quotes", return_value=live):
+            q = client.get("/api/terminal/quotes").get_json()["quotes"][0]
+        assert q["ext"] == "post" and q["regular_close"] == 173.73
+        assert q["ext_pct"] == -8.88 and q["ext_chg"] == -15.43 and q["day_pct"] == 2.87
+
+    def test_terminal_shows_extended_on_its_own_line_and_defaults_extended_on(self):
+        assert 'id="tw-c-ext"' in TEMPLATE and "function twShowExt(" in TEMPLATE
+        assert "twSavedExtended = _xv === null ? true : _xv === '1';" in TEMPLATE
+        assert "var extTag = {post:'AH ', pre:'PRE ', overnight:'O/N '}[q.ext]" in TEMPLATE

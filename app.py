@@ -5634,6 +5634,18 @@ def api_terminal_quotes():
                 r["gap_class"] = "positive" if q["change_pct"] >= 0 else "negative"
             r["live"] = True
             r["source"] = q.get("source") or r.get("source") or ""
+            # Extended hours: what the stock is doing since the bell. After
+            # hours that is measured from today's regular close (the day's own
+            # % stays separate); pre-market from yesterday's close.
+            ext = q.get("ext")
+            r["ext"] = ext
+            base = q.get("day_close") if ext in ("post", "overnight") else q.get("prev_close")
+            if ext and base:
+                r["regular_close"] = round(float(base), 2)
+                r["ext_pct"] = round((float(q["price"]) / float(base) - 1) * 100, 2)
+                r["ext_chg"] = round(float(q["price"]) - float(base), 2)
+                if ext in ("post", "overnight") and q.get("prev_close"):
+                    r["day_pct"] = round((float(base) / float(q["prev_close"]) - 1) * 100, 2)
             if q.get("epoch"):
                 from zoneinfo import ZoneInfo as _ZI
                 r["as_of"] = datetime.fromtimestamp(q["epoch"], _ZI("America/New_York")).strftime("%-I:%M:%S %p ET")
