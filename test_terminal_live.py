@@ -229,6 +229,9 @@ class TestAfterHours:
     def test_terminal_shows_extended_on_its_own_line_and_defaults_extended_on(self):
         assert 'id="tw-c-ext"' in TEMPLATE and "function twShowExt(" in TEMPLATE
         assert "twSavedExtended = _xv === null ? true : _xv === '1';" in TEMPLATE
+        # Switching to 1D/4H must not switch the intraday Extended view off.
+        assert "twChartState.extended = twExtendedPref && ['4h','1d'].indexOf(twChartState.interval)<0;" in TEMPLATE
+        assert "chartExtended.v2" not in TEMPLATE
         assert "var extTag = {post:'AH ', pre:'PRE ', overnight:'O/N '}[q.ext]" in TEMPLATE
 
 
