@@ -133,7 +133,8 @@ def _alpaca_bars(ticker: str, interval: str, range_str: str,
         return None, None
     headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
     end = datetime.now(timezone.utc)
-    start = end - timedelta(days=days)
+    # Alpaca's history starts in 2016; asking for earlier can be refused.
+    start = max(end - timedelta(days=days), datetime(2015, 1, 1, tzinfo=timezone.utc))
     for feed in _feed_candidates():
         params = {
             "timeframe": timeframe,

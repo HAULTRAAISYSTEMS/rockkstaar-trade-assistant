@@ -248,7 +248,7 @@ def test_live_feed_measures_after_hours_from_todays_close(client):
 def test_selecting_a_row_after_hours_and_candle_timeout():
     assert "if(d.ext && d.ext !== 'pre' && Number(d.regclose) > 0){" in TEMPLATE
     assert "row.dataset.regclose = q.regular_close || '';" in TEMPLATE
-    assert "candleCtl.abort(); }, 20000)" in TEMPLATE and "e.name==='AbortError'" in TEMPLATE
+    assert "candleCtl.abort(); }, range==='max' ? 45000 : 20000)" in TEMPLATE and "e.name==='AbortError'" in TEMPLATE
 
 
 def test_extended_4h_candles_follow_the_et_clock():

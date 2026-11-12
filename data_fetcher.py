@@ -385,6 +385,7 @@ def _fetch_ohlcv_via_chart_api(
     interval: str = "1d",
     range_str: str = "1y",
     include_prepost: bool = False,
+    period: tuple | None = None,
 ) -> dict | None:
     """
     Fetch OHLCV bars directly from Yahoo Finance's chart API.
@@ -429,6 +430,11 @@ def _fetch_ohlcv_via_chart_api(
         "includePrePost": "true" if include_prepost else "false",
         "events": "div,splits",
     }
+    if range_str == "max" and period is None:
+        return _fetch_full_history_chunked(ticker, interval)
+    if period is not None:
+        params.pop("range")
+        params["period1"], params["period2"] = int(period[0]), int(period[1])
 
     for url in _CHART_URLS:
         try:
@@ -476,6 +482,66 @@ def _fetch_ohlcv_via_chart_api(
             )
             continue
     return None
+
+
+_FULL_HISTORY_START = -252460800   # 1962-01-01: Yahoo's oldest US equity data
+_FULL_HISTORY_CHUNK = 10 * 365 * 86400
+
+
+def _fetch_full_history_chunked(ticker: str, interval: str) -> dict | None:
+    """Every bar since listing, fetched in 10-year windows and joined.
+
+    Yahoo truncates or downsamples range=max for daily and weekly candles
+    (daily came back as 3-month bars), so ask for explicit 10-year windows in
+    parallel. Windows before the listing are empty; a missing window after the
+    first one with data would leave a hole, so then return None and let the
+    caller fall back.
+    """
+    import time as _t
+    from concurrent.futures import ThreadPoolExecutor
+
+    end = int(_t.time()) + 86400
+    windows = []
+    start = _FULL_HISTORY_START
+    while start < end:
+        windows.append((start, min(start + _FULL_HISTORY_CHUNK, end)))
+        start += _FULL_HISTORY_CHUNK
+    with ThreadPoolExecutor(max_workers=len(windows)) as pool:
+        parts = list(pool.map(
+            lambda w: _fetch_ohlcv_via_chart_api(ticker, interval=interval, range_str="custom", period=w),
+            windows))
+    seen_data = False
+    for part in parts:
+        has = bool(part and part.get("timestamps"))
+        if has:
+            seen_data = True
+        elif seen_data:
+            logger.info("full history %s %s: a window failed; not joining a partial history", ticker, interval)
+            return None
+    parts = [p for p in parts if p and p.get("timestamps")]
+    if not parts:
+        return None
+    grans = {p.get("data_granularity") for p in parts}
+    if len(grans) != 1:
+        return None
+    merged: dict = {}
+    for key in ("timestamps", "opens", "highs", "lows", "closes", "volumes"):
+        merged[key] = []
+    seen = set()
+    for part in parts:
+        for i, ts in enumerate(part["timestamps"]):
+            if ts in seen:
+                continue
+            seen.add(ts)
+            for key in ("timestamps", "opens", "highs", "lows", "closes", "volumes"):
+                merged[key].append(part[key][i])
+    order = sorted(range(len(merged["timestamps"])), key=lambda i: merged["timestamps"][i])
+    for key in ("timestamps", "opens", "highs", "lows", "closes", "volumes"):
+        merged[key] = [merged[key][i] for i in order]
+    merged["data_granularity"] = grans.pop()
+    merged["exchange_timezone"] = parts[-1].get("exchange_timezone")
+    merged["currency"] = parts[-1].get("currency")
+    return merged
 
 
 def _bar_date(ts) -> str | None:

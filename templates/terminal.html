@@ -1719,7 +1719,8 @@ function twLoadChart(ticker, interval, range, refreshOnly){
   // A request the server never answers used to leave "Loading…" up for good.
   // Give up after 20 s and fall into the retry path below.
   var candleCtl = ('AbortController' in window) ? new AbortController() : null;
-  var candleKill = candleCtl ? setTimeout(function(){ candleCtl.abort(); }, 20000) : null;
+  // Full history is one large first fetch (cached for an hour after); give it longer.
+  var candleKill = candleCtl ? setTimeout(function(){ candleCtl.abort(); }, range==='max' ? 45000 : 20000) : null;
   fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session, {cache:'no-store', credentials:'same-origin', signal: candleCtl ? candleCtl.signal : undefined})
     .then(function(r){
       if(candleKill) clearTimeout(candleKill);
