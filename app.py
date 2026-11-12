@@ -5785,8 +5785,12 @@ def api_terminal_live(ticker):
             q = (_mkt.live_quotes([ticker]) or {}).get(ticker)
             if q and q.get("price") is not None:
                 base = q.get("prev_close")
+                # After the bell the extended move is measured from today's
+                # regular close, not yesterday's (that read NVDA -5.15% AH
+                # when it was -8.88% from the close).
+                reg = q.get("day_close") if q.get("ext") in ("post", "overnight") and q.get("day_close") else base
                 quote = {"price": q["price"], "epoch": q.get("epoch"),
-                         "prev_close": base, "regular_close": base,
+                         "prev_close": base, "regular_close": reg,
                          "ext": q.get("ext"), "source": q.get("source") or "",
                          "day_open": q.get("day_open"), "day_high": q.get("day_high"),
                          "day_low": q.get("day_low"), "day_volume": q.get("day_volume"),
