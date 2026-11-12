@@ -37,6 +37,11 @@ def _now() -> datetime:
 # ── Tables ───────────────────────────────────────────────────────────────────
 
 def ensure_tables(conn) -> None:
+    from database import ensure_schema
+    ensure_schema(conn, 'insider_feed', ['insider_trades', 'idx_insider_trades_ticker', 'idx_insider_trades_side', 'insider_feed_seen'], _create_tables)
+
+
+def _create_tables(conn) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS insider_trades (
             id TEXT PRIMARY KEY,
@@ -231,8 +236,9 @@ def process(conn, filings: list[dict], *, budget: int, get, deadline: float) -> 
         except Exception as exc:
             stats["errors"] += 1
             logger.debug("insider feed %s: %s", f["accession"], exc)
-        if stats["checked"] % 25 == 0:
-            conn.commit()
+        # Commit each filing: the next one is a network fetch, and an open
+        # transaction must not sit on its row locks across it.
+        conn.commit()
     conn.commit()
     return stats
 

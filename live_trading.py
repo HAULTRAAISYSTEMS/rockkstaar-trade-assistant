@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS live_orders (
 
 
 def _ensure(conn) -> None:
+    from database import ensure_schema
+    ensure_schema(conn, 'live_trading', ['live_orders', 'idx_live_orders_user_day'], _create_tables)
+
+
+def _create_tables(conn) -> None:
     conn.execute(_DDL)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_live_orders_user_day ON live_orders(user_id, trade_date)")
 

@@ -31,6 +31,13 @@ def _merge(total, summary, prefix=""):
     total["drafts_created"] += summary["created"]; total["duplicates"] += summary["duplicates"]; total["malformed_skipped"] += summary["skipped"]
     total["errors"].extend((prefix+e) for e in summary["errors"])
 
+def _checkpoint(conn):
+    """Commit between steps. Each step ends in network calls (news, SEC,
+    push services); one transaction for the whole run kept every row it
+    touched locked for minutes while the web app waited on them."""
+    try: conn.commit()
+    except Exception: pass
+
 def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
     priority=[str(t).strip().upper() for t in (tickers or _tickers_from_env()) if str(t).strip()]
     conn=get_db()
@@ -45,39 +52,46 @@ def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
             if stats.get("samples"): total["samples"]=stats["samples"]
             _merge(total, ingest(items, actor, conn), "discovery:")
         except Exception as exc: total["provider_failures"].append("discovery:"+type(exc).__name__)
+        _checkpoint(conn)
         for ticker in priority:
             try:
                 news=fetch_headlines(ticker); items=finnhub_articles_to_items(ticker,_company_name(ticker),news.articles)
                 _merge(total, ingest(items,actor,conn),ticker+":")
             except Exception as exc: total["provider_failures"].append(ticker+":"+type(exc).__name__)
+            _checkpoint(conn)
         try:
             gate=autopublish.auto_publish(conn, actor)
             total["auto_publish_enabled"]=gate["enabled"]; total["auto_published"]=gate["published"]
             total["errors"].extend("autopublish:"+e for e in gate["errors"])
         except Exception as exc: total["errors"].append("autopublish:"+type(exc).__name__)
+        _checkpoint(conn)
         # Command Center alerts. Each source is interval-gated inside the sync,
         # so this is a cheap no-op on most 5-minute firings.
         try:
             total.update(insider_alert_sync.run(conn, priority))
         except Exception as exc: total["errors"].append("alert_sync:"+type(exc).__name__)
+        _checkpoint(conn)
         # Retire items nobody reviewed in time, before measuring depth so the
         # number reported is what is actually still waiting. No-op unless
         # LIVE_RESEARCH_EXPIRE_DAYS is set.
         try:
             total.update(live_research_expiry.run(conn))
         except Exception as exc: total["errors"].append("expiry:"+type(exc).__name__)
+        _checkpoint(conn)
         # Delivery is a separate, opt-in boundary. It sees published research
         # only and is a no-op unless SMS_ALERTS_ENABLED is explicitly enabled.
         try:
             total.update(sms_alerts.deliver_pending(conn))
         except Exception as exc:
             total["errors"].append("sms:"+type(exc).__name__)
+        _checkpoint(conn)
         # Standards-based browser push has no paid provider. Subscriptions are
         # explicit per device and delivery uses the same thesis-aware boundary.
         try:
             total.update(browser_push.deliver_pending(conn))
         except Exception as exc:
             total["errors"].append("push:"+type(exc).__name__)
+        _checkpoint(conn)
         # The earnings and catalyst calendar, as a second push source. Its own
         # counters rather than update(): a research push failing and a
         # calendar push failing are different problems, and a merged total
@@ -89,6 +103,7 @@ def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
             total["errors"].extend(cal.get("push_errors", []))
         except Exception as exc:
             total["errors"].append("calendar_push:" + type(exc).__name__)
+        _checkpoint(conn)
         # Fundamentals changes — the page was always right, it just never
         # came to find you when a ratio crossed a line that matters.
         try:
@@ -98,6 +113,7 @@ def run(tickers: Iterable[str]|None=None, *, discovery_fetchers=None):
             total["errors"].extend(fund.get("push_errors", []))
         except Exception as exc:
             total["errors"].append("fundamentals_push:" + type(exc).__name__)
+        _checkpoint(conn)
         # Queue depth. drafts_created is 0 on most firings by design - a story
         # creates a draft once, on the first run after it appears, and the next
         # 5-minute run correctly sees it as a duplicate. Reading a single run
