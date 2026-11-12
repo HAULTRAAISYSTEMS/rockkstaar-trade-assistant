@@ -5875,6 +5875,75 @@ def _with_todays_daily_bar(ticker: str, bars: list, quote: dict | None = None) -
         return bars
 
 
+_CHART_TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-^=/]{0,14}$")
+_CHART_DRAWINGS_MAX = 300
+_CHART_DRAWINGS_BYTES = 256 * 1024
+_CHART_PREFS_BYTES = 32 * 1024
+
+
+@app.route("/api/chart/drawings/<ticker>", methods=["GET", "PUT"])
+def api_chart_drawings(ticker):
+    """Chart markups for one symbol, shared by every timeframe and device.
+
+    Stored per user as one JSON blob: {"updated": ms, "drawings": [...]}.
+    The browser keeps its own copy and the newer of the two wins.
+    """
+    sym = (ticker or "").strip().upper()
+    if not _CHART_TICKER_RE.match(sym):
+        return jsonify({"ok": False, "error": "bad ticker"}), 400
+    uid = current_user_id()
+    key = "chart_drawings:" + sym
+    if request.method == "GET":
+        raw = get_user_setting(uid, key)
+        try:
+            data = _json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            data = {}
+        return jsonify({"ok": True, "ticker": sym,
+                        "updated": int(data.get("updated") or 0),
+                        "drawings": data.get("drawings") or []})
+    body = request.get_json(silent=True) or {}
+    drawings = body.get("drawings")
+    if not isinstance(drawings, list) or len(drawings) > _CHART_DRAWINGS_MAX:
+        return jsonify({"ok": False, "error": "drawings must be a list of at most %d" % _CHART_DRAWINGS_MAX}), 400
+    if not all(isinstance(d, dict) and isinstance(d.get("type"), str) and isinstance(d.get("points"), list)
+               for d in drawings):
+        return jsonify({"ok": False, "error": "malformed drawing"}), 400
+    try:
+        updated = int(body.get("updated") or 0)
+    except (TypeError, ValueError):
+        updated = 0
+    if updated <= 0:
+        updated = int(_time.time() * 1000)
+    payload = _json.dumps({"updated": updated, "drawings": drawings}, separators=(",", ":"))
+    if len(payload) > _CHART_DRAWINGS_BYTES:
+        return jsonify({"ok": False, "error": "too many drawings to save"}), 413
+    set_user_setting(uid, key, payload)
+    return jsonify({"ok": True, "updated": updated, "count": len(drawings)})
+
+
+@app.route("/api/chart/prefs", methods=["GET", "PUT"])
+def api_chart_prefs():
+    """Chart overlay settings and drawing-tool defaults, synced across devices."""
+    uid = current_user_id()
+    if request.method == "GET":
+        raw = get_user_setting(uid, "chart_prefs")
+        try:
+            prefs = _json.loads(raw) if raw else None
+        except (TypeError, ValueError):
+            prefs = None
+        return jsonify({"ok": True, "prefs": prefs if isinstance(prefs, dict) else None})
+    body = request.get_json(silent=True) or {}
+    prefs = body.get("prefs")
+    if not isinstance(prefs, dict):
+        return jsonify({"ok": False, "error": "prefs must be an object"}), 400
+    payload = _json.dumps(prefs, separators=(",", ":"))
+    if len(payload) > _CHART_PREFS_BYTES:
+        return jsonify({"ok": False, "error": "prefs too large"}), 413
+    set_user_setting(uid, "chart_prefs", payload)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/terminal/candles/<ticker>")
 def api_terminal_candles(ticker):
     """Return OHLCV bars for the terminal chart from the existing data feed."""
