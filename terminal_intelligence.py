@@ -61,6 +61,52 @@ def aggregate_ohlcv_bars(bars: list[dict], size: int = 4) -> list[dict]:
     return aggregated
 
 
+_EXT_SESSIONS = {"premarket", "after_hours", "overnight"}
+
+
+def clean_extended_wicks(bars: list[dict], window: int = 12) -> list[dict]:
+    """Remove bad prints from thin extended-hours bars.
+
+    Pre-market, after-hours and overnight volume is thin, and the raw feeds
+    carry the occasional odd-lot or off-exchange print far from the market —
+    SPY at 756 showed wicks down to 715. TradingView filters those; we drew
+    them as long lines through the chart. For an extended-hours bar, a wick
+    reaching further than max(0.5% of price, 8× the typical bar range) past
+    its own body is cut back to the body; a bar whose open/close is itself
+    that far from the surrounding prices is dropped. Regular-session bars are
+    never touched.
+    """
+    from statistics import median
+    if len(bars) < 5:
+        return bars
+    closes = [float(b["close"]) for b in bars]
+    ranges = [max(float(b["high"]) - float(b["low"]), 0.0) for b in bars]
+    out = []
+    for i, bar in enumerate(bars):
+        if bar.get("session") not in _EXT_SESSIONS:
+            out.append(bar)
+            continue
+        lo_i, hi_i = max(0, i - window), min(len(bars), i + window + 1)
+        near = [closes[j] for j in range(lo_i, hi_i) if j != i]
+        rng = [ranges[j] for j in range(lo_i, hi_i) if j != i and ranges[j] > 0]
+        if not near:
+            out.append(bar)
+            continue
+        mid = median(near)
+        limit = max(mid * 0.005, (median(rng) if rng else 0.0) * 8)
+        o, c = float(bar["open"]), float(bar["close"])
+        if abs(c - mid) > limit * 2 and abs(o - mid) > limit * 2:
+            continue                              # the whole bar is a bad print
+        body_lo, body_hi = min(o, c), max(o, c)
+        fixed = dict(bar)
+        if body_lo - float(bar["low"]) > limit:
+            fixed["low"] = body_lo
+        if float(bar["high"]) - body_hi > limit:
+            fixed["high"] = body_hi
+        out.append(fixed)
+    return out
+
+
 def aggregate_extended_4h(bars: list[dict]) -> list[dict]:
     """Hourly bars incl. pre/after-hours → 4-hour candles on the ET clock
     (4-8 AM, 8-12, 12-4 PM, 4-8 PM, 8 PM-midnight, midnight-4 AM), the way

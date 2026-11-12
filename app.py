@@ -5951,6 +5951,10 @@ def api_terminal_candles(ticker):
         bars = annotate_market_sessions(
             bars, (data or {}).get("exchange_timezone") or "America/New_York"
         )
+        # Thin pre/after-hours/overnight feeds carry stray prints (SPY wicks
+        # to 715 at 756); filter them the way TradingView does.
+        from terminal_intelligence import clean_extended_wicks
+        bars = clean_extended_wicks(bars)
         extended_summary = summarize_extended_sessions(bars)
 
     source_interval = (data or {}).get("data_granularity") or fetch_interval

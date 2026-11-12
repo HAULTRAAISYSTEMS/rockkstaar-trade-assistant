@@ -272,3 +272,22 @@ def test_4h_accepts_extended_and_the_toggle_allows_it():
     assert '"4h":14400' in TEMPLATE
     src = Path(_app.__file__).read_text()
     assert 'interval not in {"1m", "5m", "15m", "1h", "4h"}' in src
+
+
+def test_extended_bad_prints_are_filtered_not_drawn():
+    """SPY at 756 drew after-hours wicks down to 715; TradingView doesn't."""
+    from terminal_intelligence import clean_extended_wicks
+    bars = []
+    for i in range(30):
+        px = 756 + (i % 3) * 0.05
+        bars.append({"time": i * 300, "open": px, "high": px + 0.1, "low": px - 0.1, "close": px + 0.02,
+                     "volume": 100, "session": "after_hours" if i >= 20 else "regular"})
+    bars[24]["low"] = 715.0                               # stray print
+    bars[26] = dict(bars[26], open=640.0, close=641.0, high=641.0, low=640.0)   # whole bar bad
+    bars[5]["low"] = 740.0                                # regular session: left alone
+    out = clean_extended_wicks(bars)
+    by_t = {b["time"]: b for b in out}
+    assert by_t[24 * 300]["low"] == min(bars[24]["open"], bars[24]["close"])
+    assert 26 * 300 not in by_t
+    assert by_t[5 * 300]["low"] == 740.0
+    assert len(out) == 29
