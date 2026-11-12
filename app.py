@@ -5567,7 +5567,43 @@ _TERMINAL_INTERVALS = {
     "1w": {"fetch": "1d", "ranges": ("1y", "2y", "5y", "10y", "max"), "default": "5y"},
     "1mo": {"fetch": "1d", "ranges": ("5y", "10y", "max"), "default": "max"},
 }
-_TERMINAL_CANDLE_CACHE: dict = {}  # (ticker, interval, range) -> {"ts": epoch, "bars": [...]}
+_TERMINAL_CANDLE_CACHE: dict = {}  # (ticker, interval, range, session) -> {"ts", "ttl", "bars", ...}
+# The cache was never trimmed: every symbol x interval x range stayed in memory
+# for the life of the worker. A full-history chart is ~12k bars (~5 MB), so a
+# session clicking through a 120-stock list pushed workers past Render's
+# memory limit and the app restarted ("crashed"). Keep it bounded.
+_CANDLE_CACHE_MAX_BARS = 120_000
+_CANDLE_CACHE_MAX_ENTRIES = 300
+_CANDLE_CACHE_LOCK = threading.Lock()
+
+
+def _candle_cache_get(key, ttl: float):
+    with _CANDLE_CACHE_LOCK:
+        entry = _TERMINAL_CANDLE_CACHE.get(key)
+        if not entry:
+            return None
+        if _time.time() - entry["ts"] >= ttl:
+            _TERMINAL_CANDLE_CACHE.pop(key, None)
+            return None
+        # Most recently used goes to the end (dicts keep insertion order).
+        _TERMINAL_CANDLE_CACHE[key] = _TERMINAL_CANDLE_CACHE.pop(key)
+        return entry
+
+
+def _candle_cache_put(key, entry: dict) -> None:
+    with _CANDLE_CACHE_LOCK:
+        _TERMINAL_CANDLE_CACHE.pop(key, None)
+        _TERMINAL_CANDLE_CACHE[key] = entry
+        now = _time.time()
+        for k in [k for k, e in _TERMINAL_CANDLE_CACHE.items() if now - e["ts"] >= e.get("ttl", 300)]:
+            _TERMINAL_CANDLE_CACHE.pop(k, None)
+        total = sum(len(e.get("bars") or ()) for e in _TERMINAL_CANDLE_CACHE.values())
+        while _TERMINAL_CANDLE_CACHE and (total > _CANDLE_CACHE_MAX_BARS
+                                          or len(_TERMINAL_CANDLE_CACHE) > _CANDLE_CACHE_MAX_ENTRIES):
+            oldest = next(iter(_TERMINAL_CANDLE_CACHE))
+            if oldest == key and len(_TERMINAL_CANDLE_CACHE) == 1:
+                break
+            total -= len(_TERMINAL_CANDLE_CACHE.pop(oldest).get("bars") or ())
 
 
 # What the Terminal's status pill says for each trading session. One place,
@@ -6041,8 +6077,8 @@ def api_terminal_candles(ticker):
         since = int(request.args.get("since") or 0)
     except ValueError:
         since = 0
-    cached = _TERMINAL_CANDLE_CACHE.get(key)
-    if cached and (_time.time() - cached["ts"]) < ttl:
+    cached = _candle_cache_get(key, ttl)
+    if cached:
         market_data = dict(cached.get("market_data") or {})
         market_data["cache_age_seconds"] = max(0, int(_time.time() - cached["ts"]))
         return jsonify({"ok": True, "ticker": ticker, "tf": legacy_tf or None,
@@ -6124,12 +6160,12 @@ def api_terminal_candles(ticker):
         from terminal_intelligence import aggregate_calendar_bars
         bars = aggregate_calendar_bars(bars, "week" if interval == "1w" else "month")
 
-    _TERMINAL_CANDLE_CACHE[key] = {
-        "ts": _time.time(), "bars": bars, "source_interval": source_interval,
+    _candle_cache_put(key, {
+        "ts": _time.time(), "ttl": ttl, "bars": bars, "source_interval": source_interval,
         "market_data": market_data,
         "extended_summary": extended_summary,
         "overnight_status": overnight_status,
-    }
+    })
     return jsonify({"ok": True, "ticker": ticker, "tf": legacy_tf or None,
                     "interval": interval, "source_interval": source_interval,
                     "session": session_mode, "adjustment": "split-adjusted",
