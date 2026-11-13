@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="cc27 cc27-auth">
+<html lang="en" class="cc27 cc27-auth" style="overflow-x:clip">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -261,7 +261,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/command_center.css') }}" />
 <script src="{{ url_for('static', filename='js/csrf.js') }}" defer></script>
 </head>
-<body>
+<body style="overflow-x:clip">
   <canvas id="cc3d-backdrop" aria-hidden="true"></canvas>
   <div id="cc3d-veil" aria-hidden="true"></div>
 
@@ -333,6 +333,7 @@
           </div>
 
           <button type="submit" class="login-btn">✦ Create Account</button>
+          <div class="legal-links" style="margin-top:14px;text-align:center;font:500 12px/1.5 Inter,sans-serif;color:#6d7b90">By continuing you agree to the <a href="/terms" style="color:#8fd3ff">Terms</a> and <a href="/privacy" style="color:#8fd3ff">Privacy Policy</a> · <a href="/support" style="color:#8fd3ff">Support</a><br>Not financial advice. Trading involves risk.</div>
         </div>
       </form>
 
