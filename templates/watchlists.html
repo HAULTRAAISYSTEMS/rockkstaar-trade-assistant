@@ -193,7 +193,7 @@
         <label class="col gap-1 full"><span class="faint" style="font-size:11px">TARGET PRICE</span><input class="hx-input" name="target_price" type="number" min="0.0001" max="10000000" step="0.0001" inputmode="decimal" required placeholder="$ 150.00"></label>
         <button class="btn btn-primary full" type="submit">Create Alert</button>
       </form>
-      <div class="faint" style="font-size:11px;line-height:1.5;margin-top:10px">Threshold status uses Tradestaar's latest cached quote. Live push delivery will require the notification service connection.</div>
+      <div class="faint" style="font-size:11px;line-height:1.5;margin-top:10px">Checked every 10 seconds against the live quote. When the price reaches your target you get a notification (inbox + push on devices with notifications on) and the alert switches off. You can also set alerts straight from a line on the Terminal chart.</div>
     </div>
   </div>
 
@@ -209,12 +209,14 @@
                being read on a Sunday. The crossing is real either way; when
                it happened is what was missing, so a hit off a price that is
                not live says "AS OF" instead of asserting now. #}
-            {% if a.triggered and a.quote and not a.quote.live %}<span class="badge badge-pos is-asof" title="Your target was crossed at this price. It is not a live quote — {{ a.quote.caveat or (a.quote.source_name ~ ' · ' ~ (a.quote.as_of or 'time unknown')) }}">TARGET HIT · AS OF {{ a.quote.as_of or 'UNKNOWN' }}</span>
+            {% if a.triggered_at %}<span class="badge badge-pos" title="Fired {{ a.triggered_at[:16].replace('T', ' ') }} ET">FIRED · ${{ '%.2f'|format(a.triggered_price or a.target_price) }}</span>
+            {% elif a.triggered and a.quote and not a.quote.live %}<span class="badge badge-pos is-asof" title="Your target was crossed at this price. It is not a live quote — {{ a.quote.caveat or (a.quote.source_name ~ ' · ' ~ (a.quote.as_of or 'time unknown')) }}">TARGET HIT · AS OF {{ a.quote.as_of or 'UNKNOWN' }}</span>
             {% elif a.triggered %}<span class="badge badge-pos">TARGET HIT</span>
             {% elif not a.enabled %}<span class="badge badge-neutral">PAUSED</span>
             {% else %}<span class="badge badge-info">MONITORING</span>{% endif %}
           </div>
           <div style="font-size:13px;margin-top:5px">Notify when price is <b>{{ a.direction }}</b> <b>${{ '%.2f'|format(a.target_price) }}</b></div>
+          {% if a.note %}<div class="faint" style="font-size:11px;margin-top:2px">{{ a.note }}{% if a.source == 'chart' %} · from chart{% endif %}</div>{% endif %}
           <div class="faint" style="font-size:11px;margin-top:3px">Latest: {{ ('$%.2f'|format(a.current_price)) if a.current_price is not none else 'quote pending' }}{%
             if a.current_price is not none and a.quote %} · {{ a.quote.source_name }}{% if a.quote.as_of %} · {{ a.quote.as_of }}{% else %} · time unknown{% endif %}{%
             endif %}</div>

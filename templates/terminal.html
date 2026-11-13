@@ -558,7 +558,7 @@
         <div class="tw-sym-hd">
           <div class="tw-sym-left">
             <div class="tw-sym-toprow">
-              <span class="tw-sym-ticker" id="tw-c-ticker">{{ stocks[0].ticker if stocks else chart_symbol }}</span>
+              <span class="tw-sym-ticker" id="tw-c-ticker">{{ requested_symbol or (stocks[0].ticker if stocks else chart_symbol) }}</span>
               {% if stocks %}
                 {% set b0 = 'bull' if stocks[0].trade_bias == 'Long' else ('bear' if stocks[0].trade_bias == 'Short' else 'neutral') %}
                 <span class="tw-bias {{ b0 }}" id="tw-c-bias">{{ 'BULLISH' if b0=='bull' else ('BEARISH' if b0=='bear' else 'NEUTRAL') }}</span>
@@ -601,6 +601,7 @@
           <label class="tw-range-wrap"><span class="tw-control-label">Range</span><select id="tw-range" class="tw-range-select" onchange="twRange(this.value)"></select></label>
           <button type="button" class="tw-fs-btn" id="tw-settings-btn" onclick="twToggleStudySettings()" title="Chart settings" aria-label="Chart settings"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
           <button type="button" class="tw-fs-btn" id="tw-fs-btn" onclick="twToggleFullscreen()" title="Full screen chart (Esc to exit)" aria-label="Full screen chart" aria-pressed="false"><svg class="tw-fs-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="tw-fs-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
+          <button type="button" class="tw-fs-btn" id="tw-layout-btn" onclick="twToggleLayouts(event)" title="Layouts — save and switch chart setups" aria-label="Chart layouts" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M10 10v10"/></svg></button>
           <button type="button" class="tw-fs-btn tw-size-btn" id="tw-size-btn" onclick="twToggleSize()" title="Size a trade: tap entry, then stop" aria-label="Position size tool" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M5 7h14M5 7l-3 6a3 3 0 0 0 6 0zM19 7l-3 6a3 3 0 0 0 6 0z"/></svg></button>
           <button type="button" class="tw-draw-toggle" id="tw-draw-toggle" onclick="twToggleDrawbar()" title="Drawing tools" aria-label="Drawing tools" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg></button>
           <div class="tw-type" aria-label="Chart tools">
@@ -638,7 +639,7 @@
         </div>
 
         <div class="tw-study-settings" id="tw-study-settings" hidden>
-          <div class="tw-study-head"><div><strong>Chart settings</strong><span>Saved to your account · syncs to your devices</span></div><button type="button" onclick="twToggleStudySettings()" aria-label="Close chart settings">×</button></div>
+          <div class="tw-study-head"><div><strong>Chart settings</strong><span>Saved to your account · syncs to your devices · press <kbd>?</kbd> for shortcuts</span></div><button type="button" class="tw-study-layouts" onclick="twToggleLayouts(event)">Layouts &amp; grid</button><button type="button" onclick="twToggleStudySettings()" aria-label="Close chart settings">×</button></div>
           <div class="ct-tabs" role="tablist">
             <button type="button" role="tab" data-ct-tab="candles" class="on">Candles</button>
             <button type="button" role="tab" data-ct-tab="scale">Scale &amp; view</button>
@@ -656,6 +657,8 @@
             <div class="tw-study-group" data-tab="candles"><h4>Extended hours</h4>
               <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.session"><span>Color pre/after-hours candles by session (blue / purple)</span></label>
               <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.shading" checked><span>Shade pre/after-hours background</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.sessions" checked><span>Mark the open, close and each new day on intraday charts</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.events" checked><span>Show earnings dates and news on the time axis</span></label>
               <p class="tw-study-note">Pre-market and after-hours candles use the same up/down colors as the regular session unless session colors are on.</p>
             </div>
             <div class="tw-study-group" data-tab="candles"><h4>Volume</h4>
@@ -793,7 +796,7 @@
 
       <div class="tw-panel tw-intel" id="tw-intel">
         <div class="tw-intel-head">
-          <div><span class="tw-intel-kicker">Stock Intelligence</span><h3><span id="tw-intel-ticker">{{ stocks[0].ticker if stocks else chart_symbol }}</span> command deck</h3></div>
+          <div><span class="tw-intel-kicker">Stock Intelligence</span><h3><span id="tw-intel-ticker">{{ requested_symbol or (stocks[0].ticker if stocks else chart_symbol) }}</span> command deck</h3></div>
           <span class="tw-count" id="tw-intel-asof">ticker scoped</span>
         </div>
         <div class="tw-intel-tabs" role="tablist" aria-label="Stock intelligence sections">
@@ -855,9 +858,9 @@
     <!-- RIGHT: stat cards + order ticket -->
     <div class="tw-right">
       <!-- Level 2 + Time & Sales (Schwab streamer, see market_depth.py) -->
-      <section class="dp" id="dp" data-symbol="{{ stocks[0].ticker if stocks else chart_symbol }}" aria-label="Level 2 and Time and Sales">
+      <section class="dp" id="dp" data-symbol="{{ requested_symbol or (stocks[0].ticker if stocks else chart_symbol) }}" aria-label="Level 2 and Time and Sales">
         <header class="dp-head">
-          <div class="dp-title"><strong>L2</strong><span>·</span><strong>Time &amp; Sales</strong><b class="dp-sym" id="dp-sym">{{ stocks[0].ticker if stocks else chart_symbol }}</b></div>
+          <div class="dp-title"><strong>L2</strong><span>·</span><strong>Time &amp; Sales</strong><b class="dp-sym" id="dp-sym">{{ requested_symbol or (stocks[0].ticker if stocks else chart_symbol) }}</b></div>
           <span class="dp-status" id="dp-status" data-state="starting"><i></i><span id="dp-status-text">Connecting…</span></span>
         </header>
         <div class="dp-quote" id="dp-quote">
@@ -993,7 +996,7 @@
           </div>
           <div class="tw-field">
             <label for="tw-ot-symbol">Symbol</label>
-            <input class="tw-input" id="tw-ot-symbol" type="text" value="{{ stocks[0].ticker if stocks else chart_symbol }}" autocomplete="off" oninput="twEstCost()">
+            <input class="tw-input" id="tw-ot-symbol" type="text" value="{{ requested_symbol or (stocks[0].ticker if stocks else chart_symbol) }}" autocomplete="off" oninput="twEstCost()">
           </div>
           <div class="tw-field">
             <label for="tw-ot-type">Order Type</label>
@@ -1942,13 +1945,13 @@ function twIntelTab(btn){
 }
 function twPanel(name,html){ var panel=document.querySelector('.tw-intel-panel[data-panel="'+name+'"]'); if(panel) panel.innerHTML=html; }
 function twEmpty(message,action){ return '<div class="tw-intel-empty">'+twEsc(message)+(action?'<br><br>'+action:'')+'</div>'; }
+/* Earnings and news are drawn on the time axis by chart_tools (ctDrawEvents):
+   a series marker can only sit on an existing bar, so an upcoming earnings
+   date was pinned to the LAST candle — reading as if it had just happened. */
 function twApplyEvents(events){
   twChartState.events=events||[];
-  var markers=(events||[]).map(function(event){
-    var date=new Date(event.date+'T12:00:00Z'); if(isNaN(date.getTime())) return null;
-    return {time:Math.floor(date.getTime()/1000),position:'aboveBar',color:'#F0B53F',shape:'circle',text:event.type==='earnings'?'E':'•'};
-  }).filter(Boolean);
-  try { twChartState.area.setMarkers(markers); twChartState.candle.setMarkers(markers); } catch(e) {}
+  try { twChartState.area.setMarkers([]); twChartState.candle.setMarkers([]); } catch(e) {}
+  if(typeof twRenderDrawings==='function') twRenderDrawings();
 }
 function twRenderIntelligence(data){
   twChartState.assetType=data.asset_type||'EQUITY';
@@ -2390,6 +2393,31 @@ function twUseLimit(px){
   twEstCost();
 }
 // Tap a Level 2 level or a tape print → that price becomes the limit.
+/* Chart position drawing → ticket. Entry above price on a long (or below on
+   a short) is a breakout, so it goes in as a Stop order; otherwise a Limit.
+   Size comes from the Position size settings (account $ × risk %). */
+document.addEventListener('ct:ticket', function(e){
+  var d=e.detail||{}; if(!(d.entry>0)) return;
+  var sym=document.getElementById('tw-ot-symbol'); if(sym && d.symbol) sym.value=d.symbol;
+  var sideBtn=document.querySelector('.tw-side-btn[data-side="'+d.side+'"]'); if(sideBtn) twSide(sideBtn);
+  var breakout=d.last>0 && (d.side==='BUY' ? d.entry>d.last : d.entry<d.last);
+  var type=document.getElementById('tw-ot-type'); if(type){ type.value=breakout?'STOP':'LIMIT'; twTypeChange(); }
+  var lim=document.getElementById('tw-ot-limit'), stp=document.getElementById('tw-ot-stop');
+  if(breakout){ if(stp){ stp.disabled=false; stp.value=d.entry.toFixed(2); twFlash(stp,true); } }
+  else if(lim){ lim.disabled=false; lim.value=d.entry.toFixed(2); twFlash(lim,true); }
+  var cfg=twSizeSettings(), per=Math.abs(d.entry-d.stop), qty=document.getElementById('tw-ot-qty');
+  if(qty && cfg.acct>0 && per>0){ qty.value=Math.max(1,Math.floor(cfg.acct*cfg.risk/100/per)); twFlash(qty,true); }
+  var br=document.getElementById('tw-ot-bracket'), buy=d.side==='BUY';
+  window._twTarget=d.target; window._twStop=d.stop;
+  // Brackets exit a position you're buying into; a short's exits are set separately.
+  if(br){ br.checked=buy; twBracketToggle(); }
+  var tg=document.getElementById('tw-ot-target'), sl=document.getElementById('tw-ot-sl');
+  if(buy){ if(tg){ tg.value=d.target.toFixed(2); twFlash(tg,true); } if(sl){ sl.value=d.stop.toFixed(2); twFlash(sl,false); } }
+  if(typeof twTifRules==='function') twTifRules();
+  twEstCost();
+  var tk=document.getElementById('tw-ticket'); if(tk) tk.scrollIntoView({behavior:'smooth',block:'nearest'});
+  if(typeof ctNotice==='function') ctNotice('Ticket filled: '+(breakout?'Stop':'Limit')+' '+d.entry.toFixed(2)+' · target '+d.target.toFixed(2)+' · stop '+d.stop.toFixed(2)+(cfg.acct>0?'':' — set Account $ in Position size to auto-size')+(buy?'':' (no bracket on shorts — place the stop after it fills)')+'. Review, then Preview.');
+});
 document.addEventListener('dp:price', function(e){
   var d = e.detail || {}, sym = document.getElementById('tw-ot-symbol');
   if(sym && d.symbol) sym.value = d.symbol;
@@ -2479,12 +2507,24 @@ document.addEventListener('keydown',function(e){
   twRefreshExtendedAvailability();
   twApplyIndicatorVisibility();
   twApplyType();
-  var first=document.querySelector('.tw-wl-row.active')||document.querySelector('.tw-wl-row');
+  var wanted={{ (requested_symbol or '')|tojson }}, wantedRow=null;
+  if(wanted){ document.querySelectorAll('.tw-wl-row[data-ticker]').forEach(function(r){ if(r.dataset.ticker===wanted) wantedRow=r; }); }
+  var first=wantedRow||document.querySelector('.tw-wl-row.active')||document.querySelector('.tw-wl-row');
   // No row to start from (empty list, or rows still loading): chart the
   // server's fallback symbol instead of leaving the chart blank.
-  var bootSym=(first && first.dataset.ticker) || {{ chart_symbol|tojson }};
+  var bootSym=(wanted && !wantedRow) ? wanted : ((first && first.dataset.ticker) || {{ chart_symbol|tojson }});
   if(!twChartState.chart){ twChartMsg('Chart unavailable','The charting library did not load.'); }
-  else if(bootSym){ twLoadChart(bootSym,twChartState.interval,twChartState.range); twLoadIntelligence(bootSym); }
+  else if(wantedRow){ twSelect(wantedRow); }
+  else if(bootSym){
+    if(wanted){
+      // A symbol from a link that isn't in this list: chart it with no row selected.
+      document.querySelectorAll('.tw-wl-row').forEach(function(r){ r.classList.remove('active'); });
+      twNum('tw-c-ticker', wanted); twNum('tw-c-price', '—');
+      var ots=document.getElementById('tw-ot-symbol'); if(ots) ots.value=wanted;
+      if(window.dpSetSymbol) window.dpSetSymbol(wanted);
+    }
+    twLoadChart(bootSym,twChartState.interval,twChartState.range); twLoadIntelligence(bootSym);
+  }
   twEstCost();
   // Seed the change-detector from what the server rendered, so the first poll
   // only flashes prices that actually moved since the page was built.

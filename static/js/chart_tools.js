@@ -59,7 +59,8 @@ var CT_ICONS = {
   reset: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4.5h4.5"/>',
   lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   clone: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
-  price: '<path d="M4 12h9"/><path d="M13 8h7v8h-7z"/>'
+  price: '<path d="M4 12h9"/><path d="M13 8h7v8h-7z"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>'
 };
 function ctIcon(name, size) {
   return '<svg viewBox="0 0 24 24" width="' + (size || 18) + '" height="' + (size || 18) + '" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + (CT_ICONS[name] || '') + '</svg>';
@@ -88,7 +89,7 @@ var CT_PREF_DEFAULTS = {
   candles: {up: '#22C58B', down: '#FF4D45', session: false, shading: true, style: 'candles', wicks: true},
   scale: {mode: 'normal', invert: false, lastLine: true, lastLabel: true},
   view: {grid: 'none', crosshair: 'free', watermark: false, hilo: true, rightOffset: 5, countdown: true,
-         ohlc: true, legend: true, tooltip: true, hint: true, volume: true},
+         ohlc: true, legend: true, tooltip: true, hint: true, volume: true, sessions: true, events: true},
   draw: {stay: false, hidden: false},
   magnet: false
 };
@@ -305,6 +306,7 @@ function twLoadDrawings() {
     twChartState.selectedDrawing = null;
   }
   twRenderDrawings();
+  ctLoadAlerts(ticker);
   if (Date.now() - ctStore.fetchedAt < 30000) return;
   ctStore.fetchedAt = Date.now();
   fetch('/api/chart/drawings/' + encodeURIComponent(ticker), {credentials: 'same-origin', cache: 'no-store'})
@@ -406,6 +408,7 @@ function twRenderDrawings() {
     try { ctDrawOne(ctx, draft, dim, true, axisLabels, timeLabels, true); } catch (e) {}
   }
   try { ctDrawExtras(ctx, dim); } catch (e) {}
+  try { ctDrawAlerts(ctx, dim, axisLabels); } catch (e) {}
   ctx.restore();
   ctCurId = null;
   axisLabels.forEach(function (l) { ctAxisLabel(ctx, dim, l.p, l.c, l.text); });
@@ -665,12 +668,19 @@ function ctDrawPosition(ctx, d, dim, sel, pts, axisLabels) {
   var qty = '';
   try {
     var g2 = JSON.parse(localStorage.getItem('ts_gate') || '{}'), acct = Number(g2.acct) || 0, rp = Number(g2.risk) || 1;
-    if (acct > 0 && risk > 0) qty = ' · Qty ' + Math.floor(acct * rp / 100 / risk);
+    if (acct > 0 && risk > 0) {
+      var q = Math.floor(acct * rp / 100 / risk);
+      qty = ' · ' + q + ' sh · risk $' + Math.round(q * risk).toLocaleString();
+    }
   } catch (e) {}
   var cx = (g.x1 + g.x2) / 2;
   ctLabelText(ctx, 'Target ' + ctFmt(target) + ' (' + (tPct >= 0 ? '+' : '') + tPct.toFixed(2) + '%)', cx, g.yt + (g.yt < g.a.y ? -4 : 4), '#ffffff', {align: 'center', baseline: g.yt < g.a.y ? 'bottom' : 'top', bg: 'rgba(22,150,105,.92)', size: 10});
   ctLabelText(ctx, 'Stop ' + ctFmt(stop) + ' (' + (sPct >= 0 ? '+' : '') + sPct.toFixed(2) + '%)', cx, g.ys + (g.ys > g.a.y ? 4 : -4), '#ffffff', {align: 'center', baseline: g.ys > g.a.y ? 'top' : 'bottom', bg: 'rgba(200,52,52,.92)', size: 10});
-  ctLabelText(ctx, (long ? 'Long' : 'Short') + ' ' + ctFmt(entry) + ' · R:R ' + rr.toFixed(2) + qty, cx, g.a.y, '#ffffff', {align: 'center', baseline: 'middle', bg: 'rgba(30,38,52,.94)', size: 10});
+  var midText = (long ? 'Long' : 'Short') + ' ' + ctFmt(entry) + ' · R:R ' + rr.toFixed(2) + qty;
+  ctx.font = '600 10px "IBM Plex Mono", ui-monospace, monospace';
+  var half = ctx.measureText(midText).width / 2 + 8;
+  cx = Math.max(half, Math.min(dim.W - half, cx));            // keep it off the price axis
+  ctLabelText(ctx, midText, cx, g.a.y, '#ffffff', {align: 'center', baseline: 'middle', bg: 'rgba(30,38,52,.94)', size: 10});
   ctBoxes[d.id] = {x: g.x1, y: Math.min(g.yt, g.ys), w: g.x2 - g.x1, h: Math.abs(g.yt - g.ys)};
   if (ctPriceLabels(d, sel)) {
     axisLabels.push({p: target, c: '#169669'}); axisLabels.push({p: entry, c: '#5b6b82'}); axisLabels.push({p: stop, c: '#c83434'});
@@ -897,7 +907,18 @@ function ctInitPointer() {
   cv.addEventListener('pointerdown', function (ev) {
     if (ev.pointerType === 'touch' || ev.pointerType === 'pen') ctTouchSeen = true;
     if (!twChartState.chart || !(twChartState.bars || []).length) return;
+    if (!ctMode && ctAlertClick(ev)) { ev.preventDefault(); return; }
     var c = ctLocal(ev);
+    if (!ctMode) {
+      var evHit = ctEventAt(c.x, c.y);
+      if (evHit) {
+        ev.preventDefault();
+        var withUrl = (evHit.items || []).filter(function (e) { return e.url; })[0];
+        if (withUrl && (ev.pointerType === 'mouse' || document.getElementById('ct-evtip') && !document.getElementById('ct-evtip').hidden)) window.open(withUrl.url, '_blank', 'noopener');
+        else ctEventTip(evHit, c.x, c.y);
+        return;
+      }
+    }
     if (ctMode) {
       ev.preventDefault();
       var pt = ctPointAt(c.x, c.y, true); if (!pt) return;
@@ -972,11 +993,12 @@ function ctInitPointer() {
   // chart keeps its own pan and zoom.
   box.addEventListener('pointermove', function (ev) {
     if (ev.pointerType !== 'mouse' || ctMode || ctAction || ctDraft) return;
-    var c = ctLocal(ev), hit = ctHit(c.x, c.y);
-    cv.classList.toggle('ct-hover', !!hit);
-    cv.style.cursor = hit ? (hit.part === 'body' ? 'move' : 'pointer') : '';
+    var c = ctLocal(ev), hit = ctHit(c.x, c.y), onAlert = ctOverAlert(c.x, c.y), onEvent = ctEventAt(c.x, c.y);
+    ctEventTip(onEvent, c.x, c.y);
+    cv.classList.toggle('ct-hover', !!hit || onAlert || !!onEvent);
+    cv.style.cursor = (onAlert || onEvent) ? 'pointer' : hit ? (hit.part === 'body' ? 'move' : 'pointer') : '';
   });
-  box.addEventListener('pointerleave', function () { if (!ctAction) cv.classList.remove('ct-hover'); });
+  box.addEventListener('pointerleave', function () { if (!ctAction) cv.classList.remove('ct-hover'); ctEventTip(null); });
   document.addEventListener('keydown', function (ev) {
     var tag = (ev.target && ev.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select' || (ev.target && ev.target.isContentEditable)) return;
@@ -984,6 +1006,7 @@ function ctInitPointer() {
     if ((ev.key === 'Delete' || ev.key === 'Backspace') && twChartState.selectedDrawing != null) { ev.preventDefault(); twDeleteSelected(); }
     else if (ev.key === 'Escape') { if (ctMode || ctDraft) twStopDrawing(); else if (twChartState.selectedDrawing != null) ctSelect(null); }
     else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'z' || ev.key === 'Z') && !ev.shiftKey) { if (ctStore.undo.length) { ev.preventDefault(); ctUndo(); } }
+    else if (ctShortcut(ev)) ev.preventDefault();
   });
 }
 /* Keep drawings glued to the chart. The chart reports time-axis moves but not
@@ -1179,6 +1202,8 @@ function ctUpdateProps() {
     html += '<button type="button" class="ct-p-btn ct-p-ico' + (priceOn ? ' on' : '') + '" data-ct-flag="showPrice" title="Show price on the price scale">' + ctIcon('price', 15) + '</button>';
   }
   html += '<button type="button" class="ct-p-btn ct-p-ico' + (d.locked ? ' on' : '') + '" data-ct-cmd="lock" title="' + (d.locked ? 'Unlock' : 'Lock in place') + '">' + ctIcon('lock', 15) + '</button>';
+  if (t === 'long' || t === 'short') html += '<button type="button" class="ct-p-btn ct-p-ticket" data-ct-cmd="ticket" title="Fill the order ticket from this position: entry, bracket target and stop, size from your risk %">→ Ticket</button>';
+  if (ctAlertPrices(d).length) html += '<button type="button" class="ct-p-btn ct-p-ico" data-ct-cmd="alert" title="Alert me when price reaches this (Alt+W)">' + ctIcon('bell', 15) + '</button>';
   html += '<button type="button" class="ct-p-btn ct-p-ico" data-ct-cmd="clone" title="Clone">' + ctIcon('clone', 15) + '</button>';
   html += '<button type="button" class="ct-p-btn ct-p-ico ct-p-del" data-ct-cmd="delete" title="Delete">' + ctIcon('trash', 15) + '</button>';
   html += '<button type="button" class="ct-p-btn ct-p-ico" data-ct-cmd="close" title="Done" aria-label="Close">×</button>';
@@ -1256,6 +1281,8 @@ function ctPropClick(ev) {
   if (c === 'delete') twDeleteSelected();
   else if (c === 'close') ctSelect(null);
   else if (c === 'lock') { ctPushUndo(); d.locked = !d.locked; ctPropsFor = null; twSaveDrawings(); twRenderDrawings(); }
+  else if (c === 'alert') ctAlertFromSelected();
+  else if (c === 'ticket') ctSendToTicket(d);
   else if (c === 'clone') {
     ctPushUndo();
     var copy = JSON.parse(JSON.stringify(d)), shift = 4;
@@ -1327,6 +1354,8 @@ function ctApplyView(force) {
 function ctDrawExtras(ctx, dim) {
   var bars = twChartState.bars || [], ch = twChartState.chart;
   if (!bars.length || !ch) return;
+  try { ctDrawSessionMarks(ctx, dim); } catch (e) {}
+  try { ctDrawEvents(ctx, dim); } catch (e) {}
   if (ctPrefs.view.hilo) {
     var r = null;
     try { r = ch.timeScale().getVisibleLogicalRange(); } catch (e) {}
@@ -1368,6 +1397,40 @@ function ctDrawExtras(ctx, dim) {
       }
     }
   }
+}
+/* Opening bell, closing bell and new-day lines on intraday charts. With
+   extended hours on, the line sits where the session flips (9:30 / 4:00 ET);
+   with it off, consecutive bars jump from one day's close to the next open,
+   so a faint line marks each new day instead. */
+function ctDrawSessionMarks(ctx, dim) {
+  var bars = twChartState.bars || [], ch = twChartState.chart, step = CT_STEP[twChartState.interval];
+  if (!ctPrefs.view.sessions || !ch || !step || step >= 14400 || bars.length < 2) return;
+  var r = null;
+  try { r = ch.timeScale().getVisibleLogicalRange(); } catch (e) {}
+  if (!r) return;
+  var from = Math.max(1, Math.floor(r.from)), to = Math.min(bars.length - 1, Math.ceil(r.to));
+  if (to - from > 4000) return;
+  var marks = [];
+  for (var i = from; i <= to; i++) {
+    var a = bars[i - 1], b = bars[i], ra = ctIsRegular(a), rb = ctIsRegular(b);
+    if (!ra && rb) marks.push([i, 'OPEN', 'rgba(34,197,139,0.55)']);
+    else if (ra && !rb) marks.push([i, 'CLOSE', 'rgba(255,77,69,0.45)']);
+    else if (ctEtDay(ctSec(a.time)) !== ctEtDay(ctSec(b.time))) marks.push([i, '', 'rgba(255,255,255,0.10)']);
+  }
+  if (marks.length > 60) marks = marks.filter(function (m) { return m[1]; });   // zoomed far out: bells only
+  if (marks.length > 60) return;
+  ctx.save();
+  ctx.lineWidth = 1; ctx.font = '700 9px "IBM Plex Mono", ui-monospace, monospace'; ctx.textBaseline = 'top';
+  marks.forEach(function (m) {
+    var x = ctLogX(m[0] - 0.5);
+    if (x == null || x < 0 || x > dim.W) return;
+    x = Math.round(x) + 0.5;
+    ctx.strokeStyle = m[2]; ctx.setLineDash(m[1] ? [3, 4] : [2, 6]);
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, dim.H); ctx.stroke();
+    // Below the OHLC legend in the top-left corner.
+    if (m[1]) { ctx.fillStyle = m[2].replace(/[\d.]+\)$/, '0.9)'); ctx.textAlign = 'left'; ctx.fillText(m[1], x + 4, 60); }
+  });
+  ctx.restore();
 }
 function ctEtDay(sec) { try { return twEasternSessionDate.format(new Date(sec * 1000)); } catch (e) { return ''; } }
 function ctIsRegular(b) { return !b.session || b.session === 'regular'; }
@@ -1666,3 +1729,371 @@ document.addEventListener('click', function (ev) {
     setTimeout(function () { cmd.textContent = 'Remove all drawings on this symbol'; }, 2500);
   }
 });
+
+
+/* ── Keyboard shortcuts ─────────────────────────────────────────────
+   1–8 timeframes · Alt+letter drawing tools (ev.code, because Alt changes
+   ev.key on a Mac) · Alt+R reset view · Shift+F full screen · ? help. */
+var CT_KEY_TOOLS = {KeyT: 'trend', KeyH: 'hline', KeyV: 'vline', KeyF: 'fib', KeyB: 'rect', KeyC: 'channel',
+                    KeyM: 'measure', KeyL: 'long', KeyS: 'short', KeyX: 'text', KeyA: 'avwap', KeyY: 'ray'};
+var CT_SHORTCUTS = [
+  ['1 – 8', 'Timeframe: 1m 5m 15m 1H 4H 1D 1W 1M'],
+  ['Alt + T / Y', 'Trend line / ray'], ['Alt + H / V', 'Horizontal / vertical line'],
+  ['Alt + F', 'Fib retracement'], ['Alt + B / C', 'Rectangle / channel'],
+  ['Alt + L / S', 'Long / short position'], ['Alt + M', 'Measure'], ['Alt + A', 'Anchored VWAP'],
+  ['Alt + X', 'Text'], ['Alt + R', 'Reset view'], ['Shift + F', 'Full screen'],
+  ['Alt + W', 'Alert at the selected line'], ['Ctrl/⌘ + Z', 'Undo'],
+  ['Delete', 'Remove selected drawing'], ['Esc', 'Cancel / deselect'], ['?', 'This list']
+];
+function ctShortcut(ev) {
+  if (ev.metaKey || ev.ctrlKey) return false;
+  if (!ev.altKey && !ev.shiftKey && /^[1-8]$/.test(ev.key)) {
+    var btn = document.querySelectorAll('.tw-chart-toolbar .tw-tf-btn')[Number(ev.key) - 1];
+    if (btn && !btn.disabled) { btn.click(); return true; }
+    return false;
+  }
+  if (ev.key === '?') { ctToggleShortcutHelp(); return true; }
+  if (ev.shiftKey && !ev.altKey && ev.code === 'KeyF' && typeof twToggleFullscreen === 'function') { twToggleFullscreen(); return true; }
+  if (!ev.altKey || ev.shiftKey) return false;
+  if (ev.code === 'KeyR' && typeof twResetView === 'function') { twResetView(); return true; }
+  if (ev.code === 'KeyW' && typeof ctAlertFromSelected === 'function') { ctAlertFromSelected(); return true; }
+  var tool = CT_KEY_TOOLS[ev.code];
+  if (tool && CT_TOOLS[tool]) { twStartDrawing(tool); return true; }
+  return false;
+}
+function ctToggleShortcutHelp() {
+  var el = document.getElementById('ct-keys');
+  if (el) { el.remove(); return; }
+  el = document.createElement('div');
+  el.id = 'ct-keys'; el.className = 'ct-keys'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Keyboard shortcuts');
+  el.innerHTML = '<div class="ct-keys-card"><div class="ct-keys-hd"><b>Keyboard shortcuts</b><button type="button" aria-label="Close">×</button></div>' +
+    CT_SHORTCUTS.map(function (r) { return '<div class="ct-keys-row"><kbd>' + ctEsc(r[0]) + '</kbd><span>' + ctEsc(r[1]) + '</span></div>'; }).join('') + '</div>';
+  el.addEventListener('click', function (e) { if (e.target === el || e.target.closest('button')) el.remove(); });
+  document.body.appendChild(el);
+}
+
+
+/* ── Price alerts from drawings ─────────────────────────────────────
+   The bell in a drawing's properties bar (or Alt+W) sets an alert at the
+   drawing's price(s): a horizontal line or ray, both edges of a box, the
+   fib levels on either side of price, a position's stop and target. The
+   server checks every 10 s against the live quote and notifies once. */
+var ctAlerts = {ticker: null, list: [], at: 0};
+function ctLoadAlerts(ticker, force) {
+  if (!ticker) return;
+  if (!force && ctAlerts.ticker === ticker && Date.now() - ctAlerts.at < 30000) return;
+  ctAlerts.at = Date.now();
+  fetch('/api/alerts/price?ticker=' + encodeURIComponent(ticker), {credentials: 'same-origin', cache: 'no-store'})
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (!d || !d.ok || twChartState.ticker !== ticker) return;
+      ctAlerts = {ticker: ticker, list: d.alerts || [], at: Date.now()};
+      twRenderDrawings();
+    }).catch(function () {});
+}
+function ctLastPrice() {
+  var b = twChartState.bars || [];
+  return b.length ? Number(b[b.length - 1].close) : null;
+}
+function ctAlertPrices(d) {
+  if (!d || !d.points || !d.points.length) return [];
+  var t = d.type, out = [];
+  if (t === 'hline' || t === 'hray') out.push({p: d.points[0].p, note: 'Line'});
+  else if (t === 'rect' && d.points[1]) {
+    out.push({p: Math.max(d.points[0].p, d.points[1].p), note: 'Box top'});
+    out.push({p: Math.min(d.points[0].p, d.points[1].p), note: 'Box bottom'});
+  } else if ((t === 'long' || t === 'short') && d.points[1]) {
+    out.push({p: d.points[1].p, note: (t === 'long' ? 'Long' : 'Short') + ' target'});
+    if (d.stop != null) out.push({p: d.stop, note: (t === 'long' ? 'Long' : 'Short') + ' stop'});
+  } else if ((t === 'fib' || t === 'fibext') && d.points[1]) {
+    var A = d.points[0], B = d.points[1], C = d.points[2], s = d.style, last = ctLastPrice();
+    var lv = (s.levels || []).filter(function (l) { return l.on; }).map(function (l) {
+      var p = t === 'fibext' ? (C || B).p + (B.p - A.p) * l.v : (s.reverse ? A.p + (B.p - A.p) * l.v : B.p + (A.p - B.p) * l.v);
+      return {p: p, note: 'Fib ' + (Math.round(l.v * 1000) / 1000)};
+    });
+    if (last == null) return lv.slice(0, 2);
+    var above = lv.filter(function (x) { return x.p > last; }).sort(function (a, b) { return a.p - b.p; })[0];
+    var below = lv.filter(function (x) { return x.p < last; }).sort(function (a, b) { return b.p - a.p; })[0];
+    if (above) out.push(above); if (below) out.push(below);
+  }
+  return out.filter(function (x) { return isFinite(x.p) && x.p > 0; });
+}
+function ctAlertFromSelected() {
+  var d = ctSelected(), ticker = twChartState.ticker;
+  var prices = ctAlertPrices(d);
+  if (!ticker || !prices.length) { ctNotice('Select a horizontal line, box, fib or position first, then tap the bell.'); return; }
+  var last = ctLastPrice(), done = 0, made = [];
+  prices.forEach(function (x) {
+    fetch('/api/alerts/price', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ticker: ticker, price: Math.round(x.p * 10000) / 10000, current: last, note: x.note, drawing_id: d.id})})
+      .then(function (r) { return r.json(); })
+      .then(function (res) { if (res && res.ok) made.push(res.alert); else ctNotice((res && res.error) || 'Could not set the alert'); })
+      .catch(function () { ctNotice('Could not set the alert — check your connection'); })
+      .then(function () {
+        if (++done < prices.length) return;
+        if (made.length) ctNotice('🔔 Alert set: ' + made.map(function (a) { return (a.direction === 'above' ? '↑ ' : '↓ ') + ctFmt(a.price); }).join(' · ') + ' — you’ll be notified once.');
+        ctLoadAlerts(ticker, true);
+      });
+  });
+}
+function ctDeleteAlert(id) {
+  fetch('/api/alerts/price/' + id, {method: 'DELETE', credentials: 'same-origin'})
+    .then(function () { ctLoadAlerts(twChartState.ticker, true); }).catch(function () {});
+}
+var ctAlertHits = [];
+function ctDrawAlerts(ctx, dim, axisLabels) {
+  ctAlertHits = [];
+  if (ctAlerts.ticker !== twChartState.ticker) return;
+  ctAlerts.list.forEach(function (a) {
+    if (!a.enabled || a.triggered_at) return;
+    var y = ctY(a.price);
+    if (y == null || y < 0 || y > dim.H) return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(245,197,66,0.75)'; ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
+    ctx.beginPath(); ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(dim.W, Math.round(y) + 0.5); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = '700 10px "IBM Plex Mono", ui-monospace, monospace';
+    var label = '🔔 ' + (a.direction === 'above' ? '↑ ' : '↓ ') + (a.note || 'Alert') + '  ×';
+    var w = ctx.measureText(label).width + 12, x = 8;
+    ctx.fillStyle = 'rgba(11,17,28,0.92)'; ctx.fillRect(x, y - 9, w, 18);
+    ctx.strokeStyle = 'rgba(245,197,66,0.75)'; ctx.strokeRect(x + 0.5, y - 8.5, w - 1, 17);
+    ctx.fillStyle = '#f5c542'; ctx.textBaseline = 'middle'; ctx.fillText(label, x + 6, y + 0.5);
+    ctx.restore();
+    ctAlertHits.push({id: a.id, x1: x + w - 16, x2: x + w, y1: y - 9, y2: y + 9});
+    axisLabels.push({p: a.price, c: '#f5c542'});
+  });
+}
+/* Tap the × on an alert tag to cancel it. Capture phase, before drawing. */
+function ctOverAlert(x, y) {
+  return ctAlertHits.some(function (h) { return x >= h.x1 - 4 && x <= h.x2 + 2 && y >= h.y1 && y <= h.y2; });
+}
+function ctAlertClick(ev) {
+  if (!ctAlertHits.length) return false;
+  var cv = ctCanvas(); if (!cv) return false;
+  var r = cv.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
+  for (var i = 0; i < ctAlertHits.length; i++) {
+    var h = ctAlertHits[i];
+    if (x >= h.x1 - 4 && x <= h.x2 + 2 && y >= h.y1 && y <= h.y2) { ctDeleteAlert(h.id); ctNotice('Alert cancelled.'); return true; }
+  }
+  return false;
+}
+function ctNotice(msg) {
+  var el = document.getElementById('ct-notice');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'ct-notice'; el.className = 'ct-notice'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite');
+    var box = document.getElementById('tw-chart-box'); (box || document.body).appendChild(el);
+  }
+  el.textContent = msg; el.classList.add('on');
+  clearTimeout(el._t); el._t = setTimeout(function () { el.classList.remove('on'); }, 4200);
+}
+// A fired alert drops off the chart within a minute.
+var ctAlertPoll = setInterval(function () {
+  if (typeof document === 'undefined' || document.hidden) return;
+  if (ctAlerts.list.some(function (a) { return a.enabled && !a.triggered_at; })) ctLoadAlerts(twChartState.ticker, true);
+}, 60000);
+if (ctAlertPoll && ctAlertPoll.unref) ctAlertPoll.unref();   // never keeps a test runner (node) alive
+
+
+/* ── Trade from the chart ───────────────────────────────────────────
+   A long/short position drawing hands entry, target and stop to the order
+   ticket (terminal.html listens for ct:ticket). Drag the handles, then
+   "→ Ticket" again to update it. Nothing is sent: the ticket still needs
+   Preview and a second tap. */
+function ctSendToTicket(d) {
+  if (!d || (d.type !== 'long' && d.type !== 'short') || !d.points[1]) return;
+  var detail = {symbol: twChartState.ticker, side: d.type === 'long' ? 'BUY' : 'SELL',
+    entry: Math.round(d.points[0].p * 100) / 100, target: Math.round(d.points[1].p * 100) / 100,
+    stop: Math.round(d.stop * 100) / 100, last: ctLastPrice()};
+  document.dispatchEvent(new CustomEvent('ct:ticket', {detail: detail}));
+}
+
+
+/* ── Saved layouts ──────────────────────────────────────────────────
+   A layout is the chart's own saved state (timeframe, range, chart type,
+   volume, extended hours, indicators and every Settings-panel option).
+   Applying one writes that state back and reloads the Terminal, so it
+   comes up exactly as saved. Synced to the account (/api/chart/layouts). */
+var CT_LAYOUT_KEYS = ['tradestaar.chartInterval', 'tradestaar.chartRange', 'tradestaar.chartType', 'tradestaar.chartVolume',
+  'tradestaar.chartExtendedPref', 'tradestaar.chartIndicators', 'tradestaar.chartStudies', 'tradestaar.chartStyles',
+  'tradestaar.chartOverlays'];
+var CT_BUILTIN_LAYOUTS = [
+  {name: 'Scalp · 1m', builtin: true, state: {'tradestaar.chartInterval': '1m', 'tradestaar.chartRange': '1d', 'tradestaar.chartType': 'candles',
+    'tradestaar.chartExtendedPref': '1', 'tradestaar.chartVolume': '1'}},
+  {name: 'Day trade · 5m', builtin: true, state: {'tradestaar.chartInterval': '5m', 'tradestaar.chartRange': '5d', 'tradestaar.chartType': 'candles',
+    'tradestaar.chartExtendedPref': '1', 'tradestaar.chartVolume': '1'}},
+  {name: 'Swing · 1D', builtin: true, state: {'tradestaar.chartInterval': '1d', 'tradestaar.chartRange': '1y', 'tradestaar.chartType': 'candles',
+    'tradestaar.chartExtendedPref': '0', 'tradestaar.chartVolume': '1'}},
+  {name: 'Big picture · 1W', builtin: true, state: {'tradestaar.chartInterval': '1w', 'tradestaar.chartRange': 'max', 'tradestaar.chartType': 'candles',
+    'tradestaar.chartExtendedPref': '0', 'tradestaar.chartVolume': '1'}}
+];
+var ctLayouts = [];
+try { ctLayouts = JSON.parse(localStorage.getItem('tradestaar.layouts') || '[]') || []; } catch (e) { ctLayouts = []; }
+function ctLayoutState() {
+  var st = {};
+  CT_LAYOUT_KEYS.forEach(function (k) { try { var v = localStorage.getItem(k); if (v != null) st[k] = v; } catch (e) {} });
+  st['tradestaar.chartOverlays'] = JSON.stringify(ctPrefs);
+  if (twChartState.interval) st['tradestaar.chartInterval'] = twChartState.interval;
+  if (twChartState.range) st['tradestaar.chartRange'] = twChartState.range;
+  return st;
+}
+function ctPushLayouts() {
+  try { localStorage.setItem('tradestaar.layouts', JSON.stringify(ctLayouts)); } catch (e) {}
+  return fetch('/api/chart/layouts', {method: 'PUT', credentials: 'same-origin', keepalive: true, headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({layouts: ctLayouts})}).catch(function () {});
+}
+function ctLoadLayouts() {
+  fetch('/api/chart/layouts', {credentials: 'same-origin', cache: 'no-store'})
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (!d || !d.ok || !Array.isArray(d.layouts)) return;
+      if (!d.layouts.length && ctLayouts.length) { ctPushLayouts(); return; }   // first sync from this device
+      ctLayouts = d.layouts;
+      try { localStorage.setItem('tradestaar.layouts', JSON.stringify(ctLayouts)); } catch (e) {}
+      ctRenderLayoutMenu();
+    }).catch(function () {});
+}
+function ctSaveLayout(name) {
+  name = String(name || '').trim().slice(0, 40);
+  if (!name) return;
+  var st = ctLayoutState(), at = -1;
+  ctLayouts.forEach(function (l, i) { if (l.name.toLowerCase() === name.toLowerCase()) at = i; });
+  if (at >= 0) ctLayouts[at] = {name: name, state: st}; else ctLayouts.unshift({name: name, state: st});
+  ctLayouts = ctLayouts.slice(0, 20);
+  ctPushLayouts(); ctRenderLayoutMenu();
+  if (typeof ctNotice === 'function') ctNotice('Layout "' + name + '" saved.');
+}
+function ctApplyLayout(layout) {
+  if (!layout || !layout.state) return;
+  var st = layout.state;
+  Object.keys(st).forEach(function (k) { if (CT_LAYOUT_KEYS.indexOf(k) >= 0) { try { localStorage.setItem(k, st[k]); } catch (e) {} } });
+  var now = Date.now();
+  try { localStorage.setItem('tradestaar.chartOverlaysAt', String(now)); } catch (e) {}
+  var overlays = null;
+  try { overlays = st['tradestaar.chartOverlays'] ? JSON.parse(st['tradestaar.chartOverlays']) : null; } catch (e) {}
+  var done = function () { location.reload(); };
+  if (overlays) {
+    fetch('/api/chart/prefs', {method: 'PUT', credentials: 'same-origin', keepalive: true, headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({prefs: {overlays: overlays, tools: ctToolDefaults, updated: now}})}).then(done, done);
+  } else done();
+}
+function ctDeleteLayout(i) { ctLayouts.splice(i, 1); ctPushLayouts(); ctRenderLayoutMenu(); }
+function ctRenderLayoutMenu() {
+  var m = document.getElementById('ct-layouts'); if (!m) return;
+  var row = function (l, i, builtin) {
+    return '<div class="ct-lay-row"><button type="button" class="ct-lay-apply" data-lay="' + (builtin ? 'b' : 'u') + i + '">' + ctEsc(l.name) +
+      '<small>' + ctEsc(((l.state['tradestaar.chartInterval'] || '') + ' · ' + (l.state['tradestaar.chartRange'] || '')).toUpperCase()) + '</small></button>' +
+      (builtin ? '' : '<button type="button" class="ct-lay-del" data-lay-del="' + i + '" title="Delete layout" aria-label="Delete ' + ctEsc(l.name) + '">×</button>') + '</div>';
+  };
+  m.innerHTML = '<div class="ct-lay-hd">Layouts</div>' +
+    '<form class="ct-lay-save"><input name="n" maxlength="40" placeholder="Name this layout…" aria-label="Layout name"><button type="submit">Save current</button></form>' +
+    (ctLayouts.length ? '<div class="ct-lay-sec">Yours</div>' + ctLayouts.map(function (l, i) { return row(l, i, false); }).join('') : '') +
+    '<div class="ct-lay-sec">Presets</div>' + CT_BUILTIN_LAYOUTS.map(function (l, i) { return row(l, i, true); }).join('') +
+    '<a class="ct-lay-grid" href="/terminal/grid?ticker=' + encodeURIComponent(twChartState.ticker || '') + '">▦ Multi-chart grid (2 or 4 charts) ↗</a>';
+}
+function twToggleLayouts(ev) {
+  if (ev) ev.stopPropagation();
+  var m = document.getElementById('ct-layouts'), btn = document.getElementById('tw-layout-btn');
+  if (!m) {
+    m = document.createElement('div'); m.id = 'ct-layouts'; m.className = 'ct-layouts'; m.hidden = true;
+    (btn && btn.parentElement || document.body).appendChild(m);
+    m.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var a = e.target.closest('[data-lay]'), d = e.target.closest('[data-lay-del]');
+      if (d) { ctDeleteLayout(Number(d.getAttribute('data-lay-del'))); return; }
+      if (a) { var k = a.getAttribute('data-lay'); ctApplyLayout(k[0] === 'b' ? CT_BUILTIN_LAYOUTS[+k.slice(1)] : ctLayouts[+k.slice(1)]); }
+    });
+    m.addEventListener('submit', function (e) { e.preventDefault(); var inp = m.querySelector('input[name=n]'); ctSaveLayout(inp.value); inp.value = ''; });
+    document.addEventListener('click', function (e) { if (!m.hidden && !m.contains(e.target) && e.target !== btn) { m.hidden = true; if (btn) btn.setAttribute('aria-expanded', 'false'); } });
+    ctLoadLayouts();
+  }
+  ctRenderLayoutMenu();
+  m.hidden = !m.hidden;
+  if (btn) btn.setAttribute('aria-expanded', m.hidden ? 'false' : 'true');
+  if (!m.hidden) { var inp = m.querySelector('input[name=n]'); if (inp && !('ontouchstart' in window)) inp.focus(); }
+}
+
+
+/* ── Earnings & news on the time axis ───────────────────────────────
+   Earnings: a gold dashed line at the date (the future too — the time axis
+   extrapolates past the last bar) with an "E" flag. News: small dots along
+   the bottom at the headline's time; hover shows it, tap opens it. Nearby
+   headlines merge into one dot with a count. */
+var ctEventHits = [];
+function ctEventTime(e) {
+  if (e.ts) return Number(e.ts);
+  if (!e.date) return null;
+  // Earnings date: 9:30 ET for "BMO"/"before", 4:00 PM for "AMC"/"after", else noon ET.
+  var tm = String(e.time || '').toLowerCase(), hh = /bmo|before|pre/.test(tm) ? 9.5 : /amc|after|post/.test(tm) ? 16 : 12;
+  var d = new Date(e.date + 'T00:00:00Z'); if (isNaN(d.getTime())) return null;
+  return Math.floor(d.getTime() / 1000) + Math.round((hh + 5) * 3600);   // ET ≈ UTC−5 (±1 h in summer is fine at this scale)
+}
+function ctDrawEvents(ctx, dim) {
+  ctEventHits = [];
+  var evs = twChartState.events || [];
+  if (!ctPrefs.view.events || !evs.length) return;
+  var step = CT_STEP[twChartState.interval] || 86400, bars = twChartState.bars || [];
+  if (!bars.length) return;
+  var first = ctSec(bars[0].time);
+  ctx.save();
+  ctx.font = '800 10px "IBM Plex Mono", ui-monospace, monospace'; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+  // Earnings
+  evs.filter(function (e) { return e.type === 'earnings'; }).forEach(function (e) {
+    var t = ctEventTime(e); if (t == null || t < first) return;
+    if (step >= 86400) t = Math.floor(t / 86400) * 86400 + 12 * 3600;
+    var x = ctX(t); if (x == null || x < 0) return;
+    var label = 'Earnings ' + (e.date || '') + (e.time && e.time !== 'TBD' ? ' · ' + String(e.time).toUpperCase() : '');
+    if (x > dim.W) {
+      // Past the right edge (upcoming): a flag at the edge says it's coming.
+      var tag = 'E ' + ctShortDate(e.date) + ' ›';
+      ctx.font = '800 10px "IBM Plex Mono", ui-monospace, monospace';
+      var tw = ctx.measureText(tag).width + 12, tx = dim.W - tw - 4, ty = dim.H - 22;
+      ctx.fillStyle = '#F0B53F'; ctx.fillRect(tx, ty, tw, 16);
+      ctx.fillStyle = '#1a1206'; ctx.textAlign = 'left'; ctx.fillText(tag, tx + 6, ty + 8.5); ctx.textAlign = 'center';
+      ctEventHits.push({x: tx + tw / 2, y: ty + 8, r: Math.max(10, tw / 2), text: label + ' — scroll right to see it on the time axis'});
+      return;
+    }
+    x = Math.round(x) + 0.5;
+    ctx.strokeStyle = 'rgba(240,181,63,0.55)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, dim.H - 4); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#F0B53F'; ctx.beginPath(); ctx.arc(x, dim.H - 14, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1a1206'; ctx.fillText('E', x, dim.H - 13.5);
+    ctEventHits.push({x: x, y: dim.H - 14, r: 10, text: label + (e.source ? ' (' + e.source + ')' : '')});
+  });
+  // News, clustered by pixel
+  var dots = [];
+  evs.filter(function (e) { return e.type === 'news' && e.ts; }).forEach(function (e) {
+    if (e.ts < first) return;
+    var x = ctX(Number(e.ts)); if (x == null || x < 0 || x > dim.W) return;
+    var near = dots.filter(function (d) { return Math.abs(d.x - x) < 12; })[0];
+    if (near) near.items.push(e); else dots.push({x: x, items: [e]});
+  });
+  dots.forEach(function (d) {
+    var y = dim.H - 14, n = d.items.length;
+    ctx.fillStyle = 'rgba(111,168,255,0.92)'; ctx.beginPath(); ctx.arc(d.x, y, n > 1 ? 8 : 6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#06101f'; ctx.fillText(n > 1 ? String(Math.min(n, 9)) : 'N', d.x, y + 0.5);
+    ctEventHits.push({x: d.x, y: y, r: 10, items: d.items});
+  });
+  ctx.restore();
+}
+function ctShortDate(iso) {
+  var d = new Date(String(iso) + 'T12:00:00Z');
+  return isNaN(d.getTime()) ? String(iso || '') : d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'UTC'});
+}
+function ctEventAt(x, y) {
+  for (var i = 0; i < ctEventHits.length; i++) { var h = ctEventHits[i]; if (Math.abs(h.x - x) <= h.r && Math.abs(h.y - y) <= h.r) return h; }
+  return null;
+}
+function ctEventTip(h, x, y) {
+  var tip = document.getElementById('ct-evtip'), box = document.getElementById('tw-chart-box');
+  if (!h) { if (tip) tip.hidden = true; return; }
+  if (!tip) { tip = document.createElement('div'); tip.id = 'ct-evtip'; tip.className = 'ct-evtip'; (box || document.body).appendChild(tip); }
+  var html = h.text ? '<b>' + ctEsc(h.text) + '</b>' : h.items.slice(0, 4).map(function (e) {
+    var when = '';
+    try { when = new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}).format(new Date(e.ts * 1000)); } catch (_) {}
+    return '<div class="ct-evrow"><small>' + ctEsc(when) + (e.source ? ' · ' + ctEsc(e.source) : '') + '</small>' + ctEsc(e.label) + '</div>';
+  }).join('') + (h.items.length > 4 ? '<small>+' + (h.items.length - 4) + ' more</small>' : '') + (h.items.some(function (e) { return e.url; }) ? '<small class="ct-evhint">Tap to open</small>' : '');
+  tip.innerHTML = html; tip.hidden = false;
+  var W = box ? box.clientWidth : 600;
+  tip.style.left = Math.max(6, Math.min(W - 286, x - 140)) + 'px';
+  tip.style.bottom = '40px';
+}

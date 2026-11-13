@@ -113,3 +113,54 @@
 .tw-chart-stack.ct-no-legend .tw-ema-legend,
 .tw-chart-stack.ct-no-tooltip .tw-chart-tooltip,
 .tw-chart-stack.ct-no-hint .tw-chart-hint { display: none !important; }
+
+/* Keyboard shortcut sheet (press ?) */
+.ct-keys { position: fixed; inset: 0; z-index: 10080; display: grid; place-items: center; background: rgba(3, 5, 8, .55); backdrop-filter: blur(3px); }
+.ct-keys-card { width: min(420px, 92vw); max-height: 80vh; overflow: auto; padding: 14px 16px; border-radius: 14px; background: #0b111c; border: 1px solid rgba(255,255,255,.1); box-shadow: 0 18px 50px rgba(0,0,0,.6); }
+.ct-keys-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #e8eef6; font: 700 13px var(--font-display, sans-serif); letter-spacing: .04em; }
+.ct-keys-hd button { background: none; border: 0; color: #8d9bb0; font-size: 20px; cursor: pointer; }
+.ct-keys-row { display: flex; gap: 12px; align-items: center; padding: 5px 0; border-top: 1px solid rgba(255,255,255,.05); color: #b8c3d1; font: 500 12px var(--font-mono, monospace); }
+.ct-keys-row kbd { flex: 0 0 104px; color: var(--cc-accent-hi, #e8ffad); font: 700 11px var(--font-mono, monospace); }
+
+/* Short confirmations on the chart (alert set, alert cancelled) */
+.ct-notice { position: absolute; left: 50%; bottom: 46px; transform: translate(-50%, 8px); z-index: 30; max-width: min(520px, 90%);
+  padding: 8px 14px; border-radius: 10px; background: rgba(11,17,28,.95); border: 1px solid rgba(245,197,66,.45);
+  color: #f3e7c2; font: 600 12px var(--font-mono, monospace); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; }
+.ct-notice.on { opacity: 1; transform: translate(-50%, 0); }
+
+/* Layouts menu */
+.ct-layouts { position: absolute; z-index: 10070; width: 260px; padding: 10px; border-radius: 12px; background: #0b111c;
+  border: 1px solid rgba(255,255,255,.1); box-shadow: 0 16px 40px rgba(0,0,0,.55); white-space: normal; }
+.tw-chart-toolbar .ct-layouts { right: 10px; top: 100%; margin-top: 4px; }
+.tw-chart-toolbar { position: relative; }
+.ct-lay-hd { color: #e8eef6; font: 700 12px var(--font-display, sans-serif); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+.ct-lay-save { display: flex; gap: 6px; margin-bottom: 8px; }
+.ct-lay-save input { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: #060a12; color: #e8eef6; font: 500 12px var(--font-mono, monospace); }
+.ct-lay-save button { height: 30px; padding: 0 10px; border-radius: 8px; border: 0; background: var(--cc-accent, #c4f53b); color: #0a0712; font: 700 11px var(--font-mono, monospace); cursor: pointer; }
+.ct-lay-sec { margin: 8px 0 4px; color: #6d7b90; font: 700 9px var(--font-mono, monospace); letter-spacing: .14em; text-transform: uppercase; }
+.ct-lay-row { display: flex; align-items: stretch; gap: 4px; }
+.ct-lay-apply { flex: 1; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 8px; border: 0;
+  background: transparent; color: #dbe4ef; font: 600 12px var(--font-mono, monospace); text-align: left; cursor: pointer; }
+.ct-lay-apply small { color: #6d7b90; font: 600 10px var(--font-mono, monospace); }
+.ct-lay-apply:hover { background: rgba(255,255,255,.06); color: #fff; }
+.ct-lay-del { width: 26px; border: 0; border-radius: 8px; background: transparent; color: #8d9bb0; font-size: 16px; cursor: pointer; }
+.ct-lay-del:hover { color: #ff6973; background: rgba(255,105,115,.1); }
+@media (max-width: 1099px) {
+  .tw-chart-toolbar .ct-layouts { position: fixed; left: 12px; right: 12px; top: auto; width: auto;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px)); margin: 0; }
+}
+.ct-lay-grid { display: block; margin-top: 10px; padding: 8px 9px; border-radius: 8px; border: 1px dashed rgba(255,255,255,.14); color: #b8c3d1; font: 600 12px var(--font-mono, monospace); text-decoration: none; }
+.ct-lay-grid:hover { color: #fff; border-color: rgba(var(--cc-accent-rgb, 196,245,59), .5); }
+
+/* Earnings / news tip */
+.ct-evtip { position: absolute; z-index: 31; width: 280px; padding: 8px 10px; border-radius: 10px; background: rgba(11,17,28,.97);
+  border: 1px solid rgba(111,168,255,.35); color: #dbe4ef; font: 500 12px/1.35 var(--font-body, sans-serif); pointer-events: none; box-shadow: 0 10px 28px rgba(0,0,0,.5); }
+.ct-evtip small { display: block; color: #7f8da3; font: 600 10px var(--font-mono, monospace); margin-bottom: 2px; }
+.ct-evrow + .ct-evrow { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,.06); }
+.ct-evhint { margin-top: 6px; color: #6fa8ff !important; }
+
+.tw-study-head .tw-study-layouts { width: auto !important; margin-left: auto; padding: 0 10px !important; height: 28px; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.12) !important; background: rgba(255,255,255,.04) !important; color: #dbe4ef !important; font: 600 11px var(--font-mono, monospace) !important; }
+.tw-study-head kbd { font: 700 10px var(--font-mono, monospace); color: var(--cc-accent-hi, #e8ffad); }
+/* Phones: the row is full — Layouts opens from Chart settings instead. */
+@media (max-width: 600px) { .tw-chart-toolbar #tw-layout-btn { display: none !important; } }

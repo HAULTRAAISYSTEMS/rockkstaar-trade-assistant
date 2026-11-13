@@ -268,6 +268,37 @@ def _headline_subject(fallback_ticker: str, headline: str) -> str:
         return ""
 
 
+def _epoch(value: Any) -> int | None:
+    """Seconds since 1970 from a unix time, ISO-8601 or RFC-2822 string."""
+    if value in (None, ""):
+        return None
+    try:
+        n = float(value)
+        if n > 1e12:
+            n /= 1000.0
+        return int(n) if 946684800 < n < 4102444800 else None
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    from datetime import datetime as _dt, timezone as _tz
+    try:
+        d = _dt.fromisoformat(text.replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            from zoneinfo import ZoneInfo
+            d = d.replace(tzinfo=ZoneInfo("America/New_York"))
+        return int(d.timestamp())
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        d = parsedate_to_datetime(text)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_tz.utc)
+        return int(d.timestamp())
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
 def _news_row(raw: Any, fallback_ticker: str = "") -> dict | None:
     if isinstance(raw, str):
         headline = raw.strip()
@@ -456,9 +487,16 @@ def build_terminal_intelligence(ticker: str, stock: dict | None, intel_summary: 
         })
 
     events = [
-        {"type": "earnings", "date": row["date"], "label": "Earnings", "source": row["source"]}
+        {"type": "earnings", "date": row["date"], "label": "Earnings", "source": row["source"],
+         "time": row.get("time") or ""}
         for row in earnings if row.get("date")
     ]
+    # Headlines with a real timestamp go on the chart's time axis too.
+    for row in news:
+        ts = _epoch(row.get("published"))
+        if ts:
+            events.append({"type": "news", "ts": ts, "label": row["headline"][:200],
+                           "source": row.get("source") or "", "url": row.get("url") or ""})
 
     overview = {
         "price": stock.get("current_price"),

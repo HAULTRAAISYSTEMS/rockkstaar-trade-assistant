@@ -338,7 +338,8 @@ def send_test(user_id: int, conn=None) -> dict:
 
 
 _TAG_KINDS = (("recall", "memory"), ("thesis", "research"), ("calendar", "calendar"), ("cal-", "calendar"),
-              ("fund", "fundamentals"), ("insider", "insider"))
+              ("fund", "fundamentals"), ("insider", "insider"),
+              ("price-", "price"))
 
 
 def _inbox_from_payload(user_id: int, payload: dict, conn=None, *, kind: str | None = None,

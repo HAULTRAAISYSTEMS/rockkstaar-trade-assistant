@@ -380,7 +380,7 @@ def test_empty_list_still_charts_a_symbol(client, monkeypatch):
     monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: [])
     html = c.get("/terminal").get_data(as_text=True)
     assert "starter watchlist is seeding" not in html and "No symbol" not in html
-    assert 'id="tw-c-ticker">SPY<' in html and 'var bootSym=(first && first.dataset.ticker) || "SPY";' in html
+    assert 'id="tw-c-ticker">SPY<' in html and '((first && first.dataset.ticker) || "SPY");' in html
     assert "This list is empty" in html
 
 
@@ -391,7 +391,7 @@ def test_list_whose_rows_have_not_loaded_charts_its_first_ticker(client, monkeyp
     monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: ["NVDA", "AMD"])
     monkeypatch.setattr(legacy, "get_all_stock_data", lambda: [])
     html = c.get("/terminal").get_data(as_text=True)
-    assert '|| "NVDA";' in html and 'id="tw-c-ticker">NVDA<' in html
+    assert '|| "NVDA");' in html and 'id="tw-c-ticker">NVDA<' in html
 
 
 def test_chart_refresh_downloads_only_new_bars(client, monkeypatch):
@@ -485,3 +485,40 @@ def test_chart_bar_wraps_instead_of_clipping_on_desktop():
     block = css[css.index("@media (min-width: 1100px) {\n  /* Wrap, never clip."):]
     block = block[:block.index("}\n", block.index(".tw-chart-toolbar {"))]
     assert "flex-wrap: wrap !important" in block and "flex-wrap: nowrap" not in block
+
+
+def test_terminal_opens_a_linked_symbol(client):
+    # Price-alert notifications and the chart grid link to /terminal?ticker=X.
+    c, _ = client
+    html = c.get("/terminal?ticker=amd").get_data(as_text=True)
+    assert 'var wanted="AMD"' in html and 'id="tw-ot-symbol" type="text" value="AMD"' in html
+    assert 'var wanted=""' in c.get("/terminal?ticker=<x>").get_data(as_text=True)
+
+
+def test_chart_grid_page_and_layouts_api(client):
+    c, store = client
+    html = c.get("/terminal/grid?ticker=nvda").get_data(as_text=True)
+    assert 'id="cg-grid"' in html and '"NVDA"' in html
+    assert c.get("/api/chart/layouts").get_json() == {"ok": True, "layouts": []}
+    lay = [{"name": "Scalp", "state": {"tradestaar.chartInterval": "1m"}}]
+    assert c.put("/api/chart/layouts", json={"layouts": lay}).get_json()["count"] == 1
+    assert c.get("/api/chart/layouts").get_json()["layouts"] == lay
+    assert c.put("/api/chart/layouts", json={"layouts": [{"name": ""}]}).status_code == 400
+    assert c.put("/api/chart/layouts", json={"layouts": [{"name": "x", "state": {}}] * 21}).status_code == 400
+
+
+def test_new_terminal_tools_are_wired():
+    for needle in ("function ctShortcut(ev)", "function ctDrawSessionMarks(", "function ctDrawEvents(",
+                   "function ctSendToTicket(", "function twToggleLayouts(", "ctAlertPoll.unref"):
+        assert needle in JS, needle
+    assert "document.addEventListener('ct:ticket'" in TEMPLATE and 'id="tw-layout-btn"' in TEMPLATE
+    assert 'data-ct-set="view.sessions"' in TEMPLATE and 'data-ct-set="view.events"' in TEMPLATE
+
+
+def test_news_and_earnings_events_have_times():
+    import terminal_intelligence as ti
+    out = ti.build_terminal_intelligence("NVDA", {"news_headlines": [
+        {"headline": "Nvidia beats", "source": "Reuters", "published": "2026-11-12T14:30:00Z", "url": "https://x"},
+        "Bare headline without a time"]}, {})
+    news = [e for e in out["events"] if e["type"] == "news"]
+    assert len(news) == 1 and news[0]["ts"] == 1794493800 and news[0]["url"] == "https://x"
