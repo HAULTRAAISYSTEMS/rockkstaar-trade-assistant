@@ -538,6 +538,16 @@ def parse_quote_entry(entry: dict) -> dict | None:
         out["price"], out["epoch"] = round(xp, 4), xt
         if out.get("prev_close"):
             out["change_pct"] = round((xp / out["prev_close"] - 1) * 100, 2)
+    # Inside quote, so the chart can draw Bid / Ask without the streamer.
+    # After the bell the extended block carries the live after-hours book.
+    for blk in (q, ext):
+        try:
+            b, a = float(blk.get("bidPrice") or 0), float(blk.get("askPrice") or 0)
+        except (TypeError, ValueError):
+            continue
+        if b > 0 and a >= b and (blk is q or xt >= out["epoch"]):
+            out["bid"], out["ask"] = round(b, 4), round(a, 4)
+            out["bid_size"], out["ask_size"] = blk.get("bidSize"), blk.get("askSize")
     reg = (entry or {}).get("regular") or {}
     try:
         rclose = float(reg.get("regularMarketLastPrice") or 0)

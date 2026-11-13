@@ -292,3 +292,35 @@ def test_extended_bad_prints_are_filtered_not_drawn():
     assert 26 * 300 not in by_t
     assert by_t[5 * 300]["low"] == 740.0
     assert len(out) == 29
+
+
+def test_after_hours_bid_ask_reach_the_chart_without_the_streamer(client):
+    # Bid/Ask lines only came from the Level 2 streamer, so with it quiet or
+    # not connected after hours the chart and ticket showed none.
+    import schwab
+    entry = {"quote": {"lastPrice": 585.3, "tradeTime": 1_800_000_000_000, "closePrice": 552.9,
+                       "bidPrice": 585.1, "askPrice": 585.4, "bidSize": 3, "askSize": 5},
+             "extended": {"lastPrice": 587.0, "tradeTime": 1_800_000_600_000,
+                          "bidPrice": 586.9, "askPrice": 587.1, "bidSize": 2, "askSize": 1}}
+    q = schwab.parse_quote_entry(entry)
+    assert q["price"] == 587.0 and (q["bid"], q["ask"]) == (586.9, 587.1)
+    import market_engine as me
+    from datetime import date
+    snap = {"latestTrade": {"p": 10.0, "t": "2026-11-12T23:00:00Z"}, "latestQuote": {"bp": 9.98, "ap": 10.02, "bs": 1, "as": 2},
+            "dailyBar": {"t": "2026-11-12T05:00:00Z", "c": 9.5}, "prevDailyBar": {"c": 9.0}}
+    a = me._quote_from_alpaca_snapshot(snap, date(2026, 11, 12))
+    assert (a["bid"], a["ask"]) == (9.98, 10.02)
+    live = {"AMD": {"price": 587.0, "prev_close": 552.9, "ext": "post", "epoch": 1_800_000_600,
+                    "bid": 586.9, "ask": 587.1, "source": "Schwab real-time"}}
+    with patch.object(_app._mkt, "live_quotes", return_value=live), \
+         patch.object(_app._mkt, "overnight_window_start", return_value=None):
+        out = client.get("/api/terminal/live/AMD").get_json()["quote"]
+    assert (out["bid"], out["ask"]) == (586.9, 587.1)
+    js = open("static/js/chart_tools.js", encoding="utf-8").read()
+    assert "function ctNbboFallback(sym, q)" in js and "ctNbboFallback(String(t).toUpperCase(), q)" in TEMPLATE
+
+
+def test_extended_hours_turned_back_on_once():
+    assert "tradestaar.extReset.v3" in TEMPLATE
+    js = open("static/js/chart_tools.js", encoding="utf-8").read()
+    assert "'tradestaar.chartExtendedPref': '0'" not in js     # presets no longer switch it off

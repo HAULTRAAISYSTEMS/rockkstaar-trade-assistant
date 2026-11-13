@@ -5973,7 +5973,9 @@ def api_terminal_live(ticker):
                          "ext": q.get("ext"), "source": q.get("source") or "",
                          "day_open": q.get("day_open"), "day_high": q.get("day_high"),
                          "day_low": q.get("day_low"), "day_volume": q.get("day_volume"),
-                         "day_close": q.get("day_close"), "day_epoch": q.get("day_epoch")}
+                         "day_close": q.get("day_close"), "day_epoch": q.get("day_epoch"),
+                         "bid": q.get("bid"), "ask": q.get("ask"),
+                         "bid_size": q.get("bid_size"), "ask_size": q.get("ask_size")}
         except Exception as exc:
             logger.debug("terminal live (shared) %s: %s", ticker, exc)
         # 8 PM-4 AM: the after-hours print goes stale at 8 PM, so the chart
