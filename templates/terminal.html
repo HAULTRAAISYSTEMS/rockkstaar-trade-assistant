@@ -1400,6 +1400,13 @@ try {
   // v2 key: the old one was written as "0" on every interval change.
   // Only the Extended button writes this, so switching to 1D/4H (which
   // have no extended candles) no longer turns it off for the intraday charts.
+  // Turned back on once (Nov 2026): the Swing / Big-picture layout presets
+  // wrote "0" here and hid after-hours candles on every intraday chart.
+  // After this the button's choice sticks again.
+  if(localStorage.getItem('tradestaar.extReset.v3') === null){
+    localStorage.setItem('tradestaar.chartExtendedPref', '1');
+    localStorage.setItem('tradestaar.extReset.v3', '1');
+  }
   var _xv = localStorage.getItem('tradestaar.chartExtendedPref');
   twSavedExtended = _xv === null ? true : _xv === '1';
   var twStoredIndicators=JSON.parse(localStorage.getItem('tradestaar.chartIndicators')||'null');
@@ -2330,6 +2337,17 @@ var twRegClose = {};
 function twLiveApply(d){
   var t = twChartState.ticker, q = d && d.quote;
   if(!d || (d.ticker && d.ticker !== String(t || '').toUpperCase())) return;
+  // Bid / Ask on the chart and the ticket even when Level 2 isn't streaming.
+  if(q && t && typeof ctNbboFallback === 'function' && ctNbboFallback(String(t).toUpperCase(), q)){
+    var osym = (document.getElementById('tw-ot-symbol').value || '').toUpperCase(), up = String(t).toUpperCase();
+    if(osym === up){
+      window._twNbbo = {symbol:up, bid:Number(q.bid), ask:Number(q.ask), last:Number(q.price)};
+      var fx = function(v){ return Number(v) > 0 ? Number(v).toFixed(2) : '—'; };
+      var ob = document.getElementById('tw-ot-bid'), oa = document.getElementById('tw-ot-ask'), ol = document.getElementById('tw-ot-last');
+      if(ob) ob.textContent = fx(q.bid); if(oa) oa.textContent = fx(q.ask); if(ol) ol.textContent = fx(q.price);
+      var nb = document.getElementById('tw-ot-nbbo'); if(nb) nb.classList.remove('is-off');
+    }
+  }
   if(q && t){
       var px = Number(q.price);
       // Never step back to an older print (a poll answered by a slower

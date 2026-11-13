@@ -1762,6 +1762,13 @@ def _quote_from_alpaca_snapshot(snap: dict, today) -> dict | None:
     pct = round((float(price) / float(prev_close) - 1) * 100, 2) if prev_close else None
     out = {"price": round(float(price), 4), "epoch": epoch, "prev_close": prev_close,
            "change_pct": pct, "ext": ext}
+    lq = (snap or {}).get("latestQuote") or {}
+    try:
+        b, a = float(lq.get("bp") or 0), float(lq.get("ap") or 0)
+        if b > 0 and a >= b:
+            out.update(bid=round(b, 4), ask=round(a, 4), bid_size=lq.get("bs"), ask_size=lq.get("as"))
+    except (TypeError, ValueError):
+        pass
     if daily_day == today:
         # Today's session so far, for drawing today's daily candle.
         out.update(day_open=daily.get("o"), day_high=daily.get("h"),

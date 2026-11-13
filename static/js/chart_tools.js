@@ -1557,9 +1557,21 @@ document.addEventListener('dp:quote', function (e) {
   var d = e.detail || {};
   var bid = Number(d.bid), ask = Number(d.ask);
   if (!d.symbol || !(bid > 0) || !(ask > 0)) return;
-  ctStudy.nbbo = {symbol: d.symbol, bid: bid, ask: ask, at: Date.now()};
+  ctStudy.nbbo = {symbol: d.symbol, bid: bid, ask: ask, at: Date.now(), src: 'stream'};
   ctRenderNbbo();
 });
+/* Bid / Ask from the 3-second quote poll (Schwab REST / Alpaca) when the
+   Level 2 streamer isn't delivering — not connected, between symbols, or
+   quiet after hours. The streamer wins whenever it's fresh. */
+function ctNbboFallback(sym, q) {
+  var bid = Number(q && q.bid), ask = Number(q && q.ask);
+  if (!sym || !(bid > 0) || !(ask >= bid)) return false;
+  var cur = ctStudy.nbbo;
+  if (cur && cur.src === 'stream' && cur.symbol === sym && Date.now() - cur.at < 8000) return false;
+  ctStudy.nbbo = {symbol: sym, bid: bid, ask: ask, at: Date.now(), src: 'poll'};
+  ctRenderNbbo();
+  return true;
+}
 function ctOnSeriesChange() {
   ctRenderLevels();
   if (ctStudy.nbboLines.length) { ctStudy.nbboLines.forEach(function (l) { try { l.s.removePriceLine(l.line); } catch (e) {} }); ctStudy.nbboLines = []; }
@@ -1916,15 +1928,17 @@ function ctSendToTicket(d) {
 var CT_LAYOUT_KEYS = ['tradestaar.chartInterval', 'tradestaar.chartRange', 'tradestaar.chartType', 'tradestaar.chartVolume',
   'tradestaar.chartExtendedPref', 'tradestaar.chartIndicators', 'tradestaar.chartStudies', 'tradestaar.chartStyles',
   'tradestaar.chartOverlays'];
+// Daily/weekly presets leave the Extended choice alone: it only applies to
+// intraday charts, and switching it off there hid after-hours candles later.
 var CT_BUILTIN_LAYOUTS = [
   {name: 'Scalp · 1m', builtin: true, state: {'tradestaar.chartInterval': '1m', 'tradestaar.chartRange': '1d', 'tradestaar.chartType': 'candles',
     'tradestaar.chartExtendedPref': '1', 'tradestaar.chartVolume': '1'}},
   {name: 'Day trade · 5m', builtin: true, state: {'tradestaar.chartInterval': '5m', 'tradestaar.chartRange': '5d', 'tradestaar.chartType': 'candles',
     'tradestaar.chartExtendedPref': '1', 'tradestaar.chartVolume': '1'}},
   {name: 'Swing · 1D', builtin: true, state: {'tradestaar.chartInterval': '1d', 'tradestaar.chartRange': '1y', 'tradestaar.chartType': 'candles',
-    'tradestaar.chartExtendedPref': '0', 'tradestaar.chartVolume': '1'}},
+    'tradestaar.chartVolume': '1'}},
   {name: 'Big picture · 1W', builtin: true, state: {'tradestaar.chartInterval': '1w', 'tradestaar.chartRange': 'max', 'tradestaar.chartType': 'candles',
-    'tradestaar.chartExtendedPref': '0', 'tradestaar.chartVolume': '1'}}
+    'tradestaar.chartVolume': '1'}}
 ];
 var ctLayouts = [];
 try { ctLayouts = JSON.parse(localStorage.getItem('tradestaar.layouts') || '[]') || []; } catch (e) { ctLayouts = []; }
