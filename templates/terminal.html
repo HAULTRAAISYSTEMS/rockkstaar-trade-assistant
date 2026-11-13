@@ -603,6 +603,7 @@
           <div class="tw-tools-pill" role="group" aria-label="Chart tools">
             <button type="button" class="tw-fs-btn" id="tw-layout-btn" onclick="twToggleLayouts(event)" title="Layouts — save and switch chart setups" aria-label="Chart layouts" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M10 10v10"/></svg></button>
             <button type="button" class="tw-fs-btn tw-size-btn" id="tw-size-btn" onclick="twToggleSize()" title="Size a trade: tap entry, then stop" aria-label="Position size tool" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M5 7h14M5 7l-3 6a3 3 0 0 0 6 0zM19 7l-3 6a3 3 0 0 0 6 0z"/></svg></button>
+            <button type="button" class="tw-fs-btn tw-zones-btn" id="tw-zones-btn" onclick="twToggleZones()" title="Value zones on/off (Accumulate / Load the boat on 1D, 1W, 1M)" aria-label="Value zones" aria-pressed="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke-dasharray="2 3"/><path d="M12 3v7M9 7l3 3 3-3"/></svg></button>
             <button type="button" class="tw-fs-btn" id="tw-settings-btn" onclick="twToggleStudySettings()" title="Chart settings" aria-label="Chart settings"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
             <button type="button" class="tw-fs-btn" id="tw-fs-btn" onclick="twToggleFullscreen()" title="Full screen chart (Esc to exit)" aria-label="Full screen chart" aria-pressed="false"><svg class="tw-fs-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="tw-fs-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
           </div>
@@ -1480,8 +1481,9 @@ function twInitChart(){
       horzLine:{color:'rgba(214,224,236,0.38)',style:LC.LineStyle.Dashed,labelBackgroundColor:'#2b3646'} }
   });
   // Semantic colours — green = gain, red = loss. Do not restyle.
-  var area=chart.addAreaSeries({ lineColor:'#22C58B', topColor:'rgba(34,197,139,0.28)', bottomColor:'rgba(34,197,139,0.0)', lineWidth:2, priceLineVisible:false });
-  var candle=chart.addCandlestickSeries({ upColor:'#22C58B', downColor:'#FF4D45', wickUpColor:'#22C58B', wickDownColor:'#FF4D45', borderVisible:false, visible:false });
+  var twPxFmt={type:'custom', formatter:twAxisPrice, minMove:0.0001};
+  var area=chart.addAreaSeries({ priceFormat:twPxFmt, lineColor:'#22C58B', topColor:'rgba(34,197,139,0.28)', bottomColor:'rgba(34,197,139,0.0)', lineWidth:2, priceLineVisible:false });
+  var candle=chart.addCandlestickSeries({ priceFormat:twPxFmt, upColor:'#22C58B', downColor:'#FF4D45', wickUpColor:'#22C58B', wickDownColor:'#FF4D45', borderVisible:false, visible:false });
   var vol=chart.addHistogramSeries({ priceFormat:{type:'volume'}, priceScaleId:'' });
   vol.priceScale().applyOptions({ scaleMargins:{ top:0.85, bottom:0 } });
   // Extended-hours background shading (TradingView-style separation).
@@ -2153,6 +2155,26 @@ function twLoadIntelligenceSoon(ticker){
   clearTimeout(twIntelSoonTimer);
   twIntelSoonTimer=setTimeout(function(){ twLoadIntelligence(ticker); }, 900);
 }
+/* Price-axis labels: a stock can't trade below $0, so the margin under the
+   lowest candle is left unlabeled instead of reading −25, −50. */
+function twAxisPrice(p){
+  if(!(p>=0)) return '';
+  return (p>=1||p===0) ? p.toFixed(2) : p.toFixed(4);
+}
+/* One-tap value-zone toggle on the chart toolbar (same setting as the
+   checkbox in chart settings). */
+function twToggleZones(){
+  var on=!(window.ctPrefs&&ctPrefs.view&&ctPrefs.view.zones===false);
+  if(typeof ctSet==='function') ctSet('view.zones', !on);
+  twSyncZonesBtn();
+  if(typeof twRenderDrawings==='function') twRenderDrawings();
+}
+function twSyncZonesBtn(){
+  var b=document.getElementById('tw-zones-btn'); if(!b) return;
+  var on=!(window.ctPrefs&&ctPrefs.view&&ctPrefs.view.zones===false);
+  b.setAttribute('aria-pressed', on?'true':'false'); b.classList.toggle('is-off', !on);
+}
+document.addEventListener('DOMContentLoaded', function(){ setTimeout(twSyncZonesBtn, 0); });
 /* Value zones from the Thesis page, shaded on the Daily/Weekly/Monthly chart. */
 function twLoadValueZones(ticker, tries){
   tries=tries||0;
