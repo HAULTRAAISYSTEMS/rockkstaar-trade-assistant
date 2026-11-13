@@ -73,17 +73,58 @@ def _history_series(data: dict) -> list[dict]:
     return out
 
 
-def _revenue_cagr(history: list[dict]) -> float:
+def _revenue_cagr_raw(history: list[dict]) -> float | None:
     revs = [h["revenue"] for h in reversed(history)
             if isinstance(h["revenue"], (int, float)) and h["revenue"] > 0]
     if len(revs) < 2:
-        return 0.0
+        return None
     years = len(revs) - 1
     try:
-        g = (revs[-1] / revs[0]) ** (1 / years) - 1
+        return (revs[-1] / revs[0]) ** (1 / years) - 1
     except (ZeroDivisionError, ValueError):
+        return None
+
+
+def _revenue_cagr(history: list[dict]) -> float:
+    g = _revenue_cagr_raw(history)
+    if g is None:
         return 0.0
     return max(_GROWTH_MIN, min(_GROWTH_MAX, g))
+
+
+# Above this size a company can't keep compounding like a small one; the
+# page says so when the model is leaning on a capped growth rate.
+_MEGA_CAP = 500e9
+
+
+def model_cautions(history: list[dict], price: float | None, shares: float | None) -> list[dict]:
+    """Plain-English warnings about where the simple model is a stretch."""
+    out = []
+    raw = _revenue_cagr_raw(history)
+    cap = (price * shares) if price and shares else None
+    if raw is not None and raw > _GROWTH_MAX:
+        out.append({"key": "growth_cap", "text": (
+            f"Revenue has grown {raw * 100:.0f}% a year, so the model holds growth at its "
+            f"{_GROWTH_MAX * 100:.0f}% cap. Even capped, that assumes the boom keeps going.")})
+    if cap and cap >= _MEGA_CAP:
+        out.append({"key": "mega_cap", "text": (
+            f"At about ${cap / 1e12:.1f}T, this is one of the largest companies in the world. "
+            "Growth this big is hard to keep up — treat the upper zones with extra caution."
+            if cap >= 1e12 else
+            f"At about ${cap / 1e9:.0f}B, this is a very large company; fast growth gets harder at this size.")})
+    return out
+
+
+def trading_range(bars: dict | None) -> dict | None:
+    """Actual 52-week high and low from the daily candles."""
+    if not bars:
+        return None
+    highs = [h for h in (bars.get("highs") or [])[-252:] if h]
+    lows = [x for x in (bars.get("lows") or [])[-252:] if x]
+    if len(highs) < 20 or len(lows) < 20:
+        return None
+    return {"high": max(highs), "low": min(lows),
+            "high_fmt": _fmt_price(max(highs)), "low_fmt": _fmt_price(min(lows))}
 
 
 def _earnings_power(history: list[dict], growth: float) -> tuple[float | None, str]:
@@ -610,12 +651,26 @@ def build_thesis(data: dict, ticker: str, basis: str = "auto", bars: dict | None
             zones = build_zones(price, targets["base"], targets["bull"])
             ig = implied_growth(price, targets["power"], targets.get("shares"), targets["sales_based"])
             trend = trend_check(bars)
+            rng = trading_range(bars)
+            for r in zones["rows"]:
+                lo, hi = r["lo"], r["hi"]
+                inside = lambda p: p is not None and (lo is None or p > lo) and (hi is None or p <= hi)
+                r["marks"] = []
+                if rng and inside(rng["high"]):
+                    r["marks"].append({"key": "high", "text": f"52-wk high {rng['high_fmt']}"})
+                if rng and inside(rng["low"]):
+                    r["marks"].append({"key": "low", "text": f"52-wk low {rng['low_fmt']}"})
             value = {
                 "available": True,
+                "range": rng,
+                "cautions": model_cautions(_history_series(data), price, targets.get("shares")),
                 "zones": zones,
                 "implied_growth": ig,
                 "implied_growth_fmt": (f"{ig * 100:+.0f}%" if ig is not None else "—"),
-                "history_growth_fmt": targets["growth_pct"],
+                "history_growth_fmt": (f"{_revenue_cagr_raw(_history_series(data)) * 100:+.0f}%"
+                                       if (_revenue_cagr_raw(_history_series(data)) or 0) > _GROWTH_MAX
+                                       else targets["growth_pct"]),
+                "growth_capped": (_revenue_cagr_raw(_history_series(data)) or 0) > _GROWTH_MAX,
                 "growth_gap": (ig - targets["growth"]) if ig is not None else None,
                 "plan": buy_plan(targets["base"]),
                 "history": multiple_history(data, bars, targets["basis_key"]),
