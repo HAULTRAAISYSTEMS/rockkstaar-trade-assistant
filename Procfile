@@ -13,4 +13,9 @@
 # few minutes, so each worker restarted (≈12 s of no answer) every few
 # minutes — the "crashes". Recycling exists to contain slow memory growth,
 # not to restart on a timer; 20000 keeps that safety net at roughly hours.
-web: gunicorn --bind 0.0.0.0:$PORT --workers 2 --worker-class gthread --threads 4 --timeout 120 --graceful-timeout 30 --max-requests 20000 --max-requests-jitter 2000 web_app:app
+# 12 threads per worker (was 4): opening the Terminal fires ~10 requests at
+# once (candles, quotes, live, context, insiders, events, depth…), several of
+# them slow outside lookups. With 8 slots in total the chart's candle request
+# queued behind them — about 30 s before the chart appeared. Threads wait on
+# the network, not the CPU, and cost little memory.
+web: gunicorn --bind 0.0.0.0:$PORT --workers 2 --worker-class gthread --threads 12 --timeout 120 --graceful-timeout 30 --max-requests 20000 --max-requests-jitter 2000 web_app:app

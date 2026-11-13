@@ -17,6 +17,7 @@ max_requests_jitter = 2000
 # recycle floor and the crash diagnostics below cannot be switched off by an
 # old --max-requests 500 left in the Render dashboard.
 MIN_MAX_REQUESTS = 5000
+MIN_THREADS = 12        # see the Procfile: the Terminal's first load needs the slots
 
 
 def on_starting(server):
@@ -28,6 +29,10 @@ def on_starting(server):
             "to match the Procfile.", cfg.max_requests, max_requests)
         cfg.set("max_requests", max_requests)
         cfg.set("max_requests_jitter", max(cfg.max_requests_jitter, max_requests_jitter))
+    if cfg.threads < MIN_THREADS:
+        server.log.warning("threads=%s is too few for the Terminal's first load; raising to %s.",
+                           cfg.threads, MIN_THREADS)
+        cfg.set("threads", MIN_THREADS)
     server.log.info("gunicorn settings: workers=%s threads=%s timeout=%s max_requests=%s(+%s)",
                     cfg.workers, cfg.threads, cfg.timeout, cfg.max_requests, cfg.max_requests_jitter)
 
