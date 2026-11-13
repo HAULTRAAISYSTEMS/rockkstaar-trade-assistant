@@ -970,6 +970,7 @@
             <button type="button" class="tw-side-btn buy active" data-side="BUY" onclick="twSide(this)">Buy</button>
             <button type="button" class="tw-side-btn sell" data-side="SELL" onclick="twSide(this)">Sell</button>
           </div>
+          {% if not ios_app %}{# iPhone App Store build: no live order entry (Apple 3.2.1(viii)) #}
           <div class="lt-mode" id="lt-mode" role="group" aria-label="Paper or live">
             <button type="button" class="active" data-mode="paper">Paper</button>
             <button type="button" data-mode="live">Live · Schwab</button>
@@ -996,6 +997,7 @@
             </div>
             <div class="lt-set-note">Orders go to your Schwab account for real. Every order is previewed, checked against your Risk page rules, and needs a second tap to send.</div>
           </div>
+          {% endif %}
           <div class="tw-field">
             <label for="tw-ot-symbol">Symbol</label>
             <input class="tw-input" id="tw-ot-symbol" type="text" value="{{ requested_symbol or (stocks[0].ticker if stocks else chart_symbol) }}" autocomplete="off" oninput="twEstCost()">

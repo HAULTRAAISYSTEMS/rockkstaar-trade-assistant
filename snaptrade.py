@@ -138,7 +138,21 @@ def _body(response):
 
 def _stored_secret(user_id: int) -> str:
     from database import get_user_setting
-    return get_user_setting(user_id, _SETTING_SECRET) or ""
+    import secret_box
+    raw = get_user_setting(user_id, _SETTING_SECRET) or ""
+    value = secret_box.decrypt(raw)
+    if raw and not value:
+        # Unreadable (encryption key changed). Don't fall through to a fresh
+        # registration — that issues a new secret and strands every linked
+        # brokerage. Reconnecting from the Brokers page fixes it.
+        raise RuntimeError("SnapTrade connection needs to be reconnected")
+    if raw and not secret_box.is_encrypted(raw):
+        try:
+            from database import set_user_setting
+            set_user_setting(user_id, _SETTING_SECRET, secret_box.encrypt(raw))
+        except Exception:
+            pass
+    return value
 
 
 def register_user(user_id: int = 1, *, force: bool = False) -> str:
@@ -162,7 +176,8 @@ def register_user(user_id: int = 1, *, force: bool = False) -> str:
     if not secret:
         raise RuntimeError("SnapTrade registration returned no userSecret")
 
-    set_user_setting(user_id, _SETTING_SECRET, secret)
+    import secret_box
+    set_user_setting(user_id, _SETTING_SECRET, secret_box.encrypt(secret))
     logger.info("snaptrade user registered user_id=%s", user_id)
     return secret
 
