@@ -1957,8 +1957,16 @@ function twEmpty(message,action){ return '<div class="tw-intel-empty">'+twEsc(me
 /* Earnings and news are drawn on the time axis by chart_tools (ctDrawEvents):
    a series marker can only sit on an existing bar, so an upcoming earnings
    date was pinned to the LAST candle — reading as if it had just happened. */
-function twApplyEvents(events){
-  twChartState.events=events||[];
+function twApplyEvents(events, source){
+  // Two feeds: the intelligence card (next earnings, today's headlines) and
+  // /api/terminal/events (past earnings with EPS results + timed news).
+  if(source) twChartState['events_'+source]=events||[]; else if(events!==twChartState.events) twChartState.events_intel=events||[];
+  var seen={}, merged=[];
+  (twChartState.events_chart||[]).concat(twChartState.events_intel||[]).forEach(function(e){
+    var k=e.type+'|'+(e.type==='earnings'?e.date:(e.ts+'|'+(e.label||'').slice(0,40)));
+    if(seen[k]) return; seen[k]=1; merged.push(e);
+  });
+  twChartState.events=merged;
   try { twChartState.area.setMarkers([]); twChartState.candle.setMarkers([]); } catch(e) {}
   if(typeof twRenderDrawings==='function') twRenderDrawings();
 }
@@ -2025,9 +2033,21 @@ function twRenderIntelligence(data){
   twNum('tw-context-rvol',c.relative_volume==null?'—':Number(c.relative_volume).toFixed(2)+'x');
   twNum('tw-context-earnings',c.next_earnings?(c.next_earnings.date+' · '+c.next_earnings.time):(data.asset_type==='ETF'?'Not applicable · ETF':'No verified date'));
   if(data.asset_type==='ETF'){twNum('tw-context-insiders','Not applicable · ETF');twPanel('insiders',twEmpty('Corporate Form 4 insider filings are not applicable to an ETF.'));}
-  twApplyEvents(data.events||[]);
+  twApplyEvents(data.events||[], 'intel');
+}
+function twLoadChartEvents(ticker, tries){
+  tries=tries||0;
+  if(tries===0){ twChartState.events_chart=[]; twChartState.events_intel=[]; twApplyEvents([], 'chart'); }
+  fetch('/api/terminal/events/'+encodeURIComponent(ticker),{credentials:'same-origin',cache:'no-store'})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(!d||!d.ok||twChartState.ticker!==ticker&&String(twChartState.ticker||'').toUpperCase()!==ticker) return;
+      twApplyEvents(d.events||[], 'chart');
+      if(d.pending && tries<6) setTimeout(function(){ twLoadChartEvents(ticker, tries+1); }, 2500+tries*1500);
+    }).catch(function(){});
 }
 function twLoadIntelligence(ticker){
+  twLoadChartEvents(String(ticker||'').toUpperCase());
   var req=++twChartState.intelReqId; twNum('tw-intel-ticker',ticker); twNum('tw-context-why','Loading verified context…'); twNum('tw-context-insiders','Checking SEC filings…');
   fetch('/api/terminal/intelligence/'+encodeURIComponent(ticker)).then(function(r){return r.json();}).then(function(data){if(req!==twChartState.intelReqId)return;if(!data.ok)throw new Error(data.error||'Unavailable');twRenderIntelligence(data);}).catch(function(){if(req===twChartState.intelReqId){twPanel('overview',twEmpty('Ticker intelligence is temporarily unavailable.'));twNum('tw-context-why','Context temporarily unavailable.');}});
   var insiderReq=++twChartState.insiderReqId;

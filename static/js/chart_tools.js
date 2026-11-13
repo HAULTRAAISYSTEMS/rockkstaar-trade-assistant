@@ -2077,6 +2077,9 @@ function ctDrawEvents(ctx, dim) {
     if (step >= 86400) t = Math.floor(t / 86400) * 86400 + 12 * 3600;
     var x = ctX(t); if (x == null || x < 0) return;
     var label = 'Earnings ' + (e.date || '') + (e.time && e.time !== 'TBD' ? ' · ' + String(e.time).toUpperCase() : '');
+    if (e.eps != null) label += ' · EPS ' + Number(e.eps).toFixed(2) + (e.eps_est != null ? ' vs ' + Number(e.eps_est).toFixed(2) + ' est' : '') + (e.result ? ' · ' + e.result.toUpperCase() : '');
+    else if (e.upcoming || t > Date.now() / 1000) label += ' · upcoming';
+    var flagColor = e.result === 'beat' ? '#22C58B' : e.result === 'miss' ? '#FF4D45' : '#F0B53F';
     if (x > dim.W) {
       // Past the right edge (upcoming): a flag at the edge says it's coming.
       var tag = 'E ' + ctShortDate(e.date) + ' ›';
@@ -2088,9 +2091,12 @@ function ctDrawEvents(ctx, dim) {
       return;
     }
     x = Math.round(x) + 0.5;
-    ctx.strokeStyle = 'rgba(240,181,63,0.55)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
-    ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, dim.H - 4); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = '#F0B53F'; ctx.beginPath(); ctx.arc(x, dim.H - 14, 8, 0, Math.PI * 2); ctx.fill();
+    // Many past reports on a long chart: only the flag, no full-height line.
+    if (step < 86400 || e.upcoming) {
+      ctx.strokeStyle = ctHexA(flagColor, 0.55); ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, dim.H - 4); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.fillStyle = flagColor; ctx.beginPath(); ctx.arc(x, dim.H - 14, 8, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#1a1206'; ctx.fillText('E', x, dim.H - 13.5);
     ctEventHits.push({x: x, y: dim.H - 14, r: 10, text: label + (e.source ? ' (' + e.source + ')' : '')});
   });

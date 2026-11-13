@@ -6351,6 +6351,81 @@ def api_terminal_intelligence(ticker):
     return jsonify(payload)
 
 
+_CHART_EVENTS: dict = {}          # ticker -> {"at", "events"}
+_CHART_EVENTS_BUSY: set = set()
+_CHART_EVENTS_LOCK = threading.Lock()
+_CHART_EVENTS_TTL = 900
+
+
+def _build_chart_events(ticker: str) -> list:
+    """Past earnings (with EPS vs estimate), the next report date and timed
+    headlines for the chart's time axis. Slow providers (SEC, Finnhub, FMP,
+    news) — always run in a background thread, never in a request."""
+    events: list = []
+    try:
+        import news_desk
+        for r in (news_desk.earnings_dates(ticker) or [])[:40]:
+            eps, est = r.get("eps"), r.get("eps_est")
+            beat = None
+            if eps is not None and est is not None:
+                beat = "beat" if eps > est else ("miss" if eps < est else "inline")
+            events.append({"type": "earnings", "date": r["date"], "time": r.get("hour") or "",
+                           "eps": eps, "eps_est": est, "result": beat, "label": "Earnings",
+                           "source": "SEC 8-K / Finnhub / FMP"})
+    except Exception as exc:
+        logger.debug("chart events: earnings history %s: %s", ticker, exc)
+    try:
+        stock = get_stock_data(ticker) or {}
+        nxt = str(stock.get("earnings_date") or "")[:10]
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", nxt) and nxt >= _et_now().strftime("%Y-%m-%d"):
+            events.append({"type": "earnings", "date": nxt, "time": str(stock.get("earnings_time") or ""),
+                           "upcoming": True, "label": "Earnings", "source": "stock snapshot"})
+    except Exception as exc:
+        logger.debug("chart events: next earnings %s: %s", ticker, exc)
+    try:
+        from terminal_intelligence import _epoch
+        for n in (_intel.fetch_ticker_news(ticker, limit=25) or []):
+            ts = _epoch(n.get("published_at"))
+            if ts:
+                events.append({"type": "news", "ts": ts, "label": str(n.get("headline") or "")[:200],
+                               "source": n.get("source") or "", "url": n.get("url") or ""})
+    except Exception as exc:
+        logger.debug("chart events: news %s: %s", ticker, exc)
+    return events
+
+
+@app.route("/api/terminal/events/<ticker>")
+def api_terminal_events(ticker):
+    """Earnings and news markers for the chart. Answers from a 15-minute cache;
+    a miss starts one background fetch and returns pending:true (the chart
+    asks again a few seconds later), so no request waits on SEC or a vendor."""
+    ticker = (ticker or "").upper().strip()
+    if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
+        return jsonify({"ok": False, "error": "bad ticker"}), 400
+    now = _time.time()
+    hit = _CHART_EVENTS.get(ticker)
+    if hit and now - hit["at"] < _CHART_EVENTS_TTL:
+        return jsonify({"ok": True, "ticker": ticker, "events": hit["events"]})
+    with _CHART_EVENTS_LOCK:
+        start = ticker not in _CHART_EVENTS_BUSY
+        if start:
+            _CHART_EVENTS_BUSY.add(ticker)
+    if start:
+        def _work():
+            try:
+                ev = _build_chart_events(ticker)
+                with _CHART_EVENTS_LOCK:
+                    if len(_CHART_EVENTS) > 300:
+                        _CHART_EVENTS.clear()
+                    _CHART_EVENTS[ticker] = {"at": _time.time(), "events": ev}
+            finally:
+                with _CHART_EVENTS_LOCK:
+                    _CHART_EVENTS_BUSY.discard(ticker)
+        threading.Thread(target=_work, daemon=True, name=f"chart-events-{ticker}").start()
+    return jsonify({"ok": True, "ticker": ticker, "pending": True,
+                    "events": hit["events"] if hit else []})
+
+
 @app.route("/api/terminal/insiders/<ticker>")
 def api_terminal_insiders(ticker):
     """Return verified corporate-insider transactions from SEC Form 4 filings."""
