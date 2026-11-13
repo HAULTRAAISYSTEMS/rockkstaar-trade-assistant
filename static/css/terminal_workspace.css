@@ -378,18 +378,24 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
   .tw-chart-toolbar .tw-symsearch     { order: 1; }
   .tw-chart-toolbar .tw-interval-wrap { order: 2; }
   .tw-chart-toolbar .tw-range-wrap    { order: 3; }
-  .tw-chart-toolbar .tw-type          { order: 4; }
+  /* Row 1: what to chart (symbol, timeframe, range). Row 2: how it looks,
+     and the tools pinned right. A fixed break keeps the tools pill whole. */
+  .tw-chart-toolbar::after { content: ""; order: 4; flex: 0 0 100%; height: 0; }
+  .tw-chart-toolbar .tw-type          { order: 5; }
   .tw-chart-toolbar .tw-fs-btn        { margin-left: 0 !important; }
-  .tw-chart-toolbar #tw-size-btn      { order: 6; margin-left: auto !important; }
-  .tw-chart-toolbar #tw-settings-btn  { order: 7; margin-left: -6px !important; }
-  .tw-chart-toolbar #tw-fs-btn        { order: 8; margin-left: -6px !important; }
+  .tw-chart-toolbar #tw-layout-btn    { order: 6; margin-left: auto !important; }
+  .tw-chart-toolbar #tw-size-btn      { order: 7; margin-left: -6px !important; }
+  .tw-chart-toolbar #tw-settings-btn  { order: 8; margin-left: -6px !important; }
+  .tw-chart-toolbar #tw-fs-btn        { order: 9; margin-left: -6px !important; }
   /* The three tools read as one pill. */
   .tw-chart-toolbar .tw-fs-btn {
     border: 1px solid rgba(255, 255, 255, 0.07) !important; border-radius: 0 !important;
     background: rgba(255, 255, 255, 0.03) !important;
   }
-  .tw-chart-toolbar #tw-size-btn { border-radius: 10px 0 0 10px !important; }
+  .tw-chart-toolbar #tw-layout-btn { border-radius: 10px 0 0 10px !important; }
+  .tw-chart-toolbar #tw-size-btn,
   .tw-chart-toolbar #tw-settings-btn { border-left: 0 !important; border-right: 0 !important; }
+  .tw-chart-toolbar #tw-settings-btn { border-left: 1px solid rgba(255, 255, 255, 0.07) !important; border-right: 1px solid rgba(255, 255, 255, 0.07) !important; }
   .tw-chart-toolbar #tw-fs-btn { border-radius: 0 10px 10px 0 !important; }
   .tw-chart-toolbar .tw-fs-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.07) !important; }
   .tw-chart-toolbar .tw-size-btn[aria-pressed="true"],
@@ -466,8 +472,9 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
   .tw-chart-toolbar #tw-volume-btn .tw-btn-text,
   .tw-chart-toolbar #tw-extended-btn .tw-btn-text,
   .tw-chart-toolbar #tw-indicators-btn .tw-btn-text { display: none !important; }
+  .tw-chart-toolbar #tw-layout-btn { order: 7; margin-left: auto !important; width: 32px; height: 32px; color: #c9d3df; border-color: rgba(255,255,255,.1); background: rgba(3,7,15,.6); }
   .tw-draw-toggle {
-    order: 7; margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+    order: 7; margin-left: 4px; display: inline-flex; align-items: center; justify-content: center;
     width: 32px; height: 32px; border-radius: 9px;
     border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(3, 7, 15, 0.6); color: #c9d3df;
   }

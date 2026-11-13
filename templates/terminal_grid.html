@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Chart Grid — Tradestaar Elite{% endblock %}
+{% block head_extra %}
+<style>
+.cg-wrap { padding: 12px 16px 20px; }
+.cg-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.cg-bar h1 { margin: 0 8px 0 0; font: 800 15px var(--font-display, sans-serif); letter-spacing: .12em; text-transform: uppercase; color: #e8eef6; }
+.cg-seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(255,255,255,.03); }
+.cg-seg button { height: 28px; padding: 0 11px; border: 0; border-radius: 8px; background: transparent; color: #8d9bb0; font: 600 11.5px var(--font-mono, monospace); cursor: pointer; }
+.cg-seg button.on { color: var(--cc-accent-hi, #e8ffad); background: rgba(var(--cc-accent-rgb, 196,245,59), .14); box-shadow: inset 0 0 0 1px rgba(var(--cc-accent-rgb, 196,245,59), .45); }
+.cg-back { margin-left: auto; color: #8d9bb0; font: 600 12px var(--font-mono, monospace); text-decoration: none; }
+.cg-back:hover { color: #fff; }
+.cg-grid { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; height: calc(100vh - 300px); min-height: 460px; }
+.cg-grid.n2 { grid-template-rows: 1fr; }
+.cg-grid.n4 { grid-template-rows: 1fr 1fr; }
+.cg-cell { position: relative; display: flex; flex-direction: column; min-height: 0; border: 1px solid rgba(255,255,255,.07); border-radius: 12px; background: #070b12; overflow: hidden; }
+.cg-cell.focus { border-color: rgba(var(--cc-accent-rgb, 196,245,59), .45); }
+.cg-hd { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.cg-sym { width: 82px; height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1); background: #060a12; color: #fff; font: 800 13px var(--font-mono, monospace); text-transform: uppercase; }
+.cg-px { font: 700 13px var(--font-mono, monospace); color: #e8eef6; }
+.cg-chg { font: 600 11.5px var(--font-mono, monospace); }
+.cg-chg.up { color: #22c58b; } .cg-chg.dn { color: #ff4d45; }
+.cg-hd .cg-seg { margin-left: auto; }
+.cg-hd .cg-seg button { height: 24px; padding: 0 7px; font-size: 10.5px; }
+.cg-open { color: #8d9bb0; text-decoration: none; font: 700 13px var(--font-mono, monospace); padding: 0 4px; }
+.cg-open:hover { color: #fff; }
+.cg-chart { flex: 1 1 auto; min-height: 0; }
+.cg-msg[hidden] { display: none; }
+.cg-msg { position: absolute; inset: 40px 0 0; display: grid; place-items: center; color: #6d7b90; font: 600 12px var(--font-mono, monospace); pointer-events: none; }
+@media (max-width: 900px) {
+  .cg-grid, .cg-grid.n2, .cg-grid.n4 { grid-template-columns: 1fr; grid-template-rows: none; height: auto; }
+  .cg-cell { height: 320px; }
+  .cg-hd .cg-seg button { padding: 0 5px; }
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="cg-wrap">
+  <div class="cg-bar">
+    <h1>Chart grid</h1>
+    <div class="cg-seg" role="group" aria-label="Number of charts">
+      <button type="button" data-n="2">2 charts</button>
+      <button type="button" data-n="4">4 charts</button>
+    </div>
+    <span class="faint" style="font-size:11px">Type a symbol and press Enter · times in Eastern · updates live</span>
+    <a class="cg-back" href="{{ url_for('terminal') }}">← Terminal</a>
+  </div>
+  <datalist id="cg-syms">{% for t in watchlist %}<option value="{{ t }}">{% endfor %}</datalist>
+  <div class="cg-grid n4" id="cg-grid"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+(function(){
+  var IV = [['1m','1m','1d'],['5m','5m','5d'],['15m','15m','5d'],['1h','1H','1mo'],['1d','1D','1y'],['1w','1W','5y']];
+  var WL = {{ watchlist|tojson }}, FIRST = {{ first_symbol|tojson }};
+  var dateFmt = new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  var dayFmt = new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric'});
+  var clockFmt = new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit'});
+  function toDate(t){ if(t&&typeof t==='object'&&t.year) return new Date(Date.UTC(t.year,(t.month||1)-1,t.day||1,12)); var s=Number(t); return isFinite(s)?new Date(s*1000):null; }
+  var state;
+  try { state = JSON.parse(localStorage.getItem('tradestaar.grid')||'null'); } catch(e) { state = null; }
+  if(!state || !Array.isArray(state.cells)) {
+    var pick = ['SPY','QQQ'].concat(WL.filter(function(t){ return t!=='SPY' && t!=='QQQ'; }));
+    state = {n:4, cells:[0,1,2,3].map(function(i){ return {sym: pick[i] || ['SPY','QQQ','NVDA','AAPL'][i], iv: i<2 ? '5m' : '1d'}; })};
+  }
+  if(FIRST){ state.cells[0].sym = FIRST; }
+  function save(){ try{ localStorage.setItem('tradestaar.grid', JSON.stringify(state)); }catch(e){} }
+  var grid = document.getElementById('cg-grid'), cells = [];
+
+  function build(){
+    cells.forEach(function(c){ try{ c.chart.remove(); }catch(e){} clearTimeout(c.timer); });
+    cells = []; grid.innerHTML = ''; grid.className = 'cg-grid n' + state.n;
+    document.querySelectorAll('.cg-bar [data-n]').forEach(function(b){ b.classList.toggle('on', Number(b.dataset.n)===state.n); });
+    for(var i=0;i<state.n;i++) cells.push(makeCell(i));
+    save();
+  }
+  function makeCell(i){
+    var cfg = state.cells[i], el = document.createElement('section');
+    el.className = 'cg-cell'; el.setAttribute('aria-label','Chart '+(i+1));
+    el.innerHTML = '<div class="cg-hd"><input class="cg-sym" list="cg-syms" maxlength="10" aria-label="Symbol" value="'+cfg.sym+'">'+
+      '<span class="cg-px">—</span><span class="cg-chg"></span>'+
+      '<div class="cg-seg" role="group" aria-label="Timeframe">'+IV.map(function(v){ return '<button type="button" data-iv="'+v[0]+'"'+(v[0]===cfg.iv?' class="on"':'')+'>'+v[1]+'</button>'; }).join('')+'</div>'+
+      '<a class="cg-open" title="Open in the Terminal" aria-label="Open in the Terminal" href="/terminal?ticker='+encodeURIComponent(cfg.sym)+'">↗</a></div>'+
+      '<div class="cg-chart"></div><div class="cg-msg">Loading…</div>';
+    grid.appendChild(el);
+    var box = el.querySelector('.cg-chart');
+    var chart = LightweightCharts.createChart(box, {
+      autoSize: true,
+      layout:{background:{type:'solid',color:'transparent'},textColor:'#8d9bb0',fontFamily:'IBM Plex Mono, ui-monospace, monospace',fontSize:11},
+      grid:{vertLines:{color:'rgba(255,255,255,0.03)'},horzLines:{color:'rgba(255,255,255,0.03)'}},
+      rightPriceScale:{borderColor:'rgba(255,255,255,0.08)'},
+      timeScale:{borderColor:'rgba(255,255,255,0.08)',timeVisible:true,secondsVisible:false,rightOffset:4,
+        tickMarkFormatter:function(t,k){ var d=toDate(t); return d ? (Number(k)<=2 ? dayFmt.format(d) : clockFmt.format(d)) : ''; }},
+      localization:{locale:'en-US',timeFormatter:function(t){ var d=toDate(t); return d?dateFmt.format(d):''; }},
+      crosshair:{mode:0}
+    });
+    var candles = chart.addCandlestickSeries({upColor:'#22C58B',downColor:'#FF4D45',borderVisible:false,wickUpColor:'#22C58B',wickDownColor:'#FF4D45'});
+    var ema = chart.addLineSeries({color:'rgba(56,214,197,0.8)',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+    var vol = chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'v',lastValueVisible:false,priceLineVisible:false});
+    chart.priceScale('v').applyOptions({scaleMargins:{top:0.82,bottom:0}});
+    var c = {i:i, el:el, chart:chart, candles:candles, ema:ema, vol:vol, timer:null, key:''};
+    var input = el.querySelector('.cg-sym');
+    input.addEventListener('keydown', function(e){ if(e.key==='Enter'){ input.blur(); } });
+    input.addEventListener('change', function(){
+      var v = input.value.trim().toUpperCase();
+      if(!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(v)){ input.value = cfg.sym; return; }
+      cfg.sym = v; input.value = v; el.querySelector('.cg-open').href = '/terminal?ticker='+encodeURIComponent(v); save(); load(c, true);
+    });
+    el.querySelector('.cg-hd .cg-seg').addEventListener('click', function(e){
+      var b = e.target.closest('[data-iv]'); if(!b) return;
+      cfg.iv = b.dataset.iv; el.querySelectorAll('[data-iv]').forEach(function(x){ x.classList.toggle('on', x===b); }); save(); load(c, true);
+    });
+    el.addEventListener('pointerdown', function(){ cells.forEach(function(o){ o.el.classList.toggle('focus', o===c); }); });
+    load(c, true);
+    return c;
+  }
+  function emaOf(bars, n){ var k=2/(n+1), out=[], e=null; bars.forEach(function(b){ var v=Number(b.close); e = e==null ? v : v*k + e*(1-k); out.push({time:b.time, value:e}); }); return out; }
+  function load(c, fresh){
+    clearTimeout(c.timer);
+    var cfg = state.cells[c.i], iv = IV.filter(function(v){ return v[0]===cfg.iv; })[0] || IV[1];
+    var key = cfg.sym+'|'+iv[0], msg = c.el.querySelector('.cg-msg');
+    if(fresh){ msg.textContent = 'Loading '+cfg.sym+'…'; msg.hidden = false; }
+    c.key = key;
+    var intraday = ['1m','5m','15m','1h'].indexOf(iv[0])>=0;
+    fetch('/api/terminal/candles/'+encodeURIComponent(cfg.sym)+'?interval='+iv[0]+'&range='+iv[2]+'&session='+(intraday?'extended':'regular'), {credentials:'same-origin', cache:'no-store'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(c.key !== key) return;
+        var bars = (d && d.ok && d.bars) || [];
+        if(!bars.length){ msg.textContent = (d && d.error) || ('No data for '+cfg.sym); msg.hidden = false; return; }
+        msg.hidden = true;
+        c.candles.setData(bars.map(function(b){ return {time:b.time, open:+b.open, high:+b.high, low:+b.low, close:+b.close}; }));
+        c.ema.setData(emaOf(bars, 20));
+        c.vol.setData(bars.map(function(b){ return {time:b.time, value:+b.volume||0, color: +b.close >= +b.open ? 'rgba(34,197,139,0.35)' : 'rgba(255,77,69,0.35)'}; }));
+        if(fresh) c.chart.timeScale().scrollToRealTime();
+        var last = bars[bars.length-1], base = intraday ? null : (bars.length>1 ? +bars[bars.length-2].close : null);
+        if(intraday){ // change vs the previous session's last regular bar
+          var lastDay = dayFmt.format(toDate(last.time));
+          for(var j=bars.length-1;j>=0;j--){ if(dayFmt.format(toDate(bars[j].time))!==lastDay && (!bars[j].session || bars[j].session==='regular')){ base=+bars[j].close; break; } }
+        }
+        c.el.querySelector('.cg-px').textContent = (+last.close).toFixed(+last.close < 1 ? 4 : 2);
+        var chg = c.el.querySelector('.cg-chg');
+        if(base){ var p=(+last.close/base-1)*100; chg.textContent=(p>=0?'+':'')+p.toFixed(2)+'%'; chg.className='cg-chg '+(p>=0?'up':'dn'); } else chg.textContent='';
+      })
+      .catch(function(){ if(c.key===key){ msg.textContent='Couldn’t load '+cfg.sym+' — retrying'; msg.hidden=false; } })
+      .then(function(){
+        if(c.key!==key) return;
+        var tick = function(){ if(document.hidden){ c.timer = setTimeout(tick, 5000); return; } load(c, false); };
+        c.timer = setTimeout(tick, intraday ? 15000 : 60000);
+      });
+  }
+  document.querySelectorAll('.cg-bar [data-n]').forEach(function(b){ b.addEventListener('click', function(){ state.n = Number(b.dataset.n); build(); }); });
+  if(!window.LightweightCharts){ grid.innerHTML = '<p class="faint">The charting library did not load.</p>'; return; }
+  build();
+})();
+</script>
+{% endblock %}

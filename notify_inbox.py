@@ -27,6 +27,7 @@ KINDS = {
     "news":         {"label": "News",         "icon": "📰"},
     "setup":        {"label": "Setups",       "icon": "⚡"},
     "position":     {"label": "Positions",    "icon": "🛡"},
+    "price":        {"label": "Price alerts", "icon": "🔔"},
     "insider":      {"label": "Insider",      "icon": "🟢"},
     "calendar":     {"label": "Earnings & Economy", "icon": "📅"},
     "research":     {"label": "Thesis",       "icon": "📌"},

@@ -574,6 +574,17 @@ def init_db():
             UNIQUE(user_id, ticker, direction, target_price)
         )
     """))
+    # Chart alerts (price_alert_engine): when it fired, at what price, the
+    # note shown in the notification and which drawing it came from.
+    for col, col_type in (("triggered_at", "TEXT"), ("triggered_price", "REAL"),
+                          ("note", "TEXT"), ("source", "TEXT"), ("drawing_id", "TEXT")):
+        if _USE_POSTGRES:
+            cursor.execute(f"ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS {col} {col_type}")
+        else:
+            try:
+                cursor.execute(f"ALTER TABLE price_alerts ADD COLUMN {col} {col_type}")
+            except sqlite3.OperationalError:
+                pass
 
     # Dashboard-only SEC Form 4 match rules. These preferences do not imply a
     # background poller or push delivery; they highlight matching verified
@@ -3145,7 +3156,8 @@ def get_price_alerts(user_id: int) -> list:
     """Return only alerts owned by the signed-in user."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT id, ticker, direction, target_price, enabled, created_at "
+        "SELECT id, ticker, direction, target_price, enabled, created_at, "
+        "triggered_at, triggered_price, note, source "
         "FROM price_alerts WHERE user_id = ? ORDER BY enabled DESC, id DESC",
         (user_id,),
     ).fetchall()
@@ -3156,8 +3168,10 @@ def get_price_alerts(user_id: int) -> list:
 def set_price_alert_enabled(alert_id: int, user_id: int, enabled: bool) -> None:
     conn = get_db()
     conn.execute(
-        "UPDATE price_alerts SET enabled = ? WHERE id = ? AND user_id = ?",
-        (1 if enabled else 0, alert_id, user_id),
+        # Resuming a fired alert re-arms it: clear when it fired.
+        "UPDATE price_alerts SET enabled = ?, triggered_at = CASE WHEN ? = 1 THEN NULL ELSE triggered_at END, "
+        "triggered_price = CASE WHEN ? = 1 THEN NULL ELSE triggered_price END WHERE id = ? AND user_id = ?",
+        (1 if enabled else 0, 1 if enabled else 0, 1 if enabled else 0, alert_id, user_id),
     )
     conn.commit()
     conn.close()

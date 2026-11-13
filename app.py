@@ -903,6 +903,8 @@ try:
     if _BACKGROUND_ENABLED:
         threading.Thread(target=_intel_alert_loop, daemon=True, name="intel-alerts").start()
         threading.Thread(target=_guardian_loop, daemon=True, name="position-guardian").start()
+        import price_alert_engine as _pae
+        threading.Thread(target=_pae.loop, daemon=True, name="price-alerts").start()
 except Exception as _loop_err:
     logger.error("intel alert loop failed to start: %s", _loop_err)
 
@@ -5148,7 +5150,7 @@ def watchlists_page():
         quote = stock_data.get(alert["ticker"], {})
         current = quote.get("current_price")
         alert["current_price"] = current
-        alert["triggered"] = bool(
+        alert["triggered"] = bool(alert.get("triggered_at")) or bool(
             alert["enabled"] and current is not None and
             ((alert["direction"] == "above" and current >= alert["target_price"]) or
              (alert["direction"] == "below" and current <= alert["target_price"]))
@@ -5263,6 +5265,80 @@ def price_alert_create():
         except Exception:
             flash("That exact price alert already exists.", "error")
     return redirect(url_for("watchlists_page") + "#price-alerts")
+
+
+def _price_alert_json(a: dict) -> dict:
+    return {"id": a["id"], "ticker": a["ticker"], "direction": a["direction"],
+            "price": float(a["target_price"]), "enabled": bool(a["enabled"]),
+            "triggered_at": a.get("triggered_at"), "triggered_price": a.get("triggered_price"),
+            "note": a.get("note") or "", "source": a.get("source") or ""}
+
+
+@app.route("/api/alerts/price", methods=["GET", "POST"])
+def api_price_alerts():
+    """Chart price alerts: list (optionally for one ticker) or create one.
+
+    POST {ticker, price, note?, drawing_id?, current?}. The direction comes
+    from where price is now (the client's current price, else the live
+    quote): an alert at a line fires when price reaches that line.
+    """
+    uid = current_user_id()
+    if request.method == "GET":
+        t = (request.args.get("ticker") or "").strip().upper()
+        rows = [a for a in get_price_alerts(uid) if not t or a["ticker"] == t]
+        return jsonify({"ok": True, "alerts": [_price_alert_json(a) for a in rows]})
+    import price_alert_engine as pae
+    body = request.get_json(silent=True) or {}
+    ticker = str(body.get("ticker") or "").strip().upper()
+    try:
+        price = float(body.get("price"))
+    except (TypeError, ValueError):
+        price = 0.0
+    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", ticker):
+        return jsonify({"ok": False, "error": "Enter a valid ticker"}), 400
+    if not (0 < price < 10_000_000):
+        return jsonify({"ok": False, "error": "Enter a valid price"}), 400
+    existing = get_price_alerts(uid)
+    if sum(1 for a in existing if a["enabled"]) >= pae.MAX_PER_USER:
+        return jsonify({"ok": False, "error": f"You have {pae.MAX_PER_USER} active alerts — delete some first"}), 400
+    current = None
+    try:
+        current = float(body.get("current")) if body.get("current") not in (None, "") else None
+    except (TypeError, ValueError):
+        current = None
+    if current is None and _MKT_AVAILABLE:
+        try:
+            current = float((_mkt.live_quotes([ticker]).get(ticker) or {}).get("price") or 0) or None
+        except Exception:
+            current = None
+    direction = pae.direction_for(price, current)
+    target = round(price, 4)
+    note = str(body.get("note") or "")[:120]
+    drawing_id = str(body.get("drawing_id") or "")[:40]
+    from database import get_db
+    from zoneinfo import ZoneInfo
+    conn = get_db()
+    try:
+        # Same line again: re-arm the old alert instead of failing on UNIQUE.
+        conn.execute("DELETE FROM price_alerts WHERE user_id=? AND ticker=? AND direction=? AND target_price=?",
+                     (uid, ticker, direction, target))
+        cur = conn.execute(
+            "INSERT INTO price_alerts (user_id, ticker, direction, target_price, enabled, created_at, note, source, drawing_id) "
+            "VALUES (?, ?, ?, ?, 1, ?, ?, 'chart', ?)",
+            (uid, ticker, direction, target, datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %I:%M %p"),
+             note, drawing_id), returning_id=True)
+        conn.commit()
+        new_id = cur.lastrowid
+    finally:
+        conn.close()
+    return jsonify({"ok": True, "alert": {"id": new_id, "ticker": ticker, "direction": direction, "price": target,
+                                          "enabled": True, "triggered_at": None, "note": note, "source": "chart"}})
+
+
+@app.route("/api/alerts/price/<int:alert_id>", methods=["DELETE"])
+def api_price_alert_delete(alert_id):
+    delete_price_alert(alert_id, current_user_id())
+    return jsonify({"ok": True})
 
 
 @app.route("/price-alerts/<int:alert_id>/toggle", methods=["POST"])
@@ -5495,9 +5571,17 @@ def terminal():
         chart_symbol = watchlist[0]
     else:
         chart_symbol = "SPY"
+    # /terminal?ticker=NVDA (from a price alert, the chart grid, a link) opens
+    # that symbol even when it isn't in the active list.
+    requested_symbol = (request.args.get("ticker") or "").strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", requested_symbol):
+        requested_symbol = ""
+    if requested_symbol:
+        chart_symbol = requested_symbol
 
     return render_template(
         "terminal.html",
+        requested_symbol=requested_symbol,
         stocks=valid,
         watchlist_count=len(watchlist),
         chart_symbol=chart_symbol,
@@ -6036,6 +6120,45 @@ def api_chart_prefs():
         return jsonify({"ok": False, "error": "prefs too large"}), 413
     set_user_setting(uid, "chart_prefs", payload)
     return jsonify({"ok": True})
+
+
+@app.route("/terminal/grid")
+def terminal_grid():
+    """2 or 4 live charts side by side, each with its own symbol and timeframe."""
+    wl_id = get_active_wl_id()
+    try:
+        watchlist = get_watchlist_stocks(wl_id) if wl_id else []
+    except Exception:
+        watchlist = []
+    first = (request.args.get("ticker") or "").strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", first):
+        first = ""
+    return render_template("terminal_grid.html", watchlist=watchlist[:200], first_symbol=first)
+
+
+@app.route("/api/chart/layouts", methods=["GET", "PUT"])
+def api_chart_layouts():
+    """Saved chart layouts (timeframe, range, type, indicators, overlays),
+    synced across devices. PUT replaces the whole list."""
+    uid = current_user_id()
+    if request.method == "GET":
+        raw = get_user_setting(uid, "chart_layouts")
+        try:
+            layouts = _json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            layouts = []
+        return jsonify({"ok": True, "layouts": layouts if isinstance(layouts, list) else []})
+    body = request.get_json(silent=True) or {}
+    layouts = body.get("layouts")
+    if not isinstance(layouts, list) or len(layouts) > 20 or \
+            not all(isinstance(l, dict) and isinstance(l.get("name"), str) and 0 < len(l["name"]) <= 40
+                    and isinstance(l.get("state"), dict) for l in layouts):
+        return jsonify({"ok": False, "error": "layouts must be up to 20 {name, state} objects"}), 400
+    payload = _json.dumps(layouts, separators=(",", ":"))
+    if len(payload) > _CHART_PREFS_BYTES * 4:
+        return jsonify({"ok": False, "error": "layouts too large"}), 413
+    set_user_setting(uid, "chart_layouts", payload)
+    return jsonify({"ok": True, "count": len(layouts)})
 
 
 @app.route("/api/terminal/candles/<ticker>")
