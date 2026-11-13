@@ -83,6 +83,8 @@
         <a class="{{ 'is-on' if t.basis_key == key else '' }}" href="{{ url_for('thesis_view', ticker=thesis.ticker, basis=key) }}">{{ label }}</a>{% endif %}{% endfor %}
       </div>
     </div>
+    <p class="vz-explain">These are <b>estimated values</b>, not prices {{ thesis.ticker }} has traded at: what the model thinks it's worth, split into buy and wait zones.{% if v.range %} It has actually traded between <b>{{ v.range.low_fmt }}</b> and <b>{{ v.range.high_fmt }}</b> over the last 52 weeks.{% endif %}</p>
+    {% if v.cautions %}<div class="vz-cautions">{% for c in v.cautions %}<p><b>⚠ Model caution</b> {{ c.text }}</p>{% endfor %}</div>{% endif %}
     <div class="vz-grid">
       <ol class="vz-ladder">
         {% for r in z.rows %}
@@ -91,7 +93,7 @@
           <div class="vz-rung__body">
             <div class="vz-rung__top"><b>{{ r.label }}</b><strong>{{ r.range_fmt }}</strong></div>
             <p>{{ r.action }}</p>
-            {% if r.current %}<span class="vz-here">● Today <b data-live-price>{{ thesis.price_fmt }}</b></span>{% endif %}
+            {% if r.current or r.marks %}<div class="vz-marks">{% if r.current %}<span class="vz-here">● Today <b data-live-price>{{ thesis.price_fmt }}</b></span>{% endif %}{% for m in r.marks %}<span class="vz-mark is-{{ m.key }}">{{ '▲' if m.key == 'high' else '▼' }} {{ m.text }}</span>{% endfor %}</div>{% endif %}
           </div>
           {% if r.key in ('accumulate', 'load') %}
           <button type="button" class="vz-bell" data-alert-price="{{ '%.2f'|format(r.hi) }}" data-alert-note="{{ thesis.ticker }} {{ r.label }} zone" aria-label="Alert me when {{ thesis.ticker }} reaches {{ r.label }}">🔔<span>Alert me</span></button>
@@ -105,8 +107,9 @@
           {% set ig = v.implied_growth or 0 %}{% set hg = t.growth %}{% set mx = [ig|abs, hg|abs, 0.05]|max %}
           <div class="vz-bars">
             <div><small>Growth needed</small><i style="width:{{ (ig|abs / mx * 100)|round(1) }}%" class="{{ 'is-hot' if v.growth_gap and v.growth_gap > 0.1 else 'is-ok' }}"></i><b>{{ v.implied_growth_fmt }}</b></div>
-            <div><small>Has delivered</small><i style="width:{{ (hg|abs / mx * 100)|round(1) }}%" class="is-base"></i><b>{{ v.history_growth_fmt }}</b></div>
+            <div><small>Has delivered</small><i style="width:{{ (hg|abs / mx * 100)|round(1) if not v.growth_capped else 100 }}%" class="is-base"></i><b>{{ v.history_growth_fmt }}</b></div>
           </div>
+          {% if v.growth_capped %}<p class="vz-note">The model uses {{ t.growth_pct }} (its cap), not the full {{ v.history_growth_fmt }}.</p>{% endif %}
           <p class="vz-note">{% if v.growth_gap is not none and v.growth_gap > 0.1 %}The price needs much faster growth than the company has shown. That gap is what you're paying for.{% elif v.growth_gap is not none and v.growth_gap < -0.05 %}The price asks for less growth than the company has delivered. That's room in your favor.{% else %}The price asks for about the growth the company has delivered.{% endif %}</p>
         </article>
         {% set h = v.history %}

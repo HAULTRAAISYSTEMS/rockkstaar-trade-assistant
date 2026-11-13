@@ -305,3 +305,27 @@ def test_daily_scan_prices_at_the_official_close(monkeypatch):
     monkeypatch.setattr(th, "zone_summary", lambda d, t, b: seen.setdefault("price", d["valuation"]["price"]))
     vzs._zone_for_ticker("MRVL")
     assert seen["price"] == 60.0
+
+
+def test_ladder_says_estimates_and_shows_real_trading_range():
+    # NVDA's ladder read like prices it had traded at ("NVDA never hit 408").
+    # The page now says these are estimates, marks the real 52-week high and
+    # low on the ladder, and warns when growth is held at the cap or the
+    # company is enormous.
+    bars = _bars(last=190.0)
+    rng = th.trading_range(bars)
+    assert rng["high"] == max(bars["highs"][-252:]) and rng["low"] == min(bars["lows"][-252:])
+    assert th.trading_range({"highs": [1, 2], "lows": [1]}) is None
+    fast = [{"revenue": 300e9 * (0.5 ** i), "net_income": 1, "fcf": 1} for i in range(4)]
+    keys = [c["key"] for c in th.model_cautions(fast, 190.0, 24.15e9)]
+    assert keys == ["growth_cap", "mega_cap"]
+    assert "100% a year" in th.model_cautions(fast, 190.0, 24.15e9)[0]["text"]
+    assert "$4.6T" in th.model_cautions(fast, 190.0, 24.15e9)[1]["text"]
+    assert th.model_cautions(fast[:1], 50.0, 1e8) == []
+    v = th.build_thesis(_data(), "MRVL", bars=bars)["value"]
+    assert v["range"]["high_fmt"].startswith("$")
+    marks = [m for r in v["zones"]["rows"] for m in r["marks"]]
+    assert {m["key"] for m in marks} == {"high", "low"}
+    tpl = open("templates/thesis.html", encoding="utf-8").read()
+    assert "These are <b>estimated values</b>, not prices" in tpl and "Model caution" in tpl
+    assert "52-wk" not in tpl or "vz-mark is-{{ m.key }}" in tpl
