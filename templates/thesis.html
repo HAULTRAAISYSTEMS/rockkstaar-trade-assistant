@@ -127,8 +127,33 @@
           <p class="vz-note">{{ h.read }}{% if h.price_at_median %} At its usual {{ h.median_fmt }}, the price would be <b>{{ h.price_at_median_fmt }}</b>.{% endif %}</p>
         </article>
         {% endif %}
+        <article class="vz-card" id="vz-peers" hidden>
+          <span class="vz-kicker">Vs. its peers · P/E</span>
+          <div class="vz-pct"><strong id="vz-peers-prem">—</strong><span id="vz-peers-sub"></span></div>
+          <div class="vz-peer-list" id="vz-peers-list"></div>
+          <p class="vz-note" id="vz-peers-read"></p>
+        </article>
       </div>
     </div>
+  </section>
+
+  {% set tk = v.track %}
+  <section class="th-section">
+    <div class="th-section__head"><div><span>Track record</span><h2>Have these zones worked for {{ thesis.ticker }}?</h2></div><small>Next-12-month return by zone{% if tk.available %} · {{ tk.first }} to {{ tk.last }}{% endif %}</small></div>
+    {% if tk.available %}
+    <div class="vz-track">
+      {% for r in tk.zones %}
+      <article class="vz-track__cell tone-{{ r.tone }}{% if not r.months %} is-empty{% endif %}">
+        <b>{{ r.label }}</b>
+        <strong>{{ r.avg_fmt }}</strong>
+        <em>{% if r.months %}avg next 12 months · up {{ r.hit_fmt }} of the time · {{ r.months }} month{{ 's' if r.months != 1 }}{% else %}never in this zone{% endif %}</em>
+      </article>
+      {% endfor %}
+    </div>
+    <p class="vz-note"><b>{{ tk.read }}</b> Replayed month by month with only the annual reports that were public at the time; {{ tk.months }} months in all (average across all months {{ tk.avg_all_fmt }}). A small sample from one stock, so treat it as a tendency, not a promise.</p>
+    {% else %}
+    <p class="vz-note">Not enough history to replay the model for {{ thesis.ticker }} yet (it needs about 3 years of annual reports and 2+ years of prices).</p>
+    {% endif %}
   </section>
 
   <section class="th-section">
@@ -215,7 +240,7 @@
   {% endif %}
 </main>
 {% if thesis and thesis.value and thesis.value.available %}
-<script id="vz-model" type="application/json">{{ {"ticker": thesis.ticker, "price": thesis.value.model.price, "power": thesis.value.model.power, "shares": thesis.value.model.shares, "growth": thesis.value.model.growth, "sales": thesis.value.model.sales_based, "mos": thesis.value.model.mos, "drift": thesis.value.model.drift, "cash_ps": thesis.value.model.cash_ps, "zone": thesis.value.model.zone, "accum_top": thesis.value.model.accum_top, "load_top": thesis.value.model.load_top, "bull": thesis.value.model.bull, "plan": thesis.value.plan|map(attribute="price")|list}|tojson }}</script>
+<script id="vz-model" type="application/json">{{ {"ticker": thesis.ticker, "price": thesis.value.model.price, "power": thesis.value.model.power, "shares": thesis.value.model.shares, "growth": thesis.value.model.growth, "sales": thesis.value.model.sales_based, "mos": thesis.value.model.mos, "pe": thesis.value.model.pe, "drift": thesis.value.model.drift, "cash_ps": thesis.value.model.cash_ps, "zone": thesis.value.model.zone, "accum_top": thesis.value.model.accum_top, "load_top": thesis.value.model.load_top, "bull": thesis.value.model.bull, "plan": thesis.value.plan|map(attribute="price")|list}|tojson }}</script>
 <script src="{{ url_for('static', filename='js/thesis.js') }}"></script>
 {% endif %}
 {% endblock %}

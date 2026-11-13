@@ -362,3 +362,55 @@ def test_cash_debt_recent_growth_and_share_count(monkeypatch):
     assert "(1 + (M.drift || 0))" in js and "(M.cash_ps || 0)" in js
     tpl = open("templates/thesis.html", encoding="utf-8").read()
     assert "Cash and debt" in tpl and "Share count" in tpl and "half the last 12 months" in tpl
+
+
+def test_peer_comparison_premium_discount_and_price_at_peer():
+    m = {"AMD": {"peTTM": 35.0, "revenueGrowthTTMYoy": 30}, "AVGO": {"peTTM": 28.0, "revenueGrowthTTMYoy": 20},
+         "QCOM": {"peTTM": 17.0, "revenueGrowthTTMYoy": 10}, "BAD": {"peTTM": -4.0}, "BIG": {"peTTM": 900.0}}
+    out = th.peer_comparison("NVDA", 190.0, 23.8, 0.60, peers=list(m), metrics_fn=lambda t: m[t])
+    assert out["available"] and out["median_pe"] == 28.0 and [p["ticker"] for p in out["peers"]] == ["QCOM", "AVGO", "AMD"]
+    assert out["premium_fmt"] == "-15%" and "discount" in out["read"] and "growing faster" in out["read"]
+    assert out["price_at_peer"] == pytest.approx(190.0 * 28.0 / 23.8)
+    rich = th.peer_comparison("X", 100.0, 60.0, 0.05, peers=list(m), metrics_fn=lambda t: m[t])
+    assert "premium" in rich["read"] and "caution" in rich["read"]
+    assert th.peer_comparison("X", 100.0, 20.0, 0.1, peers=["AMD"], metrics_fn=lambda t: m[t])["available"] is False
+    assert th.fetch_peers("NVDA") == [] or isinstance(th.fetch_peers("NVDA"), list)
+
+
+def test_backtest_replays_with_only_public_filings():
+    # Prices sit far under the model's value for the first stretch (buy zone)
+    # and far over it later (pricey), and the following year's returns differ.
+    from datetime import datetime, timedelta, timezone
+    start = datetime(2021, 1, 4, tzinfo=timezone.utc)
+    ts, cl = [], []
+    for i in range(5 * 252):
+        ts.append(int((start + timedelta(days=i * 1.45)).timestamp()))
+        cl.append(20.0 + i * 0.02 if i < 600 else 400.0 - (i - 600) * 0.1)
+    bars = {"timestamps": ts, "closes": cl}
+    hist = [{"period_end": f"{2025 - k}-12-31", "revenue_num": 100e9 / (1.2 ** k),
+             "net_income_num": 20e9 / (1.2 ** k), "fcf_num": 20e9} for k in range(5)]
+    out = th.backtest({"history": hist}, bars, 10e9)
+    assert out["available"] and out["months"] >= 6
+    by = {r["key"]: r for r in out["zones"]}
+    assert by["load"]["months"] or by["accumulate"]["months"]
+    assert sum(r["months"] for r in out["zones"]) == out["months"]
+    # No filing before ~75 days after its year end: nothing replayed before 2023.
+    assert out["first"] >= "2023-03"
+    assert th.backtest({"history": hist[:2]}, bars, 10e9) == {"available": False}
+    assert th.backtest({"history": hist}, None, 10e9) == {"available": False}
+
+
+def test_peers_endpoint_and_track_record_section(monkeypatch):
+    legacy, client = _client()
+    monkeypatch.setattr(legacy, "_auth_required", lambda: False)
+    legacy._THESIS_PEERS.clear()
+    monkeypatch.setattr(th, "fetch_peers", lambda t: ["AMD", "AVGO", "QCOM"])
+    import finnhub_ttm
+    pes = {"AMD": 35.0, "AVGO": 28.0, "QCOM": 17.0}
+    monkeypatch.setattr(finnhub_ttm, "fetch_finnhub_metrics", lambda t: {"_raw_metric": {"peTTM": pes[t]}})
+    d = client.get("/api/thesis/peers/nvda?price=190&pe=23.8&growth=0.3").get_json()
+    assert d["ok"] and d["available"] and d["median_pe_fmt"] == "28.0x" and d["ticker"] == "NVDA"
+    assert client.get("/api/thesis/peers/bad$").status_code == 400
+    tpl = open("templates/thesis.html", encoding="utf-8").read()
+    assert 'id="vz-peers"' in tpl and "Have these zones worked for" in tpl
+    assert "/api/thesis/peers/" in open("static/js/thesis.js", encoding="utf-8").read()
