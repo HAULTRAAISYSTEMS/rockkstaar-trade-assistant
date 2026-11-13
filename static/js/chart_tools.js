@@ -103,6 +103,24 @@ var ctToolDefaults = {};
     if (td && typeof td === 'object') ctToolDefaults = td;
   } catch (e) {}
 })();
+/* Pre-market and after-hours candles: green/red like the regular session.
+   The blue/purple session colors were on for some accounts; switched off
+   once (synced, so it wins over the older account copy). The checkbox in
+   Chart settings still turns them back on. */
+var ctSessFixNow = false;
+(function () {
+  try {
+    if (localStorage.getItem('tradestaar.sessColorsOff.v1')) return;
+    localStorage.setItem('tradestaar.sessColorsOff.v1', '1');
+    ctSessFixNow = true;
+    if (ctPrefs.candles.session) {
+      ctPrefs.candles.session = false;
+      localStorage.setItem('tradestaar.chartOverlays', JSON.stringify(ctPrefs));
+      localStorage.setItem('tradestaar.chartOverlaysAt', String(Date.now()));
+      ctSavePrefs();
+    }
+  } catch (e) {}
+})();
 function ctMergePrefs(saved) {
   // The single Bid/Ask switch became two.
   if (saved.labels && saved.labels.bidask === false && saved.labels.bid == null) { saved.labels.bid = false; saved.labels.ask = false; }
@@ -133,6 +151,9 @@ function ctLoadServerPrefs() {
       try { localAt = Number(localStorage.getItem('tradestaar.chartOverlaysAt')) || 0; } catch (e) {}
       if ((Number(d.prefs.updated) || 0) <= localAt) return;
       if (d.prefs.overlays) ctMergePrefs(d.prefs.overlays);
+      // First load on this device after the switch-off: the account copy may
+      // still have session colors on — apply the switch-off to it too.
+      if (ctSessFixNow && ctPrefs.candles.session) { ctPrefs.candles.session = false; ctSessFixNow = false; ctPrefChanged(); }
       if (d.prefs.tools && typeof d.prefs.tools === 'object') ctToolDefaults = d.prefs.tools;
       try {
         localStorage.setItem('tradestaar.chartOverlays', JSON.stringify(ctPrefs));

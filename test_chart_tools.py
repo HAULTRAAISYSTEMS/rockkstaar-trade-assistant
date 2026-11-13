@@ -522,3 +522,32 @@ def test_news_and_earnings_events_have_times():
         "Bare headline without a time"]}, {})
     news = [e for e in out["events"] if e["type"] == "news"]
     assert len(news) == 1 and news[0]["ts"] == 1794493800 and news[0]["url"] == "https://x"
+
+
+SESS_HARNESS = r"""
+const fs=require('fs');
+global.localStorage={_d:{'tradestaar.chartOverlays':JSON.stringify({candles:{session:true}})},getItem(k){return this._d[k]===undefined?null:this._d[k];},setItem(k,v){this._d[k]=String(v);},removeItem(k){delete this._d[k];},key(i){return Object.keys(this._d)[i];},get length(){return Object.keys(this._d).length;}};
+global.document={addEventListener(){},getElementById(){return null;},querySelectorAll(){return [];},querySelector(){return null;}};
+global.window={};global.fetch=()=>Promise.resolve({ok:false,json:()=>({})});
+global.twChartState={bars:[],interval:'5m',type:'candles',ticker:'SPY',selectedDrawing:null,chart:null};
+eval(fs.readFileSync('static/js/chart_tools.js','utf8')+'\n;global.T={ctPrefs,ctCandleDatum};');
+const pm=T.ctCandleDatum({time:1,open:1,high:2,low:0.5,close:1.5,session:'premarket'});
+console.log(JSON.stringify({session:T.ctPrefs.candles.session, color:pm.color||null, flag:localStorage.getItem('tradestaar.sessColorsOff.v1')}));
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_extended_candles_go_back_to_green_red(tmp_path):
+    h = tmp_path / "h.js"
+    h.write_text(SESS_HARNESS)
+    out = json.loads(subprocess.run(["node", str(h)], capture_output=True, text=True, check=True,
+                                    cwd=os.getcwd()).stdout)
+    assert out == {"session": False, "color": None, "flag": "1"}
+
+
+def test_symbol_header_and_chart_bar_stack_on_desktop():
+    css = open("static/css/terminal_workspace.css", encoding="utf-8").read()
+    assert ".tw-center > .tw-panel:first-child > .tw-chart-toolbar { grid-column: 1 / -1; grid-row: 2; }" in css
+    assert ".tw-chart-toolbar .tw-tools-pill    { order: 6; margin-left: auto; display: inline-flex;" in css
+    assert ".tw-chart-toolbar .tw-tools-pill { display: contents; }" in css
+    assert 'class="tw-tools-pill"' in TEMPLATE
