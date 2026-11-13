@@ -414,3 +414,36 @@ def test_peers_endpoint_and_track_record_section(monkeypatch):
     tpl = open("templates/thesis.html", encoding="utf-8").read()
     assert 'id="vz-peers"' in tpl and "Have these zones worked for" in tpl
     assert "/api/thesis/peers/" in open("static/js/thesis.js", encoding="utf-8").read()
+
+
+def test_price_map_shows_real_prices_ath_and_entries():
+    # "Why don't it show the price it's at or its ATH to tell me the entry
+    # point" — the map lists real trading levels with entries and triggers.
+    up = [20 + i * 0.19 for i in range(1180)]
+    down = [243 - k * 1.05 for k in range(1, 80)]
+    closes = up + down
+    bars = {"timestamps": [1600000000 + i * 86400 for i in range(len(closes))], "closes": closes,
+            "highs": [c + 1 for c in closes], "lows": [c - 1 for c in closes]}
+    price = closes[-1]
+    m = th.price_map(price, bars, None, {"accum_top": 291.7, "bull": 408.9})
+    assert m["available"] and m["ath"] == pytest.approx(max(closes) + 1)
+    assert m["headline"].startswith(f"Trading at ${price:,.2f}, ") and "below its all-time high" in m["headline"]
+    keys = [l["key"] for l in m["levels"]]
+    assert keys[0] == "ath" and "e20" in keys and "e50" in keys
+    assert any(l.get("trigger") for l in m["levels"])
+    assert any("Breakout entry: wait for a daily close back above" in p for p in m["plan"])
+    # The swing low sits just under today: it is the pullback entry.
+    assert m["plan"][0].startswith("Pullback entry: ") and "Recent swing low" in m["plan"][0]
+    # Below every level (a fresh low): say so instead of inventing support.
+    knife = th.price_map(price - 10, bars, None, {"accum_top": 291.7, "bull": 408.9})
+    assert any("below every recent chart level" in p for p in knife["plan"])
+    assert all(l["zone"] in ("load", "accumulate", "fair", "pricey") for l in m["levels"])
+    # A stock above its moving averages gets numbered pullback entries.
+    up_bars = {"timestamps": bars["timestamps"][:1180], "closes": up, "highs": [c + 1 for c in up], "lows": [c - 1 for c in up]}
+    m2 = th.price_map(up[-1], up_bars, None, {"accum_top": 291.7, "bull": 408.9})
+    entries = [l for l in m2["levels"] if l.get("entry")]
+    assert [l["entry"] for l in entries] == [1, 2, 3][:len(entries)] and entries
+    assert all(l["price"] < up[-1] for l in entries) and m2["plan"][0].startswith("Pullback entry:")
+    assert th.price_map(None, bars) == {"available": False}
+    tpl = open("templates/thesis.html", encoding="utf-8").read()
+    assert "Where to buy · real prices" in tpl and "Your entry plan" in tpl and "data-level-pct" in tpl

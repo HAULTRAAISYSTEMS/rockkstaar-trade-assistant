@@ -11023,6 +11023,27 @@ _THESIS_BARS: dict = {}
 _THESIS_BARS_TTL = 30 * 60
 
 
+_THESIS_ATH: dict = {}
+
+
+def _thesis_ath_bars(ticker: str) -> dict | None:
+    """Monthly bars over the full history, for the true all-time high.
+    Cached 6 h; None when unavailable (the 5-year daily high is used)."""
+    hit = _THESIS_ATH.get(ticker)
+    if hit and _time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    try:
+        from market_data import fetch_chart_bars
+        bars, _ = fetch_chart_bars(ticker, "1mo", "max")
+    except Exception as exc:
+        logger.debug("thesis ATH bars unavailable for %s: %s", ticker, exc)
+        bars = None
+    if len(_THESIS_ATH) > 200:
+        _THESIS_ATH.clear()
+    _THESIS_ATH[ticker] = (_time.time(), bars)
+    return bars
+
+
 def _thesis_daily_bars(ticker: str) -> dict | None:
     """Five years of daily bars for the valuation history and trend check.
     Cached 30 min; None when unavailable (those panels then stay hidden)."""
@@ -11217,7 +11238,7 @@ def thesis_view():
                 basis = "auto"
             bars = _thesis_daily_bars(ticker)
             data = _with_live_price(data, _thesis_live_price(ticker))
-            thesis = build_thesis(data, ticker, basis=basis, bars=bars)
+            thesis = build_thesis(data, ticker, basis=basis, bars=bars, ath_bars=_thesis_ath_bars(ticker))
             if basis == "auto" and not data.get("error"):
                 # Opening the page refreshes the chart/watchlist zones too.
                 try:

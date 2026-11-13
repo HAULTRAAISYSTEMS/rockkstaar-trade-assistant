@@ -106,6 +106,10 @@
       mv.querySelector('span').textContent = M.ticker + ' just moved into ' + ZONE_LABEL[z] + ' (' + money(q.price) + '). Refresh for the updated verdict.';
       mv.querySelector('a').href = location.href;
     }
+    document.querySelectorAll('[data-level]').forEach(function (row) {
+      var lv = parseFloat(row.getAttribute('data-level')), el = row.querySelector('[data-level-pct]');
+      if (el && lv > 0) { var p = (lv / q.price - 1) * 100; el.textContent = (p >= 0 ? '+' : '') + p.toFixed(1) + '%'; }
+    });
     if (gIn) update();
   }
   if (window.TSLive) {

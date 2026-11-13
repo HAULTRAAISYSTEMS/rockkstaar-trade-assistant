@@ -65,6 +65,40 @@
     </div>
   </section>
 
+  {% set pm = v.map %}
+  {% if pm.available %}
+  <section class="th-section vz-entry">
+    <div class="th-section__head"><div><span>Where to buy · real prices</span><h2>{{ pm.headline }}</h2></div></div>
+    <div class="vz-entry__grid">
+      <ol class="vz-pmap" aria-label="Actual price levels">
+        {% set ns = namespace(today_done=false) %}
+        {% for l in pm.levels %}
+          {% if not ns.today_done and l.price < pm.price %}
+          <li class="vz-pmap__row is-today"><b>● Today</b><strong data-live-price>{{ pm.price_fmt }}</strong><em></em></li>
+          {% set ns.today_done = true %}
+          {% endif %}
+          <li class="vz-pmap__row is-{{ l.key }}{% if l.entry %} is-entry{% endif %}{% if l.trigger %} is-trigger{% endif %}" data-level="{{ '%.4f'|format(l.price) }}">
+            <b>{% if l.entry %}<i class="vz-pmap__n">Entry {{ l.entry }}</i>{% elif l.trigger %}<i class="vz-pmap__n is-trig">Breakout</i>{% endif %}{{ l.label }}{% if l.note %}<small>{{ l.note }}</small>{% endif %}</b>
+            <strong>{{ l.price_fmt }}</strong>
+            <em><span data-level-pct>{{ l.pct_fmt }}</span>{% if l.zone %}<span class="vz-chip tone-{{ {'accumulate':'accum'}.get(l.zone, l.zone) }}">{{ {'load':'Load','accumulate':'Accum','fair':'Fair','pricey':'Pricey'}[l.zone] }}</span>{% endif %}</em>
+          </li>
+        {% endfor %}
+        {% if not ns.today_done %}<li class="vz-pmap__row is-today"><b>● Today</b><strong data-live-price>{{ pm.price_fmt }}</strong><em></em></li>{% endif %}
+      </ol>
+      <article class="vz-card vz-entry__plan">
+        <span class="vz-kicker">Your entry plan</span>
+        <ul>{% for line in pm.plan %}<li>{{ line }}</li>{% endfor %}</ul>
+        <div class="vz-entry__stats">
+          <div><span>All-time high</span><strong>{{ pm.ath_fmt }}</strong><em>{{ pm.ath_when }}</em></div>
+          <div><span>From the high</span><strong>{{ pm.off_ath_fmt }}</strong><em>today vs ATH</em></div>
+          <div><span>52-week range</span><strong>{{ pm.lo52_fmt }}–{{ pm.hi52_fmt }}</strong><em>actual trades</em></div>
+        </div>
+        <p class="vz-note">Entries are real chart levels (moving averages, the recent swing low). The chip shows which value zone each price falls in — the best entries are a chart level <b>inside a buy zone</b>. Set a stop under the next level down.</p>
+      </article>
+    </div>
+  </section>
+  {% endif %}
+
   {% set src = thesis.sources %}
   <div class="vz-sources" aria-label="Where these numbers come from">
     <span class="vz-sources__title">Data</span>
