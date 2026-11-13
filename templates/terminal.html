@@ -1861,6 +1861,58 @@ function twCandleCacheSave(key, d){
     localStorage.setItem(TW_CANDLE_CACHE_INDEX, JSON.stringify(idx));
   }catch(e){}
 }
+/* Timeframe switches: once a ticker's chart is up, the other timeframes are
+   fetched one at a time in the background and held in memory, so a tap on
+   1D / 1W / 1H paints at once (fresh candles still replace them). This also
+   warms the server's candle cache, so that refresh is quick too. */
+var twPrefetchMem={}, twPrefetchTimer=null, twPrefetchTicker='';
+var TW_PREFETCH_ORDER=['1d','1h','15m','4h','5m','1w','1m','1mo'];
+function twPrefetchPlan(interval){
+  var cfg=twIntervalConfig[interval]; if(!cfg) return null;
+  var range=cfg.ranges.indexOf(twChartState.range)>=0?twChartState.range:cfg.defaultRange;
+  var session=(twExtendedPref&&!twLongBars(interval))?'extended':'regular';
+  return {interval:interval, range:range, session:session};
+}
+var TW_RANGE_SECS={'1d':86400,'5d':5*86400,'1mo':31*86400,'3mo':92*86400,'6mo':183*86400,'1y':366*86400,'2y':731*86400,'5y':1827*86400,'10y':3653*86400,'max':Infinity};
+/* A held copy of a longer range stands in for a shorter one (trimmed). */
+function twPrefetchFind(ticker, interval, range, session){
+  var exact=twPrefetchMem[ticker+'|'+interval+'|'+range+'|'+session];
+  if(exact&&Date.now()-exact.at<15*60000) return exact.d;
+  var want=TW_RANGE_SECS[range]; if(!want||want===Infinity) return null;
+  for(var k in twPrefetchMem){
+    var p=k.split('|'), m=twPrefetchMem[k];
+    if(p[0]!==ticker||p[1]!==interval||p[3]!==session||Date.now()-m.at>=15*60000) continue;
+    if(!((TW_RANGE_SECS[p[2]]||0)>=want)) continue;
+    var bars=m.d.bars||[]; if(!bars.length) continue;
+    var cut=Number(bars[bars.length-1].time)-want;
+    return Object.assign({}, m.d, {bars:bars.filter(function(b){ return Number(b.time)>=cut; })});
+  }
+  return null;
+}
+function twPrefetchTimeframes(ticker){
+  // Re-planned when the ticker, the range or the Extended choice changes;
+  // copies already held for this ticker are kept.
+  var plan=ticker+'|'+twChartState.range+'|'+(twExtendedPref?1:0);
+  if(twPrefetchTicker===plan) return;
+  if(String(twPrefetchTicker).split('|')[0]!==ticker) twPrefetchMem={};
+  twPrefetchTicker=plan; clearTimeout(twPrefetchTimer);
+  var queue=TW_PREFETCH_ORDER.slice();
+  function next(){
+    if(twChartState.ticker!==ticker||!queue.length) return;
+    if(document.hidden){ twPrefetchTimer=setTimeout(next,5000); return; }
+    var iv=queue.shift();
+    if(iv===twChartState.interval){ next(); return; }
+    var plan=twPrefetchPlan(iv); if(!plan){ next(); return; }
+    var key=ticker+'|'+plan.interval+'|'+plan.range+'|'+plan.session;
+    if(twPrefetchFind(ticker, plan.interval, plan.range, plan.session)){ next(); return; }
+    fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+plan.interval+'&range='+plan.range+'&session='+plan.session,{credentials:'same-origin'})
+      .then(function(r){ return (r.ok&&(r.headers.get('Content-Type')||'').indexOf('application/json')>=0)?r.json():null; })
+      .then(function(d){ if(d&&d.ok!==false&&d.bars&&d.bars.length&&String(twPrefetchTicker).split('|')[0]===ticker) twPrefetchMem[key]={at:Date.now(), d:d}; })
+      .catch(function(){})
+      .then(function(){ twPrefetchTimer=setTimeout(next,350); });
+  }
+  twPrefetchTimer=setTimeout(next,2000);
+}
 function twLoadChart(ticker, interval, range, refreshOnly){
   if(!ticker) return;
   if(twChartRefreshTimer)clearTimeout(twChartRefreshTimer);twChartRefreshTimer=null;
@@ -1942,13 +1994,14 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       if(fromCache){ shownFromCache=true; if(hint) hint.textContent+=' · updating…'; return; }
       twChartState.retryN=0;clearTimeout(twChartState.retryTimer);
       if(!refreshOnly && !d.partial) twCandleCacheSave(cacheKey, d);
+      if(!refreshOnly) twPrefetchTimeframes(ticker);
       twScheduleChartRefresh();
   };
   // Instant chart: paint the last copy of these candles saved on this device
   // (if any) right away, then replace it with fresh data when it arrives —
   // the first network load after opening the Terminal can take a while.
   if(!refreshOnly){
-    var cached=twCandleCacheLoad(cacheKey);
+    var cached=twPrefetchFind(ticker, interval, range, session)||twCandleCacheLoad(cacheKey);
     if(cached){ try{ applyD(cached, true); }catch(_){ shownFromCache=false; } }
   }
   fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session+(since?'&since='+since:''), {cache:'no-store', credentials:'same-origin', signal: candleCtl ? candleCtl.signal : undefined})

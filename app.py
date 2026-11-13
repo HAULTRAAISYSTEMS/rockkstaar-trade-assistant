@@ -6382,16 +6382,75 @@ def _build_chart_events(ticker: str) -> list:
                            "upcoming": True, "label": "Earnings", "source": "stock snapshot"})
     except Exception as exc:
         logger.debug("chart events: next earnings %s: %s", ticker, exc)
+    seen_heads: set = set()
     try:
         from terminal_intelligence import _epoch
         for n in (_intel.fetch_ticker_news(ticker, limit=25) or []):
             ts = _epoch(n.get("published_at"))
             if ts:
-                events.append({"type": "news", "ts": ts, "label": str(n.get("headline") or "")[:200],
+                head = str(n.get("headline") or "")[:200]
+                seen_heads.add(head.lower())
+                events.append({"type": "news", "ts": ts, "label": head,
                                "source": n.get("source") or "", "url": n.get("url") or ""})
     except Exception as exc:
         logger.debug("chart events: news %s: %s", ticker, exc)
+    # The latest headlines all land on the last bar of a Daily, Weekly or
+    # Monthly chart. A year of company news (thinned to the strongest two a
+    # day) gives those charts their history.
+    for row in _chart_news_history(ticker):
+        if row["label"].lower() not in seen_heads:
+            seen_heads.add(row["label"].lower())
+            events.append(row)
     return events
+
+
+_CHART_NEWS_PER_DAY = 2
+_CHART_NEWS_MAX = 260
+
+
+def _chart_news_history(ticker: str, days: int = 365) -> list:
+    """A year of Finnhub company news for the chart's longer timeframes:
+    at most two headlines per New York trading day (high-impact ones
+    first), newest 260 kept. [] without FINNHUB_API_KEY or on any error."""
+    key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not key:
+        return []
+    try:
+        if _intel._fh_is_rate_limited():
+            return []
+        from datetime import timedelta as _td
+        today = _et_now().date()
+        url = ("https://finnhub.io/api/v1/company-news?symbol=" + ticker
+               + "&from=" + (today - _td(days=days)).isoformat()
+               + "&to=" + today.isoformat() + "&token=" + key)
+        with _intel._fh_urlopen(url, timeout=10) as resp:
+            rows = _json.loads(resp.read().decode() or "[]") or []
+    except Exception as exc:
+        logger.debug("chart events: news history %s: %s", ticker, exc)
+        return []
+    from zoneinfo import ZoneInfo
+    _ny = ZoneInfo("America/New_York")
+    rank = {"high": 0, "medium": 1, "low": 2}
+    by_day: dict = {}
+    for r in rows if isinstance(rows, list) else []:
+        head = str(r.get("headline") or "").strip()
+        ts = r.get("datetime")
+        if not head or not isinstance(ts, (int, float)) or ts <= 0:
+            continue
+        try:
+            impact = _intel.classify_news_impact(head, [])[0]
+        except Exception:
+            impact = "low"
+        day = datetime.fromtimestamp(ts, _ny).strftime("%Y-%m-%d")
+        by_day.setdefault(day, []).append((rank.get(str(impact).lower(), 2), -int(ts), {
+            "type": "news", "ts": int(ts), "label": head[:200],
+            "source": r.get("source") or "Finnhub", "url": r.get("url") or ""}))
+    out = []
+    for day in sorted(by_day, reverse=True):
+        out.extend(x[2] for x in sorted(by_day[day], key=lambda x: (x[0], x[1]))[:_CHART_NEWS_PER_DAY])
+        if len(out) >= _CHART_NEWS_MAX:
+            break
+    return out[:_CHART_NEWS_MAX]
 
 
 @app.route("/api/terminal/events/<ticker>")
