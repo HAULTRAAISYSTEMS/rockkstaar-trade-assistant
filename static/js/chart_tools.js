@@ -2062,6 +2062,16 @@ function ctEventTime(e) {
   var d = new Date(e.date + 'T00:00:00Z'); if (isNaN(d.getTime())) return null;
   return Math.floor(d.getTime() / 1000) + Math.round((hh + 5) * 3600);   // ET ≈ UTC−5 (±1 h in summer is fine at this scale)
 }
+/* Daily, Weekly and Monthly: an event belongs to the candle that contains
+   it, so it sits on that candle instead of between two. */
+function ctEventX(t, step) {
+  if (step < 86400) return ctX(t);
+  var l = ctTimeToLogical(t), n = ctBarSecs().length;
+  if (l == null) return null;
+  // Inside the last (still-forming) candle counts as that candle.
+  if (l >= 0 && l < n) return ctLogX(Math.min(n - 1, Math.floor(l + 1e-6)));
+  return ctLogX(l);
+}
 function ctDrawEvents(ctx, dim) {
   ctEventHits = [];
   var evs = twChartState.events || [];
@@ -2075,7 +2085,7 @@ function ctDrawEvents(ctx, dim) {
   evs.filter(function (e) { return e.type === 'earnings'; }).forEach(function (e) {
     var t = ctEventTime(e); if (t == null || t < first) return;
     if (step >= 86400) t = Math.floor(t / 86400) * 86400 + 12 * 3600;
-    var x = ctX(t); if (x == null || x < 0) return;
+    var x = ctEventX(t, step); if (x == null || x < 0) return;
     var label = 'Earnings ' + (e.date || '') + (e.time && e.time !== 'TBD' ? ' · ' + String(e.time).toUpperCase() : '');
     if (e.eps != null) label += ' · EPS ' + Number(e.eps).toFixed(2) + (e.eps_est != null ? ' vs ' + Number(e.eps_est).toFixed(2) + ' est' : '') + (e.result ? ' · ' + e.result.toUpperCase() : '');
     else if (e.upcoming || t > Date.now() / 1000) label += ' · upcoming';
@@ -2084,16 +2094,18 @@ function ctDrawEvents(ctx, dim) {
       // Past the right edge (upcoming): a flag at the edge says it's coming.
       var tag = 'E ' + ctShortDate(e.date) + ' ›';
       ctx.font = '800 10px "IBM Plex Mono", ui-monospace, monospace';
-      var tw = ctx.measureText(tag).width + 12, tx = dim.W - tw - 4, ty = dim.H - 22;
+      // Above the news dots, which collect at the last candle.
+      var tw = ctx.measureText(tag).width + 12, tx = dim.W - tw - 4, ty = dim.H - 44;
       ctx.fillStyle = '#F0B53F'; ctx.fillRect(tx, ty, tw, 16);
       ctx.fillStyle = '#1a1206'; ctx.textAlign = 'left'; ctx.fillText(tag, tx + 6, ty + 8.5); ctx.textAlign = 'center';
       ctEventHits.push({x: tx + tw / 2, y: ty + 8, r: Math.max(10, tw / 2), text: label + ' — scroll right to see it on the time axis'});
       return;
     }
     x = Math.round(x) + 0.5;
-    // Many past reports on a long chart: only the flag, no full-height line.
-    if (step < 86400 || e.upcoming) {
-      ctx.strokeStyle = ctHexA(flagColor, 0.55); ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    // Every timeframe gets the report line; on Daily and up it is fainter,
+    // since a long chart holds many reports.
+    {
+      ctx.strokeStyle = ctHexA(flagColor, step < 86400 || e.upcoming ? 0.55 : 0.32); ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
       ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, dim.H - 4); ctx.stroke(); ctx.setLineDash([]);
     }
     ctx.fillStyle = flagColor; ctx.beginPath(); ctx.arc(x, dim.H - 14, 8, 0, Math.PI * 2); ctx.fill();
@@ -2104,12 +2116,14 @@ function ctDrawEvents(ctx, dim) {
   var dots = [];
   evs.filter(function (e) { return e.type === 'news' && e.ts; }).forEach(function (e) {
     if (e.ts < first) return;
-    var x = ctX(Number(e.ts)); if (x == null || x < 0 || x > dim.W) return;
+    var x = ctEventX(Number(e.ts), step); if (x == null || x < 0 || x > dim.W) return;
     var near = dots.filter(function (d) { return Math.abs(d.x - x) < 12; })[0];
     if (near) near.items.push(e); else dots.push({x: x, items: [e]});
   });
+  // A news dot on the same candle as an earnings flag stacks above it.
+  var eXs = ctEventHits.filter(function (h) { return h.text && Math.abs(h.y - (dim.H - 14)) < 2; }).map(function (h) { return h.x; });
   dots.forEach(function (d) {
-    var y = dim.H - 14, n = d.items.length;
+    var y = eXs.some(function (ex) { return Math.abs(ex - d.x) < 16; }) ? dim.H - 34 : dim.H - 14, n = d.items.length;
     ctx.fillStyle = 'rgba(111,168,255,0.92)'; ctx.beginPath(); ctx.arc(d.x, y, n > 1 ? 8 : 6, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#06101f'; ctx.fillText(n > 1 ? String(Math.min(n, 9)) : 'N', d.x, y + 0.5);
     ctEventHits.push({x: d.x, y: y, r: 10, items: d.items});
@@ -2128,7 +2142,7 @@ function ctEventTip(h, x, y) {
   var tip = document.getElementById('ct-evtip'), box = document.getElementById('tw-chart-box');
   if (!h) { if (tip) tip.hidden = true; return; }
   if (!tip) { tip = document.createElement('div'); tip.id = 'ct-evtip'; tip.className = 'ct-evtip'; (box || document.body).appendChild(tip); }
-  var html = h.text ? '<b>' + ctEsc(h.text) + '</b>' : h.items.slice(0, 4).map(function (e) {
+  var html = h.text ? '<b>' + ctEsc(h.text) + '</b>' : h.items.slice().sort(function (a, b) { return b.ts - a.ts; }).slice(0, 4).map(function (e) {
     var when = '';
     try { when = new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}).format(new Date(e.ts * 1000)); } catch (_) {}
     return '<div class="ct-evrow"><small>' + ctEsc(when) + (e.source ? ' · ' + ctEsc(e.source) : '') + '</small>' + ctEsc(e.label) + '</div>';

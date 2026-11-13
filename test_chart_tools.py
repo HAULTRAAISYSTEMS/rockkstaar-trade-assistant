@@ -567,6 +567,7 @@ def test_chart_events_endpoint_past_earnings_and_news(client, monkeypatch):
         {"headline": "Nvidia unveils chip", "source": "Reuters", "url": "https://x", "published_at": "2026-11-12T14:30:00Z"},
         {"headline": "No time on this one", "published_at": ""}])
     monkeypatch.setattr(legacy, "get_stock_data", lambda t: {"earnings_date": "2099-11-19", "earnings_time": "AMC"})
+    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
     legacy._CHART_EVENTS.clear()
     c, _ = client
     first = c.get("/api/terminal/events/NVDA").get_json()
@@ -595,3 +596,57 @@ def test_chart_paints_saved_candles_first_and_side_panels_wait():
     proc = open("Procfile", encoding="utf-8").read()
     assert "--threads 12" in proc
     assert "MIN_THREADS = 12" in open("gunicorn.conf.py", encoding="utf-8").read()
+
+
+class _FakeResp:
+    def __init__(self, body): self.body = body
+    def read(self): return self.body
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
+def test_chart_news_history_gives_daily_weekly_monthly_charts_a_year_of_news(monkeypatch):
+    # Daily / Weekly / Monthly charts showed no news: only the latest ~25
+    # headlines were sent, all on the last candle. A year of company news,
+    # at most two a day (high-impact first), now fills them in.
+    import json as _j
+    import app as legacy
+    monkeypatch.setenv("FINNHUB_API_KEY", "k")
+    monkeypatch.setattr(legacy._intel, "_fh_is_rate_limited", lambda: False)
+    seen = {}
+    day1 = 1786000000  # one New York day
+    rows = [{"headline": "Routine note %d" % i, "datetime": day1 + i * 60, "source": "X", "url": ""} for i in range(5)]
+    rows.append({"headline": "Company beats earnings, raises guidance", "datetime": day1 + 600, "source": "Reuters", "url": "u"})
+    rows.append({"headline": "Older story", "datetime": day1 - 86400 * 40, "source": "CNBC", "url": ""})
+    rows.append({"headline": "", "datetime": day1})
+    def fake_open(url, timeout=8):
+        seen["url"] = url
+        return _FakeResp(_j.dumps(rows).encode())
+    monkeypatch.setattr(legacy._intel, "_fh_urlopen", fake_open)
+    monkeypatch.setattr(legacy._intel, "classify_news_impact",
+                        lambda h, c: ("HIGH", "") if "beats" in h else ("LOW", ""))
+    out = legacy._chart_news_history("NVDA")
+    assert "company-news?symbol=NVDA" in seen["url"] and "&from=" in seen["url"]
+    labels = [e["label"] for e in out]
+    assert labels[0] == "Company beats earnings, raises guidance"
+    assert len([l for l in labels if l != "Older story"]) == 2      # two per day
+    assert "Older story" in labels and all(e["type"] == "news" and e["ts"] for e in out)
+    monkeypatch.delenv("FINNHUB_API_KEY")
+    assert legacy._chart_news_history("NVDA") == []
+
+
+def test_higher_timeframes_draw_events_on_their_candle():
+    js = open("static/js/chart_tools.js", encoding="utf-8").read()
+    assert "function ctEventX(t, step)" in js
+    assert "var x = ctEventX(t, step);" in js and "ctEventX(Number(e.ts), step)" in js
+    assert "step < 86400 || e.upcoming ? 0.55 : 0.32" in js        # report line on 1D/1W/1M too
+    assert "ty = dim.H - 44" in js                                  # upcoming tag above news dots
+    assert "dim.H - 34 : dim.H - 14" in js                          # news stacks above a same-candle flag
+
+
+def test_timeframe_switch_paints_from_background_prefetch():
+    # Switching 5m -> 1D -> 1W waited on a fresh download each time.
+    assert "function twPrefetchTimeframes(ticker)" in TEMPLATE
+    assert "function twPrefetchFind(ticker, interval, range, session)" in TEMPLATE
+    assert "if(!refreshOnly) twPrefetchTimeframes(ticker);" in TEMPLATE
+    assert "var cached=twPrefetchFind(ticker, interval, range, session)||twCandleCacheLoad(cacheKey);" in TEMPLATE
