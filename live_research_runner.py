@@ -171,6 +171,13 @@ def main():
         print(json.dumps({"recall": pings}, sort_keys=True))
     except Exception as exc:
         print(json.dumps({"recall_error": type(exc).__name__}))
+    # Daily value-zone scan (after the close): watchlist names that moved
+    # into Accumulate / Load the boat, one digest per user.
+    try:
+        import value_zone_scan
+        print(json.dumps({"value_zones": value_zone_scan.run()}, sort_keys=True, default=str))
+    except Exception as exc:
+        print(json.dumps({"value_zones_error": type(exc).__name__}))
     # Notification inbox: fresh news on followed tickers and big market
     # headlines, earnings today/tomorrow and results, economic releases.
     try:

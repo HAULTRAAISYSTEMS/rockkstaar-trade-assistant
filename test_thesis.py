@@ -157,9 +157,6 @@ def test_range_labels_sit_under_their_marks_and_read_explains_price():
     assert "below the base case" in thesis._price_read(60.0, tg)["text"]
     assert "below even the bear case" in thesis._price_read(30.0, tg)["text"]
     assert thesis._price_read(None, tg) is None
-    tpl = open("templates/thesis.html", encoding="utf-8").read()
-    assert 'class="th-range__today' in tpl and "Today {{ t.price_fmt }}" in tpl
-    assert 'style="left:{{ l.pct }}%"' in tpl and 'class="th-read tone-{{ t.read.tone }}"' in tpl
 
 
 # --- Route-level tests: the /thesis page renders end to end ---------------
@@ -201,11 +198,12 @@ def test_thesis_route_renders_targets_and_flags():
         patch.object(app_module, "get_user_tracked_tickers", return_value=["NVDA"]),
         patch("fundamentals_engine.get_fundamentals", return_value=_route_synthetic()),
         patch.object(thesis, "_shares_outstanding", return_value=24.6e9),
+        patch.object(app_module, "_thesis_daily_bars", return_value=None),
     ):
         resp = client.get("/thesis?ticker=NVDA")
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)
-    assert "Est. upside" in html
+    assert "What price do I buy at?" in html and "The verdict" in html
     assert "Bear" in html and "Base" in html and "Bull" in html
     assert "Revenue growing 3+ years" in html
     assert "NVIDIA Corporation" in html

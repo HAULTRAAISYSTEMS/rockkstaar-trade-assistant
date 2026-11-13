@@ -89,7 +89,7 @@ var CT_PREF_DEFAULTS = {
   candles: {up: '#22C58B', down: '#FF4D45', session: false, shading: true, style: 'candles', wicks: true},
   scale: {mode: 'normal', invert: false, lastLine: true, lastLabel: true},
   view: {grid: 'none', crosshair: 'free', watermark: false, hilo: true, rightOffset: 5, countdown: true,
-         ohlc: true, legend: true, tooltip: true, hint: true, volume: true, sessions: true, events: true},
+         ohlc: true, legend: true, tooltip: true, hint: true, volume: true, sessions: true, events: true, zones: true},
   draw: {stay: false, hidden: false},
   magnet: false
 };
@@ -1375,6 +1375,7 @@ function ctApplyView(force) {
 function ctDrawExtras(ctx, dim) {
   var bars = twChartState.bars || [], ch = twChartState.chart;
   if (!bars.length || !ch) return;
+  try { ctDrawValueZones(ctx, dim); } catch (e) {}
   try { ctDrawSessionMarks(ctx, dim); } catch (e) {}
   try { ctDrawEvents(ctx, dim); } catch (e) {}
   if (ctPrefs.view.hilo) {
@@ -1423,6 +1424,42 @@ function ctDrawExtras(ctx, dim) {
    extended hours on, the line sits where the session flips (9:30 / 4:00 ET);
    with it off, consecutive bars jump from one day's close to the next open,
    so a faint line marks each new day instead. */
+/* ── Value zones (from the Thesis page) on Daily / Weekly / Monthly ──
+   Shaded price bands: Accumulate (under base value) and Load the boat
+   (25%+ under), plus a thin line where Pricey starts. Value says where;
+   the candles say when. */
+function ctDrawValueZones(ctx, dim) {
+  var z = twChartState.zones;
+  if (!z || !z.available || ctPrefs.view.zones === false) return;
+  if ((CT_STEP[twChartState.interval] || 0) < 86400) return;
+  var yAcc = ctY(z.accum_top), yLoad = ctY(z.load_top), yBull = ctY(z.bull);
+  function band(yTop, yBot, fill, edge) {
+    if (yTop == null) yTop = -10;
+    if (yBot == null || yBot > dim.H) yBot = dim.H;
+    if (yTop > dim.H || yBot < 0 || yBot <= yTop) return;
+    ctx.fillStyle = fill; ctx.fillRect(0, Math.max(0, yTop), dim.W, yBot - Math.max(0, yTop));
+    if (yTop >= 0) { ctx.strokeStyle = edge; ctx.lineWidth = 1; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(0, yTop + 0.5); ctx.lineTo(dim.W, yTop + 0.5); ctx.stroke(); }
+  }
+  ctx.save();
+  if (yAcc != null) band(yAcc, yLoad == null ? dim.H : yLoad, 'rgba(139,227,107,0.07)', 'rgba(139,227,107,0.45)');
+  if (yLoad != null) band(yLoad, dim.H + 10, 'rgba(46,230,166,0.13)', 'rgba(46,230,166,0.7)');
+  if (yBull != null && yBull > 0 && yBull < dim.H) {
+    ctx.strokeStyle = 'rgba(255,107,107,0.55)'; ctx.setLineDash([2, 5]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, yBull + 0.5); ctx.lineTo(dim.W, yBull + 0.5); ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.font = '700 10px ui-monospace, Menlo, monospace'; ctx.textBaseline = 'middle';
+  function tag(y, text, color) {
+    if (y == null || y < 8 || y > dim.H - 8) return;
+    var w = ctx.measureText(text).width + 12, x = 8;
+    ctx.fillStyle = 'rgba(8,10,12,0.85)'; ctx.fillRect(x, y - 9, w, 18);
+    ctx.strokeStyle = color; ctx.strokeRect(x + 0.5, y - 8.5, w - 1, 17);
+    ctx.fillStyle = color; ctx.fillText(text, x + 6, y);
+  }
+  tag(yAcc != null ? yAcc + 11 : null, 'ACCUMULATE ≤ ' + ctFmt(z.accum_top), '#8be36b');
+  tag(yLoad != null ? yLoad + 11 : null, 'LOAD THE BOAT ≤ ' + ctFmt(z.load_top), '#2ee6a6');
+  tag(yBull != null ? yBull - 11 : null, 'PRICEY ≥ ' + ctFmt(z.bull), '#ff6b6b');
+  ctx.restore();
+}
 function ctDrawSessionMarks(ctx, dim) {
   var bars = twChartState.bars || [], ch = twChartState.chart, step = CT_STEP[twChartState.interval];
   if (!ctPrefs.view.sessions || !ch || !step || step >= 14400 || bars.length < 2) return;
