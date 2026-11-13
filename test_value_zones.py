@@ -12,6 +12,8 @@ import pytest
 
 import thesis as th
 
+_REAL_TTM = th._ttm_values
+
 
 def _data(price=156.93, ni=2.5e9, fcf=None, vh=None):
     return {"valuation": {"price": price, "pe": 52.0, "pfcf": 45.0},
@@ -23,6 +25,7 @@ def _data(price=156.93, ni=2.5e9, fcf=None, vh=None):
 @pytest.fixture(autouse=True)
 def _shares(monkeypatch):
     monkeypatch.setattr(th, "_shares_outstanding", lambda t, p: 860e6)
+    monkeypatch.setattr(th, "_ttm_values", lambda t: {})
 
 
 def test_zone_boundaries_use_margin_of_safety():
@@ -149,7 +152,8 @@ def test_thesis_page_renders_ladder_timing_plan_and_whatif(monkeypatch):
     with (patch.object(legacy, "_auth_required", return_value=False),
           patch.object(legacy, "get_user_tracked_tickers", return_value=[]),
           patch("fundamentals_engine.get_fundamentals", return_value=dict(_data(vh=vh), company_name="Marvell")),
-          patch.object(legacy, "_thesis_daily_bars", return_value=_bars())):
+          patch.object(legacy, "_thesis_daily_bars", return_value=_bars()),
+          patch.object(legacy, "_thesis_live_price", return_value=None)):
         html = client.get("/thesis?ticker=MRVL").get_data(as_text=True)
         cash = client.get("/thesis?ticker=MRVL&basis=fcf").get_data(as_text=True)
     for s in ("Too pricey — wait", "What price do I buy at?", "Load the boat", "data-alert-price=",
@@ -200,3 +204,104 @@ def test_daily_scan_sends_one_digest_on_entry(monkeypatch):
     assert vzs.changes("fair|hold", zones["AMD"]) == "entered"
     assert vzs.changes("load|load-wait", zones["AMD"]) == "signal"
     assert vzs.changes("accumulate|", dict(zones["AMD"], zone="accumulate", signal={})) is None
+
+
+def test_ttm_values_from_finnhub_metrics(monkeypatch):
+    import finnhub_ttm
+    monkeypatch.setattr(th, "_ttm_values", _REAL_TTM)
+    monkeypatch.setattr(finnhub_ttm, "fetch_finnhub_metrics", lambda t: {"_raw_metric": {
+        "marketCapitalization": 135000.0, "peTTM": 50.0, "freeCashFlowTTM": 3000.0}})
+    v = th._ttm_values("MRVL")
+    assert v["net_income"] == pytest.approx(2.7e9) and v["fcf"] == pytest.approx(3.0e9)
+    monkeypatch.setattr(finnhub_ttm, "fetch_finnhub_metrics", lambda t: {"_raw_metric": {
+        "marketCapitalization": 1000.0, "pfcfShareTTM": 20.0}})
+    assert th._ttm_values("X") == {"fcf": pytest.approx(5e7)}
+    monkeypatch.setattr(finnhub_ttm, "fetch_finnhub_metrics", lambda t: (_ for _ in ()).throw(RuntimeError("x")))
+    assert th._ttm_values("X") == {}
+
+
+def test_trailing_twelve_months_replace_the_last_fiscal_year(monkeypatch):
+    # Annual filing: $2.5B profit. The last four quarters: $3.0B. A growing
+    # company is valued on the fresher number, and the page says so.
+    monkeypatch.setattr(th, "_ttm_values", lambda t: {"net_income": 3.0e9, "fcf": 3.2e9})
+    t = th.build_targets(_data(ni=2.5e9, fcf=2.6e9), "MRVL")
+    assert t["power"] == pytest.approx(3.0e9) and t["uses_ttm"]
+    assert t["basis"] == "net income, last 12 months"
+    # Cash-earned basis uses TTM free cash flow.
+    f = th.build_targets(_data(ni=2.5e9, fcf=2.6e9), "MRVL", basis="fcf")
+    assert f["power"] == pytest.approx(3.2e9) and f["basis_key"] == "fcf"
+    # A shrinking business keeps the conservative cycle median.
+    shrink = _data(ni=2.5e9)
+    shrink["history"] = [dict(h, revenue_num=5e9 * (1.2 ** i)) for i, h in enumerate(shrink["history"])]
+    s = th.build_targets(shrink, "X")
+    assert not s["uses_ttm"]
+
+
+def test_live_price_replaces_the_cached_price():
+    pytest.importorskip("flask")
+    import app as legacy
+    data = {"valuation": {"price": 150.0, "pe": 50.0, "pfcf": 40.0}}
+    out = legacy._with_live_price(data, {"price": 165.0, "epoch": 1794600000, "prev_close": 150.0,
+                                         "source": "Schwab", "session": "regular"})
+    v = out["valuation"]
+    assert v["price"] == 165.0 and v["pe"] == pytest.approx(55.0) and v["pfcf"] == pytest.approx(44.0)
+    assert v["change_pct"] == pytest.approx(10.0)
+    assert v["price_source"]["live"] and v["price_source"]["source"] == "Schwab" and "ET" in v["price_source"]["as_of"]
+    assert data["valuation"]["price"] == 150.0            # the cached copy is untouched
+    stale = legacy._with_live_price(data, None)["valuation"]["price_source"]
+    assert stale == {"live": False, "source": "Finnhub", "note": "From the last data load"}
+
+
+def test_page_uses_the_terminal_price_and_shared_live_feed(monkeypatch):
+    # One price everywhere: the page's server-side price is the Terminal's own
+    # live endpoint, and the open page ticks on the shared 3-second live hub.
+    from unittest.mock import patch
+    from flask import jsonify
+    legacy, client = _client()
+    with legacy.app.test_request_context():
+        with patch.object(legacy, "api_terminal_live", lambda t: jsonify({"ok": True, "ticker": t, "quote": {
+                "price": 160.0, "epoch": 1794600000, "prev_close": 150.0, "source": "Schwab", "ext": None}})):
+            live = legacy._thesis_live_price("MRVL", wait_s=0)
+        assert live["price"] == 160.0 and live["source"] == "Schwab" and live["prev_close"] == 150.0
+        with patch.object(legacy, "api_terminal_live", lambda t: jsonify({"ok": True, "ticker": t, "quote": None})):
+            assert legacy._thesis_live_price("MRVL", wait_s=0) is None
+    with patch.object(legacy, "_auth_required", return_value=False), \
+         patch.object(legacy, "_thesis_live_price", return_value=dict(live, session="")), \
+         patch.object(legacy, "get_user_tracked_tickers", return_value=[]), \
+         patch("fundamentals_engine.get_fundamentals", return_value=dict(_data(), company_name="Marvell")), \
+         patch.object(legacy, "_thesis_daily_bars", return_value=_bars()):
+        html = client.get("/thesis?ticker=MRVL").get_data(as_text=True)
+    assert "$160.00" in html and "Live · Schwab" in html
+    assert 'id="vz-src-price"' in html and "<b>Earnings</b>" in html and "daily candles through" in html
+    assert "/thesis/price" not in open("app.py", encoding="utf-8").read()
+    tjs = open("static/js/thesis.js", encoding="utf-8").read()
+    assert "TSLive.on('live', onLive)" in tjs and "TSLive.setLiveTicker" in tjs and "setInterval" not in tjs
+    tpl = open("templates/terminal.html", encoding="utf-8").read()
+    assert "The value-zone chip follows the same tick as the price header." in tpl
+
+
+def test_cached_zones_are_reread_at_the_live_price(monkeypatch):
+    import time
+    legacy, client = _client()
+    monkeypatch.setattr(legacy, "_auth_required", lambda: False)
+    z = {"available": True, "ticker": "MRVL", "price": 156.0, "zone": "pricey", "zone_label": "Pricey",
+         "load_top": 55.0, "accum_top": 74.0, "bull": 104.0, "bear": 36.0,
+         "signal": {"key": "wait"}, "trend": {"confirmed": True}}
+    legacy._VALUE_ZONES["MRVL"] = (time.time(), z)
+    monkeypatch.setattr(legacy, "_MKT_AVAILABLE", True)
+    monkeypatch.setattr(legacy._mkt, "live_quotes", lambda syms: {"MRVL": {"price": 70.0}})
+    d = client.get("/api/thesis/zones?ticker=MRVL").get_json()["zones"]["MRVL"]
+    assert d["zone"] == "accumulate" and d["price"] == 70.0 and d["signal"]["key"] == "buy"
+    r = th.restate_zone(dict(z, trend={"confirmed": False}), 50.0)
+    assert r["zone"] == "load" and r["signal"]["key"] == "load-wait"
+
+
+def test_daily_scan_prices_at_the_official_close(monkeypatch):
+    import value_zone_scan as vzs
+    import fundamentals_engine, market_data
+    seen = {}
+    monkeypatch.setattr(fundamentals_engine, "get_fundamentals", lambda t: _data(price=150.0))
+    monkeypatch.setattr(market_data, "fetch_chart_bars", lambda t, i, r: (_bars(last=60.0), {}))
+    monkeypatch.setattr(th, "zone_summary", lambda d, t, b: seen.setdefault("price", d["valuation"]["price"]))
+    vzs._zone_for_ticker("MRVL")
+    assert seen["price"] == 60.0

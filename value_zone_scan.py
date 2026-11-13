@@ -50,7 +50,20 @@ def _zone_for_ticker(ticker: str) -> dict:
         bars, _ = fetch_chart_bars(ticker, "1d", "5y")
     except Exception:
         bars = None
-    return zone_summary(get_fundamentals(ticker), ticker, bars)
+    data = get_fundamentals(ticker)
+    # After the close the last daily candle is today's official close —
+    # fresher than the price cached with the fundamentals (up to a day old).
+    closes = [c for c in ((bars or {}).get("closes") or []) if c]
+    if closes:
+        val = dict(data.get("valuation") or {})
+        old = val.get("price")
+        if isinstance(old, (int, float)) and old > 0:
+            for k in ("pe", "pfcf", "ps"):
+                if isinstance(val.get(k), (int, float)) and val[k] > 0:
+                    val[k] = val[k] * closes[-1] / old
+        val["price"] = float(closes[-1])
+        data = dict(data, valuation=val)
+    return zone_summary(data, ticker, bars)
 
 
 def changes(prev: str | None, z: dict) -> str | None:

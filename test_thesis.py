@@ -199,6 +199,7 @@ def test_thesis_route_renders_targets_and_flags():
         patch("fundamentals_engine.get_fundamentals", return_value=_route_synthetic()),
         patch.object(thesis, "_shares_outstanding", return_value=24.6e9),
         patch.object(app_module, "_thesis_daily_bars", return_value=None),
+        patch.object(app_module, "_thesis_live_price", return_value=None),
     ):
         resp = client.get("/thesis?ticker=NVDA")
     assert resp.status_code == 200

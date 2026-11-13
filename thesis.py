@@ -125,14 +125,26 @@ def _fcf_power(history: list[dict], growth: float) -> float | None:
 _FCF_OVER_NI_SWITCH = 1.3
 
 
-def _choose_power(history: list[dict], growth: float, basis: str) -> tuple[float | None, str, str]:
+def _choose_power(history: list[dict], growth: float, basis: str,
+                  ttm: dict | None = None) -> tuple[float | None, str, str]:
     """(power, basis label, basis key) for the requested yardstick.
 
     basis: "earnings" (reported net income), "fcf" (free cash flow) or
     "auto" — earnings unless cash earned runs well above reported profit.
+    For a growing business the trailing twelve months replace the last
+    fiscal year (fresher by up to three quarters); a shrinking one keeps
+    the cycle median, so one good stretch doesn't flatter it.
     """
     ni_power, ni_basis = _earnings_power(history, growth)
     fcf_power = _fcf_power(history, growth)
+    ttm = ttm or {}
+    if growth >= 0:
+        if ni_basis == "net income" and ttm.get("net_income"):
+            ni_power = ttm["net_income"]
+        elif not ni_basis.startswith("net") and ttm.get("net_income"):
+            ni_power, ni_basis = ttm["net_income"], "net income"
+        if ttm.get("fcf"):
+            fcf_power = ttm["fcf"]
     if basis == "fcf" and fcf_power:
         return fcf_power, "free cash flow", "fcf"
     if basis == "earnings" and ni_basis == "net income":
@@ -141,6 +153,38 @@ def _choose_power(history: list[dict], growth: float, basis: str) -> tuple[float
         return fcf_power, "free cash flow", "fcf"
     key = "fcf" if ni_basis == "free cash flow" else ("sales" if ni_basis.startswith("sales") else "earnings")
     return ni_power, ni_basis, key
+
+
+def _ttm_values(ticker: str) -> dict:
+    """Trailing-12-month net income and free cash flow (USD) from Finnhub.
+
+    Annual filings can be up to a year old; the last four quarters are not.
+    Net income comes from market cap / trailing P/E (both Finnhub, so they
+    describe the same moment); free cash flow from freeCashFlowTTM, or market
+    cap / trailing P/FCF. {} when unavailable — the model then uses the
+    latest fiscal year.
+    """
+    try:
+        from finnhub_ttm import fetch_finnhub_metrics
+        raw = (fetch_finnhub_metrics(ticker) or {}).get("_raw_metric") or {}
+    except Exception as exc:
+        logger.debug("thesis TTM unavailable for %s: %s", ticker, exc)
+        return {}
+
+    def pos(v):
+        return float(v) if isinstance(v, (int, float)) and v > 0 else None
+    cap_m = pos(raw.get("marketCapitalization"))
+    pe = pos(raw.get("peTTM")) or pos(raw.get("peExclExtraTTM"))
+    pfcf = pos(raw.get("pfcfShareTTM"))
+    out = {}
+    if cap_m and pe:
+        out["net_income"] = cap_m * 1e6 / pe
+    fcf_m = pos(raw.get("freeCashFlowTTM"))
+    if fcf_m:
+        out["fcf"] = fcf_m * 1e6
+    elif cap_m and pfcf:
+        out["fcf"] = cap_m * 1e6 / pfcf
+    return out
 
 
 def _shares_outstanding(ticker: str, price: float | None) -> float | None:
@@ -193,11 +237,16 @@ def build_targets(data: dict, ticker: str, basis: str = "auto") -> dict:
     price = valuation.get("price")
     price = float(price) if isinstance(price, (int, float)) and price > 0 else None
 
-    power, basis_label, basis_key = _choose_power(history, _revenue_cagr(history), basis)
-    basis = basis_label
-    ni_check = _earnings_power(history, _revenue_cagr(history))
-    fcf_check = _fcf_power(history, _revenue_cagr(history))
-    basis_options = [k for k, ok in (("earnings", ni_check[1] == "net income"), ("fcf", bool(fcf_check))) if ok]
+    ttm = _ttm_values(ticker)
+    g0 = _revenue_cagr(history)
+    power, basis_label, basis_key = _choose_power(history, g0, basis, ttm)
+    uses_ttm = g0 >= 0 and ((basis_key == "earnings" and bool(ttm.get("net_income")))
+                            or (basis_key == "fcf" and bool(ttm.get("fcf"))))
+    basis = basis_label + (", last 12 months" if uses_ttm else "")
+    ni_check = _earnings_power(history, g0)
+    fcf_check = _fcf_power(history, g0) or (ttm.get("fcf") if g0 >= 0 else None)
+    basis_options = [k for k, ok in (("earnings", ni_check[1] == "net income" or bool(g0 >= 0 and ttm.get("net_income"))),
+                                     ("fcf", bool(fcf_check))) if ok]
     shares = _shares_outstanding(ticker, price) if power else None
 
     if power is None or not shares:
@@ -206,7 +255,7 @@ def build_targets(data: dict, ticker: str, basis: str = "auto") -> dict:
         return {"available": False, "note": note, "price": price}
 
     growth = _revenue_cagr(history)
-    sales_based = basis.startswith("sales")
+    sales_based = basis_key == "sales"
     base_mult = _base_ps(growth) if sales_based else _base_multiple(growth)
     targets, scenario_rows = {}, []
     for key, label in (("bear", "Bear"), ("base", "Base"), ("bull", "Bull")):
@@ -261,6 +310,7 @@ def build_targets(data: dict, ticker: str, basis: str = "auto") -> dict:
         "upside_tone": ("pos" if price and base >= price else "neg") if price else "neutral",
         "basis": basis,
         "basis_key": basis_key,
+        "uses_ttm": uses_ttm,
         "basis_options": basis_options,
         "shares": shares,
         "power": power,
@@ -516,7 +566,18 @@ def zone_summary(data: dict, ticker: str, bars: dict | None = None) -> dict:
             "zone": z["current"], "zone_label": ZONE_META[z["current"]]["label"],
             "load_top": round(z["load_top"], 2), "accum_top": round(t["base"], 2),
             "bull": round(t["bull"], 2), "bear": round(t["bear"], 2),
-            "basis": t["basis"], "signal": sig}
+            "basis": t["basis"], "signal": sig, "trend": trend if bars else None}
+
+
+def restate_zone(summary: dict, price: float) -> dict:
+    """A cached zone summary re-read at a new price (levels unchanged)."""
+    zone = zone_for(price, summary["accum_top"], summary["bull"])
+    if zone is None:
+        return summary
+    out = dict(summary, price=price, zone=zone, zone_label=ZONE_META[zone]["label"])
+    if summary.get("trend"):
+        out["signal"] = load_signal(zone, summary["trend"])
+    return out
 
 
 def build_flags(data: dict) -> list[dict]:
@@ -561,12 +622,30 @@ def build_thesis(data: dict, ticker: str, basis: str = "auto", bars: dict | None
                 "trend": trend,
                 "signal": load_signal(zones["current"], trend),
                 "model": {"power": targets["power"], "shares": targets.get("shares"),
+                          "zone": zones["current"], "accum_top": targets["base"],
+                          "load_top": zones["load_top"], "bull": targets["bull"],
                           "growth": targets["growth"], "sales_based": targets["sales_based"],
                           "price": price, "mos": MARGIN_OF_SAFETY},
             }
+        ends = [str(r.get("period_end"))[:10] for r in (data.get("history") or [])
+                if isinstance(r, dict) and r.get("period_end")]
+        last_bar = None
+        if bars and bars.get("timestamps"):
+            from datetime import datetime as _dt, timezone as _tz
+            last_bar = _dt.fromtimestamp(bars["timestamps"][-1], _tz.utc).strftime("%b %-d, %Y")
+        sources = {
+            "price": valuation.get("price_source") or {"live": False, "source": "Finnhub",
+                                                       "note": "From the last data load"},
+            "fiscal_year_end": max(ends) if ends else None,
+            "uses_ttm": bool(targets.get("uses_ttm")),
+            "basis": targets.get("basis") or "",
+            "bars_through": last_bar,
+            "shares": "Finnhub shares outstanding",
+        }
         return {
             "ticker": ticker,
             "company_name": data.get("company_name") or ticker,
+            "sources": sources,
             "sector": data.get("sector") or "",
             "industry": data.get("industry") or "",
             "price": price,

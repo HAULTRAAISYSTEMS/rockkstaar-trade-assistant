@@ -2425,6 +2425,21 @@ if(window.TSLive){
   TSLive.on('quotes', twQuotesApply);
   TSLive.setLiveTicker(function(){ return twChartState && twChartState.ticker; });
   TSLive.on('live', twLiveApply);
+  // The value-zone chip follows the same tick as the price header.
+  TSLive.on('live', function(d){
+    var z=twChartState.zones, q=d&&d.quote;
+    if(!z||!z.available||!q||!(q.price>0)||String(d.ticker||'').toUpperCase()!==String(z.ticker||'').toUpperCase()) return;
+    var zone=q.price<=z.load_top?'load':(q.price<=z.accum_top?'accumulate':(q.price<=z.bull?'fair':'pricey'));
+    if(zone===z.zone) return;
+    var labels={load:'Load the boat',accumulate:'Accumulate',fair:'Fair',pricey:'Pricey'};
+    var tr=z.trend||{}, ok=!!tr.confirmed, sig;
+    if(zone==='load') sig=ok?{key:'load',title:'Load the boat',tone:'load'}:{key:'load-wait',title:'Load zone — wait for the turn',tone:'accum'};
+    else if(zone==='accumulate') sig=ok?{key:'buy',title:'Buy signal',tone:'accum'}:{key:'accum-wait',title:'In the buy zone — timing not there yet',tone:'fair'};
+    else if(zone==='fair') sig={key:'hold',title:'Fair value — hold',tone:'fair'};
+    else sig={key:'wait',title:'Too pricey — wait',tone:'pricey'};
+    twChartState.zones=Object.assign({},z,{zone:zone,zone_label:labels[zone],price:q.price,signal:Object.assign({},z.signal||{},sig)});
+    twRenderZoneChip(twChartState.zones);
+  });
 }
 // Rows, header and chips: every 3 s, from the shared live-quote feed.
 window._arInterval = 3000;

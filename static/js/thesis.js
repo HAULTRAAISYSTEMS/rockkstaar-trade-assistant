@@ -69,6 +69,50 @@
     renderShares();
   }
 
+  /* ---- Live price ---- */
+  var ZONE_LABEL = {load: 'Load the boat', accumulate: 'Accumulate', fair: 'Fair', pricey: 'Pricey'};
+  function zoneAt(p) {
+    if (p <= M.load_top) return 'load';
+    if (p <= M.accum_top) return 'accumulate';
+    if (p <= M.bull) return 'fair';
+    return 'pricey';
+  }
+  /* Same feed, same 3-second beat as the Terminal, tape and watchlists:
+     the page's shared live hub (one request for every live part on the
+     page), asking for this ticker's chart price. */
+  function onLive(d) {
+    var q = d && d.quote;
+    if (!q || !(q.price > 0) || (d.ticker && d.ticker !== M.ticker)) return;
+    M.price = q.price;
+    document.querySelectorAll('[data-live-price]').forEach(function (e) { e.textContent = money(q.price); });
+    var chg = document.querySelector('[data-live-chg]');
+    if (chg && q.prev_close > 0) {
+      var pctv = (q.price / q.prev_close - 1) * 100;
+      chg.textContent = (pctv >= 0 ? '+' : '') + pctv.toFixed(2) + '%';
+      chg.className = pctv >= 0 ? 'is-up' : 'is-down';
+    }
+    var when = '';
+    if (q.epoch) { try { when = new Date(q.epoch * 1000).toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York'}) + ' ET'; } catch (e) {} }
+    var st = $('vz-stamp');
+    if (st) { st.className = 'vz-stamp is-live'; st.textContent = '● Live · ' + (q.source || 'Live feed') + (when ? ' · ' + when : ''); }
+    var sp = $('vz-src-price');
+    if (sp) { sp.className = 'is-live'; sp.innerHTML = '<b>Price</b> live · ' + (q.source || 'Live feed'); }
+    var tb = $('vz-to-buy');
+    if (tb) tb.textContent = q.price > M.accum_top ? Math.round((M.accum_top / q.price - 1) * 100) + '% from here' : "You're in it";
+    var z = zoneAt(q.price), mv = $('vz-moved'), chip = $('vz-zone-chip');
+    if (chip) { chip.textContent = ZONE_LABEL[z]; chip.className = 'vz-chip tone-' + ({accumulate: 'accum'}[z] || z); }
+    if (mv && z !== M.zone) {
+      mv.hidden = false;
+      mv.querySelector('span').textContent = M.ticker + ' just moved into ' + ZONE_LABEL[z] + ' (' + money(q.price) + '). Refresh for the updated verdict.';
+      mv.querySelector('a').href = location.href;
+    }
+    if (gIn) update();
+  }
+  if (window.TSLive) {
+    TSLive.setLiveTicker(function () { return M.ticker; });
+    TSLive.on('live', onLive);
+  }
+
   /* ---- What-if ---- */
   var gIn = $('vz-g'), mIn = $('vz-m'), sIn = $('vz-s');
   if (!gIn || !M.power || !M.shares) return;
