@@ -140,6 +140,28 @@ def test_range_bar_geometry():
     assert bar["price_pct"] is not None
 
 
+def test_range_labels_sit_under_their_marks_and_read_explains_price():
+    # The labels used to be spread evenly, so "Base" sat under the bull mark
+    # and "Bull" under today's price. Each label now carries its mark's
+    # position, today's price is labeled, and one line says what it means.
+    d = _data([(100e9, 10e9, 9e9)] * 3)
+    t = thesis.build_targets(d, "TEST")
+    labels = {l["key"]: l for l in t["bar"]["labels"]}
+    for key in ("bear", "base", "bull"):
+        assert labels[key]["pct"] == t["bar"][key + "_pct"]
+    assert labels["base"]["text"].startswith("Base $")
+    tg = {"bear": 36.0, "base": 74.0, "bull": 104.0}
+    assert "above even the bull case" in thesis._price_read(156.93, tg)["text"]
+    assert thesis._price_read(156.93, tg)["tone"] == "neg"
+    assert "between the base and bull" in thesis._price_read(90.0, tg)["text"]
+    assert "below the base case" in thesis._price_read(60.0, tg)["text"]
+    assert "below even the bear case" in thesis._price_read(30.0, tg)["text"]
+    assert thesis._price_read(None, tg) is None
+    tpl = open("templates/thesis.html", encoding="utf-8").read()
+    assert 'class="th-range__today' in tpl and "Today {{ t.price_fmt }}" in tpl
+    assert 'style="left:{{ l.pct }}%"' in tpl and 'class="th-read tone-{{ t.read.tone }}"' in tpl
+
+
 # --- Route-level tests: the /thesis page renders end to end ---------------
 
 def _route_synthetic():

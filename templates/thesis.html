@@ -55,14 +55,16 @@
       <div class="th-range">
         <div class="th-range__bar">
           <i class="th-range__fill" style="left:{{ t.bar.bear_pct }}%;width:{{ (t.bar.bull_pct - t.bar.bear_pct) }}%"></i>
-          {% if t.bar.price_pct is not none %}<b class="th-range__price" style="left:{{ t.bar.price_pct }}%" title="Market price {{ t.price_fmt }}"></b>{% endif %}
           <b class="th-range__mark is-bear" style="left:{{ t.bar.bear_pct }}%"></b>
           <b class="th-range__mark is-base" style="left:{{ t.bar.base_pct }}%"></b>
           <b class="th-range__mark is-bull" style="left:{{ t.bar.bull_pct }}%"></b>
+          {% if t.bar.price_pct is not none %}<b class="th-range__price" style="left:{{ t.bar.price_pct }}%" title="Market price {{ t.price_fmt }}"></b>
+          <span class="th-range__today{% if t.bar.price_pct > 80 %} is-right{% elif t.bar.price_pct < 20 %} is-left{% endif %}" style="left:{{ t.bar.price_pct }}%">Today {{ t.price_fmt }}</span>{% endif %}
         </div>
-        <div class="th-range__labels"><span>Bear {{ t.bear_fmt }}</span><span>Base {{ t.base_fmt }}</span><span>Bull {{ t.bull_fmt }}</span></div>
+        <div class="th-range__labels">{% for l in t.bar.labels %}<span class="is-{{ l.key }} row-{{ l.row }}{% if l.pct > 85 %} is-right{% elif l.pct < 12 %} is-left{% endif %}" style="left:{{ l.pct }}%">{{ l.text }}</span>{% endfor %}</div>
       </div>
     </div>
+    {% if t.read %}<p class="th-read tone-{{ t.read.tone }}">{{ t.read.text }}</p>{% endif %}
     <div class="th-scenarios">
       {% for s in t.scenarios %}
       <article class="th-scenario is-{{ s.key }}">

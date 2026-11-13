@@ -61,7 +61,22 @@
 .th-range__mark.is-bear{background:var(--th-red)}
 .th-range__mark.is-bull{background:var(--th-green)}
 .th-range__price{position:absolute;top:-7px;width:3px;height:24px;background:#f5f3ee;border-radius:2px;transform:translateX(-50%);box-shadow:0 0 8px rgba(255,255,255,.5)}
-.th-range__labels{display:flex;justify-content:space-between;color:#7e8995;font:600 10px var(--font-mono)}
+.th-range{padding-top:22px}
+.th-range__today{position:absolute;bottom:22px;transform:translateX(-50%);white-space:nowrap;color:#f5f3ee;font:700 10px var(--font-mono);letter-spacing:.04em}
+.th-range__today.is-right{transform:translateX(-100%)}
+.th-range__today.is-left{transform:none}
+.th-range__labels{position:relative;height:30px;color:#7e8995;font:600 10px var(--font-mono)}
+.th-range__labels span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
+.th-range__labels span.row-1{top:15px}
+.th-range__labels span.is-right{transform:translateX(-100%)}
+.th-range__labels span.is-left{transform:none}
+.th-range__labels .is-bear{color:var(--th-red)}
+.th-range__labels .is-base{color:var(--th-gold-bright)}
+.th-range__labels .is-bull{color:var(--th-green)}
+.th-read{margin:14px 0 0;padding:10px 14px;border-left:3px solid #8d98a4;border-radius:6px;background:rgba(255,255,255,.03);color:#d9dde2;font-size:13px;line-height:1.5}
+.th-read.tone-neg{border-left-color:var(--th-red)}
+.th-read.tone-warn{border-left-color:var(--th-gold-bright)}
+.th-read.tone-pos{border-left-color:var(--th-green)}
 .th-scenarios{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .th-scenario{padding:16px;border:1px solid rgba(255,255,255,.06);border-radius:13px;background:#090c0f}
 .th-scenario>div{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
@@ -96,3 +111,8 @@
 .th-deep-link span{color:#6b7682;font-size:9px}
 .th-deep-link a{color:var(--th-gold);font:700 10px var(--font-ui);text-decoration:none;white-space:nowrap}
 @media(max-width:900px){.th-header,.th-start{grid-template-columns:1fr}.th-hero{grid-template-columns:1fr}.th-flags,.th-math{grid-template-columns:1fr}.th-scenarios{grid-template-columns:1fr}.th-company{grid-template-columns:1fr}.th-market,.th-score{text-align:left}.th-market>div{justify-content:flex-start}}
+@media (max-width:640px){
+  .th-range__labels span.is-bear,.th-range__labels span.is-bull{top:0}
+  .th-range__labels span.is-base{top:15px}
+}
+.th-read{margin-bottom:4px}

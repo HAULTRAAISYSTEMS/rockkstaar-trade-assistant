@@ -129,6 +129,28 @@ def _shares_outstanding(ticker: str, price: float | None) -> float | None:
     return None
 
 
+def _price_read(price: float | None, targets: dict) -> dict | None:
+    """One plain-English line: where today's price sits among the scenarios."""
+    if not price:
+        return None
+    bear, base, bull = targets["bear"], targets["base"], targets["bull"]
+    if price > bull:
+        return {"tone": "neg", "text": (
+            f"Today's price is {price / bull - 1:.0%} above even the bull case. The market "
+            "is paying for more growth than this model assumes — expensive on these numbers.")}
+    if price > base:
+        return {"tone": "warn", "text": (
+            "Today's price is between the base and bull cases: fully valued. "
+            "You are paying for things going better than the base case.")}
+    if price >= bear:
+        return {"tone": "pos", "text": (
+            f"Today's price is {1 - price / base:.0%} below the base case: a discount "
+            "if the base-case growth holds.")}
+    return {"tone": "pos", "text": (
+        "Today's price is below even the bear case. Either a deep discount or "
+        "the business is breaking — check the red flags below.")}
+
+
 def build_targets(data: dict, ticker: str) -> dict:
     """Bear/base/bull price targets from the fundamentals history.
 
@@ -178,10 +200,21 @@ def build_targets(data: dict, ticker: str) -> dict:
         "bull_pct": round((targets["bull"] - lo) / span * 100, 1),
         "price_pct": round((price - lo) / span * 100, 1) if price else None,
     }
+    # Labels sit under their own marks; marks closer than ~18% of the bar
+    # take turns on a second row so the text never overlaps.
+    labels, last_pct, row = [], None, 0
+    for key, label in (("bear", "Bear"), ("base", "Base"), ("bull", "Bull")):
+        pct = bar[key + "_pct"]
+        row = (1 - row) if last_pct is not None and pct - last_pct < 18 else 0
+        labels.append({"key": key, "text": f"{label} {_fmt_price(targets[key])}",
+                       "pct": pct, "row": row})
+        last_pct = pct
+    bar["labels"] = labels
     return {
         "available": True,
         "price": price,
         "price_fmt": _fmt_price(price),
+        "read": _price_read(price, targets),
         "bear": targets["bear"], "base": base, "bull": targets["bull"],
         "bear_fmt": _fmt_price(targets["bear"]),
         "base_fmt": _fmt_price(base),
