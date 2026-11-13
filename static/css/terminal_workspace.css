@@ -603,3 +603,6 @@ html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen::after { display: non
 .tw-zone-chip.tone-accum,.tw-zone-chip.tone-accumulate{color:#8be36b;background:rgba(139,227,107,.1)}
 .tw-zone-chip.tone-fair{color:#f3c95a;background:rgba(243,201,90,.08)}
 .tw-zone-chip.tone-pricey{color:#ff6b6b;background:rgba(255,107,107,.08)}
+/* Value-zones toolbar toggle */
+.tw-zones-btn{color:#2ee6a6}
+.tw-zones-btn.is-off{color:#6b7682;opacity:.7}

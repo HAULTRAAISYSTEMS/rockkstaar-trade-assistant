@@ -1441,23 +1441,26 @@ function ctDrawValueZones(ctx, dim) {
     if (yTop >= 0) { ctx.strokeStyle = edge; ctx.lineWidth = 1; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(0, yTop + 0.5); ctx.lineTo(dim.W, yTop + 0.5); ctx.stroke(); }
   }
   ctx.save();
-  if (yAcc != null) band(yAcc, yLoad == null ? dim.H : yLoad, 'rgba(139,227,107,0.07)', 'rgba(139,227,107,0.45)');
-  if (yLoad != null) band(yLoad, dim.H + 10, 'rgba(46,230,166,0.13)', 'rgba(46,230,166,0.7)');
+  // Light washes, so Fibonacci levels, alerts and drawings stay readable.
+  if (yAcc != null) band(yAcc, yLoad == null ? dim.H : yLoad, 'rgba(139,227,107,0.035)', 'rgba(139,227,107,0.35)');
+  if (yLoad != null) band(yLoad, dim.H + 10, 'rgba(46,230,166,0.06)', 'rgba(46,230,166,0.5)');
   if (yBull != null && yBull > 0 && yBull < dim.H) {
-    ctx.strokeStyle = 'rgba(255,107,107,0.55)'; ctx.setLineDash([2, 5]); ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,107,107,0.45)'; ctx.setLineDash([2, 5]); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(0, yBull + 0.5); ctx.lineTo(dim.W, yBull + 0.5); ctx.stroke(); ctx.setLineDash([]);
   }
-  ctx.font = '700 10px ui-monospace, Menlo, monospace'; ctx.textBaseline = 'middle';
+  // Labels sit at the right edge, next to the price axis, clear of the
+  // OHLC / indicator readout in the top-left corner.
+  ctx.font = '700 9.5px ui-monospace, Menlo, monospace'; ctx.textBaseline = 'middle';
   function tag(y, text, color) {
-    if (y == null || y < 8 || y > dim.H - 8) return;
-    var w = ctx.measureText(text).width + 12, x = 8;
-    ctx.fillStyle = 'rgba(8,10,12,0.85)'; ctx.fillRect(x, y - 9, w, 18);
-    ctx.strokeStyle = color; ctx.strokeRect(x + 0.5, y - 8.5, w - 1, 17);
-    ctx.fillStyle = color; ctx.fillText(text, x + 6, y);
+    if (y == null || y < 9 || y > dim.H - 9) return;
+    var w = ctx.measureText(text).width + 10, x = dim.W - w - 6;
+    ctx.fillStyle = 'rgba(8,10,12,0.82)'; ctx.fillRect(x, y - 8, w, 16);
+    ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y - 7.5, w - 1, 15);
+    ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.fillText(text, x + 5, y + 0.5);
   }
-  tag(yAcc != null ? yAcc + 11 : null, 'ACCUMULATE ≤ ' + ctFmt(z.accum_top), '#8be36b');
-  tag(yLoad != null ? yLoad + 11 : null, 'LOAD THE BOAT ≤ ' + ctFmt(z.load_top), '#2ee6a6');
-  tag(yBull != null ? yBull - 11 : null, 'PRICEY ≥ ' + ctFmt(z.bull), '#ff6b6b');
+  tag(yAcc != null ? yAcc + 10 : null, 'ACCUM ≤ ' + ctFmt(z.accum_top), '#8be36b');
+  tag(yLoad != null ? yLoad + 10 : null, 'LOAD ≤ ' + ctFmt(z.load_top), '#2ee6a6');
+  tag(yBull != null ? yBull - 10 : null, 'PRICEY ≥ ' + ctFmt(z.bull), '#ff6b6b');
   ctx.restore();
 }
 function ctDrawSessionMarks(ctx, dim) {
@@ -1730,6 +1733,7 @@ function ctSet(path, value) {
   if (path.indexOf('candles.') === 0) { ctApplyCandleColors(); ctRepaintCandles(); }
   if (path === 'view.volume' && typeof twToggleVolume === 'function' && !!value !== !!twChartState.showVolume) twToggleVolume(document.getElementById('tw-volume-btn') || document.createElement('button'));
   if (path.indexOf('view.') === 0 || path.indexOf('scale.') === 0) ctApplyView(true);
+  if (path === 'view.zones' && typeof twSyncZonesBtn === 'function') twSyncZonesBtn();
   if (path.indexOf('labels.') === 0 || path.indexOf('levels.') === 0) { ctStudy.nbboWant = null; ctRenderLevels(); }
   if (path === 'magnet' || path === 'draw.hidden') ctSyncRail();
   if (path === 'labels.indicators' && typeof twApplyStudyStyles === 'function') twApplyStudyStyles();
@@ -2109,6 +2113,7 @@ function ctEventX(t, step) {
   if (l >= 0 && l < n) return ctLogX(Math.min(n - 1, Math.floor(l + 1e-6)));
   return ctLogX(l);
 }
+var CT_MAX_EARNINGS_LONG = 8;
 function ctDrawEvents(ctx, dim) {
   ctEventHits = [];
   var evs = twChartState.events || [];
@@ -2118,8 +2123,16 @@ function ctDrawEvents(ctx, dim) {
   var first = ctSec(bars[0].time);
   ctx.save();
   ctx.font = '800 10px "IBM Plex Mono", ui-monospace, monospace'; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
-  // Earnings
-  evs.filter(function (e) { return e.type === 'earnings'; }).forEach(function (e) {
+  // Earnings. On Daily and longer only the last 8 past reports (plus any
+  // upcoming one): an "All" chart would otherwise carry 30+ flags.
+  var earn = evs.filter(function (e) { return e.type === 'earnings'; });
+  if (step >= 86400) {
+    var nowS = Date.now() / 1000;
+    var past = earn.filter(function (e) { var t = ctEventTime(e); return t != null && t <= nowS && !e.upcoming; })
+      .sort(function (a, b) { return ctEventTime(b) - ctEventTime(a); }).slice(0, CT_MAX_EARNINGS_LONG);
+    earn = past.concat(earn.filter(function (e) { var t = ctEventTime(e); return e.upcoming || (t != null && t > nowS); }));
+  }
+  earn.forEach(function (e) {
     var t = ctEventTime(e); if (t == null || t < first) return;
     if (step >= 86400) t = Math.floor(t / 86400) * 86400 + 12 * 3600;
     var x = ctEventX(t, step); if (x == null || x < 0) return;

@@ -650,3 +650,17 @@ def test_timeframe_switch_paints_from_background_prefetch():
     assert "function twPrefetchFind(ticker, interval, range, session)" in TEMPLATE
     assert "if(!refreshOnly) twPrefetchTimeframes(ticker);" in TEMPLATE
     assert "var cached=twPrefetchFind(ticker, interval, range, session)||twCandleCacheLoad(cacheKey);" in TEMPLATE
+
+
+def test_chart_declutter_zone_tags_earnings_cap_axis_and_toggle():
+    js = open("static/js/chart_tools.js", encoding="utf-8").read()
+    # Zone labels at the right edge (clear of the top-left OHLC/EMA readout), lighter bands.
+    assert "x = dim.W - w - 6" in js and "'rgba(46,230,166,0.06)'" in js
+    # Daily+ charts keep only the last 8 past earnings reports (plus upcoming).
+    assert "var CT_MAX_EARNINGS_LONG = 8;" in js and ".slice(0, CT_MAX_EARNINGS_LONG)" in js
+    assert "if (path === 'view.zones' && typeof twSyncZonesBtn === 'function') twSyncZonesBtn();" in js
+    # No negative prices on the axis; volume keeps its own format.
+    assert "function twAxisPrice(p){" in TEMPLATE and "if(!(p>=0)) return '';" in TEMPLATE
+    assert "priceFormat:twPxFmt" in TEMPLATE and "priceFormatter:twAxisPrice" not in TEMPLATE
+    # One-tap value-zone toggle on the toolbar.
+    assert 'id="tw-zones-btn" onclick="twToggleZones()"' in TEMPLATE and "function twToggleZones(){" in TEMPLATE
