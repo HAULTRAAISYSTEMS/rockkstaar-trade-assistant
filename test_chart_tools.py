@@ -551,3 +551,35 @@ def test_symbol_header_and_chart_bar_stack_on_desktop():
     assert ".tw-chart-toolbar .tw-tools-pill    { order: 6; margin-left: auto; display: inline-flex;" in css
     assert ".tw-chart-toolbar .tw-tools-pill { display: contents; }" in css
     assert 'class="tw-tools-pill"' in TEMPLATE
+
+
+def test_chart_events_endpoint_past_earnings_and_news(client, monkeypatch):
+    # The chart had no earnings or news: the intelligence card only carried
+    # an UPCOMING date and headlines usually had no time. Past reports (with
+    # EPS vs estimate) and timed news now come from /api/terminal/events.
+    import time as _t
+    import app as legacy
+    import news_desk
+    monkeypatch.setattr(news_desk, "earnings_dates", lambda t: [
+        {"date": "2026-08-27", "hour": "amc", "eps": 1.05, "eps_est": 1.01},
+        {"date": "2026-05-28", "hour": "amc", "eps": 0.9, "eps_est": 0.95}])
+    monkeypatch.setattr(legacy._intel, "fetch_ticker_news", lambda t, limit=25: [
+        {"headline": "Nvidia unveils chip", "source": "Reuters", "url": "https://x", "published_at": "2026-11-12T14:30:00Z"},
+        {"headline": "No time on this one", "published_at": ""}])
+    monkeypatch.setattr(legacy, "get_stock_data", lambda t: {"earnings_date": "2099-11-19", "earnings_time": "AMC"})
+    legacy._CHART_EVENTS.clear()
+    c, _ = client
+    first = c.get("/api/terminal/events/NVDA").get_json()
+    assert first["ok"] and first.get("pending")
+    for _ in range(50):
+        d = c.get("/api/terminal/events/NVDA").get_json()
+        if not d.get("pending"):
+            break
+        _t.sleep(0.05)
+    ev = d["events"]
+    earn = [e for e in ev if e["type"] == "earnings"]
+    assert [e["result"] for e in earn if not e.get("upcoming")] == ["beat", "miss"]
+    assert any(e.get("upcoming") and e["date"] == "2099-11-19" for e in earn)
+    news = [e for e in ev if e["type"] == "news"]
+    assert len(news) == 1 and news[0]["ts"] == 1794493800
+    assert "function twLoadChartEvents(ticker, tries)" in TEMPLATE and "'/api/terminal/events/'" in TEMPLATE
