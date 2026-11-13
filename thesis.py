@@ -566,7 +566,18 @@ def zone_summary(data: dict, ticker: str, bars: dict | None = None) -> dict:
             "zone": z["current"], "zone_label": ZONE_META[z["current"]]["label"],
             "load_top": round(z["load_top"], 2), "accum_top": round(t["base"], 2),
             "bull": round(t["bull"], 2), "bear": round(t["bear"], 2),
-            "basis": t["basis"], "signal": sig}
+            "basis": t["basis"], "signal": sig, "trend": trend if bars else None}
+
+
+def restate_zone(summary: dict, price: float) -> dict:
+    """A cached zone summary re-read at a new price (levels unchanged)."""
+    zone = zone_for(price, summary["accum_top"], summary["bull"])
+    if zone is None:
+        return summary
+    out = dict(summary, price=price, zone=zone, zone_label=ZONE_META[zone]["label"])
+    if summary.get("trend"):
+        out["signal"] = load_signal(zone, summary["trend"])
+    return out
 
 
 def build_flags(data: dict) -> list[dict]:

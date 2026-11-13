@@ -11042,20 +11042,21 @@ def _thesis_daily_bars(ticker: str) -> dict | None:
 
 
 def _thesis_live_price(ticker: str, wait_s: float = 2.5) -> dict | None:
-    """The live price from the Terminal's shared feed (Schwab, then Alpaca,
-    then Yahoo). Waits up to `wait_s` for the first fetch of a cold ticker.
-    {"price", "epoch", "source"} or None."""
-    try:
-        import market_engine as _me
-    except Exception:
-        return None
+    """The same print the Terminal chart and header show: this calls the
+    Terminal's own live endpoint (shared Schwab -> Alpaca feed, overnight
+    print 8 PM-4 AM, Yahoo fallback), so every page agrees to the cent.
+    Waits up to `wait_s` for the first fetch of a cold ticker."""
     deadline = _time.time() + wait_s
     while True:
-        q = (_me.live_quotes([ticker]) or {}).get(ticker) or _me.live_ticker_quote(ticker)
+        try:
+            resp = api_terminal_live(ticker)
+            q = (resp.get_json(silent=True) or {}).get("quote") if hasattr(resp, "get_json") else None
+        except Exception as exc:
+            logger.debug("thesis live price %s: %s", ticker, exc)
+            q = None
         if q and isinstance(q.get("price"), (int, float)) and q["price"] > 0:
             return {"price": float(q["price"]), "epoch": q.get("epoch"), "prev_close": q.get("prev_close"),
-                    "source": q.get("source") or q.get("source_name") or "Live feed",
-                    "session": q.get("session") or q.get("ext") or ""}
+                    "source": q.get("source") or "Live feed", "session": q.get("ext") or ""}
         if _time.time() >= deadline:
             return None
         _time.sleep(0.25)
@@ -11131,22 +11132,6 @@ def _value_zones_cached(ticker: str, start: bool = True) -> dict | None:
     return None
 
 
-@app.route("/api/thesis/price/<ticker>")
-def api_thesis_price(ticker):
-    """Live price for an open Thesis page (polled every ~15 s)."""
-    ticker = (ticker or "").strip().upper()[:12]
-    if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
-        return jsonify({"ok": False, "error": "Enter a valid ticker"}), 400
-    live = _thesis_live_price(ticker, wait_s=0)
-    if not live:
-        return jsonify({"ok": True, "live": False})
-    stamp = _with_live_price({"valuation": {"price": live["price"]}}, live)["valuation"]["price_source"]
-    pc = live.get("prev_close")
-    return jsonify({"ok": True, "live": True, "price": live["price"], "as_of": stamp.get("as_of"),
-                    "change_pct": ((live["price"] / pc - 1) * 100) if isinstance(pc, (int, float)) and pc > 0 else None,
-                    "source": stamp.get("source"), "session": stamp.get("session")})
-
-
 @app.route("/api/thesis/zones")
 def api_value_zones():
     """Value zones for up to 40 tickers: {"zones": {T: {...}}, "pending": [..]}."""
@@ -11154,12 +11139,24 @@ def api_value_zones():
     tickers = [t for t in dict.fromkeys(x.strip() for x in raw.split(","))
                if re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", t)][:40]
     zones, pending = {}, []
+    live = {}
+    if _MKT_AVAILABLE and tickers:
+        try:
+            live = _mkt.live_quotes(tickers) or {}
+        except Exception:
+            live = {}
     for t in tickers:
         z = _value_zones_cached(t)
         if z is None:
             pending.append(t)
-        else:
-            zones[t] = z
+            continue
+        # Zones (the dollar levels) are cached; which zone the stock is in
+        # follows the same live price every other page shows.
+        px = (live.get(t) or {}).get("price")
+        if z.get("available") and isinstance(px, (int, float)) and px > 0:
+            from thesis import restate_zone
+            z = restate_zone(z, float(px))
+        zones[t] = z
     return jsonify({"ok": True, "zones": zones, "pending": pending})
 
 

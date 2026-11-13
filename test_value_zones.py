@@ -252,23 +252,48 @@ def test_live_price_replaces_the_cached_price():
     assert stale == {"live": False, "source": "Finnhub", "note": "From the last data load"}
 
 
-def test_price_endpoint_and_page_show_where_numbers_come_from(monkeypatch):
+def test_page_uses_the_terminal_price_and_shared_live_feed(monkeypatch):
+    # One price everywhere: the page's server-side price is the Terminal's own
+    # live endpoint, and the open page ticks on the shared 3-second live hub.
     from unittest.mock import patch
+    from flask import jsonify
     legacy, client = _client()
-    live = {"price": 160.0, "epoch": 1794600000, "prev_close": 150.0, "source": "Schwab", "session": "regular"}
+    with legacy.app.test_request_context():
+        with patch.object(legacy, "api_terminal_live", lambda t: jsonify({"ok": True, "ticker": t, "quote": {
+                "price": 160.0, "epoch": 1794600000, "prev_close": 150.0, "source": "Schwab", "ext": None}})):
+            live = legacy._thesis_live_price("MRVL", wait_s=0)
+        assert live["price"] == 160.0 and live["source"] == "Schwab" and live["prev_close"] == 150.0
+        with patch.object(legacy, "api_terminal_live", lambda t: jsonify({"ok": True, "ticker": t, "quote": None})):
+            assert legacy._thesis_live_price("MRVL", wait_s=0) is None
     with patch.object(legacy, "_auth_required", return_value=False), \
-         patch.object(legacy, "_thesis_live_price", return_value=live):
-        d = client.get("/api/thesis/price/mrvl").get_json()
-        assert d["live"] and d["price"] == 160.0 and d["source"] == "Schwab" and round(d["change_pct"], 2) == 6.67
-        assert client.get("/api/thesis/price/bad$").status_code == 400
-        with patch.object(legacy, "get_user_tracked_tickers", return_value=[]), \
-             patch("fundamentals_engine.get_fundamentals", return_value=dict(_data(), company_name="Marvell")), \
-             patch.object(legacy, "_thesis_daily_bars", return_value=_bars()):
-            html = client.get("/thesis?ticker=MRVL").get_data(as_text=True)
+         patch.object(legacy, "_thesis_live_price", return_value=dict(live, session="")), \
+         patch.object(legacy, "get_user_tracked_tickers", return_value=[]), \
+         patch("fundamentals_engine.get_fundamentals", return_value=dict(_data(), company_name="Marvell")), \
+         patch.object(legacy, "_thesis_daily_bars", return_value=_bars()):
+        html = client.get("/thesis?ticker=MRVL").get_data(as_text=True)
     assert "$160.00" in html and "Live · Schwab" in html
     assert 'id="vz-src-price"' in html and "<b>Earnings</b>" in html and "daily candles through" in html
+    assert "/thesis/price" not in open("app.py", encoding="utf-8").read()
     tjs = open("static/js/thesis.js", encoding="utf-8").read()
-    assert "/api/thesis/price/" in tjs and "setInterval(pollPrice, 15000)" in tjs
+    assert "TSLive.on('live', onLive)" in tjs and "TSLive.setLiveTicker" in tjs and "setInterval" not in tjs
+    tpl = open("templates/terminal.html", encoding="utf-8").read()
+    assert "The value-zone chip follows the same tick as the price header." in tpl
+
+
+def test_cached_zones_are_reread_at_the_live_price(monkeypatch):
+    import time
+    legacy, client = _client()
+    monkeypatch.setattr(legacy, "_auth_required", lambda: False)
+    z = {"available": True, "ticker": "MRVL", "price": 156.0, "zone": "pricey", "zone_label": "Pricey",
+         "load_top": 55.0, "accum_top": 74.0, "bull": 104.0, "bear": 36.0,
+         "signal": {"key": "wait"}, "trend": {"confirmed": True}}
+    legacy._VALUE_ZONES["MRVL"] = (time.time(), z)
+    monkeypatch.setattr(legacy, "_MKT_AVAILABLE", True)
+    monkeypatch.setattr(legacy._mkt, "live_quotes", lambda syms: {"MRVL": {"price": 70.0}})
+    d = client.get("/api/thesis/zones?ticker=MRVL").get_json()["zones"]["MRVL"]
+    assert d["zone"] == "accumulate" and d["price"] == 70.0 and d["signal"]["key"] == "buy"
+    r = th.restate_zone(dict(z, trend={"confirmed": False}), 50.0)
+    assert r["zone"] == "load" and r["signal"]["key"] == "load-wait"
 
 
 def test_daily_scan_prices_at_the_official_close(monkeypatch):
