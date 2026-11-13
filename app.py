@@ -10575,7 +10575,7 @@ def logout():
 # ---------------------------------------------------------------------------
 
 def _support_email() -> str:
-    return (os.environ.get("SUPPORT_EMAIL") or "").strip() or "support@tradestaar.com"
+    return (os.environ.get("SUPPORT_EMAIL") or "").strip() or "tradestaarelite@gmail.com"
 
 
 @app.route("/privacy")
