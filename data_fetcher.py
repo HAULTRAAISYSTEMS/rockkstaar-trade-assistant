@@ -642,7 +642,26 @@ def _fetch_price_via_chart_api(ticker: str) -> dict | None:
                     if c is not None and c > 0
                 ]
 
-                if len(valid_bars) >= 2:
+                # Pre-market: today's daily bar doesn't exist yet, so the LAST
+                # bar is the previous session (yesterday) — using the second to
+                # last compared today's pre-market price with the day before
+                # yesterday.
+                _premarket_no_today = False
+                try:
+                    if valid_bars and market_session_now() == "pre_market":
+                        _ld = _bar_date(valid_bars[-1][0])
+                        _premarket_no_today = bool(_ld) and _ld < _et_now().strftime("%Y-%m-%d")
+                except Exception:
+                    _premarket_no_today = False
+                if _premarket_no_today:
+                    pt, prev_c, prev_h, prev_lo = valid_bars[-1]
+                    out["prev_close"]    = round(float(prev_c),  2)
+                    out["prev_day_high"] = round(float(prev_h),  2)
+                    out["prev_day_low"]  = round(float(prev_lo), 2)
+                    _d = _bar_date(pt)
+                    if _d:
+                        out["prev_close_date"] = _d
+                elif len(valid_bars) >= 2:
                     # Second-to-last bar = previous completed trading session
                     pt, prev_c, prev_h, prev_lo = valid_bars[-2]
                     out["prev_close"]    = round(float(prev_c),  2)
