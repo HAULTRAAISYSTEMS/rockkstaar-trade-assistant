@@ -15,18 +15,27 @@ import hashlib
 import logging
 import os
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
 logger = logging.getLogger(__name__)
 PREFIX = "enc:v1:"
 
 
+def _key(secret: str) -> Fernet:
+    return Fernet(base64.urlsafe_b64encode(hashlib.sha256(("token-store:" + secret).encode()).digest()))
+
+
 def _fernet() -> Fernet | None:
-    secret = (os.environ.get("TOKEN_ENCRYPTION_KEY") or os.environ.get("SECRET_KEY") or "").strip()
-    if not secret:
+    """Encrypts with TOKEN_ENCRYPTION_KEY (else SECRET_KEY); decrypts with
+    either, so adding TOKEN_ENCRYPTION_KEY after tokens were already
+    encrypted under SECRET_KEY doesn't disconnect anyone."""
+    secrets = [v.strip() for v in (os.environ.get("TOKEN_ENCRYPTION_KEY") or "",
+                                   os.environ.get("SECRET_KEY") or "") if v and v.strip()]
+    if not secrets:
         return None
-    key = base64.urlsafe_b64encode(hashlib.sha256(("token-store:" + secret).encode()).digest())
-    return Fernet(key)
+    if len(secrets) == 1 or secrets[0] == secrets[1]:
+        return _key(secrets[0])
+    return MultiFernet([_key(x) for x in secrets])
 
 
 def is_encrypted(value) -> bool:

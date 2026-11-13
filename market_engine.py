@@ -1619,10 +1619,21 @@ def _live_quote_from_chart(res: dict, session: str) -> dict | None:
     when = datetime.fromtimestamp(int(epoch), ZoneInfo("America/New_York"))
     mins = when.hour * 60 + when.minute
     ext = "pre" if mins < 570 else ("post" if mins >= 960 else None)
-    return {"price": round(float(price), 4), "epoch": int(epoch),
-            "prev_close": meta.get("chartPreviousClose") or meta.get("previousClose"),
-            "regular_close": meta.get("regularMarketPrice"),
-            "ext": ext}
+    prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+    reg = meta.get("regularMarketPrice")
+    reg_t = meta.get("regularMarketTime")
+    # Pre-market: the last regular session is yesterday's, and Yahoo's
+    # previousClose is the close BEFORE it — so NVDA read -1.65% against the
+    # day before yesterday instead of its move since last night's close.
+    if ext == "pre" and reg and reg_t:
+        reg_day = datetime.fromtimestamp(int(reg_t), ZoneInfo("America/New_York")).date()
+        if reg_day < when.date():
+            prev = reg
+    out = {"price": round(float(price), 4), "epoch": int(epoch), "prev_close": prev,
+           "regular_close": reg, "ext": ext}
+    if ext == "post" and reg:
+        out["day_close"] = reg          # after hours is measured from today's close
+    return out
 
 
 def _fetch_live_quote(sym: str) -> None:
@@ -1960,7 +1971,10 @@ def _refresh_live_quotes() -> None:
                                        source="Blue Ocean 24H via Alpaca" + (" (may lag)" if bar.get("source") == "alpaca_overnight" else ""))
     except Exception as exc:
         logger.debug("live quotes (overnight) failed: %s", exc)
-    missing = [s for s in wanted if s not in quotes][:_LQ_YAHOO_MAX]
+    # Before and after the bell Alpaca's free feed is thin, so more symbols
+    # fall through to Yahoo; cover a full watchlist screen then.
+    yahoo_max = _LQ_YAHOO_MAX * 4 if pulse_session() in ("pre", "post") else _LQ_YAHOO_MAX
+    missing = [s for s in wanted if s not in quotes][:yahoo_max]
     if missing:
         # Fallback: Yahoo per symbol, at its own slower cadence.
         stale = [s for s in missing
@@ -1977,7 +1991,9 @@ def _refresh_live_quotes() -> None:
                 base = lq.get("prev_close")
                 quotes[s] = {"price": lq["price"], "epoch": lq["epoch"], "prev_close": base,
                              "change_pct": round((lq["price"] / float(base) - 1) * 100, 2) if base else None,
-                             "ext": lq.get("ext"), "source": "Yahoo"}
+                             "ext": lq.get("ext"), "source": "Yahoo",
+                             # AH / PRE tags in the watchlist need the bell's close.
+                             "day_close": lq.get("day_close")}
     stamp = _time.time()
     for s, q in quotes.items():
         # Never step back to an older print: a slower fallback (Yahoo) can
