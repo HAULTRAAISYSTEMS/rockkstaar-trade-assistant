@@ -134,7 +134,8 @@
     $('vz-s-out').textContent = Math.round(mos * 100) + '%';
     var rows = {bear: [Math.min(G, 0) - 0.05, 0.6], base: [G, 1], bull: [G + 0.05, 1.35]}, out = {};
     Object.keys(rows).forEach(function (k) {
-      var g = rows[k][0], mult = baseMult * rows[k][1], target = M.power * (1 + g) * mult / M.shares;
+      var g = rows[k][0], mult = baseMult * rows[k][1],
+          target = Math.max(0, M.power * (1 + g) / (1 + (M.drift || 0)) * mult / M.shares + (M.cash_ps || 0));
       out[k] = target;
       var up = target / M.price - 1;
       var tEl = document.querySelector('[data-wi-target="' + k + '"]'); if (tEl) tEl.textContent = money(target);
