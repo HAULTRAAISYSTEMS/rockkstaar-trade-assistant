@@ -202,7 +202,9 @@
     <div class="th-section__head"><div><span>06 · The math</span><h2>Assumptions, on screen</h2></div><small>Simple by design</small></div>
     <div class="th-math">
       <div><span>Earnings power</span><strong>{{ t.power_fmt }}</strong><em>{% if t.uses_ttm %}{{ t.basis }} (through the latest quarter){% elif t.growth >= 0 %}latest annual {{ t.basis }}{% else %}median of positive annual {{ t.basis }}{% endif %}</em></div>
-      <div><span>Growth anchor</span><strong>{{ t.growth_pct }}</strong><em>historical revenue CAGR, clamped ±</em></div>
+      <div><span>Growth anchor</span><strong>{{ t.growth_pct }}</strong><em>{% if t.growth_source == 'blend' %}half the multi-year revenue trend ({{ '%+.0f%%'|format(t.growth_history * 100) }}), half the last 12 months ({{ '%+.0f%%'|format(t.growth_ttm * 100) }}){% elif t.growth_source == 'ttm' %}revenue growth, last 12 months{% else %}multi-year revenue trend{% endif %}, kept between −10% and +30%</em></div>
+      <div><span>Cash and debt</span><strong>{% if t.net_cash is not none %}{{ ('+' if t.net_cash_ps >= 0 else '−') }}${{ '%.2f'|format(t.net_cash_ps|abs) }}<small>/share</small>{% else %}—{% endif %}</strong><em>{% if t.net_cash is not none %}{{ 'net cash' if t.net_cash >= 0 else 'net debt' }} of {{ t.net_cash_fmt }} added to every target{% else %}not applied (no balance sheet, or a financial company){% endif %}</em></div>
+      <div><span>Share count</span><strong>{% if t.share_drift is not none %}{{ '%+.1f%%'|format(t.share_drift * 100) }}<small>/yr</small>{% else %}—{% endif %}</strong><em>{% if t.share_drift is none %}not applied (too little history or a split){% elif t.share_drift < 0 %}buybacks shrink the share count, raising value per share{% else %}new shares dilute value per share{% endif %}</em></div>
       <div><span>Method</span><strong>Forward {{ t.basis }} × scenario multiple</strong><em>base {{ '%.1f'|format(t.base_multiple) }}x, scaled to growth · bear 0.6x · bull 1.35x</em></div>
     </div>
     <p class="th-disclaimer">{{ t.note }} Nothing here is investment advice — verify the fundamentals yourself before acting.</p>
@@ -213,7 +215,7 @@
   {% endif %}
 </main>
 {% if thesis and thesis.value and thesis.value.available %}
-<script id="vz-model" type="application/json">{{ {"ticker": thesis.ticker, "price": thesis.value.model.price, "power": thesis.value.model.power, "shares": thesis.value.model.shares, "growth": thesis.value.model.growth, "sales": thesis.value.model.sales_based, "mos": thesis.value.model.mos, "zone": thesis.value.model.zone, "accum_top": thesis.value.model.accum_top, "load_top": thesis.value.model.load_top, "bull": thesis.value.model.bull, "plan": thesis.value.plan|map(attribute="price")|list}|tojson }}</script>
+<script id="vz-model" type="application/json">{{ {"ticker": thesis.ticker, "price": thesis.value.model.price, "power": thesis.value.model.power, "shares": thesis.value.model.shares, "growth": thesis.value.model.growth, "sales": thesis.value.model.sales_based, "mos": thesis.value.model.mos, "drift": thesis.value.model.drift, "cash_ps": thesis.value.model.cash_ps, "zone": thesis.value.model.zone, "accum_top": thesis.value.model.accum_top, "load_top": thesis.value.model.load_top, "bull": thesis.value.model.bull, "plan": thesis.value.plan|map(attribute="price")|list}|tojson }}</script>
 <script src="{{ url_for('static', filename='js/thesis.js') }}"></script>
 {% endif %}
 {% endblock %}

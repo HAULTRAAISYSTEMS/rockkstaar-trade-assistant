@@ -329,3 +329,36 @@ def test_ladder_says_estimates_and_shows_real_trading_range():
     tpl = open("templates/thesis.html", encoding="utf-8").read()
     assert "These are <b>estimated values</b>, not prices" in tpl and "Model caution" in tpl
     assert "52-wk" not in tpl or "vz-mark is-{{ m.key }}" in tpl
+
+
+def test_cash_debt_recent_growth_and_share_count(monkeypatch):
+    # Three accuracy inputs: net cash per share is added to every target,
+    # growth blends the multi-year trend with the last 12 months, and a
+    # shrinking (buybacks) or growing (dilution) share count moves value
+    # per share.
+    assert th.blended_growth(0.10, 0.40) == (pytest.approx(0.25), "blend")
+    assert th.blended_growth(1.0, 1.05)[0] == 0.30                 # still capped
+    assert th.blended_growth(None, 0.12) == (0.12, "ttm") and th.blended_growth(None, None) == (0.0, "none")
+    assert th.share_drift({"diluted_shares": [97.0, 98.5, 100.0]}) == pytest.approx((0.97) ** 0.5 - 1)
+    assert th.share_drift({"diluted_shares": [10.0, 100.0]}) is None  # a split, not buybacks
+    assert th.share_drift({"diluted_shares": [100.0]}) is None
+    assert th.net_cash({"cash": 62e9, "debt": 38e9}) == 24e9
+    assert th.net_cash({"cash": 5e9, "debt": 9e9}) == -4e9
+    assert th.net_cash({"cash": 5e9, "debt": 1e9}, "Financial Services") is None
+    assert th.net_cash({}) is None
+
+    base = th.build_targets(_data(), "MRVL")
+    monkeypatch.setattr(th, "_ttm_values", lambda t: {"revenue_growth": 0.40})
+    d = dict(_data(), capital={"cash": 8.6e9, "debt": 0.0, "diluted_shares": [98.0, 100.0]})
+    t = th.build_targets(d, "MRVL")
+    assert t["growth_source"] == "blend" and t["growth"] > base["growth"]
+    assert t["net_cash_ps"] == pytest.approx(10.0) and t["share_drift"] == pytest.approx(-0.02)
+    expect = t["power"] * (1 + t["growth"]) / (1 - 0.02) * th._base_multiple(t["growth"]) / t["shares"] + 10.0
+    assert t["base"] == pytest.approx(expect)
+    # Implied growth still reproduces the base target with the new inputs.
+    g = th.implied_growth(t["base"], t["power"], t["shares"], False, t["share_drift"], t["net_cash_ps"])
+    assert g == pytest.approx(t["growth"], abs=1e-6)
+    js = open("static/js/thesis.js", encoding="utf-8").read()
+    assert "(1 + (M.drift || 0))" in js and "(M.cash_ps || 0)" in js
+    tpl = open("templates/thesis.html", encoding="utf-8").read()
+    assert "Cash and debt" in tpl and "Share count" in tpl and "half the last 12 months" in tpl

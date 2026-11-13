@@ -218,6 +218,9 @@ def _ttm_values(ticker: str) -> dict:
     pe = pos(raw.get("peTTM")) or pos(raw.get("peExclExtraTTM"))
     pfcf = pos(raw.get("pfcfShareTTM"))
     out = {}
+    rg = raw.get("revenueGrowthTTMYoy")
+    if isinstance(rg, (int, float)) and -95 < rg < 1000:
+        out["revenue_growth"] = rg / 100.0          # Finnhub: percent
     if cap_m and pe:
         out["net_income"] = cap_m * 1e6 / pe
     fcf_m = pos(raw.get("freeCashFlowTTM"))
@@ -268,6 +271,48 @@ def _price_read(price: float | None, targets: dict) -> dict | None:
         "the business is breaking — check the red flags below.")}
 
 
+# Share count drift beyond this (per year) is a split or a merger, not
+# buybacks or stock pay; it is left out rather than read as dilution.
+_SHARE_DRIFT_MAX = 0.10
+
+
+def share_drift(capital: dict | None) -> float | None:
+    """Annual change in diluted shares (negative = buybacks), or None."""
+    series = [x for x in ((capital or {}).get("diluted_shares") or []) if x]
+    if len(series) < 2:
+        return None
+    new, old, years = series[0], series[-1], len(series) - 1
+    if not (0.6 < new / old < 1.6):
+        return None
+    d = (new / old) ** (1 / years) - 1
+    return d if abs(d) <= _SHARE_DRIFT_MAX else None
+
+
+def net_cash(capital: dict | None, sector: str = "") -> float | None:
+    """Cash and short-term investments minus total debt (USD), or None.
+    Skipped for financial companies, whose debt is their raw material."""
+    if "financ" in (sector or "").lower() or "bank" in (sector or "").lower():
+        return None
+    c, d = (capital or {}).get("cash"), (capital or {}).get("debt")
+    if not isinstance(c, (int, float)):
+        return None
+    return float(c) - float(d if isinstance(d, (int, float)) else 0)
+
+
+def blended_growth(history_cagr: float | None, ttm_growth: float | None) -> tuple[float, str]:
+    """Half the multi-year revenue trend, half the last 12 months, clamped.
+    The trend alone reacts a year late to an acceleration or a slowdown."""
+    if history_cagr is None and ttm_growth is None:
+        return 0.0, "none"
+    if ttm_growth is None:
+        g, src = history_cagr, "history"
+    elif history_cagr is None:
+        g, src = ttm_growth, "ttm"
+    else:
+        g, src = (history_cagr + ttm_growth) / 2, "blend"
+    return max(_GROWTH_MIN, min(_GROWTH_MAX, g)), src
+
+
 def build_targets(data: dict, ticker: str, basis: str = "auto") -> dict:
     """Bear/base/bull price targets from the fundamentals history.
 
@@ -295,7 +340,13 @@ def build_targets(data: dict, ticker: str, basis: str = "auto") -> dict:
                 else "Share count unavailable — targets need per-share math.")
         return {"available": False, "note": note, "price": price}
 
-    growth = _revenue_cagr(history)
+    hist_raw = _revenue_cagr_raw(history)
+    growth, growth_src = blended_growth(hist_raw, ttm.get("revenue_growth"))
+    capital = data.get("capital") or {}
+    drift = share_drift(capital)
+    cash = net_cash(capital, data.get("sector") or "")
+    cash_ps = (cash / shares) if cash is not None else 0.0
+    per_share = 1 / (1 + drift) if drift is not None else 1.0
     sales_based = basis_key == "sales"
     base_mult = _base_ps(growth) if sales_based else _base_multiple(growth)
     targets, scenario_rows = {}, []
@@ -303,7 +354,9 @@ def build_targets(data: dict, ticker: str, basis: str = "auto") -> dict:
         adj = _SCENARIO_G_ADJ[key]
         g = min(growth, 0.0) + adj if key == "bear" else growth + adj
         multiple = base_mult * _SCENARIO_MULT[key]
-        target = power * (1 + g) * multiple / shares
+        # Earnings value per share (buybacks shrink the share count, dilution
+        # grows it) plus the net cash each share owns.
+        target = max(0.0, power * (1 + g) * per_share * multiple / shares + cash_ps)
         multiple_label = f"{multiple:.1f}x" + (" sales" if sales_based else "")
         targets[key] = target
         scenario_rows.append({
@@ -352,6 +405,13 @@ def build_targets(data: dict, ticker: str, basis: str = "auto") -> dict:
         "basis": basis,
         "basis_key": basis_key,
         "uses_ttm": uses_ttm,
+        "growth_source": growth_src,
+        "growth_history": hist_raw,
+        "growth_ttm": ttm.get("revenue_growth"),
+        "share_drift": drift,
+        "net_cash": cash,
+        "net_cash_ps": cash_ps,
+        "net_cash_fmt": _fmt_money(abs(cash)) if cash is not None else "—",
         "basis_options": basis_options,
         "shares": shares,
         "power": power,
@@ -423,7 +483,8 @@ def build_zones(price: float | None, base: float, bull: float) -> dict:
 
 
 def implied_growth(price: float | None, power: float | None, shares: float | None,
-                   sales_based: bool = False) -> float | None:
+                   sales_based: bool = False, drift: float | None = None,
+                   cash_ps: float = 0.0) -> float | None:
     """Growth today's price needs under the model's own pricing rule.
 
     Solves power * (1 + g) * fair_multiple(g) / shares = price. The fair
@@ -433,7 +494,8 @@ def implied_growth(price: float | None, power: float | None, shares: float | Non
     if not price or not power or not shares or power <= 0:
         return None
     mult = _base_ps if sales_based else _base_multiple
-    f = lambda g: power * (1 + g) * mult(g) / shares
+    k = 1 / (1 + drift) if drift is not None else 1.0
+    f = lambda g: power * (1 + g) * k * mult(g) / shares + (cash_ps or 0.0)
     lo, hi = -0.95, 20.0
     if f(lo) >= price:
         return lo
@@ -649,7 +711,8 @@ def build_thesis(data: dict, ticker: str, basis: str = "auto", bars: dict | None
         value = {"available": False}
         if targets.get("available") and price:
             zones = build_zones(price, targets["base"], targets["bull"])
-            ig = implied_growth(price, targets["power"], targets.get("shares"), targets["sales_based"])
+            ig = implied_growth(price, targets["power"], targets.get("shares"), targets["sales_based"],
+                                targets.get("share_drift"), targets.get("net_cash_ps") or 0.0)
             trend = trend_check(bars)
             rng = trading_range(bars)
             for r in zones["rows"]:
@@ -680,6 +743,7 @@ def build_thesis(data: dict, ticker: str, basis: str = "auto", bars: dict | None
                           "zone": zones["current"], "accum_top": targets["base"],
                           "load_top": zones["load_top"], "bull": targets["bull"],
                           "growth": targets["growth"], "sales_based": targets["sales_based"],
+                          "drift": targets.get("share_drift") or 0.0, "cash_ps": targets.get("net_cash_ps") or 0.0,
                           "price": price, "mos": MARGIN_OF_SAFETY},
             }
         ends = [str(r.get("period_end"))[:10] for r in (data.get("history") or [])

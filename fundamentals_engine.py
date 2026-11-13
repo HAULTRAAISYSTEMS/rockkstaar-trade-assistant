@@ -2680,6 +2680,14 @@ def score_fundamentals(raw: dict) -> dict:
         "downgrade_check":  downgrade_check,
         "valuation":        raw.get("_valuation") or {"available": False, "rows": []},
         "valuation_history": raw.get("_valuation_history") or {"available": False, "rows": []},
+        # Balance sheet and share count for the Thesis model (newest first).
+        "capital": {
+            "cash": next((x for x in (raw.get("cash_and_st_investments") or raw.get("cash") or [])
+                          if isinstance(x, (int, float))), None),
+            "debt": next((x for x in (raw.get("total_debt") or []) if isinstance(x, (int, float))), None),
+            "diluted_shares": [x if isinstance(x, (int, float)) and x > 0 else None
+                               for x in (raw.get("diluted_shares") or [])],
+        },
         # A split makes every per-share figure on the page incomparable with
         # anything a reader has seen from an older source. Say so at the top
         # rather than in a parenthetical halfway down.
