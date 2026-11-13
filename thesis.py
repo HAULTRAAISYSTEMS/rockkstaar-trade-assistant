@@ -700,7 +700,8 @@ def build_flags(data: dict) -> list[dict]:
     return groups
 
 
-def build_thesis(data: dict, ticker: str, basis: str = "auto", bars: dict | None = None) -> dict:
+def build_thesis(data: dict, ticker: str, basis: str = "auto", bars: dict | None = None,
+                 ath_bars: dict | None = None) -> dict:
     """Assemble everything the Thesis view needs. Never raises."""
     ticker = (ticker or "").upper().strip()
     try:
@@ -739,6 +740,8 @@ def build_thesis(data: dict, ticker: str, basis: str = "auto", bars: dict | None
                 "history": multiple_history(data, bars, targets["basis_key"]),
                 "trend": trend,
                 "track": backtest(data, bars, targets.get("shares")),
+                "map": price_map(price, bars, ath_bars,
+                                 {"accum_top": targets["base"], "bull": targets["bull"]}),
                 "signal": load_signal(zones["current"], trend),
                 "model": {"power": targets["power"], "shares": targets.get("shares"),
                           "zone": zones["current"], "accum_top": targets["base"],
@@ -944,3 +947,105 @@ def backtest(data: dict, bars: dict | None, shares: float | None, horizon_days: 
     return {"available": True, "zones": by, "months": len(samples),
             "first": samples[0]["date"], "last": samples[-1]["date"],
             "avg_all_fmt": f"{sum(allr) / len(allr) * 100:+.0f}%", "read": read}
+
+
+# --- Where to buy: real trading prices -----------------------------------------
+
+def price_map(price: float | None, bars: dict | None, ath_bars: dict | None = None,
+              zones: dict | None = None) -> dict:
+    """Actual prices the stock trades at, with concrete entry levels.
+
+    The value zones answer "what is it worth"; this answers "where is it
+    now, where has it been, and at what price do I buy". Levels: the
+    all-time high, the 52-week high and low, the 20/50/200-day EMAs and the
+    recent swing low. Levels below today are pullback entries; EMAs above
+    today are reclaim triggers (wait for a close back above).
+    """
+    from datetime import datetime, timezone
+    closes = [c for c in (bars or {}).get("closes") or [] if c]
+    if not price or len(closes) < 60:
+        return {"available": False}
+    ts = (bars or {}).get("timestamps") or []
+    highs = (bars or {}).get("highs") or closes
+    lows = (bars or {}).get("lows") or closes
+
+    def when(t):
+        try:
+            return datetime.fromtimestamp(t, timezone.utc).strftime("%b %Y")
+        except Exception:
+            return ""
+    # All-time high: monthly "max" history when available, else the daily set.
+    src_h = (ath_bars or {}).get("highs") or []
+    src_t = (ath_bars or {}).get("timestamps") or []
+    if not src_h:
+        src_h, src_t = highs, ts
+    pairs = [(h, t) for h, t in zip(src_h, src_t) if h]
+    ath, ath_t = max(pairs) if pairs else (max(closes), None)
+    ath = max(ath, max(h for h in highs[-252:] if h), price)
+    hi52 = max(h for h in highs[-252:] if h)
+    lo52 = min(x for x in lows[-252:] if x)
+    swing_low = min(x for x in lows[-60:] if x)
+    e20, e50 = _ema(closes, 20)[-1], _ema(closes, 50)[-1]
+    e200 = _ema(closes, 200)[-1] if len(closes) >= 200 else None
+    z = zones or {}
+
+    def zone_at(p):
+        if not z.get("accum_top") or not z.get("bull"):
+            return None
+        return zone_for(p, z["accum_top"], z["bull"])
+
+    levels = []
+
+    def add(key, label, p, note):
+        if p and p > 0:
+            pct = p / price - 1
+            levels.append({"key": key, "label": label, "price": p, "price_fmt": _fmt_price(p),
+                           "pct": pct, "pct_fmt": f"{pct * 100:+.1f}%", "note": note,
+                           "zone": zone_at(p)})
+    add("ath", "All-time high", ath, when(ath_t) if ath_t else "")
+    if hi52 < ath * 0.999:
+        add("hi52", "52-week high", hi52, "")
+    add("e20", "20-day EMA", e20, "short-term trend")
+    add("e50", "50-day EMA", e50, "medium-term trend")
+    if e200:
+        add("e200", "200-day EMA", e200, "long-term trend")
+    add("swing", "Recent swing low", swing_low, "lowest low of the last 3 months")
+    if lo52 < swing_low * 0.999:
+        add("lo52", "52-week low", lo52, "")
+    # De-duplicate levels within 0.5% of each other (keep the first label).
+    levels.sort(key=lambda l: -l["price"])
+    clean = []
+    for l in levels:
+        if clean and abs(l["price"] / clean[-1]["price"] - 1) < 0.005 and l["key"] not in ("ath",):
+            continue
+        clean.append(l)
+    below = [l for l in clean if l["price"] < price * 0.998 and l["key"] not in ("ath", "hi52")]
+    above = [l for l in clean if l["price"] > price * 1.002 and l["key"] in ("e20", "e50", "e200")]
+    for i, l in enumerate(below[:3]):
+        l["entry"] = i + 1
+    for l in above:
+        l["trigger"] = True
+    off = price / ath - 1
+    if off > -0.03:
+        head = f"Trading at {_fmt_price(price)}, at or near its all-time high of {_fmt_price(ath)}."
+    else:
+        head = (f"Trading at {_fmt_price(price)}, {abs(off) * 100:.0f}% below its all-time high of "
+                f"{_fmt_price(ath)}{(' (' + when(ath_t) + ')') if ath_t else ''}.")
+    best = next((l for l in below if l["zone"] in ("accumulate", "load")), below[0] if below else None)
+    trig = min(above, key=lambda l: l["price"]) if above else None
+    plan = []
+    if best:
+        plan.append(f"Pullback entry: {best['price_fmt']} ({best['label']}, {best['pct_fmt']} from here)"
+                    + (" — inside a buy zone." if best["zone"] in ("accumulate", "load") else "."))
+    if not below:
+        plan.append("It's trading below every recent chart level — there's no support under it on this chart. "
+                    "Don't try to catch the bottom: wait for the breakout entry, or buy small in steps with the buy plan.")
+    if trig:
+        plan.append(f"Breakout entry: wait for a daily close back above {trig['price_fmt']} ({trig['label']}).")
+    if len(plan) == 0:
+        plan.append("No clear level nearby — wait for a pullback to the 20-day EMA.")
+    return {"available": True, "price": price, "price_fmt": _fmt_price(price),
+            "ath": ath, "ath_fmt": _fmt_price(ath), "ath_when": when(ath_t) if ath_t else "",
+            "off_ath": off, "off_ath_fmt": f"{off * 100:+.0f}%",
+            "hi52_fmt": _fmt_price(hi52), "lo52_fmt": _fmt_price(lo52),
+            "headline": head, "plan": plan, "levels": clean}
