@@ -596,3 +596,10 @@ html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen::after { display: non
   .tw-panel.tw-is-fullscreen .tw-chart-toolbar .tw-interval-wrap .tw-tf-btn { flex: 0 0 auto; padding: 0 10px !important; height: 30px !important; }
   .tw-panel.tw-is-fullscreen .tw-chart-toolbar .tw-fs-btn { top: calc(env(safe-area-inset-top, 0px) + 6px); width: 36px !important; height: 36px !important; }
 }
+/* Value-zone chip next to the bias tag (links to the Thesis page). */
+.tw-zone-chip{display:inline-flex;align-items:center;margin-left:6px;padding:2px 8px;border-radius:99px;font:800 10px var(--font-mono, ui-monospace);letter-spacing:.06em;text-transform:uppercase;text-decoration:none;white-space:nowrap;border:1px solid currentColor}
+.tw-zone-chip[hidden]{display:none}
+.tw-zone-chip.tone-load{color:#2ee6a6;background:rgba(46,230,166,.12)}
+.tw-zone-chip.tone-accum,.tw-zone-chip.tone-accumulate{color:#8be36b;background:rgba(139,227,107,.1)}
+.tw-zone-chip.tone-fair{color:#f3c95a;background:rgba(243,201,90,.08)}
+.tw-zone-chip.tone-pricey{color:#ff6b6b;background:rgba(255,107,107,.08)}

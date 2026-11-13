@@ -528,7 +528,7 @@
              data-href="{{ url_for('stock_detail', ticker=s.ticker) }}"
              onclick="twSelect(this)">
           <div style="min-width:0;">
-            <div class="tw-wl-sym">{{ s.ticker }}</div>
+            <div class="tw-wl-sym">{{ s.ticker }}<a class="vz-badge" data-zone-badge="{{ s.ticker }}" hidden></a></div>
             <div class="tw-wl-name">{{ s.company_name or '—' }}</div>
           </div>
           <svg class="tw-spark" width="46" height="24" viewBox="0 0 46 24" preserveAspectRatio="none" data-spark="{{ s.ticker }}" data-dir="{{ 'neg' if (s.gap_pct or 0) < 0 else 'pos' }}"></svg>
@@ -563,6 +563,7 @@
                 {% set b0 = 'bull' if stocks[0].trade_bias == 'Long' else ('bear' if stocks[0].trade_bias == 'Short' else 'neutral') %}
                 <span class="tw-bias {{ b0 }}" id="tw-c-bias">{{ 'BULLISH' if b0=='bull' else ('BEARISH' if b0=='bear' else 'NEUTRAL') }}</span>
               {% else %}<span class="tw-bias neutral" id="tw-c-bias">—</span>{% endif %}
+              <a class="tw-zone-chip" id="tw-zone-chip" href="#" hidden></a>
             </div>
             <div class="tw-sym-sub" id="tw-c-sub">{{ stocks[0].company_name if stocks and stocks[0].company_name else '' }}</div>
           </div>
@@ -661,6 +662,7 @@
               <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.shading" checked><span>Shade pre/after-hours background</span></label>
               <label class="tw-study-row"><input type="checkbox" data-ct-set="view.sessions" checked><span>Mark the open, close and each new day on intraday charts</span></label>
               <label class="tw-study-row"><input type="checkbox" data-ct-set="view.events" checked><span>Show earnings dates and news on the time axis</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.zones" checked><span>Show value zones (Accumulate / Load the boat) on 1D, 1W and 1M</span></label>
               <p class="tw-study-note">Pre-market and after-hours candles use the same up/down colors as the regular session unless session colors are on.</p>
             </div>
             <div class="tw-study-group" data-tab="candles"><h4>Volume</h4>
@@ -1079,6 +1081,7 @@
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="{{ url_for('static', filename='js/depth_panel.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/live_trading.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/value_badges.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/chart_tools.js') }}"></script>
 <script>
 /* ── helpers ── */
@@ -2150,8 +2153,32 @@ function twLoadIntelligenceSoon(ticker){
   clearTimeout(twIntelSoonTimer);
   twIntelSoonTimer=setTimeout(function(){ twLoadIntelligence(ticker); }, 900);
 }
+/* Value zones from the Thesis page, shaded on the Daily/Weekly/Monthly chart. */
+function twLoadValueZones(ticker, tries){
+  tries=tries||0;
+  if(tries===0) twChartState.zones=null;
+  fetch('/api/thesis/zones?ticker='+encodeURIComponent(ticker),{credentials:'same-origin',cache:'no-store'})
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(d){
+      if(!d||!d.ok||String(twChartState.ticker||'').toUpperCase()!==ticker) return;
+      var z=(d.zones||{})[ticker];
+      if(z){ twChartState.zones=z; twRenderZoneChip(z); if(typeof twRenderDrawings==='function') twRenderDrawings(); }
+      else if((d.pending||[]).indexOf(ticker)>=0 && tries<8) setTimeout(function(){ twLoadValueZones(ticker, tries+1); }, 3000+tries*2000);
+    }).catch(function(){});
+}
+function twRenderZoneChip(z){
+  var el=document.getElementById('tw-zone-chip'); if(!el) return;
+  if(!z||!z.available){ el.hidden=true; return; }
+  var sig=z.signal||{};
+  el.hidden=false;
+  el.className='tw-zone-chip tone-'+(sig.tone||z.zone);
+  el.textContent=(sig.key==='load'||sig.key==='buy')?('⚓ '+sig.title):z.zone_label;
+  el.title=(sig.text||'')+' Tap for the full value view.';
+  el.href='/thesis?ticker='+encodeURIComponent(z.ticker);
+}
 function twLoadIntelligence(ticker){
   twLoadChartEvents(String(ticker||'').toUpperCase());
+  twLoadValueZones(String(ticker||'').toUpperCase());
   var req=++twChartState.intelReqId; twNum('tw-intel-ticker',ticker); twNum('tw-context-why','Loading verified context…'); twNum('tw-context-insiders','Checking SEC filings…');
   fetch('/api/terminal/intelligence/'+encodeURIComponent(ticker)).then(function(r){return r.json();}).then(function(data){if(req!==twChartState.intelReqId)return;if(!data.ok)throw new Error(data.error||'Unavailable');twRenderIntelligence(data);}).catch(function(){if(req===twChartState.intelReqId){twPanel('overview',twEmpty('Ticker intelligence is temporarily unavailable.'));twNum('tw-context-why','Context temporarily unavailable.');}});
   var insiderReq=++twChartState.insiderReqId;

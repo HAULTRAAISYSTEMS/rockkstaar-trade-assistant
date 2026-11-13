@@ -47,39 +47,126 @@
     </div>
   </section>
 
-  <section class="th-section">
-    <div class="th-section__head"><div><span>01 · The call</span><h2>Estimated upside</h2></div><small>Base target vs. market price</small></div>
-    {% if t.available %}
-    <div class="th-hero">
-      <div class="th-upside"><span>Est. upside</span><strong class="tone-{{ t.upside_tone }}">{{ t.upside_pct }}</strong><em>Base {{ t.base_fmt }} vs. {{ t.price_fmt }} today</em></div>
-      <div class="th-range">
-        <div class="th-range__bar">
-          <i class="th-range__fill" style="left:{{ t.bar.bear_pct }}%;width:{{ (t.bar.bull_pct - t.bar.bear_pct) }}%"></i>
-          <b class="th-range__mark is-bear" style="left:{{ t.bar.bear_pct }}%"></b>
-          <b class="th-range__mark is-base" style="left:{{ t.bar.base_pct }}%"></b>
-          <b class="th-range__mark is-bull" style="left:{{ t.bar.bull_pct }}%"></b>
-          {% if t.bar.price_pct is not none %}<b class="th-range__price" style="left:{{ t.bar.price_pct }}%" title="Market price {{ t.price_fmt }}"></b>
-          <span class="th-range__today{% if t.bar.price_pct > 80 %} is-right{% elif t.bar.price_pct < 20 %} is-left{% endif %}" style="left:{{ t.bar.price_pct }}%">Today {{ t.price_fmt }}</span>{% endif %}
-        </div>
-        <div class="th-range__labels">{% for l in t.bar.labels %}<span class="is-{{ l.key }} row-{{ l.row }}{% if l.pct > 85 %} is-right{% elif l.pct < 12 %} is-left{% endif %}" style="left:{{ l.pct }}%">{{ l.text }}</span>{% endfor %}</div>
-      </div>
+  {% set v = thesis.value %}
+  {% if v.available %}
+  {% set z = v.zones %}{% set sig = v.signal %}
+  <section class="vz-verdict tone-{{ sig.tone }}" aria-label="Value signal">
+    <div class="vz-verdict__main">
+      <span class="vz-kicker">The verdict</span>
+      <h2>{{ sig.title }}</h2>
+      <p>{{ sig.text }}</p>
     </div>
-    {% if t.read %}<p class="th-read tone-{{ t.read.tone }}">{{ t.read.text }}</p>{% endif %}
-    <div class="th-scenarios">
-      {% for s in t.scenarios %}
-      <article class="th-scenario is-{{ s.key }}">
-        <div><b>{{ s.label }}</b><strong>{{ s.target_fmt }}</strong></div>
-        <p><span class="tone-{{ 'pos' if s.upside is not none and s.upside >= 0 else 'neg' }}">{{ s.upside_pct }}</span> · growth {{ s.growth_pct }} · {{ s.multiple }}</p>
-      </article>
-      {% endfor %}
+    <div class="vz-verdict__stats">
+      <div><span>Today</span><strong>{{ thesis.price_fmt }}</strong><em class="vz-chip tone-{{ z.meta.tone }}">{{ z.meta.label }}</em></div>
+      <div><span>Buy zone starts</span><strong>{{ '$%.2f'|format(z.accum_top) }}</strong><em>{% if z.to_buy_zone %}{{ z.to_buy_zone.pct_fmt }} from here{% else %}You're in it{% endif %}</em></div>
+      <div><span>Load the boat</span><strong>{{ '$%.2f'|format(z.load_top) }}</strong><em>& below</em></div>
     </div>
-    {% else %}
-    <div class="th-unavailable"><b>Targets unavailable.</b><span>{{ t.note }}</span></div>
-    {% endif %}
   </section>
 
   <section class="th-section">
-    <div class="th-section__head"><div><span>02 · The evidence</span><h2>Factor flags</h2></div><small>From the {{ thesis.score }}/40 filing scorecard</small></div>
+    <div class="th-section__head"><div><span>01 · The price ladder</span><h2>What price do I buy at?</h2></div>
+      <div class="vz-basis" role="group" aria-label="Value it on">
+        <small>Value it on</small>
+        {% for key, label in (('earnings', 'Reported profit'), ('fcf', 'Cash earned')) %}{% if key in t.basis_options %}
+        <a class="{{ 'is-on' if t.basis_key == key else '' }}" href="{{ url_for('thesis_view', ticker=thesis.ticker, basis=key) }}">{{ label }}</a>{% endif %}{% endfor %}
+      </div>
+    </div>
+    <div class="vz-grid">
+      <ol class="vz-ladder">
+        {% for r in z.rows %}
+        <li class="vz-rung tone-{{ r.tone }}{% if r.current %} is-here{% endif %}">
+          <i class="vz-rail" aria-hidden="true"></i>
+          <div class="vz-rung__body">
+            <div class="vz-rung__top"><b>{{ r.label }}</b><strong>{{ r.range_fmt }}</strong></div>
+            <p>{{ r.action }}</p>
+            {% if r.current %}<span class="vz-here">● Today {{ thesis.price_fmt }}</span>{% endif %}
+          </div>
+          {% if r.key in ('accumulate', 'load') %}
+          <button type="button" class="vz-bell" data-alert-price="{{ '%.2f'|format(r.hi) }}" data-alert-note="{{ thesis.ticker }} {{ r.label }} zone" aria-label="Alert me when {{ thesis.ticker }} reaches {{ r.label }}">🔔<span>Alert me</span></button>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+      <div class="vz-side">
+        <article class="vz-card">
+          <span class="vz-kicker">What today's price assumes</span>
+          {% set ig = v.implied_growth or 0 %}{% set hg = t.growth %}{% set mx = [ig|abs, hg|abs, 0.05]|max %}
+          <div class="vz-bars">
+            <div><small>Growth needed</small><i style="width:{{ (ig|abs / mx * 100)|round(1) }}%" class="{{ 'is-hot' if v.growth_gap and v.growth_gap > 0.1 else 'is-ok' }}"></i><b>{{ v.implied_growth_fmt }}</b></div>
+            <div><small>Has delivered</small><i style="width:{{ (hg|abs / mx * 100)|round(1) }}%" class="is-base"></i><b>{{ v.history_growth_fmt }}</b></div>
+          </div>
+          <p class="vz-note">{% if v.growth_gap is not none and v.growth_gap > 0.1 %}The price needs much faster growth than the company has shown. That gap is what you're paying for.{% elif v.growth_gap is not none and v.growth_gap < -0.05 %}The price asks for less growth than the company has delivered. That's room in your favor.{% else %}The price asks for about the growth the company has delivered.{% endif %}</p>
+        </article>
+        {% set h = v.history %}
+        {% if h.available %}
+        <article class="vz-card">
+          <span class="vz-kicker">Vs. its own past · {{ h.label }}</span>
+          <div class="vz-pct"><strong>{{ h.percentile_fmt }}<small>th</small></strong><span>percentile over {{ h.years }} yrs</span></div>
+          {% set lo = h.spark_min %}{% set hi = h.spark_max %}{% set rg = (hi - lo) if hi > lo else 1 %}{% set n = h.spark|length %}
+          <svg class="vz-spark" viewBox="0 0 200 52" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="0" x2="200" y1="{{ 48 - (h.median - lo) / rg * 44 }}" y2="{{ 48 - (h.median - lo) / rg * 44 }}" class="vz-spark__median"/>
+            <polyline points="{% for p in h.spark %}{{ (loop.index0 / ([n - 1, 1]|max) * 200)|round(1) }},{{ (48 - (p - lo) / rg * 44)|round(1) }} {% endfor %}" class="vz-spark__line"/>
+            <circle cx="200" cy="{{ ([[48 - (h.today - lo) / rg * 44, 4]|max, 48]|min)|round(1) }}" r="3.5" class="vz-spark__dot"/>
+          </svg>
+          <div class="vz-spark__legend"><span>Today {{ h.today_fmt }}</span><span>Median {{ h.median_fmt }}</span><span>Range {{ h.low_fmt }}–{{ h.high_fmt }}</span></div>
+          <p class="vz-note">{{ h.read }}{% if h.price_at_median %} At its usual {{ h.median_fmt }}, the price would be <b>{{ h.price_at_median_fmt }}</b>.{% endif %}</p>
+        </article>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="th-section">
+    <div class="th-section__head"><div><span>02 · Timing</span><h2>Is the chart turning up?</h2></div><small>Daily chart · value says where, trend says when</small></div>
+    {% set tr = v.trend %}
+    {% if tr.available %}
+    <div class="vz-trend">
+      <div class="vz-trend__score tone-{{ 'load' if tr.confirmed else 'fair' }}"><strong>{{ tr.score }}<small>/4</small></strong><span>{{ 'Trend confirmed' if tr.confirmed else 'Not confirmed' }}</span></div>
+      <ul>{% for c in tr.checks %}<li class="{{ 'is-ok' if c.ok else 'is-no' }}"><i aria-hidden="true">{{ '✓' if c.ok else '✕' }}</i><div><b>{{ c.label }}</b><span>{{ c.detail }}</span></div></li>{% endfor %}</ul>
+    </div>
+    {% else %}<p class="vz-note">Daily chart data is unavailable right now.</p>{% endif %}
+  </section>
+
+  <section class="th-section">
+    <div class="th-section__head"><div><span>03 · Buy plan</span><h2>Scale in, don't guess the bottom</h2></div>
+      <label class="vz-account">Plan size <span>$</span><input id="vz-account" type="number" min="0" step="100" inputmode="decimal" placeholder="5000"></label></div>
+    <div class="vz-plan">
+      {% for st in v.plan %}
+      <article class="vz-step">
+        <span class="vz-step__n">{{ loop.index }}</span>
+        <div><b>{{ st.label }}</b><strong>{{ st.price_fmt }}</strong><em>{{ st.weight_pct }} of the plan<span class="vz-shares" data-weight="{{ st.weight }}" data-price="{{ '%.4f'|format(st.price) }}"></span></em></div>
+      </article>
+      {% endfor %}
+    </div>
+    <div class="vz-plan__foot"><p class="vz-note">Buying in three steps averages your cost down if it keeps falling and gets you in if it turns. Set all three alerts and the app will tell you when each level hits.</p>
+      <button type="button" class="vz-btn" id="vz-plan-alerts">🔔 Set all 3 alerts</button></div>
+  </section>
+
+  <section class="th-section">
+    <div class="th-section__head"><div><span>04 · What if</span><h2>Move the assumptions</h2></div><button type="button" class="vz-reset" id="vz-reset">Reset</button></div>
+    <div class="vz-whatif">
+      <label><span>Earnings growth <b id="vz-g-out"></b></span><input id="vz-g" type="range" min="-20" max="60" step="0.1"></label>
+      <label><span>Fair P/E multiple <b id="vz-m-out"></b></span><input id="vz-m" type="range" min="5" max="60" step="0.1"></label>
+      <label><span>Margin of safety <b id="vz-s-out"></b></span><input id="vz-s" type="range" min="0" max="50" step="5"></label>
+    </div>
+    <div class="th-scenarios">
+      {% for s in t.scenarios %}
+      <article class="th-scenario is-{{ s.key }}">
+        <div><b>{{ s.label }}</b><strong data-wi-target="{{ s.key }}">{{ s.target_fmt }}</strong></div>
+        <p><span data-wi-upside="{{ s.key }}" class="tone-{{ 'pos' if s.upside is not none and s.upside >= 0 else 'neg' }}">{{ s.upside_pct }}</span> · growth <span data-wi-growth="{{ s.key }}">{{ s.growth_pct }}</span> · <span data-wi-mult="{{ s.key }}">{{ s.multiple }}</span></p>
+      </article>
+      {% endfor %}
+    </div>
+    <p class="vz-whatif__read" id="vz-wi-read"></p>
+  </section>
+  {% elif t.available %}
+  <section class="th-section"><div class="th-unavailable"><b>Zones unavailable.</b><span>No live price for {{ thesis.ticker }} right now.</span></div></section>
+  {% else %}
+  <section class="th-section"><div class="th-unavailable"><b>Targets unavailable.</b><span>{{ t.note }}</span></div></section>
+  {% endif %}
+
+  <section class="th-section">
+    <div class="th-section__head"><div><span>05 · The evidence</span><h2>Factor flags</h2></div><small>From the {{ thesis.score }}/40 filing scorecard</small></div>
     <div class="th-flags">
       {% for group in thesis.flags %}
       <article class="th-flag-group">
@@ -97,7 +184,7 @@
 
   {% if t.available %}
   <section class="th-section">
-    <div class="th-section__head"><div><span>03 · The math</span><h2>Assumptions, on screen</h2></div><small>Simple by design</small></div>
+    <div class="th-section__head"><div><span>06 · The math</span><h2>Assumptions, on screen</h2></div><small>Simple by design</small></div>
     <div class="th-math">
       <div><span>Earnings power</span><strong>{{ t.power_fmt }}</strong><em>{% if t.growth >= 0 %}latest annual{% else %}median of positive annual{% endif %} {{ t.basis }}</em></div>
       <div><span>Growth anchor</span><strong>{{ t.growth_pct }}</strong><em>historical revenue CAGR, clamped ±</em></div>
@@ -110,4 +197,8 @@
   <div class="th-deep-link"><div><b>Want the full evidence trail?</b><span>Statements, filings, catalysts, changes and your notes live on the Company Research page.</span></div><a href="{{ url_for('research_page', ticker=thesis.ticker) }}">Open Company Research →</a></div>
   {% endif %}
 </main>
+{% if thesis and thesis.value and thesis.value.available %}
+<script id="vz-model" type="application/json">{{ {"ticker": thesis.ticker, "price": thesis.value.model.price, "power": thesis.value.model.power, "shares": thesis.value.model.shares, "growth": thesis.value.model.growth, "sales": thesis.value.model.sales_based, "mos": thesis.value.model.mos, "plan": thesis.value.plan|map(attribute="price")|list}|tojson }}</script>
+<script src="{{ url_for('static', filename='js/thesis.js') }}"></script>
+{% endif %}
 {% endblock %}

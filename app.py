@@ -11019,6 +11019,86 @@ def research_detail():
                            financial_period=financial_period, quarter=quarter)
 
 
+_THESIS_BARS: dict = {}
+_THESIS_BARS_TTL = 30 * 60
+
+
+def _thesis_daily_bars(ticker: str) -> dict | None:
+    """Five years of daily bars for the valuation history and trend check.
+    Cached 30 min; None when unavailable (those panels then stay hidden)."""
+    hit = _THESIS_BARS.get(ticker)
+    if hit and _time.time() - hit[0] < _THESIS_BARS_TTL:
+        return hit[1]
+    try:
+        from market_data import fetch_chart_bars
+        bars, _ = fetch_chart_bars(ticker, "1d", "5y")
+    except Exception as exc:
+        logger.debug("thesis bars unavailable for %s: %s", ticker, exc)
+        bars = None
+    if len(_THESIS_BARS) > 200:
+        _THESIS_BARS.clear()
+    _THESIS_BARS[ticker] = (_time.time(), bars)
+    return bars
+
+
+# Value zones for the chart, watchlist badges and the daily scan. Built in the
+# background (fundamentals can take seconds on a cold ticker) and cached.
+_VALUE_ZONES: dict = {}
+_VALUE_ZONES_TTL = 6 * 3600
+_VALUE_ZONES_BUILDING: set = set()
+_VALUE_ZONES_LOCK = threading.Lock()
+# A watchlist of 40 names would otherwise start 40 fundamentals builds at once.
+_VALUE_ZONES_SLOTS = threading.BoundedSemaphore(3)
+
+
+def build_value_zones(ticker: str) -> dict:
+    from fundamentals_engine import get_fundamentals
+    from thesis import zone_summary
+    data = get_fundamentals(ticker)
+    out = zone_summary(data, ticker, _thesis_daily_bars(ticker))
+    _VALUE_ZONES[ticker] = (_time.time(), out)
+    return out
+
+
+def _value_zones_cached(ticker: str, start: bool = True) -> dict | None:
+    hit = _VALUE_ZONES.get(ticker)
+    if hit and _time.time() - hit[0] < _VALUE_ZONES_TTL:
+        return hit[1]
+    if start:
+        with _VALUE_ZONES_LOCK:
+            if ticker in _VALUE_ZONES_BUILDING:
+                return None
+            _VALUE_ZONES_BUILDING.add(ticker)
+
+        def _run():
+            try:
+                with _VALUE_ZONES_SLOTS:
+                    build_value_zones(ticker)
+            except Exception as exc:
+                logger.debug("value zones failed for %s: %s", ticker, exc)
+                _VALUE_ZONES[ticker] = (_time.time(), {"available": False, "ticker": ticker})
+            finally:
+                _VALUE_ZONES_BUILDING.discard(ticker)
+        threading.Thread(target=_run, daemon=True, name=f"zones-{ticker}").start()
+    return None
+
+
+@app.route("/api/thesis/zones")
+def api_value_zones():
+    """Value zones for up to 40 tickers: {"zones": {T: {...}}, "pending": [..]}."""
+    raw = (request.args.get("tickers") or request.args.get("ticker") or "").upper()
+    tickers = [t for t in dict.fromkeys(x.strip() for x in raw.split(","))
+               if re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", t)][:40]
+    zones, pending = {}, []
+    for t in tickers:
+        z = _value_zones_cached(t)
+        if z is None:
+            pending.append(t)
+        else:
+            zones[t] = z
+    return jsonify({"ok": True, "zones": zones, "pending": pending})
+
+
 @app.route("/thesis")
 def thesis_view():
     """Thesis view: bear/base/bull targets, est. upside, and factor flags.
@@ -11039,7 +11119,18 @@ def thesis_view():
             data = get_fundamentals(ticker, force_refresh=request.args.get("refresh") == "1")
             if data.get("error"):
                 error = data["error"]
-            thesis = build_thesis(data, ticker)
+            basis = request.args.get("basis") or "auto"
+            if basis not in ("auto", "earnings", "fcf"):
+                basis = "auto"
+            bars = _thesis_daily_bars(ticker)
+            thesis = build_thesis(data, ticker, basis=basis, bars=bars)
+            if basis == "auto" and not data.get("error"):
+                # Opening the page refreshes the chart/watchlist zones too.
+                try:
+                    from thesis import zone_summary
+                    _VALUE_ZONES[ticker] = (_time.time(), zone_summary(data, ticker, bars))
+                except Exception:
+                    pass
         except Exception as exc:
             logger.exception("thesis view failed for %s", ticker)
             error = str(exc)

@@ -136,7 +136,7 @@
               {% for t in section.tickers %}
               <div class="te-ticker-row" data-ticker="{{ t }}">
                 <span class="te-drag-handle te-ticker-handle" draggable="true" title="Drag {{ t }}" aria-label="Drag {{ t }}">⠿</span>
-                <a class="te-ticker-link" href="{{ url_for('stock_detail', ticker=t) }}">{{ t }}</a>
+                <a class="te-ticker-link" href="{{ url_for('stock_detail', ticker=t) }}">{{ t }}</a><a class="vz-badge" data-zone-badge="{{ t }}" hidden></a>
                 <form class="te-move-form" action="{{ url_for('watchlist_ticker_section', wl_id=active_id, ticker=t) }}" method="POST">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <select class="te-section-select" name="section_id" aria-label="Move {{ t }} to section" onchange="this.form.submit()">
@@ -157,7 +157,7 @@
               {% for t in active_structure.unsectioned %}
               <div class="te-ticker-row" data-ticker="{{ t }}">
                 <span class="te-drag-handle te-ticker-handle" draggable="true" title="Drag {{ t }}" aria-label="Drag {{ t }}">⠿</span>
-                <a class="te-ticker-link" href="{{ url_for('stock_detail', ticker=t) }}">{{ t }}</a>
+                <a class="te-ticker-link" href="{{ url_for('stock_detail', ticker=t) }}">{{ t }}</a><a class="vz-badge" data-zone-badge="{{ t }}" hidden></a>
                 <form class="te-move-form" action="{{ url_for('watchlist_ticker_section', wl_id=active_id, ticker=t) }}" method="POST">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <select class="te-section-select" name="section_id" aria-label="Move {{ t }} to section" onchange="this.form.submit()">
@@ -240,6 +240,7 @@
 
 {% block scripts %}
 {{ super() }}
+<script src="{{ url_for('static', filename='js/value_badges.js') }}" defer></script>
 <script>
 (function () {
   const organizer = document.getElementById('organize-watchlist');
