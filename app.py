@@ -336,7 +336,9 @@ def _require_login():
                 session["username"] = user["username"]
     # Always public — Schwab OAuth callback must stay reachable; callback validates PKCE/state.
     if (request.path in ("/login", "/logout", "/register", "/favicon.ico", "/health",
-                         "/service-worker.js", "/schwab/callback", "/api/csrf-token")
+                         "/service-worker.js", "/schwab/callback", "/api/csrf-token",
+                         # App Store / Google Play: reachable without an account.
+                         "/privacy", "/terms", "/support", "/.well-known/assetlinks.json")
             or request.path.startswith("/static/")):
         return
     if session.get("user_id"):
@@ -7186,7 +7188,7 @@ def api_earnings_digest():
         return jsonify({"ok": True, "digest": result, "cached": False})
     except Exception as exc:
         logger.error("api_earnings_digest Nebius call failed: %s", exc, exc_info=True)
-        return jsonify({"ok": False, "error": str(exc)}), 500
+        return jsonify({"ok": False, "error": "The earnings digest isn't available right now."}), 503
 
 
 _WL_TAPE_CACHE = {"at": 0.0, "user": None, "items": []}
@@ -10463,6 +10465,85 @@ def logout():
     """Clear session and redirect to login."""
     session.clear()
     return redirect(url_for("login_page"))
+
+
+# ---------------------------------------------------------------------------
+# Store requirements: public legal/support pages, self-service account
+# deletion (Apple 5.1.1(v), Google Play), Android app-link verification.
+# ---------------------------------------------------------------------------
+
+def _support_email() -> str:
+    return (os.environ.get("SUPPORT_EMAIL") or "").strip() or "support@tradestaar.com"
+
+
+@app.route("/privacy")
+def privacy_page():
+    return render_template("legal.html", page="privacy", support_email=_support_email(),
+                           updated="November 12, 2026")
+
+
+@app.route("/terms")
+def terms_page():
+    return render_template("legal.html", page="terms", support_email=_support_email(),
+                           updated="November 12, 2026")
+
+
+@app.route("/support")
+def support_page():
+    return render_template("legal.html", page="support", support_email=_support_email(),
+                           updated="November 12, 2026")
+
+
+@app.route("/.well-known/assetlinks.json")
+def android_assetlinks():
+    """Digital Asset Links for the Google Play (TWA) build.
+
+    Set ANDROID_PACKAGE (e.g. com.rockkstaar.tradestaar) and
+    ANDROID_SHA256_FINGERPRINTS (comma-separated, from Play Console → App
+    integrity → App signing key certificate). Empty list until they're set.
+    """
+    pkg = (os.environ.get("ANDROID_PACKAGE") or "").strip()
+    prints = [p.strip().upper() for p in (os.environ.get("ANDROID_SHA256_FINGERPRINTS") or "").split(",") if p.strip()]
+    body = [] if not (pkg and prints) else [{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {"namespace": "android_app", "package_name": pkg, "sha256_cert_fingerprints": prints},
+    }]
+    resp = jsonify(body)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@app.route("/account/delete", methods=["GET", "POST"])
+def account_delete():
+    """Delete your own account and everything stored for it.
+
+    Asks for the password and the word DELETE. The primary admin (id 1) can't
+    delete itself here — that account owns the app's settings.
+    """
+    uid = current_user_id()
+    user = get_user_by_id(uid) if uid else None
+    if not user:
+        return redirect(url_for("login_page"))
+    error = None
+    if request.method == "POST":
+        if uid == 1:
+            error = "This is the owner account that runs the app, so it can't be deleted here."
+        elif (request.form.get("confirm") or "").strip().upper() != "DELETE":
+            error = "Type DELETE to confirm."
+        elif not check_user_password(user["username"], request.form.get("password") or ""):
+            error = "That password isn't right."
+        else:
+            try:
+                delete_user(uid)
+            except Exception as exc:
+                logger.exception("account delete failed for user %s", uid)
+                error = "Couldn't delete the account right now — try again, or email " + _support_email()
+            else:
+                session.clear()
+                flash("Your account and its data were deleted.", "info")
+                return redirect(url_for("login_page"))
+    return render_template("account_delete.html", error=error, username=user["username"],
+                           is_owner=(uid == 1), support_email=_support_email())
 
 
 @app.route("/register", methods=["GET", "POST"])

@@ -124,6 +124,13 @@
                 snap_connected, url_for('brokers_page')) }}
 </div></div>
 
+<div class="card"><div class="card-hd">Privacy &amp; account</div><div class="card-bd row gap-2" style="flex-wrap:wrap">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('privacy_page') }}">Privacy Policy</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('terms_page') }}">Terms of Use</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('support_page') }}">Support</a>
+  <a class="btn btn-sm" href="{{ url_for('account_delete') }}" style="margin-left:auto;color:#ff8a84;border:1px solid rgba(255,77,69,.4);background:transparent">Delete account</a>
+</div></div>
+
 <div class="faint" style="font-size:11px;line-height:1.6">Live broker balances and positions are read-only. Position <b class="muted">Grade</b> badges remain <span class="mono">—</span> until scanner grades are joined to broker holdings.</div>
 {% endblock %}
 

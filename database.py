@@ -76,6 +76,11 @@ def _adapt_sql(sql: str, params=None):
     if not _USE_POSTGRES:
         return sql, params
 
+    # psycopg2 reads every % as a placeholder when params are passed, so a
+    # literal one (LIKE 'research_lab:%') raised "tuple index out of range" —
+    # the Research Lab record list failed on Postgres. Escape them first.
+    if params is not None and "%" in sql:
+        sql = sql.replace("%", "%%")
     # Named params  :name  →  %(name)s  (avoid matching :: PG cast syntax)
     if isinstance(params, dict):
         sql = re.sub(r"(?<![:])[:]([A-Za-z_]\w*)", r"%(\1)s", sql)
@@ -1351,26 +1356,59 @@ def update_user_password(user_id: int, new_password: str) -> None:
     conn.close()
 
 
+def _tables_with_user_id(conn) -> list[str]:
+    """Every table that has a user_id column (the per-user data)."""
+    if _USE_POSTGRES:
+        rows = conn.execute(
+            "SELECT table_name FROM information_schema.columns "
+            "WHERE column_name = 'user_id' AND table_schema = current_schema()").fetchall()
+        return sorted({r["table_name"] for r in rows})
+    names = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").fetchall()]
+    out = []
+    for n in names:
+        cols = [c[1] for c in conn.execute(f'PRAGMA table_info("{n}")').fetchall()]
+        if "user_id" in cols:
+            out.append(n)
+    return sorted(out)
+
+
+def _table_exists(conn, name: str) -> bool:
+    if _USE_POSTGRES:
+        return conn.execute("SELECT to_regclass(?) AS t", (name,)).fetchone()["t"] is not None
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
+
+
 def delete_user(user_id: int) -> None:
-    """Delete a user and all their data. Cannot delete user_id=1 (original admin)."""
+    """Delete a user and all their data. Cannot delete user_id=1 (original admin).
+
+    Self-service deletion (App Store / Google Play requirement) uses this too,
+    so it must not leave anything behind: it used to clear eight named tables
+    and miss price alerts, notifications, live orders, push subscriptions,
+    research memory and everything added since. Now every table with a
+    user_id column is cleared, plus the watchlists' child rows.
+    """
     if user_id == 1:
         raise ValueError("Cannot delete the primary admin user (id=1).")
     conn = get_db()
-    # Cascade-delete all user-scoped data
-    for tbl in ("watchlist_stocks",):
-        # watchlist_stocks via watchlist FK
-        wl_ids = [r["id"] for r in conn.execute(
-            "SELECT id FROM watchlists WHERE user_id = ?", (user_id,)
-        ).fetchall()]
-        for wl_id in wl_ids:
-            conn.execute("DELETE FROM watchlist_stocks WHERE watchlist_id = ?", (wl_id,))
-            conn.execute("DELETE FROM watchlist_sections WHERE watchlist_id = ?", (wl_id,))
-    for tbl in ("watchlists", "notes", "trade_plans", "journal",
-                "daily_sessions", "schwab_imports", "setup_outcomes", "user_settings"):
-        conn.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
-    conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-    conn.commit()
-    conn.close()
+    try:
+        tables = _tables_with_user_id(conn)
+        if "watchlists" in tables:
+            wl_ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM watchlists WHERE user_id = ?", (user_id,)).fetchall()]
+            for child in ("watchlist_stocks", "watchlist_sections"):
+                if not _table_exists(conn, child):
+                    continue
+                for wl_id in wl_ids:
+                    conn.execute(f"DELETE FROM {child} WHERE watchlist_id = ?", (wl_id,))
+        for tbl in tables:
+            if tbl == "users":
+                continue
+            conn.execute(f'DELETE FROM "{tbl}" WHERE user_id = ?', (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def check_user_password(username: str, password: str) -> dict | None:

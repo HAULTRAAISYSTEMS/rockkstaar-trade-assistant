@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Delete account — Tradestaar Elite{% endblock %}
+{% block content %}
+<div style="max-width:560px;margin:24px auto;padding:0 16px">
+  <div class="card">
+    <div class="card-hd">Delete account<span class="badge badge-neg" style="background:rgba(255,77,69,.15);color:#ff8a84">Permanent</span></div>
+    <div class="card-bd col gap-3">
+      {% if is_owner %}
+      <p style="margin:0;line-height:1.6">You're signed in as <b>{{ username }}</b>, the owner account that runs this app, so it can't be deleted from here.</p>
+      <a class="btn btn-ghost" href="{{ url_for('account') }}">Back to Account</a>
+      {% else %}
+      <p style="margin:0;line-height:1.6">This deletes <b>{{ username }}</b> and everything stored for it: watchlists, alerts, chart drawings and layouts, journal, notes, research records, paper trades, settings, notification devices and broker connections. It can't be undone.</p>
+      <p class="faint" style="margin:0;font-size:12px;line-height:1.6">Your broker account itself (e.g. Charles Schwab) is not affected — only Tradestaar's connection to it is removed.</p>
+      {% if error %}<div role="alert" style="padding:10px 12px;border-radius:10px;background:rgba(255,77,69,.12);border:1px solid rgba(255,77,69,.4);color:#ffb3ae">{{ error }}</div>{% endif %}
+      <form method="POST" action="{{ url_for('account_delete') }}" class="col gap-3" autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="col gap-1"><span class="faint" style="font-size:11px">PASSWORD</span>
+          <input class="hx-input" type="password" name="password" required autocomplete="current-password"></label>
+        <label class="col gap-1"><span class="faint" style="font-size:11px">TYPE DELETE TO CONFIRM</span>
+          <input class="hx-input" type="text" name="confirm" required autocapitalize="characters" spellcheck="false" placeholder="DELETE"></label>
+        <button class="btn" type="submit" style="background:#c83434;color:#fff;border-color:transparent">Delete my account</button>
+        <a class="btn btn-ghost" href="{{ url_for('account') }}">Cancel</a>
+      </form>
+      {% endif %}
+      <div class="faint" style="font-size:12px">Questions? <a href="mailto:{{ support_email }}">{{ support_email }}</a> · <a href="{{ url_for('privacy_page') }}">Privacy</a></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

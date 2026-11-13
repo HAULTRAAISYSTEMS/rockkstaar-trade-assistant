@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#02040a" />
+  <title>{{ {'privacy': 'Privacy Policy', 'terms': 'Terms of Use', 'support': 'Support'}[page] }} — Tradestaar Elite</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon-32.png') }}" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; overflow-x: clip; }
+    body { background: #05080f; color: #c9d3df; font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+      padding: calc(env(safe-area-inset-top, 0px) + 20px) 18px calc(env(safe-area-inset-bottom, 0px) + 40px); }
+    main { max-width: 760px; margin: 0 auto; }
+    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; color: #e8ffad; font: 800 13px/1 "Inter", sans-serif; letter-spacing: .16em; text-decoration: none; }
+    .brand img { width: 30px; height: 30px; border-radius: 8px; }
+    nav.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 22px; }
+    nav.tabs a { padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,.12); color: #b8c3d1; text-decoration: none; font-size: 13px; }
+    nav.tabs a.on { color: #0a0712; background: #c4f53b; border-color: transparent; font-weight: 700; }
+    h1 { color: #fff; font-size: 28px; line-height: 1.2; margin: 0 0 4px; }
+    .updated { color: #6d7b90; font-size: 13px; margin-bottom: 24px; }
+    h2 { color: #e8eef6; font-size: 17px; margin: 28px 0 8px; }
+    ul { padding-left: 20px; }
+    li { margin: 4px 0; }
+    a { color: #8fd3ff; }
+    .callout { padding: 14px 16px; border-radius: 12px; border: 1px solid rgba(245,197,66,.35); background: rgba(245,197,66,.06); color: #f3e7c2; }
+    .foot { margin-top: 36px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.08); color: #6d7b90; font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <a class="brand" href="{{ url_for('login_page') }}"><img src="{{ url_for('static', filename='icon-192.png') }}" alt="" />TRADESTAAR ELITE</a>
+  <nav class="tabs" aria-label="Legal and support">
+    <a href="{{ url_for('privacy_page') }}" class="{{ 'on' if page == 'privacy' }}">Privacy</a>
+    <a href="{{ url_for('terms_page') }}" class="{{ 'on' if page == 'terms' }}">Terms</a>
+    <a href="{{ url_for('support_page') }}" class="{{ 'on' if page == 'support' }}">Support</a>
+  </nav>
+
+{% if page == 'privacy' %}
+  <h1>Privacy Policy</h1>
+  <div class="updated">Last updated {{ updated }}</div>
+  <p>Tradestaar Elite ("Tradestaar", "we") is a market research, charting and trade-planning app. This policy explains what we collect, why, and the choices you have. We do not sell your personal information and we do not show third-party ads.</p>
+
+  <h2>What we collect</h2>
+  <ul>
+    <li><b>Account details:</b> your username and a one-way hash of your password (we never store the password itself).</li>
+    <li><b>What you create in the app:</b> watchlists, chart drawings and layouts, price alerts, journal entries, notes, trade plans, research records, paper-trading orders and your app settings.</li>
+    <li><b>Broker connections (optional):</b> if you connect Charles Schwab or a broker through SnapTrade, we store the access tokens those services issue and read balances, positions and orders to show them to you. If you turn on live trading, orders you preview and confirm are sent to your broker and logged in your account.</li>
+    <li><b>Notifications (optional):</b> if you allow notifications, we store your device's push subscription; if you set up text alerts, the phone number you give us.</li>
+    <li><b>Basic technical data:</b> server logs (time, page requested, IP address, browser type) used to keep the service secure and working. Kept for a limited time.</li>
+  </ul>
+  <p>We don't collect your location, contacts, photos, health data or browsing activity outside the app, and we don't use tracking or advertising identifiers.</p>
+
+  <h2>How we use it</h2>
+  <ul>
+    <li>To run the app for you: show your lists, charts, alerts, research and broker data, and send the notifications you asked for.</li>
+    <li>To keep accounts secure (sign-in protection, preventing abuse).</li>
+    <li>To fix problems and improve the app.</li>
+  </ul>
+
+  <h2>Who we share it with</h2>
+  <p>Only the service providers needed to run the features you use, and only what each needs:</p>
+  <ul>
+    <li><b>Market data providers</b> (for example Charles Schwab, Alpaca, Finnhub, Yahoo Finance, SEC EDGAR) receive the ticker symbols being looked up — not your identity.</li>
+    <li><b>Your broker</b> (Charles Schwab, SnapTrade) when you connect it, under their own privacy policies.</li>
+    <li><b>AI providers</b> (for example Anthropic or Nebius) receive market and research text to write summaries; we don't send your account details.</li>
+    <li><b>Messaging providers</b> (web push services, Twilio for text alerts, Telegram if you set it up) to deliver alerts you turned on.</li>
+    <li><b>Hosting</b> (Render) stores the app and its database.</li>
+  </ul>
+  <p>We may disclose information if required by law. We don't sell or rent personal information.</p>
+
+  <h2>Keeping it safe</h2>
+  <p>Connections use HTTPS, passwords are hashed, broker access tokens are kept only in our private database, and repeated failed sign-ins are locked out. No system is perfectly secure, but we work to protect your data.</p>
+
+  <h2>Your choices and deleting your account</h2>
+  <ul>
+    <li>You can disconnect a broker, turn off notifications, and delete watchlists, alerts and entries at any time.</li>
+    <li>You can delete your account in the app: <b>Account → Delete account</b>. This removes your account and the data stored for it from our database right away. Backups roll off within 30 days.</li>
+    <li>You can also email <a href="mailto:{{ support_email }}">{{ support_email }}</a> to request access to or deletion of your data.</li>
+  </ul>
+
+  <h2>Children</h2>
+  <p>Tradestaar is not intended for anyone under 18, and we don't knowingly collect information from children.</p>
+
+  <h2>Changes</h2>
+  <p>If we change this policy we'll update the date above and, for significant changes, tell you in the app.</p>
+
+  <h2>Contact</h2>
+  <p><a href="mailto:{{ support_email }}">{{ support_email }}</a></p>
+
+{% elif page == 'terms' %}
+  <h1>Terms of Use</h1>
+  <div class="updated">Last updated {{ updated }}</div>
+  <p class="callout"><b>Not financial advice.</b> Tradestaar provides market data, charts, research summaries, scores and tools for your own analysis. Nothing in the app is a recommendation to buy or sell any security. Trading involves risk, including loss of the money you invest. Past performance does not predict future results.</p>
+
+  <h2>Using the app</h2>
+  <ul>
+    <li>You must be 18 or older and responsible for keeping your sign-in details private.</li>
+    <li>Don't misuse the service: no attempts to break security, overload the service, scrape it at scale, or resell its data.</li>
+  </ul>
+
+  <h2>Market data and AI content</h2>
+  <p>Prices, news and other data come from third-party sources and may be delayed, incomplete or wrong. AI-written summaries can contain mistakes. Always check important information with your broker or the original source before acting on it.</p>
+
+  <h2>Paper trading and live trading</h2>
+  <ul>
+    <li>Paper trading is simulated and does not reflect real fills, fees or slippage.</li>
+    <li>Live trading is optional and goes through your own broker account (Charles Schwab) after you connect it, turn it on, preview each order and confirm it. Tradestaar is not a broker-dealer and does not hold your money or securities. Orders are executed by your broker under its terms, and you are responsible for every order you confirm.</li>
+    <li>Risk limits, alerts and guardrails in the app are aids, not guarantees. Alerts can be delayed or missed.</li>
+  </ul>
+
+  <h2>No warranty; limitation of liability</h2>
+  <p>The app is provided "as is" without warranties of any kind. To the fullest extent allowed by law, Tradestaar is not liable for trading losses or for indirect or consequential damages arising from your use of the app or its data.</p>
+
+  <h2>Ending your account</h2>
+  <p>You can delete your account at any time in Account → Delete account. We may suspend accounts that break these terms.</p>
+
+  <h2>Contact</h2>
+  <p><a href="mailto:{{ support_email }}">{{ support_email }}</a></p>
+
+{% else %}
+  <h1>Support</h1>
+  <div class="updated">We usually reply within one business day.</div>
+  <p>Questions, bugs or account help: email <a href="mailto:{{ support_email }}">{{ support_email }}</a>. Include your username and, for a bug, a screenshot and what you tapped.</p>
+  <h2>Common questions</h2>
+  <ul>
+    <li><b>How do I delete my account?</b> Account → Delete account. It removes your account and its data.</li>
+    <li><b>Is Tradestaar a broker?</b> No. Live orders go through your own Charles Schwab account after you connect it and confirm each order.</li>
+    <li><b>Why does a price say "delayed" or "as of"?</b> Some data sources are delayed; the app labels where each price came from and when.</li>
+    <li><b>Notifications aren't arriving.</b> Account → Free Browser Alerts, and make sure notifications are allowed for the app in your phone's settings.</li>
+  </ul>
+{% endif %}
+
+  <div class="foot">Tradestaar Elite · <a href="{{ url_for('privacy_page') }}">Privacy</a> · <a href="{{ url_for('terms_page') }}">Terms</a> · <a href="{{ url_for('support_page') }}">Support</a></div>
+</main>
+</body>
+</html>
