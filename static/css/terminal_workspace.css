@@ -98,15 +98,20 @@
   .tw-center > .tw-panel:first-child {
     grid-column: 1; grid-row: 1 / span 2;
     display: grid !important;
-    grid-template-columns: auto minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
     min-height: 0; overflow: hidden;
     padding: 0 !important;
   }
-  .tw-center > .tw-panel:first-child > .tw-sym-hd { grid-column: 1; grid-row: 1; }
-  .tw-center > .tw-panel:first-child > .tw-chart-toolbar { grid-column: 2; grid-row: 1; }
+  /* Symbol header on its own row, the chart bar full width under it. Side by
+     side, an after-hours header (price · AH price · change · time) squeezed
+     the bar into a narrow column and it stacked four rows deep on a laptop. */
+  .tw-center > .tw-panel:first-child > .tw-sym-hd { grid-column: 1 / -1; grid-row: 1; }
+  /* Full width now: keep ticker, price, change and the after-hours line together. */
+  .tw-center > .tw-panel .tw-sym-hd .tw-sym-right { margin-left: 0 !important; }
+  .tw-center > .tw-panel:first-child > .tw-chart-toolbar { grid-column: 1 / -1; grid-row: 2; }
   .tw-center > .tw-panel:first-child > :not(.tw-sym-hd):not(.tw-chart-toolbar):not(.tw-workspace) { grid-column: 1 / -1; }
-  .tw-center > .tw-panel:first-child > .tw-workspace { grid-column: 1 / -1; grid-row: 5; }
+  .tw-center > .tw-panel:first-child > .tw-workspace { grid-column: 1 / -1; grid-row: 6; }
 
   /* One slim top bar: symbol + price on the left, tools on the right */
   .tw-sym-hd {
@@ -239,8 +244,8 @@
   width: 100vw !important; height: 100vh !important; height: 100dvh !important;
   max-width: none !important; margin: 0 !important;
   display: grid !important;
-  grid-template-columns: auto minmax(0, 1fr) !important;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr) !important;
   border: 0 !important; border-radius: 0 !important;
   background: #050810 !important;
   padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0) !important;
@@ -250,9 +255,9 @@
 .tw-center > .tw-panel.tw-is-fullscreen > .tw-sym-hd,
 .tw-center > .tw-panel:fullscreen > .tw-sym-hd { grid-column: 1; grid-row: 1; }
 .tw-center > .tw-panel.tw-is-fullscreen > .tw-chart-toolbar,
-.tw-center > .tw-panel:fullscreen > .tw-chart-toolbar { grid-column: 2; grid-row: 1; }
+.tw-center > .tw-panel:fullscreen > .tw-chart-toolbar { grid-column: 1; grid-row: 2; }
 .tw-center > .tw-panel.tw-is-fullscreen > .tw-workspace,
-.tw-center > .tw-panel:fullscreen > .tw-workspace { grid-column: 1 / -1; grid-row: 5; min-height: 0; }
+.tw-center > .tw-panel:fullscreen > .tw-workspace { grid-column: 1 / -1; grid-row: 6; min-height: 0; }
 .tw-center > .tw-panel.tw-is-fullscreen .tw-chart-stack > .tw-chart,
 .tw-center > .tw-panel:fullscreen .tw-chart-stack > .tw-chart { flex: 1 1 auto; height: auto !important; min-height: 0; }
 html.tw-fs-lock, html.tw-fs-lock body { overflow: hidden !important; }
@@ -369,8 +374,6 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
      full screen and the chart-type/overlay buttons were cut off with no way
      to scroll to them. */
   .tw-chart-toolbar { flex-wrap: wrap !important; min-width: 0; padding: 7px 10px !important; }
-  /* Only the first icon button pushes right; with all three on auto they
-     spread across the wrapped row with big gaps between them. */
   /* Left to right, the way you work a chart:
        find a symbol → timeframe → how far back → how it's drawn →
        what's on it → and, pinned right, the tools (size a trade,
@@ -378,15 +381,10 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
   .tw-chart-toolbar .tw-symsearch     { order: 1; }
   .tw-chart-toolbar .tw-interval-wrap { order: 2; }
   .tw-chart-toolbar .tw-range-wrap    { order: 3; }
-  /* Row 1: what to chart (symbol, timeframe, range). Row 2: how it looks,
-     and the tools pinned right. A fixed break keeps the tools pill whole. */
-  .tw-chart-toolbar::after { content: ""; order: 4; flex: 0 0 100%; height: 0; }
   .tw-chart-toolbar .tw-type          { order: 5; }
   .tw-chart-toolbar .tw-fs-btn        { margin-left: 0 !important; }
-  .tw-chart-toolbar #tw-layout-btn    { order: 6; margin-left: auto !important; }
-  .tw-chart-toolbar #tw-size-btn      { order: 7; margin-left: -6px !important; }
-  .tw-chart-toolbar #tw-settings-btn  { order: 8; margin-left: -6px !important; }
-  .tw-chart-toolbar #tw-fs-btn        { order: 9; margin-left: -6px !important; }
+  /* Layouts · size · settings · full screen: one pill, pinned right, never split. */
+  .tw-chart-toolbar .tw-tools-pill    { order: 6; margin-left: auto; display: inline-flex; flex: 0 0 auto; position: relative; }
   /* The three tools read as one pill. */
   .tw-chart-toolbar .tw-fs-btn {
     border: 1px solid rgba(255, 255, 255, 0.07) !important; border-radius: 0 !important;
@@ -421,6 +419,9 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
   .tw-symsearch span { display: none; }
   .tw-symsearch { width: 32px; padding: 0; justify-content: center; }
   .tw-sym-hd .tw-bias { display: none !important; }
+  /* Laptop widths: tighter timeframe buttons so the whole bar fits one row. */
+  .tw-chart-toolbar .tw-tf-btn { padding: 0 7px !important; min-width: 26px !important; }
+  .tw-chart-toolbar { gap: 5px !important; }
 }
 .tw-chart-toolbar .tw-range-wrap { height: 34px; box-sizing: border-box; }
 .tw-chart-toolbar .tw-range-select { min-height: 0 !important; line-height: 28px !important; }
@@ -445,6 +446,10 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
    The drawing rail opens from ✎ instead of taking a row of its own. */
 .tw-draw-toggle { display: none; }
 @media (max-width: 1099px) {
+  /* Phones/tablets lay the tool buttons out one by one (full screen on
+     row 1, layouts on row 2), so the pill wrapper steps out of the way. */
+  .tw-chart-toolbar .tw-tools-pill { display: contents; }
+  .tw-chart-toolbar .tw-tools-pill > * { flex: 0 0 auto; }
   .tw-chart-toolbar {
     flex-wrap: wrap !important;
     overflow: visible !important;
