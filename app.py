@@ -11041,6 +11041,54 @@ def _thesis_daily_bars(ticker: str) -> dict | None:
     return bars
 
 
+def _thesis_live_price(ticker: str, wait_s: float = 2.5) -> dict | None:
+    """The live price from the Terminal's shared feed (Schwab, then Alpaca,
+    then Yahoo). Waits up to `wait_s` for the first fetch of a cold ticker.
+    {"price", "epoch", "source"} or None."""
+    try:
+        import market_engine as _me
+    except Exception:
+        return None
+    deadline = _time.time() + wait_s
+    while True:
+        q = (_me.live_quotes([ticker]) or {}).get(ticker) or _me.live_ticker_quote(ticker)
+        if q and isinstance(q.get("price"), (int, float)) and q["price"] > 0:
+            return {"price": float(q["price"]), "epoch": q.get("epoch"), "prev_close": q.get("prev_close"),
+                    "source": q.get("source") or q.get("source_name") or "Live feed",
+                    "session": q.get("session") or q.get("ext") or ""}
+        if _time.time() >= deadline:
+            return None
+        _time.sleep(0.25)
+
+
+def _with_live_price(data: dict, live: dict | None) -> dict:
+    """Fundamentals with today's price (and the trailing multiples) moved to
+    the live print. The cached price can be up to a day old."""
+    val = dict(data.get("valuation") or {})
+    old = val.get("price")
+    if not live or not isinstance(old, (int, float)) or old <= 0:
+        val["price_source"] = {"live": False, "source": "Finnhub", "note": "From the last data load"}
+        return dict(data, valuation=val)
+    k = live["price"] / old
+    for key in ("pe", "pfcf", "ps"):
+        if isinstance(val.get(key), (int, float)) and val[key] > 0:
+            val[key] = val[key] * k
+    pc = live.get("prev_close")
+    if isinstance(pc, (int, float)) and pc > 0:
+        val["change_pct"] = (live["price"] / pc - 1) * 100
+    val["price"] = live["price"]
+    when = ""
+    if live.get("epoch"):
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            when = datetime.fromtimestamp(int(live["epoch"]), _ZI("America/New_York")).strftime("%-I:%M %p ET")
+        except Exception:
+            when = ""
+    val["price_source"] = {"live": True, "source": live.get("source") or "Live feed", "as_of": when,
+                           "session": live.get("session") or ""}
+    return dict(data, valuation=val)
+
+
 # Value zones for the chart, watchlist badges and the daily scan. Built in the
 # background (fundamentals can take seconds on a cold ticker) and cached.
 _VALUE_ZONES: dict = {}
@@ -11054,7 +11102,7 @@ _VALUE_ZONES_SLOTS = threading.BoundedSemaphore(3)
 def build_value_zones(ticker: str) -> dict:
     from fundamentals_engine import get_fundamentals
     from thesis import zone_summary
-    data = get_fundamentals(ticker)
+    data = _with_live_price(get_fundamentals(ticker), _thesis_live_price(ticker))
     out = zone_summary(data, ticker, _thesis_daily_bars(ticker))
     _VALUE_ZONES[ticker] = (_time.time(), out)
     return out
@@ -11081,6 +11129,22 @@ def _value_zones_cached(ticker: str, start: bool = True) -> dict | None:
                 _VALUE_ZONES_BUILDING.discard(ticker)
         threading.Thread(target=_run, daemon=True, name=f"zones-{ticker}").start()
     return None
+
+
+@app.route("/api/thesis/price/<ticker>")
+def api_thesis_price(ticker):
+    """Live price for an open Thesis page (polled every ~15 s)."""
+    ticker = (ticker or "").strip().upper()[:12]
+    if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
+        return jsonify({"ok": False, "error": "Enter a valid ticker"}), 400
+    live = _thesis_live_price(ticker, wait_s=0)
+    if not live:
+        return jsonify({"ok": True, "live": False})
+    stamp = _with_live_price({"valuation": {"price": live["price"]}}, live)["valuation"]["price_source"]
+    pc = live.get("prev_close")
+    return jsonify({"ok": True, "live": True, "price": live["price"], "as_of": stamp.get("as_of"),
+                    "change_pct": ((live["price"] / pc - 1) * 100) if isinstance(pc, (int, float)) and pc > 0 else None,
+                    "source": stamp.get("source"), "session": stamp.get("session")})
 
 
 @app.route("/api/thesis/zones")
@@ -11123,6 +11187,7 @@ def thesis_view():
             if basis not in ("auto", "earnings", "fcf"):
                 basis = "auto"
             bars = _thesis_daily_bars(ticker)
+            data = _with_live_price(data, _thesis_live_price(ticker))
             thesis = build_thesis(data, ticker, basis=basis, bars=bars)
             if basis == "auto" and not data.get("error"):
                 # Opening the page refreshes the chart/watchlist zones too.

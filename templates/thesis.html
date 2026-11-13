@@ -39,7 +39,9 @@
       <div><h2>{{ thesis.company_name }}</h2><p>{% if thesis.sector %}{{ thesis.sector }}{% endif %}{% if thesis.sector and thesis.industry %} · {% endif %}{% if thesis.industry %}{{ thesis.industry }}{% endif %}</p></div>
     </div>
     <div class="th-market">
-      <div><span>Market price</span><strong>{{ thesis.price_fmt }}</strong>{% if thesis.change_pct is not none %}<em class="{{ 'is-up' if thesis.change_pct >= 0 else 'is-down' }}">{{ '+' if thesis.change_pct >= 0 else '' }}{{ '%.2f'|format(thesis.change_pct) }}%</em>{% endif %}</div>
+      <div><span>Market price</span><strong data-live-price>{{ thesis.price_fmt }}</strong>{% if thesis.change_pct is not none %}<em data-live-chg class="{{ 'is-up' if thesis.change_pct >= 0 else 'is-down' }}">{{ '+' if thesis.change_pct >= 0 else '' }}{{ '%.2f'|format(thesis.change_pct) }}%</em>{% endif %}
+        {% set ps = thesis.sources.price if thesis.sources else {} %}
+        <small class="vz-stamp {{ 'is-live' if ps.live else 'is-stale' }}" id="vz-stamp">● {% if ps.live %}Live · {{ ps.source }}{% if ps.as_of %} · {{ ps.as_of }}{% endif %}{% else %}{{ ps.source }} · {{ ps.note }}{% endif %}</small></div>
     </div>
     <div class="th-score">
       <div><span>Quality score</span><strong>{{ thesis.score if thesis.score is not none else '—' }}<small>/40</small></strong></div>
@@ -57,11 +59,21 @@
       <p>{{ sig.text }}</p>
     </div>
     <div class="vz-verdict__stats">
-      <div><span>Today</span><strong>{{ thesis.price_fmt }}</strong><em class="vz-chip tone-{{ z.meta.tone }}">{{ z.meta.label }}</em></div>
-      <div><span>Buy zone starts</span><strong>{{ '$%.2f'|format(z.accum_top) }}</strong><em>{% if z.to_buy_zone %}{{ z.to_buy_zone.pct_fmt }} from here{% else %}You're in it{% endif %}</em></div>
+      <div><span>Today</span><strong data-live-price>{{ thesis.price_fmt }}</strong><em class="vz-chip tone-{{ z.meta.tone }}" id="vz-zone-chip">{{ z.meta.label }}</em></div>
+      <div><span>Buy zone starts</span><strong>{{ '$%.2f'|format(z.accum_top) }}</strong><em id="vz-to-buy">{% if z.to_buy_zone %}{{ z.to_buy_zone.pct_fmt }} from here{% else %}You're in it{% endif %}</em></div>
       <div><span>Load the boat</span><strong>{{ '$%.2f'|format(z.load_top) }}</strong><em>& below</em></div>
     </div>
   </section>
+
+  {% set src = thesis.sources %}
+  <div class="vz-sources" aria-label="Where these numbers come from">
+    <span class="vz-sources__title">Data</span>
+    <span class="{{ 'is-live' if src.price.live else 'is-stale' }}" id="vz-src-price"><b>Price</b> {% if src.price.live %}live · {{ src.price.source }}{% else %}{{ src.price.source }} (last load){% endif %}</span>
+    <span><b>Earnings</b> {{ 'last 12 months · Finnhub' if src.uses_ttm else (('fiscal year ending ' ~ src.fiscal_year_end) if src.fiscal_year_end else 'latest fiscal year') ~ ' · SEC filings' }}</span>
+    <span><b>Growth</b> annual revenue · SEC filings{% if src.fiscal_year_end %} through {{ src.fiscal_year_end }}{% endif %}</span>
+    {% if src.bars_through %}<span><b>Chart</b> daily candles through {{ src.bars_through }}</span>{% endif %}
+  </div>
+  <div class="vz-moved" id="vz-moved" hidden><span></span><a href="">Refresh</a></div>
 
   <section class="th-section">
     <div class="th-section__head"><div><span>01 · The price ladder</span><h2>What price do I buy at?</h2></div>
@@ -79,7 +91,7 @@
           <div class="vz-rung__body">
             <div class="vz-rung__top"><b>{{ r.label }}</b><strong>{{ r.range_fmt }}</strong></div>
             <p>{{ r.action }}</p>
-            {% if r.current %}<span class="vz-here">● Today {{ thesis.price_fmt }}</span>{% endif %}
+            {% if r.current %}<span class="vz-here">● Today <b data-live-price>{{ thesis.price_fmt }}</b></span>{% endif %}
           </div>
           {% if r.key in ('accumulate', 'load') %}
           <button type="button" class="vz-bell" data-alert-price="{{ '%.2f'|format(r.hi) }}" data-alert-note="{{ thesis.ticker }} {{ r.label }} zone" aria-label="Alert me when {{ thesis.ticker }} reaches {{ r.label }}">🔔<span>Alert me</span></button>
@@ -186,7 +198,7 @@
   <section class="th-section">
     <div class="th-section__head"><div><span>06 · The math</span><h2>Assumptions, on screen</h2></div><small>Simple by design</small></div>
     <div class="th-math">
-      <div><span>Earnings power</span><strong>{{ t.power_fmt }}</strong><em>{% if t.growth >= 0 %}latest annual{% else %}median of positive annual{% endif %} {{ t.basis }}</em></div>
+      <div><span>Earnings power</span><strong>{{ t.power_fmt }}</strong><em>{% if t.uses_ttm %}{{ t.basis }} (through the latest quarter){% elif t.growth >= 0 %}latest annual {{ t.basis }}{% else %}median of positive annual {{ t.basis }}{% endif %}</em></div>
       <div><span>Growth anchor</span><strong>{{ t.growth_pct }}</strong><em>historical revenue CAGR, clamped ±</em></div>
       <div><span>Method</span><strong>Forward {{ t.basis }} × scenario multiple</strong><em>base {{ '%.1f'|format(t.base_multiple) }}x, scaled to growth · bear 0.6x · bull 1.35x</em></div>
     </div>
@@ -198,7 +210,7 @@
   {% endif %}
 </main>
 {% if thesis and thesis.value and thesis.value.available %}
-<script id="vz-model" type="application/json">{{ {"ticker": thesis.ticker, "price": thesis.value.model.price, "power": thesis.value.model.power, "shares": thesis.value.model.shares, "growth": thesis.value.model.growth, "sales": thesis.value.model.sales_based, "mos": thesis.value.model.mos, "plan": thesis.value.plan|map(attribute="price")|list}|tojson }}</script>
+<script id="vz-model" type="application/json">{{ {"ticker": thesis.ticker, "price": thesis.value.model.price, "power": thesis.value.model.power, "shares": thesis.value.model.shares, "growth": thesis.value.model.growth, "sales": thesis.value.model.sales_based, "mos": thesis.value.model.mos, "zone": thesis.value.model.zone, "accum_top": thesis.value.model.accum_top, "load_top": thesis.value.model.load_top, "bull": thesis.value.model.bull, "plan": thesis.value.plan|map(attribute="price")|list}|tojson }}</script>
 <script src="{{ url_for('static', filename='js/thesis.js') }}"></script>
 {% endif %}
 {% endblock %}

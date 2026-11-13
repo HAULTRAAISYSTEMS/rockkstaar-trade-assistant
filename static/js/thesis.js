@@ -69,6 +69,46 @@
     renderShares();
   }
 
+  /* ---- Live price: refresh every 15 s while the page is open ---- */
+  var ZONE_LABEL = {load: 'Load the boat', accumulate: 'Accumulate', fair: 'Fair', pricey: 'Pricey'};
+  function zoneAt(p) {
+    if (p <= M.load_top) return 'load';
+    if (p <= M.accum_top) return 'accumulate';
+    if (p <= M.bull) return 'fair';
+    return 'pricey';
+  }
+  function pollPrice() {
+    if (document.hidden) return;
+    fetch('/api/thesis/price/' + encodeURIComponent(M.ticker), {credentials: 'same-origin', cache: 'no-store'})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.ok || !d.live || !(d.price > 0)) return;
+        M.price = d.price;
+        document.querySelectorAll('[data-live-price]').forEach(function (e) { e.textContent = money(d.price); });
+        var chg = document.querySelector('[data-live-chg]');
+        if (chg && d.change_pct != null) {
+          chg.textContent = (d.change_pct >= 0 ? '+' : '') + d.change_pct.toFixed(2) + '%';
+          chg.className = d.change_pct >= 0 ? 'is-up' : 'is-down';
+        }
+        var st = $('vz-stamp');
+        if (st) { st.className = 'vz-stamp is-live'; st.textContent = '● Live · ' + (d.source || 'Live feed') + (d.as_of ? ' · ' + d.as_of : ''); }
+        var sp = $('vz-src-price');
+        if (sp) { sp.className = 'is-live'; sp.innerHTML = '<b>Price</b> live · ' + (d.source || 'Live feed'); }
+        var tb = $('vz-to-buy');
+        if (tb) tb.textContent = d.price > M.accum_top ? Math.round((M.accum_top / d.price - 1) * 100) + '% from here' : "You're in it";
+        var z = zoneAt(d.price), mv = $('vz-moved'), chip = $('vz-zone-chip');
+        if (chip) { chip.textContent = ZONE_LABEL[z]; chip.className = 'vz-chip tone-' + ({accumulate: 'accum'}[z] || z); }
+        if (mv && z !== M.zone) {
+          mv.hidden = false;
+          mv.querySelector('span').textContent = M.ticker + ' just moved into ' + ZONE_LABEL[z] + ' (' + money(d.price) + '). Refresh for the updated verdict.';
+          mv.querySelector('a').href = location.href;
+        }
+        if (typeof update === 'function' && gIn) update();
+      }).catch(function () {});
+  }
+  setInterval(pollPrice, 15000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) pollPrice(); });
+
   /* ---- What-if ---- */
   var gIn = $('vz-g'), mIn = $('vz-m'), sIn = $('vz-s');
   if (!gIn || !M.power || !M.shares) return;
