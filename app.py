@@ -11132,6 +11132,38 @@ def _value_zones_cached(ticker: str, start: bool = True) -> dict | None:
     return None
 
 
+_THESIS_PEERS: dict = {}
+_THESIS_PEERS_TTL = 24 * 3600
+
+
+@app.route("/api/thesis/peers/<ticker>")
+def api_thesis_peers(ticker):
+    """Industry peers' P/E vs this company. Loaded after the Thesis page
+    paints (eight cached metric lookups). ?price=&pe=&growth= come from the
+    page, so the comparison uses the same live price it shows."""
+    ticker = (ticker or "").strip().upper()[:12]
+    if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", ticker):
+        return jsonify({"ok": False, "error": "Enter a valid ticker"}), 400
+
+    def num(k):
+        try:
+            v = float(request.args.get(k, ""))
+            return v if v == v and abs(v) < 1e7 else None
+        except (TypeError, ValueError):
+            return None
+    from thesis import fetch_peers, peer_comparison
+    hit = _THESIS_PEERS.get(ticker)
+    if hit and _time.time() - hit[0] < _THESIS_PEERS_TTL:
+        peers = hit[1]
+    else:
+        peers = fetch_peers(ticker)
+        if len(_THESIS_PEERS) > 300:
+            _THESIS_PEERS.clear()
+        _THESIS_PEERS[ticker] = (_time.time(), peers)
+    out = peer_comparison(ticker, num("price"), num("pe"), num("growth"), peers=peers)
+    return jsonify(dict(out, ok=True, ticker=ticker))
+
+
 @app.route("/api/thesis/zones")
 def api_value_zones():
     """Value zones for up to 40 tickers: {"zones": {T: {...}}, "pending": [..]}."""

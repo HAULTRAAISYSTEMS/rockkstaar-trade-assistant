@@ -248,3 +248,14 @@
 .vz-marks{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .vz-marks .vz-here{margin-top:0}
 .vz-mark{display:inline-block;padding:3px 9px;border-radius:99px;border:1px dashed rgba(255,255,255,.28);color:#cfd5db;font:700 10px var(--font-mono);letter-spacing:.03em}
+/* Peers card and track record */
+.vz-peer-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.vz-peer-list a{padding:4px 9px;border:1px solid rgba(255,255,255,.1);border-radius:99px;color:#cfd5db;font:700 10.5px var(--font-mono);text-decoration:none}
+.vz-peer-list a:hover{border-color:var(--th-gold);color:var(--th-gold-bright)}
+.vz-track{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.vz-track__cell{padding:16px;border:1px solid color-mix(in srgb,var(--vz-c) 35%,transparent);border-radius:14px;background:color-mix(in srgb,var(--vz-c) 6%,#090c0f)}
+.vz-track__cell b{display:block;color:var(--vz-c);font:800 11px var(--font-mono);letter-spacing:.08em;text-transform:uppercase}
+.vz-track__cell strong{display:block;margin:6px 0 4px;color:#f6f4ee;font:800 28px var(--font-mono)}
+.vz-track__cell em{color:#8d98a4;font:600 11px/1.45 var(--font-ui);font-style:normal}
+.vz-track__cell.is-empty{opacity:.45}
+@media (max-width:860px){.vz-track{grid-template-columns:repeat(2,minmax(0,1fr))}}

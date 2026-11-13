@@ -113,6 +113,31 @@
     TSLive.on('live', onLive);
   }
 
+  /* ---- Peers (loaded after the page paints) ---- */
+  (function loadPeers() {
+    var card = $('vz-peers');
+    if (!card || !(M.pe > 0)) return;
+    var q = '?price=' + encodeURIComponent(M.price) + '&pe=' + encodeURIComponent(M.pe) + '&growth=' + encodeURIComponent(M.growth);
+    fetch('/api/thesis/peers/' + encodeURIComponent(M.ticker) + q, {credentials: 'same-origin'})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.ok || !d.available) return;
+        card.hidden = false;
+        $('vz-peers-prem').textContent = d.premium_fmt;
+        $('vz-peers-sub').textContent = (d.premium >= 0 ? 'premium' : 'discount') + ' · ' + d.today_pe_fmt + ' vs peer median ' + d.median_pe_fmt;
+        var list = $('vz-peers-list');
+        list.innerHTML = '';
+        d.peers.forEach(function (p) {
+          var a = document.createElement('a');
+          a.href = '/thesis?ticker=' + encodeURIComponent(p.ticker);
+          a.textContent = p.ticker + ' ' + p.pe_fmt;
+          list.appendChild(a);
+        });
+        $('vz-peers-read').innerHTML = d.read + (d.price_at_peer_fmt && d.price_at_peer_fmt !== '—'
+          ? ' At the peer median P/E, ' + M.ticker + ' would be <b>' + d.price_at_peer_fmt + '</b>.' : '');
+      }).catch(function () {});
+  })();
+
   /* ---- What-if ---- */
   var gIn = $('vz-g'), mIn = $('vz-m'), sIn = $('vz-s');
   if (!gIn || !M.power || !M.shares) return;

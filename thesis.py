@@ -738,12 +738,14 @@ def build_thesis(data: dict, ticker: str, basis: str = "auto", bars: dict | None
                 "plan": buy_plan(targets["base"]),
                 "history": multiple_history(data, bars, targets["basis_key"]),
                 "trend": trend,
+                "track": backtest(data, bars, targets.get("shares")),
                 "signal": load_signal(zones["current"], trend),
                 "model": {"power": targets["power"], "shares": targets.get("shares"),
                           "zone": zones["current"], "accum_top": targets["base"],
                           "load_top": zones["load_top"], "bull": targets["bull"],
                           "growth": targets["growth"], "sales_based": targets["sales_based"],
                           "drift": targets.get("share_drift") or 0.0, "cash_ps": targets.get("net_cash_ps") or 0.0,
+                          "pe": valuation.get("pe"),
                           "price": price, "mos": MARGIN_OF_SAFETY},
             }
         ends = [str(r.get("period_end"))[:10] for r in (data.get("history") or [])
@@ -786,3 +788,159 @@ def build_thesis(data: dict, ticker: str, basis: str = "auto", bars: dict | None
                 "targets": {"available": False, "note": str(exc)},
                 "value": {"available": False},
                 "flags": [], "red_flags": [], "error": str(exc)}
+
+
+# --- Peers: what similar companies trade at ---------------------------------
+
+def fetch_peers(ticker: str, limit: int = 8) -> list[str]:
+    """Finnhub's peer list (same industry), without the ticker itself."""
+    import json
+    import os
+    key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not key:
+        return []
+    try:
+        import intel_engine
+        if intel_engine._fh_is_rate_limited():
+            return []
+        url = f"https://finnhub.io/api/v1/stock/peers?symbol={ticker}&grouping=industry&token={key}"
+        with intel_engine._fh_urlopen(url, timeout=8) as resp:
+            rows = json.loads(resp.read().decode() or "[]") or []
+    except Exception as exc:
+        logger.debug("peers unavailable for %s: %s", ticker, exc)
+        return []
+    out = []
+    for p in rows if isinstance(rows, list) else []:
+        p = str(p or "").upper().strip()
+        if p and p != ticker and "." not in p and p not in out:
+            out.append(p)
+    return out[:limit]
+
+
+def _median(vals: list[float]) -> float | None:
+    v = sorted(vals)
+    if not v:
+        return None
+    n = len(v)
+    return v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2
+
+
+def peer_comparison(ticker: str, price: float | None, today_pe: float | None,
+                    growth: float | None, peers: list[str] | None = None, metrics_fn=None) -> dict:
+    """This company's P/E against its industry peers' median, plus the price
+    it would have at the peer multiple. Growth is shown alongside, because a
+    faster grower deserves some premium."""
+    if metrics_fn is None:
+        from finnhub_ttm import fetch_finnhub_metrics
+        metrics_fn = lambda t: (fetch_finnhub_metrics(t) or {}).get("_raw_metric") or {}
+    peers = fetch_peers(ticker) if peers is None else peers
+    rows = []
+    for p in peers:
+        try:
+            m = metrics_fn(p) or {}
+        except Exception:
+            continue
+        pe = m.get("peTTM") or m.get("peExclExtraTTM")
+        if not isinstance(pe, (int, float)) or not (0 < pe < 300):
+            continue
+        g = m.get("revenueGrowthTTMYoy")
+        rows.append({"ticker": p, "pe": float(pe), "pe_fmt": f"{pe:.1f}x",
+                     "growth": (g / 100.0) if isinstance(g, (int, float)) else None})
+    if len(rows) < 3 or not today_pe or today_pe <= 0:
+        return {"available": False, "peers": rows}
+    med = _median([r["pe"] for r in rows])
+    gmed = _median([r["growth"] for r in rows if r["growth"] is not None])
+    prem = today_pe / med - 1
+    at_peer = price * med / today_pe if price else None
+    faster = growth is not None and gmed is not None and growth > gmed + 0.05
+    if prem > 0.15:
+        read = (f"Trades at a {prem:.0%} premium to its peers" +
+                (", but it is also growing faster than them." if faster else
+                 " without growing faster — a reason for caution."))
+    elif prem < -0.15:
+        read = (f"Trades at a {-prem:.0%} discount to its peers" +
+                (" while growing faster — that's unusual." if faster else "."))
+    else:
+        read = "Priced in line with its peers."
+    return {"available": True, "peers": sorted(rows, key=lambda r: r["pe"]),
+            "median_pe": med, "median_pe_fmt": f"{med:.1f}x", "today_pe_fmt": f"{today_pe:.1f}x",
+            "premium": prem, "premium_fmt": f"{prem * 100:+.0f}%",
+            "median_growth": gmed, "price_at_peer": at_peer, "price_at_peer_fmt": _fmt_price(at_peer),
+            "read": read}
+
+
+# --- Track record: how the zones have done for this stock --------------------
+
+FILING_LAG_DAYS = 75     # a 10-K is public roughly 2-3 months after year end
+
+
+def backtest(data: dict, bars: dict | None, shares: float | None, horizon_days: int = 365) -> dict:
+    """Replay the zone model month by month over the price history, using
+    only the annual filings that were public at each date, and measure the
+    stock's return over the following 12 months by the zone it was in.
+
+    Deliberately simple and honest: annual figures only (no TTM, no live
+    price), today's share count (the price history is split-adjusted),
+    and a small sample. It shows tendencies, not guarantees.
+    """
+    from datetime import datetime, timedelta, timezone
+    out = {"available": False}
+    hist = [r for r in (data.get("history") or []) if isinstance(r, dict) and r.get("period_end")]
+    ts, closes = (bars or {}).get("timestamps") or [], (bars or {}).get("closes") or []
+    if len(hist) < 3 or len(ts) < 300 or not shares:
+        return out
+    rows = [{"end": datetime.strptime(str(r["period_end"])[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc),
+             "revenue": r.get("revenue_num"), "net_income": r.get("net_income_num"), "fcf": r.get("fcf_num")}
+            for r in hist]
+    rows.sort(key=lambda r: r["end"], reverse=True)            # newest first
+    days = [datetime.fromtimestamp(t, timezone.utc) for t in ts]
+    samples, last_month = [], None
+    for i, (d, c) in enumerate(zip(days, closes)):
+        if not c or (d.year, d.month) == last_month:
+            continue
+        last_month = (d.year, d.month)
+        future = d + timedelta(days=horizon_days)
+        if future > days[-1]:
+            break
+        known = [r for r in rows if r["end"] + timedelta(days=FILING_LAG_DAYS) <= d]
+        if len(known) < 2:
+            continue
+        g = _revenue_cagr(known)
+        power, basis = _earnings_power(known, g)
+        if not power or basis.startswith("sales"):
+            continue
+        mult = _base_multiple(g)
+        base = power * (1 + g) * mult / shares
+        bull = power * (1 + g + _SCENARIO_G_ADJ["bull"]) * mult * _SCENARIO_MULT["bull"] / shares
+        zone = zone_for(c, base, bull)
+        j = next((k for k in range(i, len(days)) if days[k] >= future), None)
+        if zone is None or j is None or not closes[j]:
+            continue
+        samples.append({"date": d.strftime("%Y-%m"), "zone": zone, "ret": closes[j] / c - 1})
+    if len(samples) < 6:
+        return {"available": False, "samples": len(samples)}
+    by = []
+    for key in ("load", "accumulate", "fair", "pricey"):
+        rs = [s["ret"] for s in samples if s["zone"] == key]
+        by.append({"key": key, "label": ZONE_META[key]["label"], "tone": ZONE_META[key]["tone"],
+                   "months": len(rs),
+                   "avg": (sum(rs) / len(rs)) if rs else None,
+                   "avg_fmt": f"{sum(rs) / len(rs) * 100:+.0f}%" if rs else "—",
+                   "hit": (sum(1 for r in rs if r > 0) / len(rs)) if rs else None,
+                   "hit_fmt": f"{sum(1 for r in rs if r > 0) / len(rs) * 100:.0f}%" if rs else "—"})
+    allr = [s["ret"] for s in samples]
+    buy = [s["ret"] for s in samples if s["zone"] in ("load", "accumulate")]
+    wait = [s["ret"] for s in samples if s["zone"] in ("fair", "pricey")]
+    if buy and wait:
+        diff = sum(buy) / len(buy) - sum(wait) / len(wait)
+        read = (f"Buying in the buy zones beat buying in Fair/Pricey by {diff * 100:.0f} points a year on average."
+                if diff > 0.02 else
+                f"For this stock, the buy zones did NOT beat Fair/Pricey ({diff * 100:+.0f} points) — trust the zones less here."
+                if diff < -0.02 else "Buy-zone and wait-zone months did about the same for this stock.")
+    elif buy:
+        read = "It was only ever in the buy zones over this stretch, so there is nothing to compare."
+    else:
+        read = "It never reached a buy zone over this stretch — the model saw it as fully priced the whole time."
+    return {"available": True, "zones": by, "months": len(samples),
+            "first": samples[0]["date"], "last": samples[-1]["date"],
+            "avg_all_fmt": f"{sum(allr) / len(allr) * 100:+.0f}%", "read": read}
