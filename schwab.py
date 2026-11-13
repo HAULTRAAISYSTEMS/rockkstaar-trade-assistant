@@ -244,7 +244,8 @@ def save_tokens(token_response: dict, user_id: int = 1, *, is_refresh: bool = Fa
     now = int(time.time())
     expires_at = now + _safe_int(token_response.get("expires_in"), _ACCESS_TTL)
 
-    old_refresh = get_user_setting(user_id, "schwab_refresh_token") or ""
+    import secret_box
+    old_refresh = secret_box.decrypt(get_user_setting(user_id, "schwab_refresh_token") or "")
     old_rt_exp  = _safe_int(get_user_setting(user_id, "schwab_rt_expires_at"), 0)
     new_refresh = token_response.get("refresh_token") or ""
 
@@ -252,8 +253,10 @@ def save_tokens(token_response: dict, user_id: int = 1, *, is_refresh: bool = Fa
     # keep the old one if Schwab only sends a replacement access token.
     refresh_token = new_refresh or (old_refresh if is_refresh else "")
 
-    set_user_setting(user_id, "schwab_access_token", access_token)
-    set_user_setting(user_id, "schwab_refresh_token", refresh_token)
+    # Encrypted at rest (secret_box): a copy of the database alone can't be
+    # used to reach the Schwab account.
+    set_user_setting(user_id, "schwab_access_token", secret_box.encrypt(access_token))
+    set_user_setting(user_id, "schwab_refresh_token", secret_box.encrypt(refresh_token))
     set_user_setting(user_id, "schwab_expires_at", str(expires_at))
 
     explicit_rt_ttl = _safe_int(
@@ -290,10 +293,20 @@ def clear_tokens(user_id: int = 1) -> None:
 
 def _read_stored_tokens(user_id: int) -> dict:
     """Read the current token snapshot from persistent storage."""
-    from database import get_user_setting
+    from database import get_user_setting, set_user_setting
+    import secret_box
+    raw_access = get_user_setting(user_id, "schwab_access_token") or ""
+    raw_refresh = get_user_setting(user_id, "schwab_refresh_token") or ""
+    # Tokens saved before encryption: encrypt them in place on first read.
+    for key, raw in (("schwab_access_token", raw_access), ("schwab_refresh_token", raw_refresh)):
+        if raw and not secret_box.is_encrypted(raw):
+            try:
+                set_user_setting(user_id, key, secret_box.encrypt(raw))
+            except Exception as exc:
+                logger.debug("schwab token re-encrypt failed: %s", exc)
     return {
-        "access_token":  get_user_setting(user_id, "schwab_access_token") or "",
-        "refresh_token": get_user_setting(user_id, "schwab_refresh_token") or "",
+        "access_token":  secret_box.decrypt(raw_access),
+        "refresh_token": secret_box.decrypt(raw_refresh),
         "expires_at":    _safe_int(get_user_setting(user_id, "schwab_expires_at"), 0),
         "rt_expires_at": _safe_int(get_user_setting(user_id, "schwab_rt_expires_at"), 0),
     }

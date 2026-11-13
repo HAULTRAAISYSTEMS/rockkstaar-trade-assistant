@@ -8289,9 +8289,36 @@ def _tf_ugcss(g):
     return _ugrade_info(g)[2]
 
 
+# ── iPhone App Store build ────────────────────────────────────────────────
+# The App Store app is a wrapper around this site that adds a marker to its
+# user agent (default "TradestaarIOS"). Apple 3.2.1(viii): trading apps must
+# come from the broker itself, so inside that app live order entry is off
+# (paper trading, charts, alerts and research stay). The website, the Mac and
+# the Android app are unchanged.
+_IOS_TRADE_BLOCK = "Live trading isn't available in the iPhone app. Use Tradestaar in Safari or on your computer to place live orders."
+
+
+def _is_ios_app() -> bool:
+    marker = (os.environ.get("IOS_APP_UA_MARKER") or "TradestaarIOS").strip()
+    try:
+        return bool(marker) and marker.lower() in (request.headers.get("User-Agent") or "").lower()
+    except RuntimeError:
+        return False
+
+
+@app.before_request
+def _ios_app_no_live_trading():
+    if request.path.startswith("/api/trade/") and _is_ios_app():
+        if request.path == "/api/trade/status":
+            return jsonify({"ok": True, "enabled": False, "available": False, "connected": False,
+                            "accounts": [], "reason": _IOS_TRADE_BLOCK})
+        return jsonify({"ok": False, "error": _IOS_TRADE_BLOCK}), 403
+
+
 @app.context_processor
 def inject_helpers():
     helpers = {
+        "ios_app":              _is_ios_app(),
         "get_score_class":      get_score_class,
         "get_bias_class":       get_bias_class,
         "get_setup_type_class": get_setup_type_class,
