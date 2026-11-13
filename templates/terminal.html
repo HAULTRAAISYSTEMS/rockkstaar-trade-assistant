@@ -1181,7 +1181,7 @@ function twSelect(row){
   var sym=document.getElementById('tw-ot-symbol'); if(sym){ sym.value=d.ticker; }
   twEstCost();
   twLoadChart(d.ticker, twChartState.interval, twChartState.range);
-  twLoadIntelligence(d.ticker);
+  twLoadIntelligenceSoon(d.ticker);
   if (window.dpSetSymbol) window.dpSetSymbol(d.ticker);
 }
 
@@ -1834,6 +1834,33 @@ function twPatchActiveCandle(q,px){
   twRenderIndicators();twRenderEmas();twOhlcv(twChartState.bars);twRenderDrawings();
 }
 
+/* Saved candles per ticker/interval/range/session for an instant first paint.
+   Up to 8 sets, 4000 bars each, 3 days old at most; localStorage only. */
+var TW_CANDLE_CACHE_INDEX='tradestaar.candleCache.idx';
+function twCandleCacheLoad(key){
+  try{
+    var raw=localStorage.getItem('tradestaar.candleCache:'+key); if(!raw) return null;
+    var c=JSON.parse(raw); if(!c||!c.d||!c.at||Date.now()-c.at>3*86400000) return null;
+    return c.d;
+  }catch(e){ return null; }
+}
+function twCandleCacheSave(key, d){
+  try{
+    var bars=(d.bars||[]).slice(-4000);
+    if(!bars.length) return;
+    var slim={ok:true, bars:bars, session:d.session, adjustment:d.adjustment, source_interval:d.source_interval};
+    var idx=JSON.parse(localStorage.getItem(TW_CANDLE_CACHE_INDEX)||'[]').filter(function(k){ return k!==key; });
+    idx.unshift(key);
+    while(idx.length>8){ localStorage.removeItem('tradestaar.candleCache:'+idx.pop()); }
+    var payload=JSON.stringify({at:Date.now(), d:slim});
+    try{ localStorage.setItem('tradestaar.candleCache:'+key, payload); }
+    catch(full){ // storage full: drop the oldest and keep going
+      while(idx.length>1){ localStorage.removeItem('tradestaar.candleCache:'+idx.pop()); }
+      try{ localStorage.setItem('tradestaar.candleCache:'+key, payload); }catch(_){ return; }
+    }
+    localStorage.setItem(TW_CANDLE_CACHE_INDEX, JSON.stringify(idx));
+  }catch(e){}
+}
 function twLoadChart(ticker, interval, range, refreshOnly){
   if(!ticker) return;
   if(twChartRefreshTimer)clearTimeout(twChartRefreshTimer);twChartRefreshTimer=null;
@@ -1856,26 +1883,8 @@ function twLoadChart(ticker, interval, range, refreshOnly){
     twChartState.partialN=(twChartState.partialN||0)+1;
     if(twChartState.partialN%10) since=Number(prevBars[prevBars.length-3].time)||0;
   } else if(!refreshOnly){ twChartState.partialN=0; }
-  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session+(since?'&since='+since:''), {cache:'no-store', credentials:'same-origin', signal: candleCtl ? candleCtl.signal : undefined})
-    .then(function(r){
-      if(candleKill) clearTimeout(candleKill);
-      // A deploy, a restart or a proxy timeout answers with an HTML page.
-      // r.json() on that threw Safari's "The string did not match the
-      // expected pattern" and the chart stayed broken until a reload.
-      var type=(r.headers.get('Content-Type')||'').toLowerCase();
-      if(type.indexOf('application/json')<0){
-        var err=new Error(r.status===401?'Signed out — sign in again to load the chart.':'The chart service did not answer (HTTP '+r.status+').');
-        err.retryable=r.status!==401; throw err;
-      }
-      // A server error (5xx) during a deploy or a provider blip is
-      // momentary: retry it instead of leaving "Service temporarily
-      // unavailable" on screen until a reload.
-      if(r.status>=500) return r.json().catch(function(){return {};}).then(function(body){
-        var e5=new Error((body&&body.error)||'The chart service is busy (HTTP '+r.status+'). Retrying…'); e5.retryable=true; throw e5;
-      });
-      return r.json();
-    })
-    .then(function(d){
+  var cacheKey=ticker+'|'+interval+'|'+range+'|'+session, shownFromCache=false;
+  var applyD=function(d, fromCache){
       if(myReq!==twChartState.reqId) return;
       if(!d||d.ok===false)throw new Error((d&&d.error)||'Market-data provider unavailable');
       if(d.source_interval&&interval!=='4h'&&d.source_interval!==interval)throw new Error('Feed returned '+d.source_interval+' candles instead of '+interval);
@@ -1919,7 +1928,9 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       twChartState.lastPrice = bars[bars.length-1].close;
       twApplyType();
       twApplyEvents(twChartState.events);
-      if(!refreshOnly){twAutoScalePrice();twChartState.chart.timeScale().fitContent();twLoadDrawings();}else{twRenderDrawings();}
+      // After an instant paint from the saved copy, the fresh data replaces it
+      // without re-fitting the view the user may already be moving.
+      if(!refreshOnly && !shownFromCache){twAutoScalePrice();twChartState.chart.timeScale().fitContent();twLoadDrawings();}else{twRenderDrawings();}
       twRenderIndicators();
       twRenderEmas();
       twOhlcv(bars);
@@ -1928,9 +1939,38 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       twEstCost();
       var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent=interval.toUpperCase()+' · '+range.toUpperCase()+' · '+bars.length.toLocaleString()+' bars · '+(d.session||'regular')+' · '+(d.adjustment||'split-adjusted');
       twChartHideMsg();
+      if(fromCache){ shownFromCache=true; if(hint) hint.textContent+=' · updating…'; return; }
       twChartState.retryN=0;clearTimeout(twChartState.retryTimer);
+      if(!refreshOnly && !d.partial) twCandleCacheSave(cacheKey, d);
       twScheduleChartRefresh();
+  };
+  // Instant chart: paint the last copy of these candles saved on this device
+  // (if any) right away, then replace it with fresh data when it arrives —
+  // the first network load after opening the Terminal can take a while.
+  if(!refreshOnly){
+    var cached=twCandleCacheLoad(cacheKey);
+    if(cached){ try{ applyD(cached, true); }catch(_){ shownFromCache=false; } }
+  }
+  fetch('/api/terminal/candles/'+encodeURIComponent(ticker)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)+'&session='+session+(since?'&since='+since:''), {cache:'no-store', credentials:'same-origin', signal: candleCtl ? candleCtl.signal : undefined})
+    .then(function(r){
+      if(candleKill) clearTimeout(candleKill);
+      // A deploy, a restart or a proxy timeout answers with an HTML page.
+      // r.json() on that threw Safari's "The string did not match the
+      // expected pattern" and the chart stayed broken until a reload.
+      var type=(r.headers.get('Content-Type')||'').toLowerCase();
+      if(type.indexOf('application/json')<0){
+        var err=new Error(r.status===401?'Signed out — sign in again to load the chart.':'The chart service did not answer (HTTP '+r.status+').');
+        err.retryable=r.status!==401; throw err;
+      }
+      // A server error (5xx) during a deploy or a provider blip is
+      // momentary: retry it instead of leaving "Service temporarily
+      // unavailable" on screen until a reload.
+      if(r.status>=500) return r.json().catch(function(){return {};}).then(function(body){
+        var e5=new Error((body&&body.error)||'The chart service is busy (HTTP '+r.status+'). Retrying…'); e5.retryable=true; throw e5;
+      });
+      return r.json();
     })
+    .then(function(d){ applyD(d, false); })
     .catch(function(e){
       if(myReq!==twChartState.reqId)return;
       if(refreshOnly){var hint=document.getElementById('tw-chart-hint');if(hint)hint.textContent='Refresh failed · showing last loaded bars';twScheduleChartRefresh();return;}
@@ -1943,7 +1983,9 @@ function twLoadChart(ticker, interval, range, refreshOnly){
       var key=ticker+'|'+interval+'|'+range;
       if(twChartState.retryKey!==key){twChartState.retryKey=key;twChartState.retryN=0;}
       var n=++twChartState.retryN, wait=n<=3?3000*Math.pow(2,n-1):30000;
-      twChartMsg('Reconnecting chart…','The chart data did not load. Trying again in '+Math.round(wait/1000)+' s.');
+      // Showing the saved copy: keep it on screen and retry quietly.
+      if(shownFromCache){ var h2=document.getElementById('tw-chart-hint'); if(h2) h2.textContent='Saved chart · reconnecting in '+Math.round(wait/1000)+' s'; }
+      else twChartMsg('Reconnecting chart…','The chart data did not load. Trying again in '+Math.round(wait/1000)+' s.');
       clearTimeout(twChartState.retryTimer);
       twChartState.retryTimer=setTimeout(function(){if(twChartState.ticker===ticker&&twChartState.interval===interval&&twChartState.range===range)twLoadChart(ticker,interval,range,false);},wait);
     });
@@ -2047,6 +2089,13 @@ function twLoadChartEvents(ticker, tries){
       twApplyEvents(d.events||[], 'chart');
       if(d.pending && tries<6) setTimeout(function(){ twLoadChartEvents(ticker, tries+1); }, 2500+tries*1500);
     }).catch(function(){});
+}
+/* Candles first: the side panels (context, insiders, events) wait a moment so
+   the chart's request isn't queued behind their slower SEC/news lookups. */
+var twIntelSoonTimer=null;
+function twLoadIntelligenceSoon(ticker){
+  clearTimeout(twIntelSoonTimer);
+  twIntelSoonTimer=setTimeout(function(){ twLoadIntelligence(ticker); }, 900);
 }
 function twLoadIntelligence(ticker){
   twLoadChartEvents(String(ticker||'').toUpperCase());
@@ -2565,7 +2614,7 @@ document.addEventListener('keydown',function(e){
       var ots=document.getElementById('tw-ot-symbol'); if(ots) ots.value=wanted;
       if(window.dpSetSymbol) window.dpSetSymbol(wanted);
     }
-    twLoadChart(bootSym,twChartState.interval,twChartState.range); twLoadIntelligence(bootSym);
+    twLoadChart(bootSym,twChartState.interval,twChartState.range); twLoadIntelligenceSoon(bootSym);
   }
   twEstCost();
   // Seed the change-detector from what the server rendered, so the first poll

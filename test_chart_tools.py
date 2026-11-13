@@ -583,3 +583,15 @@ def test_chart_events_endpoint_past_earnings_and_news(client, monkeypatch):
     news = [e for e in ev if e["type"] == "news"]
     assert len(news) == 1 and news[0]["ts"] == 1794493800
     assert "function twLoadChartEvents(ticker, tries)" in TEMPLATE and "'/api/terminal/events/'" in TEMPLATE
+
+
+def test_chart_paints_saved_candles_first_and_side_panels_wait():
+    # Opening the Terminal took ~30 s to show a chart: the candle request was
+    # queued behind slower panel lookups. Now the last saved copy paints at
+    # once, panels start a moment later, and the server has more threads.
+    assert "function twCandleCacheLoad(key)" in TEMPLATE and "function twCandleCacheSave(key, d)" in TEMPLATE
+    assert "applyD(cached, true)" in TEMPLATE and "twCandleCacheSave(cacheKey, d)" in TEMPLATE
+    assert "twLoadIntelligenceSoon(bootSym)" in TEMPLATE
+    proc = open("Procfile", encoding="utf-8").read()
+    assert "--threads 12" in proc
+    assert "MIN_THREADS = 12" in open("gunicorn.conf.py", encoding="utf-8").read()
