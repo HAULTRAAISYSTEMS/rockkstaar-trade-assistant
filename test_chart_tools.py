@@ -702,7 +702,7 @@ def test_zone_and_alert_tags_live_on_the_price_axis():
     js = open("static/js/chart_tools.js", encoding="utf-8").read()
     # Zones and alerts are tags on the price axis; in-chart zone tags are opt-in.
     assert "overlays: {rail: true, lines: true, tags: false, axisTags: true," in js
-    assert "ctExtraAxis.push({p: z.load_top, c: o.loadColor, text: 'LOAD ≤'})" in js
+    assert "ctExtraAxis.push({p: z.load_top, c: o.loadColor, text: 'LOAD'})" in js and "var CT_TAG_H = 14;" in js
     assert "alertId: a.id});" in js and "var w = ctx.measureText(label).width + 12, x = 8;" not in js
     # Overlapping tags are pushed apart; the × on an alert tag still cancels it.
     assert "function ctLayoutAxisLabels(ctx, dim, labels) {" in js
