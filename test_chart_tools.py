@@ -681,7 +681,7 @@ def test_next_earnings_marker_and_countdown_chip():
 def test_zones_and_events_settings_tab():
     # Every chart overlay can be switched off or recoloured in Chart settings.
     js = open("static/js/chart_tools.js", encoding="utf-8").read()
-    assert "overlays: {rail: true, lines: true, tags: true," in js
+    assert "overlays: {rail: true, lines: true, tags: false, axisTags: true," in js
     assert "priceyColor: '#ff6b6b', fairColor: '#f3c95a', accumColor: '#8be36b', loadColor: '#2ee6a6'" in js
     assert "if (o.rail) {" in js and "if (o.lines) {" in js and "if (o.tags) {" in js
     assert "if (!ctPrefs.view.events || !o.nextEarnings) return;" in js
@@ -697,6 +697,20 @@ def test_zones_and_events_settings_tab():
     css = open("static/css/chart_tools.css", encoding="utf-8").read()
     assert '[data-ct-active="zones"] > [data-tab="zones"]' in css
 
+
+def test_zone_and_alert_tags_live_on_the_price_axis():
+    js = open("static/js/chart_tools.js", encoding="utf-8").read()
+    # Zones and alerts are tags on the price axis; in-chart zone tags are opt-in.
+    assert "overlays: {rail: true, lines: true, tags: false, axisTags: true," in js
+    assert "ctExtraAxis.push({p: z.load_top, c: o.loadColor, text: 'LOAD'})" in js and "var CT_TAG_H = 14;" in js
+    assert "alertId: a.id});" in js and "var w = ctx.measureText(label).width + 12, x = 8;" not in js
+    # Overlapping tags are pushed apart; the × on an alert tag still cancels it.
+    assert "function ctLayoutAxisLabels(ctx, dim, labels) {" in js
+    assert "if (r && l.alertId != null) ctAlertHits.push(" in js
+    assert "ctLayoutAxisLabels(ctx, dim, axisLabels.concat(ctExtraAxis));" in js
+    # One-time switch to axis tags also wins over the account copy.
+    assert "tradestaar.axisTags.v1" in js and "if (ctAxisTagFixNow && ctPrefs.overlays" in js
+    assert 'data-ct-set="overlays.axisTags"' in TEMPLATE
 
 def test_overlays_saved_per_ticker_and_loaded_immediately():
     # Earnings, zones and the next-earnings date show the moment a ticker

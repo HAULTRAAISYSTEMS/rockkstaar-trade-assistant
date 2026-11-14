@@ -92,7 +92,7 @@ var CT_PREF_DEFAULTS = {
          ohlc: true, legend: true, tooltip: true, hint: true, volume: true, sessions: true, events: true, zones: true},
   draw: {stay: false, hidden: false},
   // Value zones and events on the chart: each piece on/off with its colour.
-  overlays: {rail: true, lines: true, tags: true,
+  overlays: {rail: true, lines: true, tags: false, axisTags: true,
              pricey: true, fair: true, accum: true, load: true,
              priceyColor: '#ff6b6b', fairColor: '#f3c95a', accumColor: '#8be36b', loadColor: '#2ee6a6',
              nextEarnings: true, earningsColor: '#f0b53f', earnChip: true, zoneChip: true,
@@ -121,6 +121,23 @@ var ctSessFixNow = false;
     ctSessFixNow = true;
     if (ctPrefs.candles.session) {
       ctPrefs.candles.session = false;
+      localStorage.setItem('tradestaar.chartOverlays', JSON.stringify(ctPrefs));
+      localStorage.setItem('tradestaar.chartOverlaysAt', String(Date.now()));
+      ctSavePrefs();
+    }
+  } catch (e) {}
+})();
+/* Zone and alert labels moved onto the price axis; the in-chart tags are
+   switched off once for accounts that saved the older default (the
+   checkbox in Zones & events turns them back on). */
+var ctAxisTagFixNow = false;
+(function () {
+  try {
+    if (localStorage.getItem('tradestaar.axisTags.v1')) return;
+    localStorage.setItem('tradestaar.axisTags.v1', '1');
+    ctAxisTagFixNow = true;
+    if (ctPrefs.overlays) {
+      ctPrefs.overlays.tags = false; ctPrefs.overlays.axisTags = true;
       localStorage.setItem('tradestaar.chartOverlays', JSON.stringify(ctPrefs));
       localStorage.setItem('tradestaar.chartOverlaysAt', String(Date.now()));
       ctSavePrefs();
@@ -160,6 +177,10 @@ function ctLoadServerPrefs() {
       // First load on this device after the switch-off: the account copy may
       // still have session colors on — apply the switch-off to it too.
       if (ctSessFixNow && ctPrefs.candles.session) { ctPrefs.candles.session = false; ctSessFixNow = false; ctPrefChanged(); }
+      // Same for the move of zone/alert tags onto the price axis.
+      if (ctAxisTagFixNow && ctPrefs.overlays && (ctPrefs.overlays.tags || ctPrefs.overlays.axisTags === false)) {
+        ctPrefs.overlays.tags = false; ctPrefs.overlays.axisTags = true; ctAxisTagFixNow = false; ctPrefChanged();
+      }
       if (d.prefs.tools && typeof d.prefs.tools === 'object') ctToolDefaults = d.prefs.tools;
       try {
         localStorage.setItem('tradestaar.chartOverlays', JSON.stringify(ctPrefs));
@@ -434,35 +455,75 @@ function twRenderDrawings() {
     draft.id = '_draft';
     try { ctDrawOne(ctx, draft, dim, true, axisLabels, timeLabels, true); } catch (e) {}
   }
+  ctExtraAxis = [];
   try { ctDrawExtras(ctx, dim); } catch (e) {}
   try { ctDrawAlerts(ctx, dim, axisLabels); } catch (e) {}
   ctx.restore();
   ctCurId = null;
-  axisLabels.forEach(function (l) { ctAxisLabel(ctx, dim, l.p, l.c, l.text); });
+  ctLayoutAxisLabels(ctx, dim, axisLabels.concat(ctExtraAxis));
   timeLabels.forEach(function (l) { ctTimeLabel(ctx, dim, l.t, l.c); });
   ctUpdateProps();
 }
-function ctAxisLabel(ctx, dim, price, color, title) {
-  var y = ctY(price);
-  if (y == null || y < 0 || y > dim.H) return;
+/* Axis tags: zones, alerts and drawing prices sit on the price axis with
+   their name attached. Tags that would overlap are pushed apart (each
+   keeps a short leader line to its real price). */
+var ctExtraAxis = [];
+var CT_TAG_H = 14;
+function ctLayoutAxisLabels(ctx, dim, labels) {
+  var GAP = 1, items = [];
+  labels.forEach(function (l) {
+    var y = ctY(l.p);
+    if (y == null || y < 0 || y > dim.H) return;
+    items.push({l: l, y0: y, y: y});
+  });
+  items.sort(function (a, b) { return a.y0 - b.y0; });
+  // Spacing depends on each tag's height (named tags are shorter).
+  var hOf = function (it) { return it.l.text ? CT_TAG_H : 18; };
+  for (var i = 1; i < items.length; i++) {
+    var need = (hOf(items[i - 1]) + hOf(items[i])) / 2 + GAP;
+    if (items[i].y < items[i - 1].y + need) items[i].y = items[i - 1].y + need;
+  }
+  // Pushed past the bottom: settle upward instead.
+  for (var j = items.length - 1; j >= 0; j--) {
+    var maxY = j === items.length - 1 ? dim.H - hOf(items[j]) / 2
+      : items[j + 1].y - (hOf(items[j]) + hOf(items[j + 1])) / 2 - GAP;
+    if (items[j].y > maxY) items[j].y = maxY;
+  }
+  items.forEach(function (it) {
+    var l = it.l;
+    if (Math.abs(it.y - it.y0) > 1) {
+      ctx.save(); ctx.strokeStyle = l.c; ctx.globalAlpha = 0.7; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(dim.W - 2, it.y0); ctx.lineTo(dim.W + 4, it.y); ctx.stroke(); ctx.restore();
+    }
+    var r = ctAxisLabel(ctx, dim, l.p, l.c, l.text, it.y);
+    if (r && l.alertId != null) ctAlertHits.push({id: l.alertId, x1: r.x2 - 16, x2: r.x2, y1: r.y1, y2: r.y2});
+  });
+}
+function ctAxisLabel(ctx, dim, price, color, title, yAt) {
+  var y = yAt != null ? yAt : ctY(price);
+  if (y == null || y < -9 || y > dim.H + 9) return null;
   var label = ctFmt(price);
   ctx.save();
-  ctx.font = '700 11px "IBM Plex Mono", ui-monospace, monospace';
-  var h = 18, w = dim.axisW;
+  // Named tags (zones, alerts) are compact so a stack of them stays small.
+  ctx.font = title ? '700 9.5px "IBM Plex Mono", ui-monospace, monospace' : '700 11px "IBM Plex Mono", ui-monospace, monospace';
+  var h = title ? CT_TAG_H : 18, w = dim.axisW;
   ctx.fillStyle = color;
   ctx.fillRect(dim.W, y - h / 2, w, h);
   ctx.fillStyle = ctTextOn(color);
   ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
   ctx.fillText(label, dim.W + 6, y + 0.5);
   if (title) {
-    ctx.font = '700 10px "IBM Plex Mono", ui-monospace, monospace';
-    var tw = ctx.measureText(title).width + 10;
+    ctx.font = '700 8.5px "IBM Plex Mono", ui-monospace, monospace';
+    var tw = ctx.measureText(title).width + 8;
     ctx.fillStyle = color;
     ctx.fillRect(dim.W - tw, y - h / 2, tw, h);
     ctx.fillStyle = ctTextOn(color);
-    ctx.fillText(title, dim.W - tw + 5, y + 0.5);
+    ctx.fillText(title, dim.W - tw + 4, y + 0.5);
+    ctx.restore();
+    return {x1: dim.W - tw, x2: dim.W, y1: y - h / 2, y2: y + h / 2};
   }
   ctx.restore();
+  return null;
 }
 function ctTimeLabel(ctx, dim, t, color) {
   var x = ctX(t);
@@ -1470,6 +1531,11 @@ function ctDrawValueZones(ctx, dim) {
     if (o.load) edge(yLoad, o.loadColor, [6, 6]);
   }
   ctx.setLineDash([]);
+  if (o.axisTags !== false) {
+    if (o.pricey && z.bull) ctExtraAxis.push({p: z.bull, c: o.priceyColor, text: 'PRICEY'});
+    if (o.accum && z.accum_top) ctExtraAxis.push({p: z.accum_top, c: o.accumColor, text: 'ACCUM'});
+    if (o.load && z.load_top) ctExtraAxis.push({p: z.load_top, c: o.loadColor, text: 'LOAD'});
+  }
   if (o.tags) {
     ctx.font = '700 9.5px ui-monospace, Menlo, monospace'; ctx.textBaseline = 'middle';
     var tagRight = o.rail ? railX - 5 : dim.W - 6;
@@ -2026,16 +2092,12 @@ function ctDrawAlerts(ctx, dim, axisLabels) {
     ctx.save();
     ctx.strokeStyle = 'rgba(245,197,66,0.75)'; ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
     ctx.beginPath(); ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(dim.W, Math.round(y) + 0.5); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.font = '700 10px "IBM Plex Mono", ui-monospace, monospace';
-    var label = '🔔 ' + (a.direction === 'above' ? '↑ ' : '↓ ') + (a.note || 'Alert') + '  ×';
-    var w = ctx.measureText(label).width + 12, x = 8;
-    ctx.fillStyle = 'rgba(11,17,28,0.92)'; ctx.fillRect(x, y - 9, w, 18);
-    ctx.strokeStyle = 'rgba(245,197,66,0.75)'; ctx.strokeRect(x + 0.5, y - 8.5, w - 1, 17);
-    ctx.fillStyle = '#f5c542'; ctx.textBaseline = 'middle'; ctx.fillText(label, x + 6, y + 0.5);
     ctx.restore();
-    ctAlertHits.push({id: a.id, x1: x + w - 16, x2: x + w, y1: y - 9, y2: y + 9});
-    axisLabels.push({p: a.price, c: '#f5c542'});
+    // The name rides on the price axis (× at its end cancels the alert).
+    var note = String(a.note || 'Alert').replace(new RegExp('^' + (twChartState.ticker || '') + '\\s+'), '');
+    note = note.replace(/\bstep\s+/i, '').replace(/\s+zone$/i, '');
+    if (note.length > 14) note = note.slice(0, 13) + '…';
+    axisLabels.push({p: a.price, c: '#f5c542', text: '🔔' + (a.direction === 'above' ? '↑ ' : '↓ ') + note + ' ×', alertId: a.id});
   });
 }
 /* Tap the × on an alert tag to cancel it. Capture phase, before drawing. */
