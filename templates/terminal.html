@@ -1206,6 +1206,7 @@ function twSelect(row){
   var sym=document.getElementById('tw-ot-symbol'); if(sym){ sym.value=d.ticker; }
   twEstCost();
   twLoadChart(d.ticker, twChartState.interval, twChartState.range);
+  twLoadOverlays(d.ticker);
   twLoadIntelligenceSoon(d.ticker);
   if (window.dpSetSymbol) window.dpSetSymbol(d.ticker);
 }
@@ -2160,7 +2161,9 @@ function twRenderIntelligence(data){
   // The verified next-earnings date also drives the chart marker and the
   // header countdown (the chart's own feed may not have an upcoming date).
   if(String(data.ticker||'').toUpperCase()===String(twChartState.ticker||'').toUpperCase()){
-    twChartState.nextEarnings=(c.next_earnings&&/^\d{4}-\d{2}-\d{2}/.test(String(c.next_earnings.date||'')))?c.next_earnings:null;
+    var ne=(c.next_earnings&&/^\d{4}-\d{2}-\d{2}/.test(String(c.next_earnings.date||'')))?c.next_earnings:null;
+    if(ne||!twChartState.nextEarnings) twChartState.nextEarnings=ne;
+    if(ne) twOvlSave(data.ticker, {next: ne});
     twRenderEarningsChip();
     if(typeof twRenderDrawings==='function') twRenderDrawings();
   }
@@ -2176,15 +2179,57 @@ function twRenderEarningsChip(){
   el.textContent=n.days===0?'Earnings today':(n.days===1?'Earnings tomorrow':'Earnings in '+n.days+'d');
   el.title='Next earnings '+n.date+(n.time?' · '+n.time:'');
 }
-function twLoadChartEvents(ticker, tries){
+/* Saved overlays: the chart's events (earnings, news), value zones and the
+   next-earnings date are kept per ticker on this device, like the candles,
+   so they appear the moment a ticker opens. Fresh data replaces them. */
+var TW_OVL_PREFIX='tradestaar.ovl.', TW_OVL_INDEX='tradestaar.ovl.index', TW_OVL_MAX=40;
+function twOvlRead(ticker){
+  try{ var v=JSON.parse(localStorage.getItem(TW_OVL_PREFIX+ticker)||'null'); return (v&&typeof v==='object')?v:null; }catch(e){ return null; }
+}
+function twOvlSave(ticker, patch){
+  ticker=String(ticker||'').toUpperCase(); if(!ticker) return;
+  try{
+    var v=twOvlRead(ticker)||{}; Object.keys(patch).forEach(function(k){ v[k]=patch[k]; v[k+'_at']=Date.now(); });
+    localStorage.setItem(TW_OVL_PREFIX+ticker, JSON.stringify(v));
+    var idx=JSON.parse(localStorage.getItem(TW_OVL_INDEX)||'[]').filter(function(t){ return t!==ticker; });
+    idx.unshift(ticker);
+    idx.slice(TW_OVL_MAX).forEach(function(t){ try{ localStorage.removeItem(TW_OVL_PREFIX+t); }catch(e){} });
+    localStorage.setItem(TW_OVL_INDEX, JSON.stringify(idx.slice(0,TW_OVL_MAX)));
+  }catch(e){}
+}
+function twOvlRestore(ticker){
+  var v=twOvlRead(ticker), now=Date.now(); if(!v) return false;
+  var fresh=function(k,h){ return v[k]!=null && now-(v[k+'_at']||0) < h*3600000; };
+  if(fresh('events',48)) twChartState.events_chart=v.events;
+  if(fresh('zones',24)) twChartState.zones=v.zones;
+  if(fresh('next',72)) twChartState.nextEarnings=v.next;
+  twApplyEvents(twChartState.events_chart||[], 'chart');
+  if(twChartState.zones) twRenderZoneChip(twChartState.zones);
+  twRenderEarningsChip();
+  return true;
+}
+/* Events, zones and the earnings date start loading the moment a ticker
+   opens (they don't wait for the candles or the side panels). */
+function twLoadOverlays(ticker){
+  ticker=String(ticker||'').toUpperCase(); if(!ticker) return;
+  twChartState.events_chart=[]; twChartState.events_intel=[]; twChartState.zones=null; twChartState.nextEarnings=null;
+  twOvlRestore(ticker);
+  twLoadChartEvents(ticker, 0, true);
+  twLoadValueZones(ticker, 0, true);
+}
+function twLoadChartEvents(ticker, tries, keep){
   tries=tries||0;
-  if(tries===0){ twChartState.events_chart=[]; twChartState.events_intel=[]; twApplyEvents([], 'chart'); }
+  if(tries===0 && !keep){ twChartState.events_chart=[]; twChartState.events_intel=[]; twApplyEvents([], 'chart'); }
   fetch('/api/terminal/events/'+encodeURIComponent(ticker),{credentials:'same-origin',cache:'no-store'})
     .then(function(r){return r.json();})
     .then(function(d){
       if(!d||!d.ok||twChartState.ticker!==ticker&&String(twChartState.ticker||'').toUpperCase()!==ticker) return;
-      twApplyEvents(d.events||[], 'chart');
-      if(d.pending && tries<6) setTimeout(function(){ twLoadChartEvents(ticker, tries+1); }, 2500+tries*1500);
+      // A pending (still building) empty answer must not wipe saved events.
+      if((d.events||[]).length || !d.pending){
+        twApplyEvents(d.events||[], 'chart');
+        twOvlSave(ticker, {events: d.events||[]});
+      }
+      if(d.pending && tries<10) setTimeout(function(){ twLoadChartEvents(ticker, tries+1, true); }, 2500+tries*1500);
     }).catch(function(){});
 }
 /* Candles first: the side panels (context, insiders, events) wait a moment so
@@ -2215,16 +2260,16 @@ function twSyncZonesBtn(){
 }
 document.addEventListener('DOMContentLoaded', function(){ setTimeout(twSyncZonesBtn, 0); });
 /* Value zones from the Thesis page, shaded on the Daily/Weekly/Monthly chart. */
-function twLoadValueZones(ticker, tries){
+function twLoadValueZones(ticker, tries, keep){
   tries=tries||0;
-  if(tries===0){ twChartState.zones=null; twChartState.nextEarnings=null; twRenderEarningsChip(); }
+  if(tries===0 && !keep){ twChartState.zones=null; twChartState.nextEarnings=null; twRenderEarningsChip(); }
   fetch('/api/thesis/zones?ticker='+encodeURIComponent(ticker),{credentials:'same-origin',cache:'no-store'})
     .then(function(r){return r.ok?r.json():null;})
     .then(function(d){
       if(!d||!d.ok||String(twChartState.ticker||'').toUpperCase()!==ticker) return;
       var z=(d.zones||{})[ticker];
-      if(z){ twChartState.zones=z; twRenderZoneChip(z); if(typeof twRenderDrawings==='function') twRenderDrawings(); }
-      else if((d.pending||[]).indexOf(ticker)>=0 && tries<8) setTimeout(function(){ twLoadValueZones(ticker, tries+1); }, 3000+tries*2000);
+      if(z){ twChartState.zones=z; twRenderZoneChip(z); if(z.available) twOvlSave(ticker, {zones: z}); if(typeof twRenderDrawings==='function') twRenderDrawings(); }
+      else if((d.pending||[]).indexOf(ticker)>=0 && tries<10) setTimeout(function(){ twLoadValueZones(ticker, tries+1, true); }, 3000+tries*2000);
     }).catch(function(){});
 }
 function twRenderZoneChip(z){
@@ -2239,8 +2284,6 @@ function twRenderZoneChip(z){
   el.href='/thesis?ticker='+encodeURIComponent(z.ticker);
 }
 function twLoadIntelligence(ticker){
-  twLoadChartEvents(String(ticker||'').toUpperCase());
-  twLoadValueZones(String(ticker||'').toUpperCase());
   var req=++twChartState.intelReqId; twNum('tw-intel-ticker',ticker); twNum('tw-context-why','Loading verified context…'); twNum('tw-context-insiders','Checking SEC filings…');
   fetch('/api/terminal/intelligence/'+encodeURIComponent(ticker)).then(function(r){return r.json();}).then(function(data){if(req!==twChartState.intelReqId)return;if(!data.ok)throw new Error(data.error||'Unavailable');twRenderIntelligence(data);}).catch(function(){if(req===twChartState.intelReqId){twPanel('overview',twEmpty('Ticker intelligence is temporarily unavailable.'));twNum('tw-context-why','Context temporarily unavailable.');}});
   var insiderReq=++twChartState.insiderReqId;
@@ -2771,7 +2814,7 @@ document.addEventListener('keydown',function(e){
       var ots=document.getElementById('tw-ot-symbol'); if(ots) ots.value=wanted;
       if(window.dpSetSymbol) window.dpSetSymbol(wanted);
     }
-    twLoadChart(bootSym,twChartState.interval,twChartState.range); twLoadIntelligenceSoon(bootSym);
+    twLoadChart(bootSym,twChartState.interval,twChartState.range); twLoadOverlays(bootSym); twLoadIntelligenceSoon(bootSym);
   }
   twEstCost();
   // Seed the change-detector from what the server rendered, so the first poll
