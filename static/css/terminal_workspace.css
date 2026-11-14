@@ -606,3 +606,9 @@ html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen::after { display: non
 /* Value-zones toolbar toggle */
 .tw-zones-btn{color:#2ee6a6}
 .tw-zones-btn.is-off{color:#6b7682;opacity:.7}
+/* Next-earnings countdown chip */
+.tw-earn-chip{display:inline-flex;align-items:center;margin-left:6px;padding:2px 8px;border-radius:99px;border:1px solid #F0B53F;color:#F0B53F;background:rgba(240,181,63,.1);font:800 10px var(--font-mono, ui-monospace);letter-spacing:.05em;text-transform:uppercase;white-space:nowrap}
+.tw-earn-chip[hidden]{display:none}
+.tw-earn-chip.is-soon{background:#F0B53F;color:#1a1206;animation:twEarnPulse 1.6s ease-in-out infinite}
+@keyframes twEarnPulse{50%{box-shadow:0 0 0 4px rgba(240,181,63,.18)}}
+@media (prefers-reduced-motion:reduce){.tw-earn-chip.is-soon{animation:none}}

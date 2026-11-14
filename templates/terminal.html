@@ -564,6 +564,7 @@
                 <span class="tw-bias {{ b0 }}" id="tw-c-bias">{{ 'BULLISH' if b0=='bull' else ('BEARISH' if b0=='bear' else 'NEUTRAL') }}</span>
               {% else %}<span class="tw-bias neutral" id="tw-c-bias">—</span>{% endif %}
               <a class="tw-zone-chip" id="tw-zone-chip" href="#" hidden></a>
+              <span class="tw-earn-chip" id="tw-earn-chip" hidden></span>
             </div>
             <div class="tw-sym-sub" id="tw-c-sub">{{ stocks[0].company_name if stocks and stocks[0].company_name else '' }}</div>
           </div>
@@ -2136,6 +2137,23 @@ function twRenderIntelligence(data){
   twNum('tw-context-earnings',c.next_earnings?(c.next_earnings.date+' · '+c.next_earnings.time):(data.asset_type==='ETF'?'Not applicable · ETF':'No verified date'));
   if(data.asset_type==='ETF'){twNum('tw-context-insiders','Not applicable · ETF');twPanel('insiders',twEmpty('Corporate Form 4 insider filings are not applicable to an ETF.'));}
   twApplyEvents(data.events||[], 'intel');
+  // The verified next-earnings date also drives the chart marker and the
+  // header countdown (the chart's own feed may not have an upcoming date).
+  if(String(data.ticker||'').toUpperCase()===String(twChartState.ticker||'').toUpperCase()){
+    twChartState.nextEarnings=(c.next_earnings&&/^\d{4}-\d{2}-\d{2}/.test(String(c.next_earnings.date||'')))?c.next_earnings:null;
+    twRenderEarningsChip();
+    if(typeof twRenderDrawings==='function') twRenderDrawings();
+  }
+}
+/* "Earnings in N days" chip next to the ticker. */
+function twRenderEarningsChip(){
+  var el=document.getElementById('tw-earn-chip'); if(!el) return;
+  var n=typeof ctNextEarnings==='function'?ctNextEarnings():null;
+  if(!n){ el.hidden=true; return; }
+  el.hidden=false;
+  el.className='tw-earn-chip'+(n.days<=3?' is-soon':'');
+  el.textContent=n.days===0?'Earnings today':(n.days===1?'Earnings tomorrow':'Earnings in '+n.days+'d');
+  el.title='Next earnings '+n.date+(n.time?' · '+n.time:'');
 }
 function twLoadChartEvents(ticker, tries){
   tries=tries||0;
@@ -2178,7 +2196,7 @@ document.addEventListener('DOMContentLoaded', function(){ setTimeout(twSyncZones
 /* Value zones from the Thesis page, shaded on the Daily/Weekly/Monthly chart. */
 function twLoadValueZones(ticker, tries){
   tries=tries||0;
-  if(tries===0) twChartState.zones=null;
+  if(tries===0){ twChartState.zones=null; twChartState.nextEarnings=null; twRenderEarningsChip(); }
   fetch('/api/thesis/zones?ticker='+encodeURIComponent(ticker),{credentials:'same-origin',cache:'no-store'})
     .then(function(r){return r.ok?r.json():null;})
     .then(function(d){

@@ -1378,6 +1378,7 @@ function ctDrawExtras(ctx, dim) {
   try { ctDrawValueZones(ctx, dim); } catch (e) {}
   try { ctDrawSessionMarks(ctx, dim); } catch (e) {}
   try { ctDrawEvents(ctx, dim); } catch (e) {}
+  try { ctDrawNextEarnings(ctx, dim); } catch (e) {}
   if (ctPrefs.view.hilo) {
     var r = null;
     try { r = ch.timeScale().getVisibleLogicalRange(); } catch (e) {}
@@ -1432,35 +1433,110 @@ function ctDrawValueZones(ctx, dim) {
   var z = twChartState.zones;
   if (!z || !z.available || ctPrefs.view.zones === false) return;
   if ((CT_STEP[twChartState.interval] || 0) < 86400) return;
-  var yAcc = ctY(z.accum_top), yLoad = ctY(z.load_top), yBull = ctY(z.bull);
-  function band(yTop, yBot, fill, edge) {
-    if (yTop == null) yTop = -10;
-    if (yBot == null || yBot > dim.H) yBot = dim.H;
-    if (yTop > dim.H || yBot < 0 || yBot <= yTop) return;
-    ctx.fillStyle = fill; ctx.fillRect(0, Math.max(0, yTop), dim.W, yBot - Math.max(0, yTop));
-    if (yTop >= 0) { ctx.strokeStyle = edge; ctx.lineWidth = 1; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(0, yTop + 0.5); ctx.lineTo(dim.W, yTop + 0.5); ctx.stroke(); }
-  }
+  /* The value rail: a slim colour strip down the right edge of the chart
+     (Pricey red / Fair amber / Accumulate light green / Load green) with a
+     marker at the current price. The chart background stays untouched;
+     only hairlines cross it at the zone edges. */
+  var yBull = ctY(z.bull), yAcc = ctY(z.accum_top), yLoad = ctY(z.load_top);
+  if (yBull == null && yAcc == null && yLoad == null) return;
+  var top = -1e6, bot = 1e6;
+  function clampY(y, dflt) { return y == null ? dflt : Math.max(0, Math.min(dim.H, y)); }
+  var railX = dim.W - 10, railW = 7;
+  var segs = [
+    [clampY(null, 0), clampY(yBull, 0), '#ff6b6b'],
+    [clampY(yBull, 0), clampY(yAcc, 0), '#f3c95a'],
+    [clampY(yAcc, 0), clampY(yLoad, dim.H), '#8be36b'],
+    [clampY(yLoad, dim.H), dim.H, '#2ee6a6']
+  ];
   ctx.save();
-  // Light washes, so Fibonacci levels, alerts and drawings stay readable.
-  if (yAcc != null) band(yAcc, yLoad == null ? dim.H : yLoad, 'rgba(139,227,107,0.035)', 'rgba(139,227,107,0.35)');
-  if (yLoad != null) band(yLoad, dim.H + 10, 'rgba(46,230,166,0.06)', 'rgba(46,230,166,0.5)');
-  if (yBull != null && yBull > 0 && yBull < dim.H) {
-    ctx.strokeStyle = 'rgba(255,107,107,0.45)'; ctx.setLineDash([2, 5]); ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(0, yBull + 0.5); ctx.lineTo(dim.W, yBull + 0.5); ctx.stroke(); ctx.setLineDash([]);
+  segs.forEach(function (sg) {
+    var y0 = Math.min(sg[0], sg[1]), y1 = Math.max(sg[0], sg[1]);
+    if (y1 - y0 < 1) return;
+    ctx.fillStyle = sg[2]; ctx.globalAlpha = 0.85;
+    ctx.fillRect(railX, y0, railW, y1 - y0);
+  });
+  ctx.globalAlpha = 1;
+  // Hairlines at the zone edges, then labels just left of the rail.
+  function edge(y, color, dash) {
+    if (y == null || y < 0 || y > dim.H) return;
+    ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash(dash);
+    ctx.beginPath(); ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(railX - 2, Math.round(y) + 0.5); ctx.stroke();
   }
-  // Labels sit at the right edge, next to the price axis, clear of the
-  // OHLC / indicator readout in the top-left corner.
+  edge(yBull, 'rgba(255,107,107,0.32)', [2, 6]);
+  edge(yAcc, 'rgba(139,227,107,0.32)', [6, 6]);
+  edge(yLoad, 'rgba(46,230,166,0.38)', [6, 6]);
+  ctx.setLineDash([]);
   ctx.font = '700 9.5px ui-monospace, Menlo, monospace'; ctx.textBaseline = 'middle';
   function tag(y, text, color) {
     if (y == null || y < 9 || y > dim.H - 9) return;
-    var w = ctx.measureText(text).width + 10, x = dim.W - w - 6;
-    ctx.fillStyle = 'rgba(8,10,12,0.82)'; ctx.fillRect(x, y - 8, w, 16);
+    var w = ctx.measureText(text).width + 10, x = railX - w - 5;
+    ctx.fillStyle = 'rgba(8,10,12,0.85)'; ctx.fillRect(x, y - 8, w, 16);
     ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y - 7.5, w - 1, 15);
     ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.fillText(text, x + 5, y + 0.5);
   }
+  tag(yBull != null ? yBull - 10 : null, 'PRICEY ≥ ' + ctFmt(z.bull), '#ff6b6b');
   tag(yAcc != null ? yAcc + 10 : null, 'ACCUM ≤ ' + ctFmt(z.accum_top), '#8be36b');
   tag(yLoad != null ? yLoad + 10 : null, 'LOAD ≤ ' + ctFmt(z.load_top), '#2ee6a6');
-  tag(yBull != null ? yBull - 10 : null, 'PRICEY ≥ ' + ctFmt(z.bull), '#ff6b6b');
+  // Marker on the rail at the current price.
+  var bars = twChartState.bars || [], last = bars.length ? bars[bars.length - 1].close : null;
+  var yNow = last != null ? ctY(last) : null;
+  if (yNow != null && yNow >= 0 && yNow <= dim.H) {
+    ctx.fillStyle = '#f6f4ee';
+    ctx.beginPath(); ctx.moveTo(railX - 7, yNow - 5); ctx.lineTo(railX - 1, yNow); ctx.lineTo(railX - 7, yNow + 5); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* Next earnings: from the chart's event feed (upcoming) or the verified
+   date the Terminal's context card shows. {date, time, ts, days} or null. */
+function ctNextEarnings() {
+  var now = Date.now() / 1000, best = null;
+  (twChartState.events || []).forEach(function (e) {
+    if (e.type !== 'earnings') return;
+    var t = ctEventTime(e);
+    if (t != null && t >= now - 86400 && (!best || t < best.ts)) best = {date: e.date, time: e.time || '', ts: t};
+  });
+  var ne = twChartState.nextEarnings;
+  if (!best && ne && ne.date) {
+    var t2 = Date.parse(String(ne.date).slice(0, 10) + 'T12:00:00Z') / 1000;
+    if (isFinite(t2) && t2 >= now - 86400) best = {date: String(ne.date).slice(0, 10), time: ne.time || '', ts: t2};
+  }
+  if (!best) return null;
+  var todayET = new Date(new Date().toLocaleString('en-US', {timeZone: 'America/New_York'}));
+  todayET.setHours(12, 0, 0, 0);
+  var d = new Date(String(best.date).slice(0, 10) + 'T12:00:00');
+  best.days = Math.max(0, Math.round((d - todayET) / 86400000));
+  return best;
+}
+
+/* The next earnings date on every timeframe: a gold dashed line at the day
+   with a countdown pill at the top; past the right edge, the pill sits at
+   the edge pointing right. */
+function ctDrawNextEarnings(ctx, dim) {
+  if (!ctPrefs.view.events) return;
+  var n = ctNextEarnings(); if (!n) return;
+  var step = CT_STEP[twChartState.interval] || 86400;
+  var t = step >= 86400 ? Math.floor(n.ts / 86400) * 86400 + 12 * 3600 : n.ts;
+  var x = ctEventX(t, step);
+  var when = n.days === 0 ? 'TODAY' : (n.days === 1 ? 'TOMORROW' : 'IN ' + n.days + 'D');
+  var text = 'EARNINGS ' + ctShortDate(n.date).toUpperCase() + (n.time ? ' ' + String(n.time).toUpperCase() : '') + ' · ' + when;
+  ctx.save();
+  ctx.font = '800 10px "IBM Plex Mono", ui-monospace, monospace'; ctx.textBaseline = 'middle';
+  var w = ctx.measureText(text).width + 14, h = 18, y = 4;
+  if (x != null && x >= 0 && x <= dim.W - 16) {
+    x = Math.round(x) + 0.5;
+    ctx.strokeStyle = 'rgba(240,181,63,0.75)'; ctx.lineWidth = 1.2; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x, dim.H); ctx.stroke(); ctx.setLineDash([]);
+    var px = Math.min(Math.max(4, x - w / 2), dim.W - w - 18);
+    ctx.fillStyle = '#F0B53F'; ctx.fillRect(px, y, w, h);
+    ctx.fillStyle = '#1a1206'; ctx.textAlign = 'left'; ctx.fillText(text, px + 7, y + h / 2 + 0.5);
+    ctEventHits.push({x: px + w / 2, y: y + h / 2, r: Math.max(12, w / 2), text: 'Next earnings ' + n.date + (n.time ? ' · ' + n.time : '')});
+  } else if (x != null && x > dim.W - 16) {
+    var t2 = text + ' ›', w2 = ctx.measureText(t2).width + 14, ex = dim.W - w2 - 18;
+    ctx.fillStyle = '#F0B53F'; ctx.fillRect(ex, y, w2, h);
+    ctx.fillStyle = '#1a1206'; ctx.textAlign = 'left'; ctx.fillText(t2, ex + 7, y + h / 2 + 0.5);
+    ctEventHits.push({x: ex + w2 / 2, y: y + h / 2, r: Math.max(12, w2 / 2), text: 'Next earnings ' + n.date + ' — scroll right to see it on the time axis'});
+  }
   ctx.restore();
 }
 function ctDrawSessionMarks(ctx, dim) {
@@ -2130,7 +2206,9 @@ function ctDrawEvents(ctx, dim) {
     var nowS = Date.now() / 1000;
     var past = earn.filter(function (e) { var t = ctEventTime(e); return t != null && t <= nowS && !e.upcoming; })
       .sort(function (a, b) { return ctEventTime(b) - ctEventTime(a); }).slice(0, CT_MAX_EARNINGS_LONG);
-    earn = past.concat(earn.filter(function (e) { var t = ctEventTime(e); return e.upcoming || (t != null && t > nowS); }));
+    earn = past;
+  } else {
+    earn = earn.filter(function (e) { var t = ctEventTime(e); return !e.upcoming && t != null && t <= Date.now() / 1000; });
   }
   earn.forEach(function (e) {
     var t = ctEventTime(e); if (t == null || t < first) return;
