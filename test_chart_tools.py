@@ -655,7 +655,8 @@ def test_timeframe_switch_paints_from_background_prefetch():
 def test_chart_declutter_zone_tags_earnings_cap_axis_and_toggle():
     js = open("static/js/chart_tools.js", encoding="utf-8").read()
     # Zone labels at the right edge (clear of the top-left OHLC/EMA readout), lighter bands.
-    assert "x = dim.W - w - 6" in js and "'rgba(46,230,166,0.06)'" in js
+    # Zones draw as a value rail at the right edge; the background is never tinted.
+    assert "var railX = dim.W - 10, railW = 7;" in js and "fillRect(0, Math.max(0, yTop)" not in js
     # Daily+ charts keep only the last 8 past earnings reports (plus upcoming).
     assert "var CT_MAX_EARNINGS_LONG = 8;" in js and ".slice(0, CT_MAX_EARNINGS_LONG)" in js
     assert "if (path === 'view.zones' && typeof twSyncZonesBtn === 'function') twSyncZonesBtn();" in js
@@ -664,3 +665,14 @@ def test_chart_declutter_zone_tags_earnings_cap_axis_and_toggle():
     assert "priceFormat:twPxFmt" in TEMPLATE and "priceFormatter:twAxisPrice" not in TEMPLATE
     # One-tap value-zone toggle on the toolbar.
     assert 'id="tw-zones-btn" onclick="twToggleZones()"' in TEMPLATE and "function twToggleZones(){" in TEMPLATE
+
+
+
+def test_next_earnings_marker_and_countdown_chip():
+    js = open("static/js/chart_tools.js", encoding="utf-8").read()
+    assert "function ctNextEarnings()" in js and "function ctDrawNextEarnings(ctx, dim)" in js
+    assert "try { ctDrawNextEarnings(ctx, dim); } catch (e) {}" in js
+    assert "twChartState.nextEarnings" in js            # verified date from the context card
+    assert "'EARNINGS ' + ctShortDate(n.date).toUpperCase()" in js
+    assert 'id="tw-earn-chip"' in TEMPLATE and "function twRenderEarningsChip(){" in TEMPLATE
+    assert "twChartState.nextEarnings=(c.next_earnings" in TEMPLATE
