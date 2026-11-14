@@ -91,6 +91,12 @@ var CT_PREF_DEFAULTS = {
   view: {grid: 'none', crosshair: 'free', watermark: false, hilo: true, rightOffset: 5, countdown: true,
          ohlc: true, legend: true, tooltip: true, hint: true, volume: true, sessions: true, events: true, zones: true},
   draw: {stay: false, hidden: false},
+  // Value zones and events on the chart: each piece on/off with its colour.
+  overlays: {rail: true, lines: true, tags: true,
+             pricey: true, fair: true, accum: true, load: true,
+             priceyColor: '#ff6b6b', fairColor: '#f3c95a', accumColor: '#8be36b', loadColor: '#2ee6a6',
+             nextEarnings: true, earningsColor: '#f0b53f', earnChip: true, zoneChip: true,
+             pastEarnings: true, news: true, newsColor: '#6fa8ff'},
   magnet: false
 };
 var ctPrefs = JSON.parse(JSON.stringify(CT_PREF_DEFAULTS));
@@ -1430,59 +1436,61 @@ function ctDrawExtras(ctx, dim) {
    (25%+ under), plus a thin line where Pricey starts. Value says where;
    the candles say when. */
 function ctDrawValueZones(ctx, dim) {
-  var z = twChartState.zones;
+  var z = twChartState.zones, o = ctPrefs.overlays || CT_PREF_DEFAULTS.overlays;
   if (!z || !z.available || ctPrefs.view.zones === false) return;
   if ((CT_STEP[twChartState.interval] || 0) < 86400) return;
   /* The value rail: a slim colour strip down the right edge of the chart
-     (Pricey red / Fair amber / Accumulate light green / Load green) with a
-     marker at the current price. The chart background stays untouched;
-     only hairlines cross it at the zone edges. */
+     (Pricey / Fair / Accumulate / Load) with a marker at the current price.
+     The chart background stays untouched; only hairlines cross it at the
+     zone edges. Every piece and colour comes from Chart settings. */
   var yBull = ctY(z.bull), yAcc = ctY(z.accum_top), yLoad = ctY(z.load_top);
   if (yBull == null && yAcc == null && yLoad == null) return;
-  var top = -1e6, bot = 1e6;
   function clampY(y, dflt) { return y == null ? dflt : Math.max(0, Math.min(dim.H, y)); }
-  var railX = dim.W - 10, railW = 7;
-  var segs = [
-    [clampY(null, 0), clampY(yBull, 0), '#ff6b6b'],
-    [clampY(yBull, 0), clampY(yAcc, 0), '#f3c95a'],
-    [clampY(yAcc, 0), clampY(yLoad, dim.H), '#8be36b'],
-    [clampY(yLoad, dim.H), dim.H, '#2ee6a6']
-  ];
+  var railX = dim.W - 10, railW = 7, lineEnd = o.rail ? railX - 2 : dim.W;
   ctx.save();
-  segs.forEach(function (sg) {
-    var y0 = Math.min(sg[0], sg[1]), y1 = Math.max(sg[0], sg[1]);
-    if (y1 - y0 < 1) return;
-    ctx.fillStyle = sg[2]; ctx.globalAlpha = 0.85;
-    ctx.fillRect(railX, y0, railW, y1 - y0);
-  });
-  ctx.globalAlpha = 1;
-  // Hairlines at the zone edges, then labels just left of the rail.
+  if (o.rail) {
+    [[0, clampY(yBull, 0), o.pricey, o.priceyColor],
+     [clampY(yBull, 0), clampY(yAcc, 0), o.fair, o.fairColor],
+     [clampY(yAcc, 0), clampY(yLoad, dim.H), o.accum, o.accumColor],
+     [clampY(yLoad, dim.H), dim.H, o.load, o.loadColor]].forEach(function (sg) {
+      var y0 = Math.min(sg[0], sg[1]), y1 = Math.max(sg[0], sg[1]);
+      if (!sg[2] || y1 - y0 < 1) return;
+      ctx.fillStyle = sg[3]; ctx.globalAlpha = 0.85; ctx.fillRect(railX, y0, railW, y1 - y0);
+    });
+    ctx.globalAlpha = 1;
+  }
   function edge(y, color, dash) {
     if (y == null || y < 0 || y > dim.H) return;
-    ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash(dash);
-    ctx.beginPath(); ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(railX - 2, Math.round(y) + 0.5); ctx.stroke();
+    ctx.strokeStyle = ctHexA(color, 0.4); ctx.lineWidth = 1; ctx.setLineDash(dash);
+    ctx.beginPath(); ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(lineEnd, Math.round(y) + 0.5); ctx.stroke();
   }
-  edge(yBull, 'rgba(255,107,107,0.32)', [2, 6]);
-  edge(yAcc, 'rgba(139,227,107,0.32)', [6, 6]);
-  edge(yLoad, 'rgba(46,230,166,0.38)', [6, 6]);
+  if (o.lines) {
+    if (o.pricey) edge(yBull, o.priceyColor, [2, 6]);
+    if (o.accum) edge(yAcc, o.accumColor, [6, 6]);
+    if (o.load) edge(yLoad, o.loadColor, [6, 6]);
+  }
   ctx.setLineDash([]);
-  ctx.font = '700 9.5px ui-monospace, Menlo, monospace'; ctx.textBaseline = 'middle';
-  function tag(y, text, color) {
-    if (y == null || y < 9 || y > dim.H - 9) return;
-    var w = ctx.measureText(text).width + 10, x = railX - w - 5;
-    ctx.fillStyle = 'rgba(8,10,12,0.85)'; ctx.fillRect(x, y - 8, w, 16);
-    ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y - 7.5, w - 1, 15);
-    ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.fillText(text, x + 5, y + 0.5);
+  if (o.tags) {
+    ctx.font = '700 9.5px ui-monospace, Menlo, monospace'; ctx.textBaseline = 'middle';
+    var tagRight = o.rail ? railX - 5 : dim.W - 6;
+    var tag = function (y, text, color) {
+      if (y == null || y < 9 || y > dim.H - 9) return;
+      var w = ctx.measureText(text).width + 10, x = tagRight - w;
+      ctx.fillStyle = 'rgba(8,10,12,0.85)'; ctx.fillRect(x, y - 8, w, 16);
+      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y - 7.5, w - 1, 15);
+      ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.fillText(text, x + 5, y + 0.5);
+    };
+    if (o.pricey) tag(yBull != null ? yBull - 10 : null, 'PRICEY ≥ ' + ctFmt(z.bull), o.priceyColor);
+    if (o.accum) tag(yAcc != null ? yAcc + 10 : null, 'ACCUM ≤ ' + ctFmt(z.accum_top), o.accumColor);
+    if (o.load) tag(yLoad != null ? yLoad + 10 : null, 'LOAD ≤ ' + ctFmt(z.load_top), o.loadColor);
   }
-  tag(yBull != null ? yBull - 10 : null, 'PRICEY ≥ ' + ctFmt(z.bull), '#ff6b6b');
-  tag(yAcc != null ? yAcc + 10 : null, 'ACCUM ≤ ' + ctFmt(z.accum_top), '#8be36b');
-  tag(yLoad != null ? yLoad + 10 : null, 'LOAD ≤ ' + ctFmt(z.load_top), '#2ee6a6');
-  // Marker on the rail at the current price.
-  var bars = twChartState.bars || [], last = bars.length ? bars[bars.length - 1].close : null;
-  var yNow = last != null ? ctY(last) : null;
-  if (yNow != null && yNow >= 0 && yNow <= dim.H) {
-    ctx.fillStyle = '#f6f4ee';
-    ctx.beginPath(); ctx.moveTo(railX - 7, yNow - 5); ctx.lineTo(railX - 1, yNow); ctx.lineTo(railX - 7, yNow + 5); ctx.closePath(); ctx.fill();
+  if (o.rail) {
+    var bars = twChartState.bars || [], last = bars.length ? bars[bars.length - 1].close : null;
+    var yNow = last != null ? ctY(last) : null;
+    if (yNow != null && yNow >= 0 && yNow <= dim.H) {
+      ctx.fillStyle = '#f6f4ee';
+      ctx.beginPath(); ctx.moveTo(railX - 7, yNow - 5); ctx.lineTo(railX - 1, yNow); ctx.lineTo(railX - 7, yNow + 5); ctx.closePath(); ctx.fill();
+    }
   }
   ctx.restore();
 }
@@ -1513,7 +1521,9 @@ function ctNextEarnings() {
    with a countdown pill at the top; past the right edge, the pill sits at
    the edge pointing right. */
 function ctDrawNextEarnings(ctx, dim) {
-  if (!ctPrefs.view.events) return;
+  var o = ctPrefs.overlays || CT_PREF_DEFAULTS.overlays;
+  if (!ctPrefs.view.events || !o.nextEarnings) return;
+  var gold = o.earningsColor || '#f0b53f';
   var n = ctNextEarnings(); if (!n) return;
   var step = CT_STEP[twChartState.interval] || 86400;
   var t = step >= 86400 ? Math.floor(n.ts / 86400) * 86400 + 12 * 3600 : n.ts;
@@ -1525,15 +1535,15 @@ function ctDrawNextEarnings(ctx, dim) {
   var w = ctx.measureText(text).width + 14, h = 18, y = 4;
   if (x != null && x >= 0 && x <= dim.W - 16) {
     x = Math.round(x) + 0.5;
-    ctx.strokeStyle = 'rgba(240,181,63,0.75)'; ctx.lineWidth = 1.2; ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = ctHexA(gold, 0.75); ctx.lineWidth = 1.2; ctx.setLineDash([5, 4]);
     ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x, dim.H); ctx.stroke(); ctx.setLineDash([]);
     var px = Math.min(Math.max(4, x - w / 2), dim.W - w - 18);
-    ctx.fillStyle = '#F0B53F'; ctx.fillRect(px, y, w, h);
+    ctx.fillStyle = gold; ctx.fillRect(px, y, w, h);
     ctx.fillStyle = '#1a1206'; ctx.textAlign = 'left'; ctx.fillText(text, px + 7, y + h / 2 + 0.5);
     ctEventHits.push({x: px + w / 2, y: y + h / 2, r: Math.max(12, w / 2), text: 'Next earnings ' + n.date + (n.time ? ' · ' + n.time : '')});
   } else if (x != null && x > dim.W - 16) {
     var t2 = text + ' ›', w2 = ctx.measureText(t2).width + 14, ex = dim.W - w2 - 18;
-    ctx.fillStyle = '#F0B53F'; ctx.fillRect(ex, y, w2, h);
+    ctx.fillStyle = gold; ctx.fillRect(ex, y, w2, h);
     ctx.fillStyle = '#1a1206'; ctx.textAlign = 'left'; ctx.fillText(t2, ex + 7, y + h / 2 + 0.5);
     ctEventHits.push({x: ex + w2 / 2, y: y + h / 2, r: Math.max(12, w2 / 2), text: 'Next earnings ' + n.date + ' — scroll right to see it on the time axis'});
   }
@@ -1810,10 +1820,25 @@ function ctSet(path, value) {
   if (path === 'view.volume' && typeof twToggleVolume === 'function' && !!value !== !!twChartState.showVolume) twToggleVolume(document.getElementById('tw-volume-btn') || document.createElement('button'));
   if (path.indexOf('view.') === 0 || path.indexOf('scale.') === 0) ctApplyView(true);
   if (path === 'view.zones' && typeof twSyncZonesBtn === 'function') twSyncZonesBtn();
+  if (path.indexOf('overlays.') === 0) {
+    if (typeof twRenderEarningsChip === 'function') twRenderEarningsChip();
+    if (typeof twRenderZoneChip === 'function') twRenderZoneChip(twChartState.zones);
+    if (typeof twRenderDrawings === 'function') twRenderDrawings();
+  }
   if (path.indexOf('labels.') === 0 || path.indexOf('levels.') === 0) { ctStudy.nbboWant = null; ctRenderLevels(); }
   if (path === 'magnet' || path === 'draw.hidden') ctSyncRail();
   if (path === 'labels.indicators' && typeof twApplyStudyStyles === 'function') twApplyStudyStyles();
   ctRenderStudies(); ctSyncSettingsUI(); twRenderDrawings();
+}
+/* Zones & events tab: back to the default look. */
+function ctResetOverlays() {
+  ctPrefs.overlays = JSON.parse(JSON.stringify(CT_PREF_DEFAULTS.overlays));
+  ctPrefs.view.zones = true; ctPrefs.view.events = true;
+  ctPrefChanged(); ctSyncSettingsUI();
+  if (typeof twSyncZonesBtn === 'function') twSyncZonesBtn();
+  if (typeof twRenderEarningsChip === 'function') twRenderEarningsChip();
+  if (typeof twRenderZoneChip === 'function') twRenderZoneChip(twChartState.zones);
+  twRenderDrawings();
 }
 function ctSyncSettingsUI() {
   if (typeof twChartState !== 'undefined') ctPrefs.view.volume = !!twChartState.showVolume;
@@ -2201,7 +2226,8 @@ function ctDrawEvents(ctx, dim) {
   ctx.font = '800 10px "IBM Plex Mono", ui-monospace, monospace'; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
   // Earnings. On Daily and longer only the last 8 past reports (plus any
   // upcoming one): an "All" chart would otherwise carry 30+ flags.
-  var earn = evs.filter(function (e) { return e.type === 'earnings'; });
+  var ov = ctPrefs.overlays || CT_PREF_DEFAULTS.overlays;
+  var earn = ov.pastEarnings === false ? [] : evs.filter(function (e) { return e.type === 'earnings'; });
   if (step >= 86400) {
     var nowS = Date.now() / 1000;
     var past = earn.filter(function (e) { var t = ctEventTime(e); return t != null && t <= nowS && !e.upcoming; })
@@ -2242,7 +2268,7 @@ function ctDrawEvents(ctx, dim) {
   });
   // News, clustered by pixel
   var dots = [];
-  evs.filter(function (e) { return e.type === 'news' && e.ts; }).forEach(function (e) {
+  (ov.news === false ? [] : evs).filter(function (e) { return e.type === 'news' && e.ts; }).forEach(function (e) {
     if (e.ts < first) return;
     var x = ctEventX(Number(e.ts), step); if (x == null || x < 0 || x > dim.W) return;
     var near = dots.filter(function (d) { return Math.abs(d.x - x) < 12; })[0];
@@ -2252,7 +2278,7 @@ function ctDrawEvents(ctx, dim) {
   var eXs = ctEventHits.filter(function (h) { return h.text && Math.abs(h.y - (dim.H - 14)) < 2; }).map(function (h) { return h.x; });
   dots.forEach(function (d) {
     var y = eXs.some(function (ex) { return Math.abs(ex - d.x) < 16; }) ? dim.H - 34 : dim.H - 14, n = d.items.length;
-    ctx.fillStyle = 'rgba(111,168,255,0.92)'; ctx.beginPath(); ctx.arc(d.x, y, n > 1 ? 8 : 6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = ctHexA(ov.newsColor || '#6fa8ff', 0.92); ctx.beginPath(); ctx.arc(d.x, y, n > 1 ? 8 : 6, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#06101f'; ctx.fillText(n > 1 ? String(Math.min(n, 9)) : 'N', d.x, y + 0.5);
     ctEventHits.push({x: d.x, y: y, r: 10, items: d.items});
   });
