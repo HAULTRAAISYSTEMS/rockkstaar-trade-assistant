@@ -583,7 +583,7 @@ def test_chart_events_endpoint_past_earnings_and_news(client, monkeypatch):
     assert any(e.get("upcoming") and e["date"] == "2099-11-19" for e in earn)
     news = [e for e in ev if e["type"] == "news"]
     assert len(news) == 1 and news[0]["ts"] == 1794493800
-    assert "function twLoadChartEvents(ticker, tries)" in TEMPLATE and "'/api/terminal/events/'" in TEMPLATE
+    assert "function twLoadChartEvents(ticker, tries, keep)" in TEMPLATE and "'/api/terminal/events/'" in TEMPLATE
 
 
 def test_chart_paints_saved_candles_first_and_side_panels_wait():
@@ -675,7 +675,7 @@ def test_next_earnings_marker_and_countdown_chip():
     assert "twChartState.nextEarnings" in js            # verified date from the context card
     assert "'EARNINGS ' + ctShortDate(n.date).toUpperCase()" in js
     assert 'id="tw-earn-chip"' in TEMPLATE and "function twRenderEarningsChip(){" in TEMPLATE
-    assert "twChartState.nextEarnings=(c.next_earnings" in TEMPLATE
+    assert "if(ne||!twChartState.nextEarnings) twChartState.nextEarnings=ne" in TEMPLATE
 
 
 def test_zones_and_events_settings_tab():
@@ -696,3 +696,16 @@ def test_zones_and_events_settings_tab():
     assert "ov.earnChip===false" in TEMPLATE and "ov.zoneChip===false" in TEMPLATE
     css = open("static/css/chart_tools.css", encoding="utf-8").read()
     assert '[data-ct-active="zones"] > [data-tab="zones"]' in css
+
+
+def test_overlays_saved_per_ticker_and_loaded_immediately():
+    # Earnings, zones and the next-earnings date show the moment a ticker
+    # opens: saved per ticker on the device, loaded without waiting for the
+    # candles, and never wiped by a 'still building' (pending) answer.
+    assert "function twOvlSave(ticker, patch){" in TEMPLATE and "function twOvlRestore(ticker){" in TEMPLATE
+    assert "function twLoadOverlays(ticker){" in TEMPLATE
+    assert "twLoadChart(d.ticker, twChartState.interval, twChartState.range);\n  twLoadOverlays(d.ticker);" in TEMPLATE
+    assert "twLoadOverlays(bootSym);" in TEMPLATE
+    assert "if((d.events||[]).length || !d.pending){" in TEMPLATE
+    assert "twOvlSave(ticker, {zones: z})" in TEMPLATE and "twOvlSave(data.ticker, {next: ne})" in TEMPLATE
+    assert "TW_OVL_MAX=40" in TEMPLATE

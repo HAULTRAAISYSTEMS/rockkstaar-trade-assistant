@@ -208,3 +208,15 @@ def test_workspace_links_and_accessible_search_render(client, monkeypatch):
         html = server.render_template("_workspace_search.html")
     assert 'id="workspace-search"' in html and 'aria-labelledby="workspace-search-title"' in html
     assert '/fundamentals?tab=quarter' in html and '/notifications' in html
+
+
+def test_smart_watchlist_tolerates_missing_scores():
+    # A stock without swing/prob/rvol scores (None) crashed the Smart
+    # watchlist with "'>=' not supported between NoneType and int".
+    import institutional_engine as inst
+    rows = [{"ticker": "AAA", "prob_score": None, "swing_score": None, "rvol": None, "gap_pct": None,
+             "continuation_score": None},
+            {"ticker": "BBB", "prob_score": 85, "swing_score": 7, "rvol": 2.0, "gap_pct": 3.0,
+             "continuation_score": 60}]
+    out = inst.build_smart_watchlist(rows, {})
+    assert isinstance(out, dict)

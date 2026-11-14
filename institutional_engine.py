@@ -1366,16 +1366,16 @@ def build_smart_watchlist(stocks: list[dict], mkt_ctx: dict) -> dict:
     if not stocks:
         return {"a_plus": [], "a_grade": [], "b_grade": [], "watchlists": {}}
 
-    scored = sorted(stocks, key=lambda s: s.get("prob_score", 0), reverse=True)
+    scored = sorted(stocks, key=lambda s: (s.get("prob_score") or 0), reverse=True)
 
-    a_plus = [s for s in scored if s.get("prob_score", 0) >= 80]
-    a_grade = [s for s in scored if 70 <= s.get("prob_score", 0) < 80]
-    b_grade = [s for s in scored if 55 <= s.get("prob_score", 0) < 70]
+    a_plus = [s for s in scored if (s.get("prob_score") or 0) >= 80]
+    a_grade = [s for s in scored if 70 <= (s.get("prob_score") or 0) < 80]
+    b_grade = [s for s in scored if 55 <= (s.get("prob_score") or 0) < 70]
 
     # Specialized watchlists
     earnings_plays = [s for s in stocks if s.get("in_earnings_drift") or s.get("earnings_date")]
-    orb_candidates = [s for s in stocks if s.get("rvol", 0) >= 1.5 and s.get("gap_pct", 0) > 2]
-    continuation   = [s for s in stocks if s.get("continuation_score", 0) >= 50]
+    orb_candidates = [s for s in stocks if (s.get("rvol") or 0) >= 1.5 and (s.get("gap_pct") or 0) > 2]
+    continuation   = [s for s in stocks if (s.get("continuation_score") or 0) >= 50]
     squeeze_plays  = [s for s in stocks if s.get("squeeze_probability") in ("High", "Moderate")]
 
     def _ticker_list(lst, max_n=8):
@@ -1387,11 +1387,11 @@ def build_smart_watchlist(stocks: list[dict], mkt_ctx: dict) -> dict:
         "b_grade":    _ticker_list(b_grade),
         "watchlists": {
             "AI Momentum":    _ticker_list(a_plus),
-            "Earnings Plays": _ticker_list(sorted(earnings_plays, key=lambda s: s.get("prob_score", 0), reverse=True)),
-            "ORB Candidates": _ticker_list(sorted(orb_candidates, key=lambda s: s.get("rvol", 0), reverse=True)),
-            "Continuation":   _ticker_list(sorted(continuation, key=lambda s: s.get("continuation_score", 0), reverse=True)),
+            "Earnings Plays": _ticker_list(sorted(earnings_plays, key=lambda s: (s.get("prob_score") or 0), reverse=True)),
+            "ORB Candidates": _ticker_list(sorted(orb_candidates, key=lambda s: (s.get("rvol") or 0), reverse=True)),
+            "Continuation":   _ticker_list(sorted(continuation, key=lambda s: (s.get("continuation_score") or 0), reverse=True)),
             "Squeeze Plays":  _ticker_list(squeeze_plays),
-            "Swing Setups":   _ticker_list([s for s in scored if s.get("swing_score", 0) >= 6]),
+            "Swing Setups":   _ticker_list([s for s in scored if (s.get("swing_score") or 0) >= 6]),
         },
     }
 
