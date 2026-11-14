@@ -723,3 +723,11 @@ def test_overlays_saved_per_ticker_and_loaded_immediately():
     assert "if((d.events||[]).length || !d.pending){" in TEMPLATE
     assert "twOvlSave(ticker, {zones: z})" in TEMPLATE and "twOvlSave(data.ticker, {next: ne})" in TEMPLATE
     assert "TW_OVL_MAX=40" in TEMPLATE
+
+
+def test_alert_levels_are_a_short_axis_stub_by_default():
+    js = open("static/js/chart_tools.js", encoding="utf-8").read()
+    assert "axisTags: true, alertLines: false," in js
+    assert "var full = (ctPrefs.overlays || {}).alertLines === true;" in js
+    assert "ctx.moveTo(full ? 0 : Math.max(0, dim.W - 36)" in js
+    assert 'data-ct-set="overlays.alertLines"' in TEMPLATE

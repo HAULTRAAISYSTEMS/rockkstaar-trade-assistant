@@ -92,7 +92,7 @@ var CT_PREF_DEFAULTS = {
          ohlc: true, legend: true, tooltip: true, hint: true, volume: true, sessions: true, events: true, zones: true},
   draw: {stay: false, hidden: false},
   // Value zones and events on the chart: each piece on/off with its colour.
-  overlays: {rail: true, lines: true, tags: false, axisTags: true,
+  overlays: {rail: true, lines: true, tags: false, axisTags: true, alertLines: false,
              pricey: true, fair: true, accum: true, load: true,
              priceyColor: '#ff6b6b', fairColor: '#f3c95a', accumColor: '#8be36b', loadColor: '#2ee6a6',
              nextEarnings: true, earningsColor: '#f0b53f', earnChip: true, zoneChip: true,
@@ -2089,9 +2089,12 @@ function ctDrawAlerts(ctx, dim, axisLabels) {
     if (!a.enabled || a.triggered_at) return;
     var y = ctY(a.price);
     if (y == null || y < 0 || y > dim.H) return;
+    // By default only a short stub next to the price axis marks the level
+    // (the tag on the axis carries the name); full-width lines are a setting.
+    var full = (ctPrefs.overlays || {}).alertLines === true;
     ctx.save();
-    ctx.strokeStyle = 'rgba(245,197,66,0.75)'; ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
-    ctx.beginPath(); ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(dim.W, Math.round(y) + 0.5); ctx.stroke();
+    ctx.strokeStyle = 'rgba(245,197,66,0.75)'; ctx.lineWidth = 1; ctx.setLineDash(full ? [6, 4] : []);
+    ctx.beginPath(); ctx.moveTo(full ? 0 : Math.max(0, dim.W - 36), Math.round(y) + 0.5); ctx.lineTo(dim.W, Math.round(y) + 0.5); ctx.stroke();
     ctx.restore();
     // The name rides on the price axis (× at its end cancels the alert).
     var note = String(a.note || 'Alert').replace(new RegExp('^' + (twChartState.ticker || '') + '\\s+'), '');
