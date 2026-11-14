@@ -648,6 +648,7 @@
           <div class="ct-tabs" role="tablist">
             <button type="button" role="tab" data-ct-tab="candles" class="on">Candles</button>
             <button type="button" role="tab" data-ct-tab="scale">Scale &amp; view</button>
+            <button type="button" role="tab" data-ct-tab="zones">Zones &amp; events</button>
             <button type="button" role="tab" data-ct-tab="labels">Price labels</button>
             <button type="button" role="tab" data-ct-tab="indicators">Indicators</button>
             <button type="button" role="tab" data-ct-tab="drawings">Drawings</button>
@@ -663,9 +664,28 @@
               <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.session"><span>Color pre/after-hours candles by session (blue / purple)</span></label>
               <label class="tw-study-row"><input type="checkbox" data-ct-set="candles.shading" checked><span>Shade pre/after-hours background</span></label>
               <label class="tw-study-row"><input type="checkbox" data-ct-set="view.sessions" checked><span>Mark the open, close and each new day on intraday charts</span></label>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.events" checked><span>Show earnings dates and news on the time axis</span></label>
-              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.zones" checked><span>Show value zones (Accumulate / Load the boat) on 1D, 1W and 1M</span></label>
               <p class="tw-study-note">Pre-market and after-hours candles use the same up/down colors as the regular session unless session colors are on.</p>
+            </div>
+            <div class="tw-study-group" data-tab="zones"><h4>Value zones <small>1D · 1W · 1M</small></h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.zones" checked><span>Show value zones</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.rail" checked><span>Colour rail on the right edge</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.lines" checked><span>Dashed lines across the chart</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.tags" checked><span>Price tags (PRICEY ≥ / ACCUM ≤ / LOAD ≤)</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.zoneChip" checked><span>Zone chip next to the ticker</span></label>
+            </div>
+            <div class="tw-study-group" data-tab="zones"><h4>Each zone</h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.pricey" checked><span>Pricey</span><input type="color" data-ct-set="overlays.priceyColor" value="#ff6b6b" aria-label="Pricey colour"></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.fair" checked><span>Fair <small>(rail only)</small></span><input type="color" data-ct-set="overlays.fairColor" value="#f3c95a" aria-label="Fair colour"></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.accum" checked><span>Accumulate</span><input type="color" data-ct-set="overlays.accumColor" value="#8be36b" aria-label="Accumulate colour"></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.load" checked><span>Load the boat</span><input type="color" data-ct-set="overlays.loadColor" value="#2ee6a6" aria-label="Load the boat colour"></label>
+            </div>
+            <div class="tw-study-group" data-tab="zones"><h4>Earnings &amp; news</h4>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="view.events" checked><span>Show earnings and news on the chart</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.nextEarnings" checked><span>Next earnings line and countdown pill</span><input type="color" data-ct-set="overlays.earningsColor" value="#f0b53f" aria-label="Next earnings colour"></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.earnChip" checked><span>"Earnings in Xd" chip next to the ticker</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.pastEarnings" checked><span>Past earnings flags (E)</span></label>
+              <label class="tw-study-row"><input type="checkbox" data-ct-set="overlays.news" checked><span>News dots</span><input type="color" data-ct-set="overlays.newsColor" value="#6fa8ff" aria-label="News colour"></label>
+              <button type="button" class="tw-study-reset" onclick="ctResetOverlays()">Reset zones &amp; events</button>
             </div>
             <div class="tw-study-group" data-tab="candles"><h4>Volume</h4>
               <label class="tw-study-row"><input type="checkbox" data-ct-set="view.volume" checked><span>Show volume bars</span></label>
@@ -2148,7 +2168,8 @@ function twRenderIntelligence(data){
 /* "Earnings in N days" chip next to the ticker. */
 function twRenderEarningsChip(){
   var el=document.getElementById('tw-earn-chip'); if(!el) return;
-  var n=typeof ctNextEarnings==='function'?ctNextEarnings():null;
+  var ov=(window.ctPrefs&&ctPrefs.overlays)||{};
+  var n=(ov.earnChip===false)?null:(typeof ctNextEarnings==='function'?ctNextEarnings():null);
   if(!n){ el.hidden=true; return; }
   el.hidden=false;
   el.className='tw-earn-chip'+(n.days<=3?' is-soon':'');
@@ -2208,7 +2229,8 @@ function twLoadValueZones(ticker, tries){
 }
 function twRenderZoneChip(z){
   var el=document.getElementById('tw-zone-chip'); if(!el) return;
-  if(!z||!z.available){ el.hidden=true; return; }
+  var ov=(window.ctPrefs&&ctPrefs.overlays)||{};
+  if(!z||!z.available||ov.zoneChip===false){ el.hidden=true; return; }
   var sig=z.signal||{};
   el.hidden=false;
   el.className='tw-zone-chip tone-'+(sig.tone||z.zone);

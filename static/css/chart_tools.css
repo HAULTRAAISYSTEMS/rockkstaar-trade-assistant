@@ -96,6 +96,7 @@
 .tw-study-grid[data-ct-active="candles"] > [data-tab="candles"],
 .tw-study-grid[data-ct-active="scale"] > [data-tab="scale"],
 .tw-study-grid[data-ct-active="labels"] > [data-tab="labels"],
+.tw-study-grid[data-ct-active="zones"] > [data-tab="zones"],
 .tw-study-grid[data-ct-active="indicators"] > [data-tab="indicators"],
 .tw-study-grid[data-ct-active="drawings"] > [data-tab="drawings"] { display: block; }
 .tw-study-grid[data-ct-active] { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)) !important; }
@@ -164,3 +165,9 @@
 .tw-study-head kbd { font: 700 10px var(--font-mono, monospace); color: var(--cc-accent-hi, #e8ffad); }
 /* Phones: the row is full — Layouts opens from Chart settings instead. */
 @media (max-width: 600px) { .tw-chart-toolbar #tw-layout-btn { display: none !important; } }
+
+/* Zones & events tab */
+.tw-study-group h4 small{margin-left:6px;color:#6e7985;font-weight:600;letter-spacing:.04em}
+.tw-study-row span small{color:#6e7985}
+.tw-study-reset{margin-top:8px;min-height:34px;padding:0 12px;border:1px solid rgba(255,255,255,.14);border-radius:9px;background:transparent;color:#cfd5db;font:700 11px var(--font-ui, system-ui);cursor:pointer}
+.tw-study-reset:hover{border-color:#f0b53f;color:#f0b53f}

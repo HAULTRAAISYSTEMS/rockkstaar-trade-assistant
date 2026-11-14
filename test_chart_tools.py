@@ -656,7 +656,7 @@ def test_chart_declutter_zone_tags_earnings_cap_axis_and_toggle():
     js = open("static/js/chart_tools.js", encoding="utf-8").read()
     # Zone labels at the right edge (clear of the top-left OHLC/EMA readout), lighter bands.
     # Zones draw as a value rail at the right edge; the background is never tinted.
-    assert "var railX = dim.W - 10, railW = 7;" in js and "fillRect(0, Math.max(0, yTop)" not in js
+    assert "var railX = dim.W - 10, railW = 7, lineEnd" in js and "fillRect(0, Math.max(0, yTop)" not in js
     # Daily+ charts keep only the last 8 past earnings reports (plus upcoming).
     assert "var CT_MAX_EARNINGS_LONG = 8;" in js and ".slice(0, CT_MAX_EARNINGS_LONG)" in js
     assert "if (path === 'view.zones' && typeof twSyncZonesBtn === 'function') twSyncZonesBtn();" in js
@@ -676,3 +676,23 @@ def test_next_earnings_marker_and_countdown_chip():
     assert "'EARNINGS ' + ctShortDate(n.date).toUpperCase()" in js
     assert 'id="tw-earn-chip"' in TEMPLATE and "function twRenderEarningsChip(){" in TEMPLATE
     assert "twChartState.nextEarnings=(c.next_earnings" in TEMPLATE
+
+
+def test_zones_and_events_settings_tab():
+    # Every chart overlay can be switched off or recoloured in Chart settings.
+    js = open("static/js/chart_tools.js", encoding="utf-8").read()
+    assert "overlays: {rail: true, lines: true, tags: true," in js
+    assert "priceyColor: '#ff6b6b', fairColor: '#f3c95a', accumColor: '#8be36b', loadColor: '#2ee6a6'" in js
+    assert "if (o.rail) {" in js and "if (o.lines) {" in js and "if (o.tags) {" in js
+    assert "if (!ctPrefs.view.events || !o.nextEarnings) return;" in js
+    assert "ov.pastEarnings === false ? []" in js and "ov.news === false ? []" in js
+    assert "function ctResetOverlays()" in js
+    assert 'data-ct-tab="zones"' in TEMPLATE
+    for key in ("rail", "lines", "tags", "zoneChip", "pricey", "fair", "accum", "load",
+                "priceyColor", "fairColor", "accumColor", "loadColor", "nextEarnings",
+                "earningsColor", "earnChip", "pastEarnings", "news", "newsColor"):
+        assert f'data-ct-set="overlays.{key}"' in TEMPLATE, key
+    assert 'onclick="ctResetOverlays()"' in TEMPLATE
+    assert "ov.earnChip===false" in TEMPLATE and "ov.zoneChip===false" in TEMPLATE
+    css = open("static/css/chart_tools.css", encoding="utf-8").read()
+    assert '[data-ct-active="zones"] > [data-tab="zones"]' in css
