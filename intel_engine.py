@@ -189,6 +189,8 @@ def _cget(key: str):
             count = sum(len(data.get(bucket) or []) for bucket in ("today", "tomorrow", "this_week", "coming_up"))
             if count == 0:
                 ttl = min(ttl, 300)
+            elif (data.get("meta") or {}).get("stale_fallback"):
+                ttl = min(ttl, 900)       # showing a saved slate: keep trying for a fresh one
         if e and (_time.monotonic() - e["ts"]) < ttl:
             return e["data"]
     return None
@@ -1279,6 +1281,103 @@ def _earnings_from_fmp(today: date, horizon_days: int = 7) -> tuple[list[dict], 
     return rows, ""
 
 
+def _earnings_finnhub_direct(today: date, exclude: set, horizon_days: int = 7) -> list[dict]:
+    """One market-wide Finnhub calendar call outside the shared cooldown."""
+    try:
+        from finnhub_ttm import _finnhub_get
+        import earnings_timing
+        data = _finnhub_get("/calendar/earnings", {"from": today.isoformat(),
+                                                    "to": (today + timedelta(days=horizon_days)).isoformat()}) or {}
+    except Exception as exc:
+        logger.debug("intel/earnings finnhub direct: %s", exc)
+        return []
+    out = []
+    for e in (data.get("earningsCalendar") or []) if isinstance(data, dict) else []:
+        t = str(e.get("symbol") or "").upper()
+        try:
+            d = datetime.strptime(str(e.get("date") or "")[:10], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        days = (d - today).days
+        if not t or t in exclude or days < 0 or days > horizon_days:
+            continue
+        if e.get("revenueEstimate") is None and e.get("epsEstimate") is None:
+            continue
+        hour = (e.get("hour") or "").lower()
+        timing = earnings_timing.describe(hour)
+        out.append({"ticker": t, "company_name": _company_name(t), "date": d.isoformat(), "days_away": days,
+                    "time_label": earnings_timing.label_for_storage(hour), "time_text": timing["text"],
+                    "time_known": timing["known"], "date_provisional": timing["provisional"],
+                    "eps_est": round(float(e["epsEstimate"]), 2) if e.get("epsEstimate") is not None else None,
+                    "rev_est": int(e["revenueEstimate"]) if e.get("revenueEstimate") is not None else None,
+                    "fiscal_quarter": e.get("quarter"), "fiscal_year": e.get("year"),
+                    "source": "finnhub", "is_override": False})
+    out.sort(key=lambda r: -(r.get("rev_est") or 0))
+    logger.info("intel/earnings finnhub direct: %d rows", len(out))
+    return out
+
+
+_EARN_SNAPSHOT_KEY = "earnings_last_good"
+_EARN_SNAPSHOT_MAX_AGE_DAYS = 5
+_earn_snapshot_mem: dict = {}
+
+
+def _save_earnings_snapshot(buckets: dict, today: date) -> None:
+    """Keep the last good slate (memory + the settings table) so a failed
+    refresh or a fresh deploy doesn't show zero earnings."""
+    items = [dict(i) for k in ("today", "tomorrow", "this_week", "coming_up") for i in (buckets.get(k) or [])]
+    if not items:
+        return
+    snap = {"saved": today.isoformat(), "items": items[:800]}
+    _earn_snapshot_mem.clear(); _earn_snapshot_mem.update(snap)
+    try:
+        from database import set_setting
+        set_setting(_EARN_SNAPSHOT_KEY, json.dumps(snap, default=str))
+    except Exception as exc:
+        logger.debug("intel/earnings snapshot save: %s", exc)
+
+
+def _load_earnings_snapshot() -> dict:
+    if _earn_snapshot_mem.get("items"):
+        return _earn_snapshot_mem
+    try:
+        from database import get_setting
+        raw = get_setting(_EARN_SNAPSHOT_KEY)
+        snap = json.loads(raw) if raw else {}
+        if isinstance(snap, dict) and snap.get("items"):
+            _earn_snapshot_mem.update(snap)
+            return snap
+    except Exception as exc:
+        logger.debug("intel/earnings snapshot load: %s", exc)
+    return {}
+
+
+def _snapshot_items(today: date, wl_set: set, present: set) -> tuple[list[dict], str | None]:
+    """The saved slate re-dated to today (only reports still ahead)."""
+    snap = _load_earnings_snapshot()
+    try:
+        saved = datetime.strptime(str(snap.get("saved") or "")[:10], "%Y-%m-%d").date()
+    except Exception:
+        return [], None
+    if not (0 <= (today - saved).days <= _EARN_SNAPSHOT_MAX_AGE_DAYS):
+        return [], None
+    out, seen = [], set(present)
+    for raw in snap.get("items") or []:
+        t = raw.get("ticker")
+        try:
+            d = datetime.strptime(str(raw.get("date") or "")[:10], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if not t or t in seen or d < today:
+            continue
+        item = dict(raw)
+        item["days_away"] = (d - today).days
+        item["date_label"] = _date_label(d, today)
+        item["on_watchlist"] = t in wl_set
+        out.append(item); seen.add(t)
+    return out, saved.isoformat()
+
+
 def _market_wide_earnings(today: date, wl_set: set, exclude: set) -> tuple[list[dict], str]:
     """The market-wide slate, from whichever source will answer.
 
@@ -1314,6 +1413,10 @@ def _market_wide_earnings(today: date, wl_set: set, exclude: set) -> tuple[list[
 
     fallback, errs = _earnings_from_finnhub(
         [], key, today, set(exclude), market_wide=True, horizon_days=7)
+    if not fallback and _fh_is_rate_limited():
+        # The 30-minute pause after a 429 elsewhere would leave the calendar
+        # empty for half an hour; this is one call, so try it once directly.
+        fallback = _earnings_finnhub_direct(today, set(exclude), horizon_days=7)
     # Finnhub's calendar carries no market cap, so the Large/Mid tier test the
     # Nasdaq path applies cannot be reproduced. A published consensus is the
     # closest honest proxy for "a company followed by enough people to belong
@@ -1719,6 +1822,22 @@ def fetch_earnings_calendar(tickers: Optional[list[str]] = None) -> dict:
             not x.get("on_watchlist"),
             x["days_away"],
         ))
+
+    # No market-wide slate this time (every source refused or rate-limited):
+    # show the last good one, re-dated to today, instead of a confident zero.
+    if not nasdaq_found:
+        present = {i.get("ticker") for b in buckets.values() for i in b}
+        items, saved = _snapshot_items(today, wl_set, present)
+        for item in items:
+            _bucket_item(item)
+        if items:
+            meta["stale_fallback"] = saved
+            meta["earnings_source_used"] = meta.get("earnings_source_used", "") + "+saved_slate"
+            logger.warning("intel/earnings: live sources empty — showing saved slate from %s (%d rows)", saved, len(items))
+            for k in ("today", "tomorrow", "this_week", "coming_up"):
+                buckets[k].sort(key=lambda x: (not x.get("is_override"), not x.get("on_watchlist"), x["days_away"]))
+    else:
+        _save_earnings_snapshot(buckets, today)
 
     meta["earnings_count"] = sum(len(v) for v in buckets.values())
     result = dict(buckets)
@@ -2834,12 +2953,25 @@ def get_intel_summary() -> dict:
         "this_week":  list(_earn.get("this_week",  [])),
         "coming_up":  list(_earn.get("coming_up",  [])),
     }
-    earn_meta = _earn.get("meta", {})
+    earn_meta = dict(_earn.get("meta", {}))
 
     # Always re-inject overrides so they appear even with stale/empty cache.
     # Must use fresh today + wl_set (not the cached values from fetch time).
     today  = _today_et()
     wl_set = set(_get_watchlist_tickers())
+    # Cold cache (fresh deploy, refresh still running): show the saved slate
+    # straight away rather than zero.
+    if not any(earn_buckets.values()):
+        try:
+            for item in _snapshot_items(today, wl_set, set())[0]:
+                d = item["days_away"]
+                key = "today" if d == 0 else "tomorrow" if d == 1 else "this_week" if d <= 7 else "coming_up"
+                if key != "coming_up" or d <= 21 or item.get("on_watchlist"):
+                    earn_buckets[key].append(item)
+            if any(earn_buckets.values()):
+                earn_meta["stale_fallback"] = _load_earnings_snapshot().get("saved")
+        except Exception as exc:
+            logger.debug("intel/earnings snapshot on cold cache: %s", exc)
     _apply_overrides_to_buckets(earn_buckets, today, wl_set)
 
     return {
@@ -2863,6 +2995,7 @@ def get_intel_summary() -> dict:
             "server_date":          today.isoformat(),
             "tickers_checked":      earn_meta.get("tickers_checked", 0),
             "earnings_source_used": earn_meta.get("earnings_source_used", "—"),
+            "stale_fallback":       earn_meta.get("stale_fallback"),
             "earnings_errors":      earn_meta.get("earnings_errors", []),
             "earnings_count":       sum(len(v) for v in earn_buckets.values()),
             "overrides_injected":   earn_meta.get("overrides_injected", 0),

@@ -5580,6 +5580,12 @@ def terminal():
         requested_symbol = ""
     if requested_symbol:
         chart_symbol = requested_symbol
+    # Get every watchlist name's earnings markers ready in the background, so
+    # they're there the moment a ticker opens on the chart.
+    try:
+        prewarm_chart_earnings([chart_symbol] + list(watchlist or [])[:40])
+    except Exception as exc:
+        logger.debug("prewarm earnings: %s", exc)
 
     return render_template(
         "terminal.html",
@@ -6361,6 +6367,19 @@ def _build_chart_events(ticker: str) -> list:
     """Past earnings (with EPS vs estimate), the next report date and timed
     headlines for the chart's time axis. Slow providers (SEC, Finnhub, FMP,
     news) — always run in a background thread, never in a request."""
+    return _build_chart_earnings(ticker) + _build_chart_news(ticker)
+
+
+_CHART_EARN: dict = {}            # ticker -> {"at", "events"}: earnings change rarely
+_CHART_EARN_TTL = 6 * 3600
+
+
+def _build_chart_earnings(ticker: str) -> list:
+    """Earnings markers only (past reports with beat/miss, next report).
+    Cached for hours: these move a few times a year."""
+    hit = _CHART_EARN.get(ticker)
+    if hit and _time.time() - hit["at"] < _CHART_EARN_TTL:
+        return list(hit["events"])
     events: list = []
     try:
         import news_desk
@@ -6392,6 +6411,15 @@ def _build_chart_events(ticker: str) -> list:
                 events.append(nxt_ev)
         except Exception as exc:
             logger.debug("chart events: next earnings lookup %s: %s", ticker, exc)
+    if len(_CHART_EARN) > 400:
+        _CHART_EARN.clear()
+    _CHART_EARN[ticker] = {"at": _time.time(), "events": list(events)}
+    return events
+
+
+def _build_chart_news(ticker: str) -> list:
+    """Timed headlines for the chart (recent + a year of company news)."""
+    events: list = []
     seen_heads: set = set()
     try:
         from terminal_intelligence import _epoch
@@ -6536,7 +6564,12 @@ def api_terminal_events(ticker):
     if start:
         def _work():
             try:
-                ev = _build_chart_events(ticker)
+                # Earnings first (fast, cached for hours) so the pins appear
+                # while the year of headlines is still loading.
+                earn = _build_chart_earnings(ticker)
+                with _CHART_EVENTS_LOCK:
+                    _CHART_EVENTS_PARTIAL[ticker] = earn
+                ev = earn + _build_chart_news(ticker)
                 with _CHART_EVENTS_LOCK:
                     if len(_CHART_EVENTS) > 300:
                         _CHART_EVENTS.clear()
@@ -6544,9 +6577,64 @@ def api_terminal_events(ticker):
             finally:
                 with _CHART_EVENTS_LOCK:
                     _CHART_EVENTS_BUSY.discard(ticker)
+                    _CHART_EVENTS_PARTIAL.pop(ticker, None)
         threading.Thread(target=_work, daemon=True, name=f"chart-events-{ticker}").start()
-    return jsonify({"ok": True, "ticker": ticker, "pending": True,
-                    "events": hit["events"] if hit else []})
+    else:
+        # Already building: hand back the earnings if they're ready.
+        part = _CHART_EVENTS_PARTIAL.get(ticker)
+        if part is not None and not hit:
+            return jsonify({"ok": True, "ticker": ticker, "pending": True, "events": part})
+    # Earnings cached from an earlier build answer straight away.
+    cached = _CHART_EARN.get(ticker)
+    quick = hit["events"] if hit else (list(cached["events"]) if cached and now - cached["at"] < _CHART_EARN_TTL else [])
+    return jsonify({"ok": True, "ticker": ticker, "pending": True, "events": quick})
+
+
+_CHART_EVENTS_PARTIAL: dict = {}
+_PREWARM_Q: list = []
+_PREWARM_LOCK = threading.Lock()
+_PREWARM_RUNNING = [False]
+
+
+def prewarm_chart_earnings(tickers) -> None:
+    """Build earnings markers for a watchlist in the background, one ticker
+    every couple of seconds (Finnhub's free plan allows ~60 calls a minute),
+    so they're ready before the chart opens them."""
+    with _PREWARM_LOCK:
+        for t in tickers or []:
+            t = str(t or "").upper().strip()
+            hit = _CHART_EARN.get(t)
+            if (re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", t) and t not in _PREWARM_Q
+                    and not (hit and _time.time() - hit["at"] < _CHART_EARN_TTL)):
+                _PREWARM_Q.append(t)
+        del _PREWARM_Q[60:]
+        if _PREWARM_RUNNING[0] or not _PREWARM_Q:
+            return
+        _PREWARM_RUNNING[0] = True
+
+    def _run():
+        try:
+            while True:
+                with _PREWARM_LOCK:
+                    if not _PREWARM_Q:
+                        return
+                    t = _PREWARM_Q.pop(0)
+                # Stay well inside Finnhub's free 60 calls/min (about three
+                # calls per ticker), and stand down while it's rate-limited.
+                try:
+                    while _intel._fh_is_rate_limited():
+                        _time.sleep(30)
+                except Exception:
+                    pass
+                try:
+                    _build_chart_earnings(t)
+                except Exception as exc:
+                    logger.debug("prewarm earnings %s: %s", t, exc)
+                _time.sleep(6)
+        finally:
+            with _PREWARM_LOCK:
+                _PREWARM_RUNNING[0] = False
+    threading.Thread(target=_run, daemon=True, name="chart-earnings-prewarm").start()
 
 
 @app.route("/api/terminal/insiders/<ticker>")
@@ -9755,6 +9843,49 @@ def _build_catalyst_calendar(summary, watchlist_tickers=None):
     ))
 
 
+def _add_watchlist_earnings(rows: list, tickers) -> list:
+    """Watchlist names the market-wide slate missed, from the per-ticker
+    next-earnings dates the chart looks up (cached; nothing fetched here —
+    a background job fills the rest for next time)."""
+    have = {r.get("ticker") for r in rows if r.get("kind") == "EARNINGS"}
+    want = [str(t).upper() for t in (tickers or []) if str(t).upper() not in have]
+    try:
+        prewarm_chart_earnings(want)
+    except Exception:
+        pass
+    today = _et_now().date()
+    added = []
+    for t in want:
+        hit = _CHART_EARN.get(t)
+        ev = next((e for e in (hit or {}).get("events", []) if e.get("upcoming")), None)
+        if not ev:
+            continue
+        try:
+            from datetime import date as _date
+            d = _date.fromisoformat(str(ev["date"])[:10])
+        except Exception:
+            continue
+        days = (d - today).days
+        if days < 0 or days > 120:
+            continue
+        est = bool(ev.get("estimated"))
+        added.append({
+            "kind": "EARNINGS", "date": d.isoformat(), "date_label": d.strftime("%b %d").replace(" 0", " "),
+            "time": ev.get("time") or "TBD", "time_text": ev.get("time") or "Time TBD", "time_known": bool(ev.get("time")),
+            "date_provisional": est,
+            "provisional_note": "Estimated from past reports — the company hasn't announced it yet." if est else "",
+            "fiscal_quarter": None, "fiscal_year": None,
+            "title": f"{t} Earnings", "ticker": t, "company_name": t,
+            "impact": "HIGH", "reason": "Quarterly earnings can create price gaps and volatility.",
+            "days_away": days, "on_watchlist": True, "eps_est": ev.get("eps_est"), "rev_est": None,
+            "market_cap": None, "cap_tier": "Watchlist",
+        })
+    if not added:
+        return rows
+    return sorted(rows + added, key=lambda row: (
+        row["days_away"], row["date"], _minutes_of_day(row["time"]), row["title"]))
+
+
 @app.route("/calendar")
 def catalyst_calendar():
     """Mobile-first earnings and economic catalyst calendar."""
@@ -9770,6 +9901,7 @@ def catalyst_calendar():
     except Exception:
         active_tickers = []
     rows = _build_catalyst_calendar(summary, active_tickers)
+    rows = _add_watchlist_earnings(rows, active_tickers)
     # If the earnings cache is empty, kick off a background refresh so the
     # next load populates (same pattern as the command centre's news refill).
     earnings_count = sum(row["kind"] == "EARNINGS" for row in rows)
@@ -9792,6 +9924,7 @@ def catalyst_calendar():
         economic_count=sum(row["kind"] == "ECONOMIC" for row in rows),
         watchlist_count=sum(row["on_watchlist"] for row in rows),
         econ_coverage=econ_coverage,
+        earnings_saved_on=(summary.get("earnings_debug") or {}).get("stale_fallback") if isinstance(summary, dict) else None,
     )
 
 

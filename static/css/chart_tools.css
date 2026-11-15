@@ -195,3 +195,11 @@
 .ct-fb-hide:hover { color: #ff5c6c; background: transparent; }
 .ct-fb-empty { padding: 0 8px; color: #8d9bb0; font: 500 11px var(--font-sans, system-ui); white-space: nowrap; }
 @media (pointer: coarse) { .ct-fb-tool { width: 38px; height: 38px; } }
+
+/* "A" auto-fit button on the price axis. */
+.tw-auto-btn { position: absolute; z-index: 7; width: 22px; height: 20px; padding: 0; border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
+  background: rgba(9,12,18,.88); color: #6e7a8a; font: 800 10px "IBM Plex Mono", ui-monospace, monospace; cursor: pointer; transition: color .15s, border-color .15s, box-shadow .15s; }
+.tw-auto-btn:not(.is-manual) { color: var(--cc-accent, #c4f53b); border-color: rgba(var(--cc-accent-rgb, 196,245,59), .45); }
+.tw-auto-btn.is-manual { color: #d6e0ec; border-color: rgba(255,255,255,.3); box-shadow: 0 0 0 2px rgba(var(--cc-accent-rgb, 196,245,59), .15); animation: twAutoPulse 1.6s ease-in-out 2; }
+@keyframes twAutoPulse { 50% { box-shadow: 0 0 0 4px rgba(var(--cc-accent-rgb, 196,245,59), .25); } }
+.tw-auto-btn:hover { color: #fff; border-color: var(--cc-accent, #c4f53b); }
