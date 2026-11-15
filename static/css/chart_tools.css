@@ -13,7 +13,7 @@
 .tw-drawbar .ct-toggle.active { color: #0a0712 !important; background: rgba(var(--cc-accent-rgb, 196,245,59), .85) !important; box-shadow: none; }
 
 .ct-flyout {
-  position: fixed; z-index: 2000; min-width: 210px; padding: 6px;
+  position: fixed; z-index: 10090; min-width: 210px; padding: 6px;
   border: 1px solid rgba(255,255,255,.1); border-radius: 10px;
   background: rgba(10,14,22,.98); box-shadow: 0 16px 40px rgba(0,0,0,.5);
   backdrop-filter: blur(10px);
@@ -171,3 +171,27 @@
 .tw-study-row span small{color:#6e7985}
 .tw-study-reset{margin-top:8px;min-height:34px;padding:0 12px;border:1px solid rgba(255,255,255,.14);border-radius:9px;background:transparent;color:#cfd5db;font:700 11px var(--font-ui, system-ui);cursor:pointer}
 .tw-study-reset:hover{border-color:#f0b53f;color:#f0b53f}
+.ct-level-pct { margin-left:-4px; color:#8d9bb0; font-size:11px; }
+
+/* Favorite tools: ☆ in the menus, floating bar on the chart. */
+.ct-flyout button .ct-fav-star { margin-left: auto; padding: 0 2px 0 12px; color: rgba(141,155,176,.45); font-style: normal; font-size: 14px; line-height: 1; transition: color .15s, transform .15s; }
+.ct-flyout button:hover .ct-fav-star { color: #8d9bb0; }
+.ct-flyout button .ct-fav-star:hover { color: #ffd166; transform: scale(1.2); }
+.ct-flyout button .ct-fav-star.is-on { color: #ffd166; text-shadow: 0 0 8px rgba(255,209,102,.55); }
+.ct-favbar {
+  position: absolute; z-index: 8; display: flex; align-items: center; gap: 2px; padding: 4px;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 11px;
+  background: rgba(10,14,22,.92); box-shadow: 0 10px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04);
+  backdrop-filter: blur(8px); user-select: none; touch-action: none;
+}
+.ct-favbar[hidden] { display: none; }
+.ct-favbar.is-drag { box-shadow: 0 16px 40px rgba(0,0,0,.6), 0 0 0 1px rgba(255,209,102,.4); cursor: grabbing; }
+.ct-fb-grip { display: grid; place-items: center; width: 14px; height: 30px; color: rgba(141,155,176,.6); cursor: grab; }
+.ct-fb-grip:hover { color: #ffd166; }
+.ct-fb-tool { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #c9d3e0; cursor: pointer; transition: background .12s, color .12s; }
+.ct-fb-tool:hover { background: rgba(255,255,255,.08); color: #fff; }
+.ct-fb-tool.active { background: rgba(var(--cc-accent-rgb, 196,245,59), .9); color: #0a0712; }
+.ct-fb-hide { width: 22px; color: rgba(141,155,176,.55); font-size: 15px; }
+.ct-fb-hide:hover { color: #ff5c6c; background: transparent; }
+.ct-fb-empty { padding: 0 8px; color: #8d9bb0; font: 500 11px var(--font-sans, system-ui); white-space: nowrap; }
+@media (pointer: coarse) { .ct-fb-tool { width: 38px; height: 38px; } }

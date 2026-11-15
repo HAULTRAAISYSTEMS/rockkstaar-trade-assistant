@@ -784,3 +784,43 @@ def test_ticker_search_palette_on_the_chart():
     assert "if(window.twRememberTicker) twRememberTicker(d.ticker);" in TEMPLATE
     css = open("static/css/terminal_workspace.css", encoding="utf-8").read()
     assert ".tp-overlay{position:absolute;inset:0;z-index:60" in css
+
+
+def test_tool_menus_open_in_full_screen():
+    css = open("static/css/chart_tools.css", encoding="utf-8").read()
+    assert "return document.fullscreenElement || document.webkitFullscreenElement || document.body;" in JS
+    assert "ctPopupHost().appendChild(fly);" in JS and "document.body.appendChild(fly)" not in JS
+    assert ".ct-flyout {\n  position: fixed; z-index: 10090;" in css      # above the full-screen chart (10050)
+
+
+def test_measure_has_its_own_button_and_shift_drag():
+    assert "{id: 'measure', tools: ['measure', 'pctlevels']}" in JS
+    assert "{id: 'forecast', tools: ['long', 'short']}" in JS
+    assert "if (!ev.shiftKey || ctMode" in JS and "never saved" in JS
+    assert "function ctPctFrom(level, now)" in JS                             # H/L labels: % from now
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_pct_drop_levels_maths(tmp_path):
+    h = tmp_path / "pct.js"
+    h.write_text(HARNESS.split("const out={};")[0].replace(
+        "ctReadLocal};');", "ctReadLocal,ctPctLevelPrices};');") + r"""
+const d=T.ctNewDrawing('pctlevels',[{t:1000,p:200}]);
+const f=a=>a.map(l=>l.v+':'+l.p.toFixed(2));
+const down=f(T.ctPctLevelPrices(d)); d.style.reverse=true; const up=f(T.ctPctLevelPrices(d));
+console.log(JSON.stringify({down:down,up:up,ext:d.style.extendLeft}));
+""")
+    got = json.loads(subprocess.run(["node", str(h)], capture_output=True, text=True, check=True, cwd=os.getcwd()).stdout)
+    assert got["down"] == ["20:160.00", "30:140.00", "40:120.00", "50:100.00", "60:80.00"]
+    assert got["up"][:2] == ["20:240.00", "30:260.00"]
+    assert got["ext"] is True
+
+
+def test_favorite_drawing_tools_bar():
+    css = open("static/css/chart_tools.css", encoding="utf-8").read()
+    assert "favtools: {list: ['trend', 'hline', 'hray', 'fib', 'rect', 'measure', 'pctlevels', 'text'], on: true, x: null, y: null}" in JS
+    assert 'data-ct-favstar="' in JS and "function ctToggleFavTool(t)" in JS       # ☆ in every tool menu
+    assert 'data-ct-act="favbar"' in JS                                             # ★ on the rail shows/hides it
+    assert "box.appendChild(bar);" in JS and "function ctFavDrag(e, bar, box)" in JS  # lives in the chart (full screen too), draggable
+    assert "ctPrefs.favtools.x = (br.left - b.left) / b.width" in JS               # position kept as a share of the chart
+    assert ".ct-favbar {\n  position: absolute; z-index: 8;" in css
