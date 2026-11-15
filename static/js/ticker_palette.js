@@ -36,15 +36,21 @@
     el.innerHTML =
       '<div class="tp-card">' +
         '<div class="tp-input-row"><span class="tp-glyph" aria-hidden="true">⌕</span>' +
-        '<input class="tp-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Ticker or company — NVDA, apple, s&amp;p 500" aria-label="Ticker or company" role="combobox" aria-expanded="true" aria-controls="tp-list">' +
-        '<kbd class="tp-esc">Esc</kbd></div>' +
+        '<input class="tp-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go" placeholder="Ticker or company — NVDA, apple, s&amp;p 500" aria-label="Ticker or company" role="combobox" aria-expanded="true" aria-controls="tp-list">' +
+        '<button type="button" class="tp-clear" aria-label="Clear" hidden>×</button>' +
+        '<kbd class="tp-esc">Esc</kbd><button type="button" class="tp-cancel">Cancel</button></div>' +
         '<div class="tp-recent" aria-label="Recent tickers"></div>' +
         '<ul class="tp-list" id="tp-list" role="listbox"></ul>' +
         '<div class="tp-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span>Start typing on the chart to search</span></div>' +
       '</div>';
     input = el.querySelector('.tp-input'); list = el.querySelector('.tp-list'); recentBox = el.querySelector('.tp-recent');
     el.addEventListener('mousedown', function (e) { if (e.target === el) close(); });
-    input.addEventListener('input', function () { schedule(); });
+    el.querySelector('.tp-cancel').addEventListener('click', close);
+    var clr = el.querySelector('.tp-clear');
+    clr.addEventListener('click', function () { input.value = ''; clr.hidden = true; schedule(); input.focus(); });
+    input.addEventListener('input', function () { clr.hidden = !input.value; schedule(); });
+    // Phone: scrolling the results puts the keyboard away so you can see them all.
+    list.addEventListener('touchstart', function () { if (phone()) input.blur(); }, {passive: true});
     input.addEventListener('keydown', function (e) {
       if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
@@ -56,24 +62,60 @@
     recentBox.addEventListener('click', function (e) { var b = e.target.closest('[data-t]'); if (b) pick({symbol: b.dataset.t}); });
   }
 
-  function host() {
-    // Inside the chart panel, so it shows in full screen too.
-    return (typeof twChartPanel === 'function' && twChartPanel()) || document.getElementById('tw-chart-box') || document.body;
+  /* Phones get their own layout: a full-screen sheet with the search box on
+     top, one-line rows, and the keyboard up straight away. */
+  function phone() {
+    try { return window.matchMedia('(max-width: 760px), (pointer: coarse) and (max-width: 1099px)').matches; } catch (e) { return false; }
   }
+  function panel() { return (typeof twChartPanel === 'function' && twChartPanel()) || null; }
+  function host() {
+    var p = panel();
+    var fs = document.fullscreenElement || document.webkitFullscreenElement || (p && p.classList.contains('tw-is-fullscreen') ? p : null);
+    if (fs) return fs;                       // full screen: only what's inside it is drawn
+    if (phone()) return document.body;       // phone: cover the whole screen
+    // Desktop: inside the chart panel.
+    return p || document.getElementById('tw-chart-box') || document.body;
+  }
+  function fitViewport() {
+    // iOS keeps the layout viewport full height when the keyboard opens; size the
+    // sheet to what's actually visible so the results aren't under the keyboard.
+    if (!el || el.hidden || !el.classList.contains('tp-phone')) return;
+    var vv = window.visualViewport;
+    if (!vv) return;
+    el.style.height = Math.round(vv.height) + 'px';
+    el.style.top = Math.round(vv.offsetTop) + 'px';
+  }
+  if (window.visualViewport) { window.visualViewport.addEventListener('resize', fitViewport); window.visualViewport.addEventListener('scroll', fitViewport); }
 
   function open(prefill) {
     build();
-    var h = host();
+    var h = host(), ph = phone();
+    el.classList.toggle('tp-phone', ph);
+    input.placeholder = ph ? 'Search NVDA, Apple, S&P 500' : 'Ticker or company — NVDA, apple, s&p 500';
     try { if (h !== document.body && getComputedStyle(h).position === 'static') h.style.position = 'relative'; } catch (e) {}
     if (el.parentNode !== h) h.appendChild(el);
     el.hidden = false;
     input.value = prefill || '';
+    el.querySelector('.tp-clear').hidden = !input.value;
+    // Focus now, inside the tap: iPhone only raises the keyboard for a focus
+    // that happens in the same gesture (a setTimeout loses it).
+    try { input.focus({preventScroll: true}); } catch (e) { input.focus(); }
+    var n = input.value.length; try { input.setSelectionRange(n, n); } catch (e) {}
+    if (ph) document.documentElement.classList.add('tp-locked');
     renderRecent();
     render(localMatches(input.value), true);
     if (input.value) schedule();
-    setTimeout(function () { input.focus(); var n = input.value.length; try { input.setSelectionRange(n, n); } catch (e) {} }, 0);
+    fitViewport();
+    if (!ph) setTimeout(function () { if (document.activeElement !== input) input.focus(); }, 0);
   }
-  function close() { if (el) { el.hidden = true; if (ctrl) { try { ctrl.abort(); } catch (e) {} } } }
+  function close() {
+    if (!el) return;
+    el.hidden = true;
+    el.style.height = ''; el.style.top = '';
+    document.documentElement.classList.remove('tp-locked');
+    try { input.blur(); } catch (e) {}
+    if (ctrl) { try { ctrl.abort(); } catch (e) {} }
+  }
   window.twOpenTickerSearch = open;
 
   function renderRecent() {
@@ -141,7 +183,7 @@
       var chg = x.chg ? '<span class="tp-chg ' + (x.dir === 'pos' ? 'is-up' : x.dir === 'neg' ? 'is-down' : '') + '">' + esc(x.chg) + '</span>' : '';
       var tag = x.type ? '<span class="tp-type">' + esc(x.type) + '</span>' : '';
       var watch = x.watch ? '<span class="tp-watch" title="On your watchlist">★</span>' : '';
-      return '<li class="tp-item" role="option" data-i="' + i + '" id="tp-opt-' + i + '">' +
+      return '<li class="tp-item' + (x.watch ? ' is-watch' : '') + '" role="option" data-i="' + i + '" id="tp-opt-' + i + '">' +
         '<span class="tp-sym">' + esc(x.symbol) + '</span>' +
         '<span class="tp-name">' + esc(x.name || '') + tag + '</span>' +
         '<span class="tp-meta">' + watch + '<a class="vz-badge" data-zone-badge="' + esc(x.symbol) + '" hidden></a>' + price + chg + '</span></li>';

@@ -824,3 +824,19 @@ def test_favorite_drawing_tools_bar():
     assert "box.appendChild(bar);" in JS and "function ctFavDrag(e, bar, box)" in JS  # lives in the chart (full screen too), draggable
     assert "ctPrefs.favtools.x = (br.left - b.left) / b.width" in JS               # position kept as a share of the chart
     assert ".ct-favbar {\n  position: absolute; z-index: 8;" in css
+
+
+def test_ticker_search_on_phones():
+    js = open("static/js/ticker_palette.js", encoding="utf-8").read()
+    css = open("static/css/terminal_workspace.css", encoding="utf-8").read()
+    # Shows in the phone full-screen layout (which hides other panel children).
+    assert ":not(.tw-draw-status):not(.tp-overlay)," in css and ":not(.tw-draw-status):not(.tp-overlay) {" in css
+    # Focus inside the tap so the iPhone keyboard comes up (no setTimeout on phones).
+    assert "try { input.focus({preventScroll: true}); } catch (e) { input.focus(); }" in js
+    assert "if (!ph) setTimeout(" in js
+    # Own phone layout: full-screen sheet, Cancel, sized to the visible viewport above the keyboard.
+    assert "el.classList.toggle('tp-phone', ph);" in js and 'class="tp-cancel">Cancel</button>' in js
+    assert "window.visualViewport.addEventListener('resize', fitViewport)" in js
+    assert 'enterkeyhint="go"' in js
+    assert ".tp-overlay.tp-phone{position:fixed;inset:0;z-index:10080;" in css
+    assert ".tp-phone .tp-foot{display:none}" in css
