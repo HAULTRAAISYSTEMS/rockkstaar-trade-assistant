@@ -1017,3 +1017,17 @@ def test_ema_line_thickness_style_and_visibility():
     assert 'data-ema-w="{{ w }}"' in tpl and 'id="tw-ema-style-{{ period }}"' in tpl and 'id="tw-ema-show-{{ period }}"' in tpl
     assert "if(twEmaOn(style)&&last!=null)legend.push(" in tpl                                    # legend shows what's drawn
     assert "'9':{enabled:true,color:'#f5b942',width:1,style:'solid',show:'all'}" in tpl
+
+
+def test_live_bundle_answers_tabs_from_one_build(client, monkeypatch):
+    import app as legacy
+    c, _ = client
+    calls = []
+    def fake():
+        calls.append(1)
+        return legacy.jsonify({"ok": True, "n": len(calls)})
+    monkeypatch.setattr(legacy, "api_market_tape", fake)
+    legacy._BUNDLE_CACHE.clear()
+    a = c.get("/api/live/bundle?want=tape").get_json()
+    b = c.get("/api/live/bundle?want=tape").get_json()
+    assert len(calls) == 1 and a["parts"]["tape"] == b["parts"]["tape"]
