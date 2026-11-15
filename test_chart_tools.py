@@ -731,3 +731,56 @@ def test_alert_levels_are_a_short_axis_stub_by_default():
     assert "var full = (ctPrefs.overlays || {}).alertLines === true;" in js
     assert "ctx.moveTo(full ? 0 : Math.max(0, dim.W - 36)" in js
     assert 'data-ct-set="overlays.alertLines"' in TEMPLATE
+
+
+def test_ticker_search_endpoint(monkeypatch):
+    import json as _j
+    import app as legacy
+    legacy._SYMBOL_SEARCH.clear()
+    monkeypatch.setenv("FINNHUB_API_KEY", "k")
+    monkeypatch.setattr(legacy, "_auth_required", lambda: False)
+    monkeypatch.setattr(legacy._intel, "_fh_is_rate_limited", lambda: False)
+    seen = {}
+
+    class _R:
+        def __init__(self, b): self.b = b
+        def read(self): return self.b
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake(url, timeout=6):
+        seen["url"] = url
+        return _R(_j.dumps({"result": [
+            {"symbol": "APLE", "description": "APPLE HOSPITALITY REIT INC", "type": "Common Stock"},
+            {"symbol": "AAPL", "description": "APPLE INC", "type": "Common Stock"},
+            {"symbol": "AAPL.MX", "description": "APPLE INC", "type": "Common Stock"},
+            {"symbol": "APLW", "description": "WARRANT", "type": "Warrant"},
+            {"symbol": "QQQ", "description": "INVESCO QQQ TRUST", "type": "ETP"}]}).encode())
+    monkeypatch.setattr(legacy._intel, "_fh_urlopen", fake)
+    c = legacy.app.test_client()
+    d = c.get("/api/symbols/search?q=apple").get_json()
+    assert "search?q=apple&exchange=US" in seen["url"]
+    syms = [r["symbol"] for r in d["results"]]
+    assert syms == ["APLE", "AAPL", "QQQ"]                  # foreign listing and warrant dropped
+    assert d["results"][1]["name"] == "Apple Inc" and d["results"][2]["type"] == "ETF"
+    # An exact ticker goes first, and a symbol Finnhub doesn't list can still be opened.
+    legacy._SYMBOL_SEARCH.clear()
+    d2 = c.get("/api/symbols/search?q=aapl").get_json()
+    assert d2["results"][0]["symbol"] == "AAPL"
+    monkeypatch.delenv("FINNHUB_API_KEY")
+    legacy._SYMBOL_SEARCH.clear()
+    assert c.get("/api/symbols/search?q=zzzz").get_json()["results"] == [{"symbol": "ZZZZ", "name": "", "type": ""}]
+    assert c.get("/api/symbols/search?q=").get_json()["results"] == []
+
+
+def test_ticker_search_palette_on_the_chart():
+    js = open("static/js/ticker_palette.js", encoding="utf-8").read()
+    assert "window.twOpenTickerSearch = open;" in js and "window.twOpenTicker = pick;" in js
+    assert "/api/symbols/search?q=" in js and "tradestaar.recentTickers" in js
+    assert "if (/^[a-zA-Z]$/.test(e.key)) { e.preventDefault(); open(e.key.toUpperCase()); }" in js
+    assert "(e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')" in js
+    assert "twChartPanel()" in js                         # lives inside the chart panel (full screen too)
+    assert "js/ticker_palette.js" in TEMPLATE and "twOpenTickerSearch('')" in TEMPLATE
+    assert "if(window.twRememberTicker) twRememberTicker(d.ticker);" in TEMPLATE
+    css = open("static/css/terminal_workspace.css", encoding="utf-8").read()
+    assert ".tp-overlay{position:absolute;inset:0;z-index:60" in css

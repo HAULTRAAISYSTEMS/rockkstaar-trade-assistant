@@ -612,3 +612,38 @@ html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen::after { display: non
 .tw-earn-chip.is-soon{background:#F0B53F;color:#1a1206;animation:twEarnPulse 1.6s ease-in-out infinite}
 @keyframes twEarnPulse{50%{box-shadow:0 0 0 4px rgba(240,181,63,.18)}}
 @media (prefers-reduced-motion:reduce){.tw-earn-chip.is-soon{animation:none}}
+/* ── Ticker search over the chart ── */
+.tp-overlay{position:absolute;inset:0;z-index:60;display:flex;justify-content:center;align-items:flex-start;padding:min(12vh,90px) 14px 14px;background:rgba(3,5,8,.55);backdrop-filter:blur(3px)}
+.tp-overlay[hidden]{display:none}
+.tw-is-fullscreen .tp-overlay,.tp-overlay{border-radius:inherit}
+.tp-card{width:min(620px,100%);max-height:min(560px,calc(100% - 20px));display:flex;flex-direction:column;border:1px solid rgba(var(--cc-accent-rgb,229,185,79),.45);border-radius:16px;background:linear-gradient(160deg,#10141a,#080a0d);box-shadow:0 24px 60px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.03) inset;overflow:hidden;animation:tpIn .14s ease-out}
+@keyframes tpIn{from{opacity:0;transform:translateY(-6px) scale(.99)}}
+@media (prefers-reduced-motion:reduce){.tp-card{animation:none}}
+.tp-input-row{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.07)}
+.tp-glyph{color:var(--cc-accent,#e5b94f);font-size:20px;line-height:1}
+.tp-input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:#f6f4ee;font:800 20px var(--font-mono,ui-monospace);letter-spacing:.04em;text-transform:uppercase}
+.tp-input::placeholder{color:#5d6773;font:600 14px var(--font-ui,system-ui);letter-spacing:0;text-transform:none}
+.tp-esc,.tp-foot kbd,.tp-empty kbd{padding:2px 6px;border:1px solid rgba(255,255,255,.15);border-radius:5px;color:#9aa4ae;font:700 10px var(--font-mono,ui-monospace)}
+.tp-recent{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.05)}
+.tp-recent[hidden]{display:none}
+.tp-label{color:#6e7985;font:800 9px var(--font-mono,ui-monospace);letter-spacing:.14em;text-transform:uppercase;margin-right:4px}
+.tp-chip{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 10px;border:1px solid rgba(255,255,255,.1);border-radius:99px;background:#0b0e12;color:#e8ebee;cursor:pointer}
+.tp-chip b{font:800 12px var(--font-mono,ui-monospace)}
+.tp-chip i{font:700 10.5px var(--font-mono,ui-monospace);font-style:normal;color:#8d98a4}
+.tp-chip:hover{border-color:var(--cc-accent,#e5b94f)}
+.tp-list{list-style:none;margin:0;padding:6px;overflow:auto;flex:1}
+.tp-list.is-loading{opacity:.75}
+.tp-label--list{display:block;padding:6px 10px 4px}
+.tp-item{display:grid;grid-template-columns:76px minmax(0,1fr) auto;align-items:center;gap:12px;min-height:44px;padding:6px 10px;border-radius:10px;cursor:pointer}
+.tp-item.is-cur{background:rgba(var(--cc-accent-rgb,229,185,79),.12);box-shadow:inset 3px 0 0 var(--cc-accent,#e5b94f)}
+.tp-sym{color:#f6f4ee;font:800 14px var(--font-mono,ui-monospace)}
+.tp-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#aab4be;font:600 12.5px var(--font-ui,system-ui)}
+.tp-type{margin-left:8px;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.06);color:#7e8995;font:700 9.5px var(--font-mono,ui-monospace)}
+.tp-meta{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.tp-px{color:#e8ebee;font:700 12.5px var(--font-mono,ui-monospace)}
+.tp-chg{font:700 11.5px var(--font-mono,ui-monospace);color:#8d98a4}
+.tp-chg.is-up,.tp-chip i.is-up{color:#22c58b}.tp-chg.is-down,.tp-chip i.is-down{color:#ff6b6b}
+.tp-watch{color:var(--cc-accent,#e5b94f);font-size:12px}
+.tp-empty{padding:16px 12px;color:#9aa4ae;font:600 13px var(--font-ui,system-ui)}
+.tp-foot{display:flex;gap:16px;flex-wrap:wrap;padding:9px 16px;border-top:1px solid rgba(255,255,255,.06);color:#6e7985;font:600 11px var(--font-ui,system-ui)}
+@media (max-width:640px){.tp-overlay{padding-top:16px}.tp-item{grid-template-columns:64px minmax(0,1fr)}.tp-meta{grid-column:2;justify-content:flex-start}.tp-foot span:last-child{display:none}}
