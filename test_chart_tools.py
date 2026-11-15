@@ -980,3 +980,29 @@ def test_indicator_settings_sync_and_default_buttons():
     assert 'data-ct-cmdset="savedefault"' in tpl and 'data-ct-cmdset="mydefault"' in tpl and 'data-ct-cmdset="resetall"' in tpl
     assert "if (c === 'savedefault')" in JS and "if (c === 'mydefault')" in JS and "chart: ctChartBundle(true)" in JS
     assert "function ctSaveStatus(state)" in JS and 'id="ct-save-note"' in tpl
+
+
+def test_undo_redo_for_drawings():
+    assert "function ctRedo()" in JS and "ctStore.redo = [];" in JS                    # a new change clears redo
+    assert 'data-ct-act="redo"' in JS and "else if (a === 'redo') ctRedo();" in JS     # rail button
+    assert 'data-ct-fb="_undo"' in JS and 'data-ct-fb="_redo"' in JS                   # favorites bar
+    assert "(ev.key === 'z' || ev.key === 'Z') && ev.shiftKey) || ev.key === 'y'" in JS  # Ctrl/⌘+Shift+Z, Ctrl+Y
+    assert "function ctSyncUndoBtns()" in JS
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_undo_redo_stack_behaviour(tmp_path):
+    h = tmp_path / "ur.js"
+    h.write_text(HARNESS.split("const out={};")[0].replace(
+        ";global.T={", ";twSaveDrawings=function(){};twRenderDrawings=function(){};ctNotice=function(){};global.T={").replace(
+        "ctReadLocal};');", "ctReadLocal,ctPushUndo,ctUndo,ctRedo,ctStore:()=>ctStore,setD:(d)=>{ctStore.drawings=d;}};');") + r"""
+T.setD([]); T.ctPushUndo(); T.setD([1]); T.ctPushUndo(); T.setD([1,2]);
+T.ctUndo(); const a=JSON.stringify(T.ctStore().drawings);
+T.ctRedo(); const b=JSON.stringify(T.ctStore().drawings);
+T.ctUndo(); T.ctPushUndo(); T.setD([1,9]); const redoLeft=T.ctStore().redo.length;
+console.log(JSON.stringify({a:a,b:b,redoLeft:redoLeft}));
+""")
+    r = subprocess.run(["node", str(h)], capture_output=True, text=True, cwd=os.getcwd())
+    assert r.returncode == 0, r.stderr[-600:]
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    assert got == {"a": "[1]", "b": "[1,2]", "redoLeft": 0}
