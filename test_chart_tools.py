@@ -1006,3 +1006,14 @@ console.log(JSON.stringify({a:a,b:b,redoLeft:redoLeft}));
     assert r.returncode == 0, r.stderr[-600:]
     got = json.loads(r.stdout.strip().splitlines()[-1])
     assert got == {"a": "[1]", "b": "[1,2]", "redoLeft": 0}
+
+
+def test_ema_line_thickness_style_and_visibility():
+    tpl = TEMPLATE
+    assert "var TW_EMA_LS={solid:0,dotted:1,dashed:2,longdash:3};" in tpl
+    assert "function twEmaOn(st)" in tpl and "(sh==='intraday'&&!long)||(sh==='daily'&&long)" in tpl
+    assert "lineWidth:Math.max(1,Math.min(4,Number(st.width)||1)),lineStyle:TW_EMA_LS[st.style]||0,visible:twEmaOn(st)" in tpl
+    assert "function twSetEmaOpt(period,key,value)" in tpl and "twSaveStyles();" in tpl          # saved + synced to the account
+    assert 'data-ema-w="{{ w }}"' in tpl and 'id="tw-ema-style-{{ period }}"' in tpl and 'id="tw-ema-show-{{ period }}"' in tpl
+    assert "if(twEmaOn(style)&&last!=null)legend.push(" in tpl                                    # legend shows what's drawn
+    assert "'9':{enabled:true,color:'#f5b942',width:1,style:'solid',show:'all'}" in tpl
