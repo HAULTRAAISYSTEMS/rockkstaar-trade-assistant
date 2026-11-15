@@ -219,3 +219,22 @@
 /* Undo / redo: dim when there's nothing to step through. */
 #ct-rail [data-ct-act="undo"]:disabled, #ct-rail [data-ct-act="redo"]:disabled, .ct-fb-tool:disabled { opacity: .32; cursor: default; }
 .ct-fb-sep { width: 1px; height: 20px; margin: 0 3px; background: rgba(255,255,255,.12); }
+
+/* EMA line controls (Indicators tab): thickness, style, timeframes. */
+.tw-ema-card { padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.tw-ema-card .tw-study-row { border-bottom: 0; }
+.tw-ema-prev { flex: none; margin-right: 4px; }
+.tw-ema-opts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-left: 22px; }
+.tw-ema-widths { display: inline-flex; padding: 2px; border: 1px solid rgba(255,255,255,.1); border-radius: 6px; background: rgba(255,255,255,.02); }
+.tw-ema-widths button { display: grid; place-items: center; width: 24px; height: 20px; padding: 0 4px; border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
+.tw-ema-widths button i { display: block; width: 100%; border-radius: 2px; background: #8d9bb0; }
+.tw-ema-widths button:hover i { background: #d6e0ec; }
+.tw-ema-widths button.on { background: rgba(var(--cc-accent-rgb, 196,245,59), .16); }
+.tw-ema-widths button.on i { background: var(--cc-accent, #c4f53b); }
+.tw-ema-opts select { height: 24px; padding: 0 6px; border: 1px solid rgba(255,255,255,.1); border-radius: 6px; background: #0e131c; color: #c9d3e0; font: 600 10px "IBM Plex Mono", ui-monospace, monospace; cursor: pointer; }
+.tw-ema-card.is-off .tw-ema-opts, .tw-ema-card.is-off .tw-ema-prev { opacity: .4; }
+.tw-ema-card.is-hidden-tf .tw-ema-prev { opacity: .5; }
+.tw-ema-card.is-hidden-tf .tw-study-row span::after { content: ' · hidden on this timeframe'; color: #6e7a8a; font-size: 9px; }
+.tw-study-settings .tw-ema-opts select { height: 26px !important; min-height: 0 !important; padding: 0 8px !important; line-height: 1 !important; width: auto !important; font-size: 10px !important; }
+.tw-study-settings .tw-ema-opts { flex-wrap: nowrap; }
+@media (max-width: 720px) { .tw-study-settings .tw-ema-opts { flex-wrap: wrap; } }

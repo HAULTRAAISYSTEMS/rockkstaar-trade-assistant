@@ -732,7 +732,16 @@
             </div>
             <div class="tw-study-group" data-tab="indicators"><h4>EMA overlays</h4>
               {% for period, color, enabled in [(9,'#f5b942',true),(20,'#38d6c5',true),(50,'#6fa8ff',true),(100,'#c084fc',false),(200,'#ff6b7a',false)] %}
-              <label class="tw-study-row"><input id="tw-ema-{{ period }}" type="checkbox" {{ 'checked' if enabled }} onchange="twSetEma({{ period }},this.checked)"><span>EMA {{ period }}</span><input id="tw-color-ema{{ period }}" type="color" value="{{ color }}" oninput="twSetColor('ema{{ period }}',this.value)"></label>
+              <div class="tw-ema-card" data-ema="{{ period }}">
+                <label class="tw-study-row"><input id="tw-ema-{{ period }}" type="checkbox" {{ 'checked' if enabled }} onchange="twSetEma({{ period }},this.checked)" aria-label="Show EMA {{ period }}"><span>EMA {{ period }}</span>
+                  <svg class="tw-ema-prev" id="tw-ema-prev-{{ period }}" viewBox="0 0 56 10" width="56" height="10" aria-hidden="true"><line x1="2" y1="5" x2="54" y2="5" stroke="{{ color }}" stroke-width="1" stroke-linecap="round"/></svg>
+                  <input id="tw-color-ema{{ period }}" type="color" value="{{ color }}" oninput="twSetColor('ema{{ period }}',this.value)" aria-label="EMA {{ period }} colour"></label>
+                <div class="tw-ema-opts">
+                  <div class="tw-ema-widths" role="radiogroup" aria-label="EMA {{ period }} thickness">{% for w in [1,2,3,4] %}<button type="button" data-ema-w="{{ w }}" onclick="twSetEmaOpt({{ period }},'width',{{ w }})" title="{{ w }}px" aria-label="{{ w }} pixel"><i style="height:{{ w }}px"></i></button>{% endfor %}</div>
+                  <select id="tw-ema-style-{{ period }}" onchange="twSetEmaOpt({{ period }},'style',this.value)" aria-label="EMA {{ period }} line style"><option value="solid">━ Solid</option><option value="dashed">╍ Dashed</option><option value="longdash">— — Long dash</option><option value="dotted">┅ Dotted</option></select>
+                  <select id="tw-ema-show-{{ period }}" onchange="twSetEmaOpt({{ period }},'show',this.value)" aria-label="EMA {{ period }} visible on"><option value="all">All timeframes</option><option value="intraday">Intraday only</option><option value="daily">Daily &amp; up</option></select>
+                </div>
+              </div>
               {% endfor %}
             </div>
             <div class="tw-study-group" data-tab="indicators"><h4>Overlays</h4>
@@ -1333,6 +1342,7 @@ function twSaveStyles(){try{localStorage.setItem('tradestaar.chartStyles',JSON.s
 function twToggleStudySettings(){var panel=document.getElementById('tw-study-settings'),btn=document.getElementById('tw-studies-btn'),gear=document.getElementById('tw-settings-btn');if(!panel)return;panel.hidden=!panel.hidden;if(btn)btn.classList.toggle('active',!panel.hidden);if(gear)gear.setAttribute('aria-pressed',panel.hidden?'false':'true');if(!panel.hidden){twSyncStudySettings();if(typeof ctSyncSettingsUI==='function')ctSyncSettingsUI();}}
 function twSyncStudySettings(){
   ['9','20','50','100','200'].forEach(function(period){var check=document.getElementById('tw-ema-'+period),color=document.getElementById('tw-color-ema'+period);if(check)check.checked=!!twChartState.styles.emas[period].enabled;if(color)color.value=twChartState.styles.emas[period].color;});
+  if(typeof twSyncEmaControls==='function') twSyncEmaControls();
   ['rsi','macd','signal','drawing','fib'].forEach(function(key){var input=document.getElementById('tw-color-'+key);if(input)input.value=twChartState.styles[key];});var width=document.getElementById('tw-drawing-width');if(width)width.value=String(twChartState.styles.drawingWidth);
   var ids={rsiPeriod:'tw-rsi-period',rsiUpper:'tw-rsi-upper',rsiLower:'tw-rsi-lower',macdFast:'tw-macd-fast',macdSlow:'tw-macd-slow',macdSignal:'tw-macd-signal'};Object.keys(ids).forEach(function(key){var input=document.getElementById(ids[key]);if(input)input.value=String(twChartState.studies[key]);});twSyncIndicatorLabels();
 }
@@ -1348,7 +1358,29 @@ function twSetColor(key,value){
   twSaveStyles();twApplyStudyStyles();twRenderIndicators();twRenderDrawings();
 }
 function twSetEma(period,enabled){var style=twChartState.styles.emas[String(period)];if(!style)return;style.enabled=!!enabled;twSaveStyles();twApplyStudyStyles();twRenderEmas();}
-function twApplyStudyStyles(){Object.keys(twChartState.emaSeries).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period].applyOptions({color:style.color,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:ctLbl('indicators'),title:''});});}
+/* EMA lines: thickness 1-4px, solid / dashed / long dash / dotted, and which
+   timeframes they show on (all, intraday only, daily and up). */
+var TW_EMA_LS={solid:0,dotted:1,dashed:2,longdash:3};
+function twEmaOn(st){ if(!st||!st.enabled) return false; var sh=st.show||'all', long=twLongBars(twChartState.interval); return sh==='all'||(sh==='intraday'&&!long)||(sh==='daily'&&long); }
+function twEmaOpts(st){ return {color:st.color,lineWidth:Math.max(1,Math.min(4,Number(st.width)||1)),lineStyle:TW_EMA_LS[st.style]||0,visible:twEmaOn(st),priceLineVisible:false,lastValueVisible:ctLbl('indicators'),title:''}; }
+function twSetEmaOpt(period,key,value){
+  var st=twChartState.styles.emas[String(period)]; if(!st) return;
+  if(key==='width') st.width=Math.max(1,Math.min(4,Number(value)||1));
+  else if(key==='style'&&TW_EMA_LS[value]!=null) st.style=value;
+  else if(key==='show'&&['all','intraday','daily'].indexOf(value)>=0) st.show=value;
+  twSaveStyles(); twApplyStudyStyles(); twRenderEmas(); twSyncEmaControls();
+}
+function twSyncEmaControls(){
+  Object.keys(twChartState.styles.emas).forEach(function(p){
+    var st=twChartState.styles.emas[p], w=Math.max(1,Math.min(4,Number(st.width)||1)), dash={solid:'',dashed:'5 3',longdash:'10 4',dotted:'1 3'}[st.style||'solid'];
+    document.querySelectorAll('.tw-ema-card[data-ema="'+p+'"] [data-ema-w]').forEach(function(b){ var on=Number(b.getAttribute('data-ema-w'))===w; b.classList.toggle('on',on); b.setAttribute('aria-checked',on?'true':'false'); });
+    var s1=document.getElementById('tw-ema-style-'+p); if(s1) s1.value=st.style||'solid';
+    var s2=document.getElementById('tw-ema-show-'+p); if(s2) s2.value=st.show||'all';
+    var ln=document.querySelector('#tw-ema-prev-'+p+' line'); if(ln){ ln.setAttribute('stroke',st.color); ln.setAttribute('stroke-width',String(w)); if(dash) ln.setAttribute('stroke-dasharray',dash); else ln.removeAttribute('stroke-dasharray'); }
+    var card=document.querySelector('.tw-ema-card[data-ema="'+p+'"]'); if(card){ card.classList.toggle('is-off',!st.enabled); card.classList.toggle('is-hidden-tf',!!st.enabled&&!twEmaOn(st)); }
+  });
+}
+function twApplyStudyStyles(){Object.keys(twChartState.emaSeries).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period].applyOptions(twEmaOpts(style));});if(typeof twSyncEmaControls==='function')twSyncEmaControls();}
 
 /* ── Order ticket ── */
 function twSide(btn){ document.querySelectorAll('.tw-side-btn').forEach(function(b){ b.classList.remove('active'); }); btn.classList.add('active'); window._twSide=btn.dataset.side; var tk=document.getElementById('tw-ticket'); if(tk) tk.dataset.side=btn.dataset.side; twEstCost(); }
@@ -1429,7 +1461,7 @@ var twSavedVolume = true, twSavedExtended = false;
 var twSavedIndicators = {rsi:true,macd:true};
 var twDefaultStudies={rsiPeriod:14,rsiUpper:70,rsiLower:30,macdFast:12,macdSlow:26,macdSignal:9};
 var twSavedStudies=Object.assign({},twDefaultStudies);
-var twDefaultStyles={rsi:'#e7b84b',macd:'#e7b84b',signal:'#6fa8ff',drawing:'#f0b53f',fib:'#f0b53f',drawingWidth:2,emas:{'9':{enabled:true,color:'#f5b942'},'20':{enabled:true,color:'#38d6c5'},'50':{enabled:true,color:'#6fa8ff'},'100':{enabled:false,color:'#c084fc'},'200':{enabled:false,color:'#ff6b7a'}}};
+var twDefaultStyles={rsi:'#e7b84b',macd:'#e7b84b',signal:'#6fa8ff',drawing:'#f0b53f',fib:'#f0b53f',drawingWidth:2,emas:{'9':{enabled:true,color:'#f5b942',width:1,style:'solid',show:'all'},'20':{enabled:true,color:'#38d6c5',width:1,style:'solid',show:'all'},'50':{enabled:true,color:'#6fa8ff',width:1,style:'solid',show:'all'},'100':{enabled:false,color:'#c084fc',width:1,style:'solid',show:'all'},'200':{enabled:false,color:'#ff6b7a',width:1,style:'solid',show:'all'}}};
 var twSavedStyles=JSON.parse(JSON.stringify(twDefaultStyles));
 try {
   var twStoredType = localStorage.getItem('tradestaar.chartType');
@@ -1529,7 +1561,7 @@ function twInitChart(){
   chart.priceScale('shade').applyOptions({ scaleMargins:{ top:0, bottom:0 }, visible:false });
   twChartState.chart=chart; twChartState.area=area; twChartState.candle=candle; twChartState.vol=vol; twChartState.shade=shade;
   ctInitStudies(chart);
-  Object.keys(twChartState.styles.emas).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period]=chart.addLineSeries({color:style.color,lineWidth:1,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,title:''});});
+  Object.keys(twChartState.styles.emas).forEach(function(period){var style=twChartState.styles.emas[period];twChartState.emaSeries[period]=chart.addLineSeries(Object.assign(twEmaOpts(style),{lastValueVisible:false,crosshairMarkerVisible:false}));});
   vol.applyOptions({visible:twChartState.showVolume});
   twApplyStudyStyles();
   chart.subscribeCrosshairMove(function(param){
@@ -1623,9 +1655,9 @@ function twEma(values,period){
 }
 function twRenderEmas(){
   if(!twChartState.bars.length)return;var closes=twChartState.bars.map(function(b){return Number(b.close);});
-  var legend=[];Object.keys(twChartState.emaSeries).forEach(function(period){var values=twEma(closes,Number(period)),series=twChartState.emaSeries[period],style=twChartState.styles.emas[period],last=values.filter(function(v){return v!=null;}).pop();series.setData(twChartState.bars.map(function(bar,i){return values[i]==null?null:{time:bar.time,value:values[i]};}).filter(Boolean));series.applyOptions({color:style.color,visible:!!style.enabled,priceLineVisible:false,lastValueVisible:ctLbl('indicators'),title:''});if(style.enabled&&last!=null)legend.push({period:period,value:last,color:style.color});});twRenderEmaLegend(legend);ctRenderStudies();
+  var legend=[];Object.keys(twChartState.emaSeries).forEach(function(period){var values=twEma(closes,Number(period)),series=twChartState.emaSeries[period],style=twChartState.styles.emas[period],last=values.filter(function(v){return v!=null;}).pop();series.setData(twChartState.bars.map(function(bar,i){return values[i]==null?null:{time:bar.time,value:values[i]};}).filter(Boolean));series.applyOptions(twEmaOpts(style));if(twEmaOn(style)&&last!=null)legend.push({period:period,value:last,color:style.color,width:Number(style.width)||1,style:style.style||'solid'});});twRenderEmaLegend(legend);ctRenderStudies();
 }
-function twRenderEmaLegend(items){var host=document.getElementById('tw-ema-legend');if(!host)return;host.replaceChildren();items.forEach(function(item){var chip=document.createElement('span'),dot=document.createElement('i'),label=document.createElement('b');dot.style.backgroundColor=item.color;label.textContent='EMA '+item.period+'  '+Number(item.value).toFixed(2);chip.appendChild(dot);chip.appendChild(label);host.appendChild(chip);});host.hidden=!items.length;}
+function twRenderEmaLegend(items){var host=document.getElementById('tw-ema-legend');if(!host)return;host.replaceChildren();items.forEach(function(item){var chip=document.createElement('span'),dot=document.createElement('i'),label=document.createElement('b');dot.style.backgroundColor='transparent';dot.style.height='0';dot.style.borderTop=Math.max(1,Math.min(4,item.width||1))+'px '+({dashed:'dashed',longdash:'dashed',dotted:'dotted'}[item.style]||'solid')+' '+item.color;label.textContent='EMA '+item.period+'  '+Number(item.value).toFixed(2);chip.appendChild(dot);chip.appendChild(label);host.appendChild(chip);});host.hidden=!items.length;}
 function twRsi(values,period){
   var out=new Array(values.length).fill(null);if(values.length<=period)return out;var gain=0,loss=0;
   for(var i=1;i<=period;i++){var d=values[i]-values[i-1];gain+=Math.max(d,0);loss+=Math.max(-d,0);}gain/=period;loss/=period;out[period]=loss===0?100:100-(100/(1+gain/loss));
