@@ -65,6 +65,22 @@
       </div>
       {% endif %}
 
+      <!-- New US listing: first annual report not filed yet -->
+      {% if data.listing_notice %}
+      <div class="listing-notice" role="note">
+        <span class="listing-notice-hd">🆕 {{ data.listing_notice.title }}</span>
+        <p>{{ data.listing_notice.text }}</p>
+      </div>
+      {% endif %}
+
+      <!-- Numbers that contradict each other -->
+      {% if data.data_checks %}
+      <div class="data-checks" role="note">
+        <span class="data-checks-hd">⚠ Double-check these numbers</span>
+        <ul>{% for c in data.data_checks %}<li>{{ c.text }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+
       <!-- Split notice -->
       {% if data.split_notice %}
       <div class="split-notice">
@@ -249,7 +265,7 @@
                   </span>
                 </div>
                 <div class="metric-data">
-                  <span class="metric-value">{{ row.value }}</span>
+                  <span class="metric-value">{% if row.suspect %}<span class="metric-suspect" title="{{ row.suspect }}">⚠ check</span> {% endif %}{{ row.value }}</span>
                   {% if row.points > 0 %}
                   <span class="metric-pts {% if row.passed == 'partial' %}metric-pts-partial{% elif row.earned > 0 %}metric-pts-earned{% endif %}">
                     {% if row.passed is none %}?{% else %}{{ row.earned }}{% endif %}/{{ row.points }}

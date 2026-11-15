@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import math
 import os
-from datetime import datetime
+from datetime import date, datetime
 import requests as _req_module
 from typing import Any
 
@@ -1579,6 +1579,77 @@ def _score_check(condition, points: int) -> tuple[int, int, object]:
     return earned, points, "partial"
 
 
+_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def listing_notice(filing_signals: dict | None, company: str | None, today: date | None = None) -> dict | None:
+    """A new US listing whose first annual report isn't filed yet.
+
+    Its statements aren't in the SEC's structured data until the first 10-K /
+    20-F, so cash-flow and several balance-sheet checks can't be scored and
+    read N/A. Say so plainly, with roughly when that report is due, so N/A
+    reads as "not yet" instead of "broken".
+    """
+    lst = (filing_signals or {}).get("listing") or {}
+    reg = lst.get("registered")
+    if not reg or lst.get("annual_reports_on_file"):
+        return None
+    today = today or date.today()
+    foreign = bool(lst.get("foreign_filer"))
+    form = "20-F" if foreign else "10-K"
+    expected = None
+    fye = str(lst.get("fiscal_year_end") or "")
+    try:
+        filed = datetime.strptime(str(reg.get("filed"))[:10], "%Y-%m-%d").date()
+        if len(fye) == 4 and fye.isdigit():
+            mm, dd = int(fye[:2]), int(fye[2:])
+            year = filed.year
+            end = date(year, mm, min(dd, 28))
+            if end < filed:
+                end = date(year + 1, mm, min(dd, 28))
+            # 20-F: within four months of year end; 10-K: about 60-90 days.
+            due_m = mm + (4 if foreign else 3)
+            due = date(end.year + (due_m - 1) // 12, (due_m - 1) % 12 + 1, 1)
+            expected = f"{_MONTHS[due.month - 1]} {due.year}"
+    except (TypeError, ValueError):
+        filed = None
+    who = company or "This company"
+    text = (f"{who} listed in the US recently ({reg.get('form')} filed "
+            f"{_MONTHS[filed.month - 1] + ' ' + str(filed.year) if filed else reg.get('filed')}) and hasn't filed "
+            f"its first annual report ({form}) with the SEC yet"
+            + (f" — expected around {expected}" if expected else "") + ". "
+            "Until then its full statements aren't in the SEC's data, so the cash-flow checks and some "
+            "balance-sheet checks can't be scored and show N/A. The rows that did score use a data "
+            "provider's last-12-month figures. Treat this grade as incomplete; it fills in once that report is filed.")
+    return {"title": "New US listing — first annual report not filed yet", "text": text,
+            "form": form, "expected": expected}
+
+
+def data_checks(nm: float | None, om: float | None, eps_growth: float | None, currency: str = "USD") -> list:
+    """Numbers that can't all be right at once — flagged, not silently scored.
+
+    A net margin above the operating margin needs a large one-off gain below
+    the operating line; far more often one of the two is from a different
+    period, currency or share basis than the other.
+    """
+    out = []
+    if nm is not None and om is not None and nm > om + 5:
+        out.append({"key": "net_margin",
+                    "text": f"Net margin ({nm:.1f}%) is above operating margin ({om:.1f}%). That needs a big one-off "
+                            "gain below the operating line; more often one of the two figures comes from a different "
+                            "period or source. Check the latest report before relying on either."})
+    elif nm is not None and nm > 80:
+        out.append({"key": "net_margin",
+                    "text": f"Net margin of {nm:.1f}% is far above what operating businesses earn — verify it in the report."})
+    if eps_growth is not None and abs(eps_growth) > 300:
+        out.append({"key": "eps_growth",
+                    "text": f"EPS growth of {eps_growth:+.1f}% is extreme. Booms can do this, but "
+                            + ("for a company reporting in " + currency + " through a US listing, share-basis or "
+                               "currency mix-ups are common — " if currency and currency != "USD" else "")
+                            + "confirm it against the reported EPS."})
+    return out
+
+
 def score_fundamentals(raw: dict) -> dict:
     """
     Score a raw fundamentals dict and return a structured scorecard.
@@ -2650,6 +2721,19 @@ def score_fundamentals(raw: dict) -> dict:
         if isinstance(v, dict) and v.get("divergence_warning")
     }
 
+    # Figures that contradict each other get a ⚠ on their row and a note.
+    try:
+        _checks = data_checks(nm_series[0] if nm_series else None, om_series[0] if om_series else None,
+                              ttm.get("eps_growth_ttm_yoy") if eps_source == "finnhub_metric" else None,
+                              raw.get("currency") or "USD")
+    except Exception:
+        _checks = []
+    _flagged = {c["key"]: c["text"] for c in _checks}
+    for _sec in sections:
+        for _row in _sec.get("checks", _sec.get("rows", [])) or []:
+            if isinstance(_row, dict) and _row.get("key") in _flagged:
+                _row["suspect"] = _flagged[_row["key"]]
+
     return {
         "ticker":           raw.get("ticker", ""),
         "company_name":     raw.get("company_name"),
@@ -2716,6 +2800,8 @@ def score_fundamentals(raw: dict) -> dict:
         },
         "ttm_quarters_used":   (raw.get("_ttm_metrics") or {}).get("quarters_used", 0),
         "divergence_warnings": divergence_warnings,
+        "listing_notice":      listing_notice(raw.get("_filing_signals"), raw.get("company_name")),
+        "data_checks":         _checks,
     }
 
 
@@ -2730,7 +2816,7 @@ def score_fundamentals(raw: dict) -> dict:
 # streak, the ROE line, split handling - shipped and deployed correctly and then
 # appeared not to work, because the page kept serving a scorecard computed by the
 # previous code. Hours went into re-diagnosing bugs that were already fixed.
-SCORECARD_VERSION = "2026-09-28.2"
+SCORECARD_VERSION = "2026-11-15.1"
 
 # The unit buckets in EDGAR are keyed by currency. Everything read only "USD",
 # so a filer that reports in its own currency lost every figure with no USD

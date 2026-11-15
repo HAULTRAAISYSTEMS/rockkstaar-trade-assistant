@@ -1529,3 +1529,15 @@
   text-decoration: none;
   border-bottom: 1px solid rgba(var(--cc-accent-rgb, 229, 185, 79), .3);
 }
+
+/* New US listing + contradicting-number notes */
+.listing-notice, .data-checks { margin: 14px 0; padding: 13px 16px; border: 1px solid var(--elite-border-strong); border-radius: var(--elite-radius); background: var(--elite-panel-inset); }
+.listing-notice { border-left: 3px solid var(--series-revenue, var(--elite-gold)); }
+.listing-notice-hd, .data-checks-hd { display: block; margin-bottom: 6px; font: 700 10px/1 var(--font-ui, system-ui); letter-spacing: .16em; text-transform: uppercase; }
+.listing-notice-hd { color: var(--series-revenue, var(--elite-gold-bright)); }
+.listing-notice p { margin: 0; font: 500 12.5px/1.55 var(--font-ui, system-ui); color: var(--elite-copy); }
+.data-checks { border-left: 3px solid var(--warn-500); }
+.data-checks-hd { color: var(--warn-500); }
+.data-checks ul { margin: 0; padding-left: 18px; font: 500 12.5px/1.55 var(--font-ui, system-ui); color: var(--elite-copy); }
+.metric-suspect { display: inline-block; margin-right: 6px; padding: 1px 6px; border: 1px solid var(--warn-500); border-radius: var(--elite-radius-sm); color: var(--warn-500); font: 700 10px var(--font-mono, ui-monospace, monospace); cursor: help; }
+@media (max-width: 640px) { .listing-notice, .data-checks { padding: 11px 13px; } }
