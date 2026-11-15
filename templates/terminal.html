@@ -766,7 +766,14 @@
               <button type="button" class="ct-set-btn ct-danger" data-ct-cmdset="clearsym">Remove all drawings on this symbol</button>
             </div>
           </div>
-          <div class="ct-set-foot"><button type="button" class="ct-set-btn" data-ct-cmdset="resetall">Reset chart settings to defaults</button></div>
+          <div class="ct-set-foot ct-default-foot">
+            <p class="ct-save-note" id="ct-save-note"><span class="ct-save-dot"></span><span id="ct-save-text">Changes save to your account automatically and sync to your devices.</span></p>
+            <div class="ct-default-row">
+              <button type="button" class="ct-set-btn ct-primary" data-ct-cmdset="savedefault" title="Save every chart setting, indicator style and the current timeframe as your default">★ Save as my default</button>
+              <button type="button" class="ct-set-btn" data-ct-cmdset="mydefault" id="ct-mydefault-btn" disabled title="Put every chart setting back to your saved default">Reset to my default</button>
+              <button type="button" class="ct-set-btn ct-danger" data-ct-cmdset="resetall" title="Tradestaar's original chart settings">Factory reset</button>
+            </div>
+          </div>
         </div>
 
         <div class="tw-draw-status" id="tw-draw-status" hidden></div>
@@ -1251,7 +1258,7 @@ function twType(btn){
   btn.classList.add('active');
   twChartState.type = btn.dataset.type;
   try { localStorage.setItem('tradestaar.chartType', twChartState.type); } catch(e) {}
-  twApplyType();
+  twApplyType(); if(typeof ctChartChanged==='function')ctChartChanged();
 }
 function twApplyType(){
   if(!twChartState.area || !twChartState.candle) return;
@@ -1265,6 +1272,7 @@ function twToggleVolume(btn){
   btn.classList.toggle('active',twChartState.showVolume);
   if(twChartState.vol) twChartState.vol.applyOptions({visible:twChartState.showVolume});
   try { localStorage.setItem('tradestaar.chartVolume',twChartState.showVolume?'1':'0'); } catch(e) {}
+  if(typeof ctChartChanged==='function')ctChartChanged();
 }
 function twRefreshExtendedAvailability(){
   var btn=document.getElementById('tw-extended-btn'),supported=['1m','5m','15m','1h','4h'].indexOf(twChartState.interval)>=0;if(!btn)return;btn.disabled=false;btn.classList.toggle('active',supported&&twChartState.extended);btn.title=supported?'Show premarket and after-hours candles':'Open extended hours in a 5-minute overnight view';
@@ -1308,6 +1316,7 @@ function twToggleIndicator(name,btn){
   if(btn && btn.type === 'checkbox'){ on = btn.checked; twChartState.indicators[name] = on; }
   else { twChartState.indicators[name]=!twChartState.indicators[name]; on = twChartState.indicators[name]; if(btn) btn.classList.toggle('active', on); }
   try { localStorage.setItem('tradestaar.chartIndicators',JSON.stringify(twChartState.indicators)); } catch(e) {}
+  if(typeof ctChartChanged==='function')ctChartChanged();
   twSyncIndicatorMenu(); twApplyIndicatorVisibility(); twRenderIndicators();
 }
 function twApplyIndicatorVisibility(){
@@ -1320,14 +1329,14 @@ function twApplyIndicatorVisibility(){
   if(twChartState.chart){ try{ twChartState.chart.applyOptions({timeScale:{visible:!anyInd}}); }catch(e){} }
   twRenderIndicators(); twRenderDrawings();
 }
-function twSaveStyles(){try{localStorage.setItem('tradestaar.chartStyles',JSON.stringify(twChartState.styles));}catch(e){}}
+function twSaveStyles(){try{localStorage.setItem('tradestaar.chartStyles',JSON.stringify(twChartState.styles));}catch(e){}if(typeof ctChartChanged==='function')ctChartChanged();}
 function twToggleStudySettings(){var panel=document.getElementById('tw-study-settings'),btn=document.getElementById('tw-studies-btn'),gear=document.getElementById('tw-settings-btn');if(!panel)return;panel.hidden=!panel.hidden;if(btn)btn.classList.toggle('active',!panel.hidden);if(gear)gear.setAttribute('aria-pressed',panel.hidden?'false':'true');if(!panel.hidden){twSyncStudySettings();if(typeof ctSyncSettingsUI==='function')ctSyncSettingsUI();}}
 function twSyncStudySettings(){
   ['9','20','50','100','200'].forEach(function(period){var check=document.getElementById('tw-ema-'+period),color=document.getElementById('tw-color-ema'+period);if(check)check.checked=!!twChartState.styles.emas[period].enabled;if(color)color.value=twChartState.styles.emas[period].color;});
   ['rsi','macd','signal','drawing','fib'].forEach(function(key){var input=document.getElementById('tw-color-'+key);if(input)input.value=twChartState.styles[key];});var width=document.getElementById('tw-drawing-width');if(width)width.value=String(twChartState.styles.drawingWidth);
   var ids={rsiPeriod:'tw-rsi-period',rsiUpper:'tw-rsi-upper',rsiLower:'tw-rsi-lower',macdFast:'tw-macd-fast',macdSlow:'tw-macd-slow',macdSignal:'tw-macd-signal'};Object.keys(ids).forEach(function(key){var input=document.getElementById(ids[key]);if(input)input.value=String(twChartState.studies[key]);});twSyncIndicatorLabels();
 }
-function twSaveStudies(){try{localStorage.setItem('tradestaar.chartStudies',JSON.stringify(twChartState.studies));}catch(e){}}
+function twSaveStudies(){try{localStorage.setItem('tradestaar.chartStudies',JSON.stringify(twChartState.studies));}catch(e){}if(typeof ctChartChanged==='function')ctChartChanged();}
 function twSetStudyParam(key,value){
   var ranges={rsiPeriod:[2,100],rsiUpper:[51,99],rsiLower:[1,49],macdFast:[2,100],macdSlow:[3,200],macdSignal:[2,100]},range=ranges[key];if(!range)return;var parsed=Math.max(range[0],Math.min(range[1],Math.round(Number(value)||twChartState.studies[key])));twChartState.studies[key]=parsed;
   if(twChartState.studies.macdFast>=twChartState.studies.macdSlow)twChartState.studies.macdSlow=Math.min(200,twChartState.studies.macdFast+1);if(twChartState.studies.rsiLower>=twChartState.studies.rsiUpper)twChartState.studies.rsiLower=Math.max(1,twChartState.studies.rsiUpper-1);

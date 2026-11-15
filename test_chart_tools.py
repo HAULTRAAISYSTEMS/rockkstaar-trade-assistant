@@ -957,3 +957,26 @@ def test_chart_vertical_drag_and_earnings_visuals():
     assert "function ctEarningsMove()" in JS and "function ctDrawEarningsRange(" in JS and "function ctDrawEarningsRunway(" in JS
     assert "lg.addColorStop(0, ctHexA(flagColor, 0));" in JS                       # faded report lines
     assert "e.result === 'miss' ? '#FF4D45'" in JS
+
+
+def test_chart_default_api_round_trip(client):
+    c, _ = client
+    assert c.get("/api/chart/default").get_json()["default"] is None
+    snap = {"overlays": {"magnet": True}, "tools": {}, "chart": {"interval": "1d", "styles": {"emas": {"9": {"color": "#ff0000"}}}}, "saved": 1}
+    assert c.put("/api/chart/default", json={"default": snap}).status_code == 200
+    assert c.get("/api/chart/default").get_json()["default"]["chart"]["interval"] == "1d"
+    assert c.put("/api/chart/default", json={"default": "x"}).status_code == 400
+    assert c.put("/api/chart/default", json={"default": {"big": "x" * 40000}}).status_code == 413
+    assert c.delete("/api/chart/default").status_code == 200
+    assert c.get("/api/chart/default").get_json()["default"] is None
+
+
+def test_indicator_settings_sync_and_default_buttons():
+    tpl = TEMPLATE
+    # The Indicators tab, chart type and volume used to stay on one device; they now sync.
+    for fn in ("function twSaveStyles()", "function twSaveStudies()"):
+        i = tpl.index(fn); assert "ctChartChanged()" in tpl[i:i + 220]
+    assert "chart: ctChartBundle(), updated: Date.now()" in JS and "if (d.prefs.chart) ctApplyChartBundle(d.prefs.chart, false);" in JS
+    assert 'data-ct-cmdset="savedefault"' in tpl and 'data-ct-cmdset="mydefault"' in tpl and 'data-ct-cmdset="resetall"' in tpl
+    assert "if (c === 'savedefault')" in JS and "if (c === 'mydefault')" in JS and "chart: ctChartBundle(true)" in JS
+    assert "function ctSaveStatus(state)" in JS and 'id="ct-save-note"' in tpl

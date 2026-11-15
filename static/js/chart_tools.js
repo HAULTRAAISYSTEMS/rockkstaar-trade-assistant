@@ -175,7 +175,8 @@ function ctSavePrefs() {
   clearTimeout(ctPrefsTimer);
   ctPrefsTimer = setTimeout(function () {
     fetch('/api/chart/prefs', {method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({prefs: {overlays: ctPrefs, tools: ctToolDefaults, updated: Date.now()}})}).catch(function () {});
+      body: JSON.stringify({prefs: {overlays: ctPrefs, tools: ctToolDefaults, chart: ctChartBundle(), updated: Date.now()}})})
+      .then(function (r) { ctSaveStatus(r.ok ? 'saved' : 'error'); }).catch(function () { ctSaveStatus('error'); });
   }, 900);
 }
 function ctLoadServerPrefs() {
@@ -187,6 +188,8 @@ function ctLoadServerPrefs() {
       try { localAt = Number(localStorage.getItem('tradestaar.chartOverlaysAt')) || 0; } catch (e) {}
       if ((Number(d.prefs.updated) || 0) <= localAt) return;
       if (d.prefs.overlays) ctMergePrefs(d.prefs.overlays);
+      // Indicator styles, chart type, volume and extended hours ride along too.
+      if (d.prefs.chart) ctApplyChartBundle(d.prefs.chart, false);
       // First load on this device after the switch-off: the account copy may
       // still have session colors on — apply the switch-off to it too.
       if (ctSessFixNow && ctPrefs.candles.session) { ctPrefs.candles.session = false; ctSessFixNow = false; ctPrefChanged(); }
@@ -206,6 +209,90 @@ function ctLoadServerPrefs() {
 function ctPrefChanged() {
   try { localStorage.setItem('tradestaar.chartOverlaysAt', String(Date.now())); } catch (e) {}
   ctSavePrefs();
+}
+/* ═══ The Terminal's own chart setup (Indicators tab, chart type, volume,
+   extended hours, timeframe) — synced with the account like the rest, and
+   part of "Save as my default". ═══ */
+function ctChartBundle(withTimeframe) {
+  if (typeof twChartState === 'undefined') return null;
+  var b = {type: twChartState.type, volume: !!twChartState.showVolume,
+    extended: typeof twExtendedPref !== 'undefined' ? !!twExtendedPref : !!twChartState.extended,
+    indicators: twChartState.indicators, styles: twChartState.styles, studies: twChartState.studies};
+  if (withTimeframe) { b.interval = twChartState.interval; b.range = twChartState.range; }
+  return JSON.parse(JSON.stringify(b));
+}
+function ctChartChanged() { ctPrefChanged(); }
+function ctApplyChartBundle(b, withTimeframe) {
+  if (!b || typeof twChartState === 'undefined') return;
+  try {
+    if (b.styles && typeof b.styles === 'object') {
+      Object.keys(b.styles).forEach(function (k) { if (k !== 'emas') twChartState.styles[k] = b.styles[k]; });
+      Object.keys(b.styles.emas || {}).forEach(function (p) { twChartState.styles.emas[p] = Object.assign({}, twChartState.styles.emas[p] || {}, b.styles.emas[p]); });
+      localStorage.setItem('tradestaar.chartStyles', JSON.stringify(twChartState.styles));
+      if (typeof twApplyStudyStyles === 'function') twApplyStudyStyles();
+    }
+    if (b.studies && typeof b.studies === 'object') {
+      Object.keys(b.studies).forEach(function (k) { var v = Number(b.studies[k]); if (isFinite(v)) twChartState.studies[k] = Math.round(v); });
+      localStorage.setItem('tradestaar.chartStudies', JSON.stringify(twChartState.studies));
+    }
+    if (b.indicators && typeof b.indicators === 'object') {
+      twChartState.indicators.rsi = b.indicators.rsi !== false; twChartState.indicators.macd = b.indicators.macd !== false;
+      localStorage.setItem('tradestaar.chartIndicators', JSON.stringify(twChartState.indicators));
+      if (typeof twSyncIndicatorMenu === 'function') twSyncIndicatorMenu();
+      if (typeof twApplyIndicatorVisibility === 'function') twApplyIndicatorVisibility();
+    }
+    if (b.type === 'candles' || b.type === 'area') {
+      twChartState.type = b.type; localStorage.setItem('tradestaar.chartType', b.type);
+      document.querySelectorAll('.tw-type-btn[data-type]').forEach(function (x) { x.classList.toggle('active', x.dataset.type === b.type); });
+      if (typeof twApplyType === 'function') twApplyType();
+    }
+    if (typeof b.volume === 'boolean' && b.volume !== !!twChartState.showVolume) {
+      twChartState.showVolume = b.volume; localStorage.setItem('tradestaar.chartVolume', b.volume ? '1' : '0');
+      var vb = document.getElementById('tw-volume-btn'); if (vb) vb.classList.toggle('active', b.volume);
+      if (twChartState.vol) twChartState.vol.applyOptions({visible: b.volume});
+    }
+    if (typeof b.extended === 'boolean') {
+      localStorage.setItem('tradestaar.chartExtendedPref', b.extended ? '1' : '0');
+      if (typeof twExtendedPref !== 'undefined') { twExtendedPref = b.extended; }
+    }
+    if (typeof twSyncStudySettings === 'function') twSyncStudySettings();
+    if (typeof twRenderIndicators === 'function') twRenderIndicators();
+    if (withTimeframe && b.interval) {
+      var tf = document.querySelector('.tw-tf-btn[data-interval="' + b.interval + '"]');
+      if (b.range) { twChartState.range = b.range; try { localStorage.setItem('tradestaar.chartRange', b.range); } catch (e) {} }
+      if (tf && typeof twInterval === 'function') twInterval(tf);
+    }
+  } catch (e) {}
+}
+/* "Saved ✓" in the settings footer after each sync. */
+var ctSaveFlashT = null;
+function ctSaveStatus(state) {
+  var el = document.getElementById('ct-save-text'), note = document.getElementById('ct-save-note');
+  if (!el || !note) return;
+  note.classList.remove('is-saved', 'is-error');
+  if (state === 'saved') {
+    note.classList.add('is-saved'); el.textContent = 'Saved to your account ✓';
+  } else {
+    note.classList.add('is-error'); el.textContent = 'Couldn’t reach the server — saved on this device, will sync next change.';
+  }
+  clearTimeout(ctSaveFlashT);
+  ctSaveFlashT = setTimeout(function () { note.classList.remove('is-saved'); el.textContent = 'Changes save to your account automatically and sync to your devices.'; }, 2600);
+}
+/* Save as my default / Reset to my default. */
+var ctMyDefault = null;
+function ctLoadMyDefault() {
+  fetch('/api/chart/default', {credentials: 'same-origin', cache: 'no-store'})
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) { ctMyDefault = d && d.default && d.default.overlays ? d.default : null; ctSyncDefaultBtn(); })
+    .catch(function () {});
+}
+function ctSyncDefaultBtn() {
+  var b = document.getElementById('ct-mydefault-btn'); if (!b) return;
+  b.disabled = !ctMyDefault;
+  if (ctMyDefault && ctMyDefault.saved) {
+    var d = new Date(ctMyDefault.saved);
+    b.textContent = 'Reset to my default · ' + d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
+  } else b.textContent = 'Reset to my default';
 }
 function ctLbl(key) { return !!(ctPrefs.labels && ctPrefs.labels[key]); }
 
@@ -1328,6 +1415,7 @@ function twInitDrawingLayer() {
     });
   }
   ctLoadServerPrefs();
+  ctLoadMyDefault();
 }
 
 /* ═══ Drawing rail ═══ */
@@ -2282,15 +2370,44 @@ document.addEventListener('click', function (ev) {
   var cmd = ev.target.closest && ev.target.closest('[data-ct-cmdset]');
   if (!cmd) return;
   var c = cmd.getAttribute('data-ct-cmdset');
+  if (c === 'savedefault') {
+    var snap = {overlays: JSON.parse(JSON.stringify(ctPrefs)), tools: JSON.parse(JSON.stringify(ctToolDefaults)),
+      chart: ctChartBundle(true), saved: Date.now()};
+    cmd.textContent = 'Saving…';
+    fetch('/api/chart/default', {method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({default: snap})})
+      .then(function (r) {
+        if (!r.ok) throw new Error('save failed');
+        ctMyDefault = snap; ctSyncDefaultBtn();
+        cmd.textContent = '★ Saved as your default ✓';
+      }).catch(function () { cmd.textContent = 'Couldn’t save — try again'; })
+      .then(function () { setTimeout(function () { cmd.textContent = '★ Save as my default'; }, 2200); });
+    return;
+  }
+  if (c === 'mydefault') {
+    if (!ctMyDefault) return;
+    ctPrefs = JSON.parse(JSON.stringify(CT_PREF_DEFAULTS));
+    ctMergePrefs(JSON.parse(JSON.stringify(ctMyDefault.overlays)));
+    ctToolDefaults = JSON.parse(JSON.stringify(ctMyDefault.tools || {}));
+    ctApplyChartBundle(ctMyDefault.chart, true);
+    ctPrefChanged();
+    ctApplyCandleColors(); ctRepaintCandles(); ctApplyView(true); ctStudy.nbboWant = null;
+    ctRenderStudies(); ctSyncSettingsUI(); ctSyncRail(); twRenderDrawings();
+    cmd.textContent = 'Back to your default ✓';
+    setTimeout(ctSyncDefaultBtn, 2000);
+    return;
+  }
   if (c === 'resetall') {
     ctPrefs = JSON.parse(JSON.stringify(CT_PREF_DEFAULTS));
+    // Indicator styles and lengths back to factory too.
+    if (typeof twDefaultStyles !== 'undefined') ctApplyChartBundle({styles: JSON.parse(JSON.stringify(twDefaultStyles)),
+      studies: JSON.parse(JSON.stringify(twDefaultStudies)), indicators: {rsi: true, macd: true}}, false);
     ctPrefChanged();
     if (!twChartState.showVolume && typeof twToggleVolume === 'function') twToggleVolume(document.getElementById('tw-volume-btn') || document.createElement('button'));
     ctApplyCandleColors(); ctRepaintCandles(); ctApplyView(true); ctStudy.nbboWant = null;
     if (typeof twApplyStudyStyles === 'function') twApplyStudyStyles();
     ctRenderStudies(); ctSyncSettingsUI(); ctSyncRail(); twRenderDrawings();
-    cmd.textContent = 'Settings reset ✓';
-    setTimeout(function () { cmd.textContent = 'Reset chart settings to defaults'; }, 2000);
+    cmd.textContent = 'Factory settings back ✓';
+    setTimeout(function () { cmd.textContent = 'Factory reset'; }, 2000);
   } else if (c === 'cleartool') {
     ctToolDefaults = {}; ctPrefChanged();
     cmd.textContent = 'Drawing styles reset ✓';
