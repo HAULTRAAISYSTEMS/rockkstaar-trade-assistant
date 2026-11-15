@@ -5584,6 +5584,7 @@ def terminal():
     return render_template(
         "terminal.html",
         requested_symbol=requested_symbol,
+        favorites=get_favorites(),
         stocks=valid,
         watchlist_count=len(watchlist),
         chart_symbol=chart_symbol,
@@ -5736,8 +5737,14 @@ def api_terminal_quotes():
         logger.debug("terminal quotes: watchlist unavailable: %s", exc)
         wl_id, watchlist = None, []
 
+    # Favorites ride the same poll, so a favorite that isn't on the open
+    # watchlist still gets the one shared live price.
+    try:
+        favs = [t for t in get_favorites() if t not in watchlist]
+    except Exception:
+        favs = []
     rows = []
-    if watchlist:
+    if watchlist or favs:
         try:
             data_map = {d["ticker"]: d for d in (get_all_stock_data() or [])}
             _trigger_exec_state_refresh(wl_id)   # non-blocking; lands next poll
@@ -5768,6 +5775,17 @@ def api_terminal_quotes():
                     "source": (annotated.get("quote") or {}).get("source_name") or "",
                     "quote_note": (annotated.get("quote") or {}).get("caveat") or "",
                 })
+            for ticker in favs:
+                stock = data_map.get(ticker)
+                if stock:
+                    a = annotate(dict(stock))
+                    rows.append({"ticker": ticker, "fav": True, "price": a.get("current_price"),
+                                 "gap_pct": a.get("gap_pct"), "gap_display": a.get("gap_display") or "0.00%",
+                                 "gap_class": a.get("gap_class") or "", "prev_close": a.get("prev_close"),
+                                 "live": False, "as_of": "", "source": "", "quote_note": ""})
+                else:
+                    rows.append({"ticker": ticker, "fav": True, "price": None, "gap_pct": None,
+                                 "gap_display": "", "live": False, "as_of": "", "source": "", "quote_note": ""})
         except Exception as exc:
             logger.warning("terminal quotes: read failed: %s", exc)
 
@@ -6102,6 +6120,48 @@ def api_chart_drawings(ticker):
         return jsonify({"ok": False, "error": "too many drawings to save"}), 413
     set_user_setting(uid, key, payload)
     return jsonify({"ok": True, "updated": updated, "count": len(drawings)})
+
+
+_FAV_MAX = 40
+_FAV_RE = re.compile(r"[A-Z][A-Z0-9]{0,5}(\.[A-Z])?")
+
+
+def get_favorites(uid=None):
+    """The user's favorite tickers, in their own order."""
+    try:
+        raw = get_user_setting(uid if uid is not None else current_user_id(), "favorites")
+        items = _json.loads(raw) if raw else []
+    except Exception:
+        items = []
+    out = []
+    for t in items if isinstance(items, list) else []:
+        t = str(t or "").strip().upper()
+        if _FAV_RE.fullmatch(t) and t not in out:
+            out.append(t)
+    return out[:_FAV_MAX]
+
+
+@app.route("/api/favorites", methods=["GET", "PUT"])
+def api_favorites():
+    """Favorite tickers, synced across devices. PUT replaces the list (order kept)."""
+    uid = current_user_id()
+    if request.method == "GET":
+        return jsonify({"ok": True, "tickers": get_favorites(uid), "max": _FAV_MAX})
+    body = request.get_json(silent=True) or {}
+    items = body.get("tickers")
+    if not isinstance(items, list):
+        return jsonify({"ok": False, "error": "tickers must be a list"}), 400
+    clean = []
+    for t in items:
+        t = str(t or "").strip().upper()
+        if not _FAV_RE.fullmatch(t):
+            return jsonify({"ok": False, "error": f"not a ticker: {t[:12]}"}), 400
+        if t not in clean:
+            clean.append(t)
+    if len(clean) > _FAV_MAX:
+        return jsonify({"ok": False, "error": f"up to {_FAV_MAX} favorites"}), 400
+    set_user_setting(uid, "favorites", _json.dumps(clean))
+    return jsonify({"ok": True, "tickers": clean})
 
 
 @app.route("/api/chart/prefs", methods=["GET", "PUT"])

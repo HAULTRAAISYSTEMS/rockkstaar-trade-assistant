@@ -23,14 +23,16 @@ var CT_TOOLS = {
   text:     {n: 1, label: 'Text', defaults: {color: '#e8edf5', text: 'Note', fontSize: 13}},
   long:     {n: 2, label: 'Long position', defaults: {showPrice: true}},
   short:    {n: 2, label: 'Short position', defaults: {showPrice: true}},
-  measure:  {n: 2, label: 'Price range'},
+  measure:  {n: 2, label: 'Measure % (price range)'},
+  pctlevels: {n: 1, label: '% drop levels', defaults: {color: '#9aa7b8', width: 1, dash: 'dashed', showPrice: true, fillOpacity: 0, extendLeft: true}},
   avwap:    {n: 1, label: 'Anchored VWAP', defaults: {color: '#ff9f43', showPrice: true}}
 };
 var CT_GROUPS = [
   {id: 'lines', tools: ['trend', 'ray', 'extended', 'arrow', 'hline', 'hray', 'vline', 'channel']},
   {id: 'fib', tools: ['fib', 'fibext']},
   {id: 'shapes', tools: ['rect', 'text']},
-  {id: 'forecast', tools: ['long', 'short', 'measure']},
+  {id: 'forecast', tools: ['long', 'short']},
+  {id: 'measure', tools: ['measure', 'pctlevels']},
   {id: 'avwap', tools: ['avwap']}
 ];
 var CT_ICONS = {
@@ -49,8 +51,9 @@ var CT_ICONS = {
   text: '<path d="M5 6h14M12 6v13M9 19h6"/>',
   long: '<path d="M4 4h16v8H4z" fill="rgba(34,197,139,.25)"/><path d="M4 12h16v7H4z" fill="rgba(255,77,69,.22)"/>',
   short: '<path d="M4 5h16v7H4z" fill="rgba(255,77,69,.22)"/><path d="M4 12h16v8H4z" fill="rgba(34,197,139,.25)"/>',
-  measure: '<path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4"/>',
+  measure: '<path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4"/><path d="M17 15.5l4-4.5M17.3 11.4h.01M20.7 15.2h.01" stroke-width="1.6"/>',
   avwap: '<path d="M3 18c4-1 5-8 9-8s5 4 9 2"/><circle cx="3.5" cy="18" r="1.8"/>',
+  pctlevels: '<path d="M3 4h18"/><path d="M9 10h12M9 15h12M9 20h12" stroke-dasharray="2.5 2"/><circle cx="5" cy="4" r="1.6"/><path d="M4 11.5l2.5-3M4.2 8.6h.01M6.3 11.4h.01" stroke-width="1.4"/>',
   magnet: '<path d="M6 4v8a6 6 0 0 0 12 0V4M6 8h4M14 8h4"/>',
   eye: '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
@@ -76,6 +79,12 @@ var CT_FIBEXT_LEVELS = [
   {v: 0, on: true, c: '#787b86'}, {v: 0.382, on: false, c: '#ff9800'}, {v: 0.618, on: true, c: '#089981'},
   {v: 1, on: true, c: '#2962ff'}, {v: 1.272, on: true, c: '#00bcd4'}, {v: 1.618, on: true, c: '#f23645'},
   {v: 2, on: false, c: '#9c27b0'}, {v: 2.618, on: true, c: '#e91e63'}
+];
+// % drop levels: lines this far below the high you click (or above a low with ⇅).
+var CT_PCT_LEVELS = [
+  {v: 10, on: false, c: '#f3c95a'}, {v: 20, on: true, c: '#ff9f43'}, {v: 30, on: true, c: '#ff6b6b'},
+  {v: 40, on: true, c: '#ff4d8d'}, {v: 50, on: true, c: '#c084fc'}, {v: 60, on: true, c: '#38bdf8'},
+  {v: 70, on: false, c: '#2ee6a6'}, {v: 80, on: false, c: '#8be36b'}
 ];
 var CT_BASE_STYLE = {color: '#f0b53f', width: 2, dash: 'solid', fillOpacity: 0.12, extendLeft: false, extendRight: false, showPrice: false, text: '', fontSize: 13, labels: true, reverse: false};
 
@@ -304,6 +313,7 @@ function ctDashArr(d, w) { return d === 'dashed' ? [6, 4] : (d === 'dotted' ? [M
 
 /* ═══ Drawing store (per ticker, synced to the account) ═══ */
 var ctStore = {ticker: null, drawings: [], updated: 0, fetchedAt: 0, undo: [], hidden: false};
+var ctQuick = null;  // Shift+drag measure: shown until the next click, never saved
 var ctDraft = null, ctAction = null, ctBoxes = {}, ctPaths = {}, ctLabelHits = {}, ctCurId = null;
 var ctSaveTimer = null;
 function ctLocalKey(t) { return 'tradestaar.draw.v2.' + t; }
@@ -406,8 +416,8 @@ function ctSelected() {
 
 function ctNewDrawing(type, points) {
   var tool = CT_TOOLS[type], style = Object.assign({}, CT_BASE_STYLE, tool.defaults || {}, ctToolDefaults[type] || {});
-  if (type === 'fib' || type === 'fibext') {
-    var base = type === 'fib' ? CT_FIB_LEVELS : CT_FIBEXT_LEVELS;
+  if (type === 'fib' || type === 'fibext' || type === 'pctlevels') {
+    var base = type === 'fib' ? CT_FIB_LEVELS : (type === 'fibext' ? CT_FIBEXT_LEVELS : CT_PCT_LEVELS);
     style.levels = JSON.parse(JSON.stringify((ctToolDefaults[type] && ctToolDefaults[type].levels) || base));
   } else delete style.levels;
   var d = {id: ctUid(), type: type, points: points.map(function (p) { return {t: p.t, p: p.p}; }), style: style, locked: false};
@@ -454,6 +464,11 @@ function twRenderDrawings() {
     var draft = ctNewDrawing(ctDraft.type, ctDraft.points);
     draft.id = '_draft';
     try { ctDrawOne(ctx, draft, dim, true, axisLabels, timeLabels, true); } catch (e) {}
+  }
+  if (ctQuick && ctQuick.points.length === 2) {
+    var qm = ctNewDrawing('measure', ctQuick.points);
+    qm.id = '_quick';
+    try { ctDrawOne(ctx, qm, dim, true, axisLabels, timeLabels, true); } catch (e) {}
   }
   ctExtraAxis = [];
   try { ctDrawExtras(ctx, dim); } catch (e) {}
@@ -675,7 +690,7 @@ function ctDrawOne(ctx, d, dim, sel, axisLabels, timeLabels, isDraft) {
     var dp = d.points[1].p - d.points[0].p, pct = d.points[0].p ? dp / d.points[0].p * 100 : 0;
     var nb = Math.round((ctTimeToLogical(d.points[1].t) || 0) - (ctTimeToLogical(d.points[0].t) || 0));
     var secs = Math.abs(d.points[1].t - d.points[0].t), span = secs >= 86400 ? (secs / 86400).toFixed(1) + 'd' : (secs >= 3600 ? (secs / 3600).toFixed(1) + 'h' : Math.round(secs / 60) + 'm');
-    var line1 = (dp >= 0 ? '+' : '') + dp.toFixed(2) + ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%)', line2 = Math.abs(nb) + ' bars, ' + span;
+    var line1 = (pct >= 0 ? '▲ +' : '▼ ') + pct.toFixed(2) + '%  (' + (dp >= 0 ? '+' : '') + dp.toFixed(2) + ')', line2 = Math.abs(nb) + ' bars, ' + span;
     var ly = up ? my - 6 : my + mh + 6;
     ctLabelText(ctx, line1 + '   ' + line2, mx + mw / 2, ly, '#ffffff', {align: 'center', baseline: up ? 'bottom' : 'top', bg: ctHexA(mc, 0.92)});
     ctBoxes[d.id] = {x: mx, y: my, w: mw, h: mh};
@@ -684,8 +699,41 @@ function ctDrawOne(ctx, d, dim, sel, axisLabels, timeLabels, isDraft) {
     ctDrawPosition(ctx, d, dim, sel, pts, axisLabels, isDraft);
   } else if (type === 'avwap') {
     ctDrawAvwap(ctx, d, dim, sel, a, axisLabels);
+  } else if (type === 'pctlevels') {
+    ctDrawPctLevels(ctx, d, dim, sel, a, axisLabels);
   }
   ctx.restore();
+}
+function ctPctLevelPrices(d) {
+  var A = d.points[0].p, up = !!d.style.reverse;
+  return (d.style.levels || []).filter(function (l) { return l.on && isFinite(l.v); }).map(function (l) {
+    return {v: Number(l.v), c: l.c || d.style.color, p: up ? A * (1 + l.v / 100) : A * (1 - l.v / 100)};
+  }).filter(function (l) { return l.p > 0; });
+}
+function ctDrawPctLevels(ctx, d, dim, sel, a, axisLabels) {
+  var s = d.style, up = !!s.reverse, x1 = s.extendLeft ? 0 : a.x, x2 = dim.W, ys = [a.y];
+  var lbl = s.labels !== false, priceTags = s.showPrice !== false || sel;
+  // The anchor: the high (or low) everything is measured from.
+  ctx.save(); ctx.globalAlpha = 0.9; ctx.strokeStyle = s.color; ctx.lineWidth = 1; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(x1, a.y); ctx.lineTo(x2, a.y); ctx.stroke(); ctx.restore();
+  if (lbl) ctLabelText(ctx, '0%  ' + ctFmt(d.points[0].p) + (up ? '  · from low' : '  · from high'), Math.max(8, x1 + 8), a.y - 4, s.color, {size: 10});
+  var levels = ctPctLevelPrices(d), last = ctLastPrice();
+  levels.forEach(function (l) {
+    var y = ctY(l.p); if (y == null) return;
+    ys.push(y);
+    ctStroke(ctx, {color: l.c, width: s.width, dash: s.dash});
+    ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke();
+    if (s.fillOpacity > 0.01) { ctx.globalAlpha = 1; ctx.fillStyle = ctHexA(l.c, s.fillOpacity / 3); ctx.fillRect(x1, Math.min(y, a.y), x2 - x1, Math.abs(y - a.y)); }
+    ctx.globalAlpha = 1;
+    var name = (up ? '+' : '−') + (Math.round(l.v * 100) / 100) + '%';
+    var hit = last != null && (up ? last >= l.p : last <= l.p);
+    // Labels sit at the right, next to the price scale, like TradingView.
+    if (lbl) ctLabelText(ctx, name + '  ' + ctFmt(l.p) + (hit ? '  ✓ hit' : ''), dim.W - 34, y - 4, l.c, {weight: '700', align: 'right'});
+    if (priceTags) axisLabels.push({p: l.p, c: l.c, text: (Math.round(l.v * 100) / 100) + '%'});
+  });
+  ctPaths[d.id] = {kind: 'fib', x1: x1, x2: x2, ys: ys, diag: []};
+  if (priceTags) axisLabels.push({p: d.points[0].p, c: s.color});
+  if (sel) ctHandles(ctx, [a], s.color);
 }
 function ctDrawFibs(ctx, d, dim, sel, pts, axisLabels, isDraft) {
   var s = d.style, ext = d.type === 'fibext', A = d.points[0], B = d.points[1], C = d.points[2];
@@ -892,7 +940,7 @@ function twStartDrawing(mode) {
   var tool = CT_TOOLS[mode], st = document.getElementById('tw-draw-status');
   if (st) {
     st.hidden = false;
-    st.textContent = tool.label + ': ' + (tool.n === 1 ? 'click the chart to place it.' : (tool.n === 3 ? 'click (or drag) the first two points, then click the third.' : 'click two points, or press and drag.')) + ' Esc cancels.';
+    st.textContent = mode === 'pctlevels' ? '% drop levels: click the high to measure from (a low measures % up). Esc cancels.' : tool.label + ': ' + (tool.n === 1 ? 'click the chart to place it.' : (tool.n === 3 ? 'click (or drag) the first two points, then click the third.' : 'click two points, or press and drag.')) + ' Esc cancels.';
   }
   twRenderDrawings();
 }
@@ -937,8 +985,22 @@ function ctSelect(i) {
 function ctArm(on) { var cv = ctCanvas(); if (cv) cv.classList.toggle('ct-armed', !!on); }
 var ctTouchSeen = false;
 
+/* % drop levels measure from a real price: a click near a candle's high
+   lands on that high (near its low, on the low — and flips to "% up"). */
+function ctSnapExtreme(pt) {
+  var bars = twChartState.bars || [], l = ctTimeToLogical(pt.t);
+  if (l == null) return pt;
+  var i = Math.max(0, Math.min(bars.length - 1, Math.round(l))), b = bars[i];
+  if (!b) return pt;
+  var hi = Number(b.high), lo = Number(b.low), yh = ctY(hi), yl = ctY(lo), y = ctY(pt.p);
+  if (y == null || yh == null || yl == null) return pt;
+  if (Math.abs(y - yh) <= 30 && Math.abs(y - yh) <= Math.abs(y - yl)) return {t: pt.t, p: hi};
+  if (Math.abs(y - yl) <= 30) return {t: pt.t, p: lo, low: true};
+  return pt;
+}
 function ctFinishDraft() {
   var d = ctNewDrawing(ctDraft.type, ctDraft.points);
+  if (d.type === 'pctlevels' && ctDraft.points[0].low) d.style.reverse = true;
   ctPushUndo();
   ctStore.drawings.push(d);
   if (ctStore.drawings.length > 300) ctStore.drawings.shift();
@@ -992,6 +1054,23 @@ function ctInitPointer() {
   var cv = ctCanvas(), box = document.getElementById('tw-chart-box');
   if (!cv || !box || cv._ctBound) return;
   cv._ctBound = true;
+  // Shift + drag anywhere on the chart: a quick % measure (like TradingView).
+  // It stays up until the next click or Esc and is never saved.
+  box.addEventListener('pointerdown', function (ev) {
+    if (ctQuick && !ev.shiftKey) { ctQuick = null; twRenderDrawings(); }
+    if (!ev.shiftKey || ctMode || ev.button > 0 || !twChartState.chart || !(twChartState.bars || []).length) return;
+    var c = ctLocal(ev), dim = ctDims();
+    if (c.x < 0 || c.y < 0 || c.x > dim.W || c.y > dim.H) return;
+    var pt = ctPointAt(c.x, c.y, true); if (!pt) return;
+    ev.preventDefault(); ev.stopPropagation();
+    ctQuick = {points: [pt, {t: pt.t, p: pt.p}], live: true};
+    function mv(e) { if (!ctQuick || !ctQuick.live) return; var q = ctPointAt(ctLocal(e).x, ctLocal(e).y, true); if (q) { ctQuick.points[1] = q; twRenderDrawings(); } }
+    function done() { if (ctQuick) ctQuick.live = false; window.removeEventListener('pointermove', mv, true); window.removeEventListener('pointerup', done, true); window.removeEventListener('pointercancel', done, true); }
+    window.addEventListener('pointermove', mv, true);
+    window.addEventListener('pointerup', done, true);
+    window.addEventListener('pointercancel', done, true);
+    twRenderDrawings();
+  }, true);
   cv.addEventListener('pointerdown', function (ev) {
     if (ev.pointerType === 'touch' || ev.pointerType === 'pen') ctTouchSeen = true;
     if (!twChartState.chart || !(twChartState.bars || []).length) return;
@@ -1012,6 +1091,7 @@ function ctInitPointer() {
       var pt = ctPointAt(c.x, c.y, true); if (!pt) return;
       var n = CT_TOOLS[ctMode].n;
       if (!ctDraft) {
+        if (ctMode === 'pctlevels') pt = ctSnapExtreme(pt);
         if (n === 1) { ctDraft = {type: ctMode, points: [pt]}; ctFinishDraft(); return; }
         ctDraft = {type: ctMode, points: [pt, {t: pt.t, p: pt.p}], stage: 'drag', down: c};
         try { cv.setPointerCapture(ev.pointerId); } catch (e) {}
@@ -1092,6 +1172,7 @@ function ctInitPointer() {
     if (tag === 'input' || tag === 'textarea' || tag === 'select' || (ev.target && ev.target.isContentEditable)) return;
     if (!document.getElementById('tw-chart-box')) return;
     if ((ev.key === 'Delete' || ev.key === 'Backspace') && twChartState.selectedDrawing != null) { ev.preventDefault(); twDeleteSelected(); }
+    else if (ev.key === 'Escape' && ctQuick) { ctQuick = null; twRenderDrawings(); }
     else if (ev.key === 'Escape') { if (ctMode || ctDraft) twStopDrawing(); else if (twChartState.selectedDrawing != null) ctSelect(null); }
     else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'z' || ev.key === 'Z') && !ev.shiftKey) { if (ctStore.undo.length) { ev.preventDefault(); ctUndo(); } }
     else if (ctShortcut(ev)) ev.preventDefault();
@@ -1196,6 +1277,11 @@ function ctBuildRail() {
   });
   ctSyncRail();
 }
+/* Popups have to live inside the full-screen element, or the browser
+   won't draw them while the chart is in full screen. */
+function ctPopupHost() {
+  return document.fullscreenElement || document.webkitFullscreenElement || document.body;
+}
 function ctOpenFlyout(groupId, anchor) {
   var old = document.getElementById('ct-flyout');
   if (old) { var same = old.getAttribute('data-group') === groupId; old.remove(); if (same) return; }
@@ -1206,7 +1292,7 @@ function ctOpenFlyout(groupId, anchor) {
   fly.innerHTML = g.tools.map(function (t) {
     return '<button type="button" role="menuitem" data-ct-pick="' + t + '"' + (ctMode === t ? ' class="on"' : '') + '>' + ctIcon(t, 16) + '<span>' + CT_TOOLS[t].label + '</span></button>';
   }).join('');
-  document.body.appendChild(fly);
+  ctPopupHost().appendChild(fly);
   var r = anchor.getBoundingClientRect(), fw = fly.offsetWidth, fh = fly.offsetHeight;
   var left = r.right + 6, top = r.top - 4;
   if (left + fw > window.innerWidth - 6) left = Math.max(6, r.left);
@@ -1269,6 +1355,7 @@ function ctUpdateProps() {
   if (t === 'rect' || t === 'channel' || t === 'fib' || t === 'fibext' || t === 'text') {
     html += '<label class="ct-p-range" title="' + (t === 'text' ? 'Background' : 'Fill opacity') + '"><span>' + (t === 'text' ? 'Bg' : 'Fill') + '</span><input type="range" min="0" max="0.5" step="0.02" data-ct-p="fillOpacity" value="' + (Number(s.fillOpacity) || 0) + '"></label>';
   }
+  if (t === 'pctlevels') html += '<button type="button" class="ct-p-btn' + (s.extendLeft ? ' on' : '') + '" data-ct-flag="extendLeft" title="Extend the lines left across the chart">⟵</button>';
   if (t === 'trend' || t === 'ray' || t === 'extended' || t === 'channel' || t === 'fib' || t === 'fibext') {
     html += '<button type="button" class="ct-p-btn' + (s.extendLeft ? ' on' : '') + '" data-ct-flag="extendLeft" title="Extend left">⟵</button>';
     html += '<button type="button" class="ct-p-btn' + (s.extendRight ? ' on' : '') + '" data-ct-flag="extendRight" title="Extend right">⟶</button>';
@@ -1278,6 +1365,11 @@ function ctUpdateProps() {
     html += '<select data-ct-p="fontSize" title="Text size">' + [11, 13, 16, 20, 26].map(function (f) { return '<option value="' + f + '"' + (Number(s.fontSize) === f ? ' selected' : '') + '>' + f + '</option>'; }).join('') + '</select>';
   } else if (t === 'trend' || t === 'ray' || t === 'extended' || t === 'arrow' || t === 'hline' || t === 'hray' || t === 'vline' || t === 'rect') {
     html += '<input type="text" class="ct-p-text" data-ct-p="text" maxlength="80" value="' + ctEsc(s.text) + '" placeholder="Label">';
+  }
+  if (t === 'pctlevels') {
+    html += '<button type="button" class="ct-p-btn' + (ctLevelsOpen ? ' on' : '') + '" data-ct-cmd="levels" title="Pick the % levels (30%, 40%, 50%…) and their colors">Levels %</button>';
+    html += '<button type="button" class="ct-p-btn' + (s.reverse ? ' on' : '') + '" data-ct-flag="reverse" title="' + (s.reverse ? 'Measuring % up from a low — tap for % down from a high' : 'Measuring % down from a high — tap for % up from a low') + '">' + (s.reverse ? '▲ From low' : '▼ From high') + '</button>';
+    html += '<button type="button" class="ct-p-btn' + (s.labels !== false ? ' on' : '') + '" data-ct-flag="labels" title="Level labels">Aa</button>';
   }
   if (t === 'fib' || t === 'fibext') {
     html += '<button type="button" class="ct-p-btn' + (ctLevelsOpen ? ' on' : '') + '" data-ct-cmd="levels" title="Edit levels and level colors">Levels</button>';
@@ -1295,10 +1387,11 @@ function ctUpdateProps() {
   html += '<button type="button" class="ct-p-btn ct-p-ico" data-ct-cmd="clone" title="Clone">' + ctIcon('clone', 15) + '</button>';
   html += '<button type="button" class="ct-p-btn ct-p-ico ct-p-del" data-ct-cmd="delete" title="Delete">' + ctIcon('trash', 15) + '</button>';
   html += '<button type="button" class="ct-p-btn ct-p-ico" data-ct-cmd="close" title="Done" aria-label="Close">×</button>';
-  if ((t === 'fib' || t === 'fibext') && ctLevelsOpen) {
+  if ((t === 'fib' || t === 'fibext' || t === 'pctlevels') && ctLevelsOpen) {
+    var isPct = t === 'pctlevels';
     html += '<div class="ct-levels">' + (s.levels || []).map(function (l, i) {
       return '<div class="ct-level"><input type="checkbox" data-ct-lv="on" data-i="' + i + '"' + (l.on ? ' checked' : '') + '>' +
-        '<input type="number" step="0.001" data-ct-lv="v" data-i="' + i + '" value="' + l.v + '">' +
+        '<input type="number" step="' + (isPct ? '1' : '0.001') + '"' + (isPct ? ' min="0.5" max="99" title="% from the anchor"' : '') + ' data-ct-lv="v" data-i="' + i + '" value="' + l.v + '">' + (isPct ? '<span class="ct-level-pct">%</span>' : '') +
         '<input type="color" data-ct-lv="c" data-i="' + i + '" value="' + ctHex(l.c || s.color) + '">' +
         '<button type="button" data-ct-lvdel="' + i + '" title="Remove level">×</button></div>';
     }).join('') + '<div class="ct-level-actions"><button type="button" data-ct-cmd="addlevel">+ Level</button><button type="button" data-ct-cmd="resetlevels">Reset</button><button type="button" data-ct-cmd="defaultlevels" title="Use these levels for new fibs">Save as default</button></div></div>';
@@ -1331,11 +1424,11 @@ function ctPropInput(ev) {
     var val = el.value;
     if (key === 'width' || key === 'fontSize' || key === 'fillOpacity') val = Number(val);
     d.style[key] = val;
-    if (key === 'color' && d.style.levels) {
+    if (key === 'color' && d.style.levels && d.type !== 'pctlevels') {
       d.style.levels.forEach(function (l) { l.c = val; });
       if (ctPropsFor) { var bar = document.getElementById('ct-props'); if (bar) bar.querySelectorAll('[data-ct-lv="c"]').forEach(function (x) { x.value = val; }); }
     }
-    if (key !== 'text') ctRemember(d, key === 'color' && d.style.levels ? ['color', 'levels'] : [key]);
+    if (key !== 'text') ctRemember(d, key === 'color' && d.style.levels && d.type !== 'pctlevels' ? ['color', 'levels'] : [key]);
     twSaveDrawings(); twRenderDrawings();
   } else if (lv) {
     ctBeginEdit();
@@ -1379,8 +1472,8 @@ function ctPropClick(ev) {
     ctStore.drawings.push(copy); twSaveDrawings(); ctSelect(ctStore.drawings.length - 1);
   }
   else if (c === 'levels') { ctLevelsOpen = !ctLevelsOpen; ctPropsFor = null; twRenderDrawings(); }
-  else if (c === 'addlevel') { ctPushUndo(); d.style.levels.push({v: 1.414, on: true, c: d.style.color}); ctPropsFor = null; twSaveDrawings(); twRenderDrawings(); }
-  else if (c === 'resetlevels') { ctPushUndo(); d.style.levels = JSON.parse(JSON.stringify(d.type === 'fib' ? CT_FIB_LEVELS : CT_FIBEXT_LEVELS)); ctPropsFor = null; twSaveDrawings(); twRenderDrawings(); }
+  else if (c === 'addlevel') { ctPushUndo(); d.style.levels.push(d.type === 'pctlevels' ? {v: 25, on: true, c: '#ffd166'} : {v: 1.414, on: true, c: d.style.color}); ctPropsFor = null; twSaveDrawings(); twRenderDrawings(); }
+  else if (c === 'resetlevels') { ctPushUndo(); d.style.levels = JSON.parse(JSON.stringify(d.type === 'fib' ? CT_FIB_LEVELS : (d.type === 'fibext' ? CT_FIBEXT_LEVELS : CT_PCT_LEVELS))); ctPropsFor = null; twSaveDrawings(); twRenderDrawings(); }
   else if (c === 'defaultlevels') { ctRemember(d, ['levels']); cmd.textContent = 'Saved ✓'; }
 }
 
@@ -1437,6 +1530,11 @@ function ctApplyView(force) {
     stack.classList.toggle('ct-no-hint', v.hint === false);
   }
 }
+function ctPctFrom(level, now) {
+  var pct = (now - level) / level * 100;
+  if (!isFinite(pct) || Math.abs(pct) < 0.05) return '';
+  return (pct < 0 ? '▼' : '▲') + Math.abs(pct).toFixed(Math.abs(pct) >= 100 ? 0 : 1) + '% now';
+}
 /* Overlay extras drawn on the drawing canvas: high/low of the visible range
    and the time left in the current candle. */
 function ctDrawExtras(ctx, dim) {
@@ -1463,7 +1561,18 @@ function ctDrawExtras(ctx, dim) {
         if (x == null || y == null || y < 10 || y > dim.H - 10) return;
         ctx.textBaseline = m[2];
         var tx = Math.max(30, Math.min(dim.W - 30, x));
-        ctx.fillText(m[4] + ctFmt(bars[m[0]][m[1]]), tx, y + m[3]);
+        var lvl = Number(bars[m[0]][m[1]]), now = Number(bars[bars.length - 1].close);
+        var pctTxt = lvl && now ? ctPctFrom(lvl, now) : '';
+        if (!pctTxt) { ctx.fillText(m[4] + ctFmt(lvl), tx, y + m[3]); return; }
+        // Price now vs. this high/low: how far it has dropped from the top,
+        // or how far it has come off the bottom.
+        var base = m[4] + ctFmt(lvl) + '  ', bw = ctx.measureText(base).width, pw = ctx.measureText(pctTxt).width;
+        var sx = Math.max(4, Math.min(dim.W - bw - pw - 4, tx - (bw + pw) / 2));
+        ctx.textAlign = 'left';
+        ctx.fillStyle = 'rgba(214,224,236,0.75)'; ctx.fillText(base, sx, y + m[3]);
+        ctx.fillStyle = now < lvl ? 'rgba(255,92,108,0.95)' : 'rgba(52,211,153,0.95)';
+        ctx.fillText(pctTxt, sx + bw, y + m[3]);
+        ctx.fillStyle = 'rgba(214,224,236,0.75)'; ctx.textAlign = 'center';
       });
       ctx.restore();
     }
@@ -1976,12 +2085,12 @@ document.addEventListener('click', function (ev) {
    1–8 timeframes · Alt+letter drawing tools (ev.code, because Alt changes
    ev.key on a Mac) · Alt+R reset view · Shift+F full screen · ? help. */
 var CT_KEY_TOOLS = {KeyT: 'trend', KeyH: 'hline', KeyV: 'vline', KeyF: 'fib', KeyB: 'rect', KeyC: 'channel',
-                    KeyM: 'measure', KeyL: 'long', KeyS: 'short', KeyX: 'text', KeyA: 'avwap', KeyY: 'ray'};
+                    KeyM: 'measure', KeyL: 'long', KeyS: 'short', KeyX: 'text', KeyA: 'avwap', KeyY: 'ray', KeyD: 'pctlevels'};
 var CT_SHORTCUTS = [
   ['1 – 8', 'Timeframe: 1m 5m 15m 1H 4H 1D 1W 1M'],
   ['Alt + T / Y', 'Trend line / ray'], ['Alt + H / V', 'Horizontal / vertical line'],
-  ['Alt + F', 'Fib retracement'], ['Alt + B / C', 'Rectangle / channel'],
-  ['Alt + L / S', 'Long / short position'], ['Alt + M', 'Measure'], ['Alt + A', 'Anchored VWAP'],
+  ['Alt + F', 'Fib retracement'], ['Alt + D', '% drop levels (click a high)'], ['Alt + B / C', 'Rectangle / channel'],
+  ['Alt + L / S', 'Long / short position'], ['Alt + M', 'Measure % (or Shift + drag for a quick one)'], ['Alt + A', 'Anchored VWAP'],
   ['Alt + X', 'Text'], ['Alt + R', 'Reset view'], ['Shift + F', 'Full screen'],
   ['Alt + W', 'Alert at the selected line'], ['Ctrl/⌘ + Z', 'Undo'],
   ['Delete', 'Remove selected drawing'], ['Esc', 'Cancel / deselect'], ['?', 'This list']
@@ -2010,7 +2119,7 @@ function ctToggleShortcutHelp() {
   el.innerHTML = '<div class="ct-keys-card"><div class="ct-keys-hd"><b>Keyboard shortcuts</b><button type="button" aria-label="Close">×</button></div>' +
     CT_SHORTCUTS.map(function (r) { return '<div class="ct-keys-row"><kbd>' + ctEsc(r[0]) + '</kbd><span>' + ctEsc(r[1]) + '</span></div>'; }).join('') + '</div>';
   el.addEventListener('click', function (e) { if (e.target === el || e.target.closest('button')) el.remove(); });
-  document.body.appendChild(el);
+  ctPopupHost().appendChild(el);
 }
 
 
@@ -2046,6 +2155,12 @@ function ctAlertPrices(d) {
   } else if ((t === 'long' || t === 'short') && d.points[1]) {
     out.push({p: d.points[1].p, note: (t === 'long' ? 'Long' : 'Short') + ' target'});
     if (d.stop != null) out.push({p: d.stop, note: (t === 'long' ? 'Long' : 'Short') + ' stop'});
+  } else if (t === 'pctlevels') {
+    var lastP = ctLastPrice(), pl = ctPctLevelPrices(d).map(function (l) { return {p: l.p, note: (d.style.reverse ? '+' : '−') + l.v + '% level'}; });
+    if (lastP == null) return pl.slice(0, 2);
+    var ab = pl.filter(function (x) { return x.p > lastP; }).sort(function (a, b) { return a.p - b.p; })[0];
+    var be = pl.filter(function (x) { return x.p < lastP; }).sort(function (a, b) { return b.p - a.p; })[0];
+    if (ab) out.push(ab); if (be) out.push(be);
   } else if ((t === 'fib' || t === 'fibext') && d.points[1]) {
     var A = d.points[0], B = d.points[1], C = d.points[2], s = d.style, last = ctLastPrice();
     var lv = (s.levels || []).filter(function (l) { return l.on; }).map(function (l) {

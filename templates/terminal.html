@@ -559,6 +559,7 @@
           <div class="tw-sym-left">
             <div class="tw-sym-toprow">
               <span class="tw-sym-ticker" id="tw-c-ticker">{{ requested_symbol or (stocks[0].ticker if stocks else chart_symbol) }}</span>
+              <button type="button" class="tw-fav-btn" id="tw-fav-btn" aria-pressed="false" title="Add to favorites (*)" aria-label="Toggle favorite">☆</button>
               {% if stocks %}
                 {% set b0 = 'bull' if stocks[0].trade_bias == 'Long' else ('bear' if stocks[0].trade_bias == 'Short' else 'neutral') %}
                 <span class="tw-bias {{ b0 }}" id="tw-c-bias">{{ 'BULLISH' if b0=='bull' else ('BEARISH' if b0=='bear' else 'NEUTRAL') }}</span>
@@ -768,6 +769,9 @@
           </div>
           <div class="ct-set-foot"><button type="button" class="ct-set-btn" data-ct-cmdset="resetall">Reset chart settings to defaults</button></div>
         </div>
+
+        {# ★ Favorites: the tickers you like most, live, one tap away (static/js/favorites.js). #}
+        <div class="fv-strip" id="fv-strip" aria-label="Favorites"></div>
 
         <div class="tw-draw-status" id="tw-draw-status" hidden></div>
 
@@ -1106,6 +1110,8 @@
 <script src="{{ url_for('static', filename='js/depth_panel.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/live_trading.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/ticker_palette.js') }}" defer></script>
+<script>window.TW_FAVS = {{ (favorites or [])|tojson }};</script>
+<script src="{{ url_for('static', filename='js/favorites.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/value_badges.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/chart_tools.js') }}"></script>
 <script>

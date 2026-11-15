@@ -784,3 +784,72 @@ def test_ticker_search_palette_on_the_chart():
     assert "if(window.twRememberTicker) twRememberTicker(d.ticker);" in TEMPLATE
     css = open("static/css/terminal_workspace.css", encoding="utf-8").read()
     assert ".tp-overlay{position:absolute;inset:0;z-index:60" in css
+
+
+def test_favorites_api_round_trip(client):
+    c, _store = client
+    assert c.get("/api/favorites").get_json()["tickers"] == []
+    r = c.put("/api/favorites", json={"tickers": ["nvda", "AAPL", "NVDA", "brk.b"]})
+    assert r.status_code == 200 and r.get_json()["tickers"] == ["NVDA", "AAPL", "BRK.B"]   # cleaned, deduped, order kept
+    assert c.get("/api/favorites").get_json()["tickers"] == ["NVDA", "AAPL", "BRK.B"]
+    assert c.put("/api/favorites", json={"tickers": ["NOT A TICKER"]}).status_code == 400
+    assert c.put("/api/favorites", json={"tickers": "NVDA"}).status_code == 400
+    assert c.put("/api/favorites", json={"tickers": ["T%d" % i for i in range(41)]}).status_code == 400
+
+
+def test_favorites_ride_the_shared_quotes_poll(client, monkeypatch):
+    import app as legacy
+    c, store = client
+    c.put("/api/favorites", json={"tickers": ["AAPL", "ZZZZ"]})
+    monkeypatch.setattr(legacy, "get_active_wl_id", lambda: 1)
+    monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wl: ["NVDA"])
+    monkeypatch.setattr(legacy, "get_all_stock_data", lambda: [
+        {"ticker": "NVDA", "current_price": 161.0}, {"ticker": "AAPL", "current_price": 228.4}])
+    monkeypatch.setattr(legacy, "annotate", lambda d: d)
+    monkeypatch.setattr(legacy, "_trigger_exec_state_refresh", lambda wl: None)
+    rows = {q["ticker"]: q for q in c.get("/api/terminal/quotes").get_json()["quotes"]}
+    assert rows["AAPL"]["fav"] is True and rows["AAPL"]["price"] == 228.4
+    assert rows["ZZZZ"]["price"] is None            # no price yet: the strip keeps "—"
+    assert "fav" not in rows["NVDA"]
+
+
+def test_favorites_strip_star_and_shortcuts_on_the_terminal():
+    fav = open("static/js/favorites.js", encoding="utf-8").read()
+    css = open("static/css/terminal_workspace.css", encoding="utf-8").read()
+    assert 'id="tw-fav-btn"' in TEMPLATE and 'id="fv-strip"' in TEMPLATE
+    assert "window.TW_FAVS = {{ (favorites or [])|tojson }}" in TEMPLATE and "js/favorites.js" in TEMPLATE
+    assert "TSLive.on('quotes', onQuotes)" in fav and "TSLive.on('live', onLive)" in fav   # same live price as the page
+    assert "e.key === '*'" in fav and "/^Digit[1-9]$/" in fav                              # star + Alt+1…9
+    for mode in ("mine", "gain", "drop", "zone"):
+        assert '<option value="%s"' % mode in fav
+    assert ".tw-panel:fullscreen > .fv-strip { grid-column:1; grid-row:3; }" in css
+
+
+def test_tool_menus_open_in_full_screen():
+    css = open("static/css/chart_tools.css", encoding="utf-8").read()
+    assert "return document.fullscreenElement || document.webkitFullscreenElement || document.body;" in JS
+    assert "ctPopupHost().appendChild(fly);" in JS and "document.body.appendChild(fly)" not in JS
+    assert ".ct-flyout {\n  position: fixed; z-index: 10090;" in css      # above the full-screen chart (10050)
+
+
+def test_measure_has_its_own_button_and_shift_drag():
+    assert "{id: 'measure', tools: ['measure', 'pctlevels']}" in JS
+    assert "{id: 'forecast', tools: ['long', 'short']}" in JS
+    assert "if (!ev.shiftKey || ctMode" in JS and "never saved" in JS
+    assert "function ctPctFrom(level, now)" in JS                             # H/L labels: % from now
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_pct_drop_levels_maths(tmp_path):
+    h = tmp_path / "pct.js"
+    h.write_text(HARNESS.split("const out={};")[0].replace(
+        "ctReadLocal};');", "ctReadLocal,ctPctLevelPrices};');") + r"""
+const d=T.ctNewDrawing('pctlevels',[{t:1000,p:200}]);
+const f=a=>a.map(l=>l.v+':'+l.p.toFixed(2));
+const down=f(T.ctPctLevelPrices(d)); d.style.reverse=true; const up=f(T.ctPctLevelPrices(d));
+console.log(JSON.stringify({down:down,up:up,ext:d.style.extendLeft}));
+""")
+    got = json.loads(subprocess.run(["node", str(h)], capture_output=True, text=True, check=True, cwd=os.getcwd()).stdout)
+    assert got["down"] == ["20:160.00", "30:140.00", "40:120.00", "50:100.00", "60:80.00"]
+    assert got["up"][:2] == ["20:240.00", "30:260.00"]
+    assert got["ext"] is True

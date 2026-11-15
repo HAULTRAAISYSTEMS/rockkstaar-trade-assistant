@@ -13,7 +13,7 @@
 .tw-drawbar .ct-toggle.active { color: #0a0712 !important; background: rgba(var(--cc-accent-rgb, 196,245,59), .85) !important; box-shadow: none; }
 
 .ct-flyout {
-  position: fixed; z-index: 2000; min-width: 210px; padding: 6px;
+  position: fixed; z-index: 10090; min-width: 210px; padding: 6px;
   border: 1px solid rgba(255,255,255,.1); border-radius: 10px;
   background: rgba(10,14,22,.98); box-shadow: 0 16px 40px rgba(0,0,0,.5);
   backdrop-filter: blur(10px);
@@ -171,3 +171,4 @@
 .tw-study-row span small{color:#6e7985}
 .tw-study-reset{margin-top:8px;min-height:34px;padding:0 12px;border:1px solid rgba(255,255,255,.14);border-radius:9px;background:transparent;color:#cfd5db;font:700 11px var(--font-ui, system-ui);cursor:pointer}
 .tw-study-reset:hover{border-color:#f0b53f;color:#f0b53f}
+.ct-level-pct { margin-left:-4px; color:#8d9bb0; font-size:11px; }
