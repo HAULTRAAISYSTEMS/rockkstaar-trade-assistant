@@ -673,7 +673,7 @@ def test_next_earnings_marker_and_countdown_chip():
     assert "function ctNextEarnings()" in js and "function ctDrawNextEarnings(ctx, dim)" in js
     assert "try { ctDrawNextEarnings(ctx, dim); } catch (e) {}" in js
     assert "twChartState.nextEarnings" in js            # verified date from the context card
-    assert "'EARNINGS ' + ctShortDate(n.date).toUpperCase()" in js
+    assert "var main = 'EARNINGS ' + date" in js and "ctShortDate(n.date).toUpperCase()" in js
     assert 'id="tw-earn-chip"' in TEMPLATE and "function twRenderEarningsChip(){" in TEMPLATE
     assert "if(ne||!twChartState.nextEarnings) twChartState.nextEarnings=ne" in TEMPLATE
 
@@ -702,11 +702,11 @@ def test_zone_and_alert_tags_live_on_the_price_axis():
     js = open("static/js/chart_tools.js", encoding="utf-8").read()
     # Zones and alerts are tags on the price axis; in-chart zone tags are opt-in.
     assert "overlays: {rail: true, lines: true, tags: false, axisTags: true," in js
-    assert "ctExtraAxis.push({p: z.load_top, c: o.loadColor, text: 'LOAD'})" in js and "var CT_TAG_H = 14;" in js
-    assert "alertId: a.id});" in js and "var w = ctx.measureText(label).width + 12, x = 8;" not in js
+    assert "ctExtraAxis.push({p: z.load_top, c: o.loadColor, text: 'LOAD'})" in js and "var CT_TAG_H = 16;" in js
+    assert "alertId: a.id, dir: a.direction});" in js and "var w = ctx.measureText(label).width + 12, x = 8;" not in js
     # Overlapping tags are pushed apart; the × on an alert tag still cancels it.
     assert "function ctLayoutAxisLabels(ctx, dim, labels) {" in js
-    assert "if (r && l.alertId != null) ctAlertHits.push(" in js
+    assert "if (r && l.alertId != null && r.close) ctAlertHits.push(" in js
     assert "ctLayoutAxisLabels(ctx, dim, axisLabels.concat(ctExtraAxis));" in js
     # One-time switch to axis tags also wins over the account copy.
     assert "tradestaar.axisTags.v1" in js and "if (ctAxisTagFixNow && ctPrefs.overlays" in js
@@ -840,3 +840,42 @@ def test_ticker_search_on_phones():
     assert 'enterkeyhint="go"' in js
     assert ".tp-overlay.tp-phone{position:fixed;inset:0;z-index:10080;" in css
     assert ".tp-phone .tp-foot{display:none}" in css
+
+
+def test_next_earnings_projection():
+    from datetime import date
+    import app as legacy
+    past = ["2025-01-29", "2025-04-30", "2025-07-31", "2025-10-29", "2026-01-28", "2026-07-30", "2026-10-28"]
+    assert legacy.project_next_earnings(past, date(2026, 11, 15)) == "2027-01-27"   # same quarter last year, same weekday
+    assert legacy.project_next_earnings(["2026-10-28"], date(2026, 11, 15)) == "2027-01-27"  # short history: +1 quarter
+    assert legacy.project_next_earnings(["2024-01-01"], date(2026, 11, 15)) is None   # stale history: no guess
+    assert legacy.project_next_earnings([], date(2026, 11, 15)) is None
+
+
+def test_next_earnings_lookup_calendar_then_estimate(monkeypatch):
+    import app as legacy
+    import finnhub_ttm
+    monkeypatch.setattr(finnhub_ttm, "_finnhub_get", lambda path, params: {"earningsCalendar": [
+        {"symbol": "KLAC", "date": "2027-01-28", "hour": "amc", "epsEstimate": 8.1},
+        {"symbol": "OTHER", "date": "2026-12-01", "hour": "bmo"}]})
+    ev = legacy._next_earnings_for("KLAC", [])
+    assert ev["date"] == "2027-01-28" and ev["time"] == "AMC" and ev["upcoming"] and not ev.get("estimated")
+    monkeypatch.setattr(finnhub_ttm, "_finnhub_get", lambda path, params: {"earningsCalendar": []})
+    est = legacy._next_earnings_for("KLAC", ["2026-01-28", "2026-10-28"])
+    assert est["estimated"] is True and est["upcoming"] is True and "not confirmed" in est["source"]
+
+
+def test_axis_tags_earnings_pins_and_axes_redesign():
+    tpl = TEMPLATE
+    # Tags: price pill nosing into the chart + dark glass name flag; alerts get ×, bell, numbered badge, arrow.
+    assert "function ctPricePill(ctx, dim, y, h, color, label)" in JS
+    assert "function ctAlertTagParts(text)" in JS and "if (m) return {num: m[1], name: 'BUY'};" in JS
+    assert "axisLabels.push({p: a.price, c: '#f5c542', text: note, alertId: a.id, dir: a.direction});" in JS
+    assert "out.close = {x1: cx - 2, x2: cx + 12};" in JS                      # × still cancels the alert
+    # Earnings pins + EPS surprise, next-earnings capsule (estimates marked), axis notches.
+    assert "function ctDrawEarnPin(ctx, x, y, c, e, gap)" in JS
+    assert "(n.est ? ' · EST' : '')" in JS and "est: !!e.estimated" in JS
+    assert "function ctDrawTimeMarksAt(ctx, W, top0, axisH)" in JS and "ctDrawTimeMarksAt(ctx,fit.w-ax,0,22)" in tpl
+    # Axes: no hard borders, accent crosshair labels, glass strip drawn by chart_tools.
+    assert "rightPriceScale:{ borderVisible:false" in tpl and "timeScale:{ borderVisible:false" in tpl
+    assert "labelBackgroundColor:twAcc" in tpl and "function ctDrawAxisChrome(ctx, dim)" in JS
