@@ -6132,6 +6132,33 @@ def api_chart_prefs():
     return jsonify({"ok": True})
 
 
+@app.route("/api/chart/default", methods=["GET", "PUT", "DELETE"])
+def api_chart_default():
+    """The user's saved default chart setup (Save as my default): every chart
+    setting, the indicator styles and the default timeframe. Reset to my
+    default restores it."""
+    uid = current_user_id()
+    if request.method == "GET":
+        raw = get_user_setting(uid, "chart_default")
+        try:
+            snap = _json.loads(raw) if raw else None
+        except (TypeError, ValueError):
+            snap = None
+        return jsonify({"ok": True, "default": snap if isinstance(snap, dict) else None})
+    if request.method == "DELETE":
+        set_user_setting(uid, "chart_default", "")
+        return jsonify({"ok": True})
+    body = request.get_json(silent=True) or {}
+    snap = body.get("default")
+    if not isinstance(snap, dict):
+        return jsonify({"ok": False, "error": "default must be an object"}), 400
+    payload = _json.dumps(snap, separators=(",", ":"))
+    if len(payload) > _CHART_PREFS_BYTES:
+        return jsonify({"ok": False, "error": "default too large"}), 413
+    set_user_setting(uid, "chart_default", payload)
+    return jsonify({"ok": True})
+
+
 @app.route("/terminal/grid")
 def terminal_grid():
     """2 or 4 live charts side by side, each with its own symbol and timeframe."""
