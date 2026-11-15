@@ -39,6 +39,11 @@
     {# The macro schedule is a list in the source and therefore has an end.
        An exhausted calendar looks exactly like a quiet fortnight, so it has
        to say so before it runs out rather than after. #}
+    {% if earnings_saved_on %}
+    <p class="cal-coverage">Earnings shown are the list saved on {{ earnings_saved_on }} — the live calendar sources didn't answer just now. It refreshes on its own.</p>
+    {% elif earnings_count == 0 %}
+    <p class="cal-coverage cal-coverage-out">The earnings calendar sources didn't answer yet — this is a data gap, not a quiet week. It retries every few minutes.</p>
+    {% endif %}
     {% if econ_coverage and econ_coverage.exhausted %}
     <p class="cal-coverage cal-coverage-out">The built-in macro schedule ended on {{ econ_coverage.horizon }}. No economic releases are listed beyond that date — this is a gap in the schedule, not a quiet calendar.</p>
     {% elif econ_coverage and econ_coverage.days_of_full_coverage is not none and econ_coverage.days_of_full_coverage < 45 %}

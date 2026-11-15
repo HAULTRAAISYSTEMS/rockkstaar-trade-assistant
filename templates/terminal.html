@@ -1279,7 +1279,7 @@ function twToggleExtended(btn){
 // scaling, and lightweight-charts keeps that manual range across every later
 // setData — a new symbol or timeframe then opened squeezed against an edge
 // or partly off-screen. Each fresh load and Reset view hand scaling back.
-function twAutoScalePrice(){ if(!twChartState.chart) return; try{ twChartState.chart.priceScale('right').applyOptions({autoScale:true}); }catch(e){} }
+function twAutoScalePrice(){ if(!twChartState.chart) return; try{ twChartState.chart.priceScale('right').applyOptions({autoScale:true}); }catch(e){} if(typeof ctSyncAutoBtn==='function') ctSyncAutoBtn(); }
 function twResetView(){ if(twChartState.chart){ twAutoScalePrice(); twChartState.chart.timeScale().fitContent(); } twRenderDrawings(); }
 function twToggleIndicatorMenu(ev){
   if(ev) ev.stopPropagation();
@@ -2233,12 +2233,18 @@ function twLoadChartEvents(ticker, tries, keep){
     .then(function(r){return r.json();})
     .then(function(d){
       if(!d||!d.ok||twChartState.ticker!==ticker&&String(twChartState.ticker||'').toUpperCase()!==ticker) return;
-      // A pending (still building) empty answer must not wipe saved events.
-      if((d.events||[]).length || !d.pending){
-        twApplyEvents(d.events||[], 'chart');
-        twOvlSave(ticker, {events: d.events||[]});
+      // A pending (still building) empty answer must not wipe saved events,
+      // and an earnings-only partial keeps the saved headlines until the rest lands.
+      var evs=d.events||[];
+      if(d.pending && evs.length && !evs.some(function(e){return e.type==='news';})){
+        evs=evs.concat((twChartState.events_chart||[]).filter(function(e){return e.type==='news';}));
       }
-      if(d.pending && tries<10) setTimeout(function(){ twLoadChartEvents(ticker, tries+1, true); }, 2500+tries*1500);
+      if(evs.length || !d.pending){
+        twApplyEvents(evs, 'chart');
+        if(!d.pending) twOvlSave(ticker, {events: evs});
+      }
+      // Ask again soon: the earnings land first (about a second), the headlines after.
+      if(d.pending && tries<14) setTimeout(function(){ twLoadChartEvents(ticker, tries+1, true); }, Math.min(6000, 700+tries*600));
     }).catch(function(){});
 }
 /* Candles first: the side panels (context, insiders, events) wait a moment so

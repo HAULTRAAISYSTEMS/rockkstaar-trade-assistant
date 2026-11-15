@@ -639,7 +639,7 @@ def test_higher_timeframes_draw_events_on_their_candle():
     js = open("static/js/chart_tools.js", encoding="utf-8").read()
     assert "function ctEventX(t, step)" in js
     assert "var x = ctEventX(t, step);" in js and "ctEventX(Number(e.ts), step)" in js
-    assert "step < 86400 || e.upcoming ? 0.55 : 0.32" in js        # report line on 1D/1W/1M too
+    assert "var a1 = step < 86400 ? 0.34 : 0.2;" in js             # report line on 1D/1W/1M too (faded)
     assert "ty = dim.H - 44" in js                                  # upcoming tag above news dots
     assert "dim.H - 34 : dim.H - 14" in js                          # news stacks above a same-candle flag
 
@@ -720,7 +720,7 @@ def test_overlays_saved_per_ticker_and_loaded_immediately():
     assert "function twLoadOverlays(ticker){" in TEMPLATE
     assert "twLoadChart(d.ticker, twChartState.interval, twChartState.range);\n  twLoadOverlays(d.ticker);" in TEMPLATE
     assert "twLoadOverlays(bootSym);" in TEMPLATE
-    assert "if((d.events||[]).length || !d.pending){" in TEMPLATE
+    assert "if(evs.length || !d.pending){" in TEMPLATE
     assert "twOvlSave(ticker, {zones: z})" in TEMPLATE and "twOvlSave(data.ticker, {next: ne})" in TEMPLATE
     assert "TW_OVL_MAX=40" in TEMPLATE
 
@@ -879,3 +879,81 @@ def test_axis_tags_earnings_pins_and_axes_redesign():
     # Axes: no hard borders, accent crosshair labels, glass strip drawn by chart_tools.
     assert "rightPriceScale:{ borderVisible:false" in tpl and "timeScale:{ borderVisible:false" in tpl
     assert "labelBackgroundColor:twAcc" in tpl and "function ctDrawAxisChrome(ctx, dim)" in JS
+
+
+def test_earnings_beat_miss_from_finnhub_surprises(monkeypatch):
+    import news_desk
+    monkeypatch.setattr(news_desk, "_edgar_history", lambda t: [
+        {"date": "2026-07-30", "hour": "amc", "eps": None, "eps_est": None},
+        {"date": "2026-04-29", "hour": "amc", "eps": None, "eps_est": None}])
+    monkeypatch.setattr(news_desk, "_finnhub_history", lambda t: [])
+    monkeypatch.setattr(news_desk, "_fmp_history", lambda t: [])
+    monkeypatch.setattr(news_desk, "_finnhub_surprises", lambda t: [
+        {"period": "2026-06-30", "eps": 8.4, "eps_est": 8.0}, {"period": "2026-03-31", "eps": 7.1, "eps_est": 7.5}])
+    rows = {r["date"]: r for r in news_desk.earnings_dates("KLAC")}
+    assert rows["2026-07-30"]["eps"] == 8.4 and rows["2026-07-30"]["eps_est"] == 8.0   # beat
+    assert rows["2026-04-29"]["eps"] == 7.1 and rows["2026-04-29"]["eps_est"] == 7.5   # miss
+
+
+def test_chart_events_answer_earnings_first(client, monkeypatch):
+    import app as legacy, time
+    c, _ = client
+    monkeypatch.setattr(legacy, "_build_chart_earnings", lambda t: [{"type": "earnings", "date": "2026-07-30"}])
+    gate = {"go": False}
+    def slow_news(t):
+        while not gate["go"]:
+            time.sleep(0.02)
+        return [{"type": "news", "ts": 1, "label": "x"}]
+    monkeypatch.setattr(legacy, "_build_chart_news", slow_news)
+    legacy._CHART_EVENTS.pop("ZZTEST", None)
+    c.get("/api/terminal/events/ZZTEST")
+    for _ in range(50):
+        d = c.get("/api/terminal/events/ZZTEST").get_json()
+        if d["events"]:
+            break
+        time.sleep(0.02)
+    assert d["pending"] is True and [e["type"] for e in d["events"]] == ["earnings"]   # pins before headlines
+    gate["go"] = True
+    for _ in range(100):
+        d = c.get("/api/terminal/events/ZZTEST").get_json()
+        if not d.get("pending"):
+            break
+        time.sleep(0.02)
+    assert {e["type"] for e in d["events"]} == {"earnings", "news"}
+    tpl = TEMPLATE
+    assert "Math.min(6000, 700+tries*600)" in tpl and "if(!d.pending) twOvlSave(ticker, {events: evs});" in tpl
+
+
+def test_earnings_calendar_keeps_the_last_good_slate(monkeypatch):
+    import intel_engine as ie
+    from datetime import date
+    saved = {}
+    monkeypatch.setattr("database.set_setting", lambda k, v: saved.__setitem__(k, v))
+    monkeypatch.setattr("database.get_setting", lambda k: saved.get(k))
+    ie._earn_snapshot_mem.clear()
+    today = date(2026, 11, 15)
+    ie._save_earnings_snapshot({"this_week": [{"ticker": "NVDA", "date": "2026-11-19", "days_away": 4}],
+                                "today": [], "tomorrow": [], "coming_up": []}, date(2026, 11, 14))
+    ie._earn_snapshot_mem.clear()                              # as after a deploy: read back from the DB
+    items, when = ie._snapshot_items(today, {"NVDA"}, set())
+    assert when == "2026-11-14" and items[0]["ticker"] == "NVDA" and items[0]["days_away"] == 4 and items[0]["on_watchlist"]
+    assert ie._snapshot_items(date(2026, 11, 25), set(), set())[0] == []     # past report / too old: nothing
+
+
+def test_calendar_fills_watchlist_from_chart_earnings(monkeypatch):
+    import app as legacy, time
+    from datetime import date, timedelta
+    monkeypatch.setattr(legacy, "prewarm_chart_earnings", lambda t: None)
+    d = (legacy._et_now().date() + timedelta(days=5)).isoformat()
+    legacy._CHART_EARN["KLAC"] = {"at": time.time(), "events": [{"type": "earnings", "date": d, "upcoming": True, "time": "AMC"}]}
+    rows = legacy._add_watchlist_earnings([], ["KLAC", "NVDA"])
+    assert [r["ticker"] for r in rows] == ["KLAC"] and rows[0]["on_watchlist"] and rows[0]["days_away"] == 5
+
+
+def test_chart_vertical_drag_and_earnings_visuals():
+    css = open("static/css/chart_tools.css", encoding="utf-8").read()
+    assert "ps.applyOptions({autoScale: false});" in JS and "if (maxDy < 14 || maxDy < maxDx * 0.35) ps.applyOptions({autoScale: true});" in JS
+    assert "function ctSyncAutoBtn()" in JS and ".tw-auto-btn {" in css
+    assert "function ctEarningsMove()" in JS and "function ctDrawEarningsRange(" in JS and "function ctDrawEarningsRunway(" in JS
+    assert "lg.addColorStop(0, ctHexA(flagColor, 0));" in JS                       # faded report lines
+    assert "e.result === 'miss' ? '#FF4D45'" in JS

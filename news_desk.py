@@ -161,6 +161,24 @@ def _finnhub_history(ticker: str) -> list[dict]:
         return []
 
 
+def _finnhub_surprises(ticker: str) -> list[dict]:
+    """EPS actual vs estimate by fiscal quarter (Finnhub /stock/earnings —
+    the last four quarters on the free plan). Keyed by quarter end, not the
+    report date; earnings_dates() matches them to report days."""
+    try:
+        from finnhub_ttm import _finnhub_get
+        rows = _finnhub_get("/stock/earnings", {"symbol": ticker}) or []
+        out = []
+        for r in rows if isinstance(rows, list) else []:
+            if r.get("actual") is None or r.get("estimate") is None or not r.get("period"):
+                continue
+            out.append({"period": str(r["period"])[:10], "eps": r.get("actual"), "eps_est": r.get("estimate")})
+        return out
+    except Exception as exc:
+        logger.debug("finnhub surprises %s: %s", ticker, exc)
+        return []
+
+
 def _fmp_history(ticker: str) -> list[dict]:
     key = os.environ.get("FMP_API_KEY", "").strip()
     if not key:
@@ -271,6 +289,25 @@ def earnings_dates(ticker: str) -> list[dict]:
         merged[d] = {"date": d, "hour": row.get("hour") or prev.get("hour") or "",
                      "eps": row.get("eps") if row.get("eps") is not None else prev.get("eps"),
                      "eps_est": row.get("eps_est") if row.get("eps_est") is not None else prev.get("eps_est")}
+    # Beat / miss for report days that still lack EPS: a quarter's numbers are
+    # reported 1-80 days after the quarter ends, so the first report date in
+    # that window is the one.
+    for sp in _finnhub_surprises(ticker):
+        try:
+            period = date.fromisoformat(sp["period"])
+        except ValueError:
+            continue
+        for k in sorted(merged):
+            try:
+                gap = (date.fromisoformat(k) - period).days
+            except ValueError:
+                continue
+            if 0 < gap <= 80:
+                row = merged[k]
+                if row.get("eps") is None or row.get("eps_est") is None:
+                    merged[k] = {**row, "eps": sp["eps"] if row.get("eps") is None else row["eps"],
+                                 "eps_est": sp["eps_est"] if row.get("eps_est") is None else row["eps_est"]}
+                break
     return sorted(merged.values(), key=lambda r: r["date"], reverse=True)
 
 

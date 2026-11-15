@@ -486,6 +486,7 @@ function twRenderDrawings() {
   ctLayoutAxisLabels(ctx, dim, axisLabels.concat(ctExtraAxis));
   timeLabels.forEach(function (l) { ctTimeLabel(ctx, dim, l.t, l.c); });
   ctUpdateProps();
+  ctSyncAutoBtn();
 }
 /* Axis tags: zones, alerts and drawing prices sit on the price axis with
    their name attached. Tags that would overlap are pushed apart (each
@@ -1125,6 +1126,32 @@ function ctInitPointer() {
   var cv = ctCanvas(), box = document.getElementById('tw-chart-box');
   if (!cv || !box || cv._ctBound) return;
   cv._ctBound = true;
+  // Drag the chart up or down (like TradingView). lightweight-charts only
+  // pans vertically while the price axis is in manual mode, so a press on
+  // the chart switches it off auto; if the drag turns out mostly sideways
+  // (or was just a click) auto comes straight back on release.
+  box.addEventListener('pointerdown', function (ev) {
+    if (ctMode || ev.shiftKey || ev.button > 0 || ev.target === cv || !twChartState.chart) return;
+    var c = ctLocal(ev), dim = ctDims();
+    if (c.x < 0 || c.y < 0 || c.x > dim.W || c.y > dim.H) return;     // the plot only, not the axes
+    var ps; try { ps = twChartState.chart.priceScale('right'); } catch (e) { return; }
+    if (!ps.options().autoScale) return;                              // already manual: the library pans it
+    ps.applyOptions({autoScale: false});
+    var x0 = ev.clientX, y0 = ev.clientY, maxDy = 0, maxDx = 0;
+    function mv(e) { maxDy = Math.max(maxDy, Math.abs(e.clientY - y0)); maxDx = Math.max(maxDx, Math.abs(e.clientX - x0)); }
+    function up() {
+      window.removeEventListener('pointermove', mv, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true);
+      if (maxDy < 14 || maxDy < maxDx * 0.35) ps.applyOptions({autoScale: true});
+      ctSyncAutoBtn();
+    }
+    window.addEventListener('pointermove', mv, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+  }, true);
+  // Mouse wheel / pinch on the price axis also leaves auto: keep the A button honest.
+  box.addEventListener('wheel', function () { setTimeout(ctSyncAutoBtn, 60); }, {passive: true});
+  box.addEventListener('dblclick', function () { setTimeout(ctSyncAutoBtn, 60); });
+  ctSyncAutoBtn();
   // Shift + drag anywhere on the chart: a quick % measure (like TradingView).
   // It stays up until the next click or Esc and is never saved.
   box.addEventListener('pointerdown', function (ev) {
@@ -1878,6 +1905,8 @@ function ctDrawNextEarnings(ctx, dim) {
   var when = n.days === 0 ? 'TODAY' : (n.days === 1 ? '1D' : n.days + 'D');
   var date = (n.est ? '~' : '') + ctShortDate(n.date).toUpperCase();
   var main = 'EARNINGS ' + date + (n.time ? ' · ' + String(n.time).toUpperCase() : '') + (n.est ? ' · EST' : '');
+  var mv = ctEarningsMove();
+  if (mv) main += '  ·  AVG MOVE ±' + mv.avg.toFixed(1) + '%';
   var tip = (n.est ? 'Estimated next earnings ~' : 'Next earnings ') + n.date + (n.time ? ' · ' + n.time : '') +
     (n.est ? ' — projected from past reports, not yet announced' : (n.src ? ' (' + n.src + ')' : ''));
   ctx.save();
@@ -1910,6 +1939,8 @@ function ctDrawNextEarnings(ctx, dim) {
     ctx.fillStyle = gl; ctx.fillRect(x - 6, y + h, 12, dim.H - y - h);
     ctx.strokeStyle = ctHexA(gold, n.est ? 0.55 : 0.85); ctx.lineWidth = 1.2; ctx.setLineDash(n.est ? [2, 4] : [6, 4]);
     ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x, dim.H); ctx.stroke(); ctx.setLineDash([]);
+    ctDrawEarningsRunway(ctx, dim, x, n, gold);
+    if (mv) ctDrawEarningsRange(ctx, dim, x, mv, gold);
     var px = Math.min(Math.max(4, x - w / 2), dim.W - w - 18);
     capsule(px);
     ctTimeAxisMarks.push({x: x, c: gold, est: n.est, label: date + ' · ' + when});
@@ -2633,7 +2664,9 @@ function ctDrawEvents(ctx, dim) {
     var label = 'Earnings ' + (e.date || '') + (e.time && e.time !== 'TBD' ? ' · ' + String(e.time).toUpperCase() : '');
     if (e.eps != null) label += ' · EPS ' + Number(e.eps).toFixed(2) + (e.eps_est != null ? ' vs ' + Number(e.eps_est).toFixed(2) + ' est' : '') + (e.result ? ' · ' + e.result.toUpperCase() : '');
     else if (e.upcoming || t > Date.now() / 1000) label += ' · upcoming';
-    var flagColor = e.result === 'beat' ? '#22C58B' : e.result === 'miss' ? '#FF4D45' : '#F0B53F';
+    // Beat green, miss red; a report with no EPS on file stays a quiet slate
+    // (gold is kept for the next report).
+    var flagColor = e.result === 'beat' ? '#22C58B' : e.result === 'miss' ? '#FF4D45' : (e.result === 'inline' ? '#C9D3E0' : '#7F8A9B');
     if (x > dim.W) {
       // Past the right edge (upcoming): a flag at the edge says it's coming.
       var tag = 'E ' + ctShortDate(e.date) + ' ›';
@@ -2649,8 +2682,12 @@ function ctDrawEvents(ctx, dim) {
     // Every timeframe gets the report line; on Daily and up it is fainter,
     // since a long chart holds many reports.
     {
-      ctx.strokeStyle = ctHexA(flagColor, step < 86400 || e.upcoming ? 0.55 : 0.32); ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
-      ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, dim.H - 4); ctx.stroke(); ctx.setLineDash([]);
+      // Blends into the background: a faint dotted line that fades out toward the top.
+      var lg = ctx.createLinearGradient(0, 18, 0, dim.H - 22);
+      var a1 = step < 86400 ? 0.34 : 0.2;
+      lg.addColorStop(0, ctHexA(flagColor, 0)); lg.addColorStop(0.55, ctHexA(flagColor, a1 * 0.6)); lg.addColorStop(1, ctHexA(flagColor, a1));
+      ctx.strokeStyle = lg; ctx.lineWidth = 1; ctx.setLineDash([2, 4]);
+      ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, dim.H - 24); ctx.stroke(); ctx.setLineDash([]);
     }
     ctDrawEarnPin(ctx, x, dim.H - 14, flagColor, e, pinGap(x));
     ctTimeAxisMarks.push({x: x, c: flagColor});
@@ -2673,6 +2710,123 @@ function ctDrawEvents(ctx, dim) {
     ctEventHits.push({x: d.x, y: y, r: 10, items: d.items});
   });
   ctx.restore();
+}
+/* How much this stock has moved on its own earnings days: for each of the
+   last 8 reports with a known reaction day (after-close → next session,
+   before-open → that day; unknown → the bigger of the two), the close-to-
+   close % move. From the chart's daily candles; null without enough. */
+var ctMoveCache = {key: '', val: null};
+function ctEarningsMove() {
+  var bars = twChartState.bars || [];
+  if (twChartState.interval !== '1d' || bars.length < 40) return ctMoveCache.key.indexOf((twChartState.ticker || '') + '|') === 0 ? ctMoveCache.val : null;
+  var evs = (twChartState.events || []).filter(function (e) { return e.type === 'earnings' && !e.upcoming && e.date; });
+  var key = (twChartState.ticker || '') + '|' + bars.length + '|' + evs.length;
+  if (ctMoveCache.key === key) return ctMoveCache.val;
+  var days = bars.map(function (b) { return ctEtDay(ctSec(b.time)); });
+  var moves = [];
+  evs.sort(function (a, b) { return a.date < b.date ? 1 : -1; }).slice(0, 12).forEach(function (e) {
+    if (moves.length >= 8) return;
+    var d = String(e.date).slice(0, 10), i = -1;
+    for (var k = 0; k < days.length; k++) { if (days[k] >= d) { i = k; break; } }
+    if (i < 1 || i >= bars.length) return;
+    var hr = String(e.time || '').toLowerCase();
+    function mvAt(r) { return r >= 1 && r < bars.length ? (bars[r].close / bars[r - 1].close - 1) * 100 : null; }
+    var sameDay = days[i] === d, m;
+    if (/amc|after/.test(hr)) m = mvAt(sameDay ? i + 1 : i);
+    else if (/bmo|before/.test(hr)) m = mvAt(i);
+    else { var m1 = mvAt(i), m2 = sameDay ? mvAt(i + 1) : null; m = (m2 != null && Math.abs(m2) > Math.abs(m1 || 0)) ? m2 : m1; }
+    if (m != null && isFinite(m)) moves.push(m);
+  });
+  var val = null;
+  if (moves.length >= 3) {
+    var avg = moves.reduce(function (s, v) { return s + Math.abs(v); }, 0) / moves.length;
+    val = {avg: avg, n: moves.length, up: moves.filter(function (v) { return v > 0; }).length, last: Number(bars[bars.length - 1].close)};
+  }
+  ctMoveCache = {key: key, val: val};
+  return val;
+}
+/* The road to the report: a thin gold track from the last candle to the
+   earnings line along the bottom, a tick each week, and the day count. */
+function ctDrawEarningsRunway(ctx, dim, x, n, gold) {
+  var bars = twChartState.bars || []; if (!bars.length) return;
+  var x0 = ctLogX(bars.length - 1); if (x0 == null || x - x0 < 30) return;
+  var y = dim.H - 30;
+  ctx.save();
+  var g = ctx.createLinearGradient(x0, 0, x, 0);
+  g.addColorStop(0, ctHexA(gold, 0.05)); g.addColorStop(1, ctHexA(gold, 0.5));
+  ctx.fillStyle = g; ctx.fillRect(x0, y - 1, x - x0, 2);
+  var per = (x - x0) / Math.max(1, n.days);
+  if (per * 7 >= 6) for (var d = 7; d < n.days; d += 7) { var tx = x0 + per * d; ctx.fillStyle = ctHexA(gold, 0.35); ctx.fillRect(Math.round(tx), y - 3, 1, 6); }
+  ctx.beginPath(); ctx.arc(x0, y, 2.5, 0, Math.PI * 2); ctx.fillStyle = ctHexA(gold, 0.6); ctx.fill();
+  var label = n.days === 0 ? 'REPORTS TODAY' : n.days + (n.days === 1 ? ' DAY' : ' DAYS') + ' TO EARNINGS';
+  ctx.font = '800 9px "IBM Plex Mono", ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  var mid = (x0 + x) / 2, tw = ctx.measureText(label).width;
+  if (x - x0 > tw + 20) { ctx.fillStyle = ctHexA(gold, 0.8); ctx.fillText(label, mid, y - 5); }
+  ctx.restore();
+}
+/* The stock's usual earnings move as a bracket on the report line: last
+   price ± the average move, with both prices. Historical, not a forecast. */
+function ctDrawEarningsRange(ctx, dim, x, mv, gold) {
+  var hiP = mv.last * (1 + mv.avg / 100), loP = mv.last * (1 - mv.avg / 100);
+  var yh = ctY(hiP), yl = ctY(loP), ym = ctY(mv.last);
+  if (yh == null || yl == null || ym == null) return;
+  ctx.save();
+  var bw = 14;
+  var g = ctx.createLinearGradient(0, yh, 0, yl);
+  g.addColorStop(0, 'rgba(34,197,139,0.22)'); g.addColorStop(0.5, ctHexA(gold, 0.08)); g.addColorStop(1, 'rgba(255,77,69,0.22)');
+  ctRoundRect(ctx, x - bw / 2, yh, bw, yl - yh, 5); ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 1; ctx.strokeStyle = ctHexA(gold, 0.6); ctx.stroke();
+  ctx.fillStyle = '#22C58B'; ctx.fillRect(x - bw / 2 - 3, Math.round(yh), bw + 6, 1.5);
+  ctx.fillStyle = '#FF4D45'; ctx.fillRect(x - bw / 2 - 3, Math.round(yl), bw + 6, 1.5);
+  ctx.beginPath(); ctx.moveTo(x, ym - 4); ctx.lineTo(x + 4, ym); ctx.lineTo(x, ym + 4); ctx.lineTo(x - 4, ym); ctx.closePath();
+  ctx.fillStyle = gold; ctx.fill();
+  ctx.font = '800 9px "IBM Plex Mono", ui-monospace, monospace'; ctx.textBaseline = 'middle';
+  var right = x + bw / 2 + 6 + 90 < dim.W;
+  ctx.textAlign = right ? 'left' : 'right';
+  var lx = right ? x + bw / 2 + 6 : x - bw / 2 - 6;
+  if (yl - yh >= 34) {
+    ctx.fillStyle = '#22C58B'; ctx.fillText('+' + mv.avg.toFixed(1) + '%  ' + ctFmt(hiP), lx, yh);
+    ctx.fillStyle = '#FF6B6B'; ctx.fillText('−' + mv.avg.toFixed(1) + '%  ' + ctFmt(loP), lx, yl);
+    ctx.fillStyle = ctHexA(gold, 0.75); ctx.font = '700 8px "IBM Plex Mono", ui-monospace, monospace';
+    ctx.fillText('AVG EARNINGS MOVE · LAST ' + mv.n, lx, (yh + yl) / 2);
+  } else {
+    // Tight range: one line under the bracket so nothing overlaps.
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    var t1 = 'AVG MOVE ±' + mv.avg.toFixed(1) + '% · ' + ctFmt(loP) + '–' + ctFmt(hiP);
+    var tw = ctx.measureText(t1).width, tx = Math.max(tw / 2 + 4, Math.min(dim.W - tw / 2 - 4, x));
+    ctx.fillStyle = 'rgba(9,12,18,0.85)'; ctx.fillRect(tx - tw / 2 - 4, yl + 5, tw + 8, 13);
+    ctx.fillStyle = ctHexA(gold, 0.9); ctx.fillText(t1, tx, yl + 7);
+  }
+  ctx.restore();
+  ctEventHits.push({x: x, y: (yh + yl) / 2, r: Math.max(10, (yl - yh) / 2), text: 'Average move on its last ' + mv.n + ' earnings days: ±' + mv.avg.toFixed(1) + '% (' + mv.up + ' up, ' + (mv.n - mv.up) + ' down). From past prices — not a forecast.'});
+}
+/* "A" on the price axis: lit while the axis auto-fits; after a vertical drag
+   or axis scaling it dims, and a tap fits the price back to the candles. */
+function ctSyncAutoBtn() {
+  var box = document.getElementById('tw-chart-box'); if (!box || !twChartState.chart) return;
+  var b = document.getElementById('tw-auto-btn');
+  if (!b) {
+    b = document.createElement('button');
+    b.type = 'button'; b.id = 'tw-auto-btn'; b.className = 'tw-auto-btn'; b.textContent = 'A';
+    b.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (typeof twAutoScalePrice === 'function') twAutoScalePrice(); else twChartState.chart.priceScale('right').applyOptions({autoScale: true});
+      ctSyncAutoBtn(); twRenderDrawings();
+    });
+    box.appendChild(b);
+  }
+  var auto = true;
+  try { auto = !!twChartState.chart.priceScale('right').options().autoScale; } catch (e) {}
+  b.classList.toggle('is-manual', !auto);
+  b.setAttribute('aria-pressed', auto ? 'true' : 'false');
+  b.title = auto ? 'Price axis auto-fits the candles. Drag the chart up or down to move it.' : 'Manual price axis — tap to fit the price back to the candles';
+  var dim = ctDims();
+  // In the corner where the two axes meet (above the axis end when the time
+  // axis is the shared one under RSI/MACD).
+  var axH = dim.fullH - dim.H;
+  b.style.left = Math.round(dim.W + (dim.axisW - 22) / 2) + 'px';
+  b.style.top = Math.round(axH >= 20 ? dim.H + (axH - 20) / 2 : dim.H - 24) + 'px';
 }
 /* Earnings pin: a dark rounded badge ringed in the result colour (beat green,
    miss red, no estimate gold) with a pointer up to the report line, and the
