@@ -591,7 +591,7 @@
         </div>
 
         <div class="tw-chart-toolbar">
-          <button type="button" class="tw-symsearch" onclick="var o=document.getElementById('workspace-search-open');if(o)o.click();" title="Search a company or tool (/)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg><span>Search</span></button>
+          <button type="button" class="tw-symsearch" onclick="if(window.twOpenTickerSearch)twOpenTickerSearch('');" title="Search a ticker or company — or just start typing (Ctrl/⌘+K)" aria-label="Search a ticker"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg><span>Search</span></button>
           <div class="tw-interval-wrap">
             <span class="tw-control-label">Interval · Eastern Time</span>
             <div class="tw-tf">
@@ -1105,6 +1105,7 @@
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="{{ url_for('static', filename='js/depth_panel.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/live_trading.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/ticker_palette.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/value_badges.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/chart_tools.js') }}"></script>
 <script>
@@ -1206,6 +1207,7 @@ function twSelect(row){
   twRenderStamp({live: d.live === '1', as_of: d.asof,
                  source: d.source, quote_note: d.quotenote});
   var sym=document.getElementById('tw-ot-symbol'); if(sym){ sym.value=d.ticker; }
+  if(window.twRememberTicker) twRememberTicker(d.ticker);
   twEstCost();
   twLoadChart(d.ticker, twChartState.interval, twChartState.range);
   twLoadOverlays(d.ticker);

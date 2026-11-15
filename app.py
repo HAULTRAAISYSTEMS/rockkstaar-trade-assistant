@@ -11185,6 +11185,62 @@ def api_thesis_peers(ticker):
     return jsonify(dict(out, ok=True, ticker=ticker))
 
 
+_SYMBOL_SEARCH: dict = {}
+_SYMBOL_SEARCH_TTL = 24 * 3600
+
+
+@app.route("/api/symbols/search")
+def api_symbol_search():
+    """Ticker / company lookup for the chart's ticker search (US listings).
+
+    Finnhub symbol search, cached a day per query. An exact ticker is always
+    returned first so a symbol Finnhub doesn't list can still be opened.
+    """
+    q = re.sub(r"[^A-Za-z0-9 .&'-]", "", request.args.get("q") or "").strip()[:40]
+    if not q:
+        return jsonify({"ok": True, "query": "", "results": []})
+    key = q.lower()
+    hit = _SYMBOL_SEARCH.get(key)
+    if hit and _time.time() - hit[0] < _SYMBOL_SEARCH_TTL:
+        return jsonify({"ok": True, "query": q, "results": hit[1]})
+    results = []
+    token = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if token:
+        try:
+            if not _intel._fh_is_rate_limited():
+                from urllib.parse import quote as _q
+                url = f"https://finnhub.io/api/v1/search?q={_q(q)}&exchange=US&token={token}"
+                with _intel._fh_urlopen(url, timeout=6) as resp:
+                    rows = (_json.loads(resp.read().decode() or "{}") or {}).get("result") or []
+                seen = set()
+                for r in rows:
+                    sym = str(r.get("symbol") or r.get("displaySymbol") or "").upper().strip()
+                    typ = str(r.get("type") or "").strip()
+                    if not re.fullmatch(r"[A-Z][A-Z0-9]{0,5}(\.[A-Z])?", sym) or sym in seen:
+                        continue
+                    if typ and typ not in ("Common Stock", "ETP", "ETF", "ADR", "REIT"):
+                        continue
+                    seen.add(sym)
+                    results.append({"symbol": sym, "name": str(r.get("description") or "").title()[:60],
+                                    "type": "ETF" if typ in ("ETP", "ETF") else ("ADR" if typ == "ADR" else "Stock")})
+                    if len(results) >= 12:
+                        break
+        except Exception as exc:
+            logger.debug("symbol search %r failed: %s", q, exc)
+    # An exact ticker ranks first. When nothing matched at all, offer the
+    # typed text as a ticker so an unlisted symbol can still be opened (a
+    # company word like "apple" with real matches doesn't get a fake one).
+    up = q.upper().replace(" ", "")
+    if re.fullmatch(r"[A-Z][A-Z0-9]{0,5}(\.[A-Z])?", up):
+        exact = [r for r in results if r["symbol"] == up]
+        rest = [r for r in results if r["symbol"] != up]
+        results = exact + rest if (exact or rest) else [{"symbol": up, "name": "", "type": ""}]
+    if len(_SYMBOL_SEARCH) > 2000:
+        _SYMBOL_SEARCH.clear()
+    _SYMBOL_SEARCH[key] = (_time.time(), results)
+    return jsonify({"ok": True, "query": q, "results": results})
+
+
 @app.route("/api/thesis/zones")
 def api_value_zones():
     """Value zones for up to 40 tickers: {"zones": {T: {...}}, "pending": [..]}."""
