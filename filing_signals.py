@@ -144,7 +144,21 @@ def extract_signals(submissions: dict, *, cik: str = "",
     oldest = min((_as_date(r["filed"]) for r in rows if _as_date(r["filed"])), default=today)
     recent_filings = sorted([r for r in window_rows if r["form"] in ("10-K", "10-Q", "20-F", "40-F", "8-K", "6-K")],
                             key=lambda r: r["filed"], reverse=True)[:8]
+    # A company that registered to list (F-1 / S-1) but has not filed an
+    # annual report yet: its statements aren't in the SEC's structured data,
+    # so most of the scorecard can't be computed until the first 10-K / 20-F.
+    annual_on_file = sum(1 for r in rows if r["form"] in ("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"))
+    regs = sorted([r for r in rows if r["form"] in ("F-1", "F-1/A", "S-1", "S-1/A", "424B4", "424B1", "F-3", "S-3")
+                   and _as_date(r["filed"])], key=lambda r: r["filed"])
+    foreign = any(r["form"] in ("20-F", "6-K", "F-1", "F-1/A", "40-F") for r in rows)
+    listing = {
+        "annual_reports_on_file": annual_on_file,
+        "registered": ({"form": regs[0]["form"], "filed": regs[0]["filed"]} if regs else None),
+        "foreign_filer": foreign,
+        "fiscal_year_end": str((submissions or {}).get("fiscalYearEnd") or ""),
+    }
     return {
+        "listing": listing,
         "available": True if saw_items_column else False,
         "reason": "" if saw_items_column else "filing index carried no item codes",
         "signals": signals,
