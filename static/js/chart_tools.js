@@ -58,6 +58,7 @@ var CT_ICONS = {
   star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9 6.8 19.6l1-5.8-4.3-4.1 5.9-.9z"/>',
   eye: '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+  redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
   trash: '<path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13"/>',
   clear: '<path d="M6 6l12 12M18 6 6 18"/>',
   reset: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4.5h4.5"/>',
@@ -403,7 +404,7 @@ function ctHexA(hex, a) {
 function ctDashArr(d, w) { return d === 'dashed' ? [6, 4] : (d === 'dotted' ? [Math.max(1, w), 3] : []); }
 
 /* ═══ Drawing store (per ticker, synced to the account) ═══ */
-var ctStore = {ticker: null, drawings: [], updated: 0, fetchedAt: 0, undo: [], hidden: false};
+var ctStore = {ticker: null, drawings: [], updated: 0, fetchedAt: 0, undo: [], redo: [], hidden: false};
 var ctQuick = null;  // Shift+drag measure: shown until the next click, never saved
 var ctDraft = null, ctAction = null, ctBoxes = {}, ctPaths = {}, ctLabelHits = {}, ctCurId = null;
 var ctSaveTimer = null;
@@ -451,7 +452,8 @@ function twLoadDrawings() {
   ctDraft = null; ctAction = null;
   if (ctStore.ticker !== ticker) {
     var local = ctReadLocal(ticker);
-    ctStore = {ticker: ticker, drawings: local.drawings, updated: local.updated, fetchedAt: 0, undo: []};
+    ctStore = {ticker: ticker, drawings: local.drawings, updated: local.updated, fetchedAt: 0, undo: [], redo: []};
+    ctSyncUndoBtns();
     twChartState.selectedDrawing = null;
   }
   twRenderDrawings();
@@ -490,15 +492,41 @@ function ctPushServer(ticker) {
   }).catch(function () {});
 }
 function ctSnapshot() { return JSON.stringify(ctStore.drawings); }
+/* Undo / redo for drawings: every add, move, edit, delete or clear is a step.
+   A new change after undoing clears the redo steps (like any editor). */
 function ctPushUndo(snap) {
   ctStore.undo.push(snap == null ? ctSnapshot() : snap);
   if (ctStore.undo.length > 60) ctStore.undo.shift();
+  ctStore.redo = [];
+  ctSyncUndoBtns();
 }
 function ctUndo() {
   if (!ctStore.undo.length) return;
+  var cur = ctSnapshot();
   try { ctStore.drawings = JSON.parse(ctStore.undo.pop()); } catch (e) { return; }
+  (ctStore.redo = ctStore.redo || []).push(cur);
+  if (ctStore.redo.length > 60) ctStore.redo.shift();
   twChartState.selectedDrawing = null;
-  twSaveDrawings(); twRenderDrawings();
+  twSaveDrawings(); twRenderDrawings(); ctSyncUndoBtns();
+  ctNotice('↶ Undone' + (ctStore.undo.length ? '' : ' — nothing more to undo'));
+}
+function ctRedo() {
+  if (!ctStore.redo || !ctStore.redo.length) return;
+  var cur = ctSnapshot();
+  try { ctStore.drawings = JSON.parse(ctStore.redo.pop()); } catch (e) { return; }
+  ctStore.undo.push(cur);
+  twChartState.selectedDrawing = null;
+  twSaveDrawings(); twRenderDrawings(); ctSyncUndoBtns();
+  ctNotice('↷ Redone');
+}
+function ctSyncUndoBtns() {
+  var u = !!(ctStore.undo && ctStore.undo.length), r = !!(ctStore.redo && ctStore.redo.length);
+  document.querySelectorAll('[data-ct-act="undo"], [data-ct-fb="_undo"]').forEach(function (b) {
+    b.disabled = !u; b.title = u ? 'Undo (Ctrl/⌘ Z) — ' + ctStore.undo.length + ' step' + (ctStore.undo.length === 1 ? '' : 's') : 'Nothing to undo';
+  });
+  document.querySelectorAll('[data-ct-act="redo"], [data-ct-fb="_redo"]').forEach(function (b) {
+    b.disabled = !r; b.title = r ? 'Redo (Ctrl/⌘ Shift Z) — ' + ctStore.redo.length + ' step' + (ctStore.redo.length === 1 ? '' : 's') : 'Nothing to redo';
+  });
 }
 function ctSelected() {
   var i = twChartState.selectedDrawing;
@@ -1360,6 +1388,7 @@ function ctInitPointer() {
     else if (ev.key === 'Escape' && ctQuick) { ctQuick = null; twRenderDrawings(); }
     else if (ev.key === 'Escape') { if (ctMode || ctDraft) twStopDrawing(); else if (twChartState.selectedDrawing != null) ctSelect(null); }
     else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'z' || ev.key === 'Z') && !ev.shiftKey) { if (ctStore.undo.length) { ev.preventDefault(); ctUndo(); } }
+    else if ((ev.metaKey || ev.ctrlKey) && (((ev.key === 'z' || ev.key === 'Z') && ev.shiftKey) || ev.key === 'y' || ev.key === 'Y')) { if (ctStore.redo && ctStore.redo.length) { ev.preventDefault(); ctRedo(); } }
     else if (ctShortcut(ev)) ev.preventDefault();
   });
 }
@@ -1438,6 +1467,7 @@ function ctBuildRail() {
     '<button type="button" class="tw-type-btn tw-icon-btn ct-toggle" data-ct-act="magnet" title="Magnet: snap to open, high, low and close">' + ctIcon('magnet') + '</button>' +
     '<button type="button" class="tw-type-btn tw-icon-btn ct-toggle" data-ct-act="hide" title="Hide all drawings">' + ctIcon('eye') + '</button>' +
     '<button type="button" class="tw-type-btn tw-icon-btn" data-ct-act="undo" title="Undo (Ctrl/⌘ Z)">' + ctIcon('undo') + '</button>' +
+    '<button type="button" class="tw-type-btn tw-icon-btn" data-ct-act="redo" title="Redo (Ctrl/⌘ Shift Z)">' + ctIcon('redo') + '</button>' +
     '<button type="button" class="tw-type-btn tw-icon-btn" data-ct-act="delete" title="Delete selected drawing">' + ctIcon('trash') + '</button>' +
     '<button type="button" class="tw-type-btn tw-icon-btn" data-ct-act="clear" title="Remove all drawings on this symbol">' + ctIcon('clear') + '</button>' +
     '<button type="button" class="tw-type-btn tw-icon-btn" data-ct-act="reset" title="Reset chart view">' + ctIcon('reset') + '</button>';
@@ -1454,6 +1484,7 @@ function ctBuildRail() {
     else if (a === 'magnet') { ctPrefs.magnet = !ctPrefs.magnet; ctPrefChanged(); ctSyncRail(); }
     else if (a === 'hide') { ctPrefs.draw.hidden = !ctPrefs.draw.hidden; ctPrefChanged(); ctSyncSettingsUI(); ctSyncRail(); twRenderDrawings(); }
     else if (a === 'undo') ctUndo();
+    else if (a === 'redo') ctRedo();
     else if (a === 'delete') twDeleteSelected();
     else if (a === 'clear') twClearDrawings();
     else if (a === 'reset' && typeof twResetView === 'function') twResetView();
@@ -1523,6 +1554,7 @@ function ctSyncRail() {
   var fb = document.querySelector('#ct-rail [data-ct-act="favbar"]');
   if (fb) { var fon = !!(ctPrefs.favtools && ctPrefs.favtools.on); fb.classList.toggle('active', fon); fb.setAttribute('aria-pressed', fon ? 'true' : 'false'); fb.title = fon ? 'Hide the favorite tools bar' : 'Show the favorite tools bar'; }
   ctRenderFavBar();
+  ctSyncUndoBtns();
   var hide = document.querySelector('#ct-rail [data-ct-act="hide"]');
   if (hide) { hide.classList.toggle('active', !!ctPrefs.draw.hidden); hide.title = ctPrefs.draw.hidden ? 'Show drawings' : 'Hide all drawings'; }
 }
@@ -1560,11 +1592,13 @@ function ctRenderFavBar() {
       var b = e.target.closest('[data-ct-fb]'); if (!b) return;
       var t = b.getAttribute('data-ct-fb');
       if (t === '_hide') { ctPrefs.favtools.on = false; ctPrefChanged(); ctSyncRail(); return; }
+      if (t === '_undo') { ctUndo(); return; }
+      if (t === '_redo') { ctRedo(); return; }
       twStartDrawing(t);
     });
     bar.addEventListener('contextmenu', function (e) {
       var b = e.target.closest('[data-ct-fb]');
-      if (b && b.getAttribute('data-ct-fb') !== '_hide') { e.preventDefault(); ctToggleFavTool(b.getAttribute('data-ct-fb')); }
+      if (b && b.getAttribute('data-ct-fb').charAt(0) !== '_') { e.preventDefault(); ctToggleFavTool(b.getAttribute('data-ct-fb')); }
     });
     box.appendChild(bar);
     bar._key = '';
@@ -1578,9 +1612,13 @@ function ctRenderFavBar() {
       (list.length ? list.map(function (t) {
         return '<button type="button" class="ct-fb-tool' + (ctMode === t ? ' active' : '') + '" data-ct-fb="' + t + '" title="' + CT_TOOLS[t].label + ' · right-click to remove" aria-label="' + CT_TOOLS[t].label + '">' + ctIcon(t, 17) + '</button>';
       }).join('') : '<span class="ct-fb-empty">Tap ☆ next to a tool in the drawing menus to add it here</span>') +
+      '<span class="ct-fb-sep"></span>' +
+      '<button type="button" class="ct-fb-tool" data-ct-fb="_undo" aria-label="Undo">' + ctIcon('undo', 16) + '</button>' +
+      '<button type="button" class="ct-fb-tool" data-ct-fb="_redo" aria-label="Redo">' + ctIcon('redo', 16) + '</button>' +
       '<button type="button" class="ct-fb-tool ct-fb-hide" data-ct-fb="_hide" title="Hide this bar (★ on the left brings it back)" aria-label="Hide favorites bar">×</button>';
   }
   ctPlaceFavBar(bar, box);
+  ctSyncUndoBtns();
 }
 function ctPlaceFavBar(bar, box) {
   var ft = ctPrefs.favtools || {}, bw = box.clientWidth, bh = box.clientHeight, w = bar.offsetWidth, h = bar.offsetHeight;
@@ -2439,7 +2477,7 @@ var CT_SHORTCUTS = [
   ['Alt + F', 'Fib retracement'], ['Alt + D', '% drop levels (click a high)'], ['Alt + B / C', 'Rectangle / channel'],
   ['Alt + L / S', 'Long / short position'], ['Alt + M', 'Measure % (or Shift + drag for a quick one)'], ['Alt + A', 'Anchored VWAP'],
   ['Alt + X', 'Text'], ['Alt + R', 'Reset view'], ['Shift + F', 'Full screen'],
-  ['Alt + W', 'Alert at the selected line'], ['Ctrl/⌘ + Z', 'Undo'],
+  ['Alt + W', 'Alert at the selected line'], ['Ctrl/⌘ + Z', 'Undo'], ['Ctrl/⌘ + Shift + Z  or  Ctrl + Y', 'Redo'],
   ['Delete', 'Remove selected drawing'], ['Esc', 'Cancel / deselect'], ['?', 'This list']
 ];
 function ctShortcut(ev) {

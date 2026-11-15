@@ -215,3 +215,7 @@
 .ct-set-btn.ct-primary { background: var(--cc-accent, #c4f53b); border-color: var(--cc-accent, #c4f53b); color: #0a0d06; font-weight: 800; }
 .ct-set-btn.ct-primary:hover { filter: brightness(1.08); color: #0a0d06; }
 .ct-set-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Undo / redo: dim when there's nothing to step through. */
+#ct-rail [data-ct-act="undo"]:disabled, #ct-rail [data-ct-act="redo"]:disabled, .ct-fb-tool:disabled { opacity: .32; cursor: default; }
+.ct-fb-sep { width: 1px; height: 20px; margin: 0 3px; background: rgba(255,255,255,.12); }
