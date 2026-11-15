@@ -6382,6 +6382,16 @@ def _build_chart_events(ticker: str) -> list:
                            "upcoming": True, "label": "Earnings", "source": "stock snapshot"})
     except Exception as exc:
         logger.debug("chart events: next earnings %s: %s", ticker, exc)
+    # The snapshot only carries a date for some tickers. Ask the earnings
+    # calendar for this one; failing that, project the date from last
+    # year's report for the same quarter (marked as an estimate).
+    if not any(e.get("upcoming") for e in events):
+        try:
+            nxt_ev = _next_earnings_for(ticker, [e["date"] for e in events if e.get("type") == "earnings"])
+            if nxt_ev:
+                events.append(nxt_ev)
+        except Exception as exc:
+            logger.debug("chart events: next earnings lookup %s: %s", ticker, exc)
     seen_heads: set = set()
     try:
         from terminal_intelligence import _epoch
@@ -6402,6 +6412,60 @@ def _build_chart_events(ticker: str) -> list:
             seen_heads.add(row["label"].lower())
             events.append(row)
     return events
+
+
+_EARN_HOUR = {"bmo": "BMO", "amc": "AMC", "dmh": "During market"}
+
+
+def project_next_earnings(past_dates: list, today) -> str | None:
+    """Estimate the next report from history: companies report each quarter
+    about a year after the same quarter last year (same weekday). Returns
+    the earliest such date after today, else None."""
+    from datetime import date as _date, timedelta as _td
+    days = []
+    for d in past_dates or []:
+        try:
+            days.append(_date.fromisoformat(str(d)[:10]))
+        except ValueError:
+            continue
+    if not days:
+        return None
+    days = sorted(set(days))
+    cands = [d + _td(days=364) for d in days if today < d + _td(days=364) <= today + _td(days=130)]
+    # Without that quarter a year back, roll the last report forward by quarters.
+    if not cands and (today - days[-1]).days < 200:
+        nxt = days[-1] + _td(days=91)
+        while nxt <= today:
+            nxt += _td(days=91)
+        cands = [nxt]
+    return min(cands).isoformat() if cands else None
+
+
+def _next_earnings_for(ticker: str, past_dates: list) -> dict | None:
+    """The next report for one ticker: Finnhub's per-symbol calendar (120
+    days out), else an estimate projected from past reports."""
+    today = _et_now().date()
+    try:
+        from finnhub_ttm import _finnhub_get
+        from datetime import timedelta as _td
+        data = _finnhub_get("/calendar/earnings", {"symbol": ticker, "from": today.isoformat(),
+                                                    "to": (today + _td(days=120)).isoformat()}) or {}
+        rows = [r for r in (data.get("earningsCalendar") or []) if isinstance(data, dict)
+                and str(r.get("symbol") or "").upper() == ticker
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(r.get("date") or "")[:10])
+                and str(r.get("date"))[:10] >= today.isoformat()]
+        if rows:
+            r = min(rows, key=lambda x: str(x.get("date")))
+            return {"type": "earnings", "date": str(r["date"])[:10], "time": _EARN_HOUR.get(r.get("hour"), ""),
+                    "upcoming": True, "label": "Earnings", "eps_est": r.get("epsEstimate"),
+                    "source": "Finnhub earnings calendar"}
+    except Exception as exc:
+        logger.debug("next earnings calendar %s: %s", ticker, exc)
+    est = project_next_earnings(past_dates, today)
+    if est:
+        return {"type": "earnings", "date": est, "time": "", "upcoming": True, "estimated": True,
+                "label": "Earnings (estimated)", "source": "Estimated from past reports — not confirmed"}
+    return None
 
 
 _CHART_NEWS_PER_DAY = 2

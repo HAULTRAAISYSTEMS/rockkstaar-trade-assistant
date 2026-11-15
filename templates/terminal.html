@@ -1495,16 +1495,19 @@ function twInitChart(){
   var el=document.getElementById('tw-chart');
   if(!el || !window.LightweightCharts) return false;
   var LC=window.LightweightCharts;
+  // Axes: no hard borders (chart_tools.js draws a glass strip with a glowing
+  // accent edge), quieter tick text, and accent crosshair labels.
+  var twAcc=(function(){try{var v=getComputedStyle(document.documentElement).getPropertyValue('--cc-accent').trim();if(/^#[0-9a-f]{6}$/i.test(v))return v;}catch(e){}return '#c4f53b';})();
   var chart=LC.createChart(el,{
     autoSize:true,
-    layout:{ background:{type:'solid',color:'transparent'}, textColor:'#AEB7C2', fontFamily:"'IBM Plex Mono', ui-monospace, monospace", fontSize:11 },
+    layout:{ background:{type:'solid',color:'transparent'}, textColor:'#8E9AAB', fontFamily:"'IBM Plex Mono', ui-monospace, monospace", fontSize:10.5 },
     grid:{ vertLines:{visible:false}, horzLines:{visible:false} },
-    rightPriceScale:{ borderColor:'rgba(255,255,255,0.08)' },
+    rightPriceScale:{ borderVisible:false, entireTextOnly:true },
     localization:{locale:'en-US',timeFormatter:twEasternTimeLabel},
-    timeScale:{ borderColor:'rgba(255,255,255,0.08)', timeVisible:true, secondsVisible:false,tickMarkFormatter:twEasternTickLabel },
+    timeScale:{ borderVisible:false, timeVisible:true, secondsVisible:false,tickMarkFormatter:twEasternTickLabel },
     crosshair:{ mode:LC.CrosshairMode.Normal,
-      vertLine:{color:'rgba(214,224,236,0.38)',style:LC.LineStyle.Dashed,labelBackgroundColor:'#2b3646'},
-      horzLine:{color:'rgba(214,224,236,0.38)',style:LC.LineStyle.Dashed,labelBackgroundColor:'#2b3646'} }
+      vertLine:{color:'rgba(214,224,236,0.34)',style:LC.LineStyle.Dashed,labelBackgroundColor:twAcc},
+      horzLine:{color:'rgba(214,224,236,0.34)',style:LC.LineStyle.Dashed,labelBackgroundColor:twAcc} }
   });
   // Semantic colours — green = gain, red = loss. Do not restyle.
   var twPxFmt={type:'custom', formatter:twAxisPrice, minMove:0.0001};
@@ -1692,12 +1695,14 @@ function twDrawTimeAxis(){
     ctx.textAlign='center';ctx.fillText(lbl,px,15);
     lastR=px+w/2;
   }
+  // Earnings notches and the next report's date (chart_tools.js).
+  if(typeof ctDrawTimeMarksAt==='function'){try{ctDrawTimeMarksAt(ctx,fit.w-ax,0,22);}catch(e){}}
   var hov=twChartState.hoverIdx;
   if(hov!=null&&hov>=win.start&&hov<win.end){
     var hbar=twChartState.bars[hov],hpx=x(hov-win.start),hlbl=twAxisLabel(hbar.time);
     ctx.font='700 9px ui-monospace,monospace';var twd=ctx.measureText(hlbl).width+12;
     var rx=Math.min(Math.max(hpx-twd/2,2),Math.max(2,fit.w-ax-twd-2));
-    ctx.fillStyle='#FF7A18';
+    ctx.fillStyle=(typeof ctAccent==='function'?ctAccent():'#c4f53b');
     if(ctx.roundRect){ctx.beginPath();ctx.roundRect(rx,3,twd,16,8);ctx.fill();}else{ctx.fillRect(rx,3,twd,16);}
     ctx.fillStyle='#0b0e11';ctx.textAlign='center';ctx.fillText(hlbl,rx+twd/2,15);ctx.textAlign='left';
   }

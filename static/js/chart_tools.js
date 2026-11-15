@@ -474,11 +474,15 @@ function twRenderDrawings() {
     qm.id = '_quick';
     try { ctDrawOne(ctx, qm, dim, true, axisLabels, timeLabels, true); } catch (e) {}
   }
-  ctExtraAxis = [];
+  ctExtraAxis = []; ctTimeAxisMarks = [];
   try { ctDrawExtras(ctx, dim); } catch (e) {}
   try { ctDrawAlerts(ctx, dim, axisLabels); } catch (e) {}
   ctx.restore();
   ctCurId = null;
+  try { ctDrawAxisChrome(ctx, dim); ctDrawTimeAxisMarks(ctx, dim); } catch (e) {}
+  // The shared time axis under RSI/MACD carries the same marks.
+  var sharedAx = document.getElementById('tw-time-axis');
+  if (sharedAx && sharedAx.style.display !== 'none' && typeof twDrawTimeAxis === 'function') { try { twDrawTimeAxis(); } catch (e) {} }
   ctLayoutAxisLabels(ctx, dim, axisLabels.concat(ctExtraAxis));
   timeLabels.forEach(function (l) { ctTimeLabel(ctx, dim, l.t, l.c); });
   ctUpdateProps();
@@ -487,9 +491,9 @@ function twRenderDrawings() {
    their name attached. Tags that would overlap are pushed apart (each
    keeps a short leader line to its real price). */
 var ctExtraAxis = [];
-var CT_TAG_H = 14;
+var CT_TAG_H = 16;
 function ctLayoutAxisLabels(ctx, dim, labels) {
-  var GAP = 1, items = [];
+  var GAP = 2, items = [];
   labels.forEach(function (l) {
     var y = ctY(l.p);
     if (y == null || y < 0 || y > dim.H) return;
@@ -511,38 +515,101 @@ function ctLayoutAxisLabels(ctx, dim, labels) {
   items.forEach(function (it) {
     var l = it.l;
     if (Math.abs(it.y - it.y0) > 1) {
-      ctx.save(); ctx.strokeStyle = l.c; ctx.globalAlpha = 0.7; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(dim.W - 2, it.y0); ctx.lineTo(dim.W + 4, it.y); ctx.stroke(); ctx.restore();
+      // Moved to make room: a soft elbow leads back to the real price.
+      ctx.save(); ctx.strokeStyle = l.c; ctx.globalAlpha = 0.6; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(dim.W - 10, it.y0); ctx.lineTo(dim.W - 5, it.y0); ctx.lineTo(dim.W, it.y); ctx.stroke();
+      ctx.beginPath(); ctx.arc(dim.W - 10, it.y0, 1.6, 0, Math.PI * 2); ctx.fillStyle = l.c; ctx.fill(); ctx.restore();
     }
-    var r = ctAxisLabel(ctx, dim, l.p, l.c, l.text, it.y);
-    if (r && l.alertId != null) ctAlertHits.push({id: l.alertId, x1: r.x2 - 16, x2: r.x2, y1: r.y1, y2: r.y2});
+    var r = ctAxisLabel(ctx, dim, l.p, l.c, l.text, it.y, l);
+    if (r && l.alertId != null && r.close) ctAlertHits.push({id: l.alertId, x1: r.close.x1, x2: r.close.x2, y1: r.y1, y2: r.y2});
   });
 }
-function ctAxisLabel(ctx, dim, price, color, title, yAt) {
+function ctRoundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, h / 2, w / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+/* Price pill on the axis: rounded, with a small arrow nosing into the chart. */
+function ctPricePill(ctx, dim, y, h, color, label) {
+  var x = dim.W + 1, w = dim.axisW - 3, r = 4;
+  ctx.beginPath();
+  ctx.moveTo(x - 5, y);
+  ctx.lineTo(x, y - h / 2 + 2); ctx.quadraticCurveTo(x, y - h / 2, x + 2, y - h / 2);
+  ctx.lineTo(x + w - r, y - h / 2); ctx.quadraticCurveTo(x + w, y - h / 2, x + w, y - h / 2 + r);
+  ctx.lineTo(x + w, y + h / 2 - r); ctx.quadraticCurveTo(x + w, y + h / 2, x + w - r, y + h / 2);
+  ctx.lineTo(x + 2, y + h / 2); ctx.quadraticCurveTo(x, y + h / 2, x, y + h / 2 - 2);
+  ctx.closePath();
+  ctx.fillStyle = color; ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(x + 1, y - h / 2 + 1, w - 2, 1);   // top sheen
+  ctx.fillStyle = ctTextOn(color); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillText(label, x + 5, y + 0.5);
+}
+function ctBellIcon(ctx, x, y, c) {
+  ctx.save(); ctx.fillStyle = c;
+  ctx.beginPath(); ctx.moveTo(x - 3.6, y + 2.4);
+  ctx.quadraticCurveTo(x - 3.4, y - 3.8, x, y - 4); ctx.quadraticCurveTo(x + 3.4, y - 3.8, x + 3.6, y + 2.4);
+  ctx.closePath(); ctx.fill();
+  ctx.fillRect(x - 4.6, y + 2, 9.2, 1.3);
+  ctx.beginPath(); ctx.arc(x, y + 4.4, 1.2, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+/* What an alert is called on its tag: Buy plan 2 → "② BUY", Load the boat → "LOAD THE BOAT". */
+function ctAlertTagParts(text) {
+  var t = String(text || '').replace(/^🔔[↑↓]?\s*/, '').replace(/\s*×\s*$/, '').trim();
+  var m = /buy\s*plan\s*(\d+)/i.exec(t);
+  if (m) return {num: m[1], name: 'BUY'};
+  return {num: '', name: t.toUpperCase()};
+}
+function ctAxisLabel(ctx, dim, price, color, title, yAt, meta) {
   var y = yAt != null ? yAt : ctY(price);
   if (y == null || y < -9 || y > dim.H + 9) return null;
   var label = ctFmt(price);
   ctx.save();
-  // Named tags (zones, alerts) are compact so a stack of them stays small.
+  var h = title ? CT_TAG_H : 18;
   ctx.font = title ? '700 9.5px "IBM Plex Mono", ui-monospace, monospace' : '700 11px "IBM Plex Mono", ui-monospace, monospace';
-  var h = title ? CT_TAG_H : 18, w = dim.axisW;
-  ctx.fillStyle = color;
-  ctx.fillRect(dim.W, y - h / 2, w, h);
-  ctx.fillStyle = ctTextOn(color);
-  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-  ctx.fillText(label, dim.W + 6, y + 0.5);
-  if (title) {
-    ctx.font = '700 8.5px "IBM Plex Mono", ui-monospace, monospace';
-    var tw = ctx.measureText(title).width + 8;
-    ctx.fillStyle = color;
-    ctx.fillRect(dim.W - tw, y - h / 2, tw, h);
-    ctx.fillStyle = ctTextOn(color);
-    ctx.fillText(title, dim.W - tw + 4, y + 0.5);
-    ctx.restore();
-    return {x1: dim.W - tw, x2: dim.W, y1: y - h / 2, y2: y + h / 2};
+  ctPricePill(ctx, dim, y, h, color, label);
+  if (!title) { ctx.restore(); return null; }
+  // The name: a dark glass flag in the tag's colour, left of the axis.
+  var isAlert = meta && meta.alertId != null;
+  var parts = isAlert ? ctAlertTagParts(title) : {num: '', name: String(title)};
+  ctx.font = '800 8.5px "IBM Plex Mono", ui-monospace, monospace';
+  var nameW = ctx.measureText(parts.name).width;
+  var pad = 6, icon = isAlert ? 12 : 0, badge = parts.num ? 13 : 0, close = isAlert ? 14 : 0, arrow = isAlert && meta.dir ? 9 : 0;
+  var w = pad + close + icon + badge + nameW + arrow + pad + 4;
+  var x = dim.W - 6 - w, top = y - h / 2;
+  ctRoundRect(ctx, x, top, w + 6, h, 4);
+  ctx.fillStyle = 'rgba(9,12,18,0.94)'; ctx.fill();
+  ctx.strokeStyle = ctHexA(color, 0.85); ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = color; ctx.fillRect(x + 0.5, top + 3, 2, h - 6);                       // accent bar
+  var cx = x + pad, out = {x1: x, x2: dim.W, y1: top, y2: top + h};
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+  if (close) {
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.beginPath(); ctx.arc(cx + 5, y, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(214,224,236,0.75)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(cx + 3, y - 2); ctx.lineTo(cx + 7, y + 2); ctx.moveTo(cx + 7, y - 2); ctx.lineTo(cx + 3, y + 2); ctx.stroke();
+    out.close = {x1: cx - 2, x2: cx + 12};
+    cx += close;
+  }
+  if (icon) { ctBellIcon(ctx, cx + 4, y, color); cx += icon; }
+  if (badge) {
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx + 5, y, 5.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = ctTextOn(color); ctx.font = '800 8px "IBM Plex Mono", ui-monospace, monospace';
+    ctx.fillText(parts.num, cx + 5, y + 0.5); cx += badge;
+    ctx.font = '800 8.5px "IBM Plex Mono", ui-monospace, monospace';
+  }
+  ctx.textAlign = 'left'; ctx.fillStyle = color; ctx.fillText(parts.name, cx, y + 0.5); cx += nameW;
+  if (arrow) {
+    var up = meta.dir === 'above';
+    ctx.beginPath();
+    if (up) { ctx.moveTo(cx + 3, y + 2.5); ctx.lineTo(cx + 6, y - 2.5); ctx.lineTo(cx + 9, y + 2.5); }
+    else { ctx.moveTo(cx + 3, y - 2.5); ctx.lineTo(cx + 6, y + 2.5); ctx.lineTo(cx + 9, y - 2.5); }
+    ctx.closePath(); ctx.fillStyle = up ? '#22C58B' : '#FF6B6B'; ctx.fill();
   }
   ctx.restore();
-  return null;
+  return out;
 }
 function ctTimeLabel(ctx, dim, t, color) {
   var x = ctX(t);
@@ -1403,7 +1470,9 @@ function ctRenderFavBar() {
 function ctPlaceFavBar(bar, box) {
   var ft = ctPrefs.favtools || {}, bw = box.clientWidth, bh = box.clientHeight, w = bar.offsetWidth, h = bar.offsetHeight;
   if (!bw || !bh) return;
-  var x = ft.x == null ? (bw - w) / 2 : ft.x * bw, y = ft.y == null ? bh - h - 34 : ft.y * bh;
+  // Default: bottom-left, above the earnings pins and clear of the axis tags.
+  var plotH = ctDims().H || bh;
+  var x = ft.x == null ? 10 : ft.x * bw, y = ft.y == null ? plotH - h - 30 : ft.y * bh;
   x = Math.max(4, Math.min(bw - w - 4, x)); y = Math.max(4, Math.min(bh - h - 4, y));
   bar.style.left = Math.round(x) + 'px'; bar.style.top = Math.round(y) + 'px';
 }
@@ -1780,7 +1849,7 @@ function ctNextEarnings() {
   (twChartState.events || []).forEach(function (e) {
     if (e.type !== 'earnings') return;
     var t = ctEventTime(e);
-    if (t != null && t >= now - 86400 && (!best || t < best.ts)) best = {date: e.date, time: e.time || '', ts: t};
+    if (t != null && t >= now - 86400 && (!best || t < best.ts)) best = {date: e.date, time: e.time || '', ts: t, est: !!e.estimated, src: e.source || ''};
   });
   var ne = twChartState.nextEarnings;
   if (!best && ne && ne.date) {
@@ -1806,24 +1875,51 @@ function ctDrawNextEarnings(ctx, dim) {
   var step = CT_STEP[twChartState.interval] || 86400;
   var t = step >= 86400 ? Math.floor(n.ts / 86400) * 86400 + 12 * 3600 : n.ts;
   var x = ctEventX(t, step);
-  var when = n.days === 0 ? 'TODAY' : (n.days === 1 ? 'TOMORROW' : 'IN ' + n.days + 'D');
-  var text = 'EARNINGS ' + ctShortDate(n.date).toUpperCase() + (n.time ? ' ' + String(n.time).toUpperCase() : '') + ' · ' + when;
+  var when = n.days === 0 ? 'TODAY' : (n.days === 1 ? '1D' : n.days + 'D');
+  var date = (n.est ? '~' : '') + ctShortDate(n.date).toUpperCase();
+  var main = 'EARNINGS ' + date + (n.time ? ' · ' + String(n.time).toUpperCase() : '') + (n.est ? ' · EST' : '');
+  var tip = (n.est ? 'Estimated next earnings ~' : 'Next earnings ') + n.date + (n.time ? ' · ' + n.time : '') +
+    (n.est ? ' — projected from past reports, not yet announced' : (n.src ? ' (' + n.src + ')' : ''));
   ctx.save();
-  ctx.font = '800 10px "IBM Plex Mono", ui-monospace, monospace'; ctx.textBaseline = 'middle';
-  var w = ctx.measureText(text).width + 14, h = 18, y = 4;
+  ctx.font = '800 9.5px "IBM Plex Mono", ui-monospace, monospace'; ctx.textBaseline = 'middle';
+  var mw = ctx.measureText(main).width, ww = ctx.measureText(when).width;
+  var h = 20, y = 4, icon = 16, w = 8 + icon + mw + 8 + ww + 12;
+  function capsule(px) {
+    // Glass capsule: calendar glyph, the date, then the countdown in gold.
+    ctx.shadowColor = ctHexA(gold, 0.45); ctx.shadowBlur = 10;
+    ctRoundRect(ctx, px, y, w, h, h / 2);
+    ctx.fillStyle = 'rgba(14,11,5,0.95)'; ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 1; ctx.strokeStyle = gold; if (n.est) ctx.setLineDash([3, 2]); ctx.stroke(); ctx.setLineDash([]);
+    var cx = px + 8;
+    ctx.strokeStyle = gold; ctx.lineWidth = 1.2;
+    ctRoundRect(ctx, cx, y + 5, 11, 10, 2); ctx.stroke();
+    ctx.fillStyle = gold; ctx.fillRect(cx, y + 5, 11, 3); ctx.fillRect(cx + 2.5, y + 3.5, 1.2, 3); ctx.fillRect(cx + 7.5, y + 3.5, 1.2, 3);
+    cx += icon;
+    ctx.fillStyle = gold; ctx.textAlign = 'left'; ctx.fillText(main, cx, y + h / 2 + 0.5);
+    cx += mw + 8;
+    ctRoundRect(ctx, cx - 4, y + 3, ww + 10, h - 6, (h - 6) / 2);
+    ctx.fillStyle = gold; ctx.fill();
+    ctx.fillStyle = '#1a1206'; ctx.fillText(when, cx + 1, y + h / 2 + 0.5);
+  }
   if (x != null && x >= 0 && x <= dim.W - 16) {
     x = Math.round(x) + 0.5;
-    ctx.strokeStyle = ctHexA(gold, 0.75); ctx.lineWidth = 1.2; ctx.setLineDash([5, 4]);
+    // A soft gold glow behind a dashed line down to the time axis.
+    var gl = ctx.createLinearGradient(x - 6, 0, x + 6, 0);
+    gl.addColorStop(0, ctHexA(gold, 0)); gl.addColorStop(0.5, ctHexA(gold, n.est ? 0.08 : 0.16)); gl.addColorStop(1, ctHexA(gold, 0));
+    ctx.fillStyle = gl; ctx.fillRect(x - 6, y + h, 12, dim.H - y - h);
+    ctx.strokeStyle = ctHexA(gold, n.est ? 0.55 : 0.85); ctx.lineWidth = 1.2; ctx.setLineDash(n.est ? [2, 4] : [6, 4]);
     ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x, dim.H); ctx.stroke(); ctx.setLineDash([]);
     var px = Math.min(Math.max(4, x - w / 2), dim.W - w - 18);
-    ctx.fillStyle = gold; ctx.fillRect(px, y, w, h);
-    ctx.fillStyle = '#1a1206'; ctx.textAlign = 'left'; ctx.fillText(text, px + 7, y + h / 2 + 0.5);
-    ctEventHits.push({x: px + w / 2, y: y + h / 2, r: Math.max(12, w / 2), text: 'Next earnings ' + n.date + (n.time ? ' · ' + n.time : '')});
+    capsule(px);
+    ctTimeAxisMarks.push({x: x, c: gold, est: n.est, label: date + ' · ' + when});
+    ctEventHits.push({x: px + w / 2, y: y + h / 2, r: Math.max(12, w / 2), text: tip});
   } else if (x != null && x > dim.W - 16) {
-    var t2 = text + ' ›', w2 = ctx.measureText(t2).width + 14, ex = dim.W - w2 - 18;
-    ctx.fillStyle = gold; ctx.fillRect(ex, y, w2, h);
-    ctx.fillStyle = '#1a1206'; ctx.textAlign = 'left'; ctx.fillText(t2, ex + 7, y + h / 2 + 0.5);
-    ctEventHits.push({x: ex + w2 / 2, y: y + h / 2, r: Math.max(12, w2 / 2), text: 'Next earnings ' + n.date + ' — scroll right to see it on the time axis'});
+    // Past the right edge: the capsule waits at the edge, pointing right.
+    var ex = dim.W - w - 30;
+    capsule(ex);
+    ctx.fillStyle = gold; ctx.beginPath(); ctx.moveTo(ex + w + 6, y + 5); ctx.lineTo(ex + w + 13, y + h / 2); ctx.lineTo(ex + w + 6, y + h - 5); ctx.closePath(); ctx.fill();
+    ctEventHits.push({x: ex + w / 2, y: y + h / 2, r: Math.max(12, w / 2), text: tip + ' — scroll right to see it on the time axis'});
   }
   ctx.restore();
 }
@@ -2318,7 +2414,7 @@ function ctDrawAlerts(ctx, dim, axisLabels) {
     var note = String(a.note || 'Alert').replace(new RegExp('^' + (twChartState.ticker || '') + '\\s+'), '');
     note = note.replace(/\bstep\s+/i, '').replace(/\s+zone$/i, '');
     if (note.length > 14) note = note.slice(0, 13) + '…';
-    axisLabels.push({p: a.price, c: '#f5c542', text: '🔔' + (a.direction === 'above' ? '↑ ' : '↓ ') + note + ' ×', alertId: a.id});
+    axisLabels.push({p: a.price, c: '#f5c542', text: note, alertId: a.id, dir: a.direction});
   });
 }
 /* Tap the × on an alert tag to cancel it. Capture phase, before drawing. */
@@ -2519,6 +2615,17 @@ function ctDrawEvents(ctx, dim) {
   } else {
     earn = earn.filter(function (e) { var t = ctEventTime(e); return !e.upcoming && t != null && t <= Date.now() / 1000; });
   }
+  // Room between neighbouring pins decides whether the EPS surprise fits above each.
+  var pinXs = earn.map(function (e) {
+    var t = ctEventTime(e); if (t == null) return null;
+    if (step >= 86400) t = Math.floor(t / 86400) * 86400 + 12 * 3600;
+    return ctEventX(t, step);
+  }).filter(function (v) { return v != null; }).sort(function (a, b) { return a - b; });
+  function pinGap(x) {
+    var g = Infinity;
+    pinXs.forEach(function (o) { if (Math.abs(o - x) > 0.5) g = Math.min(g, Math.abs(o - x)); });
+    return g;
+  }
   earn.forEach(function (e) {
     var t = ctEventTime(e); if (t == null || t < first) return;
     if (step >= 86400) t = Math.floor(t / 86400) * 86400 + 12 * 3600;
@@ -2545,8 +2652,8 @@ function ctDrawEvents(ctx, dim) {
       ctx.strokeStyle = ctHexA(flagColor, step < 86400 || e.upcoming ? 0.55 : 0.32); ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
       ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, dim.H - 4); ctx.stroke(); ctx.setLineDash([]);
     }
-    ctx.fillStyle = flagColor; ctx.beginPath(); ctx.arc(x, dim.H - 14, 8, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#1a1206'; ctx.fillText('E', x, dim.H - 13.5);
+    ctDrawEarnPin(ctx, x, dim.H - 14, flagColor, e, pinGap(x));
+    ctTimeAxisMarks.push({x: x, c: flagColor});
     ctEventHits.push({x: x, y: dim.H - 14, r: 10, text: label + (e.source ? ' (' + e.source + ')' : '')});
   });
   // News, clustered by pixel
@@ -2564,6 +2671,93 @@ function ctDrawEvents(ctx, dim) {
     ctx.fillStyle = ctHexA(ov.newsColor || '#6fa8ff', 0.92); ctx.beginPath(); ctx.arc(d.x, y, n > 1 ? 8 : 6, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#06101f'; ctx.fillText(n > 1 ? String(Math.min(n, 9)) : 'N', d.x, y + 0.5);
     ctEventHits.push({x: d.x, y: y, r: 10, items: d.items});
+  });
+  ctx.restore();
+}
+/* Earnings pin: a dark rounded badge ringed in the result colour (beat green,
+   miss red, no estimate gold) with a pointer up to the report line, and the
+   EPS surprise above it when there's room. */
+function ctDrawEarnPin(ctx, x, y, c, e, gap) {
+  ctx.save();
+  var w = 17, h = 16, top = y - h / 2;
+  ctx.shadowColor = ctHexA(c, 0.55); ctx.shadowBlur = 6;
+  ctRoundRect(ctx, x - w / 2, top, w, h, 5);
+  ctx.fillStyle = 'rgba(10,13,19,0.96)'; ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = 1.4; ctx.strokeStyle = c; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x - 3, top); ctx.lineTo(x, top - 3.5); ctx.lineTo(x + 3, top); ctx.closePath(); ctx.fillStyle = c; ctx.fill();
+  ctx.fillStyle = c; ctx.font = '800 9.5px "IBM Plex Mono", ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('E', x, y + 0.5);
+  if (e.result === 'beat' || e.result === 'miss') {
+    ctx.beginPath();
+    if (e.result === 'beat') { ctx.moveTo(x + 4.5, top + 5); ctx.lineTo(x + 6.5, top + 2); ctx.lineTo(x + 8.5, top + 5); }
+    else { ctx.moveTo(x + 4.5, top + 2); ctx.lineTo(x + 6.5, top + 5); ctx.lineTo(x + 8.5, top + 2); }
+    ctx.closePath(); ctx.fill();
+  }
+  if (gap >= 38 && e.eps != null && e.eps_est != null && Number(e.eps_est) !== 0) {
+    var sp = (Number(e.eps) - Number(e.eps_est)) / Math.abs(Number(e.eps_est)) * 100;
+    if (isFinite(sp)) {
+      var txt = (sp >= 0 ? '+' : '') + (Math.abs(sp) >= 100 ? sp.toFixed(0) : sp.toFixed(1)) + '%';
+      ctx.font = '700 8.5px "IBM Plex Mono", ui-monospace, monospace';
+      ctx.fillStyle = ctHexA(c, 0.95); ctx.fillText(txt, x, top - 9);
+    }
+  }
+  ctx.restore();
+}
+var ctTimeAxisMarks = [];
+/* Price and time axes: a soft glass strip with a glowing accent edge, the
+   earnings notches on the time axis and the next report's date. */
+function ctAccent() {
+  try { var v = getComputedStyle(document.documentElement).getPropertyValue('--cc-accent').trim(); if (/^#[0-9a-f]{6}$/i.test(v)) return v; } catch (e) {}
+  return '#c4f53b';
+}
+function ctDrawAxisChrome(ctx, dim) {
+  if (!dim.W || !dim.H) return;
+  var acc = ctAccent();
+  ctx.save();
+  var g = ctx.createLinearGradient(dim.W, 0, dim.fullW, 0);
+  g.addColorStop(0, 'rgba(255,255,255,0.035)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(dim.W, 0, dim.axisW, dim.H);
+  var v = ctx.createLinearGradient(0, 0, 0, dim.H);
+  v.addColorStop(0, ctHexA(acc, 0)); v.addColorStop(0.5, ctHexA(acc, 0.45)); v.addColorStop(1, ctHexA(acc, 0.08));
+  ctx.fillStyle = v; ctx.fillRect(dim.W, 0, 1, dim.H);
+  if (dim.fullH - dim.H > 8) {
+    var hz = ctx.createLinearGradient(0, 0, dim.W, 0);
+    hz.addColorStop(0, ctHexA(acc, 0.04)); hz.addColorStop(0.7, ctHexA(acc, 0.4)); hz.addColorStop(1, ctHexA(acc, 0.55));
+    ctx.fillStyle = hz; ctx.fillRect(0, dim.H, dim.W + 1, 1);
+    var tb = ctx.createLinearGradient(0, dim.H, 0, dim.fullH);
+    tb.addColorStop(0, 'rgba(255,255,255,0.03)'); tb.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = tb; ctx.fillRect(0, dim.H + 1, dim.W, dim.fullH - dim.H - 1);
+    // A small glowing corner where the two axes meet.
+    ctx.fillStyle = ctHexA(acc, 0.7); ctx.beginPath(); ctx.arc(dim.W + 0.5, dim.H + 0.5, 2, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+function ctDrawTimeAxisMarks(ctx, dim) {
+  if (dim.fullH - dim.H < 10) return;   // no native time axis (the shared one below draws them)
+  ctDrawTimeMarksAt(ctx, dim.W, dim.H, dim.fullH - dim.H);
+}
+/* Earnings notches and the next report's date on a time axis whose top edge
+   is at y=top (the chart's own axis, or the shared one under RSI/MACD). */
+function ctDrawTimeMarksAt(ctx, W, top0, axisH) {
+  var dim = {W: W, H: top0, fullH: top0 + axisH};
+  ctx.save();
+  ctTimeAxisMarks.forEach(function (m) {
+    if (m.x < 0 || m.x > dim.W) return;
+    if (m.label) {
+      ctx.font = '800 9.5px "IBM Plex Mono", ui-monospace, monospace';
+      var w = ctx.measureText(m.label).width + 14, h = Math.min(17, dim.fullH - dim.H - 3);
+      var left = Math.max(0, Math.min(dim.W - w, m.x - w / 2)), top = dim.H + 2;
+      ctx.fillStyle = '#07090d'; ctx.fillRect(left - 6, dim.H + 1, w + 12, dim.fullH - dim.H - 1);   // clear the tick text under it
+      ctRoundRect(ctx, left, top, w, h, h / 2);
+      ctx.fillStyle = m.est ? 'rgba(9,12,18,0.96)' : m.c; ctx.fill();
+      ctx.lineWidth = 1; ctx.strokeStyle = m.c; if (m.est) ctx.setLineDash([3, 2]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = m.est ? m.c : ctTextOn(m.c); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(m.label, left + w / 2, top + h / 2 + 0.5);
+      return;
+    }
+    ctx.fillStyle = m.c;
+    ctx.beginPath(); ctx.moveTo(m.x - 3.5, dim.H + 5); ctx.lineTo(m.x, dim.H + 1); ctx.lineTo(m.x + 3.5, dim.H + 5); ctx.closePath(); ctx.fill();
   });
   ctx.restore();
 }
