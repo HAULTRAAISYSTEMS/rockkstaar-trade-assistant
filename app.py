@@ -5861,6 +5861,14 @@ def api_live_bundle():
     one part failing never takes the others down.
     """
     want = {w for w in (request.args.get("want") or "").split(",") if w}
+    # Several open tabs and devices on one account poll the same thing every
+    # 3 s; answer them from one build instead of rebuilding it per tab.
+    _bkey = (current_user_id(), ",".join(sorted(want)), (request.args.get("ticker") or "").strip().upper())
+    _hit = _BUNDLE_CACHE.get(_bkey)
+    if _hit and _time.time() - _hit[0] < _BUNDLE_TTL_S:
+        resp = jsonify(_hit[1])
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
     parts = {}
     handlers = {
         "tape": api_market_tape,
@@ -5873,9 +5881,17 @@ def api_live_bundle():
     if "live" in want:
         ticker = (request.args.get("ticker") or "").strip()
         parts["live"] = _bundle_part(lambda: api_terminal_live(ticker)) if ticker else None
-    resp = jsonify({"ok": True, "parts": parts, "server_epoch": int(_time.time())})
+    payload = {"ok": True, "parts": parts, "server_epoch": int(_time.time())}
+    if len(_BUNDLE_CACHE) > 500:
+        _BUNDLE_CACHE.clear()
+    _BUNDLE_CACHE[_bkey] = (_time.time(), payload)
+    resp = jsonify(payload)
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+_BUNDLE_CACHE: dict = {}
+_BUNDLE_TTL_S = 1.5
 
 
 def _bundle_part(view):
