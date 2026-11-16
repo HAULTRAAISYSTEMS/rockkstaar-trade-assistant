@@ -1541,3 +1541,13 @@
 .data-checks ul { margin: 0; padding-left: 18px; font: 500 12.5px/1.55 var(--font-ui, system-ui); color: var(--elite-copy); }
 .metric-suspect { display: inline-block; margin-right: 6px; padding: 1px 6px; border: 1px solid var(--warn-500); border-radius: var(--elite-radius-sm); color: var(--warn-500); font: 700 10px var(--font-mono, ui-monospace, monospace); cursor: help; }
 @media (max-width: 640px) { .listing-notice, .data-checks { padding: 11px 13px; } }
+
+/* Drill: P/E card, split note, saved-quarter chips */
+.fundamentals-shell .qd-pe-row { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; }
+.fundamentals-shell .qd-pe-row label { color: var(--elite-muted); font: 700 10px var(--font-mono, ui-monospace, monospace); letter-spacing: .1em; text-transform: uppercase; }
+.fundamentals-shell .qd-pe-row input { width: 110px; height: 30px; padding: 0 10px; border: 1px solid var(--elite-border-strong); border-radius: var(--elite-radius-sm); background: var(--elite-panel-inset); color: var(--elite-copy); font: 700 13px var(--font-mono, ui-monospace, monospace); text-align: right; }
+.fundamentals-shell .qd-pe-live { height: 30px; padding: 0 10px; border: 1px solid var(--elite-border); border-radius: var(--elite-radius-sm); background: transparent; color: var(--elite-gold); font: 700 11px var(--font-mono, ui-monospace, monospace); cursor: pointer; }
+.fundamentals-shell .qd-pe-src { color: var(--elite-faint); font: 600 11px var(--font-mono, ui-monospace, monospace); }
+.fundamentals-shell .qd-split-note { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--elite-border-strong); border-left: 3px solid var(--elite-gold); border-radius: var(--elite-radius-sm); background: var(--fund-gold-soft); color: var(--elite-copy); font: 500 12.5px/1.5 var(--font-ui, system-ui); }
+.fundamentals-shell .qd-chip-kicker { margin-right: 6px; color: var(--elite-faint); font: 700 8px var(--font-mono, ui-monospace, monospace); letter-spacing: .14em; text-transform: uppercase; }
+.fundamentals-shell .qd-chip.is-current { border-color: var(--elite-gold); }
