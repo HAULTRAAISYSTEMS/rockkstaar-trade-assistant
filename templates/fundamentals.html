@@ -1228,7 +1228,9 @@
     const typedEps = P.typedEps, ttm = P.ttm, price = P.price;
     if (qdPriceFor !== ticker && !qdPriceTyped) qdLoadPrice(ticker);
     const pe = P.text, note = P.nm ? 'Earnings over the last twelve months are zero or negative, so there is no meaningful P/E.' : '';
-    const basis = ttm
+    const basis = (ttm && !(ttm.quarters || []).length)
+      ? 'TTM EPS ' + qdFmt$(ttm.value) + ' — ' + (ttm.method || '') + '.'
+      : ttm
       ? 'TTM diluted EPS ' + qdFmt$(ttm.value) + ' = ' + ttm.quarters.map(q => qdFmt$(q.eps) + (q.derived ? '*' : '')).join(' + ') +
         ' (quarters ended ' + ttm.quarters.map(q => q.end).join(', ') + ')' +
         (ttm.quarters.some(q => q.derived) ? '. * fiscal Q4 = the full year less its first three quarters.' : '.') +
@@ -1250,7 +1252,10 @@
   function qdPe(ticker) {
     const typedEps = parseFloat(String((qdEl('eps') || {}).value || '').replace(/[$,]/g, ''));
     const ttm = (qdTTM && qdTTMFor === ticker) ? qdTTM : null;
-    const eps = ttm ? ttm.value : (isFinite(typedEps) ? typedEps * 4 : null);
+    // A quarterly EPS in New Taiwan dollars × 4 against a US-dollar price
+    // would be a P/E off by the exchange rate and the ADR ratio. Not shown.
+    const foreign = qdTTMFor === ticker && qdCurrency !== 'USD';
+    const eps = ttm ? ttm.value : (isFinite(typedEps) && !foreign ? typedEps * 4 : null);
     const price = (qdPriceFor === ticker && qdPrice > 0) ? qdPrice : null;
     const out = {typedEps, ttm, eps, price, value: null, text: '—', nm: false};
     if (price && eps != null) {
@@ -1288,8 +1293,10 @@
   function qdMoney(v) {
     if (v == null) return null;
     const a = Math.abs(v), sign = v < 0 ? '−' : '';
-    if (a >= 1e9) return sign + '$' + (a / 1e9).toFixed(2) + 'B';
-    if (a >= 1e6) return sign + '$' + (a / 1e6).toFixed(0) + 'M';
+    const cur = (qdCurrency && qdCurrency !== 'USD') ? qdCurrency + ' ' : '$';
+    if (a >= 1e12) return sign + cur + (a / 1e12).toFixed(2) + 'T';
+    if (a >= 1e9) return sign + cur + (a / 1e9).toFixed(2) + 'B';
+    if (a >= 1e6) return sign + cur + (a / 1e6).toFixed(0) + 'M';
     return sign + a.toLocaleString('en-US');
   }
   // PEG on every ticker. When it cannot be computed, say why rather than
@@ -1500,7 +1507,7 @@
   var qdWalking = false;
   // P/E: trailing-twelve-month diluted EPS from the walkthrough (split-aware),
   // and the live price — editable, so a reader can test "what if it were $X".
-  var qdTTMPrior = null;
+  var qdTTMPrior = null, qdCurrency = 'USD', qdSource = 'sec';
   var qdTTM = null, qdSplit = null, qdTTMFor = '', qdPrice = null, qdPriceFor = '', qdPriceTyped = false;
 
   async function qdWalk() {
@@ -1520,7 +1527,7 @@
         qdApplyShape(null);
         // Never leave a previous company's figures sitting under this ticker.
         QD_FIELDS.forEach(k => { const el = qdEl(k); if (el) el.value = ''; });
-        qdEl('per').value = ''; qdTTM = null; qdTTMPrior = null; qdSplit = null; qdMarkFilled();
+        qdEl('per').value = ''; qdTTM = null; qdTTMPrior = null; qdSplit = null; qdCurrency = 'USD'; qdSource = 'sec'; qdMarkFilled();
         { const bar = document.getElementById('q-fold'); if (bar) delete bar.dataset.auto; qdFold(false); }
         document.getElementById('q-results').innerHTML =
           '<h3>' + qdEsc(ticker) + '</h3>' +
@@ -1533,7 +1540,8 @@
       }
 
       qdStatements = data;
-      qdTTM = data.ttm_eps || null; qdTTMPrior = data.ttm_eps_prior || null; qdSplit = data.split || null; qdTTMFor = (data.ticker || ticker);
+      qdTTM = data.ttm_eps || null; qdTTMPrior = data.ttm_eps_prior || null; qdSplit = data.split || null;
+      qdCurrency = (data.currency || 'USD').toUpperCase(); qdSource = data.source || 'sec'; qdTTMFor = (data.ticker || ticker);
       qdApplyShape(data.profile);
       qdEl('co').value = data.ticker || ticker;
       if (data.period_end) qdEl('per').value = 'Quarter ended ' + data.period_end;
@@ -1547,9 +1555,13 @@
       qdWalking = true;
       const shaped = (data.profile && data.profile.explains)
         ? ' Read as a ' + (data.profile.shape_label || '').toLowerCase() + '.' : '';
-      qdStatus('Filled from ' + (data.company || ticker) + '’s ' + (data.form || 'filing') +
-               ' for the quarter ended ' + (data.period_end || '') +
-               '. Each check below shows the statement it read.' + shaped);
+      qdStatus(data.source === 'fmp'
+        ? 'Filled from Financial Modeling Prep — ' + (data.company || ticker) + ' files no US 10-Q, so ' +
+          'these are its quarterly figures for the quarter ended ' + (data.period_end || '') +
+          (qdCurrency !== 'USD' ? ', in ' + qdCurrency + ' as the company reports them. Ratios are unaffected; the P/E uses the US-listed share in USD.' : '.')
+        : 'Filled from ' + (data.company || ticker) + '’s ' + (data.form || 'filing') +
+          ' for the quarter ended ' + (data.period_end || '') +
+          '. Each check below shows the statement it read.' + shaped);
       qdRun(true);
       qdWalking = false;
     } catch (e) {
@@ -1577,7 +1589,7 @@
         const on = lit.indexOf(r.key) >= 0;
         html += '<tr class="' + (on ? 'is-lit' : '') + (r.indent ? ' is-ind' : '') + '">' +
           '<td>' + qdEsc(r.label) +
-            (r.derived ? '<span class="qd-stmt-note">computed — this filer prints only the combined line</span>' : '') +
+            (r.derived ? '<span class="qd-stmt-note">computed — not printed as one line in the filing</span>' : '') +
           '</td>' +
           '<td class="qd-stmt-num">' + qdNum(r.now) + '</td>' +
           '<td class="qd-stmt-num">' + qdNum(r.prior) + '</td></tr>';
