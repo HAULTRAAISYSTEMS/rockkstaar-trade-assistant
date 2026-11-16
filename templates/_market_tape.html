@@ -44,30 +44,30 @@
     track.querySelectorAll('[data-mtape]').forEach(function (el) {
       have[el.getAttribute('data-mtape')] = 1;
     });
-    var missing = items.some(function (t) { return !have[t.symbol]; });
-    if (missing) build(items);
+    var incoming = {};
+    items.forEach(function (t) { incoming[String(t.symbol)] = 1; });
+    if (Object.keys(have).length !== Object.keys(incoming).length || items.some(function (t) { return !have[String(t.symbol)]; })) build(items);
     items.forEach(function (t) {
-      document.querySelectorAll('[data-mtape="' + t.symbol + '"]').forEach(function (el) {
+      track.querySelectorAll('[data-mtape]').forEach(function (el) {
+        if (el.getAttribute('data-mtape') !== String(t.symbol)) return;
         var px = el.querySelector('[data-mtape-px]');
         var chg = el.querySelector('[data-mtape-chg]');
-        if (px && t.price != null) px.textContent = Number(t.price).toFixed(2);
-        if (chg && t.change_pct != null) {
-          var v = Number(t.change_pct);
-          chg.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
-          chg.className = 'market-tape-chg ' + (v > 0 ? 'chg-pos' : (v < 0 ? 'chg-neg' : 'chg-flat'));
-        }
+        if (px) { var price = t.price == null ? NaN : Number(t.price); px.textContent = Number.isFinite(price) ? price.toFixed(2) : '—'; }
+        if (chg) { var v = t.change_pct == null ? NaN : Number(t.change_pct); chg.textContent = Number.isFinite(v) ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '—'; chg.className = 'market-tape-chg ' + (Number.isFinite(v) ? (v > 0 ? 'chg-pos' : (v < 0 ? 'chg-neg' : 'chg-flat')) : 'chg-flat'); }
       });
     });
   }
   var freshness = document.getElementById('market-tape-freshness');
   var pending = false;
   var lastSuccess = 0;
+  var lastError = false;
   function updateFreshness() {
     if (!freshness) return;
     if (!lastSuccess) { freshness.textContent = 'Quotes unavailable'; return; }
     var age = Math.floor((Date.now() - lastSuccess) / 60000);
     freshness.textContent = age < 1 ? 'API checked just now' : 'API checked ' + age + 'm ago';
-    freshness.classList.toggle('is-stale', age >= 3);
+    freshness.classList.toggle('is-stale', age >= 3 || lastError);
+    if (lastError) freshness.textContent += ' · refresh failed';
   }
   function fetchTape() {
     if (pending || document.hidden) return;
@@ -78,9 +78,10 @@
         if (!d || !d.ok || !Array.isArray(d.items) || !d.items.length) throw new Error('No quotes returned');
         paint(d.items);
         lastSuccess = Date.now();
+        lastError = false;
         updateFreshness();
       })
-      .catch(function () { updateFreshness(); })
+      .catch(function () { lastError = true; updateFreshness(); })
       .finally(function () { pending = false; });
   }
   fetchTape();
