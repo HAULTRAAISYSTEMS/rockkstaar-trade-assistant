@@ -693,6 +693,15 @@
         </div>
         {% endmacro %}
 
+        <!-- Once the filing has filled the form, the boxes are a record, not a
+             task: they fold away behind one line so the results lead. -->
+        <div class="qd-fold" id="q-fold" hidden>
+          <span class="qd-fold-txt" id="q-fold-txt"></span>
+          <button type="button" class="qd-ghost qd-fold-btn" id="q-fold-btn"
+                  aria-controls="q-fields" aria-expanded="false"
+                  onclick="qdFold(!document.getElementById('q-fields').classList.contains('is-folded'))">Edit numbers</button>
+        </div>
+        <div class="qd-fields" id="q-fields">
         <fieldset>
           <legend>Income statement — the quarter</legend>
           <p class="qd-where"><b>Three-month columns.</b> A 10-Q prints the
@@ -723,6 +732,7 @@
              not the quarter you entered above.</p>
           {% for key, label, where, aliases in qd_cash %}{{ qd_field(key, label, where, aliases, paired=False) }}{% endfor %}
         </fieldset>
+        </div>
 
         <div class="qd-actions">
           <button type="button" class="qd-primary" onclick="qdRun()">Run the seven checks</button>
@@ -1095,6 +1105,7 @@
     niy: 42621, cfo: 64088, capex: 49113, revYtd: 117111
   };
   function qdExample() {
+    { const bar = document.getElementById('q-fold'); if (bar) delete bar.dataset.auto; qdFold(false); }
     qdEl('co').value = QD_EXAMPLE.co;
     qdEl('per').value = QD_EXAMPLE.per;
     QD_FIELDS.forEach(k => {
@@ -1147,7 +1158,8 @@
               'net income to grade the first one.</p>';
     }
 
-    html += qdSplitNote(ticker) + qdPeCard(ticker);
+    qdLastChecks = data;
+    html += qdGlance(ticker, data) + qdSplitNote(ticker) + qdPeCard(ticker);
 
     (data.checks || []).forEach(ch => {
       // Not the same thing as a skip, and the difference is the point. A skip
@@ -1206,16 +1218,10 @@
   }
   function qdPeCard(ticker) {
     if (!ticker) return '';
-    const typedEps = parseFloat(String((qdEl('eps') || {}).value || '').replace(/[$,]/g, ''));
-    const ttm = (qdTTM && qdTTMFor === ticker) ? qdTTM : null;
-    const eps = ttm ? ttm.value : (isFinite(typedEps) ? typedEps * 4 : null);
-    const price = (qdPriceFor === ticker && qdPrice > 0) ? qdPrice : null;
+    const P = qdPe(ticker);
+    const typedEps = P.typedEps, ttm = P.ttm, price = P.price;
     if (qdPriceFor !== ticker && !qdPriceTyped) qdLoadPrice(ticker);
-    let pe = '—', note = '';
-    if (price && eps != null) {
-      if (eps <= 0) { pe = 'n/m'; note = 'Earnings over the last twelve months are zero or negative, so there is no meaningful P/E.'; }
-      else pe = (price / eps).toFixed(1) + '×';
-    }
+    const pe = P.text, note = P.nm ? 'Earnings over the last twelve months are zero or negative, so there is no meaningful P/E.' : '';
     const basis = ttm
       ? 'TTM diluted EPS ' + qdFmt$(ttm.value) + ' = ' + ttm.quarters.map(q => qdFmt$(q.eps) + (q.derived ? '*' : '')).join(' + ') +
         ' (quarters ended ' + ttm.quarters.map(q => q.end).join(', ') + ')' +
@@ -1235,6 +1241,123 @@
       (note ? '<p class="qd-says">' + qdEsc(note) + '</p>' : '<p class="qd-says">What you pay for each $1 of the last year’s earnings. Compare it with the company’s own history and its peers, not a fixed number.</p>') +
       '</div>';
   }
+  function qdPe(ticker) {
+    const typedEps = parseFloat(String((qdEl('eps') || {}).value || '').replace(/[$,]/g, ''));
+    const ttm = (qdTTM && qdTTMFor === ticker) ? qdTTM : null;
+    const eps = ttm ? ttm.value : (isFinite(typedEps) ? typedEps * 4 : null);
+    const price = (qdPriceFor === ticker && qdPrice > 0) ? qdPrice : null;
+    const out = {typedEps, ttm, eps, price, value: null, text: '—', nm: false};
+    if (price && eps != null) {
+      if (eps <= 0) { out.text = 'n/m'; out.nm = true; }
+      else { out.value = price / eps; out.text = out.value.toFixed(1) + '×'; }
+    }
+    return out;
+  }
+
+  // ── At a glance ───────────────────────────────────────────────────────────
+  // The seven checks answer seven narrow questions. A reader arrives with
+  // five broad ones — is it growing, is it profitable, is the profit real
+  // cash, what am I paying, can it get hurt — so those lead, each answered
+  // from the same figures, and each lit by the worst check that feeds it.
+  var qdLastChecks = null;
+  const QD_GLANCE_CHECKS = {
+    grow: [], profit: ['gross_margin', 'operating_leverage'],
+    cash: ['cash_conversion', 'free_cash_flow'], price: [],
+    safe: ['current_ratio', 'dso'],
+  };
+  function qdN(k) {
+    const el = qdEl(k); if (!el) return null;
+    const v = parseFloat(String(el.value || '').replace(/[$,\s]/g, ''));
+    return isFinite(v) ? v : null;
+  }
+  function qdPctTxt(v, signed) {
+    if (v == null || !isFinite(v)) return null;
+    const t = (v * 100).toFixed(1).replace(/\.0$/, '') + '%';
+    return signed && v > 0 ? '+' + t : t.replace('-', '−');
+  }
+  function qdGrowth(now, prior) {
+    if (now == null || prior == null || prior <= 0) return null;
+    return now / prior - 1;
+  }
+  function qdMoney(v) {
+    if (v == null) return null;
+    const a = Math.abs(v), sign = v < 0 ? '−' : '';
+    if (a >= 1e9) return sign + '$' + (a / 1e9).toFixed(2) + 'B';
+    if (a >= 1e6) return sign + '$' + (a / 1e6).toFixed(0) + 'M';
+    return sign + a.toLocaleString('en-US');
+  }
+  function qdGlance(ticker, data) {
+    const n = qdN, rev = n('rev');
+    const div = (a, b) => (a != null && b != null && b !== 0) ? a / b : null;
+    const P = qdPe(ticker);
+    const ttmP = (qdTTMPrior && qdTTMFor === ticker) ? qdTTMPrior : null;
+    const ttmGrowth = (P.ttm && ttmP) ? qdGrowth(P.ttm.value, ttmP.value) : null;
+    const peg = (P.value && ttmGrowth != null && ttmGrowth > 0) ? P.value / (ttmGrowth * 100) : null;
+    const fcf = (n('cfo') != null && n('capex') != null) ? n('cfo') - Math.abs(n('capex')) : null;
+    const bal = ((qdStatements && qdStatements.ticker === ticker && qdStatements.statements) || {}).balance;
+    const brow = k => ((bal && bal.rows) || []).find(r => r.key === k);
+    const debt = brow('ltd'), eq = brow('equity');
+    const de = (debt && eq && eq.now > 0) ? debt.now / eq.now : null;
+
+    const items = {
+      grow: [['Revenue', qdPctTxt(qdGrowth(rev, n('revP')), true)],
+             ['EPS', qdPctTxt(qdGrowth(n('eps'), n('epsP')), true)],
+             ['TTM EPS', qdPctTxt(ttmGrowth, true)]],
+      profit: [['Gross', qdPctTxt(div(rev != null && n('cogs') != null ? rev - n('cogs') : null, rev))],
+               ['Operating', qdPctTxt(div(n('opinc'), rev))],
+               ['Net', qdPctTxt(div(n('ni'), rev))]],
+      cash: [['Cash ÷ NI', div(n('cfo'), n('niy')) != null ? div(n('cfo'), n('niy')).toFixed(2) + '×' : null],
+             ['Free cash flow', qdMoney(fcf)],
+             ['FCF margin', qdPctTxt(div(fcf, n('revYtd')))]],
+      price: [['P/E', P.value ? P.text : (P.nm ? 'n/m' : null)],
+              ['PEG', peg != null ? peg.toFixed(2) : null]],
+      safe: [['Current ratio', div(n('ca'), n('cl')) != null ? div(n('ca'), n('cl')).toFixed(2) : null],
+             ['Debt ÷ equity', de != null ? de.toFixed(2) : null]],
+    };
+    const titles = {grow: 'Growing?', profit: 'Profitable?', cash: 'Real cash?',
+                    price: 'Price?', safe: 'Safe?'};
+    const notes = {
+      grow: 'This quarter against the same quarter a year ago.',
+      profit: 'Share of each sales dollar kept after costs.',
+      cash: 'Year to date. Cash ÷ NI near or above 1 means the profit is real cash.',
+      price: 'PEG = P/E ÷ trailing EPS growth. Near 1 is fair for the growth; a single quarter’s jump is not used.',
+      safe: 'Liquidity and leverage. Rarely the story for a profitable company; it matters when profits stop.',
+    };
+    const byKey = {};
+    ((data && data.checks) || []).forEach(c => { byKey[c.key] = c; });
+    const rank = {flag: 3, watch: 2, clean: 1};
+    let html = '';
+    Object.keys(items).forEach(g => {
+      const shown = items[g].filter(([, v]) => v != null);
+      let tone = '';
+      QD_GLANCE_CHECKS[g].forEach(k => {
+        const v = byKey[k] && byKey[k].verdict;
+        if (v && (!tone || rank[v] > rank[tone])) tone = v;
+      });
+      html += '<div class="qd-glance-row' + (tone ? ' is-' + tone : '') + '" title="' + qdEsc(notes[g]) + '">' +
+        '<span class="qd-glance-q">' + titles[g] + '</span>' +
+        '<span class="qd-glance-v">' + (shown.length
+          ? shown.map(([l, v]) => '<span><i>' + qdEsc(l) + '</i> <b>' + qdEsc(v) + '</b></span>').join('')
+          : '<span class="qd-glance-wait">needs more figures</span>') + '</span></div>';
+    });
+    return '<div class="qd-glance" aria-label="At a glance"><div class="qd-glance-hd">At a glance</div>' + html + '</div>';
+  }
+
+  // Fold the input boxes once the filing has filled them.
+  function qdFold(folded) {
+    const box = document.getElementById('q-fields'), bar = document.getElementById('q-fold');
+    if (!box || !bar) return;
+    const filled = QD_FIELDS.filter(k => { const e = qdEl(k); return e && e.value.trim(); }).length;
+    box.classList.toggle('is-folded', !!folded);
+    bar.hidden = !folded && !bar.dataset.auto;
+    document.getElementById('q-fold-txt').textContent = folded
+      ? filled + ' figures filled from the filing.'
+      : 'Editing the filed figures — run the checks again after a change.';
+    const btn = document.getElementById('q-fold-btn');
+    btn.textContent = folded ? 'Edit numbers' : 'Hide numbers';
+    btn.setAttribute('aria-expanded', folded ? 'false' : 'true');
+  }
+
   async function qdLoadPrice(ticker) {
     qdPriceFor = ticker;
     try {
@@ -1256,6 +1379,8 @@
     const caret = keepFocus && document.activeElement && document.activeElement.id === 'q-price' ? document.activeElement.selectionStart : null;
     const wrap = document.createElement('div'); wrap.innerHTML = qdPeCard(ticker);
     old.replaceWith(wrap.firstChild);
+    const g = document.querySelector('#q-results .qd-glance');
+    if (g) { const w2 = document.createElement('div'); w2.innerHTML = qdGlance(ticker, qdLastChecks); g.replaceWith(w2.firstChild); }
     if (caret != null) { const i = document.getElementById('q-price'); if (i) { i.focus(); try { i.setSelectionRange(caret, caret); } catch (e) {} } }
   }
 
@@ -1268,6 +1393,7 @@
   var qdWalking = false;
   // P/E: trailing-twelve-month diluted EPS from the walkthrough (split-aware),
   // and the live price — editable, so a reader can test "what if it were $X".
+  var qdTTMPrior = null;
   var qdTTM = null, qdSplit = null, qdTTMFor = '', qdPrice = null, qdPriceFor = '', qdPriceTyped = false;
 
   async function qdWalk() {
@@ -1287,7 +1413,8 @@
         qdApplyShape(null);
         // Never leave a previous company's figures sitting under this ticker.
         QD_FIELDS.forEach(k => { const el = qdEl(k); if (el) el.value = ''; });
-        qdEl('per').value = ''; qdTTM = null; qdSplit = null; qdMarkFilled();
+        qdEl('per').value = ''; qdTTM = null; qdTTMPrior = null; qdSplit = null; qdMarkFilled();
+        { const bar = document.getElementById('q-fold'); if (bar) delete bar.dataset.auto; qdFold(false); }
         document.getElementById('q-results').innerHTML =
           '<h3>' + qdEsc(ticker) + '</h3>' +
           '<div class="qd-item is-na"><div class="qd-top">' +
@@ -1299,7 +1426,7 @@
       }
 
       qdStatements = data;
-      qdTTM = data.ttm_eps || null; qdSplit = data.split || null; qdTTMFor = (data.ticker || ticker);
+      qdTTM = data.ttm_eps || null; qdTTMPrior = data.ttm_eps_prior || null; qdSplit = data.split || null; qdTTMFor = (data.ticker || ticker);
       qdApplyShape(data.profile);
       qdEl('co').value = data.ticker || ticker;
       if (data.period_end) qdEl('per').value = 'Quarter ended ' + data.period_end;
@@ -1308,6 +1435,8 @@
         if (el) el.value = (data.figures && data.figures[k] !== undefined) ? data.figures[k] : '';
       });
       qdMarkFilled();
+      document.getElementById('q-fold').dataset.auto = '1';
+      qdFold(true);
       qdWalking = true;
       const shaped = (data.profile && data.profile.explains)
         ? ' Read as a ' + (data.profile.shape_label || '').toLowerCase() + '.' : '';
@@ -1625,6 +1754,7 @@
   }
 
   async function qdOpenSaved(id) {
+    { const bar = document.getElementById('q-fold'); if (bar) delete bar.dataset.auto; qdFold(false); }
     try {
       const resp = await fetch('/api/quarter/saved/' + id);
       const data = await resp.json();
@@ -1668,6 +1798,7 @@
 
   function qdClear() {
     qdApplyShape(null);
+    { const bar = document.getElementById('q-fold'); if (bar) delete bar.dataset.auto; qdFold(false); }
     QD_FIELDS.forEach(k => { const el = qdEl(k); if (el) el.value = ''; });
     const per = qdEl('per'); if (per) per.value = '';
     qdMarkFilled();

@@ -71,3 +71,18 @@ def test_drill_page_has_pe_card_split_note_and_stale_clear():
     assert "function qdSplitNote(ticker)" in tpl
     assert "Never leave a previous company's figures sitting under this ticker." in tpl
     assert "qd-chip-kicker\">Saved</span>" in tpl and "is-current" in tpl
+
+
+def test_prior_year_ttm_is_on_the_same_basis():
+    """PEG needs last year's trailing EPS on today's share basis."""
+    facts = kla_like()
+    sp = qf.detect_split(facts)
+    eps = facts["facts"]["us-gaap"]["EarningsPerShareDiluted"]["units"]["USD/shares"]
+    for s, e, v, filed in (("2024-10-01", "2024-12-31", 7.0, "2025-01-29"),
+                           ("2025-01-01", "2025-03-31", 7.5, "2025-04-30"),
+                           ("2025-04-01", "2025-06-30", 8.0, "2025-08-07")):
+        eps.append(_f(s, e, v, filed))
+    t = qf.ttm_eps(facts, "2025-09-30", sp)
+    assert t is not None
+    assert [q["end"] for q in t["quarters"]][-1] == "2025-09-30"
+    assert round(t["value"], 3) == round(0.7 + 0.75 + 0.8 + 0.847, 3)

@@ -1551,3 +1551,23 @@
 .fundamentals-shell .qd-split-note { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--elite-border-strong); border-left: 3px solid var(--elite-gold); border-radius: var(--elite-radius-sm); background: var(--fund-gold-soft); color: var(--elite-copy); font: 500 12.5px/1.5 var(--font-ui, system-ui); }
 .fundamentals-shell .qd-chip-kicker { margin-right: 6px; color: var(--elite-faint); font: 700 8px var(--font-mono, ui-monospace, monospace); letter-spacing: .14em; text-transform: uppercase; }
 .fundamentals-shell .qd-chip.is-current { border-color: var(--elite-gold); }
+
+/* ── 10-Q drill: at a glance + folded inputs ─────────────────────────────── */
+.fundamentals-shell .qd-glance { margin: 10px 0 14px; border: 1px solid var(--elite-border); border-radius: var(--elite-radius); background: var(--elite-panel-inset); overflow: hidden; }
+.fundamentals-shell .qd-glance-hd { padding: 8px 14px; color: var(--elite-muted); font: 700 10px var(--font-mono, ui-monospace, monospace); letter-spacing: .14em; text-transform: uppercase; border-bottom: 1px solid var(--elite-border); }
+.fundamentals-shell .qd-glance-row { display: grid; grid-template-columns: 112px 1fr; gap: 12px; align-items: baseline; padding: 9px 14px 9px 11px; border-left: 3px solid transparent; border-bottom: 1px solid var(--elite-border); }
+.fundamentals-shell .qd-glance-row:last-child { border-bottom: 0; }
+.fundamentals-shell .qd-glance-row.is-clean { border-left-color: var(--pos-500); }
+.fundamentals-shell .qd-glance-row.is-watch { border-left-color: var(--warn-500); }
+.fundamentals-shell .qd-glance-row.is-flag  { border-left-color: var(--neg-500); }
+.fundamentals-shell .qd-glance-q { color: var(--elite-copy); font-weight: 700; font-size: 13px; }
+.fundamentals-shell .qd-glance-v { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.fundamentals-shell .qd-glance-v i { font-style: normal; color: var(--elite-muted); font-size: 12px; }
+.fundamentals-shell .qd-glance-v b { color: var(--elite-copy); font: 700 14px var(--font-mono, ui-monospace, monospace); }
+.fundamentals-shell .qd-glance-wait { color: var(--elite-muted); font-size: 12px; }
+.fundamentals-shell .qd-fold { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; padding: 10px 14px; border: 1px dashed var(--elite-border-strong); border-radius: var(--elite-radius-sm); color: var(--elite-muted); font-size: 13px; }
+.fundamentals-shell .qd-fold[hidden] { display: none; }
+.fundamentals-shell .qd-fields.is-folded { display: none; }
+@media (max-width: 560px) {
+  .fundamentals-shell .qd-glance-row { grid-template-columns: 1fr; gap: 4px; }
+}
