@@ -1158,6 +1158,128 @@ def _insert_derived_opex(rows: list) -> None:
     rows.insert(at, derived)
 
 
+# ── Stock splits and trailing EPS ─────────────────────────────────────────────
+#
+# KLA split 10-for-1 on 12 June 2026. Its 10-Qs since then carry 1.31 billion
+# diluted shares and EPS of $1.18; the ones before carry about 131 million and
+# EPS ten times larger. Both are right, on different bases. A trailing-twelve-
+# month EPS that adds four quarters straight from the filings mixes the two
+# and comes out several times too high, so the P/E is nonsense. The split is
+# found in the filings themselves: after a split the company restates the
+# comparative periods, so the same period appears twice with values a whole
+# ratio apart.
+
+def detect_split(facts: dict) -> dict | None:
+    """The most recent stock split visible in the share counts, or None.
+
+    Returns {"ratio": 10.0, "since": "2026-07-31"} — `since` is the first
+    filing date carrying the post-split basis; facts filed before it for
+    periods ending before it are on the old basis.
+    """
+    by_period: dict = {}
+    for tag in QUARTER_TAGS["sh"][1]:
+        for f in _facts_for(tag, facts):
+            if f.get("val") and f.get("start") and f.get("end") and f.get("filed"):
+                by_period.setdefault((f["start"], f["end"]), []).append(f)
+    found = []
+    for rows in by_period.values():
+        rows = sorted(rows, key=lambda f: f["filed"])
+        first, last = rows[0], rows[-1]
+        try:
+            ratio = float(last["val"]) / float(first["val"])
+        except (TypeError, ValueError, ZeroDivisionError):
+            continue
+        if ratio < 1.4 and ratio > 1 / 1.4:
+            continue
+        nice = round(ratio) if ratio >= 1 else 1 / round(1 / ratio)
+        if abs(ratio - nice) / nice > 0.06:
+            continue                                     # a restatement, not a split
+        since = next(r["filed"] for r in rows if abs(float(r["val"]) / float(first["val"]) - ratio) / ratio < 0.06)
+        found.append((since, float(nice)))
+    if not found:
+        return None
+    # Different periods are restated in different filings; the split took
+    # effect at the FIRST filing on the new basis. Group around the latest.
+    latest_since, ratio = max(found)
+    from datetime import datetime
+    def _d(t):
+        return datetime.strptime(t, "%Y-%m-%d").date()
+    same = [sn for sn, r in found if r == ratio and (_d(latest_since) - _d(sn)).days <= 400]
+    return {"ratio": ratio, "since": min(same)}
+
+
+def _on_current_basis(fact: dict, split: dict | None) -> float | None:
+    """A per-share figure restated to the latest share basis."""
+    try:
+        val = float(fact.get("val"))
+    except (TypeError, ValueError):
+        return None
+    if split and (fact.get("filed") or "") < split["since"] and (fact.get("end") or "") < split["since"]:
+        val = val / split["ratio"]
+    return val
+
+
+def ttm_eps(facts: dict, end: str, split: dict | None = None) -> dict | None:
+    """Diluted EPS over the four quarters ending at `end`, on one share basis.
+
+    Each quarter takes its most recently filed figure (a later filing restates
+    it after a split); a fiscal Q4 that was only ever reported inside the
+    annual total is the year less its first three quarters. Returns
+    {value, quarters: [{end, eps, derived}], method} or None.
+    """
+    from datetime import datetime, timedelta
+
+    def d(text):
+        try:
+            return datetime.strptime(text, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            return None
+
+    tags = QUARTER_TAGS["eps"][1]
+    end_d = d(end)
+    if not end_d:
+        return None
+    quarters: dict = {}     # end -> (filed, value)
+    annuals: dict = {}      # (start, end) -> (filed, value)
+    for tag in tags:
+        for f in _facts_for(tag, facts):
+            n = _days(f)
+            fe = d(f.get("end"))
+            if n is None or fe is None or fe > end_d or fe < end_d - timedelta(days=460):
+                continue
+            v = _on_current_basis(f, split)
+            if v is None:
+                continue
+            key_filed = f.get("filed") or ""
+            if QUARTER_DAYS[0] <= n <= QUARTER_DAYS[1]:
+                if f["end"] not in quarters or key_filed > quarters[f["end"]][0]:
+                    quarters[f["end"]] = (key_filed, v, f.get("start"))
+            elif 350 <= n <= 380:
+                k = (f["start"], f["end"])
+                if k not in annuals or key_filed > annuals[k][0]:
+                    annuals[k] = (key_filed, v)
+
+    # Fill a missing fiscal Q4 from its year: FY less Q1-Q3 of that year.
+    for (a_start, a_end), (_filed, a_val) in annuals.items():
+        if a_end in quarters:
+            continue
+        inside = [(e, q) for e, q in quarters.items() if q[2] and q[2] >= a_start and e < a_end]
+        if len(inside) == 3:
+            quarters[a_end] = ("", a_val - sum(q[1] for _e, q in inside), None, "derived")
+
+    window_start = end_d - timedelta(days=365 - 20)
+    picked = sorted([(e, q) for e, q in quarters.items() if d(e) and d(e) > window_start - timedelta(days=95)
+                     and d(e) <= end_d], key=lambda x: x[0])[-4:]
+    if len(picked) < 4 or (d(picked[-1][0]) - d(picked[0][0])).days > 300:
+        return None
+    total = sum(q[1] for _e, q in picked)
+    return {"value": round(total, 4),
+            "quarters": [{"end": e, "eps": round(q[1], 4), "derived": len(q) > 3 and q[3] == "derived"}
+                         for e, q in picked],
+            "method": "sum of the last four quarters' diluted EPS"
+                      + (f", restated to the post-split basis ({int(split['ratio'])}-for-1)" if split and split["ratio"] >= 1 else "")}
+
+
 def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) -> dict | None:
     """Everything the guided mode needs: the figures, and where they came from."""
     if facts is None:
@@ -1179,6 +1301,12 @@ def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) 
         ytd_prior = _prior_year_end(ytd["end"])
 
     prof = filed.get("profile") or context_for(None)
+    try:
+        _split = detect_split(facts)
+        _ttm = ttm_eps(facts, filed.get("period_end"), _split)
+    except Exception as exc:
+        logger.debug("quarter facts: ttm eps for %s: %s", ticker, exc)
+        _split, _ttm = None, None
 
     return {
         "ticker": filed.get("ticker"),
@@ -1193,4 +1321,6 @@ def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) 
                                  filed.get("prior_end"), ytd_prior,
                                  shape=prof.get("shape")),
         "filing_url": _FILING_URL.format(cik=cik.lstrip("0")) if cik else None,
+        "split": _split,
+        "ttm_eps": _ttm,
     }

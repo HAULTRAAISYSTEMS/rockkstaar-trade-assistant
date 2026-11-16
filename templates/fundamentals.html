@@ -1039,6 +1039,7 @@
   }
   document.addEventListener('input', e => {
     if (e.target && e.target.id && e.target.id.startsWith('q-')) qdMarkFilled();
+    if (e.target && e.target.id === 'q-co') { clearTimeout(window._qdCoT); window._qdCoT = setTimeout(qdLoadSavedList, 400); }
   });
 
   // ── Where do I find this ──────────────────────────────────────────────────
@@ -1146,6 +1147,8 @@
               'net income to grade the first one.</p>';
     }
 
+    html += qdSplitNote(ticker) + qdPeCard(ticker);
+
     (data.checks || []).forEach(ch => {
       // Not the same thing as a skip, and the difference is the point. A skip
       // is a figure not yet typed. This is a figure the filing does not
@@ -1188,6 +1191,74 @@
     document.getElementById('q-results').innerHTML = html;
   }
 
+  // ── P/E: price ÷ trailing-twelve-month diluted EPS ────────────────────────
+  // Not one quarter's EPS: a single quarter makes the P/E four times too big.
+  // The trailing figure is the last four quarters summed, restated to one
+  // share basis across any split; without it, this quarter × 4 is shown and
+  // labelled as the rough estimate it is.
+  function qdFmt$(v) { return '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+  function qdSplitNote(ticker) {
+    if (!qdSplit || qdTTMFor !== ticker || !(qdSplit.ratio > 1)) return '';
+    return '<div class="qd-split-note"><b>' + qdEsc(ticker) + ' split ' + Math.round(qdSplit.ratio) + '-for-1.</b> ' +
+      'Shares and EPS here are on the post-split basis in both columns (the filing restates the year-ago quarter), ' +
+      'so the share count is ' + Math.round(qdSplit.ratio) + '× what older reports show and EPS ' + Math.round(qdSplit.ratio) +
+      '× smaller. Nothing changed in the business.</div>';
+  }
+  function qdPeCard(ticker) {
+    if (!ticker) return '';
+    const typedEps = parseFloat(String((qdEl('eps') || {}).value || '').replace(/[$,]/g, ''));
+    const ttm = (qdTTM && qdTTMFor === ticker) ? qdTTM : null;
+    const eps = ttm ? ttm.value : (isFinite(typedEps) ? typedEps * 4 : null);
+    const price = (qdPriceFor === ticker && qdPrice > 0) ? qdPrice : null;
+    if (qdPriceFor !== ticker && !qdPriceTyped) qdLoadPrice(ticker);
+    let pe = '—', note = '';
+    if (price && eps != null) {
+      if (eps <= 0) { pe = 'n/m'; note = 'Earnings over the last twelve months are zero or negative, so there is no meaningful P/E.'; }
+      else pe = (price / eps).toFixed(1) + '×';
+    }
+    const basis = ttm
+      ? 'TTM diluted EPS ' + qdFmt$(ttm.value) + ' = ' + ttm.quarters.map(q => qdFmt$(q.eps) + (q.derived ? '*' : '')).join(' + ') +
+        ' (quarters ended ' + ttm.quarters.map(q => q.end).join(', ') + ')' +
+        (ttm.quarters.some(q => q.derived) ? '. * fiscal Q4 = the full year less its first three quarters.' : '.') +
+        (/split/.test(ttm.method || '') ? ' Restated to the post-split share basis.' : '')
+      : (isFinite(typedEps) ? 'Estimate: this quarter’s diluted EPS ' + qdFmt$(typedEps) + ' × 4 = ' + qdFmt$(typedEps * 4) +
+          '. Press “Walk me through it” for the real trailing twelve months.' : 'Needs diluted EPS — type it above or walk through the filing.');
+    return '<div class="qd-item qd-pe"><div class="qd-top">' +
+      '<span class="qd-name">P/E ratio ' + (ttm ? '(trailing 12 months)' : '<span class="qd-badge qd-watch">estimate</span>') + '</span>' +
+      '<span class="qd-val">' + qdEsc(pe) + '</span></div>' +
+      '<div class="qd-pe-row"><label for="q-price">Price</label>' +
+      '<input type="text" id="q-price" inputmode="decimal" autocomplete="off" value="' + (price ? price.toFixed(2) : '') + '" ' +
+        'placeholder="loading…" oninput="qdPriceInput(this)" aria-label="Share price">' +
+      '<button type="button" class="qd-pe-live" onclick="qdPriceTyped=false;qdPriceFor=\'\';qdLoadPrice(\'' + qdEsc(ticker) + '\')" title="Use the live price">↻ Live</button>' +
+      '<span class="qd-pe-src" id="q-price-src">' + (qdPriceTyped ? 'your price' : (price ? 'live price' : '')) + '</span></div>' +
+      '<div class="qd-basis">' + qdEsc(basis) + '</div>' +
+      (note ? '<p class="qd-says">' + qdEsc(note) + '</p>' : '<p class="qd-says">What you pay for each $1 of the last year’s earnings. Compare it with the company’s own history and its peers, not a fixed number.</p>') +
+      '</div>';
+  }
+  async function qdLoadPrice(ticker) {
+    qdPriceFor = ticker;
+    try {
+      const r = await fetch('/api/terminal/live/' + encodeURIComponent(ticker), {cache: 'no-store'});
+      const d = await r.json();
+      const p = d && d.quote && Number(d.quote.price);
+      if (p > 0 && qdPriceFor === ticker && !qdPriceTyped) { qdPrice = p; qdRefreshPe(ticker); }
+      else if (!(p > 0)) { const s = document.getElementById('q-price-src'); if (s) s.textContent = 'no live price — type one'; const i = document.getElementById('q-price'); if (i) i.placeholder = 'type a price'; }
+    } catch (e) { const s = document.getElementById('q-price-src'); if (s) s.textContent = 'no live price — type one'; }
+  }
+  function qdPriceInput(el) {
+    const v = parseFloat(String(el.value).replace(/[$,]/g, ''));
+    qdPriceTyped = true; qdPriceFor = (qdEl('co').value || '').trim().toUpperCase();
+    qdPrice = v > 0 ? v : null;
+    qdRefreshPe(qdPriceFor, true);
+  }
+  function qdRefreshPe(ticker, keepFocus) {
+    const old = document.querySelector('#q-results .qd-pe'); if (!old) return;
+    const caret = keepFocus && document.activeElement && document.activeElement.id === 'q-price' ? document.activeElement.selectionStart : null;
+    const wrap = document.createElement('div'); wrap.innerHTML = qdPeCard(ticker);
+    old.replaceWith(wrap.firstChild);
+    if (caret != null) { const i = document.getElementById('q-price'); if (i) { i.focus(); try { i.setSelectionRange(caret, caret); } catch (e) {} } }
+  }
+
   // ── Walk me through it ────────────────────────────────────────────────────
   // Studying a worked example beats solving a blank one while you are new to
   // something. What makes it teach rather than merely answer is that the
@@ -1195,6 +1266,9 @@
   // are; a number on its line shows where the filing's are.
   var qdStatements = null;
   var qdWalking = false;
+  // P/E: trailing-twelve-month diluted EPS from the walkthrough (split-aware),
+  // and the live price — editable, so a reader can test "what if it were $X".
+  var qdTTM = null, qdSplit = null, qdTTMFor = '', qdPrice = null, qdPriceFor = '', qdPriceTyped = false;
 
   async function qdWalk() {
     const ticker = (qdEl('co').value || '').trim().toUpperCase();
@@ -1211,6 +1285,9 @@
         // does not fit on a status line.
         qdStatus('Nothing quarterly to read for ' + ticker + '.', true);
         qdApplyShape(null);
+        // Never leave a previous company's figures sitting under this ticker.
+        QD_FIELDS.forEach(k => { const el = qdEl(k); if (el) el.value = ''; });
+        qdEl('per').value = ''; qdTTM = null; qdSplit = null; qdMarkFilled();
         document.getElementById('q-results').innerHTML =
           '<h3>' + qdEsc(ticker) + '</h3>' +
           '<div class="qd-item is-na"><div class="qd-top">' +
@@ -1222,6 +1299,7 @@
       }
 
       qdStatements = data;
+      qdTTM = data.ttm_eps || null; qdSplit = data.split || null; qdTTMFor = (data.ticker || ticker);
       qdApplyShape(data.profile);
       qdEl('co').value = data.ticker || ticker;
       if (data.period_end) qdEl('per').value = 'Quarter ended ' + data.period_end;
@@ -1530,9 +1608,11 @@
           '<span class="t-watch">' + c.watch + '</span>' +
           '<span class="t-flag">' + c.flag + '</span>'
         : '<span class="qd-chip-none">not graded</span>';
-      return '<div class="qd-chip">' +
+      const cur = (qdEl('co').value || '').trim().toUpperCase() === String(e.ticker || '').toUpperCase();
+      return '<div class="qd-chip' + (cur ? ' is-current' : '') + '">' +
         '<button type="button" class="qd-chip-open" onclick="qdOpenSaved(' + e.id + ')" ' +
-          'title="Reopen ' + qdEsc(e.ticker) + '">' +
+          'title="Saved quarter — reopen ' + qdEsc(e.ticker) + (e.period ? ' ' + qdEsc(e.period) : '') + '">' +
+          '<span class="qd-chip-kicker">Saved</span>' +
           '<span class="qd-chip-sym">' + qdEsc(e.ticker) + '</span>' +
           (e.period ? '<span class="qd-chip-per">' + qdEsc(e.period) + '</span>' : '') +
           '<span class="qd-chip-tally">' + tally + '</span>' +
