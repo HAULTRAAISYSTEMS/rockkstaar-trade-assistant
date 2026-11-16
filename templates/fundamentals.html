@@ -1013,8 +1013,12 @@
 
   function qdStatus(msg, isErr) {
     const el = document.getElementById('q-status');
+    // With the form folded the top line sits right above this one, so saying
+    // it twice is just an echo.
+    const folded = (document.getElementById('q-fields') || {classList: {contains: () => false}})
+      .classList.contains('is-folded');
     if (el) {
-      el.textContent = msg || '';
+      el.textContent = folded ? '' : (msg || '');
       el.className = 'qd-status' + (isErr ? ' err' : '');
     }
     // Repeated at the top, because the button that starts most of this is up
@@ -1159,7 +1163,8 @@
     }
 
     qdLastChecks = data;
-    html += qdGlance(ticker, data) + qdSplitNote(ticker) + qdPeCard(ticker);
+    html += qdGlance(ticker, data) + qdSplitNote(ticker) + qdPeCard(ticker) +
+            (ticker ? '<div class="qd-item qd-thesis" id="q-thesis"></div>' : '');
 
     (data.checks || []).forEach(ch => {
       // Not the same thing as a skip, and the difference is the point. A skip
@@ -1201,6 +1206,7 @@
     });
     if (data.summary) html += '<div class="qd-summary">' + qdEsc(data.summary) + '</div>';
     document.getElementById('q-results').innerHTML = html;
+    if (ticker) qdThesisCheck(ticker);
   }
 
   // ── P/E: price ÷ trailing-twelve-month diluted EPS ────────────────────────
@@ -1210,7 +1216,7 @@
   // labelled as the rough estimate it is.
   function qdFmt$(v) { return '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
   function qdSplitNote(ticker) {
-    if (!qdSplit || qdTTMFor !== ticker || !(qdSplit.ratio > 1)) return '';
+    if (!qdSplit || qdTTMFor !== ticker || !(qdSplit.ratio > 1) || qdSplit.recent === false) return '';
     return '<div class="qd-split-note"><b>' + qdEsc(ticker) + ' split ' + Math.round(qdSplit.ratio) + '-for-1.</b> ' +
       'Shares and EPS here are on the post-split basis in both columns (the filing restates the year-ago quarter), ' +
       'so the share count is ' + Math.round(qdSplit.ratio) + '× what older reports show and EPS ' + Math.round(qdSplit.ratio) +
@@ -1310,7 +1316,8 @@
              ['Free cash flow', qdMoney(fcf)],
              ['FCF margin', qdPctTxt(div(fcf, n('revYtd')))]],
       price: [['P/E', P.value ? P.text : (P.nm ? 'n/m' : null)],
-              ['PEG', peg != null ? peg.toFixed(2) : null]],
+              ['PEG', peg != null ? peg.toFixed(2)
+                     : (P.value && ttmGrowth != null && ttmGrowth <= 0 ? 'n/m (EPS falling)' : null)]],
       safe: [['Current ratio', div(n('ca'), n('cl')) != null ? div(n('ca'), n('cl')).toFixed(2) : null],
              ['Debt ÷ equity', de != null ? de.toFixed(2) : null]],
     };
@@ -1343,12 +1350,101 @@
     return '<div class="qd-glance" aria-label="At a glance"><div class="qd-glance-hd">At a glance</div>' + html + '</div>';
   }
 
+  // ── Long-term thesis ──────────────────────────────────────────────────────
+  // Why you own it, and the business numbers that would make you reconsider —
+  // written once, calmly, then checked against every quarter. Price is never
+  // a rule here: a ten-year holder sells when the business breaks.
+  var qdThesisEditing = false;
+  async function qdThesisCheck(ticker) {
+    const box = document.getElementById('q-thesis'); if (!box || qdThesisEditing) return;
+    try {
+      const r = await fetch('/api/quarter/thesis/' + encodeURIComponent(ticker) + '/check', {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': qdCsrf()},
+        body: JSON.stringify({figures: qdValues(), period: (qdEl('per').value || '').trim()})
+      });
+      const d = await r.json();
+      if (!document.getElementById('q-thesis')) return;
+      box.innerHTML = d.saved ? qdThesisView(ticker, d) : qdThesisEmpty(ticker);
+    } catch (e) { box.innerHTML = qdThesisEmpty(ticker); }
+  }
+  function qdThesisEmpty(ticker) {
+    return '<div class="qd-top"><span class="qd-name">Your thesis</span></div>' +
+      '<p class="qd-says">Holding ' + qdEsc(ticker) + ' for the long term? Write down why you own it and ' +
+      'which business numbers would make you reconsider. Every quarter, this checks them for you — ' +
+      'so the decision is made calmly now, not in the middle of a drawdown.</p>' +
+      '<button type="button" class="qd-ghost" onclick="qdThesisEdit(\'' + qdEsc(ticker) + '\')">Write my thesis</button>';
+  }
+  function qdThesisView(ticker, d) {
+    const badge = d.tripped ? '<span class="qd-badge qd-flag">' + d.tripped + ' tripped</span>'
+                : d.warning ? '<span class="qd-badge qd-watch">' + d.warning + ' to watch</span>'
+                : '<span class="qd-badge qd-clean">Intact</span>';
+    const icon = {ok: '✓', warning: '!', tripped: '✕', no_data: '–'};
+    const rows = (d.rules || []).map(r =>
+      '<li class="qd-rule is-' + r.status + '"><span class="qd-rule-i">' + icon[r.status] + '</span>' +
+      '<span class="qd-rule-t">' + qdEsc(r.text) + '</span><b>' + qdEsc(r.value) + '</b>' +
+      (r.detail ? '<em>' + qdEsc(r.detail) + '</em>' : '') + '</li>').join('');
+    const hist = d.history_quarters
+      ? 'Streaks counted across ' + d.history_quarters + ' earlier saved quarter' + (d.history_quarters > 1 ? 's' : '') + '.'
+      : 'Save this quarter each time it reports — streak rules count back through your saved quarters.';
+    return '<div class="qd-top"><span class="qd-name">Your thesis</span><span class="qd-val">' + badge + '</span></div>' +
+      (d.why ? '<blockquote class="qd-why-own">' + qdEsc(d.why) + '</blockquote>' : '') +
+      '<ul class="qd-rules">' + (rows || '<li class="qd-rule is-no_data">No rules switched on.</li>') + '</ul>' +
+      '<p class="qd-basis">' + qdEsc(hist) + ' Price is not a rule: these are the business breaking, not the stock falling.</p>' +
+      '<button type="button" class="qd-ghost" onclick="qdThesisEdit(\'' + qdEsc(ticker) + '\')">Edit thesis</button>';
+  }
+  async function qdThesisEdit(ticker) {
+    const box = document.getElementById('q-thesis'); if (!box) return;
+    qdThesisEditing = true;
+    try {
+      const d = await (await fetch('/api/quarter/thesis/' + encodeURIComponent(ticker))).json();
+      const t = d.thesis || {rules: []}, L = d.labels || {};
+      const rows = t.rules.map(r => {
+        const l = L[r.key] || {label: r.key, unit: ''};
+        const noValue = r.key === 'rev_shrinks' || r.key === 'eps_shrinks';
+        return '<div class="qd-rule-edit" data-key="' + qdEsc(r.key) + '">' +
+          '<label><input type="checkbox" class="te-on"' + (r.on ? ' checked' : '') + '> ' + qdEsc(l.label) + '</label>' +
+          '<span class="te-val"' + (noValue ? ' hidden' : '') + '><input type="text" inputmode="decimal" class="te-num" value="' +
+            qdEsc(r.value) + '" aria-label="Threshold">' + qdEsc(l.unit) + '</span>' +
+          '<span class="te-streak"><input type="number" min="1" max="8" class="te-run" value="' + qdEsc(r.streak) +
+            '" aria-label="Quarters in a row"> qtrs in a row</span></div>';
+      }).join('');
+      box.innerHTML = '<div class="qd-top"><span class="qd-name">Your thesis — ' + qdEsc(ticker) + '</span></div>' +
+        '<label class="qd-te-lbl" for="q-thesis-why">Why I own it</label>' +
+        '<textarea id="q-thesis-why" rows="3" maxlength="2000" placeholder="e.g. Leader in chip inspection; every advanced chip needs it; high margins and buybacks. Holding up to 10 years.">' +
+          qdEsc(t.why || '') + '</textarea>' +
+        '<div class="qd-te-lbl">I reconsider if…</div>' + rows +
+        '<div class="qd-te-actions"><button type="button" class="qd-primary" onclick="qdThesisSave(\'' + qdEsc(ticker) + '\')">Save thesis</button>' +
+        '<button type="button" class="qd-ghost" onclick="qdThesisEditing=false;qdThesisCheck(\'' + qdEsc(ticker) + '\')">Cancel</button></div>';
+    } catch (e) { qdThesisEditing = false; qdStatus('Could not open the thesis: ' + e.message, true); }
+  }
+  async function qdThesisSave(ticker) {
+    const box = document.getElementById('q-thesis'); if (!box) return;
+    const rules = [...box.querySelectorAll('.qd-rule-edit')].map(el => ({
+      key: el.dataset.key,
+      on: el.querySelector('.te-on').checked,
+      value: el.querySelector('.te-num').value,
+      streak: el.querySelector('.te-run').value
+    }));
+    try {
+      const r = await fetch('/api/quarter/thesis/' + encodeURIComponent(ticker), {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': qdCsrf()},
+        body: JSON.stringify({why: document.getElementById('q-thesis-why').value, rules})
+      });
+      const d = await r.json();
+      if (d.error) { qdStatus(d.error, true); return; }
+      qdThesisEditing = false;
+      qdStatus('Thesis saved for ' + ticker + '. It is checked every time you run this ticker.');
+      qdThesisCheck(ticker);
+    } catch (e) { qdStatus('Could not save the thesis: ' + e.message, true); }
+  }
+
   // Fold the input boxes once the filing has filled them.
   function qdFold(folded) {
     const box = document.getElementById('q-fields'), bar = document.getElementById('q-fold');
     if (!box || !bar) return;
     const filled = QD_FIELDS.filter(k => { const e = qdEl(k); return e && e.value.trim(); }).length;
     box.classList.toggle('is-folded', !!folded);
+    const low = document.getElementById('q-status'); if (low && folded) low.textContent = '';
     bar.hidden = !folded && !bar.dataset.auto;
     document.getElementById('q-fold-txt').textContent = folded
       ? filled + ' figures filled from the filing.'

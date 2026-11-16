@@ -1571,3 +1571,26 @@
 @media (max-width: 560px) {
   .fundamentals-shell .qd-glance-row { grid-template-columns: 1fr; gap: 4px; }
 }
+
+/* ── 10-Q drill: long-term thesis ────────────────────────────────────────── */
+.fundamentals-shell .qd-thesis .qd-ghost { margin-top: 8px; }
+.fundamentals-shell .qd-why-own { margin: 6px 0 10px; padding: 8px 12px; border-left: 3px solid var(--elite-border-strong); color: var(--elite-copy); font-style: italic; white-space: pre-wrap; }
+.fundamentals-shell .qd-rules { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 6px; }
+.fundamentals-shell .qd-rule { display: grid; grid-template-columns: 22px 1fr auto; gap: 4px 10px; align-items: baseline; padding: 7px 10px; border: 1px solid var(--elite-border); border-radius: var(--elite-radius-sm); }
+.fundamentals-shell .qd-rule b { font: 700 13px var(--font-mono, ui-monospace, monospace); color: var(--elite-copy); }
+.fundamentals-shell .qd-rule em { grid-column: 2 / 4; font-style: normal; font-size: 12px; color: var(--elite-muted); }
+.fundamentals-shell .qd-rule-i { font-weight: 800; text-align: center; }
+.fundamentals-shell .qd-rule.is-ok .qd-rule-i { color: var(--pos-500); }
+.fundamentals-shell .qd-rule.is-warning { border-color: var(--warn-500); }
+.fundamentals-shell .qd-rule.is-warning .qd-rule-i { color: var(--warn-500); }
+.fundamentals-shell .qd-rule.is-tripped { border-color: var(--neg-500); }
+.fundamentals-shell .qd-rule.is-tripped .qd-rule-i { color: var(--neg-500); }
+.fundamentals-shell .qd-rule.is-no_data { opacity: .6; }
+.fundamentals-shell .qd-te-lbl { display: block; margin: 10px 0 6px; color: var(--elite-muted); font: 700 10px var(--font-mono, ui-monospace, monospace); letter-spacing: .12em; text-transform: uppercase; }
+.fundamentals-shell #q-thesis-why { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--elite-border-strong); border-radius: var(--elite-radius-sm); background: var(--elite-panel-inset); color: var(--elite-copy); font: inherit; resize: vertical; }
+.fundamentals-shell .qd-rule-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 0; border-bottom: 1px solid var(--elite-border); font-size: 13px; color: var(--elite-copy); }
+.fundamentals-shell .qd-rule-edit label { flex: 1 1 220px; }
+.fundamentals-shell .qd-rule-edit input[type=text], .fundamentals-shell .qd-rule-edit input[type=number] { width: 64px; height: 28px; padding: 0 8px; border: 1px solid var(--elite-border-strong); border-radius: var(--elite-radius-sm); background: var(--elite-panel-inset); color: var(--elite-copy); font: 700 12px var(--font-mono, ui-monospace, monospace); text-align: right; }
+.fundamentals-shell .qd-rule-edit .te-val[hidden] { display: none; }
+.fundamentals-shell .te-streak { color: var(--elite-muted); font-size: 12px; }
+.fundamentals-shell .qd-te-actions { display: flex; gap: 8px; margin-top: 10px; }

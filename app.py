@@ -11957,6 +11957,93 @@ def api_quarter_delete(entry_id):
     return jsonify({"entries": [_quarter_card(e) for e in get_quarter_entries(uid)]})
 
 
+# ── Long-term thesis: the reader's own sell rules, checked every quarter ────
+def _thesis_key(ticker: str) -> str:
+    return "quarter_thesis:" + ticker
+
+
+def _valid_ticker(ticker: str) -> str | None:
+    ticker = (ticker or "").strip().upper()
+    if not ticker or len(ticker) > 10 or not ticker.replace(".", "").replace("-", "").isalnum():
+        return None
+    return ticker
+
+
+def _load_thesis(uid, ticker):
+    import quarter_thesis
+    raw = get_user_setting(uid, _thesis_key(ticker))
+    if not raw:
+        return None
+    try:
+        return quarter_thesis.clean(_json.loads(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+@app.route("/api/quarter/thesis/<ticker>", methods=["GET"])
+def api_quarter_thesis(ticker):
+    """The reader's thesis for one ticker, or the defaults to start from."""
+    import quarter_thesis
+    ticker = _valid_ticker(ticker)
+    if not ticker:
+        return jsonify({"error": "Invalid ticker"}), 400
+    saved = _load_thesis(current_user_id(), ticker)
+    return jsonify({"ticker": ticker, "saved": bool(saved),
+                    "thesis": saved or quarter_thesis.default_thesis(),
+                    "labels": {k: {"label": v[0], "unit": v[4], "op": v[2]}
+                               for k, v in quarter_thesis.RULES.items()}})
+
+
+@app.route("/api/quarter/thesis/<ticker>", methods=["POST"])
+def api_quarter_thesis_save(ticker):
+    import quarter_thesis
+    ticker = _valid_ticker(ticker)
+    if not ticker:
+        return jsonify({"error": "Invalid ticker"}), 400
+    thesis = quarter_thesis.clean(request.get_json(silent=True) or {})
+    try:
+        set_user_setting(current_user_id(), _thesis_key(ticker), _json.dumps(thesis))
+    except Exception as exc:
+        logger.warning("saving thesis failed: %s", exc)
+        return jsonify({"error": "Could not save the thesis."}), 500
+    return jsonify({"ticker": ticker, "saved": True, "thesis": thesis})
+
+
+@app.route("/api/quarter/thesis/<ticker>/check", methods=["POST"])
+def api_quarter_thesis_check(ticker):
+    """This quarter's figures against the reader's rules.
+
+    Streaks count back through the quarters saved for this ticker, ordered by
+    the period-end date they name; the quarter being checked is excluded from
+    its own history.
+    """
+    import quarter_thesis
+    ticker = _valid_ticker(ticker)
+    if not ticker:
+        return jsonify({"error": "Invalid ticker"}), 400
+    uid = current_user_id()
+    thesis = _load_thesis(uid, ticker)
+    if not thesis:
+        return jsonify({"ticker": ticker, "saved": False})
+    payload = request.get_json(silent=True) or {}
+    figures = payload.get("figures") or {}
+    current_key = quarter_thesis.period_key(payload.get("period"))
+    try:
+        entries = [e for e in get_quarter_entries(uid)
+                   if str(e.get("ticker") or "").upper() == ticker]
+    except Exception:
+        entries = []
+    older = []
+    for e in entries:
+        key = quarter_thesis.period_key(e.get("period"), "")
+        if not key or (current_key and key >= current_key):
+            continue        # the same quarter, a later one, or one with no date
+        older.append((key, e.get("figures") or {}))
+    older.sort(key=lambda kv: kv[0], reverse=True)
+    result = quarter_thesis.evaluate(thesis, figures, [f for _k, f in older])
+    return jsonify(dict(result, ticker=ticker, saved=True))
+
+
 @app.route("/api/quarter/brief", methods=["POST"])
 def api_quarter_brief():
     """Why one check flagged, from the filing and nothing else.

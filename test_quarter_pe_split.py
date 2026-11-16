@@ -86,3 +86,41 @@ def test_prior_year_ttm_is_on_the_same_basis():
     assert t is not None
     assert [q["end"] for q in t["quarters"]][-1] == "2025-09-30"
     assert round(t["value"], 3) == round(0.7 + 0.75 + 0.8 + 0.847, 3)
+
+
+def nvda_like():
+    """52/53-week quarters: last year's matching quarter ends a day later."""
+    q = [  # (start, end, eps, filed, form)
+        ("2024-01-29", "2024-04-28", 0.60, "2025-05-28"),
+        ("2024-04-29", "2024-07-28", 0.67, "2025-08-27"),
+        ("2024-07-29", "2024-10-27", 0.78, "2024-11-20"),
+        ("2024-01-29", "2025-01-26", 2.94, "2025-02-26", "10-K"),
+        ("2025-01-27", "2025-04-27", 0.76, "2025-05-28"),
+        ("2025-04-28", "2025-07-27", 1.08, "2025-08-27"),
+        ("2025-07-28", "2025-10-26", 1.30, "2025-11-19"),
+        ("2025-01-27", "2026-01-25", 4.90, "2026-02-25", "10-K"),
+        ("2026-01-26", "2026-04-26", 2.39, "2026-05-27"),
+        ("2026-04-27", "2026-07-26", 2.46, "2026-08-26"),
+    ]
+    eps = [_f(*row) for row in q]
+    rev = [_f(r[0], r[1], 1000 * (i + 1), r[3], *r[4:]) for i, r in enumerate(q)]
+    return {"entityName": "NVIDIA", "facts": {"us-gaap": {
+        "EarningsPerShareDiluted": {"units": {"USD/shares": eps}},
+        "Revenues": {"units": {"USD": rev}},
+    }}}
+
+
+def test_prior_ttm_found_for_52_53_week_quarters():
+    w = qf.walkthrough("NVDA", facts=nvda_like())
+    assert w["period_end"] == "2026-07-26"
+    assert w["ttm_eps"] and w["ttm_eps_prior"], "PEG needs both"
+    assert w["ttm_eps_prior"]["quarters"][-1]["end"] == "2025-07-27"
+    assert round(w["ttm_eps_prior"]["value"], 2) == round(0.78 + (2.94 - 0.60 - 0.67 - 0.78) + 0.76 + 1.08, 2)
+
+
+def test_an_old_split_is_not_announced():
+    facts = kla_like()
+    w_split = qf.detect_split(facts)
+    assert w_split
+    # Two years after the split, the comparatives are no longer restated for it.
+    assert qf._day_gap("2028-09-30", w_split["since"]) > 460
