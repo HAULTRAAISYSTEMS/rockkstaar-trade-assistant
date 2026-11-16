@@ -99,3 +99,10 @@ def test_page_has_the_glance_strip_and_folding_inputs():
     for needle in ("function qdGlance(", "Growing?", "Real cash?", "PEG",
                    'id="q-fields"', "function qdFold(", "ttm_eps_prior"):
         assert needle in html
+
+
+def test_peg_is_always_shown_with_a_reason():
+    html = open("templates/fundamentals.html").read()
+    assert "function qdPegText(" in html
+    for reason in ("n/m (EPS falling)", "n/m (losing money)", "under 2 yrs of EPS", "needs price"):
+        assert reason in html
