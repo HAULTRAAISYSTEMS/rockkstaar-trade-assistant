@@ -11840,6 +11840,17 @@ def api_quarter_walkthrough(ticker):
         return jsonify({"available": False,
                         "error": "Could not read the filing right now."})
     if not found:
+        # Foreign issuers (TSMC, ASML, SK hynix) file no 10-Q. FMP publishes
+        # their quarterly statements; use them, and say where they came from.
+        try:
+            import quarter_fmp
+            via_fmp = quarter_fmp.walkthrough(ticker)
+        except Exception as exc:
+            logger.warning("FMP quarter fallback errored for %s: %s", ticker, exc)
+            via_fmp = None
+        if via_fmp:
+            return jsonify(dict(via_fmp, available=True))
+    if not found:
         # "No quarterly filing found" is true and useless. Say which of the
         # several quite different reasons it is, so the reader knows whether
         # to try again, try another ticker, or go somewhere else entirely.
