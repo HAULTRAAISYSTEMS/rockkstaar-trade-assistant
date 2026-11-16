@@ -1292,6 +1292,18 @@
     if (a >= 1e6) return sign + '$' + (a / 1e6).toFixed(0) + 'M';
     return sign + a.toLocaleString('en-US');
   }
+  // PEG on every ticker. When it cannot be computed, say why rather than
+  // leaving a gap that reads like the feature is missing for this stock.
+  function qdPegText(P, peg, ttmGrowth, ttmP) {
+    if (peg != null) return peg.toFixed(2);
+    if (!P.ttm) return P.typedEps != null && isFinite(P.typedEps)
+      ? 'needs “Walk me through it”' : 'needs EPS';
+    if (P.nm) return 'n/m (losing money)';
+    if (!ttmP) return 'n/a (under 2 yrs of EPS)';
+    if (ttmGrowth != null && ttmGrowth <= 0) return 'n/m (EPS falling)';
+    if (!P.price) return 'needs price';
+    return '—';
+  }
   function qdGlance(ticker, data) {
     const n = qdN, rev = n('rev');
     const div = (a, b) => (a != null && b != null && b !== 0) ? a / b : null;
@@ -1316,8 +1328,7 @@
              ['Free cash flow', qdMoney(fcf)],
              ['FCF margin', qdPctTxt(div(fcf, n('revYtd')))]],
       price: [['P/E', P.value ? P.text : (P.nm ? 'n/m' : null)],
-              ['PEG', peg != null ? peg.toFixed(2)
-                     : (P.value && ttmGrowth != null && ttmGrowth <= 0 ? 'n/m (EPS falling)' : null)]],
+              ['PEG', qdPegText(P, peg, ttmGrowth, ttmP)]],
       safe: [['Current ratio', div(n('ca'), n('cl')) != null ? div(n('ca'), n('cl')).toFixed(2) : null],
              ['Debt ÷ equity', de != null ? de.toFixed(2) : null]],
     };
