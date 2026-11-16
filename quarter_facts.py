@@ -39,7 +39,12 @@ TOLERANCE = 0.005
 # Quarterly durations are not exactly ninety days — 13-week quarters, 52/53
 # week fiscal years and holiday-shifted period ends all move it around.
 QUARTER_DAYS = (80, 100)
-YTD_DAYS = (150, 400)          # six, nine or twelve months into the year
+# Three, six, nine or twelve months into the year. Three months belongs here
+# too: in a fiscal first quarter the cash-flow statement covers exactly the
+# quarter. KLA's year starts in July, so its September 10-Q prints a
+# three-month cash flow, and a six-month floor left the whole section empty.
+# Where several spans end on the same date, _pick takes the longest.
+YTD_DAYS = (80, 380)
 
 # A 52/53-week fiscal year does not repeat on the same calendar date. NVIDIA's
 # quarters end on a Sunday, so the same quarter a year earlier ended 26 July
@@ -229,7 +234,8 @@ def _pick(facts, tags, *, window, end=None, near=None, slack=0):
                 length = _days(fact)
                 if length is None or not (window[0] <= length <= window[1]):
                     continue
-            candidates.append((distance, fact, rank, tag))
+            span = (_days(fact) or 0) if window == YTD_DAYS else 0
+            candidates.append((distance, fact, rank, tag, span))
 
     if not candidates:
         return None
@@ -237,9 +243,12 @@ def _pick(facts, tags, *, window, end=None, near=None, slack=0):
     # Nearest to the target date first when one was given; then the latest
     # period; then the preferred tag; then the latest filing, so an amended
     # figure supersedes.
-    candidates.sort(key=lambda c: (-c[0], c[1].get("end") or "", -c[2],
+    # For a year-to-date read, the longest span ending on that date comes
+    # before tag preference: the 10-Q prints the quarter and the year to date
+    # side by side, and the cash flow it is matched against is the latter.
+    candidates.sort(key=lambda c: (-c[0], c[1].get("end") or "", c[4], -c[2],
                                    c[1].get("filed") or ""))
-    _distance, best, _rank, tag = candidates[-1]
+    _distance, best, _rank, tag, _span = candidates[-1]
     return {"value": best.get("val"), "tag": tag,
             "end": best.get("end"), "start": best.get("start"),
             "form": best.get("form"), "filed": best.get("filed"),
@@ -715,6 +724,7 @@ def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
             fields[key] = dict(found, label=_label_for(found, label))
 
     _derive_operating_expenses(facts, fields, end, prior_end)
+    _derive_operating_income(fields, shape)
 
     return {
         "ticker": ticker.upper(),
@@ -768,6 +778,7 @@ def _derive_operating_expenses(facts, fields, end, prior_end):
 
         total = _pick(facts, ["CostsAndExpenses"], window=QUARTER_DAYS, **where)
         value = source = None
+        summed_parts = False
         if total and _same_duration(total, cogs):
             try:
                 value = float(total["value"]) - float(cogs["value"])
@@ -780,23 +791,30 @@ def _derive_operating_expenses(facts, fields, end, prior_end):
             # Only an actual operating-income fact makes this identity valid.
             # Pre-tax income includes interest and other non-operating items.
             operating = fields.get("opinc" if key == "opex" else "opincP")
-            if not revenue or not operating:
+            if (revenue and operating
+                    and operating.get("tag") in OPERATING_INCOME_TAGS
+                    and _same_duration(revenue, cogs, operating)):
+                try:
+                    value = (float(revenue["value"]) - float(cogs["value"])
+                             - float(operating["value"]))
+                    total = revenue
+                    source = (revenue["tag"] + " \u2212 " + cogs["tag"] + " \u2212 "
+                              + (operating.get("tag") or "operating income"))
+                except (TypeError, ValueError):
+                    value = None
+
+        if value is None:
+            # KLA's shape: no total line and no operating-income subtotal, just
+            # the expense lines under cost of revenue. Their sum is the figure.
+            summed = _expense_components(facts, cogs, where)
+            if summed:
+                value, total, source = summed
+                summed_parts = True     # already the components; no floor check
+            else:
                 continue
-            if operating.get("tag") not in OPERATING_INCOME_TAGS:
-                continue
-            if not _same_duration(revenue, cogs, operating):
-                continue                # three different periods is not a subtotal
-            try:
-                value = (float(revenue["value"]) - float(cogs["value"])
-                         - float(operating["value"]))
-            except (TypeError, ValueError):
-                continue
-            total = revenue
-            source = (revenue["tag"] + " \u2212 " + cogs["tag"] + " \u2212 "
-                      + (operating.get("tag") or "operating income"))
 
         components = []
-        for tags in (["ResearchAndDevelopmentExpense"],
+        for tags in () if summed_parts else (["ResearchAndDevelopmentExpense"],
                      ["SellingAndMarketingExpense", "MarketingExpense"],
                      ["GeneralAndAdministrativeExpense",
                       "SellingGeneralAndAdministrativeExpense"]):
@@ -816,6 +834,70 @@ def _derive_operating_expenses(facts, fields, end, prior_end):
             "end": period, "start": total.get("start"),
             "form": total.get("form"), "filed": total.get("filed"),
             "label": label,
+        }
+
+
+def _expense_components(facts, cogs, where):
+    """(sum, anchor fact, source) of the operating-expense lines, or None.
+
+    Selling, general and administrative is one line that already contains
+    selling and marketing, so when it is filed the separate S&M and G&A tags
+    are not added on top of it. Every component must share cost of revenue's
+    period, and research and development plus at least one overhead line must
+    both be present: one line on its own is a component, not a total.
+    """
+    rnd = _pick(facts, ["ResearchAndDevelopmentExpense"], window=QUARTER_DAYS, **where)
+    sga = _pick(facts, ["SellingGeneralAndAdministrativeExpense"], window=QUARTER_DAYS, **where)
+    parts = [("ResearchAndDevelopmentExpense", rnd)]
+    if sga:
+        parts.append(("SellingGeneralAndAdministrativeExpense", sga))
+    else:
+        parts.append(("SellingAndMarketingExpense",
+                      _pick(facts, ["SellingAndMarketingExpense", "MarketingExpense"],
+                            window=QUARTER_DAYS, **where)))
+        parts.append(("GeneralAndAdministrativeExpense",
+                      _pick(facts, ["GeneralAndAdministrativeExpense"],
+                            window=QUARTER_DAYS, **where)))
+    found = [(tag, fact) for tag, fact in parts if fact]
+    if not rnd or len(found) < 2:
+        return None
+    if not _same_duration(cogs, *[f for _t, f in found]):
+        return None
+    try:
+        value = sum(float(f["value"]) for _t, f in found)
+    except (TypeError, ValueError):
+        return None
+    return value, rnd, " + ".join(f.get("tag") or t for t, f in found)
+
+
+def _derive_operating_income(fields, shape):
+    """Revenue less cost of revenue less operating expenses, when unfiled.
+
+    Only for an operating company, and only from three figures of the same
+    period. A bank's or insurer's pre-tax line is never rebuilt this way.
+    """
+    if shape in ("bank", "insurer"):
+        return
+    for suffix in ("", "P"):
+        key = "opinc" + suffix
+        if key in fields:
+            continue
+        rev, cogs, opex = (fields.get(k + suffix) for k in ("rev", "cogs", "opex"))
+        if not (rev and cogs and opex):
+            continue
+        if not (rev.get("end") == cogs.get("end") == opex.get("end")):
+            continue
+        try:
+            value = float(rev["value"]) - float(cogs["value"]) - float(opex["value"])
+        except (TypeError, ValueError):
+            continue
+        fields[key] = {
+            "value": value,
+            "tag": "Revenue \u2212 cost of revenue \u2212 operating expenses",
+            "derived": True,
+            "end": rev.get("end"), "start": rev.get("start"),
+            "form": rev.get("form"), "filed": rev.get("filed"),
+            "label": "Operating income" + ("" if not suffix else ", year ago"),
         }
 
 
@@ -1118,7 +1200,10 @@ def _insert_derived_opex(rows: list) -> None:
         # When actual operating income is filed, the statement identity can
         # supply the missing subtotal. Pre-tax income never enters this row.
         revenue, operating = by_key.get("rev"), by_key.get("opinc")
-        if not revenue or not operating:
+        if revenue and not operating:
+            _insert_component_opex(rows, by_key, revenue, cogs)
+            return
+        if not revenue:
             return
         if not _same_duration(revenue.get("_now_fact") or {},
                               cogs.get("_now_fact") or {},
@@ -1156,6 +1241,49 @@ def _insert_derived_opex(rows: list) -> None:
     at = next((i for i, r in enumerate(rows) if r["key"] == "opinc"),
               rows.index(cogs) + 1)
     rows.insert(at, derived)
+
+
+def _insert_component_opex(rows, by_key, revenue, cogs):
+    """KLA's shape: expense lines, no total, no operating-income subtotal.
+
+    Adds the two computed rows the drill needs — total operating expenses
+    and operating income — labelled as computed, where they would sit.
+    """
+    rnd = by_key.get("rnd")
+    admin = by_key.get("admin")
+    if not rnd or not admin:
+        return
+    parts = [rnd, admin]
+    if admin.get("tag") != "SellingGeneralAndAdministrativeExpense" and by_key.get("sales"):
+        parts.append(by_key["sales"])
+    facts_now = [p.get("_now_fact") or {} for p in parts] + [cogs.get("_now_fact") or {}]
+    if not _same_duration(*facts_now):
+        return
+
+    def total(field, rows_):
+        vals = [r.get(field) for r in rows_]
+        return None if any(v is None for v in vals) else sum(vals)
+
+    opex_now, opex_prior = total("now", parts), total("prior", parts)
+    if opex_now is None:
+        return
+    tag = " + ".join(p.get("tag") or p["label"] for p in parts)
+    opex = {"key": "opex", "label": "Total operating expenses", "indent": 0,
+            "now": opex_now, "prior": opex_prior, "tag": tag, "derived": True,
+            "prior_end": rnd.get("prior_end")}
+
+    def op(field):
+        vals = (revenue.get(field), cogs.get(field),
+                opex_now if field == "now" else opex_prior)
+        return None if any(v is None for v in vals) else vals[0] - vals[1] - vals[2]
+
+    opinc = {"key": "opinc", "label": "Operating income", "indent": 0,
+             "now": op("now"), "prior": op("prior"),
+             "tag": "Revenue \u2212 cost of revenue \u2212 operating expenses",
+             "derived": True, "prior_end": revenue.get("prior_end")}
+    last = max(rows.index(p) for p in parts)
+    rows.insert(last + 1, opex)
+    rows.insert(last + 2, opinc)
 
 
 # ── Stock splits and trailing EPS ─────────────────────────────────────────────
@@ -1280,6 +1408,14 @@ def ttm_eps(facts: dict, end: str, split: dict | None = None) -> dict | None:
                       + (f", restated to the post-split basis ({int(split['ratio'])}-for-1)" if split and split["ratio"] >= 1 else "")}
 
 
+def _day_gap(a: str, b: str) -> int:
+    from datetime import datetime
+    try:
+        return (datetime.strptime(a, "%Y-%m-%d") - datetime.strptime(b, "%Y-%m-%d")).days
+    except (TypeError, ValueError):
+        return 10**6
+
+
 def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) -> dict | None:
     """Everything the guided mode needs: the figures, and where they came from."""
     if facts is None:
@@ -1304,9 +1440,16 @@ def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) 
     try:
         _split = detect_split(facts)
         _ttm = ttm_eps(facts, filed.get("period_end"), _split)
+        # The same twelve months a year earlier: what the P/E's growth rate
+        # (and so PEG) is measured against. One quarter's jump is too noisy.
+        _ttm_prior = (ttm_eps(facts, filed.get("prior_end"), _split)
+                      if _ttm and filed.get("prior_end") else None)
+        if _ttm_prior and abs(_day_gap(_ttm_prior["quarters"][-1]["end"],
+                                      filed.get("prior_end"))) > PERIOD_SLACK_DAYS:
+            _ttm_prior = None           # ends somewhere else; not the year-ago window
     except Exception as exc:
         logger.debug("quarter facts: ttm eps for %s: %s", ticker, exc)
-        _split, _ttm = None, None
+        _split, _ttm, _ttm_prior = None, None, None
 
     return {
         "ticker": filed.get("ticker"),
@@ -1323,4 +1466,5 @@ def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) 
         "filing_url": _FILING_URL.format(cik=cik.lstrip("0")) if cik else None,
         "split": _split,
         "ttm_eps": _ttm,
+        "ttm_eps_prior": _ttm_prior,
     }

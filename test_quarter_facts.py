@@ -702,9 +702,10 @@ class TestTheFilerWhoPrintsNoSubtotalAtAll:
     CostsAndExpenses stops in 2015 — so the check sat waiting forever for a
     figure the filing does not contain and never will.
 
-    KLA's available pre-tax concept is not operating income. In the current
-    quarter R&D plus SG&A is already 679,897, greater than the old 670,645
-    derivation. The safe result is to leave the check ungraded.
+    KLA's available pre-tax concept is not operating income, so it is never
+    used. The lines the statement does print — R&D and SG&A — add up to the
+    operating expenses, and revenue less cost of revenue less that sum is the
+    operating income. Both are labelled as computed, not filed.
     """
 
     KLA = facts(
@@ -733,28 +734,33 @@ class TestTheFilerWhoPrintsNoSubtotalAtAll:
     def test_this_filer_really_does_not_tag_operating_income(self):
         """The fixture is only worth anything if it keeps that true."""
         assert qf._facts_for("OperatingIncomeLoss", self.KLA) == []
-        assert "opinc" not in qf.latest_quarter("KLAC", facts=self.KLA)["fields"]
+        assert qf._facts_for("OperatingExpenses", self.KLA) == []
 
-    def test_pretax_income_is_not_used_to_invent_operating_expenses(self):
-        filed = qf.latest_quarter("KLAC", facts=self.KLA)
-        assert "opex" not in filed["fields"]
-        assert "opexP" not in filed["fields"]
+    def test_operating_expenses_are_the_sum_of_the_lines_it_prints(self):
+        """R&D plus SG&A, labelled as computed. Pre-tax income never enters."""
+        f = qf.latest_quarter("KLAC", facts=self.KLA)["fields"]
+        assert f["opex"]["value"] == 388763 + 291134
+        assert f["opexP"]["value"] == 338043 + 284864
+        assert f["opex"]["derived"]
+        assert "Before" not in f["opex"]["tag"]
+        assert f["opinc"]["value"] == 3415078 - 1327672 - 679897
+        assert f["opinc"]["derived"]
 
-    def test_an_unprovable_check_stays_ungraded(self):
+    def test_the_check_now_grades(self):
         import quarter_checks as qc
         filed = qf.latest_quarter("KLAC", facts=self.KLA)
         figures = {k: v["value"] for k, v in filed["fields"].items()}
         check = [c for c in qc.run(figures, filed["profile"])["checks"]
                  if c["key"] == "operating_leverage"][0]
-        assert check["verdict"] is None
-        assert check["skipped"]
+        assert check["verdict"] is not None
 
     def test_the_rebuilt_statement_keeps_pretax_in_its_own_row(self):
         st = qf.statements(self.KLA, "2026-03-31", "2025-03-31")
         by_key = {r["key"]: r for r in st["income"]["rows"]}
-        assert "opex" not in by_key and "opinc" not in by_key
+        assert by_key["opex"]["derived"] and by_key["opex"]["now"] == 679897
+        assert by_key["opinc"]["derived"]
+        assert by_key["opinc"]["now"] == 3415078 - 1327672 - 679897
         assert by_key["pretax"]["now"] == 1416761
-        assert by_key["rnd"]["now"] + by_key["admin"]["now"] == 679897
 
     def test_the_combined_total_is_still_preferred_when_a_filer_prints_one(self):
         """Meta's shape must not change: it prints one "Total costs and
