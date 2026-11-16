@@ -1405,7 +1405,22 @@ def ttm_eps(facts: dict, end: str, split: dict | None = None) -> dict | None:
             "quarters": [{"end": e, "eps": round(q[1], 4), "derived": len(q) > 3 and q[3] == "derived"}
                          for e, q in picked],
             "method": "sum of the last four quarters' diluted EPS"
-                      + (f", restated to the post-split basis ({int(split['ratio'])}-for-1)" if split and split["ratio"] >= 1 else "")}
+                      + (f", restated to the post-split basis ({int(split['ratio'])}-for-1)"
+                         if split and split["ratio"] >= 1 and _split_inside(split, picked) else "")}
+
+
+def _split_inside(split: dict, picked: list) -> bool:
+    """Did the split happen after the earliest of these quarters was first filed?"""
+    first_end = picked[0][0] if picked else None
+    return bool(first_end and split.get("since") and split["since"] > first_end)
+
+
+def _shift_days(day: str | None, n: int) -> str | None:
+    from datetime import datetime, timedelta
+    try:
+        return (datetime.strptime(day, "%Y-%m-%d") + timedelta(days=n)).date().isoformat()
+    except (TypeError, ValueError):
+        return None
 
 
 def _day_gap(a: str, b: str) -> int:
@@ -1442,11 +1457,27 @@ def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) 
         _ttm = ttm_eps(facts, filed.get("period_end"), _split)
         # The same twelve months a year earlier: what the P/E's growth rate
         # (and so PEG) is measured against. One quarter's jump is too noisy.
-        _ttm_prior = (ttm_eps(facts, filed.get("prior_end"), _split)
-                      if _ttm and filed.get("prior_end") else None)
+        #
+        # Anchored on the year-ago quarter the filing actually printed, not
+        # on this date minus a calendar year: a 52/53-week filer's quarter
+        # moves by a day or two each year. NVIDIA's ended 27 July 2025 against
+        # 26 July 2026, so "one year back" stopped a day short, skipped the
+        # quarter, and PEG vanished for every retailer and chipmaker that
+        # closes its books on a Sunday.
+        fields_ = filed.get("fields") or {}
+        prior_anchor = ((fields_.get("epsP") or {}).get("end")
+                        or (fields_.get("revP") or {}).get("end")
+                        or _shift_days(filed.get("prior_end"), PERIOD_SLACK_DAYS))
+        _ttm_prior = (ttm_eps(facts, prior_anchor, _split)
+                      if _ttm and prior_anchor else None)
         if _ttm_prior and abs(_day_gap(_ttm_prior["quarters"][-1]["end"],
                                       filed.get("prior_end"))) > PERIOD_SLACK_DAYS:
             _ttm_prior = None           # ends somewhere else; not the year-ago window
+        # A split reads as news only while this filing's comparatives were
+        # restated for it. NVIDIA's of June 2024 is history two years on.
+        if _split:
+            _split = dict(_split, recent=0 <= _day_gap(filed.get("period_end"),
+                                                       _split["since"]) <= 460)
     except Exception as exc:
         logger.debug("quarter facts: ttm eps for %s: %s", ticker, exc)
         _split, _ttm, _ttm_prior = None, None, None

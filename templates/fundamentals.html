@@ -1216,7 +1216,7 @@
   // labelled as the rough estimate it is.
   function qdFmt$(v) { return '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
   function qdSplitNote(ticker) {
-    if (!qdSplit || qdTTMFor !== ticker || !(qdSplit.ratio > 1)) return '';
+    if (!qdSplit || qdTTMFor !== ticker || !(qdSplit.ratio > 1) || qdSplit.recent === false) return '';
     return '<div class="qd-split-note"><b>' + qdEsc(ticker) + ' split ' + Math.round(qdSplit.ratio) + '-for-1.</b> ' +
       'Shares and EPS here are on the post-split basis in both columns (the filing restates the year-ago quarter), ' +
       'so the share count is ' + Math.round(qdSplit.ratio) + '× what older reports show and EPS ' + Math.round(qdSplit.ratio) +
@@ -1316,7 +1316,8 @@
              ['Free cash flow', qdMoney(fcf)],
              ['FCF margin', qdPctTxt(div(fcf, n('revYtd')))]],
       price: [['P/E', P.value ? P.text : (P.nm ? 'n/m' : null)],
-              ['PEG', peg != null ? peg.toFixed(2) : null]],
+              ['PEG', peg != null ? peg.toFixed(2)
+                     : (P.value && ttmGrowth != null && ttmGrowth <= 0 ? 'n/m (EPS falling)' : null)]],
       safe: [['Current ratio', div(n('ca'), n('cl')) != null ? div(n('ca'), n('cl')).toFixed(2) : null],
              ['Debt ÷ equity', de != null ? de.toFixed(2) : null]],
     };
