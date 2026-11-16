@@ -1594,3 +1594,19 @@
 .fundamentals-shell .qd-rule-edit .te-val[hidden] { display: none; }
 .fundamentals-shell .te-streak { color: var(--elite-muted); font-size: 12px; }
 .fundamentals-shell .qd-te-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+/* ── 10-Q drill: five-year P/E range ─────────────────────────────────────── */
+.fundamentals-shell .qd-range { margin: 12px 0 4px; padding: 10px 12px 8px; border: 1px solid var(--elite-border); border-radius: var(--elite-radius-sm); background: var(--elite-panel-inset); }
+.fundamentals-shell .qd-range.is-loading { color: var(--elite-muted); font-size: 12px; }
+.fundamentals-shell .qd-range-hd { display: flex; justify-content: space-between; align-items: center; color: var(--elite-muted); font: 700 10px var(--font-mono, ui-monospace, monospace); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 18px; }
+.fundamentals-shell .qd-range-bar { position: relative; height: 10px; margin: 0 6px; border-radius: 5px; background: var(--elite-border); }
+.fundamentals-shell .qd-range-band { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: var(--elite-border-strong); }
+.fundamentals-shell .qd-range-bar i { position: absolute; top: 2px; width: 2px; height: 6px; margin-left: -1px; background: var(--elite-muted); opacity: .7; }
+.fundamentals-shell .qd-range-med { position: absolute; top: -3px; width: 2px; height: 16px; margin-left: -1px; background: var(--elite-copy); }
+.fundamentals-shell .qd-range-now { position: absolute; top: -5px; width: 12px; height: 20px; margin-left: -6px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 0 2px var(--elite-panel-inset); }
+.fundamentals-shell .qd-range-now b { position: absolute; bottom: 22px; left: 50%; width: max-content; max-width: none; transform: translateX(-50%); white-space: nowrap; color: var(--elite-copy); font: 700 11px var(--font-mono, ui-monospace, monospace); }
+.fundamentals-shell .qd-range-scale { display: flex; justify-content: space-between; margin-top: 8px; color: var(--elite-muted); font: 600 11px var(--font-mono, ui-monospace, monospace); }
+.fundamentals-shell .qd-range-says { margin: 8px 0 0; color: var(--elite-copy); font-size: 13px; }
+.fundamentals-shell .qd-range-now.is-right b { left: 12px; transform: translateX(-100%); }
+.fundamentals-shell .qd-range-now.is-left b { left: 0; transform: none; }
+.fundamentals-shell .qd-range-hd { margin-bottom: 24px; }
