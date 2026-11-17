@@ -9756,9 +9756,15 @@ def smart_money():
                                                    "buyers": set(), "sellers": set(), "latest": r["trade_date"], "rows": []})
         (w["buyers"] if r["side"] == "P" else w["sellers"]).add(r["owner"])
         w["buy_value" if r["side"] == "P" else "sell_value"] += r.get("value") or 0
-        if len(w["rows"]) < 6:
-            w["rows"].append(r)
-    watch_list = sorted(watch_summary.values(), key=lambda w: (-w["buy_value"], -w["sell_value"]))
+        w["latest"] = max(w["latest"] or "", r.get("trade_date") or "")
+        w["rows"].append(r)
+    # Newest activity first — the order a reader scans a feed in. Within a
+    # ticker, the six most recent trades, newest first.
+    for w in watch_summary.values():
+        w["rows"] = sorted(w["rows"], key=lambda r: r.get("trade_date") or "", reverse=True)[:6]
+    watch_list = sorted(watch_summary.values(),
+                        key=lambda w: (w["latest"] or "", w["buy_value"] + w["sell_value"]),
+                        reverse=True)
     return render_template(
         "smart_money.html",
         insiders=insiders,

@@ -262,3 +262,26 @@ def test_page_renders_top_buys_and_watchlist(monkeypatch):
     assert "Your watchlist — open-market activity" in html and "NVDA" in html
     assert "1,234 open-market trades stored" in html and "Whole market" in html
     assert "Open-market buys &amp; sales" in html or "Open-market buys & sales" in html
+
+
+def test_watchlist_activity_is_newest_first(monkeypatch):
+    import web_app
+    monkeypatch.setattr(smart_money, "fetch_sec_form4", lambda *a, **k: ([], {"available": True, "message": "ok"}))
+    monkeypatch.setattr(f, "top_buys", lambda **k: [])
+    row = lambda t, side, val, d: {"ticker": t, "side": side, "owner": t + d, "role": "Dir", "value": val,
+                                    "avg_price": 1.0, "trade_date": d, "planned_10b5_1": 0, "source_url": "https://sec"}
+    monkeypatch.setattr(f, "watchlist_trades", lambda *a, **k: [
+        row("BIG", "S", 9e8, "2026-11-04"),          # biggest dollars, oldest
+        row("NEW", "P", 1e5, "2026-11-13"),          # smallest, newest
+        row("MID", "P", 5e6, "2026-11-01"),
+        row("MID", "S", 1e6, "2026-11-10"),          # MID's latest is the 10th, not its first row
+    ])
+    monkeypatch.setattr(f, "feed_status", lambda: {"rows": 4, "last_stored": "x", "backfill_days_done": 30})
+    c = web_app.app.test_client()
+    with c.session_transaction() as s:
+        s["user_id"] = 1
+    html = c.get("/smart-money").get_data(as_text=True)
+    i = html.index("Your watchlist — open-market activity")
+    part = html[i:]
+    assert part.index(">NEW<") < part.index(">MID<") < part.index(">BIG<")
+    assert "latest 2026-11-10" in part

@@ -79,7 +79,7 @@
 
   <section class="sm-panel" id="sm-watch" hidden>
     <section class="sm-watch" aria-label="Your watchlist insider activity">
-      <div class="sm-section-head"><div><span class="sm-kicker">All {{ watched_tickers|length }} tracked tickers · last 30 days</span><h2>Your watchlist — open-market activity</h2></div></div>
+      <div class="sm-section-head"><div><span class="sm-kicker">All {{ watched_tickers|length }} tracked tickers · last 30 days · newest first</span><h2>Your watchlist — open-market activity</h2></div></div>
       {% if watch_list %}
       <div class="sm-watch-grid">
         {% for w in watch_list %}
