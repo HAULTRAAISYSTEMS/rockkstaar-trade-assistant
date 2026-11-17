@@ -2347,8 +2347,10 @@ def compute_trade_permission(stock: dict, trade_mode: str) -> dict:
             return {"permission": "BLOCKED", "css": "perm-blocked",
                     "reason": f"Trend not aligned — {bias or 'no bias'} vs {daily_trend} daily trend"}
 
-        # Structure — HH/HL on Daily or 4H required before any entry
-        structure_valid = daily_hh_hl or h4_hh_hl
+        # Structure in the trade's direction — HH/HL for a long, LH/LL for a
+        # short — on the daily or 4H, before any entry.
+        from scoring import structure_for_bias
+        structure_valid = structure_for_bias(stock, bias)
         if not structure_valid:
             # Classify as bullish pullback (WATCH) when price is above both EMAs
             # and within a healthy fib retracement — trend still intact, structure forming
@@ -2365,8 +2367,15 @@ def compute_trade_permission(stock: dict, trade_mode: str) -> dict:
                 return {"permission": "WATCH", "css": "perm-watch",
                         "reason": ("Bullish pullback / continuation watch — price above 20 & 50 EMA "
                                    "within healthy fib zone; wait for HH/HL structure to confirm")}
+            below_20ema = pct_ema20 is not None and pct_ema20 < 0
+            below_50ema = pct_ema50 is not None and pct_ema50 < 0
+            if not long_bias and below_20ema and below_50ema:
+                return {"permission": "WATCH", "css": "perm-watch",
+                        "reason": ("Bearish bounce / continuation watch — price below 20 & 50 EMA; "
+                                   "wait for a lower high (LH/LL) to confirm before shorting")}
+            need = "HH/HL" if long_bias else "LH/LL"
             return {"permission": "BLOCKED", "css": "perm-blocked",
-                    "reason": "No valid structure — need HH/HL confirmed on daily or 4H chart"}
+                    "reason": f"No valid structure — need {need} confirmed on daily or 4H chart"}
 
         # At key level — tighter bands than before
         # Fib: within 1.5% | 20 EMA: within 2% pulling back | 50 EMA: within 3% pulling back

@@ -159,8 +159,20 @@ def _bucket_and_reason(stock: dict) -> tuple:
         )
 
     # ── 3. A+ READY ───────────────────────────────────────────────────────────
+    # The same structure rule and the same gate the page shows. A+ READY
+    # beside "BLOCKED — no valid structure" was two widgets disagreeing.
+    from scoring import structure_for_bias
+    structure_ok = structure_for_bias(stock, bias)
+    perm = stock.get("trade_permission") or {}
+    gate_blocked = perm.get("permission") == "BLOCKED"
+
     if swing_score >= 7 and swing_status in _READY_STATUSES and trend_aligned:
         gaps = []
+        if not structure_ok:
+            gaps.append("structure not confirmed (need "
+                        + ("LH/LL" if bias == "Short Bias" else "HH/HL") + " on daily or 4H)")
+        if gate_blocked and perm.get("reason"):
+            gaps.append("trade gate: " + str(perm.get("reason")))
         if rr > 0 and rr < 1.5:
             gaps.append(f"R:R only {rr:.1f}:1")
         if cat_sc < 4:
@@ -183,7 +195,7 @@ def _bucket_and_reason(stock: dict) -> tuple:
         )
 
     # A+ even without trend if score is very high, in a ready status, AND has catalyst
-    if swing_score >= 9 and swing_status in _READY_STATUSES and cat_sc >= 4:
+    if swing_score >= 9 and swing_status in _READY_STATUSES and cat_sc >= 4 and not gate_blocked:
         return A_PLUS_READY, (
             f"A+ READY: Elite score {swing_score}/10, {swing_status} — "
             "trade allowed regardless of trend (very high score + catalyst)"
