@@ -1453,7 +1453,7 @@ def compute_swing_score(data: dict) -> ScoringResult:
         trend_str_1d = daily_trend == "Bullish"
         trend_ok_1d  = daily_trend in ("Bullish", "Bullish Lean")
         trend_ok_4h  = h4_trend in ("Bullish", "Bullish Lean")
-        structure    = daily_hh_hl or h4_hh_hl
+        structure    = structure_for_bias(data, bias)
 
         if trend_str_1d and trend_ok_4h and structure:
             trend_pts = SWING_W["trend_full"]
@@ -1474,7 +1474,7 @@ def compute_swing_score(data: dict) -> ScoringResult:
         trend_str_1d = daily_trend == "Bearish"
         trend_ok_1d  = daily_trend in ("Bearish", "Bearish Lean")
         trend_ok_4h  = h4_trend in ("Bearish", "Bearish Lean")
-        structure    = daily_lh_ll or (not h4_hh_hl and h4_trend in ("Bearish", "Bearish Lean"))
+        structure    = structure_for_bias(data, bias)
 
         if trend_str_1d and trend_ok_4h and structure:
             trend_pts = SWING_W["trend_full"]
@@ -2301,3 +2301,22 @@ def compute_swing_trade_plan(data: dict) -> dict:
                     out["risk_reward"] = round(reward_1 / risk, 2)
 
     return out
+
+
+def structure_for_bias(data: dict, bias: str | None) -> bool:
+    """Is market structure confirmed in the direction of the trade?
+
+    Long:  higher highs and higher lows on the daily or the 4H.
+    Short: lower highs and lower lows on the daily, or a bearish 4H that is
+           not printing higher highs/lows.
+    The swing score, the trade-permission gate and the A+ classifier all
+    read this one definition. When the gate demanded HH/HL from a short —
+    a bullish pattern — every short read BLOCKED beside an A+ badge.
+    """
+    daily_hh_hl = bool(data.get("daily_hh_hl"))
+    h4_hh_hl    = bool(data.get("h4_hh_hl"))
+    daily_lh_ll = bool(data.get("daily_lh_ll"))
+    h4_trend    = data.get("h4_trend") or "Neutral"
+    if bias == "Short Bias":
+        return daily_lh_ll or (not h4_hh_hl and h4_trend in ("Bearish", "Bearish Lean"))
+    return daily_hh_hl or h4_hh_hl

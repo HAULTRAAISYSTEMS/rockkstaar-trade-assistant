@@ -50,6 +50,10 @@ def make_stock(**overrides) -> dict:
         "pct_from_ema20":  None,
     }
     base.update(overrides)
+    # Mirror data_fetcher: a "Bullish" daily trend is only ever set when the
+    # daily bars print HH/HL, and "Bearish" only with LH/LL.
+    base.setdefault("daily_hh_hl", base["daily_trend"] == "Bullish")
+    base.setdefault("daily_lh_ll", base["daily_trend"] == "Bearish")
     return base
 
 
