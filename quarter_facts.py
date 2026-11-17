@@ -1409,6 +1409,41 @@ def ttm_eps(facts: dict, end: str, split: dict | None = None) -> dict | None:
                          if split and split["ratio"] >= 1 and _split_inside(split, picked) else "")}
 
 
+def ttm_history(facts: dict, latest_end: str | None, split: dict | None = None,
+                years: int = 5) -> list[dict]:
+    """Trailing EPS at every quarter end over the last `years`, oldest first.
+
+    The quarter ends come from the filer's own EPS facts (quarterly and
+    annual), so a 52/53-week calendar is followed exactly. Each point is a
+    full four-quarter trailing sum on today's share basis; quarter ends where
+    four quarters cannot be assembled are left out rather than estimated.
+    """
+    from datetime import datetime, timedelta
+    try:
+        last = datetime.strptime(latest_end, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return []
+    floor = last - timedelta(days=int(365.25 * years) + 20)
+    ends = set()
+    for tag in QUARTER_TAGS["eps"][1]:
+        for f in _facts_for(tag, facts):
+            n = _days(f)
+            if n is None or not (QUARTER_DAYS[0] <= n <= QUARTER_DAYS[1] or 350 <= n <= 380):
+                continue
+            try:
+                e = datetime.strptime(f.get("end") or "", "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if floor <= e <= last:
+                ends.add(e.isoformat())
+    out = []
+    for end in sorted(ends):
+        t = ttm_eps(facts, end, split)
+        if t and t["quarters"] and t["quarters"][-1]["end"] == end:
+            out.append({"end": end, "eps": t["value"]})
+    return out
+
+
 def _split_inside(split: dict, picked: list) -> bool:
     """Did the split happen after the earliest of these quarters was first filed?"""
     first_end = picked[0][0] if picked else None
@@ -1481,6 +1516,11 @@ def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) 
     except Exception as exc:
         logger.debug("quarter facts: ttm eps for %s: %s", ticker, exc)
         _split, _ttm, _ttm_prior = None, None, None
+    try:
+        _ttm_hist = ttm_history(facts, filed.get("period_end"), _split) if _ttm else []
+    except Exception as exc:
+        logger.debug("quarter facts: ttm history for %s: %s", ticker, exc)
+        _ttm_hist = []
 
     return {
         "ticker": filed.get("ticker"),
@@ -1498,4 +1538,5 @@ def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) 
         "split": _split,
         "ttm_eps": _ttm,
         "ttm_eps_prior": _ttm_prior,
+        "ttm_history": _ttm_hist,
     }

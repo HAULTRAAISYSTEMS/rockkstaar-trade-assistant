@@ -12055,6 +12055,63 @@ def api_quarter_thesis_check(ticker):
     return jsonify(dict(result, ticker=ticker, saved=True))
 
 
+def pe_range_from(points: list, bars: dict | None) -> dict:
+    """P/E at each quarter end: the close that day (or the last before it)
+    over the trailing EPS reported for the four quarters ending then.
+
+    Bars are split-adjusted and the EPS is restated to today's share basis,
+    so a split inside the window does not show up as a fake re-rating.
+    Quarters with zero or negative trailing EPS have no P/E and are skipped.
+    """
+    import bisect
+    from datetime import datetime, timezone
+    ts = list((bars or {}).get("timestamps") or [])
+    closes = list((bars or {}).get("closes") or [])
+    out = []
+    for p in points or []:
+        try:
+            eps = float(p.get("eps"))
+            day = datetime.strptime(str(p.get("end")), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if eps <= 0 or not ts:
+            continue
+        cutoff = day.timestamp() + 86400            # include the end date itself
+        i = bisect.bisect_left(ts, cutoff) - 1
+        if i < 0 or cutoff - ts[i] > 8 * 86400:     # no close within a week of it
+            continue
+        price = closes[i]
+        if not price:
+            continue
+        out.append({"end": p["end"], "eps": round(eps, 4), "price": round(float(price), 2),
+                    "pe": round(float(price) / eps, 2)})
+    pes = sorted(x["pe"] for x in out)
+    if len(pes) < 6:
+        return {"points": out, "enough": False}
+
+    def q(frac):
+        k = (len(pes) - 1) * frac
+        lo, hi = int(k), min(int(k) + 1, len(pes) - 1)
+        return round(pes[lo] + (pes[hi] - pes[lo]) * (k - lo), 2)
+
+    return {"points": out, "enough": True, "low": pes[0], "high": pes[-1],
+            "median": q(0.5), "p25": q(0.25), "p75": q(0.75),
+            "from": out[0]["end"], "to": out[-1]["end"], "count": len(out)}
+
+
+@app.route("/api/quarter/pe-range/<ticker>", methods=["POST"])
+def api_quarter_pe_range(ticker):
+    """Where today's P/E sits against the company's own last five years."""
+    ticker = _valid_ticker(ticker)
+    if not ticker:
+        return jsonify({"error": "Invalid ticker"}), 400
+    points = (request.get_json(silent=True) or {}).get("points") or []
+    if not isinstance(points, list) or not points:
+        return jsonify({"ticker": ticker, "enough": False, "points": []})
+    result = pe_range_from(points[:40], _thesis_daily_bars(ticker))
+    return jsonify(dict(result, ticker=ticker))
+
+
 @app.route("/api/quarter/brief", methods=["POST"])
 def api_quarter_brief():
     """Why one check flagged, from the filing and nothing else.

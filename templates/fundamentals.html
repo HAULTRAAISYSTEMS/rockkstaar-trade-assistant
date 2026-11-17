@@ -1207,6 +1207,7 @@
     if (data.summary) html += '<div class="qd-summary">' + qdEsc(data.summary) + '</div>';
     document.getElementById('q-results').innerHTML = html;
     if (ticker) qdThesisCheck(ticker);
+    if (ticker) qdLoadPeRange(ticker);
   }
 
   // ── P/E: price ÷ trailing-twelve-month diluted EPS ────────────────────────
@@ -1246,7 +1247,62 @@
       '<button type="button" class="qd-pe-live" onclick="qdPriceTyped=false;qdPriceFor=\'\';qdLoadPrice(\'' + qdEsc(ticker) + '\')" title="Use the live price">↻ Live</button>' +
       '<span class="qd-pe-src" id="q-price-src">' + (qdPriceTyped ? 'your price' : (price ? 'live price' : '')) + '</span></div>' +
       '<div class="qd-basis">' + qdEsc(basis) + '</div>' +
+      qdPeRangeHtml(ticker, P.value) +
       (note ? '<p class="qd-says">' + qdEsc(note) + '</p>' : '<p class="qd-says">What you pay for each $1 of the last year’s earnings. Compare it with the company’s own history and its peers, not a fixed number.</p>') +
+      '</div>';
+  }
+
+  // ── Five-year P/E range ───────────────────────────────────────────────────
+  // "Is 37× expensive?" has no answer in the abstract; "37× against its own
+  // 18–42× over five years" does. Each point is the close on a quarter end
+  // over the trailing EPS reported for the four quarters ending then.
+  var qdTTMHist = null, qdPeRange = null, qdPeRangeFor = '';
+  async function qdLoadPeRange(ticker) {
+    if (!qdTTMHist || qdTTMHist.length < 6 || qdTTMFor !== ticker) return;
+    if (qdPeRangeFor === ticker && qdPeRange) return;
+    qdPeRangeFor = ticker; qdPeRange = {loading: true};
+    try {
+      const r = await fetch('/api/quarter/pe-range/' + encodeURIComponent(ticker), {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': qdCsrf()},
+        body: JSON.stringify({points: qdTTMHist})
+      });
+      const d = await r.json();
+      if (qdPeRangeFor !== ticker) return;
+      qdPeRange = d.enough ? d : {none: true};
+    } catch (e) { qdPeRange = {none: true}; }
+    if (document.querySelector('#q-results .qd-pe')) qdRefreshPe(ticker, true);
+  }
+  function qdPeRangeHtml(ticker, pe) {
+    if (qdPeRangeFor !== ticker || !qdPeRange) return '';
+    if (qdPeRange.loading) return '<div class="qd-range is-loading">Loading 5-year P/E range…</div>';
+    if (!qdPeRange.enough) return '';
+    const R = qdPeRange;
+    const lo = Math.min(R.low, pe || R.low), hi = Math.max(R.high, pe || R.high);
+    const span = (hi - lo) || 1, at = v => ((v - lo) / span * 100).toFixed(1) + '%';
+    let verdict = '', tone = '';
+    if (pe) {
+      const below = R.points.filter(p => p.pe < pe).length;
+      const pct = Math.round(below / R.points.length * 100);
+      if (pe < R.p25)      { verdict = 'Cheap for this stock — below its usual range'; tone = 'clean'; }
+      else if (pe <= R.p75){ verdict = 'Inside its usual range'; tone = 'watch'; }
+      else                 { verdict = 'Expensive for this stock — above its usual range'; tone = 'flag'; }
+      verdict += ' (higher than ' + pct + '% of the last ' + R.count + ' quarter-ends).';
+    }
+    const ticks = R.points.map(p => '<i style="left:' + at(p.pe) + '" title="' + qdEsc(p.end + ': ' + p.pe.toFixed(1) + '×') + '"></i>').join('');
+    return '<div class="qd-range">' +
+      '<div class="qd-range-hd"><span>5-year P/E range</span>' +
+        (pe ? '<span class="qd-badge qd-' + tone + '">' + (tone === 'clean' ? 'Low' : tone === 'flag' ? 'High' : 'Normal') + '</span>' : '') + '</div>' +
+      '<div class="qd-range-bar">' +
+        '<span class="qd-range-band" style="left:' + at(R.p25) + ';width:calc(' + at(R.p75) + ' - ' + at(R.p25) + ')"></span>' +
+        ticks +
+        '<span class="qd-range-med" style="left:' + at(R.median) + '" title="median"></span>' +
+        (pe ? '<span class="qd-range-now' + ((pe - lo) / span > 0.85 ? ' is-right' : (pe - lo) / span < 0.15 ? ' is-left' : '') +
+          '" style="left:' + at(pe) + '"><b>Today ' + pe.toFixed(1) + '×</b></span>' : '') +
+      '</div>' +
+      '<div class="qd-range-scale"><span>' + R.low.toFixed(1) + '× low</span><span>median ' + R.median.toFixed(1) +
+        '×</span><span>' + R.high.toFixed(1) + '× high</span></div>' +
+      (verdict ? '<p class="qd-range-says">' + qdEsc(verdict) + ' Usual range = middle half, ' +
+        R.p25.toFixed(1) + '–' + R.p75.toFixed(1) + '×, ' + qdEsc(R.from.slice(0, 7)) + ' to ' + qdEsc(R.to.slice(0, 7)) + '.</p>' : '') +
       '</div>';
   }
   function qdPe(ticker) {
@@ -1302,7 +1358,9 @@
   // PEG on every ticker. When it cannot be computed, say why rather than
   // leaving a gap that reads like the feature is missing for this stock.
   function qdPegText(P, peg, ttmGrowth, ttmP) {
-    if (peg != null) return peg.toFixed(2);
+    // PEG assumes steady growth. Off a one-year spike (Dell's +150%) it reads
+    // absurdly cheap, so say the number cannot be leaned on.
+    if (peg != null) return peg.toFixed(2) + (ttmGrowth > 0.5 ? ' ⚠ growth >50% — unreliable' : '');
     if (!P.ttm) return P.typedEps != null && isFinite(P.typedEps)
       ? 'needs “Walk me through it”' : 'needs EPS';
     if (P.nm) return 'n/m (losing money)';
@@ -1527,7 +1585,7 @@
         qdApplyShape(null);
         // Never leave a previous company's figures sitting under this ticker.
         QD_FIELDS.forEach(k => { const el = qdEl(k); if (el) el.value = ''; });
-        qdEl('per').value = ''; qdTTM = null; qdTTMPrior = null; qdSplit = null; qdCurrency = 'USD'; qdSource = 'sec'; qdMarkFilled();
+        qdEl('per').value = ''; qdTTM = null; qdTTMPrior = null; qdSplit = null; qdCurrency = 'USD'; qdSource = 'sec'; qdTTMHist = null; qdPeRange = null; qdPeRangeFor = ''; qdMarkFilled();
         { const bar = document.getElementById('q-fold'); if (bar) delete bar.dataset.auto; qdFold(false); }
         document.getElementById('q-results').innerHTML =
           '<h3>' + qdEsc(ticker) + '</h3>' +
@@ -1541,7 +1599,8 @@
 
       qdStatements = data;
       qdTTM = data.ttm_eps || null; qdTTMPrior = data.ttm_eps_prior || null; qdSplit = data.split || null;
-      qdCurrency = (data.currency || 'USD').toUpperCase(); qdSource = data.source || 'sec'; qdTTMFor = (data.ticker || ticker);
+      qdCurrency = (data.currency || 'USD').toUpperCase(); qdSource = data.source || 'sec';
+      qdTTMHist = data.ttm_history || null; qdPeRange = null; qdPeRangeFor = ''; qdTTMFor = (data.ticker || ticker);
       qdApplyShape(data.profile);
       qdEl('co').value = data.ticker || ticker;
       if (data.period_end) qdEl('per').value = 'Quarter ended ' + data.period_end;
