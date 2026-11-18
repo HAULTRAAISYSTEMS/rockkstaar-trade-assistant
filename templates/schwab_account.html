@@ -133,8 +133,32 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
 
   </div>
 
+  <div class="detail-card" style="margin:1rem 0;padding:1rem">
+    <h3 class="card-title">Manage Accounts</h3>
+    <p style="opacity:.75">Hide accounts or exclude them from Wealth Architect. Your Schwab accounts and transaction history are never deleted.</p>
+    {% for acct in account_data.accounts %}
+    {% set key = acct.account_hash or acct.account_number %}
+    {% set pref = account_preferences.get(key, {'visible': true, 'include_wealth': true}) %}
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.6rem;border-top:1px solid #293640;padding:.8rem 0">
+      <span><strong>···{{ acct.account_number[-4:] if acct.account_number else '?' }}</strong> · {{ acct.account_type }} · {{ acct.equity_positions|length }} holdings</span>
+      <div style="display:flex;flex-wrap:wrap;gap:.5rem">
+        {% for action, label in [(('hide' if pref.visible else 'show'), ('Hide' if pref.visible else 'Show')), (('wealth_off' if pref.include_wealth else 'wealth_on'), ('Exclude from Wealth' if pref.include_wealth else 'Include in Wealth'))] %}
+        <form method="post" action="{{ url_for('schwab_account_preferences_update') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="account_key" value="{{ key }}">
+          <input type="hidden" name="action" value="{{ action }}">
+          <button class="btn" type="submit">{{ label }}</button>
+        </form>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
   <!-- Per-account detail -->
   {% for acct in account_data.accounts %}
+  {% set key = acct.account_hash or acct.account_number %}
+  {% if account_preferences.get(key, {'visible': true}).visible %}
   <div class="detail-card schwab-acct-card">
     <h3 class="card-title">
       Account ···{{ acct.account_number[-4:] if acct.account_number else '?' }}
@@ -254,6 +278,7 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
     {% endif %}
 
   </div>
+  {% endif %}
   {% endfor %}
 
   <!-- Risk integration note -->
