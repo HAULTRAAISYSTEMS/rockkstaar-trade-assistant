@@ -5183,9 +5183,34 @@ def _board_quotes(tickers, stock_data, today=None):
                 er_days = d if 0 <= d <= 14 else None
         except ValueError:
             er_days = None
+        def _int(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+        rvol = row.get("rel_volume")
+        try:
+            rvol = float(rvol) if rvol is not None else None
+        except (TypeError, ValueError):
+            rvol = None
+        setup_type = (row.get("setup_type") or "").strip()
         out[t] = {"price": price, "chg": chg, "er_days": er_days,
-                  "as_of": row.get("last_updated")}
+                  "as_of": row.get("last_updated"),
+                  # What the scanner saw, for the automatic lists.
+                  "setup": _int(row.get("setup_score")),
+                  "catalyst": _int(row.get("catalyst_score")),
+                  "setup_type": "" if setup_type.lower() in ("no setup", "none") else setup_type,
+                  "bias": (row.get("trade_bias") or "").strip(),
+                  "rvol": rvol}
     return out
+
+
+def _scanner_rows(tickers, quotes):
+    """An automatic list's tickers, strongest setup first, then by name."""
+    def key(t):
+        q = quotes.get(t) or {}
+        return (-(q.get("setup") if q.get("setup") is not None else -1), t)
+    return sorted(tickers or [], key=key)
 
 
 def _zone_preload(tickers, quotes) -> dict:
@@ -5262,6 +5287,7 @@ def watchlists_page():
         active_structure=active_structure, can_organize=can_organize,
         price_alerts=price_alerts, personal_watchlists=PERSONAL_WATCHLISTS,
         board_quotes=board_quotes, zone_preload=zone_preload,
+        scanner_rows=_scanner_rows(active_tickers, board_quotes) if not can_organize else [],
         automatic_watchlists=DEFAULT_WATCHLISTS,
     )
 

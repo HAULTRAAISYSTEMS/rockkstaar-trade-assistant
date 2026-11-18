@@ -102,6 +102,25 @@
   .te-fold-all{display:flex;gap:6px}
   .te-fold-all button{padding:5px 9px;border:1px solid var(--elite-hairline);border-radius:7px;background:transparent;color:var(--elite-muted);font:700 9px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
   .te-fold-all button:hover{border-color:var(--elite-border);color:var(--elite-copy)}
+  .te-scan{padding:12px 18px 18px}
+  .te-scan-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  .te-scan-note{color:var(--elite-faint);font-size:11px;line-height:1.5}.te-scan-note .elite-live-dot{display:inline-block;margin-right:6px;vertical-align:middle}.te-scan-note b{color:var(--elite-copy)}
+  .te-scan-sort{display:flex;align-items:center;gap:6px}
+  .te-scan-sort button{padding:5px 10px;border:1px solid var(--elite-hairline);border-radius:999px;background:transparent;color:var(--elite-muted);font:700 10px var(--font-mono);cursor:pointer}
+  .te-scan-sort button.is-on{border-color:var(--elite-gold);color:var(--elite-gold-bright);background:rgba(var(--cc-accent-rgb, 229,185,79),.1)}
+  .te-scan-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:8px}
+  .te-scan-row{--sec:var(--elite-gold);display:grid;grid-template-columns:minmax(0,1fr) 58px 76px 22px;align-items:center;gap:10px;padding:9px 10px 9px 12px;border:1px solid var(--elite-hairline);border-radius:11px;background:rgba(255,255,255,.02);transition:border-color .12s,background .12s}
+  .te-scan-row:hover{border-color:var(--elite-border);background:rgba(255,255,255,.04)}
+  .te-scan-id{min-width:0}
+  .te-scan-sub{display:flex;gap:8px;margin-top:3px;overflow:hidden;color:var(--elite-faint);font:600 10px var(--font-mono);white-space:nowrap;text-overflow:ellipsis}
+  .te-bias.bullish{color:var(--pos-500)}.te-bias.bearish{color:var(--neg-500)}.te-bias.avoid{color:var(--warn-500)}
+  .te-score{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:help}
+  .te-score b{font:800 15px var(--font-mono)}
+  .te-score-bar{width:44px;height:4px;border-radius:2px;background:rgba(255,255,255,.07);overflow:hidden}.te-score-bar i{display:block;height:100%;border-radius:2px;background:currentColor}
+  .te-score.hi{color:var(--pos-500)}.te-score.mid{color:var(--warn-500)}.te-score.lo{color:var(--elite-faint)}
+  .te-scan-px{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25;cursor:help}
+  .te-scan-px b{color:var(--elite-copy);font:600 12px var(--font-mono)}.te-scan-px b.na{color:var(--elite-faint)}
+  .te-pop-link{display:block;padding:6px 7px;border-radius:7px;color:var(--elite-copy);font:600 11px var(--font-mono);text-decoration:none}.te-pop-link:hover{background:rgba(255,255,255,.06)}
   .te-symbol-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;padding:16px 18px}
   .te-symbol{display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid var(--border);border-radius:13px;background:rgba(255,255,255,.025)}
   .te-symbol-main{color:inherit;text-decoration:none;min-width:0;flex:1}.te-symbol-ticker{font:700 16px var(--font-mono);color:var(--cc-accent-hi, #f5d66d)}
@@ -114,7 +133,7 @@
      Dashed border, same rule as everywhere else in the app. */
   .badge.is-asof{border-style:dashed;cursor:help}
 
-  @media(max-width:720px){.hx-topbar{display:none}.te-deck>.te-deck-label{display:none}.te-alert-grid,.te-list-guide{grid-template-columns:1fr}.tbl-wrap{display:none}.te-alert-form{grid-template-columns:1fr}.te-alert-form .full{grid-column:auto}.te-symbol-grid{grid-template-columns:1fr 1fr}.te-alert-card{grid-template-columns:1fr}.te-alert-actions{justify-content:flex-start}.te-section-stack{padding:10px}.te-section-hd{flex-wrap:wrap;row-gap:6px}.te-section-name-form{flex:1}.te-col-meta{order:5;flex:1 1 100%;padding-left:30px}.te-quick-add{order:6;flex:1 1 100%}.te-section-list{grid-template-columns:1fr;padding:2px 8px 6px 12px}.te-ticker-row{grid-template-columns:12px minmax(0,1fr) 66px 56px 22px}.te-mv{display:none}.te-col-new .hx-input{flex:1 1 100%}.te-board-hd,.te-board-tools{padding:12px}.te-stat{min-width:0;flex:1}.te-global-add{min-width:0;flex:1 1 100%;flex-wrap:wrap}.te-global-add select{flex:1 1 100%}.te-global-add input[name="tickers"]{flex:1 1 0;min-width:0}.te-fold-all{flex:1}.te-stat>span{white-space:nowrap}}
+  @media(max-width:720px){.hx-topbar{display:none}.te-deck>.te-deck-label{display:none}.te-alert-grid,.te-list-guide{grid-template-columns:1fr}.tbl-wrap{display:none}.te-alert-form{grid-template-columns:1fr}.te-alert-form .full{grid-column:auto}.te-symbol-grid{grid-template-columns:1fr 1fr}.te-scan{padding:10px}.te-scan-list{grid-template-columns:1fr}.te-alert-card{grid-template-columns:1fr}.te-alert-actions{justify-content:flex-start}.te-section-stack{padding:10px}.te-section-hd{flex-wrap:wrap;row-gap:6px}.te-section-name-form{flex:1}.te-col-meta{order:5;flex:1 1 100%;padding-left:30px}.te-quick-add{order:6;flex:1 1 100%}.te-section-list{grid-template-columns:1fr;padding:2px 8px 6px 12px}.te-ticker-row{grid-template-columns:12px minmax(0,1fr) 66px 56px 22px}.te-mv{display:none}.te-col-new .hx-input{flex:1 1 100%}.te-board-hd,.te-board-tools{padding:12px}.te-stat{min-width:0;flex:1}.te-global-add{min-width:0;flex:1 1 100%;flex-wrap:wrap}.te-global-add select{flex:1 1 100%}.te-global-add input[name="tickers"]{flex:1 1 0;min-width:0}.te-fold-all{flex:1}.te-stat>span{white-space:nowrap}}
 </style>
 
 <section class="elite-hero">
@@ -340,9 +359,50 @@
     </div>
   </div>
   {% elif active_tickers %}
-  <div class="te-organizer-help" style="padding:14px 18px 0">This automatic setup list is managed by the scanner. Activate a personal or custom list to create sections and save a manual order.</div>
-  <div class="te-symbol-grid">
-    {% for t in active_tickers %}<div class="te-symbol"><a class="te-symbol-main" href="{{ url_for('stock_detail', ticker=t) }}"><div class="te-symbol-ticker">{{ t }}</div><div class="faint" style="font-size:11px">Open profile</div></a><form action="{{ url_for('watchlist_remove', ticker=t) }}" method="POST" style="margin:0;display:inline-flex"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}"><button type="submit" class="chip-x" title="Remove {{ t }}">×</button></form></div>{% endfor %}
+  <div class="te-scan">
+    <div class="te-scan-bar">
+      <div class="te-scan-note"><span class="elite-live-dot"></span><b>Scanner-managed</b> · tickers move in and out of this list as setups change. Build your own sections in a personal list.</div>
+      <div class="te-scan-sort" role="group" aria-label="Sort">
+        <span class="te-deck-label">Sort</span>
+        <button type="button" class="is-on" data-sort="setup">Setup score</button>
+        <button type="button" data-sort="chg">Day move</button>
+        <button type="button" data-sort="name">A–Z</button>
+      </div>
+    </div>
+    <div class="te-scan-list" id="te-scan-list">
+      {% for t in scanner_rows %}{% set q = board_quotes.get(t, {}) %}
+      <div class="te-scan-row" data-ticker="{{ t }}" data-setup="{{ q.setup if q.setup is not none else -1 }}" data-chg="{{ q.chg if q.chg is not none else -999 }}">
+        <div class="te-scan-id">
+          <div class="te-tk-main">
+            <a class="te-ticker-link" href="{{ url_for('stock_detail', ticker=t) }}">{{ t }}</a><a class="vz-badge" data-zone-badge="{{ t }}" hidden></a>
+            {% if q.er_days is not none %}<span class="te-er" title="Earnings in {{ q.er_days }} day{{ '' if q.er_days == 1 else 's' }}">ER {{ 'TODAY' if q.er_days == 0 else q.er_days ~ 'D' }}</span>{% endif %}
+          </div>
+          <div class="te-scan-sub">
+            {% if q.bias %}<span class="te-bias {{ q.bias|lower }}">{{ '▲' if q.bias|lower == 'bullish' else ('▼' if q.bias|lower == 'bearish' else '•') }} {{ q.bias }}</span>{% endif %}
+            {% if q.setup_type %}<span>{{ q.setup_type }}</span>{% endif %}
+            {% if q.rvol %}<span title="Relative volume: today against its average">RVOL {{ '%.1f'|format(q.rvol) }}×</span>{% endif %}
+            {% if not q.bias and not q.setup_type and not q.rvol %}<span>Waiting on the scanner</span>{% endif %}
+          </div>
+        </div>
+        {% set sc = q.setup %}
+        <div class="te-score {{ 'hi' if sc is not none and sc >= 7 else ('mid' if sc is not none and sc >= 4 else 'lo') }}" title="Setup {{ sc if sc is not none else '—' }}/10{{ ' · Catalyst ' ~ q.catalyst ~ '/10' if q.catalyst is not none else '' }}">
+          <b>{{ sc if sc is not none else '—' }}</b><span class="te-score-bar"><i style="width:{{ (sc or 0) * 10 }}%"></i></span>
+        </div>
+        <div class="te-scan-px" title="Last stored price{{ ' · updated ' ~ q.as_of[:16].replace('T', ' ') if q.as_of else '' }}">
+          {% if q.price is not none %}<b>{{ '%.2f'|format(q.price) }}</b>{% else %}<b class="na">—</b>{% endif %}
+          {% if q.chg is not none %}<span class="te-tk-chg {{ 'up' if q.chg >= 0 else 'dn' }}">{{ '%+.2f'|format(q.chg) }}%</span>{% endif %}
+        </div>
+        <details class="te-tk-menu">
+          <summary aria-label="Options for {{ t }}">⋯</summary>
+          <div class="te-tk-pop">
+            <a class="te-pop-link" href="{{ url_for('stock_detail', ticker=t) }}">Open profile</a>
+            <a class="te-pop-link" href="/thesis?ticker={{ t }}">Open thesis</a>
+            <form action="{{ url_for('watchlist_remove', ticker=t) }}" method="POST" style="margin:0"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}"><button type="submit" class="te-remove" title="Remove {{ t }}">Remove {{ t }}</button></form>
+          </div>
+        </details>
+      </div>
+      {% endfor %}
+    </div>
   </div>
   {% else %}<div class="faint" style="font-size:13px;padding:16px 18px">No tickers in this list yet — add some above. Newly added tickers load in the background.</div>{% endif %}
 </div>
@@ -428,6 +488,22 @@
       if (!menu.contains(event.target)) menu.removeAttribute('open');
     });
   });
+
+  // Automatic lists: sort in the page (the scanner owns their order).
+  const scan = document.getElementById('te-scan-list');
+  if (scan) {
+    document.querySelectorAll('.te-scan-sort button').forEach(btn => btn.addEventListener('click', () => {
+      document.querySelectorAll('.te-scan-sort button').forEach(b => b.classList.toggle('is-on', b === btn));
+      const by = btn.dataset.sort;
+      const rows = Array.from(scan.children);
+      rows.sort((a, b) => {
+        if (by === 'name') return a.dataset.ticker.localeCompare(b.dataset.ticker);
+        const d = parseFloat(b.dataset[by]) - parseFloat(a.dataset[by]);
+        return d || a.dataset.ticker.localeCompare(b.dataset.ticker);
+      });
+      rows.forEach(r => scan.appendChild(r));
+    }));
+  }
 
   const organizer = document.getElementById('organize-watchlist');
   if (!organizer) return;
