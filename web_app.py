@@ -22,7 +22,18 @@ app.register_blueprint(create_browser_push_blueprint(current_user=legacy.current
 app.register_blueprint(create_trade_tools_blueprint(current_user=legacy.current_user))
 app.register_blueprint(create_news_desk_blueprint(current_user=legacy.current_user,tracked_tickers=legacy.get_user_tracked_tickers))
 app.register_blueprint(create_notifications_blueprint(current_user=legacy.current_user))
-app.register_blueprint(create_wealth_blueprint(current_user=legacy.current_user))
+def _wealth_zone(ticker, price):
+    """The app's value zone for a ticker, restated at the given price."""
+    z = legacy._value_zones_cached(ticker)
+    if not z or not z.get("available"):
+        return None
+    if price:
+        from thesis import restate_zone
+        z = restate_zone(z, float(price))
+    return z
+
+
+app.register_blueprint(create_wealth_blueprint(current_user=legacy.current_user, zone_lookup=_wealth_zone))
 install_stock_research(app)
 
 @legacy.sock.route('/ws/live-research')

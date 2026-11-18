@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% import "_wealth_macros.html" as wa with context %}
+{% block title %}{{ ticker }} M.C.F.F. — Wealth Architect{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
+{% block content %}
+<div class="wa">
+{{ wa.head('research', ticker ~ ' · M.C.F.F.', 'Score each gate in order. Financials is filled from SEC filings; Moat, CEO and Future are your judgment. Your scores are what count.', portfolios, current, with_all=False, pills=False) }}
+<div id="mc" aria-live="polite"><section class="wa-card"><p class="wa-note">Loading {{ ticker }}: the first look at a company reads its filings and can take a few seconds.</p></section></div>
+</div>
+{{ wa.common_js() }}
+<script>
+(function () {
+  const T = {{ ticker|tojson }}, AI = {{ 'true' if ai_available else 'false' }};
+  const root = document.getElementById('mc');
+  const CLS = {'BUY ZONE': 'BUY', 'HOLD': 'HOLD', 'DO NOT BUY': 'DONT'};
+  let M = null, drafted = {};
+  load();
+  async function load() {
+    const d = await WA.api('/api/wealth/mcff/' + encodeURIComponent(T));
+    if (!d.ok) { root.innerHTML = '<section class="wa-card"><p class="wa-msg err">' + WA.esc(d.error || 'Could not load.') + '</p></section>'; return; }
+    M = d; render();
+  }
+  const fmtPct = v => v == null ? '' : (v * 100).toFixed(1);
+  function judged(g, n) {
+    const r = (M.research || {})[g] || {}, ev = M.evaluation.gates[g];
+    const srcs = (r.sources || []).map(s => (s.label && s.url && s.label !== s.url ? s.label + ' | ' : '') + (s.url || s.label)).join('\n');
+    const origin = r.drafted_by_ai ? '<span class="wa-origin ai" title="Started as an AI draft; saved by you">AI draft · reviewed by you</span>' : (ev.counted ? '<span class="wa-origin investor">Your judgment</span>' : '');
+    return '<section class="wa-card wa-gate" data-g="' + g + '"><span class="n">' + n + '/4</span><h2>' + M.labels[g] + origin + '</h2>' +
+      '<p class="wa-note" style="margin:-4px 0 10px">' + WA.esc(M.prompts[g]) + '</p>' +
+      '<div class="wa-gate-score"><b data-score-out>' + (r.score != null ? (+r.score).toFixed(1) : '—') + '</b><span class="' + (ev.passed === true ? 'up' : ev.passed === false ? 'dn' : 'muted') + '">' + (ev.passed === true ? 'passes' : ev.passed === false ? 'fails' : 'not scored') + ' · needs ' + ev.threshold + '</span></div>' +
+      '<input type="range" class="wa-range" min="0" max="10" step="0.5" name="score" value="' + (r.score != null ? r.score : 5) + '" aria-label="' + M.labels[g] + ' score">' +
+      '<div class="wa-form" style="grid-template-columns:1fr 1fr;margin-top:8px">' +
+      '<label class="wide" style="grid-column:1/-1">Evidence<textarea name="evidence" placeholder="What supports this score?">' + WA.esc(r.evidence || '') + '</textarea></label>' +
+      '<label class="wide" style="grid-column:1/-1">Risks<textarea name="risks" style="min-height:60px" placeholder="What would make you wrong?">' + WA.esc(r.risks || '') + '</textarea></label>' +
+      '<label class="wide" style="grid-column:1/-1">Sources · one per line, “label | https://…”<textarea name="sources" style="min-height:52px" placeholder="10-K Item 1 | https://www.sec.gov/…">' + WA.esc(srcs) + '</textarea></label>' +
+      '<label>Confidence<select name="confidence"><option value="">—</option>' + ['low', 'medium', 'high'].map(c => '<option ' + (r.confidence === c ? 'selected' : '') + '>' + c + '</option>').join('') + '</select></label>' +
+      '<label>Last verified<input type="date" name="verified_on" value="' + (r.verified_on || '') + '"></label>' +
+      '</div>' + (AI ? '<button type="button" class="wa-btn" data-draft="' + g + '" style="margin-top:8px">✦ Draft with AI</button><div class="wa-note" data-draft-note></div>' : '') + '</section>';
+  }
+  function fin() {
+    const f = M.evaluation.gates.financials;
+    return '<section class="wa-card wa-gate"><span class="n">3/4</span><h2>Financials<span class="wa-origin verified">Verified · SEC filings</span></h2>' +
+      '<div class="wa-gate-score"><b>' + (f.score != null ? f.score.toFixed(1) : '—') + '</b><span class="' + (f.passed === true ? 'up' : f.passed === false ? 'dn' : 'muted') + '">' + (f.passed === true ? 'passes' : f.passed === false ? 'fails' : 'no data') + ' · needs ' + f.threshold + '</span></div>' +
+      (f.note ? '<p class="wa-note">' + WA.esc(f.note) + '</p>' : '') +
+      '<p class="wa-note" style="margin-top:0">' + WA.esc((f.verdict || '') + (f.coverage ? ' · ' + f.coverage : '') + (f.verified_on ? ' · data from ' + f.verified_on : '') + (f.confidence ? ' · confidence ' + f.confidence : '')) + '</p>' +
+      '<ul class="wa-ev">' + (f.evidence || []).map(e => '<li><span>' + WA.esc(e.label) + '</span><b class="' + (e.passed ? 'up' : 'dn') + '">' + WA.esc(e.value) + '</b></li>').join('') + '</ul>' +
+      ((f.risks || []).length ? '<p class="wa-note dn">Red flags: ' + f.risks.map(WA.esc).join('; ') + '</p>' : '') +
+      '<p class="wa-note">' + (f.sources || []).map(s => s.url ? '<a href="' + WA.esc(s.url) + '">' + WA.esc(s.label) + '</a>' : WA.esc(s.label)).join(' · ') + '</p>' +
+      '<p class="wa-note">Score = the Fundamentals Engine scorecard percentage ÷ 10. Any red flag fails the gate.</p></section>';
+  }
+  function render() {
+    const ev = M.evaluation, v = ev.valuation, r = M.research || {}, A = M.assumptions;
+    let h = '<div class="wa-status-banner ' + CLS[ev.status] + '"><span class="st">' + ev.status + '</span><div class="why"><b>' + WA.esc(M.company || T) + '</b>' +
+      (M.price != null ? ' · ' + WA.money(M.price) + ' <span class="muted">(' + WA.esc(M.price_source || '') + (M.price_as_of ? ' · ' + WA.esc(M.price_as_of) : '') + ')</span>' : ' · no price') +
+      '<br>' + ev.reasons.map(WA.esc).join(' ') + '<br><span class="muted">' + WA.esc(v.zone_text) + '</span></div></div>';
+    h += '<form id="mf"><div class="wa-gates">' + judged('moat', 1) + judged('ceo', 2) + fin() + judged('future', 4) + '</div>';
+    h += '<div class="wa-two" style="margin-top:12px"><section class="wa-card"><h2>Buy zone <small>yours overrides the app\'s value zone</small></h2>' +
+      '<div class="wa-form" style="grid-template-columns:1fr 1fr"><label>Buy up to<input name="buy_high" inputmode="decimal" value="' + (r.buy_high || '') + '" placeholder="e.g. 130"></label><label>Floor (re-check below)<input name="buy_low" inputmode="decimal" value="' + (r.buy_low || '') + '" placeholder="optional"></label></div>' +
+      '<p class="wa-note">' + (M.value_zone ? 'App value zone now: ' + WA.esc(M.value_zone.zone_label || M.value_zone.zone) + (M.value_zone.accum_top ? ' · Accumulate up to ' + WA.money(M.value_zone.accum_top) + ' · Load up to ' + WA.money(M.value_zone.load_top) : '') : 'No app value zone for this company yet.') + ' The app never calls a price above your zone a buy.</p>' +
+      '<div class="wa-form wa-gate" style="grid-template-columns:1fr;margin-top:8px"><label>Thesis<textarea name="thesis" style="min-height:80px" placeholder="Why you own it, in a few sentences">' + WA.esc(r.thesis || '') + '</textarea></label></div></section>';
+    h += '<section class="wa-card"><h2>Scenarios <small>' + A.years + ' years · your assumptions</small></h2><div class="wa-scroll"><table class="wa-table"><thead><tr><th>Case</th><th>EPS growth %/yr</th><th>Exit P/E</th><th>Price in ' + A.years + 'y</th><th>Per year</th></tr></thead><tbody>' +
+      M.scenarios.map(s => '<tr><td>' + s.case + '</td><td><input class="wa-input" style="width:80px;min-height:30px" name="g_' + s.case + '" value="' + fmtPct(A.growth[s.case]) + '" inputmode="decimal"></td><td><input class="wa-input" style="width:70px;min-height:30px" name="pe_' + s.case + '" value="' + (A.exit_pe[s.case] ?? '') + '" inputmode="decimal"></td><td>' + (s.price_target ? WA.money(s.price_target) : '<span class="muted">needs ' + (s.missing || []).join(', ') + '</span>') + '</td><td class="' + WA.tone(s.annual_return_pct) + '">' + WA.pct(s.annual_return_pct) + '</td></tr>').join('') +
+      '</tbody></table></div><div class="wa-form" style="grid-template-columns:120px 1fr;margin-top:8px"><label>Years<input name="years" value="' + A.years + '" inputmode="numeric"></label></div>' +
+      '<p class="wa-note">Price in N years = EPS now × (1 + growth)<sup>N</sup> × exit P/E. EPS now = price ÷ trailing P/E (' + (M.pe ? (+M.pe).toFixed(1) + '×' : 'not available') + '). Blank fields use the starting points: ' + WA.esc(M.defaults.derived_from) + ' These are assumptions, not forecasts.</p></section></div>';
+    h += '<div style="display:flex;gap:10px;align-items:center;margin-top:12px"><button class="wa-btn is-gold" type="submit">Save research</button><span class="wa-msg" id="mmsg"></span></div></form>';
+    root.innerHTML = h;
+    root.querySelectorAll('.wa-gate input[type=range]').forEach(rg => rg.addEventListener('input', () => { rg.closest('.wa-gate').querySelector('[data-score-out]').textContent = (+rg.value).toFixed(1); rg.dataset.touched = '1'; }));
+    root.querySelectorAll('[data-draft]').forEach(b => b.addEventListener('click', () => draft(b)));
+    document.getElementById('mf').addEventListener('submit', save);
+  }
+  function gateData(g) {
+    const sec = root.querySelector('.wa-gate[data-g="' + g + '"]'), r = (M.research || {})[g] || {};
+    const rg = sec.querySelector('[name=score]');
+    const touched = rg.dataset.touched || r.score != null;
+    return {score: touched ? +rg.value : null, evidence: sec.querySelector('[name=evidence]').value, risks: sec.querySelector('[name=risks]').value,
+      sources: sec.querySelector('[name=sources]').value.split('\n').map(x => x.trim()).filter(Boolean).map(x => { const p = x.split('|'); return p.length > 1 ? {label: p[0].trim(), url: p.slice(1).join('|').trim()} : {label: x, url: x}; }),
+      confidence: sec.querySelector('[name=confidence]').value || null, verified_on: sec.querySelector('[name=verified_on]').value || null,
+      origin: 'investor', drafted_by_ai: !!(drafted[g] || r.drafted_by_ai)};
+  }
+  async function save(e) {
+    e.preventDefault();
+    const f = e.target, num = v => v === '' || v == null ? null : +v;
+    const body = {moat: gateData('moat'), ceo: gateData('ceo'), future: gateData('future'), buy_high: num(f.buy_high.value), buy_low: num(f.buy_low.value), thesis: f.thesis.value,
+      assumptions: {years: num(f.years.value), growth: {}, exit_pe: {}}};
+    ['conservative', 'base', 'optimistic'].forEach(c => { const g = f['g_' + c].value; body.assumptions.growth[c] = g === '' ? null : +g / 100; body.assumptions.exit_pe[c] = num(f['pe_' + c].value); });
+    const d = await WA.api('/api/wealth/mcff/' + encodeURIComponent(T), 'POST', body);
+    if (!d.ok) { document.getElementById('mmsg').textContent = d.error || 'Not saved.'; return; }
+    M = d; drafted = {}; render(); const m = document.getElementById('mmsg'); m.textContent = 'Saved.'; m.className = 'wa-msg ok';
+  }
+  async function draft(b) {
+    const g = b.dataset.draft, sec = b.closest('.wa-gate'), note = sec.querySelector('[data-draft-note]');
+    b.disabled = true; note.textContent = 'Drafting…';
+    const d = await WA.api('/api/wealth/mcff/' + encodeURIComponent(T) + '/draft', 'POST', {gate: g});
+    b.disabled = false;
+    if (!d.ok) { note.textContent = d.error || 'No draft.'; return; }
+    const x = d.draft;
+    sec.querySelector('[name=evidence]').value = x.evidence; sec.querySelector('[name=risks]').value = x.risks;
+    if (x.score != null) { const rg = sec.querySelector('[name=score]'); rg.value = x.score; rg.dataset.touched = '1'; sec.querySelector('[data-score-out]').textContent = (+x.score).toFixed(1); }
+    if (x.confidence) sec.querySelector('[name=confidence]').value = x.confidence;
+    drafted[g] = true;
+    note.innerHTML = '<span class="wa-origin ai">AI interpretation</span> Not counted until you edit and save it as yours. Verify: ' + (x.check || []).map(WA.esc).join(' · ');
+  }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% import "_wealth_macros.html" as wa with context %}
+{% block title %}Planner {{ year }} — Wealth Architect{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
+{% block content %}
+<div class="wa">
+{{ wa.head('plan', 'Seasonal Wealth Planner · ' ~ year, 'Plan contributions by month and portfolio, track them against what you actually deposited, and stay inside IRA limits.', portfolios, current, with_all=False, pills=False) }}
+<div class="wa-bar"><a class="wa-pill" href="?year={{ year - 1 }}">← {{ year - 1 }}</a><span class="wa-pill is-on">{{ year }}</span><a class="wa-pill" href="?year={{ year + 1 }}">{{ year + 1 }} →</a></div>
+{% if not portfolios %}
+<section class="wa-card wa-empty"><h2>Create a portfolio first</h2>{{ wa.create_portfolio(quick_start, kinds) }}</section>
+{% else %}
+<div id="pl"><section class="wa-card"><p class="wa-note">Loading…</p></section></div>
+{% endif %}
+</div>
+{{ wa.common_js() }}
+{% if portfolios %}
+<script>
+(function () {
+  const Y = {{ year }}, P = {{ portfolios|tojson }}, MONTHS = {{ months|tojson }}, SEASONS = {{ seasons|tojson }}, IRA = {{ ira_kinds|tojson }};
+  const root = document.getElementById('pl');
+  let plan = null;
+  load();
+  async function load() { const d = await WA.api('/api/wealth/plan/' + Y); plan = d.plan; render(d.view); }
+  function pname(id) { return (P.find(p => p.id === id) || {}).name || '?'; }
+  function render(v) {
+    let h = '<section class="wa-kpis">' +
+      '<div class="wa-kpi is-hero"><span>Planned for ' + Y + '</span><b>' + WA.money(v.planned_total) + '</b><em>' + WA.money(v.actual_total) + ' deposited so far</em></div>' +
+      ['Winter', 'Spring', 'Summer', 'Fall'].map(n => [n, v.seasons[n]]).map(([n, a]) => '<div class="wa-kpi"><span>' + n + '</span><b>' + WA.money(a) + '</b><em>' + SEASONS[n].map(m => MONTHS[m - 1]).join(' · ') + '</em></div>').join('') + '</section>';
+    // IRA
+    if (v.ira.length) {
+      h += '<section class="wa-card" style="margin-bottom:12px"><h2>IRA limits <small>Roth + traditional combined, per person</small></h2><div class="wa-grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">' +
+        v.ira.map(r => { const lim = r.limit ? r.limit.limit : null, pct = lim ? Math.min(r.actual / lim * 100, 100) : 0;
+          return '<div><div style="display:flex;justify-content:space-between;font:700 12px var(--font-mono)"><span>Tax year ' + r.tax_year + '</span><span>' + WA.money(r.actual) + (lim ? ' / ' + WA.money(lim) : '') + '</span></div>' +
+            '<div class="wa-prog" style="margin:6px 0"><i class="' + (lim && r.actual > lim ? 'over' : '') + '" style="width:' + pct + '%"></i></div>' +
+            '<div class="wa-note" style="margin:0">Planned ' + WA.money(r.planned) + (r.room != null ? ' · room left ' + WA.money(Math.max(r.room, 0)) : '') + (r.limit ? ' · source: ' + WA.esc(r.limit.source) : '') + '</div>' +
+            r.warnings.map(w => '<div class="wa-note dn">' + WA.esc(w) + '</div>').join('') + '</div>'; }).join('') + '</div>' +
+        (v.prior_year_window_open ? '<p class="wa-note">Until April 15 you can still designate an IRA deposit for ' + (Y - 1) + '. Set its tax year on the deposit in the Ledger, and tell your broker which year it is for.</p>' : '<p class="wa-note">Deposits made January 1 – April 15 can count toward the prior tax year; set that on the plan line or the ledger deposit, and tell your broker. Income limits apply to Roth contributions.</p>') + '</section>';
+    }
+    // Calendar grid
+    h += '<section class="wa-card" style="margin-bottom:12px"><h2>Month by month <small>planned · <span class="up">deposited</span></small></h2><div class="wa-scroll"><table class="wa-cal"><thead><tr><th>Portfolio</th>' +
+      MONTHS.map((m, i) => '<th class="' + (v.current_month === i + 1 ? 'now' : '') + '">' + m + '</th>').join('') + '<th>Total</th><th>Goal</th></tr></thead><tbody>' +
+      v.rows.map(r => '<tr><td><b>' + WA.esc(r.name) + '</b>' + (IRA.includes(r.kind) ? ' <span class="wa-tag">IRA</span>' : '') + '</td>' +
+        r.planned.map((p, i) => '<td class="' + (v.current_month === i + 1 ? 'now' : '') + '">' + (p ? WA.money(p, false).replace('.00', '') : '<span class="muted">·</span>') + (r.actual[i] ? '<span class="act ' + (r.actual[i] < p ? 'short' : '') + '">' + WA.money(r.actual[i]).replace('.00', '') + '</span>' : '') + '</td>').join('') +
+        '<td><b>' + WA.money(r.planned_total).replace('.00', '') + '</b><span class="act">' + WA.money(r.actual_total).replace('.00', '') + '</span></td><td>' + (r.goal ? WA.money(r.goal).replace('.00', '') + '<span class="act">' + r.goal_pct.toFixed(0) + '%</span>' : '<span class="muted">—</span>') + '</td></tr>').join('') +
+      '</tbody></table></div>' + v.rows.filter(r => r.behind_by > 0.5).map(r => '<p class="wa-note">' + WA.esc(r.name) + ': ' + WA.money(r.behind_by) + ' behind plan to date.</p>').join('') + '</section>';
+    // Editor
+    h += '<section class="wa-card"><h2>Edit the plan</h2><div id="lines"></div><button type="button" class="wa-btn" id="add-line" style="margin:8px 0">＋ Add a contribution line</button>' +
+      '<div class="wa-form" style="margin-top:10px">' + P.map(p => '<label>' + WA.esc(p.name) + ' goal ($)<input data-goal="' + p.id + '" inputmode="decimal" value="' + ((plan.goals || {})[p.id] || '') + '"></label><label>' + WA.esc(p.name) + ' target %<input data-target="' + p.id + '" inputmode="decimal" value="' + ((plan.targets || {})[p.id] ?? '') + '" placeholder="of new money"></label>').join('') +
+      '<label>Cash reserve to keep ($)<input id="reserve" inputmode="decimal" value="' + (plan.cash_reserve || '') + '"></label>' +
+      '<label class="wa-toggle"><input type="checkbox" id="age50" ' + (plan.age_50_plus ? 'checked' : '') + '> Age 50 or older by Dec 31 (adds the IRA catch-up)</label></div>' +
+      '<div style="display:flex;gap:10px;align-items:center;margin-top:10px"><button class="wa-btn is-gold" id="save" type="button">Save plan</button><span class="wa-msg" id="pmsg"></span></div>' +
+      '<p class="wa-note">Buy-zone alerts: when a company you research reaches BUY ZONE, it shows on the <a href="/wealth/research">M.C.F.F. list</a> and ranks in <a href="/wealth/next-dollar">Next Dollar</a>.</p></section>';
+    root.innerHTML = h;
+    const lines = document.getElementById('lines');
+    (plan.entries || []).forEach(e => lines.insertAdjacentHTML('beforeend', line(e)));
+    if (!(plan.entries || []).length) lines.insertAdjacentHTML('beforeend', line({}));
+    document.getElementById('add-line').addEventListener('click', () => lines.insertAdjacentHTML('beforeend', line({})));
+    lines.addEventListener('click', ev => {
+      const s = ev.target.closest('[data-season]'); if (s) { const ln = s.closest('.pl-line'); const ms = SEASONS[s.dataset.season]; ln.querySelectorAll('[name=m]').forEach(c => { c.checked = ms.includes(+c.value); }); }
+      const x = ev.target.closest('[data-del]'); if (x) x.closest('.pl-line').remove();
+    });
+    document.getElementById('save').addEventListener('click', save);
+  }
+  function line(e) {
+    const ms = e.months || [];
+    return '<div class="pl-line wa-form" style="padding:10px 0;border-bottom:1px solid var(--elite-hairline)">' +
+      '<label>Portfolio<select name="pid">' + P.map(p => '<option value="' + p.id + '" ' + (e.portfolio_id === p.id ? 'selected' : '') + '>' + WA.esc(p.name) + '</option>').join('') + '</select></label>' +
+      '<label>Kind<select name="kind"><option value="monthly" ' + (e.kind !== 'one_time' ? 'selected' : '') + '>Monthly</option><option value="one_time" ' + (e.kind === 'one_time' ? 'selected' : '') + '>One-time</option></select></label>' +
+      '<label>Amount ($)<input name="amount" inputmode="decimal" value="' + (e.amount || '') + '"></label>' +
+      '<label>Label<input name="label" maxlength="60" value="' + WA.esc(e.label || '') + '" placeholder="e.g. tax refund"></label>' +
+      '<label title="IRA only: Jan–Apr 15 deposits can count toward the prior year">Tax year<select name="ty"><option value="' + Y + '">' + Y + '</option><option value="' + (Y - 1) + '" ' + (e.tax_year === Y - 1 ? 'selected' : '') + '>' + (Y - 1) + '</option></select></label>' +
+      '<div class="wa-months">' + MONTHS.map((m, i) => '<label><input type="checkbox" name="m" value="' + (i + 1) + '" ' + (ms.includes(i + 1) ? 'checked' : '') + '>' + m + '</label>').join('') +
+      ['Winter', 'Spring', 'Summer', 'Fall'].map(s => '<button type="button" class="wa-btn" style="padding:4px 8px" data-season="' + s + '">' + s + '</button>').join('') + '<button type="button" class="wa-x" data-del title="Remove line">×</button></div></div>';
+  }
+  async function save() {
+    const entries = [...document.querySelectorAll('.pl-line')].map(l => ({portfolio_id: +l.querySelector('[name=pid]').value, kind: l.querySelector('[name=kind]').value,
+      amount: l.querySelector('[name=amount]').value, label: l.querySelector('[name=label]').value, tax_year: +l.querySelector('[name=ty]').value,
+      months: [...l.querySelectorAll('[name=m]:checked')].map(c => +c.value)}));
+    const goals = {}, targets = {};
+    document.querySelectorAll('[data-goal]').forEach(i => { if (i.value) goals[i.dataset.goal] = i.value; });
+    document.querySelectorAll('[data-target]').forEach(i => { if (i.value !== '') targets[i.dataset.target] = i.value; });
+    const d = await WA.api('/api/wealth/plan/' + Y, 'POST', {entries, goals, targets, cash_reserve: document.getElementById('reserve').value, age_50_plus: document.getElementById('age50').checked});
+    if (!d.ok) { document.getElementById('pmsg').textContent = d.error || 'Not saved.'; return; }
+    plan = d.plan; render(d.view); const m = document.getElementById('pmsg'); m.textContent = 'Saved.'; m.className = 'wa-msg ok';
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}

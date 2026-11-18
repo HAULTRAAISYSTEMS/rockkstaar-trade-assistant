@@ -28,6 +28,7 @@
         <label data-f="amount"><span data-l="amount">Amount</span><input name="amount" inputmode="decimal" placeholder="2000"></label>
         <label data-f="fees">Fees<input name="fees" inputmode="decimal" placeholder="0"></label>
         <label data-f="ratio">Split ratio<input name="ratio" inputmode="decimal" placeholder="10 = 10-for-1"></label>
+        {% if current.kind in ('roth_ira', 'traditional_ira') %}<label data-f="tax_year" title="Jan 1 – Apr 15 deposits can count toward the prior year">IRA tax year<input name="tax_year" inputmode="numeric" placeholder="same as date"></label>{% endif %}
         <label class="wide">Note<input name="note" maxlength="200" placeholder="Optional"></label>
         <button class="wa-btn is-gold" type="submit">Add</button>
       </form>
@@ -43,7 +44,7 @@
         <tbody>
         {% for t in txs %}
         <tr>
-          <td>{{ t.date }}</td>
+          <td>{{ t.date }}{% if t.tax_year %}<span class="wa-sub">for {{ t.tax_year }}</span>{% endif %}</td>
           <td style="text-align:right"><span class="wa-tag {{ t.type }}">{{ t.type.replace('_', ' ') }}</span></td>
           <td>{{ t.ticker or '' }}</td>
           <td>{% if t.type == 'SPLIT' %}{{ ('×' ~ t.ratio) if t.ratio else ('+' ~ wa.qty(t.shares) ~ ' sh') }}{% else %}{{ wa.qty(t.shares) if t.shares else '' }}{% endif %}</td>
@@ -115,7 +116,7 @@
     TRANSFER_OUT: 'Shares moved out to another account. Not a sale.'
   };
   const FIELDS = {
-    DEPOSIT: ['amount'], WITHDRAWAL: ['amount'], INTEREST: ['amount'], FEE: ['amount'], TAX: ['amount'],
+    DEPOSIT: ['amount', 'tax_year'], WITHDRAWAL: ['amount'], INTEREST: ['amount'], FEE: ['amount'], TAX: ['amount'],
     DIVIDEND: ['ticker', 'amount'], BUY: ['ticker', 'shares', 'price', 'fees'], SELL: ['ticker', 'shares', 'price', 'fees'],
     REINVEST: ['ticker', 'shares', 'price'], SPLIT: ['ticker', 'ratio', 'shares'],
     TRANSFER_IN: ['ticker', 'shares', 'price', 'amount'], TRANSFER_OUT: ['ticker', 'shares', 'amount']

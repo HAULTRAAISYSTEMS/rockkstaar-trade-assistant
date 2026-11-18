@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% import "_wealth_macros.html" as wa with context %}
+{% block title %}Next Dollar — Wealth Architect{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
+{% block content %}
+<div class="wa">
+{{ wa.head('next', 'Next Dollar', 'Where should the next dollar go? Each candidate is checked against your M.C.F.F. gates, your buy zone, your position limit and its scenarios. Holding cash is always an option.', portfolios, current, with_all=False) }}
+{% if not portfolios %}
+<section class="wa-card wa-empty"><h2>Create a portfolio first</h2>{{ wa.create_portfolio(quick_start, kinds) }}</section>
+{% else %}
+<div class="wa-lab">
+  <section class="wa-card">
+    <h2>Your question</h2>
+    <form class="wa-form" id="nd" style="grid-template-columns:1fr 1fr">
+      <label>Amount<input name="amount" inputmode="decimal" placeholder="500" required></label>
+      <label title="Optional: candidates whose base case is below this are left out">Hurdle %/yr<input name="hurdle_pct" inputmode="decimal" placeholder="optional"></label>
+      <div class="wide" style="grid-column:1/-1">
+        <div class="wa-kicker" style="margin-bottom:6px">Candidates · up to 12</div>
+        <div class="wa-cands" id="cands">
+          {% for t in candidates %}<label><input type="checkbox" value="{{ t }}" {{ 'checked' if loop.index <= 6 }}>{{ t }}{% if t not in researched %}<span class="muted" title="No M.C.F.F. research yet">*</span>{% endif %}</label>{% endfor %}
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px"><input class="wa-input" id="add-t" maxlength="10" placeholder="Add ticker" style="text-transform:uppercase;max-width:160px"><button type="button" class="wa-btn" id="add-b">Add</button></div>
+        {% if candidates|reject('in', researched)|list %}<p class="wa-note">* not researched yet: these cannot reach BUY ZONE until you score them in M.C.F.F.</p>{% endif %}
+      </div>
+      <button class="wa-btn is-gold" type="submit" style="grid-column:1/-1">Rank for {{ current.name }}</button>
+    </form>
+    <p class="wa-note">Ranking rules, in order: all four gates pass inside the buy zone → stays under your max position ({{ (current.max_position_pct|string ~ '%') if current.max_position_pct else 'none set' }}) → clears your hurdle → highest base-case return, then best conservative case. A fallen price or a lower average cost never moves a stock up.</p>
+  </section>
+  <section class="wa-card" id="out"><h2>Ranking</h2><p class="wa-note">Enter an amount and pick candidates.</p></section>
+</div>
+{% endif %}
+</div>
+{{ wa.common_js() }}
+{% if current %}
+<script>
+(function () {
+  const PID = {{ current.id }};
+  const CLS = {'BUY ZONE': 'BUY', 'HOLD': 'HOLD', 'DO NOT BUY': 'DONT', 'HOLD CASH': 'CASH'};
+  const box = document.getElementById('cands');
+  document.getElementById('add-b').addEventListener('click', () => {
+    const i = document.getElementById('add-t'), t = i.value.trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(t) || box.querySelector('input[value="' + t + '"]')) return;
+    box.insertAdjacentHTML('beforeend', '<label><input type="checkbox" value="' + t + '" checked>' + t + '<span class="muted">*</span></label>'); i.value = '';
+  });
+  document.getElementById('nd').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = document.getElementById('out');
+    const tickers = [...box.querySelectorAll('input:checked')].map(i => i.value);
+    out.innerHTML = '<h2>Ranking</h2><p class="wa-note">Checking ' + tickers.length + ' candidates against their gates and filings…</p>';
+    const d = await WA.api('/api/wealth/next-dollar', 'POST', {portfolio_id: PID, amount: e.target.amount.value, hurdle_pct: e.target.hurdle_pct.value || null, tickers});
+    if (!d.ok) { out.innerHTML = '<h2>Ranking</h2><p class="wa-msg err">' + WA.esc(d.error) + '</p>'; return; }
+    let h = '<h2>Ranking <small>' + WA.money(d.amount) + '</small></h2><div class="wa-callout" style="margin:0 0 12px"><b>' + WA.esc(d.verdict) + '</b>' +
+      (d.over_cash ? '<br>Note: ' + WA.money(d.amount) + ' is more than the ' + WA.money(d.cash_available) + ' cash this portfolio holds.' : '') + '</div><div class="wa-rank">';
+    d.rows.forEach((r, i) => {
+      const cash = r.ticker === 'CASH';
+      h += '<article class="' + (i === 0 ? 'top' : '') + '"><span class="rk">' + r.rank + '</span><div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        (cash ? '<b style="font:800 15px var(--font-mono)">Hold cash</b>' : '<a class="wa-tk" style="font:800 15px var(--font-mono)" href="/wealth/research/' + encodeURIComponent(r.ticker) + '">' + WA.esc(r.ticker) + '</a>') +
+        '<span class="wa-chip ' + (CLS[r.status] || 'NONE') + '">' + WA.esc(r.status) + '</span>' +
+        (!cash && r.price ? '<span class="muted" style="font:600 11px var(--font-mono)">' + WA.money(r.price) + (r.shares ? ' · ' + (+r.shares).toFixed(4).replace(/\.?0+$/, '') + ' sh' : '') + '</span>' : '') + '</div>' +
+        (r.why.length ? '<ul>' + r.why.map(x => '<li>' + WA.esc(x) + '</li>').join('') + '</ul>' : '') +
+        (r.blocks.length ? '<ul class="blocks">' + r.blocks.map(x => '<li>' + WA.esc(x) + '</li>').join('') + '</ul>' : '') + '</div>' +
+        (cash ? '' : '<div class="nums"><span>Cons.</span><span>Base</span><span>Opt.</span><b class="' + WA.tone(r.conservative_pct) + '">' + WA.pct(r.conservative_pct, 1) + '</b><b class="' + WA.tone(r.base_pct) + '">' + WA.pct(r.base_pct) + '</b><b class="' + WA.tone(r.optimistic_pct) + '">' + WA.pct(r.optimistic_pct) + '</b>' +
+          '<span>Weight</span><span>after</span><span>Sector</span><b>' + (r.weight_before_pct != null ? r.weight_before_pct.toFixed(1) + '%' : '—') + '</b><b>' + (r.weight_after_pct != null ? r.weight_after_pct.toFixed(1) + '%' : '—') + '</b><b>' + (r.sector_after_pct != null ? r.sector_after_pct.toFixed(1) + '%' : '—') + '</b></div>') +
+        '</article>';
+    });
+    h += '</div><p class="wa-note">Returns are per year over each company\'s scenario horizon, from your own growth and exit-P/E assumptions on its M.C.F.F. page. They are what-ifs, not forecasts, and this is decision support, not financial advice.</p>';
+    out.innerHTML = h;
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}
