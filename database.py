@@ -1064,6 +1064,17 @@ def init_db():
         )
     """))
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_wa_tx_portfolio ON wa_transactions (user_id, portfolio_id, date)")
+    # Broker snapshots are separate from the immutable transaction ledger.
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS wa_broker_snapshots (
+            user_id INTEGER NOT NULL,
+            broker TEXT NOT NULL,
+            account_key TEXT NOT NULL,
+            snapshot_json TEXT NOT NULL,
+            synced_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, broker, account_key)
+        )
+    """))
     # IRA deposits made Jan 1 – Apr 15 can count toward the prior tax year.
     if _USE_POSTGRES:
         cursor.execute("ALTER TABLE wa_transactions ADD COLUMN IF NOT EXISTS tax_year INTEGER")
