@@ -76,7 +76,8 @@ def test_board_renders_columns_with_quick_add_and_prices(board):
     html = c.get("/watchlists").get_data(as_text=True)
     assert 'id="sec-7"' in html and 'id="sec-none"' in html
     assert 'name="section_id" value="7"' in html and "Add to Foundation…" in html
-    assert "$110.00" in html and "+10.00%" in html and "-5.00%" in html
+    assert ">110.00<" in html and "+10.00%" in html and "-5.00%" in html
+    assert "te-fold" in html and "data-fold=\"close\"" in html
     assert "te-col-new" in html
 
 
