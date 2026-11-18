@@ -63,7 +63,15 @@ def _zone_for_ticker(ticker: str) -> dict:
                     val[k] = val[k] * closes[-1] / old
         val["price"] = float(closes[-1])
         data = dict(data, valuation=val)
-    return zone_summary(data, ticker, bars)
+    z = zone_summary(data, ticker, bars)
+    # The daily scan builds every watched ticker anyway; saving it means the
+    # badges are already there the next time a page asks.
+    try:
+        from database import save_value_zones_cache
+        save_value_zones_cache(ticker, z, time.time())
+    except Exception as exc:
+        logger.debug("value zone scan: not saved for %s: %s", ticker, exc)
+    return z
 
 
 def changes(prev: str | None, z: dict) -> str | None:

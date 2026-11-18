@@ -1028,6 +1028,17 @@ def init_db():
         )
     """))
 
+    # Value-zone badges (Load / Accum / Fair / Pricey). Kept here so they
+    # survive deploys and worker restarts and are shared by every worker;
+    # in memory only, a restart meant rebuilding every ticker from scratch.
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS value_zones_cache (
+            ticker    TEXT PRIMARY KEY,
+            data_json TEXT NOT NULL,
+            built_at  DOUBLE PRECISION NOT NULL
+        )
+    """))
+
     # Finnhub /stock/metric TTM cache — one row per (ticker, date), 24-hr TTL
     cursor.execute(_adapt_ddl("""
         CREATE TABLE IF NOT EXISTS finnhub_metrics_cache (
@@ -3589,6 +3600,46 @@ def save_fundamentals_cache(ticker: str, data: dict) -> None:
     )
     conn.commit()
     conn.close()
+
+
+def get_value_zones_cache_many(tickers) -> dict:
+    """{ticker: (built_at_epoch, zone_dict)} for the tickers that have a row."""
+    import json as _json
+    tickers = [t.upper() for t in tickers or []]
+    if not tickers:
+        return {}
+    out = {}
+    conn = get_db()
+    try:
+        for i in range(0, len(tickers), 200):
+            chunk = tickers[i:i + 200]
+            marks = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT ticker, data_json, built_at FROM value_zones_cache WHERE ticker IN ({marks})",
+                tuple(chunk),
+            ).fetchall()
+            for r in rows:
+                try:
+                    out[r["ticker"]] = (float(r["built_at"]), _json.loads(r["data_json"]))
+                except Exception:
+                    continue
+    finally:
+        conn.close()
+    return out
+
+
+def save_value_zones_cache(ticker: str, data: dict, built_at: float) -> None:
+    import json as _json
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO value_zones_cache (ticker, data_json, built_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(ticker) DO UPDATE SET data_json = excluded.data_json, built_at = excluded.built_at",
+            (ticker.upper(), _json.dumps(data, default=str), float(built_at)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
