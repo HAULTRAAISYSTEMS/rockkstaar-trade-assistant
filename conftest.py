@@ -45,3 +45,16 @@ def _no_live_yahoo_statements(monkeypatch):
             raise RuntimeError("offline in tests")
     monkeypatch.setattr(quarter_yahoo, "_ticker", _Offline)
     quarter_yahoo._CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
+def _value_zone_cache_in_memory(monkeypatch):
+    """Value-zone badges persist to the database in the app. In tests each
+    test gets its own empty store, so one test's zones never leak into the
+    next through the shared database file."""
+    import database
+    store = {}
+    monkeypatch.setattr(database, "get_value_zones_cache_many",
+                        lambda ts: {t.upper(): store[t.upper()] for t in ts if t.upper() in store})
+    monkeypatch.setattr(database, "save_value_zones_cache",
+                        lambda t, z, at: store.__setitem__(t.upper(), (at, z)))

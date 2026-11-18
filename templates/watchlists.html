@@ -405,6 +405,7 @@
 
 {% block scripts %}
 {{ super() }}
+<script>window.VZ_PRELOAD = {{ (zone_preload or {})|tojson }};</script>
 <script src="{{ url_for('static', filename='js/value_badges.js') }}" defer></script>
 <script>
 (function () {

@@ -38,6 +38,7 @@ def board(monkeypatch):
     monkeypatch.setattr(legacy, "get_watchlist_structure", structure)
     monkeypatch.setattr(legacy, "move_watchlist_ticker", move)
     monkeypatch.setattr(legacy, "get_price_alerts", lambda uid: [])
+    monkeypatch.setattr(legacy, "_zone_preload", lambda tickers, quotes: {})
     monkeypatch.setattr(legacy, "get_all_stock_data", lambda: [
         {"ticker": "NVDA", "current_price": 110.0, "prev_close": 100.0, "earnings_date": None},
         {"ticker": "KLAC", "current_price": 95.0, "prev_close": 100.0, "earnings_date": None},

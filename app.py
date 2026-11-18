@@ -5188,6 +5188,32 @@ def _board_quotes(tickers, stock_data, today=None):
     return out
 
 
+def _zone_preload(tickers, quotes) -> dict:
+    """Value-zone badges already known for these tickers, written into the
+    page so they show with it instead of after a round trip. Which zone a
+    ticker sits in is restated from the stored price here; the page's own
+    fetch then restates it from the live price. Unknown tickers start
+    building now, so they are ready sooner."""
+    out = {}
+    try:
+        _load_value_zones(list(tickers or []))
+        from thesis import restate_zone
+    except Exception:
+        return out
+    for t in tickers or []:
+        try:
+            z = _value_zones_cached(t)
+            if not z or not z.get("available"):
+                continue
+            px = (quotes.get(t) or {}).get("price")
+            if isinstance(px, (int, float)) and px > 0:
+                z = restate_zone(z, float(px))
+            out[t] = z
+        except Exception:
+            continue
+    return out
+
+
 @app.route("/watchlists")
 def watchlists_page():
     """Watchlists settings — create / rename / activate / delete lists and
@@ -5208,6 +5234,7 @@ def watchlists_page():
     can_organize = bool(active_wl and active_wl.get("name") not in DEFAULT_WATCHLISTS)
     stock_data     = {row["ticker"]: row for row in get_all_stock_data()}
     board_quotes   = _board_quotes(active_tickers, stock_data)
+    zone_preload   = _zone_preload(active_tickers, board_quotes)
     price_alerts   = get_price_alerts(uid)
     for alert in price_alerts:
         quote = stock_data.get(alert["ticker"], {})
@@ -5234,7 +5261,7 @@ def watchlists_page():
         wl_counts=wl_counts, active_tickers=active_tickers,
         active_structure=active_structure, can_organize=can_organize,
         price_alerts=price_alerts, personal_watchlists=PERSONAL_WATCHLISTS,
-        board_quotes=board_quotes,
+        board_quotes=board_quotes, zone_preload=zone_preload,
         automatic_watchlists=DEFAULT_WATCHLISTS,
     )
 
@@ -11429,23 +11456,66 @@ _VALUE_ZONES_LOCK = threading.Lock()
 _VALUE_ZONES_SLOTS = threading.BoundedSemaphore(3)
 
 
+def _store_value_zones(ticker: str, out: dict) -> None:
+    """Keep a built zone in memory and in the database, so a deploy or a
+    worker restart doesn't send every ticker back to a cold build."""
+    now = _time.time()
+    _VALUE_ZONES[ticker] = (now, out)
+    try:
+        from database import save_value_zones_cache
+        save_value_zones_cache(ticker, out, now)
+    except Exception as exc:
+        logger.debug("value zones not saved for %s: %s", ticker, exc)
+
+
 def build_value_zones(ticker: str) -> dict:
     from fundamentals_engine import get_fundamentals
     from thesis import zone_summary
     data = _with_live_price(get_fundamentals(ticker), _thesis_live_price(ticker))
     out = zone_summary(data, ticker, _thesis_daily_bars(ticker))
-    _VALUE_ZONES[ticker] = (_time.time(), out)
+    _store_value_zones(ticker, out)
     return out
 
 
+def _load_value_zones(tickers) -> None:
+    """Fill memory from the database for tickers this worker hasn't seen."""
+    now = _time.time()
+    want = [t for t in tickers if not (_VALUE_ZONES.get(t) and now - _VALUE_ZONES[t][0] < _VALUE_ZONES_TTL)]
+    if not want:
+        return
+    try:
+        from database import get_value_zones_cache_many
+        rows = get_value_zones_cache_many(want)
+    except Exception as exc:
+        logger.debug("value zones cache read failed: %s", exc)
+        return
+    for t, (built, z) in rows.items():
+        if not isinstance(z, dict):
+            continue
+        mine = _VALUE_ZONES.get(t)
+        if not mine or mine[0] < built:
+            _VALUE_ZONES[t] = (built, z)
+
+
 def _value_zones_cached(ticker: str, start: bool = True) -> dict | None:
+    """The ticker's zones, without waiting on a build.
+
+    Fresh: returned. Older than the TTL: still returned straight away (the
+    dollar levels move slowly, and which zone the price sits in is restated
+    from the live price anyway) while a rebuild runs behind it. Never built:
+    None, and a build starts.
+    """
     hit = _VALUE_ZONES.get(ticker)
+    if hit is None:
+        _load_value_zones([ticker])
+        hit = _VALUE_ZONES.get(ticker)
     if hit and _time.time() - hit[0] < _VALUE_ZONES_TTL:
         return hit[1]
+    stale = hit[1] if hit else None
     if start:
         with _VALUE_ZONES_LOCK:
             if ticker in _VALUE_ZONES_BUILDING:
-                return None
+                return stale
             _VALUE_ZONES_BUILDING.add(ticker)
 
         def _run():
@@ -11454,11 +11524,16 @@ def _value_zones_cached(ticker: str, start: bool = True) -> dict | None:
                     build_value_zones(ticker)
             except Exception as exc:
                 logger.debug("value zones failed for %s: %s", ticker, exc)
-                _VALUE_ZONES[ticker] = (_time.time(), {"available": False, "ticker": ticker})
+                prev = _VALUE_ZONES.get(ticker)
+                if prev and (prev[1] or {}).get("available"):
+                    # Keep showing the last good badge; try again in 30 minutes.
+                    _VALUE_ZONES[ticker] = (_time.time() - _VALUE_ZONES_TTL + 1800, prev[1])
+                else:
+                    _VALUE_ZONES[ticker] = (_time.time(), {"available": False, "ticker": ticker})
             finally:
                 _VALUE_ZONES_BUILDING.discard(ticker)
         threading.Thread(target=_run, daemon=True, name=f"zones-{ticker}").start()
-    return None
+    return stale
 
 
 _THESIS_PEERS: dict = {}
@@ -11562,6 +11637,7 @@ def api_value_zones():
             live = _mkt.live_quotes(tickers) or {}
         except Exception:
             live = {}
+    _load_value_zones(tickers)            # one query for the whole batch
     for t in tickers:
         z = _value_zones_cached(t)
         if z is None:
@@ -11607,7 +11683,7 @@ def thesis_view():
                 # Opening the page refreshes the chart/watchlist zones too.
                 try:
                     from thesis import zone_summary
-                    _VALUE_ZONES[ticker] = (_time.time(), zone_summary(data, ticker, bars))
+                    _store_value_zones(ticker, zone_summary(data, ticker, bars))
                 except Exception:
                     pass
         except Exception as exc:

@@ -36,14 +36,20 @@
       .then(function (d) {
         if (!d || !d.ok) return;
         Object.keys(d.zones || {}).forEach(function (t) { paint(d.zones[t]); });
+        // A ticker never built before takes a few seconds each, three at a
+        // time; keep asking for about three minutes rather than one.
         var pending = d.pending || [];
-        if (pending.length && tries < 6) setTimeout(function () { load(pending, tries + 1); }, 4000 + tries * 3000);
+        if (pending.length && tries < 14) setTimeout(function () { load(pending, tries + 1); }, Math.min(2500 + tries * 1500, 15000));
       }).catch(function () {});
   }
   function run() {
     var els = document.querySelectorAll('[data-zone-badge]');
     if (!els.length) return;
     injectCss();
+    // Badges the server already knew are written into the page: paint them
+    // now, then let the fetch below restate them from the live price.
+    var pre = window.VZ_PRELOAD || {};
+    Object.keys(pre).forEach(function (t) { paint(pre[t]); });
     var seen = {}, list = [];
     els.forEach(function (el) {
       el.addEventListener('click', function (e) { e.stopPropagation(); });
