@@ -137,15 +137,18 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         except Exception:
             logger.exception("wealth brokerage discovery failed")
             return jsonify({"ok": False, "error": "Brokerage data is temporarily unavailable."}), 503
-        # Only successful fetches may update stored broker snapshots.
-        # Never delete existing snapshots when a broker is unavailable.
+        # Never auto-create empty brokerage portfolios. Existing portfolio
+        # records are retained even if Schwab stops returning the account.
         if snapshot and snapshot.get("connected"):
             for account in snapshot.get("accounts") or []:
                 key = str(account.get("account_hash") or account.get("account_number") or "")
-                if not key:
+                if not key or not account.get("equity_positions"):
                     continue
                 try:
-                    wealth_store.link_broker_portfolio(user_id, key)
+                    raw_type = str(account.get("account_type") or "").upper()
+                    kind = ("roth_ira" if "ROTH" in raw_type else
+                            "traditional_ira" if "IRA" in raw_type else "taxable")
+                    wealth_store.link_broker_portfolio(user_id, key, kind)
                 except Exception:
                     logger.exception("Failed to provision brokerage portfolio")
         result = wealth_broker_sync.discover(
@@ -166,6 +169,11 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 account["sync_error"] = "Unable to persist or reconcile this account"
             # Never expose full account identifiers in browser responses.
             account["account_id"] = "••••" + key[-4:]
+        # Surface holdings to research without fabricating a trade or M.C.F.F. score.
+        result["research_candidates"] = sorted({
+            h["ticker"] for account in result.get("accounts", [])
+            for h in account.get("holdings", [])
+        })
         return jsonify({"ok": result["connected"], **result})
 
     # ── Pages ────────────────────────────────────────────────────────────

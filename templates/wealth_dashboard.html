@@ -6,50 +6,71 @@
 <div class="wa">
 {{ wa.head('dash', 'Wealth Architect', 'Where your money is, what it has earned, and how concentrated it is. Built from your own transactions.', portfolios, current) }}
 
-<section class="wa-card" id="wa-broker-sync" aria-label="Connected brokerage holdings">
-  <h2>Brokerage Sync <small>Schwab · read-only</small></h2>
-  <p class="wa-note" id="wa-sync-status">Checking linked brokerage accounts…</p>
+<section class="wa-card" id="wa-broker-sync" aria-label="Brokerage command center">
+  <h2>Brokerage Command Center <small>Schwab · read-only</small></h2>
+  <p class="wa-note" id="wa-sync-status" role="status">Connecting to Schwab…</p>
+  <div id="wa-sync-summary" class="wa-kpis"></div>
+  <div class="wa-scroll"><table class="wa-table" id="wa-sync-table" hidden>
+    <thead><tr><th>Holding</th><th>Shares</th><th class="hide-sm">Market value</th><th>Ledger</th><th>Research</th></tr></thead>
+    <tbody id="wa-sync-rows"></tbody>
+  </table></div>
   <div id="wa-sync-accounts"></div>
-  <p class="wa-note">Positions appear automatically after a refresh. This live snapshot does not alter your ledger, tax lots, or historical returns.</p>
-  <button class="wa-btn" id="wa-sync-refresh" type="button">Refresh holdings</button>
+  <p class="wa-note">Broker snapshots are separate from your transaction ledger. Missing history cannot be used to calculate verified returns or tax lots.</p>
+  <button class="wa-btn" id="wa-sync-refresh" type="button">Sync now</button>
 </section>
 <script>
 (function () {
   const status = document.getElementById('wa-sync-status');
-  const target = document.getElementById('wa-sync-accounts');
+  const summary = document.getElementById('wa-sync-summary');
+  const table = document.getElementById('wa-sync-table');
+  const rows = document.getElementById('wa-sync-rows');
+  const accounts = document.getElementById('wa-sync-accounts');
   const refresh = document.getElementById('wa-sync-refresh');
+  const money = value => typeof value === 'number' && Number.isFinite(value)
+    ? new Intl.NumberFormat('en-US', {style:'currency', currency:'USD'}).format(value) : '—';
+  const cell = (tr, value) => { const td = document.createElement('td'); td.textContent = value; tr.appendChild(td); return td; };
   async function load() {
     refresh.disabled = true;
-    status.textContent = 'Refreshing broker positions…';
-    target.replaceChildren();
+    status.textContent = 'Synchronizing brokerage positions…';
+    rows.replaceChildren(); accounts.replaceChildren(); summary.replaceChildren(); table.hidden = true;
     try {
-      const response = await fetch('/api/wealth/brokerage/discovery', {credentials: 'same-origin', cache: 'no-store'});
-      if (!response.ok) throw new Error('Connection unavailable');
+      const response = await fetch('/api/wealth/brokerage/discovery', {credentials:'same-origin', cache:'no-store'});
+      if (!response.ok) throw new Error('Schwab unavailable');
       const data = await response.json();
-      status.textContent = data.accounts.length + ' account(s) · ' + data.new_holdings + ' holdings not recorded in the ledger · updated ' + new Date(data.as_of).toLocaleString();
-      data.accounts.forEach(account => {
-        const section = document.createElement('div');
-        const heading = document.createElement('h3');
-        heading.textContent = (account.portfolio_name || 'Unmapped Schwab account') + ' · ' + account.holdings.length + ' holdings';
-        section.appendChild(heading);
-        const items = document.createElement('p');
-        items.className = 'wa-note';
-        items.textContent = account.holdings.map(h => h.ticker + ' (' + h.shares + ' shares' + (h.new ? ', new' : '') + ')').join(' · ') || 'No supported long equity positions';
-        section.appendChild(items);
-        if (account.unsupported_positions) {
-          const warning = document.createElement('p');
-          warning.className = 'wa-note';
-          warning.textContent = account.unsupported_positions + ' option position(s) excluded from this view.';
-          section.appendChild(warning);
-        }
-        target.appendChild(section);
+      const active = data.accounts.filter(a => a.holdings.length);
+      const holdings = active.flatMap(a => a.holdings.map(h => ({...h, account:a})));
+      const alerts = active.reduce((sum,a) => sum + (a.discrepancies || []).length, 0);
+      const total = holdings.reduce((sum,h) => sum + (Number(h.market_value) || 0), 0);
+      status.textContent = 'Last successful sync: ' + new Date(data.as_of).toLocaleString()
+        + ' · ' + data.accounts.length + ' connected account(s), ' + active.length + ' with holdings';
+      [['Connected holdings',holdings.length],['Broker market value',money(total)],
+       ['Reconciliation alerts',alerts]].forEach(([label,value]) => {
+        const tile = document.createElement('div'); tile.className = 'wa-kpi';
+        const heading = document.createElement('span'); heading.textContent = label;
+        const number = document.createElement('b'); number.textContent = value;
+        tile.append(heading,number); summary.appendChild(tile);
       });
+      if (holdings.length) table.hidden = false;
+      holdings.forEach(h => {
+        const tr = document.createElement('tr');
+        cell(tr,h.ticker); cell(tr,String(h.shares)); cell(tr,money(h.market_value));
+        cell(tr,(h.account.discrepancies || []).some(d => d.ticker === h.ticker) ? 'Review history' : 'Matched');
+        const td = cell(tr,'');
+        const link = document.createElement('a'); link.className = 'wa-btn';
+        link.href = '/wealth/research/' + encodeURIComponent(h.ticker);
+        link.textContent = 'M.C.F.F.'; td.appendChild(link);
+        rows.appendChild(tr);
+      });
+      const empty = data.accounts.length - active.length;
+      if (empty) { const note = document.createElement('p'); note.className = 'wa-note';
+        note.textContent = empty + ' connected account(s) with no supported long equity positions are hidden from this holdings table.';
+        accounts.appendChild(note); }
+      if (!holdings.length) status.textContent += ' · No supported holdings returned';
     } catch (_) {
-      status.textContent = 'Schwab is not connected or temporarily unavailable. Existing portfolio records are unaffected.';
+      status.textContent = 'Brokerage connection unavailable. Existing portfolio and ledger data are safe.';
     } finally { refresh.disabled = false; }
   }
-  refresh.addEventListener('click', load);
-  load();
+  refresh.addEventListener('click', load); load();
 })();
 </script>
 {% if not portfolios %}
