@@ -169,6 +169,11 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 account["sync_error"] = "Unable to persist or reconcile this account"
             # Never expose full account identifiers in browser responses.
             account["account_id"] = "••••" + key[-4:]
+        # Surface holdings to research without fabricating a trade or M.C.F.F. score.
+        result["research_candidates"] = sorted({
+            h["ticker"] for account in result.get("accounts", [])
+            for h in account.get("holdings", [])
+        })
         return jsonify({"ok": result["connected"], **result})
 
     # ── Pages ────────────────────────────────────────────────────────────
