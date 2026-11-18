@@ -16,6 +16,7 @@ from datetime import date
 from flask import Blueprint, Response, abort, jsonify, render_template, request
 
 import wealth_calc
+import wealth_broker_sync
 import wealth_csv
 import wealth_history
 import wealth_ledger
@@ -125,6 +126,21 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                                      max_position_pct=(portfolio or {}).get("max_position_pct"))
         s["transaction_count"] = len(txs)
         return s
+
+    # Broker snapshots are deliberately separate from the transaction ledger.
+    # GET only: no orders, deposits, or synthetic cost-basis transactions.
+    @bp.get("/api/wealth/brokerage/discovery")
+    def brokerage_discovery():
+        user_id = uid()
+        try:
+            snapshot = broker_summary(user_id)
+        except Exception:
+            logger.exception("wealth brokerage discovery failed")
+            return jsonify({"ok": False, "error": "Brokerage data is temporarily unavailable."}), 503
+        result = wealth_broker_sync.discover(
+            snapshot, wealth_store.list_portfolios(user_id),
+            wealth_store.list_transactions(user_id))
+        return jsonify({"ok": result["connected"], **result})
 
     # ── Pages ────────────────────────────────────────────────────────────
     @bp.get("/wealth")
