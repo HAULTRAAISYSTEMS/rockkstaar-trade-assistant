@@ -106,3 +106,66 @@ def test_endpoint_falls_back_to_fmp(monkeypatch, fmp):
 def test_page_never_multiplies_a_foreign_eps_by_four():
     html = open("templates/fundamentals.html").read()
     assert "qdCurrency !== 'USD'" in html and "Financial Modeling Prep" in html
+
+
+def test_home_market_symbol_and_annual_fallback(monkeypatch):
+    """SKHY: no quarterly on the plan; annual statements under 000660.KS."""
+    ann = [dict(_q("2025-12-31", "FY", "2025", 4000e9, 50.0), reportedCurrency="KRW"),
+           dict(_q("2024-12-31", "FY", "2024", 2000e9, 20.0), reportedCurrency="KRW")]
+    bal = [dict(BAL[0], date="2025-12-31"), dict(BAL[1], date="2024-12-31")]
+    cf = [{"date": "2025-12-31", "operatingCashFlow": 1500e9, "capitalExpenditure": -500e9}]
+
+    def fake(endpoint, params=None, ticker=""):
+        per = (params or {}).get("period")
+        if endpoint == "income-statement":
+            if per == "quarter":
+                quarter_fmp._LAST_REASON[(endpoint, per, ticker)] = "your FMP plan does not include this data"
+                return None
+            return ann if ticker == "000660.KS" else None
+        if endpoint == "balance-sheet-statement":
+            return bal if ticker == "000660.KS" else None
+        if endpoint == "cash-flow-statement":
+            return cf if ticker == "000660.KS" else None
+        if endpoint == "quote":
+            return [{"price": 140.0, "pe": 10.0}] if ticker == "SKHY" else None
+        return None
+
+    monkeypatch.setattr(quarter_fmp, "_get", fake)
+    quarter_fmp._CACHE.clear()
+    w = quarter_fmp.walkthrough("SKHY")
+    assert w["basis"] == "annual" and w["fmp_symbol"] == "000660.KS"
+    assert w["figures"]["rev"] == 4000e9 and w["figures"]["revP"] == 2000e9
+    assert w["figures"]["caP"] == BAL[1]["totalCurrentAssets"]
+    assert w["ttm_eps"]["value"] == 14.0                      # USD per SKHY share, from P/E
+    assert round(w["ttm_eps_prior"]["value"], 2) == round(14.0 / 2.5, 2)   # EPS 50 vs 20
+
+
+def test_plan_limit_is_reported(monkeypatch):
+    def fake(endpoint, params=None, ticker=""):
+        quarter_fmp._LAST_REASON[(endpoint, (params or {}).get("period"), ticker)] = "your FMP plan does not include this data"
+        return None
+    monkeypatch.setattr(quarter_fmp, "_get", fake)
+    quarter_fmp._CACHE.clear()
+    assert quarter_fmp.walkthrough("SKHY") is None
+    assert "paid FMP feature" in quarter_fmp.last_failure("SKHY")
+
+
+def test_get_detail_reads_fmp_failures(monkeypatch):
+    import fundamentals_engine as fe
+
+    class R:
+        def __init__(self, code, body=None, text=""):
+            self.status_code, self._b, self.text = code, body, text
+        def json(self):
+            if self._b is None:
+                raise ValueError
+            return self._b
+
+    monkeypatch.setattr(fe, "_FMP_API_KEY", "k")
+    replies = iter([R(402, text="Premium"), R(200, {"Error Message": "Exclusive Endpoint: upgrade your subscription"})])
+    monkeypatch.setattr(fe._req_module, "get", lambda *a, **k: next(replies))
+    data, why = quarter_fmp._get_detail("income-statement", {"period": "quarter"}, "SKHY")
+    assert data is None and "plan" in why
+
+    monkeypatch.setattr(fe._req_module, "get", lambda *a, **k: R(200, [{"date": "x"}]))
+    assert quarter_fmp._get_detail("quote", None, "SKHY") == ([{"date": "x"}], None)

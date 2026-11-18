@@ -11873,7 +11873,14 @@ def api_quarter_walkthrough(ticker):
             why = quarter_facts.explain_gap(ticker, facts, cik)
         except Exception:
             why = f"No quarterly filing found for {ticker}."
-        return jsonify({"available": False, "error": why})
+        try:
+            import quarter_fmp
+            fmp_why = quarter_fmp.last_failure(ticker)
+        except Exception:
+            fmp_why = None
+        if fmp_why:
+            why = f"{why} Backup source tried — {fmp_why}"
+        return jsonify({"available": False, "error": why, "fmp": fmp_why})
     return jsonify(dict(found, available=True))
 
 
