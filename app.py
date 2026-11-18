@@ -11865,6 +11865,16 @@ def api_quarter_walkthrough(ticker):
             via_fmp = None
         if via_fmp:
             return jsonify(dict(via_fmp, available=True))
+        # FMP's free plan leaves out some of them (SK hynix). Yahoo Finance
+        # publishes the same statements at no cost under the home listing.
+        try:
+            import quarter_yahoo
+            via_yahoo = quarter_yahoo.walkthrough(ticker)
+        except Exception as exc:
+            logger.warning("Yahoo quarter fallback errored for %s: %s", ticker, exc)
+            via_yahoo = None
+        if via_yahoo:
+            return jsonify(dict(via_yahoo, available=True))
     if not found:
         # "No quarterly filing found" is true and useless. Say which of the
         # several quite different reasons it is, so the reader knows whether
@@ -11880,7 +11890,14 @@ def api_quarter_walkthrough(ticker):
             fmp_why = None
         if fmp_why:
             why = f"{why} Backup source tried — {fmp_why}"
-        return jsonify({"available": False, "error": why, "fmp": fmp_why})
+        try:
+            import quarter_yahoo
+            yahoo_why = quarter_yahoo.last_failure(ticker)
+        except Exception:
+            yahoo_why = None
+        if yahoo_why:
+            why = f"{why} Second backup — {yahoo_why}"
+        return jsonify({"available": False, "error": why, "fmp": fmp_why, "yahoo": yahoo_why})
     return jsonify(dict(found, available=True))
 
 
