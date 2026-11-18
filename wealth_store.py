@@ -295,3 +295,58 @@ def fundamentals_fetched_at(ticker: str) -> str | None:
         return None
     finally:
         conn.close()
+
+
+# Brokerage snapshots are never posted as trades or tax lots.
+def save_broker_snapshot(user_id: int, account_key: str, snapshot: dict) -> None:
+    if not account_key or not isinstance(snapshot, dict):
+        raise ValueError("Valid account and snapshot required")
+    conn = get_db()
+    try:
+        payload = json.dumps(snapshot, allow_nan=False, separators=(",", ":"))
+        conn.execute(
+            "INSERT INTO wa_broker_snapshots (user_id, broker, account_key, snapshot_json, synced_at) "
+            "VALUES (?, 'schwab', ?, ?, ?) "
+            "ON CONFLICT (user_id, broker, account_key) DO UPDATE SET "
+            "snapshot_json = excluded.snapshot_json, synced_at = excluded.synced_at",
+            (user_id, account_key, payload, _now()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_broker_snapshots(user_id: int) -> list[dict]:
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT account_key, snapshot_json, synced_at FROM wa_broker_snapshots "
+            "WHERE user_id = ? AND broker = 'schwab' ORDER BY account_key", (user_id,)).fetchall()
+        return [{"account_key": r["account_key"], "snapshot": json.loads(r["snapshot_json"]),
+                 "synced_at": r["synced_at"]} for r in rows]
+    finally:
+        conn.close()
+
+
+def link_broker_portfolio(user_id: int, account_key: str, kind: str = "taxable") -> int:
+    """Idempotently provision a distinct portfolio for a broker account."""
+    if not account_key:
+        raise ValueError("Account key required")
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT id FROM wa_portfolios WHERE user_id = ? AND broker_account = ? "
+            "ORDER BY id LIMIT 1", (user_id, account_key)).fetchone()
+        if row:
+            return int(row["id"])
+        count = conn.execute("SELECT COUNT(*) AS n FROM wa_portfolios WHERE user_id = ?",
+                             (user_id,)).fetchone()["n"]
+        label = "Schwab " + (KIND_LABELS.get(kind) or "Brokerage")
+        cur = conn.execute(
+            "INSERT INTO wa_portfolios (user_id, name, kind, broker_account, sort_order, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, label, kind if kind in PORTFOLIO_KINDS else "taxable",
+             account_key, int(count), _now()), returning_id=True)
+        conn.commit()
+        return int(cur.lastrowid)
+    finally:
+        conn.close()

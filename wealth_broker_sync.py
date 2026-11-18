@@ -45,3 +45,24 @@ def discover(summary: dict | None, portfolios: list[dict], transactions: list[di
     return {"connected": True, "source": "schwab", "as_of": datetime.now(timezone.utc).isoformat(),
             "accounts": accounts, "new_holdings": new_count,
             "note": "Live broker positions are displayed automatically. Ledger and tax lots remain unchanged."}
+
+
+def reconcile(snapshot: dict, ledger_positions: dict) -> list[dict]:
+    """Compare broker quantities with ledger quantities, never modifying either."""
+    result = []
+    for h in snapshot.get("holdings", []):
+        symbol = h["ticker"]
+        broker_qty = float(h["shares"])
+        ledger_qty = float(ledger_positions.get(symbol, 0))
+        if abs(broker_qty - ledger_qty) > 0.000001:
+            result.append({"ticker": symbol, "broker_shares": broker_qty,
+                           "ledger_shares": ledger_qty,
+                           "difference": round(broker_qty - ledger_qty, 8),
+                           "status": "missing_history" if ledger_qty == 0 else "quantity_mismatch"})
+    broker_symbols = {h["ticker"] for h in snapshot.get("holdings", [])}
+    for symbol, qty in ledger_positions.items():
+        if symbol not in broker_symbols and float(qty) != 0:
+            result.append({"ticker": symbol, "broker_shares": 0,
+                           "ledger_shares": float(qty), "difference": -float(qty),
+                           "status": "not_at_broker"})
+    return result
