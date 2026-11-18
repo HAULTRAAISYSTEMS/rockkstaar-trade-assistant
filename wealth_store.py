@@ -9,7 +9,7 @@ from database import get_db
 PORTFOLIO_KINDS = ("roth_ira", "traditional_ira", "taxable", "other")
 KIND_LABELS = {"roth_ira": "Roth IRA", "traditional_ira": "Traditional IRA",
                "taxable": "Taxable brokerage", "other": "Other"}
-TX_FIELDS = ("date", "type", "ticker", "shares", "price", "amount", "fees", "ratio", "note")
+TX_FIELDS = ("date", "type", "ticker", "shares", "price", "amount", "fees", "ratio", "note", "tax_year")
 
 
 def _now():
@@ -118,11 +118,12 @@ def add_transactions(user_id: int, pid: int, txs: list[dict], source: str = "man
                 continue
             conn.execute(
                 "INSERT INTO wa_transactions (user_id, portfolio_id, date, type, ticker, shares, price, amount, "
-                "fees, ratio, note, source, fingerprint, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "fees, ratio, note, source, fingerprint, created_at, tax_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (user_id, pid, tx["date"], str(tx["type"]).upper(),
                  (str(tx.get("ticker") or "").upper() or None),
                  tx.get("shares"), tx.get("price"), tx.get("amount"), tx.get("fees") or 0.0,
-                 tx.get("ratio"), (tx.get("note") or "")[:200], tx.get("source") or source, fp, _now()))
+                 tx.get("ratio"), (tx.get("note") or "")[:200], tx.get("source") or source, fp, _now(),
+                 tx.get("tax_year")))
             if fp:
                 seen.add(fp)
             added += 1
@@ -198,5 +199,99 @@ def stored_prices(tickers) -> dict:
             tuple(tickers)).fetchall() if r["current_price"]}
     except Exception:
         return {}
+    finally:
+        conn.close()
+
+
+# ── M.C.F.F. research ────────────────────────────────────────────────────
+
+def get_research(user_id: int, ticker: str) -> dict | None:
+    conn = get_db()
+    try:
+        r = conn.execute("SELECT data_json, updated_at FROM wa_research WHERE user_id = ? AND ticker = ?",
+                         (user_id, ticker.upper())).fetchone()
+    finally:
+        conn.close()
+    if not r:
+        return None
+    try:
+        d = json.loads(r["data_json"])
+    except ValueError:
+        return None
+    d["updated_at"] = r["updated_at"]
+    return d
+
+
+def list_research(user_id: int) -> dict:
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT ticker, data_json, updated_at FROM wa_research WHERE user_id = ? ORDER BY ticker",
+                            (user_id,)).fetchall()
+    finally:
+        conn.close()
+    out = {}
+    for r in rows:
+        try:
+            out[r["ticker"]] = dict(json.loads(r["data_json"]), updated_at=r["updated_at"])
+        except ValueError:
+            continue
+    return out
+
+
+def save_research(user_id: int, ticker: str, data: dict) -> None:
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO wa_research (user_id, ticker, data_json, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(user_id, ticker) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at",
+            (user_id, ticker.upper(), json.dumps(data), _now()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_research(user_id: int, ticker: str) -> bool:
+    conn = get_db()
+    try:
+        cur = conn.execute("DELETE FROM wa_research WHERE user_id = ? AND ticker = ?", (user_id, ticker.upper()))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+# ── Contribution plan ────────────────────────────────────────────────────
+
+def get_plan(user_id: int, year: int) -> dict | None:
+    conn = get_db()
+    try:
+        r = conn.execute("SELECT data_json FROM wa_plans WHERE user_id = ? AND year = ?", (user_id, year)).fetchone()
+    finally:
+        conn.close()
+    try:
+        return json.loads(r["data_json"]) if r else None
+    except ValueError:
+        return None
+
+
+def save_plan(user_id: int, year: int, data: dict) -> None:
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO wa_plans (user_id, year, data_json, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(user_id, year) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at",
+            (user_id, int(year), json.dumps(data), _now()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def fundamentals_fetched_at(ticker: str) -> str | None:
+    conn = get_db()
+    try:
+        r = conn.execute("SELECT fetched_at FROM fundamentals_cache WHERE ticker = ?", (ticker.upper(),)).fetchone()
+        return r["fetched_at"] if r else None
+    except Exception:
+        return None
     finally:
         conn.close()

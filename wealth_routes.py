@@ -19,6 +19,9 @@ import wealth_calc
 import wealth_csv
 import wealth_history
 import wealth_ledger
+import wealth_mcff
+import wealth_nextdollar
+import wealth_planner
 import wealth_service
 import wealth_store
 
@@ -35,7 +38,8 @@ def _num(v):
     return None if x != x else x
 
 
-def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None, broker_summary=None):
+def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None, broker_summary=None,
+                            fundamentals_lookup=None, zone_lookup=None, ai_draft=None):
     bp = Blueprint("wealth", __name__)
     price_lookup = price_lookup or wealth_service.default_price_lookup
 
@@ -50,8 +54,14 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             return None
         return schwab.get_account_summary(user_id)
 
+    def _default_fundamentals(ticker):
+        from fundamentals_engine import get_fundamentals
+        return get_fundamentals(ticker), wealth_store.fundamentals_fetched_at(ticker)
+
     bars_lookup = bars_lookup or _default_bars
     broker_summary = broker_summary or _default_broker
+    fundamentals_lookup = fundamentals_lookup or _default_fundamentals
+    zone_lookup = zone_lookup or (lambda ticker, price: None)
     closes_cache: dict = {}
     closes_lock = threading.Lock()
 
@@ -229,7 +239,16 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
               "shares": _num(d.get("shares")), "price": _num(d.get("price")), "amount": _num(d.get("amount")),
               "fees": _num(d.get("fees")) or 0.0, "ratio": _num(d.get("ratio")),
               "note": str(d.get("note") or "")[:200]}
+        ty = str(d.get("tax_year") or "").strip()
+        tx["tax_year"] = int(ty) if ty.isdigit() and 1990 <= int(ty) <= 2100 else None
         errs = wealth_ledger.validate(tx)
+        if tx["tax_year"] and tx["type"] == "DEPOSIT":
+            try:
+                dy = date.fromisoformat(tx["date"]).year
+                if tx["tax_year"] not in (dy, dy - 1) or (tx["tax_year"] == dy - 1 and tx["date"][5:] > "04-15"):
+                    errs.append("An IRA deposit can count toward this year, or the prior year only until April 15.")
+            except ValueError:
+                pass
         if tx["ticker"] and not _TICKER.match(tx["ticker"]):
             errs.append("Ticker looks wrong.")
         return tx, errs
@@ -378,4 +397,258 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         rec = wealth_service.reconcile(lg.holdings(), lg.cash, acct)
         return jsonify({"ok": True, "accounts": choices, "account": acct.get("account_number"), **rec})
 
+    # ── M.C.F.F. research ────────────────────────────────────────────────
+    def mcff_for(user_id, ticker, research=None):
+        research = research if research is not None else (wealth_store.get_research(user_id, ticker) or {})
+        try:
+            fund, fetched = fundamentals_lookup(ticker)
+        except Exception as exc:
+            logger.debug("mcff fundamentals %s: %s", ticker, exc)
+            fund, fetched = None, None
+        q = (price_lookup([ticker]) or {}).get(ticker) or {}
+        price = q.get("price")
+        try:
+            zone = zone_lookup(ticker, price)
+        except Exception as exc:
+            logger.debug("mcff zone %s: %s", ticker, exc)
+            zone = None
+        fin = wealth_mcff.financials_gate(fund, fetched_at=fetched)
+        ev = wealth_mcff.evaluate(research, fin, price=price, value_zone=zone)
+        pe = ((fund or {}).get("valuation") or {}).get("pe")
+        defaults = wealth_mcff.default_assumptions(fund, pe)
+        assumptions = research.get("assumptions") or {}
+        merged = {"years": assumptions.get("years") or defaults["years"],
+                  "growth": {c: ((assumptions.get("growth") or {}).get(c) if (assumptions.get("growth") or {}).get(c) is not None
+                                 else defaults["growth"][c]) for c in ("conservative", "base", "optimistic")},
+                  "exit_pe": {c: ((assumptions.get("exit_pe") or {}).get(c) if (assumptions.get("exit_pe") or {}).get(c) is not None
+                                  else defaults["exit_pe"][c]) for c in ("conservative", "base", "optimistic")}}
+        return {"ticker": ticker, "company": (fund or {}).get("company_name"), "sector": (fund or {}).get("sector"),
+                "price": price, "price_source": q.get("source"), "price_as_of": q.get("as_of"), "pe": pe,
+                "value_zone": zone, "evaluation": ev, "research": research,
+                "assumptions": merged, "defaults": defaults,
+                "scenarios": wealth_mcff.scenarios(price, pe, merged),
+                "prompts": wealth_mcff.GATE_PROMPTS, "labels": wealth_mcff.GATE_LABELS}
+
+    def _tk(ticker):
+        t = (ticker or "").upper().strip()
+        if not _TICKER.match(t):
+            abort(404)
+        return t
+
+    @bp.get("/wealth/research")
+    def research_list_page():
+        user_id = uid()
+        portfolios = wealth_store.list_portfolios(user_id)
+        researched = wealth_store.list_research(user_id)
+        held = sorted({t for lg in ledgers_for(user_id, None)[0].values() for t in lg.positions})
+        return render_template("wealth_research_list.html", portfolios=portfolios, current=None,
+                               researched=researched, held=held, kinds=wealth_store.KIND_LABELS,
+                               quick_start=QUICK_START, labels=wealth_mcff.GATE_LABELS)
+
+    @bp.get("/wealth/research/<ticker>")
+    def research_page(ticker):
+        user_id = uid()
+        t = _tk(ticker)
+        return render_template("wealth_research.html", portfolios=wealth_store.list_portfolios(user_id),
+                               current=None, ticker=t, kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START,
+                               ai_available=bool(ai_draft or _ai_configured()))
+
+    @bp.get("/api/wealth/mcff/<ticker>")
+    def mcff_api(ticker):
+        user_id = uid()
+        return jsonify({"ok": True, **mcff_for(user_id, _tk(ticker))})
+
+    @bp.post("/api/wealth/mcff/<ticker>")
+    def mcff_save(ticker):
+        user_id = uid()
+        t = _tk(ticker)
+        data = wealth_mcff.clean_research(request.get_json(silent=True) or {})
+        prev = wealth_store.get_research(user_id, t) or {}
+        for g in ("moat", "ceo", "future"):
+            # Keep the record that a write-up started as an AI draft.
+            if (request.get_json(silent=True) or {}).get(g, {}).get("drafted_by_ai") or (prev.get(g) or {}).get("drafted_by_ai"):
+                data[g]["drafted_by_ai"] = True
+        wealth_store.save_research(user_id, t, data)
+        return jsonify({"ok": True, **mcff_for(user_id, t, data)})
+
+    @bp.delete("/api/wealth/mcff/<ticker>")
+    def mcff_delete(ticker):
+        wealth_store.delete_research(uid(), _tk(ticker))
+        return jsonify({"ok": True})
+
+    @bp.get("/api/wealth/mcff-status")
+    def mcff_statuses():
+        """Status for each researched ticker (and holdings), for lists and alerts."""
+        user_id = uid()
+        researched = wealth_store.list_research(user_id)
+        asked = {t for t in request.args.get("tickers", "").upper().split(",") if _TICKER.match(t)}
+        base = set() if request.args.get("only") else set(researched)
+        want = sorted(base | asked)[:40]
+        def one(t):
+            try:
+                m = mcff_for(user_id, t, researched.get(t) or {})
+                ev = m["evaluation"]
+                return {"ticker": t, "status": ev["status"], "reasons": ev["reasons"], "price": m["price"],
+                        "gates": {g: ev["gates"][g]["passed"] for g in wealth_mcff.GATES},
+                        "zone_text": ev["valuation"]["zone_text"], "researched": t in researched}
+            except Exception as exc:
+                logger.debug("mcff status %s: %s", t, exc)
+                return {"ticker": t, "status": None, "researched": t in researched}
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            rows = list(pool.map(one, want))
+        return jsonify({"ok": True, "rows": rows})
+
+    def _ai_configured():
+        import os
+        return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+    @bp.post("/api/wealth/mcff/<ticker>/draft")
+    def mcff_draft(ticker):
+        """An AI-written starting point for one judged gate. Labeled as
+        interpretation; it only counts once the investor saves it."""
+        user_id = uid()
+        t = _tk(ticker)
+        gate = (request.get_json(silent=True) or {}).get("gate")
+        if gate not in ("moat", "ceo", "future"):
+            return jsonify({"ok": False, "error": "Choose Moat, CEO or Future."}), 400
+        m = mcff_for(user_id, t)
+        drafter = ai_draft or _anthropic_draft
+        try:
+            draft, why = drafter(t, gate, m)
+        except Exception as exc:
+            logger.warning("mcff draft %s %s: %s", t, gate, exc)
+            draft, why = None, "The AI draft failed."
+        if not draft:
+            return jsonify({"ok": False, "error": why or "No draft."}), 503
+        return jsonify({"ok": True, "gate": gate, "draft": draft})
+
+    # ── Next Dollar ──────────────────────────────────────────────────────
+    @bp.get("/wealth/next-dollar")
+    def next_dollar_page():
+        user_id = uid()
+        portfolios = wealth_store.list_portfolios(user_id)
+        current = owned(user_id, request.args.get("p")) or (portfolios[0] if portfolios else None)
+        researched = sorted(wealth_store.list_research(user_id))
+        held = sorted({t for lg in (ledgers_for(user_id, current)[0].values() if current else []) for t in lg.positions})
+        return render_template("wealth_next_dollar.html", portfolios=portfolios, current=current,
+                               candidates=sorted(set(researched) | set(held)), researched=researched,
+                               kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
+
+    @bp.post("/api/wealth/next-dollar")
+    def next_dollar_api():
+        user_id = uid()
+        d = request.get_json(silent=True) or {}
+        p = owned(user_id, d.get("portfolio_id"))
+        amount = _num(d.get("amount"))
+        if not amount or amount <= 0:
+            return jsonify({"ok": False, "error": "Enter an amount to invest."}), 400
+        tickers = []
+        for t in (d.get("tickers") or [])[:12]:
+            t = str(t).upper().strip()
+            if _TICKER.match(t) and t not in tickers:
+                tickers.append(t)
+        if not tickers:
+            return jsonify({"ok": False, "error": "Pick at least one candidate."}), 400
+        s = summary_for(user_id, p)
+        holdings = {h["ticker"]: h["market_value"] or 0.0 for h in s["holdings"]}
+        sectors = {r["sector"]: r["value"] for r in s["sectors"] if r["sector"] != "Cash"}
+        researched = wealth_store.list_research(user_id)
+
+        def one(t):
+            m = mcff_for(user_id, t, researched.get(t) or {})
+            return {"ticker": t, "price": m["price"], "sector": m["sector"] or (wealth_store.sectors_for([t]).get(t) or (None,))[0],
+                    "evaluation": m["evaluation"], "scenarios": m["scenarios"], "company": m["company"]}
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            cands = list(pool.map(one, tickers))
+        out = wealth_nextdollar.rank(amount, cands, total_value=s["total_value"], holdings=holdings, sectors=sectors,
+                                     max_position_pct=(p or {}).get("max_position_pct"), hurdle_pct=_num(d.get("hurdle_pct")))
+        out["cash_available"] = s["cash"]
+        out["over_cash"] = amount > (s["cash"] or 0) + 0.005
+        out["scenarios"] = {c["ticker"]: c["scenarios"] for c in cands}
+        return jsonify({"ok": True, **out})
+
+    # ── Seasonal Planner ─────────────────────────────────────────────────
+    @bp.get("/wealth/planner")
+    def planner_page():
+        user_id = uid()
+        portfolios = wealth_store.list_portfolios(user_id)
+        try:
+            year = int(request.args.get("year") or date.today().year)
+        except ValueError:
+            year = date.today().year
+        year = max(2000, min(2100, year))
+        return render_template("wealth_planner.html", portfolios=portfolios, current=None, year=year,
+                               kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START,
+                               months=wealth_planner.MONTHS, seasons=wealth_planner.SEASONS,
+                               ira_kinds=wealth_planner.IRA_KINDS)
+
+    def _plan_view(user_id, year):
+        portfolios = wealth_store.list_portfolios(user_id)
+        plan = wealth_store.get_plan(user_id, year) or {"entries": [], "goals": {}, "targets": {}}
+        actual = [t for t in wealth_store.list_transactions(user_id) if t["type"] == "DEPOSIT"]
+        view = wealth_planner.schedule(plan, year, portfolios, actual)
+        return {"plan": plan, "view": view}
+
+    @bp.get("/api/wealth/plan/<int:year>")
+    def plan_get(year):
+        return jsonify({"ok": True, **_plan_view(uid(), year)})
+
+    @bp.post("/api/wealth/plan/<int:year>")
+    def plan_save(year):
+        user_id = uid()
+        ids = {p["id"] for p in wealth_store.list_portfolios(user_id)}
+        plan = wealth_planner.clean_plan(request.get_json(silent=True) or {}, year, ids)
+        wealth_store.save_plan(user_id, year, plan)
+        return jsonify({"ok": True, **_plan_view(user_id, year)})
+
     return bp
+
+
+def _anthropic_draft(ticker: str, gate: str, m: dict):
+    """(draft dict, reason-if-none). Uses only facts the app holds; anything
+    from general knowledge must be marked as such by the model."""
+    import json as _json
+    import os
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        return None, "No ANTHROPIC_API_KEY is set on this server, so AI drafts are off."
+    try:
+        import anthropic
+        from quarter_brief import MODEL
+    except ImportError:
+        return None, "The anthropic package is not installed on this server."
+    fin = m["evaluation"]["gates"]["financials"]
+    facts = [f"{e['label']}: {e['value']} ({'pass' if e['passed'] else 'fail'})" for e in fin.get("evidence") or []][:20]
+    prompt = f"""Company: {m.get('company') or ticker} ({ticker}); sector: {m.get('sector') or 'unknown'}.
+Gate to draft: {wealth_mcff.GATE_LABELS[gate]} — {wealth_mcff.GATE_PROMPTS[gate]}
+
+VERIFIED FACTS FROM THE APP (SEC filings via the Fundamentals Engine):
+{chr(10).join(facts) or 'none available'}
+
+Write JSON only, with keys:
+  "score": a number 0-10 for this gate,
+  "evidence": 3 to 5 short sentences. Mark anything that is not in the verified facts above with "(general knowledge, verify)". Do not invent figures, dates, quotes or sources.
+  "risks": 2 or 3 short sentences.
+  "confidence": "low", "medium" or "high" — low unless the verified facts carry it.
+  "check": 2 or 3 specific things the investor should verify, each naming where (e.g. "the latest 10-K, Item 1A", "the proxy statement's insider ownership table")."""
+    client = anthropic.Anthropic(api_key=key)
+    resp = client.messages.create(model=MODEL, max_tokens=900,
+                                  system="You draft investment research notes for an individual investor. You are careful, plain-spoken, and you never fabricate data or sources.",
+                                  messages=[{"role": "user", "content": prompt}])
+    text = "".join(getattr(b, "text", "") for b in resp.content).strip()
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        return None, "The AI answered in a form the app could not read."
+    try:
+        out = _json.loads(match.group(0))
+    except ValueError:
+        return None, "The AI answer would not parse."
+    try:
+        score = max(0.0, min(10.0, float(out.get("score"))))
+    except (TypeError, ValueError):
+        score = None
+    check = out.get("check") or []
+    return {"score": score, "evidence": str(out.get("evidence") or "")[:3000],
+            "risks": str(out.get("risks") or "")[:1500],
+            "confidence": out.get("confidence") if out.get("confidence") in wealth_mcff.CONFIDENCE else "low",
+            "check": [str(c)[:300] for c in check][:4] if isinstance(check, list) else []}, None

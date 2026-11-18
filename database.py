@@ -1064,6 +1064,35 @@ def init_db():
         )
     """))
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_wa_tx_portfolio ON wa_transactions (user_id, portfolio_id, date)")
+    # IRA deposits made Jan 1 – Apr 15 can count toward the prior tax year.
+    if _USE_POSTGRES:
+        cursor.execute("ALTER TABLE wa_transactions ADD COLUMN IF NOT EXISTS tax_year INTEGER")
+    else:
+        try:
+            cursor.execute("ALTER TABLE wa_transactions ADD COLUMN tax_year INTEGER")
+        except sqlite3.OperationalError:
+            pass
+    # M.C.F.F. research per company (the investor's scores, evidence, buy
+    # zone and scenario assumptions) and the contribution plan. JSON bodies:
+    # their shape is validated in wealth_mcff.clean_research / wealth_planner.
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS wa_research (
+            user_id    INTEGER NOT NULL,
+            ticker     TEXT    NOT NULL,
+            data_json  TEXT    NOT NULL,
+            updated_at TEXT    NOT NULL,
+            PRIMARY KEY (user_id, ticker)
+        )
+    """))
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS wa_plans (
+            user_id    INTEGER NOT NULL,
+            year       INTEGER NOT NULL,
+            data_json  TEXT    NOT NULL,
+            updated_at TEXT    NOT NULL,
+            PRIMARY KEY (user_id, year)
+        )
+    """))
 
     # Value-zone badges (Load / Accum / Fair / Pricey). Kept here so they
     # survive deploys and worker restarts and are shared by every worker;

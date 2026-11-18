@@ -35,7 +35,15 @@ def env(monkeypatch):
         current_user=lambda: {"id": session.get("user_id")} if session.get("user_id") else None,
         price_lookup=lambda ts: {t: prices[t] for t in ts if t in prices},
         bars_lookup=lambda t: {"timestamps": [1767225600, 1769904000, 1770681600], "closes": [600.0, 610.0, 620.0]},
-        broker_summary=lambda uid: broker)
+        broker_summary=lambda uid: broker,
+        fundamentals_lookup=lambda t: ({"ticker": t, "company_name": t + " Inc", "sector": "Technology", "score_percent": 80,
+                                        "scored_metrics": 10, "total_metrics": 10, "red_flags": [], "sections": [],
+                                        "valuation": {"pe": 28.0},
+                                        "history": [{"year_offset": 0, "revenue_num": 10, "net_income_num": 3},
+                                                    {"year_offset": 3, "revenue_num": 5, "net_income_num": 1.5}]},
+                                       "2026-11-18T09:00:00"),
+        zone_lookup=lambda t, px: {"zone": "accumulate", "zone_label": "Accumulate", "accum_top": 1500, "load_top": 1100},
+        ai_draft=lambda t, g, m: ({"score": 7, "evidence": "draft", "risks": "r", "confidence": "low", "check": ["10-K"]}, None))
     app.register_blueprint(bp)
 
     @app.context_processor
@@ -164,7 +172,9 @@ def test_pages_render_through_the_real_app(monkeypatch):
     c = web_app.app.test_client()
     with c.session_transaction() as s:
         s["user_id"] = 1
-    for url in ("/wealth", "/wealth/ledger", "/wealth/lab", "/wealth/scoreboard"):
+    monkeypatch.setattr(wealth_store, "list_research", lambda uid: {})
+    for url in ("/wealth", "/wealth/ledger", "/wealth/lab", "/wealth/scoreboard", "/wealth/research",
+                "/wealth/research/KLAC", "/wealth/next-dollar", "/wealth/planner"):
         r = c.get(url)
         assert r.status_code == 200, url
         html = r.get_data(as_text=True)
@@ -184,3 +194,53 @@ def test_scoreboard_api(env):
     assert d["ok"] and d["contributed"] == 3000
     assert "twr_pct" in d and "spy_pct" in d and d["chart"]["days"]
     assert d["end_value"] == pytest.approx(1800 + 2 * 1400)       # cash + live KLAC today
+
+
+def test_mcff_save_status_and_privacy(env):
+    app, *_ = env
+    a, b = client(app, 1), client(app, 2)
+    first = a.get("/api/wealth/mcff/KLAC").get_json()
+    assert first["ok"] and first["evaluation"]["status"] == "DO NOT BUY"
+    assert first["evaluation"]["gates"]["financials"]["passed"] is True
+    g = {"score": 8, "evidence": "e", "origin": "investor"}
+    saved = a.post("/api/wealth/mcff/KLAC", json={"moat": g, "ceo": g, "future": g, "buy_high": 1500,
+                                                   "assumptions": {"growth": {"base": 0.12}}}).get_json()
+    assert saved["evaluation"]["status"] == "BUY ZONE"                      # price 1,400 ≤ 1,500
+    base = [s for s in saved["scenarios"] if s["case"] == "base"][0]
+    assert base["growth"] == 0.12 and base["annual_return_pct"] == pytest.approx(12, abs=0.01)
+    assert b.get("/api/wealth/mcff/KLAC").get_json()["evaluation"]["status"] == "DO NOT BUY"   # not user 2's research
+    st = a.get("/api/wealth/mcff-status").get_json()
+    assert st["rows"][0]["ticker"] == "KLAC" and st["rows"][0]["status"] == "BUY ZONE"
+    d = a.post("/api/wealth/mcff/KLAC/draft", json={"gate": "moat"}).get_json()
+    assert d["ok"] and d["draft"]["evidence"] == "draft"
+    assert a.post("/api/wealth/mcff/KLAC/draft", json={"gate": "financials"}).status_code == 400
+    assert a.get("/api/wealth/mcff/<x>").status_code == 404
+
+
+def test_next_dollar_api(env):
+    app, *_ = env
+    c = client(app, 1)
+    pid = make_portfolio(c)
+    c.post("/api/wealth/transactions", json={"portfolio_id": pid, "date": "2026-01-01", "type": "DEPOSIT", "amount": 5000})
+    g = {"score": 8, "origin": "investor"}
+    c.post("/api/wealth/mcff/KLAC", json={"moat": g, "ceo": g, "future": g, "buy_high": 1500})
+    r = c.post("/api/wealth/next-dollar", json={"portfolio_id": pid, "amount": 500, "tickers": ["KLAC", "SPY"]}).get_json()
+    assert r["ok"] and r["rows"][0]["ticker"] == "KLAC" and r["rows"][1]["ticker"] == "CASH"
+    assert r["rows"][2]["ticker"] == "SPY" and r["rows"][2]["status"] == "DO NOT BUY"
+    assert c.post("/api/wealth/next-dollar", json={"portfolio_id": pid, "amount": 0, "tickers": ["KLAC"]}).status_code == 400
+
+
+def test_planner_api_and_ira_tax_year_on_deposits(env):
+    app, *_ = env
+    c = client(app, 1)
+    pid = make_portfolio(c)
+    ok = c.post("/api/wealth/transactions", json={"portfolio_id": pid, "date": "2027-02-01", "type": "DEPOSIT",
+                                                   "amount": 1000, "tax_year": 2026}).get_json()
+    assert ok["ok"]
+    late = c.post("/api/wealth/transactions", json={"portfolio_id": pid, "date": "2027-05-01", "type": "DEPOSIT",
+                                                     "amount": 1000, "tax_year": 2026})
+    assert late.status_code == 400 and "April 15" in late.get_json()["error"]
+    v = c.post("/api/wealth/plan/2027", json={"entries": [{"portfolio_id": pid, "months": [1, 2, 3], "amount": 2000}]}).get_json()
+    ira = {r["tax_year"]: r for r in v["view"]["ira"]}
+    assert ira[2027]["planned"] == 6000 and ira[2026]["actual"] == 1000
+    assert c.get("/api/wealth/plan/2027").get_json()["plan"]["entries"][0]["amount"] == 2000

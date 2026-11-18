@@ -94,6 +94,7 @@
         <button type="submit" class="sd-btn" title="Re-run the full analysis">⟳ Refresh</button>
       </form>
       <a class="sd-btn sd-btn--accent" href="{{ url_for('trade_tools.gate_page', ticker=stock.ticker, entry=stock.entry_zone_high or '', stop=stock.stop_level or '', target=stock.target_1 or '') }}" title="Run this plan through the Pre-Trade Gate">Pre-Trade Gate →</a>
+      <a class="sd-btn" id="sd-mcff" href="{{ url_for('wealth.research_page', ticker=stock.ticker) }}" title="Long-term M.C.F.F. gates: Moat, CEO, Financials, Future">M.C.F.F. →</a>
     </div>
     <div class="sd-hero__status">
       <div class="sd-hero__badges">
@@ -1559,6 +1560,18 @@
 
 </div>
 
+<script>
+(function () {
+  // Long-term status beside the trading tools: one light call, cached filings.
+  var a = document.getElementById('sd-mcff'); if (!a || !window.fetch) return;
+  fetch('/api/wealth/mcff-status?only=1&tickers=' + encodeURIComponent({{ stock.ticker|tojson }}), {credentials: 'same-origin'})
+    .then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      var r = d && d.rows && d.rows[0]; if (!r || !r.status) return;
+      a.textContent = 'M.C.F.F. · ' + (r.researched ? r.status : 'not researched') + ' →';
+      a.title = (r.reasons || []).join(' ');
+    }).catch(function () {});
+})();
+</script>
 {% endblock %}
 
 {% block scripts %}

@@ -37,8 +37,13 @@
   ('Long-term investing', [
     ('wealth', url_for('wealth.dashboard'), 'Wealth Architect', 'Portfolios, returns, concentration and sectors', 'vault'),
   ]),
-  ('Tools', [
-    ('wscore', url_for('wealth.scoreboard_page'), 'Scoreboard', 'Returns vs the S&P 500, drawdowns, growth', 'pulse'),
+  ('Decide', [
+    ('wnext', url_for('wealth.next_dollar_page'), 'Next Dollar', 'Where your next dollar goes, or stays cash', 'target'),
+    ('wmcff', url_for('wealth.research_list_page'), 'M.C.F.F.', 'Moat, CEO, Financials, Future gates', 'checks'),
+    ('wplan', url_for('wealth.planner_page'), 'Planner', 'Contributions by month, IRA limits', 'calendar'),
+  ]),
+  ('Track', [
+    ('wscore', url_for('wealth.scoreboard_page'), 'Scoreboard', 'Returns vs the S&P 500, drawdowns', 'pulse'),
     ('wledger', url_for('wealth.ledger_page'), 'Ledger', 'Transactions, CSV import, Schwab check', 'pen'),
     ('wlab', url_for('wealth.lab_page'), 'Cost Basis Lab', 'What one more purchase does', 'flask'),
   ]),
