@@ -1075,6 +1075,15 @@ def init_db():
             PRIMARY KEY (user_id, broker, account_key)
         )
     """))
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS schwab_account_preferences (
+            user_id INTEGER NOT NULL,
+            account_key TEXT NOT NULL,
+            visible INTEGER NOT NULL DEFAULT 1,
+            include_wealth INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (user_id, account_key)
+        )
+    """))
     # IRA deposits made Jan 1 – Apr 15 can count toward the prior tax year.
     if _USE_POSTGRES:
         cursor.execute("ALTER TABLE wa_transactions ADD COLUMN IF NOT EXISTS tax_year INTEGER")
