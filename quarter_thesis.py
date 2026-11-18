@@ -36,7 +36,12 @@ def metrics(figures: dict) -> dict:
         "gross_margin": _ratio(rev - cogs, rev) if rev is not None and cogs is not None else None,
         "op_margin":    _ratio(f.get("opinc"), rev),
         "net_margin":   _ratio(f.get("ni"), rev),
-        "cash_conv":    _ratio(f.get("cfo"), f.get("niy")),
+        # Cash over profit only means something when there is profit. A new
+        # public company coming out of losses (SpaceX, 2026) can have a tiny
+        # or negative year-to-date net income, and the ratio swings to -31×.
+        "cash_conv":    (_ratio(f.get("cfo"), f.get("niy"))
+                         if (f.get("niy") or 0) > 0 else None),
+        "_cash_nm":     f.get("niy") is not None and f.get("niy") <= 0,
         "current":      _ratio(f.get("ca"), f.get("cl")),
         "share_growth": _growth(f.get("sh"), f.get("shP")),
     }
@@ -158,7 +163,10 @@ def evaluate(thesis: dict, current: dict, history: list[dict]) -> dict:
             detail = (f"Breached {run} quarters running. Your own rule says "
                       "re-examine the position: is this the cycle, or the business?")
         elif status == "no_data":
-            detail = "This quarter does not have the figures for this rule."
+            detail = ("Not meaningful this quarter: year-to-date net income is zero or "
+                      "negative, so cash ÷ profit has no sensible value."
+                      if metric == "cash_conv" and quarters[0].get("_cash_nm")
+                      else "This quarter does not have the figures for this rule.")
         out.append({"key": rule["key"], "text": text, "status": status,
                     "value": _show(now, unit, metric.endswith("growth")), "run": run, "detail": detail})
     tripped = sum(1 for r in out if r["status"] == "tripped")
