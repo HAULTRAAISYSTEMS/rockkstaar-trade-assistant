@@ -4068,9 +4068,27 @@ def watchlist_add():
     if wl_id:
         session["active_wl_id"] = wl_id
 
+    # Added from inside a section on the Watchlists board: file the tickers
+    # there straight away. One already in the list moves to that section,
+    # which is what typing it into that section's box asks for.
+    section_name = None
+    section_id = request.form.get("section_id", "").strip()
+    if wl_id and section_id.isdigit() and (queued or already):
+        moved = [t for t in queued + already if move_watchlist_ticker(wl_id, t, section_id)]
+        if moved:
+            structure = get_watchlist_structure(wl_id)
+            section_name = next((s["name"] for s in structure.get("sections", [])
+                                 if str(s["id"]) == section_id), None)
+            if already and section_name:
+                moved_already = [t for t in already if t in moved]
+                if moved_already:
+                    flash(f"Moved {', '.join(moved_already)} to {section_name}.", "success")
+                already = [t for t in already if t not in moved]
+
     if queued:
         flash(
-            f"Adding {', '.join(queued)}… "
+            (f"Adding {', '.join(queued)} to {section_name}… " if section_name else
+             f"Adding {', '.join(queued)}… ") +
             "The row shows Loading → Partial → Ready as data arrives. "
             "The page auto-refreshes when it's ready.",
             "success",
@@ -5137,6 +5155,39 @@ def _owned_watchlist(wl_id: int):
     return None
 
 
+def _board_quotes(tickers, stock_data, today=None):
+    """What each card on the Watchlists board shows beside the ticker.
+
+    The last stored price and its move against the previous close, and the
+    days to earnings when they are two weeks out or less. These are the
+    stored values the rest of the app reads, not a fresh quote, and the card
+    says so on hover.
+    """
+    from datetime import date as _date
+    today = today or _date.today()
+    out = {}
+    for t in tickers or []:
+        row = stock_data.get(t) or {}
+        price, prev = row.get("current_price"), row.get("prev_close")
+        chg = None
+        try:
+            if price is not None and prev:
+                chg = (float(price) / float(prev) - 1) * 100
+        except (TypeError, ValueError, ZeroDivisionError):
+            chg = None
+        er_days = None
+        try:
+            er = str(row.get("earnings_date") or "")[:10]
+            if er:
+                d = (_date.fromisoformat(er) - today).days
+                er_days = d if 0 <= d <= 14 else None
+        except ValueError:
+            er_days = None
+        out[t] = {"price": price, "chg": chg, "er_days": er_days,
+                  "as_of": row.get("last_updated")}
+    return out
+
+
 @app.route("/watchlists")
 def watchlists_page():
     """Watchlists settings — create / rename / activate / delete lists and
@@ -5156,6 +5207,7 @@ def watchlists_page():
     active_structure = get_watchlist_structure(active_id) if active_id else {"sections": [], "unsectioned": []}
     can_organize = bool(active_wl and active_wl.get("name") not in DEFAULT_WATCHLISTS)
     stock_data     = {row["ticker"]: row for row in get_all_stock_data()}
+    board_quotes   = _board_quotes(active_tickers, stock_data)
     price_alerts   = get_price_alerts(uid)
     for alert in price_alerts:
         quote = stock_data.get(alert["ticker"], {})
@@ -5182,6 +5234,7 @@ def watchlists_page():
         wl_counts=wl_counts, active_tickers=active_tickers,
         active_structure=active_structure, can_organize=can_organize,
         price_alerts=price_alerts, personal_watchlists=PERSONAL_WATCHLISTS,
+        board_quotes=board_quotes,
         automatic_watchlists=DEFAULT_WATCHLISTS,
     )
 
