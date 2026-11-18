@@ -57,7 +57,7 @@
         cell(tr,(h.account.discrepancies || []).some(d => d.ticker === h.ticker) ? 'Review history' : 'Matched');
         const td = cell(tr,'');
         const link = document.createElement('a'); link.className = 'wa-btn';
-        link.href = '/wealth/mcff/' + encodeURIComponent(h.ticker);
+        link.href = '/wealth/research/' + encodeURIComponent(h.ticker);
         link.textContent = 'M.C.F.F.'; td.appendChild(link);
         rows.appendChild(tr);
       });
