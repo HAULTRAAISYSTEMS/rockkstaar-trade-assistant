@@ -4,7 +4,7 @@
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
 {% block content %}
 <div class="wa">
-{{ wa.head('research', 'M.C.F.F. research', 'Moat → CEO → Financials → Future, in that order. A company reaches BUY ZONE only when all four gates pass and the price is inside your buy zone.', portfolios, current, with_all=False) }}
+{{ wa.head('research', 'M.C.F.F. research', 'Moat → CEO → Financials → Future, in that order. A company reaches BUY ZONE only when all four gates pass and the price is inside your buy zone.', portfolios, current, with_all=False, pills=False) }}
 
 <section class="wa-card" style="margin-bottom:12px">
   <form class="wa-form" id="go" style="grid-template-columns:minmax(0,260px) auto">

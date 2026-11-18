@@ -10,7 +10,7 @@
 {% macro tone(v) -%}{{ 'up' if v is not none and v > 0 else ('dn' if v is not none and v < 0 else '') }}{%- endmacro %}
 {% macro qty(v) -%}{{ ('{:,.6f}'.format(v)).rstrip('0').rstrip('.') if v is not none else '—' }}{%- endmacro %}
 
-{% macro head(active, title, blurb, portfolios, current, with_all=True) %}
+{% macro head(active, title, blurb, portfolios, current, with_all=True, pills=True) %}
 <header class="wa-head">
   <div>
     <div class="wa-kicker">Wealth Architect · capital intelligence</div>
@@ -28,7 +28,7 @@
     <a href="{{ url_for('wealth.lab_page') }}{{ q }}" class="{{ 'is-on' if active == 'lab' }}">Lab</a>
   </nav>
 </header>
-{% if portfolios %}
+{% if portfolios and pills %}
 <div class="wa-bar" aria-label="Portfolio">
   {% set ep = request.endpoint %}
   {% if with_all %}<a class="wa-pill {{ 'is-on' if not current }}" href="{{ url_for(ep) }}">All portfolios</a>{% endif %}

@@ -4,7 +4,7 @@
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
 {% block content %}
 <div class="wa">
-{{ wa.head('research', ticker ~ ' · M.C.F.F.', 'Score each gate in order. Financials is filled from SEC filings; Moat, CEO and Future are your judgment. Your scores are what count.', portfolios, current, with_all=False) }}
+{{ wa.head('research', ticker ~ ' · M.C.F.F.', 'Score each gate in order. Financials is filled from SEC filings; Moat, CEO and Future are your judgment. Your scores are what count.', portfolios, current, with_all=False, pills=False) }}
 <div id="mc" aria-live="polite"><section class="wa-card"><p class="wa-note">Loading {{ ticker }}: the first look at a company reads its filings and can take a few seconds.</p></section></div>
 </div>
 {{ wa.common_js() }}
@@ -57,7 +57,7 @@
     h += '<div class="wa-two" style="margin-top:12px"><section class="wa-card"><h2>Buy zone <small>yours overrides the app\'s value zone</small></h2>' +
       '<div class="wa-form" style="grid-template-columns:1fr 1fr"><label>Buy up to<input name="buy_high" inputmode="decimal" value="' + (r.buy_high || '') + '" placeholder="e.g. 130"></label><label>Floor (re-check below)<input name="buy_low" inputmode="decimal" value="' + (r.buy_low || '') + '" placeholder="optional"></label></div>' +
       '<p class="wa-note">' + (M.value_zone ? 'App value zone now: ' + WA.esc(M.value_zone.zone_label || M.value_zone.zone) + (M.value_zone.accum_top ? ' · Accumulate up to ' + WA.money(M.value_zone.accum_top) + ' · Load up to ' + WA.money(M.value_zone.load_top) : '') : 'No app value zone for this company yet.') + ' The app never calls a price above your zone a buy.</p>' +
-      '<label class="wa-form" style="display:grid;margin-top:8px"><span style="color:var(--elite-faint);font:700 9px var(--font-mono);letter-spacing:.1em;text-transform:uppercase">Thesis</span><textarea name="thesis" class="wa-input" style="min-height:80px;font-family:var(--font-ui)" placeholder="Why you own it, in a few sentences">' + WA.esc(r.thesis || '') + '</textarea></label></section>';
+      '<div class="wa-form wa-gate" style="grid-template-columns:1fr;margin-top:8px"><label>Thesis<textarea name="thesis" style="min-height:80px" placeholder="Why you own it, in a few sentences">' + WA.esc(r.thesis || '') + '</textarea></label></div></section>';
     h += '<section class="wa-card"><h2>Scenarios <small>' + A.years + ' years · your assumptions</small></h2><div class="wa-scroll"><table class="wa-table"><thead><tr><th>Case</th><th>EPS growth %/yr</th><th>Exit P/E</th><th>Price in ' + A.years + 'y</th><th>Per year</th></tr></thead><tbody>' +
       M.scenarios.map(s => '<tr><td>' + s.case + '</td><td><input class="wa-input" style="width:80px;min-height:30px" name="g_' + s.case + '" value="' + fmtPct(A.growth[s.case]) + '" inputmode="decimal"></td><td><input class="wa-input" style="width:70px;min-height:30px" name="pe_' + s.case + '" value="' + (A.exit_pe[s.case] ?? '') + '" inputmode="decimal"></td><td>' + (s.price_target ? WA.money(s.price_target) : '<span class="muted">needs ' + (s.missing || []).join(', ') + '</span>') + '</td><td class="' + WA.tone(s.annual_return_pct) + '">' + WA.pct(s.annual_return_pct) + '</td></tr>').join('') +
       '</tbody></table></div><div class="wa-form" style="grid-template-columns:120px 1fr;margin-top:8px"><label>Years<input name="years" value="' + A.years + '" inputmode="numeric"></label></div>' +

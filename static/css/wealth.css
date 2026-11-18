@@ -76,7 +76,7 @@
 .wa-callout{margin:12px 0 0;padding:12px 14px;border-left:3px solid var(--elite-gold);border-radius:0 10px 10px 0;background:rgba(var(--cc-accent-rgb, 229,185,79),.06);color:var(--elite-copy);font-size:12px;line-height:1.55}
 .wa-callout b{color:var(--elite-gold-bright)}
 .wa-table tr.is-target td{background:rgba(var(--cc-accent-rgb, 229,185,79),.08)}
-.wa-toggle{display:flex;align-items:center;gap:8px;color:var(--elite-muted);font:600 12px var(--font-ui);grid-column:1/-1}
+.wa-toggle,.wa-form .wa-toggle{display:flex;align-items:center;gap:8px;color:var(--elite-muted);font:600 12px var(--font-ui);letter-spacing:0;text-transform:none;grid-column:1/-1}
 .wa-toggle input{width:auto;min-height:0}
 @media(max-width:900px){.wa-two,.wa-lab{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:720px){

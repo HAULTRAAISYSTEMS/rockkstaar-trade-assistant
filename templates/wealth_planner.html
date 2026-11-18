@@ -4,7 +4,7 @@
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
 {% block content %}
 <div class="wa">
-{{ wa.head('plan', 'Seasonal Wealth Planner · ' ~ year, 'Plan contributions by month and portfolio, track them against what you actually deposited, and stay inside IRA limits.', portfolios, current, with_all=False) }}
+{{ wa.head('plan', 'Seasonal Wealth Planner · ' ~ year, 'Plan contributions by month and portfolio, track them against what you actually deposited, and stay inside IRA limits.', portfolios, current, with_all=False, pills=False) }}
 <div class="wa-bar"><a class="wa-pill" href="?year={{ year - 1 }}">← {{ year - 1 }}</a><span class="wa-pill is-on">{{ year }}</span><a class="wa-pill" href="?year={{ year + 1 }}">{{ year + 1 }} →</a></div>
 {% if not portfolios %}
 <section class="wa-card wa-empty"><h2>Create a portfolio first</h2>{{ wa.create_portfolio(quick_start, kinds) }}</section>
@@ -25,7 +25,7 @@
   function render(v) {
     let h = '<section class="wa-kpis">' +
       '<div class="wa-kpi is-hero"><span>Planned for ' + Y + '</span><b>' + WA.money(v.planned_total) + '</b><em>' + WA.money(v.actual_total) + ' deposited so far</em></div>' +
-      Object.entries(v.seasons).map(([n, a]) => '<div class="wa-kpi"><span>' + n + '</span><b>' + WA.money(a) + '</b><em>' + SEASONS[n].map(m => MONTHS[m - 1]).join(' · ') + '</em></div>').join('') + '</section>';
+      ['Winter', 'Spring', 'Summer', 'Fall'].map(n => [n, v.seasons[n]]).map(([n, a]) => '<div class="wa-kpi"><span>' + n + '</span><b>' + WA.money(a) + '</b><em>' + SEASONS[n].map(m => MONTHS[m - 1]).join(' · ') + '</em></div>').join('') + '</section>';
     // IRA
     if (v.ira.length) {
       h += '<section class="wa-card" style="margin-bottom:12px"><h2>IRA limits <small>Roth + traditional combined, per person</small></h2><div class="wa-grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">' +
@@ -65,12 +65,12 @@
     const ms = e.months || [];
     return '<div class="pl-line wa-form" style="padding:10px 0;border-bottom:1px solid var(--elite-hairline)">' +
       '<label>Portfolio<select name="pid">' + P.map(p => '<option value="' + p.id + '" ' + (e.portfolio_id === p.id ? 'selected' : '') + '>' + WA.esc(p.name) + '</option>').join('') + '</select></label>' +
-      '<label>Kind<select name="kind"><option value="monthly" ' + (e.kind !== 'one_time' ? 'selected' : '') + '>Each chosen month</option><option value="one_time" ' + (e.kind === 'one_time' ? 'selected' : '') + '>One-time</option></select></label>' +
+      '<label>Kind<select name="kind"><option value="monthly" ' + (e.kind !== 'one_time' ? 'selected' : '') + '>Monthly</option><option value="one_time" ' + (e.kind === 'one_time' ? 'selected' : '') + '>One-time</option></select></label>' +
       '<label>Amount ($)<input name="amount" inputmode="decimal" value="' + (e.amount || '') + '"></label>' +
       '<label>Label<input name="label" maxlength="60" value="' + WA.esc(e.label || '') + '" placeholder="e.g. tax refund"></label>' +
       '<label title="IRA only: Jan–Apr 15 deposits can count toward the prior year">Tax year<select name="ty"><option value="' + Y + '">' + Y + '</option><option value="' + (Y - 1) + '" ' + (e.tax_year === Y - 1 ? 'selected' : '') + '>' + (Y - 1) + '</option></select></label>' +
       '<div class="wa-months">' + MONTHS.map((m, i) => '<label><input type="checkbox" name="m" value="' + (i + 1) + '" ' + (ms.includes(i + 1) ? 'checked' : '') + '>' + m + '</label>').join('') +
-      Object.keys(SEASONS).map(s => '<button type="button" class="wa-btn" style="padding:4px 8px" data-season="' + s + '">' + s + '</button>').join('') + '<button type="button" class="wa-x" data-del title="Remove line">×</button></div></div>';
+      ['Winter', 'Spring', 'Summer', 'Fall'].map(s => '<button type="button" class="wa-btn" style="padding:4px 8px" data-season="' + s + '">' + s + '</button>').join('') + '<button type="button" class="wa-x" data-del title="Remove line">×</button></div></div>';
   }
   async function save() {
     const entries = [...document.querySelectorAll('.pl-line')].map(l => ({portfolio_id: +l.querySelector('[name=pid]').value, kind: l.querySelector('[name=kind]').value,
