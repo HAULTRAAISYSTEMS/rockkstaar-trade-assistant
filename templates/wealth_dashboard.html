@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% import "_wealth_macros.html" as wa with context %}
+{% block title %}Wealth Architect — Tradestaar Elite{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
+{% block content %}
+<div class="wa">
+{{ wa.head('dash', 'Wealth Architect', 'Where your money is, what it has earned, and how concentrated it is. Built from your own transactions.', portfolios, current) }}
+
+{% if not portfolios %}
+<section class="wa-card wa-empty">
+  <h2>Start with a portfolio</h2>
+  <p class="wa-note" style="max-width:560px;margin:0 auto">Create one for each account you invest through. Then add transactions by hand or import Schwab's transaction history (CSV). Every figure here is calculated from those transactions; nothing is synced or estimated.</p>
+  {{ wa.create_portfolio(quick_start, kinds) }}
+</section>
+{% else %}
+
+{% if s.unpriced %}
+<div class="wa-warn"><b>No price</b><span>{{ s.unpriced|join(', ') }} {{ 'has' if s.unpriced|length == 1 else 'have' }} no price right now, so {{ 'it is' if s.unpriced|length == 1 else 'they are' }} left out of market value, and total return isn't shown until every holding is priced.</span></div>
+{% endif %}
+{% if s.stale %}
+<div class="wa-warn"><b>Old price</b><span>{{ s.stale|join(', ') }}: the live feed has no quote, so the last stored price is used. Hover a price to see its date.</span></div>
+{% endif %}
+{% if s.issues %}
+<div class="wa-warn"><b>Ledger</b><span>{{ s.issues|length }} item{{ '' if s.issues|length == 1 else 's' }} to check: {{ s.issues[:2]|join(' · ') }}{% if s.issues|length > 2 %} · <a href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">see all</a>{% endif %}</span></div>
+{% endif %}
+
+{% if s.transaction_count == 0 %}
+<section class="wa-card wa-empty">
+  <h2>No transactions yet</h2>
+  <p class="wa-note">Add your deposits and buys, or import a Schwab transaction-history CSV.</p>
+  <a class="wa-btn is-gold" href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">Open the ledger</a>
+</section>
+{% else %}
+<section class="wa-kpis" aria-label="Portfolio totals">
+  <div class="wa-kpi is-hero"><span>Total value · holdings + cash</span><b>{{ wa.money(s.total_value) }}</b><em>{{ wa.money(s.market_value) }} invested · {{ wa.money(s.cash) }} cash{% if s.unpriced %} · excl. {{ s.unpriced|length }} unpriced{% endif %}</em></div>
+  <div class="wa-kpi"><span>Cost basis</span><b>{{ wa.money(s.cost_basis) }}</b><em>fees included</em></div>
+  <div class="wa-kpi"><span>Unrealized</span><b class="{{ wa.tone(s.unrealized) }}">{{ wa.money(s.unrealized, True) }}</b><em class="{{ wa.tone(s.unrealized_pct) }}">{{ wa.pct(s.unrealized_pct) }} on priced holdings</em></div>
+  <div class="wa-kpi"><span>Realized</span><b class="{{ wa.tone(s.realized) }}">{{ wa.money(s.realized, True) }}</b><em>short {{ wa.money(s.realized_short, True) }} · long {{ wa.money(s.realized_long, True) }}</em></div>
+  <div class="wa-kpi"><span>Dividends</span><b>{{ wa.money(s.dividends) }}</b><em>+ {{ wa.money(s.interest) }} interest{% if s.taxes %} · −{{ wa.money(s.taxes) }} tax{% endif %}</em></div>
+  <div class="wa-kpi"><span>Net contributions</span><b>{{ wa.money(s.net_contributions) }}</b><em>your money in, minus out</em></div>
+  <div class="wa-kpi"><span>Total return · gains only</span><b class="{{ wa.tone(s.total_return) }}">{{ wa.money(s.total_return, True) }}</b><em class="{{ wa.tone(s.total_return_pct) }}">{{ wa.pct(s.total_return_pct) }} of contributions</em></div>
+  <div class="wa-kpi" title="Money-weighted (XIRR): includes the timing of your deposits"><span>Annualized · money-weighted</span><b class="{{ wa.tone(s.money_weighted_pct) }}">{{ wa.pct(s.money_weighted_pct) }}</b><em>{% if s.money_weighted_pct is none %}needs 30+ days and every holding priced{% else %}since {{ s.first_date }}{% endif %}</em></div>
+  <div class="wa-kpi" id="wa-bench"><span>vs S&amp;P 500 · same deposits</span><b class="muted">…</b><em>loading</em></div>
+</section>
+
+<div class="wa-two">
+  <section class="wa-card">
+    <h2>Holdings <small>{{ s.holdings|length }} positions · priced {{ s.as_of }}</small></h2>
+    <div class="wa-scroll">
+    <table class="wa-table">
+      <thead><tr><th>Ticker</th><th class="hide-sm">Shares</th><th class="hide-sm">Avg cost</th><th>Price</th><th>Value</th><th>Unrealized</th><th class="hide-sm">Weight</th></tr></thead>
+      <tbody>
+      {% for h in s.holdings %}
+      <tr>
+        <td><a class="wa-tk" href="{{ url_for('stock_detail', ticker=h.ticker) }}">{{ h.ticker }}</a><span class="wa-sub">{{ wa.qty(h.shares) }} sh · {{ wa.pct(h.weight_pct, False, 1) }} · {{ h.sector }}</span></td>
+        <td class="hide-sm">{{ wa.qty(h.shares) }}</td>
+        <td class="hide-sm">{{ wa.money(h.avg_cost) }}</td>
+        <td title="{{ (h.price_source ~ ' · ' ~ (h.price_as_of or 'time unknown')) if h.price is not none else 'No price available' }}">{{ wa.money(h.price) }}{% if h.stale %}<span class="wa-stale">OLD</span>{% endif %}</td>
+        <td>{{ wa.money(h.market_value) }}</td>
+        <td class="{{ wa.tone(h.unrealized) }}">{{ wa.money(h.unrealized, True) }}<span class="wa-sub {{ wa.tone(h.unrealized_pct) }}">{{ wa.pct(h.unrealized_pct) }}</span></td>
+        <td class="hide-sm">{{ wa.pct(h.weight_pct, False, 1) }}<span class="wa-wbar {{ 'over' if h.ticker in s.over_limit }}"><i style="width:{{ [h.weight_pct or 0, 100]|min }}%"></i></span></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p class="wa-note">Prices: live feed (Schwab → Alpaca → Yahoo) when it has a quote; otherwise the last stored price, marked OLD after {{ 3 }} days. Hover a price for its source and time.</p>
+  </section>
+
+  <div class="wa-grid">
+    <section class="wa-card">
+      <h2>Concentration</h2>
+      <dl class="wa-facts">
+        <div><dt>Largest position</dt><dd>{{ s.holdings[0].ticker if s.holdings else '—' }} · {{ wa.pct(s.top_weight_pct, False, 1) }}</dd></div>
+        <div><dt>Top 5 positions</dt><dd>{{ wa.pct(s.top5_weight_pct, False, 1) }}</dd></div>
+        <div title="1 ÷ sum of squared weights: how many equal-sized positions this portfolio behaves like"><dt>Behaves like</dt><dd>{{ '%.1f'|format(s.effective_holdings) if s.effective_holdings else '—' }} equal positions</dd></div>
+        <div><dt>Cash</dt><dd>{{ wa.pct((s.cash / s.total_value * 100) if s.total_value else none, False, 1) }}</dd></div>
+      </dl>
+      {% if s.over_limit %}<p class="wa-note dn">Above this portfolio's {{ current.max_position_pct|round(0)|int }}% position limit: {{ s.over_limit|join(', ') }}.</p>{% endif %}
+    </section>
+    <section class="wa-card">
+      <h2>Sector exposure</h2>
+      <div class="wa-bars">
+        {% for r in s.sectors %}
+        <div><span><i style="width:{{ r.pct or 0 }}%"></i><em>{{ r.sector }}</em></span><b>{{ wa.pct(r.pct, False, 1) }}</b></div>
+        {% endfor %}
+      </div>
+      <p class="wa-note">Sector comes from the company profile the app has stored. "Unclassified" means it hasn't been looked up yet: open the stock's page once to fill it in.</p>
+    </section>
+  </div>
+</div>
+
+{% if s.realized_rows %}
+<section class="wa-card" style="margin-top:12px">
+  <h2>Realized gains <small>first-in, first-out lots</small></h2>
+  <div class="wa-scroll"><table class="wa-table">
+    <thead><tr><th>Sold</th><th>Ticker</th><th>Shares</th><th class="hide-sm">Bought</th><th>Proceeds</th><th>Cost</th><th>Gain</th><th>Term</th></tr></thead>
+    <tbody>{% for r in s.realized_rows[:25] %}<tr><td>{{ r.date }}</td><td>{{ r.ticker }}</td><td>{{ wa.qty(r.shares) }}</td><td class="hide-sm">{{ r.acquired }}</td><td>{{ wa.money(r.proceeds) }}</td><td>{{ wa.money(r.cost) }}</td><td class="{{ wa.tone(r.gain) }}">{{ wa.money(r.gain, True) }}</td><td>{{ r.term }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="wa-note">For your records, not a tax form. Your broker's 1099-B is the figure to file; wash-sale adjustments are not applied here.</p>
+</section>
+{% endif %}
+{% endif %}
+{% endif %}
+</div>
+{{ wa.common_js() }}
+{% if s and s.transaction_count %}
+<script>
+(async function () {
+  const el = document.getElementById('wa-bench');
+  const d = await WA.api('/api/wealth/benchmark{{ ('?p=' ~ current.id) if current else '' }}');
+  if (!d.ok) { el.querySelector('b').textContent = '—'; el.querySelector('em').textContent = d.reason || 'Unavailable'; return; }
+  const diff = d.portfolio_value - d.spy.value;
+  el.querySelector('b').textContent = WA.money(diff, true);
+  el.querySelector('b').className = WA.tone(diff);
+  el.querySelector('em').textContent = 'SPY would be ' + WA.money(d.spy.value) + (d.spy.money_weighted_pct != null ? ' · ' + WA.pct(d.spy.money_weighted_pct) + '/yr' : '');
+  el.title = d.note;
+})();
+</script>
+{% endif %}
+{% endblock %}

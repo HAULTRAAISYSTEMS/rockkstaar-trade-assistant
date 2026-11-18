@@ -1028,6 +1028,43 @@ def init_db():
         )
     """))
 
+    # Wealth Architect: the investor's portfolios and the transactions that
+    # define them. Positions, cost basis, cash and gains are all derived from
+    # wa_transactions (see wealth_ledger.py); nothing derived is stored.
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS wa_portfolios (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       INTEGER NOT NULL,
+            name          TEXT    NOT NULL,
+            kind          TEXT    NOT NULL DEFAULT 'taxable',
+            target_cash_pct REAL,
+            max_position_pct REAL,
+            broker_account TEXT,
+            sort_order    INTEGER NOT NULL DEFAULT 0,
+            created_at    TEXT    NOT NULL
+        )
+    """))
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS wa_transactions (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       INTEGER NOT NULL,
+            portfolio_id  INTEGER NOT NULL,
+            date          TEXT    NOT NULL,
+            type          TEXT    NOT NULL,
+            ticker        TEXT,
+            shares        DOUBLE PRECISION,
+            price         DOUBLE PRECISION,
+            amount        DOUBLE PRECISION,
+            fees          DOUBLE PRECISION NOT NULL DEFAULT 0,
+            ratio         DOUBLE PRECISION,
+            note          TEXT,
+            source        TEXT    NOT NULL DEFAULT 'manual',
+            fingerprint   TEXT,
+            created_at    TEXT    NOT NULL
+        )
+    """))
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_wa_tx_portfolio ON wa_transactions (user_id, portfolio_id, date)")
+
     # Value-zone badges (Load / Accum / Fair / Pricey). Kept here so they
     # survive deploys and worker restarts and are shared by every worker;
     # in memory only, a restart meant rebuilding every ticker from scratch.

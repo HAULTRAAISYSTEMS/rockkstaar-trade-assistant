@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% import "_wealth_macros.html" as wa with context %}
+{% block title %}Ledger — Wealth Architect{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
+{% block content %}
+<div class="wa">
+{{ wa.head('ledger', 'Ledger', 'Every buy, sale, dividend, split and deposit. Positions, cost basis and gains are calculated from this list, so fixing a row here fixes every figure.', portfolios, current, with_all=False) }}
+
+{% if not portfolios %}
+<section class="wa-card wa-empty"><h2>Create a portfolio first</h2>{{ wa.create_portfolio(quick_start, kinds) }}</section>
+{% else %}
+{% if ledger and ledger.issues %}
+<div class="wa-warn"><b>Check</b><span>{% for i in ledger.issues %}{{ i }}{% if not loop.last %}<br>{% endif %}{% endfor %}</span></div>
+{% endif %}
+
+<div class="wa-two">
+  <div class="wa-grid">
+    <section class="wa-card">
+      <h2>Add a transaction <small>{{ current.name }}</small></h2>
+      <form class="wa-form" id="tx-form" autocomplete="off">
+        <label>Date<input type="date" name="date" required value="{{ today if today is defined else '' }}"></label>
+        <label>Type<select name="type" id="tx-type">
+          {% for t in types %}<option value="{{ t }}">{{ t.replace('_', ' ').title() }}</option>{% endfor %}
+        </select></label>
+        <label data-f="ticker">Ticker<input name="ticker" maxlength="10" style="text-transform:uppercase" placeholder="KLAC"></label>
+        <label data-f="shares"><span data-l="shares">Shares</span><input name="shares" inputmode="decimal" placeholder="1.5"></label>
+        <label data-f="price"><span data-l="price">Price</span><input name="price" inputmode="decimal" placeholder="141.20"></label>
+        <label data-f="amount"><span data-l="amount">Amount</span><input name="amount" inputmode="decimal" placeholder="2000"></label>
+        <label data-f="fees">Fees<input name="fees" inputmode="decimal" placeholder="0"></label>
+        <label data-f="ratio">Split ratio<input name="ratio" inputmode="decimal" placeholder="10 = 10-for-1"></label>
+        <label class="wide">Note<input name="note" maxlength="200" placeholder="Optional"></label>
+        <button class="wa-btn is-gold" type="submit">Add</button>
+      </form>
+      <div class="wa-msg" id="tx-msg"></div>
+      <p class="wa-note" id="tx-help"></p>
+    </section>
+
+    <section class="wa-card">
+      <h2>Transactions <small>{{ txs|length }} rows · newest first</small></h2>
+      {% if not txs %}<p class="wa-note">None yet.</p>{% else %}
+      <div class="wa-scroll"><table class="wa-table">
+        <thead><tr><th>Date</th><th>Type</th><th>Ticker</th><th>Shares</th><th class="hide-sm">Price</th><th>Amount</th><th class="hide-sm">Source</th><th></th></tr></thead>
+        <tbody>
+        {% for t in txs %}
+        <tr>
+          <td>{{ t.date }}</td>
+          <td style="text-align:right"><span class="wa-tag {{ t.type }}">{{ t.type.replace('_', ' ') }}</span></td>
+          <td>{{ t.ticker or '' }}</td>
+          <td>{% if t.type == 'SPLIT' %}{{ ('×' ~ t.ratio) if t.ratio else ('+' ~ wa.qty(t.shares) ~ ' sh') }}{% else %}{{ wa.qty(t.shares) if t.shares else '' }}{% endif %}</td>
+          <td class="hide-sm">{{ wa.money(t.price) if t.price else '' }}</td>
+          <td>{% if t.amount %}{{ wa.money(t.amount) }}{% elif t.shares and t.price %}{{ wa.money(t.shares * t.price + (t.fees or 0)) }}{% endif %}</td>
+          <td class="hide-sm muted" title="{{ t.note or '' }}">{{ t.source.replace('_', ' ') }}</td>
+          <td><button class="wa-x" type="button" data-del="{{ t.id }}" title="Delete this row">×</button></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="wa-grid">
+    <section class="wa-card">
+      <h2>Import CSV</h2>
+      <p class="wa-note" style="margin-top:0">Schwab: Accounts → History → choose the account and dates → Export. Or use the <a href="/api/wealth/template.csv">template</a>. You'll see every row before anything is saved; rows already imported are skipped.</p>
+      <form id="imp-form" class="wa-form" style="grid-template-columns:1fr auto">
+        <input type="file" name="file" accept=".csv,text/csv" required>
+        <button class="wa-btn" type="submit">Preview</button>
+      </form>
+      <div class="wa-msg" id="imp-msg"></div>
+      <div id="imp-preview"></div>
+    </section>
+
+    <section class="wa-card">
+      <h2>Reconcile with Schwab</h2>
+      <p class="wa-note" style="margin-top:0">Compares this ledger with the positions and cash Schwab reports through your connected account. It reads only; nothing is changed on either side.</p>
+      <button class="wa-btn" type="button" id="rec-btn">Compare now</button>
+      <div id="rec-out" style="margin-top:10px"></div>
+    </section>
+
+    <section class="wa-card">
+      <h2>Portfolio settings</h2>
+      <form class="wa-form" id="pf-form">
+        <label class="wide">Name<input name="name" maxlength="60" value="{{ current.name }}"></label>
+        <label>Type<select name="kind">{% for k, v in kinds.items() %}<option value="{{ k }}" {{ 'selected' if k == current.kind }}>{{ v }}</option>{% endfor %}</select></label>
+        <label title="Holdings above this weight are flagged on the dashboard">Max position %<input name="max_position_pct" inputmode="decimal" value="{{ current.max_position_pct if current.max_position_pct is not none else '' }}" placeholder="e.g. 20"></label>
+        <label>Cash target %<input name="target_cash_pct" inputmode="decimal" value="{{ current.target_cash_pct if current.target_cash_pct is not none else '' }}" placeholder="e.g. 5"></label>
+        <button class="wa-btn" type="submit">Save</button>
+      </form>
+      <div class="wa-msg" id="pf-msg"></div>
+      <details style="margin-top:10px"><summary class="wa-note" style="cursor:pointer">Add another portfolio</summary>{{ wa.create_portfolio(quick_start, kinds) }}</details>
+      <button class="wa-btn is-danger" type="button" id="pf-del" style="margin-top:12px">Delete {{ current.name }} and its transactions</button>
+    </section>
+  </div>
+</div>
+{% endif %}
+</div>
+{{ wa.common_js() }}
+{% if current %}
+<script>
+(function () {
+  const PID = {{ current.id }}, PNAME = {{ current.name|tojson }};
+  const HELP = {
+    DEPOSIT: 'Money you added to the account. Counts as a contribution.',
+    WITHDRAWAL: 'Money you took out of the account.',
+    BUY: 'Price per share. Fees are added to the cost basis.',
+    SELL: 'Shares are taken from the oldest lots first (FIFO). Fees reduce the proceeds.',
+    DIVIDEND: 'Cash dividend received. Income, not a contribution.',
+    REINVEST: 'A dividend that bought shares: enter the shares and the price they were bought at.',
+    INTEREST: 'Interest paid on cash.',
+    FEE: 'An account fee.',
+    TAX: 'Tax withheld, e.g. foreign tax on an ADR dividend.',
+    SPLIT: 'Enter the ratio (10 for a 10-for-1, 0.2 for a 1-for-5 reverse), or the shares you received. Total cost does not change.',
+    TRANSFER_IN: 'Shares moved in from another account. Price = your cost per share; Amount = market value on the day (for returns).',
+    TRANSFER_OUT: 'Shares moved out to another account. Not a sale.'
+  };
+  const FIELDS = {
+    DEPOSIT: ['amount'], WITHDRAWAL: ['amount'], INTEREST: ['amount'], FEE: ['amount'], TAX: ['amount'],
+    DIVIDEND: ['ticker', 'amount'], BUY: ['ticker', 'shares', 'price', 'fees'], SELL: ['ticker', 'shares', 'price', 'fees'],
+    REINVEST: ['ticker', 'shares', 'price'], SPLIT: ['ticker', 'ratio', 'shares'],
+    TRANSFER_IN: ['ticker', 'shares', 'price', 'amount'], TRANSFER_OUT: ['ticker', 'shares', 'amount']
+  };
+  const form = document.getElementById('tx-form'), type = document.getElementById('tx-type');
+  if (!form.date.value) form.date.value = new Date().toISOString().slice(0, 10);
+  function sync() {
+    const t = type.value, show = FIELDS[t] || [];
+    form.querySelectorAll('[data-f]').forEach(l => { l.hidden = !show.includes(l.dataset.f); });
+    form.querySelector('[data-l="shares"]').textContent = t === 'SPLIT' ? 'Or shares received' : 'Shares';
+    form.querySelector('[data-l="price"]').textContent = t === 'TRANSFER_IN' ? 'Cost / share' : 'Price';
+    form.querySelector('[data-l="amount"]').textContent = t.startsWith('TRANSFER') ? 'Market value' : 'Amount';
+    document.getElementById('tx-help').textContent = HELP[t] || '';
+  }
+  type.addEventListener('change', sync); sync();
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(form)); body.portfolio_id = PID;
+    const d = await WA.api('/api/wealth/transactions', 'POST', body);
+    const m = document.getElementById('tx-msg');
+    if (!d.ok) { m.textContent = d.error; m.className = 'wa-msg err'; return; }
+    location.reload();
+  });
+  document.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Delete this transaction? Positions and gains will be recalculated.')) return;
+    const d = await WA.api('/api/wealth/transactions/' + b.dataset.del, 'DELETE');
+    if (d.ok) location.reload();
+  }));
+
+  // Import: preview first.
+  let preview = [];
+  document.getElementById('imp-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const m = document.getElementById('imp-msg'), out = document.getElementById('imp-preview');
+    m.textContent = 'Reading…'; m.className = 'wa-msg';
+    const d = await WA.api('/api/wealth/import/preview', 'POST', new FormData(e.target));
+    if (!d.ok) { m.textContent = d.error; m.className = 'wa-msg err'; out.innerHTML = ''; return; }
+    preview = d.transactions;
+    m.textContent = (d.format === 'schwab' ? 'Schwab export' : 'Template') + ': ' + preview.length + ' rows to import, ' + d.skipped.length + ' not imported.';
+    m.className = 'wa-msg ok';
+    let h = '<div class="wa-scroll" style="max-height:340px;overflow:auto"><table class="wa-table"><thead><tr><th></th><th>Date</th><th>Type</th><th>Ticker</th><th>Shares</th><th>Price / cost</th><th>Amount</th></tr></thead><tbody>';
+    preview.forEach((t, i) => {
+      const cost = t.needs_cost ? '<input class="wa-input" style="width:90px;min-height:28px" data-cost="' + i + '" placeholder="cost/sh">' : (t.price ? WA.money(t.price) : '');
+      h += '<tr><td><input type="checkbox" checked data-pick="' + i + '"></td><td>' + WA.esc(t.date) + '</td><td><span class="wa-tag ' + t.type + '">' + t.type + '</span></td><td>' + WA.esc(t.ticker || '') +
+           '</td><td>' + (t.type === 'SPLIT' ? (t.ratio ? '×' + t.ratio : '+' + t.shares) : (t.shares ?? '')) + '</td><td>' + cost + '</td><td>' + (t.amount ? WA.money(t.amount) : '') + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    if (d.skipped.length) h += '<details style="margin-top:8px"><summary class="wa-note" style="cursor:pointer">' + d.skipped.length + ' rows not imported</summary><ul class="wa-note">' + d.skipped.map(s => '<li>Row ' + s.row + ': ' + WA.esc(s.reason) + (s.text ? ' <span class="muted">(' + WA.esc(s.text) + ')</span>' : '') + '</li>').join('') + '</ul></details>';
+    h += '<p class="wa-note">Shares moved in from another account have no cost in the export: enter your cost per share for those rows.</p><button class="wa-btn is-gold" id="imp-commit" type="button">Import ' + preview.length + ' rows into ' + WA.esc(PNAME) + '</button>';
+    out.innerHTML = h;
+    document.getElementById('imp-commit').addEventListener('click', async () => {
+      const rows = [];
+      preview.forEach((t, i) => {
+        if (!out.querySelector('[data-pick="' + i + '"]').checked) return;
+        const c = out.querySelector('[data-cost="' + i + '"]');
+        if (c) t.price = parseFloat(c.value) || 0;
+        rows.push(t);
+      });
+      const r = await WA.api('/api/wealth/import/commit', 'POST', {portfolio_id: PID, transactions: rows});
+      if (!r.ok) { m.textContent = r.error; m.className = 'wa-msg err'; return; }
+      m.textContent = 'Imported ' + r.added + ' rows' + (r.duplicates ? ', skipped ' + r.duplicates + ' already in the ledger' : '') + (r.rejected.length ? ', rejected ' + r.rejected.length : '') + '.';
+      setTimeout(() => location.reload(), 900);
+    });
+  });
+
+  // Reconcile
+  async function reconcile(account) {
+    const out = document.getElementById('rec-out');
+    out.innerHTML = '<p class="wa-note">Asking Schwab…</p>';
+    const d = await WA.api('/api/wealth/reconcile?p=' + PID + (account ? '&account=' + encodeURIComponent(account) : ''));
+    if (!d.ok) { out.innerHTML = '<p class="wa-note">' + WA.esc(d.reason || d.error) + '</p>'; return; }
+    if (d.needs_account) {
+      out.innerHTML = '<p class="wa-note">Which Schwab account is ' + WA.esc(PNAME) + '?</p>' + d.accounts.map(a => '<button class="wa-btn" data-acct="' + WA.esc(a.id) + '" style="margin:3px">' + WA.esc(a.label) + '</button>').join('');
+      out.querySelectorAll('[data-acct]').forEach(b => b.addEventListener('click', () => reconcile(b.dataset.acct)));
+      return;
+    }
+    const lbl = {match: 'match', share_mismatch: 'shares differ', cost_mismatch: 'cost differs', missing_in_ledger: 'not in ledger', missing_at_broker: 'not at Schwab'};
+    let h = '<p class="wa-note">' + d.matched + ' of ' + d.total + ' positions match.' + (d.cash_diff != null ? ' Cash: ledger ' + WA.money(d.ledger_cash) + ' vs Schwab ' + WA.money(d.broker_cash) + '.' : '') + '</p>';
+    h += '<div class="wa-scroll"><table class="wa-table"><thead><tr><th>Ticker</th><th>Ledger</th><th>Schwab</th><th>Avg ledger</th><th>Avg Schwab</th><th></th></tr></thead><tbody>' +
+      d.rows.map(r => '<tr><td>' + WA.esc(r.ticker) + '</td><td>' + (+r.ledger_shares).toFixed(4).replace(/\.?0+$/, '') + '</td><td>' + (+r.broker_shares).toFixed(4).replace(/\.?0+$/, '') + '</td><td>' + WA.money(r.ledger_avg) + '</td><td>' + WA.money(r.broker_avg) + '</td><td class="wa-status ' + r.status + '">' + lbl[r.status] + '</td></tr>').join('') + '</tbody></table></div>';
+    out.innerHTML = h;
+  }
+  document.getElementById('rec-btn').addEventListener('click', () => reconcile());
+
+  // Settings
+  document.getElementById('pf-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = await WA.api('/api/wealth/portfolios/' + PID, 'POST', Object.fromEntries(new FormData(e.target)));
+    const m = document.getElementById('pf-msg'); m.textContent = d.ok ? 'Saved.' : (d.error || 'Not saved.'); m.className = 'wa-msg ' + (d.ok ? 'ok' : 'err');
+  });
+  document.getElementById('pf-del').addEventListener('click', async () => {
+    if (!confirm('Delete ' + PNAME + ' and every transaction in it? This cannot be undone.')) return;
+    const d = await WA.api('/api/wealth/portfolios/' + PID, 'DELETE');
+    if (d.ok) location.href = '{{ url_for("wealth.dashboard") }}';
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

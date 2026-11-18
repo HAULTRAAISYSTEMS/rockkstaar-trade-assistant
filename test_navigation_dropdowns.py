@@ -13,10 +13,10 @@ def test_elite_navigation_allows_dropdown_panels_to_escape_nav_row():
 
 def test_research_learn_and_account_are_native_dropdowns():
     template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
-    for label in ("Research", "Learn", "Account"):
+    for label in ("Research", "Wealth", "Learn", "Account"):
         assert f'<summary class="nav-link' in template
         assert f">{label} <span" in template
-    assert template.count('<details class="nav-menu">') == 3
+    assert template.count('<details class="nav-menu">') == 4
 
 
 def test_account_dropdown_links_to_free_browser_alerts():
@@ -35,12 +35,13 @@ def test_navigation_script_closes_sibling_and_outside_menus():
 
 def test_mobile_research_learn_and_account_open_menu_sheets():
     template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
-    for menu_id in ("mobile-terminal-menu", "mobile-research-menu", "mobile-learn-menu", "mobile-account-menu"):
+    for menu_id in ("mobile-terminal-menu", "mobile-research-menu", "mobile-wealth-menu", "mobile-learn-menu", "mobile-account-menu"):
         assert f'aria-controls="{menu_id}"' in template
         assert f'data-mobile-menu="{menu_id}"' in template
         assert f'id="{menu_id}" hidden' in template
     # Terminal opens a sheet too (Terminal, Setups Board, Watchlists & Alerts).
-    assert template.count("mobile-app-nav__menu-trigger") == 4
+    assert template.count("mobile-app-nav__menu-trigger") == 5
+    assert template.count("nav_tiles(wealth_groups)") == 2
     assert "Company Research" in template
     # Research entries are one grouped list rendered in both menus.
     assert "'Seven Checks'" in template and template.count("nav_tiles(research_groups)") == 2
@@ -67,7 +68,7 @@ def test_watchlists_live_under_terminal_on_desktop_and_phone():
     assert template.count("url_for('watchlists_page')") == 1 and template.count("nav_tiles(terminal_groups)") == 2
     assert 'class="nav-link {{ \'nav-link-active\' if ep == \'watchlists_page\' }}">Watchlists</a>' not in template
     # Five phone tabs: Today, then Terminal, Research, Learn, Account sheets.
-    assert template.count('class="mobile-app-nav__item') == 5
+    assert template.count('class="mobile-app-nav__item') == 6   # Today, Terminal, Research, Wealth, Learn, Account
 
 
 def test_research_menu_leads_with_market_intel_and_describes_every_tile():
