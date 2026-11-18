@@ -137,6 +137,13 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         except Exception:
             logger.exception("wealth brokerage discovery failed")
             return jsonify({"ok": False, "error": "Brokerage data is temporarily unavailable."}), 503
+        # Account inclusion is controlled on the Schwab Account page.
+        # Keep aggregate broker summary intact; filter only Wealth account rows.
+        if snapshot and snapshot.get("connected"):
+            import schwab_account_preferences as _prefs
+            snapshot = dict(snapshot)
+            snapshot["accounts"] = _prefs.select_accounts(
+                snapshot.get("accounts") or [], _prefs.get_preferences(user_id), for_wealth=True)
         # Only successful fetches may update stored broker snapshots.
         # Never delete existing snapshots when a broker is unavailable.
         if snapshot and snapshot.get("connected"):
