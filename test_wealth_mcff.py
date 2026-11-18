@@ -142,3 +142,23 @@ def test_planner_warns_over_the_limit_and_for_unknown_years():
     assert "over the $7,500 IRA limit" in v["ira"][-1]["warnings"][0]
     assert wp.ira_limit(2027, True)["limit"] == 8600 and wp.ira_limit(2031) is None
     assert wp.prior_year_window(date(2027, 4, 15)) and not wp.prior_year_window(date(2027, 4, 16))
+
+
+def test_custom_financial_threshold_changes_gate_result():
+    fin = mc.financials_gate(FUND)
+    strict = mc.evaluate(research(buy_high=150, thresholds={"financials": 9}), fin, price=140, value_zone=None)
+    assert strict["gates"]["financials"]["threshold"] == 9
+    assert strict["gates"]["financials"]["passed"] is False
+    assert strict["status"] == "DO NOT BUY"
+    permissive = mc.evaluate(research(buy_high=150, thresholds={"financials": 8}), fin, price=140, value_zone=None)
+    assert permissive["gates"]["financials"]["passed"] is True
+    assert permissive["status"] == "BUY ZONE"
+    flagged = mc.financials_gate(dict(FUND, red_flags=["Material risk"]))
+    assert mc.evaluate(research(thresholds={"financials": 1}), flagged, price=140, value_zone=None)["gates"]["financials"]["passed"] is False
+
+
+def test_scenario_years_are_bounded_even_without_clean_research():
+    assumptions = {"years": 0, "growth": {"base": 0.1}, "exit_pe": {"base": 30}}
+    assert mc.scenarios(150, 30, assumptions)[1]["years"] == 5
+    assumptions["years"] = 999
+    assert mc.scenarios(150, 30, assumptions)[1]["years"] == 20

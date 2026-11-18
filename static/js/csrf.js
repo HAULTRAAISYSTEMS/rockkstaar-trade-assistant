@@ -94,18 +94,15 @@
     e.preventDefault();
     var submitter = e.submitter || null;
     syncToken().then(function () {
-      form.__csrfFresh = true;
-      if (typeof form.requestSubmit === "function") {
-        form.requestSubmit(submitter && submitter.form === form ? submitter : undefined);
-      } else {
-        if (submitter && submitter.name) {
-          var carry = document.createElement("input");
-          carry.type = "hidden"; carry.name = submitter.name; carry.value = submitter.value;
-          form.appendChild(carry);
-        }
-        form.__csrfFresh = false;
-        HTMLFormElement.prototype.submit.call(form);
+      // Resume with the native form submission. requestSubmit() can fire
+      // another submit event and silently fail on some suspended iOS webviews.
+      // The original submit event already passed browser constraint validation.
+      if (submitter && submitter.name) {
+        var carry = document.createElement("input");
+        carry.type = "hidden"; carry.name = submitter.name; carry.value = submitter.value;
+        form.appendChild(carry);
       }
+      HTMLFormElement.prototype.submit.call(form);
     });
   });
 

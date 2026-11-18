@@ -131,7 +131,7 @@ def default_assumptions(fund: dict | None, pe: float | None) -> dict:
 def scenarios(price: float | None, pe: float | None, assumptions: dict) -> list[dict]:
     """Price in N years = EPS now × (1+g)^N × exit P/E; annual return from today's price."""
     price, pe = _f(price), _f(pe)
-    n = int(_f(assumptions.get("years")) or 5)
+    n = max(1, min(20, int(_f(assumptions.get("years")) or 5)))
     out = []
     for case in ("conservative", "base", "optimistic"):
         g = _f((assumptions.get("growth") or {}).get(case))
@@ -167,9 +167,9 @@ def judged_gate(name: str, entry: dict | None, threshold: float | None = None) -
 def evaluate(research: dict | None, fin_gate: dict, *, price: float | None, value_zone: dict | None) -> dict:
     research = research or {}
     th = {**DEFAULT_PASS, **{k: _f(v) for k, v in (research.get("thresholds") or {}).items() if _f(v) is not None}}
-    gates = {"moat": judged_gate("moat", research.get("moat"), th["moat"]),
+    # Apply the investor-selected financial threshold to the verified score,\n    # while preserving the hard red-flag veto.\n    financial = dict(fin_gate)\n    financial["threshold"] = th["financials"]\n    if financial.get("score") is not None:\n        financial["passed"] = financial["score"] >= th["financials"] and not financial.get("risks")\n    gates = {"moat": judged_gate("moat", research.get("moat"), th["moat"]),
              "ceo": judged_gate("ceo", research.get("ceo"), th["ceo"]),
-             "financials": dict(fin_gate, threshold=fin_gate.get("threshold", th["financials"])),
+             "financials": financial,
              "future": judged_gate("future", research.get("future"), th["future"])}
     reasons = []
     incomplete = [GATE_LABELS[g] for g in GATES if gates[g]["passed"] is None]
