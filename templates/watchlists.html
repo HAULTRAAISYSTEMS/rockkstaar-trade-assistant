@@ -5,6 +5,27 @@
 {% set nexturl = url_for('watchlists_page') %}
 
 <style>
+  /* ── Compact page head: title + Lists / Price alerts tabs ───────── */
+  .te-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:6px 0 12px}
+  .te-top-title{display:flex;align-items:center;gap:9px}
+  .te-top-title h1{margin:0;color:var(--elite-copy);font:700 22px/1 var(--font-display);letter-spacing:.02em}
+  .te-tabs{display:inline-flex;gap:3px;padding:3px;border:1px solid var(--elite-hairline);border-radius:999px;background:var(--elite-panel-inset)}
+  .te-tabs button{position:relative;display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border:0;border-radius:999px;background:transparent;color:var(--elite-muted);font:700 11px var(--font-display);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
+  .te-tabs button b{padding:0 6px;border-radius:999px;background:rgba(255,255,255,.07);font:700 9px var(--font-mono)}
+  .te-tabs button.is-on{background:linear-gradient(135deg,rgba(var(--cc-accent-rgb, 229,185,79),.22),rgba(var(--cc-accent-rgb, 229,185,79),.06));color:var(--elite-gold-bright)}
+  .te-tab-hit{width:7px;height:7px;border-radius:50%;background:var(--pos-500);box-shadow:0 0 8px var(--pos-500)}
+  .te-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-bottom:1px solid var(--elite-hairline)}
+  .te-bar-2{padding:7px 14px;background:rgba(255,255,255,.012)}
+  .te-glance{display:flex;align-items:center;gap:14px;flex-wrap:wrap;color:var(--elite-faint);font:600 11px var(--font-mono)}
+  .te-glance b{color:var(--elite-copy);font-weight:800}.te-glance b.up{color:var(--pos-500)}.te-glance b.dn{color:var(--neg-500)}
+  .te-glance-note{color:var(--elite-faint)}
+  .te-tools{display:flex;align-items:center;gap:8px}
+  .te-icon-btn{flex:0 0 auto;padding:6px 11px;border:1px solid var(--elite-hairline);border-radius:8px;background:transparent;color:var(--elite-muted);font:700 10px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;cursor:pointer;white-space:nowrap}
+  .te-icon-btn:hover,.te-icon-btn[aria-expanded="true"]{border-color:var(--elite-border);color:var(--elite-copy);background:rgba(255,255,255,.04)}
+  .te-icon-btn.is-gold{border-color:color-mix(in srgb,var(--elite-gold) 55%,transparent);color:var(--elite-gold-bright)}
+  .te-drop{padding:12px 14px;border-bottom:1px solid var(--elite-hairline);background:rgba(var(--cc-accent-rgb, 229,185,79),.03)}
+  .te-drop[hidden]{display:none}
+  .te-fold-all button{padding:3px 8px;font-size:13px;letter-spacing:0}
   /* ── List switcher ─────────────────────────────────────────────── */
   .te-deck{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}
   .te-deck-label{color:var(--elite-faint);font:700 9px var(--font-mono);letter-spacing:.14em;text-transform:uppercase}
@@ -35,7 +56,7 @@
   .te-save-state{color:var(--elite-faint);font:700 9px var(--font-mono);letter-spacing:.08em;text-transform:uppercase}.te-save-state.saving{color:var(--elite-gold)}.te-save-state.saved{color:var(--pos-500)}
   .te-organizer-help{color:var(--elite-faint);font-size:11px;line-height:1.45}
 
-  .te-section-stack{display:flex;flex-direction:column;gap:10px;padding:14px 18px 18px}
+  .te-section-stack{display:flex;flex-direction:column;gap:8px;padding:12px 14px 14px}
   .te-section{--sec:var(--elite-gold);position:relative;border:1px solid var(--elite-hairline);border-radius:12px;background:rgba(255,255,255,.014);transition:border-color .15s,box-shadow .15s}
   .te-section:before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:var(--sec)}
   .te-section.is-over{border-color:var(--sec);box-shadow:0 0 0 1px var(--sec),0 8px 26px color-mix(in srgb,var(--sec) 20%,transparent)}
@@ -72,7 +93,7 @@
   .te-section-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:0 18px;min-height:40px;padding:4px 12px 8px 16px}
   .te-section.is-collapsed .te-section-list{display:none}
   .te-section-list:empty:after{content:"Type a ticker in the box above, or drag one here";grid-column:1/-1;display:block;padding:10px;color:var(--elite-faint);font:600 10px var(--font-mono);text-align:center}
-  .te-ticker-row{display:grid;grid-template-columns:14px minmax(0,1fr) 74px 58px 46px 22px;align-items:center;gap:7px;height:38px;padding:0 4px;border-bottom:1px solid rgba(255,255,255,.045);border-radius:6px;transition:background .12s}
+  .te-ticker-row{display:grid;grid-template-columns:14px minmax(0,1fr) 74px 58px 46px 22px;align-items:center;gap:7px;height:34px;padding:0 4px;border-bottom:1px solid rgba(255,255,255,.045);border-radius:6px;transition:background .12s}
   .te-ticker-row:hover{background:rgba(255,255,255,.04)}
   .te-ticker-row .te-drag-handle{width:14px;opacity:.35}.te-ticker-row:hover .te-drag-handle{opacity:1}
   .te-tk-main{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden}
@@ -96,13 +117,15 @@
   .te-remove{width:100%;padding:6px;border:1px solid color-mix(in srgb,var(--neg-500) 45%,transparent);border-radius:7px;background:transparent;color:var(--neg-500);font:700 10px var(--font-mono);cursor:pointer}
   .te-remove:hover{background:color-mix(in srgb,var(--neg-500) 12%,transparent)}
   .te-section.is-unsorted{--sec:var(--elite-muted);border-style:dashed}
+  /* An empty Unsorted only takes room while a row is being dragged. */
+  .te-section.is-unsorted.is-empty{display:none}.te-organizer.is-dragging-row .te-section.is-unsorted.is-empty{display:block}
   .te-col-new{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0;padding:10px 14px;border:1px dashed var(--elite-border);border-radius:12px;background:rgba(var(--cc-accent-rgb, 229,185,79),.025)}
   .te-col-new b{color:var(--elite-gold-bright);font:700 11px var(--font-display);letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
   .te-col-new .hx-input{flex:0 1 260px}
   .te-fold-all{display:flex;gap:6px}
   .te-fold-all button{padding:5px 9px;border:1px solid var(--elite-hairline);border-radius:7px;background:transparent;color:var(--elite-muted);font:700 9px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
   .te-fold-all button:hover{border-color:var(--elite-border);color:var(--elite-copy)}
-  .te-scan{padding:12px 18px 18px}
+  .te-scan{padding:10px 14px 14px}
   .te-scan-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
   .te-scan-note{color:var(--elite-faint);font-size:11px;line-height:1.5}.te-scan-note .elite-live-dot{display:inline-block;margin-right:6px;vertical-align:middle}.te-scan-note b{color:var(--elite-copy)}
   .te-scan-sort{display:flex;align-items:center;gap:6px}
@@ -133,33 +156,65 @@
      Dashed border, same rule as everywhere else in the app. */
   .badge.is-asof{border-style:dashed;cursor:help}
 
-  @media(max-width:720px){.hx-topbar{display:none}.te-deck>.te-deck-label{display:none}.te-alert-grid,.te-list-guide{grid-template-columns:1fr}.tbl-wrap{display:none}.te-alert-form{grid-template-columns:1fr}.te-alert-form .full{grid-column:auto}.te-symbol-grid{grid-template-columns:1fr 1fr}.te-scan{padding:10px}.te-scan-list{grid-template-columns:1fr}.te-alert-card{grid-template-columns:1fr}.te-alert-actions{justify-content:flex-start}.te-section-stack{padding:10px}.te-section-hd{flex-wrap:wrap;row-gap:6px}.te-section-name-form{flex:1}.te-col-meta{order:5;flex:1 1 100%;padding-left:30px}.te-quick-add{order:6;flex:1 1 100%}.te-section-list{grid-template-columns:1fr;padding:2px 8px 6px 12px}.te-ticker-row{grid-template-columns:12px minmax(0,1fr) 66px 56px 22px}.te-mv{display:none}.te-col-new .hx-input{flex:1 1 100%}.te-board-hd,.te-board-tools{padding:12px}.te-stat{min-width:0;flex:1}.te-global-add{min-width:0;flex:1 1 100%;flex-wrap:wrap}.te-global-add select{flex:1 1 100%}.te-global-add input[name="tickers"]{flex:1 1 0;min-width:0}.te-fold-all{flex:1}.te-stat>span{white-space:nowrap}}
+  @media(max-width:720px){.hx-topbar{display:none}.te-bar{flex-wrap:wrap}.te-bar .te-watch-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;padding-bottom:4px}.te-bar-2{flex-direction:column;align-items:stretch}.te-tools{justify-content:space-between}.te-top-title h1{font-size:19px}.te-deck>.te-deck-label{display:none}.te-alert-grid,.te-list-guide{grid-template-columns:1fr}.tbl-wrap{display:none}.te-alert-form{grid-template-columns:1fr}.te-alert-form .full{grid-column:auto}.te-symbol-grid{grid-template-columns:1fr 1fr}.te-scan{padding:10px}.te-scan-list{grid-template-columns:1fr}.te-alert-card{grid-template-columns:1fr}.te-alert-actions{justify-content:flex-start}.te-section-stack{padding:10px}.te-section-hd{flex-wrap:wrap;row-gap:6px}.te-section-name-form{flex:1}.te-col-meta{order:5;flex:0 0 auto;padding-left:30px}.te-col-meta .te-breadth,.te-col-meta>span:last-child{display:none}.te-quick-add{order:6;flex:1 1 0}.te-section-hd>form[action*="/delete"]{order:7}.te-section.is-collapsed .te-quick-add{display:none}.te-section.is-collapsed .te-col-meta{order:6;padding-left:0}.te-section.is-collapsed .te-section-hd{flex-wrap:nowrap}.te-section-list{grid-template-columns:1fr;padding:2px 8px 6px 12px}.te-ticker-row{grid-template-columns:12px minmax(0,1fr) 66px 56px 22px}.te-mv{display:none}.te-col-new .hx-input{flex:1 1 100%}.te-board-hd,.te-board-tools{padding:12px}.te-stat{min-width:0;flex:1}.te-global-add{min-width:0;flex:1 1 100%;flex-wrap:wrap}.te-global-add select{flex:1 1 100%}.te-global-add input[name="tickers"]{flex:1 1 0;min-width:0}.te-fold-all{flex:1}.te-stat>span{white-space:nowrap}}
 </style>
 
-<section class="elite-hero">
-  <div>
-    <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Your market · your signals</div>
-    <h1 class="elite-hero-title">Watchlists <span class="accent">&amp; Alerts</span></h1>
-    <p class="elite-hero-sub">Track the names that matter and set your exact price targets.</p>
+{% set alert_hits = price_alerts|selectattr('triggered')|list|length %}
+<header class="te-top">
+  <div class="te-top-title">
+    <span class="elite-live-dot"></span>
+    <h1>Watchlists</h1>
   </div>
-</section>
+  <nav class="te-tabs" role="tablist" aria-label="Watchlists and price alerts">
+    <button type="button" role="tab" class="is-on" data-tab="lists" aria-selected="true">Lists <b>{{ all_wls|length }}</b></button>
+    <button type="button" role="tab" data-tab="alerts" aria-selected="false">Price alerts <b>{{ price_alerts|length }}</b>{% if alert_hits %}<i class="te-tab-hit" title="{{ alert_hits }} target{{ '' if alert_hits == 1 else 's' }} hit"></i>{% endif %}</button>
+  </nav>
+</header>
 
-<!-- Which list is on the board -->
-<div class="te-deck">
-  <span class="te-deck-label">Lists</span>
-  <div class="te-watch-tabs">
-    {% for w in all_wls %}
-    <form action="{{ url_for('watchlist_activate', wl_id=w.id) }}" method="POST">
+<!-- The active list as a board -->
+{% set ns = namespace(up=0, dn=0, sum=0, n=0) %}
+{% for t in active_tickers %}{% set q = board_quotes.get(t, {}) %}{% if q.chg is not none and q.chg is defined %}{% set ns.n = ns.n + 1 %}{% set ns.sum = ns.sum + q.chg %}{% if q.chg >= 0 %}{% set ns.up = ns.up + 1 %}{% else %}{% set ns.dn = ns.dn + 1 %}{% endif %}{% endif %}{% endfor %}
+<div class="te-pane" data-pane="lists">
+<div class="card te-board">
+  <!-- Row 1: which list is on the board -->
+  <div class="te-bar">
+    <div class="te-watch-tabs">
+      {% for w in all_wls %}
+      <form action="{{ url_for('watchlist_activate', wl_id=w.id) }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}">
+        <button class="te-pill {{ 'is-active' if w.id == active_id }}" type="submit"{% if w.id == active_id %} aria-current="true" title="Active list · drives Setups and the Terminal watchlist"{% endif %}>{{ w.name }} <b>{{ wl_counts.get(w.id, 0) }}</b></button>
+      </form>
+      {% endfor %}
+    </div>
+    <button type="button" class="te-icon-btn" data-toggle="te-manage" aria-expanded="false" title="Rename, delete or create lists">⚙ Manage</button>
+  </div>
+
+  <!-- Row 2: the list at a glance, and the tools -->
+  <div class="te-bar te-bar-2">
+    <div class="te-glance" title="From the last stored prices">
+      <span><b>{{ active_tickers|length }}</b> tickers</span>
+      {% if can_organize %}<span><b>{{ active_structure.sections|length }}</b> sections</span>{% endif %}
+      <span><b class="up">{{ ns.up }}▲</b> <b class="dn">{{ ns.dn }}▼</b></span>
+      {% if ns.n %}<span>avg <b class="{{ 'up' if ns.sum >= 0 else 'dn' }}">{{ '%+.1f'|format(ns.sum / ns.n) }}%</b></span>{% endif %}
+      {% if not can_organize %}<span class="te-glance-note">· managed by the scanner</span>{% endif %}
+    </div>
+    <div class="te-tools">
+      <button type="button" class="te-icon-btn is-gold" data-toggle="te-add" aria-expanded="false">＋ Add tickers</button>
+      {% if can_organize %}<div class="te-fold-all"><button type="button" data-fold="open" title="Expand all sections">⊞</button><button type="button" data-fold="close" title="Collapse all sections">⊟</button></div><span class="te-save-state" id="te-save-state">Order saved</span>{% endif %}
+    </div>
+  </div>
+
+  <div class="te-drop" id="te-add" hidden>
+    <form action="{{ url_for('watchlist_add') }}" method="POST" class="te-global-add">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}">
-      <button class="te-pill {{ 'is-active' if w.id == active_id }}" type="submit"{% if w.id == active_id %} aria-current="true"{% endif %}>{{ w.name }} <b>{{ wl_counts.get(w.id, 0) }}</b></button>
+      <select class="hx-input" name="watchlist_id" aria-label="Destination watchlist" style="min-width:150px">
+        {% for w in all_wls %}<option value="{{ w.id }}" {{ 'selected' if w.id == active_id }}>{{ w.name }}</option>{% endfor %}
+      </select>
+      <input class="hx-input" name="tickers" placeholder="ADD TICKERS TO ANY LIST · e.g. NVDA AMD" autocomplete="off" style="flex:1;text-transform:uppercase;font-family:var(--font-mono)">
+      <button class="btn btn-primary btn-sm" type="submit">Add</button>
     </form>
-    {% endfor %}
   </div>
-</div>
-
-<details class="te-manage">
-  <summary>Manage lists · rename, delete, create<span></span></summary>
-  <div class="te-manage-bd">
+  <div class="te-drop" id="te-manage" hidden>
     <div class="te-list-guide" aria-label="Personal watchlist guide">
       <article><b>BUY &amp; HOLD</b><span>Long-term companies you want to own through normal market noise.</span></article>
       <article><b>BATTLEFIELD</b><span>Active names at important levels that need close monitoring and a plan.</span></article>
@@ -200,36 +255,6 @@
       <input class="hx-input" name="name" placeholder="New list name" maxlength="50" style="flex:1">
       <button class="btn btn-primary btn-sm" type="submit">+ Create</button>
     </form>
-  </div>
-</details>
-
-<!-- The active list as a board: one column per section -->
-{% set ns = namespace(up=0, dn=0, sum=0, n=0) %}
-{% for t in active_tickers %}{% set q = board_quotes.get(t, {}) %}{% if q.chg is not none and q.chg is defined %}{% set ns.n = ns.n + 1 %}{% set ns.sum = ns.sum + q.chg %}{% if q.chg >= 0 %}{% set ns.up = ns.up + 1 %}{% else %}{% set ns.dn = ns.dn + 1 %}{% endif %}{% endif %}{% endfor %}
-<div class="card te-board">
-  <div class="te-board-hd">
-    <div>
-      <div class="te-deck-label">Active list · drives Setups &amp; Terminal</div>
-      <h2 class="te-board-title">{{ active_wl.name if active_wl else 'Active list' }}</h2>
-      <div class="te-board-sub">{% if can_organize %}Type a ticker into any section to add it there. Drag rows between sections, click ▾ to fold a section, or use ⋯ on a row.{% else %}Managed by the scanner.{% endif %}</div>
-    </div>
-    <div class="te-stats">
-      <div class="te-stat"><span>Tickers</span><b>{{ active_tickers|length }}</b></div>
-      {% if can_organize %}<div class="te-stat"><span>Sections</span><b>{{ active_structure.sections|length }}</b></div>{% endif %}
-      <div class="te-stat" title="How many names are up and down on the day, from the last stored prices"><span>Up / Down</span><b><span class="up">{{ ns.up }}</span> / <span class="dn">{{ ns.dn }}</span></b></div>
-      {% if ns.n %}<div class="te-stat" title="Average move on the day across the list, from the last stored prices"><span>Avg move</span><b class="{{ 'up' if ns.sum >= 0 else 'dn' }}">{{ '%+.1f'|format(ns.sum / ns.n) }}%</b></div>{% endif %}
-    </div>
-  </div>
-  <div class="te-board-tools">
-    <form action="{{ url_for('watchlist_add') }}" method="POST" class="te-global-add">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ nexturl }}">
-      <select class="hx-input" name="watchlist_id" aria-label="Destination watchlist" style="min-width:150px">
-        {% for w in all_wls %}<option value="{{ w.id }}" {{ 'selected' if w.id == active_id }}>{{ w.name }}</option>{% endfor %}
-      </select>
-      <input class="hx-input" name="tickers" placeholder="ADD TICKERS TO ANY LIST · e.g. NVDA AMD" autocomplete="off" style="flex:1;text-transform:uppercase;font-family:var(--font-mono)">
-      <button class="btn btn-primary btn-sm" type="submit">Add</button>
-    </form>
-    {% if can_organize %}<div class="te-fold-all"><button type="button" data-fold="open">Expand all</button><button type="button" data-fold="close">Collapse all</button></div><span class="te-save-state" id="te-save-state">Order saved</span>{% endif %}
   </div>
 
   {% if can_organize %}
@@ -302,7 +327,7 @@
       </section>
       {% endfor %}
 
-      <section class="te-section is-unsorted" id="sec-none" data-section-id="none">
+      <section class="te-section is-unsorted{{ ' is-empty' if not active_structure.unsectioned }}" id="sec-none" data-section-id="none">
         <header class="te-section-hd">
           <button class="te-fold" type="button" aria-expanded="true" aria-label="Show or hide Unsorted">▾</button>
           <span class="te-drag-handle" aria-hidden="true">·</span>
@@ -407,7 +432,10 @@
   {% else %}<div class="faint" style="font-size:13px;padding:16px 18px">No tickers in this list yet — add some above. Newly added tickers load in the background.</div>{% endif %}
 </div>
 
-<section id="price-alerts" class="te-alert-grid" style="margin-top:14px;scroll-margin-top:20px">
+</div>
+
+<div class="te-pane" data-pane="alerts" hidden>
+<section id="price-alerts" class="te-alert-grid" style="scroll-margin-top:20px">
   <div class="card">
     <div class="card-hd">Create Price Alert<span class="badge badge-accent">CUSTOM</span></div>
     <div class="card-bd">
@@ -458,8 +486,6 @@
   </div>
 </section>
 
-<div class="faint" style="font-size:11px;line-height:1.6;margin-top:8px">
-  The active list drives the <a href="{{ url_for('dashboard') }}" style="color:#d4af37">Setups</a> scanner and the <a href="{{ url_for('terminal') }}" style="color:#d4af37">Terminal</a> watchlist. Adding a ticker kicks off the same two-stage onboarding the app uses everywhere.
 </div>
 {% endblock %}
 
@@ -482,6 +508,31 @@
       if (box) box.focus({preventScroll: true});
     }
   }
+  // Lists | Price alerts. #price-alerts (where alert forms land) opens alerts.
+  const tabs = document.querySelectorAll('.te-tabs [data-tab]');
+  function showTab(name) {
+    tabs.forEach(t => { const on = t.dataset.tab === name; t.classList.toggle('is-on', on); t.setAttribute('aria-selected', String(on)); });
+    document.querySelectorAll('.te-pane').forEach(p => { p.hidden = p.dataset.pane !== name; });
+  }
+  tabs.forEach(t => t.addEventListener('click', () => {
+    showTab(t.dataset.tab);
+    history.replaceState(null, '', t.dataset.tab === 'alerts' ? '#price-alerts' : window.location.pathname);
+  }));
+  if (window.location.hash === '#price-alerts') showTab('alerts');
+
+  // + Add tickers and ⚙ Manage open a panel under the bar; one at a time.
+  document.querySelectorAll('[data-toggle]').forEach(btn => btn.addEventListener('click', () => {
+    const panel = document.getElementById(btn.dataset.toggle);
+    const open = panel.hidden;
+    document.querySelectorAll('[data-toggle]').forEach(b => {
+      const p = document.getElementById(b.dataset.toggle);
+      p.hidden = true; b.setAttribute('aria-expanded', 'false');
+    });
+    panel.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+    if (open) { const f = panel.querySelector('input[name="tickers"], input[name="name"]'); if (f) f.focus(); }
+  }));
+
   // One ⋯ menu open at a time; a click elsewhere closes it.
   document.addEventListener('click', event => {
     document.querySelectorAll('.te-tk-menu[open]').forEach(menu => {
@@ -527,7 +578,14 @@
     const btn = section.querySelector('.te-fold');
     if (btn) btn.setAttribute('aria-expanded', String(!folded));
   }
-  const folded = readFolded();
+  let folded = readFolded();
+  // First visit on a phone: open only the first section, so the whole list
+  // reads as a short index of section headers. Tap ▾ to open the others.
+  let saved = null;
+  try { saved = localStorage.getItem(foldKey); } catch (e) { saved = null; }
+  if (saved === null && window.matchMedia && window.matchMedia('(max-width: 720px)').matches) {
+    folded = new Set(Array.from(organizer.querySelectorAll('.te-section')).slice(1).map(s => s.dataset.sectionId));
+  }
   const openId = window.location.hash.startsWith('#sec-') ? window.location.hash.slice(5) : null;
   organizer.querySelectorAll('.te-section').forEach(section => {
     // The section a ticker was just added to always opens.
@@ -616,6 +674,7 @@
     if (tickerHandle) {
       draggedTicker = tickerHandle.closest('.te-ticker-row');
       draggedTicker.classList.add('is-dragging');
+      organizer.classList.add('is-dragging-row');
       event.dataTransfer.effectAllowed = 'move';
       event.dataTransfer.setData('text/plain', draggedTicker.dataset.ticker);
     } else if (sectionHandle) {
@@ -655,6 +714,9 @@
 
   organizer.addEventListener('dragend', () => {
     if (draggedTicker) draggedTicker.classList.remove('is-dragging');
+    organizer.classList.remove('is-dragging-row');
+    const uns = organizer.querySelector('.te-section.is-unsorted');
+    if (uns) uns.classList.toggle('is-empty', !uns.querySelector('.te-ticker-row'));
     if (draggedSection) draggedSection.classList.remove('is-dragging');
     clearOver();
     const changed = Boolean(draggedTicker || draggedSection);
