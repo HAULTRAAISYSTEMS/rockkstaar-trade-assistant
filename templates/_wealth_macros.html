@@ -1,0 +1,86 @@
+{% macro money(v, signed=False, dp=2) -%}
+{%- if v is none -%}—{%- else -%}
+{%- set s = ('+' if signed and v > 0 else ('−' if v < 0 else '')) -%}
+{{ s }}${{ ('{:,.' ~ dp ~ 'f}').format(v|abs) }}
+{%- endif -%}
+{%- endmacro %}
+{% macro pct(v, signed=True, dp=2) -%}
+{%- if v is none -%}—{%- else -%}{{ ('+' if signed and v > 0 else ('−' if v < 0 else '')) }}{{ ('{:,.' ~ dp ~ 'f}').format(v|abs) }}%{%- endif -%}
+{%- endmacro %}
+{% macro tone(v) -%}{{ 'up' if v is not none and v > 0 else ('dn' if v is not none and v < 0 else '') }}{%- endmacro %}
+{% macro qty(v) -%}{{ ('{:,.6f}'.format(v)).rstrip('0').rstrip('.') if v is not none else '—' }}{%- endmacro %}
+
+{% macro head(active, title, blurb, portfolios, current, with_all=True) %}
+<header class="wa-head">
+  <div>
+    <div class="wa-kicker">Wealth Architect · capital intelligence</div>
+    <h1>{{ title }}</h1>
+    {% if blurb %}<p>{{ blurb }}</p>{% endif %}
+  </div>
+  <nav class="wa-nav" aria-label="Wealth Architect">
+    {% set q = ('?p=' ~ current.id) if current else '' %}
+    <a href="{{ url_for('wealth.dashboard') }}{{ q }}" class="{{ 'is-on' if active == 'dash' }}">Dashboard</a>
+    <a href="{{ url_for('wealth.ledger_page') }}{{ q }}" class="{{ 'is-on' if active == 'ledger' }}">Ledger</a>
+    <a href="{{ url_for('wealth.lab_page') }}{{ q }}" class="{{ 'is-on' if active == 'lab' }}">Cost Basis Lab</a>
+  </nav>
+</header>
+{% if portfolios %}
+<div class="wa-bar" aria-label="Portfolio">
+  {% set ep = request.endpoint %}
+  {% if with_all %}<a class="wa-pill {{ 'is-on' if not current }}" href="{{ url_for(ep) }}">All portfolios</a>{% endif %}
+  {% for p in portfolios %}
+  <a class="wa-pill {{ 'is-on' if current and current.id == p.id }}" href="{{ url_for(ep, p=p.id) }}">{{ p.name }} <small>{{ kinds.get(p.kind, '') if kinds is defined else '' }}</small></a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro create_portfolio(quick_start, kinds) %}
+<div class="wa-quick">
+  {% for name, kind in quick_start %}
+  <button type="button" class="wa-btn" data-create-portfolio="{{ name }}" data-kind="{{ kind }}">＋ {{ name }}</button>
+  {% endfor %}
+</div>
+<form class="wa-form" id="wa-new-portfolio" style="max-width:520px;margin:0 auto">
+  <label class="wide">Name<input name="name" maxlength="60" placeholder="e.g. Roth IRA" required></label>
+  <label>Type<select name="kind">{% for k, v in kinds.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+  <button class="wa-btn is-gold" type="submit">Create portfolio</button>
+</form>
+<div class="wa-msg" id="wa-new-msg"></div>
+{% endmacro %}
+
+{% macro common_js() %}
+<script>
+window.WA = (function () {
+  const token = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
+  async function api(url, method, body) {
+    const opts = {method: method || 'GET', headers: {'X-CSRFToken': token()}};
+    if (body instanceof FormData) opts.body = body;
+    else if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    const r = await fetch(url, opts);
+    let d = {};
+    try { d = await r.json(); } catch (e) { d = {ok: false, error: 'Unexpected response (' + r.status + ').'}; }
+    if (!r.ok && d.ok === undefined) d.ok = false;
+    return d;
+  }
+  const money = (v, signed) => v == null || isNaN(v) ? '—' :
+    (signed && v > 0 ? '+' : v < 0 ? '−' : '') + '$' + Math.abs(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const pct = (v) => v == null || isNaN(v) ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(2) + '%';
+  const tone = (v) => v > 0 ? 'up' : v < 0 ? 'dn' : '';
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+  document.querySelectorAll('[data-create-portfolio]').forEach(b => b.addEventListener('click', async () => {
+    const d = await api('/api/wealth/portfolios', 'POST', {name: b.dataset.createPortfolio, kind: b.dataset.kind});
+    if (d.ok) location.href = location.pathname + '?p=' + d.id; else alert(d.error || 'Could not create it.');
+  }));
+  const nf = document.getElementById('wa-new-portfolio');
+  if (nf) nf.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = await api('/api/wealth/portfolios', 'POST', Object.fromEntries(new FormData(nf)));
+    const m = document.getElementById('wa-new-msg');
+    if (d.ok) location.href = location.pathname + '?p=' + d.id;
+    else { m.textContent = d.error || 'Could not create it.'; m.className = 'wa-msg err'; }
+  });
+  return {api, money, pct, tone, esc};
+})();
+</script>
+{% endmacro %}

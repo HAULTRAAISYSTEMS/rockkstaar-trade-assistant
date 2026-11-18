@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% import "_wealth_macros.html" as wa with context %}
+{% block title %}Cost Basis Lab — Wealth Architect{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
+{% block content %}
+<div class="wa">
+{{ wa.head('lab', 'Cost Basis Lab', 'See what one more purchase does to a position before you make it: shares, new average cost, cash left, concentration, and outcomes at different prices.', portfolios, current) }}
+
+<div class="wa-lab">
+  <section class="wa-card">
+    <h2>Purchase</h2>
+    <form class="wa-form" id="lab-form" autocomplete="off">
+      {% if holdings %}
+      <label class="wide" style="grid-column:1/-1">From your holdings<select id="lab-pick"><option value="">— Pick a holding, or type below —</option>
+        {% for h in holdings %}<option value="{{ loop.index0 }}" {{ 'selected' if h.ticker == ticker }}>{{ h.ticker }} · {{ wa.qty(h.shares) }} sh @ {{ wa.money(h.avg_cost) }}</option>{% endfor %}
+      </select></label>
+      {% endif %}
+      <label>Ticker<input name="ticker" maxlength="10" value="{{ ticker }}" style="text-transform:uppercase" placeholder="KLAC"></label>
+      <label>Current price<input name="current_price" inputmode="decimal" placeholder="for P/L now"></label>
+      <label>Shares owned<input name="existing_shares" inputmode="decimal" value="0"></label>
+      <label>Avg cost now<input name="existing_avg_cost" inputmode="decimal" value="0"></label>
+      <label>Buy price<input name="purchase_price" inputmode="decimal" required placeholder="141.20"></label>
+      <label>Amount to invest<input name="invest_amount" inputmode="decimal" required placeholder="500"></label>
+      <label>Fees<input name="fees" inputmode="decimal" value="0"></label>
+      <label>What-if future price<input name="future_price" inputmode="decimal" placeholder="optional"></label>
+      <label>Cash available<input name="cash_available" inputmode="decimal" value="{{ '%.2f'|format(cash) if cash else '' }}" placeholder="optional"></label>
+      <label>Portfolio value<input name="portfolio_value" inputmode="decimal" value="{{ '%.2f'|format(total_value) if total_value else '' }}" placeholder="for weight"></label>
+      <label class="wa-toggle"><input type="checkbox" name="fractional" checked> Fractional shares (only where your broker allows them for this stock)</label>
+    </form>
+    <p class="wa-note" id="lab-src"></p>
+  </section>
+
+  <section class="wa-card" id="lab-out">
+    <h2>Result</h2>
+    <p class="wa-note">Enter a buy price and an amount.</p>
+  </section>
+</div>
+</div>
+{{ wa.common_js() }}
+<script>
+(function () {
+  const H = {{ holdings|tojson }};
+  const form = document.getElementById('lab-form'), out = document.getElementById('lab-out'), src = document.getElementById('lab-src');
+  const pick = document.getElementById('lab-pick');
+  const f2 = (v, d) => v == null || v === '' ? '' : (+v).toFixed(d == null ? 2 : d);
+  function fill(i) {
+    const h = H[i]; if (!h) return;
+    form.ticker.value = h.ticker; form.existing_shares.value = +(+h.shares).toFixed(6); form.existing_avg_cost.value = f2(h.avg_cost, 4);
+    if (h.price) { form.current_price.value = f2(h.price); if (!form.purchase_price.value) form.purchase_price.value = f2(h.price); }
+    src.textContent = h.price ? 'Price from ' + (h.price_source || 'the price feed') + (h.price_as_of ? ' · ' + h.price_as_of : '') + '. Shares and average cost from your ledger.' : 'No current price for ' + h.ticker + '; enter one.';
+    run();
+  }
+  if (pick) { pick.addEventListener('change', () => fill(pick.value)); if (pick.value) fill(pick.value); }
+  let timer;
+  form.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 250); });
+  async function run() {
+    const d = Object.fromEntries(new FormData(form));
+    d.fractional = form.fractional.checked;
+    if (!d.purchase_price || !d.invest_amount) return;
+    const r = await WA.api('/api/wealth/lab', 'POST', d);
+    if (!r.ok) { out.innerHTML = '<h2>Result</h2><p class="wa-msg err">' + (r.errors || [r.error]).map(WA.esc).join('<br>') + '</p>'; return; }
+    const tk = WA.esc((form.ticker.value || 'the stock').toUpperCase());
+    const had = +d.existing_shares > 0;
+    let h = '<h2>Result <small>' + tk + '</small></h2><div class="wa-out-hero">' +
+      kpi('New shares', (+r.new_shares).toFixed(6).replace(/\.?0+$/, ''), 'for ' + WA.money(r.purchase_cost) + (r.fees ? ' incl. fees' : '')) +
+      kpi('Total shares', (+r.total_shares).toFixed(6).replace(/\.?0+$/, ''), 'cost basis ' + WA.money(r.total_basis)) +
+      kpi('New average cost', WA.money(r.new_avg_cost), had ? 'was ' + WA.money(r.old_avg_cost) + ' (' + WA.money(r.avg_cost_change, true) + ')' : 'first purchase', '') +
+      kpi(r.remaining_cash != null ? 'Cash left' : 'Left of amount', WA.money(r.remaining_cash != null ? r.remaining_cash : r.left_of_amount), r.remaining_cash != null && r.remaining_cash < 0 ? 'more than the cash available' : '', r.remaining_cash != null && r.remaining_cash < 0 ? 'dn' : '') +
+      kpi('P/L at current price', WA.money(r.pl_now_after, true), had ? 'before: ' + WA.money(r.pl_now_before, true) : '', WA.tone(r.pl_now_after)) +
+      (r.weight_after_pct != null ? kpi('Weight in portfolio', (+r.weight_after_pct).toFixed(1) + '%', 'before: ' + (+r.weight_before_pct).toFixed(1) + '%', r.weight_after_pct > 25 ? 'dn' : '') : '') +
+      (r.future_price ? kpi('At ' + WA.money(r.future_price), WA.money(r.pl_future_after, true), WA.pct(r.return_future_after_pct) + ' on the whole position', WA.tone(r.pl_future_after)) : '') +
+      '</div>';
+    h += '<div class="wa-scroll"><table class="wa-table"><thead><tr><th>If ' + tk + ' goes to</th><th>Move</th><th>This purchase</th><th>Whole position</th><th class="hide-sm">Without buying</th></tr></thead><tbody>' +
+      r.scenarios.map(s => '<tr class="' + (s.is_target ? 'is-target' : '') + '"><td>' + WA.money(s.price) + (s.is_target ? ' ★' : '') + '</td><td class="hide-sm ' + WA.tone(s.move_pct) + '">' + WA.pct(s.move_pct) + '</td><td class="' + WA.tone(s.new_money_pl) + '">' + WA.money(s.new_money_pl, true) +
+        '</td><td class="' + WA.tone(s.position_pl) + '">' + WA.money(s.position_pl, true) + ' <span class="wa-sub ' + WA.tone(s.position_return_pct) + '">' + WA.pct(s.position_return_pct) + '</span></td><td class="hide-sm ' + WA.tone(s.without_purchase_pl) + '">' + WA.money(s.without_purchase_pl, true) + '</td></tr>').join('') +
+      '</tbody></table></div>';
+    h += '<div class="wa-callout"><b>Read the "This purchase" column.</b> The new shares earn exactly what ' + tk + ' does from ' + WA.money(+d.purchase_price) +
+      '. A lower average cost moves your breakeven to ' + WA.money(r.breakeven_price) + ', but it does not make the stock more likely to rise: ' +
+      'buy because the business and the price justify it on their own, not to bring the average down.</div>';
+    out.innerHTML = h;
+  }
+  function kpi(label, value, sub, cls) {
+    return '<div class="wa-kpi"><span>' + label + '</span><b class="' + (cls || '') + '">' + value + '</b><em>' + (sub || '') + '</em></div>';
+  }
+})();
+</script>
+{% endblock %}

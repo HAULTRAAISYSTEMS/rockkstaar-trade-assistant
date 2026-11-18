@@ -33,6 +33,15 @@
     ('memory', url_for('research_memory.notebook'), 'Memory', 'Your saved notes and recall reviews', 'bulb'),
   ]),
 ] %}
+{% set wealth_groups = [
+  ('Long-term investing', [
+    ('wealth', url_for('wealth.dashboard'), 'Wealth Architect', 'Portfolios, returns, concentration and sectors', 'vault'),
+  ]),
+  ('Tools', [
+    ('wledger', url_for('wealth.ledger_page'), 'Ledger', 'Transactions, CSV import, Schwab check', 'pen'),
+    ('wlab', url_for('wealth.lab_page'), 'Cost Basis Lab', 'What one more purchase does', 'flask'),
+  ]),
+] %}
 {% set learn_groups = [
   ('Start here', [
     ('learn', url_for('learn_index'), 'Learning Center', 'Market concepts in plain language', 'cap'),
@@ -79,6 +88,7 @@
 {%- elif name == 'plug' %}<path d="M9 3.5v4M15 3.5v4"/><path d="M6.5 7.5h11v3a5.5 5.5 0 0 1-11 0Z"/><path d="M12 16v4.5"/>
 {%- elif name == 'bell' %}<path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 2H5Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>
 {%- elif name == 'key' %}<circle cx="8" cy="15" r="4"/><path d="m11 12 8.5-8.5M16 7l2.5 2.5M14 9l2 2"/>
+{%- elif name == 'vault' %}<rect x="3.5" y="5" width="17" height="14" rx="2.2"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7.5M12 16.5v-1.3M15.2 12h1.3M7.5 12h1.3M6.5 19v1.5M17.5 19v1.5"/>
 {%- elif name == 'bulb' %}<path d="M9.5 18h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3Z"/>
 {%- endif %}</svg>
 {%- endmacro %}
@@ -95,6 +105,7 @@
 {%- endmacro %}
 {% set terminal_active = ep in ('terminal', 'dashboard', 'quick_mode', 'watchlists_page') or (ep and ep.startswith('trade_tools.')) %}
 {% set research_active = ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare', 'intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'macro_page') or (ep and (ep.startswith('live_research.') or ep.startswith('research_memory.'))) %}
+{% set wealth_active = ep and ep.startswith('wealth.') %}
 {% set learn_active = ep in ('learn_index', 'learn_concept', 'learn_paths', 'learn_path', 'learn_review', 'tradestaar_ai') %}
 {% set account_active = ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'schwab_account', 'brokers_page', 'browser_push.settings') %}
 <nav class="navbar elite-navbar" aria-label="Primary navigation">
@@ -126,6 +137,14 @@
       <div class="nav-menu__panel nav-menu__panel--tiles nav-menu__panel--research">
         <span class="nav-menu__label">Understand the market</span>
         {{ nav_tiles(research_groups) }}
+      </div>
+    </details>
+
+    <details class="nav-menu">
+      <summary class="nav-link {{ 'nav-link-active' if wealth_active }}">Wealth <span aria-hidden="true">⌄</span></summary>
+      <div class="nav-menu__panel nav-menu__panel--tiles">
+        <span class="nav-menu__label">Your next investment dollar</span>
+        {{ nav_tiles(wealth_groups) }}
       </div>
     </details>
 
@@ -182,6 +201,13 @@
     <div class="mobile-app-menu" id="mobile-research-menu" hidden>
       <div class="mobile-app-menu__head"><strong>Research</strong><span>Understand the market</span></div>
       <div class="rm-sheet">{{ nav_tiles(research_groups) }}</div>
+    </div>
+  </div>
+  <div class="mobile-app-nav__group">
+    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if wealth_active }}" aria-expanded="false" aria-controls="mobile-wealth-menu" data-mobile-menu="mobile-wealth-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="3.5" y="5" width="17" height="14" rx="2.2"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7.5M12 16.5v-1.3M15.2 12h1.3M7.5 12h1.3"/></svg></span><span class="mobile-app-nav__label">Wealth</span></button>
+    <div class="mobile-app-menu" id="mobile-wealth-menu" hidden>
+      <div class="mobile-app-menu__head"><strong>Wealth</strong><span>Your next investment dollar</span></div>
+      <div class="rm-sheet">{{ nav_tiles(wealth_groups) }}</div>
     </div>
   </div>
   <div class="mobile-app-nav__group">
