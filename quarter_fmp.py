@@ -30,9 +30,90 @@ _LOCK = threading.Lock()
 _TTL_S = 6 * 3600
 
 
-def _get(endpoint, params=None, ticker=""):
+# The reason the last FMP call for each endpoint came back empty, so the page
+# can say "your FMP plan doesn't include quarterly statements" instead of a
+# blank "nothing to read". Written by _get_detail, read by _build.
+_LAST_REASON: dict = {}
+_LAST_FAIL: dict = {}
+
+
+def _get_detail(endpoint, params=None, ticker=""):
+    """(data, reason) from FMP. reason is None on success.
+
+    Mirrors fundamentals_engine._fmp_get — /stable/ first, then /api/v3/ —
+    but keeps what went wrong: a plan that does not cover the request (402 or
+    403), a bad key (401), FMP's own error message, or simply no rows.
+    """
     import fundamentals_engine as fe
-    return fe._fmp_get(endpoint, params, ticker=ticker)
+    key = fe._FMP_API_KEY
+    if not key:
+        return None, "FMP_API_KEY is not set on the server."
+    reasons = []
+    for base in (fe._FMP_BASE_STABLE, fe._FMP_BASE_V3):
+        if base == fe._FMP_BASE_V3 and ticker:
+            url, p = f"{base}/{endpoint}/{ticker}", {"apikey": key, **(params or {})}
+        else:
+            url, p = f"{base}/{endpoint}", {"apikey": key, **({"symbol": ticker} if ticker else {}), **(params or {})}
+        try:
+            resp = fe._req_module.get(url, params=p, timeout=15)
+        except Exception as exc:
+            reasons.append(f"network error ({type(exc).__name__})")
+            continue
+        if resp.status_code in (402, 403):
+            reasons.append("your FMP plan does not include this data")
+            continue
+        if resp.status_code == 401:
+            return None, "FMP rejected the API key"
+        if resp.status_code != 200:
+            reasons.append(f"FMP returned HTTP {resp.status_code}")
+            continue
+        try:
+            data = resp.json()
+        except ValueError:
+            text = (resp.text or "")[:160]
+            reasons.append("your FMP plan does not include this data"
+                           if "premium" in text.lower() or "subscription" in text.lower()
+                           else "FMP sent an unreadable reply")
+            continue
+        if isinstance(data, dict) and ("Error Message" in data or "error" in data):
+            msg = str(data.get("Error Message") or data.get("error"))
+            reasons.append("your FMP plan does not include this data"
+                           if "premium" in msg.lower() or "subscription" in msg.lower()
+                           or "exclusive" in msg.lower() else f"FMP: {msg[:120]}")
+            continue
+        if isinstance(data, list) and not data:
+            reasons.append("FMP has no rows for this symbol")
+            continue
+        return data, None
+    # Prefer the most informative reason
+    for pref in ("plan", "key", "HTTP", "FMP:", "no rows", "network"):
+        for r in reasons:
+            if pref in r:
+                return None, r
+    return None, reasons[0] if reasons else "no data"
+
+
+def _get(endpoint, params=None, ticker=""):
+    data, reason = _get_detail(endpoint, params, ticker)
+    _LAST_REASON[(endpoint, (params or {}).get("period"), ticker)] = reason
+    return data
+
+
+def last_failure(ticker: str) -> str | None:
+    """Why the last walkthrough for this ticker found nothing, in plain words."""
+    return _LAST_FAIL.get(ticker.upper())
+
+
+# US tickers whose company statements FMP files under the home-market
+# listing. The US symbol is still used for the P/E, which must be in dollars
+# per US share.
+HOME_SYMBOLS = {
+    "SKHY": ["000660.KS"],
+    "TSM": ["2330.TW"],
+    "ASML": ["ASML.AS"],
+    "SONY": ["6758.T"],
+    "TM": ["7203.T"],
+}
 
 
 def _rows(data):
@@ -121,20 +202,44 @@ def walkthrough(ticker: str) -> dict | None:
         logger.warning("FMP quarter fallback failed for %s: %s", ticker, exc)
         out = None
     with _LOCK:
-        _CACHE[ticker] = (time.time(), out)
+        # A miss is often a plan limit or a passing outage: remember it for
+        # 15 minutes, not 6 hours.
+        _CACHE[ticker] = (time.time() - (_TTL_S - 900 if out is None else 0), out)
     return out
 
 
 def _build(ticker):
-    inc = _rows(_get("income-statement", {"period": "quarter", "limit": 12}, ticker=ticker))
+    symbols = [ticker] + HOME_SYMBOLS.get(ticker, [])
+    inc, sym, period, reasons = [], ticker, "quarter", []
+    for per, limit in (("quarter", 12), ("annual", 4)):
+        for candidate in symbols:
+            rows = _rows(_get("income-statement", {"period": per, "limit": limit}, ticker=candidate))
+            if rows:
+                inc, sym, period = rows, candidate, per
+                break
+            r = _LAST_REASON.get(("income-statement", per, candidate))
+            if r:
+                reasons.append((per, r))
+        if inc:
+            break
     if not inc:
+        plan = [r for per, r in reasons if "plan" in r]
+        if plan:
+            _LAST_FAIL[ticker] = ("FMP has this company, but " + plan[0] +
+                                  " (quarterly statements are a paid FMP feature).")
+        elif reasons:
+            _LAST_FAIL[ticker] = "FMP: " + reasons[-1][1] + "."
+        else:
+            _LAST_FAIL[ticker] = "FMP returned nothing for this ticker."
         return None
-    bal = _rows(_get("balance-sheet-statement", {"period": "quarter", "limit": 8}, ticker=ticker))
-    cf = _rows(_get("cash-flow-statement", {"period": "quarter", "limit": 8}, ticker=ticker))
+    _LAST_FAIL.pop(ticker, None)
+    annual = period == "annual"
+    bal = _rows(_get("balance-sheet-statement", {"period": period, "limit": 8}, ticker=sym))
+    cf = _rows(_get("cash-flow-statement", {"period": period, "limit": 8}, ticker=sym))
 
     cur = inc[0]
     end = cur.get("date")
-    ago = _same_quarter_last_year(inc, cur) or {}
+    ago = (inc[1] if len(inc) > 1 else {}) if annual else (_same_quarter_last_year(inc, cur) or {})
     eps_keys = ("epsDiluted", "epsdiluted", "eps")
     figures = {
         "rev": _f(cur, "revenue"), "revP": _f(ago, "revenue"),
@@ -148,7 +253,8 @@ def _build(ticker):
 
     b_now = next((b for b in bal if b.get("date") == end), bal[0] if bal else None)
     if b_now:
-        b_prior = _prior_year_end_row(bal, b_now) or {}
+        b_prior = ((bal[1] if len(bal) > 1 else {}) if annual
+                   else _prior_year_end_row(bal, b_now)) or {}
         figures.update({
             "ca": _f(b_now, "totalCurrentAssets"), "caP": _f(b_prior, "totalCurrentAssets"),
             "cl": _f(b_now, "totalCurrentLiabilities"), "clP": _f(b_prior, "totalCurrentLiabilities"),
@@ -158,7 +264,7 @@ def _build(ticker):
 
     # Cash flow over the fiscal year to date, matched with income over the
     # same quarters — the drill pairs them, so they must share a span.
-    ytd_inc = _year_to_date(inc, cur)
+    ytd_inc = [cur] if annual else _year_to_date(inc, cur)
     ends = {r.get("date") for r in ytd_inc}
     ytd_cf = [r for r in cf if r.get("date") in ends]
     if len(ytd_cf) == len(ytd_inc):
@@ -171,11 +277,12 @@ def _build(ticker):
     figures = {k: v for k, v in figures.items() if v is not None}
 
     currency = (cur.get("reportedCurrency") or "USD").upper()
-    ttm, ttm_prior = _ttm(ticker, inc, currency)
+    ttm, ttm_prior = _ttm(ticker, inc, currency, annual=annual)
 
     balance_rows = []
     if b_now:
-        b_prior = _prior_year_end_row(bal, b_now) or {}
+        b_prior = ((bal[1] if len(bal) > 1 else {}) if annual
+                   else _prior_year_end_row(bal, b_now)) or {}
         for key, label, field in (("ltd", "Long-term debt", "longTermDebt"),
                                   ("equity", "Total stockholders' equity", "totalStockholdersEquity")):
             v = _f(b_now, field)
@@ -184,7 +291,7 @@ def _build(ticker):
                                      "now": v, "prior": _f(b_prior, field)})
 
     name = None
-    prof = _rows(_get("profile", ticker=ticker))
+    prof = _rows(_get("profile", ticker=ticker)) or _rows(_get("profile", ticker=sym))
     if prof:
         name = prof[0].get("companyName")
     import quarter_facts
@@ -194,7 +301,11 @@ def _build(ticker):
         "profile": quarter_facts.context_for(None),
         "period_end": end,
         "prior_end": ago.get("date"),
-        "form": f"{cur.get('period') or 'quarterly'} {_year(cur)} report (via FMP)",
+        "form": (f"fiscal {_year(cur)} annual report (via FMP — quarterly statements "
+                 f"are not available on this FMP plan, so both columns are full years)")
+                if annual else f"{cur.get('period') or 'quarterly'} {_year(cur)} report (via FMP)",
+        "basis": "annual" if annual else "quarter",
+        "fmp_symbol": sym,
         "filed_on": cur.get("filingDate") or cur.get("fillingDate"),
         "figures": figures,
         "statements": {"balance": {"title": "Balance sheet", "sub": currency,
@@ -208,15 +319,20 @@ def _build(ticker):
     }
 
 
-def _ttm(ticker, inc, currency):
+def _ttm(ticker, inc, currency, annual=False):
     """Trailing EPS per US-listed share, and last year's on the same basis."""
     eps_keys = ("epsDiluted", "epsdiluted", "eps")
-    last8 = [_f(r, *eps_keys) for r in inc[:8]]
     growth = None
-    if len(last8) == 8 and all(v is not None for v in last8):
-        now, before = sum(last8[:4]), sum(last8[4:])
-        if before > 0:
-            growth = now / before - 1
+    if annual:
+        e = [_f(r, *eps_keys) for r in inc[:2]]
+        if len(e) == 2 and None not in e and e[1] > 0:
+            growth = e[0] / e[1] - 1
+    else:
+        last8 = [_f(r, *eps_keys) for r in inc[:8]]
+        if len(last8) == 8 and all(v is not None for v in last8):
+            now, before = sum(last8[:4]), sum(last8[4:])
+            if before > 0:
+                growth = now / before - 1
 
     price, pe = _pe_usd(ticker)
     if not price or not pe or pe <= 0:

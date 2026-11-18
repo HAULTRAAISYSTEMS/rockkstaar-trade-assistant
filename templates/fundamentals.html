@@ -1616,7 +1616,10 @@
         ? ' Read as a ' + (data.profile.shape_label || '').toLowerCase() + '.' : '';
       qdStatus(data.source === 'fmp'
         ? 'Filled from Financial Modeling Prep — ' + (data.company || ticker) + ' files no US 10-Q, so ' +
-          'these are its quarterly figures for the quarter ended ' + (data.period_end || '') +
+          (data.basis === 'annual'
+            ? 'these are its FULL-YEAR figures for the year ended ' + (data.period_end || '') +
+              ' against the year before (quarterly statements aren’t on this FMP plan — read “this qtr / year ago” as this year / last year)'
+            : 'these are its quarterly figures for the quarter ended ' + (data.period_end || '')) +
           (qdCurrency !== 'USD' ? ', in ' + qdCurrency + ' as the company reports them. Ratios are unaffected; the P/E uses the US-listed share in USD.' : '.')
         : 'Filled from ' + (data.company || ticker) + '’s ' + (data.form || 'filing') +
           ' for the quarter ended ' + (data.period_end || '') +
