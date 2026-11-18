@@ -105,3 +105,13 @@ def test_board_quotes_carry_the_scanner_fields():
     a = legacy._board_quotes(["A"], rows)["A"]
     assert a["setup"] == 7 and a["catalyst"] == 5 and a["setup_type"] == ""
     assert a["bias"] == "Bullish" and a["rvol"] == 1.8
+
+
+def test_page_is_compact_with_tabs_and_folding_panels(board):
+    c, *_ = board
+    html = c.get("/watchlists").get_data(as_text=True)
+    assert 'class="elite-hero"' not in html
+    assert 'data-tab="lists"' in html and 'data-tab="alerts"' in html
+    assert 'data-pane="alerts" hidden' in html and 'id="price-alerts"' in html
+    assert 'id="te-add" hidden' in html and 'id="te-manage" hidden' in html
+    assert "window.location.hash === '#price-alerts'" in html
