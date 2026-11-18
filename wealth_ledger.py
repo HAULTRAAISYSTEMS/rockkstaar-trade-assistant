@@ -123,6 +123,8 @@ class LedgerResult:
     taxes: float = 0.0
     realized: list = field(default_factory=list)
     flows: list = field(default_factory=list)          # (date, amount) money the investor put in (+) or took out (-)
+    splits: list = field(default_factory=list)         # (ticker, date, ratio) as applied
+    snapshots: list = field(default_factory=list)      # (date, cash, {ticker: shares}) after each day with activity
     issues: list = field(default_factory=list)
     first_date: date | None = None
 
@@ -252,6 +254,7 @@ def build(transactions: list[dict]) -> LedgerResult:
                 ratio = (held + shares) / held
             for lot in lots:
                 lot.shares *= ratio           # total cost unchanged
+            r.splits.append((tk, day, ratio))
         elif t == "TRANSFER_IN":
             basis = shares * price
             lots.append(Lot(day, shares, basis))
@@ -266,6 +269,11 @@ def build(transactions: list[dict]) -> LedgerResult:
             r.transfers_out += value; r.flows.append((day, -value))
         if tk and not r.positions.get(tk):
             r.positions.pop(tk, None)
+        snap = (day, r.cash, {t: sum(l.shares for l in ls) for t, ls in r.positions.items() if ls})
+        if r.snapshots and r.snapshots[-1][0] == day:
+            r.snapshots[-1] = snap
+        else:
+            r.snapshots.append(snap)
     if r.cash < -0.005:
         r.issues.append(f"Cash is below zero ({r.cash:,.2f}). A deposit may be missing, or the "
                         f"account uses margin.")

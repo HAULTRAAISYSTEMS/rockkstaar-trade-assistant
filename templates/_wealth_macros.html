@@ -20,6 +20,7 @@
   <nav class="wa-nav" aria-label="Wealth Architect">
     {% set q = ('?p=' ~ current.id) if current else '' %}
     <a href="{{ url_for('wealth.dashboard') }}{{ q }}" class="{{ 'is-on' if active == 'dash' }}">Dashboard</a>
+    <a href="{{ url_for('wealth.scoreboard_page') }}{{ q }}" class="{{ 'is-on' if active == 'score' }}">Scoreboard</a>
     <a href="{{ url_for('wealth.ledger_page') }}{{ q }}" class="{{ 'is-on' if active == 'ledger' }}">Ledger</a>
     <a href="{{ url_for('wealth.lab_page') }}{{ q }}" class="{{ 'is-on' if active == 'lab' }}">Cost Basis Lab</a>
   </nav>

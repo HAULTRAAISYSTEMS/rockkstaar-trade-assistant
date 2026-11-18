@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from flask import Blueprint, Response, abort, jsonify, render_template, request
 
 import wealth_calc
 import wealth_csv
+import wealth_history
 import wealth_ledger
 import wealth_service
 import wealth_store
@@ -48,6 +52,35 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
 
     bars_lookup = bars_lookup or _default_bars
     broker_summary = broker_summary or _default_broker
+    closes_cache: dict = {}
+    closes_lock = threading.Lock()
+
+    def closes_for(tickers) -> dict:
+        """{ticker: [(date, close)]}, split-adjusted daily closes, cached 6 h."""
+        now = time.time()
+        out, need = {}, []
+        with closes_lock:
+            for t in tickers:
+                hit = closes_cache.get(t)
+                if hit and now - hit[0] < 6 * 3600:
+                    out[t] = hit[1]
+                else:
+                    need.append(t)
+
+        def one(t):
+            try:
+                return t, wealth_service._closes(bars_lookup(t))
+            except Exception as exc:
+                logger.debug("history %s: %s", t, exc)
+                return t, []
+        if need:
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                for t, rows in pool.map(one, need):
+                    out[t] = rows
+                    if rows:
+                        with closes_lock:
+                            closes_cache[t] = (now, rows)
+        return out
 
     def uid() -> int:
         u = int((current_user() or {}).get("id") or 0)
@@ -103,6 +136,45 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         return render_template("wealth_ledger.html", portfolios=portfolios, current=current,
                                txs=list(reversed(txs)), ledger=lg, types=wealth_ledger.TYPES,
                                kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
+
+    @bp.get("/wealth/scoreboard")
+    def scoreboard_page():
+        user_id = uid()
+        portfolios = wealth_store.list_portfolios(user_id)
+        current = owned(user_id, request.args.get("p"))
+        return render_template("wealth_scoreboard.html", portfolios=portfolios, current=current,
+                               kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
+
+    @bp.get("/api/wealth/scoreboard")
+    def scoreboard_api():
+        user_id = uid()
+        current = owned(user_id, request.args.get("p"))
+        ledgers, _txs = ledgers_for(user_id, current)
+        if not ledgers:
+            return jsonify({"ok": False, "reason": "No transactions yet."})
+        lgs = list(ledgers.values())
+        tickers = sorted({t for lg in lgs for _, _, held in lg.snapshots for t in held})
+        closes = closes_for(tickers + ["SPY"])
+        spy = closes.pop("SPY", [])
+        if not spy:
+            return jsonify({"ok": False, "reason": "S&P 500 history is unavailable right now, so there is no trading calendar to value on."})
+        live = {t: q["price"] for t, q in (price_lookup(tickers) or {}).items() if q.get("live")}
+        today = date.today()
+        held_now = {t for lg in lgs for t in lg.positions}
+        series = wealth_history.build_series(lgs, closes, [d for d, _ in spy],
+                                             today_prices=live if held_now <= set(live) else None, today=today)
+        if not series["ok"]:
+            return jsonify(series)
+        out = wealth_history.scoreboard(series, spy)
+        div_years = {}
+        for t in _txs:
+            if t["type"] in ("DIVIDEND", "REINVEST"):
+                y = str(t["date"])[:4]
+                v = t["amount"] or ((t["shares"] or 0) * (t["price"] or 0))
+                div_years[y] = div_years.get(y, 0.0) + (v or 0)
+        out["dividends_by_year"] = div_years
+        out["reinvested"] = sum(1 for t in _txs if t["type"] == "REINVEST")
+        return jsonify({"ok": True, **out})
 
     @bp.get("/wealth/lab")
     def lab_page():

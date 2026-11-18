@@ -164,9 +164,23 @@ def test_pages_render_through_the_real_app(monkeypatch):
     c = web_app.app.test_client()
     with c.session_transaction() as s:
         s["user_id"] = 1
-    for url in ("/wealth", "/wealth/ledger", "/wealth/lab"):
+    for url in ("/wealth", "/wealth/ledger", "/wealth/lab", "/wealth/scoreboard"):
         r = c.get(url)
         assert r.status_code == 200, url
         html = r.get_data(as_text=True)
         assert "Wealth Architect" in html
     assert "Start with a portfolio" in c.get("/wealth").get_data(as_text=True)
+
+
+def test_scoreboard_api(env):
+    app, *_ = env
+    c = client(app, 1)
+    pid = make_portfolio(c)
+    for tx in ({"date": "2026-01-01", "type": "DEPOSIT", "amount": 3000},
+               {"date": "2026-02-01", "type": "BUY", "ticker": "KLAC", "shares": 2, "price": 600}):
+        c.post("/api/wealth/transactions", json={"portfolio_id": pid, **tx})
+    d = c.get(f"/api/wealth/scoreboard?p={pid}").get_json()
+    # The fixture's bars serve every ticker (KLAC and SPY) from the same closes.
+    assert d["ok"] and d["contributed"] == 3000
+    assert "twr_pct" in d and "spy_pct" in d and d["chart"]["days"]
+    assert d["end_value"] == pytest.approx(1800 + 2 * 1400)       # cash + live KLAC today
