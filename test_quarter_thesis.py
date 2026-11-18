@@ -120,3 +120,13 @@ def test_page_has_the_thesis_card():
     html = open("templates/fundamentals.html").read()
     for needle in ("function qdThesisCheck(", "Write my thesis", "qd-thesis", "Save thesis"):
         assert needle in html
+
+
+def test_cash_rule_is_not_meaningful_without_profit():
+    """SpaceX 2026: losses earlier in the year leave YTD net income tiny or
+    negative, and cash ÷ net income came out at -31.7×, tripping the rule."""
+    now = {"rev": 14.6e9, "revP": 5.6e9, "opinc": 2.8e9, "cfo": 9e9, "niy": -0.28e9}
+    older = [{"rev": 7.8e9, "revP": 4e9, "opinc": 0.5e9, "cfo": 5e9, "niy": -2e9}]
+    by = {r["key"]: r for r in qt.evaluate(qt.default_thesis(), now, older)["rules"]}
+    assert by["cash_conv"]["status"] == "no_data"
+    assert "Not meaningful" in by["cash_conv"]["detail"]
