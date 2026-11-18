@@ -6,6 +6,52 @@
 <div class="wa">
 {{ wa.head('dash', 'Wealth Architect', 'Where your money is, what it has earned, and how concentrated it is. Built from your own transactions.', portfolios, current) }}
 
+<section class="wa-card" id="wa-broker-sync" aria-label="Connected brokerage holdings">
+  <h2>Brokerage Sync <small>Schwab · read-only</small></h2>
+  <p class="wa-note" id="wa-sync-status">Checking linked brokerage accounts…</p>
+  <div id="wa-sync-accounts"></div>
+  <p class="wa-note">Positions appear automatically after a refresh. This live snapshot does not alter your ledger, tax lots, or historical returns.</p>
+  <button class="wa-btn" id="wa-sync-refresh" type="button">Refresh holdings</button>
+</section>
+<script>
+(function () {
+  const status = document.getElementById('wa-sync-status');
+  const target = document.getElementById('wa-sync-accounts');
+  const refresh = document.getElementById('wa-sync-refresh');
+  async function load() {
+    refresh.disabled = true;
+    status.textContent = 'Refreshing broker positions…';
+    target.replaceChildren();
+    try {
+      const response = await fetch('/api/wealth/brokerage/discovery', {credentials: 'same-origin', cache: 'no-store'});
+      if (!response.ok) throw new Error('Connection unavailable');
+      const data = await response.json();
+      status.textContent = data.accounts.length + ' account(s) · ' + data.new_holdings + ' holdings not recorded in the ledger · updated ' + new Date(data.as_of).toLocaleString();
+      data.accounts.forEach(account => {
+        const section = document.createElement('div');
+        const heading = document.createElement('h3');
+        heading.textContent = (account.portfolio_name || 'Unmapped Schwab account') + ' · ' + account.holdings.length + ' holdings';
+        section.appendChild(heading);
+        const items = document.createElement('p');
+        items.className = 'wa-note';
+        items.textContent = account.holdings.map(h => h.ticker + ' (' + h.shares + ' shares' + (h.new ? ', new' : '') + ')').join(' · ') || 'No supported long equity positions';
+        section.appendChild(items);
+        if (account.unsupported_positions) {
+          const warning = document.createElement('p');
+          warning.className = 'wa-note';
+          warning.textContent = account.unsupported_positions + ' option position(s) excluded from this view.';
+          section.appendChild(warning);
+        }
+        target.appendChild(section);
+      });
+    } catch (_) {
+      status.textContent = 'Schwab is not connected or temporarily unavailable. Existing portfolio records are unaffected.';
+    } finally { refresh.disabled = false; }
+  }
+  refresh.addEventListener('click', load);
+  load();
+})();
+</script>
 {% if not portfolios %}
 <section class="wa-card wa-empty">
   <h2>Start with a portfolio</h2>
