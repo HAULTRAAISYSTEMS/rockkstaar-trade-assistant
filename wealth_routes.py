@@ -160,7 +160,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 txs = wealth_store.list_transactions(user_id, account["portfolio_id"])
                 ledger = wealth_ledger.build(txs)
                 account["discrepancies"] = wealth_broker_sync.reconcile(
-                    account, {ticker: pos.shares for ticker, pos in ledger.positions.items()})
+                    account, {ticker: sum(lot.shares for lot in lots) for ticker, lots in ledger.positions.items()})
             except Exception:
                 logger.exception("Brokerage snapshot/reconciliation failure")
                 account["sync_error"] = "Unable to persist or reconcile this account"
