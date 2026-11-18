@@ -1614,8 +1614,9 @@
       qdWalking = true;
       const shaped = (data.profile && data.profile.explains)
         ? ' Read as a ' + (data.profile.shape_label || '').toLowerCase() + '.' : '';
-      qdStatus(data.source === 'fmp'
-        ? 'Filled from Financial Modeling Prep — ' + (data.company || ticker) + ' files no US 10-Q, so ' +
+      qdStatus((data.source === 'fmp' || data.source === 'yahoo')
+        ? 'Filled from ' + (data.source === 'yahoo' ? 'Yahoo Finance (' + (data.source_symbol || ticker) + ')' : 'Financial Modeling Prep') +
+          ' — ' + (data.company || ticker) + ' files no US 10-Q, so ' +
           (data.basis === 'annual'
             ? 'these are its FULL-YEAR figures for the year ended ' + (data.period_end || '') +
               ' against the year before (quarterly statements aren’t on this FMP plan — read “this qtr / year ago” as this year / last year)'

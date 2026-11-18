@@ -32,3 +32,16 @@ def _no_live_earnings_release(monkeypatch):
     offline; earnings_release's own tests call fetch() with a stub."""
     import earnings_release
     monkeypatch.setattr(earnings_release, "latest", lambda ticker: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_yahoo_statements(monkeypatch):
+    """The 10-Q drill's last backup asks Yahoo Finance for statements. Tests
+    stay offline; test_quarter_yahoo installs its own fake ticker."""
+    import quarter_yahoo
+
+    class _Offline:
+        def __init__(self, sym):
+            raise RuntimeError("offline in tests")
+    monkeypatch.setattr(quarter_yahoo, "_ticker", _Offline)
+    quarter_yahoo._CACHE.clear()
