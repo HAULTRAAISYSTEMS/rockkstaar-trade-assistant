@@ -171,7 +171,7 @@ def test_chart_and_watchlist_hooks():
     assert "events: true, zones: true}" in js
     assert 'data-ct-set="view.zones"' in tpl and "function twLoadValueZones(ticker, tries, keep)" in tpl
     assert 'id="tw-zone-chip"' in tpl and 'data-zone-badge="{{ s.ticker }}"' in tpl
-    assert wl.count('data-zone-badge="{{ t }}"') == 2 and "js/value_badges.js" in wl and "js/value_badges.js" in tpl
+    assert wl.count('data-zone-badge="{{ t }}"') == 3 and "js/value_badges.js" in wl and "js/value_badges.js" in tpl
     tjs = open("static/js/thesis.js", encoding="utf-8").read()
     assert "/api/alerts/price" in tjs and "fairMultiple" in tjs and "tradestaar.thesis.planSize" in tjs
 

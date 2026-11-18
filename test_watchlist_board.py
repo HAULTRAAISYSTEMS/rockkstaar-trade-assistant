@@ -90,3 +90,18 @@ def test_board_quotes_flags_earnings_within_two_weeks():
     assert q["A"]["chg"] == pytest.approx(25.0) and q["A"]["er_days"] == 7
     assert q["B"]["chg"] is None and q["B"]["er_days"] is None
     assert q["C"]["price"] is None
+
+
+def test_scanner_rows_sort_strongest_setup_first():
+    import app as legacy
+    q = {"A": {"setup": 4}, "B": {"setup": 9}, "C": {"setup": None}, "D": {"setup": 9}}
+    assert legacy._scanner_rows(["A", "B", "C", "D"], q) == ["B", "D", "A", "C"]
+
+
+def test_board_quotes_carry_the_scanner_fields():
+    import app as legacy
+    rows = {"A": {"current_price": 10, "prev_close": 9, "setup_score": "7", "catalyst_score": 5,
+                  "setup_type": "No Setup", "trade_bias": "Bullish", "rel_volume": "1.8"}}
+    a = legacy._board_quotes(["A"], rows)["A"]
+    assert a["setup"] == 7 and a["catalyst"] == 5 and a["setup_type"] == ""
+    assert a["bias"] == "Bullish" and a["rvol"] == 1.8
