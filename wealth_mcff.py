@@ -167,7 +167,13 @@ def judged_gate(name: str, entry: dict | None, threshold: float | None = None) -
 def evaluate(research: dict | None, fin_gate: dict, *, price: float | None, value_zone: dict | None) -> dict:
     research = research or {}
     th = {**DEFAULT_PASS, **{k: _f(v) for k, v in (research.get("thresholds") or {}).items() if _f(v) is not None}}
-    # Apply the investor-selected financial threshold to the verified score,\n    # while preserving the hard red-flag veto.\n    financial = dict(fin_gate)\n    financial["threshold"] = th["financials"]\n    if financial.get("score") is not None:\n        financial["passed"] = financial["score"] >= th["financials"] and not financial.get("risks")\n    gates = {"moat": judged_gate("moat", research.get("moat"), th["moat"]),
+    # Apply the investor-selected financial threshold to the verified score,
+    # while preserving the hard red-flag veto.
+    financial = dict(fin_gate)
+    financial["threshold"] = th["financials"]
+    if financial.get("score") is not None:
+        financial["passed"] = financial["score"] >= th["financials"] and not financial.get("risks")
+    gates = {"moat": judged_gate("moat", research.get("moat"), th["moat"]),
              "ceo": judged_gate("ceo", research.get("ceo"), th["ceo"]),
              "financials": financial,
              "future": judged_gate("future", research.get("future"), th["future"])}
