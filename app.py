@@ -8777,6 +8777,35 @@ def _get_schwab_data(user_id: int = 1, force: bool = False) -> dict:
         })
 
 
+@app.post("/schwab/account/preferences")
+def schwab_account_preferences_update():
+    """Change local display preferences, never the actual brokerage account."""
+    import schwab_account_preferences as prefs
+    uid = current_user_id()
+    data = request.form
+    key = str(data.get("account_key") or "")
+    if not uid:
+        abort(401)
+    if data.get("action") not in ("hide", "show", "wealth_on", "wealth_off"):
+        abort(400)
+    summary = _get_schwab_data(uid, force=True)
+    if not summary.get("connected") or key not in {
+        str(a.get("account_hash") or a.get("account_number") or "")
+        for a in summary.get("accounts") or []
+    }:
+        abort(400, description="Account not available in the connected brokerage")
+    existing = prefs.get_preferences(uid).get(key, {"visible": True, "include_wealth": True})
+    visible, include = existing["visible"], existing["include_wealth"]
+    action = data["action"]
+    if action == "hide": visible = False
+    if action == "show": visible = True
+    if action == "wealth_on": include = True
+    if action == "wealth_off": include = False
+    prefs.update_preference(uid, key, visible=visible, include_wealth=include)
+    flash("Account display preferences saved. Your Schwab account and transactions are unchanged.", "success")
+    return redirect(url_for("schwab_account"))
+
+
 @app.route("/schwab/account")
 def schwab_account():
     """Schwab account overview page — read-only, Phase 1."""
@@ -8807,12 +8836,15 @@ def schwab_account():
             error_msg = str(_e)
             logger.warning("schwab_account page error: %s", _e)
 
+    import schwab_account_preferences as _prefs
+    account_preferences = _prefs.get_preferences(uid)
     return render_template(
         "schwab_account.html",
         configured=configured,
         tok_status=tok_status,
         account_data=account_data,
         orders_by_account=orders_by_account,
+        account_preferences=account_preferences,
         error_msg=error_msg,
     )
 
