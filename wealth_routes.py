@@ -127,6 +127,41 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         s["transaction_count"] = len(txs)
         return s
 
+    def broker_holdings_for(user_id, portfolio=None):
+        """Read the latest broker snapshots; never fabricate ledger trades or tax lots."""
+        import schwab_account_preferences as prefs
+        allowed = prefs.get_preferences(user_id)
+        selected = (str(portfolio.get("broker_account") or "") if portfolio else None)
+        by_ticker = {}
+        for row in wealth_store.list_broker_snapshots(user_id):
+            key = row["account_key"]
+            if not allowed.get(key, {}).get("include_wealth", True):
+                continue
+            if selected and key != selected:
+                continue
+            if portfolio and not selected:
+                continue
+            for h in row["snapshot"].get("holdings", []):
+                ticker = str(h.get("ticker") or "")
+                qty = _num(h.get("shares"))
+                if not _TICKER.fullmatch(ticker) or qty is None or qty <= 0:
+                    continue
+                entry = by_ticker.setdefault(ticker, {"ticker": ticker, "shares": 0.0,
+                    "market_value": 0.0, "basis": 0.0, "basis_known": True,
+                    "source": "schwab_snapshot", "as_of": row["synced_at"]})
+                entry["shares"] += qty
+                mv = _num(h.get("market_value"))
+                if mv is not None:
+                    entry["market_value"] += mv
+                else:
+                    entry["market_value"] = None
+                basis = _num(h.get("cost_basis_snapshot"))
+                if basis is not None and basis > 0:
+                    entry["basis"] += basis
+                else:
+                    entry["basis_known"] = False
+        return list(by_ticker.values())
+
     # Broker snapshots are deliberately separate from the transaction ledger.
     # GET only: no orders, deposits, or synthetic cost-basis transactions.
     @bp.get("/api/wealth/brokerage/discovery")
@@ -148,6 +183,8 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         # Never delete existing snapshots when a broker is unavailable.
         if snapshot and snapshot.get("connected"):
             for account in snapshot.get("accounts") or []:
+                if not account.get("equity_positions"):
+                    continue
                 key = str(account.get("account_hash") or account.get("account_number") or "")
                 if not key:
                     continue
@@ -183,7 +220,8 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         current = owned(user_id, request.args.get("p"))
         s = summary_for(user_id, current) if portfolios else None
         return render_template("wealth_dashboard.html", portfolios=portfolios, current=current,
-                               s=s, kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
+                               s=s, broker_holdings=broker_holdings_for(user_id, current),
+                               kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
 
     @bp.get("/wealth/ledger")
     def ledger_page():
@@ -244,6 +282,13 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         holdings = [{"ticker": h["ticker"], "shares": h["shares"], "avg_cost": h["avg_cost"],
                      "price": h["price"], "price_source": h.get("price_source"), "price_as_of": h.get("price_as_of")}
                     for h in (s or {}).get("holdings", [])]
+        for bh in broker_holdings_for(user_id, current):
+            if any(h["ticker"] == bh["ticker"] for h in holdings):
+                continue
+            basis = bh["basis"] / bh["shares"] if bh["basis_known"] else None
+            price = bh["market_value"] / bh["shares"] if bh["market_value"] is not None else None
+            holdings.append({"ticker": bh["ticker"], "shares": bh["shares"], "avg_cost": basis,
+                             "price": price, "price_source": "Schwab snapshot", "price_as_of": bh["as_of"]})
         return render_template("wealth_lab.html", portfolios=portfolios, current=current, holdings=holdings,
                                total_value=(s or {}).get("total_value"), cash=(s or {}).get("cash"),
                                ticker=(request.args.get("ticker") or "").upper()[:10])
@@ -579,8 +624,9 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         current = owned(user_id, request.args.get("p")) or (portfolios[0] if portfolios else None)
         researched = sorted(wealth_store.list_research(user_id))
         held = sorted({t for lg in (ledgers_for(user_id, current)[0].values() if current else []) for t in lg.positions})
+        broker_tickers = {h["ticker"] for h in broker_holdings_for(user_id, current)}
         return render_template("wealth_next_dollar.html", portfolios=portfolios, current=current,
-                               candidates=sorted(set(researched) | set(held)), researched=researched,
+                               candidates=sorted(set(researched) | set(held) | broker_tickers), researched=researched,
                                kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
 
     @bp.post("/api/wealth/next-dollar")
