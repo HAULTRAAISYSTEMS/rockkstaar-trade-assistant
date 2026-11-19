@@ -52,6 +52,21 @@
   load();
 })();
 </script>
+{% if broker_holdings %}
+<section class="wa-card" aria-label="Brokerage holdings">
+  <h2>Connected Holdings <small>Schwab snapshot · read-only</small></h2>
+  <p class="wa-note">These are real broker-reported positions, not reconstructed ledger trades. Cost basis and returns are not ledger-verified until transaction history is imported.</p>
+  <div class="wa-scroll"><table class="wa-table">
+    <thead><tr><th>Stock</th><th>Shares</th><th>Broker value</th><th>Broker average cost</th><th>Research</th></tr></thead>
+    <tbody>{% for h in broker_holdings %}
+      <tr><td><strong>{{ h.ticker }}</strong></td><td>{{ wa.qty(h.shares) }}</td>
+      <td>{{ wa.money(h.market_value) if h.market_value is not none else 'Unavailable' }}</td>
+      <td>{{ wa.money(h.basis / h.shares) if h.basis_known else 'Unavailable' }}</td>
+      <td><a class="wa-btn" href="{{ url_for('wealth.research_page', ticker=h.ticker) }}">M.C.F.F.</a></td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
 {% if not portfolios %}
 <section class="wa-card wa-empty">
   <h2>Start with a portfolio</h2>
