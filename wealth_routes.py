@@ -283,12 +283,12 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                      "price": h["price"], "price_source": h.get("price_source"), "price_as_of": h.get("price_as_of")}
                     for h in (s or {}).get("holdings", [])]
         for bh in broker_holdings_for(user_id, current):
-            if any(h["ticker"] == bh["ticker"] for h in holdings):
-                continue
+            holdings = [h for h in holdings if h["ticker"] != bh["ticker"]]
             basis = bh["basis"] / bh["shares"] if bh["basis_known"] else None
             price = bh["market_value"] / bh["shares"] if bh["market_value"] is not None else None
             holdings.append({"ticker": bh["ticker"], "shares": bh["shares"], "avg_cost": basis,
-                             "price": price, "price_source": "Schwab snapshot", "price_as_of": bh["as_of"]})
+                             "price": price, "price_source": "Schwab snapshot", "price_as_of": bh["as_of"],
+                             "source": "schwab_snapshot"})
         return render_template("wealth_lab.html", portfolios=portfolios, current=current, holdings=holdings,
                                total_value=(s or {}).get("total_value"), cash=(s or {}).get("cash"),
                                ticker=(request.args.get("ticker") or "").upper()[:10])
@@ -535,8 +535,9 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         portfolios = wealth_store.list_portfolios(user_id)
         researched = wealth_store.list_research(user_id)
         held = sorted({t for lg in ledgers_for(user_id, None)[0].values() for t in lg.positions})
+        broker_tickers = {h["ticker"] for h in broker_holdings_for(user_id)}
         return render_template("wealth_research_list.html", portfolios=portfolios, current=None,
-                               researched=researched, held=held, kinds=wealth_store.KIND_LABELS,
+                               researched=researched, held=sorted(set(held) | broker_tickers), kinds=wealth_store.KIND_LABELS,
                                quick_start=QUICK_START, labels=wealth_mcff.GATE_LABELS)
 
     @bp.get("/wealth/research/<ticker>")
