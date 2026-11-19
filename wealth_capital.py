@@ -83,7 +83,9 @@ def balanced_rank(amount, candidates, state, *, position_limit=25, sector_limit=
             blocks.append("Portfolio total is unknown")
         elif pos_after > position_limit:
             blocks.append("Position would exceed the " + str(position_limit) + "% limit")
-        if sector_after is None:\n            blocks.append("Sector concentration cannot be verified")\n        if sector_after is not None and sector_after > sector_limit:
+        if sector_after is None:
+            blocks.append("Sector concentration cannot be verified")
+        if sector_after is not None and sector_after > sector_limit:
             blocks.append("Sector would exceed the " + str(sector_limit) + "% limit")
         if cash_is_existing and amount > cash - reserve:
             blocks.append("Insufficient available cash after reserve")
@@ -91,7 +93,9 @@ def balanced_rank(amount, candidates, state, *, position_limit=25, sector_limit=
             blocks.append("Missing broker market values: concentration cannot be verified")
         if available < 80:
             blocks.append("Insufficient verified evidence for a confident balanced ranking")
-        if total <= 0:\n            blocks.append("No verified portfolio denominator")\n        rows.append({"ticker": c["ticker"], "company": c.get("company"), "sector": sec,
+        if total <= 0:
+            blocks.append("No verified portfolio denominator")
+        rows.append({"ticker": c["ticker"], "company": c.get("company"), "sector": sec,
                      "price": c.get("price"), "status": ev.get("status"), "eligible": not blocks,
                      "score": score, "coverage_pct": available, "components": components,
                      "weight_before_pct": round(100 * current / total, 2) if total else None,
