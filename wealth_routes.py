@@ -151,7 +151,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                     "source": "schwab_snapshot", "as_of": row["synced_at"]})
                 entry["shares"] += qty
                 mv = _num(h.get("market_value"))
-                if mv is not None:
+                if mv is not None and entry["market_value"] is not None:
                     entry["market_value"] += mv
                 else:
                     entry["market_value"] = None
