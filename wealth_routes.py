@@ -703,6 +703,82 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         out["scenarios"] = {c["ticker"]: c["scenarios"] for c in cands}
         return jsonify({"ok": True, **out})
 
+    # ── Capital Deployment: read-only balanced investment decisions ───────
+    @bp.get("/wealth/capital")
+    def capital_page():
+        user_id = uid()
+        portfolios = wealth_store.list_portfolios(user_id)
+        current = owned(user_id, request.args.get("p"))
+        researched = sorted(wealth_store.list_research(user_id))
+        broker = sorted(h["ticker"] for h in broker_holdings_for(user_id, current))
+        return render_template("wealth_capital.html", portfolios=portfolios, current=current,
+                               candidates=sorted(set(researched) | set(broker)),
+                               kinds=wealth_store.KIND_LABELS)
+
+    @bp.post("/api/wealth/capital/rank")
+    def capital_rank_api():
+        import wealth_capital
+        user_id = uid()
+        d = request.get_json(silent=True) or {}
+        p = owned(user_id, d.get("portfolio_id"))
+        amount = _num(d.get("amount"))
+        if amount is None or amount <= 0 or amount > 1000000000:
+            return jsonify({"ok": False, "error": "Enter a valid amount"}), 400
+        tickers = []
+        for raw in (d.get("tickers") or [])[:12]:
+            t = str(raw).upper().strip()
+            if _TICKER.fullmatch(t) and t not in tickers:
+                tickers.append(t)
+        if not tickers:
+            return jsonify({"ok": False, "error": "Choose at least one ticker"}), 400
+        summary = summary_for(user_id, p)
+        brokers = broker_holdings_for(user_id, p)
+        state = wealth_capital.portfolio_state(summary, brokers)
+        sectors_lookup = wealth_store.sectors_for(list(state["holdings"]))
+        sectors = {}
+        for ticker, value in state["holdings"].items():
+            sector = (sectors_lookup.get(ticker) or ("Unclassified",))[0] or "Unclassified"
+            sectors[sector] = sectors.get(sector, 0) + value
+        state["sectors"] = sectors
+        research = wealth_store.list_research(user_id)
+        def one(t):
+            m = mcff_for(user_id, t, research.get(t) or {})
+            return {"ticker": t, "price": m["price"], "company": m["company"],
+                    "sector": m["sector"] or (wealth_store.sectors_for([t]).get(t) or (None,))[0],
+                    "evaluation": m["evaluation"]}
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            candidates = list(pool.map(one, tickers))
+        try:
+            position_limit = _num(d.get("position_limit")) or 25
+            sector_limit = _num(d.get("sector_limit")) or 40
+            if not (1 <= position_limit <= 100 and 1 <= sector_limit <= 100):
+                return jsonify({"ok": False, "error": "Limits must be 1–100%"}), 400
+            result = wealth_capital.balanced_rank(
+                amount, candidates, state, position_limit=position_limit,
+                sector_limit=sector_limit, cash_is_existing=bool(d.get("existing_cash")),
+                cash_reserve=_num(d.get("cash_reserve")) or 0)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify({"ok": True, **result, "snapshot": {"total_value": state["total_value"],
+                        "cash": state["cash"], "holdings": state["holdings"],
+                        "unknown_market_values": state["unknown_market_values"]}})
+
+    @bp.route("/api/wealth/capital/journal", methods=["GET", "POST"])
+    def capital_journal_api():
+        import wealth_capital_journal
+        user_id = uid()
+        if request.method == "GET":
+            return jsonify({"ok": True, "decisions": wealth_capital_journal.list_decisions(user_id)})
+        d = request.get_json(silent=True) or {}
+        ticker = str(d.get("ticker") or "").upper().strip()
+        if not _TICKER.fullmatch(ticker):
+            return jsonify({"ok": False, "error": "Invalid ticker"}), 400
+        try:
+            wealth_capital_journal.add_decision(user_id, d)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify({"ok": True})
+
     # ── Seasonal Planner ─────────────────────────────────────────────────
     @bp.get("/wealth/planner")
     def planner_page():
