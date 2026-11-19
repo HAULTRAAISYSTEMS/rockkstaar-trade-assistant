@@ -16,7 +16,7 @@ function selectHolding(i){
  const h=H[+i];if(!h)return;
  form.elements.ticker.value=h.ticker;form.elements.existing_shares.value=h.shares;
  form.elements.existing_avg_cost.value=h.avg_cost??'';
- if(h.price!=null){form.elements.current_price.value=(+h.price).toFixed(2);form.elements.purchase_price.value=(+h.price).toFixed(2)}
+ if(h.price!=null&&Number(h.price)>0){form.elements.current_price.value=(+h.price).toFixed(2);form.elements.purchase_price.value=(+h.price).toFixed(2);const slider=$('lab-price-range');slider.max=Math.max(Number(slider.max),Math.ceil(Number(h.price)*1.5));slider.value=Number(h.price)}else{form.elements.current_price.value='';form.elements.purchase_price.value=''}
  $('lab-provenance').textContent='Position from '+(h.source==='schwab_snapshot'?'Schwab snapshot':'ledger')+' · price from '+(h.price_source||'available data')+(h.price_as_of?' · '+h.price_as_of:'')+'. Broker cost basis may not be tax-lot verified.';
  run();
 }
@@ -52,16 +52,17 @@ function compare(r){
  if(!alternatives.length){box.textContent='Connect more priced holdings to compare where the same capital could go.';return}
  const cards=alternatives.map(x=>{
  const shares=amount/Number(x.price),basis=Number(x.avg_cost),oldShares=Number(x.shares);
- const nextAvg=Number.isFinite(basis)&&basis>0?(oldShares*basis+amount)/(oldShares+shares):null;
+ const nextAvg=x.avg_cost!=null&&Number.isFinite(basis)&&basis>0?(oldShares*basis+amount)/(oldShares+shares):null;
  return '<div class="lab-comparison"><b>'+esc(x.ticker)+'</b><p>'+fmt(shares)+' additional shares at '+money(x.price)+'</p><p>Hypothetical new average: '+(nextAvg==null?'Unknown':money(nextAvg))+'</p><small>Same '+money(amount)+' budget. Different company and risk.</small></div>';
  });
  box.innerHTML=cards.join('');
 }
 async function run(){
  const d=Object.fromEntries(new FormData(form));d.fractional=form.elements.fractional.checked;
- if(!d.purchase_price||!d.invest_amount||!d.ticker){out.textContent='Select a holding, enter a buy price and an investment amount to begin.';return}
+ if(!d.purchase_price||!d.invest_amount||!d.ticker){out.textContent='Select a holding, enter a buy price and an investment amount to begin.';last=null;$('lab-kpis').replaceChildren();$('lab-chart-wrap').replaceChildren();$('lab-scenarios').replaceChildren();return}
+ if(Number(d.existing_shares)>0&&(!d.existing_avg_cost||Number(d.existing_avg_cost)<=0)){out.textContent='Average cost is unavailable for this position. Enter your verified Schwab average cost before modeling existing-position profit and loss.';$('lab-kpis').replaceChildren();$('lab-chart-wrap').replaceChildren();$('lab-scenarios').replaceChildren();$('lab-brief').textContent='Brokerage positions are read-only; missing cost basis cannot be assumed to be zero.';return}
  if(Number(d.purchase_price)<=0||Number(d.invest_amount)<=0){out.textContent='Enter a positive purchase price and investment amount.';return}
- const seq=++requestId;
+ const seq=++requestId;last=null;
  try{
  const r=await WA.api('/api/wealth/lab','POST',d);if(seq!==requestId)return;
  if(!r.ok){out.textContent=(r.errors||[r.error||'Simulation unavailable']).join(' · ');return}
