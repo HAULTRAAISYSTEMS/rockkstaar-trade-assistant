@@ -133,27 +133,79 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
 
   </div>
 
-  <div class="detail-card" style="margin:1rem 0;padding:1rem">
-    <h3 class="card-title">Manage Accounts</h3>
-    <p style="opacity:.75">Hide accounts or exclude them from Wealth Architect. Your Schwab accounts and transaction history are never deleted.</p>
-    {% for acct in account_data.accounts %}
-    {% set key = acct.account_hash or acct.account_number %}
-    {% set pref = account_preferences.get(key, {'visible': true, 'include_wealth': true}) %}
-    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.6rem;border-top:1px solid #293640;padding:.8rem 0">
-      <span><strong>···{{ acct.account_number[-4:] if acct.account_number else '?' }}</strong> · {{ acct.account_type }} · {{ acct.equity_positions|length }} holdings</span>
-      <div style="display:flex;flex-wrap:wrap;gap:.5rem">
-        {% for action, label in [(('hide' if pref.visible else 'show'), ('Hide' if pref.visible else 'Show')), (('wealth_off' if pref.include_wealth else 'wealth_on'), ('Exclude from Wealth' if pref.include_wealth else 'Include in Wealth'))] %}
-        <form method="post" action="{{ url_for('schwab_account_preferences_update') }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="hidden" name="account_key" value="{{ key }}">
-          <input type="hidden" name="action" value="{{ action }}">
-          <button class="btn" type="submit">{{ label }}</button>
-        </form>
-        {% endfor %}
+  <style>
+    .sa-manager{position:relative;margin:24px 0 18px;padding:26px;border:1px solid rgba(109,219,232,.19);border-radius:22px;background:linear-gradient(135deg,rgba(13,30,39,.95),rgba(5,12,23,.96) 65%);box-shadow:0 18px 50px rgba(0,0,0,.2);overflow:hidden}
+    .sa-manager:before{content:"";position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,#50d9f2,#c6fa67,transparent)}
+    .sa-manager-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-bottom:20px}
+    .sa-eyebrow{color:#72e6ed;letter-spacing:.19em;text-transform:uppercase;font:700 11px/1.5 monospace}
+    .sa-manager h3{font-size:clamp(20px,2.4vw,27px);margin:5px 0 8px;color:#f3f9ff}
+    .sa-manager p{color:#9eafc1;margin:0;font-size:13px;line-height:1.6}
+    .sa-count{border:1px solid rgba(177,245,110,.32);color:#d6ff9b;background:rgba(177,245,110,.08);border-radius:999px;padding:8px 13px;font:700 11px monospace;white-space:nowrap}
+    .sa-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:12px}
+    .sa-account{border:1px solid rgba(135,172,195,.19);border-radius:16px;padding:17px;background:rgba(11,23,34,.88);transition:border-color .2s,transform .2s}
+    .sa-account:hover{border-color:rgba(101,221,238,.55);transform:translateY(-1px)}
+    .sa-account.is-hidden{opacity:.75}
+    .sa-account-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+    .sa-id{font:700 17px/1.3 monospace;letter-spacing:.04em;color:#f4f8ff}
+    .sa-type{font:700 10px monospace;text-transform:uppercase;color:#8db5c7;letter-spacing:.1em}
+    .sa-account-stats{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:13px 0 16px;color:#9cb1c1;font-size:12px}
+    .sa-dot{width:6px;height:6px;border-radius:50%;display:inline-block;background:#b9f16a;margin-right:5px}
+    .sa-dot.off{background:#6d7b8a}
+    .sa-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .sa-actions form{margin:0}
+    .sa-control{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;min-height:42px;border-radius:10px;border:1px solid rgba(122,166,185,.33);background:rgba(29,49,63,.55);color:#e5f4fc;font:700 12px/1.25 inherit;cursor:pointer;transition:background .18s,border-color .18s}
+    .sa-control:hover{background:rgba(45,82,98,.75);border-color:#5ad3e4}
+    .sa-control.active{background:rgba(178,246,101,.12);border-color:rgba(178,246,101,.5);color:#d5ff9d}
+    .sa-control:focus-visible{outline:2px solid #74e5fa;outline-offset:3px}
+    .sa-foot{margin-top:15px!important;font-size:11px!important}
+    @media(max-width:550px){.sa-manager{padding:17px;border-radius:16px}.sa-list{grid-template-columns:1fr}.sa-account{padding:14px}.sa-actions{grid-template-columns:1fr 1fr}.sa-control{font-size:11px}}
+  </style>
+  <section class="sa-manager" aria-labelledby="sa-manager-title">
+    <header class="sa-manager-head">
+      <div>
+        <div class="sa-eyebrow">Tradestaar / Account Control</div>
+        <h3 id="sa-manager-title">Manage brokerage accounts</h3>
+        <p>Choose what appears in your command center and what powers Wealth Architect.</p>
       </div>
+      <span class="sa-count">{{ account_data.accounts|length }} linked accounts</span>
+    </header>
+    <div class="sa-list">
+      {% for acct in account_data.accounts %}
+      {% set key = acct.account_hash or acct.account_number %}
+      {% set pref = account_preferences.get(key, {'visible': true, 'include_wealth': true}) %}
+      <article class="sa-account{% if not pref.visible %} is-hidden{% endif %}">
+        <div class="sa-account-top">
+          <span class="sa-id">•••• {{ acct.account_number[-4:] if acct.account_number else '????' }}</span>
+          <span class="sa-type">{{ acct.account_type }}</span>
+        </div>
+        <div class="sa-account-stats">
+          <span>{{ acct.equity_positions|length }} holdings</span>
+          <span><i class="sa-dot{{ '' if pref.visible else ' off' }}" aria-hidden="true"></i>{{ 'Visible' if pref.visible else 'Hidden' }}</span>
+          <span><i class="sa-dot{{ '' if pref.include_wealth else ' off' }}" aria-hidden="true"></i>{{ 'In Wealth' if pref.include_wealth else 'Excluded' }}</span>
+        </div>
+        <div class="sa-actions">
+          <form method="post" action="{{ url_for('schwab_account_preferences_update') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="account_key" value="{{ key }}">
+            <input type="hidden" name="action" value="{{ 'hide' if pref.visible else 'show' }}">
+            <button class="sa-control{{ ' active' if pref.visible else '' }}" type="submit" aria-label="{{ 'Hide' if pref.visible else 'Show' }} Schwab account ending {{ acct.account_number[-4:] if acct.account_number else 'unknown' }}">
+              <span aria-hidden="true">{{ '◉' if pref.visible else '◎' }}</span>{{ 'Visible · Hide' if pref.visible else 'Hidden · Show' }}
+            </button>
+          </form>
+          <form method="post" action="{{ url_for('schwab_account_preferences_update') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="account_key" value="{{ key }}">
+            <input type="hidden" name="action" value="{{ 'wealth_off' if pref.include_wealth else 'wealth_on' }}">
+            <button class="sa-control{{ ' active' if pref.include_wealth else '' }}" type="submit" aria-label="{{ 'Exclude' if pref.include_wealth else 'Include' }} Schwab account ending {{ acct.account_number[-4:] if acct.account_number else 'unknown' }} {{ 'from' if pref.include_wealth else 'in' }} Wealth Architect">
+              <span aria-hidden="true">{{ '✦' if pref.include_wealth else '◇' }}</span>{{ 'Wealth · On' if pref.include_wealth else 'Wealth · Off' }}
+            </button>
+          </form>
+        </div>
+      </article>
+      {% endfor %}
     </div>
-    {% endfor %}
-  </div>
+    <p class="sa-foot">Changes only affect Tradestaar visibility and Wealth inclusion. Your Schwab accounts and transaction history remain untouched.</p>
+  </section>
 
   <!-- Per-account detail -->
   {% for acct in account_data.accounts %}
