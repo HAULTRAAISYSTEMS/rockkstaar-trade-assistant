@@ -1,0 +1,39 @@
+/* Tradestaar Wealth Lab 2027: scoped, responsive investment simulator */
+.wa-lab-v2{--lab-line:rgba(115,177,204,.2);--lab-cyan:#6ce3ee;--lab-lime:#c9fa76;--lab-ink:#07131d;color:#e7f2f8}
+.wa-lab-v2 .lab-banner{padding:24px;border:1px solid var(--lab-line);border-radius:20px;background:radial-gradient(ellipse at 90% 0%,rgba(83,212,233,.12),transparent 45%),linear-gradient(120deg,#10232d,#080e18);margin-bottom:18px}
+.wa-lab-v2 .lab-kicker{font:700 11px monospace;letter-spacing:.18em;color:var(--lab-cyan);text-transform:uppercase}
+.wa-lab-v2 .lab-banner h2{font-size:clamp(23px,3vw,35px);margin:8px 0}
+.wa-lab-v2 .lab-muted{color:#a3b8c8;font-size:13px;line-height:1.6}
+.wa-lab-v2 .lab-grid{display:grid;grid-template-columns:minmax(280px,380px) minmax(0,1fr);gap:16px;align-items:start}
+.wa-lab-v2 .lab-panel{border:1px solid var(--lab-line);border-radius:18px;background:linear-gradient(160deg,rgba(16,32,43,.95),rgba(7,14,24,.95));padding:20px;min-width:0}
+.wa-lab-v2 .lab-panel h3{font:700 14px monospace;letter-spacing:.08em;text-transform:uppercase;margin:0 0 15px}
+.wa-lab-v2 .lab-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.wa-lab-v2 .lab-field{display:flex;flex-direction:column;gap:6px;color:#99afc0;font:700 11px monospace;letter-spacing:.06em;text-transform:uppercase;min-width:0}
+.wa-lab-v2 .lab-field.wide{grid-column:1/-1}
+.wa-lab-v2 .lab-field input,.wa-lab-v2 .lab-field select{width:100%;min-width:0;background:#09131d;border:1px solid #294354;border-radius:10px;padding:12px;color:#effaff;font:600 14px system-ui;letter-spacing:normal}
+.wa-lab-v2 .lab-field input:focus,.wa-lab-v2 .lab-field select:focus{outline:2px solid var(--lab-cyan);outline-offset:1px}
+.wa-lab-v2 .lab-range{width:100%;accent-color:var(--lab-lime);margin-top:12px}
+.wa-lab-v2 .lab-check{display:flex;gap:8px;align-items:center;font-size:12px;color:#bfd0dd;margin:13px 0}
+.wa-lab-v2 .lab-check input{accent-color:var(--lab-lime)}
+.wa-lab-v2 .lab-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.wa-lab-v2 .lab-tile{padding:15px;background:#0a1722;border:1px solid var(--lab-line);border-radius:13px;min-width:0}
+.wa-lab-v2 .lab-tile span{font:700 10px monospace;letter-spacing:.08em;color:#8ea8b9;text-transform:uppercase}
+.wa-lab-v2 .lab-tile strong{display:block;font:700 clamp(17px,2vw,25px) monospace;color:#f1f8ff;margin:9px 0 3px;overflow-wrap:anywhere}
+.wa-lab-v2 .lab-tile small{color:#a1b8c5;font-size:11px}
+.wa-lab-v2 .lab-positive{color:#70e8b7!important}.wa-lab-v2 .lab-negative{color:#ff858e!important}
+.wa-lab-v2 .lab-chart{width:100%;height:auto;display:block;background:#09151f;border-radius:12px;border:1px solid var(--lab-line)}
+.wa-lab-v2 .lab-chart-key{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0 0;font-size:11px;color:#b9d0de}
+.wa-lab-v2 .lab-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.wa-lab-v2 .lab-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.wa-lab-v2 .lab-button{background:#142d39;border:1px solid #45788b;color:#e6f7ff;border-radius:10px;padding:11px 14px;cursor:pointer;font-weight:700}
+.wa-lab-v2 .lab-button.primary{background:rgba(191,244,101,.16);border-color:#c3f66b;color:#e4ffad}
+.wa-lab-v2 .lab-button:focus-visible{outline:2px solid var(--lab-cyan);outline-offset:2px}
+.wa-lab-v2 .lab-brief{border-left:3px solid var(--lab-lime);padding:13px 15px;background:rgba(183,244,111,.06);color:#d3e2e8;font-size:13px;line-height:1.7;margin-top:14px}
+.wa-lab-v2 .lab-compare{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.wa-lab-v2 .lab-comparison{border:1px solid var(--lab-line);border-radius:12px;padding:13px;background:#0a1722;font-size:12px;color:#bed2de}
+.wa-lab-v2 .lab-comparison b{color:#f1f9ff}
+.wa-lab-v2 .lab-status{font-size:12px;color:#b4cbd9;min-height:18px}
+.wa-lab-v2 .lab-saved{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.wa-lab-v2 .lab-saved select{background:#09131d;color:#e5f3f9;border:1px solid #294354;padding:9px;border-radius:8px;max-width:100%}
+@media(max-width:900px){.wa-lab-v2 .lab-grid{grid-template-columns:1fr}.wa-lab-v2 .lab-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.wa-lab-v2 .lab-panel,.wa-lab-v2 .lab-banner{padding:15px}.wa-lab-v2 .lab-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.wa-lab-v2 .lab-compare{grid-template-columns:1fr}.wa-lab-v2 .lab-tile strong{font-size:17px}}
