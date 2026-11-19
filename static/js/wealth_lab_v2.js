@@ -23,10 +23,10 @@ function selectHolding(i){
 if(pick){pick.addEventListener('change',()=>{if(pick.value!=='')selectHolding(pick.value)});if(pick.value!=='')selectHolding(pick.value)}
 function tile(label,value,sub,cls=''){return '<div class="lab-tile"><span>'+esc(label)+'</span><strong class="'+cls+'">'+esc(value)+'</strong><small>'+esc(sub||'')+'</small></div>'}
 function chart(r){
- const p=Number(r.old_avg_cost),n=Number(r.new_avg_cost),cur=numeric('current_price'),buy=numeric('purchase_price');
- const values=[p,n,cur,buy].filter(v=>Number.isFinite(v)&&v>0);if(!values.length)return '';
+ const p=r.old_avg_cost==null?null:Number(r.old_avg_cost),n=Number(r.new_avg_cost),cur=numeric('current_price'),buy=numeric('purchase_price');
+ const values=[p,n,cur,buy].filter(v=>v!=null&&Number.isFinite(v)&&v>0);if(!values.length)return '';
  const min=Math.min(...values)*.94,max=Math.max(...values)*1.06,scale=v=>Math.round(35+235*(v-min)/Math.max(.01,max-min));
- const lines=[['Old avg',p,'#f3b967'],['New avg',n,'#c9fa76'],['Market',cur,'#69e0ee'],['Buy',buy,'#b5a4ff']].filter(x=>Number.isFinite(x[1])&&x[1]>0);
+ const lines=[['Old avg',p,'#f3b967'],['New avg',n,'#c9fa76'],['Market',cur,'#69e0ee'],['Buy',buy,'#b5a4ff']].filter(x=>x[1]!=null&&Number.isFinite(x[1])&&x[1]>0);
  return '<svg class="lab-chart" viewBox="0 0 320 165" role="img" aria-label="Price markers comparing existing average cost, new average cost, current price, and proposed buy price">'+
  '<line x1="35" y1="122" x2="270" y2="122" stroke="#456073"/>'+
  lines.map((x,i)=>'<line x1="'+scale(x[1])+'" y1="25" x2="'+scale(x[1])+'" y2="122" stroke="'+x[2]+'" stroke-width="2" stroke-dasharray="'+(i>1?'5 4':'0')+'"/><circle cx="'+scale(x[1])+'" cy="122" r="4" fill="'+x[2]+'"/>').join('')+
@@ -36,7 +36,7 @@ function chart(r){
 function brief(r){
  const old=Number(r.old_avg_cost),avg=Number(r.new_avg_cost),weight=r.weight_after_pct;
  const clauses=['This is a hypothetical purchase, not a trade recommendation.'];
- if(Number.isFinite(old)&&old>0)clauses.push(avg<old?'Your break-even cost decreases by '+money(old-avg)+' per share.':avg>old?'Your break-even cost increases by '+money(avg-old)+' per share.':'Your break-even cost is unchanged.');
+ if(r.old_avg_cost!=null&&Number.isFinite(old)&&old>0)clauses.push(avg<old?'Your break-even cost decreases by '+money(old-avg)+' per share.':avg>old?'Your break-even cost increases by '+money(avg-old)+' per share.':'Your break-even cost is unchanged.');
  if(weight!=null)clauses.push('Your simulated position weight becomes '+Number(weight).toFixed(1)+'%'+(weight>25?', above a 25% concentration watch threshold.':'.'));
  else clauses.push('Portfolio concentration cannot be calculated without a reliable portfolio value.');
  const down=(r.scenarios||[]).find(s=>Number(s.move_pct)===-30);
@@ -69,9 +69,9 @@ async function run(){
  const tiles=[
  tile('New shares',fmt(r.new_shares),'for '+money(r.purchase_cost)),
  tile('Total shares',fmt(r.total_shares),'Total basis '+money(r.total_basis)),
- tile('New average cost',money(r.new_avg_cost),'Previously '+money(r.old_avg_cost)),
+ tile('New average cost',money(r.new_avg_cost),'Previously '+(r.old_avg_cost==null?'not applicable':money(r.old_avg_cost))),
  tile('Break-even price',money(r.breakeven_price),'After hypothetical purchase'),
- tile('P/L at market',money(r.pl_now_after),'Before '+money(r.pl_now_before),r.pl_now_after>=0?'lab-positive':'lab-negative'),
+ tile('P/L at market',money(r.pl_now_after),'Before '+(r.pl_now_before==null?'not applicable':money(r.pl_now_before)),r.pl_now_after>=0?'lab-positive':'lab-negative'),
  tile('Portfolio weight',r.weight_after_pct==null?'Not available':Number(r.weight_after_pct).toFixed(1)+'%','Based on supplied portfolio value')];
  $('lab-kpis').innerHTML=tiles.join('');
  $('lab-chart-wrap').innerHTML=chart(r);
