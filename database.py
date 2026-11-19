@@ -1084,6 +1084,17 @@ def init_db():
             PRIMARY KEY (user_id, account_key)
         )
     """))
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS wa_lab_scenarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            inputs_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """))
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_wa_lab_scenarios_user ON wa_lab_scenarios (user_id, id)")
     # IRA deposits made Jan 1 – Apr 15 can count toward the prior tax year.
     if _USE_POSTGRES:
         cursor.execute("ALTER TABLE wa_transactions ADD COLUMN IF NOT EXISTS tax_year INTEGER")

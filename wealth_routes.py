@@ -464,6 +464,46 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             cash_available=d.get("cash_available"), portfolio_value=d.get("portfolio_value"))
         return jsonify(r), (200 if r.get("ok") else 400)
 
+    @bp.route("/api/wealth/lab/scenarios", methods=["GET", "POST"])
+    def lab_scenarios_api():
+        import wealth_lab_scenarios
+        user_id = uid()
+        if request.method == "GET":
+            return jsonify({"ok": True, "scenarios": wealth_lab_scenarios.list_scenarios(user_id)})
+        d = request.get_json(silent=True) or {}
+        data = d.get("data") or {}
+        ticker = str(data.get("ticker") or "").upper().strip()
+        if not _TICKER.fullmatch(ticker):
+            return jsonify({"ok": False, "error": "Invalid ticker"}), 400
+        if not wealth_calc.simulate_purchase(
+            existing_shares=data.get("existing_shares"), existing_avg_cost=data.get("existing_avg_cost"),
+            purchase_price=data.get("purchase_price"), invest_amount=data.get("invest_amount"),
+            future_price=data.get("future_price"), current_price=data.get("current_price"),
+            fees=data.get("fees"), fractional=data.get("fractional", True)).get("ok"):
+            return jsonify({"ok": False, "error": "Run a valid simulation before saving"}), 400
+        try:
+            wealth_lab_scenarios.save_scenario(user_id, d.get("name"), data)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify({"ok": True, "scenarios": wealth_lab_scenarios.list_scenarios(user_id)})
+
+    @bp.delete("/api/wealth/lab/scenarios/<int:scenario_id>")
+    def lab_scenario_delete(scenario_id):
+        import wealth_lab_scenarios
+        wealth_lab_scenarios.delete_scenario(uid(), scenario_id)
+        return jsonify({"ok": True})
+
+    @bp.get("/api/wealth/lab/compare")
+    def lab_compare_api():
+        user_id = uid()
+        ticker = str(request.args.get("ticker") or "").upper().strip()
+        if not _TICKER.fullmatch(ticker):
+            return jsonify({"ok": False, "error": "Invalid ticker"}), 400
+        data = mcff_for(user_id, ticker)
+        return jsonify({"ok": True, "ticker": ticker, "price": data["price"],
+                        "sector": data["sector"], "evaluation": data["evaluation"],
+                        "value_zone": data["value_zone"], "price_as_of": data["price_as_of"]})
+
     @bp.get("/api/wealth/reconcile")
     def reconcile_api():
         user_id = uid()
