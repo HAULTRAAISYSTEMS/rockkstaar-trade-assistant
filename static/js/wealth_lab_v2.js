@@ -9,9 +9,9 @@ const fmt=n=>Number.isFinite(+n)?Number(n).toLocaleString('en-US',{maximumFracti
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const numeric=(name)=>{const v=form.elements[name]?.value;return v===''||v==null?null:Number(v)};
 let last=null,requestId=0;
-const storeKey='tradestaar.lab.scenarios.v1';
-function saved(){try{const a=JSON.parse(localStorage.getItem(storeKey)||'[]');return Array.isArray(a)?a.slice(0,20):[]}catch(e){return []}}
-function store(a){try{localStorage.setItem(storeKey,JSON.stringify(a.slice(0,20)));return true}catch(e){return false}}
+let cloudScenarios=[];
+async function syncSaved(){try{const r=await WA.api('/api/wealth/lab/scenarios');if(r.ok){cloudScenarios=r.scenarios||[];refreshSaved()}}catch(e){$('lab-save-status').textContent='Saved scenarios are temporarily unavailable.'}}
+function saved(){return cloudScenarios}
 function selectHolding(i){
  const h=H[+i];if(!h)return;
  form.elements.ticker.value=h.ticker;form.elements.existing_shares.value=h.shares;
@@ -56,6 +56,7 @@ function compare(r){
  return '<div class="lab-comparison"><b>'+esc(x.ticker)+'</b><p>'+fmt(shares)+' additional shares at '+money(x.price)+'</p><p>Hypothetical new average: '+(nextAvg==null?'Unknown':money(nextAvg))+'</p><small>Same '+money(amount)+' budget. Different company and risk.</small></div>';
  });
  box.innerHTML=cards.join('');
+ alternatives.forEach(async x=>{try{const r=await WA.api('/api/wealth/lab/compare?ticker='+encodeURIComponent(x.ticker));if(!r.ok)return;const card=[...box.children].find(el=>el.querySelector('b')?.textContent===x.ticker);if(!card)return;const note=document.createElement('p');const ev=r.evaluation||{};note.textContent='M.C.F.F. research: '+(ev.verdict||ev.rating||ev.status||'Open research for full assessment')+' · Sector: '+(r.sector||'unavailable');card.appendChild(note)}catch(e){}});
 }
 async function run(){
  const d=Object.fromEntries(new FormData(form));d.fractional=form.elements.fractional.checked;
@@ -85,16 +86,16 @@ async function run(){
 let timer;form.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(run,180)});
 $('lab-price-range').addEventListener('input',e=>{form.elements.purchase_price.value=e.target.value;run()});
 form.elements.purchase_price.addEventListener('input',e=>{const v=Number(e.target.value);if(v>0){const slider=$('lab-price-range');slider.max=Math.max(Number(slider.max),Math.ceil(v*1.5));slider.value=v}});
-function refreshSaved(){const list=saved(),el=$('lab-saved-list');el.replaceChildren();list.forEach((x,i)=>{const opt=document.createElement('option');opt.value=i;opt.textContent=x.name+' · '+x.ticker;el.append(opt)})}
-$('lab-save').addEventListener('click',()=>{
+function refreshSaved(){const el=$('lab-saved-list');el.replaceChildren();saved().forEach(x=>{const opt=document.createElement('option');opt.value=x.id;opt.textContent=x.name+' · '+x.ticker;el.append(opt)})}
+$('lab-save').addEventListener('click',async()=>{
  if(!last){$('lab-save-status').textContent='Run a valid simulation first.';return}
- const name=prompt('Name this hypothetical scenario (for example: SPCX at $140)');if(!name)return;
+ const name=prompt('Name this hypothetical scenario');if(!name)return;
  const data=Object.fromEntries(new FormData(form));data.fractional=form.elements.fractional.checked;
- const list=saved();list.unshift({name:name.slice(0,70),ticker:data.ticker,date:new Date().toISOString(),data});
- $('lab-save-status').textContent=store(list)?'Saved in this browser only. No trade was placed.':'Browser storage unavailable.';
- refreshSaved();
+ try{const r=await WA.api('/api/wealth/lab/scenarios','POST',{name:name.slice(0,70),data});
+ $('lab-save-status').textContent=r.ok?'Saved to your Tradestaar account. No trade placed.':(r.error||'Unable to save');
+ if(r.ok){cloudScenarios=r.scenarios||[];refreshSaved()}}catch(e){$('lab-save-status').textContent='Unable to save scenario.'}
 });
-$('lab-load').addEventListener('click',()=>{const item=saved()[Number($('lab-saved-list').value)];if(!item)return;for(const [k,v]of Object.entries(item.data)){const field=form.elements[k];if(!field)continue;if(field.type==='checkbox')field.checked=!!v;else field.value=v}if(pick)pick.value='';run()});
-$('lab-delete').addEventListener('click',()=>{const i=Number($('lab-saved-list').value),list=saved();if(!list[i])return;list.splice(i,1);store(list);refreshSaved();$('lab-save-status').textContent='Scenario removed from this browser.'});
-refreshSaved();if(!pick||pick.value==='')run();
+$('lab-load').addEventListener('click',()=>{const item=saved().find(x=>String(x.id)===$('lab-saved-list').value);if(!item)return;for(const [k,v]of Object.entries(item.data)){const field=form.elements[k];if(!field)continue;if(field.type==='checkbox')field.checked=!!v;else field.value=v}if(pick)pick.value='';run()});
+$('lab-delete').addEventListener('click',async()=>{const id=$('lab-saved-list').value;if(!id)return;try{const r=await WA.api('/api/wealth/lab/scenarios/'+encodeURIComponent(id),'DELETE');if(r.ok){cloudScenarios=cloudScenarios.filter(x=>String(x.id)!==id);refreshSaved();$('lab-save-status').textContent='Saved scenario deleted.'}}catch(e){$('lab-save-status').textContent='Unable to delete scenario.'}});
+syncSaved();if(!pick||pick.value==='')run();
 })();
