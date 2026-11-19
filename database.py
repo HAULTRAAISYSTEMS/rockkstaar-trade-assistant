@@ -1095,6 +1095,22 @@ def init_db():
         )
     """))
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_wa_lab_scenarios_user ON wa_lab_scenarios (user_id, id)")
+    cursor.execute(_adapt_ddl("""
+        CREATE TABLE IF NOT EXISTS wa_capital_decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            ticker TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            amount REAL NOT NULL,
+            thesis TEXT NOT NULL,
+            risk TEXT NOT NULL,
+            invalidation TEXT NOT NULL,
+            review_date TEXT,
+            evidence_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """))
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_wa_capital_decisions_user ON wa_capital_decisions (user_id, id)")
     # IRA deposits made Jan 1 – Apr 15 can count toward the prior tax year.
     if _USE_POSTGRES:
         cursor.execute("ALTER TABLE wa_transactions ADD COLUMN IF NOT EXISTS tax_year INTEGER")
