@@ -4,6 +4,7 @@
 {% block head_extra %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/today.css') }}" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_layout.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_picture.css') }}" />
 {% endblock %}
 
 {% block content %}
@@ -366,4 +367,5 @@ document.addEventListener('click', function (e) {
 });
 </script>
 <script defer src="{{ url_for('static', filename='js/elite_2027_layout.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/elite_2027_picture.js') }}"></script>
 {% endblock %}
