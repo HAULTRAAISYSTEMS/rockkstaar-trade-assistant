@@ -42,6 +42,7 @@
     }
     root.append(grid,node('p','Reported figures are not a valuation or an M.C.F.F. buy signal.','wa-note'));
   }
+  window.TradestaarFinancialContract = Object.freeze({render});
   function boot(){
     document.querySelectorAll('[data-sec-contract-ticker]').forEach(root=>{
       render(root,root.dataset.secContractTicker);
