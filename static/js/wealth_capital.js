@@ -35,6 +35,16 @@ form.addEventListener('submit',async e=>{
  '<p class="lab-muted">Moat '+(x.components.quality??'—')+' · Financials '+(x.components.financials??'—')+' · Growth '+(x.components.growth??'—')+' · Valuation '+(x.components.valuation??'—')+' · Diversification '+(x.components.diversification??'—')+'</p>'+
  '<details><summary style="cursor:pointer;color:#ff9da4">'+(x.blocks||[]).length+' eligibility checks need attention</summary>'+(x.blocks||[]).map(b=>'<p class="lab-negative">'+esc(b)+'</p>').join('')+'</details>'+
  '<button class="lab-button" type="button" data-journal-ticker="'+esc(x.ticker)+'">Journal this candidate</button></article>').join('');
+ const exposure=r.exposure||{};
+ const section=document.createElement('section');section.className='lab-comparison';section.style.margin='16px 0';
+ const heading=document.createElement('h3');heading.textContent='Portfolio Intelligence 2.0';section.append(heading);
+ const description=document.createElement('p');description.className='lab-muted';description.textContent='Verified sector coverage: '+(exposure.coverage_pct??0)+'%. Unverified ETFs and industries are not assigned to a sector.';section.append(description);
+ (exposure.holdings||[]).forEach(h=>{const line=document.createElement('div');line.style.margin='8px 0';const label=document.createElement('span');label.textContent=h.ticker+' · '+(h.weight_pct??'—')+'% · '+(h.industry||'Industry unverified');line.append(label);const track=document.createElement('div');track.style.cssText='height:7px;background:#183543;border-radius:9px;overflow:hidden;margin-top:4px';const fill=document.createElement('div');fill.style.cssText='height:100%;background:#68dce7;border-radius:9px;width:'+Math.max(0,Math.min(100,h.weight_pct||0))+'%';track.append(fill);line.append(track);section.append(line)});
+ const plans=document.createElement('h4');plans.textContent='Capital deployment alternatives';section.append(plans);
+ (r.allocation_plans||[]).forEach(p=>{const el=document.createElement('p');el.textContent=p.name+': '+Object.entries(p.allocations||{}).map(([t,a])=>t+' '+money(a)).join(' + ')+(Object.keys(p.allocations||{}).length?' · ':'')+'Cash remaining '+money(p.cash_remaining);section.append(el)});
+ const monitor=document.createElement('details');const title=document.createElement('summary');title.textContent='Data reliability monitor · '+(r.data_quality||[]).filter(c=>c.status!=='current').length+' items need review';monitor.append(title);
+ (r.data_quality||[]).forEach(c=>{const el=document.createElement('p');el.className='lab-muted';el.textContent=(c.ticker?c.ticker+' · ':'')+c.category+': '+c.detail;monitor.append(el)});section.append(monitor);
+ $('capital-results').prepend(section);
  $('capital-results').querySelectorAll('[data-journal-ticker]').forEach(b=>b.addEventListener('click',()=>{
  $('capital-journal').elements.ticker.value=b.dataset.journalTicker;
  $('capital-journal').elements.amount.value=r.amount;
