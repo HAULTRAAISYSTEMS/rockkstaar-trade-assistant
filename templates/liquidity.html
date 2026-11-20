@@ -7,7 +7,10 @@
 
 {% block content %}
 <div class="liq-page">
+<nav class="te27-flow" aria-label="Elite 2027 research workflow"><span class="te27-flow__label">INTELLIGENCE WORKFLOW</span><a href="{{ url_for('liquidity_page') }}" aria-current="page">◉ Command</a><a href="{{ url_for('research_page') }}">⌕ Discover</a><a href="{{ url_for('fundamentals_page', tab='quarter') }}">◇ Verify</a><a href="{{ url_for('wealth.research_list') }}">▥ M.C.F.F.</a><a href="{{ url_for('live_research.index') }}">◷ Live Research</a></nav>
 
+
+  {# Preserve cc3d-orb, its ticker percentages, existing 3D background and refresh logic. #}
   <!-- ══ HEADER ═══════════════════════════════════════════════════════════
        The title used to sit below a 400px banner, so the page opened on a
        narrative and named itself second. It is first now, and the whole
