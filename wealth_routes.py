@@ -42,6 +42,16 @@ def _num(v):
 def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None, broker_summary=None,
                             fundamentals_lookup=None, zone_lookup=None, ai_draft=None):
     bp = Blueprint("wealth", __name__)
+    @bp.route("/api/wealth/sec-evidence/<ticker>", methods=["GET"])
+    def sec_evidence_api(ticker):
+        # SEC evidence is issuer-scoped, read-only, and must never imply a buy signal.
+        if not current_user():
+            abort(401)
+        if ticker.upper() != "SPCX":
+            return jsonify({"ok": False, "error": "Verified SEC identity mapping unavailable"}), 404
+        from wealth_sec_evidence import fetch_sec_evidence
+        return jsonify({"ok": True, **fetch_sec_evidence(ticker.upper())})
+
     price_lookup = price_lookup or wealth_service.default_price_lookup
 
     def _default_bars(ticker):
