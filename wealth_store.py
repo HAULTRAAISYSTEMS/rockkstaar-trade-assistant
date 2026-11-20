@@ -31,6 +31,39 @@ def list_portfolios(user_id: int) -> list[dict]:
         conn.close()
 
 
+
+def visible_portfolio_tabs(user_id: int, portfolios: list[dict]) -> list[dict]:
+    """Keep manually created portfolios; show broker-linked tabs only with holdings.
+
+    Never delete portfolio rows or transaction history. Respect Schwab account
+    inclusion preferences; current holdings are from saved read-only snapshots.
+    """
+    import schwab_account_preferences as prefs
+    preferences = prefs.get_preferences(user_id)
+    snapshots = {row["account_key"]: row["snapshot"]
+                 for row in list_broker_snapshots(user_id)}
+    transactions = list_transactions(user_id)
+    ledger_holdings = {int(t["portfolio_id"]) for t in transactions
+                       if str(t.get("type") or "").upper() in ("BUY", "SPLIT", "REINVEST")}
+    visible = []
+    for portfolio in portfolios:
+        key = str(portfolio.get("broker_account") or "")
+        if not key:
+            visible.append(portfolio)
+            continue
+        if not preferences.get(key, {}).get("include_wealth", True):
+            continue
+        snapshot = snapshots.get(key) or {}
+        positions = snapshot.get("holdings") or []
+        has_broker_stocks = any(
+            isinstance(p, dict) and
+            float(p.get("shares") or 0) > 0 and p.get("ticker")
+            for p in positions if isinstance(p, dict))
+        if has_broker_stocks or portfolio["id"] in ledger_holdings:
+            visible.append(portfolio)
+    return visible
+
+
 def get_portfolio(user_id: int, pid: int) -> dict | None:
     conn = get_db()
     try:
