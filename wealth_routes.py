@@ -779,13 +779,18 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         fund_snapshots = etf_lookthrough.load_snapshots(state["holdings"])
         result["etf_lookthrough"] = etf_lookthrough.lookthrough(state, fund_snapshots)
         import wealth_etf_ingestion as issuer_ingestion
-        fetched, feed_errors = issuer_ingestion.fetch_issuer_snapshots(state["holdings"])
+        import wealth_etf_refresh as etf_refresh
+        fetched, feed_errors, feed_statuses = etf_refresh.refresh(state["holdings"])
         fund_snapshots.update(fetched)
         result["etf_lookthrough"] = etf_lookthrough.lookthrough(state, fund_snapshots)
         result["etf_lookthrough"]["configured"] = bool(fund_snapshots)
         result["etf_lookthrough"]["feed_errors"] = feed_errors
+        result["etf_lookthrough"]["feed_statuses"] = feed_statuses
+        result["etf_lookthrough"]["refresh_policy"] = "On-demand, at most hourly per server process; not scheduled or persisted"
         result["etf_lookthrough"]["overlap"] = issuer_ingestion.company_overlap(state, fund_snapshots)
         result["etf_lookthrough"]["identity_warnings"] = (["SPCX identity requires broker security identifier verification"] if "SPCX" in state["holdings"] else [])
+        result["allocation_evidence"] = {"lookthrough_in_ranking": False,
+            "reason": "ETF look-through is informational only until broker identifiers and all issuer sector data are verified; unverified exposure must not relax concentration gates."}
 
         return jsonify({"ok": True, **result, "snapshot": {"total_value": state["total_value"],
                         "cash": state["cash"], "holdings": state["holdings"],
