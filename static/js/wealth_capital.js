@@ -29,11 +29,11 @@ form.addEventListener('submit',async e=>{
  $('capital-results').innerHTML='<p class="lab-muted">Portfolio value: '+money(r.portfolio_value)+' · '+(r.assumed_new_money?'New contribution':'Existing cash')+'</p>'+
  (r.warnings||[]).map(x=>'<p class="lab-negative">'+esc(x)+'</p>').join('')+
  r.rows.map(x=>'<article class="lab-comparison" style="margin:10px 0"><div style="display:flex;justify-content:space-between;gap:12px"><b>'+esc(x.ticker)+'</b><b>'+ (x.score==null?'Unscored':x.score+'/100')+'</b></div>'+
- '<p>'+esc(x.status||'Unverified')+' · '+(x.eligible?'ELIGIBLE':'NOT ELIGIBLE')+' · Evidence coverage '+x.coverage_pct+'%</p>'+
+ '<p>'+esc(x.score_label||'Research score')+' · '+esc(x.status||'Unverified')+' · '+(x.eligible?'ELIGIBLE':'NOT ELIGIBLE')+' · Evidence coverage '+x.coverage_pct+'%</p>'+
  '<p>Position weight: '+(x.weight_before_pct==null?'Unknown':x.weight_before_pct+'%')+' → '+(x.weight_after_pct==null?'Unknown':x.weight_after_pct+'%')+' · Sector after: '+(x.sector_after_pct==null?'Unknown':x.sector_after_pct+'%')+'</p>'+
- '<p>Valuation: '+esc(x.zone||'Not available')+'</p>'+
+ '<p>Valuation: '+(x.valuation_verified?esc(x.zone||'Not available'):'UNVERIFIED — open M.C.F.F. to verify valuation')+' · Quote date: '+esc(x.valuation_as_of||'unknown')+'</p>'+ '<p>Maximum deployment within configured concentration limits: '+money(x.max_allocation)+'</p>'+
  '<p class="lab-muted">Moat '+(x.components.quality??'—')+' · Financials '+(x.components.financials??'—')+' · Growth '+(x.components.growth??'—')+' · Valuation '+(x.components.valuation??'—')+' · Diversification '+(x.components.diversification??'—')+'</p>'+
- (x.blocks||[]).map(b=>'<p class="lab-negative">'+esc(b)+'</p>').join('')+
+ '<details><summary style="cursor:pointer;color:#ff9da4">'+(x.blocks||[]).length+' eligibility checks need attention</summary>'+(x.blocks||[]).map(b=>'<p class="lab-negative">'+esc(b)+'</p>').join('')+'</details>'+
  '<button class="lab-button" type="button" data-journal-ticker="'+esc(x.ticker)+'">Journal this candidate</button></article>').join('');
  $('capital-results').querySelectorAll('[data-journal-ticker]').forEach(b=>b.addEventListener('click',()=>{
  $('capital-journal').elements.ticker.value=b.dataset.journalTicker;
