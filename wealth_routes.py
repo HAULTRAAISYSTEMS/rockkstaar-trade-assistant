@@ -734,17 +734,28 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         summary = summary_for(user_id, p)
         brokers = broker_holdings_for(user_id, p)
         state = wealth_capital.portfolio_state(summary, brokers)
-        sectors_lookup = wealth_store.sectors_for(list(state["holdings"]))
+        sectors_lookup = wealth_store.sectors_for(list(state["holdings"]) + tickers)
         sectors = {}
         for ticker, value in state["holdings"].items():
             sector = (sectors_lookup.get(ticker) or ("Unclassified",))[0] or "Unclassified"
             sectors[sector] = sectors.get(sector, 0) + value
         state["sectors"] = sectors
+        state["unknown_sectors"] = [t for t in state["holdings"] if t not in sectors_lookup]
         research = wealth_store.list_research(user_id)
         def one(t):
             m = mcff_for(user_id, t, research.get(t) or {})
+            sector = (sectors_lookup.get(t) or (None,))[0]
+            zone = m.get("value_zone") or {}
+            price_date = str(m.get("price_as_of") or "")[:10]
+            from datetime import datetime, timezone
+            try:
+                age = (datetime.now(timezone.utc).date() - date.fromisoformat(price_date)).days
+            except (ValueError, TypeError):
+                age = None
+            valuation_verified = bool(m["evaluation"].get("valuation", {}).get("zone_source") == "investor" and price_date and age is not None and 0 <= age <= 7)
             return {"ticker": t, "price": m["price"], "company": m["company"],
-                    "sector": m["sector"] or (wealth_store.sectors_for([t]).get(t) or (None,))[0],
+                    "sector": sector, "sector_verified": bool(sector and sector != "Unclassified" and not state["unknown_sectors"]),
+                    "valuation_verified": valuation_verified, "valuation_as_of": price_date,
                     "evaluation": m["evaluation"]}
         with ThreadPoolExecutor(max_workers=6) as pool:
             candidates = list(pool.map(one, tickers))
