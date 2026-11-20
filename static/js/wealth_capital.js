@@ -48,6 +48,9 @@ form.addEventListener('submit',async e=>{
  const ltNote=document.createElement('p');ltNote.className='lab-muted';ltNote.textContent=look.configured?'Dated issuer/provider holdings snapshots; not a live feed.':'No verified ETF holdings source configured. Sector exposures remain unverified.';lt.append(ltNote);
  (look.funds||[]).forEach(f=>{const line=document.createElement('p');line.textContent=f.ticker+' · '+f.source+' · '+f.as_of+' · '+f.coverage_pct+'% of fund holdings covered';lt.append(line)});
  Object.entries(look.sector_exposure_pct||{}).forEach(([sector,pct])=>{const line=document.createElement('p');line.textContent=sector+': '+pct+'% of whole portfolio (verified ETF portion only)';lt.append(line)});
+ (look.identity_warnings||[]).forEach(w=>{const p=document.createElement('p');p.textContent='Identity check: '+w;lt.append(p)});
+ (look.overlap||[]).forEach(o=>{const p=document.createElement('p');p.textContent='Overlap '+o.ticker+': '+money(o.direct_value)+' direct + '+money(o.indirect_value)+' via ETFs ('+o.combined_weight_pct+'% combined)';lt.append(p)});
+ Object.entries(look.feed_errors||{}).forEach(([t,e])=>{const p=document.createElement('p');p.textContent=t+' issuer feed unavailable: '+e;lt.append(p)});
  section.append(lt);
  const monitor=document.createElement('details');const title=document.createElement('summary');title.textContent='Data reliability monitor · '+(r.data_quality||[]).filter(c=>c.status!=='current').length+' items need review';monitor.append(title);
  (r.data_quality||[]).forEach(c=>{const el=document.createElement('p');el.className='lab-muted';el.textContent=(c.ticker?c.ticker+' · ':'')+c.category+': '+c.detail;monitor.append(el)});section.append(monitor);

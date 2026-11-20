@@ -778,7 +778,14 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         import wealth_etf_lookthrough as etf_lookthrough
         fund_snapshots = etf_lookthrough.load_snapshots(state["holdings"])
         result["etf_lookthrough"] = etf_lookthrough.lookthrough(state, fund_snapshots)
+        import wealth_etf_ingestion as issuer_ingestion
+        fetched, feed_errors = issuer_ingestion.fetch_issuer_snapshots(state["holdings"])
+        fund_snapshots.update(fetched)
+        result["etf_lookthrough"] = etf_lookthrough.lookthrough(state, fund_snapshots)
         result["etf_lookthrough"]["configured"] = bool(fund_snapshots)
+        result["etf_lookthrough"]["feed_errors"] = feed_errors
+        result["etf_lookthrough"]["overlap"] = issuer_ingestion.company_overlap(state, fund_snapshots)
+        result["etf_lookthrough"]["identity_warnings"] = (["SPCX identity requires broker security identifier verification"] if "SPCX" in state["holdings"] else [])
 
         return jsonify({"ok": True, **result, "snapshot": {"total_value": state["total_value"],
                         "cash": state["cash"], "holdings": state["holdings"],

@@ -7,19 +7,21 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from math import isfinite
 
-ETF_TICKERS = {"SPCX", "SKHY", "VOO", "VTI", "SCHD", "GLD", "GLDM", "SGOV"}
+ETF_TICKERS = {"VOO", "VTI", "SCHD", "GLD", "GLDM", "SGOV", "SPCK"}
 KNOWN_INDUSTRY = {"KLAC": ("Semiconductor equipment", "Semiconductors"),
                   "NVDA": ("Semiconductors", "AI infrastructure"),
                   "GOOG": ("Internet services", "Digital platforms"),
                   "GOOGL": ("Internet services", "Digital platforms"),
                   "V": ("Payment networks", "Financial services"),
-                  "TSM": ("Semiconductor foundry", "Semiconductors")}
+                  "TSM": ("Semiconductor foundry", "Semiconductors"),
+                  "SKHY": ("Memory semiconductors", "Semiconductors")}
 THEMES = {"KLAC": ["Semiconductors", "AI infrastructure"],
           "NVDA": ["Semiconductors", "AI infrastructure"],
           "TSM": ["Semiconductors", "AI infrastructure"],
           "GOOG": ["AI infrastructure", "Digital platforms"],
           "GOOGL": ["AI infrastructure", "Digital platforms"],
-          "V": ["Financial services"]}
+          "V": ["Financial services"],
+          "SKHY": ["Semiconductors", "AI infrastructure"]}
 
 
 def age_days(raw):
@@ -33,6 +35,10 @@ def age_days(raw):
 
 def classify(ticker, cached_sector=None):
     ticker = str(ticker or "").upper()
+    if ticker == "SPCX":
+        return {"sector": None, "industry": None, "themes": [], "verified": False,
+                "reason": "Ambiguous symbol: historical SPCX ETF changed to SPCK; verify broker security identity",
+                "asset_type": "unresolved"}
     if ticker in ETF_TICKERS:
         return {"sector": None, "industry": None, "themes": [],
                 "verified": False, "reason": "ETF holdings look-through unavailable",
