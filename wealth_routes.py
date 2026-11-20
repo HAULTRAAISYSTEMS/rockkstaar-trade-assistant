@@ -770,6 +770,11 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 cash_reserve=_num(d.get("cash_reserve")) or 0)
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
+        import wealth_portfolio_intelligence as intelligence
+        classifications = {t: intelligence.classify(t, (sectors_lookup.get(t) or (None,))[0]) for t in state["holdings"]}
+        result["exposure"] = intelligence.exposure(state, classifications)
+        result["allocation_plans"] = intelligence.split_options(amount, result["rows"])
+        result["data_quality"] = intelligence.quality_monitor(candidates, state)
         return jsonify({"ok": True, **result, "snapshot": {"total_value": state["total_value"],
                         "cash": state["cash"], "holdings": state["holdings"],
                         "unknown_market_values": state["unknown_market_values"]}})
