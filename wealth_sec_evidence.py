@@ -57,7 +57,7 @@ def normalize_facts(payload):
                         continue
                     if not isinstance(row.get("val"), (int, float)):
                         continue
-                    candidates.append({"value": row["val"], "period_end": row["end"],
+                    candidates.append({"value": row["val"], "period_end": row["end"], "start": row.get("start"),
                                        "filed": row["filed"], "form": row["form"],
                                        "accession": row.get("accn"), "tag": tag, "unit": unit})
         if candidates:
