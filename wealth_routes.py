@@ -795,6 +795,10 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             identity = security_identity.identity("SPCX", cusip=broker_spcx.get("cusip"),
                                                  description=broker_spcx.get("description"))
             result["security_identity"]["SPCX"] = identity
+            from wealth_data_confidence import data_confidence
+            result["security_data_confidence"] = {"SPCX": data_confidence(
+                "SPCX", broker_cusip=broker_spcx.get("cusip"),
+                broker_description=broker_spcx.get("description"))}
             result["etf_lookthrough"]["identity_warnings"] = ([] if identity["verified"] else [identity["reason"]])
         else:
             result["etf_lookthrough"]["identity_warnings"] = []
