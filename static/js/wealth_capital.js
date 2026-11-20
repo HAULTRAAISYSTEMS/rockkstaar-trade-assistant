@@ -53,6 +53,8 @@ form.addEventListener('submit',async e=>{
  Object.entries(look.feed_errors||{}).forEach(([t,e])=>{const p=document.createElement('p');p.textContent=t+' issuer feed unavailable: '+e;lt.append(p)});
  const refresh=document.createElement('p');refresh.textContent=look.refresh_policy||'Issuer refresh status unavailable';lt.append(refresh);
  Object.entries(look.feed_statuses||{}).forEach(([t,status])=>{const p=document.createElement('p');p.textContent=t+': '+status.replaceAll('_',' ');lt.append(p)});
+ const spcx=r.security_identity&&r.security_identity.SPCX;
+ if(spcx){const p=document.createElement('p');p.textContent='SPCX · '+spcx.issuer+' · '+spcx.security+' · '+(spcx.verified?'Broker CUSIP verified':'Broker CUSIP not verified');lt.append(p)}
  section.append(lt);
  const monitor=document.createElement('details');const title=document.createElement('summary');title.textContent='Data reliability monitor · '+(r.data_quality||[]).filter(c=>c.status!=='current').length+' items need review';monitor.append(title);
  (r.data_quality||[]).forEach(c=>{const el=document.createElement('p');el.className='lab-muted';el.textContent=(c.ticker?c.ticker+' · ':'')+c.category+': '+c.detail;monitor.append(el)});section.append(monitor);

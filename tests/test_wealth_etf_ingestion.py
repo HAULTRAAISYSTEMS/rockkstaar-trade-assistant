@@ -11,8 +11,10 @@ class IssuerFeedTests(unittest.TestCase):
     def test_skyhynix_is_equity(self):
         self.assertEqual(classify("SKHY")["asset_type"], "equity")
 
-    def test_ambiguous_spcx_blocked(self):
-        self.assertEqual(classify("SPCX")["asset_type"], "unresolved")
+    def test_spcx_equity_identity_remains_unverified_without_cusip(self):
+        classification = classify("SPCX")
+        self.assertEqual(classification["asset_type"], "equity")
+        self.assertFalse(classification["verified"])
 
     def test_rejects_untrusted_host(self):
         config = {"SPCK": {"url": "https://other.example/holdings.json",

@@ -726,6 +726,7 @@ def _normalize_account(raw: dict) -> dict:
             "symbol":      symbol,
             "description": instrument.get("description", ""),
             "asset_type":  asset_type,
+            "cusip": str(instrument.get("cusip") or ""),
             "quantity":    qty,
             "avg_price":   round(avg_price, 4),
             "market_value":round(mkt_val, 2),

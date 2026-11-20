@@ -788,7 +788,16 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         result["etf_lookthrough"]["feed_statuses"] = feed_statuses
         result["etf_lookthrough"]["refresh_policy"] = "On-demand, at most hourly per server process; not scheduled or persisted"
         result["etf_lookthrough"]["overlap"] = issuer_ingestion.company_overlap(state, fund_snapshots)
-        result["etf_lookthrough"]["identity_warnings"] = (["SPCX identity requires broker security identifier verification"] if "SPCX" in state["holdings"] else [])
+        import wealth_security_identity as security_identity
+        result["security_identity"] = {}
+        if "SPCX" in state["holdings"]:
+            broker_spcx = next((h for h in brokers if str(h.get("ticker") or h.get("symbol") or "").upper() == "SPCX"), {})
+            identity = security_identity.identity("SPCX", cusip=broker_spcx.get("cusip"),
+                                                 description=broker_spcx.get("description"))
+            result["security_identity"]["SPCX"] = identity
+            result["etf_lookthrough"]["identity_warnings"] = ([] if identity["verified"] else [identity["reason"]])
+        else:
+            result["etf_lookthrough"]["identity_warnings"] = []
         result["allocation_evidence"] = {"lookthrough_in_ranking": False,
             "reason": "ETF look-through is informational only until broker identifiers and all issuer sector data are verified; unverified exposure must not relax concentration gates."}
 

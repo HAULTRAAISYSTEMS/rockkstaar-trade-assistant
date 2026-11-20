@@ -36,9 +36,10 @@ def age_days(raw):
 def classify(ticker, cached_sector=None):
     ticker = str(ticker or "").upper()
     if ticker == "SPCX":
-        return {"sector": None, "industry": None, "themes": [], "verified": False,
-                "reason": "Ambiguous symbol: historical SPCX ETF changed to SPCK; verify broker security identity",
-                "asset_type": "unresolved"}
+        return {"sector": None, "industry": "Aerospace and space technology",
+                "themes": ["Space infrastructure"], "verified": False,
+                "reason": "SpaceX Class A equity; broker CUSIP and provider sector verification required",
+                "asset_type": "equity"}
     if ticker in ETF_TICKERS:
         return {"sector": None, "industry": None, "themes": [],
                 "verified": False, "reason": "ETF holdings look-through unavailable",
