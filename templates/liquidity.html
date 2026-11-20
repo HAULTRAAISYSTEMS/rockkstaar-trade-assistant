@@ -4,6 +4,7 @@
 {% block head_extra %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/today.css') }}" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_layout.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_picture.css') }}" />
 {% endblock %}
 
 {% block content %}
@@ -146,6 +147,15 @@
   </section>
   </section><!-- /cc-now -->
 
+  <section class="te27-market-tiles" aria-label="Market performance snapshot">
+    <article class="te27-market-tile"><span class="te27-market-icon">↗</span><div><small>{{ pulse.spy_label or 'SPY / S&P 500' }}</small><strong id="te27-spy">{% if pulse.spy is not none %}{{ '%+.2f'|format(pulse.spy) }}%{% else %}—{% endif %}</strong></div></article>
+    <article class="te27-market-tile"><span class="te27-market-icon">▥</span><div><small>{{ pulse.qqq_label or 'QQQ / Nasdaq' }}</small><strong id="te27-qqq">{% if pulse.qqq is not none %}{{ '%+.2f'|format(pulse.qqq) }}%{% else %}—{% endif %}</strong></div></article>
+    <article class="te27-market-tile"><span class="te27-market-icon">◈</span><div><small>VIX volatility</small><strong id="te27-vix">{% if pulse.vix is not none %}{{ '%.2f'|format(pulse.vix) }}{% else %}—{% endif %}</strong></div></article>
+    <article class="te27-market-tile"><span class="te27-market-icon">◉</span><div><small>Liquidity</small><strong id="te27-liq">{% if pulse.liquidity is not none %}{{ pulse.liquidity }}/100{% else %}—{% endif %}</strong></div></article>
+    <article class="te27-market-tile"><span class="te27-market-icon">⌁</span><div><small>Next catalyst</small><strong class="te27-market-next">{% if next_up %}{{ next_up.title }}{% else %}—{% endif %}</strong></div></article>
+  </section>
+  <div class="te27-module-head"><strong>AI Market Intelligence</strong><span>LIVE SIGNALS · VERIFIED CONTEXT</span></div>
+  <p class="te27-evidence-note">Index proxies, volatility and event timing reflect the latest available feeds. An unavailable value is shown as a dash; no simulated market prices are displayed.</p>
   <!-- ══ BODY: reading on the left, the live feed on the right ══════════ -->
   <div class="cc-body">
     <div class="cc-col-main">
@@ -357,4 +367,5 @@ document.addEventListener('click', function (e) {
 });
 </script>
 <script defer src="{{ url_for('static', filename='js/elite_2027_layout.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/elite_2027_picture.js') }}"></script>
 {% endblock %}
