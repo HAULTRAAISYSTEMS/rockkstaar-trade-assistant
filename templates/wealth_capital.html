@@ -9,17 +9,14 @@
 <div class="wa wa-lab-v2">
 {{ wa.head('capital', 'Capital Deployment', 'Balanced investment decisions, verified M.C.F.F. gates, portfolio concentration and a permanent decision journal.', portfolios, current) }}
 <div class="lab-banner"><div class="lab-kicker">Tradestaar Elite / Wealth Architect / Phase 4</div><h2>Capital Deployment <span style="color:#c9fa76">✦</span></h2><p class="lab-muted">Compare your next dollar against the business, the price, and the portfolio. No orders are placed.</p></div>
-<section class="lab-panel" aria-label="Unified SEC financial intelligence" style="margin:16px 0">
-<h3>✦ SEC Evidence Terminal <small>One verified source · every view</small></h3>
-<p class="lab-muted">Live SEC filing evidence for verified issuers. This source is also available to other Tradestaar research pages through the unified financial intelligence API. Unverified figures never become M.C.F.F. scores.</p>
-<button type="button" class="lab-button" id="sec-unified-load">Inspect SPCX filings</button>
-<p id="sec-unified-status" class="lab-status" aria-live="polite"></p>
-<div id="sec-unified-results" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px"></div>
-</section>
 <section class="lab-panel" style="margin:16px 0">
-<h3>✦ Unified Financial Evidence</h3>
-<p class="lab-muted">The same source-backed metrics and reporting dates shown in M.C.F.F. research.</p>
-<section data-sec-contract-ticker="SPCX" aria-label="SEC financial evidence"></section>
+<h3>✦ Verified Company Financial Evidence</h3>
+<p class="lab-muted">Select a company to inspect its own SEC filings. Unsupported issuers show no invented financials.</p>
+<label class="lab-field">Company ticker
+<input id="capital-sec-ticker" maxlength="10" placeholder="KLAC" aria-label="Company ticker for SEC evidence">
+</label>
+<button type="button" class="lab-button" id="capital-sec-inspect">Inspect verified filings</button>
+<section id="capital-sec-evidence" aria-live="polite" aria-label="Selected company SEC financial evidence"></section>
 </section>
 <div class="lab-grid">
 <section class="lab-panel">
