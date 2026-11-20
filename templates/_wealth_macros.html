@@ -20,7 +20,8 @@
   <nav class="wa-nav" aria-label="Wealth Architect">
     {% set q = ('?p=' ~ current.id) if current else '' %}
     <a href="{{ url_for('wealth.dashboard') }}{{ q }}" class="{{ 'is-on' if active == 'dash' }}">Dashboard</a>
-    <a href="{{ url_for('wealth.next_dollar_page') }}{{ q }}" class="{{ 'is-on' if active == 'next' }}">Next Dollar</a>\n    <a href="{{ url_for('wealth.capital_page') }}{{ q }}" class="{{ 'is-on' if active == 'capital' }}">Capital Engine</a>
+    <a href="{{ url_for('wealth.next_dollar_page') }}{{ q }}" class="{{ 'is-on' if active == 'next' }}">Next Dollar</a>
+    <a href="{{ url_for('wealth.capital_page') }}{{ q }}" class="{{ 'is-on' if active == 'capital' }}">Capital Engine</a>
     <a href="{{ url_for('wealth.research_list_page') }}" class="{{ 'is-on' if active == 'research' }}">M.C.F.F.</a>
     <a href="{{ url_for('wealth.scoreboard_page') }}{{ q }}" class="{{ 'is-on' if active == 'score' }}">Scoreboard</a>
     <a href="{{ url_for('wealth.planner_page') }}" class="{{ 'is-on' if active == 'plan' }}">Planner</a>
@@ -29,13 +30,52 @@
   </nav>
 </header>
 {% if portfolios and pills %}
-<div class="wa-bar" aria-label="Portfolio">
+<div class="wa-bar" aria-label="Portfolio" data-portfolio-tabs data-visibility-key="tradestaar:wealth:visible:{{ session.get('user_id', 'anonymous') }}">
   {% set ep = request.endpoint %}
   {% if with_all %}<a class="wa-pill {{ 'is-on' if not current }}" href="{{ url_for(ep) }}">All portfolios</a>{% endif %}
   {% for p in portfolios %}
-  <a class="wa-pill {{ 'is-on' if current and current.id == p.id }}" href="{{ url_for(ep, p=p.id) }}">{{ p.name }} <small>{{ kinds.get(p.kind, '') if kinds is defined else '' }}</small></a>
+  <a class="wa-pill {{ 'is-on' if current and current.id == p.id }}" data-portfolio-tab="{{ p.id }}" href="{{ url_for(ep, p=p.id) }}">{{ p.name }} <small>{{ kinds.get(p.kind, '') if kinds is defined else '' }}</small></a>
   {% endfor %}
+  <button type="button" class="wa-pill" data-manage-tabs aria-expanded="false">Manage tabs</button>
 </div>
+<div data-portfolio-chooser hidden style="margin:10px 0;padding:14px;border:1px solid #506174;border-radius:12px">
+  <strong>Choose visible portfolio tabs</strong>
+  <p style="margin:6px 0">Hiding a tab does not delete its portfolio, transactions or holdings. This preference is saved in this browser.</p>
+  {% for p in portfolios %}
+  <label style="display:inline-flex;align-items:center;gap:6px;margin:8px 16px 8px 0">
+    <input type="checkbox" data-portfolio-choice="{{ p.id }}" checked> {{ p.name }}
+  </label>
+  {% endfor %}
+  <button type="button" class="wa-btn" data-show-all-tabs>Show all</button>
+</div>
+<script>
+(function(){
+  const bar=document.querySelector('[data-portfolio-tabs]');
+  if(!bar)return;
+  const key=bar.dataset.visibilityKey, chooser=document.querySelector('[data-portfolio-chooser]');
+  const tabs=[...bar.querySelectorAll('[data-portfolio-tab]')];
+  const choices=[...chooser.querySelectorAll('[data-portfolio-choice]')];
+  let selected=null;
+  try{const saved=JSON.parse(localStorage.getItem(key));if(Array.isArray(saved))selected=new Set(saved.map(String));}catch(e){}
+  function render(){
+    tabs.forEach(tab=>{tab.hidden=selected!==null&&!selected.has(tab.dataset.portfolioTab);});
+    choices.forEach(input=>{input.checked=selected===null||selected.has(input.dataset.portfolioChoice);});
+  }
+  function save(){
+    selected=new Set(choices.filter(input=>input.checked).map(input=>input.dataset.portfolioChoice));
+    try{localStorage.setItem(key,JSON.stringify([...selected]));}catch(e){}
+    render();
+  }
+  choices.forEach(input=>input.addEventListener('change',save));
+  bar.querySelector('[data-manage-tabs]').addEventListener('click',function(){
+    chooser.hidden=!chooser.hidden;this.setAttribute('aria-expanded',String(!chooser.hidden));
+  });
+  chooser.querySelector('[data-show-all-tabs]').addEventListener('click',()=>{
+    selected=null;try{localStorage.removeItem(key);}catch(e){}render();
+  });
+  render();
+})();
+</script>
 {% endif %}
 {% endmacro %}
 
