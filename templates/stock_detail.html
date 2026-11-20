@@ -1186,6 +1186,7 @@
     <p class="wa-note">Reported SEC facts and calculated financial ratios. Annual and quarterly figures are not mixed.</p>
     <div id="sd-sec-intelligence-content" aria-live="polite">Loading verified financial evidence…</div>
   </section>
+<section class="te27-intel" data-te27-ticker="{{ stock.ticker }}" aria-label="Verified SEC financial intelligence" aria-live="polite"></section>
   <div class="sd-links">
     <a class="sd-btn" href="{{ url_for('fundamentals_page', ticker=stock.ticker) }}">Full fundamentals →</a>
     <a class="sd-btn" href="{{ url_for('research_page', ticker=stock.ticker) }}">Company research →</a>
@@ -2348,4 +2349,5 @@ console.log('[detail] Auto-refresh armed for', DETAIL_TICKER,
 })();
 </script>
 <script src="{{ url_for('static', filename='js/stock_financial_intelligence.js') }}" defer></script>
+<script defer src="{{ url_for('static', filename='js/elite_2027_intelligence.js') }}"></script>
 {% endblock %}
