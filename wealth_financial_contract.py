@@ -12,9 +12,16 @@ METRIC_LABELS = {
     "assets": "Total assets",
     "liabilities": "Total liabilities",
     "operating_cash_flow": "Operating cash flow",
+    "capital_expenditures": "Capital expenditures",
+    "gross_profit": "Gross profit",
+    "operating_income": "Operating income",
+    "cash": "Cash and equivalents",
+    "long_term_debt": "Long-term debt (noncurrent)",
+    "stockholders_equity": "Stockholders equity",
+    "diluted_eps": "Diluted EPS",
 }
-BALANCE_METRICS = {"assets", "liabilities"}
-FLOW_METRICS = {"revenue", "net_income", "operating_cash_flow"}
+BALANCE_METRICS = {"assets", "liabilities", "cash", "long_term_debt", "stockholders_equity"}
+FLOW_METRICS = {"revenue", "net_income", "operating_cash_flow", "capital_expenditures", "gross_profit", "operating_income", "diluted_eps"}
 
 
 def _freshness(filed, today=None):
@@ -45,7 +52,7 @@ def normalize_financial_contract(snapshot, *, today=None):
         has_fact = (
             isinstance(latest.get("value"), (int, float))
             and not isinstance(latest.get("value"), bool)
-            and latest.get("unit") == "USD"
+            and latest.get("unit") == ("USD/shares" if key == "diluted_eps" else "USD")
             and latest.get("period_end")
             and latest.get("filed")
             and latest.get("accession")
@@ -58,7 +65,7 @@ def normalize_financial_contract(snapshot, *, today=None):
         metrics[key] = {
             "label": label, "status": "reported" if has_fact else "missing",
             "value": latest.get("value") if has_fact else None,
-            "unit": "USD" if has_fact else None,
+            "unit": latest.get("unit") if has_fact else None,
             "period_start": latest.get("start") if has_fact else None,
             "period_end": latest.get("period_end") if has_fact else None,
             "filed": latest.get("filed") if has_fact else None,

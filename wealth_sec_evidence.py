@@ -22,6 +22,13 @@ FACT_TAGS = {
     "assets": ("Assets",),
     "liabilities": ("Liabilities",),
     "operating_cash_flow": ("NetCashProvidedByUsedInOperatingActivities",),
+    "capital_expenditures": ("PaymentsToAcquirePropertyPlantAndEquipment",),
+    "gross_profit": ("GrossProfit",),
+    "operating_income": ("OperatingIncomeLoss",),
+    "cash": ("CashAndCashEquivalentsAtCarryingValue",),
+    "long_term_debt": ("LongTermDebtNoncurrent",),
+    "stockholders_equity": ("StockholdersEquity",),
+    "diluted_eps": ("EarningsPerShareDiluted",),
 }
 
 
@@ -59,7 +66,7 @@ def normalize_facts(payload):
         candidates = []
         for tag in tags:
             for unit, entries in (facts.get(tag, {}).get("units") or {}).items():
-                if unit != "USD":
+                if unit != ("USD/shares" if metric == "diluted_eps" else "USD"):
                     continue
                 for row in entries:
                     if row.get("form") not in {"10-K", "10-Q"} or not row.get("filed") or not row.get("end"):

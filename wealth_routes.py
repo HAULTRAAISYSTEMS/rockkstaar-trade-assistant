@@ -63,6 +63,15 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         result = normalize_financial_contract(financial_snapshot(ticker))
         return jsonify(result), (200 if result["ok"] else 404)
 
+    @bp.get("/api/wealth/advanced-financials/<ticker>")
+    def advanced_financials_api(ticker):
+        if not current_user():
+            abort(401)
+        from wealth_financial_data import financial_snapshot
+        from wealth_advanced_financials import advanced_financial_snapshot
+        result = advanced_financial_snapshot(financial_snapshot(ticker))
+        return jsonify(result), (200 if result["ok"] else 404)
+
     @bp.get("/api/wealth/sec-evidence/<ticker>")
     def sec_evidence_api(ticker):
         if not current_user():
