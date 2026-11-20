@@ -43,7 +43,15 @@
       <div class="cc3d-hud" data-cc3d-hud aria-live="off"><span>Status <b>Awaiting live quotes</b></span></div>
     </div>
   </header>
-
+  <div class="te27-module-head"><strong>Elite Intelligence Network</strong><span>CONNECTED RESEARCH</span></div>
+  <nav class="te27-feature-grid" aria-label="Explore Tradestaar intelligence">
+    <a href="{{ url_for('research_page') }}"><em>⌕</em><b>Discover</b><small>Find opportunities and inspect company research</small></a>
+    <a href="{{ url_for('fundamentals_page', tab='quarter') }}"><em>◇</em><b>Verify</b><small>Validate financial evidence and risk</small></a>
+    <a href="{{ url_for('wealth.research_list_page') }}"><em>▥</em><b>M.C.F.F.</b><small>Review the four investment gates</small></a>
+    <a href="{{ url_for('live_research.feed') }}"><em>◷</em><b>Live Research</b><small>Track catalysts and current developments</small></a>
+    <a href="{{ url_for('wealth.next_dollar_page') }}"><em>◈</em><b>Capital</b><small>Evaluate portfolio deployment decisions</small></a>
+  </nav>
+  <p class="te27-evidence-note">The interactive 3D market globe and stock percentages above retain their existing live data connections. Quote freshness and research verification remain distinct.</p>
 
   {# The FRED loading and weekend notices sat above the page title, so the
      first thing the page said was that one of its lower panels was still
