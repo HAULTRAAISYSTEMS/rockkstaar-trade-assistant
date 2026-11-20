@@ -53,6 +53,16 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             return jsonify(result), 404
         return jsonify(result)
 
+    @bp.get("/api/wealth/financial-contract/<ticker>")
+    def financial_contract_api(ticker):
+        """Shared normalized SEC financial metric contract for all UI surfaces."""
+        if not current_user():
+            abort(401)
+        from wealth_financial_data import financial_snapshot
+        from wealth_financial_contract import normalize_financial_contract
+        result = normalize_financial_contract(financial_snapshot(ticker))
+        return jsonify(result), (200 if result["ok"] else 404)
+
     @bp.get("/api/wealth/sec-evidence/<ticker>")
     def sec_evidence_api(ticker):
         if not current_user():
