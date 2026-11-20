@@ -60,16 +60,21 @@ def derive_metrics(contract):
     }
     # Conservative ROIC proxy: NOPAT / (equity + identified interest-bearing debt - cash).
     # Only available with a matching income statement period and matching balance sheet date.
-    income = _compatible(metrics, ("operating_income", "income_tax_expense", "interest_expense"), duration=True)
+    income = _compatible(metrics, ("operating_income", "income_tax_expense", "pretax_income"), duration=True)
     balance = _compatible(metrics, ("stockholders_equity", "cash") + debt_keys)
     roic = {"status": "unavailable", "value": None, "unit": "%",
             "formula": "Operating income * (1 - effective tax rate) / (equity + identified debt - cash) * 100",
             "warning": "ROIC proxy requires complete period-aligned SEC inputs; not a full invested-capital reconciliation",
             "period_end": None}
     if income and balance and income[0]["period_end"] == balance[0]["period_end"]:
-        operating, taxes, interest = (row["value"] for row in income)
-        # A reported effective tax rate requires pretax income; do not infer it from operating income.
-        roic["warning"] = "Cannot infer effective tax rate from operating income and tax expense alone"
+        operating, taxes, pretax = (row["value"] for row in income)
+        equity, cash, *debts = (row["value"] for row in balance)
+        capital = equity + sum(debts) - cash
+        if pretax > 0 and capital > 0 and 0 <= taxes / pretax <= 1:
+            rate = taxes / pretax
+            roic.update(status="calculated", value=round(100 * operating * (1 - rate) / capital, 4),
+                        period_end=income[0]["period_end"],
+                        warning="ROIC proxy uses end-period capital, not average invested capital; debt components may be incomplete")
     derived["roic_proxy_pct"] = roic
     return derived
 
