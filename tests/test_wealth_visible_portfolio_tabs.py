@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from types import SimpleNamespace
 import wealth_store
 
 
@@ -36,5 +37,6 @@ def test_historical_buys_keep_broker_tab_visible_without_snapshot():
     with patch("schwab_account_preferences.get_preferences", return_value={}), \
          patch.object(wealth_store, "list_broker_snapshots", return_value=[]), \
          patch.object(wealth_store, "list_transactions",
-                      return_value=[{"portfolio_id": 3, "type": "BUY"}]):
+                      return_value=[{"portfolio_id": 3, "type": "BUY"}]), \
+         patch("wealth_ledger.build", return_value=SimpleNamespace(positions={"KLAC": [SimpleNamespace(shares=5)]})):
         assert wealth_store.visible_portfolio_tabs(7, portfolios) == portfolios
