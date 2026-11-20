@@ -4,9 +4,12 @@
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_financial_contract.css') }}">{% endblock %}
 {% block content %}
 <div class="wa">
+<nav class="te27-flow" aria-label="Elite 2027 research workflow"><span class="te27-flow__label">INTELLIGENCE WORKFLOW</span><a href="{{ url_for('liquidity_page') }}">◉ Command</a><a href="{{ url_for('research_page') }}">⌕ Discover</a><a href="{{ url_for('fundamentals_page', tab='quarter') }}">◇ Verify</a><a href="{{ url_for('wealth.research_list_page') }}">▥ M.C.F.F.</a><a href="{{ url_for('live_research.feed') }}">◷ Live Research</a></nav>
+
 {{ wa.head('research', ticker ~ ' · M.C.F.F.', 'Score each gate in order. Financials is filled from SEC filings; Moat, CEO and Future are your judgment. Your scores are what count.', portfolios, current, with_all=False, pills=False) }}
 <section class="wa-card" data-sec-contract-ticker="{{ ticker }}" aria-label="Verified SEC financial evidence"></section>
 <section class="te27-intel" data-te27-ticker="{{ ticker }}" aria-label="Verified SEC financial intelligence" aria-live="polite"></section>
+<p class="te27-evidence-note"><strong>Verify the evidence.</strong> SEC reporting periods, missing data and financial quality are shown separately from investor-scored M.C.F.F. gates. No automated BUY rating is inferred.</p>
 <div id="mc" aria-live="polite"><section class="wa-card"><p class="wa-note">Loading {{ ticker }}: the first look at a company reads its filings and can take a few seconds.</p></section></div>
 </div>
 {{ wa.common_js() }}

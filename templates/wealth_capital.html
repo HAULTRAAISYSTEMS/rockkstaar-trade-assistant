@@ -7,6 +7,8 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_financial_contract.css') }}">{% endblock %}
 {% block content %}
 <div class="wa wa-lab-v2">
+<nav class="te27-flow" aria-label="Elite 2027 research workflow"><span class="te27-flow__label">INTELLIGENCE WORKFLOW</span><a href="{{ url_for('liquidity_page') }}">◉ Command</a><a href="{{ url_for('research_page') }}">⌕ Discover</a><a href="{{ url_for('fundamentals_page', tab='quarter') }}">◇ Verify</a><a href="{{ url_for('wealth.research_list_page') }}">▥ M.C.F.F.</a><a href="{{ url_for('live_research.feed') }}">◷ Live Research</a></nav>
+
 {{ wa.head('capital', 'Capital Deployment', 'Balanced investment decisions, verified M.C.F.F. gates, portfolio concentration and a permanent decision journal.', portfolios, current) }}
 <div class="lab-banner"><div class="lab-kicker">Tradestaar Elite / Wealth Architect / Phase 4</div><h2>Capital Deployment <span style="color:#c9fa76">✦</span></h2><p class="lab-muted">Compare your next dollar against the business, the price, and the portfolio. No orders are placed.</p></div>
 <section class="lab-panel" style="margin:16px 0">

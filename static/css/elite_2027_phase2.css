@@ -1,0 +1,30 @@
+/* Tradestaar Elite 2027 · immersive visual system across all research surfaces.
+   Preserve existing interactive globe, 3D backdrop, stock percentages and polling. */
+:root{--te27-glow:#64e8fb;--te27-lime:#77ffba;--te27-panel:rgba(4,17,34,.84);--te27-border:rgba(91,210,248,.36)}
+html.cc27 body{background-color:#020917;background-image:radial-gradient(ellipse at 50% 5%,rgba(12,80,152,.25),transparent 55%),radial-gradient(ellipse at 95% 40%,rgba(42,45,129,.2),transparent 50%),linear-gradient(180deg,#030b1c,#020816 65%,#020714);background-attachment:fixed}
+html.cc27 body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.23;background-image:linear-gradient(rgba(58,157,237,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(58,157,237,.08) 1px,transparent 1px);background-size:72px 72px;mask-image:linear-gradient(180deg,transparent 0%,#000 55%,#000 100%)}
+html.cc27 :is(.liq-page,.wa,.cr-shell,.lr-public-shell,.detail-wrap,.elite-page){position:relative;isolation:isolate}
+html.cc27 :is(.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card,.cc-card,.te27-intel){background:linear-gradient(150deg,rgba(7,29,50,.94),rgba(4,15,32,.92));border:1px solid var(--te27-border);box-shadow:inset 0 1px rgba(157,237,255,.07),0 16px 38px rgba(0,0,0,.28);border-radius:18px;backdrop-filter:blur(16px)}
+html.cc27 :is(.elite-hero,.lab-banner){background:radial-gradient(ellipse at 65% 0%,rgba(20,105,181,.28),transparent 66%),linear-gradient(125deg,rgba(7,26,52,.93),rgba(3,11,27,.91));border:1px solid rgba(93,200,249,.35);border-radius:22px;box-shadow:0 20px 60px rgba(0,0,0,.3),inset 0 1px rgba(140,236,255,.1)}
+html.cc27 :is(.elite-hero-title,.wa h1,.cr-shell h1){text-shadow:0 0 26px rgba(69,179,251,.2)}
+html.cc27 :is(.elite-hero .accent,.lab-kicker){color:#74f9b8}
+html.cc27 :is(.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card,.cc-card):hover{border-color:rgba(105,236,249,.53)}
+.te27-flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px;margin:16px 0 22px;border:1px solid rgba(87,204,247,.35);border-radius:16px;background:rgba(3,18,38,.88)}
+.te27-flow__label{font:700 11px 'IBM Plex Mono',monospace;letter-spacing:.13em;color:#65e8fb;padding:0 8px}
+.te27-flow a{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:9px 13px;border:1px solid rgba(90,196,237,.3);border-radius:10px;color:#d6edf7;background:rgba(14,41,67,.66);text-decoration:none;font:600 12px 'IBM Plex Sans',sans-serif;transition:border-color .2s,background .2s}
+.te27-flow a:hover,.te27-flow a[aria-current="page"]{color:#85ffbf;border-color:#77ffba;background:rgba(31,119,106,.2)}
+.te27-flow a:focus-visible{outline:2px solid #64e8fb;outline-offset:2px}
+.te27-module-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 10px}
+.te27-module-head strong{font:700 clamp(20px,2.4vw,27px) Rajdhani,sans-serif;color:#effbff}
+.te27-module-head span{font:600 10px 'IBM Plex Mono',monospace;letter-spacing:.1em;color:#6af0c0;border:1px solid rgba(106,240,192,.35);padding:5px 8px;border-radius:20px}
+.te27-evidence-note{font:500 12px/1.65 'IBM Plex Sans',sans-serif;color:#9fbacc;margin:8px 0 18px;max-width:80ch}
+.te27-feature-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:22px 0}
+.te27-feature-grid a{display:flex;flex-direction:column;gap:8px;min-width:0;padding:16px 14px;border:1px solid rgba(95,205,247,.4);border-radius:15px;background:linear-gradient(155deg,rgba(8,40,66,.93),rgba(3,15,34,.94));text-decoration:none;box-shadow:inset 0 1px rgba(138,232,255,.13),0 9px 28px rgba(0,0,0,.2)}
+.te27-feature-grid a:hover{border-color:#77ffba;box-shadow:0 0 20px rgba(65,235,178,.12)}
+.te27-feature-grid b{font:700 21px Rajdhani,sans-serif;color:#f1faff}
+.te27-feature-grid small{font:400 12px/1.5 'IBM Plex Sans',sans-serif;color:#a4becb}
+.te27-feature-grid em{font:700 24px Rajdhani,sans-serif;color:#69eafa;font-style:normal}
+@media(max-width:1050px){.te27-feature-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){.te27-feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.te27-flow a{flex:1 1 125px}.te27-flow__label{width:100%}}
+@media(max-width:370px){.te27-feature-grid{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){.te27-flow a{transition:none}}

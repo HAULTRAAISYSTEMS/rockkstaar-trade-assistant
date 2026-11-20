@@ -4,6 +4,8 @@
 
 {% block hx_content %}
 <main class="cr-shell">
+<nav class="te27-flow" aria-label="Elite 2027 research workflow"><span class="te27-flow__label">INTELLIGENCE WORKFLOW</span><a href="{{ url_for('liquidity_page') }}">◉ Command</a><a href="{{ url_for('research_page') }}" aria-current="page">⌕ Discover</a><a href="{{ url_for('fundamentals_page', tab='quarter') }}">◇ Verify</a><a href="{{ url_for('wealth.research_list_page') }}">▥ M.C.F.F.</a><a href="{{ url_for('live_research.feed') }}">◷ Live Research</a></nav>
+
   <header class="elite-hero">
     <div>
       <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Research System</div>
@@ -16,6 +18,7 @@
     </form>
   </header>
 
+  <p class="te27-evidence-note"><strong>DISCOVER → VERIFY → DECIDE.</strong> Financial filings, valuation, catalysts and thesis notes retain their own source and reporting context. Missing evidence is not a positive signal.</p>
   {% if not ticker %}
   <section class="cr-start">
     <div class="cr-start__copy"><span class="cr-index">01</span><h2>Start with a company, not a dashboard.</h2><p>Tradestaar will assemble the latest available company snapshot, the filing-based scorecard, valuation, published research, connected headlines, and your private notes without mixing them into one unexplained score.</p>
