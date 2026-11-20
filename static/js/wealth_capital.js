@@ -80,5 +80,37 @@ $('capital-journal').addEventListener('submit',async e=>{
  $('journal-status').textContent=r.ok?'Decision recorded. No trade placed.':r.error||'Save failed';
  if(r.ok)loadJournal()}catch(err){$('journal-status').textContent='Unable to save decision.'}
 });
+const secButton=$('sec-dashboard-load');
+if(secButton)secButton.addEventListener('click',async()=>{
+ const status=$('sec-dashboard-status'),root=$('sec-dashboard-results');
+ status.textContent='Loading SEC evidence…';root.replaceChildren();secButton.disabled=true;
+ try{
+  const response=await fetch('/api/wealth/sec-dashboard/SPCX',{credentials:'same-origin'});
+  if(!response.ok)throw new Error('SEC endpoint unavailable');
+  const data=await response.json();
+  status.textContent='SEC evidence: '+(data.status||'unavailable')+' · '+(data.source||'')+'. Valuation scoring is disabled.';
+  Object.entries(data.metrics||{}).forEach(([name,metric])=>{
+   const card=document.createElement('article');card.className='lab-comparison';
+   const h=document.createElement('h4');h.textContent=name.replaceAll('_',' ');card.append(h);
+   const p=document.createElement('p');const v=metric.latest;
+   p.textContent=v?new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(v.value):'Not reported';card.append(p);
+   const source=document.createElement('small');
+   source.textContent=v?'Period end '+v.period_end+' · Filed '+v.filed+' · '+v.form+' · '+v.tag:'No verified XBRL figure available';
+   card.append(source);
+   if(metric.balance_sheet_change_pct!==null&&metric.balance_sheet_change_pct!==undefined){
+    const change=document.createElement('p');change.textContent='Change versus previous reported balance: '+metric.balance_sheet_change_pct+'%';card.append(change);
+   }
+   root.append(card);
+  });
+  if(!Object.keys(data.metrics||{}).length)status.textContent+=' No structured financial facts available.';
+  const filings=document.createElement('div');filings.className='lab-comparison';
+  const heading=document.createElement('h4');heading.textContent='Latest SEC filings';filings.append(heading);
+  (data.filings||[]).slice(0,8).forEach(row=>{
+   const p=document.createElement('p'),a=document.createElement('a');
+   a.href=row.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=row.form+' · '+row.filed;p.append(a);filings.append(p);
+  });root.append(filings);
+ }catch(e){status.textContent='SEC evidence could not be loaded. No figures were inferred.'}
+ finally{secButton.disabled=false}
+});
 loadJournal();
 })();
