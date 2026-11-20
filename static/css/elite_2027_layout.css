@@ -1,0 +1,28 @@
+/* 2027 Command Center structural layout: actual composition, not only color changes.
+   Existing canvas, stock labels, polling and backdrop remain operational. */
+@media(min-width:1100px){
+.cc27 .liq-page{max-width:1760px;margin-inline:auto;padding-inline:clamp(12px,2vw,32px)}
+.cc27 .liq-page>.te27-flow{margin:0 0 12px}
+.cc27 .liq-page>.cc-hero-xl{display:grid!important;grid-template-columns:minmax(210px,.85fr) minmax(440px,1.8fr) minmax(230px,.85fr);grid-template-rows:minmax(380px,auto);align-items:center;gap:14px;min-height:440px;padding:20px!important;overflow:visible;position:relative}
+.cc27 .liq-page>.cc-hero-xl>div:first-child{grid-column:1;grid-row:1;z-index:2;align-self:center;min-width:0}
+.cc27 .liq-page>.cc-hero-xl>.elite-hero-actions{grid-column:1;grid-row:1;align-self:end;z-index:3;display:flex;flex-wrap:wrap;gap:8px}
+.cc27 .liq-page>.cc-hero-xl>.cc3d-orb{grid-column:2;grid-row:1;position:relative!important;inset:auto!important;transform:none!important;width:100%!important;height:420px!important;min-width:0;max-width:none!important;z-index:1}
+.cc27 .liq-page>.cc-hero-xl>.te27-pulse-rail{grid-column:3;grid-row:1;align-self:center;z-index:2;min-width:0}
+.cc27 .liq-page>.cc-hero-xl>.elite-hero-actions .cc-shortcuts{display:none}
+.cc27 .liq-page>.cc-hero-xl h1{font-size:clamp(31px,3.1vw,53px);line-height:1.04;max-width:9ch}
+.cc27 .liq-page>.cc-hero-xl .workspace-intro{font-size:15px;max-width:25ch}
+.cc27 .te27-pulse-rail .cc-pulse{display:flex!important;flex-direction:column!important;gap:0!important;padding:10px 14px!important;max-width:none!important;background:linear-gradient(145deg,rgba(5,24,46,.96),rgba(3,13,30,.96));border:1px solid rgba(102,223,248,.55);border-radius:18px}
+.cc27 .te27-pulse-rail .cc-pulse-cell{display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:5px;padding:10px 0!important;border-bottom:1px solid rgba(108,204,232,.18);min-width:0}
+.cc27 .te27-pulse-rail .cc-pulse-cell:last-child{border-bottom:0}
+.cc27 .te27-pulse-rail .cc-pulse-k{font-size:12px}
+.cc27 .te27-pulse-rail .cc-pulse-v{font-size:clamp(16px,1.6vw,23px);white-space:nowrap}
+.cc27 .te27-pulse-rail .cc-pulse-meta,.cc27 .te27-pulse-rail .cc-pulse-cell small{grid-column:1/-1;font-size:10px}
+.cc27 .te27-pulse-rail .cc-pulse-next{display:none!important}
+.cc27 .liq-page.te27-pulse-mounted .cc-now>.cc-pulse{display:none}
+.cc27 .liq-page .te27-feature-grid{margin-top:10px}
+}
+@media(min-width:700px) and (max-width:1099px){.cc27 .liq-page>.cc-hero-xl{min-height:380px}.cc27 .liq-page>.cc-hero-xl>.cc3d-orb{min-height:310px}}
+@media(max-width:699px){.cc27 .liq-page>.cc-hero-xl{padding:16px!important}.cc27 .liq-page>.cc-hero-xl>.cc3d-orb{min-height:280px}.cc27 .liq-page .te27-feature-grid{margin:12px 0}}
+.cc27 .te27-pulse-rail__heading{display:flex;align-items:center;justify-content:space-between;margin:0 0 10px;font:700 21px Rajdhani,sans-serif;color:#e7f9ff}
+.cc27 .te27-pulse-rail__heading small{font:600 10px 'IBM Plex Mono',monospace;color:#72f3ba}
+.cc27 .te27-pulse-rail__fallback{font-size:12px;color:#aac0cd}
