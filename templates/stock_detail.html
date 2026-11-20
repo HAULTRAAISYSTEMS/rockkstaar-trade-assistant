@@ -3,6 +3,7 @@
 
 {% block head_extra %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/stock_page.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_financial_contract.css') }}" />
 <style>
 @keyframes shimmer {
   0%   { background-position: 200% 0; }
@@ -1180,6 +1181,11 @@
     {% with market_cap_ticker=stock.ticker %}{% include '_company_market_cap.html' %}{% endwith %}
     <div id="co-description" class="co-description"></div>
   </div>
+  <section class="detail-card" id="sd-sec-intelligence" data-ticker="{{ stock.ticker }}" aria-label="Verified company financial intelligence">
+    <h3 class="card-title">Financial Intelligence <small>SEC filings</small></h3>
+    <p class="wa-note">Reported SEC facts and calculated financial ratios. Annual and quarterly figures are not mixed.</p>
+    <div id="sd-sec-intelligence-content" aria-live="polite">Loading verified financial evidence…</div>
+  </section>
   <div class="sd-links">
     <a class="sd-btn" href="{{ url_for('fundamentals_page', ticker=stock.ticker) }}">Full fundamentals →</a>
     <a class="sd-btn" href="{{ url_for('research_page', ticker=stock.ticker) }}">Company research →</a>
@@ -2341,4 +2347,5 @@ console.log('[detail] Auto-refresh armed for', DETAIL_TICKER,
     .catch(() => { state.textContent = 'Chart temporarily unavailable'; });
 })();
 </script>
+<script src="{{ url_for('static', filename='js/stock_financial_intelligence.js') }}" defer></script>
 {% endblock %}
