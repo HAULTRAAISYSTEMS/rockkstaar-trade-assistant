@@ -72,6 +72,18 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         result = advanced_financial_snapshot(financial_snapshot(ticker))
         return jsonify(result), (200 if result["ok"] else 404)
 
+    @bp.get("/api/wealth/intelligence-3/<ticker>")
+    def intelligence_3_api(ticker):
+        """Shared read-only SEC observations for M.C.F.F., Discover and Verify."""
+        if not current_user():
+            abort(401)
+        from wealth_financial_data import financial_snapshot
+        from wealth_advanced_financials import advanced_financial_snapshot
+        from wealth_intelligence_3 import assess
+        contract = advanced_financial_snapshot(financial_snapshot(ticker))
+        return jsonify({"ticker": contract.get("ticker"), "contract": contract,
+                        "intelligence": assess(contract)}), (200 if contract.get("ok") else 404)
+
     @bp.get("/api/wealth/sec-evidence/<ticker>")
     def sec_evidence_api(ticker):
         if not current_user():
