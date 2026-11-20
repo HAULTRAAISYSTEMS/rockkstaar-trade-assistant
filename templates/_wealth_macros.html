@@ -30,6 +30,7 @@
   </nav>
 </header>
 {% if portfolios and pills %}
+<style>[data-portfolio-tab][hidden], [data-portfolio-chooser][hidden] {display:none !important}</style>
 <div class="wa-bar" aria-label="Portfolio" data-portfolio-tabs data-visibility-key="tradestaar:wealth:visible:{{ session.get('user_id', 'anonymous') }}">
   {% set ep = request.endpoint %}
   {% if with_all %}<a class="wa-pill {{ 'is-on' if not current }}" href="{{ url_for(ep) }}">All portfolios</a>{% endif %}
