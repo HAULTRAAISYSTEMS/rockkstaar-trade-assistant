@@ -59,8 +59,6 @@ def balanced_rank(amount, candidates, state, *, position_limit=25, sector_limit=
         sec = c.get("sector") or "Unclassified"
         current = number(holdings.get(c["ticker"])) or 0
         pos_after = 100 * (current + amount) / denom if denom else None
-        sec_value = sum(number(x.get("market_value")) or 0 for x in candidates
-                        if x.get("sector") == sec and x.get("ticker") in holdings)
         # The caller supplies a complete sector-value mapping where possible.
         sector_value = number((state.get("sectors") or {}).get(sec))
         sector_after = 100 * (sector_value + amount) / denom if sector_value is not None and denom else None
@@ -93,11 +91,21 @@ def balanced_rank(amount, candidates, state, *, position_limit=25, sector_limit=
             blocks.append("Missing broker market values: concentration cannot be verified")
         if available < 80:
             blocks.append("Insufficient verified evidence for a confident balanced ranking")
+        if not c.get("valuation_verified"):
+            blocks.append("Valuation source or freshness unverified")
+        if not c.get("sector_verified"):
+            blocks.append("Sector classification unverified")
         if total <= 0:
             blocks.append("No verified portfolio denominator")
+        position_room = max(0.0, ((position_limit / 100.0) * (total if cash_is_existing else total) - current) / (1 if cash_is_existing else (1 - position_limit / 100.0))) if position_limit < 100 or cash_is_existing else None
+        sector_room = (max(0.0, ((sector_limit / 100.0) * total - sector_value) / (1 if cash_is_existing else (1 - sector_limit / 100.0))) if sector_value is not None and (sector_limit < 100 or cash_is_existing) else None)
+        caps = [x for x in (position_room, sector_room, cash - reserve if cash_is_existing else None) if x is not None]
+        max_amount = min(caps) if caps else None
         rows.append({"ticker": c["ticker"], "company": c.get("company"), "sector": sec,
                      "price": c.get("price"), "status": ev.get("status"), "eligible": not blocks,
-                     "score": score, "coverage_pct": available, "components": components,
+                     "score": score, "score_label": "Provisional research score" if available < 100 else "Research score", "coverage_pct": available, "components": components,
+                     "max_allocation": round(max(0.0, max_amount), 2) if max_amount is not None else None, "sector_verified": bool(c.get("sector_verified")),
+                     "valuation_verified": bool(c.get("valuation_verified")), "valuation_as_of": c.get("valuation_as_of"),
                      "weight_before_pct": round(100 * current / total, 2) if total else None,
                      "weight_after_pct": round(pos_after, 2) if pos_after is not None else None,
                      "sector_after_pct": round(sector_after, 2) if sector_after is not None else None,
