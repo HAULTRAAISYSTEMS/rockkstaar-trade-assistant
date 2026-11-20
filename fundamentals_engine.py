@@ -46,6 +46,7 @@ _CIK_OVERRIDES: dict[str, tuple[str, str]] = {
     "GEV":  ("0001996810", "GE Vernova Inc."),      # GE spinoff Apr 2024, may lag in tickers file
     "GEHC": ("0001835016", "GE HealthCare Technologies Inc."),
     "SOLV": ("0001974964", "Solventum Corp"),        # 3M spinoff Apr 2024
+    "SPCX": ("0001181412", "Space Exploration Technologies Corp."),
 }
 
 
