@@ -18,6 +18,7 @@
 <button type="button" class="lab-button" id="capital-sec-inspect">Inspect verified filings</button>
 <section id="capital-sec-evidence" aria-live="polite" aria-label="Selected company SEC financial evidence"></section>
 </section>
+<section class="te27-intel" id="te27-capital-evidence" aria-label="Verified SEC financial intelligence" aria-live="polite"><div class="te27-intel__eyebrow">TRADESTAAR / CAPITAL INTELLIGENCE</div><h3 class="te27-intel__heading">Select a ticker to inspect its evidence</h3></section>
 <div class="lab-grid">
 <section class="lab-panel">
 <h3>01 / Deployment parameters</h3>
@@ -56,4 +57,6 @@
 {{ wa.common_js() }}
 <script src="{{ url_for('static', filename='js/wealth_capital.js') }}" defer></script>
 <script defer src="{{ url_for('static', filename='js/wealth_financial_contract.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/elite_2027_intelligence.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/elite_2027_capital.js') }}"></script>
 {% endblock %}
