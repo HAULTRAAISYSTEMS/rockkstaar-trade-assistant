@@ -42,6 +42,13 @@ form.addEventListener('submit',async e=>{
  (exposure.holdings||[]).forEach(h=>{const line=document.createElement('div');line.style.margin='8px 0';const label=document.createElement('span');label.textContent=h.ticker+' · '+(h.weight_pct??'—')+'% · '+(h.industry||'Industry unverified');line.append(label);const track=document.createElement('div');track.style.cssText='height:7px;background:#183543;border-radius:9px;overflow:hidden;margin-top:4px';const fill=document.createElement('div');fill.style.cssText='height:100%;background:#68dce7;border-radius:9px;width:'+Math.max(0,Math.min(100,h.weight_pct||0))+'%';track.append(fill);line.append(track);section.append(line)});
  const plans=document.createElement('h4');plans.textContent='Capital deployment alternatives';section.append(plans);
  (r.allocation_plans||[]).forEach(p=>{const el=document.createElement('p');el.textContent=p.name+': '+Object.entries(p.allocations||{}).map(([t,a])=>t+' '+money(a)).join(' + ')+(Object.keys(p.allocations||{}).length?' · ':'')+'Cash remaining '+money(p.cash_remaining);section.append(el)});
+ const look=r.etf_lookthrough||{};
+ const lt=document.createElement('details');const ltTitle=document.createElement('summary');
+ ltTitle.textContent='ETF holdings look-through · '+(look.portfolio_lookthrough_coverage_pct||0)+'% of portfolio covered';lt.append(ltTitle);
+ const ltNote=document.createElement('p');ltNote.className='lab-muted';ltNote.textContent=look.configured?'Dated issuer/provider holdings snapshots; not a live feed.':'No verified ETF holdings source configured. Sector exposures remain unverified.';lt.append(ltNote);
+ (look.funds||[]).forEach(f=>{const line=document.createElement('p');line.textContent=f.ticker+' · '+f.source+' · '+f.as_of+' · '+f.coverage_pct+'% of fund holdings covered';lt.append(line)});
+ Object.entries(look.sector_exposure_pct||{}).forEach(([sector,pct])=>{const line=document.createElement('p');line.textContent=sector+': '+pct+'% of whole portfolio (verified ETF portion only)';lt.append(line)});
+ section.append(lt);
  const monitor=document.createElement('details');const title=document.createElement('summary');title.textContent='Data reliability monitor · '+(r.data_quality||[]).filter(c=>c.status!=='current').length+' items need review';monitor.append(title);
  (r.data_quality||[]).forEach(c=>{const el=document.createElement('p');el.className='lab-muted';el.textContent=(c.ticker?c.ticker+' · ':'')+c.category+': '+c.detail;monitor.append(el)});section.append(monitor);
  $('capital-results').prepend(section);

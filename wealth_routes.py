@@ -775,6 +775,11 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         result["exposure"] = intelligence.exposure(state, classifications)
         result["allocation_plans"] = intelligence.split_options(amount, result["rows"])
         result["data_quality"] = intelligence.quality_monitor(candidates, state)
+        import wealth_etf_lookthrough as etf_lookthrough
+        fund_snapshots = etf_lookthrough.load_snapshots(state["holdings"])
+        result["etf_lookthrough"] = etf_lookthrough.lookthrough(state, fund_snapshots)
+        result["etf_lookthrough"]["configured"] = bool(fund_snapshots)
+
         return jsonify({"ok": True, **result, "snapshot": {"total_value": state["total_value"],
                         "cash": state["cash"], "holdings": state["holdings"],
                         "unknown_market_values": state["unknown_market_values"]}})
