@@ -5,9 +5,11 @@
 {% block content %}
 <div class="wa">
 {{ wa.head('research', ticker ~ ' · M.C.F.F.', 'Score each gate in order. Financials is filled from SEC filings; Moat, CEO and Future are your judgment. Your scores are what count.', portfolios, current, with_all=False, pills=False) }}
+<section class="wa-card" data-sec-contract-ticker="{{ ticker }}" aria-label="Verified SEC financial evidence"></section>
 <div id="mc" aria-live="polite"><section class="wa-card"><p class="wa-note">Loading {{ ticker }}: the first look at a company reads its filings and can take a few seconds.</p></section></div>
 </div>
 {{ wa.common_js() }}
+<script defer src="{{ url_for('static', filename='js/wealth_financial_contract.js') }}"></script>
 <script>
 (function () {
   const T = {{ ticker|tojson }}, AI = {{ 'true' if ai_available else 'false' }};
