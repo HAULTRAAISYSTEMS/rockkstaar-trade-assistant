@@ -80,5 +80,32 @@ $('capital-journal').addEventListener('submit',async e=>{
  $('journal-status').textContent=r.ok?'Decision recorded. No trade placed.':r.error||'Save failed';
  if(r.ok)loadJournal()}catch(err){$('journal-status').textContent='Unable to save decision.'}
 });
+const secLoad=$('sec-unified-load');
+if(secLoad)secLoad.addEventListener('click',async()=>{
+ const status=$('sec-unified-status'),root=$('sec-unified-results');
+ secLoad.disabled=true;status.textContent='Retrieving verified SEC filings…';root.replaceChildren();
+ try{
+  const response=await fetch('/api/wealth/financial-intelligence/SPCX',{credentials:'same-origin'});
+  if(!response.ok)throw Error('SEC service unavailable');
+  const payload=await response.json();
+  status.textContent='Source: '+payload.source+' · '+payload.status+' · scoring withheld until full verification';
+  for(const [name,metric] of Object.entries(payload.dashboard.metrics||{})){
+   const card=document.createElement('article');card.className='lab-comparison';
+   const title=document.createElement('h4');title.textContent=name.replaceAll('_',' ');
+   const value=document.createElement('p');
+   value.textContent=metric.latest?new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(metric.latest.value):'Not reported';
+   const source=document.createElement('small');
+   source.textContent=metric.latest?metric.latest.form+' · period '+metric.latest.period_end+' · filed '+metric.latest.filed:'No verified SEC fact';
+   card.append(title,value,source);root.append(card);
+  }
+  for(const item of payload.analysis.explanations||[]){
+   const card=document.createElement('article');card.className='lab-comparison';
+   const title=document.createElement('h4');title.textContent='Evidence insight · '+item.metric.replaceAll('_',' ');
+   const detail=document.createElement('p');detail.textContent=item.text;
+   card.append(title,detail);root.append(card);
+  }
+ }catch(e){status.textContent='SEC evidence unavailable. No financial figures were estimated.'}
+ finally{secLoad.disabled=false}
+});
 loadJournal();
 })();
