@@ -31,6 +31,7 @@ FACT_TAGS = {
     "short_term_borrowings": ("ShortTermBorrowings",),
     "interest_expense": ("InterestExpenseNonOperating", "InterestExpense",),
     "income_tax_expense": ("IncomeTaxExpenseBenefit",),
+    "pretax_income": ("IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest", "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",),
     "stockholders_equity": ("StockholdersEquity",),
     "diluted_eps": ("EarningsPerShareDiluted",),
 }
