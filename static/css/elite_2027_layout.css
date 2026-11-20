@@ -18,7 +18,7 @@
 .cc27 .te27-pulse-rail .cc-pulse-v{font-size:clamp(16px,1.6vw,23px);white-space:nowrap}
 .cc27 .te27-pulse-rail .cc-pulse-meta,.cc27 .te27-pulse-rail .cc-pulse-cell small{grid-column:1/-1;font-size:10px}
 .cc27 .te27-pulse-rail .cc-pulse-next{display:none!important}
-.cc27 .liq-page .cc-now>.cc-pulse{display:none}
+.cc27 .liq-page.te27-pulse-mounted .cc-now>.cc-pulse{display:none}
 .cc27 .liq-page .te27-feature-grid{margin-top:10px}
 }
 @media(min-width:700px) and (max-width:1099px){.cc27 .liq-page>.cc-hero-xl{min-height:380px}.cc27 .liq-page>.cc-hero-xl>.cc3d-orb{min-height:310px}}
