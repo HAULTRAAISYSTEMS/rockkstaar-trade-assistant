@@ -181,6 +181,29 @@ def _alpaca_bars(ticker: str, interval: str, range_str: str,
     return None, None
 
 
+
+def _enforce_security_history(ticker: str, bars: dict | None, meta: dict | None):
+    """Reject reused-ticker candles; keep OHLCV arrays aligned."""
+    if str(ticker).upper() != "SPCX" or not bars:
+        return bars, meta
+    from datetime import date
+    from wealth_security_identity import SPACEX
+    threshold = date.fromisoformat(SPACEX["first_trade_date"])
+    timestamps = bars.get("timestamps") or []
+    keys = ("timestamps", "opens", "closes", "highs", "lows", "volumes")
+    if any(len(bars.get(key) or []) != len(timestamps) for key in keys):
+        return None, {**(meta or {}), "identity_warning": "Inconsistent price arrays; SPCX history withheld"}
+    indices = [i for i, ts in enumerate(timestamps)
+               if datetime.fromtimestamp(ts, timezone.utc).date() >= threshold]
+    if not indices:
+        return None, {**(meta or {}), "identity_warning": "No SpaceX-era price bars; recycled ticker history withheld"}
+    filtered = {**bars, **{key: [bars[key][i] for i in indices] for key in keys}}
+    updated = {**(meta or {}), "history_start": datetime.fromtimestamp(filtered["timestamps"][0], timezone.utc).date().isoformat(),
+               "identity_warning": "SPCX ticker was previously used by another instrument; pre-IPO bars excluded"}
+    updated["as_of"] = datetime.fromtimestamp(filtered["timestamps"][-1], timezone.utc).isoformat()
+    return filtered, updated
+
+
 def fetch_chart_bars(ticker: str, interval: str, range_str: str,
                      include_extended: bool = False) -> tuple[dict | None, dict]:
     """Return chart bars and a truthful provider/freshness contract."""
@@ -195,7 +218,7 @@ def fetch_chart_bars(ticker: str, interval: str, range_str: str,
         if full and (full.get("timestamps") or []) and full.get("data_granularity") in (None, interval):
             full["data_granularity"] = interval
             first = datetime.fromtimestamp(full["timestamps"][0], timezone.utc).date().isoformat()
-            return full, {
+            meta = {
                 "provider": "Yahoo",
                 "feed": "yahoo_chart",
                 "feed_label": "FULL HISTORY",
@@ -210,17 +233,18 @@ def fetch_chart_bars(ticker: str, interval: str, range_str: str,
                 "history_start": first,
                 "message": "Full price history since " + first + ".",
             }
+            return _enforce_security_history(ticker, full, meta)
 
     data, meta = _alpaca_bars(ticker, interval, range_str, include_extended)
     if data and meta:
-        return data, meta
+        return _enforce_security_history(ticker, data, meta)
 
     fallback = _fetch_ohlcv_via_chart_api(
         ticker, interval=interval, range_str=range_str, include_prepost=include_extended
     )
     timestamps = (fallback or {}).get("timestamps") or []
     credentials_configured = all(_credentials())
-    return fallback, {
+    meta = {
         "provider": "Yahoo",
         "feed": "yahoo_chart",
         "feed_label": "YAHOO BACKUP",
@@ -243,3 +267,4 @@ def fetch_chart_bars(ticker: str, interval: str, range_str: str,
             "using Yahoo backup data. Yahoo backup bars are not labelled as real-time."
         ),
     }
+    return _enforce_security_history(ticker, fallback, meta)
