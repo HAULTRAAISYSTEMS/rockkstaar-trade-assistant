@@ -13,7 +13,8 @@ KNOWN_INDUSTRY = {"KLAC": ("Semiconductor equipment", "Semiconductors"),
                   "GOOG": ("Internet services", "Digital platforms"),
                   "GOOGL": ("Internet services", "Digital platforms"),
                   "V": ("Payment networks", "Financial services"),
-                  "TSM": ("Semiconductor foundry", "Semiconductors")}
+                  "TSM": ("Semiconductor foundry", "Semiconductors"),
+                  "SKHY": ("Memory semiconductors", "Semiconductors")}
 THEMES = {"KLAC": ["Semiconductors", "AI infrastructure"],
           "NVDA": ["Semiconductors", "AI infrastructure"],
           "TSM": ["Semiconductors", "AI infrastructure"],
