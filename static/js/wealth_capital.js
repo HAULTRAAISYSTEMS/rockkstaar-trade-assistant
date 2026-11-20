@@ -112,5 +112,28 @@ if(secButton)secButton.addEventListener('click',async()=>{
  }catch(e){status.textContent='SEC evidence could not be loaded. No figures were inferred.'}
  finally{secButton.disabled=false}
 });
+const explainButton=$('sec-explanations-load');
+if(explainButton)explainButton.addEventListener('click',async()=>{
+ const status=$('sec-explanations-status'),root=$('sec-explanations-results');
+ status.textContent='Comparing SEC filing evidence…';root.replaceChildren();explainButton.disabled=true;
+ try{
+  const response=await fetch('/api/wealth/sec-explanations/SPCX',{credentials:'same-origin'});
+  if(!response.ok)throw new Error('Unavailable');
+  const data=await response.json();
+  status.textContent=(data.explanations||[]).length?'Evidence-based comparisons · not investment recommendations':'No comparable SEC facts available';
+  (data.explanations||[]).forEach(item=>{
+   const article=document.createElement('article');article.className='lab-comparison';
+   const h=document.createElement('h4');h.textContent=item.metric.replaceAll('_',' ');article.append(h);
+   const p=document.createElement('p');p.textContent=item.text;article.append(p);
+   if(item.reason){const note=document.createElement('small');note.textContent=item.reason;article.append(note)}
+   (item.evidence||[]).forEach(e=>{
+    const note=document.createElement('small');note.style.display='block';
+    note.textContent='SEC '+e.form+' · filed '+e.filed+' · period '+e.period_end+' · '+e.tag+' · '+(e.accession||'accession unavailable');
+    article.append(note);
+   });root.append(article);
+  });
+ }catch(err){status.textContent='Unable to retrieve SEC comparisons; no explanations inferred.'}
+ finally{explainButton.disabled=false}
+});
 loadJournal();
 })();
