@@ -31,6 +31,47 @@ def list_portfolios(user_id: int) -> list[dict]:
         conn.close()
 
 
+
+def visible_portfolio_tabs(user_id: int, portfolios: list[dict]) -> list[dict]:
+    """Keep manually created portfolios; show broker-linked tabs only with holdings.
+
+    Never delete portfolio rows or transaction history. Respect Schwab account
+    inclusion preferences; current holdings are from saved read-only snapshots.
+    """
+    import schwab_account_preferences as prefs
+    preferences = prefs.get_preferences(user_id)
+    snapshots = {row["account_key"]: row["snapshot"]
+                 for row in list_broker_snapshots(user_id)}
+    import wealth_ledger
+    transactions = list_transactions(user_id)
+    by_portfolio = {}
+    for tx in transactions:
+        by_portfolio.setdefault(int(tx["portfolio_id"]), []).append(tx)
+    ledger_holdings = set()
+    for pid, rows in by_portfolio.items():
+        ledger = wealth_ledger.build(rows)
+        if any(any(lot.shares > 0 for lot in lots)
+               for lots in ledger.positions.values()):
+            ledger_holdings.add(pid)
+    visible = []
+    for portfolio in portfolios:
+        key = str(portfolio.get("broker_account") or "")
+        if not key:
+            visible.append(portfolio)
+            continue
+        if not preferences.get(key, {}).get("include_wealth", True):
+            continue
+        snapshot = snapshots.get(key) or {}
+        positions = snapshot.get("holdings") or []
+        has_broker_stocks = any(
+            isinstance(p, dict) and
+            isinstance(p.get("shares"), (int, float)) and p["shares"] > 0 and p.get("ticker")
+            for p in positions if isinstance(p, dict))
+        if has_broker_stocks or portfolio["id"] in ledger_holdings:
+            visible.append(portfolio)
+    return visible
+
+
 def get_portfolio(user_id: int, pid: int) -> dict | None:
     conn = get_db()
     try:

@@ -267,7 +267,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         portfolios = wealth_store.list_portfolios(user_id)
         current = owned(user_id, request.args.get("p"))
         s = summary_for(user_id, current) if portfolios else None
-        return render_template("wealth_dashboard.html", portfolios=portfolios, current=current,
+        return render_template("wealth_dashboard.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=current,
                                s=s, broker_holdings=broker_holdings_for(user_id, current),
                                kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
 
@@ -278,7 +278,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         current = owned(user_id, request.args.get("p")) or (portfolios[0] if portfolios else None)
         txs = wealth_store.list_transactions(user_id, current["id"]) if current else []
         lg = wealth_ledger.build(txs) if current else None
-        return render_template("wealth_ledger.html", portfolios=portfolios, current=current,
+        return render_template("wealth_ledger.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=current,
                                txs=list(reversed(txs)), ledger=lg, types=wealth_ledger.TYPES,
                                kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
 
@@ -287,7 +287,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         user_id = uid()
         portfolios = wealth_store.list_portfolios(user_id)
         current = owned(user_id, request.args.get("p"))
-        return render_template("wealth_scoreboard.html", portfolios=portfolios, current=current,
+        return render_template("wealth_scoreboard.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=current,
                                kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
 
     @bp.get("/api/wealth/scoreboard")
@@ -337,7 +337,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             holdings.append({"ticker": bh["ticker"], "shares": bh["shares"], "avg_cost": basis,
                              "price": price, "price_source": "Schwab snapshot", "price_as_of": bh["as_of"],
                              "source": "schwab_snapshot"})
-        return render_template("wealth_lab.html", portfolios=portfolios, current=current, holdings=holdings,
+        return render_template("wealth_lab.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=current, holdings=holdings,
                                total_value=(s or {}).get("total_value"), cash=(s or {}).get("cash"),
                                ticker=(request.args.get("ticker") or "").upper()[:10])
 
@@ -624,7 +624,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         researched = wealth_store.list_research(user_id)
         held = sorted({t for lg in ledgers_for(user_id, None)[0].values() for t in lg.positions})
         broker_tickers = {h["ticker"] for h in broker_holdings_for(user_id)}
-        return render_template("wealth_research_list.html", portfolios=portfolios, current=None,
+        return render_template("wealth_research_list.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=None,
                                researched=researched, held=sorted(set(held) | broker_tickers), kinds=wealth_store.KIND_LABELS,
                                quick_start=QUICK_START, labels=wealth_mcff.GATE_LABELS)
 
@@ -714,7 +714,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         researched = sorted(wealth_store.list_research(user_id))
         held = sorted({t for lg in (ledgers_for(user_id, current)[0].values() if current else []) for t in lg.positions})
         broker_tickers = {h["ticker"] for h in broker_holdings_for(user_id, current)}
-        return render_template("wealth_next_dollar.html", portfolios=portfolios, current=current,
+        return render_template("wealth_next_dollar.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=current,
                                candidates=sorted(set(researched) | set(held) | broker_tickers), researched=researched,
                                kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
 
@@ -759,7 +759,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         current = owned(user_id, request.args.get("p"))
         researched = sorted(wealth_store.list_research(user_id))
         broker = sorted(h["ticker"] for h in broker_holdings_for(user_id, current))
-        return render_template("wealth_capital.html", portfolios=portfolios, current=current,
+        return render_template("wealth_capital.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=current,
                                candidates=sorted(set(researched) | set(broker)),
                                kinds=wealth_store.KIND_LABELS)
 
@@ -883,7 +883,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         except ValueError:
             year = date.today().year
         year = max(2000, min(2100, year))
-        return render_template("wealth_planner.html", portfolios=portfolios, current=None, year=year,
+        return render_template("wealth_planner.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=None, year=year,
                                kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START,
                                months=wealth_planner.MONTHS, seasons=wealth_planner.SEASONS,
                                ira_kinds=wealth_planner.IRA_KINDS)
