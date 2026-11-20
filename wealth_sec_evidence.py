@@ -27,6 +27,10 @@ FACT_TAGS = {
     "operating_income": ("OperatingIncomeLoss",),
     "cash": ("CashAndCashEquivalentsAtCarryingValue",),
     "long_term_debt": ("LongTermDebtNoncurrent",),
+    "long_term_debt_current": ("LongTermDebtCurrent",),
+    "short_term_borrowings": ("ShortTermBorrowings",),
+    "interest_expense": ("InterestExpenseNonOperating", "InterestExpense",),
+    "income_tax_expense": ("IncomeTaxExpenseBenefit",),
     "stockholders_equity": ("StockholdersEquity",),
     "diluted_eps": ("EarningsPerShareDiluted",),
 }
