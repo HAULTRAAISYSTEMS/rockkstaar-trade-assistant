@@ -1,0 +1,52 @@
+/* ELITE 2027 — one authoritative application-wide visual system.
+   Loaded AFTER legacy style sheets so the design actually appears. */
+html.cc27{--e27-bg:#020813;--e27-panel:rgba(4,19,37,.91);--e27-border:rgba(73,186,231,.38);--e27-cyan:#62e7ff;--e27-lime:#a6ff8b;--e27-text:#edf9ff;--e27-muted:#9db9c9;color-scheme:dark}
+html.cc27 body{background:#020813!important;color:var(--e27-text);font-family:'IBM Plex Sans',sans-serif}
+html.cc27 #cc3d-backdrop,html.cc27 #cc3d-veil{pointer-events:none}
+html.cc27 .main-content{position:relative;z-index:1;width:100%;max-width:none;min-width:0}
+html.cc27 .main-content> :is(.liq-page,.wa,.cr-shell,.lr-public-shell,.lab-page,.detail-wrap,.stock-detail,.elite-page){max-width:1720px;margin-inline:auto;padding-inline:clamp(14px,2vw,32px)}
+html.cc27 :is(.cc-card,.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card,.te27-intel,.nx-panel,.te27-market-tile){background:linear-gradient(150deg,rgba(7,32,57,.94),rgba(3,13,30,.95))!important;border:1px solid var(--e27-border)!important;border-radius:18px!important;box-shadow:inset 0 1px rgba(130,236,255,.12),0 16px 40px rgba(0,0,0,.28)!important;backdrop-filter:blur(14px)}
+html.cc27 :is(.cc-card,.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card,.te27-intel):hover{border-color:rgba(116,247,216,.58)!important}
+html.cc27 :is(.cc-card,.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card) :is(h2,h3){color:var(--e27-text);letter-spacing:.01em}
+html.cc27 :is(.cc-card,.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card) :is(button,a):focus-visible{outline:2px solid var(--e27-cyan);outline-offset:3px}
+html.cc27 .te27-flow{max-width:1720px;margin:12px auto 20px!important;gap:8px;border:1px solid rgba(76,203,247,.35);border-radius:14px;background:rgba(3,18,36,.87);padding:9px}
+html.cc27 .te27-flow a{background:rgba(9,37,61,.92);border-color:rgba(73,186,231,.38);border-radius:9px}
+html.cc27 .te27-flow a[aria-current=page]{color:var(--e27-lime);border-color:var(--e27-lime)}
+/* The globe is the central focal point, not an illustration pushed offscreen. */
+@media(min-width:1100px){
+html.cc27 .liq-page>.cc-hero-xl{display:grid!important;grid-template-columns:minmax(220px,.9fr) minmax(450px,1.7fr) minmax(240px,.9fr)!important;grid-template-rows:minmax(430px,auto)!important;gap:clamp(12px,2vw,28px)!important;align-items:center!important;min-height:480px!important;max-width:none!important;padding:22px 28px!important;overflow:visible!important;background:radial-gradient(ellipse at 51% 50%,rgba(23,110,166,.19),transparent 54%),linear-gradient(110deg,rgba(3,14,28,.75),rgba(4,20,38,.82))!important;border:1px solid rgba(78,194,237,.3)!important;border-radius:22px!important}
+html.cc27 .liq-page>.cc-hero-xl>div:first-child{grid-column:1!important;grid-row:1!important;align-self:center!important;z-index:3!important}
+html.cc27 .liq-page>.cc-hero-xl>.elite-hero-actions{grid-column:1!important;grid-row:1!important;align-self:end!important;z-index:3!important}
+html.cc27 .liq-page>.cc-hero-xl>.cc3d-orb{grid-column:2!important;grid-row:1!important;position:relative!important;inset:auto!important;transform:none!important;width:100%!important;max-width:none!important;height:440px!important;min-height:440px!important;z-index:2!important;overflow:visible!important}
+html.cc27 .liq-page>.cc-hero-xl>.te27-pulse-rail{grid-column:3!important;grid-row:1!important;position:relative!important;z-index:3!important}
+html.cc27 .liq-page>.cc-hero-xl h1{font:700 clamp(37px,3.5vw,64px)/.98 Rajdhani,sans-serif!important;max-width:11ch!important;text-wrap:balance}
+html.cc27 .liq-page>.cc-hero-xl .workspace-intro{font-size:14px;line-height:1.6;max-width:26ch}
+html.cc27 .liq-page>.cc-hero-xl .cc-shortcuts{display:none!important}
+html.cc27 .liq-page>.cc-hero-xl .cc3d-hud-title{color:var(--e27-cyan);letter-spacing:.2em}
+html.cc27 .liq-page>.cc-hero-xl .te27-pulse-rail .cc-pulse{display:flex!important;flex-direction:column!important;gap:0!important;max-width:none!important}
+html.cc27 .liq-page>.cc-hero-xl .te27-pulse-rail .cc-pulse-cell{display:grid!important;grid-template-columns:1fr auto!important;padding:10px 0!important;gap:4px!important}
+html.cc27 .liq-page>.cc-hero-xl .te27-pulse-rail .cc-pulse-v{font-size:21px!important}
+html.cc27 .liq-page>.cc-hero-xl .te27-pulse-rail .cc-pulse-meta{grid-column:1/-1!important}
+html.cc27 .liq-page.te27-pulse-mounted .cc-now>.cc-pulse{display:none!important}
+}
+/* Five index cards and 2x2 command modules as in the approved composition. */
+html.cc27 .liq-page .te27-market-tiles{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:18px 0 22px}
+html.cc27 .te27-market-tile{min-width:0;padding:16px;display:flex;gap:12px;align-items:center}
+html.cc27 .te27-market-tile small{display:block;color:var(--e27-muted);font-size:12px}
+html.cc27 .te27-market-tile strong{display:block;color:var(--e27-lime);font:700 clamp(20px,2vw,29px) Rajdhani,sans-serif}
+html.cc27 .te27-market-tile .te27-market-next{font-size:17px;color:var(--e27-text)}
+html.cc27 .liq-page .cc-body{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:16px!important;align-items:stretch}
+html.cc27 .liq-page .cc-body>.cc-col-main,html.cc27 .liq-page .cc-body>.cc-col-side{display:contents!important}
+html.cc27 .liq-page .cc-body .cc-story{grid-column:1;order:1}
+html.cc27 .liq-page .cc-body .cc-picks{grid-column:2;order:2}
+html.cc27 .liq-page .cc-body .cc-weekcard{grid-column:1;order:3}
+html.cc27 .liq-page .cc-body .nx-panel{grid-column:2;order:4}
+html.cc27 .liq-page .cc-body .cc-digest{grid-column:1/-1;order:5}
+html.cc27 .liq-page .cc-body>.cc-col-main>*,html.cc27 .liq-page .cc-body>.cc-col-side>*{min-width:0;margin:0!important}
+html.cc27 .liq-page .cc-body .cc-head{padding-bottom:12px;border-bottom:1px solid rgba(94,199,237,.2)}
+html.cc27 .liq-page .te27-feature-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+html.cc27 .liq-page .te27-feature-grid a{background:linear-gradient(140deg,rgba(8,39,62,.94),rgba(3,17,37,.95));border-color:var(--e27-border)}
+@media(max-width:1099px){html.cc27 .liq-page .te27-market-tiles{grid-template-columns:repeat(3,minmax(0,1fr))}html.cc27 .liq-page .te27-feature-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:720px){html.cc27 .liq-page .cc-body{grid-template-columns:1fr!important}html.cc27 .liq-page .cc-body :is(.cc-story,.cc-picks,.cc-weekcard,.nx-panel,.cc-digest){grid-column:1!important}html.cc27 .liq-page .te27-market-tiles,html.cc27 .liq-page .te27-feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))}html.cc27 .liq-page>.cc-hero-xl{overflow:hidden!important}html.cc27 .liq-page>.cc-hero-xl .cc3d-orb{max-width:100%!important}}
+@media(max-width:380px){html.cc27 .liq-page .te27-market-tiles,html.cc27 .liq-page .te27-feature-grid{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){html.cc27 *{animation-duration:.01ms!important;transition-duration:.01ms!important}}
