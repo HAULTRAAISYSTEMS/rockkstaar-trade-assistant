@@ -42,6 +42,54 @@ def _num(v):
 def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None, broker_summary=None,
                             fundamentals_lookup=None, zone_lookup=None, ai_draft=None):
     bp = Blueprint("wealth", __name__)
+    @bp.get("/api/wealth/financial-intelligence/<ticker>")
+    def financial_intelligence_api(ticker):
+        """Canonical source-backed SEC view shared by research and capital pages."""
+        if not current_user():
+            abort(401)
+        from wealth_sec_evidence import SEC_CIK, fetch_sec_evidence
+        from wealth_sec_dashboard import build_dashboard
+        from wealth_sec_explanations import compare_periods, explain_changes
+        symbol = ticker.upper()
+        if symbol not in SEC_CIK:
+            return jsonify({"ok": False, "ticker": symbol,
+                            "error": "No verified SEC issuer mapping; financial facts withheld"}), 404
+        evidence = fetch_sec_evidence(symbol)
+        dashboard = build_dashboard(evidence)
+        explanations = explain_changes(compare_periods(evidence.get("facts")))
+        return jsonify({"ok": True, "ticker": symbol, "cik": evidence.get("cik"),
+                        "status": evidence.get("status"), "dashboard": dashboard,
+                        "analysis": explanations, "scoring_eligible": False,
+                        "source": "SEC EDGAR companyfacts and submissions",
+                        "warnings": evidence.get("warnings") or []})
+
+    @bp.get("/api/wealth/sec-evidence/<ticker>")
+    def sec_evidence_api(ticker):
+        if not current_user():
+            abort(401)
+        from wealth_sec_evidence import SEC_CIK, fetch_sec_evidence
+        symbol = ticker.upper()
+        if symbol not in SEC_CIK:
+            return jsonify({"ok": False, "error": "No verified SEC issuer mapping"}), 404
+        return jsonify({"ok": True, **fetch_sec_evidence(symbol)})
+
+    @bp.get("/api/wealth/sec-dashboard/<ticker>")
+    def sec_dashboard_api(ticker):
+        result = financial_intelligence_api(ticker)
+        if isinstance(result, tuple):
+            return result
+        return jsonify({"ok": True, **result.get_json()["dashboard"]})
+
+    @bp.get("/api/wealth/sec-explanations/<ticker>")
+    def sec_explanations_api(ticker):
+        result = financial_intelligence_api(ticker)
+        if isinstance(result, tuple):
+            return result
+        data = result.get_json()
+        return jsonify({"ok": True, "ticker": data["ticker"], "cik": data["cik"],
+                        "status": data["status"], "warnings": data["warnings"],
+                        **data["analysis"]})
+
     price_lookup = price_lookup or wealth_service.default_price_lookup
 
     def _default_bars(ticker):
