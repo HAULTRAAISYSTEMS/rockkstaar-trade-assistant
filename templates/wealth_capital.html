@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% import "_wealth_macros.html" as wa with context %}
+{% block title %}Capital Deployment — Tradestaar Elite{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_lab_v2.css') }}">
+{% endblock %}
+{% block content %}
+<div class="wa wa-lab-v2">
+{{ wa.head('capital', 'Capital Deployment', 'Balanced investment decisions, verified M.C.F.F. gates, portfolio concentration and a permanent decision journal.', portfolios, current) }}
+<div class="lab-banner"><div class="lab-kicker">Tradestaar Elite / Wealth Architect / Phase 4</div><h2>Capital Deployment <span style="color:#c9fa76">✦</span></h2><p class="lab-muted">Compare your next dollar against the business, the price, and the portfolio. No orders are placed.</p></div>
+<div class="lab-grid">
+<section class="lab-panel">
+<h3>01 / Deployment parameters</h3>
+<form id="capital-form" class="lab-form-grid">
+<label class="lab-field">Budget ($)<input name="amount" value="750" type="number" min="1" step=".01" required></label>
+<label class="lab-field">Mode<select name="mode"><option value="balanced">Balanced</option></select></label>
+<label class="lab-field">Max position (%)<input name="position_limit" type="number" value="25" min="1" max="100"></label>
+<label class="lab-field">Max sector (%)<input name="sector_limit" type="number" value="40" min="1" max="100"></label>
+<label class="lab-field">Cash reserve ($)<input name="cash_reserve" type="number" value="0" min="0"></label>
+<label class="lab-check"><input name="existing_cash" type="checkbox"> Invest existing portfolio cash (otherwise new contribution)</label>
+<div class="lab-field wide"><span>Candidates (up to 12)</span><div style="display:flex;flex-wrap:wrap;gap:10px">{% for t in candidates %}<label style="color:#d4e7ef"><input type="checkbox" name="candidate" value="{{ t }}" {{ 'checked' if loop.index <= 6 }}>{{ t }}</label>{% endfor %}</div></div>
+<label class="lab-field wide">Add researched ticker<input id="capital-add" maxlength="10" placeholder="GOOG"></label>
+<button type="button" id="capital-add-button" class="lab-button">Add ticker</button>
+<button type="submit" class="lab-button primary">Run balanced analysis</button>
+</form>
+<p class="lab-muted">Requires complete M.C.F.F. research and reliable position values. Missing evidence blocks eligibility. Cash is always an option.</p>
+</section>
+<div style="display:grid;gap:16px;min-width:0">
+<section class="lab-panel"><h3>02 / Capital allocation intelligence</h3><p id="capital-status" class="lab-status" aria-live="polite">Run an analysis to compare candidates.</p><div id="capital-results"></div></section>
+<section class="lab-panel"><h3>03 / Investment decision journal</h3>
+<form id="capital-journal" class="lab-form-grid">
+<label class="lab-field">Ticker<input name="ticker" maxlength="10" placeholder="KLAC" required></label>
+<label class="lab-field">Decision<select name="decision"><option>WAIT</option><option>BUY</option><option>REJECT</option></select></label>
+<label class="lab-field">Budget ($)<input name="amount" type="number" value="750" min="1" step=".01" required></label>
+<label class="lab-field">Review date<input name="review_date" type="date"></label>
+<label class="lab-field wide">Investment thesis<input name="thesis" maxlength="2000" required placeholder="Why the business deserves capital"></label>
+<label class="lab-field wide">Main risk<input name="risk" maxlength="2000" required placeholder="What could go wrong"></label>
+<label class="lab-field wide">Thesis invalidation<input name="invalidation" maxlength="2000" required placeholder="What would make you reconsider"></label>
+<button class="lab-button primary" type="submit">Save decision</button>
+</form>
+<p class="lab-status" id="journal-status" aria-live="polite"></p>
+<div id="journal-list"></div>
+<p class="lab-muted">Journal entries are append-only and tied to your account. A BUY journal entry is a note, never a Schwab order.</p>
+</section>
+</div></div></div>
+{{ wa.common_js() }}
+<script src="{{ url_for('static', filename='js/wealth_capital.js') }}" defer></script>
+{% endblock %}

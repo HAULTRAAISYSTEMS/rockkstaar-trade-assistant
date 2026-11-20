@@ -1,0 +1,60 @@
+/* Capital Deployment Phase 4. Never executes brokerage trades. */
+(function(){
+'use strict';
+const form=document.getElementById('capital-form');if(!form)return;
+const $=id=>document.getElementById(id);
+const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=n=>n==null?'—':Number(n).toLocaleString('en-US',{style:'currency',currency:'USD'});
+let latest=null;
+$('capital-add-button').addEventListener('click',()=>{
+ const input=$('capital-add'),t=input.value.trim().toUpperCase();
+ if(!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(t))return;
+ const existing=[...form.querySelectorAll('input[name=candidate]')];
+ if(existing.some(x=>x.value===t)||existing.length>=12)return;
+ const label=document.createElement('label');label.style.color='#d4e7ef';
+ const cb=document.createElement('input');cb.type='checkbox';cb.name='candidate';cb.value=t;cb.checked=true;
+ label.append(cb,document.createTextNode(t));existing[0]?.parentElement?.parentElement?.append(label);input.value='';
+});
+form.addEventListener('submit',async e=>{
+ e.preventDefault();
+ const status=$('capital-status');status.textContent='Analyzing connected holdings and M.C.F.F. research…';
+ const tickers=[...form.querySelectorAll('input[name=candidate]:checked')].map(x=>x.value).slice(0,12);
+ const data={amount:form.elements.amount.value,position_limit:form.elements.position_limit.value,
+ sector_limit:form.elements.sector_limit.value,cash_reserve:form.elements.cash_reserve.value,
+ existing_cash:form.elements.existing_cash.checked,tickers};
+ try{
+ const r=await WA.api('/api/wealth/capital/rank','POST',data);
+ if(!r.ok){status.textContent=r.error||'Analysis unavailable';return}
+ latest=r;status.textContent=r.verdict;
+ $('capital-results').innerHTML='<p class="lab-muted">Portfolio value: '+money(r.portfolio_value)+' · '+(r.assumed_new_money?'New contribution':'Existing cash')+'</p>'+
+ (r.warnings||[]).map(x=>'<p class="lab-negative">'+esc(x)+'</p>').join('')+
+ r.rows.map(x=>'<article class="lab-comparison" style="margin:10px 0"><div style="display:flex;justify-content:space-between;gap:12px"><b>'+esc(x.ticker)+'</b><b>'+ (x.score==null?'Unscored':x.score+'/100')+'</b></div>'+
+ '<p>'+esc(x.status||'Unverified')+' · '+(x.eligible?'ELIGIBLE':'NOT ELIGIBLE')+' · Evidence coverage '+x.coverage_pct+'%</p>'+
+ '<p>Position weight: '+(x.weight_before_pct==null?'Unknown':x.weight_before_pct+'%')+' → '+(x.weight_after_pct==null?'Unknown':x.weight_after_pct+'%')+' · Sector after: '+(x.sector_after_pct==null?'Unknown':x.sector_after_pct+'%')+'</p>'+
+ '<p>Valuation: '+esc(x.zone||'Not available')+'</p>'+
+ '<p class="lab-muted">Moat '+(x.components.quality??'—')+' · Financials '+(x.components.financials??'—')+' · Growth '+(x.components.growth??'—')+' · Valuation '+(x.components.valuation??'—')+' · Diversification '+(x.components.diversification??'—')+'</p>'+
+ (x.blocks||[]).map(b=>'<p class="lab-negative">'+esc(b)+'</p>').join('')+
+ '<button class="lab-button" type="button" data-journal-ticker="'+esc(x.ticker)+'">Journal this candidate</button></article>').join('');
+ $('capital-results').querySelectorAll('[data-journal-ticker]').forEach(b=>b.addEventListener('click',()=>{
+ $('capital-journal').elements.ticker.value=b.dataset.journalTicker;
+ $('capital-journal').elements.amount.value=r.amount;
+ $('capital-journal').scrollIntoView({behavior:'smooth',block:'center'});
+ }));
+ }catch(err){status.textContent='Analysis temporarily unavailable.'}
+});
+async function loadJournal(){
+ try{const r=await WA.api('/api/wealth/capital/journal');if(!r.ok)return;
+ $('journal-list').innerHTML=(r.decisions||[]).map(x=>'<article class="lab-comparison" style="margin:10px 0"><b>'+esc(x.ticker)+' · '+esc(x.decision)+' · '+money(x.amount)+'</b><p>'+esc(x.thesis)+'</p><p class="lab-muted">Risk: '+esc(x.risk)+' · Invalidation: '+esc(x.invalidation)+'</p><small>Recorded '+esc(x.created_at)+' · Review '+esc(x.review_date||'not scheduled')+'</small></article>').join('');
+ }catch(err){$('journal-status').textContent='Journal temporarily unavailable.'}
+}
+$('capital-journal').addEventListener('submit',async e=>{
+ e.preventDefault();const f=e.target,data=Object.fromEntries(new FormData(f));
+ const row=latest?.rows?.find(x=>x.ticker===data.ticker.toUpperCase());
+ data.evidence={mode:'balanced',analysis_at:new Date().toISOString(),candidate:row||null,
+ portfolio_value:latest?.portfolio_value??null,assumed_new_money:latest?.assumed_new_money??null};
+ try{const r=await WA.api('/api/wealth/capital/journal','POST',data);
+ $('journal-status').textContent=r.ok?'Decision recorded. No trade placed.':r.error||'Save failed';
+ if(r.ok)loadJournal()}catch(err){$('journal-status').textContent='Unable to save decision.'}
+});
+loadJournal();
+})();
