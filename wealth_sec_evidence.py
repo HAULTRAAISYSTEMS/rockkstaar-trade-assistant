@@ -4,7 +4,16 @@ from datetime import datetime, timezone
 import os
 import requests
 
-SEC_CIK = {"SPCX": "0001181412"}
+# SEC registrant CIK mappings; validate against live EDGAR responses before showing facts.
+# Alphabet share classes intentionally share one registrant; do not infer ETF identities.
+SEC_CIK = {
+    "SPCX": "0001181412",
+    "KLAC": "0000319201",
+    "NVDA": "0001045810",
+    "GOOG": "0001652044",
+    "GOOGL": "0001652044",
+    "V": "0001403161",
+}
 SEC_BASE = "https://data.sec.gov"
 FORMS = {"10-K", "10-Q", "8-K", "20-F", "6-K"}
 FACT_TAGS = {
