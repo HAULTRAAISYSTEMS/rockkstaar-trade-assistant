@@ -57,7 +57,7 @@ def visible_portfolio_tabs(user_id: int, portfolios: list[dict]) -> list[dict]:
         positions = snapshot.get("holdings") or []
         has_broker_stocks = any(
             isinstance(p, dict) and
-            float(p.get("shares") or 0) > 0 and p.get("ticker")
+            isinstance(p.get("shares"), (int, float)) and p["shares"] > 0 and p.get("ticker")
             for p in positions if isinstance(p, dict))
         if has_broker_stocks or portfolio["id"] in ledger_holdings:
             visible.append(portfolio)
