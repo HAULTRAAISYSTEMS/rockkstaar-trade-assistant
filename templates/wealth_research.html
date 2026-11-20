@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "_wealth_macros.html" as wa with context %}
 {% block title %}{{ ticker }} M.C.F.F. — Wealth Architect{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_financial_contract.css') }}">{% endblock %}
 {% block content %}
 <div class="wa">
 {{ wa.head('research', ticker ~ ' · M.C.F.F.', 'Score each gate in order. Financials is filled from SEC filings; Moat, CEO and Future are your judgment. Your scores are what count.', portfolios, current, with_all=False, pills=False) }}
