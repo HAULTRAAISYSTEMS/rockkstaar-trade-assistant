@@ -1,0 +1,24 @@
+/* Approved 2027 concept composition: hero globe, KPI strip, intelligence grid. */
+.cc27 .liq-page .te27-market-tiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:16px 0 24px}
+.cc27 .te27-market-tile{display:flex;align-items:center;gap:12px;min-width:0;padding:17px 15px;border-radius:16px;border:1px solid rgba(80,215,247,.55);background:linear-gradient(155deg,rgba(8,41,63,.95),rgba(4,15,35,.97));box-shadow:0 0 0 1px rgba(16,100,163,.1),inset 0 1px rgba(172,250,255,.15),0 13px 30px rgba(0,0,0,.26)}
+.cc27 .te27-market-tile:nth-child(1),.cc27 .te27-market-tile:nth-child(2){border-bottom-color:#4df0a9}
+.cc27 .te27-market-icon{flex:0 0 auto;font:700 30px Rajdhani,sans-serif;color:#70f7c0;text-shadow:0 0 18px rgba(79,241,181,.45)}
+.cc27 .te27-market-tile>div{min-width:0}
+.cc27 .te27-market-tile small{display:block;color:#c2d7e4;font:600 12px 'IBM Plex Sans',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cc27 .te27-market-tile strong{display:block;font:700 clamp(19px,2vw,30px)/1.2 Rajdhani,sans-serif;color:#7af5b8;overflow-wrap:anywhere}
+.cc27 .te27-market-tile strong.te27-market-next{font-size:clamp(13px,1.3vw,18px);color:#e7f6ff}
+.cc27 .liq-page .cc-body{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:stretch}
+.cc27 .liq-page .cc-col-main,.cc27 .liq-page .cc-col-side{display:contents}
+.cc27 .liq-page .cc-body>.cc-col-main>.cc-story{grid-column:span 2;order:1}
+.cc27 .liq-page .cc-body>.cc-col-main>.cc-picks{grid-column:span 2;order:2}
+.cc27 .liq-page .cc-body>.cc-col-side>.cc-weekcard{grid-column:span 2;order:3}
+.cc27 .liq-page .cc-body>.cc-col-side>.nx-panel{grid-column:span 2;order:4}
+.cc27 .liq-page .cc-body>.cc-col-main>.cc-digest{grid-column:1/-1;order:5}
+.cc27 .liq-page .cc-body :is(.cc-story,.cc-picks,.cc-weekcard,.nx-panel,.cc-digest){min-width:0;margin:0;border-radius:17px}
+.cc27 .liq-page .cc-body :is(.cc-story,.cc-picks,.cc-weekcard,.nx-panel) h2{font:700 clamp(19px,2vw,26px) Rajdhani,sans-serif}
+.cc27 .liq-page .cc-body .cc-head{border-bottom:1px solid rgba(93,204,247,.17);padding-bottom:10px}
+.cc27 .liq-page .cc-now{margin-bottom:16px}
+@media(min-width:1200px){.cc27 .liq-page .cc-body{grid-template-columns:repeat(4,minmax(0,1fr))}.cc27 .liq-page .cc-body>.cc-col-main>.cc-story,.cc27 .liq-page .cc-body>.cc-col-main>.cc-picks,.cc27 .liq-page .cc-body>.cc-col-side>.cc-weekcard,.cc27 .liq-page .cc-body>.cc-col-side>.nx-panel{grid-column:span 1}}
+@media(max-width:950px){.cc27 .liq-page .te27-market-tiles{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:680px){.cc27 .liq-page .te27-market-tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.cc27 .te27-market-tile{padding:12px 10px}.cc27 .te27-market-icon{font-size:24px}.cc27 .liq-page .cc-body{grid-template-columns:1fr}.cc27 .liq-page .cc-body>.cc-col-main>.cc-story,.cc27 .liq-page .cc-body>.cc-col-main>.cc-picks,.cc27 .liq-page .cc-body>.cc-col-side>.cc-weekcard,.cc27 .liq-page .cc-body>.cc-col-side>.nx-panel,.cc27 .liq-page .cc-body>.cc-col-main>.cc-digest{grid-column:1}}
+@media(max-width:380px){.cc27 .liq-page .te27-market-tiles{grid-template-columns:1fr}}
