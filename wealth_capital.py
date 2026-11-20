@@ -99,11 +99,12 @@ def balanced_rank(amount, candidates, state, *, position_limit=25, sector_limit=
             blocks.append("No verified portfolio denominator")
         position_room = max(0.0, ((position_limit / 100.0) * (total if cash_is_existing else total) - current) / (1 if cash_is_existing else (1 - position_limit / 100.0))) if position_limit < 100 or cash_is_existing else None
         sector_room = (max(0.0, ((sector_limit / 100.0) * total - sector_value) / (1 if cash_is_existing else (1 - sector_limit / 100.0))) if sector_value is not None and (sector_limit < 100 or cash_is_existing) else None)
-        max_amount = min(x for x in (position_room, sector_room, cash - reserve if cash_is_existing else None) if x is not None)
+        caps = [x for x in (position_room, sector_room, cash - reserve if cash_is_existing else None) if x is not None]
+        max_amount = min(caps) if caps else None
         rows.append({"ticker": c["ticker"], "company": c.get("company"), "sector": sec,
                      "price": c.get("price"), "status": ev.get("status"), "eligible": not blocks,
                      "score": score, "score_label": "Provisional research score" if available < 100 else "Research score", "coverage_pct": available, "components": components,
-                     "max_allocation": round(max(0.0, max_amount), 2), "sector_verified": bool(c.get("sector_verified")),
+                     "max_allocation": round(max(0.0, max_amount), 2) if max_amount is not None else None, "sector_verified": bool(c.get("sector_verified")),
                      "valuation_verified": bool(c.get("valuation_verified")), "valuation_as_of": c.get("valuation_as_of"),
                      "weight_before_pct": round(100 * current / total, 2) if total else None,
                      "weight_after_pct": round(pos_after, 2) if pos_after is not None else None,
