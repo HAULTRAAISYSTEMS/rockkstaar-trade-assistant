@@ -42,9 +42,17 @@ def visible_portfolio_tabs(user_id: int, portfolios: list[dict]) -> list[dict]:
     preferences = prefs.get_preferences(user_id)
     snapshots = {row["account_key"]: row["snapshot"]
                  for row in list_broker_snapshots(user_id)}
+    import wealth_ledger
     transactions = list_transactions(user_id)
-    ledger_holdings = {int(t["portfolio_id"]) for t in transactions
-                       if str(t.get("type") or "").upper() in ("BUY", "SPLIT", "REINVEST")}
+    by_portfolio = {}
+    for tx in transactions:
+        by_portfolio.setdefault(int(tx["portfolio_id"]), []).append(tx)
+    ledger_holdings = set()
+    for pid, rows in by_portfolio.items():
+        ledger = wealth_ledger.build(rows)
+        if any(any(lot.shares > 0 for lot in lots)
+               for lots in ledger.positions.values()):
+            ledger_holdings.add(pid)
     visible = []
     for portfolio in portfolios:
         key = str(portfolio.get("broker_account") or "")
