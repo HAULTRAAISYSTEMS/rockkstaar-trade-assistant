@@ -17,11 +17,16 @@ METRIC_LABELS = {
     "operating_income": "Operating income",
     "cash": "Cash and equivalents",
     "long_term_debt": "Long-term debt (noncurrent)",
+    "long_term_debt_current": "Current portion of long-term debt",
+    "short_term_borrowings": "Short-term borrowings",
+    "interest_expense": "Interest expense",
+    "income_tax_expense": "Income tax expense",
+    "pretax_income": "Pretax income",
     "stockholders_equity": "Stockholders equity",
     "diluted_eps": "Diluted EPS",
 }
-BALANCE_METRICS = {"assets", "liabilities", "cash", "long_term_debt", "stockholders_equity"}
-FLOW_METRICS = {"revenue", "net_income", "operating_cash_flow", "capital_expenditures", "gross_profit", "operating_income", "diluted_eps"}
+BALANCE_METRICS = {"assets", "liabilities", "cash", "long_term_debt", "long_term_debt_current", "short_term_borrowings", "stockholders_equity"}
+FLOW_METRICS = {"revenue", "net_income", "operating_cash_flow", "capital_expenditures", "gross_profit", "operating_income", "diluted_eps", "interest_expense", "income_tax_expense", "pretax_income"}
 
 
 def _freshness(filed, today=None):
