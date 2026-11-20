@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import os
 import requests
 
-# SEC EDGAR entity pages independently verified for each listed ticker.
+# SEC registrant CIK mappings; validate against live EDGAR responses before showing facts.
 # Alphabet share classes intentionally share one registrant; do not infer ETF identities.
 SEC_CIK = {
     "SPCX": "0001181412",
