@@ -6,6 +6,19 @@ const $=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>n==null?'—':Number(n).toLocaleString('en-US',{style:'currency',currency:'USD'});
 let latest=null;
+const secTicker=$('capital-sec-ticker'),secInspect=$('capital-sec-inspect'),secRoot=$('capital-sec-evidence');
+if(secInspect&&secTicker&&secRoot){
+ const inspect=()=>{
+  const symbol=secTicker.value.trim().toUpperCase();
+  if(!/^[A-Z][A-Z0-9.\\-]{0,9}$/.test(symbol)){
+   secRoot.textContent='Enter a valid company ticker.';return;
+  }
+  window.TradestaarFinancialContract?.render(secRoot,symbol);
+ };
+ secInspect.addEventListener('click',inspect);
+ secTicker.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inspect();}});
+}
+
 $('capital-add-button').addEventListener('click',()=>{
  const input=$('capital-add'),t=input.value.trim().toUpperCase();
  if(!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(t))return;
