@@ -4,7 +4,7 @@
 {% block head_extra %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_lab_v2.css') }}">
-{% endblock %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_financial_contract.css') }}">{% endblock %}
 {% block content %}
 <div class="wa wa-lab-v2">
 {{ wa.head('capital', 'Capital Deployment', 'Balanced investment decisions, verified M.C.F.F. gates, portfolio concentration and a permanent decision journal.', portfolios, current) }}
@@ -15,6 +15,11 @@
 <button type="button" class="lab-button" id="sec-unified-load">Inspect SPCX filings</button>
 <p id="sec-unified-status" class="lab-status" aria-live="polite"></p>
 <div id="sec-unified-results" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px"></div>
+</section>
+<section class="lab-panel" style="margin:16px 0">
+<h3>✦ Unified Financial Evidence</h3>
+<p class="lab-muted">The same source-backed metrics and reporting dates shown in M.C.F.F. research.</p>
+<section data-sec-contract-ticker="SPCX" aria-label="SEC financial evidence"></section>
 </section>
 <div class="lab-grid">
 <section class="lab-panel">
@@ -53,4 +58,5 @@
 </div></div></div>
 {{ wa.common_js() }}
 <script src="{{ url_for('static', filename='js/wealth_capital.js') }}" defer></script>
+<script defer src="{{ url_for('static', filename='js/wealth_financial_contract.js') }}"></script>
 {% endblock %}
