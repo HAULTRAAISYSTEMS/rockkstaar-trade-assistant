@@ -47,31 +47,23 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         """Canonical source-backed SEC view shared by research and capital pages."""
         if not current_user():
             abort(401)
-        from wealth_sec_evidence import SEC_CIK, fetch_sec_evidence
-        from wealth_sec_dashboard import build_dashboard
-        from wealth_sec_explanations import compare_periods, explain_changes
-        symbol = ticker.upper()
-        if symbol not in SEC_CIK:
-            return jsonify({"ok": False, "ticker": symbol,
-                            "error": "No verified SEC issuer mapping; financial facts withheld"}), 404
-        evidence = fetch_sec_evidence(symbol)
-        dashboard = build_dashboard(evidence)
-        explanations = explain_changes(compare_periods(evidence.get("facts")))
-        return jsonify({"ok": True, "ticker": symbol, "cik": evidence.get("cik"),
-                        "status": evidence.get("status"), "dashboard": dashboard,
-                        "analysis": explanations, "scoring_eligible": False,
-                        "source": "SEC EDGAR companyfacts and submissions",
-                        "warnings": evidence.get("warnings") or []})
+        from wealth_financial_data import financial_snapshot
+        result = financial_snapshot(ticker)
+        if not result["ok"]:
+            return jsonify(result), 404
+        return jsonify(result)
 
     @bp.get("/api/wealth/sec-evidence/<ticker>")
     def sec_evidence_api(ticker):
         if not current_user():
             abort(401)
-        from wealth_sec_evidence import SEC_CIK, fetch_sec_evidence
-        symbol = ticker.upper()
-        if symbol not in SEC_CIK:
-            return jsonify({"ok": False, "error": "No verified SEC issuer mapping"}), 404
-        return jsonify({"ok": True, **fetch_sec_evidence(symbol)})
+        from wealth_financial_data import financial_snapshot
+        result = financial_snapshot(ticker)
+        if not result["ok"]:
+            return jsonify(result), 404
+        # Raw SEC facts are intentionally not exposed by the unified snapshot.
+        # Legacy evidence endpoint returns the canonical dashboard with provenance.
+        return jsonify({"ok": True, **result["dashboard"]})
 
     @bp.get("/api/wealth/sec-dashboard/<ticker>")
     def sec_dashboard_api(ticker):
