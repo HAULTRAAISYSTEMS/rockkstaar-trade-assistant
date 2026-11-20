@@ -62,6 +62,19 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         from wealth_sec_dashboard import build_dashboard
         return jsonify({"ok": True, **build_dashboard(fetch_sec_evidence(ticker.upper()))})
 
+    @bp.route("/api/wealth/sec-explanations/<ticker>", methods=["GET"])
+    def sec_explanations_api(ticker):
+        if not current_user():
+            abort(401)
+        if ticker.upper() != "SPCX":
+            return jsonify({"ok": False, "error": "Verified SEC mapping unavailable"}), 404
+        from wealth_sec_evidence import fetch_sec_evidence
+        from wealth_sec_explanations import compare_periods, explain_changes
+        evidence = fetch_sec_evidence(ticker.upper())
+        return jsonify({"ok": True, "ticker": ticker.upper(), "cik": evidence.get("cik"),
+                        "status": evidence.get("status"), "warnings": evidence.get("warnings"),
+                        **explain_changes(compare_periods(evidence.get("facts")))})
+
     price_lookup = price_lookup or wealth_service.default_price_lookup
 
     def _default_bars(ticker):
