@@ -37,7 +37,7 @@ def env(monkeypatch):
         bars_lookup=lambda t: {"timestamps": [1767225600, 1769904000, 1770681600], "closes": [600.0, 610.0, 620.0]},
         broker_summary=lambda uid: broker,
         fundamentals_lookup=lambda t: ({"ticker": t, "company_name": t + " Inc", "sector": "Technology", "score_percent": 80,
-                                        "scored_metrics": 10, "total_metrics": 10, "red_flags": [], "sections": [],
+                                        "scored_metrics": 10, "total_metrics": 10, "red_flags": [], "sections": [{"name": "Profitability", "rows": [{"label": "Operating margin", "value": "25%", "passed": True}]}],
                                         "valuation": {"pe": 28.0},
                                         "history": [{"year_offset": 0, "revenue_num": 10, "net_income_num": 3},
                                                     {"year_offset": 3, "revenue_num": 5, "net_income_num": 1.5}]},
