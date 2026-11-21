@@ -389,3 +389,16 @@ def test_globe_overview_is_sector_tabs_and_tap_opens_the_sector():
     assert 'id="cmd27-back"' in html
     pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
     assert "var back = $('#cmd27-back');" in pj
+
+
+def test_fullscreen_deep_space_backdrop():
+    css = (ROOT / "static/css/command_center_picture.css").read_text(encoding="utf-8")
+    assert ".cmd27 .cc3d-orb::before { display: none; }" in css          # no oval smudge
+    assert '[data-mood="off"] .cmd27-fs-sky__neb' in css and '[data-mood="on"] .cmd27-fs-sky__neb' in css
+    assert "var(--sun-x, 22%) var(--sun-y, 30%)" in css
+    html = (ROOT / "templates/liquidity.html").read_text(encoding="utf-8")
+    assert 'class="cmd27-fs-sky"' in html
+    pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
+    assert "box.insertBefore(scene, box.firstChild)" in pj and "moveScene(on);" in pj
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    assert "new CustomEvent('cmd27:sun'" in js
