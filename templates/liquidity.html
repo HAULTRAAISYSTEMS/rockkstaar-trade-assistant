@@ -47,15 +47,15 @@
           <span class="cc-live" id="cc-pulse-live"><i class="cc-dot"></i>{{ 'Live' if pulse.live else 'Snapshot' }}</span>
         </div>
         <div class="cc-pulse-regime">
-      <span class="cc-p-lbl">Trend</span><strong class="cc-regime-val" id="cc-regime">{{ pulse.trend_label if pulse.known else '—' }}</strong>
+      <span class="cc-p-lbl">Trend</span><strong class="cc-regime-val" id="cc-regime">{{ pulse.trend_label if pulse.known else '—' }}</strong><span class="cc-regime-meta" id="cc-regime-meta">{{ pulse.regime_meta if pulse.known else 'not read yet' }}</span>
           <span class="cc-pulse-sub" id="cc-pulse-sub">{{ pulse.summary or '' }}</span>
         </div>
         <div class="cc-pulse-grid">
           <div class="cc-p-cell"><span class="cc-p-lbl">{{ pulse.spy_label or 'SPY' }}</span><strong class="cc-p-val" id="cc-spy">{{ '%.2f'|format(pulse.spy) if pulse.spy else '—' }}</strong></div>
           <div class="cc-p-cell"><span class="cc-p-lbl">{{ pulse.qqq_label or 'QQQ' }}</span><strong class="cc-p-val" id="cc-qqq">{{ '%.2f'|format(pulse.qqq) if pulse.qqq else '—' }}</strong></div>
-          <div class="cc-p-cell"><span class="cc-p-lbl">VIX {{ pulse.vix_regime or '' }}</span><strong class="cc-p-val" id="cc-vix">{{ '%.2f'|format(pulse.vix) if pulse.vix else '—' }}</strong></div>
+          <div class="cc-p-cell"><span class="cc-p-lbl">VIX {{ pulse.vix_regime or '' }}</span><strong class="cc-p-val" id="cc-vix">{{ '%.2f'|format(pulse.vix) if pulse.vix else '—' }}</strong><span class="cc-p-meta" id="cc-vix-meta">{{ pulse.vix_freshness or '' }}</span></div>
           <div class="cc-p-cell" id="cc-es-cell"{% if not pulse.es %} hidden{% endif %}><span class="cc-p-lbl">ES</span><strong class="cc-p-val" id="cc-es">{{ '%.2f'|format(pulse.es) if pulse.es else '—' }}</strong></div>
-          <div class="cc-p-cell" id="cc-nq-cell"><span class="cc-p-lbl">NQ</span><strong class="cc-p-val" id="cc-nq">{{ '%.2f'|format(pulse.nq) if pulse.nq else '—' }}</strong></div>
+          <div class="cc-p-cell" id="cc-nq-cell"{% if not pulse.nq %} hidden{% endif %}><span class="cc-p-lbl">NQ</span><strong class="cc-p-val" id="cc-nq">{{ '%.2f'|format(pulse.nq) if pulse.nq else '—' }}</strong></div>
         </div>
         <p class="cc-pulse-note" id="cc-pulse-note">{{ pulse.note or '' }}</p>
       </div>
@@ -77,7 +77,7 @@
     <article class="te27-market-tile"><span class="te27-market-icon">☀</span><div><small>Liquidity</small><strong id="te27-liq">{{ pulse.liquidity_label or 'Neutral' }}</strong></div></article>
     <article class="te27-market-tile"><span class="te27-market-icon">◫</span><div><small>Next catalyst</small><strong class="te27-market-next">{{ next_up.title if next_up else 'None scheduled' }}</strong></div></article>
   </section>
-
+<div class="cc-now"><div class="cc-col-main">
   <div class="cc-body cc-intel-row">
     <section class="cc-card cc-intel-card" id="ai-brief-card">
       <div class="cc-head">
@@ -190,7 +190,7 @@
         </div>
       {% else %}
         <p class="cc-empty">No upcoming events were returned.</p>
-      {% endif %}
+      {% endif %}</div><div class="cc-col-side"></div></div>
       <div class="nx-panel cc-nx-mini" id="nx-panel" aria-labelledby="nx-panel-title">
         <header class="nx-panel__head">
           <h3 class="nx-panel__title" id="nx-panel-title">Notifications <span class="nx-panel__count" id="nx-panel-count"></span></h3>
