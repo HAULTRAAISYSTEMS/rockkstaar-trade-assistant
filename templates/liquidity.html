@@ -37,6 +37,7 @@
         </form>
         <button type="button" id="cmd27-orbit-reset" class="cmd27-orbit-bar__reset" hidden>Reset</button>
       </div>
+      <nav class="cmd27-dock" id="cmd27-dock" aria-label="Fly to a sector" hidden></nav>
     </div>
 
     <div class="cmd27-hero__globe">
@@ -50,6 +51,17 @@
         <div class="cc3d-hud" data-cc3d-hud aria-live="off"><span>Status <b>Awaiting live quotes</b></span></div>
       </div>
       <div class="cmd27-orbit" id="cmd27-orbit" aria-label="Tickers in orbit around the globe"></div>
+      <div class="cmd27-zoom" role="group" aria-label="Globe zoom">
+        <button type="button" data-zoom="in" aria-label="Zoom in" title="Zoom in (pinch or double-tap)">+</button>
+        <button type="button" data-zoom="out" aria-label="Zoom out" title="Zoom out">−</button>
+        <button type="button" data-zoom="reset" aria-label="Back to the whole world" title="Whole world">⟲</button>
+      </div>
+      <section class="cmd27-sector" id="cmd27-sector" hidden aria-live="polite">
+        <header><div><small>Sector</small><strong id="cmd27-sector-name"></strong></div><b id="cmd27-sector-avg"></b>
+          <button type="button" class="cmd27-sector__x" id="cmd27-sector-close" aria-label="Back to the whole world">×</button></header>
+        <ol id="cmd27-sector-list"></ol>
+        <p class="cmd27-sector__foot">Tap a stock to fly to it · ☆ keeps it in your orbit</p>
+      </section>
     </div>
 
     <aside class="cmd27-hero__pulse">

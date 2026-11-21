@@ -10,7 +10,7 @@ html.cc27 .ts-scene .ts-scene__layer { max-width: none !important; position: abs
 .ts-scene__sky  { background-image: url("../img/scene_sky.webp"); }
 .ts-scene__far  { background-image: url("../img/scene_far.webp"); }
 .ts-scene__near { background-image: url("../img/scene_near.webp"); }
-.ts-scene__floor { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ts-scene__floor { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
 
 /* Veil: light on the Command page, darker where pages are dense with data. */
 html.cc27.cc-scene #cc3d-veil { opacity: 1; background:
@@ -88,3 +88,11 @@ html.cc27 .main-content :is(.wa-table, .cr-table, .intel-table) th { color: #8ea
 html.cc27 .main-content :is(.wa-table, .cr-table, .intel-table) tr:hover td { background: rgba(57, 198, 255, 0.06); }
 html.cc27 .wa-head h1 { font-size: clamp(28px, 2.8vw, 40px) !important; letter-spacing: -0.01em; }
 @media (max-width: 760px) { html.cc27 .wa-head h1 { font-size: 26px !important; } }
+
+/* Performance: the scene behind is animated, so a backdrop blur would be
+   recomputed for every card on every frame. Cards are already near-opaque;
+   only the top bar keeps its blur. */
+html.cc27.cc-scene .main-content *, html.cc27.cc-scene .market-tape, html.cc27.cc-scene .workspace-bar,
+html.cc27.cc-scene .main-content *::before, html.cc27.cc-scene .main-content *::after {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}

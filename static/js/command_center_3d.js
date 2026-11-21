@@ -319,6 +319,60 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     }
     // Starred tickers (the orbit) always get a name tag on the globe.
     var starred = {}, chipSet = {}, chipRects = [];
+    // Zoom + sector focus state.
+    var zoom = 1, zoomTo = 1, ZMIN = 1, ZMAX = 3.6, focusKey = null, sectorHits = [], lastHidden = {}, zoomSent = 1;
+    var shiftX = 0, shiftTo = 0;   // slide the globe right while the sector panel is open
+    document.addEventListener('cmd27:sector', function (e) {
+      var on = !!e.detail;
+      // Measure after the panel is laid out: slide only by what it covers.
+      requestAnimationFrame(function () {
+        var panel = document.getElementById('cmd27-sector');
+        if (!on || !panel || panel.hidden || W <= 520) { shiftTo = 0; return; }
+        var pr = panel.getBoundingClientRect(), hr = canvas.getBoundingClientRect();
+        var cover = Math.max(0, pr.right - hr.left);
+        shiftTo = Math.min(cover * 0.5, W * 0.22);
+      });
+    });
+    function clampZ(z) { return Math.max(ZMIN, Math.min(ZMAX, z)); }
+    document.addEventListener('cmd27:zoom-cmd', function (e) {
+      var d = e.detail && e.detail.dir;
+      if (d === 'in') zoomTo = clampZ(zoomTo * 1.45);
+      else if (d === 'out') { zoomTo = clampZ(zoomTo / 1.45); if (zoomTo <= 1.05) { zoomTo = 1; clearFocus(); } }
+      else if (d === 'reset') { zoomTo = 1; clearFocus(); }
+    });
+    document.addEventListener('cmd27:sector-close', function () { clearFocus(); zoomTo = 1; });
+    function clearFocus() {
+      if (!focusKey) return;
+      focusKey = null;
+      document.dispatchEvent(new CustomEvent('cmd27:sector', { detail: null }));
+    }
+    // Spin + tilt (+ optional zoom) so a world point faces you.
+    function flyToVec(v, z, done) {
+      var tY = Math.atan2(-v[0], v[2]), z1 = Math.sqrt(v[0] * v[0] + v[2] * v[2]);
+      var tX = Math.max(-1.1, Math.min(1.1, Math.atan2(v[1], z1)));
+      var dY = Math.atan2(Math.sin(tY - rotY), Math.cos(tY - rotY));
+      flyTo = { fromY: rotY, toY: rotY + dY, fromX: rotX, toX: tX, t: 0, done: done || null };
+      if (z) zoomTo = clampZ(z);
+      velY = 0;
+    }
+    function focusRegion(k) {
+      var rg = REGIONS[k]; if (!rg) return;
+      focusKey = k;
+      var z = Math.max(1.7, Math.min(3.2, 26 / (rg.eff || rg.spread) + 0.9));
+      flyToVec(geo(rg.lat, rg.lon), z);
+      sendSector(k);
+    }
+    // The panel's rows/average — re-sent on every tape update without moving the camera.
+    function sendSector(k) {
+      var rg = REGIONS[k]; if (!rg) return;
+      var rows = nodes.filter(function (nd) { return nd.region === k; })
+        .map(function (nd) { return { symbol: nd.symbol, chg: nd.chg, price: nd.price }; })
+        .sort(function (a, b) { return (b.chg == null ? -1e9 : b.chg) - (a.chg == null ? -1e9 : a.chg); });
+      var known = rows.filter(function (r) { return r.chg != null && !/VIX/.test(r.symbol); });
+      var avg = known.length ? known.reduce(function (t, r) { return t + Number(r.chg); }, 0) / known.length : null;
+      document.dispatchEvent(new CustomEvent('cmd27:sector', { detail: { key: k, name: rg.name, avg: avg, rows: rows } }));
+    }
+    document.addEventListener('cmd27:sector-open', function (e) { if (e.detail && e.detail.key) focusRegion(e.detail.key); });
     document.addEventListener('cmd27:chips', function (e) {
       chipSet = {}; ((e.detail && e.detail.tickers) || []).forEach(function (t) { chipSet[String(t).toUpperCase()] = 1; });
       chipRects = (e.detail && e.detail.rects) || [];
@@ -385,7 +439,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     }
     var tex = null, TW = 0, TH = 0;
     var eCanvas = document.createElement('canvas'), eCtx = eCanvas.getContext('2d');
-    var eImg = null, eD = 0, eRay = null;
+    var eImg = null;
     (function loadEarth() {
       var img = new Image();
       img.decoding = 'async';
@@ -401,61 +455,62 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       img.src = (host.getAttribute('data-earth-src') || '/static/img/' + (small ? 'earth_1024.webp' : 'earth.webp'));
     })();
 
-    function buildRays(D) {
-      // Camera-space unit-sphere point for every pixel of a D×D square (0 = off-globe).
-      eD = D; eCanvas.width = D; eCanvas.height = D;
-      eImg = eCtx.createImageData(D, D);
-      eRay = new Float32Array(D * D * 4);
-      var half = D / 2;
-      for (var j = 0; j < D; j++) {
-        for (var i = 0; i < D; i++) {
-          var u = ((i + 0.5) - half) / half * EARTH_SIL, v = ((j + 0.5) - half) / half * EARTH_SIL;
+    /* Viewport renderer: one ray per screen pixel of the canvas (not per
+       pixel of the disc), so zooming in stays sharp and costs the same.
+       Rays and the lat/lon lookup are cached per (size, R, tilt); a frame
+       is then a texture lookup plus lighting. Spinning only shifts
+       longitude, so it never invalidates the cache. */
+    var eW = 0, eH = 0, eS = 1, eKey = '', eRay = null, eRow = null, eCol = null, lowres = false, eBox = [0, 0, 0, 0];
+    // Adaptive quality: a device that struggles gets a softer Earth, not a stutter.
+    var eQuality = 1, eCost = 0, eFrames = 0;
+    function buildViewport(R, cx0, cy0) {
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      var budget = (window.innerWidth < 760 ? 260000 : 520000) * eQuality / (lowres ? 4 : 1);
+      eS = Math.min(dpr, Math.sqrt(budget / Math.max(1, W * H)));
+      eW = Math.max(1, Math.round(W * eS)); eH = Math.max(1, Math.round(H * eS));
+      if (eCanvas.width !== eW || eCanvas.height !== eH) { eCanvas.width = eW; eCanvas.height = eH; }
+      eImg = eCtx.createImageData(eW, eH);
+      var n = eW * eH;
+      eRay = new Float32Array(n * 4); eRow = new Int32Array(n); eCol = new Float32Array(n);
+      var cX = Math.cos(rotX), sX = Math.sin(rotX), PI = Math.PI, aa = 1.5 / (R * eS);
+      // Only the silhouette's bounding box can hold Earth pixels.
+      var rS = R * EARTH_SIL * 1.02;
+      eBox = [Math.max(0, Math.floor((cx0 - rS) * eS)), Math.max(0, Math.floor((cy0 - rS) * eS)),
+              Math.min(eW, Math.ceil((cx0 + rS) * eS)), Math.min(eH, Math.ceil((cy0 + rS) * eS))];
+      for (var j = eBox[1]; j < eBox[3]; j++) {
+        for (var i = eBox[0]; i < eBox[2]; i++) {
+          var p = j * eW + i, o = p * 4;
+          var u = ((i + 0.5) / eS - cx0) / R, v = ((j + 0.5) / eS - cy0) / R;
           var k = (u * u + v * v) / 10.24;
           var A = k + 1, B = -6.4 * k, C = 10.24 * k - 1, disc = B * B - 4 * A * C;
-          var o = (j * D + i) * 4;
           if (disc < 0) { eRay[o + 3] = 0; continue; }
-          var z = (-B + Math.sqrt(disc)) / (2 * A);
-          var f = (3.2 - z) / 3.2;
-          eRay[o] = u * f; eRay[o + 1] = v * f; eRay[o + 2] = z;
-          // Edge alpha: fade the last ~1.5px for a smooth limb.
+          var z = (-B + Math.sqrt(disc)) / (2 * A), f = (3.2 - z) / 3.2;
+          var x1 = u * f, y1 = v * f;
+          eRay[o] = x1; eRay[o + 1] = y1; eRay[o + 2] = z;
           var rr = Math.sqrt(u * u + v * v) / EARTH_SIL;
-          eRay[o + 3] = Math.max(0.001, Math.min(1, (1 - rr) * half / 1.5));
+          eRay[o + 3] = Math.max(0.001, Math.min(1, (1 - rr) / aa));
+          var y = y1 * cX + z * sX, z1 = -y1 * sX + z * cX;
+          var lat = Math.asin(y < -1 ? 1 : (y > 1 ? -1 : -y));
+          var ty = ((PI / 2 - lat) / PI * TH) | 0; if (ty >= TH) ty = TH - 1;
+          eRow[p] = ty * TW;
+          eCol[p] = (PI - Math.atan2(z1, x1)) / (2 * PI) * TW;
         }
       }
     }
 
-    // Spinning about the vertical axis only shifts longitude, so each pixel's
-    // texture row and base column are cached per tilt (rotX); a frame is then
-    // a lookup plus lighting.
-    var eRow = null, eCol = null, eTilt = null;
-    function buildLookup() {
-      var n = eD * eD, cX = Math.cos(rotX), sX = Math.sin(rotX), PI = Math.PI;
-      eRow = new Int32Array(n); eCol = new Float32Array(n);
-      for (var p = 0; p < n; p++) {
-        var o = p * 4;
-        if (eRay[o + 3] === 0) continue;
-        var y1 = eRay[o + 1], z2 = eRay[o + 2];
-        var y = y1 * cX + z2 * sX, z1 = -y1 * sX + z2 * cX;
-        var lat = Math.asin(y < -1 ? 1 : (y > 1 ? -1 : -y));
-        var ty = ((PI / 2 - lat) / PI * TH) | 0; if (ty >= TH) ty = TH - 1;
-        eRow[p] = ty * TW;
-        eCol[p] = (PI - Math.atan2(z1, eRay[o])) / (2 * PI) * TW;   // lon = -atan2(z1, x1) - rotY
-      }
-      eTilt = rotX;
-    }
-
     function drawEarth(cx, cy, R) {
       if (!tex) return false;
-      var dpr = Math.min(window.devicePixelRatio || 1, 2);
-      var D = Math.min(Math.round(2 * R * EARTH_SIL * dpr), window.innerWidth < 760 ? 360 : 600);
-      if (D !== eD) { buildRays(D); eTilt = null; }
-      if (eTilt !== rotX) buildLookup();
+      // Rays are built around the resting centre; pointer parallax is a shift.
+      var cx0 = W / 2 + shiftX, cy0 = H * 0.47;
+      var t0 = performance.now();
+      var key = W + 'x' + H + ':' + R.toFixed(1) + ':' + rotX.toFixed(4) + ':' + shiftX.toFixed(1) + ':' + eQuality.toFixed(2) + (lowres ? ':lo' : '');
+      if (key !== eKey) { buildViewport(R, cx0, cy0); eKey = key; }
       var data = eImg.data, ray = eRay, row = eRow, col = eCol;
       var Lx = sunCam[0], Ly = sunCam[1], Lz = sunCam[2];
       var Hx = Lx, Hy = Ly, Hz = Lz + 1, hl = Math.sqrt(Hx * Hx + Hy * Hy + Hz * Hz) || 1; Hx /= hl; Hy /= hl; Hz /= hl;
       var tw = TW, rowB = TW * TH * 4;
       var shift = (rotY / (2 * Math.PI)) * tw; shift = shift - Math.floor(shift / tw) * tw;
-      for (var p = 0, n = D * D; p < n; p++) {
+      for (var jj = eBox[1]; jj < eBox[3]; jj++) for (var p = jj * eW + eBox[0], pe = jj * eW + eBox[2]; p < pe; p++) {
         var o = p * 4, a = ray[o + 3];
         if (a === 0) { data[o + 3] = 0; continue; }
         var x1 = ray[o], y1 = ray[o + 1], z2 = ray[o + 2];
@@ -467,7 +522,6 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         var nightness = 0.5 - raw * 4; nightness = nightness < 0 ? 0 : (nightness > 1 ? 1 : nightness);
         var lg = lights * (0.35 + 1.35 * nightness);
         var R2 = r * shade + 210 * lg, G2 = g * shade + 255 * lg, B2 = b * shade + 72 * lg;
-        // Warm twilight along the terminator.
         var tb = raw < 0 ? -raw : raw;
         if (tb < 0.07 && g > b) { tb = (1 - tb / 0.07) * 0.35; R2 += 90 * tb; G2 += 50 * tb; }
         if (b > g) {
@@ -479,9 +533,22 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         data[o] = R2 > 255 ? 255 : R2; data[o + 1] = G2 > 255 ? 255 : G2; data[o + 2] = B2 > 255 ? 255 : B2;
         data[o + 3] = a * 255;
       }
-      eCtx.putImageData(eImg, 0, 0);
-      var RS = R * EARTH_SIL;
-      ctx.drawImage(eCanvas, cx - RS, cy - RS, RS * 2, RS * 2);
+      // Push only the box that holds the Earth.
+      var bw0 = eBox[2] - eBox[0], bh0 = eBox[3] - eBox[1];
+      if (bw0 > 0 && bh0 > 0) {
+        eCtx.clearRect(0, 0, eW, eH);
+        eCtx.putImageData(eImg, 0, 0, eBox[0], eBox[1], bw0, bh0);
+      }
+      ctx.drawImage(eCanvas, cx - cx0, cy - cy0, W, H);
+      // (cx0 already includes the slide; the offset is only pointer parallax)
+      if (!lowres) {
+        eCost = eCost * 0.9 + (performance.now() - t0) * 0.1;
+        if (++eFrames > 30) {
+          eFrames = 0;
+          if (eCost > 11 && eQuality > 0.4) eQuality = Math.max(0.4, eQuality * 0.8);
+          else if (eCost < 4 && eQuality < 1) eQuality = Math.min(1, eQuality * 1.15);
+        }
+      }
       return true;
     }
 
@@ -507,6 +574,18 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           flash: prev && prev.price !== t.price ? 1 : (prev ? prev.flash : 0.6)
         };
       });
+      if (useRegions) {
+        var sum = {};
+        nodes.forEach(function (nd) {
+          if (!nd.region) return;
+          var st = sum[nd.region] = sum[nd.region] || { key: nd.region, name: REGIONS[nd.region].name, n: 0, s: 0, k: 0 };
+          st.n++; if (nd.chg != null && !/VIX/.test(nd.symbol)) { st.s += Number(nd.chg); st.k++; }
+        });
+        var list2 = Object.keys(sum).map(function (k) { var st = sum[k]; return { key: k, name: st.name, n: st.n, avg: st.k ? st.s / st.k : null }; })
+          .sort(function (a, b) { return b.n - a.n; });
+        document.dispatchEvent(new CustomEvent('cmd27:regions', { detail: list2 }));
+        if (focusKey) sendSector(focusKey);
+      }
       var known = uniq.filter(function (t) { return t.change_pct != null; });
       host.classList.toggle('is-waiting', !known.length);
       if (known.length) lastSync = Date.now();
@@ -557,7 +636,15 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     // ── Interaction: drag spins; a tap (barely moves) picks a ticker ──
     var hits = [];            // screen positions of near-side nodes, rebuilt every frame
     var hovered = null, selected = null;
-    var downX = 0, downY = 0, downT = 0, moved = 0;
+    var downX = 0, downY = 0, downT = 0, moved = 0, ptrs = {}, pinch0 = null, lastTap = 0;
+    var _tw = {}, _twN = 0;
+    function textW(key, txt) {
+      var v = _tw[key]; if (v !== undefined) return v;
+      if (++_twN > 2000) { _tw = {}; _twN = 0; }
+      return (_tw[key] = ctx.measureText(txt).width);
+    }
+    function ptrsList() { return Object.keys(ptrs).map(function (k) { return ptrs[k]; }); }
+    function pinching() { return !!pinch0; }
     var card = decor ? null : buildCard();
 
     function nearest(clientX, clientY, radius) {
@@ -573,10 +660,23 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     if (!decor) {
       host.addEventListener('pointerdown', function (e) {
         if (e.target.closest('.cc3d-card')) return;
+        ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
+        if (useRegions && Object.keys(ptrs).length === 2) {
+          var pp = ptrsList(); pinch0 = { d: Math.hypot(pp[0].x - pp[1].x, pp[0].y - pp[1].y) || 1, z: zoomTo };
+          dragging = false; moved = 99; return;
+        }
         dragging = true; lx = downX = e.clientX; ly = downY = e.clientY; downT = Date.now(); moved = 0;
         host.setPointerCapture && host.setPointerCapture(e.pointerId);
       });
       host.addEventListener('pointermove', function (e) {
+        if (ptrs[e.pointerId]) { ptrs[e.pointerId].x = e.clientX; ptrs[e.pointerId].y = e.clientY; }
+        if (pinch0 && Object.keys(ptrs).length >= 2) {
+          var pq = ptrsList(), dd = Math.hypot(pq[0].x - pq[1].x, pq[0].y - pq[1].y);
+          zoomTo = clampZ(pinch0.z * dd / pinch0.d); zoom = zoomTo;
+          if (zoomTo <= 1.02) clearFocus();
+          if (selected) closeCard();
+          return;
+        }
         if (!dragging) {
           if (e.pointerType === 'mouse') {
             var h = nearest(e.clientX, e.clientY, 16);
@@ -590,20 +690,42 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         moved += Math.abs(dx) + Math.abs(dy);
         if (moved < 6) return;              // still a tap, not a drag
         if (selected) closeCard();
-        rotY += dx * 0.008; rotX = Math.max(-1.1, Math.min(1.1, rotX + dy * 0.006));
-        velY = dx * 0.4;
+        var zf = 1 / zoom;
+        rotY += dx * 0.008 * zf; rotX = Math.max(-1.1, Math.min(1.1, rotX + dy * 0.006 * zf));
+        velY = dx * 0.4 * zf;
         if (reduceMotion) draw(0, 0);
       });
       host.addEventListener('pointerup', function (e) {
+        delete ptrs[e.pointerId];
+        if (Object.keys(ptrs).length < 2) pinch0 = null;
         if (e.target.closest('.cc3d-card')) return;
         var wasTap = dragging && moved < 6 && Date.now() - downT < 600;
         dragging = false;
         if (wasTap) {
+          var r0 = canvas.getBoundingClientRect(), tx0 = e.clientX - r0.left, ty0 = e.clientY - r0.top;
+          // Sector tag → fly into that sector.
+          for (var si = 0; si < sectorHits.length; si++) {
+            var bx = sectorHits[si].box;
+            if (tx0 >= bx[0] - 4 && tx0 <= bx[2] + 4 && ty0 >= bx[1] - 4 && ty0 <= bx[3] + 4) { lastTap = 0; focusRegion(sectorHits[si].key); return; }
+          }
           var h = nearest(e.clientX, e.clientY, e.pointerType === 'mouse' ? 16 : 26);
-          if (h) openCard(h.symbol); else closeCard();
-        } else if (!selected && !reduceMotion && Math.abs(velY) < 0.06) velY = 0.1;
+          if (h) { lastTap = 0; openCard(h.symbol); return; }
+          // Double-tap on open globe: zoom in; double-tap when deep: back out.
+          var now = Date.now();
+          if (useRegions && now - lastTap < 320) { lastTap = 0; if (zoomTo >= 3) { zoomTo = 1; clearFocus(); } else zoomTo = clampZ(zoomTo * 1.6); return; }
+          lastTap = now;
+          closeCard();
+        } else if (!selected && !reduceMotion && Math.abs(velY) < 0.06 && zoomTo <= 1.15 && !focusKey) velY = 0.1;
       });
-      host.addEventListener('pointercancel', function () { dragging = false; });
+      host.addEventListener('pointercancel', function (e) { delete ptrs[e.pointerId]; pinch0 = null; dragging = false; });
+      // Trackpad pinch (ctrl+wheel) always zooms; a plain wheel zooms only
+      // once you are already zoomed in, so the page still scrolls normally.
+      host.addEventListener('wheel', function (e) {
+        if (!useRegions || !(e.ctrlKey || zoomTo > 1.01)) return;
+        e.preventDefault();
+        zoomTo = clampZ(zoomTo * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018)));
+        if (zoomTo <= 1.02) { zoomTo = 1; clearFocus(); }
+      }, { passive: false });
       host.addEventListener('pointerleave', function () { hovered = null; canvas.style.cursor = ''; });
       document.addEventListener('pointerdown', function (e) { if (selected && !host.contains(e.target)) closeCard(); });
       document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && selected) closeCard(); });
@@ -680,10 +802,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     document.addEventListener('cmd27:focus', function (e) {
       var sym = String((e.detail && e.detail.symbol) || '').toUpperCase(), nd = nodeFor(sym);
       if (!nd) return;
-      var target = Math.atan2(-nd.x, nd.z);
-      var d = target - rotY; d = Math.atan2(Math.sin(d), Math.cos(d));
-      flyTo = { from: rotY, to: rotY + d, t: 0, sym: sym };
-      velY = 0;
+      flyToVec([nd.x, nd.y, nd.z], Math.max(zoomTo, 1.8), function () { openCard(sym); });
     });
     function placeCard() {
       if (!card || card.hidden || !selected) return;
@@ -724,16 +843,30 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       if (flyTo) {
         flyTo.t = Math.min(1, flyTo.t + (reduceMotion ? 1 : dt / 1.1));
         var ez = flyTo.t < 0.5 ? 2 * flyTo.t * flyTo.t : 1 - Math.pow(-2 * flyTo.t + 2, 2) / 2;
-        rotY = flyTo.from + (flyTo.to - flyTo.from) * ez;
-        if (flyTo.t >= 1) { var fsym = flyTo.sym; flyTo = null; openCard(fsym); }
-      } else if (!dragging && !reduceMotion) { rotY += velY * dt; velY += ((selected ? 0 : 0.1) - velY) * (selected ? 0.2 : 0.02); }
+        rotY = flyTo.fromY + (flyTo.toY - flyTo.fromY) * ez;
+        rotX = flyTo.fromX + (flyTo.toX - flyTo.fromX) * ez;
+        if (flyTo.t >= 1) { var fdone = flyTo.done; flyTo = null; if (fdone) fdone(); }
+      } else if (!dragging && !reduceMotion) {
+        // Zoomed in or focused on a sector: hold still so it can be read.
+        var cruise = selected || focusKey || zoomTo > 1.15 ? 0 : 0.1;
+        rotY += velY * dt; velY += (cruise - velY) * (selected ? 0.2 : 0.02);
+      }
+      if (zoom !== zoomTo) { zoom += (zoomTo - zoom) * Math.min(1, (reduceMotion ? 1 : dt * 6)); if (Math.abs(zoomTo - zoom) < 0.002) zoom = zoomTo; }
+      if (shiftX !== shiftTo) { shiftX += (shiftTo - shiftX) * Math.min(1, (reduceMotion ? 1 : dt * 6)); if (Math.abs(shiftTo - shiftX) < 0.5) shiftX = shiftTo; }
+      lowres = dragging || !!flyTo || zoom !== zoomTo || shiftX !== shiftTo || pinching();
+      if (Math.abs(zoom - zoomSent) > 0.04 || (zoom === zoomTo && zoomSent !== zoom)) {
+        zoomSent = zoom;
+        host.classList.toggle('is-zoomed', zoom > 1.15);
+        document.dispatchEvent(new CustomEvent('cmd27:zoom', { detail: { zoom: zoom } }));
+      }
       ctx.clearRect(0, 0, W, H);
       // Bigger canvas, bigger globe: fill more of it once there is room.
       var R = Math.min(W, H) * (Math.min(W, H) > 420 ? 0.35 : 0.33);
       // With orbit chips around it, the globe also leaves a clear ring for
       // them sideways (narrow columns: iPad landscape, phones).
       if (useRegions) R = Math.min(R, W * 0.30);
-      var cx = W / 2 + pointer.x * 6, cy = H * 0.47 + pointer.y * 6;
+      R *= zoom;
+      var cx = W / 2 + shiftX + pointer.x * 6, cy = H * 0.47 + pointer.y * 6;
 
       // Core glow
       var cg = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.35, R * 0.1, cx, cy, R * 1.25);
@@ -794,6 +927,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         strokePath(function (t) { return [Math.cos(t) * Math.cos(lon), Math.sin(t), Math.cos(t) * Math.sin(lon)]; });
       }
 
+      if (zoom < 1.25) {
       // Tilted orbit ring with a travelling beacon
       var ringTilt = 0.42, beacon = (time * 0.6) % 6.2832, prevR = null;
       ctx.lineWidth = 1.2;
@@ -857,6 +991,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       ctx.shadowBlur = 0;
       ctx.restore();
 
+      }
       // Trading arcs between money centres, with light pulses flowing along them.
       ctx.save();
       for (var ai = 0; ai < ARCS.length; ai++) {
@@ -888,7 +1023,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         ctx.shadowBlur = 0;
       }
       // Orbit chips are obstacles: tags and names steer around them.
-      var tagBoxes = useRegions ? chipRects.slice() : [];
+      var tagBoxes = useRegions && zoom < 1.2 ? chipRects.slice() : [];
+      sectorHits = [];
       function boxFree(b) {
         for (var q = 0; q < tagBoxes.length; q++) { var o = tagBoxes[q]; if (b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]) return false; }
         return true;
@@ -914,19 +1050,33 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           var e1 = [cen[1] * up[2] - cen[2] * up[1], cen[2] * up[0] - cen[0] * up[2], cen[0] * up[1] - cen[1] * up[0]];
           var l1 = Math.sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]); e1 = [e1[0] / l1, e1[1] / l1, e1[2] / l1];
           var e2 = [cen[1] * e1[2] - cen[2] * e1[1], cen[2] * e1[0] - cen[0] * e1[2], cen[0] * e1[1] - cen[1] * e1[0]];
-          var dash = reduceMotion ? 0 : time * 0.6;
-          ctx.lineWidth = 1.6;
-          ctx.shadowColor = rgba(colT, 0.9); ctx.shadowBlur = 8;
-          var prevT = null;
+          var dash = reduceMotion ? 0 : time * 0.6, isFocus = focusKey === k, dimT = focusKey && !isFocus ? 0.3 : 1;
+          var ring = [], frontN = 0;
           for (var bs = 0; bs <= 64; bs++) {
             var th2 = bs / 64 * 6.2832, c2 = Math.cos(th2), s2 = Math.sin(th2);
             var pv = [cen[0] * ca + (e1[0] * c2 + e2[0] * s2) * sa, cen[1] * ca + (e1[1] * c2 + e2[1] * s2) * sa, cen[2] * ca + (e1[2] * c2 + e2[2] * s2) * sa];
             var PT = project(pv[0] * 1.004, pv[1] * 1.004, pv[2] * 1.004, R, cx, cy);
-            if (prevT && PT[2] > 0 && prevT[2] > 0 && ((bs + Math.floor(dash * 4)) % 4 !== 0)) {
-              ctx.strokeStyle = rgba(colT, 0.5 * Math.min(1, PT[2] * 2));
-              ctx.beginPath(); ctx.moveTo(prevT[0], prevT[1]); ctx.lineTo(PT[0], PT[1]); ctx.stroke();
+            ring.push(PT); if (PT[2] > 0) frontN++;
+          }
+          // Heat: the territory glows with its sector's average move.
+          if (frontN > 52 && avg != null) {
+            var heat = Math.min(Math.abs(avg) / 3, 1);
+            ctx.save();
+            ctx.beginPath(); ctx.arc(cx, cy, R * EARTH_SIL, 0, 6.2832); ctx.clip();
+            ctx.beginPath();
+            ring.forEach(function (q, qi) { if (qi) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+            ctx.closePath();
+            ctx.fillStyle = rgba(colT, (0.07 + 0.16 * heat) * dimT * (isFocus ? 1.4 : 1)); ctx.fill();
+            ctx.restore();
+          }
+          ctx.lineWidth = isFocus ? 2.2 : 1.6;
+          ctx.shadowColor = rgba(colT, 0.9); ctx.shadowBlur = isFocus ? 14 : 8;
+          for (var bq = 1; bq < ring.length; bq++) {
+            var PT2 = ring[bq], prevT = ring[bq - 1];
+            if (PT2[2] > 0 && prevT[2] > 0 && (isFocus || (bq + Math.floor(dash * 4)) % 4 !== 0)) {
+              ctx.strokeStyle = rgba(colT, (isFocus ? 0.9 : 0.5) * dimT * Math.min(1, PT2[2] * 2));
+              ctx.beginPath(); ctx.moveTo(prevT[0], prevT[1]); ctx.lineTo(PT2[0], PT2[1]); ctx.stroke();
             }
-            prevT = PT;
           }
           ctx.shadowBlur = 0;
           // Floating tag above the territory.
@@ -934,11 +1084,14 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             var lift = project(cen[0] * 1.16, cen[1] * 1.16, cen[2] * 1.16, R, cx, cy);
             ctx.font = '800 ' + (W > 520 ? 11 : 10) + 'px "IBM Plex Mono", ui-monospace, monospace';
             ctx.textBaseline = 'middle';
-            var t1 = rg.name, t2 = avg == null ? st.n + ' pins' : (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%';
+            var more = lastHidden[k] || 0;
+            var t1 = rg.name, t2 = (avg == null ? st.n + ' pins' : (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%') + (more ? '  ·  +' + more : '');
             var w1 = ctx.measureText(t1).width, w2 = ctx.measureText(t2).width, bw = w1 + w2 + 22;
             var bx = lift[0] - bw / 2, by = lift[1] - 11, box = [bx, by, bx + bw, by + 22];
             if (!boxFree(box)) return;
             tagBoxes.push(box);
+            sectorHits.push({ key: k, box: box });
+            ctx.globalAlpha = dimT;
             ctx.strokeStyle = rgba(colT, 0.55); ctx.lineWidth = 1;
             ctx.beginPath(); ctx.moveTo(C[0], C[1]); ctx.lineTo(lift[0], by + 22); ctx.stroke();
             ctx.fillStyle = 'rgba(3,10,22,0.82)';
@@ -948,6 +1101,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             ctx.fill(); ctx.shadowBlur = 0; ctx.stroke();
             ctx.fillStyle = 'rgba(232,241,255,0.95)'; ctx.fillText(t1, bx + 8, by + 11);
             ctx.fillStyle = rgba(colT, 1); ctx.fillText(t2, bx + 14 + w1, by + 11);
+            ctx.globalAlpha = 1;
           }
         });
       }
@@ -992,29 +1146,35 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         drawn.push([base, tip, nd, col, mag]);
       }
       drawn.sort(function (a, b) { return a[1][2] - b[1][2]; });
-      // A crowded globe labels only its biggest movers on the near side,
-      // so names never pile on top of each other. Every node still draws.
       var labelSet = null, sceneOn = useRegions && document.documentElement.classList.contains('cc-scene');
-      if (drawn.length > 16) {
+      if (!sceneOn && drawn.length > 16) {
         labelSet = {};
         drawn.filter(function (it) { return it[1][2] > 0.15 && it[2].chg != null; })
           .sort(function (a, b) { return Math.abs(b[2].chg) - Math.abs(a[2].chg); })
           .slice(0, W > 520 ? 18 : 12)
           .forEach(function (it) { labelSet[it[2].symbol] = 1; });
       }
-      ctx.font = '600 ' + (W > 520 ? 12 : 10) + 'px "IBM Plex Mono", ui-monospace, monospace';
-      ctx.textBaseline = 'middle';
       hits = [];
+      var cands = [];
       for (var d = 0; d < drawn.length; d++) {
         var it = drawn[d], front = it[1][2] > -0.1, A = front ? 1 : 0.25;
         var isSel = selected === it[2].symbol, isHov = hovered === it[2].symbol;
         if (selected && !isSel) A *= 0.45;
+        if (focusKey && it[2].region !== focusKey) A *= 0.35;
         if (front && it[1][2] > 0) hits.push({ symbol: it[2].symbol, x: it[1][0], y: it[1][1] });
         it[2].flash = Math.max(0, it[2].flash - dt * 0.6);
-        ctx.strokeStyle = rgba(it[3], 0.75 * A);
-        ctx.lineWidth = 1.4;
+        // Tower: footprint ring on the surface, glowing shaft, bright cap.
+        if (sceneOn && front) {
+          ctx.strokeStyle = rgba(it[3], 0.45 * A); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.ellipse(it[0][0], it[0][1], 3.2 * it[0][3] * Math.min(zoom, 2.2), 1.6 * it[0][3] * Math.min(zoom, 2.2), 0, 0, 6.2832); ctx.stroke();
+          ctx.strokeStyle = rgba(it[3], 0.22 * A); ctx.lineWidth = 4 + Math.min(zoom - 1, 1.5) * 2;
+          ctx.beginPath(); ctx.moveTo(it[0][0], it[0][1]); ctx.lineTo(it[1][0], it[1][1]); ctx.stroke();
+          ctx.strokeStyle = rgba(it[3], 0.9 * A); ctx.lineWidth = 1.3 + Math.min(zoom - 1, 1.5) * 0.6;
+        } else {
+          ctx.strokeStyle = rgba(it[3], 0.75 * A); ctx.lineWidth = 1.4;
+        }
         ctx.beginPath(); ctx.moveTo(it[0][0], it[0][1]); ctx.lineTo(it[1][0], it[1][1]); ctx.stroke();
-        var rad = (2 + it[4] * 2.5) * it[1][3];
+        var rad = (2 + it[4] * 2.5) * it[1][3] * (sceneOn ? Math.min(1 + (zoom - 1) * 0.5, 1.8) : 1);
         ctx.fillStyle = rgba(it[3], A);
         ctx.shadowColor = rgba(it[3], 0.9 * A); ctx.shadowBlur = front ? 10 + it[2].flash * 20 : 0;
         ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad * (isSel || isHov ? 1.8 : 1), 0, 6.2832); ctx.fill();
@@ -1028,22 +1188,59 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           ctx.strokeStyle = rgba(GOLD, 0.95); ctx.lineWidth = 1.5;
           ctx.beginPath(); ctx.arc(it[1][0], it[1][1], pr, 0, 6.2832); ctx.stroke();
         }
-        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && (sceneOn ? (it[1][2] > 0.3 && !chipSet[it[2].symbol] && (it[2].rank < 3 || starred[it[2].symbol])) : (!labelSet || labelSet[it[2].symbol]))))) {
+        if (sceneOn) {
+          if (front && it[1][2] > 0.12) {
+            var pri = (isSel || isHov ? 1e4 : 0) + (starred[it[2].symbol] ? 500 : 0) + (focusKey && it[2].region === focusKey ? 300 : 0)
+              + Math.abs(it[2].chg || 0) * 10 + it[1][2] * 5;
+            cands.push({ it: it, pri: pri, sel: isSel || isHov, A: A });
+          }
+        } else if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && (!labelSet || labelSet[it[2].symbol])))) {
+          ctx.font = '600 ' + (W > 520 ? 12 : 10) + 'px "IBM Plex Mono", ui-monospace, monospace';
+          ctx.textBaseline = 'middle';
           var label = it[2].symbol + (it[2].chg != null ? ' ' + (it[2].chg >= 0 ? '+' : '') + Number(it[2].chg).toFixed(2) + '%' : '');
-          if (sceneOn && !isSel && !isHov) label = it[2].symbol;
           var lx2 = it[1][0] + 7, ly2 = it[1][1];
           var tw = ctx.measureText(label).width;
           if (lx2 + tw > W - 4) lx2 = it[1][0] - 7 - tw;
-          if (sceneOn && !isSel && !isHov) {
-            var lb = [lx2 - 3, ly2 - 7, lx2 + tw + 3, ly2 + 7];
-            if (typeof boxFree === 'function' && !boxFree(lb)) continue;
-            if (typeof tagBoxes !== 'undefined') tagBoxes.push(lb);
-          }
           ctx.fillStyle = 'rgba(3,7,15,0.72)';
           ctx.fillRect(lx2 - 3, ly2 - (W > 520 ? 8 : 7), tw + 6, W > 520 ? 16 : 14);
           ctx.fillStyle = rgba(it[3], Math.min(1, 0.55 + it[1][2]));
           ctx.fillText(label, lx2, ly2);
         }
+      }
+      // Ticker tags on the towers, most important first; when two would
+      // collide the less important one waits (zoom in to reveal it).
+      if (sceneOn) {
+        cands.sort(function (a, b) { return b.pri - a.pri; });
+        var fs = Math.round(Math.min(10.5 + (zoom - 1) * 1.6, 13.5) * (W > 520 ? 1 : 0.92));
+        ctx.font = '700 ' + fs + 'px "IBM Plex Mono", ui-monospace, monospace';
+        ctx.textBaseline = 'middle';
+        var hiddenNow = {}, fkey = fs + '|';
+        for (var c = 0; c < cands.length; c++) {
+          var cd = cands[c], nd2 = cd.it[2], tip2 = cd.it[1];
+          var showPct = cd.sel || zoom >= 1.6 || starred[nd2.symbol];
+          var txt = nd2.symbol + (showPct && nd2.chg != null ? ' ' + (nd2.chg >= 0 ? '+' : '') + Number(nd2.chg).toFixed(2) + '%' : '');
+          var tw3 = textW(fkey + txt, txt), ph = fs + 7, pw = tw3 + 12;
+          var spots = [[tip2[0] - pw / 2, tip2[1] - ph - 6], [tip2[0] + 8, tip2[1] - ph / 2], [tip2[0] - pw - 8, tip2[1] - ph / 2], [tip2[0] - pw / 2, tip2[1] + 6]];
+          var placed = null;
+          for (var sp2 = 0; sp2 < spots.length; sp2++) {
+            var bx2 = [spots[sp2][0], spots[sp2][1], spots[sp2][0] + pw, spots[sp2][1] + ph];
+            if (bx2[0] < 2 || bx2[2] > W - 2 || bx2[1] < 2 || bx2[3] > H - 2) continue;
+            if (cd.sel || boxFree(bx2)) { placed = bx2; break; }
+          }
+          if (!placed) { if (nd2.region) hiddenNow[nd2.region] = (hiddenNow[nd2.region] || 0) + 1; continue; }
+          tagBoxes.push(placed);
+          var colL = cd.it[3], aL = Math.max(0.35, cd.A);
+          ctx.fillStyle = 'rgba(3,10,22,' + (0.86 * aL).toFixed(2) + ')';
+          ctx.strokeStyle = rgba(colL, 0.75 * aL); ctx.lineWidth = 1;
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(placed[0], placed[1], pw, ph, 6); else ctx.rect(placed[0], placed[1], pw, ph);
+          ctx.fill(); ctx.stroke();
+          ctx.fillStyle = 'rgba(232,241,255,' + aL.toFixed(2) + ')';
+          var symW = textW(fkey + nd2.symbol, nd2.symbol);
+          ctx.fillText(nd2.symbol, placed[0] + 6, placed[1] + ph / 2 + 0.5);
+          if (txt.length > nd2.symbol.length) { ctx.fillStyle = rgba(colL, aL); ctx.fillText(txt.slice(nd2.symbol.length), placed[0] + 6 + symW, placed[1] + ph / 2 + 0.5); }
+        }
+        lastHidden = hiddenNow;
       }
     }
     tasks.push(function () { placeCard(); });
