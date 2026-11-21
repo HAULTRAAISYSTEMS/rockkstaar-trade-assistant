@@ -377,7 +377,11 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     document.addEventListener('cmd27:sector-open', function (e) { if (e.detail && e.detail.key) focusRegion(e.detail.key); });
     // Clear space between the side panels (wide screens), from the page.
     var safeHalf = null;
-    document.addEventListener('cmd27:safe', function (e) { safeHalf = (e.detail && e.detail.half) || null; });
+    var ctlRects = [];
+    document.addEventListener('cmd27:safe', function (e) {
+      safeHalf = (e.detail && e.detail.half) || null;
+      ctlRects = (e.detail && e.detail.obst) || [];
+    });
     // My Portfolio view: pins become your holdings (sized by $ value).
     var pMode = false, lastTape = null;
     document.addEventListener('cmd27:portfolio', function (e) {
@@ -1176,17 +1180,20 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       }
       // Orbit chips are obstacles: tags and names steer around them.
       var tagBoxes = useRegions && zoom < 1.2 ? chipRects.slice() : [];
+      tagBoxes = tagBoxes.concat(ctlRects);   // view switch, legend, zoom buttons
       sectorHits = [];
       function boxFree(b) {
         for (var q = 0; q < tagBoxes.length; q++) { var o = tagBoxes[q]; if (b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]) return false; }
         return true;
       }
-      // Sector territories: a glowing border on the land + a live tag.
+      // Sector territories: a faint tint on the land + a sign (drawn last, on top).
+      var signQueue = [];
       if (useRegions && nodes.length) {
         var stats = {};
         nodes.forEach(function (nd) {
           if (!nd.region) return;
-          var st = stats[nd.region] = stats[nd.region] || { n: 0, sum: 0, k: 0, w: 0 };
+          var st = stats[nd.region] = stats[nd.region] || { n: 0, sum: 0, k: 0, w: 0, up: 0, dn: 0 };
+          if (nd.chg != null) { if (nd.chg > 0.05) st.up++; else if (nd.chg < -0.05) st.dn++; }
           st.n++; if (pMode && nd.weight != null) st.w += Number(nd.weight);
           // VIX moves opposite to stocks, so it stays a pin but not part of the average.
           if (nd.chg != null && !/VIX/.test(String(nd.symbol).toUpperCase())) { st.sum += Number(nd.chg); st.k++; }
@@ -1228,31 +1235,109 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             ctx.stroke();
             ctx.restore();
           }
-          // Floating tag above the territory.
-          if (C[2] > 0.42) {
-            var lift = project(cen[0] * 1.16, cen[1] * 1.16, cen[2] * 1.16, R, cx, cy);
-            ctx.font = '800 ' + (W > 520 ? 11 : 10) + 'px "IBM Plex Mono", ui-monospace, monospace';
+          // Sector sign: a holographic plate on a light beam rising from the
+          // sector's land — name, today's move, and how many stocks are up vs
+          // down (breadth bar). Tap it to fly there.
+          if (C[2] > 0.34) {
+            var small = W <= 520, more = lastHidden[k] || 0;
+            var big = isFocus ? 1.1 : 1;
+            var lift = project(cen[0] * 1.2, cen[1] * 1.2, cen[2] * 1.2, R, cx, cy);
+            var name = rg.name, pctT = avg == null ? '—' : (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%';
+            var sub = small ? '' : pMode ? ('YOU ' + (st.w >= 10 ? st.w.toFixed(0) : st.w.toFixed(1)) + '%  ·  ' + st.n + (st.n === 1 ? ' holding' : ' holdings'))
+              : ('▲' + st.up + '  ▼' + st.dn + '  ·  ' + st.n + (st.n === 1 ? ' stock' : ' stocks') + (more ? '  ·  +' + more + ' hidden' : ''));
+            var f1 = Math.round((small ? 10.5 : 13) * big), f2 = Math.round((small ? 9 : 10.5) * big);
             ctx.textBaseline = 'middle';
-            var more = lastHidden[k] || 0;
-            var t1 = rg.name, t2 = (avg == null ? st.n + ' pins' : (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%') + (more ? '  ·  +' + more : '');
-            // My Portfolio: the territory tag leads with your allocation there.
-            if (pMode) t1 = rg.name + '  ' + (st.w >= 10 ? st.w.toFixed(0) : st.w.toFixed(1)) + '%';
-            var w1 = ctx.measureText(t1).width, w2 = ctx.measureText(t2).width, bw = w1 + w2 + 22;
-            var bx = lift[0] - bw / 2, by = lift[1] - 11, box = [bx, by, bx + bw, by + 22];
-            if (!boxFree(box)) return;
+            var hasLS = 'letterSpacing' in ctx;
+            ctx.font = '800 ' + f1 + 'px "IBM Plex Mono", ui-monospace, monospace';
+            if (hasLS) ctx.letterSpacing = small ? '0.5px' : '1.2px';
+            var wName = ctx.measureText(name).width;
+            if (hasLS) ctx.letterSpacing = '0px';
+            var wPct = ctx.measureText(pctT).width;
+            ctx.font = '600 ' + f2 + 'px "IBM Plex Mono", ui-monospace, monospace';
+            var wSub = ctx.measureText(sub).width;
+            var padX = small ? 8 : 12, ph2 = small ? 22 : 44 * big;
+            var bw2 = Math.max(wName + wPct + padX * 2 + 12, wSub + padX * 2) + 6;
+            // Try above the land first, then nudge sideways / below if taken.
+            var cands = [[0, 0], [-bw2 * 0.55, 0], [bw2 * 0.55, 0], [0, -ph2 * 0.8], [0, ph2 + 26], [-bw2 * 0.55, ph2 + 26], [bw2 * 0.55, ph2 + 26]];
+            var bx, by, box = null;
+            for (var ci = 0; ci < cands.length && !box; ci++) {
+              var xlo = safeHalf ? W / 2 - safeHalf + 4 : 4, xhi = safeHalf ? W / 2 + safeHalf - 4 - bw2 : W - 4 - bw2;
+              var x0 = Math.max(xlo, Math.min(xhi, lift[0] - bw2 / 2 + cands[ci][0]));
+              var y0 = Math.max(4, Math.min(H - 4 - ph2, lift[1] - ph2 - 6 + cands[ci][1]));
+              var b0 = [x0, y0, x0 + bw2, y0 + ph2];
+              if (boxFree(b0)) { box = b0; bx = x0; by = y0; }
+            }
+            if (!box) return;
             tagBoxes.push(box);
             sectorHits.push({ key: k, box: box });
+            ctx.save(); ctx.globalAlpha = dimT;
+            // Beam from the land up to the sign + a glowing footprint.
+            var pulse = reduceMotion ? 0.5 : (Math.sin(time * 2.2 + k.length) + 1) / 2;
+            var bg = ctx.createLinearGradient(C[0], C[1], bx + bw2 / 2, by + ph2 / 2);
+            bg.addColorStop(0, rgba(colT, 0.9)); bg.addColorStop(1, rgba(colT, 0.15));
+            ctx.strokeStyle = bg; ctx.lineWidth = isFocus ? 2.4 : 1.6;
+            ctx.shadowColor = rgba(colT, 0.9); ctx.shadowBlur = 8;
+            var bxC = Math.max(bx + 12, Math.min(bx + bw2 - 12, C[0])), byC = by + ph2 < C[1] ? by + ph2 : by;
+            ctx.beginPath(); ctx.moveTo(C[0], C[1]); ctx.lineTo(bxC, byC); ctx.stroke();
+            ctx.lineWidth = 1.4; ctx.strokeStyle = rgba(colT, 0.35 + 0.4 * (1 - pulse));
+            ctx.beginPath(); ctx.ellipse(C[0], C[1], (5 + pulse * 9) * C[3], (3 + pulse * 5) * C[3], 0, 0, 6.2832); ctx.stroke();
+            ctx.fillStyle = rgba(colT, 1);
+            ctx.beginPath(); ctx.arc(C[0], C[1], 2.4 * C[3], 0, 6.2832); ctx.fill();
+            ctx.restore();
+            signQueue.push(function () {
+            ctx.save();
             ctx.globalAlpha = dimT;
-            ctx.strokeStyle = rgba(colT, 0.55); ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.moveTo(C[0], C[1]); ctx.lineTo(lift[0], by + 22); ctx.stroke();
-            ctx.fillStyle = 'rgba(3,10,22,0.82)';
-            ctx.shadowColor = rgba(colT, 0.7); ctx.shadowBlur = 12;
+            // Glass plate.
+            ctx.fillStyle = 'rgba(5,12,26,0.97)'; ctx.shadowColor = rgba(colT, isFocus ? 0.95 : 0.6); ctx.shadowBlur = isFocus ? 22 : 14;
             ctx.beginPath();
-            if (ctx.roundRect) ctx.roundRect(bx, by, bw, 22, 7); else ctx.rect(bx, by, bw, 22);
-            ctx.fill(); ctx.shadowBlur = 0; ctx.stroke();
-            ctx.fillStyle = 'rgba(232,241,255,0.95)'; ctx.fillText(t1, bx + 8, by + 11);
-            ctx.fillStyle = rgba(colT, 1); ctx.fillText(t2, bx + 14 + w1, by + 11);
-            ctx.globalAlpha = 1;
+            if (ctx.roundRect) ctx.roundRect(bx, by, bw2, ph2, 9); else ctx.rect(bx, by, bw2, ph2);
+            ctx.fill(); ctx.shadowBlur = 0;
+            var g2 = ctx.createLinearGradient(0, by, 0, by + ph2);
+            g2.addColorStop(0, rgba(colT, 0.04)); g2.addColorStop(1, rgba(colT, 0.2));
+            ctx.fillStyle = g2; ctx.fill();
+            ctx.strokeStyle = rgba(colT, isFocus ? 1 : 0.75); ctx.lineWidth = isFocus ? 1.6 : 1.1; ctx.stroke();
+            // Top accent + glint.
+            ctx.fillStyle = rgba(colT, 0.95);
+            ctx.fillRect(bx + 10, by, bw2 - 20, 2);
+            if (!reduceMotion) {
+              var gx = bx + ((time * 40 + k.length * 37) % (bw2 + 60)) - 30;
+              var gl = ctx.createLinearGradient(gx - 18, 0, gx + 18, 0);
+              gl.addColorStop(0, 'rgba(255,255,255,0)'); gl.addColorStop(0.5, 'rgba(255,255,255,0.10)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
+              ctx.save(); ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx, by, bw2, ph2, 9); else ctx.rect(bx, by, bw2, ph2); ctx.clip();
+              ctx.fillStyle = gl; ctx.fillRect(gx - 18, by, 36, ph2); ctx.restore();
+            }
+            // Row 1: NAME ........ ±x.xx%
+            var r1 = small ? by + 11.5 : by + 15 * big;
+            ctx.font = '800 ' + f1 + 'px "IBM Plex Mono", ui-monospace, monospace';
+            if (hasLS) ctx.letterSpacing = small ? '0.5px' : '1.2px';
+            ctx.fillStyle = 'rgba(240,246,255,0.98)'; ctx.shadowColor = rgba(colT, 0.8); ctx.shadowBlur = 6;
+            ctx.fillText(name, bx + padX, r1);
+            if (hasLS) ctx.letterSpacing = '0px';
+            ctx.fillStyle = rgba(colT, 1); ctx.textAlign = 'right';
+            ctx.fillText(pctT, bx + bw2 - padX, r1);
+            ctx.textAlign = 'left'; ctx.shadowBlur = 0;
+            // Row 2: breadth / allocation.
+            ctx.font = '600 ' + f2 + 'px "IBM Plex Mono", ui-monospace, monospace';
+            var r2 = by + 29 * big;
+            if (small) { /* phones: one line */ }
+            else if (pMode) { ctx.fillStyle = 'rgba(255,227,161,0.95)'; ctx.fillText(sub, bx + padX, r2); }
+            else {
+              // ▲ up in green, ▼ down in red, the rest muted.
+              var pieces = [['▲' + st.up, POS], ['  ▼' + st.dn, NEG], [sub.slice(('▲' + st.up + '  ▼' + st.dn).length), null]], xx = bx + padX;
+              pieces.forEach(function (pc) {
+                ctx.fillStyle = pc[1] ? rgba(pc[1], 1) : 'rgba(200,215,240,0.92)';
+                ctx.fillText(pc[0], xx, r2); xx += ctx.measureText(pc[0]).width;
+              });
+            }
+            // Breadth bar along the bottom edge: green share = stocks up.
+            if (!small && st.up + st.dn > 0) {
+              var bl = bx + padX, bwid = bw2 - padX * 2, byb = by + ph2 - 6, upW = bwid * st.up / (st.up + st.dn);
+              ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(bl, byb, bwid, 2.5);
+              ctx.fillStyle = rgba(POS, 0.95); ctx.fillRect(bl, byb, upW, 2.5);
+              ctx.fillStyle = rgba(NEG, 0.95); ctx.fillRect(bl + upW, byb, bwid - upW, 2.5);
+            }
+            ctx.restore();
+            });
           }
         });
       }
@@ -1449,6 +1534,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         }
         lastHidden = hiddenNow;
       }
+      // Sector signs go on top of pins and labels.
+      for (var sq = 0; sq < signQueue.length; sq++) signQueue[sq]();
     }
     tasks.push(function () { placeCard(); });
     tasks.push(draw);
