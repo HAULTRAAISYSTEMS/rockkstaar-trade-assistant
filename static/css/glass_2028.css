@@ -18,9 +18,10 @@ html.cc27 {
 
 /* Outer panes (blurred glass). */
 html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .intel-kpi, .liq-card, .wa-card, .lab-panel, .lab-banner, .tw-panel, .tw-stat,
-              .dp, .nd-heat, .learn-fold, .tt-card, .sm-top, .stat, .cmd27-m, .cmd27-orbit-bar, .ptabs,
+              .dp, .nd-heat, .learn-fold, .tt-card, .sm-top, .stat, .cmd27-m, .cmd27-orbit-bar,
               .aplus-command__status, .cmd27-sector) {
-  position: relative;
+  /* No position here: cards keep their own (sticky tab bar, floating sector
+     panel, phone bottom sheet…). The glass is all background + border. */
   background:
     radial-gradient(340px circle at var(--gx, -400px) var(--gy, -400px), rgba(120, 205, 255, .16), transparent 60%),
     radial-gradient(130% 90% at 0% 0%, rgba(255, 255, 255, .09), transparent 42%),
@@ -34,7 +35,7 @@ html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .intel-kp
     0 34px 70px -40px rgba(57, 198, 255, .32) !important;
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
   backdrop-filter: blur(var(--glass-blur)) saturate(150%);
-  transition: transform .35s cubic-bezier(.2, .8, .2, 1), box-shadow .35s ease, border-color .35s ease;
+  transition: --cc-wash .3s, transform .35s cubic-bezier(.2, .8, .2, 1), box-shadow .35s ease, border-color .35s ease;
 }
 
 /* Inner tiles sit on glass already: translucent, no second blur. */
@@ -47,7 +48,7 @@ html.cc27 :is(#workspace-main, body) :is(.learn-card, .tw-context-card) {
   background: linear-gradient(155deg, rgba(130, 180, 255, .08), rgba(6, 14, 30, .34)) !important;
   border: 1px solid rgba(170, 215, 255, .14) !important;
   border-top-color: rgba(200, 235, 255, .26) !important;
-  transition: transform .3s cubic-bezier(.2, .8, .2, 1), border-color .3s ease, box-shadow .3s ease;
+  transition: --cc-wash .3s, transform .3s cubic-bezier(.2, .8, .2, 1), border-color .3s ease, box-shadow .3s ease;
 }
 
 /* Lift on hover (mouse only): the card rises toward you, edge brightens. */
@@ -83,7 +84,7 @@ html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .liq-card
 /* People who asked their OS for less transparency / motion get solid panes. */
 @media (prefers-reduced-transparency: reduce) {
   html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .intel-kpi, .liq-card, .wa-card, .lab-panel, .tw-panel, .tw-stat, .dp, .nd-heat,
-                .learn-fold, .tt-card, .sm-top, .stat, .cmd27-m, .cmd27-orbit-bar, .ptabs, .cmd27-sector) {
+                .learn-fold, .tt-card, .sm-top, .stat, .cmd27-m, .cmd27-orbit-bar, .cmd27-sector) {
     background: rgba(7, 15, 32, .94) !important; -webkit-backdrop-filter: none; backdrop-filter: none;
   }
 }
@@ -95,4 +96,24 @@ html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .liq-card
 /* Text on glass: a whisper of shadow keeps small type crisp over the scene. */
 html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .liq-card, .wa-card, .lab-panel, .tw-panel, .learn-fold, .cmd27-m, .stat) {
   text-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+}
+
+/* The open sector list sits over the globe and its labels: it gets dark,
+   nearly solid glass so the rows read cleanly, and the things it would
+   collide with step aside while it is open. */
+html.cc27 :is(#workspace-main, body) .cmd27-sector {
+  background:
+    radial-gradient(130% 90% at 0% 0%, rgba(255, 255, 255, .07), transparent 42%),
+    linear-gradient(155deg, rgba(22, 44, 88, .62), rgba(4, 10, 24, .95) 55%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(140%); backdrop-filter: blur(18px) saturate(140%);
+  z-index: 7 !important;
+}
+html.cc27 .cmd27-hero__globe.has-sector :is(.cmd27-mode, .cmd27-legend) { display: none !important; }
+@media (min-width: 1081px) {
+  /* Wide screens: the panel covers the title column's spot — hide that column meanwhile. */
+  html.cc27 .cmd27-hero:has(.cmd27-hero__globe.has-sector:not(.is-full)) .cmd27-hero__left > * { visibility: hidden; }
+}
+@media (max-width: 760px) {
+  /* Phone bottom sheet: the zoom buttons would sit on top of its rows. */
+  html.cc27 .cmd27-hero__globe.has-sector .cmd27-zoom { display: none !important; }
 }
