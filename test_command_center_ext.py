@@ -138,6 +138,6 @@ def test_command_center_layout_redesign():
 
 def test_globe_scales_up_on_big_canvas():
     js = open("static/js/command_center_3d.js", encoding="utf-8").read()
-    assert "Math.min(W, H) > 420 ? 0.37 : 0.33" in js
+    assert "Math.min(W, H) > 420 ? 0.35 : 0.33" in js
     css = open("static/css/today.css", encoding="utf-8").read()
     assert ".cc-hero-xl > .cc3d-orb" in css and "max-width: 560px" in css

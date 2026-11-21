@@ -79,7 +79,8 @@
     var n = movers.length;
     movers.forEach(function (q, i) {
       var a = (-Math.PI / 2) + (i / Math.max(n, 1)) * Math.PI * 2 + 0.3;
-      var x = 50 + Math.cos(a) * 44, y = 50 + Math.sin(a) * 41;
+      var narrow = window.innerWidth < 760;
+      var x = 50 + Math.cos(a) * (narrow ? 38 : 46), y = 50 + Math.sin(a) * (narrow ? 44 : 45);
       var el = document.createElement(chartUrl ? 'a' : 'span');
       el.className = 'cmd27-chip ' + (q.change_pct < 0 ? 'is-down' : 'is-up');
       if (chartUrl) el.href = chartUrl.replace('__T__', encodeURIComponent(q.symbol));

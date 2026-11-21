@@ -270,6 +270,63 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
        Each frame every pixel of the disc is ray-cast through the same
        perspective as project(), rotated back to lat/lon and shaded. */
     var EARTH_SIL = Math.sqrt(10.24 * 4 / 36.96);   // silhouette radius / R for persp 3.2
+
+    // World point for a latitude/longitude, in the same frame as project()
+    // and the texture (east is +lon).
+    function geo(lat, lon) {
+      var a = lat * 0.0174533, o = lon * 0.0174533;
+      return [Math.cos(a) * Math.cos(o), -Math.sin(a), -Math.cos(a) * Math.sin(o)];
+    }
+    function toCam(v) {
+      var cY = Math.cos(rotY), sY = Math.sin(rotY), cX = Math.cos(rotX), sX = Math.sin(rotX);
+      var x1 = v[0] * cY + v[2] * sY, z1 = -v[0] * sY + v[2] * cY;
+      return [x1, v[1] * cX - z1 * sX, v[1] * sX + z1 * cX];
+    }
+    // Where the sun is overhead right now (declination + hour angle), so the
+    // lit half of the globe is the real day side.
+    function subsolar(now) {
+      var start = Date.UTC(now.getUTCFullYear(), 0, 0), day = (now - start) / 864e5;
+      var decl = -23.44 * Math.cos(2 * Math.PI / 365 * (day + 10));
+      var hrs = now.getUTCHours() + now.getUTCMinutes() / 60;
+      return [decl, -15 * (hrs - 12)];
+    }
+    var sunCam = [-0.52, -0.42, 0.74];
+
+    /* Exchanges: a beacon pulses green while the exchange is inside its
+       regular session by its own local clock (holidays are not counted). */
+    var EXCH = [
+      ['NYSE', 40.71, -74.01, 'America/New_York', 930, 1600],
+      ['TSX', 43.65, -79.38, 'America/Toronto', 930, 1600],
+      ['B3', -23.55, -46.63, 'America/Sao_Paulo', 1000, 1700],
+      ['LSE', 51.51, -0.09, 'Europe/London', 800, 1630],
+      ['XETRA', 50.11, 8.68, 'Europe/Berlin', 900, 1730],
+      ['NSE', 19.06, 72.87, 'Asia/Kolkata', 915, 1530],
+      ['SSE', 31.23, 121.47, 'Asia/Shanghai', 930, 1500],
+      ['HKEX', 22.28, 114.16, 'Asia/Hong_Kong', 930, 1600],
+      ['TSE', 35.68, 139.77, 'Asia/Tokyo', 900, 1530],
+      ['ASX', -33.87, 151.21, 'Australia/Sydney', 1000, 1600]
+    ].map(function (e) { return { name: e[0], lat: e[1], lon: e[2], tz: e[3], open: e[4], close: e[5], v: geo(e[1], e[2]), live: false }; });
+    var ARCS = [['NYSE', 'LSE'], ['LSE', 'XETRA'], ['XETRA', 'NSE'], ['NSE', 'HKEX'], ['HKEX', 'TSE'], ['TSE', 'ASX'],
+                ['NYSE', 'B3'], ['NYSE', 'TSX'], ['LSE', 'HKEX'], ['NYSE', 'TSE'], ['SSE', 'HKEX'], ['LSE', 'B3']];
+    function exch(n) { for (var i = 0; i < EXCH.length; i++) if (EXCH[i].name === n) return EXCH[i]; return null; }
+    var sessionAt = 0;
+    function refreshSessions(now) {
+      EXCH.forEach(function (e) {
+        try {
+          var parts = new Intl.DateTimeFormat('en-US', { timeZone: e.tz, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
+          var get = function (t) { for (var i = 0; i < parts.length; i++) if (parts[i].type === t) return parts[i].value; return ''; };
+          var wd = get('weekday'), hm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
+          e.live = wd !== 'Sat' && wd !== 'Sun' && hm >= e.open && hm < e.close;
+        } catch (err) { e.live = false; }
+      });
+    }
+    // Great-circle arc lifted off the surface.
+    function arcPoint(a, b, t, lift) {
+      var d = Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])));
+      var sd = Math.sin(d) || 1e-6, k1 = Math.sin((1 - t) * d) / sd, k2 = Math.sin(t * d) / sd;
+      var h = 1 + lift * Math.sin(Math.PI * t) * Math.min(1, d / 1.2);
+      return [(a[0] * k1 + b[0] * k2) * h, (a[1] * k1 + b[1] * k2) * h, (a[2] * k1 + b[2] * k2) * h];
+    }
     var tex = null, TW = 0, TH = 0;
     var eCanvas = document.createElement('canvas'), eCtx = eCanvas.getContext('2d');
     var eImg = null, eD = 0, eRay = null;
@@ -338,8 +395,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       if (D !== eD) { buildRays(D); eTilt = null; }
       if (eTilt !== rotX) buildLookup();
       var data = eImg.data, ray = eRay, row = eRow, col = eCol;
-      var Lx = -0.52, Ly = -0.42, Lz = 0.74;
-      var Hx = Lx, Hy = Ly, Hz = Lz + 1, hl = Math.sqrt(Hx * Hx + Hy * Hy + Hz * Hz); Hx /= hl; Hy /= hl; Hz /= hl;
+      var Lx = sunCam[0], Ly = sunCam[1], Lz = sunCam[2];
+      var Hx = Lx, Hy = Ly, Hz = Lz + 1, hl = Math.sqrt(Hx * Hx + Hy * Hy + Hz * Hz) || 1; Hx /= hl; Hy /= hl; Hz /= hl;
       var tw = TW, rowB = TW * TH * 4;
       var shift = (rotY / (2 * Math.PI)) * tw; shift = shift - Math.floor(shift / tw) * tw;
       for (var p = 0, n = D * D; p < n; p++) {
@@ -349,10 +406,14 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         var tx = (col[p] - shift) | 0; if (tx < 0) tx += tw; if (tx >= tw) tx -= tw;
         var ti = (row[p] + tx) * 4;
         var r = tex[ti], g = tex[ti + 1], b = tex[ti + 2], lights = tex[rowB + ti] / 255;
-        var dif = x1 * Lx + y1 * Ly + z2 * Lz; if (dif < 0) dif = 0;
-        var shade = 0.45 + 0.9 * dif;
-        var lg = lights * (0.8 + 0.9 * (1 - dif));
+        var raw = x1 * Lx + y1 * Ly + z2 * Lz, dif = raw < 0 ? 0 : raw;
+        var shade = 0.34 + 0.95 * dif;
+        var nightness = 0.5 - raw * 4; nightness = nightness < 0 ? 0 : (nightness > 1 ? 1 : nightness);
+        var lg = lights * (0.35 + 1.35 * nightness);
         var R2 = r * shade + 210 * lg, G2 = g * shade + 255 * lg, B2 = b * shade + 72 * lg;
+        // Warm twilight along the terminator.
+        var tb = raw < 0 ? -raw : raw;
+        if (tb < 0.07 && g > b) { tb = (1 - tb / 0.07) * 0.35; R2 += 90 * tb; G2 += 50 * tb; }
         if (b > g) {
           var sp = x1 * Hx + y1 * Hy + z2 * Hz;
           if (sp > 0.97) { sp = Math.pow(sp, 220) * 80; R2 += sp * 0.6; G2 += sp * 0.9; B2 += sp; }
@@ -580,7 +641,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       if (!dragging && !reduceMotion) { rotY += velY * dt; velY += ((selected ? 0 : 0.1) - velY) * (selected ? 0.2 : 0.02); }
       ctx.clearRect(0, 0, W, H);
       // Bigger canvas, bigger globe: fill more of it once there is room.
-      var R = Math.min(W, H) * (Math.min(W, H) > 420 ? 0.37 : 0.33);
+      var R = Math.min(W, H) * (Math.min(W, H) > 420 ? 0.35 : 0.33);
       var cx = W / 2 + pointer.x * 6, cy = H * 0.47 + pointer.y * 6;
 
       // Core glow
@@ -590,7 +651,10 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       cg.addColorStop(1, rgba(CYAN, 0));
       ctx.fillStyle = cg;
       ctx.beginPath(); ctx.arc(cx, cy, R * 1.25, 0, 6.2832); ctx.fill();
-      // Real Earth: coastlines + city lights texture, lit and shaded per pixel.
+      // Real Earth: coastlines + city lights texture, lit by the real sun.
+      var nowD = new Date();
+      var ss = subsolar(nowD); sunCam = toCam(geo(ss[0], ss[1]));
+      if (!sessionAt || time - sessionAt > 30) { refreshSessions(nowD); sessionAt = time || 0.001; }
       if (!drawEarth(cx, cy, R)) {
         var earthBg = ctx.createRadialGradient(cx - R * 0.28, cy - R * 0.3, R * 0.1, cx, cy, R);
         earthBg.addColorStop(0, 'rgba(10, 48, 72, 0.88)');
@@ -683,7 +747,89 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       ctx.beginPath(); ctx.arc(B2[0], B2[1], 2.8 * B2[3], 0, 6.2832); ctx.fill();
       ctx.shadowBlur = 0;
        
-      // Data nodes: spike length = size of the move, colour = direction
+      // Holographic HUD ring: slow-turning ticks and arc segments.
+      var RSo = R * EARTH_SIL, hr = RSo * 1.13, spin = reduceMotion ? 0 : time * 0.12;
+      ctx.save();
+      ctx.lineWidth = 1;
+      for (var tk = 0; tk < 120; tk++) {
+        var ang = spin + tk / 120 * 6.2832, long = tk % 10 === 0;
+        var r0 = hr - (long ? 7 : 3), r1 = hr + (long ? 2 : 0);
+        ctx.strokeStyle = rgba(CYAN, long ? 0.55 : 0.22);
+        ctx.beginPath(); ctx.moveTo(cx + Math.cos(ang) * r0, cy + Math.sin(ang) * r0); ctx.lineTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1); ctx.stroke();
+      }
+      ctx.lineWidth = 2;
+      ctx.shadowColor = rgba(CYAN, 0.9); ctx.shadowBlur = 10;
+      [[0.1, 0.9], [1.6, 2.2], [3.3, 4.4], [5.0, 5.5]].forEach(function (seg, i) {
+        ctx.strokeStyle = rgba(i % 2 ? POS : CYAN, 0.7);
+        ctx.beginPath(); ctx.arc(cx, cy, hr + 6, -spin * 1.6 + seg[0], -spin * 1.6 + seg[1]); ctx.stroke();
+      });
+      ctx.shadowBlur = 0;
+      ctx.restore();
+
+      // Trading arcs between money centres, with light pulses flowing along them.
+      ctx.save();
+      for (var ai = 0; ai < ARCS.length; ai++) {
+        var ea = exch(ARCS[ai][0]), eb = exch(ARCS[ai][1]);
+        var liveArc = ea.live || eb.live, prevA = null, segs = 36;
+        ctx.lineWidth = liveArc ? 1.6 : 1;
+        for (var si = 0; si <= segs; si++) {
+          var Pa = arcPoint(ea.v, eb.v, si / segs, 0.32);
+          var Q = project(Pa[0], Pa[1], Pa[2], R, cx, cy);
+          if (prevA) {
+            var vis = (prevA[2] + Q[2]) / 2;
+            // Hidden behind the globe? skip (the limb sits around z≈0.3 of the radius in this view).
+            if (vis > -0.05) {
+              ctx.strokeStyle = rgba(liveArc ? POS : CYAN, (liveArc ? 0.55 : 0.28) * Math.min(1, 0.4 + vis));
+              ctx.beginPath(); ctx.moveTo(prevA[0], prevA[1]); ctx.lineTo(Q[0], Q[1]); ctx.stroke();
+            }
+          }
+          prevA = Q;
+        }
+        // Pulses
+        for (var pk = 0; pk < 2; pk++) {
+          var pt = ((reduceMotion ? 0.5 : time * 0.22) + ai * 0.37 + pk * 0.5) % 1;
+          var Pp = arcPoint(ea.v, eb.v, pt, 0.32), Qp = project(Pp[0], Pp[1], Pp[2], R, cx, cy);
+          if (Qp[2] < 0) continue;
+          ctx.fillStyle = rgba(liveArc ? POS : CYAN, 0.95);
+          ctx.shadowColor = rgba(liveArc ? POS : CYAN, 1); ctx.shadowBlur = 12;
+          ctx.beginPath(); ctx.arc(Qp[0], Qp[1], 2.2 * Qp[3], 0, 6.2832); ctx.fill();
+        }
+        ctx.shadowBlur = 0;
+      }
+      // Exchange beacons + labels (near side only).
+      ctx.font = '700 ' + (W > 520 ? 10 : 9) + 'px "IBM Plex Mono", ui-monospace, monospace';
+      ctx.textBaseline = 'middle';
+      var tagBoxes = [];
+      for (var ei = 0; ei < EXCH.length; ei++) {
+        var ex = EXCH[ei], Pe = project(ex.v[0], ex.v[1], ex.v[2], R, cx, cy);
+        if (Pe[2] < 0.12) continue;
+        var colE = ex.live ? POS : GOLD, ph = reduceMotion ? 0.5 : (time * 0.8 + ei * 0.13) % 1;
+        ctx.strokeStyle = rgba(colE, (1 - ph) * 0.8); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(Pe[0], Pe[1], (4 + ph * 14) * Pe[3], 0, 6.2832); ctx.stroke();
+        ctx.fillStyle = rgba(colE, 1); ctx.shadowColor = rgba(colE, 1); ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.arc(Pe[0], Pe[1], 2.6 * Pe[3], 0, 6.2832); ctx.fill();
+        ctx.shadowBlur = 0;
+        if (Pe[2] > 0.3) {
+          var tag = ex.name + (ex.live ? ' · OPEN' : ' · CLOSED'), tw2 = ctx.measureText(tag).width;
+          var tx2 = Pe[0] + 8, ty2 = Pe[1] - 10, clash = false;
+          for (var bi = 0; bi < tagBoxes.length; bi++) {
+            var bb = tagBoxes[bi];
+            if (tx2 - 4 < bb[2] && tx2 + tw2 + 4 > bb[0] && ty2 - 8 < bb[3] && ty2 + 8 > bb[1]) { clash = true; break; }
+          }
+          if (!clash) { tx2 = tx2; } else { ty2 = Pe[1] + 12; for (var bj = 0; bj < tagBoxes.length; bj++) { var b2 = tagBoxes[bj]; if (tx2 - 4 < b2[2] && tx2 + tw2 + 4 > b2[0] && ty2 - 8 < b2[3] && ty2 + 8 > b2[1]) { clash = 2; break; } } }
+          if (clash === 2) continue;
+          tagBoxes.push([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8]);
+          ctx.fillStyle = 'rgba(3,10,22,0.78)';
+          ctx.strokeStyle = rgba(colE, 0.6); ctx.lineWidth = 1;
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(tx2 - 4, ty2 - 8, tw2 + 8, 16, 5); else ctx.rect(tx2 - 4, ty2 - 8, tw2 + 8, 16);
+          ctx.fill(); ctx.stroke();
+          ctx.fillStyle = rgba(colE, 1);
+          ctx.fillText(tag, tx2, ty2);
+        }
+      }
+      ctx.restore();
+
       var drawn = [];
       for (var n = 0; n < nodes.length; n++) {
         var nd = nodes[n];
@@ -697,7 +843,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       drawn.sort(function (a, b) { return a[1][2] - b[1][2]; });
       // A crowded globe labels only its biggest movers on the near side,
       // so names never pile on top of each other. Every node still draws.
-      var labelSet = null;
+      var labelSet = null, sceneOn = document.documentElement.classList.contains('cc-scene');
       if (drawn.length > 16) {
         labelSet = {};
         drawn.filter(function (it) { return it[1][2] > 0.15 && it[2].chg != null; })
@@ -727,7 +873,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           ctx.strokeStyle = rgba(GOLD, 0.95); ctx.lineWidth = 1.5;
           ctx.beginPath(); ctx.arc(it[1][0], it[1][1], pr, 0, 6.2832); ctx.stroke();
         }
-        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && (!labelSet || labelSet[it[2].symbol])))) {
+        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && !sceneOn && (!labelSet || labelSet[it[2].symbol])))) {
           var label = it[2].symbol + (it[2].chg != null ? ' ' + (it[2].chg >= 0 ? '+' : '') + Number(it[2].chg).toFixed(2) + '%' : '');
           var lx2 = it[1][0] + 7, ly2 = it[1][1];
           var tw = ctx.measureText(label).width;

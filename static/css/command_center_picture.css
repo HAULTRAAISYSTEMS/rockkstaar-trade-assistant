@@ -14,11 +14,11 @@
   backdrop-filter: blur(10px); padding: 18px 20px; min-width: 0; }
 
 /* ── Hero ─────────────────────────────────────────────────────────── */
-.cmd27 .cmd27-hero { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(360px, 1.15fr) minmax(320px, .95fr);
-  align-items: center; gap: 22px; min-height: 430px; padding: 10px 6px; margin: 0;
+.cmd27 .cmd27-hero { display: grid; grid-template-columns: minmax(280px, .85fr) minmax(460px, 1.5fr) minmax(300px, .85fr);
+  align-items: center; gap: 10px; min-height: 560px; padding: 10px 6px; margin: 0;
   background: none; border: 0; box-shadow: none; }
 .cmd27 .cmd27-hero::before, .cmd27 .cmd27-hero::after { display: none; }
-.cmd27-title { margin: 0; font-size: clamp(40px, 4.1vw, 68px); line-height: 1.02; font-weight: 800; letter-spacing: -.02em;
+.cmd27-title { margin: 0; font-size: clamp(38px, 3.7vw, 64px); line-height: 1.02; font-weight: 800; letter-spacing: -.02em;
   background: linear-gradient(180deg, #fff 0%, #cfe3ff 60%, #8fb7ff 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .cmd27-title sup { font-size: .32em; vertical-align: super; color: #cfe3ff; -webkit-text-fill-color: #cfe3ff; }
 .cmd27-sub { margin: 12px 0 18px; font-size: 21px; color: var(--c-cy); font-weight: 500; }
@@ -38,7 +38,7 @@
 .cmd27 .cc-shortcuts { margin-top: 8px; color: #5f7394; font-size: 11px; }
 .cmd27 .cc-shortcuts kbd { border: 1px solid #2a3a57; border-radius: 4px; padding: 0 5px; font-size: 10px; }
 
-.cmd27-hero__globe { position: relative; height: 430px; min-width: 0; }
+.cmd27-hero__globe { position: relative; height: 580px; min-width: 0; margin: -30px -20px -10px; }
 .cmd27-hero__globe::before { content: ""; position: absolute; inset: 8% 6%; border-radius: 50%;
   background: radial-gradient(circle, rgba(57,198,255,.22) 0%, rgba(57,198,255,.05) 45%, transparent 70%); filter: blur(10px); }
 .cmd27 .cc3d-orb { position: absolute; inset: 0; margin: 0; width: 100%; height: 100%; border: 0; background: none; }
@@ -201,7 +201,7 @@
 }
 @media (max-width: 1180px) {
   .cmd27 .cmd27-hero { grid-template-columns: 1fr 1fr; }
-  .cmd27-hero__globe { grid-column: 1 / -1; grid-row: 2; height: 380px; }
+  .cmd27-hero__globe { grid-column: 1 / -1; grid-row: 2; height: 520px; margin: 0; }
   .cmd27-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .cmd27 .cmd27-now { grid-template-columns: 1fr; }
   .cmd27-launch { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -209,7 +209,7 @@
 @media (max-width: 760px) {
   .cmd27 { padding: 12px 12px 90px; gap: 14px; }
   .cmd27 .cmd27-hero { grid-template-columns: 1fr; min-height: 0; gap: 14px; }
-  .cmd27-hero__globe { grid-row: auto; height: 300px; }
+  .cmd27-hero__globe { grid-row: auto; height: 400px; margin: 0 -12px; }
   .cmd27-title { font-size: 38px; } .cmd27-sub { font-size: 16px; margin: 8px 0 12px; }
   .cmd27-chip { min-width: 0; padding: 4px 8px; font-size: 11px; } .cmd27-chip small { font-size: 11px; }
   .cmd27-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -230,7 +230,7 @@ html.cc27 .liq-page.cmd27 .cmd27-trend { display: flex !important; flex-directio
   outline: 0 !important; margin: 10px 0 0 !important; padding: 10px 0 0 !important; width: auto !important; }
 html.cc27 .liq-page.cmd27 .cmd27-vixmeta { position: static !important; display: block !important; }
 html.cc27 .liq-page.cmd27 .cmd27-hero__globe [data-cc3d-orb] { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important;
-  aspect-ratio: auto !important; margin: 0 !important; transform: none !important; }
+  aspect-ratio: auto !important; margin: 0 !important; transform: none !important; max-width: none !important; max-height: none !important; min-height: 0 !important; }
 html.cc27 .liq-page.cmd27 .cc3d-hud { display: none !important; }
 html.cc27 .liq-page.cmd27 > .cmd27-hero { display: grid !important; }
 
