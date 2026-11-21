@@ -65,56 +65,91 @@
     </div>
 
     <aside class="cmd27-hero__pulse">
-      <div class="cc-card cc-pulse cmd27-pulse" id="cc-pulse" data-pulse-url="/api/today/pulse"
+      {# Game Plan: the Rockkstaar market check, live (command_gameplan.py). The
+         ids cc-spy / cc-qqq / cc-vix / cc-regime / cm-* are kept so the live
+         scripts keep updating them. #}
+      <div class="cc-card cc-pulse cmd27-pulse cmd27-plan" id="cc-pulse" data-pulse-url="/api/today/pulse"
            data-session="{{ 'pre' if pulse.session and 'pre' in (pulse.session|string|lower) else (pulse.session or '')|lower }}" aria-live="polite">
         <div class="cmd27-pulse__head">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 12h4l2.2-5.5 4.3 11 2.2-5.5H21"/></svg>
-          <h2>Market Pulse</h2>
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3 4 7v5c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V7Z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
+          <h2>Game Plan</h2>
           <span class="cc-live" id="cc-pulse-live"><i class="cc-dot"></i><span id="cc-pulse-live-text">{{ 'Live' if pulse.live else 'Snapshot' }}</span></span>
         </div>
-        <div class="cmd27-rows">
-          <div class="cmd27-row"><span class="cmd27-row__name">S&amp;P 500 <span class="cc-p-lbl" id="cc-spy-k">{{ pulse.spy_label or 'SPY' }}</span></span><b class="cmd27-px" data-px="SPY">—</b><strong class="cc-p-val {{ dir(pulse.spy) }}" id="cc-spy">{{ pct(pulse.spy) }}</strong></div>
-          <div class="cmd27-row"><span class="cmd27-row__name">Nasdaq <span class="cc-p-lbl" id="cc-qqq-k">{{ pulse.qqq_label or 'QQQ' }}</span></span><b class="cmd27-px" data-px="QQQ">—</b><strong class="cc-p-val {{ dir(pulse.qqq) }}" id="cc-qqq">{{ pct(pulse.qqq) }}</strong></div>
-          <div class="cmd27-row"><span class="cmd27-row__name">Dow <span class="cc-p-lbl">DIA</span></span><b class="cmd27-px" data-px="DIA">—</b><strong class="cc-p-val" data-chg="DIA">—</strong></div>
-          <div class="cmd27-row"><span class="cmd27-row__name">Russell 2000 <span class="cc-p-lbl">IWM</span></span><b class="cmd27-px" data-px="IWM">—</b><strong class="cc-p-val" data-chg="IWM">—</strong></div>
-          <div class="cmd27-row"><span class="cmd27-row__name"><span class="cc-p-lbl">VIX</span> {{ pulse.vix_regime or '' }}</span><b class="cmd27-px" id="cc-vix">{{ '%.2f'|format(pulse.vix) if pulse.vix else '—' }}</b><strong class="cc-p-val" data-chg="VIX">—</strong></div>
+        <div class="cmd27-verdict is-pending" id="gp-verdict">
+          <b id="gp-word">Checking…</b>
+          <span id="gp-rule">Running your market check: SPY &amp; QQQ structure, VIX, the dollar.</span>
         </div>
+        <ul class="cmd27-checks">
+          <li data-check="SPY"><i class="cmd27-dot"></i><span id="cc-spy-k">{{ pulse.spy_label or 'SPY' }}</span><em id="gp-spy">—</em><strong class="cc-p-val {{ dir(pulse.spy) }}" id="cc-spy">{{ pct(pulse.spy) }}</strong></li>
+          <li data-check="QQQ"><i class="cmd27-dot"></i><span id="cc-qqq-k">{{ pulse.qqq_label or 'QQQ' }}</span><em id="gp-qqq">—</em><strong class="cc-p-val {{ dir(pulse.qqq) }}" id="cc-qqq">{{ pct(pulse.qqq) }}</strong></li>
+          <li data-check="VIX"><i class="cmd27-dot"></i><span>VIX</span><em id="gp-vix">{{ pulse.vix_regime or '—' }}</em><strong class="cc-p-val" id="cc-vix">{{ '%.2f'|format(pulse.vix) if pulse.vix else '—' }}</strong></li>
+          <li data-check="DXY"><i class="cmd27-dot"></i><span>DXY</span><em id="gp-dxy">—</em><strong class="cc-p-val" id="gp-dxy-chg">—</strong></li>
+        </ul>
         <p class="cc-p-meta cmd27-vixmeta" id="cc-vix-meta">{{ pulse.vix_freshness or ('As of ' ~ pulse.vix_as_of if pulse.vix_as_of else 'Latest available') }}</p>
-        <div class="cc-pulse-regime cmd27-trend">
-          <span class="cc-p-lbl">Trend</span><strong class="cc-regime-val" id="cc-regime">{{ pulse.trend_label if pulse.known else '—' }}</strong><span class="cc-regime-meta" id="cc-regime-meta">{{ pulse.regime_meta if pulse.known else 'not read yet' }}</span>
-          <span class="cc-pulse-sub" id="cc-pulse-sub">{{ pulse.summary or '' }}</span>
+        <div class="cmd27-levels" id="gp-levels" hidden></div>
+        <div class="cmd27-gp-inputs">
+          <div id="cm-wrap" class="cm-wrap cmd27-mood" aria-label="Market mood">
+            <svg viewBox="0 0 220 130" class="cmd27-mood__dial" aria-hidden="true">
+              <defs><linearGradient id="cm-grad" x1="0" x2="1"><stop offset="0" stop-color="#ff5470"/><stop offset=".5" stop-color="#f5c451"/><stop offset="1" stop-color="#22e39a"/></linearGradient></defs>
+              <path d="M20 115 A90 90 0 0 1 200 115" fill="none" stroke="url(#cm-grad)" stroke-width="16" stroke-linecap="round" opacity=".9"/>
+              <g id="cm-needle" style="transform-origin:110px 115px;transform:rotate(-90deg)"><line x1="110" y1="115" x2="110" y2="42" stroke="#e8f1ff" stroke-width="5" stroke-linecap="round"/><circle cx="110" cy="115" r="8" fill="#e8f1ff"/></g>
+            </svg>
+            <div class="cmd27-mood__read"><small>App mood</small><b id="cm-label">—</b><em id="cm-score"></em></div>
+            <p class="cm-note" id="cm-note" hidden></p>
+            <details class="cmd27-why"><summary>What's in the score</summary><div class="cm-parts" id="cm-parts"></div></details>
+          </div>
+          <div class="cmd27-gp-mini">
+            <p class="cc-pulse-regime"><span class="cc-p-lbl">Trend</span> <strong class="cc-regime-val" id="cc-regime">{{ pulse.trend_label if pulse.known else '—' }}</strong> <span class="cc-regime-meta" id="cc-regime-meta">{{ pulse.regime_meta if pulse.known else 'not read yet' }}</span></p>
+            <p class="cmd27-liq">Liquidity <strong id="cc-liq" data-href="{{ url_for('macro_page') }}">{{ pulse.liquidity_label or '—' }}</strong></p>
+            <p class="cmd27-futures">
+              <span id="cc-es-cell"{% if not pulse.es %} hidden{% endif %}>ES <strong class="{{ dir(pulse.es) }}" id="cc-es">{{ pct(pulse.es) }}</strong></span>
+              <span id="cc-nq-cell"{% if not pulse.nq %} hidden{% endif %}>NQ <strong class="{{ dir(pulse.nq) }}" id="cc-nq">{{ pct(pulse.nq) }}</strong></span>
+            </p>
+          </div>
         </div>
-        <div class="cmd27-futures">
-          <span id="cc-es-cell"{% if not pulse.es %} hidden{% endif %}>ES <strong class="{{ dir(pulse.es) }}" id="cc-es">{{ pct(pulse.es) }}</strong></span>
-          <span id="cc-nq-cell"{% if not pulse.nq %} hidden{% endif %}>NQ <strong class="{{ dir(pulse.nq) }}" id="cc-nq">{{ pct(pulse.nq) }}</strong></span>
-        </div>
+        {% set nx_ev = (week | selectattr('kind', 'ne', 'EARNINGS') | selectattr('impact', 'equalto', 'HIGH') | list | first) if week else None %}
+        {% set nx_ev = nx_ev or next_up %}
+        {% if nx_ev %}
+        <p class="cmd27-next" id="gp-next" data-date="{{ nx_ev.date or '' }}" data-time="{{ nx_ev.time or '' }}">
+          <span>Next catalyst</span><b>{{ nx_ev.title }}</b><em id="gp-countdown">{{ nx_ev.date_label or '' }}{% if nx_ev.time %} · {{ nx_ev.time }}{% endif %}</em>
+        </p>
+        {% endif %}
+        <span class="cc-pulse-sub" id="cc-pulse-sub" hidden>{{ pulse.summary or '' }}</span>
         <p class="cc-pulse-note" id="cc-pulse-note">{{ pulse.note or '' }}</p>
       </div>
     </aside>
   </header>
 
   <div id="liq-status-banner" class="cc-status-banner" hidden></div>
-  <div id="market-story-banner" class="cc-story-banner cmd27-story">
-    {%- if story and (story.headline or story.summary) %}
-      <span class="cc-story-tag">{{ story.regime or 'Market Story' }}</span>
-      <p>{{ story.headline or story.summary }}</p>
-    {%- endif -%}
-  </div>
+  {# The day's story lives in the AI briefing; this hook stays for the scripts. #}
+  <div id="market-story-banner" class="cc-story-banner cmd27-story" hidden></div>
 
-  {# ── Index strip ─────────────────────────────────────────────────────── #}
-  <section class="cmd27-kpis" aria-label="Index moves today">
-    {% for sym, name, icon in [('SPY', 'S&P 500', 'trend'), ('QQQ', 'Nasdaq', 'bars'), ('DIA', 'Dow', 'stack'), ('IWM', 'Russell 2000', 'grid'), ('VIX', 'VIX', 'pulse')] %}
-    <article class="cmd27-kpi" data-kpi="{{ sym }}">
-      <span class="cmd27-kpi__ic" aria-hidden="true">
-        {%- if icon == 'trend' %}<svg viewBox="0 0 32 32" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 26h24"/><path d="M6 21l7-7 5 4 9-10"/><path d="M21 8h6v6"/></svg>
-        {%- elif icon == 'bars' %}<svg viewBox="0 0 32 32" width="34" height="34" fill="currentColor"><rect x="6" y="17" width="5" height="10" rx="1"/><rect x="14" y="11" width="5" height="16" rx="1"/><rect x="22" y="5" width="5" height="22" rx="1"/></svg>
-        {%- elif icon == 'stack' %}<svg viewBox="0 0 32 32" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 22l7-7 5 4 10-11"/><rect x="5" y="24" width="4" height="4"/><rect x="12" y="20" width="4" height="8"/><rect x="19" y="17" width="4" height="11"/></svg>
-        {%- elif icon == 'grid' %}<svg viewBox="0 0 32 32" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="5" width="9" height="9" rx="2"/><rect x="18" y="5" width="9" height="9" rx="2"/><rect x="5" y="18" width="9" height="9" rx="2"/><rect x="18" y="18" width="9" height="9" rx="2"/></svg>
-        {%- else %}<svg viewBox="0 0 32 32" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 16h6l3-8 5 16 3-8h9"/></svg>{% endif -%}
-      </span>
-      <div><small>{{ name }}</small><strong data-kpi-chg>{% if sym == 'SPY' %}{{ pct(pulse.spy) }}{% elif sym == 'QQQ' %}{{ pct(pulse.qqq) }}{% else %}—{% endif %}</strong><em data-kpi-px>{{ sym }}</em></div>
+  {# ── Your money today (all Wealth portfolios combined) ───────────────── #}
+  <section class="cmd27-money is-loading" id="cmd27-money" aria-label="Your money today"
+           data-wealth-url="{{ url_for('wealth.dashboard') }}" data-next-url="{{ url_for('wealth.next_dollar_page') }}">
+    <article class="cmd27-m" data-m="value">
+      <span class="cmd27-m__ic" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="9" width="24" height="17" rx="3"/><path d="M4 14h24"/><circle cx="22" cy="20" r="2"/><path d="M8 9V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"/></svg></span>
+      <div><small>All portfolios</small><strong data-v>—</strong><em data-s>Loading your money…</em></div>
     </article>
-    {% endfor %}
+    <article class="cmd27-m" data-m="day">
+      <span class="cmd27-m__ic" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 24l7-8 5 4 10-11"/><path d="M20 9h6v6"/></svg></span>
+      <div><small data-l>Today</small><strong data-v>—</strong><em data-s></em></div>
+    </article>
+    <article class="cmd27-m" data-m="cash">
+      <span class="cmd27-m__ic" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.2"><ellipse cx="13" cy="9" rx="8" ry="3.5"/><path d="M5 9v5c0 2 3.6 3.5 8 3.5s8-1.5 8-3.5V9"/><path d="M5 14v5c0 2 3.6 3.5 8 3.5"/><ellipse cx="22" cy="20" rx="7" ry="3"/><path d="M15 20v4c0 1.7 3.1 3 7 3s7-1.3 7-3v-4"/></svg></span>
+      <div><small>Cash to deploy</small><strong data-v>—</strong><em data-s><a href="{{ url_for('wealth.next_dollar_page') }}">Next Dollar →</a></em></div>
+    </article>
+    <article class="cmd27-m" data-m="best">
+      <span class="cmd27-m__ic" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M16 26V7"/><path d="m8 14 8-8 8 8"/></svg></span>
+      <div><small>Best today</small><strong data-v>—</strong><em data-s></em></div>
+    </article>
+    <article class="cmd27-m" data-m="worst">
+      <span class="cmd27-m__ic" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M16 6v19"/><path d="m8 18 8 8 8-8"/></svg></span>
+      <div><small>Worst today</small><strong data-v>—</strong><em data-s></em></div>
+    </article>
+    <a class="cmd27-money__empty" href="{{ url_for('wealth.dashboard') }}" hidden>
+      <b>See your money here every morning.</b><span>Add your portfolio in Wealth (or import your Schwab CSV) and this strip shows today's move, cash and your best and worst holding.</span><em>Set up Wealth →</em>
+    </a>
   </section>
 
   {# ── Briefing · setups · breadth · events ────────────────────────────── #}
@@ -183,43 +218,40 @@
       </div>
     </section>
 
-    <section class="cc-card cmd27-card cmd27-breadth">
+    <section class="cc-card cmd27-card cmd27-signals" id="cmd27-signals"
+             data-tickers="{{ ((watchlist or []) | map(attribute='ticker') | list | join(',')) }}"
+             data-thesis-url="{{ url_for('thesis_view') }}">
       <div class="cmd27-card__head">
-        <h2><span aria-hidden="true">▮</span> Market Breadth</h2>
-        <a class="cmd27-more" href="{{ url_for('macro_page') }}">Macro →</a>
+        <h2><span aria-hidden="true">◆</span> Watchlist Signals</h2>
+        <span class="cmd27-badge">For you</span>
       </div>
-      <div class="cmd27-ring-row">
-        <div class="cmd27-ring" id="cmd27-ring" style="--p:0">
-          <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="trk" cx="60" cy="60" r="50"/><circle class="val" cx="60" cy="60" r="50"/></svg>
-          <div class="cmd27-ring__txt"><strong id="cmd27-ring-pct">—</strong><span>sectors<br>advancing</span></div>
-        </div>
-        <ul class="cmd27-legend">
-          <li><i class="up"></i>Advancing <b id="cmd27-adv">—</b></li>
-          <li><i class="dn"></i>Declining <b id="cmd27-dec">—</b></li>
-          <li><i class="fl"></i>Unchanged <b id="cmd27-unc">—</b></li>
+      <div class="cmd27-sig">
+        <h3>In buy zones <a href="{{ url_for('watchlists_page') }}">All →</a></h3>
+        <ul id="sig-zones"><li class="cc-empty">Checking value zones…</li></ul>
+      </div>
+      <div class="cmd27-sig">
+        <h3>Price alerts <a href="{{ url_for('watchlists_page') }}">Manage →</a></h3>
+        <ul id="sig-alerts"><li class="cc-empty">Checking your alerts…</li></ul>
+      </div>
+      <div class="cmd27-sig">
+        <h3>Earnings this week</h3>
+        {% set wl_earn = (week | selectattr('kind', 'equalto', 'EARNINGS') | selectattr('on_watchlist') | list) if week else [] %}
+        <ul id="sig-earn">
+          {% for e in wl_earn[:4] %}
+          <li><a href="{{ url_for('stock_detail', ticker=e.ticker) }}"><b>{{ e.ticker }}</b><span>{{ e.date_label }}{% if e.time %} · {{ e.time }}{% endif %}</span></a></li>
+          {% else %}
+          <li class="cc-empty">None of your watchlist reports this week.</li>
+          {% endfor %}
         </ul>
       </div>
-      {# Market mood (command_center_ext.js reads /api/mood). #}
-      <div id="cm-wrap" class="cm-wrap cmd27-mood" aria-label="Market mood">
-        <svg viewBox="0 0 220 130" class="cmd27-mood__dial" aria-hidden="true">
-          <defs><linearGradient id="cm-grad" x1="0" x2="1"><stop offset="0" stop-color="#ff5470"/><stop offset=".5" stop-color="#f5c451"/><stop offset="1" stop-color="#22e39a"/></linearGradient></defs>
-          <path d="M20 115 A90 90 0 0 1 200 115" fill="none" stroke="url(#cm-grad)" stroke-width="16" stroke-linecap="round" opacity=".9"/>
-          <g id="cm-needle" style="transform-origin:110px 115px;transform:rotate(-90deg)"><line x1="110" y1="115" x2="110" y2="42" stroke="#e8f1ff" stroke-width="5" stroke-linecap="round"/><circle cx="110" cy="115" r="8" fill="#e8f1ff"/></g>
-        </svg>
-        <div class="cmd27-mood__read"><small>Market mood</small><b id="cm-label">—</b><em id="cm-score"></em></div>
-        <p class="cm-note" id="cm-note" hidden></p>
-        <details class="cmd27-why"><summary>What's in the score</summary><div class="cm-parts" id="cm-parts"></div></details>
-      </div>
-      <p class="cmd27-liq">Liquidity <strong id="cc-liq" data-href="{{ url_for('macro_page') }}">{{ pulse.liquidity_label or '—' }}</strong></p>
-      <p class="cmd27-note" id="cmd27-breadth-note">Counts the 11 sector funds (XLK, SMH, XLF…) on the day.</p>
     </section>
 
     <section class="cc-card cmd27-card cmd27-events">
       <div class="cmd27-card__head">
-        <h2><span aria-hidden="true">▦</span> Economic Events</h2>
+        <h2><span aria-hidden="true">▦</span> Economy This Week</h2>
         <a class="cmd27-badge is-link" href="{{ url_for('catalyst_calendar') }}">Calendar</a>
       </div>
-      {% set evs = ([next_up] if next_up else []) + ((week | rejectattr('title', 'equalto', next_up.title if next_up else '') | list) if week else []) %}
+      {% set evs = (([next_up] if next_up and next_up.kind != 'EARNINGS' else []) + ((week | rejectattr('title', 'equalto', next_up.title if next_up else '') | rejectattr('kind', 'equalto', 'EARNINGS') | list) if week else [])) %}
       {% if evs %}
       <ul class="cmd27-evlist">
         {% for e in evs[:4] %}
@@ -235,35 +267,14 @@
   </div><div class="cc-col-side">
     <div class="nx-panel cc-nx-mini cmd27-nx" id="nx-panel" aria-labelledby="nx-panel-title">
       <header class="nx-panel__head">
-        <h3 class="nx-panel__title" id="nx-panel-title">Notifications <span class="nx-panel__count" id="nx-panel-count"></span></h3>
-        <span class="nx-panel__links"><a class="nx-text-btn" href="{{ url_for('intel') }}">All news</a><button type="button" class="nx-text-btn" data-nx-open>Open</button></span>
+        <h3 class="nx-panel__title" id="nx-panel-title">Top 3 for you <span class="nx-panel__count" id="nx-panel-count"></span></h3>
+        <span class="nx-panel__links"><button type="button" class="nx-text-btn" data-nx-open>All alerts</button></span>
       </header>
       <div class="nx-chips" id="nx-panel-chips" role="group" aria-label="Filter notifications"></div>
       <ol class="nx-list nx-list--panel" id="nx-panel-list" aria-live="polite"><li class="nx-empty"><span>Loading...</span></li></ol>
     </div>
   </div></div>
 
-  {# ── Launch cards ────────────────────────────────────────────────────── #}
-  <nav class="cmd27-launch" aria-label="Go to">
-    {% for href, title, blurb, ic in [
-      (url_for('research_page'), 'Discover', 'Find high-quality opportunities with AI screening', 'search'),
-      (url_for('fundamentals_page'), 'Verify', 'Investigate, validate and assess risks with real evidence', 'shield'),
-      (url_for('wealth.research_list_page'), 'M.C.F.F.', 'Moat, CEO, Financials, Future — your four gates', 'bars'),
-      (url_for('research_page'), 'Company Overview', 'Complete financial and business intelligence', 'bank'),
-      (url_for('wealth.next_dollar_page'), 'Capital Deployment', 'Where your next dollar goes, or stays cash', 'coins')] %}
-    <a class="cmd27-launch__card" href="{{ href }}">
-      <span class="cmd27-launch__ic ic-{{ ic }}" aria-hidden="true">
-        {%- if ic == 'search' %}<svg viewBox="0 0 40 40" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.6"><circle cx="17" cy="17" r="11"/><path d="m25 25 9 9"/><path d="M10 18h4l2-4 3 7 2-3h3"/></svg>
-        {%- elif ic == 'shield' %}<svg viewBox="0 0 40 40" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 4 7 9v9c0 9 6 15 13 18 7-3 13-9 13-18V9Z"/><path d="m13 20 5 5 9-10"/></svg>
-        {%- elif ic == 'bars' %}<svg viewBox="0 0 40 40" width="44" height="44" fill="currentColor"><rect x="5" y="22" width="6" height="13" rx="1.5"/><rect x="14" y="16" width="6" height="19" rx="1.5"/><rect x="23" y="10" width="6" height="25" rx="1.5"/><rect x="32" y="4" width="5" height="31" rx="1.5"/></svg>
-        {%- elif ic == 'bank' %}<svg viewBox="0 0 40 40" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 35V12l14-7 14 7v23"/><path d="M4 35h32"/><path d="M12 16v4M18 16v4M24 16v4M30 16v4M12 25v4M18 25v4M24 25v4M30 25v4"/></svg>
-        {%- else %}<svg viewBox="0 0 40 40" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.4"><ellipse cx="15" cy="10" rx="9" ry="4"/><path d="M6 10v6c0 2.2 4 4 9 4s9-1.8 9-4v-6"/><path d="M6 16v6c0 2.2 4 4 9 4"/><ellipse cx="26" cy="24" rx="9" ry="4"/><path d="M17 24v6c0 2.2 4 4 9 4s9-1.8 9-4v-6"/></svg>{% endif -%}
-      </span>
-      <span class="cmd27-launch__txt"><strong>{{ title }}</strong><small>{{ blurb }}</small></span>
-      <span class="cmd27-launch__go" aria-hidden="true">›</span>
-    </a>
-    {% endfor %}
-  </nav>
 </div>
 {% endblock %}
 

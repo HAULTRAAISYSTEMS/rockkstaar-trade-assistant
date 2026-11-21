@@ -291,7 +291,9 @@ def require_admin(f):
 _POLL_VERIFY_TTL_S = 30
 _POLL_VERIFY_CACHE: dict = {}
 # Only the price polls. Session and account endpoints always hit the database.
-_POLL_PATHS = ("/api/live/bundle", "/api/market-tape", "/api/today/pulse",
+_POLL_PATHS = (
+    "/api/command/gameplan",
+    "/api/live/bundle", "/api/market-tape", "/api/today/pulse",
                "/api/terminal/quotes", "/api/terminal/live/", "/api/quick",
                "/api/dashboard", "/api/live-board", "/api/mood", "/api/stock/",
                "/api/briefing/voice", "/api/notifications", "/api/depth/", "/api/today/breadth")
@@ -7767,7 +7769,10 @@ def api_market_tape():
             items = list(_mkt.get_market_tape())
         else:
             items = []
-        items += _tape_watchlist_items()
+        # A watchlist ticker that is already an index item (SPY, QQQ…) shows once.
+        have = {str(i.get("symbol") or "").upper() for i in items}
+        items += [i for i in _tape_watchlist_items()
+                  if str(i.get("symbol") or "").upper() not in have]
         # Every ticker on the tape gets the shared few-seconds-old quote
         # where one exists; the tape polls every 3 s.
         if _MKT_AVAILABLE:
@@ -10663,6 +10668,32 @@ if _MKT_AVAILABLE:
 def api_mood():
     _pulse, reading = _mood_inputs()
     resp = jsonify({"ok": reading.get("known", False), **reading, "session": _pulse.get("session") or ""})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+_GAMEPLAN_CACHE: dict = {"at": 0.0, "data": None}
+
+
+@app.route("/api/command/gameplan")
+def api_command_gameplan():
+    """The Rockkstaar market-environment check on daily closes (5-min cache):
+    SPY/QQQ structure, VIX zone, DXY direction → RISK-ON / CAUTION / RISK-OFF."""
+    import command_gameplan as _gp
+    now = _time.time()
+    data = _GAMEPLAN_CACHE["data"]
+    if not data or now - _GAMEPLAN_CACHE["at"] > 300:
+        closes = {}
+        if _MKT_AVAILABLE:
+            try:
+                closes = _mkt._fetch_prices_chart(["SPY", "QQQ", "^VIX", "DX-Y.NYB"], period="90d") or {}
+            except Exception as exc:
+                logger.debug("gameplan closes: %s", exc)
+        data = _gp.build_game_plan(closes.get("SPY") or [], closes.get("QQQ") or [],
+                                   closes.get("^VIX") or [], closes.get("DX-Y.NYB") or [])
+        if data.get("ok"):
+            _GAMEPLAN_CACHE.update(at=now, data=data)
+    resp = jsonify(data)
     resp.headers["Cache-Control"] = "no-store"
     return resp
 

@@ -253,3 +253,28 @@ def test_planner_api_and_ira_tax_year_on_deposits(env):
     ira = {r["tax_year"]: r for r in v["view"]["ira"]}
     assert ira[2027]["planned"] == 6000 and ira[2026]["actual"] == 1000
     assert c.get("/api/wealth/plan/2027").get_json()["plan"]["entries"][0]["amount"] == 2000
+
+
+def test_today_strip_combines_portfolios_and_uses_official_closes_when_closed(env, monkeypatch):
+    """Command Center 'Your money today': all portfolios, last close vs the one
+    before when the market is closed (never an after-hours print)."""
+    import market_engine
+    monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "closed")
+    app, *_ = env
+    c = client(app, 1)
+    pid = make_portfolio(c)
+    prev = c.post("/api/wealth/import/preview", json={"text": SCHWAB}).get_json()
+    c.post("/api/wealth/import/commit", json={"portfolio_id": pid, "transactions": prev["transactions"]})
+    d = c.get("/api/wealth/today").get_json()
+    assert d["ok"] and not d["empty"] and d["source"] == "wealth"
+    assert d["value"] == pytest.approx(3300) and d["cash"] == pytest.approx(500)
+    # bars: 610 → 620 on 2 shares
+    assert d["day_dollars"] == pytest.approx(20) and d["best"]["ticker"] == "KLAC"
+    assert d["best"]["pct"] == pytest.approx(1.64, abs=0.01) and d["day_label"]
+    assert d["tickers"] == ["KLAC"]
+
+
+def test_today_strip_is_empty_without_portfolios(env):
+    app, *_ = env
+    d = client(app, 7).get("/api/wealth/today").get_json()
+    assert d["ok"] and d["empty"] is True
