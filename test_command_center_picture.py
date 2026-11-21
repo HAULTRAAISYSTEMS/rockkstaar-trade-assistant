@@ -76,3 +76,14 @@ def test_globe_uses_the_real_earth_texture():
         p = ROOT / "static/img" / f
         assert p.exists() and p.stat().st_size < 400_000
     assert (ROOT / "scripts/build_earth_texture.py").exists()
+
+
+def test_command_page_paints_the_scene_and_skips_the_line_backdrop():
+    src = (ROOT / "templates/liquidity.html").read_text(encoding="utf-8")
+    assert "classList.add('cc-scene')" in src
+    css = (ROOT / "static/css/command_center_picture.css").read_text(encoding="utf-8")
+    assert "html.cc27.cc-scene body" in css and "command_scene.webp" in css
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    assert "classList.contains('cc-scene')" in js
+    p = ROOT / "static/img/command_scene.webp"
+    assert p.exists() and p.stat().st_size < 400_000

@@ -2,6 +2,8 @@
 {% block title %}Morning Command Center — Tradestaar{% endblock %}
 
 {% block head_extra %}
+  <script>document.documentElement.classList.add('cc-scene')</script>
+  <link rel="preload" as="image" href="{{ url_for('static', filename='img/command_scene.webp') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/today.css') }}" />
 {% endblock %}
 {% block late_css %}

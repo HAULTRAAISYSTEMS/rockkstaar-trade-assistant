@@ -286,3 +286,13 @@ html.cc27 .liq-page.cmd27 .cmd27-trend::before { display: none !important; }
   .cmd27-row:last-child .cmd27-row__name .cc-p-lbl { display: inline; }
   html.cc27 .liq-page.cmd27 .cmd27-pulse { padding: 16px !important; }
 }
+
+/* ── Painted scene behind the hero: stars, nebula, mountains, neon floor ── */
+html.cc27.cc-scene body { background: #020813 url("../img/command_scene.webp") center 140px / max(100vw, 1824px) auto no-repeat !important; }
+html.cc27 .liq-page.cmd27 { background: none !important; }
+@media (max-width: 760px) {
+  html.cc27.cc-scene body { background-size: 1500px auto !important; background-position: center 120px !important; }
+}
+.cmd27-title, .cmd27-sub, .cmd27-clock { text-shadow: 0 2px 18px rgba(2, 8, 19, .85), 0 0 2px rgba(2, 8, 19, .6); }
+html.cc27 .liq-page.cmd27 .cmd27-hero, html.cc27 .liq-page.cmd27 .cmd27-hero__globe::before { background: none !important; }
+html.cc27.cc-scene #cc3d-veil { opacity: .35; }

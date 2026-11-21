@@ -96,6 +96,8 @@
       var cx = W / 2 - pointer.x * 30;
       var cy = H * 0.42 - pointer.y * 20;
       var horizon = H * 0.66 - pointer.y * 12;
+      // Pages with a painted scene (the Command Center) keep only the particles.
+      if (!document.documentElement.classList.contains('cc-scene')) {
       var aur = ctx.createRadialGradient(cx, horizon, 10, cx, horizon, Math.max(W, H) * 0.55);
        aur.addColorStop(0, rgba(CYAN, 0.28));
 aur.addColorStop(0.35, rgba(POS, 0.16));
@@ -188,6 +190,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       ctx.fillStyle = hg;
       ctx.fillRect(0, horizon - 60, W, 90);
 
+      }
       // Particle field drifting toward the camera, with near-neighbour links
       var proj = [];
       for (var i = 0; i < pts.length; i++) {
