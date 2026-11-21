@@ -37,8 +37,8 @@
 .tw-drawbar .tw-type-btn:hover { color: #fff !important; background: rgba(255, 255, 255, 0.06) !important; }
 .tw-drawbar .tw-type-btn.active {
   color: #0a0712 !important;
-  background: linear-gradient(135deg, var(--cc-accent-hi, #e8ffad), var(--cc-accent, #c4f53b)) !important;
-  box-shadow: 0 0 16px -2px rgba(var(--cc-accent-rgb, 196, 245, 59), 0.7);
+  background: linear-gradient(135deg, var(--cc-accent-hi, #a6ffd9), var(--cc-accent, #34f5a8)) !important;
+  box-shadow: 0 0 16px -2px rgba(var(--cc-accent-rgb, 52, 245, 168), 0.7);
 }
 .tw-drawbar .tw-type-btn:nth-child(4) { margin-top: 10px; }  /* separate edit actions from tools */
 .tw-draw-name {
@@ -53,7 +53,7 @@
   color: #c9d3df; font: 600 11px var(--font-ui, system-ui); cursor: pointer;
   flex: 0 0 auto;
 }
-.tw-symsearch:hover { border-color: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.55); color: #fff; }
+.tw-symsearch:hover { border-color: rgba(var(--cc-accent-rgb, 52, 245, 168), 0.55); color: #fff; }
 
 .tw-chart-stack { position: relative; flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .tw-chart-stack > .tw-time-axis { flex: 0 0 22px; height: 22px !important; }
@@ -233,8 +233,8 @@
   border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 9px;
   background: rgba(3, 7, 15, 0.6); color: #c9d3df; cursor: pointer;
 }
-.tw-fs-btn:hover { color: #fff; border-color: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.6); }
-.tw-fs-btn[aria-pressed="true"] { color: #0a0712; background: linear-gradient(135deg, var(--cc-accent-hi, #e8ffad), var(--cc-accent, #c4f53b)); border-color: transparent; }
+.tw-fs-btn:hover { color: #fff; border-color: rgba(var(--cc-accent-rgb, 52, 245, 168), 0.6); }
+.tw-fs-btn[aria-pressed="true"] { color: #0a0712; background: linear-gradient(135deg, var(--cc-accent-hi, #a6ffd9), var(--cc-accent, #34f5a8)); border-color: transparent; }
 .tw-fs-btn .tw-fs-off, .tw-fs-btn[aria-pressed="true"] .tw-fs-on { display: none; }
 .tw-fs-btn[aria-pressed="true"] .tw-fs-off { display: block; }
 
@@ -336,9 +336,9 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
 .tw-chart-toolbar .tw-type-btn:hover { color: #fff !important; background: rgba(255, 255, 255, 0.06) !important; }
 .tw-chart-toolbar .tw-tf-btn.active,
 .tw-chart-toolbar .tw-type-btn.active {
-  color: var(--cc-accent-hi, #e8ffad) !important;
-  background: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.14) !important;
-  box-shadow: inset 0 0 0 1px rgba(var(--cc-accent-rgb, 196, 245, 59), 0.45) !important;
+  color: var(--cc-accent-hi, #a6ffd9) !important;
+  background: rgba(var(--cc-accent-rgb, 52, 245, 168), 0.14) !important;
+  box-shadow: inset 0 0 0 1px rgba(var(--cc-accent-rgb, 52, 245, 168), 0.45) !important;
 }
 .tw-chart-toolbar .tw-ico { flex: none; }
 .tw-chart-toolbar .tw-tool-icon { display: none !important; }
@@ -356,7 +356,7 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
 .tw-chart-toolbar .tw-ind-count {
   min-width: 17px !important; height: 17px !important; padding: 0 5px !important;
   border-radius: 999px !important; font: 700 10px/17px var(--font-mono, monospace) !important;
-  color: #0a0712 !important; background: var(--cc-accent, #c4f53b) !important;
+  color: #0a0712 !important; background: var(--cc-accent, #34f5a8) !important;
 }
 
 /* Search: icon pill; full-screen pinned to the far right */
@@ -397,7 +397,7 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
   .tw-chart-toolbar #tw-fs-btn { border-radius: 0 10px 10px 0 !important; }
   .tw-chart-toolbar .tw-fs-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.07) !important; }
   .tw-chart-toolbar .tw-size-btn[aria-pressed="true"],
-  .tw-chart-toolbar #tw-fs-btn[aria-pressed="true"] { color: var(--cc-accent-hi, #e8ffad); background: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.14) !important; }
+  .tw-chart-toolbar #tw-fs-btn[aria-pressed="true"] { color: var(--cc-accent-hi, #a6ffd9); background: rgba(var(--cc-accent-rgb, 52, 245, 168), 0.14) !important; }
   /* Timeframes in three families — minutes │ hours │ days+ — with a hairline
      between them, so 1m and 1M can't be mistaken for each other. */
   .tw-chart-toolbar .tw-tf-btn[data-interval="1h"],
@@ -464,9 +464,9 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
   .tw-chart-toolbar .tw-interval-wrap .tw-tf-btn { flex: 1 1 0; min-width: 0; height: 32px !important; padding: 0 !important; justify-content: center; }
   .tw-chart-toolbar .tw-fs-btn {
     order: 2; margin-left: 2px !important; width: 38px; height: 38px;
-    color: var(--cc-accent, #c4f53b);
-    border-color: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.45);
-    background: rgba(var(--cc-accent-rgb, 196, 245, 59), 0.08);
+    color: var(--cc-accent, #34f5a8);
+    border-color: rgba(var(--cc-accent-rgb, 52, 245, 168), 0.45);
+    background: rgba(var(--cc-accent-rgb, 52, 245, 168), 0.08);
   }
   .tw-chart-toolbar .tw-symsearch { order: 4; width: 32px; height: 32px; padding: 0 !important; justify-content: center; }
   .tw-chart-toolbar .tw-range-wrap { order: 5; height: 32px; }
@@ -485,7 +485,7 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
   }
   .tw-draw-toggle[aria-pressed="true"] {
     color: #0a0712; border-color: transparent;
-    background: linear-gradient(135deg, var(--cc-accent-hi, #e8ffad), var(--cc-accent, #c4f53b));
+    background: linear-gradient(135deg, var(--cc-accent-hi, #a6ffd9), var(--cc-accent, #34f5a8));
   }
   .tw-workspace:not(.show-draw) > .tw-drawbar { display: none !important; }
 }
@@ -510,7 +510,7 @@ html.tw-fs-lock .mobile-app-nav, html.tw-fs-lock #ask-fab { display: none !impor
 html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen,
 html.cc27 body .tw .tw-center > .tw-panel:fullscreen {
   background:
-    radial-gradient(120% 55% at 50% -12%, rgba(var(--cc-accent-rgb, 196, 245, 59), 0.10), transparent 62%),
+    radial-gradient(120% 55% at 50% -12%, rgba(var(--cc-accent-rgb, 52, 245, 168), 0.10), transparent 62%),
     radial-gradient(80% 40% at 100% 100%, rgba(79, 227, 255, 0.06), transparent 70%),
     #04070c !important;
   box-shadow: none !important;
@@ -536,7 +536,7 @@ html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen::after { display: non
     grid-row: 1 !important;
     padding: calc(env(safe-area-inset-top, 0px) + 12px) 70px 10px calc(env(safe-area-inset-left, 0px) + 16px) !important;
     background: linear-gradient(180deg, rgba(4, 7, 12, 0.96), rgba(4, 7, 12, 0.7)) !important;
-    border-bottom: 1px solid rgba(var(--cc-accent-rgb, 196, 245, 59), 0.14);
+    border-bottom: 1px solid rgba(var(--cc-accent-rgb, 52, 245, 168), 0.14);
     gap: 2px 10px !important;
   }
   .tw-panel.tw-is-fullscreen .tw-sym-hd .tw-bias { display: none !important; }
@@ -557,7 +557,7 @@ html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen::after { display: non
     grid-row: 3 !important;
     margin: 8px calc(env(safe-area-inset-right, 0px) + 10px) calc(env(safe-area-inset-bottom, 0px) + 10px) calc(env(safe-area-inset-left, 0px) + 10px) !important;
     padding: 8px 10px !important;
-    border: 1px solid rgba(var(--cc-accent-rgb, 196, 245, 59), 0.22) !important;
+    border: 1px solid rgba(var(--cc-accent-rgb, 52, 245, 168), 0.22) !important;
     border-radius: 18px !important;
     /* No backdrop-filter: it would make the dock the containing block for
        the fixed exit button and pin it inside the dock. */
@@ -572,8 +572,8 @@ html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen::after { display: non
     top: calc(env(safe-area-inset-top, 0px) + 10px); right: calc(env(safe-area-inset-right, 0px) + 14px);
     width: 42px !important; height: 42px !important; border-radius: 50% !important; margin: 0 !important;
     color: #0a0712 !important; border: 0 !important;
-    background: linear-gradient(135deg, var(--cc-accent-hi, #e8ffad), var(--cc-accent, #c4f53b)) !important;
-    box-shadow: 0 0 0 4px rgba(var(--cc-accent-rgb, 196, 245, 59), 0.14), 0 8px 24px rgba(0, 0, 0, 0.5);
+    background: linear-gradient(135deg, var(--cc-accent-hi, #a6ffd9), var(--cc-accent, #34f5a8)) !important;
+    box-shadow: 0 0 0 4px rgba(var(--cc-accent-rgb, 52, 245, 168), 0.14), 0 8px 24px rgba(0, 0, 0, 0.5);
   }
   .tw-panel.tw-is-fullscreen .tw-chart-toolbar .tw-interval-wrap { flex-basis: 100% !important; }
 

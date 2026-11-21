@@ -111,8 +111,8 @@
 .tw-wl { max-height: 660px; overflow-y:auto; }
 .tw-wl-switch { display:flex; align-items:center; gap:8px; min-width:0; margin:0; }
 .tw-wl-switch-label { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
-.tw-wl-switch select { max-width:170px; height:30px; padding:0 26px 0 10px; border:1px solid rgba(255,255,255,.12); border-radius:8px; background:#0d131c url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23c4f53b' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 9px center; -webkit-appearance:none; appearance:none; color:var(--text-hi, #eef2f6); font:700 12px var(--font-display, system-ui); letter-spacing:.06em; text-transform:uppercase; cursor:pointer; text-overflow:ellipsis; }
-.tw-wl-switch select:hover, .tw-wl-switch select:focus { border-color:rgba(var(--cc-accent-rgb,196,245,59),.55); outline:none; }
+.tw-wl-switch select { max-width:170px; height:30px; padding:0 26px 0 10px; border:1px solid rgba(255,255,255,.12); border-radius:8px; background:#0d131c url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2334f5a8' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 9px center; -webkit-appearance:none; appearance:none; color:var(--text-hi, #eef2f6); font:700 12px var(--font-display, system-ui); letter-spacing:.06em; text-transform:uppercase; cursor:pointer; text-overflow:ellipsis; }
+.tw-wl-switch select:hover, .tw-wl-switch select:focus { border-color:rgba(var(--cc-accent-rgb,52, 245, 168),.55); outline:none; }
 .tw-wl-row { display:grid; grid-template-columns: 1fr 46px auto; align-items:center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-bottom:1px solid var(--border-subtle); cursor:pointer; transition: background var(--dur-fast) var(--ease-out); }
 .tw-wl-row:last-child { border-bottom:none; }
 .tw-wl-row:hover { background: var(--surface-raised); }
@@ -1538,7 +1538,7 @@ function twInitChart(){
   var LC=window.LightweightCharts;
   // Axes: no hard borders (chart_tools.js draws a glass strip with a glowing
   // accent edge), quieter tick text, and accent crosshair labels.
-  var twAcc=(function(){try{var v=getComputedStyle(document.documentElement).getPropertyValue('--cc-accent').trim();if(/^#[0-9a-f]{6}$/i.test(v))return v;}catch(e){}return '#c4f53b';})();
+  var twAcc=(function(){try{var v=getComputedStyle(document.documentElement).getPropertyValue('--cc-accent').trim();if(/^#[0-9a-f]{6}$/i.test(v))return v;}catch(e){}return '#34f5a8';})();
   var chart=LC.createChart(el,{
     autoSize:true,
     layout:{ background:{type:'solid',color:'transparent'}, textColor:'#8E9AAB', fontFamily:"'IBM Plex Mono', ui-monospace, monospace", fontSize:10.5 },
@@ -1743,7 +1743,7 @@ function twDrawTimeAxis(){
     var hbar=twChartState.bars[hov],hpx=x(hov-win.start),hlbl=twAxisLabel(hbar.time);
     ctx.font='700 9px ui-monospace,monospace';var twd=ctx.measureText(hlbl).width+12;
     var rx=Math.min(Math.max(hpx-twd/2,2),Math.max(2,fit.w-ax-twd-2));
-    ctx.fillStyle=(typeof ctAccent==='function'?ctAccent():'#c4f53b');
+    ctx.fillStyle=(typeof ctAccent==='function'?ctAccent():'#34f5a8');
     if(ctx.roundRect){ctx.beginPath();ctx.roundRect(rx,3,twd,16,8);ctx.fill();}else{ctx.fillRect(rx,3,twd,16);}
     ctx.fillStyle='#0b0e11';ctx.textAlign='center';ctx.fillText(hlbl,rx+twd/2,15);ctx.textAlign='left';
   }

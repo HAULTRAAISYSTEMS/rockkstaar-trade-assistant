@@ -78,17 +78,81 @@ def test_globe_uses_the_real_earth_texture():
     assert (ROOT / "scripts/build_earth_texture.py").exists()
 
 
-def test_command_page_paints_the_scene_and_skips_the_line_backdrop():
-    src = (ROOT / "templates/liquidity.html").read_text(encoding="utf-8")
-    assert "classList.add('cc-scene')" in src
-    # 3D scene: depth layers + live floor canvas.
-    for s in ('cmd27-scene__sky" data-depth', 'id="cmd27-floor"', 'cmd27-scene__far" data-depth', 'cmd27-scene__near" data-depth'):
-        assert s in src, s
-    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
-    assert "classList.contains('cc-scene')" in js
+def test_scene_is_behind_every_page_and_fixed(client):
+    base = (ROOT / "templates/base.html").read_text(encoding="utf-8")
+    for s in ('ts-scene__sky" data-depth', 'id="ts-scene-floor"', 'ts-scene__far" data-depth', 'ts-scene__near" data-depth',
+              "scene3d.js", "scene_2028.css"):
+        assert s in base, s
+    assert 'id="cc3d-backdrop"' not in base          # the old line-art backdrop is retired
+    css = (ROOT / "static/css/scene_2028.css").read_text(encoding="utf-8")
+    assert ".ts-scene { position: fixed;" in css    # stays put while the page scrolls
+    js = (ROOT / "static/js/scene3d.js").read_text(encoding="utf-8")
+    assert "travel +=" in js                        # scrolling moves you over the floor
+    home = client.get("/").get_data(as_text=True)
+    assert 'class="cc27 cc-scene"' in home          # Command page: no dimming veil
+    other = client.get("/watchlists").get_data(as_text=True)
+    assert "cc-scene cc-scene-dim" in other
     for f in ("scene_sky.webp", "scene_far.webp", "scene_near.webp"):
         p = ROOT / "static/img" / f
         assert p.exists() and p.stat().st_size < 300_000, f
+
+
+def test_accent_is_emerald_everywhere():
+    import glob
+    for f in glob.glob(str(ROOT / "static/css/*.css")) + glob.glob(str(ROOT / "templates/*.html")):
+        txt = open(f, encoding="utf-8").read().lower()
+        assert "c4f53b" not in txt and "196, 245, 59" not in txt, f
+
+
+def test_orbit_saves_per_account(client):
+    import web_app
+    web_app.app.config["WTF_CSRF_ENABLED"] = False
+    try:
+        _orbit_round_trip(client)
+    finally:
+        web_app.app.config["WTF_CSRF_ENABLED"] = True
+
+
+def test_orbit_post_requires_csrf(client):
+    assert client.post("/api/command/orbit", json={"tickers": ["NVDA"]}).status_code == 400
+
+
+def _orbit_round_trip(client):
+    assert client.get("/api/command/orbit").get_json()["tickers"] == []
+    r = client.post("/api/command/orbit", json={"tickers": ["nvda", "AMD", "NVDA", "bad ticker!", "RKLB"]})
+    assert r.status_code == 200 and r.get_json()["tickers"] == ["NVDA", "AMD", "RKLB"]
+    assert client.get("/api/command/orbit").get_json()["tickers"] == ["NVDA", "AMD", "RKLB"]
+    many = [f"T{i}" for i in range(20)]
+    assert len(client.post("/api/command/orbit", json={"tickers": many}).get_json()["tickers"]) == 12
+    assert client.post("/api/command/orbit", json={"tickers": "NVDA"}).status_code == 400
+
+
+def test_orbit_needs_a_signed_in_user():
+    import web_app
+    c = web_app.app.test_client()
+    r = c.get("/api/command/orbit")
+    assert r.status_code in (302, 401)
+
+
+def test_globe_sectors_cover_common_names_and_profiles():
+    import globe_sectors as gs
+    m = gs.builtin_map()
+    for t, etf in (("APLD", "XLK"), ("NBIS", "XLK"), ("CRDO", "SMH"), ("RKLB", "XLI"), ("IREN", "XLK"),
+                   ("ALAB", "SMH"), ("COHR", "SMH"), ("NVDA", "XLK"), ("XLF", "XLF")):
+        assert m[t] == etf, t
+    assert gs.etf_for("Technology", "Semiconductors") == "SMH"
+    assert gs.etf_for("Financial Services") == "XLF"
+    assert gs.etf_for("Consumer Defensive") == "XLY"
+    assert gs.etf_for("Nonsense") == ""
+
+
+def test_globe_orbit_and_fly_to_are_wired():
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    assert "cmd27:orbit-toggle" in js and "cmd27:focus" in js and "flyTo" in js
+    assert "FUT:" in js                              # futures get their own zone
+    assert "it[2].rank < 3 || starred[it[2].symbol]" in js
+    pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
+    assert "/api/command/orbit" in pj and "cmd27-chip__x" in pj
 
 
 def test_globe_groups_pins_by_sector(client):

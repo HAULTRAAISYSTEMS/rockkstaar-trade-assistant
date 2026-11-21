@@ -303,7 +303,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       COMM:   { name: 'COMMUNICATION', lat: 22,  lon: 79,   spread: 6 },
       INDUS:  { name: 'INDUSTRIALS',   lat: 60,  lon: 95,   spread: 12 },
       OTHER:  { name: 'DEFENSIVE · OTHER', lat: -25, lon: 134, spread: 9 },
-      INDEX:  { name: 'INDEXES',       lat: 72,  lon: -40,  spread: 6 }
+      INDEX:  { name: 'INDEXES',       lat: 70,  lon: -42,  spread: 5, max: 9 },
+      FUT:    { name: 'FUTURES · MACRO', lat: 30, lon: -40, spread: 5, max: 9 }
     };
     var ETF_REGION = { XLK: 'TECH', SMH: 'SEMIS', XLF: 'FIN', XLE: 'ENERGY', XLY: 'CONS', XLV: 'HEALTH',
                        XLC: 'COMM', XLI: 'INDUS', XLB: 'INDUS', XLU: 'OTHER', XLRE: 'OTHER', IWM: 'INDEX' };
@@ -312,20 +313,32 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     var useRegions = !!host.getAttribute('data-sectors');
     function regionFor(sym) {
       var u = String(sym || '').toUpperCase();
-      if (/^(SPY|QQQ|DIA|IWM|VIX|VOO|VTI|TLT|GLD|SLV|USO|DXY|UUP|BTC.*|ETH.*|ES|NQ|YM|RTY|CL|GC)$/.test(u) || /[=^\/]/.test(u)) return 'INDEX';
+      if (/^(ES|NQ|YM|RTY|CL|GC|SI|NG|ZB|ZN|DXY|BTC.*|ETH.*)$/.test(u) || /[=\/]/.test(u)) return 'FUT';
+      if (/^(SPY|QQQ|DIA|IWM|VIX|VOO|VTI|TLT|GLD|SLV|USO|UUP)$/.test(u) || /\^/.test(u)) return 'INDEX';
       return ETF_REGION[SECTORS[u]] || 'OTHER';
     }
+    // Starred tickers (the orbit) always get a name tag on the globe.
+    var starred = {};
+    document.addEventListener('cmd27:orbit', function (e) {
+      starred = {}; ((e.detail && e.detail.tickers) || []).forEach(function (t) { starred[String(t).toUpperCase()] = 1; });
+      if (typeof selected !== 'undefined' && selected && typeof renderCard === 'function') renderCard();
+    });
     function placeInRegions(list) {
       var groups = {};
       list.forEach(function (t) { var k = regionFor(t.symbol); (groups[k] = groups[k] || []).push(t); });
       var pos = {};
       Object.keys(groups).forEach(function (k) {
-        var g = groups[k], rg = REGIONS[k], n = g.length;
+        // Biggest movers sit at the heart of the territory; the territory
+        // grows with its pin count so pins never stack.
+        var g = groups[k].slice().sort(function (a, b) { return Math.abs(b.change_pct || 0) - Math.abs(a.change_pct || 0); });
+        var rg = REGIONS[k], n = g.length;
+        var spread = Math.min(rg.max || 20, Math.max(rg.spread, 2.7 * Math.sqrt(n)));
+        rg.eff = spread;
         g.forEach(function (t, i) {
-          var rr = n === 1 ? 0 : rg.spread * Math.sqrt((i + 0.5) / n), a = i * 2.39996;
+          var rr = n === 1 ? 0 : spread * Math.sqrt((i + 0.5) / n), a = i * 2.39996;
           var la = rg.lat + rr * Math.cos(a);
           var lo = rg.lon + rr * Math.sin(a) / Math.max(0.3, Math.cos(la * 0.0174533));
-          pos[t.symbol] = { v: geo(la, lo), region: k };
+          pos[t.symbol] = { v: geo(la, lo), region: k, rank: i };
         });
       });
       return pos;
@@ -485,7 +498,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           symbol: t.symbol,
           price: t.price,
           chg: t.change_pct,
-          region: pp ? pp.region : null,
+          region: pp ? pp.region : null, rank: pp ? pp.rank : 0,
           x: pp ? pp.v[0] : Math.cos(th) * rad, y: pp ? pp.v[1] : y * 0.92, z: pp ? pp.v[2] : Math.sin(th) * rad,
           flash: prev && prev.price !== t.price ? 1 : (prev ? prev.flash : 0.6)
         };
@@ -613,7 +626,9 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       var close = document.createElement('button'); close.type = 'button'; close.className = 'cc3d-card__close';
       close.setAttribute('aria-label', 'Close'); close.textContent = '×';
       close.addEventListener('click', closeCard);
-      head.append(sym, close);
+      var sector = document.createElement('small'); sector.className = 'cc3d-card__sector';
+      sector.textContent = nd.region && REGIONS[nd.region] ? REGIONS[nd.region].name : '';
+      head.append(sym, sector, close);
       var quote = document.createElement('div'); quote.className = 'cc3d-card__quote';
       var px = document.createElement('span'); px.className = 'cc3d-card__px';
       px.textContent = nd.price != null ? Number(nd.price).toFixed(2) : '—';
@@ -642,8 +657,30 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         b.title = 'Add ' + nd.symbol + ' to your active watchlist';
         f.appendChild(b); acts.appendChild(f);
       }
+      if (sceneMode()) {
+        var on = !!starred[nd.symbol];
+        var st = document.createElement('button'); st.type = 'button';
+        st.className = 'cc3d-card__btn cc3d-card__star' + (on ? ' is-on' : '');
+        st.textContent = on ? '★ In your orbit' : '☆ Add to orbit';
+        st.title = on ? 'Remove ' + nd.symbol + ' from the chips around the globe' : 'Keep ' + nd.symbol + ' in the chips around the globe';
+        st.addEventListener('click', function () {
+          document.dispatchEvent(new CustomEvent('cmd27:orbit-toggle', { detail: { symbol: nd.symbol } }));
+        });
+        acts.insertBefore(st, acts.firstChild);
+      }
       card.append(head, quote, src, acts);
     }
+    function sceneMode() { return document.documentElement.classList.contains('cc-scene') && useRegions; }
+    // Fly to a ticker: spin the globe until its pin faces you, then open its card.
+    var flyTo = null;
+    document.addEventListener('cmd27:focus', function (e) {
+      var sym = String((e.detail && e.detail.symbol) || '').toUpperCase(), nd = nodeFor(sym);
+      if (!nd) return;
+      var target = Math.atan2(-nd.x, nd.z);
+      var d = target - rotY; d = Math.atan2(Math.sin(d), Math.cos(d));
+      flyTo = { from: rotY, to: rotY + d, t: 0, sym: sym };
+      velY = 0;
+    });
     function placeCard() {
       if (!card || card.hidden || !selected) return;
       if (window.matchMedia('(max-width: 640px)').matches) { card.style.left = ''; card.style.top = ''; card.classList.add('is-sheet'); return; }
@@ -680,7 +717,12 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     }
 
     function draw(time, dt) {
-      if (!dragging && !reduceMotion) { rotY += velY * dt; velY += ((selected ? 0 : 0.1) - velY) * (selected ? 0.2 : 0.02); }
+      if (flyTo) {
+        flyTo.t = Math.min(1, flyTo.t + (reduceMotion ? 1 : dt / 1.1));
+        var ez = flyTo.t < 0.5 ? 2 * flyTo.t * flyTo.t : 1 - Math.pow(-2 * flyTo.t + 2, 2) / 2;
+        rotY = flyTo.from + (flyTo.to - flyTo.from) * ez;
+        if (flyTo.t >= 1) { var fsym = flyTo.sym; flyTo = null; openCard(fsym); }
+      } else if (!dragging && !reduceMotion) { rotY += velY * dt; velY += ((selected ? 0 : 0.1) - velY) * (selected ? 0.2 : 0.02); }
       ctx.clearRect(0, 0, W, H);
       // Bigger canvas, bigger globe: fill more of it once there is room.
       var R = Math.min(W, H) * (Math.min(W, H) > 420 ? 0.35 : 0.33);
@@ -859,7 +901,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           var cen = geo(rg.lat, rg.lon), C = project(cen[0], cen[1], cen[2], R, cx, cy);
           if (C[2] < -0.1) return;
           // Border: small circle of radius spread+4° around the centre.
-          var ang = (rg.spread + 4) * 0.0174533, ca = Math.cos(ang), sa = Math.sin(ang);
+          var ang = ((rg.eff || rg.spread) + 3) * 0.0174533, ca = Math.cos(ang), sa = Math.sin(ang);
           var up = Math.abs(cen[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0];
           var e1 = [cen[1] * up[2] - cen[2] * up[1], cen[2] * up[0] - cen[0] * up[2], cen[0] * up[1] - cen[1] * up[0]];
           var l1 = Math.sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]); e1 = [e1[0] / l1, e1[1] / l1, e1[2] / l1];
@@ -943,7 +985,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       drawn.sort(function (a, b) { return a[1][2] - b[1][2]; });
       // A crowded globe labels only its biggest movers on the near side,
       // so names never pile on top of each other. Every node still draws.
-      var labelSet = null, sceneOn = document.documentElement.classList.contains('cc-scene');
+      var labelSet = null, sceneOn = useRegions && document.documentElement.classList.contains('cc-scene');
       if (drawn.length > 16) {
         labelSet = {};
         drawn.filter(function (it) { return it[1][2] > 0.15 && it[2].chg != null; })
@@ -968,12 +1010,16 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         ctx.shadowColor = rgba(it[3], 0.9 * A); ctx.shadowBlur = front ? 10 + it[2].flash * 20 : 0;
         ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad * (isSel || isHov ? 1.8 : 1), 0, 6.2832); ctx.fill();
         ctx.shadowBlur = 0;
+        if (sceneOn && starred[it[2].symbol] && front) {
+          ctx.strokeStyle = rgba(GOLD, 0.9 * A); ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad + 4, 0, 6.2832); ctx.stroke();
+        }
         if (isSel) {
           var pr = rad * 2.6 + 4 + Math.sin(time * 4) * 2;
           ctx.strokeStyle = rgba(GOLD, 0.95); ctx.lineWidth = 1.5;
           ctx.beginPath(); ctx.arc(it[1][0], it[1][1], pr, 0, 6.2832); ctx.stroke();
         }
-        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && (!labelSet || labelSet[it[2].symbol]) && (!sceneOn || it[1][2] > 0.35)))) {
+        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && (sceneOn ? (it[1][2] > 0.3 && (it[2].rank < 3 || starred[it[2].symbol])) : (!labelSet || labelSet[it[2].symbol]))))) {
           var label = it[2].symbol + (it[2].chg != null ? ' ' + (it[2].chg >= 0 ? '+' : '') + Number(it[2].chg).toFixed(2) + '%' : '');
           if (sceneOn && !isSel && !isHov) label = it[2].symbol;
           var lx2 = it[1][0] + 7, ly2 = it[1][1];
