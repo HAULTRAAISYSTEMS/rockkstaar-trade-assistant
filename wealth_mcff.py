@@ -50,17 +50,21 @@ def _f(v):
 # ── Financials: verified ─────────────────────────────────────────────────
 
 def financials_gate(fund: dict | None, *, fetched_at: str | None = None, threshold: float | None = None) -> dict:
+    """Preserve existing Fundamentals score; fail closed when provenance is insufficient."""
     threshold = threshold if threshold is not None else DEFAULT_PASS["financials"]
     base = {"gate": "financials", "origin": "verified", "threshold": threshold}
     if not fund or fund.get("error") or fund.get("score_percent") is None:
         return {**base, "score": None, "passed": None, "confidence": None,
                 "evidence": [], "risks": [], "sources": [],
-                "note": (fund or {}).get("verdict_reason") or "The Fundamentals Engine has no scored data for this company yet."}
-    pct = _f(fund.get("score_percent")) or 0.0
-    score = round(pct / 10.0, 1)
-    scored, total = fund.get("scored_metrics") or 0, fund.get("total_metrics") or 0
-    coverage = (scored / total) if total else 0
-    confidence = "high" if coverage >= 0.85 else "medium" if coverage >= 0.6 else "low"
+                "note": (fund or {}).get("verdict_reason") or "No scored Fundamentals Engine evidence."}
+    pct = _f(fund.get("score_percent"))
+    scored = _f(fund.get("scored_metrics"))
+    total = _f(fund.get("total_metrics"))
+    if pct is None or not 0 <= pct <= 100 or scored is None or total is None or total <= 0 or scored <= 0 or scored > total:
+        return {**base, "score": None, "passed": None, "confidence": "low",
+                "evidence": [], "risks": [], "sources": [],
+                "note": "Invalid or incomplete metric coverage; financial gate not scored."}
+    coverage = scored / total
     evidence = []
     for sec in fund.get("sections") or []:
         for row in sec.get("rows") or []:
@@ -68,19 +72,27 @@ def financials_gate(fund: dict | None, *, fetched_at: str | None = None, thresho
                 continue
             evidence.append({"section": sec.get("name"), "label": row.get("label"), "value": row.get("value"),
                              "passed": bool(row.get("passed"))})
+    if not evidence:
+        return {**base, "score": None, "passed": None, "confidence": "low",
+                "evidence": [], "risks": [], "sources": [],
+                "note": "No individually verified financial metrics; score withheld."}
     flags = [f if isinstance(f, str) else (f.get("text") or f.get("label") or str(f)) for f in fund.get("red_flags") or []]
-    passed = score >= threshold and not flags
+    score = round(pct / 10, 1)
+    confidence = "high" if coverage >= 0.85 else "medium" if coverage >= 0.6 else "low"
+    # Low coverage may describe a partial company filing; it cannot pass the investment gate.
+    passed = (score >= threshold and not flags) if coverage >= 0.6 else None
     ends = fund.get("fiscal_period_ends") or []
-    sources = [{"label": "SEC filings via the Fundamentals Engine" + (f" (fiscal year ended {ends[0]})" if ends else ""),
+    sources = [{"label": "Fundamentals Engine (SEC filing data where available)" +
+                (f" · fiscal period ended {ends[0]}" if ends else ""),
                 "url": f"/research?ticker={fund.get('ticker') or ''}"}]
-    for n in fund.get("source_notes") or []:
-        sources.append({"label": n if isinstance(n, str) else str(n), "url": None})
+    for note in fund.get("source_notes") or []:
+        sources.append({"label": str(note), "url": None})
     return {**base, "score": score, "passed": passed, "confidence": confidence,
             "evidence": evidence, "risks": flags, "sources": sources[:6],
-            "verdict": fund.get("verdict"), "coverage": f"{scored} of {total} metrics scored",
+            "verdict": fund.get("verdict"), "coverage": f"{int(scored)} of {int(total)} metrics scored",
             "verified_on": (fetched_at or "")[:10] or None,
-            "note": None if not flags else "Red flags fail this gate regardless of score."}
-
+            "note": ("Financial evidence coverage is below 60%; gate cannot pass." if coverage < 0.6
+                     else "Red flags fail this gate regardless of score." if flags else None)}
 
 def history_growth(fund: dict | None) -> dict:
     """Compound annual growth of revenue, net income and free cash flow over
@@ -171,7 +183,7 @@ def evaluate(research: dict | None, fin_gate: dict, *, price: float | None, valu
     # while preserving the hard red-flag veto.
     financial = dict(fin_gate)
     financial["threshold"] = th["financials"]
-    if financial.get("score") is not None:
+    if financial.get("score") is not None and financial.get("passed") is not None:
         financial["passed"] = financial["score"] >= th["financials"] and not financial.get("risks")
     gates = {"moat": judged_gate("moat", research.get("moat"), th["moat"]),
              "ceo": judged_gate("ceo", research.get("ceo"), th["ceo"]),
