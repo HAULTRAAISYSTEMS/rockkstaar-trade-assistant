@@ -210,7 +210,7 @@ def test_ipad_landscape_keeps_three_columns_and_chips_clear_the_globe():
     assert "@media (min-width: 1081px) and (max-width: 1400px)" in css   # iPad 1180/1366 landscape
     assert "@media (max-width: 1080px)" in css and "@media (max-width: 1180px)" not in css
     pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
-    assert "Push out until the chip's nearest corner clears the atmosphere" in pj
+    assert "push out until the nearest corner clears the atmosphere" in pj
     assert "rects: rects" in pj
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
     assert "safeHalf ? Math.min(R, (safeHalf - 70) / 1.053) : Math.min(R, W * 0.30)" in js
@@ -292,3 +292,57 @@ def test_page_passes_this_weeks_earnings_to_the_globe(client):
     for r in rows:   # ticker + ISO date, nothing invented
         assert set(r) == {"s", "d", "t"} and re.match(r"^\d{4}-\d{2}-\d{2}", r["d"])
     assert 'data-mode="market" aria-pressed="true"' in page
+
+
+
+def test_globe_spreads_sectors_on_an_even_grid():
+    """Every sector gets its own territory and pins sit on one even grid,
+    so tickers never bunch up; tall spikes and edge pins don't fan out."""
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    assert "function lattice(M)" in js and "Math.ceil(total * 2.4)" in js
+    assert "if (level < 1 && other) continue;" in js          # channel between sectors
+    assert "if (key === layoutKey && layoutPos) return layoutPos;" in js   # stable between quotes
+    assert "function buildCells()" in js and "nd.outer" in js  # territory = union of the sector's cells
+    assert "R = Math.min(R, (H * 0.47 - 16) / 1.22);" in js    # spikes never clipped at the top
+    assert "A *= Math.max(0.06, Math.min(1, (it[0][2] - 0.25) / 0.3));" in js
+    pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
+    # Chips: measured, kept inside the frame, clear of the controls.
+    assert "var hw = el.offsetWidth / 2 + 6" in pj
+    assert "['.cmd27-mode', '.cmd27-legend', '.cmd27-zoom']" in pj
+    assert "R0 = Math.min(R0, (bh * 0.47 - 16) / 1.22);" in pj
+
+
+def test_layout_runs_in_node_without_stacking(tmp_path):
+    """Run the real lattice + region growing on 130 pins in 11 sectors:
+    every pin gets its own grid point and sectors stay apart."""
+    import shutil, subprocess, json
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not installed")
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    start = js.index("    function lattice(M) {")
+    end = js.index("    /* Exchanges: a beacon pulses green")
+    body = js[start:end]
+    harness = """
+function geo(lat, lon) { var a = lat * 0.0174533, o = lon * 0.0174533; return [Math.cos(a) * Math.cos(o), -Math.sin(a), -Math.cos(a) * Math.sin(o)]; }
+var pMode = false;
+var REGIONS = { A:{alat:38,alon:-102}, B:{alat:30,alon:120}, C:{alat:48,alon:8}, D:{alat:24,alon:48}, E:{alat:-16,alon:-58},
+  F:{alat:-4,alon:22}, G:{alat:20,alon:80}, H:{alat:56,alon:96}, I:{alat:-26,alon:136}, J:{alat:58,alon:-45}, K:{alat:4,alon:-30} };
+var counts = {A:25,B:24,C:17,D:4,E:13,F:14,G:9,H:16,I:2,J:4,K:2}, list = [];
+Object.keys(counts).forEach(function (k) { for (var i = 0; i < counts[k]; i++) list.push({ symbol: k + i, sec: k }); });
+function regionFor(sym) { return sym.charAt(0); }
+""" + body + """
+var pos = placeInRegions(list), keys = Object.keys(pos), minD = 999, touch = 0;
+for (var i = 0; i < keys.length; i++) for (var j = i + 1; j < keys.length; j++) {
+  var a = pos[keys[i]], b = pos[keys[j]], d = Math.acos(Math.min(1, a.v[0]*b.v[0]+a.v[1]*b.v[1]+a.v[2]*b.v[2])) * 57.29578;
+  minD = Math.min(minD, d);
+  if (a.region !== b.region && d < layoutStep * 1.35) touch++;
+}
+console.log(JSON.stringify({ n: keys.length, step: layoutStep, minD: minD, touch: touch }));
+"""
+    f = tmp_path / "layout.js"
+    f.write_text(harness, encoding="utf-8")
+    out = json.loads(subprocess.check_output([node, str(f)], text=True).strip())
+    assert out["n"] == 130
+    assert out["minD"] > out["step"] * 0.8           # no two pins closer than ~a grid step
+    assert out["touch"] <= 5                         # sectors keep a channel between them

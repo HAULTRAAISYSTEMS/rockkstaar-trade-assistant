@@ -100,6 +100,11 @@ html.cc27 .elite-navbar .nav-tile.nav-link-active,
   .elite-navbar .nav-brand { flex: none; max-width: 150px; }
   .elite-navbar .nav-links.nav-tiles { flex: 0 1 auto; min-width: 0; gap: 0; margin: 0 8px; }
   .elite-navbar .nav-tile { min-width: 42px; }
+  /* Tiles shrink to fit the bar (never spill left over the logo). */
+  html.cc27 .elite-navbar .nav-links.nav-tiles { justify-content: flex-start !important; overflow: hidden; }
+  html.cc27 .elite-navbar .nav-tiles > .nav-tile, html.cc27 .elite-navbar .nav-tiles > .nav-menu { flex: 1 1 0 !important; min-width: 0 !important; width: auto !important; }
+  html.cc27 .elite-navbar .nav-tiles > .nav-menu > .nav-tile { flex: 1 1 auto !important; min-width: 0 !important; width: 100% !important; }
+  html.cc27 .elite-navbar .nav-tile__ic, html.cc27 .elite-navbar .nav-tile__ic svg { flex: none !important; width: 20px !important; height: 20px !important; min-width: 20px; }
   .elite-navbar .nav-ai-button { font-size: 0 !important; width: 40px; height: 40px; padding: 0 !important; justify-content: center; }
   .elite-navbar .nav-ai-button span { font-size: 16px; }
   .elite-navbar .nav-system__label { display: none; }

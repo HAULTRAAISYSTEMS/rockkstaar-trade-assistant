@@ -295,18 +295,19 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
 
     /* Sector continents: each sector owns a landmass, pins cluster inside it. */
     var REGIONS = {
-      TECH:   { name: 'TECH',          lat: 41,  lon: -100, spread: 12 },
-      SEMIS:  { name: 'SEMIS',         lat: 34,  lon: 118,  spread: 9 },
-      FIN:    { name: 'FINANCIALS',    lat: 49,  lon: 12,   spread: 8 },
-      ENERGY: { name: 'ENERGY',        lat: 26,  lon: 47,   spread: 6 },
-      CONS:   { name: 'CONSUMER',      lat: -11, lon: -57,  spread: 10 },
-      HEALTH: { name: 'HEALTHCARE',    lat: 3,   lon: 22,   spread: 10 },
-      COMM:   { name: 'COMMUNICATION', lat: 22,  lon: 79,   spread: 6 },
-      INDUS:  { name: 'INDUSTRIALS',   lat: 60,  lon: 95,   spread: 12 },
-      OTHER:  { name: 'DEFENSIVE · OTHER', lat: -25, lon: 134, spread: 9 },
-      INDEX:  { name: 'INDEXES',       lat: 70,  lon: -42,  spread: 5, max: 9 },
-      FUT:    { name: 'FUTURES · MACRO', lat: 8, lon: -32, spread: 5, max: 9 }
+      TECH:   { name: 'TECH',          alat: 38,  alon: -102 },
+      SEMIS:  { name: 'SEMIS',         alat: 30,  alon: 120 },
+      FIN:    { name: 'FINANCIALS',    alat: 48,  alon: 8 },
+      ENERGY: { name: 'ENERGY',        alat: 24,  alon: 48 },
+      CONS:   { name: 'CONSUMER',      alat: -16, alon: -58 },
+      HEALTH: { name: 'HEALTHCARE',    alat: -4,  alon: 22 },
+      COMM:   { name: 'COMMUNICATION', alat: 20,  alon: 80 },
+      INDUS:  { name: 'INDUSTRIALS',   alat: 56,  alon: 96 },
+      OTHER:  { name: 'DEFENSIVE · OTHER', alat: -26, alon: 136 },
+      INDEX:  { name: 'INDEXES',       alat: 58,  alon: -45 },
+      FUT:    { name: 'FUTURES · MACRO', alat: 4, alon: -30 }
     };
+    Object.keys(REGIONS).forEach(function (k) { var rg = REGIONS[k]; rg.lat = rg.alat; rg.lon = rg.alon; rg.spread = 6; });
     var ETF_REGION = { XLK: 'TECH', SMH: 'SEMIS', XLF: 'FIN', XLE: 'ENERGY', XLY: 'CONS', XLV: 'HEALTH',
                        XLC: 'COMM', XLI: 'INDUS', XLB: 'INDUS', XLU: 'OTHER', XLRE: 'OTHER', IWM: 'INDEX' };
     var SECTORS = {};
@@ -425,27 +426,93 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       starred = {}; ((e.detail && e.detail.tickers) || []).forEach(function (t) { starred[String(t).toUpperCase()] = 1; });
       if (typeof selected !== 'undefined' && selected && typeof renderCard === 'function') renderCard();
     });
+    /* Sector layout. Every sector gets its own territory, sized to how many
+       pins it holds, and pins sit on one even grid over the whole globe
+       (a Fibonacci lattice), so no two pins are ever closer than the grid
+       step: ~14° apart with 130 pins, wider with fewer.
+       Territories grow from fixed home points in turn — the sector that is
+       furthest behind its share claims the next-nearest free grid point — so
+       big sectors get big land and small ones keep a spot of their own. */
+    function lattice(M) {
+      var pts = [], golden = Math.PI * (3 - Math.sqrt(5)), N = Math.ceil(M / 0.917);
+      for (var i = 0; i < N; i++) {
+        var y = 1 - (i + 0.5) / N * 2, lat = Math.asin(y) * 57.29578;
+        if (lat > 72 || lat < -62) continue;          // keep off the squashed poles
+        var lon = ((i * golden * 57.29578) % 360 + 540) % 360 - 180;
+        pts.push(geo(lat, lon));
+      }
+      return pts;
+    }
+    function dot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+    var layoutKey = '', layoutPos = null, layoutStep = 14;
     function placeInRegions(list) {
       var groups = {};
       list.forEach(function (t) { var k = regionFor(t.symbol); (groups[k] = groups[k] || []).push(t); });
-      var pos = {};
-      Object.keys(groups).forEach(function (k) {
-        // Biggest movers sit at the heart of the territory; the territory
-        // grows with its pin count so pins never stack.
-        var g = groups[k].slice().sort(function (a, b) { return Math.abs(b.change_pct || 0) - Math.abs(a.change_pct || 0); });
-        var rg = REGIONS[k], n = g.length;
-        var spread = Math.min(rg.max || 20, Math.max(rg.spread, 2.7 * Math.sqrt(n)));
-        rg.eff = spread;
-        g.forEach(function (t, i) {
-          var rr = n === 1 ? 0 : spread * Math.sqrt((i + 0.5) / n), a = i * 2.39996;
-          var la = rg.lat + rr * Math.cos(a);
-          var lo = rg.lon + rr * Math.sin(a) / Math.max(0.3, Math.cos(la * 0.0174533));
-          pos[t.symbol] = { v: geo(la, lo), region: k, rank: i };
-        });
+      var keys = Object.keys(groups).sort();
+      // Same pins in the same sectors → same layout (pins don't jump on every quote).
+      var key = keys.map(function (k) { return k + ':' + groups[k].map(function (t) { return t.symbol; }).sort().join(','); }).join('|') + (pMode ? '|p' : '');
+      if (key === layoutKey && layoutPos) return layoutPos;
+      var total = list.length, M = Math.max(60, Math.ceil(total * 2.4));
+      var pts = lattice(M), taken = new Uint8Array(pts.length);
+      var step = Math.sqrt(37800 / pts.length);       // grid spacing in degrees
+      layoutStep = step;
+      // Neighbours on the grid; a point next to one sector is kept free for
+      // the others, which leaves a dark channel between territories.
+      var nb = pts.map(function () { return []; }), cosN = Math.cos(step * 1.35 * 0.0174533);
+      for (var a1 = 0; a1 < pts.length; a1++) for (var b1 = a1 + 1; b1 < pts.length; b1++)
+        if (dot3(pts[a1], pts[b1]) > cosN) { nb[a1].push(b1); nb[b1].push(a1); }
+      var owner = new Int16Array(pts.length).fill(-1);
+      var S = keys.map(function (k, si) {
+        var rg = REGIONS[k];
+        return { k: k, i: si, need: groups[k].length, got: [], a: geo(rg.alat, rg.alon) };
       });
+      // Region growing: a sector only takes free points touching its own land,
+      // nearest its home first, and never one touching another sector (that
+      // keeps a dark channel between territories). Boxed in → it may touch;
+      // fully enclosed → it starts a new patch at the nearest free point.
+      function pick(sec, level) {
+        var best = -1, bs = -9;
+        for (var p2 = 0; p2 < pts.length; p2++) {
+          if (owner[p2] !== -1) continue;
+          var own = false, other = false, ns = nb[p2];
+          for (var q = 0; q < ns.length; q++) { var o = owner[ns[q]]; if (o === sec.i) own = true; else if (o !== -1) other = true; }
+          if (level < 2 && sec.got.length && !own) continue;
+          if (level < 1 && other) continue;
+          var sc = dot3(pts[p2], sec.a);
+          if (sc > bs) { bs = sc; best = p2; }
+        }
+        return best;
+      }
+      for (;;) {
+        var next = null;
+        S.forEach(function (sec) { if (sec.got.length < sec.need && (!next || sec.got.length / sec.need < next.got.length / next.need)) next = sec; });
+        if (!next) break;
+        var pi = pick(next, 0); if (pi < 0) pi = pick(next, 1); if (pi < 0) pi = pick(next, 2);
+        if (pi < 0) { next.need = next.got.length; continue; }   // globe full (never with 2.4× points)
+        owner[pi] = next.i; taken[pi] = 1; next.got.push(pi);
+      }
+      var pos = {};
+      S.forEach(function (sec) {
+        // Portfolio: biggest holding at the heart. Market: alphabetical (stable).
+        var g = groups[sec.k].slice().sort(pMode
+          ? function (a, b) { return (b.weight || 0) - (a.weight || 0); }
+          : function (a, b) { return a.symbol < b.symbol ? -1 : 1; });
+        var c = [0, 0, 0];
+        sec.got.forEach(function (pi) { c[0] += pts[pi][0]; c[1] += pts[pi][1]; c[2] += pts[pi][2]; });
+        var cl = Math.sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]) || 1; c = [c[0] / cl, c[1] / cl, c[2] / cl];
+        var dists = sec.got.map(function (pi) { return Math.acos(Math.max(-1, Math.min(1, dot3(pts[pi], c)))) * 57.29578; }).sort(function (a, b) { return a - b; });
+        var rg = REGIONS[sec.k];
+        rg.lat = -Math.asin(c[1]) * 57.29578;
+        rg.lon = Math.atan2(-c[2], c[0]) * 57.29578;
+        // Border hugs the territory: 90th-percentile reach + a little margin.
+        rg.eff = Math.max(3, dists[Math.min(dists.length - 1, Math.floor(dists.length * 0.9))] + step * 0.4 - 3);
+        // Heart of the territory first.
+        var byC = sec.got.slice().sort(function (i, j) { return dot3(pts[j], c) - dot3(pts[i], c); });
+        g.forEach(function (t, i) { pos[t.symbol] = { v: pts[byC[i]], region: sec.k, rank: i }; });
+      });
+      layoutKey = key; layoutPos = pos;
       return pos;
     }
-
     /* Exchanges: a beacon pulses green while the exchange is inside its
        regular session by its own local clock (holidays are not counted). */
     var EXCH = [
@@ -619,6 +686,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           flash: prev && prev.price !== t.price ? 1 : (prev ? prev.flash : 0.6)
         };
       });
+      if (useRegions) buildCells();
       if (useRegions) {
         var sum = {};
         nodes.forEach(function (nd) {
@@ -637,6 +705,35 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       renderHud(known);
       if (selected) { if (nodeFor(selected)) renderCard(); else closeCard(); }
       if (reduceMotion && ctx) draw(0, 0);
+    }
+
+    /* Territory = the union of small discs around a sector's pins. The fill
+       is one path per sector; the outline keeps only the arcs that are not
+       inside another disc of the same sector, so it traces the real shape. */
+    var CELL_N = 18;
+    function buildCells() {
+      var ang = layoutStep * 0.78 * 0.0174533, ca = Math.cos(ang), sa = Math.sin(ang), cosIn = Math.cos(ang * 0.995);
+      nodes.forEach(function (nd) {
+        var c = [nd.x, nd.y, nd.z], up = Math.abs(c[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0];
+        var e1 = [c[1] * up[2] - c[2] * up[1], c[2] * up[0] - c[0] * up[2], c[0] * up[1] - c[1] * up[0]];
+        var l1 = Math.sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]); e1 = [e1[0] / l1, e1[1] / l1, e1[2] / l1];
+        var e2 = [c[1] * e1[2] - c[2] * e1[1], c[2] * e1[0] - c[0] * e1[2], c[0] * e1[1] - c[1] * e1[0]];
+        nd.cell = [];
+        for (var i = 0; i < CELL_N; i++) {
+          var th = i / CELL_N * 6.2832, c2 = Math.cos(th), s2 = Math.sin(th);
+          nd.cell.push([(c[0] * ca + (e1[0] * c2 + e2[0] * s2) * sa) * 1.004, (c[1] * ca + (e1[1] * c2 + e2[1] * s2) * sa) * 1.004, (c[2] * ca + (e1[2] * c2 + e2[2] * s2) * sa) * 1.004]);
+        }
+      });
+      nodes.forEach(function (nd) {
+        nd.outer = nd.cell.map(function (v) {
+          var l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+          for (var j = 0; j < nodes.length; j++) {
+            var o = nodes[j]; if (o === nd || o.region !== nd.region) continue;
+            if ((v[0] * o.x + v[1] * o.y + v[2] * o.z) / l > cosIn) return false;
+          }
+          return true;
+        });
+      });
     }
 
     function renderHud(known) {
@@ -916,6 +1013,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       // With orbit chips around it, the globe also leaves a clear ring for
       // them sideways (narrow columns: iPad landscape, phones).
       if (useRegions) R = safeHalf ? Math.min(R, (safeHalf - 70) / 1.053) : Math.min(R, W * 0.30);
+      // The tallest spike (×1.32) must stay inside the frame at the top.
+      R = Math.min(R, (H * 0.47 - 16) / 1.22);
       R *= zoom;
       var cx = W / 2 + shiftX + pointer.x * 6, cy = H * 0.47 + pointer.y * 6;
 
@@ -1094,44 +1193,37 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           var rg = REGIONS[k], st = stats[k], avg = st.k ? st.sum / st.k : null;
           var colT = avg == null ? CYAN : (avg > 0.05 ? POS : (avg < -0.05 ? NEG : FLAT));
           var cen = geo(rg.lat, rg.lon), C = project(cen[0], cen[1], cen[2], R, cx, cy);
-          if (C[2] < -0.1) return;
-          // Border: small circle of radius spread+4° around the centre.
-          var ang = ((rg.eff || rg.spread) + 3) * 0.0174533, ca = Math.cos(ang), sa = Math.sin(ang);
-          var up = Math.abs(cen[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0];
-          var e1 = [cen[1] * up[2] - cen[2] * up[1], cen[2] * up[0] - cen[0] * up[2], cen[0] * up[1] - cen[1] * up[0]];
-          var l1 = Math.sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]); e1 = [e1[0] / l1, e1[1] / l1, e1[2] / l1];
-          var e2 = [cen[1] * e1[2] - cen[2] * e1[1], cen[2] * e1[0] - cen[0] * e1[2], cen[0] * e1[1] - cen[1] * e1[0]];
-          var dash = reduceMotion ? 0 : time * 0.6, isFocus = focusKey === k, dimT = focusKey && !isFocus ? 0.3 : 1;
-          var ring = [], frontN = 0;
-          for (var bs = 0; bs <= 64; bs++) {
-            var th2 = bs / 64 * 6.2832, c2 = Math.cos(th2), s2 = Math.sin(th2);
-            var pv = [cen[0] * ca + (e1[0] * c2 + e2[0] * s2) * sa, cen[1] * ca + (e1[1] * c2 + e2[1] * s2) * sa, cen[2] * ca + (e1[2] * c2 + e2[2] * s2) * sa];
-            var PT = project(pv[0] * 1.004, pv[1] * 1.004, pv[2] * 1.004, R, cx, cy);
-            ring.push(PT); if (PT[2] > 0) frontN++;
-          }
-          // Heat: the territory glows with its sector's average move.
-          if (frontN > 52 && avg != null) {
-            var heat = Math.min(Math.abs(avg) / 3, 1);
+          var isFocus = focusKey === k, dimT = focusKey && !isFocus ? 0.3 : 1;
+          var heat = avg == null ? 0.3 : Math.min(Math.abs(avg) / 3, 1);
+          var mine2 = nodes.filter(function (nd) { return nd.region === k && nd.cell; });
+          var shown = [];
+          mine2.forEach(function (nd) {
+            var P0 = project(nd.x, nd.y, nd.z, R, cx, cy); if (P0[2] < 0.22) return;
+            shown.push(nd.cell.map(function (v) { return project(v[0], v[1], v[2], R, cx, cy); }).concat([nd]));
+          });
+          if (shown.length) {
             ctx.save();
             ctx.beginPath(); ctx.arc(cx, cy, R * EARTH_SIL, 0, 6.2832); ctx.clip();
             ctx.beginPath();
-            ring.forEach(function (q, qi) { if (qi) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
-            ctx.closePath();
-            ctx.fillStyle = rgba(colT, (0.07 + 0.16 * heat) * dimT * (isFocus ? 1.4 : 1)); ctx.fill();
+            shown.forEach(function (ring) { for (var q = 0; q < CELL_N; q++) { if (q) ctx.lineTo(ring[q][0], ring[q][1]); else ctx.moveTo(ring[q][0], ring[q][1]); } ctx.closePath(); });
+            ctx.fillStyle = rgba(colT, (0.08 + 0.14 * heat) * dimT * (isFocus ? 1.5 : 1)); ctx.fill('nonzero');
+            // Outline: only the outer arcs of the union.
+            ctx.lineWidth = isFocus ? 2 : 1.3;
+            ctx.shadowColor = rgba(colT, 0.9); ctx.shadowBlur = isFocus ? 12 : 6;
+            ctx.strokeStyle = rgba(colT, (isFocus ? 0.85 : 0.5) * dimT);
+            ctx.beginPath();
+            shown.forEach(function (ring) {
+              var nd = ring[CELL_N];
+              for (var q = 0; q < CELL_N; q++) {
+                var q2 = (q + 1) % CELL_N;
+                if (nd.outer[q] && nd.outer[q2] && ring[q][2] > 0.3 && ring[q2][2] > 0.3) { ctx.moveTo(ring[q][0], ring[q][1]); ctx.lineTo(ring[q2][0], ring[q2][1]); }
+              }
+            });
+            ctx.stroke();
             ctx.restore();
           }
-          ctx.lineWidth = isFocus ? 2.2 : 1.6;
-          ctx.shadowColor = rgba(colT, 0.9); ctx.shadowBlur = isFocus ? 14 : 8;
-          for (var bq = 1; bq < ring.length; bq++) {
-            var PT2 = ring[bq], prevT = ring[bq - 1];
-            if (PT2[2] > 0 && prevT[2] > 0 && (isFocus || (bq + Math.floor(dash * 4)) % 4 !== 0)) {
-              ctx.strokeStyle = rgba(colT, (isFocus ? 0.9 : 0.5) * dimT * Math.min(1, PT2[2] * 2));
-              ctx.beginPath(); ctx.moveTo(prevT[0], prevT[1]); ctx.lineTo(PT2[0], PT2[1]); ctx.stroke();
-            }
-          }
-          ctx.shadowBlur = 0;
           // Floating tag above the territory.
-          if (C[2] > 0.2) {
+          if (C[2] > 0.42) {
             var lift = project(cen[0] * 1.16, cen[1] * 1.16, cen[2] * 1.16, R, cx, cy);
             ctx.font = '800 ' + (W > 520 ? 11 : 10) + 'px "IBM Plex Mono", ui-monospace, monospace';
             ctx.textBaseline = 'middle';
@@ -1164,7 +1256,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       ctx.textBaseline = 'middle';
       for (var ei = 0; ei < EXCH.length; ei++) {
         var ex = EXCH[ei], Pe = project(ex.v[0], ex.v[1], ex.v[2], R, cx, cy);
-        if (Pe[2] < 0.12) continue;
+        if (Pe[2] < 0.3) continue;
         var colE = ex.live ? POS : GOLD, ph = reduceMotion ? 0.5 : (time * 0.8 + ei * 0.13) % 1;
         ctx.strokeStyle = rgba(colE, (1 - ph) * 0.8); ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(Pe[0], Pe[1], (4 + ph * 14) * Pe[3], 0, 6.2832); ctx.stroke();
@@ -1198,7 +1290,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           : (nd.chg == null ? 0 : Math.min(Math.abs(nd.chg), 6) / 6);
         var col = nd.chg == null ? FLAT : (nd.chg > 0 ? POS : (nd.chg < 0 ? NEG : FLAT));
         var base = project(nd.x, nd.y, nd.z, R, cx, cy);
-        var k = 1 + 0.06 + mag * (pMode ? 0.42 : 0.30);
+        var k = 1 + 0.03 + mag * (pMode ? 0.16 : 0.1);
         var tip = project(nd.x * k, nd.y * k, nd.z * k, R, cx, cy);
         drawn.push([base, tip, nd, col, mag]);
       }
@@ -1215,10 +1307,13 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       var cands = [];
       for (var d = 0; d < drawn.length; d++) {
         var it = drawn[d], front = it[1][2] > -0.1, A = front ? 1 : 0.25;
+        // Pins rolling over the edge fade out instead of fanning long spikes.
+        // (the visible edge of the Earth sits at depth ≈ 0.31 in this projection)
+        A *= Math.max(0.06, Math.min(1, (it[0][2] - 0.25) / 0.3));
         var isSel = selected === it[2].symbol, isHov = hovered === it[2].symbol;
         if (selected && !isSel) A *= 0.45;
         if (focusKey && it[2].region !== focusKey) A *= 0.35;
-        if (front && it[1][2] > 0) hits.push({ symbol: it[2].symbol, x: it[1][0], y: it[1][1] });
+        if (front && it[0][2] > 0.3) hits.push({ symbol: it[2].symbol, x: it[1][0], y: it[1][1] });
         it[2].flash = Math.max(0, it[2].flash - dt * 0.6);
         // Tower: footprint ring on the surface, glowing shaft, bright cap.
         if (sceneOn && front) {
@@ -1240,7 +1335,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           ctx.strokeStyle = rgba(starred[it[2].symbol] ? GOLD : CYAN, 0.9 * A); ctx.lineWidth = 1.4;
           ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad + 4, 0, 6.2832); ctx.stroke();
         }
-        if (front && it[1][2] > 0) {
+        if (front && it[0][2] > 0.3) {
           var symU = it[2].symbol, sc = Math.min(zoom, 2.2) * it[0][3];
           // Shockwave: three rings race out from the base the first time a
           // price alert fires or the stock enters its buy zone…
@@ -1289,7 +1384,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         }
         if (sceneOn) {
           // A stock that is an orbit chip keeps its gold ring, not a second name tag.
-          if (front && it[1][2] > 0.12 && (isSel || isHov || zoom >= 1.2 || !chipSet[it[2].symbol])) {
+          if (front && it[0][2] > (zoom < 1.2 ? 0.42 : 0.33) && (isSel || isHov || zoom >= 1.2 || !chipSet[it[2].symbol])) {
             var pri = (isSel || isHov ? 1e4 : 0) + (starred[it[2].symbol] ? 500 : 0) + (focusKey && it[2].region === focusKey ? 300 : 0)
               + (flagged[it[2].symbol] ? 400 : 0) + (it[2].earn != null ? 250 : 0) + (pMode ? (it[2].weight || 0) * 20 : 0)
               + Math.abs(it[2].chg || 0) * 10 + it[1][2] * 5;
