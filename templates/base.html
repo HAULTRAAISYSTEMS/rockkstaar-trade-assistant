@@ -51,6 +51,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/command_center.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/research_menu.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_complete.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nav_2027.css') }}" />
+  {% block late_css %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
   <a class="workspace-skip" href="#workspace-main">Skip to content</a>
