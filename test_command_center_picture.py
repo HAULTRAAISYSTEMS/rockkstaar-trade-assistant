@@ -360,3 +360,32 @@ def test_sector_signs_are_holographic_and_stay_clear():
     assert "var xlo = safeHalf ? W / 2 - safeHalf + 4 : 4" in js
     pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
     assert "detail: { half: half, obst: obst }" in pj
+
+
+def test_globe_calm_view_shows_detail_on_demand():
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    # Whole globe: only names that matter; zoom / focus a sector → all names.
+    assert "var nq = it[2], calm = zoom < 1.2 && !pMode && !(focusKey && nq.region === focusKey);" in js
+    assert "var matters = isSel || isHov;" in js          # whole globe: sector tabs only
+    # Signs: one line until you focus the sector or zoom in.
+    assert "var small = W <= 520 || (!isFocus && !overview)" in js
+    # Decorations quieter on the Command Center, and defined outside the zoom block.
+    assert js.index("var calmK = useRegions ? 0.45 : 1;") < js.index("      if (zoom < 1.25) {\n      // Tilted orbit ring")
+
+
+
+def test_globe_overview_is_sector_tabs_and_tap_opens_the_sector():
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    # Whole globe: tabs only — pins are skipped unless selected.
+    assert "var overview = useRegions && zoom < 1.2 && !focusKey;" in js
+    assert "if (overview) continue;" in js and "if (focusKey && nd.region !== focusKey) continue;" in js
+    # Tabs: sized by sector, best/worst line, gold pulse when an alert/buy zone is inside.
+    assert "0.86 + 0.3 * Math.sqrt(st.n / maxN)" in js
+    assert "line3 = '▲ ' + st.best.symbol" in js
+    assert "if (st.flag) {" in js
+    # Opening a sector: pins rise biggest movers first.
+    assert "nd.rise = i;" in js and "(time - focusT0 - 0.35 - nd.rise * 0.045) / 0.45" in js
+    html = (ROOT / "templates/liquidity.html").read_text(encoding="utf-8")
+    assert 'id="cmd27-back"' in html
+    pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
+    assert "var back = $('#cmd27-back');" in pj
