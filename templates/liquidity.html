@@ -92,7 +92,7 @@
           </ul>
         {% endif %}
       {% elif story %}
-        <p class="cc-brief-lead">{{ story.summary or story.headline or '' }}</p>
+        <p class="cc-brief-lead">{{ story.summary or story.headline or '' }}</p>{% if story.bullets %}<ul class="cc-brief-list">{% for b in story.bullets %}<li class="ms-bullet">{{ b }}</li>{% endfor %}</ul>{% endif %}
       {% else %}
         <p class="cc-empty">Briefing updates as live market research arrives.</p>
       {% endif %}{% if story and story.permissions %}<p class="cc-brief-permissions">{{ story.permissions|join(', ') if story.permissions is sequence and story.permissions is not string else story.permissions }}</p>{% endif %}{% if story and story.leaders %}<p class="cc-brief-leaders">{{ story.leaders|join(', ') if story.leaders is sequence and story.leaders is not string else story.leaders }}</p>{% endif %}</div>
