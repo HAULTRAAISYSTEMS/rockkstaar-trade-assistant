@@ -249,7 +249,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     var ctx, W = 0, H = 0;
     var nodes = [];
     var lastSync = 0;
-    var rotY = 0.6, rotX = -0.32, velY = reduceMotion ? 0 : 0.18, dragging = false, lx = 0, ly = 0;
+    var rotY = -0.35, rotX = -0.3, velY = reduceMotion ? 0 : 0.1, dragging = false, lx = 0, ly = 0;
 
     function resize() {
       var r = host.getBoundingClientRect();
@@ -259,6 +259,111 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     if (window.ResizeObserver) new ResizeObserver(resize).observe(host);
     else window.addEventListener('resize', resize, { passive: true });
     resize();
+
+    /* ── Real Earth texture ───────────────────────────────────────────
+       /static/img/earth.webp is an equirectangular map built from Natural
+       Earth coastlines (top half) and city lights from real city
+       populations (bottom half); scripts/build_earth_texture.py makes it.
+       Each frame every pixel of the disc is ray-cast through the same
+       perspective as project(), rotated back to lat/lon and shaded. */
+    var EARTH_SIL = Math.sqrt(10.24 * 4 / 36.96);   // silhouette radius / R for persp 3.2
+    var tex = null, TW = 0, TH = 0;
+    var eCanvas = document.createElement('canvas'), eCtx = eCanvas.getContext('2d');
+    var eImg = null, eD = 0, eRay = null;
+    (function loadEarth() {
+      var img = new Image();
+      img.decoding = 'async';
+      img.onload = function () {
+        try {
+          var c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+          var g = c.getContext('2d'); g.drawImage(img, 0, 0);
+          tex = g.getImageData(0, 0, c.width, c.height).data; TW = c.width; TH = c.height / 2;
+          if (reduceMotion && ctx) draw(0, 0);
+        } catch (e) { tex = null; }
+      };
+      var small = Math.min(window.innerWidth, window.innerHeight) < 600;
+      img.src = (host.getAttribute('data-earth-src') || '/static/img/' + (small ? 'earth_1024.webp' : 'earth.webp'));
+    })();
+
+    function buildRays(D) {
+      // Camera-space unit-sphere point for every pixel of a D×D square (0 = off-globe).
+      eD = D; eCanvas.width = D; eCanvas.height = D;
+      eImg = eCtx.createImageData(D, D);
+      eRay = new Float32Array(D * D * 4);
+      var half = D / 2;
+      for (var j = 0; j < D; j++) {
+        for (var i = 0; i < D; i++) {
+          var u = ((i + 0.5) - half) / half * EARTH_SIL, v = ((j + 0.5) - half) / half * EARTH_SIL;
+          var k = (u * u + v * v) / 10.24;
+          var A = k + 1, B = -6.4 * k, C = 10.24 * k - 1, disc = B * B - 4 * A * C;
+          var o = (j * D + i) * 4;
+          if (disc < 0) { eRay[o + 3] = 0; continue; }
+          var z = (-B + Math.sqrt(disc)) / (2 * A);
+          var f = (3.2 - z) / 3.2;
+          eRay[o] = u * f; eRay[o + 1] = v * f; eRay[o + 2] = z;
+          // Edge alpha: fade the last ~1.5px for a smooth limb.
+          var rr = Math.sqrt(u * u + v * v) / EARTH_SIL;
+          eRay[o + 3] = Math.max(0.001, Math.min(1, (1 - rr) * half / 1.5));
+        }
+      }
+    }
+
+    // Spinning about the vertical axis only shifts longitude, so each pixel's
+    // texture row and base column are cached per tilt (rotX); a frame is then
+    // a lookup plus lighting.
+    var eRow = null, eCol = null, eTilt = null;
+    function buildLookup() {
+      var n = eD * eD, cX = Math.cos(rotX), sX = Math.sin(rotX), PI = Math.PI;
+      eRow = new Int32Array(n); eCol = new Float32Array(n);
+      for (var p = 0; p < n; p++) {
+        var o = p * 4;
+        if (eRay[o + 3] === 0) continue;
+        var y1 = eRay[o + 1], z2 = eRay[o + 2];
+        var y = y1 * cX + z2 * sX, z1 = -y1 * sX + z2 * cX;
+        var lat = Math.asin(y < -1 ? 1 : (y > 1 ? -1 : -y));
+        var ty = ((PI / 2 - lat) / PI * TH) | 0; if (ty >= TH) ty = TH - 1;
+        eRow[p] = ty * TW;
+        eCol[p] = (PI - Math.atan2(z1, eRay[o])) / (2 * PI) * TW;   // lon = -atan2(z1, x1) - rotY
+      }
+      eTilt = rotX;
+    }
+
+    function drawEarth(cx, cy, R) {
+      if (!tex) return false;
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      var D = Math.min(Math.round(2 * R * EARTH_SIL * dpr), window.innerWidth < 760 ? 360 : 600);
+      if (D !== eD) { buildRays(D); eTilt = null; }
+      if (eTilt !== rotX) buildLookup();
+      var data = eImg.data, ray = eRay, row = eRow, col = eCol;
+      var Lx = -0.52, Ly = -0.42, Lz = 0.74;
+      var Hx = Lx, Hy = Ly, Hz = Lz + 1, hl = Math.sqrt(Hx * Hx + Hy * Hy + Hz * Hz); Hx /= hl; Hy /= hl; Hz /= hl;
+      var tw = TW, rowB = TW * TH * 4;
+      var shift = (rotY / (2 * Math.PI)) * tw; shift = shift - Math.floor(shift / tw) * tw;
+      for (var p = 0, n = D * D; p < n; p++) {
+        var o = p * 4, a = ray[o + 3];
+        if (a === 0) { data[o + 3] = 0; continue; }
+        var x1 = ray[o], y1 = ray[o + 1], z2 = ray[o + 2];
+        var tx = (col[p] - shift) | 0; if (tx < 0) tx += tw; if (tx >= tw) tx -= tw;
+        var ti = (row[p] + tx) * 4;
+        var r = tex[ti], g = tex[ti + 1], b = tex[ti + 2], lights = tex[rowB + ti] / 255;
+        var dif = x1 * Lx + y1 * Ly + z2 * Lz; if (dif < 0) dif = 0;
+        var shade = 0.45 + 0.9 * dif;
+        var lg = lights * (0.8 + 0.9 * (1 - dif));
+        var R2 = r * shade + 210 * lg, G2 = g * shade + 255 * lg, B2 = b * shade + 72 * lg;
+        if (b > g) {
+          var sp = x1 * Hx + y1 * Hy + z2 * Hz;
+          if (sp > 0.97) { sp = Math.pow(sp, 220) * 80; R2 += sp * 0.6; G2 += sp * 0.9; B2 += sp; }
+        }
+        var limb = 1 - z2; limb = limb * limb * limb;
+        R2 += 20 * limb; G2 += 120 * limb; B2 += 170 * limb;
+        data[o] = R2 > 255 ? 255 : R2; data[o + 1] = G2 > 255 ? 255 : G2; data[o + 2] = B2 > 255 ? 255 : B2;
+        data[o + 3] = a * 255;
+      }
+      eCtx.putImageData(eImg, 0, 0);
+      var RS = R * EARTH_SIL;
+      ctx.drawImage(eCanvas, cx - RS, cy - RS, RS * 2, RS * 2);
+      return true;
+    }
 
     function setData(items) {
       var list = (items || []).filter(function (t) { return t && t.symbol; });
@@ -373,7 +478,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         if (wasTap) {
           var h = nearest(e.clientX, e.clientY, e.pointerType === 'mouse' ? 16 : 26);
           if (h) openCard(h.symbol); else closeCard();
-        } else if (!selected && !reduceMotion && Math.abs(velY) < 0.12) velY = 0.18;
+        } else if (!selected && !reduceMotion && Math.abs(velY) < 0.06) velY = 0.1;
       });
       host.addEventListener('pointercancel', function () { dragging = false; });
       host.addEventListener('pointerleave', function () { hovered = null; canvas.style.cursor = ''; });
@@ -456,7 +561,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       if (!selected) return;
       selected = null; if (card) card.hidden = true;
       host.classList.remove('has-selection');
-      if (!reduceMotion) velY = 0.18; else draw(0, 0);
+      if (!reduceMotion) velY = 0.1; else draw(0, 0);
     }
 
     function project(x, y, z, R, cx, cy) {
@@ -469,10 +574,10 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     }
 
     function draw(time, dt) {
-      if (!dragging && !reduceMotion) { rotY += velY * dt; velY += ((selected ? 0 : 0.18) - velY) * (selected ? 0.2 : 0.02); }
+      if (!dragging && !reduceMotion) { rotY += velY * dt; velY += ((selected ? 0 : 0.1) - velY) * (selected ? 0.2 : 0.02); }
       ctx.clearRect(0, 0, W, H);
       // Bigger canvas, bigger globe: fill more of it once there is room.
-      var R = Math.min(W, H) * (Math.min(W, H) > 420 ? 0.34 : 0.29);
+      var R = Math.min(W, H) * (Math.min(W, H) > 420 ? 0.37 : 0.33);
       var cx = W / 2 + pointer.x * 6, cy = H * 0.47 + pointer.y * 6;
 
       // Core glow
@@ -482,79 +587,30 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       cg.addColorStop(1, rgba(CYAN, 0));
       ctx.fillStyle = cg;
       ctx.beginPath(); ctx.arc(cx, cy, R * 1.25, 0, 6.2832); ctx.fill();
-      // Luminous 3D Earth sphere & bright cyan atmospheric rim halo
-      var earthBg = ctx.createRadialGradient(cx - R * 0.28, cy - R * 0.3, R * 0.1, cx, cy, R);
-      earthBg.addColorStop(0, 'rgba(10, 48, 72, 0.88)');
-      earthBg.addColorStop(0.65, 'rgba(4, 16, 34, 0.92)');
-      earthBg.addColorStop(0.92, rgba(CYAN, 0.24));
-      earthBg.addColorStop(1, rgba(CYAN, 0.58));
-      ctx.fillStyle = earthBg;
-      ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.fill();
+      // Real Earth: coastlines + city lights texture, lit and shaded per pixel.
+      if (!drawEarth(cx, cy, R)) {
+        var earthBg = ctx.createRadialGradient(cx - R * 0.28, cy - R * 0.3, R * 0.1, cx, cy, R);
+        earthBg.addColorStop(0, 'rgba(10, 48, 72, 0.88)');
+        earthBg.addColorStop(1, 'rgba(4, 16, 34, 0.92)');
+        ctx.fillStyle = earthBg;
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.fill();
+      }
+      // Atmosphere: soft cyan halo just outside the limb, then a crisp rim.
+      var RS = R * EARTH_SIL;
+      var atm = ctx.createRadialGradient(cx, cy, RS * 0.96, cx, cy, RS * 1.16);
+      atm.addColorStop(0, rgba(CYAN, 0.55));
+      atm.addColorStop(0.35, rgba(CYAN, 0.18));
+      atm.addColorStop(1, rgba(CYAN, 0));
+      ctx.fillStyle = atm;
+      ctx.beginPath(); ctx.arc(cx, cy, RS * 1.16, 0, 6.2832); ctx.arc(cx, cy, RS * 0.985, 0, 6.2832, true); ctx.fill();
       ctx.save();
-      ctx.strokeStyle = rgba(CYAN, 0.8);
-      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = rgba(CYAN, 0.7);
+      ctx.lineWidth = 1.6;
       ctx.shadowColor = rgba(CYAN, 0.95);
-      ctx.shadowBlur = 20;
-      ctx.beginPath(); ctx.arc(cx, cy, R * 1.004, 0, 6.2832); ctx.stroke();
+      ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(cx, cy, RS, 0, 6.2832); ctx.stroke();
       ctx.restore();
 
-      // Glowing emerald/cyan continent silhouettes
-      var CONTINENTS = [
-        [[60,-165],[70,-140],[68,-95],[60,-65],[45,-62],[30,-81],[25,-80],[20,-90],[15,-84],[9,-78],[18,-104],[32,-117],[48,-125],[58,-136]],
-        [[11,-74],[5,-52],[-5,-35],[-23,-42],[-38,-57],[-54,-68],[-45,-75],[-20,-71],[-5,-81]],
-        [[36,-9],[43,-9],[50,2],[58,8],[69,18],[70,30],[60,30],[50,25],[43,15],[38,24],[36,10]],
-        [[35,-6],[32,12],[31,32],[12,44],[2,45],[-10,40],[-26,33],[-34,18],[-20,12],[4,9],[6,-10],[20,-17]],
-        [[70,32],[73,80],[72,135],[66,170],[54,140],[40,128],[31,122],[22,114],[10,104],[1,103],[8,98],[22,90],[8,77],[25,62],[30,48],[41,29],[55,28]],
-        [[-12,130],[-14,142],[-26,153],[-38,145],[-34,115],[-22,114]]
-      ];
-      ctx.save();
-      ctx.beginPath(); ctx.arc(cx, cy, R * 0.998, 0, 6.2832); ctx.clip();
-      for (var ci = 0; ci < CONTINENTS.length; ci++) {
-        var poly = CONTINENTS[ci], ptsC = [], front = 0;
-        for (var vi = 0; vi < poly.length; vi++) {
-          var laR = poly[vi][0] * 0.0174533, loR = poly[vi][1] * 0.0174533;
-          var cp = project(Math.cos(laR) * Math.cos(loR), -Math.sin(laR), Math.cos(laR) * Math.sin(loR), R * 1.001, cx, cy);
-          ptsC.push(cp);
-          if (cp[2] > -0.15 * R) front++;
-        }
-        if (front < 2) continue;
-        ctx.beginPath();
-        for (var vi = 0; vi < ptsC.length; vi++) {
-          if (vi === 0) ctx.moveTo(ptsC[vi][0], ptsC[vi][1]);
-          else ctx.lineTo(ptsC[vi][0], ptsC[vi][1]);
-        }
-        ctx.closePath();
-        ctx.fillStyle = rgba(POS, 0.24);
-        ctx.fill();
-        ctx.shadowColor = rgba(CYAN, 0.75);
-        ctx.shadowBlur = 8;
-        ctx.strokeStyle = rgba(POS, 0.76);
-        ctx.lineWidth = 1.25;
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-      }
-      // City-light clusters
-      var CITIES = [
-        [40.7,-74],[41.8,-87.6],[37.7,-122.4],[43.6,-79.3],[51.5,-0.1],[50.1,8.6],[48.8,2.3],[47.3,8.5],
-        [35.6,139.7],[22.3,114.2],[1.3,103.8],[-33.8,151.2],[25.2,55.3],[-23.5,-46.6],[19.0,72.8],[37.5,127.0],[31.2,121.5],[-26.2,28.0]
-      ];
-      for (var ki = 0; ki < CITIES.length; ki++) {
-        var cLat = CITIES[ki][0], cLon = CITIES[ki][1];
-        for (var sub = 0; sub < 3; sub++) {
-          var sLat = (cLat + (sub === 0 ? 0 : (sub === 1 ? 1.8 : -1.5))) * 0.0174533;
-          var sLon = (cLon + (sub === 0 ? 0 : (sub === 1 ? 2.2 : -1.9))) * 0.0174533;
-          var cP = project(Math.cos(sLat) * Math.cos(sLon), -Math.sin(sLat), Math.cos(sLat) * Math.sin(sLon), R * 1.003, cx, cy);
-          if (cP[2] <= 0.05 * R) continue;
-          var pulse = reduceMotion ? 0.85 : (0.55 + 0.45 * Math.sin(time * 2.4 + ki * 1.3 + sub));
-          ctx.fillStyle = rgba(sub === 0 ? GOLD : CYAN, pulse * 0.9);
-          ctx.shadowColor = rgba(sub === 0 ? GOLD : CYAN, 0.85);
-          ctx.shadowBlur = sub === 0 ? 8 : 5;
-          ctx.beginPath(); ctx.arc(cP[0], cP[1], sub === 0 ? 2.0 : 1.15, 0, 6.2832); ctx.fill();
-        }
-      }
-      ctx.shadowBlur = 0;
-      ctx.restore();
-       
       // Wireframe: latitudes + meridians
       ctx.lineWidth = 0.8;
       var seg = 48;
@@ -565,7 +621,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           var P = project(p[0], p[1], p[2], R, cx, cy);
           if (prev) {
             var depth = (prev[2] + P[2]) / 2;
-            ctx.strokeStyle = rgba(CYAN, depth > 0 ? 0.32 : 0.08);
+            ctx.strokeStyle = rgba(CYAN, depth > 0 ? 0.13 : 0.0);
             ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(P[0], P[1]); ctx.stroke();
           }
           prev = P;

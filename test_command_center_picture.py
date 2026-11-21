@@ -66,3 +66,13 @@ def test_page_css_loads_after_the_global_sheets():
     assert base.index("elite_2027_complete.css") < base.index("{% block late_css %}")
     assert (ROOT / "static/css/command_center_picture.css").exists()
     assert (ROOT / "static/js/command_center_picture.js").exists()
+
+
+def test_globe_uses_the_real_earth_texture():
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    assert "earth.webp" in js and "earth_1024.webp" in js
+    assert "var CONTINENTS" not in js   # the hand-drawn outlines are gone
+    for f in ("earth.webp", "earth_1024.webp"):
+        p = ROOT / "static/img" / f
+        assert p.exists() and p.stat().st_size < 400_000
+    assert (ROOT / "scripts/build_earth_texture.py").exists()
