@@ -366,7 +366,7 @@ def test_globe_calm_view_shows_detail_on_demand():
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
     # Whole globe: only names that matter; zoom / focus a sector → all names.
     assert "var nq = it[2], calm = zoom < 1.2 && !pMode && !(focusKey && nq.region === focusKey);" in js
-    assert "(topMove[nq.region] === nq)" in js
+    assert "var matters = isSel || isHov;" in js          # whole globe: sector tabs only
     # Signs: one line until you focus the sector or zoom in.
     assert "var small = W <= 520 || (!isFocus && zoom < 1.2)" in js
     # Decorations quieter on the Command Center, and defined outside the zoom block.

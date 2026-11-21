@@ -829,7 +829,9 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           if (e.pointerType === 'mouse') {
             var h = nearest(e.clientX, e.clientY, 16);
             hovered = h ? h.symbol : null;
-            canvas.style.cursor = h ? 'pointer' : '';
+            var rb = canvas.getBoundingClientRect(), mx = e.clientX - rb.left, my = e.clientY - rb.top, onTab = false;
+            for (var sh = 0; sh < sectorHits.length; sh++) { var sb = sectorHits[sh].box; if (mx >= sb[0] && mx <= sb[2] && my >= sb[1] && my <= sb[3]) onTab = true; }
+            canvas.style.cursor = h || onTab ? 'pointer' : '';
             if (reduceMotion) draw(0, 0);
           }
           return;
@@ -1258,7 +1260,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             ctx.font = '600 ' + f2 + 'px "IBM Plex Mono", ui-monospace, monospace';
             var wSub = ctx.measureText(sub).width;
             var padX = small ? 9 : 12, ph2 = small ? (W <= 520 ? 22 : 25) : 44 * big;
-            var bw2 = Math.max(wName + wPct + padX * 2 + 12, wSub + padX * 2) + 6;
+            var chev = !isFocus && W > 520 ? 14 : 0;   // "›" = tap to zoom in
+            var bw2 = Math.max(wName + wPct + padX * 2 + 12, wSub + padX * 2) + 6 + chev;
             // Try above the land first, then nudge sideways / below if taken.
             var cands = [[0, 0], [-bw2 * 0.55, 0], [bw2 * 0.55, 0], [0, -ph2 * 0.8], [0, ph2 + 26], [-bw2 * 0.55, ph2 + 26], [bw2 * 0.55, ph2 + 26]];
             var bx, by, box = null;
@@ -1316,7 +1319,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             ctx.fillText(name, bx + padX, r1);
             if (hasLS) ctx.letterSpacing = '0px';
             ctx.fillStyle = rgba(colT, 1); ctx.textAlign = 'right';
-            ctx.fillText(pctT, bx + bw2 - padX, r1);
+            ctx.fillText(pctT, bx + bw2 - padX - chev, r1);
+            if (chev) { ctx.fillStyle = 'rgba(200,215,240,0.75)'; ctx.fillText('›', bx + bw2 - padX + 2, r1 - 0.5); }
             ctx.textAlign = 'left'; ctx.shadowBlur = 0;
             // Row 2: breadth / allocation.
             ctx.font = '600 ' + f2 + 'px "IBM Plex Mono", ui-monospace, monospace';
@@ -1487,7 +1491,9 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         if (sceneOn) {
           // A stock that is an orbit chip keeps its gold ring, not a second name tag.
           var nq = it[2], calm = zoom < 1.2 && !pMode && !(focusKey && nq.region === focusKey);
-          var matters = isSel || isHov || starred[nq.symbol] || flagged[nq.symbol] || nq.earn != null || (topMove[nq.region] === nq);
+          // Whole globe: no ticker names — just the sector tabs. Tap a tab (or
+          // zoom) to open that sector with every name; hover/selection still shows one.
+          var matters = isSel || isHov;
           if (front && it[0][2] > (zoom < 1.2 ? 0.42 : 0.33) && (!calm || matters) && (isSel || isHov || zoom >= 1.2 || !chipSet[nq.symbol])) {
             var pri = (isSel || isHov ? 1e4 : 0) + (starred[it[2].symbol] ? 500 : 0) + (focusKey && it[2].region === focusKey ? 300 : 0)
               + (flagged[it[2].symbol] ? 400 : 0) + (it[2].earn != null ? 250 : 0) + (pMode ? (it[2].weight || 0) * 20 : 0)
