@@ -10,7 +10,7 @@
   var root = document.documentElement;
   var layers = Array.prototype.slice.call(stage.querySelectorAll('[data-depth]'));
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var calm = root.classList.contains('cc-scene-dim') || window.innerWidth < 760;  // data pages + phones: 30 fps
+  var calm = true;  // 30 fps everywhere: the floor moves slowly, the eye can't tell, the battery can
   var deep = root.classList.contains('cc-scene-deep');          // terminal: still frame
   var ctx = canvas.getContext('2d'), W = 0, H = 0;
   var px = 0, py = 0, tx = 0, ty = 0, last = 0, drawnAt = 0, travel = 0, lastScroll = window.scrollY || 0;
@@ -19,11 +19,16 @@
   var stars = [];
   for (var i = 0; i < 140; i++) stars.push({ x: Math.random(), y: Math.random() * 0.6, r: Math.random() * 1.3 + 0.3, p: Math.random() * 6.28, s: 0.6 + Math.random() * 1.8 });
 
+  // The art stage is wider than the screen (to keep its aspect); the floor
+  // canvas only covers what is visible, at a soft resolution (glow content).
+  var OX = 0;
   function size() {
-    var r = stage.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-    W = r.width; H = r.height;
-    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var r = stage.getBoundingClientRect(), vw = document.documentElement.clientWidth || window.innerWidth;
+    var scale = Math.min(window.devicePixelRatio || 1, 1) * (vw > 1400 ? 0.75 : 0.85);
+    W = r.width; H = r.height; OX = Math.max(0, (W - vw) / 2);
+    canvas.style.left = OX + 'px'; canvas.style.width = (W - 2 * OX) + 'px';
+    canvas.width = Math.round((W - 2 * OX) * scale); canvas.height = Math.round(H * scale);
+    ctx.setTransform(scale, 0, 0, scale, -OX * scale, 0);
     if (reduce || deep) draw(0);
   }
   window.addEventListener('resize', size, { passive: true });
@@ -52,14 +57,15 @@
     for (var l = 0; l < layers.length; l++) {
       var d = parseFloat(layers[l].getAttribute('data-depth')) || 0;
       // Scrolling down lifts you: near ranges sink faster than far ones.
-      layers[l].style.transform = 'translate3d(' + (-px * d * 34).toFixed(2) + 'px,' + (-py * d * 10 + sc * d * 0.06).toFixed(2) + 'px,0)';
+      var tf = 'translate3d(' + (-px * d * 34).toFixed(1) + 'px,' + (-py * d * 10 + sc * d * 0.06).toFixed(1) + 'px,0)';
+      if (layers[l]._tf !== tf) { layers[l].style.transform = tf; layers[l]._tf = tf; }
     }
     draw(time);
   }
 
   function draw(time) {
     if (!W || !H) return;
-    ctx.clearRect(0, 0, W, H);
+    ctx.clearRect(OX, 0, W - 2 * OX, H);
     var hz = H * HZ, k = W / 2400, vx = W / 2 - px * 18;
     for (var i = 0; i < stars.length; i++) {
       var s = stars[i], a = 0.35 + 0.65 * Math.abs(Math.sin(time * s.s + s.p));

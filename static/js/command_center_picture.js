@@ -121,7 +121,8 @@
         if (Math.sqrt(nx * nx + ny * ny) >= clear) break;
         dx *= 1.06; dy *= 1.06;
       }
-      dx = Math.max(-bw / 2 + halfW - 26, Math.min(bw / 2 - halfW + 26, dx));
+      var spill = narrow ? -4 : 26;   // phones: chips stay fully on screen
+      dx = Math.max(-bw / 2 + halfW - spill, Math.min(bw / 2 - halfW + spill, dx));
       dy = Math.max(-cyc + halfH, Math.min(bh - cyc - halfH, dy));
       rects.push([bw / 2 + dx - halfW, cyc + dy - halfH, bw / 2 + dx + halfW, cyc + dy + halfH]);
       var x = (bw / 2 + dx) / bw * 100, y = (cyc + dy) / bh * 100;
@@ -219,4 +220,76 @@
   setInterval(refresh, 30000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
   var btn = $('#cc-refresh-btn'); if (btn) btn.addEventListener('click', refresh);
+})();
+
+/* Globe controls: zoom buttons, the Sectors dock and the sector panel. */
+(function () {
+  'use strict';
+  var root = document.querySelector('.cmd27'); if (!root) return;
+  function $(s, el) { return (el || document).querySelector(s); }
+  function pct(v) { return typeof v === 'number' && isFinite(v) ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '—'; }
+  function tone(v) { return typeof v === 'number' && v > 0.05 ? 'is-up' : (typeof v === 'number' && v < -0.05 ? 'is-down' : ''); }
+  function emit(n, d) { document.dispatchEvent(new CustomEvent(n, { detail: d })); }
+
+  root.addEventListener('click', function (e) {
+    var z = e.target.closest('[data-zoom]'); if (z) { emit('cmd27:zoom-cmd', { dir: z.getAttribute('data-zoom') }); return; }
+    var sec = e.target.closest('[data-sector]'); if (sec) { emit('cmd27:sector-open', { key: sec.getAttribute('data-sector') }); return; }
+  });
+
+  // Hide the orbit chips while zoomed in — the towers carry the names then.
+  var globeBox = $('.cmd27-hero__globe');
+  document.addEventListener('cmd27:zoom', function (e) {
+    if (globeBox) globeBox.classList.toggle('is-zoomed', (e.detail && e.detail.zoom) > 1.15);
+  });
+
+  // Sectors dock: one pill per territory, live average, tap to fly in.
+  var dock = $('#cmd27-dock'), focused = null;
+  document.addEventListener('cmd27:regions', function (e) {
+    var list = e.detail || [];
+    if (!dock) return;
+    dock.hidden = !list.length;
+    dock.innerHTML = '<span class="cmd27-dock__lbl">Fly to a sector</span>';
+    list.forEach(function (r) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.setAttribute('data-sector', r.key);
+      b.className = 'cmd27-dock__pill ' + tone(r.avg) + (focused === r.key ? ' is-on' : '');
+      b.innerHTML = '<span></span><small></small>';
+      b.firstChild.textContent = r.name.replace(' · OTHER', '').replace('COMMUNICATION', 'COMMS');
+      b.lastChild.textContent = pct(r.avg) + ' · ' + r.n;
+      dock.appendChild(b);
+    });
+  });
+
+  // Sector panel.
+  var panel = $('#cmd27-sector'), list = $('#cmd27-sector-list');
+  var orbitSet = {};
+  document.addEventListener('cmd27:orbit', function (e) { orbitSet = {}; ((e.detail && e.detail.tickers) || []).forEach(function (t) { orbitSet[t] = 1; }); });
+  document.addEventListener('cmd27:sector', function (e) {
+    var d = e.detail;
+    focused = d ? d.key : null;
+    if (dock) Array.prototype.forEach.call(dock.querySelectorAll('[data-sector]'), function (b) { b.classList.toggle('is-on', b.getAttribute('data-sector') === focused); });
+    if (!panel) return;
+    if (globeBox) globeBox.classList.toggle('has-sector', !!d);
+    if (!d) { panel.hidden = true; return; }
+    panel.hidden = false;
+    $('#cmd27-sector-name').textContent = d.name;
+    var avg = $('#cmd27-sector-avg'); avg.textContent = pct(d.avg) + ' avg'; avg.className = tone(d.avg);
+    list.innerHTML = '';
+    d.rows.forEach(function (r, i) {
+      var li = document.createElement('li');
+      li.innerHTML = '<button type="button" class="cmd27-sector__go"><i></i><b></b><span></span><em></em></button><button type="button" class="cmd27-sector__star"></button>';
+      var go = li.firstChild, st = li.lastChild;
+      go.children[0].textContent = i + 1;
+      go.children[1].textContent = r.symbol;
+      go.children[2].textContent = r.price != null ? Number(r.price).toFixed(2) : '';
+      go.children[3].textContent = pct(r.chg); go.children[3].className = tone(r.chg);
+      go.addEventListener('click', function () { emit('cmd27:focus', { symbol: r.symbol }); });
+      st.textContent = orbitSet[r.symbol] ? '★' : '☆';
+      st.title = orbitSet[r.symbol] ? 'Remove from your orbit' : 'Keep in your orbit';
+      st.addEventListener('click', function () { emit('cmd27:orbit-toggle', { symbol: r.symbol }); st.textContent = st.textContent === '★' ? '☆' : '★'; });
+      list.appendChild(li);
+    });
+  });
+  var x = $('#cmd27-sector-close'); if (x) x.addEventListener('click', function () { emit('cmd27:sector-close'); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && focused) emit('cmd27:sector-close'); });
 })();

@@ -152,7 +152,7 @@ def test_globe_orbit_and_fly_to_are_wired():
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
     assert "cmd27:orbit-toggle" in js and "cmd27:focus" in js and "flyTo" in js
     assert "FUT:" in js                              # futures get their own zone
-    assert "it[2].rank < 3 || starred[it[2].symbol]" in js
+    assert "cands.sort(function (a, b) { return b.pri - a.pri; });" in js   # every pin labelled, by priority
     pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
     assert "/api/command/orbit" in pj and "cmd27-chip__x" in pj
 
@@ -174,7 +174,36 @@ def test_ipad_landscape_keeps_three_columns_and_chips_clear_the_globe():
     assert "rects: rects" in pj
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
     assert "if (useRegions) R = Math.min(R, W * 0.30);" in js
-    assert "var tagBoxes = useRegions ? chipRects.slice() : [];" in js
+    assert "var tagBoxes = useRegions && zoom < 1.2 ? chipRects.slice() : [];" in js
     assert "if (Pe[2] > 0.3 && ex.live) {" in js     # closed exchanges: beacon only
     nav = (ROOT / "static/css/nav_2027.css").read_text(encoding="utf-8")
     assert "@media (min-width: 761px) and (max-width: 1080px)" in nav
+
+
+def test_globe_zoom_sector_focus_and_dock():
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    for s in ("cmd27:zoom-cmd", "function focusRegion(", "function sendSector(", "sectorHits.push", "pinch0 = {",
+              "host.addEventListener('wheel'", "R *= zoom;", "eBox", "eQuality"):
+        assert s in js, s
+    # live tape updates refresh the sector panel without cancelling a flight
+    assert "if (focusKey) sendSector(focusKey);" in js
+    pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
+    assert "cmd27:regions" in pj and "cmd27:sector-open" in pj and "cmd27-sector-list" in pj
+    html = (ROOT / "templates/liquidity.html").read_text(encoding="utf-8")
+    for s in ('data-zoom="in"', 'data-zoom="out"', 'data-zoom="reset"', 'id="cmd27-sector"', 'id="cmd27-dock"'):
+        assert s in html, s
+
+
+def test_pull_to_refresh_ignores_globe_and_pinches():
+    base = (ROOT / "templates/base.html").read_text(encoding="utf-8")
+    assert "t.closest('[data-cc3d-orb], [data-no-ptr], canvas" in base
+    assert "if(e.touches.length > 1){ pulling = false;" in base
+    css = (ROOT / "static/css/command_center_picture.css").read_text(encoding="utf-8")
+    assert "touch-action: none; overscroll-behavior: contain;" in css
+
+
+def test_scene_performance_guards():
+    js = (ROOT / "static/js/scene3d.js").read_text(encoding="utf-8")
+    assert "var calm = true;" in js and "OX = Math.max(0, (W - vw) / 2);" in js
+    css = (ROOT / "static/css/scene_2028.css").read_text(encoding="utf-8")
+    assert "backdrop-filter: none !important;" in css
