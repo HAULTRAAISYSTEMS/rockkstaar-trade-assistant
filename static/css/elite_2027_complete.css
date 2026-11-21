@@ -1,60 +1,107 @@
-/* ELITE 2027 — one authoritative application-wide visual system.
-   Loaded AFTER legacy style sheets so the design actually appears. */
-html.cc27{--e27-bg:#020813;--e27-panel:rgba(4,19,37,.91);--e27-border:rgba(73,186,231,.38);--e27-cyan:#62e7ff;--e27-lime:#a6ff8b;--e27-text:#edf9ff;--e27-muted:#9db9c9;color-scheme:dark}
+/* ELITE 2027 - Morning Command Center Glassmorphic Layout */
+html.cc27{--e27-bg:#020813;--e27-panel:rgba(5,20,42,.72);--e27-border:rgba(98,231,255,.32);--e27-cyan:#62e7ff;--e27-emerald:#48f5a8;--e27-lime:#a6ff8b;--e27-text:#edf9ff;--e27-muted:#8eb4d4}
 html.cc27 body{background:#020813!important;color:var(--e27-text);font-family:'IBM Plex Sans',sans-serif}
 html.cc27 #cc3d-backdrop,html.cc27 #cc3d-veil{pointer-events:none}
 html.cc27 .main-content{position:relative;z-index:1;width:100%;max-width:none;min-width:0}
-html.cc27 .main-content> :is(.liq-page,.wa,.cr-shell,.lr-public-shell,.lab-page,.detail-wrap,.stock-detail,.elite-page){max-width:1720px;margin-inline:auto;padding-inline:clamp(14px,2vw,32px)}
-html.cc27 :is(.cc-card,.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card,.te27-intel,.nx-panel,.te27-market-tile){background:linear-gradient(150deg,rgba(7,32,57,.94),rgba(3,13,30,.95))!important;border:1px solid var(--e27-border)!important;border-radius:18px!important;box-shadow:inset 0 1px rgba(130,236,255,.12),0 16px 40px rgba(0,0,0,.28)!important;backdrop-filter:blur(14px)}
-html.cc27 :is(.cc-card,.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card,.te27-intel):hover{border-color:rgba(116,247,216,.58)!important}
-html.cc27 :is(.cc-card,.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card) :is(h2,h3){color:var(--e27-text);letter-spacing:.01em}
-html.cc27 :is(.cc-card,.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card) :is(button,a):focus-visible{outline:2px solid var(--e27-cyan);outline-offset:3px}
-html.cc27 .te27-flow{max-width:1720px;margin:12px auto 20px!important;gap:8px;border:1px solid rgba(76,203,247,.35);border-radius:14px;background:rgba(3,18,36,.87);padding:9px}
-html.cc27 .te27-flow a{background:rgba(9,37,61,.92);border-color:rgba(73,186,231,.38);border-radius:9px}
-html.cc27 .te27-flow a[aria-current=page]{color:var(--e27-lime);border-color:var(--e27-lime)}
-/* The globe is the central focal point, not an illustration pushed offscreen. */
+html.cc27 .main-content>:is(.liq-page,.wa,.cr-shell,.lr-public-shell,.lab-page,.detail-wrap,.stock-detail,.elite-page){max-width:1720px;margin-inline:auto;padding-inline:24px}
+html.cc27 .te27-flow{max-width:1720px;margin:10px auto 16px!important;gap:8px;border:1px solid rgba(98,231,255,.28);border-radius:14px;background:rgba(4,18,38,.58);backdrop-filter:blur(14px)}
+html.cc27 .te27-flow a{background:rgba(7,28,54,.72);border-color:rgba(98,231,255,.26);border-radius:9px}
+html.cc27 .te27-flow [aria-current=page],html.cc27 .te27-flow .is-active{color:var(--e27-emerald);border-color:var(--e27-emerald)}
+
+/* Open, transparent 3-column hero (no opaque box covering 3D background) */
+html.cc27 .liq-page>.cc-hero-xl{background:transparent!important;border:none!important;box-shadow:none!important;backdrop-filter:none!important;padding:12px 4px 18px!important;display:grid!important;grid-template-columns:1fr;gap:22px;align-items:center}
 @media(min-width:1100px){
-html.cc27 .liq-page>.cc-hero-xl{display:grid!important;grid-template-columns:minmax(220px,.9fr) minmax(450px,1.7fr) minmax(240px,.9fr)!important;grid-template-rows:minmax(430px,auto)!important;gap:clamp(12px,2vw,28px)!important;align-items:center!important;min-height:480px!important;max-width:none!important;padding:22px 28px!important;overflow:visible!important;background:radial-gradient(ellipse at 51% 50%,rgba(23,110,166,.19),transparent 54%),linear-gradient(110deg,rgba(3,14,28,.75),rgba(4,20,38,.82))!important;border:1px solid rgba(78,194,237,.3)!important;border-radius:22px!important}
-html.cc27 .liq-page>.cc-hero-xl>div:first-child{grid-column:1!important;grid-row:1!important;align-self:center!important;z-index:3!important}
-html.cc27 .liq-page>.cc-hero-xl>.elite-hero-actions{grid-column:1!important;grid-row:1!important;align-self:end!important;z-index:3!important}
-html.cc27 .liq-page>.cc-hero-xl>.cc3d-orb{grid-column:2!important;grid-row:1!important;position:relative!important;inset:auto!important;transform:none!important;width:100%!important;max-width:none!important;height:440px!important;min-height:440px!important;z-index:2!important;overflow:visible!important}
-html.cc27 .liq-page>.cc-hero-xl>.te27-pulse-rail{grid-column:3!important;grid-row:1!important;position:relative!important;z-index:3!important}
-html.cc27 .liq-page>.cc-hero-xl h1{font:700 clamp(37px,3.5vw,64px)/.98 Rajdhani,sans-serif!important;max-width:11ch!important;text-wrap:balance}
-html.cc27 .liq-page>.cc-hero-xl .workspace-intro{font-size:14px;line-height:1.6;max-width:26ch}
-html.cc27 .liq-page>.cc-hero-xl .cc-shortcuts{display:none!important}
-html.cc27 .liq-page>.cc-hero-xl .cc3d-hud-title{color:var(--e27-cyan);letter-spacing:.2em}
-html.cc27 .liq-page>.cc-hero-xl .te27-pulse-rail .cc-pulse{display:flex!important;flex-direction:column!important;gap:0!important;max-width:none!important}
-html.cc27 .liq-page>.cc-hero-xl .te27-pulse-rail .cc-pulse-cell{display:grid!important;grid-template-columns:1fr auto!important;padding:10px 0!important;gap:4px!important}
-html.cc27 .liq-page>.cc-hero-xl .te27-pulse-rail .cc-pulse-v{font-size:21px!important}
-html.cc27 .liq-page>.cc-hero-xl .te27-pulse-rail .cc-pulse-meta{grid-column:1/-1!important}
-html.cc27 .liq-page.te27-pulse-mounted .cc-now>.cc-pulse{display:none!important}
+  html.cc27 .liq-page>.cc-hero-xl{grid-template-columns:minmax(260px,1fr) minmax(380px,1.35fr) minmax(290px,1fr)!important;gap:24px!important}
 }
-/* Five index cards and 2x2 command modules as in the approved composition. */
-html.cc27 .liq-page .te27-market-tiles{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:18px 0 22px}
-html.cc27 .te27-market-tile{min-width:0;padding:16px;display:flex;gap:12px;align-items:center}
-html.cc27 .te27-market-tile small{display:block;color:var(--e27-muted);font-size:12px}
-html.cc27 .te27-market-tile strong{display:block;color:var(--e27-lime);font:700 clamp(20px,2vw,29px) Rajdhani,sans-serif}
-html.cc27 .te27-market-tile .te27-market-next{font-size:17px;color:var(--e27-text)}
-html.cc27 .liq-page .cc-body{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:16px!important;align-items:stretch}
-html.cc27 .liq-page .cc-body>.cc-col-main,html.cc27 .liq-page .cc-body>.cc-col-side{display:contents!important}
-html.cc27 .liq-page .cc-body .cc-story{grid-column:1;order:1}
-html.cc27 .liq-page .cc-body .cc-picks{grid-column:2;order:2}
-html.cc27 .liq-page .cc-body .cc-weekcard{grid-column:1;order:3}
-html.cc27 .liq-page .cc-body .nx-panel{grid-column:2;order:4}
-html.cc27 .liq-page .cc-body .cc-digest{grid-column:1/-1;order:5}
-html.cc27 .liq-page .cc-body>.cc-col-main>*,html.cc27 .liq-page .cc-body>.cc-col-side>*{min-width:0;margin:0!important}
-html.cc27 .liq-page .cc-body .cc-head{padding-bottom:12px;border-bottom:1px solid rgba(94,199,237,.2)}
-html.cc27 .liq-page .te27-feature-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
-html.cc27 .liq-page .te27-feature-grid a{background:linear-gradient(140deg,rgba(8,39,62,.94),rgba(3,17,37,.95));border-color:var(--e27-border)}
-@media(max-width:1099px){html.cc27 .liq-page .te27-market-tiles{grid-template-columns:repeat(3,minmax(0,1fr))}html.cc27 .liq-page .te27-feature-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(max-width:720px){html.cc27 .liq-page .cc-body{grid-template-columns:1fr!important}html.cc27 .liq-page .cc-body :is(.cc-story,.cc-picks,.cc-weekcard,.nx-panel,.cc-digest){grid-column:1!important}html.cc27 .liq-page .te27-market-tiles,html.cc27 .liq-page .te27-feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))}html.cc27 .liq-page>.cc-hero-xl{overflow:hidden!important}html.cc27 .liq-page>.cc-hero-xl .cc3d-orb{max-width:100%!important}}
-@media(max-width:380px){html.cc27 .liq-page .te27-market-tiles,html.cc27 .liq-page .te27-feature-grid{grid-template-columns:1fr}}
-@media(prefers-reduced-motion:reduce){html.cc27 *{animation-duration:.01ms!important;transition-duration:.01ms!important}}
-/* Unified Glassmorphic Neon-Cyan & Emerald Redesign */ html.cc27{--e27-emerald:#34d399;--e27-emerald-deep:#10b981;--e27-glass-bg:linear-gradient(145deg,rgba(6,28,56,.72),rgba(2,12,28,.82));--e27-glass-border:rgba(98,231,255,.42);--e27-rim-glow:inset 0 1px 0 rgba(52,211,153,.18),inset 0 0 22px rgba(98,231,255,.08),0 0 24px rgba(16,185,129,.14),0 18px 42px rgba(0,0,0,.42)}
-html.cc27 :is(.cc-card,.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card,.te27-intel,.nx-panel,.te27-market-tile,.te27-feature-grid a,.cc-story,.cc-picks,.cc-weekcard,.cc-digest){background:var(--e27-glass-bg)!important;border:1px solid var(--e27-glass-border)!important;box-shadow:var(--e27-rim-glow)!important;backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);color:var(--e27-text)}
-html.cc27 :is(.cc-card,.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card,.te27-intel,.nx-panel,.te27-market-tile,.te27-feature-grid a):hover{border-color:rgba(52,211,153,.72)!important;box-shadow:inset 0 1px 0 rgba(98,231,255,.24),0 0 28px rgba(98,231,255,.22),0 0 18px rgba(16,185,129,.24),0 20px 44px rgba(0,0,0,.48)!important}
-html.cc27 :is(.liq-page,.wa,.cr-shell,.lr-public-shell,.lab-page,.detail-wrap,.stock-detail,.elite-page,.cc-card,.wa-card,.lab-panel,.cr-card,.lr-public-item,.detail-card) :is(h1,h2,h3,h4){color:#f0fbff;letter-spacing:.01em;text-shadow:0 1px 12px rgba(2,8,19,.72)}
-html.cc27 .te27-flow{background:linear-gradient(135deg,rgba(4,20,42,.74),rgba(2,11,26,.84))!important;border:1px solid rgba(98,231,255,.4)!important;box-shadow:var(--e27-rim-glow)!important;backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%)}
-html.cc27 .te27-flow a{background:rgba(7,30,56,.68)!important;color:#dcf4ff!important;border:1px solid rgba(98,231,255,.32)!important;transition:border-color .2s ease,box-shadow .2s ease,background .2s ease,color .2s ease}
-html.cc27 .te27-flow a:hover,html.cc27 .te27-flow a[aria-current=page],html.cc27 .te27-flow a.active{background:linear-gradient(135deg,rgba(98,231,255,.22),rgba(16,185,129,.24))!important;color:#c7ffec!important;border-color:var(--e27-emerald)!important;box-shadow:0 0 18px rgba(98,231,255,.38),inset 0 0 14px rgba(52,211,153,.24)!important;text-shadow:0 0 10px rgba(98,231,255,.6)}
-html.cc27 :is(.liq-page,.wa,.cr-shell,.lr-public-shell,.lab-page,.detail-wrap,.stock-detail,.elite-page) :is(p,td,th,li,label){color:rgba(237,249,255,.92)}html.cc27 :is(.te27-flow a,.cc-card a,.cc-card button,.wa-card a,.wa-card button,.lab-panel a,.lab-panel button):focus-visible{outline:2px solid var(--e27-cyan);outline-offset:3px;box-shadow:0 0 14px rgba(98,231,255,.45)}
+html.cc27 .liq-page>.cc-hero-xl .cc-hero-left{display:flex;flex-direction:column;gap:10px;z-index:2}
+html.cc27 .liq-page>.cc-hero-xl .elite-hero-eyebrow{display:inline-flex;align-items:center;gap:8px;width:fit-content;padding:5px 12px;border-radius:999px;background:rgba(4,20,42,.68);border:1px solid rgba(72,245,168,.42);color:var(--e27-emerald);font-size:11px;font-weight:700;letter-spacing:.14em;box-shadow:0 0 16px rgba(72,245,168,.18)}
+html.cc27 .liq-page>.cc-hero-xl .live-dot{width:8px;height:8px;border-radius:50%;background:var(--e27-emerald);box-shadow:0 0 10px var(--e27-emerald)}
+html.cc27 .liq-page>.cc-hero-xl h1{font:700 clamp(36px,3.4vw,60px)/1 'Rajdhani',sans-serif!important;margin:0;color:var(--e27-text);text-shadow:0 4px 24px rgba(2,10,24,.75)}
+html.cc27 .liq-page>.cc-hero-xl h1 .accent{color:var(--e27-cyan)}
+html.cc27 .liq-page>.cc-hero-xl .workspace-intro{font-size:14px;line-height:1.55;color:var(--e27-muted);max-width:34ch;margin:0}
+html.cc27 .liq-page>.cc-hero-xl .elite-hero-actions{display:flex;align-items:center;gap:12px;margin-top:4px}
+html.cc27 .liq-page>.cc-hero-xl .cc-refresh{padding:8px 16px;border-radius:10px;border:1px solid rgba(98,231,255,.45);background:rgba(6,24,48,.74);color:var(--e27-cyan);font-weight:600;cursor:pointer;box-shadow:0 0 14px rgba(98,231,255,.16)}
+html.cc27 .liq-page>.cc-hero-xl .cc-refresh:hover{border-color:var(--e27-emerald);color:var(--e27-emerald);box-shadow:0 0 18px rgba(72,245,168,.28)}
+html.cc27 .liq-page>.cc-hero-xl .cc-stamp{font-size:12px;color:var(--e27-muted)}
+html.cc27 .liq-page>.cc-hero-xl .cc-hero-center{display:flex;justify-content:center;align-items:center;position:relative;min-height:320px}
+html.cc27 .liq-page>.cc-hero-xl [data-cc3d-orb]{position:relative!important;inset:auto!important;transform:none!important;width:min(100%,420px);aspect-ratio:1/1;margin:0 auto}
+html.cc27 .liq-page>.cc-hero-xl .cc3d-hud-title{color:var(--e27-cyan);letter-spacing:.2em}
+
+/* Floating glassmorphic Market Pulse card */
+html.cc27 .liq-page .cc-hero-pulse{background:linear-gradient(155deg,rgba(6,22,46,.72),rgba(4,15,34,.84))!important;backdrop-filter:blur(18px) saturate(140%)!important;border:1px solid rgba(98,231,255,.38)!important;border-radius:18px!important;padding:18px 20px!important;box-shadow:0 18px 46px rgba(2,10,24,.58),0 0 24px rgba(98,231,255,.15),inset 0 1px 0 rgba(72,245,168,.18)!important}
+html.cc27 .liq-page .cc-pulse-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+html.cc27 .liq-page .cc-kicker{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--e27-cyan)}
+html.cc27 .liq-page .cc-live{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--e27-emerald)}
+html.cc27 .liq-page .cc-dot{width:7px;height:7px;border-radius:50%;background:var(--e27-emerald);box-shadow:0 0 8px var(--e27-emerald)}
+html.cc27 .liq-page .cc-pulse-regime{display:flex;flex-direction:column;gap:2px;margin-bottom:12px}
+html.cc27 .liq-page .cc-regime-val{font:700 22px/1.15 'Rajdhani',sans-serif;color:var(--e27-text)}
+html.cc27 .liq-page .cc-pulse-sub,html.cc27 .liq-page .cc-pulse-note{font-size:12px;color:var(--e27-muted);margin:0}
+html.cc27 .liq-page .cc-pulse-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:10px}
+html.cc27 .liq-page .cc-p-cell{padding:8px 10px;border-radius:10px;background:rgba(4,16,34,.68);border:1px solid rgba(98,231,255,.22);display:flex;flex-direction:column;gap:2px}
+html.cc27 .liq-page .cc-p-lbl{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--e27-muted)}
+html.cc27 .liq-page .cc-p-val{font-size:15px;font-weight:700;color:var(--e27-text)}
+
+/* Banners */
+html.cc27 .liq-page .cc-story-banner{display:flex;align-items:center;gap:12px;padding:10px 16px;margin:4px 0 14px;border-radius:12px;background:rgba(5,20,42,.66);backdrop-filter:blur(12px);border:1px solid rgba(98,231,255,.26);font-size:13px;color:var(--e27-text)}
+html.cc27 .liq-page .cc-story-banner:empty{display:none}
+html.cc27 .liq-page .cc-story-tag{padding:3px 9px;border-radius:999px;background:rgba(98,231,255,.16);border:1px solid rgba(98,231,255,.35);color:var(--e27-cyan);font-size:11px;font-weight:700;text-transform:uppercase;white-space:nowrap}
+
+/* 5-card index KPI strip */
+html.cc27 .liq-page .te27-market-tiles{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:14px!important;margin:14px 0 20px!important}
+@media(max-width:1099px){html.cc27 .liq-page .te27-market-tiles{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+html.cc27 .liq-page .te27-market-tile{min-width:0;padding:14px 16px!important;display:flex;gap:12px;align-items:center;border-radius:15px!important;background:linear-gradient(155deg,rgba(6,24,48,.72),rgba(3,14,30,.84))!important;backdrop-filter:blur(16px)!important;border:1px solid rgba(98,231,255,.34)!important;box-shadow:0 12px 30px rgba(2,10,24,.45),0 0 18px rgba(98,231,255,.1),inset 0 1px 0 rgba(72,245,168,.14)!important;transition:border-color .2s,box-shadow .2s}
+html.cc27 .liq-page .te27-market-tile:hover{border-color:rgba(72,245,168,.65)!important;box-shadow:0 14px 34px rgba(2,10,24,.55),0 0 22px rgba(72,245,168,.2)!important}
+html.cc27 .liq-page .te27-market-icon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:rgba(98,231,255,.12);border:1px solid rgba(98,231,255,.32);color:var(--e27-cyan);font-size:15px;flex-shrink:0}
+html.cc27 .liq-page .te27-market-tile small{display:block;font-size:11px;color:var(--e27-muted);letter-spacing:.04em}
+html.cc27 .liq-page .te27-market-tile strong{display:block;font-size:18px;font-weight:700;color:var(--e27-text)}
+
+/* 4-column intelligence row */
+html.cc27 .liq-page .cc-body.cc-intel-row{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:16px!important;align-items:stretch!important;margin-bottom:22px!important}
+@media(max-width:1280px){html.cc27 .liq-page .cc-body.cc-intel-row{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+@media(max-width:720px){html.cc27 .liq-page .cc-body.cc-intel-row{grid-template-columns:1fr!important}}
+html.cc27 .liq-page .cc-intel-card{background:linear-gradient(160deg,rgba(6,22,46,.74),rgba(3,13,28,.86))!important;backdrop-filter:blur(18px) saturate(135%)!important;border:1px solid rgba(98,231,255,.32)!important;border-radius:18px!important;padding:18px!important;box-shadow:0 16px 40px rgba(2,10,24,.52),0 0 20px rgba(98,231,255,.09),inset 0 1px 0 rgba(72,245,168,.12)!important;display:flex;flex-direction:column;gap:12px;min-width:0}
+html.cc27 .liq-page .cc-intel-card:hover{border-color:rgba(72,245,168,.56)!important;box-shadow:0 18px 44px rgba(2,10,24,.6),0 0 24px rgba(72,245,168,.18)!important}
+html.cc27 .liq-page .cc-head{display:flex;justify-content:space-between;align-items:center;gap:10px;border-bottom:1px solid rgba(98,231,255,.16);padding-bottom:10px}
+html.cc27 .liq-page .cc-head h2{font:700 17px/1.2 'Rajdhani',sans-serif;letter-spacing:.04em;text-transform:uppercase;color:var(--e27-text);margin:0}
+html.cc27 .liq-page .cc-head a{font-size:12px;color:var(--e27-cyan);text-decoration:none}
+html.cc27 .liq-page .cc-brief-lead{font-size:13px;line-height:1.55;color:var(--e27-text);margin:0}
+html.cc27 .liq-page .cc-brief-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--e27-muted)}
+html.cc27 .liq-page .cc-tabs{display:inline-flex;gap:4px;background:rgba(4,16,34,.7);padding:3px;border-radius:9px;border:1px solid rgba(98,231,255,.24)}
+html.cc27 .liq-page .cc-tabs button{border:none;background:transparent;color:var(--e27-muted);font-size:11px;font-weight:600;padding:4px 9px;border-radius:6px;cursor:pointer}
+html.cc27 .liq-page .cc-tabs button[aria-selected=true]{background:rgba(98,231,255,.2);color:var(--e27-cyan)}
+html.cc27 .liq-page .cc-rows{display:flex;flex-direction:column;gap:8px}
+html.cc27 .liq-page .cc-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;background:rgba(4,16,34,.6);border:1px solid rgba(98,231,255,.16);text-decoration:none;color:var(--e27-text)}
+html.cc27 .liq-page .cc-row:hover{border-color:rgba(72,245,168,.48)}
+html.cc27 .liq-page .cc-row-sym{font-weight:700;color:var(--e27-cyan);min-width:52px}
+html.cc27 .liq-page .cc-row-mid{flex:1;min-width:0;display:flex;flex-direction:column;font-size:12px}
+html.cc27 .liq-page .cc-row-mid small{color:var(--e27-muted);font-size:11px}
+html.cc27 .liq-page .cc-row-price{font-weight:700;color:var(--e27-emerald);font-size:13px}
+html.cc27 .liq-page .cc-card-foot{display:flex;justify-content:space-between;margin-top:auto;padding-top:8px;font-size:12px}
+html.cc27 .liq-page .cc-card-foot a{color:var(--e27-cyan);text-decoration:none}
+
+/* Market Breadth radial gauge */
+html.cc27 .liq-page .cm-wrap{display:flex;justify-content:center;align-items:center;padding:12px 0;margin:auto 0}
+html.cc27 .liq-page .cm-dial{position:relative;width:154px;height:154px;border-radius:50%;background:radial-gradient(circle at center,rgba(4,16,34,.92) 56%,transparent 57%),conic-gradient(from 220deg,#ff5c7c 0deg 80deg,#f5c451 80deg 170deg,#48f5a8 170deg 280deg,rgba(98,231,255,.14) 280deg 360deg);display:grid;place-items:center;box-shadow:0 0 26px rgba(98,231,255,.2),inset 0 0 18px rgba(72,245,168,.14);border:1px solid rgba(98,231,255,.35)}
+html.cc27 .liq-page .cm-center{text-align:center;z-index:2;display:flex;flex-direction:column;gap:2px}
+html.cc27 .liq-page .cm-center strong{font:700 26px/1 'Rajdhani',sans-serif;color:var(--e27-text)}
+html.cc27 .liq-page .cm-center span{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--e27-emerald)}
+html.cc27 .liq-page .cc-liq-row{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:10px;background:rgba(4,16,34,.66);border:1px solid rgba(98,231,255,.22);font-size:12px}
+html.cc27 .liq-page .cc-liq-row strong{color:var(--e27-cyan)}
+
+/* Economic Events + mini notifications */
+html.cc27 .liq-page .cc-next-up{padding:9px 11px;border-radius:10px;background:rgba(72,245,168,.1);border:1px solid rgba(72,245,168,.32);display:flex;flex-direction:column;gap:2px;font-size:12px}
+html.cc27 .liq-page .cc-next-up .cc-tag{color:var(--e27-emerald);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em}
+html.cc27 .liq-page .cc-week{display:flex;flex-direction:column;gap:7px}
+html.cc27 .liq-page .cc-week-row{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:7px 9px;border-radius:9px;background:rgba(4,16,34,.6);border:1px solid rgba(98,231,255,.16);font-size:12px}
+html.cc27 .liq-page .cc-when{display:flex;flex-direction:column;font-size:11px;color:var(--e27-muted)}
+html.cc27 .liq-page .cc-impact.is-high{color:var(--e27-emerald);font-weight:700;font-size:11px}
+html.cc27 .liq-page .cc-nx-mini{margin-top:auto;padding:10px!important;border-radius:12px!important;background:rgba(4,16,34,.66)!important;border:1px solid rgba(98,231,255,.2)!important}
+
+/* 5 bottom module quick-launch cards */
+html.cc27 .liq-page .te27-feature-grid{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:14px!important;margin:10px 0 24px!important}
+@media(max-width:1099px){html.cc27 .liq-page .te27-feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+html.cc27 .liq-page .te27-feature-card{display:flex;flex-direction:column;gap:6px;padding:16px 18px!important;border-radius:16px!important;background:linear-gradient(155deg,rgba(6,24,48,.72),rgba(3,14,30,.85))!important;backdrop-filter:blur(16px)!important;border:1px solid rgba(98,231,255,.32)!important;box-shadow:0 12px 30px rgba(2,10,24,.45),0 0 18px rgba(98,231,255,.1),inset 0 1px 0 rgba(72,245,168,.14)!important;text-decoration:none;color:var(--e27-text);transition:transform .18s,border-color .18s,box-shadow .18s}
+html.cc27 .liq-page .te27-feature-card:hover{transform:translateY(-2px);border-color:var(--e27-emerald)!important;box-shadow:0 16px 36px rgba(2,10,24,.58),0 0 24px rgba(72,245,168,.24)!important}
+html.cc27 .liq-page .te27-feature-kicker{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--e27-cyan)}
+html.cc27 .liq-page .te27-feature-card strong{font:700 17px/1.2 'Rajdhani',sans-serif;color:var(--e27-text)}
+html.cc27 .liq-page .te27-feature-card small{font-size:12px;line-height:1.45;color:var(--e27-muted)}
