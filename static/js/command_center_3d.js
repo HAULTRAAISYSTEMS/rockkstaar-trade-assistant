@@ -96,7 +96,66 @@
       var cx = W / 2 - pointer.x * 30;
       var cy = H * 0.42 - pointer.y * 20;
       var horizon = H * 0.66 - pointer.y * 12;
-
+      var aur = ctx.createRadialGradient(cx, horizon, 10, cx, horizon, Math.max(W, H) * 0.55);
+       aur.addColorStop(0, rgba(CYAN, 0.28));
+aur.addColorStop(0.35, rgba(POS, 0.16));
+aur.addColorStop(0.7, rgba(CYAN, 0.05));
+aur.addColorStop(1, 'rgba(0,0,0,0)');
+ctx.fillStyle = aur;
+ctx.fillRect(0, horizon - H * 0.42, W, H * 0.56);
+var hBand = ctx.createLinearGradient(0, horizon - 22, 0, horizon + 18);
+hBand.addColorStop(0, 'rgba(0,0,0,0)');
+hBand.addColorStop(0.5, rgba(CYAN, 0.34));
+hBand.addColorStop(1, 'rgba(0,0,0,0)');
+ctx.fillStyle = hBand;
+ctx.fillRect(0, horizon - 22, W, 40);
+       // Glowing 3D neon mountain ridges on left and right horizon
+var ridgePeaks = [[0, 0.24], [0.07, 0.74], [0.15, 0.46], [0.23, 0.95], [0.31, 0.54], [0.39, 0.28], [0.46, 0.0]];
+for (var layer = 0; layer < 2; layer++) {
+var maxH = H * (layer === 0 ? 0.17 : 0.115);
+var pxShift = -pointer.x * (layer === 0 ? 14 : 26);
+var baseY = horizon - pointer.y * (layer === 0 ? 4 : 8);
+var mCol = layer === 0 ? CYAN : POS;
+for (var side = -1; side <= 1; side += 2) {
+var ptsM = [];
+for (var k = 0; k < ridgePeaks.length; k++) {
+var xf = ridgePeaks[k][0] * (layer === 0 ? 1 : 0.92);
+var hf = ridgePeaks[k][1] * (0.85 + 0.15 * Math.sin(k * 2.1 + layer + side));
+var mx = (side < 0 ? W * xf : W * (1 - xf)) + pxShift;
+var my = baseY - maxH * hf;
+ptsM.push([mx, my]);
+}
+ctx.beginPath();
+ctx.moveTo(side < 0 ? -20 : W + 20, baseY);
+for (var k = 0; k < ptsM.length; k++) ctx.lineTo(ptsM[k][0], ptsM[k][1]);
+ctx.lineTo(ptsM[ptsM.length - 1][0], baseY);
+ctx.closePath();
+ctx.fillStyle = 'rgba(4, 10, 22, 0.84)';
+ctx.fill();
+ctx.save();
+ctx.beginPath();
+for (var k = 0; k < ptsM.length; k++) {
+if (k === 0) ctx.moveTo(ptsM[k][0], ptsM[k][1]);
+else ctx.lineTo(ptsM[k][0], ptsM[k][1]);
+}
+ctx.shadowColor = rgba(mCol, 0.9);
+ctx.shadowBlur = layer === 0 ? 14 : 18;
+ctx.strokeStyle = rgba(mCol, layer === 0 ? 0.72 : 0.92);
+ctx.lineWidth = layer === 0 ? 1.4 : 1.8;
+ctx.stroke();
+ctx.shadowBlur = 0;
+ctx.strokeStyle = rgba(mCol, 0.24);
+ctx.lineWidth = 0.8;
+ctx.beginPath();
+for (var k = 1; k < ptsM.length - 1; k++) {
+ctx.moveTo(ptsM[k][0], ptsM[k][1]);
+ctx.lineTo(ptsM[k][0] + side * 24, baseY);
+}
+ctx.stroke();
+ctx.restore();
+}
+}
+       
       // Perspective floor grid
       gridOffset = (gridOffset + dt * 60) % 80;
       var camH = 160;
@@ -105,14 +164,19 @@
         var y = horizon + (camH * f) / (z + 1) * 0.35;
         if (y > H + 2) continue;
         var a = Math.max(0, 0.16 - z / 2600 * 0.16);
-        ctx.strokeStyle = rgba(CYAN, a);
+        ctx.strokeStyle = rgba(Math.round((z + gridOffset) / 80) % 2 === 0 ? CYAN : POS, a * 1.35);
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
       }
       var vg = ctx.createLinearGradient(0, horizon, 0, H);
       vg.addColorStop(0, rgba(CYAN, 0));
       vg.addColorStop(1, rgba(CYAN, 0.13));
+var vg2 = ctx.createLinearGradient(0, horizon, 0, H);
+vg2.addColorStop(0, rgba(POS, 0));
+vg2.addColorStop(1, rgba(POS, 0.16));
+
       ctx.strokeStyle = vg;
       for (var gx = -12; gx <= 12; gx++) {
+ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         var spread = gx * W * 0.16;
         ctx.beginPath(); ctx.moveTo(cx + spread * 0.04, horizon); ctx.lineTo(cx + spread, H + 40); ctx.stroke();
       }
@@ -418,7 +482,79 @@
       cg.addColorStop(1, rgba(CYAN, 0));
       ctx.fillStyle = cg;
       ctx.beginPath(); ctx.arc(cx, cy, R * 1.25, 0, 6.2832); ctx.fill();
+      // Luminous 3D Earth sphere & bright cyan atmospheric rim halo
+      var earthBg = ctx.createRadialGradient(cx - R * 0.28, cy - R * 0.3, R * 0.1, cx, cy, R);
+      earthBg.addColorStop(0, 'rgba(10, 48, 72, 0.88)');
+      earthBg.addColorStop(0.65, 'rgba(4, 16, 34, 0.92)');
+      earthBg.addColorStop(0.92, rgba(CYAN, 0.24));
+      earthBg.addColorStop(1, rgba(CYAN, 0.58));
+      ctx.fillStyle = earthBg;
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.fill();
+      ctx.save();
+      ctx.strokeStyle = rgba(CYAN, 0.8);
+      ctx.lineWidth = 2.2;
+      ctx.shadowColor = rgba(CYAN, 0.95);
+      ctx.shadowBlur = 20;
+      ctx.beginPath(); ctx.arc(cx, cy, R * 1.004, 0, 6.2832); ctx.stroke();
+      ctx.restore();
 
+      // Glowing emerald/cyan continent silhouettes
+      var CONTINENTS = [
+        [[60,-165],[70,-140],[68,-95],[60,-65],[45,-62],[30,-81],[25,-80],[20,-90],[15,-84],[9,-78],[18,-104],[32,-117],[48,-125],[58,-136]],
+        [[11,-74],[5,-52],[-5,-35],[-23,-42],[-38,-57],[-54,-68],[-45,-75],[-20,-71],[-5,-81]],
+        [[36,-9],[43,-9],[50,2],[58,8],[69,18],[70,30],[60,30],[50,25],[43,15],[38,24],[36,10]],
+        [[35,-6],[32,12],[31,32],[12,44],[2,45],[-10,40],[-26,33],[-34,18],[-20,12],[4,9],[6,-10],[20,-17]],
+        [[70,32],[73,80],[72,135],[66,170],[54,140],[40,128],[31,122],[22,114],[10,104],[1,103],[8,98],[22,90],[8,77],[25,62],[30,48],[41,29],[55,28]],
+        [[-12,130],[-14,142],[-26,153],[-38,145],[-34,115],[-22,114]]
+      ];
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx, cy, R * 0.998, 0, 6.2832); ctx.clip();
+      for (var ci = 0; ci < CONTINENTS.length; ci++) {
+        var poly = CONTINENTS[ci], ptsC = [], front = 0;
+        for (var vi = 0; vi < poly.length; vi++) {
+          var laR = poly[vi][0] * 0.0174533, loR = poly[vi][1] * 0.0174533;
+          var cp = project(Math.cos(laR) * Math.cos(loR), -Math.sin(laR), Math.cos(laR) * Math.sin(loR), R * 1.001, cx, cy);
+          ptsC.push(cp);
+          if (cp[2] > -0.15 * R) front++;
+        }
+        if (front < 2) continue;
+        ctx.beginPath();
+        for (var vi = 0; vi < ptsC.length; vi++) {
+          if (vi === 0) ctx.moveTo(ptsC[vi][0], ptsC[vi][1]);
+          else ctx.lineTo(ptsC[vi][0], ptsC[vi][1]);
+        }
+        ctx.closePath();
+        ctx.fillStyle = rgba(POS, 0.24);
+        ctx.fill();
+        ctx.shadowColor = rgba(CYAN, 0.75);
+        ctx.shadowBlur = 8;
+        ctx.strokeStyle = rgba(POS, 0.76);
+        ctx.lineWidth = 1.25;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+      // City-light clusters
+      var CITIES = [
+        [40.7,-74],[41.8,-87.6],[37.7,-122.4],[43.6,-79.3],[51.5,-0.1],[50.1,8.6],[48.8,2.3],[47.3,8.5],
+        [35.6,139.7],[22.3,114.2],[1.3,103.8],[-33.8,151.2],[25.2,55.3],[-23.5,-46.6],[19.0,72.8],[37.5,127.0],[31.2,121.5],[-26.2,28.0]
+      ];
+      for (var ki = 0; ki < CITIES.length; ki++) {
+        var cLat = CITIES[ki][0], cLon = CITIES[ki][1];
+        for (var sub = 0; sub < 3; sub++) {
+          var sLat = (cLat + (sub === 0 ? 0 : (sub === 1 ? 1.8 : -1.5))) * 0.0174533;
+          var sLon = (cLon + (sub === 0 ? 0 : (sub === 1 ? 2.2 : -1.9))) * 0.0174533;
+          var cP = project(Math.cos(sLat) * Math.cos(sLon), -Math.sin(sLat), Math.cos(sLat) * Math.sin(sLon), R * 1.003, cx, cy);
+          if (cP[2] <= 0.05 * R) continue;
+          var pulse = reduceMotion ? 0.85 : (0.55 + 0.45 * Math.sin(time * 2.4 + ki * 1.3 + sub));
+          ctx.fillStyle = rgba(sub === 0 ? GOLD : CYAN, pulse * 0.9);
+          ctx.shadowColor = rgba(sub === 0 ? GOLD : CYAN, 0.85);
+          ctx.shadowBlur = sub === 0 ? 8 : 5;
+          ctx.beginPath(); ctx.arc(cP[0], cP[1], sub === 0 ? 2.0 : 1.15, 0, 6.2832); ctx.fill();
+        }
+      }
+      ctx.shadowBlur = 0;
+      ctx.restore();
+       
       // Wireframe: latitudes + meridians
       ctx.lineWidth = 0.8;
       var seg = 48;
@@ -464,7 +600,30 @@
       ctx.shadowColor = rgba(GOLD, 0.9); ctx.shadowBlur = 14;
       ctx.beginPath(); ctx.arc(B[0], B[1], 2.6 * B[3], 0, 6.2832); ctx.fill();
       ctx.shadowBlur = 0;
-
+      // Second glowing cyan/emerald orbital ring
+      var ringTilt2 = -0.52, beacon2 = (-time * 0.45 + 2.1) % 6.2832, prevR2 = null;
+      ctx.lineWidth = 1.4;
+      for (var s2 = 0; s2 <= 72; s2++) {
+        var t2 = s2 / 72 * 6.2832;
+        var rx2 = Math.cos(t2) * 1.44, rz2 = Math.sin(t2) * 1.44;
+        var ry2 = rz2 * Math.sin(ringTilt2); rz2 = rz2 * Math.cos(ringTilt2);
+        var P2 = project(rx2, ry2, rz2, R, cx, cy);
+        if (prevR2) {
+          ctx.strokeStyle = rgba(P2[2] > 0 ? CYAN : POS, P2[2] > 0 ? 0.62 : 0.16);
+          ctx.shadowColor = rgba(CYAN, 0.8);
+          ctx.shadowBlur = P2[2] > 0 ? 10 : 0;
+          ctx.beginPath(); ctx.moveTo(prevR2[0], prevR2[1]); ctx.lineTo(P2[0], P2[1]); ctx.stroke();
+        }
+        prevR2 = P2;
+      }
+      ctx.shadowBlur = 0;
+      var bz2 = Math.sin(beacon2) * 1.44;
+      var B2 = project(Math.cos(beacon2) * 1.44, bz2 * Math.sin(ringTilt2), bz2 * Math.cos(ringTilt2), R, cx, cy);
+      ctx.fillStyle = rgba(POS, 0.95);
+      ctx.shadowColor = rgba(CYAN, 0.95); ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(B2[0], B2[1], 2.8 * B2[3], 0, 6.2832); ctx.fill();
+      ctx.shadowBlur = 0;
+       
       // Data nodes: spike length = size of the move, colour = direction
       var drawn = [];
       for (var n = 0; n < nodes.length; n++) {
