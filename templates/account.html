@@ -24,8 +24,9 @@
   </div>
 </header>
 
+<div data-ptabs-bar="Overview,Brokers,Settings"></div>
 <!-- KPI tiles -->
-<div class="kpis">
+<div class="kpis" data-ptab="Overview">
   <div class="stat"><div class="stat-lbl">Portfolio Value</div>
     <div class="stat-val">{{ '{:,.2f}'.format(acct.total_value) if connected and acct.total_value is not none else '—' }}{% if connected and acct.total_value is not none %}<span class="u">USD</span>{% endif %}</div>
     {% if connected %}<span class="stat-delta pos">● live from {{ acct.sources | selectattr('connected') | map(attribute='label') | join(' + ') }}</span>{% else %}<a class="stat-delta faint" href="{{ url_for('brokers_page') }}">connect a brokerage</a>{% endif %}
@@ -63,7 +64,7 @@
   </div>
 </div>
 
-<div class="acct-2col">
+<div class="acct-2col" data-ptab="Overview">
   <div class="card"><div class="card-hd">Open Positions<span class="badge badge-neutral">{{ acct.open_positions if connected else 0 }}</span></div>
     <div class="tbl-wrap" style="border:none;border-radius:0">
       {% set ns = namespace(rows=0) %}
@@ -102,11 +103,11 @@
   </div>
 </div>
 
-<div class="card"><div class="card-hd">Practice Portfolio<a class="btn btn-primary btn-sm" href="{{ url_for('paper_trading') }}">Open Paper Trading</a></div><div class="card-bd"><div class="muted" style="font-size:13px;line-height:1.6">Practice market orders with $100,000 in simulated buying power. Paper positions and performance stay separate from your live Schwab account.</div></div></div>
+<div class="card" data-ptab="Brokers"><div class="card-hd">Practice Portfolio<a class="btn btn-primary btn-sm" href="{{ url_for('paper_trading') }}">Open Paper Trading</a></div><div class="card-bd"><div class="muted" style="font-size:13px;line-height:1.6">Practice market orders with $100,000 in simulated buying power. Paper positions and performance stay separate from your live Schwab account.</div></div></div>
 
-<div class="card app-preferences-card"><div class="card-hd">App Preferences<span class="badge badge-info">Personalized</span></div><div class="card-bd app-preferences-grid"><div><div class="hi" style="font-size:14px;font-weight:700">Default market chart</div><div class="faint" style="font-size:12px;margin-top:4px">Your choice stays selected when you return to the Terminal.</div></div><div class="preference-segment" role="group" aria-label="Default chart type"><button type="button" data-chart-preference="area">Area</button><button type="button" data-chart-preference="candles">Candles</button></div><a class="btn btn-primary btn-sm" href="{{ url_for('browser_push.settings') }}">Free Browser Alerts</a><a class="btn btn-outline btn-sm" href="{{ url_for('risk_settings') }}">Trading &amp; Risk Settings</a></div></div>
+<div class="card app-preferences-card" data-ptab="Settings"><div class="card-hd">App Preferences<span class="badge badge-info">Personalized</span></div><div class="card-bd app-preferences-grid"><div><div class="hi" style="font-size:14px;font-weight:700">Default market chart</div><div class="faint" style="font-size:12px;margin-top:4px">Your choice stays selected when you return to the Terminal.</div></div><div class="preference-segment" role="group" aria-label="Default chart type"><button type="button" data-chart-preference="area">Area</button><button type="button" data-chart-preference="candles">Candles</button></div><a class="btn btn-primary btn-sm" href="{{ url_for('browser_push.settings') }}">Free Browser Alerts</a><a class="btn btn-outline btn-sm" href="{{ url_for('risk_settings') }}">Trading &amp; Risk Settings</a></div></div>
 
-<div class="card"><div class="card-hd">Broker Connections</div><div class="card-bd">
+<div class="card" data-ptab="Brokers"><div class="card-hd">Broker Connections</div><div class="card-bd">
   {% macro broker_row(name, sub, is_on, href) %}
   <div class="between" style="padding:16px;background:var(--surface-inset);border:1px {{ 'solid rgba(34,197,139,.3)' if is_on else 'dashed var(--border-strong)' }};border-radius:var(--r-md);margin-bottom:10px">
     <div class="row gap-3">
@@ -124,7 +125,7 @@
                 snap_connected, url_for('brokers_page')) }}
 </div></div>
 
-<div class="card"><div class="card-hd">Privacy &amp; account</div><div class="card-bd row gap-2" style="flex-wrap:wrap">
+<div class="card" data-ptab="Settings"><div class="card-hd">Privacy &amp; account</div><div class="card-bd row gap-2" style="flex-wrap:wrap">
   <a class="btn btn-ghost btn-sm" href="{{ url_for('privacy_page') }}">Privacy Policy</a>
   <a class="btn btn-ghost btn-sm" href="{{ url_for('terms_page') }}">Terms of Use</a>
   <a class="btn btn-ghost btn-sm" href="{{ url_for('support_page') }}">Support</a>

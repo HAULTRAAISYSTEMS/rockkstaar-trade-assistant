@@ -8,10 +8,11 @@
   <!-- ═══════════════════════════════════════════════════════════════════════
        ROW 1: FED LIQUIDITY STATUS  +  MARKET RISK METER
   ═══════════════════════════════════════════════════════════════════════ -->
+  <div data-ptabs-bar="Liquidity,Risk,Sectors,Scanner"></div>
   <div class="liq-row liq-row-top">
 
     <!-- Fed Liquidity Status -->
-    <div class="liq-card liq-card-fed" id="card-fed">
+    <div class="liq-card liq-card-fed" id="card-fed" data-ptab="Liquidity">
       <div class="liq-card-header">
         <span class="liq-card-title">📡 Fed Liquidity Monitor</span>
         <span class="liq-badge" id="liq-status-badge">—</span>
@@ -48,7 +49,7 @@
     </div>
 
     <!-- Market Risk Meter -->
-    <div class="liq-card liq-card-risk" id="card-risk">
+    <div class="liq-card liq-card-risk" id="card-risk" data-ptab="Risk">
       <div class="liq-card-header">
         <span class="liq-card-title">⚡ Market Risk Meter</span>
       </div>
@@ -78,7 +79,7 @@
   <!-- ═══════════════════════════════════════════════════════════════════════
        ROW 2: SECTOR MONEY FLOW
   ═══════════════════════════════════════════════════════════════════════ -->
-  <div class="liq-card liq-card-flow">
+  <div class="liq-card liq-card-flow" data-ptab="Sectors">
     <div class="liq-card-header">
       <span class="liq-card-title">💸 Sector Money Flow</span>
       <span class="liq-card-sub">Where institutional capital is rotating</span>
@@ -91,7 +92,7 @@
   <!-- ═══════════════════════════════════════════════════════════════════════
        ROW 3: OPPORTUNITY SCANNER  (full-width)
   ═══════════════════════════════════════════════════════════════════════ -->
-  <div class="liq-card liq-card-scanner">
+  <div class="liq-card liq-card-scanner" data-ptab="Scanner">
     <div class="liq-card-header">
       <span class="liq-card-title">🎯 Hidden Opportunity Scanner</span>
       <span class="liq-card-sub" id="scan-sub">Scanning universe…</span>
@@ -120,7 +121,7 @@
   <!-- ═══════════════════════════════════════════════════════════════════════
        ROW 4: RESEARCH REPORT PANEL  (slide-in when ticker selected)
   ═══════════════════════════════════════════════════════════════════════ -->
-  <div class="liq-card liq-card-report" id="liq-report-panel" style="display:none;">
+  <div class="liq-card liq-card-report" id="liq-report-panel" style="display:none;" data-ptab="Scanner">
     <div class="liq-card-header">
       <span class="liq-card-title">📋 Investment Research Report</span>
       <span class="liq-report-ticker" id="report-ticker-label">—</span>
@@ -134,7 +135,7 @@
   <!-- ═══════════════════════════════════════════════════════════════════════
        ROW 5: OPPORTUNITY ALERTS
   ═══════════════════════════════════════════════════════════════════════ -->
-  <div class="liq-card liq-card-opp-alerts">
+  <div class="liq-card liq-card-opp-alerts" data-ptab="Scanner">
     <div class="liq-card-header">
       <span class="liq-card-title">🔔 Opportunity Alerts</span>
       <span class="liq-badge liq-badge-count" id="opp-alert-count">0</span>

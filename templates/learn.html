@@ -94,9 +94,14 @@
   </section>
   {% endif %}
 
+  {# Each topic is a folder: open on iPad/desktop, closed on a phone so the
+     library is a short list of sections instead of ~10 screens of cards. #}
   {% for topic in topics %}
-  <section class="learn-topic">
-    <h2 class="learn-h2">{{ topic.name }}</h2>
+  <details class="learn-topic learn-fold" open>
+    <summary class="learn-fold__sum">
+      <h2 class="learn-h2">{{ topic.name }}</h2>
+      <span class="learn-fold__count">{{ topic.concepts|length }} {{ 'idea' if topic.concepts|length == 1 else 'ideas' }}</span>
+    </summary>
     <p class="learn-blurb">{{ topic.blurb }}</p>
     <div class="learn-grid">
       {% for c in topic.concepts %}
@@ -107,8 +112,16 @@
       </a>
       {% endfor %}
     </div>
-  </section>
+  </details>
   {% endfor %}
+  <script>
+  (function () {
+    if (!window.matchMedia || !matchMedia('(max-width: 760px)').matches) return;
+    var q = new URLSearchParams(location.search).get('q');
+    if (q) return;   // searching: keep everything open
+    document.querySelectorAll('.learn-fold').forEach(function (d) { d.open = false; });
+  })();
+  </script>
 
 </div>
 {% endblock %}

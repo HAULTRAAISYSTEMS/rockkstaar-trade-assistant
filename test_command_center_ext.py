@@ -128,8 +128,9 @@ def test_command_center_layout_redesign():
     assert "liq-mode-toggle" not in html and "setMode(" not in html
     assert "cc-hero-xl" in html and 'class="cc-shortcuts"' in html
     assert "workspace-paths--next" not in html
-    assert html.index('class="cc-col-main"') < html.index('class="cc-col-side"')
-    assert html.index('class="cc-col-side"') < html.index('id="nx-panel"')
+    # "Top 3 for you" (the nx feed) now lives inside Watchlist Signals — one alerts list.
+    assert 'class="cc-col-side"' not in html
+    assert html.index('id="cmd27-signals"') < html.index('id="nx-panel"')
     assert 'data-cc-tab="setups"' in html and 'data-cc-panel="watch" hidden' in html
     scripts = open("templates/_liq_scripts.html", encoding="utf-8").read()
     assert "localStorage.removeItem('cc-mode')" in scripts
