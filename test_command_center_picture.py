@@ -299,7 +299,7 @@ def test_globe_spreads_sectors_on_an_even_grid():
     """Every sector gets its own territory and pins sit on one even grid,
     so tickers never bunch up; tall spikes and edge pins don't fan out."""
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
-    assert "function lattice(M)" in js and "Math.ceil(total * 2.4)" in js
+    assert "function lattice(M)" in js and "Math.ceil(37800 / (8 * 8))" in js
     assert "if (level < 1 && other) continue;" in js          # channel between sectors
     assert "if (key === layoutKey && layoutPos) return layoutPos;" in js   # stable between quotes
     assert "function buildCells()" in js and "nd.outer" in js  # territory = union of the sector's cells
