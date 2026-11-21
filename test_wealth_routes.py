@@ -272,6 +272,12 @@ def test_today_strip_combines_portfolios_and_uses_official_closes_when_closed(en
     assert d["day_dollars"] == pytest.approx(20) and d["best"]["ticker"] == "KLAC"
     assert d["best"]["pct"] == pytest.approx(1.64, abs=0.01) and d["day_label"]
     assert d["tickers"] == ["KLAC"]
+    # Per-holding rows feed the globe's My Portfolio view.
+    h = d["holdings"]
+    assert [x["ticker"] for x in h] == ["KLAC"]
+    assert h[0]["value"] == pytest.approx(2800) and h[0]["weight"] == pytest.approx(100)
+    assert h[0]["pct"] == pytest.approx(1.64, abs=0.01) and h[0]["dollars"] == pytest.approx(20)
+    assert "sector" in h[0]
 
 
 def test_today_strip_is_empty_without_portfolios(env):
