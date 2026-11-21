@@ -615,8 +615,28 @@
   }
   setInterval(tickFs, 15000);
   function relayout() { setTimeout(function () { emit('cmd27:relayout'); window.dispatchEvent(new Event('resize')); }, 60); }
+  // Full screen brings the app's 3D scene (sky, stars, mountains, neon floor)
+  // in behind the globe; it goes back to the page on exit.
+  var scene = document.querySelector('.ts-scene'), sceneHome = scene && scene.parentNode, sceneNext = scene && scene.nextSibling;
+  function moveScene(on) {
+    if (!scene) return;
+    if (on) box.insertBefore(scene, box.firstChild);
+    else if (sceneHome) sceneHome.insertBefore(scene, sceneNext && sceneNext.parentNode === sceneHome ? sceneNext : sceneHome.firstChild);
+  }
+  function mood() {
+    var w = ((document.getElementById('gp-word') || {}).textContent || '').toUpperCase();
+    return /RISK-OFF/.test(w) ? 'off' : /RISK-ON/.test(w) ? 'on' : /CAUTION/.test(w) ? 'caution' : 'neutral';
+  }
+  document.addEventListener('cmd27:sun', function (e) {
+    var d = e.detail || {}; if (d.x == null) return;
+    var l = Math.sqrt(d.x * d.x + d.y * d.y) || 1;
+    box.style.setProperty('--sun-x', (50 + d.x / l * 46).toFixed(1) + '%');
+    box.style.setProperty('--sun-y', (47 + d.y / l * 40).toFixed(1) + '%');
+  });
   function setFull(on) {
     if (on === box.classList.contains('is-full')) return;
+    moveScene(on);
+    box.setAttribute('data-mood', mood());
     box.classList.toggle('is-full', on);
     document.documentElement.classList.toggle('cmd27-fs', on);
     if (fsBtn) { fsBtn.setAttribute('aria-pressed', on ? 'true' : 'false'); fsBtn.textContent = on ? '⤡' : '⛶';

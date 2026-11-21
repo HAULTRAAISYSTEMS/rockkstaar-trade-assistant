@@ -657,3 +657,33 @@ html.cc27 .liq-page.cmd27 .cmd27-gp-mini .cc-regime-val { font-size: 15px !impor
 .cmd27-back:hover { border-color: var(--c-cy); box-shadow: 0 0 24px rgba(57,198,255,.45); }
 .cmd27-hero__globe.has-sector .cmd27-back { display: inline-flex; }
 .cmd27-hero__globe.is-full .cmd27-back { top: calc(16px + env(safe-area-inset-top, 0px)); }
+
+/* ── Full-screen deep space ──
+   The app's 3D scene (sky, stars, purple range, neon floor) moves in behind
+   the globe; over it: a nebula tinted by today's Game Plan, a glow on the
+   side the real sun lights, and a vignette that pulls the eye to the globe. */
+.cmd27 .cc3d-orb::before { display: none; }          /* old glow → oval smudge on wide screens */
+.cmd27-fs-sky { display: none; }
+.cmd27 .cmd27-hero__globe.is-full { background: #020813; }
+.cmd27-hero__globe.is-full > .ts-scene { position: absolute; inset: 0; z-index: 0; }
+.cmd27-hero__globe.is-full .cmd27-fs-sky { display: block; position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.cmd27-fs-sky i { position: absolute; inset: 0; }
+.cmd27-fs-sky__neb {
+  --n1: rgba(139,124,255,.22); --n2: rgba(57,198,255,.12);
+  background:
+    radial-gradient(42% 38% at 30% 34%, var(--n1), transparent 70%),
+    radial-gradient(38% 34% at 72% 62%, var(--n2), transparent 72%),
+    radial-gradient(60% 50% at 50% 47%, rgba(2,8,19,.55), transparent 75%);
+  filter: blur(8px);
+  animation: cmd27-neb 40s ease-in-out infinite alternate;
+}
+.cmd27-hero__globe[data-mood="off"] .cmd27-fs-sky__neb { --n1: rgba(255,77,109,.22); --n2: rgba(139,124,255,.2); }
+.cmd27-hero__globe[data-mood="on"] .cmd27-fs-sky__neb { --n1: rgba(34,227,154,.18); --n2: rgba(57,198,255,.18); }
+.cmd27-hero__globe[data-mood="caution"] .cmd27-fs-sky__neb { --n1: rgba(245,196,81,.18); --n2: rgba(139,124,255,.16); }
+@keyframes cmd27-neb { from { transform: scale(1) translate(0, 0); } to { transform: scale(1.08) translate(-1.5%, 1%); } }
+.cmd27-fs-sky__sun { background: radial-gradient(26% 30% at var(--sun-x, 22%) var(--sun-y, 30%), rgba(255,236,190,.16), rgba(255,200,120,.05) 45%, transparent 70%); }
+.cmd27-fs-sky__vig { background: radial-gradient(75% 75% at 50% 47%, transparent 55%, rgba(0,3,10,.72) 100%); }
+@media (prefers-reduced-motion: reduce) { .cmd27-fs-sky__neb { animation: none; } }
+.cmd27-hero__globe.is-full > :not(.ts-scene):not(.cmd27-fs-sky) { z-index: 1; }
+.cmd27-hero__globe.is-full .cmd27-zoom, .cmd27-hero__globe.is-full .cmd27-mode, .cmd27-hero__globe.is-full .cmd27-sector,
+.cmd27-hero__globe.is-full .cmd27-back, .cmd27-hero__globe.is-full .cmd27-legend, .cmd27-hero__globe.is-full .cmd27-fs-title { z-index: 5; }

@@ -291,7 +291,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       var hrs = now.getUTCHours() + now.getUTCMinutes() / 60;
       return [decl, -15 * (hrs - 12)];
     }
-    var sunCam = [-0.52, -0.42, 0.74];
+    var sunCam = [-0.52, -0.42, 0.74], lastSunSent = 0;
 
     /* Sector continents: each sector owns a landmass, pins cluster inside it. */
     var REGIONS = {
@@ -1044,6 +1044,11 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       // Real Earth: coastlines + city lights texture, lit by the real sun.
       var nowD = new Date();
       var ss = subsolar(nowD); sunCam = toCam(geo(ss[0], ss[1]));
+      // Tell the page where the light comes from (full-screen sky lights that side).
+      if (useRegions && (!lastSunSent || time - lastSunSent > 1.5)) {
+        lastSunSent = time;
+        document.dispatchEvent(new CustomEvent('cmd27:sun', { detail: { x: sunCam[0], y: sunCam[1], z: sunCam[2] } }));
+      }
       if (!sessionAt || time - sessionAt > 30) { refreshSessions(nowD); sessionAt = time || 0.001; }
       if (!drawEarth(cx, cy, R)) {
         var earthBg = ctx.createRadialGradient(cx - R * 0.28, cy - R * 0.3, R * 0.1, cx, cy, R);
