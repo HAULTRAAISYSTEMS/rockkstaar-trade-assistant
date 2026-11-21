@@ -104,10 +104,27 @@
     list = list.slice(0, narrow ? (mine ? 8 : 4) : (mine ? 12 : 10));
     orbitEl.innerHTML = '';
     var n = list.length;
+    // Ring sized from the globe itself (same maths as the globe renderer:
+    // R = 0.35·min side, silhouette ≈ 1.053·R, centre at 47% height), so
+    // chips always circle outside the Earth whatever the screen.
+    var box = orbitEl.getBoundingClientRect(), bw = box.width || 600, bh = box.height || 500;
+    var mn = Math.min(bw, bh), RS = Math.min(mn * (mn > 420 ? 0.35 : 0.33), bw * 0.30) * 1.053, cyc = bh * 0.47;
+    var ry = Math.min(bh * 0.5 - 24, RS + 40), rx = Math.min(bw * 0.5 - 34, Math.max(RS + 60, ry * 1.3));
+    var rects = [], halfW = narrow ? 34 : 42, halfH = narrow ? 20 : 25, clear = RS + 14;
     list.forEach(function (q, i) {
       var sym = String(q.symbol).toUpperCase(), chg = q.change_pct;
       var ang = (-Math.PI / 2) + (i / Math.max(n, 1)) * Math.PI * 2 + 0.3;
-      var x = 50 + Math.cos(ang) * (narrow ? 38 : 46), y = 50 + Math.sin(ang) * (narrow ? 44 : 45);
+      var dx = Math.cos(ang) * rx, dy = Math.sin(ang) * ry;
+      // Push out until the chip's nearest corner clears the atmosphere.
+      for (var k = 0; k < 12; k++) {
+        var nx = Math.max(0, Math.abs(dx) - halfW), ny = Math.max(0, Math.abs(dy) - halfH);
+        if (Math.sqrt(nx * nx + ny * ny) >= clear) break;
+        dx *= 1.06; dy *= 1.06;
+      }
+      dx = Math.max(-bw / 2 + halfW - 26, Math.min(bw / 2 - halfW + 26, dx));
+      dy = Math.max(-cyc + halfH, Math.min(bh - cyc - halfH, dy));
+      rects.push([bw / 2 + dx - halfW, cyc + dy - halfH, bw / 2 + dx + halfW, cyc + dy + halfH]);
+      var x = (bw / 2 + dx) / bw * 100, y = (cyc + dy) / bh * 100;
       var el = document.createElement('div');
       el.className = 'cmd27-chip ' + (num(chg) ? (chg < 0 ? 'is-down' : 'is-up') : 'is-flat') + (mine ? ' is-mine' : '');
       el.setAttribute('role', 'button'); el.tabIndex = 0;
@@ -129,6 +146,7 @@
       }
       orbitEl.appendChild(el);
     });
+    document.dispatchEvent(new CustomEvent('cmd27:chips', { detail: { tickers: list.map(function (q) { return String(q.symbol).toUpperCase(); }), rects: rects } }));
     if (bar) {
       var lbl = $('#cmd27-orbit-label', bar), reset = $('#cmd27-orbit-reset', bar);
       lbl.textContent = mine ? 'Your orbit · ' + orbit.length + '/12' : 'Orbit · top movers';
@@ -146,6 +164,8 @@
     });
     $('#cmd27-orbit-reset', bar).addEventListener('click', function () { orbit = []; saveOrbit(); });
   }
+  var rto = null;
+  window.addEventListener('resize', function () { clearTimeout(rto); rto = setTimeout(renderOrbit, 150); }, { passive: true });
   fetch('/api/command/orbit', { credentials: 'same-origin', cache: 'no-store' })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) { if (d && d.ok) { orbit = d.tickers || []; orbitLoaded = true; announce(); renderOrbit(); } })

@@ -199,7 +199,22 @@
   .cmd27-launch__ic svg { width: 34px; height: 34px; }
   .cmd27-launch__card { padding: 16px; gap: 12px; }
 }
-@media (max-width: 1180px) {
+/* Tablets in landscape (iPad 1180 / 1366): keep the picture's three columns, tighter. */
+@media (min-width: 1081px) and (max-width: 1400px) {
+  .cmd27 { padding: 14px 16px 40px; }
+  .cmd27 .cmd27-hero { grid-template-columns: minmax(250px, .78fr) minmax(420px, 1.45fr) minmax(270px, .8fr); gap: 6px; min-height: 520px; }
+  .cmd27-hero__globe { height: 540px; margin: -20px -14px -10px; }
+  .cmd27-title { font-size: clamp(34px, 3.4vw, 48px); }
+  .cmd27-sub { font-size: 17px; }
+  html.cc27 .liq-page.cmd27 .cmd27-pulse { padding: 16px !important; }
+  .cmd27-row { grid-template-columns: minmax(0, 1fr) auto 70px; gap: 8px; font-size: 14px; padding: 10px 0; }
+  .cmd27-row__name .cc-p-lbl { display: none; }
+  .cmd27-row:last-child .cmd27-row__name .cc-p-lbl { display: inline; }
+  .cmd27-kpi { padding: 14px; gap: 12px; }
+  .cmd27-kpi__ic { width: 46px; height: 46px; }
+  .cmd27-kpi__ic svg { width: 26px; height: 26px; }
+}
+@media (max-width: 1080px) {
   .cmd27 .cmd27-hero { grid-template-columns: 1fr 1fr; }
   .cmd27-hero__globe { grid-column: 1 / -1; grid-row: 2; height: 520px; margin: 0; }
   .cmd27-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
