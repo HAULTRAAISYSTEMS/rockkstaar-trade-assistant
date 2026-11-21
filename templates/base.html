@@ -55,6 +55,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/scene_2028.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/phone_tabs.css') }}" />
   {% block late_css %}{% endblock %}
+  {# Floating glass cards on every page — last, so it styles every card. #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/glass_2028.css') }}" />
 </head>
 <body class="{% block body_class %}{% endblock %}">
   <a class="workspace-skip" href="#workspace-main">Skip to content</a>
@@ -114,6 +116,7 @@
   <script defer src="{{ url_for('static', filename='js/phone_tabs.js') }}"></script>
   <script defer src="{{ url_for('static', filename='js/command_center_3d.js') }}"></script>
   {% block scripts %}{% endblock %}
+  <script defer src="{{ url_for('static', filename='js/glass.js') }}"></script>
 
   <!-- ===== ASK AI FAB — bottom-center pill ===== -->
   <button id="ask-fab" onclick="openAsk()" title="Ask AI (Ctrl+K)" style="

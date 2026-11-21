@@ -1,0 +1,98 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Floating holo-glass cards — every page.
+   Clear, frosted panes that let the 3D scene (stars, range, neon floor) show
+   through; a lit top edge and corner sheen; a deep shadow + faint cyan
+   under-glow so they read as hovering above the floor. With a mouse, a soft
+   light follows the cursor across the glass and the card tilts a little
+   (static/js/glass.js). Each card glints once as it scrolls into view.
+   Colour-coded parts (verdicts, gains/losses, badges) keep their own colours.
+   ───────────────────────────────────────────────────────────────────────── */
+html.cc27 {
+  --glass-tint-a: rgba(130, 180, 255, .10);
+  --glass-tint-b: rgba(24, 46, 92, .18);
+  --glass-tint-c: rgba(5, 12, 28, .40);
+  --glass-edge: rgba(170, 215, 255, .17);
+  --glass-edge-hi: rgba(200, 235, 255, .34);
+  --glass-blur: 9px;
+}
+
+/* Outer panes (blurred glass). */
+html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .intel-kpi, .liq-card, .wa-card, .lab-panel, .lab-banner, .tw-panel, .tw-stat,
+              .dp, .nd-heat, .learn-fold, .tt-card, .sm-top, .stat, .cmd27-m, .cmd27-orbit-bar, .ptabs,
+              .aplus-command__status, .cmd27-sector) {
+  position: relative;
+  background:
+    radial-gradient(340px circle at var(--gx, -400px) var(--gy, -400px), rgba(120, 205, 255, .16), transparent 60%),
+    radial-gradient(130% 90% at 0% 0%, rgba(255, 255, 255, .09), transparent 42%),
+    linear-gradient(155deg, var(--glass-tint-a) 0%, var(--glass-tint-b) 38%, var(--glass-tint-c) 100%) !important;
+  border: 1px solid var(--glass-edge) !important;
+  border-top-color: var(--glass-edge-hi) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .14),
+    inset 0 -1px 0 rgba(0, 0, 0, .25),
+    0 22px 44px -20px rgba(0, 0, 0, .85),
+    0 34px 70px -40px rgba(57, 198, 255, .32) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  transition: transform .35s cubic-bezier(.2, .8, .2, 1), box-shadow .35s ease, border-color .35s ease;
+}
+
+/* Inner tiles sit on glass already: translucent, no second blur. */
+html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .liq-card, .wa-card, .lab-panel, .tw-panel, .learn-fold, .tt-card, .cmd27-sector)
+  :is(.card, .intel-kpi, .stat, .tw-stat, .cmd27-m, .nx-panel, .learn-card, .tw-context-card) {
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .10), 0 10px 22px -16px rgba(0, 0, 0, .8) !important;
+}
+html.cc27 :is(#workspace-main, body) :is(.learn-card, .tw-context-card) {
+  background: linear-gradient(155deg, rgba(130, 180, 255, .08), rgba(6, 14, 30, .34)) !important;
+  border: 1px solid rgba(170, 215, 255, .14) !important;
+  border-top-color: rgba(200, 235, 255, .26) !important;
+  transition: transform .3s cubic-bezier(.2, .8, .2, 1), border-color .3s ease, box-shadow .3s ease;
+}
+
+/* Lift on hover (mouse only): the card rises toward you, edge brightens. */
+@media (hover: hover) and (pointer: fine) {
+  html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .intel-kpi, .liq-card, .wa-card, .lab-panel, .stat, .cmd27-m, .tt-card, .learn-card, .learn-fold, .tw-stat):hover {
+    border-color: rgba(120, 210, 255, .34) !important;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .2),
+      0 30px 60px -22px rgba(0, 0, 0, .9),
+      0 40px 90px -40px rgba(57, 198, 255, .55),
+      0 0 0 1px rgba(57, 198, 255, .10) !important;
+  }
+  html.cc27 .glass-tilt {
+    transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateY(-4px);
+  }
+}
+
+/* One glint as a card scrolls into view. */
+html.cc27 .glass-glint { animation: glass-glint 1.4s cubic-bezier(.3, .6, .2, 1) 1; }
+@keyframes glass-glint { from { --glint: 200%; } to { --glint: -80%; } }
+@property --glint { syntax: '<percentage>'; inherits: false; initial-value: 200%; }
+html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .liq-card, .wa-card, .lab-panel, .tw-panel, .learn-fold, .stat, .cmd27-m, .intel-kpi).glass-glint {
+  background-image:
+    radial-gradient(340px circle at var(--gx, -400px) var(--gy, -400px), rgba(120, 205, 255, .16), transparent 60%),
+    radial-gradient(130% 90% at 0% 0%, rgba(255, 255, 255, .09), transparent 42%),
+    linear-gradient(110deg, transparent 40%, rgba(220, 245, 255, .16) 46%, transparent 52%),
+    linear-gradient(155deg, var(--glass-tint-a) 0%, var(--glass-tint-b) 38%, var(--glass-tint-c) 100%) !important;
+  background-size: auto, auto, 260% 100%, auto !important;
+  background-repeat: no-repeat !important;
+  background-position: 0 0, 0 0, var(--glint) 0, 0 0 !important;
+}
+
+/* People who asked their OS for less transparency / motion get solid panes. */
+@media (prefers-reduced-transparency: reduce) {
+  html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .intel-kpi, .liq-card, .wa-card, .lab-panel, .tw-panel, .tw-stat, .dp, .nd-heat,
+                .learn-fold, .tt-card, .sm-top, .stat, .cmd27-m, .cmd27-orbit-bar, .ptabs, .cmd27-sector) {
+    background: rgba(7, 15, 32, .94) !important; -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.cc27 .glass-glint { animation: none; }
+  html.cc27 .glass-tilt { transform: none; }
+}
+
+/* Text on glass: a whisper of shadow keeps small type crisp over the scene. */
+html.cc27 :is(#workspace-main, body) :is(.cc-card, .card, .intel-card, .liq-card, .wa-card, .lab-panel, .tw-panel, .learn-fold, .cmd27-m, .stat) {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+}
