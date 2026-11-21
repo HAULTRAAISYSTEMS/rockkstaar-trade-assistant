@@ -1297,14 +1297,12 @@ function renderRiskMeter(d) {
     yieldRow('SOFR',          rate.sofr != null ? rate.sofr + '%' : null, null, '', rate.sofr_data_as_of || rate.data_as_of),
   ].join('');
 
-  // Regime box
+  // Regime box: the yield-curve read only. The liquidity label and summary
+  // already lead the Fed Liquidity card right above — no second copy.
   const regime = document.getElementById('liq-regime-box');
-  if (regime && d.status) {
-    regime.innerHTML = `
-      <div class="reg-label">${d.status_label || d.status}</div>
-      <div class="reg-signal">${d.summary || ''}</div>
-      ${yc.signal ? `<div class="reg-signal" style="margin-top:.35rem">${yc.signal}</div>` : ''}
-    `;
+  if (regime) {
+    regime.innerHTML = yc.signal ? `<div class="reg-label">Yield curve</div><div class="reg-signal">${yc.signal}</div>` : '';
+    regime.style.display = yc.signal ? '' : 'none';
   }
 }
 

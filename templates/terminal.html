@@ -480,10 +480,12 @@
   </div>
 
   <!-- ===== 3-column body ===== -->
+  {# iPhone: section tabs (see static/js/phone_tabs.js) #}
+  <div data-ptabs-bar="Chart,List,Trade,Positions,Intel"></div>
   <div class="tw-body">
 
     <!-- LEFT: Watchlist -->
-    <div class="tw-panel">
+    <div class="tw-panel" data-ptab="List">
       <div class="tw-panel-hd">
         {% if all_wls and all_wls|length > 1 %}
         <form class="tw-wl-switch" id="tw-wl-switch" method="post" action="" onsubmit="return false">
@@ -554,7 +556,7 @@
 
     <!-- CENTER: chart + OHLCV + positions -->
     <div class="tw-center">
-      <div class="tw-panel">
+      <div class="tw-panel" data-ptab="Chart">
         <div class="tw-sym-hd">
           <div class="tw-sym-left">
             <div class="tw-sym-toprow">
@@ -831,14 +833,14 @@
 
       </div>
 
-      <div class="tw-context" aria-label="Ticker context">
+      <div class="tw-context" aria-label="Ticker context" data-ptab="Chart">
           <article class="tw-context-card tw-context-wide"><span>Why moving</span><strong id="tw-context-why">Loading verified context…</strong></article>
           <article class="tw-context-card"><span>Relative volume</span><strong id="tw-context-rvol">—</strong></article>
           <article class="tw-context-card"><span>Next earnings</span><strong id="tw-context-earnings">—</strong></article>
           <article class="tw-context-card"><span>Insider pulse</span><strong id="tw-context-insiders">Checking SEC filings…</strong></article>
         </div>
 
-      <div class="tw-panel tw-intel" id="tw-intel">
+      <div class="tw-panel tw-intel" id="tw-intel" data-ptab="Intel">
         <div class="tw-intel-head">
           <div><span class="tw-intel-kicker">Stock Intelligence</span><h3><span id="tw-intel-ticker">{{ requested_symbol or (stocks[0].ticker if stocks else chart_symbol) }}</span> command deck</h3></div>
           <span class="tw-count" id="tw-intel-asof">ticker scoped</span>
@@ -860,7 +862,7 @@
       </div>
 
       <!-- Positions -->
-      <div class="tw-panel">
+      <div class="tw-panel" data-ptab="Positions">
         <div class="tw-panel-hd">
           <h3>Positions</h3>
           <span class="tw-count">{{ acct.open_positions if connected else 0 }}{{ '' if connected else ' · paper' }}</span>
@@ -902,7 +904,7 @@
     <!-- RIGHT: stat cards + order ticket -->
     <div class="tw-right">
       <!-- Level 2 + Time & Sales (Schwab streamer, see market_depth.py) -->
-      <section class="dp" id="dp" data-symbol="{{ requested_symbol or (stocks[0].ticker if stocks else chart_symbol) }}" aria-label="Level 2 and Time and Sales">
+      <section class="dp" id="dp" data-ptab="Trade" data-symbol="{{ requested_symbol or (stocks[0].ticker if stocks else chart_symbol) }}" aria-label="Level 2 and Time and Sales">
         <header class="dp-head">
           <div class="dp-title"><strong>L2</strong><span>·</span><strong>Time &amp; Sales</strong><b class="dp-sym" id="dp-sym">{{ requested_symbol or (stocks[0].ticker if stocks else chart_symbol) }}</b></div>
           <span class="dp-status" id="dp-status" data-state="starting"><i></i><span id="dp-status-text">Connecting…</span></span>
@@ -936,7 +938,7 @@
       </section>
 
       <!-- Today's Setups panel (design spec · item #5) -->
-      <div class="hx" style="margin-bottom:var(--sp-4)">
+      <div class="hx" style="margin-bottom:var(--sp-4)" data-ptab="List">
         <div class="card">
           {% set apn = today_setups|selectattr('swing_grade','equalto','A+')|list|length if today_setups else 0 %}
           <div class="card-hd">Today's Setups{% if today_setups %}<span class="badge badge-accent"><span class="dot"></span>{{ apn }} A+</span>{% endif %}<span class="faint" style="font-weight:400" title="Snapshot at page load — tape and watchlist update live">as of load</span></div>
@@ -968,7 +970,7 @@
         </div>
       </div>
 
-      <div class="tw-stats">
+      <div class="tw-stats" data-ptab="Positions">
         <div class="tw-stat {{ '' if connected else 'paper' }}">
           <div class="tw-stat-lbl">Buying Power</div>
           <div class="tw-stat-val">{{ '${:,.0f}'.format(acct.buying_power) if connected and acct.buying_power is not none else '—' }}</div>
@@ -1005,7 +1007,7 @@
       </div>
 
       <!-- Order ticket (paper) -->
-      <div class="tw-panel">
+      <div class="tw-panel" data-ptab="Trade">
         <div class="tw-panel-hd"><h3>Order Ticket</h3><span class="tw-count" id="tw-ot-mode-tag">PAPER</span></div>
         <div class="tw-ticket" id="tw-ticket" data-side="BUY">
           <div class="tw-side">

@@ -17,7 +17,7 @@
   {# ── Hero: title · globe · market pulse ─────────────────────────────── #}
   <header class="elite-hero cmd27-hero cc-hero-xl is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
     <div class="cmd27-hero__left">
-      <h1 class="cmd27-title">Morning<br>Command Center<sup>™</sup></h1>
+      <h1 class="cmd27-title">Morning<br> Command Center<sup>™</sup></h1>
       <p class="cmd27-sub">Your AI Market Intelligence Briefing</p>
       {# Says "live" only when the quotes are. #}
       <p class="cmd27-live {{ 'is-live' if pulse.live else 'is-snapshot' }}" id="cmd27-live">
@@ -29,7 +29,8 @@
         <span class="cc-stamp" id="liq-last-updated" aria-live="polite">Loaded · {{ pulse.as_of or 'live' }}</span>
       </div>
       <div class="cc-shortcuts"><span class="cc-shortcut"><kbd>R</kbd> refresh</span></div>
-      <div class="cmd27-orbit-bar" id="cmd27-orbit-bar">
+      <div class="cmd27-ptabs" data-ptabs-bar></div>
+      <div class="cmd27-orbit-bar" id="cmd27-orbit-bar" data-ptab="Globe">
         <span class="cmd27-orbit-bar__lbl"><b aria-hidden="true">★</b> <span id="cmd27-orbit-label">Orbit · top movers</span></span>
         <span class="cmd27-orbit-bar__hint" id="cmd27-orbit-hint">Tap a pin, then ☆ to keep it here</span>
         <form id="cmd27-orbit-form" class="cmd27-orbit-bar__form" autocomplete="off">
@@ -38,10 +39,10 @@
         <button type="button" id="cmd27-orbit-edit" class="cmd27-orbit-bar__edit" aria-pressed="false" hidden>Edit</button>
         <button type="button" id="cmd27-orbit-reset" class="cmd27-orbit-bar__reset" hidden>Reset</button>
       </div>
-      <nav class="cmd27-dock" id="cmd27-dock" aria-label="Fly to a sector" hidden></nav>
+      <nav class="cmd27-dock" id="cmd27-dock" aria-label="Fly to a sector" data-ptab="Globe" hidden></nav>
     </div>
 
-    <div class="cmd27-hero__globe">
+    <div class="cmd27-hero__globe" data-ptab="Globe">
       <div class="cc3d-orb is-waiting" data-cc3d-orb
            data-chart-url="{{ url_for('stock_detail', ticker='__T__') }}"
            data-research-url="{{ url_for('research_page', ticker='__T__') }}"
@@ -82,7 +83,7 @@
       </section>
     </div>
 
-    <aside class="cmd27-hero__pulse">
+    <aside class="cmd27-hero__pulse" data-ptab="Plan">
       {# Game Plan: the Rockkstaar market check, live (command_gameplan.py). The
          ids cc-spy / cc-qqq / cc-vix / cc-regime / cm-* are kept so the live
          scripts keep updating them. #}
@@ -125,13 +126,7 @@
             </p>
           </div>
         </div>
-        {% set nx_ev = (week | selectattr('kind', 'ne', 'EARNINGS') | selectattr('impact', 'equalto', 'HIGH') | list | first) if week else None %}
-        {% set nx_ev = nx_ev or next_up %}
-        {% if nx_ev %}
-        <p class="cmd27-next" id="gp-next" data-date="{{ nx_ev.date or '' }}" data-time="{{ nx_ev.time or '' }}">
-          <span>Next catalyst</span><b>{{ nx_ev.title }}</b><em id="gp-countdown">{{ nx_ev.date_label or '' }}{% if nx_ev.time %} · {{ nx_ev.time }}{% endif %}</em>
-        </p>
-        {% endif %}
+        {# Next catalyst lives on the economy card (countdown on its row). #}
         <span class="cc-pulse-sub" id="cc-pulse-sub" hidden>{{ pulse.summary or '' }}</span>
         <p class="cc-pulse-note" id="cc-pulse-note">{{ pulse.note or '' }}</p>
       </div>
@@ -143,7 +138,7 @@
   <div id="market-story-banner" class="cc-story-banner cmd27-story" hidden></div>
 
   {# ── Your money today (all Wealth portfolios combined) ───────────────── #}
-  <section class="cmd27-money is-loading" id="cmd27-money" aria-label="Your money today"
+  <section class="cmd27-money is-loading" id="cmd27-money" data-ptab="Money" aria-label="Your money today"
            data-wealth-url="{{ url_for('wealth.dashboard') }}" data-next-url="{{ url_for('wealth.next_dollar_page') }}">
     <article class="cmd27-m" data-m="value">
       <span class="cmd27-m__ic" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="9" width="24" height="17" rx="3"/><path d="M4 14h24"/><circle cx="22" cy="20" r="2"/><path d="M8 9V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"/></svg></span>
@@ -173,7 +168,7 @@
   {# ── Briefing · setups · breadth · events ────────────────────────────── #}
   <div class="cc-now cmd27-now"><div class="cc-col-main">
   <div class="cmd27-intel">
-    <section class="cc-card cmd27-card" id="ai-brief-card">
+    <section class="cc-card cmd27-card" id="ai-brief-card" data-ptab="Plan">
       <div class="cmd27-card__head">
         <h2><span class="cmd27-spark" aria-hidden="true">✦</span> AI Market Briefing</h2>
         <span class="cmd27-badge">AI insights</span>
@@ -199,7 +194,7 @@
       <a class="cmd27-more" href="{{ url_for('live_research.feed') }}">Full feed →</a>
     </section>
 
-    <section class="cc-card cc-picks cmd27-card">
+    <section class="cc-card cc-picks cmd27-card" data-ptab="Signals">
       <div class="cmd27-card__head">
         <h2><span class="cmd27-target" aria-hidden="true">◎</span> A+ Setups Today</h2>
         <span class="cmd27-badge">Scanner</span>
@@ -236,7 +231,7 @@
       </div>
     </section>
 
-    <section class="cc-card cmd27-card cmd27-signals" id="cmd27-signals"
+    <section class="cc-card cmd27-card cmd27-signals" id="cmd27-signals" data-ptab="Signals"
              data-tickers="{{ ((watchlist or []) | map(attribute='ticker') | list | join(',')) }}"
              data-thesis-url="{{ url_for('thesis_view') }}">
       <div class="cmd27-card__head">
@@ -262,19 +257,34 @@
           {% endfor %}
         </ul>
       </div>
+      {# Was a separate top-3 strip: same alerts feed, now one place. #}
+      <div class="cmd27-sig cmd27-sig--nx">
+    <div class="nx-panel cc-nx-mini cmd27-nx cmd27-nx--in" id="nx-panel" aria-labelledby="nx-panel-title">
+      <header class="nx-panel__head">
+        <h3 class="nx-panel__title" id="nx-panel-title">Next up for you <span class="nx-panel__count" id="nx-panel-count"></span></h3>
+        <span class="nx-panel__links"><button type="button" class="nx-text-btn" data-nx-open>All alerts</button></span>
+      </header>
+      <div class="nx-chips" id="nx-panel-chips" role="group" aria-label="Filter notifications"></div>
+      <ol class="nx-list nx-list--panel" id="nx-panel-list" aria-live="polite"><li class="nx-empty"><span>Loading...</span></li></ol>
+    </div>
+      </div>
     </section>
 
-    <section class="cc-card cmd27-card cmd27-events">
+    <section class="cc-card cmd27-card cmd27-events" data-ptab="Economy">
       <div class="cmd27-card__head">
         <h2><span aria-hidden="true">▦</span> Economy This Week</h2>
         <a class="cmd27-badge is-link" href="{{ url_for('catalyst_calendar') }}">Calendar</a>
       </div>
       {% set evs = (([next_up] if next_up and next_up.kind != 'EARNINGS' else []) + ((week | rejectattr('title', 'equalto', next_up.title if next_up else '') | rejectattr('kind', 'equalto', 'EARNINGS') | list) if week else [])) %}
+      {% set nx_ev = (week | selectattr('kind', 'ne', 'EARNINGS') | selectattr('impact', 'equalto', 'HIGH') | list | first) if week else None %}
+      {% set nx_ev = nx_ev or (next_up if next_up and next_up.kind != 'EARNINGS' else None) %}
+      {% if nx_ev %}{% set evs = [nx_ev] + (evs | rejectattr('title', 'equalto', nx_ev.title) | list) %}{% endif %}
       {% if evs %}
       <ul class="cmd27-evlist">
         {% for e in evs[:4] %}
-        <li class="{{ 'is-high' if e.impact == 'HIGH' }}">
-          <span class="cmd27-ev-when">{{ e.time or '' }}<small>{{ e.date_label or '' }}</small></span>
+        {% set is_nx = nx_ev and loop.first %}
+        <li class="{{ 'is-high' if e.impact == 'HIGH' }}{{ ' is-next' if is_nx }}"{% if is_nx %} id="gp-next" data-date="{{ nx_ev.date or '' }}" data-time="{{ nx_ev.time or '' }}"{% endif %}>
+          <span class="cmd27-ev-when">{{ e.time or '' }}<small>{{ e.date_label or '' }}</small>{% if is_nx %}<em class="cmd27-ev-count" id="gp-countdown">next</em>{% endif %}</span>
           <span class="cmd27-ev-what">{{ e.title }}{% if e.on_watchlist %} <em class="cc-tag">watchlist</em>{% endif %}{% if e.reason and e.kind != 'EARNINGS' %}<small>{{ e.reason }}</small>{% endif %}</span>
         </li>
         {% endfor %}
@@ -282,16 +292,7 @@
       {% else %}<p class="cc-empty">No upcoming events were returned.</p>{% endif %}
     </section>
   </div>
-  </div><div class="cc-col-side">
-    <div class="nx-panel cc-nx-mini cmd27-nx" id="nx-panel" aria-labelledby="nx-panel-title">
-      <header class="nx-panel__head">
-        <h3 class="nx-panel__title" id="nx-panel-title">Top 3 for you <span class="nx-panel__count" id="nx-panel-count"></span></h3>
-        <span class="nx-panel__links"><button type="button" class="nx-text-btn" data-nx-open>All alerts</button></span>
-      </header>
-      <div class="nx-chips" id="nx-panel-chips" role="group" aria-label="Filter notifications"></div>
-      <ol class="nx-list nx-list--panel" id="nx-panel-list" aria-live="polite"><li class="nx-empty"><span>Loading...</span></li></ol>
-    </div>
-  </div></div>
+  </div>
 
 </div>
 {% endblock %}
