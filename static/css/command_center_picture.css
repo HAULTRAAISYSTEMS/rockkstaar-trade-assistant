@@ -287,12 +287,25 @@ html.cc27 .liq-page.cmd27 .cmd27-trend::before { display: none !important; }
   html.cc27 .liq-page.cmd27 .cmd27-pulse { padding: 16px !important; }
 }
 
-/* ── Painted scene behind the hero: stars, nebula, mountains, neon floor ── */
-html.cc27.cc-scene body { background: #020813 url("../img/command_scene.webp") center 140px / max(100vw, 1824px) auto no-repeat !important; }
+/* ── 3D scene behind the hero: parallax layers + live floor canvas ── */
+html.cc27.cc-scene body { background: #020813 !important; overflow-x: clip; }
 html.cc27 .liq-page.cmd27 { background: none !important; }
+.cmd27 { --sw: max(100vw, 1824px); }
+html.cc27 .liq-page.cmd27 > .cmd27-scene { position: absolute; z-index: -1; pointer-events: none; top: -34px; left: calc(50% - 50vw) !important; width: 100vw !important; max-width: none !important; margin: 0 !important;
+  height: calc(var(--sw) * 0.41667); overflow: hidden; background: #020813;
+  -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent 100%); mask-image: linear-gradient(to bottom, #000 82%, transparent 100%); }
+html.cc27 .liq-page.cmd27 .cmd27-scene__stage { position: absolute; top: 0; left: 50%; width: var(--sw) !important; max-width: none !important; height: 100%; transform: translateX(-50%); }
+.cmd27-scene__layer { position: absolute; top: 0; bottom: 0; left: -3%; right: -3%; display: block;
+  background: center / 100% 100% no-repeat; will-change: transform; }
+.cmd27-scene__sky  { background-image: url("../img/scene_sky.webp"); }
+.cmd27-scene__far  { background-image: url("../img/scene_far.webp"); }
+.cmd27-scene__near { background-image: url("../img/scene_near.webp"); }
+.cmd27-scene__floor { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 @media (max-width: 760px) {
-  html.cc27.cc-scene body { background-size: 1500px auto !important; background-position: center 120px !important; }
+  .cmd27 { --sw: 1500px; }
+  html.cc27 .liq-page.cmd27 > .cmd27-scene { top: -24px; }
 }
+@media (prefers-reduced-motion: reduce) { .cmd27-scene__layer { will-change: auto; } }
 .cmd27-title, .cmd27-sub, .cmd27-clock { text-shadow: 0 2px 18px rgba(2, 8, 19, .85), 0 0 2px rgba(2, 8, 19, .6); }
 html.cc27 .liq-page.cmd27 .cmd27-hero, html.cc27 .liq-page.cmd27 .cmd27-hero__globe::before { background: none !important; }
 html.cc27.cc-scene #cc3d-veil { opacity: .35; }

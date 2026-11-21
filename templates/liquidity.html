@@ -3,7 +3,7 @@
 
 {% block head_extra %}
   <script>document.documentElement.classList.add('cc-scene')</script>
-  <link rel="preload" as="image" href="{{ url_for('static', filename='img/command_scene.webp') }}" />
+  <link rel="preload" as="image" href="{{ url_for('static', filename='img/scene_sky.webp') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/today.css') }}" />
 {% endblock %}
 {% block late_css %}
@@ -15,6 +15,15 @@
 
 {% block content %}
 <div class="liq-page cmd27">
+  {# 3D scene: sky → live stars + neon floor → far range → near range, each at its own depth. #}
+  <div class="cmd27-scene" aria-hidden="true">
+    <div class="cmd27-scene__stage" id="cmd27-stage">
+      <i class="cmd27-scene__layer cmd27-scene__sky" data-depth="0.12"></i>
+      <canvas class="cmd27-scene__floor" id="cmd27-floor"></canvas>
+      <i class="cmd27-scene__layer cmd27-scene__far" data-depth="0.4"></i>
+      <i class="cmd27-scene__layer cmd27-scene__near" data-depth="0.85"></i>
+    </div>
+  </div>
   {# ── Hero: title · globe · market pulse ─────────────────────────────── #}
   <header class="elite-hero cmd27-hero cc-hero-xl is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
     <div class="cmd27-hero__left">
@@ -37,6 +46,7 @@
            data-chart-url="{{ url_for('stock_detail', ticker='__T__') }}"
            data-research-url="{{ url_for('research_page', ticker='__T__') }}"
            data-watch-url="{{ url_for('watchlist_add') }}"
+           data-sectors="{{ (sector_map or {})|tojson|forceescape }}"
            role="group" aria-label="3D market globe of the symbols on the live market tape. Green spikes are advancing, red are declining; spike length is the magnitude.">
         <canvas aria-hidden="true"></canvas>
         <div class="cc3d-hud" data-cc3d-hud aria-live="off"><span>Status <b>Awaiting live quotes</b></span></div>

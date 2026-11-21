@@ -10390,7 +10390,7 @@ def _command_center_context() -> dict:
     feed is cold is worse than one that renders with a gap in it.
     """
     context = {"week": [], "news": [], "setups": [], "watchlist": [],
-               "watchlist_name": "", "pulse": {}, "next_up": None,
+               "watchlist_name": "", "pulse": {}, "next_up": None, "sector_map": {},
                "story": None, "story_note": "",
                "news_refreshing": False, "news_note": "", "research_digest": {
                    "items": [], "material_count": 0, "alert_count": 0,
@@ -10581,6 +10581,17 @@ def _command_center_context() -> dict:
             key=lambda r: -(r.get("score") or 0))[:COMMAND_SETUPS]
     except Exception as exc:
         logger.debug("command centre: watchlist rows unavailable: %s", exc)
+
+    # Ticker → sector fund, so the globe can group pins by sector.
+    # Built-in map only (no network); unknown tickers land in "Other".
+    try:
+        from market_engine import _TICKER_SECTOR, SECTOR_ETFS
+        smap = dict(_TICKER_SECTOR)
+        smap.update({etf: etf for etf in SECTOR_ETFS})
+        context["sector_map"] = smap
+    except Exception as exc:
+        logger.debug("command centre: sector map unavailable: %s", exc)
+        context["sector_map"] = {}
 
     return context
 

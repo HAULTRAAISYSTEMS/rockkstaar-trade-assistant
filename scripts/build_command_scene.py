@@ -1,5 +1,8 @@
-"""Builds static/img/command_scene.webp: starfield + nebula sky, layered
-glowing mountains on both sides, and a neon perspective grid floor."""
+"""Builds the Command Center scene layers in static/img/:
+scene_sky.webp (stars, nebula, horizon bloom, floor base), scene_far.webp and
+scene_near.webp (transparent mountain ranges with glowing ridges).
+The neon floor grid and light trails are drawn live in the page.
+Usage: python3 build_command_scene.py static/img"""
 import math, sys, numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 W, H = 2400, 1000; HZ = int(H * 0.64)
@@ -42,6 +45,16 @@ for _ in range(90):
 sg = blur(star_glow, 2.2) * 2.2 + blur(star_glow, 6) * 1.2
 img += (sg / 255)[..., None] * np.array([160, 200, 255])
 
+# Floor: dark reflective plane with a neon perspective grid and light trails.
+fl = yy > HZ
+dfl = np.clip((yy - HZ) / (H - HZ), 0, 1)
+floor = np.stack([2 + 4 * dfl, 5 + 10 * dfl, 14 + 22 * dfl], -1) * np.ones((1, W, 1))
+floor += bloom[..., None] * np.array([10, 60, 100]) * 0.8
+img = np.where(fl[..., None], floor, img)
+# Horizon line
+hl = np.exp(-((yy - HZ) / 2.5) ** 2) * np.exp(-((xx - W / 2) / (W * 0.4)) ** 2)
+img += hl[..., None] * np.array([120, 230, 255])
+LAYERS = []
 # Mountains: two layers, high at the sides, a valley in the middle.
 def ridge(seed, base, amp, rough):
     r = np.random.default_rng(seed); n = 2**11 + 1; h = np.zeros(n); h[0] = r.random(); h[-1] = r.random()
@@ -72,54 +85,28 @@ for seed, base, amp, rough, body, rim, haze in layers:
     snow = np.clip(1 - depth * 4, 0, 1) * np.clip(shade - 0.45, 0, 1) * 2
     col += snow[..., None] * rim[None, None, :] * 0.55
     col = col * (1 - haze * 0.35) + np.array([30, 50, 110]) * haze * 0.35
-    img = np.where(m[..., None], col, img)
+    rgb = np.where(m[..., None], col, 0).astype(np.float32)
+    alpha = m.astype(np.float32)
     # glowing rim line along the ridge
     edge = np.zeros((H, W), np.float32)
     ti = np.clip(top.astype(int), 0, H - 1); edge[ti, np.arange(W)] = 255
     eg = blur(edge, 1.2) * 1.6 + blur(edge, 5) * 1.4 + blur(edge, 16) * 0.9
-    img += (eg / 255)[..., None] * rim * (0.6 if haze else 0.9)
+    glow = (eg / 255) * (0.6 if haze else 0.9)
+    gcol = rim[None, None, :] * np.ones((H, W, 1))
+    a2 = np.clip(glow * 1.2, 0, 1) * (1 - alpha)
+    rgb = rgb + (eg / 255)[..., None] * rim * (0.6 if haze else 0.9) * alpha[..., None]
+    rgb = np.where(alpha[..., None] > 0, rgb, gcol)
+    alpha = np.clip(alpha + a2, 0, 1)
+    # crop to the band that holds mountains and save RGBA
+    out = np.dstack([np.clip(rgb, 0, 255), alpha * 255]).astype(np.uint8)
+    LAYERS.append(out)
 
-# Floor: dark reflective plane with a neon perspective grid and light trails.
-fl = yy > HZ
-dfl = np.clip((yy - HZ) / (H - HZ), 0, 1)
-floor = np.stack([2 + 4 * dfl, 5 + 10 * dfl, 14 + 22 * dfl], -1) * np.ones((1, W, 1))
-floor += bloom[..., None] * np.array([10, 60, 100]) * 0.8
-img = np.where(fl[..., None], floor, img)
-grid = Image.new('L', (W, H), 0); g = ImageDraw.Draw(grid)
-vx = W / 2
-for k in range(-24, 25):
-    g.line([(vx + k * 12, HZ), (vx + k * 380, H + 400)], fill=150, width=2)
-z = 1.0
-while True:
-    y = HZ + 2600 / z
-    z += 2.2 if z < 12 else 4
-    if y >= H: continue
-    if y - HZ < 3: break
-    g.line([(0, y), (W, y)], fill=int(90 + 130 * (y - HZ) / (H - HZ)), width=2)
-    if z > 400: break
-ga = np.asarray(grid, np.float32) / 255 * fl * np.clip((yy - HZ) / 60, 0, 1)
-gg = blurf(ga, 1) * 0.9 + blurf(ga, 5) * 0.9
-img += gg[..., None] * np.array([40, 170, 255]) * 0.45
-# Light trails sweeping across the floor
-trail = Image.new('L', (W, H), 0); tr = ImageDraw.Draw(trail)
-for (x0, x1, bend) in [(-150, 1020, 0.55), (250, 1120, 0.8), (2550, 1380, 0.55), (2150, 1280, 0.8)]:
-    pts = []
-    for i in range(120):
-        s = i / 119
-        x = x0 + (x1 - x0) * (1 - (1 - s) ** (1 + bend)); y = H + 30 - (H + 30 - HZ - 6) * (s ** 0.75)
-        pts.append((x, y))
-    tr.line(pts, fill=255, width=3)
-ta = np.asarray(trail, np.float32) / 255
-tgl = blurf(ta, 1.5) * 1.2 + blurf(ta, 8) * 1.1 + blurf(ta, 24) * 0.7
-img += tgl[..., None] * np.array([60, 255, 170]) * 0.75
-# Horizon line
-hl = np.exp(-((yy - HZ) / 2.5) ** 2) * np.exp(-((xx - W / 2) / (W * 0.4)) ** 2)
-img += hl[..., None] * np.array([120, 230, 255])
-# Fade the bottom 22% into the page colour so the scene ends softly.
+
 fade = np.clip((yy - H * 0.78) / (H * 0.22), 0, 1)[..., None]
 img = img * (1 - fade) + np.array([2, 8, 19]) * fade
-# Soft darkening top-left keeps the title readable over the nebula.
 vig = np.exp(-(((xx - W * 0.12) / (W * 0.22)) ** 2 + ((yy - H * 0.35) / (H * 0.35)) ** 2))
 img = img * (1 - 0.35 * vig[..., None])
-out = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
-out.save(sys.argv[1] if len(sys.argv) > 1 else 'command_scene.webp', quality=80, method=6)
+outdir = sys.argv[1] if len(sys.argv) > 1 else '.'
+Image.fromarray(np.clip(img, 0, 255).astype(np.uint8)).save(outdir + '/scene_sky.webp', quality=80, method=6)
+for name, L in zip(('scene_far', 'scene_near'), LAYERS):
+    Image.fromarray(L, 'RGBA').save(outdir + '/' + name + '.webp', quality=82, method=6)

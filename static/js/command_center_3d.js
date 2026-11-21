@@ -292,6 +292,45 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     }
     var sunCam = [-0.52, -0.42, 0.74];
 
+    /* Sector continents: each sector owns a landmass, pins cluster inside it. */
+    var REGIONS = {
+      TECH:   { name: 'TECH',          lat: 41,  lon: -100, spread: 12 },
+      SEMIS:  { name: 'SEMIS',         lat: 34,  lon: 118,  spread: 9 },
+      FIN:    { name: 'FINANCIALS',    lat: 49,  lon: 12,   spread: 8 },
+      ENERGY: { name: 'ENERGY',        lat: 26,  lon: 47,   spread: 6 },
+      CONS:   { name: 'CONSUMER',      lat: -11, lon: -57,  spread: 10 },
+      HEALTH: { name: 'HEALTHCARE',    lat: 3,   lon: 22,   spread: 10 },
+      COMM:   { name: 'COMMUNICATION', lat: 22,  lon: 79,   spread: 6 },
+      INDUS:  { name: 'INDUSTRIALS',   lat: 60,  lon: 95,   spread: 12 },
+      OTHER:  { name: 'DEFENSIVE · OTHER', lat: -25, lon: 134, spread: 9 },
+      INDEX:  { name: 'INDEXES',       lat: 72,  lon: -40,  spread: 6 }
+    };
+    var ETF_REGION = { XLK: 'TECH', SMH: 'SEMIS', XLF: 'FIN', XLE: 'ENERGY', XLY: 'CONS', XLV: 'HEALTH',
+                       XLC: 'COMM', XLI: 'INDUS', XLB: 'INDUS', XLU: 'OTHER', XLRE: 'OTHER', IWM: 'INDEX' };
+    var SECTORS = {};
+    try { SECTORS = JSON.parse(host.getAttribute('data-sectors') || '{}') || {}; } catch (e) { SECTORS = {}; }
+    var useRegions = !!host.getAttribute('data-sectors');
+    function regionFor(sym) {
+      var u = String(sym || '').toUpperCase();
+      if (/^(SPY|QQQ|DIA|IWM|VIX|VOO|VTI|TLT|GLD|SLV|USO|DXY|UUP|BTC.*|ETH.*|ES|NQ|YM|RTY|CL|GC)$/.test(u) || /[=^\/]/.test(u)) return 'INDEX';
+      return ETF_REGION[SECTORS[u]] || 'OTHER';
+    }
+    function placeInRegions(list) {
+      var groups = {};
+      list.forEach(function (t) { var k = regionFor(t.symbol); (groups[k] = groups[k] || []).push(t); });
+      var pos = {};
+      Object.keys(groups).forEach(function (k) {
+        var g = groups[k], rg = REGIONS[k], n = g.length;
+        g.forEach(function (t, i) {
+          var rr = n === 1 ? 0 : rg.spread * Math.sqrt((i + 0.5) / n), a = i * 2.39996;
+          var la = rg.lat + rr * Math.cos(a);
+          var lo = rg.lon + rr * Math.sin(a) / Math.max(0.3, Math.cos(la * 0.0174533));
+          pos[t.symbol] = { v: geo(la, lo), region: k };
+        });
+      });
+      return pos;
+    }
+
     /* Exchanges: a beacon pulses green while the exchange is inside its
        regular session by its own local clock (holidays are not counted). */
     var EXCH = [
@@ -434,17 +473,20 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       var seen = {}, uniq = [];
       list.forEach(function (t) { if (!seen[t.symbol]) { seen[t.symbol] = 1; uniq.push(t); } });
       var n = uniq.length, golden = Math.PI * (3 - Math.sqrt(5));
+      var placed = useRegions ? placeInRegions(uniq) : null;
       nodes = uniq.map(function (t, i) {
         var y = n === 1 ? 0 : 1 - (i / (n - 1)) * 2;
         var rad = Math.sqrt(1 - y * y);
         var th = golden * i;
         var prev = null;
         for (var j = 0; j < nodes.length; j++) if (nodes[j].symbol === t.symbol) prev = nodes[j];
+        var pp = placed && placed[t.symbol];
         return {
           symbol: t.symbol,
           price: t.price,
           chg: t.change_pct,
-          x: Math.cos(th) * rad, y: y * 0.92, z: Math.sin(th) * rad,
+          region: pp ? pp.region : null,
+          x: pp ? pp.v[0] : Math.cos(th) * rad, y: pp ? pp.v[1] : y * 0.92, z: pp ? pp.v[2] : Math.sin(th) * rad,
           flash: prev && prev.price !== t.price ? 1 : (prev ? prev.flash : 0.6)
         };
       });
@@ -796,10 +838,73 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         }
         ctx.shadowBlur = 0;
       }
+      var tagBoxes = [];
+      function boxFree(b) {
+        for (var q = 0; q < tagBoxes.length; q++) { var o = tagBoxes[q]; if (b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]) return false; }
+        return true;
+      }
+      // Sector territories: a glowing border on the land + a live tag.
+      if (useRegions && nodes.length) {
+        var stats = {};
+        nodes.forEach(function (nd) {
+          if (!nd.region) return;
+          var st = stats[nd.region] = stats[nd.region] || { n: 0, sum: 0, k: 0 };
+          st.n++;
+          // VIX moves opposite to stocks, so it stays a pin but not part of the average.
+          if (nd.chg != null && !/VIX/.test(String(nd.symbol).toUpperCase())) { st.sum += Number(nd.chg); st.k++; }
+        });
+        Object.keys(stats).forEach(function (k) {
+          var rg = REGIONS[k], st = stats[k], avg = st.k ? st.sum / st.k : null;
+          var colT = avg == null ? CYAN : (avg > 0.05 ? POS : (avg < -0.05 ? NEG : FLAT));
+          var cen = geo(rg.lat, rg.lon), C = project(cen[0], cen[1], cen[2], R, cx, cy);
+          if (C[2] < -0.1) return;
+          // Border: small circle of radius spread+4° around the centre.
+          var ang = (rg.spread + 4) * 0.0174533, ca = Math.cos(ang), sa = Math.sin(ang);
+          var up = Math.abs(cen[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0];
+          var e1 = [cen[1] * up[2] - cen[2] * up[1], cen[2] * up[0] - cen[0] * up[2], cen[0] * up[1] - cen[1] * up[0]];
+          var l1 = Math.sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]); e1 = [e1[0] / l1, e1[1] / l1, e1[2] / l1];
+          var e2 = [cen[1] * e1[2] - cen[2] * e1[1], cen[2] * e1[0] - cen[0] * e1[2], cen[0] * e1[1] - cen[1] * e1[0]];
+          var dash = reduceMotion ? 0 : time * 0.6;
+          ctx.lineWidth = 1.6;
+          ctx.shadowColor = rgba(colT, 0.9); ctx.shadowBlur = 8;
+          var prevT = null;
+          for (var bs = 0; bs <= 64; bs++) {
+            var th2 = bs / 64 * 6.2832, c2 = Math.cos(th2), s2 = Math.sin(th2);
+            var pv = [cen[0] * ca + (e1[0] * c2 + e2[0] * s2) * sa, cen[1] * ca + (e1[1] * c2 + e2[1] * s2) * sa, cen[2] * ca + (e1[2] * c2 + e2[2] * s2) * sa];
+            var PT = project(pv[0] * 1.004, pv[1] * 1.004, pv[2] * 1.004, R, cx, cy);
+            if (prevT && PT[2] > 0 && prevT[2] > 0 && ((bs + Math.floor(dash * 4)) % 4 !== 0)) {
+              ctx.strokeStyle = rgba(colT, 0.5 * Math.min(1, PT[2] * 2));
+              ctx.beginPath(); ctx.moveTo(prevT[0], prevT[1]); ctx.lineTo(PT[0], PT[1]); ctx.stroke();
+            }
+            prevT = PT;
+          }
+          ctx.shadowBlur = 0;
+          // Floating tag above the territory.
+          if (C[2] > 0.2) {
+            var lift = project(cen[0] * 1.16, cen[1] * 1.16, cen[2] * 1.16, R, cx, cy);
+            ctx.font = '800 ' + (W > 520 ? 11 : 10) + 'px "IBM Plex Mono", ui-monospace, monospace';
+            ctx.textBaseline = 'middle';
+            var t1 = rg.name, t2 = avg == null ? st.n + ' pins' : (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%';
+            var w1 = ctx.measureText(t1).width, w2 = ctx.measureText(t2).width, bw = w1 + w2 + 22;
+            var bx = lift[0] - bw / 2, by = lift[1] - 11, box = [bx, by, bx + bw, by + 22];
+            if (!boxFree(box)) return;
+            tagBoxes.push(box);
+            ctx.strokeStyle = rgba(colT, 0.55); ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(C[0], C[1]); ctx.lineTo(lift[0], by + 22); ctx.stroke();
+            ctx.fillStyle = 'rgba(3,10,22,0.82)';
+            ctx.shadowColor = rgba(colT, 0.7); ctx.shadowBlur = 12;
+            ctx.beginPath();
+            if (ctx.roundRect) ctx.roundRect(bx, by, bw, 22, 7); else ctx.rect(bx, by, bw, 22);
+            ctx.fill(); ctx.shadowBlur = 0; ctx.stroke();
+            ctx.fillStyle = 'rgba(232,241,255,0.95)'; ctx.fillText(t1, bx + 8, by + 11);
+            ctx.fillStyle = rgba(colT, 1); ctx.fillText(t2, bx + 14 + w1, by + 11);
+          }
+        });
+      }
+
       // Exchange beacons + labels (near side only).
       ctx.font = '700 ' + (W > 520 ? 10 : 9) + 'px "IBM Plex Mono", ui-monospace, monospace';
       ctx.textBaseline = 'middle';
-      var tagBoxes = [];
       for (var ei = 0; ei < EXCH.length; ei++) {
         var ex = EXCH[ei], Pe = project(ex.v[0], ex.v[1], ex.v[2], R, cx, cy);
         if (Pe[2] < 0.12) continue;
@@ -811,13 +916,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         ctx.shadowBlur = 0;
         if (Pe[2] > 0.3) {
           var tag = ex.name + (ex.live ? ' · OPEN' : ' · CLOSED'), tw2 = ctx.measureText(tag).width;
-          var tx2 = Pe[0] + 8, ty2 = Pe[1] - 10, clash = false;
-          for (var bi = 0; bi < tagBoxes.length; bi++) {
-            var bb = tagBoxes[bi];
-            if (tx2 - 4 < bb[2] && tx2 + tw2 + 4 > bb[0] && ty2 - 8 < bb[3] && ty2 + 8 > bb[1]) { clash = true; break; }
-          }
-          if (!clash) { tx2 = tx2; } else { ty2 = Pe[1] + 12; for (var bj = 0; bj < tagBoxes.length; bj++) { var b2 = tagBoxes[bj]; if (tx2 - 4 < b2[2] && tx2 + tw2 + 4 > b2[0] && ty2 - 8 < b2[3] && ty2 + 8 > b2[1]) { clash = 2; break; } } }
-          if (clash === 2) continue;
+          var tx2 = Pe[0] + 8, ty2 = Pe[1] - 10;
+          if (!boxFree([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8])) { ty2 = Pe[1] + 12; if (!boxFree([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8])) continue; }
           tagBoxes.push([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8]);
           ctx.fillStyle = 'rgba(3,10,22,0.78)';
           ctx.strokeStyle = rgba(colE, 0.6); ctx.lineWidth = 1;
@@ -873,11 +973,17 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           ctx.strokeStyle = rgba(GOLD, 0.95); ctx.lineWidth = 1.5;
           ctx.beginPath(); ctx.arc(it[1][0], it[1][1], pr, 0, 6.2832); ctx.stroke();
         }
-        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && !sceneOn && (!labelSet || labelSet[it[2].symbol])))) {
+        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && (!labelSet || labelSet[it[2].symbol]) && (!sceneOn || it[1][2] > 0.35)))) {
           var label = it[2].symbol + (it[2].chg != null ? ' ' + (it[2].chg >= 0 ? '+' : '') + Number(it[2].chg).toFixed(2) + '%' : '');
+          if (sceneOn && !isSel && !isHov) label = it[2].symbol;
           var lx2 = it[1][0] + 7, ly2 = it[1][1];
           var tw = ctx.measureText(label).width;
           if (lx2 + tw > W - 4) lx2 = it[1][0] - 7 - tw;
+          if (sceneOn && !isSel && !isHov) {
+            var lb = [lx2 - 3, ly2 - 7, lx2 + tw + 3, ly2 + 7];
+            if (typeof boxFree === 'function' && !boxFree(lb)) continue;
+            if (typeof tagBoxes !== 'undefined') tagBoxes.push(lb);
+          }
           ctx.fillStyle = 'rgba(3,7,15,0.72)';
           ctx.fillRect(lx2 - 3, ly2 - (W > 520 ? 8 : 7), tw + 6, W > 520 ? 16 : 14);
           ctx.fillStyle = rgba(it[3], Math.min(1, 0.55 + it[1][2]));

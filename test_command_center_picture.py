@@ -81,18 +81,19 @@ def test_globe_uses_the_real_earth_texture():
 def test_command_page_paints_the_scene_and_skips_the_line_backdrop():
     src = (ROOT / "templates/liquidity.html").read_text(encoding="utf-8")
     assert "classList.add('cc-scene')" in src
-    css = (ROOT / "static/css/command_center_picture.css").read_text(encoding="utf-8")
-    assert "html.cc27.cc-scene body" in css and "command_scene.webp" in css
+    # 3D scene: depth layers + live floor canvas.
+    for s in ('cmd27-scene__sky" data-depth', 'id="cmd27-floor"', 'cmd27-scene__far" data-depth', 'cmd27-scene__near" data-depth'):
+        assert s in src, s
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
     assert "classList.contains('cc-scene')" in js
-    p = ROOT / "static/img/command_scene.webp"
-    assert p.exists() and p.stat().st_size < 400_000
+    for f in ("scene_sky.webp", "scene_far.webp", "scene_near.webp"):
+        p = ROOT / "static/img" / f
+        assert p.exists() and p.stat().st_size < 300_000, f
 
 
-def test_globe_has_real_sun_exchanges_and_arcs():
+def test_globe_groups_pins_by_sector(client):
+    html = client.get("/").get_data(as_text=True)
+    assert 'data-sectors="' in html and "&#34;NVDA&#34;: &#34;XLK&#34;" in html
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
-    assert "function subsolar(" in js          # real day/night
-    for ex in ("'NYSE', 40.71, -74.01, 'America/New_York', 930, 1600", "'LSE'", "'TSE'", "'HKEX'"):
-        assert ex in js
-    assert "wd !== 'Sat' && wd !== 'Sun'" in js  # weekends are closed
-    assert "function arcPoint(" in js and "Holographic HUD ring" in js
+    assert "TECH:" in js and "FIN:" in js and "function placeInRegions(" in js
+    assert "XLK: 'TECH'" in js and "XLF: 'FIN'" in js
