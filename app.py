@@ -10582,13 +10582,16 @@ def _command_center_context() -> dict:
     except Exception as exc:
         logger.debug("command centre: watchlist rows unavailable: %s", exc)
 
-    # Ticker → sector fund, so the globe can group pins by sector.
-    # Built-in map only (no network); unknown tickers land in "Other".
+    # Ticker → sector fund, so the globe can group pins by sector. Built-in
+    # map + sectors saved from company profiles; unknown watchlist tickers
+    # are looked up in the background and appear on the next load.
     try:
-        from market_engine import _TICKER_SECTOR, SECTOR_ETFS
-        smap = dict(_TICKER_SECTOR)
-        smap.update({etf: etf for etf in SECTOR_ETFS})
+        import globe_sectors as _gs
+        smap = _gs.sector_map()
         context["sector_map"] = smap
+        wl = [it.get("symbol") for it in (_WL_TAPE_CACHE.get("items") or []) if isinstance(it, dict)] if _WL_TAPE_CACHE.get("user") == current_user_id() else []
+        wl += [r.get("ticker") for r in context.get("watchlist") or [] if isinstance(r, dict)]
+        _gs.resolve_unknown_async(wl, known=smap)
     except Exception as exc:
         logger.debug("command centre: sector map unavailable: %s", exc)
         context["sector_map"] = {}
@@ -10660,6 +10663,49 @@ if _MKT_AVAILABLE:
 def api_mood():
     _pulse, reading = _mood_inputs()
     resp = jsonify({"ok": reading.get("known", False), **reading, "session": _pulse.get("session") or ""})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+_ORBIT_MAX = 12
+_ORBIT_SYM = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,9}$")
+
+
+@app.route("/api/command/orbit", methods=["GET", "POST"])
+def api_command_orbit():
+    """The tickers the user keeps in orbit around the Command Center globe.
+
+    GET returns the saved list (empty = show the day's top movers). POST
+    {"tickers": [...]} replaces it; symbols are upper-cased, de-duplicated,
+    validated and capped at 12. Saved per account so phone and desktop match.
+    """
+    import json as _json
+    uid = current_user_id()
+    if not uid:
+        return jsonify({"ok": False, "error": "Sign in first."}), 401
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        raw = body.get("tickers")
+        if not isinstance(raw, list):
+            return jsonify({"ok": False, "error": "tickers must be a list"}), 400
+        out = []
+        for t in raw:
+            u = str(t or "").strip().upper()
+            if _ORBIT_SYM.match(u) and u not in out:
+                out.append(u)
+        out = out[:_ORBIT_MAX]
+        try:
+            set_user_setting(uid, "cc_orbit", _json.dumps(out))
+        except Exception as exc:
+            logger.warning("orbit save failed: %s", exc)
+            return jsonify({"ok": False, "error": "Could not save."}), 500
+        return jsonify({"ok": True, "tickers": out})
+    try:
+        saved = _json.loads(get_user_setting(uid, "cc_orbit", "[]") or "[]")
+        saved = [t for t in saved if isinstance(t, str) and _ORBIT_SYM.match(t)][:_ORBIT_MAX]
+    except Exception:
+        saved = []
+    resp = jsonify({"ok": True, "tickers": saved, "max": _ORBIT_MAX})
     resp.headers["Cache-Control"] = "no-store"
     return resp
 

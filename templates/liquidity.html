@@ -2,7 +2,6 @@
 {% block title %}Morning Command Center — Tradestaar{% endblock %}
 
 {% block head_extra %}
-  <script>document.documentElement.classList.add('cc-scene')</script>
   <link rel="preload" as="image" href="{{ url_for('static', filename='img/scene_sky.webp') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/today.css') }}" />
 {% endblock %}
@@ -15,15 +14,6 @@
 
 {% block content %}
 <div class="liq-page cmd27">
-  {# 3D scene: sky → live stars + neon floor → far range → near range, each at its own depth. #}
-  <div class="cmd27-scene" aria-hidden="true">
-    <div class="cmd27-scene__stage" id="cmd27-stage">
-      <i class="cmd27-scene__layer cmd27-scene__sky" data-depth="0.12"></i>
-      <canvas class="cmd27-scene__floor" id="cmd27-floor"></canvas>
-      <i class="cmd27-scene__layer cmd27-scene__far" data-depth="0.4"></i>
-      <i class="cmd27-scene__layer cmd27-scene__near" data-depth="0.85"></i>
-    </div>
-  </div>
   {# ── Hero: title · globe · market pulse ─────────────────────────────── #}
   <header class="elite-hero cmd27-hero cc-hero-xl is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
     <div class="cmd27-hero__left">
@@ -39,6 +29,14 @@
         <span class="cc-stamp" id="liq-last-updated" aria-live="polite">Loaded · {{ pulse.as_of or 'live' }}</span>
       </div>
       <div class="cc-shortcuts"><span class="cc-shortcut"><kbd>R</kbd> refresh</span></div>
+      <div class="cmd27-orbit-bar" id="cmd27-orbit-bar">
+        <span class="cmd27-orbit-bar__lbl"><b aria-hidden="true">★</b> <span id="cmd27-orbit-label">Orbit · top movers</span></span>
+        <span class="cmd27-orbit-bar__hint" id="cmd27-orbit-hint">Tap a pin, then ☆ to keep it here</span>
+        <form id="cmd27-orbit-form" class="cmd27-orbit-bar__form" autocomplete="off">
+          <input type="text" name="t" maxlength="10" placeholder="+ ticker" aria-label="Add a ticker to your orbit" />
+        </form>
+        <button type="button" id="cmd27-orbit-reset" class="cmd27-orbit-bar__reset" hidden>Reset</button>
+      </div>
     </div>
 
     <div class="cmd27-hero__globe">
@@ -51,7 +49,7 @@
         <canvas aria-hidden="true"></canvas>
         <div class="cc3d-hud" data-cc3d-hud aria-live="off"><span>Status <b>Awaiting live quotes</b></span></div>
       </div>
-      <div class="cmd27-orbit" id="cmd27-orbit" aria-label="Biggest moves on your watchlist"></div>
+      <div class="cmd27-orbit" id="cmd27-orbit" aria-label="Tickers in orbit around the globe"></div>
     </div>
 
     <aside class="cmd27-hero__pulse">

@@ -7,7 +7,7 @@
 {%- elif _ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'schwab_account', 'brokers_page', 'browser_push.settings', 'admin_users') -%}{% set cc_theme = 'account' %}
 {%- elif _ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare', 'intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'thesis_view') or _ep.startswith(('live_research.', 'research_memory.', 'research_lab', 'research_workbench')) -%}{% set cc_theme = 'research' %}
 {%- else -%}{% set cc_theme = 'account' %}{%- endif %}
-<html lang="en" class="cc27" data-cc-theme="{{ cc_theme }}">
+<html lang="en" class="cc27 cc-scene{% if _ep not in ('liquidity_page',) %} cc-scene-dim{% endif %}{% if cc_theme == 'terminal' %} cc-scene-deep{% endif %}" data-cc-theme="{{ cc_theme }}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -52,11 +52,20 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/research_menu.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_complete.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nav_2027.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/scene_2028.css') }}" />
   {% block late_css %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
   <a class="workspace-skip" href="#workspace-main">Skip to content</a>
-  <canvas id="cc3d-backdrop" aria-hidden="true"></canvas>
+  {# 3D scene behind every page: sky → live stars + neon floor → far range → near range. #}
+  <div class="ts-scene" aria-hidden="true">
+    <div class="ts-scene__stage" id="ts-scene-stage">
+      <i class="ts-scene__layer ts-scene__sky" data-depth="0.12"></i>
+      <canvas class="ts-scene__floor" id="ts-scene-floor"></canvas>
+      <i class="ts-scene__layer ts-scene__far" data-depth="0.4"></i>
+      <i class="ts-scene__layer ts-scene__near" data-depth="0.85"></i>
+    </div>
+  </div>
   <div id="cc3d-veil" aria-hidden="true"></div>
 
   {% include "_elite_navigation.html" %}
@@ -100,6 +109,7 @@
   <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
 
   <script defer src="{{ url_for('static', filename='js/company_market_cap.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/scene3d.js') }}"></script>
   <script defer src="{{ url_for('static', filename='js/command_center_3d.js') }}"></script>
   {% block scripts %}{% endblock %}
 
