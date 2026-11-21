@@ -57,7 +57,9 @@ class TestRenderersStandDown:
         assert meter < bail
 
     def test_the_regime_box_write_is_guarded(self):
-        assert "if (regime && d.status) {" in SCRIPT
+        # Yield-curve read only (the liquidity label/summary lead the Fed card).
+        assert "if (regime) {" in SCRIPT
+        assert "regime.style.display = yc.signal ? '' : 'none';" in SCRIPT
 
     def test_money_flow_scan_and_alerts_all_bail(self):
         for guard in ("if (!grid) return;\n  if (!mflow.length)",

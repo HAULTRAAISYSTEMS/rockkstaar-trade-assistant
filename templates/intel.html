@@ -95,6 +95,12 @@
      entirely when the feed omits both, instead of printing a pair of dashes. */
   .cal-consensus{display:block;margin-top:3px;font-size:10.5px;letter-spacing:.02em;color:rgba(255,255,255,.42)}
   .impact{padding:3px 6px;border-radius:5px;background:rgba(var(--cc-accent-rgb, 231,184,75),.09);color:var(--elite-gold);font:700 9px var(--font-mono)}.impact.high{color:#ff7c83;background:rgba(255,105,115,.1)}
+  .intel-head-count{margin-left:6px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.06);font:700 12px var(--font-mono);vertical-align:middle}
+  .intel-head-count.is-unread{opacity:.6}
+  .intel-xlink{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;text-decoration:none;color:#c9d2de}
+  .intel-xlink b{color:var(--elite-gold);font-size:13px}
+  .intel-kpis{grid-template-columns:repeat(3,minmax(0,1fr)) !important}
+  @media(max-width:760px){html.has-ptabs .intel-hero{padding:14px 16px !important;gap:10px !important}html.has-ptabs .intel-subtitle,html.has-ptabs .intel-kicker{display:none}html.has-ptabs .intel-title{font-size:28px !important;line-height:1.05}html.has-ptabs .intel-search-panel{padding:0 !important;background:none !important;border:0 !important}html.has-ptabs .intel-quicklinks{grid-template-columns:repeat(3,minmax(0,1fr)) !important;gap:8px}}
   .flow-wrap{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;padding:14px}
   .flow-tile{padding:12px;border:1px solid rgba(255,255,255,.055);border-radius:11px;background:#0c1014}.flow-tile>div{display:flex;justify-content:space-between;gap:10px;color:#b9c0c8;font-size:11px}.flow-track{height:4px;margin-top:8px;border-radius:4px;background:#07090b;overflow:hidden}.flow-track i{display:block;height:100%;border-radius:4px}
   @media(max-width:1050px){.intel-hero{grid-template-columns:1fr}.intel-grid{grid-template-columns:1fr}.intel-rail{display:grid;grid-template-columns:repeat(2,1fr)}.intel-rail .intel-card:last-child{grid-column:1/-1}}
@@ -133,11 +139,8 @@
       <h1 class="intel-title">See the market.<span>Move with clarity.</span></h1>
       <p class="intel-subtitle">A focused command center for market-moving headlines, earnings risk, economic catalysts and verified smart-money activity.</p>
     </div>
+    {# Research box removed: the search bar at the top of every page opens any company. #}
     <div class="intel-search-panel">
-      <span class="intel-search-label">Research any company</span>
-      <form class="intel-search" onsubmit="event.preventDefault();var t=this.ticker.value.trim().toUpperCase();if(t)location.href='/stock/'+encodeURIComponent(t)">
-        <input name="ticker" maxlength="8" placeholder="Ticker symbol" aria-label="Open ticker research" autocomplete="off"><button type="submit">Research</button>
-      </form>
       <div class="intel-quicklinks"><a href="{{ url_for('sentiment') }}">Sentiment</a><a href="{{ url_for('catalyst_calendar') }}">Calendar</a><a href="{{ url_for('smart_money') }}">Smart Money</a></div>
     </div>
   </section>
@@ -150,25 +153,24 @@
     {% set news_loaded = news or not (intel_status and intel_status.message) %}
     <div class="intel-kpi {{ '' if news_loaded else 'is-unread' }}"><small>Live catalysts</small><strong id="intel-live-count">{% if news_loaded %}{{ news|length }}{% else %}—{% endif %}</strong>{% if not news_loaded %}<em class="intel-kpi-note">{{ intel_status.message }}</em>{% endif %}</div>
     <div class="intel-kpi {{ '' if news_loaded else 'is-unread' }}"><small>Bullish / Bearish</small><strong id="intel-tone-counts">{% if news_loaded %}<span class="pos">{{ bull_count }}</span> / <span class="neg">{{ bear_count }}</span>{% else %}—{% endif %}</strong></div>
-    {% set earn_loaded = earnings or not (earnings_status and earnings_status.message) %}
-    <div class="intel-kpi {{ '' if earn_loaded else 'is-unread' }}"><small>Earnings radar</small><strong id="intel-earnings-count">{% if earn_loaded %}{{ earnings|length }}{% else %}—{% endif %}</strong>{% if not earn_loaded %}<em class="intel-kpi-note">{{ earnings_status.message }}</em>{% endif %}</div>
   </section>
 
-  <div class="intel-toolbar">
+  <div data-ptabs-bar="News,Calendar,Smart Money"></div>
+  <div class="intel-toolbar" data-ptab="News">
     <div class="intel-tabs" role="tablist" aria-label="Filter market news">
       <button class="intel-tab active" data-filter="ALL">All News</button><button class="intel-tab" data-filter="WATCHLIST">Watchlist</button><button class="intel-tab" data-filter="BULLISH">Bullish</button><button class="intel-tab" data-filter="BEARISH">Bearish</button><button class="intel-tab" data-filter="HIGH">High Impact</button>
     </div>
     <input id="scanner-query" class="scanner-query" type="search" placeholder="Search ticker, headline or source" aria-label="Search news scanner">
   </div>
 
-  <section class="nd-heat" id="nd-heat" aria-label="Catalyst heat map">
+  <section class="nd-heat" id="nd-heat" aria-label="Catalyst heat map" data-ptab="News">
     <div class="nd-heat-head"><div><span class="nd-kicker">Catalyst heat map · last 24h</span><h2>Where the news is</h2></div><small id="nd-heat-meta">Loading your watchlist…</small></div>
     <div class="nd-grid" id="nd-grid"></div>
     <div class="nd-explain" id="nd-explain" hidden></div>
   </section>
 
   <section class="intel-grid">
-    <main class="intel-card">
+    <main class="intel-card" data-ptab="News">
       <div class="intel-card-head"><h2>Elite News Scanner</h2><span id="scanner-count">{{ news|length }} catalysts</span></div>
       <section class="intel-ticker-news" id="intel-ticker-news" hidden aria-live="polite">
         <div class="intel-ticker-news-head"><b id="intel-ticker-news-title">Latest news</b><span id="intel-ticker-news-meta"></span></div>
@@ -181,7 +183,7 @@
     </main>
 
     <aside class="intel-rail">
-      <div class="intel-card" id="cc-alert-card">
+      <div class="intel-card" id="cc-alert-card" data-ptab="Smart Money">
         <div class="intel-card-head">
           <h2>Alerts{% if unseen_alerts %} <span class="cc-badge" id="cc-alert-badge">{{ unseen_alerts }}</span>{% endif %}</h2>
           {% if command_alerts %}<button type="button" class="elite-link" onclick="markAlertsSeen(this)">Mark read</button>{% else %}<span>Insider &amp; earnings</span>{% endif %}
@@ -199,17 +201,18 @@
           {% endfor %}
         </div>
       </div>
-      <div class="intel-card">
+      <div class="intel-card" data-ptab="News">
         <div class="intel-card-head"><h2>Trending Coverage</h2><span>Impact rank</span></div>
         <div class="intel-list" id="intel-trending">{% include "_intel_trending.html" %}</div>
       </div>
-      <div class="intel-card">
-        <div class="intel-card-head"><h2>Earnings Radar</h2><button type="button" class="elite-link" id="intel-earnings-refresh" onclick="refreshEarningsRadar(this)">Refresh ↻</button></div>
+      <div class="intel-card" data-ptab="Calendar">
+        {% set earn_loaded = earnings or not (earnings_status and earnings_status.message) %}
+        <div class="intel-card-head"><h2>Earnings Radar <span class="intel-head-count {{ '' if earn_loaded else 'is-unread' }}"><strong id="intel-earnings-count">{% if earn_loaded %}{{ earnings|length }}{% else %}—{% endif %}</strong></span></h2><button type="button" class="elite-link" id="intel-earnings-refresh" onclick="refreshEarningsRadar(this)">Refresh ↻</button></div>
         <div class="intel-list" id="intel-earnings-radar" data-empty="{{ 0 if earnings else 1 }}">
           {% set earnings_message = earnings_status.message %}{% include "_intel_earnings_items.html" %}
         </div>
       </div>
-      <div class="intel-card">
+      <div class="intel-card" data-ptab="Smart Money">
         <div class="intel-card-head"><h2>Verified Smart Money</h2><span>Official filings</span></div>
         <div class="verified-box"><div class="intel-kicker" style="font-size:9px">SEC Form 4 + Congress</div><p>Insider activity for your watchlist and congressional transactions backed by official disclosure links.</p><a class="elite-link" href="{{ url_for('smart_money') }}">Open verified feeds</a></div>
         <div class="intel-foot">Filing data can be delayed and is research context—not a trade signal.</div>
@@ -218,12 +221,10 @@
   </section>
 
   <section class="intel-lower">
-    <div class="intel-card"><div class="intel-card-head"><h2>Economic Catalyst Calendar</h2><a class="elite-link" href="{{ url_for('catalyst_calendar') }}">Full calendar</a></div>
+    <div class="intel-card" data-ptab="Calendar"><div class="intel-card-head"><h2>Economic Catalyst Calendar</h2><a class="elite-link" href="{{ url_for('catalyst_calendar') }}">Full calendar</a></div>
       {% for e in events %}<div class="calendar-row"><span class="mono {{ 'warn' if e.impact=='HIGH' else 'faint' }}">{{ e.time or e.date_label or '—' }}</span><span class="{{ 'hi' if e.impact=='HIGH' else 'muted' }}">{{ e.event }}{% if e.estimate is not none or e.previous is not none %}<span class="cal-consensus mono">est {{ e.estimate if e.estimate is not none else '—' }}{{ e.unit }} · prev {{ e.previous if e.previous is not none else '—' }}{{ e.unit }}</span>{% endif %}</span><span class="impact {{ 'high' if e.impact=='HIGH' }}">{{ e.impact|title }}</span></div>{% else %}<div class="intel-foot">No upcoming events cached.</div>{% endfor %}
     </div>
-    <div class="intel-card"><div class="intel-card-head"><h2>Sector Money Flow</h2><span>1-day move</span></div><div class="flow-wrap">
-      {% for s in money_flow %}{% set p=s.chg_1d or 0 %}<div class="flow-tile"><div><span>{{ s.name or s.ticker }}</span><span class="mono {{ 'pos' if p>0 else ('neg' if p<0 else 'faint') }}">{{ '%+.1f'|format(p) }}%</span></div><div class="flow-track"><i style="width:{{ s.flow_score if s.flow_score is not none else 50 }}%;background:{{ 'var(--pos-500)' if p>0 else 'var(--neg-500)' }}"></i></div></div>{% else %}<span class="intel-mini">Sector data unavailable.</span>{% endfor %}
-    </div></div>
+    <a class="intel-card intel-xlink" href="{{ url_for('macro_page') }}#tab-sectors" data-ptab="Calendar"><span>Sector money flow</span><b>Open on Macro →</b></a>
   </section>
 </div>
 
@@ -331,7 +332,7 @@ function refreshIntelNews(button){
    A count of zero from a feed that did not answer stays a dash. */
 function setKpi(id, ok, value, isHtml){
   var el=document.getElementById(id); if(!el) return;
-  var tile=el.closest('.intel-kpi');
+  var tile=el.closest('.intel-kpi, .intel-head-count');
   if(!ok){
     el.textContent='—';
     if(tile) tile.classList.add('is-unread');

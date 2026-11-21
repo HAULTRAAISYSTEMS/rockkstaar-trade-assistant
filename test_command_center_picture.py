@@ -44,9 +44,9 @@ def test_breadth_says_not_ok_without_quotes(client, monkeypatch):
 
 def test_page_has_the_picture_sections(client):
     html = client.get("/").get_data(as_text=True)
-    for s in ("Morning<br>Command Center", "Your AI Market Intelligence Briefing", "Game Plan",
+    for s in ("Morning<br> Command Center", "Your AI Market Intelligence Briefing", "Game Plan",
               "AI Market Briefing", "A+ Setups Today", "Watchlist Signals", "Economy This Week",
-              'id="cmd27-orbit"', 'id="cmd27-money"', 'id="gp-verdict"', "Top 3 for you",
+              'id="cmd27-orbit"', 'id="cmd27-money"', 'id="gp-verdict"', "Next up for you",
               "command_center_picture.css", "command_center_picture.js"):
         assert s in html, s
     # One home per fact: the index strip, breadth ring and launch cards are gone.
@@ -402,3 +402,32 @@ def test_fullscreen_deep_space_backdrop():
     assert "box.insertBefore(scene, box.firstChild)" in pj and "moveScene(on);" in pj
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
     assert "new CustomEvent('cmd27:sun'" in js
+
+
+
+def test_phone_tabs_and_no_duplicate_sections():
+    """iPhone: long pages show one section at a time; duplicates removed."""
+    root = ROOT
+    js = (root / "static/js/phone_tabs.js").read_text(encoding="utf-8")
+    assert "max-width: 760px" in js and "data-ptab" in js and "sessionStorage" in js
+    assert "slot.parentNode.insertBefore(bar, slot)" in js       # sibling → sticky for the whole page
+    base = (root / "templates/base.html").read_text(encoding="utf-8")
+    assert "js/phone_tabs.js" in base and "css/phone_tabs.css" in base
+    cmd = (root / "templates/liquidity.html").read_text(encoding="utf-8")
+    for t in ("Globe", "Plan", "Money", "Signals", "Economy"):
+        assert 'data-ptab="%s"' % t in cmd
+    # Next catalyst: once (on Economy This Week), not also in the Game Plan.
+    assert cmd.count('id="gp-next"') == 1 and cmd.index('id="gp-next"') > cmd.index("Economy This Week")
+    assert cmd.count('id="nx-panel"') == 1 and "Top 3 for you" not in cmd
+    term = (root / "templates/terminal.html").read_text(encoding="utf-8")
+    assert 'data-ptabs-bar="Chart,List,Trade,Positions,Intel"' in term
+    intel = (root / "templates/intel.html").read_text(encoding="utf-8")
+    assert "Research any company" not in intel                    # the top search bar does it
+    assert intel.count('id="intel-earnings-count"') == 1 and intel.count("<h2>Earnings Radar") == 1
+    assert "<h2>Sector Money Flow</h2>" not in intel and "#tab-sectors" in intel   # Macro owns it
+    macro = (root / "templates/_macro_panels.html").read_text(encoding="utf-8")
+    assert 'data-ptabs-bar="Liquidity,Risk,Sectors,Scanner"' in macro
+    acct = (root / "templates/account.html").read_text(encoding="utf-8")
+    assert 'data-ptabs-bar="Overview,Brokers,Settings"' in acct
+    learn = (root / "templates/learn.html").read_text(encoding="utf-8")
+    assert '<details class="learn-topic learn-fold" open>' in learn

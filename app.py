@@ -9678,11 +9678,12 @@ def intel():
         _intel.clear_intel_cache("earnings")
     mkt = _get_mkt_ctx()
 
+    # Sector money flow lives on /macro now (it was a copy here), so the
+    # Discover page no longer fetches it.
     liq, money_flow = {}, []
     try:
         import liquidity_engine as _liq
         liq = _liq.get_liquidity_status() or {}
-        money_flow = _liq.get_money_flow() or []
     except Exception as _e:
         logger.debug("intel: liquidity fetch failed: %s", _e)
 

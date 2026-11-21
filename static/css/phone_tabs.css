@@ -1,0 +1,40 @@
+/* Phone page tabs (see static/js/phone_tabs.js). Only active ≤760px. */
+.ptabs { display: none; }
+@media (max-width: 760px) {
+  .ptab-off { display: none !important; }
+  .ptabs {
+    display: block; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 4px); z-index: 40;
+    margin: 6px 0 12px; padding: 4px;
+    border-radius: 16px; border: 1px solid rgba(57, 198, 255, .22);
+    background: rgba(4, 11, 24, .9);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+  }
+  .ptabs__in { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .ptabs__in::-webkit-scrollbar { display: none; }
+  .ptabs__btn {
+    flex: 1 0 auto; min-height: 38px; padding: 0 10px; border: 0; border-radius: 12px; cursor: pointer;
+    background: none; color: rgba(200, 215, 240, .72); font-size: 12.5px; font-weight: 700; line-height: 1; font-family: inherit; letter-spacing: .01em;
+    white-space: nowrap;
+  }
+  .ptabs__btn.is-on {
+    color: #031019; background: linear-gradient(135deg, #5df2c0, #39c6ff);
+    box-shadow: 0 0 16px rgba(57, 198, 255, .35);
+  }
+  .ptabs__btn:focus-visible { outline: 2px solid #39c6ff; outline-offset: 2px; }
+
+  /* Compact page headers on phones: the content starts right away. */
+  html.has-ptabs .elite-hero { padding-top: 6px !important; padding-bottom: 4px !important; margin-bottom: 4px !important; gap: 8px !important; }
+  html.has-ptabs .elite-hero-sub, html.has-ptabs .elite-hero-eyebrow { display: none !important; }
+  html.has-ptabs .elite-hero-title { font-size: 26px !important; line-height: 1.1 !important; margin: 0 !important; }
+  html.has-ptabs .elite-hero-actions { gap: 8px !important; }
+}
+
+/* iPhone: cards use the full screen width (slim 8px edge) instead of sitting
+   inside the page margin plus each page wrapper's own 20–24px gutter. */
+@media (max-width: 760px) {
+  html.cc27 .main-content { padding-left: 8px !important; padding-right: 8px !important; }
+  html.cc27 .main-content > :is(.liq-page, .hx, .elite-page, .wa, .learn-wrap, .intel-shell, .tw, section, div) {
+    padding-left: 0 !important; padding-right: 0 !important;
+  }
+}

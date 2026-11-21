@@ -687,3 +687,26 @@ html.cc27 .liq-page.cmd27 .cmd27-gp-mini .cc-regime-val { font-size: 15px !impor
 .cmd27-hero__globe.is-full > :not(.ts-scene):not(.cmd27-fs-sky) { z-index: 1; }
 .cmd27-hero__globe.is-full .cmd27-zoom, .cmd27-hero__globe.is-full .cmd27-mode, .cmd27-hero__globe.is-full .cmd27-sector,
 .cmd27-hero__globe.is-full .cmd27-back, .cmd27-hero__globe.is-full .cmd27-legend, .cmd27-hero__globe.is-full .cmd27-fs-title { z-index: 5; }
+
+/* Economy This Week: the next high-impact release leads, with a live countdown
+   (it used to repeat as "Next catalyst" in the Game Plan). */
+.cmd27-evlist li.is-next { background: linear-gradient(90deg, rgba(245,196,81,.10), transparent 70%); border-radius: 10px; }
+.cmd27-ev-count { display: block; margin-top: 3px; font-style: normal; font-size: 11px; font-weight: 800; color: var(--c-gold); letter-spacing: .02em; }
+
+/* "Next up for you" (was the separate Top 3 strip) inside Watchlist Signals. */
+html.cc27 .liq-page.cmd27 .cmd27-nx.cmd27-nx--in { background: none !important; border: 0 !important; padding: 0 !important; border-radius: 0; max-height: none; }
+html.cc27 .liq-page.cmd27 .cmd27-nx--in .nx-panel__head { margin-bottom: 6px; }
+html.cc27 .liq-page.cmd27 .cmd27-nx--in .nx-panel__title { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--c-cy); font-weight: 800; margin: 0; }
+html.cc27 .liq-page.cmd27 .cmd27-nx--in .nx-list { display: flex !important; flex-direction: column; gap: 6px; grid-template-columns: none; }
+
+/* iPhone: the hero flattens into the page so the section tabs can stick,
+   and the header shrinks to two short rows. */
+@media (max-width: 760px) {
+  html.has-ptabs .liq-page.cmd27 > .cmd27-hero, html.has-ptabs .cmd27-hero__left { display: contents !important; }
+  html.has-ptabs .cmd27-title { font-size: 26px !important; line-height: 1.1 !important; margin: 6px 0 4px !important; }
+  html.has-ptabs .cmd27-title br { display: none; }
+  html.has-ptabs .cmd27-sub, html.has-ptabs .cmd27-clock, html.has-ptabs .cmd27 .cc-shortcuts { display: none !important; }
+  html.has-ptabs .cmd27-live { margin: 0 0 6px !important; }
+  html.has-ptabs .cmd27-actions { margin: 0 !important; }
+  html.has-ptabs .cmd27-hero__globe, html.has-ptabs .cmd27-hero__pulse, html.has-ptabs .cmd27-orbit-bar, html.has-ptabs .cmd27-dock { margin-top: 0 !important; }
+}
