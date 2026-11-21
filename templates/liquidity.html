@@ -1,347 +1,220 @@
 {% extends "base.html" %}
-{% block title %}Morning Command Center — Tradestaar Elite{% endblock %}
+{% block title %}Morning Command Center — Tradestaar{% endblock %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/today.css') }}" />
-<link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_layout.css') }}" />
-<link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_picture.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/today.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_layout.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_picture.css') }}" />
 {% endblock %}
 
 {% block content %}
 <div class="liq-page">
-<nav class="te27-flow" aria-label="Elite 2027 research workflow"><span class="te27-flow__label">INTELLIGENCE WORKFLOW</span><a href="{{ url_for('liquidity_page') }}" aria-current="page">◉ Command</a><a href="{{ url_for('research_page') }}">⌕ Discover</a><a href="{{ url_for('fundamentals_page', tab='quarter') }}">◇ Verify</a><a href="{{ url_for('wealth.research_list_page') }}">▥ M.C.F.F.</a><a href="{{ url_for('live_research.feed') }}">◷ Live Research</a></nav>
+  <nav class="te27-flow" aria-label="Elite 2027 research workflow">
+    <a class="te27-step is-active" href="{{ url_for('liquidity_page') }}"><span class="te27-step-num">1</span><span class="te27-step-label">Today</span></a>
+    <a class="te27-step" href="{{ url_for('research_page') }}"><span class="te27-step-num">2</span><span class="te27-step-label">Discover</span></a>
+    <a class="te27-step" href="{{ url_for('fundamentals_page') }}"><span class="te27-step-num">3</span><span class="te27-step-label">Verify</span></a>
+    <a class="te27-step" href="{{ url_for('terminal') }}"><span class="te27-step-num">4</span><span class="te27-step-label">Execute</span></a>
+    <a class="te27-step" href="{{ url_for('wealth.next_dollar_page') }}"><span class="te27-step-num">5</span><span class="te27-step-label">Deploy</span></a>
+  </nav>
 
-
-  {# Preserve cc3d-orb, its ticker percentages, existing 3D background and refresh logic. #}
-  <!-- ══ HEADER ═══════════════════════════════════════════════════════════
-       The title used to sit below a 400px banner, so the page opened on a
-       narrative and named itself second. It is first now, and the whole
-       header is one band rather than a card of its own. -->
   <header class="elite-hero has-orb cc-hero-xl is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
-    <div>
-      <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Intelligence</div>
+    <div class="cc-hero-left">
+      <p class="elite-hero-eyebrow"><span class="live-dot" aria-hidden="true"></span> LIVE MARKET · COMMAND CENTER</p>
       <h1 class="elite-hero-title">Morning <span class="accent">Command Center</span></h1>
-      <p class="workspace-intro">Understand what changed. Check the evidence. Build your conviction.</p>
+      <p class="workspace-intro">Macro regime, live index pulse, AI market briefing, A+ setups, breadth, and catalysts — before you size a trade.</p>
+      <div class="elite-hero-actions">
+        <button type="button" id="cc-refresh-btn" class="cc-refresh" title="Reload quotes, regime, and setups (R)">Refresh</button>
+        <span class="cc-stamp" id="liq-last-updated" aria-live="polite">Loaded · {{ pulse.as_of or 'live' }}</span>
+      </div><div class="cc-shortcuts"><span class="cc-shortcut"><kbd>R</kbd> Refresh</span></div>
     </div>
-    <div class="elite-hero-actions">
-      <button class="btn-liq-refresh" id="cc-refresh-btn" onclick="refreshAll()" title="Refresh all data">↺ Refresh</button>
-      <span class="liq-last-updated cc-updated" id="liq-last-updated">Loading…</span>
-      <nav class="cc-shortcuts" aria-label="Research workflow">
-        <a href="{{ url_for('research_page') }}"><span aria-hidden="true">⌕</span> Find the edge</a>
-        <a href="{{ url_for('fundamentals_page', tab='quarter') }}"><span aria-hidden="true">◎</span> Verify the thesis</a>
-        <a href="{{ url_for('learn_review') }}"><span aria-hidden="true">◈</span> Review learning</a>
-      </nav>
+
+    <div class="cc-hero-center">
+      <div class="cc3d-orb is-waiting" data-cc3d-orb
+           data-chart-url="{{ url_for('stock_detail', ticker='__T__') }}"
+           data-research-url="{{ url_for('research_page', ticker='__T__') }}"
+           data-watch-url="{{ url_for('watchlist_add') }}"
+           role="group" aria-label="3D market globe of the symbols on the live market tape. Green spikes are advancing, red are declining; spike length is the magnitude.">
+        <span class="cc3d-hud-title" aria-hidden="true">Live Market Globe</span>
+        <canvas aria-hidden="true"></canvas>
+        <div class="cc3d-hud" data-cc3d-hud aria-live="off"><span>Status <b>Awaiting live quotes</b></span></div>
+      </div>
     </div>
-    {# Live market globe. Every node is a symbol already on the market tape;
-       it repaints when the tape's own poll lands, and says so when it has
-       nothing to show rather than inventing a reading. #}
-    <div class="cc3d-orb is-waiting" data-cc3d-orb
-         data-chart-url="{{ url_for('stock_detail', ticker='__T__') }}"
-         data-research-url="{{ url_for('research_page', ticker='__T__') }}"
-         data-watch-url="{{ url_for('watchlist_add') }}"
-         role="group" aria-label="3D market globe of the symbols on the live market tape. Green spikes are advancing, red are declining; spike length is the size of the move. Drag to rotate; tap a ticker for its chart and fundamentals.">
-      <span class="cc3d-hud-title" aria-hidden="true">Live Market Globe</span>
-      <canvas aria-hidden="true"></canvas>
-      <div class="cc3d-hud" data-cc3d-hud aria-live="off"><span>Status <b>Awaiting live quotes</b></span></div>
+
+    <div class="cc-hero-right">
+      <div class="cc-card cc-pulse cc-hero-pulse" id="cc-pulse"  data-pulse-url="/api/today/pulse" data-session="{{ 'pre' if pulse.session and 'pre' in (pulse.session|string|lower) else (pulse.session or '')|lower }}"aria-live="polite">
+        <div class="cc-pulse-head">
+          <span class="cc-kicker">Market Pulse</span>
+          <span class="cc-live" id="cc-pulse-live"><i class="cc-dot"></i>{{ 'Live' if pulse.live else 'Snapshot' }}</span>
+        </div>
+        <div class="cc-pulse-regime">
+      <span class="cc-p-lbl">Trend</span><strong class="cc-regime-val" id="cc-regime">{{ pulse.trend_label if pulse.known else '—' }}</strong><span class="cc-regime-meta" id="cc-regime-meta">{{ pulse.regime_meta if pulse.known else 'not read yet' }}</span>
+          <span class="cc-pulse-sub" id="cc-pulse-sub">{{ pulse.summary or '' }}</span>
+        </div>
+        <div class="cc-pulse-grid">
+          <div class="cc-p-cell"><span class="cc-p-lbl" id="cc-spy-k">{{ pulse.spy_label or 'SPY' }}</span><strong class="cc-p-val" id="cc-spy">{{ '%.2f'|format(pulse.spy) if pulse.spy else '—' }}</strong></div>
+          <div class="cc-p-cell"><span class="cc-p-lbl" id="cc-qqq-k">{{ pulse.qqq_label or 'QQQ' }}</span><strong class="cc-p-val" id="cc-qqq">{{ '%.2f'|format(pulse.qqq) if pulse.qqq else '—' }}</strong></div>
+          <div class="cc-p-cell"><span class="cc-p-lbl">VIX {{ pulse.vix_regime or '' }}</span><strong class="cc-p-val" id="cc-vix">{{ '%.2f'|format(pulse.vix) if pulse.vix else '—' }}</strong><span class="cc-p-meta" id="cc-vix-meta">{{ pulse.vix_freshness or '' }}</span></div>
+          <div class="cc-p-cell" id="cc-es-cell"{% if not pulse.es %} hidden{% endif %}><span class="cc-p-lbl">ES</span><strong class="cc-p-val" id="cc-es">{{ '%.2f'|format(pulse.es) if pulse.es else '—' }}</strong></div>
+          <div class="cc-p-cell" id="cc-nq-cell"{% if not pulse.nq %} hidden{% endif %}><span class="cc-p-lbl">NQ</span><strong class="cc-p-val" id="cc-nq">{{ '%.2f'|format(pulse.nq) if pulse.nq else '—' }}</strong></div>
+        </div>
+        <p class="cc-pulse-note" id="cc-pulse-note">{{ pulse.note or '' }}</p>
+      </div>
     </div>
   </header>
-  <div class="te27-module-head"><strong>Elite Intelligence Network</strong><span>CONNECTED RESEARCH</span></div>
-  <nav class="te27-feature-grid" aria-label="Explore Tradestaar intelligence">
-    <a href="{{ url_for('research_page') }}"><em>⌕</em><b>Discover</b><small>Find opportunities and inspect company research</small></a>
-    <a href="{{ url_for('fundamentals_page', tab='quarter') }}"><em>◇</em><b>Verify</b><small>Validate financial evidence and risk</small></a>
-    <a href="{{ url_for('wealth.research_list_page') }}"><em>▥</em><b>M.C.F.F.</b><small>Review the four investment gates</small></a>
-    <a href="{{ url_for('live_research.feed') }}"><em>◷</em><b>Live Research</b><small>Track catalysts and current developments</small></a>
-    <a href="{{ url_for('wealth.next_dollar_page') }}"><em>◈</em><b>Capital</b><small>Evaluate portfolio deployment decisions</small></a>
-  </nav>
-  <p class="te27-evidence-note">The interactive 3D market globe and stock percentages above retain their existing live data connections. Quote freshness and research verification remain distinct.</p>
 
-  {# The FRED loading and weekend notices sat above the page title, so the
-     first thing the page said was that one of its lower panels was still
-     fetching. They belong under the header, with everything else. #}
-  <div class="liq-status-banner" id="liq-status-banner" style="display:none;"></div>
-
-  <!-- ══ MARKET NOW: the verdict (dial), the numbers once, next event, briefing ══ -->
-  <section class="cc-now cc-rise" aria-label="Market now">
-  <!-- ══ PULSE ════════════════════════════════════════════════════════════
-       The numbers that set the tone for everything under them, on one line.
-       Rendered server-side so the top of the page is never a row of spinners. -->
-  {# pulse.known is False when the market snapshot is empty or cold. The cells
-     below then carry a dash, because an unread market is not a neutral one —
-     this strip used to print "Regime · Neutral" off no data at all. #}
-  <div class="cc-pulse cc-rise pulse-{{ (pulse.regime or 'neutral')|lower if pulse.known else 'unknown' }}{{ ' is-unknown' if not pulse.known }}" id="cc-pulse" data-pulse-url="{{ url_for('api_today_pulse') }}" data-session="{{ pulse.session or '' }}">
-    {# Live badge: the strip polls /api/today/pulse, so the numbers move
-       without a reload. The badge says how long ago the last good read
-       landed, and goes dashed when polls stop coming back. #}
-    <span class="cc-pulse-live" id="cc-pulse-live" role="status" aria-live="off" hidden><i aria-hidden="true"></i><span id="cc-pulse-live-text">Live</span></span>
-    {# The regime is an input to the mood dial now: one verdict, not a
-       "Risk Off" cell beside a "Neutral" dial. #}
-    <div class="cc-pulse-cell">
-      <span class="cc-pulse-k">VIX</span>
-      <b class="cc-pulse-v" id="cc-vix">{% if pulse.vix %}{{ '%.1f'|format(pulse.vix) }}{% else %}—{% endif %}</b>
-      <small class="cc-pulse-meta" id="cc-vix-meta">{% if pulse.vix_as_of %}As of {{ pulse.vix_as_of }}{% else %}Latest available{% endif %}</small>
-    </div>
-    <div class="cc-pulse-cell">
-      <span class="cc-pulse-k{{ ' is-ext' if pulse.spy_ext }}" id="cc-spy-k">{{ pulse.spy_label or 'SPY' }}</span>
-      <b class="cc-pulse-v {{ 'is-up' if (pulse.spy or 0) > 0 else ('is-down' if (pulse.spy or 0) < 0 else '') }}" id="cc-spy">{% if pulse.spy is not none %}{{ '%+.2f'|format(pulse.spy) }}%{% else %}—{% endif %}</b>
-      <small class="cc-pulse-meta" id="cc-spy-meta"{% if not pulse.spy_at %} hidden{% endif %}>{% if pulse.spy_at %}print {{ pulse.spy_at }}{% endif %}</small>
-    </div>
-    <div class="cc-pulse-cell">
-      <span class="cc-pulse-k{{ ' is-ext' if pulse.qqq_ext }}" id="cc-qqq-k">{{ pulse.qqq_label or 'QQQ' }}</span>
-      <b class="cc-pulse-v {{ 'is-up' if (pulse.qqq or 0) > 0 else ('is-down' if (pulse.qqq or 0) < 0 else '') }}" id="cc-qqq">{% if pulse.qqq is not none %}{{ '%+.2f'|format(pulse.qqq) }}%{% else %}—{% endif %}</b>
-      <small class="cc-pulse-meta" id="cc-qqq-meta"{% if not pulse.qqq_at %} hidden{% endif %}>{% if pulse.qqq_at %}print {{ pulse.qqq_at }}{% endif %}</small>
-    </div>
-    <div class="cc-pulse-cell" id="cc-es-cell"{% if pulse.es is none %} hidden{% endif %}>
-      <span class="cc-pulse-k">ES Futures</span>
-      <b class="cc-pulse-v {{ 'is-up' if (pulse.es or 0) > 0 else ('is-down' if (pulse.es or 0) < 0 else '') }}" id="cc-es">{% if pulse.es is not none %}{{ '%+.2f'|format(pulse.es) }}%{% else %}—{% endif %}</b>
-    </div>
-    <div class="cc-pulse-cell" id="cc-nq-cell"{% if pulse.nq is none %} hidden{% endif %}>
-      <span class="cc-pulse-k">NQ Futures</span>
-      <b class="cc-pulse-v {{ 'is-up' if (pulse.nq or 0) > 0 else ('is-down' if (pulse.nq or 0) < 0 else '') }}" id="cc-nq">{% if pulse.nq is not none %}{{ '%+.2f'|format(pulse.nq) }}%{% else %}—{% endif %}</b>
-    </div>
-    <div class="cc-pulse-cell">
-      <span class="cc-pulse-k">Liquidity</span>
-      <b class="cc-pulse-v" id="cc-liq" data-href="{{ url_for('macro_page') }}">{% if pulse.liquidity is not none %}<a href="{{ url_for('macro_page') }}">{{ pulse.liquidity }}<small>/100</small></a>{% else %}—{% endif %}</b>
-    </div>
-    <div class="cc-pulse-cell cc-pulse-next">
-      <span class="cc-pulse-k">Next up</span>
-      {% if next_up %}
-      <b class="cc-pulse-v"><a href="{{ url_for('catalyst_calendar') }}">{{ next_up.title }}</a></b>
-      <small>{% if next_up.days_away == 0 %}today{% elif next_up.days_away == 1 %}tomorrow{% else %}in {{ next_up.days_away }} days{% endif %} · {{ next_up.time }}</small>
-      {% else %}<b class="cc-pulse-v">—</b>{% endif %}
-    </div>
+  <div id="liq-status-banner" class="cc-status-banner" hidden></div>
+  <div id="market-story-banner" class="cc-story-banner">
+    {% if story %}
+      <span class="cc-story-tag">{{ story.regime or 'Market Story' }}</span>
+      <p>{{ story.headline or story.summary or '' }}</p>
+    {% endif %}
   </div>
-
-  <!-- ══ MOOD DIAL + VOICE BRIEFING ══════════════════════════════════════ -->
-  <section class="cm-wrap cc-rise cc-d1" id="cm-wrap" aria-label="Market mood">
-    <div class="cm-dial">
-      <svg viewBox="0 0 220 130" class="cm-svg" aria-hidden="true">
-        <defs><linearGradient id="cm-grad" x1="0" x2="1"><stop offset="0" stop-color="#ff6973"/><stop offset=".5" stop-color="#f4c45a"/><stop offset="1" stop-color="#32d49b"/></linearGradient></defs>
-        <path d="M20 115 A90 90 0 0 1 200 115" fill="none" stroke="#141b22" stroke-width="16" stroke-linecap="round"/>
-        <path d="M20 115 A90 90 0 0 1 200 115" fill="none" stroke="url(#cm-grad)" stroke-width="16" stroke-linecap="round" opacity=".9"/>
-        <g id="cm-needle" style="transform-origin:110px 115px;transform:rotate(-90deg)"><line x1="110" y1="115" x2="110" y2="42" stroke="#f2f5f8" stroke-width="4" stroke-linecap="round"/><circle cx="110" cy="115" r="7" fill="#f2f5f8"/></g>
-        <text x="20" y="128" fill="#8d97a4" font-size="9" text-anchor="middle">OFF</text><text x="200" y="128" fill="#8d97a4" font-size="9" text-anchor="middle">ON</text>
-      </svg>
-      <div class="cm-read"><span class="cm-kicker">Market mood</span><b id="cm-label">—</b><em id="cm-score"></em>
-        {# The trend regime is one input to the dial, shown as such, not as a
-           second verdict in its own cell. #}
-        <small class="cm-trend"><span class="cc-pulse-k">Trend</span>
-        {% if pulse.known %}
-        <b class="cc-pulse-v {{ 'is-up' if pulse.trend_label == 'Uptrend' else ('is-down' if pulse.trend_label in ('Downtrend', 'Extreme volatility') else '') }}" id="cc-regime">{{ pulse.trend_label or '—' }}</b>
-        <small class="cc-pulse-meta" id="cc-regime-meta"{% if not pulse.snapshot_stale %} hidden{% endif %}>{% if pulse.snapshot_stale %}snapshot {{ pulse.age_minutes|int }} min old{% endif %}</small>
-        {% else %}
-        <b class="cc-pulse-v is-unknown" id="cc-regime">—</b>
-        <small class="cc-pulse-meta" id="cc-regime-meta">not read yet</small>
-        {% endif %}
-        </small>
-      </div>
-    </div>
-    <div class="cm-side">
-      <p class="cm-note" id="cm-note">Reading VIX, the indexes, futures, sector breadth and news tone…</p>
-      <details class="cm-why"><summary>What's in the score</summary><div class="cm-parts" id="cm-parts"></div></details>
-      <div class="cm-voice">
-        <button type="button" class="cm-play" id="cm-play"><span class="cm-play-ico">▶</span><span id="cm-play-text">Play 60-sec briefing</span></button>
-        <div class="cm-wave" id="cm-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
-        <small id="cm-voice-note">Spoken by your phone — keep the screen on while driving.</small>
-      </div>
-    </div>
-  </section>
-  </section><!-- /cc-now -->
 
   <section class="te27-market-tiles" aria-label="Market performance snapshot">
-    <article class="te27-market-tile"><span class="te27-market-icon">↗</span><div><small>{{ pulse.spy_label or 'SPY / S&P 500' }}</small><strong id="te27-spy">{% if pulse.spy is not none %}{{ '%+.2f'|format(pulse.spy) }}%{% else %}—{% endif %}</strong></div></article>
-    <article class="te27-market-tile"><span class="te27-market-icon">▥</span><div><small>{{ pulse.qqq_label or 'QQQ / Nasdaq' }}</small><strong id="te27-qqq">{% if pulse.qqq is not none %}{{ '%+.2f'|format(pulse.qqq) }}%{% else %}—{% endif %}</strong></div></article>
-    <article class="te27-market-tile"><span class="te27-market-icon">◈</span><div><small>VIX volatility</small><strong id="te27-vix">{% if pulse.vix is not none %}{{ '%.2f'|format(pulse.vix) }}{% else %}—{% endif %}</strong></div></article>
-    <article class="te27-market-tile"><span class="te27-market-icon">◉</span><div><small>Liquidity</small><strong id="te27-liq">{% if pulse.liquidity is not none %}{{ pulse.liquidity }}/100{% else %}—{% endif %}</strong></div></article>
-    <article class="te27-market-tile"><span class="te27-market-icon">⌁</span><div><small>Next catalyst</small><strong class="te27-market-next">{% if next_up %}{{ next_up.title }}{% else %}—{% endif %}</strong></div></article>
+    <article class="te27-market-tile"><span class="te27-market-icon">↗</span><div><small>{{ pulse.spy_label or 'SPY / S&P 500' }}</small><strong id="te27-spy">{{ '%.2f'|format(pulse.spy) if pulse.spy else '—' }}</strong></div></article>
+    <article class="te27-market-tile"><span class="te27-market-icon">▥</span><div><small>{{ pulse.qqq_label or 'QQQ / Nasdaq' }}</small><strong id="te27-qqq">{{ '%.2f'|format(pulse.qqq) if pulse.qqq else '—' }}</strong></div></article>
+    <article class="te27-market-tile"><span class="te27-market-icon">◈</span><div><small>VIX volatility</small><strong id="te27-vix">{{ '%.2f'|format(pulse.vix) if pulse.vix else '—' }}</strong></div></article>
+    <article class="te27-market-tile"><span class="te27-market-icon">☀</span><div><small>Liquidity</small><strong id="te27-liq">{{ pulse.liquidity_label or 'Neutral' }}</strong></div></article>
+    <article class="te27-market-tile"><span class="te27-market-icon">◫</span><div><small>Next catalyst</small><strong class="te27-market-next">{{ next_up.title if next_up else 'None scheduled' }}</strong></div></article>
   </section>
-  <div class="te27-module-head"><strong>AI Market Intelligence</strong><span>LIVE SIGNALS · VERIFIED CONTEXT</span></div>
-  <p class="te27-evidence-note">Index proxies, volatility and event timing reflect the latest available feeds. An unavailable value is shown as a dash; no simulated market prices are displayed.</p>
-  <!-- ══ BODY: reading on the left, the live feed on the right ══════════ -->
-  <div class="cc-body">
-    <div class="cc-col-main">
-    <div id="market-story-banner" class="cc-card cc-story cc-rise cc-d1 sent-{{ story.sentiment if story else 'neutral' }}">
+<div class="cc-now"><div class="cc-col-main">
+  <div class="cc-body cc-intel-row">
+    <section class="cc-card cc-intel-card" id="ai-brief-card">
       <div class="cc-head">
-        <h2>Today's read</h2>
-        <span class="cc-story-links"><a href="{{ url_for('macro_page') }}" class="market-story-action">Macro →</a><a href="{{ url_for('terminal') }}" class="market-story-action">Terminal →</a></span>
-      </div>
-      <div id="ms-body">
-      {% if story %}
-        <div id="ms-glow" class="cc-story-glow"></div>
-        <div id="ms-headline" class="cc-story-headline">{{ story.headline }}</div>
-        <div id="ms-bullets" class="cc-story-bullets">
-          {% for b in (story.bullets | reject('story_repeat') | list)[:3] %}
-          <div class="ms-bullet"><span>›</span>{{ b }}</div>
-          {% endfor %}
-        </div>
-        {% if story.permissions %}
-        <div id="ms-permissions" class="cc-story-perms">
-          {% for p in story.permissions %}
-          <span class="cc-chip ms-perm {{ 'ms-perm-ok' if '✓' in p else ('ms-perm-no' if '✗' in p else ('ms-perm-warn' if p == 'Reduce size' else 'ms-perm-stop')) }}">{{ p }}</span>
-          {% endfor %}
-        </div>
+        <h2>AI Market Briefing</h2>
+        <a href="{{ url_for('live_research.feed') }}">Full feed &rarr;</a>
+      </div><p class="cc-brief-conflict" id="ai-brief-conflict"{% if not (story and story.conflict) %} hidden{% endif %}>{{ story.conflict if story and story.conflict else '' }}</p><div id="ai-brief-body">
+      {% if research_digest %}
+        <p class="cc-brief-lead">{{ research_digest.summary or research_digest.headline or '' }}</p>
+        {% if research_digest.bullets %}
+          <ul class="cc-brief-list">
+            {% for b in (research_digest.bullets | reject('story_repeat') | list)[:4] %}<li>{{ b }}</li>{% endfor %}
+          </ul>
         {% endif %}
+      {% elif story %}
+        <p class="cc-brief-lead">{{ story.summary or story.headline or '' }}</p>{% if story.bullets %}<ul class="cc-brief-list">{% for b in story.bullets %}<li class="ms-bullet">{{ b }}</li>{% endfor %}</ul>{% endif %}
       {% else %}
-        {# Written by the route, which knows whether the snapshot is cold or
-           simply failed. The old text said "still loading" either way. #}
-        <p class="cc-empty">{{ story_note or 'Market data is still loading — the read appears on the next refresh.' }}</p>
-      {% endif %}
-      </div>
-      <details class="cc-ai-brief" id="ai-brief-card">
-        <summary><span class="ai-brief-label">AI morning briefing</span><span class="ai-brief-time" id="ai-brief-time">Fetching…</span></summary>
-        <span id="ai-brief-cached" hidden></span><span id="ai-brief-badge" hidden></span>
-        <div id="ai-brief-body"><div class="ai-brief-skeleton"></div></div>
-        <div class="ai-brief-conflict" id="ai-brief-conflict" style="display:none;"></div>
-        <button class="ai-brief-refresh" id="ai-brief-refresh-btn" type="button" onclick="refreshAIBrief()">↻ Refresh</button>
-      </details>
-    </div>
+        <p class="cc-empty">Briefing updates as live market research arrives.</p>
+      {% endif %}{% if story and story.bullets %}<ul class="cc-brief-list">{% for b in story.bullets %}<li class="ms-bullet">{{ b }}</li>{% endfor %}</ul>>{% endif %} if story and story.permissions %}<p class="cc-brief-permissions">{{ story.permissions|join(', ') if story.permissions is sequence and story.permissions is not string else story.permissions }}</p{% if story and story.leaders %}<p class="cc-brief-leaders">{{ story.leaders|join(', ') if story.leaders is sequence and story.leaders is not string else story.leaders }}</p>{% endif %}</div>
+      <div id="what-changed" class="cc-what-changed"><h3>What changed for you</h3></div>
+    </section>
 
-  <!-- ══ PERSONAL RESEARCH DIGEST ════════════════════════════════════════ -->
-    <section class="cc-card cc-digest cc-rise cc-d2" id="what-changed">
-    <div class="cc-head cc-digest-head">
-      <div>
-        <div class="cc-digest-kicker">Your watchlist + saved theses</div>
-        <h2>What changed for you</h2>
-      </div>
-      <div class="cc-digest-actions">
-        {% if research_digest.alert_count %}<span class="cc-digest-alert">{{ research_digest.alert_count }} thesis {{ 'alert' if research_digest.alert_count == 1 else 'alerts' }}</span>{% endif %}
-        <a href="{{ url_for('live_research.feed') }}">Open research →</a>
-      </div>
-    </div>
-    <p class="cc-digest-intro">
-      Material, source-ranked changes only. Low-signal repeats are suppressed.
-      {% if research_digest.first_run %}Showing the last seven days.{% elif research_digest.reviewed_at %}Showing items since your last review.{% endif %}
-    </p>
-    {% if research_digest['items'] %}
-    <div class="cc-digest-list">
-      {% for item in research_digest['items'] %}
-      <article class="cc-digest-item {{ 'is-alert' if item.alert }}"{% if loop.index > 3 %} data-more hidden{% endif %}>
-        <div class="cc-digest-topline">
-          <a class="cc-sym" href="{{ url_for('research_page', ticker=item.ticker) }}">{{ item.ticker }}</a>
-          <span class="cc-source-rank is-{{ item.quality.key }}">{{ item.quality.label }}</span>
-          <span class="cc-digest-kind">{{ item.catalyst_type }}</span>
-          {% if item.alert %}<strong class="cc-thesis-alert">Thesis alert</strong>{% endif %}
-        </div>
-        {% if item.source_url %}<a class="cc-digest-title" href="{{ item.source_url }}" target="_blank" rel="noopener noreferrer">{{ item.headline }}</a>
-        {% else %}<div class="cc-digest-title">{{ item.headline }}</div>{% endif %}
-        {% if item.why %}<p class="cc-digest-why">{{ item.why }}</p>{% endif %}
-        <div class="cc-digest-proof">
-          <span>{{ item.reasons | join(' · ') }}</span>
-          <span>{{ item.source_name }}</span>
-        </div>
-        {% if item.thesis %}
-        <div class="cc-thesis-match">
-          <b>Saved thesis · {{ item.thesis_impact or 'uncertain' }}</b>
-          <span>{{ item.thesis.why_it_matters }}</span>
-        </div>
-        {% endif %}
-      </article>
-      {% endfor %}
-    </div>
-    {% if research_digest['items']|length > 3 %}
-    <button type="button" class="cc-more" data-more-toggle="what-changed">Show {{ research_digest['items']|length - 3 }} more</button>
-    {% endif %}
-    <form class="cc-digest-review" method="post" action="{{ url_for('research_digest_reviewed') }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <span>{{ research_digest.material_count }} material {{ 'change' if research_digest.material_count == 1 else 'changes' }} found</span>
-      <button type="submit">Mark briefing reviewed</button>
-    </form>
-    {% else %}
-    <div class="cc-digest-clear">
-      <span class="cc-digest-check">✓</span>
-      <div><b>No new material thesis changes.</b><p>Your tracked companies are quiet, or the latest items did not clear the evidence threshold.</p></div>
-    </div>
-    {% endif %}
-  </section>
-
-    <section class="cc-card cc-picks cc-rise cc-d3" aria-label="Setups and watchlist">
+    <section class="cc-card cc-picks cc-intel-card">
       <div class="cc-head">
-        <div class="cc-tabs" role="tablist" aria-label="Setups or watchlist">
+        <h2>A+ Setups Today</h2>
+        <div class="cc-tabs" role="tablist">
           <button type="button" role="tab" aria-selected="true" data-cc-tab="setups">Trade setups</button>
-          <button type="button" role="tab" aria-selected="false" data-cc-tab="watch">Watchlist{% if watchlist_name %} · {{ watchlist_name }}{% endif %}</button>
+          <button type="button" role="tab" aria-selected="false" data-cc-tab="watch">{{ watchlist_name or 'Watchlist' }}</button>
         </div>
-        <span class="cc-picks-links"><a href="{{ url_for('dashboard') }}" data-cc-for="setups">All setups →</a><a href="{{ url_for('watchlists_page') }}" data-cc-for="watch" hidden>Manage →</a></span>
       </div>
       <div data-cc-panel="setups">
-      {% if setups %}
-      <div class="cc-rows">
-        {% for r in setups[:5] %}
-        <a class="cc-row" href="{{ url_for('terminal') }}?ticker={{ r.ticker }}">
-          <span class="cc-row-sym">{{ r.ticker }}</span>
-          <span class="cc-row-mid">
-            <b>{{ r.setup or 'Setup' }}</b>
-            {% if r.grade %}<small>{{ r.grade }} confidence</small>{% endif %}
-          </span>
-          <span class="cc-score" style="--fill: {{ [(r.score or 0) * 10, 100] | min }}%">{{ r.score }}</span>
-        </a>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="cc-empty">The scanner has not confirmed a qualifying setup yet.</p>
-      {% endif %}
+        {% if setups %}
+          <div class="cc-rows">
+            {% for r in setups[:5] %}
+              <a class="cc-row" href="{{ url_for('fundamentals_page') }}?ticker={{ r.ticker }}">
+                <span class="cc-row-sym">{{ r.ticker }}</span>
+                <span class="cc-row-mid"><b>{{ r.setup or r.grade or 'A+' }}</b>{% if r.score %}<small>Score {{ r.score }}</small>{% endif %}</span>
+                <span class="cc-row-price">{% if r.price %}{{ '%.2f'|format(r.price) }}{% else %}—{% endif %}</span>
+              </a>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="cc-empty">No A+ setups matched yet.</p>
+        {% endif %}
+        <div class="cc-card-foot">
+          <a href="{{ url_for('terminal') }}">Terminal &rarr;</a>
+          <a href="{{ url_for('dashboard') }}">Screener &rarr;</a>
+        </div>
       </div>
       <div data-cc-panel="watch" hidden>
-      {% if watchlist %}
-      <div class="cc-rows">
-        {% for r in watchlist[:5] %}
-        <a class="cc-row" href="{{ url_for('fundamentals_page') }}?ticker={{ r.ticker }}">
-          <span class="cc-row-sym">{{ r.ticker }}</span>
-          <span class="cc-row-mid">
-            {% if r.name and r.name != r.ticker %}<b>{{ r.name }}</b>{% if r.setup %}<small>{{ r.setup }}</small>{% endif %}
-            {% else %}<b>{{ r.setup or 'No setup' }}</b>{% endif %}
-          </span>
-          <span class="cc-row-price">{% if r.price %}{{ '%.2f'|format(r.price) }}{% else %}—{% endif %}</span>
-        </a>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="cc-empty">No tickers on the active watchlist yet.</p>
-      {% endif %}
+        {% if watchlist %}
+          <div class="cc-rows">
+            {% for r in watchlist[:5] %}
+              <a class="cc-row" href="{{ url_for('fundamentals_page') }}?ticker={{ r.ticker }}">
+                <span class="cc-row-sym">{{ r.ticker }}</span>
+                <span class="cc-row-mid">{% if r.name and r.name != r.ticker %}<b>{{ r.name }}</b>{% if r.setup %}<small>{{ r.setup }}</small>{% endif %}{% else %}<b>{{ r.setup or 'No setup' }}</b>{% endif %}</span>
+                <span class="cc-row-price">{% if r.price %}{{ '%.2f'|format(r.price) }}{% else %}—{% endif %}</span>
+              </a>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="cc-empty">No tickers on the active watchlist yet.</p>
+        {% endif %}
+        <div class="cc-card-foot">
+          <a href="{{ url_for('watchlists_page') }}">Manage watchlist &rarr;</a>
+        </div>
       </div>
     </section>
-    </div>
-    <aside class="cc-col-side" aria-label="Live feed">
-  <!-- ══ NOTIFICATIONS ═══════════════════════════════════════════════════ -->
-  <section class="cc-card nx-panel cc-rise cc-d1" id="nx-panel" aria-labelledby="nx-panel-title">
-    <header class="nx-panel__head">
-      <h2 class="nx-panel__title" id="nx-panel-title"><span aria-hidden="true">🔔</span> Notifications <span class="nx-panel__count" id="nx-panel-count"></span></h2>
-      <span class="nx-panel__links"><a class="nx-text-btn" href="{{ url_for('intel') }}">All news</a><button type="button" class="nx-text-btn" data-nx-open>Open all →</button></span>
-    </header>
-    <div class="nx-chips" id="nx-panel-chips" role="group" aria-label="Filter notifications"></div>
-    <ol class="nx-list nx-list--panel" id="nx-panel-list" aria-live="polite"><li class="nx-empty"><span>Loading…</span></li></ol>
-  </section>
 
-    <div class="cc-card cc-weekcard cc-rise cc-d2">
+    <section class="cc-card cc-breadth-card cc-intel-card">
       <div class="cc-head">
-        <h2>This week</h2>
-        <a href="{{ url_for('catalyst_calendar') }}">Full calendar →</a>
+        <h2>Market Breadth</h2>
+        <a href="{{ url_for('macro_page') }}">Macro &rarr;</a>
       </div>
-      {% if week %}
-      <div class="cc-week">
-        {% for e in (week | rejectattr('title', 'equalto', next_up.title if next_up else '') | list)[:3] %}
-        <div class="cc-week-row {{ 'is-high' if e.impact == 'HIGH' }} {{ 'is-imminent' if e.days_away is number and 0 <= e.days_away <= 1 }}">
-          <span class="cc-when"><b>{{ e.date_label }}</b><small>{{ e.time }}</small></span>
-          <span class="cc-what">
-            {{ e.title }}
-            {% if e.on_watchlist %}<em class="cc-tag">watchlist</em>{% endif %}
-            {# Every earnings row carries the same boilerplate sentence, which
-               says nothing eight times over. Macro reasons are specific and
-               worth the line. #}
-            {% if e.reason and e.kind != 'EARNINGS' %}<small>{{ e.reason }}</small>
-            {% elif e.company_name and e.company_name != e.ticker %}<small>{{ e.company_name }}</small>{% endif %}
-          </span>
-          <span class="cc-impact {{ 'is-high' if e.impact == 'HIGH' }}">{{ e.impact|title }}</span>
+      <div id="cm-wrap" class="cm-wrap">
+        <div class="cm-dial" role="img" aria-label="Market breadth radial gauge">
+          <div class="cm-needle" id="cm-needle"></div>
+          <div class="cm-center">
+            <strong id="cm-score">{{ pulse.breadth_score or '—' }}</strong>
+            <span id="cm-label">{{ pulse.regime_label or 'Neutral' }}</span>
+          </div>
         </div>
-        {% endfor %}
+      </div><p class="cm-play" id="cm-play">{{ pulse.summary or '' }}</p>
+      <div class="cc-liq-row" id="cc-liq">
+        <span>Liquidity Regime</span>
+        <strong>{{ pulse.liquidity_label or 'Neutral' }}</strong>
       </div>
-      {% else %}
-      <p class="cc-empty">No upcoming events were returned. This does not confirm an empty week. Open the full calendar to check coverage.</p>
-      {% endif %}
-    </div>
+    </section>
 
-    </aside>
+    <section class="cc-card cc-weekcard cc-intel-card">
+      <div class="cc-head">
+        <h2>Economic Events</h2>
+        <a href="{{ url_for('catalyst_calendar') }}">Full calendar &rarr;</a>
+      </div>
+      {% if next_up %}
+        <div class="cc-next-up">
+          <span class="cc-tag">Next Up</span>
+          <strong>{{ next_up.title }}</strong>
+          <small>{{ next_up.date_label or '' }} {{ next_up.time or '' }}</small>
+        </div>
+      {% endif %}
+      {% if week %}
+        <div class="cc-week">
+          {% for e in (week | rejectattr('title', 'equalto', next_up.title if next_up else '') | list)[:3] %}
+            <div class="cc-week-row {{ 'is-high' if e.impact == 'HIGH' }} {{ 'is-imminent' if e.days_away is number and 0 <= e.days_away <= 1 }}">
+              <span class="cc-when"><b>{{ e.date_label }}</b><small>{{ e.time }}</small></span>
+              <span class="cc-what">{{ e.title }}{% if e.on_watchlist %}<em class="cc-tag">watchlist</em>{% endif %}{% if e.reason and e.kind != 'EARNINGS' %}<small>{{ e.reason }}</small>{% elif e.company_name and e.company_name != e.ticker %}<small>{{ e.company_name }}</small>{% endif %}</span>
+              <span class="cc-impact {{ 'is-high' if e.impact == 'HIGH' }}">{{ e.impact|title }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="cc-empty">No upcoming events were returned.</p>
+      {% endif %}</div><div class="cc-col-side"></div></div>
+      <div class="nx-panel cc-nx-mini" id="nx-panel" aria-labelledby="nx-panel-title">
+        <header class="nx-panel__head">
+          <h3 class="nx-panel__title" id="nx-panel-title">Notifications <span class="nx-panel__count" id="nx-panel-count"></span></h3>
+          <span class="nx-panel__links">
+            <a class="nx-text-btn" href="{{ url_for('intel') }}">All news</a>
+            <button type="button" class="nx-text-btn" data-nx-open>Open</button>
+          </span>
+        </header>
+        <div class="nx-chips" id="nx-panel-chips" role="group" aria-label="Filter notifications"></div>
+        <ol class="nx-list nx-list--panel" id="nx-panel-list" aria-live="polite">
+          <li class="nx-empty"><span>Loading...</span></li>
+        </ol>
+      </div>
+    </section>
   </div>
 
-</div><!-- /liq-page -->
+  <nav class="te27-feature-grid" aria-label="Explore Tradestaar intelligence">
+    <a class="te27-feature-card" href="{{ url_for('research_page') }}"><span class="te27-feature-kicker">Discover</span><strong>Live Market Research</strong><small>Top picks, momentum leaders, and thesis catalysts.</small></a>
+    <a class="te27-feature-card" href="{{ url_for('fundamentals_page', tab='quarter') }}"><span class="te27-feature-kicker">Verify</span><strong>Quarterly Deep-Dive</strong><small>Earnings trends, valuation, and analyst consensus.</small></a>
+    <a class="te27-feature-card" href="{{ url_for('wealth.research_list_page') }}"><span class="te27-feature-kicker">M.C.F.F.</span><strong>Wealth Watchlist</strong><small>50-name quality compounder screen &amp; scores.</small></a>
+    <a class="te27-feature-card" href="{{ url_for('live_research.feed') }}"><span class="te27-feature-kicker">Company Overview</span><strong>Institutional Feed</strong><small>AI-parsed SEC filings, macro notes, and upgrades.</small></a>
+    <a class="te27-feature-card" href="{{ url_for('wealth.next_dollar_page') }}"><span class="te27-feature-kicker">Capital Deployment</span><strong>Next-Dollar Allocator</strong><small>Regime-aware position sizing &amp; cash deployment.</small></a>
+  </nav>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -355,15 +228,6 @@ document.addEventListener('click', function (e) {
   box.querySelectorAll('[data-cc-tab]').forEach(function (b) { b.setAttribute('aria-selected', b === t ? 'true' : 'false'); });
   box.querySelectorAll('[data-cc-panel]').forEach(function (p) { p.hidden = p.getAttribute('data-cc-panel') !== name; });
   box.querySelectorAll('[data-cc-for]').forEach(function (a) { a.hidden = a.getAttribute('data-cc-for') !== name; });
-});
-// "Show N more" on long Today lists.
-document.addEventListener('click', function (e) {
-  var b = e.target.closest('[data-more-toggle]'); if (!b) return;
-  var box = document.getElementById(b.getAttribute('data-more-toggle')); if (!box) return;
-  var rows = box.querySelectorAll('[data-more]'), open = b.getAttribute('aria-expanded') === 'true';
-  rows.forEach(function (r) { r.hidden = open; });
-  b.setAttribute('aria-expanded', open ? 'false' : 'true');
-  b.textContent = open ? 'Show ' + rows.length + ' more' : 'Show less';
 });
 </script>
 <script defer src="{{ url_for('static', filename='js/elite_2027_layout.js') }}"></script>
