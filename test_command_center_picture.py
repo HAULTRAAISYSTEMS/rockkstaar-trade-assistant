@@ -402,3 +402,15 @@ def test_fullscreen_deep_space_backdrop():
     assert "box.insertBefore(scene, box.firstChild)" in pj and "moveScene(on);" in pj
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
     assert "new CustomEvent('cmd27:sun'" in js
+
+
+def test_floating_glass_cards_everywhere():
+    css = (ROOT / "static/css/glass_2028.css").read_text(encoding="utf-8")
+    assert "backdrop-filter: blur(var(--glass-blur))" in css
+    assert ":is(#workspace-main, body) :is(.cc-card" in css          # beats older page rules
+    assert "prefers-reduced-transparency" in css and "prefers-reduced-motion" in css
+    js = (ROOT / "static/js/glass.js").read_text(encoding="utf-8")
+    assert "IntersectionObserver" in js and "'--gx'" in js and "canTilt" in js
+    base = (ROOT / "templates/base.html").read_text(encoding="utf-8")
+    assert base.index("css/glass_2028.css") > base.index("{% block late_css %}")
+    assert "js/glass.js" in base
