@@ -352,6 +352,7 @@
     });
   });
   var x = $('#cmd27-sector-close'); if (x) x.addEventListener('click', function () { emit('cmd27:sector-close'); });
+  var back = $('#cmd27-back'); if (back) back.addEventListener('click', function () { emit('cmd27:sector-close'); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && focused) emit('cmd27:sector-close'); });
 })();
 

@@ -357,8 +357,16 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       if (z) zoomTo = clampZ(z);
       velY = 0;
     }
+    var focusT0 = 0;
     function focusRegion(k) {
       var rg = REGIONS[k]; if (!rg) return;
+      if (focusKey !== k) {
+        focusT0 = performance.now() / 1000;
+        // Pins rise biggest movers first.
+        nodes.filter(function (nd) { return nd.region === k; })
+          .sort(function (a, b) { return Math.abs(b.chg || 0) - Math.abs(a.chg || 0); })
+          .forEach(function (nd, i) { nd.rise = i; });
+      }
       focusKey = k;
       var z = Math.max(1.7, Math.min(3.2, 26 / (rg.eff || rg.spread) + 0.9));
       flyToVec(geo(rg.lat, rg.lon), z);
@@ -1190,18 +1198,26 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         for (var q = 0; q < tagBoxes.length; q++) { var o = tagBoxes[q]; if (b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]) return false; }
         return true;
       }
+      // Overview (whole globe): sector tabs only — no pins (see the pin loop).
+      var overview = useRegions && zoom < 1.2 && !focusKey;
       // Sector territories: a faint tint on the land + a sign (drawn last, on top).
       var signQueue = [];
       if (useRegions && nodes.length) {
         var stats = {};
         nodes.forEach(function (nd) {
           if (!nd.region) return;
-          var st = stats[nd.region] = stats[nd.region] || { n: 0, sum: 0, k: 0, w: 0, up: 0, dn: 0 };
+          var st = stats[nd.region] = stats[nd.region] || { n: 0, sum: 0, k: 0, w: 0, up: 0, dn: 0, best: null, worst: null, flag: false };
+          if (flagged[nd.symbol]) st.flag = true;
+          if (nd.chg != null && !/VIX/.test(String(nd.symbol).toUpperCase())) {
+            if (!st.best || nd.chg > st.best.chg) st.best = nd;
+            if (!st.worst || nd.chg < st.worst.chg) st.worst = nd;
+          }
           if (nd.chg != null) { if (nd.chg > 0.05) st.up++; else if (nd.chg < -0.05) st.dn++; }
           st.n++; if (pMode && nd.weight != null) st.w += Number(nd.weight);
           // VIX moves opposite to stocks, so it stays a pin but not part of the average.
           if (nd.chg != null && !/VIX/.test(String(nd.symbol).toUpperCase())) { st.sum += Number(nd.chg); st.k++; }
         });
+        var maxN = 1; Object.keys(stats).forEach(function (q) { maxN = Math.max(maxN, stats[q].n); });
         Object.keys(stats).forEach(function (k) {
           var rg = REGIONS[k], st = stats[k], avg = st.k ? st.sum / st.k : null;
           var colT = avg == null ? CYAN : (avg > 0.05 ? POS : (avg < -0.05 ? NEG : FLAT));
@@ -1243,8 +1259,12 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           // sector's land — name, today's move, and how many stocks are up vs
           // down (breadth bar). Tap it to fly there.
           if (C[2] > 0.34) {
-            var small = W <= 520 || (!isFocus && zoom < 1.2), more = lastHidden[k] || 0;
-            var big = isFocus ? 1.1 : 1;
+            var small = W <= 520 || (!isFocus && !overview), more = overview ? 0 : (lastHidden[k] || 0);
+            // Bigger sector → bigger tab (Tech's 25 stocks vs Energy's 1).
+            var big = isFocus ? 1.12 : (overview ? 0.86 + 0.3 * Math.sqrt(st.n / maxN) : 1);
+            var line3 = '';
+            if (!small && !pMode && st.best && st.worst && st.best !== st.worst)
+              line3 = '▲ ' + st.best.symbol + ' ' + (st.best.chg >= 0 ? '+' : '') + st.best.chg.toFixed(1) + '%   ▼ ' + st.worst.symbol + ' ' + (st.worst.chg >= 0 ? '+' : '') + st.worst.chg.toFixed(1) + '%';
             var lift = project(cen[0] * 1.2, cen[1] * 1.2, cen[2] * 1.2, R, cx, cy);
             var name = rg.name, pctT = avg == null ? '—' : (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%';
             var sub = small ? '' : pMode ? ('YOU ' + (st.w >= 10 ? st.w.toFixed(0) : st.w.toFixed(1)) + '%  ·  ' + st.n + (st.n === 1 ? ' holding' : ' holdings'))
@@ -1258,9 +1278,9 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             if (hasLS) ctx.letterSpacing = '0px';
             var wPct = ctx.measureText(pctT).width;
             ctx.font = '600 ' + f2 + 'px "IBM Plex Mono", ui-monospace, monospace';
-            var wSub = ctx.measureText(sub).width;
-            var padX = small ? 9 : 12, ph2 = small ? (W <= 520 ? 22 : 25) : 44 * big;
-            var chev = !isFocus && W > 520 ? 14 : 0;   // "›" = tap to zoom in
+            var wSub = Math.max(ctx.measureText(sub).width, line3 ? ctx.measureText(line3).width : 0);
+            var padX = small ? 9 : 12, ph2 = small ? (W <= 520 ? 22 : 25) : (line3 ? 57 : 44) * big;
+            var chev = !isFocus && W > 520 ? 14 : 0;   // "›" = tap to open the sector
             var bw2 = Math.max(wName + wPct + padX * 2 + 12, wSub + padX * 2) + 6 + chev;
             // Try above the land first, then nudge sideways / below if taken.
             var cands = [[0, 0], [-bw2 * 0.55, 0], [bw2 * 0.55, 0], [0, -ph2 * 0.8], [0, ph2 + 26], [-bw2 * 0.55, ph2 + 26], [bw2 * 0.55, ph2 + 26]];
@@ -1301,6 +1321,13 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             g2.addColorStop(0, rgba(colT, 0.04)); g2.addColorStop(1, rgba(colT, 0.2));
             ctx.fillStyle = g2; ctx.fill();
             ctx.strokeStyle = rgba(colT, isFocus ? 1 : 0.75); ctx.lineWidth = isFocus ? 1.6 : 1.1; ctx.stroke();
+            if (st.flag) {   // an alert hit / buy zone inside: gold pulse on the tab
+              var gp = reduceMotion ? 0.6 : (Math.sin(time * 3) + 1) / 2;
+              ctx.save(); ctx.strokeStyle = rgba(ALERT_GOLD, 0.5 + 0.5 * gp); ctx.lineWidth = 2;
+              ctx.shadowColor = rgba(ALERT_GOLD, 0.9); ctx.shadowBlur = 8 + 10 * gp;
+              ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx - 3, by - 3, bw2 + 6, ph2 + 6, 11); else ctx.rect(bx - 3, by - 3, bw2 + 6, ph2 + 6);
+              ctx.stroke(); ctx.restore();
+            }
             // Top accent + glint.
             ctx.fillStyle = rgba(colT, 0.95);
             ctx.fillRect(bx + 10, by, bw2 - 20, 2);
@@ -1333,6 +1360,14 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
               pieces.forEach(function (pc) {
                 ctx.fillStyle = pc[1] ? rgba(pc[1], 1) : 'rgba(200,215,240,0.92)';
                 ctx.fillText(pc[0], xx, r2); xx += ctx.measureText(pc[0]).width;
+              });
+            }
+            if (line3) {
+              var r3 = by + 43 * big, segs3 = line3.split('   '), x3 = bx + padX;
+              ctx.font = '700 ' + f2 + 'px "IBM Plex Mono", ui-monospace, monospace';
+              segs3.forEach(function (sg, si3) {
+                ctx.fillStyle = rgba(si3 === 0 ? POS : NEG, 0.95);
+                ctx.fillText(sg, x3, r3); x3 += ctx.measureText(sg + '   ').width;
               });
             }
             // Breadth bar along the bottom edge: green share = stocks up.
@@ -1389,16 +1424,28 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       });
       var drawn = [], maxW = 0;
       if (pMode) nodes.forEach(function (q) { if (q.weight > maxW) maxW = q.weight; });
+      // Overview (whole globe): sector tabs only — no pins. A focused sector's
+      // pins rise out of the land; zooming in by hand shows every pin.
       for (var n = 0; n < nodes.length; n++) {
         var nd = nodes[n];
+        var grow = 1;
+        if (useRegions) {
+          if (nd.symbol !== selected) {
+            if (overview) continue;
+            if (focusKey && nd.region !== focusKey) continue;
+          }
+          if (focusKey && nd.region === focusKey && nd.rise != null)
+            grow = reduceMotion ? 1 : Math.max(0, Math.min(1, (time - focusT0 - 0.35 - nd.rise * 0.045) / 0.45));
+          if (grow <= 0) continue;
+        }
         // Market: spike = size of today's move. Portfolio: spike = $ size of the position.
         var mag = pMode ? (maxW > 0 && nd.weight > 0 ? Math.sqrt(nd.weight / maxW) : 0.1)
           : (nd.chg == null ? 0 : Math.min(Math.abs(nd.chg), 6) / 6);
         var col = nd.chg == null ? FLAT : (nd.chg > 0 ? POS : (nd.chg < 0 ? NEG : FLAT));
         var base = project(nd.x, nd.y, nd.z, R, cx, cy);
-        var k = 1 + 0.03 + mag * (pMode ? 0.16 : 0.1);
+        var k = 1 + (0.03 + mag * (pMode ? 0.16 : 0.1)) * grow;
         var tip = project(nd.x * k, nd.y * k, nd.z * k, R, cx, cy);
-        drawn.push([base, tip, nd, col, mag]);
+        drawn.push([base, tip, nd, col, mag, grow]);
       }
       drawn.sort(function (a, b) { return a[1][2] - b[1][2]; });
       var labelSet = null, sceneOn = useRegions && document.documentElement.classList.contains('cc-scene');
@@ -1416,6 +1463,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         // Pins rolling over the edge fade out instead of fanning long spikes.
         // (the visible edge of the Earth sits at depth ≈ 0.31 in this projection)
         A *= Math.max(0.06, Math.min(1, (it[0][2] - 0.25) / 0.3));
+        if (it[5] != null) A *= it[5];   // rising pins fade in
         var isSel = selected === it[2].symbol, isHov = hovered === it[2].symbol;
         if (selected && !isSel) A *= 0.45;
         if (focusKey && it[2].region !== focusKey) A *= 0.35;

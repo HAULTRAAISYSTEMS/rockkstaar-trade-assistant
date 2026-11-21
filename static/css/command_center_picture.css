@@ -649,3 +649,11 @@ html.cc27 .liq-page.cmd27 .cmd27-gp-mini .cc-regime-val { font-size: 15px !impor
 @media (max-width: 1400px) {
   .cmd27-gp-inputs { flex-wrap: wrap; }
 }
+
+/* "‹ All sectors": back to the whole globe while a sector is open. */
+.cmd27-back { display: none; position: absolute; left: 50%; top: 6px; transform: translateX(-50%); z-index: 6;
+  border: 1px solid rgba(57,198,255,.55); background: rgba(5,12,26,.88); color: var(--c-txt); font-weight: 800; font-size: 12.5px;
+  letter-spacing: .04em; padding: 7px 16px; border-radius: 999px; cursor: pointer; box-shadow: 0 0 18px rgba(57,198,255,.25); }
+.cmd27-back:hover { border-color: var(--c-cy); box-shadow: 0 0 24px rgba(57,198,255,.45); }
+.cmd27-hero__globe.has-sector .cmd27-back { display: inline-flex; }
+.cmd27-hero__globe.is-full .cmd27-back { top: calc(16px + env(safe-area-inset-top, 0px)); }
