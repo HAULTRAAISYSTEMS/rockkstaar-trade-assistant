@@ -346,3 +346,17 @@ console.log(JSON.stringify({ n: keys.length, step: layoutStep, minD: minD, touch
     assert out["n"] == 130
     assert out["minD"] > out["step"] * 0.8           # no two pins closer than ~a grid step
     assert out["touch"] <= 5                         # sectors keep a channel between them
+
+
+def test_sector_signs_are_holographic_and_stay_clear():
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    # Sign = plate + beam from the land + breadth (up vs down) + tap to fly.
+    assert "var signQueue = [];" in js and "signQueue[sq]();" in js     # drawn on top of pins
+    assert "st.up++" in js and "st.dn++" in js                            # breadth counts
+    assert "upW = bwid * st.up / (st.up + st.dn)" in js                   # breadth bar
+    assert "sectorHits.push({ key: k, box: box });" in js
+    # Never under the side panels or the view switch / legend / zoom buttons.
+    assert "tagBoxes = tagBoxes.concat(ctlRects);" in js
+    assert "var xlo = safeHalf ? W / 2 - safeHalf + 4 : 4" in js
+    pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
+    assert "detail: { half: half, obst: obst }" in pj

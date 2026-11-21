@@ -119,7 +119,6 @@
     // so chips always circle outside the Earth whatever the screen.
     var box = orbitEl.getBoundingClientRect(), bw = box.width || 600, bh = box.height || 500;
     var half = safeHalf();
-    document.dispatchEvent(new CustomEvent('cmd27:safe', { detail: { half: half } }));
     var mn = Math.min(bw, bh), R0 = mn * (mn > 420 ? 0.35 : 0.33);
     R0 = half ? Math.min(R0, (half - 70) / 1.053) : Math.min(R0, bw * 0.30);
     R0 = Math.min(R0, (bh * 0.47 - 16) / 1.22);   // tallest spike stays inside the frame
@@ -133,6 +132,8 @@
       var r = o.getBoundingClientRect(); if (!r.width || !r.height) return null;
       return [r.left - box.left - GAP, r.top - box.top - GAP, r.right - box.left + GAP, r.bottom - box.top + GAP];
     }).filter(Boolean);
+    // The globe keeps its signs inside the clear space and off these controls.
+    document.dispatchEvent(new CustomEvent('cmd27:safe', { detail: { half: half, obst: obst } }));
     function hit(b) {
       var all = obst.concat(rects);
       for (var q = 0; q < all.length; q++) { var o = all[q]; if (b[0] < o[2] + GAP && b[2] + GAP > o[0] && b[1] < o[3] + GAP && b[3] + GAP > o[1]) return true; }
