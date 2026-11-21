@@ -714,7 +714,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
        inside another disc of the same sector, so it traces the real shape. */
     var CELL_N = 18;
     function buildCells() {
-      var ang = layoutStep * 0.78 * 0.0174533, ca = Math.cos(ang), sa = Math.sin(ang), cosIn = Math.cos(ang * 0.995);
+      var ang = layoutStep * 1.0 * 0.0174533, ca = Math.cos(ang), sa = Math.sin(ang), cosIn = Math.cos(ang * 0.995);
       nodes.forEach(function (nd) {
         var c = [nd.x, nd.y, nd.z], up = Math.abs(c[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0];
         var e1 = [c[1] * up[2] - c[2] * up[1], c[2] * up[0] - c[0] * up[2], c[0] * up[1] - c[1] * up[0]];
@@ -1208,11 +1208,15 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             ctx.beginPath(); ctx.arc(cx, cy, R * EARTH_SIL, 0, 6.2832); ctx.clip();
             ctx.beginPath();
             shown.forEach(function (ring) { for (var q = 0; q < CELL_N; q++) { if (q) ctx.lineTo(ring[q][0], ring[q][1]); else ctx.moveTo(ring[q][0], ring[q][1]); } ctx.closePath(); });
-            ctx.fillStyle = rgba(colT, (0.08 + 0.14 * heat) * dimT * (isFocus ? 1.5 : 1)); ctx.fill('nonzero');
-            // Outline: only the outer arcs of the union.
-            ctx.lineWidth = isFocus ? 2 : 1.3;
-            ctx.shadowColor = rgba(colT, 0.9); ctx.shadowBlur = isFocus ? 12 : 6;
-            ctx.strokeStyle = rgba(colT, (isFocus ? 0.85 : 0.5) * dimT);
+            // A faint tint marks the sector's land: no per-pin rings. Only the
+            // sector you flew to gets an outline.
+            ctx.fillStyle = rgba(colT, isFocus ? 0.13 : (0.035 + 0.045 * heat) * dimT); ctx.fill('nonzero');
+            if (!isFocus) { ctx.restore(); shown = null; }
+          }
+          if (shown && shown.length) {
+            ctx.lineWidth = 1.6;
+            ctx.shadowColor = rgba(colT, 0.9); ctx.shadowBlur = 10;
+            ctx.strokeStyle = rgba(colT, 0.8);
             ctx.beginPath();
             shown.forEach(function (ring) {
               var nd = ring[CELL_N];
