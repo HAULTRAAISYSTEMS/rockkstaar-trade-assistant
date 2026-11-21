@@ -35,6 +35,7 @@
         <form id="cmd27-orbit-form" class="cmd27-orbit-bar__form" autocomplete="off">
           <input type="text" name="t" maxlength="10" placeholder="+ ticker" aria-label="Add a ticker to your orbit" />
         </form>
+        <button type="button" id="cmd27-orbit-edit" class="cmd27-orbit-bar__edit" aria-pressed="false" hidden>Edit</button>
         <button type="button" id="cmd27-orbit-reset" class="cmd27-orbit-bar__reset" hidden>Reset</button>
       </div>
       <nav class="cmd27-dock" id="cmd27-dock" aria-label="Fly to a sector" hidden></nav>
@@ -46,15 +47,29 @@
            data-research-url="{{ url_for('research_page', ticker='__T__') }}"
            data-watch-url="{{ url_for('watchlist_add') }}"
            data-sectors="{{ (sector_map or {})|tojson|forceescape }}"
+           {%- set _earn = [] %}{% for e in (week or []) if e.kind == 'EARNINGS' and e.ticker and e.date %}{% set _ = _earn.append({'s': e.ticker|upper, 'd': e.date, 't': e.time or ''}) %}{% endfor %}
+           data-earnings="{{ _earn|tojson|forceescape }}"
            role="group" aria-label="3D market globe of the symbols on the live market tape. Green spikes are advancing, red are declining; spike length is the magnitude.">
         <canvas aria-hidden="true"></canvas>
         <div class="cc3d-hud" data-cc3d-hud aria-live="off"><span>Status <b>Awaiting live quotes</b></span></div>
       </div>
       <div class="cmd27-orbit" id="cmd27-orbit" aria-label="Tickers in orbit around the globe"></div>
+      {# Market = the live tape; My Portfolio = your holdings (all Wealth portfolios combined). #}
+      <div class="cmd27-mode" id="cmd27-mode" role="group" aria-label="What the globe shows">
+        <button type="button" data-mode="market" aria-pressed="true">Market</button>
+        <button type="button" data-mode="portfolio" aria-pressed="false">My Portfolio</button>
+        <span class="cmd27-mode__note" id="cmd27-mode-note" role="status" hidden></span>
+      </div>
+      <div class="cmd27-fs-title" aria-hidden="true"><b>Command Center</b><span id="cmd27-fs-clock"></span></div>
+      <div class="cmd27-legend" id="cmd27-legend" aria-hidden="true">
+        <span><i class="lg-wave"></i>alert hit / buy zone</span>
+        <span><i class="lg-earn"></i>reports this week</span>
+      </div>
       <div class="cmd27-zoom" role="group" aria-label="Globe zoom">
         <button type="button" data-zoom="in" aria-label="Zoom in" title="Zoom in (pinch or double-tap)">+</button>
         <button type="button" data-zoom="out" aria-label="Zoom out" title="Zoom out">−</button>
         <button type="button" data-zoom="reset" aria-label="Back to the whole world" title="Whole world">⟲</button>
+        <button type="button" id="cmd27-fs" class="cmd27-fs-btn" aria-pressed="false" aria-label="Full-screen globe" title="Full screen (F) · Esc to exit">⛶</button>
       </div>
       <section class="cmd27-sector" id="cmd27-sector" hidden aria-live="polite">
         <header><div><small>Sector</small><strong id="cmd27-sector-name"></strong></div><b id="cmd27-sector-avg"></b>

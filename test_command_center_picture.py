@@ -213,7 +213,7 @@ def test_ipad_landscape_keeps_three_columns_and_chips_clear_the_globe():
     assert "Push out until the chip's nearest corner clears the atmosphere" in pj
     assert "rects: rects" in pj
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
-    assert "if (useRegions) R = Math.min(R, W * 0.30);" in js
+    assert "safeHalf ? Math.min(R, (safeHalf - 70) / 1.053) : Math.min(R, W * 0.30)" in js
     assert "var tagBoxes = useRegions && zoom < 1.2 ? chipRects.slice() : [];" in js
     assert "if (Pe[2] > 0.3 && ex.live) {" in js     # closed exchanges: beacon only
     nav = (ROOT / "static/css/nav_2027.css").read_text(encoding="utf-8")
@@ -247,3 +247,48 @@ def test_scene_performance_guards():
     assert "var calm = true;" in js and "OX = Math.max(0, (W - vw) / 2);" in js
     css = (ROOT / "static/css/scene_2028.css").read_text(encoding="utf-8")
     assert "backdrop-filter: none !important;" in css
+
+
+
+def test_centerpiece_globe_fullscreen_and_edit_mode():
+    """Bigger globe spanning the hero, a full-screen mode, and the orbit ×
+    only while editing."""
+    css = (ROOT / "static/css/command_center_picture.css").read_text(encoding="utf-8")
+    assert "grid-column: 1 / -1; grid-row: 1; height: 800px" in css
+    assert ".cmd27 .cmd27-hero__globe.is-full { position: fixed !important" in css
+    assert ".cmd27-chip__x { display: none; }" in css
+    assert ".cmd27-orbit.is-editing .cmd27-chip__x { display: block" in css
+    assert "@media (hover: none) { .cmd27-chip__x" not in css
+    html = (ROOT / "templates/liquidity.html").read_text(encoding="utf-8")
+    assert 'id="cmd27-orbit-edit"' in html and 'id="cmd27-fs"' in html
+    assert 'data-mode="portfolio"' in html and 'data-earnings=' in html
+    pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
+    assert "orbitEl.classList.toggle('is-editing', editing && mine)" in pj
+    assert "box.requestFullscreen || box.webkitRequestFullscreen" in pj
+    assert "cmd27:safe" in pj
+
+
+def test_globe_portfolio_view_shockwaves_and_earnings():
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    # Portfolio: pins sized by position weight, tape ignored while on.
+    assert "document.addEventListener('cmd27:portfolio'" in js
+    assert "lastTape = e.detail; if (!pMode) setData(e.detail);" in js
+    assert "Math.sqrt(nd.weight / maxW)" in js
+    # Shockwaves on alert hits / buy-zone entries; earnings ring + countdown.
+    assert "document.addEventListener('cmd27:flags'" in js and "waves.push(" in js
+    assert "earnDays(" in js and "ctx.setLineDash([3, 3])" in js
+    pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
+    assert "cmd27.waves.seen" in pj   # a reload doesn't replay old shockwaves
+    assert "'cmd27:portfolio-data'" in pj
+
+
+def test_page_passes_this_weeks_earnings_to_the_globe(client):
+    import html as _html, json, re
+    page = client.get("/").get_data(as_text=True)
+    m = re.search(r'data-earnings="([^"]*)"', page)
+    assert m, "globe is missing its earnings list"
+    rows = json.loads(_html.unescape(m.group(1)))
+    assert isinstance(rows, list)
+    for r in rows:   # ticker + ISO date, nothing invented
+        assert set(r) == {"s", "d", "t"} and re.match(r"^\d{4}-\d{2}-\d{2}", r["d"])
+    assert 'data-mode="market" aria-pressed="true"' in page

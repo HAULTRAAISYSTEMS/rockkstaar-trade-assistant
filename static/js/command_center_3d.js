@@ -39,6 +39,7 @@
     return v.length === 3 && v.every(isFinite) ? v : [241, 199, 91];
   })();
   var VIOLET = [139, 124, 255];
+  var ALERT_GOLD = [245, 196, 81];   // price-alert shockwaves: always gold
   var POS = hexToRgb(cssVar('--pos-500', '#22C58B')) || [34, 197, 139];
   var NEG = hexToRgb(cssVar('--neg-500', '#FF4D45')) || [255, 77, 69];
   var FLAT = [174, 183, 194];
@@ -373,6 +374,49 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       document.dispatchEvent(new CustomEvent('cmd27:sector', { detail: { key: k, name: rg.name, avg: avg, rows: rows } }));
     }
     document.addEventListener('cmd27:sector-open', function (e) { if (e.detail && e.detail.key) focusRegion(e.detail.key); });
+    // Clear space between the side panels (wide screens), from the page.
+    var safeHalf = null;
+    document.addEventListener('cmd27:safe', function (e) { safeHalf = (e.detail && e.detail.half) || null; });
+    // My Portfolio view: pins become your holdings (sized by $ value).
+    var pMode = false, lastTape = null;
+    document.addEventListener('cmd27:portfolio', function (e) {
+      var it = e.detail && e.detail.items;
+      if (it && it.length) {
+        pMode = true;
+        it.forEach(function (h) { if (h.sector && !SECTORS[h.symbol]) SECTORS[h.symbol] = h.sector; });
+        setData(it);
+      } else if (pMode) {
+        pMode = false;
+        setData(lastTape || readTapeFromDom());
+      }
+    });
+    // Shockwaves (alert hit / buy zone) and earnings this week.
+    var flagged = {}, waves = [], EARN = {};
+    try {
+      JSON.parse(host.getAttribute('data-earnings') || '[]').forEach(function (ev) {
+        var su = String(ev.s || '').toUpperCase(); if (su && (!EARN[su] || ev.d < EARN[su].d)) EARN[su] = ev;
+      });
+    } catch (e) { EARN = {}; }
+    function earnDays(sym) {
+      var ev = EARN[sym]; if (!ev) return null;
+      var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ev.d || '')); if (!m) return null;
+      var et; try { et = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); } catch (e2) { et = new Date().toISOString().slice(0, 10); }
+      var d = Math.round((Date.UTC(+m[1], +m[2] - 1, +m[3]) - Date.UTC(+et.slice(0, 4), +et.slice(5, 7) - 1, +et.slice(8, 10))) / 864e5);
+      return d >= 0 && d <= 7 ? d : null;
+    }
+    document.addEventListener('cmd27:flags', function (e) {
+      var d = e.detail || {}; flagged = {};
+      Object.keys(d.zone || {}).forEach(function (k) { flagged[k] = 'zone'; });
+      Object.keys(d.alert || {}).forEach(function (k) { flagged[k] = 'alert'; });
+      var t0 = performance.now() / 1000;
+      (d.fresh || []).forEach(function (f, i) { waves.push({ symbol: String(f.symbol).toUpperCase(), kind: f.kind, t0: t0 + i * 0.35 }); });
+      var lg = document.getElementById('cmd27-legend');
+      if (lg) lg.classList.toggle('has-wave', Object.keys(flagged).length > 0);
+    });
+    (function () {
+      var lg = document.getElementById('cmd27-legend');
+      if (lg) lg.classList.toggle('has-earn', Object.keys(EARN).some(function (k) { return earnDays(k) != null; }));
+    })();
     document.addEventListener('cmd27:chips', function (e) {
       chipSet = {}; ((e.detail && e.detail.tickers) || []).forEach(function (t) { chipSet[String(t).toUpperCase()] = 1; });
       chipRects = (e.detail && e.detail.rects) || [];
@@ -569,6 +613,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           symbol: t.symbol,
           price: t.price,
           chg: t.change_pct,
+          value: t.value, weight: t.weight, dollars: t.dollars, earn: earnDays(String(t.symbol).toUpperCase()),
           region: pp ? pp.region : null, rank: pp ? pp.rank : 0,
           x: pp ? pp.v[0] : Math.cos(th) * rad, y: pp ? pp.v[1] : y * 0.92, z: pp ? pp.v[2] : Math.sin(th) * rad,
           flash: prev && prev.price !== t.price ? 1 : (prev ? prev.flash : 0.6)
@@ -630,7 +675,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
 
     if (!decor) {
       setData(readTapeFromDom());
-      document.addEventListener('tradestaar:tape', function (e) { setData(e.detail); });
+      document.addEventListener('tradestaar:tape', function (e) { lastTape = e.detail; if (!pMode) setData(e.detail); });
     }
 
     // ── Interaction: drag spins; a tap (barely moves) picks a ticker ──
@@ -764,6 +809,12 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       quote.append(px, ch);
       var src = document.createElement('small'); src.className = 'cc3d-card__src';
       src.textContent = 'From the live tape' + (lastSync ? ' · synced ' + new Date(lastSync).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+      if (pMode && nd.value != null) {
+        var usd = function (v, sign) { var a = Math.abs(v); return (sign ? (v > 0 ? '+' : v < 0 ? '−' : '') : '') + '$' + a.toLocaleString('en-US', { maximumFractionDigits: a >= 1000 ? 0 : 2 }); };
+        src.textContent = usd(nd.value) + (nd.weight != null ? ' · ' + Number(nd.weight).toFixed(1) + '% of your portfolio' : '') +
+          (nd.dollars != null ? ' · ' + usd(nd.dollars, true) + ' today' : '');
+      }
+      if (nd.earn != null) src.textContent += ' · reports ' + (nd.earn === 0 ? 'today' : nd.earn === 1 ? 'tomorrow' : 'in ' + nd.earn + ' days');
       var acts = document.createElement('div'); acts.className = 'cc3d-card__actions';
       function link(label, href, primary) {
         var a = document.createElement('a'); a.href = href; a.textContent = label;
@@ -864,7 +915,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       var R = Math.min(W, H) * (Math.min(W, H) > 420 ? 0.35 : 0.33);
       // With orbit chips around it, the globe also leaves a clear ring for
       // them sideways (narrow columns: iPad landscape, phones).
-      if (useRegions) R = Math.min(R, W * 0.30);
+      if (useRegions) R = safeHalf ? Math.min(R, (safeHalf - 70) / 1.053) : Math.min(R, W * 0.30);
       R *= zoom;
       var cx = W / 2 + shiftX + pointer.x * 6, cy = H * 0.47 + pointer.y * 6;
 
@@ -1034,8 +1085,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         var stats = {};
         nodes.forEach(function (nd) {
           if (!nd.region) return;
-          var st = stats[nd.region] = stats[nd.region] || { n: 0, sum: 0, k: 0 };
-          st.n++;
+          var st = stats[nd.region] = stats[nd.region] || { n: 0, sum: 0, k: 0, w: 0 };
+          st.n++; if (pMode && nd.weight != null) st.w += Number(nd.weight);
           // VIX moves opposite to stocks, so it stays a pin but not part of the average.
           if (nd.chg != null && !/VIX/.test(String(nd.symbol).toUpperCase())) { st.sum += Number(nd.chg); st.k++; }
         });
@@ -1086,6 +1137,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             ctx.textBaseline = 'middle';
             var more = lastHidden[k] || 0;
             var t1 = rg.name, t2 = (avg == null ? st.n + ' pins' : (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%') + (more ? '  ·  +' + more : '');
+            // My Portfolio: the territory tag leads with your allocation there.
+            if (pMode) t1 = rg.name + '  ' + (st.w >= 10 ? st.w.toFixed(0) : st.w.toFixed(1)) + '%';
             var w1 = ctx.measureText(t1).width, w2 = ctx.measureText(t2).width, bw = w1 + w2 + 22;
             var bx = lift[0] - bw / 2, by = lift[1] - 11, box = [bx, by, bx + bw, by + 22];
             if (!boxFree(box)) return;
@@ -1135,13 +1188,17 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       }
       ctx.restore();
 
-      var drawn = [];
+      if (waves.length) waves = waves.filter(function (wv) { return time - wv.t0 < 3.4; });
+      var drawn = [], maxW = 0;
+      if (pMode) nodes.forEach(function (q) { if (q.weight > maxW) maxW = q.weight; });
       for (var n = 0; n < nodes.length; n++) {
         var nd = nodes[n];
-        var mag = nd.chg == null ? 0 : Math.min(Math.abs(nd.chg), 6) / 6;
+        // Market: spike = size of today's move. Portfolio: spike = $ size of the position.
+        var mag = pMode ? (maxW > 0 && nd.weight > 0 ? Math.sqrt(nd.weight / maxW) : 0.1)
+          : (nd.chg == null ? 0 : Math.min(Math.abs(nd.chg), 6) / 6);
         var col = nd.chg == null ? FLAT : (nd.chg > 0 ? POS : (nd.chg < 0 ? NEG : FLAT));
         var base = project(nd.x, nd.y, nd.z, R, cx, cy);
-        var k = 1 + 0.06 + mag * 0.30;
+        var k = 1 + 0.06 + mag * (pMode ? 0.42 : 0.30);
         var tip = project(nd.x * k, nd.y * k, nd.z * k, R, cx, cy);
         drawn.push([base, tip, nd, col, mag]);
       }
@@ -1174,7 +1231,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           ctx.strokeStyle = rgba(it[3], 0.75 * A); ctx.lineWidth = 1.4;
         }
         ctx.beginPath(); ctx.moveTo(it[0][0], it[0][1]); ctx.lineTo(it[1][0], it[1][1]); ctx.stroke();
-        var rad = (2 + it[4] * 2.5) * it[1][3] * (sceneOn ? Math.min(1 + (zoom - 1) * 0.5, 1.8) : 1);
+        var rad = (2 + it[4] * (pMode ? 4.5 : 2.5)) * it[1][3] * (sceneOn ? Math.min(1 + (zoom - 1) * 0.5, 1.8) : 1);
         ctx.fillStyle = rgba(it[3], A);
         ctx.shadowColor = rgba(it[3], 0.9 * A); ctx.shadowBlur = front ? 10 + it[2].flash * 20 : 0;
         ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad * (isSel || isHov ? 1.8 : 1), 0, 6.2832); ctx.fill();
@@ -1182,6 +1239,48 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         if (sceneOn && (starred[it[2].symbol] || chipSet[it[2].symbol]) && front) {
           ctx.strokeStyle = rgba(starred[it[2].symbol] ? GOLD : CYAN, 0.9 * A); ctx.lineWidth = 1.4;
           ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad + 4, 0, 6.2832); ctx.stroke();
+        }
+        if (front && it[1][2] > 0) {
+          var symU = it[2].symbol, sc = Math.min(zoom, 2.2) * it[0][3];
+          // Shockwave: three rings race out from the base the first time a
+          // price alert fires or the stock enters its buy zone…
+          for (var wi = 0; wi < waves.length; wi++) {
+            var wv = waves[wi]; if (wv.symbol !== symU) continue;
+            var wcol = wv.kind === 'alert' ? ALERT_GOLD : POS;
+            for (var rr2 = 0; rr2 < 3; rr2++) {
+              var age = time - wv.t0 - rr2 * 0.45;
+              if (age < 0 || age > 2.2) continue;
+              var wr = (6 + age * 62) * sc, wa = (1 - age / 2.2);
+              ctx.strokeStyle = rgba(wcol, 0.9 * wa * A); ctx.lineWidth = 2.4 * wa + 0.6;
+              ctx.shadowColor = rgba(wcol, 0.9 * wa); ctx.shadowBlur = 14 * wa;
+              ctx.beginPath(); ctx.ellipse(it[0][0], it[0][1], wr, wr * 0.62, 0, 0, 6.2832); ctx.stroke();
+            }
+            ctx.shadowBlur = 0;
+            if (time - wv.t0 < 1.2) {   // a flash up the tower
+              ctx.strokeStyle = rgba(wcol, (1 - (time - wv.t0) / 1.2) * A); ctx.lineWidth = 3;
+              ctx.beginPath(); ctx.moveTo(it[0][0], it[0][1]); ctx.lineTo(it[1][0], it[1][1]); ctx.stroke();
+            }
+          }
+          // …then a soft echo every few seconds while it stays true.
+          var fk = flagged[symU];
+          if (fk && !reduceMotion) {
+            var ph2 = ((time + (symU.charCodeAt(0) % 7) * 0.4) % 4.5) / 4.5;
+            if (ph2 < 0.55) {
+              var er = (5 + ph2 / 0.55 * 34) * sc, ea = 1 - ph2 / 0.55;
+              ctx.strokeStyle = rgba(fk === 'alert' ? ALERT_GOLD : POS, 0.6 * ea * A); ctx.lineWidth = 1.6;
+              ctx.beginPath(); ctx.ellipse(it[0][0], it[0][1], er, er * 0.62, 0, 0, 6.2832); ctx.stroke();
+            }
+          }
+          // Earnings this week: a dashed violet ring that pulses on the cap.
+          if (it[2].earn != null) {
+            var pulse2 = reduceMotion ? 0 : Math.sin(time * 3.2) * 1.6;
+            ctx.save();
+            ctx.setLineDash([3, 3]); ctx.lineDashOffset = reduceMotion ? 0 : -time * 8;
+            ctx.strokeStyle = rgba(VIOLET, 0.95 * A); ctx.lineWidth = 1.6;
+            ctx.shadowColor = rgba(VIOLET, 0.9); ctx.shadowBlur = 10;
+            ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad + 7 + pulse2, 0, 6.2832); ctx.stroke();
+            ctx.restore();
+          }
         }
         if (isSel) {
           var pr = rad * 2.6 + 4 + Math.sin(time * 4) * 2;
@@ -1192,6 +1291,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           // A stock that is an orbit chip keeps its gold ring, not a second name tag.
           if (front && it[1][2] > 0.12 && (isSel || isHov || zoom >= 1.2 || !chipSet[it[2].symbol])) {
             var pri = (isSel || isHov ? 1e4 : 0) + (starred[it[2].symbol] ? 500 : 0) + (focusKey && it[2].region === focusKey ? 300 : 0)
+              + (flagged[it[2].symbol] ? 400 : 0) + (it[2].earn != null ? 250 : 0) + (pMode ? (it[2].weight || 0) * 20 : 0)
               + Math.abs(it[2].chg || 0) * 10 + it[1][2] * 5;
             cands.push({ it: it, pri: pri, sel: isSel || isHov, A: A });
           }
@@ -1219,7 +1319,10 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         for (var c = 0; c < cands.length; c++) {
           var cd = cands[c], nd2 = cd.it[2], tip2 = cd.it[1];
           var showPct = cd.sel || zoom >= 1.6 || starred[nd2.symbol];
-          var txt = nd2.symbol + (showPct && nd2.chg != null ? ' ' + (nd2.chg >= 0 ? '+' : '') + Number(nd2.chg).toFixed(2) + '%' : '');
+          var txt = nd2.symbol + (pMode && nd2.weight != null ? ' ' + Number(nd2.weight).toFixed(nd2.weight < 10 ? 1 : 0) + '%'
+            : (showPct && nd2.chg != null ? ' ' + (nd2.chg >= 0 ? '+' : '') + Number(nd2.chg).toFixed(2) + '%' : ''));
+          var eTxt = nd2.earn != null ? (nd2.earn === 0 ? ' TODAY' : ' ' + nd2.earn + 'd') : '';
+          txt += eTxt;
           var tw3 = textW(fkey + txt, txt), ph = fs + 7, pw = tw3 + 12;
           var spots = [[tip2[0] - pw / 2, tip2[1] - ph - 6], [tip2[0] + 8, tip2[1] - ph / 2], [tip2[0] - pw - 8, tip2[1] - ph / 2], [tip2[0] - pw / 2, tip2[1] + 6]];
           var placed = null;
@@ -1239,7 +1342,9 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           ctx.fillStyle = 'rgba(232,241,255,' + aL.toFixed(2) + ')';
           var symW = textW(fkey + nd2.symbol, nd2.symbol);
           ctx.fillText(nd2.symbol, placed[0] + 6, placed[1] + ph / 2 + 0.5);
-          if (txt.length > nd2.symbol.length) { ctx.fillStyle = rgba(colL, aL); ctx.fillText(txt.slice(nd2.symbol.length), placed[0] + 6 + symW, placed[1] + ph / 2 + 0.5); }
+          var mid = txt.slice(nd2.symbol.length, txt.length - eTxt.length);
+          if (mid) { ctx.fillStyle = pMode ? 'rgba(255,227,161,' + aL.toFixed(2) + ')' : rgba(colL, aL); ctx.fillText(mid, placed[0] + 6 + symW, placed[1] + ph / 2 + 0.5); }
+          if (eTxt) { ctx.fillStyle = rgba(VIOLET, aL); ctx.fillText(eTxt, placed[0] + 6 + symW + textW(fkey + mid, mid), placed[1] + ph / 2 + 0.5); }
         }
         lastHidden = hiddenNow;
       }

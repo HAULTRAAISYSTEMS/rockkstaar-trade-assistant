@@ -547,7 +547,35 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         day_dollars = round(sum(m["dollars"] for m in moves), 2)
         base = (value or 0) - day_dollars
         ranked = sorted(moves, key=lambda m: m["pct"])
+        # Per-holding value + today's move, for the globe's My Portfolio view.
+        by_move = {m["ticker"]: m for m in moves}
+        sized = []
+        for h in holdings:
+            if not h["shares"]:
+                continue
+            mv = h.get("market_value")
+            if mv is None and h.get("price") is not None:
+                mv = float(h["price"]) * float(h["shares"])
+            if not mv or mv <= 0:
+                continue
+            m = by_move.get(h["ticker"]) or {}
+            sized.append({"ticker": h["ticker"], "value": round(float(mv), 2),
+                          "pct": m.get("pct"), "dollars": m.get("dollars"),
+                          "price": h.get("price")})
+        try:
+            import globe_sectors as _gs
+            smap = _gs.sector_map()
+            _gs.resolve_unknown_async([x["ticker"] for x in sized], known=smap)
+        except Exception:
+            smap = {}
+        for x in sized:
+            x["sector"] = smap.get(x["ticker"]) or None
+        invested = sum(x["value"] for x in sized)
+        for x in sized:
+            x["weight"] = round(x["value"] / invested * 100, 2) if invested > 0 else None
+        sized.sort(key=lambda x: -x["value"])
         return jsonify({"ok": True, "empty": False, "source": source, "value": value, "cash": cash,
+                        "holdings": sized[:40],
                         "day_dollars": day_dollars,
                         "day_pct": round(day_dollars / base * 100, 2) if base > 0 else None,
                         "best": ranked[-1] if ranked else None, "worst": ranked[0] if ranked else None,

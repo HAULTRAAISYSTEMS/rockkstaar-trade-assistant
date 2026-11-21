@@ -54,6 +54,39 @@
   // ── Orbit: your starred tickers (saved to your account), else top movers ──
   var orbit = [], orbitLoaded = false, lastItems = [];
   var orbitEl = $('#cmd27-orbit'), bar = $('#cmd27-orbit-bar');
+  var editing = false, mode = 'market', held = null, flags = { alert: {}, zone: {} }, earn = {};
+  var orbHost = $('[data-cc3d-orb]'), globeBox = $('.cmd27-hero__globe');
+  try {
+    JSON.parse((orbHost && orbHost.getAttribute('data-earnings')) || '[]').forEach(function (e) {
+      var s = String(e.s || '').toUpperCase(); if (s && (!earn[s] || e.d < earn[s].d)) earn[s] = e;
+    });
+  } catch (e) { earn = {}; }
+  // Calendar days from today (ET) to an ISO date: 0 = today.
+  function daysTo(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); if (!m) return null;
+    var now = new Date(), et;
+    try { et = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); } catch (e) { et = now.toISOString().slice(0, 10); }
+    var a = Date.UTC(+et.slice(0, 4), +et.slice(5, 7) - 1, +et.slice(8, 10)), b = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    return Math.round((b - a) / 864e5);
+  }
+  function earnLabel(sym) {
+    var e = earn[sym]; if (!e) return '';
+    var d = daysTo(e.d); if (d == null || d < 0 || d > 7) return '';
+    return d === 0 ? 'TODAY' : d + 'd';
+  }
+  // Wide screens: the clear space between the title column and the Game Plan.
+  // The globe sizes itself to it (cmd27:safe) and the chips stay inside it.
+  function safeHalf() {
+    if (globeBox) globeBox.style.removeProperty('--safe-r');
+    if (!globeBox || globeBox.classList.contains('is-full') || window.innerWidth <= 1080) return null;
+    var g = globeBox.getBoundingClientRect(), L = $('.cmd27-hero__left'), P = $('.cmd27-hero__pulse');
+    if (!L || !P) return null;
+    var cx = g.left + g.width / 2, l = L.getBoundingClientRect().right, r = P.getBoundingClientRect().left;
+    if (!(r > l)) return null;
+    // Controls on the right edge of the globe stop short of the Game Plan.
+    globeBox.style.setProperty('--safe-r', Math.max(6, g.right - r + 10) + 'px');
+    return Math.max(160, Math.min(cx - l, r - cx) - 6);
+  }
   function bySym() { var m = {}; lastItems.forEach(function (q) { if (q && q.symbol) m[String(q.symbol).toUpperCase()] = q; }); return m; }
   function announce() { document.dispatchEvent(new CustomEvent('cmd27:orbit', { detail: { tickers: orbit.slice() } })); }
   function saveOrbit() {
@@ -74,8 +107,9 @@
 
   function renderOrbit() {
     if (!orbitEl) return;
-    var m = bySym(), narrow = window.innerWidth < 760, list, mine = orbit.length > 0;
-    if (mine) list = orbit.map(function (s) { return m[s] || { symbol: s }; });
+    var m = bySym(), narrow = window.innerWidth < 760, list, mine = orbit.length > 0 && mode !== 'portfolio';
+    if (mode === 'portfolio' && held && held.length) list = held.map(function (h) { return { symbol: h.ticker, change_pct: h.pct, weight: h.weight }; });
+    else if (mine) list = orbit.map(function (s) { return m[s] || { symbol: s }; });
     else list = lastItems.filter(function (q) { return q && q.symbol && !INDEX[String(q.symbol).toUpperCase()] && num(q.change_pct) && !/[=\/^]/.test(q.symbol) && !/^(ES|NQ|YM|RTY|CL|GC|SI|NG|ZB|ZN|DXY|VIX)$/i.test(q.symbol); })
       .sort(function (a, b) { return Math.abs(b.change_pct) - Math.abs(a.change_pct); });
     list = list.slice(0, narrow ? (mine ? 8 : 4) : (mine ? 12 : 10));
@@ -85,9 +119,13 @@
     // R = 0.35·min side, silhouette ≈ 1.053·R, centre at 47% height), so
     // chips always circle outside the Earth whatever the screen.
     var box = orbitEl.getBoundingClientRect(), bw = box.width || 600, bh = box.height || 500;
-    var mn = Math.min(bw, bh), RS = Math.min(mn * (mn > 420 ? 0.35 : 0.33), bw * 0.30) * 1.053, cyc = bh * 0.47;
-    var ry = Math.min(bh * 0.5 - 24, RS + 40), rx = Math.min(bw * 0.5 - 34, Math.max(RS + 60, ry * 1.3));
-    var rects = [], halfW = narrow ? 34 : 42, halfH = narrow ? 20 : 25, clear = RS + 14;
+    var half = safeHalf(), halfW = narrow ? 34 : 42, halfH = narrow ? 20 : 25;
+    document.dispatchEvent(new CustomEvent('cmd27:safe', { detail: { half: half } }));
+    var mn = Math.min(bw, bh), R0 = mn * (mn > 420 ? 0.35 : 0.33);
+    R0 = half ? Math.min(R0, (half - 70) / 1.053) : Math.min(R0, bw * 0.30);
+    var RS = R0 * 1.053, cyc = bh * 0.47, lim = half ? half - halfW : bw * 0.5 - 34;
+    var ry = Math.min(bh * 0.5 - 24, RS + 40), rx = Math.min(lim, Math.max(RS + 60, ry * 1.3));
+    var rects = [], clear = RS + 14;
     list.forEach(function (q, i) {
       var sym = String(q.symbol).toUpperCase(), chg = q.change_pct;
       var ang = (-Math.PI / 2) + (i / Math.max(n, 1)) * Math.PI * 2 + 0.3;
@@ -100,18 +138,27 @@
       }
       var spill = narrow ? -4 : 26;   // phones: chips stay fully on screen
       dx = Math.max(-bw / 2 + halfW - spill, Math.min(bw / 2 - halfW + spill, dx));
+      if (half) dx = Math.max(-lim, Math.min(lim, dx));
       dy = Math.max(-cyc + halfH, Math.min(bh - cyc - halfH, dy));
       rects.push([bw / 2 + dx - halfW, cyc + dy - halfH, bw / 2 + dx + halfW, cyc + dy + halfH]);
       var x = (bw / 2 + dx) / bw * 100, y = (cyc + dy) / bh * 100;
       var el = document.createElement('div');
-      el.className = 'cmd27-chip ' + (num(chg) ? (chg < 0 ? 'is-down' : 'is-up') : 'is-flat') + (mine ? ' is-mine' : '');
+      var fl = flags.alert[sym] ? 'alert' : (flags.zone[sym] ? 'zone' : ''), ek = earnLabel(sym);
+      el.className = 'cmd27-chip ' + (num(chg) ? (chg < 0 ? 'is-down' : 'is-up') : 'is-flat') + (mine ? ' is-mine' : '') +
+        (fl ? ' is-' + fl : '') + (num(q.weight) ? ' is-hold' : '');
       el.setAttribute('role', 'button'); el.tabIndex = 0;
       el.style.left = x + '%'; el.style.top = y + '%';
       el.innerHTML = '<span></span><small></small>';
       el.firstChild.textContent = sym; el.lastChild.textContent = pct(chg);
-      el.title = (m[sym] ? 'Spin the globe to ' : 'Open the chart for ') + sym;
+      if (num(q.weight)) { var w = document.createElement('em'); w.textContent = q.weight.toFixed(q.weight < 10 ? 1 : 0) + (narrow ? '% held' : '% of portfolio'); el.appendChild(w); }
+      var tagTxt = fl === 'alert' ? 'HIT' : (fl === 'zone' ? flags.zone[sym] : ek);
+      if (tagTxt) {
+        var tg = document.createElement('i'); tg.className = 'cmd27-chip__tag' + (fl ? ' is-' + fl : ''); tg.textContent = tagTxt; el.appendChild(tg);
+      }
+      el.title = (m[sym] || mode === 'portfolio' ? 'Spin the globe to ' : 'Open the chart for ') + sym +
+        (fl === 'alert' ? ' · price alert hit' : fl === 'zone' ? ' · in its buy zone' : '') + (ek ? ' · reports ' + (ek === 'TODAY' ? 'today' : 'in ' + ek) : '');
       function go() {
-        if (m[sym]) document.dispatchEvent(new CustomEvent('cmd27:focus', { detail: { symbol: sym } }));
+        if (m[sym] || mode === 'portfolio') document.dispatchEvent(new CustomEvent('cmd27:focus', { detail: { symbol: sym } }));
         else if (chartUrl) location.href = chartUrl.replace('__T__', encodeURIComponent(sym));
       }
       el.addEventListener('click', function (e) { if (!e.target.closest('.cmd27-chip__x')) go(); });
@@ -125,13 +172,20 @@
       orbitEl.appendChild(el);
     });
     document.dispatchEvent(new CustomEvent('cmd27:chips', { detail: { tickers: list.map(function (q) { return String(q.symbol).toUpperCase(); }), rects: rects } }));
+    orbitEl.classList.toggle('is-editing', editing && mine);
     if (bar) {
-      var lbl = $('#cmd27-orbit-label', bar), reset = $('#cmd27-orbit-reset', bar);
-      lbl.textContent = mine ? 'Your orbit · ' + orbit.length + '/12' : 'Orbit · top movers';
-      reset.hidden = !mine;
-      $('#cmd27-orbit-hint', bar).hidden = mine;
+      var lbl = $('#cmd27-orbit-label', bar), reset = $('#cmd27-orbit-reset', bar), edit = $('#cmd27-orbit-edit', bar);
+      lbl.textContent = mode === 'portfolio' ? 'My Portfolio · top ' + n + ' by value' : (mine ? 'Your orbit · ' + orbit.length + '/12' : 'Orbit · top movers');
+      if (!mine && editing) editing = false;
+      reset.hidden = !(mine && editing);
+      if (edit) { edit.hidden = !mine; edit.textContent = editing ? 'Done' : 'Edit'; edit.setAttribute('aria-pressed', editing ? 'true' : 'false'); }
+      $('#cmd27-orbit-hint', bar).hidden = mine || mode === 'portfolio';
     }
   }
+  document.addEventListener('cmd27:flags', function (e) { if (e.detail) { flags = e.detail; renderOrbit(); } });
+  document.addEventListener('cmd27:portfolio-data', function (e) { held = (e.detail || []).slice(0, 10); if (mode === 'portfolio') renderOrbit(); });
+  document.addEventListener('cmd27:mode', function (e) { mode = (e.detail && e.detail.mode) || 'market'; editing = false; renderOrbit(); });
+  document.addEventListener('cmd27:relayout', function () { renderOrbit(); });
   if (bar) {
     var form = $('#cmd27-orbit-form', bar);
     form.addEventListener('submit', function (e) {
@@ -140,7 +194,10 @@
       if (/^[A-Z0-9][A-Z0-9.\-]{0,9}$/.test(v) && orbit.indexOf(v) < 0) { toggle(v); }
       inp.value = '';
     });
-    $('#cmd27-orbit-reset', bar).addEventListener('click', function () { orbit = []; saveOrbit(); });
+    $('#cmd27-orbit-reset', bar).addEventListener('click', function () { orbit = []; editing = false; saveOrbit(); });
+    var editBtn = $('#cmd27-orbit-edit', bar);
+    if (editBtn) editBtn.addEventListener('click', function () { editing = !editing; renderOrbit(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && editing) { editing = false; renderOrbit(); } });
   }
   var rto = null;
   window.addEventListener('resize', function () { clearTimeout(rto); rto = setTimeout(renderOrbit, 150); }, { passive: true });
@@ -363,9 +420,14 @@
     get('/api/wealth/today').then(function (d) {
       strip.classList.remove('is-loading');
       if (!d || !d.ok) { setTile('value', '—', 'Wealth data unavailable right now'); return; }
-      if (d.empty) { strip.classList.add('is-empty'); strip.querySelector('.cmd27-money__empty').hidden = false; return; }
+      if (d.empty) {
+        strip.classList.add('is-empty'); strip.querySelector('.cmd27-money__empty').hidden = false;
+        document.dispatchEvent(new CustomEvent('cmd27:portfolio-data', { detail: [] }));
+        return;
+      }
       holdings = d.tickers || [];
       document.dispatchEvent(new CustomEvent('cmd27:holdings', { detail: holdings }));
+      document.dispatchEvent(new CustomEvent('cmd27:portfolio-data', { detail: d.holdings || [] }));
       // Since you last looked (this browser).
       var since = '';
       try {
@@ -404,12 +466,38 @@
     return all.filter(function (t, i) { return all.indexOf(t) === i; }).slice(0, 40);
   }
   var sigTimer = null;
+  // Alert hits + buy-zone entries light up the globe: chips glow while the
+  // condition holds, and a pin sends out a shockwave the first time this
+  // browser sees it (remembered so a reload doesn't replay old news).
+  var flagState = { alert: {}, zone: {} }, flagKeys = { alert: {}, zone: {} }, SEEN = 'cmd27.waves.seen';
+  function sendFlags() {
+    var seen = {}, fresh = [];
+    try { seen = JSON.parse(localStorage.getItem(SEEN) || '{}') || {}; } catch (e) { seen = {}; }
+    ['alert', 'zone'].forEach(function (k) {
+      Object.keys(flagKeys[k]).forEach(function (sym) {
+        var key = k + ':' + sym + ':' + flagKeys[k][sym];
+        if (!seen[key]) { seen[key] = Date.now(); fresh.push({ symbol: sym, kind: k }); }
+      });
+    });
+    var cut = Date.now() - 14 * 864e5;
+    Object.keys(seen).forEach(function (k) { if (seen[k] < cut) delete seen[k]; });
+    try { localStorage.setItem(SEEN, JSON.stringify(seen)); } catch (e) {}
+    document.dispatchEvent(new CustomEvent('cmd27:flags', { detail: { alert: flagState.alert, zone: flagState.zone, fresh: fresh } }));
+  }
   function loadSignals() {
     if (!sig) return;
     var ts = sigTickers(), thesis = sig.getAttribute('data-thesis-url') || '/thesis';
     if (ts.length) get('/api/thesis/zones?tickers=' + encodeURIComponent(ts.join(','))).then(function (d) {
       var ul = $('#sig-zones'); if (!ul) return;
       var zs = d && d.zones ? Object.keys(d.zones).map(function (k) { return d.zones[k]; }).filter(function (z) { return z && z.available; }) : [];
+      flagState.zone = {}; flagKeys.zone = {};
+      var today = new Date().toISOString().slice(0, 10);
+      zs.forEach(function (z) {
+        if (z.zone === 'load' || z.zone === 'accumulate') {
+          var t = String(z.ticker).toUpperCase(); flagState.zone[t] = ZSHORT[z.zone]; flagKeys.zone[t] = z.zone + ':' + today;
+        }
+      });
+      sendFlags();
       var buy = zs.filter(function (z) { return z.zone === 'load' || z.zone === 'accumulate'; })
         .sort(function (a, b) { return (a.zone === 'load' ? 0 : 1) - (b.zone === 'load' ? 0 : 1) || (a.price / a.accum_top) - (b.price / b.accum_top); });
       var near = zs.filter(function (z) { return z.zone === 'fair'; }).sort(function (a, b) { return a.price / a.accum_top - b.price / b.accum_top; });
@@ -430,6 +518,9 @@
       var cut = Date.now() - 3 * 864e5;
       var fired = al.filter(function (a) { return a.triggered_at && Date.parse(String(a.triggered_at).replace(' ', 'T')) > cut; });
       var armed = al.filter(function (a) { return a.enabled && !a.triggered_at; });
+      flagState.alert = {}; flagKeys.alert = {};
+      fired.forEach(function (a) { var t = String(a.ticker).toUpperCase(); flagState.alert[t] = a.direction || 'hit'; flagKeys.alert[t] = String(a.id || '') + ':' + a.triggered_at; });
+      sendFlags();
       var rows = fired.slice(0, 3).map(function (a) {
         return '<li class="is-fired"><a href="/stock/' + encodeURIComponent(a.ticker) + '"><b>' + esc(a.ticker) + '</b><i class="zc z-fired">HIT</i><span>' +
           (a.direction === 'above' ? 'rose to ' : 'fell to ') + Number(a.triggered_price || a.price).toFixed(2) + '</span></a></li>';
@@ -444,4 +535,79 @@
   document.addEventListener('cmd27:holdings', soon);
   document.addEventListener('cmd27:orbit', soon);
   soon(); setInterval(function () { if (!document.hidden) loadSignals(); }, 5 * 60 * 1000);
+})();
+
+
+/* ── Globe: Market / My Portfolio switch + full-screen mode ── */
+(function () {
+  'use strict';
+  var box = document.querySelector('.cmd27-hero__globe');
+  if (!box) return;
+  var seg = document.getElementById('cmd27-mode'), note = document.getElementById('cmd27-mode-note');
+  var fsBtn = document.getElementById('cmd27-fs'), held = null, mode = 'market';
+  var KEY = 'cmd27.globe.mode';
+  function emit(n, d) { document.dispatchEvent(new CustomEvent(n, { detail: d })); }
+  function showNote(html) { if (!note) return; note.innerHTML = html; note.hidden = !html; }
+  function items() {
+    return (held || []).map(function (h) {
+      return { symbol: h.ticker, price: h.price, change_pct: h.pct, value: h.value, weight: h.weight, dollars: h.dollars, sector: h.sector };
+    });
+  }
+  function setMode(m, quiet) {
+    if (m === 'portfolio' && held && !held.length) {
+      showNote('No holdings yet — <a href="/wealth">add a portfolio in Wealth</a>');
+      setTimeout(function () { showNote(''); }, 5000);
+      m = 'market';
+    }
+    mode = m;
+    if (seg) Array.prototype.forEach.call(seg.querySelectorAll('[data-mode]'), function (b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-mode') === m ? 'true' : 'false');
+    });
+    box.classList.toggle('is-portfolio', m === 'portfolio');
+    if (m === 'portfolio' && !held) showNote('Loading your holdings…'); else if (!quiet || m === 'market') showNote('');
+    emit('cmd27:portfolio', { items: m === 'portfolio' && held ? items() : null });
+    emit('cmd27:mode', { mode: m });
+    try { localStorage.setItem(KEY, m); } catch (e) {}
+  }
+  document.addEventListener('cmd27:portfolio-data', function (e) {
+    held = e.detail || [];
+    if (mode === 'portfolio') { if (!held.length) setMode('market'); else { showNote(''); emit('cmd27:portfolio', { items: items() }); } }
+  });
+  if (seg) seg.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-mode]'); if (b) setMode(b.getAttribute('data-mode'));
+  });
+  try { if (localStorage.getItem(KEY) === 'portfolio') setMode('portfolio', true); } catch (e) {}
+
+  // Full screen: the globe fills the screen (the real Fullscreen API where the
+  // browser has it, a fixed overlay everywhere else). Esc, F or ⛶ exits.
+  var fsClock = document.getElementById('cmd27-fs-clock');
+  function tickFs() {
+    if (!fsClock || !box.classList.contains('is-full')) return;
+    try { fsClock.textContent = new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }) + ' ET · live globe'; } catch (e) {}
+  }
+  setInterval(tickFs, 15000);
+  function relayout() { setTimeout(function () { emit('cmd27:relayout'); window.dispatchEvent(new Event('resize')); }, 60); }
+  function setFull(on) {
+    if (on === box.classList.contains('is-full')) return;
+    box.classList.toggle('is-full', on);
+    document.documentElement.classList.toggle('cmd27-fs', on);
+    if (fsBtn) { fsBtn.setAttribute('aria-pressed', on ? 'true' : 'false'); fsBtn.textContent = on ? '⤡' : '⛶';
+      fsBtn.setAttribute('aria-label', on ? 'Exit full screen' : 'Full-screen globe'); }
+    var req = box.requestFullscreen || box.webkitRequestFullscreen, exit = document.exitFullscreen || document.webkitExitFullscreen;
+    var cur = document.fullscreenElement || document.webkitFullscreenElement;
+    try {
+      if (on && req && !cur) { var p = req.call(box); if (p && p.catch) p.catch(function () {}); }
+      if (!on && cur && exit) { var q = exit.call(document); if (q && q.catch) q.catch(function () {}); }
+    } catch (e) {}
+    tickFs(); relayout();
+  }
+  if (fsBtn) fsBtn.addEventListener('click', function () { setFull(!box.classList.contains('is-full')); });
+  function onFsChange() { if (!(document.fullscreenElement || document.webkitFullscreenElement) && box.classList.contains('is-full')) setFull(false); }
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+  document.addEventListener('keydown', function (e) {
+    var t = e.target, typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    if (e.key === 'Escape' && box.classList.contains('is-full')) setFull(false);
+    else if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 'f' || e.key === 'F')) setFull(!box.classList.contains('is-full'));
+  });
 })();
