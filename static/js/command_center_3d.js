@@ -429,7 +429,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     /* Sector layout. Every sector gets its own territory, sized to how many
        pins it holds, and pins sit on one even grid over the whole globe
        (a Fibonacci lattice), so no two pins are ever closer than the grid
-       step: ~14° apart with 130 pins, wider with fewer.
+       step (~8°). Sectors grow as compact clusters around home points.
        Territories grow from fixed home points in turn — the sector that is
        furthest behind its share claims the next-nearest free grid point — so
        big sectors get big land and small ones keep a spot of their own. */
@@ -452,7 +452,9 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       // Same pins in the same sectors → same layout (pins don't jump on every quote).
       var key = keys.map(function (k) { return k + ':' + groups[k].map(function (t) { return t.symbol; }).sort().join(','); }).join('|') + (pMode ? '|p' : '');
       if (key === layoutKey && layoutPos) return layoutPos;
-      var total = list.length, M = Math.max(60, Math.ceil(total * 2.4));
+      // Grid step ≈ 8°: sectors stay compact clusters on their own continent
+      // with ocean between them, yet no two pins are closer than one step.
+      var total = list.length, M = Math.max(Math.ceil(37800 / (8 * 8)), Math.ceil(total * 2.4));
       var pts = lattice(M), taken = new Uint8Array(pts.length);
       var step = Math.sqrt(37800 / pts.length);       // grid spacing in degrees
       layoutStep = step;
