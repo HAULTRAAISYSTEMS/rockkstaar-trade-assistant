@@ -118,6 +118,7 @@ def test_orbit_post_requires_csrf(client):
 
 
 def _orbit_round_trip(client):
+    assert client.post("/api/command/orbit", json={"tickers": []}).get_json()["tickers"] == []
     assert client.get("/api/command/orbit").get_json()["tickers"] == []
     r = client.post("/api/command/orbit", json={"tickers": ["nvda", "AMD", "NVDA", "bad ticker!", "RKLB"]})
     assert r.status_code == 200 and r.get_json()["tickers"] == ["NVDA", "AMD", "RKLB"]
@@ -125,6 +126,7 @@ def _orbit_round_trip(client):
     many = [f"T{i}" for i in range(20)]
     assert len(client.post("/api/command/orbit", json={"tickers": many}).get_json()["tickers"]) == 12
     assert client.post("/api/command/orbit", json={"tickers": "NVDA"}).status_code == 400
+    client.post("/api/command/orbit", json={"tickers": []})
 
 
 def test_orbit_needs_a_signed_in_user():
