@@ -1083,6 +1083,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         strokePath(function (t) { return [Math.cos(t) * Math.cos(lon), Math.sin(t), Math.cos(t) * Math.sin(lon)]; });
       }
 
+      // Command Center: decorations stay quiet so the Earth, signs and chips lead.
+      var calmK = useRegions ? 0.45 : 1;
       if (zoom < 1.25) {
       // Tilted orbit ring with a travelling beacon
       var ringTilt = 0.42, beacon = (time * 0.6) % 6.2832, prevR = null;
@@ -1093,7 +1095,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         var ry = rz * Math.sin(ringTilt); rz = rz * Math.cos(ringTilt);
         var P = project(rx, ry, rz, R, cx, cy);
         if (prevR) {
-          ctx.strokeStyle = rgba(GOLD, P[2] > 0 ? 0.45 : 0.12);
+          ctx.strokeStyle = rgba(GOLD, (P[2] > 0 ? 0.45 : 0.12) * calmK);
           ctx.beginPath(); ctx.moveTo(prevR[0], prevR[1]); ctx.lineTo(P[0], P[1]); ctx.stroke();
         }
         prevR = P;
@@ -1113,9 +1115,9 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         var ry2 = rz2 * Math.sin(ringTilt2); rz2 = rz2 * Math.cos(ringTilt2);
         var P2 = project(rx2, ry2, rz2, R, cx, cy);
         if (prevR2) {
-          ctx.strokeStyle = rgba(P2[2] > 0 ? CYAN : POS, P2[2] > 0 ? 0.62 : 0.16);
+          ctx.strokeStyle = rgba(P2[2] > 0 ? CYAN : POS, (P2[2] > 0 ? 0.62 : 0.16) * calmK);
           ctx.shadowColor = rgba(CYAN, 0.8);
-          ctx.shadowBlur = P2[2] > 0 ? 10 : 0;
+          ctx.shadowBlur = P2[2] > 0 && !useRegions ? 10 : 0;
           ctx.beginPath(); ctx.moveTo(prevR2[0], prevR2[1]); ctx.lineTo(P2[0], P2[1]); ctx.stroke();
         }
         prevR2 = P2;
@@ -1135,13 +1137,13 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       for (var tk = 0; tk < 120; tk++) {
         var ang = spin + tk / 120 * 6.2832, long = tk % 10 === 0;
         var r0 = hr - (long ? 7 : 3), r1 = hr + (long ? 2 : 0);
-        ctx.strokeStyle = rgba(CYAN, long ? 0.55 : 0.22);
+        ctx.strokeStyle = rgba(CYAN, (long ? 0.55 : 0.22) * calmK);
         ctx.beginPath(); ctx.moveTo(cx + Math.cos(ang) * r0, cy + Math.sin(ang) * r0); ctx.lineTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1); ctx.stroke();
       }
       ctx.lineWidth = 2;
       ctx.shadowColor = rgba(CYAN, 0.9); ctx.shadowBlur = 10;
       [[0.1, 0.9], [1.6, 2.2], [3.3, 4.4], [5.0, 5.5]].forEach(function (seg, i) {
-        ctx.strokeStyle = rgba(i % 2 ? POS : CYAN, 0.7);
+        ctx.strokeStyle = rgba(i % 2 ? POS : CYAN, 0.7 * calmK);
         ctx.beginPath(); ctx.arc(cx, cy, hr + 6, -spin * 1.6 + seg[0], -spin * 1.6 + seg[1]); ctx.stroke();
       });
       ctx.shadowBlur = 0;
@@ -1161,7 +1163,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             var vis = (prevA[2] + Q[2]) / 2;
             // Hidden behind the globe? skip (the limb sits around z≈0.3 of the radius in this view).
             if (vis > -0.05) {
-              ctx.strokeStyle = rgba(liveArc ? POS : CYAN, (liveArc ? 0.55 : 0.28) * Math.min(1, 0.4 + vis));
+              ctx.strokeStyle = rgba(liveArc ? POS : CYAN, (liveArc ? 0.55 : 0.28) * Math.min(1, 0.4 + vis) * calmK);
               ctx.beginPath(); ctx.moveTo(prevA[0], prevA[1]); ctx.lineTo(Q[0], Q[1]); ctx.stroke();
             }
           }
@@ -1172,8 +1174,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           var pt = ((reduceMotion ? 0.5 : time * 0.22) + ai * 0.37 + pk * 0.5) % 1;
           var Pp = arcPoint(ea.v, eb.v, pt, 0.32), Qp = project(Pp[0], Pp[1], Pp[2], R, cx, cy);
           if (Qp[2] < 0) continue;
-          ctx.fillStyle = rgba(liveArc ? POS : CYAN, 0.95);
-          ctx.shadowColor = rgba(liveArc ? POS : CYAN, 1); ctx.shadowBlur = 12;
+          ctx.fillStyle = rgba(liveArc ? POS : CYAN, useRegions ? 0.6 : 0.95);
+          ctx.shadowColor = rgba(liveArc ? POS : CYAN, 1); ctx.shadowBlur = useRegions ? 6 : 12;
           ctx.beginPath(); ctx.arc(Qp[0], Qp[1], 2.2 * Qp[3], 0, 6.2832); ctx.fill();
         }
         ctx.shadowBlur = 0;
@@ -1239,13 +1241,13 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           // sector's land — name, today's move, and how many stocks are up vs
           // down (breadth bar). Tap it to fly there.
           if (C[2] > 0.34) {
-            var small = W <= 520, more = lastHidden[k] || 0;
+            var small = W <= 520 || (!isFocus && zoom < 1.2), more = lastHidden[k] || 0;
             var big = isFocus ? 1.1 : 1;
             var lift = project(cen[0] * 1.2, cen[1] * 1.2, cen[2] * 1.2, R, cx, cy);
             var name = rg.name, pctT = avg == null ? '—' : (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%';
             var sub = small ? '' : pMode ? ('YOU ' + (st.w >= 10 ? st.w.toFixed(0) : st.w.toFixed(1)) + '%  ·  ' + st.n + (st.n === 1 ? ' holding' : ' holdings'))
               : ('▲' + st.up + '  ▼' + st.dn + '  ·  ' + st.n + (st.n === 1 ? ' stock' : ' stocks') + (more ? '  ·  +' + more + ' hidden' : ''));
-            var f1 = Math.round((small ? 10.5 : 13) * big), f2 = Math.round((small ? 9 : 10.5) * big);
+            var f1 = Math.round((small ? (W <= 520 ? 10.5 : 11.5) : 13) * big), f2 = Math.round((small ? 9 : 10.5) * big);
             ctx.textBaseline = 'middle';
             var hasLS = 'letterSpacing' in ctx;
             ctx.font = '800 ' + f1 + 'px "IBM Plex Mono", ui-monospace, monospace';
@@ -1255,7 +1257,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             var wPct = ctx.measureText(pctT).width;
             ctx.font = '600 ' + f2 + 'px "IBM Plex Mono", ui-monospace, monospace';
             var wSub = ctx.measureText(sub).width;
-            var padX = small ? 8 : 12, ph2 = small ? 22 : 44 * big;
+            var padX = small ? 9 : 12, ph2 = small ? (W <= 520 ? 22 : 25) : 44 * big;
             var bw2 = Math.max(wName + wPct + padX * 2 + 12, wSub + padX * 2) + 6;
             // Try above the land first, then nudge sideways / below if taken.
             var cands = [[0, 0], [-bw2 * 0.55, 0], [bw2 * 0.55, 0], [0, -ph2 * 0.8], [0, ph2 + 26], [-bw2 * 0.55, ph2 + 26], [bw2 * 0.55, ph2 + 26]];
@@ -1307,7 +1309,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
               ctx.fillStyle = gl; ctx.fillRect(gx - 18, by, 36, ph2); ctx.restore();
             }
             // Row 1: NAME ........ ±x.xx%
-            var r1 = small ? by + 11.5 : by + 15 * big;
+            var r1 = small ? by + ph2 / 2 + 0.5 : by + 15 * big;
             ctx.font = '800 ' + f1 + 'px "IBM Plex Mono", ui-monospace, monospace';
             if (hasLS) ctx.letterSpacing = small ? '0.5px' : '1.2px';
             ctx.fillStyle = 'rgba(240,246,255,0.98)'; ctx.shadowColor = rgba(colT, 0.8); ctx.shadowBlur = 6;
@@ -1372,6 +1374,15 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       ctx.restore();
 
       if (waves.length) waves = waves.filter(function (wv) { return time - wv.t0 < 3.4; });
+      // Calm view (whole globe, no sector focused): only pins that matter get
+      // a name — starred, alert/buy zone, earnings, and each sector's biggest
+      // mover. Zoom in or fly to a sector to see every name there.
+      var topMove = {};
+      if (useRegions) nodes.forEach(function (q) {
+        if (q.chg == null || !q.region) return;
+        var cur = topMove[q.region];
+        if (!cur || Math.abs(q.chg) > Math.abs(cur.chg)) topMove[q.region] = q;
+      });
       var drawn = [], maxW = 0;
       if (pMode) nodes.forEach(function (q) { if (q.weight > maxW) maxW = q.weight; });
       for (var n = 0; n < nodes.length; n++) {
@@ -1475,7 +1486,9 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         }
         if (sceneOn) {
           // A stock that is an orbit chip keeps its gold ring, not a second name tag.
-          if (front && it[0][2] > (zoom < 1.2 ? 0.42 : 0.33) && (isSel || isHov || zoom >= 1.2 || !chipSet[it[2].symbol])) {
+          var nq = it[2], calm = zoom < 1.2 && !pMode && !(focusKey && nq.region === focusKey);
+          var matters = isSel || isHov || starred[nq.symbol] || flagged[nq.symbol] || nq.earn != null || (topMove[nq.region] === nq);
+          if (front && it[0][2] > (zoom < 1.2 ? 0.42 : 0.33) && (!calm || matters) && (isSel || isHov || zoom >= 1.2 || !chipSet[nq.symbol])) {
             var pri = (isSel || isHov ? 1e4 : 0) + (starred[it[2].symbol] ? 500 : 0) + (focusKey && it[2].region === focusKey ? 300 : 0)
               + (flagged[it[2].symbol] ? 400 : 0) + (it[2].earn != null ? 250 : 0) + (pMode ? (it[2].weight || 0) * 20 : 0)
               + Math.abs(it[2].chg || 0) * 10 + it[1][2] * 5;

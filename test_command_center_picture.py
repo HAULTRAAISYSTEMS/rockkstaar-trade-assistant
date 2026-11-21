@@ -360,3 +360,14 @@ def test_sector_signs_are_holographic_and_stay_clear():
     assert "var xlo = safeHalf ? W / 2 - safeHalf + 4 : 4" in js
     pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
     assert "detail: { half: half, obst: obst }" in pj
+
+
+def test_globe_calm_view_shows_detail_on_demand():
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    # Whole globe: only names that matter; zoom / focus a sector → all names.
+    assert "var nq = it[2], calm = zoom < 1.2 && !pMode && !(focusKey && nq.region === focusKey);" in js
+    assert "(topMove[nq.region] === nq)" in js
+    # Signs: one line until you focus the sector or zoom in.
+    assert "var small = W <= 520 || (!isFocus && zoom < 1.2)" in js
+    # Decorations quieter on the Command Center, and defined outside the zoom block.
+    assert js.index("var calmK = useRegions ? 0.45 : 1;") < js.index("      if (zoom < 1.25) {\n      // Tilted orbit ring")
