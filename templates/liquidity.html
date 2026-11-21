@@ -2,217 +2,257 @@
 {% block title %}Morning Command Center — Tradestaar{% endblock %}
 
 {% block head_extra %}
+  <script>document.documentElement.classList.add('cc-scene')</script>
+  <link rel="preload" as="image" href="{{ url_for('static', filename='img/scene_sky.webp') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/today.css') }}" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_layout.css') }}" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/elite_2027_picture.css') }}" />
+{% endblock %}
+{% block late_css %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/command_center_picture.css') }}" />
 {% endblock %}
 
-{% block content %}
-<div class="liq-page">
-  <nav class="te27-flow" aria-label="Elite 2027 research workflow">
-    <a class="te27-step is-active" href="{{ url_for('liquidity_page') }}"><span class="te27-step-num">1</span><span class="te27-step-label">Today</span></a>
-    <a class="te27-step" href="{{ url_for('research_page') }}"><span class="te27-step-num">2</span><span class="te27-step-label">Discover</span></a>
-    <a class="te27-step" href="{{ url_for('fundamentals_page') }}"><span class="te27-step-num">3</span><span class="te27-step-label">Verify</span></a>
-    <a class="te27-step" href="{{ url_for('terminal') }}"><span class="te27-step-num">4</span><span class="te27-step-label">Execute</span></a>
-    <a class="te27-step" href="{{ url_for('wealth.next_dollar_page') }}"><span class="te27-step-num">5</span><span class="te27-step-label">Deploy</span></a>
-  </nav>
+{% macro pct(v) -%}{% if v is not none %}{{ '%+.2f'|format(v) }}%{% else %}—{% endif %}{%- endmacro %}
+{% macro dir(v) -%}{{ 'is-up' if v is not none and v > 0 else ('is-down' if v is not none and v < 0 else '') }}{%- endmacro %}
 
-  <header class="elite-hero has-orb cc-hero-xl is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
-    <div class="cc-hero-left">
-      <p class="elite-hero-eyebrow"><span class="live-dot" aria-hidden="true"></span> LIVE MARKET · COMMAND CENTER</p>
-      <h1 class="elite-hero-title">Morning <span class="accent">Command Center</span></h1>
-      <p class="workspace-intro">Macro regime, live index pulse, AI market briefing, A+ setups, breadth, and catalysts — before you size a trade.</p>
-      <div class="elite-hero-actions">
+{% block content %}
+<div class="liq-page cmd27">
+  {# 3D scene: sky → live stars + neon floor → far range → near range, each at its own depth. #}
+  <div class="cmd27-scene" aria-hidden="true">
+    <div class="cmd27-scene__stage" id="cmd27-stage">
+      <i class="cmd27-scene__layer cmd27-scene__sky" data-depth="0.12"></i>
+      <canvas class="cmd27-scene__floor" id="cmd27-floor"></canvas>
+      <i class="cmd27-scene__layer cmd27-scene__far" data-depth="0.4"></i>
+      <i class="cmd27-scene__layer cmd27-scene__near" data-depth="0.85"></i>
+    </div>
+  </div>
+  {# ── Hero: title · globe · market pulse ─────────────────────────────── #}
+  <header class="elite-hero cmd27-hero cc-hero-xl is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
+    <div class="cmd27-hero__left">
+      <h1 class="cmd27-title">Morning<br>Command Center<sup>™</sup></h1>
+      <p class="cmd27-sub">Your AI Market Intelligence Briefing</p>
+      {# Says "live" only when the quotes are. #}
+      <p class="cmd27-live {{ 'is-live' if pulse.live else 'is-snapshot' }}" id="cmd27-live">
+        <i aria-hidden="true"></i><span id="cmd27-live-text">{{ 'Live market · real-time' if pulse.live else ((pulse.day_label or 'Latest') ~ ' · latest available') }}</span>
+      </p>
+      <p class="cmd27-clock"><span aria-hidden="true">{{ '' }}</span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><time id="cmd27-clock" datetime="">—</time></p>
+      <div class="elite-hero-actions cmd27-actions">
         <button type="button" id="cc-refresh-btn" class="cc-refresh" title="Reload quotes, regime, and setups (R)">Refresh</button>
         <span class="cc-stamp" id="liq-last-updated" aria-live="polite">Loaded · {{ pulse.as_of or 'live' }}</span>
-      </div><div class="cc-shortcuts"><span class="cc-shortcut"><kbd>R</kbd> Refresh</span></div>
+      </div>
+      <div class="cc-shortcuts"><span class="cc-shortcut"><kbd>R</kbd> refresh</span></div>
     </div>
 
-    <div class="cc-hero-center">
+    <div class="cmd27-hero__globe">
       <div class="cc3d-orb is-waiting" data-cc3d-orb
            data-chart-url="{{ url_for('stock_detail', ticker='__T__') }}"
            data-research-url="{{ url_for('research_page', ticker='__T__') }}"
            data-watch-url="{{ url_for('watchlist_add') }}"
+           data-sectors="{{ (sector_map or {})|tojson|forceescape }}"
            role="group" aria-label="3D market globe of the symbols on the live market tape. Green spikes are advancing, red are declining; spike length is the magnitude.">
-        <span class="cc3d-hud-title" aria-hidden="true">Live Market Globe</span>
         <canvas aria-hidden="true"></canvas>
         <div class="cc3d-hud" data-cc3d-hud aria-live="off"><span>Status <b>Awaiting live quotes</b></span></div>
       </div>
+      <div class="cmd27-orbit" id="cmd27-orbit" aria-label="Biggest moves on your watchlist"></div>
     </div>
 
-    <div class="cc-hero-right">
-      <div class="cc-card cc-pulse cc-hero-pulse" id="cc-pulse"  data-pulse-url="/api/today/pulse" data-session="{{ 'pre' if pulse.session and 'pre' in (pulse.session|string|lower) else (pulse.session or '')|lower }}"aria-live="polite">
-        <div class="cc-pulse-head">
-          <span class="cc-kicker">Market Pulse</span>
-          <span class="cc-live" id="cc-pulse-live"><i class="cc-dot"></i>{{ 'Live' if pulse.live else 'Snapshot' }}</span>
+    <aside class="cmd27-hero__pulse">
+      <div class="cc-card cc-pulse cmd27-pulse" id="cc-pulse" data-pulse-url="/api/today/pulse"
+           data-session="{{ 'pre' if pulse.session and 'pre' in (pulse.session|string|lower) else (pulse.session or '')|lower }}" aria-live="polite">
+        <div class="cmd27-pulse__head">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 12h4l2.2-5.5 4.3 11 2.2-5.5H21"/></svg>
+          <h2>Market Pulse</h2>
+          <span class="cc-live" id="cc-pulse-live"><i class="cc-dot"></i><span id="cc-pulse-live-text">{{ 'Live' if pulse.live else 'Snapshot' }}</span></span>
         </div>
-        <div class="cc-pulse-regime">
-      <span class="cc-p-lbl">Trend</span><strong class="cc-regime-val" id="cc-regime">{{ pulse.trend_label if pulse.known else '—' }}</strong><span class="cc-regime-meta" id="cc-regime-meta">{{ pulse.regime_meta if pulse.known else 'not read yet' }}</span>
+        <div class="cmd27-rows">
+          <div class="cmd27-row"><span class="cmd27-row__name">S&amp;P 500 <span class="cc-p-lbl" id="cc-spy-k">{{ pulse.spy_label or 'SPY' }}</span></span><b class="cmd27-px" data-px="SPY">—</b><strong class="cc-p-val {{ dir(pulse.spy) }}" id="cc-spy">{{ pct(pulse.spy) }}</strong></div>
+          <div class="cmd27-row"><span class="cmd27-row__name">Nasdaq <span class="cc-p-lbl" id="cc-qqq-k">{{ pulse.qqq_label or 'QQQ' }}</span></span><b class="cmd27-px" data-px="QQQ">—</b><strong class="cc-p-val {{ dir(pulse.qqq) }}" id="cc-qqq">{{ pct(pulse.qqq) }}</strong></div>
+          <div class="cmd27-row"><span class="cmd27-row__name">Dow <span class="cc-p-lbl">DIA</span></span><b class="cmd27-px" data-px="DIA">—</b><strong class="cc-p-val" data-chg="DIA">—</strong></div>
+          <div class="cmd27-row"><span class="cmd27-row__name">Russell 2000 <span class="cc-p-lbl">IWM</span></span><b class="cmd27-px" data-px="IWM">—</b><strong class="cc-p-val" data-chg="IWM">—</strong></div>
+          <div class="cmd27-row"><span class="cmd27-row__name"><span class="cc-p-lbl">VIX</span> {{ pulse.vix_regime or '' }}</span><b class="cmd27-px" id="cc-vix">{{ '%.2f'|format(pulse.vix) if pulse.vix else '—' }}</b><strong class="cc-p-val" data-chg="VIX">—</strong></div>
+        </div>
+        <p class="cc-p-meta cmd27-vixmeta" id="cc-vix-meta">{{ pulse.vix_freshness or ('As of ' ~ pulse.vix_as_of if pulse.vix_as_of else 'Latest available') }}</p>
+        <div class="cc-pulse-regime cmd27-trend">
+          <span class="cc-p-lbl">Trend</span><strong class="cc-regime-val" id="cc-regime">{{ pulse.trend_label if pulse.known else '—' }}</strong><span class="cc-regime-meta" id="cc-regime-meta">{{ pulse.regime_meta if pulse.known else 'not read yet' }}</span>
           <span class="cc-pulse-sub" id="cc-pulse-sub">{{ pulse.summary or '' }}</span>
         </div>
-        <div class="cc-pulse-grid">
-          <div class="cc-p-cell"><span class="cc-p-lbl" id="cc-spy-k">{{ pulse.spy_label or 'SPY' }}</span><strong class="cc-p-val" id="cc-spy">{{ '%.2f'|format(pulse.spy) if pulse.spy else '—' }}</strong></div>
-          <div class="cc-p-cell"><span class="cc-p-lbl" id="cc-qqq-k">{{ pulse.qqq_label or 'QQQ' }}</span><strong class="cc-p-val" id="cc-qqq">{{ '%.2f'|format(pulse.qqq) if pulse.qqq else '—' }}</strong></div>
-          <div class="cc-p-cell"><span class="cc-p-lbl">VIX {{ pulse.vix_regime or '' }}</span><strong class="cc-p-val" id="cc-vix">{{ '%.2f'|format(pulse.vix) if pulse.vix else '—' }}</strong><span class="cc-p-meta" id="cc-vix-meta">{{ pulse.vix_freshness or '' }}</span></div>
-          <div class="cc-p-cell" id="cc-es-cell"{% if not pulse.es %} hidden{% endif %}><span class="cc-p-lbl">ES</span><strong class="cc-p-val" id="cc-es">{{ '%.2f'|format(pulse.es) if pulse.es else '—' }}</strong></div>
-          <div class="cc-p-cell" id="cc-nq-cell"{% if not pulse.nq %} hidden{% endif %}><span class="cc-p-lbl">NQ</span><strong class="cc-p-val" id="cc-nq">{{ '%.2f'|format(pulse.nq) if pulse.nq else '—' }}</strong></div>
+        <div class="cmd27-futures">
+          <span id="cc-es-cell"{% if not pulse.es %} hidden{% endif %}>ES <strong class="{{ dir(pulse.es) }}" id="cc-es">{{ pct(pulse.es) }}</strong></span>
+          <span id="cc-nq-cell"{% if not pulse.nq %} hidden{% endif %}>NQ <strong class="{{ dir(pulse.nq) }}" id="cc-nq">{{ pct(pulse.nq) }}</strong></span>
         </div>
         <p class="cc-pulse-note" id="cc-pulse-note">{{ pulse.note or '' }}</p>
       </div>
-    </div>
+    </aside>
   </header>
 
   <div id="liq-status-banner" class="cc-status-banner" hidden></div>
-  <div id="market-story-banner" class="cc-story-banner">
-    {% if story %}
+  <div id="market-story-banner" class="cc-story-banner cmd27-story">
+    {%- if story and (story.headline or story.summary) %}
       <span class="cc-story-tag">{{ story.regime or 'Market Story' }}</span>
-      <p>{{ story.headline or story.summary or '' }}</p>
-    {% endif %}
+      <p>{{ story.headline or story.summary }}</p>
+    {%- endif -%}
   </div>
 
-  <section class="te27-market-tiles" aria-label="Market performance snapshot">
-    <article class="te27-market-tile"><span class="te27-market-icon">↗</span><div><small>{{ pulse.spy_label or 'SPY / S&P 500' }}</small><strong id="te27-spy">{{ '%.2f'|format(pulse.spy) if pulse.spy else '—' }}</strong></div></article>
-    <article class="te27-market-tile"><span class="te27-market-icon">▥</span><div><small>{{ pulse.qqq_label or 'QQQ / Nasdaq' }}</small><strong id="te27-qqq">{{ '%.2f'|format(pulse.qqq) if pulse.qqq else '—' }}</strong></div></article>
-    <article class="te27-market-tile"><span class="te27-market-icon">◈</span><div><small>VIX volatility</small><strong id="te27-vix">{{ '%.2f'|format(pulse.vix) if pulse.vix else '—' }}</strong></div></article>
-    <article class="te27-market-tile"><span class="te27-market-icon">☀</span><div><small>Liquidity</small><strong id="te27-liq">{{ pulse.liquidity_label or 'Neutral' }}</strong></div></article>
-    <article class="te27-market-tile"><span class="te27-market-icon">◫</span><div><small>Next catalyst</small><strong class="te27-market-next">{{ next_up.title if next_up else 'None scheduled' }}</strong></div></article>
+  {# ── Index strip ─────────────────────────────────────────────────────── #}
+  <section class="cmd27-kpis" aria-label="Index moves today">
+    {% for sym, name, icon in [('SPY', 'S&P 500', 'trend'), ('QQQ', 'Nasdaq', 'bars'), ('DIA', 'Dow', 'stack'), ('IWM', 'Russell 2000', 'grid'), ('VIX', 'VIX', 'pulse')] %}
+    <article class="cmd27-kpi" data-kpi="{{ sym }}">
+      <span class="cmd27-kpi__ic" aria-hidden="true">
+        {%- if icon == 'trend' %}<svg viewBox="0 0 32 32" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 26h24"/><path d="M6 21l7-7 5 4 9-10"/><path d="M21 8h6v6"/></svg>
+        {%- elif icon == 'bars' %}<svg viewBox="0 0 32 32" width="34" height="34" fill="currentColor"><rect x="6" y="17" width="5" height="10" rx="1"/><rect x="14" y="11" width="5" height="16" rx="1"/><rect x="22" y="5" width="5" height="22" rx="1"/></svg>
+        {%- elif icon == 'stack' %}<svg viewBox="0 0 32 32" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 22l7-7 5 4 10-11"/><rect x="5" y="24" width="4" height="4"/><rect x="12" y="20" width="4" height="8"/><rect x="19" y="17" width="4" height="11"/></svg>
+        {%- elif icon == 'grid' %}<svg viewBox="0 0 32 32" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="5" width="9" height="9" rx="2"/><rect x="18" y="5" width="9" height="9" rx="2"/><rect x="5" y="18" width="9" height="9" rx="2"/><rect x="18" y="18" width="9" height="9" rx="2"/></svg>
+        {%- else %}<svg viewBox="0 0 32 32" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 16h6l3-8 5 16 3-8h9"/></svg>{% endif -%}
+      </span>
+      <div><small>{{ name }}</small><strong data-kpi-chg>{% if sym == 'SPY' %}{{ pct(pulse.spy) }}{% elif sym == 'QQQ' %}{{ pct(pulse.qqq) }}{% else %}—{% endif %}</strong><em data-kpi-px>{{ sym }}</em></div>
+    </article>
+    {% endfor %}
   </section>
-<div class="cc-now"><div class="cc-col-main">
-  <div class="cc-body cc-intel-row">
-    <section class="cc-card cc-intel-card" id="ai-brief-card">
-      <div class="cc-head">
-        <h2>AI Market Briefing</h2>
-        <a href="{{ url_for('live_research.feed') }}">Full feed &rarr;</a>
-      </div><p class="cc-brief-conflict" id="ai-brief-conflict"{% if not (story and story.conflict) %} hidden{% endif %}>{{ story.conflict if story and story.conflict else '' }}</p><div id="ai-brief-body">
-      {% if research_digest %}
-        <p class="cc-brief-lead">{{ research_digest.summary or research_digest.headline or '' }}</p>
-        {% if research_digest.bullets %}
-          <ul class="cc-brief-list">
-            {% for b in (research_digest.bullets | reject('story_repeat') | list)[:4] %}<li>{{ b }}</li>{% endfor %}
-          </ul>
-        {% endif %}
-      {% elif story %}
-        <p class="cc-brief-lead">{{ story.summary or story.headline or '' }}</p>{% if story.bullets %}<ul class="cc-brief-list">{% for b in story.bullets %}<li class="ms-bullet">{{ b }}</li>{% endfor %}</ul>{% endif %}
+
+  {# ── Briefing · setups · breadth · events ────────────────────────────── #}
+  <div class="cc-now cmd27-now"><div class="cc-col-main">
+  <div class="cmd27-intel">
+    <section class="cc-card cmd27-card" id="ai-brief-card">
+      <div class="cmd27-card__head">
+        <h2><span class="cmd27-spark" aria-hidden="true">✦</span> AI Market Briefing</h2>
+        <span class="cmd27-badge">AI insights</span>
+      </div>
+      <p class="cc-brief-conflict" id="ai-brief-conflict"{% if not (story and story.conflict) %} hidden{% endif %}>{{ story.conflict if story and story.conflict else '' }}</p>
+      <div id="ai-brief-body">
+      {% set lead = (research_digest.summary or research_digest.headline) if research_digest else '' %}
+      {% if lead or story %}
+        <p class="cc-brief-lead">{{ lead or story.summary or story.headline or '' }}</p>
+        {% if story and story.bullets %}<ul class="cc-brief-list">{% for b in story.bullets[:4] %}<li class="ms-bullet">{{ b }}</li>{% endfor %}</ul>
+        {% elif research_digest and research_digest.bullets %}<ul class="cc-brief-list">{% for b in (research_digest.bullets | reject('story_repeat') | list)[:4] %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
+        {% if story and story.leaders %}<p class="cc-brief-leaders">Leading: {{ story.leaders|join(', ') if story.leaders is sequence and story.leaders is not string else story.leaders }}</p>{% endif %}
       {% else %}
-        <p class="cc-empty">Briefing updates as live market research arrives.</p>
-      {% endif %}{% if story and story.bullets %}<ul class="cc-brief-list">{% for b in story.bullets %}<li class="ms-bullet">{{ b }}</li>{% endfor %}</ul>>{% endif %} if story and story.permissions %}<p class="cc-brief-permissions">{{ story.permissions|join(', ') if story.permissions is sequence and story.permissions is not string else story.permissions }}</p{% if story and story.leaders %}<p class="cc-brief-leaders">{{ story.leaders|join(', ') if story.leaders is sequence and story.leaders is not string else story.leaders }}</p>{% endif %}</div>
+        <p class="cc-empty">The briefing fills in as live market research arrives.</p>
+      {% endif %}
+      </div>
       <div id="what-changed" class="cc-what-changed"><h3>What changed for you</h3></div>
+      <div class="cm-voice cmd27-voice">
+        <button type="button" class="cm-play" id="cm-play"><span class="cm-play-ico">▶</span><span id="cm-play-text">Play 60-sec briefing</span></button>
+        <div class="cm-wave" id="cm-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <small id="cm-voice-note">Spoken by your phone. Keep the screen on.</small>
+      </div>
+      <a class="cmd27-more" href="{{ url_for('live_research.feed') }}">Full feed →</a>
     </section>
 
-    <section class="cc-card cc-picks cc-intel-card">
-      <div class="cc-head">
-        <h2>A+ Setups Today</h2>
-        <div class="cc-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected="true" data-cc-tab="setups">Trade setups</button>
-          <button type="button" role="tab" aria-selected="false" data-cc-tab="watch">{{ watchlist_name or 'Watchlist' }}</button>
-        </div>
+    <section class="cc-card cc-picks cmd27-card">
+      <div class="cmd27-card__head">
+        <h2><span class="cmd27-target" aria-hidden="true">◎</span> A+ Setups Today</h2>
+        <span class="cmd27-badge">Scanner</span>
+      </div>
+      <div class="cc-tabs cmd27-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected="true" data-cc-tab="setups">Trade setups</button>
+        <button type="button" role="tab" aria-selected="false" data-cc-tab="watch">{{ watchlist_name or 'Watchlist' }}</button>
       </div>
       <div data-cc-panel="setups">
         {% if setups %}
-          <div class="cc-rows">
-            {% for r in setups[:5] %}
-              <a class="cc-row" href="{{ url_for('fundamentals_page') }}?ticker={{ r.ticker }}">
-                <span class="cc-row-sym">{{ r.ticker }}</span>
-                <span class="cc-row-mid"><b>{{ r.setup or r.grade or 'A+' }}</b>{% if r.score %}<small>Score {{ r.score }}</small>{% endif %}</span>
-                <span class="cc-row-price">{% if r.price %}{{ '%.2f'|format(r.price) }}{% else %}—{% endif %}</span>
-              </a>
-            {% endfor %}
-          </div>
-        {% else %}
-          <p class="cc-empty">No A+ setups matched yet.</p>
-        {% endif %}
-        <div class="cc-card-foot">
-          <a href="{{ url_for('terminal') }}">Terminal &rarr;</a>
-          <a href="{{ url_for('dashboard') }}">Screener &rarr;</a>
+        <div class="cmd27-rows2">
+          {% for r in setups[:5] %}
+          <a class="cmd27-setup" href="{{ url_for('stock_detail', ticker=r.ticker) }}">
+            <b>{{ r.ticker }}</b><span>{{ r.setup or 'Setup forming' }}</span>
+            <em class="cmd27-grade g-{{ (r.grade or 'A')|replace('+', 'plus')|lower }}">{{ r.grade or ('A+' if r.score and r.score >= 8 else 'A') }}</em>
+          </a>
+          {% endfor %}
         </div>
+        {% else %}<p class="cc-empty">No A+ setups right now. The scanner adds them as they form.</p>{% endif %}
+        <div class="cmd27-foot"><a href="{{ url_for('dashboard') }}">Setups board →</a><a href="{{ url_for('terminal') }}">Terminal →</a></div>
       </div>
       <div data-cc-panel="watch" hidden>
         {% if watchlist %}
-          <div class="cc-rows">
-            {% for r in watchlist[:5] %}
-              <a class="cc-row" href="{{ url_for('fundamentals_page') }}?ticker={{ r.ticker }}">
-                <span class="cc-row-sym">{{ r.ticker }}</span>
-                <span class="cc-row-mid">{% if r.name and r.name != r.ticker %}<b>{{ r.name }}</b>{% if r.setup %}<small>{{ r.setup }}</small>{% endif %}{% else %}<b>{{ r.setup or 'No setup' }}</b>{% endif %}</span>
-                <span class="cc-row-price">{% if r.price %}{{ '%.2f'|format(r.price) }}{% else %}—{% endif %}</span>
-              </a>
-            {% endfor %}
-          </div>
-        {% else %}
-          <p class="cc-empty">No tickers on the active watchlist yet.</p>
-        {% endif %}
-        <div class="cc-card-foot">
-          <a href="{{ url_for('watchlists_page') }}">Manage watchlist &rarr;</a>
-        </div>
-      </div>
-    </section>
-
-    <section class="cc-card cc-breadth-card cc-intel-card">
-      <div class="cc-head">
-        <h2>Market Breadth</h2>
-        <a href="{{ url_for('macro_page') }}">Macro &rarr;</a>
-      </div>
-      <div id="cm-wrap" class="cm-wrap">
-        <div class="cm-dial" role="img" aria-label="Market breadth radial gauge">
-          <div class="cm-needle" id="cm-needle"></div>
-          <div class="cm-center">
-            <strong id="cm-score">{{ pulse.breadth_score or '—' }}</strong>
-            <span id="cm-label">{{ pulse.regime_label or 'Neutral' }}</span>
-          </div>
-        </div>
-      </div><p class="cm-play" id="cm-play">{{ pulse.summary or '' }}</p>
-      <div class="cc-liq-row" id="cc-liq">
-        <span>Liquidity Regime</span>
-        <strong>{{ pulse.liquidity_label or 'Neutral' }}</strong>
-      </div>
-    </section>
-
-    <section class="cc-card cc-weekcard cc-intel-card">
-      <div class="cc-head">
-        <h2>Economic Events</h2>
-        <a href="{{ url_for('catalyst_calendar') }}">Full calendar &rarr;</a>
-      </div>
-      {% if next_up %}
-        <div class="cc-next-up">
-          <span class="cc-tag">Next Up</span>
-          <strong>{{ next_up.title }}</strong>
-          <small>{{ next_up.date_label or '' }} {{ next_up.time or '' }}</small>
-        </div>
-      {% endif %}
-      {% if week %}
-        <div class="cc-week">
-          {% for e in (week | rejectattr('title', 'equalto', next_up.title if next_up else '') | list)[:3] %}
-            <div class="cc-week-row {{ 'is-high' if e.impact == 'HIGH' }} {{ 'is-imminent' if e.days_away is number and 0 <= e.days_away <= 1 }}">
-              <span class="cc-when"><b>{{ e.date_label }}</b><small>{{ e.time }}</small></span>
-              <span class="cc-what">{{ e.title }}{% if e.on_watchlist %}<em class="cc-tag">watchlist</em>{% endif %}{% if e.reason and e.kind != 'EARNINGS' %}<small>{{ e.reason }}</small>{% elif e.company_name and e.company_name != e.ticker %}<small>{{ e.company_name }}</small>{% endif %}</span>
-              <span class="cc-impact {{ 'is-high' if e.impact == 'HIGH' }}">{{ e.impact|title }}</span>
-            </div>
+        <div class="cmd27-rows2">
+          {% for r in watchlist[:5] %}
+          <a class="cmd27-setup" href="{{ url_for('stock_detail', ticker=r.ticker) }}">
+            <b>{{ r.ticker }}</b><span>{{ r.setup or (r.name if r.name and r.name != r.ticker else 'No setup') }}</span>
+            <em class="cmd27-px2">{% if r.price %}{{ '%.2f'|format(r.price) }}{% else %}—{% endif %}</em>
+          </a>
           {% endfor %}
         </div>
-      {% else %}
-        <p class="cc-empty">No upcoming events were returned.</p>
-      {% endif %}</div><div class="cc-col-side"></div></div>
-      <div class="nx-panel cc-nx-mini" id="nx-panel" aria-labelledby="nx-panel-title">
-        <header class="nx-panel__head">
-          <h3 class="nx-panel__title" id="nx-panel-title">Notifications <span class="nx-panel__count" id="nx-panel-count"></span></h3>
-          <span class="nx-panel__links">
-            <a class="nx-text-btn" href="{{ url_for('intel') }}">All news</a>
-            <button type="button" class="nx-text-btn" data-nx-open>Open</button>
-          </span>
-        </header>
-        <div class="nx-chips" id="nx-panel-chips" role="group" aria-label="Filter notifications"></div>
-        <ol class="nx-list nx-list--panel" id="nx-panel-list" aria-live="polite">
-          <li class="nx-empty"><span>Loading...</span></li>
-        </ol>
+        {% else %}<p class="cc-empty">No tickers on the active watchlist yet.</p>{% endif %}
+        <div class="cmd27-foot"><a href="{{ url_for('watchlists_page') }}">Manage watchlist →</a></div>
       </div>
     </section>
-  </div>
 
-  <nav class="te27-feature-grid" aria-label="Explore Tradestaar intelligence">
-    <a class="te27-feature-card" href="{{ url_for('research_page') }}"><span class="te27-feature-kicker">Discover</span><strong>Live Market Research</strong><small>Top picks, momentum leaders, and thesis catalysts.</small></a>
-    <a class="te27-feature-card" href="{{ url_for('fundamentals_page', tab='quarter') }}"><span class="te27-feature-kicker">Verify</span><strong>Quarterly Deep-Dive</strong><small>Earnings trends, valuation, and analyst consensus.</small></a>
-    <a class="te27-feature-card" href="{{ url_for('wealth.research_list_page') }}"><span class="te27-feature-kicker">M.C.F.F.</span><strong>Wealth Watchlist</strong><small>50-name quality compounder screen &amp; scores.</small></a>
-    <a class="te27-feature-card" href="{{ url_for('live_research.feed') }}"><span class="te27-feature-kicker">Company Overview</span><strong>Institutional Feed</strong><small>AI-parsed SEC filings, macro notes, and upgrades.</small></a>
-    <a class="te27-feature-card" href="{{ url_for('wealth.next_dollar_page') }}"><span class="te27-feature-kicker">Capital Deployment</span><strong>Next-Dollar Allocator</strong><small>Regime-aware position sizing &amp; cash deployment.</small></a>
+    <section class="cc-card cmd27-card cmd27-breadth">
+      <div class="cmd27-card__head">
+        <h2><span aria-hidden="true">▮</span> Market Breadth</h2>
+        <a class="cmd27-more" href="{{ url_for('macro_page') }}">Macro →</a>
+      </div>
+      <div class="cmd27-ring-row">
+        <div class="cmd27-ring" id="cmd27-ring" style="--p:0">
+          <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="trk" cx="60" cy="60" r="50"/><circle class="val" cx="60" cy="60" r="50"/></svg>
+          <div class="cmd27-ring__txt"><strong id="cmd27-ring-pct">—</strong><span>sectors<br>advancing</span></div>
+        </div>
+        <ul class="cmd27-legend">
+          <li><i class="up"></i>Advancing <b id="cmd27-adv">—</b></li>
+          <li><i class="dn"></i>Declining <b id="cmd27-dec">—</b></li>
+          <li><i class="fl"></i>Unchanged <b id="cmd27-unc">—</b></li>
+        </ul>
+      </div>
+      {# Market mood (command_center_ext.js reads /api/mood). #}
+      <div id="cm-wrap" class="cm-wrap cmd27-mood" aria-label="Market mood">
+        <svg viewBox="0 0 220 130" class="cmd27-mood__dial" aria-hidden="true">
+          <defs><linearGradient id="cm-grad" x1="0" x2="1"><stop offset="0" stop-color="#ff5470"/><stop offset=".5" stop-color="#f5c451"/><stop offset="1" stop-color="#22e39a"/></linearGradient></defs>
+          <path d="M20 115 A90 90 0 0 1 200 115" fill="none" stroke="url(#cm-grad)" stroke-width="16" stroke-linecap="round" opacity=".9"/>
+          <g id="cm-needle" style="transform-origin:110px 115px;transform:rotate(-90deg)"><line x1="110" y1="115" x2="110" y2="42" stroke="#e8f1ff" stroke-width="5" stroke-linecap="round"/><circle cx="110" cy="115" r="8" fill="#e8f1ff"/></g>
+        </svg>
+        <div class="cmd27-mood__read"><small>Market mood</small><b id="cm-label">—</b><em id="cm-score"></em></div>
+        <p class="cm-note" id="cm-note" hidden></p>
+        <details class="cmd27-why"><summary>What's in the score</summary><div class="cm-parts" id="cm-parts"></div></details>
+      </div>
+      <p class="cmd27-liq">Liquidity <strong id="cc-liq" data-href="{{ url_for('macro_page') }}">{{ pulse.liquidity_label or '—' }}</strong></p>
+      <p class="cmd27-note" id="cmd27-breadth-note">Counts the 11 sector funds (XLK, SMH, XLF…) on the day.</p>
+    </section>
+
+    <section class="cc-card cmd27-card cmd27-events">
+      <div class="cmd27-card__head">
+        <h2><span aria-hidden="true">▦</span> Economic Events</h2>
+        <a class="cmd27-badge is-link" href="{{ url_for('catalyst_calendar') }}">Calendar</a>
+      </div>
+      {% set evs = ([next_up] if next_up else []) + ((week | rejectattr('title', 'equalto', next_up.title if next_up else '') | list) if week else []) %}
+      {% if evs %}
+      <ul class="cmd27-evlist">
+        {% for e in evs[:4] %}
+        <li class="{{ 'is-high' if e.impact == 'HIGH' }}">
+          <span class="cmd27-ev-when">{{ e.time or '' }}<small>{{ e.date_label or '' }}</small></span>
+          <span class="cmd27-ev-what">{{ e.title }}{% if e.on_watchlist %} <em class="cc-tag">watchlist</em>{% endif %}{% if e.reason and e.kind != 'EARNINGS' %}<small>{{ e.reason }}</small>{% endif %}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="cc-empty">No upcoming events were returned.</p>{% endif %}
+    </section>
+  </div>
+  </div><div class="cc-col-side">
+    <div class="nx-panel cc-nx-mini cmd27-nx" id="nx-panel" aria-labelledby="nx-panel-title">
+      <header class="nx-panel__head">
+        <h3 class="nx-panel__title" id="nx-panel-title">Notifications <span class="nx-panel__count" id="nx-panel-count"></span></h3>
+        <span class="nx-panel__links"><a class="nx-text-btn" href="{{ url_for('intel') }}">All news</a><button type="button" class="nx-text-btn" data-nx-open>Open</button></span>
+      </header>
+      <div class="nx-chips" id="nx-panel-chips" role="group" aria-label="Filter notifications"></div>
+      <ol class="nx-list nx-list--panel" id="nx-panel-list" aria-live="polite"><li class="nx-empty"><span>Loading...</span></li></ol>
+    </div>
+  </div></div>
+
+  {# ── Launch cards ────────────────────────────────────────────────────── #}
+  <nav class="cmd27-launch" aria-label="Go to">
+    {% for href, title, blurb, ic in [
+      (url_for('research_page'), 'Discover', 'Find high-quality opportunities with AI screening', 'search'),
+      (url_for('fundamentals_page'), 'Verify', 'Investigate, validate and assess risks with real evidence', 'shield'),
+      (url_for('wealth.research_list_page'), 'M.C.F.F.', 'Moat, CEO, Financials, Future — your four gates', 'bars'),
+      (url_for('research_page'), 'Company Overview', 'Complete financial and business intelligence', 'bank'),
+      (url_for('wealth.next_dollar_page'), 'Capital Deployment', 'Where your next dollar goes, or stays cash', 'coins')] %}
+    <a class="cmd27-launch__card" href="{{ href }}">
+      <span class="cmd27-launch__ic ic-{{ ic }}" aria-hidden="true">
+        {%- if ic == 'search' %}<svg viewBox="0 0 40 40" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.6"><circle cx="17" cy="17" r="11"/><path d="m25 25 9 9"/><path d="M10 18h4l2-4 3 7 2-3h3"/></svg>
+        {%- elif ic == 'shield' %}<svg viewBox="0 0 40 40" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 4 7 9v9c0 9 6 15 13 18 7-3 13-9 13-18V9Z"/><path d="m13 20 5 5 9-10"/></svg>
+        {%- elif ic == 'bars' %}<svg viewBox="0 0 40 40" width="44" height="44" fill="currentColor"><rect x="5" y="22" width="6" height="13" rx="1.5"/><rect x="14" y="16" width="6" height="19" rx="1.5"/><rect x="23" y="10" width="6" height="25" rx="1.5"/><rect x="32" y="4" width="5" height="31" rx="1.5"/></svg>
+        {%- elif ic == 'bank' %}<svg viewBox="0 0 40 40" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 35V12l14-7 14 7v23"/><path d="M4 35h32"/><path d="M12 16v4M18 16v4M24 16v4M30 16v4M12 25v4M18 25v4M24 25v4M30 25v4"/></svg>
+        {%- else %}<svg viewBox="0 0 40 40" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.4"><ellipse cx="15" cy="10" rx="9" ry="4"/><path d="M6 10v6c0 2.2 4 4 9 4s9-1.8 9-4v-6"/><path d="M6 16v6c0 2.2 4 4 9 4"/><ellipse cx="26" cy="24" rx="9" ry="4"/><path d="M17 24v6c0 2.2 4 4 9 4s9-1.8 9-4v-6"/></svg>{% endif -%}
+      </span>
+      <span class="cmd27-launch__txt"><strong>{{ title }}</strong><small>{{ blurb }}</small></span>
+      <span class="cmd27-launch__go" aria-hidden="true">›</span>
+    </a>
+    {% endfor %}
   </nav>
 </div>
 {% endblock %}
@@ -227,9 +267,7 @@ document.addEventListener('click', function (e) {
   var box = t.closest('.cc-picks'), name = t.getAttribute('data-cc-tab');
   box.querySelectorAll('[data-cc-tab]').forEach(function (b) { b.setAttribute('aria-selected', b === t ? 'true' : 'false'); });
   box.querySelectorAll('[data-cc-panel]').forEach(function (p) { p.hidden = p.getAttribute('data-cc-panel') !== name; });
-  box.querySelectorAll('[data-cc-for]').forEach(function (a) { a.hidden = a.getAttribute('data-cc-for') !== name; });
 });
 </script>
-<script defer src="{{ url_for('static', filename='js/elite_2027_layout.js') }}"></script>
-<script defer src="{{ url_for('static', filename='js/elite_2027_picture.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/command_center_picture.js') }}"></script>
 {% endblock %}

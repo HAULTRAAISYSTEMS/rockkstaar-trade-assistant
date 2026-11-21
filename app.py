@@ -294,7 +294,7 @@ _POLL_VERIFY_CACHE: dict = {}
 _POLL_PATHS = ("/api/live/bundle", "/api/market-tape", "/api/today/pulse",
                "/api/terminal/quotes", "/api/terminal/live/", "/api/quick",
                "/api/dashboard", "/api/live-board", "/api/mood", "/api/stock/",
-               "/api/briefing/voice", "/api/notifications", "/api/depth/")
+               "/api/briefing/voice", "/api/notifications", "/api/depth/", "/api/today/breadth")
 
 
 def _verified_user_for_request(uid):
@@ -10390,7 +10390,7 @@ def _command_center_context() -> dict:
     feed is cold is worse than one that renders with a gap in it.
     """
     context = {"week": [], "news": [], "setups": [], "watchlist": [],
-               "watchlist_name": "", "pulse": {}, "next_up": None,
+               "watchlist_name": "", "pulse": {}, "next_up": None, "sector_map": {},
                "story": None, "story_note": "",
                "news_refreshing": False, "news_note": "", "research_digest": {
                    "items": [], "material_count": 0, "alert_count": 0,
@@ -10582,6 +10582,17 @@ def _command_center_context() -> dict:
     except Exception as exc:
         logger.debug("command centre: watchlist rows unavailable: %s", exc)
 
+    # Ticker → sector fund, so the globe can group pins by sector.
+    # Built-in map only (no network); unknown tickers land in "Other".
+    try:
+        from market_engine import _TICKER_SECTOR, SECTOR_ETFS
+        smap = dict(_TICKER_SECTOR)
+        smap.update({etf: etf for etf in SECTOR_ETFS})
+        context["sector_map"] = smap
+    except Exception as exc:
+        logger.debug("command centre: sector map unavailable: %s", exc)
+        context["sector_map"] = {}
+
     return context
 
 
@@ -10649,6 +10660,43 @@ if _MKT_AVAILABLE:
 def api_mood():
     _pulse, reading = _mood_inputs()
     resp = jsonify({"ok": reading.get("known", False), **reading, "session": _pulse.get("session") or ""})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/api/today/breadth")
+def api_today_breadth():
+    """How many sector funds are up, down and flat on the day.
+
+    The app does not price all 500 S&P members, so the Command Center's
+    breadth ring counts the sector funds it already quotes (the same input
+    the market verdict uses) and says so. Flat = within ±0.05%.
+    """
+    try:
+        from market_engine import SECTOR_ETFS as _SE, live_quotes as _lq
+        quotes = _lq([s for s in _SE if s != "IWM"]) or {}
+    except Exception as exc:
+        logger.debug("breadth: %s", exc)
+        quotes = {}
+    rows = []
+    for sym, name in __import__("market_engine").SECTOR_ETFS.items():
+        if sym == "IWM":
+            continue
+        chg = (quotes.get(sym) or {}).get("change_pct")
+        try:
+            chg = float(chg) if chg is not None else None
+        except (TypeError, ValueError):
+            chg = None
+        rows.append({"symbol": sym, "name": name, "change_pct": chg})
+    known = [r for r in rows if r["change_pct"] is not None]
+    up = sum(1 for r in known if r["change_pct"] > 0.05)
+    down = sum(1 for r in known if r["change_pct"] < -0.05)
+    flat = len(known) - up - down
+    ok = len(known) >= 5
+    resp = jsonify({"ok": ok, "total": len(known), "advancing": up, "declining": down, "unchanged": flat,
+                    "pct_advancing": round(up / len(known) * 100) if known else None,
+                    "rows": sorted(rows, key=lambda r: -(r["change_pct"] if r["change_pct"] is not None else -99)),
+                    "basis": "sector funds"})
     resp.headers["Cache-Control"] = "no-store"
     return resp
 

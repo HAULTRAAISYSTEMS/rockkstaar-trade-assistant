@@ -12,11 +12,17 @@ def test_elite_navigation_allows_dropdown_panels_to_escape_nav_row():
 
 
 def test_research_learn_and_account_are_native_dropdowns():
+    """Desktop bar is icon tiles: Command, Terminal, Discover, Verify, M.C.F.F.,
+    Capital, Watchlists, Portfolio, then an avatar menu (Account + Learn)."""
     template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
-    for label in ("Research", "Wealth", "Learn", "Account"):
-        assert f'<summary class="nav-link' in template
-        assert f">{label} <span" in template
+    for label in ("Terminal", "Discover", "Capital", "Portfolio"):
+        assert '<summary class="nav-link nav-tile' in template
+        assert f'<span class="nav-tile__lbl">{label}</span>' in template
+    for label in ("Command", "Verify", "M.C.F.F.", "Watchlists"):
+        assert f'<span class="nav-tile__lbl">{label}</span>' in template
     assert template.count('<details class="nav-menu">') == 4
+    assert '<details class="nav-menu nav-avatar">' in template
+    assert "nav_tiles(capital_groups)" in template and "nav_tiles(portfolio_groups)" in template
 
 
 def test_account_dropdown_links_to_free_browser_alerts():
@@ -41,7 +47,7 @@ def test_mobile_research_learn_and_account_open_menu_sheets():
         assert f'id="{menu_id}" hidden' in template
     # Terminal opens a sheet too (Terminal, Setups Board, Watchlists & Alerts).
     assert template.count("mobile-app-nav__menu-trigger") == 5
-    assert template.count("nav_tiles(wealth_groups)") == 2
+    assert template.count("nav_tiles(wealth_groups)") == 1   # phone Capital sheet
     assert "Company Research" in template
     # Research entries are one grouped list rendered in both menus.
     assert "'Seven Checks'" in template and template.count("nav_tiles(research_groups)") == 2
@@ -61,12 +67,11 @@ def test_mobile_menu_sheets_are_usable_and_mutually_exclusive():
 
 
 def test_watchlists_live_under_terminal_on_desktop_and_phone():
-    """Watchlists moved off the top level: the lists feed the Terminal rail,
-    the setups board and alerts, so they sit in the Terminal menu."""
+    """Watchlists is a top-level tile on desktop and stays in the Terminal
+    sheet on the phone."""
     template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
-    assert '<details class="nav-menu nav-menu--split">' in template
-    assert template.count("url_for('watchlists_page')") == 1 and template.count("nav_tiles(terminal_groups)") == 2
-    assert 'class="nav-link {{ \'nav-link-active\' if ep == \'watchlists_page\' }}">Watchlists</a>' not in template
+    assert template.count("url_for('watchlists_page')") == 2 and template.count("nav_tiles(terminal_groups)") == 2
+    assert "'Watchlists & Alerts'" in template
     # Five phone tabs: Today, then Terminal, Research, Learn, Account sheets.
     assert template.count('class="mobile-app-nav__item') == 6   # Today, Terminal, Research, Wealth, Learn, Account
 

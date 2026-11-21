@@ -96,6 +96,8 @@
       var cx = W / 2 - pointer.x * 30;
       var cy = H * 0.42 - pointer.y * 20;
       var horizon = H * 0.66 - pointer.y * 12;
+      // Pages with a painted scene (the Command Center) keep only the particles.
+      if (!document.documentElement.classList.contains('cc-scene')) {
       var aur = ctx.createRadialGradient(cx, horizon, 10, cx, horizon, Math.max(W, H) * 0.55);
        aur.addColorStop(0, rgba(CYAN, 0.28));
 aur.addColorStop(0.35, rgba(POS, 0.16));
@@ -188,6 +190,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       ctx.fillStyle = hg;
       ctx.fillRect(0, horizon - 60, W, 90);
 
+      }
       // Particle field drifting toward the camera, with near-neighbour links
       var proj = [];
       for (var i = 0; i < pts.length; i++) {
@@ -249,7 +252,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     var ctx, W = 0, H = 0;
     var nodes = [];
     var lastSync = 0;
-    var rotY = 0.6, rotX = -0.32, velY = reduceMotion ? 0 : 0.18, dragging = false, lx = 0, ly = 0;
+    var rotY = -0.35, rotX = -0.3, velY = reduceMotion ? 0 : 0.1, dragging = false, lx = 0, ly = 0;
 
     function resize() {
       var r = host.getBoundingClientRect();
@@ -260,22 +263,230 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     else window.addEventListener('resize', resize, { passive: true });
     resize();
 
+    /* ── Real Earth texture ───────────────────────────────────────────
+       /static/img/earth.webp is an equirectangular map built from Natural
+       Earth coastlines (top half) and city lights from real city
+       populations (bottom half); scripts/build_earth_texture.py makes it.
+       Each frame every pixel of the disc is ray-cast through the same
+       perspective as project(), rotated back to lat/lon and shaded. */
+    var EARTH_SIL = Math.sqrt(10.24 * 4 / 36.96);   // silhouette radius / R for persp 3.2
+
+    // World point for a latitude/longitude, in the same frame as project()
+    // and the texture (east is +lon).
+    function geo(lat, lon) {
+      var a = lat * 0.0174533, o = lon * 0.0174533;
+      return [Math.cos(a) * Math.cos(o), -Math.sin(a), -Math.cos(a) * Math.sin(o)];
+    }
+    function toCam(v) {
+      var cY = Math.cos(rotY), sY = Math.sin(rotY), cX = Math.cos(rotX), sX = Math.sin(rotX);
+      var x1 = v[0] * cY + v[2] * sY, z1 = -v[0] * sY + v[2] * cY;
+      return [x1, v[1] * cX - z1 * sX, v[1] * sX + z1 * cX];
+    }
+    // Where the sun is overhead right now (declination + hour angle), so the
+    // lit half of the globe is the real day side.
+    function subsolar(now) {
+      var start = Date.UTC(now.getUTCFullYear(), 0, 0), day = (now - start) / 864e5;
+      var decl = -23.44 * Math.cos(2 * Math.PI / 365 * (day + 10));
+      var hrs = now.getUTCHours() + now.getUTCMinutes() / 60;
+      return [decl, -15 * (hrs - 12)];
+    }
+    var sunCam = [-0.52, -0.42, 0.74];
+
+    /* Sector continents: each sector owns a landmass, pins cluster inside it. */
+    var REGIONS = {
+      TECH:   { name: 'TECH',          lat: 41,  lon: -100, spread: 12 },
+      SEMIS:  { name: 'SEMIS',         lat: 34,  lon: 118,  spread: 9 },
+      FIN:    { name: 'FINANCIALS',    lat: 49,  lon: 12,   spread: 8 },
+      ENERGY: { name: 'ENERGY',        lat: 26,  lon: 47,   spread: 6 },
+      CONS:   { name: 'CONSUMER',      lat: -11, lon: -57,  spread: 10 },
+      HEALTH: { name: 'HEALTHCARE',    lat: 3,   lon: 22,   spread: 10 },
+      COMM:   { name: 'COMMUNICATION', lat: 22,  lon: 79,   spread: 6 },
+      INDUS:  { name: 'INDUSTRIALS',   lat: 60,  lon: 95,   spread: 12 },
+      OTHER:  { name: 'DEFENSIVE · OTHER', lat: -25, lon: 134, spread: 9 },
+      INDEX:  { name: 'INDEXES',       lat: 72,  lon: -40,  spread: 6 }
+    };
+    var ETF_REGION = { XLK: 'TECH', SMH: 'SEMIS', XLF: 'FIN', XLE: 'ENERGY', XLY: 'CONS', XLV: 'HEALTH',
+                       XLC: 'COMM', XLI: 'INDUS', XLB: 'INDUS', XLU: 'OTHER', XLRE: 'OTHER', IWM: 'INDEX' };
+    var SECTORS = {};
+    try { SECTORS = JSON.parse(host.getAttribute('data-sectors') || '{}') || {}; } catch (e) { SECTORS = {}; }
+    var useRegions = !!host.getAttribute('data-sectors');
+    function regionFor(sym) {
+      var u = String(sym || '').toUpperCase();
+      if (/^(SPY|QQQ|DIA|IWM|VIX|VOO|VTI|TLT|GLD|SLV|USO|DXY|UUP|BTC.*|ETH.*|ES|NQ|YM|RTY|CL|GC)$/.test(u) || /[=^\/]/.test(u)) return 'INDEX';
+      return ETF_REGION[SECTORS[u]] || 'OTHER';
+    }
+    function placeInRegions(list) {
+      var groups = {};
+      list.forEach(function (t) { var k = regionFor(t.symbol); (groups[k] = groups[k] || []).push(t); });
+      var pos = {};
+      Object.keys(groups).forEach(function (k) {
+        var g = groups[k], rg = REGIONS[k], n = g.length;
+        g.forEach(function (t, i) {
+          var rr = n === 1 ? 0 : rg.spread * Math.sqrt((i + 0.5) / n), a = i * 2.39996;
+          var la = rg.lat + rr * Math.cos(a);
+          var lo = rg.lon + rr * Math.sin(a) / Math.max(0.3, Math.cos(la * 0.0174533));
+          pos[t.symbol] = { v: geo(la, lo), region: k };
+        });
+      });
+      return pos;
+    }
+
+    /* Exchanges: a beacon pulses green while the exchange is inside its
+       regular session by its own local clock (holidays are not counted). */
+    var EXCH = [
+      ['NYSE', 40.71, -74.01, 'America/New_York', 930, 1600],
+      ['TSX', 43.65, -79.38, 'America/Toronto', 930, 1600],
+      ['B3', -23.55, -46.63, 'America/Sao_Paulo', 1000, 1700],
+      ['LSE', 51.51, -0.09, 'Europe/London', 800, 1630],
+      ['XETRA', 50.11, 8.68, 'Europe/Berlin', 900, 1730],
+      ['NSE', 19.06, 72.87, 'Asia/Kolkata', 915, 1530],
+      ['SSE', 31.23, 121.47, 'Asia/Shanghai', 930, 1500],
+      ['HKEX', 22.28, 114.16, 'Asia/Hong_Kong', 930, 1600],
+      ['TSE', 35.68, 139.77, 'Asia/Tokyo', 900, 1530],
+      ['ASX', -33.87, 151.21, 'Australia/Sydney', 1000, 1600]
+    ].map(function (e) { return { name: e[0], lat: e[1], lon: e[2], tz: e[3], open: e[4], close: e[5], v: geo(e[1], e[2]), live: false }; });
+    var ARCS = [['NYSE', 'LSE'], ['LSE', 'XETRA'], ['XETRA', 'NSE'], ['NSE', 'HKEX'], ['HKEX', 'TSE'], ['TSE', 'ASX'],
+                ['NYSE', 'B3'], ['NYSE', 'TSX'], ['LSE', 'HKEX'], ['NYSE', 'TSE'], ['SSE', 'HKEX'], ['LSE', 'B3']];
+    function exch(n) { for (var i = 0; i < EXCH.length; i++) if (EXCH[i].name === n) return EXCH[i]; return null; }
+    var sessionAt = 0;
+    function refreshSessions(now) {
+      EXCH.forEach(function (e) {
+        try {
+          var parts = new Intl.DateTimeFormat('en-US', { timeZone: e.tz, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
+          var get = function (t) { for (var i = 0; i < parts.length; i++) if (parts[i].type === t) return parts[i].value; return ''; };
+          var wd = get('weekday'), hm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
+          e.live = wd !== 'Sat' && wd !== 'Sun' && hm >= e.open && hm < e.close;
+        } catch (err) { e.live = false; }
+      });
+    }
+    // Great-circle arc lifted off the surface.
+    function arcPoint(a, b, t, lift) {
+      var d = Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])));
+      var sd = Math.sin(d) || 1e-6, k1 = Math.sin((1 - t) * d) / sd, k2 = Math.sin(t * d) / sd;
+      var h = 1 + lift * Math.sin(Math.PI * t) * Math.min(1, d / 1.2);
+      return [(a[0] * k1 + b[0] * k2) * h, (a[1] * k1 + b[1] * k2) * h, (a[2] * k1 + b[2] * k2) * h];
+    }
+    var tex = null, TW = 0, TH = 0;
+    var eCanvas = document.createElement('canvas'), eCtx = eCanvas.getContext('2d');
+    var eImg = null, eD = 0, eRay = null;
+    (function loadEarth() {
+      var img = new Image();
+      img.decoding = 'async';
+      img.onload = function () {
+        try {
+          var c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+          var g = c.getContext('2d'); g.drawImage(img, 0, 0);
+          tex = g.getImageData(0, 0, c.width, c.height).data; TW = c.width; TH = c.height / 2;
+          if (reduceMotion && ctx) draw(0, 0);
+        } catch (e) { tex = null; }
+      };
+      var small = Math.min(window.innerWidth, window.innerHeight) < 600;
+      img.src = (host.getAttribute('data-earth-src') || '/static/img/' + (small ? 'earth_1024.webp' : 'earth.webp'));
+    })();
+
+    function buildRays(D) {
+      // Camera-space unit-sphere point for every pixel of a D×D square (0 = off-globe).
+      eD = D; eCanvas.width = D; eCanvas.height = D;
+      eImg = eCtx.createImageData(D, D);
+      eRay = new Float32Array(D * D * 4);
+      var half = D / 2;
+      for (var j = 0; j < D; j++) {
+        for (var i = 0; i < D; i++) {
+          var u = ((i + 0.5) - half) / half * EARTH_SIL, v = ((j + 0.5) - half) / half * EARTH_SIL;
+          var k = (u * u + v * v) / 10.24;
+          var A = k + 1, B = -6.4 * k, C = 10.24 * k - 1, disc = B * B - 4 * A * C;
+          var o = (j * D + i) * 4;
+          if (disc < 0) { eRay[o + 3] = 0; continue; }
+          var z = (-B + Math.sqrt(disc)) / (2 * A);
+          var f = (3.2 - z) / 3.2;
+          eRay[o] = u * f; eRay[o + 1] = v * f; eRay[o + 2] = z;
+          // Edge alpha: fade the last ~1.5px for a smooth limb.
+          var rr = Math.sqrt(u * u + v * v) / EARTH_SIL;
+          eRay[o + 3] = Math.max(0.001, Math.min(1, (1 - rr) * half / 1.5));
+        }
+      }
+    }
+
+    // Spinning about the vertical axis only shifts longitude, so each pixel's
+    // texture row and base column are cached per tilt (rotX); a frame is then
+    // a lookup plus lighting.
+    var eRow = null, eCol = null, eTilt = null;
+    function buildLookup() {
+      var n = eD * eD, cX = Math.cos(rotX), sX = Math.sin(rotX), PI = Math.PI;
+      eRow = new Int32Array(n); eCol = new Float32Array(n);
+      for (var p = 0; p < n; p++) {
+        var o = p * 4;
+        if (eRay[o + 3] === 0) continue;
+        var y1 = eRay[o + 1], z2 = eRay[o + 2];
+        var y = y1 * cX + z2 * sX, z1 = -y1 * sX + z2 * cX;
+        var lat = Math.asin(y < -1 ? 1 : (y > 1 ? -1 : -y));
+        var ty = ((PI / 2 - lat) / PI * TH) | 0; if (ty >= TH) ty = TH - 1;
+        eRow[p] = ty * TW;
+        eCol[p] = (PI - Math.atan2(z1, eRay[o])) / (2 * PI) * TW;   // lon = -atan2(z1, x1) - rotY
+      }
+      eTilt = rotX;
+    }
+
+    function drawEarth(cx, cy, R) {
+      if (!tex) return false;
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      var D = Math.min(Math.round(2 * R * EARTH_SIL * dpr), window.innerWidth < 760 ? 360 : 600);
+      if (D !== eD) { buildRays(D); eTilt = null; }
+      if (eTilt !== rotX) buildLookup();
+      var data = eImg.data, ray = eRay, row = eRow, col = eCol;
+      var Lx = sunCam[0], Ly = sunCam[1], Lz = sunCam[2];
+      var Hx = Lx, Hy = Ly, Hz = Lz + 1, hl = Math.sqrt(Hx * Hx + Hy * Hy + Hz * Hz) || 1; Hx /= hl; Hy /= hl; Hz /= hl;
+      var tw = TW, rowB = TW * TH * 4;
+      var shift = (rotY / (2 * Math.PI)) * tw; shift = shift - Math.floor(shift / tw) * tw;
+      for (var p = 0, n = D * D; p < n; p++) {
+        var o = p * 4, a = ray[o + 3];
+        if (a === 0) { data[o + 3] = 0; continue; }
+        var x1 = ray[o], y1 = ray[o + 1], z2 = ray[o + 2];
+        var tx = (col[p] - shift) | 0; if (tx < 0) tx += tw; if (tx >= tw) tx -= tw;
+        var ti = (row[p] + tx) * 4;
+        var r = tex[ti], g = tex[ti + 1], b = tex[ti + 2], lights = tex[rowB + ti] / 255;
+        var raw = x1 * Lx + y1 * Ly + z2 * Lz, dif = raw < 0 ? 0 : raw;
+        var shade = 0.34 + 0.95 * dif;
+        var nightness = 0.5 - raw * 4; nightness = nightness < 0 ? 0 : (nightness > 1 ? 1 : nightness);
+        var lg = lights * (0.35 + 1.35 * nightness);
+        var R2 = r * shade + 210 * lg, G2 = g * shade + 255 * lg, B2 = b * shade + 72 * lg;
+        // Warm twilight along the terminator.
+        var tb = raw < 0 ? -raw : raw;
+        if (tb < 0.07 && g > b) { tb = (1 - tb / 0.07) * 0.35; R2 += 90 * tb; G2 += 50 * tb; }
+        if (b > g) {
+          var sp = x1 * Hx + y1 * Hy + z2 * Hz;
+          if (sp > 0.97) { sp = Math.pow(sp, 220) * 80; R2 += sp * 0.6; G2 += sp * 0.9; B2 += sp; }
+        }
+        var limb = 1 - z2; limb = limb * limb * limb;
+        R2 += 20 * limb; G2 += 120 * limb; B2 += 170 * limb;
+        data[o] = R2 > 255 ? 255 : R2; data[o + 1] = G2 > 255 ? 255 : G2; data[o + 2] = B2 > 255 ? 255 : B2;
+        data[o + 3] = a * 255;
+      }
+      eCtx.putImageData(eImg, 0, 0);
+      var RS = R * EARTH_SIL;
+      ctx.drawImage(eCanvas, cx - RS, cy - RS, RS * 2, RS * 2);
+      return true;
+    }
+
     function setData(items) {
       var list = (items || []).filter(function (t) { return t && t.symbol; });
       var seen = {}, uniq = [];
       list.forEach(function (t) { if (!seen[t.symbol]) { seen[t.symbol] = 1; uniq.push(t); } });
       var n = uniq.length, golden = Math.PI * (3 - Math.sqrt(5));
+      var placed = useRegions ? placeInRegions(uniq) : null;
       nodes = uniq.map(function (t, i) {
         var y = n === 1 ? 0 : 1 - (i / (n - 1)) * 2;
         var rad = Math.sqrt(1 - y * y);
         var th = golden * i;
         var prev = null;
         for (var j = 0; j < nodes.length; j++) if (nodes[j].symbol === t.symbol) prev = nodes[j];
+        var pp = placed && placed[t.symbol];
         return {
           symbol: t.symbol,
           price: t.price,
           chg: t.change_pct,
-          x: Math.cos(th) * rad, y: y * 0.92, z: Math.sin(th) * rad,
+          region: pp ? pp.region : null,
+          x: pp ? pp.v[0] : Math.cos(th) * rad, y: pp ? pp.v[1] : y * 0.92, z: pp ? pp.v[2] : Math.sin(th) * rad,
           flash: prev && prev.price !== t.price ? 1 : (prev ? prev.flash : 0.6)
         };
       });
@@ -373,7 +584,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         if (wasTap) {
           var h = nearest(e.clientX, e.clientY, e.pointerType === 'mouse' ? 16 : 26);
           if (h) openCard(h.symbol); else closeCard();
-        } else if (!selected && !reduceMotion && Math.abs(velY) < 0.12) velY = 0.18;
+        } else if (!selected && !reduceMotion && Math.abs(velY) < 0.06) velY = 0.1;
       });
       host.addEventListener('pointercancel', function () { dragging = false; });
       host.addEventListener('pointerleave', function () { hovered = null; canvas.style.cursor = ''; });
@@ -456,7 +667,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       if (!selected) return;
       selected = null; if (card) card.hidden = true;
       host.classList.remove('has-selection');
-      if (!reduceMotion) velY = 0.18; else draw(0, 0);
+      if (!reduceMotion) velY = 0.1; else draw(0, 0);
     }
 
     function project(x, y, z, R, cx, cy) {
@@ -469,10 +680,10 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     }
 
     function draw(time, dt) {
-      if (!dragging && !reduceMotion) { rotY += velY * dt; velY += ((selected ? 0 : 0.18) - velY) * (selected ? 0.2 : 0.02); }
+      if (!dragging && !reduceMotion) { rotY += velY * dt; velY += ((selected ? 0 : 0.1) - velY) * (selected ? 0.2 : 0.02); }
       ctx.clearRect(0, 0, W, H);
       // Bigger canvas, bigger globe: fill more of it once there is room.
-      var R = Math.min(W, H) * (Math.min(W, H) > 420 ? 0.34 : 0.29);
+      var R = Math.min(W, H) * (Math.min(W, H) > 420 ? 0.35 : 0.33);
       var cx = W / 2 + pointer.x * 6, cy = H * 0.47 + pointer.y * 6;
 
       // Core glow
@@ -482,79 +693,33 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       cg.addColorStop(1, rgba(CYAN, 0));
       ctx.fillStyle = cg;
       ctx.beginPath(); ctx.arc(cx, cy, R * 1.25, 0, 6.2832); ctx.fill();
-      // Luminous 3D Earth sphere & bright cyan atmospheric rim halo
-      var earthBg = ctx.createRadialGradient(cx - R * 0.28, cy - R * 0.3, R * 0.1, cx, cy, R);
-      earthBg.addColorStop(0, 'rgba(10, 48, 72, 0.88)');
-      earthBg.addColorStop(0.65, 'rgba(4, 16, 34, 0.92)');
-      earthBg.addColorStop(0.92, rgba(CYAN, 0.24));
-      earthBg.addColorStop(1, rgba(CYAN, 0.58));
-      ctx.fillStyle = earthBg;
-      ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.fill();
+      // Real Earth: coastlines + city lights texture, lit by the real sun.
+      var nowD = new Date();
+      var ss = subsolar(nowD); sunCam = toCam(geo(ss[0], ss[1]));
+      if (!sessionAt || time - sessionAt > 30) { refreshSessions(nowD); sessionAt = time || 0.001; }
+      if (!drawEarth(cx, cy, R)) {
+        var earthBg = ctx.createRadialGradient(cx - R * 0.28, cy - R * 0.3, R * 0.1, cx, cy, R);
+        earthBg.addColorStop(0, 'rgba(10, 48, 72, 0.88)');
+        earthBg.addColorStop(1, 'rgba(4, 16, 34, 0.92)');
+        ctx.fillStyle = earthBg;
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.fill();
+      }
+      // Atmosphere: soft cyan halo just outside the limb, then a crisp rim.
+      var RS = R * EARTH_SIL;
+      var atm = ctx.createRadialGradient(cx, cy, RS * 0.96, cx, cy, RS * 1.16);
+      atm.addColorStop(0, rgba(CYAN, 0.55));
+      atm.addColorStop(0.35, rgba(CYAN, 0.18));
+      atm.addColorStop(1, rgba(CYAN, 0));
+      ctx.fillStyle = atm;
+      ctx.beginPath(); ctx.arc(cx, cy, RS * 1.16, 0, 6.2832); ctx.arc(cx, cy, RS * 0.985, 0, 6.2832, true); ctx.fill();
       ctx.save();
-      ctx.strokeStyle = rgba(CYAN, 0.8);
-      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = rgba(CYAN, 0.7);
+      ctx.lineWidth = 1.6;
       ctx.shadowColor = rgba(CYAN, 0.95);
-      ctx.shadowBlur = 20;
-      ctx.beginPath(); ctx.arc(cx, cy, R * 1.004, 0, 6.2832); ctx.stroke();
+      ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(cx, cy, RS, 0, 6.2832); ctx.stroke();
       ctx.restore();
 
-      // Glowing emerald/cyan continent silhouettes
-      var CONTINENTS = [
-        [[60,-165],[70,-140],[68,-95],[60,-65],[45,-62],[30,-81],[25,-80],[20,-90],[15,-84],[9,-78],[18,-104],[32,-117],[48,-125],[58,-136]],
-        [[11,-74],[5,-52],[-5,-35],[-23,-42],[-38,-57],[-54,-68],[-45,-75],[-20,-71],[-5,-81]],
-        [[36,-9],[43,-9],[50,2],[58,8],[69,18],[70,30],[60,30],[50,25],[43,15],[38,24],[36,10]],
-        [[35,-6],[32,12],[31,32],[12,44],[2,45],[-10,40],[-26,33],[-34,18],[-20,12],[4,9],[6,-10],[20,-17]],
-        [[70,32],[73,80],[72,135],[66,170],[54,140],[40,128],[31,122],[22,114],[10,104],[1,103],[8,98],[22,90],[8,77],[25,62],[30,48],[41,29],[55,28]],
-        [[-12,130],[-14,142],[-26,153],[-38,145],[-34,115],[-22,114]]
-      ];
-      ctx.save();
-      ctx.beginPath(); ctx.arc(cx, cy, R * 0.998, 0, 6.2832); ctx.clip();
-      for (var ci = 0; ci < CONTINENTS.length; ci++) {
-        var poly = CONTINENTS[ci], ptsC = [], front = 0;
-        for (var vi = 0; vi < poly.length; vi++) {
-          var laR = poly[vi][0] * 0.0174533, loR = poly[vi][1] * 0.0174533;
-          var cp = project(Math.cos(laR) * Math.cos(loR), -Math.sin(laR), Math.cos(laR) * Math.sin(loR), R * 1.001, cx, cy);
-          ptsC.push(cp);
-          if (cp[2] > -0.15 * R) front++;
-        }
-        if (front < 2) continue;
-        ctx.beginPath();
-        for (var vi = 0; vi < ptsC.length; vi++) {
-          if (vi === 0) ctx.moveTo(ptsC[vi][0], ptsC[vi][1]);
-          else ctx.lineTo(ptsC[vi][0], ptsC[vi][1]);
-        }
-        ctx.closePath();
-        ctx.fillStyle = rgba(POS, 0.24);
-        ctx.fill();
-        ctx.shadowColor = rgba(CYAN, 0.75);
-        ctx.shadowBlur = 8;
-        ctx.strokeStyle = rgba(POS, 0.76);
-        ctx.lineWidth = 1.25;
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-      }
-      // City-light clusters
-      var CITIES = [
-        [40.7,-74],[41.8,-87.6],[37.7,-122.4],[43.6,-79.3],[51.5,-0.1],[50.1,8.6],[48.8,2.3],[47.3,8.5],
-        [35.6,139.7],[22.3,114.2],[1.3,103.8],[-33.8,151.2],[25.2,55.3],[-23.5,-46.6],[19.0,72.8],[37.5,127.0],[31.2,121.5],[-26.2,28.0]
-      ];
-      for (var ki = 0; ki < CITIES.length; ki++) {
-        var cLat = CITIES[ki][0], cLon = CITIES[ki][1];
-        for (var sub = 0; sub < 3; sub++) {
-          var sLat = (cLat + (sub === 0 ? 0 : (sub === 1 ? 1.8 : -1.5))) * 0.0174533;
-          var sLon = (cLon + (sub === 0 ? 0 : (sub === 1 ? 2.2 : -1.9))) * 0.0174533;
-          var cP = project(Math.cos(sLat) * Math.cos(sLon), -Math.sin(sLat), Math.cos(sLat) * Math.sin(sLon), R * 1.003, cx, cy);
-          if (cP[2] <= 0.05 * R) continue;
-          var pulse = reduceMotion ? 0.85 : (0.55 + 0.45 * Math.sin(time * 2.4 + ki * 1.3 + sub));
-          ctx.fillStyle = rgba(sub === 0 ? GOLD : CYAN, pulse * 0.9);
-          ctx.shadowColor = rgba(sub === 0 ? GOLD : CYAN, 0.85);
-          ctx.shadowBlur = sub === 0 ? 8 : 5;
-          ctx.beginPath(); ctx.arc(cP[0], cP[1], sub === 0 ? 2.0 : 1.15, 0, 6.2832); ctx.fill();
-        }
-      }
-      ctx.shadowBlur = 0;
-      ctx.restore();
-       
       // Wireframe: latitudes + meridians
       ctx.lineWidth = 0.8;
       var seg = 48;
@@ -565,7 +730,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           var P = project(p[0], p[1], p[2], R, cx, cy);
           if (prev) {
             var depth = (prev[2] + P[2]) / 2;
-            ctx.strokeStyle = rgba(CYAN, depth > 0 ? 0.32 : 0.08);
+            ctx.strokeStyle = rgba(CYAN, depth > 0 ? 0.13 : 0.0);
             ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(P[0], P[1]); ctx.stroke();
           }
           prev = P;
@@ -624,7 +789,147 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       ctx.beginPath(); ctx.arc(B2[0], B2[1], 2.8 * B2[3], 0, 6.2832); ctx.fill();
       ctx.shadowBlur = 0;
        
-      // Data nodes: spike length = size of the move, colour = direction
+      // Holographic HUD ring: slow-turning ticks and arc segments.
+      var RSo = R * EARTH_SIL, hr = RSo * 1.13, spin = reduceMotion ? 0 : time * 0.12;
+      ctx.save();
+      ctx.lineWidth = 1;
+      for (var tk = 0; tk < 120; tk++) {
+        var ang = spin + tk / 120 * 6.2832, long = tk % 10 === 0;
+        var r0 = hr - (long ? 7 : 3), r1 = hr + (long ? 2 : 0);
+        ctx.strokeStyle = rgba(CYAN, long ? 0.55 : 0.22);
+        ctx.beginPath(); ctx.moveTo(cx + Math.cos(ang) * r0, cy + Math.sin(ang) * r0); ctx.lineTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1); ctx.stroke();
+      }
+      ctx.lineWidth = 2;
+      ctx.shadowColor = rgba(CYAN, 0.9); ctx.shadowBlur = 10;
+      [[0.1, 0.9], [1.6, 2.2], [3.3, 4.4], [5.0, 5.5]].forEach(function (seg, i) {
+        ctx.strokeStyle = rgba(i % 2 ? POS : CYAN, 0.7);
+        ctx.beginPath(); ctx.arc(cx, cy, hr + 6, -spin * 1.6 + seg[0], -spin * 1.6 + seg[1]); ctx.stroke();
+      });
+      ctx.shadowBlur = 0;
+      ctx.restore();
+
+      // Trading arcs between money centres, with light pulses flowing along them.
+      ctx.save();
+      for (var ai = 0; ai < ARCS.length; ai++) {
+        var ea = exch(ARCS[ai][0]), eb = exch(ARCS[ai][1]);
+        var liveArc = ea.live || eb.live, prevA = null, segs = 36;
+        ctx.lineWidth = liveArc ? 1.6 : 1;
+        for (var si = 0; si <= segs; si++) {
+          var Pa = arcPoint(ea.v, eb.v, si / segs, 0.32);
+          var Q = project(Pa[0], Pa[1], Pa[2], R, cx, cy);
+          if (prevA) {
+            var vis = (prevA[2] + Q[2]) / 2;
+            // Hidden behind the globe? skip (the limb sits around z≈0.3 of the radius in this view).
+            if (vis > -0.05) {
+              ctx.strokeStyle = rgba(liveArc ? POS : CYAN, (liveArc ? 0.55 : 0.28) * Math.min(1, 0.4 + vis));
+              ctx.beginPath(); ctx.moveTo(prevA[0], prevA[1]); ctx.lineTo(Q[0], Q[1]); ctx.stroke();
+            }
+          }
+          prevA = Q;
+        }
+        // Pulses
+        for (var pk = 0; pk < 2; pk++) {
+          var pt = ((reduceMotion ? 0.5 : time * 0.22) + ai * 0.37 + pk * 0.5) % 1;
+          var Pp = arcPoint(ea.v, eb.v, pt, 0.32), Qp = project(Pp[0], Pp[1], Pp[2], R, cx, cy);
+          if (Qp[2] < 0) continue;
+          ctx.fillStyle = rgba(liveArc ? POS : CYAN, 0.95);
+          ctx.shadowColor = rgba(liveArc ? POS : CYAN, 1); ctx.shadowBlur = 12;
+          ctx.beginPath(); ctx.arc(Qp[0], Qp[1], 2.2 * Qp[3], 0, 6.2832); ctx.fill();
+        }
+        ctx.shadowBlur = 0;
+      }
+      var tagBoxes = [];
+      function boxFree(b) {
+        for (var q = 0; q < tagBoxes.length; q++) { var o = tagBoxes[q]; if (b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]) return false; }
+        return true;
+      }
+      // Sector territories: a glowing border on the land + a live tag.
+      if (useRegions && nodes.length) {
+        var stats = {};
+        nodes.forEach(function (nd) {
+          if (!nd.region) return;
+          var st = stats[nd.region] = stats[nd.region] || { n: 0, sum: 0, k: 0 };
+          st.n++;
+          // VIX moves opposite to stocks, so it stays a pin but not part of the average.
+          if (nd.chg != null && !/VIX/.test(String(nd.symbol).toUpperCase())) { st.sum += Number(nd.chg); st.k++; }
+        });
+        Object.keys(stats).forEach(function (k) {
+          var rg = REGIONS[k], st = stats[k], avg = st.k ? st.sum / st.k : null;
+          var colT = avg == null ? CYAN : (avg > 0.05 ? POS : (avg < -0.05 ? NEG : FLAT));
+          var cen = geo(rg.lat, rg.lon), C = project(cen[0], cen[1], cen[2], R, cx, cy);
+          if (C[2] < -0.1) return;
+          // Border: small circle of radius spread+4° around the centre.
+          var ang = (rg.spread + 4) * 0.0174533, ca = Math.cos(ang), sa = Math.sin(ang);
+          var up = Math.abs(cen[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0];
+          var e1 = [cen[1] * up[2] - cen[2] * up[1], cen[2] * up[0] - cen[0] * up[2], cen[0] * up[1] - cen[1] * up[0]];
+          var l1 = Math.sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]); e1 = [e1[0] / l1, e1[1] / l1, e1[2] / l1];
+          var e2 = [cen[1] * e1[2] - cen[2] * e1[1], cen[2] * e1[0] - cen[0] * e1[2], cen[0] * e1[1] - cen[1] * e1[0]];
+          var dash = reduceMotion ? 0 : time * 0.6;
+          ctx.lineWidth = 1.6;
+          ctx.shadowColor = rgba(colT, 0.9); ctx.shadowBlur = 8;
+          var prevT = null;
+          for (var bs = 0; bs <= 64; bs++) {
+            var th2 = bs / 64 * 6.2832, c2 = Math.cos(th2), s2 = Math.sin(th2);
+            var pv = [cen[0] * ca + (e1[0] * c2 + e2[0] * s2) * sa, cen[1] * ca + (e1[1] * c2 + e2[1] * s2) * sa, cen[2] * ca + (e1[2] * c2 + e2[2] * s2) * sa];
+            var PT = project(pv[0] * 1.004, pv[1] * 1.004, pv[2] * 1.004, R, cx, cy);
+            if (prevT && PT[2] > 0 && prevT[2] > 0 && ((bs + Math.floor(dash * 4)) % 4 !== 0)) {
+              ctx.strokeStyle = rgba(colT, 0.5 * Math.min(1, PT[2] * 2));
+              ctx.beginPath(); ctx.moveTo(prevT[0], prevT[1]); ctx.lineTo(PT[0], PT[1]); ctx.stroke();
+            }
+            prevT = PT;
+          }
+          ctx.shadowBlur = 0;
+          // Floating tag above the territory.
+          if (C[2] > 0.2) {
+            var lift = project(cen[0] * 1.16, cen[1] * 1.16, cen[2] * 1.16, R, cx, cy);
+            ctx.font = '800 ' + (W > 520 ? 11 : 10) + 'px "IBM Plex Mono", ui-monospace, monospace';
+            ctx.textBaseline = 'middle';
+            var t1 = rg.name, t2 = avg == null ? st.n + ' pins' : (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%';
+            var w1 = ctx.measureText(t1).width, w2 = ctx.measureText(t2).width, bw = w1 + w2 + 22;
+            var bx = lift[0] - bw / 2, by = lift[1] - 11, box = [bx, by, bx + bw, by + 22];
+            if (!boxFree(box)) return;
+            tagBoxes.push(box);
+            ctx.strokeStyle = rgba(colT, 0.55); ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(C[0], C[1]); ctx.lineTo(lift[0], by + 22); ctx.stroke();
+            ctx.fillStyle = 'rgba(3,10,22,0.82)';
+            ctx.shadowColor = rgba(colT, 0.7); ctx.shadowBlur = 12;
+            ctx.beginPath();
+            if (ctx.roundRect) ctx.roundRect(bx, by, bw, 22, 7); else ctx.rect(bx, by, bw, 22);
+            ctx.fill(); ctx.shadowBlur = 0; ctx.stroke();
+            ctx.fillStyle = 'rgba(232,241,255,0.95)'; ctx.fillText(t1, bx + 8, by + 11);
+            ctx.fillStyle = rgba(colT, 1); ctx.fillText(t2, bx + 14 + w1, by + 11);
+          }
+        });
+      }
+
+      // Exchange beacons + labels (near side only).
+      ctx.font = '700 ' + (W > 520 ? 10 : 9) + 'px "IBM Plex Mono", ui-monospace, monospace';
+      ctx.textBaseline = 'middle';
+      for (var ei = 0; ei < EXCH.length; ei++) {
+        var ex = EXCH[ei], Pe = project(ex.v[0], ex.v[1], ex.v[2], R, cx, cy);
+        if (Pe[2] < 0.12) continue;
+        var colE = ex.live ? POS : GOLD, ph = reduceMotion ? 0.5 : (time * 0.8 + ei * 0.13) % 1;
+        ctx.strokeStyle = rgba(colE, (1 - ph) * 0.8); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(Pe[0], Pe[1], (4 + ph * 14) * Pe[3], 0, 6.2832); ctx.stroke();
+        ctx.fillStyle = rgba(colE, 1); ctx.shadowColor = rgba(colE, 1); ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.arc(Pe[0], Pe[1], 2.6 * Pe[3], 0, 6.2832); ctx.fill();
+        ctx.shadowBlur = 0;
+        if (Pe[2] > 0.3) {
+          var tag = ex.name + (ex.live ? ' · OPEN' : ' · CLOSED'), tw2 = ctx.measureText(tag).width;
+          var tx2 = Pe[0] + 8, ty2 = Pe[1] - 10;
+          if (!boxFree([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8])) { ty2 = Pe[1] + 12; if (!boxFree([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8])) continue; }
+          tagBoxes.push([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8]);
+          ctx.fillStyle = 'rgba(3,10,22,0.78)';
+          ctx.strokeStyle = rgba(colE, 0.6); ctx.lineWidth = 1;
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(tx2 - 4, ty2 - 8, tw2 + 8, 16, 5); else ctx.rect(tx2 - 4, ty2 - 8, tw2 + 8, 16);
+          ctx.fill(); ctx.stroke();
+          ctx.fillStyle = rgba(colE, 1);
+          ctx.fillText(tag, tx2, ty2);
+        }
+      }
+      ctx.restore();
+
       var drawn = [];
       for (var n = 0; n < nodes.length; n++) {
         var nd = nodes[n];
@@ -638,7 +943,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       drawn.sort(function (a, b) { return a[1][2] - b[1][2]; });
       // A crowded globe labels only its biggest movers on the near side,
       // so names never pile on top of each other. Every node still draws.
-      var labelSet = null;
+      var labelSet = null, sceneOn = document.documentElement.classList.contains('cc-scene');
       if (drawn.length > 16) {
         labelSet = {};
         drawn.filter(function (it) { return it[1][2] > 0.15 && it[2].chg != null; })
@@ -668,11 +973,17 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           ctx.strokeStyle = rgba(GOLD, 0.95); ctx.lineWidth = 1.5;
           ctx.beginPath(); ctx.arc(it[1][0], it[1][1], pr, 0, 6.2832); ctx.stroke();
         }
-        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && (!labelSet || labelSet[it[2].symbol])))) {
+        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && (!labelSet || labelSet[it[2].symbol]) && (!sceneOn || it[1][2] > 0.35)))) {
           var label = it[2].symbol + (it[2].chg != null ? ' ' + (it[2].chg >= 0 ? '+' : '') + Number(it[2].chg).toFixed(2) + '%' : '');
+          if (sceneOn && !isSel && !isHov) label = it[2].symbol;
           var lx2 = it[1][0] + 7, ly2 = it[1][1];
           var tw = ctx.measureText(label).width;
           if (lx2 + tw > W - 4) lx2 = it[1][0] - 7 - tw;
+          if (sceneOn && !isSel && !isHov) {
+            var lb = [lx2 - 3, ly2 - 7, lx2 + tw + 3, ly2 + 7];
+            if (typeof boxFree === 'function' && !boxFree(lb)) continue;
+            if (typeof tagBoxes !== 'undefined') tagBoxes.push(lb);
+          }
           ctx.fillStyle = 'rgba(3,7,15,0.72)';
           ctx.fillRect(lx2 - 3, ly2 - (W > 520 ? 8 : 7), tw + 6, W > 520 ? 16 : 14);
           ctx.fillStyle = rgba(it[3], Math.min(1, 0.55 + it[1][2]));

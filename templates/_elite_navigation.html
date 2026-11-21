@@ -48,6 +48,26 @@
     ('wlab', url_for('wealth.lab_page'), 'Cost Basis Lab', 'What one more purchase does', 'flask'),
   ]),
 ] %}
+{% set capital_groups = [
+  ('Deploy capital', [
+    ('wnext', url_for('wealth.next_dollar_page'), 'Next Dollar', 'Where your next dollar goes, or stays cash', 'target'),
+  ]),
+  ('Plan', [
+    ('wplan', url_for('wealth.planner_page'), 'Planner', 'Contributions by month, IRA limits', 'calendar'),
+    ('wlab', url_for('wealth.lab_page'), 'Cost Basis Lab', 'What one more purchase does', 'flask'),
+    ('wmcff2', url_for('wealth.research_list_page'), 'M.C.F.F. list', 'Which companies are in their buy zone', 'checks'),
+  ]),
+] %}
+{% set portfolio_groups = [
+  ('Your money', [
+    ('wealth', url_for('wealth.dashboard'), 'Wealth Dashboard', 'Value, gains, dividends, concentration', 'vault'),
+  ]),
+  ('Track', [
+    ('wscore', url_for('wealth.scoreboard_page'), 'Scoreboard', 'Returns vs the S&P 500, drawdowns', 'pulse'),
+    ('wledger', url_for('wealth.ledger_page'), 'Ledger', 'Transactions, CSV import, Schwab check', 'pen'),
+    ('schwab', url_for('schwab_account'), 'Schwab Account', 'Live balances and positions', 'bank'),
+  ]),
+] %}
 {% set learn_groups = [
   ('Start here', [
     ('learn', url_for('learn_index'), 'Learning Center', 'Market concepts in plain language', 'cap'),
@@ -95,6 +115,12 @@
 {%- elif name == 'bell' %}<path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 2H5Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>
 {%- elif name == 'key' %}<circle cx="8" cy="15" r="4"/><path d="m11 12 8.5-8.5M16 7l2.5 2.5M14 9l2 2"/>
 {%- elif name == 'vault' %}<rect x="3.5" y="5" width="17" height="14" rx="2.2"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7.5M12 16.5v-1.3M15.2 12h1.3M7.5 12h1.3M6.5 19v1.5M17.5 19v1.5"/>
+{%- elif name == 'home' %}<path d="M3.5 10.5 12 4l8.5 6.5"/><path d="M5.5 9v10.5h13V9"/><path d="M10 19.5v-5h4v5"/>
+{%- elif name == 'search' %}<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>
+{%- elif name == 'bars' %}<path d="M5 20V13M10 20V9M15 20V5M20 20v-9"/>
+{%- elif name == 'coins' %}<ellipse cx="9" cy="7" rx="5.5" ry="2.5"/><path d="M3.5 7v4c0 1.4 2.5 2.5 5.5 2.5s5.5-1.1 5.5-2.5V7"/><path d="M3.5 11v4c0 1.4 2.5 2.5 5.5 2.5"/><ellipse cx="15.5" cy="15" rx="5" ry="2.3"/><path d="M10.5 15v3.3c0 1.3 2.2 2.3 5 2.3s5-1 5-2.3V15"/>
+{%- elif name == 'star' %}<path d="m12 3.5 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8L3.6 9.6l5.8-.8Z"/>
+{%- elif name == 'pie' %}<path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12Z"/><path d="M14.5 3.8A8.5 8.5 0 0 1 20.2 9.5h-5.7Z"/>
 {%- elif name == 'bulb' %}<path d="M9.5 18h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3Z"/>
 {%- endif %}</svg>
 {%- endmacro %}
@@ -122,57 +148,59 @@
     <span class="brand-divider" aria-hidden="true"></span><span class="brand-sub">Elite</span>
   </a>
 
-  <div class="nav-links" aria-label="Desktop destinations">
-    <a href="{{ url_for('liquidity_page') }}" class="nav-link {{ 'nav-link-active' if ep == 'liquidity_page' }}">Today</a>
-    {# Terminal is a split control: the word opens the Terminal, the chevron
-       opens its tools. Watchlists lives here because the lists feed the
-       Terminal rail, the setups board and your alerts. #}
-    <div class="nav-split {{ 'is-active' if terminal_active }}">
-      <a href="{{ url_for('terminal') }}" class="nav-link nav-link-exec {{ 'nav-link-active' if terminal_active }}">Terminal</a>
-      <details class="nav-menu nav-menu--split">
-        <summary class="nav-link nav-split__toggle {{ 'nav-link-active' if terminal_active }}" aria-label="Terminal tools: setups and watchlists"><span aria-hidden="true">⌄</span></summary>
-        <div class="nav-menu__panel nav-menu__panel--tiles">
-          <span class="nav-menu__label">Trade and track</span>
-          {{ nav_tiles(terminal_groups) }}
-        </div>
-      </details>
-    </div>
-
+  {# Icon tiles: one per destination, the four with many tools open a panel.
+     Learn and Account live in the profile menu on the right. #}
+  {% set verify_active = ep in ('fundamentals_page',) %}
+  {% set mcff_active = ep in ('wealth.research_list_page', 'wealth.research_page') %}
+  {% set capital_active = ep in ('wealth.next_dollar_page', 'wealth.planner_page', 'wealth.lab_page') %}
+  {% set portfolio_active = ep in ('wealth.dashboard', 'wealth.scoreboard_page', 'wealth.ledger_page', 'schwab_account') %}
+  {% set discover_active = research_active and not verify_active %}
+  {% set term_active = terminal_active and ep != 'watchlists_page' %}
+  <div class="nav-links nav-tiles" aria-label="Desktop destinations">
+    <a href="{{ url_for('liquidity_page') }}" class="nav-link nav-tile {{ 'nav-link-active' if ep == 'liquidity_page' }}"{% if ep == 'liquidity_page' %} aria-current="page"{% endif %}><span class="nav-tile__ic">{{ rm_icon('home') }}</span><span class="nav-tile__lbl">Command</span></a>
     <details class="nav-menu">
-      <summary class="nav-link {{ 'nav-link-active' if research_active }}">Research <span aria-hidden="true">⌄</span></summary>
+      <summary class="nav-link nav-tile {{ 'nav-link-active' if term_active }}"><span class="nav-tile__ic">{{ rm_icon('candles') }}</span><span class="nav-tile__lbl">Terminal</span><span class="nav-tile__chev" aria-hidden="true">⌄</span></summary>
+      <div class="nav-menu__panel nav-menu__panel--tiles">
+        <span class="nav-menu__label">Trade and track</span>
+        {{ nav_tiles(terminal_groups) }}
+      </div>
+    </details>
+    <details class="nav-menu">
+      <summary class="nav-link nav-tile {{ 'nav-link-active' if discover_active }}"><span class="nav-tile__ic">{{ rm_icon('search') }}</span><span class="nav-tile__lbl">Discover</span><span class="nav-tile__chev" aria-hidden="true">⌄</span></summary>
       <div class="nav-menu__panel nav-menu__panel--tiles nav-menu__panel--research">
         <span class="nav-menu__label">Understand the market</span>
         {{ nav_tiles(research_groups) }}
       </div>
     </details>
-
+    <a href="{{ url_for('fundamentals_page') }}" class="nav-link nav-tile {{ 'nav-link-active' if verify_active }}" title="10-Q drill, the seven checks, valuation"><span class="nav-tile__ic">{{ rm_icon('shield') }}</span><span class="nav-tile__lbl">Verify</span></a>
+    <a href="{{ url_for('wealth.research_list_page') }}" class="nav-link nav-tile {{ 'nav-link-active' if mcff_active }}" title="Moat, CEO, Financials, Future"><span class="nav-tile__ic">{{ rm_icon('bars') }}</span><span class="nav-tile__lbl">M.C.F.F.</span></a>
     <details class="nav-menu">
-      <summary class="nav-link {{ 'nav-link-active' if wealth_active }}">Wealth <span aria-hidden="true">⌄</span></summary>
+      <summary class="nav-link nav-tile {{ 'nav-link-active' if capital_active }}"><span class="nav-tile__ic">{{ rm_icon('coins') }}</span><span class="nav-tile__lbl">Capital</span><span class="nav-tile__chev" aria-hidden="true">⌄</span></summary>
       <div class="nav-menu__panel nav-menu__panel--tiles">
-        <span class="nav-menu__label">Your next investment dollar</span>
-        {{ nav_tiles(wealth_groups) }}
+        <span class="nav-menu__label">Capital deployment</span>
+        {{ nav_tiles(capital_groups) }}
       </div>
     </details>
-
+    <a href="{{ url_for('watchlists_page') }}" class="nav-link nav-tile {{ 'nav-link-active' if ep == 'watchlists_page' }}"><span class="nav-tile__ic">{{ rm_icon('star') }}</span><span class="nav-tile__lbl">Watchlists</span></a>
     <details class="nav-menu">
-      <summary class="nav-link {{ 'nav-link-active' if learn_active }}">Learn <span aria-hidden="true">⌄</span></summary>
-      <div class="nav-menu__panel nav-menu__panel--tiles">
-        <span class="nav-menu__label">Learn, practice, remember</span>
-        {{ nav_tiles(learn_groups) }}
-      </div>
-    </details>
-
-    <details class="nav-menu">
-      <summary class="nav-link nav-link-account {{ 'nav-link-active' if account_active }}">Account <span aria-hidden="true">⌄</span></summary>
-      <div class="nav-menu__panel nav-menu__panel--account nav-menu__panel--tiles">
-        <span class="nav-menu__label">Your workspace</span>
-        {{ nav_tiles(account_groups) }}
+      <summary class="nav-link nav-tile {{ 'nav-link-active' if portfolio_active }}"><span class="nav-tile__ic">{{ rm_icon('pie') }}</span><span class="nav-tile__lbl">Portfolio</span><span class="nav-tile__chev" aria-hidden="true">⌄</span></summary>
+      <div class="nav-menu__panel nav-menu__panel--tiles nav-menu__panel--right">
+        <span class="nav-menu__label">Your portfolio</span>
+        {{ nav_tiles(portfolio_groups) }}
       </div>
     </details>
   </div>
 
   <div class="nav-actions">
     <button class="nav-ai-button" type="button" onclick="openAsk()" title="Ask AI (Ctrl+K)"><span aria-hidden="true">✦</span> Ask AI</button>
+    <details class="nav-menu nav-avatar">
+      <summary class="nav-avatar__btn {{ 'is-active' if learn_active or account_active }}" aria-label="Learn and account" title="Learn and account">{{ rm_icon('user') }}</summary>
+      <div class="nav-menu__panel nav-menu__panel--tiles nav-menu__panel--account nav-menu__panel--right">
+        <span class="nav-menu__label">{{ session.get('username') or 'Your workspace' }}</span>
+        {{ nav_tiles(account_groups) }}
+        {{ nav_tiles(learn_groups) }}
+      </div>
+    </details>
     <span class="nav-live-indicator" id="nav-live-indicator" title="Scheduled equity session, not quote freshness"><span class="nav-live-dot" aria-hidden="true"></span><span id="nav-live-label">Checking session…</span></span>
     <details class="nav-system">
       <summary aria-label="Data status and account menu" title="Data status and account menu"><span class="nav-system__dot" aria-hidden="true"></span><span class="nav-system__label">Status</span></summary>
@@ -194,7 +222,7 @@
 </nav>
 
 <nav class="mobile-app-nav" aria-label="Primary mobile navigation">
-  <a href="{{ url_for('liquidity_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep == 'liquidity_page' }}" {% if ep == 'liquidity_page' %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M3.5 10.5 12 4l8.5 6.5"/><path d="M5.5 9v10.5h13V9"/><path d="M10 19.5v-5h4v5"/></svg></span><span class="mobile-app-nav__label">Today</span></a>
+  <a href="{{ url_for('liquidity_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep == 'liquidity_page' }}" {% if ep == 'liquidity_page' %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M3.5 10.5 12 4l8.5 6.5"/><path d="M5.5 9v10.5h13V9"/><path d="M10 19.5v-5h4v5"/></svg></span><span class="mobile-app-nav__label">Command</span></a>
   <div class="mobile-app-nav__group">
     <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if terminal_active }}" aria-expanded="false" aria-controls="mobile-terminal-menu" data-mobile-menu="mobile-terminal-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M4 20h16"/><path d="M7 16V9"/><rect x="5.5" y="10" width="3" height="4.5" rx=".6"/><path d="M12 14V4"/><rect x="10.5" y="6" width="3" height="5.5" rx=".6"/><path d="M17 17V8"/><rect x="15.5" y="9.5" width="3" height="5" rx=".6"/></svg></span><span class="mobile-app-nav__label">Terminal</span></button>
     <div class="mobile-app-menu" id="mobile-terminal-menu" hidden>
@@ -203,16 +231,16 @@
     </div>
   </div>
   <div class="mobile-app-nav__group">
-    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if research_active }}" aria-expanded="false" aria-controls="mobile-research-menu" data-mobile-menu="mobile-research-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/><path d="M8 12l1.8-2 1.6 1.4L13.5 9"/></svg></span><span class="mobile-app-nav__label">Research</span></button>
+    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if research_active }}" aria-expanded="false" aria-controls="mobile-research-menu" data-mobile-menu="mobile-research-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/><path d="M8 12l1.8-2 1.6 1.4L13.5 9"/></svg></span><span class="mobile-app-nav__label">Discover</span></button>
     <div class="mobile-app-menu" id="mobile-research-menu" hidden>
-      <div class="mobile-app-menu__head"><strong>Research</strong><span>Understand the market</span></div>
+      <div class="mobile-app-menu__head"><strong>Discover</strong><span>Understand the market</span></div>
       <div class="rm-sheet">{{ nav_tiles(research_groups) }}</div>
     </div>
   </div>
   <div class="mobile-app-nav__group">
-    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if wealth_active }}" aria-expanded="false" aria-controls="mobile-wealth-menu" data-mobile-menu="mobile-wealth-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="3.5" y="5" width="17" height="14" rx="2.2"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7.5M12 16.5v-1.3M15.2 12h1.3M7.5 12h1.3"/></svg></span><span class="mobile-app-nav__label">Wealth</span></button>
+    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if wealth_active }}" aria-expanded="false" aria-controls="mobile-wealth-menu" data-mobile-menu="mobile-wealth-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="3.5" y="5" width="17" height="14" rx="2.2"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7.5M12 16.5v-1.3M15.2 12h1.3M7.5 12h1.3"/></svg></span><span class="mobile-app-nav__label">Capital</span></button>
     <div class="mobile-app-menu" id="mobile-wealth-menu" hidden>
-      <div class="mobile-app-menu__head"><strong>Wealth</strong><span>Your next investment dollar</span></div>
+      <div class="mobile-app-menu__head"><strong>Capital</strong><span>Deploy, track and plan your money</span></div>
       <div class="rm-sheet">{{ nav_tiles(wealth_groups) }}</div>
     </div>
   </div>

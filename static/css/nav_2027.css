@@ -1,0 +1,95 @@
+/* 2027 icon-tile top bar. Loaded after every other stylesheet. */
+html.cc27 .elite-navbar,
+.elite-navbar {
+  min-height: 76px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  background: linear-gradient(180deg, rgba(4, 14, 30, .96), rgba(4, 12, 26, .88));
+  border-bottom: 1px solid rgba(56, 220, 255, .14);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .35), inset 0 -1px 0 rgba(52, 211, 153, .08);
+}
+.elite-navbar .nav-tiles {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px;
+  margin: 0 auto;
+  border: 1px solid rgba(56, 220, 255, .12);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(10, 30, 56, .55), rgba(6, 18, 36, .35));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+.elite-navbar .nav-tiles > .nav-menu { position: relative; display: flex; }
+html.cc27 .elite-navbar .nav-tile,
+.elite-navbar .nav-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 86px;
+  height: 58px;
+  padding: 6px 12px 5px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: rgba(214, 232, 255, .78);
+  font: 600 11.5px/1.1 var(--font-ui, "IBM Plex Sans", sans-serif);
+  letter-spacing: .01em;
+  text-transform: none;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  list-style: none;
+  transition: color .15s, background .15s, border-color .15s, box-shadow .15s;
+}
+.elite-navbar .nav-tile::-webkit-details-marker { display: none; }
+html.cc27 .elite-navbar .nav-tile::after,
+.elite-navbar .nav-tile::after { display: none !important; }
+.elite-navbar .nav-tile__ic { display: grid; place-items: center; width: 26px; height: 26px; color: rgba(150, 220, 255, .9); }
+.elite-navbar .nav-tile__ic svg { width: 24px; height: 24px; stroke-width: 1.6; }
+.elite-navbar .nav-tile__lbl { display: block; }
+.elite-navbar .nav-tile__chev { position: absolute; right: 6px; top: 6px; font-size: 9px; opacity: .45; }
+.elite-navbar .nav-tile:hover { color: #fff; background: rgba(56, 220, 255, .06); }
+.elite-navbar .nav-tile:hover .nav-tile__ic { color: #7ef7d4; }
+html.cc27 .elite-navbar .nav-tile.nav-link-active,
+.elite-navbar .nav-tile.nav-link-active,
+.elite-navbar .nav-menu[open] > .nav-tile {
+  color: #eafff6;
+  border-color: rgba(52, 211, 153, .75);
+  background: linear-gradient(180deg, rgba(16, 185, 129, .22), rgba(16, 185, 129, .06));
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, .18), 0 0 22px rgba(16, 185, 129, .35), inset 0 0 14px rgba(52, 211, 153, .12);
+  text-shadow: none;
+}
+.elite-navbar .nav-tile.nav-link-active .nav-tile__ic,
+.elite-navbar .nav-menu[open] > .nav-tile .nav-tile__ic { color: #5ff5b8; filter: drop-shadow(0 0 6px rgba(52, 211, 153, .7)); }
+.elite-navbar .nav-tiles .nav-menu__panel { top: calc(100% + 10px); }
+.elite-navbar .nav-menu__panel--right { left: auto !important; right: 0 !important; transform: none !important; }
+
+/* Profile menu */
+.elite-navbar .nav-avatar { position: relative; }
+.elite-navbar .nav-avatar__btn {
+  display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%;
+  border: 1.5px solid rgba(56, 220, 255, .55);
+  background: radial-gradient(circle at 50% 35%, rgba(56, 220, 255, .28), rgba(8, 30, 60, .9));
+  color: #bff3ff; cursor: pointer; list-style: none;
+  box-shadow: 0 0 18px rgba(56, 220, 255, .35);
+}
+.elite-navbar .nav-avatar__btn::-webkit-details-marker { display: none; }
+.elite-navbar .nav-avatar__btn svg { width: 24px; height: 24px; }
+.elite-navbar .nav-avatar__btn.is-active, .elite-navbar .nav-avatar[open] .nav-avatar__btn { border-color: #34d399; box-shadow: 0 0 22px rgba(52, 211, 153, .5); }
+.elite-navbar .nav-avatar .nav-menu__panel { top: calc(100% + 10px); width: min(560px, 92vw); max-height: 78vh; overflow: auto; }
+
+/* Narrower desktops: icons first, then labels go. */
+@media (max-width: 1440px) {
+  .elite-navbar .nav-tile { min-width: 74px; padding: 6px 8px 5px; font-size: 11px; }
+}
+@media (max-width: 1240px) {
+  .elite-navbar .nav-live-indicator { display: none; }
+  .elite-navbar .nav-tile { min-width: 62px; padding: 6px 5px 5px; }
+}
+@media (max-width: 1080px) {
+  .elite-navbar .nav-tile { min-width: 46px; height: 46px; }
+  .elite-navbar .nav-tile__lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+}
