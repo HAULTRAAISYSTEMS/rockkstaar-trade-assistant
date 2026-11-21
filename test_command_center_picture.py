@@ -44,15 +44,55 @@ def test_breadth_says_not_ok_without_quotes(client, monkeypatch):
 
 def test_page_has_the_picture_sections(client):
     html = client.get("/").get_data(as_text=True)
-    for s in ("Morning<br>Command Center", "Your AI Market Intelligence Briefing", "Market Pulse",
-              "AI Market Briefing", "A+ Setups Today", "Market Breadth", "Economic Events",
-              'id="cmd27-orbit"', 'id="cmd27-ring"', 'class="cmd27-kpis"', 'class="cmd27-launch"',
-              "Capital Deployment", "command_center_picture.css", "command_center_picture.js"):
+    for s in ("Morning<br>Command Center", "Your AI Market Intelligence Briefing", "Game Plan",
+              "AI Market Briefing", "A+ Setups Today", "Watchlist Signals", "Economy This Week",
+              'id="cmd27-orbit"', 'id="cmd27-money"', 'id="gp-verdict"', "Top 3 for you",
+              "command_center_picture.css", "command_center_picture.js"):
         assert s in html, s
-    # Labels the Dow and Russell rows honestly by the funds that price them.
-    assert ">DIA<" in html and ">IWM<" in html
+    # One home per fact: the index strip, breadth ring and launch cards are gone.
+    for gone in ('class="cmd27-kpis"', 'id="cmd27-ring"', 'class="cmd27-launch"', "Market Pulse"):
+        assert gone not in html, gone
     # The broken 2027 overlays are gone.
     assert "elite_2027_layout" not in html and "elite_2027_picture" not in html
+
+
+def test_game_plan_follows_the_trading_engine_gate():
+    import command_gameplan as gp
+    up = [100 + i * 0.5 for i in range(80)]          # steady uptrend
+    down = [140 - i * 0.6 for i in range(80)]        # steady downtrend
+    flat_dxy = [100.0] * 10
+    on = gp.build_game_plan(up, up, [14.0] * 5, flat_dxy)
+    assert on["verdict"] == "RISK-ON" and on["spy"]["trend"] == "bullish"
+    caution = gp.build_game_plan(up, up, [22.0] * 5, flat_dxy)
+    assert caution["verdict"] == "CAUTION" and "22/30" in caution["rule"]
+    off = gp.build_game_plan(down, up, [14.0] * 5, flat_dxy)
+    assert off["verdict"] == "RISK-OFF" and "27+/30" in off["rule"]
+    vix_off = gp.build_game_plan(up, up, [36.0] * 5, flat_dxy)
+    assert vix_off["verdict"] == "RISK-OFF" and vix_off["vix"]["zone"] == "extreme"
+    dxy_off = gp.build_game_plan(up, up, [14.0] * 5, [100, 100, 100, 100, 100, 100, 100, 100, 100, 102.0])
+    assert dxy_off["verdict"] == "RISK-OFF" and dxy_off["dxy"]["direction"] == "surging"
+    assert off["spy"]["streak"] < 0 and any("down days" in r for r in off["reasons"])
+    assert gp.build_game_plan([], [], [], [])["verdict"] == "UNKNOWN"
+
+
+def test_gameplan_endpoint(client, monkeypatch):
+    import web_app
+    import app as legacy
+    up = [100 + i * 0.5 for i in range(80)]
+    monkeypatch.setattr(legacy, "_GAMEPLAN_CACHE", {"at": 0.0, "data": None})
+    monkeypatch.setattr(legacy._mkt, "_fetch_prices_chart", lambda t, period="90d": {
+        "SPY": up, "QQQ": up, "^VIX": [14.0] * 5, "DX-Y.NYB": [100.0] * 10})
+    d = client.get("/api/command/gameplan").get_json()
+    assert d["ok"] and d["verdict"] == "RISK-ON" and d["levels"]
+
+
+def test_command_center_has_no_duplicate_facts():
+    src = (ROOT / "templates/liquidity.html").read_text(encoding="utf-8")
+    # Economy card is economic-only; your earnings live in Watchlist Signals.
+    assert "rejectattr('kind', 'equalto', 'EARNINGS')" in src
+    assert "selectattr('kind', 'equalto', 'EARNINGS') | selectattr('on_watchlist')" in src
+    js = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
+    assert "/api/wealth/today" in js and "cmd27.money.last" in js and "/api/thesis/zones" in js
 
 
 def test_live_badge_only_claims_live_when_live():

@@ -490,6 +490,71 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         return Response(wealth_csv.template_csv(), mimetype="text/csv",
                         headers={"Content-Disposition": "attachment; filename=wealth-architect-template.csv"})
 
+    # ── Command Center: your money today ─────────────────────────────────
+    @bp.get("/api/wealth/today")
+    def today_api():
+        """All portfolios combined, for the Command Center strip.
+
+        Value, today's move in dollars and %, cash, and the best and worst
+        holding today. During the regular session the move is the live price
+        against the prior close; otherwise it is the last session's official
+        close against the one before (labelled with that day), so an
+        after-hours print never passes for the day's move. Falls back to the
+        broker snapshot only when there are no Wealth portfolios, so a Schwab
+        account imported into Wealth is never counted twice.
+        """
+        user_id = uid()
+        s = summary_for(user_id, None)
+        source = "wealth"
+        holdings = [{"ticker": h["ticker"], "shares": h["shares"], "price": h.get("price"),
+                     "market_value": h.get("market_value")} for h in s.get("holdings") or []]
+        cash = float(s.get("cash") or 0.0)
+        value = s.get("total_value")
+        if not s.get("transaction_count"):
+            snap = broker_holdings_for(user_id)
+            if not snap:
+                return jsonify({"ok": True, "empty": True})
+            source = "schwab"
+            holdings = [{"ticker": h["ticker"], "shares": h["shares"], "price": None,
+                         "market_value": h.get("market_value")} for h in snap]
+            cash = 0.0
+            value = sum(h["market_value"] or 0 for h in holdings)
+        tickers = [h["ticker"] for h in holdings if h["shares"]]
+        try:
+            import market_engine as _me
+            session = _me.pulse_session()
+        except Exception:
+            session = "closed"
+        closes = closes_for(tickers) if tickers else {}
+        live = price_lookup(tickers) if (tickers and session == "regular") else {}
+        today = date.today()
+        moves, day_label = [], None
+        for h in holdings:
+            rows = closes.get(h["ticker"]) or []
+            if len(rows) < 2 or not h["shares"]:
+                continue
+            if session == "regular" and (live.get(h["ticker"]) or {}).get("price"):
+                prev = next((c for d, c in reversed(rows) if d < today), None)
+                now_px = float(live[h["ticker"]]["price"])
+            else:
+                prev, now_px = rows[-2][1], rows[-1][1]
+                day_label = rows[-1][0].strftime("%a")
+            if not prev:
+                continue
+            pct = (now_px / prev - 1) * 100
+            moves.append({"ticker": h["ticker"], "pct": round(pct, 2),
+                          "dollars": round((now_px - prev) * h["shares"], 2)})
+        day_dollars = round(sum(m["dollars"] for m in moves), 2)
+        base = (value or 0) - day_dollars
+        ranked = sorted(moves, key=lambda m: m["pct"])
+        return jsonify({"ok": True, "empty": False, "source": source, "value": value, "cash": cash,
+                        "day_dollars": day_dollars,
+                        "day_pct": round(day_dollars / base * 100, 2) if base > 0 else None,
+                        "best": ranked[-1] if ranked else None, "worst": ranked[0] if ranked else None,
+                        "positions": len(tickers), "priced": len(moves), "tickers": tickers[:40],
+                        "session": session, "day_label": None if session == "regular" else day_label,
+                        "unpriced": s.get("unpriced") or []})
+
     # ── Data ─────────────────────────────────────────────────────────────
     @bp.get("/api/wealth/summary")
     def summary_api():

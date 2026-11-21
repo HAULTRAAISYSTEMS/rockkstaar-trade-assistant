@@ -126,3 +126,25 @@ class TestThePagesPollEveryThreeSeconds:
 def test_the_chart_retries_instead_of_staying_broken():
     page = open("templates/terminal.html").read()
     assert "Reconnecting chart…" in page and "application/json" in page
+
+
+def test_after_hours_print_rides_alongside_the_regular_session(monkeypatch):
+    """Fri Nov 20 2026: SPY closed 689.81 (-3.64%); an after-hours print of
+    697.48 is +1.11% vs that close. The tape must keep -3.64% as the day's
+    move and carry the after-hours move as a labelled extra."""
+    monkeypatch.setattr(market_engine, "live_quotes", lambda syms: {
+        "SPY": {"price": 697.48, "change_pct": 1.11, "ext": "post", "day_close": 689.81}})
+    monkeypatch.setattr(market_engine, "fast_pulse_quotes", lambda: {})
+    out = market_engine.overlay_live_tape([{"symbol": "SPY", "price": 689.81, "change_pct": -3.64}])
+    assert out[0]["price"] == 689.81 and out[0]["change_pct"] == -3.64
+    assert out[0]["ext"] == "post" and out[0]["ext_price"] == 697.48 and out[0]["ext_pct"] == 1.11
+
+
+def test_tape_shows_an_index_once_even_if_it_is_on_the_watchlist(client, monkeypatch):
+    monkeypatch.setattr(legacy._mkt, "get_market_tape", lambda: [
+        {"symbol": "QQQ", "price": 608.45, "change_pct": -5.67}])
+    monkeypatch.setattr(legacy, "_tape_watchlist_items", lambda: [
+        {"symbol": "QQQ", "price": 608.45, "change_pct": -5.67}, {"symbol": "NVDA", "price": 160.0, "change_pct": -14.0}])
+    monkeypatch.setattr(legacy._mkt, "live_quotes", lambda syms: {})
+    syms = [i["symbol"] for i in client.get("/api/market-tape").get_json()["items"]]
+    assert syms == ["QQQ", "NVDA"]

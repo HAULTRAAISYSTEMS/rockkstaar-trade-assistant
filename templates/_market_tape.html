@@ -7,6 +7,7 @@
       {% if t.logo %}<img class="market-tape-logo" src="{{ t.logo }}" alt="" loading="lazy" onerror="if(!this.dataset.fbk){this.dataset.fbk=1;this.src='https://financialmodelingprep.com/image-stock/{{ t.symbol }}.png';}else{this.remove();}">{% endif %}<span class="market-tape-sym">{{ t.symbol }}</span>
       <span class="market-tape-px" data-mtape-px>{{ '%.2f'|format(t.price) if t.price is not none else '—' }}</span>
       <span class="market-tape-chg {{ 'chg-pos' if (t.change_pct or 0) > 0 else ('chg-neg' if (t.change_pct or 0) < 0 else 'chg-flat') }}" data-mtape-chg>{{ '%+.2f'|format(t.change_pct) ~ '%' if t.change_pct is not none else '—' }}</span>
+      <span class="market-tape-ext" data-mtape-ext {% if not (t.ext and t.ext_pct is not none) %}hidden{% endif %}>{% if t.ext and t.ext_pct is not none %}{{ {'pre': 'PRE', 'post': 'AH', 'overnight': 'ON'}[t.ext] }} {{ '%+.2f'|format(t.ext_pct) }}%{% endif %}</span>
     </span>
     {% endfor %}
   </div>
@@ -25,15 +26,18 @@
     // so only part of the tape made the first paint).
     var bar = document.querySelector('.market-tape');
     track.innerHTML = '';
-    items.forEach(function (t) {
-      for (var k = 0; k < 2; k++) {
+    // The whole list twice (A B C A B C) so the scroll loops seamlessly —
+    // never each symbol twice in a row.
+    for (var k = 0; k < 2; k++) items.forEach(function (t) {
+      {
         var el = document.createElement('span');
         el.className = 'market-tape-item' + (t.tier ? ' mt-' + t.tier : '');
         el.setAttribute('data-mtape', t.symbol);
         el.innerHTML = (t.logo ? '<img class="market-tape-logo" src="' + t.logo + '" alt="" loading="lazy" onerror="if(!this.dataset.fbk){this.dataset.fbk=1;this.src=\'https://financialmodelingprep.com/image-stock/' + t.symbol + '.png\';}else{this.remove();}">' : '') +
           '<span class="market-tape-sym">' + t.symbol + '</span> ' +
           '<span class="market-tape-px" data-mtape-px>—</span> ' +
-          '<span class="market-tape-chg" data-mtape-chg>—</span>';
+          '<span class="market-tape-chg" data-mtape-chg>—</span>' +
+          '<span class="market-tape-ext" data-mtape-ext hidden></span>';
         track.appendChild(el);
       }
     });
@@ -56,6 +60,17 @@
           var v = Number(t.change_pct);
           chg.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
           chg.className = 'market-tape-chg ' + (v > 0 ? 'chg-pos' : (v < 0 ? 'chg-neg' : 'chg-flat'));
+        }
+        var ex = el.querySelector('[data-mtape-ext]');
+        if (ex) {
+          var lbl = { pre: 'PRE', post: 'AH', overnight: 'ON' }[t.ext];
+          if (lbl && t.ext_pct != null) {
+            var e2 = Number(t.ext_pct);
+            ex.textContent = lbl + ' ' + (e2 >= 0 ? '+' : '') + e2.toFixed(2) + '%';
+            ex.className = 'market-tape-ext ' + (e2 > 0 ? 'chg-pos' : (e2 < 0 ? 'chg-neg' : 'chg-flat'));
+            ex.title = (t.ext === 'post' ? 'After hours' : t.ext === 'pre' ? 'Pre-market' : 'Overnight') + ' ' + Number(t.ext_price).toFixed(2) + ' vs the close';
+            ex.hidden = false;
+          } else ex.hidden = true;
         }
       });
     });

@@ -1179,8 +1179,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         ctx.shadowColor = rgba(it[3], 0.9 * A); ctx.shadowBlur = front ? 10 + it[2].flash * 20 : 0;
         ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad * (isSel || isHov ? 1.8 : 1), 0, 6.2832); ctx.fill();
         ctx.shadowBlur = 0;
-        if (sceneOn && starred[it[2].symbol] && front) {
-          ctx.strokeStyle = rgba(GOLD, 0.9 * A); ctx.lineWidth = 1.4;
+        if (sceneOn && (starred[it[2].symbol] || chipSet[it[2].symbol]) && front) {
+          ctx.strokeStyle = rgba(starred[it[2].symbol] ? GOLD : CYAN, 0.9 * A); ctx.lineWidth = 1.4;
           ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad + 4, 0, 6.2832); ctx.stroke();
         }
         if (isSel) {
@@ -1189,7 +1189,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           ctx.beginPath(); ctx.arc(it[1][0], it[1][1], pr, 0, 6.2832); ctx.stroke();
         }
         if (sceneOn) {
-          if (front && it[1][2] > 0.12) {
+          // A stock that is an orbit chip keeps its gold ring, not a second name tag.
+          if (front && it[1][2] > 0.12 && (isSel || isHov || zoom >= 1.2 || !chipSet[it[2].symbol])) {
             var pri = (isSel || isHov ? 1e4 : 0) + (starred[it[2].symbol] ? 500 : 0) + (focusKey && it[2].region === focusKey ? 300 : 0)
               + Math.abs(it[2].chg || 0) * 10 + it[1][2] * 5;
             cands.push({ it: it, pri: pri, sel: isSel || isHov, A: A });

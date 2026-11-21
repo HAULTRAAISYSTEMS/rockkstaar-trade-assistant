@@ -2093,9 +2093,24 @@ def overlay_live_tape(items: list[dict]) -> list[dict]:
         sym = item.get("symbol")
         q = live.get(sym)
         if q and q.get("price") is not None:
+            ext = q.get("ext")
+            # Pre-market / after-hours / overnight prints ride alongside the
+            # regular session instead of replacing it: a +1.1% after-hours
+            # bounce must not read as the day's move on a -3.7% day.
+            if ext in ("pre", "post", "overnight") and item.get("price") is not None \
+                    and item.get("change_pct") is not None:
+                base = q.get("day_close") or q.get("regular_close") or q.get("prev_close")
+                item["ext"] = ext
+                item["ext_price"] = round(float(q["price"]), 2)
+                item["ext_pct"] = (round((float(q["price"]) / float(base) - 1) * 100, 2)
+                                   if base else q.get("change_pct"))
+                item["live"] = True
+                continue
             item["price"] = round(float(q["price"]), 2)
             if q.get("change_pct") is not None:
                 item["change_pct"] = q["change_pct"]
+            if ext:
+                item["ext"] = ext
             item["live"] = True
             continue
         f = fast.get(sym) if sym in ("ES", "NQ", "VIX") else None

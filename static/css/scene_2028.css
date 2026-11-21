@@ -96,3 +96,10 @@ html.cc27.cc-scene .main-content *, html.cc27.cc-scene .market-tape, html.cc27.c
 html.cc27.cc-scene .main-content *::before, html.cc27.cc-scene .main-content *::after {
   -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
 }
+
+/* Extended-hours tag on the tape: the regular session stays the headline. */
+.market-tape-ext { margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  border: 1px dashed rgba(142,163,194,.45); color: #8ea3c2; white-space: nowrap; }
+.market-tape-ext.chg-pos { color: #7ef0c2; border-color: rgba(52,245,168,.45); }
+.market-tape-ext.chg-neg { color: #ff9aac; border-color: rgba(255,84,112,.45); }
+.market-tape-ext[hidden] { display: none; }
