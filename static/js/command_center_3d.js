@@ -304,7 +304,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       INDUS:  { name: 'INDUSTRIALS',   lat: 60,  lon: 95,   spread: 12 },
       OTHER:  { name: 'DEFENSIVE · OTHER', lat: -25, lon: 134, spread: 9 },
       INDEX:  { name: 'INDEXES',       lat: 70,  lon: -42,  spread: 5, max: 9 },
-      FUT:    { name: 'FUTURES · MACRO', lat: 30, lon: -40, spread: 5, max: 9 }
+      FUT:    { name: 'FUTURES · MACRO', lat: 8, lon: -32, spread: 5, max: 9 }
     };
     var ETF_REGION = { XLK: 'TECH', SMH: 'SEMIS', XLF: 'FIN', XLE: 'ENERGY', XLY: 'CONS', XLV: 'HEALTH',
                        XLC: 'COMM', XLI: 'INDUS', XLB: 'INDUS', XLU: 'OTHER', XLRE: 'OTHER', IWM: 'INDEX' };
@@ -318,7 +318,11 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       return ETF_REGION[SECTORS[u]] || 'OTHER';
     }
     // Starred tickers (the orbit) always get a name tag on the globe.
-    var starred = {};
+    var starred = {}, chipSet = {}, chipRects = [];
+    document.addEventListener('cmd27:chips', function (e) {
+      chipSet = {}; ((e.detail && e.detail.tickers) || []).forEach(function (t) { chipSet[String(t).toUpperCase()] = 1; });
+      chipRects = (e.detail && e.detail.rects) || [];
+    });
     document.addEventListener('cmd27:orbit', function (e) {
       starred = {}; ((e.detail && e.detail.tickers) || []).forEach(function (t) { starred[String(t).toUpperCase()] = 1; });
       if (typeof selected !== 'undefined' && selected && typeof renderCard === 'function') renderCard();
@@ -726,6 +730,9 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       ctx.clearRect(0, 0, W, H);
       // Bigger canvas, bigger globe: fill more of it once there is room.
       var R = Math.min(W, H) * (Math.min(W, H) > 420 ? 0.35 : 0.33);
+      // With orbit chips around it, the globe also leaves a clear ring for
+      // them sideways (narrow columns: iPad landscape, phones).
+      if (useRegions) R = Math.min(R, W * 0.30);
       var cx = W / 2 + pointer.x * 6, cy = H * 0.47 + pointer.y * 6;
 
       // Core glow
@@ -880,7 +887,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         }
         ctx.shadowBlur = 0;
       }
-      var tagBoxes = [];
+      // Orbit chips are obstacles: tags and names steer around them.
+      var tagBoxes = useRegions ? chipRects.slice() : [];
       function boxFree(b) {
         for (var q = 0; q < tagBoxes.length; q++) { var o = tagBoxes[q]; if (b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]) return false; }
         return true;
@@ -956,7 +964,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         ctx.fillStyle = rgba(colE, 1); ctx.shadowColor = rgba(colE, 1); ctx.shadowBlur = 12;
         ctx.beginPath(); ctx.arc(Pe[0], Pe[1], 2.6 * Pe[3], 0, 6.2832); ctx.fill();
         ctx.shadowBlur = 0;
-        if (Pe[2] > 0.3) {
+        // Closed exchanges keep their beacon; only open ones carry a tag.
+        if (Pe[2] > 0.3 && ex.live) {
           var tag = ex.name + (ex.live ? ' · OPEN' : ' · CLOSED'), tw2 = ctx.measureText(tag).width;
           var tx2 = Pe[0] + 8, ty2 = Pe[1] - 10;
           if (!boxFree([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8])) { ty2 = Pe[1] + 12; if (!boxFree([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8])) continue; }
@@ -1019,7 +1028,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           ctx.strokeStyle = rgba(GOLD, 0.95); ctx.lineWidth = 1.5;
           ctx.beginPath(); ctx.arc(it[1][0], it[1][1], pr, 0, 6.2832); ctx.stroke();
         }
-        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && (sceneOn ? (it[1][2] > 0.3 && (it[2].rank < 3 || starred[it[2].symbol])) : (!labelSet || labelSet[it[2].symbol]))))) {
+        if (front && it[1][2] > 0.15 && (isSel || isHov || (!selected && (sceneOn ? (it[1][2] > 0.3 && !chipSet[it[2].symbol] && (it[2].rank < 3 || starred[it[2].symbol])) : (!labelSet || labelSet[it[2].symbol]))))) {
           var label = it[2].symbol + (it[2].chg != null ? ' ' + (it[2].chg >= 0 ? '+' : '') + Number(it[2].chg).toFixed(2) + '%' : '');
           if (sceneOn && !isSel && !isHov) label = it[2].symbol;
           var lx2 = it[1][0] + 7, ly2 = it[1][1];

@@ -163,3 +163,18 @@ def test_globe_groups_pins_by_sector(client):
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
     assert "TECH:" in js and "FIN:" in js and "function placeInRegions(" in js
     assert "XLK: 'TECH'" in js and "XLF: 'FIN'" in js
+
+
+def test_ipad_landscape_keeps_three_columns_and_chips_clear_the_globe():
+    css = (ROOT / "static/css/command_center_picture.css").read_text(encoding="utf-8")
+    assert "@media (min-width: 1081px) and (max-width: 1400px)" in css   # iPad 1180/1366 landscape
+    assert "@media (max-width: 1080px)" in css and "@media (max-width: 1180px)" not in css
+    pj = (ROOT / "static/js/command_center_picture.js").read_text(encoding="utf-8")
+    assert "Push out until the chip's nearest corner clears the atmosphere" in pj
+    assert "rects: rects" in pj
+    js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
+    assert "if (useRegions) R = Math.min(R, W * 0.30);" in js
+    assert "var tagBoxes = useRegions ? chipRects.slice() : [];" in js
+    assert "if (Pe[2] > 0.3 && ex.live) {" in js     # closed exchanges: beacon only
+    nav = (ROOT / "static/css/nav_2027.css").read_text(encoding="utf-8")
+    assert "@media (min-width: 761px) and (max-width: 1080px)" in nav

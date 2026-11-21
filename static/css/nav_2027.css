@@ -93,3 +93,15 @@ html.cc27 .elite-navbar .nav-tile.nav-link-active,
   .elite-navbar .nav-tile { min-width: 46px; height: 46px; }
   .elite-navbar .nav-tile__lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 }
+/* iPad portrait and small laptops: brand, Ask AI and Status go compact so
+   the tile bar never runs into the logo. */
+@media (min-width: 761px) and (max-width: 1080px) {
+  .elite-navbar .brand-divider, .elite-navbar .brand-sub { display: none !important; }
+  .elite-navbar .nav-brand { flex: none; max-width: 150px; }
+  .elite-navbar .nav-links.nav-tiles { flex: 0 1 auto; min-width: 0; gap: 0; margin: 0 8px; }
+  .elite-navbar .nav-tile { min-width: 42px; }
+  .elite-navbar .nav-ai-button { font-size: 0 !important; width: 40px; height: 40px; padding: 0 !important; justify-content: center; }
+  .elite-navbar .nav-ai-button span { font-size: 16px; }
+  .elite-navbar .nav-system__label { display: none; }
+  .elite-navbar .nav-actions { gap: 6px; flex: none; }
+}
