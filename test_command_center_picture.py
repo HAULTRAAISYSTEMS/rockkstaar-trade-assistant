@@ -441,3 +441,33 @@ def test_phone_tabs_and_no_duplicate_sections():
     assert 'data-ptabs-bar="Overview,Brokers,Settings"' in acct
     learn = (root / "templates/learn.html").read_text(encoding="utf-8")
     assert '<details class="learn-topic learn-fold" open>' in learn
+
+
+def test_schwab_account_preferences_rejects_bad_input_cleanly(client):
+    """abort() was used without being imported, so a bad request crashed
+    (500) instead of being refused (400)."""
+    import web_app
+    web_app.app.config["WTF_CSRF_ENABLED"] = False
+    try:
+        r = client.post("/schwab/account/preferences", data={"account_key": "x", "action": "explode"})
+        assert r.status_code == 400
+        r = client.post("/schwab/account/preferences", data={"account_key": "not-mine", "action": "hide"})
+        assert r.status_code == 400          # not a connected account
+    finally:
+        web_app.app.config["WTF_CSRF_ENABLED"] = True
+    import ast, pathlib
+    tree = ast.parse(pathlib.Path("app.py").read_text(encoding="utf-8"))
+    flask_imports = [a.name for n in tree.body if isinstance(n, ast.ImportFrom) and n.module == "flask" for a in n.names]
+    assert "abort" in flask_imports
+
+
+def test_glass_never_sets_position_on_cards():
+    """Glass is background + border only. It once set position:relative,
+    which un-stuck the phone tab bar and could move floating panels."""
+    css = (ROOT / "static/css/glass_2028.css").read_text(encoding="utf-8")
+    assert "position:" not in css.replace("background-position", "")
+    assert ".ptabs" not in css
+    assert "transition: --cc-wash .3s, transform" in css          # keeps the theme colour fade
+    assert ".cmd27-hero__globe.has-sector :is(.cmd27-mode, .cmd27-legend) { display: none !important; }" in css
+    pc = (ROOT / "static/css/command_center_picture.css").read_text(encoding="utf-8")
+    assert ".cmd27-hero__globe:not(.is-full) .cmd27-sector { left: 22px; }" in pc

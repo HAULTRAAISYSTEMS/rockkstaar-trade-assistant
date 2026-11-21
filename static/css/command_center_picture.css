@@ -710,3 +710,9 @@ html.cc27 .liq-page.cmd27 .cmd27-nx--in .nx-list { display: flex !important; fle
   html.has-ptabs .cmd27-actions { margin: 0 !important; }
   html.has-ptabs .cmd27-hero__globe, html.has-ptabs .cmd27-hero__pulse, html.has-ptabs .cmd27-orbit-bar, html.has-ptabs .cmd27-dock { margin-top: 0 !important; }
 }
+
+/* The globe box overhangs the page by its negative margin (22px desktop,
+   16px tablet) and the page clips that overhang — so the sector panel
+   starts at the page edge, not the box edge, or its first column is cut. */
+@media (min-width: 1081px) { .cmd27-hero__globe:not(.is-full) .cmd27-sector { left: 22px; } }
+@media (min-width: 1081px) and (max-width: 1400px) { .cmd27-hero__globe:not(.is-full) .cmd27-sector { left: 16px; } }

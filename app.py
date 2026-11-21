@@ -18,7 +18,7 @@ import time as _time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, Response, send_from_directory
+from flask import Flask, abort, render_template, request, redirect, url_for, flash, jsonify, session, Response, send_from_directory
 from flask_sock import Sock
 from flask_wtf.csrf import CSRFProtect, generate_csrf  # type: ignore[import-untyped]
 from flask.sessions import SecureCookieSessionInterface
