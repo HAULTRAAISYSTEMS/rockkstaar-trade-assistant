@@ -25,7 +25,7 @@
       <div class="elite-hero-actions">
         <button type="button" id="cc-refresh-btn" class="cc-refresh" title="Reload quotes, regime, and setups (R)">Refresh</button>
         <span class="cc-stamp" id="liq-last-updated" aria-live="polite">Loaded · {{ pulse.as_of or 'live' }}</span>
-      </div>
+      </div><div class="cc-shortcuts"><span class="cc-shortcut"><kbd>R</kbd> Refresh</span></div>
     </div>
 
     <div class="cc-hero-center">
@@ -41,20 +41,20 @@
     </div>
 
     <div class="cc-hero-right">
-      <div class="cc-card cc-pulse cc-hero-pulse" id="cc-pulse" aria-live="polite">
+      <div class="cc-card cc-pulse cc-hero-pulse" id="cc-pulse"  data-pulse-url="/api/today/pulse" data-session="{{ 'pre' if pulse.session and 'pre' in (pulse.session|string|lower) else (pulse.session or '')|lower }}"aria-live="polite">
         <div class="cc-pulse-head">
           <span class="cc-kicker">Market Pulse</span>
           <span class="cc-live" id="cc-pulse-live"><i class="cc-dot"></i>{{ 'Live' if pulse.live else 'Snapshot' }}</span>
         </div>
         <div class="cc-pulse-regime">
-          <strong class="cc-regime-val">{{ pulse.regime_label or (pulse.regime or 'Neutral')|replace('_', ' ')|title }}</strong>
+      <span class="cc-p-lbl">Trend</span><strong class="cc-regime-val" id="cc-regime">{{ pulse.trend_label if pulse.known else '—' }}</strong>
           <span class="cc-pulse-sub" id="cc-pulse-sub">{{ pulse.summary or '' }}</span>
         </div>
         <div class="cc-pulse-grid">
           <div class="cc-p-cell"><span class="cc-p-lbl">{{ pulse.spy_label or 'SPY' }}</span><strong class="cc-p-val" id="cc-spy">{{ '%.2f'|format(pulse.spy) if pulse.spy else '—' }}</strong></div>
           <div class="cc-p-cell"><span class="cc-p-lbl">{{ pulse.qqq_label or 'QQQ' }}</span><strong class="cc-p-val" id="cc-qqq">{{ '%.2f'|format(pulse.qqq) if pulse.qqq else '—' }}</strong></div>
           <div class="cc-p-cell"><span class="cc-p-lbl">VIX {{ pulse.vix_regime or '' }}</span><strong class="cc-p-val" id="cc-vix">{{ '%.2f'|format(pulse.vix) if pulse.vix else '—' }}</strong></div>
-          <div class="cc-p-cell" id="cc-es-cell"><span class="cc-p-lbl">ES</span><strong class="cc-p-val" id="cc-es">{{ '%.2f'|format(pulse.es) if pulse.es else '—' }}</strong></div>
+          <div class="cc-p-cell" id="cc-es-cell"{% if not pulse.es %} hidden{% endif %}><span class="cc-p-lbl">ES</span><strong class="cc-p-val" id="cc-es">{{ '%.2f'|format(pulse.es) if pulse.es else '—' }}</strong></div>
           <div class="cc-p-cell" id="cc-nq-cell"><span class="cc-p-lbl">NQ</span><strong class="cc-p-val" id="cc-nq">{{ '%.2f'|format(pulse.nq) if pulse.nq else '—' }}</strong></div>
         </div>
         <p class="cc-pulse-note" id="cc-pulse-note">{{ pulse.note or '' }}</p>
@@ -83,7 +83,7 @@
       <div class="cc-head">
         <h2>AI Market Briefing</h2>
         <a href="{{ url_for('live_research.feed') }}">Full feed &rarr;</a>
-      </div>
+      </div><p class="cc-brief-conflict" id="ai-brief-conflict"{% if not (story and story.conflict) %} hidden{% endif %}>{{ story.conflict if story and story.conflict else '' }}</p><div id="ai-brief-body">
       {% if research_digest %}
         <p class="cc-brief-lead">{{ research_digest.summary or research_digest.headline or '' }}</p>
         {% if research_digest.bullets %}
@@ -95,15 +95,15 @@
         <p class="cc-brief-lead">{{ story.summary or story.headline or '' }}</p>
       {% else %}
         <p class="cc-empty">Briefing updates as live market research arrives.</p>
-      {% endif %}
-      <div id="what-changed" class="cc-what-changed"></div>
+      {% endif %}{% if story and story.permissions %}<p class="cc-brief-permissions">{{ story.permissions|join(', ') if story.permissions is sequence and story.permissions is not string else story.permissions }}</p>{% endif %}</div>
+      <div id="what-changed" class="cc-what-changed"><h3>What changed for you</h3></div>
     </section>
 
     <section class="cc-card cc-picks cc-intel-card">
       <div class="cc-head">
         <h2>A+ Setups Today</h2>
         <div class="cc-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected="true" data-cc-tab="setups">Setups</button>
+          <button type="button" role="tab" aria-selected="true" data-cc-tab="setups">Trade setups</button>
           <button type="button" role="tab" aria-selected="false" data-cc-tab="watch">{{ watchlist_name or 'Watchlist' }}</button>
         </div>
       </div>
@@ -159,7 +159,7 @@
             <span id="cm-label">{{ pulse.regime_label or 'Neutral' }}</span>
           </div>
         </div>
-      </div>
+      </div><p class="cm-play" id="cm-play">{{ pulse.summary or '' }}</p>
       <div class="cc-liq-row" id="cc-liq">
         <span>Liquidity Regime</span>
         <strong>{{ pulse.liquidity_label or 'Neutral' }}</strong>
