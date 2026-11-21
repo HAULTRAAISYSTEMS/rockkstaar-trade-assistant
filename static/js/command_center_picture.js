@@ -115,39 +115,38 @@
     list = list.slice(0, narrow ? (mine ? 8 : 4) : (mine ? 12 : 10));
     orbitEl.innerHTML = '';
     var n = list.length;
-    // Ring sized from the globe itself (same maths as the globe renderer:
-    // R = 0.35·min side, silhouette ≈ 1.053·R, centre at 47% height), so
-    // chips always circle outside the Earth whatever the screen.
+    // Ring sized from the globe itself (same maths as the globe renderer),
+    // so chips always circle outside the Earth whatever the screen.
     var box = orbitEl.getBoundingClientRect(), bw = box.width || 600, bh = box.height || 500;
-    var half = safeHalf(), halfW = narrow ? 34 : 42, halfH = narrow ? 20 : 25;
+    var half = safeHalf();
     document.dispatchEvent(new CustomEvent('cmd27:safe', { detail: { half: half } }));
     var mn = Math.min(bw, bh), R0 = mn * (mn > 420 ? 0.35 : 0.33);
     R0 = half ? Math.min(R0, (half - 70) / 1.053) : Math.min(R0, bw * 0.30);
-    var RS = R0 * 1.053, cyc = bh * 0.47, lim = half ? half - halfW : bw * 0.5 - 34;
-    var ry = Math.min(bh * 0.5 - 24, RS + 40), rx = Math.min(lim, Math.max(RS + 60, ry * 1.3));
-    var rects = [], clear = RS + 14;
+    R0 = Math.min(R0, (bh * 0.47 - 16) / 1.22);   // tallest spike stays inside the frame
+    var RS = R0 * 1.053, cyc = bh * 0.47;
+    var ry = Math.min(bh * 0.5 - 24, RS + 40), rx = Math.max(RS + 60, ry * 1.3);
+    if (half) rx = Math.min(rx, half - 40); else rx = Math.min(rx, bw * 0.5 - 40);
+    var rects = [], clear = RS + 14, GAP = 6;
+    // Things a chip must never cover: the view switch, legend and zoom buttons.
+    var obst = ['.cmd27-mode', '.cmd27-legend', '.cmd27-zoom'].map(function (sel) {
+      var o = globeBox && globeBox.querySelector(sel); if (!o) return null;
+      var r = o.getBoundingClientRect(); if (!r.width || !r.height) return null;
+      return [r.left - box.left - GAP, r.top - box.top - GAP, r.right - box.left + GAP, r.bottom - box.top + GAP];
+    }).filter(Boolean);
+    function hit(b) {
+      var all = obst.concat(rects);
+      for (var q = 0; q < all.length; q++) { var o = all[q]; if (b[0] < o[2] + GAP && b[2] + GAP > o[0] && b[1] < o[3] + GAP && b[3] + GAP > o[1]) return true; }
+      return false;
+    }
+    var els = [];
     list.forEach(function (q, i) {
       var sym = String(q.symbol).toUpperCase(), chg = q.change_pct;
-      var ang = (-Math.PI / 2) + (i / Math.max(n, 1)) * Math.PI * 2 + 0.3;
-      var dx = Math.cos(ang) * rx, dy = Math.sin(ang) * ry;
-      // Push out until the chip's nearest corner clears the atmosphere.
-      for (var k = 0; k < 12; k++) {
-        var nx = Math.max(0, Math.abs(dx) - halfW), ny = Math.max(0, Math.abs(dy) - halfH);
-        if (Math.sqrt(nx * nx + ny * ny) >= clear) break;
-        dx *= 1.06; dy *= 1.06;
-      }
-      var spill = narrow ? -4 : 26;   // phones: chips stay fully on screen
-      dx = Math.max(-bw / 2 + halfW - spill, Math.min(bw / 2 - halfW + spill, dx));
-      if (half) dx = Math.max(-lim, Math.min(lim, dx));
-      dy = Math.max(-cyc + halfH, Math.min(bh - cyc - halfH, dy));
-      rects.push([bw / 2 + dx - halfW, cyc + dy - halfH, bw / 2 + dx + halfW, cyc + dy + halfH]);
-      var x = (bw / 2 + dx) / bw * 100, y = (cyc + dy) / bh * 100;
       var el = document.createElement('div');
       var fl = flags.alert[sym] ? 'alert' : (flags.zone[sym] ? 'zone' : ''), ek = earnLabel(sym);
       el.className = 'cmd27-chip ' + (num(chg) ? (chg < 0 ? 'is-down' : 'is-up') : 'is-flat') + (mine ? ' is-mine' : '') +
         (fl ? ' is-' + fl : '') + (num(q.weight) ? ' is-hold' : '');
       el.setAttribute('role', 'button'); el.tabIndex = 0;
-      el.style.left = x + '%'; el.style.top = y + '%';
+      el.style.left = '0px'; el.style.top = '0px'; el.style.visibility = 'hidden';
       el.innerHTML = '<span></span><small></small>';
       el.firstChild.textContent = sym; el.lastChild.textContent = pct(chg);
       if (num(q.weight)) { var w = document.createElement('em'); w.textContent = q.weight.toFixed(q.weight < 10 ? 1 : 0) + (narrow ? '% held' : '% of portfolio'); el.appendChild(w); }
@@ -170,6 +169,33 @@
         el.appendChild(x2);
       }
       orbitEl.appendChild(el);
+      els.push(el);
+    });
+    // Place each chip at its real size: fully inside the frame (tags included),
+    // outside the atmosphere, and clear of the controls and the other chips.
+    els.forEach(function (el, i) {
+      var hw = el.offsetWidth / 2 + 6, hh = el.offsetHeight / 2 + 6;   // +6: the ★ and tag badges stick out
+      var base = (-Math.PI / 2) + (i / Math.max(n, 1)) * Math.PI * 2 + 0.3, pick = null, first = null;
+      for (var t = 0; t < 13 && !pick; t++) {
+        var a = base + (t === 0 ? 0 : (t % 2 ? 1 : -1) * Math.ceil(t / 2) * 0.13);
+        var dx = Math.cos(a) * rx, dy = Math.sin(a) * ry;
+        for (var k = 0; k < 14; k++) {   // push out until the nearest corner clears the atmosphere
+          var nx = Math.max(0, Math.abs(dx) - hw), ny = Math.max(0, Math.abs(dy) - hh);
+          if (Math.sqrt(nx * nx + ny * ny) >= clear) break;
+          dx *= 1.06; dy *= 1.06;
+        }
+        var lim = Math.min(bw / 2 - hw - 2, half ? half - hw : Infinity);
+        dx = Math.max(-lim, Math.min(lim, dx));
+        dy = Math.max(-cyc + hh + 2, Math.min(bh - cyc - hh - 2, dy));
+        var r = [bw / 2 + dx - hw, cyc + dy - hh, bw / 2 + dx + hw, cyc + dy + hh];
+        if (!first) first = r;
+        if (!hit(r)) pick = r;
+      }
+      pick = pick || first;
+      rects.push(pick);
+      el.style.left = ((pick[0] + pick[2]) / 2 / bw * 100) + '%';
+      el.style.top = ((pick[1] + pick[3]) / 2 / bh * 100) + '%';
+      el.style.visibility = '';
     });
     document.dispatchEvent(new CustomEvent('cmd27:chips', { detail: { tickers: list.map(function (q) { return String(q.symbol).toUpperCase(); }), rects: rects } }));
     orbitEl.classList.toggle('is-editing', editing && mine);
