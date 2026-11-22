@@ -669,7 +669,22 @@ def explain_gap(ticker: str, facts: dict | None, cik: str | None) -> str:
             "this does not know yet.")
 
 
-def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
+def available_quarters(facts: dict, limit: int = 8) -> list[str]:
+    """Quarter ends the company filed a three-month revenue figure for, newest first.
+
+    These are its 10-Q quarters. A fiscal Q4 is usually only inside the 10-K's
+    full year, so it is not offered as a quarter to read.
+    """
+    ends = set()
+    for tag in QUARTER_TAGS["rev"][1]:
+        for f in _facts_for(tag, facts):
+            n = _days(f)
+            if n is not None and QUARTER_DAYS[0] <= n <= QUARTER_DAYS[1] and f.get("end"):
+                ends.add(f["end"])
+    return sorted(ends, reverse=True)[:limit]
+
+
+def latest_quarter(ticker: str, facts: dict | None = None, end: str | None = None) -> dict | None:
     """Every figure the drill asks for, as the company filed it.
 
     Returns {"period_end": ..., "fields": {key: {value, tag, ...}}} or None
@@ -683,7 +698,7 @@ def latest_quarter(ticker: str, facts: dict | None = None) -> dict | None:
 
     # Anchor on revenue: it is the one line every filer tags, and its period
     # end defines which quarter the rest of the figures must come from.
-    anchor = _pick(facts, QUARTER_TAGS["rev"][1], window=QUARTER_DAYS)
+    anchor = _pick(facts, QUARTER_TAGS["rev"][1], window=QUARTER_DAYS, end=end)
     if not anchor or not anchor.get("end"):
         return None
     end = anchor["end"]
@@ -1373,7 +1388,9 @@ def ttm_eps(facts: dict, end: str, split: dict | None = None) -> dict | None:
         for f in _facts_for(tag, facts):
             n = _days(f)
             fe = d(f.get("end"))
-            if n is None or fe is None or fe > end_d or fe < end_d - timedelta(days=460):
+            # 640 days: at a Q3 end, last year's Q1 (needed to back fiscal Q4
+            # out of the 10-K) ended ~550 days earlier.
+            if n is None or fe is None or fe > end_d or fe < end_d - timedelta(days=640):
                 continue
             v = _on_current_basis(f, split)
             if v is None:
@@ -1466,13 +1483,19 @@ def _day_gap(a: str, b: str) -> int:
         return 10**6
 
 
-def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) -> dict | None:
-    """Everything the guided mode needs: the figures, and where they came from."""
+def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None,
+                end: str | None = None) -> dict | None:
+    """Everything the guided mode needs: the figures, and where they came from.
+
+    `end` reads an earlier 10-Q quarter instead of the latest one.
+    """
     if facts is None:
         facts, cik = fetch_facts(ticker)
         if facts is None:
             return None
-    filed = latest_quarter(ticker, facts=facts)
+    if end and end not in available_quarters(facts, limit=40):
+        end = None
+    filed = latest_quarter(ticker, facts=facts, end=end)
     if not filed:
         return None
 
@@ -1539,4 +1562,5 @@ def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None) 
         "ttm_eps": _ttm,
         "ttm_eps_prior": _ttm_prior,
         "ttm_history": _ttm_hist,
+        "quarters": available_quarters(facts),
     }
