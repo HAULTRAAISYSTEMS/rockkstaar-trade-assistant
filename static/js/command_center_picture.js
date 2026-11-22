@@ -104,6 +104,14 @@
     saveOrbit();
   }
   document.addEventListener('cmd27:orbit-toggle', function (e) { toggle(e.detail && e.detail.symbol); });
+  // Right-click menu: put a ticker in (on) or take it out of (on=false) the orbit, or start over.
+  document.addEventListener('cmd27:orbit-set', function (e) {
+    var d = e.detail || {}, sym = String(d.symbol || '').toUpperCase();
+    if (!sym || (orbit.indexOf(sym) >= 0) === (d.on !== false)) return;
+    toggle(sym);
+  });
+  document.addEventListener('cmd27:orbit-reset', function () { orbit = []; editing = false; saveOrbit(); });
+  document.addEventListener('cmd27:orbit-edit', function () { if (orbit.length && mode !== 'portfolio') { editing = !editing; renderOrbit(); } });
 
   function renderOrbit() {
     if (!orbitEl) return;
@@ -156,6 +164,9 @@
       el.className = 'cmd27-chip ' + (num(chg) ? (chg < 0 ? 'is-down' : 'is-up') : 'is-flat') + (mine ? ' is-mine' : '') +
         (fl ? ' is-' + fl : '') + (num(q.weight) ? ' is-hold' : '');
       el.setAttribute('role', 'button'); el.tabIndex = 0;
+      el.setAttribute('data-ticker', sym); el.setAttribute('data-orbit', orbit.indexOf(sym) >= 0 ? '1' : '0');
+      if (num(q.price)) el.setAttribute('data-price', String(q.price));
+      if (m[sym] || mode === 'portfolio') el.setAttribute('data-spin', '1');
       el.style.left = '0px'; el.style.top = '0px'; el.style.visibility = 'hidden';
       el.innerHTML = '<span></span><small></small>';
       el.firstChild.textContent = sym; el.lastChild.textContent = pct(chg);

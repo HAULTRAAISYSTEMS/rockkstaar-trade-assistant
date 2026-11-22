@@ -10720,6 +10720,80 @@ _ORBIT_MAX = 12
 _ORBIT_SYM = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,9}$")
 
 
+# ── Right-click menus ────────────────────────────────────────────────
+# The app-wide ticker menu (static/js/context_menu.js) asks once, when it
+# opens, which of the user's lists hold the ticker, whether it is in the
+# globe orbit, and the latest shared quote (for the "alert at" box).
+_MENU_SYM = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+
+
+@app.route("/api/ticker-menu/<ticker>", methods=["GET"])
+def api_ticker_menu(ticker):
+    import json as _json
+    t = (ticker or "").strip().upper()
+    if not _MENU_SYM.match(t):
+        return jsonify({"ok": False, "error": "Invalid ticker"}), 400
+    uid = current_user_id()
+    lists = []
+    for wl in get_all_watchlists(uid):
+        try:
+            has = t in set(get_watchlist_stocks(wl["id"]))
+        except Exception:
+            has = False
+        lists.append({"id": wl["id"], "name": wl["name"], "has": has,
+                      "auto": wl["name"] in DEFAULT_WATCHLISTS})
+    try:
+        orbit = _json.loads(get_user_setting(uid, "cc_orbit", "[]") or "[]")
+    except Exception:
+        orbit = []
+    price = change_pct = None
+    if _MKT_AVAILABLE:
+        try:
+            q = _mkt.live_quotes([t]).get(t) or {}
+            price = float(q.get("price")) if q.get("price") else None
+            change_pct = float(q["change_pct"]) if q.get("change_pct") is not None else None
+        except Exception:
+            price = change_pct = None
+    resp = jsonify({"ok": True, "ticker": t, "lists": lists, "in_orbit": t in orbit,
+                    "orbit_full": len(orbit) >= _ORBIT_MAX, "price": price, "change_pct": change_pct})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/api/ticker-menu/<ticker>/watchlist", methods=["POST"])
+def api_ticker_menu_watchlist(ticker):
+    """Add the ticker to one of the user's lists, or take it out of one."""
+    t = (ticker or "").strip().upper()
+    if not _MENU_SYM.match(t):
+        return jsonify({"ok": False, "error": "Invalid ticker"}), 400
+    uid = current_user_id()
+    body = request.get_json(silent=True) or {}
+    try:
+        wl_id = int(body.get("watchlist_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Pick a list"}), 400
+    owned = {w["id"]: w for w in get_all_watchlists(uid)}
+    if wl_id not in owned:
+        return jsonify({"ok": False, "error": "List not found"}), 404
+    name = owned[wl_id]["name"]
+    action = body.get("action")
+    if action == "remove":
+        remove_ticker_from_watchlist(wl_id, t)
+        # Same rule as the Remove button: an automatic list must not put it back.
+        if name in DEFAULT_WATCHLISTS:
+            remove_ticker_from_defaults(t, uid)
+        return jsonify({"ok": True, "ticker": t, "list": name, "has": False})
+    if action != "add":
+        return jsonify({"ok": False, "error": "Unknown action"}), 400
+    if t not in set(get_watchlist_stocks(wl_id)):
+        add_ticker_to_watchlist(wl_id, t)
+        if t not in set(get_watchlist_stocks(wl_id)):
+            return jsonify({"ok": False, "error": f"Could not add {t} to {name}"}), 400
+        upsert_loading_placeholder(t)
+        threading.Thread(target=_onboard_ticker_bg, args=(t, uid), daemon=True, name=f"onboard-{t}").start()
+    return jsonify({"ok": True, "ticker": t, "list": name, "has": True})
+
+
 @app.route("/api/command/orbit", methods=["GET", "POST"])
 def api_command_orbit():
     """The tickers the user keeps in orbit around the Command Center globe.

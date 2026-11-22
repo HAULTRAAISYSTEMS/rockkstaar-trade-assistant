@@ -394,7 +394,7 @@
         <button type="button" data-sort="name">A–Z</button>
       </div>
     </div>
-    <div class="te-scan-list" id="te-scan-list">
+    <div class="te-scan-list" id="te-scan-list" data-watchlist-id="{{ active_id }}">
       {% for t in scanner_rows %}{% set q = board_quotes.get(t, {}) %}
       <div class="te-scan-row" data-ticker="{{ t }}" data-setup="{{ q.setup if q.setup is not none else -1 }}" data-chg="{{ q.chg if q.chg is not none else -999 }}">
         <div class="te-scan-id">

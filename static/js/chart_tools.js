@@ -3092,3 +3092,146 @@ function ctEventTip(h, x, y) {
   tip.style.left = Math.max(6, Math.min(W - 286, x - 140)) + 'px';
   tip.style.bottom = '40px';
 }
+
+
+/* ── Right-click on the chart (press and hold on a phone) ───────────
+   On empty chart: an alert, a line or a trade plan at the exact price
+   under the pointer, the drawing tools, indicators and view. On a
+   drawing: its own menu (style, alert, colour, lock, copy, delete).
+   The menu itself is static/js/context_menu.js. */
+var CT_MENU_COLORS = ['#38d6c5', '#22c58b', '#f0b53f', '#ff9f43', '#ff4d45', '#ff6bcb', '#8b93ff', '#e8edf5'];
+function ctMenuAddDrawing(type, points, select) {
+  var d = ctNewDrawing(type, points);
+  ctPushUndo(); ctStore.drawings.push(d);
+  if (ctStore.drawings.length > 300) ctStore.drawings.shift();
+  twSaveDrawings();
+  if (select) ctSelect(ctStore.drawings.length - 1); else twRenderDrawings();
+  return d;
+}
+function ctMenuCmd(i, cmd) {
+  ctSelect(i);
+  var f = document.createElement('i'); f.setAttribute('data-ct-cmd', cmd);
+  ctPropClick({target: f});
+}
+function ctMenuAlertAt(price) {
+  var t = twChartState.ticker; if (!t || !window.TSMenu) return;
+  window.TSMenu.setAlert(t, Math.round(price * 10000) / 10000, ctLastPrice()).then(function (ok) { if (ok) ctLoadAlerts(t, true); });
+}
+function ctMenuDrawingSpec(i) {
+  var d = ctStore.drawings[i], T = window.TSMenu;
+  var label = (CT_TOOLS[d.type] || {}).label || 'Drawing', items = [];
+  items.push({icon: 'edit', label: 'Edit style & levels', run: function () { ctSelect(i); }});
+  if (ctAlertPrices(d).length) items.push({icon: 'bell', label: 'Set alert at this ' + (d.type === 'rect' ? 'box' : d.type === 'long' || d.type === 'short' ? 'stop & target' : 'level'), hint: 'Alt W', run: function () { ctMenuCmd(i, 'alert'); }});
+  if ((d.type === 'long' || d.type === 'short') && document.querySelector('[data-ticket], #tw-ticket, .tw-ticket')) items.push({icon: 'ticket', label: 'Send to order ticket', run: function () { ctMenuCmd(i, 'ticket'); }});
+  items.push({sep: true});
+  items.push({swatches: CT_MENU_COLORS, current: d.style && d.style.color, pick: function (c) {
+    ctPushUndo(); d.style.color = c; ctPropsFor = null; twSaveDrawings(); twRenderDrawings();
+  }});
+  items.push({icon: 'lock', label: d.locked ? 'Unlock' : 'Lock in place', run: function () { ctMenuCmd(i, 'lock'); }});
+  items.push({icon: 'dup', label: 'Duplicate', run: function () { ctMenuCmd(i, 'clone'); }});
+  if (i !== ctStore.drawings.length - 1) items.push({icon: 'front', label: 'Bring to front', run: function () {
+    ctPushUndo(); ctStore.drawings.push(ctStore.drawings.splice(i, 1)[0]); twSaveDrawings(); ctSelect(ctStore.drawings.length - 1);
+  }});
+  items.push({sep: true});
+  items.push({icon: 'trash', label: 'Delete', hint: 'Del', danger: true, run: function () {
+    ctSelect(i); twDeleteSelected();
+    if (T) T.toast(label + ' deleted', {undo: ctUndo});
+  }});
+  return {title: label, sub: twChartState.ticker || '', items: items, prefetch: false};
+}
+function ctMenuChartSpec(c) {
+  var T = window.TSMenu, t = twChartState.ticker || '', p = c.price, pt = c.point, F = ctFmt(p);
+  var last = ctLastPrice(), diff = last ? (p - last) / last * 100 : null;
+  var items = [];
+  items.push({icon: 'bell', label: 'Alert at $' + F, hint: diff == null ? '' : (diff >= 0 ? '+' : '−') + Math.abs(diff).toFixed(1) + '%', run: function () { ctMenuAlertAt(p); }});
+  if (pt) {
+    items.push({icon: 'hline', label: 'Horizontal line at $' + F, hint: 'Alt H', run: function () { ctMenuAddDrawing('hline', [pt]); if (T) T.toast('Line at $' + F + ' · right-click it for options'); }});
+    items.push({icon: 'hray', label: 'Horizontal ray from here', run: function () { ctMenuAddDrawing('hray', [pt]); }});
+    items.push({icon: 'long', label: 'Plan a long from $' + F, run: function () {
+      var l = ctTimeToLogical(pt.t), t2 = ctLogicalToTime((l == null ? 0 : l) + 18);
+      ctMenuAddDrawing('long', [pt, {t: t2 == null ? pt.t : t2, p: p * 1.06}], true);
+    }});
+    items.push({icon: 'short', label: 'Plan a short from $' + F, run: function () {
+      var l = ctTimeToLogical(pt.t), t2 = ctLogicalToTime((l == null ? 0 : l) + 18);
+      ctMenuAddDrawing('short', [pt, {t: t2 == null ? pt.t : t2, p: p * 0.94}], true);
+    }});
+    items.push({icon: 'text', label: 'Note here', run: function () {
+      ctMenuAddDrawing('text', [pt], true);
+      setTimeout(function () { var inp = document.getElementById('ct-p-text'); if (inp) { inp.focus(); inp.select(); } }, 30);
+    }});
+  }
+  items.push({icon: 'pen', label: 'Draw', sub: function () {
+    var out = [];
+    if (pt) {
+      out.push({icon: 'vline', label: 'Vertical line here', run: function () { ctMenuAddDrawing('vline', [pt]); }});
+      out.push({icon: 'wave', label: 'Anchored VWAP from this bar', run: function () { ctMenuAddDrawing('avwap', [pt]); }});
+      out.push({sep: true}, {note: 'Pick a tool, then click the chart:'});
+    }
+    [['trend', 'pen', 'Alt T'], ['fib', 'fib', 'Alt F'], ['rect', 'rect', 'Alt B'], ['channel', 'chan', 'Alt C'], ['measure', 'ruler', ''], ['pctlevels', 'fib', ''], ['ray', 'pen', ''], ['arrow', 'pen', '']].forEach(function (r) {
+      if (CT_TOOLS[r[0]]) out.push({icon: r[1], label: CT_TOOLS[r[0]].label, hint: r[2], run: function () { twStartDrawing(r[0]); }});
+    });
+    return out;
+  }});
+  items.push({icon: 'wave', label: 'Indicators', sub: function () {
+    var ind = twChartState.indicators || {}, out = [];
+    function study(label, path) {
+      var parts = path.split('.'), on = !!(ctPrefs[parts[0]] && ctPrefs[parts[0]][parts[1]]);
+      out.push({label: label, checked: function () { var o = ctPrefs[parts[0]]; return !!(o && o[parts[1]]); }, keep: true, run: function () { var o = ctPrefs[parts[0]]; ctSet(path, !(o && o[parts[1]])); }});
+      return on;
+    }
+    if (typeof twToggleIndicator === 'function') {
+      ['rsi', 'macd'].forEach(function (n) {
+        out.push({label: n === 'rsi' ? 'RSI (14)' : 'MACD (12, 26, 9)', keep: true, checked: function () { return !!(twChartState.indicators || {})[n]; },
+          run: function () { var cb = document.getElementById('tw-ind-' + n); if (cb) { cb.checked = !ind[n]; twToggleIndicator(n, cb); } else twToggleIndicator(n); ind = twChartState.indicators; }});
+      });
+    }
+    study('VWAP', 'vwap.on');
+    study('Bollinger Bands (' + ctPrefs.bb.len + ', ' + ctPrefs.bb.mult + ')', 'bb.on');
+    study('SMA ' + ctPrefs.sma.len, 'sma.on');
+    study('Key levels (PDH / PDL / PDC)', 'levels.on');
+    out.push({sep: true});
+    study('Volume', 'view.volume');
+    study('Value zones', 'view.zones');
+    study('Earnings & news marks', 'view.events');
+    return out;
+  }});
+  items.push({sep: true});
+  if (ctStore.undo && ctStore.undo.length) items.push({icon: 'undo', label: 'Undo', hint: 'Ctrl Z', run: ctUndo});
+  if (ctStore.drawings.length) {
+    items.push({icon: 'eye', label: ctPrefs.draw.hidden ? 'Show drawings' : 'Hide drawings', run: function () { ctSet('draw.hidden', !ctPrefs.draw.hidden); }});
+    items.push({icon: 'trash', danger: true, label: 'Remove all ' + ctStore.drawings.length + ' drawing' + (ctStore.drawings.length === 1 ? '' : 's'), run: function () {
+      var n = ctStore.drawings.length;
+      ctPushUndo(); ctStore.drawings = []; twChartState.selectedDrawing = null; twSaveDrawings(); twStopDrawing();
+      if (T) T.toast(n + ' drawing' + (n === 1 ? '' : 's') + ' removed from ' + t, {undo: ctUndo});
+    }});
+  }
+  if (typeof twResetView === 'function') items.push({icon: 'reset', label: 'Reset chart view', hint: 'Alt R', run: twResetView});
+  if (typeof twToggleFullscreen === 'function') items.push({icon: 'full', label: 'Full screen chart', hint: 'Shift F', run: twToggleFullscreen});
+  items.push({icon: 'copy', label: 'Copy price $' + F, run: function () { if (T) T.copy(F, '$' + F); }});
+  if (t && T) {
+    items.push({sep: true});
+    items.push({icon: 'star', label: t + ' — more', sub: function () { return T.tickerItems({ticker: t, price: last, inChart: true}); }});
+  }
+  return {title: t + '  ·  $' + F, sub: diff == null ? '' : (diff >= 0 ? '+' : '−') + Math.abs(diff).toFixed(2) + '% from last', items: items, prefetch: false};
+}
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  (window.TSMenuQueue = window.TSMenuQueue || []).push({
+    priority: 30,
+    match: function (target, ev) {
+      var box = target.closest && target.closest('#tw-chart-box');
+      if (!box || !twChartState.chart || !ctCanvas()) return null;
+      if (target.closest('button, input, select, textarea, a, label, [data-ct-group], [data-ct-fb], [role="dialog"], .ct-notice')) return null;
+      var c = ctLocal(ev), dim = ctDims();
+      if (c.y < 0 || c.y > dim.H || c.x < 0) return null;
+      var hit = c.x <= dim.W ? ctHit(c.x, c.y) : null;
+      if (hit) return {drawing: hit.index};
+      var price = ctPriceAt(c.y);
+      if (price == null || !(price > 0)) return null;
+      return {price: price, point: c.x <= dim.W ? ctPointAt(c.x, c.y, true) : null};
+    },
+    build: function (c) {
+      if (ctMode) twStopDrawing();
+      return c.drawing != null ? ctMenuDrawingSpec(c.drawing) : ctMenuChartSpec(c);
+    }
+  });
+}
