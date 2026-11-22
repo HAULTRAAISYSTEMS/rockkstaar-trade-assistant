@@ -46,6 +46,7 @@
     const file = input.files && input.files[0];
     input.value = '';
     if (!file) return;
+    if (file.size > 25 * 1024 * 1024) { status('That photo is over 25 MB. Pick a smaller one.', true); return; }
     status('Uploading…');
     try {
       const fd = new FormData();
@@ -57,7 +58,8 @@
       show(d.url);
       status('Saved · tap to change');
     } catch (e) {
-      status(e.message || 'Could not save that photo.', true);
+      const net = e instanceof TypeError;   // fetch() itself failed: connection dropped or offline
+      status(net ? 'Upload didn\'t go through. Check your connection and try again.' : (e.message || 'Could not save that photo.'), true);
     }
   });
 })();

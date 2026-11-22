@@ -84,3 +84,37 @@ def test_nav_offers_upload_from_the_photo_spot(c):
     html = c.get("/intel").get_data(as_text=True)
     assert html.count("data-photo-pick") == 2 and "Tap to add a photo" in html
     assert 'id="profile-photo-file"' in html and "js/profile_photo.js" in html
+
+
+def big_jpeg():
+    import random
+    random.seed(1)
+    im = Image.frombytes("RGB", (2400, 1800), bytes(random.getrandbits(8) for _ in range(2400 * 1800 * 3)))
+    b = io.BytesIO()
+    im.save(b, "JPEG", quality=95)
+    assert len(b.getvalue()) > 2 * 1024 * 1024        # over the app-wide 2 MB cap
+    return b.getvalue()
+
+
+def test_full_size_phone_photo_uploads(c):
+    """A full-size phone photo the browser couldn't shrink must still upload."""
+    r = c.post("/api/account/photo", data={"photo": (io.BytesIO(big_jpeg()), "IMG_0001.jpg")},
+               content_type="multipart/form-data")
+    assert r.status_code == 200 and r.get_json()["ok"]
+
+
+def test_other_routes_keep_the_2mb_cap(c):
+    r = c.post("/api/wealth/import/preview", data={"file": (io.BytesIO(b"x" * (3 * 1024 * 1024)), "a.csv")},
+               content_type="multipart/form-data")
+    assert r.status_code == 413
+
+
+def test_iphone_heic_photo_uploads(c):
+    pillow_heif = pytest.importorskip("pillow_heif")
+    pillow_heif.register_heif_opener()
+    b = io.BytesIO()
+    Image.new("RGB", (1200, 900), (30, 90, 200)).save(b, "HEIF")
+    r = c.post("/api/account/photo", data={"photo": (io.BytesIO(b.getvalue()), "IMG_0002.HEIC")},
+               content_type="multipart/form-data")
+    assert r.get_json()["ok"]
+    assert Image.open(io.BytesIO(c.get(r.get_json()["url"]).data)).format == "JPEG"
