@@ -35,5 +35,5 @@
 .wa-lab-v2 .lab-status{font-size:12px;color:#b4cbd9;min-height:18px}
 .wa-lab-v2 .lab-saved{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
 .wa-lab-v2 .lab-saved select{background:#09131d;color:#e5f3f9;border:1px solid #294354;padding:9px;border-radius:8px;max-width:100%}
-@media(max-width:900px){.wa-lab-v2 .lab-grid{grid-template-columns:1fr}.wa-lab-v2 .lab-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.wa-lab-v2 .lab-grid{grid-template-columns:minmax(0,1fr)}.wa-lab-v2 .lab-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.wa-lab-v2 .lab-panel,.wa-lab-v2 .lab-banner{padding:15px}.wa-lab-v2 .lab-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.wa-lab-v2 .lab-compare{grid-template-columns:1fr}.wa-lab-v2 .lab-tile strong{font-size:17px}}

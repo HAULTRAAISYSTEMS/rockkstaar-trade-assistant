@@ -1,4 +1,5 @@
-/* Capital Deployment Phase 4. Never executes brokerage trades. */
+/* Next Dollar · Split and Journal tabs (formerly Capital Deployment). Never executes brokerage trades.
+   Amount and candidates come from the shared question at the top of the page. */
 (function(){
 'use strict';
 const form=document.getElementById('capital-form');if(!form)return;
@@ -19,20 +20,14 @@ if(secInspect&&secTicker&&secRoot){
  secTicker.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inspect();}});
 }
 
-$('capital-add-button').addEventListener('click',()=>{
- const input=$('capital-add'),t=input.value.trim().toUpperCase();
- if(!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(t))return;
- const existing=[...form.querySelectorAll('input[name=candidate]')];
- if(existing.some(x=>x.value===t)||existing.length>=12)return;
- const label=document.createElement('label');label.style.color='#d4e7ef';
- const cb=document.createElement('input');cb.type='checkbox';cb.name='candidate';cb.value=t;cb.checked=true;
- label.append(cb,document.createTextNode(t));existing[0]?.parentElement?.parentElement?.append(label);input.value='';
-});
 form.addEventListener('submit',async e=>{
  e.preventDefault();
  const status=$('capital-status');status.textContent='Analyzing connected holdings and M.C.F.F. research…';
- const tickers=[...form.querySelectorAll('input[name=candidate]:checked')].map(x=>x.value).slice(0,12);
- const data={amount:form.elements.amount.value,position_limit:form.elements.position_limit.value,
+ const tickers=[...document.querySelectorAll('#cands input:checked')].map(x=>x.value).slice(0,12);
+ const amount=($('nd-amount')||{}).value;
+ if(!amount){status.textContent='Enter an amount at the top first.';return}
+ if(!tickers.length){status.textContent='Pick at least one candidate.';return}
+ const data={amount,portfolio_id:form.dataset.portfolio?Number(form.dataset.portfolio):null,position_limit:form.elements.position_limit.value,
  sector_limit:form.elements.sector_limit.value,cash_reserve:form.elements.cash_reserve.value,
  existing_cash:form.elements.existing_cash.checked,tickers};
  try{
@@ -41,11 +36,11 @@ form.addEventListener('submit',async e=>{
  latest=r;status.textContent=r.verdict;
  $('capital-results').innerHTML='<p class="lab-muted">Portfolio value: '+money(r.portfolio_value)+' · '+(r.assumed_new_money?'New contribution':'Existing cash')+'</p>'+
  (r.warnings||[]).map(x=>'<p class="lab-negative">'+esc(x)+'</p>').join('')+
- r.rows.map(x=>'<article class="lab-comparison" style="margin:10px 0"><div style="display:flex;justify-content:space-between;gap:12px"><b>'+esc(x.ticker)+'</b><b>'+ (x.score==null?'Unscored':x.score+'/100')+'</b></div>'+
+ r.rows.map(x=>'<article class="lab-comparison" style="margin:10px 0"><div style="display:flex;justify-content:space-between;gap:12px"><b>'+esc(x.ticker)+'</b><b class="nd-score">'+ (x.score==null?'Unscored':x.score+'/100')+'</b></div>'+
  '<p>'+esc(x.score_label||'Research score')+' · '+esc(x.status||'Unverified')+' · '+(x.eligible?'ELIGIBLE':'NOT ELIGIBLE')+' · Evidence coverage '+x.coverage_pct+'%</p>'+
  '<p>Position weight: '+(x.weight_before_pct==null?'Unknown':x.weight_before_pct+'%')+' → '+(x.weight_after_pct==null?'Unknown':x.weight_after_pct+'%')+' · Sector after: '+(x.sector_after_pct==null?'Unknown':x.sector_after_pct+'%')+'</p>'+
  '<p>Valuation: '+(x.valuation_verified?esc(x.zone||'Not available'):'UNVERIFIED — open M.C.F.F. to verify valuation')+' · Quote date: '+esc(x.valuation_as_of||'unknown')+'</p>'+ '<p>Maximum deployment within configured concentration limits: '+money(x.max_allocation)+'</p>'+
- '<p class="lab-muted">Moat '+(x.components.quality??'—')+' · Financials '+(x.components.financials??'—')+' · Growth '+(x.components.growth??'—')+' · Valuation '+(x.components.valuation??'—')+' · Diversification '+(x.components.diversification??'—')+'</p>'+
+ '<p class="lab-muted">Moat '+(x.components.quality??'—')+' · Financials '+(x.components.financials??'—')+' · Growth '+(x.components.growth??'—')+' · Valuation '+(x.components.valuation??'—')+' · Diversification '+(x.components.diversification==null?'—':Math.round(x.components.diversification))+'</p>'+
  '<details><summary style="cursor:pointer;color:#ff9da4">'+(x.blocks||[]).length+' eligibility checks need attention</summary>'+(x.blocks||[]).map(b=>'<p class="lab-negative">'+esc(b)+'</p>').join('')+'</details>'+
  '<button class="lab-button" type="button" data-journal-ticker="'+esc(x.ticker)+'">Journal this candidate</button></article>').join('');
  const exposure=r.exposure||{};
@@ -75,13 +70,14 @@ form.addEventListener('submit',async e=>{
  $('capital-results').querySelectorAll('[data-journal-ticker]').forEach(b=>b.addEventListener('click',()=>{
  $('capital-journal').elements.ticker.value=b.dataset.journalTicker;
  $('capital-journal').elements.amount.value=r.amount;
- $('capital-journal').scrollIntoView({behavior:'smooth',block:'center'});
+ if(window.NDTabs)window.NDTabs.show('journal');
+ $('capital-journal').elements.thesis.focus();
  }));
  }catch(err){status.textContent='Analysis temporarily unavailable.'}
 });
 async function loadJournal(){
  try{const r=await WA.api('/api/wealth/capital/journal');if(!r.ok)return;
- $('journal-list').innerHTML=(r.decisions||[]).map(x=>'<article class="lab-comparison" style="margin:10px 0"><b>'+esc(x.ticker)+' · '+esc(x.decision)+' · '+money(x.amount)+'</b><p>'+esc(x.thesis)+'</p><p class="lab-muted">Risk: '+esc(x.risk)+' · Invalidation: '+esc(x.invalidation)+'</p><small>Recorded '+esc(x.created_at)+' · Review '+esc(x.review_date||'not scheduled')+'</small></article>').join('');
+ $('journal-list').innerHTML=(r.decisions||[]).map(x=>'<article class="lab-comparison" style="margin:10px 0"><b>'+esc(x.ticker)+' · '+esc(x.decision)+' · '+money(x.amount)+'</b><p>'+esc(x.thesis)+'</p><p class="lab-muted">Risk: '+esc(x.risk)+' · Invalidation: '+esc(x.invalidation)+'</p><small>Recorded '+esc(String(x.created_at||'').slice(0,10))+' · Review '+esc(x.review_date||'not scheduled')+'</small></article>').join('')||'<p class="wa-note">No decisions recorded yet.</p>';
  }catch(err){$('journal-status').textContent='Journal temporarily unavailable.'}
 }
 $('capital-journal').addEventListener('submit',async e=>{

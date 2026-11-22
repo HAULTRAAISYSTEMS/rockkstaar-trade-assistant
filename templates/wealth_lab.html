@@ -1,18 +1,13 @@
 {% extends "base.html" %}
 {% import "_wealth_macros.html" as wa with context %}
-{% block title %}Investment Lab — Wealth Architect{% endblock %}
+{% block title %}Cost Basis Lab — Wealth Architect{% endblock %}
 {% block head_extra %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_lab_v2.css') }}">
 {% endblock %}
 {% block content %}
 <div class="wa wa-lab-v2">
-{{ wa.head('lab', 'Investment Lab', 'Model your next investment before committing capital. Compare break-even, risk, and alternatives using your connected holdings.', portfolios, current) }}
-<div class="lab-banner">
-  <div class="lab-kicker">Wealth Architect / Capital Intelligence</div>
-  <h2>Investment Lab 2.0 <span style="color:#c9fa76">✦</span></h2>
-  <p class="lab-muted">Real positions. Hypothetical decisions. Read-only brokerage integration.</p>
-</div>
+{{ wa.head('lab', 'Cost Basis Lab', 'What one more purchase does to your average cost, your break-even and your downside. Uses your connected holdings.', portfolios, current) }}
 <div class="lab-grid">
   <section class="lab-panel" aria-label="Purchase simulator">
     <h3>01 / Build your scenario</h3>
@@ -65,12 +60,7 @@
       <div class="wa-scroll"><table class="wa-table"><thead><tr><th>Future price</th><th>Move</th><th>New capital P/L</th><th>Total P/L</th><th>Without buying</th></tr></thead><tbody id="lab-scenarios"></tbody></table></div>
       <div class="lab-brief" id="lab-brief">This decision briefing is based on simulation math, not an AI-generated buy recommendation.</div>
     </section>
-    <section class="lab-panel" aria-label="Alternative investments">
-      <h3>04 / Compare your next dollar</h3>
-      <p class="lab-muted">What if the same capital went into a different connected holding? Compare shares and average cost, not hypothetical guaranteed returns.</p>
-      <div class="lab-compare" id="lab-compare"></div>
-      <p class="lab-muted">For deeper fundamentals and valuation, use M.C.F.F. Research. This comparison is not a recommendation or automatic order.</p>
-    </section>
+    <p class="lab-muted lab-next">Comparing this buy against other stocks? Use <a href="{{ url_for('wealth.next_dollar_page', p=current.id if current else None) }}">Next Dollar</a>: it ranks candidates on your M.C.F.F. gates, buy zones and limits.</p>
   </div>
 </div>
 </div>

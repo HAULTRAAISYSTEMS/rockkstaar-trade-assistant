@@ -1,8 +1,11 @@
 {% extends "base.html" %}
+{% import "_wealth_macros.html" as wa with context %}
 {% block title %}Schwab Account — Tradestaar Elite{% endblock %}
+{% block head_extra %}{{ super() }}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
 
 {% block content %}
 <div class="schwab-wrap">
+  <div class="wa schwab-portfolio-nav">{{ wa.portfolio_nav('schwab') }}</div>
 
   <!-- ===== HEADER ===== -->
   <div class="schwab-header">

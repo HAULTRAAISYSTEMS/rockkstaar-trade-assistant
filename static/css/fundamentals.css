@@ -385,7 +385,7 @@
   .fundamentals-shell .page-header { padding: 22px 17px; border-radius: 15px; }
   .fundamentals-shell .page-title { font-size: 36px; }
   .fundamentals-shell .page-header::after { font-size: 8px; }
-  .fundamentals-shell .tab-bar { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .fundamentals-shell .tab-bar { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); width: 100%; }
   .fundamentals-shell .tab-btn { min-width: 0; }
   .fundamentals-shell .search-wrap { grid-template-columns: 1fr auto; }
   .fundamentals-shell .btn-refresh-link { grid-column: 1 / -1; justify-self: start; padding: 2px 0; }

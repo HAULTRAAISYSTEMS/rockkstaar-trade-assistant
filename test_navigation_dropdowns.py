@@ -12,17 +12,30 @@ def test_elite_navigation_allows_dropdown_panels_to_escape_nav_row():
 
 
 def test_research_learn_and_account_are_native_dropdowns():
-    """Desktop bar is icon tiles: Command, Terminal, Discover, Verify, M.C.F.F.,
-    Capital, Watchlists, Portfolio, then an avatar menu (Account + Learn)."""
+    """Desktop bar is icon tiles: Command, Terminal, Discover, Verify, Watchlists,
+    Portfolio, then an avatar menu (Account + Learn). M.C.F.F. and Capital live
+    inside Portfolio, not on the bar."""
     template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
-    for label in ("Terminal", "Discover", "Capital", "Portfolio"):
+    for label in ("Terminal", "Discover", "Portfolio"):
         assert '<summary class="nav-link nav-tile' in template
         assert f'<span class="nav-tile__lbl">{label}</span>' in template
-    for label in ("Command", "Verify", "M.C.F.F.", "Watchlists"):
+    for label in ("Command", "Verify", "Watchlists"):
         assert f'<span class="nav-tile__lbl">{label}</span>' in template
-    assert template.count('<details class="nav-menu">') == 4
+    for gone in ("M.C.F.F.", "Capital"):
+        assert f'<span class="nav-tile__lbl">{gone}</span>' not in template
+    assert template.count('<details class="nav-menu">') == 3
     assert '<details class="nav-menu nav-avatar">' in template
-    assert "nav_tiles(capital_groups)" in template and "nav_tiles(portfolio_groups)" in template
+    assert "nav_tiles(portfolio_groups)" in template and "capital_groups" not in template
+
+
+def test_portfolio_menu_puts_schwab_first_and_groups_the_rest():
+    template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
+    block = template[template.index("portfolio_groups = ["):template.index("] %}", template.index("portfolio_groups = ["))]
+    groups = re.findall(r"\('(Accounts|Invest|Track|Research)',", block)
+    assert groups == ["Accounts", "Invest", "Track", "Research"]
+    titles = re.findall(r"url_for\([^)]*\),\s*'([^']+)'", block)
+    assert titles == ["Schwab Account", "Wealth Overview", "Next Dollar", "Planner", "Cost Basis Lab",
+                      "Scoreboard", "Ledger", "M.C.F.F. list"]
 
 
 def test_account_dropdown_links_to_free_browser_alerts():

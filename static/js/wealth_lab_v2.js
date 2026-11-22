@@ -48,7 +48,7 @@ function compare(r){
  const amount=numeric('invest_amount')||0,buy=numeric('purchase_price'),cur=numeric('current_price');
  const h=H.find(x=>x.ticker.toUpperCase()===(form.elements.ticker.value||'').toUpperCase());
  const alternatives=H.filter(x=>x!==h&&Number(x.price)>0).slice(0,3);
- const box=$('lab-compare');box.replaceChildren();
+ const box=$('lab-compare');if(!box)return;box.replaceChildren();
  if(!alternatives.length){box.textContent='Connect more priced holdings to compare where the same capital could go.';return}
  const cards=alternatives.map(x=>{
  const shares=amount/Number(x.price),basis=Number(x.avg_cost),oldShares=Number(x.shares);

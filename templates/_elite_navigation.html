@@ -33,41 +33,27 @@
     ('memory', url_for('research_memory.notebook'), 'Memory', 'Your saved notes and recall reviews', 'bulb'),
   ]),
 ] %}
-{% set wealth_groups = [
-  ('Long-term investing', [
-    ('wealth', url_for('wealth.dashboard'), 'Wealth Architect', 'Portfolios, returns, concentration and sectors', 'vault'),
-  ]),
-  ('Decide', [
-    ('wnext', url_for('wealth.next_dollar_page'), 'Next Dollar', 'Where your next dollar goes, or stays cash', 'target'),
-    ('wmcff', url_for('wealth.research_list_page'), 'M.C.F.F.', 'Moat, CEO, Financials, Future gates', 'checks'),
-    ('wplan', url_for('wealth.planner_page'), 'Planner', 'Contributions by month, IRA limits', 'calendar'),
-  ]),
-  ('Track', [
-    ('wscore', url_for('wealth.scoreboard_page'), 'Scoreboard', 'Returns vs the S&P 500, drawdowns', 'pulse'),
-    ('wledger', url_for('wealth.ledger_page'), 'Ledger', 'Transactions, CSV import, Schwab check', 'pen'),
-    ('wlab', url_for('wealth.lab_page'), 'Cost Basis Lab', 'What one more purchase does', 'flask'),
-  ]),
-] %}
-{% set capital_groups = [
-  ('Deploy capital', [
-    ('wnext', url_for('wealth.next_dollar_page'), 'Next Dollar', 'Where your next dollar goes, or stays cash', 'target'),
-  ]),
-  ('Plan', [
-    ('wplan', url_for('wealth.planner_page'), 'Planner', 'Contributions by month, IRA limits', 'calendar'),
-    ('wlab', url_for('wealth.lab_page'), 'Cost Basis Lab', 'What one more purchase does', 'flask'),
-    ('wmcff2', url_for('wealth.research_list_page'), 'M.C.F.F. list', 'Which companies are in their buy zone', 'checks'),
-  ]),
-] %}
+{# Portfolio: one menu for desktop and phone. Accounts first (Schwab on top),
+   then where money goes next, then how it's doing, then your research list. #}
 {% set portfolio_groups = [
-  ('Your money', [
-    ('wealth', url_for('wealth.dashboard'), 'Wealth Dashboard', 'Value, gains, dividends, concentration', 'vault'),
+  ('Accounts', [
+    ('schwab', url_for('schwab_account'), 'Schwab Account', 'Live balances and positions', 'bank'),
+    ('wealth', url_for('wealth.dashboard'), 'Wealth Overview', 'Net worth, holdings and allocation', 'vault'),
+  ]),
+  ('Invest', [
+    ('wnext', url_for('wealth.next_dollar_page'), 'Next Dollar', 'Rank, split and journal your next buy', 'target'),
+    ('wplan', url_for('wealth.planner_page'), 'Planner', 'Contributions by month, IRA limits', 'calendar'),
+    ('wlab', url_for('wealth.lab_page'), 'Cost Basis Lab', 'What one more purchase does', 'flask'),
   ]),
   ('Track', [
     ('wscore', url_for('wealth.scoreboard_page'), 'Scoreboard', 'Returns vs the S&P 500, drawdowns', 'pulse'),
     ('wledger', url_for('wealth.ledger_page'), 'Ledger', 'Transactions, CSV import, Schwab check', 'pen'),
-    ('schwab', url_for('schwab_account'), 'Schwab Account', 'Live balances and positions', 'bank'),
+  ]),
+  ('Research', [
+    ('wmcff', url_for('wealth.research_list_page'), 'M.C.F.F. list', 'Your companies and their buy zones', 'checks'),
   ]),
 ] %}
+{% set wealth_groups = portfolio_groups %}
 {% set learn_groups = [
   ('Start here', [
     ('learn', url_for('learn_index'), 'Learning Center', 'Market concepts in plain language', 'cap'),
@@ -151,9 +137,7 @@
   {# Icon tiles: one per destination, the four with many tools open a panel.
      Learn and Account live in the profile menu on the right. #}
   {% set verify_active = ep in ('fundamentals_page',) %}
-  {% set mcff_active = ep in ('wealth.research_list_page', 'wealth.research_page') %}
-  {% set capital_active = ep in ('wealth.next_dollar_page', 'wealth.planner_page', 'wealth.lab_page') %}
-  {% set portfolio_active = ep in ('wealth.dashboard', 'wealth.scoreboard_page', 'wealth.ledger_page', 'schwab_account') %}
+  {% set portfolio_active = wealth_active or ep == 'schwab_account' %}
   {% set discover_active = research_active and not verify_active %}
   {% set term_active = terminal_active and ep != 'watchlists_page' %}
   <div class="nav-links nav-tiles" aria-label="Desktop destinations">
@@ -173,14 +157,6 @@
       </div>
     </details>
     <a href="{{ url_for('fundamentals_page') }}" class="nav-link nav-tile {{ 'nav-link-active' if verify_active }}" title="10-Q drill, the seven checks, valuation"><span class="nav-tile__ic">{{ rm_icon('shield') }}</span><span class="nav-tile__lbl">Verify</span></a>
-    <a href="{{ url_for('wealth.research_list_page') }}" class="nav-link nav-tile {{ 'nav-link-active' if mcff_active }}" title="Moat, CEO, Financials, Future"><span class="nav-tile__ic">{{ rm_icon('bars') }}</span><span class="nav-tile__lbl">M.C.F.F.</span></a>
-    <details class="nav-menu">
-      <summary class="nav-link nav-tile {{ 'nav-link-active' if capital_active }}"><span class="nav-tile__ic">{{ rm_icon('coins') }}</span><span class="nav-tile__lbl">Capital</span><span class="nav-tile__chev" aria-hidden="true">⌄</span></summary>
-      <div class="nav-menu__panel nav-menu__panel--tiles">
-        <span class="nav-menu__label">Capital deployment</span>
-        {{ nav_tiles(capital_groups) }}
-      </div>
-    </details>
     <a href="{{ url_for('watchlists_page') }}" class="nav-link nav-tile {{ 'nav-link-active' if ep == 'watchlists_page' }}"><span class="nav-tile__ic">{{ rm_icon('star') }}</span><span class="nav-tile__lbl">Watchlists</span></a>
     <details class="nav-menu">
       <summary class="nav-link nav-tile {{ 'nav-link-active' if portfolio_active }}"><span class="nav-tile__ic">{{ rm_icon('pie') }}</span><span class="nav-tile__lbl">Portfolio</span><span class="nav-tile__chev" aria-hidden="true">⌄</span></summary>
@@ -238,9 +214,9 @@
     </div>
   </div>
   <div class="mobile-app-nav__group">
-    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if wealth_active }}" aria-expanded="false" aria-controls="mobile-wealth-menu" data-mobile-menu="mobile-wealth-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="3.5" y="5" width="17" height="14" rx="2.2"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7.5M12 16.5v-1.3M15.2 12h1.3M7.5 12h1.3"/></svg></span><span class="mobile-app-nav__label">Capital</span></button>
+    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if (wealth_active or ep == 'schwab_account') }}" aria-expanded="false" aria-controls="mobile-wealth-menu" data-mobile-menu="mobile-wealth-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="3.5" y="5" width="17" height="14" rx="2.2"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7.5M12 16.5v-1.3M15.2 12h1.3M7.5 12h1.3"/></svg></span><span class="mobile-app-nav__label">Portfolio</span></button>
     <div class="mobile-app-menu" id="mobile-wealth-menu" hidden>
-      <div class="mobile-app-menu__head"><strong>Capital</strong><span>Deploy, track and plan your money</span></div>
+      <div class="mobile-app-menu__head"><strong>Portfolio</strong><span>Accounts, investing and research</span></div>
       <div class="rm-sheet">{{ nav_tiles(wealth_groups) }}</div>
     </div>
   </div>

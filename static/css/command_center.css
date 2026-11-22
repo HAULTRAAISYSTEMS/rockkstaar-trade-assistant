@@ -599,9 +599,9 @@ html.cc27 .elite-stats > .elite-stat { background: none !important; border: 0 !i
 html.cc27 .elite-stats > .elite-stat + .elite-stat { box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.08) !important; }
 html.cc27 .elite-stats > .elite-stat::after { display: none !important; }
 
-/* Fundamentals tabs (Analyze · Seven Checks · Learn): one even row, phone included */
+/* Fundamentals tabs (Analyze · Seven Checks · M.C.F.F. · Learn): one even row, phone included */
 html.cc27 .fundamentals-shell .tab-bar {
-  display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  display: grid !important; grid-template-columns: none !important; grid-auto-flow: column !important; grid-auto-columns: minmax(0, 1fr) !important;
   gap: 4px !important; padding: 4px !important; width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.08) !important; border-radius: 14px !important;
   background: rgba(3, 7, 15, 0.6) !important; box-shadow: none !important;
@@ -611,7 +611,7 @@ html.cc27 .fundamentals-shell .tab-btn {
   background: transparent !important; box-shadow: none !important;
   color: #8d9bb0 !important; font: 700 12px/1 var(--font-display) !important; letter-spacing: 0.14em !important;
 }
-@media (max-width: 640px) { html.cc27 .fundamentals-shell .tab-btn { letter-spacing: 0.06em !important; font-size: 11px !important; } }
+@media (max-width: 640px) { html.cc27 .fundamentals-shell .tab-btn { letter-spacing: 0.04em !important; font-size: 10.5px !important; padding: 0 4px !important; } }
 html.cc27 .fundamentals-shell .tab-btn.active,
 html.cc27 .fundamentals-shell .tab-btn[aria-selected="true"] {
   color: #0a0712 !important;
