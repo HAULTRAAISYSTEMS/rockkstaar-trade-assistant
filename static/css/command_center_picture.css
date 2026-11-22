@@ -558,7 +558,7 @@ html.cc27 .liq-page.cmd27 .cmd27-nx .nx-list > .nx-empty { grid-column: 1 / -1; 
 
 /* Market / My Portfolio switch: top-right corner of the globe's clear space. */
 .cmd27-zoom { right: var(--safe-r, 6px); }
-.cmd27-mode { position: absolute; right: var(--safe-r, 6px); top: 6px; z-index: 4; display: flex; gap: 2px; padding: 3px;
+.cmd27-mode { position: absolute; right: var(--safe-r, 6px); top: calc(var(--clip-t, 0px) + 6px); z-index: 4; display: flex; gap: 2px; padding: 3px;
   border-radius: 999px; background: rgba(5,12,26,.82); border: 1px solid var(--c-line2); backdrop-filter: blur(8px); }
 .cmd27-mode button { border: 0; background: none; color: var(--c-mute); font-size: 12px; font-weight: 800; letter-spacing: .04em;
   padding: 6px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
@@ -570,7 +570,7 @@ html.cc27 .liq-page.cmd27 .cmd27-nx .nx-list > .nx-empty { grid-column: 1 / -1; 
 .cmd27-mode__note[hidden] { display: none; }
 
 /* Legend for the pulses (only when something is pulsing). */
-.cmd27-legend { position: absolute; right: calc(var(--safe-r, 6px) + 4px); top: 46px; z-index: 3; display: none; gap: 5px; align-items: flex-end;
+.cmd27-legend { position: absolute; right: calc(var(--safe-r, 6px) + 4px); top: calc(var(--clip-t, 0px) + 46px); z-index: 3; display: none; gap: 5px; align-items: flex-end;
   font-size: 10.5px; color: var(--c-mute); white-space: nowrap; pointer-events: none; }
 .cmd27-legend.has-wave, .cmd27-legend.has-earn { display: flex; flex-direction: column; }
 .cmd27-legend span { display: none; align-items: center; gap: 6px; }

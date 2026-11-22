@@ -118,6 +118,15 @@
     // Ring sized from the globe itself (same maths as the globe renderer),
     // so chips always circle outside the Earth whatever the screen.
     var box = orbitEl.getBoundingClientRect(), bw = box.width || 600, bh = box.height || 500;
+    // The globe box hangs a little outside the hero panel (negative margins),
+    // and the panel hides what pokes out. Keep chips and the view switch
+    // inside the part of the box that is actually visible.
+    var clipT = 0, clipB = 0, hero = globeBox && globeBox.closest('.cmd27-hero');
+    if (hero && !(globeBox.classList.contains('is-full')) && getComputedStyle(hero).overflowY !== 'visible') {
+      var hr = hero.getBoundingClientRect();
+      clipT = Math.max(0, Math.ceil(hr.top - box.top)); clipB = Math.max(0, Math.ceil(box.bottom - hr.bottom));
+    }
+    if (globeBox) globeBox.style.setProperty('--clip-t', clipT + 'px');
     var half = safeHalf();
     var mn = Math.min(bw, bh), R0 = mn * (mn > 420 ? 0.35 : 0.33);
     R0 = half ? Math.min(R0, (half - 70) / 1.053) : Math.min(R0, bw * 0.30);
@@ -187,7 +196,7 @@
         }
         var lim = Math.min(bw / 2 - hw - 2, half ? half - hw : Infinity);
         dx = Math.max(-lim, Math.min(lim, dx));
-        dy = Math.max(-cyc + hh + 2, Math.min(bh - cyc - hh - 2, dy));
+        dy = Math.max(-cyc + hh + 2 + clipT, Math.min(bh - cyc - hh - 2 - clipB, dy));
         var r = [bw / 2 + dx - hw, cyc + dy - hh, bw / 2 + dx + hw, cyc + dy + hh];
         if (!first) first = r;
         if (!hit(r)) pick = r;
