@@ -509,7 +509,7 @@
         <input class="tw-add-input" id="tw-add-input" type="text" placeholder="ADD SYMBOL" autocomplete="off" maxlength="10">
         <button class="tw-add-go" type="submit">ADD</button>
       </form>
-      <div class="tw-wl">
+      <div class="tw-wl"{% if active_wl %} data-watchlist-id="{{ active_wl.id }}" data-watchlist-name="{{ active_wl.name }}"{% endif %}>
         {% macro render_watch_row(s) -%}
         {% set bias = 'bull' if s.trade_bias == 'Long' else ('bear' if s.trade_bias == 'Short' else 'neutral') %}
         <div class="tw-wl-row {{ 'active' if stocks and s.ticker == stocks[0].ticker }}"
