@@ -1483,6 +1483,80 @@ def _day_gap(a: str, b: str) -> int:
         return 10**6
 
 
+NONOP_TAGS = ["NonoperatingIncomeExpense", "OtherNonoperatingIncomeExpense"]
+TAX_TAGS = ["IncomeTaxExpenseBenefit"]
+ONE_OFF_SHARE = 0.20        # after tax, at least this share of net income to warn
+
+
+def one_offs(facts: dict, period_end: str | None, ytd_end: str | None = None,
+             ttm_ends: list | None = None) -> dict | None:
+    """Income below the operating line: investment gains and losses, mostly.
+
+    Alphabet's 2026 profit is a fair example. Q2 included a $98 billion gain
+    on equity securities, so its net income and EPS say almost nothing about
+    the business, and a P/E or a cash-versus-profit ratio built on them
+    misleads in both directions. This returns "Other income (expense), net"
+    for the quarter, the year to date and the trailing twelve months, and the
+    year-to-date effective tax rate to put it after tax. When the filer has no
+    such line it is pre-tax income less operating income, which is the same
+    thing by construction. Banks and insurers have no operating line apart
+    from financing, so they are not asked.
+    """
+    if not period_end:
+        return None
+
+    def span(end, window):
+        found = _pick(facts, NONOP_TAGS, window=window, end=end)
+        if found and found.get("value") is not None:
+            return float(found["value"]), "tagged"
+        pre = _pick(facts, PRETAX_TAGS + ["IncomeLossFromContinuingOperationsBeforeIncomeTaxesDomestic"],
+                    window=window, end=end)
+        op = _pick(facts, OPERATING_INCOME_TAGS, window=window, end=end)
+        if pre and op and pre.get("value") is not None and op.get("value") is not None \
+                and (window != YTD_DAYS or _days(pre) == _days(op)):
+            return float(pre["value"]) - float(op["value"]), "derived"
+        return None, None
+
+    q, src = span(period_end, QUARTER_DAYS)
+    y, src_y = span(ytd_end or period_end, YTD_DAYS)
+
+    ttm = None
+    if ttm_ends:
+        total, ok = 0.0, True
+        for e in ttm_ends:
+            v, _s = span(e, QUARTER_DAYS)
+            if v is None:
+                # Fiscal Q4: the year less the nine months before it.
+                full, _a = span(e, (350, 380))
+                nine = None
+                for f in _facts_for(NONOP_TAGS[0], facts) + _facts_for(NONOP_TAGS[1], facts):
+                    n = _days(f)
+                    if n and 260 <= n <= 290 and f.get("end") and f["end"] < e and _day_gap(e, f["end"]) <= 100:
+                        nine = float(f["val"])
+                if full is not None and nine is not None:
+                    v = full - nine
+            if v is None:
+                ok = False
+                break
+            total += v
+        ttm = total if ok else None
+
+    rate = None
+    tax = _pick(facts, TAX_TAGS, window=YTD_DAYS, end=ytd_end or period_end)
+    pre = _pick(facts, PRETAX_TAGS, window=YTD_DAYS, end=ytd_end or period_end)
+    try:
+        if tax and pre and float(pre["value"]) > 0:
+            rate = min(0.35, max(0.0, float(tax["value"]) / float(pre["value"])))
+    except (TypeError, ValueError):
+        rate = None
+    if q is None and y is None and ttm is None:
+        return None
+    return {"quarter": q, "ytd": y, "ttm": ttm, "tax_rate": rate if rate is not None else 0.21,
+            "tax_rate_source": "effective" if rate is not None else "assumed 21%",
+            "label": "Other income (expense), net", "source": src or src_y,
+            "warn_share": ONE_OFF_SHARE}
+
+
 def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None,
                 end: str | None = None) -> dict | None:
     """Everything the guided mode needs: the figures, and where they came from.
@@ -1563,4 +1637,16 @@ def walkthrough(ticker: str, facts: dict | None = None, cik: str | None = None,
         "ttm_eps_prior": _ttm_prior,
         "ttm_history": _ttm_hist,
         "quarters": available_quarters(facts),
+        "one_offs": _one_offs_safe(facts, filed, ytd, _ttm, prof),
     }
+
+
+def _one_offs_safe(facts, filed, ytd, ttm, prof):
+    if (prof or {}).get("shape") in ("bank", "insurer"):
+        return None
+    try:
+        return one_offs(facts, filed.get("period_end"), (ytd or {}).get("end"),
+                        [q["end"] for q in (ttm or {}).get("quarters") or []])
+    except Exception as exc:
+        logger.debug("quarter facts: one-offs: %s", exc)
+        return None
