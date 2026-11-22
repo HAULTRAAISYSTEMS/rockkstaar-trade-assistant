@@ -637,7 +637,7 @@
          type them yourself — that is the drill.</p>
     </header>
 
-    <section class="qx-how" id="q-how" hidden>
+    <section class="qx-how wa-card" id="q-how" hidden>
     <div class="qd-intro qx-how-body">
       
       <p>The <strong>Analyze</strong> tab reads annual filings and scores whether
@@ -693,7 +693,7 @@
     </div>
 
     <section class="qd-results qx-results" id="q-results" aria-live="polite">
-      <div class="qx-empty">
+      <div class="qx-empty wa-card">
         <h3>Pick a company to grade its latest quarter</h3>
         <p class="qd-empty">Press <b>Walk me through it</b> and every figure is read from the
            company&rsquo;s own 10-Q, graded on seven checks, and shown beside the statement it
@@ -1277,7 +1277,7 @@
       const line = c.applies === false ? 'Does not apply to this kind of company'
                  : c.skipped ? 'Waiting on ' + c.skipped
                  : String(c.says || '').split(/(?<=[.!?])\s/)[0];
-      return '<button type="button" class="qx-tile is-' + tone + '" onclick="qxOpenCheck(\'' + k + '\')">' +
+      return '<button type="button" class="qx-tile wa-card is-' + tone + '" onclick="qxOpenCheck(\'' + k + '\')">' +
         '<span class="qx-tile-hd"><span>' + qdEsc(QX_SHORT[k] || c.name) + '</span><i>' + label + '</i></span>' +
         (() => { const v = c.applies === false || c.skipped ? '—' : qxFmt(c.value);
                  return '<b class="qx-tile-v' + (v.length > 10 ? ' is-long' : '') + '">' + qdEsc(v) + '</b>'; })() +
@@ -1295,7 +1295,7 @@
       const arrow = d < 0 ? '<i class="up">▲ better</i>' : d > 0 ? '<i class="dn">▼ worse</i>' : '<i>same</i>';
       return '<tr><td>' + qdEsc(QX_SHORT[c.key] || c.name) + '</td><td>' + qdEsc(qxFmt(was.value)) + '</td><td>' + qdEsc(qxFmt(c.value)) + '</td><td>' + arrow + '</td></tr>';
     }).join('');
-    return rows ? '<details class="qx-compare" id="q-compare"><summary>Compare with ' + qdEsc(prev.period || 'your last saved quarter') + '</summary>' +
+    return rows ? '<details class="qx-compare wa-card" id="q-compare"><summary>Compare with ' + qdEsc(prev.period || 'your last saved quarter') + '</summary>' +
       '<table><thead><tr><th>Check</th><th>Then</th><th>Now</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></details>' : '';
   }
   // A check value that is a bare whole-dollar figure reads better as $4.80B.
@@ -1333,12 +1333,12 @@
     const filled = QD_FIELDS.filter(k => { const el = qdEl(k); return el && el.value.trim(); }).length;
     let html;
     if (!data.graded) {
-      html = '<div class="qx-empty"><h3>' + qdEsc(ticker || 'This company') + (period ? ' · ' + qdEsc(period) : '') + '</h3>' +
+      html = '<div class="qx-empty wa-card"><h3>' + qdEsc(ticker || 'This company') + (period ? ' · ' + qdEsc(period) : '') + '</h3>' +
         '<p class="qd-empty">Nothing to grade yet. Each check needs its own figures — at least cash from ' +
         'operations and year-to-date net income for the first one.</p>' +
         '<div class="qx-empty-actions"><button type="button" class="qd-ghost" onclick="qxDrawer(true)">Open the figures</button></div></div>';
     } else {
-      html = '<div class="qx-hero">' + qxRing(data) +
+      html = '<div class="qx-hero wa-card">' + qxRing(data) +
         '<div class="qx-hero-txt"><span class="qx-kicker">' + qdEsc(ticker || 'This company') + (period ? ' · ' + qdEsc(period) : '') + '</span>' +
         '<h3 class="qx-verdict">' + qdEsc(qxVerdict(data)) + '</h3>' +
         '<div class="qd-tally"><span class="t-clean"><b>' + c.clean + '</b> clean</span>' +
@@ -1357,7 +1357,7 @@
 
     html += '<div class="qx-cols"><div class="qx-col">' + qdGlance(ticker, data) + qdSplitNote(ticker) + '</div>' +
             '<div class="qx-col">' + qdPeCard(ticker) + '</div></div>' +
-            (ticker ? '<div class="qd-item qd-thesis" id="q-thesis"></div>' : '');
+            (ticker ? '<div class="qd-item qd-thesis wa-card" id="q-thesis"></div>' : '');
 
     let details = '';
     (data.checks || []).forEach(ch => {
@@ -1365,14 +1365,14 @@
       // is a figure not yet typed. This is a figure the filing does not
       // contain and never will, so it says what to read in its place.
       if (ch.applies === false) {
-        details += '<details class="qd-item is-na" id="qd-ck-' + qdEsc(ch.key) + '"><summary class="qd-top">' +
+        details += '<details class="qd-item wa-card is-na" id="qd-ck-' + qdEsc(ch.key) + '"><summary class="qd-top">' +
           '<span class="qd-name">' + qdEsc(ch.name) + '</span>' +
           '<span class="qd-val"><span class="qd-badge qd-na-badge">Does not apply</span></span>' +
           '</summary><p class="qd-says">' + qdEsc(ch.why) + '</p></details>';
         return;
       }
       if (ch.skipped) {
-        details += '<details class="qd-item is-skipped" id="qd-ck-' + qdEsc(ch.key) + '"><summary class="qd-top">' +
+        details += '<details class="qd-item wa-card is-skipped" id="qd-ck-' + qdEsc(ch.key) + '"><summary class="qd-top">' +
           '<span class="qd-name">' + qdEsc(ch.name) + '</span></summary>' +
           '<p class="qd-skipped">Waiting on ' + qdEsc(ch.skipped) + '.</p></details>';
         return;
@@ -1390,7 +1390,7 @@
             'Why is this flagged?</button>' +
           '<div class="qd-why-out" id="why-' + qdEsc(ch.key) + '" hidden></div></div>'
         : '';
-      details += '<details class="qd-item" id="qd-ck-' + qdEsc(ch.key) + '"><summary class="qd-top">' +
+      details += '<details class="qd-item wa-card" id="qd-ck-' + qdEsc(ch.key) + '"><summary class="qd-top">' +
         '<span class="qd-name">' + qdEsc(ch.name) + '</span>' +
         '<span class="qd-val">' + qdEsc(qxFmt(ch.value)) +
         '<span class="qd-badge qd-' + qdEsc(ch.verdict) + '">' + label + '</span></span></summary>' +
@@ -1433,7 +1433,7 @@
         (/split/.test(ttm.method || '') ? ' Restated to the post-split share basis.' : '')
       : (isFinite(typedEps) ? 'Estimate: this quarter’s diluted EPS ' + qdFmt$(typedEps) + ' × 4 = ' + qdFmt$(typedEps * 4) +
           '. Press “Walk me through it” for the real trailing twelve months.' : 'Needs diluted EPS — type it above or walk through the filing.');
-    return '<div class="qd-item qd-pe"><div class="qd-top">' +
+    return '<div class="qd-item qd-pe wa-card"><div class="qd-top">' +
       '<span class="qd-name">P/E ratio ' + (ttm ? '(trailing 12 months)' : '<span class="qd-badge qd-watch">estimate</span>') + '</span>' +
       '<span class="qd-val">' + qdEsc(pe) + '</span></div>' +
       '<div class="qd-pe-row"><label for="q-price">Price</label>' +
@@ -1618,7 +1618,7 @@
           ? shown.map(([l, v]) => '<span><i>' + qdEsc(l) + '</i> <b>' + qdEsc(v) + '</b></span>').join('')
           : '<span class="qd-glance-wait">needs more figures</span>') + '</span></div>';
     });
-    return '<div class="qd-glance" aria-label="At a glance"><div class="qd-glance-hd">At a glance</div>' + html + '</div>';
+    return '<div class="qd-glance wa-card" aria-label="At a glance"><div class="qd-glance-hd">At a glance</div>' + html + '</div>';
   }
 
   // ── Long-term thesis ──────────────────────────────────────────────────────
@@ -2174,7 +2174,7 @@
       : '<span class="qd-chip-none">not graded</span>');
     list.innerHTML = Object.keys(groups).sort((a, b) => (a === cur ? -1 : b === cur ? 1 : 0)).map(tk => {
       const rows = groups[tk].sort((a, b) => qxPeriodKey(a.period) < qxPeriodKey(b.period) ? 1 : -1);
-      return '<div class="qd-chip qx-card' + (tk === cur ? ' is-current' : '') + '">' +
+      return '<div class="qd-chip qx-card wa-card' + (tk === cur ? ' is-current' : '') + '">' +
         '<div class="qx-card-hd"><span class="qd-chip-kicker">Saved</span><span class="qd-chip-sym">' + qdEsc(tk) + '</span>' +
           (rows.length > 1 ? '<span class="qx-card-n">' + rows.length + ' quarters</span>' : '') + '</div>' +
         rows.slice(0, 3).map(e => '<div class="qx-card-row">' +
@@ -2243,7 +2243,7 @@
     qxFillQuarters([], '');
     if (qxKey) { qxKey = null; const d = document.getElementById('q-drawer'); if (d) d.classList.remove('is-practice'); }
     document.getElementById('q-results').innerHTML =
-      '<div class="qx-empty"><h3>Pick a company to grade its latest quarter</h3><p class="qd-empty">Press ' +
+      '<div class="qx-empty wa-card"><h3>Pick a company to grade its latest quarter</h3><p class="qd-empty">Press ' +
       '<b>Walk me through it</b>, or open the figures and type them yourself. Every check with its ' +
       'inputs grades itself; the rest say which figure they were waiting on.</p>' +
       '<div class="qx-empty-actions"><button type="button" class="qd-ghost" onclick="qxDrawer(true)">Type the figures myself</button></div></div>';
