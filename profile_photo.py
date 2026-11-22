@@ -18,7 +18,8 @@ from flask import Blueprint, Response, jsonify, request
 import database
 
 SIZE = 256
-MAX_UPLOAD = 4 * 1024 * 1024          # raw bytes accepted before re-encoding
+MAX_UPLOAD = 25 * 1024 * 1024         # raw bytes accepted before re-encoding (full-size phone photos)
+UPLOAD_PATH = "/api/account/photo"
 _KEY = "profile_photo_jpeg_b64"
 _VER = "profile_photo_version"
 
@@ -32,16 +33,21 @@ def clean_photo(raw: bytes) -> bytes:
     if not raw:
         raise PhotoError("Choose a photo first.")
     if len(raw) > MAX_UPLOAD:
-        raise PhotoError("That photo is too large. Use one under 4 MB.")
+        raise PhotoError("That photo is too large. Use one under 25 MB.")
     try:
         from PIL import Image, ImageOps
     except ImportError as exc:  # pragma: no cover - Pillow is in requirements.txt
         raise PhotoError("Photo uploads are not available right now.") from exc
-    Image.MAX_IMAGE_PIXELS = 40_000_000
+    try:                                   # iPhone HEIC/HEIF photos
+        from pillow_heif import register_heif_opener
+        register_heif_opener()
+    except ImportError:
+        pass
+    Image.MAX_IMAGE_PIXELS = 60_000_000
     try:
         img = Image.open(io.BytesIO(raw))
-        if img.format not in {"JPEG", "PNG", "WEBP", "GIF", "MPO"}:
-            raise PhotoError("Use a JPEG, PNG or WebP photo.")
+        if img.format not in {"JPEG", "PNG", "WEBP", "GIF", "MPO", "HEIF", "HEIC"}:
+            raise PhotoError("Use a JPEG, PNG, HEIC or WebP photo.")
         img.load()
     except PhotoError:
         raise
@@ -96,6 +102,28 @@ def delete_photo(user_id: int) -> None:
         conn.close()
 
 
+def allow_large_photo_uploads(app) -> None:
+    """Lift the app-wide 2 MB body cap for the photo upload route only.
+
+    The cap is enforced while the body is read (before any view runs, since
+    CSRF reads the form first), so it has to live on the request class.
+    """
+    base = app.request_class
+
+    class _Request(base):
+        @property
+        def max_content_length(self):
+            if self.path == UPLOAD_PATH and self.method == "POST":
+                return MAX_UPLOAD + 1024 * 1024          # room for multipart framing
+            return base.max_content_length.fget(self)
+
+        @max_content_length.setter
+        def max_content_length(self, value):
+            base.max_content_length.fset(self, value)
+
+    app.request_class = _Request
+
+
 def create_profile_photo_blueprint(*, current_user):
     bp = Blueprint("profile_photo", __name__)
 
@@ -122,7 +150,7 @@ def create_profile_photo_blueprint(*, current_user):
         resp.headers["ETag"] = version
         return resp
 
-    @bp.post("/api/account/photo")
+    @bp.post(UPLOAD_PATH)
     def upload():
         user_id = uid()
         if not user_id:
