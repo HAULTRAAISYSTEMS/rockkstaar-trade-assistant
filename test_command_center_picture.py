@@ -471,3 +471,14 @@ def test_glass_never_sets_position_on_cards():
     assert ".cmd27-hero__globe.has-sector :is(.cmd27-mode, .cmd27-legend) { display: none !important; }" in css
     pc = (ROOT / "static/css/command_center_picture.css").read_text(encoding="utf-8")
     assert ".cmd27-hero__globe:not(.is-full) .cmd27-sector { left: 22px; }" in pc
+
+
+def test_orbit_chips_and_view_switch_stay_inside_the_visible_hero():
+    """The globe box hangs past the hero panel, which hides overflow: chips
+    pushed to the top edge, and the Market/My Portfolio switch, were cut off."""
+    from pathlib import Path
+    js = Path("static/js/command_center_picture.js").read_text()
+    css = Path("static/css/command_center_picture.css").read_text()
+    assert "closest('.cmd27-hero')" in js and "--clip-t" in js
+    assert "dy = Math.max(-cyc + hh + 2 + clipT, Math.min(bh - cyc - hh - 2 - clipB, dy));" in js
+    assert ".cmd27-mode { position: absolute; right: var(--safe-r, 6px); top: calc(var(--clip-t, 0px) + 6px);" in css
