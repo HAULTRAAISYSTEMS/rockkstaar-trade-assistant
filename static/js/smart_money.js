@@ -62,3 +62,17 @@
       }).catch(function () { box.innerHTML = "<small>Track record unavailable.</small>"; });
   });
 })();
+
+// Watchlist: All / Buying / Selling.
+(function () {
+  const bar = document.querySelector('.smw-filter');
+  if (!bar) return;
+  bar.addEventListener('click', e => {
+    const b = e.target.closest('[data-smw]'); if (!b) return;
+    bar.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+    const mode = b.dataset.smw;
+    document.querySelectorAll('.smw-card').forEach(c => {
+      c.hidden = mode === 'buy' ? c.dataset.buy !== '1' : mode === 'sell' ? c.dataset.sell !== '1' : false;
+    });
+  });
+})();

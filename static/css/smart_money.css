@@ -67,3 +67,42 @@
   .sm-dashboard .sm-section-head{flex-direction:column;align-items:stretch;gap:10px}
   .sm-dashboard .sm-top-filters{flex-direction:row}
 }
+
+/* ── Glass cards, same as Verify / M.C.F.F. ── */
+.sm-dashboard .wa-card{border-radius:18px!important}
+.sm-dashboard .sm-buy.wa-card{padding:16px}
+/* Watchlist: summary strip, filter, cards */
+.sm-dashboard .smw-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:14px 0 12px}
+.sm-dashboard .smw-stat{display:grid;gap:4px;min-width:0;padding:12px 14px;border:1px solid rgba(170,215,255,.14);border-radius:14px;background:rgba(255,255,255,.03)}
+.sm-dashboard .smw-stat span{color:#8ea3c2;font:700 9.5px var(--font-mono,monospace);letter-spacing:.12em;text-transform:uppercase}
+.sm-dashboard .smw-stat b{font:800 20px var(--font-mono,monospace);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#eaf6ff}
+.sm-dashboard .smw-stat small{color:#76818d;font:500 11px var(--font-ui,system-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sm-dashboard .smw-filter{display:inline-flex;gap:4px;padding:3px;margin-bottom:12px;border:1px solid rgba(170,215,255,.14);border-radius:999px;background:rgba(0,0,0,.25)}
+.sm-dashboard .smw-filter button{border:0;border-radius:999px;padding:6px 14px;background:transparent;color:#a9bddb;font:700 11px var(--font-mono,monospace);letter-spacing:.06em;cursor:pointer}
+.sm-dashboard .smw-filter button span{opacity:.6;margin-left:4px}
+.sm-dashboard .smw-filter button.active{background:rgba(52,245,168,.16);color:#34f5a8;box-shadow:inset 0 0 0 1px rgba(52,245,168,.4)}
+.sm-dashboard .smw-grid{grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px!important;align-items:start}
+.sm-dashboard .smw-card{border-radius:18px!important;overflow:hidden}
+.sm-dashboard .smw-card[hidden]{display:none}
+.sm-dashboard .smw-card summary{display:grid!important;gap:9px;padding:14px 16px!important;list-style:none;font-family:var(--font-ui,system-ui)!important}
+.sm-dashboard .smw-card summary::-webkit-details-marker{display:none}
+.sm-dashboard .smw-card.is-buy{box-shadow:0 0 0 1px rgba(66,214,154,.35),0 18px 40px -22px rgba(66,214,154,.45)!important}
+.sm-dashboard .smw-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.sm-dashboard .smw-tk{color:#eaf6ff!important;font:800 20px var(--font-mono,monospace)!important;letter-spacing:.04em;min-width:0!important}
+.sm-dashboard .smw-tk:hover{color:#34f5a8!important}
+.sm-dashboard .smw-net{font:800 17px var(--font-mono,monospace)}
+.sm-dashboard .smw-net small{margin-left:5px;color:#76818d;font:600 10px var(--font-mono,monospace);text-transform:uppercase;letter-spacing:.1em}
+.sm-dashboard .smw-bar{height:6px;border-radius:6px;background:rgba(255,101,117,.55);overflow:hidden}
+.sm-dashboard .smw-bar i{display:block;height:100%;background:#42d69a;border-radius:6px}
+.sm-dashboard .smw-sides{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:600 12px var(--font-mono,monospace)}
+.sm-dashboard .smw-sides em{font-style:normal;color:#5d6b7a!important}
+.sm-dashboard .smw-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sm-dashboard .smw-foot small{color:#76818d;font:500 11px var(--font-mono,monospace)!important;margin:0!important}
+.sm-dashboard .smw-foot .sm-tag-plan{font-size:10px}
+.sm-dashboard .smw-more{margin-left:auto;color:#7fdcff;font:700 10.5px var(--font-mono,monospace);letter-spacing:.06em}
+.sm-dashboard .smw-more::after{content:" ▾";transition:transform .2s}
+.sm-dashboard .smw-card[open] .smw-more::after{content:" ▴"}
+.sm-dashboard .smw-card ul{padding:2px 16px 14px 18px!important;border-top:1px solid rgba(170,215,255,.1);margin:0}
+.sm-dashboard .smw-card li{padding-top:7px;line-height:1.45}
+@media(max-width:1100px){.sm-dashboard .smw-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:720px){.sm-dashboard .smw-strip{grid-template-columns:1fr 1fr}.sm-dashboard .smw-strip .smw-stat:first-child{grid-column:1/-1}.sm-dashboard .smw-grid{grid-template-columns:1fr}}
