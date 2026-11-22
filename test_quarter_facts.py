@@ -571,7 +571,7 @@ class TestTheTickerHasSomethingToPress:
             return c.get("/fundamentals?tab=quarter").get_data(as_text=True)
 
     def test_the_button_sits_in_the_same_row_as_the_ticker(self, page):
-        row = page[page.index('<div class="qd-id">'):]
+        row = page[page.index('<div class="qd-id qx-bar">'):]
         row = row[:row.index("</div>")]
         assert 'id="q-co"' in row
         assert "qdWalk()" in row

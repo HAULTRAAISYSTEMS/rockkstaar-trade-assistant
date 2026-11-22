@@ -12162,7 +12162,10 @@ def api_quarter_walkthrough(ticker):
         return jsonify({"available": False, "error": "Invalid ticker"}), 400
     try:
         facts, cik = quarter_facts.fetch_facts(ticker)
-        found = quarter_facts.walkthrough(ticker, facts=facts, cik=cik) if facts else None
+        end = (request.args.get("end") or "").strip()
+        if end and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", end):
+            end = ""
+        found = quarter_facts.walkthrough(ticker, facts=facts, cik=cik, end=end or None) if facts else None
     except Exception as exc:
         logger.warning("quarter walkthrough failed for %s: %s", ticker, exc)
         return jsonify({"available": False,
@@ -12241,6 +12244,10 @@ def _quarter_card(entry: dict) -> dict:
         "shape_label": graded.get("shape_label"),
         "counts":     graded["counts"],
         "graded":     graded["graded"],
+        # One entry per check, in order: the shelf draws these as dots and
+        # the report card draws their values as trend lines.
+        "checks":     [{"key": c["key"], "verdict": c["verdict"], "value": c["value"],
+                        "applies": c["applies"]} for c in graded["checks"]],
     }
 
 

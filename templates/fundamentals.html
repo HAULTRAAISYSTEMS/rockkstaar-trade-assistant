@@ -4,6 +4,7 @@
 {% block head_extra %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/fundamentals.css') }}" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/quarter_report.css') }}" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_financial_contract.css') }}" />
 {% endblock %}
 
@@ -614,8 +615,31 @@
        'Total revenue, cumulative'),
     ] %}
 
-    <div class="qd-intro">
-      <h2>Seven checks on one quarter</h2>
+    <!-- ── Command bar: one row to pick the company and the quarter ── -->
+    <header class="qx-head">
+      <div class="qx-title">
+        <h2>Seven checks <span>on one quarter</span></h2>
+        <button type="button" class="qx-how-btn" aria-expanded="false" aria-controls="q-how"
+                onclick="qxHow(this)">How this works</button>
+      </div>
+      <div class="qd-id qx-bar">
+        <input type="text" id="q-co" placeholder="Ticker" maxlength="8"
+               value="{{ ticker }}" autocomplete="off" spellcheck="false"
+               aria-label="Ticker">
+        <select id="q-pick" class="qx-pick" aria-label="Quarter" onchange="qxPickQuarter(this.value)">
+          <option value="">Latest 10-Q</option>
+        </select>
+        <input type="hidden" id="q-per">
+        <button type="button" class="qd-primary qd-go" onclick="qdWalk()">Walk me through it</button>
+      </div>
+      <p class="qd-id-hint" id="q-status-top">Fills every figure from the
+         company&rsquo;s own filing and grades the quarter. Or open the figures and
+         type them yourself — that is the drill.</p>
+    </header>
+
+    <section class="qx-how" id="q-how" hidden>
+    <div class="qd-intro qx-how-body">
+      
       <p>The <strong>Analyze</strong> tab reads annual filings and scores whether
          a business is worth owning. This asks a different question: what did the
          latest quarter actually say? Open the company&rsquo;s 10-Q, find each
@@ -640,23 +664,21 @@
          chasing, not a mark against you.</p>
     </div>
 
-    <div class="qd-toolbar">
-      <button type="button" class="qd-ghost" id="q-hints-btn" onclick="qdToggleHints()">Show me where</button>
-      <button type="button" class="qd-ghost" onclick="qdExample()">Load a worked example</button>
-      <span class="qd-spacer"></span>
-      <button type="button" class="qd-ghost" onclick="qdClear()">Clear</button>
-    </div>
+      <div class="qd-toolbar">
+        <button type="button" class="qd-ghost" id="q-hints-btn" onclick="qdToggleHints()">Show me where</button>
+        <button type="button" class="qd-ghost" onclick="qdExample()">Load a worked example</button>
+        <span class="qd-spacer"></span>
+        <button type="button" class="qd-ghost" onclick="qdClear()">Clear</button>
+      </div>
+    </section>
 
-    <!-- Reading a filing takes twenty minutes. Losing it to a refresh, or
-         retyping it to compare against last quarter, is what stops the drill
-         becoming a habit. -->
-    <section class="qd-saved" id="q-saved" hidden>
+    <!-- Saved quarters: one card per company, seven dots per quarter. -->
+    <section class="qd-saved qx-shelf" id="q-saved" hidden>
       <div class="qd-saved-hd">
         <h3>Saved quarters</h3>
-        <span class="qd-saved-hint">Click one to reopen it. Saving the same
-              ticker and quarter again updates it rather than making a copy.</span>
+        <span class="qd-saved-hint">Each dot is one check: green clean, amber watching, red flagged.</span>
       </div>
-      <div class="qd-saved-list" id="q-saved-list"></div>
+      <div class="qd-saved-list qx-shelf-list" id="q-saved-list"></div>
     </section>
 
     <!-- What kind of company this is changes which of the seven can even be
@@ -670,21 +692,31 @@
       <p class="qd-shape-why" id="q-shape-why"></p>
     </div>
 
-    <div class="qd-grid">
-      <section class="qd-form">
-        <div class="qd-id">
-          <input type="text" id="q-co" placeholder="Ticker" maxlength="8"
-                 value="{{ ticker }}" autocomplete="off" spellcheck="false"
-                 aria-label="Ticker">
-          <input type="text" id="q-per" placeholder="Quarter, e.g. Q3 FY26"
-                 autocomplete="off" aria-label="Quarter">
-          <button type="button" class="qd-primary qd-go" onclick="qdWalk()">Walk me through it</button>
+    <section class="qd-results qx-results" id="q-results" aria-live="polite">
+      <div class="qx-empty">
+        <h3>Pick a company to grade its latest quarter</h3>
+        <p class="qd-empty">Press <b>Walk me through it</b> and every figure is read from the
+           company&rsquo;s own 10-Q, graded on seven checks, and shown beside the statement it
+           came from. Thresholds are starting points, not verdicts.</p>
+        <div class="qx-empty-actions">
+          <button type="button" class="qd-ghost" onclick="qxDrawer(true)">Type the figures myself</button>
+          <button type="button" class="qd-ghost" onclick="qdExample()">Load a worked example</button>
         </div>
-        <p class="qd-id-hint" id="q-status-top">Fills every field from the
-           company&rsquo;s own filing and shows you the statement each number came
-           from. Or leave it blank and type the figures in yourself — that is the
-           drill.</p>
+      </div>
+    </section>
 
+    <!-- ── Figures drawer: the 24 numbers, out of the way until wanted ── -->
+    <div class="qx-scrim" id="q-scrim" hidden onclick="qxDrawer(false)"></div>
+    <section class="qd-form qx-drawer" id="q-drawer" aria-label="Figures" aria-hidden="true">
+      <div class="qx-drawer-hd">
+        <div><b>Figures</b><span id="q-drawer-sub">From the 10-Q, or typed by you</span></div>
+        <button type="button" class="qx-x" onclick="qxDrawer(false)" aria-label="Close figures">×</button>
+      </div>
+      <div class="qx-practice">
+        <button type="button" class="qd-ghost" id="q-practice" onclick="qxPractice()">Practice: hide the numbers</button>
+        <span id="q-practice-txt">Hide the filed figures, find them in the 10-Q yourself, then score yourself.</span>
+      </div>
+      <div class="qx-drawer-body">
         {% macro qd_field(key, label, where, aliases, paired=True) %}
         <div class="qd-row {{ '' if paired else 'qd-single' }}">
           <label for="q-{{ key }}">{{ label|safe }}</label>
@@ -702,13 +734,10 @@
         </div>
         {% endmacro %}
 
-        <!-- Once the filing has filled the form, the boxes are a record, not a
-             task: they fold away behind one line so the results lead. -->
         <div class="qd-fold" id="q-fold" hidden>
           <span class="qd-fold-txt" id="q-fold-txt"></span>
-          <button type="button" class="qd-ghost qd-fold-btn" id="q-fold-btn"
-                  aria-controls="q-fields" aria-expanded="false"
-                  onclick="qdFold(!document.getElementById('q-fields').classList.contains('is-folded'))">Edit numbers</button>
+          <button type="button" class="qd-ghost qd-fold-btn" id="q-fold-btn" hidden
+                  aria-controls="q-fields" aria-expanded="true">Edit numbers</button>
         </div>
         <div class="qd-fields" id="q-fields">
         <fieldset>
@@ -743,23 +772,14 @@
         </fieldset>
         </div>
 
-        <div class="qd-actions">
-          <button type="button" class="qd-primary" onclick="qdRun()">Run the seven checks</button>
-          <button type="button" class="qd-ghost" onclick="qdCheck()">Check my numbers</button>
-          <button type="button" class="qd-ghost" onclick="qdSave()">Save this quarter</button>
-        </div>
-        <p class="qd-status" id="q-status"></p>
-      </section>
-
-      <section class="qd-results" id="q-results" aria-live="polite">
-        <h3>Results</h3>
-        <p class="qd-empty">Fill in what you have and run the drill. Every check
-           with its inputs grades itself; the rest say which figure they were
-           waiting on. Nothing here is a verdict — the thresholds are starting
-           points, and what counts as healthy differs at a retailer, a bank and
-           a chipmaker.</p>
-      </section>
-    </div>
+      </div>
+      <div class="qd-actions qx-drawer-ft">
+        <button type="button" class="qd-primary" onclick="qdRun();qxDrawer(false)">Run the seven checks</button>
+        <button type="button" class="qd-ghost" onclick="qdCheck();qxDrawer(false)">Check my numbers</button>
+        <button type="button" class="qd-ghost" onclick="qdSave()">Save this quarter</button>
+      </div>
+      <p class="qd-status" id="q-status"></p>
+    </section>
   </div>
 
   {% include "_mcff_panel.html" %}
@@ -1189,45 +1209,172 @@
     }
   }
 
+  // ── Report card ───────────────────────────────────────────────────────────
+  // One ring for the seven checks, one sentence for what they add up to, one
+  // tile per check. The long explanations stay, folded under the tiles.
+  const QX_ORDER = ['cash_conversion', 'gross_margin', 'operating_leverage', 'current_ratio',
+                    'dso', 'share_count', 'free_cash_flow'];
+  const QX_SHORT = {cash_conversion: 'Cash vs profit', gross_margin: 'Gross margin',
+    operating_leverage: 'Costs vs sales', current_ratio: 'Short-term cushion', dso: 'Days to get paid',
+    share_count: 'Share count', free_cash_flow: 'Free cash flow'};
+  const QX_FLAG = {cash_conversion: 'profit isn’t turning into cash', gross_margin: 'margins are slipping',
+    operating_leverage: 'costs outran sales', current_ratio: 'the short-term cushion is thin',
+    dso: 'customers are paying slower', share_count: 'shares are being diluted',
+    free_cash_flow: 'spending ate the free cash flow'};
+  const QX_COLOR = {clean: '#34d399', watch: '#f5b544', flag: '#ff6b6b', na: 'rgba(255,255,255,.16)', none: 'rgba(255,255,255,.07)'};
+
+  function qxVerdict(data) {
+    const g = qdGrowth(qdN('rev'), qdN('revP'));
+    const lead = g == null ? 'This quarter' : g > 0.15 ? 'Growing fast' : g > 0.03 ? 'Growing'
+               : g > -0.03 ? 'Sales flat' : 'Sales shrinking';
+    const checks = data.checks || [];
+    const flags = checks.filter(c => c.verdict === 'flag').map(c => QX_FLAG[c.key]).filter(Boolean);
+    const watch = checks.filter(c => c.verdict === 'watch').map(c => QX_FLAG[c.key]).filter(Boolean);
+    if (flags.length) return lead + ', but ' + flags.slice(0, 2).join(' and ');
+    if (watch.length) return lead + '; keep an eye on whether ' + watch[0];
+    return data.graded ? lead + ', and every check came back clean' : 'Waiting on figures';
+  }
+  function qxRing(data) {
+    const by = {}; (data.checks || []).forEach(c => { by[c.key] = c; });
+    const step = 100 / QX_ORDER.length, gap = 0.9;
+    const stops = QX_ORDER.map((k, i) => {
+      const c = by[k] || {}, tone = c.applies === false ? 'na' : (c.verdict || 'none');
+      const a = i * step, b = a + step - gap;
+      return QX_COLOR[tone] + ' ' + a.toFixed(2) + '% ' + b.toFixed(2) + '%, transparent ' + b.toFixed(2) + '% ' + (a + step).toFixed(2) + '%';
+    }).join(', ');
+    const c = data.counts || {}, of = 7 - (c.n_a || 0);
+    return '<div class="qx-ring" style="--ring: conic-gradient(from -90deg, ' + stops + ')" role="img" ' +
+      'aria-label="' + (c.clean || 0) + ' of ' + of + ' checks clean"><div class="qx-ring-hole"><b>' +
+      (c.clean || 0) + '<small>/' + of + '</small></b><span>clean</span></div></div>';
+  }
+  // Earlier saved quarters of the same company, oldest first, for the trend lines.
+  var qxSaved = [];
+  function qxNum(v) { const m = String(v == null ? '' : v).replace(/[−–]/g, '-').replace(/,/g, '').match(/-?\d+(\.\d+)?/); return m ? parseFloat(m[0]) : null; }
+  function qxPeriodKey(p) { const m = String(p || '').match(/\d{4}-\d{2}-\d{2}/); return m ? m[0] : String(p || ''); }
+  function qxHistory(ticker, period) {
+    return qxSaved.filter(e => String(e.ticker || '').toUpperCase() === ticker && e.checks)
+      .filter(e => qxPeriodKey(e.period) !== qxPeriodKey(period))
+      .sort((a, b) => qxPeriodKey(a.period) < qxPeriodKey(b.period) ? -1 : 1);
+  }
+  function qxSpark(points) {
+    const v = points.filter(x => x != null);
+    if (v.length < 2) return '';
+    const lo = Math.min(...v), hi = Math.max(...v), span = (hi - lo) || 1;
+    const d = points.map((y, i) => y == null ? null : (i / (points.length - 1) * 60).toFixed(1) + ',' + (16 - (y - lo) / span * 14).toFixed(1))
+      .filter(Boolean).join(' ');
+    return '<svg class="qx-spark" viewBox="0 0 60 18" aria-hidden="true"><polyline points="' + d + '"/></svg>';
+  }
+  function qxTiles(data, ticker, period) {
+    const hist = qxHistory(ticker, period);
+    const by = {}; (data.checks || []).forEach(c => { by[c.key] = c; });
+    return '<div class="qx-tiles">' + QX_ORDER.map(k => {
+      const c = by[k]; if (!c) return '';
+      const tone = c.applies === false ? 'na' : c.skipped ? 'none' : c.verdict;
+      const label = tone === 'clean' ? 'Clean' : tone === 'watch' ? 'Watch' : tone === 'flag' ? 'Flag'
+                  : tone === 'na' ? 'N/A' : 'Needs figures';
+      const series = hist.map(h => { const x = (h.checks || []).find(y => y.key === k); return x ? qxNum(x.value) : null; });
+      if (!c.skipped && c.applies !== false) series.push(qxNum(c.value));
+      const line = c.applies === false ? 'Does not apply to this kind of company'
+                 : c.skipped ? 'Waiting on ' + c.skipped
+                 : String(c.says || '').split(/(?<=[.!?])\s/)[0];
+      return '<button type="button" class="qx-tile is-' + tone + '" onclick="qxOpenCheck(\'' + k + '\')">' +
+        '<span class="qx-tile-hd"><span>' + qdEsc(QX_SHORT[k] || c.name) + '</span><i>' + label + '</i></span>' +
+        (() => { const v = c.applies === false || c.skipped ? '—' : qxFmt(c.value);
+                 return '<b class="qx-tile-v' + (v.length > 10 ? ' is-long' : '') + '">' + qdEsc(v) + '</b>'; })() +
+        qxSpark(series) +
+        '<span class="qx-tile-says">' + qdEsc(line) + '</span></button>';
+    }).join('') + '</div>';
+  }
+  function qxCompare(data, ticker, period) {
+    const prev = qxHistory(ticker, period).slice(-1)[0];
+    if (!prev) return '';
+    const by = {}; (prev.checks || []).forEach(c => { by[c.key] = c; });
+    const rank = {clean: 1, watch: 2, flag: 3};
+    const rows = (data.checks || []).filter(c => c.verdict && by[c.key] && by[c.key].verdict).map(c => {
+      const was = by[c.key], d = rank[c.verdict] - rank[was.verdict];
+      const arrow = d < 0 ? '<i class="up">▲ better</i>' : d > 0 ? '<i class="dn">▼ worse</i>' : '<i>same</i>';
+      return '<tr><td>' + qdEsc(QX_SHORT[c.key] || c.name) + '</td><td>' + qdEsc(qxFmt(was.value)) + '</td><td>' + qdEsc(qxFmt(c.value)) + '</td><td>' + arrow + '</td></tr>';
+    }).join('');
+    return rows ? '<details class="qx-compare" id="q-compare"><summary>Compare with ' + qdEsc(prev.period || 'your last saved quarter') + '</summary>' +
+      '<table><thead><tr><th>Check</th><th>Then</th><th>Now</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></details>' : '';
+  }
+  // A check value that is a bare whole-dollar figure reads better as $4.80B.
+  function qxFmt(v) {
+    const s = String(v == null ? '' : v).trim();
+    if (/^[−-]?[\d,]+(\.\d+)?$/.test(s)) {
+      const n = parseFloat(s.replace(/,/g, '').replace('−', '-'));
+      if (Math.abs(n) >= 1e6) return qdMoney(n);
+    }
+    return s;
+  }
+  function qxOpenCheck(key) {
+    const d = document.getElementById('qd-ck-' + key);
+    if (!d) return;
+    d.open = true;
+    d.scrollIntoView({behavior: 'smooth', block: 'start'});
+  }
+  function qxAsk(ticker, period) {
+    if (typeof window.openAsk !== 'function') return;
+    window.openAsk();
+    const c = (qdLastChecks && qdLastChecks.counts) || {};
+    setTimeout(() => {
+      const input = document.getElementById('ask-input');
+      if (input) { input.value = 'Explain ' + ticker + '’s ' + (period || 'latest quarter') + ' in plain language: ' +
+        (c.clean || 0) + ' checks clean, ' + (c.watch || 0) + ' watching, ' + (c.flag || 0) + ' flagged. What drove the flagged ones, ' +
+        'and what should I look for in the next 10-Q?'; input.focus(); }
+    }, 80);
+  }
+
   function qdRender(data) {
     const ticker = (qdEl('co').value || '').trim().toUpperCase();
     const period = (qdEl('per').value || '').trim();
     const c = data.counts || {};
-    let html = '<h3>' + qdEsc(ticker || 'This company') +
-               (period ? ' — ' + qdEsc(period) : '') + '</h3>';
-
-    if (data.graded) {
-      html += '<div class="qd-tally">' +
-        '<span class="t-clean"><b>' + c.clean + '</b> clean</span>' +
-        '<span class="t-watch"><b>' + c.watch + '</b> watching</span>' +
-        '<span class="t-flag"><b>' + c.flag + '</b> flagged</span>' +
-        (c.n_a ? '<span class="t-na"><b>' + c.n_a + '</b> n/a</span>' : '') +
-        '<span>' + data.graded + ' of ' + (7 - (c.n_a || 0)) + ' graded</span></div>';
+    qdLastChecks = data;
+    const filled = QD_FIELDS.filter(k => { const el = qdEl(k); return el && el.value.trim(); }).length;
+    let html;
+    if (!data.graded) {
+      html = '<div class="qx-empty"><h3>' + qdEsc(ticker || 'This company') + (period ? ' · ' + qdEsc(period) : '') + '</h3>' +
+        '<p class="qd-empty">Nothing to grade yet. Each check needs its own figures — at least cash from ' +
+        'operations and year-to-date net income for the first one.</p>' +
+        '<div class="qx-empty-actions"><button type="button" class="qd-ghost" onclick="qxDrawer(true)">Open the figures</button></div></div>';
     } else {
-      html += '<p class="qd-empty">Nothing to compute yet. Each check needs its ' +
-              'own inputs — enter at least cash from operations and year-to-date ' +
-              'net income to grade the first one.</p>';
+      html = '<div class="qx-hero">' + qxRing(data) +
+        '<div class="qx-hero-txt"><span class="qx-kicker">' + qdEsc(ticker || 'This company') + (period ? ' · ' + qdEsc(period) : '') + '</span>' +
+        '<h3 class="qx-verdict">' + qdEsc(qxVerdict(data)) + '</h3>' +
+        '<div class="qd-tally"><span class="t-clean"><b>' + c.clean + '</b> clean</span>' +
+          '<span class="t-watch"><b>' + c.watch + '</b> watching</span>' +
+          '<span class="t-flag"><b>' + c.flag + '</b> flagged</span>' +
+          (c.n_a ? '<span class="t-na"><b>' + c.n_a + '</b> n/a</span>' : '') +
+          '<button type="button" class="qx-figs" onclick="qxDrawer(true)">' + filled + ' figures · Edit</button></div>' +
+        '<div class="qx-actions">' +
+          '<button type="button" class="qd-ghost" onclick="qdSave()">Save</button>' +
+          (qxHistory(ticker, period).length ? '<button type="button" class="qd-ghost" onclick="const d=document.getElementById(\'q-compare\');if(d){d.open=true;d.scrollIntoView({behavior:\'smooth\',block:\'center\'})}">Compare</button>' : '') +
+          (ticker ? '<button type="button" class="qd-ghost" onclick="qxAsk(\'' + qdEsc(ticker) + '\', \'' + qdEsc(period).replace(/'/g, '') + '\')">✦ Ask AI</button>' : '') +
+          (ticker ? '<a class="qd-ghost" href="/fundamentals?ticker=' + encodeURIComponent(ticker) + '&tab=mcff">Open M.C.F.F.</a>' : '') +
+        '</div></div></div>' +
+        qxTiles(data, ticker, period) + qxCompare(data, ticker, period);
     }
 
-    qdLastChecks = data;
-    html += qdGlance(ticker, data) + qdSplitNote(ticker) + qdPeCard(ticker) +
+    html += '<div class="qx-cols"><div class="qx-col">' + qdGlance(ticker, data) + qdSplitNote(ticker) + '</div>' +
+            '<div class="qx-col">' + qdPeCard(ticker) + '</div></div>' +
             (ticker ? '<div class="qd-item qd-thesis" id="q-thesis"></div>' : '');
 
+    let details = '';
     (data.checks || []).forEach(ch => {
       // Not the same thing as a skip, and the difference is the point. A skip
       // is a figure not yet typed. This is a figure the filing does not
       // contain and never will, so it says what to read in its place.
       if (ch.applies === false) {
-        html += '<div class="qd-item is-na"><div class="qd-top">' +
+        details += '<details class="qd-item is-na" id="qd-ck-' + qdEsc(ch.key) + '"><summary class="qd-top">' +
           '<span class="qd-name">' + qdEsc(ch.name) + '</span>' +
           '<span class="qd-val"><span class="qd-badge qd-na-badge">Does not apply</span></span>' +
-          '</div><p class="qd-says">' + qdEsc(ch.why) + '</p></div>';
+          '</summary><p class="qd-says">' + qdEsc(ch.why) + '</p></details>';
         return;
       }
       if (ch.skipped) {
-        html += '<div class="qd-item is-skipped"><div class="qd-top">' +
-          '<span class="qd-name">' + qdEsc(ch.name) + '</span></div>' +
-          '<p class="qd-skipped">Waiting on ' + qdEsc(ch.skipped) + '.</p></div>';
+        details += '<details class="qd-item is-skipped" id="qd-ck-' + qdEsc(ch.key) + '"><summary class="qd-top">' +
+          '<span class="qd-name">' + qdEsc(ch.name) + '</span></summary>' +
+          '<p class="qd-skipped">Waiting on ' + qdEsc(ch.skipped) + '.</p></details>';
         return;
       }
       const label = ch.verdict === 'clean' ? 'Clean'
@@ -1243,14 +1390,15 @@
             'Why is this flagged?</button>' +
           '<div class="qd-why-out" id="why-' + qdEsc(ch.key) + '" hidden></div></div>'
         : '';
-      html += '<div class="qd-item"><div class="qd-top">' +
+      details += '<details class="qd-item" id="qd-ck-' + qdEsc(ch.key) + '"><summary class="qd-top">' +
         '<span class="qd-name">' + qdEsc(ch.name) + '</span>' +
-        '<span class="qd-val">' + qdEsc(ch.value) +
-        '<span class="qd-badge qd-' + qdEsc(ch.verdict) + '">' + label + '</span></span></div>' +
+        '<span class="qd-val">' + qdEsc(qxFmt(ch.value)) +
+        '<span class="qd-badge qd-' + qdEsc(ch.verdict) + '">' + label + '</span></span></summary>' +
         (ch.basis ? '<div class="qd-basis">' + qdEsc(ch.basis) + '</div>' : '') +
         '<p class="qd-says">' + qdEsc(ch.says) + link + '</p>' +
-        why + qdStatementFor(ch) + '</div>';
+        why + qdStatementFor(ch) + '</details>';
     });
+    if (details) html += '<section class="qx-details"><h3>The seven checks in full <small>tap one to open it, with the filing lines it read</small></h3>' + details + '</section>';
     if (data.summary) html += '<div class="qd-summary">' + qdEsc(data.summary) + '</div>';
     document.getElementById('q-results').innerHTML = html;
     if (ticker) qdThesisCheck(ticker);
@@ -1562,20 +1710,72 @@
   }
 
   // Fold the input boxes once the filing has filled them.
+  // The figures live in a drawer now. "Folded" means the drawer is closed;
+  // the subtitle says how many figures it holds.
   function qdFold(folded) {
-    const box = document.getElementById('q-fields'), bar = document.getElementById('q-fold');
-    if (!box || !bar) return;
     const filled = QD_FIELDS.filter(k => { const e = qdEl(k); return e && e.value.trim(); }).length;
-    box.classList.toggle('is-folded', !!folded);
-    const low = document.getElementById('q-status'); if (low && folded) low.textContent = '';
-    bar.hidden = !folded && !bar.dataset.auto;
-    document.getElementById('q-fold-txt').textContent = folded
-      ? filled + ' figures filled from the filing.'
-      : 'Editing the filed figures — run the checks again after a change.';
-    const btn = document.getElementById('q-fold-btn');
-    btn.textContent = folded ? 'Edit numbers' : 'Hide numbers';
-    btn.setAttribute('aria-expanded', folded ? 'false' : 'true');
+    const sub = document.getElementById('q-drawer-sub');
+    const per = (qdEl('per') || {}).value || '';
+    if (sub) sub.textContent = filled ? filled + ' figures' + (per ? ' · ' + per : '') : 'From the 10-Q, or typed by you';
+    if (folded) qxDrawer(false);
   }
+  function qxDrawer(open) {
+    const d = document.getElementById('q-drawer'), s = document.getElementById('q-scrim');
+    if (!d) return;
+    d.classList.toggle('is-open', !!open);
+    d.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (s) s.hidden = !open;
+    document.documentElement.classList.toggle('qx-lock', !!open);
+    if (open) { qdFold(false); const f = d.querySelector('input:not([type=hidden])'); if (f && !qdValues().rev) setTimeout(() => f.focus(), 120); }
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') qxDrawer(false); });
+  // The page's own layers cap anything fixed inside them, so the drawer would
+  // slide in under the top bar. Lift it (and its scrim) to the top level,
+  // inside a box-less wrapper that keeps the page's styles applying.
+  document.addEventListener('DOMContentLoaded', () => {
+    const d = document.getElementById('q-drawer'), s = document.getElementById('q-scrim');
+    if (!d || document.getElementById('qx-portal')) return;
+    const portal = document.createElement('div');
+    portal.id = 'qx-portal'; portal.className = 'fundamentals-shell'; portal.style.display = 'contents';
+    document.body.appendChild(portal); portal.appendChild(s); portal.appendChild(d);
+  });
+  function qxHow(btn) {
+    const box = document.getElementById('q-how'); if (!box) return;
+    box.hidden = !box.hidden;
+    btn.setAttribute('aria-expanded', box.hidden ? 'false' : 'true');
+    btn.textContent = box.hidden ? 'How this works' : 'Hide how this works';
+  }
+  // Practice: the filed figures become the answer key. The boxes empty out,
+  // you find each figure in the 10-Q, and "Check my numbers" scores you.
+  var qxKey = null;
+  function qxPractice() {
+    const btn = document.getElementById('q-practice'), txt = document.getElementById('q-practice-txt');
+    if (!qxKey) {
+      const v = qdValues(); delete v.shape;
+      if (!Object.keys(v).length) { txt.textContent = 'Walk through a company first: its filed figures become the answer key.'; return; }
+      qxKey = v;
+      QD_FIELDS.forEach(k => { const el = qdEl(k); if (el) el.value = ''; });
+      qdMarkFilled(); qdFold(false);
+      btn.textContent = 'Show the answers';
+      txt.textContent = 'Practice on: open the 10-Q, find each figure, type it in, then press Check my numbers.';
+      document.getElementById('q-drawer').classList.add('is-practice');
+    } else {
+      QD_FIELDS.forEach(k => { const el = qdEl(k); if (el) el.value = qxKey[k] !== undefined ? qxKey[k] : ''; });
+      qxKey = null; qdMarkFilled(); qdFold(false);
+      btn.textContent = 'Practice: hide the numbers';
+      txt.textContent = 'Hide the filed figures, find them in the 10-Q yourself, then score yourself.';
+      document.getElementById('q-drawer').classList.remove('is-practice');
+    }
+  }
+  function qxFillQuarters(list, current) {
+    const sel = document.getElementById('q-pick'); if (!sel) return;
+    const ends = (list || []).slice();
+    if (current && ends.indexOf(current) < 0) ends.unshift(current);
+    sel.innerHTML = ends.length
+      ? ends.map((e, i) => '<option value="' + qdEsc(e) + '"' + (e === current ? ' selected' : '') + '>Quarter ended ' + qdEsc(e) + (i === 0 ? ' · latest' : '') + '</option>').join('')
+      : '<option value="">Latest 10-Q</option>';
+  }
+  function qxPickQuarter(end) { qdWalk(end || ''); }
 
   async function qdLoadPrice(ticker) {
     qdPriceFor = ticker;
@@ -1615,14 +1815,17 @@
   var qdTTMPrior = null, qdCurrency = 'USD', qdSource = 'sec';
   var qdTTM = null, qdSplit = null, qdTTMFor = '', qdPrice = null, qdPriceFor = '', qdPriceTyped = false;
 
-  async function qdWalk() {
+  async function qdWalk(end) {
     const ticker = (qdEl('co').value || '').trim().toUpperCase();
+    // A new ticker starts from its latest quarter; the dropdown picks older ones.
+    if (typeof end !== 'string' || (qdTTMFor && qdTTMFor !== ticker)) end = '';
+    if (qxKey) qxPractice();
     if (!ticker) { qdStatus('Put a ticker in first — the filing is looked up by it.', true); return; }
     qdStatus('Reading ' + ticker + '’s latest filing from SEC EDGAR — this can ' +
              'take a few seconds for a large company.');
     qdBusy(true, 'Reading the filing…');
     try {
-      const resp = await fetch('/api/quarter/walkthrough/' + encodeURIComponent(ticker));
+      const resp = await fetch('/api/quarter/walkthrough/' + encodeURIComponent(ticker) + (end ? '?end=' + encodeURIComponent(end) : ''));
       const data = await resp.json();
       if (!data.available) {
         // Why this ticker cannot be read is often a paragraph — SKHY is a
@@ -1651,6 +1854,7 @@
       qdApplyShape(data.profile);
       qdEl('co').value = data.ticker || ticker;
       if (data.period_end) qdEl('per').value = 'Quarter ended ' + data.period_end;
+      qxFillQuarters(data.quarters, data.period_end);
       QD_FIELDS.forEach(k => {
         const el = qdEl(k);
         if (el) el.value = (data.figures && data.figures[k] !== undefined) ? data.figures[k] : '';
@@ -1954,36 +2158,40 @@
   }
 
   function qdRenderSaved(entries) {
+    qxSaved = entries || [];
     const box = document.getElementById('q-saved');
     const list = document.getElementById('q-saved-list');
     if (!box || !list) return;
     if (!entries || !entries.length) { box.hidden = true; list.innerHTML = ''; return; }
     box.hidden = false;
-    list.innerHTML = entries.map(e => {
-      const c = e.counts || {};
-      const tally = e.graded
-        ? '<span class="t-clean">' + c.clean + '</span>' +
-          '<span class="t-watch">' + c.watch + '</span>' +
-          '<span class="t-flag">' + c.flag + '</span>'
-        : '<span class="qd-chip-none">not graded</span>';
-      const cur = (qdEl('co').value || '').trim().toUpperCase() === String(e.ticker || '').toUpperCase();
-      return '<div class="qd-chip' + (cur ? ' is-current' : '') + '">' +
-        '<button type="button" class="qd-chip-open" onclick="qdOpenSaved(' + e.id + ')" ' +
-          'title="Saved quarter — reopen ' + qdEsc(e.ticker) + (e.period ? ' ' + qdEsc(e.period) : '') + '">' +
-          '<span class="qd-chip-kicker">Saved</span>' +
-          '<span class="qd-chip-sym">' + qdEsc(e.ticker) + '</span>' +
-          (e.period ? '<span class="qd-chip-per">' + qdEsc(e.period) + '</span>' : '') +
-          '<span class="qd-chip-tally">' + tally + '</span>' +
-        '</button>' +
-        '<button type="button" class="qd-chip-del" onclick="qdDeleteSaved(' + e.id + ', \'' +
-          qdEsc(e.ticker).replace(/'/g, "") + '\')" aria-label="Forget this saved quarter" ' +
-          'title="Forget this saved quarter">×</button>' +
+    // One card per company; its saved quarters newest first, three shown.
+    const cur = (qdEl('co').value || '').trim().toUpperCase();
+    const groups = {};
+    entries.forEach(e => { const k = String(e.ticker || '').toUpperCase(); (groups[k] = groups[k] || []).push(e); });
+    const dots = e => (e.checks && e.checks.length
+      ? e.checks.map(c => '<i class="qx-dot is-' + (c.applies === false ? 'na' : (c.verdict || 'none')) + '" title="' +
+          qdEsc((QX_SHORT[c.key] || c.key) + ': ' + (c.applies === false ? 'n/a' : (c.verdict || 'needs figures'))) + '"></i>').join('')
+      : '<span class="qd-chip-none">not graded</span>');
+    list.innerHTML = Object.keys(groups).sort((a, b) => (a === cur ? -1 : b === cur ? 1 : 0)).map(tk => {
+      const rows = groups[tk].sort((a, b) => qxPeriodKey(a.period) < qxPeriodKey(b.period) ? 1 : -1);
+      return '<div class="qd-chip qx-card' + (tk === cur ? ' is-current' : '') + '">' +
+        '<div class="qx-card-hd"><span class="qd-chip-kicker">Saved</span><span class="qd-chip-sym">' + qdEsc(tk) + '</span>' +
+          (rows.length > 1 ? '<span class="qx-card-n">' + rows.length + ' quarters</span>' : '') + '</div>' +
+        rows.slice(0, 3).map(e => '<div class="qx-card-row">' +
+          '<button type="button" class="qd-chip-open" onclick="qdOpenSaved(' + e.id + ')" ' +
+            'title="Saved quarter — reopen ' + qdEsc(e.ticker) + (e.period ? ' ' + qdEsc(e.period) : '') + '">' +
+            '<span class="qd-chip-per">' + qdEsc(qxPeriodKey(e.period) || 'undated') + '</span>' +
+            '<span class="qx-dots">' + dots(e) + '</span></button>' +
+          '<button type="button" class="qd-chip-del" onclick="qdDeleteSaved(' + e.id + ', \'' +
+            qdEsc(e.ticker).replace(/'/g, "") + '\')" aria-label="Forget this saved quarter" ' +
+            'title="Forget this saved quarter">×</button></div>').join('') +
+        (rows.length > 3 ? '<span class="qx-card-more">+' + (rows.length - 3) + ' older</span>' : '') +
         '</div>';
     }).join('');
   }
 
   async function qdOpenSaved(id) {
-    { const bar = document.getElementById('q-fold'); if (bar) delete bar.dataset.auto; qdFold(false); }
+    if (qxKey) qxPractice();
     try {
       const resp = await fetch('/api/quarter/saved/' + id);
       const data = await resp.json();
@@ -2032,10 +2240,13 @@
     const per = qdEl('per'); if (per) per.value = '';
     qdMarkFilled();
     qdStatus('');
+    qxFillQuarters([], '');
+    if (qxKey) { qxKey = null; const d = document.getElementById('q-drawer'); if (d) d.classList.remove('is-practice'); }
     document.getElementById('q-results').innerHTML =
-      '<h3>Results</h3><p class="qd-empty">Fill in what you have and run the drill. ' +
-      'Every check with its inputs grades itself; the rest say which figure they ' +
-      'were waiting on.</p>';
+      '<div class="qx-empty"><h3>Pick a company to grade its latest quarter</h3><p class="qd-empty">Press ' +
+      '<b>Walk me through it</b>, or open the figures and type them yourself. Every check with its ' +
+      'inputs grades itself; the rest say which figure they were waiting on.</p>' +
+      '<div class="qx-empty-actions"><button type="button" class="qd-ghost" onclick="qxDrawer(true)">Type the figures myself</button></div></div>';
   }
 
   document.addEventListener('keydown', e => {
