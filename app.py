@@ -10828,9 +10828,50 @@ def api_command_orbit():
         saved = [t for t in saved if isinstance(t, str) and _ORBIT_SYM.match(t)][:_ORBIT_MAX]
     except Exception:
         saved = []
-    resp = jsonify({"ok": True, "tickers": saved, "max": _ORBIT_MAX})
+    payload = {"ok": True, "tickers": saved, "max": _ORBIT_MAX}
+    if request.args.get("quotes") and saved:
+        payload["quotes"] = _orbit_quotes(saved)
+    resp = jsonify(payload)
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+# Orbit chips take their numbers from the market tape, which carries the
+# indexes and the user's watchlists. A ticker that is only in the orbit (an
+# ETF like VOO, say) is on neither, so its chip had no price. These quotes
+# fill that gap: same 5-day closes and live overlay as the tape, cached a
+# minute per symbol so the globe's poll doesn't refetch.
+_ORBIT_Q_CACHE: dict = {}
+_ORBIT_Q_TTL_S = 60
+
+
+def _orbit_quotes(tickers):
+    import time as _time
+    if not _MKT_AVAILABLE or not tickers:
+        return []
+    now = _time.time()
+    stale = [t for t in tickers
+             if now - (_ORBIT_Q_CACHE.get(t) or (0, None))[0] >= _ORBIT_Q_TTL_S]
+    if stale:
+        try:
+            prices = _mkt._fetch_prices_chart(stale, period="5d")
+        except Exception as exc:
+            logger.debug("orbit quotes: %s", exc)
+            prices = {}
+        for t in stale:
+            series = [x for x in (prices.get(t) or []) if x]
+            if not series and t in _ORBIT_Q_CACHE:
+                continue          # keep the last good quote rather than blank it
+            px = round(series[-1], 2) if series else None
+            pct = (round((series[-1] / series[-2] - 1) * 100, 2)
+                   if len(series) >= 2 else None)
+            _ORBIT_Q_CACHE[t] = (now, {"symbol": t, "price": px, "change_pct": pct, "orbit": True})
+    items = [dict(_ORBIT_Q_CACHE[t][1]) for t in tickers if t in _ORBIT_Q_CACHE]
+    try:
+        items = _mkt.overlay_live_tape(items)
+    except Exception as exc:
+        logger.debug("orbit quotes live overlay: %s", exc)
+    return [i for i in items if i.get("price") is not None or i.get("change_pct") is not None]
 
 
 @app.route("/api/today/breadth")
