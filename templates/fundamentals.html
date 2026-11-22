@@ -208,6 +208,27 @@
       </div>
       {% endif %}
 
+      <!-- Scoreboard: one dial per section; tap to jump to it. -->
+      {% if data.sections %}
+      <nav class="fa-board" aria-label="Score by section">
+        {% set dial_icons = {"Balance Sheet": "⚖", "Income Statement": "📈", "Cash Flow": "💵", "Quality Metrics": "⭐"} %}
+        {% for sec in data.sections %}
+        {% set pct = ((sec.earned / sec.possible * 100) if sec.possible else 0) | round(0) | int %}
+        {% set n_pass = sec.rows | selectattr('passed', 'sameas', true) | list | length %}
+        {% set n_fail = sec.rows | selectattr('passed', 'sameas', false) | list | length %}
+        {% set n_part = sec.rows | selectattr('passed', 'equalto', 'partial') | list | length %}
+        <a class="fa-dial {{ 'is-na' if not sec.possible else ('is-hi' if pct >= 80 else ('is-mid' if pct >= 50 else 'is-lo')) }}" href="#sec-{{ loop.index }}" data-open="sec-{{ loop.index }}" style="--p:{{ pct }}">
+          <span class="fa-dial-ring" aria-hidden="true"><b>{% if sec.possible %}{{ pct }}<small>%</small>{% else %}—{% endif %}</b></span>
+          <span class="fa-dial-txt">
+            <span class="fa-dial-name"><i aria-hidden="true">{{ dial_icons.get(sec.name, '📋') }}</i>{{ sec.name }}</span>
+            <span class="fa-dial-pts">{{ sec.earned }}<small>/{{ sec.possible }} pts</small></span>
+            <span class="fa-dial-tally"><span class="t-pass">✓ {{ n_pass }}</span>{% if n_part %}<span class="t-part">◐ {{ n_part }}</span>{% endif %}<span class="t-fail">✗ {{ n_fail }}</span></span>
+          </span>
+        </a>
+        {% endfor %}
+      </nav>
+      {% endif %}
+
       <!-- Auto-downgrade check -->
       {% if data.downgrade_check and data.downgrade_check.checks %}
       <div class="dg-card{{ ' dg-fired' if data.downgrade_check.any_fired else ' dg-clean' }}">
@@ -221,7 +242,7 @@
           {% endif %}
         </div>
         <ul class="dg-list">
-          {% for c in data.downgrade_check.checks %}
+          {% for c in data.downgrade_check.checks|sort(attribute='fired', reverse=True) %}
           {# Each label states the bad thing. A tick beside "the company has
              filed for bankruptcy" reads as "yes, it did" — which is the
              opposite of what a passed check means. The outcome is a word. #}
@@ -254,7 +275,7 @@
           </div>
           <div class="section-body">
             {% for row in sec.rows %}
-            <div class="metric-row" id="mr-{{ sec.name | replace(' ','') }}-{{ loop.index }}">
+            <div class="metric-row {{ 'is-none' if row.passed is none else ('is-partial' if row.passed == 'partial' else ('is-pass' if row.passed else 'is-fail')) }}" id="mr-{{ sec.name | replace(' ','') }}-{{ loop.index }}">
               <div class="metric-top">
                 <div class="metric-left">
                   {% if row.passed is none %}
@@ -925,6 +946,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/fa_metrics.js') }}" defer></script>
 <script>
   // ── Tab switching ─────────────────────────────────────────────────────────
   function switchTab(name, btn) {

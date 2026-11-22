@@ -448,40 +448,71 @@
     <div class="detail-col">
       <div class="detail-card">
         <h3 class="card-title">EMA Stack &amp; Trend</h3>
-        <div class="ema-stack-grid">
+        {% set lp = stock.current_price %}
+        {% set ns = namespace(items=[]) %}
+        {% if lp %}{% set ns.items = ns.items + [{'k': 'price', 'name': 'Price', 'v': lp}] %}{% endif %}
+        {% if stock.ema_20_daily %}{% set ns.items = ns.items + [{'k': 'e20', 'name': '20 EMA', 'v': stock.ema_20_daily}] %}{% endif %}
+        {% if stock.ema_50_daily %}{% set ns.items = ns.items + [{'k': 'e50', 'name': '50 EMA', 'v': stock.ema_50_daily}] %}{% endif %}
+        {% if stock.ema_200_daily %}{% set ns.items = ns.items + [{'k': 'e200', 'name': '200 EMA', 'v': stock.ema_200_daily}] %}{% endif %}
+        {% set e20, e50, e200 = stock.ema_20_daily, stock.ema_50_daily, stock.ema_200_daily %}
+        {% if lp and e20 and e50 and e200 %}
+          {% if lp > e20 > e50 > e200 %}{% set stack = ('bull', 'Full bullish stack', 'Price is above every average and they are in bullish order (20 > 50 > 200). Pullbacks to the 20 EMA are the classic entries.') %}
+          {% elif lp < e20 < e50 < e200 %}{% set stack = ('bear', 'Full bearish stack', 'Price is under every average and they are in bearish order (20 < 50 < 200). Each one overhead acts as resistance until price reclaims it.') %}
+          {% elif lp > e200 %}{% set stack = ('mixed', 'Mixed stack · above the 200', 'The long-term trend (200 EMA) is still under price, but the shorter averages are out of order. Wait for the 20 and 50 to line back up.') %}
+          {% else %}{% set stack = ('mixed', 'Mixed stack · below the 200', 'Price is under the 200 EMA with the shorter averages out of order. A base is possible, not yet a trend.') %}{% endif %}
+        {% else %}{% set stack = None %}{% endif %}
 
+        {% if ns.items | length >= 2 %}
+        {% set vals = ns.items | map(attribute='v') | list %}
+        {% set lo, hi = vals | min, vals | max %}
+        {% set pad = ((hi - lo) * 0.1) if hi > lo else (hi * 0.02 + 0.01) %}
+        <div class="lv-ema">
+          {% if stack %}
+          <div class="lv-stack lv-stack--{{ stack[0] }}">
+            <b>{{ stack[1] }}</b>
+            <span>{{ stack[2] }}</span>
+          </div>
+          {% endif %}
+          <div class="lv-track" aria-hidden="true">
+            <div class="lv-track-line"></div>
+            {% if lp and e20 %}
+            {% set a = ((lp - lo + pad) / (hi - lo + 2 * pad) * 100) %}{% set b = ((e20 - lo + pad) / (hi - lo + 2 * pad) * 100) %}
+            <div class="lv-track-gap {{ 'is-up' if lp > e20 else 'is-dn' }}" style="left:{{ '%.2f'|format([a, b]|min) }}%;width:{{ '%.2f'|format((a - b)|abs) }}%"></div>
+            {% endif %}
+            {% for it in ns.items | sort(attribute='v') %}
+            <span class="lv-pin lv-k-{{ it.k }}" style="left:{{ '%.2f'|format((it.v - lo + pad) / (hi - lo + 2 * pad) * 100) }}%">
+              <i></i><b>{{ 'NOW' if it.k == 'price' else it.k[1:] }}</b>
+            </span>
+            {% endfor %}
+          </div>
+          <div class="lv-ladder">
+            {% set ladder = ns.items | sort(attribute='v', reverse=True) %}
+            {% for it in ladder %}
+            {% if not loop.first %}
+            {% set prev = ladder[loop.index0 - 1] %}
+            <div class="lv-gap"><span>{{ '%.1f'|format((prev.v / it.v - 1) * 100) }}% apart</span></div>
+            {% endif %}
+            <div class="lv-rung lv-k-{{ it.k }}{{ ' is-price' if it.k == 'price' }}{{ ' is-over' if lp and it.k != 'price' and it.v > lp }}{{ ' is-under' if lp and it.k != 'price' and it.v < lp }}">
+              <i class="lv-sw" aria-hidden="true"></i>
+              <span class="lv-name">{{ it.name }}{% if it.k != 'price' %} <small>daily</small>{% endif %}</span>
+              <span class="lv-val"{% if it.k == 'price' %} id="detail-cur-price"{% endif %}>${{ "%.2f"|format(it.v) }}</span>
+              {% if it.k != 'price' and lp %}
+              {% set d = (it.v / lp - 1) * 100 %}
+              <span class="lv-dist {{ 'is-over' if d > 0 else 'is-under' }}">{{ '%+.1f'|format(d) }}% <small>{{ 'overhead' if d > 0 else 'below' }}</small></span>
+              {% else %}<span class="lv-dist lv-dist--now">you are here</span>{% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% else %}
+        <div class="ema-stack-grid">
           <div class="ema-row">
             <span class="ema-label">Price</span>
             <span class="ema-value" id="detail-cur-price">${{ "%.2f"|format(stock.current_price) if stock.current_price is not none else "N/A" }}</span>
           </div>
-
-          {% if stock.ema_20_daily %}
-          <div class="ema-row {{ 'ema-above' if stock.current_price and stock.current_price > stock.ema_20_daily else 'ema-below' }}">
-            <span class="ema-label">20 EMA (D)</span>
-            <span class="ema-value">${{ "%.2f"|format(stock.ema_20_daily) }}</span>
-            {% if stock.pct_from_ema20 %}
-            <span class="ema-dist {{ 'text-danger' if stock.pct_from_ema20 | abs > 8 else '' }}">
-              {{ '%+.1f' | format(stock.pct_from_ema20) }}%
-            </span>
-            {% endif %}
-          </div>
-          {% endif %}
-
-          {% if stock.ema_50_daily %}
-          <div class="ema-row {{ 'ema-above' if stock.current_price and stock.current_price > stock.ema_50_daily else 'ema-below' }}">
-            <span class="ema-label">50 EMA (D)</span>
-            <span class="ema-value">${{ "%.2f"|format(stock.ema_50_daily) }}</span>
-          </div>
-          {% endif %}
-
-          {% if stock.ema_200_daily %}
-          <div class="ema-row {{ 'ema-above' if stock.current_price and stock.current_price > stock.ema_200_daily else 'ema-below' }}">
-            <span class="ema-label">200 EMA (D)</span>
-            <span class="ema-value">${{ "%.2f"|format(stock.ema_200_daily) }}</span>
-          </div>
-          {% endif %}
-
+          <div class="no-data-msg">EMA levels need price history — Refresh to compute them.</div>
         </div>
+        {% endif %}
 
         {% if stock.daily_trend %}
         <div class="daily-trend-row">
@@ -535,6 +566,14 @@
           <span id="fib-anchor-low">Low: ${{ "%.2f"|format(fl) }}</span>
         </div>
 
+        {% set lv_fib = {
+          'cur': cur, 'dir': stock.fib_direction or 'bullish',
+          'active': {'high': fh, 'low': fl, 'l236': stock.fib_236, 'l382': stock.fib_382, 'l50': stock.fib_50, 'l618': stock.fib_618, 'l65': stock.fib_65, 'l705': stock.fib_705, 'l786': stock.fib_786},
+          'macro': ({'high': stock.macro_fib_high, 'low': stock.macro_fib_low} if stock.macro_fib_high and stock.macro_fib_low else None)
+        } %}
+        <script type="application/json" id="lv-fib-data">{{ lv_fib | tojson }}</script>
+        <div class="lv-fib">
+        <div class="lv-ruler" id="lv-ruler" aria-label="Where price sits on the Fibonacci range" role="img"></div>
         <!-- Full level grid -->
         <div class="fib-grid-v2">
 
@@ -619,6 +658,8 @@
 
         </div>
 
+        </div>{# .lv-fib #}
+
         <!-- Price position insight -->
         {% if cur and frng > 0 %}
         {% set pct_r = (fh - cur) / frng * 100 %}
@@ -653,6 +694,15 @@
             {% if stock.macro_fib_618 %}<span>61.8%: ${{ "%.2f"|format(stock.macro_fib_618) }}</span>{% endif %}
             <span>L: ${{ "%.2f"|format(stock.macro_fib_low) }}</span>
           </div>
+          {% if cur %}{% set rh, rl = stock.macro_fib_high, stock.macro_fib_low %}{% set rlo, rhi = [rl, cur]|min, [rh, cur]|max %}{% set rr = (rhi - rlo) or 1 %}
+          <div class="lv-range" aria-hidden="true">
+            <i class="lv-range-band" style="left:{{ '%.1f'|format((rl - rlo) / rr * 100) }}%;width:{{ '%.1f'|format((rh - rl) / rr * 100) }}%"></i>
+            {% if stock.macro_fib_618 %}<i class="lv-range-gp" style="left:{{ '%.1f'|format((stock.macro_fib_618 - rlo) / rr * 100) }}%"></i>{% endif %}
+            {% if stock.macro_fib_50 %}<i class="lv-range-mid" style="left:{{ '%.1f'|format((stock.macro_fib_50 - rlo) / rr * 100) }}%"></i>{% endif %}
+            <b class="lv-range-now" style="left:{{ '%.1f'|format((cur - rlo) / rr * 100) }}%"></b>
+          </div>
+          <div class="lv-range-cap"><span>L</span><em>{{ 'Price is below this range' if cur < rl else ('Price is above this range' if cur > rh else 'Price is ' ~ ('%.0f'|format((cur - rl) / ((rh - rl) or 1) * 100)) ~ '% of the way up') }}</em><span>H</span></div>
+          {% endif %}
         </div>
         {% endif %}
 
@@ -666,6 +716,15 @@
             {% if stock.h4_fib_618 %}<span>61.8%: ${{ "%.2f"|format(stock.h4_fib_618) }}</span>{% endif %}
             <span>L: ${{ "%.2f"|format(stock.h4_fib_low) }}</span>
           </div>
+          {% if cur %}{% set rh, rl = stock.h4_fib_high, stock.h4_fib_low %}{% set rlo, rhi = [rl, cur]|min, [rh, cur]|max %}{% set rr = (rhi - rlo) or 1 %}
+          <div class="lv-range" aria-hidden="true">
+            <i class="lv-range-band" style="left:{{ '%.1f'|format((rl - rlo) / rr * 100) }}%;width:{{ '%.1f'|format((rh - rl) / rr * 100) }}%"></i>
+            {% if stock.h4_fib_618 %}<i class="lv-range-gp" style="left:{{ '%.1f'|format((stock.h4_fib_618 - rlo) / rr * 100) }}%"></i>{% endif %}
+            {% if stock.h4_fib_50 %}<i class="lv-range-mid" style="left:{{ '%.1f'|format((stock.h4_fib_50 - rlo) / rr * 100) }}%"></i>{% endif %}
+            <b class="lv-range-now" style="left:{{ '%.1f'|format((cur - rlo) / rr * 100) }}%"></b>
+          </div>
+          <div class="lv-range-cap"><span>L</span><em>{{ 'Price is below this range' if cur < rl else ('Price is above this range' if cur > rh else 'Price is ' ~ ('%.0f'|format((cur - rl) / ((rh - rl) or 1) * 100)) ~ '% of the way up') }}</em><span>H</span></div>
+          {% endif %}
         </div>
         {% endif %}
 
@@ -1582,6 +1641,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/levels_viz.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/stock_page.js') }}"></script>
 <script>
 function setPlanBias(bias) {

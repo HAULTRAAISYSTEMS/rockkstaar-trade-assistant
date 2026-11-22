@@ -1610,3 +1610,105 @@
 .fundamentals-shell .qd-range-now.is-right b { left: 12px; transform: translateX(-100%); }
 .fundamentals-shell .qd-range-now.is-left b { left: 0; transform: none; }
 .fundamentals-shell .qd-range-hd { margin-bottom: 24px; }
+
+/* ── Analyze redesign: section dials, check tiles, sparklines and gauges ── */
+.fundamentals-shell .fa-board {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 0 0 16px;
+}
+.fundamentals-shell .fa-dial {
+  --tone: var(--pos-500, #22c58b);
+  display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 18px; text-decoration: none; color: inherit;
+  border: 1px solid rgba(170, 215, 255, .14);
+  background: radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--tone) 14%, transparent), transparent 60%), rgba(8, 16, 32, .55);
+  -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+.fundamentals-shell .fa-dial:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--tone) 55%, transparent); box-shadow: 0 14px 30px -18px color-mix(in srgb, var(--tone) 70%, transparent); }
+.fundamentals-shell .fa-dial.is-mid { --tone: var(--warn-500, #ffb020); }
+.fundamentals-shell .fa-dial.is-lo { --tone: var(--neg-500, #ff4d45); }
+.fundamentals-shell .fa-dial-ring {
+  position: relative; flex: none; width: 62px; height: 62px; border-radius: 50%; display: grid; place-items: center;
+  background: conic-gradient(var(--tone) calc(var(--p) * 1%), rgba(255, 255, 255, .07) 0);
+  box-shadow: 0 0 22px -6px color-mix(in srgb, var(--tone) 60%, transparent);
+}
+.fundamentals-shell .fa-dial-ring::before { content: ""; position: absolute; inset: 6px; border-radius: 50%; background: rgb(10, 19, 36); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06); }
+.fundamentals-shell .fa-dial-ring b { position: relative; color: #fff; font: 700 17px var(--font-mono); }
+.fundamentals-shell .fa-dial-ring small { font-size: 10px; color: var(--elite-faint); }
+.fundamentals-shell .fa-dial-txt { display: grid; gap: 3px; min-width: 0; }
+.fundamentals-shell .fa-dial-name { display: flex; gap: 7px; align-items: center; color: var(--ink-100, #e9eef6); font: 700 11px var(--font-display); letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
+.fundamentals-shell .fa-dial-name i { font-style: normal; font-size: 13px; }
+.fundamentals-shell .fa-dial-pts { color: var(--tone); font: 700 18px var(--font-mono); }
+.fundamentals-shell .fa-dial-pts small { color: var(--elite-faint); font: 500 10px var(--font-mono); margin-left: 2px; }
+.fundamentals-shell .fa-dial-tally { display: flex; gap: 9px; font: 600 10.5px var(--font-mono); }
+.fundamentals-shell .fa-dial-tally .t-pass { color: var(--pos-500); }
+.fundamentals-shell .fa-dial-tally .t-fail { color: var(--neg-500); }
+.fundamentals-shell .fa-dial-tally .t-part { color: var(--warn-500); }
+.fundamentals-shell .section-card { scroll-margin-top: 110px; }
+.fundamentals-shell .section-card.fa-flash { animation: faFlash 1.2s ease; }
+@keyframes faFlash { 0%, 100% { box-shadow: var(--elite-shadow); } 30% { box-shadow: 0 0 0 2px var(--elite-gold-bright, #f0c35a), var(--elite-shadow); } }
+
+/* Checks as tiles: two across on wide screens, a coloured edge for the verdict. */
+@media (min-width: 1100px) {
+  .fundamentals-shell .section-card.open .section-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; }
+  .fundamentals-shell .section-card.open .section-body > :not(.metric-row) { grid-column: 1 / -1; }
+}
+.fundamentals-shell .section-card.open .section-body { padding: 10px; }
+.fundamentals-shell .metric-row {
+  --tone: var(--elite-faint);
+  position: relative; padding: 13px 15px 12px 17px; border: 1px solid rgba(170, 215, 255, .09); border-radius: 13px;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--tone) 8%, transparent), transparent 45%), rgba(4, 10, 22, .35);
+  margin-bottom: 8px;
+}
+@media (min-width: 1100px) { .fundamentals-shell .metric-row { margin-bottom: 0; } }
+.fundamentals-shell .metric-row:last-child { border-bottom: 1px solid rgba(170, 215, 255, .09); }
+.fundamentals-shell .metric-row::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--tone); box-shadow: 0 0 10px var(--tone); }
+.fundamentals-shell .metric-row.is-pass { --tone: var(--pos-500, #22c58b); }
+.fundamentals-shell .metric-row.is-fail { --tone: var(--neg-500, #ff4d45); }
+.fundamentals-shell .metric-row.is-partial { --tone: var(--warn-500, #ffb020); }
+.fundamentals-shell .metric-row.is-none::before { opacity: .4; }
+.fundamentals-shell .metric-row:hover { background: linear-gradient(100deg, color-mix(in srgb, var(--tone) 13%, transparent), transparent 55%), rgba(4, 10, 22, .45); }
+.fundamentals-shell .metric-top { align-items: flex-start; }
+.fundamentals-shell .metric-left { align-items: flex-start; }
+.fundamentals-shell .metric-label { font-size: 13px; font-weight: 600; color: rgb(230, 237, 247); line-height: 1.35; }
+.fundamentals-shell .metric-value { font-size: 15px; font-weight: 700; color: rgb(255, 255, 255); }
+.fundamentals-shell .metric-data { align-items: center; gap: 12px; }
+.fundamentals-shell .metric-row .metric-working { font-size: 10.5px; color: rgb(125, 138, 160); margin-top: 5px; }
+.fundamentals-shell .metric-bar { height: 3px; margin-top: 10px; border-radius: 3px; background: rgba(255, 255, 255, .05); overflow: hidden; }
+.fundamentals-shell .metric-bar i { display: block; height: 100%; border-radius: inherit; }
+
+.fundamentals-shell .fa-viz { display: inline-flex; align-items: center; gap: 7px; flex: none; }
+.fundamentals-shell .fa-spark svg rect { fill: color-mix(in srgb, var(--tone, #7fd8ff) 45%, transparent); }
+.fundamentals-shell .fa-spark svg rect.last { fill: var(--tone, #7fd8ff); filter: drop-shadow(0 0 4px var(--tone, #7fd8ff)); }
+.fundamentals-shell .fa-spark svg rect.neg { fill: color-mix(in srgb, var(--neg-500) 60%, transparent); }
+.fundamentals-shell .fa-viz.tone-pass { --tone: var(--pos-500, #22c58b); }
+.fundamentals-shell .fa-viz.tone-fail { --tone: var(--neg-500, #ff4d45); }
+.fundamentals-shell .fa-viz.tone-partial { --tone: var(--warn-500, #ffb020); }
+.fundamentals-shell .fa-viz.tone-none { --tone: rgb(127, 147, 173); }
+.fundamentals-shell .fa-spark em { font: 700 10.5px var(--font-mono); font-style: normal; padding: 2px 6px; border-radius: 6px; }
+.fundamentals-shell .fa-spark em.up { color: var(--pos-500); background: rgba(34, 197, 139, .1); }
+.fundamentals-shell .fa-spark em.dn { color: var(--neg-500); background: rgba(255, 77, 69, .1); }
+.fundamentals-shell .fa-gauge { flex-direction: column; align-items: stretch; gap: 3px; width: 96px; }
+.fundamentals-shell .fa-gauge small { color: var(--elite-faint); font: 600 9.5px var(--font-mono); text-align: right; }
+.fundamentals-shell .fa-g-track { position: relative; height: 8px; border-radius: 6px; background: rgba(255, 255, 255, .06); overflow: visible; }
+.fundamentals-shell .fa-g-ok { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: rgba(34, 197, 139, .14); }
+.fundamentals-shell .fa-g-fill { position: absolute; left: 0; top: 2px; bottom: 2px; border-radius: 4px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--tone) 70%, transparent)); }
+.fundamentals-shell .fa-g-thr { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: rgb(232, 237, 245); border-radius: 2px; opacity: .8; }
+.fundamentals-shell .fa-g-dot { position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 2px #0a1324, 0 0 10px var(--tone); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 640px) {
+  .fundamentals-shell .fa-board { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .fundamentals-shell .fa-dial { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; }
+  .fundamentals-shell .fa-dial-ring { width: 50px; height: 50px; }
+  .fundamentals-shell .fa-dial-ring b { font-size: 14px; }
+  .fundamentals-shell .fa-dial-name { white-space: normal; }
+  .fundamentals-shell .metric-top { flex-direction: column; gap: 8px; }
+  .fundamentals-shell .metric-data { width: 100%; justify-content: flex-end; }
+  .fundamentals-shell .metric-value { max-width: none; }
+}
+
+/* Downgrade check: what fired leads, the clear ones sit in a compact grid. */
+.dg-item.is-fired { grid-column: 1 / -1; padding: 10px 12px; border-radius: 10px; background: rgba(255, 77, 69, .08); border: 1px solid rgba(255, 77, 69, .3); }
+.dg-item.is-fired .dg-text { font-size: 13px; font-weight: 600; }
+.dg-item:not(.is-fired) .dg-text { font-size: 11px; }
+.fundamentals-shell .fa-dial.is-na { --tone: rgb(111, 127, 150); opacity: .75; }
+.fundamentals-shell .metric-row:not(.is-partial) .metric-bar { display: none; }
