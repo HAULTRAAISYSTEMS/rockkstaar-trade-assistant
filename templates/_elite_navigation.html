@@ -170,9 +170,12 @@
   <div class="nav-actions">
     <button class="nav-ai-button" type="button" onclick="openAsk()" title="Ask AI (Ctrl+K)"><span aria-hidden="true">✦</span> Ask AI</button>
     <details class="nav-menu nav-avatar">
-      <summary class="nav-avatar__btn {{ 'is-active' if learn_active or account_active }}" aria-label="Learn and account" title="Learn and account">{{ rm_icon('user') }}</summary>
+      <summary class="nav-avatar__btn {{ 'is-active' if learn_active or account_active }}" aria-label="Learn and account" title="Learn and account">{% if profile_photo_url %}<img class="nav-avatar__img" src="{{ profile_photo_url }}" alt="" width="44" height="44" decoding="async">{% else %}{{ rm_icon('user') }}{% endif %}</summary>
       <div class="nav-menu__panel nav-menu__panel--tiles nav-menu__panel--account nav-menu__panel--right">
-        <span class="nav-menu__label">{{ session.get('username') or 'Your workspace' }}</span>
+        <button type="button" class="nav-profile" data-photo-pick aria-label="{{ 'Change profile photo' if profile_photo_url else 'Add a profile photo' }}">
+          <span class="nav-profile__pic">{% if profile_photo_url %}<img src="{{ profile_photo_url }}" alt="" width="40" height="40">{% else %}{{ rm_icon('user') }}{% endif %}<i class="nav-profile__cam" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></i></span>
+          <span class="nav-profile__txt"><strong>{{ session.get('username') or 'Your workspace' }}</strong><small data-photo-status>{{ 'Tap to change photo' if profile_photo_url else 'Tap to add a photo' }}</small></span>
+        </button>
         {{ nav_tiles(account_groups) }}
         {{ nav_tiles(learn_groups) }}
       </div>
@@ -228,9 +231,13 @@
     </div>
   </div>
   <div class="mobile-app-nav__group">
-    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if account_active }}" aria-expanded="false" aria-controls="mobile-account-menu" data-mobile-menu="mobile-account-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.9-3.6 3.7-5.5 7-5.5s6.1 1.9 7 5.5"/></svg></span><span class="mobile-app-nav__label">Account</span></button>
+    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if account_active }}" aria-expanded="false" aria-controls="mobile-account-menu" data-mobile-menu="mobile-account-menu"><span class="mobile-app-nav__icon{{ ' has-photo' if profile_photo_url }}" aria-hidden="true">{% if profile_photo_url %}<img class="mobile-app-nav__photo" src="{{ profile_photo_url }}" alt="" width="26" height="26" decoding="async">{% else %}<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.9-3.6 3.7-5.5 7-5.5s6.1 1.9 7 5.5"/></svg>{% endif %}</span><span class="mobile-app-nav__label">Account</span></button>
     <div class="mobile-app-menu" id="mobile-account-menu" hidden>
       <div class="mobile-app-menu__head"><strong>Account</strong><span>Your workspace</span></div>
+      <button type="button" class="nav-profile is-sheet" data-photo-pick aria-label="{{ 'Change profile photo' if profile_photo_url else 'Add a profile photo' }}">
+          <span class="nav-profile__pic">{% if profile_photo_url %}<img src="{{ profile_photo_url }}" alt="" width="44" height="44">{% else %}{{ rm_icon('user') }}{% endif %}<i class="nav-profile__cam" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></i></span>
+          <span class="nav-profile__txt"><strong>{{ session.get('username') or 'Your workspace' }}</strong><small data-photo-status>{{ 'Tap to change photo' if profile_photo_url else 'Tap to add a photo' }}</small></span>
+        </button>
       <div class="rm-sheet">{{ nav_tiles(account_groups) }}</div>
       <form action="{{ url_for('logout') }}" method="post" class="mobile-logout-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -239,3 +246,5 @@
     </div>
   </div>
 </nav>
+<input type="file" id="profile-photo-file" accept="image/*" hidden>
+<script src="{{ url_for('static', filename='js/profile_photo.js') }}" defer></script>
