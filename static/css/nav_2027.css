@@ -110,3 +110,19 @@ html.cc27 .elite-navbar .nav-tile.nav-link-active,
   .elite-navbar .nav-system__label { display: none; }
   .elite-navbar .nav-actions { gap: 6px; flex: none; }
 }
+
+/* Profile photo in the avatar button, the account menu and the phone tab */
+.elite-navbar .nav-avatar__btn { overflow: hidden; padding: 0; }
+.elite-navbar .nav-avatar__img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; padding: 10px 12px; border-radius: 14px; text-decoration: none;
+  border: 1px solid rgba(56, 220, 255, .18); background: rgba(56, 220, 255, .05); color: inherit; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile:hover { border-color: rgba(56, 220, 255, .45); background: rgba(56, 220, 255, .09); }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile__pic { width: 40px; height: 40px; flex: none; border-radius: 50%; overflow: hidden; display: grid; place-items: center;
+  border: 1.5px solid rgba(56, 220, 255, .55); background: radial-gradient(circle at 50% 35%, rgba(56, 220, 255, .28), rgba(8, 30, 60, .9)); color: #bff3ff; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile__pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile__pic svg { width: 20px; height: 20px; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile__txt { display: grid; gap: 2px; min-width: 0; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile__txt strong { font-size: 14px; color: #eaf6ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile__txt small { font-size: 11.5px; color: #7fdcff; }
+.mobile-app-nav__photo { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; display: block; box-shadow: 0 0 0 1.5px rgba(56, 220, 255, .7); }
+.mobile-app-nav__icon.has-photo { padding: 0 !important; }

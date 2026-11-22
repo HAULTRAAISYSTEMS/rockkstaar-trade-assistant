@@ -10,6 +10,7 @@ from trade_tools_routes import create_trade_tools_blueprint
 from news_desk_routes import create_news_desk_blueprint
 from notifications_routes import create_notifications_blueprint
 from wealth_routes import create_wealth_blueprint
+from profile_photo import create_profile_photo_blueprint
 
 from research_workbench import create_blueprint as create_research_lab
 
@@ -22,6 +23,7 @@ app.register_blueprint(create_browser_push_blueprint(current_user=legacy.current
 app.register_blueprint(create_trade_tools_blueprint(current_user=legacy.current_user))
 app.register_blueprint(create_news_desk_blueprint(current_user=legacy.current_user,tracked_tickers=legacy.get_user_tracked_tickers))
 app.register_blueprint(create_notifications_blueprint(current_user=legacy.current_user))
+app.register_blueprint(create_profile_photo_blueprint(current_user=legacy.current_user))
 def _wealth_zone(ticker, price):
     """The app's value zone for a ticker, restated at the given price."""
     z = legacy._value_zones_cached(ticker)

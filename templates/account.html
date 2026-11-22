@@ -1,6 +1,7 @@
 {% extends "hx_base.html" %}
 {% from "_hx_macros.html" import grade_badge %}
 {% block title %}Account — Tradestaar Elite{% endblock %}
+{% block head_extra %}{{ super() }}<link rel="stylesheet" href="{{ url_for('static', filename='css/profile_photo.css') }}">{% endblock %}
 
 {% block hx_content %}
 {% set connected = acct and acct.connected %}
@@ -9,11 +10,23 @@
 {% set live_daily_pct = acct.get('daily_pnl_pct') if connected else none %}
 
 <!-- topbar -->
-<header class="elite-hero">
-  <div>
+<header class="elite-hero pp-hero">
+  <div class="pp" id="profile-photo">
+    <button type="button" class="pp-ring" id="pp-pick" aria-label="{{ 'Change profile photo' if profile_photo_url else 'Add a profile photo' }}">
+      <span class="pp-face">{% if profile_photo_url %}<img id="pp-img" src="{{ profile_photo_url }}" alt="Your profile photo" width="96" height="96">{% else %}<span class="pp-initial" id="pp-initial">{{ (session.get('username') or 'T')[:1]|upper }}</span>{% endif %}</span>
+      <span class="pp-cam" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
+    </button>
+    <input type="file" id="pp-file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" hidden>
+    <div class="pp-actions">
+      <button type="button" class="pp-link" id="pp-pick2">{{ 'Change photo' if profile_photo_url else 'Add photo' }}</button>
+      <button type="button" class="pp-link is-quiet" id="pp-remove" {% if not profile_photo_url %}hidden{% endif %}>Remove</button>
+    </div>
+    <p class="pp-msg" id="pp-msg" role="status" aria-live="polite"></p>
+  </div>
+  <div class="pp-title">
     <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Elite</div>
     <h1 class="elite-hero-title">Account</h1>
-    <p class="elite-hero-sub">Swing book · performance &amp; discipline</p>
+    <p class="elite-hero-sub">{{ session.get('username') or 'Your workspace' }} · swing book, performance &amp; discipline</p>
   </div>
   <div class="elite-hero-actions">
     {% if connected %}
@@ -139,4 +152,17 @@
 <script>
 (function(){var key='tradestaar.chartType';var current='area';try{current=localStorage.getItem(key)||'area';}catch(e){}var buttons=document.querySelectorAll('[data-chart-preference]');function paint(){buttons.forEach(function(btn){var active=btn.dataset.chartPreference===current;btn.classList.toggle('is-active',active);btn.setAttribute('aria-pressed',active?'true':'false');});}buttons.forEach(function(btn){btn.addEventListener('click',function(){current=btn.dataset.chartPreference;try{localStorage.setItem(key,current);}catch(e){}paint();});});paint();})();
 </script>
+<dialog class="pp-dialog" id="pp-dialog" aria-labelledby="pp-dlg-title">
+  <form method="dialog" class="pp-dlg">
+    <h2 id="pp-dlg-title">Position your photo</h2>
+    <p class="pp-dlg-sub">Drag to move · pinch, scroll or use the slider to zoom</p>
+    <div class="pp-stage" id="pp-stage"><canvas id="pp-canvas" width="560" height="560" aria-label="Photo preview"></canvas><span class="pp-mask" aria-hidden="true"></span></div>
+    <label class="pp-zoom"><span aria-hidden="true">−</span><input type="range" id="pp-zoom" min="1" max="4" step="0.01" value="1" aria-label="Zoom"><span aria-hidden="true">+</span></label>
+    <div class="pp-dlg-actions">
+      <button type="button" class="btn btn-ghost btn-sm" id="pp-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary btn-sm" id="pp-save">Save photo</button>
+    </div>
+  </form>
+</dialog>
+<script src="{{ url_for('static', filename='js/profile_photo.js') }}" defer></script>
 {% endblock %}
