@@ -89,3 +89,32 @@ def test_chart_and_globe_hooks():
 def test_scripts_parse():
     for f in ("static/js/context_menu.js", "static/js/chart_tools.js", "static/js/command_center_picture.js"):
         subprocess.run(["node", "--check", str(ROOT / f)], check=True)
+
+
+def test_orbit_only_tickers_get_quotes(c, monkeypatch):
+    """A ticker that is only in the orbit (VOO) still gets a price and change."""
+    import app as legacy
+
+    class FakeMkt:
+        calls = []
+
+        @staticmethod
+        def _fetch_prices_chart(tickers, period="5d"):
+            FakeMkt.calls.append(list(tickers))
+            return {t: [500.0, 510.0] for t in tickers}
+
+        @staticmethod
+        def overlay_live_tape(items):
+            return items
+
+    monkeypatch.setattr(legacy, "_MKT_AVAILABLE", True)
+    monkeypatch.setattr(legacy, "_mkt", FakeMkt)
+    legacy._ORBIT_Q_CACHE.clear()
+    c.post("/api/command/orbit", json={"tickers": ["VOO", "NVDA"]})
+    plain = c.get("/api/command/orbit").get_json()
+    assert "quotes" not in plain                       # the list itself stays fast
+    d = c.get("/api/command/orbit?quotes=1").get_json()
+    voo = [q for q in d["quotes"] if q["symbol"] == "VOO"][0]
+    assert voo["price"] == 510.0 and voo["change_pct"] == 2.0
+    c.get("/api/command/orbit?quotes=1")
+    assert len(FakeMkt.calls) == 1                     # cached for a minute

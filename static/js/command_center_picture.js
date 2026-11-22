@@ -87,14 +87,39 @@
     globeBox.style.setProperty('--safe-r', Math.max(6, g.right - r + 10) + 'px');
     return Math.max(160, Math.min(cx - l, r - cx) - 6);
   }
-  function bySym() { var m = {}; lastItems.forEach(function (q) { if (q && q.symbol) m[String(q.symbol).toUpperCase()] = q; }); return m; }
+  // Tape quotes first; orbit-only tickers (not on any watchlist, e.g. VOO)
+  // fall back to the orbit's own quotes.
+  var orbitQ = {};
+  function bySym() {
+    var m = {};
+    Object.keys(orbitQ).forEach(function (k) { m[k] = orbitQ[k]; });
+    lastItems.forEach(function (q) { if (q && q.symbol && num(q.change_pct)) m[String(q.symbol).toUpperCase()] = q; });
+    return m;
+  }
+  var oqT = null;
+  function loadOrbitQuotes() {
+    clearTimeout(oqT);
+    if (!orbit.length) return;
+    var tape = {}; lastItems.forEach(function (q) { if (q && q.symbol && num(q.change_pct)) tape[String(q.symbol).toUpperCase()] = 1; });
+    if (orbit.every(function (s) { return tape[s]; })) { oqT = setTimeout(loadOrbitQuotes, 60000); return; }
+    fetch('/api/command/orbit?quotes=1', { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d && d.ok && Array.isArray(d.quotes)) {
+          d.quotes.forEach(function (q) { if (q && q.symbol) orbitQ[String(q.symbol).toUpperCase()] = q; });
+          renderOrbit();
+        }
+      })
+      .catch(function () {})
+      .then(function () { oqT = setTimeout(loadOrbitQuotes, document.hidden ? 180000 : 60000); });
+  }
   function announce() { document.dispatchEvent(new CustomEvent('cmd27:orbit', { detail: { tickers: orbit.slice() } })); }
   function saveOrbit() {
     announce(); renderOrbit();
     fetch('/api/command/orbit', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tickers: orbit }) })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { if (d && d.ok) { orbit = d.tickers; announce(); renderOrbit(); } })
+      .then(function (d) { if (d && d.ok) { orbit = d.tickers; announce(); renderOrbit(); loadOrbitQuotes(); } })
       .catch(function () {});
   }
   function toggle(sym) {
@@ -250,7 +275,7 @@
   window.addEventListener('resize', function () { clearTimeout(rto); rto = setTimeout(renderOrbit, 150); }, { passive: true });
   fetch('/api/command/orbit', { credentials: 'same-origin', cache: 'no-store' })
     .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (d) { if (d && d.ok) { orbit = d.tickers || []; orbitLoaded = true; announce(); renderOrbit(); } })
+    .then(function (d) { if (d && d.ok) { orbit = d.tickers || []; orbitLoaded = true; announce(); renderOrbit(); setTimeout(loadOrbitQuotes, 1500); } })
     .catch(function () {});
   // The globe's pins come from the shared tape; chips follow it too.
   document.addEventListener('tradestaar:tape', function (e) { if (Array.isArray(e.detail) && e.detail.length) { lastItems = e.detail; renderOrbit(); } });
