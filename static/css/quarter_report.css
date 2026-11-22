@@ -165,3 +165,24 @@ html.qx-lock, html.qx-lock body { overflow: hidden; }
   :is(#tab-quarter, #qx-portal) .qx-drawer-hd::before { content: ""; position: absolute; left: 50%; top: 7px; width: 40px; height: 4px; margin-left: -20px; border-radius: 4px; background: rgba(255,255,255,.2); }
   :is(#tab-quarter, #qx-portal) .qx-practice { flex-direction: column; align-items: stretch; }
 }
+
+/* ── Same cards as the M.C.F.F. tab: frosted glass (.wa-card), 18px corners,
+      16px padding, small uppercase headers. ── */
+:is(#tab-quarter, #qx-portal) .wa-card { border-radius: 18px !important; }
+#tab-quarter .qx-tile.wa-card { padding: 14px 16px 14px 18px; }
+#tab-quarter .qx-tile::before { top: 14px; bottom: 14px; }
+#tab-quarter .qd-item.wa-card { margin: 0 0 12px; padding: 16px 18px; border-top: 1px solid var(--glass-edge, rgba(170,215,255,.17)); }
+#tab-quarter .qd-item.wa-card:first-of-type { padding-top: 16px; }
+#tab-quarter .qd-item.wa-card .qd-name { color: var(--elite-copy); font: 700 12px var(--font-display); letter-spacing: .12em; text-transform: uppercase; }
+#tab-quarter .qd-pe.wa-card .qd-name, #tab-quarter .qd-thesis.wa-card .qd-name { font-size: 12px; }
+#tab-quarter .qd-glance.wa-card { margin: 0 0 12px; padding: 0; overflow: hidden; }
+#tab-quarter .qd-glance.wa-card .qd-glance-hd { padding: 14px 18px 10px; color: var(--elite-copy); font: 700 12px var(--font-display); letter-spacing: .12em; border-bottom-color: rgba(255,255,255,.08); }
+#tab-quarter .qd-glance.wa-card .qd-glance-row { background: transparent; }
+#tab-quarter .qx-compare.wa-card { padding: 14px 18px; }
+#tab-quarter .qx-compare.wa-card summary { color: var(--elite-copy); font: 700 12px var(--font-display); letter-spacing: .12em; text-transform: uppercase; }
+#tab-quarter .qx-hero.wa-card { padding: 22px 24px; }
+#tab-quarter .qx-card.wa-card { padding: 12px 14px; }
+#tab-quarter .qx-how.wa-card { padding: 18px 20px; }
+#tab-quarter .qx-empty.wa-card { padding: 30px 24px; }
+#tab-quarter .qx-cols { gap: 14px; }
+@media (max-width: 760px) { #tab-quarter .qx-tiles > .qx-tile:last-child:nth-child(odd) { grid-column: 1 / -1; } }

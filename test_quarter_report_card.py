@@ -13,7 +13,7 @@ def test_command_bar_has_ticker_quarter_picker_and_walk():
 
 
 def test_intro_is_behind_how_this_works():
-    how = PAGE[PAGE.index('<section class="qx-how" id="q-how" hidden>'):]
+    how = PAGE[PAGE.index('<section class="qx-how wa-card" id="q-how" hidden>'):]
     assert "Seven checks on one quarter" not in how[:200]
     assert how.index("Show me where") < how.index("</section>")
 
@@ -37,3 +37,10 @@ def test_saved_cards_carry_per_check_verdicts(monkeypatch):
     card = legacy._quarter_card({"id": 1, "ticker": "GOOG", "period": "Quarter ended 2026-09-30",
                                  "figures": {"rev": 100, "revP": 80, "cfo": 50, "niy": 60}})
     assert len(card["checks"]) == 7 and {"key", "verdict", "value", "applies"} <= set(card["checks"][0])
+
+
+def test_cards_use_the_same_glass_as_mcff():
+    for needle in ("class=\"qx-hero wa-card\"", "class=\"qx-tile wa-card is-'", "class=\"qd-glance wa-card\"",
+                   "class=\"qd-item qd-pe wa-card\"", "class=\"qd-item wa-card\" id=\"qd-ck-'"):
+        assert needle in PAGE, needle
+    assert ":is(#tab-quarter, #qx-portal) .wa-card { border-radius: 18px !important; }" in CSS
