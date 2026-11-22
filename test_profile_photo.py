@@ -60,7 +60,7 @@ def test_upload_shows_in_nav_and_is_private(c):
     assert got.status_code == 200 and got.mimetype == "image/jpeg" and "private" in got.headers["Cache-Control"]
     html = c.get("/intel").get_data(as_text=True)
     assert f'class="nav-avatar__img" src="{d["url"]}"' in html and "mobile-app-nav__photo" in html
-    assert "Change profile photo" in html
+    assert "Tap to change photo" in html and html.count("data-photo-pick") == 2
     # Another user never gets this photo.
     with c.session_transaction() as s:
         s["user_id"] = 2
@@ -80,6 +80,7 @@ def test_rejects_non_images_and_requires_sign_in(c):
     assert c.post("/api/account/photo", json={"image": ""}).status_code in (401, 302)
 
 
-def test_account_page_has_the_photo_picker(c):
-    html = c.get("/account").get_data(as_text=True)
-    assert 'id="profile-photo"' in html and 'id="pp-dialog"' in html and "js/profile_photo.js" in html
+def test_nav_offers_upload_from_the_photo_spot(c):
+    html = c.get("/intel").get_data(as_text=True)
+    assert html.count("data-photo-pick") == 2 and "Tap to add a photo" in html
+    assert 'id="profile-photo-file"' in html and "js/profile_photo.js" in html

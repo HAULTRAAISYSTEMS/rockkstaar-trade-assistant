@@ -126,3 +126,9 @@ html.cc27 .elite-navbar .nav-tile.nav-link-active,
 :is(.elite-navbar, .mobile-app-menu) .nav-profile__txt small { font-size: 11.5px; color: #7fdcff; }
 .mobile-app-nav__photo { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; display: block; box-shadow: 0 0 0 1.5px rgba(56, 220, 255, .7); }
 .mobile-app-nav__icon.has-photo { padding: 0 !important; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile { width: 100%; text-align: left; font: inherit; cursor: pointer; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile__pic { position: relative; overflow: visible; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile__pic img { border-radius: 50%; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile__cam { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  color: #04121c; background: linear-gradient(135deg, #7ff0ff, #38dcff); box-shadow: 0 0 0 2px #0a1220; }
+:is(.elite-navbar, .mobile-app-menu) .nav-profile__txt small.is-bad { color: #ff8a84; }
