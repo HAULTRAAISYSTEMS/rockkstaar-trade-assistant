@@ -1,80 +1,14 @@
 {% extends "base.html" %}
 {% import "_wealth_macros.html" as wa with context %}
-{% block title %}Wealth Architect — Tradestaar Elite{% endblock %}
+{% block title %}Wealth Overview · Wealth Architect — Tradestaar Elite{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
 {% block content %}
-<div class="wa">
-{{ wa.head('dash', 'Wealth Architect', 'Where your money is, what it has earned, and how concentrated it is. Built from your own transactions.', portfolios, current) }}
+{% set has_ledger = s and s.transaction_count %}
+{% set broker_only = rows|selectattr('source', 'equalto', 'schwab')|list %}
+<div class="wa wa-ov">
+{{ wa.head('dash', 'Wealth Overview', 'Net worth, what it has earned, and where it sits. Ledger figures first; Schwab fills in what the ledger does not have yet.', portfolios, current) }}
 
-<section class="wa-card" id="wa-broker-sync" aria-label="Connected brokerage holdings">
-  <h2>Brokerage Sync <small>Schwab · read-only</small></h2>
-  <p class="wa-note" id="wa-sync-status">Checking linked brokerage accounts…</p>
-  <div id="wa-sync-accounts"></div>
-  <p class="wa-note">Positions appear automatically after a refresh. This live snapshot does not alter your ledger, tax lots, or historical returns.</p>
-  <button class="wa-btn" id="wa-sync-refresh" type="button">Refresh holdings</button>
-</section>
-<script>
-(function () {
-  const status = document.getElementById('wa-sync-status');
-  const target = document.getElementById('wa-sync-accounts');
-  const refresh = document.getElementById('wa-sync-refresh');
-  async function load() {
-    refresh.disabled = true;
-    status.textContent = 'Refreshing broker positions…';
-    target.replaceChildren();
-    try {
-      const response = await fetch('/api/wealth/brokerage/discovery', {credentials: 'same-origin', cache: 'no-store'});
-      if (!response.ok) throw new Error('Connection unavailable');
-      const data = await response.json();
-      status.textContent = data.accounts.length + ' account(s) · ' + data.new_holdings + ' holdings not recorded in the ledger · updated ' + new Date(data.as_of).toLocaleString();
-      data.accounts.forEach(account => {
-        const section = document.createElement('div');
-        const heading = document.createElement('h3');
-        heading.textContent = (account.portfolio_name || 'Unmapped Schwab account') + ' · ' + account.holdings.length + ' holdings';
-        section.appendChild(heading);
-        const items = document.createElement('p');
-        items.className = 'wa-note';
-        items.textContent = account.holdings.map(h => h.ticker + ' (' + h.shares + ' shares' + (h.new ? ', new' : '') + ')').join(' · ') || 'No supported long equity positions';
-        section.appendChild(items);
-        if (account.unsupported_positions) {
-          const warning = document.createElement('p');
-          warning.className = 'wa-note';
-          warning.textContent = account.unsupported_positions + ' option position(s) excluded from this view.';
-          section.appendChild(warning);
-        }
-        target.appendChild(section);
-      });
-    } catch (_) {
-      status.textContent = 'Schwab is not connected or temporarily unavailable. Existing portfolio records are unaffected.';
-    } finally { refresh.disabled = false; }
-  }
-  refresh.addEventListener('click', load);
-  load();
-})();
-</script>
-{% if broker_holdings %}
-<section class="wa-card" aria-label="Brokerage holdings">
-  <h2>Connected Holdings <small>Schwab snapshot · read-only</small></h2>
-  <p class="wa-note">These are real broker-reported positions, not reconstructed ledger trades. Cost basis and returns are not ledger-verified until transaction history is imported.</p>
-  <div class="wa-scroll"><table class="wa-table">
-    <thead><tr><th>Stock</th><th>Shares</th><th>Broker value</th><th>Broker average cost</th><th>Research</th></tr></thead>
-    <tbody>{% for h in broker_holdings %}
-      <tr><td><strong>{{ h.ticker }}</strong></td><td>{{ wa.qty(h.shares) }}</td>
-      <td>{{ wa.money(h.market_value) if h.market_value is not none else 'Unavailable' }}</td>
-      <td>{{ wa.money(h.basis / h.shares) if h.basis_known else 'Unavailable' }}</td>
-      <td><a class="wa-btn" href="{{ url_for('wealth.research_page', ticker=h.ticker) }}">M.C.F.F.</a></td></tr>
-    {% endfor %}</tbody>
-  </table></div>
-</section>
-{% endif %}
-{% if not portfolios %}
-<section class="wa-card wa-empty">
-  <h2>Start with a portfolio</h2>
-  <p class="wa-note" style="max-width:560px;margin:0 auto">Create one for each account you invest through. Then add transactions by hand or import Schwab's transaction history (CSV). Every figure here is calculated from those transactions; nothing is synced or estimated.</p>
-  {{ wa.create_portfolio(quick_start, kinds) }}
-</section>
-{% else %}
-
+{% if s %}
 {% if s.unpriced %}
 <div class="wa-warn"><b>No price</b><span>{{ s.unpriced|join(', ') }} {{ 'has' if s.unpriced|length == 1 else 'have' }} no price right now, so {{ 'it is' if s.unpriced|length == 1 else 'they are' }} left out of market value, and total return isn't shown until every holding is priced.</span></div>
 {% endif %}
@@ -84,92 +18,192 @@
 {% if s.issues %}
 <div class="wa-warn"><b>Ledger</b><span>{{ s.issues|length }} item{{ '' if s.issues|length == 1 else 's' }} to check: {{ s.issues[:2]|join(' · ') }}{% if s.issues|length > 2 %} · <a href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">see all</a>{% endif %}</span></div>
 {% endif %}
+{% endif %}
 
-{% if s.transaction_count == 0 %}
-<section class="wa-card wa-empty">
-  <h2>No transactions yet</h2>
-  <p class="wa-note">Add your deposits and buys, or import a Schwab transaction-history CSV.</p>
-  <a class="wa-btn is-gold" href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">Open the ledger</a>
+{# ── 1. Net worth ─────────────────────────────────────────────── #}
+{% if has_ledger %}
+<section class="wa-card ov-hero" aria-label="Net worth">
+  <div class="ov-hero__main">
+    <span class="ov-k">Net worth · {{ current.name if current else 'all portfolios' }}</span>
+    <b class="ov-big">{{ wa.money(s.total_value) }}</b>
+    <span class="ov-day" id="ov-day" aria-live="polite">Today · loading…</span>
+    <div class="ov-split">
+      <span><i class="ov-dot is-inv"></i>{{ wa.money(s.market_value) }} invested</span>
+      <span><i class="ov-dot is-cash"></i>{{ wa.money(s.cash) }} cash · {{ wa.pct((s.cash / s.total_value * 100) if s.total_value else none, False, 1) }}</span>
+      {% if s.unpriced %}<span class="muted">excl. {{ s.unpriced|length }} unpriced</span>{% endif %}
+    </div>
+  </div>
+  <figure class="ov-spark" id="ov-spark" aria-label="Growth of one dollar, you versus the S&amp;P 500">
+    <svg viewBox="0 0 300 90" preserveAspectRatio="none" aria-hidden="true"><path class="ov-spark__spy" d=""/><path class="ov-spark__you" d=""/></svg>
+    <figcaption><span><i class="ov-dot is-you"></i>You <b id="ov-you">—</b></span><span><i class="ov-dot is-spy"></i>S&amp;P 500 <b id="ov-spy">—</b></span><small id="ov-span">time-weighted, since your first deposit</small></figcaption>
+  </figure>
 </section>
-{% else %}
-<section class="wa-kpis" aria-label="Portfolio totals">
-  <div class="wa-kpi is-hero"><span>Total value · holdings + cash</span><b>{{ wa.money(s.total_value) }}</b><em>{{ wa.money(s.market_value) }} invested · {{ wa.money(s.cash) }} cash{% if s.unpriced %} · excl. {{ s.unpriced|length }} unpriced{% endif %}</em></div>
-  <div class="wa-kpi"><span>Cost basis</span><b>{{ wa.money(s.cost_basis) }}</b><em>fees included</em></div>
+
+<section class="wa-kpis ov-kpis" aria-label="Key figures">
   <div class="wa-kpi"><span>Unrealized</span><b class="{{ wa.tone(s.unrealized) }}">{{ wa.money(s.unrealized, True) }}</b><em class="{{ wa.tone(s.unrealized_pct) }}">{{ wa.pct(s.unrealized_pct) }} on priced holdings</em></div>
   <div class="wa-kpi"><span>Realized</span><b class="{{ wa.tone(s.realized) }}">{{ wa.money(s.realized, True) }}</b><em>short {{ wa.money(s.realized_short, True) }} · long {{ wa.money(s.realized_long, True) }}</em></div>
   <div class="wa-kpi"><span>Dividends</span><b>{{ wa.money(s.dividends) }}</b><em>+ {{ wa.money(s.interest) }} interest{% if s.taxes %} · −{{ wa.money(s.taxes) }} tax{% endif %}</em></div>
-  <div class="wa-kpi"><span>Net contributions</span><b>{{ wa.money(s.net_contributions) }}</b><em>your money in, minus out</em></div>
-  <div class="wa-kpi"><span>Total return · gains only</span><b class="{{ wa.tone(s.total_return) }}">{{ wa.money(s.total_return, True) }}</b><em class="{{ wa.tone(s.total_return_pct) }}">{{ wa.pct(s.total_return_pct) }} of contributions</em></div>
-  <div class="wa-kpi" title="Money-weighted (XIRR): includes the timing of your deposits"><span>Annualized · money-weighted</span><b class="{{ wa.tone(s.money_weighted_pct) }}">{{ wa.pct(s.money_weighted_pct) }}</b><em>{% if s.money_weighted_pct is none %}needs 30+ days and every holding priced{% else %}since {{ s.first_date }}{% endif %}</em></div>
-  <div class="wa-kpi" id="wa-bench"><span>vs S&amp;P 500 · same deposits</span><b class="muted">…</b><em>loading</em></div>
+  <div class="wa-kpi" title="Money-weighted (XIRR): includes the timing of your deposits"><span>Annualized</span><b class="{{ wa.tone(s.money_weighted_pct) }}">{{ wa.pct(s.money_weighted_pct) }}</b><em>{% if s.money_weighted_pct is none %}needs 30+ days, all priced{% else %}money-weighted · since {{ s.first_date }}{% endif %}</em></div>
 </section>
-
-<div class="wa-two">
-  <section class="wa-card">
-    <h2>Holdings <small>{{ s.holdings|length }} positions · priced {{ s.as_of }}</small></h2>
-    <div class="wa-scroll">
-    <table class="wa-table">
-      <thead><tr><th>Ticker</th><th class="hide-sm">Shares</th><th class="hide-sm">Avg cost</th><th>Price</th><th>Value</th><th>Unrealized</th><th class="hide-sm">Weight</th></tr></thead>
-      <tbody>
-      {% for h in s.holdings %}
-      <tr>
-        <td><a class="wa-tk" href="{{ url_for('stock_detail', ticker=h.ticker) }}">{{ h.ticker }}</a><span class="wa-sub">{{ wa.qty(h.shares) }} sh · {{ wa.pct(h.weight_pct, False, 1) }} · {{ h.sector }}</span></td>
-        <td class="hide-sm">{{ wa.qty(h.shares) }}</td>
-        <td class="hide-sm">{{ wa.money(h.avg_cost) }}</td>
-        <td title="{{ (h.price_source ~ ' · ' ~ (h.price_as_of or 'time unknown')) if h.price is not none else 'No price available' }}">{{ wa.money(h.price) }}{% if h.stale %}<span class="wa-stale">OLD</span>{% endif %}</td>
-        <td>{{ wa.money(h.market_value) }}</td>
-        <td class="{{ wa.tone(h.unrealized) }}">{{ wa.money(h.unrealized, True) }}<span class="wa-sub {{ wa.tone(h.unrealized_pct) }}">{{ wa.pct(h.unrealized_pct) }}</span></td>
-        <td class="hide-sm">{{ wa.pct(h.weight_pct, False, 1) }}<span class="wa-wbar {{ 'over' if h.ticker in s.over_limit }}"><i style="width:{{ [h.weight_pct or 0, 100]|min }}%"></i></span></td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    <p class="wa-note">Prices: live feed (Schwab → Alpaca → Yahoo) when it has a quote; otherwise the last stored price, marked OLD after {{ 3 }} days. Hover a price for its source and time.</p>
-  </section>
-
-  <div class="wa-grid">
-    <section class="wa-card">
-      <h2>Concentration</h2>
-      <dl class="wa-facts">
-        <div><dt>Largest position</dt><dd>{{ s.holdings[0].ticker if s.holdings else '—' }} · {{ wa.pct(s.top_weight_pct, False, 1) }}</dd></div>
-        <div><dt>Top 5 positions</dt><dd>{{ wa.pct(s.top5_weight_pct, False, 1) }}</dd></div>
-        <div title="1 ÷ sum of squared weights: how many equal-sized positions this portfolio behaves like"><dt>Behaves like</dt><dd>{{ '%.1f'|format(s.effective_holdings) if s.effective_holdings else '—' }} equal positions</dd></div>
-        <div><dt>Cash</dt><dd>{{ wa.pct((s.cash / s.total_value * 100) if s.total_value else none, False, 1) }}</dd></div>
-      </dl>
-      {% if s.over_limit %}<p class="wa-note dn">Above this portfolio's {{ current.max_position_pct|round(0)|int }}% position limit: {{ s.over_limit|join(', ') }}.</p>{% endif %}
-    </section>
-    <section class="wa-card">
-      <h2>Sector exposure</h2>
-      <div class="wa-bars">
-        {% for r in s.sectors %}
-        <div><span><i style="width:{{ r.pct or 0 }}%"></i><em>{{ r.sector }}</em></span><b>{{ wa.pct(r.pct, False, 1) }}</b></div>
-        {% endfor %}
-      </div>
-      <p class="wa-note">Sector comes from the company profile the app has stored. "Unclassified" means it hasn't been looked up yet: open the stock's page once to fill it in.</p>
-    </section>
+<details class="wa-card wa-fold ov-more">
+  <summary><h2>More numbers <small>cost basis · contributions · total return · vs S&amp;P 500</small></h2></summary>
+  <div class="wa-kpis">
+    <div class="wa-kpi"><span>Cost basis</span><b>{{ wa.money(s.cost_basis) }}</b><em>fees included</em></div>
+    <div class="wa-kpi"><span>Net contributions</span><b>{{ wa.money(s.net_contributions) }}</b><em>your money in, minus out</em></div>
+    <div class="wa-kpi"><span>Total return · gains only</span><b class="{{ wa.tone(s.total_return) }}">{{ wa.money(s.total_return, True) }}</b><em class="{{ wa.tone(s.total_return_pct) }}">{{ wa.pct(s.total_return_pct) }} of contributions</em></div>
+    <div class="wa-kpi" id="wa-bench"><span>vs S&amp;P 500 · same deposits</span><b class="muted">…</b><em>loading</em></div>
   </div>
-</div>
+</details>
+{% elif broker_holdings %}
+<section class="wa-card ov-hero is-broker" aria-label="Schwab snapshot value">
+  <div class="ov-hero__main">
+    <span class="ov-k">Schwab snapshot · read-only</span>
+    <b class="ov-big">{{ wa.money(broker_total) }}</b>
+    <span class="ov-day">{{ broker_holdings|length }} position{{ '' if broker_holdings|length == 1 else 's' }} reported by Schwab</span>
+    <div class="ov-split"><span class="muted">Import your Schwab transaction history to unlock cost basis, returns and the S&amp;P comparison.</span></div>
+  </div>
+</section>
+{% endif %}
 
-{% if s.realized_rows %}
-<section class="wa-card" style="margin-top:12px">
-  <h2>Realized gains <small>first-in, first-out lots</small></h2>
+{# ── 2. Holdings: one table, ledger + Schwab ──────────────────── #}
+{% if rows %}
+<section class="wa-card ov-holdings" id="wa-holdings" aria-label="Holdings">
+  <div class="ov-cardhead">
+    <h2>Holdings <small>{{ rows|length }} position{{ '' if rows|length == 1 else 's' }}{% if has_ledger %} · priced {{ s.as_of }}{% endif %}{% if broker_only %} · <span class="ov-flagcount">{{ broker_only|length }} not in your ledger yet</span>{% endif %}</small></h2>
+    {% if broker_holdings %}<button class="wa-btn" id="ov-sync" type="button" title="Re-read positions from Schwab. Nothing in your ledger changes.">Sync Schwab</button>{% endif %}
+  </div>
+  <p class="wa-note" id="ov-sync-status" hidden></p>
+  <div class="wa-scroll">
+  <table class="wa-table ov-table">
+    <thead><tr><th>Stock</th><th class="hide-sm">Shares</th><th class="hide-sm">Avg cost</th><th>Value</th><th>Unrealized</th><th class="hide-sm">Weight</th><th class="hide-sm" aria-label="Analyze"></th></tr></thead>
+    <tbody>
+    {% for h in rows %}
+    <tr class="ov-row is-{{ h.source }}">
+      <td>
+        <a class="wa-tk" href="{{ url_for('fundamentals_page', ticker=h.ticker, tab='mcff') }}">{{ h.ticker }}</a>
+        <span class="ov-src is-{{ h.source }}" title="{{ {'both': 'In your ledger and reported by Schwab', 'ledger': 'From your ledger only', 'schwab': 'Reported by Schwab; not recorded in your ledger'}[h.source] }}">{% if h.source == 'both' %}<span class="is-long">Schwab + Ledger</span><span class="is-short">Both</span>{% else %}{{ {'ledger': 'Ledger', 'schwab': 'Schwab'}[h.source] }}{% endif %}</span>
+        <span class="wa-sub">{{ wa.qty(h.shares) }} sh{% if h.weight_pct is not none %} · {{ wa.pct(h.weight_pct, False, 1) }}{% endif %}{% if h.sector %} · {{ h.sector }}{% endif %}</span>
+        {% if h.source == 'schwab' %}<a class="ov-flag" href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">Not in your ledger yet · import</a>{% endif %}
+        {% if h.share_gap %}<span class="ov-flag is-gap">Schwab shows {{ wa.qty(h.broker_shares) }} sh</span>{% endif %}
+      </td>
+      <td class="hide-sm">{{ wa.qty(h.shares) }}</td>
+      <td class="hide-sm">{{ wa.money(h.avg_cost) }}</td>
+      <td{% if h.price is not none %} title="{{ wa.money(h.price) }} · {{ h.price_source }} · {{ h.price_as_of or 'time unknown' }}"{% endif %}>{{ wa.money(h.market_value) }}{% if h.stale %}<span class="wa-stale">OLD</span>{% endif %}{% if h.source == 'schwab' %}<span class="wa-sub">Schwab value</span>{% endif %}</td>
+      <td class="{{ wa.tone(h.unrealized) }}">{{ wa.money(h.unrealized, True) }}<span class="wa-sub {{ wa.tone(h.unrealized_pct) }}">{{ wa.pct(h.unrealized_pct) }}{% if h.source == 'schwab' and h.unrealized is not none %} · broker basis{% endif %}</span></td>
+      <td class="hide-sm">{% if h.weight_pct is not none %}{{ wa.pct(h.weight_pct, False, 1) }}<span class="wa-wbar {{ 'over' if s and h.ticker in s.over_limit }}"><i style="width:{{ [h.weight_pct or 0, 100]|min }}%"></i></span>{% else %}—{% endif %}</td>
+      <td class="hide-sm"><a class="wa-btn ov-go" href="{{ url_for('fundamentals_page', ticker=h.ticker, tab='mcff') }}" aria-label="Analyze {{ h.ticker }}">Analyze</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="wa-note">Ledger rows use your own transactions and live prices (Schwab → Alpaca → Yahoo; OLD after 3 days). Schwab rows are the broker's latest snapshot and never change your ledger, lots or returns. Tap a stock to open it in the Fundamentals Analyzer.</p>
+</section>
+{% endif %}
+
+{# ── 3. Allocation ────────────────────────────────────────────── #}
+{% if has_ledger and s.holdings %}
+<section class="wa-card ov-alloc" aria-label="Allocation">
+  <h2>Allocation <small>by sector · ledger holdings</small></h2>
+  <div class="ov-alloc__body">
+    {% if ring %}
+    <div class="ov-ring" style="--ring: conic-gradient({{ ring.gradient }})" role="img" aria-label="Sector allocation ring">
+      <div class="ov-ring__hole"><b>{{ '%.1f'|format(s.effective_holdings) if s.effective_holdings else '—' }}</b><span>behaves like<br>equal positions</span></div>
+    </div>
+    <ul class="ov-legend">
+      {% for r in ring.legend %}<li><i style="background:{{ r.color }}"></i><span>{{ r.sector }}</span><b>{{ wa.pct(r.pct, False, 1) }}</b></li>{% endfor %}
+    </ul>
+    {% endif %}
+    <dl class="wa-facts ov-facts">
+      <div><dt>Largest position</dt><dd>{{ s.holdings[0].ticker }} · {{ wa.pct(s.top_weight_pct, False, 1) }}</dd></div>
+      <div><dt>Top 5 positions</dt><dd>{{ wa.pct(s.top5_weight_pct, False, 1) }}</dd></div>
+      <div><dt>Cash</dt><dd>{{ wa.pct((s.cash / s.total_value * 100) if s.total_value else none, False, 1) }}</dd></div>
+    </dl>
+  </div>
+  {% if s.over_limit %}<p class="wa-note dn ov-over">Above this portfolio's {{ current.max_position_pct|round(0)|int }}% position limit: {{ s.over_limit|join(', ') }}.</p>{% endif %}
+  <p class="wa-note">"Unclassified" means the sector hasn't been looked up yet: open the stock once to fill it in.</p>
+</section>
+{% endif %}
+
+{% if has_ledger and s.realized_rows %}
+<details class="wa-card wa-fold" id="wa-realized">
+  <summary><h2>Realized gains <small>{{ s.realized_rows|length }} sale{{ '' if s.realized_rows|length == 1 else 's' }} · first-in, first-out lots</small></h2></summary>
   <div class="wa-scroll"><table class="wa-table">
     <thead><tr><th>Sold</th><th>Ticker</th><th>Shares</th><th class="hide-sm">Bought</th><th>Proceeds</th><th>Cost</th><th>Gain</th><th>Term</th></tr></thead>
     <tbody>{% for r in s.realized_rows[:25] %}<tr><td>{{ r.date }}</td><td>{{ r.ticker }}</td><td>{{ wa.qty(r.shares) }}</td><td class="hide-sm">{{ r.acquired }}</td><td>{{ wa.money(r.proceeds) }}</td><td>{{ wa.money(r.cost) }}</td><td class="{{ wa.tone(r.gain) }}">{{ wa.money(r.gain, True) }}</td><td>{{ r.term }}</td></tr>{% endfor %}</tbody>
   </table></div>
   <p class="wa-note">For your records, not a tax form. Your broker's 1099-B is the figure to file; wash-sale adjustments are not applied here.</p>
+</details>
+{% endif %}
+
+{# ── Empty states ─────────────────────────────────────────────── #}
+{% if not portfolios %}
+<section class="wa-card wa-empty">
+  <h2>Start with a portfolio</h2>
+  <p class="wa-note" style="max-width:560px;margin:0 auto">Create one for each account you invest through. Then add transactions by hand or import Schwab's transaction history (CSV). Every ledger figure is calculated from those transactions; nothing is estimated.</p>
+  {{ wa.create_portfolio(quick_start, kinds) }}
 </section>
-{% endif %}
-{% endif %}
+{% elif not has_ledger %}
+<section class="wa-card wa-empty">
+  <h2>No transactions yet</h2>
+  <p class="wa-note">Add your deposits and buys, or import a Schwab transaction-history CSV.</p>
+  <a class="wa-btn is-gold" href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">Open the ledger</a>
+</section>
 {% endif %}
 </div>
 {{ wa.common_js() }}
-{% if s and s.transaction_count %}
+<script>
+(function () {
+  const sync = document.getElementById('ov-sync');
+  if (sync) sync.addEventListener('click', async function () {
+    const note = document.getElementById('ov-sync-status');
+    sync.disabled = true; note.hidden = false; note.textContent = 'Reading positions from Schwab…';
+    try {
+      const r = await fetch('/api/wealth/brokerage/discovery', {credentials: 'same-origin', cache: 'no-store'});
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      const opts = (d.accounts || []).reduce((n, a) => n + (a.unsupported_positions || 0), 0);
+      note.textContent = 'Synced · ' + d.new_holdings + ' not in your ledger' + (opts ? ' · ' + opts + ' option position(s) left out' : '') + '. Refreshing…';
+      setTimeout(() => location.reload(), 600);
+    } catch (_) {
+      note.textContent = 'Schwab is not connected or is unavailable right now. Your ledger is unaffected.';
+      sync.disabled = false;
+    }
+  });
+})();
+</script>
+{% if has_ledger %}
 <script>
 (async function () {
+  const q = '{{ ('?p=' ~ current.id) if current else '' }}';
+  // Net worth: today's move and the you-vs-S&P line, from the scoreboard series.
+  const day = document.getElementById('ov-day');
+  const sb = await WA.api('/api/wealth/scoreboard' + q);
+  if (sb && sb.ok && sb.chart && sb.chart.value && sb.chart.value.length > 1) {
+    const v = sb.chart.value, n = v.length, diff = v[n - 1] - v[n - 2];
+    const c = sb.chart.contributed || [], flow = (c[n - 1] || 0) - (c[n - 2] || 0);
+    const move = diff - flow, base = v[n - 2] || 0;
+    day.textContent = 'Since last close ' + WA.money(move, true) + (base > 0 ? ' · ' + WA.pct(move / base * 100) : '');
+    day.className = 'ov-day ' + WA.tone(move);
+    const you = sb.chart.growth || [], spy = sb.chart.spy || [];
+    const all = you.concat(spy).filter(x => x != null);
+    if (all.length > 2) {
+      const lo = Math.min(...all), hi = Math.max(...all), span = (hi - lo) || 1;
+      const path = arr => arr.map((y, i) => (i ? 'L' : 'M') + (i / (arr.length - 1) * 300).toFixed(1) + ' ' + (86 - (y - lo) / span * 82).toFixed(1)).join(' ');
+      const svg = document.querySelector('#ov-spark svg');
+      svg.querySelector('.ov-spark__you').setAttribute('d', path(you));
+      if (spy.length) svg.querySelector('.ov-spark__spy').setAttribute('d', path(spy));
+    }
+    const yb = document.getElementById('ov-you'), sp = document.getElementById('ov-spy');
+    yb.textContent = WA.pct(sb.twr_pct); yb.className = WA.tone(sb.twr_pct);
+    sp.textContent = WA.pct(sb.spy_pct); sp.className = WA.tone(sb.spy_pct);
+    document.getElementById('ov-span').textContent = 'time-weighted · ' + sb.start + ' → ' + sb.end;
+  } else {
+    day.textContent = (sb && sb.reason) || 'Daily history unavailable right now';
+    document.getElementById('ov-spark').classList.add('is-empty');
+  }
   const el = document.getElementById('wa-bench');
-  const d = await WA.api('/api/wealth/benchmark{{ ('?p=' ~ current.id) if current else '' }}');
+  const d = await WA.api('/api/wealth/benchmark' + q);
   if (!d.ok) { el.querySelector('b').textContent = '—'; el.querySelector('em').textContent = d.reason || 'Unavailable'; return; }
   const diff = d.portfolio_value - d.spy.value;
   el.querySelector('b').textContent = WA.money(diff, true);

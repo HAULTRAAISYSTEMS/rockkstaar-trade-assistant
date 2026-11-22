@@ -1,32 +1,85 @@
 {% extends "base.html" %}
 {% import "_wealth_macros.html" as wa with context %}
 {% block title %}Next Dollar — Wealth Architect{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_lab_v2.css') }}">{% endblock %}
 {% block content %}
 <div class="wa">
-{{ wa.head('next', 'Next Dollar', 'Where should the next dollar go? Each candidate is checked against your M.C.F.F. gates, your buy zone, your position limit and its scenarios. Holding cash is always an option.', portfolios, current, with_all=False) }}
+{{ wa.head('next', 'Next Dollar', 'Where should the next dollar go? Rank finds the single best place, Split spreads it within your limits, Journal records why. Holding cash is always an option.', portfolios, current, with_all=False) }}
 {% if not portfolios %}
 <section class="wa-card wa-empty"><h2>Create a portfolio first</h2>{{ wa.create_portfolio(quick_start, kinds) }}</section>
 {% else %}
-<div class="wa-lab">
-  <section class="wa-card">
-    <h2>Your question</h2>
-    <form class="wa-form" id="nd" style="grid-template-columns:1fr 1fr">
-      <label>Amount<input name="amount" inputmode="decimal" placeholder="500" required></label>
-      <label title="Optional: candidates whose base case is below this are left out">Hurdle %/yr<input name="hurdle_pct" inputmode="decimal" placeholder="optional"></label>
-      <div class="wide" style="grid-column:1/-1">
-        <div class="wa-kicker" style="margin-bottom:6px">Candidates · up to 12</div>
-        <div class="wa-cands" id="cands">
-          {% for t in candidates %}<label><input type="checkbox" value="{{ t }}" {{ 'checked' if loop.index <= 6 }}>{{ t }}{% if t not in researched %}<span class="muted" title="No M.C.F.F. research yet">*</span>{% endif %}</label>{% endfor %}
-        </div>
-        <div style="display:flex;gap:6px;margin-top:8px"><input class="wa-input" id="add-t" maxlength="10" placeholder="Add ticker" style="text-transform:uppercase;max-width:160px"><button type="button" class="wa-btn" id="add-b">Add</button></div>
-        {% if candidates|reject('in', researched)|list %}<p class="wa-note">* not researched yet: these cannot reach BUY ZONE until you score them in M.C.F.F.</p>{% endif %}
+<section class="wa-card nd-ask" aria-label="Your question">
+  <form class="nd-ask__row" id="nd" onsubmit="return false">
+    <label class="nd-amount">Amount to invest<span><i>$</i><input id="nd-amount" name="amount" inputmode="decimal" placeholder="500" required></span></label>
+    <div class="nd-cands">
+      <div class="wa-kicker">Candidates · up to 12</div>
+      <div class="wa-cands" id="cands">
+        {% for t in candidates %}<label><input type="checkbox" value="{{ t }}" {{ 'checked' if loop.index <= 6 }}>{{ t }}{% if t not in researched %}<span class="muted" title="No M.C.F.F. research yet">*</span>{% endif %}</label>{% endfor %}
       </div>
-      <button class="wa-btn is-gold" type="submit" style="grid-column:1/-1">Rank for {{ current.name }}</button>
-    </form>
-    <p class="wa-note">Ranking rules, in order: all four gates pass inside the buy zone → stays under your max position ({{ (current.max_position_pct|string ~ '%') if current.max_position_pct else 'none set' }}) → clears your hurdle → highest base-case return, then best conservative case. A fallen price or a lower average cost never moves a stock up.</p>
-  </section>
-  <section class="wa-card" id="out"><h2>Ranking</h2><p class="wa-note">Enter an amount and pick candidates.</p></section>
+      <div class="nd-add"><input class="wa-input" id="add-t" maxlength="10" placeholder="Add ticker" aria-label="Add ticker"><button type="button" class="wa-btn" id="add-b">Add</button></div>
+      {% if candidates|reject('in', researched)|list %}<p class="wa-note">* not researched yet: these cannot reach BUY ZONE until you score them in the Fundamentals Analyzer's M.C.F.F. tab.</p>{% endif %}
+    </div>
+  </form>
+</section>
+
+<nav class="nd-tabs" role="tablist" aria-label="Next Dollar views">
+  <button type="button" role="tab" data-nd-tab="rank" aria-selected="true"><b>Rank</b><small>Which one stock?</small></button>
+  <button type="button" role="tab" data-nd-tab="split" aria-selected="false"><b>Split</b><small>Spread it across several</small></button>
+  <button type="button" role="tab" data-nd-tab="journal" aria-selected="false"><b>Journal</b><small>Write the decision down</small></button>
+</nav>
+
+<div class="nd-pane" id="nd-rank" role="tabpanel" data-nd-pane="rank">
+  <div class="wa-lab">
+    <section class="wa-card">
+      <h2>Rank <small>one best place for the dollar</small></h2>
+      <form class="wa-form" id="nd-rank-form" style="grid-template-columns:1fr">
+        <label title="Optional: candidates whose base case is below this are left out">Hurdle %/yr<input name="hurdle_pct" inputmode="decimal" placeholder="optional"></label>
+        <button class="wa-btn is-gold" type="submit">Rank for {{ current.name }}</button>
+      </form>
+      <p class="wa-note">Ranking rules, in order: all four gates pass inside the buy zone → stays under your max position ({{ (current.max_position_pct|string ~ '%') if current.max_position_pct else 'none set' }}) → clears your hurdle → highest base-case return, then best conservative case. A fallen price or a lower average cost never moves a stock up.</p>
+    </section>
+    <section class="wa-card" id="out"><h2>Ranking</h2><p class="wa-note">Enter an amount above, pick candidates, then Rank.</p></section>
+  </div>
+</div>
+
+<div class="nd-pane" id="nd-split" role="tabpanel" data-nd-pane="split" hidden>
+  <div class="wa-lab">
+    <section class="wa-card">
+      <h2>Split <small>balanced across limits</small></h2>
+      <form id="capital-form" class="wa-form" data-portfolio="{{ current.id }}" style="grid-template-columns:1fr 1fr">
+        <input type="hidden" name="mode" value="balanced">
+        <label>Max position %<input name="position_limit" type="number" value="{{ (current.max_position_pct|int) if current.max_position_pct else 25 }}" min="1" max="100"></label>
+        <label>Max sector %<input name="sector_limit" type="number" value="40" min="1" max="100"></label>
+        <label>Keep in cash $<input name="cash_reserve" type="number" value="0" min="0"></label>
+        <label class="nd-check"><input name="existing_cash" type="checkbox"> Use cash already in {{ current.name }}</label>
+        <button type="submit" class="wa-btn is-gold" style="grid-column:1/-1">Split it</button>
+      </form>
+      <p class="wa-note">Needs complete M.C.F.F. research and reliable position values; missing evidence blocks a candidate. Cash is always an option.</p>
+    </section>
+    <section class="wa-card"><h2>Allocation</h2><p id="capital-status" class="wa-note" aria-live="polite">Enter an amount above, then Split it.</p><div id="capital-results" class="nd-split-results"></div></section>
+  </div>
+</div>
+
+<div class="nd-pane" id="nd-journal" role="tabpanel" data-nd-pane="journal" hidden>
+  <div class="wa-lab">
+    <section class="wa-card">
+      <h2>Decision journal <small>append-only</small></h2>
+      <form id="capital-journal" class="wa-form" style="grid-template-columns:1fr 1fr">
+        <label>Ticker<input name="ticker" maxlength="10" placeholder="KLAC" required style="text-transform:uppercase"></label>
+        <label>Decision<select name="decision"><option>WAIT</option><option>BUY</option><option>REJECT</option></select></label>
+        <label>Amount $<input name="amount" type="number" value="750" min="1" step=".01" required></label>
+        <label>Review date<input name="review_date" type="date"></label>
+        <label class="wide" style="grid-column:1/-1">Thesis<input name="thesis" maxlength="2000" required placeholder="Why the business deserves capital"></label>
+        <label class="wide" style="grid-column:1/-1">Main risk<input name="risk" maxlength="2000" required placeholder="What could go wrong"></label>
+        <label class="wide" style="grid-column:1/-1">What would make you reconsider<input name="invalidation" maxlength="2000" required placeholder="The thesis is wrong if…"></label>
+        <button class="wa-btn is-gold" type="submit" style="grid-column:1/-1">Save decision</button>
+      </form>
+      <p class="wa-note" id="journal-status" aria-live="polite"></p>
+      <p class="wa-note">Entries are tied to your account and can't be edited later. A BUY entry is a note, never a Schwab order.</p>
+    </section>
+    <section class="wa-card"><h2>Past decisions</h2><div id="journal-list" class="nd-journal"><p class="wa-note">No decisions recorded yet.</p></div></section>
+  </div>
 </div>
 {% endif %}
 </div>
@@ -42,19 +95,20 @@
     if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(t) || box.querySelector('input[value="' + t + '"]')) return;
     box.insertAdjacentHTML('beforeend', '<label><input type="checkbox" value="' + t + '" checked>' + t + '<span class="muted">*</span></label>'); i.value = '';
   });
-  document.getElementById('nd').addEventListener('submit', async (e) => {
+  document.getElementById('nd-rank-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const amt = document.getElementById('nd-amount').value;
     const out = document.getElementById('out');
     const tickers = [...box.querySelectorAll('input:checked')].map(i => i.value);
     out.innerHTML = '<h2>Ranking</h2><p class="wa-note">Checking ' + tickers.length + ' candidates against their gates and filings…</p>';
-    const d = await WA.api('/api/wealth/next-dollar', 'POST', {portfolio_id: PID, amount: e.target.amount.value, hurdle_pct: e.target.hurdle_pct.value || null, tickers});
+    const d = await WA.api('/api/wealth/next-dollar', 'POST', {portfolio_id: PID, amount: amt, hurdle_pct: e.target.hurdle_pct.value || null, tickers});
     if (!d.ok) { out.innerHTML = '<h2>Ranking</h2><p class="wa-msg err">' + WA.esc(d.error) + '</p>'; return; }
     let h = '<h2>Ranking <small>' + WA.money(d.amount) + '</small></h2><div class="wa-callout" style="margin:0 0 12px"><b>' + WA.esc(d.verdict) + '</b>' +
       (d.over_cash ? '<br>Note: ' + WA.money(d.amount) + ' is more than the ' + WA.money(d.cash_available) + ' cash this portfolio holds.' : '') + '</div><div class="wa-rank">';
     d.rows.forEach((r, i) => {
       const cash = r.ticker === 'CASH';
       h += '<article class="' + (i === 0 ? 'top' : '') + '"><span class="rk">' + r.rank + '</span><div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-        (cash ? '<b style="font:800 15px var(--font-mono)">Hold cash</b>' : '<a class="wa-tk" style="font:800 15px var(--font-mono)" href="/wealth/research/' + encodeURIComponent(r.ticker) + '">' + WA.esc(r.ticker) + '</a>') +
+        (cash ? '<b style="font:800 15px var(--font-mono)">Hold cash</b>' : '<a class="wa-tk" style="font:800 15px var(--font-mono)" href="/fundamentals?tab=mcff&ticker=' + encodeURIComponent(r.ticker) + '">' + WA.esc(r.ticker) + '</a>') +
         '<span class="wa-chip ' + (CLS[r.status] || 'NONE') + '">' + WA.esc(r.status) + '</span>' +
         (!cash && r.price ? '<span class="muted" style="font:600 11px var(--font-mono)">' + WA.money(r.price) + (r.shares ? ' · ' + (+r.shares).toFixed(4).replace(/\.?0+$/, '') + ' sh' : '') + '</span>' : '') + '</div>' +
         (r.why.length ? '<ul>' + r.why.map(x => '<li>' + WA.esc(x) + '</li>').join('') + '</ul>' : '') +
@@ -68,5 +122,23 @@
   });
 })();
 </script>
+
+<script>
+window.NDTabs = (function () {
+  const tabs = [...document.querySelectorAll('[data-nd-tab]')];
+  if (!tabs.length) return null;
+  function show(name, push) {
+    if (!document.querySelector('[data-nd-pane="' + name + '"]')) name = 'rank';
+    tabs.forEach(t => t.setAttribute('aria-selected', String(t.dataset.ndTab === name)));
+    document.querySelectorAll('[data-nd-pane]').forEach(p => { p.hidden = p.dataset.ndPane !== name; });
+    if (push !== false) history.replaceState(null, '', location.pathname + location.search.replace(/([?&])tab=[^&]*&?/, '$1').replace(/[?&]$/, '') + '#' + name);
+  }
+  tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.ndTab)));
+  const start = (location.hash || '').slice(1) || new URLSearchParams(location.search).get('tab') || 'rank';
+  show(start, false);
+  return {show};
+})();
+</script>
+<script src="{{ url_for('static', filename='js/wealth_capital.js') }}" defer></script>
 {% endif %}
 {% endblock %}

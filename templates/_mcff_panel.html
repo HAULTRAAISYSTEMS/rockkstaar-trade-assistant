@@ -1,28 +1,45 @@
-{% extends "base.html" %}
+{# M.C.F.F. workbench: the fourth tab of the Fundamentals Analyzer.
+   Moved here from /wealth/research/<T> so the gates sit beside the numbers they score. #}
 {% import "_wealth_macros.html" as wa with context %}
-{% block title %}{{ ticker }} M.C.F.F. — Wealth Architect{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_financial_contract.css') }}">{% endblock %}
-{% block content %}
-<div class="wa">
-<nav class="te27-flow" aria-label="Elite 2027 research workflow"><span class="te27-flow__label">INTELLIGENCE WORKFLOW</span><a href="{{ url_for('liquidity_page') }}">◉ Command</a><a href="{{ url_for('research_page') }}">⌕ Discover</a><a href="{{ url_for('fundamentals_page', tab='quarter') }}">◇ Verify</a><a href="{{ url_for('wealth.research_list_page') }}">▥ M.C.F.F.</a><a href="{{ url_for('live_research.feed') }}">◷ Live Research</a></nav>
-
-{{ wa.head('research', ticker ~ ' · M.C.F.F.', 'Score each gate in order. Financials is filled from SEC filings; Moat, CEO and Future are your judgment. Your scores are what count.', portfolios, current, with_all=False, pills=False) }}
-<section class="wa-card" data-sec-contract-ticker="{{ ticker }}" aria-label="Verified SEC financial evidence"></section>
-<section class="te27-intel" data-te27-ticker="{{ ticker }}" aria-label="Verified SEC financial intelligence" aria-live="polite"></section>
-<p class="te27-evidence-note"><strong>Verify the evidence.</strong> SEC reporting periods, missing data and financial quality are shown separately from investor-scored M.C.F.F. gates. No automated BUY rating is inferred.</p>
-<div id="mc" aria-live="polite"><section class="wa-card"><p class="wa-note">Loading {{ ticker }}: the first look at a company reads its filings and can take a few seconds.</p></section></div>
+<div id="tab-mcff" class="tab-pane wa fa-mcff" {% if request.args.get('tab') != 'mcff' %}style="display:none"{% endif %}>
+  {% if ticker %}
+  <div id="mc" aria-live="polite"><section class="wa-card"><p class="wa-note">Loading {{ ticker }}: the first look at a company reads its filings and can take a few seconds.</p></section></div>
+  <details class="wa-card wa-fold fa-sec">
+    <summary><h2>SEC filings <small>reported figures behind the Financials gate</small></h2></summary>
+    <section data-sec-lazy aria-label="Verified SEC financial evidence"></section>
+  </details>
+  {% else %}
+  <section class="wa-card wa-empty">
+    <h2>Score a company on M.C.F.F.</h2>
+    <p class="wa-note">Moat, CEO, Financials, Future: four gates, your buy zone and three scenarios. Financials fills itself from SEC filings.</p>
+    <form method="GET" action="{{ url_for('fundamentals_page') }}" class="search-wrap" style="justify-content:center">
+      <input type="hidden" name="tab" value="mcff">
+      <input type="text" name="ticker" class="ticker-input" placeholder="KLAC" maxlength="8" autocomplete="off" spellcheck="false" aria-label="Ticker">
+      <button type="submit" class="btn-analyze">Open</button>
+    </form>
+    <p class="wa-note"><a href="{{ url_for('wealth.research_list_page') }}">See your M.C.F.F. list →</a></p>
+  </section>
+  {% endif %}
 </div>
+{% if ticker %}
 {{ wa.common_js() }}
 <script defer src="{{ url_for('static', filename='js/wealth_financial_contract.js') }}"></script>
 <script>
 (function () {
-  const T = {{ ticker|tojson }}, AI = {{ 'true' if ai_available else 'false' }};
+  const T = {{ ticker|tojson }};
+  let AI = false;
   const root = document.getElementById('mc');
   const CLS = {'BUY ZONE': 'BUY', 'HOLD': 'HOLD', 'DO NOT BUY': 'DONT'};
-  let M = null, drafted = {};
-  load();
+  let M = null, drafted = {}, started = false;
+  // Lazy: the first look at a company reads its filings, so wait for the tab.
+  window.MCFF = {start: function () {
+    if (started) return; started = true; load();
+    const sec = document.querySelector('[data-sec-lazy]');
+    if (sec && window.TradestaarFinancialContract) window.TradestaarFinancialContract.render(sec, T);
+  }};
   async function load() {
     const d = await WA.api('/api/wealth/mcff/' + encodeURIComponent(T));
+    AI = !!d.ai_available;
     if (!d.ok) { root.innerHTML = '<section class="wa-card"><p class="wa-msg err">' + WA.esc(d.error || 'Could not load.') + '</p></section>'; return; }
     M = d; render();
   }
@@ -108,5 +125,4 @@
   }
 })();
 </script>
-<script defer src="{{ url_for('static', filename='js/elite_2027_intelligence.js') }}"></script>
-{% endblock %}
+{% endif %}

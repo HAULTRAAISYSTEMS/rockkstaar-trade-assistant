@@ -174,12 +174,17 @@ def test_pages_render_through_the_real_app(monkeypatch):
         s["user_id"] = 1
     monkeypatch.setattr(wealth_store, "list_research", lambda uid: {})
     for url in ("/wealth", "/wealth/ledger", "/wealth/lab", "/wealth/scoreboard", "/wealth/research",
-                "/wealth/research/KLAC", "/wealth/next-dollar", "/wealth/planner"):
+                "/wealth/next-dollar", "/wealth/planner"):
         r = c.get(url)
         assert r.status_code == 200, url
         html = r.get_data(as_text=True)
         assert "Wealth Architect" in html
     assert "Start with a portfolio" in c.get("/wealth").get_data(as_text=True)
+    # Merged pages: old links land on their new homes.
+    r = c.get("/wealth/research/klac")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/fundamentals?ticker=KLAC&tab=mcff")
+    r = c.get("/wealth/capital?p=7")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/wealth/next-dollar?p=7#split")
     # And with a portfolio: every page must build its links.
     monkeypatch.setattr(wealth_store, "list_portfolios", lambda uid: [
         {"id": 7, "name": "Roth IRA", "kind": "roth_ira", "max_position_pct": None, "target_cash_pct": None}])
@@ -187,8 +192,14 @@ def test_pages_render_through_the_real_app(monkeypatch):
                                                                          "max_position_pct": None, "target_cash_pct": None})
     monkeypatch.setattr(wealth_store, "list_transactions", lambda uid, pid=None: [])
     for url in ("/wealth", "/wealth?p=7", "/wealth/ledger?p=7", "/wealth/lab?p=7", "/wealth/scoreboard?p=7",
-                "/wealth/research", "/wealth/research/KLAC", "/wealth/next-dollar?p=7", "/wealth/planner"):
+                "/wealth/research", "/wealth/next-dollar?p=7", "/wealth/planner"):
         assert c.get(url).status_code == 200, url
+    nd = c.get("/wealth/next-dollar?p=7").get_data(as_text=True)
+    for tab in ("rank", "split", "journal"):
+        assert f'data-nd-tab="{tab}"' in nd
+    assert 'id="capital-form"' in nd and 'id="capital-journal"' in nd and "INTELLIGENCE WORKFLOW" not in nd
+    lab = c.get("/wealth/lab?p=7").get_data(as_text=True)
+    assert "Compare your next dollar" not in lab and "lab-banner" not in lab and "Investment Lab 2.0" not in lab
 
 
 def test_scoreboard_api(env):
@@ -284,3 +295,63 @@ def test_today_strip_is_empty_without_portfolios(env):
     app, *_ = env
     d = client(app, 7).get("/api/wealth/today").get_json()
     assert d["ok"] and d["empty"] is True
+
+
+def test_position_strip_api_uses_ledger_then_schwab_snapshot(env):
+    import wealth_store
+    app, *_ = env
+    c = client(app, 1)
+    assert c.get("/api/wealth/position/KLAC").get_json() == {"ok": True, "ticker": "KLAC", "held": False}
+    wealth_store.save_broker_snapshot(1, "12345678", {"holdings": [
+        {"ticker": "KLAC", "shares": 2, "market_value": 2800.0, "cost_basis_snapshot": 2500.0}]})
+    d = c.get("/api/wealth/position/klac").get_json()
+    assert d["held"] and d["source"] == "schwab" and d["avg_cost"] == 1250 and d["unrealized"] == 300
+    pid = make_portfolio(c)
+    for tx in ({"date": "2026-01-01", "type": "DEPOSIT", "amount": 3000},
+               {"date": "2026-02-01", "type": "BUY", "ticker": "KLAC", "shares": 1, "price": 1000}):
+        c.post("/api/wealth/transactions", json={"portfolio_id": pid, **tx})
+    c.post("/api/wealth/capital/journal", json={"ticker": "KLAC", "decision": "WAIT", "amount": 500,
+                                               "thesis": "t", "risk": "r", "invalidation": "i"})
+    d = c.get("/api/wealth/position/KLAC").get_json()
+    assert d["source"] == "ledger" and d["shares"] == 1 and d["unrealized"] == 400
+    assert d["last_decision"]["decision"] == "WAIT"
+    assert client(app, 2).get("/api/wealth/position/KLAC").get_json()["held"] is False   # private
+
+
+def test_overview_merges_schwab_snapshot_into_one_holdings_table(monkeypatch):
+    import web_app
+    import app as legacy
+    import wealth_store
+    import schwab_account_preferences as prefs
+    monkeypatch.setattr(legacy, "_auth_required", lambda: False)
+    monkeypatch.setattr(wealth_store, "list_portfolios", lambda uid: [])
+    monkeypatch.setattr(prefs, "get_preferences", lambda uid: {})
+    monkeypatch.setattr(wealth_store, "list_broker_snapshots", lambda uid: [
+        {"account_key": "A1", "synced_at": "2026-11-21T10:00:00", "snapshot": {"holdings": [
+            {"ticker": "KLAC", "shares": 2, "market_value": 2800.0, "cost_basis_snapshot": 2500.0},
+            {"ticker": "SKHY", "shares": 5, "market_value": 900.0}]}}])
+    c = web_app.app.test_client()
+    with c.session_transaction() as s:
+        s["user_id"] = 1
+    html = c.get("/wealth").get_data(as_text=True)
+    for gone in ("Brokerage Sync", "Connected Holdings", "Concentration</h2>", "Sector exposure"):
+        assert gone not in html
+    assert html.count('id="wa-holdings"') == 1 and "2 not in your ledger yet" in html
+    assert html.count('class="ov-src is-schwab"') == 2 and "$3,700.00" in html        # snapshot total
+    assert html.index(">KLAC<") < html.index(">SKHY<")                                 # largest first
+    assert "tab=mcff" in html and "Start with a portfolio" in html
+
+
+def test_fundamentals_analyzer_has_the_mcff_tab(monkeypatch):
+    import web_app
+    import app as legacy
+    monkeypatch.setattr(legacy, "_auth_required", lambda: False)
+    c = web_app.app.test_client()
+    with c.session_transaction() as s:
+        s["user_id"] = 1
+    html = c.get("/fundamentals?tab=mcff").get_data(as_text=True)
+    assert "switchTab('mcff', this)\">M.C.F.F.</button>" in html
+    pane = html[html.index('id="tab-mcff"'):html.index('>', html.index('id="tab-mcff"'))]
+    assert "display:none" not in pane
+    assert "Score a company on M.C.F.F." in html
+    assert 'id="tab-analyze" class="tab-pane" style="display:none"' in html

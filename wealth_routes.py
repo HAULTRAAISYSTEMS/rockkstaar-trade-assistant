@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
-from flask import Blueprint, Response, abort, jsonify, render_template, request
+from flask import Blueprint, Response, abort, jsonify, redirect, render_template, request, url_for
 
 import wealth_calc
 import wealth_broker_sync
@@ -231,6 +231,52 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                     entry["basis_known"] = False
         return list(by_ticker.values())
 
+    def merge_holdings(ledger_rows, broker_rows):
+        """One holdings list: ledger positions and Schwab snapshot positions.
+
+        Ledger figures win when both exist (they carry lots and cost basis);
+        the snapshot only adds what the ledger doesn't have yet. Each row says
+        where it came from so nothing is counted twice or passed off as
+        ledger-verified.
+        """
+        broker = {h["ticker"]: h for h in broker_rows or []}
+        out = []
+        for h in ledger_rows:
+            b = broker.pop(h["ticker"], None)
+            row = dict(h, source="both" if b else "ledger", broker_shares=b["shares"] if b else None)
+            row["share_gap"] = bool(b and abs((b["shares"] or 0) - (h["shares"] or 0)) > 1e-6)
+            out.append(row)
+        for b in broker.values():
+            avg = (b["basis"] / b["shares"]) if b.get("basis_known") and b.get("shares") else None
+            mv = b.get("market_value")
+            unreal = (mv - b["basis"]) if (mv is not None and b.get("basis_known") and b.get("basis")) else None
+            out.append({"ticker": b["ticker"], "shares": b["shares"], "avg_cost": avg, "price": None,
+                        "market_value": mv, "unrealized": unreal,
+                        "unrealized_pct": (unreal / b["basis"] * 100) if unreal is not None else None,
+                        "weight_pct": None, "sector": None, "stale": False,
+                        "source": "schwab", "as_of": b.get("as_of"), "share_gap": False})
+        out.sort(key=lambda r: -(r.get("market_value") or 0))
+        return out
+
+    RING_COLORS = ("#e5b94f", "#5fb3ff", "#4fd1a5", "#c98bff", "#ff8a5c", "#f06292", "#9ccc65", "#8d9db6")
+
+    def sector_ring(sectors):
+        """conic-gradient stops for the allocation ring (top 7 + Other)."""
+        rows = [r for r in sectors if (r.get("pct") or 0) > 0]
+        top, rest = rows[:7], rows[7:]
+        if rest:
+            top = top + [{"sector": "Other", "pct": sum(r["pct"] for r in rest)}]
+        stops, at, legend = [], 0.0, []
+        for i, r in enumerate(top):
+            color = RING_COLORS[i % len(RING_COLORS)]
+            end = min(100.0, at + r["pct"])
+            stops.append(f"{color} {at:.2f}% {end:.2f}%")
+            legend.append({"sector": r["sector"], "pct": r["pct"], "color": color})
+            at = end
+        if at < 99.9 and stops:
+            stops.append(f"rgba(255,255,255,.06) {at:.2f}% 100%")
+        return {"gradient": ", ".join(stops), "legend": legend} if stops else None
+
     # Broker snapshots are deliberately separate from the transaction ledger.
     # GET only: no orders, deposits, or synthetic cost-basis transactions.
     @bp.get("/api/wealth/brokerage/discovery")
@@ -288,8 +334,12 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         portfolios = wealth_store.list_portfolios(user_id)
         current = owned(user_id, request.args.get("p"))
         s = summary_for(user_id, current) if portfolios else None
+        broker = broker_holdings_for(user_id, current)
+        rows = merge_holdings((s or {}).get("holdings") or [], broker)
         return render_template("wealth_dashboard.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=current,
-                               s=s, broker_holdings=broker_holdings_for(user_id, current),
+                               s=s, broker_holdings=broker, rows=rows,
+                               broker_total=sum(h["market_value"] or 0 for h in broker) if broker else None,
+                               ring=sector_ring((s or {}).get("sectors") or []),
                                kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
 
     @bp.get("/wealth/ledger")
@@ -744,16 +794,43 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
 
     @bp.get("/wealth/research/<ticker>")
     def research_page(ticker):
+        """M.C.F.F. now lives in the Fundamentals Analyzer, beside the numbers it scores."""
+        return redirect(url_for("fundamentals_page", ticker=_tk(ticker), tab="mcff"), code=302)
+
+    @bp.get("/api/wealth/position/<ticker>")
+    def position_api(ticker):
+        """'Your position' strip in the Fundamentals Analyzer: ledger first, Schwab snapshot as fallback."""
+        import wealth_capital_journal
         user_id = uid()
         t = _tk(ticker)
-        return render_template("wealth_research.html", portfolios=wealth_store.list_portfolios(user_id),
-                               current=None, ticker=t, kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START,
-                               ai_available=bool(ai_draft or _ai_configured()))
+        s = summary_for(user_id, None)
+        h = next((x for x in s.get("holdings") or [] if x["ticker"] == t), None)
+        out = {"ok": True, "ticker": t, "held": False}
+        if h:
+            out.update(held=True, source="ledger", shares=h["shares"], avg_cost=h.get("avg_cost"),
+                       market_value=h.get("market_value"), weight_pct=h.get("weight_pct"),
+                       unrealized=h.get("unrealized"), unrealized_pct=h.get("unrealized_pct"))
+        else:
+            b = next((x for x in broker_holdings_for(user_id) if x["ticker"] == t), None)
+            if b:
+                total = sum(x["market_value"] or 0 for x in broker_holdings_for(user_id)) or None
+                avg = (b["basis"] / b["shares"]) if b.get("basis_known") and b.get("shares") else None
+                unreal = (b["market_value"] - b["basis"]) if (b.get("market_value") is not None and b.get("basis_known") and b.get("basis")) else None
+                out.update(held=True, source="schwab", shares=b["shares"], avg_cost=avg, market_value=b.get("market_value"),
+                           weight_pct=(b["market_value"] / total * 100) if (total and b.get("market_value") is not None) else None,
+                           unrealized=unreal, unrealized_pct=(unreal / b["basis"] * 100) if unreal is not None else None)
+        try:
+            last = next((d for d in wealth_capital_journal.list_decisions(user_id) if d["ticker"] == t), None)
+        except Exception:
+            last = None
+        if last:
+            out["last_decision"] = {k: last.get(k) for k in ("decision", "amount", "created_at", "review_date", "thesis")}
+        return jsonify(out)
 
     @bp.get("/api/wealth/mcff/<ticker>")
     def mcff_api(ticker):
         user_id = uid()
-        return jsonify({"ok": True, **mcff_for(user_id, _tk(ticker))})
+        return jsonify({"ok": True, "ai_available": bool(ai_draft or _ai_configured()), **mcff_for(user_id, _tk(ticker))})
 
     @bp.post("/api/wealth/mcff/<ticker>")
     def mcff_save(ticker):
@@ -868,14 +945,9 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
     # ── Capital Deployment: read-only balanced investment decisions ───────
     @bp.get("/wealth/capital")
     def capital_page():
-        user_id = uid()
-        portfolios = wealth_store.list_portfolios(user_id)
-        current = owned(user_id, request.args.get("p"))
-        researched = sorted(wealth_store.list_research(user_id))
-        broker = sorted(h["ticker"] for h in broker_holdings_for(user_id, current))
-        return render_template("wealth_capital.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=current,
-                               candidates=sorted(set(researched) | set(broker)),
-                               kinds=wealth_store.KIND_LABELS)
+        """Merged into Next Dollar's Split tab; old links and bookmarks still land."""
+        args = {k: v for k, v in request.args.items() if k == "p"}
+        return redirect(url_for("wealth.next_dollar_page", **args) + "#split", code=302)
 
     @bp.post("/api/wealth/capital/rank")
     def capital_rank_api():

@@ -4,10 +4,10 @@
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
 {% block content %}
 <div class="wa">
-{{ wa.head('research', 'M.C.F.F. research', 'Moat → CEO → Financials → Future, in that order. A company reaches BUY ZONE only when all four gates pass and the price is inside your buy zone.', portfolios, current, with_all=False, pills=False) }}
+{{ wa.head('research', 'M.C.F.F. list', 'Moat → CEO → Financials → Future, in that order. A company reaches BUY ZONE only when all four gates pass and the price is inside your buy zone.', portfolios, current, with_all=False, pills=False) }}
 
 <section class="wa-card" style="margin-bottom:12px">
-  <form class="wa-form" id="go" style="grid-template-columns:minmax(0,260px) auto">
+  <form class="wa-form" id="go" style="grid-template-columns:minmax(0,260px) max-content;align-items:end">
     <label>Research a company<input name="t" maxlength="10" placeholder="Ticker, e.g. KLAC" style="text-transform:uppercase" required></label>
     <button class="wa-btn is-gold" type="submit">Open</button>
   </form>
@@ -18,16 +18,16 @@
   {% set all = (researched.keys()|list + held)|unique|sort %}
   {% if not all %}<p class="wa-note">Nothing yet. Open a ticker above to start its M.C.F.F. card.</p>{% else %}
   <div class="wa-scroll"><table class="wa-table" id="rl">
-    <thead><tr><th>Ticker</th><th>Status</th><th>M · C · F · F</th><th>Price</th><th class="hide-sm">Zone</th><th class="hide-sm">Updated</th></tr></thead>
+    <thead><tr><th>Ticker</th><th>Status</th><th>M · C · F · F</th><th>Price</th><th class="hide-sm">Zone</th><th class="hide-sm">Last research</th></tr></thead>
     <tbody>
     {% for t in all %}
     <tr data-t="{{ t }}">
-      <td><a class="wa-tk" href="{{ url_for('wealth.research_page', ticker=t) }}">{{ t }}</a><span class="wa-sub">{{ 'held' if t in held else '' }}{{ ' · ' if t in held and t in researched else '' }}{{ 'researched' if t in researched else 'not researched' }}</span></td>
+      <td><a class="wa-tk" href="{{ url_for('fundamentals_page', ticker=t, tab='mcff') }}">{{ t }}</a><span class="wa-sub">{{ ' · '.join((['held'] if t in held else []) + (['researched'] if t in researched else ['not researched'])) }}</span></td>
       <td><span class="wa-chip NONE" data-st>…</span></td>
       <td><span class="wa-dots" data-dots><i>M</i><i>C</i><i>F</i><i>F</i></span></td>
       <td data-px>—</td>
       <td class="hide-sm muted" data-zone style="white-space:normal;max-width:280px">—</td>
-      <td class="hide-sm muted">{{ (researched[t].updated_at or '')[:10] if t in researched else '' }}</td>
+      <td class="hide-sm muted">{% if t in researched and researched[t].updated_at %}{{ (researched[t].updated_at|string)[:10] }}{% else %}<a href="{{ url_for('fundamentals_page', ticker=t, tab='mcff') }}">Start →</a>{% endif %}</td>
     </tr>
     {% endfor %}
     </tbody>
@@ -38,7 +38,7 @@
 </div>
 {{ wa.common_js() }}
 <script>
-document.getElementById('go').addEventListener('submit', e => { e.preventDefault(); const t = (e.target.t.value || '').trim().toUpperCase(); if (t) location.href = '/wealth/research/' + encodeURIComponent(t); });
+document.getElementById('go').addEventListener('submit', e => { e.preventDefault(); const t = (e.target.t.value || '').trim().toUpperCase(); if (t) location.href = '/fundamentals?tab=mcff&ticker=' + encodeURIComponent(t); });
 (async function () {
   const rows = document.querySelectorAll('#rl [data-t]');
   if (!rows.length) return;

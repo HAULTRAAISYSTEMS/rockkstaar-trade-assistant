@@ -95,7 +95,7 @@
         <button type="submit" class="sd-btn" title="Re-run the full analysis">⟳ Refresh</button>
       </form>
       <a class="sd-btn sd-btn--accent" href="{{ url_for('trade_tools.gate_page', ticker=stock.ticker, entry=stock.entry_zone_high or '', stop=stock.stop_level or '', target=stock.target_1 or '') }}" title="Run this plan through the Pre-Trade Gate">Pre-Trade Gate →</a>
-      <a class="sd-btn" id="sd-mcff" href="{{ url_for('wealth.research_page', ticker=stock.ticker) }}" title="Long-term M.C.F.F. gates: Moat, CEO, Financials, Future">M.C.F.F. →</a>
+      <a class="sd-btn" id="sd-mcff" href="{{ url_for('fundamentals_page', ticker=stock.ticker, tab='mcff') }}" title="Long-term M.C.F.F. gates: Moat, CEO, Financials, Future">M.C.F.F. →</a>
     </div>
     <div class="sd-hero__status">
       <div class="sd-hero__badges">
