@@ -13,7 +13,7 @@ def test_command_bar_has_ticker_quarter_picker_and_walk():
 
 
 def test_intro_is_behind_how_this_works():
-    how = PAGE[PAGE.index('<section class="qx-how" id="q-how" hidden>'):]
+    how = PAGE[PAGE.index('<section class="qx-how wa-card" id="q-how" hidden>'):]
     assert "Seven checks on one quarter" not in how[:200]
     assert how.index("Show me where") < how.index("</section>")
 
