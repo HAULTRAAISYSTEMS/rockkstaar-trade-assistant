@@ -284,3 +284,36 @@
 .vz-entry__stats em{color:#7e8995;font:600 10.5px var(--font-ui);font-style:normal}
 @media (max-width:860px){.vz-entry__grid{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:520px){.vz-pmap__row{grid-template-columns:minmax(0,1fr) auto;}.vz-pmap__row em{grid-column:1/-1;justify-content:flex-start}.vz-entry__stats{grid-template-columns:minmax(0,1fr)}}
+
+/* ── Glass cards, same as Verify / M.C.F.F. ── */
+.th-shell .wa-card { border-radius: 18px !important; }
+/* ── Price map: every real level on one line ── */
+.vz-map { margin: 6px 0 18px; padding: 70px 18px 12px; border-radius: 16px; border: 1px solid rgba(170,215,255,.14); background: rgba(0,0,0,.18); }
+.vz-map__track { position: relative; height: 10px; border-radius: 10px; background: linear-gradient(90deg, rgba(255,255,255,.06), rgba(255,101,117,.22)); margin: 0 8px 66px; }
+.vz-map__zone { position: absolute; top: 0; bottom: 0; border-radius: 10px; }
+.vz-map__zone.is-accum { background: rgba(52,211,153,.35); }
+.vz-map__zone.is-load { background: rgba(52,211,153,.75); }
+.vz-map__tick { position: absolute; top: 50%; transform: translateX(-50%); display: grid; justify-items: center; pointer-events: none; }
+.vz-map__tick i { width: 2px; height: 22px; margin-top: -11px; background: rgba(200,225,255,.55); border-radius: 2px; }
+.vz-map__tick.is-entry i { background: #7fdcff; width: 3px; box-shadow: 0 0 8px rgba(127,220,255,.6); }
+.vz-map__lbl { position: absolute; left: 0; top: -30px; width: max-content; max-width: none !important; white-space: nowrap; font: 600 10.5px var(--font-mono, monospace); color: #a9bddb; line-height: 16px; }
+.vz-map__lbl em { font-style: normal; color: #eaf6ff; font-weight: 700; margin-left: 3px; }
+.vz-map__now { position: absolute; top: 50%; transform: translate(-50%, -50%); z-index: 2; }
+.vz-map__now .vz-map__lbl { transform: translateY(4px); }
+.vz-map__now i { display: block; width: 18px; height: 18px; border-radius: 50%; background: #34f5a8; border: 3px solid #071018;
+  box-shadow: 0 0 0 4px rgba(52,245,168,.25), 0 0 18px rgba(52,245,168,.7); animation: vz-pulse 2.4s ease-in-out infinite; }
+.vz-map__now .vz-map__lbl.is-now { padding: 0 8px; border-radius: 999px; background: rgba(52,245,168,.16); border: 1px solid rgba(52,245,168,.5); color: #34f5a8; font-weight: 800; }
+@keyframes vz-pulse { 50% { box-shadow: 0 0 0 8px rgba(52,245,168,.08), 0 0 24px rgba(52,245,168,.8); } }
+.vz-map__legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: #8ea3c2; font: 500 11.5px var(--font-ui, system-ui); }
+.vz-map__legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.vz-map__legend .sw.is-accum { background: rgba(52,211,153,.35); } .vz-map__legend .sw.is-load { background: rgba(52,211,153,.75); }
+.vz-map__legend .sw.is-entry { background: #7fdcff; }
+.vz-map__off { color: #f5b544; } .vz-map__off b { color: #eaf6ff; }
+@media (max-width: 760px) {
+  .vz-map { padding: 50px 10px 10px; overflow-x: auto; }
+  .vz-map__track { min-width: 560px; }
+}
+@media (prefers-reduced-motion: reduce) { .vz-map__now i { animation: none; } }
+/* The page column must not grow to its widest child (the price map scrolls inside its own box on phones). */
+.th-shell { grid-template-columns: minmax(0, 1fr); }
+.th-shell > * { min-width: 0; }

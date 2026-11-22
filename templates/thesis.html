@@ -33,7 +33,7 @@
 
   {% if ticker and thesis and not thesis.error %}
   {% set t = thesis.targets %}
-  <section class="th-company">
+  <section class="th-company wa-card">
     <div class="th-identity">
       <span class="th-symbol">{{ thesis.ticker }}</span>
       <div><h2>{{ thesis.company_name }}</h2><p>{% if thesis.sector %}{{ thesis.sector }}{% endif %}{% if thesis.sector and thesis.industry %} · {% endif %}{% if thesis.industry %}{{ thesis.industry }}{% endif %}</p></div>
@@ -67,8 +67,56 @@
 
   {% set pm = v.map %}
   {% if pm.available %}
-  <section class="th-section vz-entry">
+  <section class="th-section vz-entry wa-card">
     <div class="th-section__head"><div><span>Where to buy · real prices</span><h2>{{ pm.headline }}</h2></div></div>
+    {# Price map: every real level on one line, today glowing, the buy zones shaded
+       where they fall on it (or pointed to when they sit far below). #}
+    {% set pts = pm.levels|map(attribute='price')|list + [pm.price] %}
+    {% set lo0 = pts|min %}{% set hi0 = pts|max %}{% set pad = (hi0 - lo0) * 0.04 if hi0 > lo0 else hi0 * 0.05 %}
+    {% set lo = lo0 - pad %}{% set hi = hi0 + pad %}{% set span = (hi - lo) if hi > lo else 1 %}
+    <div class="vz-map" aria-label="Price map">
+      <div class="vz-map__track">
+        {% if z.accum_top > lo %}<span class="vz-map__zone is-accum" style="left:0;width:{{ (([z.accum_top, hi]|min - lo) / span * 100)|round(2) }}%" title="Buy zone: up to {{ '$%.2f'|format(z.accum_top) }}"></span>{% endif %}
+        {% if z.load_top > lo %}<span class="vz-map__zone is-load" style="left:0;width:{{ (([z.load_top, hi]|min - lo) / span * 100)|round(2) }}%" title="Load the boat: up to {{ '$%.2f'|format(z.load_top) }}"></span>{% endif %}
+        {% for l in pm.levels %}
+        <span class="vz-map__tick is-{{ l.key }}{% if l.entry %} is-entry{% endif %}" style="left:{{ ((l.price - lo) / span * 100)|round(2) }}%">
+          <i></i><b class="vz-map__lbl">{% if l.entry %}E{{ l.entry }} · {% endif %}{{ l.label|replace('Recent ', '')|replace('All-time high', 'ATH') }} <em>{{ l.price_fmt }}</em></b>
+        </span>
+        {% endfor %}
+        <span class="vz-map__now" style="left:{{ ((pm.price - lo) / span * 100)|round(2) }}%"><i></i><b class="vz-map__lbl is-now">Today {{ pm.price_fmt }}</b></span>
+      </div>
+      <script>
+      (function () {
+        // Labels go into the first lane (above, then below, then further out)
+        // where they do not overlap a neighbour. Today takes the first lane.
+        function lay() {
+          document.querySelectorAll('.vz-map__track').forEach(tr => {
+            const W = tr.getBoundingClientRect().width; if (!W) return;
+            const lanes = [-1, 1, -2, 2, -3, 3], used = {};
+            const items = [...tr.querySelectorAll('.vz-map__lbl')].sort((a, b) => (b.classList.contains('is-now') ? 1 : 0) - (a.classList.contains('is-now') ? 1 : 0));
+            items.forEach(lbl => {
+              lbl.style.width = 'max-content'; lbl.style.maxWidth = 'none';
+              const host = lbl.parentElement, x = parseFloat(host.style.left) / 100 * W, w = lbl.offsetWidth + 10;
+              const hostLeft = host.getBoundingClientRect().left - tr.getBoundingClientRect().left;
+              let a = Math.max(0, Math.min(W - w, x - w / 2));
+              const lane = lanes.find(L => !(used[L] || []).some(([s, e]) => a < e && a + w > s)) || lanes[lanes.length - 1];
+              (used[lane] = used[lane] || []).push([a, a + w]);
+              lbl.style.left = (a - hostLeft + 5) + 'px';
+              lbl.style.top = lane < 0 ? (lane * 18 - 12) + 'px' : (lane * 18 + 2) + 'px';
+              lbl.dataset.lane = lane;
+            });
+          });
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', lay); else lay();
+        window.addEventListener('resize', () => { clearTimeout(window.__vzLay); window.__vzLay = setTimeout(lay, 120); });
+      })();
+      </script>
+      <div class="vz-map__legend">
+        {% if z.accum_top <= lo %}<span class="vz-map__off">↓ Buy zone starts at <b>{{ '$%.2f'|format(z.accum_top) }}</b>{% if z.to_buy_zone %} — {{ z.to_buy_zone.pct_fmt }} from here{% endif %}, below this chart</span>
+        {% else %}<span><i class="sw is-accum"></i>Buy zone ≤ {{ '$%.2f'|format(z.accum_top) }}</span><span><i class="sw is-load"></i>Load ≤ {{ '$%.2f'|format(z.load_top) }}</span>{% endif %}
+        <span><i class="sw is-entry"></i>Entry level</span>
+      </div>
+    </div>
     <div class="vz-entry__grid">
       <ol class="vz-pmap" aria-label="Actual price levels">
         {% set ns = namespace(today_done=false) %}
@@ -109,7 +157,7 @@
   </div>
   <div class="vz-moved" id="vz-moved" hidden><span></span><a href="">Refresh</a></div>
 
-  <section class="th-section">
+  <section class="th-section wa-card">
     <div class="th-section__head"><div><span>01 · The price ladder</span><h2>What price do I buy at?</h2></div>
       <div class="vz-basis" role="group" aria-label="Value it on">
         <small>Value it on</small>
@@ -172,7 +220,7 @@
   </section>
 
   {% set tk = v.track %}
-  <section class="th-section">
+  <section class="th-section wa-card">
     <div class="th-section__head"><div><span>Track record</span><h2>Have these zones worked for {{ thesis.ticker }}?</h2></div><small>Next-12-month return by zone{% if tk.available %} · {{ tk.first }} to {{ tk.last }}{% endif %}</small></div>
     {% if tk.available %}
     <div class="vz-track">
@@ -190,7 +238,7 @@
     {% endif %}
   </section>
 
-  <section class="th-section">
+  <section class="th-section wa-card">
     <div class="th-section__head"><div><span>02 · Timing</span><h2>Is the chart turning up?</h2></div><small>Daily chart · value says where, trend says when</small></div>
     {% set tr = v.trend %}
     {% if tr.available %}
@@ -201,7 +249,7 @@
     {% else %}<p class="vz-note">Daily chart data is unavailable right now.</p>{% endif %}
   </section>
 
-  <section class="th-section">
+  <section class="th-section wa-card">
     <div class="th-section__head"><div><span>03 · Buy plan</span><h2>Scale in, don't guess the bottom</h2></div>
       <label class="vz-account">Plan size <span>$</span><input id="vz-account" type="number" min="0" step="100" inputmode="decimal" placeholder="5000"></label></div>
     <div class="vz-plan">
@@ -216,7 +264,7 @@
       <button type="button" class="vz-btn" id="vz-plan-alerts">🔔 Set all 3 alerts</button></div>
   </section>
 
-  <section class="th-section">
+  <section class="th-section wa-card">
     <div class="th-section__head"><div><span>04 · What if</span><h2>Move the assumptions</h2></div><button type="button" class="vz-reset" id="vz-reset">Reset</button></div>
     <div class="vz-whatif">
       <label><span>Earnings growth <b id="vz-g-out"></b></span><input id="vz-g" type="range" min="-20" max="60" step="0.1"></label>
@@ -234,12 +282,12 @@
     <p class="vz-whatif__read" id="vz-wi-read"></p>
   </section>
   {% elif t.available %}
-  <section class="th-section"><div class="th-unavailable"><b>Zones unavailable.</b><span>No live price for {{ thesis.ticker }} right now.</span></div></section>
+  <section class="th-section wa-card"><div class="th-unavailable"><b>Zones unavailable.</b><span>No live price for {{ thesis.ticker }} right now.</span></div></section>
   {% else %}
-  <section class="th-section"><div class="th-unavailable"><b>Targets unavailable.</b><span>{{ t.note }}</span></div></section>
+  <section class="th-section wa-card"><div class="th-unavailable"><b>Targets unavailable.</b><span>{{ t.note }}</span></div></section>
   {% endif %}
 
-  <section class="th-section">
+  <section class="th-section wa-card">
     <div class="th-section__head"><div><span>05 · The evidence</span><h2>Factor flags</h2></div><small>From the {{ thesis.score }}/40 filing scorecard</small></div>
     <div class="th-flags">
       {% for group in thesis.flags %}
@@ -257,7 +305,7 @@
   </section>
 
   {% if t.available %}
-  <section class="th-section">
+  <section class="th-section wa-card">
     <div class="th-section__head"><div><span>06 · The math</span><h2>Assumptions, on screen</h2></div><small>Simple by design</small></div>
     <div class="th-math">
       <div><span>Earnings power</span><strong>{{ t.power_fmt }}</strong><em>{% if t.uses_ttm %}{{ t.basis }} (through the latest quarter){% elif t.growth >= 0 %}latest annual {{ t.basis }}{% else %}median of positive annual {{ t.basis }}{% endif %}</em></div>

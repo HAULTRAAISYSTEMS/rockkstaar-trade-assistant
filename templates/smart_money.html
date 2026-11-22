@@ -2,6 +2,7 @@
 {% block title %}Insider Intelligence — Tradestaar Elite{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/smart_money.css') }}">{% endblock %}
 {% macro money(value) -%}{% if value is not none %}${{ '{:,.0f}'.format(value) }}{% else %}Unavailable{% endif %}{%- endmacro %}
+{% macro big(value) -%}{% if value is none %}—{% else %}{% set a = value|abs %}{% if a >= 1e9 %}${{ '%.2f'|format(a / 1e9) }}B{% elif a >= 1e6 %}${{ '%.1f'|format(a / 1e6) }}M{% elif a >= 1e3 %}${{ '%.0f'|format(a / 1e3) }}K{% else %}${{ '%.0f'|format(a) }}{% endif %}{% endif %}{%- endmacro %}
 {% macro shares(value) -%}{% if value is not none %}{{ '{:,.0f}'.format(value) }}{% else %}—{% endif %}{%- endmacro %}
 {% macro summary_cards(summary) %}
 <div class="sm-summary-grid" data-summary-days="{{ summary.days }}">
@@ -33,7 +34,7 @@
 
   {# One place per trade: the ranked buys, your names, then the raw filings. #}
   <section class="sm-panel" id="sm-top">
-    <section class="sm-top" id="top-buys" aria-label="Top insider buys">
+    <section class="sm-top wa-card" id="top-buys" aria-label="Top insider buys">
       <div class="sm-section-head">
         <div><span class="sm-kicker">Every ticker · open-market purchases only</span><h2>Top insider buys</h2><p class="sm-top-sub">Insiders sell for many reasons. They buy with their own money for one. Ranked by size, who bought, clusters and conviction.</p></div>
         <form method="get" action="{{ url_for('smart_money') }}#top-buys" class="sm-top-filters">
@@ -48,7 +49,7 @@
       </div>
       <div class="sm-buy-grid">
         {% for b in top_buys %}
-        <article class="sm-buy sm-buy-{{ b.label|lower }}">
+        <article class="sm-buy wa-card sm-buy-{{ b.label|lower }}">
           <header>
             <a class="sm-buy-tk" href="{{ url_for('stock_detail', ticker=b.ticker) }}">{{ b.ticker }}</a>
             <span class="sm-buy-co">{{ b.issuer or '' }}</span>
@@ -78,16 +79,37 @@
   </section>
 
   <section class="sm-panel" id="sm-watch" hidden>
-    <section class="sm-watch" aria-label="Your watchlist insider activity">
+    <section class="sm-watch wa-card" aria-label="Your watchlist insider activity">
       <div class="sm-section-head"><div><span class="sm-kicker">All {{ watched_tickers|length }} tracked tickers · last 30 days · newest first</span><h2>Your watchlist — open-market activity</h2></div></div>
       {% if watch_list %}
-      <div class="sm-watch-grid">
+      {% set wt = watch_totals %}
+      <div class="smw-strip">
+        <div class="smw-stat"><span>Net insider flow</span><b class="{{ 'sm-positive' if wt.net > 0 else 'sm-negative' if wt.net < 0 }}">{{ '+' if wt.net > 0 else '−' if wt.net < 0 }}{{ big(wt.net) }}</b><small>{{ big(wt.buy_value) }} bought · {{ big(wt.sell_value) }} sold</small></div>
+        <div class="smw-stat"><span>Insiders buying</span><b class="sm-positive">{{ wt.buying }}</b><small>of {{ watch_list|length }} tickers with activity</small></div>
+        <div class="smw-stat"><span>Insiders selling</span><b class="sm-negative">{{ wt.selling }}</b><small>sales are often planned or for taxes</small></div>
+        <div class="smw-stat"><span>Biggest buy</span>{% if wt.top_buy %}<b class="sm-positive">{{ wt.top_buy.ticker }} {{ big(wt.top_buy.buy_value) }}</b><small>{{ wt.top_buy.buyers|length }} buyer{{ 's' if wt.top_buy.buyers|length != 1 }} · {{ wt.top_buy.latest }}</small>{% else %}<b>—</b><small>no open-market buys</small>{% endif %}</div>
+        <div class="smw-stat"><span>Biggest sale</span>{% if wt.top_sell %}<b class="sm-negative">{{ wt.top_sell.ticker }} {{ big(wt.top_sell.sell_value) }}</b><small>{{ wt.top_sell.sellers|length }} seller{{ 's' if wt.top_sell.sellers|length != 1 }} · {{ wt.top_sell.latest }}</small>{% else %}<b>—</b><small>no open-market sales</small>{% endif %}</div>
+      </div>
+      <div class="smw-filter" role="group" aria-label="Show">
+        <button type="button" class="active" data-smw="all">All <span>{{ watch_list|length }}</span></button>
+        <button type="button" data-smw="buy">Buying <span>{{ wt.buying }}</span></button>
+        <button type="button" data-smw="sell">Selling <span>{{ wt.selling }}</span></button>
+      </div>
+      <div class="sm-watch-grid smw-grid">
         {% for w in watch_list %}
-        <details class="sm-watch-row">
-          <summary><a href="{{ url_for('stock_detail', ticker=w.ticker) }}">{{ w.ticker }}</a>
-            <span class="sm-positive">{% if w.buy_value %}▲ {{ money(w.buy_value) }} · {{ w.buyers|length }} buyer{{ 's' if w.buyers|length != 1 }}{% endif %}</span>
-            <span class="sm-negative">{% if w.sell_value %}▼ {{ money(w.sell_value) }} · {{ w.sellers|length }} seller{{ 's' if w.sellers|length != 1 }}{% endif %}</span>
-            <small>latest {{ w.latest }}</small></summary>
+        <details class="sm-watch-row smw-card wa-card {{ 'is-buy' if w.buy_value and w.buy_value >= w.sell_value else 'is-sell' }}" data-buy="{{ 1 if w.buy_value else 0 }}" data-sell="{{ 1 if w.sell_value else 0 }}">
+          <summary>
+            <div class="smw-top">
+              <a class="smw-tk" href="{{ url_for('stock_detail', ticker=w.ticker) }}">{{ w.ticker }}</a>
+              <span class="smw-net {{ 'sm-positive' if w.net > 0 else 'sm-negative' }}">{{ '+' if w.net > 0 else '−' }}{{ big(w.net) }}<small>net</small></span>
+            </div>
+            <div class="smw-bar" title="Buying {{ '%.0f'|format(w.buy_share) }}% of the dollar flow"><i style="width:{{ '%.1f'|format(w.buy_share) }}%"></i></div>
+            <div class="smw-sides">
+              <span class="sm-positive">{% if w.buy_value %}▲ {{ big(w.buy_value) }} · {{ w.buyers|length }} buyer{{ 's' if w.buyers|length != 1 }}{% else %}<em>no buys</em>{% endif %}</span>
+              <span class="sm-negative">{% if w.sell_value %}▼ {{ big(w.sell_value) }} · {{ w.sellers|length }} seller{{ 's' if w.sellers|length != 1 }}{% else %}<em>no sales</em>{% endif %}</span>
+            </div>
+            <div class="smw-foot"><small>latest {{ w.latest }}</small>{% if w.planned %}<span class="sm-tag-plan">{{ w.planned }} planned · 10b5-1</span>{% endif %}<span class="smw-more">{{ w.rows|length }} trade{{ 's' if w.rows|length != 1 }}</span></div>
+          </summary>
           <ul>{% for r in w.rows %}<li><b class="{{ 'sm-positive' if r.side == 'P' else 'sm-negative' }}">{{ 'BUY' if r.side == 'P' else 'SELL' }}</b> {{ r.owner }} <small>{{ r.role }}</small> · {{ money(r.value) }}{% if r.avg_price %} @ ${{ '%.2f'|format(r.avg_price) }}{% endif %} · {{ r.trade_date }}{% if r.planned_10b5_1 %} · <em>10b5-1</em>{% endif %} <a href="{{ r.source_url }}" target="_blank" rel="noopener noreferrer">filing ↗</a></li>{% endfor %}</ul>
         </details>
         {% endfor %}

@@ -9909,6 +9909,22 @@ def smart_money():
     watch_list = sorted(watch_summary.values(),
                         key=lambda w: (w["latest"] or "", w["buy_value"] + w["sell_value"]),
                         reverse=True)
+    for w in watch_list:
+        w["net"] = w["buy_value"] - w["sell_value"]
+        total = w["buy_value"] + w["sell_value"]
+        w["buy_share"] = (w["buy_value"] / total * 100) if total else 0
+        w["planned"] = sum(1 for r in w["rows"] if r.get("planned_10b5_1"))
+    # One line across the whole watchlist: who is buying, who is selling,
+    # and the biggest of each.
+    watch_totals = {
+        "buy_value": sum(w["buy_value"] for w in watch_list),
+        "sell_value": sum(w["sell_value"] for w in watch_list),
+        "buying": sum(1 for w in watch_list if w["buy_value"] > 0),
+        "selling": sum(1 for w in watch_list if w["sell_value"] > 0),
+        "top_buy": max((w for w in watch_list if w["buy_value"] > 0), key=lambda w: w["buy_value"], default=None),
+        "top_sell": max((w for w in watch_list if w["sell_value"] > 0), key=lambda w: w["sell_value"], default=None),
+    }
+    watch_totals["net"] = watch_totals["buy_value"] - watch_totals["sell_value"]
     return render_template(
         "smart_money.html",
         insiders=insiders,
@@ -9920,6 +9936,7 @@ def smart_money():
         top_buys=top_buys,
         buy_filters={"days": buy_days, "min": int(buy_min), "cluster": buy_cluster},
         watch_list=watch_list,
+        watch_totals=watch_totals,
         feed=feed,
     )
 

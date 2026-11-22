@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "_wealth_macros.html" as wa with context %}
+{% macro sgn(v) -%}{%- if v is none -%}—{%- elif v|abs < 0.005 -%}$0.00{%- else -%}{{ '+' if v > 0 else '−' }}${{ "{:,.2f}".format(v|abs) }}{%- endif -%}{%- endmacro %}
 {% block title %}Schwab Account — Tradestaar Elite{% endblock %}
 {% block head_extra %}{{ super() }}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
 
@@ -97,21 +98,21 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
   <!-- Balance overview cards -->
   <div class="schwab-balance-grid">
 
-    <div class="schwab-bal-card">
+    <div class="wa-card schwab-bal-card">
       <div class="schwab-bal-label">Total Account Value</div>
       <div class="schwab-bal-val">${{ "{:,.2f}".format(account_data.total_value) if account_data.total_value is not none else "—" }}</div>
     </div>
 
-    <div class="schwab-bal-card">
+    <div class="wa-card schwab-bal-card">
       <div class="schwab-bal-label">Buying Power</div>
       <div class="schwab-bal-val">${{ "{:,.2f}".format(account_data.buying_power) if account_data.buying_power is not none else "—" }}</div>
     </div>
 
-    <div class="schwab-bal-card {{ 'schwab-pnl-pos' if account_data.daily_pnl and account_data.daily_pnl > 0 else ('schwab-pnl-neg' if account_data.daily_pnl and account_data.daily_pnl < 0 else '') }}">
+    <div class="wa-card schwab-bal-card {{ 'schwab-pnl-pos' if account_data.daily_pnl and account_data.daily_pnl > 0 else ('schwab-pnl-neg' if account_data.daily_pnl and account_data.daily_pnl < 0 else '') }}">
       <div class="schwab-bal-label">Daily P&amp;L</div>
       <div class="schwab-bal-val">
         {% if account_data.daily_pnl is not none %}
-          {{ '+' if account_data.daily_pnl >= 0 else '' }}${{ "{:,.2f}".format(account_data.daily_pnl) }}
+          {{ sgn(account_data.daily_pnl) }}
           {% set daily_pnl_pct = account_data.get('daily_pnl_pct') %}
           {% if daily_pnl_pct is not none %}
           <span class="schwab-pnl-pct">({{ '%+.2f'|format(daily_pnl_pct) }}%)</span>
@@ -120,16 +121,18 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
       </div>
     </div>
 
-    <div class="schwab-bal-card {{ 'schwab-pnl-pos' if account_data.total_unrealized and account_data.total_unrealized > 0 else ('schwab-pnl-neg' if account_data.total_unrealized and account_data.total_unrealized < 0 else '') }}">
+    <div class="wa-card schwab-bal-card {{ 'schwab-pnl-pos' if account_data.total_unrealized and account_data.total_unrealized > 0 else ('schwab-pnl-neg' if account_data.total_unrealized and account_data.total_unrealized < 0 else '') }}">
       <div class="schwab-bal-label">Open P&amp;L (Unrealized)</div>
       <div class="schwab-bal-val">
         {% if account_data.total_unrealized is not none %}
-          {{ '+' if account_data.total_unrealized >= 0 else '' }}${{ "{:,.2f}".format(account_data.total_unrealized) }}
+          {{ sgn(account_data.total_unrealized) }}
+          {% set ns_u = namespace(mv=0, u=0) %}{% for a in account_data.accounts %}{% for p in a.equity_positions or [] %}{% set ns_u.mv = ns_u.mv + (p.market_value or 0) %}{% set ns_u.u = ns_u.u + (p.unrealized or 0) %}{% endfor %}{% endfor %}
+          {% if ns_u.mv - ns_u.u > 0 %}<span class="schwab-pnl-pct">({{ '%+.1f'|format(ns_u.u / (ns_u.mv - ns_u.u) * 100) }}%)</span>{% endif %}
         {% else %}—{% endif %}
       </div>
     </div>
 
-    <div class="schwab-bal-card">
+    <div class="wa-card schwab-bal-card">
       <div class="schwab-bal-label">Open Positions</div>
       <div class="schwab-bal-val">{{ account_data.open_positions }}</div>
     </div>
@@ -158,12 +161,43 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
     .sa-actions form{margin:0}
     .sa-control{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;min-height:42px;border-radius:10px;border:1px solid rgba(122,166,185,.33);background:rgba(29,49,63,.55);color:#e5f4fc;font-size:12px;font-weight:700;line-height:1.25;cursor:pointer;transition:background .18s,border-color .18s}
     .sa-control:hover{background:rgba(45,82,98,.75);border-color:#5ad3e4}
+    /* Glass cards, same as Verify / M.C.F.F. */
+    .schwab-wrap .wa-card{border-radius:18px!important}
+    .schwab-wrap .schwab-bal-card.wa-card{padding:18px 20px}
+    .schwab-wrap .schwab-bal-card.wa-card::before,.schwab-wrap .schwab-bal-card.wa-card::after{display:none}
+    .schwab-wrap .schwab-acct-card.wa-card{padding:20px 22px}
+    /* Positions: one row per holding, largest first */
+    .sa-pos-list{display:grid;gap:8px;margin-top:10px}
+    .sa-pos{display:grid;grid-template-columns:minmax(90px,1.1fr) minmax(0,1fr) minmax(0,1.3fr) minmax(0,.9fr) minmax(0,1.1fr);gap:12px;align-items:center;padding:12px 16px;border-radius:14px;border:1px solid rgba(170,215,255,.12);background:rgba(255,255,255,.03);position:relative;overflow:hidden}
+    .sa-pos::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:rgba(255,255,255,.15)}
+    .sa-pos.is-up::before{background:#34d399}.sa-pos.is-dn::before{background:#ff6b6b}
+    .sa-pos:not(.sa-pos-head):hover{border-color:rgba(127,220,255,.4)}
+    .sa-pos-head{padding:0 16px;border:0;background:none;color:#7f93ad;font:700 10px monospace;letter-spacing:.12em;text-transform:uppercase}
+    .sa-pos-head::before{display:none}
+    .sa-pos > span{display:grid;gap:3px;min-width:0}
+    .sa-pos b{font:800 15px monospace;color:#eef6ff;white-space:nowrap}
+    .sa-pos small{color:#8ea3c2;font:600 11px monospace;white-space:nowrap;display:flex;align-items:center;gap:6px}
+    .sa-pos .schwab-pnl-pos b,.sa-pos .schwab-pnl-pos small{color:#34d399}
+    .sa-pos .schwab-pnl-neg b,.sa-pos .schwab-pnl-neg small{color:#ff6b6b}
+    .sa-pos-sym a{color:#eef6ff;font:800 18px monospace;letter-spacing:.04em;text-decoration:none}
+    .sa-pos-sym a:hover{color:#5ad3e4}
+    .sa-short{font-style:normal;color:#ff9aa5;font:700 10px monospace;text-transform:uppercase}
+    .sa-wbar{display:inline-block;width:54px;height:5px;border-radius:5px;background:rgba(255,255,255,.1);overflow:hidden}
+    .sa-wbar i{display:block;height:100%;background:linear-gradient(90deg,#50d9f2,#c6fa67);border-radius:5px}
+    @media(max-width:760px){
+      .sa-pos-head{display:none}
+      .sa-pos{grid-template-columns:1fr 1fr;gap:8px 12px;padding:12px 14px}
+      .sa-pos-sym{grid-column:1/-1;display:flex!important;align-items:baseline;gap:8px}
+      .sa-pos-un{text-align:right;justify-items:end}
+      .sa-pos-day{justify-items:start}
+      .sa-pos-mv{justify-items:end;text-align:right}
+    }
     .sa-control.active{background:rgba(178,246,101,.12);border-color:rgba(178,246,101,.5);color:#d5ff9d}
     .sa-control:focus-visible{outline:2px solid #74e5fa;outline-offset:3px}
     .sa-foot{margin-top:15px!important;font-size:11px!important}
     @media(max-width:550px){.sa-manager{padding:17px;border-radius:16px}.sa-list{grid-template-columns:1fr}.sa-account{padding:14px}.sa-actions{grid-template-columns:1fr 1fr}.sa-control{font-size:11px}}
   </style>
-  <section class="sa-manager" aria-labelledby="sa-manager-title">
+  <section class="sa-manager wa-card" aria-labelledby="sa-manager-title">
     <header class="sa-manager-head">
       <div>
         <div class="sa-eyebrow">Tradestaar / Account Control</div>
@@ -214,7 +248,7 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
   {% for acct in account_data.accounts %}
   {% set key = acct.account_hash or acct.account_number %}
   {% if account_preferences.get(key, {'visible': true}).visible %}
-  <div class="detail-card schwab-acct-card">
+  <div class="detail-card wa-card schwab-acct-card">
     <h3 class="card-title">
       Account ···{{ acct.account_number[-4:] if acct.account_number else '?' }}
       <span class="schwab-acct-type">{{ acct.account_type }}</span>
@@ -244,7 +278,7 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
       <div class="schwab-mini-stat {{ 'schwab-pnl-pos' if acct.daily_pnl and acct.daily_pnl > 0 else ('schwab-pnl-neg' if acct.daily_pnl and acct.daily_pnl < 0 else '') }}">
         <div class="schwab-mini-label">Daily P&amp;L</div>
         <div class="schwab-mini-val">
-          {% if acct.daily_pnl is not none %}{{ '+' if acct.daily_pnl >= 0 else '' }}${{ "{:,.2f}".format(acct.daily_pnl) }}{% else %}—{% endif %}
+          {% if acct.daily_pnl is not none %}{{ sgn(acct.daily_pnl) }}{% else %}—{% endif %}
         </div>
       </div>
     </div>
@@ -252,25 +286,19 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
     <!-- Equity positions -->
     {% if acct.equity_positions %}
     <h4 class="schwab-section-title">Equity Positions ({{ acct.equity_positions|length }})</h4>
-    <div class="schwab-positions-table">
-      <div class="schwab-pos-row schwab-pos-header">
-        <span>Symbol</span><span>Qty</span><span>Avg Price</span>
-        <span>Mkt Value</span><span>Day P&amp;L</span><span>Unrealized</span>
-      </div>
-      {% for pos in acct.equity_positions %}
-      <div class="schwab-pos-row {{ 'schwab-pos-long' if pos.quantity > 0 else 'schwab-pos-short' }}">
-        <span class="schwab-pos-symbol">{{ pos.symbol }}</span>
-        <span class="schwab-pos-qty {{ 'schwab-pnl-pos' if pos.quantity > 0 else 'schwab-pnl-neg' }}">
-          {{ pos.quantity }}
-        </span>
-        <span>${{ "%.4f"|format(pos.avg_price) }}</span>
-        <span>${{ "{:,.2f}".format(pos.market_value) }}</span>
-        <span class="{{ 'schwab-pnl-pos' if pos.day_pnl > 0 else ('schwab-pnl-neg' if pos.day_pnl < 0 else '') }}">
-          {{ '+' if pos.day_pnl >= 0 else '' }}${{ "%.2f"|format(pos.day_pnl) }}
-        </span>
-        <span class="{{ 'schwab-pnl-pos' if pos.unrealized > 0 else ('schwab-pnl-neg' if pos.unrealized < 0 else '') }}">
-          {{ '+' if pos.unrealized >= 0 else '' }}${{ "%.2f"|format(pos.unrealized) }}
-        </span>
+    {% set ns_p = namespace(mv=0) %}{% for p in acct.equity_positions %}{% set ns_p.mv = ns_p.mv + (p.market_value or 0) %}{% endfor %}
+    <div class="sa-pos-list">
+      <div class="sa-pos sa-pos-head" aria-hidden="true"><span>Position</span><span>Shares · avg</span><span>Value · weight</span><span>Today</span><span>Unrealized</span></div>
+      {% for pos in acct.equity_positions|sort(attribute='market_value', reverse=True) %}
+      {% set cost = (pos.market_value or 0) - (pos.unrealized or 0) %}
+      {% set ret = (pos.unrealized / cost * 100) if cost > 0 else none %}
+      {% set wt = (pos.market_value / ns_p.mv * 100) if ns_p.mv else 0 %}
+      <div class="sa-pos {{ 'is-up' if pos.unrealized > 0.005 else 'is-dn' if pos.unrealized < -0.005 else '' }}">
+        <span class="sa-pos-sym"><a href="{{ url_for('fundamentals_page', ticker=pos.symbol, tab='mcff') }}">{{ pos.symbol }}</a>{% if pos.quantity < 0 %}<em class="sa-short">short</em>{% endif %}</span>
+        <span class="sa-pos-qty"><b>{{ '%g'|format(pos.quantity) }}</b><small>@ ${{ "{:,.2f}".format(pos.avg_price) }}</small></span>
+        <span class="sa-pos-mv"><b>${{ "{:,.2f}".format(pos.market_value) }}</b><small><i class="sa-wbar"><i style="width:{{ '%.1f'|format(wt) }}%"></i></i>{{ '%.1f'|format(wt) }}%</small></span>
+        <span class="sa-pos-day {{ 'schwab-pnl-pos' if pos.day_pnl > 0.005 else ('schwab-pnl-neg' if pos.day_pnl < -0.005 else '') }}"><b>{{ sgn(pos.day_pnl) }}</b></span>
+        <span class="sa-pos-un {{ 'schwab-pnl-pos' if pos.unrealized > 0.005 else ('schwab-pnl-neg' if pos.unrealized < -0.005 else '') }}"><b>{{ sgn(pos.unrealized) }}</b>{% if ret is not none %}<small>{{ '%+.1f'|format(ret) }}%</small>{% endif %}</span>
       </div>
       {% endfor %}
     </div>
@@ -295,7 +323,7 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
         <span>{{ pos.contracts }}</span>
         <span>${{ "{:,.2f}".format(pos.market_value) }}</span>
         <span class="{{ 'schwab-pnl-pos' if pos.day_pnl > 0 else ('schwab-pnl-neg' if pos.day_pnl < 0 else '') }}">
-          {{ '+' if pos.day_pnl >= 0 else '' }}${{ "%.2f"|format(pos.day_pnl) }}
+          {{ sgn(pos.day_pnl) }}
         </span>
       </div>
       {% endfor %}
@@ -355,10 +383,10 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
         <span class="schwab-risk-label">Available Buying Power</span>
         <span class="schwab-risk-val">${{ "{:,.2f}".format(account_data.buying_power) }}</span>
       </div>
-      <div class="schwab-risk-item {{ 'schwab-pnl-neg' if account_data.daily_pnl and account_data.daily_pnl < 0 else '' }}">
+      <div class="schwab-risk-item {{ 'schwab-pnl-neg' if account_data.daily_pnl and account_data.daily_pnl < -0.005 else '' }}">
         <span class="schwab-risk-label">Today's P&amp;L</span>
         <span class="schwab-risk-val">
-          {{ '+' if account_data.daily_pnl and account_data.daily_pnl >= 0 else '' }}${{ "{:,.2f}".format(account_data.daily_pnl) if account_data.daily_pnl is not none else '—' }}
+          {{ sgn(account_data.daily_pnl) if account_data.daily_pnl is not none else '—' }}
         </span>
       </div>
     </div>
