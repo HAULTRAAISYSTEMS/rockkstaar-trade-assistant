@@ -186,3 +186,14 @@ html.qx-lock, html.qx-lock body { overflow: hidden; }
 #tab-quarter .qx-empty.wa-card { padding: 30px 24px; }
 #tab-quarter .qx-cols { gap: 14px; }
 @media (max-width: 760px) { #tab-quarter .qx-tiles > .qx-tile:last-child:nth-child(odd) { grid-column: 1 / -1; } }
+
+/* One-offs warning: investment gains/losses inside profit */
+#tab-quarter .qx-oneoff { display: flex; gap: 10px; align-items: baseline; margin: 0 0 10px; padding: 9px 12px; border-radius: 12px;
+  border: 1px solid rgba(245,181,68,.45); background: rgba(245,181,68,.09); color: var(--elite-muted); font: 500 12.5px/1.45 var(--font-ui); }
+#tab-quarter .qx-oneoff b { flex: none; color: #f5b544; font: 800 11px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
+#tab-quarter .qx-oneoff.is-loss { border-color: rgba(127,220,255,.4); background: rgba(127,220,255,.07); }
+#tab-quarter .qx-oneoff.is-loss b { color: #7fdcff; }
+#tab-quarter .qx-pe-oneoff { margin: 10px 0; flex-direction: column; gap: 4px; }
+#tab-quarter .qx-pe-oneoff b { font-size: 13px; text-transform: none; letter-spacing: .02em; }
+#tab-quarter .qx-oneoff-note { padding: 8px 10px; border-left: 2px solid #f5b544; background: rgba(245,181,68,.06); border-radius: 0 8px 8px 0; }
+@media (max-width: 760px) { #tab-quarter .qx-oneoff { flex-direction: column; gap: 4px; text-align: left; } }
