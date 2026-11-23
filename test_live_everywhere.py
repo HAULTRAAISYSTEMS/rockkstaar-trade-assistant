@@ -166,7 +166,7 @@ def test_an_extended_print_never_poses_as_the_days_move(monkeypatch):
 
 def test_the_globe_chips_and_banner_label_extended_moves():
     js = open("static/js/command_center_picture.js").read()
-    assert "{ pre: 'PRE', post: 'AH', overnight: '24H' }" in js and "cmd27-chip__ext" in js
+    assert "{ pre: 'PRE', post: 'AH', overnight: '24H' }" in js and "show24h()" in js
     tape = open("templates/_market_tape.html").read()
     assert "overnight: '24H'" in tape and "'ON'" not in tape
 
@@ -183,3 +183,14 @@ def test_watchlist_tape_keeps_the_days_move_beside_extended_hours(monkeypatch):
     item = legacy._WL_TAPE_CACHE["items"][0]
     assert item["change_pct"] == -5.74 and item["price"] == 229.44
     assert item["ext"] == "post" and item["ext_pct"] == 0.68 and item["ext_price"] == 231.0
+
+
+def test_24h_prices_is_a_saved_setting(client, monkeypatch):
+    monkeypatch.setitem(web_app.app.config, "WTF_CSRF_ENABLED", False)
+    assert client.get("/api/account/prefs").get_json()["prefs"]["show_24h"] is False
+    assert client.post("/api/account/prefs", json={"show_24h": True}).get_json()["prefs"]["show_24h"] is True
+    assert client.get("/api/account/prefs").get_json()["prefs"]["show_24h"] is True
+    html = client.get("/").get_data(as_text=True)
+    assert 'data-show-24h="1"' in html and 'data-pref="show_24h"' in html
+    client.post("/api/account/prefs", json={"show_24h": False})
+    assert 'data-show-24h="0"' in client.get("/").get_data(as_text=True)

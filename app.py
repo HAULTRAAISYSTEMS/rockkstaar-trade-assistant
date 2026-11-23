@@ -10798,6 +10798,46 @@ def api_ticker_menu_watchlist(ticker):
     return jsonify({"ok": True, "ticker": t, "list": name, "has": True})
 
 
+# ── Display preferences (avatar menu) ──────────────────────────────────
+# show_24h: on the globe chips, show the pre-market / after-hours / 24H move
+# while those sessions trade, instead of the last regular-session move.
+_PREF_KEYS = {"show_24h": "pref_show_24h"}
+
+
+def _user_prefs(uid) -> dict:
+    out = {}
+    for name, key in _PREF_KEYS.items():
+        try:
+            out[name] = (get_user_setting(uid, key, "0") or "0") == "1"
+        except Exception:
+            out[name] = False
+    return out
+
+
+@app.context_processor
+def _inject_prefs():
+    try:
+        uid = current_user_id()
+    except Exception:
+        uid = None
+    return {"user_prefs": _user_prefs(uid) if uid else {k: False for k in _PREF_KEYS}}
+
+
+@app.route("/api/account/prefs", methods=["GET", "POST"])
+def api_account_prefs():
+    uid = current_user_id()
+    if not uid:
+        return jsonify({"ok": False, "error": "Sign in first."}), 401
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        for name, key in _PREF_KEYS.items():
+            if name in body:
+                set_user_setting(uid, key, "1" if body.get(name) is True else "0")
+    resp = jsonify({"ok": True, "prefs": _user_prefs(uid)})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/api/command/orbit", methods=["GET", "POST"])
 def api_command_orbit():
     """The tickers the user keeps in orbit around the Command Center globe.

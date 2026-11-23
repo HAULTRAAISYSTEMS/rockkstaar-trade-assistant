@@ -90,6 +90,8 @@
   // Tape quotes first; orbit-only tickers (not on any watchlist, e.g. VOO)
   // fall back to the orbit's own quotes.
   var orbitQ = {};
+  function show24h() { return document.documentElement.getAttribute('data-show-24h') === '1'; }
+  document.addEventListener('tradestaar:prefs', function () { renderOrbit(); });
   function bySym() {
     var m = {};
     Object.keys(orbitQ).forEach(function (k) { m[k] = orbitQ[k]; });
@@ -194,17 +196,25 @@
       if (m[sym] || mode === 'portfolio') el.setAttribute('data-spin', '1');
       el.style.left = '0px'; el.style.top = '0px'; el.style.visibility = 'hidden';
       el.innerHTML = '<span></span><small></small>';
-      // Pre-market / after-hours / 24H move under the day's move. With no
-      // day's move from the feed, the extended move is the headline.
+      // One number per chip. With "24H prices" on (avatar menu), a stock
+      // trading pre-market / after hours / overnight shows that move, labelled;
+      // otherwise the last regular-session move. No day's move at all → the
+      // extended one, labelled, rather than a dash.
       var xl = { pre: 'PRE', post: 'AH', overnight: '24H' }[q.ext], xp = q.ext_pct;
+      var useX = !!(xl && num(xp) && (show24h() || !num(chg))), shown = useX ? xp : chg;
+      el.className = el.className.replace(/\bis-(down|up|flat)\b/, num(shown) ? (shown < 0 ? 'is-down' : 'is-up') : 'is-flat');
       el.firstChild.textContent = sym;
-      if (!num(chg) && xl && num(xp)) { el.lastChild.textContent = xl + ' ' + pct(xp); el.className = el.className.replace('is-flat', xp < 0 ? 'is-down' : 'is-up'); }
-      else {
-        el.lastChild.textContent = pct(chg);
-        if (xl && num(xp)) {
-          var xe = document.createElement('b'); xe.className = 'cmd27-chip__ext ' + (xp < 0 ? 'is-dn' : xp > 0 ? 'is-up' : '');
-          xe.textContent = xl + ' ' + pct(xp); el.appendChild(xe);
-        }
+      el.lastChild.textContent = (useX ? xl + ' ' : '') + pct(shown);
+      // Price and dollar change under the %, like a TradingView watchlist row
+      // (Last · Chg). The change is worked back from the same % and price.
+      var px = useX ? q.ext_price : q.price;
+      if (num(px) && px > 0) {
+        var d$ = num(shown) ? px - px / (1 + shown / 100) : null, pl = document.createElement('b');
+        pl.className = 'cmd27-chip__px';
+        pl.innerHTML = '<i></i><em></em>';
+        pl.firstChild.textContent = '$' + px.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        pl.lastChild.textContent = num(d$) ? (d$ > 0 ? '+' : d$ < 0 ? '−' : '') + Math.abs(d$).toFixed(2) : '';
+        el.appendChild(pl);
       }
       if (num(q.weight)) { var w = document.createElement('em'); w.textContent = q.weight.toFixed(q.weight < 10 ? 1 : 0) + (narrow ? '% held' : '% of portfolio'); el.appendChild(w); }
       var tagTxt = fl === 'alert' ? 'HIT' : (fl === 'zone' ? flags.zone[sym] : ek);
@@ -212,7 +222,8 @@
         var tg = document.createElement('i'); tg.className = 'cmd27-chip__tag' + (fl ? ' is-' + fl : ''); tg.textContent = tagTxt; el.appendChild(tg);
       }
       el.title = (m[sym] || mode === 'portfolio' ? 'Spin the globe to ' : 'Open the chart for ') + sym +
-        (xl && num(xp) ? ' · ' + ({ PRE: 'pre-market', AH: 'after hours', '24H': 'overnight (24H)' })[xl] + ' ' + pct(xp) + (num(q.ext_price) ? ' at $' + q.ext_price.toFixed(2) : '') + ' vs the close' : '') +
+        (useX && num(chg) ? ' · last session ' + pct(chg) : '') +
+        (!useX && xl && num(xp) ? ' · ' + ({ PRE: 'pre-market', AH: 'after hours', '24H': 'overnight (24H)' })[xl] + ' ' + pct(xp) + ' (turn on 24H prices in your profile menu to show it)' : '') +
         (fl === 'alert' ? ' · price alert hit' : fl === 'zone' ? ' · in its buy zone' : '') + (ek ? ' · reports ' + (ek === 'TODAY' ? 'today' : 'in ' + ek) : '');
       function go() {
         if (m[sym] || mode === 'portfolio') document.dispatchEvent(new CustomEvent('cmd27:focus', { detail: { symbol: sym } }));

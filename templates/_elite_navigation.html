@@ -1,3 +1,10 @@
+{% macro pref_24h(extra='') -%}
+<label class="nav-pref{{ extra }}">
+  <span class="nav-pref__txt"><strong>24H prices</strong><small>Show pre-market, after-hours and overnight moves on the globe while they trade</small></span>
+  <input type="checkbox" class="nav-pref__input" data-pref="show_24h"{% if user_prefs and user_prefs.show_24h %} checked{% endif %}>
+  <span class="nav-pref__sw" aria-hidden="true"></span>
+</label>
+{%- endmacro %}
 {% set ep = request.endpoint %}
 {# Menus: one grouped list per menu, rendered in both the desktop dropdown and
    the phone sheet. Each entry: (key, href, title, one-line description, icon).
@@ -176,6 +183,7 @@
           <span class="nav-profile__pic">{% if profile_photo_url %}<img src="{{ profile_photo_url }}" alt="" width="40" height="40">{% else %}{{ rm_icon('user') }}{% endif %}<i class="nav-profile__cam" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></i></span>
           <span class="nav-profile__txt"><strong>{{ session.get('username') or 'Your workspace' }}</strong><small data-photo-status>{{ 'Tap to change photo' if profile_photo_url else 'Tap to add a photo' }}</small></span>
         </button>
+        {{ pref_24h() }}
         {{ nav_tiles(account_groups) }}
         {{ nav_tiles(learn_groups) }}
       </div>
@@ -238,6 +246,7 @@
           <span class="nav-profile__pic">{% if profile_photo_url %}<img src="{{ profile_photo_url }}" alt="" width="44" height="44">{% else %}{{ rm_icon('user') }}{% endif %}<i class="nav-profile__cam" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></i></span>
           <span class="nav-profile__txt"><strong>{{ session.get('username') or 'Your workspace' }}</strong><small data-photo-status>{{ 'Tap to change photo' if profile_photo_url else 'Tap to add a photo' }}</small></span>
         </button>
+      {{ pref_24h(' is-sheet') }}
       <div class="rm-sheet">{{ nav_tiles(account_groups) }}</div>
       <form action="{{ url_for('logout') }}" method="post" class="mobile-logout-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
