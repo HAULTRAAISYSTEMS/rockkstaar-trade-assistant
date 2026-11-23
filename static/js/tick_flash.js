@@ -96,21 +96,61 @@
     byEl.set(el, val.v);
     if (key) byKey.set(key, val.v);
     if (quiet || prev === undefined || prev === val.v) return;
-    flash(el, val.v > prev);
-    flashName(el, val.v > prev);
+    var up = val.v > prev;
+    // Bigger moves glow harder: a 1% jump in price (or a full point on a %)
+    // is a full-strength flash; a penny tick is a soft one.
+    var rel = val.pct ? Math.abs(val.v - prev) : Math.abs(val.v - prev) / Math.max(Math.abs(prev), 1e-9) * 100;
+    el.style.setProperty('--tf-k', (0.55 + Math.min(1, rel / 1) * 0.75).toFixed(2));
+    // Streaks: three or more ticks the same way and the number runs hot.
+    var sk = key || el, st = streaks.get(sk) || { dir: 0, n: 0 };
+    st = st.dir === (up ? 1 : -1) ? { dir: st.dir, n: st.n + 1 } : { dir: up ? 1 : -1, n: 1 };
+    streaks.set(sk, st);
+    flash(el, up);
+    el.classList.toggle('tf-hot', st.n >= 3);
+    flashName(el, up, val.v - prev, val.pct, st.n);
+  }
+  var streaks = new Map();
+
+  // A small delta floats off the number and fades: "▲ +0.42" / "▼ −0.15%".
+  var pops = 0;
+  function popDelta(el, up, d, pct) {
+    if (!on() || pops > 8 || document.hidden) return;
+    var r = el.getBoundingClientRect();
+    if (!r.width || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) return;
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var p = document.createElement('span');
+    p.className = 'tf-pop ' + (up ? 'is-up' : 'is-dn');
+    var a = Math.abs(d), txt = a >= 100 ? a.toFixed(0) : a >= 1 ? a.toFixed(2) : a.toFixed(a >= 0.01 ? 2 : 4);
+    p.textContent = (up ? '▲ +' : '▼ −') + txt + (pct ? '%' : '');
+    p.style.left = Math.round(r.left + r.width / 2) + 'px';
+    // Up rises from above the number; down sinks from below it. Never on top of it.
+    p.style.top = Math.round(up ? r.top - 3 : r.bottom + 3) + 'px';
+    p.setAttribute('aria-hidden', 'true');
+    (document.fullscreenElement || document.body).appendChild(p);
+    pops++;
+    setTimeout(function () { p.remove(); pops--; }, 1100);
   }
 
   // The ticker's name glows with its number (once per row per tick).
   var nameAt = new WeakMap();
-  function flashName(el, up) {
+  function flashName(el, up, d, pct, streak) {
     var ht = hostTicker(el); if (!ht || !ht.t) return;
     var now = Date.now(); if (now - (nameAt.get(ht.host) || 0) < 300) return;
     nameAt.set(ht.host, now);
+    popDelta(el, up, d, pct);                           // one floating delta per row per tick
     var want = String(ht.t).toUpperCase(), all = [ht.host].concat(Array.prototype.slice.call(ht.host.getElementsByTagName('*'), 0, 60));
     for (var i = 0; i < all.length; i++) {
       var n = all[i], own = '';
       for (var c = n.firstChild; c; c = c.nextSibling) if (c.nodeType === 3) own += c.nodeValue;
-      if (own.trim().toUpperCase() === want) { flashTo(n, up, 'tf-name-'); return; }
+      if (own.trim().toUpperCase() === want) {
+        // The name carries the streak badge ("▲4") once a run reaches three.
+        if (streak >= 3) {
+          n.setAttribute('data-tf-streak', (up ? '▲' : '▼') + streak);
+          n.classList.add('tf-hot');
+          if (getComputedStyle(n).position === 'static') n.style.position = 'relative';
+        } else { n.removeAttribute('data-tf-streak'); n.classList.remove('tf-hot'); }
+        flashTo(n, up, 'tf-name-'); return;
+      }
     }
   }
   function flashTo(el, up, prefix) {

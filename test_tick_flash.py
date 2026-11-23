@@ -56,3 +56,11 @@ def test_the_ticker_name_glows_with_its_number():
     css = (ROOT / "static/css/tick_flash.css").read_text()
     assert "flashName(el, val.v > prev)" in js and "'tf-name-'" in js
     assert "@keyframes tfNameUp" in css and "@keyframes tfNameDn" in css
+
+
+def test_creative_extras_size_delta_and_streak():
+    js = (ROOT / "static/js/tick_flash.js").read_text()
+    css = (ROOT / "static/css/tick_flash.css").read_text()
+    assert "--tf-k" in js and "var(--tf-k, 1)" in css          # bigger moves glow harder
+    assert "function popDelta" in js and ".tf-pop" in css       # floating delta
+    assert "data-tf-streak" in js and "tfHotUp" in css          # streak badge on the name

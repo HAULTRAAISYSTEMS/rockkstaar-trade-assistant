@@ -3,11 +3,11 @@
 .tf-up { animation: tfUp 1.3s ease-out; }
 .tf-dn { animation: tfDn 1.3s ease-out; }
 @keyframes tfUp {
-  0%, 25% { background-color: rgba(34, 197, 139, .45); box-shadow: 0 0 0 2px rgba(34, 197, 139, .38), 0 0 16px rgba(34, 227, 154, .55); text-shadow: 0 0 10px rgba(34, 227, 154, .9); }
+  0%, 25% { background-color: rgba(34, 197, 139, calc(.36 * var(--tf-k, 1))); box-shadow: 0 0 0 2px rgba(34, 197, 139, calc(.32 * var(--tf-k, 1))), 0 0 calc(10px + 12px * var(--tf-k, 1)) rgba(34, 227, 154, calc(.45 * var(--tf-k, 1))); text-shadow: 0 0 10px rgba(34, 227, 154, .9); }
   100% { background-color: rgba(34, 197, 139, 0); box-shadow: 0 0 0 2px rgba(34, 197, 139, 0), 0 0 16px rgba(34, 227, 154, 0); text-shadow: none; }
 }
 @keyframes tfDn {
-  0%, 25% { background-color: rgba(255, 77, 69, .45); box-shadow: 0 0 0 2px rgba(255, 77, 69, .38), 0 0 16px rgba(255, 84, 112, .55); text-shadow: 0 0 10px rgba(255, 84, 112, .9); }
+  0%, 25% { background-color: rgba(255, 77, 69, calc(.36 * var(--tf-k, 1))); box-shadow: 0 0 0 2px rgba(255, 77, 69, calc(.32 * var(--tf-k, 1))), 0 0 calc(10px + 12px * var(--tf-k, 1)) rgba(255, 84, 112, calc(.45 * var(--tf-k, 1))); text-shadow: 0 0 10px rgba(255, 84, 112, .9); }
   100% { background-color: rgba(255, 77, 69, 0); box-shadow: 0 0 0 2px rgba(255, 77, 69, 0), 0 0 16px rgba(255, 84, 112, 0); text-shadow: none; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -29,3 +29,26 @@ html[data-tick-flash="0"] .tf-up, html[data-tick-flash="0"] .tf-dn { animation: 
 }
 @media (prefers-reduced-motion: reduce) { .tf-name-up, .tf-name-dn { animation: none; } }
 html[data-tick-flash="0"] .tf-name-up, html[data-tick-flash="0"] .tf-name-dn { animation: none; }
+
+/* Floating delta: rises (up) or sinks (down) off the number and fades. */
+.tf-pop { position: fixed; z-index: 2147482000; transform: translate(-50%, -100%); pointer-events: none; white-space: nowrap;
+  padding: 1px 6px; border-radius: 6px; font: 800 10.5px/1.3 var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  background: rgba(4, 10, 22, .85); border: 1px solid currentColor; }
+.tf-pop.is-up { color: #3ee0a1; animation: tfPopUp 1.1s ease-out forwards; box-shadow: 0 0 12px rgba(34, 227, 154, .45); }
+.tf-pop.is-dn { color: #ff7b73; animation: tfPopDn 1.1s ease-out forwards; box-shadow: 0 0 12px rgba(255, 84, 112, .45); }
+@keyframes tfPopUp { 0% { opacity: 0; transform: translate(-50%, -60%) scale(.8); } 15% { opacity: 1; transform: translate(-50%, -110%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -230%); } }
+@keyframes tfPopDn { 0% { opacity: 0; transform: translate(-50%, -40%) scale(.8); } 15% { opacity: 1; transform: translate(-50%, 10%) scale(1); } 100% { opacity: 0; transform: translate(-50%, 120%); } }
+
+/* Streak: three or more ticks the same way - the number runs hot. */
+.tf-hot.tf-name-up { animation: tfNameUp 1.3s ease-out, tfHotUp 1.3s ease-out; }
+.tf-hot.tf-name-dn { animation: tfNameDn 1.3s ease-out, tfHotDn 1.3s ease-out; }
+@keyframes tfHotUp { 0%, 40% { outline: 1px solid rgba(125, 255, 198, .9); outline-offset: 2px; } 100% { outline: 1px solid rgba(125, 255, 198, 0); outline-offset: 5px; } }
+@keyframes tfHotDn { 0%, 40% { outline: 1px solid rgba(255, 154, 146, .9); outline-offset: 2px; } 100% { outline: 1px solid rgba(255, 154, 146, 0); outline-offset: 5px; } }
+.tf-hot[data-tf-streak].tf-name-up::after, .tf-hot[data-tf-streak].tf-name-dn::after {
+  content: attr(data-tf-streak); position: absolute; right: -6px; top: -9px; padding: 0 4px; border-radius: 5px;
+  font: 800 8.5px/1.4 var(--font-mono, monospace); color: #04131a; pointer-events: none; animation: tfFade 1.3s ease-out forwards; }
+.tf-hot[data-tf-streak].tf-name-up::after { background: #3ee0a1; }
+.tf-hot[data-tf-streak].tf-name-dn::after { background: #ff7b73; }
+@keyframes tfFade { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .tf-pop { display: none; } .tf-hot.tf-name-up, .tf-hot.tf-name-dn { animation: none; } }
+html[data-tick-flash="0"] .tf-pop { display: none; }
