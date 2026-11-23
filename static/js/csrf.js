@@ -66,14 +66,25 @@
     for (var i = 0; i < fields.length; i++) { fields[i].value = next; }
   }
 
+  // Never wait on the refresh for long: a sign-in that sat open, then hung
+  // on this request, left the button doing nothing with no error at all.
+  // After a few seconds the form posts with the token it has; the server
+  // explains if that one is stale.
+  var SYNC_WAIT_MS = 4000;
   function syncToken() {
     if (typeof nativeFetch !== "function") { return Promise.resolve(); }
-    return nativeFetch.call(window, "/api/csrf-token", {
+    var ctl = typeof AbortController === "function" ? new AbortController() : null;
+    var req = nativeFetch.call(window, "/api/csrf-token", {
       credentials: "same-origin", cache: "no-store",
-      headers: { "Accept": "application/json" }
+      headers: { "Accept": "application/json" },
+      signal: ctl ? ctl.signal : undefined
     }).then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) { if (d && d.token) { applyToken(d.token); syncedAt = Date.now(); } })
       .catch(function () { /* post with what we have; the server explains */ });
+    var giveUp = new Promise(function (resolve) {
+      setTimeout(function () { if (ctl) { try { ctl.abort(); } catch (e) {} } resolve(); }, SYNC_WAIT_MS);
+    });
+    return Promise.race([req, giveUp]);
   }
 
   window.addEventListener("pageshow", function (e) {
@@ -92,8 +103,11 @@
     if (form.__csrfFresh) { form.__csrfFresh = false; return; }
     if (Date.now() - syncedAt < STALE_MS) { return; }
     e.preventDefault();
+    if (form.__csrfSyncing) { return; }
+    form.__csrfSyncing = true;
     var submitter = e.submitter || null;
     syncToken().then(function () {
+      form.__csrfSyncing = false;
       // Resume with the native form submission. requestSubmit() can fire
       // another submit event and silently fail on some suspended iOS webviews.
       // The original submit event already passed browser constraint validation.

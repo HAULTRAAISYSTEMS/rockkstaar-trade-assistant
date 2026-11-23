@@ -104,3 +104,13 @@ def test_forms_refresh_their_token_before_posting():
     assert "/api/csrf-token" in js and "e.persisted" in js and "requestSubmit" in js
     for page in ("templates/login.html", "templates/register.html"):
         assert "js/csrf.js" in open(page).read()
+
+
+def test_a_hung_token_refresh_never_blocks_sign_in():
+    """A sign-in page left open re-fetches its token before posting. When
+    that request hung, the button did nothing and showed no error; the form
+    now posts anyway after a few seconds."""
+    from pathlib import Path
+    js = (Path(__file__).parent / "static/js/csrf.js").read_text(encoding="utf-8")
+    assert "var SYNC_WAIT_MS = 4000;" in js and "Promise.race([req, giveUp])" in js
+    assert "ctl.abort()" in js and "form.__csrfSyncing" in js
