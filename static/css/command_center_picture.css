@@ -796,3 +796,31 @@ html.cc27 .liq-page.cmd27 .cmd27-nx--in .nx-list { display: flex !important; fle
 .cmd27-chip.is-low .cmd27-chip__pop { top: auto; bottom: calc(100% + 7px); transform: translate(-50%, 4px); }
 .cmd27-chip.is-low:hover .cmd27-chip__pop, .cmd27-chip.is-low:focus-visible .cmd27-chip__pop { transform: translate(-50%, 0); }
 @media (max-width: 760px) { .cmd27-chip__usd { display: none; } .cmd27-chip__w { font-size: 9px; padding: 1px 4px; } }
+
+/* Chip hover card, v2: a small labelled table that always fits its text. */
+.cmd27-chip .cmd27-chip__pop { display: flex; flex-direction: column; align-items: stretch; gap: 4px; grid-template-columns: none;
+  min-width: 212px; max-width: 280px; padding: 10px 12px 9px; border-radius: 14px; white-space: normal; text-align: left;
+  font: 600 11.5px/1.35 var(--font-mono, "IBM Plex Mono", monospace); letter-spacing: 0;
+  background: linear-gradient(160deg, rgba(22, 36, 66, .97), rgba(6, 12, 26, .98)); border: 1px solid rgba(170, 215, 255, .22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 18px 36px -14px rgba(0, 0, 0, .95); }
+.cmd27-chip__pop .p-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cmd27-chip__pop .p-head strong { font: 800 13px/1 var(--font-mono, monospace); color: #fff; letter-spacing: .04em; }
+.cmd27-chip__pop .p-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 999px; font: 700 9.5px/1.2 var(--font-ui, inherit);
+  font-style: normal; letter-spacing: .08em; text-transform: uppercase; color: #a9b6c9; background: rgba(255, 255, 255, .07); }
+.cmd27-chip__pop .p-tag.is-overnight { color: #c9b8ff; background: rgba(150, 120, 255, .18); }
+.cmd27-chip__pop .p-tag.is-post { color: #ffc98a; background: rgba(255, 170, 80, .16); }
+.cmd27-chip__pop .p-tag.is-pre { color: #ffe08a; background: rgba(255, 210, 90, .16); }
+.cmd27-chip__pop .p-big { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 2px 0 4px;
+  border-bottom: 1px solid rgba(170, 215, 255, .12); }
+.cmd27-chip__pop .p-big strong { font: 800 17px/1.1 var(--font-mono, monospace); color: #fff; }
+.cmd27-chip__pop .p-big em { font-style: normal; font-weight: 700; font-size: 11.5px; white-space: nowrap; }
+.cmd27-chip__pop .p-line { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+.cmd27-chip__pop .p-line i { font-style: normal; font: 500 11px var(--font-ui, inherit); color: #8fa3bd; white-space: nowrap; }
+.cmd27-chip__pop .p-line b { font-weight: 700; color: #e6edf7; white-space: nowrap; text-align: right; }
+.cmd27-chip__pop .up { color: var(--c-up) !important; } .cmd27-chip__pop .dn { color: var(--c-dn) !important; }
+.cmd27-chip__pop .warn { color: var(--c-gold, #f5c451) !important; }
+.cmd27-chip__pop .p-sep { display: block; height: 1px; margin: 3px 0; background: rgba(170, 215, 255, .12); }
+.cmd27-chip__pop .p-hint { margin-top: 3px; font: 500 9.5px var(--font-ui, inherit); color: #6f839d; }
+.cmd27-chip__pop .p-tag svg { width: 9px; height: 9px; }
+/* Touch screens have no hover: the card would only widen the page. Long-press opens the menu. */
+@media (max-width: 760px), (hover: none) { .cmd27-chip .cmd27-chip__pop { display: none; } }

@@ -105,20 +105,22 @@
   // Hover card for a holding: shares and cost, unrealized, buy zone, alerts.
   function holdingRows(q) {
     var sym = String(q.symbol).toUpperCase(), out = '';
-    if (num(q.shares)) out += '<span class="p-row">' + (+q.shares.toFixed(4)) + ' sh' + (num(q.avg_cost) ? ' · avg $' + q.avg_cost.toFixed(2) : '') + '</span>';
-    if (num(q.value)) out += '<span class="p-row">Worth ' + money0(q.value) + '</span>';
-    if (num(q.unrealized)) out += '<span class="p-row">Unrealized <em class="' + (q.unrealized < 0 ? 'dn' : 'up') + '">' + money0(q.unrealized, true) + (num(q.unrealized_pct) ? ' (' + pct(q.unrealized_pct) + ')' : '') + '</em></span>';
+    function line(label, value, cls) { return '<span class="p-line"><i>' + label + '</i><b' + (cls ? ' class="' + cls + '"' : '') + '>' + value + '</b></span>'; }
+    if (num(q.shares)) out += line('Shares', String(+q.shares.toFixed(4)));
+    if (num(q.avg_cost)) out += line('Avg cost', '$' + q.avg_cost.toFixed(2));
+    if (num(q.value)) out += line('Worth', money0(q.value) + (num(q.weight) ? ' · ' + q.weight.toFixed(q.weight < 10 ? 1 : 0) + '%' : ''));
+    if (num(q.unrealized)) out += line('Unrealized', money0(q.unrealized, true) + (num(q.unrealized_pct) ? ' (' + pct(q.unrealized_pct) + ')' : ''), q.unrealized < 0 ? 'dn' : 'up');
     var z = (window.__cmd27Zones || {})[sym], px = num(q.price) ? q.price : (z && z.price);
     if (z && z.available && num(z.accum_top) && num(px)) {
-      var zl = { load: 'In the LOAD zone', accumulate: 'In the buy zone' }[z.zone];
-      out += '<span class="p-row">' + (zl || ((px / z.accum_top - 1) * 100).toFixed(1) + '% above the buy zone ($' + z.accum_top.toFixed(2) + ')') + '</span>';
+      var zl = { load: 'In LOAD zone', accumulate: 'In buy zone' }[z.zone];
+      out += line('Buy zone', zl || '+' + ((px / z.accum_top - 1) * 100).toFixed(1) + '% above $' + z.accum_top.toFixed(2), zl ? 'up' : '');
     }
     var al = (window.__cmd27Alerts || []).filter(function (a) { return String(a.ticker).toUpperCase() === sym && a.enabled && !a.triggered_at && num(Number(a.price)); });
     if (al.length && num(px)) {
       var below = al.filter(function (a) { return a.price < px; }).sort(function (a, b) { return b.price - a.price; })[0];
       var above = al.filter(function (a) { return a.price >= px; }).sort(function (a, b) { return a.price - b.price; })[0];
-      if (below) out += '<span class="p-row">Alert ↓ $' + Number(below.price).toFixed(2) + ' <em class="dn">' + pct((below.price / px - 1) * 100) + '</em></span>';
-      if (above) out += '<span class="p-row">Alert ↑ $' + Number(above.price).toFixed(2) + ' <em class="up">' + pct((above.price / px - 1) * 100) + '</em></span>';
+      if (below) out += line('Alert ↓', '$' + Number(below.price).toFixed(2) + ' (' + pct((below.price / px - 1) * 100) + ')', 'dn');
+      if (above) out += line('Alert ↑', '$' + Number(above.price).toFixed(2) + ' (' + pct((above.price / px - 1) * 100) + ')', 'up');
     }
     return out ? '<span class="p-sep"></span>' + out : '';
   }
@@ -249,35 +251,44 @@
       if (useX) { var g = document.createElement('i'); g.className = 'cmd27-chip__sess is-' + q.ext; g.setAttribute('aria-label', SESS[q.ext]); g.innerHTML = GLYPH[q.ext] || ''; small.appendChild(g); }
       small.appendChild(document.createTextNode(pct(shown)));
       el.style.setProperty('--mag', num(shown) ? Math.min(1, Math.abs(shown) / 10).toFixed(3) : '0');
+      // Hover / focus card: a small labelled table, one fact per line.
       var px = useX ? q.ext_price : q.price, pop = document.createElement('b');
       pop.className = 'cmd27-chip__pop';
-      var rows = '';
+      function line(label, value, cls) { return '<span class="p-line"><i>' + label + '</i><b' + (cls ? ' class="' + cls + '"' : '') + '>' + value + '</b></span>'; }
+      var head = '<span class="p-head"><strong>' + esc(sym) + '</strong>' +
+        (useX ? '<i class="p-tag is-' + q.ext + '">' + (GLYPH[q.ext] || '') + esc(xl) + '</i>' : '<i class="p-tag">' + (num(q.weight) ? 'Holding' : 'Last session') + '</i>') + '</span>';
+      var big = '';
       if (num(px) && px > 0) {
         var d$ = num(shown) ? px - px / (1 + shown / 100) : null;
-        rows += '<span class="p-px">$' + px.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' +
-          (num(d$) ? '<span class="p-d ' + (d$ < 0 ? 'dn' : 'up') + '">' + (d$ > 0 ? '+' : d$ < 0 ? '−' : '') + Math.abs(d$).toFixed(2) + '</span>' : '');
+        big = '<span class="p-big"><strong>$' + px.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</strong>' +
+          (num(shown) ? '<em class="' + (shown < 0 ? 'dn' : 'up') + '">' + (num(d$) ? (d$ > 0 ? '+' : d$ < 0 ? '−' : '') + Math.abs(d$).toFixed(2) + ' · ' : '') + pct(shown) + '</em>' : '') + '</span>';
       }
-      if (useX && num(chg)) rows += '<span class="p-alt">Last session <em class="' + (chg < 0 ? 'dn' : 'up') + '">' + pct(chg) + '</em></span>';
-      else if (!useX && xl && num(xp)) rows += '<span class="p-alt">' + SESS[q.ext] + ' <em class="' + (xp < 0 ? 'dn' : 'up') + '">' + pct(xp) + '</em></span>';
-      if (useX) rows += '<span class="p-sess">' + SESS[q.ext] + '</span>';
-      if (rows) { pop.innerHTML = rows; el.appendChild(pop); }
+      var rows = '';
+      if (useX) rows += line(SESS[q.ext], pct(xp), xp < 0 ? 'dn' : 'up');
+      if (useX && num(chg)) rows += line('Last session', pct(chg), chg < 0 ? 'dn' : 'up');
+      else if (!useX && xl && num(xp)) rows += line(SESS[q.ext], pct(xp), xp < 0 ? 'dn' : 'up');
+      if (fl === 'alert') rows += line('Price alert', 'Hit', 'warn');
+      if (fl === 'zone') rows += line('Buy zone', esc(flags.zone[sym] || 'In zone'), 'up');
+      if (ek) rows += line('Earnings', ek === 'TODAY' ? 'Today' : 'In ' + esc(ek));
+      pop.innerHTML = head + big + rows;
+      el.appendChild(pop);
       if (num(q.weight)) {
         // Holdings: what the move did to your money, then your weight.
         var usd = useX ? q.ext_dollars : q.dollars;
-        if (num(usd)) { var u = document.createElement('b'); u.className = 'cmd27-chip__usd ' + (usd < 0 ? 'is-dn' : 'is-up'); u.textContent = money0(usd, true); el.insertBefore(u, pop.parentNode ? pop : null); }
+        if (num(usd)) { var u = document.createElement('b'); u.className = 'cmd27-chip__usd ' + (usd < 0 ? 'is-dn' : 'is-up'); u.textContent = money0(usd, true); el.insertBefore(u, pop); }
         var w = document.createElement('em'); w.className = 'cmd27-chip__w'; w.textContent = q.weight.toFixed(q.weight < 10 ? 1 : 0) + '%'; w.title = 'of your portfolio';
-        el.insertBefore(w, pop.parentNode ? pop : null);
-        if (!pop.parentNode) { pop.innerHTML = ''; el.appendChild(pop); }
-        pop.innerHTML += holdingRows(q);
+        el.insertBefore(w, pop);
+        pop.insertAdjacentHTML('beforeend', holdingRows(q));
       }
       var tagTxt = fl === 'alert' ? 'HIT' : (fl === 'zone' ? flags.zone[sym] : ek);
       if (tagTxt) {
         var tg = document.createElement('i'); tg.className = 'cmd27-chip__tag' + (fl ? ' is-' + fl : ''); tg.textContent = tagTxt; el.appendChild(tg);
       }
-      el.title = (m[sym] || mode === 'portfolio' ? 'Spin the globe to ' : 'Open the chart for ') + sym +
+      pop.insertAdjacentHTML('beforeend', '<span class="p-hint">' + (m[sym] || mode === 'portfolio' ? 'Click to spin the globe' : 'Click to open the chart') + ' · right-click for more</span>');
+      el.setAttribute('aria-label', (m[sym] || mode === 'portfolio' ? 'Spin the globe to ' : 'Open the chart for ') + sym +
         (useX && num(chg) ? ' · last session ' + pct(chg) : '') +
         (!useX && xl && num(xp) ? ' · ' + ({ PRE: 'pre-market', AH: 'after hours', '24H': 'overnight (24H)' })[xl] + ' ' + pct(xp) + ' (turn on 24H prices in your profile menu to show it)' : '') +
-        (fl === 'alert' ? ' · price alert hit' : fl === 'zone' ? ' · in its buy zone' : '') + (ek ? ' · reports ' + (ek === 'TODAY' ? 'today' : 'in ' + ek) : '');
+        (fl === 'alert' ? ' · price alert hit' : fl === 'zone' ? ' · in its buy zone' : '') + (ek ? ' · reports ' + (ek === 'TODAY' ? 'today' : 'in ' + ek) : ''));
       function go() {
         if (m[sym] || mode === 'portfolio') document.dispatchEvent(new CustomEvent('cmd27:focus', { detail: { symbol: sym } }));
         else if (chartUrl) location.href = chartUrl.replace('__T__', encodeURIComponent(sym));
@@ -793,7 +804,7 @@
   function renderSum() {
     var d = sumD, isP = mode === 'portfolio' && d && !d.empty;
     if (obar) { obar.hidden = !!isP; obar.style.display = isP ? 'none' : ''; }
-    if (psum) psum.hidden = !isP;
+    if (psum) { psum.hidden = !isP; psum.style.display = isP ? '' : 'none'; }
     var cbox = document.getElementById('gp-conc'), c = d && !d.empty ? concentration(d) : null;
     if (cbox) {
       cbox.hidden = !c;
