@@ -395,7 +395,19 @@
     .then(function (d) { if (d && d.ok) { orbit = d.tickers || []; orbitLoaded = true; announce(); renderOrbit(); setTimeout(loadOrbitQuotes, 1500); } })
     .catch(function () {});
   // The globe's pins come from the shared tape; chips follow it too.
-  document.addEventListener('tradestaar:tape', function (e) { if (Array.isArray(e.detail) && e.detail.length) { lastItems = e.detail; renderOrbit(); } });
+  function setLiveBadge(live) {
+    var badge = $('#cmd27-live'), txt = $('#cmd27-live-text'); if (!badge || !txt) return;
+    badge.classList.toggle('is-live', live); badge.classList.toggle('is-snapshot', !live);
+    var t = live ? 'Live market · real-time' : 'Latest available';
+    if (txt.textContent !== t) txt.textContent = t;
+  }
+  // The badge follows /api/market-tape's own live flag (polled every 30 s),
+  // so it turns live once the feed is pricing the tape in a trading session.
+  document.addEventListener('tradestaar:tape', function (e) {
+    if (Array.isArray(e.detail) && e.detail.length) {
+      lastItems = e.detail; renderOrbit();
+    }
+  });
 
   function loadTape() {
     fetch('/api/market-tape', { credentials: 'same-origin', cache: 'no-store' })
@@ -404,12 +416,7 @@
         if (!d) return;
         var items = Array.isArray(d) ? d : (d.items || d.tape || d.quotes || []);
         if (items.length) applyQuotes(items);
-        var live = d.live === true || d.fast_live === true;
-        var badge = $('#cmd27-live'), txt = $('#cmd27-live-text');
-        if (badge && txt && typeof d.live === 'boolean') {
-          badge.classList.toggle('is-live', live); badge.classList.toggle('is-snapshot', !live);
-          txt.textContent = live ? 'Live market · real-time' : 'Latest available';
-        }
+        if (typeof d.live === 'boolean') setLiveBadge(d.live === true || d.fast_live === true);
       }).catch(function () {});
   }
 
@@ -685,6 +692,18 @@
     });
     window.__cmd27Money = value;
     var dayPct = base > 0 ? day / base * 100 : null;
+    // The My Portfolio card on the globe (the phone's main view) ticks too.
+    var unr = null;
+    if (mode !== 'close') {
+      var u = 0, c = 0, k = 0;
+      (d.holdings || []).forEach(function (h) {
+        if (!num(h.cost_basis) || !num(h.shares)) return;
+        var q = LQ[h.ticker], px = q && num(q.price) ? q.price : h.price;
+        if (!num(px)) return;
+        u += px * h.shares - h.cost_basis; c += h.cost_basis; k++;
+      });
+      if (k) unr = { dollars: u, pct: c > 0 ? u / c * 100 : null };
+    }
     var lbl = mode === 'live' ? 'Today <i class="cmd27-mdot" aria-label="live"></i>' :
       mode === 'ext' ? ({ pre: 'Pre-market', post: 'After hours', overnight: '24H' }[session] || '24H') + ' <i class="cmd27-mdot is-ext" aria-hidden="true"></i>' :
       (d.day_label ? d.day_label + ' close' : 'Today');
@@ -695,6 +714,10 @@
     drawSpark();
     rows.sort(function (a, b) { return a.pct - b.pct; });
     var best = rows[rows.length - 1], worst = rows[0];
+    document.dispatchEvent(new CustomEvent('cmd27:money-live', { detail: mode === 'close' ? null : {
+      value: value, day: day, day_pct: dayPct, best: best || null, worst: worst || null,
+      unrealized: unr, label: mode === 'live' ? 'Today' : ({ pre: 'Pre-market', post: 'After hours', overnight: '24H' }[session] || '24H'),
+      ext: mode === 'ext' } }));
     if (best) {
       setTile('best', best.ticker, '<span>' + pct(best.pct) + '</span> · <span>' + cents(best.dollars, true) + '</span>', best.pct, null, best.ticker);
       if (lastBest && lastBest !== best.ticker) swapFx('best');
@@ -907,6 +930,7 @@
     if (w1 >= 30) return { names: [a.ticker], w: w1, hit: (a.value || 0) * 0.10 };
     return null;
   }
+  var liveSum = null;
   function renderSum() {
     var d = sumD, isP = mode === 'portfolio' && d && !d.empty;
     if (obar) { obar.hidden = !!isP; obar.style.display = isP ? 'none' : ''; }
@@ -921,26 +945,40 @@
       }
     }
     if (!isP || !psum) return;
-    var useX = on24() && d.ext_count > 0 && nm(d.ext_dollars);
+    var L = liveSum;
+    var useX = !L && on24() && d.ext_count > 0 && nm(d.ext_dollars);
     var hs = d.holdings || [], unr = 0, cost = 0, kn = 0;
     hs.forEach(function (h) { if (nm(h.unrealized) && nm(h.cost_basis)) { unr += h.unrealized; cost += h.cost_basis; kn++; } });
-    var best = d.best, worst = d.worst;
+    var unrPct = cost > 0 ? unr / cost * 100 : null;
+    if (L && L.unrealized) { unr = L.unrealized.dollars; unrPct = L.unrealized.pct; kn = kn || 1; }
+    var best = L ? L.best : d.best, worst = L ? L.worst : d.worst;
+    var value = L ? L.value : d.value, dayD = L ? L.day : d.day_dollars, dayP = L ? L.day_pct : d.day_pct;
+    var dayLbl = L ? L.label + ' <i class="cmd27-mdot' + (L.ext ? ' is-ext' : '') + '" aria-hidden="true"></i>' : e2(d.day_label ? d.day_label + ' close' : 'Today');
     if (useX) {
       var xs = hs.filter(function (h) { return nm(h.ext_pct); }).sort(function (a, b) { return a.ext_pct - b.ext_pct; });
       if (xs.length) { worst = { ticker: xs[0].ticker, pct: xs[0].ext_pct, dollars: xs[0].ext_dollars }; best = { ticker: xs[xs.length - 1].ticker, pct: xs[xs.length - 1].ext_pct, dollars: xs[xs.length - 1].ext_dollars }; }
     }
     var html = '<header><span>My portfolio</span><small>' + (d.positions || hs.length) + ' positions' + (d.source === 'schwab' ? ' · Schwab' : '') + '</small></header>' +
-      '<strong class="psum-val">' + usd(d.value) + '</strong>' +
+      '<strong class="psum-val"><span>' + usd2(value) + '</span></strong>' +
       '<div class="psum-rows">' +
-      '<div><span>' + e2(d.day_label ? d.day_label + ' close' : 'Today') + '</span><b class="' + tn(d.day_dollars) + '">' + usd(d.day_dollars, true) + ' <small>' + pc(d.day_pct) + '</small></b></div>' +
-      (d.ext_count ? '<div class="' + (useX ? 'is-on' : 'is-off') + '"><span><i class="psum-moon" aria-hidden="true"></i>24H</span><b class="' + tn(d.ext_dollars) + '">' + usd(d.ext_dollars, true) + ' <small>' + pc(d.ext_pct) + '</small></b></div>' : '') +
-      (kn ? '<div><span>Unrealized</span><b class="' + tn(unr) + '">' + usd(unr, true) + ' <small>' + pc(cost > 0 ? unr / cost * 100 : null) + '</small></b></div>' : '') +
+      '<div><span>' + dayLbl + '</span><b class="' + tn(dayD) + '"><span>' + usd2(dayD, true) + '</span> <small>' + pc(dayP) + '</small></b></div>' +
+      (d.ext_count && !L ? '<div class="' + (useX ? 'is-on' : 'is-off') + '"><span><i class="psum-moon" aria-hidden="true"></i>24H</span><b class="' + tn(d.ext_dollars) + '"><span>' + usd2(d.ext_dollars, true) + '</span> <small>' + pc(d.ext_pct) + '</small></b></div>' : '') +
+      (kn ? '<div><span>Unrealized</span><b class="' + tn(unr) + '"><span>' + usd2(unr, true) + '</span> <small>' + pc(unrPct) + '</small></b></div>' : '') +
       (nm(d.cash) && d.cash > 0 ? '<div><span>Cash</span><b>' + usd(d.cash) + '</b></div>' : '') +
       '</div>' +
-      (best && worst && best.ticker !== worst.ticker ? '<div class="psum-bw"><span class="up">▲ ' + e2(best.ticker) + ' ' + pc(best.pct) + '</span><span class="dn">▼ ' + e2(worst.ticker) + ' ' + pc(worst.pct) + '</span></div>' : '') +
+      // Best and worst are ranks, not directions: color each by its own move,
+      // so a worst holding that is still up reads green.
+      (best && worst && best.ticker !== worst.ticker ? '<div class="psum-bw"><span class="' + (tn(best.pct) || 'flat') + '"><small>Best</small> ' + e2(best.ticker) + ' <em>' + pc(best.pct) + '</em></span><span class="' + (tn(worst.pct) || 'flat') + '"><small>Worst</small> ' + e2(worst.ticker) + ' <em>' + pc(worst.pct) + '</em></span></div>' : '') +
       (useX ? '<p class="psum-note">Showing overnight / extended-hours moves (24H prices is on)</p>' : '');
-    psum.innerHTML = html;
+    if (psum.innerHTML !== html) psum.innerHTML = html;
+    if (!psum.hasAttribute('data-sym')) psum.setAttribute('data-sym', 'MY-PSUM');   // stable keys for the price flash
   }
+  function usd2(v, sign) {     // to the cent, so the live total visibly ticks
+    if (!nm(v)) return '—';
+    var a = Math.abs(v), t = a.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (sign ? (v > 0 ? '+' : v < 0 ? '−' : '') : (v < 0 ? '−' : '')) + '$' + t;
+  }
+  document.addEventListener('cmd27:money-live', function (e) { liveSum = e.detail; if (mode === 'portfolio') renderSum(); });
   document.addEventListener('cmd27:portfolio-summary', function (e) { sumD = e.detail; renderSum(); });
   (function () { var gw = document.getElementById('gp-word'); if (gw && window.MutationObserver) new MutationObserver(function () { if (sumD) renderSum(); }).observe(gw, { childList: true, characterData: true, subtree: true }); })();
   document.addEventListener('cmd27:mode', function () { renderSum(); });

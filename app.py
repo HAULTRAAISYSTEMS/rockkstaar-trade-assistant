@@ -7784,7 +7784,17 @@ def api_market_tape():
                 items = _mkt.overlay_live_tape(items)
             except Exception as exc:
                 logger.debug("api_market_tape live overlay: %s", exc)
-        resp = jsonify({"ok": True, "items": items})
+        # The Command Center's "Live market" badge follows this: live when
+        # the shared feed is actually pricing the tape right now. It used to
+        # be fixed when the page rendered, so a page opened while the feed
+        # was warming up (just after a deploy) said "latest available" all day.
+        live = False
+        if _MKT_AVAILABLE and any(i.get("live") for i in items):
+            try:
+                live = _mkt.pulse_session() in ("pre", "regular", "post", "overnight")
+            except Exception:
+                live = False
+        resp = jsonify({"ok": True, "items": items, "live": live})
         resp.headers["Cache-Control"] = "no-store"
         return resp
     except Exception as exc:
