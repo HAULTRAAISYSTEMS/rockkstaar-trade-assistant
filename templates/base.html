@@ -7,7 +7,7 @@
 {%- elif _ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'schwab_account', 'brokers_page', 'browser_push.settings', 'admin_users') -%}{% set cc_theme = 'account' %}
 {%- elif _ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare', 'intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'thesis_view') or _ep.startswith(('live_research.', 'research_memory.', 'research_lab', 'research_workbench')) -%}{% set cc_theme = 'research' %}
 {%- else -%}{% set cc_theme = 'account' %}{%- endif %}
-<html lang="en" class="cc27 cc-scene{% if _ep not in ('liquidity_page',) %} cc-scene-dim{% endif %}{% if cc_theme == 'terminal' %} cc-scene-deep{% endif %}" data-cc-theme="{{ cc_theme }}" data-show-24h="{{ '1' if (user_prefs and user_prefs.show_24h) else '0' }}">
+<html lang="en" class="cc27 cc-scene{% if _ep not in ('liquidity_page',) %} cc-scene-dim{% endif %}{% if cc_theme == 'terminal' %} cc-scene-deep{% endif %}" data-cc-theme="{{ cc_theme }}" data-show-24h="{{ '1' if (user_prefs and user_prefs.show_24h) else '0' }}" data-tick-flash="{{ '0' if (user_prefs and user_prefs.flash_ticks is sameas false) else '1' }}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -37,6 +37,7 @@
   <script src="{{ url_for('static', filename='js/ticker_brief.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/context_menu.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/prefs.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/tick_flash.js') }}" defer></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/memory_save.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/quick_mode.css') }}" />
   <!-- Mobile / iPad responsive overrides — loaded last to take priority -->
@@ -60,6 +61,7 @@
   {# Floating glass cards on every page — last, so it styles every card. #}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/glass_2028.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/context_menu.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tick_flash.css') }}" />
 </head>
 <body class="{% block body_class %}{% endblock %}">
   <a class="workspace-skip" href="#workspace-main">Skip to content</a>

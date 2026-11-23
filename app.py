@@ -10801,16 +10801,19 @@ def api_ticker_menu_watchlist(ticker):
 # ── Display preferences (avatar menu) ──────────────────────────────────
 # show_24h: on the globe chips, show the pre-market / after-hours / 24H move
 # while those sessions trade, instead of the last regular-session move.
-_PREF_KEYS = {"show_24h": "pref_show_24h"}
+# flash_ticks: prices and % changes flash green / red when they tick (on by default).
+_PREF_KEYS = {"show_24h": "pref_show_24h", "flash_ticks": "pref_flash_ticks"}
+_PREF_DEFAULTS = {"show_24h": False, "flash_ticks": True}
 
 
 def _user_prefs(uid) -> dict:
     out = {}
     for name, key in _PREF_KEYS.items():
+        dflt = "1" if _PREF_DEFAULTS.get(name) else "0"
         try:
-            out[name] = (get_user_setting(uid, key, "0") or "0") == "1"
+            out[name] = (get_user_setting(uid, key, dflt) or dflt) == "1"
         except Exception:
-            out[name] = False
+            out[name] = _PREF_DEFAULTS.get(name, False)
     return out
 
 
@@ -10820,7 +10823,7 @@ def _inject_prefs():
         uid = current_user_id()
     except Exception:
         uid = None
-    return {"user_prefs": _user_prefs(uid) if uid else {k: False for k in _PREF_KEYS}}
+    return {"user_prefs": _user_prefs(uid) if uid else dict(_PREF_DEFAULTS)}
 
 
 @app.route("/api/account/prefs", methods=["GET", "POST"])
