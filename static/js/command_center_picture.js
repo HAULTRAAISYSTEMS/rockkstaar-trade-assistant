@@ -90,6 +90,12 @@
   // Tape quotes first; orbit-only tickers (not on any watchlist, e.g. VOO)
   // fall back to the orbit's own quotes.
   var orbitQ = {};
+  var SESS = { pre: 'Pre-market', post: 'After hours', overnight: 'Overnight (24H)' };
+  var GLYPH = {
+    overnight: '<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="M10.8 2.2a6 6 0 1 0 3 9.9A6.3 6.3 0 0 1 10.8 2.2z" fill="currentColor"/></svg>',
+    post: '<svg viewBox="0 0 16 16" width="11" height="10" aria-hidden="true"><path d="M3 11a5 5 0 0 1 10 0z" fill="currentColor"/><path d="M1 13.5h14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+    pre: '<svg viewBox="0 0 16 16" width="11" height="10" aria-hidden="true"><circle cx="8" cy="9" r="3.2" fill="currentColor"/><path d="M8 2.5v1.6M3 5l1.1 1.1M13 5l-1.1 1.1M1 13.5h14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>'
+  };
   function show24h() { return document.documentElement.getAttribute('data-show-24h') === '1'; }
   document.addEventListener('tradestaar:prefs', function () { renderOrbit(); });
   function bySym() {
@@ -204,18 +210,25 @@
       var useX = !!(xl && num(xp) && (show24h() || !num(chg))), shown = useX ? xp : chg;
       el.className = el.className.replace(/\bis-(down|up|flat)\b/, num(shown) ? (shown < 0 ? 'is-down' : 'is-up') : 'is-flat');
       el.firstChild.textContent = sym;
-      el.lastChild.textContent = (useX ? xl + ' ' : '') + pct(shown);
-      // Price and dollar change under the %, like a TradingView watchlist row
-      // (Last · Chg). The change is worked back from the same % and price.
-      var px = useX ? q.ext_price : q.price;
+      // Compact capsule: ticker · session glyph · %. A hairline under it
+      // grows with the size of the move (full width at 10%). Price, dollar
+      // change and the other session open in a small card on hover / focus.
+      var small = el.lastChild;
+      if (useX) { var g = document.createElement('i'); g.className = 'cmd27-chip__sess is-' + q.ext; g.setAttribute('aria-label', SESS[q.ext]); g.innerHTML = GLYPH[q.ext] || ''; small.appendChild(g); }
+      small.appendChild(document.createTextNode(pct(shown)));
+      el.style.setProperty('--mag', num(shown) ? Math.min(1, Math.abs(shown) / 10).toFixed(3) : '0');
+      var px = useX ? q.ext_price : q.price, pop = document.createElement('b');
+      pop.className = 'cmd27-chip__pop';
+      var rows = '';
       if (num(px) && px > 0) {
-        var d$ = num(shown) ? px - px / (1 + shown / 100) : null, pl = document.createElement('b');
-        pl.className = 'cmd27-chip__px';
-        pl.innerHTML = '<i></i><em></em>';
-        pl.firstChild.textContent = '$' + px.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        pl.lastChild.textContent = num(d$) ? (d$ > 0 ? '+' : d$ < 0 ? '−' : '') + Math.abs(d$).toFixed(2) : '';
-        el.appendChild(pl);
+        var d$ = num(shown) ? px - px / (1 + shown / 100) : null;
+        rows += '<span class="p-px">$' + px.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' +
+          (num(d$) ? '<span class="p-d ' + (d$ < 0 ? 'dn' : 'up') + '">' + (d$ > 0 ? '+' : d$ < 0 ? '−' : '') + Math.abs(d$).toFixed(2) + '</span>' : '');
       }
+      if (useX && num(chg)) rows += '<span class="p-alt">Last session <em class="' + (chg < 0 ? 'dn' : 'up') + '">' + pct(chg) + '</em></span>';
+      else if (!useX && xl && num(xp)) rows += '<span class="p-alt">' + SESS[q.ext] + ' <em class="' + (xp < 0 ? 'dn' : 'up') + '">' + pct(xp) + '</em></span>';
+      if (useX) rows += '<span class="p-sess">' + SESS[q.ext] + '</span>';
+      if (rows) { pop.innerHTML = rows; el.appendChild(pop); }
       if (num(q.weight)) { var w = document.createElement('em'); w.textContent = q.weight.toFixed(q.weight < 10 ? 1 : 0) + (narrow ? '% held' : '% of portfolio'); el.appendChild(w); }
       var tagTxt = fl === 'alert' ? 'HIT' : (fl === 'zone' ? flags.zone[sym] : ek);
       if (tagTxt) {

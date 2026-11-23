@@ -717,9 +717,35 @@ html.cc27 .liq-page.cmd27 .cmd27-nx--in .nx-list { display: flex !important; fle
 @media (min-width: 1081px) { .cmd27-hero__globe:not(.is-full) .cmd27-sector { left: 22px; } }
 @media (min-width: 1081px) and (max-width: 1400px) { .cmd27-hero__globe:not(.is-full) .cmd27-sector { left: 16px; } }
 
-/* Price · dollar change under the % (TradingView-style Last · Chg). */
-.cmd27-chip__px { display: flex; gap: 6px; margin-top: 1px; white-space: nowrap; font: 600 10.5px/1.25 var(--font-mono, "IBM Plex Mono", monospace); }
-.cmd27-chip__px i { font-style: normal; color: var(--c-txt); opacity: .82; }
-.cmd27-chip__px em { font-style: normal; color: var(--c-up); }
-.cmd27-chip.is-down .cmd27-chip__px em { color: var(--c-dn); }
-@media (max-width: 760px) { .cmd27-chip__px { font-size: 9.5px; gap: 4px; } }
+/* Compact orbit capsules: ticker · session glyph · %, a hairline that grows
+   with the size of the move, and a small card with price / $ change on hover. */
+.cmd27-chip { flex-direction: row; align-items: center; gap: 7px; min-width: 0; padding: 5px 11px 6px; border-radius: 999px;
+  font-size: 12px; letter-spacing: .03em; background: rgba(6, 13, 27, .78);
+  box-shadow: 0 0 calc(6px + var(--mag, 0) * 22px) rgba(34, 227, 154, calc(.12 + var(--mag, 0) * .35)); }
+.cmd27-chip.is-down { box-shadow: 0 0 calc(6px + var(--mag, 0) * 22px) rgba(255, 84, 112, calc(.12 + var(--mag, 0) * .35)); }
+.cmd27-chip small { display: inline-flex; align-items: center; gap: 4px; font: 700 12px/1 var(--font-mono, "IBM Plex Mono", monospace); }
+.cmd27-chip::after { content: ""; position: absolute; left: 12px; bottom: 2px; height: 2px; border-radius: 2px;
+  width: calc((100% - 24px) * var(--mag, 0)); background: currentColor; color: var(--c-up); opacity: .75; }
+.cmd27-chip.is-down::after { color: var(--c-dn); }
+.cmd27-chip.is-flat::after { display: none; }
+.cmd27-chip__sess { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; font-style: normal;
+  color: #c9b8ff; background: rgba(150, 120, 255, .18); }
+.cmd27-chip__sess.is-post { color: #ffc98a; background: rgba(255, 170, 80, .16); }
+.cmd27-chip__sess.is-pre { color: #ffe08a; background: rgba(255, 210, 90, .16); }
+.cmd27-chip__pop { position: absolute; top: calc(100% + 7px); left: 50%; z-index: 5; display: grid; grid-template-columns: auto auto; column-gap: 8px; row-gap: 3px; justify-items: center; align-items: baseline;
+  padding: 6px 10px; border-radius: 10px; white-space: nowrap; pointer-events: none;
+  font: 600 11px/1.35 var(--font-mono, "IBM Plex Mono", monospace); color: var(--c-txt);
+  background: rgba(4, 10, 22, .94); border: 1px solid rgba(170, 215, 255, .2); box-shadow: 0 12px 26px -12px rgba(0, 0, 0, .9);
+  opacity: 0; transform: translate(-50%, -4px); transition: opacity .14s ease, transform .14s ease; }
+.cmd27-chip:hover .cmd27-chip__pop, .cmd27-chip:focus-visible .cmd27-chip__pop { opacity: 1; transform: translate(-50%, 0); }
+.cmd27-chip__pop .p-px { font-size: 12.5px; font-weight: 700; color: #fff; }
+.cmd27-chip__pop .p-d, .cmd27-chip__pop em { font-style: normal; }
+.cmd27-chip__pop .up { color: var(--c-up); } .cmd27-chip__pop .dn { color: var(--c-dn); }
+.cmd27-chip__pop .p-alt { grid-column: 1 / -1; font-size: 10px; color: var(--c-mute); }
+.cmd27-chip__pop .p-sess { grid-column: 1 / -1; font: 700 8.5px/1 var(--font-ui, inherit); letter-spacing: .14em; text-transform: uppercase; color: #a99aff; }
+.cmd27-chip:hover { z-index: 4; }
+@media (max-width: 760px) {
+  .cmd27-chip { padding: 4px 8px 5px; gap: 5px; font-size: 10.5px; }
+  .cmd27-chip small { font-size: 10.5px; }
+  .cmd27-chip__sess { width: 13px; height: 13px; }
+}
