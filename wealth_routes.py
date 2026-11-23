@@ -197,9 +197,28 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         return s
 
     def broker_cash_for(user_id):
-        """Cash across the snapshotted accounts included in Wealth (0 if unknown)."""
+        """Cash & cash invest across the Schwab accounts included in Wealth.
+
+        From the Schwab account summary the Schwab page itself shows (read
+        from its cache, never fetched here), so both pages count the same
+        cash, including accounts that hold only cash. Falls back to the
+        stored snapshots when that summary isn't cached.
+        """
         import schwab_account_preferences as prefs
         allowed = prefs.get_preferences(user_id)
+        live = _cached_schwab_summary(user_id)
+        if live and live.get("connected") and live.get("accounts"):
+            total = 0.0
+            for a in prefs.select_accounts(live.get("accounts") or [], allowed, for_wealth=True):
+                c = _num(a.get("cash_and_sweep"))
+                if c is None:
+                    tv = _num(a.get("total_value"))
+                    if tv is not None:
+                        c = max(0.0, tv - sum(_num(p.get("market_value")) or 0.0
+                                              for p in (a.get("positions") or [])))
+                if c is not None and c > 0:
+                    total += c
+            return round(total, 2)
         total = 0.0
         for row in wealth_store.list_broker_snapshots(user_id):
             if not allowed.get(row["account_key"], {}).get("include_wealth", True):
@@ -208,6 +227,17 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             if c is not None and c > 0:
                 total += c
         return round(total, 2)
+
+    def _cached_schwab_summary(user_id):
+        """The app's cached Schwab summary (up to 30 min old), or None."""
+        import sys
+        import time as _t
+        legacy = sys.modules.get("app")
+        cache = getattr(legacy, "_schwab_account_cache", None) if legacy else None
+        entry = (cache or {}).get(user_id) or {}
+        if entry.get("data") and _t.time() - (entry.get("ts") or 0) <= 1800:
+            return entry["data"]
+        return None
 
     def broker_holdings_for(user_id, portfolio=None):
         """Read the latest broker snapshots; never fabricate ledger trades or tax lots."""

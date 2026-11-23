@@ -465,3 +465,22 @@ def test_snapshot_keeps_cash_and_sweep():
         {"account_hash": "h1", "cash_and_sweep": 74.23, "cash_balance": 0.0,
          "equity_positions": [{"symbol": "KLAC", "quantity": 1, "market_value": 1200.0}]}]}, [], [])
     assert out["accounts"][0]["cash"] == pytest.approx(74.23)
+
+
+def test_schwab_cash_comes_from_the_same_summary_the_schwab_page_shows(env, monkeypatch):
+    """Cash-only accounts count too, and the snapshot doesn't have to have
+    been re-synced: the cached account summary is the source."""
+    import sys, time
+    import market_engine
+    import wealth_store
+    import app as legacy
+    monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "closed")
+    app, *_ = env
+    wealth_store.save_broker_snapshot(4, "acct-a", {"holdings": [
+        {"ticker": "KLAC", "shares": 2, "market_value": 2800.0, "cost_basis_snapshot": 2500.0}]})
+    monkeypatch.setitem(legacy._schwab_account_cache, 4, {"ts": time.time(), "data": {
+        "connected": True, "accounts": [
+            {"account_hash": "acct-a", "total_value": 2874.23, "cash_and_sweep": 74.23, "positions": []},
+            {"account_hash": "roth", "total_value": 2.43, "positions": []}]}})
+    d = client(app, 4).get("/api/wealth/today").get_json()
+    assert d["cash"] == pytest.approx(76.66) and d["value"] == pytest.approx(2876.66)
