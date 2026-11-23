@@ -491,3 +491,24 @@ def test_schwab_page_ticks_live():
     assert 'id="sa-live"' in tpl and 'data-sl="total"' in tpl and 'data-f="mv"' in tpl and "js/schwab_live.js" in tpl
     js = open("static/js/schwab_live.js", encoding="utf-8").read()
     assert "/api/wealth/today/live?symbols=" in js and "setInterval(poll, 3000)" in js
+
+
+def test_schwab_cash_loads_the_summary_when_this_process_has_none(env, monkeypatch):
+    """Two server processes each keep their own cache: the one answering the
+    strip may never have loaded the Schwab page. It loads the summary then."""
+    import market_engine
+    import wealth_store
+    import schwab
+    import app as legacy
+    monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "closed")
+    app, *_ = env
+    wealth_store.save_broker_snapshot(5, "acct-a", {"holdings": [
+        {"ticker": "KLAC", "shares": 2, "market_value": 2800.0, "cost_basis_snapshot": 2500.0}]})
+    legacy._schwab_account_cache.pop(5, None)
+    calls = []
+    monkeypatch.setattr(schwab, "token_status", lambda uid: {"connected": True})
+    monkeypatch.setattr(legacy, "_get_schwab_data", lambda uid, force=False: calls.append(uid) or {
+        "connected": True, "accounts": [{"account_hash": "acct-a", "cash_and_sweep": 74.23},
+                                        {"account_hash": "roth", "cash_and_sweep": 2.43}]})
+    d = client(app, 5).get("/api/wealth/today").get_json()
+    assert calls == [5] and d["cash"] == pytest.approx(76.66)
