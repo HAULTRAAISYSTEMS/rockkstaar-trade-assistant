@@ -11,6 +11,15 @@ from datetime import datetime, timezone
 _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
 
+def _cash(account: dict):
+    """Cash & cash invest for the account, or None when unknown."""
+    for k in ("cash_and_sweep", "cash_balance"):
+        v = account.get(k)
+        if isinstance(v, (int, float)) and v >= 0:
+            return round(float(v), 2)
+    return None
+
+
 def discover(summary: dict | None, portfolios: list[dict], transactions: list[dict]) -> dict:
     if not summary or not summary.get("connected"):
         return {"connected": False, "accounts": [], "new_holdings": 0,
@@ -41,6 +50,7 @@ def discover(summary: dict | None, portfolios: list[dict], transactions: list[di
                          "portfolio_id": mapped["id"] if mapped else None,
                          "portfolio_name": mapped["name"] if mapped else None,
                          "holdings": holdings,
+                         "cash": _cash(account),
                          "unsupported_positions": len(account.get("option_positions") or [])})
     return {"connected": True, "source": "schwab", "as_of": datetime.now(timezone.utc).isoformat(),
             "accounts": accounts, "new_holdings": new_count,

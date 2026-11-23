@@ -422,3 +422,46 @@ def test_strip_ticks_live_with_the_price_flash():
     assert "'<span>' + pct(best.pct) + '</span> · <span>' + cents(best.dollars, true) + '</span>'" in js
     css = open("static/css/command_center_picture.css", encoding="utf-8").read()
     assert ".cmd27-mdot" in css and ".cmd27-m__spark" in css and ".cmd27-m.is-swap" in css
+
+
+def test_my_portfolio_card_ticks_with_the_strip():
+    js = open("static/js/command_center_picture.js", encoding="utf-8").read()
+    assert "new CustomEvent('cmd27:money-live'" in js
+    assert "document.addEventListener('cmd27:money-live'" in js and "psum.setAttribute('data-sym', 'MY-PSUM')" in js
+    # Best / worst colored by their own move, not by rank.
+    assert "(tn(worst.pct) || 'flat')" in js and "'<span class=\"dn\">▼ ' + e2(worst.ticker)" not in js
+    assert "function setLiveBadge(live)" in js
+
+
+def test_tape_says_live_only_in_a_session_with_live_quotes(monkeypatch):
+    import web_app
+    import app as legacy
+    import market_engine
+    monkeypatch.setattr(legacy, "_auth_required", lambda: False)
+    monkeypatch.setattr(market_engine, "get_market_tape", lambda: [{"symbol": "SPY", "price": 600.0, "change_pct": 1.0}])
+    monkeypatch.setattr(legacy, "_tape_watchlist_items", lambda: [])
+    monkeypatch.setattr(market_engine, "overlay_live_tape", lambda items: [dict(i, live=True) for i in items])
+    c = web_app.app.test_client()
+    for session, want in (("regular", True), ("overnight", True), ("closed", False)):
+        monkeypatch.setattr(market_engine, "pulse_session", lambda now=None, s=session: s)
+        assert c.get("/api/market-tape").get_json()["live"] is want, session
+
+
+def test_schwab_today_counts_cash_like_the_broker(env, monkeypatch):
+    import market_engine
+    import wealth_store
+    monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "closed")
+    app, *_ = env
+    wealth_store.save_broker_snapshot(3, "acct-a", {"cash": 74.23, "holdings": [
+        {"ticker": "KLAC", "shares": 2, "market_value": 2800.0, "cost_basis_snapshot": 2500.0}]})
+    d = client(app, 3).get("/api/wealth/today").get_json()
+    assert d["source"] == "schwab" and d["cash"] == pytest.approx(74.23)
+    assert d["value"] == pytest.approx(2874.23)
+
+
+def test_snapshot_keeps_cash_and_sweep():
+    import wealth_broker_sync as wbs
+    out = wbs.discover({"connected": True, "accounts": [
+        {"account_hash": "h1", "cash_and_sweep": 74.23, "cash_balance": 0.0,
+         "equity_positions": [{"symbol": "KLAC", "quantity": 1, "market_value": 1200.0}]}]}, [], [])
+    assert out["accounts"][0]["cash"] == pytest.approx(74.23)

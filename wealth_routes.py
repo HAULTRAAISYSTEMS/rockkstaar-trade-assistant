@@ -196,6 +196,19 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         s["transaction_count"] = len(txs)
         return s
 
+    def broker_cash_for(user_id):
+        """Cash across the snapshotted accounts included in Wealth (0 if unknown)."""
+        import schwab_account_preferences as prefs
+        allowed = prefs.get_preferences(user_id)
+        total = 0.0
+        for row in wealth_store.list_broker_snapshots(user_id):
+            if not allowed.get(row["account_key"], {}).get("include_wealth", True):
+                continue
+            c = _num((row.get("snapshot") or {}).get("cash"))
+            if c is not None and c > 0:
+                total += c
+        return round(total, 2)
+
     def broker_holdings_for(user_id, portfolio=None):
         """Read the latest broker snapshots; never fabricate ledger trades or tax lots."""
         import schwab_account_preferences as prefs
@@ -571,8 +584,10 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                          "market_value": h.get("market_value"),
                          "cost_basis": h.get("basis") if (h.get("basis_known") and h.get("basis")) else None}
                         for h in snap]
-            cash = 0.0
-            value = sum(h["market_value"] or 0 for h in holdings)
+            # Cash & cash invest from the same snapshots, so the total matches
+            # the broker's (it was left out, about $77 short of Schwab's).
+            cash = broker_cash_for(user_id)
+            value = sum(h["market_value"] or 0 for h in holdings) + cash
         tickers = [h["ticker"] for h in holdings if h["shares"]]
         try:
             import market_engine as _me

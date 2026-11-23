@@ -778,7 +778,7 @@ html.cc27 .liq-page.cmd27 .cmd27-nx--in .nx-list { display: flex !important; fle
 .cmd27-psum .psum-val { font: 800 26px/1.1 var(--font-mono, "IBM Plex Mono", monospace); color: #fff; }
 .cmd27-psum .psum-rows { display: grid; gap: 5px; }
 .cmd27-psum .psum-rows > div { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 12.5px; }
-.cmd27-psum .psum-rows span { color: var(--c-mute); display: inline-flex; align-items: center; gap: 5px; }
+.cmd27-psum .psum-rows > div > span { color: var(--c-mute); display: inline-flex; align-items: center; gap: 5px; }
 .cmd27-psum .psum-rows b { font: 700 13px var(--font-mono, "IBM Plex Mono", monospace); color: var(--c-txt); white-space: nowrap; }
 .cmd27-psum .psum-rows b small { font-size: 11px; opacity: .85; }
 .cmd27-psum .psum-rows .is-off { opacity: .55; }
@@ -786,6 +786,9 @@ html.cc27 .liq-page.cmd27 .cmd27-nx--in .nx-list { display: flex !important; fle
 .cmd27-psum .psum-moon { width: 10px; height: 10px; border-radius: 50%; box-shadow: inset -3px -1px 0 0 #c9b8ff; transform: rotate(-20deg); }
 .cmd27-psum .psum-bw { display: flex; justify-content: space-between; gap: 8px; padding-top: 7px; border-top: 1px solid rgba(170, 215, 255, .1);
   font: 700 11.5px var(--font-mono, "IBM Plex Mono", monospace); }
+.cmd27-psum .psum-bw small { font: 600 9.5px var(--font-ui, inherit); letter-spacing: .08em; text-transform: uppercase; color: var(--c-mute); margin-right: 3px; }
+.cmd27-psum .psum-bw em { font-style: normal; }
+.cmd27-psum .psum-bw .flat { color: var(--c-txt); }
 .cmd27-psum .psum-note { margin: 0; font-size: 10.5px; color: #a99aff; }
 
 /* Concentration warning in the Game Plan */
