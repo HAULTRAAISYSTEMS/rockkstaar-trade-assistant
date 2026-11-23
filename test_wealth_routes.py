@@ -484,3 +484,10 @@ def test_schwab_cash_comes_from_the_same_summary_the_schwab_page_shows(env, monk
             {"account_hash": "roth", "total_value": 2.43, "positions": []}]}})
     d = client(app, 4).get("/api/wealth/today").get_json()
     assert d["cash"] == pytest.approx(76.66) and d["value"] == pytest.approx(2876.66)
+
+
+def test_schwab_page_ticks_live():
+    tpl = open("templates/schwab_account.html", encoding="utf-8").read()
+    assert 'id="sa-live"' in tpl and 'data-sl="total"' in tpl and 'data-f="mv"' in tpl and "js/schwab_live.js" in tpl
+    js = open("static/js/schwab_live.js", encoding="utf-8").read()
+    assert "/api/wealth/today/live?symbols=" in js and "setInterval(poll, 3000)" in js

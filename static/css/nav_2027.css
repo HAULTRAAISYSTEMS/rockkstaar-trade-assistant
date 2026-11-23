@@ -148,3 +148,42 @@ html.cc27 .elite-navbar .nav-tile.nav-link-active,
 .nav-pref__input:checked + .nav-pref__sw::after { transform: translateX(16px); background: #fff; }
 .nav-pref__input:focus-visible + .nav-pref__sw { outline: 2px solid #38d6c5; outline-offset: 2px; }
 .mobile-app-menu .nav-pref.is-sheet { margin: 0 0 12px; }
+
+/* ── Control Center (avatar menu) ───────────────────────────────────── */
+.ccx { display: grid; gap: 4px; }
+.ccx-hero { position: relative; margin: 0 0 6px; padding: 14px; border-radius: 18px; overflow: hidden;
+  border: 1px solid rgba(56, 220, 255, .28);
+  background: radial-gradient(120% 140% at 0% 0%, rgba(56, 220, 255, .16), transparent 55%),
+              radial-gradient(90% 120% at 100% 100%, rgba(167, 139, 250, .14), transparent 60%), rgba(6, 13, 27, .75); }
+.ccx-hero::after { content: ""; position: absolute; inset: -40% -20% auto auto; width: 180px; height: 180px; border-radius: 50%;
+  background: rgba(56, 220, 255, .08); filter: blur(30px); pointer-events: none; }
+:is(.elite-navbar, .mobile-app-menu) .ccx-profile { margin: 0; padding: 0; border: 0; background: none; }
+:is(.elite-navbar, .mobile-app-menu) .ccx-profile:hover { background: none; }
+:is(.elite-navbar, .mobile-app-menu) .ccx-profile .nav-profile__pic { width: 52px; height: 52px;
+  box-shadow: 0 0 0 2px rgba(56, 220, 255, .55), 0 0 18px rgba(56, 220, 255, .35); }
+:is(.elite-navbar, .mobile-app-menu) .ccx-profile .nav-profile__txt strong { font-size: 17px; }
+.ccx-greet { color: #8fa3bd !important; letter-spacing: .04em; text-transform: uppercase; font-size: 10px !important; font-weight: 700; }
+.ccx-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; position: relative; z-index: 1; }
+.ccx-chip { padding: 3px 10px; border-radius: 999px; font: 800 10px var(--font-mono, ui-monospace, monospace); letter-spacing: .08em; text-transform: uppercase;
+  color: #b9c9de; background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .1); }
+.ccx-chip.is-admin { color: #1a1204; background: linear-gradient(90deg, #ffd166, #f5c451); border-color: transparent; box-shadow: 0 0 14px rgba(245, 196, 81, .45); }
+.ccx-chip.is-session.is-open { color: #22e39a; border-color: rgba(34, 227, 154, .45); box-shadow: 0 0 10px rgba(34, 227, 154, .2); }
+.ccx-switches { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }
+.ccx-switches .nav-pref { margin: 0 !important; }
+.ccx-switches .nav-pref__txt small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+button.ccx-sw { width: 100%; text-align: left; font: inherit; color: inherit; }
+.ccx-sw[aria-pressed="true"] .nav-pref__sw { background: linear-gradient(90deg, #23bfae, #38d6c5); }
+.ccx-sw[aria-pressed="true"] .nav-pref__sw::after { transform: translateX(16px); background: #fff; }
+.ccx-admin { margin: 8px 0 4px; padding: 12px; border-radius: 16px; border: 1px solid rgba(245, 196, 81, .35);
+  background: radial-gradient(120% 120% at 0% 0%, rgba(245, 196, 81, .12), transparent 60%), rgba(20, 14, 2, .35); }
+.ccx-admin header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ccx-admin header strong { display: block; color: #ffe3a1; font-size: 13px; letter-spacing: .02em; }
+.ccx-admin header small { color: #b8a57a; font-size: 11px; }
+.ccx-admin__ic { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #ffd166;
+  background: rgba(245, 196, 81, .14); box-shadow: 0 0 14px rgba(245, 196, 81, .25); }
+.ccx-admin .rm-ic { color: #ffd166; }
+.ccx-out { margin: 10px 0 2px; }
+.ccx-out button { width: 100%; padding: 11px 14px; border-radius: 12px; cursor: pointer; font: 700 13px var(--font-ui, inherit); letter-spacing: .02em;
+  color: #ffb3ad; background: rgba(255, 84, 112, .08); border: 1px solid rgba(255, 84, 112, .3); }
+.ccx-out button:hover { background: rgba(255, 84, 112, .16); border-color: rgba(255, 84, 112, .55); }
+@media (max-width: 560px) { .ccx-switches { grid-template-columns: 1fr; } }

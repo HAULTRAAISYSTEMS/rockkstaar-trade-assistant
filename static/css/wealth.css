@@ -292,3 +292,9 @@
 .nd-journal .lab-comparison b{color:var(--elite-copy);font-family:var(--font-mono)}
 .nd-journal .lab-comparison p{margin:4px 0}
 .nd-journal small{color:var(--elite-faint)}
+
+/* Schwab page, live: a pulsing dot once prices tick, and each position's latest price */
+.sa-live-dot { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: #22e39a; vertical-align: 1px; animation: sa-live 1.8s infinite; }
+@keyframes sa-live { 0% { box-shadow: 0 0 0 0 rgba(34,227,154,.55); } 70% { box-shadow: 0 0 0 7px rgba(34,227,154,0); } 100% { box-shadow: 0 0 0 0 rgba(34,227,154,0); } }
+.sa-pos-px { display: block; margin-top: 2px; font: 600 11px var(--font-mono, ui-monospace, monospace); color: #8ea3c2; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .sa-live-dot { animation: none; } }
