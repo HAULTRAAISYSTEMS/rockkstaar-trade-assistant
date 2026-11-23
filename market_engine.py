@@ -1838,7 +1838,14 @@ def _lq_is_fresh(q: dict, session: str, now: float) -> bool:
     """
     if session not in ("pre", "regular", "post", "overnight"):
         return True
-    limit = 600 if session == "overnight" else 120
+    # 8 PM-4 AM: most names never trade overnight, so their latest print is
+    # the after-hours close (or the bell). That is still the right print to
+    # show - dropping it left those tickers with no extended move at all once
+    # the post-session quotes aged out. A real overnight trade (Blue Ocean
+    # bars, below) replaces it whenever one is newer.
+    if session == "overnight":
+        return bool(q.get("epoch"))
+    limit = 120
     return bool(q.get("epoch")) and now - q["epoch"] <= limit
 
 
@@ -1964,7 +1971,11 @@ def _refresh_live_quotes() -> None:
             for sym, bar in (_LQ_STATE.get("overnight_bars") or {}).items():
                 held = quotes.get(sym) or {}
                 if bar.get("close") and int(bar.get("time") or 0) > int(held.get("epoch") or 0):
-                    base = held.get("prev_close")
+                    # The close to measure against: this quote's, else the last
+                    # one we held for the symbol (an overnight bar has none).
+                    base = held.get("day_close") or held.get("prev_close") or \
+                        ((_LQ_CACHE.get(sym) or {}).get("quote") or {}).get("day_close") or \
+                        ((_LQ_CACHE.get(sym) or {}).get("quote") or {}).get("prev_close")
                     quotes[sym] = dict(held, price=round(float(bar["close"]), 4), epoch=int(bar["time"]),
                                        ext="overnight", prev_close=base,
                                        change_pct=round((float(bar["close"]) / float(base) - 1) * 100, 2) if base else None,
@@ -1973,7 +1984,7 @@ def _refresh_live_quotes() -> None:
         logger.debug("live quotes (overnight) failed: %s", exc)
     # Before and after the bell Alpaca's free feed is thin, so more symbols
     # fall through to Yahoo; cover a full watchlist screen then.
-    yahoo_max = _LQ_YAHOO_MAX * 4 if pulse_session() in ("pre", "post") else _LQ_YAHOO_MAX
+    yahoo_max = _LQ_YAHOO_MAX * 4 if pulse_session() in ("pre", "post", "overnight") else _LQ_YAHOO_MAX
     missing = [s for s in wanted if s not in quotes][:yahoo_max]
     if missing:
         # Fallback: Yahoo per symbol, at its own slower cadence.
@@ -2098,7 +2109,10 @@ def overlay_live_tape(items: list[dict]) -> list[dict]:
             # regular session instead of replacing it: a +1.1% after-hours
             # bounce must not read as the day's move on a -3.7% day.
             if ext in ("pre", "post", "overnight"):
-                base = q.get("day_close") or q.get("regular_close") or q.get("prev_close")
+                # Measure the extended move from the regular close: the quote's
+                # own, else the tape item's regular-session price.
+                base = q.get("day_close") or q.get("regular_close") or q.get("prev_close") or \
+                    (item.get("price") if item.get("change_pct") is not None else None)
                 item["ext"] = ext
                 item["ext_price"] = round(float(q["price"]), 2)
                 item["ext_pct"] = (round((float(q["price"]) / float(base) - 1) * 100, 2)
