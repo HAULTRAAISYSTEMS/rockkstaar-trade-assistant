@@ -83,6 +83,7 @@ def test_overnight_prints_go_into_the_shared_feed(monkeypatch):
         "SPY": {"price": 752.69, "epoch": 1000, "prev_close": 735.29, "ext": "post", "source": "Schwab real-time"},
         "AAPL": {"price": 350.49, "epoch": 5000, "prev_close": 342.4, "source": "Schwab real-time"}})
     monkeypatch.setattr(me, "_alpaca_snapshots", lambda syms: {})
+    monkeypatch.setattr(me, "_fetch_live_quote", lambda s: None)   # no network in tests
     monkeypatch.setattr(overnight_data, "latest_overnight_bars", lambda syms: {
         "SPY": {"time": 2000, "close": 753.10, "source": "alpaca_overnight"},
         "AAPL": {"time": 4000, "close": 1.0, "source": "alpaca_boats"}})
