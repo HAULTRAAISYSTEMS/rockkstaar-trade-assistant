@@ -291,6 +291,34 @@ def test_today_strip_combines_portfolios_and_uses_official_closes_when_closed(en
     assert "sector" in h[0]
 
 
+def test_today_holdings_carry_cost_and_24h_move(env, monkeypatch):
+    """Globe My Portfolio view: shares, cost, unrealized, and the extended-
+    hours move in % and dollars on your shares."""
+    import market_engine
+    monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "closed")
+
+    def overlay(items):
+        out = []
+        for i in items:
+            i = dict(i)
+            i.update(ext="overnight", ext_pct=2.0, ext_price=round(i["price"] * 1.02, 2))
+            out.append(i)
+        return out
+    monkeypatch.setattr(market_engine, "overlay_live_tape", overlay)
+    app, *_ = env
+    c = client(app, 1)
+    pid = make_portfolio(c)
+    prev = c.post("/api/wealth/import/preview", json={"text": SCHWAB}).get_json()
+    c.post("/api/wealth/import/commit", json={"portfolio_id": pid, "transactions": prev["transactions"]})
+    d = c.get("/api/wealth/today").get_json()
+    h = d["holdings"][0]
+    assert h["shares"] == pytest.approx(2) and h["avg_cost"] > 0
+    assert h["unrealized"] == pytest.approx(h["value"] - h["cost_basis"])
+    assert h["ext"] == "overnight" and h["ext_pct"] == 2.0
+    assert h["ext_dollars"] == pytest.approx(h["shares"] * h["ext_price"] * (1 - 1 / 1.02), abs=0.05)
+    assert d["ext_count"] == 1 and d["ext_pct"] == pytest.approx(2.0, abs=0.01)
+
+
 def test_today_strip_is_empty_without_portfolios(env):
     app, *_ = env
     d = client(app, 7).get("/api/wealth/today").get_json()

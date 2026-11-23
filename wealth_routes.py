@@ -557,7 +557,9 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         s = summary_for(user_id, None)
         source = "wealth"
         holdings = [{"ticker": h["ticker"], "shares": h["shares"], "price": h.get("price"),
-                     "market_value": h.get("market_value")} for h in s.get("holdings") or []]
+                     "market_value": h.get("market_value"),
+                     "cost_basis": h.get("cost_basis") if h.get("cost_basis") else None}
+                    for h in s.get("holdings") or []]
         cash = float(s.get("cash") or 0.0)
         value = s.get("total_value")
         if not s.get("transaction_count"):
@@ -566,7 +568,9 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 return jsonify({"ok": True, "empty": True})
             source = "schwab"
             holdings = [{"ticker": h["ticker"], "shares": h["shares"], "price": None,
-                         "market_value": h.get("market_value")} for h in snap]
+                         "market_value": h.get("market_value"),
+                         "cost_basis": h.get("basis") if (h.get("basis_known") and h.get("basis")) else None}
+                        for h in snap]
             cash = 0.0
             value = sum(h["market_value"] or 0 for h in holdings)
         tickers = [h["ticker"] for h in holdings if h["shares"]]
@@ -609,9 +613,17 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             if not mv or mv <= 0:
                 continue
             m = by_move.get(h["ticker"]) or {}
-            sized.append({"ticker": h["ticker"], "value": round(float(mv), 2),
-                          "pct": m.get("pct"), "dollars": m.get("dollars"),
-                          "price": h.get("price")})
+            row = {"ticker": h["ticker"], "value": round(float(mv), 2),
+                   "pct": m.get("pct"), "dollars": m.get("dollars"),
+                   "price": h.get("price") if h.get("price") is not None else round(float(mv) / float(h["shares"]), 4),
+                   "shares": round(float(h["shares"]), 6)}
+            cb = h.get("cost_basis")
+            if cb:
+                row["cost_basis"] = round(float(cb), 2)
+                row["avg_cost"] = round(float(cb) / float(h["shares"]), 4)
+                row["unrealized"] = round(float(mv) - float(cb), 2)
+                row["unrealized_pct"] = round((float(mv) / float(cb) - 1) * 100, 2)
+            sized.append(row)
         try:
             import globe_sectors as _gs
             smap = _gs.sector_map()
@@ -624,8 +636,30 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         for x in sized:
             x["weight"] = round(x["value"] / invested * 100, 2) if invested > 0 else None
         sized.sort(key=lambda x: -x["value"])
+        # Pre-market / after-hours / overnight move per holding, from the same
+        # live overlay as the tape (ext_* only when such a print exists), and
+        # what it is worth in dollars on your shares.
+        ext_dollars, ext_base, ext_n = 0.0, 0.0, 0
+        try:
+            import market_engine as _me2
+            over = {i["symbol"]: i for i in _me2.overlay_live_tape(
+                [{"symbol": x["ticker"], "price": x.get("price"), "change_pct": x.get("pct")} for x in sized])}
+        except Exception:
+            over = {}
+        for x in sized:
+            o = over.get(x["ticker"]) or {}
+            if o.get("ext") and o.get("ext_pct") is not None and o.get("ext_price"):
+                xp, xpct = float(o["ext_price"]), float(o["ext_pct"])
+                close = xp / (1 + xpct / 100)
+                d = (xp - close) * x["shares"]
+                x.update(ext=o["ext"], ext_pct=round(xpct, 2), ext_price=round(xp, 2), ext_dollars=round(d, 2))
+                ext_dollars += d; ext_base += close * x["shares"]; ext_n += 1
         return jsonify({"ok": True, "empty": False, "source": source, "value": value, "cash": cash,
                         "holdings": sized[:40],
+                        "ext_dollars": round(ext_dollars, 2) if ext_n else None,
+                        "ext_pct": round(ext_dollars / ext_base * 100, 2) if ext_n and ext_base > 0 else None,
+                        "ext_count": ext_n,
+                        "invested": round(invested, 2),
                         "day_dollars": day_dollars,
                         "day_pct": round(day_dollars / base * 100, 2) if base > 0 else None,
                         "best": ranked[-1] if ranked else None, "worst": ranked[0] if ranked else None,
