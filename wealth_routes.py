@@ -587,8 +587,10 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             rows = closes.get(h["ticker"]) or []
             if len(rows) < 2 or not h["shares"]:
                 continue
+            # The close before today: the base for today's live move.
+            prior = next((c for d, c in reversed(rows) if d < today), None)
             if session == "regular" and (live.get(h["ticker"]) or {}).get("price"):
-                prev = next((c for d, c in reversed(rows) if d < today), None)
+                prev = prior
                 now_px = float(live[h["ticker"]]["price"])
             else:
                 prev, now_px = rows[-2][1], rows[-1][1]
@@ -597,7 +599,15 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 continue
             pct = (now_px / prev - 1) * 100
             moves.append({"ticker": h["ticker"], "pct": round(pct, 2),
-                          "dollars": round((now_px - prev) * h["shares"], 2)})
+                          "dollars": round((now_px - prev) * h["shares"], 2),
+                          # For the strip to keep ticking between polls:
+                          # the price this move used, the close it is
+                          # measured from, and the latest official close
+                          # (the base for a pre / after-hours / 24H move).
+                          "now": round(now_px, 4), "prev": round(float(prev), 4),
+                          "last_close": round(float(rows[-1][1]), 4),
+                          "prior_close": round(float(prior), 4) if prior else None,
+                          "shares": float(h["shares"])})
         day_dollars = round(sum(m["dollars"] for m in moves), 2)
         base = (value or 0) - day_dollars
         ranked = sorted(moves, key=lambda m: m["pct"])
@@ -663,9 +673,39 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                         "day_dollars": day_dollars,
                         "day_pct": round(day_dollars / base * 100, 2) if base > 0 else None,
                         "best": ranked[-1] if ranked else None, "worst": ranked[0] if ranked else None,
+                        "moves": moves[:60],
                         "positions": len(tickers), "priced": len(moves), "tickers": tickers[:40],
                         "session": session, "day_label": None if session == "regular" else day_label,
                         "unpriced": s.get("unpriced") or []})
+
+    @bp.get("/api/wealth/today/live")
+    def today_live_api():
+        """Latest prices for your holdings, every few seconds — never blocks.
+
+        The Command Center strip loads /api/wealth/today once a minute and
+        ticks between those loads from this: the shared live-quote feed (the
+        same 3-second prices as the tape), so value, today's move and the
+        best and worst holding move with the market.
+        """
+        syms = []
+        for t in (request.args.get("symbols") or "").split(","):
+            t = t.strip().upper()
+            if t and len(t) <= 12 and t.replace(".", "").replace("-", "").isalnum() and t not in syms:
+                syms.append(t)
+        syms = syms[:60]
+        quotes, session = {}, "closed"
+        try:
+            import market_engine as _me
+            session = _me.pulse_session()
+            for sym, q in (_me.live_quotes(syms) or {}).items():
+                if q and q.get("price"):
+                    quotes[sym] = {"price": round(float(q["price"]), 4), "ext": q.get("ext"),
+                                   "epoch": q.get("epoch")}
+        except Exception as exc:
+            logger.debug("wealth live quotes: %s", exc)
+        resp = jsonify({"ok": True, "session": session, "quotes": quotes})
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     # ── Data ─────────────────────────────────────────────────────────────
     @bp.get("/api/wealth/summary")
