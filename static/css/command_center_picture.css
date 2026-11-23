@@ -716,3 +716,11 @@ html.cc27 .liq-page.cmd27 .cmd27-nx--in .nx-list { display: flex !important; fle
    starts at the page edge, not the box edge, or its first column is cut. */
 @media (min-width: 1081px) { .cmd27-hero__globe:not(.is-full) .cmd27-sector { left: 22px; } }
 @media (min-width: 1081px) and (max-width: 1400px) { .cmd27-hero__globe:not(.is-full) .cmd27-sector { left: 16px; } }
+
+/* Pre-market / after-hours / 24H move, under the day's move. */
+.cmd27-chip__ext { display: block; margin-top: 2px; padding: 1px 6px; border-radius: 6px; white-space: nowrap;
+  font: 700 10.5px/1.3 var(--font-mono, "IBM Plex Mono", monospace); letter-spacing: .01em;
+  color: var(--c-mute); background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .08); }
+.cmd27-chip__ext.is-up { color: var(--c-up); background: rgba(34, 227, 154, .1); border-color: rgba(34, 227, 154, .25); }
+.cmd27-chip__ext.is-dn { color: var(--c-dn); background: rgba(255, 84, 112, .1); border-color: rgba(255, 84, 112, .25); }
+@media (max-width: 760px) { .cmd27-chip__ext { font-size: 9.5px; padding: 0 4px; } }

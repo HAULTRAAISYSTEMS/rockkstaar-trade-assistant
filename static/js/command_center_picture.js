@@ -93,14 +93,14 @@
   function bySym() {
     var m = {};
     Object.keys(orbitQ).forEach(function (k) { m[k] = orbitQ[k]; });
-    lastItems.forEach(function (q) { if (q && q.symbol && num(q.change_pct)) m[String(q.symbol).toUpperCase()] = q; });
+    lastItems.forEach(function (q) { if (q && q.symbol && (num(q.change_pct) || num(q.ext_pct))) m[String(q.symbol).toUpperCase()] = q; });
     return m;
   }
   var oqT = null;
   function loadOrbitQuotes() {
     clearTimeout(oqT);
     if (!orbit.length) return;
-    var tape = {}; lastItems.forEach(function (q) { if (q && q.symbol && num(q.change_pct)) tape[String(q.symbol).toUpperCase()] = 1; });
+    var tape = {}; lastItems.forEach(function (q) { if (q && q.symbol && (num(q.change_pct) || num(q.ext_pct))) tape[String(q.symbol).toUpperCase()] = 1; });
     if (orbit.every(function (s) { return tape[s]; })) { oqT = setTimeout(loadOrbitQuotes, 60000); return; }
     fetch('/api/command/orbit?quotes=1', { credentials: 'same-origin', cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -194,13 +194,25 @@
       if (m[sym] || mode === 'portfolio') el.setAttribute('data-spin', '1');
       el.style.left = '0px'; el.style.top = '0px'; el.style.visibility = 'hidden';
       el.innerHTML = '<span></span><small></small>';
-      el.firstChild.textContent = sym; el.lastChild.textContent = pct(chg);
+      // Pre-market / after-hours / 24H move under the day's move. With no
+      // day's move from the feed, the extended move is the headline.
+      var xl = { pre: 'PRE', post: 'AH', overnight: '24H' }[q.ext], xp = q.ext_pct;
+      el.firstChild.textContent = sym;
+      if (!num(chg) && xl && num(xp)) { el.lastChild.textContent = xl + ' ' + pct(xp); el.className = el.className.replace('is-flat', xp < 0 ? 'is-down' : 'is-up'); }
+      else {
+        el.lastChild.textContent = pct(chg);
+        if (xl && num(xp)) {
+          var xe = document.createElement('b'); xe.className = 'cmd27-chip__ext ' + (xp < 0 ? 'is-dn' : xp > 0 ? 'is-up' : '');
+          xe.textContent = xl + ' ' + pct(xp); el.appendChild(xe);
+        }
+      }
       if (num(q.weight)) { var w = document.createElement('em'); w.textContent = q.weight.toFixed(q.weight < 10 ? 1 : 0) + (narrow ? '% held' : '% of portfolio'); el.appendChild(w); }
       var tagTxt = fl === 'alert' ? 'HIT' : (fl === 'zone' ? flags.zone[sym] : ek);
       if (tagTxt) {
         var tg = document.createElement('i'); tg.className = 'cmd27-chip__tag' + (fl ? ' is-' + fl : ''); tg.textContent = tagTxt; el.appendChild(tg);
       }
       el.title = (m[sym] || mode === 'portfolio' ? 'Spin the globe to ' : 'Open the chart for ') + sym +
+        (xl && num(xp) ? ' · ' + ({ PRE: 'pre-market', AH: 'after hours', '24H': 'overnight (24H)' })[xl] + ' ' + pct(xp) + (num(q.ext_price) ? ' at $' + q.ext_price.toFixed(2) : '') + ' vs the close' : '') +
         (fl === 'alert' ? ' · price alert hit' : fl === 'zone' ? ' · in its buy zone' : '') + (ek ? ' · reports ' + (ek === 'TODAY' ? 'today' : 'in ' + ek) : '');
       function go() {
         if (m[sym] || mode === 'portfolio') document.dispatchEvent(new CustomEvent('cmd27:focus', { detail: { symbol: sym } }));

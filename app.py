@@ -7721,12 +7721,16 @@ def _rebuild_tape_watchlist(uid):
                 items.append({"symbol": t, "logo": _mkt.logo_url(t),
                               "price": px, "change_pct": pct,
                               "watchlist": True, "tier": tier_of[t]})
+            # Pre-market / after-hours moves ride alongside the day's move
+            # (PRE / AH on the tape and the globe chips), never replace it.
             _ext = _mkt.extended_quotes(tickers)
+            _sess = _mkt.market_session() if _ext else None
             for _item in items:
                 _q = _ext.get(_item["symbol"])
-                if _q:
-                    _item["price"] = _q["price"]
-                    _item["change_pct"] = _q["pct"]
+                if _q and _sess in ("pre", "post"):
+                    _item["ext"] = _sess
+                    _item["ext_price"] = _q["price"]
+                    _item["ext_pct"] = _q["pct"]
     except Exception as exc:
         logger.debug("tape watchlist items unavailable: %s", exc)
     _WL_TAPE_CACHE.update(at=_time.time(), user=uid, items=items)
