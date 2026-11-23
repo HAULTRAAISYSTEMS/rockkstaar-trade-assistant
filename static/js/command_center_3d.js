@@ -721,11 +721,12 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         var sum = {};
         nodes.forEach(function (nd) {
           if (!nd.region) return;
-          var st = sum[nd.region] = sum[nd.region] || { key: nd.region, name: REGIONS[nd.region].name, n: 0, s: 0, k: 0, x: 0, up: 0, dn: 0 };
+          var st = sum[nd.region] = sum[nd.region] || { key: nd.region, name: REGIONS[nd.region].name, n: 0, s: 0, k: 0, x: 0, up: 0, dn: 0, v: 0, w: 0 };
+          if (pMode) { st.v += Number(nd.value) || 0; st.w += Number(nd.weight) || 0; }
           st.n++; if (nd.chg != null && !/VIX/.test(nd.symbol)) { st.s += Number(nd.chg); st.k++; if (nd.chg > 0.05) st.up++; else if (nd.chg < -0.05) st.dn++; }
           if (nd.session) st.x++;
         });
-        var list2 = Object.keys(sum).map(function (k) { var st = sum[k]; return { key: k, name: st.name, n: st.n, avg: st.k ? st.s / st.k : null, ext: st.x, up: st.up, dn: st.dn }; })
+        var list2 = Object.keys(sum).map(function (k) { var st = sum[k]; return { key: k, name: st.name, n: st.n, avg: st.k ? st.s / st.k : null, ext: st.x, up: st.up, dn: st.dn, pm: pMode, value: pMode ? st.v : null, w: st.w }; })
           .sort(function (a, b) { return b.n - a.n; });
         document.dispatchEvent(new CustomEvent('cmd27:regions', { detail: list2 }));
         if (focusKey) sendSector(focusKey);

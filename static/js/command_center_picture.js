@@ -96,6 +96,32 @@
     post: '<svg viewBox="0 0 16 16" width="11" height="10" aria-hidden="true"><path d="M3 11a5 5 0 0 1 10 0z" fill="currentColor"/><path d="M1 13.5h14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
     pre: '<svg viewBox="0 0 16 16" width="11" height="10" aria-hidden="true"><circle cx="8" cy="9" r="3.2" fill="currentColor"/><path d="M8 2.5v1.6M3 5l1.1 1.1M13 5l-1.1 1.1M1 13.5h14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>'
   };
+  function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function money0(v, sign) {
+    if (!num(v)) return '—';
+    var a = Math.abs(v), str = a >= 1e6 ? (a / 1e6).toFixed(2) + 'M' : a >= 1e4 ? (a / 1e3).toFixed(1) + 'K' : a.toLocaleString('en-US', { maximumFractionDigits: a >= 100 ? 0 : 2 });
+    return (sign ? (v > 0 ? '+' : v < 0 ? '−' : '') : (v < 0 ? '−' : '')) + '$' + str;
+  }
+  // Hover card for a holding: shares and cost, unrealized, buy zone, alerts.
+  function holdingRows(q) {
+    var sym = String(q.symbol).toUpperCase(), out = '';
+    if (num(q.shares)) out += '<span class="p-row">' + (+q.shares.toFixed(4)) + ' sh' + (num(q.avg_cost) ? ' · avg $' + q.avg_cost.toFixed(2) : '') + '</span>';
+    if (num(q.value)) out += '<span class="p-row">Worth ' + money0(q.value) + '</span>';
+    if (num(q.unrealized)) out += '<span class="p-row">Unrealized <em class="' + (q.unrealized < 0 ? 'dn' : 'up') + '">' + money0(q.unrealized, true) + (num(q.unrealized_pct) ? ' (' + pct(q.unrealized_pct) + ')' : '') + '</em></span>';
+    var z = (window.__cmd27Zones || {})[sym], px = num(q.price) ? q.price : (z && z.price);
+    if (z && z.available && num(z.accum_top) && num(px)) {
+      var zl = { load: 'In the LOAD zone', accumulate: 'In the buy zone' }[z.zone];
+      out += '<span class="p-row">' + (zl || ((px / z.accum_top - 1) * 100).toFixed(1) + '% above the buy zone ($' + z.accum_top.toFixed(2) + ')') + '</span>';
+    }
+    var al = (window.__cmd27Alerts || []).filter(function (a) { return String(a.ticker).toUpperCase() === sym && a.enabled && !a.triggered_at && num(Number(a.price)); });
+    if (al.length && num(px)) {
+      var below = al.filter(function (a) { return a.price < px; }).sort(function (a, b) { return b.price - a.price; })[0];
+      var above = al.filter(function (a) { return a.price >= px; }).sort(function (a, b) { return a.price - b.price; })[0];
+      if (below) out += '<span class="p-row">Alert ↓ $' + Number(below.price).toFixed(2) + ' <em class="dn">' + pct((below.price / px - 1) * 100) + '</em></span>';
+      if (above) out += '<span class="p-row">Alert ↑ $' + Number(above.price).toFixed(2) + ' <em class="up">' + pct((above.price / px - 1) * 100) + '</em></span>';
+    }
+    return out ? '<span class="p-sep"></span>' + out : '';
+  }
   function show24h() { return document.documentElement.getAttribute('data-show-24h') === '1'; }
   document.addEventListener('tradestaar:prefs', function () { renderOrbit(); });
   function bySym() {
@@ -149,7 +175,12 @@
   function renderOrbit() {
     if (!orbitEl) return;
     var m = bySym(), narrow = window.innerWidth < 760, list, mine = orbit.length > 0 && mode !== 'portfolio';
-    if (mode === 'portfolio' && held && held.length) list = held.map(function (h) { return { symbol: h.ticker, change_pct: h.pct, weight: h.weight }; });
+    var port = mode === 'portfolio' && held && held.length;
+    if (port) list = held.map(function (h) {
+      return { symbol: h.ticker, change_pct: h.pct, weight: h.weight, price: h.price, dollars: h.dollars, value: h.value,
+               ext: h.ext, ext_pct: h.ext_pct, ext_price: h.ext_price, ext_dollars: h.ext_dollars,
+               shares: h.shares, avg_cost: h.avg_cost, unrealized: h.unrealized, unrealized_pct: h.unrealized_pct };
+    });
     else if (mine) list = orbit.map(function (s) { return m[s] || { symbol: s }; });
     else list = lastItems.filter(function (q) { return q && q.symbol && !INDEX[String(q.symbol).toUpperCase()] && num(q.change_pct) && !/[=\/^]/.test(q.symbol) && !/^(ES|NQ|YM|RTY|CL|GC|SI|NG|ZB|ZN|DXY|VIX)$/i.test(q.symbol); })
       .sort(function (a, b) { return Math.abs(b.change_pct) - Math.abs(a.change_pct); });
@@ -165,7 +196,8 @@
     var clipT = 0, clipB = 0, hero = globeBox && globeBox.closest('.cmd27-hero');
     if (hero && !(globeBox.classList.contains('is-full')) && getComputedStyle(hero).overflowY !== 'visible') {
       var hr = hero.getBoundingClientRect();
-      clipT = Math.max(0, Math.ceil(hr.top - box.top)); clipB = Math.max(0, Math.ceil(box.bottom - hr.bottom));
+      // On phones the hero is a layout-less wrapper (0×0); it clips nothing.
+      if (hr.height > 0) { clipT = Math.max(0, Math.ceil(hr.top - box.top)); clipB = Math.max(0, Math.ceil(box.bottom - hr.bottom)); }
     }
     if (globeBox) globeBox.style.setProperty('--clip-t', clipT + 'px');
     var half = safeHalf();
@@ -229,7 +261,15 @@
       else if (!useX && xl && num(xp)) rows += '<span class="p-alt">' + SESS[q.ext] + ' <em class="' + (xp < 0 ? 'dn' : 'up') + '">' + pct(xp) + '</em></span>';
       if (useX) rows += '<span class="p-sess">' + SESS[q.ext] + '</span>';
       if (rows) { pop.innerHTML = rows; el.appendChild(pop); }
-      if (num(q.weight)) { var w = document.createElement('em'); w.textContent = q.weight.toFixed(q.weight < 10 ? 1 : 0) + (narrow ? '% held' : '% of portfolio'); el.appendChild(w); }
+      if (num(q.weight)) {
+        // Holdings: what the move did to your money, then your weight.
+        var usd = useX ? q.ext_dollars : q.dollars;
+        if (num(usd)) { var u = document.createElement('b'); u.className = 'cmd27-chip__usd ' + (usd < 0 ? 'is-dn' : 'is-up'); u.textContent = money0(usd, true); el.insertBefore(u, pop.parentNode ? pop : null); }
+        var w = document.createElement('em'); w.className = 'cmd27-chip__w'; w.textContent = q.weight.toFixed(q.weight < 10 ? 1 : 0) + '%'; w.title = 'of your portfolio';
+        el.insertBefore(w, pop.parentNode ? pop : null);
+        if (!pop.parentNode) { pop.innerHTML = ''; el.appendChild(pop); }
+        pop.innerHTML += holdingRows(q);
+      }
       var tagTxt = fl === 'alert' ? 'HIT' : (fl === 'zone' ? flags.zone[sym] : ek);
       if (tagTxt) {
         var tg = document.createElement('i'); tg.className = 'cmd27-chip__tag' + (fl ? ' is-' + fl : ''); tg.textContent = tagTxt; el.appendChild(tg);
@@ -255,9 +295,37 @@
     });
     // Place each chip at its real size: fully inside the frame (tags included),
     // outside the atmosphere, and clear of the controls and the other chips.
+    // My Portfolio: an allocation ring just outside the atmosphere, one arc
+    // per holding sized by its weight and coloured by its move; each chip
+    // sits beside its own slice.
+    var mids = null;
+    if (port) {
+      var tot = 0; list.forEach(function (q) { tot += num(q.weight) ? q.weight : 0; });
+      var full = Math.max(tot, 100), acc = 0, rR = RS + 9, ccx = bw / 2, arcs = '';
+      mids = list.map(function (q) {
+        var w = num(q.weight) ? q.weight : 0, a0 = -Math.PI / 2 + acc / full * Math.PI * 2, a1 = -Math.PI / 2 + (acc + w) / full * Math.PI * 2;
+        acc += w;
+        var g = Math.min(0.025, (a1 - a0) * 0.2), b0 = a0 + g, b1 = a1 - g;
+        if (b1 > b0) {
+          var xp0 = q.ext && num(q.ext_pct) && show24h() ? q.ext_pct : q.change_pct;
+          var col = !num(xp0) ? 'rgba(160,175,200,.55)' : xp0 < 0 ? 'rgba(255,84,112,' + (0.45 + Math.min(1, Math.abs(xp0) / 8) * 0.5).toFixed(2) + ')' : 'rgba(34,227,154,' + (0.45 + Math.min(1, Math.abs(xp0) / 8) * 0.5).toFixed(2) + ')';
+          arcs += '<path d="M' + (ccx + rR * Math.cos(b0)).toFixed(1) + ' ' + (cyc + rR * Math.sin(b0)).toFixed(1) + ' A' + rR.toFixed(1) + ' ' + rR.toFixed(1) + ' 0 ' + (b1 - b0 > Math.PI ? 1 : 0) + ' 1 ' +
+            (ccx + rR * Math.cos(b1)).toFixed(1) + ' ' + (cyc + rR * Math.sin(b1)).toFixed(1) + '" stroke="' + col + '" style="color:' + col + '"><title>' + esc(q.symbol) + ' ' + q.weight.toFixed(1) + '% of your portfolio</title></path>';
+        }
+        return (a0 + a1) / 2;
+      });
+      if (acc < full - 0.5) {
+        var o0 = -Math.PI / 2 + acc / full * Math.PI * 2 + 0.02, o1 = Math.PI * 1.5 - 0.02;
+        if (o1 > o0) arcs += '<path class="is-rest" d="M' + (ccx + rR * Math.cos(o0)).toFixed(1) + ' ' + (cyc + rR * Math.sin(o0)).toFixed(1) + ' A' + rR.toFixed(1) + ' ' + rR.toFixed(1) + ' 0 ' + (o1 - o0 > Math.PI ? 1 : 0) + ' 1 ' + (ccx + rR * Math.cos(o1)).toFixed(1) + ' ' + (cyc + rR * Math.sin(o1)).toFixed(1) + '"><title>Other holdings</title></path>';
+      }
+      var ring = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      ring.setAttribute('class', 'cmd27-alloc'); ring.setAttribute('viewBox', '0 0 ' + bw + ' ' + bh); ring.setAttribute('aria-hidden', 'true');
+      ring.innerHTML = arcs;
+      orbitEl.insertBefore(ring, orbitEl.firstChild);
+    }
     els.forEach(function (el, i) {
       var hw = el.offsetWidth / 2 + 6, hh = el.offsetHeight / 2 + 6;   // +6: the ★ and tag badges stick out
-      var base = (-Math.PI / 2) + (i / Math.max(n, 1)) * Math.PI * 2 + 0.3, pick = null, first = null;
+      var base = mids && !narrow ? mids[i] : (-Math.PI / 2) + (i / Math.max(n, 1)) * Math.PI * 2 + 0.3, pick = null, first = null;
       for (var t = 0; t < 13 && !pick; t++) {
         var a = base + (t === 0 ? 0 : (t % 2 ? 1 : -1) * Math.ceil(t / 2) * 0.13);
         var dx = Math.cos(a) * rx, dy = Math.sin(a) * ry;
@@ -275,6 +343,8 @@
       }
       pick = pick || first;
       rects.push(pick);
+      // Chips in the lower part of the frame open their card upward.
+      el.classList.toggle('is-low', (pick[1] + pick[3]) / 2 > bh * 0.58);
       el.style.left = ((pick[0] + pick[2]) / 2 / bw * 100) + '%';
       el.style.top = ((pick[1] + pick[3]) / 2 / bh * 100) + '%';
       el.style.visibility = '';
@@ -399,7 +469,13 @@
       b.firstChild.textContent = r.name.replace(' · OTHER', '').replace('COMMUNICATION', 'COMMS');
       // 24H prices on: the sector's overnight / after-hours average, with a
       // moon, and how many of its stocks are up and down on that move.
-      if (r.ext) {
+      if (r.pm && typeof r.value === 'number') {
+        // My Portfolio: your money in the sector, and its share of the whole.
+        var av = Math.abs(r.value), vs = av >= 1e6 ? (av / 1e6).toFixed(2) + 'M' : av >= 1e3 ? (av / 1e3).toFixed(1) + 'K' : av.toFixed(0);
+        b.lastChild.textContent = '$' + vs + ' · ' + (r.w >= 10 ? r.w.toFixed(0) : r.w.toFixed(1)) + '%';
+        b.title = r.name + ': $' + Math.round(r.value).toLocaleString('en-US') + ' of your money (' + r.w.toFixed(1) + '%), ' + pct(r.avg) + (r.ext ? ' on the 24H move' : ' today');
+        if (r.ext) b.classList.add('is-24h');
+      } else if (r.ext) {
         b.classList.add('is-24h');
         b.lastChild.innerHTML = '<i class="cmd27-dock__moon" aria-hidden="true"><svg viewBox="0 0 16 16" width="9" height="9"><path d="M10.8 2.2a6 6 0 1 0 3 9.9A6.3 6.3 0 0 1 10.8 2.2z" fill="currentColor"/></svg></i>';
         b.lastChild.appendChild(document.createTextNode(pct(r.avg) + ' · ▲' + r.up + ' ▼' + r.dn));
@@ -547,6 +623,7 @@
         return;
       }
       holdings = d.tickers || [];
+      document.dispatchEvent(new CustomEvent('cmd27:portfolio-summary', { detail: d }));
       document.dispatchEvent(new CustomEvent('cmd27:holdings', { detail: holdings }));
       document.dispatchEvent(new CustomEvent('cmd27:portfolio-data', { detail: d.holdings || [] }));
       // Since you last looked (this browser).
@@ -610,6 +687,7 @@
     var ts = sigTickers(), thesis = sig.getAttribute('data-thesis-url') || '/thesis';
     if (ts.length) get('/api/thesis/zones?tickers=' + encodeURIComponent(ts.join(','))).then(function (d) {
       var ul = $('#sig-zones'); if (!ul) return;
+      window.__cmd27Zones = (d && d.zones) || {};
       var zs = d && d.zones ? Object.keys(d.zones).map(function (k) { return d.zones[k]; }).filter(function (z) { return z && z.available; }) : [];
       flagState.zone = {}; flagKeys.zone = {};
       var today = new Date().toISOString().slice(0, 10);
@@ -636,6 +714,7 @@
     get('/api/alerts/price').then(function (d) {
       var ul = $('#sig-alerts'); if (!ul) return;
       var al = d && d.alerts ? d.alerts : [];
+      window.__cmd27Alerts = al;
       var cut = Date.now() - 3 * 864e5;
       var fired = al.filter(function (a) { return a.triggered_at && Date.parse(String(a.triggered_at).replace(' ', 'T')) > cut; });
       var armed = al.filter(function (a) { return a.enabled && !a.triggered_at; });
@@ -671,7 +750,8 @@
   function showNote(html) { if (!note) return; note.innerHTML = html; note.hidden = !html; }
   function items() {
     return (held || []).map(function (h) {
-      return { symbol: h.ticker, price: h.price, change_pct: h.pct, value: h.value, weight: h.weight, dollars: h.dollars, sector: h.sector };
+      return { symbol: h.ticker, price: h.price, change_pct: h.pct, value: h.value, weight: h.weight, dollars: h.dollars, sector: h.sector,
+               ext: h.ext, ext_pct: h.ext_pct, ext_price: h.ext_price, ext_dollars: h.ext_dollars };
     });
   }
   function setMode(m, quiet) {
@@ -690,6 +770,64 @@
     emit('cmd27:mode', { mode: m });
     try { localStorage.setItem(KEY, m); } catch (e) {}
   }
+  // ── My Portfolio summary card (replaces the orbit bar in this view) and
+  //    the concentration warning (shown in the Game Plan whatever the view).
+  var psum = document.getElementById('cmd27-psum'), obar = document.getElementById('cmd27-orbit-bar'), sumD = null;
+  function nm(v) { return typeof v === 'number' && isFinite(v); }
+  function usd(v, sign) {
+    if (!nm(v)) return '—';
+    var a = Math.abs(v), t = a.toLocaleString('en-US', { minimumFractionDigits: a >= 1000 ? 0 : 2, maximumFractionDigits: a >= 1000 ? 0 : 2 });
+    return (sign ? (v > 0 ? '+' : v < 0 ? '−' : '') : (v < 0 ? '−' : '')) + '$' + t;
+  }
+  function pc(v) { return nm(v) ? (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(2) + '%' : '—'; }
+  function tn(v) { return nm(v) ? (v > 0 ? 'up' : v < 0 ? 'dn' : '') : ''; }
+  function e2(t) { var d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; }
+  function on24() { return document.documentElement.getAttribute('data-show-24h') === '1'; }
+  function concentration(d) {
+    var h = (d && d.holdings) || []; if (h.length < 2) return null;
+    var a = h[0], b = h[1], w1 = a.weight || 0, w2 = (a.weight || 0) + (b.weight || 0);
+    if (w1 >= 30 && h.length > 1 && w2 >= 50) return { names: [a.ticker, b.ticker], w: w2, hit: ((a.value || 0) + (b.value || 0)) * 0.10 };
+    if (w1 >= 30) return { names: [a.ticker], w: w1, hit: (a.value || 0) * 0.10 };
+    return null;
+  }
+  function renderSum() {
+    var d = sumD, isP = mode === 'portfolio' && d && !d.empty;
+    if (obar) { obar.hidden = !!isP; obar.style.display = isP ? 'none' : ''; }
+    if (psum) psum.hidden = !isP;
+    var cbox = document.getElementById('gp-conc'), c = d && !d.empty ? concentration(d) : null;
+    if (cbox) {
+      cbox.hidden = !c;
+      if (c) {
+        var word = (document.getElementById('gp-word') || {}).textContent || '';
+        cbox.innerHTML = '<b>⚠ Concentrated</b> ' + e2(c.names.join(' + ')) + (c.names.length > 1 ? ' are ' : ' is ') + Math.round(c.w) + '% of your money. ' +
+          (/risk-off/i.test(word) ? 'With the market Risk-Off, a' : 'A') + ' 10% drop there costs about <em class="dn">' + usd(-c.hit) + '</em>.';
+      }
+    }
+    if (!isP || !psum) return;
+    var useX = on24() && d.ext_count > 0 && nm(d.ext_dollars);
+    var hs = d.holdings || [], unr = 0, cost = 0, kn = 0;
+    hs.forEach(function (h) { if (nm(h.unrealized) && nm(h.cost_basis)) { unr += h.unrealized; cost += h.cost_basis; kn++; } });
+    var best = d.best, worst = d.worst;
+    if (useX) {
+      var xs = hs.filter(function (h) { return nm(h.ext_pct); }).sort(function (a, b) { return a.ext_pct - b.ext_pct; });
+      if (xs.length) { worst = { ticker: xs[0].ticker, pct: xs[0].ext_pct, dollars: xs[0].ext_dollars }; best = { ticker: xs[xs.length - 1].ticker, pct: xs[xs.length - 1].ext_pct, dollars: xs[xs.length - 1].ext_dollars }; }
+    }
+    var html = '<header><span>My portfolio</span><small>' + (d.positions || hs.length) + ' positions' + (d.source === 'schwab' ? ' · Schwab' : '') + '</small></header>' +
+      '<strong class="psum-val">' + usd(d.value) + '</strong>' +
+      '<div class="psum-rows">' +
+      '<div><span>' + e2(d.day_label ? d.day_label + ' close' : 'Today') + '</span><b class="' + tn(d.day_dollars) + '">' + usd(d.day_dollars, true) + ' <small>' + pc(d.day_pct) + '</small></b></div>' +
+      (d.ext_count ? '<div class="' + (useX ? 'is-on' : 'is-off') + '"><span><i class="psum-moon" aria-hidden="true"></i>24H</span><b class="' + tn(d.ext_dollars) + '">' + usd(d.ext_dollars, true) + ' <small>' + pc(d.ext_pct) + '</small></b></div>' : '') +
+      (kn ? '<div><span>Unrealized</span><b class="' + tn(unr) + '">' + usd(unr, true) + ' <small>' + pc(cost > 0 ? unr / cost * 100 : null) + '</small></b></div>' : '') +
+      (nm(d.cash) && d.cash > 0 ? '<div><span>Cash</span><b>' + usd(d.cash) + '</b></div>' : '') +
+      '</div>' +
+      (best && worst && best.ticker !== worst.ticker ? '<div class="psum-bw"><span class="up">▲ ' + e2(best.ticker) + ' ' + pc(best.pct) + '</span><span class="dn">▼ ' + e2(worst.ticker) + ' ' + pc(worst.pct) + '</span></div>' : '') +
+      (useX ? '<p class="psum-note">Showing overnight / extended-hours moves (24H prices is on)</p>' : '');
+    psum.innerHTML = html;
+  }
+  document.addEventListener('cmd27:portfolio-summary', function (e) { sumD = e.detail; renderSum(); });
+  (function () { var gw = document.getElementById('gp-word'); if (gw && window.MutationObserver) new MutationObserver(function () { if (sumD) renderSum(); }).observe(gw, { childList: true, characterData: true, subtree: true }); })();
+  document.addEventListener('cmd27:mode', function () { renderSum(); });
+  document.addEventListener('tradestaar:prefs', function () { renderSum(); });
   document.addEventListener('cmd27:portfolio-data', function (e) {
     held = e.detail || [];
     if (mode === 'portfolio') { if (!held.length) setMode('market'); else { showNote(''); emit('cmd27:portfolio', { items: items() }); } }

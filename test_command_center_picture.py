@@ -482,3 +482,18 @@ def test_orbit_chips_and_view_switch_stay_inside_the_visible_hero():
     assert "closest('.cmd27-hero')" in js and "--clip-t" in js
     assert "dy = Math.max(-cyc + hh + 2 + clipT, Math.min(bh - cyc - hh - 2 - clipB, dy));" in js
     assert ".cmd27-mode { position: absolute; right: var(--safe-r, 6px); top: calc(var(--clip-t, 0px) + 6px);" in css
+
+
+def test_my_portfolio_view_has_summary_ring_and_warning():
+    js = open("static/js/command_center_picture.js").read()
+    page = open("templates/liquidity.html").read()
+    # Summary card replaces the orbit bar; concentration sits in the Game Plan.
+    assert 'id="cmd27-psum"' in page and 'id="gp-conc"' in page
+    assert "cmd27:portfolio-summary" in js and "function concentration(d)" in js
+    # Allocation ring + chips beside their slices; holding hover card.
+    assert "cmd27-alloc" in js and "mids ? mids[i]" not in js and "mids && !narrow ? mids[i]" in js
+    assert "function holdingRows(q)" in js and "__cmd27Zones" in js and "__cmd27Alerts" in js
+    # Sector pills show your money in portfolio view.
+    assert "r.pm && typeof r.value === 'number'" in js
+    # Phones: a 0×0 hero wrapper must not clip every chip to the top row.
+    assert "if (hr.height > 0)" in js

@@ -39,6 +39,7 @@
         <button type="button" id="cmd27-orbit-edit" class="cmd27-orbit-bar__edit" aria-pressed="false" hidden>Edit</button>
         <button type="button" id="cmd27-orbit-reset" class="cmd27-orbit-bar__reset" hidden>Reset</button>
       </div>
+      <section class="cmd27-psum" id="cmd27-psum" data-ptab="Globe" aria-live="polite" hidden></section>
       <nav class="cmd27-dock" id="cmd27-dock" aria-label="Fly to a sector" data-ptab="Globe" hidden></nav>
     </div>
 
@@ -98,6 +99,7 @@
           <b id="gp-word">Checking…</b>
           <span id="gp-rule">Running your market check: SPY &amp; QQQ structure, VIX, the dollar.</span>
         </div>
+        <p class="cmd27-gp-conc" id="gp-conc" hidden></p>
         <ul class="cmd27-checks">
           <li data-check="SPY"><i class="cmd27-dot"></i><span id="cc-spy-k">{{ pulse.spy_label or 'SPY' }}</span><em id="gp-spy">—</em><strong class="cc-p-val {{ dir(pulse.spy) }}" id="cc-spy">{{ pct(pulse.spy) }}</strong></li>
           <li data-check="QQQ"><i class="cmd27-dot"></i><span id="cc-qqq-k">{{ pulse.qqq_label or 'QQQ' }}</span><em id="gp-qqq">—</em><strong class="cc-p-val {{ dir(pulse.qqq) }}" id="cc-qqq">{{ pct(pulse.qqq) }}</strong></li>
