@@ -317,3 +317,46 @@
 /* The page column must not grow to its widest child (the price map scrolls inside its own box on phones). */
 .th-shell { grid-template-columns: minmax(0, 1fr); }
 .th-shell > * { min-width: 0; }
+
+/* ---- Pro lens ---- */
+.pl-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.pl-card{display:flex;flex-direction:column;gap:10px}
+.pl-basis button{appearance:none;border:0;background:transparent;color:inherit;font:inherit;padding:6px 10px;border-radius:9px;cursor:pointer}
+.pl-basis button.is-on{background:rgba(243,201,90,.14);color:var(--th-gold-bright,#f3c95a)}
+.pl-basis button[disabled]{opacity:.4;cursor:not-allowed}
+.pl-fall{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:6px}
+.pl-fall li{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.03);color:#c9d1da;font:500 13px var(--font-ui)}
+.pl-fall li small{color:#7e8995;font:600 10px var(--font-mono);letter-spacing:.06em;text-transform:uppercase}
+.pl-fall b{font:800 15px var(--font-mono);color:#f1efe9;white-space:nowrap}
+.pl-fall li.is-minus b{color:var(--vz-pricey)}
+.pl-fall li.is-total{border:1px solid rgba(46,230,166,.28);background:rgba(46,230,166,.06)}
+.pl-fall li.is-total b{color:var(--vz-load)}
+.pl-fall li.is-total b.tone-neg-t{color:var(--vz-pricey)}
+.pl-meter{height:6px;border-radius:6px;background:rgba(255,255,255,.06);overflow:hidden}
+.pl-meter i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,#6fe0a0,var(--vz-load))}
+.pl-meter i.is-hot{background:linear-gradient(90deg,#ffb36b,var(--vz-pricey))}
+.pl-scen{display:grid;gap:6px}
+.pl-sc{display:grid;grid-template-columns:1fr auto auto;align-items:baseline;gap:10px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.03)}
+.pl-sc small{color:#8b96a3;font:600 11px var(--font-ui)}
+.pl-sc strong{font:800 17px var(--font-mono);color:#f1efe9}
+.pl-sc em{font:700 12px var(--font-mono);font-style:normal;min-width:48px;text-align:right}
+.pl-sc.is-bear small{color:var(--th-red,#ff6b6b)}.pl-sc.is-base small{color:var(--th-gold-bright,#f3c95a)}.pl-sc.is-bull small{color:var(--th-green,#2ee6a6)}
+.pl-sc .tone-pos{color:var(--vz-load)}.pl-sc .tone-neg{color:var(--vz-pricey)}
+.pl-range{position:relative;height:22px;margin:4px 2px 0;border-radius:11px;background:rgba(255,255,255,.04)}
+.pl-range__band{position:absolute;top:7px;height:8px;border-radius:8px;background:linear-gradient(90deg,var(--vz-pricey),var(--vz-fair),var(--vz-load));opacity:.8;transition:left .2s,width .2s}
+.pl-range__px{position:absolute;top:2px;width:3px;height:18px;margin-left:-1.5px;border-radius:2px;background:#fff;box-shadow:0 0 10px rgba(255,255,255,.7);transition:left .2s}
+.pl-believe{border-color:color-mix(in srgb,var(--vz-c) 40%,transparent);background:radial-gradient(120% 120% at 0% 0%,color-mix(in srgb,var(--vz-c) 14%,transparent),transparent 60%),#090c0f}
+.pl-need{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.pl-need strong{color:var(--vz-c);font:800 clamp(34px,4vw,48px)/1 var(--font-mono);letter-spacing:-.02em}
+.pl-vs{display:grid;gap:6px}
+.pl-vs div{display:grid;grid-template-columns:72px 1fr;align-items:center;gap:8px}
+.pl-vs small{color:#8b96a3;font:600 11px var(--font-ui)}
+.pl-vs i{display:block;height:8px;border-radius:8px;background:#5d6874;transition:width .2s}
+.pl-vs i.is-hot{background:linear-gradient(90deg,#ffb36b,var(--vz-pricey))}.pl-vs i.is-ok{background:linear-gradient(90deg,#6fe0a0,var(--vz-load))}
+.pl-dials{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:14px;align-items:end;margin-top:16px}
+.pl-dials label{display:grid;gap:6px;color:#aab4bf;font:600 12px var(--font-ui)}
+.pl-dials label span{display:flex;justify-content:space-between}
+.pl-dials label b{color:#f1efe9;font:800 12px var(--font-mono)}
+.pl-dials input[type=range]{width:100%;accent-color:var(--th-gold-bright,#f3c95a)}
+.pl-foot{font-size:11.5px}
+@media (max-width:980px){.pl-grid{grid-template-columns:1fr}.pl-dials{grid-template-columns:1fr}}

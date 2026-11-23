@@ -69,6 +69,7 @@ def _history_series(data: dict) -> list[dict]:
             "revenue": row.get("revenue_num"),
             "net_income": row.get("net_income_num"),
             "fcf": row.get("fcf_num"),
+            "sbc": row.get("sbc_num"),
         })
     return out
 
@@ -751,6 +752,8 @@ def build_thesis(data: dict, ticker: str, basis: str = "auto", bars: dict | None
                           "pe": valuation.get("pe"),
                           "price": price, "mos": MARGIN_OF_SAFETY},
             }
+        if value.get("available"):
+            value["pro"] = _pro_lens(data, ticker, targets, price)
         ends = [str(r.get("period_end"))[:10] for r in (data.get("history") or [])
                 if isinstance(r, dict) and r.get("period_end")]
         last_bar = None
@@ -791,6 +794,21 @@ def build_thesis(data: dict, ticker: str, basis: str = "auto", bars: dict | None
                 "targets": {"available": False, "note": str(exc)},
                 "value": {"available": False},
                 "flags": [], "red_flags": [], "error": str(exc)}
+
+
+def _pro_lens(data: dict, ticker: str, targets: dict, price: float) -> dict:
+    """The Pro lens (pro_lens.py) on the same inputs as the zones."""
+    try:
+        from pro_lens import build_pro_lens
+        ttm = _ttm_values(ticker)
+        hist = _history_series(data)
+        h, t = _revenue_cagr_raw(hist), ttm.get("revenue_growth")
+        delivered = (h + t) / 2 if h is not None and t is not None else (h if h is not None else t)
+        return build_pro_lens(hist, ttm, price, targets.get("shares"),
+                              targets.get("net_cash_ps") or 0.0, delivered)
+    except Exception as exc:
+        logger.debug("pro lens unavailable for %s: %s", ticker, exc)
+        return {"available": False}
 
 
 # --- Peers: what similar companies trade at ---------------------------------
