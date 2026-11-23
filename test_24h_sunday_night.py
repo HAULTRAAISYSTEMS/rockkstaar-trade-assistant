@@ -54,7 +54,7 @@ def test_after_a_restart_yahoo_supplies_the_after_hours_print(monkeypatch):
     monkeypatch.setattr(me, "live_quotes", lambda syms: {"NVDA": dict(q)})
     monkeypatch.setattr(me, "fast_pulse_quotes", lambda: {})
     out = me.overlay_live_tape([item])[0]
-    assert out["ext"] == "post" and out["ext_pct"] == 2.0 and out["change_pct"] == -14.01
+    assert out["ext"] == "overnight" and out["ext_pct"] == 2.0 and out["change_pct"] == -14.01
 
 
 def test_without_an_extended_print_the_regular_close_still_shows(monkeypatch):
@@ -100,3 +100,24 @@ def test_yahoo_empty_one_day_chart_falls_back_to_five_days(monkeypatch):
 
 def teardown_function(_fn):
     me._LQ_WANTED.clear(); me._LQ_CACHE.clear(); me._LIVE_CACHE.clear()
+
+
+def test_overnight_every_ticker_reads_24h(monkeypatch):
+    monkeypatch.setattr(me, "pulse_session", lambda now=None: "overnight")
+    monkeypatch.setattr(me, "fast_pulse_quotes", lambda: {})
+    monkeypatch.setattr(me, "live_quotes", lambda syms: {
+        "AAPL": {"price": 230.0, "epoch": 1, "prev_close": 228.0, "change_pct": 0.88, "ext": None},
+        "MSFT": {"price": 410.0, "epoch": 2, "prev_close": 400.0, "day_close": 405.0, "ext": "post"}})
+    a, m = me.overlay_live_tape([{"symbol": "AAPL", "price": 230.0, "change_pct": 0.88},
+                                 {"symbol": "MSFT", "price": 405.0, "change_pct": 1.25}])
+    assert a["ext"] == "overnight" and a["ext_pct"] == 0.0 and a["change_pct"] == 0.88
+    assert m["ext"] == "overnight" and m["ext_pct"] == round((410 / 405 - 1) * 100, 2)
+
+
+def test_after_hours_keeps_its_own_label_before_8pm(monkeypatch):
+    monkeypatch.setattr(me, "pulse_session", lambda now=None: "post")
+    monkeypatch.setattr(me, "fast_pulse_quotes", lambda: {})
+    monkeypatch.setattr(me, "live_quotes", lambda syms: {
+        "MSFT": {"price": 410.0, "epoch": 2, "day_close": 405.0, "ext": "post"}})
+    m = me.overlay_live_tape([{"symbol": "MSFT", "price": 405.0, "change_pct": 1.25}])[0]
+    assert m["ext"] == "post"
