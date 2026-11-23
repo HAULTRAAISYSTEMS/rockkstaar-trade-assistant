@@ -194,3 +194,25 @@ def test_24h_prices_is_a_saved_setting(client, monkeypatch):
     assert 'data-show-24h="1"' in html and 'data-pref="show_24h"' in html
     client.post("/api/account/prefs", json={"show_24h": False})
     assert 'data-show-24h="0"' in client.get("/").get_data(as_text=True)
+
+
+def test_overnight_keeps_the_after_hours_print_however_old():
+    """Sun 9:50 PM: LMT's last trade was Friday 7:59 PM (after hours). With no
+    overnight trade it is still the latest print, so it must stay live — not
+    age out and leave the chip with no extended move."""
+    import time
+    now = time.time()
+    old_post = {"price": 455.0, "epoch": int(now - 3 * 86400), "ext": "post", "prev_close": 453.18}
+    assert market_engine._lq_is_fresh(old_post, "overnight", now)
+    assert not market_engine._lq_is_fresh({"price": 1, "epoch": int(now - 3600)}, "pre", now)
+
+
+def test_extended_move_falls_back_to_the_tape_close(monkeypatch):
+    """An overnight bar carries no close of its own; the tape item's regular
+    price is the base for the 24H move."""
+    monkeypatch.setattr(market_engine, "live_quotes", lambda syms: {
+        "VOO": {"price": 648.36, "ext": "overnight"}})
+    monkeypatch.setattr(market_engine, "fast_pulse_quotes", lambda: {})
+    (voo,) = market_engine.overlay_live_tape([{"symbol": "VOO", "price": 635.54, "change_pct": -3.41}])
+    assert voo["change_pct"] == -3.41 and voo["ext"] == "overnight"
+    assert voo["ext_pct"] == round((648.36 / 635.54 - 1) * 100, 2)
