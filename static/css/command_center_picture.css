@@ -716,3 +716,10 @@ html.cc27 .liq-page.cmd27 .cmd27-nx--in .nx-list { display: flex !important; fle
    starts at the page edge, not the box edge, or its first column is cut. */
 @media (min-width: 1081px) { .cmd27-hero__globe:not(.is-full) .cmd27-sector { left: 22px; } }
 @media (min-width: 1081px) and (max-width: 1400px) { .cmd27-hero__globe:not(.is-full) .cmd27-sector { left: 16px; } }
+
+/* Price · dollar change under the % (TradingView-style Last · Chg). */
+.cmd27-chip__px { display: flex; gap: 6px; margin-top: 1px; white-space: nowrap; font: 600 10.5px/1.25 var(--font-mono, "IBM Plex Mono", monospace); }
+.cmd27-chip__px i { font-style: normal; color: var(--c-txt); opacity: .82; }
+.cmd27-chip__px em { font-style: normal; color: var(--c-up); }
+.cmd27-chip.is-down .cmd27-chip__px em { color: var(--c-dn); }
+@media (max-width: 760px) { .cmd27-chip__px { font-size: 9.5px; gap: 4px; } }

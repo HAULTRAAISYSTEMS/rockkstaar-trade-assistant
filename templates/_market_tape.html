@@ -7,7 +7,7 @@
       {% if t.logo %}<img class="market-tape-logo" src="{{ t.logo }}" alt="" loading="lazy" onerror="if(!this.dataset.fbk){this.dataset.fbk=1;this.src='https://financialmodelingprep.com/image-stock/{{ t.symbol }}.png';}else{this.remove();}">{% endif %}<span class="market-tape-sym">{{ t.symbol }}</span>
       <span class="market-tape-px" data-mtape-px>{{ '%.2f'|format(t.price) if t.price is not none else '—' }}</span>
       <span class="market-tape-chg {{ 'chg-pos' if (t.change_pct or 0) > 0 else ('chg-neg' if (t.change_pct or 0) < 0 else 'chg-flat') }}" data-mtape-chg>{{ '%+.2f'|format(t.change_pct) ~ '%' if t.change_pct is not none else '—' }}</span>
-      <span class="market-tape-ext" data-mtape-ext {% if not (t.ext and t.ext_pct is not none) %}hidden{% endif %}>{% if t.ext and t.ext_pct is not none %}{{ {'pre': 'PRE', 'post': 'AH', 'overnight': 'ON'}[t.ext] }} {{ '%+.2f'|format(t.ext_pct) }}%{% endif %}</span>
+      <span class="market-tape-ext" data-mtape-ext {% if not (t.ext and t.ext_pct is not none) %}hidden{% endif %}>{% if t.ext and t.ext_pct is not none %}{{ {'pre': 'PRE', 'post': 'AH', 'overnight': '24H'}[t.ext] }} {{ '%+.2f'|format(t.ext_pct) }}%{% endif %}</span>
     </span>
     {% endfor %}
   </div>
@@ -63,7 +63,7 @@
         }
         var ex = el.querySelector('[data-mtape-ext]');
         if (ex) {
-          var lbl = { pre: 'PRE', post: 'AH', overnight: 'ON' }[t.ext];
+          var lbl = { pre: 'PRE', post: 'AH', overnight: '24H' }[t.ext];
           if (lbl && t.ext_pct != null) {
             var e2 = Number(t.ext_pct);
             ex.textContent = lbl + ' ' + (e2 >= 0 ? '+' : '') + e2.toFixed(2) + '%';

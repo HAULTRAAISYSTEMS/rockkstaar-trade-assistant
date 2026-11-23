@@ -7721,12 +7721,16 @@ def _rebuild_tape_watchlist(uid):
                 items.append({"symbol": t, "logo": _mkt.logo_url(t),
                               "price": px, "change_pct": pct,
                               "watchlist": True, "tier": tier_of[t]})
+            # Pre-market / after-hours moves ride alongside the day's move
+            # (PRE / AH on the tape and the globe chips), never replace it.
             _ext = _mkt.extended_quotes(tickers)
+            _sess = _mkt.market_session() if _ext else None
             for _item in items:
                 _q = _ext.get(_item["symbol"])
-                if _q:
-                    _item["price"] = _q["price"]
-                    _item["change_pct"] = _q["pct"]
+                if _q and _sess in ("pre", "post"):
+                    _item["ext"] = _sess
+                    _item["ext_price"] = _q["price"]
+                    _item["ext_pct"] = _q["pct"]
     except Exception as exc:
         logger.debug("tape watchlist items unavailable: %s", exc)
     _WL_TAPE_CACHE.update(at=_time.time(), user=uid, items=items)
@@ -10792,6 +10796,46 @@ def api_ticker_menu_watchlist(ticker):
         upsert_loading_placeholder(t)
         threading.Thread(target=_onboard_ticker_bg, args=(t, uid), daemon=True, name=f"onboard-{t}").start()
     return jsonify({"ok": True, "ticker": t, "list": name, "has": True})
+
+
+# ── Display preferences (avatar menu) ──────────────────────────────────
+# show_24h: on the globe chips, show the pre-market / after-hours / 24H move
+# while those sessions trade, instead of the last regular-session move.
+_PREF_KEYS = {"show_24h": "pref_show_24h"}
+
+
+def _user_prefs(uid) -> dict:
+    out = {}
+    for name, key in _PREF_KEYS.items():
+        try:
+            out[name] = (get_user_setting(uid, key, "0") or "0") == "1"
+        except Exception:
+            out[name] = False
+    return out
+
+
+@app.context_processor
+def _inject_prefs():
+    try:
+        uid = current_user_id()
+    except Exception:
+        uid = None
+    return {"user_prefs": _user_prefs(uid) if uid else {k: False for k in _PREF_KEYS}}
+
+
+@app.route("/api/account/prefs", methods=["GET", "POST"])
+def api_account_prefs():
+    uid = current_user_id()
+    if not uid:
+        return jsonify({"ok": False, "error": "Sign in first."}), 401
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        for name, key in _PREF_KEYS.items():
+            if name in body:
+                set_user_setting(uid, key, "1" if body.get(name) is True else "0")
+    resp = jsonify({"ok": True, "prefs": _user_prefs(uid)})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/api/command/orbit", methods=["GET", "POST"])

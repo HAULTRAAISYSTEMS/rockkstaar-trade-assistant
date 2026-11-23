@@ -2097,14 +2097,23 @@ def overlay_live_tape(items: list[dict]) -> list[dict]:
             # Pre-market / after-hours / overnight prints ride alongside the
             # regular session instead of replacing it: a +1.1% after-hours
             # bounce must not read as the day's move on a -3.7% day.
-            if ext in ("pre", "post", "overnight") and item.get("price") is not None \
-                    and item.get("change_pct") is not None:
+            if ext in ("pre", "post", "overnight"):
                 base = q.get("day_close") or q.get("regular_close") or q.get("prev_close")
                 item["ext"] = ext
                 item["ext_price"] = round(float(q["price"]), 2)
                 item["ext_pct"] = (round((float(q["price"]) / float(base) - 1) * 100, 2)
                                    if base else q.get("change_pct"))
                 item["live"] = True
+                if item.get("price") is None or item.get("change_pct") is None:
+                    # No regular-session numbers from the slower feed: take
+                    # the session close for the price, and the day's move only
+                    # when the quote knows both closes. Never let an
+                    # extended-hours move pose as the day's change.
+                    dc, pc = q.get("day_close"), q.get("prev_close")
+                    if item.get("price") is None:
+                        item["price"] = round(float(base), 2) if base else item["ext_price"]
+                    if item.get("change_pct") is None and dc and pc:
+                        item["change_pct"] = round((float(dc) / float(pc) - 1) * 100, 2)
                 continue
             item["price"] = round(float(q["price"]), 2)
             if q.get("change_pct") is not None:

@@ -148,3 +148,49 @@ def test_tape_shows_an_index_once_even_if_it_is_on_the_watchlist(client, monkeyp
     monkeypatch.setattr(legacy._mkt, "live_quotes", lambda syms: {})
     syms = [i["symbol"] for i in client.get("/api/market-tape").get_json()["items"]]
     assert syms == ["QQQ", "NVDA"]
+
+
+def test_an_extended_print_never_poses_as_the_days_move(monkeypatch):
+    """Sun 8 PM: the slower feed had no numbers for NVDA, and its live quote
+    is a 24H print. The chip must label it 24H, not show it as the day's
+    change; with both closes known the day's move is filled in too."""
+    monkeypatch.setattr(market_engine, "live_quotes", lambda syms: {
+        "NVDA": {"price": 168.9, "change_pct": 5.62, "ext": "overnight", "prev_close": 159.92},
+        "LMT": {"price": 455.0, "change_pct": 0.4, "ext": "post", "prev_close": 460.0, "day_close": 453.18}})
+    monkeypatch.setattr(market_engine, "fast_pulse_quotes", lambda: {})
+    nvda, lmt = market_engine.overlay_live_tape([{"symbol": "NVDA"}, {"symbol": "LMT", "price": None, "change_pct": None}])
+    assert nvda["ext"] == "overnight" and nvda["ext_pct"] == 5.62 and nvda.get("change_pct") is None
+    assert nvda["price"] == 159.92
+    assert lmt["ext"] == "post" and lmt["ext_pct"] == 0.4 and lmt["change_pct"] == -1.48
+
+
+def test_the_globe_chips_and_banner_label_extended_moves():
+    js = open("static/js/command_center_picture.js").read()
+    assert "{ pre: 'PRE', post: 'AH', overnight: '24H' }" in js and "show24h()" in js
+    tape = open("templates/_market_tape.html").read()
+    assert "overnight: '24H'" in tape and "'ON'" not in tape
+
+
+def test_watchlist_tape_keeps_the_days_move_beside_extended_hours(monkeypatch):
+    legacy._WL_TAPE_CACHE.update(at=0.0, user=None, items=[])
+    monkeypatch.setattr(legacy, "get_all_watchlists", lambda uid: [{"id": 1, "name": "Core"}])
+    monkeypatch.setattr(legacy, "get_watchlist_stocks", lambda wid: ["CRWD"])
+    monkeypatch.setattr(legacy, "_MKT_AVAILABLE", True)
+    monkeypatch.setattr(legacy._mkt, "_fetch_prices_chart", lambda t, period="5d": {"CRWD": [243.4, 229.44]})
+    monkeypatch.setattr(legacy._mkt, "extended_quotes", lambda t: {"CRWD": {"price": 231.0, "pct": 0.68}})
+    monkeypatch.setattr(legacy._mkt, "market_session", lambda: "post")
+    legacy._rebuild_tape_watchlist(1)
+    item = legacy._WL_TAPE_CACHE["items"][0]
+    assert item["change_pct"] == -5.74 and item["price"] == 229.44
+    assert item["ext"] == "post" and item["ext_pct"] == 0.68 and item["ext_price"] == 231.0
+
+
+def test_24h_prices_is_a_saved_setting(client, monkeypatch):
+    monkeypatch.setitem(web_app.app.config, "WTF_CSRF_ENABLED", False)
+    assert client.get("/api/account/prefs").get_json()["prefs"]["show_24h"] is False
+    assert client.post("/api/account/prefs", json={"show_24h": True}).get_json()["prefs"]["show_24h"] is True
+    assert client.get("/api/account/prefs").get_json()["prefs"]["show_24h"] is True
+    html = client.get("/").get_data(as_text=True)
+    assert 'data-show-24h="1"' in html and 'data-pref="show_24h"' in html
+    client.post("/api/account/prefs", json={"show_24h": False})
+    assert 'data-show-24h="0"' in client.get("/").get_data(as_text=True)
