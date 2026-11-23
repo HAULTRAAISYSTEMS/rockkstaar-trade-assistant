@@ -64,3 +64,9 @@ def test_creative_extras_size_delta_and_streak():
     assert "--tf-k" in js and "var(--tf-k, 1)" in css          # bigger moves glow harder
     assert "function popDelta" in js and ".tf-pop" in css       # floating delta
     assert "data-tf-streak" in js and "tfHotUp" in css          # streak badge on the name
+
+
+def test_floating_numbers_are_calm_by_default():
+    js = (ROOT / "static/js/tick_flash.js").read_text()
+    assert "POP_MAX = 2" in js and "POP_MIN = 0.5" in js
+    assert "!(rel >= POP_MIN)" in js

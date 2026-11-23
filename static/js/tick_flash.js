@@ -107,14 +107,17 @@
     streaks.set(sk, st);
     flash(el, up);
     el.classList.toggle('tf-hot', st.n >= 3);
-    flashName(el, up, val.v - prev, val.pct, st.n);
+    flashName(el, up, val.v - prev, val.pct, st.n, rel);
   }
   var streaks = new Map();
 
   // A small delta floats off the number and fades: "▲ +0.42" / "▼ −0.15%".
-  var pops = 0;
-  function popDelta(el, up, d, pct) {
-    if (!on() || pops > 8 || document.hidden) return;
+  // Calm by default: the glow is on every tick, the floating number only on
+  // a big jump (about 0.5%+ of the price, or half a point on a %), and never
+  // more than two on screen, so a board of 20+ tickers stays readable.
+  var pops = 0, POP_MAX = 2, POP_MIN = 0.5;
+  function popDelta(el, up, d, pct, rel) {
+    if (!on() || pops >= POP_MAX || document.hidden || !(rel >= POP_MIN)) return;
     var r = el.getBoundingClientRect();
     if (!r.width || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) return;
     if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -133,11 +136,11 @@
 
   // The ticker's name glows with its number (once per row per tick).
   var nameAt = new WeakMap();
-  function flashName(el, up, d, pct, streak) {
+  function flashName(el, up, d, pct, streak, rel) {
     var ht = hostTicker(el); if (!ht || !ht.t) return;
     var now = Date.now(); if (now - (nameAt.get(ht.host) || 0) < 300) return;
     nameAt.set(ht.host, now);
-    popDelta(el, up, d, pct);                           // one floating delta per row per tick
+    popDelta(el, up, d, pct, rel);                      // big moves only, at most two on screen
     var want = String(ht.t).toUpperCase(), all = [ht.host].concat(Array.prototype.slice.call(ht.host.getElementsByTagName('*'), 0, 60));
     for (var i = 0; i < all.length; i++) {
       var n = all[i], own = '';
