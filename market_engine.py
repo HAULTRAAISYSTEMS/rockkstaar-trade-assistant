@@ -2167,11 +2167,22 @@ def overlay_live_tape(items: list[dict]) -> list[dict]:
     items = [dict(i) for i in (items or [])]
     live = live_quotes([i.get("symbol") for i in items])
     fast = fast_pulse_quotes()
+    try:
+        overnight = pulse_session() == "overnight"
+    except Exception:
+        overnight = False
     for item in items:
         sym = item.get("symbol")
         q = live.get(sym)
         if q and q.get("price") is not None:
             ext = q.get("ext")
+            if overnight and sym not in ("ES", "NQ", "VIX"):
+                # 8 PM-4 AM every ticker reads as one 24H move from the last
+                # regular close: an after-hours close (or the bell itself, for
+                # a name that has not traded since) is where it stands now.
+                if not ext:
+                    q = dict(q, day_close=q.get("day_close") or q["price"])
+                ext = "overnight"
             # Pre-market / after-hours / overnight prints ride alongside the
             # regular session instead of replacing it: a +1.1% after-hours
             # bounce must not read as the day's move on a -3.7% day.

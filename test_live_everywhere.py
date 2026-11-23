@@ -23,6 +23,13 @@ ET = ZoneInfo("America/New_York")
 TODAY = date(2026, 11, 9)
 
 
+@pytest.fixture
+def daytime(monkeypatch):
+    """These overlay tests describe the day and the after-hours session; run
+    overnight, every ticker would (rightly) read as one 24H move instead."""
+    monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "post")
+
+
 def _snap(trade_at, price, daily_day, daily_close, prev_close):
     return {
         "latestTrade": {"t": trade_at, "p": price},
@@ -60,6 +67,7 @@ def test_the_feed_is_off_in_tests():
     assert market_engine.live_quotes(["SPY"]) == {}
 
 
+@pytest.mark.usefixtures("daytime")
 def test_overlay_uses_live_quotes_for_stocks_and_the_fast_feed_for_futures(monkeypatch):
     monkeypatch.setattr(market_engine, "live_quotes", lambda syms: {
         "SPY": {"price": 681.234, "change_pct": 0.31}})
@@ -83,6 +91,7 @@ def client():
     return c
 
 
+@pytest.mark.usefixtures("daytime")
 def test_the_tape_endpoint_serves_the_overlay(client, monkeypatch):
     monkeypatch.setattr(legacy._mkt, "get_market_tape", lambda: [
         {"symbol": "SPY", "price": 670.0, "change_pct": -1.0}])
@@ -128,6 +137,7 @@ def test_the_chart_retries_instead_of_staying_broken():
     assert "Reconnecting chart…" in page and "application/json" in page
 
 
+@pytest.mark.usefixtures("daytime")
 def test_after_hours_print_rides_alongside_the_regular_session(monkeypatch):
     """Fri Nov 20 2026: SPY closed 689.81 (-3.64%); an after-hours print of
     697.48 is +1.11% vs that close. The tape must keep -3.64% as the day's
@@ -150,6 +160,7 @@ def test_tape_shows_an_index_once_even_if_it_is_on_the_watchlist(client, monkeyp
     assert syms == ["QQQ", "NVDA"]
 
 
+@pytest.mark.usefixtures("daytime")
 def test_an_extended_print_never_poses_as_the_days_move(monkeypatch):
     """Sun 8 PM: the slower feed had no numbers for NVDA, and its live quote
     is a 24H print. The chip must label it 24H, not show it as the day's
