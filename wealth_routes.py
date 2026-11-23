@@ -237,7 +237,21 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         entry = (cache or {}).get(user_id) or {}
         if entry.get("data") and _t.time() - (entry.get("ts") or 0) <= 1800:
             return entry["data"]
-        return None
+        # Not cached in this worker (each server process keeps its own, and a
+        # restart empties it): load it through the app's own 60-second cache,
+        # so the strip asks Schwab at most once a minute per process.
+        fetch = getattr(legacy, "_get_schwab_data", None) if legacy else None
+        if fetch is None:
+            return None
+        try:
+            import schwab as _schwab
+            if not (_schwab.token_status(user_id) or {}).get("connected"):
+                return None
+            data = fetch(user_id)
+            return data if data and data.get("connected") else None
+        except Exception as exc:
+            logger.debug("schwab summary for cash: %s", exc)
+            return None
 
     def broker_holdings_for(user_id, portfolio=None):
         """Read the latest broker snapshots; never fabricate ledger trades or tax lots."""
