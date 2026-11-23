@@ -769,8 +769,13 @@ def _fetch_fundamentals_edgar(ticker: str) -> dict | None:
         c = cap_abs[i] if i < len(cap_abs) else None
         fcf.append((o - c) if o is not None and c is not None else None)
 
+    # Stock-based pay: a real cost that never touches cash, so free cash flow
+    # leaves it out. The Pro lens subtracts it to get owner cash flow.
+    sbc = _on_timeline(["ShareBasedCompensation",
+                        "AllocatedShareBasedCompensationExpense"], _timeline)
     result.update(operating_cash_flow=ocf, capex=cap_abs,
-                  free_cash_flow=fcf, financing_cash_flow=fin)
+                  free_cash_flow=fcf, financing_cash_flow=fin,
+                  stock_comp=[abs(x) if isinstance(x, (int, float)) else None for x in sbc])
     if not _has_values(ocf):
         missing.append("cash_flow")
 
@@ -2688,6 +2693,7 @@ def score_fundamentals(raw: dict) -> dict:
                 "revenue_num": rev,   # raw values so the UI can chart and compute
                 "net_income_num": ni,
                 "fcf_num": fcf,
+                "sbc_num": v(raw_data.get("stock_comp"), i),
                 "period_end": (raw_data.get("fiscal_period_ends") or [None] * (i + 1))[i]
                               if i < len(raw_data.get("fiscal_period_ends") or []) else None,
                 # A coverage ratio needs positive earnings underneath it. On a loss year
