@@ -54,7 +54,7 @@ def test_what_counts_as_a_number():
 def test_the_ticker_name_glows_with_its_number():
     js = (ROOT / "static/js/tick_flash.js").read_text()
     css = (ROOT / "static/css/tick_flash.css").read_text()
-    assert "flashName(el, val.v > prev)" in js and "'tf-name-'" in js
+    assert "flashName(el, up," in js and "'tf-name-'" in js
     assert "@keyframes tfNameUp" in css and "@keyframes tfNameDn" in css
 
 
