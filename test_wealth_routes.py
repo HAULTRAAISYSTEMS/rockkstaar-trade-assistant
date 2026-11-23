@@ -445,3 +445,23 @@ def test_tape_says_live_only_in_a_session_with_live_quotes(monkeypatch):
     for session, want in (("regular", True), ("overnight", True), ("closed", False)):
         monkeypatch.setattr(market_engine, "pulse_session", lambda now=None, s=session: s)
         assert c.get("/api/market-tape").get_json()["live"] is want, session
+
+
+def test_schwab_today_counts_cash_like_the_broker(env, monkeypatch):
+    import market_engine
+    import wealth_store
+    monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "closed")
+    app, *_ = env
+    wealth_store.save_broker_snapshot(3, "acct-a", {"cash": 74.23, "holdings": [
+        {"ticker": "KLAC", "shares": 2, "market_value": 2800.0, "cost_basis_snapshot": 2500.0}]})
+    d = client(app, 3).get("/api/wealth/today").get_json()
+    assert d["source"] == "schwab" and d["cash"] == pytest.approx(74.23)
+    assert d["value"] == pytest.approx(2874.23)
+
+
+def test_snapshot_keeps_cash_and_sweep():
+    import wealth_broker_sync as wbs
+    out = wbs.discover({"connected": True, "accounts": [
+        {"account_hash": "h1", "cash_and_sweep": 74.23, "cash_balance": 0.0,
+         "equity_positions": [{"symbol": "KLAC", "quantity": 1, "market_value": 1200.0}]}]}, [], [])
+    assert out["accounts"][0]["cash"] == pytest.approx(74.23)

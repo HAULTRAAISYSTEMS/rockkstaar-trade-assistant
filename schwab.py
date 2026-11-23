@@ -764,6 +764,10 @@ def _normalize_account(raw: dict) -> dict:
         # Balances
         "total_value":       round(current_value, 2),
         "cash_balance":      round(bal.get("cashBalance") or 0.0, 2),
+        # Cash plus the sweep / money-market "cash invest": everything in the
+        # account that is not a position. Schwab's "Cash & Cash Invest".
+        "cash_and_sweep":    round(max(0.0, (current_value or 0.0)
+                                       - sum(p.get("market_value") or 0.0 for p in positions)), 2),
         "buying_power":      round(
             bal.get("buyingPowerNonMarginableTrade")
             or bal.get("availableFunds")
