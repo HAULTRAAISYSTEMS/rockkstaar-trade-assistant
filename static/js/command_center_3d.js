@@ -313,6 +313,9 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     var SECTORS = {};
     try { SECTORS = JSON.parse(host.getAttribute('data-sectors') || '{}') || {}; } catch (e) { SECTORS = {}; }
     var useRegions = !!host.getAttribute('data-sectors');
+    // The scanner's 7-check swing score (1–10) per ticker, from its last scan.
+    var SCORES = {};
+    try { SCORES = JSON.parse(host.getAttribute('data-scores') || '{}') || {}; } catch (e) { SCORES = {}; }
     function regionFor(sym) {
       var u = String(sym || '').toUpperCase();
       if (/^(ES|NQ|YM|RTY|CL|GC|SI|NG|ZB|ZN|DXY|BTC.*|ETH.*)$/.test(u) || /[=\/]/.test(u)) return 'FUT';
@@ -545,9 +548,77 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     var ARCS = [['NYSE', 'LSE'], ['LSE', 'XETRA'], ['XETRA', 'NSE'], ['NSE', 'HKEX'], ['HKEX', 'TSE'], ['TSE', 'ASX'],
                 ['NYSE', 'B3'], ['NYSE', 'TSX'], ['LSE', 'HKEX'], ['NYSE', 'TSE'], ['SSE', 'HKEX'], ['LSE', 'B3']];
     function exch(n) { for (var i = 0; i < EXCH.length; i++) if (EXCH[i].name === n) return EXCH[i]; return null; }
+    /* World markets from the server (globe_markets.py): real holidays, lunch
+       breaks, early closes, next open/close times and each exchange's index.
+       Without it (login page, or the feed failed) the beacons fall back to
+       the local-clock guess below. Polled every minute, and again right
+       after any countdown reaches zero so a bell flips the beacon on time. */
+    var MK = {}, IDX = {}, RELAY = [], mkSkew = 0, mkAt = 0, mkTimer = 0, mkNext = 0;
+    var MK_URL = host.getAttribute('data-markets-url') || '';
+    function setMarkets(p) {
+      if (!p || !p.exchanges || !p.exchanges.length) return;
+      var m = {};
+      p.exchanges.forEach(function (st) { m[st.code] = st; });
+      MK = m; IDX = p.indices || {}; RELAY = p.relay || [];
+      mkAt = Date.now();
+      if (p.server_epoch) mkSkew = p.server_epoch - Date.now() / 1000;
+      // The next scheduled change anywhere: refetch just after it.
+      mkNext = 0;
+      Object.keys(MK).forEach(function (k) {
+        [MK[k].opens_at, MK[k].closes_at].forEach(function (t) { if (t && (!mkNext || t < mkNext)) mkNext = t; });
+      });
+      sessionAt = 0;
+      if (exOpen) renderExch();
+      document.dispatchEvent(new CustomEvent('cmd27:markets', { detail: p }));
+    }
+    function nowSec() { return Date.now() / 1000 + mkSkew; }
+    function pollMarkets() {
+      if (!MK_URL || document.hidden) return;
+      fetch(MK_URL, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (p) { if (p) setMarkets(p); })
+        .catch(function () { /* keep the last good state */ });
+    }
+    try { setMarkets(JSON.parse(host.getAttribute('data-markets') || '{}')); } catch (e) { /* fall back to the local clock */ }
+    if (MK_URL && !decor) {
+      setInterval(function () {
+        var due = mkNext && nowSec() > mkNext + 2;
+        if (Date.now() - mkAt > 60000 || (due && Date.now() - mkAt > 5000)) pollMarkets();
+      }, 5000);
+      document.addEventListener('visibilitychange', function () { if (!document.hidden && Date.now() - mkAt > 30000) pollMarkets(); });
+    }
+    function exState(code) { return MK[code] || null; }
+    function dur(sec) {
+      sec = Math.max(0, Math.round(sec));
+      var d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+      if (d) return d + 'd ' + h + 'h';
+      if (h) return h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
+      return m ? m + 'm' : '<1m';
+    }
+    function pctTxt(v) { return v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
+    // One short tag per beacon: what it is doing and when that changes.
+    function exTag(e) {
+      var st = exState(e.name), t = nowSec();
+      if (!st) return e.live ? e.name + ' · OPEN' : null;
+      if (st.status === 'open') return e.name + ' · OPEN' + (st.closes_at ? ' · ' + dur(st.closes_at - t) : '');
+      if (st.status === 'lunch') return e.name + ' · LUNCH · ' + (st.opens_at ? dur(st.opens_at - t) : '');
+      if (st.status === 'holiday') return e.name + ' · HOLIDAY';
+      if (st.opens_at && st.opens_at - t < 3 * 3600) return e.name + ' · OPENS ' + dur(st.opens_at - t);
+      return null;
+    }
     var sessionAt = 0;
     function refreshSessions(now) {
       EXCH.forEach(function (e) {
+        var st = exState(e.name);
+        if (st) {
+          // The server's answer, advanced by the clock between polls.
+          var t = nowSec();
+          if (st.status === 'open' && st.closes_at && t >= st.closes_at) e.live = false;
+          else if (st.status !== 'open' && st.status !== 'holiday' && st.opens_at && t >= st.opens_at) e.live = true;
+          else e.live = st.status === 'open';
+          e.state = st;
+          return;
+        }
         try {
           var parts = new Intl.DateTimeFormat('en-US', { timeZone: e.tz, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
           var get = function (t) { for (var i = 0; i < parts.length; i++) if (parts[i].type === t) return parts[i].value; return ''; };
@@ -711,6 +782,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           price: t.price,
           chg: t.change_pct, session: t.session || null,
           value: t.value, weight: t.weight, dollars: t.dollars, earn: earnDays(String(t.symbol).toUpperCase()),
+          score: SCORES[String(t.symbol).toUpperCase()] || null,
           region: pp ? pp.region : null, rank: pp ? pp.rank : 0,
           x: pp ? pp.v[0] : Math.cos(th) * rad, y: pp ? pp.v[1] : y * 0.92, z: pp ? pp.v[2] : Math.sin(th) * rad,
           flash: prev && prev.price !== t.price ? 1 : (prev ? prev.flash : 0.6)
@@ -732,6 +804,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         if (focusKey) sendSector(focusKey);
       }
       var known = uniq.filter(function (t) { return t.change_pct != null; });
+      var lgS = document.getElementById('cmd27-legend');
+      if (lgS) lgS.classList.toggle('has-score', nodes.some(function (nd) { return !!nd.score; }));
       host.classList.toggle('is-waiting', !known.length);
       if (known.length) lastSync = Date.now();
       renderHud(known);
@@ -809,7 +883,18 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
 
     // ── Interaction: drag spins; a tap (barely moves) picks a ticker ──
     var hits = [];            // screen positions of near-side nodes, rebuilt every frame
+    var exHits = [];          // near-side exchange beacons (+ their tag boxes)
     var hovered = null, selected = null;
+    function exchAt(clientX, clientY, radius) {
+      var r = canvas.getBoundingClientRect(), x = clientX - r.left, y = clientY - r.top, best = null, bestD = radius * radius;
+      for (var i = 0; i < exHits.length; i++) {
+        var h = exHits[i], b = h.box;
+        if (b && x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) return h.code;
+        var dx = h.x - x, dy = h.y - y, d2 = dx * dx + dy * dy;
+        if (d2 < bestD) { bestD = d2; best = h.code; }
+      }
+      return best;
+    }
     var downX = 0, downY = 0, downT = 0, moved = 0, ptrs = {}, pinch0 = null, lastTap = 0;
     var _tw = {}, _twN = 0;
     function textW(key, txt) {
@@ -857,7 +942,8 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             hovered = h ? h.symbol : null;
             var rb = canvas.getBoundingClientRect(), mx = e.clientX - rb.left, my = e.clientY - rb.top, onTab = false;
             for (var sh = 0; sh < sectorHits.length; sh++) { var sb = sectorHits[sh].box; if (mx >= sb[0] && mx <= sb[2] && my >= sb[1] && my <= sb[3]) onTab = true; }
-            canvas.style.cursor = h || onTab ? 'pointer' : '';
+            var onEx = !h && exPanel && exchAt(e.clientX, e.clientY, 12);
+            canvas.style.cursor = h || onTab || onEx ? 'pointer' : '';
             if (reduceMotion) draw(0, 0);
           }
           return;
@@ -885,6 +971,17 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             if (tx0 >= bx[0] - 4 && tx0 <= bx[2] + 4 && ty0 >= bx[1] - 4 && ty0 <= bx[3] + 4) { lastTap = 0; focusRegion(sectorHits[si].key); return; }
           }
           var h = nearest(e.clientX, e.clientY, e.pointerType === 'mouse' ? 16 : 26);
+          // An exchange beacon (or its tag) beats a pin only when it is closer.
+          var exc = exPanel && exchAt(e.clientX, e.clientY, e.pointerType === 'mouse' ? 12 : 20);
+          if (exc && h) {
+            var rq = canvas.getBoundingClientRect(), ex2 = null;
+            exHits.forEach(function (eh) { if (eh.code === exc) ex2 = eh; });
+            var dPin = Math.hypot(h.x - (e.clientX - rq.left), h.y - (e.clientY - rq.top));
+            var dEx = ex2 ? Math.hypot(ex2.x - (e.clientX - rq.left), ex2.y - (e.clientY - rq.top)) : 1e9;
+            if (ex2 && ex2.box && e.clientX - rq.left >= ex2.box[0] && e.clientX - rq.left <= ex2.box[2] && e.clientY - rq.top >= ex2.box[1] && e.clientY - rq.top <= ex2.box[3]) dEx = 0;
+            if (dPin < dEx) exc = null; else h = null;
+          }
+          if (exc) { lastTap = 0; openExch(exc); return; }
           if (h) { lastTap = 0; openCard(h.symbol); return; }
           // Double-tap on open globe: zoom in; double-tap when deep: back out.
           var now = Date.now();
@@ -904,7 +1001,10 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       }, { passive: false });
       host.addEventListener('pointerleave', function () { hovered = null; canvas.style.cursor = ''; });
       document.addEventListener('pointerdown', function (e) { if (selected && !host.contains(e.target)) closeCard(); });
-      document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && selected) closeCard(); });
+      document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        if (selected) closeCard(); else if (exOpen) closeExch();
+      });
     }
 
     // ── The ticker card ──
@@ -946,6 +1046,11 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           (nd.dollars != null ? ' · ' + usd(nd.dollars, true) + ' today' : '');
       }
       if (nd.earn != null) src.textContent += ' · reports ' + (nd.earn === 0 ? 'today' : nd.earn === 1 ? 'tomorrow' : 'in ' + nd.earn + ' days');
+      var scoreEl = null;
+      if (nd.score && nd.score.s) {
+        scoreEl = document.createElement('small'); scoreEl.className = 'cc3d-card__score';
+        scoreEl.textContent = 'Setup score ' + nd.score.s + '/10 · ' + nd.score.g + (nd.score.setup ? ' · ' + nd.score.setup : '') + ' (last scan)';
+      }
       var acts = document.createElement('div'); acts.className = 'cc3d-card__actions';
       function link(label, href, primary) {
         var a = document.createElement('a'); a.href = href; a.textContent = label;
@@ -976,7 +1081,9 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         });
         acts.insertBefore(st, acts.firstChild);
       }
-      card.append(head, quote, src, acts);
+      card.append(head, quote, src);
+      if (scoreEl) card.append(scoreEl);
+      card.append(acts);
     }
     function sceneMode() { return document.documentElement.classList.contains('cc-scene') && useRegions; }
     // Fly to a ticker: spin the globe until its pin faces you, then open its card.
@@ -999,6 +1106,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       card.style.top = Math.max(0, Math.min(H - chh, y)) + 'px';
     }
     function openCard(sym) {
+      if (exOpen) closeExch();
       selected = sym; velY = 0;
       host.classList.add('has-selection');
       renderCard(); card.hidden = false; placeCard();
@@ -1010,6 +1118,113 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       selected = null; if (card) card.hidden = true;
       host.classList.remove('has-selection');
       if (!reduceMotion) velY = 0.1; else draw(0, 0);
+    }
+
+    // ── The exchange panel: tap a beacon ──
+    var exPanel = decor ? null : document.getElementById('cmd27-exch');
+    var exOpen = null, exTick = 0;
+    function exEl(id) { return document.getElementById(id); }
+    function localClock(epoch, tz) {
+      try { return new Date(epoch * 1000).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: tz }); }
+      catch (e) { return new Date(epoch * 1000).toLocaleString(); }
+    }
+    function yourClock(epoch) {
+      return new Date(epoch * 1000).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+    }
+    function sparkSvg(svg, q) {
+      svg.replaceChildren();
+      var pts = q && q.spark;
+      if (!pts || pts.length < 2) { svg.setAttribute('data-empty', ''); return; }
+      svg.removeAttribute('data-empty');
+      var lo = Math.min.apply(null, pts), hi = Math.max.apply(null, pts);
+      if (q.prev_close) { lo = Math.min(lo, q.prev_close); hi = Math.max(hi, q.prev_close); }
+      var span = hi - lo || 1, ns = 'http://www.w3.org/2000/svg';
+      function yv(v) { return (40 - (v - lo) / span * 36).toFixed(1); }
+      var up = q.change_pct == null ? null : q.change_pct >= 0;
+      var col = up == null ? '#39c6ff' : (up ? '#22e39a' : '#ff5470');
+      if (q.prev_close) {
+        var base = document.createElementNS(ns, 'line');
+        base.setAttribute('x1', '0'); base.setAttribute('x2', '200');
+        base.setAttribute('y1', yv(q.prev_close)); base.setAttribute('y2', yv(q.prev_close));
+        base.setAttribute('stroke', 'rgba(188,208,238,.35)'); base.setAttribute('stroke-dasharray', '3 3'); base.setAttribute('stroke-width', '1');
+        svg.appendChild(base);
+      }
+      var d = pts.map(function (v, i) { return (i ? 'L' : 'M') + (i / (pts.length - 1) * 200).toFixed(1) + ' ' + yv(v); }).join(' ');
+      var area = document.createElementNS(ns, 'path');
+      area.setAttribute('d', d + ' L200 44 L0 44 Z'); area.setAttribute('fill', col); area.setAttribute('fill-opacity', '0.12');
+      var line = document.createElementNS(ns, 'path');
+      line.setAttribute('d', d); line.setAttribute('fill', 'none'); line.setAttribute('stroke', col); line.setAttribute('stroke-width', '1.8');
+      line.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.append(area, line);
+    }
+    function renderExch() {
+      if (!exPanel || !exOpen) return;
+      var st = exState(exOpen), e = exch(exOpen), q = IDX[exOpen], t = nowSec();
+      exEl('cmd27-exch-name').textContent = exOpen;
+      exEl('cmd27-exch-city').textContent = st ? st.city : '';
+      var s = exEl('cmd27-exch-status'), txt = '', cls = '';
+      if (!st) {
+        txt = e && e.live ? 'Open (by local clock)' : 'Closed (by local clock)';
+      } else if (e && e.live) {
+        cls = 'is-open';
+        txt = '● Open' + (st.closes_at && st.closes_at > t ? ' · closes in ' + dur(st.closes_at - t) : '');
+      } else if (st.status === 'lunch') {
+        txt = 'Lunch break · reopens in ' + dur(st.opens_at - t);
+      } else {
+        if (st.status === 'holiday') cls = 'is-holiday';
+        txt = (st.status === 'holiday' ? 'Closed · ' + st.holiday : 'Closed') +
+          (st.opens_at ? ' · opens in ' + dur(st.opens_at - t) : '');
+      }
+      if (st && st.note) txt += ' · ' + st.note;
+      s.textContent = txt; s.className = 'cmd27-exch__status' + (cls ? ' ' + cls : '');
+      exEl('cmd27-exch-idx-name').textContent = st && st.index ? st.index.name : '';
+      exEl('cmd27-exch-idx-px').textContent = q ? Number(q.price).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—';
+      var ch = exEl('cmd27-exch-idx-chg');
+      ch.textContent = q ? pctTxt(q.change_pct) : 'no quote yet';
+      ch.className = q && q.change_pct != null ? (q.change_pct > 0 ? 'is-up' : (q.change_pct < 0 ? 'is-down' : '')) : '';
+      sparkSvg(exEl('cmd27-exch-spark'), q);
+      // Where this market sits in the day's relay.
+      var from = [], to = [];
+      RELAY.forEach(function (p) { if (p[1] === exOpen) from.push(p[0]); if (p[0] === exOpen) to.push(p[1]); });
+      var rel = [];
+      from.forEach(function (c) {
+        var qc = IDX[c], sc = exState(c);
+        if (qc && sc) rel.push('Baton from ' + sc.name + ' (' + (sc.index ? sc.index.name : c) + ' ' + pctTxt(qc.change_pct) + ')');
+      });
+      to.forEach(function (c) {
+        var sc = exState(c);
+        if (sc) rel.push('hands off to ' + sc.name + (sc.status !== 'open' && sc.opens_at ? ' at ' + yourClock(sc.opens_at) : ''));
+      });
+      var relTxt = rel.join(' · ');
+      exEl('cmd27-exch-relay').textContent = relTxt ? relTxt.charAt(0).toUpperCase() + relTxt.slice(1) : '';
+      var foot = [];
+      if (st) {
+        if (st.status !== 'open' && st.opens_at) foot.push('Next open ' + localClock(st.opens_at, st.tz) + ' local · ' + yourClock(st.opens_at) + ' your time');
+        foot.push(st.verified ? 'Holidays: ' + st.source + ', through ' + st.verified_through
+                              : 'Holiday calendar not loaded past ' + st.verified_through + ' — check the exchange before trading');
+      }
+      if (q) foot.push('Index via Yahoo, may be delayed' + (q.as_of ? ' · as of ' + yourClock(q.as_of) : ''));
+      exEl('cmd27-exch-foot').textContent = foot.join(' · ');
+    }
+    function openExch(code) {
+      if (!exPanel) return;
+      if (selected) closeCard();
+      exOpen = code; velY = 0;
+      renderExch(); exPanel.hidden = false;
+      clearInterval(exTick); exTick = setInterval(renderExch, 1000);
+      var e = exch(code); if (e) flyToVec(e.v, Math.max(zoomTo, 1));
+      if (!IDX[code] && Date.now() - mkAt > 15000) pollMarkets();
+      if (reduceMotion) draw(0, 0);
+    }
+    function closeExch() {
+      if (!exOpen) return;
+      exOpen = null; clearInterval(exTick);
+      if (exPanel) exPanel.hidden = true;
+      if (!reduceMotion) velY = 0.1; else draw(0, 0);
+    }
+    if (exPanel) {
+      var exX = document.getElementById('cmd27-exch-close');
+      if (exX) exX.addEventListener('click', closeExch);
     }
 
     function project(x, y, z, R, cx, cy) {
@@ -1030,7 +1245,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         if (flyTo.t >= 1) { var fdone = flyTo.done; flyTo = null; if (fdone) fdone(); }
       } else if (!dragging && !reduceMotion) {
         // Zoomed in or focused on a sector: hold still so it can be read.
-        var cruise = selected || focusKey || zoomTo > 1.15 ? 0 : 0.1;
+        var cruise = selected || exOpen || focusKey || zoomTo > 1.15 ? 0 : 0.1;
         rotY += velY * dt; velY += (cruise - velY) * (selected ? 0.2 : 0.02);
       }
       if (zoom !== zoomTo) { zoom += (zoomTo - zoom) * Math.min(1, (reduceMotion ? 1 : dt * 6)); if (Math.abs(zoomTo - zoom) < 0.002) zoom = zoomTo; }
@@ -1183,7 +1398,60 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       ctx.restore();
 
       }
-      // Trading arcs between money centres, with light pulses flowing along them.
+      // Follow the Sun: the trading day's relay. Each arc carries the source
+      // market's index move (green up / red down, thicker = bigger move) to
+      // the next market to open. Flowing = the destination is trading on that
+      // news now; slow dots = the baton is waiting for the next bell.
+      var relayFlow = 0, relayLabels = [];
+      if (RELAY.length && Object.keys(MK).length) {
+        ctx.save();
+        var tNow = nowSec();
+        for (var ri = 0; ri < RELAY.length; ri++) {
+          var ra = exch(RELAY[ri][0]), rb = exch(RELAY[ri][1]);
+          var sa = exState(RELAY[ri][0]), sb = exState(RELAY[ri][1]);
+          if (!ra || !rb || !sa || !sb) continue;
+          var q = IDX[RELAY[ri][0]], chgR = q ? q.change_pct : null;
+          var srcFresh = ra.live || ((sa.last_close_at || 0) > (sb.last_close_at || 0));
+          var mode = !srcFresh ? 'idle' : (rb.live ? 'flow' : (sb.opens_at && sb.opens_at - tNow < 12 * 3600 ? 'queued' : 'idle'));
+          var colR = chgR == null ? CYAN : (chgR > 0.05 ? POS : (chgR < -0.05 ? NEG : FLAT));
+          var magR = chgR == null ? 0.2 : Math.min(Math.abs(chgR) / 2, 1);
+          var aBase = mode === 'flow' ? 0.7 : (mode === 'queued' ? 0.42 : 0.16);
+          var prevR3 = null, segsR = 40, midR = null;
+          ctx.lineWidth = mode === 'flow' ? 1.4 + magR * 2.2 : (mode === 'queued' ? 1.2 : 0.8);
+          if (mode === 'flow') { ctx.shadowColor = rgba(colR, 0.9); ctx.shadowBlur = useRegions ? 6 : 10; }
+          for (var sr = 0; sr <= segsR; sr++) {
+            var PaR = arcPoint(ra.v, rb.v, sr / segsR, 0.32), QR = project(PaR[0], PaR[1], PaR[2], R, cx, cy);
+            if (sr === segsR / 2) midR = QR;
+            if (prevR3) {
+              var visR = (prevR3[2] + QR[2]) / 2;
+              if (visR > -0.05) {
+                ctx.strokeStyle = rgba(mode === 'idle' ? CYAN : colR, aBase * Math.min(1, 0.4 + visR) * calmK * 1.6);
+                ctx.beginPath(); ctx.moveTo(prevR3[0], prevR3[1]); ctx.lineTo(QR[0], QR[1]); ctx.stroke();
+              }
+            }
+            prevR3 = QR;
+          }
+          ctx.shadowBlur = 0;
+          if (mode !== 'idle') {
+            // Pulses run source → destination: fast and many while flowing.
+            var nP = mode === 'flow' ? 3 : 1, spd = mode === 'flow' ? 0.18 + magR * 0.22 : 0.06;
+            for (var pr2 = 0; pr2 < nP; pr2++) {
+              var ptR = ((reduceMotion ? 0.5 : time * spd) + pr2 / nP + ri * 0.13) % 1;
+              var PpR = arcPoint(ra.v, rb.v, ptR, 0.32), QpR = project(PpR[0], PpR[1], PpR[2], R, cx, cy);
+              if (QpR[2] < 0) continue;
+              ctx.fillStyle = rgba(colR, mode === 'flow' ? 0.95 : 0.6);
+              ctx.shadowColor = rgba(colR, 1); ctx.shadowBlur = mode === 'flow' ? 12 : 6;
+              ctx.beginPath(); ctx.arc(QpR[0], QpR[1], (mode === 'flow' ? 2.4 + magR * 1.4 : 1.8) * QpR[3], 0, 6.2832); ctx.fill();
+            }
+            ctx.shadowBlur = 0;
+            if (mode === 'flow') relayFlow++;
+            if (midR && midR[2] > 0.35 && chgR != null) relayLabels.push({ p: midR, txt: RELAY[ri][0] + ' ' + pctTxt(chgR) + ' → ' + RELAY[ri][1], col: colR, flow: mode === 'flow' });
+          }
+        }
+        ctx.restore();
+      }
+      // No server relay (login page, feed down): the old decorative arcs.
+      if (!RELAY.length || !Object.keys(MK).length) {
       ctx.save();
       for (var ai = 0; ai < ARCS.length; ai++) {
         var ea = exch(ARCS[ai][0]), eb = exch(ARCS[ai][1]);
@@ -1213,6 +1481,10 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         }
         ctx.shadowBlur = 0;
       }
+      ctx.restore();
+      }
+      var lgR = document.getElementById('cmd27-legend');
+      if (lgR && (relayFlow > 0) !== lgR.classList.contains('has-relay')) lgR.classList.toggle('has-relay', relayFlow > 0);
       // Orbit chips are obstacles: tags and names steer around them.
       var tagBoxes = useRegions && zoom < 1.2 ? chipRects.slice() : [];
       tagBoxes = tagBoxes.concat(ctlRects);   // view switch, legend, zoom buttons
@@ -1407,24 +1679,43 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         });
       }
 
-      // Exchange beacons + labels (near side only).
+      // Exchange beacons + tags (near side only). Green = trading, cyan =
+      // lunch break or opening within 3h, gold = holiday, dim = closed.
+      // Every visible beacon is tappable (exHits) for its pulse panel.
+      ctx.save();
       ctx.font = '700 ' + (W > 520 ? 10 : 9) + 'px "IBM Plex Mono", ui-monospace, monospace';
       ctx.textBaseline = 'middle';
+      exHits = [];
       for (var ei = 0; ei < EXCH.length; ei++) {
         var ex = EXCH[ei], Pe = project(ex.v[0], ex.v[1], ex.v[2], R, cx, cy);
         if (Pe[2] < 0.3) continue;
-        var colE = ex.live ? POS : GOLD, ph = reduceMotion ? 0.5 : (time * 0.8 + ei * 0.13) % 1;
-        ctx.strokeStyle = rgba(colE, (1 - ph) * 0.8); ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(Pe[0], Pe[1], (4 + ph * 14) * Pe[3], 0, 6.2832); ctx.stroke();
-        ctx.fillStyle = rgba(colE, 1); ctx.shadowColor = rgba(colE, 1); ctx.shadowBlur = 12;
-        ctx.beginPath(); ctx.arc(Pe[0], Pe[1], 2.6 * Pe[3], 0, 6.2832); ctx.fill();
+        var stE = exState(ex.name), statusE = ex.live ? 'open' : (stE ? stE.status : 'closed');
+        var soon = stE && !ex.live && statusE !== 'holiday' && stE.opens_at && stE.opens_at - nowSec() < 3 * 3600;
+        var colE = ex.live ? POS : (statusE === 'holiday' ? ALERT_GOLD : (statusE === 'lunch' || soon ? CYAN : GOLD));
+        var quiet = !ex.live && statusE !== 'lunch' && !soon;   // closed for a while: no ripple
+        var ph = reduceMotion ? 0.5 : (time * (ex.live ? 0.8 : 0.5) + ei * 0.13) % 1;
+        var isEx = exOpen === ex.name;
+        if (!quiet || isEx) {
+          ctx.strokeStyle = rgba(colE, (1 - ph) * 0.8); ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(Pe[0], Pe[1], (4 + ph * 14) * Pe[3], 0, 6.2832); ctx.stroke();
+        }
+        ctx.fillStyle = rgba(colE, quiet ? 0.55 : 1); ctx.shadowColor = rgba(colE, 1); ctx.shadowBlur = quiet ? 4 : 12;
+        ctx.beginPath(); ctx.arc(Pe[0], Pe[1], (isEx ? 3.6 : 2.6) * Pe[3], 0, 6.2832); ctx.fill();
         ctx.shadowBlur = 0;
-        // Closed exchanges keep their beacon; only open ones carry a tag.
-        if (Pe[2] > 0.3 && ex.live) {
-          var tag = ex.name + (ex.live ? ' · OPEN' : ' · CLOSED'), tw2 = ctx.measureText(tag).width;
+        if (isEx) {
+          ctx.strokeStyle = rgba(colE, 0.95); ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(Pe[0], Pe[1], 9 + Math.sin(time * 4) * 1.5, 0, 6.2832); ctx.stroke();
+        }
+        var hitE = { code: ex.name, x: Pe[0], y: Pe[1], box: null };
+        exHits.push(hitE);
+        var tag = exTag(ex);
+        if (tag || isEx) {
+          tag = tag || ex.name;
+          var tw2 = ctx.measureText(tag).width;
           var tx2 = Pe[0] + 8, ty2 = Pe[1] - 10;
-          if (!boxFree([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8])) { ty2 = Pe[1] + 12; if (!boxFree([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8])) continue; }
-          tagBoxes.push([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8]);
+          if (!boxFree([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8])) { ty2 = Pe[1] + 12; if (!boxFree([tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8]) && !isEx) continue; }
+          hitE.box = [tx2 - 4, ty2 - 8, tx2 + tw2 + 4, ty2 + 8];
+          tagBoxes.push(hitE.box);
           ctx.fillStyle = 'rgba(3,10,22,0.78)';
           ctx.strokeStyle = rgba(colE, 0.6); ctx.lineWidth = 1;
           ctx.beginPath();
@@ -1433,6 +1724,19 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
           ctx.fillStyle = rgba(colE, 1);
           ctx.fillText(tag, tx2, ty2);
         }
+      }
+      // Relay labels at the arcs' crests: "LSE +0.42% →" where there is room.
+      ctx.font = '700 ' + (W > 520 ? 9.5 : 8.5) + 'px "IBM Plex Mono", ui-monospace, monospace';
+      relayLabels.sort(function (a, b) { return (b.flow ? 1 : 0) - (a.flow ? 1 : 0); });
+      for (var rl = 0, shownRL = 0; rl < relayLabels.length && shownRL < (W > 520 ? 3 : 1); rl++) {
+        var lb = relayLabels[rl], twl = ctx.measureText(lb.txt).width;
+        var bxl = [lb.p[0] - twl / 2 - 5, lb.p[1] - 18, lb.p[0] + twl / 2 + 5, lb.p[1] - 4];
+        if (!boxFree(bxl)) continue;
+        tagBoxes.push(bxl); shownRL++;
+        ctx.fillStyle = 'rgba(3,10,22,0.82)'; ctx.strokeStyle = rgba(lb.col, 0.7); ctx.lineWidth = 1;
+        ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bxl[0], bxl[1], bxl[2] - bxl[0], 14, 5); else ctx.rect(bxl[0], bxl[1], bxl[2] - bxl[0], 14);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = rgba(lb.col, 1); ctx.fillText(lb.txt, bxl[0] + 5, bxl[1] + 7.5);
       }
       ctx.restore();
 
@@ -1552,6 +1856,20 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             ctx.strokeStyle = rgba(VIOLET, 0.95 * A); ctx.lineWidth = 1.6;
             ctx.shadowColor = rgba(VIOLET, 0.9); ctx.shadowBlur = 10;
             ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rad + 7 + pulse2, 0, 6.2832); ctx.stroke();
+            ctx.restore();
+          }
+          // Setup score: a progress arc in the page accent, clockwise from
+          // twelve o'clock, filled score/10. 8+ (B+ and better) glows.
+          var scS = it[2].score;
+          if (scS && scS.s) {
+            var rS = rad + (it[2].earn != null ? 12 : 6.5), strongS = scS.s >= 8;
+            ctx.save();
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = 'rgba(255,255,255,' + (0.12 * A).toFixed(3) + ')'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rS, 0, 6.2832); ctx.stroke();
+            ctx.strokeStyle = rgba(GOLD, (strongS ? 1 : 0.8) * A); ctx.lineWidth = strongS ? 2.6 : 2;
+            if (strongS) { ctx.shadowColor = rgba(GOLD, 0.95); ctx.shadowBlur = 10; }
+            ctx.beginPath(); ctx.arc(it[1][0], it[1][1], rS, -Math.PI / 2, -Math.PI / 2 + 6.2832 * Math.min(scS.s, 10) / 10); ctx.stroke();
             ctx.restore();
           }
         }

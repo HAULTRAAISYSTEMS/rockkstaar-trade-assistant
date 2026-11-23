@@ -134,6 +134,7 @@ class TestOneColdFeedIsAGapNotAnErrorPage:
         assert set(context) == {"week", "news", "setups", "watchlist",
                                 "watchlist_name", "pulse", "next_up", "story",
                                 "story_note", "sector_map",
+                                "globe_markets", "globe_scores",
                                 "news_refreshing", "news_note", "research_digest"}
 
     def test_no_watchlist_is_not_an_error(self, monkeypatch):

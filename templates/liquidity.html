@@ -51,6 +51,9 @@
            data-sectors="{{ (sector_map or {})|tojson|forceescape }}"
            {%- set _earn = [] %}{% for e in (week or []) if e.kind == 'EARNINGS' and e.ticker and e.date %}{% set _ = _earn.append({'s': e.ticker|upper, 'd': e.date, 't': e.time or ''}) %}{% endfor %}
            data-earnings="{{ _earn|tojson|forceescape }}"
+           data-markets="{{ (globe_markets or {})|tojson|forceescape }}"
+           data-markets-url="/api/globe/markets"
+           data-scores="{{ (globe_scores or {})|tojson|forceescape }}"
            role="group" aria-label="3D market globe of the symbols on the live market tape. Green spikes are advancing, red are declining; spike length is the magnitude.">
         <canvas aria-hidden="true"></canvas>
         <div class="cc3d-hud" data-cc3d-hud aria-live="off"><span>Status <b>Awaiting live quotes</b></span></div>
@@ -67,9 +70,27 @@
       <button type="button" class="cmd27-back" id="cmd27-back" aria-label="Back to all sectors">‹ All sectors</button>
       <div class="cmd27-fs-title" aria-hidden="true"><b>Command Center</b><span id="cmd27-fs-clock"></span></div>
       <div class="cmd27-legend" id="cmd27-legend" aria-hidden="true">
-        <span><i class="lg-wave"></i>alert hit / buy zone</span>
-        <span><i class="lg-earn"></i>reports this week</span>
+        <span class="lg-row-wave"><i class="lg-wave"></i>alert hit / buy zone</span>
+        <span class="lg-row-earn"><i class="lg-earn"></i>reports this week</span>
+        <span class="lg-row-score"><i class="lg-score"></i>setup score (last scan)</span>
+        <span class="lg-row-relay"><i class="lg-relay"></i>market hand-off</span>
       </div>
+      {# Tap an exchange beacon: its session, countdown and index pulse. #}
+      <section class="cmd27-exch" id="cmd27-exch" hidden role="dialog" aria-live="polite" aria-label="Exchange details">
+        <header>
+          <div><small id="cmd27-exch-city"></small><strong id="cmd27-exch-name"></strong></div>
+          <button type="button" class="cmd27-exch__x" id="cmd27-exch-close" aria-label="Close">×</button>
+        </header>
+        <p class="cmd27-exch__status" id="cmd27-exch-status"></p>
+        <div class="cmd27-exch__idx">
+          <span id="cmd27-exch-idx-name"></span>
+          <b id="cmd27-exch-idx-px">—</b>
+          <em id="cmd27-exch-idx-chg">—</em>
+        </div>
+        <svg class="cmd27-exch__spark" id="cmd27-exch-spark" viewBox="0 0 200 44" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <p class="cmd27-exch__relay" id="cmd27-exch-relay"></p>
+        <p class="cmd27-exch__foot" id="cmd27-exch-foot"></p>
+      </section>
       <div class="cmd27-zoom" role="group" aria-label="Globe zoom">
         <button type="button" data-zoom="in" aria-label="Zoom in" title="Zoom in (pinch or double-tap)">+</button>
         <button type="button" data-zoom="out" aria-label="Zoom out" title="Zoom out">−</button>

@@ -10432,6 +10432,7 @@ def _command_center_context() -> dict:
     """
     context = {"week": [], "news": [], "setups": [], "watchlist": [],
                "watchlist_name": "", "pulse": {}, "next_up": None, "sector_map": {},
+               "globe_markets": {}, "globe_scores": {},
                "story": None, "story_note": "",
                "news_refreshing": False, "news_note": "", "research_digest": {
                    "items": [], "material_count": 0, "alert_count": 0,
@@ -10636,6 +10637,25 @@ def _command_center_context() -> dict:
     except Exception as exc:
         logger.debug("command centre: sector map unavailable: %s", exc)
         context["sector_map"] = {}
+
+    # World exchanges (sessions, holidays, index pulse) and the scanner's
+    # setup scores for the globe's pins. Both are cache/DB reads; neither
+    # waits on the network.
+    try:
+        import globe_markets as _gm
+        context["globe_markets"] = _gm.payload()
+    except Exception as exc:
+        logger.debug("command centre: globe markets unavailable: %s", exc)
+        context["globe_markets"] = {}
+    try:
+        import globe_markets as _gm
+        syms = list(tickers or [])
+        if _WL_TAPE_CACHE.get("user") == current_user_id():
+            syms += [it.get("symbol") for it in (_WL_TAPE_CACHE.get("items") or []) if isinstance(it, dict)]
+        context["globe_scores"] = _gm.score_map(syms)
+    except Exception as exc:
+        logger.debug("command centre: globe scores unavailable: %s", exc)
+        context["globe_scores"] = {}
 
     return context
 
@@ -11096,6 +11116,23 @@ def api_live_board():
         rows.append({"ticker": s, "price": price, "change_pct": chg, "live": bool(live)})
     _p, reading = _mood_inputs()
     resp = jsonify({"ok": True, "rows": rows, "mood": reading, "as_of": _et_now().isoformat()})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/api/globe/markets")
+def api_globe_markets():
+    """World exchanges for the Command Center globe, polled every minute.
+
+    Session states come from the published calendars in globe_markets.py;
+    index quotes from its background cache, so this never waits on Yahoo.
+    """
+    try:
+        import globe_markets as _gm
+        resp = jsonify(_gm.payload())
+    except Exception as exc:
+        logger.warning("globe markets payload failed: %s", exc)
+        resp = jsonify({"exchanges": [], "indices": {}, "relay": [], "error": "unavailable"})
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
