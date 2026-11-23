@@ -69,9 +69,39 @@ def _ratio(price, per_share):
     return price / per_share
 
 
+_SPLIT_RATIOS = (2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 30, 40, 50)
+
+
+def split_since_filing(filed_shares, current_shares) -> float:
+    """The stock split between the newest filing and today, or 1.0.
+
+    A split after the last annual report leaves every filed per-share figure
+    (and share count) on the old basis while the price series is already
+    split-adjusted: CRWD's 4-for-1 made its past P/FCF read a quarter of its
+    real size, so today looked like a record high. The share count gives it
+    away: today's count is a clean multiple of the filed one. Ordinary
+    issuance or buybacks move it a few percent, never 2x, so only a ratio
+    close to a usual split (or reverse split) counts.
+    """
+    try:
+        filed, now = float(filed_shares), float(current_shares)
+    except (TypeError, ValueError):
+        return 1.0
+    if filed <= 0 or now <= 0:
+        return 1.0
+    ratio = now / filed
+    forward = ratio if ratio >= 1 else 1 / ratio
+    if forward < 1.8:
+        return 1.0
+    best = min(_SPLIT_RATIOS, key=lambda r: abs(forward / r - 1))
+    if abs(forward / best - 1) > 0.12:
+        return 1.0
+    return float(best) if ratio >= 1 else 1.0 / best
+
+
 def build_history(*, period_ends, eps, fcf, shares, bars,
                   today_price=None, today_pe=None, today_pfcf=None,
-                  comparable_years=None) -> dict:
+                  comparable_years=None, current_shares=None) -> dict:
     """A multiple-per-year table plus today's row.
 
     ``comparable_years`` caps how far back to go — the count of years the newest
@@ -81,6 +111,8 @@ def build_history(*, period_ends, eps, fcf, shares, bars,
     period_ends = list(period_ends or [])
     limit = len(period_ends) if comparable_years is None else max(0, comparable_years)
     rows = []
+    filed = next((x for x in (shares or []) if x), None)
+    split = split_since_filing(filed, current_shares)
     for i, end in enumerate(period_ends[:limit]):
         price = close_on_or_before(bars, end)
         if price is None:
@@ -88,6 +120,10 @@ def build_history(*, period_ends, eps, fcf, shares, bars,
         eps_i = eps[i] if i < len(eps or []) else None
         fcf_i = fcf[i] if i < len(fcf or []) else None
         sh_i = shares[i] if i < len(shares or []) else None
+        if split != 1.0:
+            # Restate the filed figures on today's share basis.
+            eps_i = eps_i / split if eps_i is not None else None
+            sh_i = sh_i * split if sh_i else sh_i
         fcf_ps = (fcf_i / sh_i) if (fcf_i is not None and sh_i) else None
         pe, pfcf = _ratio(price, eps_i), _ratio(price, fcf_ps)
         if pe is None and pfcf is None:
@@ -128,5 +164,6 @@ def build_history(*, period_ends, eps, fcf, shares, bars,
         "note": note,
         "cheaper_years": rank,
         "comparable_years": limit,
+        "split_adjusted": split if split != 1.0 else None,
     }
 

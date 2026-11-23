@@ -828,45 +828,98 @@ def _median(vals: list[float]) -> float | None:
     return v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2
 
 
+# A P/E this high means profit is close to zero, not that the stock is
+# 100x dearer than a peer on 37x: compare on cash flow (or sales) instead.
+_PE_MEANINGFUL_MAX = 150.0
+_PEER_METRICS = (("pe", "P/E", ("peTTM", "peExclExtraTTM")),
+                 ("pfcf", "P/FCF", ("pfcfShareTTM",)),
+                 ("ps", "P/S", ("psTTM",)))
+
+
+def _metric_value(m: dict, fields) -> float | None:
+    for f in fields:
+        v = m.get(f)
+        if isinstance(v, (int, float)) and 0 < v < 300:
+            return float(v)
+    return None
+
+
 def peer_comparison(ticker: str, price: float | None, today_pe: float | None,
                     growth: float | None, peers: list[str] | None = None, metrics_fn=None) -> dict:
-    """This company's P/E against its industry peers' median, plus the price
-    it would have at the peer multiple. Growth is shown alongside, because a
-    faster grower deserves some premium."""
+    """This company's multiple against its industry peers' median, plus the
+    price it would have at the peer multiple. Growth is shown alongside,
+    because a faster grower deserves some premium.
+
+    P/E when the company's earnings are a fair yardstick; when they are near
+    zero (P/E above 150x, or none) the comparison moves to price / free cash
+    flow, then price / sales, so a tiny profit can't read as a 10,000% premium.
+    """
     if metrics_fn is None:
         from finnhub_ttm import fetch_finnhub_metrics
         metrics_fn = lambda t: (fetch_finnhub_metrics(t) or {}).get("_raw_metric") or {}
     peers = fetch_peers(ticker) if peers is None else peers
-    rows = []
+    peer_m = {}
     for p in peers:
         try:
-            m = metrics_fn(p) or {}
+            peer_m[p] = metrics_fn(p) or {}
         except Exception:
             continue
-        pe = m.get("peTTM") or m.get("peExclExtraTTM")
-        if not isinstance(pe, (int, float)) or not (0 < pe < 300):
+    own = {}
+    if not (today_pe and 0 < today_pe <= _PE_MEANINGFUL_MAX):
+        try:
+            own = metrics_fn(ticker) or {}
+        except Exception:
+            own = {}
+
+    def build(key, label, fields, today):
+        rows = []
+        for p, m in peer_m.items():
+            v = _metric_value(m, fields)
+            if v is None:
+                continue
+            g = m.get("revenueGrowthTTMYoy")
+            rows.append({"ticker": p, key: v, "value": v, "pe": v, "pe_fmt": f"{v:.1f}x",
+                         "value_fmt": f"{v:.1f}x",
+                         "growth": (g / 100.0) if isinstance(g, (int, float)) else None})
+        return rows, today
+
+    chosen = None
+    for key, label, fields in _PEER_METRICS:
+        if key == "pe":
+            today = today_pe if (today_pe and 0 < today_pe <= _PE_MEANINGFUL_MAX) else None
+        else:
+            today = _metric_value(own, fields)
+        if not today:
             continue
-        g = m.get("revenueGrowthTTMYoy")
-        rows.append({"ticker": p, "pe": float(pe), "pe_fmt": f"{pe:.1f}x",
-                     "growth": (g / 100.0) if isinstance(g, (int, float)) else None})
-    if len(rows) < 3 or not today_pe or today_pe <= 0:
+        rows, today = build(key, label, fields, today)
+        if len(rows) >= 3:
+            chosen = (key, label, rows, today)
+            break
+    if chosen is None:
+        rows = build("pe", "P/E", _PEER_METRICS[0][2], today_pe)[0]
         return {"available": False, "peers": rows}
-    med = _median([r["pe"] for r in rows])
+    key, label, rows, today = chosen
+    med = _median([r["value"] for r in rows])
     gmed = _median([r["growth"] for r in rows if r["growth"] is not None])
-    prem = today_pe / med - 1
-    at_peer = price * med / today_pe if price else None
+    prem = today / med - 1
+    at_peer = price * med / today if price else None
     faster = growth is not None and gmed is not None and growth > gmed + 0.05
     if prem > 0.15:
-        read = (f"Trades at a {prem:.0%} premium to its peers" +
+        read = (f"Trades at a {prem:.0%} premium to its peers on {label}" +
                 (", but it is also growing faster than them." if faster else
                  " without growing faster — a reason for caution."))
     elif prem < -0.15:
-        read = (f"Trades at a {-prem:.0%} discount to its peers" +
+        read = (f"Trades at a {-prem:.0%} discount to its peers on {label}" +
                 (" while growing faster — that's unusual." if faster else "."))
     else:
-        read = "Priced in line with its peers."
-    return {"available": True, "peers": sorted(rows, key=lambda r: r["pe"]),
-            "median_pe": med, "median_pe_fmt": f"{med:.1f}x", "today_pe_fmt": f"{today_pe:.1f}x",
+        read = f"Priced in line with its peers on {label}."
+    if key != "pe":
+        read = ("Its profit is too small for P/E to mean anything, so this compares "
+                f"{label} instead. " + read)
+    return {"available": True, "metric": key, "metric_label": label,
+            "peers": sorted(rows, key=lambda r: r["value"]),
+            "median_pe": med, "median_pe_fmt": f"{med:.1f}x", "today_pe_fmt": f"{today:.1f}x",
+            "median_fmt": f"{med:.1f}x", "today_fmt": f"{today:.1f}x",
             "premium": prem, "premium_fmt": f"{prem * 100:+.0f}%",
             "median_growth": gmed, "price_at_peer": at_peer, "price_at_peer_fmt": _fmt_price(at_peer),
             "read": read}

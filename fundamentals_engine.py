@@ -59,6 +59,15 @@ SPLIT_BREAK_RATIO = 4.0
 SPLIT_NI_STABLE_BAND = (0.5, 2.0)
 
 
+
+def _current_shares(metrics) -> float | None:
+    """Today's share count (Finnhub reports millions), for split checks."""
+    try:
+        v = ((metrics or {}).get("_raw_metric") or {}).get("shareOutstanding")
+        return float(v) * 1e6 if isinstance(v, (int, float)) and v > 0 else None
+    except Exception:
+        return None
+
 def _fact_rank(fact: dict) -> tuple:
     """Ordering for two facts covering the same period end.
 
@@ -3011,6 +3020,7 @@ def get_fundamentals(ticker: str, force_refresh: bool = False) -> dict:
                 today_pe=_val.get("pe"),
                 today_pfcf=_val.get("pfcf"),
                 comparable_years=max(len(_shares), 3),
+                current_shares=_current_shares(locals().get("_metrics")),
             )
     except Exception as exc:
         logger.debug("valuation history unavailable for %s: %s", ticker, exc)
