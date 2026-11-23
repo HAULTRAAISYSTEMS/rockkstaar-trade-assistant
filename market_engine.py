@@ -1636,6 +1636,39 @@ def _live_quote_from_chart(res: dict, session: str) -> dict | None:
     return out
 
 
+def _chart_has_no_bars(res: dict) -> bool:
+    """Pure: True when a Yahoo chart carries no priced bars at all."""
+    closes = ((res.get("indicators", {}).get("quote") or [{}])[0].get("close") or [])
+    return not any(c is not None for c in closes)
+
+
+def _last_session_quote(req, base: str, sym: str, headers: dict, session: str,
+                        fallback: dict | None) -> dict | None:
+    """The latest print of the last session that traded, from a 5-day chart.
+
+    Keeps the 1-day chart's closes (a 5-day chart's previous close is the one
+    before the whole window), so only the print and its session change.
+    """
+    try:
+        r = req.get(f"{base}/{_yahoo_sym(sym)}",
+                    params={"range": "5d", "interval": "1m", "includePrePost": "true"},
+                    headers=headers, timeout=5)
+        res = (r.json().get("chart", {}).get("result") or [None])[0]
+    except Exception:
+        return None
+    if not res:
+        return None
+    q = _live_quote_from_chart(res, session)
+    if not q:
+        return None
+    reg = (fallback or {}).get("regular_close") or q.get("regular_close")
+    q["regular_close"] = reg
+    q["prev_close"] = reg if q.get("ext") in ("post", "pre") else (fallback or {}).get("prev_close")
+    if q.get("ext") == "post" and reg:
+        q["day_close"] = reg
+    return q
+
+
 def _fetch_live_quote(sym: str) -> None:
     import time as _time
     session = pulse_session()
@@ -1652,6 +1685,12 @@ def _fetch_live_quote(sym: str) -> None:
                 res = (r.json().get("chart", {}).get("result") or [None])[0]
                 if res:
                     quote = _live_quote_from_chart(res, session)
+                    if session != "regular" and _chart_has_no_bars(res):
+                        # Sunday night (and holidays) Yahoo's 1-day chart is
+                        # already the next, empty session, so the latest print
+                        # fell back to the regular close and Friday's after-
+                        # hours move vanished. Five days still has those bars.
+                        quote = _last_session_quote(_req, base, sym, headers, session, quote) or quote
                     break
             except Exception:
                 continue
@@ -1958,6 +1997,18 @@ def _refresh_live_quotes() -> None:
                     quotes[sym] = q
         except Exception as exc:
             logger.debug("live quotes (alpaca) failed: %s", exc)
+    # Outside the bell a quote with no extended print (the regular close) is
+    # the fallback, not the answer: set it aside so the overnight bars and
+    # Yahoo can still supply the after-hours / 24H print, and use it only if
+    # neither has one.
+    plain = {}
+    if pulse_session() != "regular":
+        # Only names we hold no extended print for: once one is held, the
+        # never-step-back rule below keeps it, and Yahoo is left alone.
+        plain = {s: q for s, q in quotes.items() if not q.get("ext") and
+                 not ((_LQ_CACHE.get(s) or {}).get("quote") or {}).get("ext")}
+        for s in plain:
+            quotes.pop(s, None)
     # 8 PM-4 AM: Schwab's last print is the 8 PM after-hours close. The
     # overnight (24H) session trades on Blue Ocean; use its latest bar for
     # every symbol when it is newer, so the tape, watchlists and Terminal all
@@ -1969,7 +2020,7 @@ def _refresh_live_quotes() -> None:
                 _LQ_STATE["overnight_at"] = now
                 _LQ_STATE["overnight_bars"] = latest_overnight_bars(wanted[:200])
             for sym, bar in (_LQ_STATE.get("overnight_bars") or {}).items():
-                held = quotes.get(sym) or {}
+                held = quotes.get(sym) or plain.get(sym) or {}
                 if bar.get("close") and int(bar.get("time") or 0) > int(held.get("epoch") or 0):
                     # The close to measure against: this quote's, else the last
                     # one we held for the symbol (an overnight bar has none).
@@ -1988,16 +2039,21 @@ def _refresh_live_quotes() -> None:
     missing = [s for s in wanted if s not in quotes][:yahoo_max]
     if missing:
         # Fallback: Yahoo per symbol, at its own slower cadence.
+        # A name set aside above already has a price; Yahoo only adds its
+        # extended print, which does not change while nothing trades, so ask
+        # for it at most every few minutes.
         stale = [s for s in missing
-                 if now - (_LQ_CACHE.get(s) or {}).get("at", 0) >= _LQ_YAHOO_TTL_S]
+                 if ((now - (_LIVE_CACHE.get(s) or {}).get("at", 0) >= 300) if s in plain
+                     else (now - (_LQ_CACHE.get(s) or {}).get("at", 0) >= _LQ_YAHOO_TTL_S))]
         try:
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=6) as ex:
                 list(ex.map(_fetch_live_quote, stale))   # fills _LIVE_CACHE
         except Exception as exc:
             logger.debug("live quotes (yahoo) failed: %s", exc)
-        for s in stale:
-            lq = (_LIVE_CACHE.get(s) or {}).get("quote")
+        for s in stale + [s for s in missing if s in plain and s not in stale]:
+            entry = _LIVE_CACHE.get(s) or {}
+            lq = entry.get("quote") if now - entry.get("at", 0) <= 360 else None
             if lq:
                 base = lq.get("prev_close")
                 quotes[s] = {"price": lq["price"], "epoch": lq["epoch"], "prev_close": base,
@@ -2005,14 +2061,25 @@ def _refresh_live_quotes() -> None:
                              "ext": lq.get("ext"), "source": "Yahoo",
                              # AH / PRE tags in the watchlist need the bell's close.
                              "day_close": lq.get("day_close")}
+    for s, q in plain.items():
+        y = quotes.get(s)
+        if not y or (not y.get("ext") and (y.get("epoch") or 0) < (q.get("epoch") or 0)):
+            quotes[s] = q
     stamp = _time.time()
+    session_now = pulse_session()
     for s, q in quotes.items():
         # Never step back to an older print: a slower fallback (Yahoo) can
         # answer with a trade older than the one already shown.
         held = _LQ_CACHE.get(s)
-        if held and stamp - held["at"] <= _LQ_MAX_AGE_S and \
-                (held["quote"].get("epoch") or 0) > (q.get("epoch") or 0):
-            continue
+        if held and (held["quote"].get("epoch") or 0) > (q.get("epoch") or 0):
+            if stamp - held["at"] <= _LQ_MAX_AGE_S:
+                continue
+            if session_now != "regular" and stamp - (held["quote"].get("epoch") or 0) <= 4 * 86400:
+                # Outside the bell nothing new trades for most names, so a
+                # source that only knows the regular close must not replace the
+                # after-hours print we already have (that hid the 24H move).
+                held["at"] = stamp
+                continue
         _LQ_CACHE[s] = {"at": stamp, "quote": q}
     _lq_share_write()
     counts: dict = {}
