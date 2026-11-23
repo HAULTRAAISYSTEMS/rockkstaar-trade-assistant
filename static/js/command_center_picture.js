@@ -514,7 +514,7 @@
     var avg = $('#cmd27-sector-avg'); avg.textContent = (d.ext ? '24H ' : '') + pct(d.avg) + ' avg'; avg.className = tone(d.avg);
     list.innerHTML = '';
     d.rows.forEach(function (r, i) {
-      var li = document.createElement('li');
+      var li = document.createElement('li'); li.setAttribute('data-ticker', r.symbol);
       li.innerHTML = '<button type="button" class="cmd27-sector__go"><i></i><b></b><span></span><em></em></button><button type="button" class="cmd27-sector__star"></button>';
       var go = li.firstChild, st = li.lastChild;
       go.children[0].textContent = i + 1;

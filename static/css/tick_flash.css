@@ -1,0 +1,17 @@
+/* Price flash (static/js/tick_flash.js): a short green / red glow on a tick. */
+.tf-up, .tf-dn { border-radius: 4px; }
+.tf-up { animation: tfUp 1.3s ease-out; }
+.tf-dn { animation: tfDn 1.3s ease-out; }
+@keyframes tfUp {
+  0%, 25% { background-color: rgba(34, 197, 139, .45); box-shadow: 0 0 0 2px rgba(34, 197, 139, .38), 0 0 16px rgba(34, 227, 154, .55); text-shadow: 0 0 10px rgba(34, 227, 154, .9); }
+  100% { background-color: rgba(34, 197, 139, 0); box-shadow: 0 0 0 2px rgba(34, 197, 139, 0), 0 0 16px rgba(34, 227, 154, 0); text-shadow: none; }
+}
+@keyframes tfDn {
+  0%, 25% { background-color: rgba(255, 77, 69, .45); box-shadow: 0 0 0 2px rgba(255, 77, 69, .38), 0 0 16px rgba(255, 84, 112, .55); text-shadow: 0 0 10px rgba(255, 84, 112, .9); }
+  100% { background-color: rgba(255, 77, 69, 0); box-shadow: 0 0 0 2px rgba(255, 77, 69, 0), 0 0 16px rgba(255, 84, 112, 0); text-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tf-up { animation: none; background-color: rgba(34, 197, 139, .22); }
+  .tf-dn { animation: none; background-color: rgba(255, 77, 69, .22); }
+}
+html[data-tick-flash="0"] .tf-up, html[data-tick-flash="0"] .tf-dn { animation: none; background: none; box-shadow: none; text-shadow: none; }

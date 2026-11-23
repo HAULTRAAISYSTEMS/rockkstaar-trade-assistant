@@ -5,6 +5,13 @@
   <span class="nav-pref__sw" aria-hidden="true"></span>
 </label>
 {%- endmacro %}
+{% macro pref_flash(extra='') -%}
+<label class="nav-pref{{ extra }}">
+  <span class="nav-pref__txt"><strong>Price flash</strong><small>Prices and % changes glow green or red for a moment when they tick up or down</small></span>
+  <input type="checkbox" class="nav-pref__input" data-pref="flash_ticks"{% if not (user_prefs and user_prefs.flash_ticks is sameas false) %} checked{% endif %}>
+  <span class="nav-pref__sw" aria-hidden="true"></span>
+</label>
+{%- endmacro %}
 {% set ep = request.endpoint %}
 {# Menus: one grouped list per menu, rendered in both the desktop dropdown and
    the phone sheet. Each entry: (key, href, title, one-line description, icon).
@@ -184,6 +191,7 @@
           <span class="nav-profile__txt"><strong>{{ session.get('username') or 'Your workspace' }}</strong><small data-photo-status>{{ 'Tap to change photo' if profile_photo_url else 'Tap to add a photo' }}</small></span>
         </button>
         {{ pref_24h() }}
+        {{ pref_flash() }}
         {{ nav_tiles(account_groups) }}
         {{ nav_tiles(learn_groups) }}
       </div>
@@ -247,6 +255,7 @@
           <span class="nav-profile__txt"><strong>{{ session.get('username') or 'Your workspace' }}</strong><small data-photo-status>{{ 'Tap to change photo' if profile_photo_url else 'Tap to add a photo' }}</small></span>
         </button>
       {{ pref_24h(' is-sheet') }}
+      {{ pref_flash(' is-sheet') }}
       <div class="rm-sheet">{{ nav_tiles(account_groups) }}</div>
       <form action="{{ url_for('logout') }}" method="post" class="mobile-logout-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
