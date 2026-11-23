@@ -115,6 +115,7 @@ def test_refresh_never_steps_back_to_an_older_print(lq, monkeypatch):
     now = time.time()
     me._LQ_CACHE["SPY"] = {"at": now, "quote": {"price": 752.9, "epoch": 2000}}
     me._LQ_WANTED["SPY"] = now
+    monkeypatch.setattr(me, "_fetch_live_quote", lambda s: None)   # no network in tests
     monkeypatch.setattr(me, "_schwab_live", lambda syms: {"SPY": {"price": 751.0, "epoch": 1000}})
     me._refresh_live_quotes()
     assert me._LQ_CACHE["SPY"]["quote"]["price"] == 752.9
