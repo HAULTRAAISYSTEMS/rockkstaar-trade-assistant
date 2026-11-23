@@ -296,7 +296,11 @@ _POLL_PATHS = (
     "/api/live/bundle", "/api/market-tape", "/api/today/pulse",
                "/api/terminal/quotes", "/api/terminal/live/", "/api/quick",
                "/api/dashboard", "/api/live-board", "/api/mood", "/api/stock/",
-               "/api/briefing/voice", "/api/notifications", "/api/depth/", "/api/today/breadth")
+               "/api/briefing/voice", "/api/notifications", "/api/depth/", "/api/today/breadth",
+               # The Command Center money strip polls every 3 s (and its
+               # minute load); without this every poll opened a fresh
+               # database connection just to re-check the sign-in.
+               "/api/wealth/today", "/api/command/orbit", "/api/thesis/zones")
 
 
 def _verified_user_for_request(uid):
