@@ -497,3 +497,13 @@ def test_my_portfolio_view_has_summary_ring_and_warning():
     assert "r.pm && typeof r.value === 'number'" in js
     # Phones: a 0×0 hero wrapper must not clip every chip to the top row.
     assert "if (hr.height > 0)" in js
+
+
+def test_chip_card_is_a_labelled_table_without_a_native_tooltip():
+    js = open("static/js/command_center_picture.js").read()
+    css = open("static/css/command_center_picture.css").read()
+    assert "p-line" in js and "p-head" in js and "p-big" in js
+    assert "el.title = (m[sym]" not in js and "el.setAttribute('aria-label', (m[sym]" in js
+    # The summary card and orbit bar swap by style, since [hidden] loses to display rules.
+    assert "psum.style.display = isP ? '' : 'none'" in js
+    assert "(hover: none) { .cmd27-chip .cmd27-chip__pop { display: none; } }" in css
