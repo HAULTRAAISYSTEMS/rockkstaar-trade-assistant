@@ -120,14 +120,16 @@
   /* ---- Peers (loaded after the page paints) ---- */
   (function loadPeers() {
     var card = $('vz-peers');
-    if (!card || !(M.pe > 0)) return;
-    var q = '?price=' + encodeURIComponent(M.price) + '&pe=' + encodeURIComponent(M.pe) + '&growth=' + encodeURIComponent(M.growth);
+    if (!card) return;
+    var q = '?price=' + encodeURIComponent(M.price) + '&pe=' + encodeURIComponent(M.pe > 0 ? M.pe : '') + '&growth=' + encodeURIComponent(M.growth);
     fetch('/api/thesis/peers/' + encodeURIComponent(M.ticker) + q, {credentials: 'same-origin'})
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d || !d.ok || !d.available) return;
         card.hidden = false;
         $('vz-peers-prem').textContent = d.premium_fmt;
+        var lbl = d.metric_label || 'P/E';
+        var kick = card.querySelector('.vz-kicker'); if (kick) kick.textContent = 'Vs. its peers · ' + lbl;
         $('vz-peers-sub').textContent = (d.premium >= 0 ? 'premium' : 'discount') + ' · ' + d.today_pe_fmt + ' vs peer median ' + d.median_pe_fmt;
         var list = $('vz-peers-list');
         list.innerHTML = '';
@@ -138,7 +140,7 @@
           list.appendChild(a);
         });
         $('vz-peers-read').innerHTML = d.read + (d.price_at_peer_fmt && d.price_at_peer_fmt !== '—'
-          ? ' At the peer median P/E, ' + M.ticker + ' would be <b>' + d.price_at_peer_fmt + '</b>.' : '');
+          ? ' At the peer median ' + lbl + ', ' + M.ticker + ' would be <b>' + d.price_at_peer_fmt + '</b>.' : '');
       }).catch(function () {});
   })();
 
