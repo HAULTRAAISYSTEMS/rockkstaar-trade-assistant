@@ -24,3 +24,22 @@
       .catch(function () { apply(!on); });
   });
 })();
+
+/* One rule for every price display: with "24H prices" on, a stock trading
+ * pre-market / after hours / overnight shows that price and move, labelled;
+ * otherwise the last regular session. No regular move at all → the extended
+ * one, labelled. TS24.pick(item) → { px, pct, label, ext }. */
+(function () {
+  'use strict';
+  var L = { pre: 'PRE', post: 'AH', overnight: '24H' };
+  function n(v) { return v !== null && v !== undefined && v !== '' && isFinite(Number(v)); }
+  window.TS24 = {
+    on: function () { return document.documentElement.getAttribute('data-show-24h') === '1'; },
+    pick: function (t) {
+      t = t || {};
+      var lbl = L[t.ext], use = !!(lbl && n(t.ext_pct) && (window.TS24.on() || !n(t.change_pct)));
+      if (!use) return { px: n(t.price) ? Number(t.price) : null, pct: n(t.change_pct) ? Number(t.change_pct) : null, label: '', ext: null };
+      return { px: n(t.ext_price) ? Number(t.ext_price) : (n(t.price) ? Number(t.price) : null), pct: Number(t.ext_pct), label: lbl + ' ', ext: t.ext };
+    }
+  };
+})();

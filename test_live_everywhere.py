@@ -216,3 +216,28 @@ def test_extended_move_falls_back_to_the_tape_close(monkeypatch):
     (voo,) = market_engine.overlay_live_tape([{"symbol": "VOO", "price": 635.54, "change_pct": -3.41}])
     assert voo["change_pct"] == -3.41 and voo["ext"] == "overnight"
     assert voo["ext_pct"] == round((648.36 / 635.54 - 1) * 100, 2)
+
+
+def test_one_24h_rule_for_banner_terminal_and_watchlists(client):
+    prefs = open("static/js/prefs.js").read()
+    assert "window.TS24" in prefs and "pick: function (t)" in prefs
+    tape = open("templates/_market_tape.html").read()
+    assert "window.TS24.pick(t)" in tape and "data-mtape-ext hidden" in tape
+    term = open("templates/terminal.html").read()
+    assert "window.TS24.pick(t)" in term and "overnight:'24H '" in term
+    wl = open("templates/watchlists.html").read()
+    assert "/api/board-quotes" in wl and "data-show-24h" in wl
+    # Long chart views label the year on the indicator time axis.
+    assert "function twAxisLabel(t,span)" in term and "tSpan" in term
+
+
+def test_board_quotes_overlay_extended_moves(client, monkeypatch):
+    monkeypatch.setattr(legacy, "_MKT_AVAILABLE", True)
+    monkeypatch.setattr(legacy, "get_stock_data", lambda t: {"current_price": 125.53, "prev_close": 145.98})
+    monkeypatch.setattr(legacy._mkt, "live_quotes", lambda syms: {
+        "NVDA": {"price": 132.52, "ext": "overnight", "prev_close": 125.53}})
+    monkeypatch.setattr(legacy._mkt, "fast_pulse_quotes", lambda: {})
+    d = client.get("/api/board-quotes?tickers=nvda,bad$,NVDA").get_json()
+    q = d["quotes"]["NVDA"]
+    assert list(d["quotes"]) == ["NVDA"]
+    assert q["change_pct"] == -14.01 and q["ext"] == "overnight" and q["ext_pct"] == 5.57 and q["ext_price"] == 132.52

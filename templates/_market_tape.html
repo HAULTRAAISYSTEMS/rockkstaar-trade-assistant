@@ -5,9 +5,12 @@
     {% for t in market_tape + market_tape %}
     <span class="market-tape-item{% if t.tier %} mt-{{ t.tier }}{% endif %}" data-mtape="{{ t.symbol }}">
       {% if t.logo %}<img class="market-tape-logo" src="{{ t.logo }}" alt="" loading="lazy" onerror="if(!this.dataset.fbk){this.dataset.fbk=1;this.src='https://financialmodelingprep.com/image-stock/{{ t.symbol }}.png';}else{this.remove();}">{% endif %}<span class="market-tape-sym">{{ t.symbol }}</span>
-      <span class="market-tape-px" data-mtape-px>{{ '%.2f'|format(t.price) if t.price is not none else '—' }}</span>
-      <span class="market-tape-chg {{ 'chg-pos' if (t.change_pct or 0) > 0 else ('chg-neg' if (t.change_pct or 0) < 0 else 'chg-flat') }}" data-mtape-chg>{{ '%+.2f'|format(t.change_pct) ~ '%' if t.change_pct is not none else '—' }}</span>
-      <span class="market-tape-ext" data-mtape-ext {% if not (t.ext and t.ext_pct is not none) %}hidden{% endif %}>{% if t.ext and t.ext_pct is not none %}{{ {'pre': 'PRE', 'post': 'AH', 'overnight': '24H'}[t.ext] }} {{ '%+.2f'|format(t.ext_pct) }}%{% endif %}</span>
+      {%- set _x = (user_prefs and user_prefs.show_24h and t.ext and t.ext_pct is not none) or (t.ext and t.ext_pct is not none and t.change_pct is none) %}
+      {%- set _px = (t.ext_price if (_x and t.ext_price is not none) else t.price) %}
+      {%- set _pc = (t.ext_pct if _x else t.change_pct) %}
+      <span class="market-tape-px" data-mtape-px>{{ '%.2f'|format(_px) if _px is not none else '—' }}</span>
+      <span class="market-tape-chg {{ 'chg-pos' if (_pc or 0) > 0 else ('chg-neg' if (_pc or 0) < 0 else 'chg-flat') }}{{ ' is-ext' if _x }}" data-mtape-chg>{% if _pc is not none %}{{ ({'pre': 'PRE ', 'post': 'AH ', 'overnight': '24H '}[t.ext] if _x else '') }}{{ '%+.2f'|format(_pc) }}%{% else %}—{% endif %}</span>
+      <span class="market-tape-ext" data-mtape-ext hidden>{% if t.ext and t.ext_pct is not none %}{{ {'pre': 'PRE', 'post': 'AH', 'overnight': '24H'}[t.ext] }} {{ '%+.2f'|format(t.ext_pct) }}%{% endif %}</span>
     </span>
     {% endfor %}
   </div>
@@ -55,13 +58,17 @@
       document.querySelectorAll('[data-mtape="' + t.symbol + '"]').forEach(function (el) {
         var px = el.querySelector('[data-mtape-px]');
         var chg = el.querySelector('[data-mtape-chg]');
-        if (px && t.price != null) px.textContent = Number(t.price).toFixed(2);
-        if (chg && t.change_pct != null) {
-          var v = Number(t.change_pct);
-          chg.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
-          chg.className = 'market-tape-chg ' + (v > 0 ? 'chg-pos' : (v < 0 ? 'chg-neg' : 'chg-flat'));
+        // One number, like the globe: 24H prices on → the extended price and move.
+        var d = window.TS24 ? window.TS24.pick(t) : { px: t.price, pct: t.change_pct, label: '' };
+        if (px && d.px != null) px.textContent = Number(d.px).toFixed(2);
+        if (chg && d.pct != null) {
+          var v = Number(d.pct);
+          chg.textContent = d.label + (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+          chg.className = 'market-tape-chg ' + (v > 0 ? 'chg-pos' : (v < 0 ? 'chg-neg' : 'chg-flat')) + (d.label ? ' is-ext' : '');
+          chg.title = d.label ? (d.label.trim() + ' move · last session ' + (t.change_pct != null ? (t.change_pct >= 0 ? '+' : '') + Number(t.change_pct).toFixed(2) + '%' : '—')) : '';
         }
         var ex = el.querySelector('[data-mtape-ext]');
+        if (ex && window.TS24) { ex.hidden = true; ex = null; }
         if (ex) {
           var lbl = { pre: 'PRE', post: 'AH', overnight: '24H' }[t.ext];
           if (lbl && t.ext_pct != null) {
@@ -86,7 +93,10 @@
     freshness.textContent = age < 1 ? 'Live quotes' : 'Quotes checked ' + age + 'm ago';
     freshness.classList.toggle('is-stale', age >= 3);
   }
+  var lastTapeD = null;
+  document.addEventListener('tradestaar:prefs', function () { if (lastTapeD) handleTape(lastTapeD); });
   function handleTape(d) {
+    lastTapeD = d;
     try {
       if (!d || !d.ok || !Array.isArray(d.items) || !d.items.length) throw new Error('No quotes returned');
       // A reply with symbols but no prices is not a quote check that worked:
