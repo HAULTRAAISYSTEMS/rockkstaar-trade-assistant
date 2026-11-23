@@ -614,15 +614,99 @@
   tick(); setInterval(tick, 30000);
 
   // ── Your money today ──
+  // Loaded once a minute from /api/wealth/today, then ticked every few
+  // seconds from the shared live-quote feed (/api/wealth/today/live): value,
+  // today's move, best and worst all move with the market, and the price
+  // flash glows each change like the tape.
   var strip = $('#cmd27-money'), holdings = [];
   var LAST = 'cmd27.money.last';
-  function setTile(key, v, sub, toneVal, label) {
+  var M0 = null, LQ = {}, lqSession = null, lastBest = null, lastWorst = null;
+  function setTile(key, v, sub, toneVal, label, sym) {
     var t = strip && strip.querySelector('[data-m="' + key + '"]'); if (!t) return;
-    t.querySelector('[data-v]').textContent = v;
-    if (sub != null) t.querySelector('[data-s]').innerHTML = sub;
-    if (label) t.querySelector('[data-l]').textContent = label;
+    if (sym) t.setAttribute('data-sym', sym);
+    var vEl = t.querySelector('[data-v]'); if (vEl.textContent !== v) vEl.textContent = v;
+    if (sub != null) { var sEl = t.querySelector('[data-s]'); if (sEl.innerHTML !== sub) sEl.innerHTML = sub; }
+    if (label) { var l = t.querySelector('[data-l]'); if (l && l.innerHTML !== label) l.innerHTML = label; }
     t.classList.toggle('is-up', num(toneVal) && toneVal > 0.004); t.classList.toggle('is-down', num(toneVal) && toneVal < -0.004);
   }
+  function swapFx(key) {
+    var t = strip && strip.querySelector('[data-m="' + key + '"]'); if (!t) return;
+    t.classList.remove('is-swap'); void t.offsetWidth; t.classList.add('is-swap');
+    setTimeout(function () { t.classList.remove('is-swap'); }, 1200);
+  }
+  function on24() { return document.documentElement.getAttribute('data-show-24h') === '1'; }
+  // Dollars to the cent, so a live total visibly moves with each tick.
+  function cents(v, signed) {
+    if (!num(v)) return '—';
+    var a = Math.abs(v), s = a >= 1e6 ? '$' + (a / 1e6).toFixed(2) + 'M' : '$' + a.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (signed ? (v > 0 ? '+' : (v < 0 ? '−' : '')) : (v < 0 ? '−' : '')) + s;
+  }
+  // Today's samples of the day's move, for the tile's sparkline (this browser).
+  function sparkKey() { var d = new Date(); return 'cmd27.money.spark.' + d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+  var spark = []; try { spark = JSON.parse(localStorage.getItem(sparkKey()) || '[]') || []; } catch (e) { spark = []; }
+  function pushSpark(v) {
+    var now = Date.now(), last = spark[spark.length - 1];
+    if (last && now - last[0] < 20000) { last[1] = v; } else spark.push([now, v]);
+    if (spark.length > 400) spark = spark.slice(-400);
+    try { localStorage.setItem(sparkKey(), JSON.stringify(spark)); } catch (e) {}
+  }
+  function drawSpark() {
+    var t = strip && strip.querySelector('[data-m="day"]'); if (!t) return;
+    var svg = t.querySelector('.cmd27-m__spark');
+    if (!svg) { svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('class', 'cmd27-m__spark'); svg.setAttribute('viewBox', '0 0 120 36'); svg.setAttribute('preserveAspectRatio', 'none'); svg.setAttribute('aria-hidden', 'true'); t.appendChild(svg); }
+    if (spark.length < 3) { svg.innerHTML = ''; return; }
+    var vs = spark.map(function (p) { return p[1]; }), lo = Math.min.apply(null, vs.concat(0)), hi = Math.max.apply(null, vs.concat(0)), rg = hi - lo || 1;
+    var pts = vs.map(function (v, i) { return (i / (vs.length - 1) * 120).toFixed(1) + ',' + (34 - (v - lo) / rg * 32).toFixed(1); });
+    var zero = (34 - (0 - lo) / rg * 32).toFixed(1), up = vs[vs.length - 1] >= 0;
+    svg.innerHTML = '<line x1="0" x2="120" y1="' + zero + '" y2="' + zero + '" class="z"/>' +
+      '<polygon points="0,' + zero + ' ' + pts.join(' ') + ' 120,' + zero + '" class="a ' + (up ? 'up' : 'dn') + '"/>' +
+      '<polyline points="' + pts.join(' ') + '" class="l ' + (up ? 'up' : 'dn') + '"/>';
+  }
+
+  // Recompute every tile from the last load plus the latest prices.
+  function renderMoney() {
+    var d = M0; if (!d) return;
+    var session = lqSession || d.session, mode = session === 'regular' ? 'live' : (on24() && /^(pre|post|overnight)$/.test(session) ? 'ext' : 'close');
+    var rows = [], day = 0, base = 0, up = 0, dn = 0;
+    (d.moves || []).forEach(function (m) {
+      var q = LQ[m.ticker], px = q && num(q.price) ? q.price : null, b, cur;
+      if (mode === 'live') { b = num(m.prior_close) ? m.prior_close : m.prev; cur = px != null ? px : m.now; }
+      else if (mode === 'ext') { b = m.last_close; cur = px != null ? px : m.last_close; }
+      else { b = m.prev; cur = m.now; }
+      if (!num(b) || !(b > 0) || !num(cur) || !num(m.shares)) return;
+      var dol = (cur - b) * m.shares, pc = (cur / b - 1) * 100;
+      rows.push({ ticker: m.ticker, pct: pc, dollars: dol });
+      day += dol; base += b * m.shares; if (pc > 0.004) up++; else if (pc < -0.004) dn++;
+    });
+    // Value: the loaded total, moved by each holding's change since then.
+    var value = d.value;
+    if (num(value) && mode !== 'close') (d.holdings || []).forEach(function (h) {
+      var q = LQ[h.ticker]; if (q && num(q.price) && num(h.price) && num(h.shares)) value += (q.price - h.price) * h.shares;
+    });
+    window.__cmd27Money = value;
+    var dayPct = base > 0 ? day / base * 100 : null;
+    var lbl = mode === 'live' ? 'Today <i class="cmd27-mdot" aria-label="live"></i>' :
+      mode === 'ext' ? ({ pre: 'Pre-market', post: 'After hours', overnight: '24H' }[session] || '24H') + ' <i class="cmd27-mdot is-ext" aria-hidden="true"></i>' :
+      (d.day_label ? d.day_label + ' close' : 'Today');
+    var tally = rows.length ? ' · <span class="cmd27-tally"><b class="is-up">▲' + up + '</b> <b class="is-down">▼' + dn + '</b></span>' : '';
+    setTile('value', cents(value), null, null, null, 'MY-VALUE');
+    setTile('day', cents(day, true), '<span>' + pct(dayPct) + '</span>' + tally, day, lbl, 'MY-DAY');
+    if (mode !== 'close') { pushSpark(day); }
+    drawSpark();
+    rows.sort(function (a, b) { return a.pct - b.pct; });
+    var best = rows[rows.length - 1], worst = rows[0];
+    if (best) {
+      setTile('best', best.ticker, '<span>' + pct(best.pct) + '</span> · <span>' + cents(best.dollars, true) + '</span>', best.pct, null, best.ticker);
+      if (lastBest && lastBest !== best.ticker) swapFx('best');
+      lastBest = best.ticker;
+    }
+    if (worst) {
+      setTile('worst', worst.ticker, '<span>' + pct(worst.pct) + '</span> · <span>' + cents(worst.dollars, true) + '</span>', worst.pct, null, worst.ticker);
+      if (lastWorst && lastWorst !== worst.ticker) swapFx('worst');
+      lastWorst = worst.ticker;
+    }
+  }
+
   function loadMoney() {
     if (!strip) return;
     get('/api/wealth/today').then(function (d) {
@@ -646,16 +730,38 @@
           since = '<span class="' + (diff > 0 ? 'is-up' : diff < 0 ? 'is-down' : '') + '">' + money(diff, true) + '</span> since ' +
             when.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' + when.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
         }
-        window.__cmd27Money = d.value;
       } catch (e) {}
-      setTile('value', money(d.value), since || (d.positions + ' positions' + (d.source === 'schwab' ? ' · Schwab' : '')));
-      setTile('day', money(d.day_dollars, true), pct(d.day_pct), d.day_dollars,
-        d.day_label ? d.day_label + ' close' : (d.session === 'regular' ? 'Today · live' : 'Today'));
+      var vt = strip.querySelector('[data-m="value"] [data-s]');
+      if (vt) vt.innerHTML = since || (d.positions + ' positions' + (d.source === 'schwab' ? ' · Schwab' : ''));
       setTile('cash', money(d.cash), null, null);
-      if (d.best) setTile('best', d.best.ticker, pct(d.best.pct) + ' · ' + money(d.best.dollars, true), d.best.pct);
-      if (d.worst) setTile('worst', d.worst.ticker, pct(d.worst.pct) + ' · ' + money(d.worst.dollars, true), d.worst.pct);
+      M0 = d;
+      if (!(d.moves && d.moves.length)) {
+        // An older server without per-holding moves: show it as loaded.
+        setTile('value', money(d.value), null, null);
+        setTile('day', money(d.day_dollars, true), pct(d.day_pct), d.day_dollars,
+          d.day_label ? d.day_label + ' close' : (d.session === 'regular' ? 'Today · live' : 'Today'));
+        if (d.best) setTile('best', d.best.ticker, pct(d.best.pct) + ' · ' + money(d.best.dollars, true), d.best.pct);
+        if (d.worst) setTile('worst', d.worst.ticker, pct(d.worst.pct) + ' · ' + money(d.worst.dollars, true), d.worst.pct);
+        return;
+      }
+      renderMoney(); pollLive();
     });
   }
+  var lqBusy = false;
+  function pollLive() {
+    if (!M0 || !M0.moves || lqBusy || document.hidden) return;
+    var syms = (M0.moves || []).map(function (m) { return m.ticker; }); if (!syms.length) return;
+    lqBusy = true;
+    get('/api/wealth/today/live?symbols=' + encodeURIComponent(syms.join(','))).then(function (r) {
+      lqBusy = false;
+      if (!r || !r.ok) return;
+      lqSession = r.session || null;
+      Object.keys(r.quotes || {}).forEach(function (k) { LQ[k] = r.quotes[k]; });
+      renderMoney();
+    });
+  }
+  setInterval(pollLive, 3000);
+  document.addEventListener('tradestaar:prefs', renderMoney);
   // Remember what you saw when you leave, for "since you last looked".
   document.addEventListener('visibilitychange', function () {
     if (document.hidden && num(window.__cmd27Money)) { try { localStorage.setItem(LAST, JSON.stringify({ v: window.__cmd27Money, t: Date.now() })); } catch (e) {} }

@@ -383,3 +383,42 @@ def test_fundamentals_analyzer_has_the_mcff_tab(monkeypatch):
     assert "display:none" not in pane
     assert "Score a company on M.C.F.F." in html
     assert 'id="tab-analyze" class="tab-pane" style="display:none"' in html
+
+
+def test_today_moves_carry_the_bases_the_strip_ticks_from(env, monkeypatch):
+    import market_engine
+    monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "closed")
+    app, *_ = env
+    c = client(app, 1)
+    pid = make_portfolio(c)
+    prev = c.post("/api/wealth/import/preview", json={"text": SCHWAB}).get_json()
+    c.post("/api/wealth/import/commit", json={"portfolio_id": pid, "transactions": prev["transactions"]})
+    d = c.get("/api/wealth/today").get_json()
+    m = d["moves"][0]
+    assert m["ticker"] == "KLAC" and m["shares"] == pytest.approx(2)
+    assert m["prev"] == pytest.approx(610) and m["now"] == pytest.approx(620)
+    assert m["last_close"] == pytest.approx(620)
+    assert m["dollars"] == pytest.approx((m["now"] - m["prev"]) * m["shares"])
+
+
+def test_today_live_returns_shared_quotes_and_never_blocks(env, monkeypatch):
+    import market_engine
+    seen = {}
+    monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "regular")
+    monkeypatch.setattr(market_engine, "live_quotes",
+                        lambda syms: seen.setdefault("syms", syms) and {"KLAC": {"price": 631.25, "ext": None, "epoch": 5}})
+    app, *_ = env
+    d = client(app, 1).get("/api/wealth/today/live?symbols=klac,bad$,KLAC,,spcx").get_json()
+    assert d["ok"] and d["session"] == "regular"
+    assert d["quotes"] == {"KLAC": {"price": 631.25, "ext": None, "epoch": 5}}
+    assert seen["syms"] == ["KLAC", "SPCX"]
+
+
+def test_strip_ticks_live_with_the_price_flash():
+    js = open("static/js/command_center_picture.js", encoding="utf-8").read()
+    assert "/api/wealth/today/live?symbols=" in js and "setInterval(pollLive, 3000)" in js
+    assert "function renderMoney()" in js and "'MY-VALUE'" in js and "swapFx('best')" in js
+    # Each number sits alone in its element so the price flash can read it.
+    assert "'<span>' + pct(best.pct) + '</span> · <span>' + cents(best.dollars, true) + '</span>'" in js
+    css = open("static/css/command_center_picture.css", encoding="utf-8").read()
+    assert ".cmd27-mdot" in css and ".cmd27-m__spark" in css and ".cmd27-m.is-swap" in css
