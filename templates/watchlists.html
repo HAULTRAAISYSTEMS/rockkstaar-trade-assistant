@@ -95,6 +95,7 @@
   .te-section-list:empty:after{content:"Type a ticker in the box above, or drag one here";grid-column:1/-1;display:block;padding:10px;color:var(--elite-faint);font:600 10px var(--font-mono);text-align:center}
   .te-ticker-row{display:grid;grid-template-columns:14px minmax(0,1fr) 74px 58px 46px 22px;align-items:center;gap:7px;height:34px;padding:0 4px;border-bottom:1px solid rgba(255,255,255,.045);border-radius:6px;transition:background .12s}
   .te-ticker-row:hover{background:rgba(255,255,255,.04)}
+  .te-tk-chg.is-ext{font-size:.92em;white-space:nowrap}.te-ticker-row{grid-template-columns:14px minmax(0,1fr) 74px 74px 46px 22px}
   .te-ticker-row .te-drag-handle{width:14px;opacity:.35}.te-ticker-row:hover .te-drag-handle{opacity:1}
   .te-tk-main{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden}
   .te-ticker-link{color:var(--elite-copy);font:800 13px var(--font-mono);letter-spacing:.02em;text-decoration:none}.te-ticker-link:hover{color:var(--sec)}
@@ -490,6 +491,48 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+/* Live board: prices and day moves refresh every few seconds; with
+   "24H prices" on (profile menu) a stock trading pre-market / after hours /
+   overnight shows that move, labelled, like the globe. */
+(function () {
+  var rows = Array.prototype.slice.call(document.querySelectorAll('.te-ticker-row[data-ticker], .te-scan-row[data-ticker]'));
+  if (!rows.length) return;
+  var tickers = rows.map(function (r) { return r.getAttribute('data-ticker'); }).filter(function (t, i, a) { return t && a.indexOf(t) === i; });
+  var LBL = { pre: 'PRE', post: 'AH', overnight: '24H' }, last = {};
+  function num(v) { return typeof v === 'number' && isFinite(v); }
+  function on24() { return document.documentElement.getAttribute('data-show-24h') === '1'; }
+  function paint() {
+    rows.forEach(function (r) {
+      var q = last[r.getAttribute('data-ticker')]; if (!q) return;
+      var useX = !!(q.ext && LBL[q.ext] && num(q.ext_pct) && (on24() || !num(q.change_pct)));
+      var px = useX && num(q.ext_price) ? q.ext_price : q.price, chg = useX ? q.ext_pct : q.change_pct;
+      var pe = r.querySelector('.te-tk-px') || r.querySelector('.te-scan-px b');
+      var ce = r.querySelector('.te-tk-chg');
+      if (!ce && pe && pe.parentNode) { ce = document.createElement('span'); ce.className = 'te-tk-chg'; pe.parentNode.insertBefore(ce, pe.nextSibling); }
+      if (pe && num(px)) { var t = px.toFixed(2); if (pe.textContent !== t) pe.textContent = t; pe.classList.remove('na');
+        pe.title = useX ? LBL[q.ext] + ' price · last session ' + (num(q.price) ? q.price.toFixed(2) : '—') + (num(q.change_pct) ? ' (' + (q.change_pct >= 0 ? '+' : '') + q.change_pct.toFixed(2) + '%)' : '') : (q.live ? 'Live price' : 'Last stored price'); }
+      if (ce && num(chg)) {
+        var tx = (useX ? LBL[q.ext] + ' ' : '') + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+        if (ce.textContent !== tx) ce.textContent = tx;
+        ce.className = 'te-tk-chg ' + (chg >= 0 ? 'up' : 'dn') + (useX ? ' is-ext is-' + q.ext : '');
+        var bar = r.querySelector('.te-mv i');
+        if (bar) { bar.className = chg >= 0 ? 'up' : 'dn'; bar.style.width = Math.min(Math.abs(chg) / 8 * 50, 50).toFixed(1) + '%'; }
+      }
+    });
+  }
+  function load() {
+    if (document.hidden) return;
+    fetch('/api/board-quotes?tickers=' + encodeURIComponent(tickers.join(',')), { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && d.ok && d.quotes) { last = d.quotes; paint(); } })
+      .catch(function () {});
+  }
+  load(); setInterval(load, 5000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) load(); });
+  document.addEventListener('tradestaar:prefs', paint);
+})();
+</script>
 {{ super() }}
 <script>window.VZ_PRELOAD = {{ (zone_preload or {})|tojson }};</script>
 <script src="{{ url_for('static', filename='js/value_badges.js') }}" defer></script>

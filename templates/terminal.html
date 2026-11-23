@@ -1709,10 +1709,13 @@ function twDrawMacd(macd,signal,hist){
   twIndCrosshair(ctx,fit,pad,x,y,hv,hv==null?'':hv.toFixed(2));
   var valid=[];for(var i=n-1;i>=0;i--){if(macd[i]!=null&&signal[i]!=null&&hist[i]!=null){valid=[macd[i],signal[i],hist[i]];break;}}twNum('tw-macd-value',valid.length?valid.map(function(v){return v.toFixed(2);}).join(' · '):'—');
 }
-function twAxisLabel(t){
+function twAxisLabel(t,span){
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   if(t!=null&&typeof t==='object') return MON[(t.month-1)%12]+" '"+String(t.year).slice(2);
   var d=new Date(Number(t)*1000); if(isNaN(d.getTime())) return String(t);
+  // Long views need the year: "Jan 26" across 27 years of NVDA read as one year.
+  if(span>3*365*86400) return String(d.getFullYear());
+  if(span>300*86400) return MON[d.getMonth()]+" '"+String(d.getFullYear()).slice(2);
   if(['1m','5m','15m','1h','4h'].indexOf(twChartState.interval)>=0){
     var h=d.getHours(),m=d.getMinutes(),ap=h>=12?'PM':'AM';h=h%12;if(h===0)h=12;
     return h+':'+(m<10?'0':'')+m+' '+ap;
@@ -1729,10 +1732,11 @@ function twDrawTimeAxis(){
   var x=function(i){return twIndX(i,n,fit.w,ax);};
   ctx.font='9px ui-monospace,monospace';ctx.fillStyle='#8a93a0';
   // Collision-aware ticks: skip any label that would overlap the last drawn.
+  var b0=twChartState.bars[win.start],b1=twChartState.bars[win.end-1],tSpan=(b0&&b1&&typeof b0.time==='number')?(b1.time-b0.time):0;
   var maxTicks=Math.max(2,Math.floor((fit.w-ax)/76)),step=Math.max(1,Math.floor((n-1)/maxTicks)),lastR=-1e9;
   for(var i=0;i<n;i+=step){
     var bar=twChartState.bars[win.start+i];if(!bar)continue;
-    var lbl=twAxisLabel(bar.time),w=ctx.measureText(lbl).width;
+    var lbl=twAxisLabel(bar.time,tSpan),w=ctx.measureText(lbl).width;
     var px=Math.min(Math.max(x(i),w/2+2),fit.w-ax-w/2-2);
     if(px-w/2<lastR+7)continue;
     ctx.textAlign='center';ctx.fillText(lbl,px,15);
@@ -1742,7 +1746,7 @@ function twDrawTimeAxis(){
   if(typeof ctDrawTimeMarksAt==='function'){try{ctDrawTimeMarksAt(ctx,fit.w-ax,0,22);}catch(e){}}
   var hov=twChartState.hoverIdx;
   if(hov!=null&&hov>=win.start&&hov<win.end){
-    var hbar=twChartState.bars[hov],hpx=x(hov-win.start),hlbl=twAxisLabel(hbar.time);
+    var hbar=twChartState.bars[hov],hpx=x(hov-win.start),hlbl=twAxisLabel(hbar.time)+((tSpan>300*86400&&typeof hbar.time==='number')?(" '"+String(new Date(hbar.time*1000).getFullYear()).slice(2)):'');
     ctx.font='700 9px ui-monospace,monospace';var twd=ctx.measureText(hlbl).width+12;
     var rx=Math.min(Math.max(hpx-twd/2,2),Math.max(2,fit.w-ax-twd-2));
     ctx.fillStyle=(typeof ctAccent==='function'?ctAccent():'#34f5a8');
@@ -2403,8 +2407,9 @@ function twApplyQuote(q){
   var cls  = twChgClass(Number(q.gap_pct) || 0);
   // Extended hours: the row shows the move since the bell, tagged, and keeps
   // the day's own change in its tooltip.
-  var extTag = {post:'AH ', pre:'PRE ', overnight:'O/N '}[q.ext] || '';
-  if(extTag && q.ext_pct != null){
+  var extTag = {post:'AH ', pre:'PRE ', overnight:'24H '}[q.ext] || '';
+  // Follows "24H prices" (profile menu), like the banner and the globe.
+  if(extTag && q.ext_pct != null && (!window.TS24 || window.TS24.on() || q.gap_pct == null)){
     chg = extTag + (q.ext_pct >= 0 ? '+' : '') + Number(q.ext_pct).toFixed(2) + '%';
     cls = twChgClass(Number(q.ext_pct));
   }
@@ -2914,7 +2919,10 @@ document.addEventListener('keydown',function(e){
       .then(twTapeApply)
       .catch(function(){});
   }
+  var twTapeLast = null;
+  document.addEventListener('tradestaar:prefs', function(){ if(twTapeLast) twTapeApply(twTapeLast); });
   function twTapeApply(d){
+    twTapeLast = d;
     (function(){
         if(!d || !d.ok || !d.items) return;
         // The "TAPE not loaded / N min behind" chip is rendered once with
@@ -2935,12 +2943,15 @@ document.addEventListener('keydown',function(e){
           document.querySelectorAll('[data-mtape="' + t.symbol + '"]').forEach(function(el){
             var px = el.querySelector('[data-mtape-px]');
             var chg = el.querySelector('[data-mtape-chg]');
-            if(px && t.price != null) px.textContent = Number(t.price).toFixed(2);
-            if(chg && t.change_pct != null){
-              var v = Number(t.change_pct);
-              chg.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+            // Same rule as the banner and globe: 24H prices on → extended price and move.
+            var dd = window.TS24 ? window.TS24.pick(t) : {px: t.price, pct: t.change_pct, label: ''};
+            if(px && dd.px != null) px.textContent = Number(dd.px).toFixed(2);
+            if(chg && dd.pct != null){
+              var v = Number(dd.pct);
+              chg.textContent = dd.label + (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
               chg.className = 'tw-tape-chg ' + (v > 0 ? 'chg-pos' : (v < 0 ? 'chg-neg' : 'chg-flat'));
             }
+            var ex2 = el.querySelector('[data-mtape-ext]'); if(ex2 && window.TS24) ex2.hidden = true;
           });
         });
     })();

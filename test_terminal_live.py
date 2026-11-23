@@ -233,7 +233,7 @@ class TestAfterHours:
         assert "twChartState.extended = twExtendedPref && !twLongBars(twChartState.interval);" in TEMPLATE
         assert "function twLongBars(interval){ return interval==='1d'||interval==='1w'||interval==='1mo'; }" in TEMPLATE
         assert "chartExtended.v2" not in TEMPLATE
-        assert "var extTag = {post:'AH ', pre:'PRE ', overnight:'O/N '}[q.ext]" in TEMPLATE
+        assert "var extTag = {post:'AH ', pre:'PRE ', overnight:'24H '}[q.ext]" in TEMPLATE
 
 
 def test_live_feed_measures_after_hours_from_todays_close(client):

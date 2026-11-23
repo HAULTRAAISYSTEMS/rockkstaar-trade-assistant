@@ -10731,6 +10731,52 @@ _ORBIT_SYM = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,9}$")
 _MENU_SYM = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
 
+@app.route("/api/board-quotes")
+def api_board_quotes():
+    """Live quotes for a board of tickers (the Watchlists page).
+
+    The stored price and day move, with the shared live overlay laid over
+    them: the latest price, and any pre-market / after-hours / overnight
+    move as ext_* beside the day's move (never in its place).
+    """
+    raw = (request.args.get("tickers") or "").upper().split(",")
+    ts = []
+    for t in raw:
+        t = t.strip()
+        if _MENU_SYM.match(t) and t not in ts:
+            ts.append(t)
+    ts = ts[:300]
+    if not ts:
+        return jsonify({"ok": True, "quotes": {}})
+    rows = {}
+    for t in ts:
+        try:
+            rows[t] = get_stock_data(t) or {}
+        except Exception:
+            rows[t] = {}
+    items = []
+    for t in ts:
+        row = rows.get(t) or {}
+        price, prev = row.get("current_price"), row.get("prev_close")
+        try:
+            chg = (float(price) / float(prev) - 1) * 100 if price is not None and prev else None
+        except (TypeError, ValueError, ZeroDivisionError):
+            chg = None
+        items.append({"symbol": t, "price": float(price) if price is not None else None,
+                      "change_pct": round(chg, 2) if chg is not None else None})
+    if _MKT_AVAILABLE:
+        try:
+            items = _mkt.overlay_live_tape(items)
+        except Exception as exc:
+            logger.debug("board quotes overlay: %s", exc)
+    out = {}
+    for i in items:
+        out[i["symbol"]] = {k: i.get(k) for k in ("price", "change_pct", "ext", "ext_pct", "ext_price", "live")}
+    resp = jsonify({"ok": True, "quotes": out})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/api/ticker-menu/<ticker>", methods=["GET"])
 def api_ticker_menu(ticker):
     import json as _json
