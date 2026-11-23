@@ -215,7 +215,10 @@ def test_ipad_landscape_keeps_three_columns_and_chips_clear_the_globe():
     js = (ROOT / "static/js/command_center_3d.js").read_text(encoding="utf-8")
     assert "safeHalf ? Math.min(R, (safeHalf - 70) / 1.053) : Math.min(R, W * 0.30)" in js
     assert "var tagBoxes = useRegions && zoom < 1.2 ? chipRects.slice() : [];" in js
-    assert "if (Pe[2] > 0.3 && ex.live) {" in js     # closed exchanges: beacon only
+    # Closed for a while: beacon only. Tags are for open / lunch / holiday /
+    # opening within 3h (exTag returns null otherwise).
+    assert "if (st.opens_at && st.opens_at - t < 3 * 3600) return e.name + ' · OPENS '" in js
+    assert "      return null;\n    }" in js
     nav = (ROOT / "static/css/nav_2027.css").read_text(encoding="utf-8")
     assert "@media (min-width: 761px) and (max-width: 1080px)" in nav
 

@@ -572,12 +572,44 @@ html.cc27 .liq-page.cmd27 .cmd27-nx .nx-list > .nx-empty { grid-column: 1 / -1; 
 /* Legend for the pulses (only when something is pulsing). */
 .cmd27-legend { position: absolute; right: calc(var(--safe-r, 6px) + 4px); top: calc(var(--clip-t, 0px) + 46px); z-index: 3; display: none; gap: 5px; align-items: flex-end;
   font-size: 10.5px; color: var(--c-mute); white-space: nowrap; pointer-events: none; }
-.cmd27-legend.has-wave, .cmd27-legend.has-earn { display: flex; flex-direction: column; }
+.cmd27-legend.has-wave, .cmd27-legend.has-earn, .cmd27-legend.has-score, .cmd27-legend.has-relay { display: flex; flex-direction: column; }
 .cmd27-legend span { display: none; align-items: center; gap: 6px; }
-.cmd27-legend.has-wave span:first-child, .cmd27-legend.has-earn span:last-child { display: inline-flex; }
+.cmd27-legend.has-wave .lg-row-wave, .cmd27-legend.has-earn .lg-row-earn,
+.cmd27-legend.has-score .lg-row-score, .cmd27-legend.has-relay .lg-row-relay { display: inline-flex; }
 .cmd27-legend i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--c-gold); box-shadow: inset 0 0 0 2px rgba(34,227,154,.0); }
 .cmd27-legend span::after { content: none; }
 .cmd27-legend i.lg-earn { border-color: var(--c-pu); border-style: dashed; }
+/* Setup score: a progress arc, so a three-quarter ring in the page accent. */
+.cmd27-legend i.lg-score { border-color: rgb(var(--cc-accent-rgb, 198, 255, 61)); border-left-color: transparent; transform: rotate(-45deg); }
+.cmd27-legend i.lg-relay { width: 16px; height: 6px; border-radius: 6px 6px 0 0; border-bottom: 0; border-color: var(--c-up); }
+
+/* Tapped exchange: session, countdown, index pulse, hand-off. */
+/* Bottom-left of the globe: clear of the zoom stack (right) and the view switch (top). */
+.cmd27-exch { position: absolute; left: var(--safe-l, 4px); bottom: 8px; z-index: 6; width: 272px; display: flex; flex-direction: column; gap: 6px;
+  padding: 0 0 10px; border-radius: 16px; border: 1px solid var(--c-line2); background: rgba(4,11,24,.96);
+  box-shadow: 0 18px 40px rgba(0,0,0,.5), 0 0 30px rgba(57,198,255,.12); overflow: hidden; }
+.cmd27-exch[hidden] { display: none; }
+.cmd27-exch header { display: flex; align-items: center; gap: 10px; padding: 12px 12px 8px 14px; border-bottom: 1px solid rgba(80,160,255,.16); }
+.cmd27-exch header div { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.cmd27-exch header small { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--c-cy); }
+.cmd27-exch header strong { font-size: 16px; font-weight: 800; letter-spacing: .04em; color: var(--c-txt); }
+.cmd27-exch__x { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--c-line); background: none; color: var(--c-mute); font-size: 17px; cursor: pointer; }
+.cmd27-exch__status { margin: 2px 14px 0; font-size: 12.5px; font-weight: 700; color: var(--c-mute); font-variant-numeric: tabular-nums; }
+.cmd27-exch__status.is-open { color: var(--c-up); } .cmd27-exch__status.is-holiday { color: var(--c-gold); }
+.cmd27-exch__idx { display: flex; align-items: baseline; gap: 8px; margin: 0 14px; font-variant-numeric: tabular-nums; }
+.cmd27-exch__idx span { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--c-mute); flex: 1; min-width: 0; }
+.cmd27-exch__idx b { font-size: 16px; font-weight: 800; color: var(--c-txt); }
+.cmd27-exch__idx em { font-style: normal; font-weight: 800; font-size: 13px; color: var(--c-mute); }
+.cmd27-exch__idx em.is-up { color: var(--c-up); } .cmd27-exch__idx em.is-down { color: var(--c-dn); }
+.cmd27-exch__spark { display: block; width: calc(100% - 28px); height: 44px; margin: 0 14px; }
+.cmd27-exch__spark[data-empty] { display: none; }
+.cmd27-exch__relay { margin: 0 14px; font-size: 11.5px; color: #bcd0ee; }
+.cmd27-exch__relay:empty { display: none; }
+.cmd27-exch__foot { margin: 2px 14px 0; font-size: 10.5px; color: #6c80a1; }
+@media (max-width: 760px) {
+  .cmd27-exch { position: fixed; left: 8px; right: 8px; width: auto; top: auto; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); z-index: 60; }
+}
+.cmd27-hero__globe.is-full .cmd27-exch { left: calc(18px + env(safe-area-inset-left, 0px)); bottom: 70px; }
 
 /* Orbit Edit mode: the × only shows while editing. */
 .cmd27-chip__x { display: none; }

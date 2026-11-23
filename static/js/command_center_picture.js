@@ -77,7 +77,7 @@
   // Wide screens: the clear space between the title column and the Game Plan.
   // The globe sizes itself to it (cmd27:safe) and the chips stay inside it.
   function safeHalf() {
-    if (globeBox) globeBox.style.removeProperty('--safe-r');
+    if (globeBox) { globeBox.style.removeProperty('--safe-r'); globeBox.style.removeProperty('--safe-l'); }
     if (!globeBox || globeBox.classList.contains('is-full') || window.innerWidth <= 1080) return null;
     var g = globeBox.getBoundingClientRect(), L = $('.cmd27-hero__left'), P = $('.cmd27-hero__pulse');
     if (!L || !P) return null;
@@ -85,6 +85,8 @@
     if (!(r > l)) return null;
     // Controls on the right edge of the globe stop short of the Game Plan.
     globeBox.style.setProperty('--safe-r', Math.max(6, g.right - r + 10) + 'px');
+    // …and on the left edge, clear of the title column (the exchange panel).
+    globeBox.style.setProperty('--safe-l', Math.max(4, l - g.left + 10) + 'px');
     return Math.max(160, Math.min(cx - l, r - cx) - 6);
   }
   // Tape quotes first; orbit-only tickers (not on any watchlist, e.g. VOO)

@@ -407,6 +407,7 @@ html.cc27 .liq-page .elite-hero-title { font-size: clamp(34px, 4.2vw, 60px); lin
 .cc3d-card__chg.is-down { color: var(--neg-500, #ff4d45); }
 .cc3d-card__chg.is-unknown { color: var(--unknown-ink, #7b8794); }
 .cc3d-card__src { display: block; margin-top: 4px; color: #6f7c91; font: 500 9.5px/1.4 var(--font-mono, monospace); letter-spacing: 0.04em; }
+.cc3d-card__score { display: block; margin-top: 4px; color: rgb(var(--cc-accent-rgb, 198, 255, 61)); font: 700 10px/1.4 var(--font-mono, monospace); letter-spacing: 0.04em; }
 .cc3d-card__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 12px; }
 .cc3d-card__form { grid-column: 1 / -1; margin: 0; }
 .cc3d-card__btn {
