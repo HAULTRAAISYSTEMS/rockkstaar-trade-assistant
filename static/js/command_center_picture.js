@@ -397,7 +397,16 @@
       b.className = 'cmd27-dock__pill ' + tone(r.avg) + (focused === r.key ? ' is-on' : '');
       b.innerHTML = '<span></span><small></small>';
       b.firstChild.textContent = r.name.replace(' · OTHER', '').replace('COMMUNICATION', 'COMMS');
-      b.lastChild.textContent = pct(r.avg) + ' · ' + r.n;
+      // 24H prices on: the sector's overnight / after-hours average, with a
+      // moon, and how many of its stocks are up and down on that move.
+      if (r.ext) {
+        b.classList.add('is-24h');
+        b.lastChild.innerHTML = '<i class="cmd27-dock__moon" aria-hidden="true"><svg viewBox="0 0 16 16" width="9" height="9"><path d="M10.8 2.2a6 6 0 1 0 3 9.9A6.3 6.3 0 0 1 10.8 2.2z" fill="currentColor"/></svg></i>';
+        b.lastChild.appendChild(document.createTextNode(pct(r.avg) + ' · ▲' + r.up + ' ▼' + r.dn));
+        b.title = r.name + ': average 24H / extended-hours move of ' + r.n + ' stocks (' + r.ext + ' traded since the close)';
+      } else {
+        b.lastChild.textContent = pct(r.avg) + ' · ' + r.n;
+      }
       dock.appendChild(b);
     });
   });
@@ -415,7 +424,7 @@
     if (!d) { panel.hidden = true; return; }
     panel.hidden = false;
     $('#cmd27-sector-name').textContent = d.name;
-    var avg = $('#cmd27-sector-avg'); avg.textContent = pct(d.avg) + ' avg'; avg.className = tone(d.avg);
+    var avg = $('#cmd27-sector-avg'); avg.textContent = (d.ext ? '24H ' : '') + pct(d.avg) + ' avg'; avg.className = tone(d.avg);
     list.innerHTML = '';
     d.rows.forEach(function (r, i) {
       var li = document.createElement('li');
@@ -423,8 +432,11 @@
       var go = li.firstChild, st = li.lastChild;
       go.children[0].textContent = i + 1;
       go.children[1].textContent = r.symbol;
-      go.children[2].textContent = r.price != null ? Number(r.price).toFixed(2) : '';
-      go.children[3].textContent = pct(r.chg); go.children[3].className = tone(r.chg);
+      // Price and dollar change for the move shown (24H when that is on).
+      var pv = r.price != null ? Number(r.price) : null, dv = (pv && typeof r.chg === 'number') ? pv - pv / (1 + r.chg / 100) : null;
+      go.children[2].textContent = pv != null ? '$' + pv.toFixed(2) : '';
+      if (dv != null) { var dd = document.createElement('small'); dd.className = 'cmd27-sector__d ' + tone(r.chg); dd.textContent = (dv > 0 ? ' +' : dv < 0 ? ' −' : ' ') + Math.abs(dv).toFixed(2); go.children[2].appendChild(dd); }
+      go.children[3].textContent = (r.session ? ({ pre: 'PRE ', post: 'AH ', overnight: '24H ' })[r.session] || '' : '') + pct(r.chg); go.children[3].className = tone(r.chg);
       go.addEventListener('click', function () { emit('cmd27:focus', { symbol: r.symbol }); });
       st.textContent = orbitSet[r.symbol] ? '★' : '☆';
       st.title = orbitSet[r.symbol] ? 'Remove from your orbit' : 'Keep in your orbit';

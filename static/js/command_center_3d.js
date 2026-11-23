@@ -376,11 +376,12 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
     function sendSector(k) {
       var rg = REGIONS[k]; if (!rg) return;
       var rows = nodes.filter(function (nd) { return nd.region === k; })
-        .map(function (nd) { return { symbol: nd.symbol, chg: nd.chg, price: nd.price }; })
+        .map(function (nd) { return { symbol: nd.symbol, chg: nd.chg, price: nd.price, session: nd.session }; })
         .sort(function (a, b) { return (b.chg == null ? -1e9 : b.chg) - (a.chg == null ? -1e9 : a.chg); });
       var known = rows.filter(function (r) { return r.chg != null && !/VIX/.test(r.symbol); });
       var avg = known.length ? known.reduce(function (t, r) { return t + Number(r.chg); }, 0) / known.length : null;
-      document.dispatchEvent(new CustomEvent('cmd27:sector', { detail: { key: k, name: rg.name, avg: avg, rows: rows } }));
+      var nx = rows.filter(function (r) { return r.session; }).length;
+      document.dispatchEvent(new CustomEvent('cmd27:sector', { detail: { key: k, name: rg.name, avg: avg, rows: rows, ext: nx } }));
     }
     document.addEventListener('cmd27:sector-open', function (e) { if (e.detail && e.detail.key) focusRegion(e.detail.key); });
     // Clear space between the side panels (wide screens), from the page.
@@ -677,8 +678,23 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
       return true;
     }
 
+    // "24H prices" (avatar menu): a stock trading pre-market / after hours /
+    // overnight counts with that move everywhere on the globe — pins, sector
+    // signs, the Fly-to-a-sector dock and the sector panel. Off: last session.
+    function show24h() { return document.documentElement.getAttribute('data-show-24h') === '1'; }
+    function disp(t) {
+      var x = t && t.ext_pct;
+      if (!t || !t.ext || typeof x !== 'number' || !isFinite(x) || !(show24h() || t.change_pct == null)) return t;
+      var o = {}; for (var k in t) o[k] = t[k];
+      o.change_pct = x; o.session = t.ext;
+      if (typeof t.ext_price === 'number' && isFinite(t.ext_price)) o.price = t.ext_price;
+      return o;
+    }
+    var lastSet = null;
+    document.addEventListener('tradestaar:prefs', function () { if (lastSet) setData(lastSet); });
     function setData(items) {
-      var list = (items || []).filter(function (t) { return t && t.symbol; });
+      lastSet = items;
+      var list = (items || []).filter(function (t) { return t && t.symbol; }).map(disp);
       var seen = {}, uniq = [];
       list.forEach(function (t) { if (!seen[t.symbol]) { seen[t.symbol] = 1; uniq.push(t); } });
       var n = uniq.length, golden = Math.PI * (3 - Math.sqrt(5));
@@ -693,7 +709,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         return {
           symbol: t.symbol,
           price: t.price,
-          chg: t.change_pct,
+          chg: t.change_pct, session: t.session || null,
           value: t.value, weight: t.weight, dollars: t.dollars, earn: earnDays(String(t.symbol).toUpperCase()),
           region: pp ? pp.region : null, rank: pp ? pp.rank : 0,
           x: pp ? pp.v[0] : Math.cos(th) * rad, y: pp ? pp.v[1] : y * 0.92, z: pp ? pp.v[2] : Math.sin(th) * rad,
@@ -705,10 +721,11 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
         var sum = {};
         nodes.forEach(function (nd) {
           if (!nd.region) return;
-          var st = sum[nd.region] = sum[nd.region] || { key: nd.region, name: REGIONS[nd.region].name, n: 0, s: 0, k: 0 };
-          st.n++; if (nd.chg != null && !/VIX/.test(nd.symbol)) { st.s += Number(nd.chg); st.k++; }
+          var st = sum[nd.region] = sum[nd.region] || { key: nd.region, name: REGIONS[nd.region].name, n: 0, s: 0, k: 0, x: 0, up: 0, dn: 0 };
+          st.n++; if (nd.chg != null && !/VIX/.test(nd.symbol)) { st.s += Number(nd.chg); st.k++; if (nd.chg > 0.05) st.up++; else if (nd.chg < -0.05) st.dn++; }
+          if (nd.session) st.x++;
         });
-        var list2 = Object.keys(sum).map(function (k) { var st = sum[k]; return { key: k, name: st.name, n: st.n, avg: st.k ? st.s / st.k : null }; })
+        var list2 = Object.keys(sum).map(function (k) { var st = sum[k]; return { key: k, name: st.name, n: st.n, avg: st.k ? st.s / st.k : null, ext: st.x, up: st.up, dn: st.dn }; })
           .sort(function (a, b) { return b.n - a.n; });
         document.dispatchEvent(new CustomEvent('cmd27:regions', { detail: list2 }));
         if (focusKey) sendSector(focusKey);
@@ -1218,6 +1235,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             if (!st.worst || nd.chg < st.worst.chg) st.worst = nd;
           }
           if (nd.chg != null) { if (nd.chg > 0.05) st.up++; else if (nd.chg < -0.05) st.dn++; }
+          if (nd.session) st.x = (st.x || 0) + 1;
           st.n++; if (pMode && nd.weight != null) st.w += Number(nd.weight);
           // VIX moves opposite to stocks, so it stays a pin but not part of the average.
           if (nd.chg != null && !/VIX/.test(String(nd.symbol).toUpperCase())) { st.sum += Number(nd.chg); st.k++; }
@@ -1271,7 +1289,7 @@ ctx.strokeStyle = (gx % 2 === 0) ? vg : vg2;
             if (!small && !pMode && st.best && st.worst && st.best !== st.worst)
               line3 = '▲ ' + st.best.symbol + ' ' + (st.best.chg >= 0 ? '+' : '') + st.best.chg.toFixed(1) + '%   ▼ ' + st.worst.symbol + ' ' + (st.worst.chg >= 0 ? '+' : '') + st.worst.chg.toFixed(1) + '%';
             var lift = project(cen[0] * 1.2, cen[1] * 1.2, cen[2] * 1.2, R, cx, cy);
-            var name = rg.name, pctT = avg == null ? '—' : (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%';
+            var name = rg.name, pctT = avg == null ? '—' : (st.x ? '24H ' : '') + (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%';
             var sub = small ? '' : pMode ? ('YOU ' + (st.w >= 10 ? st.w.toFixed(0) : st.w.toFixed(1)) + '%  ·  ' + st.n + (st.n === 1 ? ' holding' : ' holdings'))
               : ('▲' + st.up + '  ▼' + st.dn + '  ·  ' + st.n + (st.n === 1 ? ' stock' : ' stocks') + (more ? '  ·  +' + more + ' hidden' : ''));
             var f1 = Math.round((small ? (W <= 520 ? 10.5 : 11.5) : 13) * big), f2 = Math.round((small ? 9 : 10.5) * big);
