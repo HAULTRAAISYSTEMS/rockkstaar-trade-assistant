@@ -97,6 +97,30 @@
     if (key) byKey.set(key, val.v);
     if (quiet || prev === undefined || prev === val.v) return;
     flash(el, val.v > prev);
+    flashName(el, val.v > prev);
+  }
+
+  // The ticker's name glows with its number (once per row per tick).
+  var nameAt = new WeakMap();
+  function flashName(el, up) {
+    var ht = hostTicker(el); if (!ht || !ht.t) return;
+    var now = Date.now(); if (now - (nameAt.get(ht.host) || 0) < 300) return;
+    nameAt.set(ht.host, now);
+    var want = String(ht.t).toUpperCase(), all = [ht.host].concat(Array.prototype.slice.call(ht.host.getElementsByTagName('*'), 0, 60));
+    for (var i = 0; i < all.length; i++) {
+      var n = all[i], own = '';
+      for (var c = n.firstChild; c; c = c.nextSibling) if (c.nodeType === 3) own += c.nodeValue;
+      if (own.trim().toUpperCase() === want) { flashTo(n, up, 'tf-name-'); return; }
+    }
+  }
+  function flashTo(el, up, prefix) {
+    if (!on()) return;
+    var cls = prefix + (up ? 'up' : 'dn');
+    el.classList.remove(prefix + 'up', prefix + 'dn');
+    void el.offsetWidth;
+    el.classList.add(cls);
+    clearTimeout(timers.get(el));
+    timers.set(el, setTimeout(function () { el.classList.remove(cls); }, DUR));
   }
 
   function scan(root, quiet) {

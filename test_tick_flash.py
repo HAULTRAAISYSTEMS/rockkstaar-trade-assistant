@@ -49,3 +49,10 @@ def test_what_counts_as_a_number():
     got = json.loads(res.stdout.strip())
     assert got[:6] == [635.54, -3.41, 1.2, -22.47, 1182.0, 8300.0]
     assert got[6:] == [None, None, None, None, None]   # ranks, times, counts, words, years never flash
+
+
+def test_the_ticker_name_glows_with_its_number():
+    js = (ROOT / "static/js/tick_flash.js").read_text()
+    css = (ROOT / "static/css/tick_flash.css").read_text()
+    assert "flashName(el, val.v > prev)" in js and "'tf-name-'" in js
+    assert "@keyframes tfNameUp" in css and "@keyframes tfNameDn" in css
