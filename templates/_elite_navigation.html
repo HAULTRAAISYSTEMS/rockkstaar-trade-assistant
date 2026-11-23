@@ -87,7 +87,14 @@
     ('brokers', url_for('brokers_page'), 'Brokers', 'Schwab and other brokers', 'plug'),
     ('alerts', url_for('browser_push.settings'), 'Browser Alerts', 'Push alerts on this device', 'bell'),
   ]),
-] + ([('Admin', [('admin', url_for('admin_users'), 'Admin', 'Users and access', 'key')])] if session.get('is_admin') else []) %}
+] %}
+{# Admin tools live in the avatar's Control Center, in their own console. #}
+{% set admin_tools = [
+  ('admin', url_for('admin_users'), 'Users & access', 'Accounts, passwords, admins', 'key'),
+  ('speed', url_for('admin_speed'), 'Speed monitor', 'Slow endpoints and freezes', 'pulse'),
+  ('desk', url_for('live_research.admin_page'), 'Research desk', 'Review and publish live research', 'spark'),
+  ('feed', url_for('api_live_status'), 'Live feed status', 'Which source is pricing quotes', 'plug'),
+] if session.get('is_admin') else [] %}
 {% set nav_featured = ('terminal', 'intel', 'learn') %}
 {% macro rm_icon(name) -%}
 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">
@@ -134,6 +141,49 @@
   {% endfor %}
 </div>
 {% endfor %}
+{%- endmacro %}
+{# The avatar opens the Control Center: who you are, quick switches, your
+   workspace, the admin console (admins only) and sign out, in one panel. #}
+{% macro control_center(sheet=false) -%}
+<div class="ccx{{ ' is-sheet' if sheet }}">
+  <div class="ccx-hero">
+    <button type="button" class="nav-profile ccx-profile{{ ' is-sheet' if sheet }}" data-photo-pick aria-label="{{ 'Change profile photo' if profile_photo_url else 'Add a profile photo' }}">
+      <span class="nav-profile__pic">{% if profile_photo_url %}<img src="{{ profile_photo_url }}" alt="" width="52" height="52">{% else %}{{ rm_icon('user') }}{% endif %}<i class="nav-profile__cam" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></i></span>
+      <span class="nav-profile__txt"><small class="ccx-greet" data-ccx-greet>Welcome back</small><strong>{{ session.get('username') or 'Your workspace' }}</strong><small data-photo-status>{{ 'Tap to change photo' if profile_photo_url else 'Tap to add a photo' }}</small></span>
+    </button>
+    <div class="ccx-chips">
+      <span class="ccx-chip{{ ' is-admin' if session.get('is_admin') }}">{{ '★ Admin' if session.get('is_admin') else 'Member' }}</span>
+      <span class="ccx-chip is-session" data-ccx-session>Market</span>
+    </div>
+  </div>
+  <span class="rm-sec">Quick settings</span>
+  <div class="ccx-switches">
+    {{ pref_24h(' is-sheet' if sheet else '') }}
+    {{ pref_flash(' is-sheet' if sheet else '') }}
+    <button type="button" class="nav-pref ccx-sw{{ ' is-sheet' if sheet }}" data-ccx-toggle="sound" aria-pressed="true">
+      <span class="nav-pref__txt"><strong>Alert sounds</strong><small>A chime when a price alert or setup hits</small></span><span class="nav-pref__sw" aria-hidden="true"></span>
+    </button>
+    <button type="button" class="nav-pref ccx-sw{{ ' is-sheet' if sheet }}" data-ccx-toggle="auto" aria-pressed="true">
+      <span class="nav-pref__txt"><strong>Auto refresh</strong><small>Let pages reload their data on their own</small></span><span class="nav-pref__sw" aria-hidden="true"></span>
+    </button>
+  </div>
+  {{ nav_tiles(account_groups) }}
+  {% if admin_tools %}
+  <section class="ccx-admin" aria-label="Admin console">
+    <header><span class="ccx-admin__ic">{{ rm_icon('key') }}</span><div><strong>Admin console</strong><small>Only admins see this</small></div></header>
+    <div class="rm-grid">
+      {% for key, href, title, desc, icon in admin_tools %}
+      <a href="{{ href }}" class="rm-item"><span class="rm-ic">{{ rm_icon(icon) }}</span><span class="rm-txt"><strong>{{ title }}</strong><small>{{ desc }}</small></span></a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+  {% if not sheet %}{{ nav_tiles(learn_groups) }}{% endif %}
+  <form action="{{ url_for('logout') }}" method="post" class="ccx-out">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit"><span aria-hidden="true">⏻</span> Sign out</button>
+  </form>
+</div>
 {%- endmacro %}
 {% set terminal_active = ep in ('terminal', 'dashboard', 'quick_mode', 'watchlists_page') or (ep and ep.startswith('trade_tools.')) %}
 {% set research_active = ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare', 'intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'macro_page') or (ep and (ep.startswith('live_research.') or ep.startswith('research_memory.'))) %}
@@ -184,16 +234,9 @@
   <div class="nav-actions">
     <button class="nav-ai-button" type="button" onclick="openAsk()" title="Ask AI (Ctrl+K)"><span aria-hidden="true">✦</span> Ask AI</button>
     <details class="nav-menu nav-avatar">
-      <summary class="nav-avatar__btn {{ 'is-active' if learn_active or account_active }}" aria-label="Learn and account" title="Learn and account">{% if profile_photo_url %}<img class="nav-avatar__img" src="{{ profile_photo_url }}" alt="" width="44" height="44" decoding="async">{% else %}{{ rm_icon('user') }}{% endif %}</summary>
+      <summary class="nav-avatar__btn {{ 'is-active' if learn_active or account_active }}" aria-label="Control Center: settings, account and admin" title="Control Center">{% if profile_photo_url %}<img class="nav-avatar__img" src="{{ profile_photo_url }}" alt="" width="44" height="44" decoding="async">{% else %}{{ rm_icon('user') }}{% endif %}</summary>
       <div class="nav-menu__panel nav-menu__panel--tiles nav-menu__panel--account nav-menu__panel--right">
-        <button type="button" class="nav-profile" data-photo-pick aria-label="{{ 'Change profile photo' if profile_photo_url else 'Add a profile photo' }}">
-          <span class="nav-profile__pic">{% if profile_photo_url %}<img src="{{ profile_photo_url }}" alt="" width="40" height="40">{% else %}{{ rm_icon('user') }}{% endif %}<i class="nav-profile__cam" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></i></span>
-          <span class="nav-profile__txt"><strong>{{ session.get('username') or 'Your workspace' }}</strong><small data-photo-status>{{ 'Tap to change photo' if profile_photo_url else 'Tap to add a photo' }}</small></span>
-        </button>
-        {{ pref_24h() }}
-        {{ pref_flash() }}
-        {{ nav_tiles(account_groups) }}
-        {{ nav_tiles(learn_groups) }}
+        {{ control_center() }}
       </div>
     </details>
     <span class="nav-live-indicator" id="nav-live-indicator" title="Scheduled equity session, not quote freshness"><span class="nav-live-dot" aria-hidden="true"></span><span id="nav-live-label">Checking session…</span></span>
@@ -249,20 +292,11 @@
   <div class="mobile-app-nav__group">
     <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if account_active }}" aria-expanded="false" aria-controls="mobile-account-menu" data-mobile-menu="mobile-account-menu"><span class="mobile-app-nav__icon{{ ' has-photo' if profile_photo_url }}" aria-hidden="true">{% if profile_photo_url %}<img class="mobile-app-nav__photo" src="{{ profile_photo_url }}" alt="" width="26" height="26" decoding="async">{% else %}<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.9-3.6 3.7-5.5 7-5.5s6.1 1.9 7 5.5"/></svg>{% endif %}</span><span class="mobile-app-nav__label">Account</span></button>
     <div class="mobile-app-menu" id="mobile-account-menu" hidden>
-      <div class="mobile-app-menu__head"><strong>Account</strong><span>Your workspace</span></div>
-      <button type="button" class="nav-profile is-sheet" data-photo-pick aria-label="{{ 'Change profile photo' if profile_photo_url else 'Add a profile photo' }}">
-          <span class="nav-profile__pic">{% if profile_photo_url %}<img src="{{ profile_photo_url }}" alt="" width="44" height="44">{% else %}{{ rm_icon('user') }}{% endif %}<i class="nav-profile__cam" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></i></span>
-          <span class="nav-profile__txt"><strong>{{ session.get('username') or 'Your workspace' }}</strong><small data-photo-status>{{ 'Tap to change photo' if profile_photo_url else 'Tap to add a photo' }}</small></span>
-        </button>
-      {{ pref_24h(' is-sheet') }}
-      {{ pref_flash(' is-sheet') }}
-      <div class="rm-sheet">{{ nav_tiles(account_groups) }}</div>
-      <form action="{{ url_for('logout') }}" method="post" class="mobile-logout-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="mobile-logout-btn"><span aria-hidden="true">⏻</span> Log Out</button>
-      </form>
+      <div class="mobile-app-menu__head"><strong>Control Center</strong><span>Settings, account{{ ' and admin' if session.get('is_admin') }}</span></div>
+      {{ control_center(true) }}
     </div>
   </div>
 </nav>
 <input type="file" id="profile-photo-file" accept="image/*" hidden>
 <script src="{{ url_for('static', filename='js/profile_photo.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/control_center.js') }}" defer></script>

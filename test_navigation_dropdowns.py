@@ -41,7 +41,20 @@ def test_portfolio_menu_puts_schwab_first_and_groups_the_rest():
 def test_account_dropdown_links_to_free_browser_alerts():
     template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
     assert "'browser_push.settings'" in template
-    assert "'Browser Alerts'" in template and template.count("nav_tiles(account_groups)") == 2
+    # One Control Center macro holds the account tiles; desktop and the
+    # phone sheet both render it.
+    assert "'Browser Alerts'" in template and template.count("nav_tiles(account_groups)") == 1
+    assert "{{ control_center() }}" in template and "{{ control_center(true) }}" in template
+
+
+def test_control_center_has_quick_settings_admin_console_and_sign_out():
+    template = (ROOT / "templates/_elite_navigation.html").read_text(encoding="utf-8")
+    for s in ('data-ccx-toggle="sound"', 'data-ccx-toggle="auto"', "pref_24h(", "pref_flash(",
+              'class="ccx-admin"', "url_for('admin_speed')", "url_for('live_research.admin_page')",
+              "if session.get('is_admin') else [] %}", 'class="ccx-out"', "js/control_center.js"):
+        assert s in template, s
+    js = (ROOT / "static/js/control_center.js").read_text(encoding="utf-8")
+    assert "toggleAlertSound" in js and "toggleAutoRefresh" in js and "tradestaar.cc.sound" in js
 
 
 def test_navigation_script_closes_sibling_and_outside_menus():
