@@ -95,3 +95,16 @@ def test_gunicorn_hooks_raise_a_low_recycle_limit_from_the_dashboard():
     mod.on_starting(Server())
     assert cfg.max_requests == 20000
     assert callable(mod.worker_abort) and callable(mod.worker_exit)
+
+
+def test_money_strip_polls_reuse_the_login_check(monkeypatch):
+    """The 3-second money-strip poll must not open a database connection
+    each time just to re-check the sign-in."""
+    calls = []
+    monkeypatch.setattr(legacy, "get_user_by_id", lambda uid: calls.append(uid) or {"id": uid})
+    legacy._POLL_VERIFY_CACHE.clear()
+    for path in ("/api/wealth/today/live", "/api/wealth/today", "/api/command/orbit"):
+        with web_app.app.test_request_context(path + "?symbols=KLAC"):
+            legacy._verified_user_for_request(9)
+    assert calls == [9]
+    legacy._POLL_VERIFY_CACHE.clear()
