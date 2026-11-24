@@ -10037,6 +10037,7 @@ def _build_catalyst_calendar(summary, watchlist_tickers=None):
                 "kind": "EARNINGS", "date": date,
                 "date_label": raw.get("date_label") or date or "Date TBD",
                 "time": _timing["short"],
+                "time_code": _timing["code"],
                 "time_text": _timing["text"],
                 "time_known": _timing["known"],
                 "date_provisional": _timing["provisional"],
@@ -10051,6 +10052,7 @@ def _build_catalyst_calendar(summary, watchlist_tickers=None):
                 "days_away": days,
                 "on_watchlist": ticker in watchlist,
                 "eps_est": raw.get("eps_est"),
+                "eps_actual": raw.get("eps_actual"),
                 "rev_est": raw.get("rev_est"),
                 "market_cap": raw.get("market_cap"),
                 "cap_tier": raw.get("cap_tier") or ("Watchlist" if ticker in watchlist else ""),
@@ -10430,7 +10432,7 @@ def _command_center_context() -> dict:
     Every block is guarded on its own. A landing page that fails because one
     feed is cold is worse than one that renders with a gap in it.
     """
-    context = {"week": [], "news": [], "setups": [], "watchlist": [],
+    context = {"week": [], "news": [], "setups": [], "watchlist": [], "earn_strip": [],
                "watchlist_name": "", "pulse": {}, "next_up": None, "sector_map": {},
                "globe_markets": {}, "globe_scores": {},
                "story": None, "story_note": "",
@@ -10503,6 +10505,13 @@ def _command_center_context() -> dict:
     try:
         rows = _build_catalyst_calendar(summary, tickers)
         upcoming = [r for r in rows if _calendar_event_is_upcoming(r)]
+        # The earnings strip: your reports in the next few days, including
+        # today's once they're out (upcoming drops those), with the result.
+        try:
+            import earnings_strip
+            context["earn_strip"] = earnings_strip.build_strip(rows, _et_now())
+        except Exception as exc:
+            logger.debug("command centre: earnings strip unavailable: %s", exc)
 
         # Chronological order alone fills this section with whatever reports
         # soonest. The moment the earnings feed warmed, eight medium-impact
@@ -10882,8 +10891,9 @@ def api_ticker_menu_watchlist(ticker):
 # show_24h: on the globe chips, show the pre-market / after-hours / 24H move
 # while those sessions trade, instead of the last regular-session move.
 # flash_ticks: prices and % changes flash green / red when they tick (on by default).
-_PREF_KEYS = {"show_24h": "pref_show_24h", "flash_ticks": "pref_flash_ticks"}
-_PREF_DEFAULTS = {"show_24h": False, "flash_ticks": True}
+_PREF_KEYS = {"show_24h": "pref_show_24h", "flash_ticks": "pref_flash_ticks",
+              "earnings_strip": "pref_earnings_strip"}
+_PREF_DEFAULTS = {"show_24h": False, "flash_ticks": True, "earnings_strip": True}
 
 
 def _user_prefs(uid) -> dict:

@@ -14,6 +14,26 @@
 
 {% block content %}
 <div class="liq-page cmd27">
+  {# Earnings strip: your stocks reporting in the next few days, then how
+     they did. Hidden when nothing of yours reports, or by the setting. #}
+  {% if earn_strip %}
+  <div class="es" id="earn-strip" role="region" aria-label="Earnings for your stocks">
+    <span class="es-tag"><i aria-hidden="true"></i>Earnings</span>
+    <div class="es-track">
+      {% for e in earn_strip %}
+      <a class="es-item is-{{ e.state }}" href="{{ url_for('stock_detail', ticker=e.ticker) }}" data-sym="{{ e.ticker }}" data-es="{{ e.ticker }}">
+        {% if e.state == 'live' %}<span class="es-live">LIVE</span>{% endif %}
+        <b>{{ e.ticker }}</b>
+        {% if e.result %}<em class="is-{{ e.verdict }}">{{ e.result }}</em>
+        {% else %}<span class="es-when">{{ e.when }}{% if e.session %} · {{ e.session }}{% endif %}{% if e.provisional %} <small title="Date not confirmed by the company">(est.)</small>{% endif %}</span>{% endif %}
+        <span class="es-move" data-es-move hidden></span>
+      </a>
+      {% endfor %}
+    </div>
+    <a class="es-all" href="{{ url_for('catalyst_calendar') }}">Calendar →</a>
+  </div>
+  <script src="{{ url_for('static', filename='js/earnings_strip.js') }}" defer></script>
+  {% endif %}
   {# ── Hero: title · globe · market pulse ─────────────────────────────── #}
   <header class="elite-hero cmd27-hero cc-hero-xl is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
     <div class="cmd27-hero__left">
