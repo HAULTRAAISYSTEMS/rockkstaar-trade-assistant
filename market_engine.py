@@ -218,6 +218,46 @@ def rs_css_class(score: int) -> str:
 
 # ── Low-level price helpers ────────────────────────────────────────────────────
 
+def _daily_closes(node: dict) -> list[float]:
+    """Pure: one close per trading day from a Yahoo 1d chart, today included.
+
+    Yahoo's daily chart does not always carry the latest session as a bar:
+    after the evening session its last bar can come back with a null close
+    (or not at all), and the bars before it were all we kept. Every caller
+    reads the day's move as closes[-1] / closes[-2], so on Monday night the
+    app showed Friday's move as Monday's. The chart's meta always knows the
+    last regular-session price and when it printed; when that day is newer
+    than the last bar, it is appended. Two bars for one day (Yahoo sometimes
+    adds a live bar beside the daily one) collapse to the later.
+    """
+    from zoneinfo import ZoneInfo
+    meta = node.get("meta") or {}
+    closes = ((node.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+    stamps = node.get("timestamp") or []
+    if len(stamps) != len(closes):
+        # No usable timestamps: the old behaviour, closes only.
+        return [float(c) for c in closes if c is not None and c > 0]
+    try:
+        tz = ZoneInfo(meta.get("exchangeTimezoneName") or "America/New_York")
+    except Exception:
+        tz = ZoneInfo("America/New_York")
+    days: list[tuple] = []
+    for ts, c in zip(stamps, closes):
+        if c is None or not c > 0 or not ts:
+            continue
+        d = datetime.fromtimestamp(int(ts), tz).date()
+        if days and days[-1][0] == d:
+            days[-1] = (d, float(c))
+        else:
+            days.append((d, float(c)))
+    px, pt = meta.get("regularMarketPrice"), meta.get("regularMarketTime")
+    if isinstance(px, (int, float)) and px > 0 and pt:
+        last_day = datetime.fromtimestamp(int(pt), tz).date()
+        if not days or last_day > days[-1][0]:
+            days.append((last_day, float(px)))
+    return [c for _d, c in days]
+
+
 def _fetch_prices_chart(tickers: list[str], period: str = "60d") -> dict[str, list[float]]:
     """
     Fetch daily close prices via Yahoo Finance chart API — all tickers in parallel.
@@ -259,8 +299,7 @@ def _fetch_prices_chart(tickers: list[str], period: str = "60d") -> dict[str, li
                 if r.status_code != 200:
                     continue
                 node = r.json()["chart"]["result"][0]
-                closes = node["indicators"]["quote"][0].get("close", [])
-                prices = [float(c) for c in closes if c is not None and c > 0]
+                prices = _daily_closes(node)
                 if prices:
                     return ticker, prices
             except Exception as _e:
