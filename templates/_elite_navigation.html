@@ -5,6 +5,13 @@
   <span class="nav-pref__sw" aria-hidden="true"></span>
 </label>
 {%- endmacro %}
+{% macro pref_earn(extra='') -%}
+<label class="nav-pref{{ extra }}">
+  <span class="nav-pref__txt"><strong>Earnings strip</strong><small>A line on the Command Center when your stocks report soon, then the result</small></span>
+  <input type="checkbox" class="nav-pref__input" data-pref="earnings_strip"{% if not (user_prefs and user_prefs.earnings_strip is sameas false) %} checked{% endif %}>
+  <span class="nav-pref__sw" aria-hidden="true"></span>
+</label>
+{%- endmacro %}
 {% macro pref_flash(extra='') -%}
 <label class="nav-pref{{ extra }}">
   <span class="nav-pref__txt"><strong>Price flash</strong><small>Prices and % changes glow green or red for a moment when they tick up or down</small></span>
@@ -160,6 +167,7 @@
   <div class="ccx-switches">
     {{ pref_24h(' is-sheet' if sheet else '') }}
     {{ pref_flash(' is-sheet' if sheet else '') }}
+    {{ pref_earn(' is-sheet' if sheet else '') }}
     <button type="button" class="nav-pref ccx-sw{{ ' is-sheet' if sheet }}" data-ccx-toggle="sound" aria-pressed="true">
       <span class="nav-pref__txt"><strong>Alert sounds</strong><small>A chime when a price alert or setup hits</small></span><span class="nav-pref__sw" aria-hidden="true"></span>
     </button>

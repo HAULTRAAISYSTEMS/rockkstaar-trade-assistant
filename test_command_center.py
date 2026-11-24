@@ -135,7 +135,8 @@ class TestOneColdFeedIsAGapNotAnErrorPage:
                                 "watchlist_name", "pulse", "next_up", "story",
                                 "story_note", "sector_map",
                                 "globe_markets", "globe_scores",
-                                "news_refreshing", "news_note", "research_digest"}
+                                "news_refreshing", "news_note", "research_digest",
+                                "earn_strip"}
 
     def test_no_watchlist_is_not_an_error(self, monkeypatch):
         monkeypatch.setattr(legacy._intel, "get_intel_summary", lambda: SUMMARY)
