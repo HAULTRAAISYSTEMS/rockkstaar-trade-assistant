@@ -90,9 +90,56 @@
     <section class="pc-panel pc-readiness" aria-labelledby="pc-readiness-title">
       <h2 id="pc-readiness-title"><span class="pc-icon" aria-hidden="true">{{ rm_icon('checks') }}</span>History Readiness</h2>
       <p id="pc-readiness-status" role="status">Checking transaction coverage…</p>
+      <a href="#pc-history-import">Sync or import account history</a>
       <div id="pc-reconciliation" data-ledger="{{ url_for('wealth.ledger_page') }}"></div>
     </section>
   </div>
+
+  <section class="pc-panel pc-history-import" id="pc-history-import" aria-labelledby="pc-import-title"
+      data-history="{{ url_for('wealth.performance_recent_transactions', pid=0) }}"
+      data-csv-preview="{{ url_for('wealth.import_preview') }}"
+      data-csv-commit="{{ url_for('wealth.import_commit') }}">
+    <h2 id="pc-import-title"><span class="pc-icon" aria-hidden="true">{{ rm_icon('pen') }}</span>Transaction History</h2>
+    <label>Import into <select id="pc-import-account" disabled><option>Select an account</option></select></label>
+    <div class="pc-import-actions">
+      <form id="pc-broker-history-form">
+        <button type="submit" disabled>Preview Schwab history</button>
+        <details>
+          <summary>Choose dates</summary>
+          <label>From <input type="date" name="start_date"></label>
+          <label>Through <input type="date" name="end_date"></label>
+        </details>
+      </form>
+      <form id="pc-csv-history-form">
+        <label class="pc-visually-hidden" for="pc-csv-file">Schwab CSV</label>
+        <input type="file" id="pc-csv-file" name="file" accept=".csv,text/csv" required disabled>
+        <button type="submit" disabled>Preview CSV</button>
+      </form>
+    </div>
+    <p id="pc-import-status" role="status">Select the ledger account for this history.</p>
+    <div id="pc-import-preview" hidden>
+      <div class="pc-scroll pc-import-table" tabindex="0" role="region" aria-label="Transactions ready to import">
+        <table class="pc-table">
+          <thead><tr><th scope="col">Include</th><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Symbol</th>
+            <th scope="col">Shares</th><th scope="col">Price / cost</th><th scope="col">Cash</th><th scope="col">Fees</th></tr></thead>
+          <tbody id="pc-import-rows"></tbody>
+        </table>
+      </div>
+      <details id="pc-import-skipped" hidden><summary id="pc-import-skipped-count"></summary><ul id="pc-import-warnings"></ul></details>
+      <button type="button" id="pc-import-commit" disabled>Import selected into ledger</button>
+    </div>
+    <details id="pc-recent-history" hidden>
+      <summary>Recent ledger transactions</summary>
+      <p id="pc-recent-status" role="status"></p>
+      <div class="pc-scroll pc-import-table" tabindex="0" role="region" aria-label="Recent ledger transactions">
+        <table class="pc-table">
+          <thead><tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Symbol</th><th scope="col">Shares</th>
+            <th scope="col">Price / cost</th><th scope="col">Cash</th><th scope="col">Source</th></tr></thead>
+          <tbody id="pc-recent-rows"></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
 
   <section class="pc-panel pc-contribution-planner" aria-labelledby="pc-planner-title">
     <div class="pc-panel-head">
@@ -263,4 +310,7 @@
   </dialog>
 </div>
 {% endblock %}
-{% block scripts %}<script defer src="{{ url_for('static', filename='js/wealth_performance.js') }}"></script>{% endblock %}
+{% block scripts %}
+<script defer src="{{ url_for('static', filename='js/wealth_performance_history.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/wealth_performance.js') }}"></script>
+{% endblock %}

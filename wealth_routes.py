@@ -6,15 +6,17 @@ belong to that user.
 """
 from __future__ import annotations
 
+import hmac
 import logging
 import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, Response, abort, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, jsonify, redirect, render_template, request, url_for
+from itsdangerous import BadData, URLSafeTimedSerializer
 
 import wealth_calc
 import wealth_broker_sync
@@ -26,6 +28,7 @@ import wealth_nextdollar
 import wealth_performance as performance
 import wealth_planner
 import wealth_service
+import wealth_schwab_history
 import wealth_store
 
 logger = logging.getLogger(__name__)
@@ -773,6 +776,94 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         failed = sum(bool(account.get("sync_error")) for account in accounts)
         return jsonify(ok=bool(data.get("ok")) and not failed, synced=len(accounts) - failed)
 
+    def history_portfolio(user_id, pid):
+        portfolio = owned(user_id, pid)
+        if not portfolio:
+            abort(404)
+        return portfolio
+
+    def history_signer():
+        return URLSafeTimedSerializer(current_app.secret_key, salt="wealth-schwab-history-v1")
+
+    def history_mapping_tag(key):
+        secret = current_app.secret_key
+        if isinstance(secret, str):
+            secret = secret.encode()
+        return hmac.digest(secret, ("wealth-schwab-history:" + key).encode(), "sha256").hex()
+
+    @bp.get("/api/wealth/performance/history/<int:pid>")
+    def performance_recent_transactions(pid):
+        user_id = uid()
+        history_portfolio(user_id, pid)
+        return jsonify(ok=True, transactions=wealth_store.recent_transactions(user_id, pid))
+
+    @bp.post("/api/wealth/performance/history/<int:pid>/preview")
+    def performance_history_preview(pid):
+        import schwab
+        import schwab_account_preferences as prefs
+
+        user_id = uid()
+        portfolio = history_portfolio(user_id, pid)
+        broker_key = str(portfolio.get("broker_account") or "")
+        if not broker_key:
+            return jsonify(ok=False, error="Select a Schwab-linked account or upload a CSV."), 400
+        values = request.get_json(silent=True)
+        if not isinstance(values, dict):
+            abort(400)
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+        try:
+            start = date.fromisoformat(values.get("start_date")) if values.get("start_date") else today - timedelta(days=364)
+            end = date.fromisoformat(values.get("end_date")) if values.get("end_date") else today
+        except (TypeError, ValueError):
+            return jsonify(ok=False, error="Enter valid start and end dates."), 400
+        if end > today or not 0 <= (end - start).days <= 364:
+            return jsonify(ok=False, error="Choose a date window up to 365 days, ending today or earlier."), 400
+        try:
+            accounts = schwab.fetch_account_hashes(user_id)
+            matches = [(number, key) for number, key in accounts.items() if broker_key in (number, key)]
+            if len(matches) != 1:
+                return jsonify(ok=False, error="This account could not be matched. Sync Schwab or upload its CSV."), 409
+            number, account_hash = matches[0]
+            if not wealth_broker_sync.is_in_wealth((account_hash, number), prefs.get_preferences(user_id)):
+                return jsonify(ok=False, error="This account is excluded from Wealth."), 409
+            raw = schwab.fetch_transaction_history(account_hash, start, end, user_id=user_id)
+        except Exception:
+            logger.info("Read-only Schwab history request unavailable")
+            return jsonify(ok=False, error="Schwab history is unavailable. Try again or upload the account's CSV."), 503
+        if len(raw) > 1000:
+            return jsonify(ok=False, error="This range has too many transactions to review at once. Choose a shorter range."), 400
+        result = wealth_schwab_history.normalize(raw, start, end)
+        token = history_signer().dumps({"user": user_id, "portfolio": pid,
+                                      "mapping": history_mapping_tag(broker_key), "rows": result["transactions"]})
+        return jsonify(ok=True, **result, token=token, start=start.isoformat(), end=end.isoformat())
+
+    @bp.post("/api/wealth/performance/history/<int:pid>/commit")
+    def performance_history_commit(pid):
+        user_id = uid()
+        portfolio = history_portfolio(user_id, pid)
+        broker_key = str(portfolio.get("broker_account") or "")
+        values = request.get_json(silent=True)
+        if not isinstance(values, dict) or not isinstance(values.get("token"), str) or len(values["token"]) > 500_000:
+            abort(400)
+        try:
+            preview = history_signer().loads(values["token"], max_age=900)
+        except BadData:
+            return jsonify(ok=False, error="Preview expired or invalid. Preview Schwab history again."), 400
+        if preview["user"] != user_id or preview["portfolio"] != pid:
+            abort(404)
+        if not broker_key or not hmac.compare_digest(preview["mapping"], history_mapping_tag(broker_key)):
+            return jsonify(ok=False, error="The portfolio's Schwab link changed. Preview history again."), 409
+        indexes = values.get("indexes")
+        rows = preview["rows"]
+        if (not isinstance(indexes, list) or not 0 < len(indexes) <= len(rows)
+                or any(type(i) is not int or not 0 <= i < len(rows) for i in indexes)):
+            return jsonify(ok=False, error="Select transactions from the preview."), 400
+        result = wealth_store.add_transactions(user_id, pid, [rows[i] for i in sorted(set(indexes))],
+                                               source="schwab_api", broker_key=broker_key)
+        if result.get("mapping_changed"):
+            return jsonify(ok=False, error="The portfolio's Schwab link changed. Preview history again."), 409
+        return jsonify(ok=True, **result)
+
     @bp.post("/api/wealth/performance/goals/<int:year>/preview")
     @bp.put("/api/wealth/performance/goals/<int:year>")
     def performance_goals(year):
@@ -937,7 +1028,11 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             text = raw.decode("utf-8-sig", errors="replace")
         else:
             text = (request.get_json(silent=True) or {}).get("text") or ""
+        if not isinstance(text, str) or len(text) > 2_000_000:
+            return jsonify(ok=False, error="Upload CSV text up to 2 MB."), 400
         parsed = wealth_csv.parse(text)
+        if len(parsed["transactions"]) > 5000:
+            return jsonify(ok=False, error="Import up to 5,000 rows at a time."), 400
         if not parsed["format"]:
             return jsonify({"ok": False, "error": parsed["skipped"][0]["reason"]}), 400
         return jsonify({"ok": True, **parsed})
@@ -945,21 +1040,28 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
     @bp.post("/api/wealth/import/commit")
     def import_commit():
         user_id = uid()
-        d = request.get_json(silent=True) or {}
+        d = request.get_json(silent=True)
+        if not isinstance(d, dict) or not isinstance(d.get("transactions"), list):
+            return jsonify(ok=False, error="Choose transactions to import."), 400
         p = owned(user_id, d.get("portfolio_id"))
         if not p:
             return jsonify({"ok": False, "error": "Choose a portfolio."}), 400
+        if len(d["transactions"]) > 5000:
+            return jsonify({"ok": False, "error": "Import up to 5,000 rows at a time."}), 400
         rows, bad = [], []
-        for i, raw in enumerate(d.get("transactions") or []):
+        for i, raw in enumerate(d["transactions"]):
+            if not isinstance(raw, dict):
+                bad.append({"index": i, "error": "Invalid transaction."})
+                continue
             tx, errs = _clean_tx(raw)
             if errs:
                 bad.append({"index": i, "error": " ".join(errs)})
                 continue
-            tx["fingerprint"] = raw.get("fingerprint") or wealth_csv.fingerprint(tx)
-            tx["source"] = raw.get("source") or "csv"
+            fingerprint = raw.get("fingerprint")
+            tx["fingerprint"] = fingerprint if isinstance(fingerprint, str) and re.fullmatch(
+                r"[a-f0-9]{24}", fingerprint) else wealth_csv.fingerprint(tx)
+            tx["source"] = "schwab_csv" if raw.get("source") == "schwab_csv" else "csv"
             rows.append(tx)
-        if len(rows) > 5000:
-            return jsonify({"ok": False, "error": "Import up to 5,000 rows at a time."}), 400
         res = wealth_store.add_transactions(user_id, p["id"], rows, source="csv")
         return jsonify({"ok": True, **res, "rejected": bad})
 
