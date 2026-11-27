@@ -116,6 +116,13 @@
     if (before !== select.value) selectionChanged();
     controls();
   });
+  root.addEventListener("performance:import-account", event => {
+    const pid = String(event.detail);
+    if (!busy && select.value !== pid && accounts.some(account => String(account.id) === pid)) {
+      select.value = pid;
+      selectionChanged();
+    }
+  });
   select.addEventListener("change", selectionChanged);
   get("recent-history").addEventListener("toggle", () => {
     if (get("recent-history").open) recent();
@@ -175,6 +182,7 @@
     const costs = data.transactions.some(item => item.needs_cost);
     status.textContent = ready + " eligible rows for " + select.selectedOptions[0].textContent
       + (data.start ? " · " + data.start + " through " + data.end : "") + "."
+      + (ready ? " Review the rows, then choose Import selected into ledger to save them." : "")
       + (costs ? " Provide the cost basis before selecting a share transfer." : "");
   }
 

@@ -14,7 +14,9 @@
 {% endmacro %}
 {% block content %}
 <div class="pc" id="performance-center" data-api="{{ url_for('wealth.performance_api') }}"
-     data-sync="{{ url_for('wealth.performance_sync') }}">
+     data-sync="{{ url_for('wealth.performance_sync') }}"
+     data-stock="{{ url_for('stock_detail', ticker='__TICKER__') }}"
+     data-plan-year="{{ plan_year if plan_year else '' }}">
   <nav class="pc-navigation" aria-label="Portfolio">
     <strong>Portfolio</strong>
     <a data-account-link href="{{ url_for('wealth.dashboard', p=current.id if current else None) }}">{{ rm_icon('vault') }} Overview</a>
@@ -22,7 +24,7 @@
     <a data-account-link href="{{ url_for('wealth.dashboard', p=current.id if current else None) }}#wa-holdings">{{ rm_icon('pie') }} Holdings</a>
     <a data-account-link href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">{{ rm_icon('pen') }} Transactions</a>
     <a href="#pc-cash-details">{{ rm_icon('bank') }} Income</a>
-    <a data-account-link href="{{ url_for('wealth.planner_page', p=current.id if current else None) }}">{{ rm_icon('calendar') }} Contributions</a>
+    <a data-account-link data-plan-link href="{{ url_for('wealth.planner_page', p=current.id if current else None) }}">{{ rm_icon('calendar') }} Contributions</a>
     <a data-account-link href="{{ url_for('wealth.scoreboard_page', p=current.id if current else None) }}">{{ rm_icon('checks') }} Scoreboard</a>
     <a href="{{ url_for('schwab_account') }}">{{ rm_icon('bank') }} Schwab</a>
   </nav>
@@ -55,6 +57,7 @@
   <div id="pc-notice" class="pc-notice" hidden>
     <p id="pc-notice-message"></p>
     <button type="button" data-action="retry" hidden>Retry</button>
+    <a href="#pc-history-readiness" data-history-notice>Review history</a>
     <a href="{{ url_for('wealth.ledger_page') }}" id="pc-ledger-link">Open Ledger</a>
   </div>
 
@@ -87,7 +90,7 @@
         </table>
       </div>
     </section>
-    <section class="pc-panel pc-readiness" aria-labelledby="pc-readiness-title">
+    <section class="pc-panel pc-readiness" id="pc-history-readiness" aria-labelledby="pc-readiness-title">
       <h2 id="pc-readiness-title"><span class="pc-icon" aria-hidden="true">{{ rm_icon('checks') }}</span>History Readiness</h2>
       <p id="pc-readiness-status" role="status">Checking transaction coverage…</p>
       <a href="#pc-history-import">Sync or import account history</a>
@@ -147,7 +150,7 @@
     </details>
   </section>
 
-  <section class="pc-panel pc-contribution-planner" aria-labelledby="pc-planner-title">
+  <section class="pc-panel pc-contribution-planner" id="pc-contribution-planner" aria-labelledby="pc-planner-title">
     <div class="pc-panel-head">
       <h2 id="pc-planner-title"><span class="pc-icon" aria-hidden="true">{{ rm_icon('calendar') }}</span>Contribution Planner</h2>
       <div class="pc-plan-controls">
@@ -163,9 +166,23 @@
       <div><dt>Annual contribution goal</dt><dd id="pc-plan-target">—</dd></div>
     </dl>
     <small id="pc-plan-context">Estimates use your saved schedule.</small>
+    <figure class="pc-funding-chart">
+      <figcaption>Cumulative contributions by month</figcaption>
+      <ul aria-label="Contribution chart legend" class="pc-funding-legend">
+        <li data-funding-series="planned">Scheduled</li>
+        <li data-funding-series="actual">Verified net</li>
+        <li data-funding-series="target">Even goal pace</li>
+      </ul>
+      <div class="pc-funding-grid">
+        <div id="pc-funding-scale" class="pc-funding-scale" aria-hidden="true"></div>
+        <div id="pc-funding-months" class="pc-funding-months" role="group" aria-label="Choose a month to see its values"></div>
+      </div>
+      <p id="pc-funding-readout" aria-live="polite"></p>
+    </figure>
+    <a data-account-link data-plan-link href="{{ url_for('wealth.planner_page', p=current.id if current else None) }}">Open Seasonal Wealth Planner</a>
   </section>
 
-  <div class="pc-grid pc-grid--primary">
+  <div class="pc-grid pc-grid--primary" id="pc-returns">
     <section class="pc-panel pc-summary">
       {{ panel_title('spark', 'Performance Summary') }}
       <table class="pc-table"><thead><tr><th scope="col">Period</th><th scope="col">Portfolio</th><th scope="col">S&amp;P 500 TR</th><th scope="col">Excess (pp)</th></tr></thead>
@@ -173,6 +190,7 @@
           <tr><th scope="row">{{ p }}</th><td>—</td><td>—</td><td>—</td></tr>
         {% endfor %}</tbody>
       </table>
+      <a class="pc-card-link" data-history-link href="#pc-history-readiness" hidden>Review return coverage</a>
     </section>
     <section class="pc-panel pc-growth">
       <div class="pc-panel-head">{{ panel_title('pulse', 'Portfolio Growth vs. Annual Target') }}
@@ -183,7 +201,10 @@
       <ul class="pc-legend"><li>Portfolio (TWR)</li><li>S&amp;P 500 total return</li><li>Compounded target</li></ul>
       <div class="pc-plot">
         <canvas id="pc-chart" tabindex="0" role="img" aria-label="Historical returns. Use left and right arrow keys to inspect dates."></canvas>
-        <div id="pc-chart-empty" class="pc-chart-empty">Loading historical values…</div>
+        <div id="pc-chart-empty" class="pc-chart-empty">
+          <span id="pc-chart-message">Loading historical values…</span>
+          <a href="#pc-history-readiness">See what’s blocking the chart</a>
+        </div>
       </div>
       <div class="pc-chart-readout" id="pc-chart-readout" aria-live="polite"></div>
     </section>
@@ -192,6 +213,8 @@
       {{ rows([('twr','Time-Weighted Return (TWR)'), ('xirr','Money-Weighted Return (XIRR, annualized)'), ('annual','Annualized TWR'),
         ('drawdown','Maximum Drawdown'), ('volatility','Annualized Volatility'), ('sharpe','Sharpe Ratio'),
         ('sortino','Sortino Ratio'), ('calmar','Calmar Ratio'), ('beta','Beta'), ('alpha','Annualized Jensen’s Alpha')]) }}
+      <a class="pc-card-link" data-history-link href="#pc-history-readiness" hidden>Review risk data coverage</a>
+      <small id="pc-risk-coverage" hidden>Some ratios require a longer or more varied series of returns.</small>
     </section>
   </div>
 
@@ -206,10 +229,12 @@
     <section class="pc-panel">
       {{ panel_title('star', 'Long-Term Investing') }}
       {{ rows([('long_term-return_pct','Return (TWR, YTD)'), ('long_term-value','Portfolio Value'), ('long_term-unrealized','Unrealized P/L'), ('long_term-dividends_ytd','Dividends (YTD)')]) }}
+      <button type="button" data-assign-strategy="long_term" hidden>Assign to Long-Term Investing</button>
     </section>
     <section class="pc-panel">
       {{ panel_title('pulse', 'Active Trading') }}
       {{ rows([('active-return_pct','Return (TWR, YTD)'), ('active-value','Portfolio Value'), ('active-unrealized','Unrealized P/L'), ('active-realized','Realized P/L')]) }}
+      <button type="button" data-assign-strategy="active" hidden>Assign to Active Trading</button>
     </section>
     <section class="pc-panel pc-progress">
       {{ panel_title('target', 'Annual Goal Progress') }}
@@ -235,11 +260,13 @@
           <tbody id="pc-heatmap"><tr><td colspan="14">No monthly returns available.</td></tr></tbody>
         </table>
       </div>
+      <a class="pc-card-link" data-history-link href="#pc-history-readiness" hidden>Review monthly coverage</a>
     </section>
     <section class="pc-panel">
       {{ panel_title('spark', 'Stock Contribution to Return (YTD)') }}
       <table class="pc-table"><thead><tr><th scope="col">Symbol</th><th scope="col">Contribution (pp)</th><th scope="col">P/L</th><th scope="col">Weight</th></tr></thead>
         <tbody id="pc-attribution"><tr><td colspan="4">No attribution available.</td></tr></tbody></table>
+      <a class="pc-card-link" data-history-link href="#pc-history-readiness" hidden>Review attribution coverage</a>
     </section>
     <section class="pc-panel pc-comparison">
       {{ panel_title('target', 'Performance vs. S&P 500 Total Return') }}
@@ -249,6 +276,7 @@
         <div><small>Excess (pp)</small><strong data-field="comparison-excess">—</strong></div>
       </div>
       <small>Portfolio / index Sharpe on matched sessions <strong data-field="comparison-sharpe">—</strong></small>
+      <a class="pc-card-link" data-history-link href="#pc-history-readiness" hidden>Review benchmark coverage</a>
     </section>
   </div>
 
@@ -258,6 +286,7 @@
       {{ rows([('investment_profit','Total Investment Profit'), ('basis','Total Cost Basis'),
         ('cash','Cash & Sweep'), ('available_cash','Available Cash'), ('deposits','Deposits'), ('withdrawals','Withdrawals'),
         ('dividends','Dividends'), ('interest','Interest'), ('fees','Trading & Account Fees')]) }}
+      <a class="pc-card-link" id="pc-recorded-link" data-history-link href="#pc-recorded-activity" hidden>See ledger activity recorded so far</a>
     </section>
     <section class="pc-panel">
       {{ panel_title('pie', 'Holdings & Concentration') }}

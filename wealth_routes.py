@@ -721,6 +721,9 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             strategies[name]["return_pct"] = (h.get("periods") or [{}] * 5)[4].get("portfolio")
         year = today.year
         year_rows = []
+        all_accounts = not current and strategy == "all"
+        monthly = performance.monthly_contributions(chosen["ledgers"], paired, today) if activity and all_accounts else None
+        first_recorded = min((ledger.first_date for ledger in chosen["ledgers"].values() if ledger.first_date), default=None)
         for point in sorted({year, year + 1, *activity, *goals, *(int(y) for y in history.get("years", {}))}, reverse=True):
             goal = goals.get(point, performance.DEFAULT_GOAL)
             row = activity.get(point)
@@ -728,8 +731,10 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 0. if activity and min(activity) < point <= year else None)
             plan = goal.get("contribution_plan")
             projection = performance.contribution_projection(
-                point, plan, goal["contribution"], net, today, all_accounts=not current and strategy == "all")
-            year_rows.append(dict(year=point, **goal, projection=projection,
+                point, plan, goal["contribution"], net, today, all_accounts=all_accounts)
+            chart = performance.contribution_chart(point, plan, goal["contribution"], today,
+                                                   monthly if net is not None else None, first_recorded)
+            year_rows.append(dict(year=point, **goal, projection=projection, contribution_chart=chart,
                                   net=net, planned=point > year, saved=point in goals,
                                   remaining=max(0., goal["contribution"] - net) if net is not None else None,
                                   actual_return=history.get("years", {}).get(point)))
@@ -756,7 +761,8 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
     def performance_page():
         user_id = uid()
         current = owned(user_id, request.args.get("p"))
-        return render_template("wealth_performance.html", current=current,
+        plan_year = request.args.get("year", type=int)
+        return render_template("wealth_performance.html", current=current, plan_year=plan_year,
                                portfolios=wealth_store.list_portfolios(user_id), strategies=performance.STRATEGIES)
 
     @bp.get("/api/wealth/performance")
@@ -1688,7 +1694,14 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         except ValueError:
             year = date.today().year
         year = max(2000, min(2100, year))
-        return render_template("wealth_planner.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=None, year=year,
+        current = owned(user_id, request.args.get("p"))
+        current_year = datetime.now(ZoneInfo("America/New_York")).date()
+        goals, _ = wealth_store.performance_settings(user_id)
+        goal = goals.get(year) or (performance.DEFAULT_GOAL if year in (current_year.year, current_year.year + 1) else None)
+        portfolio_goal = {"target": goal["contribution"], "schedule": performance.contribution_projection(
+            year, goal.get("contribution_plan"), goal["contribution"], None, current_year)} if goal else None
+        return render_template("wealth_planner.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios),
+                               current=current, year=year, portfolio_goal=portfolio_goal,
                                kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START,
                                months=wealth_planner.MONTHS, seasons=wealth_planner.SEASONS,
                                ira_kinds=wealth_planner.IRA_KINDS)
