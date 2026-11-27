@@ -311,3 +311,14 @@
   .pc-contribution-planner .pc-panel-head { flex-wrap: wrap; }
   .pc-plan-fields > div { grid-template-columns: minmax(0, 1fr); }
 }
+
+.pc-history-import { margin-bottom: .65rem; }
+.pc-import-actions { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; margin: .55rem 0; }
+.pc-import-actions form { display: flex; flex-wrap: wrap; gap: .4rem; align-items: baseline; }
+.pc-import-actions details label { display: inline-flex; align-items: center; gap: .25rem; margin: .2rem; }
+.pc-history-import p { margin: .4rem 0; color: var(--pc-muted); }
+.pc-history-import details { margin-block: .45rem; }
+.pc-history-import summary { cursor: pointer; }
+.pc-import-table { max-height: 19rem; margin-block: .45rem; }
+.pc-import-table input[type="number"] { width: 8rem; }
+.pc-import-actions input[type="file"] { min-width: 0; max-width: min(22rem, 74vw); }

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from database import get_db
 
@@ -144,12 +144,33 @@ def list_transactions(user_id: int, pid: int | None = None) -> list[dict]:
         conn.close()
 
 
+def recent_transactions(user_id: int, pid: int) -> list[dict]:
+    conn = get_db()
+    try:
+        return _rows(conn.execute(
+            "SELECT date, type, ticker, shares, price, amount, fees, ratio, source "
+            "FROM wa_transactions WHERE user_id = ? AND portfolio_id = ? ORDER BY date DESC, id DESC LIMIT 20",
+            (user_id, pid)))
+    finally:
+        conn.close()
+
+
 def _import_signature(tx):
     return tuple(tx.get(key) or None for key in ("date", "type", "ticker", "shares", "price",
                                                  "amount", "fees", "ratio"))
 
 
-def add_transactions(user_id: int, pid: int, txs: list[dict], source: str = "manual") -> dict:
+def _broker_overlap_key(tx):
+    """CSV rounds quote fields and omits cash amounts on trades."""
+    def rounded(key, digits):
+        value = tx.get(key)
+        return round(value, digits) if value is not None else 0
+    return (tx["type"], tx.get("ticker"), rounded("shares", 6), rounded("price", 6),
+            rounded("amount", 2) if tx["type"] not in ("BUY", "SELL") else 0,
+            rounded("fees", 2), rounded("ratio", 6))
+
+
+def add_transactions(user_id: int, pid: int, txs: list[dict], source: str = "manual", *, broker_key=None) -> dict:
     """Insert transactions; ones whose fingerprint is already in this
     portfolio are skipped (re-importing an overlapping file is safe)."""
     conn = get_db()
@@ -157,14 +178,21 @@ def add_transactions(user_id: int, pid: int, txs: list[dict], source: str = "man
     try:
         # Take the portfolio write lock before deduplication. Concurrent
         # imports serialize here on both SQLite and PostgreSQL.
-        owner = conn.execute("UPDATE wa_portfolios SET id = id WHERE user_id = ? AND id = ?",
-                             (user_id, pid))
+        guard = " AND broker_account = ?" if broker_key is not None else ""
+        params = (user_id, pid, broker_key) if broker_key is not None else (user_id, pid)
+        owner = conn.execute("UPDATE wa_portfolios SET id = id WHERE user_id = ? AND id = ?" + guard, params)
         if owner.rowcount == 0:
-            return {"added": 0, "duplicates": 0}
-        existing = _rows(conn.execute("SELECT * FROM wa_transactions WHERE user_id = ? AND portfolio_id = ? "
-                                      "AND fingerprint IS NOT NULL", (user_id, pid)))
+            return {"added": 0, "duplicates": 0, **({"mapping_changed": True} if broker_key is not None else {})}
+        existing = _rows(conn.execute("SELECT * FROM wa_transactions WHERE user_id = ? AND portfolio_id = ?",
+                                      (user_id, pid)))
         seen = {row["fingerprint"] for row in existing}
-        stored_counts = Counter(_import_signature(row) for row in existing if row["source"] == "schwab_csv")
+        stored_counts = Counter(_import_signature(row) for row in existing
+                                if row["source"] == "schwab_csv" and row["fingerprint"])
+        prior_broker = {}
+        prior_csv = {}
+        for row in existing:
+            target = prior_broker if row["source"] == "schwab_api" else prior_csv
+            target.setdefault(_broker_overlap_key(row), Counter())[row["date"]] += 1
         incoming_counts = Counter()
         checked = set()
         for tx in txs:
@@ -180,6 +208,19 @@ def add_transactions(user_id: int, pid: int, txs: list[dict], source: str = "man
                 seen.add(fp)
                 dupes += 1
                 continue
+            if fp and (tx.get("source") == "schwab_api" or source == "csv"):
+                candidates = prior_csv if tx.get("source") == "schwab_api" else prior_broker
+                nearby = candidates.get(_broker_overlap_key(tx), {})
+                day = date.fromisoformat(tx["date"])
+                # A trade's recorded date can differ from its settlement date.
+                window = 3 if tx["type"] in ("BUY", "SELL") else 0
+                match = next((key for key in sorted(nearby, key=lambda d: abs((date.fromisoformat(d) - day).days))
+                              if nearby[key] and abs((date.fromisoformat(key) - day).days) <= window), None)
+                if match:
+                    nearby[match] -= 1
+                    seen.add(fp)
+                    dupes += 1
+                    continue
             conn.execute(
                 "INSERT INTO wa_transactions (user_id, portfolio_id, date, type, ticker, shares, price, amount, "
                 "fees, ratio, note, source, fingerprint, created_at, tax_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -205,7 +246,7 @@ def update_transaction(user_id: int, tx_id: int, tx: dict) -> bool:
     sets = ", ".join(f"{k} = ?" for k in vals)
     conn = get_db()
     try:
-        cur = conn.execute(f"UPDATE wa_transactions SET {sets}, fingerprint = NULL WHERE user_id = ? AND id = ?",
+        cur = conn.execute(f"UPDATE wa_transactions SET {sets}, fingerprint = CASE WHEN source = 'schwab_api' THEN fingerprint ELSE NULL END WHERE user_id = ? AND id = ?",
                            (*vals.values(), user_id, tx_id))
         conn.commit()
         return cur.rowcount > 0

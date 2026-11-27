@@ -400,6 +400,9 @@
     }
     account.replaceChildren(new Option("All accounts", "all"), ...options);
     account.value = selected;
+    root.dispatchEvent(new CustomEvent("performance:accounts", {
+      detail: {accounts: data.accounts, selected: account.value, today: data.position.as_of}
+    }));
     root.querySelector('[data-action="goals"]').disabled = false;
     root.querySelector('[data-action="accounts"]').disabled = !data.accounts.length;
   }
@@ -781,6 +784,10 @@
   }
 
   root.querySelector('[data-action="retry"]').addEventListener("click", load);
+  root.addEventListener("performance:ledger-updated", () => {
+    syncMessage = "";
+    load();
+  });
   setInterval(refreshBalance, 60000);
   document.addEventListener("visibilitychange", refreshBalance);
   load();

@@ -126,7 +126,7 @@ def parse(text: str) -> dict:
 
 
 def _row(raw: dict) -> dict:
-    return {str(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
+    return {k.strip().lower(): (v or "").strip() for k, v in raw.items() if isinstance(k, str)}
 
 
 def _parse_template(reader) -> dict:

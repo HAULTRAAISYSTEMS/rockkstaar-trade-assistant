@@ -52,7 +52,7 @@ import os
 import secrets
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
@@ -643,6 +643,29 @@ def fetch_account_hashes(user_id: int) -> dict[str, str]:
     return {row["accountNumber"]: row["hashValue"] for row in rows
             if isinstance(row, dict) and isinstance(row.get("accountNumber"), str)
             and isinstance(row.get("hashValue"), str) and row["accountNumber"] and row["hashValue"]}
+
+
+def fetch_transaction_history(account_hash: str, start, end, *, user_id: int) -> list[dict]:
+    """Read an account's transaction activity within one broker date window."""
+    from urllib.parse import quote
+    from zoneinfo import ZoneInfo
+
+    ny = ZoneInfo("America/New_York")
+    first = datetime.combine(start, datetime.min.time(), ny).astimezone(timezone.utc)
+    last = min(datetime.combine(end, datetime.max.time(), ny).astimezone(timezone.utc), datetime.now(timezone.utc))
+    types = (
+        "TRADE", "RECEIVE_AND_DELIVER", "DIVIDEND_OR_INTEREST", "ACH_RECEIPT", "ACH_DISBURSEMENT",
+        "CASH_RECEIPT", "CASH_DISBURSEMENT", "ELECTRONIC_FUND", "WIRE_OUT", "WIRE_IN", "JOURNAL",
+        "MEMORANDUM", "MARGIN_CALL", "MONEY_MARKET", "SMA_ADJUSTMENT",
+    )
+    raw = _get(f"/accounts/{quote(account_hash, safe='')}/transactions", {
+        "startDate": first.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        "endDate": last.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "types": ",".join(types),
+    }, user_id=user_id)
+    if not isinstance(raw, list):
+        raise ValueError("Unexpected Schwab transaction response")
+    return raw
 
 
 def fetch_orders(account_hash: str, *, days_back: int = 1, user_id: int = 1) -> list[dict]:
