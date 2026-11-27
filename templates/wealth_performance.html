@@ -90,7 +90,7 @@
         </table>
       </div>
     </section>
-    <section class="pc-panel pc-readiness" id="pc-history-readiness" aria-labelledby="pc-readiness-title">
+    <section class="pc-panel pc-readiness" id="pc-history-readiness" aria-labelledby="pc-readiness-title" tabindex="-1">
       <h2 id="pc-readiness-title"><span class="pc-icon" aria-hidden="true">{{ rm_icon('checks') }}</span>History Readiness</h2>
       <p id="pc-readiness-status" role="status">Checking transaction coverage…</p>
       <a href="#pc-history-import">Sync or import account history</a>
@@ -212,6 +212,9 @@
         </div>
       </div>
       <div class="pc-chart-readout" id="pc-chart-readout" aria-live="polite"></div>
+      <p class="pc-chart-coverage" id="pc-chart-blocker" hidden>
+        <span id="pc-chart-blocker-text"></span><a href="#pc-history-readiness">See what’s blocking the chart</a>
+      </p>
       <p id="pc-option-coverage" hidden></p>
     </section>
     <section class="pc-panel pc-risk">

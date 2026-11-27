@@ -130,11 +130,12 @@
     panel.replaceChildren();
     const brokerHistory = data.reconciliation || [];
     get("readiness-status").textContent = data.history.ok ? "Verified history through " + data.history.end
-      : (brokerHistory.length ? "Select an account below to see what its ledger needs." : (data.history.reason || ""));
+      : (data.history.reason || "Select an account below to see what its ledger needs.");
     const firstBlocked = brokerHistory.find(needsHistory);
     for (const check of brokerHistory) {
       const details = document.createElement("details");
       details.dataset.account = check.portfolio_id;
+      details.toggleAttribute("data-needs-review", Boolean(needsHistory(check)));
       details.open = openState.get(details.dataset.account) ?? (!data.history.ok && check === firstBlocked);
       const title = document.createElement("summary");
       const lines = [];
@@ -143,6 +144,9 @@
         if (!check.cash_matches && finite(check.cash_difference)) {
           lines.push("Cash: Schwab " + money(check.broker_cash) + " · Ledger " + money(check.ledger_cash)
             + " · Schwab minus ledger " + money(check.cash_difference));
+          lines.push(check.ledger_start
+            ? "The ledger starts " + check.ledger_start + ". Check the prior statement for opening cash or missing activity."
+            : "Check the opening cash on the statement and import any missing cash activity.");
         }
         for (const row of check.positions) {
           lines.push(row.ticker + " shares: Schwab " + shareQuantity.format(row.broker_shares)
@@ -210,17 +214,21 @@
     for (const key of ["deposits", "withdrawals", "dividends", "interest", "fees"]) {
       field("recorded-" + key, money(recorded?.[key]));
     }
+    const partial = {
+      dividends_ytd: recorded?.dividends || null,
+      fees_ytd: recorded?.fees || null,
+      realized: options?.option_realized || null
+    };
     for (const key of ["value", "unrealized", "realized", "dividends_ytd", "fees_ytd", "investment_profit",
       "basis", "cash", "available_cash", "deposits", "withdrawals", "dividends", "interest", "fees"]) {
-      const amount = key === "dividends_ytd" ? p[key] ?? (recorded?.dividends || null)
-        : key === "fees_ytd" ? p[key] ?? (recorded?.fees || null) : p[key];
+      const amount = p[key] ?? partial[key];
       const value = key === "fees_ytd" && finite(amount) ? -amount : amount;
       const tone = ["unrealized", "realized", "fees_ytd", "investment_profit"].includes(key) ? value : null;
       field(key, money(value), tone);
     }
     field("unrealized-pct", pct(p.unrealized_pct), p.unrealized_pct);
     field("quote-summary", data.sync.live ? "Schwab balances" : (data.sync.stored ? "Schwab snapshot" : ""));
-    field("realized-period", finite(p.realized) ? "Recorded history" : "");
+    field("realized-period", finite(p.realized) ? "Recorded history" : partial.realized ? "Matched options only (YTD)" : "");
     field("fee-period", finite(p.fees_ytd) ? "Trading and account fees" : recorded?.fees ? "Partial ledger total" : "");
     field("interest-sub", !finite(p.dividends_ytd) && recorded?.dividends ? "Partial ledger total"
       : finite(p.interest) ? money(p.interest) + " interest in recorded history" : "");
@@ -280,8 +288,9 @@
   function renderReturns(history) {
     const periods = get("periods");
     periods.replaceChildren();
-    const data = history.periods || ["Today", "1 Week", "1 Month", "3 Months", "YTD", "1 Year", "All-Time"]
-      .map(label => ({label}));
+    const periodsToShow = history.periods || response.reference?.periods;
+    const data = periodsToShow?.length ? periodsToShow
+      : ["Today", "1 Week", "1 Month", "3 Months", "YTD", "1 Year", "All-Time"].map(label => ({label}));
     for (const p of data) {
       const label = p.label === "Today" && p.end && p.end !== response.position.as_of ? "Latest session" : p.label;
       const row = tableRow(periods, label, [[pct(p.portfolio), p.portfolio], [pct(p.benchmark)], [pp(p.excess), p.excess]]);
@@ -304,7 +313,7 @@
     const heat = get("heatmap");
     heat.replaceChildren();
     const years = Object.entries(history.heatmap || {}).reverse();
-    if (!years.length) emptyTable(heat, 14, "No monthly returns available.");
+    if (!years.length) emptyTable(heat, 14, history.ok ? "No monthly returns available." : "Monthly portfolio returns are pending.");
     for (const [year, monthly] of years) {
       const values = Array.from({length: 12}, (_, index) => monthly[index + 1]).concat(history.years[year]);
       const row = tableRow(heat, year, values.map(value => [finite(value) ? signed(value, "%").replace(/(\.\d)\d%$/, "$1%") : dash]));
@@ -321,7 +330,7 @@
     const attr = get("attribution");
     attr.replaceChildren();
     let rows = history.attribution || [];
-    if (!rows.length) emptyTable(attr, 4, "No attribution available.");
+    if (!rows.length) emptyTable(attr, 4, history.ok ? "No attribution available." : "Attribution needs verified portfolio returns.");
     if (rows.length > 6) rows = [...rows.slice(0, 4), ...rows.slice(-2)];
     const scale = Math.max(1, ...rows.map(row => Math.abs(row.contribution_pct)));
     for (const row of rows) {
@@ -335,14 +344,21 @@
       bar.append(fill);
       tr.cells[1].prepend(bar);
     }
-    chartRange.disabled = !history.ok;
+    chartRange.options[1].disabled = !history.ok;
+    if (!history.ok) chartRange.value = "ytd";
+    chartRange.disabled = !history.ok && !response.reference?.chart;
     chartRange.options[0].textContent = history.partial_ytd ? "Available this year" : "YTD";
     chartRange.options[1].textContent = history.option_history_trimmed ? "Available period" : "All time";
     get("option-coverage").hidden = !history.option_history_trimmed;
     get("option-coverage").textContent = history.option_history_trimmed
       ? "Returns start on " + history.start + ", after the last option position without daily prices closed." : "";
-    get("chart-empty").hidden = Boolean(history.ok);
-    get("chart-message").textContent = history.ok ? "" : "Historical values unavailable";
+    const reference = response.reference?.chart;
+    get("chart-empty").hidden = Boolean(history.ok || reference);
+    get("chart-message").textContent = history.reason || "Historical values unavailable";
+    get("chart-blocker").hidden = history.ok || !reference;
+    get("chart-blocker-text").textContent = history.ok ? ""
+      : (reference?.benchmark.length ? "S&P 500 and target shown. " : "Annual target shown. S&P 500 history is unavailable. ")
+        + "Portfolio returns are pending. ";
     for (const link of root.querySelectorAll("[data-history-link]")) link.hidden = Boolean(history.ok);
     get("recorded-link").hidden = Boolean(history.ok) || !response.position.recorded_activity_ytd;
     setPlot();
@@ -588,7 +604,7 @@
       days: source.days,
       portfolio: source.growth.map(value => (value - 1) * 100),
       benchmark: (source.spy || []).map(value => finite(value) ? (value - 1) * 100 : null)
-    } : history?.growth_chart;
+    } : history?.growth_chart || response?.reference?.chart;
     const lines = path ? seriesInfo.filter(line => path[line.key]?.some(finite)) : [];
     root.querySelectorAll(".pc-legend li").forEach((item, index) =>
       item.classList.toggle("is-missing", !lines.includes(seriesInfo[index])));
@@ -726,6 +742,13 @@
     requestPlot();
   });
   chartRange.addEventListener("change", setPlot);
+  root.querySelectorAll('a[href="#pc-history-readiness"]').forEach(link => {
+    link.addEventListener("click", () => {
+      const blocker = get("reconciliation").querySelector("[data-needs-review]");
+      if (blocker) blocker.open = true;
+      get("history-readiness").focus({preventScroll: true});
+    });
+  });
   new ResizeObserver(requestPlot).observe(chart);
 
   const goalForm = get("goals-form");

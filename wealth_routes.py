@@ -601,6 +601,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                         bucket["history_issues"].append(f"{label}: Schwab cash cannot be reconciled with the ledger.")
                     bucket["reconciliation"].append(dict(account=label, portfolio_id=pid,
                         has_transactions=bool(ledger.first_date), history_confirmed=bool(profile.get("history_confirmed")),
+                        ledger_start=ledger.first_date.isoformat() if ledger.first_date else None,
                         live=bool(snapshot.get("live")), unsupported_positions=snapshot.get("unsupported_positions"),
                         broker_cash=cash, cash_matches=cash_matches,
                         ledger_cash=round(ledger.cash, 2) if ledger.first_date else None,
@@ -654,7 +655,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         tickers = {ticker for ledger in chosen["ledgers"].values() for _, _, held in ledger.snapshots for ticker in held}
         tickers.update(event["ticker"] for ledger in chosen["ledgers"].values() for event in ledger.events
                        if event["transaction"]["type"] in ("TRANSFER_IN", "TRANSFER_OUT"))
-        historical = history_for(tickers | {performance.BENCHMARK, "SPY"}) if chosen["ledgers"] else {}
+        historical = history_for(tickers | {performance.BENCHMARK} | ({"SPY"} if chosen["ledgers"] else set()))
         closes = {t: historical[t][0] for t in tickers}
         splits = {t: historical[t][1] for t in tickers}
         provider_splits = {t: rows for t, rows in splits.items() if rows is not None}
@@ -743,7 +744,9 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                                   net=net, planned=point > year, saved=point in goals,
                                   remaining=max(0., goal["contribution"] - net) if net is not None else None,
                                   actual_return=history.get("years", {}).get(point)))
-        return dict(ok=True, position=position, history=history, warnings=sorted(set(issues + warnings)),
+        reference = None if history["ok"] else performance.reference_history(
+            benchmark, today, goals.get(year, performance.DEFAULT_GOAL))
+        return dict(ok=True, position=position, history=history, reference=reference, warnings=sorted(set(issues + warnings)),
                     strategies=strategies, goals=year_rows, reconciliation=chosen["reconciliation"],
                     selected_goal=next(row for row in year_rows if row["year"] == year),
                     accounts=[dict(id=p["id"], name=p["name"],

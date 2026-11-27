@@ -308,6 +308,42 @@ def _spread(a, b):
     return a - b if a is not None and b is not None else None
 
 
+def _target_path(days, start, year, annual_pct):
+    year_start = date(year, 1, 1) - timedelta(days=1)
+    year_days = (date(year, 12, 31) - year_start).days
+    rate = 1 + annual_pct / 100
+    return [(rate ** (max(0, (day - start).days) / year_days) - 1) * 100 for day in days]
+
+
+def reference_history(benchmark, today, goal):
+    """Index returns and goal pace can be shown while portfolio history is blocked."""
+    year_start = date(today.year, 1, 1) - timedelta(days=1)
+    levels = {day: level for day, level in benchmark if day <= today and level > 0}
+    index = sorted(levels.items())
+    base_day = max((day for day in levels if day <= year_start), default=None)
+    has_ytd_base = base_day is not None and (year_start - base_day).days <= 7
+    sessions = [day for day, _ in index if day.year == today.year]
+    has_index_path = has_ytd_base and bool(sessions)
+    if has_index_path:
+        days = [base_day, *sessions]
+        values = [_return(levels[base_day], levels[day]) for day in days]
+    else:
+        days = [year_start + timedelta(days=offset) for offset in range(0, (today - year_start).days, 7)]
+        days.append(today)
+        values = []
+
+    rows = periods(index, levels, trimmed=True) if len(index) > 1 else []
+    rows = [dict(row, portfolio=None, excess=None) for row in rows if row["label"] != "Available Period"]
+    for row in rows:
+        if row["label"] == "YTD" and not has_index_path:
+            row.update(start=None, benchmark=None)
+    return {
+        "periods": [*rows, {"label": "All-Time"}] if rows else [],
+        "chart": {"days": [day.isoformat() for day in days], "benchmark": values,
+                  "target": _target_path(days, year_start, today.year, goal["return_pct"])},
+    }
+
+
 def periods(index, benchmark, *, trimmed=False):
     days = [day for day, _ in index]
     end = days[-1]
@@ -440,13 +476,11 @@ def analyze(series, benchmark, ledgers, security_flows, goals):
     trimmed = series.get("option_history_trimmed", False)
     partial_ytd = trimmed and start > ytd_start
     target_start = start if partial_ytd else ytd_start
-    target = goals.get(end.year, DEFAULT_GOAL)["return_pct"] / 100
     chart = {
         "days": [day.isoformat() for day in ytd_days],
         "portfolio": [_return(base, level) for _, level in index[offset:]],
         "benchmark": [_return(levels.get(start), levels.get(day)) for day in ytd_days],
-        "target": [((1 + target) ** (max(0, (day - target_start).days) /
-                   (date(end.year, 12, 31) - ytd_start).days) - 1) * 100 for day in ytd_days],
+        "target": _target_path(ytd_days, target_start, end.year, goals.get(end.year, DEFAULT_GOAL)["return_pct"]),
     }
     months = heatmap(index)
     if trimmed:

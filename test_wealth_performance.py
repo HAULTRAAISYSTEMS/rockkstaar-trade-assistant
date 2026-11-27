@@ -17,6 +17,25 @@ def tx(day, kind, **fields):
     return {"date": day.isoformat(), "type": kind, **fields}
 
 
+def test_reference_chart_uses_index_and_goal_without_a_portfolio():
+    start, mid, today = date(2025, 12, 31), date(2026, 1, 2), date(2026, 11, 27)
+    benchmark = [(start, 100), (mid, 101), (today, 112), (today + timedelta(days=1), 200)]
+    ref = performance.reference_history(benchmark, today, {"return_pct": 5})
+    assert ref["chart"]["days"] == [d.isoformat() for d in (start, mid, today)]
+    assert ref["chart"]["benchmark"] == pytest.approx([0, 1, 12])
+    assert ref["chart"]["target"][-1] == pytest.approx(((1.05 ** (331 / 365)) - 1) * 100)
+    ytd = next(row for row in ref["periods"] if row["label"] == "YTD")
+    assert ytd["benchmark"] == pytest.approx(12)
+    assert ytd["portfolio"] is None and ytd["excess"] is None
+
+    for incomplete in (benchmark[1:], []):
+        fallback = performance.reference_history(incomplete, today, {"return_pct": 5})
+        assert fallback["chart"]["benchmark"] == []
+        assert fallback["chart"]["days"][0] == start.isoformat()
+        assert fallback["chart"]["days"][-1] == today.isoformat()
+        assert fallback["chart"]["target"][-1] == pytest.approx(ref["chart"]["target"][-1])
+
+
 def test_transfer_review_preserves_import_identity_and_updates_history(env):
     app, *_ = env
     owner = client(app, 1)
@@ -33,6 +52,7 @@ def test_transfer_review_preserves_import_identity_and_updates_history(env):
     edit = {"mode": "external", "note": "Journal"}
     response = owner.get(f"/api/wealth/performance?p={pid}").json
     assert "verify this cash movement" in response["history"]["reason"]
+    assert "portfolio" not in response["reference"]["chart"]
     assert client(app, 2).patch(url, json=edit).status_code == 409
     assert owner.patch(url, json={"mode": "internal", "note": "Journal"}).status_code == 400
     assert owner.patch(url, json=edit).json["note"] == "Journal external-transfer"
@@ -389,7 +409,8 @@ def test_schwab_empty_stale_entries_are_kept_without_a_fresh_roster(env, monkeyp
     assert response["position"]["value"] is None
     assert "•••• 0017" in response["accounts"][0]["label"]
     assert response["accounts"][1]["label"].endswith("Account ending unavailable")
-    assert "3333" not in str(response)
+    assert "3333" not in str(response["accounts"])
+    assert "unknown-key-3333" not in str(response)
     assert c.get(f"{endpoint}?p={linked}").get_json()["position"]["value"] == 100
 
     import time
