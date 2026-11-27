@@ -254,6 +254,20 @@ def update_transaction(user_id: int, tx_id: int, tx: dict) -> bool:
         conn.close()
 
 
+def update_transfer_note(user_id, tx_id, prior_note, note):
+    """Keep the import fingerprint and reject a stale edit."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "UPDATE wa_transactions SET note = ? WHERE user_id = ? AND id = ? AND COALESCE(note, '') = ? "
+            "AND type IN ('DEPOSIT', 'WITHDRAWAL', 'TRANSFER_IN', 'TRANSFER_OUT')",
+            (note, user_id, tx_id, prior_note))
+        conn.commit()
+        return row.rowcount > 0
+    finally:
+        conn.close()
+
+
 def delete_transaction(user_id: int, tx_id: int) -> bool:
     conn = get_db()
     try:
