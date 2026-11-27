@@ -17,13 +17,13 @@
      data-sync="{{ url_for('wealth.performance_sync') }}">
   <nav class="pc-navigation" aria-label="Portfolio">
     <strong>Portfolio</strong>
-    <a href="{{ url_for('wealth.dashboard', p=current.id if current else None) }}">{{ rm_icon('vault') }} Overview</a>
+    <a data-account-link href="{{ url_for('wealth.dashboard', p=current.id if current else None) }}">{{ rm_icon('vault') }} Overview</a>
     <a aria-current="page" href="{{ request.path }}">{{ rm_icon('pulse') }} Performance</a>
-    <a href="{{ url_for('wealth.dashboard', p=current.id if current else None) }}#wa-holdings">{{ rm_icon('pie') }} Holdings</a>
-    <a href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">{{ rm_icon('pen') }} Transactions</a>
+    <a data-account-link href="{{ url_for('wealth.dashboard', p=current.id if current else None) }}#wa-holdings">{{ rm_icon('pie') }} Holdings</a>
+    <a data-account-link href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">{{ rm_icon('pen') }} Transactions</a>
     <a href="#pc-cash-details">{{ rm_icon('bank') }} Income</a>
-    <a href="{{ url_for('wealth.planner_page', p=current.id if current else None) }}">{{ rm_icon('calendar') }} Contributions</a>
-    <a href="{{ url_for('wealth.scoreboard_page', p=current.id if current else None) }}">{{ rm_icon('checks') }} Scoreboard</a>
+    <a data-account-link href="{{ url_for('wealth.planner_page', p=current.id if current else None) }}">{{ rm_icon('calendar') }} Contributions</a>
+    <a data-account-link href="{{ url_for('wealth.scoreboard_page', p=current.id if current else None) }}">{{ rm_icon('checks') }} Scoreboard</a>
     <a href="{{ url_for('schwab_account') }}">{{ rm_icon('bank') }} Schwab</a>
   </nav>
 

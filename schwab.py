@@ -635,6 +635,16 @@ def fetch_accounts(user_id: int = 1) -> list[dict]:
     return [_normalize_account(a) for a in raw]
 
 
+def fetch_account_hashes(user_id: int) -> dict[str, str]:
+    """Read Schwab's exact account-number to hash mappings for reconciliation."""
+    rows = _get("/accounts/accountNumbers", user_id=user_id)
+    if not isinstance(rows, list):
+        return {}
+    return {row["accountNumber"]: row["hashValue"] for row in rows
+            if isinstance(row, dict) and isinstance(row.get("accountNumber"), str)
+            and isinstance(row.get("hashValue"), str) and row["accountNumber"] and row["hashValue"]}
+
+
 def fetch_orders(account_hash: str, *, days_back: int = 1, user_id: int = 1) -> list[dict]:
     """
     Fetch recent orders for an account.
