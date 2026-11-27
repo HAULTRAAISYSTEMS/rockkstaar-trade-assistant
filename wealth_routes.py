@@ -687,6 +687,9 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             else:
                 rollup = dict.fromkeys(("realized", "dividends", "interest", "fees", "deposits", "withdrawals"))
             position.update(rollup)
+            recorded = activity.get(today.year)
+            position["recorded_activity_ytd"] = ({key: recorded[key] for key in
+                ("deposits", "withdrawals", "dividends", "interest", "fees")} if recorded else None)
             position["capital_flows_to_date"] = sum(value for _, value in flows) if trusted else None
             position["investment_profit"] = (position["value"] - position["capital_flows_to_date"]
                 if trusted and position["value"] is not None else None)

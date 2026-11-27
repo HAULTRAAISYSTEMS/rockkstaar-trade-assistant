@@ -322,3 +322,9 @@
 .pc-import-table { max-height: 19rem; margin-block: .45rem; }
 .pc-import-table input[type="number"] { width: 8rem; }
 .pc-import-actions input[type="file"] { min-width: 0; max-width: min(22rem, 74vw); }
+
+.pc .pc-plan-fields > #pc-schedule-inputs { display: grid; grid-template-columns: minmax(0, 1fr); margin-bottom: .45rem; }
+.pc-schedule-entry { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem; min-width: 0; border: 1px solid #2c657e; border-radius: .4rem; padding: .45rem; }
+.pc-schedule-entry input, .pc-schedule-entry select { width: 100%; min-width: 0; }
+.pc-schedule-entry button { justify-self: start; }
+#pc-import-reasons { color: var(--pc-muted); }

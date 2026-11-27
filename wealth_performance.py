@@ -22,8 +22,14 @@ def clean_contribution_plan(year, plan):
     """Validate a saved assumption. A null plan clears the schedule."""
     if plan is None:
         return None
-    if not isinstance(plan, dict) or plan.get("cadence") not in ("weekly", "monthly"):
-        raise ValueError("Choose a weekly or monthly contribution schedule.")
+    if isinstance(plan, list):
+        if len(plan) > 30:
+            raise ValueError("Use up to 30 contribution schedules per year.")
+        if any(not isinstance(entry, dict) for entry in plan):
+            raise ValueError("Enter a valid contribution schedule.")
+        return [clean_contribution_plan(year, entry) for entry in plan] or None
+    if not isinstance(plan, dict) or plan.get("cadence") not in ("weekly", "biweekly", "monthly", "once"):
+        raise ValueError("Choose weekly, every other week, monthly, or one-time contributions.")
     amount = wealth_calc._f(plan.get("amount"))
     if amount is None or isinstance(plan.get("amount"), bool) or not .01 <= amount <= 1e10:
         raise ValueError("Enter a positive contribution amount.")
@@ -36,27 +42,44 @@ def clean_contribution_plan(year, plan):
         raise ValueError("Enter a first contribution date.") from None
     if start.year != year:
         raise ValueError("Choose a first contribution date in the goal year.")
-    return {"cadence": plan["cadence"], "amount": float(amount), "start_date": start.isoformat()}
+    result = {"cadence": plan["cadence"], "amount": amount, "start_date": start.isoformat()}
+    if plan.get("end_date") and plan["cadence"] != "once":
+        try:
+            end = date.fromisoformat(plan["end_date"])
+        except (TypeError, ValueError):
+            raise ValueError("Enter a valid last contribution date.") from None
+        if end.year != year or end < start:
+            raise ValueError("The last contribution must be on or after the first date in the same year.")
+        result["end_date"] = end.isoformat()
+    return result
 
 
 def contribution_projection(year, plan, target, actual, today, *, all_accounts=True):
     """Schedule assumptions never affect ledger totals or historical returns."""
     if not plan:
         return None
-    first = date.fromisoformat(plan["start_date"])
-    if plan["cadence"] == "weekly":
-        count = (date(year, 12, 31) - first).days // 7 + 1
-        dates = [first + timedelta(days=7 * i) for i in range(count)]
-    else:
-        dates = [date(year, month, min(first.day, monthrange(year, month)[1]))
-                 for month in range(first.month, 13)]
-    remaining = [day for day in dates if day > today]
-    amount = Decimal(str(plan["amount"]))
-    remaining_amount = float(amount * len(remaining))
+    entries = plan if isinstance(plan, list) else [plan]
+    scheduled = []
+    for entry in entries:
+        first = date.fromisoformat(entry["start_date"])
+        last = date.fromisoformat(entry["end_date"]) if entry.get("end_date") else date(year, 12, 31)
+        cadence = entry["cadence"]
+        if cadence == "once":
+            dates = [first]
+        elif cadence in ("weekly", "biweekly"):
+            every = 7 if cadence == "weekly" else 14
+            dates = [first + timedelta(days=offset) for offset in range(0, (last - first).days + 1, every)]
+        else:
+            dates = [date(year, month, min(first.day, monthrange(year, month)[1]))
+                     for month in range(first.month, last.month + 1)]
+        amount = Decimal(str(entry["amount"]))
+        scheduled.extend((day, amount) for day in dates if day <= last)
+    remaining = [(day, amount) for day, amount in scheduled if day > today]
+    remaining_amount = float(sum(amount for _, amount in remaining))
     baseline = 0. if year > today.year else actual if all_accounts else None
     projected = round(baseline + remaining_amount, 2) if baseline is not None else None
-    return dict(total=float(amount * len(dates)), count=len(dates), remaining=remaining_amount,
-                remaining_count=len(remaining), next_date=remaining[0].isoformat() if remaining else None,
+    return dict(total=float(sum(amount for _, amount in scheduled)), count=len(scheduled), remaining=remaining_amount,
+                remaining_count=len(remaining), next_date=min(day for day, _ in remaining).isoformat() if remaining else None,
                 year_end=projected, gap=round(projected - target, 2) if projected is not None else None)
 
 

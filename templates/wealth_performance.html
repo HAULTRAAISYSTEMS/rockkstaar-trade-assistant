@@ -117,6 +117,12 @@
       </form>
     </div>
     <p id="pc-import-status" role="status">Select the ledger account for this history.</p>
+    <details id="pc-recorded-activity" open hidden>
+      <summary>Activity recorded in this view (YTD)</summary>
+      <p>Totals reflect ledger entries so far. Complete statements and reconcile cash and shares to verify performance.</p>
+      {{ rows([('recorded-deposits','Recorded deposits'), ('recorded-withdrawals','Recorded withdrawals'),
+        ('recorded-dividends','Recorded dividends'), ('recorded-interest','Recorded interest'), ('recorded-fees','Recorded fees')]) }}
+    </details>
     <div id="pc-import-preview" hidden>
       <div class="pc-scroll pc-import-table" tabindex="0" role="region" aria-label="Transactions ready to import">
         <table class="pc-table">
@@ -125,7 +131,7 @@
           <tbody id="pc-import-rows"></tbody>
         </table>
       </div>
-      <details id="pc-import-skipped" hidden><summary id="pc-import-skipped-count"></summary><ul id="pc-import-warnings"></ul></details>
+      <details id="pc-import-skipped" hidden><summary id="pc-import-skipped-count"></summary><ul id="pc-import-reasons" aria-label="Review reason counts"></ul><ul id="pc-import-warnings" aria-label="Individual rows"></ul></details>
       <button type="button" id="pc-import-commit" disabled>Import selected into ledger</button>
     </div>
     <details id="pc-recent-history" hidden>
@@ -283,15 +289,23 @@
       <label>Annual contribution goal ($) <input name="contribution" type="number" min="0.01" max="10000000000" step="0.01" required></label>
       <fieldset class="pc-plan-fields">
         <legend>Expected contributions</legend>
-        <label>How often <select name="cadence">
-          <option value="">No schedule</option>
-          <option value="weekly">Every week</option>
-          <option value="monthly">Every month</option>
-        </select></label>
-        <div id="pc-schedule-inputs" hidden>
-          <label>Amount per contribution ($) <input name="plan_amount" type="number" min="0.01" max="10000000000" step="0.01" required disabled></label>
-          <label>First contribution date <input name="start_date" type="date" required disabled></label>
-        </div>
+        <div id="pc-schedule-inputs"></div>
+        <button type="button" id="pc-add-schedule">Add contribution</button>
+        <template id="pc-schedule-template">
+          <fieldset class="pc-schedule-entry">
+            <legend>Contribution</legend>
+            <label>How often <select data-plan="cadence">
+              <option value="weekly">Every week</option>
+              <option value="biweekly">Every other week</option>
+              <option value="monthly">Every month</option>
+              <option value="once">One time</option>
+            </select></label>
+            <label>Amount ($) <input data-plan="amount" type="number" min="0.01" max="10000000000" step="0.01" required></label>
+            <label>First date <input data-plan="start_date" type="date" required></label>
+            <label>End date (optional) <input data-plan="end_date" type="date"></label>
+            <button type="button" data-remove-schedule>Remove</button>
+          </fieldset>
+        </template>
       </fieldset>
       <p id="pc-goal-plan" class="pc-goal-plan" aria-live="polite"></p>
       <p role="status"></p>

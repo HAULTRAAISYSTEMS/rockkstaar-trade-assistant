@@ -542,3 +542,50 @@ def test_contribution_plan_preview_and_save_leave_ledger_untouched(env):
     assert planned_goal(c)["projection"] is None
     import wealth_store
     assert not wealth_store.list_transactions(1, pid)
+
+
+def test_mixed_contribution_plan_with_end_date_and_one_time_payment():
+    from datetime import date
+
+    plan = performance.clean_contribution_plan(2027, [
+        {"cadence": "weekly", "amount": 300, "start_date": "2027-01-01", "end_date": "2027-01-08"},
+        {"cadence": "biweekly", "amount": 200, "start_date": "2027-01-15", "end_date": "2027-02-01"},
+        {"cadence": "monthly", "amount": 50.25, "start_date": "2027-01-31", "end_date": "2027-03-01"},
+        {"cadence": "once", "amount": 400, "start_date": "2027-02-18"},
+    ])
+    result = performance.contribution_projection(2027, plan, 2000, 600, date(2027, 1, 8))
+    assert result == {"total": 1500.50, "count": 7, "remaining": 900.50, "remaining_count": 5,
+                      "next_date": "2027-01-15", "year_end": 1500.50, "gap": -499.50}
+    assert performance.clean_contribution_plan(2027, []) is None
+    with pytest.raises(ValueError, match="last contribution"):
+        performance.clean_contribution_plan(2027, plan[0] | {"end_date": "2026-12-31"})
+
+
+def test_unreconciled_broker_view_can_show_recorded_ledger_activity(env, monkeypatch):
+    import time
+    import app as legacy
+    import wealth_store
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    app, *_ = env
+    c = client(app, 1)
+    pid = make_portfolio(c, "Schwab")
+    key = "fixture-schwab"
+    wealth_store.update_portfolio(1, pid, broker_account=key)
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    for kind, amount in (("DEPOSIT", 300), ("DIVIDEND", 20), ("FEE", 5)):
+        result = c.post("/api/wealth/transactions", json={
+            "portfolio_id": pid, "type": kind, "amount": amount, "ticker": "KLAC" if kind == "DIVIDEND" else None,
+            "date": today.isoformat(),
+        })
+        assert result.status_code == 200
+    monkeypatch.setattr(legacy, "_schwab_account_cache", {1: {"ts": time.time(), "data": {
+        "connected": True, "accounts": [{"account_hash": key, "cash_and_sweep": 400, "total_value": 400}],
+    }}})
+    data = c.get(f"/api/wealth/performance?p={pid}").get_json()
+    assert not data["history"]["ok"]
+    assert data["position"]["dividends_ytd"] is None
+    assert data["selected_goal"]["net"] is None
+    assert data["position"]["recorded_activity_ytd"] == {
+        "deposits": 300, "dividends": 20, "fees": 5, "withdrawals": 0, "interest": 0}

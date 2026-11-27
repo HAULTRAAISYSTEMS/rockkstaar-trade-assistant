@@ -164,6 +164,11 @@
   function renderPortfolio(data) {
     renderOpenPositions(data);
     const p = data.position;
+    const recorded = p.recorded_activity_ytd;
+    get("recorded-activity").hidden = !recorded || data.history.ok;
+    for (const key of ["deposits", "withdrawals", "dividends", "interest", "fees"]) {
+      field("recorded-" + key, money(recorded?.[key]));
+    }
     for (const key of ["value", "unrealized", "realized", "dividends_ytd", "fees_ytd", "investment_profit",
       "basis", "cash", "available_cash", "deposits", "withdrawals", "dividends", "interest", "fees"]) {
       const value = key === "fees_ytd" && finite(p[key]) ? -p[key] : p[key];
@@ -297,6 +302,8 @@
   }
 
   const planYear = get("plan-year");
+  const planEntries = plan => Array.isArray(plan) ? plan : plan ? [plan] : [];
+  const cadenceLabels = {weekly: " every week", biweekly: " every other week", monthly: " every month", once: " one time"};
   let selectedPlanYear;
 
   function renderContributionPlanner(data) {
@@ -309,17 +316,18 @@
     planYear.disabled = false;
     root.querySelector('[data-action="edit-plan"]').disabled = false;
     const goal = options.find(row => row.year === selectedPlanYear);
-    const plan = goal.contribution_plan;
+    const entries = planEntries(goal.contribution_plan);
     const projected = goal.projection;
     const globalView = account.value === "all" && strategy.value === "all";
     get("plan-actual").textContent = goal.planned ? "Year hasn’t started" : money(globalView ? goal.net : null);
     get("plan-remaining").textContent = money(projected?.remaining);
     get("plan-projected").textContent = money(projected?.year_end);
     get("plan-target").textContent = money(goal.contribution);
-    get("plan-summary").textContent = plan
-      ? money(plan.amount) + (plan.cadence === "weekly" ? " every week" : " every month")
-        + " · " + (projected.next_date ? "Next planned date " + projected.next_date : "Schedule complete")
-      : "Enter an amount you expect to contribute each week or month.";
+    const scheduleLabel = entries.length === 1 ? money(entries[0].amount) + cadenceLabels[entries[0].cadence]
+      : entries.length + " contribution schedules";
+    get("plan-summary").textContent = entries.length
+      ? scheduleLabel + " · " + (projected.next_date ? "Next planned date " + projected.next_date : "Schedule complete")
+      : "Add weekly, every-other-week, monthly, or one-time contributions.";
     const messages = [];
     if (finite(projected?.gap)) {
       messages.push(projected.gap === 0 ? "Projection matches the goal."
@@ -329,7 +337,7 @@
         : "Select All accounts and All strategies to include verified contributions.");
     }
     if (projected) messages.push(projected.remaining_count + " planned contributions after today.");
-    if (plan) messages.push("Planning estimate only.");
+    if (entries.length) messages.push("Planning estimate only.");
     get("plan-context").textContent = messages.join(" ");
   }
 
@@ -597,12 +605,49 @@
   let previewTimer;
   let previewRequest;
 
+  const scheduleInputs = get("schedule-inputs");
+  const addSchedule = get("add-schedule");
+
+  function scheduleFields(entry) {
+    return Object.fromEntries([...entry.querySelectorAll("[data-plan]")].map(field => [field.dataset.plan, field]));
+  }
+
+  function addPlanEntry(plan = {}, focus = false) {
+    const year = Number(goalYear.value);
+    const entry = get("schedule-template").content.firstElementChild.cloneNode(true);
+    const fields = scheduleFields(entry);
+    fields.cadence.value = plan.cadence || "weekly";
+    fields.amount.value = plan.amount ?? "";
+    for (const name of ["start_date", "end_date"]) {
+      fields[name].min = year + "-01-01";
+      fields[name].max = year + "-12-31";
+    }
+    const today = response.position.as_of;
+    const tomorrow = new Date(Date.parse(today + "T00:00:00Z") + 86400000).toISOString().slice(0, 10);
+    fields.start_date.value = plan.start_date || (year === response.selected_goal.year
+      ? (tomorrow <= fields.start_date.max ? tomorrow : today) : fields.start_date.min);
+    fields.end_date.value = plan.end_date || "";
+    scheduleInputs.append(entry);
+    if (focus) fields.cadence.focus();
+  }
+
   function planDraft() {
-    return goalForm.elements.cadence.value ? {
-      cadence: goalForm.elements.cadence.value,
-      amount: goalForm.elements.plan_amount.valueAsNumber,
-      start_date: goalForm.elements.start_date.value
-    } : null;
+    return [...scheduleInputs.children].map(entry => {
+      const fields = scheduleFields(entry);
+      return {cadence: fields.cadence.value, amount: fields.amount.valueAsNumber,
+        start_date: fields.start_date.value, end_date: fields.end_date.disabled ? "" : fields.end_date.value};
+    });
+  }
+
+  function refreshScheduleControls() {
+    addSchedule.disabled = scheduleInputs.children.length >= 30;
+    [...scheduleInputs.children].forEach((entry, index) => {
+      entry.querySelector("legend").textContent = "Contribution " + (index + 1);
+      const {cadence, start_date, end_date} = scheduleFields(entry);
+      end_date.disabled = cadence.value === "once";
+      end_date.closest("label").hidden = end_date.disabled;
+      end_date.min = start_date.value || start_date.min;
+    });
   }
 
   function renderGoalPlan() {
@@ -611,17 +656,16 @@
     const amount = goalForm.elements.contribution.valueAsNumber;
     const year = Number(goalYear.value);
     const note = get("goal-plan");
+    refreshScheduleControls();
     const plan = planDraft();
-    get("schedule-inputs").hidden = !plan;
-    for (const name of ["plan_amount", "start_date"]) goalForm.elements[name].disabled = !plan;
     note.hidden = !finite(amount) || amount <= 0;
     if (note.hidden) return;
-    if (!plan) {
+    if (!plan.length) {
       note.textContent = money(amount / 12) + " per month for an even " + year + " contribution plan.";
       return;
     }
-    if (!finite(plan.amount) || !plan.start_date || !goalForm.elements.start_date.validity.valid) {
-      note.textContent = "Set an amount and a date in " + year + " to see the estimate.";
+    if ([...scheduleInputs.querySelectorAll("input")].some(input => !input.validity.valid)) {
+      note.textContent = "Set a valid amount and dates for each contribution to see the estimate.";
       return;
     }
     note.textContent = "Calculating estimate…";
@@ -647,17 +691,10 @@
 
   function showGoal() {
     const goal = response.goals.find(row => row.year === Number(goalYear.value));
-    const plan = goal.contribution_plan;
     goalForm.elements.return_pct.value = goal.return_pct;
     goalForm.elements.contribution.value = goal.contribution;
-    goalForm.elements.cadence.value = plan?.cadence || "";
-    goalForm.elements.plan_amount.value = plan?.amount ?? "";
-    const start = goalForm.elements.start_date;
-    start.min = goal.year + "-01-01";
-    start.max = goal.year + "-12-31";
-    const today = response.position.as_of;
-    const tomorrow = new Date(Date.parse(today + "T00:00:00Z") + 86400000).toISOString().slice(0, 10);
-    start.value = plan?.start_date || (goal.year === response.selected_goal.year ? (tomorrow <= start.max ? tomorrow : today) : start.min);
+    scheduleInputs.replaceChildren();
+    for (const plan of planEntries(goal.contribution_plan)) addPlanEntry(plan);
     renderGoalPlan();
   }
 
@@ -668,9 +705,18 @@
   }
 
   goalYear.addEventListener("change", showGoal);
-  for (const name of ["contribution", "cadence", "plan_amount", "start_date"]) {
-    goalForm.elements[name].addEventListener("input", renderGoalPlan);
-  }
+  goalForm.elements.contribution.addEventListener("input", renderGoalPlan);
+  scheduleInputs.addEventListener("input", renderGoalPlan);
+  addSchedule.addEventListener("click", () => {
+    addPlanEntry({}, true);
+    renderGoalPlan();
+  });
+  scheduleInputs.addEventListener("click", event => {
+    if (!event.target.closest("[data-remove-schedule]")) return;
+    event.target.closest(".pc-schedule-entry").remove();
+    renderGoalPlan();
+    addSchedule.focus();
+  });
   get("goals-dialog").addEventListener("close", () => {
     clearTimeout(previewTimer);
     previewRequest?.abort();
