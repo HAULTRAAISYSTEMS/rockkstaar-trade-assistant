@@ -820,8 +820,10 @@
 
   const settingsAccountKey = "tradestaar.performance.settings-account";
   const saveAccountButton = accountForm.querySelector('[type="submit"]');
-  let lastSettingsAccount;
-  try { lastSettingsAccount = sessionStorage.getItem(settingsAccountKey); } catch {}
+  let lastSettingsAccount, lastSettingsView;
+  try {
+    [lastSettingsAccount, lastSettingsView] = (sessionStorage.getItem(settingsAccountKey) || "").split(":");
+  } catch {}
   let settingsStrategy;
 
   function showAccount() {
@@ -868,7 +870,8 @@
     const placeholder = new Option("Select an account", "");
     placeholder.disabled = true;
     settingsAccount.replaceChildren(placeholder, ...response.accounts.map(a => new Option(a.label || a.name, a.id)));
-    const selected = [account.value, lastSettingsAccount].find(id =>
+    const preferSaved = account.value === "all" || account.value === lastSettingsView;
+    const selected = (preferSaved ? [lastSettingsAccount, account.value] : [account.value]).find(id =>
       response.accounts.some(a => String(a.id) === id));
     settingsAccount.value = selected ?? (response.accounts.length === 1 ? response.accounts[0].id : "");
     showAccount();
@@ -915,13 +918,15 @@
   accountForm.addEventListener("submit", event => {
     event.preventDefault();
     const savedId = settingsAccount.value;
+    const savedView = account.value;
     if (!savedId) return;
     save(accountForm, "/accounts/" + savedId, {
       strategy: accountForm.elements.strategy.value,
       history_confirmed: accountForm.elements.history_confirmed.checked
     }, () => {
       lastSettingsAccount = savedId;
-      try { sessionStorage.setItem(settingsAccountKey, savedId); } catch {}
+      lastSettingsView = savedView;
+      try { sessionStorage.setItem(settingsAccountKey, savedId + ":" + savedView); } catch {}
     });
   });
   root.querySelector('[data-action="sync"]').addEventListener("click", async event => {
