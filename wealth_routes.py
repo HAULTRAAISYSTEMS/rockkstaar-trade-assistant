@@ -11,7 +11,8 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, Response, abort, jsonify, redirect, render_template, request, url_for
 
@@ -22,6 +23,7 @@ import wealth_history
 import wealth_ledger
 import wealth_mcff
 import wealth_nextdollar
+import wealth_performance as performance
 import wealth_planner
 import wealth_service
 import wealth_store
@@ -115,7 +117,17 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
 
     def _default_bars(ticker):
         from market_data import fetch_chart_bars
-        bars, _meta = fetch_chart_bars(ticker, "1d", "max")
+        bars, _ = fetch_chart_bars(ticker, "1d", "max")
+        return bars
+
+    def _performance_bars(ticker):
+        from data_fetcher import _yahoo_sym
+        from market_data import fetch_chart_bars
+        bars, meta = fetch_chart_bars(ticker, "1d", "max")
+        if (meta or {}).get("provider") != "Yahoo" or not bars or bars.get("data_granularity") != "1d":
+            return None
+        if bars.get("currency") != "USD" or bars.get("symbol") != _yahoo_sym(ticker):
+            return None
         return bars
 
     def _default_broker(user_id):
@@ -128,6 +140,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         from fundamentals_engine import get_fundamentals
         return get_fundamentals(ticker), wealth_store.fundamentals_fetched_at(ticker)
 
+    performance_bars = bars_lookup or _performance_bars
     bars_lookup = bars_lookup or _default_bars
     broker_summary = broker_summary or _default_broker
     fundamentals_lookup = fundamentals_lookup or _default_fundamentals
@@ -135,31 +148,40 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
     closes_cache: dict = {}
     closes_lock = threading.Lock()
 
-    def closes_for(tickers) -> dict:
-        """{ticker: [(date, close)]}, split-adjusted daily closes, cached 6 h."""
-        now = time.time()
+    def history_for(tickers, *, verified=True):
+        """Reuse market history across account/filter requests, including short negative cache."""
+        now = time.monotonic()
         out, need = {}, []
         with closes_lock:
-            for t in tickers:
-                hit = closes_cache.get(t)
-                if hit and now - hit[0] < 6 * 3600:
-                    out[t] = hit[1]
+            for ticker in sorted(set(tickers)):
+                hit = closes_cache.get((verified, ticker))
+                if hit and now - hit[0] < (1800 if hit[1][0] else 60):
+                    out[ticker] = hit[1]
                 else:
-                    need.append(t)
+                    need.append(ticker)
 
-        def one(t):
+        def one(ticker):
             try:
-                return t, wealth_service._closes(bars_lookup(t))
+                bars = (performance_bars if verified else bars_lookup)(ticker)
+                closes = wealth_service._closes(bars)
+                raw_splits = bars.get("splits") if isinstance(bars, dict) else None
+                splits = None if raw_splits is None else []
+                for event in raw_splits or []:
+                    day = wealth_service._bar_date(event["date"])
+                    ratio = float(event["numerator"]) / float(event["denominator"])
+                    if day is None or not 0 < ratio < 10000:
+                        return ticker, ([], None)
+                    splits.append((ticker, day, ratio))
+                return ticker, (closes, splits)
             except Exception as exc:
-                logger.debug("history %s: %s", t, exc)
-                return t, []
+                logger.debug("history %s: %s", ticker, exc)
+                return ticker, ([], None)
         if need:
-            with ThreadPoolExecutor(max_workers=6) as pool:
-                for t, rows in pool.map(one, need):
-                    out[t] = rows
-                    if rows:
-                        with closes_lock:
-                            closes_cache[t] = (now, rows)
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                for ticker, data in pool.map(one, need):
+                    out[ticker] = data
+                    with closes_lock:
+                        closes_cache[verified, ticker] = (now, data)
         return out
 
     def uid() -> int:
@@ -228,14 +250,14 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 total += c
         return round(total, 2)
 
-    def _cached_schwab_summary(user_id):
+    def _cached_schwab_summary(user_id, max_age=1800):
         """The app's cached Schwab summary (up to 30 min old), or None."""
         import sys
         import time as _t
         legacy = sys.modules.get("app")
         cache = getattr(legacy, "_schwab_account_cache", None) if legacy else None
         entry = (cache or {}).get(user_id) or {}
-        if entry.get("data") and _t.time() - (entry.get("ts") or 0) <= 1800:
+        if entry.get("data") and _t.time() - (entry.get("ts") or 0) <= max_age:
             return entry["data"]
         # Not cached in this worker (each server process keeps its own, and a
         # restart empties it): load it through the app's own 60-second cache,
@@ -347,6 +369,11 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         # Account inclusion is controlled on the Schwab Account page.
         # Keep aggregate broker summary intact; filter only Wealth account rows.
         if snapshot and snapshot.get("connected"):
+            import sys
+            legacy = sys.modules.get("app")
+            cache = getattr(legacy, "_schwab_account_cache", None)
+            if cache is not None and broker_summary is _default_broker:
+                cache[user_id] = {"data": snapshot, "ts": time.time()}
             import schwab_account_preferences as _prefs
             snapshot = dict(snapshot)
             snapshot["accounts"] = _prefs.select_accounts(
@@ -355,10 +382,10 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         # Never delete existing snapshots when a broker is unavailable.
         if snapshot and snapshot.get("connected"):
             for account in snapshot.get("accounts") or []:
-                if not account.get("equity_positions"):
-                    continue
                 key = str(account.get("account_hash") or account.get("account_number") or "")
                 if not key:
+                    continue
+                if not (account.get("positions") or account.get("equity_positions") or wealth_broker_sync._cash(account)):
                     continue
                 try:
                     wealth_store.link_broker_portfolio(user_id, key)
@@ -369,10 +396,11 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             wealth_store.list_transactions(user_id))
         for account in result.get("accounts", []):
             key = account["account_id"]
+            account["account_id"] = "••••" + key[-4:]
             if not account.get("portfolio_id"):
                 continue
             try:
-                wealth_store.save_broker_snapshot(user_id, key, account)
+                wealth_store.save_broker_snapshot(user_id, key, {**account, "account_id": key})
                 txs = wealth_store.list_transactions(user_id, account["portfolio_id"])
                 ledger = wealth_ledger.build(txs)
                 account["discrepancies"] = wealth_broker_sync.reconcile(
@@ -380,8 +408,6 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             except Exception:
                 logger.exception("Brokerage snapshot/reconciliation failure")
                 account["sync_error"] = "Unable to persist or reconcile this account"
-            # Never expose full account identifiers in browser responses.
-            account["account_id"] = "••••" + key[-4:]
         return jsonify({"ok": result["connected"], **result})
 
     # ── Pages ────────────────────────────────────────────────────────────
@@ -418,36 +444,286 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         return render_template("wealth_scoreboard.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=current,
                                kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
 
+    def performance_profiles(user_id, portfolios):
+        goals, profiles = wealth_store.performance_settings(user_id)
+        for p in portfolios:
+            profiles.setdefault(p["id"], {})
+        return goals, profiles
+
+    def performance_broker(user_id, portfolios):
+        import schwab_account_preferences as prefs
+        allowed = prefs.get_preferences(user_id)
+        snapshots = {}
+        for row in wealth_store.list_broker_snapshots(user_id):
+            key = row["account_key"]
+            if allowed.get(key, {}).get("include_wealth", True):
+                snapshots[key] = dict(row["snapshot"], as_of=row["synced_at"], live=False)
+        cached = _cached_schwab_summary(user_id, max_age=120)
+        if cached and cached.get("connected"):
+            data = dict(cached, accounts=prefs.select_accounts(cached.get("accounts") or [], allowed, for_wealth=True))
+            discovered = wealth_broker_sync.discover(data, portfolios, [])
+            import sys
+            legacy = sys.modules.get("app")
+            entry = (getattr(legacy, "_schwab_account_cache", {}).get(user_id) or {})
+            stamp = entry.get("ts")
+            as_of = datetime.fromtimestamp(stamp, timezone.utc).isoformat() if stamp else None
+            fresh = bool(stamp and time.time() - stamp < 120)
+            snapshots = {a["account_id"]: dict(a, as_of=as_of, live=fresh) for a in discovered["accounts"]}
+        return snapshots, allowed
+
+    def performance_payload(user_id, current, strategy, *, balance_only=False):
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+        portfolios = wealth_store.list_portfolios(user_id)
+        goals, profiles = performance_profiles(user_id, portfolios)
+        broker, allowed = performance_broker(user_id, portfolios) if not current or current.get("broker_account") else ({}, {})
+        groups, issues = {}, []
+        for p in portfolios:
+            key = str(p.get("broker_account") or "")
+            if key and not allowed.get(key, {}).get("include_wealth", True):
+                if current and current["id"] == p["id"]:
+                    issues.append("This account is excluded from Wealth in Schwab Account settings.")
+                continue
+            if key:
+                groups.setdefault(key, []).append(p)
+
+        txs = wealth_store.list_transactions(user_id)
+        by_account = {}
+        for tx in txs:
+            by_account.setdefault(tx["portfolio_id"], []).append(tx)
+        all_ledgers = {p["id"]: wealth_ledger.build([tx for tx in by_account.get(p["id"], [])
+                       if str(tx["date"])[:10] <= today.isoformat()]) for p in portfolios}
+        paired, transfer_issues = performance.transfers(all_ledgers)
+
+        if current:
+            selected = [p for p in portfolios if p["id"] == current["id"]]
+        else:
+            selected = portfolios
+        buckets = {key: {"ledgers": {}, "broker": [], "manual": {}, "history_issues": []}
+                   for key in performance.STRATEGIES}
+        covered = set()
+        for p in selected:
+            pid = p["id"]
+            profile = profiles[pid]
+            bucket = buckets[profile.get("strategy", "unclassified")]
+            key = str(p.get("broker_account") or "")
+            if key and not allowed.get(key, {}).get("include_wealth", True):
+                continue
+            if key and (key in covered or len(groups.get(key, [])) > 1):
+                bucket["history_issues"].append("Multiple ledger accounts reference the same Schwab account. Review the mappings.")
+                if key not in covered and key in broker:
+                    bucket["broker"].append(broker[key])
+                covered.add(key)
+                continue
+            ledger = all_ledgers[pid]
+            if key:
+                covered.add(key)
+                snapshot = broker.get(key)
+                if snapshot is None:
+                    bucket["history_issues"].append(f"{p['name']}: Schwab snapshot unavailable.")
+                    bucket["broker"].append({})
+                else:
+                    bucket["broker"].append(snapshot)
+                    quantities = {ticker: sum(lot.shares for lot in lots) for ticker, lots in ledger.positions.items()}
+                    discrepancies = wealth_broker_sync.reconcile(snapshot, quantities)
+                    cash = wealth_calc._f(snapshot.get("cash"))
+                    for discrepancy in discrepancies:
+                        bucket["history_issues"].append(
+                            f"{p['name']}: {discrepancy['ticker']} ledger shares differ from Schwab by "
+                            f"{discrepancy['difference']:g}.")
+                    if cash is None or abs(cash - ledger.cash) > .02:
+                        bucket["history_issues"].append(f"{p['name']}: Schwab cash cannot be reconciled with the ledger.")
+                    if snapshot.get("unsupported_positions"):
+                        bucket["history_issues"].append(f"{p['name']}: the ledger cannot value one or more Schwab positions.")
+                    if not profile.get("history_confirmed"):
+                        bucket["history_issues"].append(f"{p['name']}: confirm complete ledger coverage in Account settings.")
+                    if not snapshot.get("live"):
+                        bucket["history_issues"].append(f"{p['name']}: refresh Schwab to verify current ledger balances.")
+            elif ledger.first_date:
+                bucket["manual"][pid] = ledger
+            if ledger.first_date or ledger.issues:
+                bucket["ledgers"][pid] = ledger
+        if not current:
+            for key, snapshot in broker.items():
+                if key not in covered:
+                    buckets["unclassified"]["broker"].append(snapshot)
+                    buckets["unclassified"]["history_issues"].append("A Schwab account has no Wealth ledger mapping.")
+
+        def combine(names):
+            result = {"ledgers": {}, "broker": [], "manual": {}, "history_issues": []}
+            for name in names:
+                bucket = buckets[name]
+                result["ledgers"].update(bucket["ledgers"])
+                result["broker"].extend(bucket["broker"])
+                result["manual"].update(bucket["manual"])
+                result["history_issues"].extend(bucket["history_issues"])
+            return result
+
+        chosen = combine([strategy] if strategy != "all" else buckets)
+        current_tickers = {ticker for ledger in chosen["manual"].values() for ticker in ledger.positions}
+        quotes = (price_lookup(current_tickers) or {}) if current_tickers else {}
+        quotes = {t: q for t, q in quotes.items() if (wealth_calc._f(q.get("price")) or 0) > 0}
+        def balance(bucket):
+            return wealth_service.performance_balance(bucket["manual"], bucket["broker"], quotes, today)
+
+        sync = dict(live=sum(bool(b.get("live")) for b in chosen["broker"]),
+                    stored=sum(bool(b.get("as_of")) and not b.get("live") for b in chosen["broker"]),
+                    as_of=sorted({b["as_of"] for b in chosen["broker"] if b.get("as_of")}))
+        if balance_only:
+            return dict(ok=True, position=balance(chosen), sync=sync,
+                        strategies={name: {key: values[key] for key in ("value", "cash", "unrealized")}
+                                    for name, values in ((name, balance(bucket)) for name, bucket in buckets.items())
+                                    if strategy in ("all", name)})
+
+        tickers = {ticker for ledger in chosen["ledgers"].values() for _, _, held in ledger.snapshots for ticker in held}
+        tickers.update(event["ticker"] for ledger in chosen["ledgers"].values() for event in ledger.events
+                       if event["transaction"]["type"] in ("TRANSFER_IN", "TRANSFER_OUT"))
+        historical = history_for(tickers | {performance.BENCHMARK, "SPY"}) if chosen["ledgers"] else {}
+        closes = {t: historical[t][0] for t in tickers}
+        splits = {t: historical[t][1] for t in tickers}
+        provider_splits = {t: rows for t, rows in splits.items() if rows is not None}
+        spy = historical.get("SPY", ([], None))[0]
+        benchmark = historical.get(performance.BENCHMARK, ([], None))[0]
+        from exchange_schedule import session_status
+        session = session_status()
+        now = datetime.now(ZoneInfo("America/New_York"))
+        closing_hour = 13 if session["early_close"] else 16
+        same_day_closed = session["known"] and now.hour >= closing_hour
+        calendar = sorted({day for day, _ in [*spy, *benchmark]
+                           if day < today or (day == today and same_day_closed)})
+        sessions = set(calendar)
+        benchmark = [(day, value) for day, value in benchmark if day in sessions]
+
+        def calculate(bucket):
+            ledgers = bucket["ledgers"]
+            current_balance = balance(bucket)
+            warnings = [*bucket["history_issues"],
+                        *(issue for ledger in ledgers.values() for issue in performance.ledger_issues(ledger))]
+            warnings.extend(issue for pid in ledgers for issue in transfer_issues.get(pid, ()))
+            flow_stocks = provider_splits if len(provider_splits) == len(tickers) else None
+            flows, security_flows, flow_issues = performance.external_flows(ledgers, paired, closes, flow_stocks)
+            warnings.extend(flow_issues)
+            for ledger in ledgers.values():
+                warnings.extend(performance.split_issues(ledger, provider_splits, today))
+            activity = performance.ledger_activity(ledgers, paired, today)
+            trusted = bool(ledgers) and not warnings
+            position = {**current_balance, "as_of": today.isoformat()}
+            if trusted:
+                rollup = {field: sum(year[field] for year in activity.values()) for field in (
+                    "realized", "dividends", "interest", "fees", "deposits", "withdrawals")}
+            else:
+                rollup = dict.fromkeys(("realized", "dividends", "interest", "fees", "deposits", "withdrawals"))
+            position.update(rollup)
+            position["capital_flows_to_date"] = sum(value for _, value in flows) if trusted else None
+            position["investment_profit"] = (position["value"] - position["capital_flows_to_date"]
+                if trusted and position["value"] is not None else None)
+            for field in ("dividends", "fees"):
+                position[f"{field}_ytd"] = activity.get(today.year, {}).get(field, 0.) if trusted else None
+            if not trusted or not calendar:
+                history = {"ok": False, "reason": (warnings[0] if warnings else
+                           ("Daily market history is unavailable." if ledgers else "Add or import transactions in the Ledger."))}
+            else:
+                series = wealth_history.build_series(list(ledgers.values()), closes, calendar, today=today,
+                                                      flows=flows, provider_splits=flow_stocks)
+                if series["ok"]:
+                    history = {"ok": True, **performance.analyze(series, benchmark, ledgers, security_flows, goals)}
+                    history["dividends_by_year"] = {point: row["dividends"] for point, row in activity.items()}
+                    history["reinvested"] = sum(e["transaction"]["type"] == "REINVEST" for ledger in ledgers.values()
+                                                for e in ledger.events)
+                else:
+                    history = series
+            return position, history, sorted(set(warnings)), activity if trusted else {}
+
+        position, history, warnings, activity = calculate(chosen)
+        strategies = {}
+        for name, bucket in buckets.items():
+            if strategy != "all" and strategy != name:
+                continue
+            p, h, _, _ = calculate(bucket) if strategy == "all" else (position, history, warnings, activity)
+            strategies[name] = {key: p[key] for key in ("value", "cash", "unrealized", "realized", "dividends_ytd")}
+            strategies[name]["return_pct"] = (h.get("periods") or [{}] * 5)[4].get("portfolio")
+        year = today.year
+        year_rows = []
+        for point in sorted({year, *activity, *goals, *(int(y) for y in history.get("years", {}))}, reverse=True):
+            goal = goals.get(point, performance.DEFAULT_GOAL)
+            row = activity.get(point)
+            net = row["deposits"] - row["withdrawals"] if row is not None else (0. if activity and point > min(activity) else None)
+            year_rows.append(dict(year=point, **goal, net=net,
+                                  remaining=max(0., goal["contribution"] - net) if net is not None else None,
+                                  actual_return=history.get("years", {}).get(point)))
+        return dict(ok=True, position=position, history=history, warnings=sorted(set(issues + warnings)),
+                    strategies=strategies, goals=year_rows,
+                    selected_goal=next(row for row in year_rows if row["year"] == year),
+                    accounts=[dict(id=p["id"], name=p["name"], linked=bool(p.get("broker_account")),
+                                   strategy=profiles[p["id"]].get("strategy", "unclassified"),
+                                   history_confirmed=bool(profiles[p["id"]].get("history_confirmed")))
+                              for p in portfolios],
+                    benchmark=dict(label=performance.BENCHMARK_LABEL, symbol=performance.BENCHMARK,
+                                   source="Yahoo Finance", as_of=benchmark[-1][0].isoformat() if benchmark else None),
+                    sync=sync, days_left=(date(year, 12, 31) - today).days)
+
     @bp.get("/api/wealth/scoreboard")
     def scoreboard_api():
         user_id = uid()
         current = owned(user_id, request.args.get("p"))
-        ledgers, _txs = ledgers_for(user_id, current)
-        if not ledgers:
-            return jsonify({"ok": False, "reason": "No transactions yet."})
-        lgs = list(ledgers.values())
-        tickers = sorted({t for lg in lgs for _, _, held in lg.snapshots for t in held})
-        closes = closes_for(tickers + ["SPY"])
-        spy = closes.pop("SPY", [])
-        if not spy:
-            return jsonify({"ok": False, "reason": "S&P 500 history is unavailable right now, so there is no trading calendar to value on."})
-        live = {t: q["price"] for t, q in (price_lookup(tickers) or {}).items() if q.get("live")}
-        today = date.today()
-        held_now = {t for lg in lgs for t in lg.positions}
-        series = wealth_history.build_series(lgs, closes, [d for d, _ in spy],
-                                             today_prices=live if held_now <= set(live) else None, today=today)
-        if not series["ok"]:
-            return jsonify(series)
-        out = wealth_history.scoreboard(series, spy)
-        div_years = {}
-        for t in _txs:
-            if t["type"] in ("DIVIDEND", "REINVEST"):
-                y = str(t["date"])[:4]
-                v = t["amount"] or ((t["shares"] or 0) * (t["price"] or 0))
-                div_years[y] = div_years.get(y, 0.0) + (v or 0)
-        out["dividends_by_year"] = div_years
-        out["reinvested"] = sum(1 for t in _txs if t["type"] == "REINVEST")
-        return jsonify({"ok": True, **out})
+        return jsonify(performance_payload(user_id, current, "all")["history"])
+
+    @bp.get("/wealth/performance")
+    def performance_page():
+        user_id = uid()
+        current = owned(user_id, request.args.get("p"))
+        return render_template("wealth_performance.html", current=current,
+                               portfolios=wealth_store.list_portfolios(user_id), strategies=performance.STRATEGIES)
+
+    @bp.get("/api/wealth/performance")
+    def performance_api():
+        user_id = uid()
+        current = owned(user_id, request.args.get("p"))
+        strategy = request.args.get("strategy", "all")
+        if strategy != "all" and strategy not in performance.STRATEGIES:
+            abort(400)
+        return jsonify(performance_payload(user_id, current, strategy,
+                                           balance_only=request.args.get("view") == "balance"))
+
+    @bp.post("/api/wealth/performance/sync")
+    def performance_sync():
+        result = brokerage_discovery()
+        if isinstance(result, tuple):
+            return jsonify(ok=False), result[1]
+        data = result.get_json()
+        accounts = data.get("accounts", [])
+        failed = sum(bool(account.get("sync_error")) for account in accounts)
+        return jsonify(ok=bool(data.get("ok")) and not failed, synced=len(accounts) - failed)
+
+    @bp.put("/api/wealth/performance/goals/<int:year>")
+    def performance_goals(year):
+        user_id = uid()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            abort(400)
+        rate, amount = wealth_calc._f(data.get("return_pct")), wealth_calc._f(data.get("contribution"))
+        if (not 1900 <= year <= datetime.now(ZoneInfo("America/New_York")).year or rate is None
+                or not -100 < rate <= 10000 or amount is None or not 0 < amount <= 1e10):
+            return jsonify(error="Enter a return above −100% and a positive contribution goal."), 400
+        wealth_store.save_performance_setting(user_id, "goal", year, {"return_pct": rate, "contribution": amount})
+        return jsonify(ok=True)
+
+    @bp.put("/api/wealth/performance/accounts/<int:pid>")
+    def performance_account(pid):
+        user_id = uid()
+        owned(user_id, pid)
+        data = request.get_json(silent=True)
+        if (not isinstance(data, dict) or data.get("strategy") not in performance.STRATEGIES
+                or not isinstance(data.get("history_confirmed"), bool)):
+            abort(400)
+        wealth_store.save_performance_setting(user_id, "account", pid, {
+            "strategy": data["strategy"], "history_confirmed": data["history_confirmed"]})
+        return jsonify(ok=True)
+
+    @bp.after_request
+    def prevent_performance_cache(response):
+        if request.path.startswith(("/api/wealth/performance", "/api/wealth/scoreboard")):
+            response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     @bp.get("/wealth/lab")
     def lab_page():
@@ -638,7 +914,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             session = _me.pulse_session()
         except Exception:
             session = "closed"
-        closes = closes_for(tickers) if tickers else {}
+        closes = {t: data[0] for t, data in history_for(tickers, verified=False).items()}
         live = price_lookup(tickers) if (tickers and session == "regular") else {}
         today = date.today()
         moves, day_label = [], None
@@ -1124,7 +1400,6 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             sector = (sectors_lookup.get(t) or (None,))[0]
             zone = m.get("value_zone") or {}
             price_date = str(m.get("price_as_of") or "")[:10]
-            from datetime import datetime, timezone
             try:
                 age = (datetime.now(timezone.utc).date() - date.fromisoformat(price_date)).days
             except (ValueError, TypeError):

@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% from "_elite_navigation.html" import rm_icon with context %}
+{% block title %}Portfolio Performance Command Center — Tradestaar Elite{% endblock %}
+{% block workspace_chrome %}{% endblock %}
+{% block body_class %}performance-page{% endblock %}
+{% block late_css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth_performance.css') }}">{% endblock %}
+{% macro panel_title(icon, label) %}
+<h2><span class="pc-icon" aria-hidden="true">{{ rm_icon(icon) }}</span>{{ label }}</h2>
+{% endmacro %}
+{% macro rows(items) %}
+<dl class="pc-rows">
+  {% for key, label in items %}<div><dt>{{ label }}</dt><dd data-field="{{ key }}">—</dd></div>{% endfor %}
+</dl>
+{% endmacro %}
+{% block content %}
+<div class="pc" id="performance-center" data-api="{{ url_for('wealth.performance_api') }}"
+     data-sync="{{ url_for('wealth.performance_sync') }}">
+  <nav class="pc-navigation" aria-label="Portfolio">
+    <strong>Portfolio</strong>
+    <a href="{{ url_for('wealth.dashboard', p=current.id if current else None) }}">{{ rm_icon('vault') }} Overview</a>
+    <a aria-current="page" href="{{ request.path }}">{{ rm_icon('pulse') }} Performance</a>
+    <a href="{{ url_for('wealth.dashboard', p=current.id if current else None) }}#wa-holdings">{{ rm_icon('pie') }} Holdings</a>
+    <a href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">{{ rm_icon('pen') }} Transactions</a>
+    <a href="#pc-cash-details">{{ rm_icon('bank') }} Income</a>
+    <a href="{{ url_for('wealth.planner_page', p=current.id if current else None) }}">{{ rm_icon('calendar') }} Contributions</a>
+    <a href="{{ url_for('wealth.scoreboard_page', p=current.id if current else None) }}">{{ rm_icon('checks') }} Scoreboard</a>
+    <a href="{{ url_for('schwab_account') }}">{{ rm_icon('bank') }} Schwab</a>
+  </nav>
+
+  <header class="pc-hero">
+    <div class="pc-heading">
+      <h1>Portfolio Performance Command Center</h1>
+      <p>Track investment returns, benchmark performance and progress toward your goals.</p>
+    </div>
+    <button class="pc-goals-button" type="button" data-action="goals" aria-label="Edit annual goals" disabled>
+      <span>{{ rm_icon('target') }} <span><small>Annual return target</small><strong data-field="goal-rate">20.00%</strong></span></span>
+      <span>{{ rm_icon('bank') }} <span><small>Annual contribution goal</small><strong data-field="goal-amount">$25,000</strong></span></span>
+    </button>
+  </header>
+
+  <div class="pc-toolbar">
+    <label>Account <select id="pc-account" aria-label="Account">
+      <option value="all">All accounts</option>
+      {% for account in portfolios %}<option value="{{ account.id }}"{% if current and current.id == account.id %} selected{% endif %}>{{ account.name }}</option>{% endfor %}
+    </select></label>
+    <label>Strategy <select id="pc-strategy" aria-label="Strategy">
+      <option value="all">All strategies</option>
+      {% for value, label in strategies.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select></label>
+    <button type="button" data-action="accounts" disabled>Account settings</button>
+    <button type="button" data-action="sync">Sync Schwab</button>
+    <span class="pc-status" id="pc-status" role="status">Loading portfolio performance…</span>
+  </div>
+
+  <div id="pc-notice" class="pc-notice" hidden>
+    <p id="pc-notice-message"></p>
+    <button type="button" data-action="retry" hidden>Retry</button>
+    <a href="{{ url_for('wealth.ledger_page') }}" id="pc-ledger-link">Open Ledger</a>
+  </div>
+
+  <div class="pc-kpis" aria-label="Portfolio overview">
+    {% for field, label, icon, detail in [
+      ('value', 'Portfolio Value', 'vault', 'quote-summary'),
+      ('unrealized', 'Unrealized P/L', 'pulse', 'unrealized-pct'),
+      ('realized', 'Realized P/L', 'target', 'realized-period'),
+      ('dividends_ytd', 'Dividend Income (YTD)', 'bank', 'interest-sub'),
+      ('net', 'Net Contributions (YTD)', 'pie', 'contribution-sub'),
+      ('fees_ytd', 'Fees (YTD)', 'pen', 'fee-period')] %}
+    <section class="pc-panel pc-kpi pc-kpi--{{ field }}">
+      <span class="pc-icon" aria-hidden="true">{{ rm_icon(icon) }}</span>
+      <div><h2>{{ label }}</h2><strong data-field="{{ field }}">—</strong><small data-field="{{ detail }}"></small></div>
+    </section>
+    {% endfor %}
+  </div>
+
+  <div class="pc-grid pc-grid--primary">
+    <section class="pc-panel pc-summary">
+      {{ panel_title('spark', 'Performance Summary') }}
+      <table class="pc-table"><thead><tr><th scope="col">Period</th><th scope="col">Portfolio</th><th scope="col">S&amp;P 500 TR</th><th scope="col">Excess (pp)</th></tr></thead>
+        <tbody id="pc-periods">{% for p in ('Today','1 Week','1 Month','3 Months','YTD','1 Year','All-Time') %}
+          <tr><th scope="row">{{ p }}</th><td>—</td><td>—</td><td>—</td></tr>
+        {% endfor %}</tbody>
+      </table>
+    </section>
+    <section class="pc-panel pc-growth">
+      <div class="pc-panel-head">{{ panel_title('pulse', 'Portfolio Growth vs. Annual Target') }}
+        <label class="pc-chart-range"><span class="pc-visually-hidden">Chart period</span><select id="pc-range">
+          <option value="ytd">YTD</option><option value="all">All time</option>
+        </select></label>
+      </div>
+      <ul class="pc-legend"><li>Portfolio (TWR)</li><li>S&amp;P 500 total return</li><li>Compounded target</li></ul>
+      <div class="pc-plot">
+        <canvas id="pc-chart" tabindex="0" role="img" aria-label="Historical returns. Use left and right arrow keys to inspect dates."></canvas>
+        <div id="pc-chart-empty" class="pc-chart-empty">Loading historical values…</div>
+      </div>
+      <div class="pc-chart-readout" id="pc-chart-readout" aria-live="polite"></div>
+    </section>
+    <section class="pc-panel pc-risk">
+      {{ panel_title('spark', 'Key Performance Metrics') }}
+      {{ rows([('twr','Time-Weighted Return (TWR)'), ('xirr','Money-Weighted Return (XIRR, annualized)'), ('annual','Annualized TWR'),
+        ('drawdown','Maximum Drawdown'), ('volatility','Annualized Volatility'), ('sharpe','Sharpe Ratio'),
+        ('sortino','Sortino Ratio'), ('calmar','Calmar Ratio'), ('beta','Beta'), ('alpha','Annualized Jensen’s Alpha')]) }}
+    </section>
+  </div>
+
+  <div class="pc-grid pc-grid--allocation">
+    <section class="pc-panel">
+      {{ panel_title('pie', 'Portfolio Allocation & Performance') }}
+      <div class="pc-allocation">
+        <div class="pc-donut" id="pc-donut"><span><strong data-field="value">—</strong><small>Portfolio value</small></span></div>
+        <ul id="pc-allocation" class="pc-allocation-list"></ul>
+      </div>
+    </section>
+    <section class="pc-panel">
+      {{ panel_title('star', 'Long-Term Investing') }}
+      {{ rows([('long_term-return_pct','Return (TWR, YTD)'), ('long_term-value','Portfolio Value'), ('long_term-unrealized','Unrealized P/L'), ('long_term-dividends_ytd','Dividends (YTD)')]) }}
+    </section>
+    <section class="pc-panel">
+      {{ panel_title('pulse', 'Active Trading') }}
+      {{ rows([('active-return_pct','Return (TWR, YTD)'), ('active-value','Portfolio Value'), ('active-unrealized','Unrealized P/L'), ('active-realized','Realized P/L')]) }}
+    </section>
+    <section class="pc-panel pc-progress">
+      {{ panel_title('target', 'Annual Goal Progress') }}
+      <div class="pc-progress-item">
+        <div>Contributions <strong data-field="progress-contribution">—</strong></div>
+        <progress id="pc-contribution-progress" max="100" aria-label="Annual contribution progress"></progress>
+        <small data-field="remaining">—</small>
+      </div>
+      <div class="pc-progress-item">
+        <div>Investment return <strong data-field="progress-return">—</strong></div>
+        <progress id="pc-return-progress" max="100" aria-label="Annual return progress"></progress>
+        <small data-field="target-gap">—</small>
+      </div>
+    </section>
+  </div>
+
+  <div class="pc-grid pc-grid--bottom">
+    <section class="pc-panel">
+      {{ panel_title('calendar', 'Monthly Returns Heatmap') }}
+      <div class="pc-scroll" tabindex="0" role="region" aria-label="Monthly returns table">
+        <table class="pc-table pc-heat">
+          <thead><tr><th scope="col">Year</th>{% for m in ('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Total') %}<th scope="col">{{ m }}</th>{% endfor %}</tr></thead>
+          <tbody id="pc-heatmap"><tr><td colspan="14">No monthly returns available.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="pc-panel">
+      {{ panel_title('spark', 'Stock Contribution to Return (YTD)') }}
+      <table class="pc-table"><thead><tr><th scope="col">Symbol</th><th scope="col">Contribution (pp)</th><th scope="col">P/L</th><th scope="col">Weight</th></tr></thead>
+        <tbody id="pc-attribution"><tr><td colspan="4">No attribution available.</td></tr></tbody></table>
+    </section>
+    <section class="pc-panel pc-comparison">
+      {{ panel_title('target', 'Performance vs. S&P 500 Total Return') }}
+      <div class="pc-comparison-row">
+        <div><small>Portfolio (YTD)</small><strong data-field="comparison-portfolio">—</strong></div>
+        <div><small>Index (YTD)</small><strong data-field="comparison-benchmark">—</strong></div>
+        <div><small>Excess (pp)</small><strong data-field="comparison-excess">—</strong></div>
+      </div>
+      <small>Portfolio / index Sharpe on matched sessions <strong data-field="comparison-sharpe">—</strong></small>
+    </section>
+  </div>
+
+  <div class="pc-grid pc-grid--details">
+    <section class="pc-panel" id="pc-cash-details">
+      {{ panel_title('vault', 'Investment & Cash Details') }}
+      {{ rows([('investment_profit','Total Investment Profit'), ('basis','Total Cost Basis'),
+        ('cash','Cash & Sweep'), ('available_cash','Available Cash'), ('deposits','Deposits'), ('withdrawals','Withdrawals'),
+        ('dividends','Dividends'), ('interest','Interest'), ('fees','Trading & Account Fees')]) }}
+    </section>
+    <section class="pc-panel">
+      {{ panel_title('pie', 'Holdings & Concentration') }}
+      {{ rows([('best','Best Open Holding'), ('worst','Worst Open Holding'), ('largest','Largest Holding Share'),
+        ('top5','Top Five Holdings Share'), ('effective','Effective Number of Holdings')]) }}
+    </section>
+    <section class="pc-panel">
+      {{ panel_title('calendar', 'Annual Goal History') }}
+      <div class="pc-scroll"><table class="pc-table">
+        <thead><tr><th scope="col">Year</th><th scope="col">Return / Target</th><th scope="col">Net / Goal</th></tr></thead>
+        <tbody id="pc-goal-history"><tr><td colspan="3">Loading goals…</td></tr></tbody>
+      </table></div>
+    </section>
+  </div>
+  <details class="pc-panel pc-sources">
+    <summary>Data coverage, sources and methodology</summary>
+    <ul id="pc-sources"></ul>
+    <ul id="pc-warnings"></ul>
+    <p>Historical returns use end-of-session ledger valuations. Cash inflows are assumed to arrive at the opening and outflows at the close. XIRR uses recorded cash-flow dates and is withheld when the sequence can admit multiple solutions. Performance begins at the first supported closing valuation.</p>
+    <p>The S&amp;P 500 Total Return Index includes reinvested dividends. Comparisons use matching endpoints. Sharpe and Sortino use a 0% risk-free rate. Volatility is annualized with 252 sessions. Stock contribution excludes unallocated cash interest, taxes and account fees.</p>
+    <p>To reconcile an internal transfer, add the same <code>transfer:reference</code> note to its two ledger entries. Record both entries on the same effective date. For unrelated cash movements that happen to match, add the note <code>external-transfer</code>. Tax figures use ledger FIFO unless the ledger has other verified basis adjustments.</p>
+  </details>
+
+  <dialog id="pc-goals-dialog" aria-labelledby="pc-goals-title">
+    <form id="pc-goals-form">
+      <h2 id="pc-goals-title">Annual goals</h2>
+      <label>Year <select name="year"></select></label>
+      <label>Annual return target (%) <input name="return_pct" type="number" min="-99.99" max="10000" step="0.01" required></label>
+      <label>Annual contribution goal ($) <input name="contribution" type="number" min="0.01" max="10000000000" step="0.01" required></label>
+      <p role="status"></p>
+      <div class="pc-dialog-actions"><button type="button" data-close>Cancel</button><button type="submit">Save goals</button></div>
+    </form>
+  </dialog>
+  <dialog id="pc-accounts-dialog" aria-labelledby="pc-accounts-title">
+    <form id="pc-accounts-form">
+      <h2 id="pc-accounts-title">Account settings</h2>
+      <label>Account <select name="account" required></select></label>
+      <label>Strategy <select name="strategy">{% for value, label in strategies.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
+      <label class="pc-checkbox"><input type="checkbox" name="history_confirmed"> I verified this ledger includes the account’s full transaction history.</label>
+      <p role="status"></p>
+      <div class="pc-dialog-actions"><button type="button" data-close>Cancel</button><button type="submit">Save account</button></div>
+    </form>
+  </dialog>
+</div>
+{% endblock %}
+{% block scripts %}<script defer src="{{ url_for('static', filename='js/wealth_performance.js') }}"></script>{% endblock %}

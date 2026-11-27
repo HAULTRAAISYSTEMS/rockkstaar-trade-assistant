@@ -45,6 +45,7 @@ OAUTH FLOW
 
 import base64
 import hashlib
+import math
 import json
 import logging
 import os
@@ -696,18 +697,16 @@ def _normalize_account(raw: dict) -> dict:
             continue
 
         if qty > 0:
-            avg_price = _safe_float(
-                pos.get("averagePrice")
-                if pos.get("averagePrice") is not None
-                else pos.get("averageLongPrice")
-            )
+            raw_average = pos.get("averagePrice")
+            if raw_average is None:
+                raw_average = pos.get("averageLongPrice")
+            avg_price = _safe_float(raw_average)
             unrealized = _safe_float(pos.get("longOpenProfitLoss"))
         else:
-            avg_price = _safe_float(
-                pos.get("averagePrice")
-                if pos.get("averagePrice") is not None
-                else pos.get("averageShortPrice")
-            )
+            raw_average = pos.get("averagePrice")
+            if raw_average is None:
+                raw_average = pos.get("averageShortPrice")
+            avg_price = _safe_float(raw_average)
             unrealized = _safe_float(pos.get("shortOpenProfitLoss"))
 
         mkt_val = _safe_float(pos.get("marketValue"))
@@ -735,6 +734,10 @@ def _normalize_account(raw: dict) -> dict:
             "unrealized":  round(unrealized, 2),
             "unrealized_pct": round(unrealized_pct, 2),
             "cost_basis": round(cost_basis, 2),
+            "performance_cost_basis": round(cost_basis, 2) if isinstance(raw_average, (int, float))
+            and math.isfinite(raw_average) else None,
+            "performance_market_value": round(mkt_val, 2) if isinstance(pos.get("marketValue"), (int, float))
+            and math.isfinite(pos["marketValue"]) else None,
             "last_price": round(last_price, 4),
             "multiplier": multiplier,
         }
@@ -751,6 +754,11 @@ def _normalize_account(raw: dict) -> dict:
             equity_positions.append(norm)
         positions.append(norm)
 
+    reported_value = next((float(bal[key]) for key in ("liquidationValue", "totalValue")
+                           if isinstance(bal.get(key), (int, float)) and math.isfinite(bal[key])), None)
+    cash_marked = reported_value is not None and all(
+        isinstance(p, dict) and isinstance(p.get("marketValue"), (int, float)) and math.isfinite(p["marketValue"])
+        for p in positions_raw)
     # Sort by market value desc
     equity_positions.sort(key=lambda p: abs(p["market_value"]), reverse=True)
     option_positions.sort(key=lambda p: abs(p["market_value"]), reverse=True)
@@ -763,6 +771,12 @@ def _normalize_account(raw: dict) -> dict:
         "is_day_trader":     acct.get("isDayTrader", False),
         # Balances
         "total_value":       round(current_value, 2),
+        "performance_liquidation_value": reported_value,
+        "performance_cash": round(reported_value - sum(p["market_value"] for p in positions), 2)
+        if cash_marked else None,
+        "performance_available_funds": (
+            float(bal["availableFunds"]) if isinstance(bal.get("availableFunds"), (int, float))
+            and math.isfinite(bal["availableFunds"]) else None),
         "cash_balance":      round(bal.get("cashBalance") or 0.0, 2),
         # Cash plus the sweep / money-market "cash invest": everything in the
         # account that is not a position. Schwab's "Cash & Cash Invest".

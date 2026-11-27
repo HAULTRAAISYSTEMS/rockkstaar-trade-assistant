@@ -21,32 +21,32 @@
   const k = (label, value, sub, cls, hero, title) => '<div class="wa-kpi' + (hero ? ' is-hero' : '') + '"' + (title ? ' title="' + WA.esc(title) + '"' : '') + '><span>' + label + '</span><b class="' + (cls || '') + '">' + value + '</b><em>' + (sub || '') + '</em></div>';
   const dd = d.max_drawdown;
   let h = '<section class="wa-kpis">' +
-    k('Value now', WA.money(d.end_value), WA.money(d.contributed) + ' contributed · ' + WA.money(d.gain, true) + ' earned', '', true) +
+    k('Latest closing value', WA.money(d.end_value), WA.money(d.contributed) + ' contributed · ' + WA.money(d.gain, true) + ' earned', '', true) +
     k('Time-weighted return', WA.pct(d.twr_pct), d.twr_annual_pct != null ? WA.pct(d.twr_annual_pct) + ' a year' : 'under a year: not annualized', WA.tone(d.twr_pct), false, 'Removes the effect of when you added money. Use this to compare with an index.') +
-    k('S&amp;P 500 (SPY)', WA.pct(d.spy_pct), d.spy_annual_pct != null ? WA.pct(d.spy_annual_pct) + ' a year · price only' : 'same days · price only', WA.tone(d.spy_pct)) +
-    k('Ahead of / behind SPY', WA.pct(d.excess_pct), 'time-weighted, same days', WA.tone(d.excess_pct)) +
+    k('S&amp;P 500 Total Return', WA.pct(d.spy_pct), d.spy_annual_pct != null ? WA.pct(d.spy_annual_pct) + ' a year' : 'same sessions', WA.tone(d.spy_pct)) +
+    k('Ahead of / behind the index', WA.pct(d.excess_pct), 'time-weighted, same days', WA.tone(d.excess_pct)) +
     k('Your annual return', WA.pct(d.mwr_annual_pct), 'money-weighted (XIRR): your timing included', WA.tone(d.mwr_annual_pct), false, 'Includes when you added money. Answers: what rate did my dollars earn?') +
     k('Worst drop', dd ? WA.pct(dd.pct) : '—', dd ? dd.peak + ' → ' + dd.trough : '', 'dn') +
     k('From the high', WA.pct(d.current_drawdown_pct), 'current drawdown', WA.tone(d.current_drawdown_pct)) +
     '</section>';
   h += '<div class="wa-two"><section class="wa-card"><h2>Value vs money put in <small>' + d.start + ' → ' + d.end + '</small></h2><div id="ch-value"></div>' +
        '<p class="wa-note">The gold line is the account value; the grey line is your net contributions. The gap between them is what the money earned. Deposits raise the grey line; they are not gains.</p></section>' +
-       '<section class="wa-card"><h2>Growth of $1 <small>vs SPY</small></h2><div id="ch-growth"></div><p class="wa-note">Both start at $1 on ' + d.start + '. SPY is price return; its dividends (about 1–1.5% a year) are not added, while your dividends are, so this flatters you slightly.</p></section></div>';
+       '<section class="wa-card"><h2>Growth of $1 <small>vs S&amp;P 500 total return</small></h2><div id="ch-growth"></div><p class="wa-note">Both start at $1 on ' + d.start + '. The S&amp;P 500 Total Return Index includes reinvested dividends.</p></section></div>';
   const years = Object.keys(d.years).sort();
-  h += '<div class="wa-two" style="margin-top:12px"><section class="wa-card"><h2>By calendar year</h2><div class="wa-scroll"><table class="wa-table"><thead><tr><th>Year</th><th>Portfolio</th><th>SPY</th><th>Difference</th><th>Dividends</th></tr></thead><tbody>' +
+  h += '<div class="wa-two" style="margin-top:12px"><section class="wa-card"><h2>By calendar year</h2><div class="wa-scroll"><table class="wa-table"><thead><tr><th>Year</th><th>Portfolio</th><th>S&amp;P 500 TR</th><th>Difference</th><th>Dividends</th></tr></thead><tbody>' +
        years.map(y => { const p = d.years[y], s = (d.spy_years || {})[y]; return '<tr><td>' + y + (y === d.end.slice(0, 4) ? ' <span class="muted">YTD</span>' : '') + '</td><td class="' + WA.tone(p) + '">' + WA.pct(p) + '</td><td class="' + WA.tone(s) + '">' + WA.pct(s) + '</td><td class="' + WA.tone(s == null ? null : p - s) + '">' + (s == null ? '—' : WA.pct(p - s)) + '</td><td>' + WA.money((d.dividends_by_year || {})[y] || 0) + '</td></tr>'; }).join('') +
        '</tbody></table></div>' + (d.reinvested ? '<p class="wa-note">' + d.reinvested + ' dividend reinvestments recorded.</p>' : '') + '</section>' +
        '<section class="wa-card"><h2>How to read this</h2><dl class="wa-facts">' +
-       '<div><dt>Time-weighted</dt><dd style="font-weight:600;font-family:inherit;max-width:60%">How the investments did. Fair to compare with SPY.</dd></div>' +
+       '<div><dt>Time-weighted</dt><dd style="font-weight:600;font-family:inherit;max-width:60%">How the investments did. Comparable with the total return index.</dd></div>' +
        '<div><dt>Money-weighted</dt><dd style="font-weight:600;font-family:inherit;max-width:60%">How your dollars did, including when you added them.</dd></div>' +
        '<div><dt>Contributed</dt><dd style="font-weight:600;font-family:inherit;max-width:60%">Deposits and transfers in, minus withdrawals and transfers out.</dd></div>' +
-       '<div><dt>Prices</dt><dd style="font-weight:600;font-family:inherit;max-width:60%">Daily closes adjusted for splits; today uses the live quote when every holding has one.</dd></div>' +
-       '</dl>' + (d.gaps && d.gaps.length ? '<p class="wa-note dn">Some early days have no close for ' + d.gaps.map(WA.esc).join(', ') + '; those days count that holding at zero.</p>' : '') + '</section></div>';
+       '<div><dt>Prices</dt><dd style="font-weight:600;font-family:inherit;max-width:60%">End-of-session closes and recorded ledger transactions.</dd></div>' +
+       '</dl></section></div>';
   root.innerHTML = h;
   chart(document.getElementById('ch-value'), d.chart.days, [{v: d.chart.value, c: 'var(--elite-gold)', n: 'Value', fill: true}, {v: d.chart.contributed, c: 'var(--elite-muted)', n: 'Contributed', dash: true}], v => WA.money(v));
   const g = [{v: d.chart.growth, c: 'var(--elite-gold)', n: 'Portfolio'}];
-  if (d.chart.spy) g.push({v: d.chart.spy, c: 'var(--info-500)', n: 'SPY'});
-  chart(document.getElementById('ch-growth'), d.chart.days, g, v => '$' + v.toFixed(3));
+  if (d.chart.spy) g.push({v: d.chart.spy, c: 'var(--info-500)', n: 'S&P 500 TR'});
+  chart(document.getElementById('ch-growth'), d.chart.days, g, v => v == null ? '—' : '$' + v.toFixed(3));
 
   function chart(el, days, lines, fmt) {
     const W = 640, H = 240, P = {l: 8, r: 8, t: 10, b: 22};
@@ -58,9 +58,9 @@
     let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="' + lines.map(l => l.n).join(' vs ') + '" style="display:block;overflow:visible">';
     for (let i = 0; i <= 3; i++) { const v = lo + (hi - lo) * i / 3; s += '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="rgba(255,255,255,.06)"/><text x="' + (W - P.r) + '" y="' + (y(v) - 3) + '" text-anchor="end" fill="var(--elite-faint)" font-size="10" font-family="var(--font-mono)">' + fmt(v) + '</text>'; }
     lines.forEach(l => {
-      const pts = l.v.map((v, i) => x(i).toFixed(1) + ',' + y(v).toFixed(1)).join(' ');
+      const pts = l.v.map((v, i) => v == null ? '|' : x(i).toFixed(1) + ',' + y(v).toFixed(1)).join(' ');
       if (l.fill) s += '<polygon points="' + x(0) + ',' + (H - P.b) + ' ' + pts + ' ' + x(n - 1) + ',' + (H - P.b) + '" fill="' + l.c + '" opacity=".08"/>';
-      s += '<polyline points="' + pts + '" fill="none" stroke="' + l.c + '" stroke-width="2"' + (l.dash ? ' stroke-dasharray="5 4"' : '') + ' stroke-linejoin="round"/>';
+      for (const segment of pts.split('|')) s += '<polyline points="' + segment + '" fill="none" stroke="' + l.c + '" stroke-width="2"' + (l.dash ? ' stroke-dasharray="5 4"' : '') + ' stroke-linejoin="round"/>';
     });
     s += '<text x="' + P.l + '" y="' + (H - 6) + '" fill="var(--elite-faint)" font-size="10" font-family="var(--font-mono)">' + days[0] + '</text><text x="' + (W - P.r) + '" y="' + (H - 6) + '" text-anchor="end" fill="var(--elite-faint)" font-size="10" font-family="var(--font-mono)">' + days[n - 1] + '</text>';
     s += '<line id="hx" y1="' + P.t + '" y2="' + (H - P.b) + '" stroke="rgba(255,255,255,.25)" visibility="hidden"/></svg>';

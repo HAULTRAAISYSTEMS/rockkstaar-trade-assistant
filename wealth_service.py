@@ -219,7 +219,7 @@ def _closes(bars) -> list[tuple[date, float]]:
                     out.append((_bar_date(t), float(c)))
     except (TypeError, ValueError):
         return []
-    return sorted((d, c) for d, c in out if d and c > 0)
+    return sorted({d: c for d, c in out if d and c > 0 and wealth_calc._f(c) is not None}.items())
 
 
 def _bar_date(t) -> date | None:
@@ -269,3 +269,74 @@ def reconcile(ledger_holdings: list[dict], ledger_cash: float, broker_account: d
     return {"rows": rows, "ledger_cash": ledger_cash, "broker_cash": bcash,
             "cash_diff": (ledger_cash - bcash) if bcash is not None else None,
             "matched": sum(1 for r in rows if r["status"] == "match"), "total": len(rows)}
+
+
+def performance_balance(ledgers, broker_accounts, prices, today):
+    """Combine one ledger or one Schwab observation per account."""
+    summary = summarize(ledgers, prices, {}, today=today) if ledgers else None
+    balances = []
+    holdings = list(summary["holdings"] if summary else [])
+    if summary:
+        missing = bool(summary["unpriced"])
+        balances.append(dict(value=None if missing else summary["total_value"], cash=summary["cash"],
+                             available_cash=summary["cash"], basis=summary["cost_basis"],
+                             unrealized=None if missing else summary["unrealized"]))
+    for account in broker_accounts:
+        positions = account.get("holdings", [])
+        unsupported = account.get("unsupported_positions")
+        known = unsupported == 0
+        cash = wealth_calc._f(account.get("cash"))
+        value = wealth_calc._f(account.get("total_value"))
+        basis = 0.0 if known else None
+        unrealized = 0.0 if known else None
+        market_value = 0.0 if known else None
+        for h in positions:
+            mv = wealth_calc._f(h.get("verified_market_value", h.get("market_value") or None))
+            cost = wealth_calc._f(h.get("verified_cost_basis", h.get("cost_basis_snapshot") or None))
+            if cost is not None and cost < 0:
+                cost = None
+            if mv is not None and mv < 0:
+                mv = None
+            pnl = mv - cost if mv is not None and cost is not None else None
+            market_value = market_value + mv if market_value is not None and mv is not None else None
+            basis = basis + cost if basis is not None and cost is not None else None
+            unrealized = unrealized + pnl if unrealized is not None and pnl is not None else None
+            holdings.append(dict(ticker=h["ticker"], shares=h["shares"], market_value=mv, cost_basis=cost,
+                                 unrealized=pnl, price_source="Schwab", price_as_of=account.get("as_of")))
+        if value is None and not account.get("live") and cash is not None and market_value is not None:
+            value = cash + market_value
+        balances.append(dict(value=value, cash=cash, available_cash=wealth_calc._f(account.get("available_funds")),
+                             basis=basis, unrealized=unrealized))
+
+    def total(key):
+        entries = [b[key] for b in balances]
+        return sum(entries) if entries and all(v is not None for v in entries) else None
+
+    value, basis, unrealized = total("value"), total("basis"), total("unrealized")
+    combined = {}
+    sources = set()
+    for h in holdings:
+        if h.get("price_source"):
+            sources.add((h["price_source"], h.get("price_as_of") or ""))
+        row = combined.setdefault(h["ticker"], dict(ticker=h["ticker"], market_value=0., cost_basis=0.))
+        for field in ("market_value", "cost_basis"):
+            v = h.get(field)
+            row[field] = row[field] + v if row[field] is not None and v is not None else None
+    for h in combined.values():
+        mv, cost = h["market_value"], h["cost_basis"]
+        h["return_pct"] = (mv / cost - 1) * 100 if mv is not None and cost and cost > 0 else None
+        h["weight_pct"] = mv / value * 100 if mv is not None and value and value > 0 else None
+    rows = sorted(combined.values(), key=lambda h: (-(h["market_value"] or 0), h["ticker"]))
+    invested = [h["market_value"] for h in rows]
+    position_total = sum(invested) if invested and all(v is not None for v in invested) else None
+    concentration = None
+    if position_total and all(a.get("unsupported_positions") == 0 for a in broker_accounts):
+        concentration = dict(largest_pct=max(invested) / position_total * 100,
+                             top5_pct=sum(invested[:5]) / position_total * 100,
+                             effective_holdings=1 / sum((v / position_total) ** 2 for v in invested))
+    return dict(value=value, cash=total("cash"), available_cash=total("available_cash"),
+                basis=basis, unrealized=unrealized, unrealized_pct=unrealized / basis * 100
+                if basis and unrealized is not None else None, holdings=rows, concentration=concentration,
+                quote_sources=[dict(source=source, as_of=timestamp or None) for source, timestamp in sorted(sources)],
+                stale=summary["stale"] if summary else [],
+                unpriced=summary["unpriced"] if summary else [])

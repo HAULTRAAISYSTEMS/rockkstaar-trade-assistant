@@ -210,10 +210,10 @@ def test_scoreboard_api(env):
                {"date": "2026-02-01", "type": "BUY", "ticker": "KLAC", "shares": 2, "price": 600}):
         c.post("/api/wealth/transactions", json={"portfolio_id": pid, **tx})
     d = c.get(f"/api/wealth/scoreboard?p={pid}").get_json()
-    # The fixture's bars serve every ticker (KLAC and SPY) from the same closes.
+    # The fixture supplies closes for the holding, calendar and total-return index.
     assert d["ok"] and d["contributed"] == 3000
     assert "twr_pct" in d and "spy_pct" in d and d["chart"]["days"]
-    assert d["end_value"] == pytest.approx(1800 + 2 * 1400)       # cash + live KLAC today
+    assert d["end_value"] == pytest.approx(1800 + 2 * 620)         # cash + aligned closing value
 
 
 def test_mcff_save_status_and_privacy(env):
