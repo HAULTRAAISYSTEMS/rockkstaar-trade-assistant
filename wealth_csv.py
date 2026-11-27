@@ -23,7 +23,7 @@ import math
 import re
 from datetime import datetime
 
-from wealth_ledger import TYPES, validate
+from wealth_ledger import TYPES, normalize_option_symbol, validate
 
 TEMPLATE_HEADER = ["date", "type", "ticker", "shares", "price", "amount", "fees", "ratio", "note"]
 
@@ -177,12 +177,20 @@ def _parse_schwab(reader) -> dict:
             t = SCHWAB_ACTIONS[low]
             if t in ("BUY", "SELL"):
                 if " " in raw_sym or "/" in raw_sym or re.search(r"\d{6}[CP]\d", sym):
-                    review = {"row": n, "reason": "Options are not tracked in Wealth Architect.", "text": text}
-                    if amount is not None and math.isfinite(amount):
-                        review["cash"] = amount
-                    skipped.append(review)
-                    continue
-                tx = {"type": t, "ticker": sym, "shares": abs(qty or 0), "price": abs(price or 0), "fees": abs(fees)}
+                    option_kind = {"buy to open": "OPTION_BUY", "sell to close": "OPTION_SELL"}.get(low)
+                    option_symbol = normalize_option_symbol(raw_sym)
+                    candidate = {"date": day, "type": option_kind, "ticker": option_symbol, "shares": abs(qty or 0),
+                                 "price": price, "fees": abs(fees), "amount": amount}
+                    if option_kind and option_symbol and amount is not None and not validate(candidate):
+                        tx = candidate
+                    else:
+                        review = {"row": n, "reason": "Option trade needs review: check action, contract and cash.", "text": text}
+                        if amount is not None and math.isfinite(amount):
+                            review["cash"] = amount
+                        skipped.append(review)
+                        continue
+                else:
+                    tx = {"type": t, "ticker": sym, "shares": abs(qty or 0), "price": abs(price or 0), "fees": abs(fees)}
             elif t == "SPLIT":
                 tx = {"type": "SPLIT", "ticker": sym, "shares": qty if (qty or 0) > 0 else None,
                       "ratio": None}

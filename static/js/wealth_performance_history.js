@@ -41,6 +41,10 @@
   }
 
   function cash(row) {
+    if (row.type === "OPTION_BUY" || row.type === "OPTION_SELL") {
+      const direction = row.type === "OPTION_BUY" ? -1 : 1;
+      return row.amount ?? direction * row.shares * row.price * 100 - (row.fees || 0);
+    }
     if (row.type === "BUY") return -(row.shares * row.price + (row.fees || 0));
     if (row.type === "SELL") return row.shares * row.price - (row.fees || 0);
     if (["WITHDRAWAL", "FEE", "TAX"].includes(row.type)) return -row.amount;
@@ -149,7 +153,8 @@
         cost.placeholder = "Cost per share";
         cost.setAttribute("aria-label", "Cost per share for transaction " + (index + 1));
       }
-      row(rows, [pick, item.date, item.type, item.ticker || "—", displayQuantity(item.shares), cost,
+      const type = {OPTION_BUY: "Buy to open", OPTION_SELL: "Sell to close"}[item.type] || item.type;
+      row(rows, [pick, item.date, type, item.ticker || "—", displayQuantity(item.shares), cost,
         displayMoney(cash(item)), displayMoney(item.fees)]);
     });
     const reasonCounts = new Map();

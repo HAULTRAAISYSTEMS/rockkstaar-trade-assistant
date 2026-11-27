@@ -126,11 +126,16 @@
       {{ rows([('recorded-deposits','Recorded deposits'), ('recorded-withdrawals','Recorded withdrawals'),
         ('recorded-dividends','Recorded dividends'), ('recorded-interest','Recorded interest'), ('recorded-fees','Recorded fees')]) }}
     </details>
+    <details id="pc-recorded-options" open hidden>
+      <summary>Option trades recorded in this view (YTD)</summary>
+      <p>Realized P/L includes matched closing trades and their fees.</p>
+      {{ rows([('option-count','Booked option trades'), ('option-realized','Matched option P/L'), ('option-fees','Option trade fees')]) }}
+    </details>
     <div id="pc-import-preview" hidden>
       <div class="pc-scroll pc-import-table" tabindex="0" role="region" aria-label="Transactions ready to import">
         <table class="pc-table">
           <thead><tr><th scope="col">Include</th><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Symbol</th>
-            <th scope="col">Shares</th><th scope="col">Price / cost</th><th scope="col">Cash</th><th scope="col">Fees</th></tr></thead>
+            <th scope="col">Shares / contracts</th><th scope="col">Price / premium</th><th scope="col">Cash</th><th scope="col">Fees</th></tr></thead>
           <tbody id="pc-import-rows"></tbody>
         </table>
       </div>
@@ -207,6 +212,7 @@
         </div>
       </div>
       <div class="pc-chart-readout" id="pc-chart-readout" aria-live="polite"></div>
+      <p id="pc-option-coverage" hidden></p>
     </section>
     <section class="pc-panel pc-risk">
       {{ panel_title('spark', 'Key Performance Metrics') }}

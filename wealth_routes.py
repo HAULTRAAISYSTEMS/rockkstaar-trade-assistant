@@ -690,6 +690,8 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             recorded = activity.get(today.year)
             position["recorded_activity_ytd"] = ({key: recorded[key] for key in
                 ("deposits", "withdrawals", "dividends", "interest", "fees")} if recorded else None)
+            position["recorded_options_ytd"] = ({key: recorded[key] for key in
+                ("option_count", "option_realized", "option_fees")} if recorded and recorded["option_count"] else None)
             position["capital_flows_to_date"] = sum(value for _, value in flows) if trusted else None
             position["investment_profit"] = (position["value"] - position["capital_flows_to_date"]
                 if trusted and position["value"] is not None else None)
@@ -983,6 +985,8 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
               "note": str(d.get("note") or "")[:200]}
         ty = str(d.get("tax_year") or "").strip()
         tx["tax_year"] = int(ty) if ty.isdigit() and 1990 <= int(ty) <= 2100 else None
+        if tx["type"] in wealth_ledger.OPTION_TYPES and tx["ticker"]:
+            tx["ticker"] = wealth_ledger.normalize_option_symbol(tx["ticker"]) or tx["ticker"]
         errs = wealth_ledger.validate(tx)
         if tx["tax_year"] and tx["type"] == "DEPOSIT":
             try:
@@ -991,7 +995,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                     errs.append("An IRA deposit can count toward this year, or the prior year only until April 15.")
             except ValueError:
                 pass
-        if tx["ticker"] and not _TICKER.match(tx["ticker"]):
+        if tx["ticker"] and tx["type"] not in wealth_ledger.OPTION_TYPES and not _TICKER.fullmatch(tx["ticker"]):
             errs.append("Ticker looks wrong.")
         return tx, errs
 

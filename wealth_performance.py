@@ -9,7 +9,7 @@ import re
 
 import wealth_calc
 import wealth_history
-from wealth_ledger import EPS, _f
+from wealth_ledger import EPS, OPTION_TYPES, _f
 
 BENCHMARK = "^SP500TR"
 BENCHMARK_LABEL = "S&P 500 Total Return Index"
@@ -237,7 +237,8 @@ def split_issues(ledger, provider_splits, today):
 def ledger_activity(ledgers, paired, today):
     """Use booked ledger amounts. Trade fees already reside in costs/proceeds."""
     years = defaultdict(lambda: dict(deposits=0., withdrawals=0., dividends=0., interest=0., fees=0.,
-                                     realized=0., standalone_fees=0., taxes=0.))
+                                     realized=0., standalone_fees=0., taxes=0., option_count=0,
+                                     option_realized=0., option_fees=0.))
     for ledger in ledgers.values():
         for event in ledger.events:
             day, tx = event["date"], event["transaction"]
@@ -253,6 +254,12 @@ def ledger_activity(ledgers, paired, today):
                 row["interest"] += amount
             if kind in ("BUY", "SELL", "REINVEST"):
                 row["fees"] += _f(tx.get("fees"))
+            if kind in OPTION_TYPES:
+                fees = _f(tx.get("fees"))
+                row["fees"] += fees
+                row["option_fees"] += fees
+                row["option_realized"] += event["realized"]
+                row["option_count"] += 1
             if kind == "FEE":
                 row["fees"] += amount
                 row["standalone_fees"] += amount
@@ -276,18 +283,19 @@ def _spread(a, b):
     return a - b if a is not None and b is not None else None
 
 
-def periods(index, benchmark):
+def periods(index, benchmark, *, trimmed=False):
     days = [day for day, _ in index]
     end = days[-1]
     from bisect import bisect_right
     ytd = date(end.year, 1, 1) - timedelta(days=1)
     windows = (("Today", days[-2]), ("1 Week", end - timedelta(days=7)),
                ("1 Month", _shift_months(end, 1)), ("3 Months", _shift_months(end, 3)),
-               ("YTD", ytd), ("1 Year", _shift_months(end, 12)), ("All-Time", days[0]))
+               ("YTD", ytd), ("1 Year", _shift_months(end, 12)),
+               ("Available Period" if trimmed else "All-Time", days[0]))
     result = []
     for label, start in windows:
         offset = bisect_right(days, start) - 1
-        if label == "YTD" and offset < 0 and days[0].year == end.year:
+        if label == "YTD" and offset < 0 and days[0].year == end.year and not trimmed:
             offset = 0
         row = {"label": label, "start": None, "end": end.isoformat(),
                "portfolio": None, "benchmark": None, "excess": None}
@@ -404,15 +412,21 @@ def analyze(series, benchmark, ledgers, security_flows, goals):
     offset = max((i for i, day in enumerate(days) if day <= ytd_start), default=0)
     start, base = index[offset]
     ytd_days = days[offset:]
+    trimmed = series.get("option_history_trimmed", False)
+    partial_ytd = trimmed and start > ytd_start
+    target_start = start if partial_ytd else ytd_start
     target = goals.get(end.year, DEFAULT_GOAL)["return_pct"] / 100
     chart = {
         "days": [day.isoformat() for day in ytd_days],
         "portfolio": [_return(base, level) for _, level in index[offset:]],
         "benchmark": [_return(levels.get(start), levels.get(day)) for day in ytd_days],
-        "target": [((1 + target) ** (max(0, (day - ytd_start).days) /
+        "target": [((1 + target) ** (max(0, (day - target_start).days) /
                    (date(end.year, 12, 31) - ytd_start).days) - 1) * 100 for day in ytd_days],
     }
-    return {**summary, "periods": periods(index, levels), "heatmap": heatmap(index),
+    months = heatmap(index)
+    if trimmed:
+        months[days[0].year].pop(days[0].month, None)
+    return {**summary, "periods": periods(index, levels, trimmed=trimmed), "heatmap": months,
             "risk": risk(index, levels, summary["twr_annual_pct"]),
-            "attribution": attribution(series, index, ledgers, security_flows),
-            "growth_chart": chart}
+            "attribution": [] if partial_ytd else attribution(series, index, ledgers, security_flows),
+            "growth_chart": chart, "partial_ytd": partial_ytd}

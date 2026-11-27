@@ -190,21 +190,29 @@
     renderOpenPositions(data);
     const p = data.position;
     const recorded = p.recorded_activity_ytd;
+    const options = p.recorded_options_ytd;
+    get("recorded-options").hidden = !options;
+    field("option-count", number(options?.option_count));
+    field("option-realized", money(options?.option_realized), options?.option_realized);
+    field("option-fees", money(options?.option_fees));
     get("recorded-activity").hidden = !recorded || data.history.ok;
     for (const key of ["deposits", "withdrawals", "dividends", "interest", "fees"]) {
       field("recorded-" + key, money(recorded?.[key]));
     }
     for (const key of ["value", "unrealized", "realized", "dividends_ytd", "fees_ytd", "investment_profit",
       "basis", "cash", "available_cash", "deposits", "withdrawals", "dividends", "interest", "fees"]) {
-      const value = key === "fees_ytd" && finite(p[key]) ? -p[key] : p[key];
+      const amount = key === "dividends_ytd" ? p[key] ?? (recorded?.dividends || null)
+        : key === "fees_ytd" ? p[key] ?? (recorded?.fees || null) : p[key];
+      const value = key === "fees_ytd" && finite(amount) ? -amount : amount;
       const tone = ["unrealized", "realized", "fees_ytd", "investment_profit"].includes(key) ? value : null;
       field(key, money(value), tone);
     }
     field("unrealized-pct", pct(p.unrealized_pct), p.unrealized_pct);
     field("quote-summary", data.sync.live ? "Schwab balances" : (data.sync.stored ? "Schwab snapshot" : ""));
     field("realized-period", finite(p.realized) ? "Recorded history" : "");
-    field("fee-period", finite(p.fees_ytd) ? "Trading and account fees" : "");
-    field("interest-sub", finite(p.interest) ? money(p.interest) + " interest in recorded history" : "");
+    field("fee-period", finite(p.fees_ytd) ? "Trading and account fees" : recorded?.fees ? "Partial ledger total" : "");
+    field("interest-sub", !finite(p.dividends_ytd) && recorded?.dividends ? "Partial ledger total"
+      : finite(p.interest) ? money(p.interest) + " interest in recorded history" : "");
 
     const holdings = p.holdings.filter(row => finite(row.return_pct)).sort((a, b) => b.return_pct - a.return_pct);
     for (const [key, value] of [["best", holdings[0]], ["worst", holdings.at(-1)]]) {
@@ -317,6 +325,11 @@
       tr.cells[1].prepend(bar);
     }
     chartRange.disabled = !history.ok;
+    chartRange.options[0].textContent = history.partial_ytd ? "Available this year" : "YTD";
+    chartRange.options[1].textContent = history.option_history_trimmed ? "Available period" : "All time";
+    get("option-coverage").hidden = !history.option_history_trimmed;
+    get("option-coverage").textContent = history.option_history_trimmed
+      ? "Returns start on " + history.start + ", after the last option position without daily prices closed." : "";
     get("chart-empty").hidden = Boolean(history.ok);
     get("chart-message").textContent = history.ok ? "" : "Historical values unavailable";
     for (const link of root.querySelectorAll("[data-history-link]")) link.hidden = Boolean(history.ok);
@@ -805,10 +818,19 @@
     renderGoalPlan();
   }
 
+  const settingsAccountKey = "tradestaar.performance.settings-account";
+  const saveAccountButton = accountForm.querySelector('[type="submit"]');
+  let lastSettingsAccount;
+  try { lastSettingsAccount = sessionStorage.getItem(settingsAccountKey); } catch {}
+  let settingsStrategy;
+
   function showAccount() {
     const a = response.accounts.find(row => row.id === Number(settingsAccount.value));
-    accountForm.elements.strategy.value = a.strategy;
-    accountForm.elements.history_confirmed.checked = a.history_confirmed;
+    accountForm.elements.strategy.value = a ? (settingsStrategy || a.strategy) : "unclassified";
+    accountForm.elements.history_confirmed.checked = Boolean(a?.history_confirmed);
+    accountForm.elements.strategy.disabled = !a;
+    accountForm.elements.history_confirmed.disabled = !a;
+    saveAccountButton.disabled = !a;
   }
 
   goalYear.addEventListener("change", showGoal);
@@ -842,14 +864,14 @@
   root.querySelector('[data-action="goals"]').addEventListener("click", () => openGoalDialog(response.selected_goal.year));
   root.querySelector('[data-action="edit-plan"]').addEventListener("click", () => openGoalDialog(selectedPlanYear));
   function openAccountSettings(preferredStrategy) {
-    settingsAccount.replaceChildren(...response.accounts.map(a => new Option(a.label || a.name, a.id)));
-    if (response.accounts.some(a => String(a.id) === account.value)) settingsAccount.value = account.value;
-    else if (preferredStrategy) {
-      const unclassified = response.accounts.find(item => item.strategy === "unclassified");
-      if (unclassified) settingsAccount.value = unclassified.id;
-    }
+    settingsStrategy = preferredStrategy;
+    const placeholder = new Option("Select an account", "");
+    placeholder.disabled = true;
+    settingsAccount.replaceChildren(placeholder, ...response.accounts.map(a => new Option(a.label || a.name, a.id)));
+    const selected = [account.value, lastSettingsAccount].find(id =>
+      response.accounts.some(a => String(a.id) === id));
+    settingsAccount.value = selected ?? (response.accounts.length === 1 ? response.accounts[0].id : "");
     showAccount();
-    if (preferredStrategy) accountForm.elements.strategy.value = preferredStrategy;
     accountForm.querySelector('[role="status"]').textContent = "";
     get("accounts-dialog").showModal();
   }
@@ -858,7 +880,7 @@
     button.addEventListener("click", () => openAccountSettings(button.dataset.assignStrategy));
   }
 
-  async function save(form, path, body) {
+  async function save(form, path, body, onSaved) {
     const message = form.querySelector('[role="status"]');
     const button = form.querySelector('[type="submit"]');
     button.disabled = true;
@@ -870,6 +892,7 @@
         const result = await r.json().catch(() => ({}));
         throw new Error(result.error || "Settings could not be saved.");
       }
+      onSaved?.();
       form.closest("dialog").close();
       syncMessage = "";
       await load();
@@ -891,9 +914,14 @@
   });
   accountForm.addEventListener("submit", event => {
     event.preventDefault();
-    save(accountForm, "/accounts/" + settingsAccount.value, {
+    const savedId = settingsAccount.value;
+    if (!savedId) return;
+    save(accountForm, "/accounts/" + savedId, {
       strategy: accountForm.elements.strategy.value,
       history_confirmed: accountForm.elements.history_confirmed.checked
+    }, () => {
+      lastSettingsAccount = savedId;
+      try { sessionStorage.setItem(settingsAccountKey, savedId); } catch {}
     });
   });
   root.querySelector('[data-action="sync"]').addEventListener("click", async event => {

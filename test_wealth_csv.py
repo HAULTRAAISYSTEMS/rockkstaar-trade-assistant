@@ -29,8 +29,9 @@ def test_schwab_export_parses_into_ledger_types():
     types = [(t["type"], t.get("ticker")) for t in p["transactions"]]
     assert ("DEPOSIT", None) in types and ("SPLIT", "KLAC") in types
     assert ("DIVIDEND", "TSM") in types and ("BUY", "TSM") in types and ("TAX", None) in types
+    assert ("OPTION_BUY", "NVDA270115C00200000") in types
     reasons = " ".join(s["reason"] for s in p["skipped"])
-    assert "Options are not tracked" in reasons and "Mystery Thing" in reasons
+    assert "Mystery Thing" in reasons
     dates = [t["date"] for t in p["transactions"]]
     assert dates == sorted(dates) and "2026-10-01" in dates          # "as of" date ignored
 
@@ -43,7 +44,7 @@ def test_schwab_import_reproduces_position_through_split():
     assert k["cost_basis"] == pytest.approx(1250 + 141.20)
     assert lg.holding("TSM")["shares"] == pytest.approx(2.0081)
     assert lg.dividends == pytest.approx(1.90 + 1.99)
-    assert lg.cash == pytest.approx(2000 + 0.11 - 1250 - 396.80 + 1.90 - 0.42 - 141.20, abs=0.02)
+    assert lg.cash == pytest.approx(2000 + 0.11 - 1250 - 396.80 + 1.90 - 0.42 - 141.20 - 500.65, abs=0.02)
 
 
 def test_fingerprints_are_stable_and_distinct():
@@ -67,9 +68,26 @@ def test_bank_moneylink_adjustment_and_option_review_cash():
     parsed = wealth_csv.parse(header +
         '09/14/2026,MoneyLink Adj,,Tfr EXAMPLE BANK,,,,-150.00\n'
         '09/15/2026,MoneyLink Adj,,Unclassified journal,,,,42.00\n'
-        '09/16/2026,Buy to Open,NVDA  260918C00100000,Option,1,0.25,0.66,-25.66\n')
+        '09/16/2026,Buy to Open,NVDA  260918C00100000,Option,1,0.25,0.66,-2.56\n')
     row = parsed["transactions"][0]
     assert row["type"] == "WITHDRAWAL" and row["amount"] == 150
     assert len(parsed["transactions"]) == 1
     assert len(parsed["skipped"]) == 2
-    assert parsed["skipped"][1]["cash"] == -25.66
+    assert parsed["skipped"][1]["cash"] == -2.56
+
+
+def test_standard_option_cash_and_fifo_from_schwab_csv():
+    parsed = wealth_csv.parse(
+        "Date,Action,Symbol,Description,Quantity,Price,Fees & Comm,Amount\n"
+        "09/14/2026,MoneyLink Transfer,,Bank,,,,$1000\n"
+        "09/15/2026,Buy to Open,NVDA 09/18/2026 100.00 C,Option,2,1,1.30,-201.30\n"
+        "09/16/2026,Sell to Close,NVDA  260918C00100000,Option,1,1.5,0.65,149.35\n"
+        "09/17/2026,Sell to Close,NVDA 09/18/2026 100.00 C,Option,1,0.5,0.65,49.35\n"
+    )
+    assert not parsed["skipped"]
+    ledger = wealth_ledger.build(parsed["transactions"])
+    assert not ledger.option_positions and not ledger.positions and not ledger.issues
+    assert ledger.cash == pytest.approx(997.40)
+    assert ledger.deposits == 1000
+    assert ledger.fees == pytest.approx(2.60)
+    assert [trade["gain"] for trade in ledger.realized] == pytest.approx([48.70, -51.30])

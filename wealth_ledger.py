@@ -11,6 +11,8 @@ DEPOSIT       amount            cash in from outside (a contribution)
 WITHDRAWAL    amount            cash out to outside
 BUY           ticker shares price fees
 SELL          ticker shares price fees      lots consumed first-in, first-out
+OPTION_BUY    OCC symbol, contracts, quoted premium, fees (standard 100-share contract)
+OPTION_SELL   OCC symbol, contracts, quoted premium, fees (close long contracts FIFO)
 DIVIDEND      ticker amount     cash dividend (income, not a contribution)
 REINVEST      ticker shares price [amount]  dividend used to buy shares: counts
                                 as dividend income and opens a lot; cash nets out
@@ -38,20 +40,58 @@ Cost basis rules
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 import math
+import re
 
 EPS = 1e-9
+OPTION_TYPES = {"OPTION_BUY", "OPTION_SELL"}
+OPTION_MULTIPLIER = 100
+OPTION_SYMBOL = re.compile(r"[A-Z]{1,6}(\d{6})[CP]\d{8}")
+
+
+def is_standard_option(symbol: str) -> bool:
+    match = OPTION_SYMBOL.fullmatch(symbol)
+    if not match:
+        return False
+    expiry = match[1]
+    try:
+        date(2000 + int(expiry[:2]), int(expiry[2:4]), int(expiry[4:]))
+    except ValueError:
+        return False
+    return True
+
+
+def normalize_option_symbol(symbol: str) -> str | None:
+    """Normalize OCC symbols and Schwab's displayed root/date/strike/right format."""
+    symbol = symbol.upper().strip()
+    compact = "".join(symbol.split())
+    if is_standard_option(compact):
+        return compact
+    match = re.fullmatch(r"([A-Z]{1,6})\s+(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,5}(?:\.\d{1,3})?)\s+([CP])", symbol)
+    if not match:
+        return None
+    root, raw_expiry, strike, right = match.groups()
+    try:
+        expiry = datetime.strptime(raw_expiry, "%m/%d/%Y").date()
+    except ValueError:
+        return None
+    units = int(Decimal(strike) * 1000)
+    if not 2000 <= expiry.year <= 2099 or not 0 < units <= 99999999:
+        return None
+    return f"{root}{expiry:%y%m%d}{right}{units:08d}"
+
 
 TYPES = ("DEPOSIT", "WITHDRAWAL", "BUY", "SELL", "DIVIDEND", "REINVEST", "INTEREST",
-         "FEE", "TAX", "SPLIT", "TRANSFER_IN", "TRANSFER_OUT", "BASIS_ADJUSTMENT")
+         "FEE", "TAX", "SPLIT", "TRANSFER_IN", "TRANSFER_OUT", "BASIS_ADJUSTMENT", "OPTION_BUY", "OPTION_SELL")
 NEEDS_TICKER = {"BUY", "SELL", "DIVIDEND", "REINVEST", "SPLIT", "TRANSFER_IN", "TRANSFER_OUT", "BASIS_ADJUSTMENT"}
 
 # Within one day: splits first (a split dated the same day as a purchase
 # applies to shares held before it), money in before money spent, sales after
 # purchases, money out last.
-_DAY_ORDER = {"SPLIT": 0, "DEPOSIT": 1, "TRANSFER_IN": 2, "BUY": 3, "REINVEST": 3,
-              "DIVIDEND": 4, "INTEREST": 4, "BASIS_ADJUSTMENT": 4, "SELL": 5, "FEE": 6, "TAX": 6,
+_DAY_ORDER = {"SPLIT": 0, "DEPOSIT": 1, "TRANSFER_IN": 2, "BUY": 3, "REINVEST": 3, "OPTION_BUY": 3,
+              "DIVIDEND": 4, "INTEREST": 4, "BASIS_ADJUSTMENT": 4, "SELL": 5, "OPTION_SELL": 5, "FEE": 6, "TAX": 6,
               "TRANSFER_OUT": 7, "WITHDRAWAL": 8}
 
 
@@ -86,6 +126,19 @@ def validate(tx: dict) -> list[str]:
         errs.append("Shares must be more than zero.")
     if t in ("BUY", "SELL", "REINVEST") and price <= 0:
         errs.append("Price must be more than zero.")
+    if t in OPTION_TYPES:
+        if not is_standard_option(str(tx.get("ticker") or "").upper()):
+            errs.append("Enter the full symbol of a standard option contract.")
+        if shares <= 0 or not shares.is_integer():
+            errs.append("Enter a positive whole number of option contracts.")
+        if price <= 0:
+            errs.append("Enter a positive quoted option premium.")
+        reported = _f(tx.get("amount"), None)
+        if reported is not None:
+            gross = shares * price * OPTION_MULTIPLIER
+            cash = (-gross if t == "OPTION_BUY" else gross) - _f(tx.get("fees"))
+            if abs(reported - cash) > .011:
+                errs.append("Option cash does not match contracts, premium and fees.")
     if t == "TRANSFER_IN" and price < 0:
         errs.append("Cost per share cannot be negative.")
     if t == "TRANSFER_OUT" and shares <= 0:
@@ -118,6 +171,8 @@ class Lot:
 @dataclass
 class LedgerResult:
     positions: dict = field(default_factory=dict)     # ticker -> list[Lot]
+    option_positions: dict = field(default_factory=dict)
+    option_exposure: dict = field(default_factory=dict)  # trade day -> open long positions at close
     cash: float = 0.0
     deposits: float = 0.0
     withdrawals: float = 0.0
@@ -210,7 +265,10 @@ def build(transactions: list[dict]) -> LedgerResult:
         tk = str(tx.get("ticker") or "").upper().strip()
         shares, price = _f(tx.get("shares")), _f(tx.get("price"))
         amount, fees = _f(tx.get("amount")), _f(tx.get("fees"))
-        lots = r.positions.setdefault(tk, []) if tk else None
+        option_trade = t in OPTION_TYPES
+        book = r.option_positions if option_trade else r.positions
+        lots = book.setdefault(tk, []) if tk else None
+        execution_price = price * OPTION_MULTIPLIER if option_trade else price
         previous_cash, flow_count, realized_count = r.cash, len(r.flows), len(r.realized)
         moved_basis = None
 
@@ -218,8 +276,8 @@ def build(transactions: list[dict]) -> LedgerResult:
             r.cash += amount; r.deposits += amount; r.flows.append((day, amount))
         elif t == "WITHDRAWAL":
             r.cash -= amount; r.withdrawals += amount; r.flows.append((day, -amount))
-        elif t == "BUY":
-            cost = shares * price + fees
+        elif t in ("BUY", "OPTION_BUY"):
+            cost = shares * execution_price + fees
             r.cash -= cost; r.fees += fees
             lots.append(Lot(day, shares, cost))
         elif t == "REINVEST":
@@ -229,21 +287,26 @@ def build(transactions: list[dict]) -> LedgerResult:
             r.cash += value - (shares * price + fees)   # nets to about zero
             r.fees += fees
             lots.append(Lot(day, shares, shares * price + fees))
-        elif t == "SELL":
+        elif t in ("SELL", "OPTION_SELL"):
             taken, short = _take_fifo(lots, shares)
             sold = shares - short
             if short > EPS:
-                r.issues.append(f"{day} sell of {shares:g} {tk}: only {sold:g} shares were held; "
-                                f"the rest was ignored. Check for a missing buy or transfer.")
-            if sold <= EPS:
+                if option_trade:
+                    r.issues.append(f"{day} close of {tk}: {short:g} contracts have no recorded opening lot.")
+                else:
+                    r.issues.append(f"{day} sell of {shares:g} {tk}: only {sold:g} shares were held; "
+                                    f"the rest was ignored. Check for a missing buy or transfer.")
+            if sold <= EPS and not option_trade:
                 continue
-            proceeds_total = sold * price - fees
+            cash_quantity = shares if option_trade else sold
+            proceeds_total = cash_quantity * execution_price - fees
             r.cash += proceeds_total; r.fees += fees
             for lot, n, cost in taken:
-                proceeds = proceeds_total * (n / sold)
+                proceeds = proceeds_total * (n / cash_quantity)
                 r.realized.append({"ticker": tk, "date": day.isoformat(), "acquired": lot.date.isoformat(),
                                    "shares": n, "proceeds": proceeds, "cost": cost, "gain": proceeds - cost,
-                                   "term": "long" if _long_term(lot.date, day) else "short"})
+                                   "term": "long" if _long_term(lot.date, day) else "short",
+                                   **({"asset": "option"} if option_trade else {})})
         elif t == "DIVIDEND":
             r.cash += amount; r.dividends += amount
             r.dividends_by_ticker[tk] = r.dividends_by_ticker.get(tk, 0.0) + amount
@@ -293,8 +356,10 @@ def build(transactions: list[dict]) -> LedgerResult:
                          "flow": r.flows[-1][1] if len(r.flows) > flow_count else None,
                          "realized": sum(row["gain"] for row in r.realized[realized_count:]),
                          "moved_basis": moved_basis})
-        if tk and not r.positions.get(tk):
-            r.positions.pop(tk, None)
+        if tk and not book.get(tk):
+            book.pop(tk, None)
+        if option_trade:
+            r.option_exposure[day] = bool(r.option_positions)
         snap = (day, r.cash, {t: sum(l.shares for l in ls) for t, ls in r.positions.items() if ls})
         if r.snapshots and r.snapshots[-1][0] == day:
             r.snapshots[-1] = snap

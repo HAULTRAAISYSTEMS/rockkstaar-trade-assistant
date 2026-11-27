@@ -16,6 +16,38 @@ def tx(day, kind, **fields):
     return {"date": day.isoformat(), "type": kind, **fields}
 
 
+def test_options_history_starts_at_first_fully_valued_close():
+    start, opened, closed, end = [date(2026, 6, day) for day in range(1, 5)]
+    symbol = "NVDA260918C00100000"
+    trades = [
+        tx(start, "DEPOSIT", amount=1000),
+        tx(start, "BUY", ticker="NVDA", shares=1, price=100),
+        tx(opened, "OPTION_BUY", ticker=symbol, shares=2, price=1, fees=1),
+    ]
+    days = [start, opened, closed, end]
+    prices = {"NVDA": [(closed, 100), (end, 110)]}
+    with_open_options = ledger.build(trades)
+    assert "open option contracts" in history.build_series([with_open_options], prices, days)["reason"]
+    balance = wealth_service.performance_balance({1: with_open_options}, [], {"NVDA": {"price": 100}}, opened)
+    assert balance["value"] is None and balance["unrealized"] is None
+    finished = ledger.build(trades + [tx(closed, "OPTION_SELL", ticker=symbol, shares=2, price=1.5, fees=1)])
+    series = history.build_series([finished], prices, days)
+    assert series["values"] == [(closed, 1098), (end, 1108)]
+    assert series["flows"] == [(closed, 1098)]
+    report = performance.analyze(series, [(closed, 100), (end, 105)], {1: finished}, {}, {})
+    assert report["partial_ytd"] and report["option_history_trimmed"]
+    assert report["gain"] == 10
+    assert report["twr_pct"] == pytest.approx(10 / 1098 * 100)
+    assert report["periods"][4]["portfolio"] is None
+    assert report["periods"][-1]["label"] == "Available Period"
+    assert report["years"] == report["spy_years"] == {}
+    assert report["heatmap"][2026] == {}
+    activity = performance.ledger_activity({1: finished}, {}, end)[2026]
+    assert activity["option_count"] == 2
+    assert activity["option_realized"] == 98
+    assert activity["option_fees"] == activity["fees"] == 2
+
+
 def test_cash_flow_timing_and_withdrawals_do_not_become_losses():
     start = date(2026, 1, 2)
     last = start + timedelta(days=1)

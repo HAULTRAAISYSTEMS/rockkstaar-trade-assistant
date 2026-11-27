@@ -22,7 +22,7 @@
         <label>Type<select name="type" id="tx-type">
           {% for t in types %}<option value="{{ t }}">{{ t.replace('_', ' ').title() }}</option>{% endfor %}
         </select></label>
-        <label data-f="ticker">Ticker<input name="ticker" maxlength="10" style="text-transform:uppercase" placeholder="KLAC"></label>
+        <label data-f="ticker"><span data-l="ticker">Ticker</span><input name="ticker" maxlength="10" style="text-transform:uppercase" placeholder="KLAC"></label>
         <label data-f="shares"><span data-l="shares">Shares</span><input name="shares" inputmode="decimal" placeholder="1.5"></label>
         <label data-f="price"><span data-l="price">Price</span><input name="price" inputmode="decimal" placeholder="141.20"></label>
         <label data-f="amount"><span data-l="amount">Amount</span><input name="amount" inputmode="decimal" placeholder="2000"></label>
@@ -106,6 +106,8 @@
     WITHDRAWAL: 'Money you took out of the account.',
     BUY: 'Price per share. Fees are added to the cost basis.',
     SELL: 'Shares are taken from the oldest lots first (FIFO). Fees reduce the proceeds.',
+    OPTION_BUY: 'Enter the standard option contract symbol, number of contracts and quoted premium per share. Each contract covers 100 shares.',
+    OPTION_SELL: 'Close a recorded long option position. The ledger matches the oldest contracts first and deducts fees from the proceeds.',
     DIVIDEND: 'Cash dividend received. Income, not a contribution.',
     REINVEST: 'A dividend that bought shares: enter the shares and the price they were bought at.',
     INTEREST: 'Interest paid on cash.',
@@ -119,6 +121,7 @@
   const FIELDS = {
     DEPOSIT: ['amount', 'tax_year'], WITHDRAWAL: ['amount'], INTEREST: ['amount'], FEE: ['amount'], TAX: ['amount'],
     DIVIDEND: ['ticker', 'amount'], BUY: ['ticker', 'shares', 'price', 'fees'], SELL: ['ticker', 'shares', 'price', 'fees'],
+    OPTION_BUY: ['ticker', 'shares', 'price', 'fees'], OPTION_SELL: ['ticker', 'shares', 'price', 'fees'],
     REINVEST: ['ticker', 'shares', 'price'], SPLIT: ['ticker', 'ratio', 'shares'],
     TRANSFER_IN: ['ticker', 'shares', 'price', 'amount'], TRANSFER_OUT: ['ticker', 'shares', 'amount'], BASIS_ADJUSTMENT: ['ticker', 'amount']
   };
@@ -126,9 +129,13 @@
   if (!form.date.value) form.date.value = new Date().toISOString().slice(0, 10);
   function sync() {
     const t = type.value, show = FIELDS[t] || [];
+    const option = t.startsWith('OPTION_');
     form.querySelectorAll('[data-f]').forEach(l => { l.hidden = !show.includes(l.dataset.f); });
-    form.querySelector('[data-l="shares"]').textContent = t === 'SPLIT' ? 'Or shares received' : 'Shares';
-    form.querySelector('[data-l="price"]').textContent = t === 'TRANSFER_IN' ? 'Cost / share' : 'Price';
+    form.elements.ticker.maxLength = option ? 40 : 10;
+    form.elements.ticker.placeholder = option ? 'NVDA 01/15/2027 200.00 C' : 'KLAC';
+    form.querySelector('[data-l="ticker"]').textContent = option ? 'Contract symbol' : 'Ticker';
+    form.querySelector('[data-l="shares"]').textContent = option ? 'Contracts' : t === 'SPLIT' ? 'Or shares received' : 'Shares';
+    form.querySelector('[data-l="price"]').textContent = option ? 'Premium per share' : t === 'TRANSFER_IN' ? 'Cost / share' : 'Price';
     form.querySelector('[data-l="amount"]').textContent = t.startsWith('TRANSFER') ? 'Market value' : 'Amount';
     document.getElementById('tx-help').textContent = HELP[t] || '';
   }
