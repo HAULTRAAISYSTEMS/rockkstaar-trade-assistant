@@ -558,7 +558,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         if current and not selected:
             selection_issue = selection_issue or "This Wealth entry is absent from the latest Schwab account list."
             issues.append(selection_issue)
-        buckets = {key: {"ledgers": {}, "broker": [], "manual": {}, "history_issues": []}
+        buckets = {key: {"ledgers": {}, "broker": [], "manual": {}, "history_issues": [], "reconciliation": []}
                    for key in performance.STRATEGIES}
         covered = set()
         for p in selected:
@@ -589,8 +589,17 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                         bucket["history_issues"].append(
                             f"{label}: {discrepancy['ticker']} ledger shares differ from Schwab by "
                             f"{discrepancy['difference']:g}.")
-                    if cash is None or abs(cash - ledger.cash) > .02:
+                    cash_difference = round(cash - ledger.cash, 2) if cash is not None else None
+                    cash_matches = cash is not None and abs(cash - ledger.cash) <= .02
+                    if not cash_matches:
                         bucket["history_issues"].append(f"{label}: Schwab cash cannot be reconciled with the ledger.")
+                    bucket["reconciliation"].append(dict(account=label, portfolio_id=pid,
+                        has_transactions=bool(ledger.first_date), history_confirmed=bool(profile.get("history_confirmed")),
+                        live=bool(snapshot.get("live")), unsupported_positions=snapshot.get("unsupported_positions"),
+                        broker_cash=cash, cash_matches=cash_matches,
+                        ledger_cash=round(ledger.cash, 2) if ledger.first_date else None,
+                        cash_difference=cash_difference if ledger.first_date and not cash_matches else None,
+                        positions=discrepancies))
                     if snapshot.get("unsupported_positions"):
                         bucket["history_issues"].append(f"{label}: the ledger cannot value one or more Schwab positions.")
                     if not profile.get("history_confirmed"):
@@ -610,13 +619,14 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                         f"{label}: use Sync Schwab to add this account to the selector.")
 
         def combine(names):
-            result = {"ledgers": {}, "broker": [], "manual": {}, "history_issues": []}
+            result = {"ledgers": {}, "broker": [], "manual": {}, "history_issues": [], "reconciliation": []}
             for name in names:
                 bucket = buckets[name]
                 result["ledgers"].update(bucket["ledgers"])
                 result["broker"].extend(bucket["broker"])
                 result["manual"].update(bucket["manual"])
                 result["history_issues"].extend(bucket["history_issues"])
+                result["reconciliation"].extend(bucket["reconciliation"])
             return result
 
         chosen = combine([strategy] if strategy != "all" else buckets)
@@ -630,7 +640,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                     stored=sum(bool(b.get("as_of")) and not b.get("live") for b in chosen["broker"]),
                     as_of=sorted({b["as_of"] for b in chosen["broker"] if b.get("as_of")}))
         if balance_only:
-            return dict(ok=True, position=balance(chosen), sync=sync,
+            return dict(ok=True, position=balance(chosen), sync=sync, reconciliation=chosen["reconciliation"],
                         strategies={name: {key: values[key] for key in ("value", "cash", "unrealized")}
                                     for name, values in ((name, balance(bucket)) for name, bucket in buckets.items())
                                     if strategy in ("all", name)})
@@ -705,15 +715,16 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             strategies[name]["return_pct"] = (h.get("periods") or [{}] * 5)[4].get("portfolio")
         year = today.year
         year_rows = []
-        for point in sorted({year, *activity, *goals, *(int(y) for y in history.get("years", {}))}, reverse=True):
+        for point in sorted({year, year + 1, *activity, *goals, *(int(y) for y in history.get("years", {}))}, reverse=True):
             goal = goals.get(point, performance.DEFAULT_GOAL)
             row = activity.get(point)
-            net = row["deposits"] - row["withdrawals"] if row is not None else (0. if activity and point > min(activity) else None)
-            year_rows.append(dict(year=point, **goal, net=net,
+            net = row["deposits"] - row["withdrawals"] if row is not None else (
+                0. if activity and min(activity) < point <= year else None)
+            year_rows.append(dict(year=point, **goal, net=net, planned=point > year, saved=point in goals,
                                   remaining=max(0., goal["contribution"] - net) if net is not None else None,
                                   actual_return=history.get("years", {}).get(point)))
         return dict(ok=True, position=position, history=history, warnings=sorted(set(issues + warnings)),
-                    strategies=strategies, goals=year_rows,
+                    strategies=strategies, goals=year_rows, reconciliation=chosen["reconciliation"],
                     selected_goal=next(row for row in year_rows if row["year"] == year),
                     accounts=[dict(id=p["id"], name=p["name"],
                                    label=wealth_broker_sync.portfolio_label(p, broker.get(broker_key(p))),
@@ -765,8 +776,10 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         if not isinstance(data, dict):
             abort(400)
         rate, amount = wealth_calc._f(data.get("return_pct")), wealth_calc._f(data.get("contribution"))
-        if (not 1900 <= year <= datetime.now(ZoneInfo("America/New_York")).year or rate is None
-                or not -100 < rate <= 10000 or amount is None or not 0 < amount <= 1e10):
+        current_year = datetime.now(ZoneInfo("America/New_York")).year
+        if not 1900 <= year <= current_year + 1:
+            return jsonify(error="Choose the current year, next year, or a historical goal year."), 400
+        if rate is None or not -100 < rate <= 10000 or amount is None or not 0 < amount <= 1e10:
             return jsonify(error="Enter a return above −100% and a positive contribution goal."), 400
         wealth_store.save_performance_setting(user_id, "goal", year, {"return_pct": rate, "contribution": amount})
         return jsonify(ok=True)

@@ -318,12 +318,14 @@ def performance_balance(ledgers, broker_accounts, prices, today):
     for h in holdings:
         if h.get("price_source"):
             sources.add((h["price_source"], h.get("price_as_of") or ""))
-        row = combined.setdefault(h["ticker"], dict(ticker=h["ticker"], market_value=0., cost_basis=0.))
+        row = combined.setdefault(h["ticker"], dict(ticker=h["ticker"], shares=0., market_value=0., cost_basis=0.))
+        row["shares"] += h["shares"]
         for field in ("market_value", "cost_basis"):
             v = h.get(field)
             row[field] = row[field] + v if row[field] is not None and v is not None else None
     for h in combined.values():
         mv, cost = h["market_value"], h["cost_basis"]
+        h["unrealized"] = mv - cost if mv is not None and cost is not None else None
         h["return_pct"] = (mv / cost - 1) * 100 if mv is not None and cost and cost > 0 else None
         h["weight_pct"] = mv / value * 100 if mv is not None and value and value > 0 else None
     rows = sorted(combined.values(), key=lambda h: (-(h["market_value"] or 0), h["ticker"]))

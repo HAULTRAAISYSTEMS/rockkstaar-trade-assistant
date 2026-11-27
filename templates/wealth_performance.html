@@ -73,6 +73,27 @@
     {% endfor %}
   </div>
 
+  <div class="pc-grid pc-grid--now">
+    <section class="pc-panel" aria-labelledby="pc-open-title">
+      <div class="pc-panel-head">
+        <h2 id="pc-open-title"><span class="pc-icon" aria-hidden="true">{{ rm_icon('pie') }}</span>Open Positions</h2>
+        <small id="pc-open-source"></small>
+      </div>
+      <div class="pc-scroll" tabindex="0" role="region" aria-label="Open positions">
+        <table class="pc-table">
+          <thead><tr><th scope="col">Symbol</th><th scope="col">Shares</th><th scope="col">Market value</th>
+            <th scope="col">Cost basis</th><th scope="col">Open P/L</th><th scope="col">Open return</th><th scope="col">Portfolio weight</th></tr></thead>
+          <tbody id="pc-open-positions"><tr><td colspan="7">Loading positions…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="pc-panel pc-readiness" aria-labelledby="pc-readiness-title">
+      <h2 id="pc-readiness-title"><span class="pc-icon" aria-hidden="true">{{ rm_icon('checks') }}</span>History Readiness</h2>
+      <p id="pc-readiness-status" role="status">Checking transaction coverage…</p>
+      <div id="pc-reconciliation" data-ledger="{{ url_for('wealth.ledger_page') }}"></div>
+    </section>
+  </div>
+
   <div class="pc-grid pc-grid--primary">
     <section class="pc-panel pc-summary">
       {{ panel_title('spark', 'Performance Summary') }}
@@ -195,6 +216,7 @@
       <label>Year <select name="year"></select></label>
       <label>Annual return target (%) <input name="return_pct" type="number" min="-99.99" max="10000" step="0.01" required></label>
       <label>Annual contribution goal ($) <input name="contribution" type="number" min="0.01" max="10000000000" step="0.01" required></label>
+      <p id="pc-goal-plan" class="pc-goal-plan"></p>
       <p role="status"></p>
       <div class="pc-dialog-actions"><button type="button" data-close>Cancel</button><button type="submit">Save goals</button></div>
     </form>

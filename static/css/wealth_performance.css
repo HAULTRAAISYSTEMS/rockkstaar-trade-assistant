@@ -281,3 +281,16 @@
 @media (prefers-reduced-motion: reduce) {
   .pc progress::-webkit-progress-value { transition: none; }
 }
+
+.pc-grid--now { grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr); }
+.pc-grid--now .pc-panel-head small { text-align: right; }
+.pc-readiness p { margin: .25rem 0 .55rem; color: var(--pc-muted); }
+.pc-readiness details { border-top: 1px solid #28475f78; padding: .45rem 0; }
+.pc-readiness details summary { cursor: pointer; }
+.pc-readiness details ul { margin: .35rem 0; padding-inline-start: 1.2rem; }
+.pc-readiness details a { color: var(--pc-cyan); }
+.pc dialog { margin: auto; }
+.pc-goal-plan { background: #102e46; color: var(--pc-ink); padding: .6rem; border-radius: .5rem; }
+@media (max-width: 850px) {
+  .pc-grid--now { grid-template-columns: minmax(0, 1fr); }
+}
