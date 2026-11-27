@@ -94,6 +94,24 @@
     </section>
   </div>
 
+  <section class="pc-panel pc-contribution-planner" aria-labelledby="pc-planner-title">
+    <div class="pc-panel-head">
+      <h2 id="pc-planner-title"><span class="pc-icon" aria-hidden="true">{{ rm_icon('calendar') }}</span>Contribution Planner</h2>
+      <div class="pc-plan-controls">
+        <label>Year <select id="pc-plan-year" disabled></select></label>
+        <button type="button" data-action="edit-plan" disabled>Edit plan</button>
+      </div>
+    </div>
+    <p id="pc-plan-summary">Loading contribution plan…</p>
+    <dl class="pc-plan-metrics">
+      <div><dt>Recorded net contributions · all accounts</dt><dd id="pc-plan-actual">—</dd></div>
+      <div><dt>Planned through year-end</dt><dd id="pc-plan-remaining">—</dd></div>
+      <div><dt>Estimated year-end total</dt><dd id="pc-plan-projected">—</dd></div>
+      <div><dt>Annual contribution goal</dt><dd id="pc-plan-target">—</dd></div>
+    </dl>
+    <small id="pc-plan-context">Estimates use your saved schedule.</small>
+  </section>
+
   <div class="pc-grid pc-grid--primary">
     <section class="pc-panel pc-summary">
       {{ panel_title('spark', 'Performance Summary') }}
@@ -216,7 +234,19 @@
       <label>Year <select name="year"></select></label>
       <label>Annual return target (%) <input name="return_pct" type="number" min="-99.99" max="10000" step="0.01" required></label>
       <label>Annual contribution goal ($) <input name="contribution" type="number" min="0.01" max="10000000000" step="0.01" required></label>
-      <p id="pc-goal-plan" class="pc-goal-plan"></p>
+      <fieldset class="pc-plan-fields">
+        <legend>Expected contributions</legend>
+        <label>How often <select name="cadence">
+          <option value="">No schedule</option>
+          <option value="weekly">Every week</option>
+          <option value="monthly">Every month</option>
+        </select></label>
+        <div id="pc-schedule-inputs" hidden>
+          <label>Amount per contribution ($) <input name="plan_amount" type="number" min="0.01" max="10000000000" step="0.01" required disabled></label>
+          <label>First contribution date <input name="start_date" type="date" required disabled></label>
+        </div>
+      </fieldset>
+      <p id="pc-goal-plan" class="pc-goal-plan" aria-live="polite"></p>
       <p role="status"></p>
       <div class="pc-dialog-actions"><button type="button" data-close>Cancel</button><button type="submit">Save goals</button></div>
     </form>
