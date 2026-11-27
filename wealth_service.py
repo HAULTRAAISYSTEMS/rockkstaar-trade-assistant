@@ -77,7 +77,8 @@ def summarize(ledgers: dict, prices: dict, sectors: dict, *, today: date | None 
             if tk in holdings:
                 holdings[tk]["dividends"] += amt
 
-    rows, unpriced, stale = [], [], []
+    rows, stale = [], []
+    unpriced = sorted({symbol for ledger in ledgers.values() for symbol in ledger.option_positions})
     mv = 0.0
     priced_basis = 0.0
     for tk, h in sorted(holdings.items()):
@@ -278,8 +279,9 @@ def performance_balance(ledgers, broker_accounts, prices, today):
     holdings = list(summary["holdings"] if summary else [])
     if summary:
         missing = bool(summary["unpriced"])
+        open_options = any(ledger.option_positions for ledger in ledgers.values())
         balances.append(dict(value=None if missing else summary["total_value"], cash=summary["cash"],
-                             available_cash=summary["cash"], basis=summary["cost_basis"],
+                             available_cash=summary["cash"], basis=None if open_options else summary["cost_basis"],
                              unrealized=None if missing else summary["unrealized"]))
     for account in broker_accounts:
         positions = account.get("holdings", [])
@@ -332,7 +334,8 @@ def performance_balance(ledgers, broker_accounts, prices, today):
     invested = [h["market_value"] for h in rows]
     position_total = sum(invested) if invested and all(v is not None for v in invested) else None
     concentration = None
-    if position_total and all(a.get("unsupported_positions") == 0 for a in broker_accounts):
+    if (position_total and not any(ledger.option_positions for ledger in ledgers.values())
+            and all(a.get("unsupported_positions") == 0 for a in broker_accounts)):
         concentration = dict(largest_pct=max(invested) / position_total * 100,
                              top5_pct=sum(invested[:5]) / position_total * 100,
                              effective_holdings=1 / sum((v / position_total) ** 2 for v in invested))

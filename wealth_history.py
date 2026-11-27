@@ -51,19 +51,28 @@ def build_series(ledgers: list, closes: dict, calendar: list[date], today_prices
     if not flows:
         return {"ok": False, "reason": "No deposits or transfers yet."}
     start = flows[0][0]
+    option_boundaries = []
+    for ledger in ledgers:
+        if ledger.option_positions:
+            return {"ok": False, "reason": "Historical returns need daily prices for open option contracts."}
+        last_exposed = max((day for day, held in ledger.option_exposure.items() if held), default=None)
+        if last_exposed is not None:
+            option_boundaries.append(min(day for day in ledger.option_exposure if day > last_exposed))
+    option_cutoff = max(option_boundaries, default=start)
+    trimmed = option_cutoff > start
+    start = max(start, option_cutoff)
     days = sorted({d for d in calendar if d >= start and (today is None or d <= today)})
     if today and today_prices and (not days or days[-1] < today):
         days.append(today)
     if len(days) < 2:
+        if trimmed:
+            return {"ok": False, "reason": "Returns need at least two valued market sessions after the last option position closed."}
         return {"ok": False, "reason": "Not enough history yet: check back after a few trading days."}
 
     series = {t: dict(rows) for t, rows in closes.items() if rows}
-    missing = sorted({t for lg in ledgers for _, _, held in lg.snapshots for t in held} - set(series))
-    if missing:
-        return {"ok": False, "reason": "No price history for " + ", ".join(missing) + ".", "missing": missing}
 
     # Walk each ledger's snapshots alongside the calendar.
-    values, gaps, security_values = [], set(), []
+    values, gaps, missing, security_values = [], set(), set(), []
     pointers = [0] * len(ledgers)
     states = [(0.0, {}) for _ in ledgers]
     for d in days:
@@ -82,6 +91,9 @@ def build_series(ledgers: list, closes: dict, calendar: list[date], today_prices
                     px = today_prices[tk]
                     marks[tk] += sh * px                # live price: actual shares, no adjustment
                     continue
+                if tk not in series:
+                    missing.add(tk)
+                    continue
                 px = series[tk].get(d)
                 if px is None or not isfinite(px) or px <= 0:
                     gaps.add(tk)
@@ -90,10 +102,16 @@ def build_series(ledgers: list, closes: dict, calendar: list[date], today_prices
                 marks[tk] += sh * _split_factor_after(splits, tk, d) * px
         values.append((d, total + sum(marks.values())))
         security_values.append((d, dict(marks)))
+    if missing:
+        missing = sorted(missing)
+        return {"ok": False, "reason": "No price history for " + ", ".join(missing) + ".", "missing": missing}
     if gaps:
         return {"ok": False, "reason": "Missing daily closing prices for " + ", ".join(sorted(gaps)) + ".",
                 "gaps": sorted(gaps)}
 
+    if trimmed:
+        opening_day, opening_value = values[0]
+        flows = [(opening_day, opening_value), *((day, amount) for day, amount in flows if day > opening_day)]
     # Flows dated on non-trading days count on the next valued day.
     flow_on_days, contrib = [], []
     fi, running = 0, 0.0
@@ -108,7 +126,7 @@ def build_series(ledgers: list, closes: dict, calendar: list[date], today_prices
         return {"ok": False, "reason": "Valuations or cash flows do not support a continuous return series."}
     return {"ok": True, "values": values, "flows": flow_on_days, "dated_flows": flows[:fi],
             "contributions": contrib, "security_values": security_values,
-            "gaps": [], "start": days[0], "end": days[-1]}
+            "gaps": [], "start": days[0], "end": days[-1], "option_history_trimmed": trimmed}
 
 
 def growth_index(values, flows) -> list[tuple[date, float]]:
@@ -188,6 +206,9 @@ def scoreboard(series: dict, spy_closes: list[tuple[date, float]] | None) -> dic
                   "growth": [round(v, 5) for _, v in idx]},
         "gaps": series["gaps"],
     }
+    if series.get("option_history_trimmed"):
+        out["option_history_trimmed"] = True
+        out["years"].pop(days[0].year, None)
     if spy_closes:
         b = benchmark_index(spy_closes, days)
         if b and b[-1][1] is not None:
@@ -197,5 +218,7 @@ def scoreboard(series: dict, spy_closes: list[tuple[date, float]] | None) -> dic
             out["spy_annual_pct"] = ann * 100 if ann is not None else None
             out["excess_pct"] = (twr - spy_tr) * 100 if twr is not None else None
             out["spy_years"] = benchmark_yearly(dict(spy_closes), days)
+            if out.get("option_history_trimmed"):
+                out["spy_years"] = {year: value for year, value in out["spy_years"].items() if year in out["years"]}
             out["chart"]["spy"] = [round(v, 5) if v is not None else None for _, v in b]
     return out
