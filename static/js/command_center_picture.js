@@ -672,6 +672,25 @@
       '<polyline points="' + pts.join(' ') + '" class="l ' + (up ? 'up' : 'dn') + '"/>';
   }
 
+  function renderReturn(d, mode) {
+    var u = d && d.unrealized_total;
+    var tile = strip && strip.querySelector('[data-m="return"]');
+    if (!tile) return;
+    var basis = tile.querySelector('[data-basis]');
+    if (!u || !num(u.cost_basis) || u.cost_basis <= 0 || !num(u.market_value)) {
+      setTile('return', '—', 'Complete cost basis unavailable', null);
+      basis.textContent = ''; return;
+    }
+    var mv = u.market_value;
+    if (mode !== 'close') (d.holdings || []).forEach(function(h) {
+      var q = LQ[h.ticker];
+      if (q && num(q.price) && num(h.price) && num(h.shares)) mv += (q.price - h.price) * h.shares;
+    });
+    var gain = mv - u.cost_basis;
+    setTile('return', pct(gain / u.cost_basis * 100), cents(gain, true) + ' open P/L', gain);
+    basis.textContent = 'Basis ' + cents(u.cost_basis);
+  }
+
   // Recompute every tile from the last load plus the latest prices.
   function renderMoney() {
     var d = M0; if (!d) return;
@@ -692,6 +711,7 @@
     if (num(value) && mode !== 'close') (d.holdings || []).forEach(function (h) {
       var q = LQ[h.ticker]; if (q && num(q.price) && num(h.price) && num(h.shares)) value += (q.price - h.price) * h.shares;
     });
+    renderReturn(d, mode);
     window.__cmd27Money = value;
     var dayPct = base > 0 ? day / base * 100 : null;
     // The My Portfolio card on the globe (the phone's main view) ticks too.
@@ -736,8 +756,9 @@
     if (!strip) return;
     get('/api/wealth/today').then(function (d) {
       strip.classList.remove('is-loading');
-      if (!d || !d.ok) { setTile('value', '—', 'Wealth data unavailable right now'); return; }
+      if (!d || !d.ok) { M0 = null; renderReturn(null, 'close'); setTile('value', '—', 'Wealth data unavailable right now'); return; }
       if (d.empty) {
+        M0 = null; renderReturn(null, 'close');
         strip.classList.add('is-empty'); strip.querySelector('.cmd27-money__empty').hidden = false;
         document.dispatchEvent(new CustomEvent('cmd27:portfolio-data', { detail: [] }));
         return;
@@ -759,7 +780,9 @@
       var vt = strip.querySelector('[data-m="value"] [data-s]');
       if (vt) vt.innerHTML = since || (d.positions + ' positions' + (d.source === 'schwab' ? ' · Schwab' : ''));
       setTile('cash', money(d.cash), null, null);
+      strip.classList.remove('is-empty'); strip.querySelector('.cmd27-money__empty').hidden = true;
       M0 = d;
+      renderReturn(d, 'close');
       if (!(d.moves && d.moves.length)) {
         // An older server without per-holding moves: show it as loaded.
         setTile('value', money(d.value), null, null);

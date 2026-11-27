@@ -723,7 +723,17 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 d = (xp - close) * x["shares"]
                 x.update(ext=o["ext"], ext_pct=round(xpct, 2), ext_price=round(xp, 2), ext_dollars=round(d, 2))
                 ext_dollars += d; ext_base += close * x["shares"]; ext_n += 1
+        # Only publish a total when every open position has a usable basis and value.
+        import math
+        complete = bool(tickers) and len(sized) == len(tickers) and all(
+            x.get("cost_basis") is not None and math.isfinite(x["cost_basis"])
+            and x["cost_basis"] > 0 and math.isfinite(x["value"]) for x in sized)
+        basis = sum(x["cost_basis"] for x in sized) if complete else None
+        unrealized = {"cost_basis": round(basis, 2), "market_value": round(invested, 2),
+                      "dollars": round(invested - basis, 2),
+                      "pct": round((invested / basis - 1) * 100, 2)} if basis else None
         return jsonify({"ok": True, "empty": False, "source": source, "value": value, "cash": cash,
+                        "unrealized_total": unrealized,
                         "holdings": sized[:40],
                         "ext_dollars": round(ext_dollars, 2) if ext_n else None,
                         "ext_pct": round(ext_dollars / ext_base * 100, 2) if ext_n and ext_base > 0 else None,
