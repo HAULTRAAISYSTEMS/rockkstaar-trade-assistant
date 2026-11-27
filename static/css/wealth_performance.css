@@ -328,3 +328,35 @@
 .pc-schedule-entry input, .pc-schedule-entry select { width: 100%; min-width: 0; }
 .pc-schedule-entry button { justify-self: start; }
 #pc-import-reasons { color: var(--pc-muted); }
+
+.pc-account-actions { display: flex; flex-wrap: wrap; gap: .3rem .85rem; }
+.pc-card-link { display: inline-block; margin-top: .4rem; color: var(--pc-cyan); font-size: .8rem; }
+.pc [data-assign-strategy] { margin-top: .45rem; }
+.pc a[data-plan-link], .pc #pc-open-positions a { color: var(--pc-cyan); }
+.pc-chart-empty { align-content: center; gap: .25rem; pointer-events: auto; }
+.pc-chart-empty a { color: var(--pc-cyan); }
+.pc #pc-history-readiness, .pc #pc-history-import, .pc #pc-contribution-planner,
+.pc #pc-recorded-activity { scroll-margin-top: 6rem; }
+
+.pc-funding-chart { margin: .8rem 0 .55rem; }
+.pc-funding-chart figcaption { font-weight: 700; }
+.pc-funding-legend { display: flex; flex-wrap: wrap; gap: .4rem .9rem; list-style: none; margin: .35rem 0; padding: 0; font-size: .75rem; }
+.pc-funding-legend li::before { content: ""; display: inline-block; width: .55rem; height: .55rem; margin-right: .3rem; border-radius: .13rem; background: #32d5ef; }
+.pc-funding-legend li[data-funding-series="actual"]::before { background: #35ef9a; }
+.pc-funding-legend li[data-funding-series="target"]::before { background: #c4a5ff; height: .15rem; vertical-align: middle; }
+.pc-funding-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .35rem; }
+.pc-funding-scale { height: 8rem; display: flex; flex-direction: column; justify-content: space-between; font-size: .65rem; color: var(--pc-muted); }
+.pc-funding-months { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.pc .pc-funding-month { padding: 0; border: 0; border-radius: .15rem; background: transparent; display: grid; justify-items: center; min-width: 0; }
+.pc-funding-month[aria-pressed="true"] { box-shadow: inset 0 0 0 1px #5799ae; }
+.pc-funding-tracks { position: relative; width: 100%; height: 8rem; border-top: 1px solid #29495d; background: linear-gradient(0deg, transparent calc(var(--funding-zero) - 1px), #29495d var(--funding-zero), transparent calc(var(--funding-zero) + 1px)); }
+.pc-funding-bar { position: absolute; width: 31%; border-radius: .2rem .2rem 0 0; }
+.pc-funding-planned { left: 16%; background: linear-gradient(#39d7f8, #187b99); }
+.pc-funding-actual { left: 51%; background: linear-gradient(#55f6ab, #128456); }
+.pc-funding-target { z-index: 1; width: 100%; left: 0; border-top: 2px dashed #c4a5ff; }
+.pc-funding-month-label { font-size: .68rem; white-space: nowrap; margin: .25rem 0; }
+#pc-funding-readout { min-height: 1.3rem; margin: .25rem 0; }
+@media (max-width: 435px) {
+  .pc-funding-month:nth-child(even):not(:last-child) .pc-funding-month-label { visibility: hidden; }
+  .pc-funding-month-label { font-size: .57rem; }
+}

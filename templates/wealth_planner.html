@@ -5,7 +5,18 @@
 {% block content %}
 <div class="wa">
 {{ wa.head('plan', 'Seasonal Wealth Planner · ' ~ year, 'Plan contributions by month and portfolio, track them against what you actually deposited, and stay inside IRA limits.', portfolios, current, with_all=False, pills=False) }}
-<div class="wa-bar"><a class="wa-pill" href="?year={{ year - 1 }}">← {{ year - 1 }}</a><span class="wa-pill is-on">{{ year }}</span><a class="wa-pill" href="?year={{ year + 1 }}">{{ year + 1 }} →</a></div>
+<div class="wa-bar">
+  <a class="wa-pill" href="{{ url_for('wealth.planner_page', year=year-1, p=current.id if current else None) }}">← {{ year - 1 }}</a>
+  <span class="wa-pill is-on">{{ year }}</span>
+  <a class="wa-pill" href="{{ url_for('wealth.planner_page', year=year+1, p=current.id if current else None) }}">{{ year + 1 }} →</a>
+</div>
+{% if portfolio_goal %}
+<section class="wa-card">
+  <h2>Performance contribution plan <small>{{ year }}</small></h2>
+  <p class="wa-note">Portfolio-wide goal {{ wa.money(portfolio_goal.target) }}{% if portfolio_goal.schedule %} · {{ wa.money(portfolio_goal.schedule.total) }} scheduled{% endif %}</p>
+  <a class="wa-pill" href="{{ url_for('wealth.performance_page', year=year, p=current.id if current else None) }}#pc-contribution-planner">Open contribution chart</a>
+</section>
+{% endif %}
 {% if not portfolios %}
 <section class="wa-card wa-empty"><h2>Create a portfolio first</h2>{{ wa.create_portfolio(quick_start, kinds) }}</section>
 {% else %}

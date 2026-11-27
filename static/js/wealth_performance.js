@@ -82,14 +82,15 @@
     }
   }
 
-  function notice(message, retry = false, ledger = true) {
+  function notice(message, retry = false, ledger = true, accountId = account.value) {
     get("notice").hidden = !message;
     get("notice-message").textContent = message;
     get("ledger-link").hidden = !ledger;
     const ledgerUrl = new URL(get("ledger-link").href);
-    ledgerUrl.search = account.value === "all" ? "" : "?p=" + account.value;
+    ledgerUrl.search = accountId === "all" ? "" : "?p=" + accountId;
     get("ledger-link").href = ledgerUrl;
     root.querySelector('[data-action="retry"]').hidden = !retry;
+    root.querySelector("[data-history-notice]").hidden = retry;
   }
 
   const shareQuantity = new Intl.NumberFormat("en-US", {maximumFractionDigits: 6});
@@ -100,15 +101,24 @@
     const rows = data.position.holdings;
     if (!rows.length) emptyTable(positions, 7, "No open positions available in this view.");
     for (const row of rows) {
-      tableRow(positions, row.ticker, [[shareQuantity.format(row.shares)],
+      const position = tableRow(positions, row.ticker, [[shareQuantity.format(row.shares)],
         [money(row.market_value)], [money(row.cost_basis)], [money(row.unrealized), row.unrealized],
         [pct(row.return_pct), row.return_pct], [percentUnsigned(row.weight_pct)]]);
+      const research = document.createElement("a");
+      research.href = root.dataset.stock.replace("__TICKER__", encodeURIComponent(row.ticker));
+      research.textContent = row.ticker;
+      position.cells[0].replaceChildren(research);
     }
     const asOf = data.sync.as_of.at(-1);
     const sources = data.position.quote_sources;
     const includesLedger = sources.some(source => source.source !== "Schwab");
     const sourceLabel = asOf ? "Schwab snapshot " + time(asOf) : "";
     get("open-source").textContent = [sourceLabel, includesLedger ? "Ledger and quotes" : ""].filter(Boolean).join(" · ");
+  }
+
+  function needsHistory(check) {
+    return !check.has_transactions || !check.history_confirmed || !check.live ||
+      !check.cash_matches || check.positions.length || check.unsupported_positions;
   }
 
   function renderReadiness(data) {
@@ -121,10 +131,11 @@
     const brokerHistory = data.reconciliation || [];
     get("readiness-status").textContent = data.history.ok ? "Verified history through " + data.history.end
       : (brokerHistory.length ? "Select an account below to see what its ledger needs." : (data.history.reason || ""));
+    const firstBlocked = brokerHistory.find(needsHistory);
     for (const check of brokerHistory) {
       const details = document.createElement("details");
       details.dataset.account = check.portfolio_id;
-      details.open = openState.get(details.dataset.account) ?? (brokerHistory.length === 1 && !data.history.ok);
+      details.open = openState.get(details.dataset.account) ?? (!data.history.ok && check === firstBlocked);
       const title = document.createElement("summary");
       const lines = [];
       if (!check.has_transactions) lines.push("Import this account’s transaction history into its ledger.");
@@ -156,7 +167,21 @@
       destination.searchParams.set("p", check.portfolio_id);
       ledger.href = destination.href;
       ledger.textContent = "Open this account’s ledger";
-      details.append(ledger);
+      const importLink = document.createElement("a");
+      const importDestination = new URL(location.href);
+      importDestination.searchParams.set("p", check.portfolio_id);
+      importDestination.hash = "pc-history-import";
+      importLink.href = importDestination.href;
+      importLink.textContent = "Import history for this account";
+      importLink.addEventListener("click", () => {
+        if (String(check.portfolio_id) === account.value) {
+          root.dispatchEvent(new CustomEvent("performance:import-account", {detail: check.portfolio_id}));
+        }
+      });
+      const actions = document.createElement("div");
+      actions.className = "pc-account-actions";
+      actions.append(importLink, ledger);
+      details.append(actions);
       panel.append(details);
     }
   }
@@ -249,6 +274,7 @@
       field(key, key === "volatility" ? percentUnsigned(value) : pct(value), key === "volatility" ? null : value);
     }
     for (const key of ["sharpe", "sortino", "calmar", "beta"]) field(key, number(r[key]));
+    get("risk-coverage").hidden = !history.ok || [r.sharpe, r.sortino, r.calmar, r.beta].every(finite);
 
     const ytd = data.find(p => p.label === "YTD");
     field("comparison-portfolio", pct(ytd?.portfolio), ytd?.portfolio);
@@ -292,7 +318,9 @@
     }
     chartRange.disabled = !history.ok;
     get("chart-empty").hidden = Boolean(history.ok);
-    get("chart-empty").textContent = history.ok ? "" : "Historical values unavailable";
+    get("chart-message").textContent = history.ok ? "" : "Historical values unavailable";
+    for (const link of root.querySelectorAll("[data-history-link]")) link.hidden = Boolean(history.ok);
+    get("recorded-link").hidden = Boolean(history.ok) || !response.position.recorded_activity_ytd;
     setPlot();
   }
 
@@ -304,7 +332,65 @@
   const planYear = get("plan-year");
   const planEntries = plan => Array.isArray(plan) ? plan : plan ? [plan] : [];
   const cadenceLabels = {weekly: " every week", biweekly: " every other week", monthly: " every month", once: " one time"};
-  let selectedPlanYear;
+  let selectedPlanYear = Number(root.dataset.planYear) || undefined;
+  let selectedFundingMonth;
+  const fundingSeries = [["planned", "Scheduled"], ["actual", "Verified net"], ["target", "Even goal pace"]];
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const compactMoney = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD", notation: "compact"});
+
+  function renderFundingChart(goal) {
+    const data = goal.contribution_chart;
+    const values = data.flatMap(row => fundingSeries.map(([key]) => row[key])).filter(finite);
+    const low = Math.min(0, ...values);
+    const high = Math.max(1, ...values);
+    const scale = value => 100 * (value - low) / (high - low);
+    const chart = get("funding-months");
+    chart.replaceChildren();
+    chart.style.setProperty("--funding-zero", scale(0) + "%");
+    get("funding-scale").replaceChildren(...[high, (high + low) / 2, low].map(value => {
+      const tick = document.createElement("span");
+      tick.textContent = compactMoney.format(value);
+      return tick;
+    }));
+    for (const [key] of fundingSeries) {
+      root.querySelector('[data-funding-series="' + key + '"]').hidden = !data.some(row => finite(row[key]));
+    }
+    const activate = (row, item) => {
+      selectedFundingMonth = row.month;
+      chart.querySelector('[aria-pressed="true"]')?.setAttribute("aria-pressed", "false");
+      item.setAttribute("aria-pressed", "true");
+      const values = fundingSeries.filter(([key]) => finite(row[key]))
+        .map(([key, label]) => label + " " + money(row[key]));
+      get("funding-readout").textContent = months[row.month - 1] + " " + goal.year + " · " + values.join(" · ");
+    };
+    for (const row of data) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "pc-funding-month";
+      item.setAttribute("aria-pressed", "false");
+      item.setAttribute("aria-label", months[row.month - 1] + " " + goal.year);
+      const tracks = document.createElement("span");
+      tracks.className = "pc-funding-tracks";
+      tracks.setAttribute("aria-hidden", "true");
+      for (const [key] of fundingSeries) {
+        const value = row[key];
+        if (!finite(value)) continue;
+        const bar = document.createElement("span");
+        bar.className = "pc-funding-bar pc-funding-" + key;
+        const point = scale(value);
+        bar.style.bottom = (key === "target" ? point : Math.min(point, scale(0))) + "%";
+        if (key !== "target") bar.style.height = Math.abs(point - scale(0)) + "%";
+        tracks.append(bar);
+      }
+      const label = document.createElement("span");
+      label.className = "pc-funding-month-label";
+      label.textContent = months[row.month - 1];
+      item.append(tracks, label);
+      item.addEventListener("click", () => activate(row, item));
+      chart.append(item);
+      if (row.month === (selectedFundingMonth || 12)) activate(row, item);
+    }
+  }
 
   function renderContributionPlanner(data) {
     const options = data.goals.filter(row => row.year >= data.selected_goal.year || row.contribution_plan);
@@ -339,10 +425,20 @@
     if (projected) messages.push(projected.remaining_count + " planned contributions after today.");
     if (entries.length) messages.push("Planning estimate only.");
     get("plan-context").textContent = messages.join(" ");
+    renderFundingChart(goal);
+    for (const link of root.querySelectorAll("[data-plan-link]")) {
+      const destination = new URL(link.href);
+      destination.searchParams.set("year", goal.year);
+      link.href = destination.href;
+    }
   }
 
   planYear.addEventListener("change", () => {
     selectedPlanYear = Number(planYear.value);
+    selectedFundingMonth = null;
+    const page = new URL(location.href);
+    page.searchParams.set("year", selectedPlanYear);
+    history.replaceState(null, "", page);
     renderContributionPlanner(response);
   });
 
@@ -395,7 +491,15 @@
     const coverage = data.history.ok ? "History through " + data.history.end : "History incomplete";
     const sync = data.sync.live ? "Schwab connected" : (data.sync.stored ? "Schwab snapshot" : "No Schwab balance in this view");
     status.textContent = (syncMessage || sync) + " · " + coverage;
-    notice(data.history.ok ? "" : data.history.reason);
+    const blocker = data.reconciliation?.find(needsHistory);
+    const ledgerAccount = account.value !== "all" ? account.value : blocker?.portfolio_id;
+    notice(data.history.ok ? "" : data.history.reason, false, Boolean(ledgerAccount), ledgerAccount);
+    for (const button of root.querySelectorAll("[data-assign-strategy]")) {
+      const group = button.dataset.assignStrategy;
+      button.hidden = !data.accounts.some(item => item.strategy === "unclassified" &&
+          (account.value === "all" || String(item.id) === account.value))
+        || finite(data.strategies[group]?.value) || (strategy.value !== "all" && strategy.value !== group);
+    }
   }
 
   function refreshOptions(data) {
@@ -431,7 +535,10 @@
       else destination.searchParams.set("p", account.value);
       link.href = destination.href;
     }
-    history.replaceState(null, "", location.pathname + query);
+    const page = new URL(location.href);
+    page.search = query;
+    if (selectedPlanYear) page.searchParams.set("year", selectedPlanYear);
+    history.replaceState(null, "", page);
     try {
       const r = await fetch(root.dataset.api + query, {signal: request.signal, cache: "no-store"});
       if (!r.ok) throw new Error("Performance data is temporarily unavailable.");
@@ -734,13 +841,22 @@
   }
   root.querySelector('[data-action="goals"]').addEventListener("click", () => openGoalDialog(response.selected_goal.year));
   root.querySelector('[data-action="edit-plan"]').addEventListener("click", () => openGoalDialog(selectedPlanYear));
-  root.querySelector('[data-action="accounts"]').addEventListener("click", () => {
+  function openAccountSettings(preferredStrategy) {
     settingsAccount.replaceChildren(...response.accounts.map(a => new Option(a.label || a.name, a.id)));
     if (response.accounts.some(a => String(a.id) === account.value)) settingsAccount.value = account.value;
+    else if (preferredStrategy) {
+      const unclassified = response.accounts.find(item => item.strategy === "unclassified");
+      if (unclassified) settingsAccount.value = unclassified.id;
+    }
     showAccount();
+    if (preferredStrategy) accountForm.elements.strategy.value = preferredStrategy;
     accountForm.querySelector('[role="status"]').textContent = "";
     get("accounts-dialog").showModal();
-  });
+  }
+  root.querySelector('[data-action="accounts"]').addEventListener("click", () => openAccountSettings());
+  for (const button of root.querySelectorAll("[data-assign-strategy]")) {
+    button.addEventListener("click", () => openAccountSettings(button.dataset.assignStrategy));
+  }
 
   async function save(form, path, body) {
     const message = form.querySelector('[role="status"]');
@@ -830,6 +946,7 @@
   }
 
   root.querySelector('[data-action="retry"]').addEventListener("click", load);
+  get("recorded-link").addEventListener("click", () => { get("recorded-activity").open = true; });
   root.addEventListener("performance:ledger-updated", () => {
     syncMessage = "";
     load();

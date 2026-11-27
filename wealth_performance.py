@@ -54,10 +54,9 @@ def clean_contribution_plan(year, plan):
     return result
 
 
-def contribution_projection(year, plan, target, actual, today, *, all_accounts=True):
-    """Schedule assumptions never affect ledger totals or historical returns."""
+def _scheduled_contributions(year, plan):
     if not plan:
-        return None
+        return []
     entries = plan if isinstance(plan, list) else [plan]
     scheduled = []
     for entry in entries:
@@ -74,6 +73,14 @@ def contribution_projection(year, plan, target, actual, today, *, all_accounts=T
                      for month in range(first.month, last.month + 1)]
         amount = Decimal(str(entry["amount"]))
         scheduled.extend((day, amount) for day in dates if day <= last)
+    return scheduled
+
+
+def contribution_projection(year, plan, target, actual, today, *, all_accounts=True):
+    """Schedule assumptions never affect ledger totals or historical returns."""
+    if not plan:
+        return None
+    scheduled = _scheduled_contributions(year, plan)
     remaining = [(day, amount) for day, amount in scheduled if day > today]
     remaining_amount = float(sum(amount for _, amount in remaining))
     baseline = 0. if year > today.year else actual if all_accounts else None
@@ -81,6 +88,41 @@ def contribution_projection(year, plan, target, actual, today, *, all_accounts=T
     return dict(total=float(sum(amount for _, amount in scheduled)), count=len(scheduled), remaining=remaining_amount,
                 remaining_count=len(remaining), next_date=min(day for day, _ in remaining).isoformat() if remaining else None,
                 year_end=projected, gap=round(projected - target, 2) if projected is not None else None)
+
+
+def contribution_chart(year, plan, target, today, actual=None, first_recorded=None):
+    """Cumulative month-end funding; the current actual month is through today."""
+    planned = defaultdict(lambda: Decimal(0))
+    for day, amount in _scheduled_contributions(year, plan):
+        planned[day.month] += amount
+    plan_total = Decimal(0)
+    actual_total = 0.
+    rows = []
+    for month in range(1, 13):
+        end = date(year, month, monthrange(year, month)[1])
+        plan_total += planned[month]
+        actual_total += (actual or {}).get((year, month), 0.)
+        has_coverage = (actual is not None and first_recorded and end >= first_recorded
+                        and date(year, month, 1) <= today)
+        rows.append(dict(month=month, target=round(target * month / 12, 2),
+                         planned=float(plan_total) if plan else None,
+                         actual=round(actual_total, 2) if has_coverage else None))
+    return rows
+
+
+def _cash_movement(event, paired):
+    kind = event["transaction"]["type"]
+    return kind in ("DEPOSIT", "WITHDRAWAL") and id(event) not in paired
+
+
+def monthly_contributions(ledgers, paired, today):
+    totals = defaultdict(float)
+    for ledger in ledgers.values():
+        for event in ledger.events:
+            day = event["date"]
+            if day <= today and _cash_movement(event, paired):
+                totals[day.year, day.month] += event["flow"]
+    return totals
 
 
 def transfers(ledgers):
@@ -203,7 +245,7 @@ def ledger_activity(ledgers, paired, today):
                 continue
             row = years[day.year]
             kind, amount = tx["type"], _f(tx.get("amount"))
-            if id(event) not in paired and kind in ("DEPOSIT", "WITHDRAWAL"):
+            if _cash_movement(event, paired):
                 row["deposits" if kind == "DEPOSIT" else "withdrawals"] += amount
             if kind in ("DIVIDEND", "REINVEST"):
                 row["dividends"] += amount or _f(tx.get("shares")) * _f(tx.get("price"))

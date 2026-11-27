@@ -589,3 +589,23 @@ def test_unreconciled_broker_view_can_show_recorded_ledger_activity(env, monkeyp
     assert data["selected_goal"]["net"] is None
     assert data["position"]["recorded_activity_ytd"] == {
         "deposits": 300, "dividends": 20, "fees": 5, "withdrawals": 0, "interest": 0}
+
+
+def test_contribution_chart_shows_cumulative_plan_and_covered_actual_months_only():
+    plan = performance.clean_contribution_plan(2026, [
+        {"cadence": "monthly", "amount": 500, "start_date": "2026-01-01"},
+        {"cadence": "once", "amount": 250, "start_date": "2026-03-15"},
+    ])
+    rows = performance.contribution_chart(2026, plan, 12000, date(2026, 4, 15),
+        {(2026, 2): 600, (2026, 3): -100}, date(2026, 2, 12))
+    assert rows[:5] == [
+        {"month": 1, "target": 1000, "planned": 500, "actual": None},
+        {"month": 2, "target": 2000, "planned": 1000, "actual": 600},
+        {"month": 3, "target": 3000, "planned": 1750, "actual": 500},
+        {"month": 4, "target": 4000, "planned": 2250, "actual": 500},
+        {"month": 5, "target": 5000, "planned": 2750, "actual": None},
+    ]
+    assert rows[-1] == {"month": 12, "target": 12000, "planned": 6250, "actual": None}
+    unverified = performance.contribution_chart(2026, plan, 12000, date(2026, 4, 15))
+    assert all(row["actual"] is None for row in unverified)
+    assert unverified[-1]["planned"] == 6250
