@@ -9,11 +9,39 @@ import wealth_history as history
 import wealth_ledger as ledger
 import wealth_performance as performance
 import wealth_service
+import wealth_store
 from test_wealth_routes import client, env, make_portfolio  # noqa: F401
 
 
 def tx(day, kind, **fields):
     return {"date": day.isoformat(), "type": kind, **fields}
+
+
+def test_transfer_review_preserves_import_identity_and_updates_history(env):
+    app, *_ = env
+    owner = client(app, 1)
+    pid = make_portfolio(owner, "Taxable", "taxable")
+    csv = (
+        "Date,Action,Symbol,Description,Quantity,Price,Fees & Comm,Amount\n"
+        "01/05/2026,Journal,,Transfer,,,,100\n"
+    )
+    preview = owner.post("/api/wealth/import/preview", json={"text": csv}).json
+    request = {"portfolio_id": pid, "transactions": preview["transactions"]}
+    assert owner.post("/api/wealth/import/commit", json=request).json["added"] == 1
+    row = wealth_store.list_transactions(1, pid)[0]
+    url = f"/api/wealth/transactions/{row['id']}/transfer"
+    edit = {"mode": "external", "note": "Journal"}
+    response = owner.get(f"/api/wealth/performance?p={pid}").json
+    assert "verify this cash movement" in response["history"]["reason"]
+    assert client(app, 2).patch(url, json=edit).status_code == 409
+    assert owner.patch(url, json={"mode": "internal", "note": "Journal"}).status_code == 400
+    assert owner.patch(url, json=edit).json["note"] == "Journal external-transfer"
+    assert owner.patch(url, json=edit).status_code == 409
+    after = wealth_store.list_transactions(1, pid)[0]
+    assert (after["fingerprint"], after["amount"]) == (row["fingerprint"], row["amount"])
+    assert owner.post("/api/wealth/import/commit", json=request).json["duplicates"] == 1
+    assert owner.get(f"/api/wealth/performance?p={pid}").json["history"]["ok"]
+    assert owner.patch(url, json={"mode": "pending", "note": after["note"]}).json["note"] == "Journal"
 
 
 def test_options_history_starts_at_first_fully_valued_close():

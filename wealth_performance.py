@@ -15,7 +15,32 @@ BENCHMARK = "^SP500TR"
 BENCHMARK_LABEL = "S&P 500 Total Return Index"
 STRATEGIES = {"long_term": "Long-Term Investing", "active": "Active Trading", "unclassified": "Unclassified"}
 DEFAULT_GOAL = {"return_pct": 20.0, "contribution": 25000.0}
-TRANSFER_REF = re.compile(r"(?:^|\s)transfer:([\w.-]{1,64})(?:\s|$)", re.IGNORECASE)
+TRANSFER_REF = re.compile(r"(?<!\S)transfer:([\w.-]{1,64})(?!\S)", re.IGNORECASE)
+TRANSFER_TYPES = {"DEPOSIT", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT"}
+EXTERNAL_MARKER = re.compile(r"(?<!\S)external-transfer(?!\S)", re.IGNORECASE)
+
+
+def transfer_review(note):
+    note = note or ""
+    match = TRANSFER_REF.search(note)
+    if match:
+        return "internal", match[1]
+    return ("external" if EXTERNAL_MARKER.search(note) else "pending"), ""
+
+
+def transfer_note(note, mode, reference):
+    clean = EXTERNAL_MARKER.sub("", TRANSFER_REF.sub("", note)).strip()
+    if mode == "pending":
+        result = clean
+    elif mode == "external":
+        result = f"{clean} external-transfer".strip()
+    elif mode == "internal" and re.fullmatch(r"[\w.-]{1,64}", reference):
+        result = f"{clean} transfer:{reference}".strip()
+    else:
+        raise ValueError("Enter a reference of up to 64 letters, digits, underscores, periods or hyphens.")
+    if len(result) > 200:
+        raise ValueError("The note and reference together must be 200 characters or less.")
+    return result
 
 
 def clean_contribution_plan(year, plan):
@@ -134,13 +159,13 @@ def transfers(ledgers):
         for event in ledger.events:
             tx = event["transaction"]
             kind = tx["type"]
-            if kind not in {"DEPOSIT", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT"}:
+            if kind not in TRANSFER_TYPES:
                 continue
             note = tx.get("note") or ""
-            match = TRANSFER_REF.search(note)
-            if match:
-                keys[match[1].lower()].append((pid, event))
-            elif "external-transfer" not in note.lower():
+            mode, reference = transfer_review(note)
+            if mode == "internal":
+                keys[reference.lower()].append((pid, event))
+            elif mode == "pending":
                 cash = kind in {"DEPOSIT", "WITHDRAWAL"}
                 quantity = abs(event["flow"]) if cash else _f(tx.get("shares"))
                 unmarked[event["date"], None if cash else event["ticker"], round(quantity, 7)].append(

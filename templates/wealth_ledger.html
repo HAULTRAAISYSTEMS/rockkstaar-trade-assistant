@@ -13,6 +13,42 @@
 <div class="wa-warn"><b>Check</b><span>{% for i in ledger.issues %}{{ i }}{% if not loop.last %}<br>{% endif %}{% endfor %}</span></div>
 {% endif %}
 
+{% if transfers %}
+<details class="wa-card" id="review-transfers" {% if review_transfers %}open{% endif %}>
+  <summary>Review transfers</summary>
+  <p class="wa-note">Use your Schwab statement to identify each movement. Choose Outside tracked accounts for money entering or leaving the accounts you track. For a transfer between tracked accounts, enter the same reference on both entries. They must match by date and amount or share quantity.</p>
+  <a href="{{ url_for('wealth.performance_page', p=current.id) }}#pc-history-readiness">Back to Performance history</a>
+  <div class="wa-scroll">
+    <table class="wa-table">
+      <thead><tr><th>Date</th><th>Activity</th><th>Amount / shares</th><th>Ledger note</th><th>Classification</th></tr></thead>
+      <tbody>
+        {% for tx, mode, reference in transfers %}
+        <tr>
+          <td>{{ tx.date }}</td>
+          <td>{{ tx.type.replace('_', ' ').title() }} {{ tx.ticker or '' }}</td>
+          <td>{{ wa.qty(tx.shares) if tx.ticker else wa.money(tx.amount) }}</td>
+          <td data-transfer-note style="white-space:normal">{{ tx.note or '—' }}</td>
+          <td>
+            <form data-review-transfer="{{ tx.id }}" data-note="{{ tx.note or '' }}">
+              <select name="mode" class="wa-input" aria-label="Transfer classification for {{ tx.date }}">
+                <option value="pending" {% if mode == 'pending' %}selected{% endif %}>Unclassified</option>
+                <option value="external" {% if mode == 'external' %}selected{% endif %}>Outside tracked accounts</option>
+                <option value="internal" {% if mode == 'internal' %}selected{% endif %}>Between tracked accounts</option>
+              </select>
+              <input class="wa-input" name="reference" aria-label="Matching transfer reference" placeholder="Matching reference" maxlength="64"
+                     value="{{ reference }}" {% if mode != 'internal' %}hidden{% else %}required{% endif %}>
+              <button class="wa-btn" type="submit">Save</button>
+              <span class="wa-msg" role="status"></span>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+{% endif %}
+
 <div class="wa-two">
   <div class="wa-grid">
     <section class="wa-card">
@@ -153,6 +189,33 @@
     const d = await WA.api('/api/wealth/transactions/' + b.dataset.del, 'DELETE');
     if (d.ok) location.reload();
   }));
+
+  document.querySelectorAll('[data-review-transfer]').forEach(review => {
+    const {mode, reference} = review.elements;
+    mode.addEventListener('change', () => {
+      reference.hidden = mode.value !== 'internal';
+      reference.required = !reference.hidden;
+    });
+    review.addEventListener('submit', async event => {
+      event.preventDefault();
+      const message = review.querySelector('[role="status"]');
+      const submit = review.querySelector('button');
+      submit.disabled = true;
+      message.textContent = 'Saving…';
+      try {
+        const result = await WA.api('/api/wealth/transactions/' + review.dataset.reviewTransfer + '/transfer',
+          'PATCH', {note: review.dataset.note, mode: mode.value, reference: reference.value});
+        if (!result.ok) throw new Error(result.error || 'Could not save this classification.');
+        review.dataset.note = result.note;
+        review.closest('tr').querySelector('[data-transfer-note]').textContent = result.note || '—';
+        message.textContent = 'Saved';
+      } catch (error) {
+        message.textContent = error.message;
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  });
 
   // Import: preview first.
   let preview = [];

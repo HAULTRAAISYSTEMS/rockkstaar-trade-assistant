@@ -118,7 +118,7 @@
 
   function needsHistory(check) {
     return !check.has_transactions || !check.history_confirmed || !check.live ||
-      !check.cash_matches || check.positions.length || check.unsupported_positions;
+      !check.cash_matches || check.positions.length || check.unsupported_positions || check.transfer_review_count;
   }
 
   function renderReadiness(data) {
@@ -155,6 +155,9 @@
       if (check.has_transactions && !check.history_confirmed) {
         lines.push("Verify full transaction coverage, then confirm it in Account settings.");
       }
+      if (check.transfer_review_count) {
+        lines.push("Review transfer classifications before calculating historical returns.");
+      }
       title.textContent = check.account + " · " + (!check.has_transactions ? "Import history" : (lines.length ? "Review ledger" : "Balances matched"));
       details.append(title);
       if (lines.length) {
@@ -181,6 +184,14 @@
       const actions = document.createElement("div");
       actions.className = "pc-account-actions";
       actions.append(importLink, ledger);
+      if (check.transfer_review_count) {
+        const review = document.createElement("a");
+        destination.searchParams.set("review", "transfers");
+        destination.hash = "review-transfers";
+        review.href = destination.href;
+        review.textContent = "Review transfers";
+        actions.append(review);
+      }
       details.append(actions);
       panel.append(details);
     }

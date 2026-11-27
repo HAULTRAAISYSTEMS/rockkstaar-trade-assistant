@@ -464,8 +464,11 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         current = owned(user_id, request.args.get("p")) or (portfolios[0] if portfolios else None)
         txs = wealth_store.list_transactions(user_id, current["id"]) if current else []
         lg = wealth_ledger.build(txs) if current else None
+        transfers = [(tx, *performance.transfer_review(tx.get("note"))) for tx in reversed(txs)
+                     if tx["type"] in performance.TRANSFER_TYPES]
         return render_template("wealth_ledger.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=current,
                                txs=list(reversed(txs)), ledger=lg, types=wealth_ledger.TYPES,
+                               transfers=transfers, review_transfers=request.args.get("review") == "transfers",
                                kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
 
     @bp.get("/wealth/scoreboard")
@@ -602,7 +605,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                         broker_cash=cash, cash_matches=cash_matches,
                         ledger_cash=round(ledger.cash, 2) if ledger.first_date else None,
                         cash_difference=cash_difference if ledger.first_date and not cash_matches else None,
-                        positions=discrepancies))
+                        positions=discrepancies, transfer_review_count=len(transfer_issues.get(pid, ()))))
                     if snapshot.get("unsupported_positions"):
                         bucket["history_issues"].append(f"{label}: the ledger cannot value one or more Schwab positions.")
                     if not profile.get("history_confirmed"):
@@ -1028,6 +1031,23 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         if not wealth_store.delete_transaction(uid(), tx_id):
             abort(404)
         return jsonify({"ok": True})
+
+    @bp.patch("/api/wealth/transactions/<int:tx_id>/transfer")
+    def review_ledger_transfer(tx_id):
+        user_id = uid()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(ok=False, error="Choose a transfer classification."), 400
+        note, mode, reference = [data.get(key, "") for key in ("note", "mode", "reference")]
+        if not all(isinstance(item, str) for item in (note, mode, reference)) or len(note) > 200:
+            return jsonify(ok=False, error="Choose a valid transfer classification."), 400
+        try:
+            updated = performance.transfer_note(note, mode, reference.strip())
+        except ValueError as error:
+            return jsonify(ok=False, error=str(error)), 400
+        if not wealth_store.update_transfer_note(user_id, tx_id, note, updated):
+            return jsonify(ok=False, error="This entry is unavailable or changed. Reload the ledger and try again."), 409
+        return jsonify(ok=True, note=updated)
 
     # ── CSV import: preview, then commit ─────────────────────────────────
     @bp.post("/api/wealth/import/preview")
