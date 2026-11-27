@@ -270,3 +270,151 @@ def test_reinvestment_and_matching_cash_dividend_needs_reconciliation():
             tx(day, "REINVEST", ticker="A", amount=40, shares=1, price=40)]
     assert performance.ledger_issues(ledger.build(rows)) == [
         "2026-01-12: check whether the A cash dividend duplicates a recorded reinvestment."]
+
+
+def test_schwab_picker_uses_verified_suffix_and_ignores_empty_stale_entries(env, monkeypatch):
+    import time
+    import app as legacy
+    import wealth_store
+
+    app, *_ = env
+    c = client(app, 1)
+    endpoint = "/api/wealth/performance"
+    number, hashed = "71324567", "opaque-schwab-key-9999"
+    linked = make_portfolio(c, "Schwab Taxable brokerage")
+    other_linked = make_portfolio(c, "Schwab Taxable brokerage")
+    stale = make_portfolio(c, "Schwab Taxable brokerage")
+    wealth_store.update_portfolio(1, linked, broker_account=number)
+    wealth_store.update_portfolio(1, other_linked, broker_account="opaque-other-key-8888")
+    wealth_store.update_portfolio(1, stale, broker_account="retired-mapping")
+    accounts = [
+        {"account_hash": hashed, "account_number": number, "total_value": 650, "cash_and_sweep": 650},
+        {"account_hash": "opaque-other-key-8888", "account_number": "82900102",
+         "total_value": 150, "cash_and_sweep": 150},
+    ]
+    monkeypatch.setattr(legacy, "_schwab_account_cache", {1: {
+        "ts": time.time(), "data": {"connected": True, "accounts": accounts}}})
+    all_accounts = c.get(endpoint).get_json()
+    assert all_accounts["position"]["value"] == 800
+    assert not all_accounts["history"]["ok"]
+    assert any("latest Schwab account list" in w for w in all_accounts["warnings"])
+    assert [(a["id"], a["label"]) for a in all_accounts["accounts"]] == [
+        (linked, "•••• 4567 · Schwab Taxable brokerage"),
+        (other_linked, "•••• 0102 · Schwab Taxable brokerage"),
+    ]
+    assert c.get(f"{endpoint}?p={linked}&view=balance").get_json()["position"]["value"] == 650
+    assert c.get(f"{endpoint}?p={other_linked}").get_json()["position"]["value"] == 150
+    assert c.get(f"{endpoint}?p={stale}").get_json()["position"]["value"] is None
+    assert all(value not in str(all_accounts) for value in (number, hashed, "82900102", "retired-mapping"))
+    assert wealth_store.get_portfolio(1, stale) is not None
+    assert client(app, 2).get(endpoint).get_json()["accounts"] == []
+
+
+def test_schwab_empty_stale_entries_are_kept_without_a_fresh_roster(env, monkeypatch):
+    import app as legacy
+    import wealth_store
+
+    app, *_ = env
+    c = client(app, 1)
+    endpoint = "/api/wealth/performance"
+    linked = make_portfolio(c, "Schwab IRA")
+    missing = make_portfolio(c, "Missing account with ledger")
+    wealth_store.update_portfolio(1, linked, broker_account="snapshot-key-1212")
+    wealth_store.update_portfolio(1, missing, broker_account="unknown-key-3333")
+    wealth_store.save_broker_snapshot(1, "snapshot-key-1212", {
+        "account_id": "snapshot-key-1212", "account_last_four": "0017",
+        "total_value": 100, "cash": 100, "unsupported_positions": 0})
+    monkeypatch.setattr(legacy, "_schwab_account_cache", {})
+    response = c.get(endpoint).get_json()
+    assert response["position"]["value"] is None
+    assert "•••• 0017" in response["accounts"][0]["label"]
+    assert response["accounts"][1]["label"].endswith("Account ending unavailable")
+    assert "3333" not in str(response)
+    assert c.get(f"{endpoint}?p={linked}").get_json()["position"]["value"] == 100
+
+    import time
+    assert c.post("/api/wealth/transactions", json={
+        "portfolio_id": missing, "type": "DEPOSIT", "amount": 40, "date": "2025-01-02"}).status_code == 200
+    monkeypatch.setattr(legacy, "_schwab_account_cache", {1: {"ts": time.time(), "data": {
+        "connected": True, "accounts": [{"account_hash": "snapshot-key-1212", "account_number": "78210017",
+                                          "total_value": 100, "cash_and_sweep": 100}]}}})
+    response = c.get(endpoint).get_json()
+    assert [a["id"] for a in response["accounts"]] == [linked, missing]
+    assert response["position"]["value"] is None
+    assert response["history"]["ok"] is False
+
+
+def test_sync_reuses_exact_number_mapping_and_persists_safe_label(env):
+    import wealth_store
+    from flask import Flask
+    from wealth_routes import create_wealth_blueprint
+
+    flask_app, *_ = env
+    c = client(flask_app, 1)
+    pid = make_portfolio(c, "Existing Schwab")
+    number = "72340007"
+    key = "real-schwab-key-9876"
+    wealth_store.update_portfolio(1, pid, broker_account=number)
+    isolated = Flask(__name__)
+    isolated.register_blueprint(create_wealth_blueprint(current_user=lambda: {"id": 1},
+        broker_summary=lambda user: {"connected": True, "accounts": [
+            {"account_number": number, "account_hash": key, "total_value": 0, "cash_and_sweep": 0},
+            {"account_number": "13241010", "account_hash": "another-key", "total_value": 0, "cash_and_sweep": 0},
+        ]}))
+    response = isolated.test_client().get("/api/wealth/brokerage/discovery").get_json()
+    assert response["ok"]
+    assert [a["account_id"] for a in response["accounts"]] == ["•••• 0007", "•••• 1010"]
+    assert response["accounts"][0]["portfolio_id"] == pid
+    assert number not in str(response) and key not in str(response)
+    assert len(wealth_store.list_portfolios(1)) == 2
+    snapshots = {r["account_key"]: r["snapshot"] for r in wealth_store.list_broker_snapshots(1)}
+    assert snapshots[number]["account_last_four"] == "0007"
+    assert snapshots["another-key"]["total_value"] == 0
+    assert key not in snapshots
+
+
+def test_sync_recovers_legacy_hash_when_positions_response_only_has_number(env, monkeypatch):
+    import time
+    import app as legacy
+    import schwab
+    import wealth_store
+    from flask import Flask
+    from wealth_routes import create_wealth_blueprint
+
+    flask_app, *_ = env
+    pid = make_portfolio(client(flask_app, 1), "Schwab IRA")
+    number, key = "71003121", "legacy-hash-4455"
+    wealth_store.update_portfolio(1, pid, broker_account=key)
+    broker = {"connected": True, "accounts": [
+        {"account_number": number, "account_hash": number, "total_value": 55, "cash_and_sweep": 55},
+    ]}
+    queries = []
+
+    def get(path, *, user_id):
+        queries.append((path, user_id))
+        return [{"accountNumber": number, "hashValue": key}]
+
+    monkeypatch.setattr(schwab, "_get", get)
+    monkeypatch.setattr(schwab, "is_connected", lambda uid: True)
+    monkeypatch.setattr(schwab, "get_account_summary", lambda uid: broker)
+    monkeypatch.setattr(legacy, "_schwab_account_cache", {})
+    isolated = Flask(__name__)
+    isolated.register_blueprint(create_wealth_blueprint(current_user=lambda: {"id": 1}))
+    c = isolated.test_client()
+    endpoint = "/api/wealth/performance"
+    assert c.post(endpoint + "/sync").get_json() == {"ok": True, "synced": 1}
+    assert queries == [("/accounts/accountNumbers", 1)]
+    assert len(wealth_store.list_portfolios(1)) == 1
+    # A later position refresh may again omit the hash. The verified mapping persists.
+    legacy._schwab_account_cache[1] = {"ts": time.time(), "data": broker}
+    result = c.get(f"{endpoint}?p={pid}").get_json()
+    assert result["position"]["value"] == 55
+    assert result["accounts"][0]["label"] == "•••• 3121 · Schwab IRA"
+    assert key not in str(result) and number not in str(result)
+    assert c.post(endpoint + "/sync").get_json() == {"ok": True, "synced": 1}
+    assert queries == [("/accounts/accountNumbers", 1)]
+    import schwab_account_preferences as prefs
+    prefs.update_preference(1, key, visible=True, include_wealth=False)
+    excluded = c.get(endpoint).get_json()
+    assert not excluded["accounts"]
+    assert excluded["position"]["value"] is None

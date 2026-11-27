@@ -366,42 +366,71 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         except Exception:
             logger.exception("wealth brokerage discovery failed")
             return jsonify({"ok": False, "error": "Brokerage data is temporarily unavailable."}), 503
-        # Account inclusion is controlled on the Schwab Account page.
-        # Keep aggregate broker summary intact; filter only Wealth account rows.
+        portfolios = wealth_store.list_portfolios(user_id)
+        aliases = None
         if snapshot and snapshot.get("connected"):
             import sys
             legacy = sys.modules.get("app")
             cache = getattr(legacy, "_schwab_account_cache", None)
+            accounts = snapshot.get("accounts") or []
+            live_aliases = wealth_broker_sync.account_aliases(accounts)
+            saved_snapshots = wealth_store.list_broker_snapshots(user_id)
+            aliases = wealth_broker_sync.include_stored_aliases(live_aliases, saved_snapshots)
+            unresolved = any(p.get("broker_account") and p["broker_account"] not in aliases for p in portfolios)
+            if broker_summary is _default_broker and unresolved and any(
+                    a.get("account_number") and a.get("account_hash") == a["account_number"] for a in accounts):
+                # Older portfolios may have been stored with an opaque ID when
+                # /accounts provided one. Ask Schwab for the exact mapping once
+                # during sync so the account and its ledger can be reused.
+                import schwab
+                try:
+                    hashes = schwab.fetch_account_hashes(user_id)
+                    accounts = [dict(a, verified_account_hash=hashes.get(str(a.get("account_number"))))
+                                for a in accounts]
+                    live_aliases = wealth_broker_sync.account_aliases(accounts)
+                    aliases = wealth_broker_sync.include_stored_aliases(live_aliases, saved_snapshots)
+                except Exception:
+                    logger.info("Schwab legacy account mapping unavailable")
+            if any(key not in live_aliases for a in accounts for key in wealth_broker_sync.account_keys(a)):
+                return jsonify(ok=False, error="Conflicting Schwab account identifiers."), 503
             if cache is not None and broker_summary is _default_broker:
-                cache[user_id] = {"data": snapshot, "ts": time.time()}
-            import schwab_account_preferences as _prefs
-            snapshot = dict(snapshot)
-            snapshot["accounts"] = _prefs.select_accounts(
-                snapshot.get("accounts") or [], _prefs.get_preferences(user_id), for_wealth=True)
-        # Only successful fetches may update stored broker snapshots.
-        # Never delete existing snapshots when a broker is unavailable.
-        if snapshot and snapshot.get("connected"):
-            for account in snapshot.get("accounts") or []:
-                key = str(account.get("account_hash") or account.get("account_number") or "")
-                if not key:
+                cache[user_id] = {"data": dict(snapshot, accounts=accounts), "ts": time.time()}
+            import schwab_account_preferences as prefs
+            preferences = prefs.get_preferences(user_id)
+            accounts = [a for a in accounts
+                        if wealth_broker_sync.is_in_wealth(wealth_broker_sync.preference_keys(a, aliases), preferences)]
+            snapshot = dict(snapshot, accounts=accounts)
+            mapped = {aliases.get(str(p.get("broker_account") or "")) for p in portfolios}
+            for account in accounts:
+                keys = wealth_broker_sync.account_keys(account)
+                if not keys or keys[0] in mapped:
                     continue
-                if not (account.get("positions") or account.get("equity_positions") or wealth_broker_sync._cash(account)):
+                total = account.get("performance_liquidation_value", account.get("total_value"))
+                if not (account.get("positions") or account.get("equity_positions")
+                        or wealth_calc._f(total) is not None or wealth_broker_sync._cash(account) is not None):
                     continue
                 try:
-                    wealth_store.link_broker_portfolio(user_id, key)
+                    wealth_store.link_broker_portfolio(user_id, keys[0])
+                    mapped.add(keys[0])
                 except Exception:
                     logger.exception("Failed to provision brokerage portfolio")
+            portfolios = wealth_store.list_portfolios(user_id)
         result = wealth_broker_sync.discover(
-            snapshot, wealth_store.list_portfolios(user_id),
-            wealth_store.list_transactions(user_id))
+            snapshot, portfolios, wealth_store.list_transactions(user_id), aliases=aliases)
+        portfolios_by_id = {p["id"]: p for p in portfolios}
         for account in result.get("accounts", []):
             key = account["account_id"]
-            account["account_id"] = "••••" + key[-4:]
-            if not account.get("portfolio_id"):
+            last_four = account["account_last_four"]
+            account["account_id"] = f"•••• {last_four}" if last_four else None
+            pid = account.get("portfolio_id")
+            if pid is None:
+                account["sync_error"] = "No Wealth portfolio could be linked for this account"
                 continue
             try:
-                wealth_store.save_broker_snapshot(user_id, key, {**account, "account_id": key})
-                txs = wealth_store.list_transactions(user_id, account["portfolio_id"])
+                # Preserve existing mappings and stored ledger history when the live identifier changes form.
+                stored_key = portfolios_by_id[pid]["broker_account"]
+                wealth_store.save_broker_snapshot(user_id, stored_key, {**account, "account_id": key})
+                txs = wealth_store.list_transactions(user_id, pid)
                 ledger = wealth_ledger.build(txs)
                 account["discrepancies"] = wealth_broker_sync.reconcile(
                     account, {ticker: sum(lot.shares for lot in lots) for ticker, lots in ledger.positions.items()})
@@ -451,53 +480,84 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         return goals, profiles
 
     def performance_broker(user_id, portfolios):
+        import sys
         import schwab_account_preferences as prefs
-        allowed = prefs.get_preferences(user_id)
-        snapshots = {}
-        for row in wealth_store.list_broker_snapshots(user_id):
+        preferences = prefs.get_preferences(user_id)
+        stored = {}
+        aliases = {}
+        saved_snapshots = wealth_store.list_broker_snapshots(user_id)
+        for row in saved_snapshots:
             key = row["account_key"]
-            if allowed.get(key, {}).get("include_wealth", True):
-                snapshots[key] = dict(row["snapshot"], as_of=row["synced_at"], live=False)
+            snapshot = row["snapshot"]
+            canonical = str(snapshot.get("account_id") or key)
+            aliases[key] = canonical
+            if wealth_broker_sync.is_in_wealth((canonical, key), preferences):
+                if canonical not in stored or row["synced_at"] > stored[canonical]["as_of"]:
+                    stored[canonical] = dict(snapshot, as_of=row["synced_at"], live=False)
         cached = _cached_schwab_summary(user_id, max_age=120)
-        if cached and cached.get("connected"):
-            data = dict(cached, accounts=prefs.select_accounts(cached.get("accounts") or [], allowed, for_wealth=True))
-            discovered = wealth_broker_sync.discover(data, portfolios, [])
-            import sys
-            legacy = sys.modules.get("app")
-            entry = (getattr(legacy, "_schwab_account_cache", {}).get(user_id) or {})
-            stamp = entry.get("ts")
-            as_of = datetime.fromtimestamp(stamp, timezone.utc).isoformat() if stamp else None
-            fresh = bool(stamp and time.time() - stamp < 120)
-            snapshots = {a["account_id"]: dict(a, as_of=as_of, live=fresh) for a in discovered["accounts"]}
-        return snapshots, allowed
+        legacy = sys.modules.get("app")
+        entry = getattr(legacy, "_schwab_account_cache", {}).get(user_id) or {}
+        stamp = entry.get("ts")
+        if not cached or not cached.get("connected") or not stamp or time.time() - stamp >= 120:
+            return stored, aliases, preferences, False
+        accounts = cached.get("accounts")
+        if not isinstance(accounts, list) or any(not wealth_broker_sync.account_keys(a) for a in accounts):
+            return stored, aliases, preferences, False
+        live_aliases = wealth_broker_sync.account_aliases(accounts)
+        if any(key not in live_aliases for a in accounts for key in wealth_broker_sync.account_keys(a)):
+            return stored, aliases, preferences, False
+        # The live roster is authoritative. A stored alias is useful only when
+        # that exact canonical key also appears in the current response.
+        aliases = wealth_broker_sync.include_stored_aliases(live_aliases, saved_snapshots)
+        included = [a for a in accounts
+                    if wealth_broker_sync.is_in_wealth(wealth_broker_sync.preference_keys(a, aliases), preferences)]
+        discovered = wealth_broker_sync.discover(dict(cached, accounts=included), portfolios, [], aliases=aliases)
+        as_of = datetime.fromtimestamp(stamp, timezone.utc).isoformat()
+        snapshots = {}
+        for account in discovered["accounts"]:
+            key = account["account_id"]
+            previous = stored.get(key, {})
+            last_four = account.get("account_last_four") or previous.get("account_last_four")
+            snapshots[key] = dict(account, account_last_four=last_four, as_of=as_of, live=True)
+        excluded = {wealth_broker_sync.account_keys(a)[0] for a in accounts if a not in included}
+        preferences.update({key: {"include_wealth": False} for key in excluded})
+        return snapshots, aliases, preferences, True
 
     def performance_payload(user_id, current, strategy, *, balance_only=False):
         today = datetime.now(ZoneInfo("America/New_York")).date()
         portfolios = wealth_store.list_portfolios(user_id)
         goals, profiles = performance_profiles(user_id, portfolios)
-        broker, allowed = performance_broker(user_id, portfolios) if not current or current.get("broker_account") else ({}, {})
-        groups, issues = {}, []
-        for p in portfolios:
-            key = str(p.get("broker_account") or "")
-            if key and not allowed.get(key, {}).get("include_wealth", True):
-                if current and current["id"] == p["id"]:
-                    issues.append("This account is excluded from Wealth in Schwab Account settings.")
-                continue
-            if key:
-                groups.setdefault(key, []).append(p)
-
-        txs = wealth_store.list_transactions(user_id)
+        broker, aliases, preferences, roster_confirmed = performance_broker(user_id, portfolios)
         by_account = {}
-        for tx in txs:
+        for tx in wealth_store.list_transactions(user_id):
             by_account.setdefault(tx["portfolio_id"], []).append(tx)
         all_ledgers = {p["id"]: wealth_ledger.build([tx for tx in by_account.get(p["id"], [])
                        if str(tx["date"])[:10] <= today.isoformat()]) for p in portfolios}
         paired, transfer_issues = performance.transfers(all_ledgers)
 
-        if current:
-            selected = [p for p in portfolios if p["id"] == current["id"]]
-        else:
-            selected = portfolios
+        def broker_key(portfolio):
+            key = str(portfolio.get("broker_account") or "")
+            return aliases.get(key, key)
+
+        issues, available, groups = [], [], {}
+        selection_issue = None
+        for p in portfolios:
+            key = broker_key(p)
+            if key and not wealth_broker_sync.is_in_wealth((key, p["broker_account"]), preferences):
+                if current and current["id"] == p["id"]:
+                    selection_issue = "This account is excluded from Wealth in Schwab Account settings."
+                continue
+            if key and roster_confirmed and key not in broker and p["id"] not in by_account:
+                issues.append("Unused Wealth entries absent from the latest Schwab account list were omitted.")
+                continue
+            available.append(p)
+            if key:
+                groups.setdefault(key, []).append(p)
+
+        selected = [p for p in available if p["id"] == current["id"]] if current else available
+        if current and not selected:
+            selection_issue = selection_issue or "This Wealth entry is absent from the latest Schwab account list."
+            issues.append(selection_issue)
         buckets = {key: {"ledgers": {}, "broker": [], "manual": {}, "history_issues": []}
                    for key in performance.STRATEGIES}
         covered = set()
@@ -505,9 +565,8 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             pid = p["id"]
             profile = profiles[pid]
             bucket = buckets[profile.get("strategy", "unclassified")]
-            key = str(p.get("broker_account") or "")
-            if key and not allowed.get(key, {}).get("include_wealth", True):
-                continue
+            key = broker_key(p)
+            label = wealth_broker_sync.portfolio_label(p, broker.get(key))
             if key and (key in covered or len(groups.get(key, [])) > 1):
                 bucket["history_issues"].append("Multiple ledger accounts reference the same Schwab account. Review the mappings.")
                 if key not in covered and key in broker:
@@ -519,7 +578,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 covered.add(key)
                 snapshot = broker.get(key)
                 if snapshot is None:
-                    bucket["history_issues"].append(f"{p['name']}: Schwab snapshot unavailable.")
+                    bucket["history_issues"].append(f"{label}: Schwab snapshot unavailable.")
                     bucket["broker"].append({})
                 else:
                     bucket["broker"].append(snapshot)
@@ -528,16 +587,16 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                     cash = wealth_calc._f(snapshot.get("cash"))
                     for discrepancy in discrepancies:
                         bucket["history_issues"].append(
-                            f"{p['name']}: {discrepancy['ticker']} ledger shares differ from Schwab by "
+                            f"{label}: {discrepancy['ticker']} ledger shares differ from Schwab by "
                             f"{discrepancy['difference']:g}.")
                     if cash is None or abs(cash - ledger.cash) > .02:
-                        bucket["history_issues"].append(f"{p['name']}: Schwab cash cannot be reconciled with the ledger.")
+                        bucket["history_issues"].append(f"{label}: Schwab cash cannot be reconciled with the ledger.")
                     if snapshot.get("unsupported_positions"):
-                        bucket["history_issues"].append(f"{p['name']}: the ledger cannot value one or more Schwab positions.")
+                        bucket["history_issues"].append(f"{label}: the ledger cannot value one or more Schwab positions.")
                     if not profile.get("history_confirmed"):
-                        bucket["history_issues"].append(f"{p['name']}: confirm complete ledger coverage in Account settings.")
+                        bucket["history_issues"].append(f"{label}: confirm complete ledger coverage in Account settings.")
                     if not snapshot.get("live"):
-                        bucket["history_issues"].append(f"{p['name']}: refresh Schwab to verify current ledger balances.")
+                        bucket["history_issues"].append(f"{label}: refresh Schwab to verify current ledger balances.")
             elif ledger.first_date:
                 bucket["manual"][pid] = ledger
             if ledger.first_date or ledger.issues:
@@ -546,7 +605,9 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             for key, snapshot in broker.items():
                 if key not in covered:
                     buckets["unclassified"]["broker"].append(snapshot)
-                    buckets["unclassified"]["history_issues"].append("A Schwab account has no Wealth ledger mapping.")
+                    label = wealth_broker_sync.portfolio_label({"name": "Schwab account"}, snapshot)
+                    buckets["unclassified"]["history_issues"].append(
+                        f"{label}: use Sync Schwab to add this account to the selector.")
 
         def combine(names):
             result = {"ledgers": {}, "broker": [], "manual": {}, "history_issues": []}
@@ -620,7 +681,8 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 position[f"{field}_ytd"] = activity.get(today.year, {}).get(field, 0.) if trusted else None
             if not trusted or not calendar:
                 history = {"ok": False, "reason": (warnings[0] if warnings else
-                           ("Daily market history is unavailable." if ledgers else "Add or import transactions in the Ledger."))}
+                           selection_issue or ("Daily market history is unavailable." if ledgers else
+                                               "Add or import transactions in the Ledger."))}
             else:
                 series = wealth_history.build_series(list(ledgers.values()), closes, calendar, today=today,
                                                       flows=flows, provider_splits=flow_stocks)
@@ -653,10 +715,12 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         return dict(ok=True, position=position, history=history, warnings=sorted(set(issues + warnings)),
                     strategies=strategies, goals=year_rows,
                     selected_goal=next(row for row in year_rows if row["year"] == year),
-                    accounts=[dict(id=p["id"], name=p["name"], linked=bool(p.get("broker_account")),
+                    accounts=[dict(id=p["id"], name=p["name"],
+                                   label=wealth_broker_sync.portfolio_label(p, broker.get(broker_key(p))),
+                                   linked=bool(p.get("broker_account")),
                                    strategy=profiles[p["id"]].get("strategy", "unclassified"),
                                    history_confirmed=bool(profiles[p["id"]].get("history_confirmed")))
-                              for p in portfolios],
+                              for p in available],
                     benchmark=dict(label=performance.BENCHMARK_LABEL, symbol=performance.BENCHMARK,
                                    source="Yahoo Finance", as_of=benchmark[-1][0].isoformat() if benchmark else None),
                     sync=sync, days_left=(date(year, 12, 31) - today).days)

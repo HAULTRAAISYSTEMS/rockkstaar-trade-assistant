@@ -269,16 +269,20 @@
     ]);
     const coverage = data.history.ok ? "History through " + data.history.end : "History incomplete";
     const sync = data.sync.live ? "Schwab connected" : (data.sync.stored ? "Schwab snapshot" : "No Schwab balance in this view");
-    status.textContent = syncMessage || sync + " · " + coverage;
+    status.textContent = (syncMessage || sync) + " · " + coverage;
     notice(data.history.ok ? "" : data.history.reason);
   }
 
   function refreshOptions(data) {
-    for (const p of data.accounts) {
-      if (!Array.from(account.options).some(option => option.value === String(p.id))) {
-        account.add(new Option(p.name, p.id));
-      }
+    const selected = account.value;
+    const options = data.accounts.map(p => new Option(p.label || p.name, p.id));
+    if (selected !== "all" && !options.some(option => option.value === selected)) {
+      const unavailable = new Option("Account unavailable", selected);
+      unavailable.disabled = true;
+      options.push(unavailable);
     }
+    account.replaceChildren(new Option("All accounts", "all"), ...options);
+    account.value = selected;
     root.querySelector('[data-action="goals"]').disabled = false;
     root.querySelector('[data-action="accounts"]').disabled = !data.accounts.length;
   }
@@ -293,6 +297,12 @@
     if (account.value !== "all") params.set("p", account.value);
     if (strategy.value !== "all") params.set("strategy", strategy.value);
     const query = params.toString() ? "?" + params : "";
+    for (const link of root.querySelectorAll("[data-account-link]")) {
+      const destination = new URL(link.href);
+      if (account.value === "all") destination.searchParams.delete("p");
+      else destination.searchParams.set("p", account.value);
+      link.href = destination.href;
+    }
     history.replaceState(null, "", location.pathname + query);
     try {
       const r = await fetch(root.dataset.api + query, {signal: request.signal, cache: "no-store"});
@@ -489,8 +499,8 @@
     get("goals-dialog").showModal();
   });
   root.querySelector('[data-action="accounts"]').addEventListener("click", () => {
-    settingsAccount.replaceChildren(...response.accounts.map(a => new Option(a.name, a.id)));
-    if (account.value !== "all") settingsAccount.value = account.value;
+    settingsAccount.replaceChildren(...response.accounts.map(a => new Option(a.label || a.name, a.id)));
+    if (response.accounts.some(a => String(a.id) === account.value)) settingsAccount.value = account.value;
     showAccount();
     accountForm.querySelector('[role="status"]').textContent = "";
     get("accounts-dialog").showModal();
@@ -540,7 +550,9 @@
       const r = await fetch(root.dataset.sync, {method: "POST", cache: "no-store"});
       const data = await r.json();
       if (!r.ok || !data.ok) throw new Error("Schwab sync unavailable. Check your connection.");
-      syncMessage = "Schwab sync complete";
+      syncMessage = data.synced
+        ? "Synced " + data.synced + " Schwab " + (data.synced === 1 ? "account" : "accounts")
+        : "No Schwab accounts included in Wealth";
       await load();
     } catch (error) {
       status.textContent = error.message;
