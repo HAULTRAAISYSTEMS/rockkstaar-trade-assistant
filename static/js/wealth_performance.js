@@ -296,7 +296,50 @@
     if (finite(value)) progress.value = Math.max(0, Math.min(100, value));
   }
 
+  const planYear = get("plan-year");
+  let selectedPlanYear;
+
+  function renderContributionPlanner(data) {
+    const options = data.goals.filter(row => row.year >= data.selected_goal.year || row.contribution_plan);
+    if (!options.some(row => row.year === selectedPlanYear)) {
+      selectedPlanYear = options.find(row => row.contribution_plan)?.year ?? data.selected_goal.year;
+    }
+    planYear.replaceChildren(...options.map(row => new Option(row.year, row.year)));
+    planYear.value = selectedPlanYear;
+    planYear.disabled = false;
+    root.querySelector('[data-action="edit-plan"]').disabled = false;
+    const goal = options.find(row => row.year === selectedPlanYear);
+    const plan = goal.contribution_plan;
+    const projected = goal.projection;
+    const globalView = account.value === "all" && strategy.value === "all";
+    get("plan-actual").textContent = goal.planned ? "Year hasn’t started" : money(globalView ? goal.net : null);
+    get("plan-remaining").textContent = money(projected?.remaining);
+    get("plan-projected").textContent = money(projected?.year_end);
+    get("plan-target").textContent = money(goal.contribution);
+    get("plan-summary").textContent = plan
+      ? money(plan.amount) + (plan.cadence === "weekly" ? " every week" : " every month")
+        + " · " + (projected.next_date ? "Next planned date " + projected.next_date : "Schedule complete")
+      : "Enter an amount you expect to contribute each week or month.";
+    const messages = [];
+    if (finite(projected?.gap)) {
+      messages.push(projected.gap === 0 ? "Projection matches the goal."
+        : money(Math.abs(projected.gap)) + (projected.gap > 0 ? " above goal." : " short of goal."));
+    } else if (projected) {
+      messages.push(globalView ? "Year-end estimate needs verified contributions to date."
+        : "Select All accounts and All strategies to include verified contributions.");
+    }
+    if (projected) messages.push(projected.remaining_count + " planned contributions after today.");
+    if (plan) messages.push("Planning estimate only.");
+    get("plan-context").textContent = messages.join(" ");
+  }
+
+  planYear.addEventListener("change", () => {
+    selectedPlanYear = Number(planYear.value);
+    renderContributionPlanner(response);
+  });
+
   function renderGoals(data) {
+    renderContributionPlanner(data);
     const goal = data.selected_goal;
     field("goal-rate", percentUnsigned(goal.return_pct));
     field("goal-amount", money(goal.contribution));
@@ -548,18 +591,70 @@
   const goalYear = goalForm.elements.year;
   const settingsAccount = accountForm.elements.account;
 
+  let previewTimer;
+  let previewRequest;
+
+  function planDraft() {
+    return goalForm.elements.cadence.value ? {
+      cadence: goalForm.elements.cadence.value,
+      amount: goalForm.elements.plan_amount.valueAsNumber,
+      start_date: goalForm.elements.start_date.value
+    } : null;
+  }
+
   function renderGoalPlan() {
+    clearTimeout(previewTimer);
+    previewRequest?.abort();
     const amount = goalForm.elements.contribution.valueAsNumber;
     const year = Number(goalYear.value);
     const note = get("goal-plan");
+    const plan = planDraft();
+    get("schedule-inputs").hidden = !plan;
+    for (const name of ["plan_amount", "start_date"]) goalForm.elements[name].disabled = !plan;
     note.hidden = !finite(amount) || amount <= 0;
-    note.textContent = note.hidden ? "" : money(amount / 12) + " per month for an even " + year + " contribution plan.";
+    if (note.hidden) return;
+    if (!plan) {
+      note.textContent = money(amount / 12) + " per month for an even " + year + " contribution plan.";
+      return;
+    }
+    if (!finite(plan.amount) || !plan.start_date || !goalForm.elements.start_date.validity.valid) {
+      note.textContent = "Set an amount and a date in " + year + " to see the estimate.";
+      return;
+    }
+    note.textContent = "Calculating estimate…";
+    previewTimer = setTimeout(async () => {
+      const request = new AbortController();
+      previewRequest = request;
+      try {
+        const r = await fetch(root.dataset.api + "/goals/" + year + "/preview", {
+          method: "POST", headers: {"Content-Type": "application/json"}, signal: request.signal,
+          body: JSON.stringify({contribution: amount, contribution_plan: plan})
+        });
+        const data = await r.json();
+        if (request.signal.aborted) return;
+        if (!r.ok) throw new Error(data.error || "Estimate unavailable.");
+        const schedule = data.projection;
+        note.textContent = schedule.count + " contributions total " + money(schedule.total)
+          + " in " + year + " · " + money(schedule.remaining) + " planned after today.";
+      } catch (error) {
+        if (error.name !== "AbortError" && !request.signal.aborted) note.textContent = error.message;
+      }
+    }, 250);
   }
 
   function showGoal() {
     const goal = response.goals.find(row => row.year === Number(goalYear.value));
+    const plan = goal.contribution_plan;
     goalForm.elements.return_pct.value = goal.return_pct;
     goalForm.elements.contribution.value = goal.contribution;
+    goalForm.elements.cadence.value = plan?.cadence || "";
+    goalForm.elements.plan_amount.value = plan?.amount ?? "";
+    const start = goalForm.elements.start_date;
+    start.min = goal.year + "-01-01";
+    start.max = goal.year + "-12-31";
+    const today = response.position.as_of;
+    const tomorrow = new Date(Date.parse(today + "T00:00:00Z") + 86400000).toISOString().slice(0, 10);
+    start.value = plan?.start_date || (goal.year === response.selected_goal.year ? (tomorrow <= start.max ? tomorrow : today) : start.min);
     renderGoalPlan();
   }
 
@@ -570,18 +665,26 @@
   }
 
   goalYear.addEventListener("change", showGoal);
-  goalForm.elements.contribution.addEventListener("input", renderGoalPlan);
+  for (const name of ["contribution", "cadence", "plan_amount", "start_date"]) {
+    goalForm.elements[name].addEventListener("input", renderGoalPlan);
+  }
+  get("goals-dialog").addEventListener("close", () => {
+    clearTimeout(previewTimer);
+    previewRequest?.abort();
+  });
   settingsAccount.addEventListener("change", showAccount);
   root.querySelectorAll("[data-close]").forEach(button =>
     button.addEventListener("click", () => button.closest("dialog").close()));
 
-  root.querySelector('[data-action="goals"]').addEventListener("click", () => {
+  function openGoalDialog(year) {
     goalYear.replaceChildren(...response.goals.map(goal => new Option(goal.year + (goal.planned ? " · Plan ahead" : ""), goal.year)));
-    goalYear.value = response.selected_goal.year;
+    goalYear.value = year;
     showGoal();
     goalForm.querySelector('[role="status"]').textContent = "";
     get("goals-dialog").showModal();
-  });
+  }
+  root.querySelector('[data-action="goals"]').addEventListener("click", () => openGoalDialog(response.selected_goal.year));
+  root.querySelector('[data-action="edit-plan"]').addEventListener("click", () => openGoalDialog(selectedPlanYear));
   root.querySelector('[data-action="accounts"]').addEventListener("click", () => {
     settingsAccount.replaceChildren(...response.accounts.map(a => new Option(a.label || a.name, a.id)));
     if (response.accounts.some(a => String(a.id) === account.value)) settingsAccount.value = account.value;
@@ -614,9 +717,11 @@
 
   goalForm.addEventListener("submit", event => {
     event.preventDefault();
+    selectedPlanYear = Number(goalYear.value);
     save(goalForm, "/goals/" + goalYear.value, {
       return_pct: goalForm.elements.return_pct.valueAsNumber,
-      contribution: goalForm.elements.contribution.valueAsNumber
+      contribution: goalForm.elements.contribution.valueAsNumber,
+      contribution_plan: planDraft()
     });
   });
   accountForm.addEventListener("submit", event => {

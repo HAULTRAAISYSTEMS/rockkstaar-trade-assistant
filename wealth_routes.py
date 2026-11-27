@@ -720,7 +720,11 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             row = activity.get(point)
             net = row["deposits"] - row["withdrawals"] if row is not None else (
                 0. if activity and min(activity) < point <= year else None)
-            year_rows.append(dict(year=point, **goal, net=net, planned=point > year, saved=point in goals,
+            plan = goal.get("contribution_plan")
+            projection = performance.contribution_projection(
+                point, plan, goal["contribution"], net, today, all_accounts=not current and strategy == "all")
+            year_rows.append(dict(year=point, **goal, projection=projection,
+                                  net=net, planned=point > year, saved=point in goals,
                                   remaining=max(0., goal["contribution"] - net) if net is not None else None,
                                   actual_return=history.get("years", {}).get(point)))
         return dict(ok=True, position=position, history=history, warnings=sorted(set(issues + warnings)),
@@ -769,6 +773,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         failed = sum(bool(account.get("sync_error")) for account in accounts)
         return jsonify(ok=bool(data.get("ok")) and not failed, synced=len(accounts) - failed)
 
+    @bp.post("/api/wealth/performance/goals/<int:year>/preview")
     @bp.put("/api/wealth/performance/goals/<int:year>")
     def performance_goals(year):
         user_id = uid()
@@ -776,12 +781,26 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         if not isinstance(data, dict):
             abort(400)
         rate, amount = wealth_calc._f(data.get("return_pct")), wealth_calc._f(data.get("contribution"))
-        current_year = datetime.now(ZoneInfo("America/New_York")).year
-        if not 1900 <= year <= current_year + 1:
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+        if not 1900 <= year <= today.year + 1:
             return jsonify(error="Choose the current year, next year, or a historical goal year."), 400
-        if rate is None or not -100 < rate <= 10000 or amount is None or not 0 < amount <= 1e10:
-            return jsonify(error="Enter a return above −100% and a positive contribution goal."), 400
-        wealth_store.save_performance_setting(user_id, "goal", year, {"return_pct": rate, "contribution": amount})
+        if amount is None or not 0 < amount <= 1e10:
+            return jsonify(error="Enter a positive annual contribution goal."), 400
+        try:
+            plan = performance.clean_contribution_plan(year, data.get("contribution_plan"))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        if request.method == "POST":
+            return jsonify(projection=performance.contribution_projection(year, plan, amount, None, today))
+        if rate is None or not -100 < rate <= 10000:
+            return jsonify(error="Enter a return target above −100% and no more than 10,000%."), 400
+        if "contribution_plan" not in data:
+            goals, _ = wealth_store.performance_settings(user_id)
+            plan = goals.get(year, {}).get("contribution_plan")
+        setting = {"return_pct": rate, "contribution": amount}
+        if plan is not None:
+            setting["contribution_plan"] = plan
+        wealth_store.save_performance_setting(user_id, "goal", year, setting)
         return jsonify(ok=True)
 
     @bp.put("/api/wealth/performance/accounts/<int:pid>")

@@ -1,6 +1,8 @@
 """Performance analytics shared by the Wealth dashboard and Scoreboard."""
+from calendar import monthrange
 from collections import defaultdict
 from datetime import date, timedelta
+from decimal import Decimal
 from math import sqrt
 from statistics import mean, stdev
 import re
@@ -14,6 +16,48 @@ BENCHMARK_LABEL = "S&P 500 Total Return Index"
 STRATEGIES = {"long_term": "Long-Term Investing", "active": "Active Trading", "unclassified": "Unclassified"}
 DEFAULT_GOAL = {"return_pct": 20.0, "contribution": 25000.0}
 TRANSFER_REF = re.compile(r"(?:^|\s)transfer:([\w.-]{1,64})(?:\s|$)", re.IGNORECASE)
+
+
+def clean_contribution_plan(year, plan):
+    """Validate a saved assumption. A null plan clears the schedule."""
+    if plan is None:
+        return None
+    if not isinstance(plan, dict) or plan.get("cadence") not in ("weekly", "monthly"):
+        raise ValueError("Choose a weekly or monthly contribution schedule.")
+    amount = wealth_calc._f(plan.get("amount"))
+    if amount is None or isinstance(plan.get("amount"), bool) or not .01 <= amount <= 1e10:
+        raise ValueError("Enter a positive contribution amount.")
+    cents = Decimal(str(amount)) * 100
+    if cents != cents.to_integral_value():
+        raise ValueError("Enter the contribution amount to the nearest cent.")
+    try:
+        start = date.fromisoformat(plan.get("start_date"))
+    except (TypeError, ValueError):
+        raise ValueError("Enter a first contribution date.") from None
+    if start.year != year:
+        raise ValueError("Choose a first contribution date in the goal year.")
+    return {"cadence": plan["cadence"], "amount": float(amount), "start_date": start.isoformat()}
+
+
+def contribution_projection(year, plan, target, actual, today, *, all_accounts=True):
+    """Schedule assumptions never affect ledger totals or historical returns."""
+    if not plan:
+        return None
+    first = date.fromisoformat(plan["start_date"])
+    if plan["cadence"] == "weekly":
+        count = (date(year, 12, 31) - first).days // 7 + 1
+        dates = [first + timedelta(days=7 * i) for i in range(count)]
+    else:
+        dates = [date(year, month, min(first.day, monthrange(year, month)[1]))
+                 for month in range(first.month, 13)]
+    remaining = [day for day in dates if day > today]
+    amount = Decimal(str(plan["amount"]))
+    remaining_amount = float(amount * len(remaining))
+    baseline = 0. if year > today.year else actual if all_accounts else None
+    projected = round(baseline + remaining_amount, 2) if baseline is not None else None
+    return dict(total=float(amount * len(dates)), count=len(dates), remaining=remaining_amount,
+                remaining_count=len(remaining), next_date=remaining[0].isoformat() if remaining else None,
+                year_end=projected, gap=round(projected - target, 2) if projected is not None else None)
 
 
 def transfers(ledgers):

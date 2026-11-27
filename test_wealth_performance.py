@@ -484,3 +484,61 @@ def test_current_holdings_and_account_check_are_available_with_incomplete_histor
     assert check["positions"][0]["broker_shares"] == 2 and check["positions"][0]["ledger_shares"] == 1
     assert key not in str(result) and number not in str(result)
     assert c.get(f"{endpoint}?p={pid}&view=balance").get_json()["reconciliation"] == result["reconciliation"]
+
+
+def test_contribution_plan_dates_and_verified_end_of_year_projection():
+    plan = performance.clean_contribution_plan(2028, {
+        "cadence": "monthly", "amount": 125.25, "start_date": "2028-01-31",
+    })
+    forecast = performance.contribution_projection(2028, plan, 2000, 500, date(2028, 2, 1))
+    assert forecast["next_date"] == "2028-02-29"
+    assert forecast["count"] == 12 and forecast["total"] == 1503
+    assert forecast["remaining_count"] == 11 and forecast["remaining"] == 1377.75
+    assert forecast["year_end"] == 1877.75 and forecast["gap"] == -122.25
+    past_february = performance.contribution_projection(2028, plan, 2000, 500, date(2028, 2, 29))
+    assert past_february["next_date"] == "2028-03-31"
+    for actual, all_accounts in [(None, True), (500, False)]:
+        incomplete = performance.contribution_projection(2028, plan, 2000, actual, date(2028, 2, 1),
+                                                          all_accounts=all_accounts)
+        assert incomplete["remaining"] == 1377.75
+        assert incomplete["year_end"] is incomplete["gap"] is None
+    weekly = performance.clean_contribution_plan(2028, {
+        "cadence": "weekly", "amount": 100, "start_date": "2028-01-01",
+    })
+    next_year = performance.contribution_projection(2028, weekly, 5000, None, date(2027, 12, 31))
+    assert next_year["count"] == next_year["remaining_count"] == 53
+    assert next_year["year_end"] == 5300 and next_year["gap"] == 300
+
+
+def test_contribution_plan_preview_and_save_leave_ledger_untouched(env):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    app, *_ = env
+    c = client(app, 1)
+    other = client(app, 2)
+    endpoint = "/api/wealth/performance"
+    year = datetime.now(ZoneInfo("America/New_York")).year + 1
+    pid = make_portfolio(c)
+    path = f"{endpoint}/goals/{year}"
+    plan = {"cadence": "monthly", "amount": 500, "start_date": f"{year}-01-01"}
+    goal = {"return_pct": 15, "contribution": 10000, "contribution_plan": plan}
+    assert app.test_client().post(path + "/preview", json=goal).status_code == 401
+    assert c.post(path + "/preview", json=goal).get_json()["projection"]["year_end"] == 6000
+    assert c.put(path, json=goal | {"contribution_plan": plan | {"amount": 50.125}}).status_code == 400
+    assert c.put(path, json=goal | {"contribution_plan": plan | {"start_date": "2020-01-01"}}).status_code == 400
+
+    def planned_goal(account):
+        return next(row for row in account.get(endpoint).get_json()["goals"] if row["year"] == year)
+
+    assert planned_goal(c)["projection"] is None
+    assert c.put(path, json=goal).status_code == 200
+    assert planned_goal(c)["projection"]["remaining"] == 6000
+    assert planned_goal(c)["net"] is None
+    assert planned_goal(other)["projection"] is None
+    assert c.put(path, json={"return_pct": 18, "contribution": 11000}).status_code == 200
+    assert planned_goal(c)["projection"]["gap"] == -5000
+    assert c.put(path, json=goal | {"contribution_plan": None}).status_code == 200
+    assert planned_goal(c)["projection"] is None
+    import wealth_store
+    assert not wealth_store.list_transactions(1, pid)
