@@ -129,6 +129,7 @@ window.WA = (function () {
     <a href="{{ url_for('wealth.next_dollar_page') }}{{ q }}" class="{{ 'is-on' if active in ('next', 'capital') }}">Next Dollar</a>
     <a href="{{ url_for('wealth.planner_page') }}" class="{{ 'is-on' if active == 'plan' }}">Planner</a>
     <a href="{{ url_for('wealth.lab_page') }}{{ q }}" class="{{ 'is-on' if active == 'lab' }}">Lab</a>
+    <a href="{{ url_for('wealth.performance_page') }}{{ q }}" class="{{ 'is-on' if active == 'performance' }}">Performance</a>
     <a href="{{ url_for('wealth.scoreboard_page') }}{{ q }}" class="{{ 'is-on' if active == 'score' }}">Scoreboard</a>
     <a href="{{ url_for('wealth.ledger_page') }}{{ q }}" class="{{ 'is-on' if active == 'ledger' }}">Ledger</a>
     <a href="{{ url_for('wealth.research_list_page') }}" class="{{ 'is-on' if active == 'research' }}">M.C.F.F.</a>

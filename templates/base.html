@@ -84,8 +84,10 @@
     <div class="ptr-label">Pull to refresh</div>
   </div>
 
-  {% if request.endpoint != 'terminal' %}{% include "_market_tape.html" %}{% endif %}
-  {% include "_workspace_search.html" %}
+  {% block workspace_chrome %}
+    {% if request.endpoint != 'terminal' %}{% include "_market_tape.html" %}{% endif %}
+    {% include "_workspace_search.html" %}
+  {% endblock %}
 
   <!-- ===== FLASH MESSAGES ===== -->
   {% with messages = get_flashed_messages(with_categories=true) %}

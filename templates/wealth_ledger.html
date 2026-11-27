@@ -113,13 +113,14 @@
     TAX: 'Tax withheld, e.g. foreign tax on an ADR dividend.',
     SPLIT: 'Enter the ratio (10 for a 10-for-1, 0.2 for a 1-for-5 reverse), or the shares you received. Total cost does not change.',
     TRANSFER_IN: 'Shares moved in from another account. Price = your cost per share; Amount = market value on the day (for returns).',
-    TRANSFER_OUT: 'Shares moved out to another account. Not a sale.'
+    TRANSFER_OUT: 'Shares moved out to another account. Use the same transfer:reference in both notes for an internal transfer.',
+    BASIS_ADJUSTMENT: 'Enter the signed change to the open cost basis. The Ledger applies it across open lots.'
   };
   const FIELDS = {
     DEPOSIT: ['amount', 'tax_year'], WITHDRAWAL: ['amount'], INTEREST: ['amount'], FEE: ['amount'], TAX: ['amount'],
     DIVIDEND: ['ticker', 'amount'], BUY: ['ticker', 'shares', 'price', 'fees'], SELL: ['ticker', 'shares', 'price', 'fees'],
     REINVEST: ['ticker', 'shares', 'price'], SPLIT: ['ticker', 'ratio', 'shares'],
-    TRANSFER_IN: ['ticker', 'shares', 'price', 'amount'], TRANSFER_OUT: ['ticker', 'shares', 'amount']
+    TRANSFER_IN: ['ticker', 'shares', 'price', 'amount'], TRANSFER_OUT: ['ticker', 'shares', 'amount'], BASIS_ADJUSTMENT: ['ticker', 'amount']
   };
   const form = document.getElementById('tx-form'), type = document.getElementById('tx-type');
   if (!form.date.value) form.date.value = new Date().toISOString().slice(0, 10);

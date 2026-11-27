@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import datetime, timezone
 
 from database import get_db
@@ -143,18 +144,40 @@ def list_transactions(user_id: int, pid: int | None = None) -> list[dict]:
         conn.close()
 
 
+def _import_signature(tx):
+    return tuple(tx.get(key) or None for key in ("date", "type", "ticker", "shares", "price",
+                                                 "amount", "fees", "ratio"))
+
+
 def add_transactions(user_id: int, pid: int, txs: list[dict], source: str = "manual") -> dict:
     """Insert transactions; ones whose fingerprint is already in this
     portfolio are skipped (re-importing an overlapping file is safe)."""
     conn = get_db()
     added = dupes = 0
     try:
-        seen = {r["fingerprint"] for r in conn.execute(
-            "SELECT fingerprint FROM wa_transactions WHERE user_id = ? AND portfolio_id = ? AND fingerprint IS NOT NULL",
-            (user_id, pid)).fetchall()}
+        # Take the portfolio write lock before deduplication. Concurrent
+        # imports serialize here on both SQLite and PostgreSQL.
+        owner = conn.execute("UPDATE wa_portfolios SET id = id WHERE user_id = ? AND id = ?",
+                             (user_id, pid))
+        if owner.rowcount == 0:
+            return {"added": 0, "duplicates": 0}
+        existing = _rows(conn.execute("SELECT * FROM wa_transactions WHERE user_id = ? AND portfolio_id = ? "
+                                      "AND fingerprint IS NOT NULL", (user_id, pid)))
+        seen = {row["fingerprint"] for row in existing}
+        stored_counts = Counter(_import_signature(row) for row in existing if row["source"] == "schwab_csv")
+        incoming_counts = Counter()
+        checked = set()
         for tx in txs:
             fp = tx.get("fingerprint")
-            if fp and fp in seen:
+            duplicates_signature = False
+            if fp and fp not in checked and tx.get("source") == "schwab_csv":
+                signature = _import_signature(tx)
+                incoming_counts[signature] += 1
+                duplicates_signature = incoming_counts[signature] <= stored_counts[signature]
+            if fp:
+                checked.add(fp)
+            if fp and (fp in seen or duplicates_signature):
+                seen.add(fp)
                 dupes += 1
                 continue
             conn.execute(
@@ -389,5 +412,36 @@ def link_broker_portfolio(user_id: int, account_key: str, kind: str = "taxable")
              account_key, int(count), _now()), returning_id=True)
         conn.commit()
         return int(cur.lastrowid)
+    finally:
+        conn.close()
+
+
+def performance_settings(user_id: int) -> tuple[dict, dict]:
+    """Read annual goals and account classifications in one user-scoped query."""
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT key, value FROM user_settings WHERE user_id = ? "
+                            "AND (key LIKE 'wealth.performance.goal.%' OR key LIKE 'wealth.performance.account.%')",
+                            (user_id,)).fetchall()
+    finally:
+        conn.close()
+    goals, accounts = {}, {}
+    for row in rows:
+        prefix, _, suffix = row["key"].rpartition(".")
+        table = goals if prefix == "wealth.performance.goal" else accounts
+        try:
+            table[int(suffix)] = json.loads(row["value"])
+        except (ValueError, TypeError):
+            continue
+    return goals, accounts
+
+
+def save_performance_setting(user_id: int, scope: str, identifier: int, values: dict) -> None:
+    conn = get_db()
+    try:
+        conn.execute("INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?) "
+                     "ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value",
+                     (user_id, f"wealth.performance.{scope}.{identifier}", json.dumps(values, allow_nan=False)))
+        conn.commit()
     finally:
         conn.close()

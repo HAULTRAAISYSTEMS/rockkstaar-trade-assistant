@@ -35,7 +35,7 @@ def test_portfolio_menu_puts_schwab_first_and_groups_the_rest():
     assert groups == ["Accounts", "Invest", "Track", "Research"]
     titles = re.findall(r"url_for\([^)]*\),\s*'([^']+)'", block)
     assert titles == ["Schwab Account", "Wealth Overview", "Next Dollar", "Planner", "Cost Basis Lab",
-                      "Scoreboard", "Ledger", "M.C.F.F. list"]
+                      "Performance Command Center", "Scoreboard", "Ledger", "M.C.F.F. list"]
 
 
 def test_account_dropdown_links_to_free_browser_alerts():

@@ -16,6 +16,7 @@ listed with their reason rather than guessed.
 from __future__ import annotations
 
 import csv
+from collections import Counter
 import hashlib
 import io
 import re
@@ -151,6 +152,7 @@ def _parse_template(reader) -> dict:
 
 def _parse_schwab(reader) -> dict:
     out, skipped = [], []
+    occurrences = Counter()
     for n, raw in enumerate(reader, start=2):
         r = _row(raw)
         action = (r.get("action") or "").strip()
@@ -214,7 +216,10 @@ def _parse_schwab(reader) -> dict:
         if tx is None:
             skipped.append({"row": n, "reason": f"“{action}” is not a type Wealth Architect imports yet.", "text": text})
             continue
-        tx.update({"date": day, "source": "schwab_csv", "raw": f"{n}:{text}"})
+        identity = tuple(sorted(r.items()))
+        occurrences[identity] += 1
+        tx.update({"date": day, "source": "schwab_csv",
+                   "raw": repr((identity, occurrences[identity]))})
         tx.setdefault("fees", 0.0)
         tx.setdefault("note", action)
         for k in ("shares", "price", "amount", "fees", "ratio"):

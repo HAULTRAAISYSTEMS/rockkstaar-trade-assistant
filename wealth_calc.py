@@ -178,32 +178,46 @@ def xirr(flows: list[tuple[date, float]], guess: float = 0.1) -> float | None:
     return (lo + hi) / 2
 
 
-def twr(values: list[tuple[date, float]], flows: list[tuple[date, float]]) -> float | None:
-    """Time-weighted return over the series, as a fraction.
-
-    `values` are end-of-day portfolio values; `flows` are money added (+) or
-    removed (-) by the investor. A flow on a day is treated as arriving at
-    the start of that day, so the day's return is
-    (value_end - flow) / value_start - 1. Removes the effect of when money was
-    added, which is what makes it comparable with an index.
-    """
-    if len(values) < 2:
+def daily_growth(previous: float, current: float, deposits: float, withdrawals: float) -> float | None:
+    """Opening inflows and closing outflows, using end-of-session valuations."""
+    capital = previous + deposits
+    ending = current + withdrawals
+    if abs(capital) < 1e-8 and abs(ending) < 1e-8:
+        return 1.0
+    if capital <= 0 or ending < 0:
         return None
+    factor = ending / capital
+    return factor if math.isfinite(factor) else None
+
+
+def growth_path(values, flows):
+    """Chain subperiod factors using gross inflows and outflows, not net flow."""
+    if not values:
+        return []
     by_day = {}
-    for d, a in flows:
-        by_day[d] = by_day.get(d, 0.0) + a
-    growth = 1.0
-    prev = values[0][1]
-    for d, v in values[1:]:
-        f = by_day.get(d, 0.0)
-        if prev <= 0:
-            # Nothing invested before today: start measuring from today's money.
-            prev = v
-            continue
-        r = (v - f) / prev - 1
-        growth *= (1 + r)
-        prev = v
-    return growth - 1
+    for day, amount in flows:
+        deposits, withdrawals = by_day.get(day, (0.0, 0.0))
+        by_day[day] = deposits + max(amount, 0), withdrawals + max(-amount, 0)
+    first_day, previous = values[0]
+    if previous <= 0:
+        return []
+    path = [(first_day, 1.0)]
+    for day, current in values[1:]:
+        factor = daily_growth(previous, current, *by_day.get(day, (0.0, 0.0)))
+        if factor is None or path[-1][1] <= 0:
+            return []
+        growth = path[-1][1] * factor
+        if not math.isfinite(growth):
+            return []
+        path.append((day, growth))
+        previous = current
+    return path
+
+
+def twr(values: list[tuple[date, float]], flows: list[tuple[date, float]]) -> float | None:
+    """Time-weighted return, as a fraction."""
+    path = growth_path(values, flows)
+    return path[-1][1] - 1 if len(path) >= 2 else None
 
 
 def annualize(total_return: float | None, days: int) -> float | None:

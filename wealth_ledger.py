@@ -25,6 +25,7 @@ TRANSFER_IN   ticker shares price [amount]  shares moved in from another account
                                 market value on the day (for return maths; cost
                                 basis is used when it is missing)
 TRANSFER_OUT  ticker shares [amount]
+BASIS_ADJUSTMENT ticker amount signed open basis change, applied proportionally across open lots
 
 Cost basis rules
 ----------------
@@ -38,18 +39,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+import math
 
 EPS = 1e-9
 
 TYPES = ("DEPOSIT", "WITHDRAWAL", "BUY", "SELL", "DIVIDEND", "REINVEST", "INTEREST",
-         "FEE", "TAX", "SPLIT", "TRANSFER_IN", "TRANSFER_OUT")
-NEEDS_TICKER = {"BUY", "SELL", "DIVIDEND", "REINVEST", "SPLIT", "TRANSFER_IN", "TRANSFER_OUT"}
+         "FEE", "TAX", "SPLIT", "TRANSFER_IN", "TRANSFER_OUT", "BASIS_ADJUSTMENT")
+NEEDS_TICKER = {"BUY", "SELL", "DIVIDEND", "REINVEST", "SPLIT", "TRANSFER_IN", "TRANSFER_OUT", "BASIS_ADJUSTMENT"}
 
 # Within one day: splits first (a split dated the same day as a purchase
 # applies to shares held before it), money in before money spent, sales after
 # purchases, money out last.
 _DAY_ORDER = {"SPLIT": 0, "DEPOSIT": 1, "TRANSFER_IN": 2, "BUY": 3, "REINVEST": 3,
-              "DIVIDEND": 4, "INTEREST": 4, "SELL": 5, "FEE": 6, "TAX": 6,
+              "DIVIDEND": 4, "INTEREST": 4, "BASIS_ADJUSTMENT": 4, "SELL": 5, "FEE": 6, "TAX": 6,
               "TRANSFER_OUT": 7, "WITHDRAWAL": 8}
 
 
@@ -58,7 +60,7 @@ def _f(v, default=0.0) -> float:
         x = float(v)
     except (TypeError, ValueError):
         return default
-    return default if x != x else x
+    return x if math.isfinite(x) else default
 
 
 def _d(v) -> date:
@@ -92,6 +94,11 @@ def validate(tx: dict) -> list[str]:
         errs.append("Amount must be more than zero.")
     if t == "SPLIT" and _f(tx.get("ratio")) <= 0 and shares <= 0:
         errs.append("A split needs a ratio (e.g. 10 for 10-for-1) or the shares received.")
+    if any(tx.get(key) is not None and _f(tx[key], None) is None
+           for key in ("shares", "price", "amount", "fees", "ratio")):
+        errs.append("Transaction numbers must be finite.")
+    if t == "BASIS_ADJUSTMENT" and not amount:
+        errs.append("Enter the signed change to the open cost basis.")
     if _f(tx.get("fees")) < 0:
         errs.append("Fees cannot be negative.")
     return errs
@@ -123,6 +130,7 @@ class LedgerResult:
     taxes: float = 0.0
     realized: list = field(default_factory=list)
     flows: list = field(default_factory=list)          # (date, amount) money the investor put in (+) or took out (-)
+    events: list = field(default_factory=list)         # actual cash and external-flow deltas per transaction
     splits: list = field(default_factory=list)         # (ticker, date, ratio) as applied
     snapshots: list = field(default_factory=list)      # (date, cash, {ticker: shares}) after each day with activity
     issues: list = field(default_factory=list)
@@ -203,6 +211,8 @@ def build(transactions: list[dict]) -> LedgerResult:
         shares, price = _f(tx.get("shares")), _f(tx.get("price"))
         amount, fees = _f(tx.get("amount")), _f(tx.get("fees"))
         lots = r.positions.setdefault(tk, []) if tk else None
+        previous_cash, flow_count, realized_count = r.cash, len(r.flows), len(r.realized)
+        moved_basis = None
 
         if t == "DEPOSIT":
             r.cash += amount; r.deposits += amount; r.flows.append((day, amount))
@@ -255,8 +265,20 @@ def build(transactions: list[dict]) -> LedgerResult:
             for lot in lots:
                 lot.shares *= ratio           # total cost unchanged
             r.splits.append((tk, day, ratio))
+        elif t == "BASIS_ADJUSTMENT":
+            basis = sum(lot.cost for lot in lots)
+            if not lots or basis + amount < -EPS:
+                r.issues.append(f"{day} {tk}: the basis adjustment needs open lots and a nonnegative resulting basis.")
+                continue
+            units = sum(lot.shares for lot in lots)
+            for lot in lots:
+                weight = lot.cost / basis if basis > EPS else lot.shares / units
+                lot.cost = max(0.0, lot.cost + amount * weight)
         elif t == "TRANSFER_IN":
             basis = shares * price
+            moved_basis = basis
+            if tx.get("price") is None:
+                r.issues.append(f"{day}: {tk} transfer is missing its carrying cost basis.")
             lots.append(Lot(day, shares, basis))
             value = amount if amount > 0 else basis
             r.transfers_in += value; r.flows.append((day, value))
@@ -264,9 +286,13 @@ def build(transactions: list[dict]) -> LedgerResult:
             taken, short = _take_fifo(lots, shares)
             if short > EPS:
                 r.issues.append(f"{day} transfer out of {shares:g} {tk}: only {shares - short:g} shares were held.")
-            moved_cost = sum(c for _l, _n, c in taken)
-            value = amount if amount > 0 else moved_cost
+            moved_basis = sum(c for _l, _n, c in taken)
+            value = amount if amount > 0 else moved_basis
             r.transfers_out += value; r.flows.append((day, -value))
+        r.events.append({"transaction": tx, "date": day, "ticker": tk, "cash": r.cash - previous_cash,
+                         "flow": r.flows[-1][1] if len(r.flows) > flow_count else None,
+                         "realized": sum(row["gain"] for row in r.realized[realized_count:]),
+                         "moved_basis": moved_basis})
         if tk and not r.positions.get(tk):
             r.positions.pop(tk, None)
         snap = (day, r.cash, {t: sum(l.shares for l in ls) for t, ls in r.positions.items() if ls})

@@ -483,6 +483,8 @@ def _fetch_ohlcv_via_chart_api(
                 "volumes":    [int(x) if x else 0 for x in vs],
                 "data_granularity": metadata.get("dataGranularity"),
                 "exchange_timezone": metadata.get("exchangeTimezoneName"),
+                "symbol": metadata.get("symbol"),
+                "splits": list(((result_node.get("events") or {}).get("splits") or {}).values()),
                 "currency": metadata.get("currency"),
             }
         except Exception as _e:
@@ -551,6 +553,10 @@ def _fetch_full_history_chunked(ticker: str, interval: str) -> dict | None:
     merged["data_granularity"] = grans.pop()
     merged["exchange_timezone"] = parts[-1].get("exchange_timezone")
     merged["currency"] = parts[-1].get("currency")
+    merged["symbol"] = parts[-1].get("symbol")
+    splits = {event["date"]: event for part in parts for event in part.get("splits", [])
+              if isinstance(event, dict) and "date" in event}
+    merged["splits"] = list(splits.values())
     return merged
 
 

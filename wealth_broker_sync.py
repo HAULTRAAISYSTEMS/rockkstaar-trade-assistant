@@ -13,6 +13,8 @@ _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
 def _cash(account: dict):
     """Cash & cash invest for the account, or None when unknown."""
+    if "performance_cash" in account:
+        return account["performance_cash"]
     for k in ("cash_and_sweep", "cash_balance"):
         v = account.get(k)
         if isinstance(v, (int, float)) and v >= 0:
@@ -44,14 +46,23 @@ def discover(summary: dict | None, portfolios: list[dict], transactions: list[di
             holdings.append({"ticker": ticker, "shares": qty,
                              "market_value": pos.get("market_value"),
                              "cost_basis_snapshot": pos.get("cost_basis"),
+                             "verified_cost_basis": pos.get("performance_cost_basis", pos.get("cost_basis") or None),
+                             "verified_market_value": pos.get("performance_market_value", pos.get("market_value") or None),
                              "unrealized_pnl": pos.get("unrealized"),
                              "new": new, "source": "schwab"})
+        raw_positions = account.get("positions")
+        unsupported = (max(0, len(raw_positions) - len(holdings)) if isinstance(raw_positions, list)
+                       else len(account.get("option_positions") or []) +
+                       max(0, len(account.get("equity_positions") or []) - len(holdings)))
+        total = account.get("performance_liquidation_value", account.get("total_value"))
         accounts.append({"account_id": account_id, "account_type": account.get("account_type"),
                          "portfolio_id": mapped["id"] if mapped else None,
                          "portfolio_name": mapped["name"] if mapped else None,
                          "holdings": holdings,
                          "cash": _cash(account),
-                         "unsupported_positions": len(account.get("option_positions") or [])})
+                         "total_value": total,
+                         "available_funds": account.get("performance_available_funds", account.get("available_funds")),
+                         "unsupported_positions": unsupported})
     return {"connected": True, "source": "schwab", "as_of": datetime.now(timezone.utc).isoformat(),
             "accounts": accounts, "new_holdings": new_count,
             "note": "Live broker positions are displayed automatically. Ledger and tax lots remain unchanged."}

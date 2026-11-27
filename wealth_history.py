@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from datetime import date
+from collections import defaultdict
+from math import isfinite
 
 import wealth_calc
 
@@ -39,34 +41,34 @@ class _Closes:
 
 
 def build_series(ledgers: list, closes: dict, calendar: list[date], today_prices: dict | None = None,
-                 today: date | None = None) -> dict:
+                 today: date | None = None, *, flows=None, provider_splits=None) -> dict:
     """Daily values across the given ledgers.
 
-    `closes` is {ticker: [(date, close)]}; `calendar` is the trading days to
-    value on (SPY's days). Returns values, flows, contributions and the
-    tickers that had no price history (the series is not trusted then).
+    `closes` is {ticker: [(date, close)]}; `calendar` is the session calendar.
+    Missing session closes invalidate the series while a position is open.
     """
-    flows = sorted(f for lg in ledgers for f in lg.flows)
+    flows = sorted(flows if flows is not None else (f for lg in ledgers for f in lg.flows))
     if not flows:
         return {"ok": False, "reason": "No deposits or transfers yet."}
     start = flows[0][0]
-    days = [d for d in calendar if d >= start]
+    days = sorted({d for d in calendar if d >= start and (today is None or d <= today)})
     if today and today_prices and (not days or days[-1] < today):
         days.append(today)
     if len(days) < 2:
         return {"ok": False, "reason": "Not enough history yet: check back after a few trading days."}
 
-    series = {t: _Closes(rows) for t, rows in closes.items() if rows}
+    series = {t: dict(rows) for t, rows in closes.items() if rows}
     missing = sorted({t for lg in ledgers for _, _, held in lg.snapshots for t in held} - set(series))
     if missing:
         return {"ok": False, "reason": "No price history for " + ", ".join(missing) + ".", "missing": missing}
 
     # Walk each ledger's snapshots alongside the calendar.
-    values, gaps = [], set()
+    values, gaps, security_values = [], set(), []
     pointers = [0] * len(ledgers)
     states = [(0.0, {}) for _ in ledgers]
     for d in days:
         total = 0.0
+        marks = defaultdict(float)
         for i, lg in enumerate(ledgers):
             snaps = lg.snapshots
             while pointers[i] < len(snaps) and snaps[pointers[i]][0] <= d:
@@ -78,60 +80,50 @@ def build_series(ledgers: list, closes: dict, calendar: list[date], today_prices
             for tk, sh in held.items():
                 if today and d == today and today_prices and tk in today_prices:
                     px = today_prices[tk]
-                    total += sh * px                    # live price: actual shares, no adjustment
+                    marks[tk] += sh * px                # live price: actual shares, no adjustment
                     continue
-                px = series[tk].on(d)
-                if px is None:
+                px = series[tk].get(d)
+                if px is None or not isfinite(px) or px <= 0:
                     gaps.add(tk)
                     continue
-                total += sh * _split_factor_after(lg.splits, tk, d) * px
-        values.append((d, total))
+                splits = lg.splits if provider_splits is None else provider_splits.get(tk, ())
+                marks[tk] += sh * _split_factor_after(splits, tk, d) * px
+        values.append((d, total + sum(marks.values())))
+        security_values.append((d, dict(marks)))
+    if gaps:
+        return {"ok": False, "reason": "Missing daily closing prices for " + ", ".join(sorted(gaps)) + ".",
+                "gaps": sorted(gaps)}
 
     # Flows dated on non-trading days count on the next valued day.
-    pending = 0.0
-    flow_on_days = []
-    fi = 0
+    flow_on_days, contrib = [], []
+    fi, running = 0, 0.0
     for d in days:
         while fi < len(flows) and flows[fi][0] <= d:
-            pending += flows[fi][1]
+            amount = flows[fi][1]
+            flow_on_days.append((d, amount))
+            running += amount
             fi += 1
-        if pending:
-            flow_on_days.append((d, pending))
-            pending = 0.0
-    contrib, running = [], 0.0
-    fmap = dict(flow_on_days)
-    for d in days:
-        running += fmap.get(d, 0.0)
         contrib.append((d, running))
-    return {"ok": True, "values": values, "flows": flow_on_days, "contributions": contrib,
-            "gaps": sorted(gaps), "start": days[0], "end": days[-1]}
+    if not growth_index(values, flow_on_days):
+        return {"ok": False, "reason": "Valuations or cash flows do not support a continuous return series."}
+    return {"ok": True, "values": values, "flows": flow_on_days, "dated_flows": flows[:fi],
+            "contributions": contrib, "security_values": security_values,
+            "gaps": [], "start": days[0], "end": days[-1]}
 
 
 def growth_index(values, flows) -> list[tuple[date, float]]:
-    """Growth of $1 with flows removed (the time-weighted path)."""
-    fmap = {}
-    for d, a in flows:
-        fmap[d] = fmap.get(d, 0.0) + a
-    out, idx, prev = [], 1.0, None
-    for d, v in values:
-        f = fmap.get(d, 0.0)
-        if prev is None or prev <= 0:
-            if v > 0:
-                prev = v
-            out.append((d, idx))
-            continue
-        idx *= (v - f) / prev
-        prev = v
-        out.append((d, idx))
-    return out
+    return wealth_calc.growth_path(values, flows)
 
 
-def benchmark_index(spy: list[tuple[date, float]], days: list[date]) -> list[tuple[date, float]]:
-    c = _Closes(spy)
-    base = c.on(days[0])
+def benchmark_index(closes, days: list[date]) -> list[tuple[date, float]]:
+    """Use exact session matches. A missing observation stays missing."""
+    prices = dict(closes)
+    base = prices.get(days[0])
     if not base:
         return []
-    return [(d, (c.on(d) or base) / base) for d in days]
+    return [(d, prices[d] / base if prices.get(d) else None) for d in days]
+
+
 
 
 def yearly(index: list[tuple[date, float]]) -> dict:
@@ -139,13 +131,34 @@ def yearly(index: list[tuple[date, float]]) -> dict:
     out, start_val, year, last = {}, None, None, None
     for d, v in index:
         if year != d.year:
-            if year is not None and start_val:
+            if year is not None and start_val and last is not None:
                 out[year] = (last / start_val - 1) * 100
             year, start_val = d.year, (last if last is not None else v)
         last = v
-    if year is not None and start_val:
+    if year is not None and start_val and last is not None:
         out[year] = (last / start_val - 1) * 100
     return out
+
+
+def benchmark_yearly(levels, days):
+    """Match exactly the endpoints used by the portfolio's yearly return."""
+    windows = {}
+    for i, day in enumerate(days):
+        start, _ = windows.get(day.year, (days[max(i - 1, 0)], None))
+        windows[day.year] = start, day
+    return {year: (levels[end] / levels[start] - 1) * 100
+            for year, (start, end) in windows.items() if levels.get(start) and levels.get(end)}
+
+
+def _verified_xirr(flows):
+    # Consolidate same-day transactions. One chronological sign change
+    # guarantees a unique economically relevant IRR if a solution exists.
+    amounts = defaultdict(float)
+    for day, amount in flows:
+        amounts[day] += amount
+    net = sorted((day, amount) for day, amount in amounts.items() if abs(amount) > 1e-9)
+    changes = sum((a < 0) != (b < 0) for (_, a), (_, b) in zip(net, net[1:]))
+    return wealth_calc.xirr(net) if changes == 1 else None
 
 
 def scoreboard(series: dict, spy_closes: list[tuple[date, float]] | None) -> dict:
@@ -156,8 +169,8 @@ def scoreboard(series: dict, spy_closes: list[tuple[date, float]] | None) -> dic
     span = (days[-1] - days[0]).days
     end_value = values[-1][1]
     contributed = series["contributions"][-1][1]
-    cf = [(d, -a) for d, a in flows] + [(days[-1], end_value)]
-    mwr = wealth_calc.xirr(cf) if span >= 30 else None
+    cf = [(d, -a) for d, a in series.get("dated_flows", flows)] + [(days[-1], end_value)]
+    mwr = _verified_xirr(cf) if span >= 30 else None
     dd = wealth_calc.max_drawdown(idx)
     peak = max(v for _, v in idx) if idx else None
     current_dd = (idx[-1][1] / peak - 1) * 100 if peak else None
@@ -177,12 +190,12 @@ def scoreboard(series: dict, spy_closes: list[tuple[date, float]] | None) -> dic
     }
     if spy_closes:
         b = benchmark_index(spy_closes, days)
-        if b:
+        if b and b[-1][1] is not None:
             spy_tr = b[-1][1] - 1
             out["spy_pct"] = spy_tr * 100
             ann = wealth_calc.annualize(spy_tr, span)
             out["spy_annual_pct"] = ann * 100 if ann is not None else None
             out["excess_pct"] = (twr - spy_tr) * 100 if twr is not None else None
-            out["spy_years"] = yearly(b)
-            out["chart"]["spy"] = [round(v, 5) for _, v in b]
+            out["spy_years"] = benchmark_yearly(dict(spy_closes), days)
+            out["chart"]["spy"] = [round(v, 5) if v is not None else None for _, v in b]
     return out
