@@ -418,3 +418,69 @@ def test_sync_recovers_legacy_hash_when_positions_response_only_has_number(env, 
     excluded = c.get(endpoint).get_json()
     assert not excluded["accounts"]
     assert excluded["position"]["value"] is None
+
+
+def test_next_year_goal_is_planning_only_and_does_not_change_current_progress(env):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    app, *_ = env
+    a, b = client(app, 1), client(app, 2)
+    pid = make_portfolio(a)
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    year = today.year
+    endpoint = "/api/wealth/performance"
+    assert a.post("/api/wealth/transactions", json={
+        "portfolio_id": pid, "date": today.isoformat(), "type": "DEPOSIT", "amount": 1000,
+    }).status_code == 200
+    data = a.get(endpoint).get_json()
+    next_year = next(row for row in data["goals"] if row["year"] == year + 1)
+    assert next_year["planned"] is True and next_year["saved"] is False
+    assert next_year["net"] is next_year["remaining"] is next_year["actual_return"] is None
+    assert a.put(f"{endpoint}/goals/{year + 2}", json={"contribution": 12000, "return_pct": 18}).status_code == 400
+    assert a.put(f"{endpoint}/goals/{year + 1}", json={"contribution": 12000, "return_pct": 18}).status_code == 200
+    saved = a.get(endpoint).get_json()
+    assert saved["selected_goal"]["year"] == year
+    assert saved["selected_goal"]["net"] == 1000
+    assert saved["selected_goal"]["contribution"] == 25000
+    next_year = next(row for row in saved["goals"] if row["year"] == year + 1)
+    assert next_year["saved"] and next_year["contribution"] == 12000
+    assert next_year["net"] is next_year["remaining"] is next_year["actual_return"] is None
+    other = next(row for row in b.get(endpoint).get_json()["goals"] if row["year"] == year + 1)
+    assert not other["saved"] and other["contribution"] == 25000
+
+
+def test_current_holdings_and_account_check_are_available_with_incomplete_history(env, monkeypatch):
+    import time
+    import app as legacy
+    import wealth_store
+
+    app, *_ = env
+    c = client(app, 1)
+    endpoint = "/api/wealth/performance"
+    pid = make_portfolio(c, "Schwab IRA")
+    key = "internal-key-9799"
+    wealth_store.update_portfolio(1, pid, broker_account=key)
+    for row in [
+        {"type": "DEPOSIT", "amount": 500},
+        {"type": "BUY", "ticker": "KLAC", "shares": 1, "price": 100},
+    ]:
+        assert c.post("/api/wealth/transactions", json={
+            **row, "portfolio_id": pid, "date": "2025-01-02",
+        }).status_code == 200
+    number = "11120456"
+    data = {"connected": True, "accounts": [{"account_hash": key, "account_number": number,
+            "cash_and_sweep": 300, "total_value": 560,
+            "equity_positions": [{"symbol": "KLAC", "quantity": 2, "market_value": 260, "cost_basis": 200}]}]}
+    monkeypatch.setattr(legacy, "_schwab_account_cache", {1: {"ts": time.time(), "data": data}})
+    result = c.get(f"{endpoint}?p={pid}").get_json()
+    assert not result["history"]["ok"]
+    h = result["position"]["holdings"][0]
+    assert h["shares"] == 2 and h["market_value"] == 260 and h["unrealized"] == 60
+    assert h["weight_pct"] == pytest.approx(260 / 560 * 100)
+    check = result["reconciliation"][0]
+    assert check["account"] == "•••• 0456 · Schwab IRA"
+    assert check["broker_cash"] == 300 and check["ledger_cash"] == 400 and check["cash_difference"] == -100
+    assert check["positions"][0]["broker_shares"] == 2 and check["positions"][0]["ledger_shares"] == 1
+    assert key not in str(result) and number not in str(result)
+    assert c.get(f"{endpoint}?p={pid}&view=balance").get_json()["reconciliation"] == result["reconciliation"]

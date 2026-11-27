@@ -92,7 +92,77 @@
     root.querySelector('[data-action="retry"]').hidden = !retry;
   }
 
+  const shareQuantity = new Intl.NumberFormat("en-US", {maximumFractionDigits: 6});
+
+  function renderOpenPositions(data) {
+    const positions = get("open-positions");
+    positions.replaceChildren();
+    const rows = data.position.holdings;
+    if (!rows.length) emptyTable(positions, 7, "No open positions available in this view.");
+    for (const row of rows) {
+      tableRow(positions, row.ticker, [[shareQuantity.format(row.shares)],
+        [money(row.market_value)], [money(row.cost_basis)], [money(row.unrealized), row.unrealized],
+        [pct(row.return_pct), row.return_pct], [percentUnsigned(row.weight_pct)]]);
+    }
+    const asOf = data.sync.as_of.at(-1);
+    const sources = data.position.quote_sources;
+    const includesLedger = sources.some(source => source.source !== "Schwab");
+    const sourceLabel = asOf ? "Schwab snapshot " + time(asOf) : "";
+    get("open-source").textContent = [sourceLabel, includesLedger ? "Ledger and quotes" : ""].filter(Boolean).join(" · ");
+  }
+
+  function renderReadiness(data) {
+    const panel = get("reconciliation");
+    const scope = account.value + ":" + strategy.value;
+    const existing = panel.dataset.scope === scope ? [...panel.querySelectorAll("details")] : [];
+    const openState = new Map(existing.map(item => [item.dataset.account, item.open]));
+    panel.dataset.scope = scope;
+    panel.replaceChildren();
+    const brokerHistory = data.reconciliation || [];
+    get("readiness-status").textContent = data.history.ok ? "Verified history through " + data.history.end
+      : (brokerHistory.length ? "Select an account below to see what its ledger needs." : (data.history.reason || ""));
+    for (const check of brokerHistory) {
+      const details = document.createElement("details");
+      details.dataset.account = check.portfolio_id;
+      details.open = openState.get(details.dataset.account) ?? (brokerHistory.length === 1 && !data.history.ok);
+      const title = document.createElement("summary");
+      const lines = [];
+      if (!check.has_transactions) lines.push("Import this account’s transaction history into its ledger.");
+      else {
+        if (!check.cash_matches && finite(check.cash_difference)) {
+          lines.push("Cash: Schwab " + money(check.broker_cash) + " · Ledger " + money(check.ledger_cash)
+            + " · Schwab minus ledger " + money(check.cash_difference));
+        }
+        for (const row of check.positions) {
+          lines.push(row.ticker + " shares: Schwab " + shareQuantity.format(row.broker_shares)
+            + " · Ledger " + shareQuantity.format(row.ledger_shares));
+        }
+      }
+      if (!finite(check.broker_cash)) lines.push("Schwab cash is unavailable for reconciliation.");
+      if (check.unsupported_positions) lines.push("The ledger cannot value one or more positions in this account.");
+      if (!check.live) lines.push("Sync Schwab to check these balances against a fresh snapshot.");
+      if (check.has_transactions && !check.history_confirmed) {
+        lines.push("Verify full transaction coverage, then confirm it in Account settings.");
+      }
+      title.textContent = check.account + " · " + (!check.has_transactions ? "Import history" : (lines.length ? "Review ledger" : "Balances matched"));
+      details.append(title);
+      if (lines.length) {
+        const list = document.createElement("ul");
+        replaceList(list, lines);
+        details.append(list);
+      }
+      const ledger = document.createElement("a");
+      const destination = new URL(panel.dataset.ledger, location.origin);
+      destination.searchParams.set("p", check.portfolio_id);
+      ledger.href = destination.href;
+      ledger.textContent = "Open this account’s ledger";
+      details.append(ledger);
+      panel.append(details);
+    }
+  }
+
   function renderPortfolio(data) {
+    renderOpenPositions(data);
     const p = data.position;
     for (const key of ["value", "unrealized", "realized", "dividends_ytd", "fees_ytd", "investment_profit",
       "basis", "cash", "available_cash", "deposits", "withdrawals", "dividends", "interest", "fees"]) {
@@ -236,8 +306,9 @@
     field("progress-contribution", percentUnsigned(contribution));
     field("remaining", finite(goal.remaining) ? money(goal.remaining) + " remaining · " + data.days_left + " days left" : "Contribution history unavailable");
     setProgress(get("contribution-progress"), contribution);
-    const actual = data.history.periods?.find(period => period.label === "YTD")?.portfolio;
-    const trajectory = data.history.growth_chart?.target.at(-1);
+    const isGoalYear = data.history.end?.slice(0, 4) === String(goal.year);
+    const actual = isGoalYear ? data.history.periods?.find(period => period.label === "YTD")?.portfolio : null;
+    const trajectory = isGoalYear ? data.history.growth_chart?.target.at(-1) : null;
     const delta = finite(actual) && finite(trajectory) ? actual - trajectory : null;
     field("progress-return", finite(actual) ? pct(actual) + " / " + percentUnsigned(goal.return_pct) : dash, actual);
     field("target-gap", finite(delta) ? pp(delta) + " pp vs. trajectory" : "Return history unavailable", delta);
@@ -248,12 +319,15 @@
     const history = get("goal-history");
     history.replaceChildren();
     for (const year of data.goals) {
-      tableRow(history, year.year, [[pct(year.actual_return) + " / " + percentUnsigned(year.return_pct)],
-        [money(year.net) + " / " + money(year.contribution)]]);
+      if (year.planned && !year.saved) continue;
+      tableRow(history, year.year + (year.planned ? " plan" : ""),
+        [[pct(year.actual_return) + " / " + percentUnsigned(year.return_pct)],
+          [money(year.net) + " / " + money(year.contribution)]]);
     }
   }
 
   function renderSources(data) {
+    renderReadiness(data);
     const p = data.position;
     const sources = [];
     if (data.history.ok) sources.push("Ledger and Yahoo Finance daily closing prices · " + data.history.start + " to " + data.history.end);
@@ -474,10 +548,19 @@
   const goalYear = goalForm.elements.year;
   const settingsAccount = accountForm.elements.account;
 
+  function renderGoalPlan() {
+    const amount = goalForm.elements.contribution.valueAsNumber;
+    const year = Number(goalYear.value);
+    const note = get("goal-plan");
+    note.hidden = !finite(amount) || amount <= 0;
+    note.textContent = note.hidden ? "" : money(amount / 12) + " per month for an even " + year + " contribution plan.";
+  }
+
   function showGoal() {
     const goal = response.goals.find(row => row.year === Number(goalYear.value));
     goalForm.elements.return_pct.value = goal.return_pct;
     goalForm.elements.contribution.value = goal.contribution;
+    renderGoalPlan();
   }
 
   function showAccount() {
@@ -487,12 +570,13 @@
   }
 
   goalYear.addEventListener("change", showGoal);
+  goalForm.elements.contribution.addEventListener("input", renderGoalPlan);
   settingsAccount.addEventListener("change", showAccount);
   root.querySelectorAll("[data-close]").forEach(button =>
     button.addEventListener("click", () => button.closest("dialog").close()));
 
   root.querySelector('[data-action="goals"]').addEventListener("click", () => {
-    goalYear.replaceChildren(...response.goals.map(goal => new Option(goal.year, goal.year)));
+    goalYear.replaceChildren(...response.goals.map(goal => new Option(goal.year + (goal.planned ? " · Plan ahead" : ""), goal.year)));
     goalYear.value = response.selected_goal.year;
     showGoal();
     goalForm.querySelector('[role="status"]').textContent = "";
@@ -578,6 +662,7 @@
       p.investment_profit = finite(p.value) && finite(p.capital_flows_to_date)
         ? p.value - p.capital_flows_to_date : null;
       response.sync = update.sync;
+      response.reconciliation = update.reconciliation;
       for (const [name, balances] of Object.entries(update.strategies)) {
         Object.assign(response.strategies[name] || {}, balances);
       }
