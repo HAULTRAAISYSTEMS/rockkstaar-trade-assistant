@@ -145,6 +145,23 @@
       row(rows, [pick, item.date, item.type, item.ticker || "—", displayQuantity(item.shares), cost,
         displayMoney(cash(item)), displayMoney(item.fees)]);
     });
+    const reasonCounts = new Map();
+    for (const item of data.skipped) {
+      const totals = reasonCounts.get(item.reason) || {count: 0, cash: 0, cashCount: 0};
+      totals.count++;
+      if (Number.isFinite(item.cash)) {
+        totals.cash += item.cash;
+        totals.cashCount++;
+      }
+      reasonCounts.set(item.reason, totals);
+    }
+    get("import-reasons").replaceChildren(...[...reasonCounts.entries()].sort((a, b) => b[1].count - a[1].count)
+      .map(([reason, totals]) => {
+        const li = document.createElement("li");
+        li.textContent = totals.count + " × " + reason
+          + (totals.cashCount ? " · CSV cash for " + totals.cashCount + " rows: " + displayMoney(totals.cash) : "");
+        return li;
+      }));
     const warnings = get("import-warnings");
     warnings.replaceChildren(...data.skipped.map(item => {
       const li = document.createElement("li");

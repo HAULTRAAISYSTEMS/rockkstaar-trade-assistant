@@ -60,3 +60,16 @@ def test_template_roundtrip_and_errors():
     assert bad["transactions"] == [] and "Shares must be" in bad["skipped"][0]["reason"]
     junk = wealth_csv.parse("a,b,c\n1,2,3\n")
     assert junk["format"] is None and junk["skipped"]
+
+
+def test_bank_moneylink_adjustment_and_option_review_cash():
+    header = "Date,Action,Symbol,Description,Quantity,Price,Fees & Comm,Amount\n"
+    parsed = wealth_csv.parse(header +
+        '09/14/2026,MoneyLink Adj,,Tfr EXAMPLE BANK,,,,-150.00\n'
+        '09/15/2026,MoneyLink Adj,,Unclassified journal,,,,42.00\n'
+        '09/16/2026,Buy to Open,NVDA  260918C00100000,Option,1,0.25,0.66,-25.66\n')
+    row = parsed["transactions"][0]
+    assert row["type"] == "WITHDRAWAL" and row["amount"] == 150
+    assert len(parsed["transactions"]) == 1
+    assert len(parsed["skipped"]) == 2
+    assert parsed["skipped"][1]["cash"] == -25.66

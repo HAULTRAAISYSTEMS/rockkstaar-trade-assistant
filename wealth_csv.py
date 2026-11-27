@@ -19,6 +19,7 @@ import csv
 from collections import Counter
 import hashlib
 import io
+import math
 import re
 from datetime import datetime
 
@@ -176,7 +177,10 @@ def _parse_schwab(reader) -> dict:
             t = SCHWAB_ACTIONS[low]
             if t in ("BUY", "SELL"):
                 if " " in raw_sym or "/" in raw_sym or re.search(r"\d{6}[CP]\d", sym):
-                    skipped.append({"row": n, "reason": "Options are not tracked in Wealth Architect.", "text": text})
+                    review = {"row": n, "reason": "Options are not tracked in Wealth Architect.", "text": text}
+                    if amount is not None and math.isfinite(amount):
+                        review["cash"] = amount
+                    skipped.append(review)
                     continue
                 tx = {"type": t, "ticker": sym, "shares": abs(qty or 0), "price": abs(price or 0), "fees": abs(fees)}
             elif t == "SPLIT":
@@ -200,6 +204,10 @@ def _parse_schwab(reader) -> dict:
                     tx = {"type": "INTEREST", "amount": amount, "note": f"{action} refund {sym}".strip()}
             elif t == "WITHDRAWAL":
                 tx = {"type": "WITHDRAWAL" if (amount or 0) < 0 else "DEPOSIT", "amount": abs(amount or 0)}
+        elif low == "moneylink adj" and not sym and amount and re.match(
+                r"^TFR\s+.*\bBANK\b", r.get("description", ""), re.IGNORECASE):
+            tx = {"type": "DEPOSIT" if amount > 0 else "WITHDRAWAL", "amount": abs(amount),
+                  "note": "MoneyLink bank transfer adjustment"}
         elif any(low.startswith(k) for k in SCHWAB_CASH_MOVES) and not sym:
             if not amount:
                 skipped.append({"row": n, "reason": "Transfer without an amount.", "text": text})
