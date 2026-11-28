@@ -44,7 +44,7 @@ def test_breadth_says_not_ok_without_quotes(client, monkeypatch):
 
 def test_page_has_the_picture_sections(client):
     html = client.get("/").get_data(as_text=True)
-    for s in ("Morning<br> Command Center", "Your AI Market Intelligence Briefing", "Game Plan",
+    for s in ("<title>Command Center — Tradestaar</title>", ">Command Center<sup>", "Your AI Market Intelligence Briefing", "Game Plan",
               "AI Market Briefing", "A+ Setups Today", "Watchlist Signals", "Economy This Week",
               'id="cmd27-orbit"', 'id="cmd27-money"', 'id="gp-verdict"', "Next up for you",
               "command_center_picture.css", "command_center_picture.js"):

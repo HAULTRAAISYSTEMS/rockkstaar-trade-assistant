@@ -221,38 +221,6 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
         s["transaction_count"] = len(txs)
         return s
 
-    def broker_cash_for(user_id):
-        """Cash & cash invest across the Schwab accounts included in Wealth.
-
-        From the Schwab account summary the Schwab page itself shows (read
-        from its cache, never fetched here), so both pages count the same
-        cash, including accounts that hold only cash. Falls back to the
-        stored snapshots when that summary isn't cached.
-        """
-        import schwab_account_preferences as prefs
-        allowed = prefs.get_preferences(user_id)
-        live = _cached_schwab_summary(user_id)
-        if live and live.get("connected") and live.get("accounts"):
-            total = 0.0
-            for a in prefs.select_accounts(live.get("accounts") or [], allowed, for_wealth=True):
-                c = _num(a.get("cash_and_sweep"))
-                if c is None:
-                    tv = _num(a.get("total_value"))
-                    if tv is not None:
-                        c = max(0.0, tv - sum(_num(p.get("market_value")) or 0.0
-                                              for p in (a.get("positions") or [])))
-                if c is not None and c > 0:
-                    total += c
-            return round(total, 2)
-        total = 0.0
-        for row in wealth_store.list_broker_snapshots(user_id):
-            if not allowed.get(row["account_key"], {}).get("include_wealth", True):
-                continue
-            c = _num((row.get("snapshot") or {}).get("cash"))
-            if c is not None and c > 0:
-                total += c
-        return round(total, 2)
-
     def _cached_schwab_summary(user_id, max_age=1800):
         """The app's cached Schwab summary (up to 30 min old), or None."""
         import sys
@@ -500,11 +468,12 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             if wealth_broker_sync.is_in_wealth((canonical, key), preferences):
                 if canonical not in stored or row["synced_at"] > stored[canonical]["as_of"]:
                     stored[canonical] = dict(snapshot, as_of=row["synced_at"], live=False)
-        cached = _cached_schwab_summary(user_id, max_age=120)
         legacy = sys.modules.get("app")
+        max_age = getattr(legacy, "_SCHWAB_CACHE_TTL", 60)
+        cached = _cached_schwab_summary(user_id, max_age=max_age)
         entry = getattr(legacy, "_schwab_account_cache", {}).get(user_id) or {}
         stamp = entry.get("ts")
-        if not cached or not cached.get("connected") or not stamp or time.time() - stamp >= 120:
+        if not cached or not cached.get("connected") or not stamp or time.time() - stamp >= max_age:
             return stored, aliases, preferences, False
         accounts = cached.get("accounts")
         if not isinstance(accounts, list) or any(not wealth_broker_sync.account_keys(a) for a in accounts):
@@ -648,6 +617,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                     as_of=sorted({b["as_of"] for b in chosen["broker"] if b.get("as_of")}))
         if balance_only:
             return dict(ok=True, position=balance(chosen), sync=sync, reconciliation=chosen["reconciliation"],
+                        account_scope=dict(schwab=len(chosen["broker"]), manual=len(chosen["manual"])),
                         strategies={name: {key: values[key] for key in ("value", "cash", "unrealized")}
                                     for name, values in ((name, balance(bucket)) for name, bucket in buckets.items())
                                     if strategy in ("all", name)})
@@ -1110,38 +1080,18 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
     # ── Command Center: your money today ─────────────────────────────────
     @bp.get("/api/wealth/today")
     def today_api():
-        """All portfolios combined, for the Command Center strip.
-
-        Value, today's move in dollars and %, cash, and the best and worst
-        holding today. During the regular session the move is the live price
-        against the prior close; otherwise it is the last session's official
-        close against the one before (labelled with that day), so an
-        after-hours print never passes for the day's move. Falls back to the
-        broker snapshot only when there are no Wealth portfolios, so a Schwab
-        account imported into Wealth is never counted twice.
-        """
+        """Use the Performance balance and calculate position price moves separately."""
         user_id = uid()
-        s = summary_for(user_id, None)
+        data = performance_payload(user_id, None, "all", balance_only=True)
+        s = data["position"]
+        scope = data["account_scope"]
+        if not any(scope.values()):
+            return jsonify({"ok": True, "empty": True})
         source = "wealth"
-        holdings = [{"ticker": h["ticker"], "shares": h["shares"], "price": h.get("price"),
-                     "market_value": h.get("market_value"),
-                     "cost_basis": h.get("cost_basis") if h.get("cost_basis") else None}
-                    for h in s.get("holdings") or []]
-        cash = float(s.get("cash") or 0.0)
-        value = s.get("total_value")
-        if not s.get("transaction_count"):
-            snap = broker_holdings_for(user_id)
-            if not snap:
-                return jsonify({"ok": True, "empty": True})
-            source = "schwab"
-            holdings = [{"ticker": h["ticker"], "shares": h["shares"], "price": None,
-                         "market_value": h.get("market_value"),
-                         "cost_basis": h.get("basis") if (h.get("basis_known") and h.get("basis")) else None}
-                        for h in snap]
-            # Cash & cash invest from the same snapshots, so the total matches
-            # the broker's (it was left out, about $77 short of Schwab's).
-            cash = broker_cash_for(user_id)
-            value = sum(h["market_value"] or 0 for h in holdings) + cash
+        if scope["schwab"]:
+            source = "mixed" if scope["manual"] else "schwab"
+        holdings = s["holdings"]
+        cash, value = s["cash"], s["value"]
         tickers = [h["ticker"] for h in holdings if h["shares"]]
         try:
             import market_engine as _me
@@ -1150,7 +1100,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             session = "closed"
         closes = {t: data[0] for t, data in history_for(tickers, verified=False).items()}
         live = price_lookup(tickers) if (tickers and session == "regular") else {}
-        today = date.today()
+        today = datetime.now(ZoneInfo("America/New_York")).date()
         moves, day_label = [], None
         for h in holdings:
             rows = closes.get(h["ticker"]) or []
@@ -1178,7 +1128,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                           "prior_close": round(float(prior), 4) if prior else None,
                           "shares": float(h["shares"])})
         day_dollars = round(sum(m["dollars"] for m in moves), 2)
-        base = (value or 0) - day_dollars
+        base = sum(m["prev"] * m["shares"] for m in moves)
         ranked = sorted(moves, key=lambda m: m["pct"])
         # Per-holding value + today's move, for the globe's My Portfolio view.
         by_move = {m["ticker"]: m for m in moves}
@@ -1187,14 +1137,12 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             if not h["shares"]:
                 continue
             mv = h.get("market_value")
-            if mv is None and h.get("price") is not None:
-                mv = float(h["price"]) * float(h["shares"])
             if not mv or mv <= 0:
                 continue
             m = by_move.get(h["ticker"]) or {}
             row = {"ticker": h["ticker"], "value": round(float(mv), 2),
                    "pct": m.get("pct"), "dollars": m.get("dollars"),
-                   "price": h.get("price") if h.get("price") is not None else round(float(mv) / float(h["shares"]), 4),
+                   "price": round(float(mv) / float(h["shares"]), 4),
                    "shares": round(float(h["shares"]), 6)}
             cb = h.get("cost_basis")
             if cb:
@@ -1233,16 +1181,12 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
                 d = (xp - close) * x["shares"]
                 x.update(ext=o["ext"], ext_pct=round(xpct, 2), ext_price=round(xp, 2), ext_dollars=round(d, 2))
                 ext_dollars += d; ext_base += close * x["shares"]; ext_n += 1
-        # Only publish a total when every open position has a usable basis and value.
-        import math
-        complete = bool(tickers) and len(sized) == len(tickers) and all(
-            x.get("cost_basis") is not None and math.isfinite(x["cost_basis"])
-            and x["cost_basis"] > 0 and math.isfinite(x["value"]) for x in sized)
-        basis = sum(x["cost_basis"] for x in sized) if complete else None
-        unrealized = {"cost_basis": round(basis, 2), "market_value": round(invested, 2),
-                      "dollars": round(invested - basis, 2),
-                      "pct": round((invested / basis - 1) * 100, 2)} if basis else None
+        basis, open_pnl = s["basis"], s["unrealized"]
+        unrealized = {"cost_basis": round(basis, 2), "market_value": round(basis + open_pnl, 2),
+                      "dollars": round(open_pnl, 2),
+                      "pct": round(open_pnl / basis * 100, 2)} if basis and open_pnl is not None else None
         return jsonify({"ok": True, "empty": False, "source": source, "value": value, "cash": cash,
+                        "account_scope": scope, "schwab_sync": data["sync"],
                         "unrealized_total": unrealized,
                         "holdings": sized[:40],
                         "ext_dollars": round(ext_dollars, 2) if ext_n else None,

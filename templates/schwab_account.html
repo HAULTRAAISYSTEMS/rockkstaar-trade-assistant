@@ -96,13 +96,10 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
   {% if account_data and not account_data.error %}
 
   <!-- Balance overview cards -->
-  <div class="schwab-balance-grid" id="sa-live" data-sym="SCHWAB-TOTALS"
-       data-total="{{ account_data.total_value if account_data.total_value is not none else '' }}"
-       data-day="{{ account_data.daily_pnl if account_data.daily_pnl is not none else '' }}"
-       data-unr="{{ account_data.total_unrealized if account_data.total_unrealized is not none else '' }}">
+  <div class="schwab-balance-grid">
 
     <div class="wa-card schwab-bal-card" data-sl="total">
-      <div class="schwab-bal-label">Total Account Value <i class="sa-live-dot" hidden aria-label="live"></i></div>
+      <div class="schwab-bal-label" title="Schwab account balances at the last refresh, across all connected Schwab accounts">Total Schwab Value</div>
       <div class="schwab-bal-val"><span data-slv>${{ "{:,.2f}".format(account_data.total_value) if account_data.total_value is not none else "—" }}</span></div>
     </div>
 
@@ -112,7 +109,7 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
     </div>
 
     <div class="wa-card schwab-bal-card {{ 'schwab-pnl-pos' if account_data.daily_pnl and account_data.daily_pnl > 0 else ('schwab-pnl-neg' if account_data.daily_pnl and account_data.daily_pnl < 0 else '') }}" data-sl="day">
-      <div class="schwab-bal-label">Daily P&amp;L</div>
+      <div class="schwab-bal-label">Schwab Daily P&amp;L</div>
       <div class="schwab-bal-val">
         {% if account_data.daily_pnl is not none %}
           <span data-slv>{{ sgn(account_data.daily_pnl) }}</span>
@@ -123,7 +120,7 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
     </div>
 
     {% set ns_u = namespace(mv=0, u=0) %}{% for a in account_data.accounts %}{% for p in a.equity_positions or [] %}{% set ns_u.mv = ns_u.mv + (p.market_value or 0) %}{% set ns_u.u = ns_u.u + (p.unrealized or 0) %}{% endfor %}{% endfor %}
-    <div class="wa-card schwab-bal-card {{ 'schwab-pnl-pos' if account_data.total_unrealized and account_data.total_unrealized > 0 else ('schwab-pnl-neg' if account_data.total_unrealized and account_data.total_unrealized < 0 else '') }}" data-sl="unr" data-cost="{{ ns_u.mv - ns_u.u }}">
+    <div class="wa-card schwab-bal-card {{ 'schwab-pnl-pos' if account_data.total_unrealized and account_data.total_unrealized > 0 else ('schwab-pnl-neg' if account_data.total_unrealized and account_data.total_unrealized < 0 else '') }}" data-sl="unr">
       <div class="schwab-bal-label">Open P&amp;L (Unrealized)</div>
       <div class="schwab-bal-val">
         {% if account_data.total_unrealized is not none %}
@@ -140,6 +137,7 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
 
   </div>
 
+  <p class="sa-foot">Totals cover all connected Schwab accounts{% if balance_as_of %} as of {{ balance_as_of.strftime('%b %d, %I:%M %p') }} ET{% endif %}. Position prices below can update between refreshes.</p>
   <style>
     .sa-manager{position:relative;margin:24px 0 18px;padding:26px;border:1px solid rgba(109,219,232,.19);border-radius:22px;background:linear-gradient(135deg,rgba(13,30,39,.95),rgba(5,12,23,.96) 65%);box-shadow:0 18px 50px rgba(0,0,0,.2);overflow:hidden}
     .sa-manager:before{content:"";position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,#50d9f2,#c6fa67,transparent)}
@@ -203,7 +201,7 @@ SCHWAB_REDIRECT_URI={{ request.host_url }}schwab/callback</pre>
       <div>
         <div class="sa-eyebrow">Tradestaar / Account Control</div>
         <h3 id="sa-manager-title">Manage brokerage accounts</h3>
-        <p>Choose what appears in your command center and what powers Wealth Architect.</p>
+      <p>Visibility controls account details on this page. Wealth controls which Schwab accounts count in Command Center and Portfolio Performance.</p>
       </div>
       <span class="sa-count">{{ account_data.accounts|length }} linked accounts</span>
     </header>
