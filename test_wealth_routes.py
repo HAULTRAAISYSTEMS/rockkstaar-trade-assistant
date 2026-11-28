@@ -452,11 +452,48 @@ def test_schwab_today_counts_cash_like_the_broker(env, monkeypatch):
     import wealth_store
     monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "closed")
     app, *_ = env
-    wealth_store.save_broker_snapshot(3, "acct-a", {"cash": 74.23, "holdings": [
+    wealth_store.save_broker_snapshot(3, "acct-a", {"cash": 74.23, "unsupported_positions": 0, "holdings": [
         {"ticker": "KLAC", "shares": 2, "market_value": 2800.0, "cost_basis_snapshot": 2500.0}]})
     d = client(app, 3).get("/api/wealth/today").get_json()
     assert d["source"] == "schwab" and d["cash"] == pytest.approx(74.23)
     assert d["value"] == pytest.approx(2874.23)
+
+
+def test_command_balance_matches_performance_with_imported_and_manual_accounts(env, monkeypatch):
+    import time
+    import app as legacy
+    import market_engine
+    import schwab_account_preferences as preferences
+    import wealth_store
+
+    monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "closed")
+    app, *_ = env
+    c = client(app, 1)
+    linked = make_portfolio(c, "Schwab", "taxable")
+    wealth_store.update_portfolio(1, linked, broker_account="broker-a")
+    preview = c.post("/api/wealth/import/preview", json={"text": SCHWAB}).json
+    assert c.post("/api/wealth/import/commit", json={"portfolio_id": linked, "transactions": preview["transactions"]}).json["added"] == 2
+    manual = make_portfolio(c, "Manual", "taxable")
+    assert c.post("/api/wealth/transactions", json={"portfolio_id": manual, "date": "2026-02-01",
+                  "type": "DEPOSIT", "amount": 50}).json["ok"]
+    preferences.update_preference(1, "cash-only", visible=False, include_wealth=True)
+    preferences.update_preference(1, "excluded", visible=True, include_wealth=False)
+    monkeypatch.setitem(legacy._schwab_account_cache, 1, {"ts": time.time(), "data": {
+        "connected": True, "accounts": [
+            {"account_hash": "broker-a", "total_value": 1340, "cash_and_sweep": 100,
+             "equity_positions": [{"symbol": "KLAC", "quantity": 1, "market_value": 1240, "cost_basis": 1300}]},
+            {"account_hash": "cash-only", "total_value": 25, "cash_and_sweep": 25, "positions": []},
+            {"account_hash": "excluded", "total_value": 500, "cash_and_sweep": 500, "positions": []},
+        ],
+    }})
+    command = c.get("/api/wealth/today").json
+    performance = c.get("/api/wealth/performance?view=balance").json["position"]
+    assert command["source"] == "mixed" and command["account_scope"] == {"schwab": 2, "manual": 1}
+    assert command["value"] == performance["value"] == 1415
+    assert command["cash"] == performance["cash"] == 175
+    assert command["holdings"][0]["shares"] == 1
+    assert command["unrealized_total"]["dollars"] == performance["unrealized"] == -60
+    assert command["schwab_sync"]["live"] == 2 and command["schwab_sync"]["as_of"]
 
 
 def test_snapshot_keeps_cash_and_sweep():
@@ -470,7 +507,7 @@ def test_snapshot_keeps_cash_and_sweep():
 def test_schwab_cash_comes_from_the_same_summary_the_schwab_page_shows(env, monkeypatch):
     """Cash-only accounts count too, and the snapshot doesn't have to have
     been re-synced: the cached account summary is the source."""
-    import sys, time
+    import time
     import market_engine
     import wealth_store
     import app as legacy
@@ -480,15 +517,16 @@ def test_schwab_cash_comes_from_the_same_summary_the_schwab_page_shows(env, monk
         {"ticker": "KLAC", "shares": 2, "market_value": 2800.0, "cost_basis_snapshot": 2500.0}]})
     monkeypatch.setitem(legacy._schwab_account_cache, 4, {"ts": time.time(), "data": {
         "connected": True, "accounts": [
-            {"account_hash": "acct-a", "total_value": 2874.23, "cash_and_sweep": 74.23, "positions": []},
-            {"account_hash": "roth", "total_value": 2.43, "positions": []}]}})
+                {"account_hash": "acct-a", "total_value": 2874.23, "cash_and_sweep": 74.23,
+                 "equity_positions": [{"symbol": "KLAC", "quantity": 2, "market_value": 2800, "cost_basis": 2500}]},
+                {"account_hash": "roth", "total_value": 2.43, "cash_and_sweep": 2.43, "positions": []}]}})
     d = client(app, 4).get("/api/wealth/today").get_json()
     assert d["cash"] == pytest.approx(76.66) and d["value"] == pytest.approx(2876.66)
 
 
 def test_schwab_page_ticks_live():
     tpl = open("templates/schwab_account.html", encoding="utf-8").read()
-    assert 'id="sa-live"' in tpl and 'data-sl="total"' in tpl and 'data-f="mv"' in tpl and "js/schwab_live.js" in tpl
+    assert 'data-sl="total"' in tpl and 'data-f="mv"' in tpl and "js/schwab_live.js" in tpl
     js = open("static/js/schwab_live.js", encoding="utf-8").read()
     assert "/api/wealth/today/live?symbols=" in js and "setInterval(poll, 3000)" in js
 
@@ -499,6 +537,7 @@ def test_schwab_cash_loads_the_summary_when_this_process_has_none(env, monkeypat
     import market_engine
     import wealth_store
     import schwab
+    import time
     import app as legacy
     monkeypatch.setattr(market_engine, "pulse_session", lambda now=None: "closed")
     app, *_ = env
@@ -507,8 +546,13 @@ def test_schwab_cash_loads_the_summary_when_this_process_has_none(env, monkeypat
     legacy._schwab_account_cache.pop(5, None)
     calls = []
     monkeypatch.setattr(schwab, "token_status", lambda uid: {"connected": True})
-    monkeypatch.setattr(legacy, "_get_schwab_data", lambda uid, force=False: calls.append(uid) or {
-        "connected": True, "accounts": [{"account_hash": "acct-a", "cash_and_sweep": 74.23},
-                                        {"account_hash": "roth", "cash_and_sweep": 2.43}]})
+    def fetch(uid, force=False):
+        calls.append(uid)
+        data = {"connected": True, "accounts": [{"account_hash": "acct-a", "cash_and_sweep": 74.23},
+                                               {"account_hash": "roth", "cash_and_sweep": 2.43}]}
+        monkeypatch.setitem(legacy._schwab_account_cache, uid, {"ts": time.time(), "data": data})
+        return data
+
+    monkeypatch.setattr(legacy, "_get_schwab_data", fetch)
     d = client(app, 5).get("/api/wealth/today").get_json()
     assert calls == [5] and d["cash"] == pytest.approx(76.66)

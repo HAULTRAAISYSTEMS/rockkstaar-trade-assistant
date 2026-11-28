@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Morning Command Center — Tradestaar{% endblock %}
+{% block title %}Command Center — Tradestaar{% endblock %}
 
 {% block head_extra %}
   <link rel="preload" as="image" href="{{ url_for('static', filename='img/scene_sky.webp') }}" />
@@ -37,7 +37,7 @@
   {# ── Hero: title · globe · market pulse ─────────────────────────────── #}
   <header class="elite-hero cmd27-hero cc-hero-xl is-{{ (pulse.regime or 'neutral')|lower|replace('_', '-') }}">
     <div class="cmd27-hero__left">
-      <h1 class="cmd27-title">Morning<br> Command Center<sup>™</sup></h1>
+      <h1 class="cmd27-title">Command Center<sup>™</sup></h1>
       <p class="cmd27-sub">Your AI Market Intelligence Briefing</p>
       {# Says "live" only when the quotes are. #}
       <p class="cmd27-live {{ 'is-live' if pulse.live else 'is-snapshot' }}" id="cmd27-live">
@@ -185,9 +185,9 @@
            data-wealth-url="{{ url_for('wealth.dashboard') }}" data-next-url="{{ url_for('wealth.next_dollar_page') }}">
     <article class="cmd27-m" data-m="value">
       <span class="cmd27-m__ic" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="9" width="24" height="17" rx="3"/><path d="M4 14h24"/><circle cx="22" cy="20" r="2"/><path d="M8 9V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"/></svg></span>
-      <div><small>All portfolios</small><strong data-v>—</strong><em data-s>Loading your money…</em></div>
+      <div><small>Portfolio value</small><strong data-v>—</strong><em data-s>Loading your money…</em><em data-balance-source></em></div>
     </article>
-    <article class="cmd27-m" data-m="day">
+    <article class="cmd27-m" data-m="day" title="Price movement on current positions using market quotes. Schwab Daily P&amp;L is reported by the broker.">
       <span class="cmd27-m__ic" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 24l7-8 5 4 10-11"/><path d="M20 9h6v6"/></svg></span>
       <div><small data-l>Today</small><strong data-v>—</strong><em data-s></em></div>
     </article>
@@ -197,7 +197,7 @@
     </a>
     <article class="cmd27-m" data-m="cash">
       <span class="cmd27-m__ic" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.2"><ellipse cx="13" cy="9" rx="8" ry="3.5"/><path d="M5 9v5c0 2 3.6 3.5 8 3.5s8-1.5 8-3.5V9"/><path d="M5 14v5c0 2 3.6 3.5 8 3.5"/><ellipse cx="22" cy="20" rx="7" ry="3"/><path d="M15 20v4c0 1.7 3.1 3 7 3s7-1.3 7-3v-4"/></svg></span>
-      <div><small>Cash to deploy</small><strong data-v>—</strong><em data-s><a href="{{ url_for('wealth.next_dollar_page') }}">Next Dollar →</a></em></div>
+      <div><small data-l>Cash balance</small><strong data-v>—</strong><em data-s><a href="{{ url_for('wealth.next_dollar_page') }}">Next Dollar →</a></em></div>
     </article>
     <article class="cmd27-m" data-m="best">
       <span class="cmd27-m__ic" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M16 26V7"/><path d="m8 14 8-8 8 8"/></svg></span>

@@ -8833,17 +8833,22 @@ def schwab_account_preferences_update():
 def schwab_account():
     """Schwab account overview page — read-only, Phase 1."""
     import schwab as _schwab
+    from zoneinfo import ZoneInfo
     uid        = current_user_id()
     configured = _schwab.is_configured()
     tok_status = _schwab.token_status(uid)
 
     account_data = None
+    balance_as_of = None
     orders_by_account = {}
     error_msg = None
 
     if tok_status["connected"]:
         try:
             account_data = _get_schwab_data(uid)
+            stamp = (_schwab_account_cache.get(uid) or {}).get("ts")
+            if stamp:
+                balance_as_of = datetime.fromtimestamp(stamp, ZoneInfo("America/New_York"))
             if account_data.get("error"):
                 error_msg = account_data["error"]
             else:
@@ -8866,6 +8871,7 @@ def schwab_account():
         configured=configured,
         tok_status=tok_status,
         account_data=account_data,
+        balance_as_of=balance_as_of,
         orders_by_account=orders_by_account,
         account_preferences=account_preferences,
         error_msg=error_msg,
@@ -10672,7 +10678,7 @@ def _command_center_context() -> dict:
 @app.route("/")
 @app.route("/opportunity")
 def liquidity_page():
-    """Morning Command Center — the market read, in one screen."""
+    """Command Center — the market read, in one screen."""
     return render_template("liquidity.html", **_command_center_context())
 
 

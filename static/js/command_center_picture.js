@@ -1,4 +1,4 @@
-/* Morning Command Center — clock, index strip, orbit chips, breadth ring.
+/* Command Center — clock, index strip, orbit chips, breadth ring.
  * Everything here is real data: /api/market-tape quotes and /api/today/breadth.
  * Nothing is invented; a value we don't have shows "—". */
 (function () {
@@ -682,13 +682,14 @@
       basis.textContent = ''; return;
     }
     var mv = u.market_value;
-    if (mode !== 'close') (d.holdings || []).forEach(function(h) {
+    if (mode !== 'close' && d.source === 'wealth') (d.holdings || []).forEach(function(h) {
       var q = LQ[h.ticker];
       if (q && num(q.price) && num(h.price) && num(h.shares)) mv += (q.price - h.price) * h.shares;
     });
     var gain = mv - u.cost_basis;
     setTile('return', pct(gain / u.cost_basis * 100), cents(gain, true) + ' open P/L', gain);
     basis.textContent = 'Basis ' + cents(u.cost_basis);
+    return { dollars: gain, pct: gain / u.cost_basis * 100 };
   }
 
   // Recompute every tile from the last load plus the latest prices.
@@ -708,30 +709,19 @@
     });
     // Value: the loaded total, moved by each holding's change since then.
     var value = d.value;
-    if (num(value) && mode !== 'close') (d.holdings || []).forEach(function (h) {
+    if (num(value) && mode !== 'close' && d.source === 'wealth') (d.holdings || []).forEach(function (h) {
       var q = LQ[h.ticker]; if (q && num(q.price) && num(h.price) && num(h.shares)) value += (q.price - h.price) * h.shares;
     });
-    renderReturn(d, mode);
+    var unr = renderReturn(d, mode) || null;
     window.__cmd27Money = value;
     var dayPct = base > 0 ? day / base * 100 : null;
     // The My Portfolio card on the globe (the phone's main view) ticks too.
-    var unr = null;
-    if (mode !== 'close') {
-      var u = 0, c = 0, k = 0;
-      (d.holdings || []).forEach(function (h) {
-        if (!num(h.cost_basis) || !num(h.shares)) return;
-        var q = LQ[h.ticker], px = q && num(q.price) ? q.price : h.price;
-        if (!num(px)) return;
-        u += px * h.shares - h.cost_basis; c += h.cost_basis; k++;
-      });
-      if (k) unr = { dollars: u, pct: c > 0 ? u / c * 100 : null };
-    }
     var lbl = mode === 'live' ? 'Today <i class="cmd27-mdot" aria-label="live"></i>' :
       mode === 'ext' ? ({ pre: 'Pre-market', post: 'After hours', overnight: '24H' }[session] || '24H') + ' <i class="cmd27-mdot is-ext" aria-hidden="true"></i>' :
       (d.day_label ? d.day_label + ' close' : 'Today');
     var tally = rows.length ? ' · <span class="cmd27-tally"><b class="is-up">▲' + up + '</b> <b class="is-down">▼' + dn + '</b></span>' : '';
     setTile('value', cents(value), null, null, null, 'MY-VALUE');
-    setTile('day', cents(day, true), '<span>' + pct(dayPct) + '</span>' + tally, day, lbl, 'MY-DAY');
+    setTile('day', cents(day, true), '<span>' + pct(dayPct) + '</span>' + tally + ' · Position move', day, lbl, 'MY-DAY');
     if (mode !== 'close') { pushSpark(day); }
     drawSpark();
     rows.sort(function (a, b) { return a.pct - b.pct; });
@@ -769,24 +759,41 @@
       document.dispatchEvent(new CustomEvent('cmd27:portfolio-data', { detail: d.holdings || [] }));
       // Since you last looked (this browser).
       var since = '';
+      var scope = d.account_scope || {};
+      var scopeKey = [d.source, scope.schwab, scope.manual].join(':');
       try {
         var prev = JSON.parse(localStorage.getItem(LAST) || 'null');
-        if (prev && num(prev.v) && num(d.value) && Date.now() - prev.t > 20 * 60 * 1000) {
+        if (prev && prev.scope === scopeKey && num(prev.v) && num(d.value) && Date.now() - prev.t > 20 * 60 * 1000) {
           var diff = d.value - prev.v, when = new Date(prev.t);
           since = '<span class="' + (diff > 0 ? 'is-up' : diff < 0 ? 'is-down' : '') + '">' + money(diff, true) + '</span> since ' +
             when.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' + when.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
         }
       } catch (e) {}
       var vt = strip.querySelector('[data-m="value"] [data-s]');
-      if (vt) vt.innerHTML = since || (d.positions + ' positions' + (d.source === 'schwab' ? ' · Schwab' : ''));
-      setTile('cash', money(d.cash), null, null);
+      if (vt) vt.innerHTML = since || (d.positions + ' positions');
+      var source = strip.querySelector('[data-balance-source]');
+      if (source) {
+        var sync = d.schwab_sync || {}, stamps = sync.as_of || [];
+        var label = d.source === 'wealth' ? 'Manual Wealth accounts'
+          : (sync.live && !sync.stored ? 'Schwab balances' : 'Schwab snapshot');
+        if (d.source === 'mixed') label += ' + manual Wealth';
+        if (stamps.length) {
+          var stamp = new Date(stamps[0]);
+          if (!isNaN(stamp)) label += ' · ' + stamp.toLocaleString('en-US', {
+            timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+          }) + ' ET';
+        }
+        source.textContent = label;
+      }
+      setTile('cash', cents(d.cash), null, null, d.source === 'schwab' ? 'Cash &amp; sweep' : 'Cash balance');
       strip.classList.remove('is-empty'); strip.querySelector('.cmd27-money__empty').hidden = true;
       M0 = d;
+      M0.localScope = scopeKey;
       renderReturn(d, 'close');
       if (!(d.moves && d.moves.length)) {
-        // An older server without per-holding moves: show it as loaded.
-        setTile('value', money(d.value), null, null);
-        setTile('day', money(d.day_dollars, true), pct(d.day_pct), d.day_dollars,
+        window.__cmd27Money = d.value;
+        setTile('value', cents(d.value), null, null);
+        setTile('day', d.priced ? cents(d.day_dollars, true) : '—', pct(d.day_pct) + ' · Position move', d.day_dollars,
           d.day_label ? d.day_label + ' close' : (d.session === 'regular' ? 'Today · live' : 'Today'));
         if (d.best) setTile('best', d.best.ticker, pct(d.best.pct) + ' · ' + money(d.best.dollars, true), d.best.pct);
         if (d.worst) setTile('worst', d.worst.ticker, pct(d.worst.pct) + ' · ' + money(d.worst.dollars, true), d.worst.pct);
@@ -811,12 +818,12 @@
   setInterval(pollLive, 3000);
   document.addEventListener('tradestaar:prefs', renderMoney);
   // Remember what you saw when you leave, for "since you last looked".
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden && num(window.__cmd27Money)) { try { localStorage.setItem(LAST, JSON.stringify({ v: window.__cmd27Money, t: Date.now() })); } catch (e) {} }
-  });
-  window.addEventListener('pagehide', function () {
-    if (num(window.__cmd27Money)) { try { localStorage.setItem(LAST, JSON.stringify({ v: window.__cmd27Money, t: Date.now() })); } catch (e) {} }
-  });
+  function rememberMoney() {
+    if (!M0 || !num(window.__cmd27Money)) return;
+    try { localStorage.setItem(LAST, JSON.stringify({ v: window.__cmd27Money, scope: M0.localScope, t: Date.now() })); } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', function () { if (document.hidden) rememberMoney(); });
+  window.addEventListener('pagehide', rememberMoney);
   loadMoney(); setInterval(function () { if (!document.hidden) loadMoney(); }, 60000);
 
   // ── Watchlist signals ──
@@ -965,17 +972,15 @@
       cbox.hidden = !c;
       if (c) {
         var word = (document.getElementById('gp-word') || {}).textContent || '';
-        cbox.innerHTML = '<b>⚠ Concentrated</b> ' + e2(c.names.join(' + ')) + (c.names.length > 1 ? ' are ' : ' is ') + Math.round(c.w) + '% of your money. ' +
+        cbox.innerHTML = '<b>⚠ Concentrated</b> ' + e2(c.names.join(' + ')) + (c.names.length > 1 ? ' are ' : ' is ') + Math.round(c.w) + '% of your invested holdings. ' +
           (/risk-off/i.test(word) ? 'With the market Risk-Off, a' : 'A') + ' 10% drop there costs about <em class="dn">' + usd(-c.hit) + '</em>.';
       }
     }
     if (!isP || !psum) return;
     var L = liveSum;
     var useX = !L && on24() && d.ext_count > 0 && nm(d.ext_dollars);
-    var hs = d.holdings || [], unr = 0, cost = 0, kn = 0;
-    hs.forEach(function (h) { if (nm(h.unrealized) && nm(h.cost_basis)) { unr += h.unrealized; cost += h.cost_basis; kn++; } });
-    var unrPct = cost > 0 ? unr / cost * 100 : null;
-    if (L && L.unrealized) { unr = L.unrealized.dollars; unrPct = L.unrealized.pct; kn = kn || 1; }
+    var hs = d.holdings || [], unrealized = L && L.unrealized || d.unrealized_total;
+    var unr = unrealized && unrealized.dollars, unrPct = unrealized && unrealized.pct;
     var best = L ? L.best : d.best, worst = L ? L.worst : d.worst;
     var value = L ? L.value : d.value, dayD = L ? L.day : d.day_dollars, dayP = L ? L.day_pct : d.day_pct;
     var dayLbl = L ? L.label + ' <i class="cmd27-mdot' + (L.ext ? ' is-ext' : '') + '" aria-hidden="true"></i>' : e2(d.day_label ? d.day_label + ' close' : 'Today');
@@ -988,7 +993,7 @@
       '<div class="psum-rows">' +
       '<div><span>' + dayLbl + '</span><b class="' + tn(dayD) + '"><span>' + usd2(dayD, true) + '</span> <small>' + pc(dayP) + '</small></b></div>' +
       (d.ext_count && !L ? '<div class="' + (useX ? 'is-on' : 'is-off') + '"><span><i class="psum-moon" aria-hidden="true"></i>24H</span><b class="' + tn(d.ext_dollars) + '"><span>' + usd2(d.ext_dollars, true) + '</span> <small>' + pc(d.ext_pct) + '</small></b></div>' : '') +
-      (kn ? '<div><span>Unrealized</span><b class="' + tn(unr) + '"><span>' + usd2(unr, true) + '</span> <small>' + pc(unrPct) + '</small></b></div>' : '') +
+      (unrealized ? '<div><span>Unrealized</span><b class="' + tn(unr) + '"><span>' + usd2(unr, true) + '</span> <small>' + pc(unrPct) + '</small></b></div>' : '') +
       (nm(d.cash) && d.cash > 0 ? '<div><span>Cash</span><b>' + usd(d.cash) + '</b></div>' : '') +
       '</div>' +
       // Best and worst are ranks, not directions: color each by its own move,
