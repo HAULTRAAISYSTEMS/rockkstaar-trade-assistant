@@ -213,6 +213,7 @@
       row.dataset.ticker = t; row.dataset.name = (x && x.name) || ''; row.dataset.price = ''; row.dataset.chg = '';
     }
     if (typeof twSelect === 'function') twSelect(row);
+    if (typeof twShowChartTab === 'function') twShowChartTab();
     if (row.isConnected && row.scrollIntoView) { try { row.scrollIntoView({block: 'nearest'}); } catch (e) {} }
     try { history.replaceState(null, '', location.pathname + '?ticker=' + encodeURIComponent(t)); } catch (e) {}
   }

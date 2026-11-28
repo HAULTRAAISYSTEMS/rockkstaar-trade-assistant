@@ -2476,7 +2476,8 @@ var CT_SHORTCUTS = [
   ['Alt + T / Y', 'Trend line / ray'], ['Alt + H / V', 'Horizontal / vertical line'],
   ['Alt + F', 'Fib retracement'], ['Alt + D', '% drop levels (click a high)'], ['Alt + B / C', 'Rectangle / channel'],
   ['Alt + L / S', 'Long / short position'], ['Alt + M', 'Measure % (or Shift + drag for a quick one)'], ['Alt + A', 'Anchored VWAP'],
-  ['Alt + X', 'Text'], ['Alt + R', 'Reset view'], ['Shift + F', 'Full screen'],
+  ['Alt + X', 'Text'], ['Alt + R', 'Fit chart history'], ['Alt + 0', 'Latest candles'], ['Shift + F', 'Full screen'],
+  ['Alt + ↑ / ↓', 'Previous / next watchlist symbol'],
   ['Alt + W', 'Alert at the selected line'], ['Ctrl/⌘ + Z', 'Undo'], ['Ctrl/⌘ + Shift + Z  or  Ctrl + Y', 'Redo'],
   ['Delete', 'Remove selected drawing'], ['Esc', 'Cancel / deselect'], ['?', 'This list']
 ];
@@ -2490,6 +2491,10 @@ function ctShortcut(ev) {
   if (ev.key === '?') { ctToggleShortcutHelp(); return true; }
   if (ev.shiftKey && !ev.altKey && ev.code === 'KeyF' && typeof twToggleFullscreen === 'function') { twToggleFullscreen(); return true; }
   if (!ev.altKey || ev.shiftKey) return false;
+  if (ev.code === 'Digit0' && typeof twLatestView === 'function') { twLatestView(); return true; }
+  if ((ev.code === 'ArrowUp' || ev.code === 'ArrowDown') && typeof twStepWatchlist === 'function') {
+    return twStepWatchlist(ev.code === 'ArrowDown' ? 1 : -1);
+  }
   if (ev.code === 'KeyR' && typeof twResetView === 'function') { twResetView(); return true; }
   if (ev.code === 'KeyW' && typeof ctAlertFromSelected === 'function') { ctAlertFromSelected(); return true; }
   var tool = CT_KEY_TOOLS[ev.code];
