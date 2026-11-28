@@ -134,7 +134,8 @@
   border: 1px solid rgba(255,255,255,.1); box-shadow: 0 16px 40px rgba(0,0,0,.55); white-space: normal; }
 .tw-chart-toolbar .ct-layouts { right: 0; top: 100%; margin-top: 6px; }
 .tw-chart-toolbar { position: relative; }
-.ct-lay-hd { color: #e8eef6; font: 700 12px var(--font-display, sans-serif); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+.ct-lay-hd { display: flex; align-items: center; justify-content: space-between; color: #e8eef6; font: 700 12px var(--font-display, sans-serif); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+.ct-lay-close { min-height: 32px; min-width: 52px; padding: 0 8px; border: 1px solid #354458; border-radius: 8px; color: #e8eef6; background: #142136; cursor: pointer; }
 .ct-lay-save { display: flex; gap: 6px; margin-bottom: 8px; }
 .ct-lay-save input { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: #060a12; color: #e8eef6; font: 500 12px var(--font-mono, monospace); }
 .ct-lay-save button { height: 30px; padding: 0 10px; border-radius: 8px; border: 0; background: var(--cc-accent, #34f5a8); color: #0a0712; font: 700 11px var(--font-mono, monospace); cursor: pointer; }
@@ -148,7 +149,12 @@
 .ct-lay-del:hover { color: #ff6973; background: rgba(255,105,115,.1); }
 @media (max-width: 1099px) {
   .tw-chart-toolbar .ct-layouts { position: fixed; left: 12px; right: 12px; top: auto; width: auto;
-    bottom: calc(84px + env(safe-area-inset-bottom, 0px)); margin: 0; }
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px)); margin: 0;
+    max-height: calc(100dvh - 100px - env(safe-area-inset-bottom, 0px)); overflow: auto; }
+  .ct-lay-close { min-height: 44px; }
+}
+@media (max-width: 1099px) and (max-height: 520px) and (pointer: coarse) {
+  .tw-chart-toolbar .ct-layouts { max-height: calc(100dvh - 172px - env(safe-area-inset-bottom, 0px)); }
 }
 .ct-lay-grid { display: block; margin-top: 10px; padding: 8px 9px; border-radius: 8px; border: 1px dashed rgba(255,255,255,.14); color: #b8c3d1; font: 600 12px var(--font-mono, monospace); text-decoration: none; }
 .ct-lay-grid:hover { color: #fff; border-color: rgba(var(--cc-accent-rgb, 52, 245, 168), .5); }

@@ -2731,7 +2731,7 @@ function ctRenderLayoutMenu() {
       '<small>' + ctEsc(((l.state['tradestaar.chartInterval'] || '') + ' · ' + (l.state['tradestaar.chartRange'] || '')).toUpperCase()) + '</small></button>' +
       (builtin ? '' : '<button type="button" class="ct-lay-del" data-lay-del="' + i + '" title="Delete layout" aria-label="Delete ' + ctEsc(l.name) + '">×</button>') + '</div>';
   };
-  m.innerHTML = '<div class="ct-lay-hd">Layouts</div>' +
+  m.innerHTML = '<div class="ct-lay-hd">Layouts <button type="button" class="ct-lay-close" data-layout-close>Done</button></div>' +
     '<form class="ct-lay-save"><input name="n" maxlength="40" placeholder="Name this layout…" aria-label="Layout name"><button type="submit">Save current</button></form>' +
     (ctLayouts.length ? '<div class="ct-lay-sec">Yours</div>' + ctLayouts.map(function (l, i) { return row(l, i, false); }).join('') : '') +
     '<div class="ct-lay-sec">Presets</div>' + CT_BUILTIN_LAYOUTS.map(function (l, i) { return row(l, i, true); }).join('') +
@@ -2745,6 +2745,7 @@ function twToggleLayouts(ev) {
     (btn && btn.parentElement || document.body).appendChild(m);
     m.addEventListener('click', function (e) {
       e.stopPropagation();
+      if (e.target.closest('[data-layout-close]')) { twToggleLayouts(); return; }
       var a = e.target.closest('[data-lay]'), d = e.target.closest('[data-lay-del]');
       if (d) { ctDeleteLayout(Number(d.getAttribute('data-lay-del'))); return; }
       if (a) { var k = a.getAttribute('data-lay'); ctApplyLayout(k[0] === 'b' ? CT_BUILTIN_LAYOUTS[+k.slice(1)] : ctLayouts[+k.slice(1)]); }
