@@ -241,6 +241,9 @@ def test_read_only_broker_balance_never_uses_missing_data_as_zero():
 
 
 def test_settings_account_strategy_and_user_isolation(env):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
     app, *_ = env
     a, other = client(app, 1), client(app, 2)
     first, second = make_portfolio(a, "Equities"), make_portfolio(a, "Tactical")
@@ -250,7 +253,7 @@ def test_settings_account_strategy_and_user_isolation(env):
     assert other.get(f"{endpoint}?p={first}").status_code == 404
     assert a.put(f"{endpoint}/accounts/{first}", json={"strategy": "long_term", "history_confirmed": False}).status_code == 200
     assert a.put(f"{endpoint}/accounts/{second}", json={"strategy": "active", "history_confirmed": False}).status_code == 200
-    today = date.today()
+    today = datetime.now(ZoneInfo("America/New_York")).date()
     for pid, value in [(first, 1000), (second, 2000)]:
         assert a.post("/api/wealth/transactions", json={
             "date": today.isoformat(), "portfolio_id": pid, "type": "DEPOSIT", "amount": value}).status_code == 200
