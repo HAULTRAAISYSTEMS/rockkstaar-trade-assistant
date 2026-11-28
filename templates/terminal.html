@@ -596,7 +596,7 @@
         <div class="tw-chart-toolbar">
           <button type="button" class="tw-symsearch" onclick="if(window.twOpenTickerSearch)twOpenTickerSearch('');" title="Search a ticker or company — or just start typing (Ctrl/⌘+K)" aria-label="Search a ticker"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg><span>Search</span></button>
           <div class="tw-interval-wrap">
-            <span class="tw-control-label">Interval · Eastern Time</span>
+            <span class="tw-control-label">Interval</span>
             <div class="tw-tf">
             {% for value, label in [('1m','1m'),('5m','5m'),('15m','15m'),('1h','1H'),('4h','4H'),('1d','1D'),('1w','1W'),('1mo','1M')] %}
             <button class="tw-tf-btn {{ 'active' if value == '5m' }}" data-interval="{{ value }}" onclick="twInterval(this)">{{ label }}</button>
@@ -609,10 +609,9 @@
             </select>
           </div>
           <label class="tw-range-wrap"><span class="tw-control-label">Range</span><select id="tw-range" class="tw-range-select" aria-label="Chart history range" onchange="twRange(this.value)"></select></label>
-          <div class="tw-view-actions" aria-label="Chart view controls">
+          <div class="tw-view-actions" role="group" aria-label="Chart view controls">
             <button type="button" class="tw-view-btn" onclick="twLatestView()" title="Zoom to recent candles (Option + 0)">Latest</button>
-            <button type="button" class="tw-view-btn" onclick="twResetView()" title="Fit the selected history range (Option + R)">Fit</button>
-            <button type="button" class="tw-view-btn tw-more-tools" aria-expanded="false" onclick="twToggleChartControls(this)">Tools</button>
+            <button type="button" class="tw-view-btn" data-fit-view onclick="twResetView()" title="Fit the selected history range (Option + R)">Fit</button>
             <button type="button" class="tw-view-btn tw-keys-btn" aria-label="Keyboard shortcuts" onclick="ctToggleShortcutHelp()">?</button>
           </div>
           <div class="tw-tools-pill" role="group" aria-label="Chart tools">
@@ -647,8 +646,44 @@
               </div>
             </div>
           </div>
+          <div class="tw-phone-actions" role="group" aria-label="Quick chart actions">
+            <button type="button" class="tw-view-btn" onclick="twLatestView()">Latest</button>
+            <button type="button" class="tw-view-btn" aria-haspopup="dialog" aria-controls="tw-phone-chart-sheet" onclick="twOpenPhoneChartSheet('indicators')">Indicators</button>
+            <button type="button" class="tw-view-btn" aria-haspopup="dialog" aria-controls="tw-phone-chart-sheet" onclick="twOpenPhoneChartSheet('tools')">Chart tools</button>
+          </div>
         </div>
 
+        <dialog class="tw-phone-sheet" id="tw-phone-chart-sheet" aria-labelledby="tw-phone-sheet-title" onclose="twRestorePhoneIndicatorMenu()" onkeydown="event.stopPropagation()">
+          <header class="tw-phone-sheet-head">
+            <h2 id="tw-phone-sheet-title">Chart tools</h2>
+            <form method="dialog"><button type="submit" class="tw-view-btn" autofocus>Done</button></form>
+          </header>
+          <div class="tw-phone-sheet-body">
+            <div id="tw-phone-indicators" hidden></div>
+            <div id="tw-phone-tools" hidden onclick="twUsePhoneChartTool(event)">
+              <section aria-labelledby="tw-phone-display-title">
+                <h3 id="tw-phone-display-title">Display</h3>
+                <div class="tw-phone-tool-grid">
+                  <button type="button" data-chart-control="[data-type='candles']" aria-pressed="false">Candles</button>
+                  <button type="button" data-chart-control="[data-type='area']" aria-pressed="false">Line</button>
+                  <button type="button" data-chart-control="#tw-volume-btn" aria-pressed="false">Volume</button>
+                  <button type="button" data-chart-control="#tw-extended-btn" aria-pressed="false">Extended hours</button>
+                  <button type="button" data-chart-control="#tw-zones-btn" aria-pressed="false">Value zones</button>
+                </div>
+              </section>
+              <section aria-labelledby="tw-phone-workspace-title">
+                <h3 id="tw-phone-workspace-title">Workspace</h3>
+                <div class="tw-phone-tool-grid">
+                  <button type="button" data-chart-control=".tw-view-actions [data-fit-view]" data-close-sheet>Fit history</button>
+                  <button type="button" data-chart-control="#tw-draw-toggle" data-close-sheet aria-pressed="false">Drawing tools</button>
+                  <button type="button" data-chart-control="#tw-layout-btn" data-close-sheet>Saved layouts</button>
+                  <button type="button" data-chart-control="#tw-settings-btn" data-close-sheet>Chart settings</button>
+                  <button type="button" data-chart-control="#tw-size-btn" data-close-sheet aria-pressed="false">Position sizing</button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </dialog>
 
         <div class="tw-session-strip" id="tw-session-strip" hidden>
           <span class="tw-session-key overnight">O/N</span><strong id="tw-overnight-quote">No overnight print</strong>
@@ -1351,15 +1386,54 @@ function twLatestView(){
   state.chart.timeScale().setVisibleLogicalRange({from:last-count+0.5,to:last+Math.max(3,Math.ceil(count/12))});
   twRenderDrawings();
 }
-function twToggleChartControls(button){
-  var open=button.closest('.tw-chart-toolbar').classList.toggle('tw-controls-open');
-  button.setAttribute('aria-expanded',String(open));
+function twSyncPhoneChartTools(){
+  document.querySelectorAll('#tw-phone-tools [aria-pressed]').forEach(function(button){
+    var control=document.querySelector('.tw-chart-toolbar '+button.dataset.chartControl);
+    if(control) button.setAttribute('aria-pressed',control.getAttribute('aria-pressed') || String(control.classList.contains('active')));
+  });
+}
+function twOpenPhoneChartSheet(mode){
+  var sheet=document.getElementById('tw-phone-chart-sheet');
+  var indicators=document.getElementById('tw-phone-indicators');
+  var showIndicators=mode==='indicators';
+  document.getElementById('tw-phone-sheet-title').textContent=showIndicators?'Indicators':'Chart tools';
+  indicators.hidden=!showIndicators;
+  document.getElementById('tw-phone-tools').hidden=showIndicators;
+  if(showIndicators){
+    var menu=document.getElementById('tw-indicator-menu');
+    indicators.appendChild(menu);
+    menu.removeAttribute('role');
+    menu.hidden=false;
+  }else{
+    twSyncPhoneChartTools();
+  }
+  sheet.showModal();
+}
+function twRestorePhoneIndicatorMenu(){
+  var host=document.getElementById('tw-phone-indicators');
+  var menu=host.querySelector('#tw-indicator-menu');
+  if(!menu) return;
+  menu.hidden=true;
+  menu.setAttribute('role','menu');
+  document.getElementById('tw-indicators-btn').parentElement.appendChild(menu);
+}
+function twUsePhoneChartTool(event){
+  var button=event.target.closest('[data-chart-control]');
+  if(!button) return;
+  var control=document.querySelector('.tw-chart-toolbar '+button.dataset.chartControl);
+  if(!control) return;
+  event.stopPropagation();
+  if(button.hasAttribute('data-close-sheet')) document.getElementById('tw-phone-chart-sheet').close();
+  control.click();
+  twSyncPhoneChartTools();
 }
 function twToggleIndicatorMenu(ev){
   if(ev) ev.stopPropagation();
   var menu = document.getElementById('tw-indicator-menu');
   var btn = document.getElementById('tw-indicators-btn');
   if(!menu) return;
+  var sheet=menu.closest('dialog');
+  if(sheet && sheet.open){ sheet.close(); return; }
   var open = menu.hidden;
   menu.hidden = !open;
   if(btn) btn.setAttribute('aria-expanded', String(open));
@@ -1367,7 +1441,7 @@ function twToggleIndicatorMenu(ev){
 document.addEventListener('click', function(){
   var menu = document.getElementById('tw-indicator-menu');
   var btn = document.getElementById('tw-indicators-btn');
-  if(menu && !menu.hidden){ menu.hidden = true; if(btn) btn.setAttribute('aria-expanded','false'); }
+  if(menu && !menu.hidden && !menu.closest('dialog')){ menu.hidden = true; if(btn) btn.setAttribute('aria-expanded','false'); }
 });
 function twSyncIndicatorMenu(){
   var r = document.getElementById('tw-ind-rsi'), m = document.getElementById('tw-ind-macd');

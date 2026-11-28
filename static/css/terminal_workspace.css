@@ -527,8 +527,8 @@ html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen::after { display: non
     padding: 0 !important;
   }
   .tw-panel.tw-is-fullscreen > *, .tw-panel:fullscreen > * { grid-column: 1 !important; }
-  .tw-panel.tw-is-fullscreen > :not(.tw-sym-hd):not(.tw-workspace):not(.tw-chart-toolbar):not(.tw-study-settings):not(.tw-draw-status):not(.tp-overlay),
-  .tw-panel:fullscreen > :not(.tw-sym-hd):not(.tw-workspace):not(.tw-chart-toolbar):not(.tw-study-settings):not(.tw-draw-status):not(.tp-overlay) { display: none !important; }
+  .tw-panel.tw-is-fullscreen > :not(.tw-sym-hd):not(.tw-workspace):not(.tw-chart-toolbar):not(.tw-study-settings):not(.tw-phone-sheet):not(.tw-draw-status):not(.tp-overlay),
+  .tw-panel:fullscreen > :not(.tw-sym-hd):not(.tw-workspace):not(.tw-chart-toolbar):not(.tw-study-settings):not(.tw-phone-sheet):not(.tw-draw-status):not(.tp-overlay) { display: none !important; }
 
   /* Slim header */
   .tw-panel.tw-is-fullscreen > .tw-sym-hd,
@@ -681,7 +681,7 @@ html.cc27 body .tw .tw-center > .tw-panel.tw-is-fullscreen::after { display: non
 html.tp-locked,html.tp-locked body{overflow:hidden}
 
 /* Keep the chart's navigation next to the interval and range controls. */
-.tw-interval-select, .tw-chart-toolbar .tw-more-tools { display: none; }
+.tw-interval-select, .tw-phone-actions { display: none; }
 .tw-view-actions {
   order: 6; display: flex; align-items: center; gap: 4px;
 }
@@ -729,41 +729,88 @@ html.tp-locked,html.tp-locked body{overflow:hidden}
 }
 
 @media (max-width: 760px) {
-  .tw .ptabs__btn { min-height: 44px; }
+  .tw .ptabs__in { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; }
+  .tw .ptabs__btn { min-height: 44px; padding-inline: 2px; font-size: .72rem; }
+}
+
+@media (max-width: 760px), (max-width: 1099px) and (max-height: 520px) and (pointer: coarse) {
   .tw-chart-toolbar {
     display: grid !important;
     grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr) 44px;
-    gap: 6px !important; overflow: visible !important; touch-action: auto;
+    align-items: end !important; gap: 8px !important; padding: 10px !important;
+    overflow: visible !important; touch-action: auto;
   }
   .tw-chart-toolbar::after, .tw-chart-toolbar .tw-interval-wrap .tw-tf,
-  .tw-chart-toolbar .tw-keys-btn { display: none !important; }
+  .tw-chart-toolbar .tw-view-actions, .tw-chart-toolbar .tw-draw-toggle,
+  .tw-chart-toolbar .tw-tools-pill > button:not(#tw-fs-btn), .tw-chart-toolbar .tw-type {
+    display: none !important;
+  }
   .tw-chart-toolbar .tw-symsearch { grid-area: 1 / 1; width: 44px; }
-  .tw-chart-toolbar .tw-interval-wrap { grid-area: 1 / 2; }
-  .tw-chart-toolbar .tw-range-wrap { grid-area: 1 / 3; padding: 0 !important; }
   .tw-chart-toolbar #tw-fs-btn { grid-area: 1 / 4; width: 44px; }
-  .tw-chart-toolbar .tw-view-actions { grid-area: 2 / 1 / 3 / 4; }
-  .tw-chart-toolbar .tw-view-btn { flex: 1 1 0; min-width: 0; padding-inline: 3px; }
-  .tw-chart-toolbar .tw-more-tools { display: inline-block; }
-  .tw-chart-toolbar .tw-draw-toggle { grid-area: 2 / 4; width: 44px !important; }
-  .tw-chart-toolbar :is(.tw-view-btn, .tw-symsearch, .tw-draw-toggle, .tw-fs-btn, .tw-range-wrap) {
-    min-height: 44px !important;
+  .tw-chart-toolbar :is(.tw-symsearch, #tw-fs-btn) { min-height: 44px !important; }
+  .tw-chart-toolbar .tw-interval-wrap { grid-area: 1 / 2; }
+  .tw-chart-toolbar .tw-range-wrap { grid-area: 1 / 3; }
+  .tw-chart-toolbar :is(.tw-interval-wrap, .tw-range-wrap) {
+    display: grid !important; gap: 4px; height: auto !important; min-width: 0;
+    border: 0 !important; padding: 0 !important; background: none !important; box-shadow: none !important;
   }
-  .tw-chart-toolbar .tw-interval-select, .tw-chart-toolbar .tw-range-select {
-    display: block; width: 100% !important; height: 44px;
-    padding: 0 8px !important; border: 1px solid #354458; border-radius: 8px;
-    color: #dce9f7; background: #101b2a; font: 600 1rem var(--font-ui, system-ui) !important;
+  .tw-chart-toolbar .tw-control-label {
+    display: block !important; color: #b1c3d8; font: 600 .7rem var(--font-ui, system-ui);
   }
-  .tw-chart-toolbar .tw-tools-pill > :not(#tw-fs-btn),
-  .tw-chart-toolbar .tw-type { display: none !important; }
-  .tw-chart-toolbar.tw-controls-open .tw-tools-pill > :not(#tw-fs-btn) {
-    display: inline-flex !important; grid-row: 3; margin: 0 !important; min-width: 44px;
+  .tw-chart-toolbar :is(.tw-interval-select, .tw-range-select) {
+    display: block; width: 100% !important; min-width: 0;
+    height: 44px !important; min-height: 44px !important; appearance: auto; color-scheme: dark;
+    padding: 0 7px !important; border: 1px solid #354458 !important; border-radius: 8px;
+    color: #edf5ff; background: #101b2a !important; font: 600 1rem var(--font-ui, system-ui) !important;
   }
-  .tw-chart-toolbar.tw-controls-open .tw-type {
-    display: flex !important; grid-area: 4 / 1 / 5 / -1; flex-wrap: wrap;
+  .tw-chart-toolbar .tw-phone-actions {
+    display: grid; grid-area: 2 / 1 / 3 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
+    border-top: 1px solid #27364a; padding-top: 8px;
   }
-  .tw-chart-toolbar.tw-controls-open .tw-type-btn { min-height: 44px !important; min-width: 44px; }
+  .tw-phone-actions .tw-view-btn { min-height: 44px; padding-inline: 2px; font-size: .78rem; }
+  .tw-workspace:not(.show-draw) .ct-favbar { display: none !important; }
   .tw-wl-row { min-height: 52px; }
 }
+@media (max-width: 1099px) and (max-height: 520px) and (pointer: coarse) {
+  .tw-panel:is(.tw-is-fullscreen, :fullscreen) .tw-chart-toolbar { grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); }
+  .tw-panel:is(.tw-is-fullscreen, :fullscreen) .tw-phone-actions { grid-area: 1 / 4; border: 0; padding: 0; }
+}
+
+.tw-phone-sheet {
+  position: fixed; inset: auto 0 0; margin: 0 auto;
+  width: min(100%, 520px); max-width: 100%; max-height: 76vh; max-height: 76dvh;
+  padding: 0; overflow: hidden;
+  color: #edf5ff; background: #0d1726; border: 1px solid #354458; border-bottom: 0;
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -12px 42px #03070e90;
+}
+.tw-phone-sheet[open] { display: flex; flex-direction: column; }
+.tw-phone-sheet::backdrop { background: #030914a8; }
+.tw-phone-sheet-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid #27364a;
+}
+.tw-phone-sheet-head h2, .tw-phone-sheet-head form { margin: 0; }
+.tw-phone-sheet-head h2 { font-size: 1.02rem; }
+.tw-phone-sheet-head button { min-height: 44px; min-width: 60px; }
+.tw-phone-sheet-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 14px max(14px, env(safe-area-inset-bottom)); }
+.tw-phone-sheet [hidden] { display: none !important; }
+.tw-phone-sheet h3 { margin: 9px 0 6px; font-size: .78rem; color: #b1c3d8; }
+.tw-phone-tool-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.tw-phone-tool-grid button {
+  min-height: 44px; padding: 6px 8px; text-align: left; cursor: pointer;
+  font: 600 .83rem var(--font-ui, system-ui); color: #edf5ff; background: #142136;
+  border: 1px solid #354458; border-radius: 8px;
+}
+.tw-phone-tool-grid button[aria-pressed="true"] { color: #afffe0; border-color: #388f76; background: #12342f; }
+.tw-phone-sheet #tw-indicator-menu {
+  position: static !important; margin: 0; padding: 0; width: auto; max-height: none;
+  background: none !important; border: 0; box-shadow: none;
+}
+.tw-phone-sheet .tw-ind-row { min-height: 46px; }
+.tw-phone-sheet .tw-ind-row small { font-size: .72rem; color: #b1c3d8; }
+.tw-phone-sheet .tw-ind-settings { min-height: 44px; color: #edf5ff; }
 
 @media (max-width: 1099px) {
   .tw-chart-stack > .tw-ohlcv {
