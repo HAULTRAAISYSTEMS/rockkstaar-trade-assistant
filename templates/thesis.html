@@ -4,6 +4,8 @@
 
 {% block hx_content %}
 <main class="th-shell">
+{% set company_symbol = thesis.ticker if thesis else ticker %}
+{% if company_symbol %}{% include "_company_context_nav.html" %}{% endif %}
   <header class="elite-hero">
     <div>
       <div class="elite-hero-eyebrow"><span class="elite-live-dot"></span>Tradestaar Thesis</div>

@@ -10,6 +10,8 @@
 
 {% block hx_content %}
 <div class="fundamentals-shell">
+{% set company_symbol = ticker or request.args.get("ticker") %}
+{% if company_symbol %}{% include "_company_context_nav.html" %}{% endif %}
 
   <!-- ── Page header ────────────────────────────────────────────────── -->
   <div class="page-header">

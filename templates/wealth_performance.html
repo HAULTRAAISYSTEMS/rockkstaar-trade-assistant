@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_elite_navigation.html" import rm_icon with context %}
+{% from "_wealth_macros.html" import portfolio_nav with context %}
 {% block title %}Portfolio Performance Command Center — Tradestaar Elite{% endblock %}
 {% block workspace_chrome %}{% endblock %}
 {% block body_class %}performance-page{% endblock %}
@@ -17,17 +18,7 @@
      data-sync="{{ url_for('wealth.performance_sync') }}"
      data-stock="{{ url_for('stock_detail', ticker='__TICKER__') }}"
      data-plan-year="{{ plan_year if plan_year else '' }}">
-  <nav class="pc-navigation" aria-label="Portfolio">
-    <strong>Portfolio</strong>
-    <a data-account-link href="{{ url_for('wealth.dashboard', p=current.id if current else None) }}">{{ rm_icon('vault') }} Overview</a>
-    <a aria-current="page" href="{{ request.path }}">{{ rm_icon('pulse') }} Performance</a>
-    <a data-account-link href="{{ url_for('wealth.dashboard', p=current.id if current else None) }}#wa-holdings">{{ rm_icon('pie') }} Holdings</a>
-    <a data-account-link href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">{{ rm_icon('pen') }} Transactions</a>
-    <a href="#pc-cash-details">{{ rm_icon('bank') }} Income</a>
-    <a data-account-link data-plan-link href="{{ url_for('wealth.planner_page', p=current.id if current else None) }}">{{ rm_icon('calendar') }} Contributions</a>
-    <a data-account-link href="{{ url_for('wealth.scoreboard_page', p=current.id if current else None) }}">{{ rm_icon('checks') }} Scoreboard</a>
-    <a href="{{ url_for('schwab_account') }}">{{ rm_icon('bank') }} Schwab</a>
-  </nav>
+  <div class="pc-navigation">{{ portfolio_nav("performance", current) }}</div>
 
   <header class="pc-hero">
     <div class="pc-heading">
@@ -58,7 +49,7 @@
     <p id="pc-notice-message"></p>
     <button type="button" data-action="retry" hidden>Retry</button>
     <a href="#pc-history-readiness" data-history-notice>Review history</a>
-    <a href="{{ url_for('wealth.ledger_page') }}" id="pc-ledger-link">Open Ledger</a>
+    <a href="{{ url_for('wealth.ledger_page') }}" id="pc-ledger-link">Open Transactions</a>
   </div>
 
   <div class="pc-kpis" aria-label="Portfolio overview">
@@ -197,13 +188,14 @@
       </table>
       <a class="pc-card-link" data-history-link href="#pc-history-readiness" hidden>Review return coverage</a>
     </section>
-    <section class="pc-panel pc-growth">
-      <div class="pc-panel-head">{{ panel_title('pulse', 'Portfolio Growth vs. Annual Target') }}
+    <section class="pc-panel pc-growth" id="pc-return-history">
+      <div class="pc-panel-head">{{ panel_title('pulse', 'Portfolio Growth') }}
         <label class="pc-chart-range"><span class="pc-visually-hidden">Chart period</span><select id="pc-range">
-          <option value="ytd">YTD</option><option value="all">All time</option>
+          <option value="ytd">YTD</option><option value="all">All time</option><option value="value">Value &amp; contributions</option>
         </select></label>
       </div>
-      <ul class="pc-legend"><li>Portfolio (TWR)</li><li>S&amp;P 500 total return</li><li>Compounded target</li></ul>
+      <ul class="pc-legend" id="pc-return-legend"><li>Portfolio (TWR)</li><li>S&amp;P 500 total return</li><li>Compounded target</li></ul>
+      <ul class="pc-legend" id="pc-value-legend" hidden><li>Closing value</li><li id="pc-baseline-label">Net contributions</li></ul>
       <div class="pc-plot">
         <canvas id="pc-chart" tabindex="0" role="img" aria-label="Historical returns. Use left and right arrow keys to inspect dates."></canvas>
         <div id="pc-chart-empty" class="pc-chart-empty">
@@ -220,7 +212,7 @@
     <section class="pc-panel pc-risk">
       {{ panel_title('spark', 'Key Performance Metrics') }}
       {{ rows([('twr','Time-Weighted Return (TWR)'), ('xirr','Money-Weighted Return (XIRR, annualized)'), ('annual','Annualized TWR'),
-        ('drawdown','Maximum Drawdown'), ('volatility','Annualized Volatility'), ('sharpe','Sharpe Ratio'),
+        ('drawdown','Maximum Drawdown'), ('current-drawdown','From the high'), ('volatility','Annualized Volatility'), ('sharpe','Sharpe Ratio'),
         ('sortino','Sortino Ratio'), ('calmar','Calmar Ratio'), ('beta','Beta'), ('alpha','Annualized Jensen’s Alpha')]) }}
       <a class="pc-card-link" data-history-link href="#pc-history-readiness" hidden>Review risk data coverage</a>
       <small id="pc-risk-coverage" hidden>Some ratios require a longer or more varied series of returns.</small>
@@ -290,6 +282,13 @@
   </div>
 
   <div class="pc-grid pc-grid--details">
+    <section class="pc-panel">
+      {{ panel_title('calendar', 'Returns by Calendar Year') }}
+      <div class="pc-scroll" tabindex="0" role="region" aria-label="Returns by calendar year"><table class="pc-table">
+        <thead><tr><th>Year</th><th>Portfolio</th><th>S&amp;P 500 TR</th><th>Excess (pp)</th><th>Dividends</th></tr></thead>
+        <tbody id="pc-yearly-returns"><tr><td colspan="5">Loading returns…</td></tr></tbody>
+      </table></div>
+    </section>
     <section class="pc-panel" id="pc-cash-details">
       {{ panel_title('vault', 'Investment & Cash Details') }}
       {{ rows([('investment_profit','Total Investment Profit'), ('basis','Total Cost Basis'),

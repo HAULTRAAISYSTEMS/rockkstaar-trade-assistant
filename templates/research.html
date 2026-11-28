@@ -4,6 +4,8 @@
 
 {% block hx_content %}
 <main class="cr-shell">
+{% set company_symbol = ticker %}
+{% if company_symbol %}{% include "_company_context_nav.html" %}{% endif %}
 
   <header class="elite-hero">
     <div>

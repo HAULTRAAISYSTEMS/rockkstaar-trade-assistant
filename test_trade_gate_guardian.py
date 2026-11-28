@@ -207,7 +207,8 @@ def test_terminal_has_size_tool_and_nav_links():
     assert "if(twChartState.sizeMode&&param&&param.point)" in term
     nav = open("templates/_elite_navigation.html", encoding="utf-8").read()
     assert nav.count("trade_tools.gate_page") == 1 and nav.count("trade_tools.guardian_page") == 1
-    assert nav.count("nav_tiles(terminal_groups)") == 2   # desktop dropdown + phone sheet
+    assert "nav_tiles(terminal_groups if terminal_active else research_groups)" in nav
+    assert 'data-tw-symbol-link href="{{ url_for(\'trade_tools.gate_page\'' in term
 
 
 def test_guardian_scan_is_parallel_bounded_and_cached(monkeypatch):

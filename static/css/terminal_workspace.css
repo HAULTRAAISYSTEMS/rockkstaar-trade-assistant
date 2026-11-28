@@ -818,3 +818,11 @@ html.tp-locked,html.tp-locked body{overflow:hidden}
     border-bottom: 1px solid rgba(255, 255, 255, .08) !important;
   }
 }
+
+.tw-symbol-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 12px 8px; }
+.tw-symbol-actions a {
+  display: inline-flex; align-items: center; min-height: 36px; padding: 0 10px;
+  border: 1px solid #28475a; border-radius: 8px; color: #bfecff; font-size: .75rem;
+  text-decoration: none;
+}
+@media (max-width: 768px) { .tw-symbol-actions a { min-height: 44px; } }

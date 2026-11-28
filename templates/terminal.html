@@ -593,6 +593,10 @@
           </div>
         </div>
 
+        <nav class="tw-symbol-actions" aria-label="Selected ticker actions">
+          <a data-tw-symbol-link href="{{ url_for('research_page', ticker=requested_symbol or chart_symbol) }}">Company research</a>
+          <a data-tw-symbol-link href="{{ url_for('trade_tools.gate_page', ticker=requested_symbol or chart_symbol) }}">Pre-Trade Gate</a>
+        </nav>
         <div class="tw-chart-toolbar">
           <button type="button" class="tw-symsearch" onclick="if(window.twOpenTickerSearch)twOpenTickerSearch('');" title="Search a ticker or company — or just start typing (Ctrl/⌘+K)" aria-label="Search a ticker"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg><span>Search</span></button>
           <div class="tw-interval-wrap">

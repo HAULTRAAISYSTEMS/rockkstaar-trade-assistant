@@ -173,12 +173,12 @@ def test_pages_render_through_the_real_app(monkeypatch):
     with c.session_transaction() as s:
         s["user_id"] = 1
     monkeypatch.setattr(wealth_store, "list_research", lambda uid: {})
-    for url in ("/wealth", "/wealth/ledger", "/wealth/lab", "/wealth/scoreboard", "/wealth/research",
+    for url in ("/wealth", "/wealth/ledger", "/wealth/lab", "/wealth/performance", "/wealth/research",
                 "/wealth/next-dollar", "/wealth/planner"):
         r = c.get(url)
         assert r.status_code == 200, url
         html = r.get_data(as_text=True)
-        assert "Wealth Architect" in html
+        assert "Wealth Architect" in html or "Portfolio Performance Command Center" in html
     assert "Start with a portfolio" in c.get("/wealth").get_data(as_text=True)
     # Merged pages: old links land on their new homes.
     r = c.get("/wealth/research/klac")
@@ -191,9 +191,17 @@ def test_pages_render_through_the_real_app(monkeypatch):
     monkeypatch.setattr(wealth_store, "get_portfolio", lambda uid, pid: {"id": 7, "name": "Roth IRA", "kind": "roth_ira",
                                                                          "max_position_pct": None, "target_cash_pct": None})
     monkeypatch.setattr(wealth_store, "list_transactions", lambda uid, pid=None: [])
-    for url in ("/wealth", "/wealth?p=7", "/wealth/ledger?p=7", "/wealth/lab?p=7", "/wealth/scoreboard?p=7",
+    for url in ("/wealth", "/wealth?p=7", "/wealth/ledger?p=7", "/wealth/lab?p=7", "/wealth/performance?p=7",
                 "/wealth/research", "/wealth/next-dollar?p=7", "/wealth/planner"):
         assert c.get(url).status_code == 200, url
+    old_scoreboard = c.get("/wealth/scoreboard?p=7")
+    assert old_scoreboard.status_code == 302
+    assert old_scoreboard.headers["Location"].endswith("/wealth/performance?p=7#pc-return-history")
+    performance = c.get("/wealth/performance?p=7").get_data(as_text=True)
+    assert 'href="/wealth?p=7#wa-holdings"' in performance
+    assert 'href="/wealth/ledger?p=7"' in performance
+    assert 'value="value">Value &amp; contributions' in performance
+    assert "Returns by Calendar Year" in performance
     nd = c.get("/wealth/next-dollar?p=7").get_data(as_text=True)
     for tab in ("rank", "split", "journal"):
         assert f'data-nd-tab="{tab}"' in nd

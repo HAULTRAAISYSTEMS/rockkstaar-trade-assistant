@@ -220,7 +220,7 @@ def test_ipad_landscape_keeps_three_columns_and_chips_clear_the_globe():
     assert "if (st.opens_at && st.opens_at - t < 3 * 3600) return e.name + ' · OPENS '" in js
     assert "      return null;\n    }" in js
     nav = (ROOT / "static/css/nav_2027.css").read_text(encoding="utf-8")
-    assert "@media (min-width: 761px) and (max-width: 1080px)" in nav
+    assert "@media (min-width: 769px) and (max-width: 1080px)" in nav
 
 
 def test_globe_zoom_sector_focus_and_dock():

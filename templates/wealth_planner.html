@@ -45,7 +45,7 @@
             '<div class="wa-prog" style="margin:6px 0"><i class="' + (lim && r.actual > lim ? 'over' : '') + '" style="width:' + pct + '%"></i></div>' +
             '<div class="wa-note" style="margin:0">Planned ' + WA.money(r.planned) + (r.room != null ? ' · room left ' + WA.money(Math.max(r.room, 0)) : '') + (r.limit ? ' · source: ' + WA.esc(r.limit.source) : '') + '</div>' +
             r.warnings.map(w => '<div class="wa-note dn">' + WA.esc(w) + '</div>').join('') + '</div>'; }).join('') + '</div>' +
-        (v.prior_year_window_open ? '<p class="wa-note">Until April 15 you can still designate an IRA deposit for ' + (Y - 1) + '. Set its tax year on the deposit in the Ledger, and tell your broker which year it is for.</p>' : '<p class="wa-note">Deposits made January 1 – April 15 can count toward the prior tax year; set that on the plan line or the ledger deposit, and tell your broker. Income limits apply to Roth contributions.</p>') + '</section>';
+        (v.prior_year_window_open ? '<p class="wa-note">Until April 15 you can still designate an IRA deposit for ' + (Y - 1) + '. Set its tax year on the deposit in Transactions, and tell your broker which year it is for.</p>' : '<p class="wa-note">Deposits made January 1 – April 15 can count toward the prior tax year; set that on the plan line or the ledger deposit, and tell your broker. Income limits apply to Roth contributions.</p>') + '</section>';
     }
     // Calendar grid
     h += '<section class="wa-card" style="margin-bottom:12px"><h2>Month by month <small>planned · <span class="up">deposited</span></small></h2><div class="wa-scroll"><table class="wa-cal"><thead><tr><th>Portfolio</th>' +

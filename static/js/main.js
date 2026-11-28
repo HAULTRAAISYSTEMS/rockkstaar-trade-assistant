@@ -50,7 +50,7 @@ document.addEventListener("DOMContentLoaded", function () {
   // dismisses the previously open panel. Clicking outside or pressing Escape
   // closes the group as users expect from an application navigation bar.
   const navMenus = Array.from(document.querySelectorAll(
-    ".elite-navbar details.nav-menu, .elite-navbar details.nav-system"
+    ".elite-navbar details.nav-menu, .elite-navbar details.nav-system, .nav-phone-tools details"
   ));
   navMenus.forEach(function (menu) {
     menu.addEventListener("toggle", function () {
@@ -61,67 +61,12 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   });
   document.addEventListener("click", function (event) {
-    if (event.target.closest(".elite-navbar details")) return;
+    if (event.target.closest(".elite-navbar details, .nav-phone-tools details")) return;
     navMenus.forEach(function (menu) { menu.open = false; });
   });
   document.addEventListener("keydown", function (event) {
     if (event.key !== "Escape") return;
     navMenus.forEach(function (menu) { menu.open = false; });
-  });
-
-  // ---- Mobile navigation menu sheets ----
-  // Research, Learn, and Account contain several destinations that do not fit
-  // in the iPhone bottom bar. Their buttons open one accessible sheet at a
-  // time while the primary Today, Terminal, and Watchlists links stay direct.
-  const mobileMenuTriggers = Array.from(document.querySelectorAll("[data-mobile-menu]"));
-  function closeMobileMenus(exceptId) {
-    mobileMenuTriggers.forEach(function (trigger) {
-      const panelId = trigger.getAttribute("data-mobile-menu");
-      if (panelId === exceptId) return;
-      const panel = document.getElementById(panelId);
-      trigger.setAttribute("aria-expanded", "false");
-      if (panel) panel.hidden = true;
-    });
-  }
-  mobileMenuTriggers.forEach(function (trigger) {
-    trigger.addEventListener("click", function () {
-      const panelId = trigger.getAttribute("data-mobile-menu");
-      const panel = document.getElementById(panelId);
-      if (!panel) return;
-      const willOpen = trigger.getAttribute("aria-expanded") !== "true";
-      closeMobileMenus(willOpen ? panelId : null);
-      trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
-      panel.hidden = !willOpen;
-    });
-  });
-  document.addEventListener("click", function (event) {
-    if (event.target.closest(".mobile-app-nav__group")) return;
-    closeMobileMenus();
-  });
-  document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") closeMobileMenus();
-  });
-  document.querySelectorAll(".mobile-app-menu a").forEach(function (link) {
-    link.addEventListener("click", function () { closeMobileMenus(); });
-  });
-  // Swipe down on an open menu sheet to dismiss it.
-  document.querySelectorAll(".mobile-app-menu").forEach(function (menu) {
-    var swipeStartY = 0;
-    menu.addEventListener("touchstart", function (e) {
-      if (e.touches.length === 1) swipeStartY = e.touches[0].clientY;
-    }, { passive: true });
-    menu.addEventListener("touchmove", function (e) {
-      if (e.touches.length !== 1) return;
-      // Only dismiss when the sheet itself is scrolled to the top —
-      // otherwise the user is just scrolling the menu's own content.
-      if (menu.scrollTop > 4) return;
-      var dy = e.touches[0].clientY - swipeStartY;
-      if (dy > 70) {
-        menu.hidden = true;
-        var trigger = document.querySelector('[data-mobile-menu="' + menu.id + '"]');
-        if (trigger) trigger.setAttribute("aria-expanded", "false");
-      }
-    }, { passive: true });
   });
 
   // ---- Kick off auto-refresh ----

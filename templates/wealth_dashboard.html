@@ -99,6 +99,11 @@
   </div>
   <p class="wa-note">Ledger rows use your own transactions and live prices (Schwab → Alpaca → Yahoo; OLD after 3 days). Schwab rows are the broker's latest snapshot and never change your ledger, lots or returns. Tap a stock to open it in the Fundamentals Analyzer.</p>
 </section>
+{% else %}
+<section class="wa-card ov-holdings" id="wa-holdings" aria-label="Holdings">
+  <h2>Holdings</h2>
+  <p class="wa-note">No open holdings for this selection.</p>
+</section>
 {% endif %}
 
 {# ── 3. Allocation ────────────────────────────────────────────── #}
@@ -147,7 +152,7 @@
 <section class="wa-card wa-empty">
   <h2>No transactions yet</h2>
   <p class="wa-note">Add your deposits and buys, or import a Schwab transaction-history CSV.</p>
-  <a class="wa-btn is-gold" href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">Open the ledger</a>
+  <a class="wa-btn is-gold" href="{{ url_for('wealth.ledger_page', p=current.id if current else None) }}">Open Transactions</a>
 </section>
 {% endif %}
 </div>
