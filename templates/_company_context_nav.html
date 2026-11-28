@@ -1,0 +1,11 @@
+<nav class="company-context-nav" aria-label="{{ company_symbol }} research">
+  {% for endpoint, label, href in [
+    ('research_page', 'Company overview', url_for('research_page', ticker=company_symbol)),
+    ('fundamentals_page', 'Seven Checks', url_for('fundamentals_page', ticker=company_symbol, tab='quarter')),
+    ('thesis_view', 'Thesis & valuation', url_for('thesis_view', ticker=company_symbol)),
+    ('live_research.feed', 'Research sources', url_for('live_research.feed', ticker=company_symbol))
+  ] %}
+    <a href="{{ href }}"{% if request.endpoint == endpoint %} aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+  <a href="{{ url_for('terminal', ticker=company_symbol) }}">Open chart</a>
+</nav>

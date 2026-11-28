@@ -441,11 +441,9 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
 
     @bp.get("/wealth/scoreboard")
     def scoreboard_page():
-        user_id = uid()
-        portfolios = wealth_store.list_portfolios(user_id)
-        current = owned(user_id, request.args.get("p"))
-        return render_template("wealth_scoreboard.html", portfolios=wealth_store.visible_portfolio_tabs(user_id, portfolios), current=current,
-                               kinds=wealth_store.KIND_LABELS, quick_start=QUICK_START)
+        current = owned(uid(), request.args.get("p"))
+        return redirect(url_for("wealth.performance_page", p=current["id"] if current else None,
+                                _anchor="pc-return-history"))
 
     def performance_profiles(user_id, portfolios):
         goals, profiles = wealth_store.performance_settings(user_id)
@@ -674,7 +672,7 @@ def create_wealth_blueprint(*, current_user, price_lookup=None, bars_lookup=None
             if not trusted or not calendar:
                 history = {"ok": False, "reason": (warnings[0] if warnings else
                            selection_issue or ("Daily market history is unavailable." if ledgers else
-                                               "Add or import transactions in the Ledger."))}
+                                               "Add or import activity in Transactions."))}
             else:
                 series = wealth_history.build_series(list(ledgers.values()), closes, calendar, today=today,
                                                       flows=flows, provider_splits=flow_stocks)

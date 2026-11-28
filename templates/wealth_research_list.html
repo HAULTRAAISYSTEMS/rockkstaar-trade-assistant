@@ -4,6 +4,7 @@
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
 {% block content %}
 <div class="wa">
+<a class="wa-btn" href="{{ url_for('watchlists_page') }}">Back to Watchlists</a>
 {{ wa.head('research', 'M.C.F.F. list', 'Moat → CEO → Financials → Future, in that order. A company reaches BUY ZONE only when all four gates pass and the price is inside your buy zone.', portfolios, current, with_all=False, pills=False) }}
 
 <section class="wa-card" style="margin-bottom:12px">

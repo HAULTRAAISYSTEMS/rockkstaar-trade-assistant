@@ -17,7 +17,7 @@
     <h1>{{ title }}</h1>
     {% if blurb %}<p>{{ blurb }}</p>{% endif %}
   </div>
-  {{ portfolio_nav(active, current) }}
+  {% if active != "research" %}{{ portfolio_nav(active, current) }}{% endif %}
 </header>
 {% if portfolios and pills %}
 <style>[data-portfolio-tab][hidden], [data-portfolio-chooser][hidden] {display:none !important}</style>
@@ -121,17 +121,20 @@ window.WA = (function () {
 {% endmacro %}
 
 {% macro portfolio_nav(active, current=None) %}
-  <nav class="wa-nav" aria-label="Wealth Architect">
-    {% set q = ('?p=' ~ current.id) if current else '' %}
-    {# Same order as the Portfolio menu. Capital Engine is now the Split tab of Next Dollar. #}
-    <a href="{{ url_for('schwab_account') }}" class="{{ 'is-on' if active == 'schwab' }}">Schwab</a>
-    <a href="{{ url_for('wealth.dashboard') }}{{ q }}" class="{{ 'is-on' if active == 'dash' }}">Overview</a>
-    <a href="{{ url_for('wealth.next_dollar_page') }}{{ q }}" class="{{ 'is-on' if active in ('next', 'capital') }}">Next Dollar</a>
-    <a href="{{ url_for('wealth.planner_page') }}" class="{{ 'is-on' if active == 'plan' }}">Planner</a>
-    <a href="{{ url_for('wealth.lab_page') }}{{ q }}" class="{{ 'is-on' if active == 'lab' }}">Lab</a>
-    <a href="{{ url_for('wealth.performance_page') }}{{ q }}" class="{{ 'is-on' if active == 'performance' }}">Performance</a>
-    <a href="{{ url_for('wealth.scoreboard_page') }}{{ q }}" class="{{ 'is-on' if active == 'score' }}">Scoreboard</a>
-    <a href="{{ url_for('wealth.ledger_page') }}{{ q }}" class="{{ 'is-on' if active == 'ledger' }}">Ledger</a>
-    <a href="{{ url_for('wealth.research_list_page') }}" class="{{ 'is-on' if active == 'research' }}">M.C.F.F.</a>
+  {% set pid = current.id if current else None %}
+  <nav class="wa-nav" aria-label="Portfolio sections">
+    {% for key, title, href, fragment in [
+      ('dash', 'Overview', url_for('wealth.dashboard', p=pid), ''),
+      ('holdings', 'Holdings', url_for('wealth.dashboard', p=pid), '#wa-holdings'),
+      ('performance', 'Performance', url_for('wealth.performance_page', p=pid), ''),
+      ('ledger', 'Transactions', url_for('wealth.ledger_page', p=pid), ''),
+      ('plan', 'Contributions', url_for('wealth.planner_page', p=pid), ''),
+      ('next', 'Next Dollar', url_for('wealth.next_dollar_page', p=pid), ''),
+      ('lab', 'Cost Basis Lab', url_for('wealth.lab_page', p=pid), ''),
+      ('schwab', 'Schwab Accounts', url_for('schwab_account'), '')
+    ] %}
+    {% set selected = active == key or (active == 'capital' and key == 'next') %}
+    <a href="{{ href }}{{ fragment }}"{% if key != 'schwab' %} data-account-link{% endif %}{% if key == 'plan' %} data-plan-link{% endif %}{% if selected %} class="is-on" aria-current="page"{% endif %}>{{ title }}</a>
+    {% endfor %}
   </nav>
 {% endmacro %}

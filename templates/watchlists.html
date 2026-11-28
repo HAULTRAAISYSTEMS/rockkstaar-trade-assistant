@@ -170,6 +170,7 @@
     <button type="button" role="tab" class="is-on" data-tab="lists" aria-selected="true">Lists <b>{{ all_wls|length }}</b></button>
     <button type="button" role="tab" data-tab="alerts" aria-selected="false">Price alerts <b>{{ price_alerts|length }}</b>{% if alert_hits %}<i class="te-tab-hit" title="{{ alert_hits }} target{{ '' if alert_hits == 1 else 's' }} hit"></i>{% endif %}</button>
   </nav>
+  <a class="te-pill" href="{{ url_for('wealth.research_list_page') }}">M.C.F.F. Buy Zones</a>
 </header>
 
 <!-- The active list as a board -->
@@ -299,7 +300,7 @@
           <div class="te-ticker-row" data-ticker="{{ t }}">
             <span class="te-drag-handle te-ticker-handle" draggable="true" title="Drag {{ t }}" aria-label="Drag {{ t }}">⠿</span>
             <div class="te-tk-main">
-              <a class="te-ticker-link" href="{{ url_for('stock_detail', ticker=t) }}">{{ t }}</a><a class="vz-badge" data-zone-badge="{{ t }}" hidden></a>
+              <a class="te-ticker-link" href="{{ url_for('terminal', ticker=t) }}">{{ t }}</a><a class="vz-badge" data-zone-badge="{{ t }}" hidden></a>
               {% if q.er_days is defined and q.er_days is not none %}<span class="te-er" title="Earnings in {{ q.er_days }} day{{ '' if q.er_days == 1 else 's' }}">ER {{ 'TODAY' if q.er_days == 0 else q.er_days ~ 'D' }}</span>{% endif %}
             </div>
             {% if q.price is defined and q.price is not none %}
@@ -348,7 +349,7 @@
           <div class="te-ticker-row" data-ticker="{{ t }}">
             <span class="te-drag-handle te-ticker-handle" draggable="true" title="Drag {{ t }}" aria-label="Drag {{ t }}">⠿</span>
             <div class="te-tk-main">
-              <a class="te-ticker-link" href="{{ url_for('stock_detail', ticker=t) }}">{{ t }}</a><a class="vz-badge" data-zone-badge="{{ t }}" hidden></a>
+              <a class="te-ticker-link" href="{{ url_for('terminal', ticker=t) }}">{{ t }}</a><a class="vz-badge" data-zone-badge="{{ t }}" hidden></a>
               {% if q.er_days is defined and q.er_days is not none %}<span class="te-er" title="Earnings in {{ q.er_days }} day{{ '' if q.er_days == 1 else 's' }}">ER {{ 'TODAY' if q.er_days == 0 else q.er_days ~ 'D' }}</span>{% endif %}
             </div>
             {% if q.price is defined and q.price is not none %}
@@ -400,7 +401,7 @@
       <div class="te-scan-row" data-ticker="{{ t }}" data-setup="{{ q.setup if q.setup is not none else -1 }}" data-chg="{{ q.chg if q.chg is not none else -999 }}">
         <div class="te-scan-id">
           <div class="te-tk-main">
-            <a class="te-ticker-link" href="{{ url_for('stock_detail', ticker=t) }}">{{ t }}</a><a class="vz-badge" data-zone-badge="{{ t }}" hidden></a>
+            <a class="te-ticker-link" href="{{ url_for('terminal', ticker=t) }}">{{ t }}</a><a class="vz-badge" data-zone-badge="{{ t }}" hidden></a>
             {% if q.er_days is not none %}<span class="te-er" title="Earnings in {{ q.er_days }} day{{ '' if q.er_days == 1 else 's' }}">ER {{ 'TODAY' if q.er_days == 0 else q.er_days ~ 'D' }}</span>{% endif %}
           </div>
           <div class="te-scan-sub">

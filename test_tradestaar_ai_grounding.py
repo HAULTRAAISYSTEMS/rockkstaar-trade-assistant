@@ -73,7 +73,7 @@ def test_navigation_groups_secondary_tools_and_ai_ui_renders_sources():
     ai_page = open("templates/tradestaar_ai.html", encoding="utf-8").read()
     base = open("templates/base.html", encoding="utf-8").read()
 
-    assert nav.count('class="nav-menu"') == 3   # Terminal, Discover, Portfolio (+ avatar)
+    assert "for label, icon, href, active, groups in destinations" in nav
     assert "Company Research" in nav and "Live Research" in nav and "Market Intel" in nav
     assert "nav-ai-button" in nav
     assert "result.data.sources" in ai_page
@@ -94,5 +94,5 @@ def test_ai_workspace_and_grouped_navigation_render_together():
         html = render_template("tradestaar_ai.html", ai_context=context)
 
     assert 'Tradestaar <span class="accent">AI</span>' in html
-    assert "Understand the market" in html
+    assert "Market Intel" in html
     assert "Data status and account menu" in html

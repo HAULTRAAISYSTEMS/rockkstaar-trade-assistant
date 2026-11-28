@@ -38,8 +38,8 @@
       p.innerHTML = '<img src="' + url + '" alt="">';
       if (cam) p.appendChild(cam);
     });
-    const mob = document.querySelector('[aria-controls="mobile-account-menu"] .mobile-app-nav__icon');
-    if (mob) { mob.classList.add('has-photo'); mob.innerHTML = '<img class="mobile-app-nav__photo" src="' + url + '" alt="" width="26" height="26">'; }
+    const mob = document.querySelector(".nav-phone-avatar");
+    if (mob) mob.innerHTML = '<img class="mobile-app-nav__photo" src="' + url + '" alt="" width="26" height="26">';
   }
 
   input.addEventListener('change', async () => {

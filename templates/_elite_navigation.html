@@ -20,62 +20,44 @@
 </label>
 {%- endmacro %}
 {% set ep = request.endpoint %}
-{# Menus: one grouped list per menu, rendered in both the desktop dropdown and
-   the phone sheet. Each entry: (key, href, title, one-line description, icon).
-   The first entry in a featured group leads full width; a row of three
-   becomes three even tiles. No tile is a bare word. #}
+{% set symbol = (ticker if ticker is defined and ticker is string else '') or request.args.get('ticker') or (request.view_args or {}).get('ticker') %}
 {% set terminal_groups = [
-  ('Your terminal', [
-    ('terminal', url_for('terminal'), 'Terminal', "Charts, levels, order ticket and today's setups", 'candles'),
-  ]),
-  ('Trade', [
-    ('setups', url_for('dashboard'), 'Setups Board', 'Every ranked setup, A+ first', 'grid'),
-    ('gate', url_for('trade_tools.gate_page'), 'Pre-Trade Gate', 'GO / WAIT / NO on a trade, with size', 'gate'),
-  ]),
-  ('Track', [
-    ('guardian', url_for('trade_tools.guardian_page'), 'Position Guardian', 'Your positions vs your stops', 'shield'),
-    ('watch', url_for('watchlists_page'), 'Watchlists & Alerts', 'Your lists, sections and price targets', 'eye'),
+  ('Trading tools', [
+    ('terminal', url_for('terminal', ticker=symbol), 'Charts', 'Chart a symbol and use the order ticket', 'candles'),
+    ('setups', url_for('dashboard'), 'Setups Board', 'Browse ranked trade setups', 'grid'),
+    ('gate', url_for('trade_tools.gate_page', ticker=symbol), 'Pre-Trade Gate', 'Check the setup and size the trade', 'gate'),
+    ('guardian', url_for('trade_tools.guardian_page'), 'Position Guardian', 'Monitor positions and stops', 'shield'),
   ]),
 ] %}
 {% set research_groups = [
   ('Markets', [
-    ('intel', url_for('intel'), 'Market Intel', 'News, heat map and why stocks are moving', 'pulse'),
+    ('intel', url_for('intel'), 'Market Intel', 'News, heat map and market movers', 'pulse'),
     ('macro', url_for('macro_page'), 'Macro', 'Fed liquidity and money flow', 'globe'),
-    ('cal', url_for('catalyst_calendar'), 'Calendar', 'Earnings and the economy', 'calendar'),
+    ('cal', url_for('catalyst_calendar'), 'Calendar', 'Earnings and economic events', 'calendar'),
     ('smart', url_for('smart_money'), 'Smart Money', 'Insiders, funds and Congress', 'bank'),
   ]),
-  ('Companies', [
-    ('research', url_for('research_page'), 'Company Research', 'Financials, filings and changes', 'doc'),
-    ('checks', url_for('fundamentals_page', tab='quarter'), 'Seven Checks', 'Grade the latest quarter', 'checks'),
-    ('thesis', url_for('thesis_view'), 'Thesis', 'Bear, base and bull targets', 'target'),
-    ('live', url_for('live_research.feed'), 'Live Research', 'Sources and published notes', 'book'),
-  ]),
-  ('Your research', [
-    ('memory', url_for('research_memory.notebook'), 'Memory', 'Your saved notes and recall reviews', 'bulb'),
+  ('My Research', [
+    ('research', url_for('research_page', ticker=symbol), 'Company Research', 'Financials, Seven Checks, thesis and sources', 'doc'),
+    ('live', url_for('live_research.feed', ticker=symbol), 'Live Research', 'Browse published research', 'book'),
+    ('memory', url_for('research_memory.notebook'), 'Research Notes', 'Your saved notes and recall reviews', 'bulb'),
   ]),
 ] %}
-{# Portfolio: one menu for desktop and phone. Accounts first (Schwab on top),
-   then where money goes next, then how it's doing, then your research list. #}
+{% set portfolio_id = current.id if current is defined and current and current.id is defined else None %}
 {% set portfolio_groups = [
-  ('Accounts', [
-    ('schwab', url_for('schwab_account'), 'Schwab Account', 'Live balances and positions', 'bank'),
-    ('wealth', url_for('wealth.dashboard'), 'Wealth Overview', 'Net worth, holdings and allocation', 'vault'),
-  ]),
-  ('Invest', [
-    ('wnext', url_for('wealth.next_dollar_page'), 'Next Dollar', 'Rank, split and journal your next buy', 'target'),
-    ('wplan', url_for('wealth.planner_page'), 'Planner', 'Contributions by month, IRA limits', 'calendar'),
-    ('wlab', url_for('wealth.lab_page'), 'Cost Basis Lab', 'What one more purchase does', 'flask'),
-  ]),
   ('Track', [
-    ('wperformance', url_for('wealth.performance_page'), 'Performance Command Center', 'Returns, risk and annual goals', 'pulse'),
-    ('wscore', url_for('wealth.scoreboard_page'), 'Scoreboard', 'Returns vs the S&P 500, drawdowns', 'pulse'),
-    ('wledger', url_for('wealth.ledger_page'), 'Ledger', 'Transactions, CSV import, Schwab check', 'pen'),
+    ('wealth', url_for('wealth.dashboard', p=portfolio_id), 'Overview', 'Balances, holdings and allocation', 'vault'),
+    ('wperformance', url_for('wealth.performance_page', p=portfolio_id), 'Performance', 'Returns, benchmark and annual goals', 'pulse'),
+    ('wledger', url_for('wealth.ledger_page', p=portfolio_id), 'Transactions', 'Activity, CSV import and transfer review', 'pen'),
   ]),
-  ('Research', [
-    ('wmcff', url_for('wealth.research_list_page'), 'M.C.F.F. list', 'Your companies and their buy zones', 'checks'),
+  ('Plan', [
+    ('wplan', url_for('wealth.planner_page', p=portfolio_id), 'Contributions', 'Contribution plans and IRA limits', 'calendar'),
+    ('wnext', url_for('wealth.next_dollar_page', p=portfolio_id), 'Next Dollar', 'Rank and plan your next buy', 'target'),
+    ('wlab', url_for('wealth.lab_page', p=portfolio_id), 'Cost Basis Lab', 'See how a purchase affects your cost basis', 'flask'),
+  ]),
+  ('Brokerage', [
+    ('schwab', url_for('schwab_account'), 'Schwab Accounts', 'Manage linked accounts and sync', 'bank'),
   ]),
 ] %}
-{% set wealth_groups = portfolio_groups %}
 {% set learn_groups = [
   ('Start here', [
     ('learn', url_for('learn_index'), 'Learning Center', 'Market concepts in plain language', 'cap'),
@@ -145,7 +127,7 @@
 {% set plain = items|rejectattr('0', 'in', nav_featured)|list %}
 <div class="rm-grid{{ ' rm-grid--markets' if plain|length == 3 }}">
   {% for key, href, title, desc, icon in items %}
-  <a href="{{ href }}" class="rm-item{{ ' rm-item--feature' if key in nav_featured }}{{ ' rm-item--wide' if items|length == 1 }}"><span class="rm-ic">{{ rm_icon(icon) }}</span><span class="rm-txt"><strong>{{ title }}</strong><small>{{ desc }}</small></span></a>
+  <a href="{{ href }}"{% if key in ('wealth', 'wperformance', 'wledger', 'wplan', 'wnext', 'wlab') %} data-account-link{% endif %} class="rm-item{{ ' rm-item--feature' if key in nav_featured }}{{ ' rm-item--wide' if items|length == 1 }}"><span class="rm-ic">{{ rm_icon(icon) }}</span><span class="rm-txt"><strong>{{ title }}</strong><small>{{ desc }}</small></span></a>
   {% endfor %}
 </div>
 {% endfor %}
@@ -187,18 +169,26 @@
     </div>
   </section>
   {% endif %}
-  {% if not sheet %}{{ nav_tiles(learn_groups) }}{% endif %}
+  {{ nav_tiles(learn_groups) }}
   <form action="{{ url_for('logout') }}" method="post" class="ccx-out">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit"><span aria-hidden="true">⏻</span> Sign out</button>
   </form>
 </div>
 {%- endmacro %}
-{% set terminal_active = ep in ('terminal', 'dashboard', 'quick_mode', 'watchlists_page') or (ep and ep.startswith('trade_tools.')) %}
-{% set research_active = ep in ('fundamentals_page', 'research_page', 'stock_detail', 'stock_compare', 'intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'macro_page') or (ep and (ep.startswith('live_research.') or ep.startswith('research_memory.'))) %}
-{% set wealth_active = ep and ep.startswith('wealth.') %}
+{% set terminal_active = ep in ('terminal', 'terminal_grid', 'dashboard', 'quick_mode') or (ep and ep.startswith('trade_tools.')) %}
+{% set research_active = ep in ('fundamentals_page', 'research_page', 'research_detail', 'stock_detail', 'stock_compare', 'intel', 'catalyst_calendar', 'sentiment', 'smart_money', 'macro_page', 'thesis_view') or (ep and (ep.startswith('live_research.') or ep.startswith('research_memory.'))) %}
+{% set watchlists_active = ep in ('watchlists_page', 'wealth.research_list_page') %}
+{% set portfolio_active = ep == 'schwab_account' or (ep and ep.startswith('wealth.') and not watchlists_active) %}
 {% set learn_active = ep in ('learn_index', 'learn_concept', 'learn_paths', 'learn_path', 'learn_review', 'tradestaar_ai') %}
-{% set account_active = ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'schwab_account', 'brokers_page', 'browser_push.settings') %}
+{% set account_active = ep in ('account', 'journal', 'risk_settings', 'paper_trading', 'brokers_page', 'browser_push.settings') %}
+{% set destinations = [
+  ('Command', 'home', url_for('liquidity_page'), ep == 'liquidity_page', none),
+  ('Terminal', 'candles', url_for('terminal'), terminal_active, terminal_groups),
+  ('Research', 'search', url_for('intel'), research_active, research_groups),
+  ('Watchlists', 'star', url_for('watchlists_page'), watchlists_active, none),
+  ('Portfolio', 'pie', url_for('wealth.dashboard', p=portfolio_id), portfolio_active, portfolio_groups),
+] %}
 <nav class="navbar elite-navbar" aria-label="Primary navigation">
   <a href="{{ url_for('liquidity_page') }}" class="nav-brand" aria-label="Tradestaar Elite Today">
     <img src="{{ url_for('static', filename='logo.png') }}" alt="Tradestaar Elite" class="nav-logo"
@@ -207,37 +197,21 @@
     <span class="brand-divider" aria-hidden="true"></span><span class="brand-sub">Elite</span>
   </a>
 
-  {# Icon tiles: one per destination, the four with many tools open a panel.
-     Learn and Account live in the profile menu on the right. #}
-  {% set verify_active = ep in ('fundamentals_page',) %}
-  {% set portfolio_active = wealth_active or ep == 'schwab_account' %}
-  {% set discover_active = research_active and not verify_active %}
-  {% set term_active = terminal_active and ep != 'watchlists_page' %}
   <div class="nav-links nav-tiles" aria-label="Desktop destinations">
-    <a href="{{ url_for('liquidity_page') }}" class="nav-link nav-tile {{ 'nav-link-active' if ep == 'liquidity_page' }}"{% if ep == 'liquidity_page' %} aria-current="page"{% endif %}><span class="nav-tile__ic">{{ rm_icon('home') }}</span><span class="nav-tile__lbl">Command</span></a>
-    <details class="nav-menu">
-      <summary class="nav-link nav-tile {{ 'nav-link-active' if term_active }}"><span class="nav-tile__ic">{{ rm_icon('candles') }}</span><span class="nav-tile__lbl">Terminal</span><span class="nav-tile__chev" aria-hidden="true">⌄</span></summary>
-      <div class="nav-menu__panel nav-menu__panel--tiles">
-        <span class="nav-menu__label">Trade and track</span>
-        {{ nav_tiles(terminal_groups) }}
-      </div>
-    </details>
-    <details class="nav-menu">
-      <summary class="nav-link nav-tile {{ 'nav-link-active' if discover_active }}"><span class="nav-tile__ic">{{ rm_icon('search') }}</span><span class="nav-tile__lbl">Discover</span><span class="nav-tile__chev" aria-hidden="true">⌄</span></summary>
-      <div class="nav-menu__panel nav-menu__panel--tiles nav-menu__panel--research">
-        <span class="nav-menu__label">Understand the market</span>
-        {{ nav_tiles(research_groups) }}
-      </div>
-    </details>
-    <a href="{{ url_for('fundamentals_page') }}" class="nav-link nav-tile {{ 'nav-link-active' if verify_active }}" title="10-Q drill, the seven checks, valuation"><span class="nav-tile__ic">{{ rm_icon('shield') }}</span><span class="nav-tile__lbl">Verify</span></a>
-    <a href="{{ url_for('watchlists_page') }}" class="nav-link nav-tile {{ 'nav-link-active' if ep == 'watchlists_page' }}"><span class="nav-tile__ic">{{ rm_icon('star') }}</span><span class="nav-tile__lbl">Watchlists</span></a>
-    <details class="nav-menu">
-      <summary class="nav-link nav-tile {{ 'nav-link-active' if portfolio_active }}"><span class="nav-tile__ic">{{ rm_icon('pie') }}</span><span class="nav-tile__lbl">Portfolio</span><span class="nav-tile__chev" aria-hidden="true">⌄</span></summary>
-      <div class="nav-menu__panel nav-menu__panel--tiles nav-menu__panel--right">
-        <span class="nav-menu__label">Your portfolio</span>
-        {{ nav_tiles(portfolio_groups) }}
-      </div>
-    </details>
+    {% for label, icon, href, active, groups in destinations %}
+      {% if groups %}
+      <details class="nav-menu">
+        <summary class="nav-link nav-tile{{ ' nav-link-active' if active }}"{% if active %} aria-current="true"{% endif %}>
+          <span class="nav-tile__ic">{{ rm_icon(icon) }}</span><span class="nav-tile__lbl">{{ label }}</span><span class="nav-tile__chev" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="nav-menu__panel nav-menu__panel--tiles{{ ' nav-menu__panel--right' if label == 'Portfolio' else '' }}">{{ nav_tiles(groups) }}</div>
+      </details>
+      {% else %}
+      <a href="{{ href }}" class="nav-link nav-tile{{ ' nav-link-active' if active }}"{% if active %} aria-current="{{ 'true' if ep == 'wealth.research_list_page' else 'page' }}"{% endif %}>
+        <span class="nav-tile__ic">{{ rm_icon(icon) }}</span><span class="nav-tile__lbl">{{ label }}</span>
+      </a>
+      {% endif %}
+    {% endfor %}
   </div>
 
   <div class="nav-actions">
@@ -269,43 +243,26 @@
 </nav>
 
 <nav class="mobile-app-nav" aria-label="Primary mobile navigation">
-  <a href="{{ url_for('liquidity_page') }}" class="mobile-app-nav__item {{ 'is-active' if ep == 'liquidity_page' }}" {% if ep == 'liquidity_page' %}aria-current="page"{% endif %}><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M3.5 10.5 12 4l8.5 6.5"/><path d="M5.5 9v10.5h13V9"/><path d="M10 19.5v-5h4v5"/></svg></span><span class="mobile-app-nav__label">Command</span></a>
-  <div class="mobile-app-nav__group">
-    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if terminal_active }}" aria-expanded="false" aria-controls="mobile-terminal-menu" data-mobile-menu="mobile-terminal-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M4 20h16"/><path d="M7 16V9"/><rect x="5.5" y="10" width="3" height="4.5" rx=".6"/><path d="M12 14V4"/><rect x="10.5" y="6" width="3" height="5.5" rx=".6"/><path d="M17 17V8"/><rect x="15.5" y="9.5" width="3" height="5" rx=".6"/></svg></span><span class="mobile-app-nav__label">Terminal</span></button>
-    <div class="mobile-app-menu" id="mobile-terminal-menu" hidden>
-      <div class="mobile-app-menu__head"><strong>Terminal</strong><span>Trade and track</span></div>
-      <div class="rm-sheet">{{ nav_tiles(terminal_groups) }}</div>
-    </div>
-  </div>
-  <div class="mobile-app-nav__group">
-    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if research_active }}" aria-expanded="false" aria-controls="mobile-research-menu" data-mobile-menu="mobile-research-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/><path d="M8 12l1.8-2 1.6 1.4L13.5 9"/></svg></span><span class="mobile-app-nav__label">Discover</span></button>
-    <div class="mobile-app-menu" id="mobile-research-menu" hidden>
-      <div class="mobile-app-menu__head"><strong>Discover</strong><span>Understand the market</span></div>
-      <div class="rm-sheet">{{ nav_tiles(research_groups) }}</div>
-    </div>
-  </div>
-  <div class="mobile-app-nav__group">
-    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if (wealth_active or ep == 'schwab_account') }}" aria-expanded="false" aria-controls="mobile-wealth-menu" data-mobile-menu="mobile-wealth-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="3.5" y="5" width="17" height="14" rx="2.2"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7.5M12 16.5v-1.3M15.2 12h1.3M7.5 12h1.3"/></svg></span><span class="mobile-app-nav__label">Portfolio</span></button>
-    <div class="mobile-app-menu" id="mobile-wealth-menu" hidden>
-      <div class="mobile-app-menu__head"><strong>Portfolio</strong><span>Accounts, investing and research</span></div>
-      <div class="rm-sheet">{{ nav_tiles(wealth_groups) }}</div>
-    </div>
-  </div>
-  <div class="mobile-app-nav__group">
-    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if learn_active }}" aria-expanded="false" aria-controls="mobile-learn-menu" data-mobile-menu="mobile-learn-menu"><span class="mobile-app-nav__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M2.5 9 12 5l9.5 4-9.5 4Z"/><path d="M6.5 10.8V15c0 1.4 2.5 3 5.5 3s5.5-1.6 5.5-3v-4.2"/><path d="M21.5 9v5"/></svg></span><span class="mobile-app-nav__label">Learn</span></button>
-    <div class="mobile-app-menu" id="mobile-learn-menu" hidden>
-      <div class="mobile-app-menu__head"><strong>Learn</strong><span>Learn, practice and remember</span></div>
-      <div class="rm-sheet">{{ nav_tiles(learn_groups) }}</div>
-    </div>
-  </div>
-  <div class="mobile-app-nav__group">
-    <button type="button" class="mobile-app-nav__item mobile-app-nav__menu-trigger {{ 'is-active' if account_active }}" aria-expanded="false" aria-controls="mobile-account-menu" data-mobile-menu="mobile-account-menu"><span class="mobile-app-nav__icon{{ ' has-photo' if profile_photo_url }}" aria-hidden="true">{% if profile_photo_url %}<img class="mobile-app-nav__photo" src="{{ profile_photo_url }}" alt="" width="26" height="26" decoding="async">{% else %}<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.9-3.6 3.7-5.5 7-5.5s6.1 1.9 7 5.5"/></svg>{% endif %}</span><span class="mobile-app-nav__label">Account</span></button>
-    <div class="mobile-app-menu" id="mobile-account-menu" hidden>
-      <div class="mobile-app-menu__head"><strong>Control Center</strong><span>Settings, account{{ ' and admin' if session.get('is_admin') }}</span></div>
-      {{ control_center(true) }}
-    </div>
-  </div>
+  {% for label, icon, href, active, groups in destinations %}
+  <a href="{{ href }}"{% if label == 'Portfolio' %} data-account-link{% endif %} class="mobile-app-nav__item{{ ' is-active' if active }}"{% if active %} aria-current="{{ 'page' if request.path == href else 'true' }}"{% endif %}>
+    <span class="mobile-app-nav__icon">{{ rm_icon(icon) }}</span><span class="mobile-app-nav__label">{{ label }}</span>
+  </a>
+  {% endfor %}
 </nav>
+<div class="nav-phone-tools">
+  {% if terminal_active or research_active %}
+  <details class="nav-phone-sections">
+    <summary>{{ 'Terminal tools' if terminal_active else 'Research tools' }}</summary>
+    <nav class="nav-phone-panel" aria-label="{{ 'Terminal tools' if terminal_active else 'Research tools' }}">
+      {{ nav_tiles(terminal_groups if terminal_active else research_groups) }}
+    </nav>
+  </details>
+  {% endif %}
+  <details class="nav-phone-account">
+    <summary><span class="nav-phone-avatar" aria-hidden="true">{% if profile_photo_url %}<img class="mobile-app-nav__photo" src="{{ profile_photo_url }}" alt="" width="26" height="26" decoding="async">{% else %}{{ rm_icon('user') }}{% endif %}</span> Account</summary>
+    <div class="nav-phone-panel">{{ control_center(true) }}</div>
+  </details>
+</div>
 <input type="file" id="profile-photo-file" accept="image/*" hidden>
 <script src="{{ url_for('static', filename='js/profile_photo.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/control_center.js') }}" defer></script>

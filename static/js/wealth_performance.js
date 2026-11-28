@@ -9,6 +9,7 @@
   const status = get("status");
   const chart = get("chart");
   const chartRange = get("range");
+  if (location.hash === "#pc-return-history") chartRange.value = "all";
   const current = new URLSearchParams(location.search);
   if (Array.from(strategy.options).some(option => option.value === current.get("strategy"))) {
     strategy.value = current.get("strategy");
@@ -33,6 +34,10 @@
     {key: "portfolio", label: "Portfolio", color: "#29f894"},
     {key: "benchmark", label: "S&P 500 TR", color: "#26aaff"},
     {key: "target", label: "Target", color: "#bc83ff", dash: [6, 4]}
+  ];
+  const currencySeries = [
+    {key: "value", label: "Closing value", color: "#29f894"},
+    {key: "contributed", label: "Net contributions", color: "#26aaff", dash: [6, 4]}
   ];
   let response;
   let inflight;
@@ -173,7 +178,7 @@
       const destination = new URL(panel.dataset.ledger, location.origin);
       destination.searchParams.set("p", check.portfolio_id);
       ledger.href = destination.href;
-      ledger.textContent = "Open this account’s ledger";
+      ledger.textContent = "Open this account’s transactions";
       const importLink = document.createElement("a");
       const importDestination = new URL(location.href);
       importDestination.searchParams.set("p", check.portfolio_id);
@@ -298,7 +303,7 @@
     }
     const r = history.risk || {};
     for (const [key, value] of Object.entries({twr: history.twr_pct, xirr: history.mwr_annual_pct,
-      annual: history.twr_annual_pct, drawdown: r.max_drawdown?.pct, volatility: r.volatility_pct, alpha: r.alpha_pct})) {
+      annual: history.twr_annual_pct, drawdown: r.max_drawdown?.pct, "current-drawdown": history.current_drawdown_pct, volatility: r.volatility_pct, alpha: r.alpha_pct})) {
       field(key, key === "volatility" ? percentUnsigned(value) : pct(value), key === "volatility" ? null : value);
     }
     for (const key of ["sharpe", "sortino", "calmar", "beta"]) field(key, number(r[key]));
@@ -327,6 +332,18 @@
       });
     }
 
+    const annual = get("yearly-returns");
+    annual.replaceChildren();
+    const returns = Object.entries(history.years || {}).reverse();
+    if (!returns.length) emptyTable(annual, 5, "Calendar-year returns are pending.");
+    for (const [year, value] of returns) {
+      const benchmark = history.spy_years?.[year];
+      const excess = finite(value) && finite(benchmark) ? value - benchmark : null;
+      const dividends = history.dividends_by_year ? (history.dividends_by_year[year] ?? 0) : null;
+      const label = year === history.end?.slice(0, 4) && !history.end.endsWith("-12-31") ? year + " YTD" : year;
+      tableRow(annual, label, [[pct(value), value], [pct(benchmark)], [pp(excess), excess], [money(dividends)]]);
+    }
+
     const attr = get("attribution");
     attr.replaceChildren();
     let rows = history.attribution || [];
@@ -345,6 +362,7 @@
       tr.cells[1].prepend(bar);
     }
     chartRange.options[1].disabled = !history.ok;
+    chartRange.options[2].disabled = !history.ok || !history.chart?.value?.length;
     if (!history.ok) chartRange.value = "ytd";
     chartRange.disabled = !history.ok && !response.reference?.chart;
     chartRange.options[0].textContent = history.partial_ytd ? "Available this year" : "YTD";
@@ -569,7 +587,7 @@
     if (account.value !== "all") params.set("p", account.value);
     if (strategy.value !== "all") params.set("strategy", strategy.value);
     const query = params.toString() ? "?" + params : "";
-    for (const link of root.querySelectorAll("[data-account-link]")) {
+    for (const link of document.querySelectorAll("[data-account-link]")) {
       const destination = new URL(link.href);
       if (account.value === "all") destination.searchParams.delete("p");
       else destination.searchParams.set("p", account.value);
@@ -600,16 +618,24 @@
   function setPlot() {
     const history = response?.history;
     const source = history?.chart;
-    const path = chartRange.value === "all" && source ? {
+    const showValue = chartRange.value === "value" && Boolean(source?.value?.length);
+    const path = showValue ? source : chartRange.value === "all" && source ? {
       days: source.days,
       portfolio: source.growth.map(value => (value - 1) * 100),
       benchmark: (source.spy || []).map(value => finite(value) ? (value - 1) * 100 : null)
     } : history?.growth_chart || response?.reference?.chart;
-    const lines = path ? seriesInfo.filter(line => path[line.key]?.some(finite)) : [];
-    root.querySelectorAll(".pc-legend li").forEach((item, index) =>
+    const baseline = history?.option_history_trimmed ? "Opening value + net flows" : "Net contributions";
+    const available = showValue ? [currencySeries[0], {...currencySeries[1], label: baseline}] : seriesInfo;
+    const lines = path ? available.filter(line => path[line.key]?.some(finite)) : [];
+    get("return-legend").hidden = showValue;
+    get("value-legend").hidden = !showValue;
+    get("baseline-label").textContent = baseline;
+    get("return-legend").querySelectorAll("li").forEach((item, index) =>
       item.classList.toggle("is-missing", !lines.includes(seriesInfo[index])));
+    chart.setAttribute("aria-label", (showValue ? "Closing value and contributions." : "Historical returns.")
+      + " Use left and right arrow keys to inspect dates.");
     selectedDay = null;
-    plot = path ? {path, lines} : null;
+    plot = path?.days?.length && lines.length ? {path, lines, showValue} : null;
     drawPlot();
   }
 
@@ -624,7 +650,7 @@
       get("chart-readout").textContent = "";
       return;
     }
-    const {path, lines} = plot;
+    const {path, lines, showValue} = plot;
     const last = path.days.length - 1;
     const values = lines.flatMap(line => path[line.key].filter(finite));
     const min = Math.min(0, ...values), max = Math.max(0, ...values);
@@ -650,7 +676,7 @@
       ctx.lineTo(right, py);
       ctx.stroke();
       ctx.textAlign = "right";
-      ctx.fillText(number(value, span < 7 ? 1 : 0) + "%", left - 5, py + 4);
+      ctx.fillText(showValue ? compactMoney.format(value) : number(value, span < 7 ? 1 : 0) + "%", left - 5, py + 4);
     }
     const ticks = Math.min(last, width < 420 ? 3 : 6);
     for (let i = 0; i <= ticks; i++) {
@@ -667,7 +693,7 @@
         ...(timeSpan > 31536000000 ? {year: "2-digit"} : {day: "numeric"}), timeZone: "UTC"}).format(stamp), px, height - 6);
     }
 
-    const portfolioValues = path.portfolio;
+    const portfolioValues = showValue ? path.value : path.portfolio;
     if (portfolioValues?.every(finite) && last > 0) {
       const fill = ctx.createLinearGradient(0, top, 0, bottom);
       fill.addColorStop(0, "#19fa9866");
@@ -707,7 +733,7 @@
       ctx.lineTo(x(i), bottom);
       ctx.stroke();
     }
-    const valuesAtDate = lines.map(line => line.label + " " + pct(path[line.key][i]));
+    const valuesAtDate = lines.map(line => line.label + " " + (showValue ? money : pct)(path[line.key][i]));
     const text = [path.days[i], ...valuesAtDate].join("  ·  ");
     if (get("chart-readout").textContent !== text) get("chart-readout").textContent = text;
   }

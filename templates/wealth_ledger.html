@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% import "_wealth_macros.html" as wa with context %}
-{% block title %}Ledger — Wealth Architect{% endblock %}
+{% block title %}Transactions — Wealth Architect{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='css/wealth.css') }}">{% endblock %}
 {% block content %}
 <div class="wa">
-{{ wa.head('ledger', 'Ledger', 'Every buy, sale, dividend, split and deposit. Positions, cost basis and gains are calculated from this list, so fixing a row here fixes every figure.', portfolios, current, with_all=False) }}
+{{ wa.head('ledger', 'Transactions', 'Every buy, sale, dividend, split and deposit. Positions, cost basis and gains are calculated from this list, so fixing a row here fixes every figure.', portfolios, current, with_all=False) }}
 
 {% if not portfolios %}
 <section class="wa-card wa-empty"><h2>Create a portfolio first</h2>{{ wa.create_portfolio(quick_start, kinds) }}</section>
