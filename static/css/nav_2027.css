@@ -87,53 +87,53 @@ html.cc27 .elite-navbar .nav-tile.nav-link-active,
   .elite-navbar .nav-live-indicator { display: none; }
   .elite-navbar .nav-tile { min-width: 62px; padding: 6px 5px 5px; }
 }
-@media (max-width: 1080px) {
-  .elite-navbar .nav-tile { min-width: 46px; height: 46px; }
-  .elite-navbar .nav-tile__lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-}
-/* iPad portrait and small laptops: brand, Ask AI and Status go compact so
-   the tile bar never runs into the logo. */
-@media (min-width: 761px) and (max-width: 1080px) {
+/* Keep all five destination labels readable on iPad. Center each tool
+   menu in the full header so the narrow tab rail cannot clip it. */
+@media (min-width: 769px) and (max-width: 1080px) {
   .elite-navbar .brand-divider, .elite-navbar .brand-sub { display: none !important; }
   .elite-navbar .nav-brand { flex: none; max-width: 150px; }
-  .elite-navbar .nav-links.nav-tiles { flex: 0 1 auto; min-width: 0; gap: 0; margin: 0 8px; }
-  .elite-navbar .nav-tile { min-width: 42px; }
-  /* Tiles shrink to fit the bar (never spill left over the logo). */
-  html.cc27 .elite-navbar .nav-links.nav-tiles { justify-content: flex-start !important; overflow: hidden; }
-  html.cc27 .elite-navbar .nav-tiles > .nav-tile, html.cc27 .elite-navbar .nav-tiles > .nav-menu { flex: 1 1 0 !important; min-width: 0 !important; width: auto !important; }
-  html.cc27 .elite-navbar .nav-tiles > .nav-menu > .nav-tile { flex: 1 1 auto !important; min-width: 0 !important; width: 100% !important; }
-  html.cc27 .elite-navbar .nav-tile__ic, html.cc27 .elite-navbar .nav-tile__ic svg { flex: none !important; width: 20px !important; height: 20px !important; min-width: 20px; }
+  html.cc27 .elite-navbar .nav-links.nav-tiles {
+    flex: 0 1 auto; min-width: 0; gap: 0; margin: 0 8px;
+    position: static; overflow: visible;
+  }
+  .elite-navbar .nav-tiles > .nav-menu { position: static; }
+  .elite-navbar .nav-tiles .nav-menu__panel {
+    top: 100%; left: 50% !important; right: auto !important; transform: translateX(-50%) !important;
+  }
+  html.cc27 .elite-navbar .nav-tile { min-width: 58px; height: 50px; padding-inline: 4px; font-size: 10px; }
+  html.cc27 .elite-navbar .nav-tile__ic,
+  html.cc27 .elite-navbar .nav-tile__ic svg { width: 20px; height: 20px; }
   .elite-navbar .nav-ai-button { font-size: 0 !important; width: 40px; height: 40px; padding: 0 !important; justify-content: center; }
   .elite-navbar .nav-ai-button span { font-size: 16px; }
   .elite-navbar .nav-system__label { display: none; }
   .elite-navbar .nav-actions { gap: 6px; flex: none; }
 }
 
-/* Profile photo in the avatar button, the account menu and the phone tab */
+/* Profile photo in the avatar button, the account menu and its phone trigger */
 .elite-navbar .nav-avatar__btn { overflow: hidden; padding: 0; }
 .elite-navbar .nav-avatar__img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; padding: 10px 12px; border-radius: 14px; text-decoration: none;
+:is(.elite-navbar, .nav-phone-panel) .nav-profile { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; padding: 10px 12px; border-radius: 14px; text-decoration: none;
   border: 1px solid rgba(56, 220, 255, .18); background: rgba(56, 220, 255, .05); color: inherit; }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile:hover { border-color: rgba(56, 220, 255, .45); background: rgba(56, 220, 255, .09); }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile__pic { width: 40px; height: 40px; flex: none; border-radius: 50%; overflow: hidden; display: grid; place-items: center;
+:is(.elite-navbar, .nav-phone-panel) .nav-profile:hover { border-color: rgba(56, 220, 255, .45); background: rgba(56, 220, 255, .09); }
+:is(.elite-navbar, .nav-phone-panel) .nav-profile__pic { width: 40px; height: 40px; flex: none; border-radius: 50%; overflow: hidden; display: grid; place-items: center;
   border: 1.5px solid rgba(56, 220, 255, .55); background: radial-gradient(circle at 50% 35%, rgba(56, 220, 255, .28), rgba(8, 30, 60, .9)); color: #bff3ff; }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile__pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile__pic svg { width: 20px; height: 20px; }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile__txt { display: grid; gap: 2px; min-width: 0; }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile__txt strong { font-size: 14px; color: #eaf6ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile__txt small { font-size: 11.5px; color: #7fdcff; }
+:is(.elite-navbar, .nav-phone-panel) .nav-profile__pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+:is(.elite-navbar, .nav-phone-panel) .nav-profile__pic svg { width: 20px; height: 20px; }
+:is(.elite-navbar, .nav-phone-panel) .nav-profile__txt { display: grid; gap: 2px; min-width: 0; }
+:is(.elite-navbar, .nav-phone-panel) .nav-profile__txt strong { font-size: 14px; color: #eaf6ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(.elite-navbar, .nav-phone-panel) .nav-profile__txt small { font-size: 11.5px; color: #7fdcff; }
 .mobile-app-nav__photo { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; display: block; box-shadow: 0 0 0 1.5px rgba(56, 220, 255, .7); }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile { width: 100%; text-align: left; font: inherit; cursor: pointer; }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile__pic { position: relative; overflow: visible; }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile__pic img { border-radius: 50%; }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile__cam { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+:is(.elite-navbar, .nav-phone-panel) .nav-profile { width: 100%; text-align: left; font: inherit; cursor: pointer; }
+:is(.elite-navbar, .nav-phone-panel) .nav-profile__pic { position: relative; overflow: visible; }
+:is(.elite-navbar, .nav-phone-panel) .nav-profile__pic img { border-radius: 50%; }
+:is(.elite-navbar, .nav-phone-panel) .nav-profile__cam { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
   color: #04121c; background: linear-gradient(135deg, #7ff0ff, #38dcff); box-shadow: 0 0 0 2px #0a1220; }
-:is(.elite-navbar, .mobile-app-menu) .nav-profile__txt small.is-bad { color: #ff8a84; }
+:is(.elite-navbar, .nav-phone-panel) .nav-profile__txt small.is-bad { color: #ff8a84; }
 
 /* Display preference toggle in the profile menu ("24H prices"). */
-:is(.elite-navbar, .mobile-app-menu) .nav-pref { position: relative; display: flex; align-items: center; gap: 12px; margin: 0 0 10px; padding: 10px 12px;
+:is(.elite-navbar, .nav-phone-panel) .nav-pref { position: relative; display: flex; align-items: center; gap: 12px; margin: 0 0 10px; padding: 10px 12px;
   border-radius: 14px; cursor: pointer; border: 1px solid rgba(170, 215, 255, .14); background: rgba(8, 16, 32, .5); }
-:is(.elite-navbar, .mobile-app-menu) .nav-pref:hover { border-color: rgba(56, 214, 197, .45); }
+:is(.elite-navbar, .nav-phone-panel) .nav-pref:hover { border-color: rgba(56, 214, 197, .45); }
 .nav-pref__txt { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .nav-pref__txt strong { font-size: 13px; color: #eef3fa; }
 .nav-pref__txt small { font-size: 11px; line-height: 1.35; color: #8fa3bd; }
@@ -154,11 +154,11 @@ html.cc27 .elite-navbar .nav-tile.nav-link-active,
               radial-gradient(90% 120% at 100% 100%, rgba(167, 139, 250, .14), transparent 60%), rgba(6, 13, 27, .75); }
 .ccx-hero::after { content: ""; position: absolute; inset: -40% -20% auto auto; width: 180px; height: 180px; border-radius: 50%;
   background: rgba(56, 220, 255, .08); filter: blur(30px); pointer-events: none; }
-:is(.elite-navbar, .mobile-app-menu) .ccx-profile { margin: 0; padding: 0; border: 0; background: none; }
-:is(.elite-navbar, .mobile-app-menu) .ccx-profile:hover { background: none; }
-:is(.elite-navbar, .mobile-app-menu) .ccx-profile .nav-profile__pic { width: 52px; height: 52px;
+:is(.elite-navbar, .nav-phone-panel) .ccx-profile { margin: 0; padding: 0; border: 0; background: none; }
+:is(.elite-navbar, .nav-phone-panel) .ccx-profile:hover { background: none; }
+:is(.elite-navbar, .nav-phone-panel) .ccx-profile .nav-profile__pic { width: 52px; height: 52px;
   box-shadow: 0 0 0 2px rgba(56, 220, 255, .55), 0 0 18px rgba(56, 220, 255, .35); }
-:is(.elite-navbar, .mobile-app-menu) .ccx-profile .nav-profile__txt strong { font-size: 17px; }
+:is(.elite-navbar, .nav-phone-panel) .ccx-profile .nav-profile__txt strong { font-size: 17px; }
 .ccx-greet { color: #8fa3bd !important; letter-spacing: .04em; text-transform: uppercase; font-size: 10px !important; font-weight: 700; }
 .ccx-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; position: relative; z-index: 1; }
 .ccx-chip { padding: 3px 10px; border-radius: 999px; font: 800 10px var(--font-mono, ui-monospace, monospace); letter-spacing: .08em; text-transform: uppercase;
